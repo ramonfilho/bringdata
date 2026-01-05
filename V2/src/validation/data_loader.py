@@ -789,6 +789,53 @@ class CAPILeadDataLoader:
                         logger.info(f"   🔍 Filtrado: {removidos} registros sem campaign_id Meta ({emails_removidos} emails únicos removidos)")
                         logger.info(f"      Restaram: {total_depois_filtro} registros com campaign_id Meta ({emails_depois_filtro} emails únicos)")
 
+                    # ENRIQUECER leads da pesquisa que não têm UTM com dados do CAPI
+                    ENABLE_CAPI_ENRICHMENT = True
+
+                    if ENABLE_CAPI_ENRICHMENT:
+                        survey_without_utm = survey_period[
+                            survey_period['source'].isna() |
+                            (survey_period['source'] != 'facebook-ads')
+                        ].copy()
+
+                        if len(survey_without_utm) > 0 and len(capi_norm) > 0:
+                            logger.info(f"   🔧 Tentando enriquecer {len(survey_without_utm)} leads da pesquisa sem UTM usando dados do CAPI...")
+
+                            # Criar mapeamento email → dados CAPI (pegar primeiro registro de cada email)
+                            capi_by_email = capi_norm[capi_norm['campaign'].notna()].groupby('email').first()
+
+                            enriched_count = 0
+                            matched_emails = []
+
+                            for idx in survey_without_utm.index:
+                                email = survey_period.at[idx, 'email']
+                                if email in capi_by_email.index:
+                                    # Enriquecer com dados do CAPI
+                                    capi_data = capi_by_email.loc[email]
+                                    survey_period.at[idx, 'campaign'] = capi_data['campaign']
+                                    survey_period.at[idx, 'source'] = capi_data['source']
+                                    survey_period.at[idx, 'medium'] = capi_data['medium']
+                                    if 'campaign_id_meta' in capi_data.index and pd.notna(capi_data['campaign_id_meta']):
+                                        survey_period.at[idx, 'campaign_id_meta'] = capi_data['campaign_id_meta']
+                                    enriched_count += 1
+                                    matched_emails.append(email)
+
+                            logger.info(f"   ✅ Enriquecidos {enriched_count} leads da pesquisa com UTMs do CAPI ({enriched_count/len(survey_without_utm)*100:.1f}%)")
+
+                            if enriched_count > 0:
+                                # Mostrar alguns exemplos
+                                logger.info(f"   📋 Exemplos de leads enriquecidos (primeiros 3):")
+                                for email in matched_emails[:3]:
+                                    idx = survey_period[survey_period['email'] == email].index[0]
+                                    campaign = survey_period.at[idx, 'campaign']
+                                    campaign_display = campaign[:60] if pd.notna(campaign) and len(str(campaign)) > 60 else campaign
+                                    logger.info(f"      • {email[:30]}... → {campaign_display}")
+                        else:
+                            if len(survey_without_utm) == 0:
+                                logger.info(f"   ✅ Todos os leads da pesquisa já possuem UTM válida")
+                    else:
+                        logger.info(f"   ⚠️  CAPI enrichment DESABILITADO para teste")
+
                     # Filtrar APENAS leads do CAPI que NÃO estão na pesquisa
                     capi_emails = set(capi_norm['email'].unique())
                     capi_extras = capi_emails - survey_emails

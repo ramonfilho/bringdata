@@ -725,6 +725,130 @@ def main():
         use_temporal_validation=False  # Results analysis mode - match against full history
     )
 
+    # INVESTIGAÇÃO: Onde estão as vendas que não fizeram match?
+    print("\n" + "="*80)
+    print("🔍 INVESTIGAÇÃO: ANÁLISE DAS VENDAS SEM MATCH")
+    print("="*80)
+
+    conversions = matched_df[matched_df['converted'] == True]
+    num_conversions = len(conversions)
+    num_sales = len(sales_df)
+
+    logger.info(f"📊 Vendas totais no período: {num_sales}")
+    logger.info(f"📊 Vendas com match nos leads classificados: {num_conversions}")
+    logger.info(f"📊 Vendas SEM match: {num_sales - num_conversions}")
+
+    if num_sales > num_conversions:
+        # Buscar vendas que não fizeram match nos leads classificados
+        sales_emails = set(sales_df['email'].str.lower().str.strip())
+        matched_emails = set(conversions['email'].str.lower().str.strip()) if num_conversions > 0 else set()
+        unmatched_sales_emails = sales_emails - matched_emails
+
+        logger.info(f"\n🔍 Investigando {len(unmatched_sales_emails)} vendas sem match...")
+
+        # Carregar dataset COMPLETO de leads (SEM filtro de período para ver histórico)
+        from src.validation.data_loader import CAPILeadDataLoader as CAPILoader
+        temp_capi_loader = CAPILoader()
+
+        # Primeiro: dataset do período atual (com filtro)
+        period_leads_df, _ = temp_capi_loader.load_combined_leads(
+            csv_path=leads_path,
+            start_date=start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d'),
+            end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d')
+        )
+
+        # Segundo: dataset histórico completo (SEM filtro de período)
+        historical_leads_df, _ = temp_capi_loader.load_combined_leads(
+            csv_path=leads_path,
+            start_date='2020-01-01',  # Data antiga para pegar todo o histórico
+            end_date='2030-12-31'
+        )
+
+        logger.info(f"   Dataset do período: {len(period_leads_df)} leads")
+        logger.info(f"   Dataset histórico: {len(historical_leads_df)} leads")
+        logger.info(f"   Dataset classificado: {len(leads_df)} leads (apenas com UTM válida)")
+
+        # Verificar cada venda não matched
+        print("\n" + "-"*80)
+        print(f"{'EMAIL':<35} {'DATA CADASTRO':<20} {'GRUPO':<15} {'CAMPANHA'[:30]}")
+        print("-"*80)
+
+        found_in_excluded = 0
+        found_before_period = 0
+        not_found = 0
+
+        for sale_email in list(unmatched_sales_emails)[:20]:  # Limitar a 20 para não poluir
+            # Buscar primeiro no dataset do período
+            lead_match = period_leads_df[period_leads_df['email'].str.lower().str.strip() == sale_email]
+
+            if len(lead_match) > 0:
+                # Encontrado NO PERÍODO
+                lead_row = lead_match.iloc[0]
+                data_cadastro = lead_row.get('data_captura', 'N/A')
+                campaign = str(lead_row.get('campaign', 'N/A'))[:30]
+                source = lead_row.get('source', 'N/A')
+
+                # Verificar se está nos leads classificados
+                in_classified = lead_row['email'] in leads_df['email'].values
+
+                if in_classified:
+                    grupo = "CLASSIFICADO"  # Estranho - deveria ter matched
+                else:
+                    # Está nos excluídos
+                    if pd.isna(source) or source != 'facebook-ads':
+                        grupo = "EXCLUIR (sem UTM)"
+                        found_in_excluded += 1
+                    else:
+                        grupo = "EXCLUIR (outro)"
+                        found_in_excluded += 1
+
+                # Formatar data
+                if pd.notna(data_cadastro):
+                    if isinstance(data_cadastro, str):
+                        data_str = data_cadastro[:16]  # Pegar apenas data e hora
+                    else:
+                        data_str = data_cadastro.strftime('%Y-%m-%d %H:%M')
+                else:
+                    data_str = 'N/A'
+
+                email_display = sale_email[:32] + "..." if len(sale_email) > 32 else sale_email
+                print(f"{email_display:<35} {data_str:<20} {grupo:<15} {campaign}")
+            else:
+                # Não encontrado no período - buscar no histórico
+                historical_match = historical_leads_df[historical_leads_df['email'].str.lower().str.strip() == sale_email]
+
+                if len(historical_match) > 0:
+                    # Encontrado no HISTÓRICO (período anterior)
+                    hist_row = historical_match.iloc[0]
+                    data_cadastro = hist_row.get('data_captura', 'N/A')
+                    campaign = str(hist_row.get('campaign', 'N/A'))[:30]
+
+                    # Formatar data
+                    if pd.notna(data_cadastro):
+                        if isinstance(data_cadastro, str):
+                            data_str = data_cadastro[:10]  # Apenas data
+                        else:
+                            data_str = data_cadastro.strftime('%Y-%m-%d')
+                    else:
+                        data_str = 'N/A'
+
+                    email_display = sale_email[:32] + "..." if len(sale_email) > 32 else sale_email
+                    print(f"{email_display:<35} {data_str:<20} {'PERÍODO ANTERIOR':<15} {campaign}")
+                    found_before_period += 1
+                else:
+                    # Não encontrado nem no histórico
+                    email_display = sale_email[:32] + "..." if len(sale_email) > 32 else sale_email
+                    print(f"{email_display:<35} {'NÃO ENCONTRADO':<20} {'???':<15} {'N/A'}")
+                    not_found += 1
+
+        print("-"*80)
+        logger.info(f"\n📊 RESUMO DA INVESTIGAÇÃO:")
+        logger.info(f"   Vendas nos leads EXCLUÍDOS (sem UTM): {found_in_excluded}")
+        logger.info(f"   Vendas de PERÍODO ANTERIOR: {found_before_period}")
+        logger.info(f"   Vendas NÃO ENCONTRADAS: {not_found}")
+
+    print("="*80 + "\n")
+
     # 6.1. Filtrar conversões por período de captura
     print("📅 FILTRANDO CONVERSÕES POR PERÍODO DE CAPTURA...", flush=True)
     print(flush=True)
