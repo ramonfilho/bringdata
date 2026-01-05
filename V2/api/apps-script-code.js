@@ -307,12 +307,14 @@ function executarRelatoriosDiarios() {
     Logger.log('🌙 Executando relatórios diários - ' + new Date().toISOString());
 
     // Etapa 1: Atualizar análises UTM (PESADO - 3-5 min)
-    Logger.log('📊 Atualizando análises UTM completas...');
-    atualizarAnaliseUTM();
+    // DESABILITADO: Geração de abas de análise UTM
+    // Logger.log('📊 Atualizando análises UTM completas...');
+    // atualizarAnaliseUTM();
 
     // Etapa 2: Atualizar Info do Modelo (se mudou)
-    Logger.log('ℹ️ Verificando info do modelo...');
-    atualizarInfoModeloSeAlterado();
+    // DESABILITADO: Geração da aba Info do Modelo
+    // Logger.log('ℹ️ Verificando info do modelo...');
+    // atualizarInfoModeloSeAlterado();
 
     Logger.log('✅ Relatórios diários concluídos com sucesso');
 
