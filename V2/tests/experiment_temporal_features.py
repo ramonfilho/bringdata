@@ -249,69 +249,81 @@ def run_experiment_with_temporal_features(
     # Salvar cópia ANTES do feature engineering (para ter Data e Medium originais)
     dataset_antes_fe = dataset_v1_devclub.copy()
 
-    # CÉLULA 18: Feature Engineering
-    print("\n⚙️  CÉLULA 18: FEATURE ENGINEERING")
-    print(f"📊 ANTES do FE:")
-    print(f"   Shape: {dataset_v1_devclub.shape}")
-    print(f"   Colunas: {list(dataset_v1_devclub.columns)}")
-
-    dataset_v1_devclub_fe = criar_features_derivadas(dataset_v1_devclub)
-
-    print(f"\n📊 DEPOIS do FE:")
-    print(f"   Shape: {dataset_v1_devclub_fe.shape}")
-    print(f"   Colunas: {list(dataset_v1_devclub_fe.columns)}")
-
-    novas_features_fe = set(dataset_v1_devclub_fe.columns) - set(dataset_v1_devclub.columns)
-    print(f"\n✨ Novas features criadas ({len(novas_features_fe)}): {sorted(novas_features_fe)}")
-
     # =========================================================================
-    # ✨ ADICIONAR FEATURES TEMPORAIS DE MEDIUM ✨
+    # ✨ ADICIONAR FEATURES TEMPORAIS DE MEDIUM (ANTES DO FE) ✨
     # =========================================================================
 
     print("\n" + "="*80)
     print("✨ ADICIONANDO FEATURES TEMPORAIS DE MEDIUM")
     print("="*80)
 
-    # Adicionar features temporais ANTES do encoding
-    # Usa dataset_antes_fe que ainda tem coluna 'Data'
     print(f"\n📊 Dataset base (ANTES de adicionar temporais):")
+    print(f"   Registros: {len(dataset_antes_fe):,}")
     print(f"   Colunas: {len(dataset_antes_fe.columns)} (inclui Data, Nome, Email, etc.)")
 
-    dataset_v1_devclub_fe_temporal = adicionar_features_temporais_medium(
-        df_leads=dataset_antes_fe,  # Dataset ANTES do FE (tem coluna Data)
+    # PASSO 1: Adicionar features temporais AO dataset que tem Data
+    dataset_com_temporais = adicionar_features_temporais_medium(
+        df_leads=dataset_antes_fe,  # TEM Data e Medium originais
         coluna_data='Data',
         coluna_medium='Medium'
     )
 
     print(f"\n📊 Após adicionar features temporais:")
-    print(f"   Colunas: {len(dataset_v1_devclub_fe_temporal.columns)}")
+    print(f"   Colunas: {len(dataset_com_temporais.columns)}")
 
     # Identificar features temporais adicionadas
-    features_temporais = set(dataset_v1_devclub_fe_temporal.columns) - set(dataset_antes_fe.columns)
+    features_temporais = set(dataset_com_temporais.columns) - set(dataset_antes_fe.columns)
     print(f"   Features temporais adicionadas ({len(features_temporais)}): {sorted(features_temporais)}")
 
-    # Remover colunas que o FE remove (para manter consistência)
-    colunas_remover = ['Data', 'Nome Completo', 'E-mail', 'Telefone', 'arquivo_origem', 'aba_origem']
-    colunas_remover_existentes = [col for col in colunas_remover if col in dataset_v1_devclub_fe_temporal.columns]
+    # =========================================================================
+    # CÉLULA 18: Feature Engineering COMPLETO (com temporais)
+    # =========================================================================
 
-    print(f"\n🗑️  Removendo colunas para consistência com FE:")
-    print(f"   Colunas removidas ({len(colunas_remover_existentes)}): {colunas_remover_existentes}")
+    print("\n⚙️  CÉLULA 18: FEATURE ENGINEERING COMPLETO")
+    print(f"📊 ANTES do FE (dataset COM temporais):")
+    print(f"   Shape: {dataset_com_temporais.shape}")
+    print(f"   Tem Data? {'Data' in dataset_com_temporais.columns}")
+    print(f"   Tem features temporais? {all(f in dataset_com_temporais.columns for f in features_temporais)}")
 
-    dataset_v1_devclub_fe_temporal = dataset_v1_devclub_fe_temporal.drop(columns=colunas_remover_existentes)
+    # PASSO 2: Aplicar FE COMPLETO (cria 7 features + remove Data, Nome, etc.)
+    dataset_v1_devclub_fe_temporal = criar_features_derivadas(dataset_com_temporais)
 
-    print(f"\n✅ Features temporais adicionadas!")
-    print(f"   Dataset original (após FE padrão): {len(dataset_v1_devclub_fe.columns)} colunas")
-    print(f"   Dataset com temporais (após remoção): {len(dataset_v1_devclub_fe_temporal.columns)} colunas")
-    print(f"   Diferença: {len(dataset_v1_devclub_fe_temporal.columns) - len(dataset_v1_devclub_fe.columns):+d} colunas")
+    print(f"\n📊 DEPOIS do FE:")
+    print(f"   Shape: {dataset_v1_devclub_fe_temporal.shape}")
+    print(f"   Tem Data? {'Data' in dataset_v1_devclub_fe_temporal.columns}")
+    print(f"   Tem features temporais? {all(f in dataset_v1_devclub_fe_temporal.columns for f in features_temporais)}")
 
-    # Comparar com FE padrão
-    colunas_novas_vs_fe = set(dataset_v1_devclub_fe_temporal.columns) - set(dataset_v1_devclub_fe.columns)
-    colunas_removidas_vs_fe = set(dataset_v1_devclub_fe.columns) - set(dataset_v1_devclub_fe_temporal.columns)
+    # Identificar features criadas pelo FE
+    novas_features_fe = set(dataset_v1_devclub_fe_temporal.columns) - set(dataset_com_temporais.columns)
+    print(f"\n✨ Features criadas pelo FE ({len(novas_features_fe)}): {sorted(novas_features_fe)}")
+
+    # =========================================================================
+    # RESUMO FINAL: Comparar com FE padrão (sem temporais)
+    # =========================================================================
+
+    # Para comparação, calcular FE padrão (sem temporais)
+    dataset_v1_devclub_fe_padrao = criar_features_derivadas(dataset_antes_fe)
+
+    print(f"\n" + "="*80)
+    print("📊 COMPARAÇÃO: FE PADRÃO vs FE COM TEMPORAIS")
+    print("="*80)
+    print(f"\n1️⃣  FE PADRÃO (sem temporais):")
+    print(f"   Colunas: {len(dataset_v1_devclub_fe_padrao.columns)}")
+
+    print(f"\n2️⃣  FE COM TEMPORAIS:")
+    print(f"   Colunas: {len(dataset_v1_devclub_fe_temporal.columns)}")
+    print(f"   Diferença: {len(dataset_v1_devclub_fe_temporal.columns) - len(dataset_v1_devclub_fe_padrao.columns):+d} colunas")
+
+    # Comparar colunas
+    colunas_novas_vs_fe = set(dataset_v1_devclub_fe_temporal.columns) - set(dataset_v1_devclub_fe_padrao.columns)
+    colunas_removidas_vs_fe = set(dataset_v1_devclub_fe_padrao.columns) - set(dataset_v1_devclub_fe_temporal.columns)
 
     if colunas_novas_vs_fe:
-        print(f"   Novas vs FE padrão ({len(colunas_novas_vs_fe)}): {sorted(colunas_novas_vs_fe)}")
+        print(f"\n   ✅ Novas features ({len(colunas_novas_vs_fe)}): {sorted(colunas_novas_vs_fe)}")
     if colunas_removidas_vs_fe:
-        print(f"   Faltando vs FE padrão ({len(colunas_removidas_vs_fe)}): {sorted(colunas_removidas_vs_fe)}")
+        print(f"   ❌ Features removidas ({len(colunas_removidas_vs_fe)}): {sorted(colunas_removidas_vs_fe)}")
+
+    print(f"\n✅ SUCESSO: Dataset com features temporais + features do FE!")
 
     # =========================================================================
     # CÉLULA 20: Encoding
@@ -363,8 +375,8 @@ def run_experiment_with_temporal_features(
     )
 
     # Adicionar informações extras ao resultado
-    resultado['temporal_features_count'] = len(colunas_novas)
-    resultado['temporal_features'] = sorted(colunas_novas)
+    resultado['temporal_features_count'] = len(features_temporais)
+    resultado['temporal_features'] = sorted(features_temporais)
     resultado['mlflow_run_id'] = resultado.get('run_id', 'N/A')
 
     # Adicionar tags específicas do experimento ao run MLflow
@@ -373,7 +385,7 @@ def run_experiment_with_temporal_features(
         with mlflow.start_run(run_id=run_id):
             mlflow.set_tag("experiment_type", "temporal_features")
             mlflow.set_tag("temporal_features", "enabled")
-            mlflow.log_param("temporal_features_count", len(colunas_novas))
+            mlflow.log_param("temporal_features_count", len(features_temporais))
 
     # =========================================================================
     # RESUMO FINAL
