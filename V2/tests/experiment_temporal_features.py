@@ -39,9 +39,13 @@ from src.model.training_model import registrar_features_e_modelo_devclub
 # ADICIONAR: importar função de features temporais
 from src.data_processing.traffic_features import adicionar_features_temporais_medium
 
-# Configurar logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+# Configurar logging - Desabilitar INFO para não poluir output
+logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
+
+# Desabilitar INFO de todos os módulos importados
+for module_name in ['src.data_processing', 'src.features', 'src.matching', 'src.model']:
+    logging.getLogger(module_name).setLevel(logging.WARNING)
 
 
 def run_experiment_with_temporal_features(
@@ -104,10 +108,23 @@ def run_experiment_with_temporal_features(
         print(f"   {i}. {os.path.basename(fp)}")
 
     all_data = read_excel_files(filepaths)
-    print(f"\n✅ Total de abas lidas: {len(all_data)}")
+
+    # Contar total de abas
+    total_abas = sum(len(abas) for abas in all_data.values())
+    print(f"\n✅ Total de abas lidas: {total_abas}")
+
+    # Mostrar primeiras 5 abas de qualquer arquivo
     print(f"Primeiras 5 abas:")
-    for i, (key, df) in enumerate(list(all_data.items())[:5], 1):
-        print(f"   {i}. {key}: {df.shape}")
+    count = 0
+    for arquivo, abas_dict in all_data.items():
+        for aba_nome, df in abas_dict.items():
+            if count < 5:
+                print(f"   {count+1}. {os.path.basename(arquivo)} → {aba_nome}: {df.shape}")
+                count += 1
+            else:
+                break
+        if count >= 5:
+            break
 
     # CÉLULA 2: Filtragem + Duplicatas
     print("\n🔄 CÉLULA 2: FILTRAGEM + DUPLICATAS")
@@ -257,23 +274,44 @@ def run_experiment_with_temporal_features(
 
     # Adicionar features temporais ANTES do encoding
     # Usa dataset_antes_fe que ainda tem coluna 'Data'
+    print(f"\n📊 Dataset base (ANTES de adicionar temporais):")
+    print(f"   Colunas: {len(dataset_antes_fe.columns)} (inclui Data, Nome, Email, etc.)")
+
     dataset_v1_devclub_fe_temporal = adicionar_features_temporais_medium(
         df_leads=dataset_antes_fe,  # Dataset ANTES do FE (tem coluna Data)
         coluna_data='Data',
         coluna_medium='Medium'
     )
 
+    print(f"\n📊 Após adicionar features temporais:")
+    print(f"   Colunas: {len(dataset_v1_devclub_fe_temporal.columns)}")
+
+    # Identificar features temporais adicionadas
+    features_temporais = set(dataset_v1_devclub_fe_temporal.columns) - set(dataset_antes_fe.columns)
+    print(f"   Features temporais adicionadas ({len(features_temporais)}): {sorted(features_temporais)}")
+
     # Remover colunas que o FE remove (para manter consistência)
     colunas_remover = ['Data', 'Nome Completo', 'E-mail', 'Telefone', 'arquivo_origem', 'aba_origem']
     colunas_remover_existentes = [col for col in colunas_remover if col in dataset_v1_devclub_fe_temporal.columns]
+
+    print(f"\n🗑️  Removendo colunas para consistência com FE:")
+    print(f"   Colunas removidas ({len(colunas_remover_existentes)}): {colunas_remover_existentes}")
+
     dataset_v1_devclub_fe_temporal = dataset_v1_devclub_fe_temporal.drop(columns=colunas_remover_existentes)
 
     print(f"\n✅ Features temporais adicionadas!")
-    print(f"   Colunas antes: {len(dataset_v1_devclub_fe.columns)}")
-    print(f"   Colunas depois: {len(dataset_v1_devclub_fe_temporal.columns)}")
+    print(f"   Dataset original (após FE padrão): {len(dataset_v1_devclub_fe.columns)} colunas")
+    print(f"   Dataset com temporais (após remoção): {len(dataset_v1_devclub_fe_temporal.columns)} colunas")
+    print(f"   Diferença: {len(dataset_v1_devclub_fe_temporal.columns) - len(dataset_v1_devclub_fe.columns):+d} colunas")
 
-    colunas_novas = set(dataset_v1_devclub_fe_temporal.columns) - set(dataset_v1_devclub_fe.columns)
-    print(f"   Novas features ({len(colunas_novas)}): {sorted(colunas_novas)}")
+    # Comparar com FE padrão
+    colunas_novas_vs_fe = set(dataset_v1_devclub_fe_temporal.columns) - set(dataset_v1_devclub_fe.columns)
+    colunas_removidas_vs_fe = set(dataset_v1_devclub_fe.columns) - set(dataset_v1_devclub_fe_temporal.columns)
+
+    if colunas_novas_vs_fe:
+        print(f"   Novas vs FE padrão ({len(colunas_novas_vs_fe)}): {sorted(colunas_novas_vs_fe)}")
+    if colunas_removidas_vs_fe:
+        print(f"   Faltando vs FE padrão ({len(colunas_removidas_vs_fe)}): {sorted(colunas_removidas_vs_fe)}")
 
     # =========================================================================
     # CÉLULA 20: Encoding
