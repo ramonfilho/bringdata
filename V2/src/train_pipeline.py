@@ -215,8 +215,8 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     print("=" * 80)
 
     # === CÉLULA 4: Consolidação de datasets ===
-    print("\nCONSOLIDAÇÃO DE DATASETS - PESQUISA E VENDAS")
-    print("=" * 45)
+    print("\n📊 CÉLULA 4: CONSOLIDAÇÃO DE DATASETS - PESQUISA E VENDAS")
+    print("=" * 60)
 
     df_pesquisa, df_vendas = consolidate_datasets(
         clean_data_cols,
@@ -254,8 +254,8 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     print(f"- dataset_vendas_final")
 
     # === CÉLULA 5: Unificação de colunas duplicadas ===
-    print("\nUNIFICAÇÃO DE COLUNAS DUPLICADAS")
-    print("=" * 32)
+    print("\n🔗 CÉLULA 5: UNIFICAÇÃO DE COLUNAS DUPLICADAS")
+    print("=" * 60)
 
     df_pesquisa_final, df_vendas_final = unificar_colunas_datasets(df_pesquisa, df_vendas)
 
@@ -267,9 +267,12 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     gerar_relatorio_colunas(df_pesquisa_final, "DATASET PESQUISA")
     gerar_relatorio_colunas(df_vendas_final, "DATASET VENDAS")
 
+    # === CÉLULA 6: Pulada (exploratória) ===
+    print("\n⏭️  CÉLULA 6: Pulando célula exploratória/informativa do notebook original de treino")
+
     # === CÉLULA 7: Unificação completa de categorias ===
-    print("\nUNIFICAÇÃO COMPLETA DE CATEGORIAS - NOVO CÓDIGO")
-    print("=" * 52)
+    print("\n🏷️  CÉLULA 7: UNIFICAÇÃO COMPLETA DE CATEGORIAS")
+    print("=" * 60)
 
     df_pesquisa_final_unificado = unificar_categorias_completo(df_pesquisa_final)
 
@@ -277,17 +280,20 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     gerar_relatorio_final_categorias(df_pesquisa_final_unificado)
 
     # === CÉLULA 8: Remoção de features desnecessárias ===
-    print("\nREMOÇÃO DE FEATURES DESNECESSÁRIAS")
-    print("=" * 38)
+    print("\n🗑️  CÉLULA 8: REMOÇÃO DE FEATURES DESNECESSÁRIAS")
+    print("=" * 60)
 
     df_features_removidas = remover_features_desnecessarias(df_pesquisa_final_unificado)
 
     # Listar colunas restantes
     listar_colunas_restantes(df_features_removidas)
 
+    # === CÉLULA 9: Pulada (exploratória) ===
+    print("\n⏭️  CÉLULA 9: Pulando célula exploratória/informativa do notebook original de treino")
+
     # === CÉLULA 10: Unificação de UTM Source e Term ===
-    print("\nUNIFICAÇÃO DE UTM SOURCE E TERM")
-    print("=" * 35)
+    print("\n🔤 CÉLULA 10: UNIFICAÇÃO DE UTM SOURCE E TERM")
+    print("=" * 60)
 
     df_utm_unificado = unificar_utm_source_term(df_features_removidas)
 
@@ -295,8 +301,8 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     verificar_consistencia_utm(df_utm_unificado)
 
     # === CÉLULA 11: Unificação de UTM Medium - Extração de Públicos ===
-    print("\nUNIFICAÇÃO DE UTM MEDIUM - EXTRAÇÃO DE PÚBLICOS")
-    print("=" * 52)
+    print("\n🎯 CÉLULA 11: UNIFICAÇÃO DE UTM MEDIUM - EXTRAÇÃO DE PÚBLICOS")
+    print("=" * 60)
 
     df_medium_unificado = extrair_publico_medium(df_utm_unificado)
 
@@ -304,8 +310,8 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     relatorio_final_medium(df_medium_unificado)
 
     # === CÉLULA 11.1: Unificação de Medium para Produção ===
-    print("\nUNIFICAÇÃO DE UTM MEDIUM BASEADA EM ACTIONS + TRATAMENTO DE PRODUÇÃO")
-    print("=" * 72)
+    print("\n🔧 CÉLULA 11.1: UNIFICAÇÃO DE UTM MEDIUM PARA PRODUÇÃO")
+    print("=" * 60)
 
     print("Iniciando processo de unificação para produção...")
     df_original = df_medium_unificado.copy()
@@ -318,9 +324,12 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     print(f"Dataset final disponível em: pesquisa_medium_producao_unificado")
     print(f"Este dataset está pronto para o pipeline de produção e não gerará incompatibilidades!")
 
+    # === CÉLULA 12: Pulada (exploratória) ===
+    print("\n⏭️  CÉLULA 12: Pulando célula exploratória/informativa do notebook original de treino")
+
     # === CÉLULA 13: Criação de versão do dataset por missing rate ===
-    print("\nCRIAÇÃO DE VERSÕES DO DATASET POR MISSING RATE")
-    print("=" * 50)
+    print("\n📋 CÉLULA 13: CRIAÇÃO DE VERSÕES DO DATASET POR MISSING RATE")
+    print("=" * 60)
 
     print("Iniciando criação das versões...")
     df_pos_cutoff = criar_dataset_pos_cutoff(df_medium_producao)
@@ -331,7 +340,13 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     print(f"\nProcesso concluído!")
     print(f"Duas versões do dataset criadas com sucesso.")
 
+    # === CÉLULA 14: Pulada (exploratória) ===
+    print("\n⏭️  CÉLULA 14: Pulando célula exploratória/informativa do notebook original de treino")
+
     # === CÉLULA 15: Matching robusto por email e telefone ===
+    print(f"\n🔍 CÉLULA 15: MATCHING DE LEADS COM VENDAS ({initial_matching.upper().replace('_', ' ')})")
+    print("=" * 60)
+
     if initial_matching == 'email_only':
         dataset_v1_final = fazer_matching_email_only(df_pos_cutoff, df_vendas_final)
     elif initial_matching == 'email_telefone':
@@ -345,7 +360,13 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     else:
         raise ValueError(f"Método de matching inicial inválido: {initial_matching}. Use 'email_only', 'email_telefone', 'variantes', 'robusto' ou 'validation'")
 
+    # === CÉLULA 16: Pulada (exploratória) ===
+    print("\n⏭️  CÉLULA 16: Pulando célula exploratória/informativa do notebook original de treino")
+
     # === CÉLULA 17: Filtragem DevClub ===
+    print(f"\n🎓 CÉLULA 17: FILTRAGEM DEVCLUB + JANELA DE CONVERSÃO")
+    print("=" * 60)
+
     dataset_v1_devclub = criar_dataset_devclub(dataset_v1_final, df_vendas_final)
 
     # Aplicar janela de conversão de 20 dias (captação + CPL + carrinho)
@@ -530,12 +551,19 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         print("=" * 80)
 
     # === CÉLULA 18: Feature Engineering ===
+    print(f"\n⚙️  CÉLULA 18: FEATURE ENGINEERING")
+    print("=" * 60)
     # IMPORTANTE: FE será aplicado no dataset COM ou SEM temporais
     # Se temporais foram adicionadas, FE vai criar 7 features E remover Data/Nome/etc
     # Resultado final: 4 temporais + 7 FE + 15 base = 26 colunas
     dataset_v1_devclub_fe = criar_features_derivadas(dataset_v1_devclub)
 
+    # === CÉLULA 19: Pulada (exploratória) ===
+    print("\n⏭️  CÉLULA 19: Pulando célula exploratória/informativa do notebook original de treino")
+
     # === CÉLULA 20: Encoding Estratégico ===
+    print(f"\n🔢 CÉLULA 20: ENCODING ESTRATÉGICO")
+    print("=" * 60)
     dataset_v1_devclub_encoded = aplicar_encoding_estrategico(dataset_v1_devclub_fe)
 
     # === HYPERPARAMETER TUNING (opcional) ===
