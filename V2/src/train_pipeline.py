@@ -13,6 +13,8 @@ import glob
 import logging
 import argparse
 import pandas as pd
+import atexit
+from datetime import datetime
 from src.data_processing.ingestion import (
     read_excel_files,
     filter_sheets,
@@ -47,6 +49,43 @@ logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 
+class Tee:
+    """Duplica output para console e arquivo (como comando tee do Unix)."""
+    def __init__(self, file_path):
+        self.terminal = sys.stdout
+        self.log = open(file_path, 'w', encoding='utf-8')
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+        self.log.flush()  # Força escrita imediata
+
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
+    def close(self):
+        self.log.close()
+
+
+def setup_output_logging():
+    """Configura redirecionamento automático de output para arquivo timestampado."""
+    # Criar diretório outputs se não existir
+    outputs_dir = os.path.join(os.path.dirname(__file__), '../outputs')
+    os.makedirs(outputs_dir, exist_ok=True)
+
+    # Gerar timestamp no formato YYYYMMDD_HHMMSS
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_path = os.path.join(outputs_dir, f'{timestamp}.log')
+
+    # Redirecionar stdout e stderr para Tee
+    tee = Tee(log_path)
+    sys.stdout = tee
+    sys.stderr = tee
+
+    return log_path, tee
+
+
 def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal', use_guru_only=None, set_active=False, temporal_features=False):
     """Executa pipeline de treino completo.
 
@@ -65,9 +104,22 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         temporal_features: Se True, adiciona features temporais de tráfego (densidade, tendência, rank)
     """
 
+    # Configurar redirecionamento de output para arquivo
+    log_path, tee = setup_output_logging()
+
+    # Registrar função de cleanup para fechar arquivo ao terminar
+    def cleanup():
+        print(f"\n✅ Pipeline concluído! Output salvo em: {log_path}")
+        tee.close()
+        sys.stdout = tee.terminal
+        sys.stderr = tee.terminal
+
+    atexit.register(cleanup)
+
     print("\n" + "=" * 80)
     print("PIPELINE DE TREINO")
     print("=" * 80)
+    print(f"\n📝 Output sendo salvo em: {log_path}")
     print(f"\n🔧 CONFIGURAÇÃO:")
     print(f"   Método de matching inicial (célula 15): {initial_matching}")
     print(f"   Salvar arquivos locais: {save_files}")
