@@ -1,0 +1,1350 @@
+/Users/ramonmoreira/.pyenv/versions/3.11.6/lib/python3.11/site-packages/mlflow/protos/service_pb2.py:11: UserWarning: google.protobuf.service module is deprecated. RPC implementations should provide code generator plugins which generate code specific to the RPC implementation. service.py will be removed in Jan 2025
+  from google.protobuf import service as _service
+INFO: 📂 Lendo 38 arquivo(s) Excel...
+INFO:   Processando: [LF01] Leads_Pesquisa.xlsx
+INFO:     Total: 7 aba(s) lida(s)
+INFO:   Processando: [LF02] Leads_Pesquisa.xlsx
+INFO:     Total: 7 aba(s) lida(s)
+INFO:   Processando: [LF03] Leads_Pesquisa.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: [LF04] Leads_Pesquisa.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: [LF05] Leads_Pesquisa.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: [LF06] Leads_Pesquisa.xlsx
+INFO:     Total: 8 aba(s) lida(s)
+INFO:   Processando: [LF07] Leads_Pesquisa.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: [LF08] Pesquisa.xlsx
+INFO:     Total: 4 aba(s) lida(s)
+INFO:   Processando: [LF] Pesquisa - Mai25 33.xlsx
+INFO:     Total: 7 aba(s) lida(s)
+INFO:   Processando: [LF] Pesquisa - Mai25-3.xlsx
+INFO:     Total: 10 aba(s) lida(s)
+INFO:   Processando: [LF] Pesquisa 31.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: GURU VENDAS 2025.xlsx
+INFO:     Total: 1 aba(s) lida(s)
+INFO:   Processando: LEAD SCORE LF 11.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LEAD SCORE LF 12.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LEAD SCORE LF 13.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LEAD SCORE LF 14.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LEAD SCORE LF 15.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LEAD SCORE LF 16.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LEAD SCORE LF 17.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LEAD SCORE LF 18.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LEAD SCORE LF 19.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LEAD SCORE LF 20.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LEAD SCORE LF 21.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: Lead Score LF 22.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: Lead score LF 24.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: Lead Score LF 26.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: Leads Score LF 25.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LF 29 LEADS SCORE.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LF 34 Leads Score.xlsx
+INFO:     Total: 7 aba(s) lida(s)
+INFO:   Processando: LF Lead Score 23.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LF Lead Score 27.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LF Lead score 28.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LF Lead Score 32.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LF LEADS SCORE 30.xlsx
+INFO:     Total: 6 aba(s) lida(s)
+INFO:   Processando: LF10 Lead Score.xlsx
+INFO:     Total: 5 aba(s) lida(s)
+INFO:   Processando: vendas_guru_1.1.xlsx
+INFO:     Total: 1 aba(s) lida(s)
+INFO:   Processando: vendas_guru_2.1.xlsx
+INFO:     Total: 1 aba(s) lida(s)
+INFO:   Processando: vendas_guru_2.2.xlsx
+INFO:     Total: 1 aba(s) lida(s)
+INFO: ✅ Total de arquivos lidos: 38
+INFO: 🔍 Filtrando abas por critérios...
+INFO:   Abas mantidas: 38
+INFO:   Abas removidas: 177
+INFO: 🧹 Removendo duplicatas...
+INFO:   Total de duplicatas removidas: 38,218
+INFO: 🧹 Removendo colunas desnecessárias...
+INFO:   Total de colunas removidas: 898
+INFO: 🔗 Consolidando datasets (Pesquisa e Vendas)...
+INFO:   Dataset Pesquisa: 151,511 registros, 26 colunas
+INFO:   Dataset Vendas: 3,618 registros, 12 colunas
+INFO: ✅ Unificação concluída
+INFO:   Pesquisa: 151511 registros, 24 colunas
+INFO:   Vendas: 3618 registros, 12 colunas
+INFO: ✅ Unificação de categorias concluída
+INFO: ✅ Features desnecessárias removidas: 3
+
+================================================================================
+PIPELINE DE TREINO
+================================================================================
+
+🔧 CONFIGURAÇÃO:
+   Método de matching inicial (célula 15): email_telefone
+   Salvar arquivos locais: False
+   Hyperparameter tuning: False
+   Features temporais de tráfego: False
+================================================================================
+
+📤 CÉLULA 1: LEITURA DE ARQUIVOS
+
+🚫 GURU ONLY MODE - Arquivos TMB excluídos:
+  - vendas-tmb_1.1.xlsx
+  - vendas_tmb_2.1.xlsx
+  - vendas_tmb_2.2.xlsx
+
+Total de arquivos: 38
+  - [LF01] Leads_Pesquisa.xlsx
+  - [LF02] Leads_Pesquisa.xlsx
+  - [LF03] Leads_Pesquisa.xlsx
+  - [LF04] Leads_Pesquisa.xlsx
+  - [LF05] Leads_Pesquisa.xlsx
+  - [LF06] Leads_Pesquisa.xlsx
+  - [LF07] Leads_Pesquisa.xlsx
+  - [LF08] Pesquisa.xlsx
+  - [LF] Pesquisa - Mai25 33.xlsx
+  - [LF] Pesquisa - Mai25-3.xlsx
+  - [LF] Pesquisa 31.xlsx
+  - GURU VENDAS 2025.xlsx
+  - LEAD SCORE LF 11.xlsx
+  - LEAD SCORE LF 12.xlsx
+  - LEAD SCORE LF 13.xlsx
+  - LEAD SCORE LF 14.xlsx
+  - LEAD SCORE LF 15.xlsx
+  - LEAD SCORE LF 16.xlsx
+  - LEAD SCORE LF 17.xlsx
+  - LEAD SCORE LF 18.xlsx
+  - LEAD SCORE LF 19.xlsx
+  - LEAD SCORE LF 20.xlsx
+  - LEAD SCORE LF 21.xlsx
+  - Lead Score LF 22.xlsx
+  - Lead score LF 24.xlsx
+  - Lead Score LF 26.xlsx
+  - Leads Score LF 25.xlsx
+  - LF 29 LEADS SCORE.xlsx
+  - LF 34 Leads Score.xlsx
+  - LF Lead Score 23.xlsx
+  - LF Lead Score 27.xlsx
+  - LF Lead score 28.xlsx
+  - LF Lead Score 32.xlsx
+  - LF LEADS SCORE 30.xlsx
+  - LF10 Lead Score.xlsx
+  - vendas_guru_1.1.xlsx
+  - vendas_guru_2.1.xlsx
+  - vendas_guru_2.2.xlsx
+
+🔄 CÉLULA 2: FILTRAGEM DE ABAS + REMOÇÃO DE DUPLICATAS
+============================================================
+
+📊 ABAS MANTIDAS E PROCESSADAS
+================================================================================
+ARQUIVO                             ABA                    ORIGINAL      FINAL  REMOVIDAS
+--------------------------------------------------------------------------------
+[LF01] Leads_Pesquisa.xlsx          Pesquisa                  6,929      6,857         72
+[LF02] Leads_Pesquisa.xlsx          Pesquisa                  2,659      2,611         48
+[LF03] Leads_Pesquisa.xlsx          Pesquisa                  5,229      5,142         87
+[LF04] Leads_Pesquisa.xlsx          Pesquisa                  6,097      6,045         52
+[LF05] Leads_Pesquisa.xlsx          Pesquisa                  3,801      3,746         55
+[LF06] Leads_Pesquisa.xlsx          LF Pesquisa               2,601      2,553         48
+[LF07] Leads_Pesquisa.xlsx          LF Pesquisa               3,332      3,223        109
+[LF08] Pesquisa.xlsx                LF Pesquisa               3,818      3,792         26
+[LF] Pesquisa - Mai25 33.xlsx       LF Pesquisa              11,735     11,735          0
+[LF] Pesquisa - Mai25-3.xlsx        LF Pesquisa              22,478     22,478          0
+[LF] Pesquisa 31.xlsx               LF Pesquisa               4,722      4,722          0
+GURU VENDAS 2025.xlsx               Vendas                    1,289      1,289          0
+LEAD SCORE LF 11.xlsx               LF Pesquisa               4,126      2,105      2,021
+LEAD SCORE LF 12.xlsx               LF Pesquisa               6,919      3,531      3,388
+LEAD SCORE LF 13.xlsx               LF Pesquisa               7,645      3,902      3,743
+LEAD SCORE LF 14.xlsx               LF Pesquisa               4,631      2,356      2,275
+LEAD SCORE LF 15.xlsx               LF Pesquisa               3,305      1,690      1,615
+LEAD SCORE LF 16.xlsx               LF Pesquisa               4,762      2,439      2,323
+LEAD SCORE LF 17.xlsx               LF Pesquisa               7,613      3,898      3,715
+LEAD SCORE LF 18.xlsx               LF Pesquisa               4,035      2,062      1,973
+LEAD SCORE LF 19.xlsx               LF Pesquisa               4,010      2,044      1,966
+LEAD SCORE LF 20.xlsx               LF Pesquisa               3,313      1,711      1,602
+LEAD SCORE LF 21.xlsx               LF Pesquisa               5,607      2,915      2,692
+Lead Score LF 22.xlsx               LF Pesquisa               5,181      2,702      2,479
+Lead score LF 24.xlsx               LF Pesquisa               3,896      2,022      1,874
+Lead Score LF 26.xlsx               LF Pesquisa               4,773      4,686         87
+Leads Score LF 25.xlsx              LF Pesquisa               5,058      4,375        683
+LF 29 LEADS SCORE.xlsx              LF Pesquisa               4,284      4,284          0
+LF 34 Leads Score.xlsx              LF Pesquisa               4,378      4,378          0
+LF Lead Score 23.xlsx               LF Pesquisa               3,926      2,028      1,898
+LF Lead Score 27.xlsx               LF Pesquisa               4,984      4,984          0
+LF Lead score 28.xlsx               LF Pesquisa               4,670      4,670          0
+LF Lead Score 32.xlsx               LF Pesquisa               7,641      7,641          0
+LF LEADS SCORE 30.xlsx              LF Pesquisa               4,622      4,622          0
+LF10 Lead Score.xlsx                LF Pesquisa               6,949      3,562      3,387
+vendas_guru_1.1.xlsx                Vendas                      416        416          0
+vendas_guru_2.1.xlsx                Vendas                      422        422          0
+vendas_guru_2.2.xlsx                Vendas                    1,491      1,491          0
+--------------------------------------------------------------------------------
+TOTAL                                                       193,347    155,129     38,218
+
+📈 RESUMO FINAL:
+Arquivos processados: 38
+Abas mantidas: 38
+Abas removidas: 177
+Linhas totais após processamento: 155,129
+Duplicatas removidas: 38,218
+Redução por duplicatas: 19.77%
+
+✅ Dados processados disponíveis na variável 'arquivos_filtrados'
+================================================================================
+
+🧹 CÉLULA 3: REMOÇÃO DE COLUNAS DESNECESSÁRIAS
+============================================================
+
+📊 COLUNAS REMOVIDAS POR ABA
+================================================================================
+ARQUIVO                             ABA                       ANTES     DEPOIS  REMOVIDAS
+--------------------------------------------------------------------------------
+[LF01] Leads_Pesquisa.xlsx          Pesquisa                     31         17         14
+[LF02] Leads_Pesquisa.xlsx          Pesquisa                     42         18         24
+[LF03] Leads_Pesquisa.xlsx          Pesquisa                     42         18         24
+[LF04] Leads_Pesquisa.xlsx          Pesquisa                     32         18         14
+[LF05] Leads_Pesquisa.xlsx          Pesquisa                     35         18         17
+[LF06] Leads_Pesquisa.xlsx          LF Pesquisa                  37         19         18
+[LF07] Leads_Pesquisa.xlsx          LF Pesquisa                  37         20         17
+[LF08] Pesquisa.xlsx                LF Pesquisa                  37         20         17
+[LF] Pesquisa - Mai25 33.xlsx       LF Pesquisa                  42         20         22
+[LF] Pesquisa - Mai25-3.xlsx        LF Pesquisa                  40         20         20
+[LF] Pesquisa 31.xlsx               LF Pesquisa                  38         20         18
+GURU VENDAS 2025.xlsx               Vendas                       81         10         71
+LEAD SCORE LF 11.xlsx               LF Pesquisa                  37         20         17
+LEAD SCORE LF 12.xlsx               LF Pesquisa                  37         20         17
+LEAD SCORE LF 13.xlsx               LF Pesquisa                  37         20         17
+LEAD SCORE LF 14.xlsx               LF Pesquisa                  37         20         17
+LEAD SCORE LF 15.xlsx               LF Pesquisa                  37         20         17
+LEAD SCORE LF 16.xlsx               LF Pesquisa                  37         20         17
+LEAD SCORE LF 17.xlsx               LF Pesquisa                  37         20         17
+LEAD SCORE LF 18.xlsx               LF Pesquisa                  38         20         18
+LEAD SCORE LF 19.xlsx               LF Pesquisa                  38         20         18
+LEAD SCORE LF 20.xlsx               LF Pesquisa                  38         20         18
+LEAD SCORE LF 21.xlsx               LF Pesquisa                  38         20         18
+Lead Score LF 22.xlsx               LF Pesquisa                  38         20         18
+Lead score LF 24.xlsx               LF Pesquisa                  38         20         18
+Lead Score LF 26.xlsx               LF Pesquisa                  38         20         18
+Leads Score LF 25.xlsx              LF Pesquisa                  38         20         18
+LF 29 LEADS SCORE.xlsx              LF Pesquisa                  38         20         18
+LF 34 Leads Score.xlsx              LF Pesquisa                  42         20         22
+LF Lead Score 23.xlsx               LF Pesquisa                  38         20         18
+LF Lead Score 27.xlsx               LF Pesquisa                  38         20         18
+LF Lead score 28.xlsx               LF Pesquisa                  38         20         18
+LF Lead Score 32.xlsx               LF Pesquisa                  38         20         18
+LF LEADS SCORE 30.xlsx              LF Pesquisa                  38         20         18
+LF10 Lead Score.xlsx                LF Pesquisa                  37         20         17
+vendas_guru_1.1.xlsx                Vendas                       80         10         70
+vendas_guru_2.1.xlsx                Vendas                       81         10         71
+vendas_guru_2.2.xlsx                Vendas                       81         10         71
+--------------------------------------------------------------------------------
+TOTAL                                                          1606        708        898
+
+📈 RESUMO:
+Total de colunas removidas: 898
+
+✅ Dados sem colunas desnecessárias disponíveis
+================================================================================
+
+CONSOLIDAÇÃO DE DATASETS - PESQUISA E VENDAS
+=============================================
+
+DATASET PESQUISA - 151511 registros
+======================================================================
+COLUNA                                  ÚNICOS   % AUSENTES      TOTAL
+----------------------------------------------------------------------
+Data                                    84,724         0.0%    151,511
+Nome Completo                           89,685         0.1%    151,511
+E-mail                                 108,390         0.1%    151,511
+Telefone                               110,938         0.1%    151,511
+O seu gênero:                                2         0.0%    151,511
+Qual a sua idade?                            8         0.0%    151,511
+O que você faz atualmente?                  11         0.0%    151,511
+Atualmente, qual a sua faixa salar          10         0.0%    151,511
+Qual o seu nível em programação?             5        82.2%    151,511
+Já investiu em algum curso online            2        77.6%    151,511
+O que mais te chama atenção na pro           5        77.6%    151,511
+Source                                       7         1.2%    151,511
+Campaign                                    91         1.7%    151,511
+Medium                                     359         1.3%    151,511
+Content                                    566         1.3%    151,511
+Term                                       271         1.3%    151,511
+                                             0       100.0%    151,511
+arquivo_origem                              34         0.0%    151,511
+aba_origem                                   2         0.0%    151,511
+Você possui cartão de crédito?               3         4.6%    151,511
+O que mais você quer ver no evento           8         4.6%    151,511
+Tem computador/notebook?                     4        37.7%    151,511
+Já estudou programação?                      2        17.8%    151,511
+Você já fez/faz/pretende fazer fac           2        17.8%    151,511
+Já investiu em algum curso online            2        22.5%    151,511
+O que mais te chama atenção na pro           5        22.5%    151,511
+
+DATASET VENDAS - 3618 registros
+======================================================================
+COLUNA                                  ÚNICOS   % AUSENTES      TOTAL
+----------------------------------------------------------------------
+valor produtos                              36         0.0%      3,618
+nome produto                                10         0.0%      3,618
+nome contato                             2,298         0.0%      3,618
+email contato                            2,302         0.0%      3,618
+telefone contato                         2,305         0.0%      3,618
+data aprovacao                           2,521         0.0%      3,618
+utm_source                                   7        94.8%      3,618
+utm_campaign                                19        94.8%      3,618
+utm_medium                                   9        94.8%      3,618
+utm_content                                 19        95.3%      3,618
+arquivo_origem                               4         0.0%      3,618
+aba_origem                                   1         0.0%      3,618
+
+RESUMO:
+Dataset Pesquisa: 151,511 registros, 26 colunas
+Dataset Vendas: 3,618 registros, 12 colunas
+
+Datasets consolidados disponíveis nas variáveis:
+- dataset_pesquisa_final
+- dataset_vendas_final
+
+UNIFICAÇÃO DE COLUNAS DUPLICADAS
+================================
+PESQUISA - Colunas duplicadas identificadas:
+  Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro? 
+  Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?
+
+  O que mais te chama atenção na profissão de Programador? 
+  O que mais te chama atenção na profissão de Programador?
+
+VENDAS - Unificando colunas:
+  valor produtos → valor
+  nome produto → produto
+  nome contato → nome
+  email contato → email
+  data aprovacao → data
+  telefone contato → telefone
+
+VENDAS - Removendo colunas UTM com alta porcentagem de ausentes:
+
+RESULTADO:
+Pesquisa: 151511 registros, 24 colunas
+Vendas: 3618 registros, 12 colunas
+
+DATASET PESQUISA - 151511 registros
+======================================================================
+COLUNA                                  ÚNICOS   % AUSENTES      TOTAL
+----------------------------------------------------------------------
+Data                                    84,724         0.0%    151,511
+Nome Completo                           89,685         0.1%    151,511
+E-mail                                 108,390         0.1%    151,511
+Telefone                               110,938         0.1%    151,511
+O seu gênero:                                2         0.0%    151,511
+Qual a sua idade?                            8         0.0%    151,511
+O que você faz atualmente?                  11         0.0%    151,511
+Atualmente, qual a sua faixa salar          10         0.0%    151,511
+Qual o seu nível em programação?             5        82.2%    151,511
+Source                                       7         1.2%    151,511
+Campaign                                    91         1.7%    151,511
+Medium                                     359         1.3%    151,511
+Content                                    566         1.3%    151,511
+Term                                       271         1.3%    151,511
+                                             0       100.0%    151,511
+arquivo_origem                              34         0.0%    151,511
+aba_origem                                   2         0.0%    151,511
+Você possui cartão de crédito?               3         4.6%    151,511
+O que mais você quer ver no evento           8         4.6%    151,511
+Tem computador/notebook?                     4        37.7%    151,511
+Já estudou programação?                      2        17.8%    151,511
+Você já fez/faz/pretende fazer fac           2        17.8%    151,511
+INFO: ✅ Unificação de UTM Source e Term concluída
+INFO: ✅ Unificação de Medium concluída
+INFO: ✅ Matching email+telefone concluído: 770 matches
+INFO: ✅ Dataset DevClub criado com sucesso (filtro mantendo target inicial)
+INFO: ✅ Janela de conversão aplicada: 15,857 leads removidos
+investiu_curso_online                        2         0.0%    151,511
+interesse_programacao                       10         0.0%    151,511
+
+DATASET VENDAS - 3618 registros
+======================================================================
+COLUNA                                  ÚNICOS   % AUSENTES      TOTAL
+----------------------------------------------------------------------
+utm_source                                   7        94.8%      3,618
+utm_campaign                                19        94.8%      3,618
+utm_medium                                   9        94.8%      3,618
+utm_content                                 19        95.3%      3,618
+arquivo_origem                               4         0.0%      3,618
+aba_origem                                   1         0.0%      3,618
+valor                                       36         0.0%      3,618
+produto                                     10         0.0%      3,618
+nome                                     2,298         0.0%      3,618
+email                                    2,302         0.0%      3,618
+data                                     2,521         0.0%      3,618
+telefone                                 2,305         0.0%      3,618
+
+UNIFICAÇÃO COMPLETA DE CATEGORIAS - NOVO CÓDIGO
+====================================================
+Aplicando limpeza e unificação completa...
+
+1. Unificando interesse_programacao...
+   Resultado: 5 valores únicos
+
+2. Unificando Tem computador/notebook?...
+   Resultado: 2 valores únicos
+
+3. Unificando O que mais você quer ver no evento?...
+   Resultado: 5 valores únicos
+
+4. Unificando Você possui cartão de crédito?...
+   Resultado: 2 valores únicos
+
+5. Unificando Atualmente, qual a sua faixa salarial?...
+   Resultado: 5 valores únicos
+
+6. Unificando O que você faz atualmente?...
+   Resultado: 9 valores únicos
+
+7. Unificando Qual a sua idade?...
+   Resultado: 6 valores únicos
+
+RESULTADO FINAL:
+Dataset unificado: 151511 registros, 24 colunas
+
+RELATÓRIO FINAL - UNIFICAÇÃO COMPLETA
+==================================================
+
+COLUNA: interesse_programacao
+--------------------------------------------------
+Valores únicos: 5
+Valores nulos: 53 (0.0%)
+Distribuição (Todas as categorias):
+  Todas as alternativas                    59,429 ( 39.2%)
+  Poder trabalhar de qualquer lugar do mundo 54,778 ( 36.2%)
+  A possibilidade de ganhar altos salários 15,417 ( 10.2%)
+  Trabalhar para outros países e ganhar em outra moeda 11,180 (  7.4%)
+  A ideia de nunca faltar emprego na área  10,654 (  7.0%)
+  nan                                          53 (  0.0%)
+
+COLUNA: Tem computador/notebook?
+--------------------------------------------------
+Valores únicos: 2
+Valores nulos: 57,183 (37.7%)
+Distribuição (Todas as categorias):
+  Sim                                      76,304 ( 50.4%)
+  nan                                      57,183 ( 37.7%)
+  Não                                      18,024 ( 11.9%)
+
+COLUNA: O que mais você quer ver no evento?
+--------------------------------------------------
+Valores únicos: 5
+Valores nulos: 6,910 (4.6%)
+Distribuição (Todas as categorias):
+  Fazer transição de carreira e conseguir meu primeiro emprego na área 54,946 ( 36.3%)
+  Fazer um projeto na prática              33,222 ( 21.9%)
+  Quero saber se é para mim                28,450 ( 18.8%)
+  Fazer freelancer como programador        17,848 ( 11.8%)
+  A aula com a recrutadora                 10,135 (  6.7%)
+  nan                                       6,910 (  4.6%)
+
+COLUNA: Você possui cartão de crédito?
+--------------------------------------------------
+Valores únicos: 2
+Valores nulos: 6,910 (4.6%)
+Distribuição (Todas as categorias):
+  Não                                      93,528 ( 61.7%)
+  Sim                                      51,073 ( 33.7%)
+  nan                                       6,910 (  4.6%)
+
+COLUNA: Atualmente, qual a sua faixa salarial?
+--------------------------------------------------
+Valores únicos: 5
+Valores nulos: 53 (0.0%)
+Distribuição (Todas as categorias):
+  Entre R$1.000 a R$2.000 reais ao mês     49,923 ( 33.0%)
+  Não tenho renda                          38,769 ( 25.6%)
+  Entre R$2.001 a R$3.000 reais ao mês     32,378 ( 21.4%)
+  Entre R$3.001 a R$5.000 reais ao mês     20,826 ( 13.7%)
+  Mais de R$5.001 reais ao mês              9,562 (  6.3%)
+  nan                                          53 (  0.0%)
+
+COLUNA: O que você faz atualmente?
+--------------------------------------------------
+Valores únicos: 9
+Valores nulos: 53 (0.0%)
+Distribuição (Todas as categorias):
+  Sou CLT/Funcionário Público              55,546 ( 36.7%)
+  Sou autônomo                             37,785 ( 24.9%)
+  Sou apenas estudante                     21,992 ( 14.5%)
+  Não trabalho e nem estudo                16,091 ( 10.6%)
+  Trabalho em outra área e quero fazer transição para tecnologia 14,821 (  9.8%)
+  Sou aposentado                            2,389 (  1.6%)
+  Estou no ensino médio ou acabei de sair e quero entrar na programação  1,316 (  0.9%)
+  Estudo T.I. na faculdade mas quero aprender mais por fora  1,160 (  0.8%)
+  Faço outro curso na faculdade e quero mudar para T.I    358 (  0.2%)
+  nan                                          53 (  0.0%)
+
+COLUNA: Qual a sua idade?
+--------------------------------------------------
+Valores únicos: 6
+Valores nulos: 53 (0.0%)
+Distribuição (Todas as categorias):
+  25 - 34 anos                             53,900 ( 35.6%)
+  35 - 44 anos                             37,822 ( 25.0%)
+  18 - 24 anos                             26,119 ( 17.2%)
+  45 - 54 anos                             16,038 ( 10.6%)
+  Menos de 18 anos                         11,891 (  7.8%)
+  Mais de 55 anos                           5,688 (  3.8%)
+  nan                                          53 (  0.0%)
+
+REMOÇÃO DE FEATURES DESNECESSÁRIAS
+======================================
+Dataset inicial: 151511 registros, 24 colunas
+
+DEBUG - Análise de nomes de colunas:
+--------------------------------------------------
+  15. ' '                            - PROBLEMA: APENAS_ESPACOS
+
+Features marcadas para remoção:
+  - Campaign
+  - Content
+  -  
+
+Colunas encontradas e removidas:
+  ✓ Campaign removida
+  ✓ Content removida
+  ✓   removida
+
+Dataset final: 151511 registros, 21 colunas
+Colunas removidas: 3
+
+COLUNAS RESTANTES NO DATASET:
+----------------------------------------
+ 1. Data
+ 2. Nome Completo
+ 3. E-mail
+ 4. Telefone
+ 5. O seu gênero:
+ 6. Qual a sua idade?
+ 7. O que você faz atualmente?
+ 8. Atualmente, qual a sua faixa salarial?
+ 9. Qual o seu nível em programação?
+10. Source
+11. Medium
+12. Term
+13. arquivo_origem
+14. aba_origem
+15. Você possui cartão de crédito?
+16. O que mais você quer ver no evento?
+17. Tem computador/notebook?
+18. Já estudou programação?
+19. Você já fez/faz/pretende fazer faculdade?
+20. investiu_curso_online
+21. interesse_programacao
+
+Total de colunas: 21
+
+UNIFICAÇÃO DE UTM SOURCE E TERM
+===================================
+Dataset inicial: 151511 registros
+
+1. UNIFICANDO COLUNA SOURCE:
+-----------------------------------
+Valores únicos antes: 7
+Distribuição antes:
+  facebook-ads              137,494 ( 90.7%)
+  google-ads                11,572 (  7.6%)
+  nan                        1,892 (  1.2%)
+  fb                           548 (  0.4%)
+  teste                          2 (  0.0%)
+  [field id="utm_source"]        1 (  0.0%)
+  facebook-ads-SiteLink          1 (  0.0%)
+  utm_source                     1 (  0.0%)
+
+Após unificação:
+Valores únicos depois: 3
+  facebook-ads              137,494 ( 90.7%)
+  google-ads                11,572 (  7.6%)
+  nan                        1,892 (  1.2%)
+  outros                       553 (  0.4%)
+
+2. UNIFICANDO COLUNA TERM:
+-----------------------------------
+Valores únicos antes: 271
+Distribuição antes (top 10):
+  ig                                  102,406 ( 67.6%)
+  fb                                  34,199 ( 22.6%)
+  22527413714--180108372678--750940275538  4,723 (  3.1%)
+  22527413657--179264823996--750940275529  2,876 (  1.9%)
+  nan                                  1,900 (  1.3%)
+  22521023178--174450244690--750940275532    890 (  0.6%)
+  {{site_source_name}}                   790 (  0.5%)
+  22451610660--179723795642--747241373657    657 (  0.4%)
+  22451610660--179723795642--747241373663    182 (  0.1%)
+  22243154059--174356534785--733065130069    158 (  0.1%)
+
+Após unificação:
+Valores únicos depois: 3
+  instagram                 102,406 ( 67.6%)
+  facebook                  34,199 ( 22.6%)
+  outros                    13,006 (  8.6%)
+  nan                        1,900 (  1.3%)
+
+RESULTADO FINAL:
+Dataset: 151511 registros, 21 colunas
+
+3. VERIFICAÇÃO DE CONSISTÊNCIA:
+----------------------------------------
+Tabela cruzada Source x Term:
+Term          facebook  instagram  outros   NaN       All
+Source                                                   
+facebook-ads     34198     102406     882     8  137494.0
+google-ads           0          0   11572     0   11572.0
+outros               1          0     552     0     553.0
+NaN                  0          0       0  1892       NaN
+All              34199     102406   13006     0  151511.0
+
+Inconsistências encontradas: 1 registros
+Term = instagram/facebook mas Source != facebook-ads
+  Source: outros, Term: facebook
+
+UNIFICAÇÃO DE UTM MEDIUM - EXTRAÇÃO DE PÚBLICOS
+====================================================
+Dataset inicial: 151511 registros
+Medium - valores únicos antes: 359
+
+Exemplos antes da extração:
+  ADV | Linguagem de programação                                           (36,746)
+  ADV | Lookalike 2% Cadastrados - DEV 2.0 + Interesses                    (20,769)
+  ADV | Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Comput   (18,160)
+  dgen                                                                     (11,459)
+  Lookalike 2% Cadastrados - DEV 2.0 + Interesses                          (10,669)
+  Aberto                                                                   (6,536)
+  ADV | Lookalike 2% Alunos + Interesse Linguagem de Programação           (3,772)
+  Lookalike 2% Alunos + Interesse Linguagem de Programação                 (2,889)
+  Linguagem de programação                                                 (2,522)
+  ABERTO | AD0027                                                          (2,176)
+
+Extraindo públicos...
+Medium - valores únicos após extração: 54
+
+Distribuição após extração inicial (top 15):
+ 1. Linguagem de programação                                       39,535 ( 26.1%)
+ 2. Lookalike 2% Cadastrados - DEV 2.0 + Interesses                32,294 ( 21.3%)
+ 3. Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Co   20,179 ( 13.3%)
+ 4. ABERTO                                                         15,143 ( 10.0%)
+ 5. dgen                                                           11,459 (  7.6%)
+ 6. Aberto                                                          7,801 (  5.1%)
+ 7. Lookalike 2% Alunos + Interesse Linguagem de Programação        6,816 (  4.5%)
+ 8. Lookalike 2% Alunos + Interesse Ciência da Computação           2,036 (  1.3%)
+ 9. nan                                                             1,896 (  1.3%)
+10. Lookalike 1% Cadastrados - DEV 2.0 + Interesse Linguagem de     1,715 (  1.1%)
+11. Interesse Python (linguagem de programação)                     1,579 (  1.0%)
+12. Interesse Programação                                           1,498 (  1.0%)
+13. Lookalike Envolvimento 30D + Salvou 180D + Direct 180D + Int    1,460 (  1.0%)
+14. Lookalike Envolvimento 30D + Salvou 180D + Direct 180D + Int    1,218 (  0.8%)
+15. Interesse Ciência da computação                                   958 (  0.6%)
+
+Identificando públicos similares para unificação...
+
+Grupos similares encontrados para unificação:
+
+Unificando em: 'ABERTO' (22,944 registros)
+  'Aberto' (7,801)
+
+Unificando em: 'Lookalike 2% Cadastrados - DEV 2.0   Interesses' (38 registros)
+  'Lookalike 2% Cadastrados - DEV 2.0 Interesses' (10)
+
+Unificando em: 'Lookalike 1% Cadastrados - DEV 2.0   Interesse Ciência da Computação' (49 registros)
+  'Lookalike 1% Cadastrados - DEV 2.0 Interesse Ciência da Computação' (2)
+
+Aplicando unificações manuais específicas...
+  'ABERTO' → 'Aberto' (22,944 registros)
+
+Resultado final:
+Medium - valores únicos após unificação: 51
+
+============================================================
+RELATÓRIO FINAL - MEDIUM (PÚBLICOS)
+============================================================
+Total de registros: 151,511
+Medium válidos: 149,615 (98.7%)
+Medium nulos: 1,896 (1.3%)
+Públicos únicos: 51
+
+Distribuição final dos públicos (top 20):
+--------------------------------------------------------------------------------
+#   PÚBLICO                                                 COUNT    %     
+--------------------------------------------------------------------------------
+1   Linguagem de programação                                39,535   26.1  %
+2   Lookalike 2% Cadastrados - DEV 2.0 + Interesses         32,294   21.3  %
+3   Aberto                                                  22,944   15.1  %
+4   Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ci...    20,179   13.3  %
+5   dgen                                                    11,459   7.6   %
+6   Lookalike 2% Alunos + Interesse Linguagem de Prog...    6,816    4.5   %
+7   Lookalike 2% Alunos + Interesse Ciência da Comput...    2,036    1.3   %
+8   nan                                                     1,896    1.3   %
+9   Lookalike 1% Cadastrados - DEV 2.0 + Interesse Li...    1,715    1.1   %
+10  Interesse Python (linguagem de programação)             1,579    1.0   %
+11  Interesse Programação                                   1,498    1.0   %
+12  Lookalike Envolvimento 30D + Salvou 180D + Direct...    1,460    1.0   %
+13  Lookalike Envolvimento 30D + Salvou 180D + Direct...    1,218    0.8   %
+14  Interesse Ciência da computação                         958      0.6   %
+15  Lookalike Envolvimento 60D + Salvou 365D + Direct...    886      0.6   %
+16  {{adset.name}}                                          790      0.5   %
+17  Interesse Linguagem de programação                      706      0.5   %
+18  Lookalike Envolvimento 60D + Salvou 365D + Direct...    657      0.4   %
+19  paid                                                    548      0.4   %
+20  Lookalike 3% Cadastrados - DEV 2.0 + Interesses         446      0.3   %
+... e mais 32 públicos
+
+UNIFICAÇÃO DE UTM MEDIUM BASEADA EM ACTIONS + TRATAMENTO DE PRODUÇÃO
+========================================================================
+Iniciando processo de unificação para produção...
+Dataset inicial: 151511 registros
+Medium - valores únicos antes: 51
+Categorias válidas para produção definidas: 8
+Categorias descontinuadas identificadas: 4
+Mapeamento criado para 50 categorias
+
+Distribuição antes da unificação (top 10):
+ 1. Linguagem de programação                             39,535 ( 26.1%)
+ 2. Lookalike 2% Cadastrados - DEV 2.0 + Interesses      32,294 ( 21.3%)
+ 3. Aberto                                               22,944 ( 15.1%)
+ 4. Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciê   20,179 ( 13.3%)
+ 5. dgen                                                 11,459 (  7.6%)
+ 6. Lookalike 2% Alunos + Interesse Linguagem de Progr    6,816 (  4.5%)
+ 7. Lookalike 2% Alunos + Interesse Ciência da Computa    2,036 (  1.3%)
+ 8. nan                                                   1,896 (  1.3%)
+ 9. Lookalike 1% Cadastrados - DEV 2.0 + Interesse Lin    1,715 (  1.1%)
+10. Interesse Python (linguagem de programação)           1,579 (  1.0%)
+
+Aplicando unificação robusta com tratamento de valores não vistos...
+NOVO VALOR NÃO VISTO: 'ADV' → direcionado para 'Outros'
+NOVO VALOR NÃO VISTO: 'utm_medium' → direcionado para 'Outros'
+Medium - valores únicos após unificação: 8
+
+======================================================================
+RELATÓRIO DE UNIFICAÇÃO PARA PRODUÇÃO
+======================================================================
+Categorias antes: 51
+Categorias depois: 8
+Redução: 43 categorias (84.3%)
+
+VERIFICAÇÃO DE CONFORMIDADE COM PRODUÇÃO:
+INFO: ✅ Feature engineering completo
+INFO: ✅ Encoding estratégico completo
+INFO: Calculando thresholds fixos de decis...
+INFO:    D1: [0.0338, 0.1280] (n=3262, mean=0.0999)
+INFO:    D2: [0.1280, 0.1591] (n=3260, mean=0.1447)
+INFO:    D3: [0.1591, 0.1868] (n=3261, mean=0.1725)
+INFO:    D4: [0.1868, 0.2165] (n=3261, mean=0.2014)
+INFO:    D5: [0.2165, 0.2475] (n=3261, mean=0.2317)
+INFO:    D6: [0.2475, 0.2847] (n=3261, mean=0.2653)
+INFO:    D7: [0.2847, 0.3295] (n=3261, mean=0.3066)
+INFO:    D8: [0.3295, 0.3787] (n=3262, mean=0.3533)
+INFO:    D9: [0.3787, 0.4575] (n=3260, mean=0.4134)
+INFO:    D10: [0.4577, 0.7944] (n=3261, mean=0.5585)
+INFO: ✅ Thresholds calculados para 10 decis
+✓ SUCESSO: Dataset tem exatamente as 8 categorias esperadas para produção
+
+Distribuição final das categorias:
+----------------------------------------------------------------------
+#   CATEGORIA                                     COUNT    %     
+----------------------------------------------------------------------
+1   Linguagem de programação                      40,241   26.6  %
+2   Lookalike 2% Cadastrados - DEV 2.0 + In...    32,332   21.3  %
+3   Aberto                                        22,944   15.1  %
+4   Lookalike 1% Cadastrados - DEV 2.0 + In...    20,179   13.3  %
+5   Outros                                        14,146   9.3   %
+6   dgen                                          11,459   7.6   %
+7   Lookalike 2% Alunos + Interesse Linguag...    6,816    4.5   %
+8   nan                                           1,896    1.3   %
+9   Interesse Programação                         1,498    1.0   %
+
+======================================================================
+COLUNAS ESPERADAS APÓS ONE-HOT ENCODING
+======================================================================
+Serão criadas 8 colunas Medium_*:
+   1. Medium_Aberto
+   2. Medium_Interesse_Programação
+   3. Medium_Linguagem_de_programação
+   4. Medium_Lookalike_1pct_Cadastrados___DEV_2.0_plus_Interesse_Ciência_da_Computação
+   5. Medium_Lookalike_2pct_Alunos_plus_Interesse_Linguagem_de_Programação
+   6. Medium_Lookalike_2pct_Cadastrados___DEV_2.0_plus_Interesses
+   7. Medium_Outros
+   8. Medium_dgen
+
+Nenhuma categoria descontinuada será criada no encoding ✓
+
+Processo concluído!
+Dataset final disponível em: pesquisa_medium_producao_unificado
+Este dataset está pronto para o pipeline de produção e não gerará incompatibilidades!
+
+CRIAÇÃO DE VERSÕES DO DATASET POR MISSING RATE
+==================================================
+Iniciando criação das versões...
+Dataset original: 151511 registros, 21 colunas
+Coluna removida: 'Qual o seu nível em programação?'
+Registros pós 2025-03-01: 124557
+
+Features de missing crítico encontradas: 4
+  ✓ Já estudou programação?
+  ✓ Você já fez/faz/pretende fazer faculdade?
+  ✓ Tem computador/notebook?
+  ✓ Qual o seu nível em programação?
+
+Features de missing crítico NÃO encontradas: 1
+  ✗ Você já fez/faz/pretende fazer
+
+============================================================
+VERSÃO 1: MENOR MISSING RATE (pós 2025-03-01)
+============================================================
+Registros: 124,557
+Features críticas MANTIDAS (período com menor missing)
+
+Taxa de missing por coluna (ordenado):
+COLUNA                                        VÁLIDOS  MISSING  % MISS 
+----------------------------------------------------------------------
+arquivo_origem                                124,557  0        0.0    %
+aba_origem                                    124,557  0        0.0    %
+O seu gênero:                                 124,504  53       0.0    %
+Qual a sua idade?                             124,504  53       0.0    %
+O que você faz atualmente?                    124,504  53       0.0    %
+Atualmente, qual a sua faixa salarial?        124,504  53       0.0    %
+Você possui cartão de crédito?                124,504  53       0.0    %
+O que mais você quer ver no evento?           124,504  53       0.0    %
+Já estudou programação?                       124,504  53       0.0    %
+Você já fez/faz/pretende fazer faculdade?     124,504  53       0.0    %
+investiu_curso_online                         124,504  53       0.0    %
+interesse_programacao                         124,504  53       0.0    %
+Nome Completo                                 124,436  121      0.1    %
+E-mail                                        124,427  130      0.1    %
+Telefone                                      124,421  136      0.1    %
+Source                                        123,375  1,182    0.9    %
+Medium                                        123,371  1,186    1.0    %
+Term                                          123,367  1,190    1.0    %
+Tem computador/notebook?                      91,938   32,619   26.2   %
+
+Resumo do dataset pós-cutoff:
+  Registros: 124,557
+  Colunas: 20
+  Missing rate médio: 1.6%
+
+Análise das features críticas:
+  Já estudou programação?: 0.0% missing
+  Você já fez/faz/pretende fazer faculdade?: 0.0% missing
+  Tem computador/notebook?: 26.2% missing
+
+============================================================
+DISPONIBILIZAÇÃO DO DATASET
+============================================================
+Dataset disponível em: pesquisa_v1_menor_missing
+  Período: 2025-02-11 em diante
+  Todas as features mantidas
+  Registros: 124,557
+  Colunas: 20
+
+Processo concluído!
+Duas versões do dataset criadas com sucesso.
+MATCHING: EMAIL (PRIMÁRIO) + TELEFONE (SECUNDÁRIO)
+======================================================================
+
+Processando DATASET V1...
+  Emails únicos na pesquisa: 123,887
+  Emails únicos nas vendas: 2,302
+  Telefones únicos na pesquisa (≥10 dígitos): 122,241
+  Telefones únicos nas vendas (≥10 dígitos): 2,274
+
+📧 MATCHES POR EMAIL: 651
+📞 MATCHES POR TELEFONE (novos): 119
+
+✅ TOTAL DE MATCHES: 770
+   Email: 651 (84.5%)
+   Telefone: 119 (15.5%)
+
+======================================================================
+DATASET FINAL:
+  Total de registros: 124,557
+  Total de matches: 770
+  Taxa de conversão: 0.62%
+  Ganho vs email_only: +119 matches
+======================================================================
+FILTRAGEM DEVCLUB - MANTENDO TARGET DO MATCHING INICIAL
+======================================================================
+Produtos DevClub identificados: 15
+Vendas DevClub: 3,588
+Emails únicos compradores DevClub: 2,279
+Telefones únicos compradores DevClub: 2,281
+
+Matches do matching inicial (célula 15): 770
+
+🔍 ANALISANDO 1 MATCHES DESCARTADOS:
+----------------------------------------------------------------------
+
+PRODUTO                                                      QUANTIDADE
+----------------------------------------------------------------------
+FrontEnd Club                                                         1
+
+TOTAL DE PRODUTOS DIFERENTES:                                         1
+TOTAL DE COMPRAS (pode haver duplicatas):                             1
+
+RESULTADO DA FILTRAGEM:
+  Matches iniciais: 770
+  Matches DevClub mantidos: 769
+  Matches descartados (outros produtos): 1
+  Taxa de retenção: 99.9%
+
+DETALHAMENTO DOS MATCHES DEVCLUB:
+  Matches apenas por email: 71
+  Matches apenas por telefone: 119
+  Matches por ambos (email E telefone): 579
+
+DATASET V1 DEVCLUB:
+  Total de registros: 124,557
+  Leads qualificados DevClub: 769
+  Taxa de conversão DevClub: 0.62%
+  Colunas: 21
+
+APLICANDO JANELA DE CONVERSÃO (20 DIAS)
+======================================================================
+Data máxima das vendas: 2025-11-03
+Data limite dos leads (vendas - 20 dias): 2025-10-14
+
+ANTES DO FILTRO:
+  Total de leads: 124,557
+  Target=1: 769 (0.62%)
+  Período: 2025-03-01 a 2025-11-04
+
+DEPOIS DO FILTRO:
+  Total de leads: 108,700
+  Target=1: 769 (0.71%)
+  Período: 2025-03-01 a 2025-11-04
+
+REMOVIDOS:
+  Leads removidos: 15,857 (12.7%)
+  Dias removidos: 21
+  Target=1 removidos: 0
+
+RAZÃO: Esses 15,857 leads ainda não tiveram 20 dias
+       para converter (última venda em 2025-11-03)
+
+================================================================================
+VERIFICAÇÃO DE PRODUTOS DEVCLUB - Análise Completa
+================================================================================
+
+📋 TODOS OS PRODUTOS COM 'DEVCLUB' NO NOME:
+--------------------------------------------------------------------------------
+
+Total de variações encontradas: 7
+
+Produtos e quantidade de vendas:
+   1980 vendas | DevClub FullStack Pro - OFICIAL
+    776 vendas | DevClub - FS - Vitalício
+    621 vendas | Formação DevClub FullStack Pro - OFICIAL
+     98 vendas | Formação DevClub FullStack Pro
+     68 vendas | [Vitalício] Formação DevClub FullStack Pro - OFICIAL
+     45 vendas | Formação DevClub FullStack Pro - COMERCIAL
+      5 vendas | DESATIVADO DevClub - FullStack - PRO
+
+================================================================================
+⚠️  PRODUTOS NÃO CONTABILIZADOS (existem mas não estão na lista):
+--------------------------------------------------------------------------------
+      5 vendas | DESATIVADO DevClub - FullStack - PRO
+
+  ⚠️  TOTAL DE VENDAS PERDIDAS: 5
+
+================================================================================
+🔍 PRODUTOS NA LISTA MAS SEM VENDAS:
+--------------------------------------------------------------------------------
+  ⚠️  DevClub - Full Stack 2025
+  ⚠️  Formação DevClub FullStack Pro - OFICI
+  ⚠️  DevClub - Full Stack 2025 - EV
+  ⚠️  [Vitalício] Formação DevClub FullStack
+  ⚠️  Formação DevClub FullStack Pro - COMER
+  ⚠️  DevClub Vitalício
+  ⚠️  DevClub 3.0 - 2024
+
+================================================================================
+✅ LISTA ATUALIZADA - Usando TODOS os produtos DevClub encontrados
+================================================================================
+Total de produtos na lista atualizada: 7
+
+================================================================================
+CÁLCULO DE RECALL - Conversões Observadas vs Vendas Reais
+================================================================================
+
+📊 DADOS:
+  Total de leads: 108,700
+  Conversões OBSERVADAS (matches): 769
+  Vendas REAIS (sem duplicatas): 1,380
+
+📈 TAXAS:
+  Taxa OBSERVADA: 0.7075%
+  Taxa REAL: 1.2695%
+
+🔧 MÉTRICAS:
+  Recall: 55.7%
+  Fator de correção: 1.795x
+
+💡 IMPACTO:
+  Estamos SUBESTIMANDO em 1.795x
+  Valores CAPI deveriam ser 79% maiores
+================================================================================
+FEATURE ENGINEERING COMPLETO
+=============================
+
+Processando DATASET V1 DEVCLUB...
+Registros: 108,700
+Colunas antes: 21
+Nomes das colunas antes:
+   1. Data
+   2. Nome Completo
+   3. E-mail
+   4. Telefone
+   5. O seu gênero:
+   6. Qual a sua idade?
+   7. O que você faz atualmente?
+   8. Atualmente, qual a sua faixa salarial?
+   9. Source
+  10. Medium
+  11. Term
+  12. arquivo_origem
+  13. aba_origem
+  14. Você possui cartão de crédito?
+  15. O que mais você quer ver no evento?
+  16. Tem computador/notebook?
+  17. Já estudou programação?
+  18. Você já fez/faz/pretende fazer faculdade?
+  19. investiu_curso_online
+  20. interesse_programacao
+  21. target
+
+% de telefones válidos por arquivo de origem:
+  LF Lead Score 23.xlsx: 2,025/2,028 (99.9%)
+  LEAD SCORE LF 13.xlsx: 3,899/3,902 (99.9%)
+  LEAD SCORE LF 17.xlsx: 3,893/3,898 (99.9%)
+  LEAD SCORE LF 18.xlsx: 2,060/2,062 (99.9%)
+  LF LEADS SCORE 30.xlsx: 4,612/4,622 (99.8%)
+  [LF] Pesquisa - Mai25-3.xlsx: 11,244/11,264 (99.8%)
+  [LF] Pesquisa - Mai25 33.xlsx: 11,197/11,217 (99.8%)
+  Leads Score LF 25.xlsx: 4,367/4,375 (99.8%)
+  Lead score LF 24.xlsx: 2,017/2,022 (99.8%)
+  LF10 Lead Score.xlsx: 3,556/3,562 (99.8%)
+  LF Lead Score 32.xlsx: 7,629/7,641 (99.8%)
+  LEAD SCORE LF 12.xlsx: 3,524/3,531 (99.8%)
+  LEAD SCORE LF 11.xlsx: 2,100/2,105 (99.8%)
+  LEAD SCORE LF 16.xlsx: 2,435/2,439 (99.8%)
+  [LF] Pesquisa 31.xlsx: 4,713/4,722 (99.8%)
+  LF 29 LEADS SCORE.xlsx: 4,272/4,284 (99.7%)
+  LF Lead score 28.xlsx: 4,656/4,670 (99.7%)
+  Lead Score LF 22.xlsx: 2,694/2,702 (99.7%)
+  Lead Score LF 26.xlsx: 4,671/4,686 (99.7%)
+  LEAD SCORE LF 15.xlsx: 1,685/1,690 (99.7%)
+  LEAD SCORE LF 14.xlsx: 2,349/2,356 (99.7%)
+  LF 34 Leads Score.xlsx: 252/253 (99.6%)
+  LF Lead Score 27.xlsx: 4,965/4,984 (99.6%)
+  LEAD SCORE LF 21.xlsx: 2,904/2,915 (99.6%)
+  LEAD SCORE LF 20.xlsx: 1,704/1,711 (99.6%)
+  LEAD SCORE LF 19.xlsx: 2,035/2,044 (99.6%)
+  [LF07] Leads_Pesquisa.xlsx: 3,194/3,223 (99.1%)
+  [LF08] Pesquisa.xlsx: 3,758/3,792 (99.1%)
+Colunas removidas: 7
+  - aba_origem
+  - arquivo_origem
+  - Data
+  - Nome Completo
+  - E-mail
+  - Telefone
+  - telefone_normalizado
+Colunas depois: 22
+Nomes das colunas depois:
+   1. O seu gênero:
+   2. Qual a sua idade?
+   3. O que você faz atualmente?
+   4. Atualmente, qual a sua faixa salarial?
+   5. Source
+   6. Medium
+   7. Term
+   8. Você possui cartão de crédito?
+   9. O que mais você quer ver no evento?
+  10. Tem computador/notebook?
+  11. Já estudou programação?
+  12. Você já fez/faz/pretende fazer faculdade?
+  13. investiu_curso_online
+  14. interesse_programacao
+  15. target
+  16. dia_semana
+  17. nome_comprimento
+  18. nome_tem_sobrenome
+  19. nome_valido
+  20. email_valido
+  21. telefone_valido
+  22. telefone_comprimento
+
+Estatísticas das features criadas:
+Nome válido: 108,423 (99.7%)
+Nome com sobrenome: 92,493 (85.1%)
+Email válido: 107,964 (99.3%)
+Telefone válido: 108,410 (99.7%)
+
+Distribuição da feature temporal:
+  0 (Segunda): 15,230 (14.0%)
+  1 (Terça): 18,997 (17.5%)
+  2 (Quarta): 16,534 (15.2%)
+  3 (Quinta): 14,487 (13.3%)
+  4 (Sexta): 13,911 (12.8%)
+  5 (Sábado): 14,066 (12.9%)
+  6 (Domingo): 15,475 (14.2%)
+
+============================================================
+DATASET FINAL PARA MODELAGEM
+============================================================
+
+DATASET V1 DEVCLUB:
+  Registros: 108,700
+  Colunas: 22
+  Target positivo: 769 (0.71%)
+
+Dataset pronto para encoding e modelagem!
+ENCODING ESTRATÉGICO
+====================
+
+Processando DATASET V1 DEVCLUB...
+Colunas antes do encoding: 22
+
+Colunas ANTES do encoding:
+   1. O seu gênero:
+   2. Qual a sua idade?
+   3. O que você faz atualmente?
+   4. Atualmente, qual a sua faixa salarial?
+   5. Source
+   6. Medium
+   7. Term
+   8. Você possui cartão de crédito?
+   9. O que mais você quer ver no evento?
+  10. Tem computador/notebook?
+  11. Já estudou programação?
+  12. Você já fez/faz/pretende fazer faculdade?
+  13. investiu_curso_online
+  14. interesse_programacao
+  15. target
+  16. dia_semana
+  17. nome_comprimento
+  18. nome_tem_sobrenome
+  19. nome_valido
+  20. email_valido
+  21. telefone_valido
+  22. telefone_comprimento
+
+Aplicando ORDINAL ENCODING:
+  Qual a sua idade?: 6 categorias → 0-5
+  Atualmente, qual a sua faixa salarial?: 5 categorias → 0-4
+  dia_semana: mantido como numérico (0-6)
+
+Aplicando ONE-HOT ENCODING para 17 variáveis:
+
+Colunas DEPOIS do encoding:
+   1. Qual a sua idade?
+   2. Atualmente, qual a sua faixa salarial?
+   3. target
+   4. dia_semana
+   5. nome_comprimento
+   6. O seu gênero:_Feminino
+   7. O seu gênero:_Masculino
+   8. O que você faz atualmente?_Não trabalho e nem estudo
+   9. O que você faz atualmente?_Sou CLT/Funcionário Público
+  10. O que você faz atualmente?_Sou apenas estudante
+  11. O que você faz atualmente?_Sou aposentado
+  12. O que você faz atualmente?_Sou autônomo
+  13. Source_facebook-ads
+  14. Source_google-ads
+  15. Source_outros
+  16. Medium_Aberto
+  17. Medium_Interesse Programação
+  18. Medium_Linguagem de programação
+  19. Medium_Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação
+  20. Medium_Lookalike 2% Alunos + Interesse Linguagem de Programação
+  21. Medium_Lookalike 2% Cadastrados - DEV 2.0 + Interesses
+  22. Medium_Outros
+  23. Medium_dgen
+  24. Term_facebook
+  25. Term_instagram
+  26. Term_outros
+  27. Você possui cartão de crédito?_Não
+  28. Você possui cartão de crédito?_Sim
+  29. O que mais você quer ver no evento?_A aula com a recrutadora
+  30. O que mais você quer ver no evento?_Fazer freelancer como programador
+  31. O que mais você quer ver no evento?_Fazer transição de carreira e conseguir meu primeiro emprego na área
+  32. O que mais você quer ver no evento?_Fazer um projeto na prática
+  33. O que mais você quer ver no evento?_Quero saber se é para mim
+  34. Tem computador/notebook?_Não
+  35. Tem computador/notebook?_Sim
+  36. Já estudou programação?_Não
+  37. Já estudou programação?_Sim
+  38. Você já fez/faz/pretende fazer faculdade?_Não
+  39. Você já fez/faz/pretende fazer faculdade?_Sim
+  40. investiu_curso_online_Não
+  41. investiu_curso_online_Sim
+  42. interesse_programacao_A ideia de nunca faltar emprego na área
+  43. interesse_programacao_A possibilidade de ganhar altos salários
+  44. interesse_programacao_Poder trabalhar de qualquer lugar do mundo
+  45. interesse_programacao_Todas as alternativas
+  46. interesse_programacao_Trabalhar para outros países e ganhar em outra moeda
+  47. nome_tem_sobrenome_False
+  48. nome_tem_sobrenome_True
+  49. nome_valido_False
+  50. nome_valido_True
+  51. email_valido_False
+  52. email_valido_True
+  53. telefone_valido_False
+  54. telefone_valido_True
+  55. telefone_comprimento_4
+  56. telefone_comprimento_9
+  57. telefone_comprimento_10
+  58. telefone_comprimento_11
+  O seu gênero:: 2 categorias → 2 colunas binárias
+  O que você faz atualmente?: 5 categorias → 5 colunas binárias
+  Source: 3 categorias → 3 colunas binárias
+  Medium: 8 categorias → 8 colunas binárias
+  Term: 3 categorias → 3 colunas binárias
+  Você possui cartão de crédito?: 2 categorias → 2 colunas binárias
+  O que mais você quer ver no evento?: 5 categorias → 5 colunas binárias
+  Tem computador/notebook?: 2 categorias → 2 colunas binárias
+  Já estudou programação?: 2 categorias → 2 colunas binárias
+  Você já fez/faz/pretende fazer faculdade?: 2 categorias → 2 colunas binárias
+  investiu_curso_online: 2 categorias → 2 colunas binárias
+  interesse_programacao: 5 categorias → 5 colunas binárias
+  nome_tem_sobrenome: 2 categorias → 2 colunas binárias
+  nome_valido: 2 categorias → 2 colunas binárias
+  email_valido: 2 categorias → 2 colunas binárias
+  telefone_valido: 2 categorias → 2 colunas binárias
+  telefone_comprimento: 5 categorias → 5 colunas binárias
+
+Resultado:
+  Colunas one-hot originais: 17
+  Colunas binárias criadas: 36
+  Total de colunas final: 58
+
+Tipos de dados no dataset final:
+  int64: 55 colunas
+  float64: 2 colunas
+  int32: 1 colunas
+
+============================================================
+DATASET FINAL ENCODADO
+============================================================
+
+DATASET V1 DEVCLUB:
+  Registros: 108,700
+  Colunas: 58
+  Target positivo: 769 (0.71%)
+
+VERIFICAÇÃO DA FEATURE telefone_comprimento_8:
+  DATASET V1 DEVCLUB: AUSENTE
+
+Dataset encodado está pronto para modelagem!
+REGISTRO DE FEATURES E MODELO DEVCLUB PARA PRODUÇÃO
+====================================================
+
+1. PREPARANDO DADOS E TREINANDO MODELO FINAL
+--------------------------------------------------
+Dataset: 108,700 registros
+Colunas totais: 58
+Colunas excluídas do treinamento:
+  - target
+Features para treinamento: 57
+Target: 769 positivos (0.71%)
+
+Split temporal por LEADS (70% dos leads):
+  Período total: 2025-03-01 a 2025-11-04 (248 dias)
+  Treino: 76,090 leads (70.0%)
+    Período: 2025-03-01 a 2025-09-24 (207 dias)
+    Taxa conversão: 0.69%
+  Teste: 32,610 leads (30.0%)
+    Período: 2025-09-24 a 2025-11-04 (41 dias)
+    Taxa conversão: 0.74%
+
+🔍 Análise de data leakage:
+  Emails em ambos train/test: 838 (8.19% do test)
+Modelo treinado - AUC: 0.747
+Feature importance calculada para 57 features
+
+2. CRIANDO FEATURE REGISTRY
+--------------------------------------------------
+Feature registry criado:
+  - Features UTM: 14
+  - Features Pesquisa: 21
+  - Features Derivadas: 14
+  - Features Outras: 8
+
+3. CRIANDO METADADOS DO MODELO
+--------------------------------------------------
+
+================================================================================
+CALCULANDO THRESHOLDS FIXOS DE DECIS
+================================================================================
+
+📊 Validando thresholds: classificando test set...
+
+================================================================================
+COMPARAÇÃO: pd.qcut vs Thresholds Fixos
+================================================================================
+Decil    pd.qcut      Threshold    Diferença    % Diff    
+--------------------------------------------------------------------------------
+D1       3262         3262                   +0      +0.0%
+D2       3260         3260                   +0      +0.0%
+D3       3261         3261                   +0      +0.0%
+D4       3261         3261                   +0      +0.0%
+D5       3261         3261                   +0      +0.0%
+D6       3261         3261                   +0      +0.0%
+D7       3261         3261                   +0      +0.0%
+D8       3262         3262                   +0      +0.0%
+D9       3260         3260                   +0      +0.0%
+D10      3261         3261                   +0      +0.0%
+================================================================================
+
+✅ Validação concluída:
+   Diferença média: 0.0 leads por decil
+   Diferença máxima: 0 leads
+   Diferença máxima %: 0.0%
+================================================================================
+Metadados do modelo criados:
+  - AUC: 0.747
+  - Top 3 decis: 63.6%
+  - Lift máximo: 3.0x
+  - Monotonia: 77.8%
+✓ Modelo registrado no MLflow
+
+4. ARQUIVOS LOCAIS NÃO SALVOS (--save-files=False)
+--------------------------------------------------
+Use --save-files para salvar arquivos locais
+✓ Metadados registrados no MLflow
+
+==================================================
+MODELO DEVCLUB REGISTRADO COM SUCESSO
+==================================================
+Modelo: v1_devclub_rf_temporal_single
+Algoritmo: RandomForestClassifier
+Split: temporal
+Matching: email_telefone
+AUC: 0.747
+Monotonia: 77.8%
+Features: 57
+MLflow Run ID: 83e442e850c04ec581a9ac8bd9ca729e
+Arquivos locais: não salvos
