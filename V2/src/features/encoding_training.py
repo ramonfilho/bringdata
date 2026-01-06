@@ -11,7 +11,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame) -> pd.DataFrame:
+def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: str = 'binary_top3') -> pd.DataFrame:
     """
     Aplica encoding seguindo a estratégia recomendada.
 
@@ -19,12 +19,19 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame) -> pd.DataFrame:
 
     Args:
         df_devclub_fe: DataFrame V1 DevClub com feature engineering
+        medium_strategy: Estratégia para Medium
+            - 'binary_top3': Features binárias para 3 categorias mais estáveis (Linguagem programação, Aberto, Lookalike 2%) - PADRÃO RECOMENDADO
+            - 'full': One-hot completo (mantém temporal leakage)
+            - 'binary_aberto': Apenas feature binária Medium_Aberto
+            - 'binary_aberto_dgen': Features binárias Medium_Aberto + Medium_dgen
+            - 'remove': Medium já foi removido na célula 8
 
     Returns:
         DataFrame com encoding aplicado
     """
     print("ENCODING ESTRATÉGICO")
     print("=" * 20)
+    print(f"Estratégia Medium: {medium_strategy}")
 
     df = df_devclub_fe.copy()
 
@@ -58,6 +65,44 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame) -> pd.DataFrame:
                 mapeamento = {categoria: i for i, categoria in enumerate(ordem)}
                 df[var] = df[var].map(mapeamento)
                 print(f"  {var}: {len(ordem)} categorias → 0-{len(ordem)-1}")
+
+    # 1.5. PROCESSAR MEDIUM CONFORME ESTRATÉGIA
+    if 'Medium' in df.columns and medium_strategy != 'full':
+        print(f"\nProcessando Medium com estratégia: {medium_strategy}")
+
+        if medium_strategy == 'binary_aberto':
+            # Criar apenas Medium_Aberto (1 se Aberto, 0 caso contrário)
+            df['Medium_Aberto'] = (df['Medium'] == 'Aberto').astype(int)
+            df = df.drop(columns=['Medium'])
+            print(f"  ✓ Criada feature binária: Medium_Aberto")
+            print(f"    Aberto: {df['Medium_Aberto'].sum():,} registros ({df['Medium_Aberto'].mean()*100:.1f}%)")
+
+        elif medium_strategy == 'binary_aberto_dgen':
+            # Criar Medium_Aberto e Medium_dgen
+            df['Medium_Aberto'] = (df['Medium'] == 'Aberto').astype(int)
+            df['Medium_dgen'] = (df['Medium'] == 'dgen').astype(int)
+            df = df.drop(columns=['Medium'])
+            print(f"  ✓ Criadas features binárias: Medium_Aberto, Medium_dgen")
+            print(f"    Aberto: {df['Medium_Aberto'].sum():,} registros ({df['Medium_Aberto'].mean()*100:.1f}%)")
+            print(f"    dgen: {df['Medium_dgen'].sum():,} registros ({df['Medium_dgen'].mean()*100:.1f}%)")
+
+        elif medium_strategy == 'binary_top3':
+            # Criar features para as 3 categorias mais estáveis temporalmente
+            df['Medium_Linguagem_programacao'] = (df['Medium'] == 'Linguagem de programação').astype(int)
+            df['Medium_Aberto'] = (df['Medium'] == 'Aberto').astype(int)
+            df['Medium_Lookalike_2pct_Cadastrados'] = (df['Medium'] == 'Lookalike 2% Cadastrados - DEV 2.0 + Interesses').astype(int)
+            df = df.drop(columns=['Medium'])
+            print(f"  ✓ Criadas features binárias (top 3 mais estáveis):")
+            print(f"    Linguagem de programação: {df['Medium_Linguagem_programacao'].sum():,} registros ({df['Medium_Linguagem_programacao'].mean()*100:.1f}%)")
+            print(f"    Aberto: {df['Medium_Aberto'].sum():,} registros ({df['Medium_Aberto'].mean()*100:.1f}%)")
+            print(f"    Lookalike 2% Cadastrados: {df['Medium_Lookalike_2pct_Cadastrados'].sum():,} registros ({df['Medium_Lookalike_2pct_Cadastrados'].mean()*100:.1f}%)")
+
+        elif medium_strategy == 'remove':
+            # Medium já foi removido na célula 8, nada a fazer
+            if 'Medium' in df.columns:
+                print(f"  ⚠️  Medium ainda presente (deveria ter sido removido na célula 8)")
+            else:
+                print(f"  ✓ Medium removido (célula 8)")
 
     # 2. ONE-HOT ENCODING para variáveis categóricas nominais
     variaveis_one_hot = []

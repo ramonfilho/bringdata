@@ -86,12 +86,13 @@ def setup_output_logging():
     return log_path, tee
 
 
-def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal', use_guru_only=None, set_active=False, temporal_features=False):
+def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal', use_guru_only=None, set_active=False, temporal_features=False, medium_strategy='binary_top3'):
     """Executa pipeline de treino completo.
 
     Args:
         initial_matching: Método de matching inicial na célula 15
                          ('email_only', 'email_telefone', 'variantes', 'robusto' ou 'validation')
+        medium_strategy: Estratégia para Medium ('full', 'binary_aberto', 'binary_aberto_dgen', 'remove')
         split_method: Método de split do train/test
                      - 'temporal': 70% dos DIAS para treino (split clássico por período)
                      - 'temporal_leads': 70% dos LEADS para treino (ordenados por data, test set mais recente)
@@ -335,7 +336,9 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     print("\n🗑️  CÉLULA 8: REMOÇÃO DE FEATURES DESNECESSÁRIAS")
     print("=" * 60)
 
-    df_features_removidas = remover_features_desnecessarias(df_pesquisa_final_unificado)
+    # Determinar se deve remover Medium (opção 3)
+    remover_medium = (medium_strategy == 'remove')
+    df_features_removidas = remover_features_desnecessarias(df_pesquisa_final_unificado, remover_medium=remover_medium)
 
     # Listar colunas restantes
     listar_colunas_restantes(df_features_removidas)
@@ -353,28 +356,162 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     verificar_consistencia_utm(df_utm_unificado)
 
     # === CÉLULA 11: Unificação de UTM Medium - Extração de Públicos ===
-    print("\n🎯 CÉLULA 11: UNIFICAÇÃO DE UTM MEDIUM - EXTRAÇÃO DE PÚBLICOS")
-    print("=" * 60)
+    # (Pulada se medium_strategy='remove')
+    if 'Medium' in df_utm_unificado.columns:
+        print("\n🎯 CÉLULA 11: UNIFICAÇÃO DE UTM MEDIUM - EXTRAÇÃO DE PÚBLICOS")
+        print("=" * 60)
 
-    df_medium_unificado = extrair_publico_medium(df_utm_unificado)
+        df_medium_unificado = extrair_publico_medium(df_utm_unificado)
 
-    # Gerar relatório final
-    relatorio_final_medium(df_medium_unificado)
+        # Gerar relatório final
+        relatorio_final_medium(df_medium_unificado)
+
+        # === ANÁLISE TEMPORAL TEMPORÁRIA - MEDIUM ===
+        print("\n" + "="*120)
+        print("📊 ANÁLISE TEMPORAL TEMPORÁRIA - MEDIUM (ANTES DO MAPEAMENTO PARA 8 CATEGORIAS)")
+        print("="*120)
+
+        # Top 20 valores de Medium (após extração, antes do mapeamento)
+        top_20_medium = df_medium_unificado['Medium'].value_counts(dropna=False).head(20)
+
+        print(f"\nAnalisando top 20 categorias Medium...")
+        print(f"Total de categorias únicas: {df_medium_unificado['Medium'].nunique()}")
+
+        # Verificar se temos coluna de data
+        if 'Data' in df_medium_unificado.columns:
+            from pathlib import Path
+
+            # Converter data se necessário
+            if df_medium_unificado['Data'].dtype == 'object':
+                df_medium_unificado['Data'] = pd.to_datetime(df_medium_unificado['Data'], errors='coerce')
+
+            # Ler dados do Meta Ads para verificar produção
+            print("\n🔍 Verificando categorias em produção (Meta Ads)...")
+            meta_dir = Path("files/validation/meta_reports")
+            subdirs = sorted([d for d in meta_dir.iterdir() if d.is_dir()],
+                             key=lambda x: x.stat().st_mtime, reverse=True)
+
+            meta_mediums_gestor = set()
+            meta_mediums_rodolfo = set()
+            relatorio_usado = "N/A"
+
+            if subdirs:
+                relatorio_usado = subdirs[0].name
+
+                # Função para extrair público (mesma da célula 11)
+                def extrair_publico_meta(medium_value):
+                    if pd.isna(medium_value):
+                        return medium_value
+                    medium_str = str(medium_value).strip()
+                    if '|' in medium_str:
+                        partes = medium_str.split('|')
+                        if len(partes) >= 2:
+                            if partes[0].strip().upper() in ['ADV', 'ADV ']:
+                                return partes[1].strip()
+                            elif partes[0].strip().upper() in ['ABERTO']:
+                                return 'Aberto'
+                            else:
+                                return partes[0].strip()
+                    return medium_str
+
+                # Ler Gestor de IA
+                adset_files_gestor = list(subdirs[0].glob("**/*Gestor-de-IA*Conjuntos*.csv"))
+                if adset_files_gestor:
+                    df_meta = pd.read_csv(adset_files_gestor[0])
+                    col = "Nome do conjunto de anúncios"
+                    if col in df_meta.columns:
+                        df_meta['Medium_extracted'] = df_meta[col].apply(extrair_publico_meta)
+                        meta_mediums_gestor = set(df_meta['Medium_extracted'].dropna().unique())
+
+                # Ler Rodolfo Mori
+                adset_files_rodolfo = list(subdirs[0].glob("**/*Rodolfo-Mori*Conjuntos*.csv"))
+                if adset_files_rodolfo:
+                    df_meta = pd.read_csv(adset_files_rodolfo[0])
+                    col = "Nome do conjunto de anúncios"
+                    if col in df_meta.columns:
+                        df_meta['Medium_extracted'] = df_meta[col].apply(extrair_publico_meta)
+                        meta_mediums_rodolfo = set(df_meta['Medium_extracted'].dropna().unique())
+
+            print(f"Relatório Meta usado: {relatorio_usado}")
+            print(f"  Gestor de IA: {len(meta_mediums_gestor)} públicos")
+            print(f"  Rodolfo Mori: {len(meta_mediums_rodolfo)} públicos")
+
+            # Criar tabela de análise
+            print(f"\n{'#':<3} {'MEDIUM':<42} {'COUNT':<8} {'%':<6} {'INÍCIO':<12} {'FIM':<12} {'GESTOR':<8} {'RODOLFO':<9}")
+            print("-"*120)
+
+            for i, (medium_val, count) in enumerate(top_20_medium.items(), 1):
+                # Calcular percentual
+                pct = count / len(df_medium_unificado) * 100
+
+                # Filtrar dados desta categoria
+                if pd.notna(medium_val):
+                    df_cat = df_medium_unificado[df_medium_unificado['Medium'] == medium_val]
+                else:
+                    df_cat = df_medium_unificado[df_medium_unificado['Medium'].isna()]
+
+                # Extrair datas
+                dates = df_cat['Data'].dropna()
+                if len(dates) > 0:
+                    data_inicio = dates.min().strftime('%Y-%m-%d')
+                    data_fim = dates.max().strftime('%Y-%m-%d')
+                else:
+                    data_inicio = 'N/A'
+                    data_fim = 'N/A'
+
+                # Verificar se está em produção
+                em_gestor = 'Sim' if medium_val in meta_mediums_gestor else 'Não'
+                em_rodolfo = 'Sim' if medium_val in meta_mediums_rodolfo else 'Não'
+
+                # Preparar string do medium
+                medium_str = str(medium_val) if pd.notna(medium_val) else 'nan'
+                medium_display = medium_str[:39] + '...' if len(medium_str) > 39 else medium_str
+
+                print(f"{i:<3} {medium_display:<42} {count:<8,} {pct:<6.1f} {data_inicio:<12} {data_fim:<12} {em_gestor:<8} {em_rodolfo:<9}")
+
+            # Resumo
+            print("\n" + "="*120)
+            print("RESUMO DA ANÁLISE")
+            print("="*120)
+
+            em_prod_gestor = sum(1 for val, _ in top_20_medium.items() if val in meta_mediums_gestor)
+            em_prod_rodolfo = sum(1 for val, _ in top_20_medium.items() if val in meta_mediums_rodolfo)
+            em_prod_ambos = sum(1 for val, _ in top_20_medium.items()
+                                if val in meta_mediums_gestor and val in meta_mediums_rodolfo)
+            nao_em_prod = sum(1 for val, _ in top_20_medium.items()
+                              if val not in meta_mediums_gestor and val not in meta_mediums_rodolfo)
+
+            print(f"Top 20 categorias analisadas (após extração, ANTES do mapeamento)")
+            print(f"  Em produção (Gestor de IA): {em_prod_gestor}/20")
+            print(f"  Em produção (Rodolfo Mori): {em_prod_rodolfo}/20")
+            print(f"  Em produção (ambas contas): {em_prod_ambos}/20")
+            print(f"  NÃO em produção: {nao_em_prod}/20")
+            print(f"\nRelatório Meta utilizado: {relatorio_usado}")
+            print("="*120 + "\n")
+        else:
+            print("⚠️  Coluna 'Data' não encontrada - análise temporal não disponível")
+    else:
+        print("\n⏭️  CÉLULA 11: Pulando (Medium foi removido na célula 8 - strategy='remove')")
+        df_medium_unificado = df_utm_unificado.copy()
 
     # === CÉLULA 11.1: Unificação de Medium para Produção ===
-    print("\n🔧 CÉLULA 11.1: UNIFICAÇÃO DE UTM MEDIUM PARA PRODUÇÃO")
-    print("=" * 60)
+    if 'Medium' in df_medium_unificado.columns:
+        print("\n🔧 CÉLULA 11.1: UNIFICAÇÃO DE UTM MEDIUM PARA PRODUÇÃO")
+        print("=" * 60)
 
-    print("Iniciando processo de unificação para produção...")
-    df_original = df_medium_unificado.copy()
-    df_medium_producao = unificar_medium_para_producao(df_medium_unificado)
+        print("Iniciando processo de unificação para produção...")
+        df_original = df_medium_unificado.copy()
+        df_medium_producao = unificar_medium_para_producao(df_medium_unificado)
 
-    # Gerar relatório
-    relatorio_unificacao_producao(df_original, df_medium_producao)
+        # Gerar relatório
+        relatorio_unificacao_producao(df_original, df_medium_producao)
 
-    print(f"\nProcesso concluído!")
-    print(f"Dataset final disponível em: pesquisa_medium_producao_unificado")
-    print(f"Este dataset está pronto para o pipeline de produção e não gerará incompatibilidades!")
+        print(f"\nProcesso concluído!")
+        print(f"Dataset final disponível em: pesquisa_medium_producao_unificado")
+        print(f"Este dataset está pronto para o pipeline de produção e não gerará incompatibilidades!")
+    else:
+        print("\n⏭️  CÉLULA 11.1: Pulando (Medium foi removido na célula 8 - strategy='remove')")
+        df_medium_producao = df_medium_unificado.copy()
 
     # === CÉLULA 12: Pulada (exploratória) ===
     print("\n⏭️  CÉLULA 12: Pulando célula exploratória/informativa do notebook original de treino")
@@ -616,7 +753,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     # === CÉLULA 20: Encoding Estratégico ===
     print(f"\n🔢 CÉLULA 20: ENCODING ESTRATÉGICO")
     print("=" * 60)
-    dataset_v1_devclub_encoded = aplicar_encoding_estrategico(dataset_v1_devclub_fe)
+    dataset_v1_devclub_encoded = aplicar_encoding_estrategico(dataset_v1_devclub_fe, medium_strategy=medium_strategy)
 
     # === HYPERPARAMETER TUNING (opcional) ===
     melhores_params = None
@@ -699,6 +836,13 @@ if __name__ == "__main__":
         action='store_true',
         help='Adicionar features temporais de tráfego (densidade, tendência, rank por Medium) - padrão: False'
     )
+    parser.add_argument(
+        '--medium-strategy',
+        type=str,
+        choices=['full', 'binary_aberto', 'binary_aberto_dgen', 'binary_top3', 'remove'],
+        default='binary_top3',
+        help='Estratégia para Medium: full (one-hot completo), binary_aberto (apenas Medium_Aberto), binary_aberto_dgen (Medium_Aberto + Medium_dgen), binary_top3 (top 3 categorias mais estáveis - RECOMENDADO), remove (remover na célula 8) - padrão: binary_top3'
+    )
 
     args = parser.parse_args()
 
@@ -715,5 +859,6 @@ if __name__ == "__main__":
         split_method=args.split_method,
         use_guru_only=use_guru_only,
         set_active=args.set_active,
-        temporal_features=args.temporal_features
+        temporal_features=args.temporal_features,
+        medium_strategy=args.medium_strategy
     )

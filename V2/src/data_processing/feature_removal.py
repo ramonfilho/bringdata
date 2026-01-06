@@ -10,7 +10,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def remover_features_desnecessarias(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
+def remover_features_desnecessarias(df_pesquisa: pd.DataFrame, remover_medium: bool = False) -> pd.DataFrame:
     """
     Remove features que não serão utilizadas no modelo.
 
@@ -18,6 +18,7 @@ def remover_features_desnecessarias(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
     Args:
         df_pesquisa: DataFrame de pesquisa
+        remover_medium: Se True, remove Medium junto com Campaign e Content
 
     Returns:
         DataFrame sem features desnecessárias
@@ -25,6 +26,8 @@ def remover_features_desnecessarias(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     df = df_pesquisa.copy()
 
     print(f"Dataset inicial: {len(df)} registros, {len(df.columns)} colunas")
+    if remover_medium:
+        print(f"⚠️  Modo: Remover Medium (junto com Campaign e Content)")
 
     # DEBUG: Identificar colunas vazias ou com nomes problemáticos
     print(f"\nDEBUG - Análise de nomes de colunas:")
@@ -66,9 +69,13 @@ def remover_features_desnecessarias(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
     # Features a serem removidas (incluindo as encontradas no debug)
     features_remover = [
-        'Campaign',  # Lançamento específico
+        'Campaign',  # Lançamento específico (data leakage temporal)
         'Content',   # Anúncios individuais
     ]
+
+    # Adicionar Medium se solicitado (opção 3: remover completamente)
+    if remover_medium:
+        features_remover.append('Medium')  # Públicos-alvo (data leakage temporal)
 
     # Adicionar colunas problemáticas encontradas
     features_remover.extend(colunas_problematicas)

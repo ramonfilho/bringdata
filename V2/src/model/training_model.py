@@ -153,6 +153,61 @@ def registrar_features_e_modelo_devclub(
             mlflow.log_param("split_method", "temporal")
             mlflow.log_param("cut_date", data_corte.strftime('%Y-%m-%d'))
 
+            # === ANÁLISE TEMPORAL TEMPORÁRIA - MEDIUM TRAIN vs TEST ===
+            if 'Medium' in dataset_original.columns:
+                print(f"\n" + "="*100)
+                print("📋 ANÁLISE TEMPORAL TEMPORÁRIA: MEDIUM - DISTRIBUIÇÃO TRAIN vs TEST")
+                print("="*100)
+
+                train_medium = dataset_original[mask_treino]['Medium']
+                test_medium = dataset_original[mask_teste]['Medium']
+
+                # Top 20 categorias no dataset completo
+                top_medium = dataset_original['Medium'].value_counts().head(20)
+
+                print(f"\n{'MEDIUM':<68} {'TRAIN':>12} {'TEST':>12}")
+                print("-"*92)
+
+                for medium, total in top_medium.items():
+                    train_count = (train_medium == medium).sum()
+                    test_count = (test_medium == medium).sum()
+
+                    train_pct = (train_count / len(train_medium) * 100) if len(train_medium) > 0 else 0
+                    test_pct = (test_count / len(test_medium) * 100) if len(test_medium) > 0 else 0
+
+                    medium_name = str(medium)[:66] if len(str(medium)) > 66 else str(medium)
+                    print(f"{medium_name:<68} {train_count:>6,} ({train_pct:>4.1f}%) {test_count:>6,} ({test_pct:>4.1f}%)")
+
+                # Categorias que só aparecem no test
+                train_medium_set = set(train_medium.dropna().unique())
+                test_medium_set = set(test_medium.dropna().unique())
+                only_test = test_medium_set - train_medium_set
+
+                if only_test:
+                    print(f"\n⚠️  CATEGORIAS NOVAS NO TEST (modelo nunca viu): {len(only_test)}")
+                    for i, medium in enumerate(sorted(only_test)[:10], 1):
+                        count = (test_medium == medium).sum()
+                        pct = (count / len(test_medium) * 100)
+                        print(f"   {i:2d}. {str(medium)[:60]:<60} {count:>5,} ({pct:>4.1f}%)")
+                    if len(only_test) > 10:
+                        print(f"   ... e mais {len(only_test) - 10} categorias")
+
+                # Categorias que desapareceram (só no train)
+                only_train = train_medium_set - test_medium_set
+                if only_train:
+                    print(f"\n⚠️  CATEGORIAS DESCONTINUADAS (só no train, não aparecem no test): {len(only_train)}")
+                    # Ordenar por volume no train
+                    only_train_counts = [(m, (train_medium == m).sum()) for m in only_train]
+                    only_train_counts.sort(key=lambda x: x[1], reverse=True)
+
+                    for i, (medium, count) in enumerate(only_train_counts[:10], 1):
+                        pct = (count / len(train_medium) * 100)
+                        print(f"   {i:2d}. {str(medium)[:60]:<60} {count:>5,} ({pct:>4.1f}%)")
+                    if len(only_train) > 10:
+                        print(f"   ... e mais {len(only_train) - 10} categorias")
+
+                print("="*100 + "\n")
+
         elif split_method == 'temporal_leads':
             # Split temporal por LEADS: 70% dos LEADS (ordenados por data) para treino
             # Test set contém últimos 30% dos leads (mais representativo de produção)
@@ -209,6 +264,61 @@ def registrar_features_e_modelo_devclub(
             mlflow.log_param("train_days", dias_treino)
             mlflow.log_param("test_days", dias_teste)
             mlflow.log_metric("leakage_email_pct", leak_pct)
+
+            # === ANÁLISE TEMPORAL TEMPORÁRIA - MEDIUM TRAIN vs TEST ===
+            if 'Medium' in dataset_original.columns:
+                print(f"\n" + "="*100)
+                print("📋 ANÁLISE TEMPORAL TEMPORÁRIA: MEDIUM - DISTRIBUIÇÃO TRAIN vs TEST")
+                print("="*100)
+
+                train_medium = dataset_original.iloc[train_indices]['Medium']
+                test_medium = dataset_original.iloc[test_indices]['Medium']
+
+                # Top 20 categorias no dataset completo
+                top_medium = dataset_original['Medium'].value_counts().head(20)
+
+                print(f"\n{'MEDIUM':<68} {'TRAIN':>12} {'TEST':>12}")
+                print("-"*92)
+
+                for medium, total in top_medium.items():
+                    train_count = (train_medium == medium).sum()
+                    test_count = (test_medium == medium).sum()
+
+                    train_pct = (train_count / len(train_medium) * 100) if len(train_medium) > 0 else 0
+                    test_pct = (test_count / len(test_medium) * 100) if len(test_medium) > 0 else 0
+
+                    medium_name = str(medium)[:66] if len(str(medium)) > 66 else str(medium)
+                    print(f"{medium_name:<68} {train_count:>6,} ({train_pct:>4.1f}%) {test_count:>6,} ({test_pct:>4.1f}%)")
+
+                # Categorias que só aparecem no test
+                train_medium_set = set(train_medium.dropna().unique())
+                test_medium_set = set(test_medium.dropna().unique())
+                only_test = test_medium_set - train_medium_set
+
+                if only_test:
+                    print(f"\n⚠️  CATEGORIAS NOVAS NO TEST (modelo nunca viu): {len(only_test)}")
+                    for i, medium in enumerate(sorted(only_test)[:10], 1):
+                        count = (test_medium == medium).sum()
+                        pct = (count / len(test_medium) * 100)
+                        print(f"   {i:2d}. {str(medium)[:60]:<60} {count:>5,} ({pct:>4.1f}%)")
+                    if len(only_test) > 10:
+                        print(f"   ... e mais {len(only_test) - 10} categorias")
+
+                # Categorias que desapareceram (só no train)
+                only_train = train_medium_set - test_medium_set
+                if only_train:
+                    print(f"\n⚠️  CATEGORIAS DESCONTINUADAS (só no train, não aparecem no test): {len(only_train)}")
+                    # Ordenar por volume no train
+                    only_train_counts = [(m, (train_medium == m).sum()) for m in only_train]
+                    only_train_counts.sort(key=lambda x: x[1], reverse=True)
+
+                    for i, (medium, count) in enumerate(only_train_counts[:10], 1):
+                        pct = (count / len(train_medium) * 100)
+                        print(f"   {i:2d}. {str(medium)[:60]:<60} {count:>5,} ({pct:>4.1f}%)")
+                    if len(only_train) > 10:
+                        print(f"   ... e mais {len(only_train) - 10} categorias")
+
+                print("="*100 + "\n")
 
         else:  # stratified
             # Split stratified POR PESSOA usando componentes conectados: garantir zero leakage

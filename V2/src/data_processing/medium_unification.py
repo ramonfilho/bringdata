@@ -146,10 +146,10 @@ def unify_medium_by_actions(df: pd.DataFrame) -> pd.DataFrame:
     if 'Medium' not in df_unified.columns:
         return df_unified
 
-    # DEFINIR CATEGORIAS VÁLIDAS PARA PRODUÇÃO (baseado na investigação)
+    # DEFINIR CATEGORIAS VÁLIDAS PARA PRODUÇÃO (baseado na análise temporal)
+    # Removido 'Interesse Programação' - terminou em set/2025, não está em produção
     categorias_validas_producao = {
         'Aberto',
-        'Interesse Programação',
         'Linguagem de programação',
         'Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação',
         'Lookalike 2% Alunos + Interesse Linguagem de Programação',
@@ -158,19 +158,19 @@ def unify_medium_by_actions(df: pd.DataFrame) -> pd.DataFrame:
         'dgen'
     }
 
-    # Mapeamento EXATO do notebook (linhas 2383-2439)
+    # Mapeamento atualizado baseado na análise temporal
     mapping_dict = {
-        # MANTER - Categorias válidas para produção (8 categorias)
+        # MANTER - Categorias válidas para produção (7 categorias)
         'Lookalike 2% Cadastrados - DEV 2.0 + Interesses': 'Lookalike 2% Cadastrados - DEV 2.0 + Interesses',
         'Aberto': 'Aberto',
         'Linguagem de programação': 'Linguagem de programação',
         'Lookalike 2% Alunos + Interesse Linguagem de Programação': 'Lookalike 2% Alunos + Interesse Linguagem de Programação',
         'dgen': 'dgen',
         'Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação': 'Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação',
-        'Interesse Programação': 'Interesse Programação',
         'nan': 'nan',
 
-        # DESCONTINUADAS - Direcionar para 'Outros' (4 categorias)
+        # DESCONTINUADAS - Direcionar para 'Outros' (5 categorias)
+        'Interesse Programação': 'Outros',  # Terminou set/2025
         'Lookalike 2% Alunos + Interesse Ciência da Computação': 'Outros',
         'Lookalike 1% Cadastrados - DEV 2.0 + Interesse Linguagem de Programação': 'Outros',
         'Interesse Python (linguagem de programação)': 'Outros',
