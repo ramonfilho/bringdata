@@ -169,7 +169,6 @@ def extrair_publico_medium(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     print(f"\nResultado final:")
     print(f"Medium - valores únicos após unificação: {df['Medium'].nunique()}")
 
-    logger.info(f"✅ Unificação de Medium concluída")
 
     return df
 

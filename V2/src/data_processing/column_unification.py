@@ -207,7 +207,6 @@ def unificar_colunas_datasets(
         for col in colunas_existentes_utm:
             print(f"  Removida: {col}")
 
-    logger.info(f"✅ Unificação concluída")
     logger.info(f"  Pesquisa: {len(df_pesquisa_unificado)} registros, {len(df_pesquisa_unificado.columns)} colunas")
     logger.info(f"  Vendas: {len(df_vendas_unificado)} registros, {len(df_vendas_unificado.columns)} colunas")
 

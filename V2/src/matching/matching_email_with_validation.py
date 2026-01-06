@@ -198,6 +198,5 @@ def fazer_matching_email_with_validation(
     print(f"Target baseado em: matching primário + validação cruzada alunos TODOS")
     print(f"✅ Todos os matches secundários foram VALIDADOS em vendas DevClub")
 
-    logger.info(f"✅ Matching com validação concluído: {total_matches} matches (+{ganho_absoluto} via validação)")
 
     return df_resultado

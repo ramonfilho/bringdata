@@ -159,7 +159,6 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     print(f"\nRESULTADO FINAL:")
     print(f"Dataset unificado: {len(df)} registros, {len(df.columns)} colunas")
 
-    logger.info(f"✅ Unificação de categorias concluída")
 
     return df
 

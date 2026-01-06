@@ -41,7 +41,9 @@ from src.model.training_model import registrar_features_e_modelo_devclub
 from src.model.hyperparameter_tuning import hyperparameter_tuning
 
 # Configurar logging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+# WARNING: Suprime logger.info() dos módulos para output limpo
+# Os módulos já usam print() para mostrar informações importantes
+logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 

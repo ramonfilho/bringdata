@@ -112,7 +112,6 @@ def unificar_utm_source_term(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     print(f"\nRESULTADO FINAL:")
     print(f"Dataset: {len(df)} registros, {len(df.columns)} colunas")
 
-    logger.info(f"✅ Unificação de UTM Source e Term concluída")
 
     return df
 

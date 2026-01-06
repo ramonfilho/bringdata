@@ -100,6 +100,5 @@ def aplicar_janela_conversao(
     print(f"\nRAZÃO: Esses {leads_removidos:,} leads ainda não tiveram {janela_dias} dias")
     print(f"       para converter (última venda em {data_max_vendas.strftime('%Y-%m-%d')})")
 
-    logger.info(f"✅ Janela de conversão aplicada: {leads_removidos:,} leads removidos")
 
     return df_filtrado

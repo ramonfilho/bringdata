@@ -167,6 +167,4 @@ def fazer_matching_email_telefone(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.Da
     print(f"  Ganho vs email_only: +{len(matches_telefone):,} matches")
     print(f"{'='*70}")
 
-    logger.info(f"✅ Matching email+telefone concluído: {total_matches} matches")
-
     return df_resultado

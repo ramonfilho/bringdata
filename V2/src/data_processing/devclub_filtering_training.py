@@ -226,6 +226,5 @@ def criar_dataset_devclub(df_v1_final: pd.DataFrame, df_vendas_unificado: pd.Dat
     print(f"  Taxa de conversão DevClub: {taxa_conversao:.2f}%")
     print(f"  Colunas: {len(df_devclub.columns)}")
 
-    logger.info(f"✅ Dataset DevClub criado com sucesso (filtro mantendo target inicial)")
 
     return df_devclub

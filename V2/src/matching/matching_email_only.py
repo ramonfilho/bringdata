@@ -102,6 +102,5 @@ def fazer_matching_email_only(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.DataFr
     for i, col in enumerate(df_resultado.columns, 1):
         print(f"  {i:2d}. {col}")
 
-    logger.info(f"✅ Matching email only concluído: {total_matches} matches")
 
     return df_resultado
