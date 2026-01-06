@@ -142,10 +142,22 @@ def run_experiment_with_temporal_features(
 
     # CÉLULA 3: Remoção de colunas
     print("\n🧹 CÉLULA 3: REMOÇÃO DE COLUNAS")
+
+    # Contar abas antes
+    total_colunas_antes = sum(len(df.columns) for abas in clean_data.values() for df in abas.values())
+
     clean_data_cols, _ = remove_unnecessary_columns(
         clean_data,
         colunas_remover=config['cleaning']['colunas_remover']
     )
+
+    # Contar abas depois
+    total_colunas_depois = sum(len(df.columns) for abas in clean_data_cols.values() for df in abas.values())
+
+    print(f"Colunas antes: {total_colunas_antes}")
+    print(f"Colunas depois: {total_colunas_depois}")
+    print(f"Colunas removidas: {total_colunas_antes - total_colunas_depois}")
+    print(f"Colunas a remover (config): {config['cleaning']['colunas_remover']}")
 
     # CÉLULA 4: Consolidação
     print("\n📦 CÉLULA 4: CONSOLIDAÇÃO")
