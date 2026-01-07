@@ -121,8 +121,37 @@ def create_derived_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # 1. FEATURES TEMPORAIS
     if 'Data' in df_fe.columns:
-        df_fe['Data'] = pd.to_datetime(df_fe['Data'], errors='coerce')
+        logger.info(f"\n📅 Processando feature temporal (dia_semana):")
+        logger.info(f"   Tipo original da coluna Data: {df_fe['Data'].dtype}")
+
+        # Detectar formato automaticamente baseado na primeira data válida
+        if len(df_fe) > 0:
+            sample_date = df_fe['Data'].iloc[0]
+            logger.info(f"   Primeira data (amostra): {sample_date}")
+
+            if sample_date and isinstance(sample_date, str):
+                # Detectar formato: se começa com 4 dígitos = YYYY-MM-DD, senão = DD/MM/YYYY
+                if sample_date.strip()[0:4].isdigit():
+                    # Formato ISO: YYYY-MM-DD ou YYYY-MM-DD HH:MM:SS
+                    logger.info(f"   ✓ Formato detectado: ISO (YYYY-MM-DD)")
+                    df_fe['Data'] = pd.to_datetime(df_fe['Data'], errors='coerce')
+                else:
+                    # Formato brasileiro: DD/MM/YYYY
+                    logger.info(f"   ✓ Formato detectado: BR (DD/MM/YYYY)")
+                    df_fe['Data'] = pd.to_datetime(df_fe['Data'], format='%d/%m/%Y', errors='coerce')
+            else:
+                # Já é datetime ou fallback
+                logger.info(f"   ✓ Data já é datetime ou fallback para auto-detect")
+                df_fe['Data'] = pd.to_datetime(df_fe['Data'], errors='coerce')
+        else:
+            df_fe['Data'] = pd.to_datetime(df_fe['Data'], errors='coerce')
+
+        # Verificar parsing
+        nans_before = df_fe['Data'].isna().sum()
+        logger.info(f"   Datas inválidas após parsing: {nans_before} / {len(df_fe)} ({nans_before/len(df_fe)*100:.1f}%)")
+
         df_fe['dia_semana'] = df_fe['Data'].dt.dayofweek
+        logger.info(f"   ✓ Feature dia_semana criada")
 
     # 2. FEATURES DE QUALIDADE DOS IDENTIFICADORES
 
@@ -201,11 +230,16 @@ def create_derived_features(df: pd.DataFrame) -> pd.DataFrame:
     # Distribuição da feature temporal
     if 'dia_semana' in df_fe.columns:
         logger.info(f"\nDistribuição da feature temporal:")
-        dia_semana_counts = df_fe['dia_semana'].value_counts().sort_index()
+        total_nans = df_fe['dia_semana'].isna().sum()
+        if total_nans > 0:
+            logger.info(f"  ⚠️  Datas inválidas (NaN): {total_nans:,} ({total_nans/len(df_fe)*100:.1f}%)")
+
+        dia_semana_counts = df_fe['dia_semana'].dropna().value_counts().sort_index()
         nomes_dias = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
         for dia, count in dia_semana_counts.items():
+            dia_int = int(dia)  # Garantir int mesmo se coluna é float64
             pct = (count / len(df_fe)) * 100
-            logger.info(f"  {dia} ({nomes_dias[dia]}): {count:,} ({pct:.1f}%)")
+            logger.info(f"  {dia_int} ({nomes_dias[dia_int]}): {count:,} ({pct:.1f}%)")
 
     return df_fe
 

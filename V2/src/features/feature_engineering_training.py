@@ -106,8 +106,37 @@ def criar_features_derivadas(df_devclub: pd.DataFrame) -> pd.DataFrame:
         print(f"  {i:2d}. {col}")
 
     # 1. FEATURES TEMPORAIS
-    df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
+    print(f"\n📅 Processando feature temporal (dia_semana):")
+    print(f"   Tipo original da coluna Data: {df['Data'].dtype}")
+
+    # Detectar formato automaticamente baseado na primeira data válida
+    if len(df) > 0:
+        sample_date = df['Data'].iloc[0]
+        print(f"   Primeira data (amostra): {sample_date}")
+
+        if sample_date and isinstance(sample_date, str):
+            # Detectar formato: se começa com 4 dígitos = YYYY-MM-DD, senão = DD/MM/YYYY
+            if sample_date.strip()[0:4].isdigit():
+                # Formato ISO: YYYY-MM-DD ou YYYY-MM-DD HH:MM:SS
+                print(f"   ✓ Formato detectado: ISO (YYYY-MM-DD)")
+                df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
+            else:
+                # Formato brasileiro: DD/MM/YYYY
+                print(f"   ✓ Formato detectado: BR (DD/MM/YYYY)")
+                df['Data'] = pd.to_datetime(df['Data'], format='%d/%m/%Y', errors='coerce')
+        else:
+            # Já é datetime ou fallback
+            print(f"   ✓ Data já é datetime ou fallback para auto-detect")
+            df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
+    else:
+        df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
+
+    # Verificar parsing
+    nans_after_parse = df['Data'].isna().sum()
+    print(f"   Datas inválidas após parsing: {nans_after_parse} / {len(df)} ({nans_after_parse/len(df)*100:.1f}%)")
+
     df['dia_semana'] = df['Data'].dt.dayofweek
+    print(f"   ✓ Feature dia_semana criada")
 
     # 2. FEATURES DE QUALIDADE DOS IDENTIFICADORES
 
