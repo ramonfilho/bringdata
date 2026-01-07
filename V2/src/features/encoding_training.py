@@ -20,11 +20,7 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
     Args:
         df_devclub_fe: DataFrame V1 DevClub com feature engineering
         medium_strategy: Estratégia para Medium
-            - 'binary_top3': Features binárias para 3 categorias mais estáveis (Linguagem programação, Aberto, Lookalike 2%) - PADRÃO RECOMENDADO
-            - 'full': One-hot completo (mantém temporal leakage)
-            - 'binary_aberto': Apenas feature binária Medium_Aberto
-            - 'binary_aberto_dgen': Features binárias Medium_Aberto + Medium_dgen
-            - 'remove': Medium já foi removido na célula 8
+            - 'binary_top3': Features binárias para 3 categorias mais estáveis (Linguagem programação, Aberto, Lookalike 2%) - PADRÃO
 
     Returns:
         DataFrame com encoding aplicado
@@ -66,43 +62,21 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
                 df[var] = df[var].map(mapeamento)
                 print(f"  {var}: {len(ordem)} categorias → 0-{len(ordem)-1}")
 
-    # 1.5. PROCESSAR MEDIUM CONFORME ESTRATÉGIA
-    if 'Medium' in df.columns and medium_strategy != 'full':
+    # 1.5. PROCESSAR MEDIUM COM BINARY_TOP3
+    if 'Medium' in df.columns:
         print(f"\nProcessando Medium com estratégia: {medium_strategy}")
 
-        if medium_strategy == 'binary_aberto':
-            # Criar apenas Medium_Aberto (1 se Aberto, 0 caso contrário)
-            df['Medium_Aberto'] = (df['Medium'] == 'Aberto').astype(int)
-            df = df.drop(columns=['Medium'])
-            print(f"  ✓ Criada feature binária: Medium_Aberto")
-            print(f"    Aberto: {df['Medium_Aberto'].sum():,} registros ({df['Medium_Aberto'].mean()*100:.1f}%)")
+        # Criar features binárias para as 3 categorias mais estáveis temporalmente
+        df['Medium_Linguagem_programacao'] = (df['Medium'] == 'Linguagem de programação').astype(int)
+        df['Medium_Aberto'] = (df['Medium'] == 'Aberto').astype(int)
+        df['Medium_Lookalike_2pct_Cadastrados'] = (df['Medium'] == 'Lookalike 2% Cadastrados - DEV 2.0 + Interesses').astype(int)
+        df = df.drop(columns=['Medium'])
 
-        elif medium_strategy == 'binary_aberto_dgen':
-            # Criar Medium_Aberto e Medium_dgen
-            df['Medium_Aberto'] = (df['Medium'] == 'Aberto').astype(int)
-            df['Medium_dgen'] = (df['Medium'] == 'dgen').astype(int)
-            df = df.drop(columns=['Medium'])
-            print(f"  ✓ Criadas features binárias: Medium_Aberto, Medium_dgen")
-            print(f"    Aberto: {df['Medium_Aberto'].sum():,} registros ({df['Medium_Aberto'].mean()*100:.1f}%)")
-            print(f"    dgen: {df['Medium_dgen'].sum():,} registros ({df['Medium_dgen'].mean()*100:.1f}%)")
-
-        elif medium_strategy == 'binary_top3':
-            # Criar features para as 3 categorias mais estáveis temporalmente
-            df['Medium_Linguagem_programacao'] = (df['Medium'] == 'Linguagem de programação').astype(int)
-            df['Medium_Aberto'] = (df['Medium'] == 'Aberto').astype(int)
-            df['Medium_Lookalike_2pct_Cadastrados'] = (df['Medium'] == 'Lookalike 2% Cadastrados - DEV 2.0 + Interesses').astype(int)
-            df = df.drop(columns=['Medium'])
-            print(f"  ✓ Criadas features binárias (top 3 mais estáveis):")
-            print(f"    Linguagem de programação: {df['Medium_Linguagem_programacao'].sum():,} registros ({df['Medium_Linguagem_programacao'].mean()*100:.1f}%)")
-            print(f"    Aberto: {df['Medium_Aberto'].sum():,} registros ({df['Medium_Aberto'].mean()*100:.1f}%)")
-            print(f"    Lookalike 2% Cadastrados: {df['Medium_Lookalike_2pct_Cadastrados'].sum():,} registros ({df['Medium_Lookalike_2pct_Cadastrados'].mean()*100:.1f}%)")
-
-        elif medium_strategy == 'remove':
-            # Medium já foi removido na célula 8, nada a fazer
-            if 'Medium' in df.columns:
-                print(f"  ⚠️  Medium ainda presente (deveria ter sido removido na célula 8)")
-            else:
-                print(f"  ✓ Medium removido (célula 8)")
+        print(f"  ✓ Criadas 3 features binárias:")
+        print(f"    Medium_Linguagem_programacao: {df['Medium_Linguagem_programacao'].sum():,} ({df['Medium_Linguagem_programacao'].mean()*100:.1f}%)")
+        print(f"    Medium_Aberto: {df['Medium_Aberto'].sum():,} ({df['Medium_Aberto'].mean()*100:.1f}%)")
+        print(f"    Medium_Lookalike_2pct_Cadastrados: {df['Medium_Lookalike_2pct_Cadastrados'].sum():,} ({df['Medium_Lookalike_2pct_Cadastrados'].mean()*100:.1f}%)")
+        print(f"  ✓ Categorias não cobertas (outros) → [0, 0, 0]")
 
     # 2. ONE-HOT ENCODING para variáveis categóricas nominais
     variaveis_one_hot = []
@@ -110,6 +84,9 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
     # Identificar variáveis categóricas (excluindo ordinais já processadas e target)
     for col in df.columns:
         if col not in ['target'] and col not in variaveis_ordinais and col != 'nome_comprimento':
+            # Excluir features Medium_ já criadas (são binárias, não precisam de one-hot)
+            if col.startswith('Medium_'):
+                continue
             # Verificar se é categórica (object ou poucos valores únicos)
             if df[col].dtype == 'object' or df[col].nunique() <= 20:
                 variaveis_one_hot.append(col)

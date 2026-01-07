@@ -86,7 +86,7 @@ def setup_output_logging():
     return log_path, tee
 
 
-def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal', use_guru_only=None, set_active=False, temporal_features=False, medium_strategy='binary_top3'):
+def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', use_guru_only=None, set_active=False, temporal_features=False, medium_strategy='binary_top3'):
     """Executa pipeline de treino completo.
 
     Args:
@@ -886,8 +886,8 @@ if __name__ == "__main__":
         '--split-method',
         type=str,
         choices=['temporal', 'temporal_leads', 'stratified'],
-        default='temporal',
-        help='Método de split: temporal (70%% dos dias), temporal_leads (70%% dos leads), ou stratified (70%% dos registros) - padrão: temporal'
+        default='temporal_leads',
+        help='Método de split: temporal (70%% dos dias), temporal_leads (70%% dos leads), ou stratified (70%% dos registros) - padrão: temporal_leads'
     )
     parser.add_argument(
         '--use-guru-only',
