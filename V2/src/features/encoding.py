@@ -10,11 +10,18 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1") -> pd.DataFrame:
+def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", medium_strategy: str = "binary_top3") -> pd.DataFrame:
     """
     Aplica encoding em um dataset específico.
 
-    Função EXATA copiada da Seção 20 do notebook original.
+    Args:
+        df_original: DataFrame original
+        versao: Versão do dataset (padrão: "v1")
+        medium_strategy: Estratégia para Medium
+            - 'binary_top3': Features binárias para 3 categorias mais estáveis (PADRÃO)
+            - 'full': One-hot completo (comportamento antigo)
+
+    Função EXATA copiada da Seção 20 do notebook original, com suporte a medium_strategy.
     """
     # Print do cabeçalho para comparação com notebook
     logger.info("ENCODING ESTRATÉGICO DOS 4 DATASETS")
@@ -83,12 +90,31 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1") ->
                     pct_nan = (nan_depois / len(df)) * 100
                     logger.warning(f"      → Resultado: {nan_depois} NaN ({pct_nan:.1f}%) - serão preenchidos com 0")
 
+    # 1.5. PROCESSAR MEDIUM CONFORME ESTRATÉGIA
+    if 'Medium' in df.columns and medium_strategy != 'full':
+        logger.info(f"\nProcessando Medium com estratégia: {medium_strategy}")
+
+        if medium_strategy == 'binary_top3':
+            # Criar features para as 3 categorias mais estáveis temporalmente
+            df['Medium_Linguagem_programacao'] = (df['Medium'] == 'Linguagem de programação').astype(int)
+            df['Medium_Aberto'] = (df['Medium'] == 'Aberto').astype(int)
+            df['Medium_Lookalike_2pct_Cadastrados'] = (df['Medium'] == 'Lookalike 2% Cadastrados - DEV 2.0 + Interesses').astype(int)
+            df = df.drop(columns=['Medium'])
+            logger.info(f"  ✓ Criadas features binárias (top 3 mais estáveis):")
+            logger.info(f"    Linguagem de programação: {df['Medium_Linguagem_programacao'].sum():,} registros ({df['Medium_Linguagem_programacao'].mean()*100:.1f}%)")
+            logger.info(f"    Aberto: {df['Medium_Aberto'].sum():,} registros ({df['Medium_Aberto'].mean()*100:.1f}%)")
+            logger.info(f"    Lookalike 2% Cadastrados: {df['Medium_Lookalike_2pct_Cadastrados'].sum():,} registros ({df['Medium_Lookalike_2pct_Cadastrados'].mean()*100:.1f}%)")
+            logger.info(f"  ✓ Categorias não cobertas (32% dos dados) → [0, 0, 0]")
+
     # 2. ONE-HOT ENCODING para variáveis categóricas nominais
     variaveis_one_hot = []
 
     # Identificar variáveis categóricas (excluindo ordinais já processadas e target)
     for col in df.columns:
         if col not in ['target'] and col not in variaveis_ordinais and col != 'nome_comprimento':
+            # Excluir features Medium_ já criadas pelo binary_top3
+            if medium_strategy == 'binary_top3' and col.startswith('Medium_'):
+                continue
             # Verificar se é categórica (object ou poucos valores únicos)
             if df[col].dtype == 'object' or df[col].nunique() <= 20:
                 variaveis_one_hot.append(col)

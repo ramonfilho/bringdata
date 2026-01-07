@@ -4,8 +4,12 @@ APENAS orquestra componentes, sem conter lógica própria.
 Reproduz EXATAMENTE a lógica do notebook com parâmetros configuráveis.
 """
 
+import sys
+import os
 import pandas as pd
 import logging
+import atexit
+from datetime import datetime
 from .data_processing.preprocessing import remove_duplicates, clean_columns, remove_campaign_features, remove_technical_fields, rename_long_column_names
 from .data_processing.utm_unification import unify_utm_columns
 from .data_processing.medium_unification import unify_medium_columns
@@ -16,6 +20,55 @@ from .model.prediction import LeadScoringPredictor
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+class Tee:
+    """Duplica output para console e arquivo (como comando tee do Unix)."""
+    def __init__(self, file_path):
+        self.terminal = sys.stdout
+        self.log = open(file_path, 'w', encoding='utf-8')
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+        self.log.flush()  # Força escrita imediata
+
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
+    def close(self):
+        self.log.close()
+
+
+def setup_output_logging():
+    """Configura redirecionamento automático de output para arquivo timestampado."""
+    # Criar diretório outputs se não existir
+    outputs_dir = os.path.join(os.path.dirname(__file__), '../outputs')
+    os.makedirs(outputs_dir, exist_ok=True)
+
+    # Gerar timestamp no formato YYYYMMDD_HHMMSS
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_path = os.path.join(outputs_dir, f'production_{timestamp}.log')
+
+    # Redirecionar stdout e stderr para Tee
+    tee = Tee(log_path)
+    sys.stdout = tee
+    sys.stderr = tee
+
+    # Configurar logging para usar o Tee também
+    # Remover handlers existentes
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    # Adicionar novo handler que escreve em stdout (que agora é o Tee)
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    root_logger.addHandler(handler)
+    root_logger.setLevel(logging.INFO)
+
+    return log_path, tee
 
 
 class LeadScoringPipeline:
@@ -175,7 +228,7 @@ class LeadScoringPipeline:
         logger.info("🔄 [9/10] Aplicando encoding categórico...")
         cols_before_encoding = len(self.data.columns)
 
-        self.data = apply_categorical_encoding(self.data, versao="v1")
+        self.data = apply_categorical_encoding(self.data, versao="v1", medium_strategy="binary_top3")
 
         encoding_cols_added = len(self.data.columns) - cols_before_encoding
         logger.info(f"   ➤ Colunas adicionadas pelo encoding: {encoding_cols_added}")
@@ -229,7 +282,20 @@ class LeadScoringPipeline:
         Returns:
             DataFrame processado (com predições se solicitado)
         """
-        logger.info("=== Iniciando Pipeline de Lead Scoring ===")
+        # Configurar redirecionamento de output para arquivo
+        log_path, tee = setup_output_logging()
+
+        # Registrar função de cleanup para fechar arquivo ao terminar
+        def cleanup():
+            tee.close()
+            sys.stdout = tee.terminal
+            sys.stderr = tee.terminal
+
+        atexit.register(cleanup)
+
+        print(f"\n📝 Output sendo salvo em: {log_path}\n")
+
+        logger.info("=== Iniciando Pipeline de Lead Scoring (Produção) ===")
 
         # Carregar dados
         self.load_data(filepath)
@@ -242,4 +308,6 @@ class LeadScoringPipeline:
             self.data = self.predict()
 
         logger.info("=== Pipeline concluído ===")
+        print(f"\n✅ Output completo salvo em: {log_path}\n")
+
         return self.data

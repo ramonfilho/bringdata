@@ -566,6 +566,76 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         janela_dias=20
     )
 
+    # === ANÁLISE TEMPORÁRIA: TAXA DE CONVERSÃO POR MEDIUM ===
+    if 'Medium' in dataset_v1_devclub.columns and 'target' in dataset_v1_devclub.columns:
+        print("\n" + "="*100)
+        print("📊 ANÁLISE TEMPORÁRIA: TAXA DE CONVERSÃO POR CATEGORIA MEDIUM")
+        print("="*100)
+
+        analysis = dataset_v1_devclub.groupby('Medium').agg({
+            'target': ['count', 'sum', 'mean']
+        })
+        analysis.columns = ['Total_Leads', 'Conversões', 'Taxa_Conversão']
+        analysis['Pct_Leads'] = (analysis['Total_Leads'] / analysis['Total_Leads'].sum() * 100)
+        analysis['Taxa_Conv_%'] = (analysis['Taxa_Conversão'] * 100)
+        analysis = analysis.sort_values('Total_Leads', ascending=False)
+
+        taxa_global = (analysis['Conversões'].sum() / analysis['Total_Leads'].sum() * 100)
+
+        print(f"\n{'CATEGORIA':<50} {'LEADS':>10} {'%TOTAL':>7} {'CONV':>7} {'TAXA':>7} {'vs MÉDIA':>10}")
+        print("-"*100)
+
+        for idx, row in analysis.iterrows():
+            categoria = str(idx)[:48]
+            leads = int(row['Total_Leads'])
+            pct = row['Pct_Leads']
+            conv = int(row['Conversões'])
+            taxa = row['Taxa_Conv_%']
+            diff = taxa - taxa_global
+            diff_str = f"{diff:+.2f}pp"
+            print(f"{categoria:<50} {leads:>10,} {pct:>6.1f}% {conv:>7,} {taxa:>6.2f}% {diff_str:>10}")
+
+        print("\n" + "-"*100)
+        print(f"{'MÉDIA GLOBAL':<50} {int(analysis['Total_Leads'].sum()):>10,} {'100.0%':>7} {int(analysis['Conversões'].sum()):>7,} {taxa_global:>6.2f}%")
+
+        # Análise TOP 3 vs OUTROS
+        print("\n" + "="*100)
+        print("🎯 COMPARAÇÃO: TOP 3 (binary_top3) vs OUTROS (agrupados como [0,0,0])")
+        print("="*100)
+
+        top3 = ['Linguagem de programação', 'Aberto', 'Lookalike 2% Cadastrados - DEV 2.0 + Interesses']
+        top3_data = analysis[analysis.index.isin(top3)]
+        outros_data = analysis[~analysis.index.isin(top3)]
+
+        top3_leads = top3_data['Total_Leads'].sum()
+        top3_conv = top3_data['Conversões'].sum()
+        top3_taxa = (top3_conv / top3_leads * 100)
+
+        outros_leads = outros_data['Total_Leads'].sum()
+        outros_conv = outros_data['Conversões'].sum()
+        outros_taxa = (outros_conv / outros_leads * 100) if outros_leads > 0 else 0
+
+        print(f"\nTOP 3: {int(top3_leads):,} leads ({top3_leads/analysis['Total_Leads'].sum()*100:.1f}%) - Taxa: {top3_taxa:.2f}%")
+        print(f"OUTROS: {int(outros_leads):,} leads ({outros_leads/analysis['Total_Leads'].sum()*100:.1f}%) - Taxa: {outros_taxa:.2f}%")
+        print(f"DIFERENÇA: {top3_taxa - outros_taxa:+.2f}pp")
+
+        if abs(top3_taxa - outros_taxa) < 0.1:
+            print("\n✅ Taxas muito similares - agrupar OUTROS como [0,0,0] parece razoável")
+        elif abs(top3_taxa - outros_taxa) > 0.2:
+            print(f"\n⚠️  ATENÇÃO: Diferença significativa ({abs(top3_taxa - outros_taxa):.2f}pp)!")
+            print("   Considerar adicionar categorias importantes de OUTROS ao encoding")
+
+            # Mostrar categorias OUTROS com maior volume ou taxa discrepante
+            print("\n   Categorias OUTROS ordenadas por volume:")
+            for idx, row in outros_data.head(5).iterrows():
+                categoria = str(idx)[:45]
+                leads = int(row['Total_Leads'])
+                taxa = row['Taxa_Conv_%']
+                diff = taxa - outros_taxa
+                print(f"     • {categoria:<45} {leads:>8,} leads - {taxa:.2f}% ({diff:+.2f}pp vs média OUTROS)")
+
+        print("="*100 + "\n")
+
     # === LOG: VERIFICAÇÃO DE PRODUTOS DEVCLUB ===
     print("\n" + "=" * 80)
     print("VERIFICAÇÃO DE PRODUTOS DEVCLUB - Análise Completa")
