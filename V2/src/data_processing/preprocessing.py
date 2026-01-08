@@ -87,15 +87,22 @@ def clean_columns(df: pd.DataFrame) -> pd.DataFrame:
     columns_to_remove = get_columns_to_remove()
     columns_to_remove_lower = [col.lower() for col in columns_to_remove]
 
+    # Prefixos de colunas de score/faixa que devem ser removidas (incluindo variantes com sufixo)
+    score_prefixes = ['score', 'faixa', 'pontuação', 'pontuacao', 'lead_score', 'decil']
+
     # Identificar colunas presentes no DataFrame para remover
     columns_to_drop = []
 
     for col in df_clean.columns:
+        col_lower = str(col).lower()
         # Remover se está na lista exata (case-insensitive)
-        if col.lower() in columns_to_remove_lower:
+        if col_lower in columns_to_remove_lower:
             columns_to_drop.append(col)
         # Remover colunas Unnamed
-        elif col.startswith('Unnamed:'):
+        elif str(col).startswith('Unnamed:'):
+            columns_to_drop.append(col)
+        # Remover qualquer coluna que comece com prefixos de score/faixa
+        elif any(col_lower.startswith(prefix) for prefix in score_prefixes):
             columns_to_drop.append(col)
 
     # Aplicar remoção se houver colunas para remover

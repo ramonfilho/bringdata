@@ -259,6 +259,9 @@ def remove_unnecessary_columns(
 
     colunas_remover_lower = [col.lower() for col in colunas_remover]
 
+    # Prefixos de colunas de score/faixa que devem ser removidas (incluindo variantes com sufixo)
+    score_prefixes = ['score', 'faixa', 'pontuação', 'pontuacao', 'lead_score', 'decil']
+
     arquivos_limpos = {}
     relatorio = []
 
@@ -271,11 +274,15 @@ def remove_unnecessary_columns(
             # Identificar colunas para remover (linhas 189-196 do notebook)
             colunas_para_remover = []
             for col in df.columns:
+                col_lower = str(col).lower()
                 # Remover se está na lista exata
-                if col.lower() in colunas_remover_lower:
+                if col_lower in colunas_remover_lower:
                     colunas_para_remover.append(col)
                 # Remover colunas Unnamed
                 elif str(col).startswith('Unnamed:'):
+                    colunas_para_remover.append(col)
+                # Remover qualquer coluna que comece com prefixos de score/faixa
+                elif any(col_lower.startswith(prefix) for prefix in score_prefixes):
                     colunas_para_remover.append(col)
                 # NÃO remover colunas vazias aqui - será feito na célula 8
                 # Mantendo compatibilidade com notebook
