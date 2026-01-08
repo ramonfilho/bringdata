@@ -8,6 +8,10 @@ mlflow/
 mlruns/
 *.db
 
+# V2 Training outputs and model artifacts
+V2/outputs/
+V2/files/
+
 # Environments
 .env
 venv/
