@@ -43,8 +43,13 @@ def aplicar_janela_conversao(
 
     # 1. Encontrar data máxima das vendas
     if 'data' in df_vendas.columns:
+        print(f"\n🔍 DEBUG: Tipo da coluna 'data' ANTES da conversão: {df_vendas['data'].dtype}")
+        print(f"🔍 DEBUG: Amostra de valores ANTES: {df_vendas['data'].head(3).tolist()}")
         df_vendas['data'] = pd.to_datetime(df_vendas['data'], errors='coerce', dayfirst=True)
+        print(f"🔍 DEBUG: Tipo da coluna 'data' DEPOIS da conversão: {df_vendas['data'].dtype}")
+        print(f"🔍 DEBUG: Amostra de valores DEPOIS: {df_vendas['data'].head(3).tolist()}")
         data_max_vendas = df_vendas['data'].max()
+        print(f"🔍 DEBUG: Data máxima calculada: {data_max_vendas}\n")
     elif 'Data' in df_vendas.columns:
         df_vendas['Data'] = pd.to_datetime(df_vendas['Data'], errors='coerce', dayfirst=True)
         data_max_vendas = df_vendas['Data'].max()

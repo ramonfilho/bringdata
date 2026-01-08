@@ -125,8 +125,6 @@ cleaning:
     - "rppc venda"
     - "Score"
     - "serviço da transportadora"
-    - "Status"
-    - "status"
     - "Status Cancelamento"
     - "Status Financeiro"
     - "tempo de entrega"

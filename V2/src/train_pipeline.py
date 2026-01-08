@@ -151,26 +151,21 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
 
     filepaths = sorted(glob.glob(os.path.join(data_dir, "*.xlsx")), key=notebook_sort_key)
 
-    # Aplicar filtro GURU only
-    # Se passado via argumento, usa argumento. Caso contrário, usa config.
+    # IMPORTANTE: Sempre carregar TODOS os arquivos (incluindo TMB) para calcular recall correto
+    # O filtro guru_only será aplicado APENAS nos matchings para treino
     if use_guru_only is None:
         use_guru_only = config['ingestion'].get('use_guru_only', False)
+
+    print(f"\nTotal de arquivos encontrados: {len(filepaths)}")
     if use_guru_only:
-        filepaths_original = filepaths.copy()
-        filepaths = [f for f in filepaths if 'guru' in os.path.basename(f).lower() or 'pesquisa' in os.path.basename(f).lower() or 'lead' in os.path.basename(f).lower()]
+        print(f"💡 GURU ONLY MODE ativado:")
+        print(f"   - Vendas Guru + TMB serão usadas para cálculo do recall")
+        print(f"   - Apenas vendas Guru serão usadas para matching/treino do modelo")
 
-        # Arquivos removidos (TMB)
-        removed = [f for f in filepaths_original if f not in filepaths]
-        if removed:
-            print(f"\n🚫 GURU ONLY MODE - Arquivos TMB excluídos:")
-            for f in removed:
-                print(f"  - {os.path.basename(f)}")
-
-    print(f"\nTotal de arquivos: {len(filepaths)}")
     for f in filepaths:
         print(f"  - {os.path.basename(f)}")
 
-    # Ler arquivos
+    # Ler TODOS os arquivos (incluindo TMB)
     all_data = read_excel_files(filepaths)
 
     # === CÉLULA 2: Filtragem + Remoção de Duplicatas ===
@@ -536,16 +531,34 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     print(f"\n🔍 CÉLULA 15: MATCHING DE LEADS COM VENDAS ({initial_matching.upper().replace('_', ' ')})")
     print("=" * 60)
 
+    # APLICAR FILTRO GURU ONLY apenas para matching (treino do modelo)
+    # Manter df_vendas_final completo (Guru + TMB) para cálculo do recall
+    df_vendas_matching = df_vendas_final.copy()
+
+    if use_guru_only and 'arquivo_origem' in df_vendas_matching.columns:
+        before_filter = len(df_vendas_matching)
+        # Filtrar apenas vendas Guru para matching/treino
+        df_vendas_matching = df_vendas_matching[
+            df_vendas_matching['arquivo_origem'].str.lower().str.contains('guru', na=False)
+        ].copy()
+        after_filter = len(df_vendas_matching)
+
+        if before_filter != after_filter:
+            print(f"\n🔧 GURU ONLY - Filtro aplicado ao matching:")
+            print(f"   Vendas Guru para matching: {after_filter:,}")
+            print(f"   Vendas TMB excluídas do matching: {before_filter - after_filter:,}")
+            print(f"   (Vendas TMB serão incluídas no cálculo do recall)\n")
+
     if initial_matching == 'email_only':
-        dataset_v1_final = fazer_matching_email_only(df_pos_cutoff, df_vendas_final)
+        dataset_v1_final = fazer_matching_email_only(df_pos_cutoff, df_vendas_matching)
     elif initial_matching == 'email_telefone':
-        dataset_v1_final = fazer_matching_email_telefone(df_pos_cutoff, df_vendas_final)
+        dataset_v1_final = fazer_matching_email_telefone(df_pos_cutoff, df_vendas_matching)
     elif initial_matching == 'variantes':
-        dataset_v1_final = fazer_matching_variantes(df_pos_cutoff, df_vendas_final)
+        dataset_v1_final = fazer_matching_variantes(df_pos_cutoff, df_vendas_matching)
     elif initial_matching == 'robusto':
-        dataset_v1_final = fazer_matching_robusto(df_pos_cutoff, df_vendas_final)
+        dataset_v1_final = fazer_matching_robusto(df_pos_cutoff, df_vendas_matching)
     elif initial_matching == 'validation':
-        dataset_v1_final = fazer_matching_email_with_validation(df_pos_cutoff, df_vendas_final)
+        dataset_v1_final = fazer_matching_email_with_validation(df_pos_cutoff, df_vendas_matching)
     else:
         raise ValueError(f"Método de matching inicial inválido: {initial_matching}. Use 'email_only', 'email_telefone', 'variantes', 'robusto' ou 'validation'")
 
@@ -556,7 +569,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     print(f"\n🎓 CÉLULA 17: FILTRAGEM DEVCLUB + JANELA DE CONVERSÃO")
     print("=" * 60)
 
-    dataset_v1_devclub, recall_metrics = criar_dataset_devclub(dataset_v1_final, df_vendas_final)
+    dataset_v1_devclub = criar_dataset_devclub(dataset_v1_final, df_vendas_final)
 
     # Aplicar janela de conversão de 20 dias (captação + CPL + carrinho)
     # Captação: 7 dias (terça-segunda) + CPL: 6 dias (terça-domingo) + Carrinho: 7 dias (segunda-domingo) = 20 dias
@@ -654,21 +667,23 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     for produto, count in produtos_com_devclub.items():
         print(f"  {count:>5} vendas | {produto}")
 
-    # 2. Lista atual de produtos que estamos usando
+    # 2. Lista atual de produtos que estamos usando (SINCRONIZADA com devclub_filtering_training.py)
     produtos_devclub_lista_atual = [
         'DevClub - Full Stack 2025',
         'DevClub FullStack Pro - OFICIAL',
         'Formação DevClub FullStack Pro - OFICI',
-        'Formação DevClub FullStack Pro - OFICIAL',
+        'Formação DevClub FullStack Pro - OFICIAL',  # Nome completo (não truncado)
         'DevClub - Full Stack 2025 - EV',
         'DevClub - FS - Vitalício',
         '[Vitalício] Formação DevClub FullStack',
-        '[Vitalício] Formação DevClub FullStack Pro - OFICIAL',
+        '[Vitalício] Formação DevClub FullStack Pro - OFICIAL',  # Vitalício completo
         'Formação DevClub FullStack Pro - COMER',
-        'Formação DevClub FullStack Pro - COMERCIAL',
-        'Formação DevClub FullStack Pro',
+        'Formação DevClub FullStack Pro - COMERCIAL',  # Nome completo (não truncado)
+        'Formação DevClub FullStack Pro',  # Sem sufixo
         'DevClub Vitalício',
         'DevClub 3.0 - 2024',
+        '(Desativado) DevClub 3.0 - 2024',
+        '(Desativado) DevClub 3.0 - 2024 - Novo'
     ]
 
     # 3. Verificar produtos que EXISTEM mas NÃO estão na lista
@@ -704,13 +719,21 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     if not produtos_sem_vendas:
         print("  ✅ Todos os produtos da lista têm vendas!")
 
-    # 5. Atualizar lista completa
-    produtos_devclub = list(produtos_com_devclub.index)
+    # 5. Usar lista hardcoded (investigada manualmente)
+    produtos_devclub = produtos_devclub_lista_atual
 
     print("\n" + "=" * 80)
-    print("✅ LISTA ATUALIZADA - Usando TODOS os produtos DevClub encontrados")
+    print("✅ USANDO LISTA HARDCODED (investigada manualmente)")
     print("=" * 80)
-    print(f"Total de produtos na lista atualizada: {len(produtos_devclub)}")
+    print(f"Total de produtos na lista: {len(produtos_devclub)}")
+
+    if produtos_nao_contabilizados:
+        print(f"\n⚠️  ATENÇÃO: {vendas_perdidas} vendas de produtos não contabilizados serão IGNORADAS")
+        print(f"   (Produtos descobertos automaticamente mas não na lista hardcoded)")
+
+    if produtos_sem_vendas:
+        print(f"\n⚠️  ATENÇÃO: {len(produtos_sem_vendas)} produtos na lista NÃO têm vendas no período")
+        print(f"   (Produtos hardcoded mas sem vendas encontradas)")
 
     # === LOG: CÁLCULO DE RECALL E FATOR DE CORREÇÃO ===
     print("\n" + "=" * 80)
@@ -726,15 +749,16 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         df_vendas_final['produto'].isin(produtos_devclub)
     ].copy()
 
-    # Filtrar por período (mesmo período dos leads)
+    # Filtrar por período (mesmo período dos leads + janela de conversão)
     if 'data' in vendas_devclub.columns:
-        vendas_devclub['data_dt'] = pd.to_datetime(vendas_devclub['data'], errors='coerce')
-        # Período dos leads (aproximado - 2025-03-01 a 2025-11-04)
+        vendas_devclub['data_dt'] = pd.to_datetime(vendas_devclub['data'], errors='coerce', dayfirst=True)
+        # Período dos leads: 2025-03-01 a 2025-11-04
+        # Janela de conversão: +20 dias após última data dos leads
         periodo_inicio = pd.to_datetime('2025-03-01')
-        periodo_fim = pd.to_datetime('2025-11-04')
+        periodo_fim = pd.to_datetime('2025-11-04') + pd.Timedelta(days=20)  # 2025-11-24
         vendas_periodo = vendas_devclub[
-            (vendas_devclub['data_dt'] >= periodo_inicio - pd.Timedelta(days=20)) &
-            (vendas_devclub['data_dt'] <= periodo_fim + pd.Timedelta(days=20))
+            (vendas_devclub['data_dt'] >= periodo_inicio) &
+            (vendas_devclub['data_dt'] <= periodo_fim)
         ].copy()
     else:
         vendas_periodo = vendas_devclub.copy()
@@ -782,6 +806,14 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         print(f"  Valores CAPI deveriam ser {(fator_correcao-1)*100:.0f}% maiores")
 
     print("=" * 80)
+
+    # Criar dicionário com métricas de recall para passar ao registro do modelo
+    recall_metrics = {
+        'vendas_devclub_total': vendas_reais,
+        'vendas_matched': conversoes_observadas,
+        'recall': recall,
+        'fator_correcao': fator_correcao
+    }
 
     # === FEATURES TEMPORAIS (OPCIONAL) ===
     if temporal_features:

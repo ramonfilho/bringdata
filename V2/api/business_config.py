@@ -1,18 +1,3 @@
-"""
-=============================================================================
-BUSINESS CONFIG - Configurações Unificadas do Sistema Smart Ads
-=============================================================================
-
-Este arquivo centraliza TODAS as configurações de negócio e métricas do sistema.
-
-HISTÓRICO DE VERSÕES:
-- 2025-10-27: Nova lógica de recomendação contínua (sigmoid + multiplicador ROAS)
-- 2025-10-22: Unificação de configs (meta_config.py, BUSINESS_CONFIG_CORRECTED.py, metricas_personalizaveis.md)
-- 2025-10-20: Correção por recall (2.906x) nas taxas de conversão
-- 2025-10-15: Análise inicial de 1.970 vendas DevClub
-
-"""
-
 # =============================================================================
 # 1. MÉTRICAS DE PRODUTO
 # =============================================================================
@@ -38,47 +23,17 @@ PRODUCT_VALUE = 2000.00
 #
 # MÉTODO: Taxa corrigida = Taxa observada / Recall
 
-# TAXAS ANTIGAS (baseadas em recall 2.906x - DESATUALIZADAS)
-# CONVERSION_RATES = {
-    "D1": 0.002799,   # 0.28% | Corrigido de 0.06% (×4.666) | 2 conversões / 3,261 leads
-    "D2": 0.006999,   # 0.70% | Corrigido de 0.15% (×4.666) | 5 conversões / 3,261 leads
-    "D3": 0.002799,   # 0.28% | Corrigido de 0.06% (×4.666) | 2 conversões / 3,261 leads
-    "D4": 0.017263,   # 1.73% | Corrigido de 0.37% (×4.666) | 12 conversões / 3,261 leads
-    "D5": 0.017263,   # 1.73% | Corrigido de 0.37% (×4.666) | 12 conversões / 3,261 leads
-    "D6": 0.031261,   # 3.13% | Corrigido de 0.67% (×4.666) | 22 conversões / 3,262 leads
-    "D7": 0.045725,   # 4.57% | Corrigido de 0.98% (×4.666) | 32 conversões / 3,260 leads
-    "D8": 0.049924,   # 4.99% | Corrigido de 1.07% (×4.666) | 35 conversões / 3,261 leads
-    "D9": 0.067188,   # 6.72% | Corrigido de 1.44% (×4.666) | 47 conversões / 3,261 leads
-    "D10": 0.104514,   # 10.45% | Corrigido de 2.24% (×4.666) | 73 conversões / 3,261 leads
-}
-
-CONVERSION_RATES_OBSERVADAS = {
-    "D1": 0.002137,   # 0.21% | 7 conversões / 3,276 leads
-    "D2": 0.002748,   # 0.27% | 9 conversões / 3,275 leads
-    "D3": 0.002138,   # 0.21% | 7 conversões / 3,274 leads (quebra monotonia vs D2)
-    "D4": 0.005802,   # 0.58% | 19 conversões / 3,275 leads
-    "D5": 0.003053,   # 0.31% | 10 conversões / 3,276 leads (quebra monotonia vs D4)
-    "D6": 0.006721,   # 0.67% | 22 conversões / 3,274 leads
-    "D7": 0.006718,   # 0.67% | 22 conversões / 3,275 leads
-    "D8": 0.010382,   # 1.04% | 34 conversões / 3,275 leads
-    "D9": 0.014043,   # 1.40% | 46 conversões / 3,276 leads
-    "D10": 0.019243,  # 1.92% | 63 conversões / 3,274 leads
-}
-
-# TAXAS CORRIGIDAS - Aplicando recall 55.7% (fator 1.795x)
-# Análise: 769 conversões observadas / 1,380 vendas reais = 55.7% recall
-# Data: 2025-11-10 | Total leads: 108,700 | Vendas reais (sem duplicatas): 1,380
 CONVERSION_RATES = {
-    "D1": 0.002799,   # 0.28% | Corrigido de 0.06% (×4.666) | 2 conversões / 3,261 leads
-    "D2": 0.006999,   # 0.70% | Corrigido de 0.15% (×4.666) | 5 conversões / 3,261 leads
-    "D3": 0.002799,   # 0.28% | Corrigido de 0.06% (×4.666) | 2 conversões / 3,261 leads
-    "D4": 0.017263,   # 1.73% | Corrigido de 0.37% (×4.666) | 12 conversões / 3,261 leads
-    "D5": 0.017263,   # 1.73% | Corrigido de 0.37% (×4.666) | 12 conversões / 3,261 leads
-    "D6": 0.031261,   # 3.13% | Corrigido de 0.67% (×4.666) | 22 conversões / 3,262 leads
-    "D7": 0.045725,   # 4.57% | Corrigido de 0.98% (×4.666) | 32 conversões / 3,260 leads
-    "D8": 0.049924,   # 4.99% | Corrigido de 1.07% (×4.666) | 35 conversões / 3,261 leads
-    "D9": 0.067188,   # 6.72% | Corrigido de 1.44% (×4.666) | 47 conversões / 3,261 leads
-    "D10": 0.104514,   # 10.45% | Corrigido de 2.24% (×4.666) | 73 conversões / 3,261 leads
+    "D1": 0.002131,   # 0.21% | Corrigido de 0.05% (×4.262) | 2 conversões / 3,737 leads
+    "D2": 0.005541,   # 0.55% | Corrigido de 0.13% (×4.262) | 5 conversões / 3,737 leads
+    "D3": 0.008098,   # 0.81% | Corrigido de 0.19% (×4.262) | 7 conversões / 3,737 leads
+    "D4": 0.008098,   # 0.81% | Corrigido de 0.19% (×4.262) | 7 conversões / 3,736 leads
+    "D5": 0.010230,   # 1.02% | Corrigido de 0.24% (×4.262) | 9 conversões / 3,737 leads
+    "D6": 0.021738,   # 2.17% | Corrigido de 0.51% (×4.262) | 19 conversões / 3,738 leads
+    "D7": 0.031967,   # 3.20% | Corrigido de 0.75% (×4.262) | 28 conversões / 3,735 leads
+    "D8": 0.038787,   # 3.88% | Corrigido de 0.91% (×4.262) | 34 conversões / 3,737 leads
+    "D9": 0.040066,   # 4.01% | Corrigido de 0.94% (×4.262) | 35 conversões / 3,737 leads
+    "D10": 0.053705,   # 5.37% | Corrigido de 1.26% (×4.262) | 47 conversões / 3,737 leads
 }
 
 # =============================================================================
