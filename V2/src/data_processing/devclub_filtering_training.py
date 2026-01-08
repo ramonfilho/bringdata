@@ -226,5 +226,20 @@ def criar_dataset_devclub(df_v1_final: pd.DataFrame, df_vendas_unificado: pd.Dat
     print(f"  Taxa de conversão DevClub: {taxa_conversao:.2f}%")
     print(f"  Colunas: {len(df_devclub.columns)}")
 
+    # CALCULAR RECALL PARA CORREÇÃO AUTOMÁTICA DAS TAXAS
+    recall = leads_qualificados / len(df_vendas_devclub) if len(df_vendas_devclub) > 0 else 0.0
+    fator_correcao = 1 / recall if recall > 0 else 1.0
 
-    return df_devclub
+    print(f"\n📊 MÉTRICAS DE RECALL (para correção automática):")
+    print(f"  Vendas DevClub totais: {len(df_vendas_devclub):,}")
+    print(f"  Vendas matched: {leads_qualificados:,}")
+    print(f"  Recall: {recall:.4f} ({recall*100:.2f}%)")
+    print(f"  Fator de correção: {fator_correcao:.3f}x")
+
+    # Retornar DataFrame e métricas de recall
+    return df_devclub, {
+        'vendas_devclub_total': len(df_vendas_devclub),
+        'vendas_matched': leads_qualificados,
+        'recall': recall,
+        'fator_correcao': fator_correcao
+    }

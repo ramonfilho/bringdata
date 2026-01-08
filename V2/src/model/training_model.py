@@ -27,6 +27,94 @@ mlflow.set_tracking_uri("sqlite:///mlflow.db")
 mlflow.set_experiment("devclub_lead_scoring")
 
 
+def atualizar_business_config_com_recall(model_metadata: dict):
+    """
+    Atualiza api/business_config.py com taxas de conversão corrigidas pelo recall real.
+
+    Lê as taxas observadas do model_metadata (decil_analysis), aplica o fator de correção
+    calculado a partir do recall real, e atualiza o arquivo business_config.py.
+
+    Args:
+        model_metadata: Dict com metadata do modelo (deve conter recall_metrics e decil_analysis)
+    """
+    import re
+    from pathlib import Path
+
+    print("\n🔄 ATUALIZANDO BUSINESS_CONFIG.PY COM RECALL REAL")
+    print("=" * 70)
+
+    # Extrair métricas de recall
+    recall_metrics = model_metadata.get('recall_metrics', {})
+    fator_correcao = recall_metrics.get('fator_correcao')
+    recall = recall_metrics.get('recall')
+
+    if not fator_correcao:
+        print("⚠️  Recall metrics não encontradas. Pulando atualização.")
+        return
+
+    print(f"📊 Recall real: {recall:.4f} ({recall*100:.2f}%)")
+    print(f"🔢 Fator de correção: {fator_correcao:.3f}x")
+
+    # Calcular taxas corrigidas a partir do decil_analysis
+    decil_analysis = model_metadata.get('decil_analysis', {})
+    taxas_corrigidas = {}
+
+    print(f"\n📈 Calculando taxas corrigidas:")
+    print(f"{'Decil':<6} | {'Observada':<10} | {'Corrigida':<10}")
+    print("-" * 35)
+
+    for i in range(1, 11):
+        decil_key = f"decil_{i}"
+        decil_label = f"D{i}"
+
+        if decil_key in decil_analysis:
+            taxa_observada = decil_analysis[decil_key]['conversion_rate']
+            taxa_corrigida = taxa_observada * fator_correcao
+            taxas_corrigidas[decil_label] = taxa_corrigida
+
+            print(f"{decil_label:<6} | {taxa_observada*100:>8.2f}% | {taxa_corrigida*100:>8.2f}%")
+
+    # Ler arquivo business_config.py
+    config_path = Path(__file__).parent.parent.parent / "api" / "business_config.py"
+
+    if not config_path.exists():
+        print(f"❌ Arquivo não encontrado: {config_path}")
+        return
+
+    with open(config_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
+    # Montar novo bloco CONVERSION_RATES
+    novo_bloco = "CONVERSION_RATES = {\n"
+    for i in range(1, 11):
+        decil_label = f"D{i}"
+        taxa = taxas_corrigidas.get(decil_label, 0.0)
+        conversoes = decil_analysis[f"decil_{i}"]["conversions"]
+        total_leads = decil_analysis[f"decil_{i}"]["total_leads"]
+        taxa_obs = decil_analysis[f"decil_{i}"]["conversion_rate"]
+
+        novo_bloco += f'    "{decil_label}": {taxa:.6f},   # {taxa*100:.2f}% | Corrigido de {taxa_obs*100:.2f}% (×{fator_correcao:.3f}) | {conversoes} conversões / {total_leads:,} leads\n'
+    novo_bloco += "}"
+
+    # Substituir bloco CONVERSION_RATES (não comentado)
+    # Padrão: Linha que começa com CONVERSION_RATES (não com # CONVERSION_RATES)
+    # Buscar de forma mais específica: início de linha + CONVERSION_RATES
+    pattern = r'(?m)^CONVERSION_RATES\s*=\s*\{[^}]*\}'
+
+    if re.search(pattern, content, re.DOTALL | re.MULTILINE):
+        content_novo = re.sub(pattern, novo_bloco, content, count=1, flags=re.DOTALL | re.MULTILINE)
+
+        # Salvar arquivo atualizado
+        with open(config_path, 'w', encoding='utf-8') as f:
+            f.write(content_novo)
+
+        print(f"\n✅ business_config.py atualizado com sucesso!")
+        print(f"   Path: {config_path}")
+        print(f"   Taxas corrigidas automaticamente com recall real ({recall*100:.2f}%)")
+    else:
+        print(f"⚠️  Padrão CONVERSION_RATES não encontrado no arquivo")
+
+
 def registrar_features_e_modelo_devclub(
     dataset_devclub_encoded: pd.DataFrame,
     dataset_devclub_original: pd.DataFrame,
@@ -34,7 +122,8 @@ def registrar_features_e_modelo_devclub(
     matching_method: str = 'email_only',
     custom_hyperparams: dict = None,
     split_method: str = 'temporal',
-    set_active: bool = False
+    set_active: bool = False,
+    recall_metrics: dict = None
 ) -> dict:
     """
     Registra features e salva modelo DevClub para produção.
@@ -560,6 +649,16 @@ def registrar_features_e_modelo_devclub(
         # Indicar se foi tunado
         mlflow.log_param("hyperparameter_tuning", custom_hyperparams is not None)
 
+        # === DEBUG: PRINT COLUNAS EXATAS ANTES DO FIT ===
+        print("\n" + "="*80)
+        print("🔍 COLUNAS EXATAS PASSADAS PARA O MODELO (X_train.columns):")
+        print("="*80)
+        for i, col in enumerate(X_train.columns, 1):
+            print(f"  {i:2d}. {col}")
+        print(f"\nTotal: {len(X_train.columns)} features")
+        print(f"Shape: {X_train.shape}")
+        print("="*80 + "\n")
+
         modelo_final.fit(X_train, y_train)
         y_prob = modelo_final.predict_proba(X_test)[:, 1]
         auc_final = roc_auc_score(y_test, y_prob)
@@ -604,13 +703,13 @@ def registrar_features_e_modelo_devclub(
         feature_registry = {
             "metadata": {
                 "created_at": datetime.now().isoformat(),
-                "model_name": "v1_devclub_rf_temporal_single",
-                "dataset_name": "dataset_devclub_rf_temporal",
+                "model_name": f"v1_devclub_rf_{split_method}_single",
+                "dataset_name": f"dataset_devclub_rf_{split_method}",
                 "total_features": len(X.columns),
                 "total_records": len(dataset_final),
                 "target_column": "target",
                 "model_type": "RandomForestClassifier",
-                "split_type": "temporal",
+                "split_type": split_method,
                 "sklearn_version": sklearn.__version__
             },
             "data_split": {
@@ -798,6 +897,13 @@ def registrar_features_e_modelo_devclub(
                     "total_days": int((data_max - data_min).days)
                 }
             },
+            "recall_metrics": {
+                "vendas_devclub_total": int(recall_metrics['vendas_devclub_total']) if recall_metrics else None,
+                "vendas_matched": int(recall_metrics['vendas_matched']) if recall_metrics else None,
+                "recall": float(recall_metrics['recall']) if recall_metrics else None,
+                "fator_correcao": float(recall_metrics['fator_correcao']) if recall_metrics else None,
+                "description": "Recall = vendas_matched / vendas_devclub_total. Used to auto-correct conversion rates in business_config.py"
+            },
             "performance_metrics": {
                 "auc": float(auc_final),
                 "top3_decil_concentration": float(top3_conversoes),
@@ -867,29 +973,29 @@ def registrar_features_e_modelo_devclub(
             os.makedirs(output_dir, exist_ok=True)
 
             # Salvar feature registry
-            registry_filename = f'{output_dir}/feature_registry_v1_devclub_rf_temporal_single.json'
+            registry_filename = f'{output_dir}/feature_registry_v1_devclub_rf_{split_method}_single.json'
             with open(registry_filename, 'w', encoding='utf-8') as f:
                 json.dump(feature_registry, f, indent=2, ensure_ascii=False)
             print(f"✓ {registry_filename} salvo")
 
             # Salvar metadados do modelo
-            metadata_filename = f'{output_dir}/model_metadata_v1_devclub_rf_temporal_single.json'
+            metadata_filename = f'{output_dir}/model_metadata_v1_devclub_rf_{split_method}_single.json'
             with open(metadata_filename, 'w', encoding='utf-8') as f:
                 json.dump(model_metadata, f, indent=2, ensure_ascii=False)
             print(f"✓ {metadata_filename} salvo")
 
             # Salvar modelo
-            model_filename = f'{output_dir}/modelo_lead_scoring_v1_devclub_rf_temporal_single.pkl'
+            model_filename = f'{output_dir}/modelo_lead_scoring_v1_devclub_rf_{split_method}_single.pkl'
             joblib.dump(modelo_final, model_filename)
             print(f"✓ {model_filename} salvo")
 
             # Salvar features ordenadas
-            features_filename = f'{output_dir}/features_ordenadas_v1_devclub_rf_temporal_single.json'
+            features_filename = f'{output_dir}/features_ordenadas_v1_devclub_rf_{split_method}_single.json'
             features_ordenadas = {
                 "feature_names": list(X_clean.columns),
                 "feature_count": len(X_clean.columns),
                 "created_at": datetime.now().isoformat(),
-                "model_name": "v1_devclub_rf_temporal_single"
+                "model_name": f"v1_devclub_rf_{split_method}_single"
             }
             with open(features_filename, 'w', encoding='utf-8') as f:
                 json.dump(features_ordenadas, f, indent=2, ensure_ascii=False)
@@ -937,6 +1043,9 @@ def registrar_features_e_modelo_devclub(
                 print(f"✓ {config_path} atualizado")
                 print(f"  Modelo ativo: v1_devclub_rf_{split_method}_single")
                 print(f"  Path: {output_dir}")
+
+                # Atualizar business_config.py com recall real
+                atualizar_business_config_com_recall(model_metadata)
         else:
             print("\n4. ARQUIVOS LOCAIS NÃO SALVOS (--save-files=False)")
             print("-" * 50)

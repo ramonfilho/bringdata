@@ -556,7 +556,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     print(f"\n🎓 CÉLULA 17: FILTRAGEM DEVCLUB + JANELA DE CONVERSÃO")
     print("=" * 60)
 
-    dataset_v1_devclub = criar_dataset_devclub(dataset_v1_final, df_vendas_final)
+    dataset_v1_devclub, recall_metrics = criar_dataset_devclub(dataset_v1_final, df_vendas_final)
 
     # Aplicar janela de conversão de 20 dias (captação + CPL + carrinho)
     # Captação: 7 dias (terça-segunda) + CPL: 6 dias (terça-domingo) + Carrinho: 7 dias (segunda-domingo) = 20 dias
@@ -852,7 +852,8 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         matching_method=initial_matching,
         custom_hyperparams=melhores_params,
         split_method=split_method,
-        set_active=set_active
+        set_active=set_active,
+        recall_metrics=recall_metrics
     )
 
 
