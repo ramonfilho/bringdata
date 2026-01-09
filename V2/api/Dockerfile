@@ -38,7 +38,7 @@ COPY ./configs/ ./configs/
 
 # Copiar APENAS o modelo ativo (não todos os modelos antigos)
 # Isso reduz o tamanho da imagem de ~47MB para ~11MB
-COPY ./files/20251111_212345/ ./files/20251111_212345/
+COPY ./files/20260109_110657/ ./files/20260109_110657/
 
 # Definir variáveis de ambiente
 ENV PYTHONPATH=/app
