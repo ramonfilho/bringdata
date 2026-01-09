@@ -2,9 +2,12 @@
 # 1. MÉTRICAS DE PRODUTO
 # =============================================================================
 
-# Valor médio do produto (baseado em análise de matches reais - 769 conversões, LTV R$ 1.782)
-# Valor arredondado para R$ 2.000 (conservador, considera 13.1% de recompra real)
-PRODUCT_VALUE = 2000.00
+# Valor médio do produto (baseado em análise real de conversões - Dez 02-15, 2025)
+# Fonte: Relatórios de validação (149 conversões)
+# - Guru: R$ 1.973,95 (71 conversões = 47.7%, 100% realizado)
+# - TMB: R$ 1.354,61 (78 conversões = 52.3%, 62.11% realizado após inadimplência)
+# Valor ponderado: (71×1973.95 + 78×1354.61) / 149 = R$ 1.649,73
+PRODUCT_VALUE = 1649.73
 
 # =============================================================================
 # 2. TAXAS DE CONVERSÃO CORRIGIDAS POR RECALL
@@ -143,8 +146,8 @@ BUSINESS_CONFIG = {
 
 """
 1. VALOR DO PRODUTO:
-   - Linha 21: PRODUCT_VALUE = 2027.38
-   - Impacto: Cálculo de receita e margem de contribuição
+   - Linha 10: PRODUCT_VALUE = 1649.73
+   - Impacto: Cálculo de receita, margem de contribuição e valor do LeadQualified (CAPI)
 
 2. TAXAS DE CONVERSÃO POR DECIL:
    - Linhas 40-51: CONVERSION_RATES
@@ -191,4 +194,15 @@ EXEMPLO COMPLETO DE CÁLCULO (Linha 8 da planilha):
 
    Sistema anterior: 40% (faixas discretas)
    Sistema novo: 50% (contínuo, considera ROAS)
+
+EXEMPLO COMPLETO DE CÁLCULO - LEADQUALIFIED (CAPI):
+   Lead D10 com taxa de conversão de 5.37%
+
+   Valor projetado = PRODUCT_VALUE × taxa_conversão
+   Valor projetado = R$ 1.649,73 × 0.0537
+   Valor projetado = R$ 88,59
+
+   Antes (PRODUCT_VALUE = 2.000): R$ 107,40
+   Depois (PRODUCT_VALUE = 1.649,73): R$ 88,59
+   Diferença: -17.5% (mais realista, considera inadimplência TMB)
 """
