@@ -165,6 +165,7 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
     mapeamentos_especificos = {
         'O_que_voc_faz_atualmente_Sou_autonomo': 'O_que_voc_faz_atualmente_Sou_aut_nomo',
         'Tem_computador_notebook_SIM': 'Tem_computador_notebook_Sim',
+        'Tem_computador_notebook_N_O': 'Tem_computador_notebook_N_o',  # NÃO maiúsculo → regex remove ã
         'Medium_outros': 'Medium_Outros'  # Corrigir capitalização
     }
 
