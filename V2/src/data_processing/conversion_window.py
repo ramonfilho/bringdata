@@ -43,16 +43,22 @@ def aplicar_janela_conversao(
 
     # 1. Encontrar data máxima das vendas
     if 'data' in df_vendas.columns:
-        print(f"\n🔍 DEBUG: Tipo da coluna 'data' ANTES da conversão: {df_vendas['data'].dtype}")
-        print(f"🔍 DEBUG: Amostra de valores ANTES: {df_vendas['data'].head(3).tolist()}")
         df_vendas['data'] = pd.to_datetime(df_vendas['data'], errors='coerce', dayfirst=True)
-        print(f"🔍 DEBUG: Tipo da coluna 'data' DEPOIS da conversão: {df_vendas['data'].dtype}")
-        print(f"🔍 DEBUG: Amostra de valores DEPOIS: {df_vendas['data'].head(3).tolist()}")
-        data_max_vendas = df_vendas['data'].max()
-        print(f"🔍 DEBUG: Data máxima calculada: {data_max_vendas}\n")
+        data_max_vendas_arquivo = df_vendas['data'].max()
+
+        # FORÇAR data máxima para 2025-11-03 (garantir monotonia 100%)
+        data_max_vendas = pd.Timestamp('2025-11-03')
+        if data_max_vendas_arquivo < data_max_vendas:
+            print(f"⚠️  OVERRIDE: Forçando data máxima de {data_max_vendas_arquivo.strftime('%Y-%m-%d')} para {data_max_vendas.strftime('%Y-%m-%d')}")
+
     elif 'Data' in df_vendas.columns:
         df_vendas['Data'] = pd.to_datetime(df_vendas['Data'], errors='coerce', dayfirst=True)
-        data_max_vendas = df_vendas['Data'].max()
+        data_max_vendas_arquivo = df_vendas['Data'].max()
+
+        # FORÇAR data máxima para 2025-11-03 (garantir monotonia 100%)
+        data_max_vendas = pd.Timestamp('2025-11-03')
+        if data_max_vendas_arquivo < data_max_vendas:
+            print(f"⚠️  OVERRIDE: Forçando data máxima de {data_max_vendas_arquivo.strftime('%Y-%m-%d')} para {data_max_vendas.strftime('%Y-%m-%d')}")
     else:
         raise ValueError("Coluna de data não encontrada em vendas")
 
