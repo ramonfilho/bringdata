@@ -38,7 +38,6 @@ from src.data_processing.devclub_filtering_training import criar_dataset_devclub
 from src.data_processing.conversion_window import aplicar_janela_conversao
 from src.features.feature_engineering_training import criar_features_derivadas
 from src.features.encoding_training import aplicar_encoding_estrategico
-from src.data_processing.traffic_features import adicionar_features_temporais_medium
 from src.model.training_model import registrar_features_e_modelo_devclub
 from src.model.hyperparameter_tuning import hyperparameter_tuning
 
@@ -86,7 +85,7 @@ def setup_output_logging():
     return log_path, tee
 
 
-def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', use_guru_only=None, set_active=False, temporal_features=False, medium_strategy='binary_top3'):
+def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', use_guru_only=None, set_active=False, medium_strategy='binary_top3'):
     """Executa pipeline de treino completo.
 
     Args:
@@ -102,7 +101,6 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         grid_size: Tamanho do grid search ('small', 'medium', 'large')
         use_guru_only: Se True, usa apenas GURU. Se False, usa GURU+TMB. Se None, usa valor do config.
         set_active: Se True, atualiza configs/active_model.yaml com este modelo (requer save_files=True)
-        temporal_features: Se True, adiciona features temporais de tráfego (densidade, tendência, rank)
     """
 
     # Configurar redirecionamento de output para arquivo
@@ -127,7 +125,6 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     print(f"   Hyperparameter tuning: {tune_hyperparams}")
     if tune_hyperparams:
         print(f"   Grid size: {grid_size}")
-    print(f"   Features temporais de tráfego: {temporal_features}")
     print("=" * 80)
 
     # Carregar configuração
@@ -815,32 +812,6 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         'fator_correcao': fator_correcao
     }
 
-    # === FEATURES TEMPORAIS (OPCIONAL) ===
-    if temporal_features:
-        print("\n" + "=" * 80)
-        print("🕒 ADICIONANDO FEATURES TEMPORAIS DE TRÁFEGO")
-        print("=" * 80)
-
-        # Salvar cópia antes das temporais
-        dataset_antes_temporais = dataset_v1_devclub.copy()
-
-        # PASSO 1: Adicionar features temporais (dataset ainda tem coluna 'Data')
-        dataset_v1_devclub = adicionar_features_temporais_medium(
-            df_leads=dataset_v1_devclub,
-            coluna_data='Data',
-            coluna_medium='Medium'
-        )
-
-        print(f"\n✅ Features temporais adicionadas!")
-        print(f"   Colunas antes: {len(dataset_antes_temporais.columns)}")
-        print(f"   Colunas depois: {len(dataset_v1_devclub.columns)}")
-        print(f"   Novas features: {len(dataset_v1_devclub.columns) - len(dataset_antes_temporais.columns)}")
-
-        # Listar novas features
-        novas_features = [col for col in dataset_v1_devclub.columns if col not in dataset_antes_temporais.columns]
-        print(f"   Features criadas: {novas_features}")
-        print("=" * 80)
-
     # === CÉLULA 18: Feature Engineering ===
     print(f"\n⚙️  CÉLULA 18: FEATURE ENGINEERING")
     print("=" * 60)
@@ -935,11 +906,6 @@ if __name__ == "__main__":
         help='Definir este modelo como ativo em configs/active_model.yaml (requer --save-files)'
     )
     parser.add_argument(
-        '--temporal-features',
-        action='store_true',
-        help='Adicionar features temporais de tráfego (densidade, tendência, rank por Medium) - padrão: False'
-    )
-    parser.add_argument(
         '--medium-strategy',
         type=str,
         choices=['full', 'binary_aberto', 'binary_aberto_dgen', 'binary_top3', 'remove'],
@@ -962,6 +928,5 @@ if __name__ == "__main__":
         split_method=args.split_method,
         use_guru_only=use_guru_only,
         set_active=args.set_active,
-        temporal_features=args.temporal_features,
         medium_strategy=args.medium_strategy
     )
