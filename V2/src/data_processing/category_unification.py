@@ -72,6 +72,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
         df.loc[df['Tem computador/notebook?'] == 'SIM', 'Tem computador/notebook?'] = 'Sim'
         df.loc[df['Tem computador/notebook?'] == 'não', 'Tem computador/notebook?'] = 'Não'
+        df.loc[df['Tem computador/notebook?'] == 'NÃO', 'Tem computador/notebook?'] = 'Não'
 
         valores_unicos = df['Tem computador/notebook?'].nunique()
         print(f"   Resultado: {valores_unicos} valores únicos")
