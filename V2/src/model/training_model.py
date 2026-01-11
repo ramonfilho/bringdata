@@ -123,7 +123,8 @@ def registrar_features_e_modelo_devclub(
     custom_hyperparams: dict = None,
     split_method: str = 'temporal',
     set_active: bool = False,
-    recall_metrics: dict = None
+    recall_metrics: dict = None,
+    categorias_treino: dict = None
 ) -> dict:
     """
     Registra features e salva modelo DevClub para produção.
@@ -1000,6 +1001,13 @@ def registrar_features_e_modelo_devclub(
             with open(features_filename, 'w', encoding='utf-8') as f:
                 json.dump(features_ordenadas, f, indent=2, ensure_ascii=False)
             print(f"✓ {features_filename} salvo")
+
+            # Salvar categorias esperadas (para drift detection)
+            if categorias_treino:
+                categorias_filename = f'{output_dir}/categorias_esperadas.json'
+                with open(categorias_filename, 'w', encoding='utf-8') as f:
+                    json.dump(categorias_treino, f, indent=2, ensure_ascii=False)
+                print(f"✓ {categorias_filename} salvo ({len(categorias_treino)} colunas rastreadas)")
 
             # Salvar test set com predições
             test_set_filename = f'{output_dir}/test_set_predictions.csv'

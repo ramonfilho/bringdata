@@ -40,6 +40,7 @@ from src.features.feature_engineering_training import criar_features_derivadas
 from src.features.encoding_training import aplicar_encoding_estrategico
 from src.model.training_model import registrar_features_e_modelo_devclub
 from src.model.hyperparameter_tuning import hyperparameter_tuning
+from src.monitoring.category_tracker import capture_training_categories
 
 # Configurar logging
 # WARNING: Suprime logger.info() dos módulos para output limpo
@@ -820,6 +821,17 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     # Resultado final: 4 temporais + 7 FE + 15 base = 26 colunas
     dataset_v1_devclub_fe = criar_features_derivadas(dataset_v1_devclub)
 
+    # === CÉLULA 18.5: Capturar categorias para monitoramento ===
+    print(f"\n📊 CAPTURANDO CATEGORIAS PARA MONITORAMENTO (DRIFT DETECTION)")
+    print("=" * 60)
+    print("Identificando e salvando categorias únicas para detecção de drift...")
+
+    # Salvar categorias apenas se save_files=True
+    # O arquivo será salvo na mesma pasta do modelo pelo registrar_features_e_modelo_devclub
+    # Por enquanto, apenas capturar - salvaremos depois junto com o modelo
+    categorias_capturadas = capture_training_categories(dataset_v1_devclub_fe, output_path=None)
+    print("=" * 60)
+
     # === CÉLULA 19: Pulada (exploratória) ===
     print("\n⏭️  CÉLULA 19: Pulando célula exploratória/informativa do notebook original de treino")
 
@@ -852,6 +864,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         dataset_v1_devclub_encoded,
         dataset_v1_devclub,
         save_files=save_files,
+        categorias_treino=categorias_capturadas,
         matching_method=initial_matching,
         custom_hyperparams=melhores_params,
         split_method=split_method,

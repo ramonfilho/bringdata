@@ -16,6 +16,7 @@ from .data_processing.medium_unification import unify_medium_columns
 from .features.engineering import create_derived_features
 from .features.encoding import apply_categorical_encoding
 from .model.prediction import LeadScoringPredictor
+from .monitoring.category_tracker import check_category_drift, load_training_categories
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -127,6 +128,32 @@ class LeadScoringPipeline:
         logger.info(f"Arquivo carregado: {len(self.data)} linhas, {len(self.data.columns)} colunas")
         return self.data
 
+    def check_category_drift(self) -> list:
+        """
+        Verifica se há novas categorias não vistas no treino.
+
+        Returns:
+            Lista de alertas (vazia se tudo OK)
+        """
+        try:
+            # Carregar categorias esperadas do modelo ativo
+            model_path = self.predictor.model_path or self.predictor._get_active_model_path()
+            categorias_esperadas = load_training_categories(model_path)
+
+            # Verificar drift
+            alertas = check_category_drift(self.data, categorias_esperadas)
+
+            return alertas
+
+        except FileNotFoundError as e:
+            # Modelo antigo sem arquivo de categorias
+            logger.warning(f"⚠️ Arquivo de categorias não encontrado: {e}")
+            logger.warning("   Execute retreino para gerar categorias_esperadas.json")
+            return []
+        except Exception as e:
+            logger.error(f"❌ Erro ao verificar category drift: {e}")
+            return []
+
     def preprocess(self) -> pd.DataFrame:
         """
         Aplica pré-processamento aos dados.
@@ -207,6 +234,22 @@ class LeadScoringPipeline:
         # Número de colunas deveria permanecer o mesmo (renomeação não adiciona/remove)
         logger.info(f"   ➤ Colunas renomeadas (mantém total): {len(self.data.columns)}")
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
+
+        # 7.5. Verificar category drift ANTES do encoding
+        logger.info("🔍 [7.5/10] Verificando category drift...")
+        drift_alerts = self.check_category_drift()
+
+        if drift_alerts:
+            logger.warning(f"⚠️  {len(drift_alerts)} alertas de category drift detectados:")
+            for alert in drift_alerts:
+                logger.warning(f"   {alert['message']}")
+
+            # Armazenar alertas para enviar depois (implementação futura)
+            if not hasattr(self, 'alerts'):
+                self.alerts = []
+            self.alerts.extend(drift_alerts)
+        else:
+            logger.info("   ✅ Nenhuma categoria nova detectada")
 
         # 8. Engenharia de features (usando componente importado)
         logger.info("🔄 [8/10] Aplicando engenharia de features...")
