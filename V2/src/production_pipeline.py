@@ -17,7 +17,7 @@ from .data_processing.category_unification import unificar_categorias_completo
 from .features.engineering import create_derived_features
 from .features.encoding import apply_categorical_encoding
 from .model.prediction import LeadScoringPredictor
-from .monitoring.category_tracker import check_category_drift, load_training_categories
+from .monitoring.category_tracker import check_category_drift, load_training_categories, check_distribution_drift, load_training_distributions
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -266,7 +266,7 @@ class LeadScoringPipeline:
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
         # 8. Verificar category drift ANTES do encoding
-        logger.info("🔍 [8/11] Verificando category drift...")
+        logger.info("🔍 [8/12] Verificando category drift...")
         drift_alerts = self.check_category_drift()
 
         if drift_alerts:
@@ -281,8 +281,37 @@ class LeadScoringPipeline:
         else:
             logger.info("   ✅ Nenhuma categoria nova detectada")
 
+        # 8.5. Verificar distribution drift (mudanças nas proporções)
+        logger.info("🔍 [8.5/12] Verificando distribution drift...")
+        try:
+            # Carregar distribuições esperadas do modelo ativo
+            model_path = self.predictor.model_path or self.predictor._get_active_model_path()
+            distribuicoes_esperadas = load_training_distributions(model_path)
+
+            # Verificar drift nas distribuições
+            distribution_alerts = check_distribution_drift(self.data, distribuicoes_esperadas)
+
+            if distribution_alerts:
+                logger.warning(f"⚠️  {len(distribution_alerts)} alertas de distribution drift detectados:")
+                for alert in distribution_alerts:
+                    logger.warning(f"   {alert['message']}")
+
+                # Armazenar alertas
+                if not hasattr(self, 'alerts'):
+                    self.alerts = []
+                self.alerts.extend(distribution_alerts)
+            else:
+                logger.info("   ✅ Nenhuma mudança drástica nas distribuições")
+
+        except FileNotFoundError as e:
+            # Modelo antigo sem arquivo de distribuições
+            logger.warning(f"⚠️ Arquivo de distribuições não encontrado: {e}")
+            logger.warning("   Execute retreino para gerar distribuicoes_esperadas.json")
+        except Exception as e:
+            logger.error(f"❌ Erro ao verificar distribution drift: {e}")
+
         # 9. Engenharia de features (usando componente importado)
-        logger.info("🔄 [9/11] Aplicando engenharia de features...")
+        logger.info("🔄 [9/12] Aplicando engenharia de features...")
         cols_before_fe = len(self.data.columns)
 
         # Verificar se colunas necessárias existem
@@ -298,7 +327,7 @@ class LeadScoringPipeline:
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
         # 10. Encoding categórico (usando componente importado)
-        logger.info("🔄 [10/11] Aplicando encoding categórico...")
+        logger.info("🔄 [10/12] Aplicando encoding categórico...")
         cols_before_encoding = len(self.data.columns)
 
         self.data = apply_categorical_encoding(self.data, versao="v1", medium_strategy="binary_top3")
@@ -308,7 +337,7 @@ class LeadScoringPipeline:
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
         # 11. Manter features UTM (configuração fixa)
-        logger.info("🔄 [11/11] Mantendo features UTM")
+        logger.info("🔄 [11/12] Mantendo features UTM")
 
         # Resumo final
         final_rows = len(self.data)

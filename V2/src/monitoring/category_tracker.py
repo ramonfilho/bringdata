@@ -1,10 +1,15 @@
 """
-Rastreamento de categorias vistas no treino para detecção de drift.
+Rastreamento de categorias e distribuições vistas no treino para detecção de drift.
+Detecta:
+- Novas categorias não vistas no treino
+- Mudanças drásticas nas proporções de categorias
+- Mudanças drásticas nas distribuições de features numéricas
 """
 
 import json
 import pandas as pd
-from typing import Dict, Set, List
+import numpy as np
+from typing import Dict, Set, List, Tuple
 from pathlib import Path
 
 
@@ -162,6 +167,254 @@ def load_training_categories(model_path: str) -> Dict[str, List[str]]:
     if not json_path.exists():
         raise FileNotFoundError(
             f"Arquivo de categorias não encontrado: {json_path}\n"
+            f"Execute o treino novamente para gerar este arquivo."
+        )
+
+    with open(json_path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def capture_training_distributions(df: pd.DataFrame, output_path: str = None) -> Dict:
+    """
+    Captura distribuições completas (proporções categóricas + estatísticas numéricas).
+
+    Args:
+        df: DataFrame ANTES do encoding (com colunas originais)
+        output_path: Caminho para salvar JSON (opcional)
+
+    Returns:
+        Dict com estrutura:
+        {
+            "categorical": {
+                "coluna1": {"categoria1": 0.45, "categoria2": 0.55, ...}
+            },
+            "numerical": {
+                "coluna1": {"mean": 10.5, "median": 9.0, "std": 3.2, ...}
+            }
+        }
+    """
+    print("\n📊 Capturando distribuições de treino...")
+
+    distribuicoes = {
+        "categorical": {},
+        "numerical": {}
+    }
+
+    # Colunas a ignorar (features derivadas, target, etc)
+    colunas_ignorar = {
+        'target',
+        'Data',  # será removida no FE
+        'Nome Completo',  # será removida no FE
+        'E-mail',  # será removida no FE
+        'Telefone'  # será removida no FE
+    }
+
+    for col in df.columns:
+        if col in colunas_ignorar:
+            continue
+
+        # Contar valores não-nulos
+        total_nao_nulos = df[col].notna().sum()
+        if total_nao_nulos == 0:
+            continue
+
+        # Identificar tipo de coluna
+        is_categorical = (
+            df[col].dtype == 'object' or
+            df[col].dtype == 'bool' or  # Booleanas são categóricas
+            (df[col].dtype in ['int64', 'float64'] and df[col].nunique() <= 20)
+        )
+
+        if is_categorical:
+            # Capturar proporções de categorias
+            contagens = df[col].value_counts()
+            proporcoes = (contagens / total_nao_nulos).to_dict()
+
+            # Converter keys para string (importante para JSON)
+            proporcoes_str = {str(k): float(v) for k, v in proporcoes.items()}
+
+            distribuicoes["categorical"][col] = proporcoes_str
+            print(f"   ✓ {col}: {len(proporcoes)} categorias")
+
+        else:
+            # Capturar estatísticas numéricas (apenas para numéricas reais, não booleanas)
+            try:
+                stats = {
+                    "mean": float(df[col].mean()),
+                    "median": float(df[col].median()),
+                    "std": float(df[col].std()),
+                    "min": float(df[col].min()),
+                    "max": float(df[col].max()),
+                    "q25": float(df[col].quantile(0.25)),
+                    "q75": float(df[col].quantile(0.75)),
+                    "missing_rate": float((df[col].isna().sum() / len(df)))
+                }
+
+                distribuicoes["numerical"][col] = stats
+                print(f"   ✓ {col}: μ={stats['mean']:.2f}, σ={stats['std']:.2f}")
+            except (TypeError, ValueError) as e:
+                # Se não conseguir calcular estatísticas, tratar como categórica
+                print(f"   ⚠️ {col}: não foi possível calcular estatísticas numéricas, tratando como categórica")
+                contagens = df[col].value_counts()
+                proporcoes = (contagens / total_nao_nulos).to_dict()
+                proporcoes_str = {str(k): float(v) for k, v in proporcoes.items()}
+                distribuicoes["categorical"][col] = proporcoes_str
+
+    print(f"\n📊 Total: {len(distribuicoes['categorical'])} categóricas, "
+          f"{len(distribuicoes['numerical'])} numéricas")
+
+    # Salvar se caminho fornecido
+    if output_path:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(distribuicoes, f, indent=2, ensure_ascii=False)
+        print(f"✅ Distribuições salvas em: {output_path}")
+
+    return distribuicoes
+
+
+def check_distribution_drift(df_producao: pd.DataFrame,
+                             distribuicoes_esperadas: Dict,
+                             threshold_categorical: float = 0.15,
+                             threshold_numerical: float = 2.0) -> List[Dict]:
+    """
+    Detecta mudanças drásticas nas distribuições.
+
+    Args:
+        df_producao: DataFrame de produção ANTES do encoding
+        distribuicoes_esperadas: Dict carregado do JSON do treino
+        threshold_categorical: Mudança mínima em % para alertar (padrão: 15pp)
+        threshold_numerical: Mudança em desvios padrão para alertar (padrão: 2.0σ)
+
+    Returns:
+        Lista de alertas (vazia se tudo OK)
+    """
+    alertas = []
+
+    # 1. Verificar mudanças em distribuições categóricas
+    for col, proporcoes_treino in distribuicoes_esperadas.get("categorical", {}).items():
+        if col not in df_producao.columns:
+            continue
+
+        # Calcular proporções atuais
+        total_nao_nulos = df_producao[col].notna().sum()
+        if total_nao_nulos == 0:
+            continue
+
+        contagens = df_producao[col].value_counts()
+        proporcoes_producao = (contagens / total_nao_nulos).to_dict()
+        proporcoes_producao_str = {str(k): float(v) for k, v in proporcoes_producao.items()}
+
+        # Comparar cada categoria
+        mudancas_significativas = []
+        for categoria, prop_treino in proporcoes_treino.items():
+            prop_producao = proporcoes_producao_str.get(categoria, 0.0)
+            diff = abs(prop_producao - prop_treino)
+
+            # Alertar se mudança > threshold
+            if diff >= threshold_categorical:
+                mudancas_significativas.append({
+                    'categoria': categoria,
+                    'treino': prop_treino,
+                    'producao': prop_producao,
+                    'diff': diff
+                })
+
+        if mudancas_significativas:
+            # Ordenar por maior diferença
+            mudancas_significativas.sort(key=lambda x: x['diff'], reverse=True)
+
+            # Formatar mensagem
+            mudancas_msg = []
+            for m in mudancas_significativas[:3]:  # Mostrar top 3
+                mudancas_msg.append(
+                    f"'{m['categoria']}': {m['treino']*100:.1f}%→{m['producao']*100:.1f}% "
+                    f"({m['diff']*100:+.1f}pp)"
+                )
+            mais_msg = f" (e mais {len(mudancas_significativas)-3})" if len(mudancas_significativas) > 3 else ""
+
+            # Determinar severidade pela maior mudança
+            max_diff = mudancas_significativas[0]['diff']
+            if max_diff >= 0.30:  # 30pp
+                severity = 'HIGH'
+            elif max_diff >= 0.20:  # 20pp
+                severity = 'MEDIUM'
+            else:
+                severity = 'LOW'
+
+            alertas.append({
+                'type': 'categorical_distribution_drift',
+                'column': col,
+                'changes': mudancas_significativas,
+                'severity': severity,
+                'message': f"⚠️ {col}: {len(mudancas_significativas)} mudança(s) significativa(s) nas proporções\n"
+                          f"   {', '.join(mudancas_msg)}{mais_msg}"
+            })
+
+    # 2. Verificar mudanças em distribuições numéricas
+    for col, stats_treino in distribuicoes_esperadas.get("numerical", {}).items():
+        if col not in df_producao.columns:
+            continue
+
+        # Calcular estatísticas atuais
+        if df_producao[col].notna().sum() == 0:
+            continue
+
+        mean_treino = stats_treino['mean']
+        std_treino = stats_treino['std']
+        mean_producao = float(df_producao[col].mean())
+        std_producao = float(df_producao[col].std())
+
+        # Calcular mudança em desvios padrão
+        if std_treino > 0:
+            mean_diff_sigma = abs(mean_producao - mean_treino) / std_treino
+        else:
+            mean_diff_sigma = 0.0
+
+        # Alertar se mudança > threshold
+        if mean_diff_sigma >= threshold_numerical:
+            # Determinar severidade
+            if mean_diff_sigma >= 3.0:
+                severity = 'HIGH'
+            elif mean_diff_sigma >= 2.5:
+                severity = 'MEDIUM'
+            else:
+                severity = 'LOW'
+
+            alertas.append({
+                'type': 'numerical_distribution_drift',
+                'column': col,
+                'mean_treino': mean_treino,
+                'mean_producao': mean_producao,
+                'std_treino': std_treino,
+                'std_producao': std_producao,
+                'sigma_diff': mean_diff_sigma,
+                'severity': severity,
+                'message': f"⚠️ {col}: média mudou {mean_diff_sigma:.1f}σ\n"
+                          f"   Treino: μ={mean_treino:.2f} (σ={std_treino:.2f})\n"
+                          f"   Produção: μ={mean_producao:.2f} (σ={std_producao:.2f})"
+            })
+
+    return alertas
+
+
+def load_training_distributions(model_path: str) -> Dict:
+    """
+    Carrega distribuições esperadas do arquivo JSON do modelo.
+
+    Args:
+        model_path: Caminho da pasta do modelo (ex: files/20260109_110657)
+
+    Returns:
+        Dict com distribuições esperadas
+
+    Raises:
+        FileNotFoundError: Se arquivo não existir
+    """
+    json_path = Path(model_path) / "distribuicoes_esperadas.json"
+
+    if not json_path.exists():
+        raise FileNotFoundError(
+            f"Arquivo de distribuições não encontrado: {json_path}\n"
             f"Execute o treino novamente para gerar este arquivo."
         )
 

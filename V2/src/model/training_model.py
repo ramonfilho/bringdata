@@ -124,7 +124,8 @@ def registrar_features_e_modelo_devclub(
     split_method: str = 'temporal',
     set_active: bool = False,
     recall_metrics: dict = None,
-    categorias_treino: dict = None
+    categorias_treino: dict = None,
+    distribuicoes_treino: dict = None
 ) -> dict:
     """
     Registra features e salva modelo DevClub para produção.
@@ -1009,6 +1010,15 @@ def registrar_features_e_modelo_devclub(
                 with open(categorias_filename, 'w', encoding='utf-8') as f:
                     json.dump(categorias_treino, f, indent=2, ensure_ascii=False)
                 print(f"✓ {categorias_filename} salvo ({len(categorias_treino)} colunas rastreadas)")
+
+            # Salvar distribuições esperadas (para distribution drift detection)
+            if distribuicoes_treino:
+                distribuicoes_filename = f'{output_dir}/distribuicoes_esperadas.json'
+                with open(distribuicoes_filename, 'w', encoding='utf-8') as f:
+                    json.dump(distribuicoes_treino, f, indent=2, ensure_ascii=False)
+                cat_count = len(distribuicoes_treino.get('categorical', {}))
+                num_count = len(distribuicoes_treino.get('numerical', {}))
+                print(f"✓ {distribuicoes_filename} salvo ({cat_count} categóricas, {num_count} numéricas)")
 
             # Salvar test set com predições
             test_set_filename = f'{output_dir}/test_set_predictions.csv'
