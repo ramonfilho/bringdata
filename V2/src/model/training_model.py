@@ -968,9 +968,10 @@ def registrar_features_e_modelo_devclub(
             print("\n4. SALVANDO ARQUIVOS LOCAIS")
             print("-" * 50)
 
-            # Criar pasta com timestamp
+            # Criar pasta com timestamp no diretório V2/files/
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            output_dir = f'files/{timestamp}'
+            base_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'files')
+            output_dir = os.path.join(base_dir, timestamp)
             os.makedirs(output_dir, exist_ok=True)
 
             # Salvar feature registry
@@ -1031,7 +1032,7 @@ def registrar_features_e_modelo_devclub(
                 active_config = {
                     'active_model': {
                         'model_name': f"v1_devclub_rf_{split_method}_single",
-                        'model_path': f"{output_dir}",
+                        'model_path': f"files/{timestamp}",
                         'trained_at': model_metadata['model_info']['trained_at'],
                         'split_method': split_method,
                         'performance': {
