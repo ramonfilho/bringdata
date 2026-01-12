@@ -13,6 +13,7 @@ from datetime import datetime
 from .data_processing.preprocessing import remove_duplicates, clean_columns, remove_campaign_features, remove_technical_fields, rename_long_column_names
 from .data_processing.utm_unification import unify_utm_columns
 from .data_processing.medium_unification import unify_medium_columns
+from .data_processing.category_unification import unificar_categorias_completo
 from .features.engineering import create_derived_features
 from .features.encoding import apply_categorical_encoding
 from .model.prediction import LeadScoringPredictor
@@ -170,7 +171,7 @@ class LeadScoringPipeline:
         logger.info(f"📊 INÍCIO DO PIPELINE: {initial_rows} linhas, {initial_cols} colunas")
 
         # 1. Remover duplicatas (usando componente importado)
-        logger.info("🔄 [1/10] Removendo duplicatas...")
+        logger.info("🔄 [1/11] Removendo duplicatas...")
         self.data = remove_duplicates(self.data)
 
         duplicates_removed = initial_rows - len(self.data)
@@ -178,7 +179,7 @@ class LeadScoringPipeline:
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
         # 2. Limpar colunas desnecessárias (usando componente importado)
-        logger.info("🔄 [2/10] Removendo colunas score/faixa...")
+        logger.info("🔄 [2/11] Removendo colunas score/faixa...")
         cols_before_clean = len(self.data.columns)
         self.data = clean_columns(self.data)
 
@@ -187,7 +188,7 @@ class LeadScoringPipeline:
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
         # 3. Remover features de campanha (usando componente importado)
-        logger.info("🔄 [3/10] Removendo features de campanha...")
+        logger.info("🔄 [3/11] Removendo features de campanha...")
         cols_before_campaign = len(self.data.columns)
         self.data = remove_campaign_features(self.data)
 
@@ -196,7 +197,7 @@ class LeadScoringPipeline:
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
         # 4. Unificar categorias UTM (usando componente importado)
-        logger.info("🔄 [4/10] Unificando categorias UTM...")
+        logger.info("🔄 [4/11] Unificando categorias UTM...")
         utm_source_before = self.data['Source'].nunique() if 'Source' in self.data.columns else 0
         utm_term_before = self.data['Term'].nunique() if 'Term' in self.data.columns else 0
 
@@ -209,7 +210,7 @@ class LeadScoringPipeline:
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
         # 5. Unificar categorias Medium (usando componente importado)
-        logger.info("🔄 [5/10] Unificando categorias Medium...")
+        logger.info("🔄 [5/11] Unificando categorias Medium...")
         medium_before = self.data['Medium'].nunique() if 'Medium' in self.data.columns else 0
 
         self.data = unify_medium_columns(self.data)
@@ -218,8 +219,37 @@ class LeadScoringPipeline:
         logger.info(f"   ➤ Medium: {medium_before}→{medium_after} categorias")
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
+        # 5.5. Unificar categorias de pesquisa (usando componente importado)
+        logger.info("🔄 [5.5/11] Unificando categorias de pesquisa...")
+
+        # Contar categorias antes para tracking
+        categorias_antes = {}
+        colunas_pesquisa = [
+            'interesse_programacao', 'Tem computador/notebook?',
+            'O que mais você quer ver no evento?', 'Você possui cartão de crédito?',
+            'Atualmente, qual a sua faixa salarial?', 'O que você faz atualmente?',
+            'Qual a sua idade?', 'Você já fez/faz/pretende fazer faculdade?'
+        ]
+        for col in colunas_pesquisa:
+            if col in self.data.columns:
+                categorias_antes[col] = self.data[col].nunique()
+
+        self.data = unificar_categorias_completo(self.data)
+
+        # Contar categorias depois
+        categorias_normalizadas = 0
+        for col in colunas_pesquisa:
+            if col in self.data.columns:
+                depois = self.data[col].nunique()
+                antes = categorias_antes.get(col, depois)
+                if antes != depois:
+                    categorias_normalizadas += (antes - depois)
+
+        logger.info(f"   ➤ Categorias normalizadas: {categorias_normalizadas}")
+        logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
+
         # 6. Remover campos técnicos (usando componente importado)
-        logger.info("🔄 [6/10] Removendo campos técnicos...")
+        logger.info("🔄 [6/11] Removendo campos técnicos...")
         cols_before_tech = len(self.data.columns)
         self.data = remove_technical_fields(self.data)
 
@@ -228,15 +258,15 @@ class LeadScoringPipeline:
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
         # 7. Renomear colunas longas (usando componente importado)
-        logger.info("🔄 [7/10] Renomeando colunas longas...")
+        logger.info("🔄 [7/11] Renomeando colunas longas...")
         self.data = rename_long_column_names(self.data)
 
         # Número de colunas deveria permanecer o mesmo (renomeação não adiciona/remove)
         logger.info(f"   ➤ Colunas renomeadas (mantém total): {len(self.data.columns)}")
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
-        # 7.5. Verificar category drift ANTES do encoding
-        logger.info("🔍 [7.5/10] Verificando category drift...")
+        # 8. Verificar category drift ANTES do encoding
+        logger.info("🔍 [8/11] Verificando category drift...")
         drift_alerts = self.check_category_drift()
 
         if drift_alerts:
@@ -251,8 +281,8 @@ class LeadScoringPipeline:
         else:
             logger.info("   ✅ Nenhuma categoria nova detectada")
 
-        # 8. Engenharia de features (usando componente importado)
-        logger.info("🔄 [8/10] Aplicando engenharia de features...")
+        # 9. Engenharia de features (usando componente importado)
+        logger.info("🔄 [9/11] Aplicando engenharia de features...")
         cols_before_fe = len(self.data.columns)
 
         # Verificar se colunas necessárias existem
@@ -267,8 +297,8 @@ class LeadScoringPipeline:
         logger.info(f"   ➤ Features criadas/processadas: {cols_added} novas colunas")
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
-        # 9. Encoding categórico (usando componente importado)
-        logger.info("🔄 [9/10] Aplicando encoding categórico...")
+        # 10. Encoding categórico (usando componente importado)
+        logger.info("🔄 [10/11] Aplicando encoding categórico...")
         cols_before_encoding = len(self.data.columns)
 
         self.data = apply_categorical_encoding(self.data, versao="v1", medium_strategy="binary_top3")
@@ -277,8 +307,8 @@ class LeadScoringPipeline:
         logger.info(f"   ➤ Colunas adicionadas pelo encoding: {encoding_cols_added}")
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
-        # 10. Manter features UTM (configuração fixa)
-        logger.info("🔄 [10/10] Mantendo features UTM")
+        # 11. Manter features UTM (configuração fixa)
+        logger.info("🔄 [11/11] Mantendo features UTM")
 
         # Resumo final
         final_rows = len(self.data)
