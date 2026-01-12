@@ -31,20 +31,15 @@ def capture_training_categories(df: pd.DataFrame, output_path: str = None) -> Di
 
     categorias_por_coluna = {}
 
-    # Colunas a ignorar (features derivadas, target, etc)
+    # Colunas a ignorar (apenas campos removidos, não features derivadas)
+    # Features derivadas (nome_valido, email_valido, etc) SÃO rastreadas
+    # para detectar mudanças na qualidade dos dados
     colunas_ignorar = {
         'target',
         'Data',  # será removida no FE
         'Nome Completo',  # será removida no FE
         'E-mail',  # será removida no FE
-        'Telefone',  # será removida no FE
-        'nome_comprimento',  # numérica derivada
-        'dia_semana',  # ordinal numérica
-        'nome_tem_sobrenome',  # booleana (será one-hot)
-        'nome_valido',  # booleana
-        'email_valido',  # booleana
-        'telefone_valido',  # booleana
-        'telefone_comprimento'  # numérica
+        'Telefone'  # será removida no FE
     }
 
     for col in df.columns:
@@ -54,9 +49,11 @@ def capture_training_categories(df: pd.DataFrame, output_path: str = None) -> Di
 
         # Identificar colunas categóricas:
         # 1. Tipo object (string)
-        # 2. OU numérica com poucos valores únicos (<=20) - pode ser ordinal encoding já aplicado
+        # 2. Tipo bool (booleanas - features de qualidade)
+        # 3. OU numérica com poucos valores únicos (<=20) - pode ser ordinal encoding já aplicado
         is_categorical = (
             df[col].dtype == 'object' or
+            df[col].dtype == 'bool' or
             (df[col].dtype in ['int64', 'float64'] and df[col].nunique() <= 20)
         )
 
