@@ -112,6 +112,12 @@ def check_category_drift(df_producao: pd.DataFrame,
         categorias_producao = df_producao[col].dropna().unique()
         categorias_producao_str = [str(v) for v in categorias_producao]
 
+        # Filtrar strings vazias e 'nan' (não são categorias reais)
+        categorias_producao_str = [
+            v for v in categorias_producao_str
+            if v.strip() and v.lower() != 'nan'
+        ]
+
         # Encontrar novas categorias
         set_treino = set(categorias_treino)
         set_producao = set(categorias_producao_str)
@@ -575,7 +581,9 @@ class DataQualityMonitor:
             return alerts
 
         for col in df.columns:
+            # Contar NaN + strings vazias
             missing_count = df[col].isna().sum()
+            missing_count += (df[col].astype(str).str.strip() == '').sum()
             missing_rate = missing_count / total_rows
 
             if missing_rate > threshold:

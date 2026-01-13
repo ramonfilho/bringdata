@@ -4,6 +4,7 @@ Orquestrador central de monitoramento.
 Coordena execução de todos os monitors e consolida alertas.
 """
 
+import logging
 import pandas as pd
 from typing import List, Dict
 from sqlalchemy.orm import Session
@@ -12,6 +13,8 @@ from .data_quality import DataQualityMonitor
 from .operational_monitor import OperationalMonitor
 from .capi_monitor import CAPIQualityMonitor
 from .models import Alert
+
+logger = logging.getLogger(__name__)
 
 
 class MonitoringOrchestrator:
@@ -55,6 +58,16 @@ class MonitoringOrchestrator:
         # 1. Data Quality (usa JSON do Sheets)
         if leads_data:
             df = pd.DataFrame(leads_data)
+
+            # Logar range de leads analisados (para facilitar debug com arquivo local)
+            primeiro_email = df.iloc[0].get('E-mail', 'N/A') if len(df) > 0 else 'N/A'
+            primeiro_data = df.iloc[0].get('Data', 'N/A') if len(df) > 0 else 'N/A'
+            ultimo_email = df.iloc[-1].get('E-mail', 'N/A') if len(df) > 0 else 'N/A'
+            ultimo_data = df.iloc[-1].get('Data', 'N/A') if len(df) > 0 else 'N/A'
+
+            logger.info(f"📧 Primeiro lead: {primeiro_email} (Data: {primeiro_data})")
+            logger.info(f"📧 Último lead: {ultimo_email} (Data: {ultimo_data})")
+
             all_alerts_dict.extend(self.monitors['data_quality'].check(df))
 
         # 2. Operational (usa PostgreSQL)
