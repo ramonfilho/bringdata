@@ -659,7 +659,7 @@ class DataQualityMonitor:
             alerts.append({
                 'type': 'score_distribution_change',
                 'severity': severity,
-                'category': 'DATA_QUALITY',
+                'category': 'data_quality',
                 'message': f"⚠️ Distribuição de decis mudou: {changes_msg}{mais_msg}",
                 'details': {
                     'changes': diferencas_significativas,
