@@ -100,10 +100,29 @@ validate_prerequisites() {
     fi
 
     if ! docker info &> /dev/null; then
-        print_error "Docker não está rodando. Inicie o Docker Desktop."
-        exit 1
+        print_warning "Docker não está rodando. Iniciando Docker Desktop..."
+        open -a Docker
+
+        print_info "Aguardando Docker inicializar (timeout: 120s)..."
+        for i in {1..60}; do
+            if docker info &> /dev/null 2>&1; then
+                print_success "Docker iniciado com sucesso!"
+                break
+            fi
+            echo -n "."
+            sleep 2
+
+            if [ $i -eq 60 ]; then
+                echo ""
+                print_error "Timeout: Docker não inicializou em 120 segundos"
+                print_error "Inicie o Docker Desktop manualmente e tente novamente"
+                exit 1
+            fi
+        done
+        echo ""
+    else
+        print_success "Docker está rodando"
     fi
-    print_success "Docker está rodando"
 
     # 1.2 gcloud CLI
     print_info "Verificando gcloud CLI..."
