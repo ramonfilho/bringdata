@@ -571,7 +571,7 @@ class DataQualityMonitor:
 
     def _check_missing_rate(self, df: pd.DataFrame) -> List[Dict]:
         """Verifica colunas com missing rate alto"""
-        from .config import THRESHOLDS
+        from .config import THRESHOLDS, MISSING_RATE_IGNORE_COLUMNS
         from datetime import datetime
         alerts = []
         threshold = THRESHOLDS['missing_rate']['threshold']
@@ -581,6 +581,9 @@ class DataQualityMonitor:
             return alerts
 
         for col in df.columns:
+            # Ignorar colunas da whitelist
+            if col in MISSING_RATE_IGNORE_COLUMNS:
+                continue
             # Contar NaN + strings vazias (converter para int nativo para serialização JSON)
             missing_count = int(df[col].isna().sum())
             missing_count += int((df[col].astype(str).str.strip() == '').sum())
