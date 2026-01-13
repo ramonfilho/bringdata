@@ -2208,6 +2208,24 @@ async def daily_monitoring_check(
                    f"MEDIUM: {result['alerts_by_severity']['MEDIUM']}, "
                    f"LOW: {result['alerts_by_severity']['LOW']})")
 
+        # Logar alertas detalhados
+        if result['total_alerts'] > 0:
+            logger.info(f"\n🚨 ALERTAS DETECTADOS ({result['total_alerts']}):\n")
+
+            max_alerts_to_log = min(10, len(result['alerts']))
+            for i, alert in enumerate(result['alerts'][:max_alerts_to_log], 1):
+                logger.info(f"{i}. [{alert['severity']}] {alert['type']}")
+                logger.info(f"   {alert['message']}")
+                if alert.get('metric_value'):
+                    threshold_msg = f" (threshold: {alert['threshold']})" if alert.get('threshold') else ""
+                    logger.info(f"   Valor: {alert['metric_value']}{threshold_msg}")
+                logger.info("")  # Linha em branco
+
+            if result['total_alerts'] > max_alerts_to_log:
+                logger.info(f"   ... e mais {result['total_alerts'] - max_alerts_to_log} alertas\n")
+        else:
+            logger.info("✅ Nenhum alerta detectado - sistema operando normalmente")
+
         return DailyCheckResponse(
             total_alerts=result['total_alerts'],
             alerts_by_severity=result['alerts_by_severity'],
