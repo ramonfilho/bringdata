@@ -581,9 +581,9 @@ class DataQualityMonitor:
             return alerts
 
         for col in df.columns:
-            # Contar NaN + strings vazias
-            missing_count = df[col].isna().sum()
-            missing_count += (df[col].astype(str).str.strip() == '').sum()
+            # Contar NaN + strings vazias (converter para int nativo para serialização JSON)
+            missing_count = int(df[col].isna().sum())
+            missing_count += int((df[col].astype(str).str.strip() == '').sum())
             missing_rate = missing_count / total_rows
 
             if missing_rate > threshold:
