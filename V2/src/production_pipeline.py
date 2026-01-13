@@ -17,7 +17,7 @@ from .data_processing.category_unification import unificar_categorias_completo
 from .features.engineering import create_derived_features
 from .features.encoding import apply_categorical_encoding
 from .model.prediction import LeadScoringPredictor
-from .monitoring.category_tracker import check_category_drift, load_training_categories, check_distribution_drift, load_training_distributions
+from .monitoring.data_quality import check_category_drift, load_training_categories, check_distribution_drift, load_training_distributions
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')

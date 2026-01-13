@@ -40,7 +40,7 @@ from src.features.feature_engineering_training import criar_features_derivadas
 from src.features.encoding_training import aplicar_encoding_estrategico
 from src.model.training_model import registrar_features_e_modelo_devclub
 from src.model.hyperparameter_tuning import hyperparameter_tuning
-from src.monitoring.category_tracker import capture_training_categories, capture_training_distributions
+from src.monitoring.data_quality import capture_training_categories, capture_training_distributions
 
 # Configurar logging
 # WARNING: Suprime logger.info() dos módulos para output limpo

@@ -1,9 +1,12 @@
 """
-Rastreamento de categorias e distribuições vistas no treino para detecção de drift.
+Monitor de qualidade de dados e detecção de drift.
+
 Detecta:
-- Novas categorias não vistas no treino
-- Mudanças drásticas nas proporções de categorias
+- Novas categorias não vistas no treino (category drift)
+- Mudanças drásticas nas proporções de categorias (distribution drift)
 - Mudanças drásticas nas distribuições de features numéricas
+- Missing rate alto em colunas
+- Mudanças na distribuição de scores/decis
 """
 
 import json
@@ -417,3 +420,254 @@ def load_training_distributions(model_path: str) -> Dict:
 
     with open(json_path, 'r', encoding='utf-8') as f:
         return json.load(f)
+
+
+# =============================================================================
+# MONITOR DE QUALIDADE DE DADOS
+# =============================================================================
+
+class DataQualityMonitor:
+    """
+    Monitor de qualidade de dados.
+
+    Verifica:
+    - Category drift (categorias não vistas no treino)
+    - Distribution drift (mudanças nas proporções)
+    - Missing rate alto
+    - Mudanças na distribuição de scores/decis
+    """
+
+    def __init__(self, model_path: str):
+        """
+        Args:
+            model_path: Caminho para pasta do modelo ativo
+        """
+        self.model_path = model_path
+
+    def check(self, df: pd.DataFrame) -> List[Dict]:
+        """
+        Executa todos os checks de qualidade de dados.
+
+        Args:
+            df: DataFrame com dados das últimas 24h do Sheets
+
+        Returns:
+            Lista de alertas no formato dict (compatível com Alert.from_dict)
+        """
+        from .config import THRESHOLDS, EXPECTED_DECIL_DISTRIBUTION
+        from datetime import datetime
+
+        alerts = []
+
+        # 1. Category drift
+        if THRESHOLDS['category_drift']['enabled']:
+            alerts.extend(self._check_category_drift(df))
+
+        # 2. Distribution drift
+        if THRESHOLDS['distribution_drift']['enabled']:
+            alerts.extend(self._check_distribution_drift(df))
+
+        # 3. Missing rate
+        if THRESHOLDS['missing_rate']['enabled']:
+            alerts.extend(self._check_missing_rate(df))
+
+        # 4. Score distribution
+        if THRESHOLDS['score_distribution']['enabled']:
+            alerts.extend(self._check_score_distribution(df))
+
+        return alerts
+
+    def _check_category_drift(self, df: pd.DataFrame) -> List[Dict]:
+        """Verifica categorias não vistas no treino"""
+        from datetime import datetime
+        alerts = []
+
+        try:
+            categorias_esperadas = load_training_categories(self.model_path)
+            drift_results = check_category_drift(df, categorias_esperadas)
+
+            for result in drift_results:
+                alerts.append({
+                    'type': 'category_drift',
+                    'severity': result['severity'],
+                    'category': 'data_quality',
+                    'message': result['message'],
+                    'details': {
+                        'column': result['column'],
+                        'new_categories': result.get('new_categories', []),
+                        'affected_count': result.get('count', 0),
+                        'percentage': result.get('percentage', 0)
+                    },
+                    'timestamp': datetime.now().isoformat(),
+                    'metric_value': result.get('percentage', 0),
+                    'threshold': None
+                })
+
+        except (FileNotFoundError, Exception):
+            pass
+
+        return alerts
+
+    def _check_distribution_drift(self, df: pd.DataFrame) -> List[Dict]:
+        """Verifica mudanças drásticas nas proporções"""
+        from .config import THRESHOLDS
+        from datetime import datetime
+        alerts = []
+
+        try:
+            distribuicoes_esperadas = load_training_distributions(self.model_path)
+            threshold_cat = THRESHOLDS['distribution_drift']['categorical']
+            threshold_num = THRESHOLDS['distribution_drift']['numerical']
+
+            drift_results = check_distribution_drift(
+                df, distribuicoes_esperadas,
+                threshold_categorical=threshold_cat,
+                threshold_numerical=threshold_num
+            )
+
+            for result in drift_results:
+                drift_type = result['type']
+
+                if drift_type == 'categorical_distribution_drift':
+                    details = {
+                        'column': result['column'],
+                        'changes': result['changes']
+                    }
+                    metric_value = result['changes'][0]['diff'] if result['changes'] else 0
+                    threshold_used = threshold_cat
+                else:
+                    details = {
+                        'column': result['column'],
+                        'mean_treino': result['mean_treino'],
+                        'mean_producao': result['mean_producao'],
+                        'std_treino': result['std_treino'],
+                        'std_producao': result['std_producao'],
+                        'sigma_diff': result['sigma_diff']
+                    }
+                    metric_value = result['sigma_diff']
+                    threshold_used = threshold_num
+
+                alerts.append({
+                    'type': 'distribution_drift',
+                    'severity': result['severity'],
+                    'category': 'data_quality',
+                    'message': result['message'],
+                    'details': details,
+                    'timestamp': datetime.now().isoformat(),
+                    'metric_value': metric_value,
+                    'threshold': threshold_used
+                })
+
+        except (FileNotFoundError, Exception):
+            pass
+
+        return alerts
+
+    def _check_missing_rate(self, df: pd.DataFrame) -> List[Dict]:
+        """Verifica colunas com missing rate alto"""
+        from .config import THRESHOLDS
+        from datetime import datetime
+        alerts = []
+        threshold = THRESHOLDS['missing_rate']['threshold']
+
+        total_rows = len(df)
+        if total_rows == 0:
+            return alerts
+
+        for col in df.columns:
+            missing_count = df[col].isna().sum()
+            missing_rate = missing_count / total_rows
+
+            if missing_rate > threshold:
+                if missing_rate >= 0.50:
+                    severity = 'HIGH'
+                elif missing_rate >= 0.35:
+                    severity = 'MEDIUM'
+                else:
+                    severity = 'LOW'
+
+                alerts.append({
+                    'type': 'missing_rate_high',
+                    'severity': severity,
+                    'category': 'data_quality',
+                    'message': f"⚠️ {col}: {missing_rate*100:.1f}% missing ({missing_count}/{total_rows} leads)",
+                    'details': {
+                        'column': col,
+                        'missing_count': missing_count,
+                        'total_rows': total_rows,
+                        'missing_rate': missing_rate
+                    },
+                    'timestamp': datetime.now().isoformat(),
+                    'metric_value': missing_rate,
+                    'threshold': threshold
+                })
+
+        return alerts
+
+    def _check_score_distribution(self, df: pd.DataFrame) -> List[Dict]:
+        """Verifica mudanças na distribuição de decis"""
+        from .config import THRESHOLDS, EXPECTED_DECIL_DISTRIBUTION
+        from datetime import datetime
+        alerts = []
+
+        if 'decil' not in df.columns:
+            return alerts
+
+        threshold = THRESHOLDS['score_distribution']['threshold']
+        total_leads = len(df)
+
+        if total_leads == 0:
+            return alerts
+
+        decil_counts = df['decil'].value_counts()
+        distribuicao_atual = {
+            decil: decil_counts.get(decil, 0) / total_leads
+            for decil in EXPECTED_DECIL_DISTRIBUTION.keys()
+        }
+
+        diferencas_significativas = []
+        for decil, prop_esperada in EXPECTED_DECIL_DISTRIBUTION.items():
+            prop_atual = distribuicao_atual.get(decil, 0)
+            diff = abs(prop_atual - prop_esperada)
+
+            if diff > threshold:
+                diferencas_significativas.append({
+                    'decil': decil,
+                    'esperado': prop_esperada,
+                    'atual': prop_atual,
+                    'diff': diff
+                })
+
+        if diferencas_significativas:
+            diferencas_significativas.sort(key=lambda x: x['diff'], reverse=True)
+            max_diff = diferencas_significativas[0]['diff']
+
+            if max_diff >= 0.20:
+                severity = 'HIGH'
+            elif max_diff >= 0.15:
+                severity = 'MEDIUM'
+            else:
+                severity = 'LOW'
+
+            top_changes = diferencas_significativas[:3]
+            changes_msg = ', '.join([
+                f"{c['decil']}: {c['esperado']*100:.0f}%→{c['atual']*100:.0f}% ({c['diff']*100:+.1f}pp)"
+                for c in top_changes
+            ])
+            mais_msg = f" (e mais {len(diferencas_significativas)-3})" if len(diferencas_significativas) > 3 else ""
+
+            alerts.append({
+                'type': 'score_distribution_change',
+                'severity': severity,
+                'category': 'DATA_QUALITY',
+                'message': f"⚠️ Distribuição de decis mudou: {changes_msg}{mais_msg}",
+                'details': {
+                    'changes': diferencas_significativas,
+                    'total_leads': total_leads
+                },
+                'timestamp': datetime.now().isoformat(),
+                'metric_value': max_diff,
+                'threshold': threshold
+            })
+
+        return alerts

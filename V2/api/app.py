@@ -72,6 +72,18 @@ class BatchPredictionResponse(BaseModel):
     processing_time_seconds: float
     timestamp: str
 
+class DailyCheckRequest(BaseModel):
+    """Request para check diário de monitoramento"""
+    leads: List[Dict[str, Any]] = Field(..., description="Dados do Sheets das últimas 24h")
+
+class DailyCheckResponse(BaseModel):
+    """Response do check diário"""
+    total_alerts: int
+    alerts_by_severity: Dict[str, int]
+    alerts_by_category: Dict[str, int]
+    alerts: List[Dict[str, Any]]
+    timestamp: str
+
 # Inicializar a aplicação FastAPI
 app = FastAPI(
     title="Smart Ads Lead Scoring API V2",
@@ -2132,6 +2144,86 @@ async def cleanup_duplicates(ids_to_delete: List[int], db: Session = Depends(get
         logger.error(f"❌ Erro na deleção: {e}")
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Erro na deleção: {str(e)}")
+
+
+# =============================================================================
+# MONITORING ENDPOINTS
+# =============================================================================
+
+@app.post("/monitoring/daily-check", response_model=DailyCheckResponse)
+async def daily_monitoring_check(
+    request: DailyCheckRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Executa check diário de monitoramento consolidado.
+
+    Verifica:
+    - Data Quality: category drift, distribution drift, missing rate, score distribution
+    - Operational: 6h sem leads, 6h sem CAPI
+    - CAPI Quality: missing rate fbp/fbc
+
+    Args:
+        request: Dados do Sheets (últimas 24h)
+        db: Sessão PostgreSQL (injetada automaticamente)
+
+    Returns:
+        Alertas consolidados por severidade e categoria
+    """
+    from src.monitoring.orchestrator import MonitoringOrchestrator
+    import yaml
+
+    start_time = time.time()
+    logger.info(f"🔍 Executando check diário de monitoramento ({len(request.leads)} leads)")
+
+    try:
+        # Obter model_path do modelo ativo
+        config_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'configs/active_model.yaml'
+        )
+
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+            model_path = config['active_model']['model_path']
+
+        # Garantir path absoluto
+        if not os.path.isabs(model_path):
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            model_path = os.path.join(base_dir, model_path)
+
+        logger.info(f"📂 Usando modelo: {model_path}")
+
+        # Inicializar orquestrador
+        orchestrator = MonitoringOrchestrator(model_path=model_path, db=db)
+
+        # Executar checks
+        result = orchestrator.run_daily_check(request.leads)
+
+        processing_time = time.time() - start_time
+
+        logger.info(f"✅ Check concluído em {processing_time:.2f}s")
+        logger.info(f"📊 Alertas: {result['total_alerts']} total "
+                   f"(HIGH: {result['alerts_by_severity']['HIGH']}, "
+                   f"MEDIUM: {result['alerts_by_severity']['MEDIUM']}, "
+                   f"LOW: {result['alerts_by_severity']['LOW']})")
+
+        return DailyCheckResponse(
+            total_alerts=result['total_alerts'],
+            alerts_by_severity=result['alerts_by_severity'],
+            alerts_by_category=result['alerts_by_category'],
+            alerts=result['alerts'],
+            timestamp=datetime.now().isoformat()
+        )
+
+    except FileNotFoundError as e:
+        logger.error(f"❌ Arquivo não encontrado: {e}")
+        raise HTTPException(status_code=500, detail=f"Modelo não encontrado: {str(e)}")
+    except Exception as e:
+        logger.error(f"❌ Erro no check de monitoramento: {str(e)}")
+        logger.error(f"Traceback: {e.__class__.__name__}")
+        raise HTTPException(status_code=500, detail=f"Erro no monitoramento: {str(e)}")
+
 
 if __name__ == "__main__":
     import uvicorn

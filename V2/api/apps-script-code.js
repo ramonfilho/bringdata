@@ -29,6 +29,7 @@ function onOpen() {
     .addItem('Ativar Polling 5min', 'agendarGatilho5Min')
     .addSeparator()
     .addItem('Testar Conexão', 'testConnection')
+    .addItem('Testar Monitoramento', 'executarMonitoramentoDiario')
     .addToUi();
 }
 
@@ -1105,6 +1106,7 @@ function agendarGatilho5Min() {
         funcName === 'executePolling5Min' ||
         funcName === 'executarRelatoriosDiarios' ||
         funcName === 'executeDailyReports' ||
+        funcName === 'executarMonitoramentoDiario' ||
         funcName === 'execute1HourUpdate' ||
         funcName === 'executeDailyMLUpdate' ||
         funcName === 'execute3HourUpdate' ||
@@ -1132,6 +1134,15 @@ function agendarGatilho5Min() {
 
   Logger.log('✅ Trigger diário criado: executarRelatoriosDiarios() às 00:00');
 
+  // 3️⃣ Criar trigger diário às 01:00 para monitoramento
+  ScriptApp.newTrigger('executarMonitoramentoDiario')
+    .timeBased()
+    .atHour(1)
+    .everyDays(1)
+    .create();
+
+  Logger.log('✅ Trigger monitoramento criado: executarMonitoramentoDiario() às 01:00');
+
   SpreadsheetApp.getUi().alert(
     'Gatilhos Ativados',
     'Sistema configurado com sucesso!\n\n' +
@@ -1142,7 +1153,149 @@ function agendarGatilho5Min() {
     '✅ Relatórios Diários: executarRelatoriosDiarios()\n' +
     '   → Executa às 00:00\n' +
     '   → Atualiza análises UTM (1D, 3D, 7D)\n' +
-    '   → Atualiza Info do Modelo',
+    '   → Atualiza Info do Modelo\n\n' +
+    '✅ Monitoramento Diário: executarMonitoramentoDiario()\n' +
+    '   → Executa às 01:00\n' +
+    '   → Verifica drift de categorias e distribuições\n' +
+    '   → Monitora qualidade de dados CAPI\n' +
+    '   → Detecta problemas operacionais',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
+}
+
+// =============================================================================
+// MONITORAMENTO DIÁRIO DE QUALIDADE E DRIFT
+// =============================================================================
+
+/**
+ * Executa check diário de monitoramento:
+ * - Category drift (novas categorias não vistas no treino)
+ * - Distribution drift (mudanças nas proporções)
+ * - Missing rate (colunas com muitos valores vazios)
+ * - Score distribution (mudanças nos decis)
+ * - Problemas operacionais (sem leads, sem CAPI)
+ * - Qualidade CAPI (missing fbp/fbc)
+ *
+ * Executado automaticamente às 01:00 via trigger.
+ */
+function executarMonitoramentoDiario() {
+  Logger.log('🔍 Iniciando monitoramento diário...');
+
+  try {
+    // 1. Buscar dados das últimas 24h do Sheets
+    const leadsData = buscarLeadsUltimas24h();
+
+    if (!leadsData || leadsData.length === 0) {
+      Logger.log('⚠️ Nenhum lead encontrado nas últimas 24h');
+      return;
+    }
+
+    Logger.log(`📊 Enviando ${leadsData.length} leads para análise...`);
+
+    // 2. Chamar endpoint de monitoramento
+    const response = UrlFetchApp.fetch(`${API_URL}/monitoring/daily-check`, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify({ leads: leadsData }),
+      muteHttpExceptions: true
+    });
+
+    const statusCode = response.getResponseCode();
+    const result = JSON.parse(response.getContentText());
+
+    if (statusCode !== 200) {
+      Logger.log(`❌ Erro no monitoramento: ${statusCode}`);
+      Logger.log(response.getContentText());
+      return;
+    }
+
+    // 3. Processar resultados
+    Logger.log(`\n📊 RESULTADOS DO MONITORAMENTO:`);
+    Logger.log(`   Total de alertas: ${result.total_alerts}`);
+    Logger.log(`   Por severidade: HIGH=${result.alerts_by_severity.HIGH}, MEDIUM=${result.alerts_by_severity.MEDIUM}, LOW=${result.alerts_by_severity.LOW}`);
+    Logger.log(`   Por categoria: DATA=${result.alerts_by_category.data_quality}, OPS=${result.alerts_by_category.operational}, CAPI=${result.alerts_by_category.capi_quality}`);
+
+    if (result.total_alerts > 0) {
+      Logger.log(`\n🚨 ALERTAS DETECTADOS (${result.total_alerts}):`);
+
+      // Mostrar os 10 primeiros alertas no log
+      const maxAlertsToLog = Math.min(10, result.alerts.length);
+      for (let i = 0; i < maxAlertsToLog; i++) {
+        const alert = result.alerts[i];
+        Logger.log(`\n${i + 1}. [${alert.severity}] ${alert.type}`);
+        Logger.log(`   ${alert.message}`);
+        if (alert.metric_value) {
+          Logger.log(`   Valor: ${alert.metric_value}${alert.threshold ? ` (threshold: ${alert.threshold})` : ''}`);
+        }
+      }
+
+      if (result.total_alerts > maxAlertsToLog) {
+        Logger.log(`\n   ... e mais ${result.total_alerts - maxAlertsToLog} alertas`);
+      }
+
+      // TODO: Futuramente enviar para Slack
+      // enviarAlertasParaSlack(result);
+
+    } else {
+      Logger.log('\n✅ Nenhum alerta detectado - sistema operando normalmente');
+    }
+
+    Logger.log('\n✅ Monitoramento concluído com sucesso!');
+
+  } catch (error) {
+    Logger.log(`❌ Erro no monitoramento diário: ${error.message}`);
+    Logger.log(error.stack);
+  }
+}
+
+/**
+ * Busca leads das últimas 24 horas da aba [LF] Pesquisa
+ * Retorna array de objetos com todos os campos
+ */
+function buscarLeadsUltimas24h() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('[LF] Pesquisa');
+  if (!sheet) {
+    throw new Error('Aba "[LF] Pesquisa" não encontrada');
+  }
+
+  const values = sheet.getDataRange().getValues();
+  if (values.length <= 1) {
+    return [];
+  }
+
+  const headers = values[0];
+  const dataColIndex = headers.indexOf('Data');
+
+  if (dataColIndex === -1) {
+    throw new Error('Coluna "Data" não encontrada');
+  }
+
+  // Calcular threshold de 24h atrás
+  const now = new Date();
+  const threshold24h = new Date(now.getTime() - (24 * 60 * 60 * 1000));
+
+  const recentLeads = [];
+
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+
+    // Ignorar cabeçalhos duplicados
+    if (row[dataColIndex] === 'Data' && row[headers.indexOf('E-mail')] === 'E-mail') {
+      continue;
+    }
+
+    const leadDate = new Date(row[dataColIndex]);
+
+    // Incluir apenas leads das últimas 24h
+    if (leadDate >= threshold24h) {
+      const leadObj = {};
+      for (let j = 0; j < headers.length; j++) {
+        // Usar nome exato da coluna do Sheets
+        leadObj[headers[j]] = row[j];
+      }
+      recentLeads.push(leadObj);
+    }
+  }
+
+  return recentLeads;
 }
