@@ -2188,8 +2188,13 @@ def fetch_leads_from_sheets(hours: int = 24) -> List[Dict[str, Any]]:
         spreadsheet = gc.open_by_url(GOOGLE_SHEETS_URL)
         worksheet = spreadsheet.get_worksheet(0)  # Primeira aba
 
-        # Buscar todos os dados
-        all_data = worksheet.get_all_records()
+        # Buscar todos os dados usando get_all_values() para evitar erro com headers duplicados
+        valores = worksheet.get_all_values()
+        headers = valores[0]
+        dados = valores[1:]
+
+        # Converter para lista de dicts
+        all_data = [dict(zip(headers, row)) for row in dados]
 
         # Tentar filtrar por data (últimas N horas)
         try:
