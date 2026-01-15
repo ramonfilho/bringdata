@@ -8,6 +8,9 @@ import logging
 import pandas as pd
 from typing import List, Dict
 from sqlalchemy.orm import Session
+import sys
+import os
+from datetime import datetime
 
 from .data_quality import DataQualityMonitor
 from .operational_monitor import OperationalMonitor
@@ -15,12 +18,62 @@ from .capi_monitor import CAPIQualityMonitor
 from .models import Alert
 
 # Importar unificação de Medium (mesmo processamento que treino e produção)
-import sys
-import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data_processing.medium_unification import unify_medium_columns
 
 logger = logging.getLogger(__name__)
+
+
+class Tee:
+    """Duplica output para console e arquivo (como comando tee do Unix)."""
+    def __init__(self, file_path):
+        self.terminal = sys.stdout
+        self.log = open(file_path, 'w', encoding='utf-8')
+
+    def write(self, message):
+        self.terminal.write(message)
+        self.log.write(message)
+        self.log.flush()  # Força escrita imediata
+
+    def flush(self):
+        self.terminal.flush()
+        self.log.flush()
+
+    def close(self):
+        self.log.close()
+
+
+def setup_monitoring_logging():
+    """Configura redirecionamento automático de output para arquivo timestampado."""
+    # Garantir que diretório outputs existe (mesmo path que production_pipeline.py)
+    outputs_dir = os.path.join(os.path.dirname(__file__), '../../outputs')
+    outputs_dir = os.path.abspath(outputs_dir)  # Normalizar path
+    os.makedirs(outputs_dir, exist_ok=True)
+
+    # Gerar timestamp no formato YYYYMMDD_HHMMSS
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_path = os.path.join(outputs_dir, f'monitoring_{timestamp}.log')
+
+    # Redirecionar stdout e stderr para Tee
+    tee = Tee(log_path)
+    sys.stdout = tee
+    sys.stderr = tee
+
+    # Configurar logging para usar o Tee também
+    # Remover handlers existentes para evitar conflito
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    # Adicionar handler que escreve em stdout (que agora é o Tee)
+    # Isso evita ter 2 file handles no mesmo arquivo
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    root_logger.addHandler(handler)
+    root_logger.setLevel(logging.INFO)
+
+    print(f"✅ Output do monitoramento será salvo em: {log_path}\n")
+    return log_path
 
 
 class MonitoringOrchestrator:
@@ -59,6 +112,9 @@ class MonitoringOrchestrator:
                 'alerts': [Alert.to_dict(), ...]
             }
         """
+        # Configurar logging automático para arquivo
+        log_path = setup_monitoring_logging()
+
         all_alerts_dict = []
 
         # 1. Data Quality (usa JSON do Sheets)
@@ -106,8 +162,11 @@ class MonitoringOrchestrator:
             # Aplicar feature engineering (mesmo processamento que produção)
             # Cria: nome_valido, email_valido, telefone_valido, telefone_comprimento, nome_tem_sobrenome
             from features.engineering import create_derived_features
+            colunas_antes_fe = len(df.columns)
             df = create_derived_features(df)
-            logger.info(f"📊 Features derivadas criadas: {len(df.columns)} colunas totais")
+            colunas_depois_fe = len(df.columns)
+            saldo_fe = colunas_depois_fe - colunas_antes_fe
+            logger.info(f"📊 Features derivadas criadas: {saldo_fe:+d} colunas (total: {colunas_depois_fe})")
 
             all_alerts_dict.extend(self.monitors['data_quality'].check(df))
 
@@ -122,6 +181,10 @@ class MonitoringOrchestrator:
 
         # Gerar sumário
         summary = self._generate_summary(alerts)
+
+        # Mensagem de conclusão
+        print(f"\n✅ Monitoramento concluído!")
+        print(f"✅ Log completo salvo em: {log_path}\n")
 
         return {
             'total_alerts': len(alerts),

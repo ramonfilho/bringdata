@@ -35,10 +35,16 @@ def unify_utm_source(df: pd.DataFrame) -> pd.DataFrame:
     # Valores minoritários para unificar em "outros"
     outras_sources = ['fb', 'teste', '[field id="utm_source"]', 'facebook-ads-SiteLink', 'youtube', 'youtube-bio']
 
-    # Aplicar unificação
+    # Aplicar unificação e logar conversões
+    conversoes = []
     for source in outras_sources:
         if source in df_unified['Source'].values:
+            count = (df_unified['Source'] == source).sum()
+            conversoes.append(f"'{source}' ({count} leads)")
             df_unified.loc[df_unified['Source'] == source, 'Source'] = 'outros'
+
+    if conversoes:
+        logger.info(f"   📌 Source convertidas para 'outros': {', '.join(conversoes)}")
 
     return df_unified
 
@@ -67,31 +73,57 @@ def unify_utm_term(df: pd.DataFrame) -> pd.DataFrame:
     # Garantir tipo object
     df_unified['Term'] = df_unified['Term'].astype('object')
 
+    conversoes_term = []
+
     # 1. Instagram: 'ig' -> 'instagram'
-    df_unified.loc[df_unified['Term'] == 'ig', 'Term'] = 'instagram'
+    count_ig = (df_unified['Term'] == 'ig').sum()
+    if count_ig > 0:
+        conversoes_term.append(f"'ig' -> 'instagram' ({count_ig} leads)")
+        df_unified.loc[df_unified['Term'] == 'ig', 'Term'] = 'instagram'
 
     # 2. Facebook: 'fb' -> 'facebook'
-    df_unified.loc[df_unified['Term'] == 'fb', 'Term'] = 'facebook'
+    count_fb = (df_unified['Term'] == 'fb').sum()
+    if count_fb > 0:
+        conversoes_term.append(f"'fb' -> 'facebook' ({count_fb} leads)")
+        df_unified.loc[df_unified['Term'] == 'fb', 'Term'] = 'facebook'
 
     # 3. IDs numéricos (padrão com --) -> 'outros'
     mask_ids_numericos = df_unified['Term'].str.contains('--', na=False)
-    df_unified.loc[mask_ids_numericos, 'Term'] = 'outros'
+    count_ids = mask_ids_numericos.sum()
+    if count_ids > 0:
+        conversoes_term.append(f"IDs numéricos com '--' -> 'outros' ({count_ids} leads)")
+        df_unified.loc[mask_ids_numericos, 'Term'] = 'outros'
 
     # 4. Parâmetros dinâmicos -> 'outros'
     mask_parametros = df_unified['Term'].str.contains('{', na=False)
-    df_unified.loc[mask_parametros, 'Term'] = 'outros'
+    count_params = mask_parametros.sum()
+    if count_params > 0:
+        conversoes_term.append(f"Parâmetros dinâmicos -> 'outros' ({count_params} leads)")
+        df_unified.loc[mask_parametros, 'Term'] = 'outros'
 
     # 5. Outros valores específicos -> 'outros'
-    # Pegar valores que não são instagram, facebook ou NaN
-    outros_terms = df_unified['Term'].notna() & (~df_unified['Term'].isin(['instagram', 'facebook']))
+    # Pegar valores que não são instagram, facebook, outros ou NaN
+    outros_terms = df_unified['Term'].notna() & (~df_unified['Term'].isin(['instagram', 'facebook', 'outros']))
     valores_outros = df_unified.loc[outros_terms, 'Term'].unique()
 
+    valores_convertidos = []
     # Converter valores restantes para 'outros'
     for valor in valores_outros:
         if isinstance(valor, str) and valor not in ['instagram', 'facebook']:
             # IDs longos ou textos especiais viram 'outros'
             if not valor.isdigit() or len(valor) > 10:
+                count = (df_unified['Term'] == valor).sum()
+                valores_convertidos.append(f"'{valor}' ({count})")
                 df_unified.loc[df_unified['Term'] == valor, 'Term'] = 'outros'
+
+    if valores_convertidos:
+        conversoes_term.append(f"Outros valores -> 'outros': {', '.join(valores_convertidos[:5])}" +
+                              (f" (+ {len(valores_convertidos)-5} mais)" if len(valores_convertidos) > 5 else ""))
+
+    if conversoes_term:
+        logger.info(f"   📌 Term convertidas:")
+        for conv in conversoes_term:
+            logger.info(f"      - {conv}")
 
     return df_unified
 

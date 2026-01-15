@@ -217,6 +217,10 @@ def unify_medium_by_actions(df: pd.DataFrame) -> pd.DataFrame:
         'Interesse Linguagem de programação': 'Linguagem de programação'
     }
 
+    # RASTREAR CONVERSÕES PARA 'OUTROS'
+    conversoes_para_outros = []
+    valores_nao_mapeados = []
+
     # FUNÇÃO DE UNIFICAÇÃO COM TRATAMENTO DE VALORES NÃO VISTOS
     def aplicar_unificacao_robusta(medium_value):
         """Aplica unificação com tratamento robusto para valores não vistos"""
@@ -228,7 +232,13 @@ def unify_medium_by_actions(df: pd.DataFrame) -> pd.DataFrame:
 
         # 1. VERIFICAR MAPEAMENTO DIRETO
         if medium_str in mapping_dict:
-            return mapping_dict[medium_str]
+            resultado = mapping_dict[medium_str]
+            # Rastrear se virou 'Outros'
+            if resultado == 'Outros' and medium_str != 'Outros':
+                if medium_str not in [c[0] for c in conversoes_para_outros]:
+                    count = (df_unified['Medium'] == medium_str).sum()
+                    conversoes_para_outros.append((medium_str, count))
+            return resultado
 
         # 2. TRATAMENTO PARA VALORES NÃO VISTOS
         # Se não encontrou no mapeamento, verificar se é uma categoria válida para produção
@@ -236,10 +246,34 @@ def unify_medium_by_actions(df: pd.DataFrame) -> pd.DataFrame:
             return medium_str
 
         # 3. VALORES COMPLETAMENTE NOVOS → 'Outros'
+        if medium_str not in [v[0] for v in valores_nao_mapeados]:
+            count = (df_unified['Medium'] == medium_str).sum()
+            valores_nao_mapeados.append((medium_str, count))
         return 'Outros'
 
     # Aplicar a função de unificação robusta
     df_unified['Medium'] = df_unified['Medium'].apply(aplicar_unificacao_robusta)
+
+    # LOGAR CONVERSÕES
+    if conversoes_para_outros:
+        logger.info(f"   📌 Medium convertidas para 'Outros' (mapeamento):")
+        # Ordenar por contagem decrescente
+        conversoes_para_outros.sort(key=lambda x: x[1], reverse=True)
+        for valor, count in conversoes_para_outros[:10]:
+            logger.info(f"      - '{valor}': {count} leads")
+        if len(conversoes_para_outros) > 10:
+            total_resto = sum(c[1] for c in conversoes_para_outros[10:])
+            logger.info(f"      ... e mais {len(conversoes_para_outros)-10} categorias ({total_resto} leads)")
+
+    if valores_nao_mapeados:
+        logger.info(f"   📌 Medium NÃO MAPEADAS → convertidas para 'Outros':")
+        # Ordenar por contagem decrescente
+        valores_nao_mapeados.sort(key=lambda x: x[1], reverse=True)
+        for valor, count in valores_nao_mapeados[:5]:
+            logger.info(f"      - '{valor}': {count} leads")
+        if len(valores_nao_mapeados) > 5:
+            total_resto = sum(v[1] for v in valores_nao_mapeados[5:])
+            logger.info(f"      ... e mais {len(valores_nao_mapeados)-5} categorias ({total_resto} leads)")
 
     return df_unified
 
