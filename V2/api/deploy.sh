@@ -58,6 +58,7 @@ IMAGE_TAG=""
 SKIP_TESTS=false
 ALLOW_PUBLIC=true  # Temporário - mudar para false em produção
 PREVIOUS_REVISION=""
+YES_FLAG=false  # Pula confirmação se true
 
 # =============================================================================
 # FUNÇÕES AUXILIARES
@@ -561,12 +562,14 @@ usage() {
     echo "  --model-version VER    Versão do modelo (ex: 20260109_110657) [default: timestamp]"
     echo "  --skip-tests           Pular testes pós-deploy"
     echo "  --no-public            Deploy sem acesso público (requer Service Account)"
+    echo "  --yes, -y              Pular confirmação (não perguntar)"
     echo "  -h, --help             Mostrar esta mensagem"
     echo ""
     echo "Exemplos:"
     echo "  $0"
+    echo "  $0 --yes"
     echo "  $0 --env production --model-version 20260109_110657"
-    echo "  $0 --skip-tests --no-public"
+    echo "  $0 --skip-tests --no-public --yes"
     exit 1
 }
 
@@ -587,6 +590,10 @@ parse_arguments() {
                 ;;
             --no-public)
                 ALLOW_PUBLIC=false
+                shift
+                ;;
+            --yes|-y)
+                YES_FLAG=true
                 shift
                 ;;
             -h|--help)
@@ -624,11 +631,15 @@ main() {
     print_info "Serviço: $SERVICE_NAME"
     echo ""
 
-    read -p "Continuar com o deploy? (y/n) " -n 1 -r
-    echo ""
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        print_warning "Deploy cancelado pelo usuário"
-        exit 0
+    if [ "$YES_FLAG" = false ]; then
+        read -p "Continuar com o deploy? (y/n) " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_warning "Deploy cancelado pelo usuário"
+            exit 0
+        fi
+    else
+        print_success "Confirmação pulada (--yes)"
     fi
 
     # Executar pipeline de deploy
