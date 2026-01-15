@@ -14,6 +14,43 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Set, List, Tuple
 from pathlib import Path
+from unidecode import unidecode
+import re
+
+
+def normalizar_categoria_para_comparacao(texto):
+    """
+    Normaliza categoria para comparação no drift detection.
+
+    Aplica MESMA normalização que limpar_texto() usa no treino/produção:
+    - Lowercase
+    - Remove acentos
+    - Remove pontuação
+    - Normaliza espaços
+
+    IMPORTANTE: Esta normalização é aplicada APENAS para comparação no monitoramento.
+    Os dados reais não são alterados. Isso evita alertas falsos onde "Sou autonomo"
+    (sem acento, em produção) seria detectado como categoria nova vs "Sou autônomo"
+    (com acento, no treino).
+
+    Args:
+        texto: String a ser normalizada
+
+    Returns:
+        String normalizada ou None se NaN
+    """
+    if pd.isna(texto):
+        return None
+
+    texto_norm = str(texto)
+    texto_norm = texto_norm.strip()
+    texto_norm = texto_norm.lower()
+    texto_norm = unidecode(texto_norm)
+    texto_norm = re.sub(r'[^\w\s]', '', texto_norm)
+    texto_norm = re.sub(r'\s+', ' ', texto_norm)
+    texto_norm = texto_norm.strip()
+
+    return texto_norm if texto_norm else None
 
 
 def capture_training_categories(df: pd.DataFrame, output_path: str = None) -> Dict[str, List[str]]:
@@ -118,10 +155,33 @@ def check_category_drift(df_producao: pd.DataFrame,
             if v.strip() and v.lower() != 'nan'
         ]
 
-        # Encontrar novas categorias
-        set_treino = set(categorias_treino)
-        set_producao = set(categorias_producao_str)
-        novas_categorias = set_producao - set_treino
+        # NOVO: Normalizar ambas as listas para comparação
+        # Isso evita falsos positivos onde "Sou autonomo" (sem acento) é detectado
+        # como nova categoria vs "Sou autônomo" (com acento)
+        categorias_producao_norm = [normalizar_categoria_para_comparacao(v) for v in categorias_producao_str]
+        categorias_treino_norm = [normalizar_categoria_para_comparacao(v) for v in categorias_treino]
+
+        # Remover None (valores que viraram vazios após normalização)
+        categorias_producao_norm = [v for v in categorias_producao_norm if v]
+        categorias_treino_norm = [v for v in categorias_treino_norm if v]
+
+        # Encontrar novas categorias (comparando versões normalizadas)
+        set_treino_norm = set(categorias_treino_norm)
+        set_producao_norm = set(categorias_producao_norm)
+        novas_categorias_norm = set_producao_norm - set_treino_norm
+
+        # Se houver categorias novas após normalização, pegar os valores ORIGINAIS correspondentes
+        if len(novas_categorias_norm) > 0:
+            # Criar mapeamento: normalizado → original
+            norm_to_original = {}
+            for orig in categorias_producao_str:
+                norm = normalizar_categoria_para_comparacao(orig)
+                if norm and norm in novas_categorias_norm:
+                    norm_to_original[norm] = orig
+
+            novas_categorias = set(norm_to_original.values())
+        else:
+            novas_categorias = set()
 
         if len(novas_categorias) > 0:
             # Calcular % de leads com novas categorias
