@@ -36,9 +36,14 @@ COPY ./src/ ./src/
 # Copiar configurações
 COPY ./configs/ ./configs/
 
+# ARG para path do modelo (lido do active_model.yaml pelo deploy.sh)
+# Valor padrão para desenvolvimento local
+ARG MODEL_PATH=files/20260115_080140
+
 # Copiar APENAS o modelo ativo (não todos os modelos antigos)
 # Isso reduz o tamanho da imagem de ~47MB para ~11MB
-COPY ./files/20260112_134522/ ./files/20260112_134522/
+# O path é dinâmico - deploy.sh passa via --build-arg MODEL_PATH=...
+COPY ./${MODEL_PATH}/ ./${MODEL_PATH}/
 
 # Definir variáveis de ambiente
 ENV PYTHONPATH=/app

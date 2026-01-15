@@ -1,11 +1,11 @@
 active_model:
   model_name: v1_devclub_rf_temporal_leads_single
-  model_path: files/20260112_134522
-  trained_at: '2026-01-12T13:45:20.049845'
+  model_path: files/20260115_080140
+  trained_at: '2026-01-15T08:01:37.803092'
   split_method: temporal_leads
   performance:
-    auc: 0.7546298267614793
-    monotonia_percentage: 100.0
+    auc: 0.7482090586288381
+    monotonia_percentage: 88.88888888888889
     lift_maximum: 2.89
 
 # Para mudar o modelo ativo:

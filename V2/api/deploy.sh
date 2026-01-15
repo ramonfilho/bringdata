@@ -253,12 +253,21 @@ build_docker_image() {
     print_info "Tag da imagem: $IMAGE_TAG"
     print_info "Imagem completa: $IMAGE_FULL"
 
+    # Ler MODEL_PATH do active_model.yaml
+    MODEL_PATH=$(grep "model_path:" "$CONFIG_FILE" | awk '{print $2}')
+    if [ -z "$MODEL_PATH" ]; then
+        print_error "model_path não encontrado em active_model.yaml"
+        exit 1
+    fi
+    print_info "Modelo ativo: $MODEL_PATH"
+
     # Build para linux/amd64 (Cloud Run requer)
     print_info "Iniciando build (linux/amd64)..."
     cd "$PROJECT_ROOT"
 
     docker buildx build \
         --platform linux/amd64 \
+        --build-arg MODEL_PATH="$MODEL_PATH" \
         -f api/Dockerfile \
         -t "$IMAGE_FULL" \
         -t "$IMAGE_LATEST" \
@@ -270,6 +279,7 @@ build_docker_image() {
 
     print_success "Imagem construída e enviada para GCR"
     print_success "Tag: $IMAGE_TAG"
+    print_success "Modelo incluído: $MODEL_PATH"
     echo ""
 }
 
