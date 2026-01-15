@@ -44,7 +44,7 @@ GENERIC_TERMS = ['fb', 'ig', 'instagram', 'facebook']         # Apenas redes soc
 # URL do Google Sheets para monitoramento
 GOOGLE_SHEETS_URL = os.getenv(
     'GOOGLE_SHEETS_URL',
-    'https://docs.google.com/spreadsheets/d/1aWI25TgGd2_VPeq1OOSvFPDcVDbWQUOZuaRo60tFKSk'
+    'https://docs.google.com/spreadsheets/d/1VYti8jX277VNMkvzrfnJSR_Ko8L1LQFDdMEeD6D8_Vo'
 )
 
 # Configurar logging
