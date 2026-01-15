@@ -74,6 +74,15 @@ class MonitoringOrchestrator:
             logger.info(f"📧 Primeiro lead: {primeiro_email} (Data: {primeiro_data})")
             logger.info(f"📧 Último lead: {ultimo_email} (Data: {ultimo_data})")
 
+            # Aplicar unificação de UTM Source/Term (mesmo processamento que produção)
+            # Isso garante que 'fb', 'youtube', etc sejam normalizados para 'outros'
+            if 'Source' in df.columns or 'Term' in df.columns:
+                from data_processing.utm_unification import unify_utm_columns
+                utm_antes = df['Source'].nunique() if 'Source' in df.columns else 0
+                df = unify_utm_columns(df)
+                utm_depois = df['Source'].nunique() if 'Source' in df.columns else 0
+                logger.info(f"📊 UTM unificado: Source {utm_antes} → {utm_depois} categorias únicas")
+
             # Aplicar unificação de Medium (mesmo processamento que treino e produção)
             # Isso garante que 'ABERTO | AD0022' seja normalizado para 'Aberto'
             if 'Medium' in df.columns:

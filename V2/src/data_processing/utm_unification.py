@@ -33,7 +33,7 @@ def unify_utm_source(df: pd.DataFrame) -> pd.DataFrame:
     df_unified['Source'] = df_unified['Source'].astype('object')
 
     # Valores minoritários para unificar em "outros"
-    outras_sources = ['fb', 'teste', '[field id="utm_source"]', 'facebook-ads-SiteLink']
+    outras_sources = ['fb', 'teste', '[field id="utm_source"]', 'facebook-ads-SiteLink', 'youtube', 'youtube-bio']
 
     # Aplicar unificação
     for source in outras_sources:
