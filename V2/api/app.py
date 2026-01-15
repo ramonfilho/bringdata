@@ -41,6 +41,12 @@ BARE_CAMPAIGN_NAMES = ['DEVLF', 'devlf']                      # Prefixos incompl
 BARE_MEDIUM_NAMES = ['dgen', 'paid']                          # Termos genéricos sem estrutura
 GENERIC_TERMS = ['fb', 'ig', 'instagram', 'facebook']         # Apenas redes sociais
 
+# URL do Google Sheets para monitoramento
+GOOGLE_SHEETS_URL = os.getenv(
+    'GOOGLE_SHEETS_URL',
+    'https://docs.google.com/spreadsheets/d/1aWI25TgGd2_VPeq1OOSvFPDcVDbWQUOZuaRo60tFKSk'
+)
+
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -2147,8 +2153,183 @@ async def cleanup_duplicates(ids_to_delete: List[int], db: Session = Depends(get
 
 
 # =============================================================================
+# MONITORING HELPERS
+# =============================================================================
+
+def fetch_leads_from_sheets(hours: int = 24) -> List[Dict[str, Any]]:
+    """
+    Busca leads do Google Sheets das últimas N horas.
+
+    Args:
+        hours: Número de horas para buscar (padrão: 24)
+
+    Returns:
+        Lista de dicts com dados dos leads
+
+    Raises:
+        Exception: Se falhar ao buscar dados
+    """
+    import gspread
+    from google.auth import default as gauth_default
+    from datetime import timedelta
+
+    try:
+        logger.info(f"📊 Buscando leads do Google Sheets (últimas {hours}h)...")
+
+        # Autenticar com Application Default Credentials
+        scopes = [
+            'https://www.googleapis.com/auth/spreadsheets.readonly',
+            'https://www.googleapis.com/auth/drive.readonly'
+        ]
+        creds, _ = gauth_default(scopes=scopes)
+        gc = gspread.authorize(creds)
+
+        # Abrir planilha
+        spreadsheet = gc.open_by_url(GOOGLE_SHEETS_URL)
+        worksheet = spreadsheet.get_worksheet(0)  # Primeira aba
+
+        # Buscar todos os dados
+        all_data = worksheet.get_all_records()
+
+        # Tentar filtrar por data (últimas N horas)
+        try:
+            df = pd.DataFrame(all_data)
+
+            # Identificar coluna de data
+            date_columns = [col for col in df.columns if any(
+                term in col.lower() for term in ['data', 'timestamp', 'hora', 'date', 'time']
+            )]
+
+            if date_columns:
+                date_col = date_columns[0]
+                df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
+                cutoff = datetime.now() - timedelta(hours=hours)
+                df_filtered = df[df[date_col] >= cutoff]
+
+                if len(df_filtered) > 0:
+                    leads = df_filtered.to_dict('records')
+                    logger.info(f"✅ {len(leads)} leads encontrados das últimas {hours}h")
+                    return leads
+                else:
+                    logger.warning(f"⚠️ Nenhum lead nas últimas {hours}h, usando últimos 100")
+                    leads = all_data[-100:] if len(all_data) > 100 else all_data
+                    return leads
+            else:
+                logger.warning(f"⚠️ Coluna de data não encontrada, usando últimos 100 leads")
+                leads = all_data[-100:] if len(all_data) > 100 else all_data
+                return leads
+
+        except Exception as e:
+            logger.warning(f"⚠️ Erro ao filtrar por data: {e}, usando últimos 100 leads")
+            leads = all_data[-100:] if len(all_data) > 100 else all_data
+            return leads
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao buscar dados do Google Sheets: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Falha ao buscar dados do Google Sheets: {str(e)}"
+        )
+
+# =============================================================================
 # MONITORING ENDPOINTS
 # =============================================================================
+
+@app.get("/monitoring/daily-check", response_model=DailyCheckResponse)
+async def daily_monitoring_check_auto(
+    hours: int = 24,
+    db: Session = Depends(get_db)
+):
+    """
+    Executa check diário de monitoramento com dados do Google Sheets.
+
+    Busca automaticamente leads das últimas N horas e executa todos os checks:
+    - Data Quality: category drift, distribution drift, missing rate, score distribution
+    - Operational: 6h sem leads, 6h sem CAPI
+    - CAPI Quality: missing rate fbp/fbc
+
+    Args:
+        hours: Número de horas para buscar (padrão: 24)
+        db: Sessão PostgreSQL (injetada automaticamente)
+
+    Returns:
+        Alertas consolidados por severidade e categoria
+    """
+    from src.monitoring.orchestrator import MonitoringOrchestrator
+    import yaml
+
+    start_time = time.time()
+
+    try:
+        # Buscar dados do Google Sheets
+        leads_data = fetch_leads_from_sheets(hours=hours)
+
+        logger.info(f"🔍 Executando check diário de monitoramento ({len(leads_data)} leads)")
+
+        # Obter model_path do modelo ativo
+        config_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'configs/active_model.yaml'
+        )
+
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+            model_path = config['active_model']['model_path']
+
+        # Garantir path absoluto
+        if not os.path.isabs(model_path):
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            model_path = os.path.join(base_dir, model_path)
+
+        logger.info(f"📂 Usando modelo: {model_path}")
+
+        # Inicializar orquestrador
+        orchestrator = MonitoringOrchestrator(model_path=model_path, db=db)
+
+        # Executar checks
+        result = orchestrator.run_daily_check(leads_data)
+
+        processing_time = time.time() - start_time
+
+        logger.info(f"✅ Check concluído em {processing_time:.2f}s")
+        logger.info(f"📊 Alertas: {result['total_alerts']} total "
+                   f"(HIGH: {result['alerts_by_severity']['HIGH']}, "
+                   f"MEDIUM: {result['alerts_by_severity']['MEDIUM']}, "
+                   f"LOW: {result['alerts_by_severity']['LOW']})")
+
+        # Logar alertas detalhados
+        if result['total_alerts'] > 0:
+            logger.info(f"\n🚨 ALERTAS DETECTADOS ({result['total_alerts']}):\n")
+
+            # Logar TODOS os alertas (sem limite)
+            for i, alert in enumerate(result['alerts'], 1):
+                logger.info(f"{i}. [{alert['severity']}] {alert['type']}")
+                logger.info(f"   {alert['message']}")
+                if alert.get('metric_value'):
+                    threshold_msg = f" (threshold: {alert['threshold']})" if alert.get('threshold') else ""
+                    logger.info(f"   Valor: {alert['metric_value']}{threshold_msg}")
+                logger.info("")  # Linha em branco
+        else:
+            logger.info("✅ Nenhum alerta detectado - sistema operando normalmente")
+
+        return DailyCheckResponse(
+            total_alerts=result['total_alerts'],
+            alerts_by_severity=result['alerts_by_severity'],
+            alerts_by_category=result['alerts_by_category'],
+            alerts=result['alerts'],
+            timestamp=datetime.now().isoformat()
+        )
+
+    except FileNotFoundError as e:
+        logger.error(f"❌ Arquivo não encontrado: {e}")
+        raise HTTPException(status_code=500, detail=f"Modelo não encontrado: {str(e)}")
+    except Exception as e:
+        logger.error(f"❌ Erro no check de monitoramento: {str(e)}")
+        logger.error(f"Traceback: {e.__class__.__name__}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Erro no monitoramento: {str(e)}")
+
 
 @app.post("/monitoring/daily-check", response_model=DailyCheckResponse)
 async def daily_monitoring_check(
