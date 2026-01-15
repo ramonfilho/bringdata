@@ -219,8 +219,19 @@ class LeadScoringPipeline:
         logger.info(f"   ➤ Medium: {medium_before}→{medium_after} categorias")
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
-        # 5.5. Unificar categorias de pesquisa (usando componente importado)
-        logger.info("🔄 [5.5/11] Unificando categorias de pesquisa...")
+        # 5.5. Renomear colunas longas (usando componente importado)
+        # IMPORTANTE: Deve vir ANTES da unificação de categorias pois cria as colunas:
+        # - 'interesse_programacao' (de 'O que mais te chama atenção na profissão de Programador?')
+        # - 'investiu_curso_online' (de 'Já investiu em algum curso online...')
+        logger.info("🔄 [5.5/11] Renomeando colunas longas...")
+        self.data = rename_long_column_names(self.data)
+
+        # Número de colunas deveria permanecer o mesmo (renomeação não adiciona/remove)
+        logger.info(f"   ➤ Colunas renomeadas (mantém total): {len(self.data.columns)}")
+        logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
+
+        # 6. Unificar categorias de pesquisa (usando componente importado)
+        logger.info("🔄 [6/11] Unificando categorias de pesquisa...")
 
         # Contar categorias antes para tracking
         categorias_antes = {}
@@ -248,21 +259,13 @@ class LeadScoringPipeline:
         logger.info(f"   ➤ Categorias normalizadas: {categorias_normalizadas}")
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
-        # 6. Remover campos técnicos (usando componente importado)
-        logger.info("🔄 [6/11] Removendo campos técnicos...")
+        # 7. Remover campos técnicos (usando componente importado)
+        logger.info("🔄 [7/11] Removendo campos técnicos...")
         cols_before_tech = len(self.data.columns)
         self.data = remove_technical_fields(self.data)
 
         tech_cols_removed = cols_before_tech - len(self.data.columns)
         logger.info(f"   ➤ Campos técnicos removidos: {tech_cols_removed}")
-        logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
-
-        # 7. Renomear colunas longas (usando componente importado)
-        logger.info("🔄 [7/11] Renomeando colunas longas...")
-        self.data = rename_long_column_names(self.data)
-
-        # Número de colunas deveria permanecer o mesmo (renomeação não adiciona/remove)
-        logger.info(f"   ➤ Colunas renomeadas (mantém total): {len(self.data.columns)}")
         logger.info(f"   ➤ Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
         # 8. Verificar category drift ANTES do encoding

@@ -91,6 +91,24 @@ class MonitoringOrchestrator:
                 medium_depois = df['Medium'].nunique()
                 logger.info(f"📊 Medium unificado: {medium_antes} → {medium_depois} categorias únicas")
 
+            # Aplicar rename de colunas longas (mesmo processamento que produção)
+            # Cria: 'interesse_programacao' e 'investiu_curso_online'
+            from data_processing.preprocessing import rename_long_column_names
+            df = rename_long_column_names(df)
+            logger.info(f"📊 Colunas renomeadas")
+
+            # Aplicar unificação de categorias (mesmo processamento que produção)
+            # Limpa e normaliza valores das categorias
+            from data_processing.category_unification import unificar_categorias_completo
+            df = unificar_categorias_completo(df)
+            logger.info(f"📊 Categorias unificadas")
+
+            # Aplicar feature engineering (mesmo processamento que produção)
+            # Cria: nome_valido, email_valido, telefone_valido, telefone_comprimento, nome_tem_sobrenome
+            from features.engineering import create_derived_features
+            df = create_derived_features(df)
+            logger.info(f"📊 Features derivadas criadas: {len(df.columns)} colunas totais")
+
             all_alerts_dict.extend(self.monitors['data_quality'].check(df))
 
         # 2. Operational (usa PostgreSQL)
