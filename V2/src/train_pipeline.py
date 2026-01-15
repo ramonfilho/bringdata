@@ -70,13 +70,13 @@ class Tee:
 
 def setup_output_logging():
     """Configura redirecionamento automático de output para arquivo timestampado."""
-    # Criar diretório outputs se não existir
-    outputs_dir = os.path.join(os.path.dirname(__file__), '../outputs')
+    # Criar diretório outputs/training se não existir
+    outputs_dir = os.path.join(os.path.dirname(__file__), '../outputs/training')
     os.makedirs(outputs_dir, exist_ok=True)
 
     # Gerar timestamp no formato YYYYMMDD_HHMMSS
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_path = os.path.join(outputs_dir, f'{timestamp}.log')
+    log_path = os.path.join(outputs_dir, f'training_{timestamp}.log')
 
     # Redirecionar stdout e stderr para Tee
     tee = Tee(log_path)

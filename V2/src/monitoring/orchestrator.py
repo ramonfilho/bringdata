@@ -45,8 +45,8 @@ class Tee:
 
 def setup_monitoring_logging():
     """Configura redirecionamento automático de output para arquivo timestampado."""
-    # Garantir que diretório outputs existe (mesmo path que production_pipeline.py)
-    outputs_dir = os.path.join(os.path.dirname(__file__), '../../outputs')
+    # Garantir que diretório outputs/monitoring existe
+    outputs_dir = os.path.join(os.path.dirname(__file__), '../../outputs/monitoring')
     outputs_dir = os.path.abspath(outputs_dir)  # Normalizar path
     os.makedirs(outputs_dir, exist_ok=True)
 
