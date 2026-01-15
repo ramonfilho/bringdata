@@ -159,6 +159,33 @@ class MonitoringOrchestrator:
             df = unificar_categorias_completo(df)
             logger.info(f"📊 Categorias unificadas")
 
+            # Remover colunas de score/faixa (mesmo processamento que produção)
+            # Remove: Pontuação, Score, Faixa, Faixa A-D, lead_score, decil
+            from data_processing.preprocessing import clean_columns
+            colunas_antes_score = len(df.columns)
+            df = clean_columns(df)
+            colunas_depois_score = len(df.columns)
+            score_removidos = colunas_antes_score - colunas_depois_score
+            logger.info(f"📊 Colunas de score/faixa removidas: {score_removidos} (total: {colunas_depois_score})")
+
+            # Remover features de campanha (mesmo processamento que produção)
+            # Remove: Campaign, Content, e colunas vazias/problemáticas
+            from data_processing.preprocessing import remove_campaign_features
+            colunas_antes_campaign = len(df.columns)
+            df = remove_campaign_features(df)
+            colunas_depois_campaign = len(df.columns)
+            campaign_removidos = colunas_antes_campaign - colunas_depois_campaign
+            logger.info(f"📊 Features de campanha removidas: {campaign_removidos} (total: {colunas_depois_campaign})")
+
+            # Remover campos técnicos (mesmo processamento que produção)
+            # Remove: Remote IP, User Agent, fbc, fbp, cidade, estado, pais, cep, externalid, Page URL, etc
+            from data_processing.preprocessing import remove_technical_fields
+            colunas_antes_tech = len(df.columns)
+            df = remove_technical_fields(df)
+            colunas_depois_tech = len(df.columns)
+            campos_removidos = colunas_antes_tech - colunas_depois_tech
+            logger.info(f"📊 Campos técnicos removidos: {campos_removidos} (total: {colunas_depois_tech})")
+
             # Aplicar feature engineering (mesmo processamento que produção)
             # Cria: nome_valido, email_valido, telefone_valido, telefone_comprimento, nome_tem_sobrenome
             from features.engineering import create_derived_features

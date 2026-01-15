@@ -541,6 +541,9 @@ class DataQualityMonitor:
         if THRESHOLDS['score_distribution']['enabled']:
             alerts.extend(self._check_score_distribution(df))
 
+        # 5. Missing features (colunas esperadas não encontradas)
+        alerts.extend(self._check_missing_features(df))
+
         return alerts
 
     def _check_category_drift(self, df: pd.DataFrame) -> List[Dict]:
@@ -548,29 +551,44 @@ class DataQualityMonitor:
         from datetime import datetime
         alerts = []
 
+        print("\n" + "="*80)
+        print("🔍 CHECK: Novas categorias não vistas no treino")
+        print("="*80)
+
         try:
             categorias_esperadas = load_training_categories(self.model_path)
             drift_results = check_category_drift(df, categorias_esperadas)
 
-            for result in drift_results:
-                alerts.append({
-                    'type': 'category_drift',
-                    'severity': result['severity'],
-                    'category': 'data_quality',
-                    'message': result['message'],
-                    'details': {
-                        'column': result['column'],
-                        'new_categories': result.get('new_categories', []),
-                        'affected_count': result.get('count', 0),
-                        'percentage': result.get('percentage', 0)
-                    },
-                    'timestamp': datetime.now().isoformat(),
-                    'metric_value': result.get('percentage', 0),
-                    'threshold': None
-                })
+            total_colunas_verificadas = len(categorias_esperadas)
+            colunas_com_drift = len(drift_results)
 
-        except (FileNotFoundError, Exception):
-            pass
+            print(f"Colunas verificadas: {total_colunas_verificadas}")
+            print(f"Colunas com categorias novas: {colunas_com_drift}")
+
+            if drift_results:
+                print(f"\n⚠️  Status: ALERTA - {colunas_com_drift} coluna(s) com categorias novas")
+                for result in drift_results:
+                    print(f"   • {result['column']}: {len(result.get('new_categories', []))} nova(s) categoria(s)")
+                    alerts.append({
+                        'type': 'category_drift',
+                        'severity': result['severity'],
+                        'category': 'data_quality',
+                        'message': result['message'],
+                        'details': {
+                            'column': result['column'],
+                            'new_categories': result.get('new_categories', []),
+                            'affected_count': result.get('count', 0),
+                            'percentage': result.get('percentage', 0)
+                        },
+                        'timestamp': datetime.now().isoformat(),
+                        'metric_value': result.get('percentage', 0),
+                        'threshold': None
+                    })
+            else:
+                print(f"✅ Status: OK - Todas as categorias conhecidas")
+
+        except (FileNotFoundError, Exception) as e:
+            print(f"❌ Status: ERRO - Não foi possível carregar categorias esperadas")
 
         return alerts
 
@@ -580,16 +598,34 @@ class DataQualityMonitor:
         from datetime import datetime
         alerts = []
 
+        print("\n" + "="*80)
+        print("🔍 CHECK: Mudanças drásticas nas distribuições")
+        print("="*80)
+
         try:
             distribuicoes_esperadas = load_training_distributions(self.model_path)
             threshold_cat = THRESHOLDS['distribution_drift']['categorical']
             threshold_num = THRESHOLDS['distribution_drift']['numerical']
+
+            print(f"Threshold categórico: {threshold_cat*100:.1f}% (mudança máxima permitida)")
+            print(f"Threshold numérico: {threshold_num} sigmas (desvio permitido)")
+            print(f"Colunas a verificar: {len(distribuicoes_esperadas)}")
 
             drift_results = check_distribution_drift(
                 df, distribuicoes_esperadas,
                 threshold_categorical=threshold_cat,
                 threshold_numerical=threshold_num
             )
+
+            colunas_com_drift = len(drift_results)
+            print(f"Colunas com drift detectado: {colunas_com_drift}")
+
+            if drift_results:
+                print(f"\n⚠️  Status: ALERTA - {colunas_com_drift} coluna(s) com mudanças significativas")
+                for result in drift_results:
+                    print(f"   • {result['column']}: {result['type']}")
+            else:
+                print(f"✅ Status: OK - Distribuições dentro do esperado")
 
             for result in drift_results:
                 drift_type = result['type']
@@ -636,9 +672,19 @@ class DataQualityMonitor:
         alerts = []
         threshold = THRESHOLDS['missing_rate']['threshold']
 
+        print("\n" + "="*80)
+        print("🔍 CHECK: Missing rate alto em colunas")
+        print("="*80)
+
         total_rows = len(df)
         if total_rows == 0:
             return alerts
+
+        print(f"Threshold: {threshold*100:.1f}% (máximo permitido)")
+        print(f"Total de linhas: {total_rows}")
+
+        colunas_acima_threshold = []
+        missing_rates = {}
 
         for col in df.columns:
             # Ignorar colunas da whitelist
@@ -649,7 +695,11 @@ class DataQualityMonitor:
             missing_count += int((df[col].astype(str).str.strip() == '').sum())
             missing_rate = missing_count / total_rows
 
+            missing_rates[col] = missing_rate
+
             if missing_rate > threshold:
+                colunas_acima_threshold.append((col, missing_rate))
+
                 if missing_rate >= 0.50:
                     severity = 'HIGH'
                 elif missing_rate >= 0.35:
@@ -673,6 +723,21 @@ class DataQualityMonitor:
                     'threshold': threshold
                 })
 
+        # Mostrar resumo
+        colunas_verificadas = len(missing_rates)
+        max_missing = max(missing_rates.values()) if missing_rates else 0
+
+        print(f"Colunas verificadas: {colunas_verificadas}")
+        print(f"Colunas acima do threshold: {len(colunas_acima_threshold)}")
+        print(f"Missing rate máximo: {max_missing*100:.1f}%")
+
+        if colunas_acima_threshold:
+            print(f"\n⚠️  Status: ALERTA - {len(colunas_acima_threshold)} coluna(s) com missing alto")
+            for col, rate in sorted(colunas_acima_threshold, key=lambda x: x[1], reverse=True)[:5]:
+                print(f"   • {col}: {rate*100:.1f}%")
+        else:
+            print(f"✅ Status: OK - Todas as colunas com missing < {threshold*100:.1f}%")
+
         return alerts
 
     def _check_score_distribution(self, df: pd.DataFrame) -> List[Dict]:
@@ -681,11 +746,19 @@ class DataQualityMonitor:
         from datetime import datetime
         alerts = []
 
+        print("\n" + "="*80)
+        print("🔍 CHECK: Mudança significativa nas proporções de score/decil")
+        print("="*80)
+
         if 'decil' not in df.columns:
+            print("❌ Status: ERRO - Coluna 'decil' não encontrada")
             return alerts
 
         threshold = THRESHOLDS['score_distribution']['threshold']
         total_leads = len(df)
+
+        print(f"Threshold: {threshold*100:.1f}% (mudança máxima permitida)")
+        print(f"Total de leads: {total_leads}")
 
         if total_leads == 0:
             return alerts
@@ -740,5 +813,95 @@ class DataQualityMonitor:
                 'metric_value': max_diff,
                 'threshold': threshold
             })
+
+        # Mostrar resumo
+        print(f"Decis verificados: {len(EXPECTED_DECIL_DISTRIBUTION)}")
+        print(f"Decis com mudança significativa: {len(diferencas_significativas)}")
+
+        if diferencas_significativas:
+            print(f"\n⚠️  Status: ALERTA - {len(diferencas_significativas)} decil(is) com mudança > {threshold*100:.1f}%")
+            for c in diferencas_significativas[:3]:
+                print(f"   • {c['decil']}: {c['esperado']*100:.0f}% → {c['atual']*100:.0f}% ({c['diff']*100:+.1f}pp)")
+        else:
+            print(f"✅ Status: OK - Distribuição de decis dentro do esperado")
+
+        return alerts
+
+    def _check_missing_features(self, df: pd.DataFrame) -> List[Dict]:
+        """
+        Verifica se todas as features esperadas pelo modelo seriam criadas após encoding.
+
+        Usa o método Predictor.validate_features() para detectar features ausentes
+        SEM fazer predição (apenas validação).
+
+        Args:
+            df: DataFrame ANTES do encoding (após feature engineering)
+
+        Returns:
+            Lista de alertas para features que estariam ausentes
+        """
+        from datetime import datetime
+
+        alerts = []
+
+        print("\n" + "="*80)
+        print("🔍 CHECK: Features esperadas pelo modelo")
+        print("="*80)
+
+        try:
+            # 1. Aplicar encoding nos dados (necessário para validar features finais)
+            from features.encoding import apply_categorical_encoding
+            df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3')
+
+            print(f"Features após encoding: {len(df_encoded.columns)}")
+
+            # 2. Usar Predictor para validar features
+            from model.prediction import LeadScoringPredictor
+            # Extrair model_name do caminho (último componente antes de features_ordenadas)
+            model_name = "v1_devclub_rf_temporal_leads_single"  # Nome padrão do modelo ativo
+            predictor = LeadScoringPredictor(model_name=model_name, model_path=self.model_path)
+
+            # 3. Validar features (NÃO faz predição, só valida)
+            # validate_features() carrega feature_names automaticamente se necessário
+            validation = predictor.validate_features(df_encoded)
+
+            print(f"Features esperadas pelo modelo: {validation['total_expected']}")
+
+            print(f"Features ausentes: {validation['missing_count']}")
+
+            if not validation['is_valid']:
+                missing_features = validation['missing_features']
+
+                print(f"\n⚠️  Status: ALERTA - {len(missing_features)} feature(s) ausente(s)")
+
+                # Mostrar primeiras 5 features ausentes
+                for feat in missing_features[:5]:
+                    print(f"   • {feat}")
+                if len(missing_features) > 5:
+                    print(f"   ... e mais {len(missing_features)-5}")
+
+                # Criar alerta
+                alerts.append({
+                    'type': 'missing_expected_features',
+                    'severity': 'HIGH',
+                    'category': 'data_quality',
+                    'message': f"⚠️ {len(missing_features)} feature(s) esperada(s) pelo modelo ausente(s) após encoding",
+                    'details': {
+                        'missing_count': len(missing_features),
+                        'missing_features': missing_features,
+                        'total_expected': validation['total_expected'],
+                        'total_created': validation['total_received']
+                    },
+                    'timestamp': datetime.now().isoformat(),
+                    'metric_value': len(missing_features),
+                    'threshold': 0  # Qualquer feature faltando é problema
+                })
+            else:
+                print(f"✅ Status: OK - Todas as features esperadas presentes")
+
+        except Exception as e:
+            print(f"❌ Status: ERRO - {str(e)}")
+            import traceback
+            traceback.print_exc()
 
         return alerts

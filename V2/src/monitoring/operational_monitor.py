@@ -49,8 +49,15 @@ class OperationalMonitor:
         from api.database import LeadCAPI
 
         alerts = []
+
+        print("\n" + "="*80)
+        print("🔍 CHECK: Mais de 6 horas sem receber leads")
+        print("="*80)
+
         threshold_hours = THRESHOLDS['operational']['no_leads_hours']
         threshold_time = datetime.now() - timedelta(hours=threshold_hours)
+
+        print(f"Threshold: {threshold_hours} horas")
 
         try:
             # Buscar lead mais recente
@@ -60,12 +67,17 @@ class OperationalMonitor:
 
             if not last_lead:
                 # Banco vazio (pode ser normal em dev/staging)
+                print("❌ Status: ERRO - Banco sem leads (dev/staging)")
                 return alerts
 
             time_since_last = datetime.now() - last_lead.created_at
+            hours_since = time_since_last.total_seconds() / 3600
+
+            print(f"Último lead: {last_lead.created_at.isoformat()}")
+            print(f"Tempo desde último lead: {hours_since:.1f} horas")
 
             if last_lead.created_at < threshold_time:
-                hours_since = time_since_last.total_seconds() / 3600
+                print(f"\n⚠️  Status: ALERTA - Sem leads há {hours_since:.1f}h (threshold: {threshold_hours}h)")
 
                 # Determinar severidade
                 if hours_since >= 12:
@@ -89,10 +101,12 @@ class OperationalMonitor:
                     'metric_value': hours_since,
                     'threshold': float(threshold_hours)
                 })
+            else:
+                print(f"✅ Status: OK - Leads sendo recebidos regularmente")
 
         except Exception as e:
             # Log erro mas não interrompe
-            pass
+            print(f"❌ Status: ERRO - {str(e)}")
 
         return alerts
 
@@ -102,8 +116,15 @@ class OperationalMonitor:
         from api.database import LeadCAPI
 
         alerts = []
+
+        print("\n" + "="*80)
+        print("🔍 CHECK: Mais de 6 horas sem enviar evento CAPI")
+        print("="*80)
+
         threshold_hours = THRESHOLDS['operational']['no_capi_hours']
         threshold_time = datetime.now() - timedelta(hours=threshold_hours)
+
+        print(f"Threshold: {threshold_hours} horas")
 
         try:
             # Buscar último envio CAPI
@@ -115,11 +136,17 @@ class OperationalMonitor:
 
             if not last_capi:
                 # Nenhum CAPI enviado ainda (pode ser normal em setup novo)
+                print("❌ Status: ERRO - Nenhum CAPI enviado ainda (setup novo)")
                 return alerts
 
             time_since_last = datetime.now() - last_capi.capi_sent_at
+            hours_since = time_since_last.total_seconds() / 3600
+
+            print(f"Último CAPI: {last_capi.capi_sent_at.isoformat()}")
+            print(f"Tempo desde último CAPI: {hours_since:.1f} horas")
 
             if last_capi.capi_sent_at < threshold_time:
+                print(f"\n⚠️  Status: ALERTA - Sem CAPI há {hours_since:.1f}h (threshold: {threshold_hours}h)")
                 hours_since = time_since_last.total_seconds() / 3600
 
                 # Determinar severidade
@@ -144,9 +171,11 @@ class OperationalMonitor:
                     'metric_value': hours_since,
                     'threshold': float(threshold_hours)
                 })
+            else:
+                print(f"✅ Status: OK - Eventos CAPI sendo enviados regularmente")
 
         except Exception as e:
             # Log erro mas não interrompe
-            pass
+            print(f"❌ Status: ERRO - {str(e)}")
 
         return alerts

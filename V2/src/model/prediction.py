@@ -154,6 +154,9 @@ class LeadScoringPredictor:
         print(f"Shape: {X.shape}")
         print("="*80 + "\n")
 
+        # Guardar lista de features ausentes para uso posterior (ex: monitoramento)
+        self.last_missing_features = missing_features
+
         logger.info(f"Features preparadas: {X.shape}")
         return X
 
@@ -201,6 +204,41 @@ class LeadScoringPredictor:
         logger.info(f"Score min/max: {scores.min():.4f} / {scores.max():.4f}")
 
         return result_df
+
+    def validate_features(self, df: pd.DataFrame) -> dict:
+        """
+        Valida se todas as features esperadas seriam criadas, SEM fazer predição.
+
+        Útil para monitoramento: detecta features ausentes sem o custo de rodar o modelo.
+
+        Args:
+            df: DataFrame processado (após encoding)
+
+        Returns:
+            Dict com informações de validação:
+            {
+                'missing_features': List[str],  # Features que estariam ausentes
+                'missing_count': int,           # Quantidade de features ausentes
+                'total_expected': int,          # Total de features esperadas
+                'total_received': int,          # Total de colunas recebidas
+                'is_valid': bool                # True se todas as features existem
+            }
+        """
+        # Garantir que feature_names está carregado
+        if self.feature_names is None:
+            self.load_model()
+
+        # Rodar prepare_features para detectar ausentes
+        # (isso preenche self.last_missing_features)
+        _ = self.prepare_features(df)
+
+        return {
+            'missing_features': self.last_missing_features,
+            'missing_count': len(self.last_missing_features),
+            'total_expected': len(self.feature_names),
+            'total_received': len(df.columns),
+            'is_valid': len(self.last_missing_features) == 0
+        }
 
     def predict_single(self, lead_data: dict) -> float:
         """
