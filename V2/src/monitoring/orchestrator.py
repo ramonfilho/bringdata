@@ -14,6 +14,12 @@ from .operational_monitor import OperationalMonitor
 from .capi_monitor import CAPIQualityMonitor
 from .models import Alert
 
+# Importar unificação de Medium (mesmo processamento que treino e produção)
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from data_processing.medium_unification import unify_medium_columns
+
 logger = logging.getLogger(__name__)
 
 
@@ -67,6 +73,14 @@ class MonitoringOrchestrator:
 
             logger.info(f"📧 Primeiro lead: {primeiro_email} (Data: {primeiro_data})")
             logger.info(f"📧 Último lead: {ultimo_email} (Data: {ultimo_data})")
+
+            # Aplicar unificação de Medium (mesmo processamento que treino e produção)
+            # Isso garante que 'ABERTO | AD0022' seja normalizado para 'Aberto'
+            if 'Medium' in df.columns:
+                medium_antes = df['Medium'].nunique()
+                df = unify_medium_columns(df)
+                medium_depois = df['Medium'].nunique()
+                logger.info(f"📊 Medium unificado: {medium_antes} → {medium_depois} categorias únicas")
 
             all_alerts_dict.extend(self.monitors['data_quality'].check(df))
 
