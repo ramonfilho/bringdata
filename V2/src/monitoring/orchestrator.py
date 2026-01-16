@@ -159,6 +159,11 @@ class MonitoringOrchestrator:
             df = unificar_categorias_completo(df)
             logger.info(f"📊 Categorias unificadas")
 
+            # Preservar colunas de score/decil ANTES de remover (necessário para monitoramento)
+            # Essas colunas vêm do Google Sheets (pipeline de produção já atribuiu)
+            decil_col = df['decil'].copy() if 'decil' in df.columns else None
+            lead_score_col = df['lead_score'].copy() if 'lead_score' in df.columns else None
+
             # Remover colunas de score/faixa (mesmo processamento que produção)
             # Remove: Pontuação, Score, Faixa, Faixa A-D, lead_score, decil
             from data_processing.preprocessing import clean_columns
@@ -167,6 +172,20 @@ class MonitoringOrchestrator:
             colunas_depois_score = len(df.columns)
             score_removidos = colunas_antes_score - colunas_depois_score
             logger.info(f"📊 Colunas de score/faixa removidas: {score_removidos} (total: {colunas_depois_score})")
+
+            # Restaurar colunas de score/decil APÓS limpeza (para monitoramento de distribuição)
+            if decil_col is not None:
+                df['decil'] = decil_col
+                logger.info(f"📊 Coluna 'decil' preservada para monitoramento (distribuição: {df['decil'].value_counts().sort_index().to_dict()})")
+            if lead_score_col is not None:
+                # Converter lead_score para float (pode vir como string com vírgula do Google Sheets)
+                if lead_score_col.dtype == 'object':
+                    # Substituir vírgula por ponto e tratar strings vazias
+                    lead_score_col = lead_score_col.str.replace(',', '.').replace('', None)
+                    lead_score_col = pd.to_numeric(lead_score_col, errors='coerce')
+                df['lead_score'] = lead_score_col
+                valid_scores = df['lead_score'].notna().sum()
+                logger.info(f"📊 Coluna 'lead_score' preservada para monitoramento ({valid_scores}/{len(df)} válidos, média: {df['lead_score'].mean():.4f})")
 
             # Remover features de campanha (mesmo processamento que produção)
             # Remove: Campaign, Content, e colunas vazias/problemáticas

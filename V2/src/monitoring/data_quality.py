@@ -695,8 +695,42 @@ class DataQualityMonitor:
 
             if drift_results:
                 print(f"\n⚠️  Status: ALERTA - {colunas_com_drift} coluna(s) com mudanças significativas")
+                print("-" * 80)
+
                 for result in drift_results:
-                    print(f"   • {result['column']}: {result['type']}")
+                    drift_type = result['type']
+                    severity = result.get('severity', 'MEDIUM')
+
+                    print(f"\n📊 {result['column']}")
+                    print(f"   Tipo: {drift_type}")
+                    print(f"   Severidade: {severity}")
+
+                    if drift_type == 'categorical_distribution_drift':
+                        # Mostrar top 3 categorias com maior mudança
+                        changes = result.get('changes', [])
+                        if changes:
+                            print(f"   Top 3 categorias com maior mudança:")
+                            for i, change in enumerate(changes[:3], 1):
+                                categoria = change['categoria']
+                                treino_pct = change['treino'] * 100
+                                producao_pct = change['producao'] * 100
+                                # Calcular diferença com sinal (+ ou -)
+                                diff_pp_signed = (change['producao'] - change['treino']) * 100
+                                print(f"      {i}. '{categoria}': {treino_pct:.1f}% → {producao_pct:.1f}% ({diff_pp_signed:+.1f}pp)")
+
+                    elif drift_type == 'numerical_distribution_drift':
+                        # Mostrar métricas numéricas
+                        mean_treino = result.get('mean_treino', 0)
+                        mean_producao = result.get('mean_producao', 0)
+                        std_treino = result.get('std_treino', 0)
+                        std_producao = result.get('std_producao', 0)
+                        sigma_diff = result.get('sigma_diff', 0)
+
+                        print(f"   Treino: μ={mean_treino:.2f}, σ={std_treino:.2f}")
+                        print(f"   Produção: μ={mean_producao:.2f}, σ={std_producao:.2f}")
+                        print(f"   Mudança: {sigma_diff:.2f}σ (threshold: {threshold_num:.1f}σ)")
+
+                print("-" * 80)
             else:
                 print(f"\n✅ Status: OK - Distribuições dentro do esperado")
 
@@ -824,7 +858,9 @@ class DataQualityMonitor:
         print("="*80)
 
         if 'decil' not in df.columns:
-            print("❌ Status: ERRO - Coluna 'decil' não encontrada")
+            print("⚠️  Status: SKIP - Coluna 'decil' não encontrada no dataset")
+            print("   Verifique se a coluna existe no Google Sheets (pipeline de produção)")
+            print("   Colunas disponíveis:", sorted([c for c in df.columns if 'score' in c.lower() or 'decil' in c.lower()]))
             return alerts
 
         threshold = THRESHOLDS['score_distribution']['threshold']
@@ -836,7 +872,11 @@ class DataQualityMonitor:
         if total_leads == 0:
             return alerts
 
-        decil_counts = df['decil'].value_counts()
+        # Normalizar formato dos decis (D01 → D1, D02 → D2, etc)
+        # Google Sheets pode ter 'D01' enquanto esperamos 'D1'
+        df['decil_normalized'] = df['decil'].astype(str).str.replace(r'^D0(\d)$', r'D\1', regex=True)
+
+        decil_counts = df['decil_normalized'].value_counts()
         distribuicao_atual = {
             decil: decil_counts.get(decil, 0) / total_leads
             for decil in EXPECTED_DECIL_DISTRIBUTION.keys()
@@ -891,12 +931,27 @@ class DataQualityMonitor:
         print(f"Decis verificados: {len(EXPECTED_DECIL_DISTRIBUTION)}")
         print(f"Decis com mudança significativa: {len(diferencas_significativas)}")
 
+        # Mostrar TODOS os decis (não apenas os que excedem threshold)
+        print(f"\n📊 Distribuição completa de decis:")
+        print("-" * 80)
+
+        # Ordenar decis numericamente (D1, D2, ..., D10 ao invés de D1, D10, D2, ...)
+        decis_ordenados = sorted(EXPECTED_DECIL_DISTRIBUTION.keys(), key=lambda x: int(x[1:]))
+
+        for decil in decis_ordenados:
+            prop_esperada = EXPECTED_DECIL_DISTRIBUTION[decil]
+            prop_atual = distribuicao_atual.get(decil, 0)
+            diff_signed = (prop_atual - prop_esperada) * 100  # Signed difference in pp
+
+            # Marcar decis que excedem threshold
+            excede = "⚠️" if abs(prop_atual - prop_esperada) > threshold else "  "
+            print(f"{excede} {decil}: {prop_esperada*100:5.1f}% → {prop_atual*100:5.1f}% ({diff_signed:+6.1f}pp)")
+        print("-" * 80)
+
         if diferencas_significativas:
             print(f"\n⚠️  Status: ALERTA - {len(diferencas_significativas)} decil(is) com mudança > {threshold*100:.1f}%")
-            for c in diferencas_significativas[:3]:
-                print(f"   • {c['decil']}: {c['esperado']*100:.0f}% → {c['atual']*100:.0f}% ({c['diff']*100:+.1f}pp)")
         else:
-            print(f"✅ Status: OK - Distribuição de decis dentro do esperado")
+            print(f"\n✅ Status: OK - Distribuição de decis dentro do esperado")
 
         return alerts
 
