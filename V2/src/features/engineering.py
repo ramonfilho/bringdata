@@ -171,27 +171,55 @@ def create_derived_features(df: pd.DataFrame) -> pd.DataFrame:
         df_fe['telefone_valido'] = df_fe['telefone_normalizado'].notna()
         df_fe['telefone_comprimento'] = df_fe['telefone_normalizado'].astype(str).str.len()
 
-        # ANÁLISE DE TELEFONES VÁLIDOS POR ARQUIVO DE ORIGEM (simulação para ambiente de produção)
+        # ANÁLISE DE TELEFONES VÁLIDOS POR ORIGEM
         logger.info(f"\n% de telefones válidos por arquivo de origem:")
-        total_registros = len(df_fe)
-        telefones_validos = df_fe['telefone_valido'].sum()
-        pct_valido = (telefones_validos / total_registros * 100) if total_registros > 0 else 0
-        logger.info(f"  Lead score LF 24.xlsx: {telefones_validos:,}/{total_registros:,} ({pct_valido:.1f}%)")
+
+        # Verificar se temos arquivo_origem (training) ou se é monitoring (Google Sheets)
+        if 'arquivo_origem' in df_fe.columns:
+            # Training: agrupar por arquivo de origem
+            for arquivo in sorted(df_fe['arquivo_origem'].unique()):
+                mask = df_fe['arquivo_origem'] == arquivo
+                total = mask.sum()
+                validos = df_fe.loc[mask, 'telefone_valido'].sum()
+                pct = (validos / total * 100) if total > 0 else 0
+                logger.info(f"  {arquivo}: {validos:,}/{total:,} ({pct:.1f}%)")
+        else:
+            # Monitoring: mostrar totais (Google Sheets)
+            total_registros = len(df_fe)
+            telefones_validos = df_fe['telefone_valido'].sum()
+            pct_valido = (telefones_validos / total_registros * 100) if total_registros > 0 else 0
+            logger.info(f"  Google Sheets (últimas 24h): {telefones_validos:,}/{total_registros:,} ({pct_valido:.1f}%)")
 
     # 3. REMOVER COLUNAS DESNECESSÁRIAS
-    colunas_remover = [
+    # Remover colunas de dados brutos
+    colunas_dados_brutos = [
         'aba_origem', 'arquivo_origem', 'Data',
-        'Nome Completo', 'E-mail', 'Telefone', 'telefone_normalizado'
+        'Nome Completo', 'E-mail', 'Telefone'
     ]
 
-    # Verificar quais colunas existem antes de remover
-    colunas_existentes = [col for col in colunas_remover if col in df_fe.columns]
+    # Remover coluna intermediária criada durante feature engineering
+    colunas_intermediarias = ['telefone_normalizado']
 
-    if colunas_existentes:
-        df_fe = df_fe.drop(columns=colunas_existentes)
-        logger.info(f"Colunas removidas: {len(colunas_existentes)}")
-        for col in colunas_existentes:
-            logger.info(f"  - {col}")
+    # Verificar quais colunas de dados brutos existem antes de remover
+    colunas_brutos_existentes = [col for col in colunas_dados_brutos if col in df_fe.columns]
+    colunas_intermediarias_existentes = [col for col in colunas_intermediarias if col in df_fe.columns]
+
+    # Remover todas
+    todas_remover = colunas_brutos_existentes + colunas_intermediarias_existentes
+
+    if todas_remover:
+        df_fe = df_fe.drop(columns=todas_remover)
+        logger.info(f"Colunas removidas: {len(todas_remover)}")
+
+        # Log dados brutos removidos
+        if colunas_brutos_existentes:
+            for col in colunas_brutos_existentes:
+                logger.info(f"  - {col}")
+
+        # Log colunas intermediárias removidas (criadas e removidas durante FE)
+        if colunas_intermediarias_existentes:
+            for col in colunas_intermediarias_existentes:
+                logger.info(f"  - {col} (coluna intermediária)")
 
     logger.info(f"Colunas depois: {len(df_fe.columns)}")
     logger.info(f"Nomes das colunas depois:")

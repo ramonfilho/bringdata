@@ -620,12 +620,85 @@ class DataQualityMonitor:
             colunas_com_drift = len(drift_results)
             print(f"Colunas com drift detectado: {colunas_com_drift}")
 
+            # Mostrar detalhes de mudanças por categoria (TODAS as colunas, não só as com drift)
+            print(f"\n📊 DETALHES DAS MUDANÇAS POR FEATURE:")
+            print("-" * 80)
+
+            # 1. Features categóricas
+            for col, proporcoes_treino in distribuicoes_esperadas.get("categorical", {}).items():
+                if col not in df.columns:
+                    continue
+
+                # Calcular proporções atuais
+                total_nao_nulos = df[col].notna().sum()
+                if total_nao_nulos == 0:
+                    continue
+
+                contagens = df[col].value_counts()
+                proporcoes_producao = (contagens / total_nao_nulos).to_dict()
+                proporcoes_producao_str = {str(k): float(v) for k, v in proporcoes_producao.items()}
+
+                # Calcular mudanças para TODAS as categorias
+                mudancas = []
+                for categoria, prop_treino in proporcoes_treino.items():
+                    prop_producao = proporcoes_producao_str.get(categoria, 0.0)
+                    diff = prop_producao - prop_treino  # Signed difference
+                    mudancas.append({
+                        'categoria': categoria,
+                        'treino': prop_treino,
+                        'producao': prop_producao,
+                        'diff': diff
+                    })
+
+                # Ordenar por maior mudança absoluta
+                mudancas.sort(key=lambda x: abs(x['diff']), reverse=True)
+
+                # Verificar se tem drift
+                tem_drift = any(result['column'] == col for result in drift_results)
+                status_icon = "⚠️" if tem_drift else "✅"
+
+                print(f"\n{status_icon} {col}:")
+                for m in mudancas:
+                    diff_abs = abs(m['diff'])
+                    excede = "⚠️" if diff_abs >= threshold_cat else "  "
+                    print(f"   {excede} '{m['categoria']}': {m['treino']*100:5.1f}% → {m['producao']*100:5.1f}% ({m['diff']*100:+6.1f}pp)")
+
+            # 2. Features numéricas
+            for col, stats_treino in distribuicoes_esperadas.get("numerical", {}).items():
+                if col not in df.columns:
+                    continue
+
+                if df[col].notna().sum() == 0:
+                    continue
+
+                mean_treino = stats_treino['mean']
+                std_treino = stats_treino['std']
+                mean_producao = float(df[col].mean())
+                std_producao = float(df[col].std())
+
+                # Calcular mudança em desvios padrão
+                if std_treino > 0:
+                    mean_diff_sigma = abs(mean_producao - mean_treino) / std_treino
+                else:
+                    mean_diff_sigma = 0.0
+
+                tem_drift = any(result['column'] == col for result in drift_results)
+                status_icon = "⚠️" if tem_drift else "✅"
+                excede = "⚠️" if mean_diff_sigma >= threshold_num else "  "
+
+                print(f"\n{status_icon} {col} (numérica):")
+                print(f"   {excede} Treino:    μ={mean_treino:7.2f}, σ={std_treino:7.2f}")
+                print(f"   {excede} Produção:  μ={mean_producao:7.2f}, σ={std_producao:7.2f}")
+                print(f"   {excede} Mudança:   {mean_diff_sigma:.2f}σ")
+
+            print("-" * 80)
+
             if drift_results:
                 print(f"\n⚠️  Status: ALERTA - {colunas_com_drift} coluna(s) com mudanças significativas")
                 for result in drift_results:
                     print(f"   • {result['column']}: {result['type']}")
             else:
-                print(f"✅ Status: OK - Distribuições dentro do esperado")
+                print(f"\n✅ Status: OK - Distribuições dentro do esperado")
 
             for result in drift_results:
                 drift_type = result['type']
