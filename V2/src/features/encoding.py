@@ -6,11 +6,62 @@ Mantém a lógica EXATA do notebook original para garantir reprodutibilidade.
 import pandas as pd
 from typing import Dict
 import logging
+import json
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
-def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", medium_strategy: str = "binary_top3") -> pd.DataFrame:
+def load_ordinal_mappings_from_training(model_path: str) -> Dict[str, list]:
+    """
+    Carrega mapeamentos ordinais a partir das categorias salvas no treino.
+
+    Args:
+        model_path: Caminho para pasta do modelo (ex: files/20260115_080140)
+
+    Returns:
+        Dict com mapeamentos ordinais {coluna: [ordem_das_categorias]}
+    """
+    categories_file = Path(model_path) / "categorias_esperadas.json"
+
+    if not categories_file.exists():
+        logger.warning(f"Arquivo de categorias não encontrado: {categories_file}")
+        logger.warning("Usando mapeamentos ordinais hardcoded (fallback)")
+        return None
+
+    with open(categories_file, 'r', encoding='utf-8') as f:
+        categorias = json.load(f)
+
+    ordinal_mappings = {}
+
+    # Idade: ordem por faixa etária crescente
+    if 'Qual a sua idade?' in categorias:
+        idade_cats = categorias['Qual a sua idade?']
+        # Ordenar por idade: menos de 18, 18-24, 25-34, 35-44, 45-54, mais de 55
+        ordem_idade = []
+        for cat in ['menos de 18 anos', '18 24 anos', '25 34 anos', '35 44 anos', '45 54 anos', 'mais de 55 anos']:
+            if cat in idade_cats:
+                ordem_idade.append(cat)
+        ordinal_mappings['Qual a sua idade?'] = ordem_idade
+
+    # Salário: ordem por faixa salarial crescente
+    if 'Atualmente, qual a sua faixa salarial?' in categorias:
+        salario_cats = categorias['Atualmente, qual a sua faixa salarial?']
+        # Ordenar por salário: sem renda, r1000-2000, r2001-3000, r3001-5000, r5001+
+        ordem_salario = []
+        for cat in ['nao tenho renda', 'entre r1000 a r2000 reais ao mes', 'entre r2001 a r3000 reais ao mes',
+                    'entre r3001 a r5000 reais ao mes', 'mais de r5001 reais ao mes']:
+            if cat in salario_cats:
+                ordem_salario.append(cat)
+        ordinal_mappings['Atualmente, qual a sua faixa salarial?'] = ordem_salario
+
+    # dia_semana sempre numérico
+    ordinal_mappings['dia_semana'] = [0, 1, 2, 3, 4, 5, 6]
+
+    return ordinal_mappings
+
+
+def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", medium_strategy: str = "binary_top3", model_path: str = None) -> pd.DataFrame:
     """
     Aplica encoding em um dataset específico.
 
@@ -20,6 +71,10 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
         medium_strategy: Estratégia para Medium
             - 'binary_top3': Features binárias para 3 categorias mais estáveis (PADRÃO)
             - 'full': One-hot completo (comportamento antigo)
+        model_path: Caminho para pasta do modelo (opcional)
+            - Se fornecido, carrega mapeamentos ordinais de categorias_esperadas.json
+            - Valida features geradas contra features_ordenadas.json do modelo
+            - Se não fornecido, usa mapeamentos hardcoded e pula validação
 
     Função EXATA copiada da Seção 20 do notebook original, com suporte a medium_strategy.
     """
@@ -39,15 +94,35 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
     logger.info("")
 
     # 1. ENCODING ORDINAL para variáveis com ordem natural
-    variaveis_ordinais = {
-        'Qual a sua idade?': ['Menos de 18 anos', '18 - 24 anos', '25 - 34 anos',
-                              '35 - 44 anos', '45 - 54 anos', 'Mais de 55 anos'],
-        'Atualmente, qual a sua faixa salarial?': ['Não tenho renda', 'Entre R$1.000 a R$2.000 reais ao mês',
-                                                   'Entre R$2.001 a R$3.000 reais ao mês',
-                                                   'Entre R$3.001 a R$5.000 reais ao mês',
-                                                   'Mais de R$5.001 reais ao mês'],
-        'dia_semana': [0, 1, 2, 3, 4, 5, 6]  # Já é numérico
-    }
+    # Se model_path fornecido, carregar categorias do treino (recomendado)
+    # Senão, usar valores hardcoded (fallback para treino ou desenvolvimento)
+    if model_path:
+        logger.info(f"Carregando mapeamentos ordinais de: {model_path}")
+        variaveis_ordinais = load_ordinal_mappings_from_training(model_path)
+        if variaveis_ordinais is None:
+            # Fallback para hardcoded se arquivo não existe
+            logger.warning("Usando mapeamentos ordinais hardcoded (fallback)")
+            variaveis_ordinais = {
+                'Qual a sua idade?': ['menos de 18 anos', '18 24 anos', '25 34 anos',
+                                      '35 44 anos', '45 54 anos', 'mais de 55 anos'],
+                'Atualmente, qual a sua faixa salarial?': ['nao tenho renda', 'entre r1000 a r2000 reais ao mes',
+                                                           'entre r2001 a r3000 reais ao mes',
+                                                           'entre r3001 a r5000 reais ao mes',
+                                                           'mais de r5001 reais ao mes'],
+                'dia_semana': [0, 1, 2, 3, 4, 5, 6]
+            }
+    else:
+        # Training ou desenvolvimento sem model_path
+        logger.info("Usando mapeamentos ordinais hardcoded (treino)")
+        variaveis_ordinais = {
+            'Qual a sua idade?': ['menos de 18 anos', '18 24 anos', '25 34 anos',
+                                  '35 44 anos', '45 54 anos', 'mais de 55 anos'],
+            'Atualmente, qual a sua faixa salarial?': ['nao tenho renda', 'entre r1000 a r2000 reais ao mes',
+                                                       'entre r2001 a r3000 reais ao mes',
+                                                       'entre r3001 a r5000 reais ao mes',
+                                                       'mais de r5001 reais ao mes'],
+            'dia_semana': [0, 1, 2, 3, 4, 5, 6]
+        }
 
     logger.info(f"\nAplicando ORDINAL ENCODING:")
     for var, ordem in variaveis_ordinais.items():
@@ -191,90 +266,47 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
 
     logger.info(f"  Total de colunas final: {len(df_encoded.columns)}")
 
-    # REORDENAR COLUNAS PARA ORDEM ESPERADA PELOS MODELOS (HARDCODED)
-    # Ordem exata baseada nos arquivos features_ordenadas_*.json dos modelos treinados
-    logger.info(f"\nReordenando colunas para compatibilidade com modelos...")
+    # VALIDAÇÃO DE FEATURES (OPCIONAL - se model_path fornecido)
+    # Carrega ordem esperada dinamicamente do arquivo features_ordenadas.json do modelo
+    if model_path:
+        logger.info(f"\nValidando features com modelo: {model_path}")
 
-    ordem_esperada = [
-        "Qual_a_sua_idade",
-        "Atualmente_qual_a_sua_faixa_salarial",
-        "dia_semana",
-        "nome_comprimento",
-        "O_seu_g_nero_Feminino",
-        "O_seu_g_nero_Masculino",
-        "O_que_voc_faz_atualmente_N_o_trabalho_e_nem_estudo",
-        "O_que_voc_faz_atualmente_Sou_CLT_Funcion_rio_P_blico",
-        "O_que_voc_faz_atualmente_Sou_apenas_estudante",
-        "O_que_voc_faz_atualmente_Sou_aposentado",
-        "O_que_voc_faz_atualmente_Sou_aut_nomo",
-        "Source_facebook_ads",
-        "Source_google_ads",
-        "Source_outros",
-        "Medium_Aberto",
-        "Medium_Interesse_Programa_o",
-        "Medium_Linguagem_de_programa_o",
-        "Medium_Lookalike_1_Cadastrados_DEV_2_0_Interesse_Ci_ncia_da_Computa_o",
-        "Medium_Lookalike_2_Alunos_Interesse_Linguagem_de_Programa_o",
-        "Medium_Lookalike_2_Cadastrados_DEV_2_0_Interesses",
-        "Medium_Outros",
-        "Medium_dgen",
-        "Term_facebook",
-        "Term_instagram",
-        "Term_outros",
-        "Voc_possui_cart_o_de_cr_dito_N_o",
-        "Voc_possui_cart_o_de_cr_dito_Sim",
-        "O_que_mais_voc_quer_ver_no_evento_A_aula_com_a_recrutadora",
-        "O_que_mais_voc_quer_ver_no_evento_Fazer_freelancer_como_programador",
-        "O_que_mais_voc_quer_ver_no_evento_Fazer_transi_o_de_carreira_e_conseguir_meu_primeiro_emprego_na_rea",
-        "O_que_mais_voc_quer_ver_no_evento_Fazer_um_projeto_na_pr_tica",
-        "O_que_mais_voc_quer_ver_no_evento_Quero_saber_se_para_mim",
-        "Tem_computador_notebook_N_o",
-        "Tem_computador_notebook_Sim",
-        "J_estudou_programa_o_N_o",
-        "J_estudou_programa_o_Sim",
-        "Voc_j_fez_faz_pretende_fazer_faculdade_N_o",
-        "Voc_j_fez_faz_pretende_fazer_faculdade_Sim",
-        "investiu_curso_online_N_o",
-        "investiu_curso_online_Sim",
-        "interesse_programacao_A_ideia_de_nunca_faltar_emprego_na_rea",
-        "interesse_programacao_A_possibilidade_de_ganhar_altos_sal_rios",
-        "interesse_programacao_Poder_trabalhar_de_qualquer_lugar_do_mundo",
-        "interesse_programacao_Todas_as_alternativas",
-        "interesse_programacao_Trabalhar_para_outros_pa_ses_e_ganhar_em_outra_moeda",
-        "nome_tem_sobrenome_False",
-        "nome_tem_sobrenome_True",
-        "nome_valido_False",
-        "nome_valido_True",
-        "email_valido_False",
-        "email_valido_True",
-        "telefone_valido_False",
-        "telefone_valido_True",
-        "telefone_comprimento_4",
-        "telefone_comprimento_9",
-        "telefone_comprimento_10",
-        "telefone_comprimento_11"
-    ]
+        features_file = Path(model_path) / "features_ordenadas_v1_devclub_rf_temporal_leads_single.json"
 
-    # Verificar se todas as colunas esperadas existem
-    colunas_faltando = [col for col in ordem_esperada if col not in df_encoded.columns]
-    colunas_extras = [col for col in df_encoded.columns if col not in ordem_esperada]
+        if features_file.exists():
+            with open(features_file, 'r') as f:
+                features_data = json.load(f)
+                ordem_esperada = features_data.get('feature_names', [])
 
-    if colunas_faltando:
-        logger.info(f"  ⚠️  ERRO: {len(colunas_faltando)} colunas esperadas estão faltando!")
-        for col in colunas_faltando[:5]:
-            logger.info(f"    - {col}")
+            logger.info(f"  Carregada ordem esperada de {len(ordem_esperada)} features do modelo")
 
-    if colunas_extras:
-        logger.info(f"  ⚠️  ERRO: {len(colunas_extras)} colunas extras encontradas!")
-        for col in colunas_extras[:5]:
-            logger.info(f"    + {col}")
+            # Verificar compatibilidade
+            colunas_faltando = [col for col in ordem_esperada if col not in df_encoded.columns]
+            colunas_extras = [col for col in df_encoded.columns if col not in ordem_esperada]
 
-    if not colunas_faltando and not colunas_extras:
-        # Reordenar DataFrame para ordem exata esperada pelos modelos
-        df_encoded = df_encoded[ordem_esperada]
-        logger.info(f"  ✅ Colunas reordenadas para ordem dos modelos: {len(ordem_esperada)} features")
+            if colunas_faltando:
+                logger.warning(f"  ⚠️  {len(colunas_faltando)} features esperadas pelo modelo estão ausentes:")
+                for col in colunas_faltando[:5]:
+                    logger.warning(f"    - {col}")
+                if len(colunas_faltando) > 5:
+                    logger.warning(f"    ... e mais {len(colunas_faltando) - 5}")
+
+            if colunas_extras:
+                logger.info(f"  ℹ️  {len(colunas_extras)} features extras geradas (não usadas pelo modelo):")
+                for col in colunas_extras[:5]:
+                    logger.info(f"    + {col}")
+                if len(colunas_extras) > 5:
+                    logger.info(f"    ... e mais {len(colunas_extras) - 5}")
+
+            if not colunas_faltando and not colunas_extras:
+                logger.info(f"  ✅ Todas as features estão corretas e alinhadas com o modelo")
+            else:
+                logger.info(f"  ℹ️  Features extras/faltando serão tratadas pelo prediction.py")
+        else:
+            logger.warning(f"  ⚠️  Arquivo features_ordenadas.json não encontrado em {model_path}")
+            logger.warning(f"  Pulando validação de features (não afeta predições)")
     else:
-        logger.info(f"  ❌ Mantendo ordem original devido a incompatibilidades")
+        logger.info(f"\nValidação de features pulada (model_path não fornecido)")
 
     # TRATAMENTO DE NaN REMANESCENTES
     logger.info(f"\nVerificando NaN remanescentes após encoding...")

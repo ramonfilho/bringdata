@@ -333,7 +333,12 @@ class LeadScoringPipeline:
         logger.info("🔄 [10/12] Aplicando encoding categórico...")
         cols_before_encoding = len(self.data.columns)
 
-        self.data = apply_categorical_encoding(self.data, versao="v1", medium_strategy="binary_top3")
+        self.data = apply_categorical_encoding(
+            self.data,
+            versao="v1",
+            medium_strategy="binary_top3",
+            model_path=str(self.predictor.model_path)
+        )
 
         encoding_cols_added = len(self.data.columns) - cols_before_encoding
         logger.info(f"   ➤ Colunas adicionadas pelo encoding: {encoding_cols_added}")

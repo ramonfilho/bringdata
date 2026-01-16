@@ -40,13 +40,15 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
         print(f"  {i:2d}. {col}")
 
     # 1. ENCODING ORDINAL para variáveis com ordem natural
+    # IMPORTANTE: Usar valores NORMALIZADOS (após unificar_categorias_completo)
+    # Estes valores devem dar match com o que está em categorias_esperadas.json
     variaveis_ordinais = {
-        'Qual a sua idade?': ['Menos de 18 anos', '18 - 24 anos', '25 - 34 anos',
-                              '35 - 44 anos', '45 - 54 anos', 'Mais de 55 anos'],
-        'Atualmente, qual a sua faixa salarial?': ['Não tenho renda', 'Entre R$1.000 a R$2.000 reais ao mês',
-                                                   'Entre R$2.001 a R$3.000 reais ao mês',
-                                                   'Entre R$3.001 a R$5.000 reais ao mês',
-                                                   'Mais de R$5.001 reais ao mês'],
+        'Qual a sua idade?': ['menos de 18 anos', '18 24 anos', '25 34 anos',
+                              '35 44 anos', '45 54 anos', 'mais de 55 anos'],
+        'Atualmente, qual a sua faixa salarial?': ['nao tenho renda', 'entre r1000 a r2000 reais ao mes',
+                                                   'entre r2001 a r3000 reais ao mes',
+                                                   'entre r3001 a r5000 reais ao mes',
+                                                   'mais de r5001 reais ao mes'],
         'dia_semana': [0, 1, 2, 3, 4, 5, 6]  # Já é numérico
     }
 

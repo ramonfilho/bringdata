@@ -541,7 +541,21 @@ class DataQualityMonitor:
         if THRESHOLDS['score_distribution']['enabled']:
             alerts.extend(self._check_score_distribution(df))
 
+        # Remover colunas de output do modelo ANTES do check de features
+        # Estas colunas (decil, lead_score) existem no Google Sheets porque foram
+        # adicionadas pela produção, mas NÃO existiam quando a produção fez encoding.
+        # O check de features precisa ver os dados EXATAMENTE como produção viu.
+        colunas_output_modelo = ['decil', 'decil_normalized', 'lead_score']
+        colunas_output_presentes = [col for col in colunas_output_modelo if col in df.columns]
+
+        if colunas_output_presentes:
+            print(f"\n🔧 Removendo outputs do modelo antes do check de features:")
+            for col in colunas_output_presentes:
+                print(f"   - {col} (adicionado pela produção, não existe no input)")
+            df = df.drop(columns=colunas_output_presentes)
+
         # 5. Missing features (colunas esperadas não encontradas)
+        # Agora df contém apenas as features que produção viu no encoding
         alerts.extend(self._check_missing_features(df))
 
         return alerts
@@ -978,8 +992,9 @@ class DataQualityMonitor:
 
         try:
             # 1. Aplicar encoding nos dados (necessário para validar features finais)
+            # Passar model_path para carregar mapeamentos ordinais do treino
             from features.encoding import apply_categorical_encoding
-            df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3')
+            df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3', model_path=self.model_path)
 
             print(f"Features após encoding: {len(df_encoded.columns)}")
 
