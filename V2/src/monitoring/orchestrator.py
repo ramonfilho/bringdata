@@ -228,6 +228,9 @@ class MonitoringOrchestrator:
         # Gerar sumário
         summary = self._generate_summary(alerts)
 
+        # NOVO: Gerar métricas do funil completo
+        funnel_metrics = self._generate_funnel_metrics(leads_data, df if leads_data else None)
+
         # Mensagem de conclusão
         print(f"\n✅ Monitoramento concluído!")
         print(f"✅ Log completo salvo em: {log_path}\n")
@@ -236,7 +239,8 @@ class MonitoringOrchestrator:
             'total_alerts': len(alerts),
             'alerts_by_severity': summary['by_severity'],
             'alerts_by_category': summary['by_category'],
-            'alerts': [alert.to_dict() for alert in alerts]
+            'alerts': [alert.to_dict() for alert in alerts],
+            'funnel_metrics': funnel_metrics
         }
 
     def _generate_summary(self, alerts: List[Alert]) -> Dict:
@@ -252,3 +256,228 @@ class MonitoringOrchestrator:
             'by_severity': by_severity,
             'by_category': by_category
         }
+
+    def _generate_funnel_metrics(self, leads_data: List[Dict], df: pd.DataFrame = None) -> Dict:
+        """
+        Gera métricas completas do funil de leads.
+
+        Analisa toda a jornada do lead:
+        1. Captura (landing page + Google Sheets)
+        2. Qualidade dos dados CAPI (FBP/FBC)
+        3. Scoring/Classificação (decis)
+        4. Envio para Meta CAPI
+        5. Resposta da Meta (aceite/rejeição)
+        6. Conversão final (resposta à pesquisa)
+        """
+        from datetime import datetime, timedelta, timezone
+        from api.database import LeadCAPI
+
+        print("\n" + "="*80)
+        print("📊 RELATÓRIO COMPLETO DO FUNIL DE LEADS")
+        print("="*80)
+
+        metrics = {}
+        lookback_time = datetime.now(timezone.utc) - timedelta(hours=24)
+
+        # ====================================================================
+        # ETAPA 1: CAPTURA DE LEADS
+        # ====================================================================
+        print("\n📥 ETAPA 1: CAPTURA DE LEADS (últimas 24h)")
+        print("-" * 80)
+
+        # Google Sheets (respostas à pesquisa)
+        total_sheets = len(leads_data) if leads_data else 0
+        print(f"Google Sheets (com resposta): {total_sheets} leads")
+
+        # PostgreSQL (todos os capturados)
+        total_db = self.db.query(LeadCAPI).filter(
+            LeadCAPI.created_at >= lookback_time
+        ).count()
+        print(f"Banco CAPI (capturados):      {total_db} leads")
+
+        metrics['capture'] = {
+            'total_sheets': total_sheets,
+            'total_database': total_db,
+            'response_rate': (total_sheets / total_db * 100) if total_db > 0 else 0
+        }
+
+        # ====================================================================
+        # ETAPA 2: QUALIDADE DOS DADOS CAPI
+        # ====================================================================
+        print("\n📊 ETAPA 2: QUALIDADE DOS DADOS CAPI")
+        print("-" * 80)
+
+        recent_leads = self.db.query(LeadCAPI).filter(
+            LeadCAPI.created_at >= lookback_time
+        ).all()
+
+        if recent_leads:
+            with_fbp = sum(1 for lead in recent_leads if lead.fbp and lead.fbp.strip())
+            with_fbc = sum(1 for lead in recent_leads if lead.fbc and lead.fbc.strip())
+            with_first_name = sum(1 for lead in recent_leads if lead.first_name and lead.first_name.strip())
+            with_phone = sum(1 for lead in recent_leads if lead.phone and lead.phone.strip())
+
+            pct_fbp = with_fbp / len(recent_leads) * 100
+            pct_fbc = with_fbc / len(recent_leads) * 100
+            pct_first_name = with_first_name / len(recent_leads) * 100
+            pct_phone = with_phone / len(recent_leads) * 100
+
+            print(f"FBP presente:         {with_fbp}/{len(recent_leads)} ({pct_fbp:.1f}%)")
+            print(f"FBC presente:         {with_fbc}/{len(recent_leads)} ({pct_fbc:.1f}%)")
+            print(f"First name presente:  {with_first_name}/{len(recent_leads)} ({pct_first_name:.1f}%)")
+            print(f"Telefone presente:    {with_phone}/{len(recent_leads)} ({pct_phone:.1f}%)")
+
+            metrics['data_quality'] = {
+                'total_leads': len(recent_leads),
+                'fbp_present': with_fbp,
+                'fbp_percentage': pct_fbp,
+                'fbc_present': with_fbc,
+                'fbc_percentage': pct_fbc,
+                'first_name_present': with_first_name,
+                'first_name_percentage': pct_first_name,
+                'phone_present': with_phone,
+                'phone_percentage': pct_phone
+            }
+
+        # ====================================================================
+        # ETAPA 3: SCORING/CLASSIFICAÇÃO
+        # ====================================================================
+        print("\n🎲 ETAPA 3: SCORING E CLASSIFICAÇÃO POR DECIL")
+        print("-" * 80)
+
+        if df is not None and 'decil' in df.columns:
+            decil_dist = df['decil'].value_counts().sort_index()
+
+            print("Distribuição por decil:")
+            for decil, count in decil_dist.items():
+                pct = count / len(df) * 100
+                bar = "█" * int(pct / 2)  # Barra visual (1 bloco = 2%)
+                print(f"  {decil}: {count:4d} leads ({pct:5.1f}%) {bar}")
+
+            if 'lead_score' in df.columns:
+                valid_scores = df['lead_score'].notna().sum()
+                avg_score = df['lead_score'].mean()
+                print(f"\nScore médio: {avg_score:.4f} ({valid_scores}/{len(df)} com score válido)")
+
+            metrics['scoring'] = {
+                'total_scored': len(df),
+                'decil_distribution': decil_dist.to_dict(),
+                'avg_score': df['lead_score'].mean() if 'lead_score' in df.columns else None
+            }
+
+        # ====================================================================
+        # ETAPA 4: ENVIO PARA META CAPI
+        # ====================================================================
+        print("\n📤 ETAPA 4: ENVIO PARA META CAPI")
+        print("-" * 80)
+
+        sent_to_capi = self.db.query(LeadCAPI).filter(
+            LeadCAPI.capi_sent_at >= lookback_time
+        ).count()
+
+        print(f"Leads enviados para CAPI: {sent_to_capi}")
+        print(f"Taxa de envio:            {sent_to_capi/total_db*100:.1f}% dos capturados" if total_db > 0 else "Taxa de envio:            N/A")
+
+        # Estimar eventos (cada lead D1-D10 = LeadQualified, D9-D10 = +LeadQualifiedHighQuality)
+        # Assumindo que em média ~30% são D9-D10
+        estimated_events = int(sent_to_capi * 1.3)  # Aproximação
+        print(f"Eventos estimados:        ~{estimated_events} (LeadQualified + LeadQualifiedHighQuality)")
+
+        metrics['capi_sent'] = {
+            'leads_sent': sent_to_capi,
+            'send_rate': (sent_to_capi / total_db * 100) if total_db > 0 else 0,
+            'estimated_events': estimated_events
+        }
+
+        # ====================================================================
+        # ETAPA 5: RESPOSTA DA META
+        # ====================================================================
+        print("\n✅ ETAPA 5: RESPOSTA DA META (ACEITAÇÃO/REJEIÇÃO)")
+        print("-" * 80)
+
+        with_response = self.db.query(LeadCAPI).filter(
+            LeadCAPI.capi_sent_at >= lookback_time,
+            LeadCAPI.capi_response_status.isnot(None)
+        ).all()
+
+        if with_response:
+            status_counts = {}
+            total_received = 0
+            total_rejected = 0
+
+            for lead in with_response:
+                status = lead.capi_response_status or 'unknown'
+                status_counts[status] = status_counts.get(status, 0) + 1
+
+                if lead.capi_events_received:
+                    total_received += lead.capi_events_received
+                if lead.capi_events_rejected:
+                    total_rejected += lead.capi_events_rejected
+
+            success_count = status_counts.get('success', 0)
+            error_count = status_counts.get('error', 0)
+            partial_count = status_counts.get('partial', 0)
+
+            print(f"Leads com resposta registrada: {len(with_response)}/{sent_to_capi}")
+            print(f"\nDistribuição de status:")
+            print(f"  ✅ Success: {success_count} ({success_count/len(with_response)*100:.1f}%)")
+            print(f"  ❌ Error:   {error_count} ({error_count/len(with_response)*100:.1f}%)")
+            print(f"  ⚠️  Partial: {partial_count} ({partial_count/len(with_response)*100:.1f}%)")
+
+            print(f"\nEventos processados pela Meta:")
+            print(f"  Recebidos:  {total_received}")
+            print(f"  Rejeitados: {total_rejected}")
+
+            acceptance_rate = (success_count / len(with_response) * 100) if len(with_response) > 0 else 0
+
+            metrics['meta_response'] = {
+                'leads_with_response': len(with_response),
+                'success_count': success_count,
+                'error_count': error_count,
+                'partial_count': partial_count,
+                'acceptance_rate': acceptance_rate,
+                'events_received': total_received,
+                'events_rejected': total_rejected
+            }
+        else:
+            print("⚠️  Nenhum lead com resposta registrada ainda")
+            print("   (Aguardando próximos batches após deploy)")
+
+            metrics['meta_response'] = {
+                'leads_with_response': 0,
+                'success_count': 0,
+                'error_count': 0,
+                'partial_count': 0,
+                'acceptance_rate': 0,
+                'events_received': 0,
+                'events_rejected': 0
+            }
+
+        # ====================================================================
+        # ETAPA 6: CONVERSÃO FINAL
+        # ====================================================================
+        print("\n🎯 ETAPA 6: CONVERSÃO FINAL (RESPOSTA À PESQUISA)")
+        print("-" * 80)
+
+        response_rate = (total_sheets / total_db * 100) if total_db > 0 else 0
+        print(f"Leads que responderam pesquisa: {total_sheets}/{total_db} ({response_rate:.1f}%)")
+
+        metrics['conversion'] = {
+            'responded_to_survey': total_sheets,
+            'response_rate': response_rate
+        }
+
+        # ====================================================================
+        # SUMÁRIO EXECUTIVO
+        # ====================================================================
+        print("\n" + "="*80)
+        print("📈 SUMÁRIO EXECUTIVO DO FUNIL")
+        print("="*80)
+        print(f"Capturados:           {total_db} leads")
+        print(f"Enviados para CAPI:   {sent_to_capi} leads ({sent_to_capi/total_db*100:.1f}%)" if total_db > 0 else f"Enviados para CAPI:   {sent_to_capi} leads")
+        if with_response:
+            print(f"Aceitos pela Meta:    {success_count} leads ({success_count/sent_to_capi*100:.1f}%)" if sent_to_capi > 0 else f"Aceitos pela Meta:    {success_count} leads")
+        print(f"Responderam pesquisa: {total_sheets} leads ({response_rate:.1f}%)")
+        print("="*80)
+
+        return metrics
