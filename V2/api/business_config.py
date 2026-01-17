@@ -27,16 +27,16 @@ PRODUCT_VALUE = 1649.73
 # MÉTODO: Taxa corrigida = Taxa observada / Recall
 
 CONVERSION_RATES = {
-    "D1": 0.000000,   # 0.00% | Corrigido de 0.00% (×4.702) | 0 conversões / 3,240 leads
-    "D2": 0.008464,   # 0.85% | Corrigido de 0.18% (×4.702) | 6 conversões / 3,244 leads
-    "D3": 0.005643,   # 0.56% | Corrigido de 0.12% (×4.702) | 4 conversões / 3,236 leads
+    "D1": 0.002821,   # 0.28% | Corrigido de 0.06% (×4.702) | 2 conversões / 3,240 leads
+    "D2": 0.007053,   # 0.71% | Corrigido de 0.15% (×4.702) | 5 conversões / 3,241 leads
+    "D3": 0.002821,   # 0.28% | Corrigido de 0.06% (×4.702) | 2 conversões / 3,239 leads
     "D4": 0.013166,   # 1.32% | Corrigido de 0.28% (×4.702) | 9 conversões / 3,239 leads
     "D5": 0.008934,   # 0.89% | Corrigido de 0.19% (×4.702) | 6 conversões / 3,239 leads
-    "D6": 0.029153,   # 2.92% | Corrigido de 0.62% (×4.702) | 20 conversões / 3,239 leads
-    "D7": 0.030564,   # 3.06% | Corrigido de 0.65% (×4.702) | 21 conversões / 3,239 leads
-    "D8": 0.039028,   # 3.90% | Corrigido de 0.83% (×4.702) | 27 conversões / 3,241 leads
-    "D9": 0.063949,   # 6.39% | Corrigido de 1.36% (×4.702) | 44 conversões / 3,238 leads
-    "D10": 0.082757,   # 8.28% | Corrigido de 1.76% (×4.702) | 57 conversões / 3,240 leads
+    "D6": 0.024451,   # 2.45% | Corrigido de 0.52% (×4.702) | 17 conversões / 3,240 leads
+    "D7": 0.034796,   # 3.48% | Corrigido de 0.74% (×4.702) | 24 conversões / 3,239 leads
+    "D8": 0.046551,   # 4.66% | Corrigido de 0.99% (×4.702) | 32 conversões / 3,239 leads
+    "D9": 0.057836,   # 5.78% | Corrigido de 1.23% (×4.702) | 40 conversões / 3,240 leads
+    "D10": 0.082757,   # 8.28% | Corrigido de 1.76% (×4.702) | 57 conversões / 3,239 leads
 }
 
 # =============================================================================
