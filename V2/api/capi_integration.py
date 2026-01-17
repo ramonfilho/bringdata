@@ -170,6 +170,73 @@ def hash_data(data) -> Optional[str]:
 # ENVIO DE EVENTOS
 # =============================================================================
 
+def parse_meta_capi_response(response) -> Dict:
+    """
+    Parseia a resposta da Meta CAPI para extrair estatísticas de eventos
+
+    Resposta da Meta tem formato:
+    {
+        "events_received": 1,  # Eventos que a Meta confirmou receber
+        "messages": [],        # Erros/warnings se houver
+        "fbtrace_id": "..."    # ID de trace para debug
+    }
+
+    Returns:
+        {
+            "status": "success" | "error" | "partial",
+            "events_received": int,
+            "events_rejected": int,
+            "error_message": str | None
+        }
+    """
+    result = {
+        "status": "success",
+        "events_received": 0,
+        "events_rejected": 0,
+        "error_message": None
+    }
+
+    try:
+        # A resposta pode ser um dict ou objeto com atributos
+        if isinstance(response, dict):
+            response_data = response
+        elif hasattr(response, '__dict__'):
+            response_data = response.__dict__
+        elif hasattr(response, 'export_value'):
+            response_data = response.export_value()
+        else:
+            response_data = {"raw": str(response)}
+
+        # Extrair events_received (eventos aceitos pela Meta)
+        events_received = response_data.get('events_received', 0)
+        result['events_received'] = int(events_received) if events_received else 0
+
+        # Extrair mensagens de erro
+        messages = response_data.get('messages', [])
+
+        # Se houve erros, marcar como error ou partial
+        if messages:
+            error_messages = [msg for msg in messages if isinstance(msg, str)]
+            result['error_message'] = '; '.join(error_messages) if error_messages else str(messages)
+
+            # Se recebeu alguns eventos mas teve erros = partial
+            if result['events_received'] > 0:
+                result['status'] = 'partial'
+                # Assumir 1 evento rejeitado se teve erro (não sabemos exatamente quantos)
+                result['events_rejected'] = 1
+            else:
+                result['status'] = 'error'
+                result['events_rejected'] = 1
+
+        logger.debug(f"📊 Meta CAPI response parsed: {result}")
+
+    except Exception as e:
+        logger.warning(f"⚠️  Erro ao parsear resposta Meta CAPI: {e}")
+        result['status'] = 'error'
+        result['error_message'] = str(e)
+
+    return result
+
 def send_lead_qualified_with_value(
     email: str,
     phone: Optional[str],
@@ -185,7 +252,8 @@ def send_lead_qualified_with_value(
     event_source_url: Optional[str],
     event_timestamp: int,
     test_event_code: Optional[str] = None,
-    survey_data: Optional[Dict] = None
+    survey_data: Optional[Dict] = None,
+    db = None
 ) -> Dict:
     """
     ESTRATÉGIA 1: Envia TODOS os leads (D1-D10) com VALOR DIFERENCIADO por decil
@@ -338,6 +406,24 @@ def send_lead_qualified_with_value(
         # Enviar
         response = event_request.execute()
 
+        # Parsear resposta da Meta
+        parsed_response = parse_meta_capi_response(response)
+
+        # Salvar resposta no banco (se db session disponível)
+        if db:
+            try:
+                from api.database import update_capi_response
+                update_capi_response(
+                    db=db,
+                    email=email,
+                    status=parsed_response['status'],
+                    events_received=parsed_response['events_received'],
+                    events_rejected=parsed_response['events_rejected'],
+                    error_message=parsed_response['error_message']
+                )
+            except Exception as db_err:
+                logger.warning(f"⚠️  Erro ao salvar CAPI response no banco para {email}: {db_err}")
+
         # DEBUG: Log da resposta da Meta para confirmar recebimento
         import json
         try:
@@ -345,20 +431,22 @@ def send_lead_qualified_with_value(
             logger.info(f"🔍 DEBUG Resposta da Meta API:")
             logger.info(f"   Response type: {type(response)}")
             logger.info(f"   Response: {response}")
+            logger.info(f"   Parsed: {parsed_response}")
             # Se for um objeto com atributos, tentar extrair
             if hasattr(response, '__dict__'):
                 logger.info(f"   Response dict: {json.dumps(response.__dict__, default=str, indent=2)}")
         except Exception as resp_err:
             logger.warning(f"⚠️  Erro ao logar resposta: {resp_err}")
 
-        logger.info(f"✅ LeadQualified enviado: {email} (decil: {decil}, valor proj: R$ {valor_projetado:.2f})")
+        logger.info(f"✅ LeadQualified enviado: {email} (decil: {decil}, valor proj: R$ {valor_projetado:.2f}, status: {parsed_response['status']})")
 
         return {
-            "status": "success",
+            "status": parsed_response['status'],
             "event_id": event_id,
             "email": email,
             "decil": decil,
             "valor_projetado": valor_projetado,
+            "capi_response": parsed_response,
             "response": str(response)
         }
 
@@ -388,7 +476,8 @@ def send_lead_qualified_high_quality(
     event_source_url: Optional[str],
     event_timestamp: int,
     test_event_code: Optional[str] = None,
-    survey_data: Optional[Dict] = None
+    survey_data: Optional[Dict] = None,
+    db = None
 ) -> Dict:
     """
     ESTRATÉGIA 2: Envia APENAS D9 e D10 SEM VALOR
@@ -522,14 +611,33 @@ def send_lead_qualified_high_quality(
         # Enviar
         response = event_request.execute()
 
-        logger.info(f"✅ LeadQualifiedHighQuality enviado: {email} (decil: {decil})")
+        # Parsear resposta da Meta
+        parsed_response = parse_meta_capi_response(response)
+
+        # Salvar resposta no banco (se db session disponível)
+        if db:
+            try:
+                from api.database import update_capi_response
+                update_capi_response(
+                    db=db,
+                    email=email,
+                    status=parsed_response['status'],
+                    events_received=parsed_response['events_received'],
+                    events_rejected=parsed_response['events_rejected'],
+                    error_message=parsed_response['error_message']
+                )
+            except Exception as db_err:
+                logger.warning(f"⚠️  Erro ao salvar CAPI response no banco para {email}: {db_err}")
+
+        logger.info(f"✅ LeadQualifiedHighQuality enviado: {email} (decil: {decil}, status: {parsed_response['status']})")
 
         return {
-            "status": "success",
+            "status": parsed_response['status'],
             "event_id": event_id,
             "email": email,
             "decil": decil,
             "estrategia": "high_quality_only",
+            "capi_response": parsed_response,
             "response": str(response)
         }
 
@@ -559,7 +667,8 @@ def send_both_lead_events(
     event_source_url: Optional[str],
     event_timestamp: int,
     test_event_code: Optional[str] = None,
-    survey_data: Optional[Dict] = None
+    survey_data: Optional[Dict] = None,
+    db = None
 ) -> Dict:
     """
     TESTE A/B: Envia AMBOS os eventos para permitir teste de 2 estratégias
@@ -599,7 +708,8 @@ def send_both_lead_events(
         event_source_url=event_source_url,
         event_timestamp=event_timestamp,
         test_event_code=test_event_code,
-        survey_data=survey_data
+        survey_data=survey_data,
+        db=db
     )
 
     # Enviar evento 2: SEM VALOR (D9-D10 only)
@@ -618,7 +728,8 @@ def send_both_lead_events(
         event_source_url=event_source_url,
         event_timestamp=event_timestamp,
         test_event_code=test_event_code,
-        survey_data=survey_data
+        survey_data=survey_data,
+        db=db
     )
 
     return {
@@ -779,7 +890,8 @@ def send_batch_events(leads: List[Dict], db=None) -> Dict:
             client_ip=lead.get('client_ip'),
             event_source_url=lead.get('event_source_url'),
             event_timestamp=lead['event_timestamp'],
-            survey_data=lead.get('survey_data')  # NOVO: Dados da pesquisa
+            survey_data=lead.get('survey_data'),  # Dados da pesquisa
+            db=db  # Passar db session para salvar resposta CAPI
             # test_event_code=None (padrão) -> vai para PRODUÇÃO
         )
 

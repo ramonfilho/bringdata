@@ -55,6 +55,10 @@ class LeadCAPI(Base):
 
     # Controle CAPI
     capi_sent_at = Column(TIMESTAMP, nullable=True, index=True)  # Quando foi enviado para CAPI
+    capi_response_status = Column(String(20), nullable=True)  # "success", "error", "partial"
+    capi_response_message = Column(Text, nullable=True)  # Detalhes de erro da Meta
+    capi_events_received = Column(Integer, nullable=True)  # Eventos recebidos pela Meta
+    capi_events_rejected = Column(Integer, nullable=True)  # Eventos rejeitados pela Meta
 
     # Timestamps
     created_at = Column(TIMESTAMP, server_default=func.now())
@@ -82,6 +86,10 @@ class LeadCAPI(Base):
             'utm_content': self.utm_content,
             'tem_comp': self.tem_comp,
             'capi_sent_at': self.capi_sent_at.isoformat() if self.capi_sent_at else None,
+            'capi_response_status': self.capi_response_status,
+            'capi_response_message': self.capi_response_message,
+            'capi_events_received': self.capi_events_received,
+            'capi_events_rejected': self.capi_events_rejected,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
@@ -247,6 +255,51 @@ def mark_lead_capi_sent(db: Session, email: str) -> bool:
         return True
     except Exception as e:
         logger.error(f"❌ Erro ao marcar CAPI sent para {email}: {e}")
+        db.rollback()
+        return False
+
+def update_capi_response(
+    db: Session,
+    email: str,
+    status: str,
+    events_received: int = 0,
+    events_rejected: int = 0,
+    error_message: Optional[str] = None
+) -> bool:
+    """
+    Atualiza o status da resposta CAPI da Meta
+
+    Args:
+        db: Sessão do banco
+        email: Email do lead
+        status: "success", "error", ou "partial"
+        events_received: Número de eventos que a Meta confirmou receber
+        events_rejected: Número de eventos que a Meta rejeitou
+        error_message: Mensagem de erro se houver
+
+    Returns:
+        True se atualizou com sucesso
+    """
+    try:
+        # Buscar TODOS os registros com esse email (pode haver duplicatas)
+        leads = db.query(LeadCAPI).filter(LeadCAPI.email == email).all()
+
+        if not leads:
+            logger.warning(f"⚠️ Lead {email} não encontrado no banco para atualizar CAPI response")
+            return False
+
+        # Atualizar todos os registros
+        for lead in leads:
+            lead.capi_response_status = status
+            lead.capi_response_message = error_message
+            lead.capi_events_received = events_received
+            lead.capi_events_rejected = events_rejected
+
+        db.commit()
+        logger.debug(f"✅ {len(leads)} registro(s) de {email} atualizados com CAPI response: {status}")
+        return True
+    except Exception as e:
+        logger.error(f"❌ Erro ao atualizar CAPI response para {email}: {e}")
         db.rollback()
         return False
 

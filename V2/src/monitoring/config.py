@@ -39,7 +39,7 @@ THRESHOLDS = {
     'capi_quality': {
         'enabled': True,
         'missing_rate': 0.50,  # 50% de missing em fbp/fbc
-        'rejection_rate': 0.20 # 20% de taxa de rejeição (futuro)
+        'rejection_rate': 0.10 # 10% de taxa de rejeição pela Meta
     }
 }
 

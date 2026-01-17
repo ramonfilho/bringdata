@@ -37,7 +37,7 @@ class CAPIQualityMonitor:
 
         if THRESHOLDS['capi_quality']['enabled']:
             alerts.extend(self._check_capi_missing_rate())
-            # Futuro: alerts.extend(self._check_capi_rejection_rate())
+            alerts.extend(self._check_capi_rejection_rate())
 
         return alerts
 
@@ -157,11 +157,102 @@ class CAPIQualityMonitor:
 
     def _check_capi_rejection_rate(self) -> List[Dict]:
         """
-        Verifica taxa de rejeição de eventos CAPI.
+        Verifica taxa de rejeição de eventos CAPI pela Meta.
 
-        TODO: Implementar leitura de logs do Cloud Run para detectar
-        erros de envio CAPI (status 400, 500, etc).
+        Query no banco: leads enviados nas últimas 24h com resposta da Meta
         """
+        from .config import THRESHOLDS
+        from api.database import LeadCAPI
+
         alerts = []
-        # Implementação futura
+
+        print("\n" + "="*80)
+        print("🔍 CHECK: Taxa de rejeição de eventos CAPI pela Meta")
+        print("="*80)
+
+        # Threshold configurável (padrão: 10%)
+        threshold = THRESHOLDS['capi_quality'].get('rejection_rate', 0.10)
+        lookback_hours = 24
+        lookback_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+
+        print(f"Threshold: {threshold*100:.1f}% (máximo permitido)")
+        print(f"Período: últimas {lookback_hours} horas")
+
+        try:
+            # Buscar leads com CAPI enviado nas últimas 24h
+            recent_capi = self.db.query(LeadCAPI).filter(
+                LeadCAPI.capi_sent_at >= lookback_time,
+                LeadCAPI.capi_response_status.isnot(None)  # Só leads com resposta registrada
+            ).all()
+
+            if not recent_capi:
+                # Sem registros de resposta CAPI
+                print("⚠️  Status: WARNING - Sem registros de resposta CAPI nas últimas 24h")
+                print("   (Pode indicar que o sistema ainda não está salvando respostas)")
+                return alerts
+
+            total_eventos = len(recent_capi)
+
+            # Contar por status
+            status_counts = {}
+            eventos_rejeitados_total = 0
+
+            for lead in recent_capi:
+                status = lead.capi_response_status or 'unknown'
+                status_counts[status] = status_counts.get(status, 0) + 1
+
+                # Somar eventos rejeitados
+                if lead.capi_events_rejected:
+                    eventos_rejeitados_total += lead.capi_events_rejected
+
+            success_count = status_counts.get('success', 0)
+            error_count = status_counts.get('error', 0)
+            partial_count = status_counts.get('partial', 0)
+
+            # Taxa de erro (error + partial)
+            error_rate = (error_count + partial_count) / total_eventos if total_eventos > 0 else 0
+
+            print(f"Total de leads com CAPI: {total_eventos}")
+            print(f"Status 'success': {success_count} ({success_count/total_eventos*100:.1f}%)")
+            print(f"Status 'error': {error_count} ({error_count/total_eventos*100:.1f}%)")
+            print(f"Status 'partial': {partial_count} ({partial_count/total_eventos*100:.1f}%)")
+            print(f"Eventos rejeitados pela Meta: {eventos_rejeitados_total}")
+            print(f"Taxa de erro (error + partial): {error_rate*100:.1f}%")
+
+            if error_rate > threshold:
+                print(f"\n⚠️  Status: ALERTA - Taxa de erro CAPI acima do threshold!")
+
+                # Determinar severidade
+                if error_rate >= 0.25:  # 25% ou mais
+                    severity = 'HIGH'
+                elif error_rate >= 0.15:  # 15% ou mais
+                    severity = 'MEDIUM'
+                else:
+                    severity = 'LOW'
+
+                alerts.append({
+                    'type': 'capi_rejection_rate_high',
+                    'severity': severity,
+                    'category': 'capi_quality',
+                    'message': f"⚠️ Taxa de erro CAPI alta: {error_rate*100:.1f}% ({error_count + partial_count}/{total_eventos} últimas 24h)",
+                    'details': {
+                        'total_leads': total_eventos,
+                        'success_count': success_count,
+                        'error_count': error_count,
+                        'partial_count': partial_count,
+                        'events_rejected': eventos_rejeitados_total,
+                        'error_rate': error_rate,
+                        'period_hours': lookback_hours
+                    },
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'metric_value': error_rate,
+                    'threshold': threshold
+                })
+            else:
+                print(f"✅ Status: OK - Taxa de erro CAPI < {threshold*100:.1f}%")
+
+        except Exception as e:
+            # Log erro mas não interrompe
+            print(f"❌ Status: ERRO - {str(e)}")
+
         return alerts
