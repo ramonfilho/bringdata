@@ -136,8 +136,8 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     if 'O que mais você quer ver no evento?' in df.columns:
         df['O que mais você quer ver no evento?'] = df['O que mais você quer ver no evento?'].apply(limpar_texto)
 
-        # Unificar "conseguir" vs "consegui"
-        df.loc[df['O que mais você quer ver no evento?'] == 'Fazer transição de carreira e consegui meu primeiro emprego na área', 'O que mais você quer ver no evento?'] = 'Fazer transição de carreira e conseguir meu primeiro emprego na área'
+        # Unificar "conseguir" vs "consegui" (usar texto normalizado após limpar_texto)
+        df.loc[df['O que mais você quer ver no evento?'] == 'fazer transicao de carreira e consegui meu primeiro emprego na area', 'O que mais você quer ver no evento?'] = 'fazer transicao de carreira e conseguir meu primeiro emprego na area'
 
         # Unificar "Quero saber se é para mim" (com espaços especiais)
         df.loc[df['O que mais você quer ver no evento?'].str.contains('Quero saber.*é.*para.*mim', na=False, regex=True), 'O que mais você quer ver no evento?'] = 'Quero saber se é para mim'
