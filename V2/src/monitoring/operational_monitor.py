@@ -6,7 +6,7 @@ Verifica:
 - Mais de 6h sem enviar eventos CAPI
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -55,7 +55,7 @@ class OperationalMonitor:
         print("="*80)
 
         threshold_hours = THRESHOLDS['operational']['no_leads_hours']
-        threshold_time = datetime.now() - timedelta(hours=threshold_hours)
+        threshold_time = datetime.now(timezone.utc) - timedelta(hours=threshold_hours)
 
         print(f"Threshold: {threshold_hours} horas")
 
@@ -70,13 +70,16 @@ class OperationalMonitor:
                 print("❌ Status: ERRO - Banco sem leads (dev/staging)")
                 return alerts
 
-            time_since_last = datetime.now() - last_lead.created_at
+            # Converter timestamp do banco para timezone-aware UTC
+            last_lead_time = last_lead.created_at.replace(tzinfo=timezone.utc) if last_lead.created_at.tzinfo is None else last_lead.created_at
+
+            time_since_last = datetime.now(timezone.utc) - last_lead_time
             hours_since = time_since_last.total_seconds() / 3600
 
-            print(f"Último lead: {last_lead.created_at.isoformat()}")
+            print(f"Último lead: {last_lead_time.isoformat()}")
             print(f"Tempo desde último lead: {hours_since:.1f} horas")
 
-            if last_lead.created_at < threshold_time:
+            if last_lead_time < threshold_time:
                 print(f"\n⚠️  Status: ALERTA - Sem leads há {hours_since:.1f}h (threshold: {threshold_hours}h)")
 
                 # Determinar severidade
@@ -91,13 +94,13 @@ class OperationalMonitor:
                     'type': 'no_leads_received',
                     'severity': severity,
                     'category': 'operational',
-                    'message': f"⚠️ Nenhum lead recebido nas últimas {hours_since:.1f} horas (último: {last_lead.created_at.isoformat()})",
+                    'message': f"⚠️ Nenhum lead recebido nas últimas {hours_since:.1f} horas (último: {last_lead_time.isoformat()})",
                     'details': {
-                        'last_lead_at': last_lead.created_at.isoformat(),
+                        'last_lead_at': last_lead_time.isoformat(),
                         'hours_since': hours_since,
                         'last_lead_email': last_lead.email
                     },
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
                     'metric_value': hours_since,
                     'threshold': float(threshold_hours)
                 })
@@ -122,7 +125,7 @@ class OperationalMonitor:
         print("="*80)
 
         threshold_hours = THRESHOLDS['operational']['no_capi_hours']
-        threshold_time = datetime.now() - timedelta(hours=threshold_hours)
+        threshold_time = datetime.now(timezone.utc) - timedelta(hours=threshold_hours)
 
         print(f"Threshold: {threshold_hours} horas")
 
@@ -139,13 +142,16 @@ class OperationalMonitor:
                 print("❌ Status: ERRO - Nenhum CAPI enviado ainda (setup novo)")
                 return alerts
 
-            time_since_last = datetime.now() - last_capi.capi_sent_at
+            # Converter timestamp do banco para timezone-aware UTC
+            last_capi_time = last_capi.capi_sent_at.replace(tzinfo=timezone.utc) if last_capi.capi_sent_at.tzinfo is None else last_capi.capi_sent_at
+
+            time_since_last = datetime.now(timezone.utc) - last_capi_time
             hours_since = time_since_last.total_seconds() / 3600
 
-            print(f"Último CAPI: {last_capi.capi_sent_at.isoformat()}")
+            print(f"Último CAPI: {last_capi_time.isoformat()}")
             print(f"Tempo desde último CAPI: {hours_since:.1f} horas")
 
-            if last_capi.capi_sent_at < threshold_time:
+            if last_capi_time < threshold_time:
                 print(f"\n⚠️  Status: ALERTA - Sem CAPI há {hours_since:.1f}h (threshold: {threshold_hours}h)")
                 hours_since = time_since_last.total_seconds() / 3600
 
@@ -161,13 +167,13 @@ class OperationalMonitor:
                     'type': 'no_capi_sent',
                     'severity': severity,
                     'category': 'operational',
-                    'message': f"⚠️ Nenhum evento CAPI enviado nas últimas {hours_since:.1f} horas (último: {last_capi.capi_sent_at.isoformat()})",
+                    'message': f"⚠️ Nenhum evento CAPI enviado nas últimas {hours_since:.1f} horas (último: {last_capi_time.isoformat()})",
                     'details': {
-                        'last_capi_at': last_capi.capi_sent_at.isoformat(),
+                        'last_capi_at': last_capi_time.isoformat(),
                         'hours_since': hours_since,
                         'last_lead_email': last_capi.email
                     },
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
                     'metric_value': hours_since,
                     'threshold': float(threshold_hours)
                 })

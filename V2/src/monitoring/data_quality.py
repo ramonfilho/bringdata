@@ -521,7 +521,7 @@ class DataQualityMonitor:
             Lista de alertas no formato dict (compatível com Alert.from_dict)
         """
         from .config import THRESHOLDS, EXPECTED_DECIL_DISTRIBUTION
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         alerts = []
 
@@ -562,7 +562,7 @@ class DataQualityMonitor:
 
     def _check_category_drift(self, df: pd.DataFrame) -> List[Dict]:
         """Verifica categorias não vistas no treino"""
-        from datetime import datetime
+        from datetime import datetime, timezone
         alerts = []
 
         print("\n" + "="*80)
@@ -594,7 +594,7 @@ class DataQualityMonitor:
                             'affected_count': result.get('count', 0),
                             'percentage': result.get('percentage', 0)
                         },
-                        'timestamp': datetime.now().isoformat(),
+                        'timestamp': datetime.now(timezone.utc).isoformat(),
                         'metric_value': result.get('percentage', 0),
                         'threshold': None
                     })
@@ -609,7 +609,7 @@ class DataQualityMonitor:
     def _check_distribution_drift(self, df: pd.DataFrame) -> List[Dict]:
         """Verifica mudanças drásticas nas proporções"""
         from .config import THRESHOLDS
-        from datetime import datetime
+        from datetime import datetime, timezone
         alerts = []
 
         print("\n" + "="*80)
@@ -776,7 +776,7 @@ class DataQualityMonitor:
                     'category': 'data_quality',
                     'message': result['message'],
                     'details': details,
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
                     'metric_value': metric_value,
                     'threshold': threshold_used
                 })
@@ -789,7 +789,7 @@ class DataQualityMonitor:
     def _check_missing_rate(self, df: pd.DataFrame) -> List[Dict]:
         """Verifica colunas com missing rate alto"""
         from .config import THRESHOLDS, MISSING_RATE_IGNORE_COLUMNS
-        from datetime import datetime
+        from datetime import datetime, timezone
         alerts = []
         threshold = THRESHOLDS['missing_rate']['threshold']
 
@@ -839,7 +839,7 @@ class DataQualityMonitor:
                         'total_rows': total_rows,
                         'missing_rate': missing_rate
                     },
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
                     'metric_value': missing_rate,
                     'threshold': threshold
                 })
@@ -864,7 +864,7 @@ class DataQualityMonitor:
     def _check_score_distribution(self, df: pd.DataFrame) -> List[Dict]:
         """Verifica mudanças na distribuição de decis"""
         from .config import THRESHOLDS, EXPECTED_DECIL_DISTRIBUTION
-        from datetime import datetime
+        from datetime import datetime, timezone
         alerts = []
 
         print("\n" + "="*80)
@@ -936,7 +936,7 @@ class DataQualityMonitor:
                     'changes': diferencas_significativas,
                     'total_leads': total_leads
                 },
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': datetime.now(timezone.utc).isoformat(),
                 'metric_value': max_diff,
                 'threshold': threshold
             })
@@ -982,7 +982,7 @@ class DataQualityMonitor:
         Returns:
             Lista de alertas para features que estariam ausentes
         """
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         alerts = []
 
@@ -1035,7 +1035,7 @@ class DataQualityMonitor:
                         'total_expected': validation['total_expected'],
                         'total_created': validation['total_received']
                     },
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
                     'metric_value': len(missing_features),
                     'threshold': 0  # Qualquer feature faltando é problema
                 })

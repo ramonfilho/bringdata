@@ -6,7 +6,7 @@ Verifica:
 - Alta taxa de rejeição de eventos CAPI (futuro - via logs)
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict
 from sqlalchemy.orm import Session
 
@@ -54,7 +54,7 @@ class CAPIQualityMonitor:
 
         threshold = THRESHOLDS['capi_quality']['missing_rate']
         lookback_hours = 24
-        lookback_time = datetime.now() - timedelta(hours=lookback_hours)
+        lookback_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
         print(f"Threshold: {threshold*100:.1f}% (máximo permitido)")
         print(f"Período: últimas {lookback_hours} horas")
@@ -108,7 +108,7 @@ class CAPIQualityMonitor:
                         'missing_rate': fbp_missing_rate,
                         'period_hours': lookback_hours
                     },
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
                     'metric_value': fbp_missing_rate,
                     'threshold': threshold
                 })
@@ -136,7 +136,7 @@ class CAPIQualityMonitor:
                         'missing_rate': fbc_missing_rate,
                         'period_hours': lookback_hours
                     },
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
                     'metric_value': fbc_missing_rate,
                     'threshold': threshold
                 })
