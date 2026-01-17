@@ -1,7 +1,7 @@
 active_model:
   model_name: v1_devclub_rf_temporal_leads_single
-  model_path: files/20260117_102344
-  trained_at: '2026-01-17T10:23:40.967873'
+  model_path: files/20260117_123914
+  trained_at: '2026-01-17T12:39:09.799868'
   split_method: temporal_leads
   performance:
     auc: 0.7486773638649244
