@@ -48,16 +48,9 @@ class CAPIQualityMonitor:
 
         alerts = []
 
-        print("\n" + "="*80)
-        print("🔍 CHECK: Missing rate alto de dados CAPI (fbp/fbc > 50%)")
-        print("="*80)
-
         threshold = THRESHOLDS['capi_quality']['missing_rate']
         lookback_hours = 24
         lookback_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
-
-        print(f"Threshold: {threshold*100:.1f}% (máximo permitido)")
-        print(f"Período: últimas {lookback_hours} horas")
 
         try:
             # Buscar leads das últimas 24h
@@ -66,8 +59,6 @@ class CAPIQualityMonitor:
             ).all()
 
             if not recent_leads:
-                # Sem leads recentes
-                print("❌ Status: ERRO - Sem leads nas últimas 24h")
                 return alerts
 
             total_leads = len(recent_leads)
@@ -79,16 +70,8 @@ class CAPIQualityMonitor:
             fbp_missing_rate = missing_fbp / total_leads
             fbc_missing_rate = missing_fbc / total_leads
 
-            print(f"Total de leads: {total_leads}")
-            print(f"FBP missing: {fbp_missing_rate*100:.1f}% ({missing_fbp}/{total_leads})")
-            print(f"FBC missing: {fbc_missing_rate*100:.1f}% ({missing_fbc}/{total_leads})")
-
-            campos_acima_threshold = []
-
             # Verificar FBP
             if fbp_missing_rate > threshold:
-                campos_acima_threshold.append(('FBP', fbp_missing_rate))
-
                 if fbp_missing_rate >= 0.75:
                     severity = 'HIGH'
                 elif fbp_missing_rate >= 0.60:
@@ -115,8 +98,6 @@ class CAPIQualityMonitor:
 
             # Verificar FBC
             if fbc_missing_rate > threshold:
-                campos_acima_threshold.append(('FBC', fbc_missing_rate))
-
                 if fbc_missing_rate >= 0.75:
                     severity = 'HIGH'
                 elif fbc_missing_rate >= 0.60:
@@ -141,17 +122,8 @@ class CAPIQualityMonitor:
                     'threshold': threshold
                 })
 
-            # Mostrar resumo
-            if campos_acima_threshold:
-                print(f"\n⚠️  Status: ALERTA - {len(campos_acima_threshold)} campo(s) CAPI com missing alto")
-                for campo, rate in campos_acima_threshold:
-                    print(f"   • {campo}: {rate*100:.1f}%")
-            else:
-                print(f"✅ Status: OK - FBP e FBC com missing < {threshold*100:.1f}%")
-
-        except Exception as e:
-            # Log erro mas não interrompe
-            print(f"❌ Status: ERRO - {str(e)}")
+        except Exception:
+            pass
 
         return alerts
 
@@ -166,17 +138,10 @@ class CAPIQualityMonitor:
 
         alerts = []
 
-        print("\n" + "="*80)
-        print("🔍 CHECK: Taxa de rejeição de eventos CAPI pela Meta")
-        print("="*80)
-
         # Threshold configurável (padrão: 10%)
         threshold = THRESHOLDS['capi_quality'].get('rejection_rate', 0.10)
         lookback_hours = 24
         lookback_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
-
-        print(f"Threshold: {threshold*100:.1f}% (máximo permitido)")
-        print(f"Período: últimas {lookback_hours} horas")
 
         try:
             # Buscar leads com CAPI enviado nas últimas 24h
@@ -186,9 +151,6 @@ class CAPIQualityMonitor:
             ).all()
 
             if not recent_capi:
-                # Sem registros de resposta CAPI
-                print("⚠️  Status: WARNING - Sem registros de resposta CAPI nas últimas 24h")
-                print("   (Pode indicar que o sistema ainda não está salvando respostas)")
                 return alerts
 
             total_eventos = len(recent_capi)
@@ -212,16 +174,7 @@ class CAPIQualityMonitor:
             # Taxa de erro (error + partial)
             error_rate = (error_count + partial_count) / total_eventos if total_eventos > 0 else 0
 
-            print(f"Total de leads com CAPI: {total_eventos}")
-            print(f"Status 'success': {success_count} ({success_count/total_eventos*100:.1f}%)")
-            print(f"Status 'error': {error_count} ({error_count/total_eventos*100:.1f}%)")
-            print(f"Status 'partial': {partial_count} ({partial_count/total_eventos*100:.1f}%)")
-            print(f"Eventos rejeitados pela Meta: {eventos_rejeitados_total}")
-            print(f"Taxa de erro (error + partial): {error_rate*100:.1f}%")
-
             if error_rate > threshold:
-                print(f"\n⚠️  Status: ALERTA - Taxa de erro CAPI acima do threshold!")
-
                 # Determinar severidade
                 if error_rate >= 0.25:  # 25% ou mais
                     severity = 'HIGH'
@@ -248,11 +201,8 @@ class CAPIQualityMonitor:
                     'metric_value': error_rate,
                     'threshold': threshold
                 })
-            else:
-                print(f"✅ Status: OK - Taxa de erro CAPI < {threshold*100:.1f}%")
 
-        except Exception as e:
-            # Log erro mas não interrompe
-            print(f"❌ Status: ERRO - {str(e)}")
+        except Exception:
+            pass
 
         return alerts

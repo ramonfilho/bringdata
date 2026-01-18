@@ -231,6 +231,9 @@ class MonitoringOrchestrator:
         # NOVO: Gerar métricas do funil completo
         funnel_metrics = self._generate_funnel_metrics(leads_data, df if leads_data else None)
 
+        # NOVO: Gerar sumário crítico consolidado
+        self._generate_critical_summary(alerts, funnel_metrics)
+
         # Mensagem de conclusão
         print(f"\n✅ Monitoramento concluído!")
         print(f"✅ Log completo salvo em: {log_path}\n")
@@ -242,6 +245,239 @@ class MonitoringOrchestrator:
             'alerts': [alert.to_dict() for alert in alerts],
             'funnel_metrics': funnel_metrics
         }
+
+    def _count_sheet_tab2_responses(self, lookback_time) -> int:
+        """
+        Conta número de respostas na segunda aba da planilha (últimas 24h).
+
+        Args:
+            lookback_time: Datetime UTC para filtrar últimas 24h
+
+        Returns:
+            Número de linhas na segunda aba (últimas 24h)
+        """
+        import gspread
+        from google.auth import default as gauth_default
+        from datetime import timezone
+
+        try:
+            # Importar URL da planilha do app.py
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../api'))
+            from app import GOOGLE_SHEETS_URL
+
+            if not GOOGLE_SHEETS_URL:
+                logger.warning("⚠️  GOOGLE_SHEETS_URL não configurado, pulando contagem aba 2")
+                return 0
+
+            # Autenticar
+            scopes = [
+                'https://www.googleapis.com/auth/spreadsheets.readonly',
+                'https://www.googleapis.com/auth/drive.readonly'
+            ]
+            creds, _ = gauth_default(scopes=scopes)
+            gc = gspread.authorize(creds)
+
+            # Abrir segunda aba (índice 1)
+            spreadsheet = gc.open_by_url(GOOGLE_SHEETS_URL)
+            worksheet = spreadsheet.get_worksheet(1)  # Segunda aba
+
+            if not worksheet:
+                logger.warning("⚠️  Segunda aba não encontrada na planilha")
+                return 0
+
+            # Buscar todos os dados
+            valores = worksheet.get_all_values()
+            if len(valores) <= 1:  # Só header ou vazio
+                return 0
+
+            headers = valores[0]
+            dados = valores[1:]
+
+            # Tentar filtrar por data (últimas 24h)
+            date_columns = [i for i, col in enumerate(headers) if any(
+                term in col.lower() for term in ['data', 'timestamp', 'hora', 'date', 'time', 'envio']
+            )]
+
+            if date_columns and dados:
+                date_col_idx = date_columns[0]
+                count = 0
+
+                for row in dados:
+                    if date_col_idx < len(row) and row[date_col_idx]:
+                        try:
+                            # Parse com formato brasileiro (DD/MM/YYYY HH:MM:SS)
+                            row_date = pd.to_datetime(row[date_col_idx], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+                            if pd.notna(row_date):
+                                # Converter para timezone-aware UTC se necessário
+                                if row_date.tzinfo is None:
+                                    row_date = row_date.replace(tzinfo=timezone.utc)
+
+                                if row_date >= lookback_time:
+                                    count += 1
+                        except:
+                            continue
+
+                return count
+            else:
+                # Sem coluna de data, avisar
+                logger.warning(f"   ⚠️  Sem coluna de data na aba 2, retornando 0")
+                return 0
+
+        except Exception as e:
+            logger.warning(f"⚠️  Erro ao contar aba 2: {e}")
+            return 0
+
+    def _generate_critical_summary(self, alerts: List[Alert], funnel_metrics: Dict) -> None:
+        """
+        Gera sumário crítico consolidado do sistema.
+
+        Args:
+            alerts: Lista de alertas gerados pelos checks
+            funnel_metrics: Métricas do funil de conversão
+        """
+        print("\n" + "="*80)
+        print("📊 SUMÁRIO CRÍTICO DO SISTEMA")
+        print("="*80)
+
+        # 1. Categorias não vistas no treino
+        new_categories = [a for a in alerts if 'nova categoria' in a.message.lower() or 'não vista no treino' in a.message.lower()]
+        if new_categories:
+            print("\n1. Categorias não vistas no treino: Sim")
+            for alert in new_categories:
+                # Extrair coluna e categoria da mensagem
+                parts = alert.message.split("'")
+                if len(parts) >= 2:
+                    print(f"   - {parts[1]}: {parts[3] if len(parts) >= 4 else 'categoria desconhecida'}")
+        else:
+            print("\n1. Categorias não vistas no treino: Não")
+
+        # 2. Mudanças drásticas nas proporções de colunas
+        drastic_changes = [a for a in alerts if 'mudança(s) significativa(s)' in a.message.lower() or 'mudanças significativas' in a.message.lower()]
+        if drastic_changes:
+            print("\n2. Mudanças drásticas nas proporções: Sim")
+            for alert in drastic_changes:
+                details = alert.details
+                column = details.get('column', 'desconhecida')
+
+                # Se for drift categórico, tem 'changes' com as mudanças
+                if 'changes' in details:
+                    changes = details['changes']
+                    if changes:
+                        # Pegar a maior mudança
+                        biggest_change = max(changes, key=lambda x: abs(x.get('diff', 0)))
+                        cat = biggest_change.get('category', '?')
+                        expected = biggest_change.get('expected', 0) * 100
+                        observed = biggest_change.get('observed', 0) * 100
+                        diff = abs(biggest_change.get('diff', 0)) * 100
+                        print(f"   - {column}: Variação de {diff:.1f}pp (esperado: {expected:.1f}%, observado: {observed:.1f}%)")
+                # Se for drift numérico, tem sigma_diff
+                elif 'sigma_diff' in details:
+                    sigma = details.get('sigma_diff', 0)
+                    mean_treino = details.get('mean_treino', 0)
+                    mean_prod = details.get('mean_producao', 0)
+                    print(f"   - {column}: Mudança de {sigma:.1f}σ (média treino: {mean_treino:.2f}, produção: {mean_prod:.2f})")
+        else:
+            print("\n2. Mudanças drásticas nas proporções: Não")
+
+        # 3. Colunas com dados faltantes
+        missing_data = [a for a in alerts if 'faltante' in a.message.lower() and 'feature' not in a.message.lower()]
+        if missing_data:
+            print("\n3. Colunas com dados faltantes: Sim")
+            for alert in missing_data:
+                print(f"   - {alert.message}")
+        else:
+            print("\n3. Colunas com dados faltantes: Não")
+
+        # 4. Features faltantes
+        missing_features_alerts = [a for a in alerts if 'feature' in a.message.lower() and ('esperada' in a.message.lower() or 'faltando' in a.message.lower() or 'não encontrada' in a.message.lower() or 'ausente' in a.message.lower())]
+        if missing_features_alerts:
+            print("\n4. Features faltantes: Sim")
+            for alert in missing_features_alerts:
+                details = alert.details
+
+                # Se o alerta tem lista de missing_features no details
+                if 'missing_features' in details:
+                    missing_list = details['missing_features']
+                    missing_count = len(missing_list)
+                    print(f"   Total: {missing_count} feature(s)")
+
+                    # Mostrar até 10 features (para não poluir)
+                    for feat in missing_list[:10]:
+                        print(f"   - {feat}")
+                    if len(missing_list) > 10:
+                        print(f"   ... e mais {len(missing_list) - 10} features")
+                # Senão, tentar extrair da mensagem (fallback)
+                else:
+                    parts = alert.message.split("'")
+                    if len(parts) >= 2:
+                        feature_name = parts[1]
+                        print(f"   - {feature_name}")
+        else:
+            print("\n4. Features faltantes: Não")
+
+        # 5. Mudança significativa em score/decil
+        score_changes = [a for a in alerts if 'distribuição de decis mudou' in a.message.lower()]
+        if score_changes:
+            print("\n5. Mudança significativa em score/decil: Sim")
+            for alert in score_changes:
+                details = alert.details
+                changes = details.get('changes', [])
+
+                if changes:
+                    # Mostrar todos os decis com mudanças
+                    for change in changes:
+                        decil = change.get('decil', '?')
+                        esperado = change.get('esperado', 0) * 100
+                        observado = change.get('observado', 0) * 100
+                        diferenca = abs(change.get('diferenca', 0))
+                        print(f"   - {decil}: Variação de {diferenca:.1f}pp (esperado: {esperado:.1f}%, observado: {observado:.1f}%)")
+        else:
+            print("\n5. Mudança significativa em score/decil: Não")
+
+        # 6. Recebimento regular de leads
+        capture = funnel_metrics.get('capture', {})
+        total_db = capture.get('total_database', 0)
+        print(f"\n6. Recebimento regular de leads: {'Sim' if total_db > 0 else 'Não'}")
+        print(f"   ({total_db:,} leads nas últimas 24h)")
+
+        # 7. Envio CAPI para Meta
+        capi_sent = funnel_metrics.get('capi_sent', {})
+        leads_sent = capi_sent.get('leads_sent', 0)
+        estimated_events = capi_sent.get('estimated_events', 0)
+        print(f"\n7. Envio CAPI para Meta: {'Sim' if leads_sent > 0 else 'Não'}")
+        print(f"   ({estimated_events:,} eventos estimados nas últimas 24h)")
+
+        # 8. Cookies FBP/FBC preenchidos
+        data_quality = funnel_metrics.get('data_quality', {})
+        fbp_rate = data_quality.get('fbp_percentage', 0)
+        fbc_rate = data_quality.get('fbc_percentage', 0)
+        print(f"\n8. Cookies FBP/FBC preenchidos: {'Sim' if fbp_rate > 90 and fbc_rate > 90 else 'Parcial' if fbp_rate > 50 or fbc_rate > 50 else 'Não'}")
+        print(f"   - FBP: {fbp_rate:.1f}%")
+        print(f"   - FBC: {fbc_rate:.1f}%")
+
+        # 9. Eventos recebidos pela Meta
+        meta_response = funnel_metrics.get('meta_response', {})
+        success_count = meta_response.get('success_count', 0)
+        leads_with_response = meta_response.get('leads_with_response', 0)
+        acceptance_rate = meta_response.get('acceptance_rate', 0)
+        print(f"\n9. Eventos recebidos pela Meta: {'Sim' if success_count > 0 else 'Não'}")
+        if success_count > 0:
+            print(f"   ({acceptance_rate:.1f}% de aceitação, {success_count} eventos aceitos)")
+
+        # 10. Funil de Conversão
+        total_sheets = capture.get('total_sheets_combined', 0)
+        print(f"\n10. Funil de Conversão:")
+        print(f"    Leads CAPI: {total_db:,} → Respostas: {total_sheets:,} → Enviados: {leads_sent:,} → Aceitos: {success_count:,}")
+
+        # 11. Taxas de Conversão
+        response_rate = capture.get('response_rate', 0)
+        send_rate = capi_sent.get('send_rate', 0)
+        print(f"\n11. Taxas de Conversão:")
+        print(f"    - Resposta pesquisa: {response_rate:.1f}%")
+        print(f"    - Envio CAPI: {send_rate:.1f}%")
+        print(f"    - Aceitação Meta: {acceptance_rate:.1f}%")
+
+        print("\n" + "="*80)
 
     def _generate_summary(self, alerts: List[Alert]) -> Dict:
         """Gera sumário de alertas por severidade e categoria"""
@@ -272,41 +508,27 @@ class MonitoringOrchestrator:
         from datetime import datetime, timedelta, timezone
         from api.database import LeadCAPI
 
-        print("\n" + "="*80)
-        print("📊 RELATÓRIO COMPLETO DO FUNIL DE LEADS")
-        print("="*80)
-
         metrics = {}
         lookback_time = datetime.now(timezone.utc) - timedelta(hours=24)
 
-        # ====================================================================
         # ETAPA 1: CAPTURA DE LEADS
-        # ====================================================================
-        print("\n📥 ETAPA 1: CAPTURA DE LEADS (últimas 24h)")
-        print("-" * 80)
+        total_sheets_tab1 = len(leads_data) if leads_data else 0
+        total_sheets_tab2 = self._count_sheet_tab2_responses(lookback_time)
+        total_sheets = total_sheets_tab1 + total_sheets_tab2
 
-        # Google Sheets (respostas à pesquisa)
-        total_sheets = len(leads_data) if leads_data else 0
-        print(f"Google Sheets (com resposta): {total_sheets} leads")
-
-        # PostgreSQL (todos os capturados)
         total_db = self.db.query(LeadCAPI).filter(
             LeadCAPI.created_at >= lookback_time
         ).count()
-        print(f"Banco CAPI (capturados):      {total_db} leads")
 
         metrics['capture'] = {
-            'total_sheets': total_sheets,
+            'total_sheets_tab1': total_sheets_tab1,
+            'total_sheets_tab2': total_sheets_tab2,
+            'total_sheets_combined': total_sheets,
             'total_database': total_db,
             'response_rate': (total_sheets / total_db * 100) if total_db > 0 else 0
         }
 
-        # ====================================================================
         # ETAPA 2: QUALIDADE DOS DADOS CAPI
-        # ====================================================================
-        print("\n📊 ETAPA 2: QUALIDADE DOS DADOS CAPI")
-        print("-" * 80)
-
         recent_leads = self.db.query(LeadCAPI).filter(
             LeadCAPI.created_at >= lookback_time
         ).all()
@@ -322,11 +544,6 @@ class MonitoringOrchestrator:
             pct_first_name = with_first_name / len(recent_leads) * 100
             pct_phone = with_phone / len(recent_leads) * 100
 
-            print(f"FBP presente:         {with_fbp}/{len(recent_leads)} ({pct_fbp:.1f}%)")
-            print(f"FBC presente:         {with_fbc}/{len(recent_leads)} ({pct_fbc:.1f}%)")
-            print(f"First name presente:  {with_first_name}/{len(recent_leads)} ({pct_first_name:.1f}%)")
-            print(f"Telefone presente:    {with_phone}/{len(recent_leads)} ({pct_phone:.1f}%)")
-
             metrics['data_quality'] = {
                 'total_leads': len(recent_leads),
                 'fbp_present': with_fbp,
@@ -339,25 +556,9 @@ class MonitoringOrchestrator:
                 'phone_percentage': pct_phone
             }
 
-        # ====================================================================
         # ETAPA 3: SCORING/CLASSIFICAÇÃO
-        # ====================================================================
-        print("\n🎲 ETAPA 3: SCORING E CLASSIFICAÇÃO POR DECIL")
-        print("-" * 80)
-
         if df is not None and 'decil' in df.columns:
             decil_dist = df['decil'].value_counts().sort_index()
-
-            print("Distribuição por decil:")
-            for decil, count in decil_dist.items():
-                pct = count / len(df) * 100
-                bar = "█" * int(pct / 2)  # Barra visual (1 bloco = 2%)
-                print(f"  {decil}: {count:4d} leads ({pct:5.1f}%) {bar}")
-
-            if 'lead_score' in df.columns:
-                valid_scores = df['lead_score'].notna().sum()
-                avg_score = df['lead_score'].mean()
-                print(f"\nScore médio: {avg_score:.4f} ({valid_scores}/{len(df)} com score válido)")
 
             metrics['scoring'] = {
                 'total_scored': len(df),
@@ -365,36 +566,20 @@ class MonitoringOrchestrator:
                 'avg_score': df['lead_score'].mean() if 'lead_score' in df.columns else None
             }
 
-        # ====================================================================
         # ETAPA 4: ENVIO PARA META CAPI
-        # ====================================================================
-        print("\n📤 ETAPA 4: ENVIO PARA META CAPI")
-        print("-" * 80)
-
         sent_to_capi = self.db.query(LeadCAPI).filter(
             LeadCAPI.capi_sent_at >= lookback_time
         ).count()
 
-        print(f"Leads enviados para CAPI: {sent_to_capi}")
-        print(f"Taxa de envio:            {sent_to_capi/total_db*100:.1f}% dos capturados" if total_db > 0 else "Taxa de envio:            N/A")
-
-        # Estimar eventos (cada lead D1-D10 = LeadQualified, D9-D10 = +LeadQualifiedHighQuality)
-        # Assumindo que em média ~30% são D9-D10
         estimated_events = int(sent_to_capi * 1.3)  # Aproximação
-        print(f"Eventos estimados:        ~{estimated_events} (LeadQualified + LeadQualifiedHighQuality)")
 
         metrics['capi_sent'] = {
             'leads_sent': sent_to_capi,
-            'send_rate': (sent_to_capi / total_db * 100) if total_db > 0 else 0,
+            'send_rate': (sent_to_capi / total_sheets * 100) if total_sheets > 0 else 0,
             'estimated_events': estimated_events
         }
 
-        # ====================================================================
         # ETAPA 5: RESPOSTA DA META
-        # ====================================================================
-        print("\n✅ ETAPA 5: RESPOSTA DA META (ACEITAÇÃO/REJEIÇÃO)")
-        print("-" * 80)
-
         with_response = self.db.query(LeadCAPI).filter(
             LeadCAPI.capi_sent_at >= lookback_time,
             LeadCAPI.capi_response_status.isnot(None)
@@ -418,16 +603,6 @@ class MonitoringOrchestrator:
             error_count = status_counts.get('error', 0)
             partial_count = status_counts.get('partial', 0)
 
-            print(f"Leads com resposta registrada: {len(with_response)}/{sent_to_capi}")
-            print(f"\nDistribuição de status:")
-            print(f"  ✅ Success: {success_count} ({success_count/len(with_response)*100:.1f}%)")
-            print(f"  ❌ Error:   {error_count} ({error_count/len(with_response)*100:.1f}%)")
-            print(f"  ⚠️  Partial: {partial_count} ({partial_count/len(with_response)*100:.1f}%)")
-
-            print(f"\nEventos processados pela Meta:")
-            print(f"  Recebidos:  {total_received}")
-            print(f"  Rejeitados: {total_rejected}")
-
             acceptance_rate = (success_count / len(with_response) * 100) if len(with_response) > 0 else 0
 
             metrics['meta_response'] = {
@@ -440,9 +615,6 @@ class MonitoringOrchestrator:
                 'events_rejected': total_rejected
             }
         else:
-            print("⚠️  Nenhum lead com resposta registrada ainda")
-            print("   (Aguardando próximos batches após deploy)")
-
             metrics['meta_response'] = {
                 'leads_with_response': 0,
                 'success_count': 0,
@@ -453,31 +625,12 @@ class MonitoringOrchestrator:
                 'events_rejected': 0
             }
 
-        # ====================================================================
         # ETAPA 6: CONVERSÃO FINAL
-        # ====================================================================
-        print("\n🎯 ETAPA 6: CONVERSÃO FINAL (RESPOSTA À PESQUISA)")
-        print("-" * 80)
-
         response_rate = (total_sheets / total_db * 100) if total_db > 0 else 0
-        print(f"Leads que responderam pesquisa: {total_sheets}/{total_db} ({response_rate:.1f}%)")
 
         metrics['conversion'] = {
             'responded_to_survey': total_sheets,
             'response_rate': response_rate
         }
-
-        # ====================================================================
-        # SUMÁRIO EXECUTIVO
-        # ====================================================================
-        print("\n" + "="*80)
-        print("📈 SUMÁRIO EXECUTIVO DO FUNIL")
-        print("="*80)
-        print(f"Capturados:           {total_db} leads")
-        print(f"Enviados para CAPI:   {sent_to_capi} leads ({sent_to_capi/total_db*100:.1f}%)" if total_db > 0 else f"Enviados para CAPI:   {sent_to_capi} leads")
-        if with_response:
-            print(f"Aceitos pela Meta:    {success_count} leads ({success_count/sent_to_capi*100:.1f}%)" if sent_to_capi > 0 else f"Aceitos pela Meta:    {success_count} leads")
-        print(f"Responderam pesquisa: {total_sheets} leads ({response_rate:.1f}%)")
-        print("="*80)
 
         return metrics

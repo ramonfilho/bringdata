@@ -549,9 +549,6 @@ class DataQualityMonitor:
         colunas_output_presentes = [col for col in colunas_output_modelo if col in df.columns]
 
         if colunas_output_presentes:
-            print(f"\n🔧 Removendo outputs do modelo antes do check de features:")
-            for col in colunas_output_presentes:
-                print(f"   - {col} (adicionado pela produção, não existe no input)")
             df = df.drop(columns=colunas_output_presentes)
 
         # 5. Missing features (colunas esperadas não encontradas)
@@ -565,24 +562,12 @@ class DataQualityMonitor:
         from datetime import datetime, timezone
         alerts = []
 
-        print("\n" + "="*80)
-        print("🔍 CHECK: Novas categorias não vistas no treino")
-        print("="*80)
-
         try:
             categorias_esperadas = load_training_categories(self.model_path)
             drift_results = check_category_drift(df, categorias_esperadas)
 
-            total_colunas_verificadas = len(categorias_esperadas)
-            colunas_com_drift = len(drift_results)
-
-            print(f"Colunas verificadas: {total_colunas_verificadas}")
-            print(f"Colunas com categorias novas: {colunas_com_drift}")
-
             if drift_results:
-                print(f"\n⚠️  Status: ALERTA - {colunas_com_drift} coluna(s) com categorias novas")
                 for result in drift_results:
-                    print(f"   • {result['column']}: {len(result.get('new_categories', []))} nova(s) categoria(s)")
                     alerts.append({
                         'type': 'category_drift',
                         'severity': result['severity'],
@@ -598,11 +583,9 @@ class DataQualityMonitor:
                         'metric_value': result.get('percentage', 0),
                         'threshold': None
                     })
-            else:
-                print(f"✅ Status: OK - Todas as categorias conhecidas")
 
-        except (FileNotFoundError, Exception) as e:
-            print(f"❌ Status: ERRO - Não foi possível carregar categorias esperadas")
+        except (FileNotFoundError, Exception):
+            pass
 
         return alerts
 
@@ -612,18 +595,10 @@ class DataQualityMonitor:
         from datetime import datetime, timezone
         alerts = []
 
-        print("\n" + "="*80)
-        print("🔍 CHECK: Mudanças drásticas nas distribuições")
-        print("="*80)
-
         try:
             distribuicoes_esperadas = load_training_distributions(self.model_path)
             threshold_cat = THRESHOLDS['distribution_drift']['categorical']
             threshold_num = THRESHOLDS['distribution_drift']['numerical']
-
-            print(f"Threshold categórico: {threshold_cat*100:.1f}% (mudança máxima permitida)")
-            print(f"Threshold numérico: {threshold_num} sigmas (desvio permitido)")
-            print(f"Colunas a verificar: {len(distribuicoes_esperadas)}")
 
             drift_results = check_distribution_drift(
                 df, distribuicoes_esperadas,
@@ -631,123 +606,7 @@ class DataQualityMonitor:
                 threshold_numerical=threshold_num
             )
 
-            colunas_com_drift = len(drift_results)
-            print(f"Colunas com drift detectado: {colunas_com_drift}")
-
-            # Mostrar detalhes de mudanças por categoria (TODAS as colunas, não só as com drift)
-            print(f"\n📊 DETALHES DAS MUDANÇAS POR FEATURE:")
-            print("-" * 80)
-
-            # 1. Features categóricas
-            for col, proporcoes_treino in distribuicoes_esperadas.get("categorical", {}).items():
-                if col not in df.columns:
-                    continue
-
-                # Calcular proporções atuais
-                total_nao_nulos = df[col].notna().sum()
-                if total_nao_nulos == 0:
-                    continue
-
-                contagens = df[col].value_counts()
-                proporcoes_producao = (contagens / total_nao_nulos).to_dict()
-                proporcoes_producao_str = {str(k): float(v) for k, v in proporcoes_producao.items()}
-
-                # Calcular mudanças para TODAS as categorias
-                mudancas = []
-                for categoria, prop_treino in proporcoes_treino.items():
-                    prop_producao = proporcoes_producao_str.get(categoria, 0.0)
-                    diff = prop_producao - prop_treino  # Signed difference
-                    mudancas.append({
-                        'categoria': categoria,
-                        'treino': prop_treino,
-                        'producao': prop_producao,
-                        'diff': diff
-                    })
-
-                # Ordenar por maior mudança absoluta
-                mudancas.sort(key=lambda x: abs(x['diff']), reverse=True)
-
-                # Verificar se tem drift
-                tem_drift = any(result['column'] == col for result in drift_results)
-                status_icon = "⚠️" if tem_drift else "✅"
-
-                print(f"\n{status_icon} {col}:")
-                for m in mudancas:
-                    diff_abs = abs(m['diff'])
-                    excede = "⚠️" if diff_abs >= threshold_cat else "  "
-                    print(f"   {excede} '{m['categoria']}': {m['treino']*100:5.1f}% → {m['producao']*100:5.1f}% ({m['diff']*100:+6.1f}pp)")
-
-            # 2. Features numéricas
-            for col, stats_treino in distribuicoes_esperadas.get("numerical", {}).items():
-                if col not in df.columns:
-                    continue
-
-                if df[col].notna().sum() == 0:
-                    continue
-
-                mean_treino = stats_treino['mean']
-                std_treino = stats_treino['std']
-                mean_producao = float(df[col].mean())
-                std_producao = float(df[col].std())
-
-                # Calcular mudança em desvios padrão
-                if std_treino > 0:
-                    mean_diff_sigma = abs(mean_producao - mean_treino) / std_treino
-                else:
-                    mean_diff_sigma = 0.0
-
-                tem_drift = any(result['column'] == col for result in drift_results)
-                status_icon = "⚠️" if tem_drift else "✅"
-                excede = "⚠️" if mean_diff_sigma >= threshold_num else "  "
-
-                print(f"\n{status_icon} {col} (numérica):")
-                print(f"   {excede} Treino:    μ={mean_treino:7.2f}, σ={std_treino:7.2f}")
-                print(f"   {excede} Produção:  μ={mean_producao:7.2f}, σ={std_producao:7.2f}")
-                print(f"   {excede} Mudança:   {mean_diff_sigma:.2f}σ")
-
-            print("-" * 80)
-
-            if drift_results:
-                print(f"\n⚠️  Status: ALERTA - {colunas_com_drift} coluna(s) com mudanças significativas")
-                print("-" * 80)
-
-                for result in drift_results:
-                    drift_type = result['type']
-                    severity = result.get('severity', 'MEDIUM')
-
-                    print(f"\n📊 {result['column']}")
-                    print(f"   Tipo: {drift_type}")
-                    print(f"   Severidade: {severity}")
-
-                    if drift_type == 'categorical_distribution_drift':
-                        # Mostrar top 3 categorias com maior mudança
-                        changes = result.get('changes', [])
-                        if changes:
-                            print(f"   Top 3 categorias com maior mudança:")
-                            for i, change in enumerate(changes[:3], 1):
-                                categoria = change['categoria']
-                                treino_pct = change['treino'] * 100
-                                producao_pct = change['producao'] * 100
-                                # Calcular diferença com sinal (+ ou -)
-                                diff_pp_signed = (change['producao'] - change['treino']) * 100
-                                print(f"      {i}. '{categoria}': {treino_pct:.1f}% → {producao_pct:.1f}% ({diff_pp_signed:+.1f}pp)")
-
-                    elif drift_type == 'numerical_distribution_drift':
-                        # Mostrar métricas numéricas
-                        mean_treino = result.get('mean_treino', 0)
-                        mean_producao = result.get('mean_producao', 0)
-                        std_treino = result.get('std_treino', 0)
-                        std_producao = result.get('std_producao', 0)
-                        sigma_diff = result.get('sigma_diff', 0)
-
-                        print(f"   Treino: μ={mean_treino:.2f}, σ={std_treino:.2f}")
-                        print(f"   Produção: μ={mean_producao:.2f}, σ={std_producao:.2f}")
-                        print(f"   Mudança: {sigma_diff:.2f}σ (threshold: {threshold_num:.1f}σ)")
-
-                print("-" * 80)
-            else:
-                print(f"\n✅ Status: OK - Distribuições dentro do esperado")
-
+            # Criar alertas para drift results
             for result in drift_results:
                 drift_type = result['type']
 
@@ -793,19 +652,12 @@ class DataQualityMonitor:
         alerts = []
         threshold = THRESHOLDS['missing_rate']['threshold']
 
-        print("\n" + "="*80)
-        print("🔍 CHECK: Missing rate alto em colunas")
-        print("="*80)
-
         total_rows = len(df)
         if total_rows == 0:
             return alerts
 
-        print(f"Threshold: {threshold*100:.1f}% (máximo permitido)")
-        print(f"Total de linhas: {total_rows}")
-
-        colunas_acima_threshold = []
         missing_rates = {}
+        colunas_acima_threshold = []
 
         for col in df.columns:
             # Ignorar colunas da whitelist
@@ -844,21 +696,6 @@ class DataQualityMonitor:
                     'threshold': threshold
                 })
 
-        # Mostrar resumo
-        colunas_verificadas = len(missing_rates)
-        max_missing = max(missing_rates.values()) if missing_rates else 0
-
-        print(f"Colunas verificadas: {colunas_verificadas}")
-        print(f"Colunas acima do threshold: {len(colunas_acima_threshold)}")
-        print(f"Missing rate máximo: {max_missing*100:.1f}%")
-
-        if colunas_acima_threshold:
-            print(f"\n⚠️  Status: ALERTA - {len(colunas_acima_threshold)} coluna(s) com missing alto")
-            for col, rate in sorted(colunas_acima_threshold, key=lambda x: x[1], reverse=True)[:5]:
-                print(f"   • {col}: {rate*100:.1f}%")
-        else:
-            print(f"✅ Status: OK - Todas as colunas com missing < {threshold*100:.1f}%")
-
         return alerts
 
     def _check_score_distribution(self, df: pd.DataFrame) -> List[Dict]:
@@ -867,21 +704,11 @@ class DataQualityMonitor:
         from datetime import datetime, timezone
         alerts = []
 
-        print("\n" + "="*80)
-        print("🔍 CHECK: Mudança significativa nas proporções de score/decil")
-        print("="*80)
-
         if 'decil' not in df.columns:
-            print("⚠️  Status: SKIP - Coluna 'decil' não encontrada no dataset")
-            print("   Verifique se a coluna existe no Google Sheets (pipeline de produção)")
-            print("   Colunas disponíveis:", sorted([c for c in df.columns if 'score' in c.lower() or 'decil' in c.lower()]))
             return alerts
 
         threshold = THRESHOLDS['score_distribution']['threshold']
         total_leads = len(df)
-
-        print(f"Threshold: {threshold*100:.1f}% (mudança máxima permitida)")
-        print(f"Total de leads: {total_leads}")
 
         if total_leads == 0:
             return alerts
@@ -941,32 +768,6 @@ class DataQualityMonitor:
                 'threshold': threshold
             })
 
-        # Mostrar resumo
-        print(f"Decis verificados: {len(EXPECTED_DECIL_DISTRIBUTION)}")
-        print(f"Decis com mudança significativa: {len(diferencas_significativas)}")
-
-        # Mostrar TODOS os decis (não apenas os que excedem threshold)
-        print(f"\n📊 Distribuição completa de decis:")
-        print("-" * 80)
-
-        # Ordenar decis numericamente (D1, D2, ..., D10 ao invés de D1, D10, D2, ...)
-        decis_ordenados = sorted(EXPECTED_DECIL_DISTRIBUTION.keys(), key=lambda x: int(x[1:]))
-
-        for decil in decis_ordenados:
-            prop_esperada = EXPECTED_DECIL_DISTRIBUTION[decil]
-            prop_atual = distribuicao_atual.get(decil, 0)
-            diff_signed = (prop_atual - prop_esperada) * 100  # Signed difference in pp
-
-            # Marcar decis que excedem threshold
-            excede = "⚠️" if abs(prop_atual - prop_esperada) > threshold else "  "
-            print(f"{excede} {decil}: {prop_esperada*100:5.1f}% → {prop_atual*100:5.1f}% ({diff_signed:+6.1f}pp)")
-        print("-" * 80)
-
-        if diferencas_significativas:
-            print(f"\n⚠️  Status: ALERTA - {len(diferencas_significativas)} decil(is) com mudança > {threshold*100:.1f}%")
-        else:
-            print(f"\n✅ Status: OK - Distribuição de decis dentro do esperado")
-
         return alerts
 
     def _check_missing_features(self, df: pd.DataFrame) -> List[Dict]:
@@ -986,42 +787,21 @@ class DataQualityMonitor:
 
         alerts = []
 
-        print("\n" + "="*80)
-        print("🔍 CHECK: Features esperadas pelo modelo")
-        print("="*80)
-
         try:
             # 1. Aplicar encoding nos dados (necessário para validar features finais)
-            # Passar model_path para carregar mapeamentos ordinais do treino
             from features.encoding import apply_categorical_encoding
             df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3', model_path=self.model_path)
 
-            print(f"Features após encoding: {len(df_encoded.columns)}")
-
             # 2. Usar Predictor para validar features
             from model.prediction import LeadScoringPredictor
-            # Extrair model_name do caminho (último componente antes de features_ordenadas)
-            model_name = "v1_devclub_rf_temporal_leads_single"  # Nome padrão do modelo ativo
+            model_name = "v1_devclub_rf_temporal_leads_single"
             predictor = LeadScoringPredictor(model_name=model_name, model_path=self.model_path)
 
             # 3. Validar features (NÃO faz predição, só valida)
-            # validate_features() carrega feature_names automaticamente se necessário
             validation = predictor.validate_features(df_encoded)
-
-            print(f"Features esperadas pelo modelo: {validation['total_expected']}")
-
-            print(f"Features ausentes: {validation['missing_count']}")
 
             if not validation['is_valid']:
                 missing_features = validation['missing_features']
-
-                print(f"\n⚠️  Status: ALERTA - {len(missing_features)} feature(s) ausente(s)")
-
-                # Mostrar primeiras 5 features ausentes
-                for feat in missing_features[:5]:
-                    print(f"   • {feat}")
-                if len(missing_features) > 5:
-                    print(f"   ... e mais {len(missing_features)-5}")
 
                 # Criar alerta
                 alerts.append({
@@ -1039,12 +819,8 @@ class DataQualityMonitor:
                     'metric_value': len(missing_features),
                     'threshold': 0  # Qualquer feature faltando é problema
                 })
-            else:
-                print(f"✅ Status: OK - Todas as features esperadas presentes")
 
-        except Exception as e:
-            print(f"❌ Status: ERRO - {str(e)}")
-            import traceback
-            traceback.print_exc()
+        except Exception:
+            pass
 
         return alerts
