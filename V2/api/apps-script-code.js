@@ -4,7 +4,9 @@
  * ========================================
  *
  * Sistema automatizado de predições ML e análise UTM
- * Execução diária à meia-noite (00:00) com análises 1D, 3D, 7D
+ * - Polling 5min: Predições ML + CAPI
+ * - Relatórios diários: 00:00 (análises UTM 1D, 3D, 7D)
+ * - Monitoramento: 01:00 e 13:00 (drift, qualidade, alertas Slack)
  */
 
 // =============================================================================
@@ -14,6 +16,7 @@
 const API_URL = 'https://smart-ads-api-12955519745.us-central1.run.app';
 const SERVICE_ACCOUNT_EMAIL = 'smart-ads-451319@appspot.gserviceaccount.com';
 const META_ACCOUNT_ID = 'act_188005769808959';  // Los Angeles Producciones LTDA (PRODUÇÃO)
+const SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/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';
 
 // =============================================================================
 // MENU
@@ -1134,14 +1137,20 @@ function agendarGatilho5Min() {
 
   Logger.log('✅ Trigger diário criado: executarRelatoriosDiarios() às 00:00');
 
-  // 3️⃣ Criar trigger diário às 01:00 para monitoramento
+  // 3️⃣ Criar triggers de monitoramento 2x por dia (01:00 e 13:00)
   ScriptApp.newTrigger('executarMonitoramentoDiario')
     .timeBased()
     .atHour(1)
     .everyDays(1)
     .create();
 
-  Logger.log('✅ Trigger monitoramento criado: executarMonitoramentoDiario() às 01:00');
+  ScriptApp.newTrigger('executarMonitoramentoDiario')
+    .timeBased()
+    .atHour(13)
+    .everyDays(1)
+    .create();
+
+  Logger.log('✅ Triggers monitoramento criados: executarMonitoramentoDiario() às 01:00 e 13:00');
 
   SpreadsheetApp.getUi().alert(
     'Gatilhos Ativados',
@@ -1154,11 +1163,12 @@ function agendarGatilho5Min() {
     '   → Executa às 00:00\n' +
     '   → Atualiza análises UTM (1D, 3D, 7D)\n' +
     '   → Atualiza Info do Modelo\n\n' +
-    '✅ Monitoramento Diário: executarMonitoramentoDiario()\n' +
-    '   → Executa às 01:00\n' +
+    '✅ Monitoramento 12h: executarMonitoramentoDiario()\n' +
+    '   → Executa às 01:00 e 13:00\n' +
     '   → Verifica drift de categorias e distribuições\n' +
     '   → Monitora qualidade de dados CAPI\n' +
-    '   → Detecta problemas operacionais',
+    '   → Detecta problemas operacionais\n' +
+    '   → Envia sumário para Slack',
     SpreadsheetApp.getUi().ButtonSet.OK
   );
 }
@@ -1232,12 +1242,20 @@ function executarMonitoramentoDiario() {
       if (result.total_alerts > maxAlertsToLog) {
         Logger.log(`\n   ... e mais ${result.total_alerts - maxAlertsToLog} alertas`);
       }
-
-      // TODO: Futuramente enviar para Slack
-      // enviarAlertasParaSlack(result);
-
     } else {
       Logger.log('\n✅ Nenhum alerta detectado - sistema operando normalmente');
+    }
+
+    // 4. Enviar sumário crítico para Slack
+    Logger.log(`\n🔍 DEBUG: critical_summary existe? ${!!result.critical_summary}`);
+    Logger.log(`🔍 DEBUG: Tamanho do summary: ${result.critical_summary ? result.critical_summary.length : 0} chars`);
+
+    if (result.critical_summary) {
+      Logger.log('📤 Tentando enviar sumário para Slack...');
+      enviarSumarioParaSlack(result.critical_summary, result.total_alerts);
+      Logger.log('✅ Sumário enviado para Slack');
+    } else {
+      Logger.log('⚠️ critical_summary não encontrado na resposta da API');
     }
 
     Logger.log('\n✅ Monitoramento concluído com sucesso!');
@@ -1245,6 +1263,65 @@ function executarMonitoramentoDiario() {
   } catch (error) {
     Logger.log(`❌ Erro no monitoramento diário: ${error.message}`);
     Logger.log(error.stack);
+  }
+}
+
+/**
+ * Envia sumário crítico de monitoramento para Slack
+ */
+function enviarSumarioParaSlack(summaryText, totalAlerts) {
+  try {
+    Logger.log(`\n🔍 DEBUG enviarSumarioParaSlack:`);
+    Logger.log(`   - summaryText recebido: ${summaryText ? 'SIM' : 'NÃO'}`);
+    Logger.log(`   - totalAlerts: ${totalAlerts}`);
+    Logger.log(`   - SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL ? 'CONFIGURADO' : 'NÃO CONFIGURADO'}`);
+
+    // Determinar cor do alerta baseado na quantidade
+    let color = '#36a64f'; // Verde
+    if (totalAlerts > 0) {
+      color = '#ff0000'; // Vermelho
+    }
+
+    // Formatar mensagem para Slack
+    const payload = {
+      text: '🔍 *Relatório de Monitoramento Smart Ads*',
+      attachments: [{
+        color: color,
+        text: '```\n' + summaryText + '\n```',
+        footer: 'Smart Ads Monitoring System',
+        footer_icon: 'https://platform.slack-edge.com/img/default_application_icon.png',
+        ts: Math.floor(Date.now() / 1000)
+      }]
+    };
+
+    Logger.log(`🔍 DEBUG: Payload criado com ${JSON.stringify(payload).length} chars`);
+
+    // Enviar para Slack
+    const options = {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    };
+
+    Logger.log('📤 Chamando UrlFetchApp.fetch...');
+    const response = UrlFetchApp.fetch(SLACK_WEBHOOK_URL, options);
+    const responseCode = response.getResponseCode();
+    const responseText = response.getContentText();
+
+    Logger.log(`📥 Resposta do Slack: ${responseCode}`);
+    Logger.log(`📥 Body: ${responseText}`);
+
+    if (responseCode !== 200) {
+      Logger.log(`⚠️ Erro ao enviar para Slack: ${responseCode}`);
+      Logger.log(responseText);
+    } else {
+      Logger.log('✅ Slack retornou 200 OK');
+    }
+
+  } catch (error) {
+    Logger.log(`❌ Erro ao enviar para Slack: ${error.message}`);
+    Logger.log(`❌ Stack: ${error.stack}`);
   }
 }
 

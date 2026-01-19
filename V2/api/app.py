@@ -88,6 +88,7 @@ class DailyCheckResponse(BaseModel):
     alerts_by_severity: Dict[str, int]
     alerts_by_category: Dict[str, int]
     alerts: List[Dict[str, Any]]
+    critical_summary: str
     timestamp: str
 
 # Inicializar a aplicação FastAPI
@@ -2322,6 +2323,7 @@ async def daily_monitoring_check_auto(
             alerts_by_severity=result['alerts_by_severity'],
             alerts_by_category=result['alerts_by_category'],
             alerts=result['alerts'],
+            critical_summary=result.get('critical_summary', ''),
             timestamp=datetime.now().isoformat()
         )
 
@@ -2414,6 +2416,7 @@ async def daily_monitoring_check(
             alerts_by_severity=result['alerts_by_severity'],
             alerts_by_category=result['alerts_by_category'],
             alerts=result['alerts'],
+            critical_summary=result.get('critical_summary', ''),
             timestamp=datetime.now().isoformat()
         )
 

@@ -232,7 +232,7 @@ class MonitoringOrchestrator:
         funnel_metrics = self._generate_funnel_metrics(leads_data, df if leads_data else None)
 
         # NOVO: Gerar sumário crítico consolidado
-        critical_summary = self._generate_critical_summary(alerts, funnel_metrics)
+        self._generate_critical_summary(alerts, funnel_metrics)
 
         # Mensagem de conclusão
         print(f"\n✅ Monitoramento concluído!")
@@ -243,8 +243,7 @@ class MonitoringOrchestrator:
             'alerts_by_severity': summary['by_severity'],
             'alerts_by_category': summary['by_category'],
             'alerts': [alert.to_dict() for alert in alerts],
-            'funnel_metrics': funnel_metrics,
-            'critical_summary': critical_summary
+            'funnel_metrics': funnel_metrics
         }
 
     def _count_sheet_tab2_responses(self, lookback_time) -> int:
@@ -359,7 +358,7 @@ class MonitoringOrchestrator:
         # 2. Mudanças drásticas nas proporções de colunas
         drastic_changes = [a for a in alerts if 'mudança(s) significativa(s)' in a.message.lower() or 'mudanças significativas' in a.message.lower()]
         if drastic_changes:
-            lines.append("\n2. Mudanças drásticas nas proporções: Sim")
+            print("\n2. Mudanças drásticas nas proporções: Sim")
             for alert in drastic_changes:
                 details = alert.details
                 column = details.get('column', 'desconhecida')
@@ -374,29 +373,29 @@ class MonitoringOrchestrator:
                         treino = biggest_change.get('treino', 0) * 100
                         producao = biggest_change.get('producao', 0) * 100
                         diff = abs(biggest_change.get('diff', 0)) * 100
-                        lines.append(f"   - {column} '{categoria}': Variação de {diff:.1f}pp (treino: {treino:.1f}%, produção: {producao:.1f}%)")
+                        print(f"   - {column} '{categoria}': Variação de {diff:.1f}pp (treino: {treino:.1f}%, produção: {producao:.1f}%)")
                 # Se for drift numérico, tem sigma_diff
                 elif 'sigma_diff' in details:
                     sigma = details.get('sigma_diff', 0)
                     mean_treino = details.get('mean_treino', 0)
                     mean_prod = details.get('mean_producao', 0)
-                    lines.append(f"   - {column}: Mudança de {sigma:.1f}σ (média treino: {mean_treino:.2f}, produção: {mean_prod:.2f})")
+                    print(f"   - {column}: Mudança de {sigma:.1f}σ (média treino: {mean_treino:.2f}, produção: {mean_prod:.2f})")
         else:
-            lines.append("\n2. Mudanças drásticas nas proporções: Não")
+            print("\n2. Mudanças drásticas nas proporções: Não")
 
         # 3. Colunas com dados faltantes
         missing_data = [a for a in alerts if 'faltante' in a.message.lower() and 'feature' not in a.message.lower()]
         if missing_data:
-            lines.append("\n3. Colunas com dados faltantes: Sim")
+            print("\n3. Colunas com dados faltantes: Sim")
             for alert in missing_data:
-                lines.append(f"   - {alert.message}")
+                print(f"   - {alert.message}")
         else:
-            lines.append("\n3. Colunas com dados faltantes: Não")
+            print("\n3. Colunas com dados faltantes: Não")
 
         # 4. Features faltantes
         missing_features_alerts = [a for a in alerts if 'feature' in a.message.lower() and ('esperada' in a.message.lower() or 'faltando' in a.message.lower() or 'não encontrada' in a.message.lower() or 'ausente' in a.message.lower())]
         if missing_features_alerts:
-            lines.append("\n4. Features faltantes: Sim")
+            print("\n4. Features faltantes: Sim")
             for alert in missing_features_alerts:
                 details = alert.details
 
@@ -404,26 +403,26 @@ class MonitoringOrchestrator:
                 if 'missing_features' in details:
                     missing_list = details['missing_features']
                     missing_count = len(missing_list)
-                    lines.append(f"   Total: {missing_count} feature(s)")
+                    print(f"   Total: {missing_count} feature(s)")
 
                     # Mostrar até 10 features (para não poluir)
                     for feat in missing_list[:10]:
-                        lines.append(f"   - {feat}")
+                        print(f"   - {feat}")
                     if len(missing_list) > 10:
-                        lines.append(f"   ... e mais {len(missing_list) - 10} features")
+                        print(f"   ... e mais {len(missing_list) - 10} features")
                 # Senão, tentar extrair da mensagem (fallback)
                 else:
                     parts = alert.message.split("'")
                     if len(parts) >= 2:
                         feature_name = parts[1]
-                        lines.append(f"   - {feature_name}")
+                        print(f"   - {feature_name}")
         else:
-            lines.append("\n4. Features faltantes: Não")
+            print("\n4. Features faltantes: Não")
 
         # 5. Mudança significativa em score/decil
         score_changes = [a for a in alerts if 'distribuição de decis mudou' in a.message.lower()]
         if score_changes:
-            lines.append("\n5. Mudança significativa em score/decil: Sim")
+            print("\n5. Mudança significativa em score/decil: Sim")
             for alert in score_changes:
                 details = alert.details
                 changes = details.get('changes', [])
@@ -435,9 +434,9 @@ class MonitoringOrchestrator:
                         esperado = change.get('esperado', 0) * 100
                         atual = change.get('atual', 0) * 100
                         diff = abs(change.get('diff', 0)) * 100
-                        lines.append(f"   - {decil}: Variação de {diff:.1f}pp (esperado: {esperado:.1f}%, atual: {atual:.1f}%)")
+                        print(f"   - {decil}: Variação de {diff:.1f}pp (esperado: {esperado:.1f}%, atual: {atual:.1f}%)")
         else:
-            lines.append("\n5. Mudança significativa em score/decil: Não")
+            print("\n5. Mudança significativa em score/decil: Não")
 
         # 6. Envio CAPI para Meta
         capture = funnel_metrics.get('capture', {})
@@ -445,42 +444,37 @@ class MonitoringOrchestrator:
         capi_sent = funnel_metrics.get('capi_sent', {})
         leads_sent = capi_sent.get('leads_sent', 0)
         estimated_events = capi_sent.get('estimated_events', 0)
-        lines.append(f"\n6. Envio CAPI para Meta: {'Sim' if leads_sent > 0 else 'Não'}")
-        lines.append(f"   ({leads_sent:,} leads enviados, ~{estimated_events:,} eventos)")
+        print(f"\n6. Envio CAPI para Meta: {'Sim' if leads_sent > 0 else 'Não'}")
+        print(f"   ({leads_sent:,} leads enviados, ~{estimated_events:,} eventos)")
 
         # 7. Cookies FBP/FBC preenchidos
         data_quality = funnel_metrics.get('data_quality', {})
         fbp_rate = data_quality.get('fbp_percentage', 0)
         fbc_rate = data_quality.get('fbc_percentage', 0)
-        lines.append(f"\n7. Cookies FBP/FBC preenchidos: {'Sim' if fbp_rate > 90 and fbc_rate > 90 else 'Parcial' if fbp_rate > 50 or fbc_rate > 50 else 'Não'}")
-        lines.append(f"   - FBP: {fbp_rate:.1f}%")
-        lines.append(f"   - FBC: {fbc_rate:.1f}%")
+        print(f"\n7. Cookies FBP/FBC preenchidos: {'Sim' if fbp_rate > 90 and fbc_rate > 90 else 'Parcial' if fbp_rate > 50 or fbc_rate > 50 else 'Não'}")
+        print(f"   - FBP: {fbp_rate:.1f}%")
+        print(f"   - FBC: {fbc_rate:.1f}%")
 
         # 8. Eventos recebidos pela Meta
         meta_response = funnel_metrics.get('meta_response', {})
         success_count = meta_response.get('success_count', 0)
         leads_with_response = meta_response.get('leads_with_response', 0)
         acceptance_rate = meta_response.get('acceptance_rate', 0)
-        lines.append(f"\n8. Eventos recebidos pela Meta: {'Sim' if success_count > 0 else 'Não'}")
+        print(f"\n8. Eventos recebidos pela Meta: {'Sim' if success_count > 0 else 'Não'}")
         if success_count > 0:
-            lines.append(f"   ({acceptance_rate:.1f}% de aceitação, {success_count} leads aceitos)")
+            print(f"   ({acceptance_rate:.1f}% de aceitação, {success_count} leads aceitos)")
 
         # 9. Funil de Conversão
         total_sheets = capture.get('total_sheets_combined', 0)
-        lines.append(f"\n9. Funil de Conversão:")
-        lines.append(f"    Capturados: {total_db:,} → Respostas: {total_sheets:,} → Enviados CAPI: {leads_sent:,} → Aceitos Meta: {success_count:,}")
+        print(f"\n9. Funil de Conversão:")
+        print(f"    Capturados: {total_db:,} → Respostas: {total_sheets:,} → Enviados CAPI: {leads_sent:,} → Aceitos Meta: {success_count:,}")
 
         # 10. Taxa de Resposta
         response_rate = capture.get('response_rate', 0)
-        lines.append(f"\n10. Taxa de Resposta:")
-        lines.append(f"    - Resposta pesquisa: {response_rate:.1f}%")
+        print(f"\n10. Taxa de Resposta:")
+        print(f"    - Resposta pesquisa: {response_rate:.1f}%")
 
-        lines.append("\n" + "="*80)
-
-        # Juntar todas as linhas e printar + retornar
-        summary = '\n'.join(lines)
-        print(summary)
-        return summary
+        print("\n" + "="*80)
 
     def _generate_summary(self, alerts: List[Alert]) -> Dict:
         """Gera sumário de alertas por severidade e categoria"""
