@@ -523,18 +523,46 @@ def main():
         logger.info(f"   📊 Usando Google Sheets (produção)")
         lead_loader = LeadDataLoader()
 
-        # Carregar direto do Google Sheets
+        # Carregar direto do Google Sheets (carrega AMBAS as abas)
         leads_df = lead_loader.load_leads_from_sheets(
             start_date=start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d'),
             end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d')
         )
         logger.info(f"   ✅ {len(leads_df)} leads carregados do Google Sheets")
 
-        # Stats fictício para compatibilidade (Sheets não distingue survey vs CAPI extras no loader simples)
+        # Contar pessoas únicas com dados CAPI do banco PostgreSQL via API
+        import requests
+
+        try:
+            API_URL = "https://smart-ads-api-12955519745.us-central1.run.app"
+
+            # Buscar estatísticas de leads CAPI no período
+            start_str = start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d')
+            end_str = end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d')
+
+            url = f"{API_URL}/webhook/lead_capture/stats?start_date={start_str}&end_date={end_str}"
+
+            response = requests.get(url, timeout=30)
+
+            if response.status_code == 200:
+                result = response.json()
+                capi_unique_emails = result.get('total_leads', 0)
+                logger.info(f"   📊 Leads CAPI no banco: {capi_unique_emails} (fbp: {result.get('leads_with_fbp', 0)})")
+            else:
+                logger.warning(f"   ⚠️ API CAPI retornou status {response.status_code}")
+                capi_unique_emails = 0
+
+        except Exception as e:
+            logger.warning(f"   ⚠️ Não foi possível contar pessoas CAPI do banco: {e}")
+            capi_unique_emails = 0
+
+        # Estatísticas completas
         lead_source_stats = {
-            'survey_leads': len(leads_df),
-            'capi_leads_extras': 0
+            'survey_leads': len(leads_df),  # Total de respostas na pesquisa
+            'capi_leads_extras': 0,  # Não há extras em modo Sheets (só pesquisa)
+            'capi_leads_total': capi_unique_emails  # Pessoas únicas com fbp
         }
+        logger.info(f"   📊 Pessoas únicas com dados CAPI (fbp): {capi_unique_emails}")
 
     # Vendas
     sales_loader = SalesDataLoader()
@@ -748,20 +776,17 @@ def main():
 
         logger.info(f"\n🔍 Investigando {len(unmatched_sales_emails)} vendas sem match...")
 
-        # Carregar dataset COMPLETO de leads (SEM filtro de período para ver histórico)
-        from src.validation.data_loader import CAPILeadDataLoader as CAPILoader
-        temp_capi_loader = CAPILoader()
+        # Carregar dataset COMPLETO de leads do Google Sheets (SEM filtro de período para ver histórico)
+        temp_loader = LeadDataLoader()
 
         # Primeiro: dataset do período atual (com filtro)
-        period_leads_df, _ = temp_capi_loader.load_combined_leads(
-            csv_path=leads_path,
+        period_leads_df = temp_loader.load_leads_from_sheets(
             start_date=start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d'),
             end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d')
         )
 
         # Segundo: dataset histórico completo (SEM filtro de período)
-        historical_leads_df, _ = temp_capi_loader.load_combined_leads(
-            csv_path=leads_path,
+        historical_leads_df = temp_loader.load_leads_from_sheets(
             start_date='2020-01-01',  # Data antiga para pegar todo o histórico
             end_date='2030-12-31'
         )

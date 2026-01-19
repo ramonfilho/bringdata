@@ -79,27 +79,76 @@ class LeadDataLoader:
 
             # Abrir planilha
             spreadsheet = gc.open_by_url(sheets_url)
-            worksheet = spreadsheet.get_worksheet(0)  # Primeira aba: [LF] Pesquisa
 
-            # Buscar todos os dados
-            valores = worksheet.get_all_values()
-            headers = valores[0]
-            dados = valores[1:]
+            # Ler AMBAS as abas de pesquisa
+            dfs_to_combine = []
 
-            # Criar DataFrame
-            df = pd.DataFrame(dados, columns=headers)
-            logger.info(f"   ✅ {len(df)} linhas lidas do Google Sheets")
+            # Aba [0]: [LF] Pesquisa (formato ISO: YYYY-MM-DD HH:MM:SS)
+            logger.info("   📄 Carregando aba [0]: [LF] Pesquisa")
+            worksheet0 = spreadsheet.get_worksheet(0)
+            valores0 = worksheet0.get_all_values()
+            headers0 = valores0[0]
+            df0 = pd.DataFrame(valores0[1:], columns=headers0)
+
+            # IMPORTANTE: Remover duplicatas de colunas mantendo a primeira ocorrência
+            # A aba [0] tem colunas duplicadas (Score, Faixa, etc) que causam erro no concat
+            df0 = df0.loc[:, ~df0.columns.duplicated(keep='first')]
+            logger.info(f"      ✅ {len(df0)} linhas, {len(df0.columns)} colunas únicas")
+
+            # Converter data (formato ISO)
+            if 'Data' in df0.columns:
+                df0['Data'] = pd.to_datetime(df0['Data'], errors='coerce')
+
+            # Reset index para garantir índices únicos
+            df0 = df0.reset_index(drop=True)
+            dfs_to_combine.append(df0)
+
+            # Aba [1]: [LF] Pesquisa v2 (formato brasileiro: DD/MM/YYYY HH:MM:SS)
+            logger.info("   📄 Carregando aba [1]: [LF] Pesquisa v2")
+            worksheet1 = spreadsheet.get_worksheet(1)
+            valores1 = worksheet1.get_all_values()
+            df1 = pd.DataFrame(valores1[1:], columns=valores1[0])
+
+            # Remover duplicatas de colunas também da aba [1]
+            df1 = df1.loc[:, ~df1.columns.duplicated(keep='first')]
+            logger.info(f"      ✅ {len(df1)} linhas, {len(df1.columns)} colunas únicas")
+
+            # Renomear 'Data do Envio' para 'Data' antes de combinar
+            if 'Data do Envio' in df1.columns:
+                df1['Data'] = pd.to_datetime(df1['Data do Envio'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+                df1 = df1.drop('Data do Envio', axis=1)
+
+            # Reset index para garantir índices únicos
+            df1 = df1.reset_index(drop=True)
+
+            # Verificar duplicatas de colunas após processamento
+            if df1.columns.duplicated().any():
+                logger.warning(f"   ⚠️ Aba [1] ainda tem colunas duplicadas após processamento")
+                df1 = df1.loc[:, ~df1.columns.duplicated(keep='first')]
+
+            dfs_to_combine.append(df1)
+
+            # Combinar ambas as abas
+            # Como têm colunas diferentes, concat criará NaN onde não houver match
+            # O normalizador (_normalize_leads_dataframe) só usa as colunas que precisa
+            df = pd.concat(dfs_to_combine, ignore_index=True, sort=False)
+
+            # Verificar e remover duplicatas de colunas no resultado final
+            if df.columns.duplicated().any():
+                logger.warning(f"   ⚠️ Resultado do concat tem colunas duplicadas, removendo...")
+                df = df.loc[:, ~df.columns.duplicated(keep='first')]
+
+            logger.info(f"   ✅ {len(df)} linhas TOTAIS lidas do Google Sheets (2 abas combinadas)")
 
             # Filtrar por período se especificado
             if start_date or end_date:
-                # Converter coluna Data para datetime
-                df['Data'] = pd.to_datetime(df['Data'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
-
                 original_len = len(df)
                 if start_date:
-                    df = df[df['Data'] >= start_date]
+                    start_dt = pd.to_datetime(start_date)
+                    df = df[df['Data'] >= start_dt]
                 if end_date:
-                    df = df[df['Data'] <= end_date]
+                    end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1)  # Incluir fim do dia
+                    df = df[df['Data'] < end_dt]
 
                 logger.info(f"   📅 Filtrado por período: {original_len} → {len(df)} leads")
 
@@ -201,14 +250,20 @@ class LeadDataLoader:
         df_norm['lead_score'] = df.get('lead_score', np.nan)
 
         # Extrair decil: PRIORIZAR lead_score (ML) sobre Faixa (legacy)
-        if 'lead_score' in df.columns and df['lead_score'].notna().any():
-            # PRIORITY 1: ML model scores
-            df_norm['decile'] = df['lead_score'].apply(self._assign_decile_from_score)
-            logger.info(f"   ✅ Decis atribuídos via lead_score: {df_norm['decile'].notna().sum()}/{len(df_norm)}")
-        elif 'Faixa' in df.columns and df['Faixa'].notna().any():
-            # FALLBACK: Legacy classification
-            df_norm['decile'] = df['Faixa']
-            logger.info(f"   ⚠️ Decis atribuídos via Faixa (legacy): {df_norm['decile'].notna().sum()}/{len(df_norm)}")
+        if 'lead_score' in df.columns:
+            if df['lead_score'].notna().any():
+                # PRIORITY 1: ML model scores
+                df_norm['decile'] = df['lead_score'].apply(self._assign_decile_from_score)
+                logger.info(f"   ✅ Decis atribuídos via lead_score: {df_norm['decile'].notna().sum()}/{len(df_norm)}")
+            else:
+                df_norm['decile'] = None
+        elif 'Faixa' in df.columns:
+            if df['Faixa'].notna().any():
+                # FALLBACK: Legacy classification
+                df_norm['decile'] = df['Faixa']
+                logger.info(f"   ⚠️ Decis atribuídos via Faixa (legacy): {df_norm['decile'].notna().sum()}/{len(df_norm)}")
+            else:
+                df_norm['decile'] = None
         else:
             df_norm['decile'] = None
             logger.warning("⚠️ Nenhuma coluna de score/decil encontrada")
