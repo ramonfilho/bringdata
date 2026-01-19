@@ -365,11 +365,11 @@ class MonitoringOrchestrator:
                     if changes:
                         # Pegar a maior mudança
                         biggest_change = max(changes, key=lambda x: abs(x.get('diff', 0)))
-                        cat = biggest_change.get('category', '?')
-                        expected = biggest_change.get('expected', 0) * 100
-                        observed = biggest_change.get('observed', 0) * 100
+                        categoria = biggest_change.get('categoria', '?')
+                        treino = biggest_change.get('treino', 0) * 100
+                        producao = biggest_change.get('producao', 0) * 100
                         diff = abs(biggest_change.get('diff', 0)) * 100
-                        print(f"   - {column}: Variação de {diff:.1f}pp (esperado: {expected:.1f}%, observado: {observed:.1f}%)")
+                        print(f"   - {column} '{categoria}': Variação de {diff:.1f}pp (treino: {treino:.1f}%, produção: {producao:.1f}%)")
                 # Se for drift numérico, tem sigma_diff
                 elif 'sigma_diff' in details:
                     sigma = details.get('sigma_diff', 0)
@@ -428,9 +428,9 @@ class MonitoringOrchestrator:
                     for change in changes:
                         decil = change.get('decil', '?')
                         esperado = change.get('esperado', 0) * 100
-                        observado = change.get('observado', 0) * 100
-                        diferenca = abs(change.get('diferenca', 0))
-                        print(f"   - {decil}: Variação de {diferenca:.1f}pp (esperado: {esperado:.1f}%, observado: {observado:.1f}%)")
+                        atual = change.get('atual', 0) * 100
+                        diff = abs(change.get('diff', 0)) * 100
+                        print(f"   - {decil}: Variação de {diff:.1f}pp (esperado: {esperado:.1f}%, atual: {atual:.1f}%)")
         else:
             print("\n5. Mudança significativa em score/decil: Não")
 
