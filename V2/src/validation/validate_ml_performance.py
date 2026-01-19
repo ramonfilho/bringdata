@@ -146,7 +146,7 @@ Exemplos de uso:
     parser.add_argument(
         '--leads-path',
         type=str,
-        help='Caminho para CSV de leads (default: files/validation/leads/leads_completo.csv)'
+        help='[Opcional] Caminho para CSV de leads (default: usar Google Sheets produção)'
     )
 
     parser.add_argument(
@@ -488,26 +488,9 @@ def main():
         logger.info(f"   Período customizado: {start_date} a {end_date}")
 
     # Determinar caminhos
-    if args.leads_path:
-        leads_path = args.leads_path
-    else:
-        # Buscar o arquivo mais recente de leads automaticamente
-        leads_dir = Path(config['paths']['leads'])
-        pattern = str(leads_dir / '*Pesquisa*.csv')
-        matching_files = glob(pattern)
-
-        if not matching_files:
-            logger.error(f"❌ Nenhum arquivo de leads encontrado em: {leads_dir}")
-            sys.exit(1)
-
-        # Pegar o arquivo mais recente
-        leads_path = max(matching_files, key=os.path.getmtime)
-        logger.info(f"   📄 Arquivo de leads detectado automaticamente: {Path(leads_path).name}")
-
     vendas_path = args.vendas_path or config['paths']['vendas']
     output_dir = args.output_dir or 'files/validation/resultados'
 
-    logger.info(f"   Leads: {leads_path}")
     logger.info(f"   Vendas: {vendas_path}")
     logger.info(f"   Output: {output_dir}")
     logger.info(f"   Valor do produto: R$ {config['product_value']:,.2f}")
@@ -518,21 +501,40 @@ def main():
     print("📂 CARREGANDO DADOS...", flush=True)
     print(flush=True)
 
-    # Leads - usar CAPI + Pesquisa combinados
-    capi_loader = CAPILeadDataLoader()
-    if not Path(leads_path).exists():
-        logger.error(f"❌ Arquivo de leads não encontrado: {leads_path}")
-        sys.exit(1)
+    # Leads - PADRÃO: Google Sheets (produção), FALLBACK: CSV se --leads-path fornecido
+    if args.leads_path:
+        # Modo CSV (legacy)
+        logger.info(f"   📄 Usando CSV: {args.leads_path}")
+        capi_loader = CAPILeadDataLoader()
 
-    # Usar loader combinado que busca Pesquisa + CAPI
-    # start_date e end_date já são datetime objects
-    leads_df, lead_source_stats = capi_loader.load_combined_leads(
-        csv_path=leads_path,
-        start_date=start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d'),
-        end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d')
-    )
-    logger.info(f"   ✅ {len(leads_df)} leads carregados")
-    logger.info(f"   📊 Estatísticas: {lead_source_stats['survey_leads']} pesquisa + {lead_source_stats['capi_leads_extras']} CAPI extras")
+        if not Path(args.leads_path).exists():
+            logger.error(f"❌ Arquivo de leads não encontrado: {args.leads_path}")
+            sys.exit(1)
+
+        leads_df, lead_source_stats = capi_loader.load_combined_leads(
+            csv_path=args.leads_path,
+            start_date=start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d'),
+            end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d')
+        )
+        logger.info(f"   ✅ {len(leads_df)} leads carregados do CSV")
+        logger.info(f"   📊 Estatísticas: {lead_source_stats['survey_leads']} pesquisa + {lead_source_stats['capi_leads_extras']} CAPI extras")
+    else:
+        # Modo Google Sheets (PADRÃO - dados de produção em tempo real)
+        logger.info(f"   📊 Usando Google Sheets (produção)")
+        lead_loader = LeadDataLoader()
+
+        # Carregar direto do Google Sheets
+        leads_df = lead_loader.load_leads_from_sheets(
+            start_date=start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d'),
+            end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d')
+        )
+        logger.info(f"   ✅ {len(leads_df)} leads carregados do Google Sheets")
+
+        # Stats fictício para compatibilidade (Sheets não distingue survey vs CAPI extras no loader simples)
+        lead_source_stats = {
+            'survey_leads': len(leads_df),
+            'capi_leads_extras': 0
+        }
 
     # Vendas
     sales_loader = SalesDataLoader()
@@ -1295,10 +1297,14 @@ def main():
     # Formatar account IDs para exibição
     account_ids_display = ', '.join(args.account_id) if isinstance(args.account_id, list) else args.account_id
 
+    # Determinar fonte dos leads
+    leads_source = 'CSV' if args.leads_path else 'Google Sheets (Produção)'
+
     config_params = {
         'Período': period_name,
         'Data Início': start_date,
         'Data Fim': end_date,
+        'Fonte de Leads': leads_source,
         'Valor do Produto': f"R$ {config['product_value']:,.2f}",
         'Janela de Matching': f"{config['max_match_days']} dias",
         'Account IDs': account_ids_display,

@@ -16,6 +16,9 @@ from typing import List, Optional, Tuple, Dict
 from pathlib import Path
 import logging
 import re
+import os
+import gspread
+from google.auth import default as gauth_default
 
 # Importar funções de normalização existentes
 import sys
@@ -23,6 +26,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.matching.matching_email_telefone import normalizar_email, normalizar_telefone_robusto
 
 logger = logging.getLogger(__name__)
+
+# URL padrão do Google Sheets (pode ser sobrescrito via env var)
+DEFAULT_SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1VYti8jX277VNMkvzrfnJSR_Ko8L1LQFDdMEeD6D8_Vo'
 
 
 class LeadDataLoader:
@@ -43,30 +49,77 @@ class LeadDataLoader:
         self.required_columns = ['Data', 'E-mail', 'Campaign']
         self._thresholds_cache = None  # Cache dos thresholds do modelo
 
-    def load_leads_csv(self, csv_path: str) -> pd.DataFrame:
+    def load_leads_from_sheets(self, sheets_url: Optional[str] = None, start_date: Optional[str] = None, end_date: Optional[str] = None) -> pd.DataFrame:
         """
-        Carrega CSV de leads do Google Sheets e normaliza.
+        Carrega leads diretamente do Google Sheets (produção).
 
         Args:
-            csv_path: Caminho para o CSV
+            sheets_url: URL do Google Sheets (default: usar variável de ambiente ou DEFAULT_SHEETS_URL)
+            start_date: Data início para filtro (YYYY-MM-DD) - opcional
+            end_date: Data fim para filtro (YYYY-MM-DD) - opcional
 
         Returns:
-            DataFrame normalizado com colunas:
-            - email: Email normalizado
-            - nome: Nome completo
-            - telefone: Telefone normalizado
-            - data_captura: Datetime da captura
-            - campaign: Nome da campanha
-            - lead_score: Score do modelo
-            - decile: Decil (D1-D10)
-            - source, medium, term, content: UTMs
+            DataFrame normalizado (mesmo formato que load_leads_csv)
         """
-        logger.info(f"📂 Carregando leads de {csv_path}")
+        # Determinar URL
+        if sheets_url is None:
+            sheets_url = os.getenv('GOOGLE_SHEETS_URL', DEFAULT_SHEETS_URL)
 
-        # Ler CSV
-        df = pd.read_csv(csv_path)
-        logger.info(f"   {len(df)} linhas lidas do CSV")
+        logger.info(f"📊 Carregando leads do Google Sheets (produção)")
+        logger.info(f"   URL: {sheets_url[:50]}...")
 
+        try:
+            # Autenticar
+            scopes = [
+                'https://www.googleapis.com/auth/spreadsheets.readonly',
+                'https://www.googleapis.com/auth/drive.readonly'
+            ]
+            creds, _ = gauth_default(scopes=scopes)
+            gc = gspread.authorize(creds)
+
+            # Abrir planilha
+            spreadsheet = gc.open_by_url(sheets_url)
+            worksheet = spreadsheet.get_worksheet(0)  # Primeira aba: [LF] Pesquisa
+
+            # Buscar todos os dados
+            valores = worksheet.get_all_values()
+            headers = valores[0]
+            dados = valores[1:]
+
+            # Criar DataFrame
+            df = pd.DataFrame(dados, columns=headers)
+            logger.info(f"   ✅ {len(df)} linhas lidas do Google Sheets")
+
+            # Filtrar por período se especificado
+            if start_date or end_date:
+                # Converter coluna Data para datetime
+                df['Data'] = pd.to_datetime(df['Data'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+
+                original_len = len(df)
+                if start_date:
+                    df = df[df['Data'] >= start_date]
+                if end_date:
+                    df = df[df['Data'] <= end_date]
+
+                logger.info(f"   📅 Filtrado por período: {original_len} → {len(df)} leads")
+
+            # Normalizar usando mesma lógica do CSV
+            return self._normalize_leads_dataframe(df)
+
+        except Exception as e:
+            logger.error(f"❌ Erro ao carregar do Google Sheets: {e}")
+            raise
+
+    def _normalize_leads_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Normaliza DataFrame de leads (interno - usado por CSV e Sheets).
+
+        Args:
+            df: DataFrame bruto com colunas originais
+
+        Returns:
+            DataFrame normalizado
+        """
         # Verificar colunas obrigatórias (aceitar 'Data' ou 'Data do Envio')
         missing = []
         for col in self.required_columns:
@@ -125,7 +178,6 @@ class LeadDataLoader:
         # LIMPEZA DE UTMs: Detectar e limpar casos problemáticos
 
         # 1. Limpar variáveis não substituídas ({{...}})
-        # Exemplo: "{{adset.name}}", "{{campaign.id}}"
         template_vars_medium = df_norm['medium'].astype(str).str.contains(r'\{\{', na=False)
         template_vars_campaign = df_norm['campaign'].astype(str).str.contains(r'\{\{', na=False)
 
@@ -138,7 +190,6 @@ class LeadDataLoader:
             df_norm.loc[template_vars_campaign, 'campaign'] = np.nan
 
         # 2. Identificar leads de outras fontes (não facebook-ads)
-        # NOTA: Não removemos, apenas logamos para awareness
         non_facebook = df_norm['source'].notna() & (df_norm['source'] != 'facebook-ads')
         if non_facebook.sum() > 0:
             sources_count = df_norm[non_facebook]['source'].value_counts()
@@ -151,11 +202,11 @@ class LeadDataLoader:
 
         # Extrair decil: PRIORIZAR lead_score (ML) sobre Faixa (legacy)
         if 'lead_score' in df.columns and df['lead_score'].notna().any():
-            # PRIORITY 1: ML model scores (53.3% coverage)
+            # PRIORITY 1: ML model scores
             df_norm['decile'] = df['lead_score'].apply(self._assign_decile_from_score)
             logger.info(f"   ✅ Decis atribuídos via lead_score: {df_norm['decile'].notna().sum()}/{len(df_norm)}")
         elif 'Faixa' in df.columns and df['Faixa'].notna().any():
-            # FALLBACK: Legacy classification (4.3% coverage)
+            # FALLBACK: Legacy classification
             df_norm['decile'] = df['Faixa']
             logger.info(f"   ⚠️ Decis atribuídos via Faixa (legacy): {df_norm['decile'].notna().sum()}/{len(df_norm)}")
         else:
@@ -173,6 +224,33 @@ class LeadDataLoader:
         logger.info(f"   ✅ {len(df_norm)} leads carregados e normalizados")
 
         return df_norm
+
+    def load_leads_csv(self, csv_path: str) -> pd.DataFrame:
+        """
+        Carrega CSV de leads do Google Sheets e normaliza.
+
+        Args:
+            csv_path: Caminho para o CSV
+
+        Returns:
+            DataFrame normalizado com colunas:
+            - email: Email normalizado
+            - nome: Nome completo
+            - telefone: Telefone normalizado
+            - data_captura: Datetime da captura
+            - campaign: Nome da campanha
+            - lead_score: Score do modelo
+            - decile: Decil (D1-D10)
+            - source, medium, term, content: UTMs
+        """
+        logger.info(f"📂 Carregando leads de {csv_path}")
+
+        # Ler CSV
+        df = pd.read_csv(csv_path)
+        logger.info(f"   {len(df)} linhas lidas do CSV")
+
+        # Normalizar usando método compartilhado
+        return self._normalize_leads_dataframe(df)
 
     def _get_thresholds(self) -> dict:
         """
