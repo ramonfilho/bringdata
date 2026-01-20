@@ -93,7 +93,10 @@ class MetaReportsLoader:
 
         # Buscar arquivos por padrão (recursivamente em subpastas)
         # Usar listagem manual para evitar problemas com Unicode em glob
-        all_files = list(self.reports_dir.rglob('*.xlsx'))
+        # Aceita tanto .xlsx quanto .csv
+        xlsx_files = list(self.reports_dir.rglob('*.xlsx'))
+        csv_files = list(self.reports_dir.rglob('*.csv'))
+        all_files = xlsx_files + csv_files
 
         # Normalizar nomes de arquivos para resolver problemas de encoding Unicode
         campaign_files = [f for f in all_files
@@ -170,8 +173,11 @@ class MetaReportsLoader:
                 # Detectar conta pelo nome do arquivo
                 account_name = self._extract_account_name(file_path.name)
 
-                # Ler Excel
-                df = pd.read_excel(file_path)
+                # Ler arquivo (CSV ou Excel)
+                if file_path.suffix.lower() == '.csv':
+                    df = pd.read_csv(file_path)
+                else:
+                    df = pd.read_excel(file_path)
 
                 # Adicionar identificação da conta
                 df['_source_file'] = file_path.name

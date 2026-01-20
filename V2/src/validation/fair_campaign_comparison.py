@@ -181,7 +181,7 @@ MATCHED_ADS = [
 ]
 
 # Gasto mínimo para incluir adset/ad na comparação (R$)
-MIN_SPEND = 200.0
+MIN_SPEND = 0.0
 
 
 # ============================================================================

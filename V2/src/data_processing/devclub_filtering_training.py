@@ -46,6 +46,11 @@ def normalizar_telefone_robusto(telefone):
         except:
             pass
 
+    # Remover .0 de strings (comum quando CSV é lido com dtype=str)
+    # Ex: '5551998784135.0' -> '5551998784135'
+    if '.0' in tel_str:
+        tel_str = tel_str.replace('.0', '')
+
     # Extrair apenas dígitos
     digitos = re.sub(r'\D', '', tel_str)
 
