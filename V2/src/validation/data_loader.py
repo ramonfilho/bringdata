@@ -49,14 +49,15 @@ class LeadDataLoader:
         self.required_columns = ['Data', 'E-mail', 'Campaign']
         self._thresholds_cache = None  # Cache dos thresholds do modelo
 
-    def load_leads_from_sheets(self, sheets_url: Optional[str] = None, start_date: Optional[str] = None, end_date: Optional[str] = None) -> pd.DataFrame:
+    def load_leads_from_sheets(self, sheets_url: Optional[str] = None, start_date: Optional[str] = None, end_date: Optional[str] = None, use_cache: bool = True) -> pd.DataFrame:
         """
-        Carrega leads diretamente do Google Sheets (produção).
+        Carrega leads diretamente do Google Sheets (produção) com cache local.
 
         Args:
             sheets_url: URL do Google Sheets (default: usar variável de ambiente ou DEFAULT_SHEETS_URL)
             start_date: Data início para filtro (YYYY-MM-DD) - opcional
             end_date: Data fim para filtro (YYYY-MM-DD) - opcional
+            use_cache: Se True, usa cache local se disponível e válido (default: True)
 
         Returns:
             DataFrame normalizado (mesmo formato que load_leads_csv)
@@ -65,33 +66,73 @@ class LeadDataLoader:
         if sheets_url is None:
             sheets_url = os.getenv('GOOGLE_SHEETS_URL', DEFAULT_SHEETS_URL)
 
+        # Extrair SHEET_ID da URL
+        import re
+        match = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', sheets_url)
+        if not match:
+            raise ValueError(f"URL inválida do Google Sheets: {sheets_url}")
+        sheet_id = match.group(1)
+
+        # Configurar cache
+        import time
+        cache_dir = Path.home() / '.cache' / 'smart_ads'
+        cache_file = cache_dir / 'sheets_leads_cache.csv'
+        cache_max_age_hours = 24
+
+        # Verificar se deve usar cache
+        if use_cache and cache_file.exists():
+            file_age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
+            if file_age_hours < cache_max_age_hours:
+                logger.info(f"📦 Usando cache local (idade: {file_age_hours:.1f}h)")
+                logger.info(f"   Arquivo: {cache_file}")
+                try:
+                    df = pd.read_csv(cache_file, parse_dates=['Data'])
+                    logger.info(f"   ✅ {len(df)} linhas carregadas do cache")
+
+                    # Filtrar por período se especificado
+                    if start_date or end_date:
+                        original_len = len(df)
+                        if start_date:
+                            start_dt = pd.to_datetime(start_date)
+                            df = df[df['Data'] >= start_dt]
+                        if end_date:
+                            end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1)
+                            df = df[df['Data'] < end_dt]
+                        logger.info(f"   📅 Filtrado por período: {original_len} → {len(df)} leads")
+
+                    # Normalizar
+                    return self._normalize_leads_dataframe(df)
+                except Exception as e:
+                    logger.warning(f"   ⚠️ Erro ao ler cache, recarregando do Sheets: {e}")
+
         logger.info(f"📊 Carregando leads do Google Sheets (produção)")
         logger.info(f"   URL: {sheets_url[:50]}...")
 
         try:
-            # Autenticar
-            scopes = [
-                'https://www.googleapis.com/auth/spreadsheets.readonly',
-                'https://www.googleapis.com/auth/drive.readonly'
-            ]
-            creds, _ = gauth_default(scopes=scopes)
-            gc = gspread.authorize(creds)
+            # WORKAROUND: Usar curl para baixar CSV das abas (gspread estava travando)
+            import subprocess
+            import tempfile
 
-            # Abrir planilha
-            spreadsheet = gc.open_by_url(sheets_url)
-
-            # Ler AMBAS as abas de pesquisa
             dfs_to_combine = []
 
-            # Aba [0]: [LF] Pesquisa (formato ISO: YYYY-MM-DD HH:MM:SS)
+            # Aba [0]: [LF] Pesquisa (gid=0 - formato ISO: YYYY-MM-DD HH:MM:SS)
             logger.info("   📄 Carregando aba [0]: [LF] Pesquisa")
-            worksheet0 = spreadsheet.get_worksheet(0)
-            valores0 = worksheet0.get_all_values()
-            headers0 = valores0[0]
-            df0 = pd.DataFrame(valores0[1:], columns=headers0)
+            url_aba0 = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0"
 
-            # IMPORTANTE: Remover duplicatas de colunas mantendo a primeira ocorrência
-            # A aba [0] tem colunas duplicadas (Score, Faixa, etc) que causam erro no concat
+            with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=False) as tmp0:
+                result = subprocess.run(
+                    ['curl', '-sL', '--max-time', '30', url_aba0, '-o', tmp0.name],
+                    capture_output=True,
+                    timeout=35
+                )
+
+                if result.returncode != 0:
+                    raise Exception(f"Curl falhou para aba [0]: {result.stderr.decode()}")
+
+                df0 = pd.read_csv(tmp0.name)
+                os.unlink(tmp0.name)
+
+            # Remover duplicatas de colunas
             df0 = df0.loc[:, ~df0.columns.duplicated(keep='first')]
             logger.info(f"      ✅ {len(df0)} linhas, {len(df0.columns)} colunas únicas")
 
@@ -99,34 +140,57 @@ class LeadDataLoader:
             if 'Data' in df0.columns:
                 df0['Data'] = pd.to_datetime(df0['Data'], errors='coerce')
 
-            # Reset index para garantir índices únicos
             df0 = df0.reset_index(drop=True)
             dfs_to_combine.append(df0)
 
-            # Aba [1]: [LF] Pesquisa v2 (formato brasileiro: DD/MM/YYYY HH:MM:SS)
+            # Aba [1]: [LF] Pesquisa v2 (gid precisa descobrir - geralmente 1 ou outro ID)
+            # Vou tentar gid=1 primeiro, se falhar, tento gid pegos da estrutura
             logger.info("   📄 Carregando aba [1]: [LF] Pesquisa v2")
-            worksheet1 = spreadsheet.get_worksheet(1)
-            valores1 = worksheet1.get_all_values()
-            df1 = pd.DataFrame(valores1[1:], columns=valores1[0])
 
-            # Remover duplicatas de colunas também da aba [1]
-            df1 = df1.loc[:, ~df1.columns.duplicated(keep='first')]
-            logger.info(f"      ✅ {len(df1)} linhas, {len(df1.columns)} colunas únicas")
+            # Tentar diferentes gids comuns para segunda aba
+            for gid in [1, 2, '0', '1', '2']:
+                url_aba1 = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
 
-            # Renomear 'Data do Envio' para 'Data' antes de combinar
-            if 'Data do Envio' in df1.columns:
-                df1['Data'] = pd.to_datetime(df1['Data do Envio'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
-                df1 = df1.drop('Data do Envio', axis=1)
+                with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=False) as tmp1:
+                    result = subprocess.run(
+                        ['curl', '-sL', '--max-time', '30', url_aba1, '-o', tmp1.name],
+                        capture_output=True,
+                        timeout=35
+                    )
 
-            # Reset index para garantir índices únicos
-            df1 = df1.reset_index(drop=True)
+                    if result.returncode == 0:
+                        try:
+                            df1_test = pd.read_csv(tmp1.name)
+                            # Verificar se é diferente da aba 0 (não é a mesma aba)
+                            if len(df1_test) != len(df0) or list(df1_test.columns) != list(df0.columns):
+                                df1 = df1_test
+                                logger.info(f"      ✅ Aba [1] encontrada (gid={gid}): {len(df1)} linhas")
+                                os.unlink(tmp1.name)
+                                break
+                        except Exception as e:
+                            logger.warning(f"      ⚠️ Erro ao ler gid={gid}: {e}")
+                    os.unlink(tmp1.name)
+            else:
+                # Não encontrou segunda aba válida - usar apenas primeira
+                logger.warning("   ⚠️ Não encontrou aba [1], usando apenas aba [0]")
+                df1 = None
 
-            # Verificar duplicatas de colunas após processamento
-            if df1.columns.duplicated().any():
-                logger.warning(f"   ⚠️ Aba [1] ainda tem colunas duplicadas após processamento")
+            if df1 is not None:
+                # Remover duplicatas de colunas
                 df1 = df1.loc[:, ~df1.columns.duplicated(keep='first')]
+                logger.info(f"      {len(df1.columns)} colunas únicas")
 
-            dfs_to_combine.append(df1)
+                # Renomear 'Data do Envio' para 'Data' antes de combinar
+                if 'Data do Envio' in df1.columns:
+                    df1['Data'] = pd.to_datetime(df1['Data do Envio'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+                    df1 = df1.drop('Data do Envio', axis=1)
+
+                df1 = df1.reset_index(drop=True)
+
+                if df1.columns.duplicated().any():
+                    df1 = df1.loc[:, ~df1.columns.duplicated(keep='first')]
+
+                dfs_to_combine.append(df1)
 
             # Combinar ambas as abas
             # Como têm colunas diferentes, concat criará NaN onde não houver match
@@ -138,7 +202,16 @@ class LeadDataLoader:
                 logger.warning(f"   ⚠️ Resultado do concat tem colunas duplicadas, removendo...")
                 df = df.loc[:, ~df.columns.duplicated(keep='first')]
 
-            logger.info(f"   ✅ {len(df)} linhas TOTAIS lidas do Google Sheets (2 abas combinadas)")
+            num_abas = len(dfs_to_combine)
+            logger.info(f"   ✅ {len(df)} linhas TOTAIS lidas do Google Sheets ({num_abas} aba{'s' if num_abas > 1 else ''} combinada{'s' if num_abas > 1 else ''})")
+
+            # Salvar no cache (antes de filtrar por período)
+            try:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                df.to_csv(cache_file, index=False)
+                logger.info(f"   💾 Cache salvo: {cache_file}")
+            except Exception as e:
+                logger.warning(f"   ⚠️ Erro ao salvar cache (não crítico): {e}")
 
             # Filtrar por período se especificado
             if start_date or end_date:
@@ -856,20 +929,32 @@ class CAPILeadDataLoader:
         # 3. Buscar TODOS os leads do CAPI no período
         logger.info("   🔍 Buscando leads no CAPI...")
 
-        import requests
+        # WORKAROUND: requests está travando, usar curl via subprocess
+        import subprocess
+        import json as json_module
 
-        url = f"{self.api_url}/webhook/lead_capture/recent"
-        params = {
-            "start_date": start_date,
-            "end_date": end_date,
-            "limit": 10000  # Buscar todos do período
-        }
+        url = f"{self.api_url}/webhook/lead_capture/recent?start_date={start_date}&end_date={end_date}&limit=10000"
 
         try:
-            response = requests.get(url, params=params, timeout=60)
+            # Usar curl com timeout de 30s
+            result_curl = subprocess.run(
+                ['curl', '-s', '--max-time', '30', url],
+                capture_output=True,
+                text=True,
+                timeout=35
+            )
 
-            if response.status_code == 200:
-                result = response.json()
+            if result_curl.returncode == 0:
+                result = json_module.loads(result_curl.stdout)
+                response_ok = True
+            else:
+                logger.warning(f"   ⚠️ Curl falhou (exit code {result_curl.returncode})")
+                response_ok = False
+
+            # response = requests.get(url, params=params, timeout=60)
+
+            if response_ok:
+                # result já foi carregado acima
                 capi_leads_data = result.get('leads', [])
 
                 logger.info(f"   📊 CAPI (período): {len(capi_leads_data)} leads")
@@ -1003,7 +1088,7 @@ class CAPILeadDataLoader:
                     }
                     return survey_period, stats
             else:
-                logger.warning(f"   ⚠️ Erro ao buscar CAPI: {response.status_code}")
+                logger.warning(f"   ⚠️ Erro ao buscar CAPI via curl (falhou)")
                 logger.info(f"   ✅ Usando apenas pesquisa: {len(survey_period)} leads")
                 stats = {
                     'survey_leads': len(survey_period),

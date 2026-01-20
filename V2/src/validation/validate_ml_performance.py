@@ -521,17 +521,29 @@ def main():
     else:
         # Modo Google Sheets (PADRÃO - dados de produção em tempo real)
         logger.info(f"   📊 Usando Google Sheets (produção)")
+
+        # Limpar cache se solicitado
+        if args.clear_cache:
+            cache_file = Path.home() / '.cache' / 'smart_ads' / 'sheets_leads_cache.csv'
+            if cache_file.exists():
+                cache_file.unlink()
+                logger.info(f"   🗑️  Cache limpo: {cache_file}")
+
         lead_loader = LeadDataLoader()
+        use_cache = not args.no_cache
 
         # Carregar direto do Google Sheets (carrega AMBAS as abas)
         leads_df = lead_loader.load_leads_from_sheets(
             start_date=start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d'),
-            end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d')
+            end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d'),
+            use_cache=use_cache
         )
         logger.info(f"   ✅ {len(leads_df)} leads carregados do Google Sheets")
 
         # Contar pessoas únicas com dados CAPI do banco PostgreSQL via API
-        import requests
+        # WORKAROUND: usar curl (requests estava travando)
+        import subprocess
+        import json as json_module
 
         try:
             API_URL = "https://smart-ads-api-12955519745.us-central1.run.app"
@@ -542,14 +554,19 @@ def main():
 
             url = f"{API_URL}/webhook/lead_capture/stats?start_date={start_str}&end_date={end_str}"
 
-            response = requests.get(url, timeout=30)
+            result_curl = subprocess.run(
+                ['curl', '-s', '--max-time', '30', url],
+                capture_output=True,
+                text=True,
+                timeout=35
+            )
 
-            if response.status_code == 200:
-                result = response.json()
+            if result_curl.returncode == 0:
+                result = json_module.loads(result_curl.stdout)
                 capi_unique_emails = result.get('total_leads', 0)
                 logger.info(f"   📊 Leads CAPI no banco: {capi_unique_emails} (fbp: {result.get('leads_with_fbp', 0)})")
             else:
-                logger.warning(f"   ⚠️ API CAPI retornou status {response.status_code}")
+                logger.warning(f"   ⚠️ Curl para API CAPI falhou")
                 capi_unique_emails = 0
 
         except Exception as e:
@@ -1310,14 +1327,11 @@ def main():
     print("📄 Gerando relatório Excel...", flush=True)
     os.makedirs(output_dir, exist_ok=True)
 
-    # Sempre usar nome com datas (sobrescreve se mesmo período)
-    excel_filename = f"validation_report_{start_date}_to_{end_date}.xlsx"
+    # Sempre adicionar timestamp no nome do arquivo (nunca sobrescreve)
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    excel_filename = f"validation_report_{start_date}_to_{end_date}_{timestamp}.xlsx"
     excel_path = str(Path(output_dir) / excel_filename)
-
-    if Path(excel_path).exists():
-        logger.info(f"   📌 Sobrescrevendo relatório existente: {excel_filename}")
-    else:
-        logger.info(f"   📌 Criando novo relatório: {excel_filename}")
+    logger.info(f"   📌 Criando relatório: {excel_filename}")
 
     # Formatar account IDs para exibição
     account_ids_display = ', '.join(args.account_id) if isinstance(args.account_id, list) else args.account_id
