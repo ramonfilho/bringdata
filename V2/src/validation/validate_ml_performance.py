@@ -26,6 +26,7 @@ import yaml
 import logging
 import time
 import pandas as pd
+import numpy as np
 from tabulate import tabulate
 
 # Adicionar V2/ ao path para imports
@@ -532,27 +533,32 @@ def main():
         lead_loader = LeadDataLoader()
         use_cache = not args.no_cache
 
-        # Carregar direto do Google Sheets (carrega AMBAS as abas)
-        leads_df = lead_loader.load_leads_from_sheets(
+        # Carregar Pesquisa do Google Sheets (carrega AMBAS as abas)
+        survey_df = lead_loader.load_leads_from_sheets(
             start_date=start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d'),
             end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d'),
             use_cache=use_cache
         )
-        logger.info(f"   ✅ {len(leads_df)} leads carregados do Google Sheets")
+        logger.info(f"   ✅ {len(survey_df)} leads da pesquisa carregados do Google Sheets")
 
-        # Contar pessoas únicas com dados CAPI do banco PostgreSQL via API
+        survey_emails = set(survey_df['email'].unique())
+        logger.info(f"   📧 {len(survey_emails)} emails únicos na pesquisa")
+
+        # Buscar e combinar com leads CAPI extras (mesma lógica do modo CSV)
         # WORKAROUND: usar curl (requests estava travando)
         import subprocess
         import json as json_module
+        import re
+
+        logger.info("   🔍 Buscando leads no CAPI...")
 
         try:
             API_URL = "https://smart-ads-api-12955519745.us-central1.run.app"
 
-            # Buscar estatísticas de leads CAPI no período
             start_str = start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d')
             end_str = end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d')
 
-            url = f"{API_URL}/webhook/lead_capture/stats?start_date={start_str}&end_date={end_str}"
+            url = f"{API_URL}/webhook/lead_capture/recent?start_date={start_str}&end_date={end_str}&limit=10000"
 
             result_curl = subprocess.run(
                 ['curl', '-s', '--max-time', '30', url],
@@ -563,23 +569,99 @@ def main():
 
             if result_curl.returncode == 0:
                 result = json_module.loads(result_curl.stdout)
-                capi_unique_emails = result.get('total_leads', 0)
-                logger.info(f"   📊 Leads CAPI no banco: {capi_unique_emails} (fbp: {result.get('leads_with_fbp', 0)})")
+                capi_leads_data = result.get('leads', [])
+
+                logger.info(f"   📊 CAPI: {len(capi_leads_data)} leads encontrados")
+
+                if capi_leads_data:
+                    # Converter para DataFrame
+                    capi_df = pd.DataFrame(capi_leads_data)
+
+                    # Normalizar
+                    from src.validation.data_loader import normalizar_email, normalizar_telefone_robusto
+
+                    capi_norm = pd.DataFrame()
+                    capi_norm['email'] = capi_df['email'].apply(lambda x: normalizar_email(x) if pd.notna(x) else None)
+                    capi_norm['nome'] = capi_df.get('name', np.nan)
+                    capi_norm['telefone'] = capi_df.get('phone', np.nan).apply(
+                        lambda x: normalizar_telefone_robusto(str(x)) if pd.notna(x) else None
+                    )
+                    capi_norm['data_captura'] = pd.to_datetime(capi_df['created_at'], errors='coerce')
+                    capi_norm['campaign'] = capi_df.get('utm_campaign', np.nan)
+                    capi_norm['source'] = capi_df.get('utm_source', np.nan)
+                    capi_norm['medium'] = capi_df.get('utm_medium', np.nan)
+                    capi_norm['term'] = capi_df.get('utm_term', np.nan)
+                    capi_norm['content'] = capi_df.get('utm_content', np.nan)
+                    capi_norm['lead_score'] = np.nan
+                    capi_norm['decile'] = None
+                    capi_norm['source_type'] = 'capi'
+
+                    # Remover leads sem email
+                    capi_norm = capi_norm[capi_norm['email'].notna()].copy()
+
+                    # FILTRO: campaign_id Meta válido
+                    def extract_campaign_id_meta(utm_campaign):
+                        if pd.isna(utm_campaign):
+                            return None
+                        match = re.search(r'\|(\d{15,})$', str(utm_campaign))
+                        return match.group(1)[:15] if match else None
+
+                    total_antes = len(capi_norm)
+                    capi_norm['campaign_id_meta'] = capi_norm['campaign'].apply(extract_campaign_id_meta)
+                    capi_norm = capi_norm[capi_norm['campaign_id_meta'].notna()].copy()
+
+                    removidos = total_antes - len(capi_norm)
+                    if removidos > 0:
+                        logger.info(f"   🔍 Filtrado: {removidos} sem campaign_id Meta ({len(capi_norm)} restaram)")
+
+                    # Leads CAPI que NÃO estão na pesquisa
+                    capi_emails = set(capi_norm['email'].unique())
+                    capi_extras = capi_emails - survey_emails
+                    capi_extra_leads = capi_norm[capi_norm['email'].isin(capi_extras)].copy()
+
+                    logger.info(f"   ➕ Leads extras do CAPI: {len(capi_extra_leads)} (não estão na pesquisa)")
+
+                    # Combinar
+                    if len(capi_extra_leads) > 0:
+                        leads_df = pd.concat([survey_df, capi_extra_leads], ignore_index=True)
+                        logger.info(f"   ✅ Total combinado: {len(leads_df)} ({len(survey_df)} pesquisa + {len(capi_extra_leads)} CAPI)")
+                    else:
+                        leads_df = survey_df
+                        logger.info(f"   ✅ Total: {len(leads_df)} (apenas pesquisa)")
+
+                    # Estatísticas
+                    lead_source_stats = {
+                        'survey_leads': len(survey_df),
+                        'capi_leads_extras': len(capi_extra_leads),
+                        'capi_leads_total': len(capi_norm['email'].unique())
+                    }
+                else:
+                    logger.info("   ⚠️ Nenhum lead CAPI encontrado")
+                    leads_df = survey_df
+                    lead_source_stats = {
+                        'survey_leads': len(survey_df),
+                        'capi_leads_extras': 0,
+                        'capi_leads_total': 0
+                    }
             else:
                 logger.warning(f"   ⚠️ Curl para API CAPI falhou")
-                capi_unique_emails = 0
+                leads_df = survey_df
+                lead_source_stats = {
+                    'survey_leads': len(survey_df),
+                    'capi_leads_extras': 0,
+                    'capi_leads_total': 0
+                }
 
         except Exception as e:
-            logger.warning(f"   ⚠️ Não foi possível contar pessoas CAPI do banco: {e}")
-            capi_unique_emails = 0
+            logger.warning(f"   ⚠️ Erro ao buscar CAPI: {e}")
+            leads_df = survey_df
+            lead_source_stats = {
+                'survey_leads': len(survey_df),
+                'capi_leads_extras': 0,
+                'capi_leads_total': 0
+            }
 
-        # Estatísticas completas
-        lead_source_stats = {
-            'survey_leads': len(leads_df),  # Total de respostas na pesquisa
-            'capi_leads_extras': 0,  # Não há extras em modo Sheets (só pesquisa)
-            'capi_leads_total': capi_unique_emails  # Pessoas únicas com fbp
-        }
-        logger.info(f"   📊 Pessoas únicas com dados CAPI (fbp): {capi_unique_emails}")
+        logger.info(f"   📊 Estatísticas: {lead_source_stats['survey_leads']} pesquisa + {lead_source_stats['capi_leads_extras']} CAPI extras")
 
     # Vendas
     sales_loader = SalesDataLoader()

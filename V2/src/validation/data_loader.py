@@ -109,88 +109,72 @@ class LeadDataLoader:
         logger.info(f"   URL: {sheets_url[:50]}...")
 
         try:
-            # WORKAROUND: Usar curl para baixar CSV das abas (gspread estava travando)
+            # HÍBRIDO: Usar gspread APENAS para listar abas/GIDs, curl para baixar dados
             import subprocess
             import tempfile
+            import gspread
 
+            # 1. Usar gspread para descobrir todas as abas e seus GIDs (operação rápida)
+            logger.info("   🔍 Descobrindo abas da planilha...")
+            scopes = [
+                'https://www.googleapis.com/auth/spreadsheets.readonly',
+                'https://www.googleapis.com/auth/drive.readonly'
+            ]
+            creds, _ = gauth_default(scopes=scopes)
+            gc = gspread.authorize(creds)
+            spreadsheet = gc.open_by_url(sheets_url)
+
+            worksheets = spreadsheet.worksheets()
+            logger.info(f"   ✅ {len(worksheets)} abas encontradas")
+
+            # Pegar apenas as 2 primeiras abas (índices 0 e 1)
+            # Aba [0]: [LF] Pesquisa | Aba [1]: [LF] Pesquisa v2
+            abas_pesquisa = worksheets[:2]
+            logger.info(f"   📋 Usando as 2 primeiras abas:")
+            for idx, ws in enumerate(abas_pesquisa):
+                logger.info(f"      [{idx}] {ws.title} (gid={ws.id})")
+
+            # 2. Baixar dados de cada aba via curl (workaround para gspread.get_all_values() travar)
             dfs_to_combine = []
 
-            # Aba [0]: [LF] Pesquisa (gid=0 - formato ISO: YYYY-MM-DD HH:MM:SS)
-            logger.info("   📄 Carregando aba [0]: [LF] Pesquisa")
-            url_aba0 = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid=0"
+            for idx, ws in enumerate(abas_pesquisa):
+                logger.info(f"   📄 Carregando aba [{idx}]: {ws.title} (gid={ws.id})")
 
-            with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=False) as tmp0:
-                result = subprocess.run(
-                    ['curl', '-sL', '--max-time', '30', url_aba0, '-o', tmp0.name],
-                    capture_output=True,
-                    timeout=35
-                )
+                url_aba = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={ws.id}"
 
-                if result.returncode != 0:
-                    raise Exception(f"Curl falhou para aba [0]: {result.stderr.decode()}")
-
-                df0 = pd.read_csv(tmp0.name)
-                os.unlink(tmp0.name)
-
-            # Remover duplicatas de colunas
-            df0 = df0.loc[:, ~df0.columns.duplicated(keep='first')]
-            logger.info(f"      ✅ {len(df0)} linhas, {len(df0.columns)} colunas únicas")
-
-            # Converter data (formato ISO)
-            if 'Data' in df0.columns:
-                df0['Data'] = pd.to_datetime(df0['Data'], errors='coerce')
-
-            df0 = df0.reset_index(drop=True)
-            dfs_to_combine.append(df0)
-
-            # Aba [1]: [LF] Pesquisa v2 (gid precisa descobrir - geralmente 1 ou outro ID)
-            # Vou tentar gid=1 primeiro, se falhar, tento gid pegos da estrutura
-            logger.info("   📄 Carregando aba [1]: [LF] Pesquisa v2")
-
-            # Tentar diferentes gids comuns para segunda aba
-            for gid in [1, 2, '0', '1', '2']:
-                url_aba1 = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
-
-                with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=False) as tmp1:
+                with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=False) as tmp:
                     result = subprocess.run(
-                        ['curl', '-sL', '--max-time', '30', url_aba1, '-o', tmp1.name],
+                        ['curl', '-sL', '--max-time', '30', url_aba, '-o', tmp.name],
                         capture_output=True,
                         timeout=35
                     )
 
-                    if result.returncode == 0:
-                        try:
-                            df1_test = pd.read_csv(tmp1.name)
-                            # Verificar se é diferente da aba 0 (não é a mesma aba)
-                            if len(df1_test) != len(df0) or list(df1_test.columns) != list(df0.columns):
-                                df1 = df1_test
-                                logger.info(f"      ✅ Aba [1] encontrada (gid={gid}): {len(df1)} linhas")
-                                os.unlink(tmp1.name)
-                                break
-                        except Exception as e:
-                            logger.warning(f"      ⚠️ Erro ao ler gid={gid}: {e}")
-                    os.unlink(tmp1.name)
-            else:
-                # Não encontrou segunda aba válida - usar apenas primeira
-                logger.warning("   ⚠️ Não encontrou aba [1], usando apenas aba [0]")
-                df1 = None
+                    if result.returncode != 0:
+                        logger.warning(f"      ⚠️ Curl falhou para aba {ws.title}: {result.stderr.decode()}")
+                        os.unlink(tmp.name)
+                        continue
 
-            if df1 is not None:
-                # Remover duplicatas de colunas
-                df1 = df1.loc[:, ~df1.columns.duplicated(keep='first')]
-                logger.info(f"      {len(df1.columns)} colunas únicas")
+                    try:
+                        df_aba = pd.read_csv(tmp.name)
+                        os.unlink(tmp.name)
 
-                # Renomear 'Data do Envio' para 'Data' antes de combinar
-                if 'Data do Envio' in df1.columns:
-                    df1['Data'] = pd.to_datetime(df1['Data do Envio'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
-                    df1 = df1.drop('Data do Envio', axis=1)
+                        # Remover duplicatas de colunas
+                        df_aba = df_aba.loc[:, ~df_aba.columns.duplicated(keep='first')]
+                        logger.info(f"      ✅ {len(df_aba)} linhas, {len(df_aba.columns)} colunas únicas")
 
-                df1 = df1.reset_index(drop=True)
+                        # Normalizar coluna de data
+                        if 'Data' in df_aba.columns:
+                            df_aba['Data'] = pd.to_datetime(df_aba['Data'], errors='coerce')
+                        elif 'Data do Envio' in df_aba.columns:
+                            df_aba['Data'] = pd.to_datetime(df_aba['Data do Envio'], format='%d/%m/%Y %H:%M:%S', errors='coerce')
+                            df_aba = df_aba.drop('Data do Envio', axis=1)
 
-                if df1.columns.duplicated().any():
-                    df1 = df1.loc[:, ~df1.columns.duplicated(keep='first')]
+                        df_aba = df_aba.reset_index(drop=True)
+                        dfs_to_combine.append(df_aba)
 
-                dfs_to_combine.append(df1)
+                    except Exception as e:
+                        logger.warning(f"      ⚠️ Erro ao processar aba {ws.title}: {e}")
+                        os.unlink(tmp.name)
 
             # Combinar ambas as abas
             # Como têm colunas diferentes, concat criará NaN onde não houver match
