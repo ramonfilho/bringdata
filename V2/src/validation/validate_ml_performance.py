@@ -772,15 +772,26 @@ def main():
     comparison_group_map_15 = {}  # Mapa com IDs de 15 dígitos
 
     if 'ml_type' in leads_df.columns and not campaigns_df.empty:
-        # Identificar campanhas ML vs Controle dinamicamente dos relatórios
-        # IMPORTANTE: Também incluir "| ML |" para nomes truncados (ex: "ADV | ML | S/ ABERTO")
-        ml_campaigns = campaigns_df[campaigns_df['campaign_name'].str.contains('MACHINE LEARNING|\\| ML \\|', case=False, na=False, regex=True)]
+        # Identificar campanhas ML vs Controle usando classificação correta
+        from src.validation.campaign_classifier import classify_campaign
+
+        # Classificar cada campanha
+        campaigns_df['ml_classification'] = campaigns_df['campaign_name'].apply(classify_campaign)
+
+        # Filtrar campanhas válidas (excluir as que não são de captação)
+        campaigns_df_filtered = campaigns_df[campaigns_df['ml_classification'].isin(['COM_ML', 'SEM_ML'])]
+
+        # Separar ML e Controle
+        ml_campaigns = campaigns_df_filtered[campaigns_df_filtered['ml_classification'] == 'COM_ML']
         ml_campaign_ids = ml_campaigns['campaign_id'].unique().tolist()
 
-        control_campaigns = campaigns_df[
-            campaigns_df['campaign_name'].str.contains('ESCALA SCORE|FAIXA A|\\bSCORE\\b', case=False, na=False, regex=True)
-        ]
+        control_campaigns = campaigns_df_filtered[campaigns_df_filtered['ml_classification'] == 'SEM_ML']
         control_campaign_ids = control_campaigns['campaign_id'].unique().tolist()
+
+        logger.info(f"   📊 Classificação de campanhas:")
+        logger.info(f"      COM_ML: {len(ml_campaign_ids)} campanhas")
+        logger.info(f"      SEM_ML (Controle): {len(control_campaign_ids)} campanhas")
+        logger.info(f"      EXCLUÍDAS: {len(campaigns_df) - len(campaigns_df_filtered)} campanhas")
 
         if ml_campaign_ids and control_campaign_ids:
             # Usar função refinada que distingue Eventos ML vs Otimização ML
@@ -1194,7 +1205,8 @@ def main():
                     adsets_df=adsets_df,
                     ml_campaign_ids=eventos_ml_campaign_ids,  # Apenas Eventos ML!
                     control_campaign_ids=control_campaign_ids,
-                    min_spend=0.0
+                    min_spend=0.0,
+                    use_dynamic_matching=True  # Usar detecção dinâmica em vez de lista hardcoded
                 )
 
                 if matched_adsets:
