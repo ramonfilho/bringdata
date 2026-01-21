@@ -686,13 +686,11 @@ def main():
 
         logger.info(f"   🌐 Buscando via API: {api_sales_start} a {api_sales_end}")
 
-        # Buscar via API (salvar cópia em Excel para auditoria)
-        output_path = f"{vendas_path}/Guru-Vendas-API-{api_sales_start}-a-{api_sales_end}.xlsx"
+        # Buscar via API (sem salvar Excel duplicado)
         guru_df = sales_loader.load_guru_sales_from_api(
             start_date=api_sales_start,
             end_date=api_sales_end,
-            save_excel=True,
-            output_path=output_path
+            save_excel=False
         )
     else:
         # Modo local (arquivos Excel)
