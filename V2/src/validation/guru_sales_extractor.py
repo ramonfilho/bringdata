@@ -372,14 +372,39 @@ class GuruSalesExtractor:
         return df
 
 
-if __name__ == '__main__':
-    # Gerar relatório dos últimos 7 dias
+def fetch_guru_sales_from_api(start_date: str, end_date: str, save_excel: bool = False, output_path: str = None) -> pd.DataFrame:
+    """
+    Função auxiliar para buscar vendas da Guru via API.
+
+    Pode ser usada como módulo no pipeline de validação.
+
+    Args:
+        start_date: Data inicial (YYYY-MM-DD)
+        end_date: Data final (YYYY-MM-DD)
+        save_excel: Se True, salva Excel além de retornar DataFrame
+        output_path: Caminho para salvar Excel (obrigatório se save_excel=True)
+
+    Returns:
+        DataFrame com vendas da Guru (já ordenado e formatado)
+    """
     extractor = GuruSalesExtractor()
 
-    # Período: últimos 7 dias (2026-01-14 a 2026-01-21)
+    # Gerar relatório (sempre retorna DataFrame)
     df = extractor.generate_report(
+        start_date=start_date,
+        end_date=end_date,
+        output_path=output_path if save_excel else None
+    )
+
+    return df
+
+
+if __name__ == '__main__':
+    # Teste: gerar relatório dos últimos 7 dias
+    df = fetch_guru_sales_from_api(
         start_date='2026-01-14',
         end_date='2026-01-21',
+        save_excel=True,
         output_path='V2/files/validation/vendas/Guru-Vendas-API-ultimos-7-dias.xlsx'
     )
 

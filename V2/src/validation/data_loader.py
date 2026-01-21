@@ -661,6 +661,98 @@ class SalesDataLoader:
 
         return df_norm
 
+    def load_guru_sales_from_api(self, start_date: str, end_date: str, save_excel: bool = False, output_path: str = None) -> pd.DataFrame:
+        """
+        Carrega vendas da Guru via API (alternativa aos arquivos Excel).
+
+        Args:
+            start_date: Data inicial (YYYY-MM-DD)
+            end_date: Data final (YYYY-MM-DD)
+            save_excel: Se True, salva cópia em Excel
+            output_path: Caminho para salvar Excel (se save_excel=True)
+
+        Returns:
+            DataFrame normalizado com origem='guru'
+        """
+        logger.info(f"🌐 Buscando vendas Guru via API ({start_date} a {end_date})")
+
+        # Importar função do extrator
+        from src.validation.guru_sales_extractor import fetch_guru_sales_from_api
+
+        # Buscar via API
+        df_raw = fetch_guru_sales_from_api(
+            start_date=start_date,
+            end_date=end_date,
+            save_excel=save_excel,
+            output_path=output_path
+        )
+
+        if df_raw.empty:
+            logger.warning("⚠️ Nenhuma venda retornada da API Guru")
+            return pd.DataFrame()
+
+        # O DataFrame da API já vem com as colunas normalizadas
+        # Mas precisamos normalizar para o formato esperado pelo pipeline
+
+        # Filtrar apenas vendas aprovadas
+        if 'status' in df_raw.columns:
+            before = len(df_raw)
+            df_raw = df_raw[df_raw['status'] == 'Aprovada'].copy()
+            after = len(df_raw)
+            if before != after:
+                logger.info(f"   Filtradas {after} vendas aprovadas (excluídas {before - after} não aprovadas)")
+
+        # Normalizar colunas para o formato do pipeline
+        df_norm = pd.DataFrame()
+
+        # Email (normalizado)
+        df_norm['email'] = df_raw['email contato'].apply(
+            lambda x: normalizar_email(x) if pd.notna(x) else None
+        )
+
+        # Nome
+        df_norm['nome'] = df_raw.get('nome contato', np.nan)
+
+        # Telefone
+        if 'telefone contato' in df_raw.columns:
+            df_norm['telefone'] = df_raw['telefone contato'].apply(
+                lambda x: normalizar_telefone_robusto(str(x)) if pd.notna(x) else None
+            )
+        else:
+            df_norm['telefone'] = None
+
+        # Valor da venda
+        df_norm['sale_value'] = pd.to_numeric(df_raw.get('valor venda', 0), errors='coerce')
+
+        # Data da venda (já vem formatada como string dd/mm/yyyy HH:MM:SS)
+        # Converter para datetime com dayfirst=True
+        df_norm['sale_date'] = pd.to_datetime(
+            df_raw['data aprovacao'].fillna(df_raw['data pedido']),
+            format='%d/%m/%Y %H:%M:%S',
+            errors='coerce'
+        )
+
+        # UTM Campaign
+        df_norm['utm_campaign'] = df_raw.get('utm_campaign', np.nan)
+
+        # Origem
+        df_norm['origem'] = 'guru'
+
+        # Remover vendas sem email ou data
+        before = len(df_norm)
+        df_norm = df_norm[
+            (df_norm['email'].notna()) &
+            (df_norm['sale_date'].notna())
+        ].copy()
+        after = len(df_norm)
+
+        if before != after:
+            logger.warning(f"⚠️ {before - after} vendas Guru API removidas (email/data inválido)")
+
+        logger.info(f"   ✅ {len(df_norm)} vendas Guru API carregadas e normalizadas")
+
+        return df_norm
+
     def combine_sales(self, guru_df: pd.DataFrame = None, tmb_df: pd.DataFrame = None,
                      guru_paths: List[str] = None, tmb_paths: List[str] = None) -> pd.DataFrame:
         """

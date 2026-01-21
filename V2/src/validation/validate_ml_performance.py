@@ -665,16 +665,50 @@ def main():
 
     # Vendas
     sales_loader = SalesDataLoader()
-    # Buscar arquivos Guru com qualquer capitalização e formato: guru*, Guru*, GURU*
-    guru_files = sorted(glob(f"{vendas_path}/[Gg][Uu][Rr][Uu]*.xlsx"))
+
+    # Configuração de fonte de dados Guru: "local" (arquivos) ou "api" (Guru API)
+    # Pode ser controlada via variável de ambiente GURU_DATA_SOURCE
+    guru_data_source = os.environ.get('GURU_DATA_SOURCE', 'local').lower()
+    logger.info(f"📊 Fonte de dados Guru: {guru_data_source.upper()}")
+
+    # Carregar vendas Guru (via API ou arquivos locais)
+    if guru_data_source == 'api':
+        # Determinar período de vendas para buscar via API
+        if args.sales_start_date and args.sales_end_date:
+            api_sales_start = args.sales_start_date
+            api_sales_end = args.sales_end_date
+        else:
+            # Usar PeriodCalculator para calcular o período de vendas
+            period_calc = PeriodCalculator()
+            calculated_periods = period_calc.calculate_periods(start_date)
+            api_sales_start = calculated_periods['sales']['start']
+            api_sales_end = calculated_periods['sales']['end']
+
+        logger.info(f"   🌐 Buscando via API: {api_sales_start} a {api_sales_end}")
+
+        # Buscar via API (salvar cópia em Excel para auditoria)
+        output_path = f"{vendas_path}/Guru-Vendas-API-{api_sales_start}-a-{api_sales_end}.xlsx"
+        guru_df = sales_loader.load_guru_sales_from_api(
+            start_date=api_sales_start,
+            end_date=api_sales_end,
+            save_excel=True,
+            output_path=output_path
+        )
+    else:
+        # Modo local (arquivos Excel)
+        # Buscar arquivos Guru com qualquer capitalização e formato: guru*, Guru*, GURU*
+        guru_files = sorted(glob(f"{vendas_path}/[Gg][Uu][Rr][Uu]*.xlsx"))
+        logger.info(f"   Arquivos Guru encontrados: {len(guru_files)}")
+
+        guru_df = sales_loader.load_guru_sales(guru_files) if guru_files else None
+
     # Buscar arquivos TMB com qualquer capitalização e formato: tmb*, Tmb*, TMB*
     tmb_files = sorted(glob(f"{vendas_path}/[Tt][Mm][Bb]*.xlsx"))
-
-    logger.info(f"   Arquivos Guru encontrados: {len(guru_files)}")
     logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)}")
 
+    # Combinar vendas Guru + TMB
     sales_df = sales_loader.combine_sales(
-        guru_paths=guru_files if guru_files else None,
+        guru_df=guru_df,
         tmb_paths=tmb_files if tmb_files else None
     )
 
@@ -749,7 +783,7 @@ def main():
     print("💰 CARREGANDO RELATÓRIOS META PARA CLASSIFICAÇÃO...", flush=True)
     print(flush=True)
 
-    # Carregar relatórios Meta locais
+    # Carregar relatórios Meta locais ou via API
     # IMPORTANTE: Usar pasta específica com relatórios oficiais do período (não adsets_analysis)
     # Construir caminho dinamicamente baseado nas datas fornecidas
     from datetime import datetime
@@ -758,7 +792,14 @@ def main():
     start_str = start_dt.strftime('%d:%m')
     end_str = end_dt.strftime('%d:%m')
     reports_dir = f'files/validation/meta_reports/{start_str} - {end_str}'
-    loader = MetaReportsLoader(reports_dir)
+
+    # Configuração de fonte de dados: "local" (arquivos) ou "api" (Meta Marketing API)
+    # Pode ser controlada via variável de ambiente META_DATA_SOURCE
+    data_source = os.environ.get('META_DATA_SOURCE', 'local').lower()
+    print(f"📊 Fonte de dados Meta: {data_source.upper()}", flush=True)
+
+    # Passar account_ids para o loader (necessário no modo API para buscar múltiplas contas)
+    loader = MetaReportsLoader(reports_dir, data_source=data_source, account_ids=args.account_id if data_source == 'api' else None)
     costs_hierarchy_temp = loader.build_costs_hierarchy(start_date, end_date)
 
     # Obter DataFrame de campanhas
