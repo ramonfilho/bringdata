@@ -70,9 +70,9 @@ Leads CAPI → Respostas Pesquisa → Eventos Enviados → Eventos Recebidos
 ## Exemplo de Output Esperado
 
 ```
-================================================================================
+========================================================================
 📊 SUMÁRIO CRÍTICO DO SISTEMA
-================================================================================
+========================================================================
 
 1. Categorias não vistas no treino: Não
 
@@ -100,12 +100,12 @@ Leads CAPI → Respostas Pesquisa → Eventos Enviados → Eventos Recebidos
 9. Eventos recebidos pela Meta: Sim (86.7% de aceitação)
 
 10. Funil de Conversão:
-    Leads CAPI: 1,389 → Respostas: 1,135 → Enviados: 623 → Aceitos: 540
+    Capturados: 1,389 → Respostas: 1,135 → Enviados: 623 → Aceitos: 540
 
 11. Taxas de Conversão:
     - Resposta pesquisa: 81.7%
     - Envio CAPI: 54.9%
     - Aceitação Meta: 86.7%
 
-================================================================================
+========================================================================
 ```

@@ -340,9 +340,9 @@ class MonitoringOrchestrator:
             String com o sumário crítico formatado
         """
         lines = []
-        lines.append("\n" + "="*80)
+        lines.append("\n" + "="*72)
         lines.append("📊 SUMÁRIO CRÍTICO DO SISTEMA")
-        lines.append("="*80)
+        lines.append("="*72)
 
         # 1. Categorias não vistas no treino
         new_categories = [a for a in alerts if 'nova categoria' in a.message.lower() or 'não vista no treino' in a.message.lower()]
@@ -475,7 +475,7 @@ class MonitoringOrchestrator:
         lines.append(f"\n10. Taxa de Resposta:")
         lines.append(f"    - Resposta pesquisa: {response_rate:.1f}%")
 
-        lines.append("\n" + "="*80)
+        lines.append("\n" + "="*72)
 
         # Juntar todas as linhas e printar + retornar
         summary = '\n'.join(lines)
