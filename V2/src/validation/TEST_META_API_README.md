@@ -6,6 +6,14 @@ Verificar se conseguimos obter os mesmos dados dos relatórios CSV exportados ma
 
 Se conseguirmos obter com a mesma granularidade, **não precisamos** implementar download automático de emails. Caso contrário, precisaremos automatizar via email.
 
+## ⚡ **IMPORTANTE: Usa ASYNC Requests**
+
+O script foi otimizado para usar **requisições assíncronas (ASYNC)** para evitar rate limits da API da Meta:
+- ✅ Cada requisição é feita de forma assíncrona
+- ✅ Aguarda conclusão do job antes de prosseguir
+- ✅ Retry automático em caso de rate limit (até 3 tentativas)
+- ✅ Timeout de 10 minutos por job
+
 ## 📋 Pré-requisitos
 
 ### 1. Instalar SDK do Facebook
@@ -14,28 +22,11 @@ Se conseguirmos obter com a mesma granularidade, **não precisamos** implementar
 pip install facebook-business
 ```
 
-### 2. Obter Token de Acesso
+### 2. Token já está Configurado! ✅
 
-1. Acesse: https://developers.facebook.com/tools/explorer/
-2. Selecione o App **Smart Ads** (ou crie um novo)
-3. Clique em **Generate Access Token**
-4. Selecione as permissões necessárias:
-   - `ads_read`
-   - `ads_management`
-5. Gere o token (ele será algo como `EAAxxxxx...`)
+O token de acesso **já está configurado** no arquivo `api/meta_config.py`. O script importa automaticamente de lá.
 
-### 3. Configurar Token
-
-**Opção A - Variável de ambiente (recomendado):**
-```bash
-export META_ACCESS_TOKEN='EAAxxxxx...'
-```
-
-**Opção B - Editar o script:**
-Edite a linha 36 do arquivo `test_meta_api_reports.py`:
-```python
-ACCESS_TOKEN = 'SEU_TOKEN_AQUI'
-```
+**Não precisa** fazer nada com o token!
 
 ## 🚀 Como Executar
 
