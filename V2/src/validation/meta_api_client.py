@@ -258,6 +258,7 @@ class MetaAPIClient:
                 'Nome da campanha': insight.get('campaign_name', ''),
                 'Identificação da campanha': insight.get('campaign_id', ''),
                 'Valor usado (BRL)': float(insight.get('spend', 0)),
+                'account_id': insight.get('account_id', ''),  # CRÍTICO: necessário para mapear account_name
             }
 
             # Campos específicos por nível

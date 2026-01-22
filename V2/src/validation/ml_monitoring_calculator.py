@@ -157,8 +157,11 @@ class MLMonitoringCalculator:
         """
         Calcula taxa de conversão por decil e compara com esperado.
 
+        IMPORTANTE: Recalcula decis usando percentis (qcut) ao invés de usar thresholds fixos.
+        Isso garante distribuição balanceada (10% em cada decil) para comparação justa com test set.
+
         Args:
-            matched_df: DataFrame com decile e converted
+            matched_df: DataFrame com lead_score e converted
 
         Returns:
             DataFrame com colunas:
@@ -169,8 +172,57 @@ class MLMonitoringCalculator:
             - conversion_rate_expected: Taxa do test set (%)
             - ratio: real / expected
         """
-        # Agrupar por decil
-        decile_stats = matched_df.groupby('decile').agg({
+        # Filtrar apenas leads com score válido
+        valid_df = matched_df[matched_df['lead_score'].notna()].copy()
+
+        if len(valid_df) == 0:
+            logger.warning("⚠️ Nenhum lead com lead_score válido para calcular performance por decil")
+            return pd.DataFrame()
+
+        # Converter lead_score para float (pode estar como string com vírgula)
+        def convert_score(score):
+            if pd.isna(score):
+                return np.nan
+            if isinstance(score, str):
+                try:
+                    return float(score.replace(',', '.'))
+                except (ValueError, AttributeError):
+                    return np.nan
+            return float(score)
+
+        valid_df['lead_score_float'] = valid_df['lead_score'].apply(convert_score)
+
+        # Remover scores que não puderam ser convertidos
+        valid_df = valid_df[valid_df['lead_score_float'].notna()].copy()
+
+        if len(valid_df) == 0:
+            logger.warning("⚠️ Nenhum lead com lead_score numérico válido")
+            return pd.DataFrame()
+
+        # NOVO: Recalcular decis usando percentis (qcut) para garantir 10% em cada
+        # D1 = 10% piores (scores mais baixos)
+        # D10 = 10% melhores (scores mais altos)
+        try:
+            valid_df['decile_percentile'] = pd.qcut(
+                valid_df['lead_score_float'],
+                q=10,
+                labels=['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10'],
+                duplicates='drop'  # Em caso de ties, agrupa decis
+            )
+        except ValueError as e:
+            # Se qcut falhar (ex: muitos valores duplicados), usar cut com limites fixos
+            logger.warning(f"⚠️ qcut falhou, usando quantis: {e}")
+            quantiles = valid_df['lead_score_float'].quantile([0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
+            valid_df['decile_percentile'] = pd.cut(
+                valid_df['lead_score_float'],
+                bins=quantiles,
+                labels=['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9', 'D10'],
+                include_lowest=True,
+                duplicates='drop'
+            )
+
+        # Agrupar por decil recalculado
+        decile_stats = valid_df.groupby('decile_percentile', observed=True).agg({
             'converted': ['count', 'sum']
         }).reset_index()
 
@@ -295,39 +347,33 @@ class MLMonitoringCalculator:
 
     def calculate_all_metrics(self, matched_df: pd.DataFrame) -> Dict:
         """
-        Calcula todas as métricas de monitoramento.
+        Calcula métricas de monitoramento do modelo.
+
+        SIMPLIFICADO: Foca em AUC e métricas de concentração.
+        Tabelas detalhadas de conversão e lift por decil foram removidas devido a
+        problemas com thresholds e distribuição desbalanceada do test set.
 
         Args:
             matched_df: DataFrame com matched leads e conversões
 
         Returns:
-            Dict com todas as métricas calculadas
+            Dict com métricas de AUC e concentração
         """
         logger.info("🔍 Calculando métricas de monitoramento do modelo...")
 
-        # AUC
+        # AUC - Métrica principal de discriminação
         auc_metrics = self.calculate_auc(matched_df)
         logger.info(f"   AUC Produção: {auc_metrics['production']:.4f} "
                    f"(Test Set: {auc_metrics['test_set']:.4f}, Δ: {auc_metrics['delta']:+.4f})")
 
-        # Taxa de conversão por decil
-        decile_performance = self.calculate_decile_performance(matched_df)
-        logger.info(f"   Taxa de conversão calculada para {len(decile_performance)} decis")
-
-        # Concentração
+        # Concentração - Distribuição de conversões nos top decis
         concentration = self.calculate_concentration_metrics(matched_df)
         logger.info(f"   Top 3 Decis: {concentration['top3_production']:.1f}% "
                    f"(Test Set: {concentration['top3_test_set']:.1f}%)")
 
-        # Lift
-        lift_by_decile = self.calculate_lift_by_decile(matched_df)
-
         return {
             'auc': auc_metrics,
-            'decile_performance': decile_performance,
             'concentration': concentration,
-            'lift_by_decile': lift_by_decile,
-            'baseline_conversion_rate': self.metadata['baseline_conversion_rate'] * 100,
             'model_info': {
                 'model_name': self.metadata['model_name'],
                 'trained_at': self.metadata['trained_at']

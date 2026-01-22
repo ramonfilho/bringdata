@@ -17,6 +17,14 @@ from glob import glob
 
 logger = logging.getLogger(__name__)
 
+# Importar MetaAPIClient para modo API
+try:
+    from src.validation.meta_api_client import MetaAPIClient
+    META_API_AVAILABLE = True
+except ImportError:
+    META_API_AVAILABLE = False
+    logger.warning("MetaAPIClient não disponível. Modo API desabilitado.")
+
 
 def normalize_unicode(text: str) -> str:
     """
@@ -60,16 +68,34 @@ class MetaReportsLoader:
     - Ads---[Conta]-Anúncios-[período].xlsx
     """
 
-    def __init__(self, reports_dir: str):
+    def __init__(self, reports_dir: str, data_source: str = "local", account_ids: Optional[List[str]] = None):
         """
         Inicializa o loader.
 
         Args:
             reports_dir: Diretório contendo os relatórios Excel
+            data_source: "local" (arquivos) ou "api" (Meta Marketing API)
+            account_ids: Lista de IDs de contas Meta (usado apenas no modo API)
         """
         self.reports_dir = Path(reports_dir)
-        if not self.reports_dir.exists():
-            raise FileNotFoundError(f"Diretório de relatórios não encontrado: {reports_dir}")
+        self.data_source = data_source.lower()
+        self.account_ids = account_ids or []
+
+        # Validar data_source
+        if self.data_source not in ["local", "api"]:
+            raise ValueError(f"data_source inválido: {data_source}. Use 'local' ou 'api'.")
+
+        # Se modo API, verificar disponibilidade
+        if self.data_source == "api":
+            if not META_API_AVAILABLE:
+                raise ImportError("MetaAPIClient não disponível. Instale as dependências necessárias.")
+            logger.info("🌐 Modo API habilitado - dados serão extraídos da Meta Marketing API")
+            logger.info(f"   Contas: {', '.join(self.account_ids) if self.account_ids else 'Padrão (Rodolfo Mori)'}")
+            # API clients serão criados sob demanda em _load_from_api()
+        else:
+            logger.info("📁 Modo LOCAL habilitado - dados serão carregados de arquivos")
+            if not self.reports_dir.exists():
+                raise FileNotFoundError(f"Diretório de relatórios não encontrado: {reports_dir}")
 
     def load_all_reports(
         self,
@@ -88,6 +114,27 @@ class MetaReportsLoader:
             - 'campaigns': DataFrame consolidado de campanhas
             - 'adsets': DataFrame consolidado de adsets
             - 'ads': DataFrame consolidado de ads
+        """
+        # Roteamento baseado no data_source
+        if self.data_source == "api":
+            return self._load_from_api(start_date, end_date)
+        else:
+            return self._load_from_local(start_date, end_date)
+
+    def _load_from_local(
+        self,
+        start_date: str,
+        end_date: str
+    ) -> Dict[str, pd.DataFrame]:
+        """
+        Carrega relatórios de arquivos locais (modo original).
+
+        Args:
+            start_date: Data início (YYYY-MM-DD)
+            end_date: Data fim (YYYY-MM-DD)
+
+        Returns:
+            Dict com DataFrames de campaigns, adsets, ads
         """
         logger.info(f"📂 Carregando relatórios Meta de {self.reports_dir}...")
 
@@ -146,6 +193,194 @@ class MetaReportsLoader:
             'adsets': adsets_df,
             'ads': ads_df
         }
+
+    def _load_from_api(
+        self,
+        start_date: str,
+        end_date: str
+    ) -> Dict[str, pd.DataFrame]:
+        """
+        Carrega relatórios via Meta Marketing API.
+
+        Args:
+            start_date: Data início (YYYY-MM-DD)
+            end_date: Data fim (YYYY-MM-DD)
+
+        Returns:
+            Dict com DataFrames de campaigns, adsets, ads (formato normalizado)
+        """
+        logger.info(f"🌐 Extraindo relatórios da Meta API...")
+        logger.info(f"   Período: {start_date} a {end_date}")
+
+        # Se não há account_ids especificados, usar conta padrão
+        accounts_to_fetch = self.account_ids if self.account_ids else [MetaAPIClient.DEFAULT_ACCOUNT_ID]
+
+        logger.info(f"   🔍 DEBUG - self.account_ids: {self.account_ids}")
+        logger.info(f"   🔍 DEBUG - accounts_to_fetch: {accounts_to_fetch}")
+
+        all_campaigns = []
+        all_adsets = []
+        all_ads = []
+
+        # Extrair dados de cada conta
+        for account_id in accounts_to_fetch:
+            # Garantir que account_id tenha o prefixo "act_"
+            if not str(account_id).startswith('act_'):
+                account_id = f"act_{account_id}"
+
+            logger.info(f"   📊 Extraindo dados da conta: {account_id}")
+
+            # Criar cliente para esta conta
+            api_client = MetaAPIClient(account_id=account_id)
+
+            # Extrair dados via API (filtros já aplicados: gasto > 0, contém 'CAP')
+            api_data = api_client.get_all_levels(
+                date_start=start_date,
+                date_end=end_date,
+                apply_filters=True
+            )
+
+            all_campaigns.append(api_data['campaigns'])
+            all_adsets.append(api_data['adsets'])
+            all_ads.append(api_data['ads'])
+
+        # Consolidar dados de todas as contas
+        campaigns_df = pd.concat(all_campaigns, ignore_index=True) if all_campaigns else pd.DataFrame()
+        adsets_df = pd.concat(all_adsets, ignore_index=True) if all_adsets else pd.DataFrame()
+        ads_df = pd.concat(all_ads, ignore_index=True) if all_ads else pd.DataFrame()
+
+        logger.info(f"   ✅ API: {len(campaigns_df)} campanhas, {len(adsets_df)} adsets, {len(ads_df)} ads (todas as contas)")
+
+        # Normalizar DataFrames para match com formato local
+        campaigns_df = self._normalize_api_data(campaigns_df, 'campaign')
+        adsets_df = self._normalize_api_data(adsets_df, 'adset')
+        ads_df = self._normalize_api_data(ads_df, 'ad')
+
+        logger.info(f"   ✅ Dados normalizados e prontos para uso")
+
+        return {
+            'campaigns': campaigns_df,
+            'adsets': adsets_df,
+            'ads': ads_df
+        }
+
+    def _normalize_api_data(
+        self,
+        df: pd.DataFrame,
+        report_type: str
+    ) -> pd.DataFrame:
+        """
+        Normaliza dados da API para match com formato de arquivos locais.
+
+        A API retorna colunas em português (ex: "Nome da campanha"),
+        enquanto o loader local normaliza para inglês (ex: "campaign_name").
+        Esta função aplica a mesma normalização.
+
+        Args:
+            df: DataFrame da API
+            report_type: 'campaign', 'adset' ou 'ad'
+
+        Returns:
+            DataFrame normalizado
+        """
+        if df.empty:
+            return df
+
+        # Mapeamento de nomes da API → nomes padronizados
+        # (mesmo mapeamento usado em _normalize_column_names)
+        column_mapping = {
+            'Nome da campanha': 'campaign_name',
+            'Identificação da campanha': 'campaign_id',
+            'Valor usado (BRL)': 'spend',
+            'Resultados': 'results',
+            'Indicador de resultados': 'optimization_goal_indicator',
+            'Início dos relatórios': 'Início dos relatórios',  # Manter para filtros
+            'Término dos relatórios': 'Término dos relatórios',  # Manter para filtros
+            'Nome do conjunto de anúncios': 'adset_name',
+            'Identificação do conjunto de anúncios': 'adset_id',
+            'Nome do anúncio': 'ad_name',
+            'Identificação do anúncio': 'ad_id',
+            'Leads': 'leads_standard',
+            'LeadQualified': 'lead_qualified',
+            'LeadQualifiedHighQuality': 'lead_qualified_hq',
+            'Faixa A': 'faixa_a',
+        }
+
+        df = df.rename(columns=column_mapping)
+
+        # Normalizar whitespace em nomes (mesmo processo que arquivos locais)
+        for name_col in ['campaign_name', 'adset_name', 'ad_name']:
+            if name_col in df.columns:
+                df[name_col] = df[name_col].apply(normalize_whitespace)
+
+        # Converter spend para numérico
+        if 'spend' in df.columns:
+            df['spend'] = pd.to_numeric(df['spend'], errors='coerce')
+
+        # Converter results para numérico
+        if 'results' in df.columns:
+            df['results'] = pd.to_numeric(df['results'], errors='coerce')
+
+        # NOTA: Endpoint de insights não retorna budget (daily_budget, lifetime_budget)
+        # Adicionar coluna budget com valor 0 para compatibilidade com código que espera essa coluna
+        df['budget'] = 0.0
+
+        # Converter IDs para string e normalizar para primeiros 15 dígitos
+        for id_col in ['campaign_id', 'adset_id', 'ad_id']:
+            if id_col in df.columns:
+                df[id_col] = df[id_col].astype(str).str.replace('.0', '', regex=False)
+                df[id_col] = df[id_col].apply(lambda x: str(x)[:15] if pd.notna(x) and str(x) != 'nan' else x)
+
+        # Converter colunas de eventos para numérico
+        for event_col in ['leads_standard', 'lead_qualified', 'lead_qualified_hq', 'faixa_a']:
+            if event_col in df.columns:
+                df[event_col] = pd.to_numeric(df[event_col], errors='coerce').fillna(0)
+
+        # Extrair AD code do nome do anúncio
+        if report_type == 'ad' and 'ad_name' in df.columns:
+            df['ad_code'] = df['ad_name'].str.extract(r'(AD0\d+)', expand=False)
+
+        # Simplificar optimization_goal_indicator (mesmo processo que arquivos locais)
+        if 'optimization_goal_indicator' in df.columns:
+            def simplify_optimization_goal(val):
+                if pd.isna(val):
+                    return 'Lead'
+                val_str = str(val).lower()
+
+                if 'leadqualifiedhighquality' in val_str or 'lead_qualified_high_quality' in val_str:
+                    return 'LeadQualifiedHighQuality'
+                elif 'leadqualified' in val_str or 'lead_qualified' in val_str:
+                    return 'LeadQualified'
+                elif 'faixa a' in val_str or 'faixa_a' in val_str:
+                    return 'Faixa A'
+                elif 'lead' in val_str:
+                    return 'Lead'
+
+                return str(val)
+
+            df['optimization_goal'] = df['optimization_goal_indicator'].apply(simplify_optimization_goal)
+
+        # Adicionar metadados (para compatibilidade com logs/debug)
+        df['_source_file'] = 'META_API'
+
+        # Mapear account_id para account_name
+        # A API retorna account_id, precisamos mapear para o nome usado nos relatórios
+        if 'account_id' in df.columns:
+            account_name_map = {
+                '188005769808959': 'Rodolfo Mori',
+                '786790755803474': 'Gestor de IA'
+            }
+            df['_account_name'] = df['account_id'].apply(
+                lambda x: account_name_map.get(str(x).replace('act_', ''), 'Unknown')
+            )
+        else:
+            df['_account_name'] = 'Unknown'
+
+        # IMPORTANTE: Adicionar total_spend para matched pairs (mesmo comportamento que arquivos locais)
+        if 'spend' in df.columns:
+            df['total_spend'] = df['spend']
+
+        return df
 
     def _load_and_consolidate(
         self,

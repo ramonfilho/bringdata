@@ -69,52 +69,46 @@ def create_refined_campaign_map(
     logger.info(f"      Colunas disponíveis: {list(campaigns_df.columns)[:10]}")
     logger.info(f"      Total de linhas: {len(campaigns_df)}")
 
-    # Criar lookup de campaign_id → optimization_goal
-    if 'optimization_goal' in campaigns_df.columns and 'campaign_id' in campaigns_df.columns:
+    # Criar lookup de campaign_id → optimization_goal e campaign_name
+    if 'campaign_id' in campaigns_df.columns:
         # Limpar campaign_id (primeiros 15 dígitos)
         campaigns_df['campaign_id_clean'] = campaigns_df['campaign_id'].astype(str).str[:15]
 
         opt_goal_map = {}
+        campaign_name_map = {}
+
         for idx, row in campaigns_df.iterrows():
             cid = str(row['campaign_id_clean'])
             opt_goal = str(row.get('optimization_goal', ''))
+            campaign_name = str(row.get('campaign_name', ''))
+
             opt_goal_map[cid] = opt_goal
+            campaign_name_map[cid] = campaign_name
     else:
         opt_goal_map = {}
-
-    # IMPORTANTE: Campanhas especiais que não disparam evento Lead padrão
-    # mas usam LeadQualified (configuradas no validation_config.yaml)
-    SPECIAL_EVENTOS_ML_CAMPAIGNS = [
-        '120234062599950',  # "DEVLF | CAP | FRIO | FASE 04 | ADV | ML | S/ ABERTO" - Não dispara Lead, só LeadQualified
-    ]
+        campaign_name_map = {}
 
     # Classificar campanhas ML
+    # REGRA: Se o nome contém "MACHINE LEARNING" → sempre "Eventos ML"
+    # Caso contrário, verificar optimization_goal (LeadQualified/LQHQ)
     for cid in ml_campaign_ids:
         cid_clean = str(cid)[:15]
         opt_goal = opt_goal_map.get(cid_clean, '')
+        campaign_name = campaign_name_map.get(cid_clean, '')
 
-        # Override para campanhas especiais listadas explicitamente
-        if cid_clean in SPECIAL_EVENTOS_ML_CAMPAIGNS:
+        # PRIORIDADE 1: Verificar se nome contém "MACHINE LEARNING"
+        if 'machine learning' in campaign_name.lower():
             refined_map[cid_clean] = 'Eventos ML'
-            logger.info(f"   ✅ Campanha especial forçada como Eventos ML: {cid_clean}")
+            logger.info(f"   ✅ Campanha classificada como Eventos ML (nome contém MACHINE LEARNING): {cid_clean}")
             continue
 
-        # Verificar se usa eventos customizados CAPI
+        # PRIORIDADE 2: Verificar se usa eventos customizados CAPI
         uses_custom_events = any(custom in opt_goal for custom in ['LeadQualified', 'LeadQualifiedHighQuality'])
 
-        # DEBUG: Log das campanhas problemáticas
-        if '120234062599950' in cid_clean or '120234748179990' in cid_clean:
-            logger.info(f"   🔍 DEBUG - Classificando campanha ML:")
-            logger.info(f"      ID (15): {cid_clean}")
-            logger.info(f"      ID (completo): {cid}")
-            logger.info(f"      optimization_goal encontrado: '{opt_goal}'")
-            logger.info(f"      uses_custom_events: {uses_custom_events}")
-            logger.info(f"      Grupo: {'Eventos ML' if uses_custom_events else 'Otimização ML'}")
-
         if uses_custom_events:
-            refined_map[cid_clean] = 'Eventos ML'  # USAR 15 DÍGITOS como chave
+            refined_map[cid_clean] = 'Eventos ML'
         else:
-            refined_map[cid_clean] = 'Otimização ML'  # USAR 15 DÍGITOS como chave
+            refined_map[cid_clean] = 'Otimização ML'
 
     # Classificar campanhas Controle
     logger.info(f"   🔍 DEBUG - Classificando {len(control_campaign_ids)} campanhas Controle:")

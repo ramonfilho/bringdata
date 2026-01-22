@@ -238,15 +238,15 @@ class ValidationReportGenerator:
         #     logger.info("   Gerando aba: Instâncias - Faixa A")
         #     self._write_faixa_a_instances_detail(writer, faixa_a_instances_detail, formats)
 
+        # Aba: ML Monitoring (antes de Detalhes das Conversões)
+        if ml_monitoring_metrics:
+            logger.info("   Gerando aba: ML Monitoring")
+            self._write_ml_monitoring_tab(writer, ml_monitoring_metrics, formats)
+
         # Aba FINAL: Detalhes das Conversões (movida para última posição)
         if sales_df is not None:
             logger.info("   Gerando aba: Detalhes das Conversões")
             self._write_conversions_detail(writer, matched_df, sales_df, formats)
-
-        # Aba: ML Monitoring
-        if ml_monitoring_metrics:
-            logger.info("   Gerando aba: ML Monitoring")
-            self._write_ml_monitoring_tab(writer, ml_monitoring_metrics, formats)
 
         # Salvar Excel
         writer.close()
@@ -2377,11 +2377,9 @@ class ValidationReportGenerator:
         """
         Gera aba ML Monitoring com métricas de performance do modelo.
 
-        Seções:
-        1. AUC Comparison (Test Set vs Production)
-        2. Conversion Rate by Decile (Expected vs Observed)
-        3. Concentration Metrics (Top 3, Top 5)
-        4. Lift by Decile
+        SIMPLIFICADO: Foca apenas em AUC (Area Under Curve).
+        Outras seções foram removidas devido a problemas com thresholds
+        e distribuição desbalanceada do test set.
 
         Args:
             writer: ExcelWriter object
@@ -2392,7 +2390,7 @@ class ValidationReportGenerator:
         row = 0
 
         # Cabeçalho principal
-        worksheet.merge_range(row, 0, row, 5, 'MONITORAMENTO DE PERFORMANCE DO MODELO ML', formats['title'])
+        worksheet.merge_range(row, 0, row, 4, 'MONITORAMENTO DE PERFORMANCE DO MODELO ML', formats['title'])
         row += 1
 
         # Informações do modelo
@@ -2402,10 +2400,16 @@ class ValidationReportGenerator:
         row += 2
 
         # ============================================================
-        # SEÇÃO 1: AUC COMPARISON
+        # SEÇÃO: AUC COMPARISON
         # ============================================================
-        worksheet.merge_range(row, 0, row, 5, 'AUC COMPARISON', formats['subtitle'])
+        worksheet.merge_range(row, 0, row, 4, 'AUC - ÁREA ABAIXO DA CURVA ROC', formats['subtitle'])
         row += 1
+
+        # Explicação
+        worksheet.write(row, 0, 'Métrica de discriminação: capacidade do modelo separar leads que convertem dos que não convertem', formats['text'])
+        row += 1
+        worksheet.write(row, 0, 'Interpretação: 1.0 = perfeito, 0.5 = aleatório, > 0.7 = aceitável', formats['text'])
+        row += 2
 
         # Headers
         auc_headers = ['Métrica', 'Produção', 'Test Set', 'Delta', 'Delta %']
@@ -2442,60 +2446,14 @@ class ValidationReportGenerator:
         row += 3
 
         # ============================================================
-        # SEÇÃO 2: CONVERSION RATE BY DECILE
+        # SEÇÃO: CONCENTRATION METRICS
         # ============================================================
-        worksheet.merge_range(row, 0, row, 5, 'CONVERSION RATE BY DECILE', formats['subtitle'])
+        worksheet.merge_range(row, 0, row, 4, 'CONCENTRAÇÃO DE CONVERSÕES', formats['subtitle'])
         row += 1
 
-        # Headers
-        decile_headers = ['Decil', 'Leads', 'Conversões', 'Taxa Real (%)', 'Taxa Esperada (%)', 'Ratio Real/Esperado']
-        for col, header in enumerate(decile_headers):
-            worksheet.write(row, col, header, formats['header'])
-        row += 1
-
-        # Dados por decil
-        decile_perf = ml_metrics.get('decile_performance', pd.DataFrame())
-
-        if not decile_perf.empty:
-            for idx, decil_row in decile_perf.iterrows():
-                worksheet.write(row, 0, decil_row['decile'], formats['text'])
-                worksheet.write(row, 1, int(decil_row['leads']), formats['number'])
-                worksheet.write(row, 2, int(decil_row['conversions']), formats['number'])
-
-                conv_rate_real = decil_row['conversion_rate_real']
-                conv_rate_expected = decil_row['conversion_rate_expected']
-                ratio = decil_row['ratio']
-
-                # Taxa Real
-                if not np.isnan(conv_rate_real):
-                    worksheet.write(row, 3, conv_rate_real / 100, formats['percent'])
-                else:
-                    worksheet.write(row, 3, 'N/A', formats['text'])
-
-                # Taxa Esperada
-                if not np.isnan(conv_rate_expected):
-                    worksheet.write(row, 4, conv_rate_expected / 100, formats['percent'])
-                else:
-                    worksheet.write(row, 4, 'N/A', formats['text'])
-
-                # Ratio
-                if not np.isnan(ratio):
-                    worksheet.write(row, 5, ratio, formats['decimal'])
-                else:
-                    worksheet.write(row, 5, 'N/A', formats['text'])
-
-                row += 1
-        else:
-            worksheet.write(row, 0, 'Nenhum dado disponível', formats['text'])
-            row += 1
-
+        # Explicação
+        worksheet.write(row, 0, 'Percentual de conversões concentradas nos melhores decis (scores mais altos)', formats['text'])
         row += 2
-
-        # ============================================================
-        # SEÇÃO 3: CONCENTRATION METRICS
-        # ============================================================
-        worksheet.merge_range(row, 0, row, 5, 'CONCENTRATION METRICS', formats['subtitle'])
-        row += 1
 
         # Headers
         conc_headers = ['Métrica', 'Produção (%)', 'Test Set (%)', 'Delta (pp)']
@@ -2528,52 +2486,11 @@ class ValidationReportGenerator:
         worksheet.write(row, 3, top5_delta / 100, formats['percent'])
         row += 3
 
-        # ============================================================
-        # SEÇÃO 4: LIFT BY DECILE
-        # ============================================================
-        worksheet.merge_range(row, 0, row, 5, 'LIFT BY DECILE', formats['subtitle'])
+        # Nota sobre simplificação
+        worksheet.write(row, 0, 'NOTA: Tabelas detalhadas por decil foram removidas devido a problemas com thresholds', formats['text'])
         row += 1
-
-        # Baseline
-        baseline_rate = ml_metrics.get('baseline_conversion_rate', 0)
-        worksheet.write(row, 0, f'Baseline Conversion Rate: {baseline_rate:.2f}%', formats['subtitle'])
-        row += 1
-
-        # Headers
-        lift_headers = ['Decil', 'Leads', 'Conversões', 'Taxa Conversão (%)', 'Lift vs Baseline']
-        for col, header in enumerate(lift_headers):
-            worksheet.write(row, col, header, formats['header'])
-        row += 1
-
-        # Dados de lift
-        lift_by_decile = ml_metrics.get('lift_by_decile', pd.DataFrame())
-
-        if not lift_by_decile.empty:
-            for idx, lift_row in lift_by_decile.iterrows():
-                worksheet.write(row, 0, lift_row['decile'], formats['text'])
-                worksheet.write(row, 1, int(lift_row['leads']), formats['number'])
-                worksheet.write(row, 2, int(lift_row['conversions']), formats['number'])
-
-                conv_rate = lift_row['conversion_rate']
-                lift = lift_row['lift']
-
-                # Taxa de conversão
-                if not np.isnan(conv_rate):
-                    worksheet.write(row, 3, conv_rate / 100, formats['percent'])
-                else:
-                    worksheet.write(row, 3, 'N/A', formats['text'])
-
-                # Lift
-                if not np.isnan(lift):
-                    worksheet.write(row, 4, lift, formats['decimal'])
-                else:
-                    worksheet.write(row, 4, 'N/A', formats['text'])
-
-                row += 1
-        else:
-            worksheet.write(row, 0, 'Nenhum dado disponível', formats['text'])
-            row += 1
+        worksheet.write(row, 0, 'e distribuição desbalanceada do test set. AUC e concentração são as métricas mais confiáveis.', formats['text'])
 
         # Ajustar larguras das colunas
-        worksheet.set_column(0, 0, 30)  # Métrica/Decil
-        worksheet.set_column(1, 5, 20)  # Demais colunas
+        worksheet.set_column(0, 0, 80)  # Coluna de texto
+        worksheet.set_column(1, 4, 15)  # Demais colunas

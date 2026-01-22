@@ -140,8 +140,8 @@ Exemplos de uso:
         '--account-id',
         type=str,
         nargs='+',
-        required=True,
-        help='IDs das contas Meta Ads, separados por espaço (ex: act_123456789 act_987654321)'
+        required=False,
+        help='IDs das contas Meta Ads, separados por espaço (ex: act_123456789 act_987654321). Se não fornecido, usa os IDs do arquivo de configuração.'
     )
 
     # Caminhos
@@ -447,6 +447,9 @@ def main():
     # 1. Parse argumentos
     args = parse_args()
 
+    # DEBUG: Verificar o que foi parseado
+    print(f"🔍 DEBUG IMEDIATO - args.account_id logo após parse: {args.account_id}", flush=True)
+
     # 1.5. Gerenciar cache se solicitado
     if args.clear_cache:
         import shutil
@@ -471,6 +474,21 @@ def main():
         config['max_match_days'] = args.max_match_days
     if args.meta_token:
         config['meta_access_token'] = args.meta_token
+
+    # Account IDs: usar config como fallback se não fornecidos via CLI
+    if not args.account_id:
+        if 'meta_account_ids' in config:
+            # Ler IDs do config e remover prefixo "act_" se presente
+            # (o código adiciona automaticamente depois)
+            config_ids = config['meta_account_ids']
+            args.account_id = [
+                id.replace('act_', '') if isinstance(id, str) and id.startswith('act_') else str(id)
+                for id in config_ids
+            ]
+            logger.info(f"   📊 Usando account IDs do config: {', '.join(args.account_id)}")
+        else:
+            logger.error("❌ Nenhum account ID fornecido via CLI ou config")
+            sys.exit(1)
 
     # Determinar período
     if args.periodo:
@@ -807,6 +825,10 @@ def main():
     # Pode ser controlada via variável de ambiente META_DATA_SOURCE
     data_source = os.environ.get('META_DATA_SOURCE', 'local').lower()
     print(f"📊 Fonte de dados Meta: {data_source.upper()}", flush=True)
+
+    # DEBUG: Verificar args.account_id
+    print(f"🔍 DEBUG - args.account_id: {args.account_id}", flush=True)
+    print(f"🔍 DEBUG - Tipo: {type(args.account_id)}", flush=True)
 
     # Passar account_ids para o loader (necessário no modo API para buscar múltiplas contas)
     loader = MetaReportsLoader(reports_dir, data_source=data_source, account_ids=args.account_id if data_source == 'api' else None)
