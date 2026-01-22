@@ -18,6 +18,7 @@ import logging
 import re
 import os
 import gspread
+import yaml
 from google.auth import default as gauth_default
 
 # Importar funções de normalização existentes
@@ -26,6 +27,40 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.matching.matching_email_telefone import normalizar_email, normalizar_telefone_robusto
 
 logger = logging.getLogger(__name__)
+
+
+def get_active_model_path() -> Path:
+    """
+    Carrega o caminho do modelo ativo do arquivo active_model.yaml.
+
+    Returns:
+        Path completo para o diretório do modelo ativo
+
+    Raises:
+        FileNotFoundError: Se active_model.yaml não existir
+        KeyError: Se estrutura do YAML estiver incorreta
+    """
+    config_path = Path(__file__).parent.parent.parent / "configs" / "active_model.yaml"
+
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Arquivo de configuração não encontrado: {config_path}\n"
+            f"Execute o treinamento com --set-active ou configure manualmente."
+        )
+
+    with open(config_path, 'r', encoding='utf-8') as f:
+        config = yaml.safe_load(f)
+
+    model_path_str = config['active_model']['model_path']
+    model_path = Path(__file__).parent.parent.parent / model_path_str
+
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"Modelo configurado não encontrado: {model_path}\n"
+            f"Configuração em: {config_path}"
+        )
+
+    return model_path
 
 # URL padrão do Google Sheets (pode ser sobrescrito via env var)
 DEFAULT_SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1VYti8jX277VNMkvzrfnJSR_Ko8L1LQFDdMEeD6D8_Vo'
@@ -375,21 +410,21 @@ class LeadDataLoader:
         if self._thresholds_cache is None:
             import json
 
-            # Caminho para o JSON canônico do modelo ativo
-            metadata_path = Path(__file__).parent.parent.parent / \
-                "files" / "20251111_212345" / \
-                "model_metadata_v1_devclub_rf_temporal_single.json"
+            # Carregar modelo ativo do active_model.yaml
+            model_path = get_active_model_path()
+            metadata_path = model_path / "model_metadata_v1_devclub_rf_temporal_leads_single.json"
 
             if not metadata_path.exists():
                 raise FileNotFoundError(
-                    f"Arquivo de metadata do modelo não encontrado: {metadata_path}"
+                    f"Arquivo de metadata do modelo não encontrado: {metadata_path}\n"
+                    f"Modelo ativo configurado em: {model_path}"
                 )
 
             with open(metadata_path, 'r', encoding='utf-8') as f:
                 metadata = json.load(f)
 
             self._thresholds_cache = metadata['decil_thresholds']['thresholds']
-            logger.debug(f"✅ Thresholds carregados do modelo: {len(self._thresholds_cache)} decis")
+            logger.debug(f"✅ Thresholds carregados do modelo ativo: {model_path.name}")
 
         return self._thresholds_cache
 
@@ -397,8 +432,7 @@ class LeadDataLoader:
         """
         Atribui decil baseado no score usando módulo decil_thresholds.
 
-        Usa thresholds do JSON canônico do modelo ativo:
-        V2/files/20251111_212345/model_metadata_v1_devclub_rf_temporal_single.json
+        Usa thresholds do modelo ativo configurado em configs/active_model.yaml
 
         Args:
             score: Lead score (0-1), pode ser string com vírgula

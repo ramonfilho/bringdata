@@ -9,6 +9,7 @@ Gera Excel com 3-4 abas:
 """
 
 import pandas as pd
+import numpy as np
 from typing import Dict, Optional
 from datetime import datetime
 from pathlib import Path
@@ -48,7 +49,8 @@ class ValidationReportGenerator:
         ad_in_matched_adsets_comparisons: Optional[Dict] = None,
         matched_ads_in_matched_adsets_comparisons: Optional[Dict] = None,
         matched_adsets_faixa_a: Optional[pd.DataFrame] = None,
-        faixa_a_instances_detail: Optional[pd.DataFrame] = None
+        faixa_a_instances_detail: Optional[pd.DataFrame] = None,
+        ml_monitoring_metrics: Optional[Dict] = None
     ) -> str:
         """
         Gera relatório Excel completo com 5-6 abas.
@@ -240,6 +242,11 @@ class ValidationReportGenerator:
         if sales_df is not None:
             logger.info("   Gerando aba: Detalhes das Conversões")
             self._write_conversions_detail(writer, matched_df, sales_df, formats)
+
+        # Aba: ML Monitoring
+        if ml_monitoring_metrics:
+            logger.info("   Gerando aba: ML Monitoring")
+            self._write_ml_monitoring_tab(writer, ml_monitoring_metrics, formats)
 
         # Salvar Excel
         writer.close()
@@ -2360,3 +2367,213 @@ class ValidationReportGenerator:
         # Ajustar larguras
         worksheet.set_column(0, 0, 20)  # Categoria/Tipo
         worksheet.set_column(1, len(all_summary_df.columns) - 1, 18)
+
+    def _write_ml_monitoring_tab(
+        self,
+        writer: pd.ExcelWriter,
+        ml_metrics: Dict,
+        formats: Dict
+    ) -> None:
+        """
+        Gera aba ML Monitoring com métricas de performance do modelo.
+
+        Seções:
+        1. AUC Comparison (Test Set vs Production)
+        2. Conversion Rate by Decile (Expected vs Observed)
+        3. Concentration Metrics (Top 3, Top 5)
+        4. Lift by Decile
+
+        Args:
+            writer: ExcelWriter object
+            ml_metrics: Dict com métricas calculadas pelo MLMonitoringCalculator
+            formats: Dict com formatos de célula
+        """
+        worksheet = writer.book.add_worksheet('ML Monitoring')
+        row = 0
+
+        # Cabeçalho principal
+        worksheet.merge_range(row, 0, row, 5, 'MONITORAMENTO DE PERFORMANCE DO MODELO ML', formats['title'])
+        row += 1
+
+        # Informações do modelo
+        model_info = ml_metrics.get('model_info', {})
+        worksheet.write(row, 0, f"Modelo: {model_info.get('model_name', 'N/A')}", formats['subtitle'])
+        worksheet.write(row, 3, f"Treinado em: {model_info.get('trained_at', 'N/A')}", formats['subtitle'])
+        row += 2
+
+        # ============================================================
+        # SEÇÃO 1: AUC COMPARISON
+        # ============================================================
+        worksheet.merge_range(row, 0, row, 5, 'AUC COMPARISON', formats['subtitle'])
+        row += 1
+
+        # Headers
+        auc_headers = ['Métrica', 'Produção', 'Test Set', 'Delta', 'Delta %']
+        for col, header in enumerate(auc_headers):
+            worksheet.write(row, col, header, formats['header'])
+        row += 1
+
+        # Dados AUC
+        auc_data = ml_metrics.get('auc', {})
+        worksheet.write(row, 0, 'AUC', formats['text'])
+
+        auc_prod = auc_data.get('production', np.nan)
+        auc_test = auc_data.get('test_set', np.nan)
+        delta = auc_data.get('delta', np.nan)
+        delta_pct = auc_data.get('delta_pct', np.nan)
+
+        worksheet.write(row, 1, auc_prod if not np.isnan(auc_prod) else 'N/A',
+                       formats['decimal'] if not np.isnan(auc_prod) else formats['text'])
+        worksheet.write(row, 2, auc_test if not np.isnan(auc_test) else 'N/A',
+                       formats['decimal'] if not np.isnan(auc_test) else formats['text'])
+        worksheet.write(row, 3, delta if not np.isnan(delta) else 'N/A',
+                       formats['decimal'] if not np.isnan(delta) else formats['text'])
+
+        if not np.isnan(delta_pct):
+            worksheet.write(row, 4, delta_pct / 100, formats['percent'])
+        else:
+            worksheet.write(row, 4, 'N/A', formats['text'])
+
+        row += 1
+
+        # Leads válidos para cálculo
+        valid_leads = auc_data.get('valid_leads', 0)
+        worksheet.write(row, 0, f'Leads com score válido: {valid_leads:,}', formats['subtitle'])
+        row += 3
+
+        # ============================================================
+        # SEÇÃO 2: CONVERSION RATE BY DECILE
+        # ============================================================
+        worksheet.merge_range(row, 0, row, 5, 'CONVERSION RATE BY DECILE', formats['subtitle'])
+        row += 1
+
+        # Headers
+        decile_headers = ['Decil', 'Leads', 'Conversões', 'Taxa Real (%)', 'Taxa Esperada (%)', 'Ratio Real/Esperado']
+        for col, header in enumerate(decile_headers):
+            worksheet.write(row, col, header, formats['header'])
+        row += 1
+
+        # Dados por decil
+        decile_perf = ml_metrics.get('decile_performance', pd.DataFrame())
+
+        if not decile_perf.empty:
+            for idx, decil_row in decile_perf.iterrows():
+                worksheet.write(row, 0, decil_row['decile'], formats['text'])
+                worksheet.write(row, 1, int(decil_row['leads']), formats['number'])
+                worksheet.write(row, 2, int(decil_row['conversions']), formats['number'])
+
+                conv_rate_real = decil_row['conversion_rate_real']
+                conv_rate_expected = decil_row['conversion_rate_expected']
+                ratio = decil_row['ratio']
+
+                # Taxa Real
+                if not np.isnan(conv_rate_real):
+                    worksheet.write(row, 3, conv_rate_real / 100, formats['percent'])
+                else:
+                    worksheet.write(row, 3, 'N/A', formats['text'])
+
+                # Taxa Esperada
+                if not np.isnan(conv_rate_expected):
+                    worksheet.write(row, 4, conv_rate_expected / 100, formats['percent'])
+                else:
+                    worksheet.write(row, 4, 'N/A', formats['text'])
+
+                # Ratio
+                if not np.isnan(ratio):
+                    worksheet.write(row, 5, ratio, formats['decimal'])
+                else:
+                    worksheet.write(row, 5, 'N/A', formats['text'])
+
+                row += 1
+        else:
+            worksheet.write(row, 0, 'Nenhum dado disponível', formats['text'])
+            row += 1
+
+        row += 2
+
+        # ============================================================
+        # SEÇÃO 3: CONCENTRATION METRICS
+        # ============================================================
+        worksheet.merge_range(row, 0, row, 5, 'CONCENTRATION METRICS', formats['subtitle'])
+        row += 1
+
+        # Headers
+        conc_headers = ['Métrica', 'Produção (%)', 'Test Set (%)', 'Delta (pp)']
+        for col, header in enumerate(conc_headers):
+            worksheet.write(row, col, header, formats['header'])
+        row += 1
+
+        # Dados de concentração
+        concentration = ml_metrics.get('concentration', {})
+
+        # Top 3 Decis
+        top3_prod = concentration.get('top3_production', 0)
+        top3_test = concentration.get('top3_test_set', 0)
+        top3_delta = top3_prod - top3_test
+
+        worksheet.write(row, 0, 'Top 3 Decis (D8, D9, D10)', formats['text'])
+        worksheet.write(row, 1, top3_prod / 100, formats['percent'])
+        worksheet.write(row, 2, top3_test / 100, formats['percent'])
+        worksheet.write(row, 3, top3_delta / 100, formats['percent'])
+        row += 1
+
+        # Top 5 Decis
+        top5_prod = concentration.get('top5_production', 0)
+        top5_test = concentration.get('top5_test_set', 0)
+        top5_delta = top5_prod - top5_test
+
+        worksheet.write(row, 0, 'Top 5 Decis (D6-D10)', formats['text'])
+        worksheet.write(row, 1, top5_prod / 100, formats['percent'])
+        worksheet.write(row, 2, top5_test / 100, formats['percent'])
+        worksheet.write(row, 3, top5_delta / 100, formats['percent'])
+        row += 3
+
+        # ============================================================
+        # SEÇÃO 4: LIFT BY DECILE
+        # ============================================================
+        worksheet.merge_range(row, 0, row, 5, 'LIFT BY DECILE', formats['subtitle'])
+        row += 1
+
+        # Baseline
+        baseline_rate = ml_metrics.get('baseline_conversion_rate', 0)
+        worksheet.write(row, 0, f'Baseline Conversion Rate: {baseline_rate:.2f}%', formats['subtitle'])
+        row += 1
+
+        # Headers
+        lift_headers = ['Decil', 'Leads', 'Conversões', 'Taxa Conversão (%)', 'Lift vs Baseline']
+        for col, header in enumerate(lift_headers):
+            worksheet.write(row, col, header, formats['header'])
+        row += 1
+
+        # Dados de lift
+        lift_by_decile = ml_metrics.get('lift_by_decile', pd.DataFrame())
+
+        if not lift_by_decile.empty:
+            for idx, lift_row in lift_by_decile.iterrows():
+                worksheet.write(row, 0, lift_row['decile'], formats['text'])
+                worksheet.write(row, 1, int(lift_row['leads']), formats['number'])
+                worksheet.write(row, 2, int(lift_row['conversions']), formats['number'])
+
+                conv_rate = lift_row['conversion_rate']
+                lift = lift_row['lift']
+
+                # Taxa de conversão
+                if not np.isnan(conv_rate):
+                    worksheet.write(row, 3, conv_rate / 100, formats['percent'])
+                else:
+                    worksheet.write(row, 3, 'N/A', formats['text'])
+
+                # Lift
+                if not np.isnan(lift):
+                    worksheet.write(row, 4, lift, formats['decimal'])
+                else:
+                    worksheet.write(row, 4, 'N/A', formats['text'])
+
+                row += 1
+        else:
+            worksheet.write(row, 0, 'Nenhum dado disponível', formats['text'])
+            row += 1
+
+        # Ajustar larguras das colunas
+        worksheet.set_column(0, 0, 30)  # Métrica/Decil
+        worksheet.set_column(1, 5, 20)  # Demais colunas

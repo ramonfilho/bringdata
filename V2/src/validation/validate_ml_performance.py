@@ -33,7 +33,7 @@ from tabulate import tabulate
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Imports dos módulos de validação
-from src.validation.data_loader import LeadDataLoader, SalesDataLoader, CAPILeadDataLoader
+from src.validation.data_loader import LeadDataLoader, SalesDataLoader, CAPILeadDataLoader, get_active_model_path
 from src.validation.campaign_classifier import add_ml_classification
 from src.validation.matching import (
     match_leads_to_sales,
@@ -51,6 +51,7 @@ from src.validation.report_generator import ValidationReportGenerator
 from src.validation.visualization import ValidationVisualizer
 from src.validation.period_calculator import PeriodCalculator
 from src.validation.meta_reports_loader import MetaReportsLoader
+from src.validation.ml_monitoring_calculator import MLMonitoringCalculator
 
 # Imports de integrações existentes
 from api.meta_integration import MetaAdsIntegration
@@ -160,6 +161,12 @@ Exemplos de uso:
         '--output-dir',
         type=str,
         help='Diretório de saída (default: files/validation/resultados/)'
+    )
+
+    parser.add_argument(
+        '--ml-monitoring-output',
+        type=str,
+        help='Diretório alternativo para relatórios ML Monitoring (se não especificado, usa --output-dir)'
     )
 
     # Configurações
@@ -490,7 +497,12 @@ def main():
 
     # Determinar caminhos
     vendas_path = args.vendas_path or config['paths']['vendas']
-    output_dir = args.output_dir or 'files/validation/resultados'
+
+    # Usar ml-monitoring-output se especificado, senão usar output-dir padrão
+    if args.ml_monitoring_output:
+        output_dir = args.ml_monitoring_output
+    else:
+        output_dir = args.output_dir or 'files/validation/resultados'
 
     logger.info(f"   Vendas: {vendas_path}")
     logger.info(f"   Output: {output_dir}")
@@ -1109,6 +1121,30 @@ def main():
     )
     logger.info(f"   ✅ Performance calculada para todos os decis (D1-D10)")
 
+    # ML Model Performance Monitoring
+    print(flush=True)
+    print("📊 CALCULANDO MÉTRICAS DE MONITORAMENTO DO MODELO...", flush=True)
+    print(flush=True)
+
+    # Carregar modelo ativo do active_model.yaml
+    active_model_path = get_active_model_path()
+    model_metadata_path = str(active_model_path / "model_metadata_v1_devclub_rf_temporal_leads_single.json")
+
+    ml_monitoring_calc = MLMonitoringCalculator(
+        model_metadata_path=model_metadata_path
+    )
+
+    ml_monitoring_metrics = ml_monitoring_calc.calculate_all_metrics(
+        matched_df=matched_df
+    )
+
+    # Log resumo no console
+    logger.info(f"📈 AUC Produção: {ml_monitoring_metrics['auc']['production']:.4f} "
+               f"(Test Set: {ml_monitoring_metrics['auc']['test_set']:.4f})")
+    logger.info(f"📊 Top 3 Decis: {ml_monitoring_metrics['concentration']['top3_production']:.1f}% "
+               f"(Test Set: {ml_monitoring_metrics['concentration']['top3_test_set']:.1f}%)")
+    print(flush=True)
+
     # Comparação ML
     ml_comparison = compare_ml_vs_non_ml(campaign_metrics) if len(campaign_metrics) > 0 else None
 
@@ -1505,7 +1541,8 @@ def main():
         ad_in_matched_adsets_comparisons=ad_in_matched_adsets_comparisons,
         matched_ads_in_matched_adsets_comparisons=matched_ads_in_matched_adsets_comparisons,
         matched_adsets_faixa_a=matched_adsets_faixa_a,
-        faixa_a_instances_detail=faixa_a_instances_detail
+        faixa_a_instances_detail=faixa_a_instances_detail,
+        ml_monitoring_metrics=ml_monitoring_metrics
     )
     print(f"   ✅ Excel salvo: {excel_path}", flush=True)
     print(flush=True)
