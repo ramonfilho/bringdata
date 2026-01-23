@@ -328,6 +328,113 @@ class MonitoringOrchestrator:
             logger.warning(f"⚠️  Erro ao contar aba 2: {e}")
             return 0
 
+    def _calculate_lead_quality_metrics(self) -> Dict:
+        """
+        Calcula métricas de qualidade dos leads em diferentes períodos.
+
+        Acessa Google Sheets e calcula:
+        - Score Médio (Histórico, Último mês, Última semana, Últimas 24h)
+        - % em D9 (4 períodos)
+        - % em D10 (4 períodos)
+
+        Returns:
+            Dict com métricas por período
+        """
+        import gspread
+        from google.auth import default as gauth_default
+        from datetime import datetime, timedelta, timezone
+
+        try:
+            # Importar URL da planilha
+            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../api'))
+            from app import GOOGLE_SHEETS_URL
+
+            if not GOOGLE_SHEETS_URL:
+                logger.warning("⚠️ GOOGLE_SHEETS_URL não configurado")
+                return {}
+
+            # Autenticar
+            scopes = [
+                'https://www.googleapis.com/auth/spreadsheets.readonly',
+                'https://www.googleapis.com/auth/drive.readonly'
+            ]
+            creds, _ = gauth_default(scopes=scopes)
+            gc = gspread.authorize(creds)
+
+            # Abrir primeira aba
+            spreadsheet = gc.open_by_url(GOOGLE_SHEETS_URL)
+            worksheet = spreadsheet.get_worksheet(0)
+
+            # Pegar todos os dados
+            valores = worksheet.get_all_values()
+            if len(valores) <= 1:
+                return {}
+
+            headers = valores[0]
+            dados = valores[1:]
+            df = pd.DataFrame(dados, columns=headers)
+
+            # Filtrar leads válidos (com decil e score)
+            df_valid = df[
+                (df['decil'].notna()) &
+                (df['decil'] != '') &
+                (df['decil'] != 'MODELO 6 ML') &
+                (df['lead_score'].notna()) &
+                (df['lead_score'] != '')
+            ].copy()
+
+            if len(df_valid) == 0:
+                return {}
+
+            # Converter score para float
+            df_valid['lead_score_float'] = df_valid['lead_score'].str.replace(',', '.').astype(float)
+
+            # Parsear data
+            df_valid['data_parsed'] = pd.to_datetime(df_valid['Data'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
+            df_with_date = df_valid[df_valid['data_parsed'].notna()].copy()
+
+            if len(df_with_date) == 0:
+                return {}
+
+            # Definir períodos
+            now = datetime.now()
+            last_24h = now - timedelta(days=1)
+            last_week = now - timedelta(days=7)
+            last_month = now - timedelta(days=30)
+
+            # Filtrar por período
+            df_24h = df_with_date[df_with_date['data_parsed'] >= last_24h]
+            df_week = df_with_date[df_with_date['data_parsed'] >= last_week]
+            df_month = df_with_date[df_with_date['data_parsed'] >= last_month]
+            df_all = df_with_date
+
+            # Calcular métricas
+            def calc_metrics(df_period):
+                if len(df_period) == 0:
+                    return {'score': 0, 'd9': 0, 'd10': 0, 'count': 0}
+
+                score_mean = df_period['lead_score_float'].mean()
+                d9_pct = (df_period['decil'] == 'D09').sum() / len(df_period) * 100
+                d10_pct = (df_period['decil'] == 'D10').sum() / len(df_period) * 100
+
+                return {
+                    'score': score_mean,
+                    'd9': d9_pct,
+                    'd10': d10_pct,
+                    'count': len(df_period)
+                }
+
+            return {
+                'historico': calc_metrics(df_all),
+                'ultimo_mes': calc_metrics(df_month),
+                'ultima_semana': calc_metrics(df_week),
+                'ultimas_24h': calc_metrics(df_24h)
+            }
+
+        except Exception as e:
+            logger.warning(f"⚠️ Erro ao calcular métricas de qualidade: {e}")
+            return {}
+
     def _generate_critical_summary(self, alerts: List[Alert], funnel_metrics: Dict) -> str:
         """
         Gera sumário crítico consolidado do sistema.
@@ -474,6 +581,49 @@ class MonitoringOrchestrator:
         response_rate = capture.get('response_rate', 0)
         lines.append(f"\n10. Taxa de Resposta:")
         lines.append(f"    - Resposta pesquisa: {response_rate:.1f}%")
+
+        # 11. Qualidade dos Leads
+        quality_metrics = self._calculate_lead_quality_metrics()
+        if quality_metrics:
+            lines.append(f"\n11. Qualidade dos Leads:")
+            lines.append(f"    ")
+            lines.append(f"    📊 Score Médio:")
+
+            hist = quality_metrics.get('historico', {})
+            mes = quality_metrics.get('ultimo_mes', {})
+            semana = quality_metrics.get('ultima_semana', {})
+            dia = quality_metrics.get('ultimas_24h', {})
+
+            if hist.get('count', 0) > 0:
+                lines.append(f"       Histórico:      {hist['score']:.4f}")
+            if mes.get('count', 0) > 0:
+                lines.append(f"       Último mês:     {mes['score']:.4f}")
+            if semana.get('count', 0) > 0:
+                lines.append(f"       Última semana:  {semana['score']:.4f}")
+            if dia.get('count', 0) > 0:
+                lines.append(f"       Últimas 24h:    {dia['score']:.4f}")
+
+            lines.append(f"    ")
+            lines.append(f"    📊 % em D9:")
+            if hist.get('count', 0) > 0:
+                lines.append(f"       Histórico:      {hist['d9']:.2f}%")
+            if mes.get('count', 0) > 0:
+                lines.append(f"       Último mês:     {mes['d9']:.2f}%")
+            if semana.get('count', 0) > 0:
+                lines.append(f"       Última semana:  {semana['d9']:.2f}%")
+            if dia.get('count', 0) > 0:
+                lines.append(f"       Últimas 24h:    {dia['d9']:.2f}%")
+
+            lines.append(f"    ")
+            lines.append(f"    📊 % em D10:")
+            if hist.get('count', 0) > 0:
+                lines.append(f"       Histórico:      {hist['d10']:.2f}%")
+            if mes.get('count', 0) > 0:
+                lines.append(f"       Último mês:     {mes['d10']:.2f}%")
+            if semana.get('count', 0) > 0:
+                lines.append(f"       Última semana:  {semana['d10']:.2f}%")
+            if dia.get('count', 0) > 0:
+                lines.append(f"       Últimas 24h:    {dia['d10']:.2f}%")
 
         lines.append("\n" + "="*72)
 
