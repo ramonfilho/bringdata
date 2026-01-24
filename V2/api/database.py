@@ -140,7 +140,35 @@ def get_database_url() -> str:
     if db_host and db_password:
         return f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 
-    # Opção 4: Fallback SQLite (desenvolvimento/testes)
+    # Opção 4: BLOQUEADO - SQLite não é permitido em produção
+    # Se chegou aqui, nenhuma configuração de PostgreSQL foi encontrada
+    environment = os.getenv('ENVIRONMENT', 'development')
+
+    if environment == 'production':
+        # PRODUÇÃO: BLOQUEAR DEPLOY SEM POSTGRESQL
+        logger.critical("=" * 80)
+        logger.critical("🚨 DEPLOY BLOQUEADO - CONFIGURAÇÃO DE BANCO DE DADOS AUSENTE 🚨")
+        logger.critical("=" * 80)
+        logger.critical("")
+        logger.critical("NENHUMA das seguintes variáveis de ambiente foi encontrada:")
+        logger.critical("  ❌ DATABASE_URL")
+        logger.critical("  ❌ CLOUD_SQL_CONNECTION_NAME")
+        logger.critical("  ❌ DB_HOST + DB_PASSWORD")
+        logger.critical("")
+        logger.critical("SQLite NÃO É PERMITIDO EM PRODUÇÃO!")
+        logger.critical("Todos os dados de leads CAPI serão PERDIDOS a cada deploy com SQLite.")
+        logger.critical("")
+        logger.critical("SOLUÇÃO:")
+        logger.critical("Configure Cloud SQL no deploy.sh ou adicione variáveis de ambiente:")
+        logger.critical("  --update-env-vars=\"CLOUD_SQL_CONNECTION_NAME=smart-ads-451319:us-central1:smart-ads-db,DB_NAME=smart_ads,DB_USER=postgres,DB_PASSWORD=<senha>\"")
+        logger.critical("")
+        logger.critical("=" * 80)
+        raise RuntimeError(
+            "🚨 DEPLOY BLOQUEADO: PostgreSQL não configurado. "
+            "SQLite não é permitido em produção devido a perda de dados em deploys."
+        )
+
+    # DESENVOLVIMENTO: Avisar mas permitir SQLite
     logger.warning("⚠️ Usando SQLite (desenvolvimento) - Configure PostgreSQL para produção!")
     logger.warning("⚠️ DADOS SERÃO PERDIDOS A CADA DEPLOY! Configure CLOUD_SQL_CONNECTION_NAME.")
     return "sqlite:////tmp/smart_ads_dev.db"

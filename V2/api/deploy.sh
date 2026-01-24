@@ -14,6 +14,13 @@
 #   5. Rollback automático em caso de falha
 #   6. Relatório detalhado
 #
+# ⚠️  CRÍTICO - PROTEÇÃO CONTRA PERDA DE DADOS:
+#   Este script configura OBRIGATORIAMENTE as variáveis de ambiente do PostgreSQL.
+#   SEM essas variáveis, a API cai no fallback SQLite e TODOS os leads CAPI são
+#   PERDIDOS a cada deploy (SQLite fica em /tmp/ que é destruído).
+#
+#   NUNCA remova as linhas de --update-env-vars e --add-cloudsql-instances!
+#
 # =============================================================================
 
 set -e  # Exit on error
@@ -39,7 +46,7 @@ GCR_REGISTRY="gcr.io"
 # Configurações do Container
 MEMORY="2Gi"
 CPU="2"
-TIMEOUT="120"
+TIMEOUT="600"  # 10 minutos para validação
 MIN_INSTANCES="1"
 MAX_INSTANCES="100"
 CONCURRENCY="80"
@@ -231,6 +238,21 @@ validate_prerequisites() {
         print_warning "Nenhuma revisão anterior encontrada (primeiro deploy?)"
     fi
 
+    # 1.10 Verificar Cloud SQL (CRÍTICO - evita perda de dados)
+    print_info "Verificando Cloud SQL..."
+    CLOUD_SQL_STATUS=$(gcloud sql instances describe smart-ads-db \
+        --format="value(state)" 2>/dev/null || echo "NOT_FOUND")
+
+    if [ "$CLOUD_SQL_STATUS" = "RUNNABLE" ]; then
+        print_success "Cloud SQL está rodando (smart-ads-db)"
+    elif [ "$CLOUD_SQL_STATUS" = "NOT_FOUND" ]; then
+        print_error "Cloud SQL instance 'smart-ads-db' não encontrada!"
+        print_error "Deploy BLOQUEADO - sem Cloud SQL, todos os dados serão perdidos"
+        exit 1
+    else
+        print_warning "Cloud SQL em estado: $CLOUD_SQL_STATUS"
+    fi
+
     echo ""
 }
 
@@ -306,6 +328,32 @@ deploy_to_cloud_run() {
         AUTH_FLAG="--allow-unauthenticated"
     fi
 
+    # Configurar variáveis de ambiente (CRITICAL - NÃO REMOVER!)
+    # Sem essas variáveis, a API usa SQLite e PERDE TODOS OS DADOS a cada deploy
+    print_info "Configurando variáveis de ambiente..."
+    ENV_VARS="ENVIRONMENT=production"
+    ENV_VARS="$ENV_VARS,CLOUD_SQL_CONNECTION_NAME=smart-ads-451319:us-central1:smart-ads-db"
+    ENV_VARS="$ENV_VARS,DB_NAME=smart_ads"
+    ENV_VARS="$ENV_VARS,DB_USER=postgres"
+    ENV_VARS="$ENV_VARS,DB_PASSWORD=SmartAds2026DB!"
+    ENV_VARS="$ENV_VARS,META_DATA_SOURCE=api"
+    ENV_VARS="$ENV_VARS,VALIDATION_REPORTS_BUCKET=smart-ads-validation-reports"
+
+    # Obter META_ACCESS_TOKEN da revisão atual (se existir)
+    CURRENT_META_TOKEN=$(gcloud run services describe $SERVICE_NAME \
+        --region=$REGION \
+        --format="value(spec.template.spec.containers[0].env[?name=='META_ACCESS_TOKEN'].value)" \
+        2>/dev/null || echo "")
+
+    if [ -n "$CURRENT_META_TOKEN" ]; then
+        ENV_VARS="$ENV_VARS,META_ACCESS_TOKEN=$CURRENT_META_TOKEN"
+        print_success "META_ACCESS_TOKEN preservado da revisão anterior"
+    else
+        print_warning "META_ACCESS_TOKEN não encontrado - configure manualmente se necessário"
+    fi
+
+    print_success "Variáveis de ambiente configuradas"
+
     gcloud run deploy $SERVICE_NAME \
         --image "$IMAGE_TO_DEPLOY" \
         --platform managed \
@@ -316,6 +364,8 @@ deploy_to_cloud_run() {
         --min-instances $MIN_INSTANCES \
         --max-instances $MAX_INSTANCES \
         --concurrency $CONCURRENCY \
+        --update-env-vars="$ENV_VARS" \
+        --add-cloudsql-instances="smart-ads-451319:us-central1:smart-ads-db" \
         $AUTH_FLAG \
         --quiet || {
             print_error "Falha no deploy para Cloud Run"
