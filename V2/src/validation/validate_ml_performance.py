@@ -530,6 +530,7 @@ def main():
 
     # 3. Carregar dados
     print("📂 CARREGANDO DADOS...", flush=True)
+    print(f"🔍 DEBUG: Timestamp início carregamento: {datetime.now().strftime('%H:%M:%S')}", flush=True)
     print(flush=True)
 
     # Leads - PADRÃO: Google Sheets (produção), FALLBACK: CSV se --leads-path fornecido
@@ -564,11 +565,14 @@ def main():
         use_cache = not args.no_cache
 
         # Carregar Pesquisa do Google Sheets (carrega AMBAS as abas)
+        print(f"🔍 DEBUG: ANTES de load_leads_from_sheets - {datetime.now().strftime('%H:%M:%S')}", flush=True)
+        print(f"🔍 DEBUG: Parâmetros: start={start_date}, end={end_date}, cache={use_cache}", flush=True)
         survey_df = lead_loader.load_leads_from_sheets(
             start_date=start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d'),
             end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d'),
             use_cache=use_cache
         )
+        print(f"🔍 DEBUG: DEPOIS de load_leads_from_sheets - {datetime.now().strftime('%H:%M:%S')}", flush=True)
         logger.info(f"   ✅ {len(survey_df)} leads da pesquisa carregados do Google Sheets")
 
         survey_emails = set(survey_df['email'].unique())
@@ -581,6 +585,7 @@ def main():
         import re
 
         logger.info("   🔍 Buscando leads no CAPI...")
+        print(f"🔍 DEBUG: ANTES de buscar CAPI - {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
         try:
             # Usar localhost se rodando dentro do container (chamado via endpoint /validation/weekly)
@@ -592,6 +597,7 @@ def main():
 
             url = f"{API_URL}/webhook/lead_capture/recent?start_date={start_str}&end_date={end_str}&limit=10000"
             logger.info(f"   📡 URL CAPI: {url}")
+            print(f"🔍 DEBUG: Iniciando subprocess.run do curl - {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
             result_curl = subprocess.run(
                 ['curl', '-s', '--max-time', '30', url],
@@ -600,10 +606,15 @@ def main():
                 timeout=35
             )
 
+            print(f"🔍 DEBUG: DEPOIS do subprocess.run do curl - {datetime.now().strftime('%H:%M:%S')}", flush=True)
+            print(f"🔍 DEBUG: Return code do curl: {result_curl.returncode}", flush=True)
+
             if result_curl.returncode == 0:
+                print(f"🔍 DEBUG: Curl sucesso, parsing JSON - {datetime.now().strftime('%H:%M:%S')}", flush=True)
                 result = json_module.loads(result_curl.stdout)
                 capi_leads_data = result.get('leads', [])
 
+                print(f"🔍 DEBUG: JSON parsed com sucesso - {datetime.now().strftime('%H:%M:%S')}", flush=True)
                 logger.info(f"   📊 CAPI: {len(capi_leads_data)} leads encontrados")
 
                 if capi_leads_data:
@@ -697,6 +708,7 @@ def main():
         logger.info(f"   📊 Estatísticas: {lead_source_stats['survey_leads']} pesquisa + {lead_source_stats['capi_leads_extras']} CAPI extras")
 
     # Vendas
+    print(f"🔍 DEBUG: Iniciando carregamento de VENDAS - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     sales_loader = SalesDataLoader()
 
     # Configuração de fonte de dados Guru: "local" (arquivos) ou "api" (Guru API)
@@ -748,6 +760,7 @@ def main():
         sys.exit(1)
 
     logger.info(f"   ✅ {len(sales_df)} vendas carregadas (Guru + TMB)")
+    print(f"🔍 DEBUG: Vendas carregadas com sucesso - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     print(flush=True)
 
     # 4. Filtrar por período
@@ -801,8 +814,10 @@ def main():
 
     # 5. Classificar campanhas
     print("🏷️ CLASSIFICANDO CAMPANHAS...", flush=True)
+    print(f"🔍 DEBUG: Iniciando classificação - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     print(flush=True)
     leads_df, excluded_count = add_ml_classification(leads_df, campaign_col='campaign')
+    print(f"🔍 DEBUG: Classificação concluída - {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
     com_ml_count = len(leads_df[leads_df['ml_type'] == 'COM_ML'])
     sem_ml_count = len(leads_df[leads_df['ml_type'] == 'SEM_ML'])
@@ -812,6 +827,7 @@ def main():
 
     # 5.5. Carregar relatórios Meta para criar grupos de comparação refinados
     print("💰 CARREGANDO RELATÓRIOS META PARA CLASSIFICAÇÃO...", flush=True)
+    print(f"🔍 DEBUG: Iniciando carregamento Meta Reports - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     print(flush=True)
 
     # Carregar relatórios Meta locais ou via API
@@ -835,11 +851,15 @@ def main():
 
     # Passar account_ids para o loader (necessário no modo API para buscar múltiplas contas)
     loader = MetaReportsLoader(reports_dir, data_source=data_source, account_ids=args.account_id if data_source == 'api' else None)
+    print(f"🔍 DEBUG: ANTES de build_costs_hierarchy - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     costs_hierarchy_temp = loader.build_costs_hierarchy(start_date, end_date)
+    print(f"🔍 DEBUG: DEPOIS de build_costs_hierarchy - {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
     # Obter DataFrame de campanhas
+    print(f"🔍 DEBUG: ANTES de load_all_reports - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     reports = loader.load_all_reports(start_date, end_date)
     campaigns_df = reports.get('campaigns', pd.DataFrame())
+    print(f"🔍 DEBUG: DEPOIS de load_all_reports - {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
     # 5.6. Criar grupos de comparação REFINADOS (distingue Eventos ML vs Otimização ML)
     print("🎯 CRIANDO GRUPOS DE COMPARAÇÃO...", flush=True)
@@ -934,12 +954,14 @@ def main():
 
     # 6. Matching
     print("🔗 VINCULANDO LEADS COM VENDAS...", flush=True)
+    print(f"🔍 DEBUG: Iniciando matching - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     print(flush=True)
     matched_df = match_leads_to_sales(
         leads_df,
         sales_df,
         use_temporal_validation=False  # Results analysis mode - match against full history
     )
+    print(f"🔍 DEBUG: Matching concluído - {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
     # INVESTIGAÇÃO: Onde estão as vendas que não fizeram match?
     print("\n" + "="*80)
@@ -1588,6 +1610,7 @@ def main():
     end_time = time.time()
     elapsed_time = end_time - start_time
 
+    print(f"🔍 DEBUG: Chegou ao fim da função main - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     print("=" * 80, flush=True)
     print("✅ VALIDAÇÃO CONCLUÍDA COM SUCESSO!", flush=True)
     print("=" * 80, flush=True)
