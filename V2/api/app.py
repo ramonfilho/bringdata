@@ -2429,6 +2429,299 @@ async def daily_monitoring_check(
         raise HTTPException(status_code=500, detail=f"Erro no monitoramento: {str(e)}")
 
 
+# =============================================================================
+# VALIDAÇÃO SEMANAL
+# =============================================================================
+
+@app.get("/validation/test")
+async def test_validation_dependencies():
+    """
+    Testa rapidamente se todas as dependências para validação estão OK.
+    Retorna em segundos, não minutos.
+    """
+    try:
+        errors = []
+        warnings = []
+
+        # 1. Testar imports críticos
+        try:
+            from src.validation.period_calculator import PeriodCalculator
+            from src.validation.slack_notifier import ValidationSlackNotifier
+            import matplotlib.pyplot as plt
+            import seaborn as sns
+            from tabulate import tabulate
+            import openpyxl
+            import xlsxwriter
+        except ImportError as e:
+            errors.append(f"Import failed: {str(e)}")
+
+        # 2. Testar paths críticos
+        from pathlib import Path
+        script_path = Path(__file__).parent.parent / 'src' / 'validation' / 'validate_ml_performance.py'
+        if not script_path.exists():
+            errors.append(f"Script not found: {script_path}")
+
+        vendas_dir = Path(__file__).parent.parent / 'vendas'
+        if not vendas_dir.exists():
+            warnings.append(f"Vendas dir not found: {vendas_dir}")
+
+        # 3. Testar env vars
+        meta_source = os.getenv('META_DATA_SOURCE', 'local')
+        bucket_name = os.getenv('VALIDATION_REPORTS_BUCKET', 'smart-ads-validation-reports')
+
+        # 4. Testar Cloud Storage
+        try:
+            from google.cloud import storage
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(bucket_name)
+            if not bucket.exists():
+                warnings.append(f"Bucket doesn't exist: {bucket_name}")
+        except Exception as e:
+            warnings.append(f"Cloud Storage test failed: {str(e)}")
+
+        # 5. Testar cálculo de datas
+        from datetime import datetime, timedelta
+        today = datetime.now()
+        test_monday = today - timedelta(days=today.weekday() + 28)
+
+        return {
+            "status": "error" if errors else "ok",
+            "errors": errors,
+            "warnings": warnings,
+            "config": {
+                "meta_data_source": meta_source,
+                "bucket": bucket_name,
+                "script_exists": script_path.exists(),
+                "test_date_calc": test_monday.strftime('%Y-%m-%d')
+            },
+            "dependencies_ok": len(errors) == 0
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "errors": [str(e)],
+            "dependencies_ok": False
+        }
+
+
+@app.post("/validation/weekly")
+async def execute_weekly_validation(db: Session = Depends(get_db)):
+    """
+    Executa validação semanal do modelo ML.
+
+    - Calcula período automaticamente (semana anterior)
+    - Executa validate_ml_performance.py com flags apropriadas
+    - Faz upload do Excel para Cloud Storage
+    - Envia sumário para Slack
+
+    Chamado automaticamente por Cloud Scheduler toda segunda-feira às 10h.
+    """
+    import subprocess
+    from pathlib import Path
+    from datetime import timedelta
+    from google.cloud import storage
+    from src.validation.period_calculator import PeriodCalculator
+    from src.validation.slack_notifier import ValidationSlackNotifier
+
+    try:
+        from datetime import datetime
+        today = datetime.now()
+
+        logger.info("🚀 Iniciando validação semanal...")
+
+        # TEMPORÁRIO: Testando com Campanha Atípica 1 (16/12/2025 - 25/01/2026)
+        # TODO: Voltar para cálculo automático depois do teste
+        start_date = '2025-12-16'
+        end_date = '2026-01-12'
+        sales_start = '2026-01-19'
+        sales_end = '2026-01-25'
+
+        logger.info(f"📅 TESTE Campanha Atípica 1: captação={start_date} a {end_date}, vendas={sales_start} a {sales_end}")
+
+        # 2. Executar script de validação
+        script_path = Path(__file__).parent.parent / 'src' / 'validation' / 'validate_ml_performance.py'
+
+        cmd = [
+            'python',
+            str(script_path),
+            '--start-date', start_date,
+            '--end-date', end_date,
+            '--sales-start-date', sales_start,
+            '--sales-end-date', sales_end
+        ]
+
+        # Configurar environment variables
+        env = os.environ.copy()
+        env['GURU_DATA_SOURCE'] = 'api'
+        env['META_DATA_SOURCE'] = os.getenv('META_DATA_SOURCE', 'local')  # local para testes, api para produção
+        env['INTERNAL_API_URL'] = 'http://localhost:8080'  # Script usa localhost para acessar a própria API
+
+        logger.info(f"🔧 Executando validação (GURU=api, META={env['META_DATA_SOURCE']})...")
+        logger.info(f"🔧 Comando: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            cwd=Path(__file__).parent.parent,
+            env=env,
+            timeout=600  # 10 minutos timeout
+        )
+
+        # Log do output para debug
+        if result.stdout:
+            logger.info(f"📋 Script output:\n{result.stdout[:1000]}")  # Primeiros 1000 chars
+        if result.stderr:
+            logger.warning(f"⚠️ Script stderr:\n{result.stderr[:1000]}")
+
+        if result.returncode != 0:
+            error_msg = f"Script falhou (exit code {result.returncode}):\n{result.stderr}"
+            logger.error(f"❌ {error_msg}")
+
+            # Notificar erro no Slack
+            notifier = ValidationSlackNotifier()
+            notifier.send_error_notification(
+                error_message=error_msg,
+                period={'start': start_date, 'sales_start': sales_start, 'sales_end': sales_end}
+            )
+
+            raise HTTPException(status_code=500, detail=error_msg)
+
+        logger.info("✅ Script de validação executado com sucesso")
+
+        # 3. Encontrar Excel gerado
+        results_dir = Path(__file__).parent.parent / 'files' / 'validation' / 'resultados'
+        excel_files = sorted(results_dir.glob('validation_report_*.xlsx'), key=lambda p: p.stat().st_mtime)
+
+        if not excel_files:
+            raise HTTPException(status_code=500, detail="Excel não foi gerado")
+
+        latest_excel = excel_files[-1]
+        logger.info(f"📊 Excel encontrado: {latest_excel.name}")
+
+        # 4. Upload para Cloud Storage
+        bucket_name = os.getenv('VALIDATION_REPORTS_BUCKET', 'smart-ads-validation-reports')
+
+        try:
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(bucket_name)
+
+            # Nome do blob: validation/2026/01/validacao_20260127_103045.xlsx
+            blob_name = f"validation/{today.year}/{today.month:02d}/{latest_excel.name}"
+            blob = bucket.blob(blob_name)
+
+            blob.upload_from_filename(str(latest_excel))
+            blob.make_public()
+
+            excel_url = blob.public_url
+            logger.info(f"☁️ Upload concluído: {excel_url}")
+
+        except Exception as storage_error:
+            logger.warning(f"⚠️ Erro no upload Cloud Storage: {storage_error}")
+            excel_url = None
+
+        # 5. Extrair métricas do log de saída
+        metrics = _parse_validation_metrics(result.stdout)
+
+        # 6. Enviar notificação Slack
+        notifier = ValidationSlackNotifier()
+        notifier.send_validation_summary(
+            metrics=metrics,
+            excel_url=excel_url,
+            period={
+                'start': start_date,
+                'sales_start': sales_start,
+                'sales_end': sales_end
+            }
+        )
+
+        logger.info("✅ Validação semanal concluída com sucesso!")
+
+        return {
+            "status": "success",
+            "message": "Validação semanal executada com sucesso",
+            "period": {
+                "captacao": start_date,
+                "vendas": f"{sales_start} a {sales_end}"
+            },
+            "excel_url": excel_url,
+            "metrics": metrics
+        }
+
+    except subprocess.TimeoutExpired:
+        error_msg = "Validação excedeu timeout de 10 minutos"
+        logger.error(f"❌ {error_msg}")
+
+        notifier = ValidationSlackNotifier()
+        notifier.send_error_notification(error_msg)
+
+        raise HTTPException(status_code=408, detail=error_msg)
+
+    except Exception as e:
+        logger.error(f"❌ Erro na validação semanal: {str(e)}")
+
+        notifier = ValidationSlackNotifier()
+        notifier.send_error_notification(str(e))
+
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _parse_validation_metrics(stdout: str) -> dict:
+    """
+    Extrai métricas do output do script de validação.
+
+    Procura por linhas como:
+    - "AUC Produção: 0.8234 (Test Set: 0.8156, Δ: +0.0078)"
+    - "Conversões: 177"
+    - "ROAS COM ML: 2.04x"
+    """
+    import re
+
+    metrics = {
+        'auc_production': 0.0,
+        'auc_test_set': 0.0,
+        'conversoes': 0,
+        'roas': 0.0,
+        'leads_analisados': 0,
+        'top3_production': 0.0,
+        'top3_test_set': 0.0
+    }
+
+    try:
+        # AUC
+        auc_match = re.search(r'AUC Produção:\s*([\d.]+)\s*\(Test Set:\s*([\d.]+)', stdout)
+        if auc_match:
+            metrics['auc_production'] = float(auc_match.group(1))
+            metrics['auc_test_set'] = float(auc_match.group(2))
+
+        # Concentração Top 3
+        top3_match = re.search(r'Top 3 Decis:\s*([\d.]+)%\s*\(Test Set:\s*([\d.]+)%', stdout)
+        if top3_match:
+            metrics['top3_production'] = float(top3_match.group(1))
+            metrics['top3_test_set'] = float(top3_match.group(2))
+
+        # Conversões
+        conv_match = re.search(r'(\d+)\s+trackeadas', stdout)
+        if conv_match:
+            metrics['conversoes'] = int(conv_match.group(1))
+
+        # ROAS
+        roas_match = re.search(r'ROAS COM ML:\s*([\d.]+)x', stdout)
+        if roas_match:
+            metrics['roas'] = float(roas_match.group(1))
+
+        # Leads
+        leads_match = re.search(r'(\d+)\s+leads.*com score válido', stdout)
+        if leads_match:
+            metrics['leads_analisados'] = int(leads_match.group(1))
+
+    except Exception as e:
+        logger.warning(f"⚠️ Erro ao extrair métricas: {e}")
+
+    return metrics
+
+
 if __name__ == "__main__":
     import uvicorn
 

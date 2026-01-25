@@ -16,6 +16,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
+    curl \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -49,6 +50,9 @@ COPY ./${MODEL_PATH}/ ./${MODEL_PATH}/
 ENV PYTHONPATH=/app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+
+# Criar diretório para relatórios de validação
+RUN mkdir -p /app/vendas
 
 # Dar permissões para o usuário appuser
 RUN chown -R appuser:appuser /app

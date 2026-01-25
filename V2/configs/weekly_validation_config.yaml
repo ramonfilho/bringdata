@@ -1,0 +1,301 @@
+# =============================================================================
+# CONFIGURAÇÃO DA VALIDAÇÃO SEMANAL AUTOMATIZADA
+# =============================================================================
+#
+# Este arquivo documenta a configuração completa do sistema de validação semanal
+# do modelo ML com notificações via Slack.
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# CLOUD STORAGE
+# -----------------------------------------------------------------------------
+cloud_storage:
+  # Bucket para armazenar relatórios Excel de validação
+  bucket_name: smart-ads-validation-reports
+  region: us-central1
+  public_access: true  # Permite links públicos nos Excels
+
+  # Estrutura de pastas: validation/YYYY/MM/validacao_YYYYMMDD_HHMMSS.xlsx
+  folder_structure: "validation/{year}/{month:02d}/{filename}"
+
+  # Comandos para criação (executar uma vez):
+  setup_commands:
+    - "gsutil mb -l us-central1 gs://smart-ads-validation-reports"
+    - "gsutil iam ch allUsers:objectViewer gs://smart-ads-validation-reports"
+
+# -----------------------------------------------------------------------------
+# CLOUD SCHEDULER
+# -----------------------------------------------------------------------------
+cloud_scheduler:
+  # Job de validação semanal
+  job_name: validation-weekly
+  location: us-central1
+
+  # Agendamento (cron format)
+  schedule: "0 10 * * MON"  # Toda segunda-feira às 10h UTC
+  schedule_description: "Segunda-feira 7h (horário de Brasília -3h)"
+
+  # Endpoint da API
+  target_uri: "https://smart-ads-api-12955519745.us-central1.run.app/validation/weekly"
+  http_method: POST
+
+  # Configurações
+  timeout: 180s  # 3 minutos
+  retry:
+    max_retry_duration: 0s
+    max_doublings: 5
+    max_backoff: 3600s
+    min_backoff: 5s
+
+  # Comando para criação (executar uma vez):
+  setup_command: |
+    gcloud scheduler jobs create http validation-weekly \
+      --location=us-central1 \
+      --schedule="0 10 * * MON" \
+      --uri="https://smart-ads-api-12955519745.us-central1.run.app/validation/weekly" \
+      --http-method=POST \
+      --headers="Content-Type=application/json" \
+      --description="Validação semanal do modelo ML (toda segunda 10h)"
+
+  # Comandos úteis:
+  useful_commands:
+    list_jobs: "gcloud scheduler jobs list --location=us-central1"
+    describe: "gcloud scheduler jobs describe validation-weekly --location=us-central1"
+    run_now: "gcloud scheduler jobs run validation-weekly --location=us-central1"
+    pause: "gcloud scheduler jobs pause validation-weekly --location=us-central1"
+    resume: "gcloud scheduler jobs resume validation-weekly --location=us-central1"
+    delete: "gcloud scheduler jobs delete validation-weekly --location=us-central1"
+
+# -----------------------------------------------------------------------------
+# CLOUD RUN (Environment Variables)
+# -----------------------------------------------------------------------------
+cloud_run:
+  service_name: smart-ads-api
+  region: us-central1
+
+  # Variáveis de ambiente necessárias
+  environment_variables:
+    META_DATA_SOURCE: "local"  # Usar CSV local (trocar para 'api' em produção)
+    GURU_DATA_SOURCE: "api"    # Sempre usar API da Guru
+    VALIDATION_REPORTS_BUCKET: "smart-ads-validation-reports"
+    SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/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"
+
+  # Comando para atualizar env vars:
+  update_env_command: |
+    gcloud run services update smart-ads-api \
+      --region=us-central1 \
+      --update-env-vars=META_DATA_SOURCE=local,VALIDATION_REPORTS_BUCKET=smart-ads-validation-reports \
+      --quiet
+
+# -----------------------------------------------------------------------------
+# SLACK NOTIFICATION
+# -----------------------------------------------------------------------------
+slack:
+  # Webhook URL (pode ser o mesmo do monitoramento ou criar canal separado)
+  webhook_url: "https://hooks.slack.com/services/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"
+
+  # Formato da mensagem
+  message_format:
+    title: "📊 Validação Semanal ML - Smart Ads"
+
+    fields:
+      - title: "📅 Período Analisado"
+        content: "Captação + Vendas"
+
+      - title: "📈 Métricas de Performance"
+        metrics:
+          - "AUC Produção vs Test Set"
+          - "Concentração Top 3 Decis"
+          - "Conversões"
+          - "ROAS"
+          - "Leads Analisados"
+
+      - title: "📄 Relatório Completo"
+        content: "Link para download do Excel"
+
+  # Cores baseadas em performance
+  color_rules:
+    green: "AUC delta >= -0.02 AND ROAS >= 2.5"
+    yellow: "AUC delta >= -0.05 OR ROAS >= 1.5"
+    red: "AUC delta < -0.05 OR ROAS < 1.5"
+
+# -----------------------------------------------------------------------------
+# VALIDAÇÃO (Script Python)
+# -----------------------------------------------------------------------------
+validation:
+  script: "V2/src/validation/validate_ml_performance.py"
+
+  # Período calculado automaticamente
+  period_calculation:
+    method: "PeriodCalculator"
+    base_date: "last_monday"  # Segunda-feira anterior
+    weeks: 3
+    structure:
+      week1: "Captação de leads (7 dias)"
+      week2: "CPLs - divulgação (6 dias)"
+      week3: "Vendas - carrinho aberto (7 dias)"
+
+  # Fontes de dados
+  data_sources:
+    leads: "Google Sheets (via gspread)"
+    sales_guru: "Guru API"
+    sales_tmb: "Local Excel files"
+    meta_reports:
+      testing: "CSV local (files/validation/meta_reports/)"
+      production: "Meta Marketing API"
+
+  # Output
+  output:
+    directory: "vendas/"
+    filename_pattern: "validacao_YYYYMMDD_HHMMSS.xlsx"
+    backup_to_cloud: true
+
+# -----------------------------------------------------------------------------
+# ARQUIVOS CRIADOS/MODIFICADOS
+# -----------------------------------------------------------------------------
+files:
+  new_files:
+    - path: "V2/src/validation/slack_notifier.py"
+      description: "Classe para enviar notificações Slack de validação"
+
+    - path: "V2/configs/weekly_validation_config.yaml"
+      description: "Este arquivo de configuração"
+
+  modified_files:
+    - path: "V2/api/app.py"
+      changes: "Adicionado endpoint POST /validation/weekly"
+
+    - path: "V2/api/requirements.txt"
+      changes: "Adicionado google-cloud-storage==2.14.0"
+
+# -----------------------------------------------------------------------------
+# FLUXO DE EXECUÇÃO
+# -----------------------------------------------------------------------------
+execution_flow:
+  trigger: "Cloud Scheduler (toda segunda 10h UTC)"
+  steps:
+    1: "Cloud Scheduler dispara POST /validation/weekly"
+    2: "API calcula período (semana anterior via PeriodCalculator)"
+    3: "API executa validate_ml_performance.py como subprocess"
+    4: "Script busca dados (Guru API + Google Sheets + Meta CSV/API)"
+    5: "Script gera Excel com métricas ML"
+    6: "API faz upload do Excel para Cloud Storage"
+    7: "API extrai métricas do log do script"
+    8: "API envia notificação Slack com sumário + link Excel"
+
+  error_handling:
+    - "Se validação falha: envia notificação de erro no Slack"
+    - "Se upload Cloud Storage falha: continua e envia Slack sem link"
+    - "Se timeout (10 min): retorna HTTP 408 e notifica Slack"
+
+# -----------------------------------------------------------------------------
+# SETUP PARA NOVOS CLIENTES
+# -----------------------------------------------------------------------------
+setup_instructions:
+  description: "Passos para replicar em outro projeto GCP"
+
+  prerequisites:
+    - "Projeto GCP criado"
+    - "Cloud Run API habilitada"
+    - "Cloud Scheduler API habilitada"
+    - "Cloud Storage API habilitada"
+    - "gcloud CLI instalado e autenticado"
+    - "Canal Slack + webhook URL"
+
+  steps:
+    1:
+      name: "Criar Cloud Storage bucket"
+      command: "gsutil mb -l {REGION} gs://{BUCKET_NAME}"
+      variables:
+        REGION: "us-central1"
+        BUCKET_NAME: "nome-projeto-validation-reports"
+
+    2:
+      name: "Tornar bucket público (opcional)"
+      command: "gsutil iam ch allUsers:objectViewer gs://{BUCKET_NAME}"
+      note: "Ou usar signed URLs se preferir privado"
+
+    3:
+      name: "Configurar env vars no Cloud Run"
+      command: |
+        gcloud run services update {SERVICE_NAME} \
+          --region={REGION} \
+          --update-env-vars=META_DATA_SOURCE=local,VALIDATION_REPORTS_BUCKET={BUCKET_NAME},SLACK_WEBHOOK_URL={WEBHOOK}
+      variables:
+        SERVICE_NAME: "nome-do-servico"
+        REGION: "us-central1"
+        BUCKET_NAME: "nome-projeto-validation-reports"
+        WEBHOOK: "https://hooks.slack.com/services/..."
+
+    4:
+      name: "Criar Cloud Scheduler job"
+      command: |
+        gcloud scheduler jobs create http validation-weekly \
+          --location={REGION} \
+          --schedule="{CRON}" \
+          --uri="{API_URL}/validation/weekly" \
+          --http-method=POST \
+          --headers="Content-Type=application/json" \
+          --description="Validação semanal do modelo ML"
+      variables:
+        REGION: "us-central1"
+        CRON: "0 10 * * MON"
+        API_URL: "https://seu-servico.run.app"
+
+    5:
+      name: "Deploy da API"
+      command: "./deploy.sh --yes"
+      note: "Certifique-se de que os arquivos novos estão no código"
+
+    6:
+      name: "Testar manualmente"
+      command: "gcloud scheduler jobs run validation-weekly --location={REGION}"
+      note: "Verifica se tudo funciona antes da primeira execução agendada"
+
+# -----------------------------------------------------------------------------
+# MONITORAMENTO
+# -----------------------------------------------------------------------------
+monitoring:
+  logs:
+    validation_execution: |
+      gcloud logging read "resource.type=cloud_run_revision
+      AND resource.labels.service_name=smart-ads-api
+      AND textPayload=~'validação semanal'" --limit=50
+
+    scheduler_execution: |
+      gcloud logging read "resource.type=cloud_scheduler_job
+      AND resource.labels.job_id=validation-weekly" --limit=20
+
+    errors: |
+      gcloud logging read "resource.type=cloud_run_revision
+      AND resource.labels.service_name=smart-ads-api
+      AND severity>=ERROR
+      AND textPayload=~'validation'" --limit=20
+
+  metrics:
+    - "Tempo de execução da validação"
+    - "Taxa de sucesso/falha"
+    - "Tamanho dos arquivos Excel gerados"
+    - "AUC production vs test set (tendência)"
+
+# -----------------------------------------------------------------------------
+# TROUBLESHOOTING
+# -----------------------------------------------------------------------------
+troubleshooting:
+  common_issues:
+    - issue: "Scheduler não dispara"
+      check: "gcloud scheduler jobs describe validation-weekly --location=us-central1"
+      solution: "Verificar se state=ENABLED e schedule está correto"
+
+    - issue: "Validação timeout"
+      check: "Verificar logs do Cloud Run"
+      solution: "Aumentar timeout do script ou otimizar queries"
+
+    - issue: "Excel não é enviado no Slack"
+      check: "Verificar se bucket existe e tem permissões"
+      solution: "Recriar bucket ou ajustar IAM policy"
+
+    - issue: "Métricas zeradas no Slack"
+      check: "Verificar regex de parsing em _parse_validation_metrics()"
+      solution: "Ajustar regex para match com output do script"

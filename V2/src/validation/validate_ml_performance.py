@@ -583,12 +583,15 @@ def main():
         logger.info("   🔍 Buscando leads no CAPI...")
 
         try:
-            API_URL = "https://smart-ads-api-12955519745.us-central1.run.app"
+            # Usar localhost se rodando dentro do container (chamado via endpoint /validation/weekly)
+            # Senão usar URL pública (execução standalone)
+            API_URL = os.getenv('INTERNAL_API_URL', 'https://smart-ads-api-12955519745.us-central1.run.app')
 
             start_str = start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d')
             end_str = end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d')
 
             url = f"{API_URL}/webhook/lead_capture/recent?start_date={start_str}&end_date={end_str}&limit=10000"
+            logger.info(f"   📡 URL CAPI: {url}")
 
             result_curl = subprocess.run(
                 ['curl', '-s', '--max-time', '30', url],

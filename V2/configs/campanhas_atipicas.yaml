@@ -1,0 +1,140 @@
+# =============================================================================
+# CAMPANHAS ATÍPICAS - PERÍODOS NÃO PADRÃO
+# =============================================================================
+#
+# Este arquivo documenta campanhas que não seguem o padrão normal de 3 semanas
+# (7 dias captação + 6 dias CPL + 7 dias vendas).
+#
+# Usar estas datas quando executar validação manual destas campanhas específicas.
+#
+# =============================================================================
+
+campanhas_atipicas:
+
+  # ---------------------------------------------------------------------------
+  # CAMPANHA ATÍPICA 1 - Dez/2025 - Jan/2026
+  # ---------------------------------------------------------------------------
+  campanha_1_dez_jan:
+    descricao: "Campanha estendida de fim de ano"
+
+    periodo:
+      captacao:
+        inicio: "2025-12-16"
+        fim: "2026-01-12"
+        duracao_dias: 28  # Quase 4 semanas!
+        nota: "Período atipicamente longo devido a fim de ano"
+
+      cpls:
+        inicio: "2026-01-13"
+        fim: "2026-01-18"
+        duracao_dias: 6  # Padrão
+
+      vendas:
+        inicio: "2026-01-19"
+        fim: "2026-01-25"
+        duracao_dias: 7  # Padrão
+
+    # Comando para executar validação desta campanha:
+    comando_validacao_local: |
+      python src/validation/validate_ml_performance.py \
+        --start-date 2025-12-16 \
+        --end-date 2026-01-12 \
+        --sales-start-date 2026-01-19 \
+        --sales-end-date 2026-01-25
+
+    # Payload para testar via API:
+    curl_test: |
+      curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/validation/manual \
+        -H "Content-Type: application/json" \
+        -d '{
+          "start_date": "2025-12-16",
+          "end_date": "2026-01-12",
+          "sales_start_date": "2026-01-19",
+          "sales_end_date": "2026-01-25"
+        }'
+
+  # ---------------------------------------------------------------------------
+  # CAMPANHA ATÍPICA 2 - Jan/2026 - Fev/2026
+  # ---------------------------------------------------------------------------
+  campanha_2_jan_fev:
+    descricao: "Campanha com captação estendida (2 semanas)"
+
+    periodo:
+      captacao:
+        inicio: "2026-01-13"
+        fim: "2026-01-26"
+        duracao_dias: 14  # 2 semanas
+        nota: "Captação dobrada para aumentar volume"
+
+      cpls:
+        inicio: "2026-01-27"
+        fim: "2026-02-01"
+        duracao_dias: 6  # Padrão
+
+      vendas:
+        inicio: "2026-02-02"
+        fim: "2026-02-08"
+        duracao_dias: 7  # Padrão
+
+    # Comando para executar validação desta campanha:
+    comando_validacao_local: |
+      python src/validation/validate_ml_performance.py \
+        --start-date 2026-01-13 \
+        --end-date 2026-01-26 \
+        --sales-start-date 2026-02-02 \
+        --sales-end-date 2026-02-08
+
+    # Payload para testar via API:
+    curl_test: |
+      curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/validation/manual \
+        -H "Content-Type: application/json" \
+        -d '{
+          "start_date": "2026-01-13",
+          "end_date": "2026-01-26",
+          "sales_start_date": "2026-02-02",
+          "sales_end_date": "2026-02-08"
+        }'
+
+# =============================================================================
+# NOTAS IMPORTANTES
+# =============================================================================
+
+notas:
+  - "Campanhas atípicas devem ser validadas MANUALMENTE com datas específicas"
+  - "Cloud Scheduler (validação semanal automática) usa o padrão de 3 semanas"
+  - "Para validar campanhas atípicas, use o endpoint /validation/manual (criar) ou rode o script localmente"
+  - "Formato de datas: SEMPRE ISO 8601 (YYYY-MM-DD)"
+  - "Não usar formato brasileiro (DD/MM/YYYY) em nenhum comando"
+
+# =============================================================================
+# PADRÃO NORMAL (para referência)
+# =============================================================================
+
+campanha_padrao:
+  descricao: "Padrão seguido pela maioria dos lançamentos"
+
+  periodo:
+    captacao:
+      duracao_dias: 7
+      exemplo: "Segunda a Segunda"
+
+    cpls:
+      duracao_dias: 6
+      exemplo: "Terça a Domingo"
+
+    vendas:
+      duracao_dias: 7
+      exemplo: "Segunda a Domingo"
+
+  total_dias: 20  # 3 semanas completas
+
+  exemplos:
+    - nome: "DEVLF01"
+      captacao: "2026-01-20 a 2026-01-26"
+      cpls: "2026-01-27 a 2026-02-01"
+      vendas: "2026-02-02 a 2026-02-08"
+
+    - nome: "DEVLF02"
+      captacao: "2026-01-27 a 2026-02-02"
+      cpls: "2026-02-03 a 2026-02-08"
+      vendas: "2026-02-09 a 2026-02-15"
