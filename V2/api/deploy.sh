@@ -27,39 +27,21 @@ set -e  # Exit on error
 set -u  # Exit on undefined variable
 
 # =============================================================================
-# CONFIGURAÇÕES
+# IMPORTAR BIBLIOTECAS COMPARTILHADAS
 # =============================================================================
 
-# Cores para output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Configurações do GCP
-PROJECT_ID="smart-ads-451319"
-REGION="us-central1"
-SERVICE_NAME="smart-ads-api"
-GCR_REGISTRY="gcr.io"
-
-# Configurações do Container
-MEMORY="2Gi"
-CPU="2"
-TIMEOUT="600"  # 10 minutos para validação
-MIN_INSTANCES="1"
-MAX_INSTANCES="100"
-CONCURRENCY="80"
-
-# Diretórios
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-MODEL_DIR="$PROJECT_ROOT/files"
-CONFIG_FILE="$PROJECT_ROOT/configs/active_model.yaml"
-BUSINESS_CONFIG="$SCRIPT_DIR/business_config.py"
 
-# Variáveis de controle
-ENVIRONMENT="production"
+# Importar funções compartilhadas (cores, print_*, validações GCP)
+source "$SCRIPT_DIR/lib/common.sh"
+
+# Importar configurações centralizadas (PROJECT_ID, REGION, etc.)
+source "$SCRIPT_DIR/lib/config.sh"
+
+# =============================================================================
+# VARIÁVEIS DE CONTROLE ESPECÍFICAS DO DEPLOY
+# =============================================================================
+
 MODEL_VERSION=""
 IMAGE_TAG=""
 SKIP_TESTS=false
@@ -68,95 +50,23 @@ PREVIOUS_REVISION=""
 YES_FLAG=false  # Pula confirmação se true
 
 # =============================================================================
-# FUNÇÕES AUXILIARES
-# =============================================================================
-
-print_header() {
-    echo -e "\n${BLUE}========================================${NC}"
-    echo -e "${BLUE}$1${NC}"
-    echo -e "${BLUE}========================================${NC}\n"
-}
-
-print_success() {
-    echo -e "${GREEN}✅ $1${NC}"
-}
-
-print_error() {
-    echo -e "${RED}❌ $1${NC}"
-}
-
-print_warning() {
-    echo -e "${YELLOW}⚠️  $1${NC}"
-}
-
-print_info() {
-    echo -e "${BLUE}ℹ️  $1${NC}"
-}
-
-# =============================================================================
 # VALIDAÇÕES PRÉ-DEPLOY
 # =============================================================================
 
 validate_prerequisites() {
     print_header "1. VALIDAÇÕES PRÉ-DEPLOY"
 
-    # 1.1 Docker
-    print_info "Verificando Docker..."
-    if ! command -v docker &> /dev/null; then
-        print_error "Docker não está instalado"
-        exit 1
-    fi
+    # 1.1 Docker (específico do deploy)
+    validate_docker
 
-    if ! docker info &> /dev/null; then
-        print_warning "Docker não está rodando. Iniciando Docker Desktop..."
-        open -a Docker
+    # 1.2 gcloud CLI (da lib/common.sh)
+    validate_gcloud
 
-        print_info "Aguardando Docker inicializar (timeout: 120s)..."
-        for i in {1..60}; do
-            if docker info &> /dev/null 2>&1; then
-                print_success "Docker iniciado com sucesso!"
-                break
-            fi
-            echo -n "."
-            sleep 2
+    # 1.3 Autenticação GCP (da lib/common.sh)
+    validate_auth
 
-            if [ $i -eq 60 ]; then
-                echo ""
-                print_error "Timeout: Docker não inicializou em 120 segundos"
-                print_error "Inicie o Docker Desktop manualmente e tente novamente"
-                exit 1
-            fi
-        done
-        echo ""
-    else
-        print_success "Docker está rodando"
-    fi
-
-    # 1.2 gcloud CLI
-    print_info "Verificando gcloud CLI..."
-    if ! command -v gcloud &> /dev/null; then
-        print_error "gcloud CLI não está instalado"
-        exit 1
-    fi
-    print_success "gcloud CLI instalado"
-
-    # 1.3 Autenticação GCP
-    print_info "Verificando autenticação GCP..."
-    CURRENT_ACCOUNT=$(gcloud config get-value account 2>/dev/null)
-    if [ -z "$CURRENT_ACCOUNT" ]; then
-        print_error "Não autenticado no GCP. Execute: gcloud auth login"
-        exit 1
-    fi
-    print_success "Autenticado como: $CURRENT_ACCOUNT"
-
-    # 1.4 Projeto GCP
-    print_info "Verificando projeto GCP..."
-    CURRENT_PROJECT=$(gcloud config get-value project 2>/dev/null)
-    if [ "$CURRENT_PROJECT" != "$PROJECT_ID" ]; then
-        print_warning "Projeto atual: $CURRENT_PROJECT. Mudando para: $PROJECT_ID"
-        gcloud config set project $PROJECT_ID
-    fi
-    print_success "Projeto: $PROJECT_ID"
+    # 1.4 Projeto GCP (da lib/common.sh)
+    validate_project "$PROJECT_ID"
 
     # 1.5 Dockerfile
     print_info "Verificando Dockerfile..."
@@ -238,20 +148,8 @@ validate_prerequisites() {
         print_warning "Nenhuma revisão anterior encontrada (primeiro deploy?)"
     fi
 
-    # 1.10 Verificar Cloud SQL (CRÍTICO - evita perda de dados)
-    print_info "Verificando Cloud SQL..."
-    CLOUD_SQL_STATUS=$(gcloud sql instances describe smart-ads-db \
-        --format="value(state)" 2>/dev/null || echo "NOT_FOUND")
-
-    if [ "$CLOUD_SQL_STATUS" = "RUNNABLE" ]; then
-        print_success "Cloud SQL está rodando (smart-ads-db)"
-    elif [ "$CLOUD_SQL_STATUS" = "NOT_FOUND" ]; then
-        print_error "Cloud SQL instance 'smart-ads-db' não encontrada!"
-        print_error "Deploy BLOQUEADO - sem Cloud SQL, todos os dados serão perdidos"
-        exit 1
-    else
-        print_warning "Cloud SQL em estado: $CLOUD_SQL_STATUS"
-    fi
+    # 1.10 ⚠️ CRÍTICO: Verificar Cloud SQL (da lib/common.sh)
+    validate_cloud_sql "$CLOUD_SQL_INSTANCE" "$REGION" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"
 
     echo ""
 }
@@ -328,31 +226,11 @@ deploy_to_cloud_run() {
         AUTH_FLAG="--allow-unauthenticated"
     fi
 
-    # Configurar variáveis de ambiente (CRITICAL - NÃO REMOVER!)
+    # ⚠️ CRÍTICO: Configurar variáveis de ambiente (NÃO REMOVER!)
     # Sem essas variáveis, a API usa SQLite e PERDE TODOS OS DADOS a cada deploy
     print_info "Configurando variáveis de ambiente..."
-    ENV_VARS="ENVIRONMENT=production"
-    ENV_VARS="$ENV_VARS,CLOUD_SQL_CONNECTION_NAME=smart-ads-451319:us-central1:smart-ads-db"
-    ENV_VARS="$ENV_VARS,DB_NAME=smart_ads"
-    ENV_VARS="$ENV_VARS,DB_USER=postgres"
-    ENV_VARS="$ENV_VARS,DB_PASSWORD=SmartAds2026DB!"
-    ENV_VARS="$ENV_VARS,META_DATA_SOURCE=api"
-    ENV_VARS="$ENV_VARS,VALIDATION_REPORTS_BUCKET=smart-ads-validation-reports"
-
-    # Obter META_ACCESS_TOKEN da revisão atual (se existir)
-    CURRENT_META_TOKEN=$(gcloud run services describe $SERVICE_NAME \
-        --region=$REGION \
-        --format="value(spec.template.spec.containers[0].env[?name=='META_ACCESS_TOKEN'].value)" \
-        2>/dev/null || echo "")
-
-    if [ -n "$CURRENT_META_TOKEN" ]; then
-        ENV_VARS="$ENV_VARS,META_ACCESS_TOKEN=$CURRENT_META_TOKEN"
-        print_success "META_ACCESS_TOKEN preservado da revisão anterior"
-    else
-        print_warning "META_ACCESS_TOKEN não encontrado - configure manualmente se necessário"
-    fi
-
-    print_success "Variáveis de ambiente configuradas"
+    ENV_VARS=$(build_env_vars)
+    print_success "Variáveis de ambiente configuradas (via lib/config.sh)"
 
     gcloud run deploy $SERVICE_NAME \
         --image "$IMAGE_TO_DEPLOY" \
@@ -365,7 +243,7 @@ deploy_to_cloud_run() {
         --max-instances $MAX_INSTANCES \
         --concurrency $CONCURRENCY \
         --update-env-vars="$ENV_VARS" \
-        --add-cloudsql-instances="smart-ads-451319:us-central1:smart-ads-db" \
+        --add-cloudsql-instances="$CLOUD_SQL_CONNECTION" \
         $AUTH_FLAG \
         --quiet || {
             print_error "Falha no deploy para Cloud Run"
