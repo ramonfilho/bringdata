@@ -54,6 +54,9 @@ COPY ./${MODEL_PATH}/ ./${MODEL_PATH}/
 # Copiar relatórios Meta CSV (necessário para validação rápida sem API)
 COPY ./files/validation/meta_reports/ ./files/validation/meta_reports/
 
+# Copiar vendas (Guru Excel + TMB para fallback)
+COPY ./files/validation/vendas/ ./files/validation/vendas/
+
 # Definir variáveis de ambiente
 ENV PYTHONPATH=/app
 ENV PYTHONDONTWRITEBYTECODE=1

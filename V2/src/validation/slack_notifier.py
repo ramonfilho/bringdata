@@ -161,12 +161,13 @@ class ValidationSlackNotifier:
         """
         lines = []
 
-        # AUC
+        # AUC (só mostrar se > 0)
         auc_prod = metrics.get('auc_production', 0)
         auc_test = metrics.get('auc_test_set', 0)
-        auc_delta = auc_prod - auc_test if auc_test > 0 else 0
-        auc_icon = "🟢" if auc_delta >= -0.02 else "🟡" if auc_delta >= -0.05 else "🔴"
-        lines.append(f"{auc_icon} *AUC Produção:* {auc_prod:.4f} (Test Set: {auc_test:.4f}, Δ {auc_delta:+.4f})")
+        if auc_prod > 0 and auc_test > 0:
+            auc_delta = auc_prod - auc_test
+            auc_icon = "🟢" if auc_delta >= -0.02 else "🟡" if auc_delta >= -0.05 else "🔴"
+            lines.append(f"{auc_icon} *AUC Produção:* {auc_prod:.4f} (Test Set: {auc_test:.4f}, Δ {auc_delta:+.4f})")
 
         # Concentração
         top3_prod = metrics.get('top3_production', 0)
@@ -174,10 +175,11 @@ class ValidationSlackNotifier:
         if top3_prod > 0:
             lines.append(f"• *Top 3 Decis:* {top3_prod:.1f}% (Test Set: {top3_test:.1f}%)")
 
-        # Conversões e ROAS
+        # Conversões e ROAS (só mostrar conversões se > 0)
         conversoes = metrics.get('conversoes', 0)
         roas = metrics.get('roas', 0)
-        lines.append(f"• *Conversões:* {conversoes:,}")
+        if conversoes > 0:
+            lines.append(f"• *Conversões:* {conversoes:,}")
 
         if roas > 0:
             roas_icon = "🟢" if roas >= 2.5 else "🟡" if roas >= 1.5 else "🔴"
