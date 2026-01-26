@@ -9,6 +9,11 @@ LABEL description="API V2 para Lead Scoring com Random Forest"
 # Criar usuário não-root para segurança
 RUN groupadd -r appuser && useradd -r -g appuser appuser
 
+# Criar home directory para appuser (useradd -r não cria)
+# Necessário para matplotlib e outras libs que precisam de cache
+RUN mkdir -p /home/appuser/.config && \
+    chown -R appuser:appuser /home/appuser
+
 # Definir diretório de trabalho
 WORKDIR /app
 
@@ -50,6 +55,8 @@ COPY ./${MODEL_PATH}/ ./${MODEL_PATH}/
 ENV PYTHONPATH=/app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+# Fix para matplotlib - usar diretório writable para cache
+ENV MPLCONFIGDIR=/home/appuser/.config/matplotlib
 
 # Criar diretório para relatórios de validação
 RUN mkdir -p /app/vendas
@@ -73,6 +80,7 @@ CMD ["gunicorn", "api.app:app", \
      "--workers", "2", \
      "--worker-class", "uvicorn.workers.UvicornWorker", \
      "--bind", "0.0.0.0:8080", \
-     "--timeout", "600", \
+     "--timeout", "1200", \
+     "--graceful-timeout", "1200", \
      "--access-logfile", "-", \
      "--error-logfile", "-"]

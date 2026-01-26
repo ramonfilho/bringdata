@@ -27,13 +27,18 @@ REGION="${REGION:-us-central1}"
 SERVICE_NAME="${SERVICE_NAME:-smart-ads-api}"
 GCR_REGISTRY="${GCR_REGISTRY:-gcr.io}"
 
-# Recursos do Container
-MEMORY="${MEMORY:-2Gi}"
+# Recursos do Container - SERVICE (CAPI + Monitoramento)
+MEMORY="${MEMORY:-2Gi}"  # Suficiente para CAPI + Monitoramento
 CPU="${CPU:-2}"
-TIMEOUT="${TIMEOUT:-600}"  # 10 minutos para validação
+TIMEOUT="${TIMEOUT:-600}"  # 10 minutos (original, necessário para monitoramento)
 MIN_INSTANCES="${MIN_INSTANCES:-1}"
 MAX_INSTANCES="${MAX_INSTANCES:-100}"
 CONCURRENCY="${CONCURRENCY:-80}"
+
+# Recursos do Container - JOB (Validação ML)
+JOB_MEMORY="${JOB_MEMORY:-4Gi}"  # Validação processa 30k+ leads + API Meta
+JOB_CPU="${JOB_CPU:-2}"
+JOB_TIMEOUT="${JOB_TIMEOUT:-1200}"  # 20 minutos para validação completa com API Meta
 
 # Ambiente
 ENVIRONMENT="${ENVIRONMENT:-production}"
@@ -76,6 +81,13 @@ SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/T09393Z
 META_DATA_SOURCE="${META_DATA_SOURCE:-api}"
 
 # =============================================================================
+# GURU API (DATA SOURCE)
+# =============================================================================
+
+# Guru Data Source: 'api' (extração via Guru API) ou 'local' (arquivos CSV locais)
+GURU_DATA_SOURCE="${GURU_DATA_SOURCE:-api}"
+
+# =============================================================================
 # DIRETÓRIOS DO PROJETO
 # =============================================================================
 
@@ -99,6 +111,7 @@ build_env_vars() {
     ENV_VARS="$ENV_VARS,DB_USER=$DB_USER"
     ENV_VARS="$ENV_VARS,DB_PASSWORD=$DB_PASSWORD"
     ENV_VARS="$ENV_VARS,META_DATA_SOURCE=$META_DATA_SOURCE"
+    ENV_VARS="$ENV_VARS,GURU_DATA_SOURCE=$GURU_DATA_SOURCE"
     ENV_VARS="$ENV_VARS,VALIDATION_REPORTS_BUCKET=$BUCKET_NAME"
     ENV_VARS="$ENV_VARS,SLACK_WEBHOOK_URL=$SLACK_WEBHOOK_URL"
 

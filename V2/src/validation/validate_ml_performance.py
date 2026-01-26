@@ -48,7 +48,7 @@ from src.validation.metrics_calculator import (
     calculate_comparison_group_metrics
 )
 from src.validation.report_generator import ValidationReportGenerator
-from src.validation.visualization import ValidationVisualizer
+# from src.validation.visualization import ValidationVisualizer  # REMOVIDO: visualizações desabilitadas, import causava delay de ~6min
 from src.validation.period_calculator import PeriodCalculator
 from src.validation.meta_reports_loader import MetaReportsLoader
 from src.validation.ml_monitoring_calculator import MLMonitoringCalculator
@@ -448,7 +448,6 @@ def main():
     args = parse_args()
 
     # DEBUG: Verificar o que foi parseado
-    print(f"🔍 DEBUG IMEDIATO - args.account_id logo após parse: {args.account_id}", flush=True)
 
     # 1.5. Gerenciar cache se solicitado
     if args.clear_cache:
@@ -530,7 +529,6 @@ def main():
 
     # 3. Carregar dados
     print("📂 CARREGANDO DADOS...", flush=True)
-    print(f"🔍 DEBUG: Timestamp início carregamento: {datetime.now().strftime('%H:%M:%S')}", flush=True)
     print(flush=True)
 
     # Leads - PADRÃO: Google Sheets (produção), FALLBACK: CSV se --leads-path fornecido
@@ -565,14 +563,11 @@ def main():
         use_cache = not args.no_cache
 
         # Carregar Pesquisa do Google Sheets (carrega AMBAS as abas)
-        print(f"🔍 DEBUG: ANTES de load_leads_from_sheets - {datetime.now().strftime('%H:%M:%S')}", flush=True)
-        print(f"🔍 DEBUG: Parâmetros: start={start_date}, end={end_date}, cache={use_cache}", flush=True)
         survey_df = lead_loader.load_leads_from_sheets(
             start_date=start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d'),
             end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d'),
             use_cache=use_cache
         )
-        print(f"🔍 DEBUG: DEPOIS de load_leads_from_sheets - {datetime.now().strftime('%H:%M:%S')}", flush=True)
         logger.info(f"   ✅ {len(survey_df)} leads da pesquisa carregados do Google Sheets")
 
         survey_emails = set(survey_df['email'].unique())
@@ -585,7 +580,6 @@ def main():
         import re
 
         logger.info("   🔍 Buscando leads no CAPI...")
-        print(f"🔍 DEBUG: ANTES de buscar CAPI - {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
         try:
             # Usar localhost se rodando dentro do container (chamado via endpoint /validation/weekly)
@@ -597,7 +591,6 @@ def main():
 
             url = f"{API_URL}/webhook/lead_capture/recent?start_date={start_str}&end_date={end_str}&limit=10000"
             logger.info(f"   📡 URL CAPI: {url}")
-            print(f"🔍 DEBUG: Iniciando subprocess.run do curl - {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
             result_curl = subprocess.run(
                 ['curl', '-s', '--max-time', '30', url],
@@ -606,15 +599,11 @@ def main():
                 timeout=35
             )
 
-            print(f"🔍 DEBUG: DEPOIS do subprocess.run do curl - {datetime.now().strftime('%H:%M:%S')}", flush=True)
-            print(f"🔍 DEBUG: Return code do curl: {result_curl.returncode}", flush=True)
 
             if result_curl.returncode == 0:
-                print(f"🔍 DEBUG: Curl sucesso, parsing JSON - {datetime.now().strftime('%H:%M:%S')}", flush=True)
                 result = json_module.loads(result_curl.stdout)
                 capi_leads_data = result.get('leads', [])
 
-                print(f"🔍 DEBUG: JSON parsed com sucesso - {datetime.now().strftime('%H:%M:%S')}", flush=True)
                 logger.info(f"   📊 CAPI: {len(capi_leads_data)} leads encontrados")
 
                 if capi_leads_data:
@@ -708,7 +697,6 @@ def main():
         logger.info(f"   📊 Estatísticas: {lead_source_stats['survey_leads']} pesquisa + {lead_source_stats['capi_leads_extras']} CAPI extras")
 
     # Vendas
-    print(f"🔍 DEBUG: Iniciando carregamento de VENDAS - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     sales_loader = SalesDataLoader()
 
     # Configuração de fonte de dados Guru: "local" (arquivos) ou "api" (Guru API)
@@ -760,7 +748,6 @@ def main():
         sys.exit(1)
 
     logger.info(f"   ✅ {len(sales_df)} vendas carregadas (Guru + TMB)")
-    print(f"🔍 DEBUG: Vendas carregadas com sucesso - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     print(flush=True)
 
     # 4. Filtrar por período
@@ -814,10 +801,8 @@ def main():
 
     # 5. Classificar campanhas
     print("🏷️ CLASSIFICANDO CAMPANHAS...", flush=True)
-    print(f"🔍 DEBUG: Iniciando classificação - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     print(flush=True)
     leads_df, excluded_count = add_ml_classification(leads_df, campaign_col='campaign')
-    print(f"🔍 DEBUG: Classificação concluída - {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
     com_ml_count = len(leads_df[leads_df['ml_type'] == 'COM_ML'])
     sem_ml_count = len(leads_df[leads_df['ml_type'] == 'SEM_ML'])
@@ -827,7 +812,6 @@ def main():
 
     # 5.5. Carregar relatórios Meta para criar grupos de comparação refinados
     print("💰 CARREGANDO RELATÓRIOS META PARA CLASSIFICAÇÃO...", flush=True)
-    print(f"🔍 DEBUG: Iniciando carregamento Meta Reports - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     print(flush=True)
 
     # Carregar relatórios Meta locais ou via API
@@ -846,20 +830,14 @@ def main():
     print(f"📊 Fonte de dados Meta: {data_source.upper()}", flush=True)
 
     # DEBUG: Verificar args.account_id
-    print(f"🔍 DEBUG - args.account_id: {args.account_id}", flush=True)
-    print(f"🔍 DEBUG - Tipo: {type(args.account_id)}", flush=True)
 
     # Passar account_ids para o loader (necessário no modo API para buscar múltiplas contas)
     loader = MetaReportsLoader(reports_dir, data_source=data_source, account_ids=args.account_id if data_source == 'api' else None)
-    print(f"🔍 DEBUG: ANTES de build_costs_hierarchy - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     costs_hierarchy_temp = loader.build_costs_hierarchy(start_date, end_date)
-    print(f"🔍 DEBUG: DEPOIS de build_costs_hierarchy - {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
     # Obter DataFrame de campanhas
-    print(f"🔍 DEBUG: ANTES de load_all_reports - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     reports = loader.load_all_reports(start_date, end_date)
     campaigns_df = reports.get('campaigns', pd.DataFrame())
-    print(f"🔍 DEBUG: DEPOIS de load_all_reports - {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
     # 5.6. Criar grupos de comparação REFINADOS (distingue Eventos ML vs Otimização ML)
     print("🎯 CRIANDO GRUPOS DE COMPARAÇÃO...", flush=True)
@@ -954,14 +932,12 @@ def main():
 
     # 6. Matching
     print("🔗 VINCULANDO LEADS COM VENDAS...", flush=True)
-    print(f"🔍 DEBUG: Iniciando matching - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     print(flush=True)
     matched_df = match_leads_to_sales(
         leads_df,
         sales_df,
         use_temporal_validation=False  # Results analysis mode - match against full history
     )
-    print(f"🔍 DEBUG: Matching concluído - {datetime.now().strftime('%H:%M:%S')}", flush=True)
 
     # INVESTIGAÇÃO: Onde estão as vendas que não fizeram match?
     print("\n" + "="*80)
@@ -1336,7 +1312,6 @@ def main():
 
                     # IMPORTANTE: Usar matched_adsets_df retornado por identify_matched_adset_pairs
                     # Este DataFrame já tem a coluna 'leads' criada a partir de 'leads_standard'
-                    logger.info(f"\n   🔍 DEBUG - Usando matched_adsets_df com 'leads' column:")
                     logger.info(f"      Total de adsets: {len(matched_adsets_df)}")
                     logger.info(f"      Tem 'leads'? {'leads' in matched_adsets_df.columns}")
                     if 'leads' in matched_adsets_df.columns:
@@ -1610,7 +1585,6 @@ def main():
     end_time = time.time()
     elapsed_time = end_time - start_time
 
-    print(f"🔍 DEBUG: Chegou ao fim da função main - {datetime.now().strftime('%H:%M:%S')}", flush=True)
     print("=" * 80, flush=True)
     print("✅ VALIDAÇÃO CONCLUÍDA COM SUCESSO!", flush=True)
     print("=" * 80, flush=True)
@@ -1618,6 +1592,84 @@ def main():
     print(f"📊 Análise exibida no console acima", flush=True)
     print(f"📄 Excel atualizado: {excel_path}", flush=True)
     print(f"⏱️  Tempo de execução: {elapsed_time:.1f} segundos ({elapsed_time/60:.1f} minutos)", flush=True)
+    print(flush=True)
+
+    # 13. Upload para Cloud Storage (se configurado)
+    excel_url = None
+    bucket_name = os.getenv('VALIDATION_REPORTS_BUCKET')
+
+    if bucket_name:
+        try:
+            from google.cloud import storage
+
+            print("☁️  Fazendo upload para Cloud Storage...", flush=True)
+
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(bucket_name)
+
+            # Nome do blob: validation/YYYY/MM/filename.xlsx
+            excel_filename = Path(excel_path).name
+            blob_name = f"validation/{datetime.now().year}/{datetime.now().month:02d}/{excel_filename}"
+            blob = bucket.blob(blob_name)
+
+            # Upload
+            blob.upload_from_filename(excel_path)
+            blob.make_public()
+
+            excel_url = blob.public_url
+            print(f"   ✅ Upload concluído: {excel_url}", flush=True)
+
+        except Exception as storage_error:
+            print(f"   ⚠️  Erro no upload Cloud Storage: {storage_error}", flush=True)
+            excel_url = None
+    else:
+        print("   ℹ️  VALIDATION_REPORTS_BUCKET não configurado, upload ignorado", flush=True)
+
+    print(flush=True)
+
+    # 14. Enviar notificação Slack (se configurado)
+    slack_webhook = os.getenv('SLACK_WEBHOOK_URL')
+
+    if slack_webhook:
+        try:
+            from src.validation.slack_notifier import ValidationSlackNotifier
+
+            print("📱 Enviando notificação Slack...", flush=True)
+
+            notifier = ValidationSlackNotifier(webhook_url=slack_webhook)
+
+            # Preparar métricas para Slack
+            slack_metrics = {
+                'status': 'success',
+                'total_leads': len(leads_df) if 'leads_df' in locals() else 0,
+                'total_conversions': conversions_count if 'conversions_count' in locals() else 0,
+                'total_campaigns': len(costs_hierarchy_temp) if 'costs_hierarchy_temp' in locals() else 0
+            }
+
+            # Preparar período
+            slack_period = {
+                'start': start_date,
+                'end': end_date,
+                'sales_start': sales_start_date,
+                'sales_end': sales_end_date
+            }
+
+            success = notifier.send_validation_summary(
+                metrics=slack_metrics,
+                excel_url=excel_url,
+                period=slack_period
+            )
+
+            if success:
+                print("   ✅ Notificação Slack enviada", flush=True)
+            else:
+                print("   ⚠️  Falha ao enviar notificação Slack", flush=True)
+
+        except Exception as slack_error:
+            print(f"   ⚠️  Erro ao enviar Slack: {slack_error}", flush=True)
+    else:
+        print("   ℹ️  SLACK_WEBHOOK_URL não configurado, notificação ignorada", flush=True)
+
     print(flush=True)
 
 

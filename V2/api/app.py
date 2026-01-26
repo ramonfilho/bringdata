@@ -2560,23 +2560,22 @@ async def execute_weekly_validation(db: Session = Depends(get_db)):
         logger.info(f"🔧 Executando validação (GURU=api, META={env['META_DATA_SOURCE']})...")
         logger.info(f"🔧 Comando: {' '.join(cmd)}")
 
+        # CRÍTICO: NÃO usar capture_output=True para permitir streaming de logs em tempo real
+        # Isso faz os logs do script aparecerem diretamente no Cloud Run
         result = subprocess.run(
             cmd,
-            capture_output=True,
+            capture_output=False,  # Permite streaming de logs!
             text=True,
             cwd=Path(__file__).parent.parent,
             env=env,
             timeout=600  # 10 minutos timeout
         )
 
-        # Log do output para debug
-        if result.stdout:
-            logger.info(f"📋 Script output:\n{result.stdout[:1000]}")  # Primeiros 1000 chars
-        if result.stderr:
-            logger.warning(f"⚠️ Script stderr:\n{result.stderr[:1000]}")
+        # Nota: Como não estamos capturando output, não temos result.stdout/stderr
+        # Mas os logs aparecem em tempo real no Cloud Run, facilitando debug
 
         if result.returncode != 0:
-            error_msg = f"Script falhou (exit code {result.returncode}):\n{result.stderr}"
+            error_msg = f"Script falhou (exit code {result.returncode})"
             logger.error(f"❌ {error_msg}")
 
             # Notificar erro no Slack
@@ -2621,13 +2620,12 @@ async def execute_weekly_validation(db: Session = Depends(get_db)):
             logger.warning(f"⚠️ Erro no upload Cloud Storage: {storage_error}")
             excel_url = None
 
-        # 5. Extrair métricas do log de saída
-        metrics = _parse_validation_metrics(result.stdout)
-
-        # 6. Enviar notificação Slack
+        # 5. Enviar notificação Slack (sem métricas detalhadas, apenas sucesso)
+        # Nota: Como não estamos capturando stdout, não temos acesso às métricas parseadas
+        # Mas o Excel tem todas as informações necessárias
         notifier = ValidationSlackNotifier()
         notifier.send_validation_summary(
-            metrics=metrics,
+            metrics={"status": "success", "message": "Validação concluída - detalhes no Excel"},
             excel_url=excel_url,
             period={
                 'start': start_date,
@@ -2645,8 +2643,7 @@ async def execute_weekly_validation(db: Session = Depends(get_db)):
                 "captacao": start_date,
                 "vendas": f"{sales_start} a {sales_end}"
             },
-            "excel_url": excel_url,
-            "metrics": metrics
+            "excel_url": excel_url
         }
 
     except subprocess.TimeoutExpired:
