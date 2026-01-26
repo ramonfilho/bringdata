@@ -1650,8 +1650,8 @@ def main():
             slack_period = {
                 'start': start_date,
                 'end': end_date,
-                'sales_start': sales_start_date,
-                'sales_end': sales_end_date
+                'sales_start': args.sales_start_date if hasattr(args, 'sales_start_date') else None,
+                'sales_end': args.sales_end_date if hasattr(args, 'sales_end_date') else None
             }
 
             success = notifier.send_validation_summary(

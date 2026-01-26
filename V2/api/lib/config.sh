@@ -77,8 +77,8 @@ SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/T09393Z
 # META API (DATA SOURCE)
 # =============================================================================
 
-# Meta Data Source: 'api' (extração via Meta API) ou 'planilha' (extração via Google Sheets)
-META_DATA_SOURCE="${META_DATA_SOURCE:-api}"
+# Meta Data Source: 'api' (extração via Meta API) ou 'planilha' (extração via Google Sheets/CSV)
+META_DATA_SOURCE="${META_DATA_SOURCE:-planilha}"
 
 # =============================================================================
 # GURU API (DATA SOURCE)
