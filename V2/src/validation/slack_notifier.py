@@ -47,11 +47,13 @@ class ValidationSlackNotifier:
         try:
             # Formatar período
             period_text = "Período não especificado"
+            report_type = None
             if period:
                 period_text = (
                     f"*Captação:* {period.get('start', 'N/A')}\n"
                     f"*Vendas:* {period.get('sales_start', 'N/A')} a {period.get('sales_end', 'N/A')}"
                 )
+                report_type = period.get('report_type', 'fechamento')
 
             # Formatar métricas
             metrics_text = self._format_metrics(metrics)
@@ -59,9 +61,15 @@ class ValidationSlackNotifier:
             # Determinar cor (verde se tudo ok, amarelo se degradação)
             color = self._determine_color(metrics)
 
+            # Determinar título baseado no tipo de relatório
+            if report_type == 'pos-devolucoes':
+                title = "✅ *Validação ML - Relatório Pós-Devoluções (Final)*"
+            else:
+                title = "📊 *Validação ML - Relatório de Fechamento*"
+
             # Construir payload
             payload = {
-                "text": "📊 *Validação Semanal ML - Smart Ads*",
+                "text": title,
                 "attachments": [
                     {
                         "color": color,

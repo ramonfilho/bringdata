@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # Descrição: Deploy do Job de Validação Semanal do Modelo ML
-# Uso: ./deploy_validation_job.sh [--yes]
+# Uso: ./deploy_validation_job.sh [--type fechamento|pos-devolucoes] [--yes]
 #
 # ⚠️  IMPORTANTE - DISTINÇÃO:
 #   - deploy.sh = Deploy da API em PRODUÇÃO (Cloud Run Service - 24/7 HTTP)
@@ -49,6 +49,7 @@ source "$SCRIPT_DIR/lib/config.sh"
 # VARIÁVEIS DE CONTROLE ESPECÍFICAS DO JOB
 # =============================================================================
 
+REPORT_TYPE="fechamento"  # fechamento ou pos-devolucoes
 JOB_NAME="validation-weekly-job"
 IMAGE_TAG=""
 YES_FLAG=false
@@ -185,7 +186,7 @@ deploy_validation_job() {
 
     # Deploy do Job
     # IMPORTANTE: Cloud Run Jobs usam --set-env-vars (não --update-env-vars)
-    # Configurado para Campanha Atípica 1 (Dez/2025 - Jan/2026)
+    # Configurado com cálculo automático de datas (padrão 3 semanas)
     gcloud run jobs deploy $JOB_NAME \
         --image "$IMAGE_TO_DEPLOY" \
         --region $REGION \
@@ -196,7 +197,7 @@ deploy_validation_job() {
         --set-env-vars="$ENV_VARS" \
         --set-cloudsql-instances="$CLOUD_SQL_CONNECTION" \
         --command python \
-        --args /app/src/validation/validate_ml_performance.py,--start-date,2025-12-16,--end-date,2026-01-12,--sales-start-date,2026-01-19,--sales-end-date,2026-01-25 \
+        --args /app/src/validation/validate_ml_performance.py,--auto-calculate-dates,--report-type,$REPORT_TYPE \
         --quiet || {
             print_error "Falha no deploy do Cloud Run Job"
             exit 1
@@ -206,10 +207,12 @@ deploy_validation_job() {
 
     print_info "O Job está configurado para executar:"
     print_info "  python /app/src/validation/validate_ml_performance.py \\"
-    print_info "    --start-date 2025-12-16 --end-date 2026-01-12 \\"
-    print_info "    --sales-start-date 2026-01-19 --sales-end-date 2026-01-25"
+    print_info "    --auto-calculate-dates \\"
+    print_info "    --report-type $REPORT_TYPE"
     print_info ""
-    print_info "Campanha Atípica 1: Dez/2025 - Jan/2026 (28 dias captação, fim de ano)"
+    print_info "Datas serão calculadas automaticamente baseado na data de execução (segunda-feira)"
+    print_info "Padrão de campanha: 7 dias captação + 6 dias CPL + 7 dias vendas"
+    print_info "Tipo de relatório: $REPORT_TYPE"
     echo ""
 }
 
@@ -294,23 +297,32 @@ usage() {
     echo "Uso: $0 [OPTIONS]"
     echo ""
     echo "Opções:"
+    echo "  --type TYPE            Tipo de relatório: 'fechamento' ou 'pos-devolucoes' (padrão: fechamento)"
     echo "  --reuse-image          Reusar imagem Docker existente (não fazer novo build)"
     echo "  --execute-now          Executar Job imediatamente após deploy (teste)"
     echo "  --yes, -y              Pular confirmação"
     echo "  -h, --help             Mostrar esta mensagem"
     echo ""
     echo "Exemplos:"
-    echo "  $0                     # Build nova imagem e deploy"
-    echo "  $0 --yes               # Deploy sem confirmação"
-    echo "  $0 --reuse-image       # Reusar imagem existente"
-    echo "  $0 --execute-now       # Deploy e testar imediatamente"
-    echo "  $0 --reuse-image --yes --execute-now  # Reuso + teste"
+    echo "  $0                                    # Deploy job de fechamento (padrão)"
+    echo "  $0 --type pos-devolucoes --yes        # Deploy job pós-devoluções"
+    echo "  $0 --type fechamento --yes            # Deploy job de fechamento"
+    echo "  $0 --reuse-image --yes                # Reusar imagem existente"
+    echo "  $0 --execute-now                      # Deploy e testar imediatamente"
     exit 1
 }
 
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
         case $1 in
+            --type)
+                REPORT_TYPE="$2"
+                if [[ "$REPORT_TYPE" != "fechamento" && "$REPORT_TYPE" != "pos-devolucoes" ]]; then
+                    print_error "Tipo inválido: $REPORT_TYPE (use 'fechamento' ou 'pos-devolucoes')"
+                    exit 1
+                fi
+                shift 2
+                ;;
             --reuse-image)
                 REUSE_IMAGE=true
                 shift
@@ -332,6 +344,13 @@ parse_arguments() {
                 ;;
         esac
     done
+
+    # Ajustar JOB_NAME baseado no tipo de relatório
+    if [[ "$REPORT_TYPE" == "pos-devolucoes" ]]; then
+        JOB_NAME="validation-pos-devolucoes-job"
+    else
+        JOB_NAME="validation-fechamento-job"
+    fi
 }
 
 # =============================================================================

@@ -72,6 +72,78 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def validate_tmb_sales_freshness(sales_df, sales_start, sales_end):
+    """
+    Valida se as vendas TMB estão atualizadas para o período de análise.
+
+    Regras:
+    1. Se não houver NENHUMA venda TMB no período → ERRO CRÍTICO (para execução)
+    2. Se houver vendas TMB mas a mais recente é ANTES do fim do período → WARNING (continua com aviso)
+
+    Args:
+        sales_df: DataFrame com todas as vendas (Guru + TMB) já filtradas por período
+        sales_start: Data início do período de vendas (string 'YYYY-MM-DD')
+        sales_end: Data fim do período de vendas (string 'YYYY-MM-DD')
+
+    Returns:
+        dict com status e mensagem
+    """
+    # Filtrar vendas TMB
+    tmb_sales = sales_df[sales_df['origem'] == 'tmb'] if 'origem' in sales_df.columns else pd.DataFrame()
+
+    if tmb_sales.empty:
+        logger.error("❌ ERRO CRÍTICO: Nenhuma venda TMB encontrada no período!")
+        logger.error(f"   Período analisado: {sales_start} a {sales_end}")
+        logger.error("   ")
+        logger.error("   ⚠️  AÇÃO NECESSÁRIA:")
+        logger.error("   1. Baixar arquivo TMB atualizado")
+        logger.error("   2. Fazer upload do arquivo para: files/validation/vendas/")
+        logger.error("   3. Fazer novo deploy do job ou rodar localmente")
+        logger.error("   ")
+        return {
+            'status': 'error',
+            'message': 'Nenhuma venda TMB no período',
+            'stop_execution': True
+        }
+
+    # Verificar data mais recente das vendas TMB
+    tmb_latest_date = tmb_sales['sale_date'].max()
+    sales_end_dt = pd.to_datetime(sales_end)
+
+    logger.info(f"📊 Vendas TMB no período: {len(tmb_sales)}")
+    logger.info(f"   Data mais recente TMB: {tmb_latest_date.strftime('%Y-%m-%d')}")
+    logger.info(f"   Fim do período esperado: {sales_end}")
+
+    # Se a data mais recente é antes do fim do período
+    if tmb_latest_date < sales_end_dt:
+        days_missing = (sales_end_dt - tmb_latest_date).days
+
+        logger.warning("⚠️  AVISO: Vendas TMB podem estar DESATUALIZADAS!")
+        logger.warning(f"   Última venda TMB: {tmb_latest_date.strftime('%Y-%m-%d')}")
+        logger.warning(f"   Fim do período: {sales_end}")
+        logger.warning(f"   Diferença: {days_missing} dias")
+        logger.warning("   ")
+        logger.warning(f"   ℹ️  O relatório será gerado com vendas TMB até {tmb_latest_date.strftime('%d/%m/%Y')}")
+        logger.warning("   ")
+
+        return {
+            'status': 'warning',
+            'message': f'Vendas TMB até {tmb_latest_date.strftime("%Y-%m-%d")} (faltam {days_missing} dias)',
+            'stop_execution': False,
+            'tmb_latest_date': tmb_latest_date.strftime('%Y-%m-%d'),
+            'days_missing': days_missing
+        }
+
+    # Vendas TMB estão atualizadas
+    logger.info("✅ Vendas TMB atualizadas até o fim do período")
+
+    return {
+        'status': 'ok',
+        'message': 'Vendas TMB atualizadas',
+        'stop_execution': False
+    }
+
+
 def parse_args():
     """
     Parse argumentos da linha de comando.
@@ -133,6 +205,22 @@ Exemplos de uso:
         '--sales-end-date',
         type=str,
         help='Data fim das vendas para matching (YYYY-MM-DD) - opcional'
+    )
+
+    # Tipo de relatório
+    parser.add_argument(
+        '--report-type',
+        type=str,
+        choices=['fechamento', 'pos-devolucoes'],
+        default='fechamento',
+        help='Tipo de relatório: fechamento (vendas ainda em prazo de devolução) ou pos-devolucoes (vendas com devoluções já processadas)'
+    )
+
+    # Cálculo automático de datas (para campanhas padrão)
+    parser.add_argument(
+        '--auto-calculate-dates',
+        action='store_true',
+        help='Calcular datas automaticamente para campanha padrão (3 semanas). Assumindo execução toda segunda-feira.'
     )
 
     # Meta Ads API
@@ -446,6 +534,40 @@ def main():
 
     # 1. Parse argumentos
     args = parse_args()
+
+    # 1.2. Calcular datas automaticamente se solicitado
+    if args.auto_calculate_dates:
+        from datetime import datetime, timedelta
+
+        hoje = datetime.now()
+
+        # Calcular baseado no tipo de relatório
+        if args.report_type == 'pos-devolucoes':
+            # Pós-devoluções: campanha de 1 semana atrás
+            # Se hoje é segunda 23/02, validar campanha que fechou em 15/02
+            vendas_fim = hoje - timedelta(days=8)  # Domingo de 1 semana atrás
+            vendas_inicio = vendas_fim - timedelta(days=6)  # Segunda dessa semana
+
+            captacao_fim = vendas_inicio - timedelta(days=1)  # Domingo anterior
+            captacao_inicio = captacao_fim - timedelta(days=6)  # Segunda dessa semana
+        else:
+            # Fechamento: campanha que fechou ontem (domingo)
+            # Se hoje é segunda 23/02, validar campanha que fechou 22/02
+            vendas_fim = hoje - timedelta(days=1)  # Domingo (ontem)
+            vendas_inicio = vendas_fim - timedelta(days=6)  # Segunda da semana passada
+
+            captacao_fim = vendas_inicio - timedelta(days=1)  # Domingo anterior
+            captacao_inicio = captacao_fim - timedelta(days=6)  # Segunda dessa semana
+
+        # Sobrescrever argumentos
+        args.start_date = captacao_inicio.strftime('%Y-%m-%d')
+        args.end_date = captacao_fim.strftime('%Y-%m-%d')
+        args.sales_start_date = vendas_inicio.strftime('%Y-%m-%d')
+        args.sales_end_date = vendas_fim.strftime('%Y-%m-%d')
+
+        logger.info(f"📅 Datas calculadas automaticamente ({args.report_type}):")
+        logger.info(f"   Captação: {args.start_date} a {args.end_date}")
+        logger.info(f"   Vendas: {args.sales_start_date} a {args.sales_end_date}")
 
     # DEBUG: Verificar o que foi parseado
 
@@ -788,6 +910,52 @@ def main():
     logger.info(f"   Total: {sales_before} → {sales_after} vendas ({sales_after/sales_before*100:.1f}%)")
     logger.info(f"   Guru: {sales_guru_before} → {sales_guru_after} vendas")
     logger.info(f"   TMB: {sales_tmb_before} → {sales_tmb_after} vendas")
+
+    # =========================================================================
+    # VALIDAÇÃO: Verificar se vendas TMB estão atualizadas
+    # =========================================================================
+    print(flush=True)
+    print("🔍 VALIDANDO ATUALIZAÇÃO DAS VENDAS TMB...", flush=True)
+    print(flush=True)
+
+    tmb_validation = validate_tmb_sales_freshness(sales_df, sales_start, sales_end)
+
+    if tmb_validation['stop_execution']:
+        # ERRO CRÍTICO: Sem vendas TMB no período
+        logger.error("❌ Execução interrompida devido a vendas TMB faltantes")
+
+        # Enviar notificação Slack de erro
+        slack_webhook = os.getenv('SLACK_WEBHOOK_URL')
+        if slack_webhook:
+            try:
+                import requests
+
+                error_message = (
+                    f"❌ *ERRO CRÍTICO: Validação ML Interrompida*\n\n"
+                    f"*Motivo:* Nenhuma venda TMB encontrada no período\n"
+                    f"*Período analisado:* {sales_start} a {sales_end}\n\n"
+                    f"*Ação necessária:*\n"
+                    f"1. Baixar arquivo TMB atualizado\n"
+                    f"2. Fazer novo deploy\n"
+                )
+
+                response = requests.post(slack_webhook, json={"text": error_message})
+                if response.status_code == 200:
+                    logger.info("   📱 Notificação de erro enviada para Slack")
+                else:
+                    logger.warning(f"   ⚠️  Falha ao enviar Slack (status {response.status_code})")
+            except Exception as e:
+                logger.warning(f"   ⚠️  Erro ao enviar notificação Slack: {e}")
+
+        sys.exit(1)
+
+    elif tmb_validation['status'] == 'warning':
+        # WARNING: Vendas TMB desatualizadas, mas continua
+        # (já logou o warning dentro da função)
+        pass
+
+    print(flush=True)
+    # =========================================================================
 
     if leads_df.empty:
         logger.error("❌ Nenhum lead no período especificado")
@@ -1520,7 +1688,10 @@ def main():
 
     # Sempre adicionar timestamp no nome do arquivo (nunca sobrescreve)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    excel_filename = f"validation_report_{start_date}_to_{end_date}_{timestamp}.xlsx"
+
+    # Adicionar prefixo baseado no tipo de relatório
+    report_type_prefix = args.report_type.upper().replace('-', '_')
+    excel_filename = f"validation_report_{report_type_prefix}_{start_date}_to_{end_date}_{timestamp}.xlsx"
     excel_path = str(Path(output_dir) / excel_filename)
     logger.info(f"   📌 Criando relatório: {excel_filename}")
 
@@ -1651,7 +1822,8 @@ def main():
                 'start': start_date,
                 'end': end_date,
                 'sales_start': args.sales_start_date if hasattr(args, 'sales_start_date') else None,
-                'sales_end': args.sales_end_date if hasattr(args, 'sales_end_date') else None
+                'sales_end': args.sales_end_date if hasattr(args, 'sales_end_date') else None,
+                'report_type': args.report_type
             }
 
             success = notifier.send_validation_summary(
