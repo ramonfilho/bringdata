@@ -349,9 +349,8 @@ class MLMonitoringCalculator:
         """
         Calcula métricas de monitoramento do modelo.
 
-        SIMPLIFICADO: Foca em AUC e métricas de concentração.
-        Tabelas detalhadas de conversão e lift por decil foram removidas devido a
-        problemas com thresholds e distribuição desbalanceada do test set.
+        Foca em AUC e métricas de concentração, que são robustas à otimização da Meta
+        que altera a distribuição de scores ao longo do tempo.
 
         Args:
             matched_df: DataFrame com matched leads e conversões

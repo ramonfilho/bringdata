@@ -326,6 +326,15 @@ class ValidationReportGenerator:
             'negative': workbook.add_format({
                 'bg_color': '#FADBD8',
                 'border': 1
+            }),
+            'warning': workbook.add_format({
+                'bold': True,
+                'bg_color': '#FFF3CD',
+                'font_color': '#856404',
+                'border': 1,
+                'align': 'center',
+                'valign': 'vcenter',
+                'text_wrap': True
             })
         }
 
@@ -2377,9 +2386,13 @@ class ValidationReportGenerator:
         """
         Gera aba ML Monitoring com métricas de performance do modelo.
 
-        SIMPLIFICADO: Foca apenas em AUC (Area Under Curve).
-        Outras seções foram removidas devido a problemas com thresholds
-        e distribuição desbalanceada do test set.
+        Inclui:
+        - AUC (Area Under Curve): discriminação de conversores vs não-conversores
+        - Concentração: % de conversões nos top decis
+
+        NOTA: Métricas por decil (lift, monotonia) não são incluídas pois a Meta
+        otimiza e altera a distribuição ao longo do tempo, tornando comparações
+        com test set estatisticamente inválidas.
 
         Args:
             writer: ExcelWriter object
@@ -2486,10 +2499,10 @@ class ValidationReportGenerator:
         worksheet.write(row, 3, top5_delta / 100, formats['percent'])
         row += 3
 
-        # Nota sobre simplificação
-        worksheet.write(row, 0, 'NOTA: Tabelas detalhadas por decil foram removidas devido a problemas com thresholds', formats['text'])
+        # Nota sobre limitações das métricas
+        worksheet.write(row, 0, 'NOTA: AUC e concentração são as métricas principais de monitoramento.', formats['text'])
         row += 1
-        worksheet.write(row, 0, 'e distribuição desbalanceada do test set. AUC e concentração são as métricas mais confiáveis.', formats['text'])
+        worksheet.write(row, 0, 'Outras métricas por decil (lift, monotonia) não são comparáveis devido à otimização da Meta que altera a distribuição.', formats['text'])
 
         # Ajustar larguras das colunas
         worksheet.set_column(0, 0, 80)  # Coluna de texto
