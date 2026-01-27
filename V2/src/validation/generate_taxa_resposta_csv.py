@@ -40,6 +40,8 @@ def get_capi_leads_by_day(start_date: str, end_date: str) -> Dict[str, int]:
     """
     Busca leads do banco CAPI via API e conta por dia.
 
+    Faz chamadas em chunks de 7 dias para evitar limite de 10k leads da API.
+
     Args:
         start_date: Data início (YYYY-MM-DD)
         end_date: Data fim (YYYY-MM-DD)
@@ -49,56 +51,79 @@ def get_capi_leads_by_day(start_date: str, end_date: str) -> Dict[str, int]:
     """
     logger.info(f"📊 Buscando leads CAPI ({start_date} a {end_date})")
 
-    url = f"{API_URL}/webhook/lead_capture/recent?start_date={start_date}&end_date={end_date}&limit=10000"
+    # Converter para datetime
+    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+    end_dt = datetime.strptime(end_date, '%Y-%m-%d')
 
-    try:
-        # Usar curl (mais confiável que requests neste ambiente)
-        result = subprocess.run(
-            ['curl', '-s', '--max-time', '60', url],
-            capture_output=True,
-            text=True,
-            timeout=65
-        )
+    # Dividir em chunks de 7 dias para evitar limite de 10k
+    all_leads = []
+    current_start = start_dt
+    chunk_num = 0
 
-        if result.returncode != 0:
-            logger.error(f"❌ Curl falhou: {result.stderr}")
-            return {}
+    while current_start <= end_dt:
+        chunk_num += 1
+        current_end = min(current_start + timedelta(days=6), end_dt)
 
-        response_data = json.loads(result.stdout)
-        leads = response_data.get('leads', [])
+        chunk_start_str = current_start.strftime('%Y-%m-%d')
+        chunk_end_str = current_end.strftime('%Y-%m-%d')
 
-        logger.info(f"   ✅ {len(leads)} leads encontrados no CAPI")
+        logger.info(f"   🔍 Chunk {chunk_num}: {chunk_start_str} a {chunk_end_str}")
 
-        # Converter para DataFrame
-        df = pd.DataFrame(leads)
+        url = f"{API_URL}/webhook/lead_capture/recent?start_date={chunk_start_str}&end_date={chunk_end_str}&limit=10000"
 
-        if len(df) == 0:
-            logger.warning("   ⚠️ Nenhum lead no período")
-            return {}
+        try:
+            # Usar curl (mais confiável que requests neste ambiente)
+            result = subprocess.run(
+                ['curl', '-s', '--max-time', '60', url],
+                capture_output=True,
+                text=True,
+                timeout=65
+            )
 
-        # Parsear created_at e extrair data
-        df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce')
-        df['date'] = df['created_at'].dt.date
+            if result.returncode != 0:
+                logger.error(f"❌ Curl falhou para chunk {chunk_num}: {result.stderr}")
+                current_start = current_end + timedelta(days=1)
+                continue
 
-        # Contar EMAILS ÚNICOS por dia (deduplicar por email + data)
-        # IMPORTANTE: Mesmo email pode aparecer múltiplas vezes (duplicatas no banco)
-        df_unique = df[['email', 'date']].drop_duplicates()
+            response_data = json.loads(result.stdout)
+            chunk_leads = response_data.get('leads', [])
 
-        # Contar por dia
-        daily_counts = df_unique['date'].value_counts().to_dict()
+            logger.info(f"      ✅ {len(chunk_leads)} leads encontrados")
 
-        # Converter date objects para strings
-        daily_counts_str = {str(date): count for date, count in daily_counts.items()}
+            all_leads.extend(chunk_leads)
 
-        logger.info(f"   📊 Leads CAPI distribuídos em {len(daily_counts_str)} dias")
+        except Exception as e:
+            logger.error(f"❌ Erro ao buscar chunk {chunk_num}: {e}")
 
-        return daily_counts_str
+        # Avançar para próximo chunk
+        current_start = current_end + timedelta(days=1)
 
-    except Exception as e:
-        logger.error(f"❌ Erro ao buscar leads CAPI: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
+    logger.info(f"   ✅ Total: {len(all_leads)} leads de {chunk_num} chunks")
+
+    if len(all_leads) == 0:
+        logger.warning("   ⚠️ Nenhum lead no período")
         return {}
+
+    # Converter para DataFrame
+    df = pd.DataFrame(all_leads)
+
+    # Parsear created_at e extrair data
+    df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce')
+    df['date'] = df['created_at'].dt.date
+
+    # Contar EMAILS ÚNICOS por dia (deduplicar por email + data)
+    # IMPORTANTE: Mesmo email pode aparecer múltiplas vezes (duplicatas no banco)
+    df_unique = df[['email', 'date']].drop_duplicates()
+
+    # Contar por dia
+    daily_counts = df_unique['date'].value_counts().to_dict()
+
+    # Converter date objects para strings
+    daily_counts_str = {str(date): count for date, count in daily_counts.items()}
+
+    logger.info(f"   📊 Leads CAPI distribuídos em {len(daily_counts_str)} dias")
+
+    return daily_counts_str
 
 
 def get_survey_responses_by_day(start_date: str, end_date: str) -> Dict[str, int]:
