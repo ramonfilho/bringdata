@@ -50,7 +50,7 @@ class ValidationSlackNotifier:
             report_type = None
             if period:
                 period_text = (
-                    f"*Captação:* {period.get('start', 'N/A')}\n"
+                    f"*Captação:* {period.get('start', 'N/A')} a {period.get('end', 'N/A')}\n"
                     f"*Vendas:* {period.get('sales_start', 'N/A')} a {period.get('sales_end', 'N/A')}"
                 )
                 report_type = period.get('report_type', 'fechamento')

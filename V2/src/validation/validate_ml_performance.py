@@ -320,8 +320,8 @@ Exemplos de uso:
     if args.end_date and not args.start_date:
         parser.error("--end-date requer --start-date")
 
-    if not args.periodo and not args.start_date:
-        parser.error("É necessário especificar --periodo OU --start-date/--end-date")
+    if not args.periodo and not args.start_date and not args.auto_calculate_dates:
+        parser.error("É necessário especificar --periodo OU --start-date/--end-date (ou usar --auto-calculate-dates)")
 
     return args
 
@@ -860,9 +860,11 @@ def main():
     logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)}")
 
     # Combinar vendas Guru + TMB
+    # Se não houver arquivos TMB locais, tentará buscar do Cloud Storage baseado em report_type
     sales_df = sales_loader.combine_sales(
         guru_df=guru_df,
-        tmb_paths=tmb_files if tmb_files else None
+        tmb_paths=tmb_files if tmb_files else None,
+        report_type=args.report_type
     )
 
     if sales_df.empty:
@@ -988,8 +990,8 @@ def main():
     from datetime import datetime
     start_dt = datetime.strptime(start_date, '%Y-%m-%d')
     end_dt = datetime.strptime(end_date, '%Y-%m-%d')
-    start_str = start_dt.strftime('%d:%m')
-    end_str = end_dt.strftime('%d:%m')
+    start_str = start_dt.strftime('%d-%m')
+    end_str = end_dt.strftime('%d-%m')
     reports_dir = f'files/validation/meta_reports/{start_str} - {end_str}'
 
     # Configuração de fonte de dados: "local" (arquivos) ou "api" (Meta Marketing API)

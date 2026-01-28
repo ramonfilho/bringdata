@@ -49,8 +49,7 @@ source "$SCRIPT_DIR/lib/config.sh"
 # VARIÁVEIS DE CONTROLE ESPECÍFICAS DO JOB
 # =============================================================================
 
-REPORT_TYPE="fechamento"  # fechamento ou pos-devolucoes
-JOB_NAME="validation-weekly-job"
+JOB_NAME="validation-weekly-job"  # Job único para ambos os tipos de relatório
 IMAGE_TAG=""
 YES_FLAG=false
 EXECUTE_NOW=false
@@ -186,7 +185,7 @@ deploy_validation_job() {
 
     # Deploy do Job
     # IMPORTANTE: Cloud Run Jobs usam --set-env-vars (não --update-env-vars)
-    # Configurado com cálculo automático de datas (padrão 3 semanas)
+    # Job genérico - o --report-type será passado pelo Scheduler em runtime
     gcloud run jobs deploy $JOB_NAME \
         --image "$IMAGE_TO_DEPLOY" \
         --region $REGION \
@@ -197,7 +196,7 @@ deploy_validation_job() {
         --set-env-vars="$ENV_VARS" \
         --set-cloudsql-instances="$CLOUD_SQL_CONNECTION" \
         --command python \
-        --args /app/src/validation/validate_ml_performance.py,--auto-calculate-dates,--report-type,$REPORT_TYPE \
+        --args /app/src/validation/validate_ml_performance.py,--auto-calculate-dates \
         --quiet || {
             print_error "Falha no deploy do Cloud Run Job"
             exit 1
@@ -205,14 +204,17 @@ deploy_validation_job() {
 
     print_success "Deploy do Job concluído"
 
-    print_info "O Job está configurado para executar:"
+    print_info "O Job está configurado com args padrão:"
     print_info "  python /app/src/validation/validate_ml_performance.py \\"
-    print_info "    --auto-calculate-dates \\"
-    print_info "    --report-type $REPORT_TYPE"
+    print_info "    --auto-calculate-dates"
     print_info ""
-    print_info "Datas serão calculadas automaticamente baseado na data de execução (segunda-feira)"
-    print_info "Padrão de campanha: 7 dias captação + 6 dias CPL + 7 dias vendas"
-    print_info "Tipo de relatório: $REPORT_TYPE"
+    print_info "O Scheduler deve passar --report-type em runtime:"
+    print_info "  gcloud run jobs execute $JOB_NAME --region $REGION \\"
+    print_info "    --args='--auto-calculate-dates,--report-type,fechamento'"
+    print_info ""
+    print_info "Arquivos TMB serão buscados do Cloud Storage:"
+    print_info "  gs://smart-ads-validation-reports/vendas/tmb_fechamento.xlsx"
+    print_info "  gs://smart-ads-validation-reports/vendas/tmb_pos-devolucoes.xlsx"
     echo ""
 }
 
@@ -267,10 +269,22 @@ print_final_report() {
     echo "   Região: $REGION"
     echo ""
 
-    echo -e "${BLUE}🔧 Comandos Úteis:${NC}"
+    echo -e "${BLUE}📦 Upload de Arquivos TMB (semanal):${NC}"
     echo ""
-    echo "   Executar Job manualmente:"
-    echo "   gcloud run jobs execute $JOB_NAME --region $REGION"
+    echo "   Upload arquivos TMB para Cloud Storage:"
+    echo "   gsutil cp tmb_fechamento.xlsx gs://smart-ads-validation-reports/vendas/"
+    echo "   gsutil cp tmb_pos_devolucoes.xlsx gs://smart-ads-validation-reports/vendas/"
+    echo ""
+
+    echo -e "${BLUE}🔧 Comandos de Execução:${NC}"
+    echo ""
+    echo "   Executar relatório de fechamento:"
+    echo "   gcloud run jobs execute $JOB_NAME --region $REGION \\"
+    echo "     --args='--auto-calculate-dates,--report-type,fechamento'"
+    echo ""
+    echo "   Executar relatório pós-devoluções:"
+    echo "   gcloud run jobs execute $JOB_NAME --region $REGION \\"
+    echo "     --args='--auto-calculate-dates,--report-type,pos-devolucoes'"
     echo ""
     echo "   Ver logs da última execução:"
     echo "   gcloud logging tail \"resource.type=cloud_run_job AND resource.labels.job_name=$JOB_NAME\" --format=json"
@@ -278,14 +292,19 @@ print_final_report() {
     echo "   Ver execuções do Job:"
     echo "   gcloud run jobs executions list --job=$JOB_NAME --region=$REGION"
     echo ""
-    echo "   Deletar Job (se necessário):"
-    echo "   gcloud run jobs delete $JOB_NAME --region=$REGION"
-    echo ""
 
-    echo -e "${BLUE}📅 Próximos Passos:${NC}"
-    echo "   1. Configurar Cloud Scheduler para disparar o Job semanalmente"
-    echo "   2. Usar este comando no Scheduler:"
-    echo "      gcloud run jobs execute $JOB_NAME --region $REGION"
+    echo -e "${BLUE}📅 Configuração do Scheduler:${NC}"
+    echo "   Criar 2 schedulers (segunda-feira):"
+    echo ""
+    echo "   1. Fechamento (08:00):"
+    echo "      Target: Cloud Run Job"
+    echo "      Job: $JOB_NAME"
+    echo "      Args: --auto-calculate-dates,--report-type,fechamento"
+    echo ""
+    echo "   2. Pós-Devoluções (10:00):"
+    echo "      Target: Cloud Run Job"
+    echo "      Job: $JOB_NAME"
+    echo "      Args: --auto-calculate-dates,--report-type,pos-devolucoes"
     echo ""
 }
 
@@ -297,32 +316,25 @@ usage() {
     echo "Uso: $0 [OPTIONS]"
     echo ""
     echo "Opções:"
-    echo "  --type TYPE            Tipo de relatório: 'fechamento' ou 'pos-devolucoes' (padrão: fechamento)"
     echo "  --reuse-image          Reusar imagem Docker existente (não fazer novo build)"
     echo "  --execute-now          Executar Job imediatamente após deploy (teste)"
     echo "  --yes, -y              Pular confirmação"
     echo "  -h, --help             Mostrar esta mensagem"
     echo ""
     echo "Exemplos:"
-    echo "  $0                                    # Deploy job de fechamento (padrão)"
-    echo "  $0 --type pos-devolucoes --yes        # Deploy job pós-devoluções"
-    echo "  $0 --type fechamento --yes            # Deploy job de fechamento"
-    echo "  $0 --reuse-image --yes                # Reusar imagem existente"
-    echo "  $0 --execute-now                      # Deploy e testar imediatamente"
+    echo "  $0                     # Deploy job (padrão)"
+    echo "  $0 --reuse-image --yes # Reusar imagem existente"
+    echo "  $0 --execute-now       # Deploy e testar imediatamente"
+    echo ""
+    echo "Nota: O --report-type deve ser passado pelo Scheduler em runtime:"
+    echo "  gcloud run jobs execute validation-weekly-job --region us-central1 \\"
+    echo "    --args='--auto-calculate-dates,--report-type,fechamento'"
     exit 1
 }
 
 parse_arguments() {
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --type)
-                REPORT_TYPE="$2"
-                if [[ "$REPORT_TYPE" != "fechamento" && "$REPORT_TYPE" != "pos-devolucoes" ]]; then
-                    print_error "Tipo inválido: $REPORT_TYPE (use 'fechamento' ou 'pos-devolucoes')"
-                    exit 1
-                fi
-                shift 2
-                ;;
             --reuse-image)
                 REUSE_IMAGE=true
                 shift
@@ -344,13 +356,6 @@ parse_arguments() {
                 ;;
         esac
     done
-
-    # Ajustar JOB_NAME baseado no tipo de relatório
-    if [[ "$REPORT_TYPE" == "pos-devolucoes" ]]; then
-        JOB_NAME="validation-pos-devolucoes-job"
-    else
-        JOB_NAME="validation-fechamento-job"
-    fi
 }
 
 # =============================================================================

@@ -587,9 +587,57 @@ class SalesDataLoader:
 
         return df_norm
 
-    def load_tmb_sales(self, tmb_paths: List[str]) -> pd.DataFrame:
+    def _download_tmb_from_gcs(self, report_type: str) -> List[str]:
+        """
+        Baixa arquivo TMB do Google Cloud Storage baseado no report_type.
+
+        Args:
+            report_type: 'fechamento' ou 'pos-devolucoes'
+
+        Returns:
+            Lista com caminho local do arquivo baixado, ou lista vazia se falhar
+        """
+        try:
+            from google.cloud import storage
+            import tempfile
+            import os
+
+            bucket_name = os.environ.get('VALIDATION_REPORTS_BUCKET', 'smart-ads-validation-reports')
+            blob_name = f'vendas/tmb_{report_type}.xlsx'
+
+            logger.info(f"   Baixando gs://{bucket_name}/{blob_name}...")
+
+            # Criar arquivo temporário
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
+            temp_path = temp_file.name
+            temp_file.close()
+
+            # Baixar do bucket
+            client = storage.Client()
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(blob_name)
+
+            if not blob.exists():
+                logger.error(f"❌ Arquivo não encontrado: gs://{bucket_name}/{blob_name}")
+                return []
+
+            blob.download_to_filename(temp_path)
+            logger.info(f"   ✅ Arquivo baixado: {blob_name} ({blob.size / 1024:.1f} KB)")
+
+            return [temp_path]
+
+        except Exception as e:
+            logger.error(f"❌ Erro ao baixar TMB do Cloud Storage: {e}")
+            logger.warning(f"   Certifique-se que o arquivo existe em gs://{bucket_name}/vendas/tmb_{report_type}.xlsx")
+            return []
+
+    def load_tmb_sales(self, tmb_paths: List[str] = None, report_type: str = 'fechamento') -> pd.DataFrame:
         """
         Carrega arquivos Excel de vendas da TMB.
+
+        Pode carregar de:
+        1. Caminhos locais fornecidos em tmb_paths
+        2. Google Cloud Storage (se tmb_paths vazio) baseado em report_type
 
         Colunas esperadas:
         - Cliente Email: Email do comprador
@@ -599,14 +647,20 @@ class SalesDataLoader:
         - Status: Status do pedido (filtrar apenas 'Efetivado')
 
         Args:
-            tmb_paths: Lista de caminhos para arquivos Excel da TMB
+            tmb_paths: Lista de caminhos para arquivos Excel da TMB (opcional)
+            report_type: Tipo de relatório ('fechamento' ou 'pos-devolucoes')
 
         Returns:
             DataFrame normalizado com origem='tmb'
         """
+        # Se não forneceu paths, baixar do Cloud Storage
         if not tmb_paths:
-            logger.warning("⚠️ Nenhum arquivo TMB fornecido")
-            return pd.DataFrame()
+            logger.info(f"📦 Buscando vendas TMB no Cloud Storage (report_type={report_type})...")
+            tmb_paths = self._download_tmb_from_gcs(report_type)
+
+            if not tmb_paths:
+                logger.warning("⚠️ Nenhum arquivo TMB encontrado no Cloud Storage")
+                return pd.DataFrame()
 
         logger.info(f"📂 Carregando vendas TMB de {len(tmb_paths)} arquivo(s)")
 
@@ -788,7 +842,8 @@ class SalesDataLoader:
         return df_norm
 
     def combine_sales(self, guru_df: pd.DataFrame = None, tmb_df: pd.DataFrame = None,
-                     guru_paths: List[str] = None, tmb_paths: List[str] = None) -> pd.DataFrame:
+                     guru_paths: List[str] = None, tmb_paths: List[str] = None,
+                     report_type: str = 'fechamento') -> pd.DataFrame:
         """
         Combina vendas da Guru e TMB em um único DataFrame.
 
@@ -797,6 +852,7 @@ class SalesDataLoader:
             tmb_df: DataFrame já carregado da TMB (opcional)
             guru_paths: Caminhos para arquivos Guru (se guru_df não fornecido)
             tmb_paths: Caminhos para arquivos TMB (se tmb_df não fornecido)
+            report_type: Tipo de relatório ('fechamento' ou 'pos-devolucoes') para buscar TMB no GCS
 
         Returns:
             DataFrame combinado e deduplicado (prioriza Guru em caso de conflito)
@@ -806,8 +862,12 @@ class SalesDataLoader:
         # Carregar se necessário
         if guru_df is None and guru_paths:
             guru_df = self.load_guru_sales(guru_paths)
-        if tmb_df is None and tmb_paths:
-            tmb_df = self.load_tmb_sales(tmb_paths)
+        if tmb_df is None and tmb_paths is not None:
+            # Se tmb_paths fornecido (pode ser lista vazia ou com arquivos)
+            tmb_df = self.load_tmb_sales(tmb_paths, report_type=report_type)
+        elif tmb_df is None and tmb_paths is None:
+            # Se tmb_paths é None, tentar buscar do GCS
+            tmb_df = self.load_tmb_sales(tmb_paths=None, report_type=report_type)
 
         # Combinar DataFrames
         dfs = []
