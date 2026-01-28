@@ -2503,7 +2503,92 @@ class ValidationReportGenerator:
         worksheet.write(row, 0, 'NOTA: AUC e concentração são as métricas principais de monitoramento.', formats['text'])
         row += 1
         worksheet.write(row, 0, 'Outras métricas por decil (lift, monotonia) não são comparáveis devido à otimização da Meta que altera a distribuição.', formats['text'])
+        row += 3
+
+        # ============================================================
+        # SEÇÃO: ANÁLISE TEMPORAL DE DEGRADAÇÃO DO AUC
+        # ============================================================
+        temporal_df = ml_metrics.get('temporal_auc_snapshots')
+        if temporal_df is not None and len(temporal_df) > 0:
+            worksheet.merge_range(row, 0, row, 8, 'ANÁLISE TEMPORAL DE DEGRADAÇÃO DO AUC', formats['subtitle'])
+            row += 1
+
+            # Descrição
+            worksheet.write(row, 0, 'Evolução dia a dia do AUC e correlação com aumento de vendas TMB', formats['text'])
+            row += 2
+
+            # Calcular correlação
+            if len(temporal_df) > 1:
+                correlation = temporal_df[['tmb_percentage', 'auc']].corr().iloc[0, 1]
+
+                # Mostrar correlação em destaque
+                worksheet.write(row, 0, 'CORRELAÇÃO % TMB vs AUC:', formats['header'])
+                if pd.notna(correlation):
+                    worksheet.write(row, 1, correlation, formats['decimal'])
+                else:
+                    worksheet.write(row, 1, 'N/A (dados insuficientes)', formats['text'])
+                row += 1
+
+                # Interpretação da correlação
+                if pd.notna(correlation):
+                    if correlation < -0.7:
+                        interpretation = 'Forte correlação negativa: aumento de TMB está associado à queda do AUC'
+                    elif correlation < -0.3:
+                        interpretation = 'Correlação negativa moderada: possível influência de TMB na queda do AUC'
+                    elif correlation > 0.3:
+                        interpretation = 'Correlação positiva: não há evidência de degradação por TMB'
+                    else:
+                        interpretation = 'Correlação fraca: relação não conclusiva'
+                else:
+                    interpretation = 'Dados insuficientes para calcular correlação (valores constantes ou NaN)'
+
+                worksheet.write(row, 0, interpretation, formats['text'])
+                row += 3
+
+            # Headers da tabela
+            headers = [
+                'Data',
+                'Vendas Acumuladas',
+                'Conversões Matched',
+                'Vendas Guru',
+                'Vendas TMB',
+                '% TMB',
+                'AUC',
+                'AUC Test Set',
+                'Delta AUC'
+            ]
+
+            for col, header in enumerate(headers):
+                worksheet.write(row, col, header, formats['header'])
+            row += 1
+
+            # Dados da tabela
+            for _, snapshot in temporal_df.iterrows():
+                worksheet.write(row, 0, snapshot['snapshot_date'].strftime('%d/%m/%Y'), formats['text'])
+                worksheet.write(row, 1, int(snapshot['cumulative_sales']), formats['number'])
+                worksheet.write(row, 2, int(snapshot['cumulative_conversions']), formats['number'])
+                worksheet.write(row, 3, int(snapshot['guru_sales']), formats['number'])
+                worksheet.write(row, 4, int(snapshot['tmb_sales']), formats['number'])
+                worksheet.write(row, 5, snapshot['tmb_percentage'] / 100, formats['percent'])
+
+                # AUC com tratamento de NaN
+                if pd.notna(snapshot['auc']):
+                    worksheet.write(row, 6, snapshot['auc'], formats['decimal'])
+                else:
+                    worksheet.write(row, 6, 'N/A', formats['text'])
+
+                if pd.notna(snapshot['auc_test_set']):
+                    worksheet.write(row, 7, snapshot['auc_test_set'], formats['decimal'])
+                else:
+                    worksheet.write(row, 7, 'N/A', formats['text'])
+
+                if pd.notna(snapshot['auc_delta']):
+                    worksheet.write(row, 8, snapshot['auc_delta'], formats['decimal'])
+                else:
+                    worksheet.write(row, 8, 'N/A', formats['text'])
+
+                row += 1
 
         # Ajustar larguras das colunas
         worksheet.set_column(0, 0, 80)  # Coluna de texto
-        worksheet.set_column(1, 4, 15)  # Demais colunas
+        worksheet.set_column(1, 8, 15)  # Demais colunas (expandido para incluir colunas temporais)

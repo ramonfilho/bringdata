@@ -1336,6 +1336,19 @@ def main():
                f"(Test Set: {ml_monitoring_metrics['concentration']['top3_test_set']:.1f}%)")
     print(flush=True)
 
+    # Análise temporal de degradação do AUC (correlação com vendas TMB)
+    # Chamado DEPOIS de calculate_all_metrics e com cópias dos DataFrames para isolamento total
+    temporal_auc_snapshots = ml_monitoring_calc.calculate_temporal_auc_snapshots(
+        matched_df=matched_df.copy(deep=True),
+        sales_df=sales_df.copy(deep=True),
+        start_date=sales_start,
+        end_date=sales_end
+    )
+
+    # Adicionar ao dict de métricas sem modificar estrutura existente
+    ml_monitoring_metrics['temporal_auc_snapshots'] = temporal_auc_snapshots
+    print(flush=True)
+
     # Comparação ML
     ml_comparison = compare_ml_vs_non_ml(campaign_metrics) if len(campaign_metrics) > 0 else None
 

@@ -345,6 +345,127 @@ class MLMonitoringCalculator:
 
         return decile_stats
 
+    def calculate_temporal_auc_snapshots(
+        self,
+        matched_df: pd.DataFrame,
+        sales_df: pd.DataFrame,
+        start_date: str,
+        end_date: str
+    ) -> pd.DataFrame:
+        """
+        Calcula AUC dia a dia para análise de degradação temporal.
+
+        Cria snapshots incrementais do AUC à medida que novas vendas surgem,
+        permitindo identificar correlação entre aumento de vendas TMB e queda do AUC.
+
+        Args:
+            matched_df: DataFrame com leads matched (com lead_score e converted)
+            sales_df: DataFrame com todas as vendas (para classificar TMB vs Guru)
+            start_date: Data inicial do período de vendas (YYYY-MM-DD)
+            end_date: Data final do período de vendas (YYYY-MM-DD)
+
+        Returns:
+            DataFrame com colunas:
+            - snapshot_date: Data do snapshot
+            - cumulative_sales: Vendas acumuladas até a data
+            - cumulative_conversions: Conversões matched acumuladas
+            - guru_sales: Vendas Guru até a data
+            - tmb_sales: Vendas TMB até a data
+            - tmb_percentage: % TMB das vendas totais
+            - auc: AUC calculado com conversões até a data
+            - auc_delta: Diferença vs AUC test set
+        """
+        from datetime import timedelta
+
+        logger.info(f"📊 Calculando snapshots temporais de AUC ({start_date} a {end_date})...")
+
+        # Fazer cópias profundas para não afetar os originais
+        matched_copy = matched_df.copy(deep=True)
+        sales_copy = sales_df.copy(deep=True)
+
+        # Garantir que sale_date é datetime
+        if 'sale_date' not in sales_copy.columns:
+            logger.warning("⚠️ Coluna 'sale_date' não encontrada em sales_df")
+            return pd.DataFrame()
+
+        sales_copy['sale_date'] = pd.to_datetime(sales_copy['sale_date'])
+
+        # Filtrar apenas vendas do período
+        start_dt = pd.to_datetime(start_date)
+        end_dt = pd.to_datetime(end_date) + timedelta(days=1) - timedelta(seconds=1)
+        sales_copy = sales_copy[
+            (sales_copy['sale_date'] >= start_dt) &
+            (sales_copy['sale_date'] <= end_dt)
+        ].copy()
+
+        if len(sales_copy) == 0:
+            logger.warning("⚠️ Nenhuma venda no período especificado")
+            return pd.DataFrame()
+
+        # Classificar vendas em Guru vs TMB (coluna 'origem' já existe no sales_df)
+        if 'origem' not in sales_copy.columns:
+            logger.warning("⚠️ Coluna 'origem' não encontrada em sales_df")
+            return pd.DataFrame()
+
+        # Já temos a coluna 'origem' com valores 'guru' ou 'tmb'
+        sales_copy['source'] = sales_copy['origem'].str.upper()  # 'guru' -> 'GURU', 'tmb' -> 'TMB'
+
+        # Criar lista de datas (dias únicos no período)
+        date_range = pd.date_range(start=start_dt.date(), end=end_dt.date(), freq='D')
+
+        snapshots = []
+        for snapshot_date in date_range:
+            # Incluir vendas até o FINAL do dia (23:59:59)
+            snapshot_end = pd.Timestamp(snapshot_date) + timedelta(days=1) - timedelta(seconds=1)
+
+            # Filtrar vendas até esta data
+            sales_until_date = sales_copy[sales_copy['sale_date'] <= snapshot_end].copy()
+
+            if len(sales_until_date) == 0:
+                continue
+
+            # Contar vendas por source
+            guru_count = len(sales_until_date[sales_until_date['source'] == 'GURU'])
+            tmb_count = len(sales_until_date[sales_until_date['source'] == 'TMB'])
+            total_count = len(sales_until_date)
+            tmb_pct = (tmb_count / total_count * 100) if total_count > 0 else 0
+
+            # Para calcular AUC: usar TODOS os leads, mas marcar como convertido apenas os que venderam até esta data
+            # Criar cópia temporária do matched_df completo
+            matched_snapshot = matched_copy.copy()
+
+            # Atualizar coluna 'converted' para refletir conversões até esta data
+            emails_converted_until_date = set(sales_until_date['email'].values)
+            matched_snapshot['converted'] = matched_snapshot['email'].isin(emails_converted_until_date)
+
+            conversions_count = matched_snapshot['converted'].sum()
+
+            # Calcular AUC com TODOS os leads, mas apenas conversões até esta data
+            auc_result = self.calculate_auc(matched_snapshot)
+
+            snapshots.append({
+                'snapshot_date': snapshot_date,
+                'cumulative_sales': total_count,
+                'cumulative_conversions': conversions_count,
+                'guru_sales': guru_count,
+                'tmb_sales': tmb_count,
+                'tmb_percentage': tmb_pct,
+                'auc': auc_result['production'],
+                'auc_test_set': auc_result['test_set'],
+                'auc_delta': auc_result['delta']
+            })
+
+        snapshots_df = pd.DataFrame(snapshots)
+
+        if len(snapshots_df) > 0:
+            # Calcular correlação entre % TMB e AUC
+            if len(snapshots_df) > 1:  # Precisa de pelo menos 2 pontos para correlação
+                correlation = snapshots_df[['tmb_percentage', 'auc']].corr().iloc[0, 1]
+                logger.info(f"   📈 {len(snapshots_df)} snapshots gerados")
+                logger.info(f"   📊 Correlação % TMB vs AUC: {correlation:.3f}")
+
+        return snapshots_df
+
     def calculate_all_metrics(self, matched_df: pd.DataFrame) -> Dict:
         """
         Calcula métricas de monitoramento do modelo.
