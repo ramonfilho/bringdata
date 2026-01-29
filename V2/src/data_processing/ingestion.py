@@ -96,6 +96,16 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
                         # Agregar por Pedido (pegar primeira linha de cada pedido)
                         df_agregado = df.groupby('Pedido', as_index=False).first()
 
+                        # Filtrar apenas pedidos efetivados (remover cancelados)
+                        if 'Status Pedido' in df_agregado.columns:
+                            total_antes = len(df_agregado)
+                            df_agregado = df_agregado[df_agregado['Status Pedido'] == 'Efetivado'].copy()
+                            cancelados = total_antes - len(df_agregado)
+                            if cancelados > 0:
+                                logger.info(f"       ⚠️  {cancelados} pedidos cancelados removidos")
+
+                        df_agregado = df_agregado
+
                         # Renomear colunas para formato esperado pelo pipeline
                         rename_map = {
                             'Cliente E-mail': 'Cliente Email',
@@ -418,7 +428,8 @@ def read_all_training_sources(
     filepaths: List[str],
     include_api_data: bool = False,
     api_start_date: str = None,
-    api_end_date: str = None
+    api_end_date: str = None,
+    num_sheets_api: int = 1
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
     Lê dados de treino de TODAS as fontes: arquivos locais + API/Sheets (opcional).
@@ -429,7 +440,7 @@ def read_all_training_sources(
     Fluxo:
     1. Lê arquivos Excel locais (sempre)
     2. Se include_api_data=True:
-       - Busca leads do Google Sheets
+       - Busca leads do Google Sheets (apenas aba 0 para retreino)
        - Busca vendas da API Guru
        - Converte para formato dict e adiciona aos dados locais
 
@@ -438,6 +449,7 @@ def read_all_training_sources(
         include_api_data: Se True, busca dados adicionais de API/Sheets
         api_start_date: Data início para buscar dados da API (formato: YYYY-MM-DD)
         api_end_date: Data fim para buscar dados da API (formato: YYYY-MM-DD)
+        num_sheets_api: Número de abas do Sheets para carregar (default: 1 para retreino)
 
     Returns:
         Dicionário no mesmo formato que read_excel_files():
@@ -491,7 +503,8 @@ def read_all_training_sources(
                 sheets_url=None,  # Usa default ou env var
                 start_date=api_start_date,
                 end_date=api_end_date,
-                use_cache=False  # Sempre buscar dados frescos no retreino
+                use_cache=False,  # Sempre buscar dados frescos no retreino
+                num_sheets=num_sheets_api  # Retreino: apenas aba 0
             )
 
             if not sheets_df.empty:

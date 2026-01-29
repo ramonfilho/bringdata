@@ -84,7 +84,7 @@ class LeadDataLoader:
         self.required_columns = ['Data', 'E-mail', 'Campaign']
         self._thresholds_cache = None  # Cache dos thresholds do modelo
 
-    def load_leads_from_sheets(self, sheets_url: Optional[str] = None, start_date: Optional[str] = None, end_date: Optional[str] = None, use_cache: bool = True) -> pd.DataFrame:
+    def load_leads_from_sheets(self, sheets_url: Optional[str] = None, start_date: Optional[str] = None, end_date: Optional[str] = None, use_cache: bool = True, num_sheets: int = 2) -> pd.DataFrame:
         """
         Carrega leads diretamente do Google Sheets (produção) com cache local.
 
@@ -93,6 +93,7 @@ class LeadDataLoader:
             start_date: Data início para filtro (YYYY-MM-DD) - opcional
             end_date: Data fim para filtro (YYYY-MM-DD) - opcional
             use_cache: Se True, usa cache local se disponível e válido (default: True)
+            num_sheets: Número de abas para carregar (default: 2 para validação, 1 para retreino)
 
         Returns:
             DataFrame normalizado (mesmo formato que load_leads_csv)
@@ -162,10 +163,10 @@ class LeadDataLoader:
             worksheets = spreadsheet.worksheets()
             logger.info(f"   ✅ {len(worksheets)} abas encontradas")
 
-            # Pegar apenas as 2 primeiras abas (índices 0 e 1)
+            # Pegar apenas as N primeiras abas (índices 0, 1, ...)
             # Aba [0]: [LF] Pesquisa | Aba [1]: [LF] Pesquisa v2
-            abas_pesquisa = worksheets[:2]
-            logger.info(f"   📋 Usando as 2 primeiras abas:")
+            abas_pesquisa = worksheets[:num_sheets]
+            logger.info(f"   📋 Usando {len(abas_pesquisa)} aba(s):")
             for idx, ws in enumerate(abas_pesquisa):
                 logger.info(f"      [{idx}] {ws.title} (gid={ws.id})")
 

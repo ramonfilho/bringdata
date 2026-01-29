@@ -186,7 +186,8 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         filepaths,
         include_api_data=include_api_data,
         api_start_date=api_start_date,
-        api_end_date=api_end_date
+        api_end_date=api_end_date,
+        num_sheets_api=1  # Retreino: apenas aba 0 do Google Sheets
     )
 
     # === CÉLULA 2: Filtragem + Remoção de Duplicatas ===
