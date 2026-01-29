@@ -168,44 +168,47 @@ def unificar_colunas_datasets(
         """Converte datetime para string DD/MM/YYYY HH:MM:SS ou mantém NaT"""
         return col.apply(lambda x: x.strftime('%d/%m/%Y %H:%M:%S') if pd.notna(x) and hasattr(x, 'strftime') else x)
 
+    # Formato de data brasileiro após fix_datetime_format
+    date_format = '%d/%m/%Y %H:%M:%S'
+
     if 'Criado Em' in df_vendas_unificado.columns and 'data aprovacao' in df_vendas_unificado.columns and 'Data Efetivado' in df_vendas_unificado.columns:
         df_vendas_unificado['Criado Em'] = fix_datetime_format(df_vendas_unificado['Criado Em'])
         df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
         df_vendas_unificado['Data Efetivado'] = fix_datetime_format(df_vendas_unificado['Data Efetivado'])
-        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], errors='coerce', dayfirst=True).fillna(
-            pd.to_datetime(df_vendas_unificado['data aprovacao'], errors='coerce', dayfirst=True)).fillna(
-            pd.to_datetime(df_vendas_unificado['Data Efetivado'], errors='coerce', dayfirst=True))
+        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], format=date_format, errors='coerce').fillna(
+            pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce')).fillna(
+            pd.to_datetime(df_vendas_unificado['Data Efetivado'], format=date_format, errors='coerce'))
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Criado Em', 'data aprovacao', 'Data Efetivado'])
         print("  Criado Em + data aprovacao + Data Efetivado → data (formato BR corrigido)")
     elif 'Criado Em' in df_vendas_unificado.columns and 'data aprovacao' in df_vendas_unificado.columns:
         df_vendas_unificado['Criado Em'] = fix_datetime_format(df_vendas_unificado['Criado Em'])
         df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
-        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], errors='coerce', dayfirst=True).fillna(
-            pd.to_datetime(df_vendas_unificado['data aprovacao'], errors='coerce', dayfirst=True))
+        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], format=date_format, errors='coerce').fillna(
+            pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce'))
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Criado Em', 'data aprovacao'])
         print("  Criado Em + data aprovacao → data (formato BR corrigido)")
     elif 'Criado Em' in df_vendas_unificado.columns and 'Data Efetivado' in df_vendas_unificado.columns:
         df_vendas_unificado['Criado Em'] = fix_datetime_format(df_vendas_unificado['Criado Em'])
         df_vendas_unificado['Data Efetivado'] = fix_datetime_format(df_vendas_unificado['Data Efetivado'])
-        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], errors='coerce', dayfirst=True).fillna(
-            pd.to_datetime(df_vendas_unificado['Data Efetivado'], errors='coerce', dayfirst=True))
+        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], format=date_format, errors='coerce').fillna(
+            pd.to_datetime(df_vendas_unificado['Data Efetivado'], format=date_format, errors='coerce'))
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Criado Em', 'Data Efetivado'])
         print("  Criado Em + Data Efetivado → data (formato BR corrigido)")
     elif 'data aprovacao' in df_vendas_unificado.columns and 'Data Efetivado' in df_vendas_unificado.columns:
         df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
         df_vendas_unificado['Data Efetivado'] = fix_datetime_format(df_vendas_unificado['Data Efetivado'])
-        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['data aprovacao'], errors='coerce', dayfirst=True).fillna(
-            pd.to_datetime(df_vendas_unificado['Data Efetivado'], errors='coerce', dayfirst=True))
+        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce').fillna(
+            pd.to_datetime(df_vendas_unificado['Data Efetivado'], format=date_format, errors='coerce'))
         df_vendas_unificado = df_vendas_unificado.drop(columns=['data aprovacao', 'Data Efetivado'])
         print("  data aprovacao + Data Efetivado → data (formato BR corrigido)")
     elif 'Criado Em' in df_vendas_unificado.columns:
         df_vendas_unificado['Criado Em'] = fix_datetime_format(df_vendas_unificado['Criado Em'])
-        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], errors='coerce', dayfirst=True)
+        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], format=date_format, errors='coerce')
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Criado Em'])
         print("  Criado Em → data (formato BR corrigido)")
     elif 'data aprovacao' in df_vendas_unificado.columns:
         df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
-        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['data aprovacao'], errors='coerce', dayfirst=True)
+        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce')
         df_vendas_unificado = df_vendas_unificado.drop(columns=['data aprovacao'])
         print("  data aprovacao → data (formato BR corrigido)")
     elif 'Data Efetivado' in df_vendas_unificado.columns:
