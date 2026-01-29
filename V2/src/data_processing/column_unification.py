@@ -208,11 +208,21 @@ def unificar_colunas_datasets(
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Data Efetivado'])
         print("  Data Efetivado → data (formato BR corrigido)")
 
-    # Filtrar vendas para incluir apenas até a data máxima dos leads (2025-11-03)
+    # Filtrar vendas para incluir apenas até a data máxima dos leads
     # Isso garante que a janela de conversão funcione corretamente
-    if 'data' in df_vendas_unificado.columns:
+    # IMPORTANTE: Calcular dinamicamente do dataset de pesquisa ao invés de hardcoded
+    if 'data' in df_vendas_unificado.columns and 'Data' in df_pesquisa_unificado.columns:
         vendas_antes = len(df_vendas_unificado)
-        data_max_leads = pd.to_datetime('2025-11-03')
+
+        # Calcular data máxima REAL dos leads (não hardcoded!)
+        df_pesquisa_unificado['Data'] = pd.to_datetime(df_pesquisa_unificado['Data'], errors='coerce')
+        data_max_leads = df_pesquisa_unificado['Data'].max()
+
+        # Se não conseguiu calcular, usar data de hoje como fallback
+        if pd.isna(data_max_leads):
+            data_max_leads = pd.Timestamp.now()
+            print(f"  ⚠️  Não foi possível calcular data máxima dos leads, usando hoje: {data_max_leads.strftime('%Y-%m-%d')}")
+
         df_vendas_unificado = df_vendas_unificado[
             (df_vendas_unificado['data'].isna()) | (df_vendas_unificado['data'] <= data_max_leads)
         ].copy()
@@ -223,6 +233,7 @@ def unificar_colunas_datasets(
             print(f"  Vendas antes do filtro: {vendas_antes:,}")
             print(f"  Vendas após filtro: {vendas_depois:,}")
             print(f"  Vendas futuras removidas: {vendas_removidas:,}")
+            print(f"  (Data calculada dinamicamente dos leads carregados)")
 
     # Unificar telefone
     if 'Telefone' in df_vendas_unificado.columns and 'telefone contato' in df_vendas_unificado.columns:

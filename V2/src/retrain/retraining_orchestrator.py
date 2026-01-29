@@ -149,6 +149,20 @@ class RetreinoMensal:
             logger.info("\n▶️  Executando train_pipeline.py com validation hook...")
 
             training_config = self.config.get('training', {})
+
+            # Datas da API: buscar da config ou usar últimos 60 dias
+            from datetime import datetime, timedelta
+            api_end_date = training_config.get('api_end_date', datetime.now().strftime('%Y-%m-%d'))
+
+            if 'api_start_date' in training_config:
+                api_start_date = training_config['api_start_date']
+            else:
+                # Default: 60 dias atrás
+                start_dt = datetime.now() - timedelta(days=60)
+                api_start_date = start_dt.strftime('%Y-%m-%d')
+
+            logger.info(f"   📅 Período de dados API: {api_start_date} a {api_end_date}")
+
             challenger_metadata = train_main(
                 initial_matching=training_config.get('initial_matching', 'email_telefone'),
                 save_files=True,  # Sempre salvar no retreino mensal
@@ -156,7 +170,11 @@ class RetreinoMensal:
                 tune_hyperparams=training_config.get('tune_hyperparams', False),
                 grid_size=training_config.get('grid_size', 'small'),
                 set_active=False,  # NÃO ativar automaticamente (decisão vem depois)
-                validation_hook=validation_hook  # ← INJETA VALIDAÇÃO
+                validation_hook=validation_hook,  # ← INJETA VALIDAÇÃO
+                include_api_data=True,  # ← RETREINO: buscar dados novos da API
+                api_start_date=api_start_date,
+                api_end_date=api_end_date,
+                output_subdir='retraining'  # ← LOGS vão para outputs/retraining/
             )
 
             # Verificar se foi abortado pela validação

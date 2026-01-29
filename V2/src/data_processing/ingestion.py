@@ -367,3 +367,164 @@ def consolidate_datasets(
     logger.info(f"  Dataset Vendas: {len(df_vendas_consolidado):,} registros, {len(df_vendas_consolidado.columns)} colunas")
 
     return df_pesquisa_consolidado, df_vendas_consolidado
+
+
+def read_all_training_sources(
+    filepaths: List[str],
+    include_api_data: bool = False,
+    api_start_date: str = None,
+    api_end_date: str = None
+) -> Dict[str, Dict[str, pd.DataFrame]]:
+    """
+    Lê dados de treino de TODAS as fontes: arquivos locais + API/Sheets (opcional).
+
+    Esta função é usada pelo pipeline de retreino para combinar dados históricos
+    (arquivos Excel locais) com dados novos (Google Sheets + API Guru).
+
+    Fluxo:
+    1. Lê arquivos Excel locais (sempre)
+    2. Se include_api_data=True:
+       - Busca leads do Google Sheets
+       - Busca vendas da API Guru
+       - Converte para formato dict e adiciona aos dados locais
+
+    Args:
+        filepaths: Lista de caminhos para arquivos Excel locais
+        include_api_data: Se True, busca dados adicionais de API/Sheets
+        api_start_date: Data início para buscar dados da API (formato: YYYY-MM-DD)
+        api_end_date: Data fim para buscar dados da API (formato: YYYY-MM-DD)
+
+    Returns:
+        Dicionário no mesmo formato que read_excel_files():
+        {
+            'arquivo1.xlsx': {'aba1': DataFrame, ...},
+            '[API] Leads Google Sheets': {'Pesquisa': DataFrame},
+            '[API] Vendas Guru': {'Vendas': DataFrame}
+        }
+
+    Example:
+        >>> # Treino normal (só arquivos locais)
+        >>> data = read_all_training_sources(filepaths)
+
+        >>> # Retreino (arquivos + API)
+        >>> data = read_all_training_sources(
+        ...     filepaths,
+        ...     include_api_data=True,
+        ...     api_start_date='2025-12-01',
+        ...     api_end_date='2026-01-28'
+        ... )
+    """
+    # 1. LER ARQUIVOS LOCAIS (comportamento padrão)
+    logger.info("📦 INGESTÃO DE DADOS DE TREINO")
+    logger.info("=" * 60)
+
+    local_data = read_excel_files(filepaths)
+
+    # 2. SE RETREINO, BUSCAR DADOS DA API
+    if not include_api_data:
+        logger.info("✅ Usando apenas arquivos locais")
+        return local_data
+
+    logger.info("\n🌐 BUSCANDO DADOS ADICIONAIS (API/Sheets)")
+    logger.info("-" * 60)
+
+    if not api_start_date or not api_end_date:
+        logger.warning("⚠️  Datas da API não fornecidas, pulando ingestão API")
+        return local_data
+
+    try:
+        # Importar loaders
+        from src.validation.data_loader import LeadDataLoader, SalesDataLoader
+
+        api_data = {}
+
+        # === LEADS DO GOOGLE SHEETS ===
+        logger.info("\n📊 1/2: Leads do Google Sheets")
+        try:
+            lead_loader = LeadDataLoader()
+            sheets_df = lead_loader.load_leads_from_sheets(
+                sheets_url=None,  # Usa default ou env var
+                start_date=api_start_date,
+                end_date=api_end_date,
+                use_cache=False  # Sempre buscar dados frescos no retreino
+            )
+
+            if not sheets_df.empty:
+                # Converter para formato esperado: {filename: {sheetname: DataFrame}}
+                # Renomear colunas para formato do notebook
+                sheets_formatted = pd.DataFrame()
+                sheets_formatted['E-mail'] = sheets_df['email']
+                sheets_formatted['Nome Completo'] = sheets_df.get('nome', '')
+                sheets_formatted['Telefone'] = sheets_df.get('telefone', '')
+                sheets_formatted['Data'] = sheets_df['data_captura']
+                sheets_formatted['Campaign'] = sheets_df['campaign']
+                sheets_formatted['Source'] = sheets_df.get('source', '')
+                sheets_formatted['Medium'] = sheets_df.get('medium', '')
+                sheets_formatted['Term'] = sheets_df.get('term', '')
+                sheets_formatted['Content'] = sheets_df.get('content', '')
+                sheets_formatted['lead_score'] = sheets_df.get('lead_score', None)
+
+                api_data['[API] Leads Google Sheets'] = {
+                    '[LF] Pesquisa - API': sheets_formatted
+                }
+                logger.info(f"   ✅ {len(sheets_formatted)} leads carregados do Sheets")
+            else:
+                logger.warning("   ⚠️  Nenhum lead encontrado no Sheets")
+
+        except Exception as e:
+            logger.error(f"   ❌ Erro ao buscar leads do Sheets: {e}")
+
+        # === VENDAS DA API GURU ===
+        logger.info("\n💰 2/2: Vendas da API Guru")
+        try:
+            sales_loader = SalesDataLoader()
+            guru_df = sales_loader.load_guru_sales_from_api(
+                start_date=api_start_date,
+                end_date=api_end_date,
+                save_excel=False
+            )
+
+            if not guru_df.empty:
+                # Converter para formato esperado
+                guru_formatted = pd.DataFrame()
+                guru_formatted['email'] = guru_df['email']
+                guru_formatted['nome'] = guru_df.get('nome', '')
+                guru_formatted['telefone'] = guru_df.get('telefone', '')
+                guru_formatted['data'] = guru_df['sale_date']
+                guru_formatted['valor'] = guru_df['sale_value']
+                guru_formatted['utm_campaign'] = guru_df.get('utm_campaign', '')
+                guru_formatted['produto'] = 'DevClub'  # Produto padrão
+                guru_formatted['arquivo_origem'] = '[API] Guru'
+
+                api_data['[API] Vendas Guru'] = {
+                    'Sheet1': guru_formatted
+                }
+                logger.info(f"   ✅ {len(guru_formatted)} vendas carregadas da API Guru")
+            else:
+                logger.warning("   ⚠️  Nenhuma venda encontrada na API Guru")
+
+        except Exception as e:
+            logger.error(f"   ❌ Erro ao buscar vendas da API Guru: {e}")
+
+        # 3. COMBINAR DADOS LOCAIS + API
+        if api_data:
+            logger.info("\n🔗 COMBINANDO DADOS")
+            logger.info("-" * 60)
+            logger.info(f"   Arquivos locais: {len(local_data)}")
+            logger.info(f"   Fontes API: {len(api_data)}")
+
+            combined_data = {**local_data, **api_data}
+
+            logger.info(f"   ✅ Total combinado: {len(combined_data)} fontes de dados")
+            logger.info("=" * 60)
+
+            return combined_data
+        else:
+            logger.warning("\n⚠️  Nenhum dado da API foi carregado")
+            logger.info("   Usando apenas arquivos locais")
+            return local_data
+
+    except Exception as e:
+        logger.error(f"\n❌ Erro ao buscar dados da API: {e}")
+        logger.info("   Fallback: usando apenas arquivos locais")
+        return local_data

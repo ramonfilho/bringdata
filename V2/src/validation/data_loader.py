@@ -190,7 +190,7 @@ class LeadDataLoader:
                         continue
 
                     try:
-                        df_aba = pd.read_csv(tmp.name)
+                        df_aba = pd.read_csv(tmp.name, low_memory=False)
                         os.unlink(tmp.name)
 
                         # Remover duplicatas de colunas

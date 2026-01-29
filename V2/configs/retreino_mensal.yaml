@@ -36,6 +36,12 @@ training:
   tune_hyperparams: false
   grid_size: "small"  # small | medium | large (se tune_hyperparams=true)
 
+  # Período de dados da API (opcional)
+  # Se não especificado, usa últimos 60 dias
+  # IMPORTANTE: api_start_date deve ser o dia SEGUINTE à última venda do treino anterior
+  api_start_date: "2025-11-04"  # Última venda do treino anterior: 2025-11-03
+  api_end_date: "2026-01-29"    # Data atual
+
 # =============================================================================
 # VALIDAÇÃO (✅ Implementado - Sprint 1)
 # =============================================================================

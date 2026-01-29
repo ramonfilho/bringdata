@@ -17,6 +17,7 @@ import atexit
 from datetime import datetime
 from src.data_processing.ingestion import (
     read_excel_files,
+    read_all_training_sources,
     filter_sheets,
     remove_duplicates_per_sheet,
     remove_unnecessary_columns,
@@ -68,15 +69,22 @@ class Tee:
         self.log.close()
 
 
-def setup_output_logging():
-    """Configura redirecionamento automático de output para arquivo timestampado."""
-    # Criar diretório outputs/training se não existir
-    outputs_dir = os.path.join(os.path.dirname(__file__), '../outputs/training')
+def setup_output_logging(output_subdir='training'):
+    """
+    Configura redirecionamento automático de output para arquivo timestampado.
+
+    Args:
+        output_subdir: Subdiretório dentro de outputs/ (default: 'training')
+                      Ex: 'retraining' para outputs/retraining/
+    """
+    # Criar diretório outputs/{subdir} se não existir
+    outputs_dir = os.path.join(os.path.dirname(__file__), f'../outputs/{output_subdir}')
     os.makedirs(outputs_dir, exist_ok=True)
 
     # Gerar timestamp no formato YYYYMMDD_HHMMSS
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_path = os.path.join(outputs_dir, f'training_{timestamp}.log')
+    log_prefix = 'retraining' if output_subdir == 'retraining' else 'training'
+    log_path = os.path.join(outputs_dir, f'{log_prefix}_{timestamp}.log')
 
     # Redirecionar stdout e stderr para Tee
     tee = Tee(log_path)
@@ -86,7 +94,7 @@ def setup_output_logging():
     return log_path, tee
 
 
-def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', use_guru_only=None, set_active=False, medium_strategy='binary_top3', validation_hook=None):
+def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', use_guru_only=None, set_active=False, medium_strategy='binary_top3', validation_hook=None, include_api_data=False, api_start_date=None, api_end_date=None, output_subdir='training'):
     """Executa pipeline de treino completo.
 
     Args:
@@ -104,10 +112,14 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         set_active: Se True, atualiza configs/active_model.yaml com este modelo (requer save_files=True)
         validation_hook: Função opcional chamada após feature engineering para validação.
                         Recebe dataset_fe e retorna True (continuar) ou False (abortar)
+        include_api_data: Se True, busca dados adicionais de API/Sheets (usado no retreino)
+        api_start_date: Data início para buscar dados da API (YYYY-MM-DD)
+        api_end_date: Data fim para buscar dados da API (YYYY-MM-DD)
+        output_subdir: Subdiretório para logs ('training' ou 'retraining')
     """
 
     # Configurar redirecionamento de output para arquivo
-    log_path, tee = setup_output_logging()
+    log_path, tee = setup_output_logging(output_subdir)
 
     # Registrar função de cleanup para fechar arquivo ao terminar
     def cleanup():
@@ -165,8 +177,13 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     for f in filepaths:
         print(f"  - {os.path.basename(f)}")
 
-    # Ler TODOS os arquivos (incluindo TMB)
-    all_data = read_excel_files(filepaths)
+    # Ler TODOS os arquivos (incluindo TMB) + dados da API se retreino
+    all_data = read_all_training_sources(
+        filepaths,
+        include_api_data=include_api_data,
+        api_start_date=api_start_date,
+        api_end_date=api_end_date
+    )
 
     # === CÉLULA 2: Filtragem + Remoção de Duplicatas ===
     print("\n🔄 CÉLULA 2: FILTRAGEM DE ABAS + REMOÇÃO DE DUPLICATAS")
