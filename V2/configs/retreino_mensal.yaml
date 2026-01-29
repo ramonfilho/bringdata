@@ -32,6 +32,14 @@ training:
   #   - stratified: 70% dos registros com stratified split por pessoa
   split_method: "temporal_leads"
 
+  # Filtro de risco para alunos TMB
+  # Opções:
+  #   - all: Todos alunos TMB (padrão)
+  #   - none: Nenhum aluno TMB (só Guru)
+  #   - low: Apenas baixo risco
+  #   - low_medium: Baixo + médio risco
+  tmb_risk_filter: "all"
+
   # Hyperparameter tuning (desabilitado por padrão - adiciona ~20min ao treino)
   tune_hyperparams: false
   grid_size: "small"  # small | medium | large (se tune_hyperparams=true)

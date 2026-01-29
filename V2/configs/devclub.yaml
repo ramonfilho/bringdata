@@ -4,11 +4,6 @@
 ingestion:
   training_data_dir: "/Users/ramonmoreira/Desktop/smart_ads/data/devclub/treino/"
 
-  # Filtro de arquivos de vendas (GURU only vs ALL)
-  # use_guru_only: true = apenas vendas_guru_*.xlsx
-  # use_guru_only: false = todos os arquivos de vendas
-  use_guru_only: true
-
   # Critérios de filtragem de abas (linhas 31-33 do notebook)
   termos_manter:
     - "Pesquisa"

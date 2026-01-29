@@ -94,7 +94,7 @@ def setup_output_logging(output_subdir='training'):
     return log_path, tee
 
 
-def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', use_guru_only=None, set_active=False, medium_strategy='binary_top3', validation_hook=None, include_api_data=False, api_start_date=None, api_end_date=None, output_subdir='training'):
+def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, include_api_data=False, api_start_date=None, api_end_date=None, output_subdir='training'):
     """Executa pipeline de treino completo.
 
     Args:
@@ -108,7 +108,11 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         save_files: Se True, salva arquivos locais em files/{timestamp}
         tune_hyperparams: Se True, executa hyperparameter tuning antes do treino
         grid_size: Tamanho do grid search ('small', 'medium', 'large')
-        use_guru_only: Se True, usa apenas GURU. Se False, usa GURU+TMB. Se None, usa valor do config.
+        tmb_risk_filter: Filtro de risco para alunos TMB
+                        - 'all': Todos alunos TMB (padrão)
+                        - 'none': Nenhum aluno TMB (só Guru)
+                        - 'low': Apenas baixo risco
+                        - 'low_medium': Baixo + médio risco
         set_active: Se True, atualiza configs/active_model.yaml com este modelo (requer save_files=True)
         validation_hook: Função opcional chamada após feature engineering para validação.
                         Recebe dataset_fe e retorna True (continuar) ou False (abortar)
@@ -163,16 +167,16 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
 
     filepaths = sorted(glob.glob(os.path.join(data_dir, "*.xlsx")), key=notebook_sort_key)
 
-    # IMPORTANTE: Sempre carregar TODOS os arquivos (incluindo TMB) para calcular recall correto
-    # O filtro guru_only será aplicado APENAS nos matchings para treino
-    if use_guru_only is None:
-        use_guru_only = config['ingestion'].get('use_guru_only', False)
-
     print(f"\nTotal de arquivos encontrados: {len(filepaths)}")
-    if use_guru_only:
-        print(f"💡 GURU ONLY MODE ativado:")
-        print(f"   - Vendas Guru + TMB serão usadas para cálculo do recall")
-        print(f"   - Apenas vendas Guru serão usadas para matching/treino do modelo")
+    print(f"💡 FILTRO TMB (tmb_risk_filter='{tmb_risk_filter}'):")
+    if tmb_risk_filter == 'none':
+        print(f"   - Usando apenas vendas GURU (nenhum aluno TMB)")
+    elif tmb_risk_filter == 'all':
+        print(f"   - Usando vendas Guru + TODOS alunos TMB")
+    elif tmb_risk_filter == 'low':
+        print(f"   - Usando vendas Guru + alunos TMB de BAIXO risco")
+    elif tmb_risk_filter == 'low_medium':
+        print(f"   - Usando vendas Guru + alunos TMB de BAIXO e MÉDIO risco")
 
     for f in filepaths:
         print(f"  - {os.path.basename(f)}")
@@ -322,7 +326,11 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     print("\n🔗 CÉLULA 5: UNIFICAÇÃO DE COLUNAS DUPLICADAS")
     print("=" * 60)
 
-    df_pesquisa_final, df_vendas_final = unificar_colunas_datasets(df_pesquisa, df_vendas)
+    df_pesquisa_final, df_vendas_final = unificar_colunas_datasets(
+        df_pesquisa,
+        df_vendas,
+        tmb_risk_filter=tmb_risk_filter
+    )
 
     print(f"\nRESULTADO:")
     print(f"Pesquisa: {len(df_pesquisa_final)} registros, {len(df_pesquisa_final.columns)} colunas")
@@ -423,23 +431,8 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     print(f"\n🔍 CÉLULA 15: MATCHING DE LEADS COM VENDAS ({initial_matching.upper().replace('_', ' ')})")
     print("=" * 60)
 
-    # APLICAR FILTRO GURU ONLY apenas para matching (treino do modelo)
-    # Manter df_vendas_final completo (Guru + TMB) para cálculo do recall
+    # Filtro TMB já foi aplicado em unificar_colunas_datasets
     df_vendas_matching = df_vendas_final.copy()
-
-    if use_guru_only and 'arquivo_origem' in df_vendas_matching.columns:
-        before_filter = len(df_vendas_matching)
-        # Filtrar apenas vendas Guru para matching/treino
-        df_vendas_matching = df_vendas_matching[
-            df_vendas_matching['arquivo_origem'].str.lower().str.contains('guru', na=False)
-        ].copy()
-        after_filter = len(df_vendas_matching)
-
-        if before_filter != after_filter:
-            print(f"\n🔧 GURU ONLY - Filtro aplicado ao matching:")
-            print(f"   Vendas Guru para matching: {after_filter:,}")
-            print(f"   Vendas TMB excluídas do matching: {before_filter - after_filter:,}")
-            print(f"   (Vendas TMB serão incluídas no cálculo do recall)\n")
 
     if initial_matching == 'email_only':
         dataset_v1_final = fazer_matching_email_only(df_pos_cutoff, df_vendas_matching)
@@ -817,11 +810,11 @@ if __name__ == "__main__":
         help='Método de split: temporal (70%% dos dias), temporal_leads (70%% dos leads), ou stratified (70%% dos registros) - padrão: temporal_leads'
     )
     parser.add_argument(
-        '--use-guru-only',
+        '--tmb-risk-filter',
         type=str,
-        choices=['true', 'false'],
-        default=None,
-        help='Filtro de produtos: true (apenas GURU), false (GURU+TMB) - padrão: usar config'
+        choices=['all', 'none', 'low', 'low_medium'],
+        default='all',
+        help='Filtro de risco para alunos TMB: all (todos), none (nenhum, só Guru), low (baixo risco), low_medium (baixo + médio) - padrão: all'
     )
     parser.add_argument(
         '--set-active',
@@ -838,18 +831,13 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Converter string para bool se fornecido
-    use_guru_only = None
-    if args.use_guru_only:
-        use_guru_only = args.use_guru_only.lower() == 'true'
-
     main(
         initial_matching=args.initial_matching,
         save_files=args.save_files,
         tune_hyperparams=args.tune_hyperparams,
         grid_size=args.grid_size,
         split_method=args.split_method,
-        use_guru_only=use_guru_only,
+        tmb_risk_filter=args.tmb_risk_filter,
         set_active=args.set_active,
         medium_strategy=args.medium_strategy
     )

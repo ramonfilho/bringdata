@@ -36,7 +36,8 @@ def identificar_colunas_duplicadas_pesquisa(df: pd.DataFrame) -> List[Tuple[str,
 
 def unificar_colunas_datasets(
     df_pesquisa: pd.DataFrame,
-    df_vendas: pd.DataFrame
+    df_vendas: pd.DataFrame,
+    tmb_risk_filter: str = 'all'
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Unifica colunas duplicadas nos datasets de pesquisa e vendas.
@@ -46,6 +47,11 @@ def unificar_colunas_datasets(
     Args:
         df_pesquisa: DataFrame de pesquisa
         df_vendas: DataFrame de vendas
+        tmb_risk_filter: Filtro de risco para alunos TMB
+            - 'all': Todos alunos TMB (padrão)
+            - 'none': Nenhum aluno TMB (só Guru)
+            - 'low': Apenas baixo risco
+            - 'low_medium': Baixo + médio risco
 
     Returns:
         Tupla (df_pesquisa_unificado, df_vendas_unificado)
@@ -273,32 +279,88 @@ def unificar_colunas_datasets(
         for col in colunas_existentes_utm:
             print(f"  Removida: {col}")
 
-    # Filtrar apenas vendas GURU aprovadas (TMB não tem coluna status)
-    # Excluir vendas canceladas, expiradas, reembolsadas, etc. APENAS dos arquivos Guru
-    if 'status' in df_vendas_unificado.columns and 'arquivo_origem' in df_vendas_unificado.columns:
+    # Filtrar vendas por status (Guru) e risco (TMB)
+    if 'arquivo_origem' in df_vendas_unificado.columns:
         before = len(df_vendas_unificado)
 
-        # Identificar vendas Guru (têm coluna status) e TMB (não têm)
+        # Identificar vendas Guru e TMB
         is_guru = df_vendas_unificado['arquivo_origem'].str.lower().str.contains('guru', na=False)
+        is_tmb = ~is_guru
 
-        # Filtrar status APENAS das vendas Guru
-        mask_guru_aprovada = (is_guru & (df_vendas_unificado['status'] == 'Aprovada'))
-        mask_tmb = ~is_guru  # Manter todas as vendas TMB
+        # === FILTRO GURU: Apenas vendas aprovadas ===
+        if 'status' in df_vendas_unificado.columns:
+            mask_guru = (is_guru & (df_vendas_unificado['status'] == 'Aprovada'))
+        else:
+            mask_guru = is_guru  # Se não tem status, manter todas Guru
 
-        df_vendas_unificado = df_vendas_unificado[mask_guru_aprovada | mask_tmb].copy()
+        # === FILTRO TMB: Por grau de risco ===
+        mask_tmb = pd.Series([False] * len(df_vendas_unificado), index=df_vendas_unificado.index)
+
+        if tmb_risk_filter == 'none':
+            # Nenhum aluno TMB (só Guru)
+            pass  # mask_tmb permanece False
+        elif tmb_risk_filter == 'all':
+            # Todos alunos TMB
+            mask_tmb = is_tmb
+        elif 'Grau de risco' in df_vendas_unificado.columns:
+            # Filtros baseados em risco
+            if tmb_risk_filter == 'low':
+                mask_tmb = (is_tmb & (df_vendas_unificado['Grau de risco'] == 'Baixo'))
+            elif tmb_risk_filter == 'low_medium':
+                mask_tmb = (is_tmb & df_vendas_unificado['Grau de risco'].isin(['Baixo', 'Médio']))
+            else:
+                logger.warning(f"⚠️  tmb_risk_filter '{tmb_risk_filter}' inválido, usando 'all'")
+                mask_tmb = is_tmb
+        else:
+            # Não tem coluna de risco, aplicar filtro padrão
+            if tmb_risk_filter in ['low', 'low_medium']:
+                logger.warning(f"⚠️  Coluna 'Grau de risco' não encontrada, mantendo todos TMB")
+            mask_tmb = is_tmb
+
+        # Aplicar filtros combinados
+        df_vendas_unificado = df_vendas_unificado[mask_guru | mask_tmb].copy()
         after = len(df_vendas_unificado)
 
-        vendas_guru_antes = is_guru.sum()
-        vendas_guru_depois = (mask_guru_aprovada).sum()
-        vendas_tmb = mask_tmb.sum()
+        # Calcular estatísticas
+        vendas_guru_total = is_guru.sum()
+        vendas_guru_mantidas = mask_guru.sum()
+        vendas_tmb_total = is_tmb.sum()
+        vendas_tmb_mantidas = mask_tmb.sum()
 
-        if before != after:
-            print(f"\nVENDAS - Filtro de status (APENAS Guru):")
-            print(f"  Vendas Guru antes do filtro: {vendas_guru_antes:,}")
-            print(f"  Vendas Guru aprovadas mantidas: {vendas_guru_depois:,}")
-            print(f"  Vendas Guru não aprovadas excluídas: {vendas_guru_antes - vendas_guru_depois:,}")
-            print(f"  Vendas TMB mantidas (sem filtro): {vendas_tmb:,}")
-            print(f"  Total após filtro: {after:,}")
+        # Mostrar relatório
+        print(f"\n{'='*80}")
+        print(f"VENDAS - Filtro de status e risco (tmb_risk_filter='{tmb_risk_filter}')")
+        print(f"{'='*80}")
+        print(f"GURU:")
+        print(f"  Total: {vendas_guru_total:,}")
+        print(f"  Aprovadas mantidas: {vendas_guru_mantidas:,}")
+        print(f"  Não aprovadas excluídas: {vendas_guru_total - vendas_guru_mantidas:,}")
+        print(f"\nTMB:")
+        print(f"  Total: {vendas_tmb_total:,}")
+
+        if tmb_risk_filter == 'none':
+            print(f"  Filtro: NENHUM aluno TMB (só Guru)")
+            print(f"  Mantidas: 0")
+            print(f"  Removidas: {vendas_tmb_total:,}")
+        elif tmb_risk_filter == 'all':
+            print(f"  Filtro: TODOS alunos TMB")
+            print(f"  Mantidas: {vendas_tmb_mantidas:,}")
+        else:
+            print(f"  Filtro: {tmb_risk_filter.upper().replace('_', ' + ')}")
+            if 'Grau de risco' in df_vendas_unificado.columns:
+                # Mostrar distribuição por risco
+                df_tmb_subset = df_vendas_unificado[mask_tmb]
+                dist_risco = df_tmb_subset['Grau de risco'].value_counts()
+                print(f"  Mantidas: {vendas_tmb_mantidas:,}")
+                print(f"  Distribuição mantida:")
+                for risco, count in dist_risco.items():
+                    print(f"    - {risco}: {count:,}")
+                print(f"  Removidas: {vendas_tmb_total - vendas_tmb_mantidas:,}")
+            else:
+                print(f"  Mantidas: {vendas_tmb_mantidas:,}")
+
+        print(f"\nTOTAL FINAL: {after:,} vendas")
+        print(f"{'='*80}")
 
     logger.info(f"  Pesquisa: {len(df_pesquisa_unificado)} registros, {len(df_pesquisa_unificado.columns)} colunas")
     logger.info(f"  Vendas: {len(df_vendas_unificado)} registros, {len(df_vendas_unificado.columns)} colunas")

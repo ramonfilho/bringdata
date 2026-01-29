@@ -73,6 +73,51 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
             # Ler todas as abas
             for sheet_name in xl_file.sheet_names:
                 df = pd.read_excel(xl_file, sheet_name=sheet_name)
+
+                # TRATAMENTO ESPECIAL: Arquivo TMB com parcelas (detectar por colunas)
+                # Detecta se é o arquivo de contas a receber pela presença de colunas específicas
+                is_tmb_parcelas = (
+                    'Pedido' in df.columns and
+                    'Parcela' in df.columns and
+                    'Grau de risco' in df.columns
+                )
+
+                if is_tmb_parcelas:
+                    logger.info(f"    📊 Detectado arquivo TMB com parcelas: {filename}")
+                    logger.info(f"       Registros totais (parcelas): {len(df):,}")
+
+                    # Agregar por pedido único
+                    if 'Pedido' in df.columns:
+                        # Preservar colunas importantes ANTES de agregar
+                        colunas_preservar = ['Grau de risco', 'Status Pedido', 'Cliente Nome',
+                                            'Cliente E-mail', 'Ticket', 'Data Efetivado',
+                                            'Lançamento', 'Oferta']
+
+                        # Agregar por Pedido (pegar primeira linha de cada pedido)
+                        df_agregado = df.groupby('Pedido', as_index=False).first()
+
+                        # Renomear colunas para formato esperado pelo pipeline
+                        rename_map = {
+                            'Cliente E-mail': 'Cliente Email',
+                            'Ticket': 'Ticket (R$)',
+                            'Lançamento': 'Criado Em'
+                        }
+                        df_agregado = df_agregado.rename(columns=rename_map)
+
+                        logger.info(f"       ✅ Agregado por pedido único: {len(df_agregado):,} pedidos")
+                        logger.info(f"       📋 Coluna 'Grau de risco' preservada")
+
+                        # Mostrar distribuição de risco
+                        if 'Grau de risco' in df_agregado.columns:
+                            dist_risco = df_agregado['Grau de risco'].value_counts(dropna=False)
+                            logger.info(f"       Distribuição de risco:")
+                            for risco, count in dist_risco.items():
+                                logger.info(f"         - {risco}: {count:,} pedidos")
+
+                        df = df_agregado
+                    else:
+                        logger.warning(f"    ⚠️  Coluna 'Pedido' não encontrada, usando dados como estão")
+
                 file_data[sheet_name] = df
                 logger.debug(f"    ✅ Aba '{sheet_name}': {len(df)} linhas, {len(df.columns)} colunas")
 

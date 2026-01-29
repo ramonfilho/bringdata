@@ -169,6 +169,7 @@ class RetreinoMensal:
                 split_method=training_config.get('split_method', 'temporal_leads'),
                 tune_hyperparams=training_config.get('tune_hyperparams', False),
                 grid_size=training_config.get('grid_size', 'small'),
+                tmb_risk_filter=training_config.get('tmb_risk_filter', 'all'),  # ← FILTRO DE RISCO TMB
                 set_active=False,  # NÃO ativar automaticamente (decisão vem depois)
                 validation_hook=validation_hook,  # ← INJETA VALIDAÇÃO
                 include_api_data=True,  # ← RETREINO: buscar dados novos da API
