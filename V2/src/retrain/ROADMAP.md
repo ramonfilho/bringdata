@@ -22,23 +22,106 @@ Cloud Run Job: retreino-mensal
 
 ---
 
+## 🔍 Decisão Arquitetural: Hook-Based Validation! (2026-01-28)
+
+**Descobrimos que NÃO precisamos duplicar código!** 🎉
+
+O `train_pipeline.py` (828 linhas) já faz **exatamente** o que o retreino precisa. A solução é adicionar um **validation hook** opcional.
+
+### Evolução do Pensamento:
+
+**FASE 1 (pensávamos):**
+- ❌ Código monolítico, precisa refatorar
+- ❌ Sprint 1: 2 semanas de refatoração
+
+**FASE 2 (descoberta da modularidade):**
+- ✅ Código já modular, só chamar funções
+- ✅ Sprint 1.1: 2-4 horas de integração
+- ⚠️ Mas ainda duplicaria 600+ linhas de lógica
+
+**FASE 3 (decisão final - hook-based):**
+- ✅ Reutiliza 100% do train_pipeline (zero duplicação!)
+- ✅ Adiciona hook opcional para injetar validação
+- ✅ Sprint 1.1: 30-45 minutos de implementação
+
+### Arquitetura Hook-Based:
+
+```python
+# train_pipeline.py (modificação mínima - adicionar parâmetro)
+def main(..., validation_hook=None):
+    # ... células 1-17: extração + preprocessing ...
+
+    dataset_v1_devclub_fe = criar_features_derivadas(dataset_v1_devclub)
+
+    # === HOOK OPCIONAL PARA VALIDAÇÃO ===
+    if validation_hook:
+        should_continue = validation_hook(dataset_v1_devclub_fe)
+        if not should_continue:
+            return {'status': 'ABORTED_BY_VALIDATION'}
+
+    # ... células 18.5-20: baseline capture + encoding + treino ...
+
+
+# retraining_orchestrator.py (orquestrador mínimo)
+def run(self):
+    def validation_hook(df):
+        validator = RetrainingDataValidator(...)
+        result = validator.validate(df)
+
+        if result['has_critical_failures']:
+            self.validation_result = result
+            return False  # Abortar
+
+        return True  # Continuar
+
+    # Reutiliza train_pipeline completo + injeta validação
+    metadata = train_main(..., validation_hook=validation_hook)
+```
+
+**Resultado:** Sprint 1.1 simplificado de 2 semanas para 30-45 minutos! 🎉🎉
+
+**Vantagens:**
+- ✅ Zero duplicação de código
+- ✅ Um único lugar para manter lógica de treino
+- ✅ Validação no ponto correto (depois do FE)
+- ✅ train_pipeline continua funcional standalone
+- ✅ Flexível para futuros hooks
+
+---
+
 ## 📦 Componentes a Criar/Modificar
 
-### Novos Arquivos
+### Arquivos Criados (✅ Sprint 1)
 
-1. `V2/src/retreino_mensal.py` - Orquestrador principal
-2. `V2/configs/retreino_mensal.yaml` - Configurações do job
-3. `V2/src/monitoring/validation_rules.py` - Validador estruturado
-4. `V2/src/model/model_comparison.py` - Comparação de modelos
-5. `V2/infrastructure/cloud_run_job_retreino.yaml` - Deploy GCP
-6. `V2/Dockerfile.retreino` - Container para o job
+1. ✅ `V2/src/retrain/retraining_orchestrator.py` - Orquestrador principal
+2. ✅ `V2/src/retrain/data_validation.py` - Wrapper do DataQualityMonitor + validações específicas
+3. ✅ `V2/configs/retreino_mensal.yaml` - Configurações do job
+4. ✅ `V2/src/retrain/__init__.py` - Módulo Python
+5. ✅ `V2/src/retrain/README.md` - Documentação técnica
+6. ✅ `V2/src/retrain/ROADMAP.md` - Planejamento (este arquivo)
 
-### Modificações
+### Arquivos Stub (🔄 Sprint 2-3)
 
-1. `V2/src/monitoring/data_quality.py` - Refatorar para ValidationRule
-2. `V2/src/model/training_model.py` - Adicionar retorno de metadata estruturado
-3. `V2/configs/active_model.yaml` - Adicionar campo `previous_champion`
-4. `V2/src/utils/slack_notifier.py` - Adicionar templates de retreino
+1. 🔄 `V2/src/retrain/model_comparison.py` - Comparação champion vs challenger (Sprint 2)
+2. 🔄 `V2/src/retrain/deployment.py` - Deploy condicional (Sprint 3)
+3. 🔄 `V2/src/retrain/notifications.py` - Notificações Slack (Sprint 3)
+4. 🔄 `V2/infrastructure/cloud_run_job_retreino.yaml` - Deploy GCP (Sprint 3)
+5. 🔄 `V2/Dockerfile.retreino` - Container para o job (Sprint 3)
+
+### Modificações Feitas (✅ Sprint 1)
+
+1. ✅ `V2/src/model/training_model.py` - Retorna model_metadata completo (não resultado_final simplificado)
+2. ✅ `V2/src/train_pipeline.py` - Retorna metadata ao final de main()
+
+### Modificações Futuras (🔄 Sprint 2-3)
+
+1. 🔄 `V2/configs/active_model.yaml` - Adicionar campo `previous_champion` (Sprint 3)
+2. 🔄 `V2/api/business_config.py` - Update automático com recall (Sprint 3)
+
+### ❌ Não Necessário (descoberta de modularidade)
+
+1. ~~❌ `V2/src/monitoring/validation_rules.py`~~ - Não necessário! DataQualityMonitor já existe e funciona
+2. ~~❌ Refatorar `data_quality.py`~~ - Não necessário! Já está bom, só reusamos
 
 ---
 
@@ -81,15 +164,30 @@ class RetreinoMensal:
 
 ## 📅 Cronograma (3 Sprints)
 
-### Sprint 1 (Semana 1-2): Validação + Infraestrutura
+### Sprint 1 (✅ CONCLUÍDO - 2026-01-28)
 
-- [ ] Refatorar `data_quality.py` para `ValidationRule` estruturado
-- [ ] Criar `validation_rules.py` com regras padrão
-- [ ] Criar `retreino_mensal.yaml` (config)
-- [ ] Implementar Steps 1-2 em `retreino_mensal.py`
-- [ ] Testar validação end-to-end localmente
+- [x] ~~Refatorar `data_quality.py`~~ → Não necessário! Reusamos DataQualityMonitor via wrapper
+- [x] ~~Criar `validation_rules.py`~~ → Não necessário! Regras já existem em monitoring
+- [x] Criar `retreino_mensal.yaml` (config)
+- [x] Criar `data_validation.py` (wrapper + validações específicas)
+- [x] Implementar estrutura do orquestrador
+- [x] Modificar `train_pipeline.py` para retornar metadata
+- [x] Documentação (README + ROADMAP)
 
-**Entrega:** Validação de dados funcionando e testada
+**Entrega:** ✅ Estrutura básica + validação implementada (wrapper funcional)
+
+**Descoberta importante:** Código já é modular! Economizou ~2 semanas de refatoração.
+
+---
+
+### Sprint 1.1 (Próximo - Estimativa: 30-45 min)
+
+- [ ] Adicionar parâmetro `validation_hook` no `train_pipeline.main()`
+- [ ] Chamar hook após feature engineering (célula 18)
+- [ ] Modificar orquestrador para injetar validation hook
+- [ ] Testar validação end-to-end com dados reais
+
+**Entrega:** Validação funcionando via hook (zero duplicação de código)
 
 ---
 
@@ -121,32 +219,50 @@ class RetreinoMensal:
 
 ## 📋 Checklist de Implementação
 
-### Phase 1: Validação de Dados
+### Phase 1: Validação de Dados (✅ Concluído - Sprint 1)
 
 ```
-[ ] Criar dataclass ValidationRule
-[ ] Migrar checks existentes para ValidationRule
-[ ] Adicionar regras:
-    [ ] Schema validation (colunas obrigatórias)
-    [ ] Volume mínimo (>100 leads)
-    [ ] Taxa de emails válidos (>80%)
-    [ ] Taxa de telefones válidos (>50%)
-    [ ] Missing rate por coluna (<30%)
-    [ ] Category drift (reusa código existente)
-    [ ] Distribution drift (reusa código existente)
-[ ] Criar método validate() que retorna dict estruturado
-[ ] Adicionar severidade (HIGH/MEDIUM/LOW)
-[ ] Testar com dados históricos
+[x] ~~Criar dataclass ValidationRule~~ → Não necessário (reusamos DataQualityMonitor)
+[x] ~~Migrar checks existentes~~ → Não necessário (já existe em monitoring)
+[x] Criar RetrainingDataValidator (wrapper)
+[x] Adicionar validações específicas de retreino:
+    [x] Volume mínimo (>1000 registros)
+    [x] Taxa de conversão esperada (0.5%-5%)
+    [x] Período mínimo de dados (30 dias)
+[x] Reusar validações do monitoramento via wrapper:
+    [x] Category drift (via DataQualityMonitor)
+    [x] Distribution drift (via DataQualityMonitor)
+    [x] Missing rate (via DataQualityMonitor)
+    [x] Score distribution (via DataQualityMonitor)
+[x] Criar método validate() que retorna dict estruturado
+[x] Severidade já implementada (HIGH/MEDIUM/LOW via monitor)
+[ ] Testar com dados históricos reais (Sprint 1.1)
 ```
 
-### Phase 2: Treinamento + Comparação
+**Status:** ✅ Implementado mas não testado com dados reais (precisa Sprint 1.1)
+
+### Phase 1.1: Integração Hook-Based (🔄 Próximo - 30-45min)
 
 ```
-[ ] Criar retreino_mensal.py com estrutura base
-[ ] Implementar extract_data() - lê Excel do GCS
-[ ] Implementar validate_data() - usa ValidationRule
-[ ] Implementar prepare_data() - chama train_pipeline steps
-[ ] Implementar train_model() - chama training_model.py
+[ ] Modificar train_pipeline.py:
+    [ ] Adicionar parâmetro opcional validation_hook na assinatura de main()
+    [ ] Chamar hook após feature engineering (linha ~697)
+    [ ] Retornar status ABORTED_BY_VALIDATION se hook retornar False
+[ ] Modificar retraining_orchestrator.py:
+    [ ] Implementar validation_hook() que chama RetrainingDataValidator
+    [ ] Passar hook ao chamar train_main()
+    [ ] Capturar resultado de validação e decidir se prossegue
+[ ] Testar com dados históricos reais
+```
+
+**Estimativa:** 30-45 minutos (modificação mínima, zero duplicação!)
+
+### Phase 2: Comparação Champion vs Challenger (🔄 Sprint 2)
+
+```
+[x] Criar retraining_orchestrator.py com estrutura base
+[x] Implementar validate_data() - wrapper do DataQualityMonitor
+[ ] Implementar _load_champion_metadata() - lê active_model.yaml
 [ ] Criar model_comparison.py:
     [ ] Função compare_metrics(champion, challenger)
     [ ] Regras de decisão:
@@ -396,12 +512,49 @@ Retreino automatizado, seguro, e com supervisão humana quando necessário.
 
 ---
 
-## 📚 Referências
+## 📊 Status Atual (2026-01-28)
 
-- [Arquitetura do Sistema](./ARQUITETURA_SISTEMA_COMPLETA.md)
-- [Sistema de Validação ML](./SISTEMA_VALIDACAO_ML.md)
-- [Documentação de Deploy GCP](../api/docs/documentacao_deploy_gcp.md)
+### ✅ Concluído (Sprint 1):
+- Estrutura de pastas e módulos
+- Orquestrador básico (`retraining_orchestrator.py`)
+- Validação de dados (`data_validation.py` - wrapper do DataQualityMonitor)
+- Configuração completa (`configs/retreino_mensal.yaml`)
+- Documentação técnica (README + ROADMAP)
+- Modificações em `train_pipeline.py` e `training_model.py` para retornar metadata
+
+### 🔄 Em Andamento (Sprint 1.1 - Próximo):
+- Adicionar validation hook no train_pipeline.py
+- Modificar orquestrador para injetar hook
+- Teste end-to-end com dados reais
+
+**Estimativa Sprint 1.1:** 30-45 minutos (graças à arquitetura hook-based!)
+
+### 🔜 Planejado:
+- Sprint 2: Comparação champion vs challenger (2 semanas)
+- Sprint 3: Deploy condicional + Cloud Run Job (2 semanas)
+
+### 💡 Decisão Arquitetural (2026-01-28):
+
+**Arquitetura Hook-Based!** Reutiliza 100% do train_pipeline sem duplicação.
+
+Adicionar um `validation_hook` opcional permite injetar validação no ponto correto sem duplicar 828 linhas de código.
+
+**Impacto:** Sprint 1.1 reduzido de ~2 semanas para ~30-45 minutos! 🎉🎉
+
+**Vantagens:**
+- Zero duplicação de código
+- Um único lugar para manter lógica de treino
+- train_pipeline continua funcional standalone
+- Flexível para futuros hooks (custom preprocessing, etc.)
 
 ---
 
-**Última atualização:** 2026-01-26
+## 📚 Referências
+
+- [README Técnico](./README.md) - Documentação de uso e APIs
+- [Documentação do Sistema de Validação](../validation/DOCUMENTATION.md)
+- [Monitoramento de Dados](../monitoring/ARCHITECTURE.md)
+
+---
+
+**Última atualização:** 2026-01-28 (Sprint 1 concluído + descoberta de modularidade)

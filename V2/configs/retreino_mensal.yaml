@@ -1,0 +1,170 @@
+# =============================================================================
+# Configuração do Pipeline de Retreino Mensal - Smart Ads ML
+# =============================================================================
+#
+# Este arquivo configura o pipeline automatizado de retreino mensal com:
+# - Validação de dados (drift detection + quality checks)
+# - Treinamento do modelo challenger
+# - Comparação champion vs challenger
+# - Deploy condicional baseado em métricas
+#
+# Status de Implementação:
+#   ✅ Training (Sprint 0 - MVP)
+#   ✅ Validation (Sprint 1)
+#   🔄 Comparison (Sprint 2 - Planejado)
+#   🔄 Deployment (Sprint 3 - Planejado)
+#   🔄 Notifications (Sprint 3 - Planejado)
+#
+# =============================================================================
+
+# =============================================================================
+# TREINAMENTO (✅ Implementado)
+# =============================================================================
+training:
+  # Método de matching inicial usado na célula 15 do notebook
+  # Opções: email_telefone (recomendado) | email_only | variantes | robusto | validation
+  initial_matching: "email_telefone"
+
+  # Método de split train/test
+  # Opções:
+  #   - temporal_leads: 70% dos LEADS para treino (ordenados por data, recomendado)
+  #   - temporal: 70% dos DIAS para treino (split clássico por período)
+  #   - stratified: 70% dos registros com stratified split por pessoa
+  split_method: "temporal_leads"
+
+  # Hyperparameter tuning (desabilitado por padrão - adiciona ~20min ao treino)
+  tune_hyperparams: false
+  grid_size: "small"  # small | medium | large (se tune_hyperparams=true)
+
+# =============================================================================
+# VALIDAÇÃO (✅ Implementado - Sprint 1)
+# =============================================================================
+validation:
+  # -------------------------
+  # Validações Específicas
+  # -------------------------
+
+  # Volume mínimo de dados para treino
+  min_records: 1000
+
+  # Taxa de conversão esperada (fora dessa faixa = alerta crítico)
+  conversion_rate_min: 0.005  # 0.5%
+  conversion_rate_max: 0.05   # 5.0%
+
+  # Período mínimo de dados (em dias)
+  min_date_range_days: 30
+
+  # -------------------------
+  # Drift Detection
+  # -------------------------
+
+  # Reusa thresholds do monitoramento de produção
+  # Se true, usa DataQualityMonitor com mesmas regras de produção
+  reuse_monitoring_thresholds: true
+
+  # Critérios de falha crítica (apenas estas severidades param o retreino)
+  # Opções: ['HIGH'] | ['HIGH', 'MEDIUM'] | ['HIGH', 'MEDIUM', 'LOW']
+  critical_failures: ['HIGH']
+
+  # -------------------------
+  # Thresholds Customizados (opcional)
+  # -------------------------
+  # Sobrescreve thresholds do monitoramento se necessário
+  # Descomente para customizar:
+  #
+  # custom_thresholds:
+  #   category_drift_enabled: true
+  #   distribution_drift_categorical: 0.15  # 15pp
+  #   distribution_drift_numerical: 2.0     # 2 std
+  #   missing_rate_threshold: 0.20          # 20%
+
+# =============================================================================
+# COMPARAÇÃO (🔄 Sprint 2 - Planejado)
+# =============================================================================
+comparison:
+  # Regras de decisão de deploy baseadas em AUC delta
+  # AUC delta >= auto_approve_threshold: deploy automático
+  auto_approve_threshold: 0.02   # +2.0% AUC
+
+  # AUC delta entre manual_approval_threshold e auto_approve_threshold: aprovação manual via Slack
+  manual_approval_threshold: 0.005  # +0.5% AUC
+
+  # Abaixo de manual_approval_threshold: manter champion (não faz deploy)
+
+  # Pré-requisitos obrigatórios
+  min_monotonia: 0.80  # 80% - modelo precisa ter monotonia >= 80%
+  min_auc: 0.65        # 65% - AUC mínimo aceitável
+
+  # Timeout para aprovação manual (em horas)
+  manual_approval_timeout_hours: 48
+
+  # Ação se timeout expirar sem resposta
+  # Opções: REJECT (manter champion) | APPROVE (fazer deploy)
+  timeout_default_action: "REJECT"
+
+# =============================================================================
+# DEPLOY (🔄 Sprint 3 - Planejado)
+# =============================================================================
+deployment:
+  # Google Cloud Storage
+  gcs_bucket: "smart-ads-ml-artifacts"
+  models_path: "models/"
+
+  # Configuração do modelo ativo
+  active_config_path: "configs/active_model.yaml"
+
+  # Manter histórico de modelos anteriores
+  keep_previous_champion: true
+
+  # Atualizar business_config.py automaticamente com recall real
+  auto_update_business_config: true
+
+# =============================================================================
+# NOTIFICAÇÕES (🔄 Sprint 3 - Planejado)
+# =============================================================================
+notifications:
+  # Slack webhook URL (via Secret Manager)
+  slack_webhook: "${SLACK_WEBHOOK_URL}"
+
+  # Canal para alertas
+  alert_channel: "#ml-alerts"
+
+  # Notificações habilitadas
+  notify_on:
+    - start             # Início do retreino
+    - validation_failed # Validação falhou
+    - training_complete # Treinamento concluído
+    - comparison_ready  # Comparação pronta (champion vs challenger)
+    - manual_approval   # Aprovação manual necessária
+    - deploy_success    # Deploy concluído com sucesso
+    - deploy_failed     # Deploy falhou
+    - complete          # Retreino finalizado
+
+# =============================================================================
+# MLFLOW (Opcional - para tracking remoto)
+# =============================================================================
+mlflow:
+  # URI do tracking server (padrão: sqlite local)
+  tracking_uri: "sqlite:///mlflow.db"
+
+  # Nome do experimento
+  experiment_name: "devclub_lead_scoring"
+
+  # Habilitar auto-logging
+  autolog: true
+
+# =============================================================================
+# SCHEDULER (para configuração do Cloud Scheduler)
+# =============================================================================
+scheduler:
+  # Cron expression (dia 1 de cada mês às 10h BRT)
+  schedule: "0 10 1 * *"
+
+  # Timezone
+  timezone: "America/Sao_Paulo"
+
+  # Região do Cloud Run Job
+  region: "us-central1"
+
+  # Nome do job
+  job_name: "retreino-mensal"

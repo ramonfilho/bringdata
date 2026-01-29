@@ -86,7 +86,7 @@ def setup_output_logging():
     return log_path, tee
 
 
-def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', use_guru_only=None, set_active=False, medium_strategy='binary_top3'):
+def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', use_guru_only=None, set_active=False, medium_strategy='binary_top3', validation_hook=None):
     """Executa pipeline de treino completo.
 
     Args:
@@ -102,6 +102,8 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         grid_size: Tamanho do grid search ('small', 'medium', 'large')
         use_guru_only: Se True, usa apenas GURU. Se False, usa GURU+TMB. Se None, usa valor do config.
         set_active: Se True, atualiza configs/active_model.yaml com este modelo (requer save_files=True)
+        validation_hook: Função opcional chamada após feature engineering para validação.
+                        Recebe dataset_fe e retorna True (continuar) ou False (abortar)
     """
 
     # Configurar redirecionamento de output para arquivo
@@ -696,6 +698,15 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     # Resultado final: 4 temporais + 7 FE + 15 base = 26 colunas
     dataset_v1_devclub_fe = criar_features_derivadas(dataset_v1_devclub)
 
+    # === VALIDATION HOOK (opcional - usado pelo retreino mensal) ===
+    if validation_hook:
+        print(f"\n🔧 VALIDATION HOOK: Validando dados antes de prosseguir...")
+        should_continue = validation_hook(dataset_v1_devclub_fe)
+        if not should_continue:
+            print("❌ Validação falhou - abortando treino")
+            return {'status': 'ABORTED_BY_VALIDATION'}
+        print("✅ Validação passou - prosseguindo com treino")
+
     # === CÉLULA 18.5: Capturar categorias para monitoramento ===
     print(f"\n📊 CAPTURANDO CATEGORIAS E DISTRIBUIÇÕES PARA MONITORAMENTO (DRIFT DETECTION)")
     print("=" * 60)
@@ -750,6 +761,9 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         set_active=set_active,
         recall_metrics=recall_metrics
     )
+
+    # Retornar metadata completo para uso pelo orquestrador de retreino
+    return resultado_registro_devclub
 
 
 if __name__ == "__main__":

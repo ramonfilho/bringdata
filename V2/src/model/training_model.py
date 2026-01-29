@@ -1096,18 +1096,12 @@ def registrar_features_e_modelo_devclub(
         else:
             print(f"Arquivos locais: não salvos")
 
-        resultado_final = {
-            "modelo": "v1_devclub_rf_temporal_single",
-            "algoritmo": "RandomForestClassifier",
-            "split": "temporal",
-            "matching_method": matching_method,
-            "auc": auc_final,
-            "top3": top3_conversoes,
-            "lift": lift_maximo,
-            "monotonia": monotonia,
-            "features_count": len(X_clean.columns),
-            "output_dir": output_dir,
-            "mlflow_run_id": mlflow.active_run().info.run_id
-        }
+        # Retornar model_metadata completo para uso pelo orquestrador de retreino
+        # Adicionar informações extras que não estão no metadata
+        model_metadata['output_dir'] = output_dir
+        model_metadata['mlflow_run_id'] = mlflow.active_run().info.run_id
+        model_metadata['matching_method'] = matching_method
+
+        resultado_final = model_metadata
 
         return resultado_final
