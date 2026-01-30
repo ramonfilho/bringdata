@@ -125,7 +125,8 @@ def registrar_features_e_modelo_devclub(
     set_active: bool = False,
     recall_metrics: dict = None,
     categorias_treino: dict = None,
-    distribuicoes_treino: dict = None
+    distribuicoes_treino: dict = None,
+    missing_rates_baseline: dict = None
 ) -> dict:
     """
     Registra features e salva modelo DevClub para produção.
@@ -950,6 +951,13 @@ def registrar_features_e_modelo_devclub(
                 "recommended_deployment": "Batch scoring with validation on future launches",
                 "monitoring_requirements": "Track performance degradation and feature drift",
                 "model_limitations": f"Monotonia at {monotonia:.1f}% - investigate if < 80%"
+            },
+            "data_quality_baseline": {
+                "description": "Missing rates das colunas críticas usadas no modelo - baseline para monitoramento",
+                "captured_at": datetime.now().isoformat(),
+                "total_records": len(dataset_devclub_original),
+                "missing_rates": missing_rates_baseline if missing_rates_baseline else {},
+                "usage": "Compare com novos treinos para detectar mudanças em qualidade de dados"
             }
         }
 

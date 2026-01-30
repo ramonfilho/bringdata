@@ -317,6 +317,19 @@ class LeadDataLoader:
         df_norm['term'] = df.get('Term', np.nan)
         df_norm['content'] = df.get('Content', np.nan)
 
+        # Colunas demográficas (perguntas do formulário)
+        df_norm['genero'] = df.get('O seu gênero:', np.nan)
+        df_norm['idade'] = df.get('Qual a sua idade?', np.nan)
+        df_norm['ocupacao'] = df.get('O que você faz atualmente?', np.nan)
+        df_norm['faixa_salarial'] = df.get('Atualmente, qual a sua faixa salarial?', np.nan)
+        df_norm['cartao_credito'] = df.get('Você possui cartão de crédito?', np.nan)
+        df_norm['interesse_evento'] = df.get('O que mais você quer ver no evento?', np.nan)
+        df_norm['tem_computador'] = df.get('Tem computador/notebook?', np.nan)
+        df_norm['estudou_programacao'] = df.get('Já estudou programação?', np.nan)
+        df_norm['pretende_faculdade'] = df.get('Você já fez/faz/pretende fazer faculdade?', np.nan)
+        df_norm['investiu_curso_online'] = df.get('Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?', np.nan)
+        df_norm['interesse_programacao'] = df.get('O que mais te chama atenção na profissão de Programador?', np.nan)
+
         # LIMPEZA DE UTMs: Detectar e limpar casos problemáticos
 
         # 1. Limpar variáveis não substituídas ({{...}})

@@ -1,12 +1,12 @@
 active_model:
   model_name: v1_devclub_rf_temporal_leads_single
-  model_path: files/20260117_123914
-  trained_at: '2026-01-17T12:39:09.799868'
+  model_path: files/20260130_090227
+  trained_at: '2026-01-30T09:02:24.891076'
   split_method: temporal_leads
   performance:
-    auc: 0.7486773638649244
-    monotonia_percentage: 77.77777777777779
-    lift_maximum: 2.94
+    auc: 0.7311170167409214
+    monotonia_percentage: 88.88888888888889
+    lift_maximum: 2.65
 
 # Para mudar o modelo ativo:
 # 1. Treine um novo modelo: python src/train_pipeline.py --split-method temporal_leads --save-files --set-active

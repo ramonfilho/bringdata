@@ -522,6 +522,20 @@ def read_all_training_sources(
                 sheets_formatted['Content'] = sheets_df.get('content', '')
                 sheets_formatted['lead_score'] = sheets_df.get('lead_score', None)
 
+                # Colunas demográficas (perguntas do formulário)
+                sheets_formatted['O seu gênero:'] = sheets_df.get('genero', None)
+                sheets_formatted['Qual a sua idade?'] = sheets_df.get('idade', None)
+                sheets_formatted['O que você faz atualmente?'] = sheets_df.get('ocupacao', None)
+                sheets_formatted['Atualmente, qual a sua faixa salar'] = sheets_df.get('faixa_salarial', None)
+                sheets_formatted['Você possui cartão de crédito?'] = sheets_df.get('cartao_credito', None)
+                sheets_formatted['O que mais você quer ver no evento?'] = sheets_df.get('interesse_evento', None)
+                sheets_formatted['Tem computador/notebook?'] = sheets_df.get('tem_computador', None)
+                sheets_formatted['Já estudou programação?'] = sheets_df.get('estudou_programacao', None)
+                sheets_formatted['Você já fez/faz/pretende fazer faculdade?'] = sheets_df.get('pretende_faculdade', None)
+                # Usar nomes completos para ser consistente com arquivos locais (column_unification.py fará a unificação)
+                sheets_formatted['Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?'] = sheets_df.get('investiu_curso_online', None)
+                sheets_formatted['O que mais te chama atenção na profissão de Programador?'] = sheets_df.get('interesse_programacao', None)
+
                 api_data['[API] Leads Google Sheets'] = {
                     '[LF] Pesquisa - API': sheets_formatted
                 }

@@ -94,7 +94,7 @@ def setup_output_logging(output_subdir='training'):
     return log_path, tee
 
 
-def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, include_api_data=False, api_start_date=None, api_end_date=None, output_subdir='training'):
+def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=False, api_start_date=None, api_end_date=None, output_subdir='training'):
     """Executa pipeline de treino completo.
 
     Args:
@@ -340,6 +340,43 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     # Gerar relatórios finais
     gerar_relatorio_colunas(df_pesquisa_final, "DATASET PESQUISA")
     gerar_relatorio_colunas(df_vendas_final, "DATASET VENDAS")
+
+    # === CAPTURAR MISSING RATES PARA MONITORAMENTO (QUALITY GATE) ===
+    # Colunas críticas usadas no modelo - monitorar mudanças em qualidade de dados
+    colunas_criticas_modelo = [
+        'O seu gênero:',
+        'Qual a sua idade?',
+        'O que você faz atualmente?',
+        'Atualmente, qual a sua faixa salar',  # Nome pode estar truncado
+        'Você possui cartão de crédito?',
+        'O que mais você quer ver no evento',  # Nome pode estar truncado
+        'Já estudou programação?',
+        'Você já fez/faz/pretende fazer fac',  # Nome pode estar truncado
+        'investiu_curso_online',
+        'interesse_programacao',
+        'Tem computador/notebook?'
+    ]
+
+    missing_rates_baseline = {}
+    for col in colunas_criticas_modelo:
+        if col in df_pesquisa_final.columns:
+            missing_rate = df_pesquisa_final[col].isnull().mean()
+            missing_rates_baseline[col] = float(missing_rate)
+        else:
+            # Tentar encontrar coluna com nome similar (truncado)
+            matching_cols = [c for c in df_pesquisa_final.columns if c.startswith(col[:30])]
+            if matching_cols:
+                missing_rate = df_pesquisa_final[matching_cols[0]].isnull().mean()
+                missing_rates_baseline[matching_cols[0]] = float(missing_rate)
+
+    # === QUALITY GATE HOOK: Validar qualidade de dados antes de continuar ===
+    if quality_gate_hook:
+        print(f"\n🔧 QUALITY GATE HOOK: Validando qualidade de dados antes de continuar...")
+        should_continue = quality_gate_hook(missing_rates_baseline, df_pesquisa_final, df_vendas_final)
+        if not should_continue:
+            print("❌ Quality gate falhou - abortando treino")
+            return {'status': 'ABORTED_BY_QUALITY_GATE', 'missing_rates': missing_rates_baseline}
+        print("✅ Quality gate passou - prosseguindo com treino")
 
     # === CÉLULA 6: Pulada (exploratória) ===
     print("\n⏭️  CÉLULA 6: Pulando célula exploratória/informativa do notebook original de treino")
@@ -770,7 +807,8 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         custom_hyperparams=melhores_params,
         split_method=split_method,
         set_active=set_active,
-        recall_metrics=recall_metrics
+        recall_metrics=recall_metrics,
+        missing_rates_baseline=missing_rates_baseline
     )
 
     # Retornar metadata completo para uso pelo orquestrador de retreino

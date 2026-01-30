@@ -97,6 +97,114 @@ class RetreinoMensal:
             logger.info("   - Validation hook injetado após feature engineering")
             logger.info("   - Zero duplicação de código!")
 
+            # Criar quality gate hook (validação de dados antes de começar treino)
+            def quality_gate_hook(missing_rates, df_pesquisa, df_vendas):
+                """
+                Hook de quality gate chamado pelo train_pipeline após consolidar dados.
+
+                Valida mudanças em missing rates antes de gastar tempo treinando.
+
+                Args:
+                    missing_rates: Dict com taxas de ausência das colunas críticas
+                    df_pesquisa: DataFrame consolidado de pesquisa
+                    df_vendas: DataFrame consolidado de vendas
+
+                Returns:
+                    True para continuar treino, False para abortar
+                """
+                logger.info("\n" + "-" * 80)
+                logger.info("🚪 QUALITY GATE HOOK ATIVADO")
+                logger.info("-" * 80)
+                logger.info("Validando qualidade de dados antes de iniciar treino...")
+
+                # Obter baseline do champion
+                try:
+                    model_path = get_active_model_path()
+                    logger.info(f"   Champion: {model_path}")
+
+                    # Carregar metadata do champion
+                    import json
+                    import glob
+
+                    # Buscar arquivo de metadata (pode ter sufixo com nome do modelo)
+                    metadata_pattern = str(Path(model_path) / 'model_metadata*.json')
+                    metadata_files = glob.glob(metadata_pattern)
+
+                    if not metadata_files:
+                        logger.warning(f"   ⚠️  Metadata não encontrado em: {model_path}")
+                        logger.info(f"   Continuando sem comparação (primeiro treino?)")
+                        return True
+
+                    metadata_path = metadata_files[0]  # Pegar primeiro (deve ser único)
+                    logger.info(f"   Metadata encontrado: {Path(metadata_path).name}")
+
+                    with open(metadata_path, 'r') as f:
+                        champion_metadata = json.load(f)
+
+                    champion_quality = champion_metadata.get('data_quality_baseline', {})
+                    champion_missing = champion_quality.get('missing_rates', {})
+
+                    if not champion_missing:
+                        logger.info(f"   Champion não tem baseline - continuando sem comparação")
+                        return True
+
+                except Exception as e:
+                    logger.warning(f"   ⚠️  Erro ao carregar champion: {e}")
+                    logger.info(f"   Continuando sem comparação")
+                    return True
+
+                # Comparar missing rates
+                THRESHOLD_WARNING = 0.10  # 10pp
+                THRESHOLD_CRITICAL = 0.20  # 20pp
+
+                alerts = []
+                for col in missing_rates:
+                    current_rate = missing_rates[col]
+                    baseline_rate = champion_missing.get(col, 0.0)
+                    diff = current_rate - baseline_rate
+
+                    if abs(diff) > THRESHOLD_CRITICAL:
+                        severity = "🔴 CRÍTICO"
+                        alerts.append((severity, col, baseline_rate, current_rate, diff, True))
+                    elif abs(diff) > THRESHOLD_WARNING:
+                        severity = "⚠️  ALERTA"
+                        alerts.append((severity, col, baseline_rate, current_rate, diff, False))
+
+                if alerts:
+                    logger.warning(f"\n{'='*80}")
+                    logger.warning("⚠️  MUDANÇAS DETECTADAS EM QUALIDADE DE DADOS")
+                    logger.warning(f"{'='*80}")
+                    logger.warning(f"\n{'SEVERIDADE':<12} {'COLUNA':<45} {'BASELINE':>10} {'ATUAL':>10} {'DIFF':>10}")
+                    logger.warning("-"*90)
+
+                    has_critical = False
+                    for severity, col, baseline, current, diff, is_critical in alerts:
+                        col_display = col[:44] if len(col) > 44 else col
+                        logger.warning(f"{severity:<12} {col_display:<45} {baseline:>9.1%} {current:>9.1%} {diff:>+9.1%}")
+                        if is_critical:
+                            has_critical = True
+
+                    logger.warning("="*80)
+                    logger.warning(f"\n💡 POSSÍVEIS CAUSAS:")
+                    logger.warning("   - Nova fonte de dados sem perguntas do formulário")
+                    logger.warning("   - Mudança no formulário de captura")
+                    logger.warning("   - Dados históricos adicionados de períodos anteriores")
+                    logger.warning("   - Problema de integração/ETL")
+
+                    if has_critical:
+                        logger.error("\n❌ QUALITY GATE FALHOU - Mudança crítica detectada (>20pp)")
+                        logger.error("   Abortando treino para investigação")
+                        return False
+                    else:
+                        logger.warning("\n⚠️  QUALITY GATE PASSOU COM AVISOS")
+                        logger.warning("   Mudanças detectadas mas dentro do threshold crítico")
+                        logger.warning("   Continuando com treino")
+                        return True
+                else:
+                    logger.info("✅ Qualidade de dados estável (sem mudanças significativas)")
+                    logger.info("-" * 80)
+                    return True
+
             # Criar validation hook
             def validation_hook(dataset_fe):
                 """
@@ -171,12 +279,23 @@ class RetreinoMensal:
                 grid_size=training_config.get('grid_size', 'small'),
                 tmb_risk_filter=training_config.get('tmb_risk_filter', 'all'),  # ← FILTRO DE RISCO TMB
                 set_active=False,  # NÃO ativar automaticamente (decisão vem depois)
-                validation_hook=validation_hook,  # ← INJETA VALIDAÇÃO
+                quality_gate_hook=quality_gate_hook,  # ← INJETA QUALITY GATE (antes de treinar)
+                validation_hook=validation_hook,  # ← INJETA VALIDAÇÃO (após feature engineering)
                 include_api_data=True,  # ← RETREINO: buscar dados novos da API
                 api_start_date=api_start_date,
                 api_end_date=api_end_date,
                 output_subdir='retraining'  # ← LOGS vão para outputs/retraining/
             )
+
+            # Verificar se foi abortado pelo quality gate
+            if challenger_metadata.get('status') == 'ABORTED_BY_QUALITY_GATE':
+                logger.error("❌ Treino abortado pelo quality gate (mudanças críticas em missing rates)")
+                return {
+                    'status': 'ABORTED',
+                    'reason': 'Quality gate failed - critical changes in data quality',
+                    'execution_id': self.execution_id,
+                    'missing_rates': challenger_metadata.get('missing_rates', {})
+                }
 
             # Verificar se foi abortado pela validação
             if challenger_metadata.get('status') == 'ABORTED_BY_VALIDATION':

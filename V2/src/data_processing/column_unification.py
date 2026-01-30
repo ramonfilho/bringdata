@@ -67,21 +67,18 @@ def unificar_colunas_datasets(
         print(f"  {col2}")
         print()
 
-    # Unificar colunas duplicadas de pesquisa
+    # Unificar colunas duplicadas de pesquisa (OPERAÇÃO VETORIZADA)
     colunas_investiu = [
         'Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?',
         'Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro? '
     ]
 
     if all(col in df_pesquisa_unificado.columns for col in colunas_investiu):
-        for i, row_idx in enumerate(df_pesquisa_unificado.index):
-            valor_final = None
-            for col in colunas_investiu:
-                valor = df_pesquisa_unificado.loc[row_idx, col]
-                if pd.notna(valor) and valor_final is None:
-                    valor_final = valor
-            df_pesquisa_unificado.loc[row_idx, 'investiu_curso_online'] = valor_final
-
+        # Vetorizado: fillna pega valor da segunda coluna onde primeira é NaN
+        df_pesquisa_unificado['investiu_curso_online'] = (
+            df_pesquisa_unificado[colunas_investiu[0]]
+            .fillna(df_pesquisa_unificado[colunas_investiu[1]])
+        )
         df_pesquisa_unificado = df_pesquisa_unificado.drop(columns=colunas_investiu)
 
     colunas_atencao = [
@@ -90,15 +87,27 @@ def unificar_colunas_datasets(
     ]
 
     if all(col in df_pesquisa_unificado.columns for col in colunas_atencao):
-        for i, row_idx in enumerate(df_pesquisa_unificado.index):
-            valor_final = None
-            for col in colunas_atencao:
-                valor = df_pesquisa_unificado.loc[row_idx, col]
-                if pd.notna(valor) and valor_final is None:
-                    valor_final = valor
-            df_pesquisa_unificado.loc[row_idx, 'interesse_programacao'] = valor_final
-
+        # Vetorizado: fillna pega valor da segunda coluna onde primeira é NaN
+        df_pesquisa_unificado['interesse_programacao'] = (
+            df_pesquisa_unificado[colunas_atencao[0]]
+            .fillna(df_pesquisa_unificado[colunas_atencao[1]])
+        )
         df_pesquisa_unificado = df_pesquisa_unificado.drop(columns=colunas_atencao)
+
+    # Unificar colunas de faixa salarial (nome truncado da API vs nome completo dos arquivos locais)
+    colunas_faixa_salarial = [
+        'Atualmente, qual a sua faixa salarial?',  # Arquivos locais (nome completo)
+        'Atualmente, qual a sua faixa salar'        # API (nome truncado)
+    ]
+
+    if all(col in df_pesquisa_unificado.columns for col in colunas_faixa_salarial):
+        # Vetorizado: unificar na coluna com NOME COMPLETO (que o modelo champion espera)
+        df_pesquisa_unificado['Atualmente, qual a sua faixa salarial?'] = (
+            df_pesquisa_unificado[colunas_faixa_salarial[0]]
+            .fillna(df_pesquisa_unificado[colunas_faixa_salarial[1]])
+        )
+        # Remove a coluna truncada (mantém a completa que o champion espera)
+        df_pesquisa_unificado = df_pesquisa_unificado.drop(columns=[colunas_faixa_salarial[1]])
 
     # DATASET VENDAS
     df_vendas_unificado = df_vendas.copy()
