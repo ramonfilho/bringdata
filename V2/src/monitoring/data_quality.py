@@ -53,6 +53,52 @@ def normalizar_categoria_para_comparacao(texto):
     return texto_norm if texto_norm else None
 
 
+def calculate_missing_rate(df: pd.DataFrame, col: str) -> float:
+    """
+    Calcula taxa de valores ausentes em uma coluna.
+
+    Considera ausente:
+    - NaN / None (pd.isna())
+    - Strings vazias após strip ('', '  ', etc)
+
+    Esta função é usada em múltiplos lugares para garantir consistência:
+    - Quality Gate no pipeline de retreino (train_pipeline.py)
+    - Monitoramento de produção (data_quality.py)
+    - Validação de dados
+
+    Args:
+        df: DataFrame
+        col: Nome da coluna
+
+    Returns:
+        Float entre 0.0 e 1.0 (proporção de valores ausentes)
+        Retorna 0.0 se coluna não existir ou DataFrame vazio
+
+    Examples:
+        >>> df = pd.DataFrame({'A': [1, None, 3], 'B': ['a', '', 'c']})
+        >>> calculate_missing_rate(df, 'A')
+        0.3333333333333333
+        >>> calculate_missing_rate(df, 'B')
+        0.3333333333333333
+    """
+    if col not in df.columns:
+        return 0.0
+
+    total_rows = len(df)
+    if total_rows == 0:
+        return 0.0
+
+    # Contar NaN/None
+    missing_count = int(df[col].isna().sum())
+
+    # Adicionar strings vazias (após strip)
+    # Importante: só verificar strings vazias se a coluna tiver tipo object
+    if df[col].dtype == 'object':
+        missing_count += int((df[col].astype(str).str.strip() == '').sum())
+
+    return float(missing_count / total_rows)
+
+
 def capture_training_categories(df: pd.DataFrame, output_path: str = None) -> Dict[str, List[str]]:
     """
     Captura categorias únicas de colunas categóricas ANTES do encoding.
@@ -663,12 +709,13 @@ class DataQualityMonitor:
             # Ignorar colunas da whitelist
             if col in MISSING_RATE_IGNORE_COLUMNS:
                 continue
-            # Contar NaN + strings vazias (converter para int nativo para serialização JSON)
-            missing_count = int(df[col].isna().sum())
-            missing_count += int((df[col].astype(str).str.strip() == '').sum())
-            missing_rate = missing_count / total_rows
 
+            # Usar função centralizada para calcular missing rate
+            missing_rate = calculate_missing_rate(df, col)
             missing_rates[col] = missing_rate
+
+            # Calcular missing_count para mensagem de alerta
+            missing_count = int(missing_rate * total_rows)
 
             if missing_rate > threshold:
                 colunas_acima_threshold.append((col, missing_rate))

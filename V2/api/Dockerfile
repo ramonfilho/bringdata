@@ -51,11 +51,11 @@ ARG MODEL_PATH=files/20260115_080140
 # O path é dinâmico - deploy.sh passa via --build-arg MODEL_PATH=...
 COPY ./${MODEL_PATH}/ ./${MODEL_PATH}/
 
-# Copiar relatórios Meta CSV (necessário para validação rápida sem API)
-COPY ./files/validation/meta_reports/ ./files/validation/meta_reports/
+# DESABILITADO: Copiar relatórios Meta CSV (será descontinuado)
+# COPY ./files/validation/meta_reports/ ./files/validation/meta_reports/
 
-# Copiar vendas (Guru Excel + TMB para fallback)
-COPY ./files/validation/vendas/ ./files/validation/vendas/
+# DESABILITADO: Copiar vendas (Guru Excel + TMB para fallback - será descontinuado)
+# COPY ./files/validation/vendas/ ./files/validation/vendas/
 
 # Definir variáveis de ambiente
 ENV PYTHONPATH=/app

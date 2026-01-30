@@ -41,7 +41,7 @@ from src.features.feature_engineering_training import criar_features_derivadas
 from src.features.encoding_training import aplicar_encoding_estrategico
 from src.model.training_model import registrar_features_e_modelo_devclub
 from src.model.hyperparameter_tuning import hyperparameter_tuning
-from src.monitoring.data_quality import capture_training_categories, capture_training_distributions
+from src.monitoring.data_quality import capture_training_categories, capture_training_distributions, calculate_missing_rate
 
 # Configurar logging
 # WARNING: Suprime logger.info() dos módulos para output limpo
@@ -341,43 +341,6 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     gerar_relatorio_colunas(df_pesquisa_final, "DATASET PESQUISA")
     gerar_relatorio_colunas(df_vendas_final, "DATASET VENDAS")
 
-    # === CAPTURAR MISSING RATES PARA MONITORAMENTO (QUALITY GATE) ===
-    # Colunas críticas usadas no modelo - monitorar mudanças em qualidade de dados
-    colunas_criticas_modelo = [
-        'O seu gênero:',
-        'Qual a sua idade?',
-        'O que você faz atualmente?',
-        'Atualmente, qual a sua faixa salar',  # Nome pode estar truncado
-        'Você possui cartão de crédito?',
-        'O que mais você quer ver no evento',  # Nome pode estar truncado
-        'Já estudou programação?',
-        'Você já fez/faz/pretende fazer fac',  # Nome pode estar truncado
-        'investiu_curso_online',
-        'interesse_programacao',
-        'Tem computador/notebook?'
-    ]
-
-    missing_rates_baseline = {}
-    for col in colunas_criticas_modelo:
-        if col in df_pesquisa_final.columns:
-            missing_rate = df_pesquisa_final[col].isnull().mean()
-            missing_rates_baseline[col] = float(missing_rate)
-        else:
-            # Tentar encontrar coluna com nome similar (truncado)
-            matching_cols = [c for c in df_pesquisa_final.columns if c.startswith(col[:30])]
-            if matching_cols:
-                missing_rate = df_pesquisa_final[matching_cols[0]].isnull().mean()
-                missing_rates_baseline[matching_cols[0]] = float(missing_rate)
-
-    # === QUALITY GATE HOOK: Validar qualidade de dados antes de continuar ===
-    if quality_gate_hook:
-        print(f"\n🔧 QUALITY GATE HOOK: Validando qualidade de dados antes de continuar...")
-        should_continue = quality_gate_hook(missing_rates_baseline, df_pesquisa_final, df_vendas_final)
-        if not should_continue:
-            print("❌ Quality gate falhou - abortando treino")
-            return {'status': 'ABORTED_BY_QUALITY_GATE', 'missing_rates': missing_rates_baseline}
-        print("✅ Quality gate passou - prosseguindo com treino")
-
     # === CÉLULA 6: Pulada (exploratória) ===
     print("\n⏭️  CÉLULA 6: Pulando célula exploratória/informativa do notebook original de treino")
 
@@ -400,6 +363,45 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
 
     # Listar colunas restantes
     listar_colunas_restantes(df_features_removidas)
+
+    # === CAPTURAR MISSING RATES PARA MONITORAMENTO (QUALITY GATE) ===
+    # IMPORTANTE: Captura APÓS célula 8 (remoção de features) para monitorar apenas colunas que vão para o modelo
+    # Colunas críticas usadas no modelo - monitorar mudanças em qualidade de dados
+    colunas_criticas_modelo = [
+        'O seu gênero:',
+        'Qual a sua idade?',
+        'O que você faz atualmente?',
+        'Atualmente, qual a sua faixa salarial?',  # Nome completo esperado
+        'Você possui cartão de crédito?',
+        'O que mais você quer ver no evento?',
+        'Já estudou programação?',
+        'Você já fez/faz/pretende fazer faculdade?',
+        'investiu_curso_online',
+        'interesse_programacao',
+        'Tem computador/notebook?'
+    ]
+
+    missing_rates_baseline = {}
+    for col in colunas_criticas_modelo:
+        if col in df_features_removidas.columns:
+            # Usar função centralizada de data_quality para consistência com monitoramento
+            missing_rate = calculate_missing_rate(df_features_removidas, col)
+            missing_rates_baseline[col] = missing_rate
+        else:
+            # Tentar encontrar coluna com nome similar (truncado)
+            matching_cols = [c for c in df_features_removidas.columns if c.startswith(col[:30])]
+            if matching_cols:
+                missing_rate = calculate_missing_rate(df_features_removidas, matching_cols[0])
+                missing_rates_baseline[matching_cols[0]] = missing_rate
+
+    # === QUALITY GATE HOOK: Validar qualidade de dados antes de continuar ===
+    if quality_gate_hook:
+        print(f"\n🔧 QUALITY GATE HOOK: Validando qualidade de dados antes de continuar...")
+        should_continue = quality_gate_hook(missing_rates_baseline, df_features_removidas, df_vendas_final)
+        if not should_continue:
+            print("❌ Quality gate falhou - abortando treino")
+            return {'status': 'ABORTED_BY_QUALITY_GATE', 'missing_rates': missing_rates_baseline}
+        print("✅ Quality gate passou - prosseguindo com treino")
 
     # === CÉLULA 9: Pulada (exploratória) ===
     print("\n⏭️  CÉLULA 9: Pulando célula exploratória/informativa do notebook original de treino")
