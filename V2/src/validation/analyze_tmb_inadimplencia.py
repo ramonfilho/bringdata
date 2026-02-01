@@ -354,6 +354,64 @@ def format_excel_brazilian_style(file_path: Path):
     logger.info(f"   ✨ Formatação brasileira aplicada com sucesso")
 
 
+def gerar_cenarios_precificacao(taxa_realizacao_ponderada: float, preco_atual: float) -> pd.DataFrame:
+    """
+    Gera cenários de precificação considerando inadimplência.
+
+    Args:
+        taxa_realizacao_ponderada: Taxa de realização média ponderada (ex: 0.629 = 62.9%)
+        preco_atual: Preço atual do produto
+
+    Returns:
+        DataFrame com cenários de precificação
+    """
+    valor_liquido_atual = preco_atual * taxa_realizacao_ponderada
+
+    # Lista de preços a testar (até R$ 3.500 para não ultrapassar R$ 2.200 líquido)
+    precos = [
+        preco_atual,  # Atual
+        2300.00,
+        2400.00,
+        2500.00,
+        2600.00,
+        2700.00,
+        2800.00,
+        2861.84,  # Para receber R$ 1.800
+        2900.00,
+        3000.00,
+        3100.00,
+        3200.00,
+        3300.00,
+        3400.00,
+        3497.53,  # Para receber R$ 2.200 (máximo)
+    ]
+
+    cenarios = []
+
+    for preco in precos:
+        # Valor líquido recebido (após inadimplência)
+        valor_liquido = preco * taxa_realizacao_ponderada
+
+        # Aumentos vs preço atual
+        aumento_absoluto = preco - preco_atual
+        aumento_percentual = (aumento_absoluto / preco_atual) * 100
+
+        # Ganhos vs valor líquido atual
+        ganho_absoluto = valor_liquido - valor_liquido_atual
+        ganho_percentual = (ganho_absoluto / valor_liquido_atual) * 100
+
+        cenarios.append({
+            'Preço Cobrado': preco,
+            'Aumento (%)': aumento_percentual,
+            'Aumento (R$)': aumento_absoluto,
+            'Valor Líquido Recebido': valor_liquido,
+            'Ganho vs Atual (%)': ganho_percentual,
+            'Ganho vs Atual (R$)': ganho_absoluto
+        })
+
+    return pd.DataFrame(cenarios)
+
+
 def generate_summary_report(
     inadimplencia: dict,
     valor_real: dict,
@@ -362,7 +420,7 @@ def generate_summary_report(
     output_path: Path
 ):
     """
-    Gera relatório único em Excel com 4 abas formatadas.
+    Gera relatório único em Excel com 5 abas formatadas.
 
     Args:
         inadimplencia: Dict com estatísticas de inadimplência
@@ -371,7 +429,7 @@ def generate_summary_report(
         risco: DataFrame com análise por risco
         output_path: Caminho do arquivo Excel de saída
     """
-    logger.info("💾 Gerando relatório Excel com 4 abas...")
+    logger.info("💾 Gerando relatório Excel com 5 abas...")
 
     # 1. Resumo geral
     resumo = pd.DataFrame([{
@@ -409,6 +467,12 @@ def generate_summary_report(
     risco_formatted = risco.copy()
     risco_formatted.columns = ['Grau de Risco', 'Pedidos', 'Valor Total', 'Valor Vencido', 'Taxa Inadimplência (%)']
 
+    # 5. Gerar cenários de precificação
+    # Calcular taxa de realização ponderada
+    taxa_realizacao = valor_real['pct_recebido_medio'] / 100  # Converter % para decimal
+    preco_nominal = valor_real['valor_nominal']
+    cenarios_precificacao = gerar_cenarios_precificacao(taxa_realizacao, preco_nominal)
+
     # Criar arquivo Excel com múltiplas abas
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         resumo.to_excel(writer, sheet_name='Resumo', index=False)
@@ -416,12 +480,13 @@ def generate_summary_report(
         risco_formatted.to_excel(writer, sheet_name='Por_Grau_Risco', index=False)
         if not valor_risco_df.empty:
             valor_risco_df.to_excel(writer, sheet_name='Valor_Real_Risco', index=False)
+        cenarios_precificacao.to_excel(writer, sheet_name='Cenarios_Precificacao', index=False)
 
     # Aplicar formatação brasileira
     format_excel_brazilian_style(output_path)
 
     logger.info(f"   ✅ Relatório gerado: {output_path}")
-    logger.info(f"   📑 Abas: Resumo, Evolucao_Temporal, Por_Grau_Risco, Valor_Real_Risco")
+    logger.info(f"   📑 Abas: Resumo, Evolucao_Temporal, Por_Grau_Risco, Valor_Real_Risco, Cenarios_Precificacao")
 
 
 def main():

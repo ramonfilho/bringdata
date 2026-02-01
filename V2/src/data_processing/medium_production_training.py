@@ -127,6 +127,10 @@ def unificar_medium_para_producao(df_medium_unificado: pd.DataFrame) -> pd.DataF
         print(f"{i:2d}. {valor_str[:50]:<52} {count:>6,} ({pct:>5.1f}%)")
 
     # FUNÇÃO DE UNIFICAÇÃO COM TRATAMENTO DE VALORES NÃO VISTOS
+    # Sets para coletar valores não vistos (evitar duplicatas nos logs)
+    valores_nao_mapeados = set()
+    valores_novos_para_outros = set()
+
     def aplicar_unificacao_robusta(medium_value):
         """Aplica unificação com tratamento robusto para valores não vistos"""
 
@@ -142,16 +146,27 @@ def unificar_medium_para_producao(df_medium_unificado: pd.DataFrame) -> pd.DataF
         # 2. TRATAMENTO PARA VALORES NÃO VISTOS
         # Se não encontrou no mapeamento, verificar se é uma categoria válida para produção
         if medium_str in categorias_validas_producao:
-            print(f"AVISO: Categoria válida não mapeada encontrada: '{medium_str}' - mantendo como está")
+            valores_nao_mapeados.add(medium_str)
             return medium_str
 
         # 3. VALORES COMPLETAMENTE NOVOS → 'Outros'
-        print(f"NOVO VALOR NÃO VISTO: '{medium_str}' → direcionado para 'Outros'")
+        valores_novos_para_outros.add(medium_str)
         return 'Outros'
 
     # Aplicar a função de unificação robusta
     print(f"\nAplicando unificação robusta com tratamento de valores não vistos...")
     df['Medium'] = df['Medium'].apply(aplicar_unificacao_robusta)
+
+    # Imprimir sumário de valores não vistos (apenas uma vez por valor único)
+    if valores_nao_mapeados:
+        print(f"\n⚠️  {len(valores_nao_mapeados)} categoria(s) válida(s) não mapeada(s) encontrada(s):")
+        for valor in sorted(valores_nao_mapeados):
+            print(f"   - '{valor}' (mantida como está)")
+
+    if valores_novos_para_outros:
+        print(f"\n⚠️  {len(valores_novos_para_outros)} novo(s) valor(es) não visto(s) direcionado(s) para 'Outros':")
+        for valor in sorted(valores_novos_para_outros):
+            print(f"   - '{valor}'")
 
     print(f"Medium - valores únicos após unificação: {df['Medium'].nunique()}")
 

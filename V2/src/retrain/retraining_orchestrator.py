@@ -240,6 +240,13 @@ class RetreinoMensal:
                 result = validator.validate(dataset_fe)
                 self.validation_result = result
 
+                # DEBUG: Imprimir TODOS os alertas (não só críticos)
+                logger.info(f"\n📋 TODOS OS ALERTAS DETECTADOS ({len(result['validations'])} total):")
+                for idx, validation in enumerate(result['validations'], 1):
+                    severity_icon = "🔴" if validation['severity'] == 'HIGH' else "⚠️ " if validation['severity'] == 'MEDIUM' else "ℹ️ "
+                    logger.info(f"\n{idx}. {severity_icon} [{validation['severity']}] {validation['type']}")
+                    logger.info(f"   {validation['message']}")
+
                 # Decidir se continua
                 if result['has_critical_failures']:
                     logger.error("\n❌ VALIDAÇÃO FALHOU - Abortando retreino")

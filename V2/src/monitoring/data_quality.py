@@ -601,6 +601,9 @@ class DataQualityMonitor:
         # Agora df contém apenas as features que produção viu no encoding
         alerts.extend(self._check_missing_features(df))
 
+        # 6. Extra features (colunas novas não esperadas pelo modelo)
+        alerts.extend(self._check_extra_features(df))
+
         return alerts
 
     def _check_category_drift(self, df: pd.DataFrame) -> List[Dict]:
@@ -869,5 +872,107 @@ class DataQualityMonitor:
 
         except Exception:
             pass
+
+        return alerts
+
+    def _check_extra_features(self, df: pd.DataFrame) -> List[Dict]:
+        """
+        Verifica se apareceram features/colunas novas que não existiam no treino.
+
+        Detecta colunas extras que foram criadas mas não são esperadas pelo modelo.
+        Isso pode indicar mudanças no formulário ou adição de novos campos.
+
+        Args:
+            df: DataFrame ANTES do encoding (após feature engineering)
+
+        Returns:
+            Lista de alertas para features extras detectadas
+        """
+        from datetime import datetime, timezone
+
+        alerts = []
+
+        print("\n" + "="*80)
+        print("🔍 DEBUG: _check_extra_features() INICIADO")
+        print("="*80)
+        print(f"DataFrame recebido: {df.shape[0]} linhas, {df.shape[1]} colunas")
+        print(f"Colunas: {sorted(df.columns.tolist())[:10]}...")
+
+        try:
+            # 1. Aplicar encoding nos dados (necessário para comparar features finais)
+            from features.encoding import apply_categorical_encoding
+            df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3', model_path=self.model_path)
+
+            # 2. Usar Predictor para obter lista de features esperadas
+            from model.prediction import LeadScoringPredictor
+            model_name = "v1_devclub_rf_temporal_leads_single"
+            predictor = LeadScoringPredictor(model_name=model_name, model_path=self.model_path)
+
+            # Garantir que feature_names está carregado
+            if predictor.feature_names is None:
+                predictor.load_model()
+
+            # 3. Identificar features extras (presentes no df mas não esperadas pelo modelo)
+            expected_features = set(predictor.feature_names)
+
+            # Remover 'target' se presente (só existe em treino, não em produção)
+            actual_features = set(df_encoded.columns) - {'target'}
+
+            extra_features = actual_features - expected_features
+
+            print(f"\n✓ Features esperadas: {len(expected_features)}")
+            print(f"✓ Features encontradas: {len(actual_features)}")
+            print(f"✓ Features extras: {len(extra_features)}")
+
+            if extra_features:
+                extra_features_list = sorted(list(extra_features))
+
+                print(f"\n⚠️  DETECTOU {len(extra_features)} FEATURES EXTRAS:")
+                for feat in extra_features_list[:10]:
+                    print(f"   - {feat}")
+                if len(extra_features) > 10:
+                    print(f"   ... e mais {len(extra_features) - 10}")
+
+                # Determinar severidade baseado na quantidade
+                if len(extra_features) > 10:
+                    severity = 'MEDIUM'
+                elif len(extra_features) > 5:
+                    severity = 'LOW'
+                else:
+                    severity = 'LOW'
+
+                # Limitar quantidade exibida na mensagem
+                features_to_show = extra_features_list[:5]
+                mais_msg = f" (e mais {len(extra_features) - 5})" if len(extra_features) > 5 else ""
+
+                # Criar alerta
+                alert_msg = f"ℹ️ {len(extra_features)} feature(s) nova(s) detectada(s) após encoding (serão ignoradas pelo modelo)\n   Exemplos: {', '.join(features_to_show)}{mais_msg}"
+
+                alerts.append({
+                    'type': 'extra_unexpected_features',
+                    'severity': severity,
+                    'category': 'data_quality',
+                    'message': alert_msg,
+                    'details': {
+                        'extra_count': len(extra_features),
+                        'extra_features': extra_features_list,
+                        'total_expected': len(expected_features),
+                        'total_received': len(actual_features)
+                    },
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'metric_value': len(extra_features),
+                    'threshold': 0  # Qualquer feature extra merece atenção
+                })
+
+                print(f"\n✅ Alerta criado: {alert_msg}")
+            else:
+                print(f"\n✅ Nenhuma feature extra detectada")
+
+            print("="*80)
+
+        except Exception as e:
+            print(f"\n❌ ERRO em _check_extra_features(): {e}")
+            import traceback
+            traceback.print_exc()
 
         return alerts
