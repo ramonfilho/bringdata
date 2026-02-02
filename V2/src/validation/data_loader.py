@@ -493,7 +493,7 @@ class SalesDataLoader:
     def __init__(self):
         pass
 
-    def load_guru_sales(self, guru_paths: List[str]) -> pd.DataFrame:
+    def load_guru_sales(self, guru_paths: List[str], include_canceled: bool = False) -> pd.DataFrame:
         """
         Carrega arquivos Excel de vendas da Guru.
 
@@ -506,6 +506,7 @@ class SalesDataLoader:
 
         Args:
             guru_paths: Lista de caminhos para arquivos Excel da Guru
+            include_canceled: Se True, inclui vendas canceladas (para relatório de fechamento)
 
         Returns:
             DataFrame normalizado com origem='guru'
@@ -534,14 +535,21 @@ class SalesDataLoader:
         # Combinar todos os DataFrames
         df_combined = pd.concat(all_sales, ignore_index=True)
 
-        # Filtrar apenas vendas aprovadas (excluir canceladas, expiradas, reembolsadas, etc.)
+        # Filtrar vendas por status
         if 'status' in df_combined.columns:
             before = len(df_combined)
-            # Manter apenas vendas com status "Aprovada"
-            df_combined = df_combined[df_combined['status'] == 'Aprovada'].copy()
-            after = len(df_combined)
-            if before != after:
-                logger.info(f"   Filtradas {after} vendas aprovadas (excluídas {before - after} não aprovadas)")
+            if include_canceled:
+                # Fechamento: incluir Aprovadas E Canceladas
+                df_combined = df_combined[df_combined['status'].isin(['Aprovada', 'Cancelada'])].copy()
+                after = len(df_combined)
+                if before != after:
+                    logger.info(f"   Filtradas {after} vendas (Aprovadas + Canceladas) | Excluídas {before - after} com outros status")
+            else:
+                # Pós-devoluções: apenas Aprovadas
+                df_combined = df_combined[df_combined['status'] == 'Aprovada'].copy()
+                after = len(df_combined)
+                if before != after:
+                    logger.info(f"   Filtradas {after} vendas aprovadas (excluídas {before - after} não aprovadas)")
 
         # Normalizar colunas
         df_norm = pd.DataFrame()
@@ -586,6 +594,9 @@ class SalesDataLoader:
         # Origem
         df_norm['origem'] = 'guru'
 
+        # Status (para deduplicação)
+        df_norm['status'] = df_combined.get('status', np.nan)
+
         # Remover vendas sem email ou data
         before = len(df_norm)
         df_norm = df_norm[
@@ -596,6 +607,26 @@ class SalesDataLoader:
 
         if before != after:
             logger.warning(f"⚠️ {before - after} vendas Guru removidas (email/data inválido)")
+
+        # Deduplicação: múltiplas transações por pessoa (tentativas de cartão, etc.)
+        # Priorizar: Aprovada > Cancelada
+        if include_canceled and len(df_norm) > 0:
+            before_dedup = len(df_norm)
+
+            # Ordenar por status (Aprovada primeiro) e manter primeira ocorrência de cada email
+            df_norm['_status_priority'] = df_norm['status'].map({'Aprovada': 1, 'Cancelada': 2}).fillna(999)
+            df_norm = df_norm.sort_values(['email', '_status_priority', 'sale_date'])
+            df_norm = df_norm.drop_duplicates(subset=['email'], keep='first')
+            df_norm = df_norm.drop(columns=['_status_priority'])
+
+            after_dedup = len(df_norm)
+            if before_dedup != after_dedup:
+                removed = before_dedup - after_dedup
+                logger.info(f"   🔄 Deduplicação: {removed} transações duplicadas removidas (1 venda por pessoa)")
+
+        # Drop status column if not needed (manter apenas se include_canceled=True para debug)
+        if not include_canceled and 'status' in df_norm.columns:
+            df_norm = df_norm.drop(columns=['status'])
 
         logger.info(f"   ✅ {len(df_norm)} vendas Guru carregadas e normalizadas")
 
@@ -645,7 +676,7 @@ class SalesDataLoader:
             logger.warning(f"   Certifique-se que o arquivo existe em gs://{bucket_name}/vendas/tmb_{report_type}.xlsx")
             return []
 
-    def load_tmb_sales(self, tmb_paths: List[str] = None, report_type: str = 'fechamento') -> pd.DataFrame:
+    def load_tmb_sales(self, tmb_paths: List[str] = None, report_type: str = 'fechamento', include_canceled: bool = False) -> pd.DataFrame:
         """
         Carrega arquivos Excel de vendas da TMB.
 
@@ -658,11 +689,12 @@ class SalesDataLoader:
         - Cliente Nome: Nome
         - Ticket (R$): Valor da transação
         - utm_campaign: Campanha de origem
-        - Status: Status do pedido (filtrar apenas 'Efetivado')
+        - Status: Status do pedido (Efetivado ou Cancelado)
 
         Args:
             tmb_paths: Lista de caminhos para arquivos Excel da TMB (opcional)
             report_type: Tipo de relatório ('fechamento' ou 'pos-devolucoes')
+            include_canceled: Se True, inclui vendas canceladas (para relatório de fechamento)
 
         Returns:
             DataFrame normalizado com origem='tmb'
@@ -696,12 +728,19 @@ class SalesDataLoader:
         # Combinar todos os DataFrames
         df_combined = pd.concat(all_sales, ignore_index=True)
 
-        # Filtrar apenas vendas efetivadas
+        # Filtrar vendas por status
         if 'Status' in df_combined.columns:
             before = len(df_combined)
-            df_combined = df_combined[df_combined['Status'] == 'Efetivado'].copy()
-            after = len(df_combined)
-            logger.info(f"   Filtradas {after} vendas efetivadas de {before} total")
+            if include_canceled:
+                # Fechamento: incluir Efetivado E Cancelado
+                df_combined = df_combined[df_combined['Status'].isin(['Efetivado', 'Cancelado'])].copy()
+                after = len(df_combined)
+                logger.info(f"   Filtradas {after} vendas TMB (Efetivado + Cancelado) de {before} total")
+            else:
+                # Pós-devoluções: apenas Efetivado
+                df_combined = df_combined[df_combined['Status'] == 'Efetivado'].copy()
+                after = len(df_combined)
+                logger.info(f"   Filtradas {after} vendas efetivadas de {before} total")
 
         # Normalizar colunas
         df_norm = pd.DataFrame()
@@ -763,7 +802,7 @@ class SalesDataLoader:
 
         return df_norm
 
-    def load_guru_sales_from_api(self, start_date: str, end_date: str, save_excel: bool = False, output_path: str = None) -> pd.DataFrame:
+    def load_guru_sales_from_api(self, start_date: str, end_date: str, save_excel: bool = False, output_path: str = None, include_canceled: bool = False) -> pd.DataFrame:
         """
         Carrega vendas da Guru via API (alternativa aos arquivos Excel).
 
@@ -772,6 +811,7 @@ class SalesDataLoader:
             end_date: Data final (YYYY-MM-DD)
             save_excel: Se True, salva cópia em Excel
             output_path: Caminho para salvar Excel (se save_excel=True)
+            include_canceled: Se True, inclui vendas canceladas (para relatório de fechamento)
 
         Returns:
             DataFrame normalizado com origem='guru'
@@ -796,13 +836,21 @@ class SalesDataLoader:
         # O DataFrame da API já vem com as colunas normalizadas
         # Mas precisamos normalizar para o formato esperado pelo pipeline
 
-        # Filtrar apenas vendas aprovadas
+        # Filtrar vendas por status
         if 'status' in df_raw.columns:
             before = len(df_raw)
-            df_raw = df_raw[df_raw['status'] == 'Aprovada'].copy()
-            after = len(df_raw)
-            if before != after:
-                logger.info(f"   Filtradas {after} vendas aprovadas (excluídas {before - after} não aprovadas)")
+            if include_canceled:
+                # Fechamento: incluir Aprovadas E Canceladas
+                df_raw = df_raw[df_raw['status'].isin(['Aprovada', 'Cancelada'])].copy()
+                after = len(df_raw)
+                if before != after:
+                    logger.info(f"   Filtradas {after} vendas (Aprovadas + Canceladas) | Excluídas {before - after} com outros status")
+            else:
+                # Pós-devoluções: apenas Aprovadas
+                df_raw = df_raw[df_raw['status'] == 'Aprovada'].copy()
+                after = len(df_raw)
+                if before != after:
+                    logger.info(f"   Filtradas {after} vendas aprovadas (excluídas {before - after} não aprovadas)")
 
         # Normalizar colunas para o formato do pipeline
         df_norm = pd.DataFrame()
@@ -840,6 +888,9 @@ class SalesDataLoader:
         # Origem
         df_norm['origem'] = 'guru'
 
+        # Status (para deduplicação)
+        df_norm['status'] = df_raw.get('status', np.nan)
+
         # Remover vendas sem email ou data
         before = len(df_norm)
         df_norm = df_norm[
@@ -851,13 +902,33 @@ class SalesDataLoader:
         if before != after:
             logger.warning(f"⚠️ {before - after} vendas Guru API removidas (email/data inválido)")
 
+        # Deduplicação: múltiplas transações por pessoa (tentativas de cartão, etc.)
+        # Priorizar: Aprovada > Cancelada
+        if include_canceled and len(df_norm) > 0:
+            before_dedup = len(df_norm)
+
+            # Ordenar por status (Aprovada primeiro) e manter primeira ocorrência de cada email
+            df_norm['_status_priority'] = df_norm['status'].map({'Aprovada': 1, 'Cancelada': 2}).fillna(999)
+            df_norm = df_norm.sort_values(['email', '_status_priority', 'sale_date'])
+            df_norm = df_norm.drop_duplicates(subset=['email'], keep='first')
+            df_norm = df_norm.drop(columns=['_status_priority'])
+
+            after_dedup = len(df_norm)
+            if before_dedup != after_dedup:
+                removed = before_dedup - after_dedup
+                logger.info(f"   🔄 Deduplicação: {removed} transações duplicadas removidas (1 venda por pessoa)")
+
+        # Drop status column if not needed (manter apenas se include_canceled=True para debug)
+        if not include_canceled and 'status' in df_norm.columns:
+            df_norm = df_norm.drop(columns=['status'])
+
         logger.info(f"   ✅ {len(df_norm)} vendas Guru API carregadas e normalizadas")
 
         return df_norm
 
     def combine_sales(self, guru_df: pd.DataFrame = None, tmb_df: pd.DataFrame = None,
                      guru_paths: List[str] = None, tmb_paths: List[str] = None,
-                     report_type: str = 'fechamento') -> pd.DataFrame:
+                     report_type: str = 'fechamento', include_canceled: bool = False) -> pd.DataFrame:
         """
         Combina vendas da Guru e TMB em um único DataFrame.
 
@@ -867,6 +938,7 @@ class SalesDataLoader:
             guru_paths: Caminhos para arquivos Guru (se guru_df não fornecido)
             tmb_paths: Caminhos para arquivos TMB (se tmb_df não fornecido)
             report_type: Tipo de relatório ('fechamento' ou 'pos-devolucoes') para buscar TMB no GCS
+            include_canceled: Se True, inclui vendas canceladas da Guru (para relatório de fechamento)
 
         Returns:
             DataFrame combinado e deduplicado (prioriza Guru em caso de conflito)
@@ -875,13 +947,13 @@ class SalesDataLoader:
 
         # Carregar se necessário
         if guru_df is None and guru_paths:
-            guru_df = self.load_guru_sales(guru_paths)
+            guru_df = self.load_guru_sales(guru_paths, include_canceled=include_canceled)
         if tmb_df is None and tmb_paths is not None:
             # Se tmb_paths fornecido (pode ser lista vazia ou com arquivos)
-            tmb_df = self.load_tmb_sales(tmb_paths, report_type=report_type)
+            tmb_df = self.load_tmb_sales(tmb_paths, report_type=report_type, include_canceled=include_canceled)
         elif tmb_df is None and tmb_paths is None:
             # Se tmb_paths é None, tentar buscar do GCS
-            tmb_df = self.load_tmb_sales(tmb_paths=None, report_type=report_type)
+            tmb_df = self.load_tmb_sales(tmb_paths=None, report_type=report_type, include_canceled=include_canceled)
 
         # Combinar DataFrames
         dfs = []

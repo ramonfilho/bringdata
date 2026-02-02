@@ -873,6 +873,13 @@ def main():
     guru_data_source = os.environ.get('GURU_DATA_SOURCE', 'local').lower()
     logger.info(f"📊 Fonte de dados Guru: {guru_data_source.upper()}")
 
+    # Determinar se deve incluir vendas canceladas baseado no tipo de relatório
+    include_canceled = (args.report_type == 'fechamento')
+    if include_canceled:
+        logger.info(f"   📋 Modo FECHAMENTO: incluindo vendas Aprovadas + Canceladas")
+    else:
+        logger.info(f"   📋 Modo PÓS-DEVOLUÇÕES: incluindo apenas vendas Aprovadas")
+
     # Carregar vendas Guru (via API ou arquivos locais)
     if guru_data_source == 'api':
         # Determinar período de vendas para buscar via API
@@ -892,7 +899,8 @@ def main():
         guru_df = sales_loader.load_guru_sales_from_api(
             start_date=api_sales_start,
             end_date=api_sales_end,
-            save_excel=False
+            save_excel=False,
+            include_canceled=include_canceled
         )
     else:
         # Modo local (arquivos Excel)
@@ -900,18 +908,29 @@ def main():
         guru_files = sorted(glob(f"{vendas_path}/[Gg][Uu][Rr][Uu]*.xlsx"))
         logger.info(f"   Arquivos Guru encontrados: {len(guru_files)}")
 
-        guru_df = sales_loader.load_guru_sales(guru_files) if guru_files else None
+        guru_df = sales_loader.load_guru_sales(guru_files, include_canceled=include_canceled) if guru_files else None
 
-    # Buscar arquivos TMB com qualquer capitalização e formato: tmb*, Tmb*, TMB*
-    tmb_files = sorted(glob(f"{vendas_path}/[Tt][Mm][Bb]*.xlsx"))
-    logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)}")
+    # Buscar arquivos TMB baseado no tipo de relatório
+    if args.report_type == 'fechamento':
+        # Fechamento: buscar tmb_completas* ou tmbcompletas* (inclui vendas canceladas)
+        tmb_files = sorted(glob(f"{vendas_path}/[Tt][Mm][Bb]_[Cc][Oo][Mm][Pp][Ll][Ee][Tt][Aa][Ss]*.xlsx") +
+                          glob(f"{vendas_path}/[Tt][Mm][Bb][Cc][Oo][Mm][Pp][Ll][Ee][Tt][Aa][Ss]*.xlsx"))
+        logger.info(f"   Arquivos TMB completas (com canceladas) encontrados: {len(tmb_files)}")
+    else:
+        # Pós-devoluções: buscar tmb* mas EXCLUIR tmb_completas* e tmbcompletas*
+        all_tmb = glob(f"{vendas_path}/[Tt][Mm][Bb]*.xlsx")
+        tmb_completas = (glob(f"{vendas_path}/[Tt][Mm][Bb]_[Cc][Oo][Mm][Pp][Ll][Ee][Tt][Aa][Ss]*.xlsx") +
+                        glob(f"{vendas_path}/[Tt][Mm][Bb][Cc][Oo][Mm][Pp][Ll][Ee][Tt][Aa][Ss]*.xlsx"))
+        tmb_files = sorted([f for f in all_tmb if f not in tmb_completas])
+        logger.info(f"   Arquivos TMB (apenas aprovadas) encontrados: {len(tmb_files)}")
 
     # Combinar vendas Guru + TMB
     # Se não houver arquivos TMB locais, tentará buscar do Cloud Storage baseado em report_type
     sales_df = sales_loader.combine_sales(
         guru_df=guru_df,
         tmb_paths=tmb_files if tmb_files else None,
-        report_type=args.report_type
+        report_type=args.report_type,
+        include_canceled=include_canceled
     )
 
     if sales_df.empty:
