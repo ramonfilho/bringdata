@@ -20,7 +20,7 @@ import argparse
 import sys
 import os
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from glob import glob
 import yaml
 import logging
@@ -97,7 +97,7 @@ def validate_tmb_sales_freshness(sales_df, sales_start, sales_end):
         logger.error("   ")
         logger.error("   ⚠️  AÇÃO NECESSÁRIA:")
         logger.error("   1. Baixar arquivo TMB atualizado")
-        logger.error("   2. Fazer upload do arquivo para: files/validation/vendas/")
+        logger.error("   2. Colocar arquivo na pasta do período: files/validation/{periodo}/tmb.xlsx")
         logger.error("   3. Fazer novo deploy do job ou rodar localmente")
         logger.error("   ")
         return {
@@ -142,6 +142,29 @@ def validate_tmb_sales_freshness(sales_df, sales_start, sales_end):
         'message': 'Vendas TMB atualizadas',
         'stop_execution': False
     }
+
+
+def get_periodo_folder_from_dates(start_date: str, end_date: str) -> str:
+    """
+    Deriva o nome da pasta do período a partir das datas.
+
+    Formato: DD:MM - DD:MM
+    Exemplo: 2025-12-16 a 2026-01-12 → "16:12 - 12:01"
+
+    Args:
+        start_date: Data início no formato YYYY-MM-DD
+        end_date: Data fim no formato YYYY-MM-DD
+
+    Returns:
+        Nome da pasta no formato DD:MM - DD:MM
+    """
+    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+    end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+
+    # Formato: DD:MM - DD:MM
+    folder_name = f"{start_dt.day:02d}:{start_dt.month:02d} - {end_dt.day:02d}:{end_dt.month:02d}"
+
+    return folder_name
 
 
 def parse_args():
@@ -242,19 +265,25 @@ Exemplos de uso:
     parser.add_argument(
         '--vendas-path',
         type=str,
-        help='Caminho para pasta com arquivos de vendas (default: files/validation/vendas/)'
+        help='Caminho para pasta com arquivos TMB (default: files/validation/{periodo}/)'
     )
 
     parser.add_argument(
         '--output-dir',
         type=str,
-        help='Diretório de saída (default: files/validation/resultados/)'
+        help='Diretório de saída (default: files/validation/{periodo}/)'
     )
 
     parser.add_argument(
         '--ml-monitoring-output',
         type=str,
         help='Diretório alternativo para relatórios ML Monitoring (se não especificado, usa --output-dir)'
+    )
+
+    parser.add_argument(
+        '--periodo-folder',
+        type=str,
+        help='Nome da pasta do período (ex: "16:12 - 12:01"). Se não especificado, deriva automaticamente de --start-date e --end-date'
     )
 
     # Configurações
@@ -537,8 +566,6 @@ def main():
 
     # 1.2. Calcular datas automaticamente se solicitado
     if args.auto_calculate_dates:
-        from datetime import datetime, timedelta
-
         hoje = datetime.now()
 
         # Calcular baseado no tipo de relatório
@@ -634,16 +661,36 @@ def main():
         period_name = f"Período {start_date} a {end_date}"
         logger.info(f"   Período customizado: {start_date} a {end_date}")
 
-    # Determinar caminhos
-    vendas_path = args.vendas_path or config['paths']['vendas']
+    # Derivar pasta do período automaticamente se não fornecida
+    if args.periodo_folder:
+        periodo_folder = args.periodo_folder
+        logger.info(f"   📁 Pasta do período (manual): {periodo_folder}")
+    else:
+        periodo_folder = get_periodo_folder_from_dates(start_date, end_date)
+        logger.info(f"   📁 Pasta do período (derivada): {periodo_folder}")
 
-    # Usar ml-monitoring-output se especificado, senão usar output-dir padrão
+    # Determinar caminhos baseados na pasta do período
+    periodo_base_path = f'files/validation/{periodo_folder}'
+
+    # vendas_path: se especificado via CLI, usa; senão, usa pasta do período
+    if args.vendas_path:
+        vendas_path = args.vendas_path
+    else:
+        vendas_path = periodo_base_path
+
+    # output_dir: usa pasta do período por padrão
     if args.ml_monitoring_output:
         output_dir = args.ml_monitoring_output
+    elif args.output_dir:
+        output_dir = args.output_dir
     else:
-        output_dir = args.output_dir or 'files/validation/resultados'
+        output_dir = periodo_base_path
 
-    logger.info(f"   Vendas: {vendas_path}")
+    # meta_reports_dir: também usa pasta do período
+    meta_reports_dir = periodo_base_path
+
+    logger.info(f"   Vendas (TMB): {vendas_path}")
+    logger.info(f"   Meta Reports: {meta_reports_dir}")
     logger.info(f"   Output: {output_dir}")
     logger.info(f"   Valor do produto: R$ {config['product_value']:,.2f}")
     logger.info(f"   Janela de matching: {config['max_match_days']} dias")
@@ -986,14 +1033,6 @@ def main():
 
     # Carregar relatórios Meta locais ou via API
     # IMPORTANTE: Usar pasta específica com relatórios oficiais do período (não adsets_analysis)
-    # Construir caminho dinamicamente baseado nas datas fornecidas
-    from datetime import datetime
-    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-    end_dt = datetime.strptime(end_date, '%Y-%m-%d')
-    start_str = start_dt.strftime('%d-%m')
-    end_str = end_dt.strftime('%d-%m')
-    reports_dir = f'files/validation/meta_reports/{start_str} - {end_str}'
-
     # Configuração de fonte de dados: "local" (arquivos) ou "api" (Meta Marketing API)
     # Pode ser controlada via variável de ambiente META_DATA_SOURCE
     data_source = os.environ.get('META_DATA_SOURCE', 'local').lower()
@@ -1002,7 +1041,8 @@ def main():
     # DEBUG: Verificar args.account_id
 
     # Passar account_ids para o loader (necessário no modo API para buscar múltiplas contas)
-    loader = MetaReportsLoader(reports_dir, data_source=data_source, account_ids=args.account_id if data_source == 'api' else None)
+    # Usar meta_reports_dir definido anteriormente (baseado na pasta do período)
+    loader = MetaReportsLoader(meta_reports_dir, data_source=data_source, account_ids=args.account_id if data_source == 'api' else None)
     costs_hierarchy_temp = loader.build_costs_hierarchy(start_date, end_date)
 
     # Obter DataFrame de campanhas

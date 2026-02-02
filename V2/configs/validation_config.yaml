@@ -29,10 +29,10 @@ campaign_filters:
     - "FAIXA C"
     - "FAIXA D"
 
-# Caminhos dos arquivos (únicos, contêm todo o período)
+# Caminhos dos arquivos
+# NOTA: TMB, Meta reports e outputs agora são organizados por período em files/validation/{periodo}/
 paths:
-  leads: "files/validation/leads"      # CSV do Google Sheets
-  vendas: "files/validation/vendas"    # Excel Guru + TMB
+  leads: "files/validation/leads"      # CSV do Google Sheets (se usado)
 
 # ============================================================================
 # PERÍODOS DE ANÁLISE
