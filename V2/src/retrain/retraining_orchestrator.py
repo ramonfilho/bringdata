@@ -291,7 +291,8 @@ class RetreinoMensal:
                 include_api_data=True,  # ← RETREINO: buscar dados novos da API
                 api_start_date=api_start_date,
                 api_end_date=api_end_date,
-                output_subdir='retraining'  # ← LOGS vão para outputs/retraining/
+                output_subdir='retraining',  # ← LOGS vão para outputs/retraining/
+                verbosity='minimal'  # ← CONTROLE DE LOGS: só warnings e erros do train_pipeline
             )
 
             # Verificar se foi abortado pelo quality gate
