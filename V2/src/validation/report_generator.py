@@ -822,8 +822,6 @@ class ValidationReportGenerator:
         worksheet.write(current_row, 0, '📊 COMPARAÇÃO POR ADSETS MATCHED (Matched Pairs)', formats['title'])
         current_row += 1
         worksheet.write(current_row, 0, 'Apenas adsets que aparecem em Eventos ML E Controle (R$ 200+ gasto)', formats['subtitle'])
-        current_row += 1
-        worksheet.write(current_row, 0, f'Matched Adsets: {matched_adsets_list}', formats['text'])
         current_row += 2
 
         if adsets_matched_df is not None and not adsets_matched_df.empty:
@@ -854,7 +852,7 @@ class ValidationReportGenerator:
         #     current_row += 1
 
         # Ajustar larguras
-        worksheet.set_column(0, 0, 25)
+        worksheet.set_column(0, 0, 60)  # Coluna A bem larga para mostrar TODAS as métricas completas
         worksheet.set_column(1, 3, 18)
 
     def _write_comparacao_faixa_a(

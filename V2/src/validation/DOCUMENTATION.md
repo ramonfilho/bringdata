@@ -395,4 +395,119 @@ Métodos principais (todos privados `_write_*`):
 
 ---
 
-**Última atualização:** 2025-12-25
+## 13. **`sheets_uploader.py`** (207 linhas)
+**Propósito:** Upload automático de relatórios Excel para Google Sheets
+
+### Classe:
+
+#### **`ValidationSheetsUploader`**
+- **`upload_excel_to_sheets(excel_path, spreadsheet_title, share_with_emails)`**: Faz upload de Excel para Google Sheets
+  - Cria nova planilha no Google Drive
+  - Converte todas as abas do Excel
+  - Compartilha com emails especificados
+  - Retorna URL da planilha criada
+
+- **`update_existing_spreadsheet(spreadsheet_url, excel_path)`**: Atualiza planilha existente
+  - Atualiza dados de todas as abas
+  - Mantém URL da planilha
+
+### Integração com Pipeline
+
+O upload para Google Sheets foi integrado ao script principal `validate_ml_performance.py` após a geração do Excel.
+
+**Passo 14 do pipeline:**
+1. Verifica variável de ambiente `UPLOAD_VALIDATION_TO_SHEETS=true`
+2. Faz upload do Excel gerado para Google Sheets
+3. Compartilha com emails em `SHEETS_SHARE_EMAILS` (separados por vírgula)
+4. Adiciona URL do Google Sheets à notificação Slack
+
+### Configuração
+
+**Variáveis de ambiente:**
+```bash
+# Habilitar upload para Google Sheets
+export UPLOAD_VALIDATION_TO_SHEETS=true
+
+# Emails para compartilhar a planilha (opcional)
+export SHEETS_SHARE_EMAILS="usuario1@email.com,usuario2@email.com"
+```
+
+**Autenticação:**
+- Utiliza Google Cloud Application Default Credentials (ADC)
+- Requer escopos: `spreadsheets`, `drive`
+- Configuração documentada em `docs/acesso_sheets.md`
+
+### Exemplo de Uso
+
+**Via CLI:**
+```bash
+# Exportar variáveis
+export UPLOAD_VALIDATION_TO_SHEETS=true
+export SHEETS_SHARE_EMAILS="team@empresa.com"
+
+# Executar validação (upload automático)
+python3 src/validation/validate_ml_performance.py \
+  --start-date 2025-12-16 \
+  --end-date 2026-01-12 \
+  --sales-start-date 2026-01-19 \
+  --sales-end-date 2026-01-25 \
+  --report-type pos-devolucoes
+```
+
+**Via código Python:**
+```python
+from src.validation.sheets_uploader import ValidationSheetsUploader
+
+uploader = ValidationSheetsUploader()
+
+# Upload simples
+sheets_url = uploader.upload_excel_to_sheets(
+    excel_path='path/to/report.xlsx',
+    spreadsheet_title='Validação ML - Jan 2026'
+)
+
+# Upload com compartilhamento
+sheets_url = uploader.upload_excel_to_sheets(
+    excel_path='path/to/report.xlsx',
+    spreadsheet_title='Validação ML - Jan 2026',
+    share_with_emails=['team@empresa.com', 'manager@empresa.com']
+)
+
+print(f"Planilha criada: {sheets_url}")
+```
+
+### Limitações e Considerações
+
+**Quotas do Google Sheets API:**
+- 300 requests/minuto por projeto
+- Delay de 0.5s entre cada aba para respeitar rate limits
+
+**Formato dos dados:**
+- Valores NaN são convertidos para string vazia
+- Todos os valores são convertidos para string para evitar erros de tipo
+- Mantém estrutura original do Excel (colunas e ordem)
+
+**Rate Limiting:**
+- Upload automático adiciona delays entre operações
+- Para relatórios grandes (>10 abas), pode levar alguns minutos
+
+### Notificação Slack
+
+A notificação Slack foi atualizada para incluir links tanto do Excel (Cloud Storage) quanto do Google Sheets:
+
+**Campos da notificação:**
+- 📥 Download Excel (se `VALIDATION_REPORTS_BUCKET` configurado)
+- 📊 Ver Google Sheets (se `UPLOAD_VALIDATION_TO_SHEETS=true`)
+
+### Mudanças Implementadas
+
+**02/02/2026 - Upload para Google Sheets:**
+- ✅ Criado módulo `sheets_uploader.py` com classe `ValidationSheetsUploader`
+- ✅ Integrado ao pipeline principal (passo 14)
+- ✅ Adicionada notificação Slack com URL do Google Sheets
+- ✅ Suporte a compartilhamento automático com múltiplos usuários
+- ✅ Documentação completa de uso e configuração
+
+---
+
+**Última atualização:** 2026-02-02

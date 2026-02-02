@@ -870,7 +870,8 @@ def main():
 
     # Configuração de fonte de dados Guru: "local" (arquivos) ou "api" (Guru API)
     # Pode ser controlada via variável de ambiente GURU_DATA_SOURCE
-    guru_data_source = os.environ.get('GURU_DATA_SOURCE', 'local').lower()
+    # PADRÃO: API (produção)
+    guru_data_source = os.environ.get('GURU_DATA_SOURCE', 'api').lower()
     logger.info(f"📊 Fonte de dados Guru: {guru_data_source.upper()}")
 
     # Determinar se deve incluir vendas canceladas baseado no tipo de relatório
@@ -910,19 +911,16 @@ def main():
 
         guru_df = sales_loader.load_guru_sales(guru_files, include_canceled=include_canceled) if guru_files else None
 
-    # Buscar arquivos TMB baseado no tipo de relatório
+    # Buscar arquivos TMB - SEMPRE usar tmb_completas (filtragem por Status no load_tmb_sales)
+    # O arquivo tmb_completas.xlsx contém TODAS as vendas (Efetivado + Cancelado)
+    # O filtro por status é aplicado no data_loader baseado em include_canceled
+    tmb_files = sorted(glob(f"{vendas_path}/[Tt][Mm][Bb]_[Cc][Oo][Mm][Pp][Ll][Ee][Tt][Aa][Ss]*.xlsx") +
+                      glob(f"{vendas_path}/[Tt][Mm][Bb][Cc][Oo][Mm][Pp][Ll][Ee][Tt][Aa][Ss]*.xlsx"))
+
     if args.report_type == 'fechamento':
-        # Fechamento: buscar tmb_completas* ou tmbcompletas* (inclui vendas canceladas)
-        tmb_files = sorted(glob(f"{vendas_path}/[Tt][Mm][Bb]_[Cc][Oo][Mm][Pp][Ll][Ee][Tt][Aa][Ss]*.xlsx") +
-                          glob(f"{vendas_path}/[Tt][Mm][Bb][Cc][Oo][Mm][Pp][Ll][Ee][Tt][Aa][Ss]*.xlsx"))
-        logger.info(f"   Arquivos TMB completas (com canceladas) encontrados: {len(tmb_files)}")
+        logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)} (incluirá Efetivado + Cancelado)")
     else:
-        # Pós-devoluções: buscar tmb* mas EXCLUIR tmb_completas* e tmbcompletas*
-        all_tmb = glob(f"{vendas_path}/[Tt][Mm][Bb]*.xlsx")
-        tmb_completas = (glob(f"{vendas_path}/[Tt][Mm][Bb]_[Cc][Oo][Mm][Pp][Ll][Ee][Tt][Aa][Ss]*.xlsx") +
-                        glob(f"{vendas_path}/[Tt][Mm][Bb][Cc][Oo][Mm][Pp][Ll][Ee][Tt][Aa][Ss]*.xlsx"))
-        tmb_files = sorted([f for f in all_tmb if f not in tmb_completas])
-        logger.info(f"   Arquivos TMB (apenas aprovadas) encontrados: {len(tmb_files)}")
+        logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)} (incluirá apenas Efetivado)")
 
     # Combinar vendas Guru + TMB
     # Se não houver arquivos TMB locais, tentará buscar do Cloud Storage baseado em report_type
@@ -1872,7 +1870,43 @@ def main():
 
     print(flush=True)
 
-    # 14. Enviar notificação Slack (se configurado)
+    # 14. Upload para Google Sheets (se configurado)
+    sheets_url = None
+    upload_to_sheets = os.getenv('UPLOAD_VALIDATION_TO_SHEETS', 'false').lower() == 'true'
+    sheets_share_emails = os.getenv('SHEETS_SHARE_EMAILS', '')  # Emails separados por vírgula
+
+    if upload_to_sheets:
+        try:
+            from src.validation.sheets_uploader import ValidationSheetsUploader
+
+            print("📊 Fazendo upload para Google Sheets...", flush=True)
+
+            uploader = ValidationSheetsUploader()
+
+            # Preparar emails para compartilhamento
+            share_with = None
+            if sheets_share_emails:
+                share_with = [email.strip() for email in sheets_share_emails.split(',') if email.strip()]
+
+            # Fazer upload
+            sheets_url = uploader.upload_excel_to_sheets(
+                excel_path=excel_path,
+                spreadsheet_title=None,  # Usa nome do arquivo
+                share_with_emails=share_with
+            )
+
+            print(f"   ✅ Google Sheets criado: {sheets_url}", flush=True)
+
+        except Exception as sheets_error:
+            print(f"   ⚠️  Erro no upload Google Sheets: {sheets_error}", flush=True)
+            logger.warning(f"Erro no upload Google Sheets: {sheets_error}")
+            sheets_url = None
+    else:
+        print("   ℹ️  UPLOAD_VALIDATION_TO_SHEETS não habilitado, upload ignorado", flush=True)
+
+    print(flush=True)
+
+    # 15. Enviar notificação Slack (se configurado)
     slack_webhook = os.getenv('SLACK_WEBHOOK_URL')
 
     if slack_webhook:
@@ -1903,6 +1937,7 @@ def main():
             success = notifier.send_validation_summary(
                 metrics=slack_metrics,
                 excel_url=excel_url,
+                sheets_url=sheets_url,
                 period=slack_period
             )
 
