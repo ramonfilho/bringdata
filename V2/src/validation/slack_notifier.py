@@ -31,6 +31,7 @@ class ValidationSlackNotifier:
         self,
         metrics: Dict,
         excel_url: Optional[str] = None,
+        sheets_url: Optional[str] = None,
         period: Dict = None
     ) -> bool:
         """
@@ -39,6 +40,7 @@ class ValidationSlackNotifier:
         Args:
             metrics: Dicionário com métricas (auc, conversoes, roas, etc)
             excel_url: URL pública do Excel no Cloud Storage
+            sheets_url: URL do Google Sheets criado
             period: Dicionário com datas do período analisado
 
         Returns:
@@ -91,11 +93,17 @@ class ValidationSlackNotifier:
                 ]
             }
 
-            # Adicionar link do Excel se disponível
+            # Adicionar links dos relatórios se disponíveis
+            report_links = []
             if excel_url:
+                report_links.append(f"<{excel_url}|📥 Download Excel>")
+            if sheets_url:
+                report_links.append(f"<{sheets_url}|📊 Ver Google Sheets>")
+
+            if report_links:
                 payload["attachments"][0]["fields"].append({
-                    "title": "📄 Relatório Completo",
-                    "value": f"<{excel_url}|📥 Download Excel>",
+                    "title": "📄 Relatórios",
+                    "value": " | ".join(report_links),
                     "short": False
                 })
 

@@ -28,6 +28,7 @@ ENV/
 experiments/**/*.csv
 *.csv
 *.xlsx
+*.docx
 data_dev/
 
 # Distribution / packaging
