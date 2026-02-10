@@ -25,6 +25,13 @@ from src.data_processing.ingestion import (
     consolidate_datasets
 )
 from src.data_processing.column_unification import unificar_colunas_datasets
+from src.data_processing.column_unification_refactored import (
+    unificar_colunas_pesquisa,
+    unificar_colunas_vendas,
+    aplicar_filtro_temporal,
+    remover_colunas_utm_ausentes,
+    aplicar_filtro_status_risco
+)
 from src.data_processing.category_unification import unificar_categorias_completo, gerar_relatorio_final_categorias
 from src.data_processing.feature_removal import remover_features_desnecessarias, listar_colunas_restantes
 from src.data_processing.utm_training import unificar_utm_source_term, verificar_consistencia_utm
@@ -398,18 +405,37 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("")
     logger.info("🔗 CÉLULA 5: UNIFICAÇÃO DE COLUNAS DUPLICADAS")
 
-    df_pesquisa_final, df_vendas_final = unificar_colunas_datasets(
-        df_pesquisa,
-        df_vendas,
-        tmb_risk_filter=tmb_risk_filter
-    )
+    # Parte 1: Unificar colunas de PESQUISA
+    df_pesquisa_unificado = unificar_colunas_pesquisa(df_pesquisa)
 
+    # Parte 2: Unificar colunas de VENDAS
+    df_vendas_unificado = unificar_colunas_vendas(df_vendas)
+
+    logger.info("=" * 80)
+    # === CÉLULA 5.1: Filtro temporal ===
     logger.info("")
-    logger.info(f"RESULTADO:")
-    logger.info(f"Pesquisa: {len(df_pesquisa_final)} registros, {len(df_pesquisa_final.columns)} colunas")
-    logger.info(f"Vendas: {len(df_vendas_final)} registros, {len(df_vendas_final.columns)} colunas")
+    logger.info("📅 CÉLULA 5.1: FILTRO TEMPORAL")
 
-    # Gerar relatórios finais
+    df_vendas_temporal = aplicar_filtro_temporal(df_vendas_unificado, df_pesquisa_unificado)
+
+    logger.info("=" * 80)
+    # === CÉLULA 5.2: Remoção de colunas UTM ===
+    logger.info("")
+    logger.info("🗑️ CÉLULA 5.2: REMOÇÃO DE COLUNAS UTM COM ALTA % AUSENTES")
+
+    df_vendas_sem_utm = remover_colunas_utm_ausentes(df_vendas_temporal)
+
+    logger.info("=" * 80)
+    # === CÉLULA 5.3: Filtro de status e risco ===
+    logger.info("")
+    logger.info("🎯 CÉLULA 5.3: FILTRO DE STATUS E RISCO")
+
+    df_vendas_final = aplicar_filtro_status_risco(df_vendas_sem_utm, tmb_risk_filter=tmb_risk_filter)
+
+    # Usar os datasets finais
+    df_pesquisa_final = df_pesquisa_unificado
+
+    # Gerar relatórios finais (apenas em DEBUG)
     gerar_relatorio_colunas(df_pesquisa_final, "DATASET PESQUISA")
     gerar_relatorio_colunas(df_vendas_final, "DATASET VENDAS")
 
