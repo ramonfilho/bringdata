@@ -50,13 +50,13 @@ def unificar_colunas_pesquisa(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     """
     df_pesquisa_unificado = df_pesquisa.copy()
 
-    logger.info("PESQUISA - Colunas duplicadas identificadas:")
+    # DEBUG: Lista completa de colunas duplicadas
     duplicadas_pesquisa = identificar_colunas_duplicadas_pesquisa(df_pesquisa_unificado)
-
+    logger.debug("PESQUISA - Colunas duplicadas identificadas:")
     for col1, col2 in duplicadas_pesquisa:
-        logger.info(f"  {col1}")
-        logger.info(f"  {col2}")
-        logger.info("")
+        logger.debug(f"  {col1}")
+        logger.debug(f"  {col2}")
+        logger.debug("")
 
     # Unificar colunas duplicadas de pesquisa (OPERAÇÃO VETORIZADA)
     colunas_investiu = [
@@ -96,6 +96,7 @@ def unificar_colunas_pesquisa(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         )
         df_pesquisa_unificado = df_pesquisa_unificado.drop(columns=[colunas_faixa_salarial[1]])
 
+    # NORMAL: Apenas resumo final
     logger.info("")
     logger.info(f"✅ Pesquisa: {len(df_pesquisa_unificado)} registros, {len(df_pesquisa_unificado.columns)} colunas")
 
@@ -114,63 +115,64 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
     """
     df_vendas_unificado = df_vendas.copy()
 
-    logger.info("VENDAS - Unificando colunas:")
+    # DEBUG: Detalhes de cada unificação
+    logger.debug("VENDAS - Unificando colunas:")
 
     # Unificar valor
     if 'Ticket (R$)' in df_vendas_unificado.columns and 'valor produtos' in df_vendas_unificado.columns:
         df_vendas_unificado['valor'] = df_vendas_unificado['Ticket (R$)'].fillna(df_vendas_unificado['valor produtos'])
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Ticket (R$)', 'valor produtos'])
-        logger.info("  Ticket (R$) + valor produtos → valor")
+        logger.debug("  Ticket (R$) + valor produtos → valor")
     elif 'Ticket (R$)' in df_vendas_unificado.columns:
         df_vendas_unificado['valor'] = df_vendas_unificado['Ticket (R$)']
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Ticket (R$)'])
-        logger.info("  Ticket (R$) → valor")
+        logger.debug("  Ticket (R$) → valor")
     elif 'valor produtos' in df_vendas_unificado.columns:
         df_vendas_unificado['valor'] = df_vendas_unificado['valor produtos']
         df_vendas_unificado = df_vendas_unificado.drop(columns=['valor produtos'])
-        logger.info("  valor produtos → valor")
+        logger.debug("  valor produtos → valor")
 
     # Unificar produto
     if 'Produto' in df_vendas_unificado.columns and 'nome produto' in df_vendas_unificado.columns:
         df_vendas_unificado['produto'] = df_vendas_unificado['Produto'].fillna(df_vendas_unificado['nome produto'])
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Produto', 'nome produto'])
-        logger.info("  Produto + nome produto → produto")
+        logger.debug("  Produto + nome produto → produto")
     elif 'Produto' in df_vendas_unificado.columns:
         df_vendas_unificado['produto'] = df_vendas_unificado['Produto']
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Produto'])
-        logger.info("  Produto → produto")
+        logger.debug("  Produto → produto")
     elif 'nome produto' in df_vendas_unificado.columns:
         df_vendas_unificado['produto'] = df_vendas_unificado['nome produto']
         df_vendas_unificado = df_vendas_unificado.drop(columns=['nome produto'])
-        logger.info("  nome produto → produto")
+        logger.debug("  nome produto → produto")
 
     # Unificar nome
     if 'Cliente Nome' in df_vendas_unificado.columns and 'nome contato' in df_vendas_unificado.columns:
         df_vendas_unificado['nome'] = df_vendas_unificado['Cliente Nome'].fillna(df_vendas_unificado['nome contato'])
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Cliente Nome', 'nome contato'])
-        logger.info("  Cliente Nome + nome contato → nome")
+        logger.debug("  Cliente Nome + nome contato → nome")
     elif 'Cliente Nome' in df_vendas_unificado.columns:
         df_vendas_unificado['nome'] = df_vendas_unificado['Cliente Nome']
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Cliente Nome'])
-        logger.info("  Cliente Nome → nome")
+        logger.debug("  Cliente Nome → nome")
     elif 'nome contato' in df_vendas_unificado.columns:
         df_vendas_unificado['nome'] = df_vendas_unificado['nome contato']
         df_vendas_unificado = df_vendas_unificado.drop(columns=['nome contato'])
-        logger.info("  nome contato → nome")
+        logger.debug("  nome contato → nome")
 
     # Unificar email
     if 'Cliente Email' in df_vendas_unificado.columns and 'email contato' in df_vendas_unificado.columns:
         df_vendas_unificado['email'] = df_vendas_unificado['Cliente Email'].fillna(df_vendas_unificado['email contato'])
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Cliente Email', 'email contato'])
-        logger.info("  Cliente Email + email contato → email")
+        logger.debug("  Cliente Email + email contato → email")
     elif 'Cliente Email' in df_vendas_unificado.columns:
         df_vendas_unificado['email'] = df_vendas_unificado['Cliente Email']
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Cliente Email'])
-        logger.info("  Cliente Email → email")
+        logger.debug("  Cliente Email → email")
     elif 'email contato' in df_vendas_unificado.columns:
         df_vendas_unificado['email'] = df_vendas_unificado['email contato']
         df_vendas_unificado = df_vendas_unificado.drop(columns=['email contato'])
-        logger.info("  email contato → email")
+        logger.debug("  email contato → email")
 
     # Unificar data
     def fix_datetime_format(col):
@@ -187,57 +189,57 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
             pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce')).fillna(
             pd.to_datetime(df_vendas_unificado['Data Efetivado'], format=date_format, errors='coerce'))
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Criado Em', 'data aprovacao', 'Data Efetivado'])
-        logger.info("  Criado Em + data aprovacao + Data Efetivado → data (formato BR corrigido)")
+        logger.debug("  Criado Em + data aprovacao + Data Efetivado → data (formato BR corrigido)")
     elif 'Criado Em' in df_vendas_unificado.columns and 'data aprovacao' in df_vendas_unificado.columns:
         df_vendas_unificado['Criado Em'] = fix_datetime_format(df_vendas_unificado['Criado Em'])
         df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
         df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], format=date_format, errors='coerce').fillna(
             pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce'))
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Criado Em', 'data aprovacao'])
-        logger.info("  Criado Em + data aprovacao → data (formato BR corrigido)")
+        logger.debug("  Criado Em + data aprovacao → data (formato BR corrigido)")
     elif 'Criado Em' in df_vendas_unificado.columns and 'Data Efetivado' in df_vendas_unificado.columns:
         df_vendas_unificado['Criado Em'] = fix_datetime_format(df_vendas_unificado['Criado Em'])
         df_vendas_unificado['Data Efetivado'] = fix_datetime_format(df_vendas_unificado['Data Efetivado'])
         df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], format=date_format, errors='coerce').fillna(
             pd.to_datetime(df_vendas_unificado['Data Efetivado'], format=date_format, errors='coerce'))
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Criado Em', 'Data Efetivado'])
-        logger.info("  Criado Em + Data Efetivado → data (formato BR corrigido)")
+        logger.debug("  Criado Em + Data Efetivado → data (formato BR corrigido)")
     elif 'data aprovacao' in df_vendas_unificado.columns and 'Data Efetivado' in df_vendas_unificado.columns:
         df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
         df_vendas_unificado['Data Efetivado'] = fix_datetime_format(df_vendas_unificado['Data Efetivado'])
         df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce').fillna(
             pd.to_datetime(df_vendas_unificado['Data Efetivado'], format=date_format, errors='coerce'))
         df_vendas_unificado = df_vendas_unificado.drop(columns=['data aprovacao', 'Data Efetivado'])
-        logger.info("  data aprovacao + Data Efetivado → data (formato BR corrigido)")
+        logger.debug("  data aprovacao + Data Efetivado → data (formato BR corrigido)")
     elif 'Criado Em' in df_vendas_unificado.columns:
         df_vendas_unificado['Criado Em'] = fix_datetime_format(df_vendas_unificado['Criado Em'])
         df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], format=date_format, errors='coerce')
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Criado Em'])
-        logger.info("  Criado Em → data (formato BR corrigido)")
+        logger.debug("  Criado Em → data (formato BR corrigido)")
     elif 'data aprovacao' in df_vendas_unificado.columns:
         df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
         df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce')
         df_vendas_unificado = df_vendas_unificado.drop(columns=['data aprovacao'])
-        logger.info("  data aprovacao → data (formato BR corrigido)")
+        logger.debug("  data aprovacao → data (formato BR corrigido)")
     elif 'Data Efetivado' in df_vendas_unificado.columns:
         df_vendas_unificado['Data Efetivado'] = fix_datetime_format(df_vendas_unificado['Data Efetivado'])
         df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Data Efetivado'], errors='coerce', dayfirst=True)
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Data Efetivado'])
-        logger.info("  Data Efetivado → data (formato BR corrigido)")
+        logger.debug("  Data Efetivado → data (formato BR corrigido)")
 
     # Unificar telefone
     if 'Telefone' in df_vendas_unificado.columns and 'telefone contato' in df_vendas_unificado.columns:
         df_vendas_unificado['telefone'] = df_vendas_unificado['Telefone'].fillna(df_vendas_unificado['telefone contato'])
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Telefone', 'telefone contato'])
-        logger.info("  Telefone + telefone contato → telefone")
+        logger.debug("  Telefone + telefone contato → telefone")
     elif 'Telefone' in df_vendas_unificado.columns:
         df_vendas_unificado['telefone'] = df_vendas_unificado['Telefone']
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Telefone'])
-        logger.info("  Telefone → telefone")
+        logger.debug("  Telefone → telefone")
     elif 'telefone contato' in df_vendas_unificado.columns:
         df_vendas_unificado['telefone'] = df_vendas_unificado['telefone contato']
         df_vendas_unificado = df_vendas_unificado.drop(columns=['telefone contato'])
-        logger.info("  telefone contato → telefone")
+        logger.debug("  telefone contato → telefone")
 
     # Unificar UTMs (manter as versões 'last' quando disponíveis)
     utms_map = [
@@ -251,7 +253,7 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
         if utm_last in df_vendas_unificado.columns and utm_regular in df_vendas_unificado.columns:
             df_vendas_unificado[utm_final] = df_vendas_unificado[utm_last].fillna(df_vendas_unificado[utm_regular])
             df_vendas_unificado = df_vendas_unificado.drop(columns=[utm_last, utm_regular])
-            logger.info(f"  {utm_last} + {utm_regular} → {utm_final}")
+            logger.debug(f"  {utm_last} + {utm_regular} → {utm_final}")
 
     logger.info("")
     logger.info(f"✅ Vendas: {len(df_vendas_unificado)} registros, {len(df_vendas_unificado.columns)} colunas")
@@ -324,17 +326,21 @@ def remover_colunas_utm_ausentes(df_vendas: pd.DataFrame) -> pd.DataFrame:
     """
     df_vendas_sem_utm = df_vendas.copy()
 
-    logger.info("Removendo colunas UTM com alta porcentagem de ausentes:")
     colunas_utm_remover = ['source', 'medium', 'campaign', 'content']
     colunas_existentes_utm = [col for col in colunas_utm_remover if col in df_vendas_sem_utm.columns]
 
     if colunas_existentes_utm:
         df_vendas_sem_utm = df_vendas_sem_utm.drop(columns=colunas_existentes_utm)
+
+        # DEBUG: Lista de cada coluna removida
+        logger.debug("Removendo colunas UTM com alta porcentagem de ausentes:")
         for col in colunas_existentes_utm:
-            logger.info(f"  Removida: {col}")
-        logger.info(f"  Total: {len(colunas_existentes_utm)} colunas removidas")
+            logger.debug(f"  Removida: {col}")
+
+        # NORMAL: Total removido
+        logger.info(f"Removidas {len(colunas_existentes_utm)} colunas UTM com alta % de ausentes")
     else:
-        logger.info("  Nenhuma coluna UTM encontrada para remover")
+        logger.info("Nenhuma coluna UTM encontrada para remover")
 
     logger.info("")
     logger.info(f"✅ Vendas: {len(df_vendas_sem_utm)} registros, {len(df_vendas_sem_utm.columns)} colunas")
@@ -408,36 +414,47 @@ def aplicar_filtro_status_risco(
     vendas_tmb_total = is_tmb.sum()
     vendas_tmb_mantidas = mask_tmb.sum()
 
-    # Mostrar relatório
+    # NORMAL: Resumo consolidado
     logger.info("")
-    logger.info(f"Filtro de status e risco (tmb_risk_filter='{tmb_risk_filter}')")
-    logger.info(f"GURU:")
-    logger.info(f"  Total: {vendas_guru_total:,}")
-    logger.info(f"  Aprovadas mantidas: {vendas_guru_mantidas:,}")
-    logger.info(f"  Não aprovadas excluídas: {vendas_guru_total - vendas_guru_mantidas:,}")
-    logger.info("")
-    logger.info(f"TMB:")
-    logger.info(f"  Total: {vendas_tmb_total:,}")
+    logger.info(f"📈 RESUMO:")
+    logger.info(f"GURU: {vendas_guru_mantidas:,} aprovadas (de {vendas_guru_total:,} total)")
+    if tmb_risk_filter == 'none':
+        logger.info(f"TMB: 0 mantidas (filtro: nenhum TMB)")
+    elif tmb_risk_filter == 'all':
+        logger.info(f"TMB: {vendas_tmb_mantidas:,} mantidas (filtro: todos)")
+    else:
+        logger.info(f"TMB: {vendas_tmb_mantidas:,} mantidas (filtro: {tmb_risk_filter.replace('_', ' + ')})")
+
+    # DEBUG: Detalhes completos
+    logger.debug("")
+    logger.debug(f"Filtro de status e risco (tmb_risk_filter='{tmb_risk_filter}')")
+    logger.debug(f"GURU:")
+    logger.debug(f"  Total: {vendas_guru_total:,}")
+    logger.debug(f"  Aprovadas mantidas: {vendas_guru_mantidas:,}")
+    logger.debug(f"  Não aprovadas excluídas: {vendas_guru_total - vendas_guru_mantidas:,}")
+    logger.debug("")
+    logger.debug(f"TMB:")
+    logger.debug(f"  Total: {vendas_tmb_total:,}")
 
     if tmb_risk_filter == 'none':
-        logger.info(f"  Filtro: NENHUM aluno TMB (só Guru)")
-        logger.info(f"  Mantidas: 0")
-        logger.info(f"  Removidas: {vendas_tmb_total:,}")
+        logger.debug(f"  Filtro: NENHUM aluno TMB (só Guru)")
+        logger.debug(f"  Mantidas: 0")
+        logger.debug(f"  Removidas: {vendas_tmb_total:,}")
     elif tmb_risk_filter == 'all':
-        logger.info(f"  Filtro: TODOS alunos TMB")
-        logger.info(f"  Mantidas: {vendas_tmb_mantidas:,}")
+        logger.debug(f"  Filtro: TODOS alunos TMB")
+        logger.debug(f"  Mantidas: {vendas_tmb_mantidas:,}")
     else:
-        logger.info(f"  Filtro: {tmb_risk_filter.upper().replace('_', ' + ')}")
+        logger.debug(f"  Filtro: {tmb_risk_filter.upper().replace('_', ' + ')}")
         if 'Grau de risco' in df_vendas_filtrado.columns:
             df_tmb_subset = df_vendas_filtrado[mask_tmb]
             dist_risco = df_tmb_subset['Grau de risco'].value_counts()
-            logger.info(f"  Mantidas: {vendas_tmb_mantidas:,}")
-            logger.info(f"  Distribuição mantida:")
+            logger.debug(f"  Mantidas: {vendas_tmb_mantidas:,}")
+            logger.debug(f"  Distribuição mantida:")
             for risco, count in dist_risco.items():
-                logger.info(f"    - {risco}: {count:,}")
-            logger.info(f"  Removidas: {vendas_tmb_total - vendas_tmb_mantidas:,}")
+                logger.debug(f"    - {risco}: {count:,}")
+            logger.debug(f"  Removidas: {vendas_tmb_total - vendas_tmb_mantidas:,}")
         else:
-            logger.info(f"  Mantidas: {vendas_tmb_mantidas:,}")
+            logger.debug(f"  Mantidas: {vendas_tmb_mantidas:,}")
 
     logger.info("")
     logger.info(f"✅ TOTAL FINAL: {after:,} vendas")

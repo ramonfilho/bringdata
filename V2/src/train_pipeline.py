@@ -24,7 +24,6 @@ from src.data_processing.ingestion import (
     remove_unnecessary_columns,
     consolidate_datasets
 )
-from src.data_processing.column_unification import unificar_colunas_datasets
 from src.data_processing.column_unification_refactored import (
     unificar_colunas_pesquisa,
     unificar_colunas_vendas,
