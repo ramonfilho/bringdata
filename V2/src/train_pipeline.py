@@ -234,8 +234,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     )
 
     # === CÉLULA 2: Filtragem + Remoção de Duplicatas ===
-    logger.warning("\n🔄 CÉLULA 2: FILTRAGEM DE ABAS + REMOÇÃO DE DUPLICATAS")
-    logger.info("=" * 60)
+    logger.info("\n🔄 CÉLULA 2: FILTRAGEM DE ABAS + REMOÇÃO DE DUPLICATAS")
 
     # Filtrar abas
     filtered_data, filter_report = filter_sheets(
@@ -248,12 +247,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     # Remover duplicatas
     clean_data, dup_stats = remove_duplicates_per_sheet(filtered_data)
 
-    # === RELATÓRIO (linhas 96-127 do notebook) ===
-    logger.info(f"\n📊 ABAS MANTIDAS E PROCESSADAS")
-    logger.info("=" * 80)
-    logger.debug(f"{'ARQUIVO':<35} {'ABA':<20} {'ORIGINAL':>10} {'FINAL':>10} {'REMOVIDAS':>10}")
-    logger.info("-" * 80)
-
+    # Calcular totais
     total_original = 0
     total_final = 0
     total_duplicatas = 0
@@ -268,31 +262,47 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
             duplicatas = dup_stats.get(filename, {}).get(sheet_name, 0)
             linhas_final = linhas_original - duplicatas
 
-            print(f"{filename[:34]:<35} {sheet_name[:19]:<20} "
-                  f"{linhas_original:>10,} {linhas_final:>10,} {duplicatas:>10,}")
-
             total_original += linhas_original
             total_final += linhas_final
             total_duplicatas += duplicatas
 
-    logger.info("-" * 80)
-    logger.warning(f"{'TOTAL':<35} {'':<20} {total_original:>10,} {total_final:>10,} {total_duplicatas:>10,}")
-
-    # Resumo final
+    # Contar abas
     abas_mantidas = sum(1 for item in filter_report if item['status'] == 'MANTIDA')
     abas_removidas = len(filter_report) - abas_mantidas
 
-    logger.info(f"\n📈 RESUMO FINAL:")
+    # NORMAL: Apenas resumo final
+    logger.info(f"\n📈 RESUMO:")
     logger.info(f"Arquivos processados: {len(clean_data)}")
     logger.info(f"Abas mantidas: {abas_mantidas}")
     logger.info(f"Abas removidas: {abas_removidas}")
     logger.info(f"Linhas totais após processamento: {total_final:,}")
-    logger.warning(f"Duplicatas removidas: {total_duplicatas:,}")
+    logger.info(f"Duplicatas removidas: {total_duplicatas:,}")
     if total_original > 0:
-        logger.warning(f"Redução por duplicatas: {(total_duplicatas/total_original*100):.2f}%")
-
+        logger.info(f"Redução por duplicatas: {(total_duplicatas/total_original*100):.2f}%")
     logger.info(f"\n✅ Dados processados disponíveis na variável 'arquivos_filtrados'")
-    logger.info("=" * 80)
+
+    # DEBUG: Tabela detalhada
+    logger.debug(f"\n📊 TABELA DETALHADA - ABAS MANTIDAS E PROCESSADAS")
+    logger.debug("=" * 80)
+    logger.debug(f"{'ARQUIVO':<35} {'ABA':<20} {'ORIGINAL':>10} {'FINAL':>10} {'REMOVIDAS':>10}")
+    logger.debug("-" * 80)
+
+    for item in filter_report:
+        if item['status'] == 'MANTIDA':
+            filename = item['arquivo']
+            sheet_name = item['aba']
+            linhas_original = item['linhas_original']
+
+            # Pegar estatísticas de duplicatas
+            duplicatas = dup_stats.get(filename, {}).get(sheet_name, 0)
+            linhas_final = linhas_original - duplicatas
+
+            logger.debug(f"{filename[:34]:<35} {sheet_name[:19]:<20} "
+                        f"{linhas_original:>10,} {linhas_final:>10,} {duplicatas:>10,}")
+
+    logger.debug("-" * 80)
+    logger.debug(f"{'TOTAL':<35} {'':<20} {total_original:>10,} {total_final:>10,} {total_duplicatas:>10,}")
+    logger.debug("=" * 80)
 
     # === CÉLULA 3: Remoção de colunas desnecessárias ===
     logger.info("\n🧹 CÉLULA 3: REMOÇÃO DE COLUNAS DESNECESSÁRIAS")
@@ -303,23 +313,27 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         colunas_remover=config['cleaning']['colunas_remover']
     )
 
-    logger.info(f"\n📊 COLUNAS REMOVIDAS POR ABA")
-    logger.info("=" * 80)
-    logger.debug(f"{'ARQUIVO':<35} {'ABA':<20} {'ANTES':>10} {'DEPOIS':>10} {'REMOVIDAS':>10}")
-    logger.info("-" * 80)
-
+    # Calcular totais
     total_antes = 0
     total_depois = 0
     total_removidas_cols = 0
 
     for item in cols_report:
-        print(f"{item['arquivo'][:34]:<35} {item['aba'][:19]:<20} "
-              f"{item['colunas_antes']:>10} {item['colunas_depois']:>10} {item['removidas']:>10}")
         total_antes += item['colunas_antes']
         total_depois += item['colunas_depois']
         total_removidas_cols += item['removidas']
 
-    logger.info("-" * 80)
+    # DEBUG: Tabela detalhada
+    logger.debug(f"\n📊 COLUNAS REMOVIDAS POR ABA")
+    logger.debug("=" * 80)
+    logger.debug(f"{'ARQUIVO':<35} {'ABA':<20} {'ANTES':>10} {'DEPOIS':>10} {'REMOVIDAS':>10}")
+    logger.debug("-" * 80)
+
+    for item in cols_report:
+        logger.debug(f"{item['arquivo'][:34]:<35} {item['aba'][:19]:<20} "
+                    f"{item['colunas_antes']:>10} {item['colunas_depois']:>10} {item['removidas']:>10}")
+
+    logger.debug("-" * 80)
     logger.debug(f"{'TOTAL':<35} {'':<20} {total_antes:>10} {total_depois:>10} {total_removidas_cols:>10}")
 
     logger.info(f"\n📈 RESUMO:")
@@ -341,10 +355,10 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     def gerar_relatorio_colunas(df, nome_dataset):
         """Gera relatório detalhado das colunas de um dataset"""
 
-        logger.info(f"\n{nome_dataset.upper()} - {len(df)} registros")
-        logger.info("=" * 70)
+        logger.debug(f"\n{nome_dataset.upper()} - {len(df)} registros")
+        logger.debug("=" * 70)
         logger.debug(f"{'COLUNA':<35} {'ÚNICOS':>10} {'% AUSENTES':>12} {'TOTAL':>10}")
-        logger.info("-" * 70)
+        logger.debug("-" * 70)
 
         for col in df.columns:
             valores_unicos = df[col].nunique()
@@ -352,7 +366,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
             pct_ausentes = (valores_ausentes / len(df)) * 100 if len(df) > 0 else 0
             total_registros = len(df)
 
-            logger.info(f"{col[:34]:<35} {valores_unicos:>10,} {pct_ausentes:>11.1f}% {total_registros:>10,}")
+            logger.debug(f"{col[:34]:<35} {valores_unicos:>10,} {pct_ausentes:>11.1f}% {total_registros:>10,}")
 
     # Gerar relatórios
     gerar_relatorio_colunas(df_pesquisa, "DATASET PESQUISA")
