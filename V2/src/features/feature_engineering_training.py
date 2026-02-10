@@ -97,7 +97,6 @@ def criar_features_derivadas(df_devclub: pd.DataFrame) -> pd.DataFrame:
         DataFrame com features derivadas
     """
     print("FEATURE ENGINEERING COMPLETO")
-    print("=" * 29)
 
     df = df_devclub.copy()
 
@@ -209,9 +208,7 @@ def criar_features_derivadas(df_devclub: pd.DataFrame) -> pd.DataFrame:
         print(f"  {dia} ({nomes_dias[dia]}): {count:,} ({pct:.1f}%)")
 
     # 6. RESUMO FINAL
-    print(f"\n" + "=" * 60)
     print("DATASET FINAL PARA MODELAGEM")
-    print("=" * 60)
 
     print(f"\nDATASET V1 DEVCLUB:")
     print(f"  Registros: {len(df):,}")

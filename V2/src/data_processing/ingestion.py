@@ -473,7 +473,6 @@ def read_all_training_sources(
     """
     # 1. LER ARQUIVOS LOCAIS (comportamento padrão)
     logger.info("📦 INGESTÃO DE DADOS DE TREINO")
-    logger.info("=" * 60)
 
     local_data = read_excel_files(filepaths)
 
@@ -588,7 +587,6 @@ def read_all_training_sources(
             combined_data = {**local_data, **api_data}
 
             logger.info(f"   ✅ Total combinado: {len(combined_data)} fontes de dados")
-            logger.info("=" * 60)
 
             return combined_data
         else:

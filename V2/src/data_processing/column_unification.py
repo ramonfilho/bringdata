@@ -343,9 +343,7 @@ def unificar_colunas_datasets(
 
         # Mostrar relatório
         logger.info("")
-        logger.info(f"{'='*80}")
         logger.info(f"VENDAS - Filtro de status e risco (tmb_risk_filter='{tmb_risk_filter}')")
-        logger.info(f"{'='*80}")
         logger.info(f"GURU:")
         logger.info(f"  Total: {vendas_guru_total:,}")
         logger.info(f"  Aprovadas mantidas: {vendas_guru_mantidas:,}")
@@ -377,7 +375,6 @@ def unificar_colunas_datasets(
 
         logger.info("")
         logger.info(f"TOTAL FINAL: {after:,} vendas")
-        logger.info(f"{'='*80}")
 
     logger.info(f"  Pesquisa: {len(df_pesquisa_unificado)} registros, {len(df_pesquisa_unificado.columns)} colunas")
     logger.info(f"  Vendas: {len(df_vendas_unificado)} registros, {len(df_vendas_unificado.columns)} colunas")

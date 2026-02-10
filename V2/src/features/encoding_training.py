@@ -26,7 +26,6 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
         DataFrame com encoding aplicado
     """
     print("ENCODING ESTRATÉGICO")
-    print("=" * 20)
     print(f"Estratégia Medium: {medium_strategy}")
 
     df = df_devclub_fe.copy()
@@ -125,9 +124,7 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
         print(f"  {tipo}: {count} colunas")
 
     # Resumo final
-    print(f"\n" + "=" * 60)
     print("DATASET FINAL ENCODADO")
-    print("=" * 60)
 
     print(f"\nDATASET V1 DEVCLUB:")
     print(f"  Registros: {len(df_encoded):,}")

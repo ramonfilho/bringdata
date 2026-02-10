@@ -213,9 +213,7 @@ def calculate_periods_from_start(lead_capture_start: str) -> Dict[str, Dict[str,
 
 if __name__ == '__main__':
     # Teste com o exemplo do problema
-    print("=" * 80)
     print("TESTE: Calculador de Períodos")
-    print("=" * 80)
     print()
 
     calc = PeriodCalculator()
@@ -248,7 +246,6 @@ if __name__ == '__main__':
     print()
 
     # Validação
-    print("=" * 80)
     print("VALIDAÇÃO:")
     print("-" * 80)
     validation = calc.validate_period_logic(

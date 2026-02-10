@@ -444,13 +444,10 @@ def main():
     args = parser.parse_args()
 
     # Banner
-    print("\n" + "=" * 80)
     print("SMART ADS - RETREINO MENSAL AUTOMATIZADO")
     print("Arquitetura: Hook-Based (Reutiliza train_pipeline.py)")
-    print("=" * 80)
     print(f"Config: {args.config}")
     print(f"Timestamp: {datetime.now().isoformat()}")
-    print("=" * 80 + "\n")
 
     # Verificar se config existe
     if not os.path.exists(args.config):
@@ -463,14 +460,11 @@ def main():
     resultado = orquestrador.run()
 
     # Exibir resultado
-    print("\n" + "=" * 80)
     print("RESULTADO FINAL")
-    print("=" * 80)
     print(f"Status: {resultado['status']}")
     print(f"Execution ID: {resultado['execution_id']}")
     if 'notes' in resultado:
         print(f"Notas: {resultado['notes']}")
-    print("=" * 80 + "\n")
 
     # Exit code
     sys.exit(0 if resultado['status'].startswith('SUCCESS') else 1)

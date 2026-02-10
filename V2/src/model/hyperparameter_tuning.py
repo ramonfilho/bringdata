@@ -103,9 +103,7 @@ def hyperparameter_tuning(
         dict com resultados do tuning
     """
 
-    print("\n" + "=" * 80)
     print("HYPERPARAMETER TUNING - RANDOMFOREST")
-    print("=" * 80)
 
     # Baseline padrão
     if baseline_params is None:
@@ -198,9 +196,7 @@ def hyperparameter_tuning(
         print(f"    {param}: {values}")
 
     # Treinar baseline
-    print(f"\n{'='*80}")
     print("BASELINE")
-    print("=" * 80)
 
     start_time = time.time()
 
@@ -220,9 +216,7 @@ def hyperparameter_tuning(
     print(f"  Monotonia: {baseline_metricas['monotonia']:.1f}%")
 
     # Grid search
-    print(f"\n{'='*80}")
     print("GRID SEARCH")
-    print("=" * 80)
 
     resultados = []
     melhor_auc = baseline_metricas['auc']
@@ -275,9 +269,7 @@ def hyperparameter_tuning(
         print("❌ Nenhum modelo válido treinado")
         return None
 
-    print(f"\n{'='*80}")
     print("TOP 10 CONFIGURAÇÕES")
-    print("=" * 80)
 
     # Ordenar por AUC
     resultados_sorted = sorted(resultados, key=lambda x: x['auc'], reverse=True)
@@ -297,9 +289,7 @@ def hyperparameter_tuning(
     # Melhor resultado
     melhor = resultados_sorted[0]
 
-    print(f"\n{'='*80}")
     print("COMPARAÇÃO: BASELINE vs MELHOR")
-    print("=" * 80)
 
     print(f"\nBASELINE:")
     print(f"  AUC: {baseline_metricas['auc']:.4f}")
@@ -324,9 +314,7 @@ def hyperparameter_tuning(
     print(f"  Top 3 decis: {melhor['top3_conv'] - baseline_metricas['top3_conv']:+.1f} pp")
 
     # Hiperparâmetros recomendados
-    print(f"\n{'='*80}")
     print("HIPERPARÂMETROS RECOMENDADOS")
-    print("=" * 80)
 
     for param, value in melhor['params'].items():
         if param not in ['random_state', 'n_jobs']:
@@ -335,9 +323,7 @@ def hyperparameter_tuning(
             print(f"{mudou} {param}: {value}")
 
     # Recomendação
-    print(f"\n{'='*80}")
     print("RECOMENDAÇÃO")
-    print("=" * 80)
 
     if melhoria_auc > 1.0:
         print(f"✅ RECOMENDADO: Usar hiperparâmetros tunados")

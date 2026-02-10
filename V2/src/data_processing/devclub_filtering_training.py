@@ -86,7 +86,6 @@ def criar_dataset_devclub(df_v1_final: pd.DataFrame, df_vendas_unificado: pd.Dat
         DataFrame V1 com target filtrado apenas para DevClub
     """
     print(f"FILTRAGEM DEVCLUB - MANTENDO TARGET DO MATCHING INICIAL")
-    print("=" * 70)
 
     # 1. PRODUTOS DEVCLUB A MANTER
     produtos_devclub_manter = [

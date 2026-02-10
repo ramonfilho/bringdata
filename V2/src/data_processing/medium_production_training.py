@@ -181,9 +181,7 @@ def relatorio_unificacao_producao(df_original: pd.DataFrame, df_unificado: pd.Da
         df_original: DataFrame antes da unificação
         df_unificado: DataFrame depois da unificação
     """
-    print(f"\n" + "="*70)
     print(f"RELATÓRIO DE UNIFICAÇÃO PARA PRODUÇÃO")
-    print(f"="*70)
 
     # Comparação antes/depois
     antes_count = df_original['Medium'].nunique()
@@ -243,9 +241,7 @@ def relatorio_unificacao_producao(df_original: pd.DataFrame, df_unificado: pd.Da
         print(f"{i:<3} {valor_display:<45} {count:<8,} {pct:<6.1f}%")
 
     # Verificação final das colunas que serão criadas no encoding
-    print(f"\n" + "="*70)
     print(f"COLUNAS ESPERADAS APÓS ONE-HOT ENCODING")
-    print(f"="*70)
 
     categorias_para_encoding = df_unificado['Medium'].dropna().unique()
 

@@ -114,14 +114,11 @@ class LeadScoringPredictor:
         logger.info(f"Preparando features para predição...")
 
         # PRINT ANTES DA REORDENAÇÃO/FILTRAGEM
-        print("\n" + "="*80)
         print("🔍 COLUNAS ANTES DA REORDENAÇÃO/FILTRAGEM (df processado):")
-        print("="*80)
         for idx, col in enumerate(sorted(df.columns), 1):
             print(f"  {idx:2d}. {col}")
         print(f"\nTotal: {len(df.columns)} features")
         print(f"Shape: {df.shape}")
-        print("="*80)
 
         logger.info(f"Colunas recebidas: {len(df.columns)}")
 
@@ -145,14 +142,11 @@ class LeadScoringPredictor:
         X = X[self.feature_names]
 
         # PRINT DEPOIS DA REORDENAÇÃO/FILTRAGEM (equivalente ao pipeline de treino)
-        print("\n" + "="*80)
         print("🔍 COLUNAS EXATAS PASSADAS PARA O MODELO (X.columns):")
-        print("="*80)
         for idx, col in enumerate(X.columns, 1):
             print(f"  {idx:2d}. {col}")
         print(f"\nTotal: {len(X.columns)} features")
         print(f"Shape: {X.shape}")
-        print("="*80 + "\n")
 
         # Guardar lista de features ausentes para uso posterior (ex: monitoramento)
         self.last_missing_features = missing_features

@@ -41,7 +41,6 @@ def atualizar_business_config_com_recall(model_metadata: dict):
     from pathlib import Path
 
     print("\n🔄 ATUALIZANDO BUSINESS_CONFIG.PY COM RECALL REAL")
-    print("=" * 70)
 
     # Extrair métricas de recall
     recall_metrics = model_metadata.get('recall_metrics', {})
@@ -146,7 +145,6 @@ def registrar_features_e_modelo_devclub(
         Dicionário com resultados do registro
     """
     print("REGISTRO DE FEATURES E MODELO DEVCLUB PARA PRODUÇÃO")
-    print("=" * 52)
 
     # Iniciar MLflow run
     with mlflow.start_run():
@@ -247,9 +245,7 @@ def registrar_features_e_modelo_devclub(
 
             # === ANÁLISE TEMPORAL TEMPORÁRIA - MEDIUM TRAIN vs TEST ===
             if 'Medium' in dataset_original.columns:
-                print(f"\n" + "="*100)
                 print("📋 ANÁLISE TEMPORAL TEMPORÁRIA: MEDIUM - DISTRIBUIÇÃO TRAIN vs TEST")
-                print("="*100)
 
                 train_medium = dataset_original[mask_treino]['Medium']
                 test_medium = dataset_original[mask_teste]['Medium']
@@ -298,7 +294,6 @@ def registrar_features_e_modelo_devclub(
                     if len(only_train) > 10:
                         print(f"   ... e mais {len(only_train) - 10} categorias")
 
-                print("="*100 + "\n")
 
         elif split_method == 'temporal_leads':
             # Split temporal por LEADS: 70% dos LEADS (ordenados por data) para treino
@@ -359,9 +354,7 @@ def registrar_features_e_modelo_devclub(
 
             # === ANÁLISE TEMPORAL TEMPORÁRIA - MEDIUM TRAIN vs TEST ===
             if 'Medium' in dataset_original.columns:
-                print(f"\n" + "="*100)
                 print("📋 ANÁLISE TEMPORAL TEMPORÁRIA: MEDIUM - DISTRIBUIÇÃO TRAIN vs TEST")
-                print("="*100)
 
                 train_medium = dataset_original.iloc[train_indices]['Medium']
                 test_medium = dataset_original.iloc[test_indices]['Medium']
@@ -410,7 +403,6 @@ def registrar_features_e_modelo_devclub(
                     if len(only_train) > 10:
                         print(f"   ... e mais {len(only_train) - 10} categorias")
 
-                print("="*100 + "\n")
 
         else:  # stratified
             # Split stratified POR PESSOA usando componentes conectados: garantir zero leakage
@@ -477,7 +469,6 @@ def registrar_features_e_modelo_devclub(
 
             # === ANÁLISE DETALHADA DOS GRUPOS ===
             print(f"\n📊 ANÁLISE DE GRUPOS CONECTADOS:")
-            print("=" * 70)
 
             tamanhos_grupos = [len(indices) for indices in grupos.values()]
             grupos_tamanho_1 = sum(1 for t in tamanhos_grupos if t == 1)
@@ -527,7 +518,6 @@ def registrar_features_e_modelo_devclub(
                 print(f"     Emails únicos: {len(emails_grupo)} - {', '.join(str(e) for e in list(emails_grupo)[:2])}{'...' if len(emails_grupo) > 2 else ''}")
                 print(f"     Telefones únicos: {len(telefones_grupo)} - {', '.join(str(t) for t in list(telefones_grupo)[:2])}{'...' if len(telefones_grupo) > 2 else ''}")
 
-            print("=" * 70)
             print()
 
             # 4. Criar DataFrame de grupos com target agregado
@@ -653,14 +643,11 @@ def registrar_features_e_modelo_devclub(
         mlflow.log_param("hyperparameter_tuning", custom_hyperparams is not None)
 
         # === DEBUG: PRINT COLUNAS EXATAS ANTES DO FIT ===
-        print("\n" + "="*80)
         print("🔍 COLUNAS EXATAS PASSADAS PARA O MODELO (X_train.columns):")
-        print("="*80)
         for i, col in enumerate(X_train.columns, 1):
             print(f"  {i:2d}. {col}")
         print(f"\nTotal: {len(X_train.columns)} features")
         print(f"Shape: {X_train.shape}")
-        print("="*80 + "\n")
 
         modelo_final.fit(X_train, y_train)
         y_prob = modelo_final.predict_proba(X_test)[:, 1]
@@ -816,9 +803,7 @@ def registrar_features_e_modelo_devclub(
         # ====================================================================
         # CALCULAR THRESHOLDS FIXOS DE DECIS (para uso em produção)
         # ====================================================================
-        print("\n" + "=" * 80)
         print("CALCULANDO THRESHOLDS FIXOS DE DECIS")
-        print("=" * 80)
 
         decil_thresholds = calcular_thresholds_decis(y_prob, df_analise['decil'])
 
@@ -835,7 +820,6 @@ def registrar_features_e_modelo_devclub(
         print(f"   Diferença média: {comparacao['media_diferenca_absoluta']:.1f} leads por decil")
         print(f"   Diferença máxima: {comparacao['max_diferenca_absoluta']} leads")
         print(f"   Diferença máxima %: {comparacao['max_diferenca_percentual']:.1f}%")
-        print("=" * 80)
 
         analise_decis = df_analise.groupby('decil', observed=True).agg({
             'target_real': ['count', 'sum', 'mean']
@@ -1088,9 +1072,7 @@ def registrar_features_e_modelo_devclub(
         print("✓ Metadados registrados no MLflow")
 
         # 5. RESUMO FINAL
-        print(f"\n" + "=" * 50)
         print("MODELO DEVCLUB REGISTRADO COM SUCESSO")
-        print("=" * 50)
         print(f"Modelo: v1_devclub_rf_temporal_single")
         print(f"Algoritmo: RandomForestClassifier")
         print(f"Split: temporal")

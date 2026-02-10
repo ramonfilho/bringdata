@@ -180,9 +180,7 @@ def relatorio_final_medium(df: pd.DataFrame):
     Args:
         df: DataFrame com Medium unificado
     """
-    print(f"\n" + "="*60)
     print(f"RELATÓRIO FINAL - MEDIUM (PÚBLICOS)")
-    print(f"="*60)
 
     if 'Medium' not in df.columns:
         print("Coluna Medium não encontrada")
@@ -229,9 +227,7 @@ def exportar_categorias_medium(df: pd.DataFrame, arquivo_csv: str = 'categorias_
         df: DataFrame com Medium unificado
         arquivo_csv: Nome do arquivo CSV de saída
     """
-    print(f"\n" + "="*60)
     print(f"EXPORTAÇÃO DAS CATEGORIAS MEDIUM")
-    print(f"="*60)
 
     # Criar DataFrame com todas as categorias e suas estatísticas
     medium_stats = df['Medium'].value_counts(dropna=False)

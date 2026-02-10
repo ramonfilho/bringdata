@@ -210,9 +210,7 @@ def comparar_distribuicoes(decis_qcut: pd.Series, decis_threshold: list, verbose
     dist_threshold = pd.Series(decis_threshold).value_counts().sort_index()
 
     if verbose:
-        print("\n" + "=" * 80)
         print("COMPARAÇÃO: pd.qcut vs Thresholds Fixos")
-        print("=" * 80)
         print(f"{'Decil':<8} {'pd.qcut':<12} {'Threshold':<12} {'Diferença':<12} {'% Diff':<10}")
         print("-" * 80)
 
@@ -225,7 +223,6 @@ def comparar_distribuicoes(decis_qcut: pd.Series, decis_threshold: list, verbose
             print(f"{decil:<8} {count_qcut:<12} {count_threshold:<12} "
                   f"{diff:+12} {pct_diff:+9.1f}%")
 
-        print("=" * 80)
 
     # Calcular estatísticas
     total = len(decis_qcut)

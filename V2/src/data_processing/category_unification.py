@@ -320,7 +320,6 @@ def gerar_relatorio_final_categorias(df: pd.DataFrame):
         df: DataFrame com categorias unificadas
     """
     print(f"\nRELATÓRIO FINAL - UNIFICAÇÃO COMPLETA")
-    print("=" * 50)
 
     colunas_analisadas = [
         'interesse_programacao',

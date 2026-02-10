@@ -523,24 +523,18 @@ def main():
     logger.info(f"   ✅ {len(df_efetivado):,} parcelas de pedidos efetivados")
 
     # Executar análises
-    print("\n" + "="*80)
     inadimplencia = analyze_inadimplencia_geral(df_efetivado)
 
-    print("\n" + "="*80)
     evolucao = analyze_evolucao_temporal(df_efetivado)
 
-    print("\n" + "="*80)
     risco = analyze_por_grau_risco(df_efetivado)
 
-    print("\n" + "="*80)
     valor_real = calculate_valor_real_venda(df_efetivado, args.valor_nominal)
 
     # Gerar relatórios
-    print("\n" + "="*80)
     generate_summary_report(inadimplencia, valor_real, evolucao, risco, output_path)
 
     # Conclusão
-    print("\n" + "="*80)
     logger.info("✅ ANÁLISE CONCLUÍDA")
     logger.info("="*80)
     logger.info(f"\n📊 RESUMO:")

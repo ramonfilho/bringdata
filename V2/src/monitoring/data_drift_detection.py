@@ -129,9 +129,7 @@ def comparar_3_periodos(df_normal, df_alto_dez, df_alto_jan, feature, top_n=None
 def analisar_feature_drift():
     """Análise completa de feature drift: 3 períodos comparados"""
 
-    print("="*120)
     print("ANÁLISE DE FEATURE DRIFT: COMPARAÇÃO DE 3 PERÍODOS")
-    print("="*120)
 
     # Carregar dados
     print(f"\n📊 Carregando dados...")
@@ -188,9 +186,7 @@ def analisar_feature_drift():
         print(f"      % D10: {dist_decil:.1f}%")
 
     # Analisar cada feature
-    print(f"\n" + "="*120)
     print("COMPARAÇÃO DE FEATURES: 3 PERÍODOS")
-    print("="*120)
 
     drift_summary = []
 
@@ -199,9 +195,7 @@ def analisar_feature_drift():
             print(f"\n⚠️  Feature '{feature}' não encontrada nos dados")
             continue
 
-        print(f"\n{'='*120}")
         print(f"📊 {feature.upper()}")
-        print(f"{'='*120}")
 
         # Comparar distribuições dos 3 períodos
         top_n = 10 if feature in ['Medium', 'Campaign', 'Source'] else None
@@ -248,9 +242,7 @@ def analisar_feature_drift():
             print(f"🟢 SIMILAR ({max_drift_dez_vs_jan:.2f}pp)")
 
     # Resumo geral de drift
-    print(f"\n" + "="*120)
     print("📊 RESUMO DE FEATURE DRIFT - 3 PERÍODOS")
-    print("="*120)
 
     df_drift_summary = pd.DataFrame(drift_summary)
     # Ordenar por maior drift (considerar o máximo entre Dez e Jan)
@@ -260,9 +252,7 @@ def analisar_feature_drift():
     print(f"\n{df_drift_summary.to_string(index=False)}")
 
     # Análise: Features com drift similar vs diferente
-    print(f"\n" + "="*120)
     print("🔍 ANÁLISE: DEZ vs JAN - São os mesmos fatores?")
-    print("="*120)
 
     features_similares = df_drift_summary[df_drift_summary['Diff Dez vs Jan (pp)'] <= 2]
     features_diferentes = df_drift_summary[df_drift_summary['Diff Dez vs Jan (pp)'] > 2]
@@ -280,9 +270,7 @@ def analisar_feature_drift():
             print(f"   • {row['Feature']}: Diff = {row['Diff Dez vs Jan (pp)']:.2f}pp")
 
     # Análise de decis por período
-    print(f"\n" + "="*120)
     print("📊 DISTRIBUIÇÃO DE DECIS - 3 PERÍODOS")
-    print("="*120)
 
     print(f"\n🔹 [1] D10 NORMAL ({PERIODO_D10_NORMAL_INICIO} a {PERIODO_D10_NORMAL_FIM}):")
     if len(df_d10_normal) > 0:
@@ -305,7 +293,6 @@ def analisar_feature_drift():
             emoji = "⚠️" if decil == 'D10' and pct > 15 else ""
             print(f"   {decil}: {pct:.2f}% {emoji}")
 
-    print(f"\n" + "="*120)
 
 if __name__ == '__main__':
     analisar_feature_drift()

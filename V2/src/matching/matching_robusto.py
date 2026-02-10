@@ -83,7 +83,6 @@ def fazer_matching_robusto(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.DataFrame
         DataFrame com target adicionado
     """
     print("MATCHING ROBUSTO POR EMAIL E TELEFONE - MÉTODO 2 (ROBUSTO)")
-    print("=" * 60)
 
     df_pesquisa = df_pesquisa_v1.copy()
     df_vendas_copy = df_vendas.copy()
@@ -164,7 +163,6 @@ def fazer_matching_robusto(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.DataFrame
     print(f"  Matches apenas por telefone: {matches_apenas_telefone:,}")
     print(f"  Matches por ambos: {matches_ambos:,}")
 
-    print(f"\n" + "=" * 60)
     print("DATASET FINAL CRIADO!")
     print(f"dataset_v1_final: {len(df_resultado):,} registros, {len(df_resultado.columns)} colunas")
     print("Dataset contém apenas colunas originais + target")

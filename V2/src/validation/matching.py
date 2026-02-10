@@ -226,9 +226,7 @@ def print_matching_summary(stats: Dict):
     Args:
         stats: Dicionário retornado por get_matching_stats()
     """
-    print("\n" + "=" * 80)
     print("📊 RESUMO DO MATCHING")
-    print("=" * 80)
     print(f"\n📈 Leads e Conversões:")
     print(f"   Total de leads: {stats['total_leads']:,}")
     print(f"   Total de conversões: {stats['total_conversions']:,}")
@@ -245,7 +243,6 @@ def print_matching_summary(stats: Dict):
     print(f"\n🏪 Origem das Vendas:")
     print(f"   Guru: {stats['conversions_guru']:,} conversões")
     print(f"   TMB: {stats['conversions_tmb']:,} conversões")
-    print("=" * 80)
 
 
 def filter_by_period(

@@ -67,9 +67,7 @@ def criar_dataset_pos_cutoff(df_medium_producao: pd.DataFrame) -> pd.DataFrame:
         for feature in features_nao_existentes:
             print(f"  ✗ {feature}")
 
-    print(f"\n" + "="*60)
     print("VERSÃO 1: MENOR MISSING RATE (pós 2025-03-01)")
-    print("="*60)
     print(f"Registros: {len(df_pos_cutoff):,}")
     print(f"Features críticas MANTIDAS (período com menor missing)")
 
@@ -122,9 +120,7 @@ def disponibilizar_dataset(df_pos_cutoff: pd.DataFrame):
     Args:
         df_pos_cutoff: DataFrame pós-cutoff
     """
-    print(f"\n" + "="*60)
     print("DISPONIBILIZAÇÃO DO DATASET")
-    print("="*60)
 
     print(f"Dataset disponível em: pesquisa_v1_menor_missing")
     print(f"  Período: 2025-02-11 em diante")

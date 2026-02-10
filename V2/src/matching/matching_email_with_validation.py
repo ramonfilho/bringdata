@@ -52,7 +52,6 @@ def fazer_matching_email_with_validation(
         DataFrame com target adicionado (matches primários + secundários validados)
     """
     print("MATCHING COM VALIDAÇÃO CRUZADA - alunos TODOS.xlsx")
-    print("=" * 70)
 
     df_pesquisa = df_pesquisa_v1.copy()
     df_vendas_copy = df_vendas.copy()
@@ -192,7 +191,6 @@ def fazer_matching_email_with_validation(
     print(f"  Total de matches FINAL: {total_matches:,}")
     print(f"  Taxa de conversão: {taxa_conversao:.2f}%")
 
-    print(f"\n" + "=" * 70)
     print("DATASET FINAL CRIADO!")
     print(f"dataset_v1_final: {len(df_resultado):,} registros, {len(df_resultado.columns)} colunas")
     print(f"Target baseado em: matching primário + validação cruzada alunos TODOS")

@@ -85,7 +85,6 @@ def fazer_matching_email_telefone(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.Da
         DataFrame com target adicionado
     """
     print("MATCHING: EMAIL (PRIMÁRIO) + TELEFONE (SECUNDÁRIO)")
-    print("=" * 70)
 
     df_pesquisa = df_pesquisa_v1.copy()
     df_vendas_copy = df_vendas.copy()
@@ -164,12 +163,10 @@ def fazer_matching_email_telefone(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.Da
     total_matches = df_resultado['target'].sum()
     taxa_conversao = (total_matches / total_registros) * 100
 
-    print(f"\n{'='*70}")
     print(f"DATASET FINAL:")
     print(f"  Total de registros: {total_registros:,}")
     print(f"  Total de matches: {total_matches:,}")
     print(f"  Taxa de conversão: {taxa_conversao:.2f}%")
     print(f"  Ganho vs email_only: +{len(matches_telefone):,} matches")
-    print(f"{'='*70}")
 
     return df_resultado

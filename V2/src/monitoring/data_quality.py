@@ -892,9 +892,7 @@ class DataQualityMonitor:
 
         alerts = []
 
-        print("\n" + "="*80)
         print("🔍 DEBUG: _check_extra_features() INICIADO")
-        print("="*80)
         print(f"DataFrame recebido: {df.shape[0]} linhas, {df.shape[1]} colunas")
         print(f"Colunas: {sorted(df.columns.tolist())[:10]}...")
 
@@ -968,7 +966,6 @@ class DataQualityMonitor:
             else:
                 print(f"\n✅ Nenhuma feature extra detectada")
 
-            print("="*80)
 
         except Exception as e:
             print(f"\n❌ ERRO em _check_extra_features(): {e}")

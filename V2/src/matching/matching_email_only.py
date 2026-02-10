@@ -40,7 +40,6 @@ def fazer_matching_email_only(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.DataFr
         DataFrame com target adicionado (apenas matches por email)
     """
     print("MATCHING EXCLUSIVAMENTE POR EMAIL - MÉTODO 3 (EMAIL ONLY)")
-    print("=" * 60)
     print("SEM MATCHING POR TELEFONE - Máxima Precisão")
 
     df_pesquisa = df_pesquisa_v1.copy()
@@ -91,7 +90,6 @@ def fazer_matching_email_only(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.DataFr
     print(f"  Matches por email: {total_matches:,}")
     print(f"  Matches por telefone: 0 (método email only)")
 
-    print(f"\n" + "=" * 60)
     print("DATASET FINAL CRIADO!")
     print(f"dataset_v1_final: {len(df_resultado):,} registros, {len(df_resultado.columns)} colunas")
     print("Dataset contém apenas colunas originais + target")

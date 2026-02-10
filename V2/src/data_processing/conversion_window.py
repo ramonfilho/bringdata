@@ -37,7 +37,6 @@ def aplicar_janela_conversao(
         DataFrame de leads filtrado pela janela de conversão
     """
     print(f"\nAPLICANDO JANELA DE CONVERSÃO ({janela_dias} DIAS)")
-    print("=" * 70)
 
     df = df_leads.copy()
 
