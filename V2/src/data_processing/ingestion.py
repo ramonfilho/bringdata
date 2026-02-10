@@ -63,7 +63,7 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
             raise FileNotFoundError(f"Arquivo não encontrado: {filepath}")
 
         filename = Path(filepath).name
-        logger.info(f"  Processando: {filename}")
+        logger.debug(f"  Processando: {filename}")
 
         try:
             # Ler arquivo Excel
@@ -83,8 +83,8 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
                 )
 
                 if is_tmb_parcelas:
-                    logger.info(f"    📊 Detectado arquivo TMB com parcelas: {filename}")
-                    logger.info(f"       Registros totais (parcelas): {len(df):,}")
+                    logger.debug(f"    📊 Detectado arquivo TMB com parcelas: {filename}")
+                    logger.debug(f"       Registros totais (parcelas): {len(df):,}")
 
                     # Agregar por pedido único
                     if 'Pedido' in df.columns:
@@ -102,7 +102,7 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
                             df_agregado = df_agregado[df_agregado['Status Pedido'] == 'Efetivado'].copy()
                             cancelados = total_antes - len(df_agregado)
                             if cancelados > 0:
-                                logger.info(f"       ⚠️  {cancelados} pedidos cancelados removidos")
+                                logger.debug(f"       ⚠️  {cancelados} pedidos cancelados removidos")
 
                         df_agregado = df_agregado
 
@@ -114,15 +114,15 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
                         }
                         df_agregado = df_agregado.rename(columns=rename_map)
 
-                        logger.info(f"       ✅ Agregado por pedido único: {len(df_agregado):,} pedidos")
-                        logger.info(f"       📋 Coluna 'Grau de risco' preservada")
+                        logger.debug(f"       ✅ Agregado por pedido único: {len(df_agregado):,} pedidos")
+                        logger.debug(f"       📋 Coluna 'Grau de risco' preservada")
 
                         # Mostrar distribuição de risco
                         if 'Grau de risco' in df_agregado.columns:
                             dist_risco = df_agregado['Grau de risco'].value_counts(dropna=False)
-                            logger.info(f"       Distribuição de risco:")
+                            logger.debug(f"       Distribuição de risco:")
                             for risco, count in dist_risco.items():
-                                logger.info(f"         - {risco}: {count:,} pedidos")
+                                logger.debug(f"         - {risco}: {count:,} pedidos")
 
                         df = df_agregado
                     else:
@@ -132,7 +132,7 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
                 logger.debug(f"    ✅ Aba '{sheet_name}': {len(df)} linhas, {len(df.columns)} colunas")
 
             all_data[filename] = file_data
-            logger.info(f"    Total: {len(file_data)} aba(s) lida(s)")
+            logger.debug(f"    Total: {len(file_data)} aba(s) lida(s)")
 
         except Exception as e:
             logger.error(f"    ❌ Erro ao ler {filename}: {e}")

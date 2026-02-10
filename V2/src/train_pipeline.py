@@ -196,19 +196,33 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
 
     filepaths = sorted(glob.glob(os.path.join(data_dir, "*.xlsx")), key=notebook_sort_key)
 
-    logger.info(f"\nTotal de arquivos encontrados: {len(filepaths)}")
-    logger.info(f"💡 FILTRO TMB (tmb_risk_filter='{tmb_risk_filter}'):")
-    if tmb_risk_filter == 'none':
-        logger.info(f"   - Usando apenas vendas GURU (nenhum aluno TMB)")
-    elif tmb_risk_filter == 'all':
-        logger.info(f"   - Usando vendas Guru + TODOS alunos TMB")
-    elif tmb_risk_filter == 'low':
-        logger.info(f"   - Usando vendas Guru + alunos TMB de BAIXO risco")
-    elif tmb_risk_filter == 'low_medium':
-        logger.info(f"   - Usando vendas Guru + alunos TMB de BAIXO e MÉDIO risco")
+    # NORMAL: Número de arquivos + fonte de dados
+    logger.info(f"\nArquivos carregados: {len(filepaths)}")
 
+    # Fonte de dados
+    if include_api_data:
+        logger.info(f"Fonte de dados: Arquivos locais + Google Sheets API")
+        if api_start_date or api_end_date:
+            logger.debug(f"   Período API: {api_start_date or 'início'} até {api_end_date or 'hoje'}")
+    else:
+        logger.info(f"Fonte de dados: Arquivos locais")
+
+    # DEBUG: Lista completa de arquivos
+    logger.debug(f"\nLista de arquivos:")
     for f in filepaths:
-        logger.info(f"  - {os.path.basename(f)}")
+        logger.debug(f"  - {os.path.basename(f)}")
+
+    # DEBUG: Detalhes do filtro TMB
+    logger.debug(f"\n💡 FILTRO TMB (tmb_risk_filter='{tmb_risk_filter}'):")
+    if tmb_risk_filter == 'none':
+        logger.debug(f"   - Vendas Guru + TMB usadas para cálculo do recall")
+        logger.debug(f"   - Apenas vendas Guru usadas para matching/treino")
+    elif tmb_risk_filter == 'all':
+        logger.debug(f"   - Usando vendas Guru + TODOS alunos TMB")
+    elif tmb_risk_filter == 'low':
+        logger.debug(f"   - Usando vendas Guru + alunos TMB de BAIXO risco")
+    elif tmb_risk_filter == 'low_medium':
+        logger.debug(f"   - Usando vendas Guru + alunos TMB de BAIXO e MÉDIO risco")
 
     # Ler TODOS os arquivos (incluindo TMB) + dados da API se retreino
     all_data = read_all_training_sources(
@@ -898,6 +912,13 @@ if __name__ == "__main__":
         default='binary_top3',
         help='Estratégia para Medium: full (one-hot completo), binary_aberto (apenas Medium_Aberto), binary_aberto_dgen (Medium_Aberto + Medium_dgen), binary_top3 (top 3 categorias mais estáveis - RECOMENDADO), remove (remover na célula 8) - padrão: binary_top3'
     )
+    parser.add_argument(
+        '--verbosity',
+        type=str,
+        choices=['silent', 'minimal', 'normal', 'debug'],
+        default='normal',
+        help='Nível de verbosidade dos logs: silent (apenas erros), minimal (warnings+erros), normal (info+warnings+erros), debug (tudo incluindo análises detalhadas) - padrão: normal'
+    )
 
     args = parser.parse_args()
 
@@ -909,5 +930,6 @@ if __name__ == "__main__":
         split_method=args.split_method,
         tmb_risk_filter=args.tmb_risk_filter,
         set_active=args.set_active,
-        medium_strategy=args.medium_strategy
+        medium_strategy=args.medium_strategy,
+        verbosity=args.verbosity
     )
