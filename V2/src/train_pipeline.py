@@ -439,11 +439,6 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     gerar_relatorio_colunas(df_vendas_final, "DATASET VENDAS")
 
     logger.info("=" * 80)
-    # === CÉLULA 6: Pulada (exploratória) ===
-    logger.info("")
-    logger.info("⏭️  CÉLULA 6: Pulando célula exploratória/informativa do notebook original de treino")
-
-    logger.info("=" * 80)
     # === CÉLULA 7: Unificação completa de categorias ===
     logger.info("")
     logger.info("🏷️  CÉLULA 7: UNIFICAÇÃO COMPLETA DE CATEGORIAS")
@@ -506,11 +501,6 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         logger.info("✅ Quality gate passou - prosseguindo com treino")
 
     logger.info("=" * 80)
-    # === CÉLULA 9: Pulada (exploratória) ===
-    logger.info("")
-    logger.info("⏭️  CÉLULA 9: Pulando célula exploratória/informativa do notebook original de treino")
-
-    logger.info("=" * 80)
     # === CÉLULA 10: Unificação de UTM Source e Term ===
     logger.info("")
     logger.info("🔤 CÉLULA 10: UNIFICAÇÃO DE UTM SOURCE E TERM")
@@ -559,11 +549,6 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         df_medium_producao = df_medium_unificado.copy()
 
     logger.info("=" * 80)
-    # === CÉLULA 12: Pulada (exploratória) ===
-    logger.info("")
-    logger.info("⏭️  CÉLULA 12: Pulando célula exploratória/informativa do notebook original de treino")
-
-    logger.info("=" * 80)
     # === CÉLULA 13: Criação de versão do dataset por missing rate ===
     logger.info("")
     logger.info("📋 CÉLULA 13: CRIAÇÃO DE VERSÕES DO DATASET POR MISSING RATE")
@@ -577,11 +562,6 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("")
     logger.info(f"Processo concluído!")
     logger.info(f"Duas versões do dataset criadas com sucesso.")
-
-    logger.info("=" * 80)
-    # === CÉLULA 14: Pulada (exploratória) ===
-    logger.info("")
-    logger.info("⏭️  CÉLULA 14: Pulando célula exploratória/informativa do notebook original de treino")
 
     logger.info("=" * 80)
     # === CÉLULA 15: Matching robusto por email e telefone ===
@@ -603,11 +583,6 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         dataset_v1_final = fazer_matching_email_with_validation(df_pos_cutoff, df_vendas_matching)
     else:
         raise ValueError(f"Método de matching inicial inválido: {initial_matching}. Use 'email_only', 'email_telefone', 'variantes', 'robusto' ou 'validation'")
-
-    logger.info("=" * 80)
-    # === CÉLULA 16: Pulada (exploratória) ===
-    logger.info("")
-    logger.info("⏭️  CÉLULA 16: Pulando célula exploratória/informativa do notebook original de treino")
 
     logger.info("=" * 80)
     # === CÉLULA 17: Filtragem DevClub ===
@@ -893,11 +868,6 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("")
     logger.info("Capturando distribuições completas (proporções + estatísticas)...")
     distribuicoes_capturadas = capture_training_distributions(dataset_v1_devclub_fe, output_path=None)
-
-    logger.info("=" * 80)
-    # === CÉLULA 19: Pulada (exploratória) ===
-    logger.info("")
-    logger.info("⏭️  CÉLULA 19: Pulando célula exploratória/informativa do notebook original de treino")
 
     logger.info("=" * 80)
     # === CÉLULA 20: Encoding Estratégico ===
