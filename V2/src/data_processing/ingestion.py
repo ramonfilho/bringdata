@@ -175,7 +175,8 @@ def filter_sheets(
         ...     min_linhas=230
         ... )
     """
-    logger.info("🔍 Filtrando abas por critérios...")
+    # DEBUG: Mensagem de progresso
+    logger.debug("🔍 Filtrando abas por critérios...")
 
     arquivos_filtrados = {}
     relatorio = []
@@ -231,8 +232,9 @@ def filter_sheets(
     abas_mantidas = sum(1 for item in relatorio if item['status'] == 'MANTIDA')
     abas_removidas = len(relatorio) - abas_mantidas
 
-    logger.info(f"  Abas mantidas: {abas_mantidas}")
-    logger.info(f"  Abas removidas: {abas_removidas}")
+    # DEBUG: Informações parciais (serão mostradas no resumo final)
+    logger.debug(f"  Abas mantidas: {abas_mantidas}")
+    logger.debug(f"  Abas removidas: {abas_removidas}")
 
     return arquivos_filtrados, relatorio
 
@@ -256,7 +258,8 @@ def remove_duplicates_per_sheet(
     Example:
         >>> clean_data, stats = remove_duplicates_per_sheet(data)
     """
-    logger.info("🧹 Removendo duplicatas...")
+    # DEBUG: Mensagem de progresso
+    logger.debug("🧹 Removendo duplicatas...")
 
     arquivos_limpos = {}
     estatisticas = {}
@@ -283,7 +286,8 @@ def remove_duplicates_per_sheet(
         estatisticas[filename] = stats_arquivo
 
     total_duplicatas = sum(sum(stats.values()) for stats in estatisticas.values())
-    logger.info(f"  Total de duplicatas removidas: {total_duplicatas:,}")
+    # DEBUG: Informação parcial (será mostrada no resumo final)
+    logger.debug(f"  Total de duplicatas removidas: {total_duplicatas:,}")
 
     return arquivos_limpos, estatisticas
 
