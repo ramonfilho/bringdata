@@ -553,15 +553,10 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("")
     logger.info("📋 CÉLULA 13: CRIAÇÃO DE VERSÕES DO DATASET POR MISSING RATE")
 
-    logger.info("Iniciando criação das versões...")
     df_pos_cutoff = criar_dataset_pos_cutoff(df_medium_producao)
 
     # Disponibilizar dataset
     disponibilizar_dataset(df_pos_cutoff)
-
-    logger.info("")
-    logger.info(f"Processo concluído!")
-    logger.info(f"Duas versões do dataset criadas com sucesso.")
 
     logger.info("=" * 80)
     # === CÉLULA 15: Matching robusto por email e telefone ===

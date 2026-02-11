@@ -25,7 +25,8 @@ def criar_dataset_pos_cutoff(df_medium_producao: pd.DataFrame) -> pd.DataFrame:
     """
     df = df_medium_producao.copy()
 
-    print(f"Dataset original: {len(df)} registros, {len(df.columns)} colunas")
+    # DEBUG: Dataset original
+    logger.debug(f"Dataset original: {len(df)} registros, {len(df.columns)} colunas")
 
     # Converter coluna de data para datetime se não estiver
     if 'Data' in df.columns:
@@ -41,9 +42,9 @@ def criar_dataset_pos_cutoff(df_medium_producao: pd.DataFrame) -> pd.DataFrame:
     coluna_remover = 'Qual o seu nível em programação?'
     if coluna_remover in df_pos_cutoff.columns:
         df_pos_cutoff = df_pos_cutoff.drop(columns=[coluna_remover])
-        print(f"Coluna removida: '{coluna_remover}'")
+        logger.debug(f"Coluna removida: '{coluna_remover}'")
 
-    print(f"Registros pós {cutoff_date.strftime('%Y-%m-%d')}: {len(df_pos_cutoff)}")
+    logger.debug(f"Registros pós {cutoff_date.strftime('%Y-%m-%d')}: {len(df_pos_cutoff)}")
 
     # Definir features com missing crítico para análise
     features_missing_critico = [
@@ -58,18 +59,22 @@ def criar_dataset_pos_cutoff(df_medium_producao: pd.DataFrame) -> pd.DataFrame:
     features_existentes = [col for col in features_missing_critico if col in df.columns]
     features_nao_existentes = [col for col in features_missing_critico if col not in df.columns]
 
-    print(f"\nFeatures de missing crítico encontradas: {len(features_existentes)}")
+    # DEBUG: Features de missing crítico
+    logger.debug("")
+    logger.debug(f"Features de missing crítico encontradas: {len(features_existentes)}")
     for feature in features_existentes:
-        print(f"  ✓ {feature}")
+        logger.debug(f"  ✓ {feature}")
 
     if features_nao_existentes:
-        print(f"\nFeatures de missing crítico NÃO encontradas: {len(features_nao_existentes)}")
+        logger.debug("")
+        logger.debug(f"Features de missing crítico NÃO encontradas: {len(features_nao_existentes)}")
         for feature in features_nao_existentes:
-            print(f"  ✗ {feature}")
+            logger.debug(f"  ✗ {feature}")
 
-    print("VERSÃO 1: MENOR MISSING RATE (pós 2025-03-01)")
-    print(f"Registros: {len(df_pos_cutoff):,}")
-    print(f"Features críticas MANTIDAS (período com menor missing)")
+    logger.debug("")
+    logger.debug("VERSÃO 1: MENOR MISSING RATE (pós 2025-03-01)")
+    logger.debug(f"Registros: {len(df_pos_cutoff):,}")
+    logger.debug(f"Features críticas MANTIDAS (período com menor missing)")
 
     # Análise de missing rate
     missing_stats = {}
@@ -86,29 +91,34 @@ def criar_dataset_pos_cutoff(df_medium_producao: pd.DataFrame) -> pd.DataFrame:
     # Ordenar por taxa de missing
     missing_sorted = sorted(missing_stats.items(), key=lambda x: x[1]['missing_rate'])
 
-    print(f"\nTaxa de missing por coluna (ordenado):")
-    print(f"{'COLUNA':<45} {'VÁLIDOS':<8} {'MISSING':<8} {'% MISS':<7}")
-    print("-" * 70)
+    # DEBUG: Tabela completa de missing rate por coluna
+    logger.debug("")
+    logger.debug("Taxa de missing por coluna (ordenado):")
+    logger.debug(f"{'COLUNA':<45} {'VÁLIDOS':<8} {'MISSING':<8} {'% MISS':<7}")
+    logger.debug("-" * 70)
 
     for col, stats in missing_sorted:
-        print(f"{col[:42]:<45} {stats['valid_count']:<8,} {stats['missing_count']:<8,} {stats['missing_rate']:<7.1f}%")
+        logger.debug(f"{col[:42]:<45} {stats['valid_count']:<8,} {stats['missing_count']:<8,} {stats['missing_rate']:<7.1f}%")
 
     # Missing rate médio
     avg_missing = sum(stats['missing_rate'] for stats in missing_stats.values()) / len(missing_stats) if missing_stats else 0
 
-    print(f"\nResumo do dataset pós-cutoff:")
-    print(f"  Registros: {len(df_pos_cutoff):,}")
-    print(f"  Colunas: {len(df_pos_cutoff.columns)}")
-    print(f"  Missing rate médio: {avg_missing:.1f}%")
+    # NORMAL: Resumo final apenas
+    logger.info("")
+    logger.info("Resumo do dataset pós-cutoff:")
+    logger.info(f"  Registros: {len(df_pos_cutoff):,}")
+    logger.info(f"  Colunas: {len(df_pos_cutoff.columns)}")
+    logger.info(f"  Missing rate médio: {avg_missing:.1f}%")
 
-    # Análise específica das features críticas
+    # DEBUG: Análise específica das features críticas
     features_criticas_presentes = [f for f in features_existentes if f in df_pos_cutoff.columns]
     if features_criticas_presentes:
-        print(f"\nAnálise das features críticas:")
+        logger.debug("")
+        logger.debug("Análise das features críticas:")
         for feature in features_criticas_presentes:
             missing_count = df_pos_cutoff[feature].isnull().sum()
             missing_rate = (missing_count / len(df_pos_cutoff)) * 100
-            print(f"  {feature}: {missing_rate:.1f}% missing")
+            logger.debug(f"  {feature}: {missing_rate:.1f}% missing")
 
     return df_pos_cutoff
 
@@ -120,10 +130,12 @@ def disponibilizar_dataset(df_pos_cutoff: pd.DataFrame):
     Args:
         df_pos_cutoff: DataFrame pós-cutoff
     """
-    print("DISPONIBILIZAÇÃO DO DATASET")
+    # DEBUG: Disponibilização é detalhe técnico
+    logger.debug("")
+    logger.debug("DISPONIBILIZAÇÃO DO DATASET")
 
-    print(f"Dataset disponível em: pesquisa_v1_menor_missing")
-    print(f"  Período: 2025-02-11 em diante")
-    print(f"  Todas as features mantidas")
-    print(f"  Registros: {len(df_pos_cutoff):,}")
-    print(f"  Colunas: {len(df_pos_cutoff.columns)}")
+    logger.debug(f"Dataset disponível em: pesquisa_v1_menor_missing")
+    logger.debug(f"  Período: 2025-02-11 em diante")
+    logger.debug(f"  Todas as features mantidas")
+    logger.debug(f"  Registros: {len(df_pos_cutoff):,}")
+    logger.debug(f"  Colunas: {len(df_pos_cutoff.columns)}")
