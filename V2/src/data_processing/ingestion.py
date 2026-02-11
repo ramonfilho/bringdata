@@ -53,7 +53,8 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
     if not filepaths:
         raise ValueError("Lista de arquivos não pode estar vazia")
 
-    logger.info(f"📂 Lendo {len(filepaths)} arquivo(s) Excel...")
+    # DEBUG: Mensagem de progresso
+    logger.debug(f"📂 Lendo {len(filepaths)} arquivo(s) Excel...")
 
     all_data = {}
 
@@ -138,7 +139,8 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
             logger.error(f"    ❌ Erro ao ler {filename}: {e}")
             raise
 
-    logger.info(f"✅ Total de arquivos lidos: {len(all_data)}")
+    # DEBUG: Total já mostrado no train_pipeline.py
+    logger.debug(f"✅ Total de arquivos lidos: {len(all_data)}")
 
     return all_data
 
@@ -472,17 +474,18 @@ def read_all_training_sources(
         ... )
     """
     # 1. LER ARQUIVOS LOCAIS (comportamento padrão)
-    logger.info("📦 INGESTÃO DE DADOS DE TREINO")
+    logger.debug("📦 INGESTÃO DE DADOS DE TREINO")
 
     local_data = read_excel_files(filepaths)
 
     # 2. SE RETREINO, BUSCAR DADOS DA API
     if not include_api_data:
-        logger.info("✅ Usando apenas arquivos locais")
         return local_data
 
-    logger.info("\n🌐 BUSCANDO DADOS ADICIONAIS (API/Sheets)")
-    logger.info("-" * 60)
+    # DEBUG: Buscando dados adicionais
+    logger.debug("")
+    logger.debug("🌐 BUSCANDO DADOS ADICIONAIS (API/Sheets)")
+    logger.debug("-" * 60)
 
     if not api_start_date or not api_end_date:
         logger.warning("⚠️  Datas da API não fornecidas, pulando ingestão API")
