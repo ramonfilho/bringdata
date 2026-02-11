@@ -27,18 +27,20 @@ def extrair_publico_medium(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     df = df_pesquisa.copy()
 
     if 'Medium' not in df.columns:
-        print("Coluna 'Medium' não encontrada")
+        logger.info("Coluna 'Medium' não encontrada")
         return df
 
-    print(f"Dataset inicial: {len(df)} registros")
-    print(f"Medium - valores únicos antes: {df['Medium'].nunique()}")
+    # NORMAL: Resumo inicial
+    logger.info(f"Dataset inicial: {len(df)} registros")
+    logger.info(f"Medium - valores únicos antes: {df['Medium'].nunique()}")
 
-    # Mostrar alguns exemplos antes
-    print(f"\nExemplos antes da extração:")
+    # DEBUG: Exemplos detalhados antes da extração
+    logger.debug("")
+    logger.debug("Exemplos antes da extração:")
     exemplos_antes = df['Medium'].value_counts().head(10)
     for valor, count in exemplos_antes.items():
         if pd.notna(valor):
-            print(f"  {str(valor)[:70]:<72} ({count:,})")
+            logger.debug(f"  {str(valor)[:70]:<72} ({count:,})")
 
     # Função para extrair público (parte antes do |)
     def extrair_publico(medium_value):
@@ -71,21 +73,25 @@ def extrair_publico_medium(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         return publico
 
     # Aplicar extração
-    print(f"\nExtraindo públicos...")
+    logger.debug("")
+    logger.debug("Extraindo públicos...")
     df['Medium'] = df['Medium'].apply(extrair_publico)
 
-    print(f"Medium - valores únicos após extração: {df['Medium'].nunique()}")
+    # NORMAL: Valores únicos após extração
+    logger.info(f"Medium - valores únicos após extração: {df['Medium'].nunique()}")
 
-    # Mostrar distribuição após extração inicial
-    print(f"\nDistribuição após extração inicial (top 15):")
+    # DEBUG: Distribuição detalhada após extração inicial
+    logger.debug("")
+    logger.debug("Distribuição após extração inicial (top 15):")
     medium_apos_extracao = df['Medium'].value_counts(dropna=False)
     for i, (valor, count) in enumerate(medium_apos_extracao.head(15).items(), 1):
         pct = count / len(df) * 100
         valor_str = str(valor) if pd.notna(valor) else 'nan'
-        print(f"{i:2d}. {valor_str[:60]:<62} {count:>6,} ({pct:>5.1f}%)")
+        logger.debug(f"{i:2d}. {valor_str[:60]:<62} {count:>6,} ({pct:>5.1f}%)")
 
     # Identificar e unificar duplicatas
-    print(f"\nIdentificando públicos similares para unificação...")
+    logger.debug("")
+    logger.debug("Identificando públicos similares para unificação...")
 
     valores_medium = df['Medium'].dropna().unique()
     grupos_similares = {}
@@ -134,21 +140,23 @@ def extrair_publico_medium(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
     # Aplicar unificações
     if grupos_similares:
-        print(f"\nGrupos similares encontrados para unificação:")
+        logger.debug("")
+        logger.debug("Grupos similares encontrados para unificação:")
         for representante, grupo in grupos_similares.items():
             if len(grupo) > 1:
                 count_total = sum((df['Medium'] == v).sum() for v in grupo)
-                print(f"\nUnificando em: '{representante}' ({count_total:,} registros)")
+                logger.debug(f"\nUnificando em: '{representante}' ({count_total:,} registros)")
                 for valor in grupo:
                     if valor != representante:
                         count_individual = (df['Medium'] == valor).sum()
-                        print(f"  '{valor}' ({count_individual:,})")
+                        logger.debug(f"  '{valor}' ({count_individual:,})")
                         df.loc[df['Medium'] == valor, 'Medium'] = representante
     else:
-        print("Nenhum grupo similar detectado automaticamente")
+        logger.debug("Nenhum grupo similar detectado automaticamente")
 
     # Unificações manuais específicas baseadas nos dados mostrados
-    print(f"\nAplicando unificações manuais específicas...")
+    logger.debug("")
+    logger.debug("Aplicando unificações manuais específicas...")
 
     unificacoes_manuais = {
         # Case sensitivity
@@ -164,10 +172,12 @@ def extrair_publico_medium(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         if original in df['Medium'].values:
             count = (df['Medium'] == original).sum()
             df.loc[df['Medium'] == original, 'Medium'] = unificado
-            print(f"  '{original}' → '{unificado}' ({count:,} registros)")
+            logger.debug(f"  '{original}' → '{unificado}' ({count:,} registros)")
 
-    print(f"\nResultado final:")
-    print(f"Medium - valores únicos após unificação: {df['Medium'].nunique()}")
+    # NORMAL: Resultado final
+    logger.info("")
+    logger.info("Resultado final:")
+    logger.info(f"Medium - valores únicos após unificação: {df['Medium'].nunique()}")
 
 
     return df
@@ -180,10 +190,12 @@ def relatorio_final_medium(df: pd.DataFrame):
     Args:
         df: DataFrame com Medium unificado
     """
-    print(f"RELATÓRIO FINAL - MEDIUM (PÚBLICOS)")
+    # DEBUG: Relatório detalhado completo
+    logger.debug("")
+    logger.debug("RELATÓRIO FINAL - MEDIUM (PÚBLICOS)")
 
     if 'Medium' not in df.columns:
-        print("Coluna Medium não encontrada")
+        logger.debug("Coluna Medium não encontrada")
         return
 
     total_registros = len(df)
@@ -191,15 +203,16 @@ def relatorio_final_medium(df: pd.DataFrame):
     medium_nulos = df['Medium'].isna().sum()
     valores_unicos = df['Medium'].nunique()
 
-    print(f"Total de registros: {total_registros:,}")
-    print(f"Medium válidos: {medium_validos:,} ({medium_validos/total_registros*100:.1f}%)")
-    print(f"Medium nulos: {medium_nulos:,} ({medium_nulos/total_registros*100:.1f}%)")
-    print(f"Públicos únicos: {valores_unicos}")
+    logger.debug(f"Total de registros: {total_registros:,}")
+    logger.debug(f"Medium válidos: {medium_validos:,} ({medium_validos/total_registros*100:.1f}%)")
+    logger.debug(f"Medium nulos: {medium_nulos:,} ({medium_nulos/total_registros*100:.1f}%)")
+    logger.debug(f"Públicos únicos: {valores_unicos}")
 
-    print(f"\nDistribuição final dos públicos (top 20):")
-    print("-" * 80)
-    print(f"{'#':<3} {'PÚBLICO':<55} {'COUNT':<8} {'%':<6}")
-    print("-" * 80)
+    logger.debug("")
+    logger.debug("Distribuição final dos públicos (top 20):")
+    logger.debug("-" * 80)
+    logger.debug(f"{'#':<3} {'PÚBLICO':<55} {'COUNT':<8} {'%':<6}")
+    logger.debug("-" * 80)
 
     medium_final = df['Medium'].value_counts(dropna=False)
 
@@ -213,10 +226,10 @@ def relatorio_final_medium(df: pd.DataFrame):
         else:
             valor_display = valor_str
 
-        print(f"{i:<3} {valor_display:<55} {count:<8,} {pct:<6.1f}%")
+        logger.debug(f"{i:<3} {valor_display:<55} {count:<8,} {pct:<6.1f}%")
 
     if len(medium_final) > 20:
-        print(f"... e mais {len(medium_final) - 20} públicos")
+        logger.debug(f"... e mais {len(medium_final) - 20} públicos")
 
 
 def exportar_categorias_medium(df: pd.DataFrame, arquivo_csv: str = 'categorias_medium_publicos.csv'):
@@ -227,7 +240,9 @@ def exportar_categorias_medium(df: pd.DataFrame, arquivo_csv: str = 'categorias_
         df: DataFrame com Medium unificado
         arquivo_csv: Nome do arquivo CSV de saída
     """
-    print(f"EXPORTAÇÃO DAS CATEGORIAS MEDIUM")
+    # DEBUG: Exportação é detalhe técnico
+    logger.debug("")
+    logger.debug("EXPORTAÇÃO DAS CATEGORIAS MEDIUM")
 
     # Criar DataFrame com todas as categorias e suas estatísticas
     medium_stats = df['Medium'].value_counts(dropna=False)
@@ -252,24 +267,25 @@ def exportar_categorias_medium(df: pd.DataFrame, arquivo_csv: str = 'categorias_
         # Exportar para CSV
         df_categorias.to_csv(arquivo_csv, index=False, encoding='utf-8')
 
-        print(f"Arquivo exportado com sucesso:")
-        print(f"  Nome: {arquivo_csv}")
-        print(f"  Total de categorias: {len(df_categorias)}")
-        print(f"  Colunas: rank, categoria_medium, quantidade, percentual")
+        logger.debug("Arquivo exportado com sucesso:")
+        logger.debug(f"  Nome: {arquivo_csv}")
+        logger.debug(f"  Total de categorias: {len(df_categorias)}")
+        logger.debug(f"  Colunas: rank, categoria_medium, quantidade, percentual")
 
         # Mostrar prévia do arquivo
-        print(f"\nPrévia do arquivo CSV (primeiras 10 linhas):")
-        print("-" * 70)
-        print(f"{'RANK':<5} {'CATEGORIA':<35} {'QTD':<8} {'%':<6}")
-        print("-" * 70)
+        logger.debug("")
+        logger.debug("Prévia do arquivo CSV (primeiras 10 linhas):")
+        logger.debug("-" * 70)
+        logger.debug(f"{'RANK':<5} {'CATEGORIA':<35} {'QTD':<8} {'%':<6}")
+        logger.debug("-" * 70)
 
         for _, row in df_categorias.head(10).iterrows():
             categoria_display = row['categoria_medium'][:32] + '...' if len(str(row['categoria_medium'])) > 32 else row['categoria_medium']
-            print(f"{row['rank']:<5} {categoria_display:<35} {row['quantidade']:<8} {row['percentual']:<6}%")
+            logger.debug(f"{row['rank']:<5} {categoria_display:<35} {row['quantidade']:<8} {row['percentual']:<6}%")
 
         if len(df_categorias) > 10:
-            print(f"... e mais {len(df_categorias) - 10} categorias no arquivo")
+            logger.debug(f"... e mais {len(df_categorias) - 10} categorias no arquivo")
 
     except Exception as e:
-        print(f"Erro ao exportar arquivo CSV: {e}")
-        print("Verifique permissões de escrita no diretório atual")
+        logger.debug(f"Erro ao exportar arquivo CSV: {e}")
+        logger.debug("Verifique permissões de escrita no diretório atual")
