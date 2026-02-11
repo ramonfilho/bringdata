@@ -373,8 +373,17 @@ class MetaReportsLoader:
             df['_account_name'] = df['account_id'].apply(
                 lambda x: account_name_map.get(str(x).replace('act_', ''), 'Unknown')
             )
+            # IMPORTANTE: Manter coluna account_id (necessária para costs_hierarchy)
+            # Já está presente, apenas garantir que está no formato correto (com act_ prefix)
+            df['account_id'] = df['account_id'].apply(
+                lambda x: x if str(x).startswith('act_') else f"act_{x}" if pd.notna(x) else ''
+            )
         else:
             df['_account_name'] = 'Unknown'
+            # Se não tem account_id, tentar mapear de _account_name para account_id
+            df['account_id'] = df.get('_account_name', pd.Series([''] * len(df))).apply(
+                self._map_account_name_to_id
+            )
 
         # IMPORTANTE: Adicionar total_spend para matched pairs (mesmo comportamento que arquivos locais)
         if 'spend' in df.columns:
@@ -421,6 +430,9 @@ class MetaReportsLoader:
                 # Normalizar nomes de colunas
                 df = self._normalize_column_names(df, report_type)
 
+                # Adicionar account_id baseado no _account_name
+                df['account_id'] = df['_account_name'].apply(self._map_account_name_to_id)
+
                 all_dfs.append(df)
 
                 logger.info(f"      ✅ {file_path.name}: {len(df)} linhas")
@@ -457,6 +469,24 @@ class MetaReportsLoader:
             account_part = account_part.split('-Anúncios-')[0]
             return account_part.replace('-', ' ')
         return 'Unknown'
+
+    def _map_account_name_to_id(self, account_name: str) -> str:
+        """
+        Mapeia nome da conta para account_id.
+
+        Args:
+            account_name: Nome da conta (ex: "Rodolfo Mori")
+
+        Returns:
+            Account ID (ex: "act_188005769808959")
+        """
+        # Mapeamento hardcoded de nomes conhecidos
+        # FIXME: Idealmente isso deveria vir de configuração ou ser extraído dinamicamente da API
+        mapping = {
+            'Rodolfo Mori': 'act_188005769808959',
+            'Gestor de IA': 'act_786790755803474',
+        }
+        return mapping.get(account_name, '')
 
     def _normalize_column_names(self, df: pd.DataFrame, report_type: str) -> pd.DataFrame:
         """
@@ -755,6 +785,9 @@ class MetaReportsLoader:
                 # Normalizar nomes de colunas usando o mesmo processo
                 df_edge = self._normalize_column_names(df_edge, report_type)
 
+                # Adicionar account_id baseado no _account_name
+                df_edge['account_id'] = df_edge['_account_name'].apply(self._map_account_name_to_id)
+
                 edge_case_dfs.append(df_edge)
 
                 logger.info(f"      ✅ Edge case: {file_path.name} ({len(df_edge)} {report_type}(s))")
@@ -914,7 +947,8 @@ class MetaReportsLoader:
             # Número de criativos (ads únicos)
             num_creatives = len(campaign_ads) if not campaign_ads.empty else 0
 
-            # Account name do primeiro adset
+            # Account ID e name do primeiro adset
+            account_id_from_adset = campaign_adsets.iloc[0].get('account_id', '')
             account_name = campaign_adsets.iloc[0].get('_account_name', 'Unknown')
 
             # NOVO: Extrair eventos diretamente das colunas dos adsets
@@ -977,7 +1011,7 @@ class MetaReportsLoader:
             # Construir entrada
             costs_hierarchy['campaigns'][campaign_id] = {
                 'name': campaign_name,
-                'account_id': account_name,
+                'account_id': account_id_from_adset,  # CORREÇÃO: usar account_id real, não account_name
                 'spend': float(total_spend) if not pd.isna(total_spend) else 0.0,
                 'daily_budget': float(budget) if not pd.isna(budget) else 0.0,
                 'num_creatives': num_creatives,

@@ -151,7 +151,18 @@ class MetaAPIClient:
 
                 results = []
                 for insight in insights:
-                    results.append(insight.export_all_data())
+                    data = insight.export_all_data()
+                    # CORREÇÃO: Forçar account_id se não retornado pela API
+                    # A Meta API nem sempre inclui account_id nos insights, mesmo solicitado
+                    if 'account_id' not in data or not data.get('account_id'):
+                        # Garantir que tem prefixo act_
+                        account_id = self.account_id if self.account_id.startswith('act_') else f"act_{self.account_id}"
+                        data['account_id'] = account_id
+                    else:
+                        # Se veio da API, garantir formato consistente (com prefixo)
+                        if not str(data['account_id']).startswith('act_'):
+                            data['account_id'] = f"act_{data['account_id']}"
+                    results.append(data)
 
                 return results
 
