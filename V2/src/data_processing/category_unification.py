@@ -80,10 +80,12 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     """
     df = df_pesquisa.copy()
 
-    print("Aplicando limpeza e unificação completa...")
+    # NORMAL: Apenas cabeçalho
+    logger.info("Aplicando limpeza e unificação completa...")
 
     # 1. INTERESSE PROGRAMAÇÃO
-    print("\n1. Unificando interesse_programacao...")
+    logger.info("")
+    logger.info("1. Unificando interesse_programacao...")
     if 'interesse_programacao' in df.columns:
         # Limpar textos primeiro
         df['interesse_programacao'] = df['interesse_programacao'].apply(limpar_texto)
@@ -96,22 +98,23 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['interesse_programacao'] == 'A ideia de nunca faltar emprego na área.', 'interesse_programacao'] = 'A ideia de nunca faltar emprego na área'
 
         valores_unicos = df['interesse_programacao'].nunique()
-        print(f"   Resultado: {valores_unicos} valores únicos")
+        logger.info(f"   Resultado: {valores_unicos} valores únicos")
 
-        # Mostrar distribuição final
+        # DEBUG: Mostrar distribuição final
         total = len(df)
         counts = df['interesse_programacao'].value_counts(dropna=False)
-        print(f"   📊 Distribuição final:")
+        logger.debug(f"   📊 Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
             # Truncar valores longos
             if len(valor_str) > 60:
                 valor_str = valor_str[:57] + '...'
-            print(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
+            logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 2. TEM COMPUTADOR/NOTEBOOK
-    print("\n2. Unificando Tem computador/notebook?...")
+    logger.info("")
+    logger.info("2. Unificando Tem computador/notebook?...")
     if 'Tem computador/notebook?' in df.columns:
         df['Tem computador/notebook?'] = df['Tem computador/notebook?'].apply(limpar_texto)
 
@@ -120,19 +123,20 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['Tem computador/notebook?'] == 'NÃO', 'Tem computador/notebook?'] = 'Não'
 
         valores_unicos = df['Tem computador/notebook?'].nunique()
-        print(f"   Resultado: {valores_unicos} valores únicos")
+        logger.info(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
         counts = df['Tem computador/notebook?'].value_counts(dropna=False)
-        print(f"   📊 Distribuição final:")
+        logger.debug(f"   📊 Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
-            print(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
+            logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 3. O QUE MAIS VOCÊ QUER VER NO EVENTO
-    print("\n3. Unificando O que mais você quer ver no evento?...")
+    logger.info("")
+    logger.info("3. Unificando O que mais você quer ver no evento?...")
     if 'O que mais você quer ver no evento?' in df.columns:
         df['O que mais você quer ver no evento?'] = df['O que mais você quer ver no evento?'].apply(limpar_texto)
 
@@ -146,21 +150,22 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['O que mais você quer ver no evento?'] == 'A aula com a recrutadora;', 'O que mais você quer ver no evento?'] = 'A aula com a recrutadora'
 
         valores_unicos = df['O que mais você quer ver no evento?'].nunique()
-        print(f"   Resultado: {valores_unicos} valores únicos")
+        logger.info(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
         counts = df['O que mais você quer ver no evento?'].value_counts(dropna=False)
-        print(f"   📊 Distribuição final:")
+        logger.debug(f"   📊 Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
             if len(valor_str) > 60:
                 valor_str = valor_str[:57] + '...'
-            print(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
+            logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 4. VOCÊ POSSUI CARTÃO DE CRÉDITO
-    print("\n4. Unificando Você possui cartão de crédito?...")
+    logger.info("")
+    logger.info("4. Unificando Você possui cartão de crédito?...")
     if 'Você possui cartão de crédito?' in df.columns:
         df['Você possui cartão de crédito?'] = df['Você possui cartão de crédito?'].apply(limpar_texto)
 
@@ -168,19 +173,20 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['Você possui cartão de crédito?'].str.contains('Sim', na=False), 'Você possui cartão de crédito?'] = 'Sim'
 
         valores_unicos = df['Você possui cartão de crédito?'].nunique()
-        print(f"   Resultado: {valores_unicos} valores únicos")
+        logger.info(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
         counts = df['Você possui cartão de crédito?'].value_counts(dropna=False)
-        print(f"   📊 Distribuição final:")
+        logger.debug(f"   📊 Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
-            print(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
+            logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 5. ATUALMENTE, QUAL A SUA FAIXA SALARIAL
-    print("\n5. Unificando Atualmente, qual a sua faixa salarial?...")
+    logger.info("")
+    logger.info("5. Unificando Atualmente, qual a sua faixa salarial?...")
     if 'Atualmente, qual a sua faixa salarial?' in df.columns:
         df['Atualmente, qual a sua faixa salarial?'] = df['Atualmente, qual a sua faixa salarial?'].apply(limpar_texto)
 
@@ -192,19 +198,20 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['Atualmente, qual a sua faixa salarial?'] == 'Mais de R$5.001 reais ao mês.', 'Atualmente, qual a sua faixa salarial?'] = 'Mais de R$5.001 reais ao mês'
 
         valores_unicos = df['Atualmente, qual a sua faixa salarial?'].nunique()
-        print(f"   Resultado: {valores_unicos} valores únicos")
+        logger.info(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
         counts = df['Atualmente, qual a sua faixa salarial?'].value_counts(dropna=False)
-        print(f"   📊 Distribuição final:")
+        logger.debug(f"   📊 Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
-            print(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
+            logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 6. O QUE VOCÊ FAZ ATUALMENTE
-    print("\n6. Unificando O que você faz atualmente?...")
+    logger.info("")
+    logger.info("6. Unificando O que você faz atualmente?...")
     if 'O que você faz atualmente?' in df.columns:
         df['O que você faz atualmente?'] = df['O que você faz atualmente?'].apply(limpar_texto)
 
@@ -242,26 +249,27 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['O que você faz atualmente?'] == 'Faço outro curso na faculdade e quero mudar para T.I.', 'O que você faz atualmente?'] = 'Faço outro curso na faculdade e quero mudar para T.I'
 
         valores_unicos = df['O que você faz atualmente?'].nunique()
-        print(f"   Resultado: {valores_unicos} valores únicos")
+        logger.info(f"   Resultado: {valores_unicos} valores únicos")
 
         if normalizacoes_faz:
-            print(f"   📌 Normalizações aplicadas:")
+            logger.debug(f"   📌 Normalizações aplicadas:")
             for norm in normalizacoes_faz:
-                print(f"      - {norm}")
+                logger.debug(f"      - {norm}")
 
         # Mostrar distribuição final
         total = len(df)
         counts = df['O que você faz atualmente?'].value_counts(dropna=False)
-        print(f"   📊 Distribuição final:")
+        logger.debug(f"   📊 Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
             if len(valor_str) > 60:
                 valor_str = valor_str[:57] + '...'
-            print(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
+            logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 7. QUAL A SUA IDADE
-    print("\n7. Unificando Qual a sua idade?...")
+    logger.info("")
+    logger.info("7. Unificando Qual a sua idade?...")
     if 'Qual a sua idade?' in df.columns:
         df['Qual a sua idade?'] = df['Qual a sua idade?'].apply(limpar_texto)
 
@@ -270,19 +278,20 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['Qual a sua idade?'] == 'Mais de 55 anos.', 'Qual a sua idade?'] = 'Mais de 55 anos'
 
         valores_unicos = df['Qual a sua idade?'].nunique()
-        print(f"   Resultado: {valores_unicos} valores únicos")
+        logger.info(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
         counts = df['Qual a sua idade?'].value_counts(dropna=False)
-        print(f"   📊 Distribuição final:")
+        logger.debug(f"   📊 Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
-            print(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
+            logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 8. OUTRAS COLUNAS CATEGÓRICAS (não processadas acima)
-    print("\n8. Outras colunas categóricas:")
+    logger.info("")
+    logger.info("8. Outras colunas categóricas:")
 
     outras_colunas = [
         'O seu gênero:',
@@ -294,19 +303,22 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     total = len(df)
     for coluna in outras_colunas:
         if coluna in df.columns:
-            print(f"\n   {coluna}")
+            logger.debug(f"")
+
+            logger.debug(f"   {coluna}")
             valores_unicos = df[coluna].nunique()
-            print(f"   Valores únicos: {valores_unicos}")
+            logger.debug(f"   Valores únicos: {valores_unicos}")
 
             counts = df[coluna].value_counts(dropna=False)
-            print(f"   📊 Distribuição:")
+            logger.debug(f"   📊 Distribuição:")
             for valor, count in counts.items():
                 pct = (count / total) * 100
                 valor_str = str(valor) if pd.notna(valor) else 'NaN'
-                print(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
+                logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
-    print(f"\nRESULTADO FINAL:")
-    print(f"Dataset unificado: {len(df)} registros, {len(df.columns)} colunas")
+    logger.info("")
+    logger.info(f"RESULTADO FINAL:")
+    logger.info(f"Dataset unificado: {len(df)} registros, {len(df.columns)} colunas")
 
 
     return df
@@ -319,7 +331,7 @@ def gerar_relatorio_final_categorias(df: pd.DataFrame):
     Args:
         df: DataFrame com categorias unificadas
     """
-    print(f"\nRELATÓRIO FINAL - UNIFICAÇÃO COMPLETA")
+    logger.debug(f"\nRELATÓRIO FINAL - UNIFICAÇÃO COMPLETA")
 
     colunas_analisadas = [
         'interesse_programacao',
@@ -333,20 +345,20 @@ def gerar_relatorio_final_categorias(df: pd.DataFrame):
 
     for coluna in colunas_analisadas:
         if coluna in df.columns:
-            print(f"\nCOLUNA: {coluna}")
-            print("-" * 50)
+            logger.debug(f"\nCOLUNA: {coluna}")
+            logger.debug("-" * 50)
 
             valores_unicos = df[coluna].nunique()
             nulos = df[coluna].isnull().sum()
             pct_nulos = (nulos / len(df)) * 100
 
-            print(f"Valores únicos: {valores_unicos}")
-            print(f"Valores nulos: {nulos:,} ({pct_nulos:.1f}%)")
+            logger.debug(f"Valores únicos: {valores_unicos}")
+            logger.debug(f"Valores nulos: {nulos:,} ({pct_nulos:.1f}%)")
 
             distribuicao = df[coluna].value_counts(dropna=False)
-            print(f"Distribuição (Todas as categorias):")
+            logger.debug(f"Distribuição (Todas as categorias):")
 
             for valor, count in distribuicao.items():
                 pct = (count / len(df)) * 100
                 valor_str = str(valor) if valor is not None else 'nan'
-                print(f"  {valor_str:<40} {count:>6,} ({pct:>5.1f}%)")
+                logger.debug(f"  {valor_str:<40} {count:>6,} ({pct:>5.1f}%)")
