@@ -404,7 +404,8 @@ def consolidate_datasets(
         ...     vendas_keywords=["vendas", "sheet1"]
         ... )
     """
-    logger.info("🔗 Consolidando datasets (Pesquisa e Vendas)...")
+    # DEBUG: Mensagem de progresso
+    logger.debug("🔗 Consolidando datasets (Pesquisa e Vendas)...")
 
     dados_pesquisa = []
     dados_vendas = []
@@ -426,8 +427,9 @@ def consolidate_datasets(
     df_pesquisa_consolidado = pd.concat(dados_pesquisa, ignore_index=True) if dados_pesquisa else pd.DataFrame()
     df_vendas_consolidado = pd.concat(dados_vendas, ignore_index=True) if dados_vendas else pd.DataFrame()
 
-    logger.info(f"  Dataset Pesquisa: {len(df_pesquisa_consolidado):,} registros, {len(df_pesquisa_consolidado.columns)} colunas")
-    logger.info(f"  Dataset Vendas: {len(df_vendas_consolidado):,} registros, {len(df_vendas_consolidado.columns)} colunas")
+    # DEBUG: Informações parciais (serão mostradas no resumo final)
+    logger.debug(f"  Dataset Pesquisa: {len(df_pesquisa_consolidado):,} registros, {len(df_pesquisa_consolidado.columns)} colunas")
+    logger.debug(f"  Dataset Vendas: {len(df_vendas_consolidado):,} registros, {len(df_vendas_consolidado.columns)} colunas")
 
     return df_pesquisa_consolidado, df_vendas_consolidado
 
