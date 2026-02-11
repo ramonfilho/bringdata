@@ -316,7 +316,8 @@ def remove_unnecessary_columns(
         ...     colunas_remover=["CEP", "Bairro", "Status"]
         ... )
     """
-    logger.info("🧹 Removendo colunas desnecessárias...")
+    # DEBUG: Mensagem de progresso
+    logger.debug("🧹 Removendo colunas desnecessárias...")
 
     colunas_remover_lower = [col.lower() for col in colunas_remover]
 
@@ -368,7 +369,8 @@ def remove_unnecessary_columns(
         arquivos_limpos[arquivo] = abas_limpas
 
     total_removidas = sum(item['removidas'] for item in relatorio)
-    logger.info(f"  Total de colunas removidas: {total_removidas}")
+    # DEBUG: Informação parcial (será mostrada no resumo final)
+    logger.debug(f"  Total de colunas removidas: {total_removidas}")
 
     return arquivos_limpos, relatorio
 
