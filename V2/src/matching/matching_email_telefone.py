@@ -84,12 +84,14 @@ def fazer_matching_email_telefone(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.Da
     Returns:
         DataFrame com target adicionado
     """
-    print("MATCHING: EMAIL (PRIMÁRIO) + TELEFONE (SECUNDÁRIO)")
+    # DEBUG: Título do matching
+    logger.debug("MATCHING: EMAIL (PRIMÁRIO) + TELEFONE (SECUNDÁRIO)")
 
     df_pesquisa = df_pesquisa_v1.copy()
     df_vendas_copy = df_vendas.copy()
 
-    print(f"\nProcessando DATASET V1...")
+    logger.debug("")
+    logger.debug("Processando DATASET V1...")
 
     # 1. NORMALIZAR DADOS
     # Pesquisa
@@ -118,10 +120,11 @@ def fazer_matching_email_telefone(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.Da
         if tel_norm and len(tel_norm) >= 10:  # Só telefones com 10+ dígitos
             telefones_vendas.add(tel_norm)
 
-    print(f"  Emails únicos na pesquisa: {len(emails_pesquisa):,}")
-    print(f"  Emails únicos nas vendas: {len(emails_vendas):,}")
-    print(f"  Telefones únicos na pesquisa (≥10 dígitos): {len(telefones_pesquisa):,}")
-    print(f"  Telefones únicos nas vendas (≥10 dígitos): {len(telefones_vendas):,}")
+    # DEBUG: Estatísticas de normalização
+    logger.debug(f"  Emails únicos na pesquisa: {len(emails_pesquisa):,}")
+    logger.debug(f"  Emails únicos nas vendas: {len(emails_vendas):,}")
+    logger.debug(f"  Telefones únicos na pesquisa (≥10 dígitos): {len(telefones_pesquisa):,}")
+    logger.debug(f"  Telefones únicos nas vendas (≥10 dígitos): {len(telefones_vendas):,}")
 
     # 2. MATCHING PRIMÁRIO POR EMAIL
     matches_email = set()
@@ -130,7 +133,8 @@ def fazer_matching_email_telefone(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.Da
         if email in emails_vendas:
             matches_email.add(idx)
 
-    print(f"\n📧 MATCHES POR EMAIL: {len(matches_email):,}")
+    logger.debug("")
+    logger.debug(f"📧 MATCHES POR EMAIL: {len(matches_email):,}")
 
     # 3. MATCHING SECUNDÁRIO POR TELEFONE (APENAS NÃO MATCHEADOS)
     matches_telefone = set()
@@ -142,14 +146,15 @@ def fazer_matching_email_telefone(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.Da
             if tel in telefones_vendas:
                 matches_telefone.add(idx)
 
-    print(f"📞 MATCHES POR TELEFONE (novos): {len(matches_telefone):,}")
+    logger.debug(f"📞 MATCHES POR TELEFONE (novos): {len(matches_telefone):,}")
 
     # 4. CONSOLIDAR MATCHES
     matches_total = matches_email | matches_telefone
 
-    print(f"\n✅ TOTAL DE MATCHES: {len(matches_total):,}")
-    print(f"   Email: {len(matches_email):,} ({len(matches_email)/len(matches_total)*100:.1f}%)")
-    print(f"   Telefone: {len(matches_telefone):,} ({len(matches_telefone)/len(matches_total)*100:.1f}%)")
+    logger.debug("")
+    logger.debug(f"✅ TOTAL DE MATCHES: {len(matches_total):,}")
+    logger.debug(f"   Email: {len(matches_email):,} ({len(matches_email)/len(matches_total)*100:.1f}%)")
+    logger.debug(f"   Telefone: {len(matches_telefone):,} ({len(matches_telefone)/len(matches_total)*100:.1f}%)")
 
     # 5. CRIAR TARGET
     df_resultado = df_pesquisa.copy()
@@ -163,10 +168,14 @@ def fazer_matching_email_telefone(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.Da
     total_matches = df_resultado['target'].sum()
     taxa_conversao = (total_matches / total_registros) * 100
 
-    print(f"DATASET FINAL:")
-    print(f"  Total de registros: {total_registros:,}")
-    print(f"  Total de matches: {total_matches:,}")
-    print(f"  Taxa de conversão: {taxa_conversao:.2f}%")
-    print(f"  Ganho vs email_only: +{len(matches_telefone):,} matches")
+    # NORMAL: Resumo final
+    logger.info("")
+    logger.info("DATASET FINAL:")
+    logger.info(f"  Total de registros: {total_registros:,}")
+    logger.info(f"  Total de matches: {total_matches:,}")
+    logger.info(f"  Taxa de conversão: {taxa_conversao:.2f}%")
+
+    # DEBUG: Ganho vs email_only
+    logger.debug(f"  Ganho vs email_only: +{len(matches_telefone):,} matches")
 
     return df_resultado
