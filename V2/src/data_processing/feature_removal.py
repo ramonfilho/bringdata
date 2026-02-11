@@ -25,13 +25,15 @@ def remover_features_desnecessarias(df_pesquisa: pd.DataFrame, remover_medium: b
     """
     df = df_pesquisa.copy()
 
-    print(f"Dataset inicial: {len(df)} registros, {len(df.columns)} colunas")
+    # NORMAL: Resumo inicial
+    logger.info(f"Dataset inicial: {len(df)} registros, {len(df.columns)} colunas")
     if remover_medium:
-        print(f"⚠️  Modo: Remover Medium (junto com Campaign e Content)")
+        logger.info(f"⚠️  Modo: Remover Medium (junto com Campaign e Content)")
 
     # DEBUG: Identificar colunas vazias ou com nomes problemáticos
-    print(f"\nDEBUG - Análise de nomes de colunas:")
-    print("-" * 50)
+    logger.debug(f"")
+    logger.debug(f"DEBUG - Análise de nomes de colunas:")
+    logger.debug("-" * 50)
 
     colunas_problematicas = []
     for i, coluna in enumerate(df.columns):
@@ -52,19 +54,19 @@ def remover_features_desnecessarias(df_pesquisa: pd.DataFrame, remover_medium: b
             problemas.append('COMPRIMENTO_ZERO')
 
         if problemas:
-            print(f"  {i+1:2d}. {coluna_repr:<30} - PROBLEMA: {', '.join(problemas)}")
+            logger.debug(f"  {i+1:2d}. {coluna_repr:<30} - PROBLEMA: {', '.join(problemas)}")
             colunas_problematicas.append(coluna)
         elif comprimento < 3 or not isinstance(coluna, str):
-            print(f"  {i+1:2d}. {coluna_repr:<30} - SUSPEITA (len={comprimento})")
+            logger.debug(f"  {i+1:2d}. {coluna_repr:<30} - SUSPEITA (len={comprimento})")
 
     if not colunas_problematicas:
-        print("  Nenhuma coluna problemática encontrada através de análise automática")
+        logger.debug("  Nenhuma coluna problemática encontrada através de análise automática")
 
         # Verificar manualmente se alguma coluna parece vazia
-        print("\n  Verificando colunas que podem parecer vazias:")
+        logger.debug("\n  Verificando colunas que podem parecer vazias:")
         for i, coluna in enumerate(df.columns):
             if len(str(coluna).strip()) <= 2:  # Muito curta
-                print(f"    {i+1:2d}. '{coluna}' (comprimento: {len(str(coluna))})")
+                logger.debug(f"    {i+1:2d}. '{coluna}' (comprimento: {len(str(coluna))})")
                 colunas_problematicas.append(coluna)
 
     # Features a serem removidas (incluindo as encontradas no debug)
@@ -80,12 +82,12 @@ def remover_features_desnecessarias(df_pesquisa: pd.DataFrame, remover_medium: b
     # Adicionar colunas problemáticas encontradas
     features_remover.extend(colunas_problematicas)
 
-    print(f"\nFeatures marcadas para remoção:")
+    logger.debug(f"\nFeatures marcadas para remoção:")
     for feature in features_remover:
         if feature == '' or pd.isna(feature) or feature is None:
-            print(f"  - Coluna problemática: {repr(feature)}")
+            logger.debug(f"  - Coluna problemática: {repr(feature)}")
         else:
-            print(f"  - {feature}")
+            logger.debug(f"  - {feature}")
 
     # Verificar quais colunas existem no dataset
     colunas_existentes = []
@@ -99,27 +101,26 @@ def remover_features_desnecessarias(df_pesquisa: pd.DataFrame, remover_medium: b
 
     # Remover colunas existentes
     if len(colunas_existentes) > 0:
-        print(f"\nColunas encontradas e removidas:")
+        logger.debug(f"\nColunas encontradas e removidas:")
         for coluna in colunas_existentes:
             if coluna == '' or pd.isna(coluna) or coluna is None:
-                print(f"  ✓ Coluna problemática removida: {repr(coluna)}")
+                logger.debug(f"  ✓ Coluna problemática removida: {repr(coluna)}")
             else:
-                print(f"  ✓ {coluna} removida")
+                logger.debug(f"  ✓ {coluna} removida")
 
         df = df.drop(columns=colunas_existentes)
 
     # Reportar colunas não encontradas
     if len(colunas_nao_encontradas) > 0:
-        print(f"\nColunas não encontradas no dataset:")
+        logger.debug(f"\nColunas não encontradas no dataset:")
         for coluna in colunas_nao_encontradas:
             if coluna == '' or pd.isna(coluna) or coluna is None:
-                print(f"  ! Coluna problemática não encontrada: {repr(coluna)}")
+                logger.debug(f"  ! Coluna problemática não encontrada: {repr(coluna)}")
             else:
-                print(f"  ! {coluna} não encontrada")
+                logger.debug(f"  ! {coluna} não encontrada")
 
-    print(f"\nDataset final: {len(df)} registros, {len(df.columns)} colunas")
-    print(f"Colunas removidas: {len(colunas_existentes)}")
-
+    # NORMAL: Resumo final
+    logger.info(f"Dataset final: {len(df)} registros, {len(df.columns)} colunas")
     logger.info(f"✅ Features desnecessárias removidas: {len(colunas_existentes)}")
 
     return df
@@ -132,10 +133,11 @@ def listar_colunas_restantes(df: pd.DataFrame):
     Args:
         df: DataFrame processado
     """
-    print(f"\nCOLUNAS RESTANTES NO DATASET:")
-    print("-" * 40)
+    # DEBUG: Lista completa de colunas restantes
+    logger.debug(f"\nCOLUNAS RESTANTES NO DATASET:")
+    logger.debug("-" * 40)
 
     for i, coluna in enumerate(df.columns, 1):
-        print(f"{i:2d}. {coluna}")
+        logger.debug(f"{i:2d}. {coluna}")
 
-    print(f"\nTotal de colunas: {len(df.columns)}")
+    logger.debug(f"\nTotal de colunas: {len(df.columns)}")
