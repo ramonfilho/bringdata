@@ -83,18 +83,37 @@ def add_adjusted_metrics_to_campaign_stats(campaign_stats: pd.DataFrame,
     # Ajustar valores no matched_df
     matched_adjusted = adjust_revenue_for_tmb(matched_df, fator=fator)
 
-    # Agrupar por campanha e calcular receita ajustada
-    revenue_by_campaign = matched_adjusted[matched_adjusted['converted'] == True].groupby('campaign').agg({
+    # IMPORTANTE: Extrair campaign_id (15 dígitos) para fazer merge correto
+    # Motivo: Nomes de campanhas podem ter sido atualizados (UTMs → Meta API)
+    import re
+    def extract_campaign_id_15(campaign_name):
+        """Extrai primeiros 15 dígitos do campaign_id do nome"""
+        if pd.isna(campaign_name):
+            return None
+        match = re.search(r'1\d{14,}', str(campaign_name))
+        if match:
+            return match.group(0)[:15]
+        return None
+
+    # Adicionar campaign_id_15 aos dois DataFrames
+    matched_adjusted['campaign_id_15'] = matched_adjusted['campaign'].apply(extract_campaign_id_15)
+    campaign_stats['campaign_id_15'] = campaign_stats['campaign'].apply(extract_campaign_id_15)
+
+    # Agrupar por campaign_id_15 e calcular receita ajustada
+    revenue_by_campaign = matched_adjusted[matched_adjusted['converted'] == True].groupby('campaign_id_15').agg({
         'sale_value': 'sum',  # Nominal
         'sale_value_adjusted': 'sum'  # Ajustada
     }).reset_index()
 
-    # Merge com campaign_stats
+    # Merge com campaign_stats usando campaign_id_15
     campaign_stats = campaign_stats.merge(
-        revenue_by_campaign[['campaign', 'sale_value_adjusted']],
-        on='campaign',
+        revenue_by_campaign[['campaign_id_15', 'sale_value_adjusted']],
+        on='campaign_id_15',
         how='left'
     )
+
+    # Cleanup: remover coluna temporária
+    campaign_stats = campaign_stats.drop(columns=['campaign_id_15'])
 
     # Preencher NaN com 0
     campaign_stats['sale_value_adjusted'] = campaign_stats['sale_value_adjusted'].fillna(0)

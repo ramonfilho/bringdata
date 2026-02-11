@@ -1912,8 +1912,8 @@ class ValidationReportGenerator:
                 parts = campaign_name.split('|')
                 # O ID está na última parte (após o último |)
                 potential_id = parts[-1].strip()
-                # Verificar se é um número de 18 dígitos
-                if potential_id.isdigit() and len(potential_id) == 18:
+                # Verificar se é um número com 15+ dígitos (aceita tanto 15 quanto 18 dígitos)
+                if potential_id.isdigit() and len(potential_id) >= 15:
                     campaign_id = potential_id
             worksheet.write(row, col_idx, campaign_id, formats['text'])
             col_idx += 1

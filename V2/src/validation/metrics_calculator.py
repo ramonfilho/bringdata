@@ -723,6 +723,13 @@ class CampaignMetricsCalculator:
                 lambda camp: self._get_campaign_account_id(camp, costs_hierarchy)
             )
 
+            # ATUALIZAR nomes das campanhas: substituir UTMs desatualizados por nomes atuais da Meta
+            logger.info("   🔄 Atualizando nomes das campanhas (UTMs → Meta API)...")
+            campaign_stats['campaign'] = campaign_stats['campaign'].apply(
+                lambda camp: self._get_campaign_current_name(camp, costs_hierarchy)
+            )
+            logger.info("   ✅ Nomes atualizados com sucesso")
+
             # optimization_goal já é retornado como string por _get_campaign_optimization_goals()
             # Não precisa converter, apenas garantir que "-" vire ""
             campaign_stats['optimization_goal'] = campaign_stats['optimization_goal'].replace('-', '')
@@ -1184,7 +1191,14 @@ class CampaignMetricsCalculator:
 
         if campaign_id and campaign_id in campaigns:
             camp_data = campaigns[campaign_id]
-        else:
+        elif campaign_id:
+            # MÉTODO 1.5: Match pelos primeiros 15 dígitos (costs_hierarchy trunca IDs)
+            # Campaign IDs no campaign_stats têm 18 dígitos, mas costs_hierarchy tem 15
+            campaign_id_short = str(campaign_id)[:15]
+            if campaign_id_short in campaigns:
+                camp_data = campaigns[campaign_id_short]
+
+        if not camp_data:
             # MÉTODO 2: Fallback - match por nome
             campaign_name_clean = campaign_name
             if campaign_id:
@@ -1200,6 +1214,65 @@ class CampaignMetricsCalculator:
             return camp_data.get('account_id', '')
 
         return ""
+
+    def _get_campaign_current_name(self, campaign_name: str, costs_hierarchy: Dict) -> str:
+        """
+        Busca o nome ATUAL de uma campanha na Meta (do costs_hierarchy).
+
+        Isso substitui nomes desatualizados dos UTMs pelos nomes atuais da Meta API.
+
+        Args:
+            campaign_name: Nome da campanha dos UTMs (pode incluir |ID no final)
+            costs_hierarchy: Dicionário retornado por get_costs_hierarchy()
+
+        Returns:
+            Nome atual da campanha na Meta, ou nome original se não encontrar
+        """
+        if not costs_hierarchy:
+            return campaign_name
+
+        campaigns = costs_hierarchy.get('campaigns', {})
+        if not campaigns:
+            return campaign_name
+
+        # MÉTODO 1: Tentar match por Campaign ID (mais preciso)
+        campaign_id = self._extract_campaign_id(campaign_name)
+        camp_data = None
+
+        if campaign_id and campaign_id in campaigns:
+            camp_data = campaigns[campaign_id]
+        elif campaign_id:
+            # MÉTODO 1.5: Match pelos primeiros 15 dígitos (costs_hierarchy trunca IDs)
+            # Campaign IDs no campaign_stats têm 18 dígitos, mas costs_hierarchy tem 15
+            campaign_id_short = str(campaign_id)[:15]
+            if campaign_id_short in campaigns:
+                camp_data = campaigns[campaign_id_short]
+
+        if not camp_data:
+            # MÉTODO 2: Fallback - match por nome
+            campaign_name_clean = campaign_name
+            if campaign_id:
+                campaign_name_clean = '|'.join(campaign_name.split('|')[:-1]).strip()
+
+            # Procurar por nome exato
+            for camp_id, data in campaigns.items():
+                if data.get('name', '').strip() == campaign_name_clean.strip():
+                    camp_data = data
+                    break
+
+        if camp_data:
+            current_name = camp_data.get('name', '')
+            if current_name:
+                # Retornar nome atual + ID (para manter formato consistente)
+                # Usar campaign_id_short (15 dígitos) se disponível
+                if campaign_id:
+                    campaign_id_short = str(campaign_id)[:15]
+                    return f"{current_name}|{campaign_id_short}"
+                else:
+                    return current_name
+
+        # Fallback: retornar nome original
+        return campaign_name
 
     def _get_campaign_leads_from_costs(self, campaign_name: str, costs_hierarchy: Dict) -> int:
         """

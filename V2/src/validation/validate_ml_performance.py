@@ -556,9 +556,7 @@ def main():
     """
     start_time = time.time()
 
-    print("=" * 80, flush=True)
     print("🚀 SISTEMA DE VALIDAÇÃO DE PERFORMANCE ML - LEAD SCORING", flush=True)
-    print("=" * 80, flush=True)
     print(flush=True)
 
     # 1. Parse argumentos
@@ -672,11 +670,11 @@ def main():
     # Determinar caminhos baseados na pasta do período
     periodo_base_path = f'files/validation/{periodo_folder}'
 
-    # vendas_path: se especificado via CLI, usa; senão, usa pasta do período
+    # vendas_path: se especificado via CLI, usa; senão, usa pasta validation raiz
     if args.vendas_path:
         vendas_path = args.vendas_path
     else:
-        vendas_path = periodo_base_path
+        vendas_path = 'files/validation'  # Buscar na pasta raiz validation
 
     # output_dir: usa pasta do período por padrão
     if args.ml_monitoring_output:
@@ -686,8 +684,8 @@ def main():
     else:
         output_dir = periodo_base_path
 
-    # meta_reports_dir: também usa pasta do período
-    meta_reports_dir = periodo_base_path
+    # meta_reports_dir: também usa pasta validation raiz
+    meta_reports_dir = 'files/validation'
 
     logger.info(f"   Vendas (TMB): {vendas_path}")
     logger.info(f"   Meta Reports: {meta_reports_dir}")
@@ -911,11 +909,14 @@ def main():
 
         guru_df = sales_loader.load_guru_sales(guru_files, include_canceled=include_canceled) if guru_files else None
 
-    # Buscar arquivos TMB - SEMPRE usar tmb_completas (filtragem por Status no load_tmb_sales)
-    # O arquivo tmb_completas.xlsx contém TODAS as vendas (Efetivado + Cancelado)
-    # O filtro por status é aplicado no data_loader baseado em include_canceled
-    tmb_files = sorted(glob(f"{vendas_path}/[Tt][Mm][Bb]_[Cc][Oo][Mm][Pp][Ll][Ee][Tt][Aa][Ss]*.xlsx") +
-                      glob(f"{vendas_path}/[Tt][Mm][Bb][Cc][Oo][Mm][Pp][Ll][Ee][Tt][Aa][Ss]*.xlsx"))
+    # Buscar arquivos TMB baseado no tipo de relatório
+    # tmb_fechamento.xlsx: vendas com devoluções ainda em aberto (Efetivado + Cancelado)
+    # tmb_pos_devolucoes.xlsx: vendas após período de devolução (apenas Efetivado)
+    if args.report_type == 'fechamento':
+        tmb_files = sorted(glob(f"{vendas_path}/[Tt][Mm][Bb]_[Ff][Ee][Cc][Hh][Aa][Mm][Ee][Nn][Tt][Oo]*.xlsx"))
+    else:
+        tmb_files = sorted(glob(f"{vendas_path}/[Tt][Mm][Bb]_[Pp][Oo][Ss]_[Dd][Ee][Vv][Oo][Ll][Uu][Cc][Oo][Ee][Ss]*.xlsx") +
+                          glob(f"{vendas_path}/[Tt][Mm][Bb]_[Pp][Oo][Ss]_[Dd][Ee][Vv][Oo][Ll][Uu][Cc][Aa][Oo]*.xlsx"))
 
     if args.report_type == 'fechamento':
         logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)} (incluirá Efetivado + Cancelado)")
@@ -1167,9 +1168,7 @@ def main():
     )
 
     # INVESTIGAÇÃO: Onde estão as vendas que não fizeram match?
-    print("\n" + "="*80)
     print("🔍 INVESTIGAÇÃO: ANÁLISE DAS VENDAS SEM MATCH")
-    print("="*80)
 
     conversions = matched_df[matched_df['converted'] == True]
     num_conversions = len(conversions)
@@ -1285,7 +1284,6 @@ def main():
         logger.info(f"   Vendas de PERÍODO ANTERIOR: {found_before_period}")
         logger.info(f"   Vendas NÃO ENCONTRADAS: {not_found}")
 
-    print("="*80 + "\n")
 
     # 6.1. Filtrar conversões por período de captura
     print("📅 FILTRANDO CONVERSÕES POR PERÍODO DE CAPTURA...", flush=True)
@@ -1356,10 +1354,42 @@ def main():
 
     # Adicionar comparison_group ao campaign_metrics (se disponível)
     if 'comparison_group' in matched_df.columns and len(campaign_metrics) > 0:
-        # Criar mapeamento campanha → comparison_group
-        campaign_to_group = matched_df.groupby('campaign')['comparison_group'].first().to_dict()
-        campaign_metrics['comparison_group'] = campaign_metrics['campaign'].map(campaign_to_group)
-        logger.info(f"   ✅ Grupos de comparação adicionados às métricas de campanha")
+        # IMPORTANTE: Fazer mapeamento por campaign_id (15 dígitos), não por nome
+        # Motivo: Nomes de campanhas podem ter sido atualizados (UTMs → Meta API)
+
+        # Extrair campaign_id (15 dígitos) do matched_df
+        import re
+        def extract_campaign_id_15(campaign_name):
+            """Extrai primeiros 15 dígitos do campaign_id do nome"""
+            if pd.isna(campaign_name):
+                return None
+            match = re.search(r'1\d{14,}', str(campaign_name))
+            if match:
+                return match.group(0)[:15]  # Primeiros 15 dígitos
+            return None
+
+        matched_df['campaign_id_15'] = matched_df['campaign'].apply(extract_campaign_id_15)
+        campaign_metrics['campaign_id_15'] = campaign_metrics['campaign'].apply(extract_campaign_id_15)
+
+        # Criar mapeamento campaign_id_15 → comparison_group
+        campaign_id_to_group = matched_df[matched_df['campaign_id_15'].notna()].groupby('campaign_id_15')['comparison_group'].first().to_dict()
+
+        # Mapear usando campaign_id_15
+        campaign_metrics['comparison_group'] = campaign_metrics['campaign_id_15'].map(campaign_id_to_group)
+
+        # Cleanup: remover coluna temporária
+        campaign_metrics = campaign_metrics.drop(columns=['campaign_id_15'])
+
+        # Log de sucesso/falha
+        mapped_count = campaign_metrics['comparison_group'].notna().sum()
+        total_count = len(campaign_metrics)
+        logger.info(f"   ✅ Grupos de comparação adicionados: {mapped_count}/{total_count} campanhas mapeadas")
+
+        if mapped_count < total_count:
+            unmapped = campaign_metrics[campaign_metrics['comparison_group'].isna()]['campaign'].tolist()
+            logger.warning(f"   ⚠️ {total_count - mapped_count} campanhas SEM comparison_group:")
+            for camp in unmapped[:5]:  # Mostrar até 5
+                logger.warning(f"      • {camp[:70]}")
     elif len(campaign_metrics) == 0:
         logger.warning("   ⚠️ Nenhuma métrica de campanha disponível - DataFrame vazio")
 
@@ -1673,16 +1703,12 @@ def main():
     print(flush=True)
 
     # 9. EXIBIR RESUMO NO TERMINAL
-    print("=" * 80, flush=True)
     print("📊 RESUMO EXECUTIVO - COMPARAÇÃO ML vs NÃO-ML", flush=True)
-    print("=" * 80, flush=True)
     print(flush=True)
     print_summary_table(ml_comparison)
 
     print(flush=True)
-    print("=" * 80, flush=True)
     print("📈 PERFORMANCE POR DECIL (Real vs Esperado)", flush=True)
-    print("=" * 80, flush=True)
     print("IMPORTANTE: Modelo treinado APENAS com vendas Guru", flush=True)
     print("→ Guru = Dados de treinamento | Total = Guru + TMB (generalização)", flush=True)
     print(flush=True)
@@ -1691,9 +1717,7 @@ def main():
     print(flush=True)
 
     # 9.5. Exibir métricas por campanha
-    print("=" * 80, flush=True)
     print("📊 MÉTRICAS DETALHADAS POR CAMPANHA", flush=True)
-    print("=" * 80, flush=True)
     print(flush=True)
 
     # Formatar nome das campanhas
@@ -1828,9 +1852,7 @@ def main():
     end_time = time.time()
     elapsed_time = end_time - start_time
 
-    print("=" * 80, flush=True)
     print("✅ VALIDAÇÃO CONCLUÍDA COM SUCESSO!", flush=True)
-    print("=" * 80, flush=True)
     print(flush=True)
     print(f"📊 Análise exibida no console acima", flush=True)
     print(f"📄 Excel atualizado: {excel_path}", flush=True)
