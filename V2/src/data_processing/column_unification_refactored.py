@@ -49,6 +49,7 @@ def unificar_colunas_pesquisa(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         DataFrame de pesquisa com colunas unificadas
     """
     df_pesquisa_unificado = df_pesquisa.copy()
+    colunas_antes = len(df_pesquisa_unificado.columns)
 
     # DEBUG: Lista completa de colunas duplicadas
     duplicadas_pesquisa = identificar_colunas_duplicadas_pesquisa(df_pesquisa_unificado)
@@ -96,9 +97,13 @@ def unificar_colunas_pesquisa(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         )
         df_pesquisa_unificado = df_pesquisa_unificado.drop(columns=[colunas_faixa_salarial[1]])
 
-    # NORMAL: Apenas resumo final
+    # NORMAL: Resumo com colunas antes/depois
+    colunas_depois = len(df_pesquisa_unificado.columns)
+    colunas_unificadas = colunas_antes - colunas_depois
+
     logger.info("")
-    logger.info(f"✅ Pesquisa: {len(df_pesquisa_unificado)} registros, {len(df_pesquisa_unificado.columns)} colunas")
+    logger.info(f"Pesquisa - Colunas antes: {colunas_antes}, depois: {colunas_depois} (unificadas: {colunas_unificadas})")
+    logger.info(f"✅ Pesquisa: {len(df_pesquisa_unificado)} registros, {colunas_depois} colunas")
 
     return df_pesquisa_unificado
 
@@ -114,6 +119,7 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
         DataFrame de vendas com colunas unificadas
     """
     df_vendas_unificado = df_vendas.copy()
+    colunas_antes = len(df_vendas_unificado.columns)
 
     # DEBUG: Detalhes de cada unificação
     logger.debug("VENDAS - Unificando colunas:")
@@ -255,8 +261,13 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
             df_vendas_unificado = df_vendas_unificado.drop(columns=[utm_last, utm_regular])
             logger.debug(f"  {utm_last} + {utm_regular} → {utm_final}")
 
+    # NORMAL: Resumo com colunas antes/depois
+    colunas_depois = len(df_vendas_unificado.columns)
+    colunas_unificadas = colunas_antes - colunas_depois
+
     logger.info("")
-    logger.info(f"✅ Vendas: {len(df_vendas_unificado)} registros, {len(df_vendas_unificado.columns)} colunas")
+    logger.info(f"Vendas - Colunas antes: {colunas_antes}, depois: {colunas_depois} (unificadas: {colunas_unificadas})")
+    logger.info(f"✅ Vendas: {len(df_vendas_unificado)} registros, {colunas_depois} colunas")
 
     return df_vendas_unificado
 
@@ -296,20 +307,23 @@ def aplicar_filtro_temporal(
         vendas_depois = len(df_vendas_filtrado)
         vendas_removidas = vendas_antes - vendas_depois
 
+        # DEBUG: Detalhes do filtro temporal
         if vendas_removidas > 0:
-            logger.info("")
-            logger.info(f"Filtro temporal (até {data_max_leads.strftime('%Y-%m-%d')}):")
-            logger.info(f"  Vendas antes: {vendas_antes:,}")
-            logger.info(f"  Vendas após: {vendas_depois:,}")
-            logger.info(f"  Vendas futuras removidas: {vendas_removidas:,}")
-            logger.info(f"  (Data calculada dinamicamente dos leads)")
+            logger.debug("")
+            logger.debug(f"Filtro temporal (até {data_max_leads.strftime('%Y-%m-%d')}):")
+            logger.debug(f"  Vendas antes: {vendas_antes:,}")
+            logger.debug(f"  Vendas após: {vendas_depois:,}")
+            logger.debug(f"  Vendas futuras removidas: {vendas_removidas:,}")
+            logger.debug(f"  (Data calculada dinamicamente dos leads)")
         else:
-            logger.info("Nenhuma venda futura encontrada (todas dentro do período dos leads)")
+            logger.debug("Nenhuma venda futura encontrada (todas dentro do período dos leads)")
     else:
-        logger.info("Filtro temporal não aplicado (colunas de data não encontradas)")
+        logger.debug("Filtro temporal não aplicado (colunas de data não encontradas)")
 
+    # NORMAL: Data do filtro e vendas antes/depois
     logger.info("")
-    logger.info(f"✅ Vendas após filtro temporal: {len(df_vendas_filtrado)} registros")
+    logger.info(f"Filtro temporal aplicado: até {data_max_leads.strftime('%Y-%m-%d')}")
+    logger.info(f"Vendas antes: {vendas_antes:,} | Vendas após: {vendas_depois:,}")
 
     return df_vendas_filtrado
 
@@ -325,25 +339,36 @@ def remover_colunas_utm_ausentes(df_vendas: pd.DataFrame) -> pd.DataFrame:
         DataFrame sem colunas UTM
     """
     df_vendas_sem_utm = df_vendas.copy()
+    colunas_antes = len(df_vendas_sem_utm.columns)
 
     colunas_utm_remover = ['source', 'medium', 'campaign', 'content']
     colunas_existentes_utm = [col for col in colunas_utm_remover if col in df_vendas_sem_utm.columns]
 
     if colunas_existentes_utm:
+        # Calcular % de ausentes de cada coluna ANTES de remover
+        missing_info = {}
+        for col in colunas_existentes_utm:
+            missing_pct = (df_vendas_sem_utm[col].isna().sum() / len(df_vendas_sem_utm)) * 100
+            missing_info[col] = missing_pct
+
         df_vendas_sem_utm = df_vendas_sem_utm.drop(columns=colunas_existentes_utm)
 
-        # DEBUG: Lista de cada coluna removida
-        logger.debug("Removendo colunas UTM com alta porcentagem de ausentes:")
+        # NORMAL: Lista de colunas removidas com % ausentes
+        logger.info("")
+        logger.info(f"Colunas removidas (alta % ausentes):")
         for col in colunas_existentes_utm:
-            logger.debug(f"  Removida: {col}")
-
-        # NORMAL: Total removido
-        logger.info(f"Removidas {len(colunas_existentes_utm)} colunas UTM com alta % de ausentes")
+            logger.info(f"  - {col}: {missing_info[col]:.1f}% ausentes")
     else:
+        logger.info("")
         logger.info("Nenhuma coluna UTM encontrada para remover")
 
+    # NORMAL: Colunas antes/depois e resultado final
+    colunas_depois = len(df_vendas_sem_utm.columns)
+    colunas_removidas = colunas_antes - colunas_depois
+
     logger.info("")
-    logger.info(f"✅ Vendas: {len(df_vendas_sem_utm)} registros, {len(df_vendas_sem_utm.columns)} colunas")
+    logger.info(f"Colunas antes: {colunas_antes} | Colunas depois: {colunas_depois} (removidas: {colunas_removidas})")
+    logger.info(f"✅ Vendas: {len(df_vendas_sem_utm)} registros, {colunas_depois} colunas")
 
     return df_vendas_sem_utm
 
