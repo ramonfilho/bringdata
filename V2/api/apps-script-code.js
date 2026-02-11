@@ -48,6 +48,34 @@ function aoAbrir() {
 // =============================================================================
 
 /**
+ * Encontra a linha dos cabeçalhos na planilha
+ * Procura pela linha que contém "Data" E "E-mail" (colunas obrigatórias)
+ * Retorna: { headerRow: número da linha (0-indexed), headers: array }
+ */
+function encontrarLinhaDosCabecalhos(values) {
+  if (!values || values.length === 0) {
+    throw new Error('Planilha vazia');
+  }
+
+  // Procurar linha que contém "Data" E "E-mail"
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i];
+    const hasData = row.some(cell => cell === 'Data');
+    const hasEmail = row.some(cell => cell === 'E-mail');
+
+    if (hasData && hasEmail) {
+      Logger.log(`✅ Cabeçalho encontrado na linha ${i + 1}`);
+      return {
+        headerRow: i,
+        headers: row
+      };
+    }
+  }
+
+  throw new Error('Cabeçalho não encontrado. Procurando por colunas "Data" e "E-mail"');
+}
+
+/**
  * Busca leads pendentes de processamento (sem score, após o último processado)
  * Retorna: { leads: [...], lastProcessedDate: Date }
  */
@@ -60,7 +88,8 @@ function buscarLeadsPendentes() {
     return { leads: [], lastProcessedDate: null };
   }
 
-  const headers = values[0];
+  // Buscar cabeçalho dinamicamente
+  const { headerRow, headers } = encontrarLinhaDosCabecalhos(values);
   const dataColIndex = headers.indexOf('Data');
   const scoreColIndex = headers.indexOf('lead_score');
 
@@ -68,10 +97,16 @@ function buscarLeadsPendentes() {
     throw new Error('Coluna "Data" não encontrada');
   }
 
-  // Encontrar a data do último lead COM score (última execução)
+  // ====================================================================
+  // ETAPA 1: Encontrar a data MAIS RECENTE entre leads COM score
+  // (não importa a posição na planilha, apenas o timestamp)
+  // ====================================================================
   let lastProcessedDate = null;
+  const firstDataRow = headerRow + 1;
 
-  for (let i = values.length - 1; i >= 1; i--) {
+  Logger.log('🔍 Procurando data mais recente de lead COM score...');
+
+  for (let i = firstDataRow; i < values.length; i++) {
     const row = values[i];
 
     // Ignorar cabeçalhos duplicados
@@ -82,15 +117,39 @@ function buscarLeadsPendentes() {
     const hasScore = scoreColIndex !== -1 && row[scoreColIndex];
 
     if (hasScore) {
-      lastProcessedDate = new Date(row[dataColIndex]);
-      break;
+      try {
+        const leadDate = new Date(row[dataColIndex]);
+
+        // Validar se é uma data válida
+        if (!isNaN(leadDate.getTime())) {
+          // Se não há data processada ainda, ou esta é mais recente
+          if (!lastProcessedDate || leadDate > lastProcessedDate) {
+            lastProcessedDate = leadDate;
+          }
+        }
+      } catch (e) {
+        // Ignorar datas inválidas
+        Logger.log(`⚠️ Data inválida na linha ${i + 1}: ${row[dataColIndex]}`);
+      }
     }
   }
 
-  // Coletar leads SEM score que são APÓS o último processado
-  const pendingLeads = [];
+  if (lastProcessedDate) {
+    Logger.log(`✅ Última data processada encontrada: ${lastProcessedDate.toISOString()}`);
+  } else {
+    Logger.log('⚠️ Nenhum lead com score encontrado (primeira execução)');
+  }
 
-  for (let i = 1; i < values.length; i++) {
+  // ====================================================================
+  // ETAPA 2: Buscar TODOS os leads SEM score com data POSTERIOR
+  // (varrer toda a planilha, não importa a ordem das linhas)
+  // ====================================================================
+  const pendingLeads = [];
+  let skippedCount = 0;
+
+  Logger.log('🔍 Buscando leads SEM score com data posterior...');
+
+  for (let i = firstDataRow; i < values.length; i++) {
     const row = values[i];
 
     // Ignorar cabeçalhos duplicados
@@ -99,25 +158,58 @@ function buscarLeadsPendentes() {
       continue;
     }
 
-    const leadDate = new Date(row[dataColIndex]);
-    const hasScore = scoreColIndex !== -1 && row[scoreColIndex];
+    try {
+      const leadDate = new Date(row[dataColIndex]);
 
-    // Lead não tem score E é após o último processado (ou não há último)
-    if (!hasScore && (!lastProcessedDate || leadDate > lastProcessedDate)) {
-      const leadData = {};
-      headers.forEach((header, index) => {
-        leadData[header] = row[index];
-      });
+      // Validar se é uma data válida
+      if (isNaN(leadDate.getTime())) {
+        skippedCount++;
+        continue;
+      }
 
-      const emailValue = row[headers.indexOf('E-mail')];
-      const email = emailValue ? String(emailValue) : null;
+      const hasScore = scoreColIndex !== -1 && row[scoreColIndex];
 
-      pendingLeads.push({
-        data: leadData,
-        email: email,
-        row_id: (i + 1).toString()
-      });
+      // Lead não tem score E é após o último processado (ou não há último)
+      if (!hasScore && (!lastProcessedDate || leadDate > lastProcessedDate)) {
+        const leadData = {};
+        headers.forEach((header, index) => {
+          leadData[header] = row[index];
+        });
+
+        const emailValue = row[headers.indexOf('E-mail')];
+        const email = emailValue ? String(emailValue) : null;
+
+        // Validar que tem email
+        if (email && email.trim() !== '') {
+          pendingLeads.push({
+            data: leadData,
+            email: email,
+            row_id: (i + 1).toString(),
+            leadDate: leadDate  // Guardar data para debug
+          });
+        } else {
+          skippedCount++;
+        }
+      }
+    } catch (e) {
+      // Ignorar linhas com erro
+      Logger.log(`⚠️ Erro ao processar linha ${i + 1}: ${e.message}`);
+      skippedCount++;
     }
+  }
+
+  // Ordenar leads pendentes por data (do mais antigo para o mais novo)
+  // Isso garante processamento em ordem cronológica
+  pendingLeads.sort((a, b) => a.leadDate - b.leadDate);
+
+  if (pendingLeads.length > 0) {
+    Logger.log(`✅ ${pendingLeads.length} leads pendentes encontrados`);
+    Logger.log(`   Data mais antiga: ${pendingLeads[0].leadDate.toISOString()}`);
+    Logger.log(`   Data mais recente: ${pendingLeads[pendingLeads.length - 1].leadDate.toISOString()}`);
+  }
+
+  if (skippedCount > 0) {
+    Logger.log(`⚠️ ${skippedCount} linhas ignoradas (data inválida ou sem email)`);
   }
 
   return {
@@ -138,7 +230,10 @@ function gerarPredicoesLeadsPendentes(leads) {
   Logger.log(`📊 Processando ${leads.length} leads pendentes`);
 
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('[LF] Pesquisa');
-  const headers = sheet.getDataRange().getValues()[0];
+  const values = sheet.getDataRange().getValues();
+
+  // Buscar cabeçalho dinamicamente
+  const { headerRow, headers } = encontrarLinhaDosCabecalhos(values);
   const scoreColIndex = headers.indexOf('lead_score');
 
   // Processar em lotes de 600
@@ -187,7 +282,7 @@ function gerarPredicoesLeadsPendentes(leads) {
 
   // Verificar/criar coluna lead_score
   if (scoreColIndex === -1) {
-    sheet.getRange(1, headers.length + 1).setValue('lead_score');
+    sheet.getRange(headerRow + 1, headers.length + 1).setValue('lead_score');
   }
 
   const scoreCol = scoreColIndex !== -1 ? scoreColIndex + 1 : headers.length + 1;
@@ -199,7 +294,7 @@ function gerarPredicoesLeadsPendentes(leads) {
   if (decilColIndex === -1) {
     // Coluna decil não existe, criar ao lado de lead_score
     decilCol = scoreCol + 1;
-    sheet.getRange(1, decilCol).setValue('decil');
+    sheet.getRange(headerRow + 1, decilCol).setValue('decil');
   } else {
     decilCol = decilColIndex + 1;
   }
@@ -229,7 +324,9 @@ function enviarLoteCapiLeadsPendentes(leads) {
 
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('[LF] Pesquisa');
     const values = sheet.getDataRange().getValues();
-    const headers = values[0];
+
+    // Buscar cabeçalho dinamicamente
+    const { headerRow, headers } = encontrarLinhaDosCabecalhos(values);
 
     const phoneColIndex = headers.indexOf('Telefone');
     const scoreColIndex = headers.indexOf('lead_score');
@@ -358,7 +455,8 @@ function atualizarAnaliseUTM() {
       return;
     }
 
-    const headers = values[0];
+    // Buscar cabeçalho dinamicamente
+    const { headerRow, headers } = encontrarLinhaDosCabecalhos(values);
 
     // ====================================================================
     // FILTRO TEMPORAL: Apenas últimos 7 dias (evita payload > 32 MB)
@@ -379,8 +477,9 @@ function atualizarAnaliseUTM() {
     const leads = [];
     let totalLeads = 0;
     let filteredLeads = 0;
+    const firstDataRow = headerRow + 1;
 
-    for (let i = 1; i < values.length; i++) {
+    for (let i = firstDataRow; i < values.length; i++) {
       totalLeads++;
       const row = values[i];
 
@@ -1340,7 +1439,8 @@ function buscarLeadsUltimas24h() {
     return [];
   }
 
-  const headers = values[0];
+  // Buscar cabeçalho dinamicamente
+  const { headerRow, headers } = encontrarLinhaDosCabecalhos(values);
   const dataColIndex = headers.indexOf('Data');
 
   if (dataColIndex === -1) {
@@ -1352,8 +1452,9 @@ function buscarLeadsUltimas24h() {
   const threshold24h = new Date(now.getTime() - (24 * 60 * 60 * 1000));
 
   const recentLeads = [];
+  const firstDataRow = headerRow + 1;
 
-  for (let i = 1; i < values.length; i++) {
+  for (let i = firstDataRow; i < values.length; i++) {
     const row = values[i];
 
     // Ignorar cabeçalhos duplicados
