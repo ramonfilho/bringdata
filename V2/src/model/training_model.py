@@ -144,8 +144,6 @@ def registrar_features_e_modelo_devclub(
     Returns:
         Dicionário com resultados do registro
     """
-    logger.info("Preparando dados e treinando modelo")
-
     # Iniciar MLflow run
     with mlflow.start_run():
         # Logar parâmetros do experimento
@@ -153,11 +151,7 @@ def registrar_features_e_modelo_devclub(
         mlflow.log_param("save_files", save_files)
 
         # 1. PREPARAR DADOS E TREINAR MODELO FINAL
-        logger.info("")
-        logger.info(f"Dataset: {len(dataset_devclub_encoded):,} registros")
-        logger.info(f"Colunas totais: {len(dataset_devclub_encoded.columns)}")
-        logger.info("")
-        logger.info("Removendo a coluna Target")
+        logger.info("  Removendo a coluna Target")
 
         # Dataset encodado
         dataset_final = dataset_devclub_encoded.copy()
@@ -198,8 +192,8 @@ def registrar_features_e_modelo_devclub(
             X_clean = X_clean[nova_ordem]
 
         logger.info("")
-        logger.info(f"Features para treinamento: {len(X_clean.columns)}")
-        logger.info(f"Target: {y.sum():,} positivos ({y.mean()*100:.2f}%)")
+        logger.info(f"  Features para treinamento: {len(X_clean.columns)}")
+        logger.info("")
 
         # Logar dados do dataset
         mlflow.log_param("total_records", len(dataset_final))
@@ -324,15 +318,10 @@ def registrar_features_e_modelo_devclub(
             dias_treino = (data_corte - data_min).days
             dias_teste = (data_max - data_inicio_teste).days
 
-            logger.info("")
-            logger.info(f"Split temporal por LEADS (70% dos leads):")
+            logger.info(f"  Split temporal por LEADS (70% dos leads):")
             logger.info(f"  Período total: {data_min.strftime('%Y-%m-%d')} a {data_max.strftime('%Y-%m-%d')} ({(data_max - data_min).days} dias)")
-            logger.info(f"  Treino: {len(X_train):,} leads ({len(X_train)/n_total*100:.1f}%)")
-            logger.info(f"    Período: {data_min.strftime('%Y-%m-%d')} a {data_corte.strftime('%Y-%m-%d')} ({dias_treino} dias)")
-            logger.info(f"    Taxa conversão: {y_train.mean()*100:.2f}%")
-            logger.info(f"  Teste: {len(X_test):,} leads ({len(X_test)/n_total*100:.1f}%)")
-            logger.info(f"    Período: {data_inicio_teste.strftime('%Y-%m-%d')} a {data_max.strftime('%Y-%m-%d')} ({dias_teste} dias)")
-            logger.info(f"    Taxa conversão: {y_test.mean()*100:.2f}%")
+            logger.info(f"  Treino: {len(X_train):,} leads ({len(X_train)/n_total*100:.1f}%) Período: {data_min.strftime('%Y-%m-%d')} a {data_corte.strftime('%Y-%m-%d')} ({dias_treino} dias)")
+            logger.info(f"  Teste: {len(X_test):,} leads ({len(X_test)/n_total*100:.1f}%) Período: {data_inicio_teste.strftime('%Y-%m-%d')} a {data_max.strftime('%Y-%m-%d')} ({dias_teste} dias)")
 
             # Quantificar data leakage
             logger.debug(f"\n Análise de data leakage:")
@@ -649,12 +638,11 @@ def registrar_features_e_modelo_devclub(
         logger.debug(f"Shape: {X_train.shape}")
 
         logger.info("")
-        logger.info("Treinando modelo...")
+        logger.info("  Treinando modelo...")
         modelo_final.fit(X_train, y_train)
         y_prob = modelo_final.predict_proba(X_test)[:, 1]
         auc_final = roc_auc_score(y_test, y_prob)
-
-        logger.info(f" Modelo treinado - AUC: {auc_final:.3f}")
+        logger.info("")
 
         # Feature importance
         feature_importance = pd.DataFrame({
@@ -1063,28 +1051,24 @@ def registrar_features_e_modelo_devclub(
         logger.debug(" Metadados adicionais registrados no MLflow")
 
         # 5. RESUMO FINAL
-        logger.info("")
         logger.info(" MODELO DEVCLUB REGISTRADO COM SUCESSO")
         logger.info("")
-        logger.info("Informações do modelo:")
+        logger.info("  Informações do modelo:")
         logger.info(f"  Modelo: v1_devclub_rf_{split_method}_single")
         logger.info(f"  Algoritmo: RandomForestClassifier")
         logger.info(f"  Split: {split_method}")
         logger.info(f"  Matching: {matching_method}")
-        logger.info("")
-        logger.info("Métricas de performance:")
-        logger.info(f"  AUC: {auc_final:.3f}")
-        logger.info(f"  Top 3 decis: {top3_conversoes:.1f}%")
-        logger.info(f"  Lift máximo: {lift_maximo:.1f}x")
-        logger.info(f"  Monotonia: {monotonia:.1f}%")
-        logger.info("")
-        logger.info("Detalhes técnicos:")
-        logger.info(f"  Features: {len(X_clean.columns)}")
-        logger.info(f"  MLflow Run ID: {mlflow.active_run().info.run_id}")
+        logger.info(f"  Métricas de performance:")
+        logger.info(f"    AUC: {auc_final:.3f}")
+        logger.info(f"    Top 3 decis: {top3_conversoes:.1f}%")
+        logger.info(f"    Lift máximo: {lift_maximo:.1f}x")
+        logger.info(f"    Monotonia: {monotonia:.1f}%")
+        logger.info(f"    Features: {len(X_clean.columns)}")
+        logger.info(f"    MLflow Run ID: {mlflow.active_run().info.run_id}")
         if output_dir:
-            logger.info(f"  Arquivos locais: {output_dir}")
+            logger.info(f"    Arquivos locais: {output_dir}")
         else:
-            logger.info(f"  Arquivos locais: não salvos")
+            logger.info(f"    Arquivos locais: não salvos")
 
         # Retornar model_metadata completo para uso pelo orquestrador de retreino
         # Adicionar informações extras que não estão no metadata

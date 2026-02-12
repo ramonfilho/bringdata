@@ -226,11 +226,10 @@ def criar_dataset_devclub(df_v1_final: pd.DataFrame, df_vendas_unificado: pd.Dat
     logger.debug(f"  Matches por ambos (email E telefone): {matches_por_ambos:,}")
 
     # NORMAL: Resumo final
-    logger.info("")
-    logger.info("DATASET V1 DEVCLUB:")
     logger.info(f"  Total de registros: {total_registros:,}")
     logger.info(f"  Leads qualificados DevClub: {leads_qualificados:,}")
     logger.info(f"  Taxa de conversão DevClub: {taxa_conversao:.2f}%")
+    logger.info("")
 
 
     return df_devclub

@@ -29,9 +29,7 @@ def unificar_medium_para_producao(df_medium_unificado: pd.DataFrame) -> pd.DataF
         logger.info("Coluna 'Medium' não encontrada")
         return df
 
-    # NORMAL: Resumo inicial
-    logger.info(f"Dataset inicial: {len(df)} registros")
-    logger.info(f"Medium - valores únicos antes: {df['Medium'].nunique()}")
+    # NORMAL: Resumo inicial (silenciado - já foi reportado na célula 11 anterior)
 
     # DEFINIR CATEGORIAS VÁLIDAS PARA PRODUÇÃO (baseado na análise temporal)
     # Removido 'Interesse Programação' - terminou em set/2025, não está em produção
@@ -173,7 +171,8 @@ def unificar_medium_para_producao(df_medium_unificado: pd.DataFrame) -> pd.DataF
             logger.debug(f"   - '{valor}'")
 
     # NORMAL: Resultado final
-    logger.info(f"Medium - valores únicos após unificação: {df['Medium'].nunique()}")
+    logger.info(f"  Medium - valores únicos depois da unificação final: {df['Medium'].nunique()}")
+    logger.info("")
 
     return df
 

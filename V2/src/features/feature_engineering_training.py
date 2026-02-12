@@ -198,12 +198,14 @@ def criar_features_derivadas(df_devclub: pd.DataFrame) -> pd.DataFrame:
     logger.info("Nomes das colunas depois:")
     for i, col in enumerate(df.columns, 1):
         logger.info(f"  {i:2d}. {col}")
+    logger.info("")
 
     # NORMAL: Features removidas e adicionadas
     features_removidas = colunas_antes - colunas_depois + len(colunas_existentes)
     features_adicionadas = colunas_depois - colunas_antes + len(colunas_existentes)
-    logger.info(f"Features removidas: {features_removidas}")
-    logger.info(f"Features adicionadas: {features_adicionadas}")
+    logger.info(f"  Features removidas: {features_removidas}")
+    logger.info(f"  Features adicionadas: {features_adicionadas}")
+    logger.info("")
 
     # 4. DEBUG: ESTATÍSTICAS DAS NOVAS FEATURES
     logger.debug(f"\nEstatísticas das features criadas:")
@@ -229,7 +231,6 @@ def criar_features_derivadas(df_devclub: pd.DataFrame) -> pd.DataFrame:
     logger.debug(f"  Target positivo: {df['target'].sum():,} ({df['target'].mean()*100:.2f}%)")
 
     logger.debug(f"\nDataset pronto para encoding e modelagem!")
-
-    logger.info(f" Feature engineering completo")
+    logger.info("")
 
     return df

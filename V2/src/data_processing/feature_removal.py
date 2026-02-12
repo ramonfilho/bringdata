@@ -26,9 +26,9 @@ def remover_features_desnecessarias(df_pesquisa: pd.DataFrame, remover_medium: b
     df = df_pesquisa.copy()
 
     # NORMAL: Resumo inicial
-    logger.info(f"Dataset inicial: {len(df)} registros, {len(df.columns)} colunas")
+    logger.info(f"  Dataset inicial: {len(df)} registros, {len(df.columns)} colunas")
     if remover_medium:
-        logger.info(f"  Modo: Remover Medium (junto com Campaign e Content)")
+        logger.info(f"    Modo: Remover Medium (junto com Campaign e Content)")
 
     # DEBUG: Identificar colunas vazias ou com nomes problemáticos
     logger.debug(f"")
@@ -120,8 +120,9 @@ def remover_features_desnecessarias(df_pesquisa: pd.DataFrame, remover_medium: b
                 logger.debug(f"  ! {coluna} não encontrada")
 
     # NORMAL: Resumo final
-    logger.info(f"Dataset final: {len(df)} registros, {len(df.columns)} colunas")
-    logger.info(f" Features desnecessárias removidas: {len(colunas_existentes)}")
+    logger.info(f"  Dataset final: {len(df)} registros, {len(df.columns)} colunas")
+    logger.info(f"  Features desnecessárias removidas: {len(colunas_existentes)}")
+    logger.info("")
 
     return df
 

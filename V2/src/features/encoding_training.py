@@ -33,7 +33,7 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
     logger.debug(f"\nProcessando DATASET V1 DEVCLUB...")
 
     # NORMAL: Colunas antes do encoding (número)
-    logger.info(f"Colunas antes do encoding: {len(df.columns)}")
+    logger.info(f"  Colunas antes do encoding: {len(df.columns)}")
 
     # DEBUG: Lista de colunas antes do encoding
     logger.debug(f"\nColunas ANTES do encoding:")
@@ -105,6 +105,10 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
     if 'telefone_comprimento_8' in df_encoded.columns:
         df_encoded = df_encoded.drop(columns=['telefone_comprimento_8'])
 
+    # NORMAL: Colunas depois do encoding
+    logger.info(f"  Colunas depois do encoding: {len(df_encoded.columns)}")
+    logger.info("")
+
     # DEBUG: Lista de colunas depois do encoding
     logger.debug(f"\nColunas DEPOIS do encoding:")
     for i, col in enumerate(df_encoded.columns, 1):
@@ -123,14 +127,13 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
 
     # NORMAL: Verificar tipos de dados finais
     tipos_dados = df_encoded.dtypes.value_counts()
-    logger.info("")
-    logger.info(f"Tipos de dados no dataset final:")
+    logger.info(f"  Tipos de dados no dataset final:")
     for tipo, count in tipos_dados.items():
         logger.info(f"  {tipo}: {count} colunas")
 
     # NORMAL: Resumo final
     logger.info("")
-    logger.info(f"Dataset final encodado:")
+    logger.info(f"  Dataset final encodado:")
     logger.info(f"  Registros: {len(df_encoded):,}")
     logger.info(f"  Colunas: {len(df_encoded.columns)}")
     logger.info(f"  Target positivo: {df_encoded['target'].sum():,} ({df_encoded['target'].mean()*100:.2f}%)")
@@ -141,7 +144,5 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
     logger.debug(f"  DATASET V1 DEVCLUB: {status}")
 
     logger.debug(f"\nDataset encodado está pronto para modelagem!")
-
-    logger.info(f" Encoding estratégico completo")
 
     return df_encoded

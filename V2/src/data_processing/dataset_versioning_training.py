@@ -33,8 +33,7 @@ def criar_dataset_pos_cutoff(df_medium_producao: pd.DataFrame) -> pd.DataFrame:
     cutoff_date = pd.to_datetime('2025-03-01')
 
     # NORMAL: Data de cutoff
-    logger.info("")
-    logger.info(f"Data de cutoff: {cutoff_date.strftime('%Y-%m-%d')}")
+    logger.info(f"  Data de cutoff: {cutoff_date.strftime('%Y-%m-%d')}")
 
     # Calcular missing rate médio do dataset completo (pré-cutoff)
     missing_stats_pre = {}
@@ -47,11 +46,7 @@ def criar_dataset_pos_cutoff(df_medium_producao: pd.DataFrame) -> pd.DataFrame:
     avg_missing_pre = sum(missing_stats_pre.values()) / len(missing_stats_pre) if missing_stats_pre else 0
 
     # NORMAL: Resumo pré-cutoff
-    logger.info("")
-    logger.info("Dataset completo (pré-cutoff):")
-    logger.info(f"  Registros: {len(df):,}")
-    logger.info(f"  Colunas: {len(df.columns)}")
-    logger.info(f"  Missing rate médio: {avg_missing_pre:.1f}%")
+    logger.info(f"  Dataset pesquisa pré-cutoff: {len(df):,} registros, {len(df.columns)} colunas, missing rate {avg_missing_pre:.1f}%")
 
     # Dataset pós-cutoff (período com menor missing das features críticas)
     df_pos_cutoff = df[df['Data'] >= cutoff_date].copy()
@@ -122,11 +117,8 @@ def criar_dataset_pos_cutoff(df_medium_producao: pd.DataFrame) -> pd.DataFrame:
     avg_missing = sum(stats['missing_rate'] for stats in missing_stats.values()) / len(missing_stats) if missing_stats else 0
 
     # NORMAL: Resumo final apenas
+    logger.info(f"  Dataset pesquisa pós-cutoff: {len(df_pos_cutoff):,} registros, {len(df_pos_cutoff.columns)} colunas, missing rate {avg_missing:.1f}%")
     logger.info("")
-    logger.info("Resumo do dataset pós-cutoff:")
-    logger.info(f"  Registros: {len(df_pos_cutoff):,}")
-    logger.info(f"  Colunas: {len(df_pos_cutoff.columns)}")
-    logger.info(f"  Missing rate médio: {avg_missing:.1f}%")
 
     # DEBUG: Análise específica das features críticas
     features_criticas_presentes = [f for f in features_existentes if f in df_pos_cutoff.columns]

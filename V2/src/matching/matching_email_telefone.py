@@ -169,11 +169,10 @@ def fazer_matching_email_telefone(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.Da
     taxa_conversao = (total_matches / total_registros) * 100
 
     # NORMAL: Resumo final
-    logger.info("")
-    logger.info("DATASET FINAL:")
     logger.info(f"  Total de registros: {total_registros:,}")
     logger.info(f"  Total de matches: {total_matches:,}")
     logger.info(f"  Taxa de conversão: {taxa_conversao:.2f}%")
+    logger.info("")
 
     # DEBUG: Ganho vs email_only
     logger.debug(f"  Ganho vs email_only: +{len(matches_telefone):,} matches")

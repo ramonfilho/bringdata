@@ -81,11 +81,8 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     df = df_pesquisa.copy()
 
     # NORMAL: Apenas cabeçalho
-    logger.info("Aplicando limpeza e unificação completa...")
-
-    # 1. INTERESSE PROGRAMAÇÃO
-    logger.info("")
-    logger.info("1. Unificando interesse_programacao")
+    logger.info("  Aplicando limpeza e unificação completa...")
+    logger.info("  1. Unificando interesse_programacao")
     if 'interesse_programacao' in df.columns:
         # Limpar textos primeiro
         df['interesse_programacao'] = df['interesse_programacao'].apply(limpar_texto)
@@ -113,8 +110,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 2. TEM COMPUTADOR/NOTEBOOK
-    logger.info("")
-    logger.info("2. Unificando Tem computador/notebook?")
+    logger.info("  2. Unificando Tem computador/notebook?")
     if 'Tem computador/notebook?' in df.columns:
         df['Tem computador/notebook?'] = df['Tem computador/notebook?'].apply(limpar_texto)
 
@@ -135,8 +131,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 3. O QUE MAIS VOCÊ QUER VER NO EVENTO
-    logger.info("")
-    logger.info("3. Unificando O que mais você quer ver no evento?")
+    logger.info("  3. Unificando O que mais você quer ver no evento?")
     if 'O que mais você quer ver no evento?' in df.columns:
         df['O que mais você quer ver no evento?'] = df['O que mais você quer ver no evento?'].apply(limpar_texto)
 
@@ -164,8 +159,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 4. VOCÊ POSSUI CARTÃO DE CRÉDITO
-    logger.info("")
-    logger.info("4. Unificando Você possui cartão de crédito?")
+    logger.info("  4. Unificando Você possui cartão de crédito?")
     if 'Você possui cartão de crédito?' in df.columns:
         df['Você possui cartão de crédito?'] = df['Você possui cartão de crédito?'].apply(limpar_texto)
 
@@ -185,8 +179,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 5. ATUALMENTE, QUAL A SUA FAIXA SALARIAL
-    logger.info("")
-    logger.info("5. Unificando Atualmente, qual a sua faixa salarial?")
+    logger.info("  5. Unificando Atualmente, qual a sua faixa salarial?")
     if 'Atualmente, qual a sua faixa salarial?' in df.columns:
         df['Atualmente, qual a sua faixa salarial?'] = df['Atualmente, qual a sua faixa salarial?'].apply(limpar_texto)
 
@@ -210,8 +203,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 6. O QUE VOCÊ FAZ ATUALMENTE
-    logger.info("")
-    logger.info("6. Unificando O que você faz atualmente?")
+    logger.info("  6. Unificando O que você faz atualmente?")
     if 'O que você faz atualmente?' in df.columns:
         df['O que você faz atualmente?'] = df['O que você faz atualmente?'].apply(limpar_texto)
 
@@ -268,8 +260,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 7. QUAL A SUA IDADE
-    logger.info("")
-    logger.info("7. Unificando Qual a sua idade?")
+    logger.info("  7. Unificando Qual a sua idade?")
     if 'Qual a sua idade?' in df.columns:
         df['Qual a sua idade?'] = df['Qual a sua idade?'].apply(limpar_texto)
 
@@ -313,8 +304,6 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
                 logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     logger.info("")
-    logger.info(f" Dataset unificado: {len(df)} registros, {len(df.columns)} colunas")
-
 
     return df
 

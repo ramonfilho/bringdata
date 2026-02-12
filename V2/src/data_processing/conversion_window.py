@@ -51,8 +51,7 @@ def aplicar_janela_conversao(
     # 2. Calcular data limite dos leads
     data_limite_leads = data_max_vendas - pd.Timedelta(days=janela_dias)
 
-    logger.info(f"Janela de conversão: {janela_dias} dias")
-    logger.info(f"Data limite dos leads: {data_limite_leads.strftime('%Y-%m-%d')}")
+    logger.info(f"  Data limite dos leads (último dia de venda): {data_max_vendas.strftime('%Y-%m-%d')} - {janela_dias} dias = {data_limite_leads.strftime('%Y-%m-%d')}")
 
     # 3. Converter data dos leads
     if 'Data' in df.columns:
@@ -66,10 +65,7 @@ def aplicar_janela_conversao(
     data_min_antes = df['Data'].min()
     data_max_antes = df['Data'].max()
 
-    logger.info("")
-    logger.info(f"Antes do filtro:")
-    logger.info(f"  Leads: {total_antes:,}")
-    logger.info(f"  Target=1: {target_antes:,} ({target_antes/total_antes*100:.2f}%)")
+    logger.info(f"  Antes do filtro: {total_antes:,} leads, {target_antes:,} target=1 ({target_antes/total_antes*100:.2f}%)")
 
     # 5. Filtrar leads
     # Lógica correta: manter leads até data_limite OU que já converteram (target=1)
@@ -83,13 +79,9 @@ def aplicar_janela_conversao(
 
     leads_removidos = total_antes - total_depois
 
+    logger.info(f"  Depois do filtro: {total_depois:,} leads, {target_depois:,} target=1 ({target_depois/total_depois*100:.2f}%)")
+    logger.info(f"  Leads removidos: {leads_removidos:,} ({leads_removidos/total_antes*100:.1f}%)")
     logger.info("")
-    logger.info(f"Depois do filtro:")
-    logger.info(f"  Leads: {total_depois:,}")
-    logger.info(f"  Target=1: {target_depois:,} ({target_depois/total_depois*100:.2f}%)")
-
-    logger.info("")
-    logger.info(f"Leads removidos: {leads_removidos:,} ({leads_removidos/total_antes*100:.1f}%)")
 
 
     return df_filtrado
