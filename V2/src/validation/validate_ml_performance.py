@@ -79,12 +79,13 @@ logger = logging.getLogger(__name__)
 #
 # Formato: IDs de 15 dígitos (primeiros 15 dígitos do Campaign ID)
 # Exemplo: '120220370119870' para campanha 120220370119870390
-EXCLUDE_CAMPAIGN_IDS = [
-    '120220370119870',  # DEVLF | CAP | FRIO | FASE 01 | ABERTO ADV+ | PG2 | SCORE (fase de teste)
-]
+# DESABILITADO: Campanha de teste removida da exclusão para ver dados totais
+# EXCLUDE_CAMPAIGN_IDS = [
+#     '120220370119870',  # DEVLF | CAP | FRIO | FASE 01 | ABERTO ADV+ | PG2 | SCORE (fase de teste)
+# ]
 
 # Para desabilitar a exclusão, deixe a lista vazia:
-# EXCLUDE_CAMPAIGN_IDS = []
+EXCLUDE_CAMPAIGN_IDS = []
 # ============================================================================
 
 

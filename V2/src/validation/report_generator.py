@@ -224,7 +224,13 @@ class ValidationReportGenerator:
         logger.info(f"      ads_df: {'OK' if ads_df is not None else 'None'}")
         logger.info(f"      ads_in_adsets_df: {'OK' if ads_in_adsets_df is not None else 'None'}")
         logger.info(f"      matched_ads_in_adsets_df: {'OK' if matched_ads_in_adsets_df is not None else 'None'}")
-        self._write_comparacao_ml(writer, ml_comparison, campanhas_df, all_adsets_comparison, adsets_df, ads_df, ads_in_adsets_df, matched_ads_in_adsets_df, formats)
+
+        # Extrair taxa de tracking global para estimar vendas reais
+        global_tracking_rate = matching_stats.get('tracking_rate', None) if matching_stats else None
+        if global_tracking_rate:
+            logger.info(f"      Taxa de tracking global: {global_tracking_rate:.1f}% (será usada para estimar vendas REAIS)")
+
+        self._write_comparacao_ml(writer, ml_comparison, campanhas_df, all_adsets_comparison, adsets_df, ads_df, ads_in_adsets_df, matched_ads_in_adsets_df, formats, global_tracking_rate=global_tracking_rate)
 
         # Aba 5: Comparação Faixa A (Eventos ML vs Faixa A - sistema legado)
         # COMENTADO: Abas de Faixa A desabilitadas temporariamente
@@ -766,7 +772,8 @@ class ValidationReportGenerator:
         ads_df: pd.DataFrame,
         ads_in_adsets_df: pd.DataFrame,
         matched_ads_in_adsets_df: pd.DataFrame,
-        formats: Dict
+        formats: Dict,
+        global_tracking_rate: float = None
     ):
         """
         Escreve aba 'Comparação ML' com 4 tabelas consolidadas:
@@ -774,6 +781,9 @@ class ValidationReportGenerator:
         2. Comparação por Adsets (todos - Eventos ML vs Controle)
         3. Comparação por Adsets Matched (apenas matched pairs)
         4. Comparação por Ads MATCHED em Adsets Matched (interseção mais rigorosa)
+
+        Args:
+            global_tracking_rate: Taxa de tracking global (%) para estimar vendas reais
         """
         worksheet = writer.book.add_worksheet('Comparação ML')
 
@@ -788,7 +798,8 @@ class ValidationReportGenerator:
         if campanhas_df is not None and not campanhas_df.empty:
             current_row = self._write_consolidated_table(
                 worksheet, campanhas_df, formats, current_row,
-                label='Campanhas'
+                label='Campanhas',
+                global_tracking_rate=global_tracking_rate
             )
         else:
             worksheet.write(current_row, 0, 'Dados indisponíveis', formats['text'])
@@ -827,7 +838,8 @@ class ValidationReportGenerator:
         if adsets_matched_df is not None and not adsets_matched_df.empty:
             current_row = self._write_consolidated_table(
                 worksheet, adsets_matched_df, formats, current_row,
-                label='Adsets (Matched)'
+                label='Adsets (Matched)',
+                global_tracking_rate=global_tracking_rate
             )
         else:
             worksheet.write(current_row, 0, 'Dados indisponíveis', formats['text'])
@@ -1417,7 +1429,8 @@ class ValidationReportGenerator:
         df: pd.DataFrame,
         formats: Dict,
         start_row: int,
-        label: str
+        label: str,
+        global_tracking_rate: float = None
     ) -> int:
         """
         Escreve uma tabela consolidada agregando por Grupo (Eventos ML vs Controle).
@@ -1428,6 +1441,7 @@ class ValidationReportGenerator:
             formats: Formatos do Excel
             start_row: Linha inicial para escrever
             label: Label para identificação (Campanhas/Adsets/Ads)
+            global_tracking_rate: Taxa de tracking global (%) para estimar vendas reais - None usa vendas traqueadas
 
         Returns:
             Próxima linha disponível após a tabela
@@ -1525,7 +1539,28 @@ class ValidationReportGenerator:
         # Agregar métricas por Grupo
         aggregated = df_filtered.groupby(group_col).agg(agg_dict).reset_index()
 
-        # Calcular métricas derivadas
+        # ESTIMAR VENDAS REAIS usando taxa de tracking global
+        if global_tracking_rate and global_tracking_rate > 0:
+            tracking_rate_decimal = global_tracking_rate / 100.0
+            aggregated['Vendas Estimadas Reais'] = aggregated['Vendas'] / tracking_rate_decimal
+            aggregated['Receita Estimada Real'] = aggregated['Receita Total'] / tracking_rate_decimal
+
+            # Calcular ROAS Real Estimado
+            aggregated['ROAS Real Estimado'] = aggregated['Receita Estimada Real'] / aggregated['Valor gasto']
+
+            # Calcular Taxa de Conversão Real Estimada
+            aggregated['Taxa de conversão Real'] = (aggregated['Vendas Estimadas Reais'] / aggregated['Leads']) * 100
+
+            # Calcular Margem Real Estimada
+            aggregated['Margem Real Estimada'] = aggregated['Receita Estimada Real'] - aggregated['Valor gasto']
+
+            # Calcular ROAS Ajustado TMB Real (se receita ajustada existir)
+            if 'Receita Ajustada TMB' in aggregated.columns:
+                aggregated['Receita Ajustada TMB Real'] = aggregated['Receita Ajustada TMB'] / tracking_rate_decimal
+                aggregated['ROAS Ajustado TMB Real'] = aggregated['Receita Ajustada TMB Real'] / aggregated['Valor gasto']
+                aggregated['Margem Ajustada TMB Real'] = aggregated['Receita Ajustada TMB Real'] - aggregated['Valor gasto']
+
+        # Calcular métricas derivadas (TRAQUEADAS - mantidas para referência)
         aggregated['Taxa de conversão'] = (aggregated['Vendas'] / aggregated['Leads']) * 100
         aggregated['CPL'] = aggregated['Valor gasto'] / aggregated['Leads']
         aggregated['ROAS'] = aggregated['Receita Total'] / aggregated['Valor gasto']
@@ -1567,33 +1602,77 @@ class ValidationReportGenerator:
         worksheet.write(row, 3, 'Diferença %', formats['header'])
         row += 1
 
-        # Dados da tabela
-        comparison_data = [
-            ('Total de Leads', ml_row['Leads'], ctrl_row['Leads'], 'number'),
-            ('Conversões', ml_row['Vendas'], ctrl_row['Vendas'], 'number'),
-            ('Taxa Conversão', ml_row['Taxa de conversão'] / 100, ctrl_row['Taxa de conversão'] / 100, 'percent'),
-            ('Receita Total', ml_row['Receita Total'], ctrl_row['Receita Total'], 'currency'),
-            ('Gasto Total', ml_row['Valor gasto'], ctrl_row['Valor gasto'], 'currency'),
-            ('CPL', ml_row['CPL'], ctrl_row['CPL'], 'currency'),
-            ('ROAS', ml_row['ROAS'], ctrl_row['ROAS'], 'decimal'),
-            ('Margem Contribuição', ml_row['Margem de contribuição'], ctrl_row['Margem de contribuição'], 'currency'),
-        ]
+        # Dados da tabela - USAR MÉTRICAS REAIS ESTIMADAS se disponíveis
+        use_real_metrics = global_tracking_rate and global_tracking_rate > 0 and 'Vendas Estimadas Reais' in ml_row
 
-        # Adicionar métricas ajustadas TMB se existirem
-        if 'Receita Ajustada TMB' in ml_row and 'Receita Ajustada TMB' in ctrl_row:
-            comparison_data.append(
-                ('Receita Ajustada TMB', ml_row['Receita Ajustada TMB'], ctrl_row['Receita Ajustada TMB'], 'currency')
-            )
+        if use_real_metrics:
+            comparison_data = [
+                ('Total de Leads', ml_row['Leads'], ctrl_row['Leads'], 'number'),
+                ('Conversões (Estimadas REAIS)', ml_row['Vendas Estimadas Reais'], ctrl_row['Vendas Estimadas Reais'], 'number'),
+                ('Conversões (Traqueadas)', ml_row['Vendas'], ctrl_row['Vendas'], 'number'),
+                ('Taxa Conversão (REAL)', ml_row['Taxa de conversão Real'] / 100, ctrl_row['Taxa de conversão Real'] / 100, 'percent'),
+                ('Receita Total (Estimada REAL)', ml_row['Receita Estimada Real'], ctrl_row['Receita Estimada Real'], 'currency'),
+                ('Receita Total (Traqueada)', ml_row['Receita Total'], ctrl_row['Receita Total'], 'currency'),
+                ('Gasto Total', ml_row['Valor gasto'], ctrl_row['Valor gasto'], 'currency'),
+                ('CPL', ml_row['CPL'], ctrl_row['CPL'], 'currency'),
+                ('ROAS (REAL Estimado)', ml_row['ROAS Real Estimado'], ctrl_row['ROAS Real Estimado'], 'decimal'),
+                ('ROAS (Traqueado)', ml_row['ROAS'], ctrl_row['ROAS'], 'decimal'),
+                ('Margem Contribuição (REAL)', ml_row['Margem Real Estimada'], ctrl_row['Margem Real Estimada'], 'currency'),
+                ('Margem Contribuição (Traqueada)', ml_row['Margem de contribuição'], ctrl_row['Margem de contribuição'], 'currency'),
+            ]
 
-        if 'ROAS Ajustado TMB' in ml_row and 'ROAS Ajustado TMB' in ctrl_row:
-            comparison_data.append(
-                ('ROAS Ajustado TMB', ml_row['ROAS Ajustado TMB'], ctrl_row['ROAS Ajustado TMB'], 'decimal')
-            )
+            # Adicionar métricas ajustadas TMB REAIS se existirem
+            if 'Receita Ajustada TMB Real' in ml_row and 'Receita Ajustada TMB Real' in ctrl_row:
+                comparison_data.append(
+                    ('Receita Ajustada TMB (REAL)', ml_row['Receita Ajustada TMB Real'], ctrl_row['Receita Ajustada TMB Real'], 'currency')
+                )
+                comparison_data.append(
+                    ('Receita Ajustada TMB (Traqueada)', ml_row['Receita Ajustada TMB'], ctrl_row['Receita Ajustada TMB'], 'currency')
+                )
 
-        if 'Margem Ajustada TMB' in ml_row and 'Margem Ajustada TMB' in ctrl_row:
-            comparison_data.append(
-                ('Margem Ajustada TMB', ml_row['Margem Ajustada TMB'], ctrl_row['Margem Ajustada TMB'], 'currency')
-            )
+            if 'ROAS Ajustado TMB Real' in ml_row and 'ROAS Ajustado TMB Real' in ctrl_row:
+                comparison_data.append(
+                    ('ROAS Ajustado TMB (REAL)', ml_row['ROAS Ajustado TMB Real'], ctrl_row['ROAS Ajustado TMB Real'], 'decimal')
+                )
+                comparison_data.append(
+                    ('ROAS Ajustado TMB (Traqueado)', ml_row['ROAS Ajustado TMB'], ctrl_row['ROAS Ajustado TMB'], 'decimal')
+                )
+
+            if 'Margem Ajustada TMB Real' in ml_row and 'Margem Ajustada TMB Real' in ctrl_row:
+                comparison_data.append(
+                    ('Margem Ajustada TMB (REAL)', ml_row['Margem Ajustada TMB Real'], ctrl_row['Margem Ajustada TMB Real'], 'currency')
+                )
+                comparison_data.append(
+                    ('Margem Ajustada TMB (Traqueada)', ml_row['Margem Ajustada TMB'], ctrl_row['Margem Ajustada TMB'], 'currency')
+                )
+        else:
+            # Fallback: usar métricas traqueadas (comportamento antigo)
+            comparison_data = [
+                ('Total de Leads', ml_row['Leads'], ctrl_row['Leads'], 'number'),
+                ('Conversões', ml_row['Vendas'], ctrl_row['Vendas'], 'number'),
+                ('Taxa Conversão', ml_row['Taxa de conversão'] / 100, ctrl_row['Taxa de conversão'] / 100, 'percent'),
+                ('Receita Total', ml_row['Receita Total'], ctrl_row['Receita Total'], 'currency'),
+                ('Gasto Total', ml_row['Valor gasto'], ctrl_row['Valor gasto'], 'currency'),
+                ('CPL', ml_row['CPL'], ctrl_row['CPL'], 'currency'),
+                ('ROAS', ml_row['ROAS'], ctrl_row['ROAS'], 'decimal'),
+                ('Margem Contribuição', ml_row['Margem de contribuição'], ctrl_row['Margem de contribuição'], 'currency'),
+            ]
+
+            # Adicionar métricas ajustadas TMB se existirem
+            if 'Receita Ajustada TMB' in ml_row and 'Receita Ajustada TMB' in ctrl_row:
+                comparison_data.append(
+                    ('Receita Ajustada TMB', ml_row['Receita Ajustada TMB'], ctrl_row['Receita Ajustada TMB'], 'currency')
+                )
+
+            if 'ROAS Ajustado TMB' in ml_row and 'ROAS Ajustado TMB' in ctrl_row:
+                comparison_data.append(
+                    ('ROAS Ajustado TMB', ml_row['ROAS Ajustado TMB'], ctrl_row['ROAS Ajustado TMB'], 'decimal')
+                )
+
+            if 'Margem Ajustada TMB' in ml_row and 'Margem Ajustada TMB' in ctrl_row:
+                comparison_data.append(
+                    ('Margem Ajustada TMB', ml_row['Margem Ajustada TMB'], ctrl_row['Margem Ajustada TMB'], 'currency')
+                )
 
         for metric, ml_value, ctrl_value, fmt_type in comparison_data:
             worksheet.write(row, 0, metric, formats['text'])
@@ -1609,22 +1688,50 @@ class ValidationReportGenerator:
                 worksheet.write(row, 3, '-', formats['text'])
             row += 1
 
-        # Vencedor - ROAS Nominal
+        # Vencedor - ROAS REAL Estimado (prioritário) ou Nominal
         row += 1
-        if ml_row['ROAS'] > ctrl_row['ROAS']:
-            diff_pct = calc_diff_pct(ml_row['ROAS'], ctrl_row['ROAS']) * 100
-            winner_text = f" VENCEDOR: Eventos ML (ROAS nominal {diff_pct:.1f}% maior)"
-            worksheet.write(row, 0, winner_text, formats['header_green'])
-        elif ctrl_row['ROAS'] > ml_row['ROAS']:
-            diff_pct = abs(calc_diff_pct(ml_row['ROAS'], ctrl_row['ROAS'])) * 100
-            winner_text = f" VENCEDOR: Controle (ROAS nominal {diff_pct:.1f}% maior)"
-            worksheet.write(row, 0, winner_text, formats['header_red'])
+        if use_real_metrics and 'ROAS Real Estimado' in ml_row:
+            # Usar ROAS REAL Estimado
+            if ml_row['ROAS Real Estimado'] > ctrl_row['ROAS Real Estimado']:
+                diff_pct = calc_diff_pct(ml_row['ROAS Real Estimado'], ctrl_row['ROAS Real Estimado']) * 100
+                winner_text = f" VENCEDOR: Eventos ML (ROAS REAL estimado {diff_pct:.1f}% maior)"
+                worksheet.write(row, 0, winner_text, formats['header_green'])
+            elif ctrl_row['ROAS Real Estimado'] > ml_row['ROAS Real Estimado']:
+                diff_pct = abs(calc_diff_pct(ml_row['ROAS Real Estimado'], ctrl_row['ROAS Real Estimado'])) * 100
+                winner_text = f" VENCEDOR: Controle (ROAS REAL estimado {diff_pct:.1f}% maior)"
+                worksheet.write(row, 0, winner_text, formats['header_red'])
+            else:
+                worksheet.write(row, 0, " Empate técnico em ROAS REAL estimado", formats['header'])
         else:
-            worksheet.write(row, 0, " Empate técnico em ROAS nominal", formats['header'])
+            # Fallback: usar ROAS traqueado
+            if ml_row['ROAS'] > ctrl_row['ROAS']:
+                diff_pct = calc_diff_pct(ml_row['ROAS'], ctrl_row['ROAS']) * 100
+                winner_text = f" VENCEDOR: Eventos ML (ROAS nominal {diff_pct:.1f}% maior)"
+                worksheet.write(row, 0, winner_text, formats['header_green'])
+            elif ctrl_row['ROAS'] > ml_row['ROAS']:
+                diff_pct = abs(calc_diff_pct(ml_row['ROAS'], ctrl_row['ROAS'])) * 100
+                winner_text = f" VENCEDOR: Controle (ROAS nominal {diff_pct:.1f}% maior)"
+                worksheet.write(row, 0, winner_text, formats['header_red'])
+            else:
+                worksheet.write(row, 0, " Empate técnico em ROAS nominal", formats['header'])
         row += 1
 
-        # Vencedor - ROAS Ajustado TMB (se disponível)
-        if 'ROAS Ajustado TMB' in ml_row and 'ROAS Ajustado TMB' in ctrl_row:
+        # Vencedor - ROAS Ajustado TMB REAL (se disponível) ou Traqueado
+        if use_real_metrics and 'ROAS Ajustado TMB Real' in ml_row and 'ROAS Ajustado TMB Real' in ctrl_row:
+            # Usar ROAS Ajustado TMB REAL
+            if ml_row['ROAS Ajustado TMB Real'] > ctrl_row['ROAS Ajustado TMB Real']:
+                diff_pct = calc_diff_pct(ml_row['ROAS Ajustado TMB Real'], ctrl_row['ROAS Ajustado TMB Real']) * 100
+                winner_text = f" VENCEDOR: Eventos ML (ROAS Ajustado TMB REAL {diff_pct:.1f}% maior)"
+                worksheet.write(row, 0, winner_text, formats['header_green'])
+            elif ctrl_row['ROAS Ajustado TMB Real'] > ml_row['ROAS Ajustado TMB Real']:
+                diff_pct = abs(calc_diff_pct(ml_row['ROAS Ajustado TMB Real'], ctrl_row['ROAS Ajustado TMB Real'])) * 100
+                winner_text = f" VENCEDOR: Controle (ROAS Ajustado TMB REAL {diff_pct:.1f}% maior)"
+                worksheet.write(row, 0, winner_text, formats['header_red'])
+            else:
+                worksheet.write(row, 0, " Empate técnico em ROAS Ajustado TMB REAL", formats['header'])
+            row += 1
+        elif 'ROAS Ajustado TMB' in ml_row and 'ROAS Ajustado TMB' in ctrl_row:
+            # Fallback: usar ROAS Ajustado TMB traqueado
             if ml_row['ROAS Ajustado TMB'] > ctrl_row['ROAS Ajustado TMB']:
                 diff_pct = calc_diff_pct(ml_row['ROAS Ajustado TMB'], ctrl_row['ROAS Ajustado TMB']) * 100
                 winner_text = f" VENCEDOR: Eventos ML (ROAS Ajustado TMB {diff_pct:.1f}% maior)"
