@@ -34,7 +34,7 @@ def extrair_publico_medium(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     logger.debug(f"Dataset inicial: {len(df)} registros")
 
     # NORMAL: Valores únicos antes
-    logger.info(f"Medium - valores únicos antes: {df['Medium'].nunique()}")
+    logger.info(f"  Medium - valores únicos antes: {df['Medium'].nunique()}")
 
     # DEBUG: Exemplos detalhados antes da extração
     logger.debug("")
@@ -80,7 +80,7 @@ def extrair_publico_medium(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     df['Medium'] = df['Medium'].apply(extrair_publico)
 
     # NORMAL: Valores únicos após extração
-    logger.info(f"Medium - valores únicos após extração: {df['Medium'].nunique()}")
+    logger.info(f"  Medium - valores únicos após extração: {df['Medium'].nunique()}")
 
     # DEBUG: Distribuição detalhada após extração inicial
     logger.debug("")
@@ -177,9 +177,7 @@ def extrair_publico_medium(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"  '{original}'  '{unificado}' ({count:,} registros)")
 
     # NORMAL: Resultado final
-    logger.info("")
-    logger.info("Resultado final:")
-    logger.info(f"Medium - valores únicos após unificação: {df['Medium'].nunique()}")
+    logger.info(f"  Medium - valores únicos depois da unificação inicial: {df['Medium'].nunique()}")
 
 
     return df

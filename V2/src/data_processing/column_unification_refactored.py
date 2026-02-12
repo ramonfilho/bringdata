@@ -101,9 +101,7 @@ def unificar_colunas_pesquisa(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     colunas_depois = len(df_pesquisa_unificado.columns)
     colunas_unificadas = colunas_antes - colunas_depois
 
-    logger.info("")
-    logger.info(f"Pesquisa - Colunas antes: {colunas_antes}, depois: {colunas_depois} (unificadas: {colunas_unificadas})")
-    logger.info(f" Pesquisa: {len(df_pesquisa_unificado)} registros, {colunas_depois} colunas")
+    logger.info(f"  Pesquisa - Colunas antes: {colunas_antes}, depois: {colunas_depois} (unificadas: {colunas_unificadas})")
 
     return df_pesquisa_unificado
 
@@ -265,9 +263,8 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
     colunas_depois = len(df_vendas_unificado.columns)
     colunas_unificadas = colunas_antes - colunas_depois
 
+    logger.info(f"  Vendas - Colunas antes: {colunas_antes}, depois: {colunas_depois} (unificadas: {colunas_unificadas})")
     logger.info("")
-    logger.info(f"Vendas - Colunas antes: {colunas_antes}, depois: {colunas_depois} (unificadas: {colunas_unificadas})")
-    logger.info(f" Vendas: {len(df_vendas_unificado)} registros, {colunas_depois} colunas")
 
     return df_vendas_unificado
 
@@ -321,9 +318,9 @@ def aplicar_filtro_temporal(
         logger.debug("Filtro temporal não aplicado (colunas de data não encontradas)")
 
     # NORMAL: Data do filtro e vendas antes/depois
+    logger.info(f"  Filtro temporal aplicado: até {data_max_leads.strftime('%Y-%m-%d')}")
+    logger.info(f"  Vendas antes: {vendas_antes:,} | Vendas após: {vendas_depois:,}")
     logger.info("")
-    logger.info(f"Filtro temporal aplicado: até {data_max_leads.strftime('%Y-%m-%d')}")
-    logger.info(f"Vendas antes: {vendas_antes:,} | Vendas após: {vendas_depois:,}")
 
     return df_vendas_filtrado
 
@@ -354,21 +351,19 @@ def remover_colunas_utm_ausentes(df_vendas: pd.DataFrame) -> pd.DataFrame:
         df_vendas_sem_utm = df_vendas_sem_utm.drop(columns=colunas_existentes_utm)
 
         # NORMAL: Lista de colunas removidas com % ausentes
-        logger.info("")
-        logger.info(f"Colunas removidas (alta % ausentes):")
+        logger.info(f"  Colunas removidas (alta % ausentes):")
         for col in colunas_existentes_utm:
-            logger.info(f"  - {col}: {missing_info[col]:.1f}% ausentes")
+            logger.info(f"    - {col}: {missing_info[col]:.1f}% ausentes")
     else:
-        logger.info("")
-        logger.info("Nenhuma coluna UTM encontrada para remover")
+        logger.info("  Nenhuma coluna UTM encontrada para remover")
 
     # NORMAL: Colunas antes/depois e resultado final
     colunas_depois = len(df_vendas_sem_utm.columns)
     colunas_removidas = colunas_antes - colunas_depois
 
+    logger.info(f"  Colunas antes: {colunas_antes} | Colunas depois: {colunas_depois} (removidas: {colunas_removidas})")
+    logger.info(f"  Vendas: {len(df_vendas_sem_utm)} registros, {colunas_depois} colunas")
     logger.info("")
-    logger.info(f"Colunas antes: {colunas_antes} | Colunas depois: {colunas_depois} (removidas: {colunas_removidas})")
-    logger.info(f" Vendas: {len(df_vendas_sem_utm)} registros, {colunas_depois} colunas")
 
     return df_vendas_sem_utm
 
@@ -440,15 +435,13 @@ def aplicar_filtro_status_risco(
     vendas_tmb_mantidas = mask_tmb.sum()
 
     # NORMAL: Resumo consolidado
-    logger.info("")
-    logger.info(f" RESUMO:")
-    logger.info(f"GURU: {vendas_guru_mantidas:,} aprovadas (de {vendas_guru_total:,} total)")
+    logger.info(f"  GURU: {vendas_guru_mantidas:,} aprovadas (de {vendas_guru_total:,} total)")
     if tmb_risk_filter == 'none':
-        logger.info(f"TMB: 0 mantidas (filtro: nenhum TMB)")
+        logger.info(f"  TMB: 0 mantidas (filtro: nenhum TMB)")
     elif tmb_risk_filter == 'all':
-        logger.info(f"TMB: {vendas_tmb_mantidas:,} mantidas (filtro: todos)")
+        logger.info(f"  TMB: {vendas_tmb_mantidas:,} mantidas (filtro: todos)")
     else:
-        logger.info(f"TMB: {vendas_tmb_mantidas:,} mantidas (filtro: {tmb_risk_filter.replace('_', ' + ')})")
+        logger.info(f"  TMB: {vendas_tmb_mantidas:,} mantidas (filtro: {tmb_risk_filter.replace('_', ' + ')})")
 
     # DEBUG: Detalhes completos
     logger.debug("")
@@ -481,7 +474,7 @@ def aplicar_filtro_status_risco(
         else:
             logger.debug(f"  Mantidas: {vendas_tmb_mantidas:,}")
 
+    logger.info(f"  TOTAL FINAL: {after:,} vendas")
     logger.info("")
-    logger.info(f" TOTAL FINAL: {after:,} vendas")
 
     return df_vendas_filtrado

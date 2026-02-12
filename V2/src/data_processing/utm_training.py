@@ -28,14 +28,13 @@ def unificar_utm_source_term(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     # DEBUG: Resumo inicial
     logger.debug(f"Dataset inicial: {len(df)} registros")
 
-    logger.info("")
-    logger.info("1. UNIFICANDO COLUNA SOURCE:")
+    logger.info("  COLUNA SOURCE:")
     logger.debug("-" * 35)
 
     if 'Source' in df.columns:
         # NORMAL: Valores únicos antes
         source_antes = df['Source'].value_counts(dropna=False)
-        logger.info(f"Valores únicos antes: {df['Source'].nunique()}")
+        logger.info(f"  Valores únicos antes: {df['Source'].nunique()}")
 
         # DEBUG: Distribuição detalhada antes
         logger.debug("Distribuição antes:")
@@ -56,7 +55,8 @@ def unificar_utm_source_term(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
         # NORMAL: Valores únicos depois
         source_depois = df['Source'].value_counts(dropna=False)
-        logger.info(f"Valores únicos depois: {df['Source'].nunique()}")
+        logger.info(f"  Valores únicos depois: {df['Source'].nunique()}")
+        logger.info("")
 
         # DEBUG: Distribuição detalhada depois
         logger.debug("")
@@ -66,15 +66,13 @@ def unificar_utm_source_term(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             valor_str = str(valor) if pd.notna(valor) else 'nan'
             logger.debug(f"  {valor_str:<25} {count:>6,} ({pct:>5.1f}%)")
 
-    # 2. UNIFICAR COLUNA TERM
-    logger.info("")
-    logger.info("2. UNIFICANDO COLUNA TERM:")
+    logger.info("  COLUNA TERM:")
     logger.debug("-" * 35)
 
     if 'Term' in df.columns:
         # NORMAL: Valores únicos antes
         term_antes = df['Term'].value_counts(dropna=False)
-        logger.info(f"Valores únicos antes: {df['Term'].nunique()}")
+        logger.info(f"  Valores únicos antes: {df['Term'].nunique()}")
 
         # DEBUG: Distribuição detalhada antes
         logger.debug("Distribuição antes (top 10):")
@@ -113,7 +111,8 @@ def unificar_utm_source_term(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
         # NORMAL: Valores únicos depois
         term_depois = df['Term'].value_counts(dropna=False)
-        logger.info(f"Valores únicos depois: {df['Term'].nunique()}")
+        logger.info(f"  Valores únicos depois: {df['Term'].nunique()}")
+        logger.info("")
 
         # DEBUG: Distribuição detalhada depois
         logger.debug("")
@@ -122,11 +121,6 @@ def unificar_utm_source_term(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             pct = count / len(df) * 100
             valor_str = str(valor) if pd.notna(valor) else 'nan'
             logger.debug(f"  {valor_str:<25} {count:>6,} ({pct:>5.1f}%)")
-
-    # DEBUG: Resultado final
-    logger.info("")
-    logger.debug("RESULTADO FINAL:")
-    logger.info(f"Dataset: {len(df)} registros, {len(df.columns)} colunas")
 
 
     return df
