@@ -30,8 +30,10 @@ def extrair_publico_medium(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         logger.info("Coluna 'Medium' não encontrada")
         return df
 
-    # NORMAL: Resumo inicial
-    logger.info(f"Dataset inicial: {len(df)} registros")
+    # DEBUG: Resumo inicial
+    logger.debug(f"Dataset inicial: {len(df)} registros")
+
+    # NORMAL: Valores únicos antes
     logger.info(f"Medium - valores únicos antes: {df['Medium'].nunique()}")
 
     # DEBUG: Exemplos detalhados antes da extração

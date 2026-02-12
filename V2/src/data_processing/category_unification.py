@@ -85,7 +85,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
     # 1. INTERESSE PROGRAMAÇÃO
     logger.info("")
-    logger.info("1. Unificando interesse_programacao...")
+    logger.info("1. Unificando interesse_programacao")
     if 'interesse_programacao' in df.columns:
         # Limpar textos primeiro
         df['interesse_programacao'] = df['interesse_programacao'].apply(limpar_texto)
@@ -98,7 +98,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['interesse_programacao'] == 'A ideia de nunca faltar emprego na área.', 'interesse_programacao'] = 'A ideia de nunca faltar emprego na área'
 
         valores_unicos = df['interesse_programacao'].nunique()
-        logger.info(f"   Resultado: {valores_unicos} valores únicos")
+        logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
         # DEBUG: Mostrar distribuição final
         total = len(df)
@@ -114,7 +114,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
     # 2. TEM COMPUTADOR/NOTEBOOK
     logger.info("")
-    logger.info("2. Unificando Tem computador/notebook?...")
+    logger.info("2. Unificando Tem computador/notebook?")
     if 'Tem computador/notebook?' in df.columns:
         df['Tem computador/notebook?'] = df['Tem computador/notebook?'].apply(limpar_texto)
 
@@ -123,7 +123,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['Tem computador/notebook?'] == 'NÃO', 'Tem computador/notebook?'] = 'Não'
 
         valores_unicos = df['Tem computador/notebook?'].nunique()
-        logger.info(f"   Resultado: {valores_unicos} valores únicos")
+        logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
@@ -136,7 +136,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
     # 3. O QUE MAIS VOCÊ QUER VER NO EVENTO
     logger.info("")
-    logger.info("3. Unificando O que mais você quer ver no evento?...")
+    logger.info("3. Unificando O que mais você quer ver no evento?")
     if 'O que mais você quer ver no evento?' in df.columns:
         df['O que mais você quer ver no evento?'] = df['O que mais você quer ver no evento?'].apply(limpar_texto)
 
@@ -150,7 +150,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['O que mais você quer ver no evento?'] == 'A aula com a recrutadora;', 'O que mais você quer ver no evento?'] = 'A aula com a recrutadora'
 
         valores_unicos = df['O que mais você quer ver no evento?'].nunique()
-        logger.info(f"   Resultado: {valores_unicos} valores únicos")
+        logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
@@ -165,7 +165,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
     # 4. VOCÊ POSSUI CARTÃO DE CRÉDITO
     logger.info("")
-    logger.info("4. Unificando Você possui cartão de crédito?...")
+    logger.info("4. Unificando Você possui cartão de crédito?")
     if 'Você possui cartão de crédito?' in df.columns:
         df['Você possui cartão de crédito?'] = df['Você possui cartão de crédito?'].apply(limpar_texto)
 
@@ -173,7 +173,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['Você possui cartão de crédito?'].str.contains('Sim', na=False), 'Você possui cartão de crédito?'] = 'Sim'
 
         valores_unicos = df['Você possui cartão de crédito?'].nunique()
-        logger.info(f"   Resultado: {valores_unicos} valores únicos")
+        logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
@@ -186,7 +186,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
     # 5. ATUALMENTE, QUAL A SUA FAIXA SALARIAL
     logger.info("")
-    logger.info("5. Unificando Atualmente, qual a sua faixa salarial?...")
+    logger.info("5. Unificando Atualmente, qual a sua faixa salarial?")
     if 'Atualmente, qual a sua faixa salarial?' in df.columns:
         df['Atualmente, qual a sua faixa salarial?'] = df['Atualmente, qual a sua faixa salarial?'].apply(limpar_texto)
 
@@ -198,7 +198,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['Atualmente, qual a sua faixa salarial?'] == 'Mais de R$5.001 reais ao mês.', 'Atualmente, qual a sua faixa salarial?'] = 'Mais de R$5.001 reais ao mês'
 
         valores_unicos = df['Atualmente, qual a sua faixa salarial?'].nunique()
-        logger.info(f"   Resultado: {valores_unicos} valores únicos")
+        logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
@@ -211,7 +211,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
     # 6. O QUE VOCÊ FAZ ATUALMENTE
     logger.info("")
-    logger.info("6. Unificando O que você faz atualmente?...")
+    logger.info("6. Unificando O que você faz atualmente?")
     if 'O que você faz atualmente?' in df.columns:
         df['O que você faz atualmente?'] = df['O que você faz atualmente?'].apply(limpar_texto)
 
@@ -249,7 +249,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['O que você faz atualmente?'] == 'Faço outro curso na faculdade e quero mudar para T.I.', 'O que você faz atualmente?'] = 'Faço outro curso na faculdade e quero mudar para T.I'
 
         valores_unicos = df['O que você faz atualmente?'].nunique()
-        logger.info(f"   Resultado: {valores_unicos} valores únicos")
+        logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
         if normalizacoes_faz:
             logger.debug(f"   📌 Normalizações aplicadas:")
@@ -269,7 +269,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
     # 7. QUAL A SUA IDADE
     logger.info("")
-    logger.info("7. Unificando Qual a sua idade?...")
+    logger.info("7. Unificando Qual a sua idade?")
     if 'Qual a sua idade?' in df.columns:
         df['Qual a sua idade?'] = df['Qual a sua idade?'].apply(limpar_texto)
 
@@ -278,7 +278,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['Qual a sua idade?'] == 'Mais de 55 anos.', 'Qual a sua idade?'] = 'Mais de 55 anos'
 
         valores_unicos = df['Qual a sua idade?'].nunique()
-        logger.info(f"   Resultado: {valores_unicos} valores únicos")
+        logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
@@ -290,9 +290,6 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 8. OUTRAS COLUNAS CATEGÓRICAS (não processadas acima)
-    logger.info("")
-    logger.info("8. Outras colunas categóricas:")
-
     outras_colunas = [
         'O seu gênero:',
         'Já estudou programação?',
@@ -304,7 +301,6 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     for coluna in outras_colunas:
         if coluna in df.columns:
             logger.debug(f"")
-
             logger.debug(f"   {coluna}")
             valores_unicos = df[coluna].nunique()
             logger.debug(f"   Valores únicos: {valores_unicos}")
@@ -317,8 +313,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
                 logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     logger.info("")
-    logger.info(f"RESULTADO FINAL:")
-    logger.info(f"Dataset unificado: {len(df)} registros, {len(df.columns)} colunas")
+    logger.info(f"✅ Dataset unificado: {len(df)} registros, {len(df.columns)} colunas")
 
 
     return df

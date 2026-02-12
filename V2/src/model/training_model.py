@@ -144,7 +144,7 @@ def registrar_features_e_modelo_devclub(
     Returns:
         Dicionário com resultados do registro
     """
-    print("REGISTRO DE FEATURES E MODELO DEVCLUB PARA PRODUÇÃO")
+    logger.info("Preparando dados e treinando modelo")
 
     # Iniciar MLflow run
     with mlflow.start_run():
@@ -153,8 +153,9 @@ def registrar_features_e_modelo_devclub(
         mlflow.log_param("save_files", save_files)
 
         # 1. PREPARAR DADOS E TREINAR MODELO FINAL
-        print("\n1. PREPARANDO DADOS E TREINANDO MODELO FINAL")
-        print("-" * 50)
+        logger.info("")
+        logger.info(f"Dataset: {len(dataset_devclub_encoded):,} registros")
+        logger.info(f"Colunas totais: {len(dataset_devclub_encoded.columns)}")
 
         # Dataset encodado
         dataset_final = dataset_devclub_encoded.copy()
@@ -162,18 +163,11 @@ def registrar_features_e_modelo_devclub(
         # Dataset original para extrair datas
         dataset_original = dataset_devclub_original.copy()
 
-        print(f"Dataset: {len(dataset_final):,} registros")
-        print(f"Colunas totais: {len(dataset_final.columns)}")
-
         # Colunas a EXCLUIR do treinamento (não usar como features)
         colunas_excluir_treino = ['target']
 
         # Verificar quais colunas existem
         colunas_excluir_existentes = [col for col in colunas_excluir_treino if col in dataset_final.columns]
-
-        print(f"Colunas excluídas do treinamento:")
-        for col in colunas_excluir_existentes:
-            print(f"  - {col}")
 
         # Preparar features e target
         X = dataset_final.drop(columns=colunas_excluir_existentes)
@@ -201,8 +195,8 @@ def registrar_features_e_modelo_devclub(
             nova_ordem = colunas_antes + colunas_telefone_ordenadas + colunas_depois
             X_clean = X_clean[nova_ordem]
 
-        print(f"Features para treinamento: {len(X_clean.columns)}")
-        print(f"Target: {y.sum():,} positivos ({y.mean()*100:.2f}%)")
+        logger.info(f"Features para treinamento: {len(X_clean.columns)}")
+        logger.info(f"Target: {y.sum():,} positivos ({y.mean()*100:.2f}%)")
 
         # Logar dados do dataset
         mlflow.log_param("total_records", len(dataset_final))

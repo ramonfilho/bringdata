@@ -36,7 +36,7 @@ def aplicar_janela_conversao(
     Returns:
         DataFrame de leads filtrado pela janela de conversão
     """
-    print(f"\nAPLICANDO JANELA DE CONVERSÃO ({janela_dias} DIAS)")
+    logger.info(f"Aplicando janela de conversão de {janela_dias} dias")
 
     df = df_leads.copy()
 
@@ -53,8 +53,8 @@ def aplicar_janela_conversao(
     # 2. Calcular data limite dos leads
     data_limite_leads = data_max_vendas - pd.Timedelta(days=janela_dias)
 
-    print(f"Data máxima das vendas: {data_max_vendas.strftime('%Y-%m-%d')}")
-    print(f"Data limite dos leads (vendas - {janela_dias} dias): {data_limite_leads.strftime('%Y-%m-%d')}")
+    logger.info(f"Data máxima das vendas: {data_max_vendas.strftime('%Y-%m-%d')}")
+    logger.info(f"Data limite dos leads: {data_limite_leads.strftime('%Y-%m-%d')}")
 
     # 3. Converter data dos leads
     if 'Data' in df.columns:
@@ -68,10 +68,11 @@ def aplicar_janela_conversao(
     data_min_antes = df['Data'].min()
     data_max_antes = df['Data'].max()
 
-    print(f"\nANTES DO FILTRO:")
-    print(f"  Total de leads: {total_antes:,}")
-    print(f"  Target=1: {target_antes:,} ({target_antes/total_antes*100:.2f}%)")
-    print(f"  Período: {data_min_antes.strftime('%Y-%m-%d')} a {data_max_antes.strftime('%Y-%m-%d')}")
+    logger.info("")
+    logger.info(f"Antes do filtro:")
+    logger.info(f"  Total de leads: {total_antes:,}")
+    logger.info(f"  Target=1: {target_antes:,} ({target_antes/total_antes*100:.2f}%)")
+    logger.info(f"  Período: {data_min_antes.strftime('%Y-%m-%d')} a {data_max_antes.strftime('%Y-%m-%d')}")
 
     # 5. Filtrar leads
     # Lógica correta: manter leads até data_limite OU que já converteram (target=1)
@@ -86,18 +87,18 @@ def aplicar_janela_conversao(
     leads_removidos = total_antes - total_depois
     dias_removidos = (data_max_antes - data_limite_leads).days
 
-    print(f"\nDEPOIS DO FILTRO:")
-    print(f"  Total de leads: {total_depois:,}")
-    print(f"  Target=1: {target_depois:,} ({target_depois/total_depois*100:.2f}%)")
-    print(f"  Período: {data_min_antes.strftime('%Y-%m-%d')} a {data_max_depois.strftime('%Y-%m-%d')}")
+    logger.info("")
+    logger.info(f"Depois do filtro:")
+    logger.info(f"  Total de leads: {total_depois:,}")
+    logger.info(f"  Target=1: {target_depois:,} ({target_depois/total_depois*100:.2f}%)")
+    logger.info(f"  Período: {data_min_antes.strftime('%Y-%m-%d')} a {data_max_depois.strftime('%Y-%m-%d')}")
 
-    print(f"\nREMOVIDOS:")
-    print(f"  Leads removidos: {leads_removidos:,} ({leads_removidos/total_antes*100:.1f}%)")
-    print(f"  Dias removidos: {dias_removidos}")
-    print(f"  Target=1 removidos: {target_antes - target_depois:,}")
-
-    print(f"\nRAZÃO: Esses {leads_removidos:,} leads ainda não tiveram {janela_dias} dias")
-    print(f"       para converter (última venda em {data_max_vendas.strftime('%Y-%m-%d')})")
+    logger.info("")
+    logger.info(f"Removidos:")
+    logger.info(f"  Leads removidos: {leads_removidos:,} ({leads_removidos/total_antes*100:.1f}%)")
+    logger.info(f"  Dias removidos: {dias_removidos}")
+    logger.info(f"  Target=1 removidos: {target_antes - target_depois:,}")
+    logger.info(f"  Razão: Leads ainda não tiveram {janela_dias} dias para converter")
 
 
     return df_filtrado

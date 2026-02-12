@@ -128,12 +128,18 @@ def match_leads_to_sales(
 
     total_matched = matched_by_email + matched_by_phone
     match_rate = (total_matched / len(leads) * 100) if len(leads) > 0 else 0
+    email_match_pct = (matched_by_email / total_matched * 100) if total_matched > 0 else 0
 
+    # NORMAL: Resumo simplificado
     logger.info(f"   ✅ Matching concluído:")
-    logger.info(f"      Total conversões: {total_matched}")
-    logger.info(f"      Por email: {matched_by_email}")
-    logger.info(f"      Por telefone: {matched_by_phone}")
-    logger.info(f"      Taxa de conversão geral: {match_rate:.2f}%")
+    logger.info(f"      Total de matches: {total_matched}")
+    logger.info(f"      Percentual de matching: {match_rate:.2f}%")
+    logger.info(f"      Percentual de encontro por e-mail: {email_match_pct:.1f}%")
+
+    # DEBUG: Detalhes completos
+    logger.debug(f"      Detalhamento:")
+    logger.debug(f"         Por email: {matched_by_email}")
+    logger.debug(f"         Por telefone: {matched_by_phone}")
 
     return leads
 

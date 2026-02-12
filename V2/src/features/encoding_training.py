@@ -25,18 +25,20 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
     Returns:
         DataFrame com encoding aplicado
     """
-    print("ENCODING ESTRATÉGICO")
-    print(f"Estratégia Medium: {medium_strategy}")
+    logger.debug("ENCODING ESTRATÉGICO")
+    logger.debug(f"Estratégia Medium: {medium_strategy}")
 
     df = df_devclub_fe.copy()
 
-    print(f"\nProcessando DATASET V1 DEVCLUB...")
-    print(f"Colunas antes do encoding: {len(df.columns)}")
+    logger.debug(f"\nProcessando DATASET V1 DEVCLUB...")
 
-    # Lista de colunas antes do encoding
-    print(f"\nColunas ANTES do encoding:")
+    # NORMAL: Colunas antes do encoding (número)
+    logger.info(f"Colunas antes do encoding: {len(df.columns)}")
+
+    # DEBUG: Lista de colunas antes do encoding
+    logger.debug(f"\nColunas ANTES do encoding:")
     for i, col in enumerate(df.columns, 1):
-        print(f"  {i:2d}. {col}")
+        logger.debug(f"  {i:2d}. {col}")
 
     # 1. ENCODING ORDINAL para variáveis com ordem natural
     # IMPORTANTE: Usar valores NORMALIZADOS (após unificar_categorias_completo)
@@ -51,21 +53,22 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
         'dia_semana': [0, 1, 2, 3, 4, 5, 6]  # Já é numérico
     }
 
-    print(f"\nAplicando ORDINAL ENCODING:")
+    # DEBUG: Aplicando ORDINAL ENCODING
+    logger.debug(f"\nAplicando ORDINAL ENCODING:")
     for var, ordem in variaveis_ordinais.items():
         if var in df.columns:
             if var == 'dia_semana':
                 # Já é numérico, apenas reportar
-                print(f"  {var}: mantido como numérico (0-6)")
+                logger.debug(f"  {var}: mantido como numérico (0-6)")
             else:
                 # Criar mapeamento ordinal
                 mapeamento = {categoria: i for i, categoria in enumerate(ordem)}
                 df[var] = df[var].map(mapeamento)
-                print(f"  {var}: {len(ordem)} categorias → 0-{len(ordem)-1}")
+                logger.debug(f"  {var}: {len(ordem)} categorias → 0-{len(ordem)-1}")
 
-    # 1.5. PROCESSAR MEDIUM COM BINARY_TOP3
+    # 1.5. DEBUG: PROCESSAR MEDIUM COM BINARY_TOP3
     if 'Medium' in df.columns:
-        print(f"\nProcessando Medium com estratégia: {medium_strategy}")
+        logger.debug(f"\nProcessando Medium com estratégia: {medium_strategy}")
 
         # Criar features binárias para as 3 categorias mais estáveis temporalmente
         df['Medium_Linguagem_programacao'] = (df['Medium'] == 'Linguagem de programação').astype(int)
@@ -73,11 +76,11 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
         df['Medium_Lookalike_2pct_Cadastrados'] = (df['Medium'] == 'Lookalike 2% Cadastrados - DEV 2.0 + Interesses').astype(int)
         df = df.drop(columns=['Medium'])
 
-        print(f"  ✓ Criadas 3 features binárias:")
-        print(f"    Medium_Linguagem_programacao: {df['Medium_Linguagem_programacao'].sum():,} ({df['Medium_Linguagem_programacao'].mean()*100:.1f}%)")
-        print(f"    Medium_Aberto: {df['Medium_Aberto'].sum():,} ({df['Medium_Aberto'].mean()*100:.1f}%)")
-        print(f"    Medium_Lookalike_2pct_Cadastrados: {df['Medium_Lookalike_2pct_Cadastrados'].sum():,} ({df['Medium_Lookalike_2pct_Cadastrados'].mean()*100:.1f}%)")
-        print(f"  ✓ Categorias não cobertas (outros) → [0, 0, 0]")
+        logger.debug(f"  ✓ Criadas 3 features binárias:")
+        logger.debug(f"    Medium_Linguagem_programacao: {df['Medium_Linguagem_programacao'].sum():,} ({df['Medium_Linguagem_programacao'].mean()*100:.1f}%)")
+        logger.debug(f"    Medium_Aberto: {df['Medium_Aberto'].sum():,} ({df['Medium_Aberto'].mean()*100:.1f}%)")
+        logger.debug(f"    Medium_Lookalike_2pct_Cadastrados: {df['Medium_Lookalike_2pct_Cadastrados'].sum():,} ({df['Medium_Lookalike_2pct_Cadastrados'].mean()*100:.1f}%)")
+        logger.debug(f"  ✓ Categorias não cobertas (outros) → [0, 0, 0]")
 
     # 2. ONE-HOT ENCODING para variáveis categóricas nominais
     variaveis_one_hot = []
@@ -92,7 +95,8 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
             if df[col].dtype == 'object' or df[col].nunique() <= 20:
                 variaveis_one_hot.append(col)
 
-    print(f"\nAplicando ONE-HOT ENCODING para {len(variaveis_one_hot)} variáveis:")
+    # DEBUG: Aplicando ONE-HOT ENCODING
+    logger.debug(f"\nAplicando ONE-HOT ENCODING para {len(variaveis_one_hot)} variáveis:")
 
     # Aplicar one-hot encoding
     df_encoded = pd.get_dummies(df, columns=variaveis_one_hot, prefix_sep='_', dtype=int)
@@ -101,42 +105,42 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
     if 'telefone_comprimento_8' in df_encoded.columns:
         df_encoded = df_encoded.drop(columns=['telefone_comprimento_8'])
 
-    # Lista de colunas depois do encoding
-    print(f"\nColunas DEPOIS do encoding:")
+    # DEBUG: Lista de colunas depois do encoding
+    logger.debug(f"\nColunas DEPOIS do encoding:")
     for i, col in enumerate(df_encoded.columns, 1):
-        print(f"  {i:2d}. {col}")
+        logger.debug(f"  {i:2d}. {col}")
 
-    # Reportar criação de colunas
+    # DEBUG: Reportar criação de colunas
     colunas_criadas = len(df_encoded.columns) - len(df.columns)
     for var in variaveis_one_hot:
         categorias_unicas = df[var].nunique()
-        print(f"  {var}: {categorias_unicas} categorias → {categorias_unicas} colunas binárias")
+        logger.debug(f"  {var}: {categorias_unicas} categorias → {categorias_unicas} colunas binárias")
 
-    print(f"\nResultado:")
-    print(f"  Colunas one-hot originais: {len(variaveis_one_hot)}")
-    print(f"  Colunas binárias criadas: {colunas_criadas}")
-    print(f"  Total de colunas final: {len(df_encoded.columns)}")
+    logger.debug(f"\nResultado:")
+    logger.debug(f"  Colunas one-hot originais: {len(variaveis_one_hot)}")
+    logger.debug(f"  Colunas binárias criadas: {colunas_criadas}")
+    logger.debug(f"  Total de colunas final: {len(df_encoded.columns)}")
 
-    # Verificar tipos de dados finais
+    # NORMAL: Verificar tipos de dados finais
     tipos_dados = df_encoded.dtypes.value_counts()
-    print(f"\nTipos de dados no dataset final:")
+    logger.info("")
+    logger.info(f"Tipos de dados no dataset final:")
     for tipo, count in tipos_dados.items():
-        print(f"  {tipo}: {count} colunas")
+        logger.info(f"  {tipo}: {count} colunas")
 
-    # Resumo final
-    print("DATASET FINAL ENCODADO")
+    # NORMAL: Resumo final
+    logger.info("")
+    logger.info(f"Dataset final encodado:")
+    logger.info(f"  Registros: {len(df_encoded):,}")
+    logger.info(f"  Colunas: {len(df_encoded.columns)}")
+    logger.info(f"  Target positivo: {df_encoded['target'].sum():,} ({df_encoded['target'].mean()*100:.2f}%)")
 
-    print(f"\nDATASET V1 DEVCLUB:")
-    print(f"  Registros: {len(df_encoded):,}")
-    print(f"  Colunas: {len(df_encoded.columns)}")
-    print(f"  Target positivo: {df_encoded['target'].sum():,} ({df_encoded['target'].mean()*100:.2f}%)")
-
-    # Verificar presença da feature telefone_comprimento_8
-    print(f"\nVERIFICAÇÃO DA FEATURE telefone_comprimento_8:")
+    # DEBUG: Verificar presença da feature telefone_comprimento_8
+    logger.debug(f"\nVERIFICAÇÃO DA FEATURE telefone_comprimento_8:")
     status = "PRESENTE" if 'telefone_comprimento_8' in df_encoded.columns else "AUSENTE"
-    print(f"  DATASET V1 DEVCLUB: {status}")
+    logger.debug(f"  DATASET V1 DEVCLUB: {status}")
 
-    print(f"\nDataset encodado está pronto para modelagem!")
+    logger.debug(f"\nDataset encodado está pronto para modelagem!")
 
     logger.info(f"✅ Encoding estratégico completo")
 

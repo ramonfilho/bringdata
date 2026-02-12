@@ -85,7 +85,8 @@ def criar_dataset_devclub(df_v1_final: pd.DataFrame, df_vendas_unificado: pd.Dat
     Returns:
         DataFrame V1 com target filtrado apenas para DevClub
     """
-    print(f"FILTRAGEM DEVCLUB - MANTENDO TARGET DO MATCHING INICIAL")
+    # DEBUG: Título da filtragem
+    logger.debug("FILTRAGEM DEVCLUB - MANTENDO TARGET DO MATCHING INICIAL")
 
     # 1. PRODUTOS DEVCLUB A MANTER
     produtos_devclub_manter = [
@@ -117,10 +118,10 @@ def criar_dataset_devclub(df_v1_final: pd.DataFrame, df_vendas_unificado: pd.Dat
     df_vendas_devclub['telefone_clean'] = df_vendas_devclub['telefone'].apply(normalizar_telefone_robusto)
     telefones_compradores_devclub = set(df_vendas_devclub['telefone_clean'].dropna())
 
-    print(f"Produtos DevClub identificados: {len(produtos_devclub_manter)}")
-    print(f"Vendas DevClub: {len(df_vendas_devclub):,}")
-    print(f"Emails únicos compradores DevClub: {len(emails_compradores_devclub):,}")
-    print(f"Telefones únicos compradores DevClub: {len(telefones_compradores_devclub):,}")
+    logger.debug(f"Produtos DevClub identificados: {len(produtos_devclub_manter)}")
+    logger.debug(f"Vendas DevClub: {len(df_vendas_devclub):,}")
+    logger.debug(f"Emails únicos compradores DevClub: {len(emails_compradores_devclub):,}")
+    logger.debug(f"Telefones únicos compradores DevClub: {len(telefones_compradores_devclub):,}")
 
     # 3. FILTRAR TARGET EXISTENTE
     df_devclub = df_v1_final.copy()
@@ -132,7 +133,7 @@ def criar_dataset_devclub(df_v1_final: pd.DataFrame, df_vendas_unificado: pd.Dat
     # Pegar índices com target=1 (matches do matching inicial)
     indices_matches = df_devclub[df_devclub['target'] == 1].index
 
-    print(f"\nMatches do matching inicial (célula 15): {len(indices_matches):,}")
+    logger.debug(f"\nMatches do matching inicial (célula 15): {len(indices_matches):,}")
 
     # 4. VERIFICAR QUAIS DESSES MATCHES SÃO DEVCLUB
     # Normalizar dados do dataset de pesquisa
@@ -162,8 +163,8 @@ def criar_dataset_devclub(df_v1_final: pd.DataFrame, df_vendas_unificado: pd.Dat
     indices_descartados = set(indices_matches) - devclub_matches
 
     if len(indices_descartados) > 0:
-        print(f"\n🔍 ANALISANDO {len(indices_descartados):,} MATCHES DESCARTADOS:")
-        print("-" * 70)
+        logger.debug(f"\n🔍 ANALISANDO {len(indices_descartados):,} MATCHES DESCARTADOS:")
+        logger.debug("-" * 70)
 
         # Normalizar vendas para busca
         df_vendas_unificado['email_clean'] = df_vendas_unificado['email'].apply(normalizar_email)
@@ -190,13 +191,13 @@ def criar_dataset_devclub(df_v1_final: pd.DataFrame, df_vendas_unificado: pd.Dat
         produtos_count = Counter(produtos_descartados)
         produtos_sorted = produtos_count.most_common()
 
-        print(f"\n{'PRODUTO':<60} {'QUANTIDADE':>10}")
-        print("-" * 70)
+        logger.debug(f"\n{'PRODUTO':<60} {'QUANTIDADE':>10}")
+        logger.debug("-" * 70)
         for produto, qtd in produtos_sorted:
-            print(f"{str(produto)[:58]:<60} {qtd:>10}")
+            logger.debug(f"{str(produto)[:58]:<60} {qtd:>10}")
 
-        print(f"\n{'TOTAL DE PRODUTOS DIFERENTES:':<60} {len(produtos_sorted):>10}")
-        print(f"{'TOTAL DE COMPRAS (pode haver duplicatas):':<60} {len(produtos_descartados):>10}")
+        logger.debug(f"\n{'TOTAL DE PRODUTOS DIFERENTES:':<60} {len(produtos_sorted):>10}")
+        logger.debug(f"{'TOTAL DE COMPRAS (pode haver duplicatas):':<60} {len(produtos_descartados):>10}")
 
     # 5. ATUALIZAR TARGET - ZERAR NÃO-DEVCLUB
     df_devclub['target_devclub'] = 0
@@ -213,22 +214,23 @@ def criar_dataset_devclub(df_v1_final: pd.DataFrame, df_vendas_unificado: pd.Dat
 
     matches_perdidos = len(indices_matches) - leads_qualificados
 
-    print(f"\nRESULTADO DA FILTRAGEM:")
-    print(f"  Matches iniciais: {len(indices_matches):,}")
-    print(f"  Matches DevClub mantidos: {leads_qualificados:,}")
-    print(f"  Matches descartados (outros produtos): {matches_perdidos:,}")
-    print(f"  Taxa de retenção: {(leads_qualificados/len(indices_matches)*100):.1f}%" if len(indices_matches) > 0 else "0.0%")
+    logger.debug(f"\nRESULTADO DA FILTRAGEM:")
+    logger.debug(f"  Matches iniciais: {len(indices_matches):,}")
+    logger.debug(f"  Matches DevClub mantidos: {leads_qualificados:,}")
+    logger.debug(f"  Matches descartados (outros produtos): {matches_perdidos:,}")
+    logger.debug(f"  Taxa de retenção: {(leads_qualificados/len(indices_matches)*100):.1f}%" if len(indices_matches) > 0 else "0.0%")
 
-    print(f"\nDETALHAMENTO DOS MATCHES DEVCLUB:")
-    print(f"  Matches apenas por email: {matches_por_email:,}")
-    print(f"  Matches apenas por telefone: {matches_por_telefone:,}")
-    print(f"  Matches por ambos (email E telefone): {matches_por_ambos:,}")
+    logger.debug(f"\nDETALHAMENTO DOS MATCHES DEVCLUB:")
+    logger.debug(f"  Matches apenas por email: {matches_por_email:,}")
+    logger.debug(f"  Matches apenas por telefone: {matches_por_telefone:,}")
+    logger.debug(f"  Matches por ambos (email E telefone): {matches_por_ambos:,}")
 
-    print(f"\nDATASET V1 DEVCLUB:")
-    print(f"  Total de registros: {total_registros:,}")
-    print(f"  Leads qualificados DevClub: {leads_qualificados:,}")
-    print(f"  Taxa de conversão DevClub: {taxa_conversao:.2f}%")
-    print(f"  Colunas: {len(df_devclub.columns)}")
+    # NORMAL: Resumo final
+    logger.info("")
+    logger.info("DATASET V1 DEVCLUB:")
+    logger.info(f"  Total de registros: {total_registros:,}")
+    logger.info(f"  Leads qualificados DevClub: {leads_qualificados:,}")
+    logger.info(f"  Taxa de conversão DevClub: {taxa_conversao:.2f}%")
 
 
     return df_devclub

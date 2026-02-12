@@ -581,88 +581,11 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
 
     logger.info("=" * 80)
     # === CÉLULA 17: Filtragem DevClub ===
+    logger.info("=" * 80)
     logger.info("")
-    logger.info(f"🎓 CÉLULA 17: FILTRAGEM DEVCLUB + JANELA DE CONVERSÃO")
+    logger.info(f"🎓 CÉLULA 17: FILTRAGEM DEVCLUB")
 
     dataset_v1_devclub = criar_dataset_devclub(dataset_v1_final, df_vendas_final)
-
-    # Aplicar janela de conversão de 20 dias (captação + CPL + carrinho)
-    # Captação: 7 dias (terça-segunda) + CPL: 6 dias (terça-domingo) + Carrinho: 7 dias (segunda-domingo) = 20 dias
-    dataset_v1_devclub = aplicar_janela_conversao(
-        df_leads=dataset_v1_devclub,
-        df_vendas=df_vendas_final,
-        janela_dias=20
-    )
-
-    # === ANÁLISE TEMPORÁRIA: TAXA DE CONVERSÃO POR MEDIUM ===
-    if 'Medium' in dataset_v1_devclub.columns and 'target' in dataset_v1_devclub.columns:
-        logger.debug("\n" + "="*100)
-        logger.debug("📊 ANÁLISE TEMPORÁRIA: TAXA DE CONVERSÃO POR CATEGORIA MEDIUM")
-        logger.debug("="*100)
-
-        analysis = dataset_v1_devclub.groupby('Medium').agg({
-            'target': ['count', 'sum', 'mean']
-        })
-        analysis.columns = ['Total_Leads', 'Conversões', 'Taxa_Conversão']
-        analysis['Pct_Leads'] = (analysis['Total_Leads'] / analysis['Total_Leads'].sum() * 100)
-        analysis['Taxa_Conv_%'] = (analysis['Taxa_Conversão'] * 100)
-        analysis = analysis.sort_values('Total_Leads', ascending=False)
-
-        taxa_global = (analysis['Conversões'].sum() / analysis['Total_Leads'].sum() * 100)
-
-        logger.debug(f"\n{'CATEGORIA':<50} {'LEADS':>10} {'%TOTAL':>7} {'CONV':>7} {'TAXA':>7} {'vs MÉDIA':>10}")
-        logger.debug("-"*100)
-
-        for idx, row in analysis.iterrows():
-            categoria = str(idx)[:48]
-            leads = int(row['Total_Leads'])
-            pct = row['Pct_Leads']
-            conv = int(row['Conversões'])
-            taxa = row['Taxa_Conv_%']
-            diff = taxa - taxa_global
-            diff_str = f"{diff:+.2f}pp"
-            logger.debug(f"{categoria:<50} {leads:>10,} {pct:>6.1f}% {conv:>7,} {taxa:>6.2f}% {diff_str:>10}")
-
-        logger.debug("\n" + "-"*100)
-        logger.debug(f"{'MÉDIA GLOBAL':<50} {int(analysis['Total_Leads'].sum()):>10,} {'100.0%':>7} {int(analysis['Conversões'].sum()):>7,} {taxa_global:>6.2f}%")
-
-        # Análise TOP 3 vs OUTROS
-        logger.debug("\n" + "="*100)
-        logger.debug("🎯 COMPARAÇÃO: TOP 3 (binary_top3) vs OUTROS (agrupados como [0,0,0])")
-        logger.debug("="*100)
-
-        top3 = ['Linguagem de programação', 'Aberto', 'Lookalike 2% Cadastrados - DEV 2.0 + Interesses']
-        top3_data = analysis[analysis.index.isin(top3)]
-        outros_data = analysis[~analysis.index.isin(top3)]
-
-        top3_leads = top3_data['Total_Leads'].sum()
-        top3_conv = top3_data['Conversões'].sum()
-        top3_taxa = (top3_conv / top3_leads * 100)
-
-        outros_leads = outros_data['Total_Leads'].sum()
-        outros_conv = outros_data['Conversões'].sum()
-        outros_taxa = (outros_conv / outros_leads * 100) if outros_leads > 0 else 0
-
-        logger.debug(f"\nTOP 3: {int(top3_leads):,} leads ({top3_leads/analysis['Total_Leads'].sum()*100:.1f}%) - Taxa: {top3_taxa:.2f}%")
-        logger.debug(f"OUTROS: {int(outros_leads):,} leads ({outros_leads/analysis['Total_Leads'].sum()*100:.1f}%) - Taxa: {outros_taxa:.2f}%")
-        logger.debug(f"DIFERENÇA: {top3_taxa - outros_taxa:+.2f}pp")
-
-        if abs(top3_taxa - outros_taxa) < 0.1:
-            logger.debug("\n✅ Taxas muito similares - agrupar OUTROS como [0,0,0] parece razoável")
-        elif abs(top3_taxa - outros_taxa) > 0.2:
-            logger.debug(f"\n⚠️  ATENÇÃO: Diferença significativa ({abs(top3_taxa - outros_taxa):.2f}pp)!")
-            logger.debug("   Considerar adicionar categorias importantes de OUTROS ao encoding")
-
-            # Mostrar categorias OUTROS com maior volume ou taxa discrepante
-            logger.debug("\n   Categorias OUTROS ordenadas por volume:")
-            for idx, row in outros_data.head(5).iterrows():
-                categoria = str(idx)[:45]
-                leads = int(row['Total_Leads'])
-                taxa = row['Taxa_Conv_%']
-                diff = taxa - outros_taxa
-                logger.debug(f"     • {categoria:<45} {leads:>8,} leads - {taxa:.2f}% ({diff:+.2f}pp vs média OUTROS)")
-
-        logger.debug("="*100 + "\n")
 
     # === LOG: VERIFICAÇÃO DE PRODUTOS DEVCLUB ===
     logger.debug("\n" + "=" * 80)
@@ -831,6 +754,19 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     }
 
     logger.info("=" * 80)
+    # === CÉLULA 17.1: Janela de Conversão ===
+    logger.info("")
+    logger.info(f"⏰ CÉLULA 17.1: JANELA DE CONVERSÃO")
+
+    # Aplicar janela de conversão de 20 dias (captação + CPL + carrinho)
+    # Captação: 7 dias (terça-segunda) + CPL: 6 dias (terça-domingo) + Carrinho: 7 dias (segunda-domingo) = 20 dias
+    dataset_v1_devclub = aplicar_janela_conversao(
+        df_leads=dataset_v1_devclub,
+        df_vendas=df_vendas_final,
+        janela_dias=20
+    )
+
+    logger.info("=" * 80)
     # === CÉLULA 18: Feature Engineering ===
     logger.info("")
     logger.info(f"⚙️  CÉLULA 18: FEATURE ENGINEERING")
@@ -866,6 +802,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
 
     logger.info("=" * 80)
     # === CÉLULA 20: Encoding Estratégico ===
+    logger.info("=" * 80)
     logger.info("")
     logger.info(f"🔢 CÉLULA 20: ENCODING ESTRATÉGICO")
     dataset_v1_devclub_encoded = aplicar_encoding_estrategico(dataset_v1_devclub_fe, medium_strategy=medium_strategy)
@@ -873,6 +810,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     # === HYPERPARAMETER TUNING (opcional) ===
     melhores_params = None
     if tune_hyperparams:
+        logger.info("")
         logger.info("EXECUTANDO HYPERPARAMETER TUNING")
 
         resultado_tuning = hyperparameter_tuning(
@@ -888,7 +826,11 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         else:
             logger.warning(f"\n⚠️  Mantendo hiperparâmetros baseline (tuning não trouxe ganho significativo)")
 
-    # === CÉLULA MODELAGEM: Treino e Registro do Modelo ===
+    logger.info("=" * 80)
+    # === CÉLULA 21: Treino e Registro do Modelo ===
+    logger.info("")
+    logger.info(f"🤖 CÉLULA 21: TREINO E REGISTRO DO MODELO")
+
     resultado_registro_devclub = registrar_features_e_modelo_devclub(
         dataset_v1_devclub_encoded,
         dataset_v1_devclub,

@@ -25,11 +25,12 @@ def unificar_utm_source_term(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     """
     df = df_pesquisa.copy()
 
-    # NORMAL: Resumo inicial
-    logger.info(f"Dataset inicial: {len(df)} registros")
+    # DEBUG: Resumo inicial
+    logger.debug(f"Dataset inicial: {len(df)} registros")
+
     logger.info("")
     logger.info("1. UNIFICANDO COLUNA SOURCE:")
-    logger.info("-" * 35)
+    logger.debug("-" * 35)
 
     if 'Source' in df.columns:
         # NORMAL: Valores únicos antes
@@ -68,7 +69,7 @@ def unificar_utm_source_term(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     # 2. UNIFICAR COLUNA TERM
     logger.info("")
     logger.info("2. UNIFICANDO COLUNA TERM:")
-    logger.info("-" * 35)
+    logger.debug("-" * 35)
 
     if 'Term' in df.columns:
         # NORMAL: Valores únicos antes
@@ -122,9 +123,9 @@ def unificar_utm_source_term(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             valor_str = str(valor) if pd.notna(valor) else 'nan'
             logger.debug(f"  {valor_str:<25} {count:>6,} ({pct:>5.1f}%)")
 
-    # NORMAL: Resultado final
+    # DEBUG: Resultado final
     logger.info("")
-    logger.info("RESULTADO FINAL:")
+    logger.debug("RESULTADO FINAL:")
     logger.info(f"Dataset: {len(df)} registros, {len(df.columns)} colunas")
 
 
