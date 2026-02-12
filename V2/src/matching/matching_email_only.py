@@ -96,7 +96,7 @@ def fazer_matching_email_only(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.DataFr
     print("Target baseado EXCLUSIVAMENTE em email (sem telefone)")
 
     # Listar variáveis
-    print(f"\n📋 VARIÁVEIS DO DATASET V1 ({len(df_resultado.columns)} colunas):")
+    print(f"\n VARIÁVEIS DO DATASET V1 ({len(df_resultado.columns)} colunas):")
     for i, col in enumerate(df_resultado.columns, 1):
         print(f"  {i:2d}. {col}")
 

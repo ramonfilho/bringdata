@@ -59,7 +59,7 @@ class GuruSalesExtractor:
             'per_page': 100,  # Máximo permitido pela API
         }
 
-        print(f'🔍 Buscando transações de {start_date} a {end_date}...')
+        print(f' Buscando transações de {start_date} a {end_date}...')
 
         while True:
             if cursor:
@@ -74,7 +74,7 @@ class GuruSalesExtractor:
                 )
 
                 if response.status_code != 200:
-                    print(f'❌ Erro na requisição: {response.status_code}')
+                    print(f' Erro na requisição: {response.status_code}')
                     print(response.text[:500])
                     break
 
@@ -95,10 +95,10 @@ class GuruSalesExtractor:
                 time.sleep(0.2)
 
             except Exception as e:
-                print(f'❌ Erro ao buscar página {page}: {e}')
+                print(f' Erro ao buscar página {page}: {e}')
                 break
 
-        print(f'✅ Total de transações buscadas: {len(all_transactions)}')
+        print(f' Total de transações buscadas: {len(all_transactions)}')
         return all_transactions
 
     def map_transaction_to_row(self, transaction: Dict[str, Any]) -> Dict[str, Any]:
@@ -301,8 +301,8 @@ class GuruSalesExtractor:
             transactions = self.fetch_transactions(start_date, end_date)
         else:
             # Dividir em chunks de 180 dias
-            print(f'\n⚠️  Período de {total_days} dias excede limite de 180 dias')
-            print(f'📦 Dividindo em múltiplas requisições...\n')
+            print(f'\n  Período de {total_days} dias excede limite de 180 dias')
+            print(f' Dividindo em múltiplas requisições...\n')
 
             transactions = []
             current_start = start
@@ -315,7 +315,7 @@ class GuruSalesExtractor:
                 chunk_start_str = current_start.strftime('%Y-%m-%d')
                 chunk_end_str = current_end.strftime('%Y-%m-%d')
 
-                print(f'📦 Chunk {chunk_num}: {chunk_start_str} a {chunk_end_str}')
+                print(f' Chunk {chunk_num}: {chunk_start_str} a {chunk_end_str}')
                 chunk_transactions = self.fetch_transactions(chunk_start_str, chunk_end_str)
                 transactions.extend(chunk_transactions)
 
@@ -327,10 +327,10 @@ class GuruSalesExtractor:
                 if current_start < end:
                     time.sleep(0.5)
 
-            print(f'\n✅ Total de transações de todos os chunks: {len(transactions)}')
+            print(f'\n Total de transações de todos os chunks: {len(transactions)}')
 
         # Mapear para DataFrame
-        print(f'\n📊 Mapeando {len(transactions)} transações...')
+        print(f'\n Mapeando {len(transactions)} transações...')
         rows = [self.map_transaction_to_row(t) for t in transactions]
         df = pd.DataFrame(rows)
 
@@ -365,9 +365,9 @@ class GuruSalesExtractor:
 
         # Salvar se caminho fornecido
         if output_path:
-            print(f'\n💾 Salvando relatório: {output_path}')
+            print(f'\n Salvando relatório: {output_path}')
             df.to_excel(output_path, index=False)
-            print(f'✅ Relatório salvo com sucesso!')
+            print(f' Relatório salvo com sucesso!')
 
         return df
 
@@ -408,4 +408,4 @@ if __name__ == '__main__':
         output_path='V2/files/validation/vendas/Guru-Vendas-API-ultimos-7-dias.xlsx'
     )
 
-    print(f'\n📊 Relatório gerado com {len(df)} transações')
+    print(f'\n Relatório gerado com {len(df)} transações')

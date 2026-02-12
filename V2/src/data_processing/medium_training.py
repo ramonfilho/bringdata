@@ -174,7 +174,7 @@ def extrair_publico_medium(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         if original in df['Medium'].values:
             count = (df['Medium'] == original).sum()
             df.loc[df['Medium'] == original, 'Medium'] = unificado
-            logger.debug(f"  '{original}' → '{unificado}' ({count:,} registros)")
+            logger.debug(f"  '{original}'  '{unificado}' ({count:,} registros)")
 
     # NORMAL: Resultado final
     logger.info("")

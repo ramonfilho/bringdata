@@ -2,8 +2,8 @@
 Módulo para matching com validação cruzada usando alunos TODOS.xlsx
 
 Este módulo implementa matching em duas etapas:
-1. Matching primário: pesquisa ↔ vendas (email)
-2. Matching secundário validado: pesquisa ↔ alunos TODOS ↔ vendas DevClub
+1. Matching primário: pesquisa  vendas (email)
+2. Matching secundário validado: pesquisa  alunos TODOS  vendas DevClub
 
 Garante que apenas alunos DevClub confirmados sejam adicionados.
 """
@@ -38,9 +38,9 @@ def fazer_matching_email_with_validation(
     Faz matching com validação cruzada usando alunos TODOS.xlsx
 
     Estratégia:
-    1. Matching primário: pesquisa ↔ vendas (por email)
+    1. Matching primário: pesquisa  vendas (por email)
     2. Identificar emails DevClub nas vendas
-    3. Matching secundário: pesquisa ↔ alunos TODOS (por email)
+    3. Matching secundário: pesquisa  alunos TODOS (por email)
     4. Validar secundário: só aceita se email está em vendas DevClub
 
     Args:
@@ -56,8 +56,8 @@ def fazer_matching_email_with_validation(
     df_pesquisa = df_pesquisa_v1.copy()
     df_vendas_copy = df_vendas.copy()
 
-    # === ETAPA 1: MATCHING PRIMÁRIO (pesquisa ↔ vendas) ===
-    print(f"\n📧 ETAPA 1: MATCHING PRIMÁRIO (pesquisa ↔ vendas)")
+    # === ETAPA 1: MATCHING PRIMÁRIO (pesquisa  vendas) ===
+    print(f"\n ETAPA 1: MATCHING PRIMÁRIO (pesquisa  vendas)")
     print("-" * 70)
 
     # Normalizar emails da pesquisa
@@ -82,10 +82,10 @@ def fazer_matching_email_with_validation(
 
     print(f"  Emails únicos na pesquisa: {len(emails_pesquisa):,}")
     print(f"  Emails únicos nas vendas: {len(emails_vendas_all):,}")
-    print(f"  Matches primários (pesquisa ↔ vendas): {len(matches_primarios):,}")
+    print(f"  Matches primários (pesquisa  vendas): {len(matches_primarios):,}")
 
     # === ETAPA 2: IDENTIFICAR EMAILS DEVCLUB NAS VENDAS ===
-    print(f"\n🎯 ETAPA 2: IDENTIFICANDO EMAILS DEVCLUB")
+    print(f"\n ETAPA 2: IDENTIFICANDO EMAILS DEVCLUB")
     print("-" * 70)
 
     produtos_devclub = [
@@ -117,11 +117,11 @@ def fazer_matching_email_with_validation(
     print(f"  Emails únicos DevClub nas vendas: {len(emails_devclub_vendas):,}")
 
     # === ETAPA 3: CARREGAR alunos TODOS.xlsx ===
-    print(f"\n📚 ETAPA 3: CARREGANDO alunos TODOS.xlsx")
+    print(f"\n ETAPA 3: CARREGANDO alunos TODOS.xlsx")
     print("-" * 70)
 
     if not os.path.exists(alunos_todos_path):
-        print(f"  ⚠️  Arquivo não encontrado: {alunos_todos_path}")
+        print(f"    Arquivo não encontrado: {alunos_todos_path}")
         print(f"  Continuando apenas com matches primários...")
         emails_alunos_todos = set()
     else:
@@ -138,7 +138,7 @@ def fazer_matching_email_with_validation(
         print(f"  Emails únicos válidos: {len(emails_alunos_todos):,}")
 
     # === ETAPA 4: MATCHING SECUNDÁRIO VALIDADO ===
-    print(f"\n✅ ETAPA 4: MATCHING SECUNDÁRIO VALIDADO")
+    print(f"\n ETAPA 4: MATCHING SECUNDÁRIO VALIDADO")
     print("-" * 70)
 
     # Encontrar novos matches potenciais
@@ -163,7 +163,7 @@ def fazer_matching_email_with_validation(
     print(f"  Matches secundários VALIDADOS (confirmados em vendas DevClub): {len(matches_secundarios_validados):,}")
 
     # === ETAPA 5: CRIAR TARGET FINAL ===
-    print(f"\n🎯 ETAPA 5: CONSOLIDANDO MATCHES")
+    print(f"\n ETAPA 5: CONSOLIDANDO MATCHES")
     print("-" * 70)
 
     df_resultado = df_pesquisa.copy()
@@ -194,7 +194,7 @@ def fazer_matching_email_with_validation(
     print("DATASET FINAL CRIADO!")
     print(f"dataset_v1_final: {len(df_resultado):,} registros, {len(df_resultado.columns)} colunas")
     print(f"Target baseado em: matching primário + validação cruzada alunos TODOS")
-    print(f"✅ Todos os matches secundários foram VALIDADOS em vendas DevClub")
+    print(f" Todos os matches secundários foram VALIDADOS em vendas DevClub")
 
 
     return df_resultado

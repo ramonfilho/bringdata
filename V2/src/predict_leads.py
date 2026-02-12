@@ -64,20 +64,20 @@ def main():
         # Adicionar _scored antes da extensão
         output_path = input_path.parent / f"{input_path.stem}_scored.xlsx"
 
-    print(f"📁 Arquivo de entrada: {input_path}")
-    print(f"📁 Arquivo de saída: {output_path}")
-    print(f"🤖 Modelo: {args.model}")
+    print(f" Arquivo de entrada: {input_path}")
+    print(f" Arquivo de saída: {output_path}")
+    print(f" Modelo: {args.model}")
     if args.model_path:
-        print(f"📂 Caminho do modelo: {args.model_path}")
+        print(f" Caminho do modelo: {args.model_path}")
     print("-" * 50)
 
     try:
         # Inicializar pipeline
-        print("🔧 Inicializando pipeline...")
+        print(" Inicializando pipeline...")
         pipeline = LeadScoringPipeline(model_name=args.model, model_path=args.model_path)
 
         # Executar pipeline com predições
-        print("🚀 Processando dados e fazendo predições...")
+        print(" Processando dados e fazendo predições...")
         result_df = pipeline.run(str(input_path), with_predictions=True)
 
         # Ordenar por score (maior primeiro)
@@ -85,11 +85,11 @@ def main():
 
         # Filtrar top N se solicitado
         if args.top_n:
-            print(f"📊 Selecionando top {args.top_n} leads...")
+            print(f" Selecionando top {args.top_n} leads...")
             result_df = result_df.head(args.top_n)
 
         # Salvar resultado
-        print(f"💾 Salvando resultado em {output_path}...")
+        print(f" Salvando resultado em {output_path}...")
 
         # Criar writer do Excel
         with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
@@ -128,15 +128,15 @@ def main():
             })
             metadata.to_excel(writer, sheet_name='Metadados', index=False)
 
-        print("✅ Processamento concluído com sucesso!")
-        print(f"📊 Total de leads processados: {len(result_df)}")
-        print(f"📈 Score médio: {result_df['lead_score'].mean():.4f}")
-        print(f"🎯 Leads no decil 10 (melhor): {len(result_df[result_df['decil'] == 10])}")
+        print(" Processamento concluído com sucesso!")
+        print(f" Total de leads processados: {len(result_df)}")
+        print(f" Score médio: {result_df['lead_score'].mean():.4f}")
+        print(f" Leads no decil 10 (melhor): {len(result_df[result_df['decil'] == 10])}")
 
         return 0
 
     except Exception as e:
-        print(f"❌ Erro durante o processamento: {e}")
+        print(f" Erro durante o processamento: {e}")
         import traceback
         traceback.print_exc()
         return 1

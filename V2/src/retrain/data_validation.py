@@ -11,7 +11,7 @@ Valida:
     - Taxa de conversão esperada (específico retreino)
     - Período de dados válido (específico retreino)
 
-Status: ✅ Implementado (Sprint 1)
+Status:  Implementado (Sprint 1)
 """
 
 import logging
@@ -48,9 +48,9 @@ class RetrainingDataValidator:
         # Inicializar monitor de produção (reusa código existente!)
         try:
             self.monitor = DataQualityMonitor(model_path)
-            logger.info(f"✅ DataQualityMonitor inicializado (model: {model_path})")
+            logger.info(f" DataQualityMonitor inicializado (model: {model_path})")
         except Exception as e:
-            logger.warning(f"⚠️  Não foi possível inicializar monitor: {e}")
+            logger.warning(f"  Não foi possível inicializar monitor: {e}")
             self.monitor = None
 
     def validate(self, df: pd.DataFrame) -> Dict:
@@ -79,7 +79,7 @@ class RetrainingDataValidator:
                 ]
             }
         """
-        logger.info("🔍 Executando validações de dados...")
+        logger.info(" Executando validações de dados...")
 
         validations = []
 
@@ -101,10 +101,10 @@ class RetrainingDataValidator:
                         'details': alert.get('details', {})
                     })
 
-                logger.info(f"      ✓ {len(drift_alerts)} alertas de drift detectados")
+                logger.info(f"       {len(drift_alerts)} alertas de drift detectados")
 
             except Exception as e:
-                logger.warning(f"      ⚠️  Erro ao executar drift checks: {e}")
+                logger.warning(f"        Erro ao executar drift checks: {e}")
         else:
             logger.info("   Drift checks desabilitados ou monitor indisponível")
 
@@ -145,18 +145,18 @@ class RetrainingDataValidator:
         }
 
         # Log resumo
-        logger.info(f"\n📊 Resumo de Validações:")
+        logger.info(f"\n Resumo de Validações:")
         logger.info(f"   Total: {len(validations)}")
-        logger.info(f"   ✅ Passou: {len(passed)}")
-        logger.info(f"   ⚠️  Warnings: {len(warnings)}")
-        logger.info(f"   ❌ Críticos: {len(critical)}")
+        logger.info(f"    Passou: {len(passed)}")
+        logger.info(f"     Warnings: {len(warnings)}")
+        logger.info(f"    Críticos: {len(critical)}")
 
         if critical:
-            logger.error(f"\n❌ VALIDAÇÃO FALHOU - {len(critical)} falha(s) crítica(s):")
+            logger.error(f"\n VALIDAÇÃO FALHOU - {len(critical)} falha(s) crítica(s):")
             for fail in critical:
-                logger.error(f"   • {fail['message']}")
+                logger.error(f"    {fail['message']}")
         else:
-            logger.info(f"✅ Validação passou - dados OK para retreino")
+            logger.info(f" Validação passou - dados OK para retreino")
 
         return result
 
@@ -182,7 +182,7 @@ class RetrainingDataValidator:
             'passed': passed,
             'message': (
                 f"Volume de dados: {actual_records:,} registros "
-                f"({'✓' if passed else '✗'} mínimo: {min_records:,})"
+                f"({'' if passed else ''} mínimo: {min_records:,})"
             ),
             'details': {
                 'actual': actual_records,
@@ -206,7 +206,7 @@ class RetrainingDataValidator:
                 'type': 'conversion_rate',
                 'severity': 'HIGH',
                 'passed': False,
-                'message': "❌ Coluna 'target' não encontrada nos dados",
+                'message': " Coluna 'target' não encontrada nos dados",
                 'details': {'error': 'missing_target_column'}
             }
 
@@ -223,7 +223,7 @@ class RetrainingDataValidator:
             'passed': passed,
             'message': (
                 f"Taxa de conversão: {conv_rate:.2%} "
-                f"({'✓' if passed else '✗'} esperado: {min_rate:.2%} - {max_rate:.2%})"
+                f"({'' if passed else ''} esperado: {min_rate:.2%} - {max_rate:.2%})"
             ),
             'details': {
                 'actual': float(conv_rate),
@@ -249,7 +249,7 @@ class RetrainingDataValidator:
                 'type': 'date_range',
                 'severity': 'MEDIUM',
                 'passed': False,
-                'message': "⚠️  Coluna 'Data' não encontrada - não foi possível validar período",
+                'message': "  Coluna 'Data' não encontrada - não foi possível validar período",
                 'details': {'error': 'missing_date_column'}
             }
 
@@ -265,7 +265,7 @@ class RetrainingDataValidator:
                 'type': 'date_range',
                 'severity': 'HIGH',
                 'passed': False,
-                'message': "❌ Nenhuma data válida encontrada nos dados",
+                'message': " Nenhuma data válida encontrada nos dados",
                 'details': {'error': 'no_valid_dates'}
             }
 
@@ -283,7 +283,7 @@ class RetrainingDataValidator:
             'passed': passed,
             'message': (
                 f"Período de dados: {date_range_days} dias "
-                f"({'✓' if passed else '✗'} mínimo: {min_days} dias)\n"
+                f"({'' if passed else ''} mínimo: {min_days} dias)\n"
                 f"   De {min_date.strftime('%Y-%m-%d')} até {max_date.strftime('%Y-%m-%d')}"
             ),
             'details': {

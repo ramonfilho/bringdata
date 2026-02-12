@@ -39,9 +39,9 @@ def remove_utm_features(df: pd.DataFrame) -> pd.DataFrame:
     # Aplicar remoção EXATA do notebook
     df_clean = df_clean.drop(columns=colunas_remover, errors='ignore')
 
-    logger.info(f"   ➤ Features UTM removidas: {len(colunas_remover)}")
+    logger.info(f"    Features UTM removidas: {len(colunas_remover)}")
     if colunas_remover:
-        logger.info(f"   ➤ Colunas removidas: {', '.join(colunas_remover[:5])}{'...' if len(colunas_remover) > 5 else ''}")
+        logger.info(f"    Colunas removidas: {', '.join(colunas_remover[:5])}{'...' if len(colunas_remover) > 5 else ''}")
 
     return df_clean
 

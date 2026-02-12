@@ -152,7 +152,7 @@ def unificar_medium_para_producao(df_medium_unificado: pd.DataFrame) -> pd.DataF
             valores_nao_mapeados.add(medium_str)
             return medium_str
 
-        # 3. VALORES COMPLETAMENTE NOVOS → 'Outros'
+        # 3. VALORES COMPLETAMENTE NOVOS  'Outros'
         valores_novos_para_outros.add(medium_str)
         return 'Outros'
 
@@ -163,12 +163,12 @@ def unificar_medium_para_producao(df_medium_unificado: pd.DataFrame) -> pd.DataF
 
     # DEBUG: Sumário de valores não vistos (apenas uma vez por valor único)
     if valores_nao_mapeados:
-        logger.debug(f"\n⚠️  {len(valores_nao_mapeados)} categoria(s) válida(s) não mapeada(s) encontrada(s):")
+        logger.debug(f"\n  {len(valores_nao_mapeados)} categoria(s) válida(s) não mapeada(s) encontrada(s):")
         for valor in sorted(valores_nao_mapeados):
             logger.debug(f"   - '{valor}' (mantida como está)")
 
     if valores_novos_para_outros:
-        logger.debug(f"\n⚠️  {len(valores_novos_para_outros)} novo(s) valor(es) não visto(s) direcionado(s) para 'Outros':")
+        logger.debug(f"\n  {len(valores_novos_para_outros)} novo(s) valor(es) não visto(s) direcionado(s) para 'Outros':")
         for valor in sorted(valores_novos_para_outros):
             logger.debug(f"   - '{valor}'")
 
@@ -210,18 +210,18 @@ def relatorio_unificacao_producao(df_original: pd.DataFrame, df_unificado: pd.Da
 
     logger.debug(f"\nVERIFICAÇÃO DE CONFORMIDADE COM PRODUÇÃO:")
     if categorias_finais == categorias_esperadas:
-        logger.debug(f"✓ SUCESSO: Dataset tem exatamente as {len(categorias_esperadas)} categorias esperadas para produção")
+        logger.debug(f" SUCESSO: Dataset tem exatamente as {len(categorias_esperadas)} categorias esperadas para produção")
     else:
         categorias_extras = categorias_finais - categorias_esperadas
         categorias_faltando = categorias_esperadas - categorias_finais
 
         if categorias_extras:
-            logger.debug(f"⚠ ATENÇÃO: {len(categorias_extras)} categorias extras encontradas:")
+            logger.debug(f" ATENÇÃO: {len(categorias_extras)} categorias extras encontradas:")
             for cat in sorted(categorias_extras):
                 logger.debug(f"    - {cat}")
 
         if categorias_faltando:
-            logger.debug(f"⚠ ATENÇÃO: {len(categorias_faltando)} categorias esperadas estão faltando:")
+            logger.debug(f" ATENÇÃO: {len(categorias_faltando)} categorias esperadas estão faltando:")
             for cat in sorted(categorias_faltando):
                 logger.debug(f"    - {cat}")
 
@@ -256,4 +256,4 @@ def relatorio_unificacao_producao(df_original: pd.DataFrame, df_unificado: pd.Da
         coluna_nome = f"Medium_{str(categoria).replace(' ', '_').replace('/', '_').replace('(', '').replace(')', '').replace('%', 'pct').replace('-', '_').replace('+', 'plus')}"
         logger.debug(f"  {i:2d}. {coluna_nome}")
 
-    logger.debug(f"\nNenhuma categoria descontinuada será criada no encoding ✓")
+    logger.debug(f"\nNenhuma categoria descontinuada será criada no encoding ")

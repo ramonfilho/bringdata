@@ -120,10 +120,9 @@ def clean_columns(df: pd.DataFrame) -> pd.DataFrame:
     logger.info(f"Total de colunas removidas: {colunas_removidas}")
     if columns_to_drop:
         logger.info(f"Colunas removidas: {columns_to_drop}")
-    logger.info(f"\nDados limpos disponíveis na variável 'arquivos_filtrados_limpos'")
 
     # DEBUG: Listar colunas exatas após limpeza
-    logger.info(f"\n🔍 DEBUG - COLUNAS APÓS LIMPEZA PIPELINE V2:")
+    logger.info(f"\n DEBUG - COLUNAS APÓS LIMPEZA PIPELINE V2:")
     logger.info(f"Total de colunas: {len(df_clean.columns)}")
     logger.info("Colunas restantes após limpeza:")
     for i, col in enumerate(sorted(df_clean.columns), 1):
@@ -202,15 +201,15 @@ def remove_campaign_features(df: pd.DataFrame) -> pd.DataFrame:
         logger.info(f"\nColunas encontradas e removidas:")
         for coluna in columns_to_drop:
             if coluna == '' or pd.isna(coluna) or coluna is None:
-                logger.info(f"  ✓ Coluna problemática removida: {repr(coluna)}")
+                logger.info(f"   Coluna problemática removida: {repr(coluna)}")
             else:
-                logger.info(f"  ✓ {coluna} removida")
+                logger.info(f"   {coluna} removida")
         df_clean = df_clean.drop(columns=columns_to_drop)
 
         logger.info(f"\nDataset após remoção: {len(df_clean)} registros, {len(df_clean.columns)} colunas")
 
     # DEBUG: Listar colunas restantes após Sessão 8 (ordem real)
-    logger.info(f"\n🔍 COLUNAS RESTANTES NO DATASET:")
+    logger.info(f"\n COLUNAS RESTANTES NO DATASET:")
     logger.info("-" * 40)
     for i, col in enumerate(df_clean.columns, 1):
         logger.info(f"{i:2d}. {col}")

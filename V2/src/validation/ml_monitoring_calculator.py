@@ -40,7 +40,7 @@ class MLMonitoringCalculator:
         self.metadata_path = Path(model_metadata_path)
         self.metadata = self._load_test_set_baseline()
 
-        logger.info(f"📊 Metadados do modelo carregados: {self.metadata_path.name}")
+        logger.info(f" Metadados do modelo carregados: {self.metadata_path.name}")
         logger.info(f"   AUC Test Set: {self.metadata['auc']:.4f}")
         logger.info(f"   Baseline Conversion Rate: {self.metadata['baseline_conversion_rate']:.4f}")
 
@@ -90,7 +90,7 @@ class MLMonitoringCalculator:
         ].copy()
 
         if len(valid_df) == 0:
-            logger.warning("⚠️ Nenhum lead com lead_score válido para calcular AUC")
+            logger.warning(" Nenhum lead com lead_score válido para calcular AUC")
             return {
                 'production': np.nan,
                 'test_set': self.metadata['auc'],
@@ -116,7 +116,7 @@ class MLMonitoringCalculator:
         valid_df = valid_df[valid_df['lead_score_float'].notna()].copy()
 
         if len(valid_df) == 0:
-            logger.warning("⚠️ Nenhum lead com lead_score numérico válido para calcular AUC")
+            logger.warning(" Nenhum lead com lead_score numérico válido para calcular AUC")
             return {
                 'production': np.nan,
                 'test_set': self.metadata['auc'],
@@ -132,7 +132,7 @@ class MLMonitoringCalculator:
                 y_score=valid_df['lead_score_float']
             )
         except Exception as e:
-            logger.error(f"❌ Erro ao calcular AUC: {e}")
+            logger.error(f" Erro ao calcular AUC: {e}")
             return {
                 'production': np.nan,
                 'test_set': self.metadata['auc'],
@@ -176,7 +176,7 @@ class MLMonitoringCalculator:
         valid_df = matched_df[matched_df['lead_score'].notna()].copy()
 
         if len(valid_df) == 0:
-            logger.warning("⚠️ Nenhum lead com lead_score válido para calcular performance por decil")
+            logger.warning(" Nenhum lead com lead_score válido para calcular performance por decil")
             return pd.DataFrame()
 
         # Converter lead_score para float (pode estar como string com vírgula)
@@ -196,7 +196,7 @@ class MLMonitoringCalculator:
         valid_df = valid_df[valid_df['lead_score_float'].notna()].copy()
 
         if len(valid_df) == 0:
-            logger.warning("⚠️ Nenhum lead com lead_score numérico válido")
+            logger.warning(" Nenhum lead com lead_score numérico válido")
             return pd.DataFrame()
 
         # NOVO: Recalcular decis usando percentis (qcut) para garantir 10% em cada
@@ -211,7 +211,7 @@ class MLMonitoringCalculator:
             )
         except ValueError as e:
             # Se qcut falhar (ex: muitos valores duplicados), usar cut com limites fixos
-            logger.warning(f"⚠️ qcut falhou, usando quantis: {e}")
+            logger.warning(f" qcut falhou, usando quantis: {e}")
             quantiles = valid_df['lead_score_float'].quantile([0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
             valid_df['decile_percentile'] = pd.cut(
                 valid_df['lead_score_float'],
@@ -377,7 +377,7 @@ class MLMonitoringCalculator:
         """
         from datetime import timedelta
 
-        logger.info(f"📊 Calculando snapshots temporais de AUC ({start_date} a {end_date})...")
+        logger.info(f" Calculando snapshots temporais de AUC ({start_date} a {end_date})...")
 
         # Fazer cópias profundas para não afetar os originais
         matched_copy = matched_df.copy(deep=True)
@@ -385,7 +385,7 @@ class MLMonitoringCalculator:
 
         # Garantir que sale_date é datetime
         if 'sale_date' not in sales_copy.columns:
-            logger.warning("⚠️ Coluna 'sale_date' não encontrada em sales_df")
+            logger.warning(" Coluna 'sale_date' não encontrada em sales_df")
             return pd.DataFrame()
 
         sales_copy['sale_date'] = pd.to_datetime(sales_copy['sale_date'])
@@ -399,12 +399,12 @@ class MLMonitoringCalculator:
         ].copy()
 
         if len(sales_copy) == 0:
-            logger.warning("⚠️ Nenhuma venda no período especificado")
+            logger.warning(" Nenhuma venda no período especificado")
             return pd.DataFrame()
 
         # Classificar vendas em Guru vs TMB (coluna 'origem' já existe no sales_df)
         if 'origem' not in sales_copy.columns:
-            logger.warning("⚠️ Coluna 'origem' não encontrada em sales_df")
+            logger.warning(" Coluna 'origem' não encontrada em sales_df")
             return pd.DataFrame()
 
         # Já temos a coluna 'origem' com valores 'guru' ou 'tmb'
@@ -461,8 +461,8 @@ class MLMonitoringCalculator:
             # Calcular correlação entre % TMB e AUC
             if len(snapshots_df) > 1:  # Precisa de pelo menos 2 pontos para correlação
                 correlation = snapshots_df[['tmb_percentage', 'auc']].corr().iloc[0, 1]
-                logger.info(f"   📈 {len(snapshots_df)} snapshots gerados")
-                logger.info(f"   📊 Correlação % TMB vs AUC: {correlation:.3f}")
+                logger.info(f"    {len(snapshots_df)} snapshots gerados")
+                logger.info(f"    Correlação % TMB vs AUC: {correlation:.3f}")
 
         return snapshots_df
 
@@ -479,7 +479,7 @@ class MLMonitoringCalculator:
         Returns:
             Dict com métricas de AUC e concentração
         """
-        logger.info("🔍 Calculando métricas de monitoramento do modelo...")
+        logger.info(" Calculando métricas de monitoramento do modelo...")
 
         # AUC - Métrica principal de discriminação
         auc_metrics = self.calculate_auc(matched_df)

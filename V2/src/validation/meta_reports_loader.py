@@ -89,11 +89,11 @@ class MetaReportsLoader:
         if self.data_source == "api":
             if not META_API_AVAILABLE:
                 raise ImportError("MetaAPIClient não disponível. Instale as dependências necessárias.")
-            logger.info("🌐 Modo API habilitado - dados serão extraídos da Meta Marketing API")
+            logger.info(" Modo API habilitado - dados serão extraídos da Meta Marketing API")
             logger.info(f"   Contas: {', '.join(self.account_ids) if self.account_ids else 'Padrão (Rodolfo Mori)'}")
             # API clients serão criados sob demanda em _load_from_api()
         else:
-            logger.info("📁 Modo LOCAL habilitado - dados serão carregados de arquivos")
+            logger.info(" Modo LOCAL habilitado - dados serão carregados de arquivos")
             if not self.reports_dir.exists():
                 raise FileNotFoundError(f"Diretório de relatórios não encontrado: {reports_dir}")
 
@@ -136,7 +136,7 @@ class MetaReportsLoader:
         Returns:
             Dict com DataFrames de campaigns, adsets, ads
         """
-        logger.info(f"📂 Carregando relatórios Meta de {self.reports_dir}...")
+        logger.info(f" Carregando relatórios Meta de {self.reports_dir}...")
 
         # Buscar arquivos por padrão (recursivamente em subpastas)
         # Usar listagem manual para evitar problemas com Unicode em glob
@@ -176,7 +176,7 @@ class MetaReportsLoader:
         # antes do período atual. Precisamos manter todos históricos para:
         # 1. Construir comparison_group_map completo (usado em fair_campaign_comparison.py)
         # 2. Fazer matching de conversões com adsets históricos
-        logger.info(f"   ℹ️  Campanhas e Adsets: mantendo histórico completo para matching")
+        logger.info(f"   ℹ  Campanhas e Adsets: mantendo histórico completo para matching")
 
         # CRÍTICO: Filtrar APENAS o spend por período (zerando spend fora do período)
         # Isso garante que conversões históricas sejam atribuídas, mas gasto seja apenas do período
@@ -209,14 +209,14 @@ class MetaReportsLoader:
         Returns:
             Dict com DataFrames de campaigns, adsets, ads (formato normalizado)
         """
-        logger.info(f"🌐 Extraindo relatórios da Meta API...")
+        logger.info(f" Extraindo relatórios da Meta API...")
         logger.info(f"   Período: {start_date} a {end_date}")
 
         # Se não há account_ids especificados, usar conta padrão
         accounts_to_fetch = self.account_ids if self.account_ids else [MetaAPIClient.DEFAULT_ACCOUNT_ID]
 
-        logger.info(f"   🔍 DEBUG - self.account_ids: {self.account_ids}")
-        logger.info(f"   🔍 DEBUG - accounts_to_fetch: {accounts_to_fetch}")
+        logger.info(f"    DEBUG - self.account_ids: {self.account_ids}")
+        logger.info(f"    DEBUG - accounts_to_fetch: {accounts_to_fetch}")
 
         all_campaigns = []
         all_adsets = []
@@ -228,7 +228,7 @@ class MetaReportsLoader:
             if not str(account_id).startswith('act_'):
                 account_id = f"act_{account_id}"
 
-            logger.info(f"   📊 Extraindo dados da conta: {account_id}")
+            logger.info(f"    Extraindo dados da conta: {account_id}")
 
             # Criar cliente para esta conta
             api_client = MetaAPIClient(account_id=account_id)
@@ -249,14 +249,14 @@ class MetaReportsLoader:
         adsets_df = pd.concat(all_adsets, ignore_index=True) if all_adsets else pd.DataFrame()
         ads_df = pd.concat(all_ads, ignore_index=True) if all_ads else pd.DataFrame()
 
-        logger.info(f"   ✅ API: {len(campaigns_df)} campanhas, {len(adsets_df)} adsets, {len(ads_df)} ads (todas as contas)")
+        logger.info(f"    API: {len(campaigns_df)} campanhas, {len(adsets_df)} adsets, {len(ads_df)} ads (todas as contas)")
 
         # Normalizar DataFrames para match com formato local
         campaigns_df = self._normalize_api_data(campaigns_df, 'campaign')
         adsets_df = self._normalize_api_data(adsets_df, 'adset')
         ads_df = self._normalize_api_data(ads_df, 'ad')
 
-        logger.info(f"   ✅ Dados normalizados e prontos para uso")
+        logger.info(f"    Dados normalizados e prontos para uso")
 
         return {
             'campaigns': campaigns_df,
@@ -286,7 +286,7 @@ class MetaReportsLoader:
         if df.empty:
             return df
 
-        # Mapeamento de nomes da API → nomes padronizados
+        # Mapeamento de nomes da API  nomes padronizados
         # (mesmo mapeamento usado em _normalize_column_names)
         column_mapping = {
             'Nome da campanha': 'campaign_name',
@@ -407,7 +407,7 @@ class MetaReportsLoader:
             DataFrame consolidado
         """
         if not file_paths:
-            logger.warning(f"   ⚠️  Nenhum arquivo encontrado para {report_type}")
+            logger.warning(f"     Nenhum arquivo encontrado para {report_type}")
             return pd.DataFrame()
 
         all_dfs = []
@@ -435,10 +435,10 @@ class MetaReportsLoader:
 
                 all_dfs.append(df)
 
-                logger.info(f"      ✅ {file_path.name}: {len(df)} linhas")
+                logger.info(f"       {file_path.name}: {len(df)} linhas")
 
             except Exception as e:
-                logger.error(f"      ❌ Erro ao ler {file_path.name}: {e}")
+                logger.error(f"       Erro ao ler {file_path.name}: {e}")
 
         if not all_dfs:
             return pd.DataFrame()
@@ -446,7 +446,7 @@ class MetaReportsLoader:
         # Consolidar todos os DataFrames
         consolidated = pd.concat(all_dfs, ignore_index=True)
 
-        logger.info(f"   ✅ Total consolidado: {len(consolidated)} linhas de {report_type}")
+        logger.info(f"    Total consolidado: {len(consolidated)} linhas de {report_type}")
 
         return consolidated
 
@@ -499,7 +499,7 @@ class MetaReportsLoader:
         Returns:
             DataFrame com colunas normalizadas
         """
-        # Mapeamento de nomes do Excel → nomes padronizados
+        # Mapeamento de nomes do Excel  nomes padronizados
         column_mapping = {
             # Comum a todos
             'Nome da campanha': 'campaign_name',
@@ -559,7 +559,7 @@ class MetaReportsLoader:
 
                 # CRÍTICO: Normalizar IDs para os primeiros 15 dígitos
                 # Isso resolve o problema de edge_cases terem sufixo "390" enquanto relatórios normais têm "000"
-                # Exemplo: 120234898385570390 → 120234898385570
+                # Exemplo: 120234898385570390  120234898385570
                 # Isso garante que a mesma campanha não seja duplicada
                 df[id_col] = df[id_col].apply(lambda x: str(x)[:15] if pd.notna(x) and str(x) != 'nan' else x)
 
@@ -568,13 +568,13 @@ class MetaReportsLoader:
             if event_col in df.columns:
                 df[event_col] = pd.to_numeric(df[event_col], errors='coerce').fillna(0)
 
-        # Extrair AD code do nome do anúncio (ex: "DEV-AD0033-vid" → "AD0033")
+        # Extrair AD code do nome do anúncio (ex: "DEV-AD0033-vid"  "AD0033")
         if report_type == 'ad' and 'ad_name' in df.columns:
             df['ad_code'] = df['ad_name'].str.extract(r'(AD0\d+)', expand=False)
 
         # Simplificar optimization_goal_indicator (extrair apenas o tipo de evento)
-        # Ex: "actions:offsite_conversion.fb_pixel_lead" → "Lead"
-        # Ex: "conversions:offsite_conversion.fb_pixel_custom.LeadQualifiedHighQuality" → "LeadQualifiedHighQuality"
+        # Ex: "actions:offsite_conversion.fb_pixel_lead"  "Lead"
+        # Ex: "conversions:offsite_conversion.fb_pixel_custom.LeadQualifiedHighQuality"  "LeadQualifiedHighQuality"
         if 'optimization_goal_indicator' in df.columns:
             def simplify_optimization_goal(val):
                 if pd.isna(val):
@@ -621,7 +621,7 @@ class MetaReportsLoader:
 
         # Verificar se as colunas de período existem
         if 'Início dos relatórios' not in df.columns or 'Término dos relatórios' not in df.columns:
-            logger.warning(f"   ⚠️  Colunas de período não encontradas em {report_type}, não foi possível filtrar")
+            logger.warning(f"     Colunas de período não encontradas em {report_type}, não foi possível filtrar")
             return df
 
         before_count = len(df)
@@ -638,10 +638,10 @@ class MetaReportsLoader:
         after_count = len(df_filtered)
 
         if before_count != after_count:
-            logger.info(f"   🗓️  {report_type} filtrados por período: {after_count}/{before_count} ({after_count/before_count*100:.1f}%)")
+            logger.info(f"     {report_type} filtrados por período: {after_count}/{before_count} ({after_count/before_count*100:.1f}%)")
             logger.info(f"      Período solicitado: {start_date} a {end_date}")
         else:
-            logger.info(f"   ✅ {report_type}: {after_count} registros (100% no período)")
+            logger.info(f"    {report_type}: {after_count} registros (100% no período)")
 
         return df_filtered
 
@@ -672,7 +672,7 @@ class MetaReportsLoader:
 
         # Verificar se as colunas de período existem
         if 'Início dos relatórios' not in df.columns or 'Término dos relatórios' not in df.columns:
-            logger.warning(f"   ⚠️  Colunas de período não encontradas em {report_type}, não foi possível filtrar spend")
+            logger.warning(f"     Colunas de período não encontradas em {report_type}, não foi possível filtrar spend")
             return df
 
         # Criar cópia para não modificar original
@@ -704,7 +704,7 @@ class MetaReportsLoader:
         df.loc[outside_period, 'spend'] = 0
 
         if spend_outside > 0 or spend_total > 0:
-            logger.info(f"   💰 {report_type}: Spend filtrado por período")
+            logger.info(f"    {report_type}: Spend filtrado por período")
             logger.info(f"      Total: R$ {spend_total:,.2f}")
             logger.info(f"      Fora do período (zerado): R$ {spend_outside:,.2f}")
             logger.info(f"      No período: R$ {spend_total - spend_outside:,.2f}")
@@ -758,7 +758,7 @@ class MetaReportsLoader:
             # Nenhum edge case encontrado para este tipo
             return df
 
-        logger.info(f"   🔧 Carregando {report_type} edge cases de {edge_case_dir.name}/...")
+        logger.info(f"    Carregando {report_type} edge cases de {edge_case_dir.name}/...")
 
         edge_case_dfs = []
 
@@ -790,7 +790,7 @@ class MetaReportsLoader:
 
                 edge_case_dfs.append(df_edge)
 
-                logger.info(f"      ✅ Edge case: {file_path.name} ({len(df_edge)} {report_type}(s))")
+                logger.info(f"       Edge case: {file_path.name} ({len(df_edge)} {report_type}(s))")
 
                 # Log dos registros carregados
                 for idx, row in df_edge.iterrows():
@@ -803,10 +803,10 @@ class MetaReportsLoader:
 
                     campaign_id = row.get('campaign_id', 'Unknown')
                     spend = row.get('spend', 0)
-                    logger.info(f"         • {name} (ID: {str(id_val)[:15]}..., Campaign: {str(campaign_id)[:15]}..., R$ {spend:.2f})")
+                    logger.info(f"          {name} (ID: {str(id_val)[:15]}..., Campaign: {str(campaign_id)[:15]}..., R$ {spend:.2f})")
 
             except Exception as e:
-                logger.warning(f"      ⚠️ Erro ao ler {file_path.name}: {e}")
+                logger.warning(f"       Erro ao ler {file_path.name}: {e}")
 
         if not edge_case_dfs:
             # Nenhum edge case válido carregado
@@ -830,7 +830,7 @@ class MetaReportsLoader:
             else:
                 combined_df = pd.concat([df, edge_cases_consolidated], ignore_index=True)
 
-        logger.info(f"   ✅ Total {report_type}s com edge cases: {len(combined_df)} (+{len(edge_cases_consolidated)} edge case(s))")
+        logger.info(f"    Total {report_type}s com edge cases: {len(combined_df)} (+{len(edge_cases_consolidated)} edge case(s))")
 
         return combined_df
 
@@ -872,7 +872,7 @@ class MetaReportsLoader:
 
         costs_hierarchy = {'campaigns': {}}
 
-        # NOVO: Criar mapeamento campaign_name → campaign_id dos relatórios de Campanhas
+        # NOVO: Criar mapeamento campaign_name  campaign_id dos relatórios de Campanhas
         # (quando disponível - arquivos novos com coluna "Identificação da campanha")
         campaign_name_to_id = {}
         skipped_campaigns = []
@@ -895,16 +895,16 @@ class MetaReportsLoader:
                 campaign_name_to_id[camp_name] = camp_id_str
 
             if campaign_name_to_id:
-                logger.info(f"   ✅ {len(campaign_name_to_id)} IDs de campanha carregados dos relatórios de Campanhas")
+                logger.info(f"    {len(campaign_name_to_id)} IDs de campanha carregados dos relatórios de Campanhas")
 
             if skipped_campaigns:
-                logger.warning(f"   ⚠️  {len(skipped_campaigns)} campanhas ignoradas no mapeamento:")
+                logger.warning(f"     {len(skipped_campaigns)} campanhas ignoradas no mapeamento:")
                 for name, reason in skipped_campaigns[:5]:
-                    logger.warning(f"      • {name[:60]}: {reason}")
+                    logger.warning(f"       {name[:60]}: {reason}")
 
         # Validar adsets
         if adsets_df.empty or 'campaign_id' not in adsets_df.columns:
-            logger.error("   ❌ Adsets vazios ou sem campaign_id")
+            logger.error("    Adsets vazios ou sem campaign_id")
             return costs_hierarchy
 
         # Agrupar por campaign_id extraído dos adsets
@@ -976,7 +976,7 @@ class MetaReportsLoader:
             # Esta campanha não reporta "Leads" padrão, apenas eventos customizados
             if campaign_id == '120234062599950' and (total_leads_standard == 0 or pd.isna(total_leads_standard)):
                 total_leads = lead_qualified
-                logger.info(f"   ⚙️  Edge case: Campanha {campaign_id} usando LeadQualified como leads ({int(lead_qualified)})")
+                logger.info(f"     Edge case: Campanha {campaign_id} usando LeadQualified como leads ({int(lead_qualified)})")
 
             # Coletar optimization_goals únicos dos adsets desta campanha
             # Agora usa a coluna "Indicador de resultados" (já simplificada para "optimization_goal")
@@ -1023,27 +1023,27 @@ class MetaReportsLoader:
                 'adsets': adsets_dict  # NOVO: Adicionar adsets individuais
             }
 
-        logger.info(f"   ✅ Costs hierarchy construída: {len(costs_hierarchy['campaigns'])} campanhas")
+        logger.info(f"    Costs hierarchy construída: {len(costs_hierarchy['campaigns'])} campanhas")
 
         # DEBUG: Verificar se leads foram extraídos
         total_leads_extracted = sum(camp.get('leads', 0) for camp in costs_hierarchy['campaigns'].values())
-        logger.info(f"   📊 Total de leads extraídos: {total_leads_extracted}")
+        logger.info(f"    Total de leads extraídos: {total_leads_extracted}")
 
         # DEBUG: Verificar gasto total
         total_spend_extracted = sum(camp.get('spend', 0) for camp in costs_hierarchy['campaigns'].values())
-        logger.info(f"   💰 Gasto total extraído: R$ {total_spend_extracted:,.2f}")
+        logger.info(f"    Gasto total extraído: R$ {total_spend_extracted:,.2f}")
 
         # DEBUG: Comparar com total nos relatórios
         total_campaigns_in_df = len(campaign_name_to_id) if campaign_name_to_id else 0
         total_adsets_unique_campaigns = len(adsets_df['campaign_id'].dropna().unique()) if not adsets_df.empty else 0
         if total_campaigns_in_df != len(costs_hierarchy['campaigns']):
-            logger.warning(f"   ⚠️  Discrepância: {total_campaigns_in_df} IDs nos Campanhas.xlsx, mas apenas {len(costs_hierarchy['campaigns'])} processadas")
-            logger.warning(f"   ⚠️  {total_adsets_unique_campaigns} IDs únicos de campanha encontrados nos Adsets")
+            logger.warning(f"     Discrepância: {total_campaigns_in_df} IDs nos Campanhas.xlsx, mas apenas {len(costs_hierarchy['campaigns'])} processadas")
+            logger.warning(f"     {total_adsets_unique_campaigns} IDs únicos de campanha encontrados nos Adsets")
 
         # DEBUG DETALHADO: Estatísticas por conta
         logger.info("")
         logger.info("=" * 100)
-        logger.info("📊 DEBUG: ESTATÍSTICAS POR CONTA")
+        logger.info(" DEBUG: ESTATÍSTICAS POR CONTA")
         logger.info("=" * 100)
 
         # Agrupar campanhas por account
@@ -1072,11 +1072,11 @@ class MetaReportsLoader:
         for account in sorted(stats_by_account.keys()):
             stats = stats_by_account[account]
             logger.info("")
-            logger.info(f"🏢 Conta: {account}")
-            logger.info(f"   📊 Campanhas: {stats['campaigns']}")
-            logger.info(f"   📊 Adsets: {stats['adsets']}")
-            logger.info(f"   📊 Ads: {stats['ads']}")
-            logger.info(f"   💰 Gasto Total: R$ {stats['spend']:,.2f}")
+            logger.info(f" Conta: {account}")
+            logger.info(f"    Campanhas: {stats['campaigns']}")
+            logger.info(f"    Adsets: {stats['adsets']}")
+            logger.info(f"    Ads: {stats['ads']}")
+            logger.info(f"    Gasto Total: R$ {stats['spend']:,.2f}")
 
         logger.info("")
         logger.info("=" * 100)

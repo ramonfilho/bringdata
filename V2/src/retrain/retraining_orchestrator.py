@@ -10,20 +10,20 @@ Arquitetura Hook-Based:
 
 Fluxo:
     Cloud Scheduler (mensal)
-        ↓
+        
     Cloud Run Job: retreino-mensal
-        ↓
-    ├─ STEP 1-3: train_pipeline.py (com validation hook injetado)
-    │   ├─ Células 1-17: Extração + Preprocessing
-    │   ├─ Célula 18: Feature Engineering
-    │   ├─ 🔧 VALIDATION HOOK (injected)
-    │   ├─ Célula 18.5-20: Baseline + Encoding + Treino
-    │   └─ Retorna model_metadata
-    │
-    ├─ STEP 4: Comparação Champion vs Challenger
-    ├─ STEP 5: Decisão de deploy (auto/manual/reject)
-    ├─ STEP 6: Deploy condicional
-    └─ STEP 7: Relatório + Notificações
+        
+     STEP 1-3: train_pipeline.py (com validation hook injetado)
+        Células 1-17: Extração + Preprocessing
+        Célula 18: Feature Engineering
+         VALIDATION HOOK (injected)
+        Célula 18.5-20: Baseline + Encoding + Treino
+        Retorna model_metadata
+    
+     STEP 4: Comparação Champion vs Challenger
+     STEP 5: Decisão de deploy (auto/manual/reject)
+     STEP 6: Deploy condicional
+     STEP 7: Relatório + Notificações
 
 Uso:
     # Local (desenvolvimento)
@@ -71,7 +71,7 @@ class RetreinoMensal:
         self.config = self._load_config(config_path)
         self.execution_id = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.validation_result = None  # Preenchido pelo hook
-        logger.info(f"🚀 Retreino Mensal iniciado - Execution ID: {self.execution_id}")
+        logger.info(f" Retreino Mensal iniciado - Execution ID: {self.execution_id}")
 
     def _load_config(self, config_path: str) -> dict:
         """Carrega configuração do retreino."""
@@ -92,7 +92,7 @@ class RetreinoMensal:
             logger.info("\n" + "=" * 80)
             logger.info("STEP 1-3: EXTRAÇÃO + PREPROCESSING + VALIDAÇÃO + TREINO")
             logger.info("=" * 80)
-            logger.info("📝 Arquitetura Hook-Based:")
+            logger.info(" Arquitetura Hook-Based:")
             logger.info("   - Reutiliza train_pipeline.py completo")
             logger.info("   - Validation hook injetado após feature engineering")
             logger.info("   - Zero duplicação de código!")
@@ -113,7 +113,7 @@ class RetreinoMensal:
                     True para continuar treino, False para abortar
                 """
                 logger.info("\n" + "-" * 80)
-                logger.info("🚪 QUALITY GATE HOOK ATIVADO")
+                logger.info(" QUALITY GATE HOOK ATIVADO")
                 logger.info("-" * 80)
                 logger.info("Validando qualidade de dados antes de iniciar treino...")
 
@@ -131,7 +131,7 @@ class RetreinoMensal:
                     metadata_files = glob.glob(metadata_pattern)
 
                     if not metadata_files:
-                        logger.warning(f"   ⚠️  Metadata não encontrado em: {model_path}")
+                        logger.warning(f"     Metadata não encontrado em: {model_path}")
                         logger.info(f"   Continuando sem comparação (primeiro treino?)")
                         return True
 
@@ -149,7 +149,7 @@ class RetreinoMensal:
                         return True
 
                 except Exception as e:
-                    logger.warning(f"   ⚠️  Erro ao carregar champion: {e}")
+                    logger.warning(f"     Erro ao carregar champion: {e}")
                     logger.info(f"   Continuando sem comparação")
                     return True
 
@@ -164,15 +164,15 @@ class RetreinoMensal:
                     diff = current_rate - baseline_rate
 
                     if abs(diff) > THRESHOLD_CRITICAL:
-                        severity = "🔴 CRÍTICO"
+                        severity = " CRÍTICO"
                         alerts.append((severity, col, baseline_rate, current_rate, diff, True))
                     elif abs(diff) > THRESHOLD_WARNING:
-                        severity = "⚠️  ALERTA"
+                        severity = "  ALERTA"
                         alerts.append((severity, col, baseline_rate, current_rate, diff, False))
 
                 if alerts:
                     logger.warning(f"\n{'='*80}")
-                    logger.warning("⚠️  MUDANÇAS DETECTADAS EM QUALIDADE DE DADOS")
+                    logger.warning("  MUDANÇAS DETECTADAS EM QUALIDADE DE DADOS")
                     logger.warning(f"{'='*80}")
                     logger.warning(f"\n{'SEVERIDADE':<12} {'COLUNA':<45} {'BASELINE':>10} {'ATUAL':>10} {'DIFF':>10}")
                     logger.warning("-"*90)
@@ -185,23 +185,23 @@ class RetreinoMensal:
                             has_critical = True
 
                     logger.warning("="*80)
-                    logger.warning(f"\n💡 POSSÍVEIS CAUSAS:")
+                    logger.warning(f"\n POSSÍVEIS CAUSAS:")
                     logger.warning("   - Nova fonte de dados sem perguntas do formulário")
                     logger.warning("   - Mudança no formulário de captura")
                     logger.warning("   - Dados históricos adicionados de períodos anteriores")
                     logger.warning("   - Problema de integração/ETL")
 
                     if has_critical:
-                        logger.error("\n❌ QUALITY GATE FALHOU - Mudança crítica detectada (>20pp)")
+                        logger.error("\n QUALITY GATE FALHOU - Mudança crítica detectada (>20pp)")
                         logger.error("   Abortando treino para investigação")
                         return False
                     else:
-                        logger.warning("\n⚠️  QUALITY GATE PASSOU COM AVISOS")
+                        logger.warning("\n  QUALITY GATE PASSOU COM AVISOS")
                         logger.warning("   Mudanças detectadas mas dentro do threshold crítico")
                         logger.warning("   Continuando com treino")
                         return True
                 else:
-                    logger.info("✅ Qualidade de dados estável (sem mudanças significativas)")
+                    logger.info(" Qualidade de dados estável (sem mudanças significativas)")
                     logger.info("-" * 80)
                     return True
 
@@ -217,7 +217,7 @@ class RetreinoMensal:
                     True para continuar treino, False para abortar
                 """
                 logger.info("\n" + "-" * 80)
-                logger.info("🔧 VALIDATION HOOK ATIVADO")
+                logger.info(" VALIDATION HOOK ATIVADO")
                 logger.info("-" * 80)
                 logger.info("Validando dados processados antes de encoding e treino...")
 
@@ -226,7 +226,7 @@ class RetreinoMensal:
                     model_path = get_active_model_path()
                     logger.info(f"   Baseline (champion): {model_path}")
                 except Exception as e:
-                    logger.warning(f"   ⚠️  Modelo ativo não encontrado: {e}")
+                    logger.warning(f"     Modelo ativo não encontrado: {e}")
                     logger.warning(f"   Continuando sem drift detection (primeiro treino?)")
                     model_path = None
 
@@ -241,27 +241,27 @@ class RetreinoMensal:
                 self.validation_result = result
 
                 # DEBUG: Imprimir TODOS os alertas (não só críticos)
-                logger.info(f"\n📋 TODOS OS ALERTAS DETECTADOS ({len(result['validations'])} total):")
+                logger.info(f"\n TODOS OS ALERTAS DETECTADOS ({len(result['validations'])} total):")
                 for idx, validation in enumerate(result['validations'], 1):
-                    severity_icon = "🔴" if validation['severity'] == 'HIGH' else "⚠️ " if validation['severity'] == 'MEDIUM' else "ℹ️ "
+                    severity_icon = "" if validation['severity'] == 'HIGH' else " " if validation['severity'] == 'MEDIUM' else "ℹ "
                     logger.info(f"\n{idx}. {severity_icon} [{validation['severity']}] {validation['type']}")
                     logger.info(f"   {validation['message']}")
 
                 # Decidir se continua
                 if result['has_critical_failures']:
-                    logger.error("\n❌ VALIDAÇÃO FALHOU - Abortando retreino")
+                    logger.error("\n VALIDAÇÃO FALHOU - Abortando retreino")
                     logger.error(f"   Falhas críticas: {result['critical_count']}")
                     for validation in result['validations']:
                         if not validation['passed'] and validation['severity'] in self.config.get('validation', {}).get('critical_failures', ['HIGH']):
-                            logger.error(f"   • {validation['message']}")
+                            logger.error(f"    {validation['message']}")
                     return False  # Abortar treino
 
-                logger.info("\n✅ VALIDAÇÃO PASSOU - Prosseguindo com treino")
+                logger.info("\n VALIDAÇÃO PASSOU - Prosseguindo com treino")
                 logger.info("-" * 80)
                 return True  # Continuar treino
 
             # Executar train_pipeline com validation hook injetado
-            logger.info("\n▶️  Executando train_pipeline.py com validation hook...")
+            logger.info("\n  Executando train_pipeline.py com validation hook...")
 
             training_config = self.config.get('training', {})
 
@@ -276,7 +276,7 @@ class RetreinoMensal:
                 start_dt = datetime.now() - timedelta(days=60)
                 api_start_date = start_dt.strftime('%Y-%m-%d')
 
-            logger.info(f"   📅 Período de dados API: {api_start_date} a {api_end_date}")
+            logger.info(f"    Período de dados API: {api_start_date} a {api_end_date}")
 
             challenger_metadata = train_main(
                 initial_matching=training_config.get('initial_matching', 'email_telefone'),
@@ -284,20 +284,20 @@ class RetreinoMensal:
                 split_method=training_config.get('split_method', 'temporal_leads'),
                 tune_hyperparams=training_config.get('tune_hyperparams', False),
                 grid_size=training_config.get('grid_size', 'small'),
-                tmb_risk_filter=training_config.get('tmb_risk_filter', 'all'),  # ← FILTRO DE RISCO TMB
+                tmb_risk_filter=training_config.get('tmb_risk_filter', 'all'),  #  FILTRO DE RISCO TMB
                 set_active=False,  # NÃO ativar automaticamente (decisão vem depois)
-                quality_gate_hook=quality_gate_hook,  # ← INJETA QUALITY GATE (antes de treinar)
-                validation_hook=validation_hook,  # ← INJETA VALIDAÇÃO (após feature engineering)
-                include_api_data=True,  # ← RETREINO: buscar dados novos da API
+                quality_gate_hook=quality_gate_hook,  #  INJETA QUALITY GATE (antes de treinar)
+                validation_hook=validation_hook,  #  INJETA VALIDAÇÃO (após feature engineering)
+                include_api_data=True,  #  RETREINO: buscar dados novos da API
                 api_start_date=api_start_date,
                 api_end_date=api_end_date,
-                output_subdir='retraining',  # ← LOGS vão para outputs/retraining/
-                verbosity='minimal'  # ← CONTROLE DE LOGS: só warnings e erros do train_pipeline
+                output_subdir='retraining',  #  LOGS vão para outputs/retraining/
+                verbosity='minimal'  #  CONTROLE DE LOGS: só warnings e erros do train_pipeline
             )
 
             # Verificar se foi abortado pelo quality gate
             if challenger_metadata.get('status') == 'ABORTED_BY_QUALITY_GATE':
-                logger.error("❌ Treino abortado pelo quality gate (mudanças críticas em missing rates)")
+                logger.error(" Treino abortado pelo quality gate (mudanças críticas em missing rates)")
                 return {
                     'status': 'ABORTED',
                     'reason': 'Quality gate failed - critical changes in data quality',
@@ -307,7 +307,7 @@ class RetreinoMensal:
 
             # Verificar se foi abortado pela validação
             if challenger_metadata.get('status') == 'ABORTED_BY_VALIDATION':
-                logger.error("❌ Treino abortado pela validação")
+                logger.error(" Treino abortado pela validação")
                 return {
                     'status': 'ABORTED',
                     'reason': 'Data validation failed',
@@ -317,14 +317,14 @@ class RetreinoMensal:
 
             # Verificar se treino falhou
             if not challenger_metadata:
-                logger.error("❌ Falha no treinamento do challenger")
+                logger.error(" Falha no treinamento do challenger")
                 return {
                     'status': 'FAILED',
                     'reason': 'Training failed',
                     'execution_id': self.execution_id
                 }
 
-            logger.info(f"\n✅ Challenger treinado com sucesso")
+            logger.info(f"\n Challenger treinado com sucesso")
             logger.info(f"   AUC: {challenger_metadata['performance_metrics']['auc']:.4f}")
             logger.info(f"   Monotonia: {challenger_metadata['performance_metrics']['monotonia_percentage']:.1f}%")
 
@@ -336,7 +336,7 @@ class RetreinoMensal:
             logger.info("=" * 80)
 
             # TODO: Implementar comparação
-            logger.info("⚠️  Comparação ainda não implementada")
+            logger.info("  Comparação ainda não implementada")
             logger.info("   Sprint 2: Implementar model_comparison.py")
 
             # ========================================
@@ -347,7 +347,7 @@ class RetreinoMensal:
             logger.info("=" * 80)
 
             # TODO: Implementar decisão
-            logger.info("⚠️  Decisão de deploy ainda não implementada")
+            logger.info("  Decisão de deploy ainda não implementada")
             logger.info("   Sprint 2: Implementar lógica de auto-approve/manual/reject")
 
             # ========================================
@@ -358,7 +358,7 @@ class RetreinoMensal:
             logger.info("=" * 80)
 
             # TODO: Implementar deploy condicional
-            logger.info("⚠️  Deploy condicional ainda não implementado")
+            logger.info("  Deploy condicional ainda não implementado")
             logger.info("   Sprint 3: Implementar atualização de active_model.yaml")
 
             # ========================================
@@ -369,14 +369,14 @@ class RetreinoMensal:
             logger.info("=" * 80)
 
             # TODO: Implementar relatório
-            logger.info("⚠️  Relatório ainda não implementado")
+            logger.info("  Relatório ainda não implementado")
             logger.info("   Sprint 3: Implementar geração de relatório Excel e Slack")
 
             # ========================================
             # RESULTADO FINAL
             # ========================================
             logger.info("\n" + "=" * 80)
-            logger.info("✅ RETREINO MENSAL CONCLUÍDO (SPRINT 1.1)")
+            logger.info(" RETREINO MENSAL CONCLUÍDO (SPRINT 1.1)")
             logger.info("=" * 80)
             logger.info(f"Execution ID: {self.execution_id}")
             logger.info(f"Arquitetura: Hook-Based (zero duplicação!)")
@@ -394,7 +394,7 @@ class RetreinoMensal:
             }
 
         except Exception as e:
-            logger.error(f"❌ Erro no retreino mensal: {e}", exc_info=True)
+            logger.error(f" Erro no retreino mensal: {e}", exc_info=True)
             return {
                 'status': 'ERROR',
                 'execution_id': self.execution_id,
@@ -451,7 +451,7 @@ def main():
 
     # Verificar se config existe
     if not os.path.exists(args.config):
-        logger.error(f"❌ Arquivo de configuração não encontrado: {args.config}")
+        logger.error(f" Arquivo de configuração não encontrado: {args.config}")
         logger.info(f"   Crie o arquivo configs/retreino_mensal.yaml")
         sys.exit(1)
 

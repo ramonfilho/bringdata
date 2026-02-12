@@ -54,7 +54,7 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
         raise ValueError("Lista de arquivos não pode estar vazia")
 
     # DEBUG: Mensagem de progresso
-    logger.debug(f"📂 Lendo {len(filepaths)} arquivo(s) Excel...")
+    logger.debug(f" Lendo {len(filepaths)} arquivo(s) Excel...")
 
     all_data = {}
 
@@ -84,7 +84,7 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
                 )
 
                 if is_tmb_parcelas:
-                    logger.debug(f"    📊 Detectado arquivo TMB com parcelas: {filename}")
+                    logger.debug(f"     Detectado arquivo TMB com parcelas: {filename}")
                     logger.debug(f"       Registros totais (parcelas): {len(df):,}")
 
                     # Agregar por pedido único
@@ -103,7 +103,7 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
                             df_agregado = df_agregado[df_agregado['Status Pedido'] == 'Efetivado'].copy()
                             cancelados = total_antes - len(df_agregado)
                             if cancelados > 0:
-                                logger.debug(f"       ⚠️  {cancelados} pedidos cancelados removidos")
+                                logger.debug(f"         {cancelados} pedidos cancelados removidos")
 
                         df_agregado = df_agregado
 
@@ -115,8 +115,8 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
                         }
                         df_agregado = df_agregado.rename(columns=rename_map)
 
-                        logger.debug(f"       ✅ Agregado por pedido único: {len(df_agregado):,} pedidos")
-                        logger.debug(f"       📋 Coluna 'Grau de risco' preservada")
+                        logger.debug(f"        Agregado por pedido único: {len(df_agregado):,} pedidos")
+                        logger.debug(f"        Coluna 'Grau de risco' preservada")
 
                         # Mostrar distribuição de risco
                         if 'Grau de risco' in df_agregado.columns:
@@ -127,20 +127,20 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
 
                         df = df_agregado
                     else:
-                        logger.warning(f"    ⚠️  Coluna 'Pedido' não encontrada, usando dados como estão")
+                        logger.warning(f"      Coluna 'Pedido' não encontrada, usando dados como estão")
 
                 file_data[sheet_name] = df
-                logger.debug(f"    ✅ Aba '{sheet_name}': {len(df)} linhas, {len(df.columns)} colunas")
+                logger.debug(f"     Aba '{sheet_name}': {len(df)} linhas, {len(df.columns)} colunas")
 
             all_data[filename] = file_data
             logger.debug(f"    Total: {len(file_data)} aba(s) lida(s)")
 
         except Exception as e:
-            logger.error(f"    ❌ Erro ao ler {filename}: {e}")
+            logger.error(f"     Erro ao ler {filename}: {e}")
             raise
 
     # DEBUG: Total já mostrado no train_pipeline.py
-    logger.debug(f"✅ Total de arquivos lidos: {len(all_data)}")
+    logger.debug(f" Total de arquivos lidos: {len(all_data)}")
 
     return all_data
 
@@ -176,7 +176,7 @@ def filter_sheets(
         ... )
     """
     # DEBUG: Mensagem de progresso
-    logger.debug("🔍 Filtrando abas por critérios...")
+    logger.debug(" Filtrando abas por critérios...")
 
     arquivos_filtrados = {}
     relatorio = []
@@ -213,7 +213,7 @@ def filter_sheets(
                     'linhas_original': linhas_original,
                     'status': 'MANTIDA'
                 })
-                logger.debug(f"  ✅ {filename} - {sheet_name}: {linhas_original:,} linhas (MANTIDA)")
+                logger.debug(f"   {filename} - {sheet_name}: {linhas_original:,} linhas (MANTIDA)")
 
             else:
                 # Aba REMOVIDA
@@ -223,7 +223,7 @@ def filter_sheets(
                     'linhas_original': linhas_original,
                     'status': 'REMOVIDA'
                 })
-                logger.debug(f"  ❌ {filename} - {sheet_name}: removida pelos critérios")
+                logger.debug(f"   {filename} - {sheet_name}: removida pelos critérios")
 
         # Salvar arquivo se tiver abas válidas
         if abas_filtradas:
@@ -259,7 +259,7 @@ def remove_duplicates_per_sheet(
         >>> clean_data, stats = remove_duplicates_per_sheet(data)
     """
     # DEBUG: Mensagem de progresso
-    logger.debug("🧹 Removendo duplicatas...")
+    logger.debug(" Removendo duplicatas...")
 
     arquivos_limpos = {}
     estatisticas = {}
@@ -317,7 +317,7 @@ def remove_unnecessary_columns(
         ... )
     """
     # DEBUG: Mensagem de progresso
-    logger.debug("🧹 Removendo colunas desnecessárias...")
+    logger.debug(" Removendo colunas desnecessárias...")
 
     colunas_remover_lower = [col.lower() for col in colunas_remover]
 
@@ -405,7 +405,7 @@ def consolidate_datasets(
         ... )
     """
     # DEBUG: Mensagem de progresso
-    logger.debug("🔗 Consolidando datasets (Pesquisa e Vendas)...")
+    logger.debug(" Consolidando datasets (Pesquisa e Vendas)...")
 
     dados_pesquisa = []
     dados_vendas = []
@@ -482,7 +482,7 @@ def read_all_training_sources(
         ... )
     """
     # 1. LER ARQUIVOS LOCAIS (comportamento padrão)
-    logger.debug("📦 INGESTÃO DE DADOS DE TREINO")
+    logger.debug(" INGESTÃO DE DADOS DE TREINO")
 
     local_data = read_excel_files(filepaths)
 
@@ -492,11 +492,11 @@ def read_all_training_sources(
 
     # DEBUG: Buscando dados adicionais
     logger.debug("")
-    logger.debug("🌐 BUSCANDO DADOS ADICIONAIS (API/Sheets)")
+    logger.debug(" BUSCANDO DADOS ADICIONAIS (API/Sheets)")
     logger.debug("-" * 60)
 
     if not api_start_date or not api_end_date:
-        logger.warning("⚠️  Datas da API não fornecidas, pulando ingestão API")
+        logger.warning("  Datas da API não fornecidas, pulando ingestão API")
         return local_data
 
     try:
@@ -506,7 +506,7 @@ def read_all_training_sources(
         api_data = {}
 
         # === LEADS DO GOOGLE SHEETS ===
-        logger.info("\n📊 1/2: Leads do Google Sheets")
+        logger.info("\n 1/2: Leads do Google Sheets")
         try:
             lead_loader = LeadDataLoader()
             sheets_df = lead_loader.load_leads_from_sheets(
@@ -549,15 +549,15 @@ def read_all_training_sources(
                 api_data['[API] Leads Google Sheets'] = {
                     '[LF] Pesquisa - API': sheets_formatted
                 }
-                logger.info(f"   ✅ {len(sheets_formatted)} leads carregados do Sheets")
+                logger.info(f"    {len(sheets_formatted)} leads carregados do Sheets")
             else:
-                logger.warning("   ⚠️  Nenhum lead encontrado no Sheets")
+                logger.warning("     Nenhum lead encontrado no Sheets")
 
         except Exception as e:
-            logger.error(f"   ❌ Erro ao buscar leads do Sheets: {e}")
+            logger.error(f"    Erro ao buscar leads do Sheets: {e}")
 
         # === VENDAS DA API GURU ===
-        logger.info("\n💰 2/2: Vendas da API Guru")
+        logger.info("\n 2/2: Vendas da API Guru")
         try:
             sales_loader = SalesDataLoader()
             guru_df = sales_loader.load_guru_sales_from_api(
@@ -581,31 +581,31 @@ def read_all_training_sources(
                 api_data['[API] Vendas Guru'] = {
                     'Sheet1': guru_formatted
                 }
-                logger.info(f"   ✅ {len(guru_formatted)} vendas carregadas da API Guru")
+                logger.info(f"    {len(guru_formatted)} vendas carregadas da API Guru")
             else:
-                logger.warning("   ⚠️  Nenhuma venda encontrada na API Guru")
+                logger.warning("     Nenhuma venda encontrada na API Guru")
 
         except Exception as e:
-            logger.error(f"   ❌ Erro ao buscar vendas da API Guru: {e}")
+            logger.error(f"    Erro ao buscar vendas da API Guru: {e}")
 
         # 3. COMBINAR DADOS LOCAIS + API
         if api_data:
-            logger.info("\n🔗 COMBINANDO DADOS")
+            logger.info("\n COMBINANDO DADOS")
             logger.info("-" * 60)
             logger.info(f"   Arquivos locais: {len(local_data)}")
             logger.info(f"   Fontes API: {len(api_data)}")
 
             combined_data = {**local_data, **api_data}
 
-            logger.info(f"   ✅ Total combinado: {len(combined_data)} fontes de dados")
+            logger.info(f"    Total combinado: {len(combined_data)} fontes de dados")
 
             return combined_data
         else:
-            logger.warning("\n⚠️  Nenhum dado da API foi carregado")
+            logger.warning("\n  Nenhum dado da API foi carregado")
             logger.info("   Usando apenas arquivos locais")
             return local_data
 
     except Exception as e:
-        logger.error(f"\n❌ Erro ao buscar dados da API: {e}")
+        logger.error(f"\n Erro ao buscar dados da API: {e}")
         logger.info("   Fallback: usando apenas arquivos locais")
         return local_data

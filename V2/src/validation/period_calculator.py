@@ -93,7 +93,7 @@ class PeriodCalculator:
         if start_date.weekday() != self.TUESDAY:
             weekday_names = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo']
             actual_day = weekday_names[start_date.weekday()]
-            print(f"⚠️ AVISO: Data de início ({lead_capture_start}) é {actual_day}, "
+            print(f" AVISO: Data de início ({lead_capture_start}) é {actual_day}, "
                   f"mas deveria ser Terça-feira conforme a lógica de negócio.")
 
         # Calcular períodos
@@ -220,26 +220,26 @@ if __name__ == '__main__':
 
     # Exemplo do período problemático
     lead_start = '2025-10-28'
-    print(f"📅 Data de início da captação: {lead_start}")
+    print(f" Data de início da captação: {lead_start}")
     print()
 
     periods = calc.calculate_periods(lead_start)
 
     print("PERÍODOS CALCULADOS:")
     print("-" * 80)
-    print(f"📊 CAPTAÇÃO DE LEADS:")
+    print(f" CAPTAÇÃO DE LEADS:")
     print(f"   Início: {periods['lead_capture']['start']} (Terça)")
     print(f"   Fim:    {periods['lead_capture']['end']} (Segunda)")
     print(f"   Duração: 7 dias")
     print()
 
-    print(f"💰 ANÁLISE DE CPL:")
+    print(f" ANÁLISE DE CPL:")
     print(f"   Início: {periods['cpl_analysis']['start']} (Terça)")
     print(f"   Fim:    {periods['cpl_analysis']['end']} (Domingo)")
     print(f"   Duração: 6 dias")
     print()
 
-    print(f"🛒 PERÍODO DE VENDAS:")
+    print(f" PERÍODO DE VENDAS:")
     print(f"   Início: {periods['sales']['start']} (Segunda)")
     print(f"   Fim:    {periods['sales']['end']} (Domingo)")
     print(f"   Duração: 7 dias")
@@ -256,11 +256,11 @@ if __name__ == '__main__':
     )
 
     for key, value in validation.items():
-        status = "✅" if value else "❌"
+        status = "" if value else ""
         print(f"{status} {key}: {value}")
     print()
 
     if validation['all_valid']:
-        print("✅ Todos os períodos estão corretos!")
+        print(" Todos os períodos estão corretos!")
     else:
-        print("⚠️ Alguns períodos não seguem a lógica esperada")
+        print(" Alguns períodos não seguem a lógica esperada")

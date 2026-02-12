@@ -49,7 +49,7 @@ def get_capi_leads_by_day(start_date: str, end_date: str) -> Dict[str, int]:
     Returns:
         Dict {data: count} com contagem de leads únicos por dia
     """
-    logger.info(f"📊 Buscando leads CAPI ({start_date} a {end_date})")
+    logger.info(f" Buscando leads CAPI ({start_date} a {end_date})")
 
     # Converter para datetime
     start_dt = datetime.strptime(start_date, '%Y-%m-%d')
@@ -67,7 +67,7 @@ def get_capi_leads_by_day(start_date: str, end_date: str) -> Dict[str, int]:
         chunk_start_str = current_start.strftime('%Y-%m-%d')
         chunk_end_str = current_end.strftime('%Y-%m-%d')
 
-        logger.info(f"   🔍 Chunk {chunk_num}: {chunk_start_str} a {chunk_end_str}")
+        logger.info(f"    Chunk {chunk_num}: {chunk_start_str} a {chunk_end_str}")
 
         url = f"{API_URL}/webhook/lead_capture/recent?start_date={chunk_start_str}&end_date={chunk_end_str}&limit=10000"
 
@@ -81,27 +81,27 @@ def get_capi_leads_by_day(start_date: str, end_date: str) -> Dict[str, int]:
             )
 
             if result.returncode != 0:
-                logger.error(f"❌ Curl falhou para chunk {chunk_num}: {result.stderr}")
+                logger.error(f" Curl falhou para chunk {chunk_num}: {result.stderr}")
                 current_start = current_end + timedelta(days=1)
                 continue
 
             response_data = json.loads(result.stdout)
             chunk_leads = response_data.get('leads', [])
 
-            logger.info(f"      ✅ {len(chunk_leads)} leads encontrados")
+            logger.info(f"       {len(chunk_leads)} leads encontrados")
 
             all_leads.extend(chunk_leads)
 
         except Exception as e:
-            logger.error(f"❌ Erro ao buscar chunk {chunk_num}: {e}")
+            logger.error(f" Erro ao buscar chunk {chunk_num}: {e}")
 
         # Avançar para próximo chunk
         current_start = current_end + timedelta(days=1)
 
-    logger.info(f"   ✅ Total: {len(all_leads)} leads de {chunk_num} chunks")
+    logger.info(f"    Total: {len(all_leads)} leads de {chunk_num} chunks")
 
     if len(all_leads) == 0:
-        logger.warning("   ⚠️ Nenhum lead no período")
+        logger.warning("    Nenhum lead no período")
         return {}
 
     # Converter para DataFrame
@@ -121,7 +121,7 @@ def get_capi_leads_by_day(start_date: str, end_date: str) -> Dict[str, int]:
     # Converter date objects para strings
     daily_counts_str = {str(date): count for date, count in daily_counts.items()}
 
-    logger.info(f"   📊 Leads CAPI distribuídos em {len(daily_counts_str)} dias")
+    logger.info(f"    Leads CAPI distribuídos em {len(daily_counts_str)} dias")
 
     return daily_counts_str
 
@@ -137,7 +137,7 @@ def get_survey_responses_by_day(start_date: str, end_date: str) -> Dict[str, int
     Returns:
         Dict {data: count} com contagem de respostas por dia
     """
-    logger.info(f"📋 Buscando respostas da pesquisa ({start_date} a {end_date})")
+    logger.info(f" Buscando respostas da pesquisa ({start_date} a {end_date})")
 
     try:
         loader = LeadDataLoader()
@@ -151,10 +151,10 @@ def get_survey_responses_by_day(start_date: str, end_date: str) -> Dict[str, int
         )
 
         if len(df) == 0:
-            logger.warning("   ⚠️ Nenhuma resposta no período")
+            logger.warning("    Nenhuma resposta no período")
             return {}
 
-        logger.info(f"   ✅ {len(df)} respostas encontradas no Google Sheets")
+        logger.info(f"    {len(df)} respostas encontradas no Google Sheets")
 
         # Extrair data da coluna data_captura
         df['date'] = df['data_captura'].dt.date
@@ -168,12 +168,12 @@ def get_survey_responses_by_day(start_date: str, end_date: str) -> Dict[str, int
         # Converter date objects para strings
         daily_counts_str = {str(date): count for date, count in daily_counts.items()}
 
-        logger.info(f"   📊 Respostas distribuídas em {len(daily_counts_str)} dias")
+        logger.info(f"    Respostas distribuídas em {len(daily_counts_str)} dias")
 
         return daily_counts_str
 
     except Exception as e:
-        logger.error(f"❌ Erro ao buscar respostas da pesquisa: {e}")
+        logger.error(f" Erro ao buscar respostas da pesquisa: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return {}
@@ -189,7 +189,7 @@ def generate_daily_report(start_date: str, end_date: str, output_path: str):
         output_path: Caminho do arquivo CSV de saída
     """
     logger.info("="*80)
-    logger.info("📊 GERANDO RELATÓRIO DE TAXA DE RESPOSTA DIÁRIA")
+    logger.info(" GERANDO RELATÓRIO DE TAXA DE RESPOSTA DIÁRIA")
     logger.info("="*80)
     logger.info(f"   Período: {start_date} a {end_date}")
     logger.info(f"   Output: {output_path}")
@@ -210,7 +210,7 @@ def generate_daily_report(start_date: str, end_date: str, output_path: str):
         date_range.append(current_dt)
         current_dt += timedelta(days=1)
 
-    logger.info(f"   📅 Gerando dados para {len(date_range)} dias")
+    logger.info(f"    Gerando dados para {len(date_range)} dias")
 
     # 4. Montar DataFrame
     rows = []
@@ -244,7 +244,7 @@ def generate_daily_report(start_date: str, end_date: str, output_path: str):
     df.to_csv(output_path, index=False)
 
     logger.info("="*80)
-    logger.info("✅ RELATÓRIO GERADO COM SUCESSO")
+    logger.info(" RELATÓRIO GERADO COM SUCESSO")
     logger.info("="*80)
     logger.info(f"   Arquivo: {output_path}")
     logger.info(f"   Total de dias: {len(df)}")
@@ -259,7 +259,7 @@ def generate_daily_report(start_date: str, end_date: str, output_path: str):
         logger.info(f"   Taxa Resposta Média: {taxa_media}%")
 
     # Mostrar primeiras 5 linhas
-    logger.info("\n   📋 Primeiras 5 linhas:")
+    logger.info("\n    Primeiras 5 linhas:")
     print(df.head(5).to_string(index=False))
 
     # Estatísticas de qualidade
@@ -267,7 +267,7 @@ def generate_daily_report(start_date: str, end_date: str, output_path: str):
     dias_sem_capi = len(df[df['Leads_CAPI'] == 0])
     dias_taxa_anormal = len(df[df['Taxa_Resposta_%'] > 100])
 
-    logger.info(f"\n   📊 Estatísticas:")
+    logger.info(f"\n    Estatísticas:")
     logger.info(f"      Dias com dados: {dias_com_dados}/{len(df)}")
     logger.info(f"      Dias sem CAPI (possível problema): {dias_sem_capi}")
     logger.info(f"      Dias com taxa >100% (possível duplicação): {dias_taxa_anormal}")
@@ -283,7 +283,7 @@ def merge_with_existing_csv(old_csv_path: str, new_csv_path: str, merged_csv_pat
         merged_csv_path: Caminho do CSV mesclado final
     """
     logger.info("="*80)
-    logger.info("🔗 MESCLANDO CSV ANTIGO + NOVO")
+    logger.info(" MESCLANDO CSV ANTIGO + NOVO")
     logger.info("="*80)
 
     # Ler ambos CSVs
@@ -305,7 +305,7 @@ def merge_with_existing_csv(old_csv_path: str, new_csv_path: str, merged_csv_pat
     after = len(df_merged)
 
     if before != after:
-        logger.info(f"   🔄 Removidas {before - after} duplicatas")
+        logger.info(f"    Removidas {before - after} duplicatas")
 
     # Ordenar por data
     df_merged = df_merged.sort_values('Data_dt')
@@ -317,7 +317,7 @@ def merge_with_existing_csv(old_csv_path: str, new_csv_path: str, merged_csv_pat
     df_merged.to_csv(merged_csv_path, index=False)
 
     logger.info("="*80)
-    logger.info("✅ CSV MESCLADO COM SUCESSO")
+    logger.info(" CSV MESCLADO COM SUCESSO")
     logger.info("="*80)
     logger.info(f"   Arquivo: {merged_csv_path}")
     logger.info(f"   Total de dias: {len(df_merged)}")
@@ -347,7 +347,7 @@ def main():
     if args.merge_with:
         merged_path = output_path.replace('.csv', '_merged.csv')
         merge_with_existing_csv(args.merge_with, output_path, merged_path)
-        logger.info(f"\n   💾 CSV final mesclado: {merged_path}")
+        logger.info(f"\n    CSV final mesclado: {merged_path}")
 
 
 if __name__ == '__main__':

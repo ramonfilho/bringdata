@@ -66,7 +66,7 @@ class ValidationVisualizer:
         Returns:
             Dicionário com caminhos dos arquivos gerados
         """
-        logger.info("📈 Gerando visualizações...")
+        logger.info(" Gerando visualizações...")
 
         # Criar diretório se não existir
         Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -103,7 +103,7 @@ class ValidationVisualizer:
             campaign_metrics, output_dir
         )
 
-        logger.info(f"   ✅ 5 gráficos PNG salvos em: {output_dir}/")
+        logger.info(f"    5 gráficos PNG salvos em: {output_dir}/")
 
         return output_files
 
@@ -286,7 +286,7 @@ class ValidationVisualizer:
             Caminho do arquivo PNG gerado
         """
         if decile_metrics.empty:
-            logger.warning("   ⚠️ Nenhuma métrica de decil para plotar")
+            logger.warning("    Nenhuma métrica de decil para plotar")
             # Criar gráfico vazio com mensagem
             fig, ax = plt.subplots(figsize=self.figsize)
             ax.text(0.5, 0.5, 'Sem dados de decil disponíveis',
@@ -391,7 +391,7 @@ class ValidationVisualizer:
             Caminho do arquivo PNG gerado
         """
         if decile_metrics.empty:
-            logger.warning("   ⚠️ Nenhuma métrica de decil para plotar")
+            logger.warning("    Nenhuma métrica de decil para plotar")
             fig, ax = plt.subplots(figsize=self.figsize)
             ax.text(0.5, 0.5, 'Sem dados de decil disponíveis',
                    ha='center', va='center', fontsize=14)
@@ -440,7 +440,7 @@ class ValidationVisualizer:
 
         # Títulos e labels
         ax.set_title(
-            'Receita Acumulada por Decil (D1 → D10)',
+            'Receita Acumulada por Decil (D1  D10)',
             fontsize=16,
             fontweight='bold',
             pad=20
@@ -488,7 +488,7 @@ class ValidationVisualizer:
             Caminho do arquivo PNG gerado
         """
         if campaign_metrics.empty:
-            logger.warning("   ⚠️ Nenhuma métrica de campanha para plotar")
+            logger.warning("    Nenhuma métrica de campanha para plotar")
             fig, ax = plt.subplots(figsize=self.figsize)
             ax.text(0.5, 0.5, 'Sem dados de campanha disponíveis',
                    ha='center', va='center', fontsize=14)

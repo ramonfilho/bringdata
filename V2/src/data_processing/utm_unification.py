@@ -47,7 +47,7 @@ def unify_utm_source(df: pd.DataFrame) -> pd.DataFrame:
             df_unified.loc[df_unified['Source'] == source, 'Source'] = 'outros'
 
     if conversoes:
-        logger.info(f"   📌 Source convertidas para 'outros': {', '.join(conversoes)}")
+        logger.info(f"    Source convertidas para 'outros': {', '.join(conversoes)}")
 
     return df_unified
 
@@ -124,7 +124,7 @@ def unify_utm_term(df: pd.DataFrame) -> pd.DataFrame:
                               (f" (+ {len(valores_convertidos)-5} mais)" if len(valores_convertidos) > 5 else ""))
 
     if conversoes_term:
-        logger.info(f"   📌 Term convertidas:")
+        logger.info(f"    Term convertidas:")
         for conv in conversoes_term:
             logger.info(f"      - {conv}")
 

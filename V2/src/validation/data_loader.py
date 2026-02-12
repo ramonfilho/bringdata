@@ -119,11 +119,11 @@ class LeadDataLoader:
         if use_cache and cache_file.exists():
             file_age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
             if file_age_hours < cache_max_age_hours:
-                logger.info(f"📦 Usando cache local (idade: {file_age_hours:.1f}h)")
+                logger.info(f" Usando cache local (idade: {file_age_hours:.1f}h)")
                 logger.info(f"   Arquivo: {cache_file}")
                 try:
                     df = pd.read_csv(cache_file, parse_dates=['Data'])
-                    logger.info(f"   ✅ {len(df)} linhas carregadas do cache")
+                    logger.info(f"    {len(df)} linhas carregadas do cache")
 
                     # Filtrar por período se especificado
                     if start_date or end_date:
@@ -134,14 +134,14 @@ class LeadDataLoader:
                         if end_date:
                             end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1)
                             df = df[df['Data'] < end_dt]
-                        logger.info(f"   📅 Filtrado por período: {original_len} → {len(df)} leads")
+                        logger.info(f"    Filtrado por período: {original_len}  {len(df)} leads")
 
                     # Normalizar
                     return self._normalize_leads_dataframe(df)
                 except Exception as e:
-                    logger.warning(f"   ⚠️ Erro ao ler cache, recarregando do Sheets: {e}")
+                    logger.warning(f"    Erro ao ler cache, recarregando do Sheets: {e}")
 
-        logger.info(f"📊 Carregando leads do Google Sheets (produção)")
+        logger.info(f" Carregando leads do Google Sheets (produção)")
         logger.info(f"   URL: {sheets_url[:50]}...")
 
         try:
@@ -151,7 +151,7 @@ class LeadDataLoader:
             import gspread
 
             # 1. Usar gspread para descobrir todas as abas e seus GIDs (operação rápida)
-            logger.info("   🔍 Descobrindo abas da planilha...")
+            logger.info("    Descobrindo abas da planilha...")
             scopes = [
                 'https://www.googleapis.com/auth/spreadsheets.readonly',
                 'https://www.googleapis.com/auth/drive.readonly'
@@ -161,12 +161,12 @@ class LeadDataLoader:
             spreadsheet = gc.open_by_url(sheets_url)
 
             worksheets = spreadsheet.worksheets()
-            logger.info(f"   ✅ {len(worksheets)} abas encontradas")
+            logger.info(f"    {len(worksheets)} abas encontradas")
 
             # Pegar apenas as N primeiras abas (índices 0, 1, ...)
             # Aba [0]: [LF] Pesquisa | Aba [1]: [LF] Pesquisa v2
             abas_pesquisa = worksheets[:num_sheets]
-            logger.info(f"   📋 Usando {len(abas_pesquisa)} aba(s):")
+            logger.info(f"    Usando {len(abas_pesquisa)} aba(s):")
             for idx, ws in enumerate(abas_pesquisa):
                 logger.info(f"      [{idx}] {ws.title} (gid={ws.id})")
 
@@ -174,7 +174,7 @@ class LeadDataLoader:
             dfs_to_combine = []
 
             for idx, ws in enumerate(abas_pesquisa):
-                logger.info(f"   📄 Carregando aba [{idx}]: {ws.title} (gid={ws.id})")
+                logger.info(f"    Carregando aba [{idx}]: {ws.title} (gid={ws.id})")
 
                 url_aba = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={ws.id}"
 
@@ -186,7 +186,7 @@ class LeadDataLoader:
                     )
 
                     if result.returncode != 0:
-                        logger.warning(f"      ⚠️ Curl falhou para aba {ws.title}: {result.stderr.decode()}")
+                        logger.warning(f"       Curl falhou para aba {ws.title}: {result.stderr.decode()}")
                         os.unlink(tmp.name)
                         continue
 
@@ -196,7 +196,7 @@ class LeadDataLoader:
 
                         # Remover duplicatas de colunas
                         df_aba = df_aba.loc[:, ~df_aba.columns.duplicated(keep='first')]
-                        logger.info(f"      ✅ {len(df_aba)} linhas, {len(df_aba.columns)} colunas únicas")
+                        logger.info(f"       {len(df_aba)} linhas, {len(df_aba.columns)} colunas únicas")
 
                         # Normalizar coluna de data
                         if 'Data' in df_aba.columns:
@@ -209,7 +209,7 @@ class LeadDataLoader:
                         dfs_to_combine.append(df_aba)
 
                     except Exception as e:
-                        logger.warning(f"      ⚠️ Erro ao processar aba {ws.title}: {e}")
+                        logger.warning(f"       Erro ao processar aba {ws.title}: {e}")
                         os.unlink(tmp.name)
 
             # Combinar ambas as abas
@@ -219,19 +219,19 @@ class LeadDataLoader:
 
             # Verificar e remover duplicatas de colunas no resultado final
             if df.columns.duplicated().any():
-                logger.warning(f"   ⚠️ Resultado do concat tem colunas duplicadas, removendo...")
+                logger.warning(f"    Resultado do concat tem colunas duplicadas, removendo...")
                 df = df.loc[:, ~df.columns.duplicated(keep='first')]
 
             num_abas = len(dfs_to_combine)
-            logger.info(f"   ✅ {len(df)} linhas TOTAIS lidas do Google Sheets ({num_abas} aba{'s' if num_abas > 1 else ''} combinada{'s' if num_abas > 1 else ''})")
+            logger.info(f"    {len(df)} linhas TOTAIS lidas do Google Sheets ({num_abas} aba{'s' if num_abas > 1 else ''} combinada{'s' if num_abas > 1 else ''})")
 
             # Salvar no cache (antes de filtrar por período)
             try:
                 cache_dir.mkdir(parents=True, exist_ok=True)
                 df.to_csv(cache_file, index=False)
-                logger.info(f"   💾 Cache salvo: {cache_file}")
+                logger.info(f"    Cache salvo: {cache_file}")
             except Exception as e:
-                logger.warning(f"   ⚠️ Erro ao salvar cache (não crítico): {e}")
+                logger.warning(f"    Erro ao salvar cache (não crítico): {e}")
 
             # Filtrar por período se especificado
             if start_date or end_date:
@@ -243,13 +243,13 @@ class LeadDataLoader:
                     end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1)  # Incluir fim do dia
                     df = df[df['Data'] < end_dt]
 
-                logger.info(f"   📅 Filtrado por período: {original_len} → {len(df)} leads")
+                logger.info(f"    Filtrado por período: {original_len}  {len(df)} leads")
 
             # Normalizar usando mesma lógica do CSV
             return self._normalize_leads_dataframe(df)
 
         except Exception as e:
-            logger.error(f"❌ Erro ao carregar do Google Sheets: {e}")
+            logger.error(f" Erro ao carregar do Google Sheets: {e}")
             raise
 
     def _normalize_leads_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -337,18 +337,18 @@ class LeadDataLoader:
         template_vars_campaign = df_norm['campaign'].astype(str).str.contains(r'\{\{', na=False)
 
         if template_vars_medium.sum() > 0:
-            logger.warning(f"   ⚠️ {template_vars_medium.sum()} leads com variáveis não substituídas em 'medium' (removidas)")
+            logger.warning(f"    {template_vars_medium.sum()} leads com variáveis não substituídas em 'medium' (removidas)")
             df_norm.loc[template_vars_medium, 'medium'] = np.nan
 
         if template_vars_campaign.sum() > 0:
-            logger.warning(f"   ⚠️ {template_vars_campaign.sum()} leads com variáveis não substituídas em 'campaign' (removidas)")
+            logger.warning(f"    {template_vars_campaign.sum()} leads com variáveis não substituídas em 'campaign' (removidas)")
             df_norm.loc[template_vars_campaign, 'campaign'] = np.nan
 
         # 2. Identificar leads de outras fontes (não facebook-ads)
         non_facebook = df_norm['source'].notna() & (df_norm['source'] != 'facebook-ads')
         if non_facebook.sum() > 0:
             sources_count = df_norm[non_facebook]['source'].value_counts()
-            logger.info(f"   ℹ️  {non_facebook.sum()} leads de outras fontes (não facebook-ads):")
+            logger.info(f"   ℹ  {non_facebook.sum()} leads de outras fontes (não facebook-ads):")
             for source, count in sources_count.head(5).items():
                 logger.info(f"      - {source}: {count} leads")
 
@@ -360,19 +360,19 @@ class LeadDataLoader:
             if df['lead_score'].notna().any():
                 # PRIORITY 1: ML model scores
                 df_norm['decile'] = df['lead_score'].apply(self._assign_decile_from_score)
-                logger.info(f"   ✅ Decis atribuídos via lead_score: {df_norm['decile'].notna().sum()}/{len(df_norm)}")
+                logger.info(f"    Decis atribuídos via lead_score: {df_norm['decile'].notna().sum()}/{len(df_norm)}")
             else:
                 df_norm['decile'] = None
         elif 'Faixa' in df.columns:
             if df['Faixa'].notna().any():
                 # FALLBACK: Legacy classification
                 df_norm['decile'] = df['Faixa']
-                logger.info(f"   ⚠️ Decis atribuídos via Faixa (legacy): {df_norm['decile'].notna().sum()}/{len(df_norm)}")
+                logger.info(f"    Decis atribuídos via Faixa (legacy): {df_norm['decile'].notna().sum()}/{len(df_norm)}")
             else:
                 df_norm['decile'] = None
         else:
             df_norm['decile'] = None
-            logger.warning("⚠️ Nenhuma coluna de score/decil encontrada")
+            logger.warning(" Nenhuma coluna de score/decil encontrada")
 
         # Remover linhas com email inválido
         before = len(df_norm)
@@ -380,9 +380,9 @@ class LeadDataLoader:
         after = len(df_norm)
 
         if before != after:
-            logger.warning(f"⚠️ {before - after} leads removidos (email inválido)")
+            logger.warning(f" {before - after} leads removidos (email inválido)")
 
-        logger.info(f"   ✅ {len(df_norm)} leads carregados e normalizados")
+        logger.info(f"    {len(df_norm)} leads carregados e normalizados")
 
         return df_norm
 
@@ -404,7 +404,7 @@ class LeadDataLoader:
             - decile: Decil (D1-D10)
             - source, medium, term, content: UTMs
         """
-        logger.info(f"📂 Carregando leads de {csv_path}")
+        logger.info(f" Carregando leads de {csv_path}")
 
         # Ler CSV
         df = pd.read_csv(csv_path)
@@ -438,7 +438,7 @@ class LeadDataLoader:
                 metadata = json.load(f)
 
             self._thresholds_cache = metadata['decil_thresholds']['thresholds']
-            logger.debug(f"✅ Thresholds carregados do modelo ativo: {model_path.name}")
+            logger.debug(f" Thresholds carregados do modelo ativo: {model_path.name}")
 
         return self._thresholds_cache
 
@@ -460,17 +460,17 @@ class LeadDataLoader:
         # Convert string to float (handle comma decimal separator)
         if isinstance(score, str):
             try:
-                # Replace comma with dot: "0,1572" → "0.1572"
+                # Replace comma with dot: "0,1572"  "0.1572"
                 score_float = float(score.replace(',', '.'))
             except (ValueError, AttributeError):
-                logger.warning(f"⚠️ Score inválido (não numérico): {score}")
+                logger.warning(f" Score inválido (não numérico): {score}")
                 return None
         else:
             score_float = float(score)
 
         # Validate range
         if not (0 <= score_float <= 1):
-            logger.warning(f"⚠️ Score fora do range [0,1]: {score_float}")
+            logger.warning(f" Score fora do range [0,1]: {score_float}")
             return None
 
         # Importar função do módulo existente
@@ -512,10 +512,10 @@ class SalesDataLoader:
             DataFrame normalizado com origem='guru'
         """
         if not guru_paths:
-            logger.warning("⚠️ Nenhum arquivo Guru fornecido")
+            logger.warning(" Nenhum arquivo Guru fornecido")
             return pd.DataFrame()
 
-        logger.info(f"📂 Carregando vendas Guru de {len(guru_paths)} arquivo(s)")
+        logger.info(f" Carregando vendas Guru de {len(guru_paths)} arquivo(s)")
 
         all_sales = []
 
@@ -525,11 +525,11 @@ class SalesDataLoader:
                 logger.info(f"   {len(df)} vendas de {Path(path).name}")
                 all_sales.append(df)
             except Exception as e:
-                logger.error(f"❌ Erro ao ler {path}: {e}")
+                logger.error(f" Erro ao ler {path}: {e}")
                 continue
 
         if not all_sales:
-            logger.warning("⚠️ Nenhuma venda Guru carregada")
+            logger.warning(" Nenhuma venda Guru carregada")
             return pd.DataFrame()
 
         # Combinar todos os DataFrames
@@ -586,7 +586,7 @@ class SalesDataLoader:
         from_aprovacao = (~date_aprovacao.isna()).sum()
         from_pedido = (date_aprovacao.isna() & ~date_pedido.isna()).sum()
         total_valid = (~df_norm['sale_date'].isna()).sum()
-        logger.info(f"   📅 Datas de venda: {total_valid} válidas ({from_aprovacao} de aprovacao, {from_pedido} de pedido)")
+        logger.info(f"    Datas de venda: {total_valid} válidas ({from_aprovacao} de aprovacao, {from_pedido} de pedido)")
 
         # UTM Campaign
         df_norm['utm_campaign'] = df_combined.get('utm_campaign', np.nan)
@@ -606,7 +606,7 @@ class SalesDataLoader:
         after = len(df_norm)
 
         if before != after:
-            logger.warning(f"⚠️ {before - after} vendas Guru removidas (email/data inválido)")
+            logger.warning(f" {before - after} vendas Guru removidas (email/data inválido)")
 
         # Deduplicação: múltiplas transações por pessoa (tentativas de cartão, etc.)
         # Priorizar: Aprovada > Cancelada
@@ -622,13 +622,13 @@ class SalesDataLoader:
             after_dedup = len(df_norm)
             if before_dedup != after_dedup:
                 removed = before_dedup - after_dedup
-                logger.info(f"   🔄 Deduplicação: {removed} transações duplicadas removidas (1 venda por pessoa)")
+                logger.info(f"    Deduplicação: {removed} transações duplicadas removidas (1 venda por pessoa)")
 
         # Drop status column if not needed (manter apenas se include_canceled=True para debug)
         if not include_canceled and 'status' in df_norm.columns:
             df_norm = df_norm.drop(columns=['status'])
 
-        logger.info(f"   ✅ {len(df_norm)} vendas Guru carregadas e normalizadas")
+        logger.info(f"    {len(df_norm)} vendas Guru carregadas e normalizadas")
 
         return df_norm
 
@@ -663,16 +663,16 @@ class SalesDataLoader:
             blob = bucket.blob(blob_name)
 
             if not blob.exists():
-                logger.error(f"❌ Arquivo não encontrado: gs://{bucket_name}/{blob_name}")
+                logger.error(f" Arquivo não encontrado: gs://{bucket_name}/{blob_name}")
                 return []
 
             blob.download_to_filename(temp_path)
-            logger.info(f"   ✅ Arquivo baixado: {blob_name} ({blob.size / 1024:.1f} KB)")
+            logger.info(f"    Arquivo baixado: {blob_name} ({blob.size / 1024:.1f} KB)")
 
             return [temp_path]
 
         except Exception as e:
-            logger.error(f"❌ Erro ao baixar TMB do Cloud Storage: {e}")
+            logger.error(f" Erro ao baixar TMB do Cloud Storage: {e}")
             logger.warning(f"   Certifique-se que o arquivo existe em gs://{bucket_name}/vendas/tmb_{report_type}.xlsx")
             return []
 
@@ -701,14 +701,14 @@ class SalesDataLoader:
         """
         # Se não forneceu paths, baixar do Cloud Storage
         if not tmb_paths:
-            logger.info(f"📦 Buscando vendas TMB no Cloud Storage (report_type={report_type})...")
+            logger.info(f" Buscando vendas TMB no Cloud Storage (report_type={report_type})...")
             tmb_paths = self._download_tmb_from_gcs(report_type)
 
             if not tmb_paths:
-                logger.warning("⚠️ Nenhum arquivo TMB encontrado no Cloud Storage")
+                logger.warning(" Nenhum arquivo TMB encontrado no Cloud Storage")
                 return pd.DataFrame()
 
-        logger.info(f"📂 Carregando vendas TMB de {len(tmb_paths)} arquivo(s)")
+        logger.info(f" Carregando vendas TMB de {len(tmb_paths)} arquivo(s)")
 
         all_sales = []
 
@@ -718,11 +718,11 @@ class SalesDataLoader:
                 logger.info(f"   {len(df)} vendas de {Path(path).name}")
                 all_sales.append(df)
             except Exception as e:
-                logger.error(f"❌ Erro ao ler {path}: {e}")
+                logger.error(f" Erro ao ler {path}: {e}")
                 continue
 
         if not all_sales:
-            logger.warning("⚠️ Nenhuma venda TMB carregada")
+            logger.warning(" Nenhuma venda TMB carregada")
             return pd.DataFrame()
 
         # Combinar todos os DataFrames
@@ -779,7 +779,7 @@ class SalesDataLoader:
         from_efetivado = (~date_efetivado.isna()).sum()
         from_criado = (date_efetivado.isna() & ~date_criado.isna()).sum()
         total_valid = (~df_norm['sale_date'].isna()).sum()
-        logger.info(f"   📅 Datas de venda TMB: {total_valid} válidas ({from_efetivado} de efetivado, {from_criado} de criado em)")
+        logger.info(f"    Datas de venda TMB: {total_valid} válidas ({from_efetivado} de efetivado, {from_criado} de criado em)")
 
         # UTM Campaign
         df_norm['utm_campaign'] = df_combined.get('utm_campaign', np.nan)
@@ -796,9 +796,9 @@ class SalesDataLoader:
         after = len(df_norm)
 
         if before != after:
-            logger.warning(f"⚠️ {before - after} vendas TMB removidas (email/data inválido)")
+            logger.warning(f" {before - after} vendas TMB removidas (email/data inválido)")
 
-        logger.info(f"   ✅ {len(df_norm)} vendas TMB carregadas e normalizadas")
+        logger.info(f"    {len(df_norm)} vendas TMB carregadas e normalizadas")
 
         return df_norm
 
@@ -816,7 +816,7 @@ class SalesDataLoader:
         Returns:
             DataFrame normalizado com origem='guru'
         """
-        logger.info(f"🌐 Buscando vendas Guru via API ({start_date} a {end_date})")
+        logger.info(f" Buscando vendas Guru via API ({start_date} a {end_date})")
 
         # Importar função do extrator
         from src.validation.guru_sales_extractor import fetch_guru_sales_from_api
@@ -830,7 +830,7 @@ class SalesDataLoader:
         )
 
         if df_raw.empty:
-            logger.warning("⚠️ Nenhuma venda retornada da API Guru")
+            logger.warning(" Nenhuma venda retornada da API Guru")
             return pd.DataFrame()
 
         # O DataFrame da API já vem com as colunas normalizadas
@@ -900,7 +900,7 @@ class SalesDataLoader:
         after = len(df_norm)
 
         if before != after:
-            logger.warning(f"⚠️ {before - after} vendas Guru API removidas (email/data inválido)")
+            logger.warning(f" {before - after} vendas Guru API removidas (email/data inválido)")
 
         # Deduplicação: múltiplas transações por pessoa (tentativas de cartão, etc.)
         # Priorizar: Aprovada > Cancelada
@@ -916,13 +916,13 @@ class SalesDataLoader:
             after_dedup = len(df_norm)
             if before_dedup != after_dedup:
                 removed = before_dedup - after_dedup
-                logger.info(f"   🔄 Deduplicação: {removed} transações duplicadas removidas (1 venda por pessoa)")
+                logger.info(f"    Deduplicação: {removed} transações duplicadas removidas (1 venda por pessoa)")
 
         # Drop status column if not needed (manter apenas se include_canceled=True para debug)
         if not include_canceled and 'status' in df_norm.columns:
             df_norm = df_norm.drop(columns=['status'])
 
-        logger.info(f"   ✅ {len(df_norm)} vendas Guru API carregadas e normalizadas")
+        logger.info(f"    {len(df_norm)} vendas Guru API carregadas e normalizadas")
 
         return df_norm
 
@@ -943,7 +943,7 @@ class SalesDataLoader:
         Returns:
             DataFrame combinado e deduplicado (prioriza Guru em caso de conflito)
         """
-        logger.info("🔗 Combinando vendas Guru + TMB")
+        logger.info(" Combinando vendas Guru + TMB")
 
         # Carregar se necessário
         if guru_df is None and guru_paths:
@@ -963,7 +963,7 @@ class SalesDataLoader:
             dfs.append(tmb_df)
 
         if not dfs:
-            logger.warning("⚠️ Nenhuma venda para combinar")
+            logger.warning(" Nenhuma venda para combinar")
             return pd.DataFrame()
 
         combined = pd.concat(dfs, ignore_index=True)
@@ -985,23 +985,23 @@ class SalesDataLoader:
         after = len(combined)
 
         if before != after:
-            logger.info(f"   🔧 Deduplicação de vendas:")
+            logger.info(f"    Deduplicação de vendas:")
             logger.info(f"      Antes: {before} vendas (Guru: {before_guru}, TMB: {before_tmb})")
             logger.info(f"      Duplicatas encontradas: {before - after} vendas com mesmo email+data")
             logger.info(f"      Depois: {after} vendas únicas")
 
             # Mostrar alguns exemplos de duplicatas (primeiras 3)
             if len(duplicates) > 0:
-                logger.info(f"      📋 Exemplos de duplicatas (primeiras {min(3, len(duplicates)//2)}):")
+                logger.info(f"       Exemplos de duplicatas (primeiras {min(3, len(duplicates)//2)}):")
                 dup_emails = duplicates['email'].unique()[:3]
                 for email in dup_emails:
                     dup_rows = duplicates[duplicates['email'] == email]
                     if len(dup_rows) > 1:
                         origins = ', '.join(dup_rows['origem'].tolist())
                         date = dup_rows['sale_date'].iloc[0].strftime('%Y-%m-%d') if pd.notna(dup_rows['sale_date'].iloc[0]) else 'sem data'
-                        logger.info(f"         • {email[:20]}... ({date}) → {origins}")
+                        logger.info(f"          {email[:20]}... ({date})  {origins}")
 
-        logger.info(f"   ✅ {len(combined)} vendas únicas combinadas")
+        logger.info(f"    {len(combined)} vendas únicas combinadas")
         logger.info(f"      Guru: {len(combined[combined['origem'] == 'guru'])}")
         logger.info(f"      TMB: {len(combined[combined['origem'] == 'tmb'])}")
 
@@ -1040,7 +1040,7 @@ class CAPILeadDataLoader:
         """
         import requests
 
-        logger.info(f"📂 Carregando leads do banco CAPI ({start_date} a {end_date})")
+        logger.info(f" Carregando leads do banco CAPI ({start_date} a {end_date})")
 
         if emails_filter:
             # Buscar emails específicos
@@ -1057,14 +1057,14 @@ class CAPILeadDataLoader:
             raise NotImplementedError("Busca de todos os leads do período ainda não implementada")
 
         if response.status_code != 200:
-            logger.error(f"❌ Erro ao buscar leads CAPI: {response.status_code}")
+            logger.error(f" Erro ao buscar leads CAPI: {response.status_code}")
             return pd.DataFrame()
 
         result = response.json()
         leads_data = result.get('leads', [])
 
         if not leads_data:
-            logger.info("   ⚠️ Nenhum lead encontrado no CAPI")
+            logger.info("    Nenhum lead encontrado no CAPI")
             return pd.DataFrame()
 
         # Converter para DataFrame
@@ -1093,9 +1093,9 @@ class CAPILeadDataLoader:
         after = len(df_norm)
 
         if before != after:
-            logger.info(f"   ⚠️ {before - after} leads removidos (email inválido)")
+            logger.info(f"    {before - after} leads removidos (email inválido)")
 
-        logger.info(f"   ✅ {len(df_norm)} leads CAPI carregados")
+        logger.info(f"    {len(df_norm)} leads CAPI carregados")
         logger.info(f"   UTM válida: {df_norm['campaign'].notna().sum()}/{len(df_norm)} ({df_norm['campaign'].notna().sum()/len(df_norm)*100:.1f}%)")
 
         return df_norm
@@ -1127,7 +1127,7 @@ class CAPILeadDataLoader:
             - capi_leads_total: int - Total de leads no banco CAPI no período
             - capi_leads_extras: int - Leads do CAPI que não estão na pesquisa
         """
-        logger.info("🔗 Combinando leads Pesquisa + CAPI")
+        logger.info(" Combinando leads Pesquisa + CAPI")
 
         # 1. Carregar leads de TODOS os arquivos de pesquisa
         from glob import glob
@@ -1137,7 +1137,7 @@ class CAPILeadDataLoader:
         pesquisa_pattern = str(leads_dir / '*Pesquisa*.csv')
         pesquisa_files = sorted(glob(pesquisa_pattern))
 
-        logger.info(f"   📂 Encontrados {len(pesquisa_files)} arquivos de pesquisa:")
+        logger.info(f"    Encontrados {len(pesquisa_files)} arquivos de pesquisa:")
         for f in pesquisa_files:
             logger.info(f"      - {Path(f).name}")
 
@@ -1150,9 +1150,9 @@ class CAPILeadDataLoader:
                 df['source_type'] = 'survey'
                 df['survey_file'] = Path(pesquisa_file).name
                 survey_dfs.append(df)
-                logger.info(f"   ✅ {Path(pesquisa_file).name}: {len(df)} leads")
+                logger.info(f"    {Path(pesquisa_file).name}: {len(df)} leads")
             except Exception as e:
-                logger.warning(f"   ⚠️ Erro ao carregar {Path(pesquisa_file).name}: {e}")
+                logger.warning(f"    Erro ao carregar {Path(pesquisa_file).name}: {e}")
 
         if not survey_dfs:
             raise ValueError("Nenhum arquivo de pesquisa foi carregado com sucesso")
@@ -1166,9 +1166,9 @@ class CAPILeadDataLoader:
         after_dedup = len(survey_df)
 
         if before_dedup != after_dedup:
-            logger.info(f"   🔄 Removidas {before_dedup - after_dedup} duplicatas entre arquivos")
+            logger.info(f"    Removidas {before_dedup - after_dedup} duplicatas entre arquivos")
 
-        logger.info(f"   📋 Total Pesquisa combinada: {len(survey_df)} leads únicos")
+        logger.info(f"    Total Pesquisa combinada: {len(survey_df)} leads únicos")
 
         # 2. Filtrar por período
         from src.validation.matching import filter_by_period
@@ -1180,10 +1180,10 @@ class CAPILeadDataLoader:
         survey_period = filter_by_period(survey_df, start_dt, end_dt, date_col='data_captura')
         survey_emails = set(survey_period[survey_period['email'].notna()]['email'].unique())
 
-        logger.info(f"   📋 Pesquisa (período): {len(survey_period)} leads, {len(survey_emails)} emails únicos")
+        logger.info(f"    Pesquisa (período): {len(survey_period)} leads, {len(survey_emails)} emails únicos")
 
         # 3. Buscar TODOS os leads do CAPI no período
-        logger.info("   🔍 Buscando leads no CAPI...")
+        logger.info("    Buscando leads no CAPI...")
 
         # WORKAROUND: requests está travando, usar curl via subprocess
         import subprocess
@@ -1204,7 +1204,7 @@ class CAPILeadDataLoader:
                 result = json_module.loads(result_curl.stdout)
                 response_ok = True
             else:
-                logger.warning(f"   ⚠️ Curl falhou (exit code {result_curl.returncode})")
+                logger.warning(f"    Curl falhou (exit code {result_curl.returncode})")
                 response_ok = False
 
             # response = requests.get(url, params=params, timeout=60)
@@ -1213,7 +1213,7 @@ class CAPILeadDataLoader:
                 # result já foi carregado acima
                 capi_leads_data = result.get('leads', [])
 
-                logger.info(f"   📊 CAPI (período): {len(capi_leads_data)} leads")
+                logger.info(f"    CAPI (período): {len(capi_leads_data)} leads")
 
                 if capi_leads_data:
                     # Converter para DataFrame
@@ -1260,7 +1260,7 @@ class CAPILeadDataLoader:
                     emails_removidos = emails_antes_filtro - emails_depois_filtro
 
                     if removidos > 0:
-                        logger.info(f"   🔍 Filtrado: {removidos} registros sem campaign_id Meta ({emails_removidos} emails únicos removidos)")
+                        logger.info(f"    Filtrado: {removidos} registros sem campaign_id Meta ({emails_removidos} emails únicos removidos)")
                         logger.info(f"      Restaram: {total_depois_filtro} registros com campaign_id Meta ({emails_depois_filtro} emails únicos)")
 
                     # ENRIQUECER leads da pesquisa que não têm UTM com dados do CAPI
@@ -1273,9 +1273,9 @@ class CAPILeadDataLoader:
                         ].copy()
 
                         if len(survey_without_utm) > 0 and len(capi_norm) > 0:
-                            logger.info(f"   🔧 Tentando enriquecer {len(survey_without_utm)} leads da pesquisa sem UTM usando dados do CAPI...")
+                            logger.info(f"    Tentando enriquecer {len(survey_without_utm)} leads da pesquisa sem UTM usando dados do CAPI...")
 
-                            # Criar mapeamento email → dados CAPI (pegar primeiro registro de cada email)
+                            # Criar mapeamento email  dados CAPI (pegar primeiro registro de cada email)
                             capi_by_email = capi_norm[capi_norm['campaign'].notna()].groupby('email').first()
 
                             enriched_count = 0
@@ -1294,28 +1294,28 @@ class CAPILeadDataLoader:
                                     enriched_count += 1
                                     matched_emails.append(email)
 
-                            logger.info(f"   ✅ Enriquecidos {enriched_count} leads da pesquisa com UTMs do CAPI ({enriched_count/len(survey_without_utm)*100:.1f}%)")
+                            logger.info(f"    Enriquecidos {enriched_count} leads da pesquisa com UTMs do CAPI ({enriched_count/len(survey_without_utm)*100:.1f}%)")
 
                             if enriched_count > 0:
                                 # Mostrar alguns exemplos
-                                logger.info(f"   📋 Exemplos de leads enriquecidos (primeiros 3):")
+                                logger.info(f"    Exemplos de leads enriquecidos (primeiros 3):")
                                 for email in matched_emails[:3]:
                                     idx = survey_period[survey_period['email'] == email].index[0]
                                     campaign = survey_period.at[idx, 'campaign']
                                     campaign_display = campaign[:60] if pd.notna(campaign) and len(str(campaign)) > 60 else campaign
-                                    logger.info(f"      • {email[:30]}... → {campaign_display}")
+                                    logger.info(f"       {email[:30]}...  {campaign_display}")
                         else:
                             if len(survey_without_utm) == 0:
-                                logger.info(f"   ✅ Todos os leads da pesquisa já possuem UTM válida")
+                                logger.info(f"    Todos os leads da pesquisa já possuem UTM válida")
                     else:
-                        logger.info(f"   ⚠️  CAPI enrichment DESABILITADO para teste")
+                        logger.info(f"     CAPI enrichment DESABILITADO para teste")
 
                     # Filtrar APENAS leads do CAPI que NÃO estão na pesquisa
                     capi_emails = set(capi_norm['email'].unique())
                     capi_extras = capi_emails - survey_emails
                     capi_extra_leads = capi_norm[capi_norm['email'].isin(capi_extras)].copy()
 
-                    logger.info(f"   ➕ Leads extras do CAPI (não estão na pesquisa): {len(capi_extra_leads)}")
+                    logger.info(f"    Leads extras do CAPI (não estão na pesquisa): {len(capi_extra_leads)}")
                     logger.info(f"   UTM válida: {capi_extra_leads['campaign'].notna().sum()}/{len(capi_extra_leads)} ({capi_extra_leads['campaign'].notna().sum()/len(capi_extra_leads)*100:.1f}%)" if len(capi_extra_leads) > 0 else "")
 
                     # 4. Combinar pesquisa + extras do CAPI
@@ -1330,13 +1330,13 @@ class CAPILeadDataLoader:
 
                     if len(capi_extra_leads) > 0:
                         combined = pd.concat([survey_period, capi_extra_leads], ignore_index=True)
-                        logger.info(f"   ✅ Total combinado: {len(combined)} leads ({len(survey_period)} pesquisa + {len(capi_extra_leads)} CAPI)")
+                        logger.info(f"    Total combinado: {len(combined)} leads ({len(survey_period)} pesquisa + {len(capi_extra_leads)} CAPI)")
                         return combined, stats
                     else:
-                        logger.info(f"   ✅ Total: {len(survey_period)} leads (apenas pesquisa)")
+                        logger.info(f"    Total: {len(survey_period)} leads (apenas pesquisa)")
                         return survey_period, stats
                 else:
-                    logger.info("   ⚠️ Nenhum lead encontrado no CAPI")
+                    logger.info("    Nenhum lead encontrado no CAPI")
                     stats = {
                         'survey_leads': len(survey_period),
                         'capi_leads_total': 0,
@@ -1344,8 +1344,8 @@ class CAPILeadDataLoader:
                     }
                     return survey_period, stats
             else:
-                logger.warning(f"   ⚠️ Erro ao buscar CAPI via curl (falhou)")
-                logger.info(f"   ✅ Usando apenas pesquisa: {len(survey_period)} leads")
+                logger.warning(f"    Erro ao buscar CAPI via curl (falhou)")
+                logger.info(f"    Usando apenas pesquisa: {len(survey_period)} leads")
                 stats = {
                     'survey_leads': len(survey_period),
                     'capi_leads_total': 0,
@@ -1354,8 +1354,8 @@ class CAPILeadDataLoader:
                 return survey_period, stats
 
         except Exception as e:
-            logger.warning(f"   ⚠️ Erro ao conectar com CAPI: {str(e)}")
-            logger.info(f"   ✅ Usando apenas pesquisa: {len(survey_period)} leads")
+            logger.warning(f"    Erro ao conectar com CAPI: {str(e)}")
+            logger.info(f"    Usando apenas pesquisa: {len(survey_period)} leads")
             stats = {
                 'survey_leads': len(survey_period),
                 'capi_leads_total': 0,

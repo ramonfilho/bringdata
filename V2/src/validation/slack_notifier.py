@@ -65,9 +65,9 @@ class ValidationSlackNotifier:
 
             # Determinar título baseado no tipo de relatório
             if report_type == 'pos-devolucoes':
-                title = "✅ *Validação ML - Relatório Pós-Devoluções (Final)*"
+                title = " *Validação ML - Relatório Pós-Devoluções (Final)*"
             else:
-                title = "📊 *Validação ML - Relatório de Fechamento*"
+                title = " *Validação ML - Relatório de Fechamento*"
 
             # Construir payload
             payload = {
@@ -77,12 +77,12 @@ class ValidationSlackNotifier:
                         "color": color,
                         "fields": [
                             {
-                                "title": "📅 Período Analisado",
+                                "title": " Período Analisado",
                                 "value": period_text,
                                 "short": False
                             },
                             {
-                                "title": "📈 Métricas de Performance",
+                                "title": " Métricas de Performance",
                                 "value": metrics_text,
                                 "short": False
                             }
@@ -96,13 +96,13 @@ class ValidationSlackNotifier:
             # Adicionar links dos relatórios se disponíveis
             report_links = []
             if excel_url:
-                report_links.append(f"<{excel_url}|📥 Download Excel>")
+                report_links.append(f"<{excel_url}| Download Excel>")
             if sheets_url:
-                report_links.append(f"<{sheets_url}|📊 Ver Google Sheets>")
+                report_links.append(f"<{sheets_url}| Ver Google Sheets>")
 
             if report_links:
                 payload["attachments"][0]["fields"].append({
-                    "title": "📄 Relatórios",
+                    "title": " Relatórios",
                     "value": " | ".join(report_links),
                     "short": False
                 })
@@ -115,14 +115,14 @@ class ValidationSlackNotifier:
             )
 
             if response.status_code == 200:
-                logger.info("✅ Notificação Slack enviada com sucesso")
+                logger.info(" Notificação Slack enviada com sucesso")
                 return True
             else:
-                logger.error(f"❌ Erro ao enviar Slack: {response.status_code} - {response.text}")
+                logger.error(f" Erro ao enviar Slack: {response.status_code} - {response.text}")
                 return False
 
         except Exception as e:
-            logger.error(f"❌ Erro ao notificar Slack: {str(e)}")
+            logger.error(f" Erro ao notificar Slack: {str(e)}")
             return False
 
     def send_error_notification(self, error_message: str, period: Dict = None) -> bool:
@@ -142,7 +142,7 @@ class ValidationSlackNotifier:
                 period_text = f"{period.get('start', 'N/A')} (vendas: {period.get('sales_start', 'N/A')} a {period.get('sales_end', 'N/A')})"
 
             payload = {
-                "text": "🚨 *Erro na Validação Semanal ML*",
+                "text": " *Erro na Validação Semanal ML*",
                 "attachments": [
                     {
                         "color": "#ff0000",
@@ -168,7 +168,7 @@ class ValidationSlackNotifier:
             return response.status_code == 200
 
         except Exception as e:
-            logger.error(f"❌ Erro ao enviar notificação de erro: {str(e)}")
+            logger.error(f" Erro ao enviar notificação de erro: {str(e)}")
             return False
 
     def _format_metrics(self, metrics: Dict) -> str:
@@ -182,29 +182,29 @@ class ValidationSlackNotifier:
         auc_test = metrics.get('auc_test_set', 0)
         if auc_prod > 0 and auc_test > 0:
             auc_delta = auc_prod - auc_test
-            auc_icon = "🟢" if auc_delta >= -0.02 else "🟡" if auc_delta >= -0.05 else "🔴"
+            auc_icon = "" if auc_delta >= -0.02 else "" if auc_delta >= -0.05 else ""
             lines.append(f"{auc_icon} *AUC Produção:* {auc_prod:.4f} (Test Set: {auc_test:.4f}, Δ {auc_delta:+.4f})")
 
         # Concentração
         top3_prod = metrics.get('top3_production', 0)
         top3_test = metrics.get('top3_test_set', 0)
         if top3_prod > 0:
-            lines.append(f"• *Top 3 Decis:* {top3_prod:.1f}% (Test Set: {top3_test:.1f}%)")
+            lines.append(f" *Top 3 Decis:* {top3_prod:.1f}% (Test Set: {top3_test:.1f}%)")
 
         # Conversões e ROAS (só mostrar conversões se > 0)
         conversoes = metrics.get('conversoes', 0)
         roas = metrics.get('roas', 0)
         if conversoes > 0:
-            lines.append(f"• *Conversões:* {conversoes:,}")
+            lines.append(f" *Conversões:* {conversoes:,}")
 
         if roas > 0:
-            roas_icon = "🟢" if roas >= 2.5 else "🟡" if roas >= 1.5 else "🔴"
+            roas_icon = "" if roas >= 2.5 else "" if roas >= 1.5 else ""
             lines.append(f"{roas_icon} *ROAS:* {roas:.2f}x")
 
         # Leads analisados
         leads = metrics.get('leads_analisados', 0)
         if leads > 0:
-            lines.append(f"• *Leads Analisados:* {leads:,}")
+            lines.append(f" *Leads Analisados:* {leads:,}")
 
         return "\n".join(lines)
 

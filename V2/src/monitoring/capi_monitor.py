@@ -83,7 +83,7 @@ class CAPIQualityMonitor:
                     'type': 'capi_fbp_missing_high',
                     'severity': severity,
                     'category': 'capi_quality',
-                    'message': f"⚠️ FBP missing em {fbp_missing_rate*100:.1f}% dos leads ({missing_fbp}/{total_leads} últimas 24h)",
+                    'message': f" FBP missing em {fbp_missing_rate*100:.1f}% dos leads ({missing_fbp}/{total_leads} últimas 24h)",
                     'details': {
                         'field': 'fbp',
                         'missing_count': missing_fbp,
@@ -109,7 +109,7 @@ class CAPIQualityMonitor:
                     'type': 'capi_fbc_missing_high',
                     'severity': severity,
                     'category': 'capi_quality',
-                    'message': f"⚠️ FBC missing em {fbc_missing_rate*100:.1f}% dos leads ({missing_fbc}/{total_leads} últimas 24h)",
+                    'message': f" FBC missing em {fbc_missing_rate*100:.1f}% dos leads ({missing_fbc}/{total_leads} últimas 24h)",
                     'details': {
                         'field': 'fbc',
                         'missing_count': missing_fbc,
@@ -187,7 +187,7 @@ class CAPIQualityMonitor:
                     'type': 'capi_rejection_rate_high',
                     'severity': severity,
                     'category': 'capi_quality',
-                    'message': f"⚠️ Taxa de erro CAPI alta: {error_rate*100:.1f}% ({error_count + partial_count}/{total_eventos} últimas 24h)",
+                    'message': f" Taxa de erro CAPI alta: {error_rate*100:.1f}% ({error_count + partial_count}/{total_eventos} últimas 24h)",
                     'details': {
                         'total_leads': total_eventos,
                         'success_count': success_count,

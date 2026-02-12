@@ -168,7 +168,7 @@ def fazer_matching_robusto(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.DataFrame
     print("Dataset contém apenas colunas originais + target")
 
     # Listar variáveis
-    print(f"\n📋 VARIÁVEIS DO DATASET V1 ({len(df_resultado.columns)} colunas):")
+    print(f"\n VARIÁVEIS DO DATASET V1 ({len(df_resultado.columns)} colunas):")
     for i, col in enumerate(df_resultado.columns, 1):
         print(f"  {i:2d}. {col}")
 

@@ -146,7 +146,7 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
 
                 if valores_problematicos:
                     total_problematicos = sum(count for _, count in valores_problematicos)
-                    logger.warning(f"  ⚠️  {var}: {total_problematicos}/{len(df)} registros com valores NÃO MAPEADOS:")
+                    logger.warning(f"    {var}: {total_problematicos}/{len(df)} registros com valores NÃO MAPEADOS:")
                     for valor, count in valores_problematicos[:10]:
                         pct = (count / len(df)) * 100
                         logger.warning(f"      - {valor}: {count} registros ({pct:.1f}%)")
@@ -157,13 +157,13 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
                 # Criar mapeamento ordinal
                 mapeamento = {categoria: i for i, categoria in enumerate(ordem)}
                 df[var] = df[var].map(mapeamento)
-                logger.info(f"  {var}: {len(ordem)} categorias → 0-{len(ordem)-1}")
+                logger.info(f"  {var}: {len(ordem)} categorias  0-{len(ordem)-1}")
 
                 # DEPOIS DO MAPEAMENTO: contar NaN resultantes
                 nan_depois = df[var].isna().sum()
                 if nan_depois > 0:
                     pct_nan = (nan_depois / len(df)) * 100
-                    logger.warning(f"      → Resultado: {nan_depois} NaN ({pct_nan:.1f}%) - serão preenchidos com 0")
+                    logger.warning(f"       Resultado: {nan_depois} NaN ({pct_nan:.1f}%) - serão preenchidos com 0")
 
     # 1.5. PROCESSAR MEDIUM CONFORME ESTRATÉGIA
     if 'Medium' in df.columns and medium_strategy != 'full':
@@ -175,11 +175,11 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
             df['Medium_Aberto'] = (df['Medium'] == 'Aberto').astype(int)
             df['Medium_Lookalike_2pct_Cadastrados'] = (df['Medium'] == 'Lookalike 2% Cadastrados - DEV 2.0 + Interesses').astype(int)
             df = df.drop(columns=['Medium'])
-            logger.info(f"  ✓ Criadas features binárias (top 3 mais estáveis):")
+            logger.info(f"   Criadas features binárias (top 3 mais estáveis):")
             logger.info(f"    Linguagem de programação: {df['Medium_Linguagem_programacao'].sum():,} registros ({df['Medium_Linguagem_programacao'].mean()*100:.1f}%)")
             logger.info(f"    Aberto: {df['Medium_Aberto'].sum():,} registros ({df['Medium_Aberto'].mean()*100:.1f}%)")
             logger.info(f"    Lookalike 2% Cadastrados: {df['Medium_Lookalike_2pct_Cadastrados'].sum():,} registros ({df['Medium_Lookalike_2pct_Cadastrados'].mean()*100:.1f}%)")
-            logger.info(f"  ✓ Categorias não cobertas (32% dos dados) → [0, 0, 0]")
+            logger.info(f"   Categorias não cobertas (32% dos dados)  [0, 0, 0]")
 
     # 2. ONE-HOT ENCODING para variáveis categóricas nominais
     variaveis_one_hot = []
@@ -205,20 +205,20 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
     # REMOVER telefone_comprimento_8 (EXATO do notebook - linha 5076-5078)
     if 'telefone_comprimento_8' in df_encoded.columns:
         df_encoded = df_encoded.drop(columns=['telefone_comprimento_8'])
-        logger.info(f"  ⚠️  telefone_comprimento_8 removida (conforme notebook)")
+        logger.info(f"    telefone_comprimento_8 removida (conforme notebook)")
 
     # REMOVER DUPLICATAS DE COLUNAS (se houver) - CRÍTICO para evitar features extras
     colunas_antes_duplicatas = len(df_encoded.columns)
     df_encoded = df_encoded.loc[:, ~df_encoded.columns.duplicated()]
     duplicatas_removidas = colunas_antes_duplicatas - len(df_encoded.columns)
     if duplicatas_removidas > 0:
-        logger.info(f"⚠️  Duplicatas removidas: {duplicatas_removidas} colunas")
+        logger.info(f"  Duplicatas removidas: {duplicatas_removidas} colunas")
 
     # Reportar criação de colunas
     colunas_criadas = len(df_encoded.columns) - len(df.columns)
     for var in variaveis_one_hot:
         categorias_unicas = df[var].nunique()
-        logger.info(f"  {var}: {categorias_unicas} categorias → {categorias_unicas} colunas binárias")
+        logger.info(f"  {var}: {categorias_unicas} categorias  {categorias_unicas} colunas binárias")
 
     logger.info(f"\nResultado:")
     logger.info(f"  Colunas one-hot originais: {len(variaveis_one_hot)}")
@@ -240,7 +240,7 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
     mapeamentos_especificos = {
         'O_que_voc_faz_atualmente_Sou_autonomo': 'O_que_voc_faz_atualmente_Sou_aut_nomo',
         'Tem_computador_notebook_SIM': 'Tem_computador_notebook_Sim',
-        'Tem_computador_notebook_N_O': 'Tem_computador_notebook_N_o',  # NÃO maiúsculo → regex remove ã
+        'Tem_computador_notebook_N_O': 'Tem_computador_notebook_N_o',  # NÃO maiúsculo  regex remove ã
         'Medium_outros': 'Medium_Outros'  # Corrigir capitalização
     }
 
@@ -252,7 +252,7 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
         novo_nome = mapeamentos_especificos.get(col, col)
         # Se o novo nome já existe E não é a mesma coluna, manter o nome original
         if novo_nome in colunas_atuais and novo_nome != col:
-            logger.warning(f"  ⚠️ Pulando mapeamento {col} → {novo_nome} (coluna destino já existe)")
+            logger.warning(f"   Pulando mapeamento {col}  {novo_nome} (coluna destino já existe)")
             novos_nomes.append(col)
         else:
             novos_nomes.append(novo_nome)
@@ -285,25 +285,25 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
             colunas_extras = [col for col in df_encoded.columns if col not in ordem_esperada]
 
             if colunas_faltando:
-                logger.warning(f"  ⚠️  {len(colunas_faltando)} features esperadas pelo modelo estão ausentes:")
+                logger.warning(f"    {len(colunas_faltando)} features esperadas pelo modelo estão ausentes:")
                 for col in colunas_faltando[:5]:
                     logger.warning(f"    - {col}")
                 if len(colunas_faltando) > 5:
                     logger.warning(f"    ... e mais {len(colunas_faltando) - 5}")
 
             if colunas_extras:
-                logger.info(f"  ℹ️  {len(colunas_extras)} features extras geradas (não usadas pelo modelo):")
+                logger.info(f"  ℹ  {len(colunas_extras)} features extras geradas (não usadas pelo modelo):")
                 for col in colunas_extras[:5]:
                     logger.info(f"    + {col}")
                 if len(colunas_extras) > 5:
                     logger.info(f"    ... e mais {len(colunas_extras) - 5}")
 
             if not colunas_faltando and not colunas_extras:
-                logger.info(f"  ✅ Todas as features estão corretas e alinhadas com o modelo")
+                logger.info(f"   Todas as features estão corretas e alinhadas com o modelo")
             else:
-                logger.info(f"  ℹ️  Features extras/faltando serão tratadas pelo prediction.py")
+                logger.info(f"  ℹ  Features extras/faltando serão tratadas pelo prediction.py")
         else:
-            logger.warning(f"  ⚠️  Arquivo features_ordenadas.json não encontrado em {model_path}")
+            logger.warning(f"    Arquivo features_ordenadas.json não encontrado em {model_path}")
             logger.warning(f"  Pulando validação de features (não afeta predições)")
     else:
         logger.info(f"\nValidação de features pulada (model_path não fornecido)")
@@ -315,7 +315,7 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
     colunas_com_nan = df_encoded.columns[df_encoded.isna().any()].tolist()
 
     if colunas_com_nan:
-        logger.warning(f"⚠️  ENCONTRADOS NaN EM {len(colunas_com_nan)} COLUNAS:")
+        logger.warning(f"  ENCONTRADOS NaN EM {len(colunas_com_nan)} COLUNAS:")
 
         # Detalhar cada coluna com NaN
         for col in colunas_com_nan:
@@ -329,11 +329,11 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
                 logger.info(f"    Valores não-NaN: {valores_nao_nan}")
 
         # Preencher NaN com 0
-        logger.info(f"\n🔧 Preenchendo {len(colunas_com_nan)} colunas com NaN...")
+        logger.info(f"\n Preenchendo {len(colunas_com_nan)} colunas com NaN...")
         df_encoded = df_encoded.fillna(0)
-        logger.info(f"✅ NaN preenchidos com 0")
+        logger.info(f" NaN preenchidos com 0")
     else:
-        logger.info(f"✅ Nenhum NaN encontrado - dados limpos")
+        logger.info(f" Nenhum NaN encontrado - dados limpos")
 
     # Verificar tipos de dados finais
     tipos_dados = df_encoded.dtypes.value_counts()

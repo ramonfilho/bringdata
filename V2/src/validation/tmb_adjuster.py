@@ -37,11 +37,11 @@ def adjust_revenue_for_tmb(df: pd.DataFrame, sale_value_col='sale_value',
         DataFrame com coluna 'sale_value_adjusted' adicionada
     """
     if sale_value_col not in df.columns:
-        logger.warning(f"⚠️ Coluna '{sale_value_col}' não encontrada")
+        logger.warning(f" Coluna '{sale_value_col}' não encontrada")
         return df
 
     if sale_origin_col not in df.columns:
-        logger.warning(f"⚠️ Coluna '{sale_origin_col}' não encontrada")
+        logger.warning(f" Coluna '{sale_origin_col}' não encontrada")
         df['sale_value_adjusted'] = df[sale_value_col]
         return df
 
@@ -75,7 +75,7 @@ def add_adjusted_metrics_to_campaign_stats(campaign_stats: pd.DataFrame,
         campaign_stats com colunas ajustadas adicionadas
     """
     if 'sale_origin' not in matched_df.columns:
-        logger.warning("⚠️ Coluna 'sale_origin' não encontrada. Ajuste TMB não aplicado.")
+        logger.warning(" Coluna 'sale_origin' não encontrada. Ajuste TMB não aplicado.")
         campaign_stats['total_revenue_adjusted'] = campaign_stats['total_revenue']
         campaign_stats['roas_adjusted'] = campaign_stats['roas']
         return campaign_stats
@@ -84,7 +84,7 @@ def add_adjusted_metrics_to_campaign_stats(campaign_stats: pd.DataFrame,
     matched_adjusted = adjust_revenue_for_tmb(matched_df, fator=fator)
 
     # IMPORTANTE: Extrair campaign_id (15 dígitos) para fazer merge correto
-    # Motivo: Nomes de campanhas podem ter sido atualizados (UTMs → Meta API)
+    # Motivo: Nomes de campanhas podem ter sido atualizados (UTMs  Meta API)
     import re
     def extract_campaign_id_15(campaign_name):
         """Extrai primeiros 15 dígitos do campaign_id do nome"""
@@ -127,7 +127,7 @@ def add_adjusted_metrics_to_campaign_stats(campaign_stats: pd.DataFrame,
         axis=1
     ).round(2)
 
-    logger.info(f"   ✅ Métricas ajustadas por TMB adicionadas (fator: {fator:.2%})")
+    logger.info(f"    Métricas ajustadas por TMB adicionadas (fator: {fator:.2%})")
 
     return campaign_stats
 
@@ -142,7 +142,7 @@ def calculate_overall_adjusted_stats(matched_df: pd.DataFrame,
         Dict com métricas nominais e ajustadas
     """
     if 'sale_origin' not in matched_df.columns:
-        logger.warning("⚠️ Coluna 'sale_origin' não encontrada")
+        logger.warning(" Coluna 'sale_origin' não encontrada")
         return {}
 
     # Ajustar valores

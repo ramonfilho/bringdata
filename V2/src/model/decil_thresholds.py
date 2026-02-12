@@ -47,7 +47,7 @@ def calcular_thresholds_decis(y_prob: np.ndarray, decis: pd.Series) -> dict:
         decil_probs = df_analise[df_analise['decil'] == decil_label]['probabilidade']
 
         if len(decil_probs) == 0:
-            logger.warning(f"⚠️  Decil {decil_label} vazio! Pulando...")
+            logger.warning(f"  Decil {decil_label} vazio! Pulando...")
             continue
 
         thresholds[decil_label] = {
@@ -64,7 +64,7 @@ def calcular_thresholds_decis(y_prob: np.ndarray, decis: pd.Series) -> dict:
     # Validar thresholds
     _validar_thresholds(thresholds)
 
-    logger.debug(f"✅ Thresholds calculados para {len(thresholds)} decis")
+    logger.debug(f" Thresholds calculados para {len(thresholds)} decis")
 
     return thresholds
 
@@ -92,11 +92,11 @@ def _validar_thresholds(thresholds: dict):
         # Gap muito grande entre decis (>0.01) pode indicar problema
         gap = min_prox - max_atual
         if gap > 0.01:
-            logger.warning(f"⚠️  Gap detectado entre {decil_atual} e {decil_prox}: {gap:.4f}")
+            logger.warning(f"  Gap detectado entre {decil_atual} e {decil_prox}: {gap:.4f}")
 
         # Overlap entre decis
         if max_atual > min_prox:
-            logger.warning(f"⚠️  Overlap detectado entre {decil_atual} e {decil_prox}: "
+            logger.warning(f"  Overlap detectado entre {decil_atual} e {decil_prox}: "
                          f"{decil_atual}_max={max_atual:.4f} > {decil_prox}_min={min_prox:.4f}")
 
 
@@ -169,7 +169,7 @@ def atribuir_decil_por_threshold(score: float, thresholds: dict) -> str:
         return d1_key
 
     # Caso extremo: buscar decil mais próximo
-    logger.warning(f"⚠️  Score {score:.4f} não encontrado em nenhum threshold, usando decil mais próximo")
+    logger.warning(f"  Score {score:.4f} não encontrado em nenhum threshold, usando decil mais próximo")
 
     distancias = []
     for decil, limits in thresholds.items():

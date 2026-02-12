@@ -37,7 +37,7 @@ def extract_email_from_log_line(line: str) -> Optional[str]:
     """
     Extrai email de uma linha de log
 
-    Formato: "✅ LeadQualified enviado: email@example.com (decil: D10, valor proj: R$ 69.10)"
+    Formato: " LeadQualified enviado: email@example.com (decil: D10, valor proj: R$ 69.10)"
     """
     match = re.search(r'enviado:\s*([^\s]+@[^\s]+)\s*\(', line)
     if match:
@@ -82,7 +82,7 @@ def get_capi_events_from_logs(
             'other@example.com': ['LeadQualified']
         }
     """
-    logger.info(f"🔍 Buscando eventos CAPI nos logs do Cloud Run ({start_date} a {end_date})...")
+    logger.info(f" Buscando eventos CAPI nos logs do Cloud Run ({start_date} a {end_date})...")
 
     # Converter datas para formato ISO com timezone
     start_timestamp = f"{start_date}T00:00:00Z"
@@ -128,28 +128,28 @@ def get_capi_events_from_logs(
             if email and event_type:
                 events_by_email[email].append(event_type)
 
-        logger.info(f"   ✅ {len(events_by_email)} emails únicos com eventos CAPI")
+        logger.info(f"    {len(events_by_email)} emails únicos com eventos CAPI")
 
         # Log estatísticas
         lq_count = sum(1 for events in events_by_email.values() if 'LeadQualified' in events)
         lqhq_count = sum(1 for events in events_by_email.values() if 'LeadQualifiedHighQuality' in events)
         faixa_a_count = sum(1 for events in events_by_email.values() if 'Faixa A' in events)
 
-        logger.info(f"   📊 LeadQualified: {lq_count} emails")
-        logger.info(f"   📊 LeadQualifiedHighQuality: {lqhq_count} emails")
-        logger.info(f"   📊 Faixa A: {faixa_a_count} emails")
+        logger.info(f"    LeadQualified: {lq_count} emails")
+        logger.info(f"    LeadQualifiedHighQuality: {lqhq_count} emails")
+        logger.info(f"    Faixa A: {faixa_a_count} emails")
 
         return dict(events_by_email)
 
     except subprocess.TimeoutExpired:
-        logger.error("❌ Timeout ao buscar logs do Cloud Run")
+        logger.error(" Timeout ao buscar logs do Cloud Run")
         return {}
     except subprocess.CalledProcessError as e:
-        logger.error(f"❌ Erro ao buscar logs: {e}")
+        logger.error(f" Erro ao buscar logs: {e}")
         logger.error(f"   stderr: {e.stderr}")
         return {}
     except Exception as e:
-        logger.error(f"❌ Erro inesperado ao buscar logs: {e}")
+        logger.error(f" Erro inesperado ao buscar logs: {e}")
         return {}
 
 
@@ -167,13 +167,13 @@ def get_campaign_ids_from_database(
         Exemplo: {'email@example.com': '120234062599950534'}
     """
     if not DB_AVAILABLE:
-        logger.warning("⚠️ Database não disponível, use get_campaign_ids_from_csv()")
+        logger.warning(" Database não disponível, use get_campaign_ids_from_csv()")
         return {}
 
     if not emails:
         return {}
 
-    logger.info(f"🔍 Buscando campaign IDs no database para {len(emails)} emails...")
+    logger.info(f" Buscando campaign IDs no database para {len(emails)} emails...")
 
     try:
         db = SessionLocal()
@@ -183,7 +183,7 @@ def get_campaign_ids_from_database(
                 LeadCAPI.email.in_([e.lower() for e in emails])
             ).all()
 
-            logger.info(f"   ✅ {len(results)} leads encontrados no database")
+            logger.info(f"    {len(results)} leads encontrados no database")
 
             # Mapear email -> campaign_id
             email_to_campaign = {}
@@ -196,7 +196,7 @@ def get_campaign_ids_from_database(
                         campaign_id = match.group(0)
                         email_to_campaign[email.lower()] = campaign_id
 
-            logger.info(f"   ✅ {len(email_to_campaign)} leads com campaign_id válido")
+            logger.info(f"    {len(email_to_campaign)} leads com campaign_id válido")
 
             return email_to_campaign
 
@@ -204,7 +204,7 @@ def get_campaign_ids_from_database(
             db.close()
 
     except Exception as e:
-        logger.error(f"❌ Erro ao buscar campaign IDs do database: {e}")
+        logger.error(f" Erro ao buscar campaign IDs do database: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return {}
@@ -236,14 +236,14 @@ def get_campaign_ids_from_csv(
     import pandas as pd
     from datetime import datetime as dt
 
-    logger.info(f"🔍 Buscando campaign IDs na planilha CSV para {len(emails)} emails...")
+    logger.info(f" Buscando campaign IDs na planilha CSV para {len(emails)} emails...")
 
     # Se não passou o path, buscar o mais recente
     if csv_path is None:
         import glob
         csv_files = glob.glob('files/validation/leads/*.csv')
         if not csv_files:
-            logger.error("❌ Nenhum arquivo CSV de leads encontrado")
+            logger.error(" Nenhum arquivo CSV de leads encontrado")
             return {}
         csv_path = max(csv_files, key=lambda x: x)  # Mais recente
         logger.info(f"   Usando: {csv_path}")
@@ -263,7 +263,7 @@ def get_campaign_ids_from_csv(
                 break
 
         if email_col is None:
-            logger.error("❌ Coluna de email não encontrada no CSV")
+            logger.error(" Coluna de email não encontrada no CSV")
             return {}
 
         # Encontrar coluna de data
@@ -281,7 +281,7 @@ def get_campaign_ids_from_csv(
                 break
 
         if campaign_col is None:
-            logger.warning("⚠️ Coluna de campanha não encontrada, tentando usar nome completo")
+            logger.warning(" Coluna de campanha não encontrada, tentando usar nome completo")
             # Tentar buscar em nome completo
             name_col = None
             for col in df.columns:
@@ -303,7 +303,7 @@ def get_campaign_ids_from_csv(
 
         # Filtrar por emails
         df = df[df[email_col].isin([e.lower() for e in emails])]
-        logger.info(f"   ✅ {len(df)} leads encontrados no CSV")
+        logger.info(f"    {len(df)} leads encontrados no CSV")
 
         # Mapear email -> campaign_id
         email_to_campaign = {}
@@ -319,12 +319,12 @@ def get_campaign_ids_from_csv(
                     campaign_id = match.group(0)
                     email_to_campaign[email] = campaign_id
 
-        logger.info(f"   ✅ {len(email_to_campaign)} leads com campaign_id válido")
+        logger.info(f"    {len(email_to_campaign)} leads com campaign_id válido")
 
         return email_to_campaign
 
     except Exception as e:
-        logger.error(f"❌ Erro ao buscar campaign IDs do CSV: {e}")
+        logger.error(f" Erro ao buscar campaign IDs do CSV: {e}")
         import traceback
         logger.error(traceback.format_exc())
         return {}
@@ -359,14 +359,14 @@ def count_capi_events_by_campaign(
         }
     """
     logger.info("=" * 80)
-    logger.info("📊 CONTANDO EVENTOS CAPI DOS LOGS (abordagem alternativa)")
+    logger.info(" CONTANDO EVENTOS CAPI DOS LOGS (abordagem alternativa)")
     logger.info("=" * 80)
 
     # 1. Buscar eventos dos logs
     events_by_email = get_capi_events_from_logs(start_date, end_date, project_id, service_name)
 
     if not events_by_email:
-        logger.warning("⚠️ Nenhum evento CAPI encontrado nos logs")
+        logger.warning(" Nenhum evento CAPI encontrado nos logs")
         return {}
 
     # 2. Buscar campaign IDs (database ou CSV)
@@ -378,16 +378,16 @@ def count_capi_events_by_campaign(
         email_to_campaign = get_campaign_ids_from_database(emails)
 
         if not email_to_campaign:
-            logger.warning("   ⚠️ Database vazio ou inacessível, tentando CSV...")
+            logger.warning("    Database vazio ou inacessível, tentando CSV...")
             email_to_campaign = get_campaign_ids_from_csv(emails, start_date, end_date, csv_path)
         else:
-            logger.info(f"   ✅ Usando dados do database")
+            logger.info(f"    Usando dados do database")
     else:
         logger.info("   Database não disponível, usando CSV...")
         email_to_campaign = get_campaign_ids_from_csv(emails, start_date, end_date, csv_path)
 
     if not email_to_campaign:
-        logger.warning("⚠️ Nenhum lead encontrado com campaign_id (nem database nem CSV)")
+        logger.warning(" Nenhum lead encontrado com campaign_id (nem database nem CSV)")
         return {}
 
     # 3. Agregar eventos por campanha
@@ -405,14 +405,14 @@ def count_capi_events_by_campaign(
 
     # 4. Log resumo
     logger.info("")
-    logger.info("📋 RESUMO - Eventos CAPI por Campanha:")
+    logger.info(" RESUMO - Eventos CAPI por Campanha:")
     for campaign_id, events in sorted(campaign_events.items()):
-        logger.info(f"   • {campaign_id}:")
+        logger.info(f"    {campaign_id}:")
         for event_type, count in sorted(events.items()):
             logger.info(f"      - {event_type}: {count}")
 
     logger.info("")
-    logger.info(f"✅ Total: {len(campaign_events)} campanhas com eventos CAPI")
+    logger.info(f" Total: {len(campaign_events)} campanhas com eventos CAPI")
     logger.info("=" * 80)
 
     return dict(campaign_events)

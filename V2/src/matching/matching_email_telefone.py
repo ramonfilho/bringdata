@@ -134,7 +134,7 @@ def fazer_matching_email_telefone(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.Da
             matches_email.add(idx)
 
     logger.debug("")
-    logger.debug(f"📧 MATCHES POR EMAIL: {len(matches_email):,}")
+    logger.debug(f" MATCHES POR EMAIL: {len(matches_email):,}")
 
     # 3. MATCHING SECUNDÁRIO POR TELEFONE (APENAS NÃO MATCHEADOS)
     matches_telefone = set()
@@ -146,13 +146,13 @@ def fazer_matching_email_telefone(df_pesquisa_v1: pd.DataFrame, df_vendas: pd.Da
             if tel in telefones_vendas:
                 matches_telefone.add(idx)
 
-    logger.debug(f"📞 MATCHES POR TELEFONE (novos): {len(matches_telefone):,}")
+    logger.debug(f" MATCHES POR TELEFONE (novos): {len(matches_telefone):,}")
 
     # 4. CONSOLIDAR MATCHES
     matches_total = matches_email | matches_telefone
 
     logger.debug("")
-    logger.debug(f"✅ TOTAL DE MATCHES: {len(matches_total):,}")
+    logger.debug(f" TOTAL DE MATCHES: {len(matches_total):,}")
     logger.debug(f"   Email: {len(matches_email):,} ({len(matches_email)/len(matches_total)*100:.1f}%)")
     logger.debug(f"   Telefone: {len(matches_telefone):,} ({len(matches_telefone)/len(matches_total)*100:.1f}%)")
 

@@ -26,12 +26,12 @@ def extract_decision(text):
     """
     # Padrões de decisão com [X]
     decisions = [
-        (r'\[X\]\s*🔴\s*CRÍTICO', '🔴 CRÍTICO'),
-        (r'\[X\]\s*🟡\s*ESSENCIAL', '🟡 ESSENCIAL'),
-        (r'\[X\]\s*🟢\s*NORMAL', '🟢 NORMAL'),
-        (r'\[X\]\s*🔵\s*DETALHADO', '🔵 DETALHADO'),
-        (r'\[X\]\s*✂️\s*SIMPLIFICAR', '✂️ SIMPLIFICAR'),
-        (r'\[X\]\s*🗑️\s*REMOVER', '🗑️ REMOVER'),
+        (r'\[X\]\s*\s*CRÍTICO', ' CRÍTICO'),
+        (r'\[X\]\s*\s*ESSENCIAL', ' ESSENCIAL'),
+        (r'\[X\]\s*\s*NORMAL', ' NORMAL'),
+        (r'\[X\]\s*\s*DETALHADO', ' DETALHADO'),
+        (r'\[X\]\s*\s*SIMPLIFICAR', ' SIMPLIFICAR'),
+        (r'\[X\]\s*\s*REMOVER', ' REMOVER'),
     ]
 
     for pattern, decision in decisions:
@@ -115,7 +115,7 @@ def parse_section(paragraphs, start_idx):
         if 'ANOTAÇÕES' in text or 'VERSÃO SIMPLIFICADA' in text:
             i += 1
             # Pular linhas de separação
-            while i < len(paragraphs) and ('─' in paragraphs[i].text or paragraphs[i].text.strip() == ''):
+            while i < len(paragraphs) and ('' in paragraphs[i].text or paragraphs[i].text.strip() == ''):
                 i += 1
 
             # Coletar anotações até próxima seção
@@ -213,20 +213,19 @@ def format_output(sections):
     output.append("```")
     output.append("logger.info(\"=\" * 80)  # Separador antes da célula")
     output.append("logger.info(\"\")")
-    output.append("logger.info(\"🔴 CÉLULA X: TÍTULO DA CÉLULA\")")
+    output.append("logger.info(\" CÉLULA X: TÍTULO DA CÉLULA\")")
     output.append("")
     output.append("# Processamento...")
     output.append("")
     output.append("logger.info(\"\")")
-    output.append("logger.info(\"📈 RESUMO:\")")
+    output.append("logger.info(\" RESUMO:\")")
     output.append("logger.info(f\"Métrica 1: {valor1}\")")
     output.append("logger.info(f\"Métrica 2: {valor2}\")")
     output.append("logger.info(\"\")")
-    output.append("logger.info(\"✅ Dados processados disponíveis na variável 'nome_var'\")")
     output.append("")
     output.append("# Tabela detalhada (apenas em DEBUG)")
     output.append("logger.debug(\"\")")
-    output.append("logger.debug(\"📊 TABELA DETALHADA\")")
+    output.append("logger.debug(\" TABELA DETALHADA\")")
     output.append("logger.debug(\"=\" * 80)")
     output.append("logger.debug(\"CABEÇALHO DA TABELA\")")
     output.append("logger.debug(\"-\" * 80)")
@@ -240,16 +239,16 @@ def format_output(sections):
     output.append("## 3. EXEMPLOS IMPLEMENTADOS")
     output.append("")
     output.append("### CÉLULA 1 - LEITURA DE ARQUIVOS")
-    output.append("✅ NORMAL: Número de arquivos + fonte de dados")
-    output.append("✅ DEBUG: Lista completa de arquivos carregados")
+    output.append(" NORMAL: Número de arquivos + fonte de dados")
+    output.append(" DEBUG: Lista completa de arquivos carregados")
     output.append("")
     output.append("### CÉLULA 2 - FILTRAGEM E DUPLICATAS")
-    output.append("✅ NORMAL: Resumo (arquivos, abas, linhas, duplicatas, percentual)")
-    output.append("✅ DEBUG: Tabela com detalhes de cada arquivo/aba processado")
+    output.append(" NORMAL: Resumo (arquivos, abas, linhas, duplicatas, percentual)")
+    output.append(" DEBUG: Tabela com detalhes de cada arquivo/aba processado")
     output.append("")
     output.append("### CÉLULA 3 - REMOÇÃO DE COLUNAS")
-    output.append("✅ NORMAL: Total de colunas removidas")
-    output.append("✅ DEBUG: Tabela com colunas antes/depois por arquivo/aba")
+    output.append(" NORMAL: Total de colunas removidas")
+    output.append(" DEBUG: Tabela com colunas antes/depois por arquivo/aba")
     output.append("")
     output.append("## 4. CHECKLIST PARA IMPLEMENTAR NOVA CÉLULA")
     output.append("")
@@ -264,7 +263,7 @@ def format_output(sections):
     output.append("")
     output.append("## 5. SUBSTITUIÇÕES GLOBAIS REALIZADAS")
     output.append("")
-    output.append("- Todos print() → logger.info() ou logger.debug()")
+    output.append("- Todos print()  logger.info() ou logger.debug()")
     output.append("- Removidas todas linhas \"print(f'=' * N)\" de separação")
     output.append("- Removidos \"\\n\" do início de logger.info()")
     output.append("- Adicionados logger.info(\"\") para linhas em branco")
@@ -313,8 +312,8 @@ def update_decisions_in_existing_file(existing_file_path, sections):
         String com o conteúdo atualizado
     """
     if not existing_file_path.exists():
-        print(f"⚠️  Arquivo existente não encontrado: {existing_file_path}")
-        print("📝 Criando arquivo novo...")
+        print(f"  Arquivo existente não encontrado: {existing_file_path}")
+        print(" Criando arquivo novo...")
         return format_output(sections)
 
     # Ler arquivo existente
@@ -357,34 +356,34 @@ def main():
     existing_file_path = project_root / 'docs' / 'classificacoes_extraidas.txt'
     backup_path = project_root / 'docs' / 'classificacoes_extraidas.txt.bak'
 
-    print(f"📄 Lendo documento: {docx_path}")
+    print(f" Lendo documento: {docx_path}")
 
     if not docx_path.exists():
-        print(f"❌ Erro: Arquivo não encontrado: {docx_path}")
+        print(f" Erro: Arquivo não encontrado: {docx_path}")
         sys.exit(1)
 
     # Extrair seções
-    print("🔍 Extraindo decisões do .docx...")
+    print(" Extraindo decisões do .docx...")
     sections = extract_all_sections(docx_path)
-    print(f"✅ {len(sections)} seções encontradas")
+    print(f" {len(sections)} seções encontradas")
 
     # Fazer backup do arquivo existente
     if existing_file_path.exists():
-        print(f"💾 Criando backup em: {backup_path}")
+        print(f" Criando backup em: {backup_path}")
         import shutil
         shutil.copy2(existing_file_path, backup_path)
 
     # Atualizar arquivo preservando anotações
-    print("📝 Atualizando decisões (preservando anotações)...")
+    print(" Atualizando decisões (preservando anotações)...")
     updated_content = update_decisions_in_existing_file(existing_file_path, sections)
 
     # Salvar
-    print(f"💾 Salvando em: {existing_file_path}")
+    print(f" Salvando em: {existing_file_path}")
     existing_file_path.write_text(updated_content, encoding='utf-8')
 
-    print("✅ Atualização concluída!")
+    print(" Atualização concluída!")
     print()
-    print("📊 Resumo das decisões:")
+    print(" Resumo das decisões:")
     decision_counts = {}
     for section in sections:
         decision = section['decision']
@@ -394,7 +393,7 @@ def main():
         print(f"  {decision}: {count} seções")
 
     print()
-    print(f"📋 Backup salvo em: {backup_path}")
+    print(f" Backup salvo em: {backup_path}")
 
 
 if __name__ == '__main__':

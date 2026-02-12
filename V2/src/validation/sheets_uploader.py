@@ -34,9 +34,9 @@ class ValidationSheetsUploader:
             self.gc = gspread.authorize(credentials)
             self.drive_service = build('drive', 'v3', credentials=credentials)
             self.project = project
-            logger.info(f"   ✅ Autenticado no Google Cloud: {project}")
+            logger.info(f"    Autenticado no Google Cloud: {project}")
         except Exception as e:
-            logger.error(f"   ❌ Erro na autenticação Google Cloud: {e}")
+            logger.error(f"    Erro na autenticação Google Cloud: {e}")
             raise
 
     def upload_excel_via_drive(
@@ -75,7 +75,7 @@ class ValidationSheetsUploader:
         if spreadsheet_title is None:
             spreadsheet_title = excel_path.stem
 
-        logger.info(f"   📤 Fazendo upload de {excel_path.name} via Google Drive...")
+        logger.info(f"    Fazendo upload de {excel_path.name} via Google Drive...")
 
         try:
             # 1. Preparar metadata do arquivo
@@ -92,7 +92,7 @@ class ValidationSheetsUploader:
             )
 
             # 3. Fazer upload e conversão
-            logger.info(f"   🔄 Convertendo Excel para Google Sheets...")
+            logger.info(f"    Convertendo Excel para Google Sheets...")
             file = self.drive_service.files().create(
                 body=file_metadata,
                 media_body=media,
@@ -102,11 +102,11 @@ class ValidationSheetsUploader:
             file_id = file.get('id')
             sheets_url = file.get('webViewLink')
 
-            logger.info(f"   ✅ Upload concluído (ID: {file_id})")
+            logger.info(f"    Upload concluído (ID: {file_id})")
 
             # 4. Tornar o arquivo público (qualquer pessoa com link pode visualizar)
             try:
-                logger.info(f"   🌐 Tornando arquivo público...")
+                logger.info(f"    Tornando arquivo público...")
                 self.drive_service.permissions().create(
                     fileId=file_id,
                     body={
@@ -115,13 +115,13 @@ class ValidationSheetsUploader:
                     },
                     fields='id'
                 ).execute()
-                logger.info(f"   ✅ Arquivo público: qualquer pessoa com o link pode visualizar")
+                logger.info(f"    Arquivo público: qualquer pessoa com o link pode visualizar")
             except Exception as e:
-                logger.warning(f"   ⚠️  Erro ao tornar arquivo público: {e}")
+                logger.warning(f"     Erro ao tornar arquivo público: {e}")
 
             # 5. Compartilhar com emails específicos se fornecidos (acesso de edição)
             if share_with_emails:
-                logger.info(f"   👥 Compartilhando acesso de edição com {len(share_with_emails)} usuários...")
+                logger.info(f"    Compartilhando acesso de edição com {len(share_with_emails)} usuários...")
                 for email in share_with_emails:
                     try:
                         self.drive_service.permissions().create(
@@ -133,15 +133,15 @@ class ValidationSheetsUploader:
                             },
                             fields='id'
                         ).execute()
-                        logger.info(f"      ✅ {email}")
+                        logger.info(f"       {email}")
                     except Exception as e:
-                        logger.warning(f"      ⚠️  Erro ao compartilhar com {email}: {e}")
+                        logger.warning(f"        Erro ao compartilhar com {email}: {e}")
 
-            logger.info(f"   ✅ Formatação preservada do Excel original!")
+            logger.info(f"    Formatação preservada do Excel original!")
             return sheets_url
 
         except Exception as e:
-            logger.error(f"   ❌ Erro no upload para Google Sheets: {e}")
+            logger.error(f"    Erro no upload para Google Sheets: {e}")
             raise
 
     def upload_excel_to_sheets(
@@ -154,7 +154,7 @@ class ValidationSheetsUploader:
         Faz upload de um arquivo Excel para Google Sheets.
 
         NOVO: Usa Google Drive API para preservar formatação!
-        Converte Excel → Sheets mantendo cores, negrito, bordas, etc.
+        Converte Excel  Sheets mantendo cores, negrito, bordas, etc.
 
         Args:
             excel_path: Caminho para o arquivo Excel (.xlsx)
@@ -192,22 +192,22 @@ class ValidationSheetsUploader:
         if spreadsheet_title is None:
             spreadsheet_title = excel_path.stem
 
-        logger.info(f"   📤 Fazendo upload de {excel_path.name} para Google Sheets...")
+        logger.info(f"    Fazendo upload de {excel_path.name} para Google Sheets...")
 
         try:
             # 1. Criar nova planilha
-            logger.info(f"   📝 Criando planilha: {spreadsheet_title}")
+            logger.info(f"    Criando planilha: {spreadsheet_title}")
             spreadsheet = self.gc.create(spreadsheet_title)
 
             # 2. Ler todas as abas do Excel
-            logger.info(f"   📖 Lendo abas do Excel...")
+            logger.info(f"    Lendo abas do Excel...")
             excel_file = pd.ExcelFile(excel_path)
             sheet_names = excel_file.sheet_names
-            logger.info(f"   📑 {len(sheet_names)} abas encontradas: {', '.join(sheet_names)}")
+            logger.info(f"    {len(sheet_names)} abas encontradas: {', '.join(sheet_names)}")
 
             # 3. Processar cada aba
             for idx, sheet_name in enumerate(sheet_names):
-                logger.info(f"   📋 Processando aba {idx + 1}/{len(sheet_names)}: {sheet_name}")
+                logger.info(f"    Processando aba {idx + 1}/{len(sheet_names)}: {sheet_name}")
 
                 # Ler dados da aba
                 df = pd.read_excel(excel_path, sheet_name=sheet_name)
@@ -250,23 +250,23 @@ class ValidationSheetsUploader:
 
             # 4. Compartilhar se emails fornecidos
             if share_with_emails:
-                logger.info(f"   👥 Compartilhando com {len(share_with_emails)} usuários...")
+                logger.info(f"    Compartilhando com {len(share_with_emails)} usuários...")
                 for email in share_with_emails:
                     try:
                         spreadsheet.share(email, perm_type='user', role='writer')
-                        logger.info(f"      ✅ {email}")
+                        logger.info(f"       {email}")
                         time.sleep(0.3)  # Rate limit
                     except Exception as e:
-                        logger.warning(f"      ⚠️  Erro ao compartilhar com {email}: {e}")
+                        logger.warning(f"        Erro ao compartilhar com {email}: {e}")
 
             # 5. Retornar URL
             spreadsheet_url = spreadsheet.url
-            logger.info(f"   ✅ Upload concluído: {spreadsheet_url}")
+            logger.info(f"    Upload concluído: {spreadsheet_url}")
 
             return spreadsheet_url
 
         except Exception as e:
-            logger.error(f"   ❌ Erro no upload para Google Sheets: {e}")
+            logger.error(f"    Erro no upload para Google Sheets: {e}")
             raise
 
     def update_existing_spreadsheet(
@@ -289,7 +289,7 @@ class ValidationSheetsUploader:
         if not excel_path.exists():
             raise FileNotFoundError(f"Arquivo Excel não encontrado: {excel_path}")
 
-        logger.info(f"   📤 Atualizando planilha existente...")
+        logger.info(f"    Atualizando planilha existente...")
 
         try:
             # Abrir planilha existente
@@ -301,7 +301,7 @@ class ValidationSheetsUploader:
 
             # Processar cada aba
             for idx, sheet_name in enumerate(sheet_names):
-                logger.info(f"   📋 Atualizando aba: {sheet_name}")
+                logger.info(f"    Atualizando aba: {sheet_name}")
 
                 df = pd.read_excel(excel_path, sheet_name=sheet_name)
 
@@ -328,11 +328,11 @@ class ValidationSheetsUploader:
                 worksheet.update('A1', data, value_input_option='USER_ENTERED')
                 time.sleep(0.5)
 
-            logger.info(f"   ✅ Atualização concluída: {spreadsheet.url}")
+            logger.info(f"    Atualização concluída: {spreadsheet.url}")
             return spreadsheet.url
 
         except Exception as e:
-            logger.error(f"   ❌ Erro ao atualizar planilha: {e}")
+            logger.error(f"    Erro ao atualizar planilha: {e}")
             raise
 
     def _apply_formatting(self, worksheet, sheet_name: str, num_rows: int, num_cols: int):
@@ -466,7 +466,7 @@ class ValidationSheetsUploader:
                 pass  # Ignorar se não funcionar
 
         except Exception as e:
-            logger.warning(f"      ⚠️  Erro ao aplicar formatação: {e}")
+            logger.warning(f"        Erro ao aplicar formatação: {e}")
 
     def _format_numbers(self, worksheet, num_rows: int, num_cols: int, all_values: list):
         """
@@ -521,7 +521,7 @@ class ValidationSheetsUploader:
                     time.sleep(0.3)
 
         except Exception as e:
-            logger.warning(f"      ⚠️  Erro ao formatar números: {e}")
+            logger.warning(f"        Erro ao formatar números: {e}")
 
     def _col_letter(self, col_num: int) -> str:
         """

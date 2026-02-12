@@ -116,7 +116,7 @@ def capture_training_categories(df: pd.DataFrame, output_path: str = None) -> Di
     Returns:
         Dict com {coluna: [categorias]}
     """
-    logger.debug("\n🔍 Identificando colunas categóricas automaticamente...")
+    logger.debug("\n Identificando colunas categóricas automaticamente...")
 
     categorias_por_coluna = {}
 
@@ -156,15 +156,15 @@ def capture_training_categories(df: pd.DataFrame, output_path: str = None) -> Di
 
             categorias_por_coluna[col] = sorted(valores_unicos_str)
 
-            logger.debug(f"   ✓ {col}: {len(valores_unicos_str)} categorias")
+            logger.debug(f"    {col}: {len(valores_unicos_str)} categorias")
 
-    logger.debug(f"\n📊 Total: {len(categorias_por_coluna)} colunas categóricas identificadas")
+    logger.debug(f"\n Total: {len(categorias_por_coluna)} colunas categóricas identificadas")
 
     # Salvar se caminho fornecido
     if output_path:
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(categorias_por_coluna, f, indent=2, ensure_ascii=False)
-        logger.debug(f"✅ Categorias salvas em: {output_path}")
+        logger.debug(f" Categorias salvas em: {output_path}")
 
     return categorias_por_coluna
 
@@ -190,7 +190,7 @@ def check_category_drift(df_producao: pd.DataFrame,
                 'type': 'missing_column',
                 'column': col,
                 'severity': 'HIGH',
-                'message': f"⚠️ Coluna '{col}' esperada mas não encontrada em produção"
+                'message': f" Coluna '{col}' esperada mas não encontrada em produção"
             })
             continue
 
@@ -221,7 +221,7 @@ def check_category_drift(df_producao: pd.DataFrame,
 
         # Se houver categorias novas após normalização, pegar os valores ORIGINAIS correspondentes
         if len(novas_categorias_norm) > 0:
-            # Criar mapeamento: normalizado → original
+            # Criar mapeamento: normalizado  original
             norm_to_original = {}
             for orig in categorias_producao_str:
                 norm = normalizar_categoria_para_comparacao(orig)
@@ -257,7 +257,7 @@ def check_category_drift(df_producao: pd.DataFrame,
                 'count': leads_com_novas,
                 'percentage': percentual,
                 'severity': severity,
-                'message': f"⚠️ {col}: {len(novas_categorias)} nova(s) categoria(s) - {percentual:.1f}% dos leads\n"
+                'message': f" {col}: {len(novas_categorias)} nova(s) categoria(s) - {percentual:.1f}% dos leads\n"
                           f"   Novas: {', '.join(novas_exibir)}{mais_msg}"
             })
 
@@ -308,7 +308,7 @@ def capture_training_distributions(df: pd.DataFrame, output_path: str = None) ->
             }
         }
     """
-    logger.debug("\n📊 Capturando distribuições de treino...")
+    logger.debug("\n Capturando distribuições de treino...")
 
     distribuicoes = {
         "categorical": {},
@@ -349,7 +349,7 @@ def capture_training_distributions(df: pd.DataFrame, output_path: str = None) ->
             proporcoes_str = {str(k): float(v) for k, v in proporcoes.items()}
 
             distribuicoes["categorical"][col] = proporcoes_str
-            logger.debug(f"   ✓ {col}: {len(proporcoes)} categorias")
+            logger.debug(f"    {col}: {len(proporcoes)} categorias")
 
         else:
             # Capturar estatísticas numéricas (apenas para numéricas reais, não booleanas)
@@ -366,23 +366,23 @@ def capture_training_distributions(df: pd.DataFrame, output_path: str = None) ->
                 }
 
                 distribuicoes["numerical"][col] = stats
-                logger.debug(f"   ✓ {col}: μ={stats['mean']:.2f}, σ={stats['std']:.2f}")
+                logger.debug(f"    {col}: μ={stats['mean']:.2f}, σ={stats['std']:.2f}")
             except (TypeError, ValueError) as e:
                 # Se não conseguir calcular estatísticas, tratar como categórica
-                logger.debug(f"   ⚠️ {col}: não foi possível calcular estatísticas numéricas, tratando como categórica")
+                logger.debug(f"    {col}: não foi possível calcular estatísticas numéricas, tratando como categórica")
                 contagens = df[col].value_counts()
                 proporcoes = (contagens / total_nao_nulos).to_dict()
                 proporcoes_str = {str(k): float(v) for k, v in proporcoes.items()}
                 distribuicoes["categorical"][col] = proporcoes_str
 
-    logger.debug(f"\n📊 Total: {len(distribuicoes['categorical'])} categóricas, "
+    logger.debug(f"\n Total: {len(distribuicoes['categorical'])} categóricas, "
           f"{len(distribuicoes['numerical'])} numéricas")
 
     # Salvar se caminho fornecido
     if output_path:
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(distribuicoes, f, indent=2, ensure_ascii=False)
-        logger.debug(f"✅ Distribuições salvas em: {output_path}")
+        logger.debug(f" Distribuições salvas em: {output_path}")
 
     return distribuicoes
 
@@ -442,7 +442,7 @@ def check_distribution_drift(df_producao: pd.DataFrame,
             mudancas_msg = []
             for m in mudancas_significativas[:3]:  # Mostrar top 3
                 mudancas_msg.append(
-                    f"'{m['categoria']}': {m['treino']*100:.1f}%→{m['producao']*100:.1f}% "
+                    f"'{m['categoria']}': {m['treino']*100:.1f}%{m['producao']*100:.1f}% "
                     f"({m['diff']*100:+.1f}pp)"
                 )
             mais_msg = f" (e mais {len(mudancas_significativas)-3})" if len(mudancas_significativas) > 3 else ""
@@ -461,7 +461,7 @@ def check_distribution_drift(df_producao: pd.DataFrame,
                 'column': col,
                 'changes': mudancas_significativas,
                 'severity': severity,
-                'message': f"⚠️ {col}: {len(mudancas_significativas)} mudança(s) significativa(s) nas proporções\n"
+                'message': f" {col}: {len(mudancas_significativas)} mudança(s) significativa(s) nas proporções\n"
                           f"   {', '.join(mudancas_msg)}{mais_msg}"
             })
 
@@ -504,7 +504,7 @@ def check_distribution_drift(df_producao: pd.DataFrame,
                 'std_producao': std_producao,
                 'sigma_diff': mean_diff_sigma,
                 'severity': severity,
-                'message': f"⚠️ {col}: média mudou {mean_diff_sigma:.1f}σ\n"
+                'message': f" {col}: média mudou {mean_diff_sigma:.1f}σ\n"
                           f"   Treino: μ={mean_treino:.2f} (σ={std_treino:.2f})\n"
                           f"   Produção: μ={mean_producao:.2f} (σ={std_producao:.2f})"
             })
@@ -737,7 +737,7 @@ class DataQualityMonitor:
                     'type': 'missing_rate_high',
                     'severity': severity,
                     'category': 'data_quality',
-                    'message': f"⚠️ {col}: {missing_rate*100:.1f}% missing ({missing_count}/{total_rows} leads)",
+                    'message': f" {col}: {missing_rate*100:.1f}% missing ({missing_count}/{total_rows} leads)",
                     'details': {
                         'column': col,
                         'missing_count': missing_count,
@@ -766,7 +766,7 @@ class DataQualityMonitor:
         if total_leads == 0:
             return alerts
 
-        # Normalizar formato dos decis (D01 → D1, D02 → D2, etc)
+        # Normalizar formato dos decis (D01  D1, D02  D2, etc)
         # Google Sheets pode ter 'D01' enquanto esperamos 'D1'
         df['decil_normalized'] = df['decil'].astype(str).str.replace(r'^D0(\d)$', r'D\1', regex=True)
 
@@ -802,7 +802,7 @@ class DataQualityMonitor:
 
             top_changes = diferencas_significativas[:3]
             changes_msg = ', '.join([
-                f"{c['decil']}: {c['esperado']*100:.0f}%→{c['atual']*100:.0f}% ({c['diff']*100:+.1f}pp)"
+                f"{c['decil']}: {c['esperado']*100:.0f}%{c['atual']*100:.0f}% ({c['diff']*100:+.1f}pp)"
                 for c in top_changes
             ])
             mais_msg = f" (e mais {len(diferencas_significativas)-3})" if len(diferencas_significativas) > 3 else ""
@@ -811,7 +811,7 @@ class DataQualityMonitor:
                 'type': 'score_distribution_change',
                 'severity': severity,
                 'category': 'data_quality',
-                'message': f"⚠️ Distribuição de decis mudou: {changes_msg}{mais_msg}",
+                'message': f" Distribuição de decis mudou: {changes_msg}{mais_msg}",
                 'details': {
                     'changes': diferencas_significativas,
                     'total_leads': total_leads
@@ -861,7 +861,7 @@ class DataQualityMonitor:
                     'type': 'missing_expected_features',
                     'severity': 'HIGH',
                     'category': 'data_quality',
-                    'message': f"⚠️ {len(missing_features)} feature(s) esperada(s) pelo modelo ausente(s) após encoding",
+                    'message': f" {len(missing_features)} feature(s) esperada(s) pelo modelo ausente(s) após encoding",
                     'details': {
                         'missing_count': len(missing_features),
                         'missing_features': missing_features,
@@ -895,7 +895,7 @@ class DataQualityMonitor:
 
         alerts = []
 
-        print("🔍 DEBUG: _check_extra_features() INICIADO")
+        print(" DEBUG: _check_extra_features() INICIADO")
         print(f"DataFrame recebido: {df.shape[0]} linhas, {df.shape[1]} colunas")
         print(f"Colunas: {sorted(df.columns.tolist())[:10]}...")
 
@@ -921,14 +921,14 @@ class DataQualityMonitor:
 
             extra_features = actual_features - expected_features
 
-            print(f"\n✓ Features esperadas: {len(expected_features)}")
-            print(f"✓ Features encontradas: {len(actual_features)}")
-            print(f"✓ Features extras: {len(extra_features)}")
+            print(f"\n Features esperadas: {len(expected_features)}")
+            print(f" Features encontradas: {len(actual_features)}")
+            print(f" Features extras: {len(extra_features)}")
 
             if extra_features:
                 extra_features_list = sorted(list(extra_features))
 
-                print(f"\n⚠️  DETECTOU {len(extra_features)} FEATURES EXTRAS:")
+                print(f"\n  DETECTOU {len(extra_features)} FEATURES EXTRAS:")
                 for feat in extra_features_list[:10]:
                     print(f"   - {feat}")
                 if len(extra_features) > 10:
@@ -947,7 +947,7 @@ class DataQualityMonitor:
                 mais_msg = f" (e mais {len(extra_features) - 5})" if len(extra_features) > 5 else ""
 
                 # Criar alerta
-                alert_msg = f"ℹ️ {len(extra_features)} feature(s) nova(s) detectada(s) após encoding (serão ignoradas pelo modelo)\n   Exemplos: {', '.join(features_to_show)}{mais_msg}"
+                alert_msg = f"ℹ {len(extra_features)} feature(s) nova(s) detectada(s) após encoding (serão ignoradas pelo modelo)\n   Exemplos: {', '.join(features_to_show)}{mais_msg}"
 
                 alerts.append({
                     'type': 'extra_unexpected_features',
@@ -965,13 +965,13 @@ class DataQualityMonitor:
                     'threshold': 0  # Qualquer feature extra merece atenção
                 })
 
-                print(f"\n✅ Alerta criado: {alert_msg}")
+                print(f"\n Alerta criado: {alert_msg}")
             else:
-                print(f"\n✅ Nenhuma feature extra detectada")
+                print(f"\n Nenhuma feature extra detectada")
 
 
         except Exception as e:
-            print(f"\n❌ ERRO em _check_extra_features(): {e}")
+            print(f"\n ERRO em _check_extra_features(): {e}")
             import traceback
             traceback.print_exc()
 

@@ -245,7 +245,7 @@ def unify_medium_by_actions(df: pd.DataFrame) -> pd.DataFrame:
         if medium_str in categorias_validas_producao:
             return medium_str
 
-        # 3. VALORES COMPLETAMENTE NOVOS → 'Outros'
+        # 3. VALORES COMPLETAMENTE NOVOS  'Outros'
         if medium_str not in [v[0] for v in valores_nao_mapeados]:
             count = (df_unified['Medium'] == medium_str).sum()
             valores_nao_mapeados.append((medium_str, count))
@@ -256,7 +256,7 @@ def unify_medium_by_actions(df: pd.DataFrame) -> pd.DataFrame:
 
     # LOGAR CONVERSÕES
     if conversoes_para_outros:
-        logger.info(f"   📌 Medium convertidas para 'Outros' (mapeamento):")
+        logger.info(f"    Medium convertidas para 'Outros' (mapeamento):")
         # Ordenar por contagem decrescente
         conversoes_para_outros.sort(key=lambda x: x[1], reverse=True)
         for valor, count in conversoes_para_outros[:10]:
@@ -266,7 +266,7 @@ def unify_medium_by_actions(df: pd.DataFrame) -> pd.DataFrame:
             logger.info(f"      ... e mais {len(conversoes_para_outros)-10} categorias ({total_resto} leads)")
 
     if valores_nao_mapeados:
-        logger.info(f"   📌 Medium NÃO MAPEADAS → convertidas para 'Outros':")
+        logger.info(f"    Medium NÃO MAPEADAS  convertidas para 'Outros':")
         # Ordenar por contagem decrescente
         valores_nao_mapeados.sort(key=lambda x: x[1], reverse=True)
         for valor, count in valores_nao_mapeados[:5]:

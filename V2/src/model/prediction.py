@@ -114,7 +114,7 @@ class LeadScoringPredictor:
         logger.info(f"Preparando features para predição...")
 
         # PRINT ANTES DA REORDENAÇÃO/FILTRAGEM
-        print("🔍 COLUNAS ANTES DA REORDENAÇÃO/FILTRAGEM (df processado):")
+        print(" COLUNAS ANTES DA REORDENAÇÃO/FILTRAGEM (df processado):")
         for idx, col in enumerate(sorted(df.columns), 1):
             print(f"  {idx:2d}. {col}")
         print(f"\nTotal: {len(df.columns)} features")
@@ -142,7 +142,7 @@ class LeadScoringPredictor:
         X = X[self.feature_names]
 
         # PRINT DEPOIS DA REORDENAÇÃO/FILTRAGEM (equivalente ao pipeline de treino)
-        print("🔍 COLUNAS EXATAS PASSADAS PARA O MODELO (X.columns):")
+        print(" COLUNAS EXATAS PASSADAS PARA O MODELO (X.columns):")
         for idx, col in enumerate(X.columns, 1):
             print(f"  {idx:2d}. {col}")
         print(f"\nTotal: {len(X.columns)} features")
@@ -187,7 +187,7 @@ class LeadScoringPredictor:
 
         if original_df is not None and len(original_df) != len(df):
             duplicatas_removidas = len(original_df) - len(df)
-            logger.warning(f"⚠️  {duplicatas_removidas} duplicatas foram removidas no pipeline")
+            logger.warning(f"  {duplicatas_removidas} duplicatas foram removidas no pipeline")
             logger.info("Retornando apenas registros únicos com scores")
 
         # Adicionar apenas score (decis serão calculados por janela de análise)

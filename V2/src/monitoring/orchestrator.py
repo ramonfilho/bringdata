@@ -72,7 +72,7 @@ def setup_monitoring_logging():
     root_logger.addHandler(handler)
     root_logger.setLevel(logging.INFO)
 
-    print(f"✅ Output do monitoramento será salvo em: {log_path}\n")
+    print(f" Output do monitoramento será salvo em: {log_path}\n")
     return log_path
 
 
@@ -127,8 +127,8 @@ class MonitoringOrchestrator:
             ultimo_email = df.iloc[-1].get('E-mail', 'N/A') if len(df) > 0 else 'N/A'
             ultimo_data = df.iloc[-1].get('Data', 'N/A') if len(df) > 0 else 'N/A'
 
-            logger.info(f"📧 Primeiro lead: {primeiro_email} (Data: {primeiro_data})")
-            logger.info(f"📧 Último lead: {ultimo_email} (Data: {ultimo_data})")
+            logger.info(f" Primeiro lead: {primeiro_email} (Data: {primeiro_data})")
+            logger.info(f" Último lead: {ultimo_email} (Data: {ultimo_data})")
 
             # Aplicar unificação de UTM Source/Term (mesmo processamento que produção)
             # Isso garante que 'fb', 'youtube', etc sejam normalizados para 'outros'
@@ -137,7 +137,7 @@ class MonitoringOrchestrator:
                 utm_antes = df['Source'].nunique() if 'Source' in df.columns else 0
                 df = unify_utm_columns(df)
                 utm_depois = df['Source'].nunique() if 'Source' in df.columns else 0
-                logger.info(f"📊 UTM unificado: Source {utm_antes} → {utm_depois} categorias únicas")
+                logger.info(f" UTM unificado: Source {utm_antes}  {utm_depois} categorias únicas")
 
             # Aplicar unificação de Medium (mesmo processamento que treino e produção)
             # Isso garante que 'ABERTO | AD0022' seja normalizado para 'Aberto'
@@ -145,19 +145,19 @@ class MonitoringOrchestrator:
                 medium_antes = df['Medium'].nunique()
                 df = unify_medium_columns(df)
                 medium_depois = df['Medium'].nunique()
-                logger.info(f"📊 Medium unificado: {medium_antes} → {medium_depois} categorias únicas")
+                logger.info(f" Medium unificado: {medium_antes}  {medium_depois} categorias únicas")
 
             # Aplicar rename de colunas longas (mesmo processamento que produção)
             # Cria: 'interesse_programacao' e 'investiu_curso_online'
             from data_processing.preprocessing import rename_long_column_names
             df = rename_long_column_names(df)
-            logger.info(f"📊 Colunas renomeadas")
+            logger.info(f" Colunas renomeadas")
 
             # Aplicar unificação de categorias (mesmo processamento que produção)
             # Limpa e normaliza valores das categorias
             from data_processing.category_unification import unificar_categorias_completo
             df = unificar_categorias_completo(df)
-            logger.info(f"📊 Categorias unificadas")
+            logger.info(f" Categorias unificadas")
 
             # Preservar colunas de score/decil ANTES de remover (necessário para monitoramento)
             # Essas colunas vêm do Google Sheets (pipeline de produção já atribuiu)
@@ -171,12 +171,12 @@ class MonitoringOrchestrator:
             df = clean_columns(df)
             colunas_depois_score = len(df.columns)
             score_removidos = colunas_antes_score - colunas_depois_score
-            logger.info(f"📊 Colunas de score/faixa removidas: {score_removidos} (total: {colunas_depois_score})")
+            logger.info(f" Colunas de score/faixa removidas: {score_removidos} (total: {colunas_depois_score})")
 
             # Restaurar colunas de score/decil APÓS limpeza (para monitoramento de distribuição)
             if decil_col is not None:
                 df['decil'] = decil_col
-                logger.info(f"📊 Coluna 'decil' preservada para monitoramento (distribuição: {df['decil'].value_counts().sort_index().to_dict()})")
+                logger.info(f" Coluna 'decil' preservada para monitoramento (distribuição: {df['decil'].value_counts().sort_index().to_dict()})")
             if lead_score_col is not None:
                 # Converter lead_score para float (pode vir como string com vírgula do Google Sheets)
                 if lead_score_col.dtype == 'object':
@@ -185,7 +185,7 @@ class MonitoringOrchestrator:
                     lead_score_col = pd.to_numeric(lead_score_col, errors='coerce')
                 df['lead_score'] = lead_score_col
                 valid_scores = df['lead_score'].notna().sum()
-                logger.info(f"📊 Coluna 'lead_score' preservada para monitoramento ({valid_scores}/{len(df)} válidos, média: {df['lead_score'].mean():.4f})")
+                logger.info(f" Coluna 'lead_score' preservada para monitoramento ({valid_scores}/{len(df)} válidos, média: {df['lead_score'].mean():.4f})")
 
             # Remover features de campanha (mesmo processamento que produção)
             # Remove: Campaign, Content, e colunas vazias/problemáticas
@@ -194,7 +194,7 @@ class MonitoringOrchestrator:
             df = remove_campaign_features(df)
             colunas_depois_campaign = len(df.columns)
             campaign_removidos = colunas_antes_campaign - colunas_depois_campaign
-            logger.info(f"📊 Features de campanha removidas: {campaign_removidos} (total: {colunas_depois_campaign})")
+            logger.info(f" Features de campanha removidas: {campaign_removidos} (total: {colunas_depois_campaign})")
 
             # Remover campos técnicos (mesmo processamento que produção)
             # Remove: Remote IP, User Agent, fbc, fbp, cidade, estado, pais, cep, externalid, Page URL, etc
@@ -203,7 +203,7 @@ class MonitoringOrchestrator:
             df = remove_technical_fields(df)
             colunas_depois_tech = len(df.columns)
             campos_removidos = colunas_antes_tech - colunas_depois_tech
-            logger.info(f"📊 Campos técnicos removidos: {campos_removidos} (total: {colunas_depois_tech})")
+            logger.info(f" Campos técnicos removidos: {campos_removidos} (total: {colunas_depois_tech})")
 
             # Aplicar feature engineering (mesmo processamento que produção)
             # Cria: nome_valido, email_valido, telefone_valido, telefone_comprimento, nome_tem_sobrenome
@@ -212,7 +212,7 @@ class MonitoringOrchestrator:
             df = create_derived_features(df)
             colunas_depois_fe = len(df.columns)
             saldo_fe = colunas_depois_fe - colunas_antes_fe
-            logger.info(f"📊 Features derivadas criadas: {saldo_fe:+d} colunas (total: {colunas_depois_fe})")
+            logger.info(f" Features derivadas criadas: {saldo_fe:+d} colunas (total: {colunas_depois_fe})")
 
             all_alerts_dict.extend(self.monitors['data_quality'].check(df))
 
@@ -235,8 +235,8 @@ class MonitoringOrchestrator:
         critical_summary = self._generate_critical_summary(alerts, funnel_metrics)
 
         # Mensagem de conclusão
-        print(f"\n✅ Monitoramento concluído!")
-        print(f"✅ Log completo salvo em: {log_path}\n")
+        print(f"\n Monitoramento concluído!")
+        print(f" Log completo salvo em: {log_path}\n")
 
         return {
             'total_alerts': len(alerts),
@@ -267,7 +267,7 @@ class MonitoringOrchestrator:
             from app import GOOGLE_SHEETS_URL
 
             if not GOOGLE_SHEETS_URL:
-                logger.warning("⚠️  GOOGLE_SHEETS_URL não configurado, pulando contagem aba 2")
+                logger.warning("  GOOGLE_SHEETS_URL não configurado, pulando contagem aba 2")
                 return 0
 
             # Autenticar
@@ -283,7 +283,7 @@ class MonitoringOrchestrator:
             worksheet = spreadsheet.get_worksheet(1)  # Segunda aba
 
             if not worksheet:
-                logger.warning("⚠️  Segunda aba não encontrada na planilha")
+                logger.warning("  Segunda aba não encontrada na planilha")
                 return 0
 
             # Buscar todos os dados
@@ -321,11 +321,11 @@ class MonitoringOrchestrator:
                 return count
             else:
                 # Sem coluna de data, avisar
-                logger.warning(f"   ⚠️  Sem coluna de data na aba 2, retornando 0")
+                logger.warning(f"     Sem coluna de data na aba 2, retornando 0")
                 return 0
 
         except Exception as e:
-            logger.warning(f"⚠️  Erro ao contar aba 2: {e}")
+            logger.warning(f"  Erro ao contar aba 2: {e}")
             return 0
 
     def _calculate_lead_quality_metrics(self) -> Dict:
@@ -350,7 +350,7 @@ class MonitoringOrchestrator:
             from app import GOOGLE_SHEETS_URL
 
             if not GOOGLE_SHEETS_URL:
-                logger.warning("⚠️ GOOGLE_SHEETS_URL não configurado")
+                logger.warning(" GOOGLE_SHEETS_URL não configurado")
                 return {}
 
             # Autenticar
@@ -432,7 +432,7 @@ class MonitoringOrchestrator:
             }
 
         except Exception as e:
-            logger.warning(f"⚠️ Erro ao calcular métricas de qualidade: {e}")
+            logger.warning(f" Erro ao calcular métricas de qualidade: {e}")
             return {}
 
     def _generate_critical_summary(self, alerts: List[Alert], funnel_metrics: Dict) -> str:
@@ -448,7 +448,7 @@ class MonitoringOrchestrator:
         """
         lines = []
         lines.append("\n" + "="*72)
-        lines.append("📊 SUMÁRIO CRÍTICO DO SISTEMA")
+        lines.append(" SUMÁRIO CRÍTICO DO SISTEMA")
         lines.append("="*72)
 
         # 1. Categorias não vistas no treino
@@ -575,7 +575,7 @@ class MonitoringOrchestrator:
         # 9. Funil de Conversão
         total_sheets = capture.get('total_sheets_combined', 0)
         lines.append(f"\n9. Funil de Conversão:")
-        lines.append(f"    Capturados: {total_db:,} → Respostas: {total_sheets:,} → Enviados CAPI: {leads_sent:,} → Aceitos Meta: {success_count:,}")
+        lines.append(f"    Capturados: {total_db:,}  Respostas: {total_sheets:,}  Enviados CAPI: {leads_sent:,}  Aceitos Meta: {success_count:,}")
 
         # 10. Taxa de Resposta
         response_rate = capture.get('response_rate', 0)
@@ -587,7 +587,7 @@ class MonitoringOrchestrator:
         if quality_metrics:
             lines.append(f"\n11. Qualidade dos Leads:")
             lines.append(f"    ")
-            lines.append(f"    📊 Score Médio:")
+            lines.append(f"     Score Médio:")
 
             hist = quality_metrics.get('historico', {})
             mes = quality_metrics.get('ultimo_mes', {})
@@ -604,7 +604,7 @@ class MonitoringOrchestrator:
                 lines.append(f"       Últimas 24h:    {dia['score']:.4f}")
 
             lines.append(f"    ")
-            lines.append(f"    📊 % em D9:")
+            lines.append(f"     % em D9:")
             if hist.get('count', 0) > 0:
                 lines.append(f"       Histórico:      {hist['d9']:.2f}%")
             if mes.get('count', 0) > 0:
@@ -615,7 +615,7 @@ class MonitoringOrchestrator:
                 lines.append(f"       Últimas 24h:    {dia['d9']:.2f}%")
 
             lines.append(f"    ")
-            lines.append(f"    📊 % em D10:")
+            lines.append(f"     % em D10:")
             if hist.get('count', 0) > 0:
                 lines.append(f"       Histórico:      {hist['d10']:.2f}%")
             if mes.get('count', 0) > 0:

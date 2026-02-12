@@ -72,8 +72,8 @@ def buscar_dados_sheets():
     # Converter coluna Data
     df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
 
-    print(f"   ✓ {len(df):,} registros carregados")
-    print(f"   ✓ {df['Data'].notna().sum():,} datas válidas")
+    print(f"    {len(df):,} registros carregados")
+    print(f"    {df['Data'].notna().sum():,} datas válidas")
 
     return df
 
@@ -132,7 +132,7 @@ def analisar_feature_drift():
     print("ANÁLISE DE FEATURE DRIFT: COMPARAÇÃO DE 3 PERÍODOS")
 
     # Carregar dados
-    print(f"\n📊 Carregando dados...")
+    print(f"\n Carregando dados...")
     df = buscar_dados_sheets()
 
     print(f"   Total de registros: {len(df):,}")
@@ -166,7 +166,7 @@ def analisar_feature_drift():
         (df['decil'].notna())
     ].copy()
 
-    print(f"\n📅 PERÍODOS COMPARADOS:")
+    print(f"\n PERÍODOS COMPARADOS:")
     print(f"\n   [1] D10 NORMAL: {PERIODO_D10_NORMAL_INICIO} a {PERIODO_D10_NORMAL_FIM}")
     print(f"      Total de leads: {len(df_d10_normal):,}")
     if len(df_d10_normal) > 0:
@@ -192,10 +192,10 @@ def analisar_feature_drift():
 
     for feature in FEATURES_CATEGORICAS:
         if feature not in df.columns:
-            print(f"\n⚠️  Feature '{feature}' não encontrada nos dados")
+            print(f"\n  Feature '{feature}' não encontrada nos dados")
             continue
 
-        print(f"📊 {feature.upper()}")
+        print(f" {feature.upper()}")
 
         # Comparar distribuições dos 3 períodos
         top_n = 10 if feature in ['Medium', 'Campaign', 'Source'] else None
@@ -219,30 +219,30 @@ def analisar_feature_drift():
         # Alerta se drift significativo
         print(f"\n   Drift em Dez: ", end="")
         if max_drift_dez > 5:
-            print(f"🚨 ALTO ({max_drift_dez:.2f}pp)")
+            print(f" ALTO ({max_drift_dez:.2f}pp)")
         elif max_drift_dez > 2:
-            print(f"⚠️  MODERADO ({max_drift_dez:.2f}pp)")
+            print(f"  MODERADO ({max_drift_dez:.2f}pp)")
         else:
-            print(f"✅ BAIXO ({max_drift_dez:.2f}pp)")
+            print(f" BAIXO ({max_drift_dez:.2f}pp)")
 
         print(f"   Drift em Jan: ", end="")
         if max_drift_jan > 5:
-            print(f"🚨 ALTO ({max_drift_jan:.2f}pp)")
+            print(f" ALTO ({max_drift_jan:.2f}pp)")
         elif max_drift_jan > 2:
-            print(f"⚠️  MODERADO ({max_drift_jan:.2f}pp)")
+            print(f"  MODERADO ({max_drift_jan:.2f}pp)")
         else:
-            print(f"✅ BAIXO ({max_drift_jan:.2f}pp)")
+            print(f" BAIXO ({max_drift_jan:.2f}pp)")
 
         print(f"   Diff Dez vs Jan: ", end="")
         if max_drift_dez_vs_jan > 5:
-            print(f"🔴 MUITO DIFERENTE ({max_drift_dez_vs_jan:.2f}pp)")
+            print(f" MUITO DIFERENTE ({max_drift_dez_vs_jan:.2f}pp)")
         elif max_drift_dez_vs_jan > 2:
-            print(f"🟡 PARCIALMENTE DIFERENTE ({max_drift_dez_vs_jan:.2f}pp)")
+            print(f" PARCIALMENTE DIFERENTE ({max_drift_dez_vs_jan:.2f}pp)")
         else:
-            print(f"🟢 SIMILAR ({max_drift_dez_vs_jan:.2f}pp)")
+            print(f" SIMILAR ({max_drift_dez_vs_jan:.2f}pp)")
 
     # Resumo geral de drift
-    print("📊 RESUMO DE FEATURE DRIFT - 3 PERÍODOS")
+    print(" RESUMO DE FEATURE DRIFT - 3 PERÍODOS")
 
     df_drift_summary = pd.DataFrame(drift_summary)
     # Ordenar por maior drift (considerar o máximo entre Dez e Jan)
@@ -252,45 +252,45 @@ def analisar_feature_drift():
     print(f"\n{df_drift_summary.to_string(index=False)}")
 
     # Análise: Features com drift similar vs diferente
-    print("🔍 ANÁLISE: DEZ vs JAN - São os mesmos fatores?")
+    print(" ANÁLISE: DEZ vs JAN - São os mesmos fatores?")
 
     features_similares = df_drift_summary[df_drift_summary['Diff Dez vs Jan (pp)'] <= 2]
     features_diferentes = df_drift_summary[df_drift_summary['Diff Dez vs Jan (pp)'] > 2]
 
-    print(f"\n🟢 FATORES SIMILARES (Dez e Jan têm o mesmo comportamento):")
+    print(f"\n FATORES SIMILARES (Dez e Jan têm o mesmo comportamento):")
     print(f"   Total: {len(features_similares)}")
     if len(features_similares) > 0:
         for _, row in features_similares.iterrows():
-            print(f"   • {row['Feature']}: Diff = {row['Diff Dez vs Jan (pp)']:.2f}pp")
+            print(f"    {row['Feature']}: Diff = {row['Diff Dez vs Jan (pp)']:.2f}pp")
 
-    print(f"\n🔴 FATORES DIFERENTES (Dez e Jan têm comportamentos distintos):")
+    print(f"\n FATORES DIFERENTES (Dez e Jan têm comportamentos distintos):")
     print(f"   Total: {len(features_diferentes)}")
     if len(features_diferentes) > 0:
         for _, row in features_diferentes.iterrows():
-            print(f"   • {row['Feature']}: Diff = {row['Diff Dez vs Jan (pp)']:.2f}pp")
+            print(f"    {row['Feature']}: Diff = {row['Diff Dez vs Jan (pp)']:.2f}pp")
 
     # Análise de decis por período
-    print("📊 DISTRIBUIÇÃO DE DECIS - 3 PERÍODOS")
+    print(" DISTRIBUIÇÃO DE DECIS - 3 PERÍODOS")
 
-    print(f"\n🔹 [1] D10 NORMAL ({PERIODO_D10_NORMAL_INICIO} a {PERIODO_D10_NORMAL_FIM}):")
+    print(f"\n [1] D10 NORMAL ({PERIODO_D10_NORMAL_INICIO} a {PERIODO_D10_NORMAL_FIM}):")
     if len(df_d10_normal) > 0:
         dist_decis_normal = df_d10_normal['decil'].value_counts(normalize=True).sort_index() * 100
         for decil, pct in dist_decis_normal.items():
-            emoji = "⚠️" if decil == 'D10' and pct > 15 else ""
+            emoji = "" if decil == 'D10' and pct > 15 else ""
             print(f"   {decil}: {pct:.2f}% {emoji}")
 
-    print(f"\n🔹 [2] D10 ALTO DEZ ({PERIODO_D10_ALTO_DEZ_INICIO} a {PERIODO_D10_ALTO_DEZ_FIM}):")
+    print(f"\n [2] D10 ALTO DEZ ({PERIODO_D10_ALTO_DEZ_INICIO} a {PERIODO_D10_ALTO_DEZ_FIM}):")
     if len(df_d10_alto_dez) > 0:
         dist_decis_alto_dez = df_d10_alto_dez['decil'].value_counts(normalize=True).sort_index() * 100
         for decil, pct in dist_decis_alto_dez.items():
-            emoji = "⚠️" if decil == 'D10' and pct > 15 else ""
+            emoji = "" if decil == 'D10' and pct > 15 else ""
             print(f"   {decil}: {pct:.2f}% {emoji}")
 
-    print(f"\n🔹 [3] D10 ALTO JAN ({PERIODO_D10_ALTO_JAN_INICIO} a {PERIODO_D10_ALTO_JAN_FIM}):")
+    print(f"\n [3] D10 ALTO JAN ({PERIODO_D10_ALTO_JAN_INICIO} a {PERIODO_D10_ALTO_JAN_FIM}):")
     if len(df_d10_alto_jan) > 0:
         dist_decis_alto_jan = df_d10_alto_jan['decil'].value_counts(normalize=True).sort_index() * 100
         for decil, pct in dist_decis_alto_jan.items():
-            emoji = "⚠️" if decil == 'D10' and pct > 15 else ""
+            emoji = "" if decil == 'D10' and pct > 15 else ""
             print(f"   {decil}: {pct:.2f}% {emoji}")
 
 

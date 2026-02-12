@@ -163,7 +163,7 @@ def criar_dataset_devclub(df_v1_final: pd.DataFrame, df_vendas_unificado: pd.Dat
     indices_descartados = set(indices_matches) - devclub_matches
 
     if len(indices_descartados) > 0:
-        logger.debug(f"\n🔍 ANALISANDO {len(indices_descartados):,} MATCHES DESCARTADOS:")
+        logger.debug(f"\n ANALISANDO {len(indices_descartados):,} MATCHES DESCARTADOS:")
         logger.debug("-" * 70)
 
         # Normalizar vendas para busca

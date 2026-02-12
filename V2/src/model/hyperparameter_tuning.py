@@ -119,7 +119,7 @@ def hyperparameter_tuning(
         }
 
     # Split temporal 70/30 para tuning
-    print("\n📅 Criando split temporal para tuning...")
+    print("\n Criando split temporal para tuning...")
 
     data_dt = pd.to_datetime(dataset_original['Data'], errors='coerce')
     data_min = data_dt.min()
@@ -151,7 +151,7 @@ def hyperparameter_tuning(
     print(f"  Teste: {len(X_test):,} registros | Taxa: {y_test.mean()*100:.2f}%")
 
     # Definir grid de hiperparâmetros
-    print(f"\n🔧 Definindo grid de hiperparâmetros (size={grid_size})...")
+    print(f"\n Definindo grid de hiperparâmetros (size={grid_size})...")
 
     if grid_size == 'small':
         # Grid focado - teste rápido
@@ -266,7 +266,7 @@ def hyperparameter_tuning(
 
     # Análise dos resultados
     if len(resultados) == 0:
-        print("❌ Nenhum modelo válido treinado")
+        print(" Nenhum modelo válido treinado")
         return None
 
     print("TOP 10 CONFIGURAÇÕES")
@@ -319,20 +319,20 @@ def hyperparameter_tuning(
     for param, value in melhor['params'].items():
         if param not in ['random_state', 'n_jobs']:
             baseline_value = baseline_params.get(param, 'N/A')
-            mudou = '🔸' if value != baseline_value else '  '
+            mudou = '' if value != baseline_value else '  '
             print(f"{mudou} {param}: {value}")
 
     # Recomendação
     print("RECOMENDAÇÃO")
 
     if melhoria_auc > 1.0:
-        print(f"✅ RECOMENDADO: Usar hiperparâmetros tunados")
+        print(f" RECOMENDADO: Usar hiperparâmetros tunados")
         print(f"   Melhoria significativa: AUC +{melhoria_auc:.2f}%, Separação +{melhoria_separacao:.1f}%")
     elif melhoria_auc > 0.3:
-        print(f"⚖️  CONSIDERAR: Melhoria marginal (+{melhoria_auc:.2f}%)")
+        print(f"  CONSIDERAR: Melhoria marginal (+{melhoria_auc:.2f}%)")
         print(f"   Avaliar se vale o trade-off")
     else:
-        print(f"❌ NÃO RECOMENDADO: Melhoria insignificante (+{melhoria_auc:.2f}%)")
+        print(f" NÃO RECOMENDADO: Melhoria insignificante (+{melhoria_auc:.2f}%)")
         print(f"   Manter baseline")
 
     return {

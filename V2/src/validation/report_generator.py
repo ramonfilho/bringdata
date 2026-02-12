@@ -69,7 +69,7 @@ class ValidationReportGenerator:
         Returns:
             Caminho do arquivo gerado
         """
-        logger.info(f"📄 Gerando relatório Excel: {output_path}")
+        logger.info(f" Gerando relatório Excel: {output_path}")
 
         # Criar diretório se não existir
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -111,7 +111,7 @@ class ValidationReportGenerator:
             merge_otimizacao = config_params.get('merge_otimizacao_ml_with_controle', False)
 
             if merge_otimizacao:
-                logger.info("   ⚙️ Agrupando 'Otimização ML' com 'Controle' (merge_otimizacao_ml_with_controle=true)")
+                logger.info("    Agrupando 'Otimização ML' com 'Controle' (merge_otimizacao_ml_with_controle=true)")
                 # Substituir 'Otimização ML' por 'Controle' antes da agregação
                 campaign_for_filtering.loc[
                     campaign_for_filtering['comparison_group'] == 'Otimização ML',
@@ -169,18 +169,18 @@ class ValidationReportGenerator:
             # ADSETS - formato similar à aba Campanhas
             if adset_level_comparisons is not None:
                 logger.info("   Gerando aba: Comparação por Adsets")
-                logger.info(f"   🔍 DEBUG - adset_level_comparisons keys: {list(adset_level_comparisons.keys())}")
+                logger.info(f"    DEBUG - adset_level_comparisons keys: {list(adset_level_comparisons.keys())}")
                 excel_dfs_adsets = prepare_adset_comparison_for_excel(adset_level_comparisons)
 
-                logger.info(f"   🔍 DEBUG - excel_dfs_adsets keys: {list(excel_dfs_adsets.keys())}")
+                logger.info(f"    DEBUG - excel_dfs_adsets keys: {list(excel_dfs_adsets.keys())}")
                 if 'comparacao_adsets' in excel_dfs_adsets:
-                    logger.info(f"   🔍 DEBUG - comparacao_adsets shape: {excel_dfs_adsets['comparacao_adsets'].shape}")
+                    logger.info(f"    DEBUG - comparacao_adsets shape: {excel_dfs_adsets['comparacao_adsets'].shape}")
 
                 if 'comparacao_adsets' in excel_dfs_adsets and not excel_dfs_adsets['comparacao_adsets'].empty:
                     adsets_df = excel_dfs_adsets['comparacao_adsets']
                     self._write_adsets_comparison(writer, adsets_df, formats)
             else:
-                logger.warning("   ⚠️ adset_level_comparisons is None, pulando aba Comparação por Adsets")
+                logger.warning("    adset_level_comparisons is None, pulando aba Comparação por Adsets")
 
             # COMENTADO: Aba de comparação por ads desabilitada temporariamente
             # # ADS - formato similar à aba Campanhas e Adsets
@@ -211,13 +211,13 @@ class ValidationReportGenerator:
                     matched_ads_in_adsets_df = excel_dfs_matched_ads_in_adsets['comparacao_ads']
 
         except Exception as e:
-            logger.warning(f"   ⚠️ Erro ao gerar abas de comparação (adsets/ads): {e}")
+            logger.warning(f"    Erro ao gerar abas de comparação (adsets/ads): {e}")
             import traceback
             traceback.print_exc()
 
         # Aba 4: Comparação ML (resumo da comparação com 4 tabelas consolidadas)
         logger.info("   Gerando aba: Comparação ML")
-        logger.info(f"   🔍 DEBUG - DataFrames status:")
+        logger.info(f"    DEBUG - DataFrames status:")
         logger.info(f"      campanhas_df: {'OK' if campanhas_df is not None else 'None'}")
         logger.info(f"      all_adsets_comparison: {'OK' if all_adsets_comparison is not None else 'None'} {f'({len(all_adsets_comparison)} rows)' if all_adsets_comparison is not None else ''}")
         logger.info(f"      adsets_df (matched): {'OK' if adsets_df is not None else 'None'} {f'({len(adsets_df)} rows)' if adsets_df is not None else ''}")
@@ -251,7 +251,7 @@ class ValidationReportGenerator:
         # Salvar Excel
         writer.close()
 
-        logger.info(f"   ✅ Excel salvo com sucesso ({Path(output_path).stat().st_size / 1024:.1f} KB)")
+        logger.info(f"    Excel salvo com sucesso ({Path(output_path).stat().st_size / 1024:.1f} KB)")
 
         return output_path
 
@@ -359,7 +359,7 @@ class ValidationReportGenerator:
 
         # Períodos de Aferição
         row = 3
-        worksheet.write(row, 0, '📅 PERÍODOS DE AFERIÇÃO', formats['subtitle'])
+        worksheet.write(row, 0, ' PERÍODOS DE AFERIÇÃO', formats['subtitle'])
         row += 1
 
         # Extrair datas dos config_params se disponíveis
@@ -378,7 +378,7 @@ class ValidationReportGenerator:
 
         # Estatísticas Gerais
         row += 1
-        worksheet.write(row, 0, '📊 ESTATÍSTICAS GERAIS', formats['subtitle'])
+        worksheet.write(row, 0, ' ESTATÍSTICAS GERAIS', formats['subtitle'])
         row += 1
 
         # Calcular tracking rate
@@ -501,7 +501,7 @@ class ValidationReportGenerator:
         worksheet = writer.book.add_worksheet('Performance por Campanha')
 
         # Título principal
-        worksheet.write(0, 0, '📊 PERFORMANCE DETALHADA POR CAMPANHA', formats['title'])
+        worksheet.write(0, 0, ' PERFORMANCE DETALHADA POR CAMPANHA', formats['title'])
 
         # Separar por conta
         account_ids = campaign_metrics['account_id'].unique()
@@ -530,9 +530,9 @@ class ValidationReportGenerator:
             excluir_vendas = excluir_campanhas['conversions'].sum()
 
             if excluir_vendas > 0:
-                logger.warning(f"   ⚠️  {int(excluir_vendas)} vendas em campanhas não-captação (não mostradas na aba):")
+                logger.warning(f"     {int(excluir_vendas)} vendas em campanhas não-captação (não mostradas na aba):")
                 for _, row in excluir_campanhas[excluir_campanhas['conversions'] > 0].iterrows():
-                    logger.warning(f"      • {int(row['conversions'])} vendas: {row['campaign'][:70]}")
+                    logger.warning(f"       {int(row['conversions'])} vendas: {row['campaign'][:70]}")
 
             # IMPORTANTE: Excluir apenas campanhas não-captação (ml_type == 'EXCLUIR')
             # Isso mantém todas as campanhas de captação (ML e não-ML) independente de serem Fair Control
@@ -542,7 +542,7 @@ class ValidationReportGenerator:
 
             vendas_depois = account_campaigns['conversions'].sum()
             if excluir_vendas > 0:
-                logger.warning(f"      Total: {int(vendas_antes)} vendas antes → {int(vendas_depois)} vendas na aba (diff: {int(excluir_vendas)})")
+                logger.warning(f"      Total: {int(vendas_antes)} vendas antes  {int(vendas_depois)} vendas na aba (diff: {int(excluir_vendas)})")
 
             if account_campaigns.empty:
                 continue
@@ -553,7 +553,7 @@ class ValidationReportGenerator:
 
             # Subtítulo da conta
             account_name = account_names.get(account_id, account_id)
-            worksheet.write(current_row, 0, f'🏢 {account_name}', formats['subtitle'])
+            worksheet.write(current_row, 0, f' {account_name}', formats['subtitle'])
             current_row += 1
 
             # Headers
@@ -687,7 +687,7 @@ class ValidationReportGenerator:
         duplicates_removed = all_sales_df_original_count - len(all_sales_df)
 
         if duplicates_removed > 0:
-            logger.info(f"   🧹 Duplicatas removidas na aba Detalhes das Conversões: {duplicates_removed}")
+            logger.info(f"    Duplicatas removidas na aba Detalhes das Conversões: {duplicates_removed}")
 
         # Ordenar: Trackeados primeiro (Sim antes de Não), depois por data de venda
         all_sales_df['sort_key'] = all_sales_df['trackeado'].map({'Sim': 0, 'Não': 1})
@@ -713,7 +713,7 @@ class ValidationReportGenerator:
         # Título
         tracked_count = len(all_sales_df[all_sales_df['trackeado'] == 'Sim'])
         total_count = len(all_sales_df)
-        worksheet.write(0, 0, f'🎯 TODAS AS {total_count} VENDAS DO PERÍODO ({tracked_count} trackeadas)', formats['title'])
+        worksheet.write(0, 0, f' TODAS AS {total_count} VENDAS DO PERÍODO ({tracked_count} trackeadas)', formats['title'])
 
         # Cabeçalhos
         headers = [
@@ -780,7 +780,7 @@ class ValidationReportGenerator:
         current_row = 0
 
         # TABELA 1: Comparação por Campanhas
-        worksheet.write(current_row, 0, '📊 COMPARAÇÃO POR CAMPANHAS (All vs All)', formats['title'])
+        worksheet.write(current_row, 0, ' COMPARAÇÃO POR CAMPANHAS (All vs All)', formats['title'])
         current_row += 1
         worksheet.write(current_row, 0, 'Todas as campanhas Eventos ML vs Controle', formats['subtitle'])
         current_row += 2
@@ -798,7 +798,7 @@ class ValidationReportGenerator:
 
         # TABELA 2: Comparação por TODOS os Adsets (Eventos ML vs Controle)
         # COMENTADO: Tabela redundante com a de campanhas acima
-        # worksheet.write(current_row, 0, '📊 COMPARAÇÃO POR ADSETS (All vs All)', formats['title'])
+        # worksheet.write(current_row, 0, ' COMPARAÇÃO POR ADSETS (All vs All)', formats['title'])
         # current_row += 1
         # worksheet.write(current_row, 0, 'Todos os adsets das campanhas Eventos ML vs Controle (sem filtros)', formats['subtitle'])
         # current_row += 2
@@ -819,7 +819,7 @@ class ValidationReportGenerator:
         from src.validation.fair_campaign_comparison import MATCHED_ADSETS
         matched_adsets_list = ', '.join(MATCHED_ADSETS)
 
-        worksheet.write(current_row, 0, '📊 COMPARAÇÃO POR ADSETS MATCHED (Matched Pairs)', formats['title'])
+        worksheet.write(current_row, 0, ' COMPARAÇÃO POR ADSETS MATCHED (Matched Pairs)', formats['title'])
         current_row += 1
         worksheet.write(current_row, 0, 'Apenas adsets que aparecem em Eventos ML E Controle (R$ 200+ gasto)', formats['subtitle'])
         current_row += 2
@@ -837,7 +837,7 @@ class ValidationReportGenerator:
 
         # COMENTADO: Tabela de ads matched desabilitada temporariamente
         # # TABELA 4: Comparação por Ads MATCHED EM Adsets Matched
-        # worksheet.write(current_row, 0, '📊 COMPARAÇÃO POR ADS MATCHED EM ADSETS MATCHED', formats['title'])
+        # worksheet.write(current_row, 0, ' COMPARAÇÃO POR ADS MATCHED EM ADSETS MATCHED', formats['title'])
         # current_row += 1
         # worksheet.write(current_row, 0, 'Apenas ads matched (mesmo ad_code) que pertencem aos adsets matched (R$ 200+ gasto)', formats['subtitle'])
         # current_row += 2
@@ -876,7 +876,7 @@ class ValidationReportGenerator:
         current_row = 0
 
         # Título principal
-        worksheet.write(current_row, 0, '📊 EVENTOS ML vs FAIXA A (Sistema Legado)', formats['title'])
+        worksheet.write(current_row, 0, ' EVENTOS ML vs FAIXA A (Sistema Legado)', formats['title'])
         current_row += 1
         worksheet.write(current_row, 0, 'Comparação entre campanhas com eventos customizados CAPI vs sistema legado Faixa A', formats['subtitle'])
         current_row += 2
@@ -927,7 +927,7 @@ class ValidationReportGenerator:
                 df_combined[new_name] = df_combined[old_name]
 
         # TABELA 1: All vs All (Campanhas)
-        worksheet.write(current_row, 0, '📊 COMPARAÇÃO POR CAMPANHAS (All vs All)', formats['title'])
+        worksheet.write(current_row, 0, ' COMPARAÇÃO POR CAMPANHAS (All vs All)', formats['title'])
         current_row += 1
         worksheet.write(current_row, 0, 'Todas as campanhas Eventos ML vs todas as campanhas Faixa A', formats['subtitle'])
         current_row += 2
@@ -941,7 +941,7 @@ class ValidationReportGenerator:
 
         # TABELA 2: Matched Pairs (Adsets)
         if matched_adsets_faixa_a is not None and not matched_adsets_faixa_a.empty:
-            worksheet.write(current_row, 0, '📊 COMPARAÇÃO POR ADSETS MATCHED (Matched Pairs)', formats['title'])
+            worksheet.write(current_row, 0, ' COMPARAÇÃO POR ADSETS MATCHED (Matched Pairs)', formats['title'])
             current_row += 1
             worksheet.write(current_row, 0, 'Apenas adsets que aparecem em Eventos ML E Faixa A (R$ 200+ gasto)', formats['subtitle'])
             current_row += 2
@@ -951,7 +951,7 @@ class ValidationReportGenerator:
                 label='Adsets (Matched Pairs)'
             )
         else:
-            worksheet.write(current_row, 0, '⚠️ Nenhum adset matched encontrado (Eventos ML vs Faixa A)', formats['text'])
+            worksheet.write(current_row, 0, ' Nenhum adset matched encontrado (Eventos ML vs Faixa A)', formats['text'])
 
         # Ajustar larguras
         worksheet.set_column(0, 0, 25)
@@ -1104,14 +1104,14 @@ class ValidationReportGenerator:
         row += 1
         if ml_metrics['roas'] > faixa_a_metrics['roas']:
             diff_pct = calc_diff_pct(ml_metrics['roas'], faixa_a_metrics['roas'])
-            winner_text = f"🏆 VENCEDOR: Eventos ML (ROAS {diff_pct:.1f}% maior)"
+            winner_text = f" VENCEDOR: Eventos ML (ROAS {diff_pct:.1f}% maior)"
             worksheet.write(row, 0, winner_text, formats['header_green'])
         elif faixa_a_metrics['roas'] > ml_metrics['roas']:
             diff_pct = abs(calc_diff_pct(ml_metrics['roas'], faixa_a_metrics['roas']))
-            winner_text = f"⚠️ VENCEDOR: Faixa A (ROAS {diff_pct:.1f}% maior)"
+            winner_text = f" VENCEDOR: Faixa A (ROAS {diff_pct:.1f}% maior)"
             worksheet.write(row, 0, winner_text, formats['header_red'])
         else:
-            worksheet.write(row, 0, "➖ Empate técnico em ROAS", formats['header'])
+            worksheet.write(row, 0, " Empate técnico em ROAS", formats['header'])
 
         return row + 2
 
@@ -1225,14 +1225,14 @@ class ValidationReportGenerator:
         row += 1
         if ml_metrics['roas'] > faixa_a_metrics['roas']:
             diff_pct = calc_diff_pct(ml_metrics['roas'], faixa_a_metrics['roas'])
-            winner_text = f"🏆 VENCEDOR: Eventos ML (ROAS {diff_pct:.1f}% maior)"
+            winner_text = f" VENCEDOR: Eventos ML (ROAS {diff_pct:.1f}% maior)"
             worksheet.write(row, 0, winner_text, formats['header_green'])
         elif faixa_a_metrics['roas'] > ml_metrics['roas']:
             diff_pct = abs(calc_diff_pct(ml_metrics['roas'], faixa_a_metrics['roas']))
-            winner_text = f"⚠️ VENCEDOR: Faixa A (ROAS {diff_pct:.1f}% maior)"
+            winner_text = f" VENCEDOR: Faixa A (ROAS {diff_pct:.1f}% maior)"
             worksheet.write(row, 0, winner_text, formats['header_red'])
         else:
-            worksheet.write(row, 0, "➖ Empate técnico em ROAS", formats['header'])
+            worksheet.write(row, 0, " Empate técnico em ROAS", formats['header'])
 
         return row + 2
 
@@ -1256,7 +1256,7 @@ class ValidationReportGenerator:
         current_row = 0
 
         # Título
-        worksheet.write(current_row, 0, '📋 DETALHES POR INSTÂNCIA - ADSETS MATCHED (EVENTOS ML vs FAIXA A)', formats['title'])
+        worksheet.write(current_row, 0, ' DETALHES POR INSTÂNCIA - ADSETS MATCHED (EVENTOS ML vs FAIXA A)', formats['title'])
         current_row += 1
         worksheet.write(current_row, 0, 'Cada linha representa uma instância de adset (linha do CSV) matched entre Eventos ML e Faixa A', formats['subtitle'])
         current_row += 2
@@ -1271,7 +1271,7 @@ class ValidationReportGenerator:
 
         # EVENTOS ML
         if not eventos_ml_instances.empty:
-            worksheet.write(current_row, 0, '🎯 EVENTOS ML (Campanhas com Eventos CAPI Customizados)', formats['header_green'])
+            worksheet.write(current_row, 0, ' EVENTOS ML (Campanhas com Eventos CAPI Customizados)', formats['header_green'])
             current_row += 2
 
             # Cabeçalhos
@@ -1311,7 +1311,7 @@ class ValidationReportGenerator:
 
         # FAIXA A
         if not faixa_a_instances.empty:
-            worksheet.write(current_row, 0, '📊 FAIXA A (Sistema Legado)', formats['header'])
+            worksheet.write(current_row, 0, ' FAIXA A (Sistema Legado)', formats['header'])
             current_row += 2
 
             # Cabeçalhos
@@ -1350,7 +1350,7 @@ class ValidationReportGenerator:
             current_row += 3
 
         # Resumo comparativo
-        worksheet.write(current_row, 0, '📊 RESUMO COMPARATIVO', formats['title'])
+        worksheet.write(current_row, 0, ' RESUMO COMPARATIVO', formats['title'])
         current_row += 2
 
         if not eventos_ml_instances.empty and not faixa_a_instances.empty:
@@ -1398,12 +1398,12 @@ class ValidationReportGenerator:
             current_row += 1
             if total_ml_roas > total_faixa_roas:
                 diff = ((total_ml_roas - total_faixa_roas) / total_faixa_roas * 100) if total_faixa_roas > 0 else 0
-                worksheet.write(current_row, 0, f'🏆 VENCEDOR: Eventos ML (ROAS {diff:.1f}% maior)', formats['header_green'])
+                worksheet.write(current_row, 0, f' VENCEDOR: Eventos ML (ROAS {diff:.1f}% maior)', formats['header_green'])
             elif total_faixa_roas > total_ml_roas:
                 diff = ((total_faixa_roas - total_ml_roas) / total_ml_roas * 100) if total_ml_roas > 0 else 0
-                worksheet.write(current_row, 0, f'🏆 VENCEDOR: Faixa A (ROAS {diff:.1f}% maior)', formats['header_red'])
+                worksheet.write(current_row, 0, f' VENCEDOR: Faixa A (ROAS {diff:.1f}% maior)', formats['header_red'])
             else:
-                worksheet.write(current_row, 0, '🤝 EMPATE', formats['header'])
+                worksheet.write(current_row, 0, ' EMPATE', formats['header'])
 
         # Ajustar larguras de colunas
         worksheet.set_column(0, 0, 40)  # Nome do Adset
@@ -1613,28 +1613,28 @@ class ValidationReportGenerator:
         row += 1
         if ml_row['ROAS'] > ctrl_row['ROAS']:
             diff_pct = calc_diff_pct(ml_row['ROAS'], ctrl_row['ROAS']) * 100
-            winner_text = f"🏆 VENCEDOR: Eventos ML (ROAS nominal {diff_pct:.1f}% maior)"
+            winner_text = f" VENCEDOR: Eventos ML (ROAS nominal {diff_pct:.1f}% maior)"
             worksheet.write(row, 0, winner_text, formats['header_green'])
         elif ctrl_row['ROAS'] > ml_row['ROAS']:
             diff_pct = abs(calc_diff_pct(ml_row['ROAS'], ctrl_row['ROAS'])) * 100
-            winner_text = f"⚠️ VENCEDOR: Controle (ROAS nominal {diff_pct:.1f}% maior)"
+            winner_text = f" VENCEDOR: Controle (ROAS nominal {diff_pct:.1f}% maior)"
             worksheet.write(row, 0, winner_text, formats['header_red'])
         else:
-            worksheet.write(row, 0, "➖ Empate técnico em ROAS nominal", formats['header'])
+            worksheet.write(row, 0, " Empate técnico em ROAS nominal", formats['header'])
         row += 1
 
         # Vencedor - ROAS Ajustado TMB (se disponível)
         if 'ROAS Ajustado TMB' in ml_row and 'ROAS Ajustado TMB' in ctrl_row:
             if ml_row['ROAS Ajustado TMB'] > ctrl_row['ROAS Ajustado TMB']:
                 diff_pct = calc_diff_pct(ml_row['ROAS Ajustado TMB'], ctrl_row['ROAS Ajustado TMB']) * 100
-                winner_text = f"🏆 VENCEDOR: Eventos ML (ROAS Ajustado TMB {diff_pct:.1f}% maior)"
+                winner_text = f" VENCEDOR: Eventos ML (ROAS Ajustado TMB {diff_pct:.1f}% maior)"
                 worksheet.write(row, 0, winner_text, formats['header_green'])
             elif ctrl_row['ROAS Ajustado TMB'] > ml_row['ROAS Ajustado TMB']:
                 diff_pct = abs(calc_diff_pct(ml_row['ROAS Ajustado TMB'], ctrl_row['ROAS Ajustado TMB'])) * 100
-                winner_text = f"⚠️ VENCEDOR: Controle (ROAS Ajustado TMB {diff_pct:.1f}% maior)"
+                winner_text = f" VENCEDOR: Controle (ROAS Ajustado TMB {diff_pct:.1f}% maior)"
                 worksheet.write(row, 0, winner_text, formats['header_red'])
             else:
-                worksheet.write(row, 0, "➖ Empate técnico em ROAS Ajustado TMB", formats['header'])
+                worksheet.write(row, 0, " Empate técnico em ROAS Ajustado TMB", formats['header'])
             row += 1
 
         return row
@@ -1685,13 +1685,13 @@ class ValidationReportGenerator:
         # Vencedor
         row += 1
         if com_ml.get('roas', 0) > sem_ml.get('roas', 0):
-            winner_text = f"🏆 VENCEDOR: COM ML (ROAS {diff.get('roas_diff', 0):.1f}% maior)"
+            winner_text = f" VENCEDOR: COM ML (ROAS {diff.get('roas_diff', 0):.1f}% maior)"
             worksheet.write(row, 0, winner_text, formats['header_green'])
         elif sem_ml.get('roas', 0) > com_ml.get('roas', 0):
-            winner_text = f"⚠️ VENCEDOR: SEM ML (ROAS {abs(diff.get('roas_diff', 0)):.1f}% maior)"
+            winner_text = f" VENCEDOR: SEM ML (ROAS {abs(diff.get('roas_diff', 0)):.1f}% maior)"
             worksheet.write(row, 0, winner_text, formats['header_red'])
         else:
-            worksheet.write(row, 0, "➖ Empate técnico em ROAS", formats['header'])
+            worksheet.write(row, 0, " Empate técnico em ROAS", formats['header'])
 
         # Ajustar larguras
         worksheet.set_column(0, 0, 25)
@@ -1764,14 +1764,14 @@ class ValidationReportGenerator:
 
         if ml_roas > fc_roas:
             diff_pct = calc_diff_pct(ml_roas, fc_roas)
-            winner_text = f"🏆 VENCEDOR: Eventos ML (ROAS {diff_pct:.1f}% maior)"
+            winner_text = f" VENCEDOR: Eventos ML (ROAS {diff_pct:.1f}% maior)"
             worksheet.write(row, 0, winner_text, formats['header_green'])
         elif fc_roas > ml_roas:
             diff_pct = abs(calc_diff_pct(ml_roas, fc_roas))
-            winner_text = f"⚠️ VENCEDOR: Controle (ROAS {diff_pct:.1f}% maior)"
+            winner_text = f" VENCEDOR: Controle (ROAS {diff_pct:.1f}% maior)"
             worksheet.write(row, 0, winner_text, formats['header_red'])
         else:
-            worksheet.write(row, 0, "➖ Empate técnico em ROAS", formats['header'])
+            worksheet.write(row, 0, " Empate técnico em ROAS", formats['header'])
 
         # Ajustar larguras
         worksheet.set_column(0, 0, 25)
@@ -1789,7 +1789,7 @@ class ValidationReportGenerator:
         worksheet = writer.book.add_worksheet('Matching Stats')
 
         # Título
-        worksheet.write(0, 0, '🔗 ESTATÍSTICAS DE MATCHING (Leads ↔ Vendas)', formats['title'])
+        worksheet.write(0, 0, ' ESTATÍSTICAS DE MATCHING (Leads  Vendas)', formats['title'])
 
         # Dados
         row = 2
@@ -1832,7 +1832,7 @@ class ValidationReportGenerator:
         worksheet = writer.book.add_worksheet('Configuração')
 
         # Título
-        worksheet.write(0, 0, '⚙️ PARÂMETROS DE CONFIGURAÇÃO', formats['title'])
+        worksheet.write(0, 0, ' PARÂMETROS DE CONFIGURAÇÃO', formats['title'])
 
         # Dados
         row = 2
@@ -1860,7 +1860,7 @@ class ValidationReportGenerator:
         worksheet = writer.book.add_worksheet('Comparação por Campanhas')
 
         # Título
-        worksheet.write(0, 0, '🎯 COMPARAÇÃO POR CAMPANHAS - EVENTOS ML vs CONTROLE', formats['title'])
+        worksheet.write(0, 0, ' COMPARAÇÃO POR CAMPANHAS - EVENTOS ML vs CONTROLE', formats['title'])
         worksheet.write(1, 0, 'Lista de campanhas matched com MESMO budget e criativos', formats['subtitle'])
 
         row = 3
@@ -1971,7 +1971,7 @@ class ValidationReportGenerator:
         worksheet = writer.book.add_worksheet('Comparação por Adsets')
 
         # Título
-        worksheet.write(0, 0, '📊 COMPARAÇÃO POR ADSETS - MATCHED', formats['title'])
+        worksheet.write(0, 0, ' COMPARAÇÃO POR ADSETS - MATCHED', formats['title'])
         worksheet.write(1, 0, 'Adsets com mesmo targeting e criativos', formats['subtitle'])
 
         row = 3
@@ -2071,7 +2071,7 @@ class ValidationReportGenerator:
         worksheet = writer.book.add_worksheet('Comparação por Ads')
 
         # Título
-        worksheet.write(0, 0, '📊 COMPARAÇÃO POR ADS - MATCHED', formats['title'])
+        worksheet.write(0, 0, ' COMPARAÇÃO POR ADS - MATCHED', formats['title'])
         worksheet.write(1, 0, 'Anúncios (criativos) com mesmo ad_code', formats['subtitle'])
 
         row = 3
@@ -2168,7 +2168,7 @@ class ValidationReportGenerator:
         worksheet = writer.book.add_worksheet(sheet_name)
 
         # Título
-        worksheet.write(0, 0, '📊 COMPARAÇÃO AGREGADA - ADSETS MATCHED', formats['title'])
+        worksheet.write(0, 0, ' COMPARAÇÃO AGREGADA - ADSETS MATCHED', formats['title'])
         worksheet.write(1, 0, 'Apenas adsets que aparecem em ML E controle (R$ 200+ gasto)', formats['subtitle'])
 
         # Cabeçalhos
@@ -2212,7 +2212,7 @@ class ValidationReportGenerator:
         worksheet = writer.book.add_worksheet(sheet_name)
 
         # Título
-        worksheet.write(0, 0, '🔬 COMPARAÇÃO DETALHADA - ADSETS', formats['title'])
+        worksheet.write(0, 0, ' COMPARAÇÃO DETALHADA - ADSETS', formats['title'])
         worksheet.write(1, 0, 'Comparação lado-a-lado (ML vs Controle)', formats['subtitle'])
 
         # Cabeçalhos
@@ -2256,7 +2256,7 @@ class ValidationReportGenerator:
         worksheet = writer.book.add_worksheet(sheet_name)
 
         # Título
-        worksheet.write(0, 0, '📊 COMPARAÇÃO AGREGADA - ANÚNCIOS MATCHED', formats['title'])
+        worksheet.write(0, 0, ' COMPARAÇÃO AGREGADA - ANÚNCIOS MATCHED', formats['title'])
         worksheet.write(1, 0, 'Apenas anúncios que aparecem em ML E controle', formats['subtitle'])
 
         # Cabeçalhos
@@ -2300,7 +2300,7 @@ class ValidationReportGenerator:
         worksheet = writer.book.add_worksheet(sheet_name)
 
         # Título
-        worksheet.write(0, 0, '🔬 COMPARAÇÃO DETALHADA - TOP 20 ANÚNCIOS', formats['title'])
+        worksheet.write(0, 0, ' COMPARAÇÃO DETALHADA - TOP 20 ANÚNCIOS', formats['title'])
         worksheet.write(1, 0, 'Ordenado por ROAS (ML)', formats['subtitle'])
 
         # Cabeçalhos
@@ -2344,7 +2344,7 @@ class ValidationReportGenerator:
         worksheet = writer.book.add_worksheet(sheet_name)
 
         # Título
-        worksheet.write(0, 0, '📋 RESUMO COMPLETO - TODOS OS ANÚNCIOS', formats['title'])
+        worksheet.write(0, 0, ' RESUMO COMPLETO - TODOS OS ANÚNCIOS', formats['title'])
         worksheet.write(1, 0, 'Incluindo anúncios matched e exclusivos do ML', formats['subtitle'])
 
         # Cabeçalhos

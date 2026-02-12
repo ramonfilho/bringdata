@@ -61,7 +61,7 @@ from api.meta_config import META_CONFIG
 try:
     from tabulate import tabulate
 except ImportError:
-    print("⚠️ Biblioteca 'tabulate' não encontrada. Instale com: pip install tabulate")
+    print(" Biblioteca 'tabulate' não encontrada. Instale com: pip install tabulate")
     sys.exit(1)
 
 # Configurar logging
@@ -93,8 +93,8 @@ def validate_tmb_sales_freshness(sales_df, sales_start, sales_end):
     Valida se as vendas TMB estão atualizadas para o período de análise.
 
     Regras:
-    1. Se não houver NENHUMA venda TMB no período → ERRO CRÍTICO (para execução)
-    2. Se houver vendas TMB mas a mais recente é ANTES do fim do período → WARNING (continua com aviso)
+    1. Se não houver NENHUMA venda TMB no período  ERRO CRÍTICO (para execução)
+    2. Se houver vendas TMB mas a mais recente é ANTES do fim do período  WARNING (continua com aviso)
 
     Args:
         sales_df: DataFrame com todas as vendas (Guru + TMB) já filtradas por período
@@ -108,10 +108,10 @@ def validate_tmb_sales_freshness(sales_df, sales_start, sales_end):
     tmb_sales = sales_df[sales_df['origem'] == 'tmb'] if 'origem' in sales_df.columns else pd.DataFrame()
 
     if tmb_sales.empty:
-        logger.error("❌ ERRO CRÍTICO: Nenhuma venda TMB encontrada no período!")
+        logger.error(" ERRO CRÍTICO: Nenhuma venda TMB encontrada no período!")
         logger.error(f"   Período analisado: {sales_start} a {sales_end}")
         logger.error("   ")
-        logger.error("   ⚠️  AÇÃO NECESSÁRIA:")
+        logger.error("     AÇÃO NECESSÁRIA:")
         logger.error("   1. Baixar arquivo TMB atualizado")
         logger.error("   2. Colocar arquivo na pasta do período: files/validation/{periodo}/tmb.xlsx")
         logger.error("   3. Fazer novo deploy do job ou rodar localmente")
@@ -126,7 +126,7 @@ def validate_tmb_sales_freshness(sales_df, sales_start, sales_end):
     tmb_latest_date = tmb_sales['sale_date'].max()
     sales_end_dt = pd.to_datetime(sales_end)
 
-    logger.info(f"📊 Vendas TMB no período: {len(tmb_sales)}")
+    logger.info(f" Vendas TMB no período: {len(tmb_sales)}")
     logger.info(f"   Data mais recente TMB: {tmb_latest_date.strftime('%Y-%m-%d')}")
     logger.info(f"   Fim do período esperado: {sales_end}")
 
@@ -134,12 +134,12 @@ def validate_tmb_sales_freshness(sales_df, sales_start, sales_end):
     if tmb_latest_date < sales_end_dt:
         days_missing = (sales_end_dt - tmb_latest_date).days
 
-        logger.warning("⚠️  AVISO: Vendas TMB podem estar DESATUALIZADAS!")
+        logger.warning("  AVISO: Vendas TMB podem estar DESATUALIZADAS!")
         logger.warning(f"   Última venda TMB: {tmb_latest_date.strftime('%Y-%m-%d')}")
         logger.warning(f"   Fim do período: {sales_end}")
         logger.warning(f"   Diferença: {days_missing} dias")
         logger.warning("   ")
-        logger.warning(f"   ℹ️  O relatório será gerado com vendas TMB até {tmb_latest_date.strftime('%d/%m/%Y')}")
+        logger.warning(f"   ℹ  O relatório será gerado com vendas TMB até {tmb_latest_date.strftime('%d/%m/%Y')}")
         logger.warning("   ")
 
         return {
@@ -151,7 +151,7 @@ def validate_tmb_sales_freshness(sales_df, sales_start, sales_end):
         }
 
     # Vendas TMB estão atualizadas
-    logger.info("✅ Vendas TMB atualizadas até o fim do período")
+    logger.info(" Vendas TMB atualizadas até o fim do período")
 
     return {
         'status': 'ok',
@@ -165,7 +165,7 @@ def get_periodo_folder_from_dates(start_date: str, end_date: str) -> str:
     Deriva o nome da pasta do período a partir das datas.
 
     Formato: DD:MM - DD:MM
-    Exemplo: 2025-12-16 a 2026-01-12 → "16:12 - 12:01"
+    Exemplo: 2025-12-16 a 2026-01-12  "16:12 - 12:01"
 
     Args:
         start_date: Data início no formato YYYY-MM-DD
@@ -357,6 +357,15 @@ Exemplos de uso:
         help='Nível de comparação: adsets_iguais (apenas ADV estrutura idêntica), todos (todas campanhas ML), both (gera ambos) - default: both'
     )
 
+    # Método de Matching
+    parser.add_argument(
+        '--matching-method',
+        type=str,
+        choices=['default', 'unified_last6'],
+        default='default',
+        help='Método de matching leads-vendas: default (email+telefone completo) ou unified_last6 (email+telefone+últimos 6 dígitos) - default: default'
+    )
+
     args = parser.parse_args()
 
     # Validações
@@ -382,7 +391,7 @@ def load_config(config_path: str) -> dict:
         Dicionário com configurações
     """
     if not Path(config_path).exists():
-        logger.error(f"❌ Arquivo de configuração não encontrado: {config_path}")
+        logger.error(f" Arquivo de configuração não encontrado: {config_path}")
         sys.exit(1)
 
     with open(config_path, 'r', encoding='utf-8') as f:
@@ -423,12 +432,12 @@ def print_summary_table(ml_comparison: dict):
     print(flush=True)
     if com_ml.get('roas_adjusted', 0) > sem_ml.get('roas_adjusted', 0):
         improvement = diff.get('roas_adjusted_diff', 0)
-        print(f"🏆 VENCEDOR: COM ML (ROAS Ajustado TMB {improvement:.1f}% maior)", flush=True)
+        print(f" VENCEDOR: COM ML (ROAS Ajustado TMB {improvement:.1f}% maior)", flush=True)
     elif sem_ml.get('roas_adjusted', 0) > com_ml.get('roas_adjusted', 0):
         decline = abs(diff.get('roas_adjusted_diff', 0))
-        print(f"⚠️ VENCEDOR: SEM ML (ROAS Ajustado TMB {decline:.1f}% maior)", flush=True)
+        print(f" VENCEDOR: SEM ML (ROAS Ajustado TMB {decline:.1f}% maior)", flush=True)
     else:
-        print("➖ Empate técnico em ROAS Ajustado TMB", flush=True)
+        print(" Empate técnico em ROAS Ajustado TMB", flush=True)
 
 
 def print_decile_table(decile_metrics):
@@ -439,7 +448,7 @@ def print_decile_table(decile_metrics):
         decile_metrics: DataFrame retornado por DecileMetricsCalculator
     """
     if decile_metrics.empty:
-        print("⚠️ Nenhuma métrica de decil disponível", flush=True)
+        print(" Nenhuma métrica de decil disponível", flush=True)
         return
 
     # Formatar dados para exibição
@@ -473,9 +482,9 @@ def print_decile_table(decile_metrics):
     total_guru = decile_metrics['revenue_guru'].sum()
     total_tmb_only = decile_metrics['revenue_total'].sum() - total_guru
     print(flush=True)
-    print(f"💰 Receita Total Guru: R$ {total_guru:,.2f}", flush=True)
-    print(f"💰 Receita Total TMB: R$ {total_tmb_only:,.2f}", flush=True)
-    print(f"💰 Receita Total (Guru+TMB): R$ {decile_metrics['revenue_total'].sum():,.2f}", flush=True)
+    print(f" Receita Total Guru: R$ {total_guru:,.2f}", flush=True)
+    print(f" Receita Total TMB: R$ {total_tmb_only:,.2f}", flush=True)
+    print(f" Receita Total (Guru+TMB): R$ {decile_metrics['revenue_total'].sum():,.2f}", flush=True)
 
 
 def enrich_campaign_ids(leads_df: pd.DataFrame, account_ids: list, access_token: str) -> pd.DataFrame:
@@ -493,7 +502,7 @@ def enrich_campaign_ids(leads_df: pd.DataFrame, account_ids: list, access_token:
     Returns:
         DataFrame com nomes de campanha enriquecidos
     """
-    logger.info("   🔍 Procurando IDs de campanha/adset sem nomes...")
+    logger.info("    Procurando IDs de campanha/adset sem nomes...")
 
     # Identificar linhas com apenas ID numérico
     def is_numeric_id(value):
@@ -506,15 +515,15 @@ def enrich_campaign_ids(leads_df: pd.DataFrame, account_ids: list, access_token:
     ids_to_enrich = leads_df.loc[mask, 'campaign'].unique()
 
     if len(ids_to_enrich) == 0:
-        logger.info("   ✅ Nenhum ID sem nome encontrado")
+        logger.info("    Nenhum ID sem nome encontrado")
         return leads_df
 
-    logger.info(f"   📋 Encontrados {len(ids_to_enrich)} IDs únicos para enriquecer ({mask.sum()} respostas)")
+    logger.info(f"    Encontrados {len(ids_to_enrich)} IDs únicos para enriquecer ({mask.sum()} respostas)")
 
     # Inicializar Meta API
     meta_api = MetaAdsIntegration(access_token=access_token)
 
-    # Mapa ID → Nome
+    # Mapa ID  Nome
     id_to_name = {}
 
     for campaign_id in ids_to_enrich:
@@ -540,13 +549,13 @@ def enrich_campaign_ids(leads_df: pd.DataFrame, account_ids: list, access_token:
                 data = response.json()
                 name = data.get('name', campaign_id_str)
                 id_to_name[campaign_id] = name
-                logger.info(f"      ✅ {campaign_id_str[:15]}... → {name[:60]}...")
+                logger.info(f"       {campaign_id_str[:15]}...  {name[:60]}...")
             else:
-                logger.info(f"      ⚠️ ID {campaign_id_str}: status {response.status_code} (pode ser adset ou campanha de outra conta)")
+                logger.info(f"       ID {campaign_id_str}: status {response.status_code} (pode ser adset ou campanha de outra conta)")
                 id_to_name[campaign_id] = campaign_id_str
 
         except Exception as e:
-            logger.info(f"      ⚠️ Erro ao buscar {campaign_id_str}: {e}")
+            logger.info(f"       Erro ao buscar {campaign_id_str}: {e}")
             id_to_name[campaign_id] = campaign_id_str
 
     # Atualizar DataFrame
@@ -561,7 +570,7 @@ def enrich_campaign_ids(leads_df: pd.DataFrame, account_ids: list, access_token:
             leads_df.loc[leads_df['campaign'] == old_id, 'campaign'] = new_name
             enriched_count += 1
 
-    logger.info(f"   ✅ {enriched_count}/{len(ids_to_enrich)} IDs enriquecidos com sucesso")
+    logger.info(f"    {enriched_count}/{len(ids_to_enrich)} IDs enriquecidos com sucesso")
 
     return leads_df
 
@@ -572,7 +581,7 @@ def main():
     """
     start_time = time.time()
 
-    print("🚀 SISTEMA DE VALIDAÇÃO DE PERFORMANCE ML - LEAD SCORING", flush=True)
+    print(" SISTEMA DE VALIDAÇÃO DE PERFORMANCE ML - LEAD SCORING", flush=True)
     print(flush=True)
 
     # 1. Parse argumentos
@@ -606,7 +615,7 @@ def main():
         args.sales_start_date = vendas_inicio.strftime('%Y-%m-%d')
         args.sales_end_date = vendas_fim.strftime('%Y-%m-%d')
 
-        logger.info(f"📅 Datas calculadas automaticamente ({args.report_type}):")
+        logger.info(f" Datas calculadas automaticamente ({args.report_type}):")
         logger.info(f"   Captação: {args.start_date} a {args.end_date}")
         logger.info(f"   Vendas: {args.sales_start_date} a {args.sales_end_date}")
 
@@ -619,14 +628,14 @@ def main():
         if cache_dir.exists():
             shutil.rmtree(cache_dir)
             cache_dir.mkdir(parents=True, exist_ok=True)
-            print("🗑️  Cache limpo com sucesso!", flush=True)
+            print("  Cache limpo com sucesso!", flush=True)
             print(flush=True)
         else:
-            print("⚠️  Nenhum cache encontrado para limpar", flush=True)
+            print("  Nenhum cache encontrado para limpar", flush=True)
             print(flush=True)
 
     # 2. Carregar configuração
-    logger.info(f"⚙️ Carregando configuração de {args.config}...")
+    logger.info(f" Carregando configuração de {args.config}...")
     config = load_config(args.config)
 
     # Sobrescrever com argumentos CLI
@@ -647,15 +656,15 @@ def main():
                 id.replace('act_', '') if isinstance(id, str) and id.startswith('act_') else str(id)
                 for id in config_ids
             ]
-            logger.info(f"   📊 Usando account IDs do config: {', '.join(args.account_id)}")
+            logger.info(f"    Usando account IDs do config: {', '.join(args.account_id)}")
         else:
-            logger.error("❌ Nenhum account ID fornecido via CLI ou config")
+            logger.error(" Nenhum account ID fornecido via CLI ou config")
             sys.exit(1)
 
     # Determinar período
     if args.periodo:
         if args.periodo not in config.get('periodos', {}):
-            logger.error(f"❌ Período '{args.periodo}' não encontrado no config")
+            logger.error(f" Período '{args.periodo}' não encontrado no config")
             sys.exit(1)
         period_config = config['periodos'][args.periodo]
         start_date = period_config['start_date']
@@ -666,7 +675,7 @@ def main():
         # Usar sales dates do config se não foram especificados via CLI
         if not args.sales_start_date and 'sales_start_date' in period_config:
             args.sales_start_date = period_config['sales_start_date']
-            logger.info(f"   📅 Período de vendas do config: {args.sales_start_date} a {period_config.get('sales_end_date')}")
+            logger.info(f"    Período de vendas do config: {args.sales_start_date} a {period_config.get('sales_end_date')}")
         if not args.sales_end_date and 'sales_end_date' in period_config:
             args.sales_end_date = period_config['sales_end_date']
     else:
@@ -678,10 +687,10 @@ def main():
     # Derivar pasta do período automaticamente se não fornecida
     if args.periodo_folder:
         periodo_folder = args.periodo_folder
-        logger.info(f"   📁 Pasta do período (manual): {periodo_folder}")
+        logger.info(f"    Pasta do período (manual): {periodo_folder}")
     else:
         periodo_folder = get_periodo_folder_from_dates(start_date, end_date)
-        logger.info(f"   📁 Pasta do período (derivada): {periodo_folder}")
+        logger.info(f"    Pasta do período (derivada): {periodo_folder}")
 
     # Determinar caminhos baseados na pasta do período
     periodo_base_path = f'files/validation/{periodo_folder}'
@@ -711,17 +720,17 @@ def main():
     print(flush=True)
 
     # 3. Carregar dados
-    print("📂 CARREGANDO DADOS...", flush=True)
+    print(" CARREGANDO DADOS...", flush=True)
     print(flush=True)
 
     # Leads - PADRÃO: Google Sheets (produção), FALLBACK: CSV se --leads-path fornecido
     if args.leads_path:
         # Modo CSV (legacy)
-        logger.info(f"   📄 Usando CSV: {args.leads_path}")
+        logger.info(f"    Usando CSV: {args.leads_path}")
         capi_loader = CAPILeadDataLoader()
 
         if not Path(args.leads_path).exists():
-            logger.error(f"❌ Arquivo de leads não encontrado: {args.leads_path}")
+            logger.error(f" Arquivo de leads não encontrado: {args.leads_path}")
             sys.exit(1)
 
         leads_df, lead_source_stats = capi_loader.load_combined_leads(
@@ -729,18 +738,18 @@ def main():
             start_date=start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d'),
             end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d')
         )
-        logger.info(f"   ✅ {len(leads_df)} leads carregados do CSV")
-        logger.info(f"   📊 Estatísticas: {lead_source_stats['survey_leads']} pesquisa + {lead_source_stats['capi_leads_extras']} CAPI extras")
+        logger.info(f"    {len(leads_df)} leads carregados do CSV")
+        logger.info(f"    Estatísticas: {lead_source_stats['survey_leads']} pesquisa + {lead_source_stats['capi_leads_extras']} CAPI extras")
     else:
         # Modo Google Sheets (PADRÃO - dados de produção em tempo real)
-        logger.info(f"   📊 Usando Google Sheets (produção)")
+        logger.info(f"    Usando Google Sheets (produção)")
 
         # Limpar cache se solicitado
         if args.clear_cache:
             cache_file = Path.home() / '.cache' / 'smart_ads' / 'sheets_leads_cache.csv'
             if cache_file.exists():
                 cache_file.unlink()
-                logger.info(f"   🗑️  Cache limpo: {cache_file}")
+                logger.info(f"     Cache limpo: {cache_file}")
 
         lead_loader = LeadDataLoader()
         use_cache = not args.no_cache
@@ -751,10 +760,10 @@ def main():
             end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d'),
             use_cache=use_cache
         )
-        logger.info(f"   ✅ {len(survey_df)} leads da pesquisa carregados do Google Sheets")
+        logger.info(f"    {len(survey_df)} leads da pesquisa carregados do Google Sheets")
 
         survey_emails = set(survey_df['email'].unique())
-        logger.info(f"   📧 {len(survey_emails)} emails únicos na pesquisa")
+        logger.info(f"    {len(survey_emails)} emails únicos na pesquisa")
 
         # Buscar e combinar com leads CAPI extras (mesma lógica do modo CSV)
         # WORKAROUND: usar curl (requests estava travando)
@@ -762,7 +771,7 @@ def main():
         import json as json_module
         import re
 
-        logger.info("   🔍 Buscando leads no CAPI...")
+        logger.info("    Buscando leads no CAPI...")
 
         try:
             # Usar localhost se rodando dentro do container (chamado via endpoint /validation/weekly)
@@ -773,7 +782,7 @@ def main():
             end_str = end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d')
 
             url = f"{API_URL}/webhook/lead_capture/recent?start_date={start_str}&end_date={end_str}&limit=10000"
-            logger.info(f"   📡 URL CAPI: {url}")
+            logger.info(f"    URL CAPI: {url}")
 
             result_curl = subprocess.run(
                 ['curl', '-s', '--max-time', '30', url],
@@ -787,7 +796,7 @@ def main():
                 result = json_module.loads(result_curl.stdout)
                 capi_leads_data = result.get('leads', [])
 
-                logger.info(f"   📊 CAPI: {len(capi_leads_data)} leads encontrados")
+                logger.info(f"    CAPI: {len(capi_leads_data)} leads encontrados")
 
                 if capi_leads_data:
                     # Converter para DataFrame
@@ -828,22 +837,22 @@ def main():
 
                     removidos = total_antes - len(capi_norm)
                     if removidos > 0:
-                        logger.info(f"   🔍 Filtrado: {removidos} sem campaign_id Meta ({len(capi_norm)} restaram)")
+                        logger.info(f"    Filtrado: {removidos} sem campaign_id Meta ({len(capi_norm)} restaram)")
 
                     # Leads CAPI que NÃO estão na pesquisa
                     capi_emails = set(capi_norm['email'].unique())
                     capi_extras = capi_emails - survey_emails
                     capi_extra_leads = capi_norm[capi_norm['email'].isin(capi_extras)].copy()
 
-                    logger.info(f"   ➕ Leads extras do CAPI: {len(capi_extra_leads)} (não estão na pesquisa)")
+                    logger.info(f"    Leads extras do CAPI: {len(capi_extra_leads)} (não estão na pesquisa)")
 
                     # Combinar
                     if len(capi_extra_leads) > 0:
                         leads_df = pd.concat([survey_df, capi_extra_leads], ignore_index=True)
-                        logger.info(f"   ✅ Total combinado: {len(leads_df)} ({len(survey_df)} pesquisa + {len(capi_extra_leads)} CAPI)")
+                        logger.info(f"    Total combinado: {len(leads_df)} ({len(survey_df)} pesquisa + {len(capi_extra_leads)} CAPI)")
                     else:
                         leads_df = survey_df
-                        logger.info(f"   ✅ Total: {len(leads_df)} (apenas pesquisa)")
+                        logger.info(f"    Total: {len(leads_df)} (apenas pesquisa)")
 
                     # Estatísticas
                     lead_source_stats = {
@@ -852,7 +861,7 @@ def main():
                         'capi_leads_total': len(capi_norm['email'].unique())
                     }
                 else:
-                    logger.info("   ⚠️ Nenhum lead CAPI encontrado")
+                    logger.info("    Nenhum lead CAPI encontrado")
                     leads_df = survey_df
                     lead_source_stats = {
                         'survey_leads': len(survey_df),
@@ -860,7 +869,7 @@ def main():
                         'capi_leads_total': 0
                     }
             else:
-                logger.warning(f"   ⚠️ Curl para API CAPI falhou")
+                logger.warning(f"    Curl para API CAPI falhou")
                 leads_df = survey_df
                 lead_source_stats = {
                     'survey_leads': len(survey_df),
@@ -869,7 +878,7 @@ def main():
                 }
 
         except Exception as e:
-            logger.warning(f"   ⚠️ Erro ao buscar CAPI: {e}")
+            logger.warning(f"    Erro ao buscar CAPI: {e}")
             leads_df = survey_df
             lead_source_stats = {
                 'survey_leads': len(survey_df),
@@ -877,7 +886,7 @@ def main():
                 'capi_leads_total': 0
             }
 
-        logger.info(f"   📊 Estatísticas: {lead_source_stats['survey_leads']} pesquisa + {lead_source_stats['capi_leads_extras']} CAPI extras")
+        logger.info(f"    Estatísticas: {lead_source_stats['survey_leads']} pesquisa + {lead_source_stats['capi_leads_extras']} CAPI extras")
 
     # Vendas
     sales_loader = SalesDataLoader()
@@ -886,14 +895,14 @@ def main():
     # Pode ser controlada via variável de ambiente GURU_DATA_SOURCE
     # PADRÃO: API (produção)
     guru_data_source = os.environ.get('GURU_DATA_SOURCE', 'api').lower()
-    logger.info(f"📊 Fonte de dados Guru: {guru_data_source.upper()}")
+    logger.info(f" Fonte de dados Guru: {guru_data_source.upper()}")
 
     # Determinar se deve incluir vendas canceladas baseado no tipo de relatório
     include_canceled = (args.report_type == 'fechamento')
     if include_canceled:
-        logger.info(f"   📋 Modo FECHAMENTO: incluindo vendas Aprovadas + Canceladas")
+        logger.info(f"    Modo FECHAMENTO: incluindo vendas Aprovadas + Canceladas")
     else:
-        logger.info(f"   📋 Modo PÓS-DEVOLUÇÕES: incluindo apenas vendas Aprovadas")
+        logger.info(f"    Modo PÓS-DEVOLUÇÕES: incluindo apenas vendas Aprovadas")
 
     # Carregar vendas Guru (via API ou arquivos locais)
     if guru_data_source == 'api':
@@ -908,7 +917,7 @@ def main():
             api_sales_start = calculated_periods['sales']['start']
             api_sales_end = calculated_periods['sales']['end']
 
-        logger.info(f"   🌐 Buscando via API: {api_sales_start} a {api_sales_end}")
+        logger.info(f"    Buscando via API: {api_sales_start} a {api_sales_end}")
 
         # Buscar via API (sem salvar Excel duplicado)
         guru_df = sales_loader.load_guru_sales_from_api(
@@ -949,10 +958,10 @@ def main():
     )
 
     if sales_df.empty:
-        logger.error("❌ Nenhuma venda carregada. Verifique os arquivos de vendas.")
+        logger.error(" Nenhuma venda carregada. Verifique os arquivos de vendas.")
         sys.exit(1)
 
-    logger.info(f"   ✅ {len(sales_df)} vendas carregadas (Guru + TMB)")
+    logger.info(f"    {len(sales_df)} vendas carregadas (Guru + TMB)")
     print(flush=True)
 
     # 4. Filtrar por período
@@ -961,17 +970,17 @@ def main():
     if args.sales_start_date and args.sales_end_date:
         sales_start = args.sales_start_date
         sales_end = args.sales_end_date
-        logger.info(f"   📅 Usando período de vendas customizado: {sales_start} a {sales_end}")
+        logger.info(f"    Usando período de vendas customizado: {sales_start} a {sales_end}")
     else:
         # Usar PeriodCalculator para calcular o período de vendas correto
         period_calc = PeriodCalculator()
         calculated_periods = period_calc.calculate_periods(start_date)
         sales_start = calculated_periods['sales']['start']
         sales_end = calculated_periods['sales']['end']
-        logger.info(f"   📅 Período de vendas calculado automaticamente: {sales_start} a {sales_end}")
+        logger.info(f"    Período de vendas calculado automaticamente: {sales_start} a {sales_end}")
 
     print(flush=True)
-    print(f"📅 FILTRANDO DADOS...", flush=True)
+    print(f" FILTRANDO DADOS...", flush=True)
     print(f"   Período de Captação (Leads/Campanhas): {start_date} a {end_date}", flush=True)
     print(f"   Período de Vendas (Matching): {sales_start} a {sales_end}", flush=True)
     print(flush=True)
@@ -989,23 +998,23 @@ def main():
     sales_guru_after = len(sales_df[sales_df['origem'] == 'guru']) if 'origem' in sales_df.columns else 0
     sales_tmb_after = len(sales_df[sales_df['origem'] == 'tmb']) if 'origem' in sales_df.columns else 0
 
-    logger.info(f"📊 Vendas após filtro de período:")
-    logger.info(f"   Total: {sales_before} → {sales_after} vendas ({sales_after/sales_before*100:.1f}%)")
-    logger.info(f"   Guru: {sales_guru_before} → {sales_guru_after} vendas")
-    logger.info(f"   TMB: {sales_tmb_before} → {sales_tmb_after} vendas")
+    logger.info(f" Vendas após filtro de período:")
+    logger.info(f"   Total: {sales_before}  {sales_after} vendas ({sales_after/sales_before*100:.1f}%)")
+    logger.info(f"   Guru: {sales_guru_before}  {sales_guru_after} vendas")
+    logger.info(f"   TMB: {sales_tmb_before}  {sales_tmb_after} vendas")
 
     # =========================================================================
     # VALIDAÇÃO: Verificar se vendas TMB estão atualizadas
     # =========================================================================
     print(flush=True)
-    print("🔍 VALIDANDO ATUALIZAÇÃO DAS VENDAS TMB...", flush=True)
+    print(" VALIDANDO ATUALIZAÇÃO DAS VENDAS TMB...", flush=True)
     print(flush=True)
 
     tmb_validation = validate_tmb_sales_freshness(sales_df, sales_start, sales_end)
 
     if tmb_validation['stop_execution']:
         # ERRO CRÍTICO: Sem vendas TMB no período
-        logger.error("❌ Execução interrompida devido a vendas TMB faltantes")
+        logger.error(" Execução interrompida devido a vendas TMB faltantes")
 
         # Enviar notificação Slack de erro
         slack_webhook = os.getenv('SLACK_WEBHOOK_URL')
@@ -1014,7 +1023,7 @@ def main():
                 import requests
 
                 error_message = (
-                    f"❌ *ERRO CRÍTICO: Validação ML Interrompida*\n\n"
+                    f" *ERRO CRÍTICO: Validação ML Interrompida*\n\n"
                     f"*Motivo:* Nenhuma venda TMB encontrada no período\n"
                     f"*Período analisado:* {sales_start} a {sales_end}\n\n"
                     f"*Ação necessária:*\n"
@@ -1024,11 +1033,11 @@ def main():
 
                 response = requests.post(slack_webhook, json={"text": error_message})
                 if response.status_code == 200:
-                    logger.info("   📱 Notificação de erro enviada para Slack")
+                    logger.info("    Notificação de erro enviada para Slack")
                 else:
-                    logger.warning(f"   ⚠️  Falha ao enviar Slack (status {response.status_code})")
+                    logger.warning(f"     Falha ao enviar Slack (status {response.status_code})")
             except Exception as e:
-                logger.warning(f"   ⚠️  Erro ao enviar notificação Slack: {e}")
+                logger.warning(f"     Erro ao enviar notificação Slack: {e}")
 
         sys.exit(1)
 
@@ -1041,36 +1050,41 @@ def main():
     # =========================================================================
 
     if leads_df.empty:
-        logger.error("❌ Nenhum lead no período especificado")
+        logger.error(" Nenhum lead no período especificado")
         sys.exit(1)
 
     # 4.5. Enriquecer IDs de campanha/adset com nomes reais
     # DESABILITADO: Usando MetaReportsLoader ao invés de API
-    # print("🔗 ENRIQUECENDO NOMES DE CAMPANHA...", flush=True)
+    # print(" ENRIQUECENDO NOMES DE CAMPANHA...", flush=True)
     # print(flush=True)
     # leads_df = enrich_campaign_ids(leads_df, args.account_id, META_CONFIG['access_token'])
 
     # 5. Classificar campanhas
-    print("🏷️ CLASSIFICANDO CAMPANHAS...", flush=True)
+    print(" CLASSIFICANDO CAMPANHAS...", flush=True)
     print(flush=True)
     leads_df, excluded_count = add_ml_classification(leads_df, campaign_col='campaign')
 
     com_ml_count = len(leads_df[leads_df['ml_type'] == 'COM_ML'])
     sem_ml_count = len(leads_df[leads_df['ml_type'] == 'SEM_ML'])
-    logger.info(f"   ✅ COM ML: {com_ml_count} leads ({com_ml_count/len(leads_df)*100:.1f}%)")
-    logger.info(f"   ✅ SEM ML: {sem_ml_count} leads ({sem_ml_count/len(leads_df)*100:.1f}%)")
+    logger.info(f"    COM ML: {com_ml_count} leads ({com_ml_count/len(leads_df)*100:.1f}%)")
+    logger.info(f"    SEM ML: {sem_ml_count} leads ({sem_ml_count/len(leads_df)*100:.1f}%)")
     print(flush=True)
 
     # 5.5. Carregar relatórios Meta para criar grupos de comparação refinados
-    print("💰 CARREGANDO RELATÓRIOS META PARA CLASSIFICAÇÃO...", flush=True)
+    print(" CARREGANDO RELATÓRIOS META PARA CLASSIFICAÇÃO...", flush=True)
     print(flush=True)
 
     # Carregar relatórios Meta locais ou via API
     # IMPORTANTE: Usar pasta específica com relatórios oficiais do período (não adsets_analysis)
     # Configuração de fonte de dados: "local" (arquivos) ou "api" (Meta Marketing API)
-    # Pode ser controlada via variável de ambiente META_DATA_SOURCE
-    data_source = os.environ.get('META_DATA_SOURCE', 'local').lower()
-    print(f"📊 Fonte de dados Meta: {data_source.upper()}", flush=True)
+    # PRIORIDADE: Se --account-id foi passado, FORÇA uso da API (ignora arquivos locais)
+    if args.account_id:
+        data_source = 'api'
+        logger.info("    --account-id fornecido: FORÇANDO uso da Meta API")
+    else:
+        # Pode ser controlada via variável de ambiente META_DATA_SOURCE
+        data_source = os.environ.get('META_DATA_SOURCE', 'local').lower()
+    print(f" Fonte de dados Meta: {data_source.upper()}", flush=True)
 
     # DEBUG: Verificar args.account_id
 
@@ -1084,7 +1098,7 @@ def main():
     campaigns_df = reports.get('campaigns', pd.DataFrame())
 
     # 5.6. Criar grupos de comparação REFINADOS (distingue Eventos ML vs Otimização ML)
-    print("🎯 CRIANDO GRUPOS DE COMPARAÇÃO...", flush=True)
+    print(" CRIANDO GRUPOS DE COMPARAÇÃO...", flush=True)
     print(flush=True)
 
     comparison_group_map_15 = {}  # Mapa com IDs de 15 dígitos
@@ -1106,7 +1120,7 @@ def main():
         control_campaigns = campaigns_df_filtered[campaigns_df_filtered['ml_classification'] == 'SEM_ML']
         control_campaign_ids = control_campaigns['campaign_id'].unique().tolist()
 
-        logger.info(f"   📊 Classificação de campanhas:")
+        logger.info(f"    Classificação de campanhas:")
         logger.info(f"      COM_ML: {len(ml_campaign_ids)} campanhas")
         logger.info(f"      SEM_ML (Controle): {len(control_campaign_ids)} campanhas")
         logger.info(f"      EXCLUÍDAS: {len(campaigns_df) - len(campaigns_df_filtered)} campanhas")
@@ -1159,40 +1173,53 @@ def main():
             leads_df['comparison_group'] = leads_df.apply(map_to_refined_group, axis=1)
 
             group_counts = leads_df['comparison_group'].value_counts()
-            logger.info(f"   ✅ Grupos refinados criados:")
+            logger.info(f"    Grupos refinados criados:")
             for group, count in group_counts.items():
                 logger.info(f"      {group}: {count} leads")
         else:
             # Fallback: usar mapeamento simples
-            logger.warning("   ⚠️ Não foi possível criar mapeamento refinado, usando simples")
+            logger.warning("    Não foi possível criar mapeamento refinado, usando simples")
             leads_df['comparison_group'] = leads_df['ml_type'].map({
                 'COM_ML': 'Eventos ML',
                 'SEM_ML': 'Controle'
             }).fillna('Outro')
     else:
-        logger.warning("   ⚠️ Coluna ml_type não encontrada, pulando criação de grupos")
+        logger.warning("    Coluna ml_type não encontrada, pulando criação de grupos")
 
     print(flush=True)
 
     # 6. Matching
-    print("🔗 VINCULANDO LEADS COM VENDAS...", flush=True)
+    print(" VINCULANDO LEADS COM VENDAS...", flush=True)
     print(flush=True)
-    matched_df = match_leads_to_sales(
-        leads_df,
-        sales_df,
-        use_temporal_validation=False  # Results analysis mode - match against full history
-    )
+
+    # Usar método de matching selecionado
+    if args.matching_method == 'unified_last6':
+        logger.info("    Usando método: EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS")
+        from src.matching.matching_unified import match_leads_to_sales_unified
+        matched_df = match_leads_to_sales_unified(
+            leads_df,
+            sales_df,
+            mode='validation',
+            use_temporal_validation=False  # Results analysis mode - match against full history
+        )
+    else:
+        logger.info("    Usando método padrão: EMAIL + TELEFONE COMPLETO")
+        matched_df = match_leads_to_sales(
+            leads_df,
+            sales_df,
+            use_temporal_validation=False  # Results analysis mode - match against full history
+        )
 
     # INVESTIGAÇÃO: Onde estão as vendas que não fizeram match?
-    print("🔍 INVESTIGAÇÃO: ANÁLISE DAS VENDAS SEM MATCH")
+    print(" INVESTIGAÇÃO: ANÁLISE DAS VENDAS SEM MATCH")
 
     conversions = matched_df[matched_df['converted'] == True]
     num_conversions = len(conversions)
     num_sales = len(sales_df)
 
-    logger.info(f"📊 Vendas totais no período: {num_sales}")
-    logger.info(f"📊 Vendas com match nos leads classificados: {num_conversions}")
-    logger.info(f"📊 Vendas SEM match: {num_sales - num_conversions}")
+    logger.info(f" Vendas totais no período: {num_sales}")
+    logger.info(f" Vendas com match nos leads classificados: {num_conversions}")
+    logger.info(f" Vendas SEM match: {num_sales - num_conversions}")
 
     if num_sales > num_conversions:
         # Buscar vendas que não fizeram match nos leads classificados
@@ -1200,7 +1227,7 @@ def main():
         matched_emails = set(conversions['email'].str.lower().str.strip()) if num_conversions > 0 else set()
         unmatched_sales_emails = sales_emails - matched_emails
 
-        logger.info(f"\n🔍 Investigando {len(unmatched_sales_emails)} vendas sem match...")
+        logger.info(f"\n Investigando {len(unmatched_sales_emails)} vendas sem match...")
 
         # Carregar dataset COMPLETO de leads do Google Sheets (SEM filtro de período para ver histórico)
         temp_loader = LeadDataLoader()
@@ -1295,14 +1322,14 @@ def main():
                     not_found += 1
 
         print("-"*80)
-        logger.info(f"\n📊 RESUMO DA INVESTIGAÇÃO:")
+        logger.info(f"\n RESUMO DA INVESTIGAÇÃO:")
         logger.info(f"   Vendas nos leads EXCLUÍDOS (sem UTM): {found_in_excluded}")
         logger.info(f"   Vendas de PERÍODO ANTERIOR: {found_before_period}")
         logger.info(f"   Vendas NÃO ENCONTRADAS: {not_found}")
 
 
     # 6.1. Filtrar conversões por período de captura
-    print("📅 FILTRANDO CONVERSÕES POR PERÍODO DE CAPTURA...", flush=True)
+    print(" FILTRANDO CONVERSÕES POR PERÍODO DE CAPTURA...", flush=True)
     print(flush=True)
     from src.validation.matching import filter_conversions_by_capture_period
     matched_df = filter_conversions_by_capture_period(
@@ -1312,21 +1339,21 @@ def main():
     )
 
     # 6.2. Remover duplicatas artificiais
-    print("🧹 REMOVENDO DUPLICATAS ARTIFICIAIS...", flush=True)
+    print(" REMOVENDO DUPLICATAS ARTIFICIAIS...", flush=True)
     print(flush=True)
     from src.validation.matching import deduplicate_conversions
     matched_df = deduplicate_conversions(matched_df)
 
     matching_stats = get_matching_stats(matched_df, total_sales=len(sales_df))
 
-    logger.info(f"   ✅ Conversões: {matching_stats['total_conversions']}")
-    logger.info(f"   ✅ Taxa de conversão geral: {matching_stats['conversion_rate']:.2f}%")
-    logger.info(f"   ✅ Match por email: {matching_stats['matched_by_email']}")
-    logger.info(f"   ✅ Match por telefone: {matching_stats['matched_by_phone']}")
+    logger.info(f"    Conversões: {matching_stats['total_conversions']}")
+    logger.info(f"    Taxa de conversão geral: {matching_stats['conversion_rate']:.2f}%")
+    logger.info(f"    Match por email: {matching_stats['matched_by_email']}")
+    logger.info(f"    Match por telefone: {matching_stats['matched_by_phone']}")
     print(flush=True)
 
     # 7. Reutilizar custos dos relatórios Meta já carregados
-    print("💰 REUTILIZANDO CUSTOS DOS RELATÓRIOS META...", flush=True)
+    print(" REUTILIZANDO CUSTOS DOS RELATÓRIOS META...", flush=True)
     print(flush=True)
 
     meta_api = None  # Não usar API, apenas relatórios locais
@@ -1334,14 +1361,14 @@ def main():
 
     num_campaigns = len(costs_hierarchy_consolidated.get('campaigns', {}))
     if num_campaigns > 0:
-        logger.info(f"   ✅ {num_campaigns} campanhas reutilizadas dos relatórios")
+        logger.info(f"    {num_campaigns} campanhas reutilizadas dos relatórios")
     else:
-        logger.warning("   ⚠️ Nenhuma campanha encontrada nos relatórios")
+        logger.warning("    Nenhuma campanha encontrada nos relatórios")
 
     print(flush=True)
 
     # 8. Calcular métricas
-    print("📊 CALCULANDO MÉTRICAS...", flush=True)
+    print(" CALCULANDO MÉTRICAS...", flush=True)
     print(flush=True)
 
     # Por campanha
@@ -1353,7 +1380,7 @@ def main():
     )
 
     if not use_cache:
-        logger.info("   ⚠️ Cache desabilitado - forçando busca de dados novos da Meta API")
+        logger.info("    Cache desabilitado - forçando busca de dados novos da Meta API")
 
     # Usar TODAS as contas para buscar leads (não apenas a primeira)
     all_account_ids = ','.join(args.account_id) if isinstance(args.account_id, list) else args.account_id
@@ -1366,7 +1393,7 @@ def main():
         global_tracking_rate=matching_stats.get('tracking_rate', 100.0),
         costs_hierarchy_consolidated=costs_hierarchy_consolidated
     )
-    logger.info(f"   ✅ Métricas calculadas para {len(campaign_metrics)} campanhas")
+    logger.info(f"    Métricas calculadas para {len(campaign_metrics)} campanhas")
 
     # FILTRAR CAMPANHAS EXCLUÍDAS (se configurado)
     if EXCLUDE_CAMPAIGN_IDS and len(campaign_metrics) > 0:
@@ -1388,14 +1415,14 @@ def main():
         excluded_campaigns = campaign_metrics[excluded_mask]
 
         if len(excluded_campaigns) > 0:
-            logger.info(f"   🚫 Excluindo {len(excluded_campaigns)} campanha(s) de teste da análise:")
+            logger.info(f"    Excluindo {len(excluded_campaigns)} campanha(s) de teste da análise:")
             for idx, row in excluded_campaigns.iterrows():
-                logger.info(f"      • {row['campaign'][:70]}...")
+                logger.info(f"       {row['campaign'][:70]}...")
                 logger.info(f"        Gasto: R$ {row['spend']:,.2f} | Leads: {int(row['leads'])} | Conversões: {int(row['conversions'])}")
 
             # Filtrar campanhas
             campaign_metrics = campaign_metrics[~excluded_mask].copy()
-            logger.info(f"   ✅ {len(campaign_metrics)} campanhas restantes após exclusão")
+            logger.info(f"    {len(campaign_metrics)} campanhas restantes após exclusão")
 
         # Cleanup: remover coluna temporária
         campaign_metrics = campaign_metrics.drop(columns=['_temp_id'])
@@ -1403,7 +1430,7 @@ def main():
     # Adicionar comparison_group ao campaign_metrics (se disponível)
     if 'comparison_group' in matched_df.columns and len(campaign_metrics) > 0:
         # IMPORTANTE: Fazer mapeamento por campaign_id (15 dígitos), não por nome
-        # Motivo: Nomes de campanhas podem ter sido atualizados (UTMs → Meta API)
+        # Motivo: Nomes de campanhas podem ter sido atualizados (UTMs  Meta API)
 
         # Extrair campaign_id (15 dígitos) do matched_df
         import re
@@ -1419,7 +1446,7 @@ def main():
         matched_df['campaign_id_15'] = matched_df['campaign'].apply(extract_campaign_id_15)
         campaign_metrics['campaign_id_15'] = campaign_metrics['campaign'].apply(extract_campaign_id_15)
 
-        # Criar mapeamento campaign_id_15 → comparison_group
+        # Criar mapeamento campaign_id_15  comparison_group
         campaign_id_to_group = matched_df[matched_df['campaign_id_15'].notna()].groupby('campaign_id_15')['comparison_group'].first().to_dict()
 
         # Mapear usando campaign_id_15
@@ -1431,15 +1458,15 @@ def main():
         # Log de sucesso/falha
         mapped_count = campaign_metrics['comparison_group'].notna().sum()
         total_count = len(campaign_metrics)
-        logger.info(f"   ✅ Grupos de comparação adicionados: {mapped_count}/{total_count} campanhas mapeadas")
+        logger.info(f"    Grupos de comparação adicionados: {mapped_count}/{total_count} campanhas mapeadas")
 
         if mapped_count < total_count:
             unmapped = campaign_metrics[campaign_metrics['comparison_group'].isna()]['campaign'].tolist()
-            logger.warning(f"   ⚠️ {total_count - mapped_count} campanhas SEM comparison_group:")
+            logger.warning(f"    {total_count - mapped_count} campanhas SEM comparison_group:")
             for camp in unmapped[:5]:  # Mostrar até 5
-                logger.warning(f"      • {camp[:70]}")
+                logger.warning(f"       {camp[:70]}")
     elif len(campaign_metrics) == 0:
-        logger.warning("   ⚠️ Nenhuma métrica de campanha disponível - DataFrame vazio")
+        logger.warning("    Nenhuma métrica de campanha disponível - DataFrame vazio")
 
     # Por decil
     decile_calc = DecileMetricsCalculator()
@@ -1447,11 +1474,11 @@ def main():
         matched_df,
         config['product_value']
     )
-    logger.info(f"   ✅ Performance calculada para todos os decis (D1-D10)")
+    logger.info(f"    Performance calculada para todos os decis (D1-D10)")
 
     # ML Model Performance Monitoring
     print(flush=True)
-    print("📊 CALCULANDO MÉTRICAS DE MONITORAMENTO DO MODELO...", flush=True)
+    print(" CALCULANDO MÉTRICAS DE MONITORAMENTO DO MODELO...", flush=True)
     print(flush=True)
 
     # Carregar modelo ativo do active_model.yaml
@@ -1467,9 +1494,9 @@ def main():
     )
 
     # Log resumo no console
-    logger.info(f"📈 AUC Produção: {ml_monitoring_metrics['auc']['production']:.4f} "
+    logger.info(f" AUC Produção: {ml_monitoring_metrics['auc']['production']:.4f} "
                f"(Test Set: {ml_monitoring_metrics['auc']['test_set']:.4f})")
-    logger.info(f"📊 Top 3 Decis: {ml_monitoring_metrics['concentration']['top3_production']:.1f}% "
+    logger.info(f" Top 3 Decis: {ml_monitoring_metrics['concentration']['top3_production']:.1f}% "
                f"(Test Set: {ml_monitoring_metrics['concentration']['top3_test_set']:.1f}%)")
     print(flush=True)
 
@@ -1506,7 +1533,7 @@ def main():
     comparison_group_metrics = None
     if 'comparison_group' in matched_df.columns and len(campaign_metrics) > 0:
         comparison_group_metrics = calculate_comparison_group_metrics(matched_df, campaign_metrics)
-        logger.info(f"   ✅ Métricas calculadas por grupo de comparação")
+        logger.info(f"    Métricas calculadas por grupo de comparação")
 
     # Fair comparison info (legacy - não usado mais)
     fair_comparison_info = None
@@ -1532,7 +1559,7 @@ def main():
                 get_faixa_a_instances_detail
             )
 
-            print("\n📊 COMPARAÇÃO DE ADSETS E ADS (relatórios locais)...", flush=True)
+            print("\n COMPARAÇÃO DE ADSETS E ADS (relatórios locais)...", flush=True)
             print(flush=True)
 
             # Carregar adsets e ads dos relatórios Meta locais
@@ -1541,17 +1568,17 @@ def main():
             ads_df = reports.get('ads', pd.DataFrame())
 
             if not adsets_df.empty:
-                logger.info(f"   ✅ {len(adsets_df)} adsets carregados dos relatórios")
+                logger.info(f"    {len(adsets_df)} adsets carregados dos relatórios")
 
                 # DEBUG: Verificar se total_spend existe
                 if 'total_spend' in adsets_df.columns:
                     total_spend_sum = adsets_df['total_spend'].sum()
                     spend_sum = adsets_df['spend'].sum()
-                    logger.info(f"   📊 DEBUG: total_spend existe em adsets_df")
+                    logger.info(f"    DEBUG: total_spend existe em adsets_df")
                     logger.info(f"      Total spend (histórico): R$ {total_spend_sum:,.2f}")
                     logger.info(f"      Total spend (filtrado): R$ {spend_sum:,.2f}")
                 else:
-                    logger.warning(f"   ⚠️ DEBUG: total_spend NÃO existe em adsets_df")
+                    logger.warning(f"    DEBUG: total_spend NÃO existe em adsets_df")
 
                 # Extrair campaign IDs do matched_df
                 def extract_campaign_id(campaign_name):
@@ -1588,7 +1615,7 @@ def main():
                             elif group == 'Controle':
                                 control_campaign_ids.append(full_id)
 
-                    logger.info(f"   📊 Campanhas por grupo:")
+                    logger.info(f"    Campanhas por grupo:")
                     logger.info(f"      Eventos ML: {len(eventos_ml_campaign_ids)}")
                     logger.info(f"      Otimização ML: {len(otimizacao_ml_campaign_ids)}")
                     logger.info(f"      Controle: {len(control_campaign_ids)}")
@@ -1602,7 +1629,7 @@ def main():
                             ml_type_map[cid_15] = 'SEM_ML'
                 else:
                     ml_type_map = {}
-                    logger.warning("   ⚠️ comparison_group_map vazio, não será possível fazer comparação")
+                    logger.warning("    comparison_group_map vazio, não será possível fazer comparação")
 
                 # 1. Comparação de TODOS os adsets (Eventos ML vs Controle)
                 all_adsets_comparison = compare_all_adsets_performance(
@@ -1613,7 +1640,7 @@ def main():
                     min_spend=0.0,
                     config=config
                 )
-                logger.info(f"   ✅ Comparação de todos adsets concluída")
+                logger.info(f"    Comparação de todos adsets concluída")
 
                 # 2. Identificar matched adset pairs (Eventos ML vs Controle apenas)
                 # IMPORTANTE: Usar apenas eventos_ml_campaign_ids (excluir Otimização ML)
@@ -1626,7 +1653,7 @@ def main():
                 )
 
                 if matched_adsets:
-                    logger.info(f"   ✅ {len(matched_adsets)} adsets matched identificados (Eventos ML vs Controle)")
+                    logger.info(f"    {len(matched_adsets)} adsets matched identificados (Eventos ML vs Controle)")
 
                     # IMPORTANTE: Usar matched_adsets_df retornado por identify_matched_adset_pairs
                     # Este DataFrame já tem a coluna 'leads' criada a partir de 'leads_standard'
@@ -1643,12 +1670,12 @@ def main():
                             product_value=config['product_value'],
                             comparison_group_map=comparison_group_map
                         )
-                        logger.info(f"   ✅ Comparação de matched adsets concluída ({len(matched_adsets_df)} adsets)")
+                        logger.info(f"    Comparação de matched adsets concluída ({len(matched_adsets_df)} adsets)")
                     else:
-                        logger.warning("   ⚠️ Nenhum adset matched encontrado após filtragem")
+                        logger.warning("    Nenhum adset matched encontrado após filtragem")
                         adset_level_comparisons = None
                 else:
-                    logger.warning("   ⚠️ Nenhum matched adset identificado")
+                    logger.warning("    Nenhum matched adset identificado")
                     adset_level_comparisons = None
 
                 # 3. Identificar matched adsets Faixa A (Eventos ML vs Faixa A)
@@ -1660,11 +1687,11 @@ def main():
                         matched_df=matched_df
                     )
                     if matched_adsets_faixa_a_list:
-                        logger.info(f"   ✅ {len(matched_adsets_faixa_a_list)} adsets matched identificados (Eventos ML vs Faixa A)")
+                        logger.info(f"    {len(matched_adsets_faixa_a_list)} adsets matched identificados (Eventos ML vs Faixa A)")
                     else:
-                        logger.info("   ℹ️ Nenhum adset matched encontrado entre Eventos ML e Faixa A")
+                        logger.info("   ℹ Nenhum adset matched encontrado entre Eventos ML e Faixa A")
                 except Exception as e:
-                    logger.warning(f"   ⚠️ Erro ao identificar matched adsets Faixa A: {e}")
+                    logger.warning(f"    Erro ao identificar matched adsets Faixa A: {e}")
                     matched_adsets_faixa_a = None
 
                 # 3.1. Obter detalhes de cada instância de adset (Faixa A)
@@ -1674,11 +1701,11 @@ def main():
                         matched_df=matched_df
                     )
                     if not faixa_a_instances_detail.empty:
-                        logger.info(f"   ✅ {len(faixa_a_instances_detail)} instâncias de adsets processadas (Eventos ML vs Faixa A)")
+                        logger.info(f"    {len(faixa_a_instances_detail)} instâncias de adsets processadas (Eventos ML vs Faixa A)")
                     else:
-                        logger.info("   ℹ️ Nenhuma instância de adset encontrada")
+                        logger.info("   ℹ Nenhuma instância de adset encontrada")
                 except Exception as e:
-                    logger.warning(f"   ⚠️ Erro ao obter detalhes de instâncias Faixa A: {e}")
+                    logger.warning(f"    Erro ao obter detalhes de instâncias Faixa A: {e}")
                     import traceback
                     traceback.print_exc()
                     faixa_a_instances_detail = None
@@ -1706,7 +1733,7 @@ def main():
                 #         ml_type_map=ml_type_map_full
                 #     )
                 #
-                #     logger.info(f"   ✅ Comparação de ads concluída ({len(ad_level_comparisons.get('detailed_matched', pd.DataFrame()))} linhas)")
+                #     logger.info(f"    Comparação de ads concluída ({len(ad_level_comparisons.get('detailed_matched', pd.DataFrame()))} linhas)")
                 #
                 # # 4. Comparar ads dentro dos matched adsets (reutilizar matched_adsets já identificado)
                 # if matched_adsets and not ads_df.empty:
@@ -1719,9 +1746,9 @@ def main():
                 #             comparison_group_map=comparison_group_map,
                 #             filtered_matched_adsets=matched_adsets
                 #         )
-                #         logger.info(f"   ✅ Comparação de ads em adsets matched concluída")
+                #         logger.info(f"    Comparação de ads em adsets matched concluída")
                 #     except Exception as e:
-                #         logger.warning(f"   ⚠️  Erro na comparação de ads em adsets matched: {e}")
+                #         logger.warning(f"     Erro na comparação de ads em adsets matched: {e}")
                 #         ad_in_matched_adsets_comparisons = None
                 #
                 #     # 6. Comparar matched ads dentro dos matched adsets
@@ -1734,38 +1761,38 @@ def main():
                 #             comparison_group_map=comparison_group_map,
                 #             filtered_matched_adsets=matched_adsets
                 #         )
-                #         logger.info(f"   ✅ Comparação de matched ads em adsets matched concluída")
+                #         logger.info(f"    Comparação de matched ads em adsets matched concluída")
                 #     except Exception as e:
-                #         logger.warning(f"   ⚠️  Erro na comparação de matched ads em adsets matched: {e}")
+                #         logger.warning(f"     Erro na comparação de matched ads em adsets matched: {e}")
                 #         matched_ads_in_matched_adsets_comparisons = None
                 # else:
-                #     logger.warning("   ⚠️ Nenhum adset matched encontrado (comparações específicas não disponíveis)")
+                #     logger.warning("    Nenhum adset matched encontrado (comparações específicas não disponíveis)")
             else:
-                logger.warning("   ⚠️ Nenhum adset carregado dos relatórios")
+                logger.warning("    Nenhum adset carregado dos relatórios")
 
         except Exception as e:
-            logger.error(f"   ❌ Erro na comparação de adsets/ads: {e}")
+            logger.error(f"    Erro na comparação de adsets/ads: {e}")
             import traceback
             traceback.print_exc()
 
     print(flush=True)
 
     # 9. EXIBIR RESUMO NO TERMINAL
-    print("📊 RESUMO EXECUTIVO - COMPARAÇÃO ML vs NÃO-ML", flush=True)
+    print(" RESUMO EXECUTIVO - COMPARAÇÃO ML vs NÃO-ML", flush=True)
     print(flush=True)
     print_summary_table(ml_comparison)
 
     print(flush=True)
-    print("📈 PERFORMANCE POR DECIL (Real vs Esperado)", flush=True)
+    print(" PERFORMANCE POR DECIL (Real vs Esperado)", flush=True)
     print("IMPORTANTE: Modelo treinado APENAS com vendas Guru", flush=True)
-    print("→ Guru = Dados de treinamento | Total = Guru + TMB (generalização)", flush=True)
+    print(" Guru = Dados de treinamento | Total = Guru + TMB (generalização)", flush=True)
     print(flush=True)
     print_decile_table(decile_metrics)
 
     print(flush=True)
 
     # 9.5. Exibir métricas por campanha
-    print("📊 MÉTRICAS DETALHADAS POR CAMPANHA", flush=True)
+    print(" MÉTRICAS DETALHADAS POR CAMPANHA", flush=True)
     print(flush=True)
 
     # Formatar nome das campanhas
@@ -1827,7 +1854,7 @@ def main():
     print(flush=True)
 
     # 10. Gerar relatório Excel
-    print("📄 Gerando relatório Excel...", flush=True)
+    print(" Gerando relatório Excel...", flush=True)
     os.makedirs(output_dir, exist_ok=True)
 
     # Sempre adicionar timestamp no nome do arquivo (nunca sobrescreve)
@@ -1837,7 +1864,7 @@ def main():
     report_type_prefix = args.report_type.upper().replace('-', '_')
     excel_filename = f"validation_report_{report_type_prefix}_{start_date}_to_{end_date}_{timestamp}.xlsx"
     excel_path = str(Path(output_dir) / excel_filename)
-    logger.info(f"   📌 Criando relatório: {excel_filename}")
+    logger.info(f"    Criando relatório: {excel_filename}")
 
     # Formatar account IDs para exibição
     account_ids_display = ', '.join(args.account_id) if isinstance(args.account_id, list) else args.account_id
@@ -1881,12 +1908,12 @@ def main():
         faixa_a_instances_detail=faixa_a_instances_detail,
         ml_monitoring_metrics=ml_monitoring_metrics
     )
-    print(f"   ✅ Excel salvo: {excel_path}", flush=True)
+    print(f"    Excel salvo: {excel_path}", flush=True)
     print(flush=True)
 
     # 11. Gerar gráficos
     # DESABILITADO: Gerando apenas análise em console até finalizar formato
-    # print("📈 Gerando visualizações...")
+    # print(" Gerando visualizações...")
     # viz = ValidationVisualizer()
     # viz.generate_all_charts(
     #     campaign_metrics,
@@ -1900,11 +1927,11 @@ def main():
     end_time = time.time()
     elapsed_time = end_time - start_time
 
-    print("✅ VALIDAÇÃO CONCLUÍDA COM SUCESSO!", flush=True)
+    print(" VALIDAÇÃO CONCLUÍDA COM SUCESSO!", flush=True)
     print(flush=True)
-    print(f"📊 Análise exibida no console acima", flush=True)
-    print(f"📄 Excel atualizado: {excel_path}", flush=True)
-    print(f"⏱️  Tempo de execução: {elapsed_time:.1f} segundos ({elapsed_time/60:.1f} minutos)", flush=True)
+    print(f" Análise exibida no console acima", flush=True)
+    print(f" Excel atualizado: {excel_path}", flush=True)
+    print(f"  Tempo de execução: {elapsed_time:.1f} segundos ({elapsed_time/60:.1f} minutos)", flush=True)
     print(flush=True)
 
     # 13. Upload para Cloud Storage (se configurado)
@@ -1915,7 +1942,7 @@ def main():
         try:
             from google.cloud import storage
 
-            print("☁️  Fazendo upload para Cloud Storage...", flush=True)
+            print("  Fazendo upload para Cloud Storage...", flush=True)
 
             storage_client = storage.Client()
             bucket = storage_client.bucket(bucket_name)
@@ -1930,13 +1957,13 @@ def main():
             blob.make_public()
 
             excel_url = blob.public_url
-            print(f"   ✅ Upload concluído: {excel_url}", flush=True)
+            print(f"    Upload concluído: {excel_url}", flush=True)
 
         except Exception as storage_error:
-            print(f"   ⚠️  Erro no upload Cloud Storage: {storage_error}", flush=True)
+            print(f"     Erro no upload Cloud Storage: {storage_error}", flush=True)
             excel_url = None
     else:
-        print("   ℹ️  VALIDATION_REPORTS_BUCKET não configurado, upload ignorado", flush=True)
+        print("   ℹ  VALIDATION_REPORTS_BUCKET não configurado, upload ignorado", flush=True)
 
     print(flush=True)
 
@@ -1949,7 +1976,7 @@ def main():
         try:
             from src.validation.sheets_uploader import ValidationSheetsUploader
 
-            print("📊 Fazendo upload para Google Sheets...", flush=True)
+            print(" Fazendo upload para Google Sheets...", flush=True)
 
             uploader = ValidationSheetsUploader()
 
@@ -1965,14 +1992,14 @@ def main():
                 share_with_emails=share_with
             )
 
-            print(f"   ✅ Google Sheets criado: {sheets_url}", flush=True)
+            print(f"    Google Sheets criado: {sheets_url}", flush=True)
 
         except Exception as sheets_error:
-            print(f"   ⚠️  Erro no upload Google Sheets: {sheets_error}", flush=True)
+            print(f"     Erro no upload Google Sheets: {sheets_error}", flush=True)
             logger.warning(f"Erro no upload Google Sheets: {sheets_error}")
             sheets_url = None
     else:
-        print("   ℹ️  UPLOAD_VALIDATION_TO_SHEETS não habilitado, upload ignorado", flush=True)
+        print("   ℹ  UPLOAD_VALIDATION_TO_SHEETS não habilitado, upload ignorado", flush=True)
 
     print(flush=True)
 
@@ -1983,7 +2010,7 @@ def main():
         try:
             from src.validation.slack_notifier import ValidationSlackNotifier
 
-            print("📱 Enviando notificação Slack...", flush=True)
+            print(" Enviando notificação Slack...", flush=True)
 
             notifier = ValidationSlackNotifier(webhook_url=slack_webhook)
 
@@ -2012,14 +2039,14 @@ def main():
             )
 
             if success:
-                print("   ✅ Notificação Slack enviada", flush=True)
+                print("    Notificação Slack enviada", flush=True)
             else:
-                print("   ⚠️  Falha ao enviar notificação Slack", flush=True)
+                print("     Falha ao enviar notificação Slack", flush=True)
 
         except Exception as slack_error:
-            print(f"   ⚠️  Erro ao enviar Slack: {slack_error}", flush=True)
+            print(f"     Erro ao enviar Slack: {slack_error}", flush=True)
     else:
-        print("   ℹ️  SLACK_WEBHOOK_URL não configurado, notificação ignorada", flush=True)
+        print("   ℹ  SLACK_WEBHOOK_URL não configurado, notificação ignorada", flush=True)
 
     print(flush=True)
 
@@ -2028,10 +2055,10 @@ if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
-        print("\n\n⚠️ Operação cancelada pelo usuário")
+        print("\n\n Operação cancelada pelo usuário")
         sys.exit(1)
     except Exception as e:
-        logger.error(f"\n❌ ERRO: {e}")
+        logger.error(f"\n ERRO: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

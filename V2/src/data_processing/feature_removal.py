@@ -28,7 +28,7 @@ def remover_features_desnecessarias(df_pesquisa: pd.DataFrame, remover_medium: b
     # NORMAL: Resumo inicial
     logger.info(f"Dataset inicial: {len(df)} registros, {len(df.columns)} colunas")
     if remover_medium:
-        logger.info(f"⚠️  Modo: Remover Medium (junto com Campaign e Content)")
+        logger.info(f"  Modo: Remover Medium (junto com Campaign e Content)")
 
     # DEBUG: Identificar colunas vazias ou com nomes problemáticos
     logger.debug(f"")
@@ -104,9 +104,9 @@ def remover_features_desnecessarias(df_pesquisa: pd.DataFrame, remover_medium: b
         logger.debug(f"\nColunas encontradas e removidas:")
         for coluna in colunas_existentes:
             if coluna == '' or pd.isna(coluna) or coluna is None:
-                logger.debug(f"  ✓ Coluna problemática removida: {repr(coluna)}")
+                logger.debug(f"   Coluna problemática removida: {repr(coluna)}")
             else:
-                logger.debug(f"  ✓ {coluna} removida")
+                logger.debug(f"   {coluna} removida")
 
         df = df.drop(columns=colunas_existentes)
 
@@ -121,7 +121,7 @@ def remover_features_desnecessarias(df_pesquisa: pd.DataFrame, remover_medium: b
 
     # NORMAL: Resumo final
     logger.info(f"Dataset final: {len(df)} registros, {len(df.columns)} colunas")
-    logger.info(f"✅ Features desnecessárias removidas: {len(colunas_existentes)}")
+    logger.info(f" Features desnecessárias removidas: {len(colunas_existentes)}")
 
     return df
 

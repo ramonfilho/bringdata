@@ -114,7 +114,7 @@ def criar_features_derivadas(df_devclub: pd.DataFrame) -> pd.DataFrame:
 
     # 1. FEATURES TEMPORAIS
     # DEBUG: Processamento de feature temporal
-    logger.debug(f"\n📅 Processando feature temporal (dia_semana):")
+    logger.debug(f"\n Processando feature temporal (dia_semana):")
     logger.debug(f"   Tipo original da coluna Data: {df['Data'].dtype}")
 
     # Detectar formato automaticamente baseado na primeira data válida
@@ -126,15 +126,15 @@ def criar_features_derivadas(df_devclub: pd.DataFrame) -> pd.DataFrame:
             # Detectar formato: se começa com 4 dígitos = YYYY-MM-DD, senão = DD/MM/YYYY
             if sample_date.strip()[0:4].isdigit():
                 # Formato ISO: YYYY-MM-DD ou YYYY-MM-DD HH:MM:SS
-                logger.debug(f"   ✓ Formato detectado: ISO (YYYY-MM-DD)")
+                logger.debug(f"    Formato detectado: ISO (YYYY-MM-DD)")
                 df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
             else:
                 # Formato brasileiro: DD/MM/YYYY
-                logger.debug(f"   ✓ Formato detectado: BR (DD/MM/YYYY)")
+                logger.debug(f"    Formato detectado: BR (DD/MM/YYYY)")
                 df['Data'] = pd.to_datetime(df['Data'], format='%d/%m/%Y', errors='coerce')
         else:
             # Já é datetime ou fallback
-            logger.debug(f"   ✓ Data já é datetime ou fallback para auto-detect")
+            logger.debug(f"    Data já é datetime ou fallback para auto-detect")
             df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
     else:
         df['Data'] = pd.to_datetime(df['Data'], errors='coerce')
@@ -144,7 +144,7 @@ def criar_features_derivadas(df_devclub: pd.DataFrame) -> pd.DataFrame:
     logger.debug(f"   Datas inválidas após parsing: {nans_after_parse} / {len(df)} ({nans_after_parse/len(df)*100:.1f}%)")
 
     df['dia_semana'] = df['Data'].dt.dayofweek
-    logger.debug(f"   ✓ Feature dia_semana criada")
+    logger.debug(f"    Feature dia_semana criada")
 
     # 2. FEATURES DE QUALIDADE DOS IDENTIFICADORES
 
@@ -230,6 +230,6 @@ def criar_features_derivadas(df_devclub: pd.DataFrame) -> pd.DataFrame:
 
     logger.debug(f"\nDataset pronto para encoding e modelagem!")
 
-    logger.info(f"✅ Feature engineering completo")
+    logger.info(f" Feature engineering completo")
 
     return df

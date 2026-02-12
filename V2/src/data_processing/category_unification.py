@@ -17,8 +17,8 @@ def limpar_texto(texto):
 
     Aplica transformações agressivas para garantir consistência entre treino e produção:
     - Remove caracteres invisíveis
-    - Lowercase (maiúsculas → minúsculas)
-    - Remove acentos (autônomo → autonomo)
+    - Lowercase (maiúsculas  minúsculas)
+    - Remove acentos (autônomo  autonomo)
     - Remove pontuação
     - Normaliza espaços múltiplos
 
@@ -50,7 +50,7 @@ def limpar_texto(texto):
     texto_limpo = texto_limpo.lower()
 
     # 4. Remover acentos (NOVO - resolve problema de acentuação)
-    # Exemplo: "autônomo" → "autonomo"
+    # Exemplo: "autônomo"  "autonomo"
     texto_limpo = unidecode(texto_limpo)
 
     # 5. Remover pontuação (exceto espaços e underscores)
@@ -103,7 +103,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         # DEBUG: Mostrar distribuição final
         total = len(df)
         counts = df['interesse_programacao'].value_counts(dropna=False)
-        logger.debug(f"   📊 Distribuição final:")
+        logger.debug(f"    Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
@@ -128,7 +128,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         # Mostrar distribuição final
         total = len(df)
         counts = df['Tem computador/notebook?'].value_counts(dropna=False)
-        logger.debug(f"   📊 Distribuição final:")
+        logger.debug(f"    Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
@@ -155,7 +155,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         # Mostrar distribuição final
         total = len(df)
         counts = df['O que mais você quer ver no evento?'].value_counts(dropna=False)
-        logger.debug(f"   📊 Distribuição final:")
+        logger.debug(f"    Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
@@ -178,7 +178,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         # Mostrar distribuição final
         total = len(df)
         counts = df['Você possui cartão de crédito?'].value_counts(dropna=False)
-        logger.debug(f"   📊 Distribuição final:")
+        logger.debug(f"    Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
@@ -203,7 +203,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         # Mostrar distribuição final
         total = len(df)
         counts = df['Atualmente, qual a sua faixa salarial?'].value_counts(dropna=False)
-        logger.debug(f"   📊 Distribuição final:")
+        logger.debug(f"    Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
@@ -221,19 +221,19 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         # Corrigir "autonomo" para "autônomo"
         if 'Sou autonomo' in df['O que você faz atualmente?'].values:
             count = (df['O que você faz atualmente?'] == 'Sou autonomo').sum()
-            normalizacoes_faz.append(f"'Sou autonomo' → 'Sou autônomo' ({count} leads)")
+            normalizacoes_faz.append(f"'Sou autonomo'  'Sou autônomo' ({count} leads)")
             df.loc[df['O que você faz atualmente?'] == 'Sou autonomo', 'O que você faz atualmente?'] = 'Sou autônomo'
 
         # Unificar "autônomo" com descrição
         if 'Sou autônomo (Uber, freela, vendedor, etc).' in df['O que você faz atualmente?'].values:
             count = (df['O que você faz atualmente?'] == 'Sou autônomo (Uber, freela, vendedor, etc).').sum()
-            normalizacoes_faz.append(f"'Sou autônomo (Uber,...)' → 'Sou autônomo' ({count} leads)")
+            normalizacoes_faz.append(f"'Sou autônomo (Uber,...)'  'Sou autônomo' ({count} leads)")
             df.loc[df['O que você faz atualmente?'] == 'Sou autônomo (Uber, freela, vendedor, etc).', 'O que você faz atualmente?'] = 'Sou autônomo'
 
         # Unificar "não trabalho"
         if 'Atualmente não trabalho e nem estudo.' in df['O que você faz atualmente?'].values:
             count = (df['O que você faz atualmente?'] == 'Atualmente não trabalho e nem estudo.').sum()
-            normalizacoes_faz.append(f"'Atualmente não trabalho...' → 'Não trabalho e nem estudo' ({count} leads)")
+            normalizacoes_faz.append(f"'Atualmente não trabalho...'  'Não trabalho e nem estudo' ({count} leads)")
             df.loc[df['O que você faz atualmente?'] == 'Atualmente não trabalho e nem estudo.', 'O que você faz atualmente?'] = 'Não trabalho e nem estudo'
 
         # Remover ponto final de "Trabalho em outra área"
@@ -252,14 +252,14 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
         if normalizacoes_faz:
-            logger.debug(f"   📌 Normalizações aplicadas:")
+            logger.debug(f"    Normalizações aplicadas:")
             for norm in normalizacoes_faz:
                 logger.debug(f"      - {norm}")
 
         # Mostrar distribuição final
         total = len(df)
         counts = df['O que você faz atualmente?'].value_counts(dropna=False)
-        logger.debug(f"   📊 Distribuição final:")
+        logger.debug(f"    Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
@@ -283,7 +283,7 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         # Mostrar distribuição final
         total = len(df)
         counts = df['Qual a sua idade?'].value_counts(dropna=False)
-        logger.debug(f"   📊 Distribuição final:")
+        logger.debug(f"    Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
@@ -306,14 +306,14 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"   Valores únicos: {valores_unicos}")
 
             counts = df[coluna].value_counts(dropna=False)
-            logger.debug(f"   📊 Distribuição:")
+            logger.debug(f"    Distribuição:")
             for valor, count in counts.items():
                 pct = (count / total) * 100
                 valor_str = str(valor) if pd.notna(valor) else 'NaN'
                 logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     logger.info("")
-    logger.info(f"✅ Dataset unificado: {len(df)} registros, {len(df.columns)} colunas")
+    logger.info(f" Dataset unificado: {len(df)} registros, {len(df.columns)} colunas")
 
 
     return df

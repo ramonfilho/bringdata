@@ -44,7 +44,7 @@ def match_leads_to_sales(
         - match_method: str ('email', 'telefone', ou None)
     """
     mode = "com validação temporal (30 dias)" if use_temporal_validation else "sem validação temporal"
-    logger.info(f"🔗 Iniciando matching ({mode})")
+    logger.info(f" Iniciando matching ({mode})")
     logger.info(f"   Leads: {len(leads_df)}")
     logger.info(f"   Vendas: {len(sales_df)}")
 
@@ -131,7 +131,7 @@ def match_leads_to_sales(
     email_match_pct = (matched_by_email / total_matched * 100) if total_matched > 0 else 0
 
     # NORMAL: Resumo simplificado
-    logger.info(f"   ✅ Matching concluído:")
+    logger.info(f"    Matching concluído:")
     logger.info(f"      Total de matches: {total_matched}")
     logger.info(f"      Percentual de matching: {match_rate:.2f}%")
     logger.info(f"      Percentual de encontro por e-mail: {email_match_pct:.1f}%")
@@ -232,21 +232,21 @@ def print_matching_summary(stats: Dict):
     Args:
         stats: Dicionário retornado por get_matching_stats()
     """
-    print("📊 RESUMO DO MATCHING")
-    print(f"\n📈 Leads e Conversões:")
+    print(" RESUMO DO MATCHING")
+    print(f"\n Leads e Conversões:")
     print(f"   Total de leads: {stats['total_leads']:,}")
     print(f"   Total de conversões: {stats['total_conversions']:,}")
     print(f"   Taxa de conversão: {stats['conversion_rate']:.2f}%")
 
-    print(f"\n🔗 Método de Match:")
+    print(f"\n Método de Match:")
     print(f"   Por email: {stats['matched_by_email']:,} ({stats['match_rate_email']:.1f}%)")
     print(f"   Por telefone: {stats['matched_by_phone']:,} ({stats['match_rate_phone']:.1f}%)")
 
-    print(f"\n💰 Receita:")
+    print(f"\n Receita:")
     print(f"   Total: R$ {stats['total_revenue']:,.2f}")
     print(f"   Ticket médio: R$ {stats['avg_ticket']:,.2f}")
 
-    print(f"\n🏪 Origem das Vendas:")
+    print(f"\n Origem das Vendas:")
     print(f"   Guru: {stats['conversions_guru']:,} conversões")
     print(f"   TMB: {stats['conversions_tmb']:,} conversões")
 
@@ -288,7 +288,7 @@ def filter_by_period(
     # Precisamos incluir TODO o dia 03/11, então usamos < próximo dia
     end_inclusive = end + pd.Timedelta(days=1)
 
-    logger.info(f"📅 Filtrando por período: {start_date} a {end_date} (dia inteiro)")
+    logger.info(f" Filtrando por período: {start_date} a {end_date} (dia inteiro)")
 
     before = len(df)
     df_filtered = df[
@@ -297,7 +297,7 @@ def filter_by_period(
     ].copy()
     after = len(df_filtered)
 
-    logger.info(f"   {before} → {after} registros ({after/before*100:.1f}%)" if before > 0 else "   0 registros")
+    logger.info(f"   {before}  {after} registros ({after/before*100:.1f}%)" if before > 0 else "   0 registros")
 
     return df_filtered
 
@@ -322,10 +322,10 @@ def filter_conversions_by_capture_period(
         DataFrame com conversões apenas de leads captados no período
 
     Example:
-        >>> # Lead captado 06/11, convertido 30/11, período 18-24/11 → excluído
+        >>> # Lead captado 06/11, convertido 30/11, período 18-24/11  excluído
         >>> filtered = filter_conversions_by_capture_period(matched_df, '2025-11-18', '2025-11-24')
     """
-    logger.info(f"📅 Filtrando conversões por período de captura: {period_start} a {period_end}")
+    logger.info(f" Filtrando conversões por período de captura: {period_start} a {period_end}")
 
     start = pd.to_datetime(period_start)
     end = pd.to_datetime(period_end)
@@ -356,12 +356,12 @@ def filter_conversions_by_capture_period(
         logger.info(f"   Emails removidos (capturados fora do período):")
         for email in removed_conversions['email'].unique():
             capture_date = removed_conversions[removed_conversions['email'] == email]['data_captura'].iloc[0]
-            logger.info(f"      • {email} (capturado em {capture_date.date()})")
+            logger.info(f"       {email} (capturado em {capture_date.date()})")
 
     # Recombinar conversões filtradas + não-convertidos (mantemos todos os leads do período)
     result = pd.concat([conversions_filtered, non_conversions], ignore_index=True)
 
-    logger.info(f"   ✅ Filtragem por período concluída")
+    logger.info(f"    Filtragem por período concluída")
 
     return result
 
@@ -385,10 +385,10 @@ def deduplicate_conversions(matched_df: pd.DataFrame) -> pd.DataFrame:
         DataFrame sem duplicatas artificiais
 
     Example:
-        >>> # Mesmo email, 5 capturas, 1 venda → mantém apenas 1 conversão
+        >>> # Mesmo email, 5 capturas, 1 venda  mantém apenas 1 conversão
         >>> deduplicated = deduplicate_conversions(matched_df)
     """
-    logger.info("🧹 Iniciando deduplicação de conversões...")
+    logger.info(" Iniciando deduplicação de conversões...")
 
     # Separar convertidos de não-convertidos
     conversions = matched_df[matched_df['converted'] == True].copy()
@@ -425,7 +425,7 @@ def deduplicate_conversions(matched_df: pd.DataFrame) -> pd.DataFrame:
     # Recombinar convertidos (sem duplicatas) + não-convertidos
     result = pd.concat([deduplicated, non_conversions], ignore_index=True)
 
-    logger.info(f"   ✅ Deduplicação concluída")
+    logger.info(f"    Deduplicação concluída")
 
     return result
 
@@ -441,7 +441,7 @@ def analyze_conversion_by_decile(matched_df: pd.DataFrame) -> pd.DataFrame:
         DataFrame com análise por decil
     """
     if 'decile' not in matched_df.columns:
-        logger.warning("⚠️ Coluna 'decile' não encontrada")
+        logger.warning(" Coluna 'decile' não encontrada")
         return pd.DataFrame()
 
     df_with_decile = matched_df[matched_df['decile'].notna()].copy()

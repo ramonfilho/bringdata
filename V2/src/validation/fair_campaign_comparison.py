@@ -47,7 +47,7 @@ def create_refined_campaign_map(
     control_campaign_ids: List[str]
 ) -> Dict[str, str]:
     """
-    Cria mapeamento refinado: campaign_id → comparison_group.
+    Cria mapeamento refinado: campaign_id  comparison_group.
 
     Distingue entre:
     - 'Eventos ML': Campanhas ML que usam eventos CAPI customizados (LeadQualified/LQHQ)
@@ -60,16 +60,16 @@ def create_refined_campaign_map(
         control_campaign_ids: Lista de IDs de campanhas Controle
 
     Returns:
-        Dict mapping campaign_id → comparison_group ('Eventos ML', 'Otimização ML', ou 'Controle')
+        Dict mapping campaign_id  comparison_group ('Eventos ML', 'Otimização ML', ou 'Controle')
     """
     refined_map = {}
 
     # DEBUG: Mostrar colunas disponíveis
-    logger.info(f"   🔍 DEBUG create_refined_campaign_map:")
+    logger.info(f"    DEBUG create_refined_campaign_map:")
     logger.info(f"      Colunas disponíveis: {list(campaigns_df.columns)[:10]}")
     logger.info(f"      Total de linhas: {len(campaigns_df)}")
 
-    # Criar lookup de campaign_id → optimization_goal e campaign_name
+    # Criar lookup de campaign_id  optimization_goal e campaign_name
     if 'campaign_id' in campaigns_df.columns:
         # Limpar campaign_id (primeiros 15 dígitos)
         campaigns_df['campaign_id_clean'] = campaigns_df['campaign_id'].astype(str).str[:15]
@@ -89,7 +89,7 @@ def create_refined_campaign_map(
         campaign_name_map = {}
 
     # Classificar campanhas ML
-    # REGRA: Se o nome contém "MACHINE LEARNING" → sempre "Eventos ML"
+    # REGRA: Se o nome contém "MACHINE LEARNING"  sempre "Eventos ML"
     # Caso contrário, verificar optimization_goal (LeadQualified/LQHQ)
     for cid in ml_campaign_ids:
         cid_clean = str(cid)[:15]
@@ -99,7 +99,7 @@ def create_refined_campaign_map(
         # PRIORIDADE 1: Verificar se nome contém "MACHINE LEARNING"
         if 'machine learning' in campaign_name.lower():
             refined_map[cid_clean] = 'Eventos ML'
-            logger.info(f"   ✅ Campanha classificada como Eventos ML (nome contém MACHINE LEARNING): {cid_clean}")
+            logger.info(f"    Campanha classificada como Eventos ML (nome contém MACHINE LEARNING): {cid_clean}")
             continue
 
         # PRIORIDADE 2: Verificar se usa eventos customizados CAPI
@@ -111,13 +111,13 @@ def create_refined_campaign_map(
             refined_map[cid_clean] = 'Otimização ML'
 
     # Classificar campanhas Controle
-    logger.info(f"   🔍 DEBUG - Classificando {len(control_campaign_ids)} campanhas Controle:")
+    logger.info(f"    DEBUG - Classificando {len(control_campaign_ids)} campanhas Controle:")
     for cid in control_campaign_ids:
         cid_clean = str(cid)[:15]
         refined_map[cid_clean] = 'Controle'  # USAR 15 DÍGITOS como chave
-        logger.info(f"      • {cid_clean} → Controle")
+        logger.info(f"       {cid_clean}  Controle")
 
-    logger.info(f"   📊 Mapeamento refinado criado:")
+    logger.info(f"    Mapeamento refinado criado:")
     eventos_ml = sum(1 for v in refined_map.values() if v == 'Eventos ML')
     otimiz_ml = sum(1 for v in refined_map.values() if v == 'Otimização ML')
     controle = sum(1 for v in refined_map.values() if v == 'Controle')
@@ -157,7 +157,7 @@ def normalize_whitespace(text: str) -> str:
 # ============================================================================
 
 # Definição dos matched adsets (aparecem em ML E Controle)
-# IMPORTANTE: Espaçamento será normalizado automaticamente (múltiplos espaços → 1 espaço)
+# IMPORTANTE: Espaçamento será normalizado automaticamente (múltiplos espaços  1 espaço)
 MATCHED_ADSETS = [
     'ABERTO | AD0022',
     'ABERTO | AD0027',
@@ -205,7 +205,7 @@ def identify_matched_adset_pairs(
         - matched_adsets: Lista de nomes de adsets matched
         - adsets_metrics_df: DataFrame com métricas por adset
     """
-    logger.info("🔍 Identificando matched pairs de adsets...")
+    logger.info(" Identificando matched pairs de adsets...")
 
     # CRÍTICO: Normalizar whitespace em adset_name para matching consistente
     adsets_df = adsets_df.copy()
@@ -223,7 +223,7 @@ def identify_matched_adset_pairs(
         ml_adsets_filtered = ml_adsets_agg[ml_adsets_agg[spend_col] >= min_spend]
         ml_adsets = set(ml_adsets_filtered['adset_name'].dropna().unique().tolist())
         total_spend_sum = ml_adsets_agg[spend_col].sum()
-        logger.info(f"   📊 ML: {len(ml_adsets)} adsets com {spend_col} >= R$ {min_spend:.0f}")
+        logger.info(f"    ML: {len(ml_adsets)} adsets com {spend_col} >= R$ {min_spend:.0f}")
         logger.info(f"      Total {spend_col}: R$ {total_spend_sum:.2f}")
     else:
         ml_adsets = set()
@@ -238,7 +238,7 @@ def identify_matched_adset_pairs(
         # Filtrar por gasto mínimo agregado
         ctrl_adsets_filtered = ctrl_adsets_agg[ctrl_adsets_agg[spend_col] >= min_spend]
         control_adsets = set(ctrl_adsets_filtered['adset_name'].dropna().unique().tolist())
-        logger.info(f"   📊 Controle: {len(control_adsets)} adsets com {spend_col} >= R$ {min_spend:.0f}")
+        logger.info(f"    Controle: {len(control_adsets)} adsets com {spend_col} >= R$ {min_spend:.0f}")
     else:
         control_adsets = set()
 
@@ -246,16 +246,16 @@ def identify_matched_adset_pairs(
     matched = list(ml_adsets.intersection(control_adsets))
 
     # DEBUG: Mostrar adsets matched
-    logger.info(f"   🔍 DEBUG - Adsets matched (interseção dinâmica): {len(matched)}")
+    logger.info(f"    DEBUG - Adsets matched (interseção dinâmica): {len(matched)}")
     for adset in sorted(matched):
-        logger.info(f"      • {repr(adset)}")
+        logger.info(f"       {repr(adset)}")
 
     # DECISÃO: Usar identificação dinâmica OU lista pré-definida
     if use_dynamic_matching:
-        logger.info(f"   🔧 Modo: DINÂMICO - usando todos os {len(matched)} adsets identificados")
+        logger.info(f"    Modo: DINÂMICO - usando todos os {len(matched)} adsets identificados")
         matched_final = matched
     else:
-        logger.info(f"   🔧 Modo: MANUAL - usando apenas MATCHED_ADSETS pré-definidos")
+        logger.info(f"    Modo: MANUAL - usando apenas MATCHED_ADSETS pré-definidos")
         # Filtrar apenas adsets que estão na lista MATCHED_ADSETS
         matched_final = [adset for adset in matched if adset in MATCHED_ADSETS]
 
@@ -265,42 +265,41 @@ def identify_matched_adset_pairs(
         missing_from_intersection = [adset for adset in MATCHED_ADSETS if adset not in matched]
 
         if in_list:
-            logger.info(f"   ✅ {len(in_list)} adsets matched encontrados na interseção:")
+            logger.info(f"    {len(in_list)} adsets matched encontrados na interseção:")
             for adset in sorted(in_list):
-                logger.info(f"      • {repr(adset)}")
+                logger.info(f"       {repr(adset)}")
 
         if not_in_list:
-            logger.info(f"   ⚠️  {len(not_in_list)} adsets matched NÃO estão na lista MATCHED_ADSETS (ignorados):")
+            logger.info(f"     {len(not_in_list)} adsets matched NÃO estão na lista MATCHED_ADSETS (ignorados):")
             for adset in sorted(not_in_list)[:5]:
-                logger.info(f"      • {repr(adset)}")
+                logger.info(f"       {repr(adset)}")
             if len(not_in_list) > 5:
                 logger.info(f"      ... e mais {len(not_in_list) - 5}")
 
         if missing_from_intersection:
-            logger.warning(f"   ⚠️  {len(missing_from_intersection)} adsets de MATCHED_ADSETS NÃO encontrados na interseção:")
+            logger.warning(f"     {len(missing_from_intersection)} adsets de MATCHED_ADSETS NÃO encontrados na interseção:")
             for adset in sorted(missing_from_intersection):
-                logger.warning(f"      • {repr(adset)}")
+                logger.warning(f"       {repr(adset)}")
 
-    logger.info(f"   ✅ {len(matched_final)} adsets matched selecionados (Eventos ML vs Controle)")
+    logger.info(f"    {len(matched_final)} adsets matched selecionados (Eventos ML vs Controle)")
     logger.info(f"      ML adsets (total): {len(ml_adsets)}, Controle adsets (total): {len(control_adsets)}")
 
     # Criar DataFrame com métricas por adset
     adsets_metrics = adsets_df[adsets_df['adset_name'].isin(matched_final)].copy()
 
     # DEBUG: Verificar quais colunas existem
-    logger.info(f"   🔍 DEBUG - Colunas disponíveis em adsets_df: {list(adsets_df.columns)[:20]}")
-    logger.info(f"   🔍 DEBUG - Tem 'leads_standard'? {'leads_standard' in adsets_df.columns}")
-    logger.info(f"   🔍 DEBUG - Tem 'leads'? {'leads' in adsets_df.columns}")
+    logger.info(f"    DEBUG - Tem 'leads_standard'? {'leads_standard' in adsets_df.columns}")
+    logger.info(f"    DEBUG - Tem 'leads'? {'leads' in adsets_df.columns}")
 
     # Criar coluna 'leads' a partir dos relatórios Meta
     if 'leads_standard' in adsets_metrics.columns:
         adsets_metrics['leads'] = adsets_metrics['leads_standard']
-        logger.info(f"   ✅ Criado coluna 'leads' a partir de 'leads_standard' ({adsets_metrics['leads'].sum():.0f} leads)")
+        logger.info(f"    Criado coluna 'leads' a partir de 'leads_standard' ({adsets_metrics['leads'].sum():.0f} leads)")
 
         # NOTA: Não preencher com LeadQualified aqui para edge case
         # A lógica de leads artificiais será aplicada depois em compare_adset_performance
     elif 'leads' not in adsets_metrics.columns:
-        logger.warning(f"   ⚠️ 'leads_standard' não encontrado em adsets_df, criando coluna 'leads' com 0")
+        logger.warning(f"    'leads_standard' não encontrado em adsets_df, criando coluna 'leads' com 0")
         adsets_metrics['leads'] = 0
 
     return matched_final, adsets_metrics
@@ -326,7 +325,7 @@ def identify_matched_ad_pairs(
         - matched_ads: Lista de AD codes matched
         - ads_metrics_df: DataFrame com métricas por ad
     """
-    logger.info("🔍 Identificando matched pairs de anúncios...")
+    logger.info(" Identificando matched pairs de anúncios...")
 
     # Anúncios em campanhas ML - AGREGAR primeiro, DEPOIS filtrar
     ml_ads_all = ads_df[ads_df['campaign_id'].isin(ml_campaign_ids)]
@@ -356,7 +355,7 @@ def identify_matched_ad_pairs(
     # Filtrar apenas ads na lista MATCHED_ADS
     matched_final = [ad for ad in matched if ad in MATCHED_ADS]
 
-    logger.info(f"   ✅ {len(matched_final)} anúncios matched (de {len(MATCHED_ADS)} esperados)")
+    logger.info(f"    {len(matched_final)} anúncios matched (de {len(MATCHED_ADS)} esperados)")
     logger.info(f"      ML ads: {len(ml_ads)}, Controle ads: {len(control_ads)}")
 
     # Criar DataFrame com métricas por ad
@@ -379,14 +378,14 @@ def identify_matched_adsets_faixa_a(
         adsets_df: DataFrame com adsets e suas métricas
         campaign_metrics: DataFrame com métricas de campanhas (para identificar quais têm Faixa A)
         eventos_ml_campaign_ids: IDs das campanhas Eventos ML
-        matched_df: DataFrame com conversões matched (leads→vendas) - OPCIONAL
+        matched_df: DataFrame com conversões matched (leadsvendas) - OPCIONAL
 
     Returns:
         Tuple (matched_adsets, adsets_metrics_df)
         - matched_adsets: Lista de nomes de adsets matched
         - adsets_metrics_df: DataFrame com métricas agregadas por grupo
     """
-    logger.info("🔍 Identificando matched pairs de adsets (Eventos ML vs Faixa A)...")
+    logger.info(" Identificando matched pairs de adsets (Eventos ML vs Faixa A)...")
 
     # Carregar arquivos de mapeamento da pasta faixa
     from pathlib import Path
@@ -396,10 +395,10 @@ def identify_matched_adsets_faixa_a(
     csv_files = glob.glob(str(base_path / "*.csv"))
 
     if not csv_files:
-        logger.warning("   ⚠️ Nenhum arquivo CSV encontrado em adsets_analysis/faixa/")
+        logger.warning("    Nenhum arquivo CSV encontrado em adsets_analysis/faixa/")
         return [], pd.DataFrame()
 
-    logger.info(f"   📂 Carregando {len(csv_files)} arquivos de mapeamento...")
+    logger.info(f"    Carregando {len(csv_files)} arquivos de mapeamento...")
 
     # Carregar e combinar todos os arquivos
     faixa_dfs = []
@@ -408,10 +407,10 @@ def identify_matched_adsets_faixa_a(
             df = pd.read_csv(csv_file)
             faixa_dfs.append(df)
         except Exception as e:
-            logger.warning(f"   ⚠️ Erro ao ler {Path(csv_file).name}: {e}")
+            logger.warning(f"    Erro ao ler {Path(csv_file).name}: {e}")
 
     if not faixa_dfs:
-        logger.warning("   ⚠️ Nenhum arquivo válido carregado")
+        logger.warning("    Nenhum arquivo válido carregado")
         return [], pd.DataFrame()
 
     # Combinar todos os DataFrames
@@ -424,10 +423,10 @@ def identify_matched_adsets_faixa_a(
             evento_ml_cols.append(col)
 
     if not evento_ml_cols:
-        logger.warning("   ⚠️ Colunas 'Evento ML' não encontradas nos arquivos de mapeamento")
+        logger.warning("    Colunas 'Evento ML' não encontradas nos arquivos de mapeamento")
         return [], pd.DataFrame()
 
-    logger.info(f"   📊 Colunas de Eventos ML encontradas: {evento_ml_cols}")
+    logger.info(f"    Colunas de Eventos ML encontradas: {evento_ml_cols}")
 
     # Normalizar nome do adset
     faixa_mapping['adset_name_normalized'] = faixa_mapping['Nome do conjunto de anúncios'].apply(normalize_whitespace)
@@ -437,19 +436,19 @@ def identify_matched_adsets_faixa_a(
     matched_adsets_df = faixa_mapping[matched_mask].copy()
 
     if matched_adsets_df.empty:
-        logger.info("   ℹ️ Nenhum adset matched encontrado nos arquivos de mapeamento")
+        logger.info("   ℹ Nenhum adset matched encontrado nos arquivos de mapeamento")
         return [], pd.DataFrame()
 
     # Lista de adsets matched (nomes normalizados)
     matched_adset_names = matched_adsets_df['adset_name_normalized'].unique().tolist()
 
-    logger.info(f"   ✅ {len(matched_adset_names)} adsets matched identificados nos arquivos")
+    logger.info(f"    {len(matched_adset_names)} adsets matched identificados nos arquivos")
 
     # DEBUG: Mostrar adsets matched
     if matched_adset_names:
-        logger.info(f"   🔍 Adsets matched:")
+        logger.info(f"    Adsets matched:")
         for adset in sorted(matched_adset_names)[:10]:  # Mostrar apenas os primeiros 10
-            logger.info(f"      • {repr(adset)}")
+            logger.info(f"       {repr(adset)}")
         if len(matched_adset_names) > 10:
             logger.info(f"      ... e mais {len(matched_adset_names) - 10} adsets")
 
@@ -468,14 +467,14 @@ def identify_matched_adsets_faixa_a(
             if len(cid_str) >= 15:
                 faixa_a_campaign_ids.append(cid_str[:15])
 
-    logger.info(f"   📊 {len(faixa_a_campaign_ids)} campanhas Faixa A identificadas dos arquivos")
-    logger.info(f"   📊 {len(eventos_ml_campaign_ids)} campanhas Eventos ML")
+    logger.info(f"    {len(faixa_a_campaign_ids)} campanhas Faixa A identificadas dos arquivos")
+    logger.info(f"    {len(eventos_ml_campaign_ids)} campanhas Eventos ML")
 
     # Filtrar adsets_df para incluir apenas matched adsets
     matched_adsets_data = adsets_df[adsets_df['adset_name'].isin(matched_adset_names)].copy()
 
     if matched_adsets_data.empty:
-        logger.warning("   ⚠️ Nenhum dado encontrado para adsets matched")
+        logger.warning("    Nenhum dado encontrado para adsets matched")
         return matched_adset_names, pd.DataFrame()
 
     # Criar coluna com primeiros 15 dígitos do campaign_id para matching
@@ -487,7 +486,7 @@ def identify_matched_adsets_faixa_a(
     matched_adsets_data = matched_adsets_data[matched_adsets_data['campaign_id_15'].isin(all_relevant_campaign_ids_15)].copy()
 
     if matched_adsets_data.empty:
-        logger.warning("   ⚠️ Nenhum dado encontrado para campanhas Eventos ML ou Faixa A")
+        logger.warning("    Nenhum dado encontrado para campanhas Eventos ML ou Faixa A")
         return matched_adset_names, pd.DataFrame()
 
     # Criar coluna 'leads' a partir dos relatórios Meta
@@ -553,7 +552,7 @@ def identify_matched_adsets_faixa_a(
                     aggregated['conversions'] = aggregated['conversions'].fillna(0)
                     aggregated['revenue'] = aggregated['revenue'].fillna(0)
 
-                    logger.info(f"   ✅ Conversões identificadas no matched_df:")
+                    logger.info(f"    Conversões identificadas no matched_df:")
                     for _, row in aggregated.iterrows():
                         logger.info(f"      {row['comparison_group']}: {row['conversions']:.0f} conversões, R$ {row['revenue']:.2f}")
                 else:
@@ -593,7 +592,7 @@ def identify_matched_adsets_faixa_a(
     aggregated = aggregated.fillna(0)
     aggregated = aggregated.replace([float('inf'), float('-inf')], 0)
 
-    logger.info(f"   ✅ Métricas agregadas por grupo:")
+    logger.info(f"    Métricas agregadas por grupo:")
     for _, row in aggregated.iterrows():
         logger.info(f"      {row['comparison_group']}: {row['Leads']:.0f} leads, {row['Vendas']:.0f} vendas")
 
@@ -612,7 +611,7 @@ def get_faixa_a_instances_detail(
 
     Args:
         eventos_ml_campaign_ids: IDs das campanhas Eventos ML
-        matched_df: DataFrame com conversões matched (leads→vendas) - OPCIONAL
+        matched_df: DataFrame com conversões matched (leadsvendas) - OPCIONAL
 
     Returns:
         DataFrame com colunas:
@@ -629,14 +628,14 @@ def get_faixa_a_instances_detail(
     from pathlib import Path
     import glob
 
-    logger.info("📋 Carregando detalhes de instâncias de adsets matched (Faixa A)...")
+    logger.info(" Carregando detalhes de instâncias de adsets matched (Faixa A)...")
 
     # Carregar CSVs de Faixa A (mesmos arquivos de mapeamento)
     base_path = Path("files/validation/meta_reports/adsets_analysis/faixa")
     csv_files = glob.glob(str(base_path / "*.csv"))
 
     if not csv_files:
-        logger.warning("   ⚠️ Nenhum arquivo CSV encontrado em adsets_analysis/faixa/")
+        logger.warning("    Nenhum arquivo CSV encontrado em adsets_analysis/faixa/")
         return pd.DataFrame()
 
     # Carregar CSVs de Eventos ML (para pegar spend/leads de Eventos ML)
@@ -650,7 +649,7 @@ def get_faixa_a_instances_detail(
             df = pd.read_csv(csv_file)
             faixa_dfs.append(df)
         except Exception as e:
-            logger.warning(f"   ⚠️ Erro ao ler {Path(csv_file).name}: {e}")
+            logger.warning(f"    Erro ao ler {Path(csv_file).name}: {e}")
 
     # Combinar CSVs Eventos ML
     eventos_ml_dfs = []
@@ -659,10 +658,10 @@ def get_faixa_a_instances_detail(
             df = pd.read_csv(csv_file)
             eventos_ml_dfs.append(df)
         except Exception as e:
-            logger.warning(f"   ⚠️ Erro ao ler {Path(csv_file).name}: {e}")
+            logger.warning(f"    Erro ao ler {Path(csv_file).name}: {e}")
 
     if not faixa_dfs:
-        logger.warning("   ⚠️ Nenhum arquivo Faixa A válido carregado")
+        logger.warning("    Nenhum arquivo Faixa A válido carregado")
         return pd.DataFrame()
 
     faixa_mapping = pd.concat(faixa_dfs, ignore_index=True)
@@ -672,7 +671,7 @@ def get_faixa_a_instances_detail(
     evento_ml_cols = [col for col in faixa_mapping.columns if 'evento ml' in col.lower()]
 
     if not evento_ml_cols:
-        logger.warning("   ⚠️ Colunas 'Evento ML' não encontradas")
+        logger.warning("    Colunas 'Evento ML' não encontradas")
         return pd.DataFrame()
 
     # Normalizar nomes de adsets
@@ -685,10 +684,10 @@ def get_faixa_a_instances_detail(
     matched_rows = faixa_mapping[matched_mask].copy()
 
     if matched_rows.empty:
-        logger.info("   ℹ️ Nenhuma instância matched encontrada")
+        logger.info("   ℹ Nenhuma instância matched encontrada")
         return pd.DataFrame()
 
-    logger.info(f"   ✅ {len(matched_rows)} instâncias matched encontradas nos CSVs Faixa A")
+    logger.info(f"    {len(matched_rows)} instâncias matched encontradas nos CSVs Faixa A")
 
     # Preparar lista de resultados
     results = []
@@ -749,7 +748,7 @@ def get_faixa_a_instances_detail(
             results.append(ml_record)
 
     if not results:
-        logger.warning("   ⚠️ Nenhum resultado processado")
+        logger.warning("    Nenhum resultado processado")
         return pd.DataFrame()
 
     # Criar DataFrame
@@ -757,7 +756,7 @@ def get_faixa_a_instances_detail(
 
     # Adicionar conversões do matched_df
     if matched_df is not None and not matched_df.empty and 'medium' in matched_df.columns:
-        logger.info("   📊 Adicionando conversões do matched_df...")
+        logger.info("    Adicionando conversões do matched_df...")
 
         matched_df_copy = matched_df.copy()
         matched_df_copy['medium_norm'] = matched_df_copy['medium'].apply(normalize_whitespace)
@@ -788,7 +787,7 @@ def get_faixa_a_instances_detail(
         axis=1
     )
 
-    logger.info(f"   ✅ {len(instances_df)} instâncias processadas com conversões")
+    logger.info(f"    {len(instances_df)} instâncias processadas com conversões")
     logger.info(f"      Eventos ML: {len(instances_df[instances_df['comparison_group'] == 'Eventos ML'])} instâncias")
     logger.info(f"      Faixa A: {len(instances_df[instances_df['comparison_group'] == 'Faixa A'])} instâncias")
 
@@ -812,15 +811,15 @@ def compare_all_adsets_performance(
 
     Args:
         adsets_df: DataFrame com TODOS os adsets do Excel (sem filtro de matched pairs)
-        matched_df: DataFrame com conversões matched (leads→vendas)
-        comparison_group_map: Mapeamento campaign_id → comparison_group
+        matched_df: DataFrame com conversões matched (leadsvendas)
+        comparison_group_map: Mapeamento campaign_id  comparison_group
         product_value: Valor do produto em R$
         min_spend: Gasto mínimo para incluir adset (default: R$ 0)
 
     Returns:
         DataFrame agregado com métricas por grupo (Eventos ML vs Controle)
     """
-    logger.info("📊 Comparando performance de TODOS os adsets (Eventos ML vs Controle)...")
+    logger.info(" Comparando performance de TODOS os adsets (Eventos ML vs Controle)...")
 
     # CRÍTICO: Contar LEADS (todos) e CONVERSÕES por CAMPAIGN + ADSET + COMPARISON_GROUP do matched_df
     # Isso garante consistência com a Tabela 1 (Comparação por Campanhas)
@@ -884,7 +883,7 @@ def compare_all_adsets_performance(
         total_convs = metrics_by_campaign_adset['conversions'].sum()
         total_revenue = metrics_by_campaign_adset['revenue'].sum()
         combinations_with_id = metrics_by_campaign_adset['campaign_id_from_utm'].notna().sum()
-        logger.info(f"   ✅ Leads, conversões e receita calculadas por campanha + adset + comparison_group")
+        logger.info(f"    Leads, conversões e receita calculadas por campanha + adset + comparison_group")
         logger.info(f"   Total de combinações: {len(metrics_by_campaign_adset)}")
         logger.info(f"   Campaign IDs extraídos dos UTMs: {combinations_with_id}/{len(metrics_by_campaign_adset)}")
         logger.info(f"   Leads totais: {total_leads}")
@@ -895,9 +894,9 @@ def compare_all_adsets_performance(
         duplicates = metrics_by_campaign_adset.groupby(['campaign_name', 'adset_name']).size()
         multi_group = duplicates[duplicates > 1]
         if len(multi_group) > 0:
-            logger.warning(f"   ⚠️  {len(multi_group)} pares (campaign, adset) aparecem em MÚLTIPLOS comparison_groups:")
+            logger.warning(f"     {len(multi_group)} pares (campaign, adset) aparecem em MÚLTIPLOS comparison_groups:")
             for (camp, adset), count in multi_group.head(5).items():
-                logger.warning(f"      • {adset[:40]} (campaign {camp[-20:]}): {count} grupos")
+                logger.warning(f"       {adset[:40]} (campaign {camp[-20:]}): {count} grupos")
                 # Mostrar quais grupos
                 groups = metrics_by_campaign_adset[
                     (metrics_by_campaign_adset['campaign_name'] == camp) &
@@ -925,7 +924,7 @@ def compare_all_adsets_performance(
     # CRÍTICO: Deduplicar adsets_df ANTES do merge para evitar duplicação de leads!
     # O adsets_df pode ter múltiplas linhas para o mesmo adset (diferentes períodos)
     # IMPORTANTE: Deduplicar por (campaign_id_clean, adset_name) que são as chaves do merge!
-    logger.info(f"   🔧 Deduplicando adsets_df antes do merge...")
+    logger.info(f"    Deduplicando adsets_df antes do merge...")
     adsets_df_before = len(adsets_df)
     adsets_df = adsets_df.groupby(['campaign_id_clean', 'adset_name'], as_index=False).agg({
         'campaign_id': 'first',  # Pegar primeiro campaign_id completo
@@ -937,7 +936,7 @@ def compare_all_adsets_performance(
         'lead_qualified_hq': 'sum' if 'lead_qualified_hq' in adsets_df.columns else lambda x: 0,
         'faixa_a': 'sum' if 'faixa_a' in adsets_df.columns else lambda x: 0,
     })
-    logger.info(f"      {adsets_df_before} rows → {len(adsets_df)} rows (removidas {adsets_df_before - len(adsets_df)} duplicatas)")
+    logger.info(f"      {adsets_df_before} rows  {len(adsets_df)} rows (removidas {adsets_df_before - len(adsets_df)} duplicatas)")
 
     # Merge leads, conversões e receita (do matched_df) com dados de spend do Excel
     adsets_full = adsets_df.merge(
@@ -959,21 +958,21 @@ def compare_all_adsets_performance(
     if 'comparison_group' not in adsets_full.columns:
         # Se não tem comparison_group, criar vazio (será filtrado depois)
         adsets_full['comparison_group'] = None
-        logger.warning(f"   ⚠️  comparison_group não veio do matched_df - adsets sem leads")
+        logger.warning(f"     comparison_group não veio do matched_df - adsets sem leads")
 
     # DEBUG: Verificar quantos NaN temos
     nan_count = adsets_full['comparison_group'].isna().sum()
     if nan_count > 0:
-        logger.info(f"   ℹ️  {nan_count} adsets sem comparison_group (sem leads no matched_df)")
+        logger.info(f"   ℹ  {nan_count} adsets sem comparison_group (sem leads no matched_df)")
 
     # IMPORTANTE: NÃO preencher NaN com mapeamento!
     # Leads com comparison_group=NaN não estão no matched_df, então não devem ser contados
-    logger.info(f"   ✅ comparison_group preservado EXATAMENTE como no matched_df (sem preenchimento)")
+    logger.info(f"    comparison_group preservado EXATAMENTE como no matched_df (sem preenchimento)")
 
     # DEBUG: Verificar total de leads ANTES da agregação
     total_leads_before_agg = adsets_full['leads_count'].sum()
     rows_before_agg = len(adsets_full)
-    logger.info(f"   🔍 DEBUG - ANTES agregação:")
+    logger.info(f"    DEBUG - ANTES agregação:")
     logger.info(f"      Total rows: {rows_before_agg}")
     logger.info(f"      Total leads: {total_leads_before_agg:.0f}")
 
@@ -985,7 +984,7 @@ def compare_all_adsets_performance(
     spend_before_dedup = adsets_full['spend'].sum()
 
     # DEBUG: Verificar leads ANTES da agregação por grupo
-    logger.info(f"   🔍 DEBUG - Leads ANTES da agregação por grupo (do matched_df):")
+    logger.info(f"    DEBUG - Leads ANTES da agregação por grupo (do matched_df):")
     adsets_full_temp = adsets_full.copy()
     adsets_full_temp['comparison_group_temp'] = adsets_full_temp['campaign_id_clean'].map(comparison_group_map)
     for group in ['Eventos ML', 'Controle']:
@@ -1033,14 +1032,14 @@ def compare_all_adsets_performance(
 
     # DEBUG: Verificar total de leads DEPOIS da agregação
     total_leads_after_agg = adsets_full['leads_count'].sum()
-    logger.info(f"   🔍 DEBUG - DEPOIS agregação:")
+    logger.info(f"    DEBUG - DEPOIS agregação:")
     logger.info(f"      Total rows: {after_dedup}")
     logger.info(f"      Total leads: {total_leads_after_agg:.0f}")
     if total_leads_before_agg != total_leads_after_agg:
-        logger.warning(f"      ⚠️ Leads mudaram na agregação: {total_leads_before_agg:.0f} → {total_leads_after_agg:.0f} ({total_leads_after_agg - total_leads_before_agg:+.0f})")
+        logger.warning(f"       Leads mudaram na agregação: {total_leads_before_agg:.0f}  {total_leads_after_agg:.0f} ({total_leads_after_agg - total_leads_before_agg:+.0f})")
 
     # DEBUG: Verificar leads DEPOIS da agregação por grupo
-    logger.info(f"   🔍 DEBUG - Leads DEPOIS da agregação por grupo (do matched_df):")
+    logger.info(f"    DEBUG - Leads DEPOIS da agregação por grupo (do matched_df):")
     adsets_full_temp2 = adsets_full.copy()
     adsets_full_temp2['comparison_group_temp'] = adsets_full_temp2['campaign_id_clean'].map(comparison_group_map)
     for group in ['Eventos ML', 'Controle']:
@@ -1052,21 +1051,21 @@ def compare_all_adsets_performance(
             logger.info(f"      {group}: {len(group_rows)} linhas, coluna leads_count não encontrada")
 
     if before_dedup != after_dedup:
-        logger.info(f"   🔧 Agregadas {before_dedup - after_dedup} linhas duplicadas (mesmo campaign_id + adset_id)")
-        logger.info(f"      Spend: R$ {spend_before_dedup:,.2f} → R$ {spend_after_dedup:,.2f}")
+        logger.info(f"    Agregadas {before_dedup - after_dedup} linhas duplicadas (mesmo campaign_id + adset_id)")
+        logger.info(f"      Spend: R$ {spend_before_dedup:,.2f}  R$ {spend_after_dedup:,.2f}")
         if convs_before_dedup != convs_after_dedup:
-            logger.warning(f"      ⚠️ Conversões afetadas: {convs_before_dedup:.0f} → {convs_after_dedup:.0f} (-{convs_before_dedup - convs_after_dedup:.0f})")
+            logger.warning(f"       Conversões afetadas: {convs_before_dedup:.0f}  {convs_after_dedup:.0f} (-{convs_before_dedup - convs_after_dedup:.0f})")
 
     # Criar coluna 'leads' a partir dos relatórios Meta
     # Usar 'leads_standard' como fonte oficial de leads
     if 'leads_standard' in adsets_full.columns:
         adsets_full['leads'] = adsets_full['leads_standard']
-        logger.info(f"   ✅ Criado coluna 'leads' a partir de 'leads_standard' ({adsets_full['leads'].sum():.0f} leads)")
+        logger.info(f"    Criado coluna 'leads' a partir de 'leads_standard' ({adsets_full['leads'].sum():.0f} leads)")
 
         # NOTA: Não preencher com LeadQualified aqui para edge case
         # A lógica de leads artificiais será aplicada depois (linhas 681-712)
     elif 'leads' not in adsets_full.columns:
-        logger.warning("   ⚠️ Coluna 'leads' e 'leads_standard' não encontradas, usando 0")
+        logger.warning("    Coluna 'leads' e 'leads_standard' não encontradas, usando 0")
         adsets_full['leads'] = 0
 
     # CRÍTICO: Remover adsets "fantasma" (0 leads E 0 gasto) DEPOIS do merge e renomeação
@@ -1075,7 +1074,7 @@ def compare_all_adsets_performance(
     before_filter = len(adsets_full)
 
     # DEBUG: Verificar leads ANTES do filtro de fantasma por grupo
-    logger.info(f"   🔍 DEBUG - Leads ANTES do filtro de adsets fantasma (do matched_df):")
+    logger.info(f"    DEBUG - Leads ANTES do filtro de adsets fantasma (do matched_df):")
     adsets_full_temp3 = adsets_full.copy()
     adsets_full_temp3['comparison_group_temp'] = adsets_full_temp3['campaign_id_clean'].map(comparison_group_map)
     for group in ['Eventos ML', 'Controle']:
@@ -1087,7 +1086,7 @@ def compare_all_adsets_performance(
     after_filter = len(adsets_full)
 
     # DEBUG: Verificar leads DEPOIS do filtro de fantasma por grupo
-    logger.info(f"   🔍 DEBUG - Leads DEPOIS do filtro de adsets fantasma (do matched_df):")
+    logger.info(f"    DEBUG - Leads DEPOIS do filtro de adsets fantasma (do matched_df):")
     adsets_full_temp4 = adsets_full.copy()
     adsets_full_temp4['comparison_group_temp'] = adsets_full_temp4['campaign_id_clean'].map(comparison_group_map)
     for group in ['Eventos ML', 'Controle']:
@@ -1096,7 +1095,7 @@ def compare_all_adsets_performance(
         logger.info(f"      {group}: {len(group_rows)} linhas, {total_leads:.0f} leads (matched_df)")
 
     if before_filter != after_filter:
-        logger.info(f"   🧹 Removidos {before_filter - after_filter} adsets fantasma (0 leads E 0 gasto)")
+        logger.info(f"    Removidos {before_filter - after_filter} adsets fantasma (0 leads E 0 gasto)")
 
     # AJUSTE ESPECIAL: Adsets da campanha edge case que não dispara evento Lead
     # Aplicar mesma lógica de "forjar" leads que foi feita no nível de campanha
@@ -1113,8 +1112,8 @@ def compare_all_adsets_performance(
         # Proporção fixa baseada no cálculo de metrics_calculator para a campanha
         # 671 leads / 352 LQ = 1.906 (ou seja, avg_ratio = 352/671 = 0.5244)
         avg_ratio = 0.5244  # 52.44% - mesma proporção usada pelas campanhas
-        logger.info(f"   📊 Usando proporção fixa da campanha edge case: {avg_ratio:.2%}")
-        logger.info(f"      Fator de multiplicação: {1/avg_ratio:.3f}x (LQ → Leads)")
+        logger.info(f"    Usando proporção fixa da campanha edge case: {avg_ratio:.2%}")
+        logger.info(f"      Fator de multiplicação: {1/avg_ratio:.3f}x (LQ  Leads)")
 
         if True:  # Sempre aplicar
             # Ajustar adsets da campanha especial
@@ -1128,11 +1127,11 @@ def compare_all_adsets_performance(
                     if pd.notna(lq) and lq > 0 and (pd.isna(current_leads) or current_leads == 0):
                         leads_artificial = int(lq / avg_ratio)
                         adsets_full.at[idx, 'leads'] = leads_artificial
-                        logger.info(f"   🔧 Adset especial ajustado: {adsets_full.at[idx, 'adset_name'][:50]}")
-                        logger.info(f"      LeadQualified: {lq:.0f} → Leads artificial: {leads_artificial} (proporção {avg_ratio:.2%})")
+                        logger.info(f"    Adset especial ajustado: {adsets_full.at[idx, 'adset_name'][:50]}")
+                        logger.info(f"      LeadQualified: {lq:.0f}  Leads artificial: {leads_artificial} (proporção {avg_ratio:.2%})")
 
     # DEBUG: Mostrar distribuição de leads por comparison_group ANTES do filtro
-    logger.info(f"   🔍 DEBUG - Leads por comparison_group ANTES do filtro:")
+    logger.info(f"    DEBUG - Leads por comparison_group ANTES do filtro:")
     for group in adsets_full['comparison_group'].unique():
         if pd.notna(group):
             group_leads = adsets_full[adsets_full['comparison_group'] == group]['leads'].sum()
@@ -1141,7 +1140,7 @@ def compare_all_adsets_performance(
 
     # Se configurado, agrupar "Otimização ML" com "Controle"
     if config and config.get('merge_otimizacao_ml_with_controle', False):
-        logger.info("   ⚙️ Agrupando 'Otimização ML' com 'Controle' (merge_otimizacao_ml_with_controle=true)")
+        logger.info("    Agrupando 'Otimização ML' com 'Controle' (merge_otimizacao_ml_with_controle=true)")
         adsets_full.loc[
             adsets_full['comparison_group'] == 'Otimização ML',
             'comparison_group'
@@ -1152,17 +1151,17 @@ def compare_all_adsets_performance(
     # Isso garante que os totais batam com a tabela de Campanhas
     adsets_filtered = adsets_full[adsets_full['comparison_group'].isin(['Eventos ML', 'Controle'])].copy()
 
-    logger.info(f"   📊 Todos os adsets das campanhas Eventos ML + Controle: {len(adsets_filtered)}")
+    logger.info(f"    Todos os adsets das campanhas Eventos ML + Controle: {len(adsets_filtered)}")
 
     # DEBUG: Mostrar distribuição de leads por comparison_group DEPOIS do filtro
-    logger.info(f"   🔍 DEBUG - Leads por comparison_group DEPOIS do filtro:")
+    logger.info(f"    DEBUG - Leads por comparison_group DEPOIS do filtro:")
     for group in ['Eventos ML', 'Controle']:
         group_leads = adsets_filtered[adsets_filtered['comparison_group'] == group]['leads'].sum()
         group_count = len(adsets_filtered[adsets_filtered['comparison_group'] == group])
         logger.info(f"      {group}: {group_count} adsets, {group_leads:.0f} leads")
 
     # DEBUG: Verificar spend e leads por grupo
-    logger.info(f"   💰 DEBUG - Spend e Leads por grupo (leads do matched_df):")
+    logger.info(f"    DEBUG - Spend e Leads por grupo (leads do matched_df):")
     for group in ['Eventos ML', 'Controle']:
         group_adsets = adsets_filtered[adsets_filtered['comparison_group'] == group]
         total_spend = group_adsets['spend'].sum()
@@ -1180,7 +1179,7 @@ def compare_all_adsets_performance(
     adsets_filtered['conversion_rate'] = adsets_filtered['conversions'] / adsets_filtered['leads'].replace(0, 1)  # Evitar divisão por zero
 
     # DEBUG: Verificar se há duplicação de conversões por comparison_group
-    logger.info(f"\n   🔍 DEBUG - Verificando conversões únicas por grupo:")
+    logger.info(f"\n    DEBUG - Verificando conversões únicas por grupo:")
     for group in ['Eventos ML', 'Controle']:
         group_adsets = adsets_filtered[adsets_filtered['comparison_group'] == group]
         total_convs = group_adsets['conversions'].sum()
@@ -1194,15 +1193,15 @@ def compare_all_adsets_performance(
             top5 = adsets_with_convs.nlargest(5, 'conversions')[['adset_name', 'campaign_id_clean', 'adset_id', 'conversions']]
             for idx, row in top5.iterrows():
                 adset_id_short = str(row['adset_id'])[:18] if pd.notna(row.get('adset_id')) else 'NO_ID'
-                logger.info(f"         • {row['adset_name'][:40]} (campaign {row['campaign_id_clean']}, adset {adset_id_short}): {row['conversions']:.0f}")
+                logger.info(f"          {row['adset_name'][:40]} (campaign {row['campaign_id_clean']}, adset {adset_id_short}): {row['conversions']:.0f}")
 
     # DEBUG ESPECÍFICO: Investigar "ABERTO | AD0027" duplicado
-    logger.info(f"\n   🔍 DEBUG - Investigando 'ABERTO | AD0027' duplicado:")
+    logger.info(f"\n    DEBUG - Investigando 'ABERTO | AD0027' duplicado:")
     ad0027_adsets = adsets_filtered[adsets_filtered['adset_name'] == 'ABERTO | AD0027']
     if len(ad0027_adsets) > 0:
         logger.info(f"      Total de linhas com 'ABERTO | AD0027': {len(ad0027_adsets)}")
         for idx, row in ad0027_adsets.iterrows():
-            logger.info(f"         • campaign_id: {row.get('campaign_id_clean', 'N/A')}")
+            logger.info(f"          campaign_id: {row.get('campaign_id_clean', 'N/A')}")
             logger.info(f"           adset_id: {row.get('adset_id', 'N/A')}")
             logger.info(f"           comparison_group: {row.get('comparison_group', 'N/A')}")
             logger.info(f"           conversions: {row.get('conversions', 0):.0f}")
@@ -1216,7 +1215,7 @@ def compare_all_adsets_performance(
                     adset_id = row.get('adset_id')
                     campaign_id = str(row.get('campaign_id_clean', ''))
 
-                    logger.info(f"           🔍 Procurando conversões para campaign {campaign_id}, adset {adset_id}")
+                    logger.info(f"            Procurando conversões para campaign {campaign_id}, adset {adset_id}")
 
                     # Filtrar conversões desse adset específico
                     converted_leads = matched_df[matched_df['converted'] == True].copy()
@@ -1240,13 +1239,13 @@ def compare_all_adsets_performance(
                         logger.info(f"              Conversões do adset 'ABERTO | AD0027': {len(converted_leads_adset)}")
 
                         if len(converted_leads_adset) > 0:
-                            logger.info(f"           📧 Emails das conversões ({len(converted_leads_adset)}):")
+                            logger.info(f"            Emails das conversões ({len(converted_leads_adset)}):")
                             for idx, conv_row in converted_leads_adset.head(5).iterrows():
                                 email = conv_row.get('email', 'N/A')
                                 medium_orig = conv_row.get('medium', 'N/A')
                                 logger.info(f"              - {email} (medium original: '{medium_orig}')")
                 except Exception as e:
-                    logger.error(f"           ❌ Erro ao buscar emails: {e}")
+                    logger.error(f"            Erro ao buscar emails: {e}")
 
     # Garantir que revenue_adjusted existe antes da agregação
     if 'revenue_adjusted' not in adsets_filtered.columns:
@@ -1272,7 +1271,7 @@ def compare_all_adsets_performance(
         aggregated['roas_adjusted'] = aggregated['revenue_adjusted'] / aggregated['spend']
         aggregated['margin_adjusted'] = aggregated['revenue_adjusted'] - aggregated['spend']
 
-    logger.info(f"   ✅ Comparação completa de adsets calculada")
+    logger.info(f"    Comparação completa de adsets calculada")
     logger.info(f"      Eventos ML: {aggregated[aggregated['comparison_group']=='Eventos ML']['conversions'].sum():.0f} conversões")
     logger.info(f"      Controle: {aggregated[aggregated['comparison_group']=='Controle']['conversions'].sum():.0f} conversões")
 
@@ -1291,17 +1290,17 @@ def compare_adset_performance(
 
     Args:
         adsets_metrics_df: DataFrame com métricas de adsets (da Meta API)
-        matched_df: DataFrame com conversões matched (leads→vendas)
-        ml_type_map: Mapeamento campaign_id → ml_type (DEPRECATED - usar comparison_group_map)
+        matched_df: DataFrame com conversões matched (leadsvendas)
+        ml_type_map: Mapeamento campaign_id  ml_type (DEPRECATED - usar comparison_group_map)
         product_value: Valor do produto em R$
-        comparison_group_map: Mapeamento campaign_id → comparison_group ('Eventos ML', 'Otimização ML', 'Controle')
+        comparison_group_map: Mapeamento campaign_id  comparison_group ('Eventos ML', 'Otimização ML', 'Controle')
 
     Returns:
         Dict com DataFrames:
         - 'aggregated': Agregação ML vs Controle
         - 'detailed': Detalhamento adset-a-adset (CADA CAMPANHA SEPARADA)
     """
-    logger.info("📊 Comparando performance de adsets...")
+    logger.info(" Comparando performance de adsets...")
 
     # CRÍTICO: Normalizar adset_name no DataFrame de métricas do Excel
     # Isso resolve problemas de espaçamento ("ABERTO |  AD0065" vs "ABERTO | AD0065")
@@ -1350,7 +1349,7 @@ def compare_adset_performance(
         leads_by_campaign_adset['adset_name'] = leads_by_campaign_adset['adset_name'].apply(normalize_whitespace)
 
         # IMPORTANTE: Extrair Campaign ID do final do nome para fazer matching preciso
-        # Exemplo: "CAMPAIGN | 2025-04-15|120220370119870390" → ID = "120220370119870390"
+        # Exemplo: "CAMPAIGN | 2025-04-15|120220370119870390"  ID = "120220370119870390"
         def extract_campaign_id(campaign_name):
             """Extrai o Campaign ID do final do nome da campanha"""
             if pd.isna(campaign_name):
@@ -1368,24 +1367,24 @@ def compare_adset_performance(
 
         # DEBUG: Verificar quantos IDs foram extraídos
         ids_extracted = conversions_by_campaign_adset['campaign_id_from_utm'].notna().sum()
-        logger.info(f"   ✅ Conversões calculadas por campanha + adset (via 'campaign' + 'medium')")
+        logger.info(f"    Conversões calculadas por campanha + adset (via 'campaign' + 'medium')")
         logger.info(f"   Total de combinações campanha+adset com conversões: {len(conversions_by_campaign_adset)}")
         logger.info(f"   Campaign IDs extraídos dos UTMs: {ids_extracted}/{len(conversions_by_campaign_adset)}")
-        logger.info(f"   ✅ Leads calculados por campanha + adset (via 'campaign' + 'medium')")
+        logger.info(f"    Leads calculados por campanha + adset (via 'campaign' + 'medium')")
         logger.info(f"   Total de combinações campanha+adset com leads: {len(leads_by_campaign_adset)}")
 
         if ids_extracted < len(conversions_by_campaign_adset):
-            logger.warning(f"   ⚠️ {len(conversions_by_campaign_adset) - ids_extracted} conversões SEM Campaign ID no UTM")
+            logger.warning(f"    {len(conversions_by_campaign_adset) - ids_extracted} conversões SEM Campaign ID no UTM")
             # Mostrar exemplos
             sem_id = conversions_by_campaign_adset[conversions_by_campaign_adset['campaign_id_from_utm'].isna()]
             for idx, row in sem_id.head(3).iterrows():
-                logger.warning(f"      • Campaign: {row['campaign_name'][:70]}")
+                logger.warning(f"       Campaign: {row['campaign_name'][:70]}")
                 logger.warning(f"        Adset: {row['adset_name'][:50]}")
     else:
         conversions_by_campaign_adset = pd.DataFrame(columns=['campaign_name', 'adset_name', 'conversions', 'revenue'])
         leads_by_campaign_adset = pd.DataFrame(columns=['campaign_name', 'adset_name', 'leads_matched_df'])
         if 'medium' not in matched_df.columns:
-            logger.warning("   ⚠️ Coluna 'medium' não encontrada em matched_df - conversões não podem ser atribuídas aos adsets!")
+            logger.warning("    Coluna 'medium' não encontrada em matched_df - conversões não podem ser atribuídas aos adsets!")
 
     # Merge conversões por campanha + adset
     # IMPORTANTE: Usar Campaign ID + Adset Name para matching preciso
@@ -1411,24 +1410,24 @@ def compare_adset_performance(
     collisions = collision_check[collision_check > 1]
 
     if len(collisions) > 0:
-        logger.warning(f"\n   ⚠️ DETECTADAS {len(collisions)} COLISÕES DE CAMPAIGN_ID (mesmo ID, contas diferentes):")
+        logger.warning(f"\n    DETECTADAS {len(collisions)} COLISÕES DE CAMPAIGN_ID (mesmo ID, contas diferentes):")
         for campaign_id_clean in collisions.index[:5]:  # Mostrar primeiros 5
             accounts = adsets_metrics_df[adsets_metrics_df['campaign_id_clean'] == campaign_id_clean]['_account_name'].unique()
             full_ids = adsets_metrics_df[adsets_metrics_df['campaign_id_clean'] == campaign_id_clean]['campaign_id_full'].unique()
-            logger.warning(f"      • ID truncado: {campaign_id_clean}")
+            logger.warning(f"       ID truncado: {campaign_id_clean}")
             logger.warning(f"        Contas: {', '.join(accounts)}")
             logger.warning(f"        IDs completos: {', '.join(full_ids[:3])}")
-        logger.warning(f"   🔧 Usando IDs COMPLETOS para merge para evitar mapeamento incorreto")
+        logger.warning(f"    Usando IDs COMPLETOS para merge para evitar mapeamento incorreto")
         use_full_id = True
     else:
-        logger.info(f"   ✅ Sem colisões de campaign_id detectadas - usando IDs truncados (compatibilidade)")
+        logger.info(f"    Sem colisões de campaign_id detectadas - usando IDs truncados (compatibilidade)")
         use_full_id = False
 
     # Definir coluna de merge baseado em detecção de colisões
     merge_id_col = 'campaign_id_full' if use_full_id else 'campaign_id_clean'
 
     # DEBUG: Verificar matching antes do merge
-    logger.info(f"\n   🔍 DEBUG - Preparando merge:")
+    logger.info(f"\n    DEBUG - Preparando merge:")
     logger.info(f"      IDs únicos no Excel: {adsets_metrics_df['campaign_id_clean'].nunique()}")
     logger.info(f"      IDs únicos nas conversões: {conversions_by_campaign_adset['campaign_id_clean'].nunique()}")
 
@@ -1439,7 +1438,7 @@ def compare_adset_performance(
     logger.info(f"      IDs que fazem match: {len(matching_ids)}")
 
     if len(matching_ids) == 0:
-        logger.warning(f"      ⚠️ NENHUM ID FAZ MATCH! Vamos comparar:")
+        logger.warning(f"       NENHUM ID FAZ MATCH! Vamos comparar:")
         logger.warning(f"         Excel (primeiros 3): {list(ids_excel)[:3]}")
         logger.warning(f"         Conversões (primeiros 3): {list(ids_conversions)[:3]}")
 
@@ -1456,14 +1455,14 @@ def compare_adset_performance(
 
     if len(unmatched_conversions) > 0:
         total_unmatched_convs = unmatched_conversions['conversions'].sum()
-        logger.warning(f"\n   ⚠️ CONVERSÕES NÃO ENCONTRADAS NO EXCEL META:")
+        logger.warning(f"\n    CONVERSÕES NÃO ENCONTRADAS NO EXCEL META:")
         logger.warning(f"      Total de adsets não encontrados: {len(unmatched_conversions)}")
         logger.warning(f"      Total de conversões perdidas: {total_unmatched_convs:.0f}")
         logger.warning(f"\n      Detalhes dos adsets não encontrados:")
 
         # Para cada adset não encontrado, buscar os emails correspondentes em matched_df
         for idx, row in unmatched_conversions.iterrows():
-            logger.warning(f"      • Campaign: {row['campaign_name'][:60]}")
+            logger.warning(f"       Campaign: {row['campaign_name'][:60]}")
             logger.warning(f"        Adset: {row['adset_name'][:50]}")
             logger.warning(f"        Campaign ID (15): {row['campaign_id_clean']}")
             logger.warning(f"        Conversões: {row['conversions']:.0f}")
@@ -1490,7 +1489,7 @@ def compare_adset_performance(
 
     # DEBUG: Verificar spend ANTES do merge
     if 'spend' in adsets_metrics_df.columns:
-        logger.info(f"   🔍 DEBUG - ANTES do merge:")
+        logger.info(f"    DEBUG - ANTES do merge:")
         logger.info(f"      adsets_metrics_df spend sum: R$ {adsets_metrics_df['spend'].sum():,.2f}")
         if 'total_spend' in adsets_metrics_df.columns:
             logger.info(f"      adsets_metrics_df total_spend sum: R$ {adsets_metrics_df['total_spend'].sum():,.2f}")
@@ -1509,7 +1508,7 @@ def compare_adset_performance(
     before_dedup = len(adsets_full)
 
     # DEBUG: Verificar se 'leads' existe ANTES da agregação
-    logger.info(f"   🔍 DEBUG - ANTES da agregação:")
+    logger.info(f"    DEBUG - ANTES da agregação:")
     logger.info(f"      'leads' in columns? {'leads' in adsets_full.columns}")
     if 'leads' in adsets_full.columns:
         logger.info(f"      'leads' sum: {adsets_full['leads'].sum():.0f}")
@@ -1558,7 +1557,7 @@ def compare_adset_performance(
     after_dedup = len(adsets_full)
 
     if before_dedup != after_dedup:
-        logger.info(f"   🔧 Agregadas {before_dedup - after_dedup} linhas duplicadas (mesmo campaign_id + adset_id)")
+        logger.info(f"    Agregadas {before_dedup - after_dedup} linhas duplicadas (mesmo campaign_id + adset_id)")
         logger.info(f"      Spend foi SOMADO para duplicatas (não descartado)")
 
     # REMOVIDO: Não substituir leads do Meta com matched_df
@@ -1569,14 +1568,14 @@ def compare_adset_performance(
     # separadamente e já estão presentes nos relatórios Meta
 
     # Manter leads do Meta como estão (não fazer merge com leads_matched_df)
-    logger.info(f"   ℹ️  Mantendo leads dos relatórios Meta (não substituído por matched_df)")
+    logger.info(f"   ℹ  Mantendo leads dos relatórios Meta (não substituído por matched_df)")
     if 'leads' in adsets_full.columns:
         logger.info(f"      Total de leads (Meta): {adsets_full['leads'].sum():.0f}")
 
     # 2. Para conversões que não tiveram match exato, tentar matching flexível
     # (útil quando nomes no UTM são truncados)
     if len(unmatched_conversions) > 0:
-        logger.info(f"   🔧 Tentando matching flexível para {len(unmatched_conversions)} conversões não encontradas...")
+        logger.info(f"    Tentando matching flexível para {len(unmatched_conversions)} conversões não encontradas...")
         matches_found = 0
 
         # Para cada conversão que não encontrou adset no Excel
@@ -1588,7 +1587,7 @@ def compare_adset_performance(
             utm_name_normalized = ' '.join(utm_name.split()).lower()
 
             # DEBUG: Log do adset que estamos tentando encontrar
-            logger.info(f"      🔍 Buscando adset: '{utm_name}' (campanha {utm_campaign_id})")
+            logger.info(f"       Buscando adset: '{utm_name}' (campanha {utm_campaign_id})")
 
             # Procurar adsets da mesma campanha no Excel
             same_campaign_excel = adsets_metrics_df[
@@ -1618,7 +1617,7 @@ def compare_adset_performance(
                     if match_mask.any():
                         adsets_full.loc[match_mask, 'conversions'] = conv_row['conversions']
                         matches_found += 1
-                        logger.info(f"      ✅ Match EXATO encontrado: '{utm_name[:50]}' → '{excel_name[:50]}'")
+                        logger.info(f"       Match EXATO encontrado: '{utm_name[:50]}'  '{excel_name[:50]}'")
                         break
 
                 # Estratégia 2: Substring/similaridade (70% dos caracteres)
@@ -1636,13 +1635,13 @@ def compare_adset_performance(
                         if match_mask.any():
                             adsets_full.loc[match_mask, 'conversions'] = conv_row['conversions']
                             matches_found += 1
-                            logger.info(f"      ✅ Match flexível ({check_len} chars): '{utm_name[:50]}' → '{excel_name[:50]}'")
+                            logger.info(f"       Match flexível ({check_len} chars): '{utm_name[:50]}'  '{excel_name[:50]}'")
                             break
 
         if matches_found > 0:
-            logger.info(f"   ✅ Recuperadas {matches_found} conversões via matching flexível!")
+            logger.info(f"    Recuperadas {matches_found} conversões via matching flexível!")
         else:
-            logger.info(f"   ⚠️ Nenhum match flexível encontrado")
+            logger.info(f"    Nenhum match flexível encontrado")
 
     # CRÍTICO: Deduplic novamente após matching flexível (pode ter criado duplicatas)
     before_dedup2 = len(adsets_full)
@@ -1650,7 +1649,7 @@ def compare_adset_performance(
     after_dedup2 = len(adsets_full)
 
     if before_dedup2 != after_dedup2:
-        logger.info(f"   🔧 Removidas {before_dedup2 - after_dedup2} linhas duplicadas após matching flexível")
+        logger.info(f"    Removidas {before_dedup2 - after_dedup2} linhas duplicadas após matching flexível")
 
     adsets_full['conversions'] = adsets_full['conversions'].fillna(0)
     adsets_full['revenue'] = adsets_full['revenue'].fillna(0)  # Receita real do matched_df
@@ -1658,7 +1657,7 @@ def compare_adset_performance(
     # Preencher revenue_adjusted (TMB) se disponível
     if 'revenue_adjusted' in adsets_full.columns:
         adsets_full['revenue_adjusted'] = adsets_full['revenue_adjusted'].fillna(0)
-        logger.info(f"   ✅ revenue_adjusted preenchida com zeros onde necessário")
+        logger.info(f"    revenue_adjusted preenchida com zeros onde necessário")
 
     # Remover colunas temporárias
     adsets_full = adsets_full.drop(columns=['campaign_id_clean', 'campaign_id_from_utm', 'campaign_name_conv'], errors='ignore')
@@ -1666,7 +1665,7 @@ def compare_adset_performance(
     # Calcular métricas de negócio
     # IMPORTANTE: NÃO sobrescrever 'leads' - o valor já vem correto do Excel!
     # Apenas garantir que leads esteja preenchido (fallback para casos sem dados)
-    logger.info(f"   🔍 DEBUG - Verificando coluna 'leads' após aggregation:")
+    logger.info(f"    DEBUG - Verificando coluna 'leads' após aggregation:")
     logger.info(f"      'leads' in columns? {'leads' in adsets_full.columns}")
     if 'leads' in adsets_full.columns:
         logger.info(f"      'leads' sum: {adsets_full['leads'].sum():.0f}")
@@ -1674,7 +1673,7 @@ def compare_adset_performance(
         logger.info(f"      'leads' count non-zero: {(adsets_full['leads'] > 0).sum()}")
 
     if 'leads' not in adsets_full.columns or adsets_full['leads'].isna().all():
-        logger.warning("   ⚠️ Coluna 'leads' não encontrada ou vazia, usando count como fallback")
+        logger.warning("    Coluna 'leads' não encontrada ou vazia, usando count como fallback")
         adsets_full['leads'] = adsets_full.groupby(['campaign_id', 'adset_name'])['adset_id'].transform('count')
     else:
         # Preencher NaN com 0
@@ -1687,9 +1686,9 @@ def compare_adset_performance(
     ]
 
     if len(weird_adsets) > 0:
-        logger.warning(f"\n   ⚠️ ATENÇÃO: {len(weird_adsets)} adset(s) com conversões mas 0 leads:")
+        logger.warning(f"\n    ATENÇÃO: {len(weird_adsets)} adset(s) com conversões mas 0 leads:")
         for idx, row in weird_adsets.iterrows():
-            logger.warning(f"      • {row['campaign_name'][:60]}")
+            logger.warning(f"       {row['campaign_name'][:60]}")
             logger.warning(f"        Adset: {row['adset_name'][:50]}")
             logger.warning(f"        Conversões: {row['conversions']:.0f} | Leads (Excel): {row['leads']:.0f}")
             logger.warning(f"        Isso indica discrepância entre dados CAPI/CSV e relatório Meta")
@@ -1710,8 +1709,8 @@ def compare_adset_performance(
         # Proporção fixa baseada no cálculo de metrics_calculator para a campanha
         # 671 leads / 352 LQ = 1.906 (ou seja, avg_ratio = 352/671 = 0.5244)
         avg_ratio = 0.5244  # 52.44% - mesma proporção usada pelas campanhas
-        logger.info(f"   📊 Usando proporção fixa da campanha edge case (Matched): {avg_ratio:.2%}")
-        logger.info(f"      Fator de multiplicação: {1/avg_ratio:.3f}x (LQ → Leads)")
+        logger.info(f"    Usando proporção fixa da campanha edge case (Matched): {avg_ratio:.2%}")
+        logger.info(f"      Fator de multiplicação: {1/avg_ratio:.3f}x (LQ  Leads)")
 
         if True:  # Sempre aplicar
             # Ajustar adsets da campanha especial
@@ -1725,8 +1724,8 @@ def compare_adset_performance(
                     if pd.notna(lq) and lq > 0 and (pd.isna(current_leads) or current_leads == 0):
                         leads_artificial = int(lq / avg_ratio)
                         adsets_full.at[idx, 'leads'] = leads_artificial
-                        logger.info(f"   🔧 Adset especial ajustado (Matched): {adsets_full.at[idx, 'adset_name'][:50]}")
-                        logger.info(f"      LeadQualified: {lq:.0f} → Leads artificial: {leads_artificial} (proporção {avg_ratio:.2%})")
+                        logger.info(f"    Adset especial ajustado (Matched): {adsets_full.at[idx, 'adset_name'][:50]}")
+                        logger.info(f"      LeadQualified: {lq:.0f}  Leads artificial: {leads_artificial} (proporção {avg_ratio:.2%})")
 
     # Filtrar adsets com gasto 0 E leads 0 (sem atividade)
     # IMPORTANTE: Manter adsets com conversões mesmo if spend/leads = 0
@@ -1736,7 +1735,7 @@ def compare_adset_performance(
         (adsets_full['conversions'] > 0)
     ].copy()
 
-    logger.info(f"   📊 Adsets após filtro (removidos com spend=0 e leads=0): {len(adsets_full)}")
+    logger.info(f"    Adsets após filtro (removidos com spend=0 e leads=0): {len(adsets_full)}")
 
     adsets_full['cpl'] = adsets_full['spend'] / adsets_full['leads'].replace(0, 1)
     adsets_full['cpa'] = adsets_full['spend'] / adsets_full['conversions'].replace(0, 1)
@@ -1750,10 +1749,10 @@ def compare_adset_performance(
     # Calcular ROAS Ajustado TMB se disponível
     if 'revenue_adjusted' in adsets_full.columns:
         adsets_full['roas_adjusted'] = adsets_full['revenue_adjusted'] / adsets_full['spend'].replace(0, 1)
-        logger.info(f"   ✅ ROAS Ajustado TMB calculado para adsets_full")
+        logger.info(f"    ROAS Ajustado TMB calculado para adsets_full")
     else:
-        logger.warning(f"   ⚠️ 'revenue_adjusted' NÃO encontrado em adsets_full")
-        logger.warning(f"   🔍 Colunas em adsets_full: {adsets_full.columns.tolist()}")
+        logger.warning(f"    'revenue_adjusted' NÃO encontrado em adsets_full")
+        logger.warning(f"    Colunas em adsets_full: {adsets_full.columns.tolist()}")
 
     # Agregação ML vs Controle
     agg_dict_ml = {
@@ -1817,10 +1816,10 @@ def compare_adset_performance(
         # Verificar se há duplicatas com a chave composta
         duplicate_keys = adset_account_map_df[adset_account_map_df.duplicated(subset=['map_key'], keep=False)]
         if len(duplicate_keys) > 0:
-            logger.warning(f"   ⚠️ {len(duplicate_keys)} duplicatas com mesma chave (campaign_id|adset_id) mas contas diferentes!")
+            logger.warning(f"    {len(duplicate_keys)} duplicatas com mesma chave (campaign_id|adset_id) mas contas diferentes!")
             for key in duplicate_keys['map_key'].unique()[:3]:
                 accounts = duplicate_keys[duplicate_keys['map_key'] == key]['_account_name'].unique()
-                logger.warning(f"      • {key}: {', '.join(accounts)}")
+                logger.warning(f"       {key}: {', '.join(accounts)}")
 
         # Criar mapa usando chave composta
         account_map = adset_account_map_df.set_index('map_key')['_account_name'].to_dict()
@@ -1853,7 +1852,7 @@ def compare_adset_performance(
         detailed['campaign_id_15'] = detailed['campaign_id'].astype(str).str[:15]
 
         # DEBUG: Verificar mapeamento antes de aplicar
-        logger.info(f"\n   🔍 DEBUG ADSETS - Verificando mapeamento comparison_group:")
+        logger.info(f"\n    DEBUG ADSETS - Verificando mapeamento comparison_group:")
         logger.info(f"      Total de IDs no mapa: {len(comparison_group_map)}")
         logger.info(f"      Total de adsets: {len(detailed)}")
         logger.info(f"      IDs únicos nos adsets (15 dig): {detailed['campaign_id_15'].nunique()}")
@@ -1862,31 +1861,31 @@ def compare_adset_performance(
         logger.info(f"\n      Mapeamento de campanhas ML:")
         for id_15, group in comparison_group_map.items():
             if 'ML' in group or group == 'Eventos ML':
-                logger.info(f"         {id_15} → {group}")
+                logger.info(f"         {id_15}  {group}")
 
         # Verificar se há IDs que não fazem match
         ids_in_detailed = set(detailed['campaign_id_15'].unique())
         ids_in_map = set(comparison_group_map.keys())
         ids_not_in_map = ids_in_detailed - ids_in_map
         if ids_not_in_map:
-            logger.warning(f"      ⚠️ {len(ids_not_in_map)} IDs de adsets NÃO encontrados no mapa:")
+            logger.warning(f"       {len(ids_not_in_map)} IDs de adsets NÃO encontrados no mapa:")
             for id_val in list(ids_not_in_map)[:5]:
                 # Mostrar o nome da campanha correspondente
                 sample_adset = detailed[detailed['campaign_id_15'] == id_val].iloc[0]
-                logger.warning(f"         • ID 15: {id_val} → {sample_adset['campaign_name'][:50]}")
+                logger.warning(f"          ID 15: {id_val}  {sample_adset['campaign_name'][:50]}")
 
         detailed['comparison_group'] = detailed['campaign_id_15'].map(comparison_group_map)
 
         # DEBUG: Verificar se há NaN após mapeamento
         unmapped_count = detailed['comparison_group'].isna().sum()
         if unmapped_count > 0:
-            logger.warning(f"      ⚠️ {unmapped_count} adsets sem grupo após mapeamento (NaN)")
+            logger.warning(f"       {unmapped_count} adsets sem grupo após mapeamento (NaN)")
 
-        logger.info("   ✅ Usando mapeamento refinado (Eventos ML / Otimização ML / Controle)")
+        logger.info("    Usando mapeamento refinado (Eventos ML / Otimização ML / Controle)")
     else:
         # LEGACY: Converter ml_type para comparison_group (sem distinção Eventos/Otimização)
         def classify_comparison_group_from_ml_type(row):
-            """Conversão legacy: ml_type → comparison_group (sem refinamento)"""
+            """Conversão legacy: ml_type  comparison_group (sem refinamento)"""
             ml_type = row['ml_type']
             if ml_type == 'COM_ML':
                 return 'Eventos ML'  # Assume todos ML são Eventos (não ideal)
@@ -1896,7 +1895,7 @@ def compare_adset_performance(
                 return 'Outro'
 
         detailed['comparison_group'] = detailed.apply(classify_comparison_group_from_ml_type, axis=1)
-        logger.warning("   ⚠️ Usando mapeamento legacy (sem distinção Eventos ML vs Otimização ML)")
+        logger.warning("    Usando mapeamento legacy (sem distinção Eventos ML vs Otimização ML)")
 
     # Filtrar apenas "Eventos ML" vs "Controle" (excluir "Otimização ML" e "Outro")
     before_filter = len(detailed)
@@ -1906,7 +1905,7 @@ def compare_adset_performance(
     removed_by_filter = detailed[~detailed['comparison_group'].isin(['Eventos ML', 'Controle'])].copy()
     if len(removed_by_filter) > 0:
         convs_removed = removed_by_filter['conversions'].sum()
-        logger.warning(f"\n   🔍 CONVERSÕES REMOVIDAS PELO FILTRO (Otimização ML / Outro):")
+        logger.warning(f"\n    CONVERSÕES REMOVIDAS PELO FILTRO (Otimização ML / Outro):")
         logger.warning(f"      Adsets removidos: {len(removed_by_filter)}")
         logger.warning(f"      Conversões removidas: {convs_removed:.0f}")
 
@@ -1923,7 +1922,7 @@ def compare_adset_performance(
         # Mostrar detalhes de cada adset removido
         logger.warning(f"\n      Detalhes dos adsets removidos:")
         for idx, row in removed_by_filter.iterrows():
-            logger.warning(f"      • [{row['comparison_group']}] {row['campaign_name'][:60]}")
+            logger.warning(f"       [{row['comparison_group']}] {row['campaign_name'][:60]}")
             logger.warning(f"        Adset: {row['adset_name'][:60]}")
             logger.warning(f"        Conversões: {row['conversions']:.0f}")
             logger.warning(f"        Campaign ID (completo): {row['campaign_id']}")
@@ -1953,7 +1952,7 @@ def compare_adset_performance(
                     emails = matching_rows['email'].unique()
                     logger.warning(f"        Emails ({len(emails)}): {', '.join(emails[:5])}{' ...' if len(emails) > 5 else ''}")
                 else:
-                    logger.warning(f"        ⚠️  Não encontrei os emails correspondentes em matched_df")
+                    logger.warning(f"          Não encontrei os emails correspondentes em matched_df")
         logger.warning("")
 
     detailed = detailed[detailed['comparison_group'].isin(['Eventos ML', 'Controle'])].copy()
@@ -1961,10 +1960,10 @@ def compare_adset_performance(
     conversions_after_filter = detailed['conversions'].sum()
 
     if before_filter != after_filter:
-        logger.info(f"   🔍 Filtrados {before_filter - after_filter} adsets (Otimização ML ou Outro)")
-        logger.info(f"   📊 Conversões: {conversions_before_filter:.0f} → {conversions_after_filter:.0f} ({conversions_before_filter - conversions_after_filter:.0f} removidas)")
+        logger.info(f"    Filtrados {before_filter - after_filter} adsets (Otimização ML ou Outro)")
+        logger.info(f"    Conversões: {conversions_before_filter:.0f}  {conversions_after_filter:.0f} ({conversions_before_filter - conversions_after_filter:.0f} removidas)")
 
-    logger.info("   ✅ Comparações de adsets calculadas")
+    logger.info("    Comparações de adsets calculadas")
     logger.info(f"      Adsets após filtro (Eventos ML + Controle): {len(detailed)}")
 
     # CRÍTICO: Para matched pairs, agregar por (campaign_id, adset_id, comparison_group)
@@ -1973,8 +1972,8 @@ def compare_adset_performance(
     is_matched_pairs = unique_adset_names < 20 and len(detailed) > unique_adset_names * 2
 
     if is_matched_pairs:
-        logger.info(f"\n   🔍 MATCHED PAIRS detectado ({unique_adset_names} adsets únicos, {len(detailed)} linhas)")
-        logger.info(f"   🔧 Agregando por (campaign_id, adset_id, comparison_group) para preservar instâncias por campanha...")
+        logger.info(f"\n    MATCHED PAIRS detectado ({unique_adset_names} adsets únicos, {len(detailed)} linhas)")
+        logger.info(f"    Agregando por (campaign_id, adset_id, comparison_group) para preservar instâncias por campanha...")
 
         # CRÍTICO: Para matched pairs, usar SEMPRE 'spend' (período filtrado)
         # NÃO usar total_spend porque queremos apenas o gasto do período de análise
@@ -2003,7 +2002,7 @@ def compare_adset_performance(
         if spend_column != 'spend':
             detailed_aggregated['spend'] = detailed_aggregated[spend_column]
             detailed_aggregated = detailed_aggregated.drop(columns=[spend_column])
-            logger.info(f"   📊 Usando {spend_column} (histórico) para matched pairs")
+            logger.info(f"    Usando {spend_column} (histórico) para matched pairs")
 
         # Recalcular métricas derivadas
         detailed_aggregated['cpl'] = detailed_aggregated['spend'] / detailed_aggregated['leads'].replace(0, 1)
@@ -2029,10 +2028,10 @@ def compare_adset_performance(
             ml_map = detailed.groupby('adset_name')['ml_type'].first().to_dict()
             detailed_aggregated['ml_type'] = detailed_aggregated['adset_name'].map(ml_map)
 
-        logger.info(f"   ✅ Agregação completa: {len(detailed)} linhas → {len(detailed_aggregated)} linhas")
-        logger.info(f"      Leads: {detailed['leads'].sum():.0f} → {detailed_aggregated['leads'].sum():.0f}")
-        logger.info(f"      Conversões: {detailed['conversions'].sum():.0f} → {detailed_aggregated['conversions'].sum():.0f}")
-        logger.info(f"      Spend: R$ {detailed['spend'].sum():.2f} → R$ {detailed_aggregated['spend'].sum():.2f}")
+        logger.info(f"    Agregação completa: {len(detailed)} linhas  {len(detailed_aggregated)} linhas")
+        logger.info(f"      Leads: {detailed['leads'].sum():.0f}  {detailed_aggregated['leads'].sum():.0f}")
+        logger.info(f"      Conversões: {detailed['conversions'].sum():.0f}  {detailed_aggregated['conversions'].sum():.0f}")
+        logger.info(f"      Spend: R$ {detailed['spend'].sum():.2f}  R$ {detailed_aggregated['spend'].sum():.2f}")
 
         detailed = detailed_aggregated
 
@@ -2057,17 +2056,17 @@ def compare_ad_performance(
 
     Args:
         ad_metrics_df: DataFrame com métricas de anúncios (da Meta API)
-        matched_df: DataFrame com conversões matched (leads→vendas)
-        ml_type_map: Mapeamento campaign_id → ml_type (DEPRECATED - usar comparison_group_map)
+        matched_df: DataFrame com conversões matched (leadsvendas)
+        ml_type_map: Mapeamento campaign_id  ml_type (DEPRECATED - usar comparison_group_map)
         product_value: Valor do produto em R$
-        comparison_group_map: Mapeamento campaign_id → comparison_group ('Eventos ML', 'Otimização ML', 'Controle')
+        comparison_group_map: Mapeamento campaign_id  comparison_group ('Eventos ML', 'Otimização ML', 'Controle')
 
     Returns:
         Dict com DataFrames:
         - 'aggregated': Agregação ML vs Controle
         - 'detailed': Detalhamento anúncio-a-anúncio
     """
-    logger.info("📊 Comparando performance de anúncios...")
+    logger.info(" Comparando performance de anúncios...")
 
     # Adicionar ml_type aos anúncios (para compatibilidade)
     ad_metrics_df['ml_type'] = ad_metrics_df['campaign_id'].map(ml_type_map)
@@ -2109,7 +2108,7 @@ def compare_ad_performance(
         # DEBUG
         content_filled = conversions_df['content'].notna().sum()
         ad_code_extracted = conversions_df['ad_code_from_utm'].notna().sum()
-        logger.info(f"\n   🔍 Extração de ad_code das conversões:")
+        logger.info(f"\n    Extração de ad_code das conversões:")
         logger.info(f"      Total conversões: {len(conversions_df)}")
         logger.info(f"      utm_content preenchido: {content_filled} ({content_filled/len(conversions_df)*100:.1f}%)")
         logger.info(f"      ad_code extraído: {ad_code_extracted} ({ad_code_extracted/len(conversions_df)*100:.1f}%)")
@@ -2130,7 +2129,7 @@ def compare_ad_performance(
         logger.info(f"      Agrupadas por (Campaign ID + ad_code): {len(conversions_by_campaign_ad)}")
 
         # 5. Calcular LEADS por anúncio (usar TODO o matched_df, não só conversões)
-        logger.info(f"\n   📊 Calculando leads por anúncio:")
+        logger.info(f"\n    Calculando leads por anúncio:")
 
         # Extrair ad_code de TODOS os leads
         all_leads_df = matched_df.copy()
@@ -2150,8 +2149,8 @@ def compare_ad_performance(
         ad_metrics_df['campaign_id_clean'] = ad_metrics_df['campaign_id'].astype(str).str[:15]
 
         # 7. AGREGAÇÃO: Consolidar anúncios com mesmo (campaign_id, ad_code)
-        #    Mesmo ad_code pode ter múltiplos ad_ids no Excel → somar spend
-        logger.info(f"\n   📊 Agregando anúncios com mesmo (Campaign ID + ad_code):")
+        #    Mesmo ad_code pode ter múltiplos ad_ids no Excel  somar spend
+        logger.info(f"\n    Agregando anúncios com mesmo (Campaign ID + ad_code):")
         logger.info(f"      Total de linhas no Excel: {len(ad_metrics_df)}")
 
         ad_metrics_aggregated = ad_metrics_df.groupby(['campaign_id_clean', 'ad_code', 'ml_type'], dropna=False).agg({
@@ -2189,10 +2188,10 @@ def compare_ad_performance(
         ad_full['conversions'] = ad_full['conversions'].fillna(0)
         ad_full['revenue'] = ad_full['revenue'].fillna(0)  # Receita real do matched_df
 
-        logger.info(f"   ✅ Anúncios com leads: {(ad_full['leads'] > 0).sum()}")
-        logger.info(f"   ✅ Anúncios com conversões: {(ad_full['conversions'] > 0).sum()}")
-        logger.info(f"   📊 Total leads: {ad_full['leads'].sum():.0f}")
-        logger.info(f"   📊 Total conversões atribuídas: {ad_full['conversions'].sum():.0f}")
+        logger.info(f"    Anúncios com leads: {(ad_full['leads'] > 0).sum()}")
+        logger.info(f"    Anúncios com conversões: {(ad_full['conversions'] > 0).sum()}")
+        logger.info(f"    Total leads: {ad_full['leads'].sum():.0f}")
+        logger.info(f"    Total conversões atribuídas: {ad_full['conversions'].sum():.0f}")
 
     else:
         ad_metrics_df['campaign_id_clean'] = ad_metrics_df['campaign_id'].astype(str).str[:15]
@@ -2222,14 +2221,14 @@ def compare_ad_performance(
     # Aplicar comparison_group_map
     if comparison_group_map:
         ad_full['comparison_group'] = ad_full['campaign_id_15'].map(comparison_group_map)
-        logger.info("   ✅ Usando mapeamento refinado (Eventos ML / Otimização ML / Controle)")
+        logger.info("    Usando mapeamento refinado (Eventos ML / Otimização ML / Controle)")
     else:
         # Fallback para ml_type
         ad_full['comparison_group'] = ad_full['ml_type'].map({
             'COM_ML': 'Eventos ML',
             'SEM_ML': 'Controle'
         })
-        logger.warning("   ⚠️ comparison_group_map não disponível, usando classificação simples")
+        logger.warning("    comparison_group_map não disponível, usando classificação simples")
 
     # FILTRAR antes de agregar: apenas Eventos ML e Controle
     before_filter_count = len(ad_full)
@@ -2237,7 +2236,7 @@ def compare_ad_performance(
     after_filter_count = len(ad_full_filtered)
 
     if before_filter_count != after_filter_count:
-        logger.info(f"   🔍 Filtrados {before_filter_count - after_filter_count} ads (Otimização ML ou Outro) ANTES da agregação")
+        logger.info(f"    Filtrados {before_filter_count - after_filter_count} ads (Otimização ML ou Outro) ANTES da agregação")
 
     # Agregação por comparison_group (NÃO ml_type)
     aggregated = ad_full_filtered.groupby('comparison_group').agg({
@@ -2290,7 +2289,7 @@ def compare_ad_performance(
     # O 'detailed' foi criado a partir do ad_full_filtered já filtrado (linhas 1118-1137),
     # então não é necessário adicionar comparison_group ou filtrar novamente aqui.
 
-    logger.info(f"   ✅ Comparações de anúncios calculadas")
+    logger.info(f"    Comparações de anúncios calculadas")
     logger.info(f"      Anúncios após filtro (Eventos ML + Controle): {len(detailed)}")
 
     return {
@@ -2316,10 +2315,10 @@ def compare_ads_in_matched_adsets(
 
     Args:
         ad_metrics_df: DataFrame com métricas de anúncios (da Meta API)
-        matched_df: DataFrame com conversões matched (leads→vendas)
-        ml_type_map: Mapeamento campaign_id → ml_type
+        matched_df: DataFrame com conversões matched (leadsvendas)
+        ml_type_map: Mapeamento campaign_id  ml_type
         product_value: Valor do produto em R$
-        comparison_group_map: Mapeamento campaign_id → comparison_group
+        comparison_group_map: Mapeamento campaign_id  comparison_group
         filtered_matched_adsets: Lista de adsets matched que passaram nos filtros (comparison_group).
                                  Se None, usa a lista hardcoded MATCHED_ADSETS.
 
@@ -2328,25 +2327,25 @@ def compare_ads_in_matched_adsets(
         - 'aggregated': Agregação ML vs Controle
         - 'detailed': Detalhamento anúncio-a-anúncio
     """
-    logger.info("📊 Comparando performance de anúncios EM adsets matched...")
+    logger.info(" Comparando performance de anúncios EM adsets matched...")
 
     # CORREÇÃO: Usar lista filtrada de adsets em vez da hardcoded
     # Isso garante que apenas ads de adsets "Eventos ML" e "Controle" sejam incluídos
     # (excluindo "Otimização ML" e outros)
     adsets_to_use = filtered_matched_adsets if filtered_matched_adsets is not None else MATCHED_ADSETS
 
-    logger.info(f"   📋 Usando {len(adsets_to_use)} adsets matched (filtrados por comparison_group)")
+    logger.info(f"    Usando {len(adsets_to_use)} adsets matched (filtrados por comparison_group)")
 
     # Filtrar apenas ads cujo adset pai está na lista filtrada
     ads_in_matched_adsets = ad_metrics_df[
         ad_metrics_df['adset_name'].isin(adsets_to_use)
     ].copy()
 
-    logger.info(f"   📋 Ads em adsets matched: {len(ads_in_matched_adsets)}")
-    logger.info(f"   📋 Ad codes únicos: {ads_in_matched_adsets['ad_name'].nunique()}")
+    logger.info(f"    Ads em adsets matched: {len(ads_in_matched_adsets)}")
+    logger.info(f"    Ad codes únicos: {ads_in_matched_adsets['ad_name'].nunique()}")
 
     if len(ads_in_matched_adsets) == 0:
-        logger.warning("   ⚠️ Nenhum ad encontrado nos adsets matched!")
+        logger.warning("    Nenhum ad encontrado nos adsets matched!")
         return {
             'aggregated': pd.DataFrame(),
             'detailed': pd.DataFrame()
@@ -2388,21 +2387,21 @@ def compare_matched_ads_in_matched_adsets(
     Returns:
         Dict com 'aggregated' e 'detailed' DataFrames
     """
-    logger.info("📊 Comparando ads MATCHED em adsets MATCHED...")
+    logger.info(" Comparando ads MATCHED em adsets MATCHED...")
 
     # PASSO 1: Filtrar apenas ads dos adsets matched
     adsets_to_use = filtered_matched_adsets if filtered_matched_adsets is not None else MATCHED_ADSETS
 
-    logger.info(f"   📋 Usando {len(adsets_to_use)} adsets matched (filtrados por comparison_group)")
+    logger.info(f"    Usando {len(adsets_to_use)} adsets matched (filtrados por comparison_group)")
 
     ads_in_matched_adsets = ad_metrics_df[
         ad_metrics_df['adset_name'].isin(adsets_to_use)
     ].copy()
 
-    logger.info(f"   📋 Ads em adsets matched: {len(ads_in_matched_adsets)}")
+    logger.info(f"    Ads em adsets matched: {len(ads_in_matched_adsets)}")
 
     if len(ads_in_matched_adsets) == 0:
-        logger.warning("   ⚠️ Nenhum ad encontrado nos adsets matched!")
+        logger.warning("    Nenhum ad encontrado nos adsets matched!")
         return {
             'aggregated': pd.DataFrame(),
             'detailed': pd.DataFrame()
@@ -2425,13 +2424,13 @@ def compare_matched_ads_in_matched_adsets(
         ads_in_matched_adsets['comparison_group'].isin(['Eventos ML', 'Controle'])
     ].copy()
 
-    logger.info(f"   📋 Ads após filtro de comparison_group: {len(ads_filtered)}")
+    logger.info(f"    Ads após filtro de comparison_group: {len(ads_filtered)}")
 
     # Identificar quais ad_codes aparecem em AMBOS os grupos
     ad_codes_by_group = ads_filtered.groupby('comparison_group')['ad_code'].unique()
 
     if 'Eventos ML' not in ad_codes_by_group or 'Controle' not in ad_codes_by_group:
-        logger.warning("   ⚠️ Não há ad_codes em ambos os grupos!")
+        logger.warning("    Não há ad_codes em ambos os grupos!")
         return {
             'aggregated': pd.DataFrame(),
             'detailed': pd.DataFrame()
@@ -2441,13 +2440,13 @@ def compare_matched_ads_in_matched_adsets(
     controle_codes = set(ad_codes_by_group['Controle'])
     matched_ad_codes = eventos_ml_codes & controle_codes
 
-    logger.info(f"   📋 Ad codes matched (aparecem em ML E Controle): {len(matched_ad_codes)}")
+    logger.info(f"    Ad codes matched (aparecem em ML E Controle): {len(matched_ad_codes)}")
     logger.info(f"      Eventos ML: {len(eventos_ml_codes)} códigos")
     logger.info(f"      Controle: {len(controle_codes)} códigos")
     logger.info(f"      Interseção: {len(matched_ad_codes)} códigos")
 
     if len(matched_ad_codes) == 0:
-        logger.warning("   ⚠️ Nenhum ad_code matched encontrado!")
+        logger.warning("    Nenhum ad_code matched encontrado!")
         return {
             'aggregated': pd.DataFrame(),
             'detailed': pd.DataFrame()
@@ -2458,7 +2457,7 @@ def compare_matched_ads_in_matched_adsets(
         ads_filtered['ad_code'].isin(matched_ad_codes)
     ].copy()
 
-    logger.info(f"   📋 Ads finais (matched em adsets matched): {len(matched_ads_only)}")
+    logger.info(f"    Ads finais (matched em adsets matched): {len(matched_ads_only)}")
 
     # PASSO 4: Calcular métricas usando a mesma lógica de compare_ad_performance
     return compare_ad_performance(
@@ -2487,7 +2486,7 @@ def prepare_adset_comparison_for_excel(
     Returns:
         Dict com DataFrames formatados para Excel
     """
-    logger.info("📝 Preparando comparações por adset para Excel...")
+    logger.info(" Preparando comparações por adset para Excel...")
 
     excel_dfs = {}
 
@@ -2496,7 +2495,7 @@ def prepare_adset_comparison_for_excel(
         df = comparisons['detailed'].copy()
 
         # DEBUG: Ver quais colunas existem
-        logger.info(f"   🔍 DEBUG - Colunas em adsets detailed: {df.columns.tolist()}")
+        logger.info(f"    DEBUG - Colunas em adsets detailed: {df.columns.tolist()}")
 
         # Renomear e reordenar colunas para formato similar à aba Campanhas
         column_mapping = {
@@ -2575,7 +2574,7 @@ def prepare_adset_comparison_for_excel(
 
         excel_dfs['comparacao_adsets'] = df
 
-    logger.info(f"   ✅ {len(excel_dfs)} abas preparadas para Excel")
+    logger.info(f"    {len(excel_dfs)} abas preparadas para Excel")
 
     return excel_dfs
 
@@ -2593,7 +2592,7 @@ def prepare_ad_comparison_for_excel(
     Returns:
         Dict com DataFrames formatados para Excel
     """
-    logger.info("📝 Preparando comparações por anúncio para Excel...")
+    logger.info(" Preparando comparações por anúncio para Excel...")
 
     excel_dfs = {}
 
@@ -2639,7 +2638,7 @@ def prepare_ad_comparison_for_excel(
 
         excel_dfs['comparacao_ads'] = df
 
-    logger.info(f"   ✅ {len(excel_dfs)} abas preparadas para Excel")
+    logger.info(f"    {len(excel_dfs)} abas preparadas para Excel")
 
     return excel_dfs
 
@@ -2849,9 +2848,9 @@ class FairCampaignMatcher:
             FacebookAdsApi.init(access_token=self.access_token)
             self.account = AdAccount(self.account_id)
             self.api_available = True
-            logger.info(f"✅ Meta API inicializada: {self.account_id}")
+            logger.info(f" Meta API inicializada: {self.account_id}")
         except Exception as e:
-            logger.error(f"❌ Erro ao inicializar Meta API: {e}")
+            logger.error(f" Erro ao inicializar Meta API: {e}")
             self.api_available = False
 
     def get_ml_campaign_metadata(
@@ -2867,13 +2866,13 @@ class FairCampaignMatcher:
             end_date: Data fim (YYYY-MM-DD)
 
         Returns:
-            Dict com campaign_id → {name, spend, creative_ids, impressions, ...}
+            Dict com campaign_id  {name, spend, creative_ids, impressions, ...}
         """
         if not self.api_available:
-            logger.warning("⚠️ Meta API não disponível")
+            logger.warning(" Meta API não disponível")
             return {}
 
-        logger.info(f"🔍 Buscando campanhas ML ({start_date} a {end_date})...")
+        logger.info(f" Buscando campanhas ML ({start_date} a {end_date})...")
 
         try:
             params = {
@@ -2954,14 +2953,14 @@ class FairCampaignMatcher:
                     'creative_ids': creative_ids,
                 }
 
-            logger.info(f"   ✅ {len(ml_campaigns)} campanhas ML encontradas")
+            logger.info(f"    {len(ml_campaigns)} campanhas ML encontradas")
             for cid, data in ml_campaigns.items():
                 logger.info(f"      {data['name']}: Budget R$ {data['budget']:.2f}, Spend R$ {data['spend']:.2f}, {len(data['creative_ids'])} criativos")
 
             return ml_campaigns
 
         except Exception as e:
-            logger.error(f"❌ Erro ao buscar campanhas ML: {e}")
+            logger.error(f" Erro ao buscar campanhas ML: {e}")
             return {}
 
     def find_fair_control_campaigns(
@@ -2989,13 +2988,13 @@ class FairCampaignMatcher:
 
         Returns:
             Tuple de (fair_control_map, control_id_to_name):
-            - fair_control_map: Dict com ml_campaign_id → [fair_control_campaign_ids]
-            - control_id_to_name: Dict com campaign_id → campaign_name (para controles)
+            - fair_control_map: Dict com ml_campaign_id  [fair_control_campaign_ids]
+            - control_id_to_name: Dict com campaign_id  campaign_name (para controles)
         """
         if not self.api_available or not ml_campaign_metadata:
             return {}, {}
 
-        logger.info(f"🔍 Buscando campanhas de controle justo (critérios: Budget ±{budget_tolerance*100:.0f}%, Criativos {min_creative_overlap*100:.0f}%+ iguais)...")
+        logger.info(f" Buscando campanhas de controle justo (critérios: Budget ±{budget_tolerance*100:.0f}%, Criativos {min_creative_overlap*100:.0f}%+ iguais)...")
 
         fair_matches = {}
         control_id_to_name = {}
@@ -3031,7 +3030,7 @@ class FairCampaignMatcher:
                     'creative_ids': creative_ids,
                 }
 
-            logger.info(f"   ✅ {len(all_campaigns)} campanhas não-ML encontradas para comparação")
+            logger.info(f"    {len(all_campaigns)} campanhas não-ML encontradas para comparação")
 
             # Para cada campanha ML, encontrar matches usando critérios refinados
             for ml_id, ml_data in ml_campaign_metadata.items():
@@ -3039,7 +3038,7 @@ class FairCampaignMatcher:
                 ml_creatives = set(ml_data['creative_ids'])
                 ml_name = ml_data['name']
 
-                logger.info(f"\n   🔍 Analisando ML: {ml_name[:80]}...")
+                logger.info(f"\n    Analisando ML: {ml_name[:80]}...")
                 logger.info(f"      Budget: R$ {ml_budget:.2f}, {len(ml_creatives)} criativos")
 
                 matches = []
@@ -3057,7 +3056,7 @@ class FairCampaignMatcher:
                         if budget_diff > budget_tolerance:
                             rejected_budget += 1
                             if rejected_budget <= 3:  # Mostrar primeiras 3
-                                logger.info(f"      ❌ Budget: {ctrl_name[:60]} (R$ {ctrl_budget:.2f}, diff {budget_diff*100:.0f}% > {budget_tolerance*100:.0f}%)")
+                                logger.info(f"       Budget: {ctrl_name[:60]} (R$ {ctrl_budget:.2f}, diff {budget_diff*100:.0f}% > {budget_tolerance*100:.0f}%)")
                             continue
 
                     # Critério 2: Sobreposição de criativos (80%+)
@@ -3073,11 +3072,11 @@ class FairCampaignMatcher:
                     if min_overlap_pct < min_creative_overlap:
                         rejected_creatives += 1
                         if rejected_creatives <= 3:  # Mostrar primeiras 3
-                            logger.info(f"      ❌ Criativos: {ctrl_name[:60]} ({min_overlap_pct*100:.0f}% < {min_creative_overlap*100:.0f}%)")
+                            logger.info(f"       Criativos: {ctrl_name[:60]} ({min_overlap_pct*100:.0f}% < {min_creative_overlap*100:.0f}%)")
                         continue
 
-                    # ✅ MATCH ENCONTRADO! Budget ±30% e Criativos 80%+
-                    logger.info(f"      ✅ MATCH: {ctrl_name[:60]}")
+                    #  MATCH ENCONTRADO! Budget ±30% e Criativos 80%+
+                    logger.info(f"       MATCH: {ctrl_name[:60]}")
                     logger.info(f"         Budget: R$ {ctrl_budget:.2f} (diff {budget_diff*100:.0f}%), Criativos: {overlap}/{len(ml_creatives)} ({min_overlap_pct*100:.0f}%)")
 
                     match_info = {
@@ -3094,34 +3093,34 @@ class FairCampaignMatcher:
 
                 # Mostrar resumo de filtros
                 total_checked = rejected_budget + rejected_creatives + len(matches)
-                logger.info(f"\n      📊 Resumo de filtros para esta ML:")
+                logger.info(f"\n       Resumo de filtros para esta ML:")
                 logger.info(f"         Total verificadas: {total_checked}")
-                logger.info(f"         ❌ Rejeitadas por Budget: {rejected_budget}")
-                logger.info(f"         ❌ Rejeitadas por Criativos: {rejected_creatives}")
-                logger.info(f"         ✅ Aprovadas (Fair Control): {len(matches)}")
+                logger.info(f"          Rejeitadas por Budget: {rejected_budget}")
+                logger.info(f"          Rejeitadas por Criativos: {rejected_creatives}")
+                logger.info(f"          Aprovadas (Fair Control): {len(matches)}")
 
                 # Ordenar por match score (melhor combinação de budget + criativos)
                 matches.sort(key=lambda x: -x['match_score'])
 
                 fair_matches[ml_id] = [m['id'] for m in matches]
 
-                # Adicionar ao mapeamento id → name
+                # Adicionar ao mapeamento id  name
                 for m in matches:
                     control_id_to_name[m['id']] = m['name']
 
                 if matches:
-                    logger.info(f"\n   ✅ {ml_name}:")
-                    logger.info(f"      🎯 Encontradas {len(matches)} campanhas Fair Control:")
+                    logger.info(f"\n    {ml_name}:")
+                    logger.info(f"       Encontradas {len(matches)} campanhas Fair Control:")
                     for m in matches[:3]:  # Top 3
-                        logger.info(f"         • {m['name'][:60]}")
+                        logger.info(f"          {m['name'][:60]}")
                         logger.info(f"           Budget: R$ {m['budget']:.2f}, Criativos: {m['creative_overlap']} ({m['creative_overlap_pct']:.0f}%), Score: {m['match_score']:.2f}")
                 else:
-                    logger.warning(f"   ⚠️ Nenhuma campanha Fair Control encontrada")
+                    logger.warning(f"    Nenhuma campanha Fair Control encontrada")
 
             return fair_matches, control_id_to_name
 
         except Exception as e:
-            logger.error(f"❌ Erro ao buscar campanhas de controle: {e}")
+            logger.error(f" Erro ao buscar campanhas de controle: {e}")
             import traceback
             logger.debug(traceback.format_exc())
             return {}, {}
@@ -3241,8 +3240,8 @@ class FairCampaignMatcher:
         Args:
             leads_df: DataFrame de leads com coluna 'campaign'
             ml_campaign_metadata: Metadata das campanhas ML (com nomes)
-            fair_control_map: Mapeamento ML campaign_id → [control campaign_ids]
-            control_id_to_name: Mapeamento control campaign_id → campaign_name
+            fair_control_map: Mapeamento ML campaign_id  [control campaign_ids]
+            control_id_to_name: Mapeamento control campaign_id  campaign_name
             campaign_hierarchy: Hierarquia de campanhas com optimization_goal (opcional)
             campaigns_with_custom_events: Set de campaign_ids que usam eventos customizados
 
@@ -3258,22 +3257,22 @@ class FairCampaignMatcher:
         # Debug: verificar colunas disponíveis
         has_lq = 'LeadQualified' in df.columns
         has_lqhq = 'LeadQualifiedHighQuality' in df.columns
-        logger.info(f"   🔍 Colunas de eventos customizados: LeadQualified={has_lq}, LeadQualifiedHighQuality={has_lqhq}")
+        logger.info(f"    Colunas de eventos customizados: LeadQualified={has_lq}, LeadQualifiedHighQuality={has_lqhq}")
         if has_lq:
             lq_sum = df['LeadQualified'].sum()
             lq_campaigns = df[df['LeadQualified'] > 0]['campaign'].unique()
-            logger.info(f"   📊 Total LeadQualified: {lq_sum} em {len(lq_campaigns)} campanhas")
+            logger.info(f"    Total LeadQualified: {lq_sum} em {len(lq_campaigns)} campanhas")
             if len(lq_campaigns) > 0:
-                logger.info(f"   📋 Campanhas com LeadQualified: {lq_campaigns[:3]}")
+                logger.info(f"    Campanhas com LeadQualified: {lq_campaigns[:3]}")
 
         # Criar set de nomes COMPLETOS de campanhas de controle justo (incluindo ID)
         fair_control_names = set(control_id_to_name.values())
 
         # Enriquecer com optimization_goal se não existir
         if 'optimization_goal' not in df.columns:
-            # Criar mapeamento campaign_id → optimization_goal da hierarquia
+            # Criar mapeamento campaign_id  optimization_goal da hierarquia
             if campaign_hierarchy:
-                logger.info(f"   🔍 Enriquecendo leads com optimization_goal ({len(campaign_hierarchy)} campanhas na hierarquia)")
+                logger.info(f"    Enriquecendo leads com optimization_goal ({len(campaign_hierarchy)} campanhas na hierarquia)")
                 opt_goal_map = {}
                 for campaign_id, campaign_data in campaign_hierarchy.items():
                     # Verificar TODOS os adsets para detectar eventos customizados
@@ -3293,7 +3292,7 @@ class FairCampaignMatcher:
                         # Usar o primeiro adset como antes
                         opt_goal_map[campaign_id] = optimization_goals[0] if optimization_goals else 'Lead'
 
-                logger.info(f"   ✅ Mapeamento criado para {len(opt_goal_map)} campanhas")
+                logger.info(f"    Mapeamento criado para {len(opt_goal_map)} campanhas")
 
                 # Extrair campaign_id da coluna campaign (formato: "nome|campaign_id")
                 def get_campaign_id(campaign_str):
@@ -3312,14 +3311,14 @@ class FairCampaignMatcher:
                 # Log de campanhas COM_ML e seus optimization_goals
                 com_ml_campaigns = df[df['ml_type'] == 'COM_ML']['campaign'].unique()
                 if len(com_ml_campaigns) > 0:
-                    logger.info(f"   📊 Campanhas COM_ML e seus eventos:")
+                    logger.info(f"    Campanhas COM_ML e seus eventos:")
                     for camp in com_ml_campaigns[:5]:  # Primeiras 5
                         camp_rows = df[df['campaign'] == camp]
                         if len(camp_rows) > 0:
                             opt_goal = camp_rows.iloc[0]['optimization_goal']
-                            logger.info(f"      • {camp[:60]}: {opt_goal}")
+                            logger.info(f"       {camp[:60]}: {opt_goal}")
             else:
-                logger.warning("   ⚠️ Hierarquia de campanhas não fornecida - usando 'Lead' padrão")
+                logger.warning("    Hierarquia de campanhas não fornecida - usando 'Lead' padrão")
 
         # Classificar
         def classify_group(row):
@@ -3376,7 +3375,7 @@ class FairCampaignMatcher:
         df['comparison_group'] = df.apply(classify_group, axis=1)
 
         # Log da distribuição
-        logger.info(f"\n   📊 Distribuição de grupos de comparação:")
+        logger.info(f"\n    Distribuição de grupos de comparação:")
         for group in ['Eventos ML', 'Otimização ML', 'Controle', 'Outro']:
             count = len(df[df['comparison_group'] == group])
             pct = count / len(df) * 100 if len(df) > 0 else 0

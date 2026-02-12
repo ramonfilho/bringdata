@@ -81,13 +81,13 @@ def criar_dataset_pos_cutoff(df_medium_producao: pd.DataFrame) -> pd.DataFrame:
     logger.debug("")
     logger.debug(f"Features de missing crítico encontradas: {len(features_existentes)}")
     for feature in features_existentes:
-        logger.debug(f"  ✓ {feature}")
+        logger.debug(f"   {feature}")
 
     if features_nao_existentes:
         logger.debug("")
         logger.debug(f"Features de missing crítico NÃO encontradas: {len(features_nao_existentes)}")
         for feature in features_nao_existentes:
-            logger.debug(f"  ✗ {feature}")
+            logger.debug(f"   {feature}")
 
     logger.debug("")
     logger.debug("VERSÃO 1: MENOR MISSING RATE (pós 2025-03-01)")

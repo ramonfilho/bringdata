@@ -91,13 +91,13 @@ class MetaAPIClient:
         while True:
             # Verificar timeout
             if time.time() - start_time > self.MAX_WAIT_TIME:
-                print(f"❌ Timeout ao aguardar {job_name}")
+                print(f" Timeout ao aguardar {job_name}")
                 return None
 
             try:
                 job = async_job.api_get()
             except Exception as e:
-                print(f"❌ Erro ao buscar status: {e}")
+                print(f" Erro ao buscar status: {e}")
                 return None
 
             status = job.get(AdReportRun.Field.async_status, 'Unknown')
@@ -109,7 +109,7 @@ class MetaAPIClient:
                 return job
 
             if status == 'Job Failed':
-                print(f"❌ {job_name} falhou!")
+                print(f" {job_name} falhou!")
                 return None
 
             time.sleep(2)
@@ -173,14 +173,14 @@ class MetaAPIClient:
                 if 'rate limit' in error_msg.lower() or 'error code 613' in error_msg.lower():
                     if attempt < self.MAX_RETRIES - 1:
                         wait_time = self.RETRY_DELAY * (attempt + 1)
-                        print(f"⚠️  Rate limit. Aguardando {wait_time}s...")
+                        print(f"  Rate limit. Aguardando {wait_time}s...")
                         time.sleep(wait_time)
                         continue
                     else:
-                        print(f"❌ Rate limit persistente")
+                        print(f" Rate limit persistente")
                         return []
                 else:
-                    print(f"❌ Erro: {e}")
+                    print(f" Erro: {e}")
                     if attempt < self.MAX_RETRIES - 1:
                         time.sleep(self.RETRY_DELAY)
                         continue
@@ -459,18 +459,18 @@ class MetaAPIClient:
         Returns:
             Dict com 'campaigns', 'adsets', 'ads' como chaves
         """
-        print(f"📊 Extraindo dados da Meta API")
+        print(f" Extraindo dados da Meta API")
         print(f"   Período: {date_start} a {date_end}")
         print(f"   Filtros: {'Sim (gasto > 0, contém CAP)' if apply_filters else 'Não'}")
 
         campaigns = self.get_campaigns(date_start, date_end, apply_filters)
-        print(f"   ✅ Campanhas: {len(campaigns)} registros")
+        print(f"    Campanhas: {len(campaigns)} registros")
 
         adsets = self.get_adsets(date_start, date_end, apply_filters)
-        print(f"   ✅ Ad Sets: {len(adsets)} registros")
+        print(f"    Ad Sets: {len(adsets)} registros")
 
         ads = self.get_ads(date_start, date_end, apply_filters)
-        print(f"   ✅ Ads: {len(ads)} registros")
+        print(f"    Ads: {len(ads)} registros")
 
         return {
             'campaigns': campaigns,
@@ -533,7 +533,7 @@ def extract_meta_reports(
             index=False
         )
 
-        print(f"\n💾 Arquivos salvos em: {output_dir}")
+        print(f"\n Arquivos salvos em: {output_dir}")
 
     return data
 
@@ -559,7 +559,7 @@ if __name__ == '__main__':
         output_dir='files/validation/meta_reports/test_output'
     )
 
-    print(f"\n✅ Extração concluída!")
+    print(f"\n Extração concluída!")
     print(f"   Campanhas: {len(data['campaigns'])} registros")
     print(f"   Ad Sets: {len(data['adsets'])} registros")
     print(f"   Ads: {len(data['ads'])} registros")

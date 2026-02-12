@@ -42,7 +42,7 @@ def analyze_inadimplencia_geral(df_efetivado: pd.DataFrame) -> dict:
     Returns:
         Dict com estatísticas de inadimplência
     """
-    logger.info("📊 ANÁLISE 1: Taxa de Inadimplência Geral")
+    logger.info(" ANÁLISE 1: Taxa de Inadimplência Geral")
 
     # Distribuição por status
     status_counts = df_efetivado['Status Parcela'].value_counts()
@@ -61,9 +61,9 @@ def analyze_inadimplencia_geral(df_efetivado: pd.DataFrame) -> dict:
     taxa_aguardando = (valor_aguardando / valor_total * 100) if valor_total > 0 else 0
 
     logger.info(f"   Valor Total Contratado: R$ {valor_total:,.2f}")
-    logger.info(f"   ✅ Recebido: R$ {valor_recebido:,.2f} ({taxa_recebido:.1f}%)")
-    logger.info(f"   ⚠️ Aguardando: R$ {valor_aguardando:,.2f} ({taxa_aguardando:.1f}%)")
-    logger.info(f"   ❌ Vencido: R$ {valor_vencido:,.2f} ({taxa_inadimplencia:.1f}%)")
+    logger.info(f"    Recebido: R$ {valor_recebido:,.2f} ({taxa_recebido:.1f}%)")
+    logger.info(f"    Aguardando: R$ {valor_aguardando:,.2f} ({taxa_aguardando:.1f}%)")
+    logger.info(f"    Vencido: R$ {valor_vencido:,.2f} ({taxa_inadimplencia:.1f}%)")
 
     return {
         'valor_total': valor_total,
@@ -88,7 +88,7 @@ def analyze_evolucao_temporal(df_efetivado: pd.DataFrame) -> pd.DataFrame:
     Returns:
         DataFrame com taxa de inadimplência por período
     """
-    logger.info("📈 ANÁLISE: Evolução Temporal da Inadimplência")
+    logger.info(" ANÁLISE: Evolução Temporal da Inadimplência")
 
     # Agrupar por ano/mês da venda
     df_efetivado['ano_mes_venda'] = pd.to_datetime(df_efetivado['Data Efetivado']).dt.to_period('M')
@@ -131,7 +131,7 @@ def analyze_por_grau_risco(df_efetivado: pd.DataFrame) -> pd.DataFrame:
     Returns:
         DataFrame com estatísticas por grau de risco
     """
-    logger.info("🎯 ANÁLISE: Inadimplência por Grau de Risco")
+    logger.info(" ANÁLISE: Inadimplência por Grau de Risco")
 
     risco_stats = []
 
@@ -175,7 +175,7 @@ def calculate_valor_real_venda(df_efetivado: pd.DataFrame, valor_nominal: float 
     Returns:
         Dict com estatísticas de valor real
     """
-    logger.info("💰 ANÁLISE 2: Valor Real de uma Venda TMB")
+    logger.info(" ANÁLISE 2: Valor Real de uma Venda TMB")
 
     # Data de referência (hoje)
     data_hoje = datetime.now()
@@ -209,7 +209,7 @@ def calculate_valor_real_venda(df_efetivado: pd.DataFrame, valor_nominal: float 
     logger.info(f"   Pedidos maduros (>= 6 meses): {len(vendas_maduras):,}")
 
     if len(vendas_maduras) == 0:
-        logger.warning("   ⚠️ Nenhuma venda madura encontrada (< 6 meses)")
+        logger.warning("    Nenhuma venda madura encontrada (< 6 meses)")
         return {
             'valor_nominal': valor_nominal,
             'valor_real_medio': 0,
@@ -351,7 +351,7 @@ def format_excel_brazilian_style(file_path: Path):
         ws.freeze_panes = 'A2'
 
     wb.save(file_path)
-    logger.info(f"   ✨ Formatação brasileira aplicada com sucesso")
+    logger.info(f"    Formatação brasileira aplicada com sucesso")
 
 
 def gerar_cenarios_precificacao(taxa_realizacao_ponderada: float, preco_atual: float) -> pd.DataFrame:
@@ -429,7 +429,7 @@ def generate_summary_report(
         risco: DataFrame com análise por risco
         output_path: Caminho do arquivo Excel de saída
     """
-    logger.info("💾 Gerando relatório Excel com 5 abas...")
+    logger.info(" Gerando relatório Excel com 5 abas...")
 
     # 1. Resumo geral
     resumo = pd.DataFrame([{
@@ -485,8 +485,8 @@ def generate_summary_report(
     # Aplicar formatação brasileira
     format_excel_brazilian_style(output_path)
 
-    logger.info(f"   ✅ Relatório gerado: {output_path}")
-    logger.info(f"   📑 Abas: Resumo, Evolucao_Temporal, Por_Grau_Risco, Valor_Real_Risco, Cenarios_Precificacao")
+    logger.info(f"    Relatório gerado: {output_path}")
+    logger.info(f"    Abas: Resumo, Evolucao_Temporal, Por_Grau_Risco, Valor_Real_Risco, Cenarios_Precificacao")
 
 
 def main():
@@ -508,19 +508,19 @@ def main():
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     logger.info("="*80)
-    logger.info("🚀 ANÁLISE DE INADIMPLÊNCIA TMB")
+    logger.info(" ANÁLISE DE INADIMPLÊNCIA TMB")
     logger.info("="*80)
     logger.info(f"   Arquivo: {args.contas_receber}")
     logger.info(f"   Output: {output_path}")
 
     # Carregar dados
-    logger.info("\n📂 Carregando arquivo de contas a receber...")
+    logger.info("\n Carregando arquivo de contas a receber...")
     df = pd.read_excel(args.contas_receber)
-    logger.info(f"   ✅ {len(df):,} parcelas carregadas")
+    logger.info(f"    {len(df):,} parcelas carregadas")
 
     # Filtrar apenas pedidos efetivados
     df_efetivado = df[df['Status Pedido'] == 'Efetivado'].copy()
-    logger.info(f"   ✅ {len(df_efetivado):,} parcelas de pedidos efetivados")
+    logger.info(f"    {len(df_efetivado):,} parcelas de pedidos efetivados")
 
     # Executar análises
     inadimplencia = analyze_inadimplencia_geral(df_efetivado)
@@ -535,9 +535,9 @@ def main():
     generate_summary_report(inadimplencia, valor_real, evolucao, risco, output_path)
 
     # Conclusão
-    logger.info("✅ ANÁLISE CONCLUÍDA")
+    logger.info(" ANÁLISE CONCLUÍDA")
     logger.info("="*80)
-    logger.info(f"\n📊 RESUMO:")
+    logger.info(f"\n RESUMO:")
     logger.info(f"   Valor Nominal TMB: R$ {valor_real['valor_nominal']:,.2f}")
     logger.info(f"   Valor Real (esperado): R$ {valor_real['valor_real_medio']:,.2f}")
     logger.info(f"   Taxa de Inadimplência: {inadimplencia['taxa_inadimplencia']:.1f}%")

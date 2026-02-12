@@ -64,7 +64,7 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
                 # Criar mapeamento ordinal
                 mapeamento = {categoria: i for i, categoria in enumerate(ordem)}
                 df[var] = df[var].map(mapeamento)
-                logger.debug(f"  {var}: {len(ordem)} categorias → 0-{len(ordem)-1}")
+                logger.debug(f"  {var}: {len(ordem)} categorias  0-{len(ordem)-1}")
 
     # 1.5. DEBUG: PROCESSAR MEDIUM COM BINARY_TOP3
     if 'Medium' in df.columns:
@@ -76,11 +76,11 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
         df['Medium_Lookalike_2pct_Cadastrados'] = (df['Medium'] == 'Lookalike 2% Cadastrados - DEV 2.0 + Interesses').astype(int)
         df = df.drop(columns=['Medium'])
 
-        logger.debug(f"  ✓ Criadas 3 features binárias:")
+        logger.debug(f"   Criadas 3 features binárias:")
         logger.debug(f"    Medium_Linguagem_programacao: {df['Medium_Linguagem_programacao'].sum():,} ({df['Medium_Linguagem_programacao'].mean()*100:.1f}%)")
         logger.debug(f"    Medium_Aberto: {df['Medium_Aberto'].sum():,} ({df['Medium_Aberto'].mean()*100:.1f}%)")
         logger.debug(f"    Medium_Lookalike_2pct_Cadastrados: {df['Medium_Lookalike_2pct_Cadastrados'].sum():,} ({df['Medium_Lookalike_2pct_Cadastrados'].mean()*100:.1f}%)")
-        logger.debug(f"  ✓ Categorias não cobertas (outros) → [0, 0, 0]")
+        logger.debug(f"   Categorias não cobertas (outros)  [0, 0, 0]")
 
     # 2. ONE-HOT ENCODING para variáveis categóricas nominais
     variaveis_one_hot = []
@@ -114,7 +114,7 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
     colunas_criadas = len(df_encoded.columns) - len(df.columns)
     for var in variaveis_one_hot:
         categorias_unicas = df[var].nunique()
-        logger.debug(f"  {var}: {categorias_unicas} categorias → {categorias_unicas} colunas binárias")
+        logger.debug(f"  {var}: {categorias_unicas} categorias  {categorias_unicas} colunas binárias")
 
     logger.debug(f"\nResultado:")
     logger.debug(f"  Colunas one-hot originais: {len(variaveis_one_hot)}")
@@ -142,6 +142,6 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
 
     logger.debug(f"\nDataset encodado está pronto para modelagem!")
 
-    logger.info(f"✅ Encoding estratégico completo")
+    logger.info(f" Encoding estratégico completo")
 
     return df_encoded

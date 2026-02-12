@@ -69,7 +69,7 @@ class CampaignMetricsCalculator:
             import json
             with open(cache_file, 'r') as f:
                 data = json.load(f)
-                logger.info(f"   💾 Cache HIT: {cache_file.name}")
+                logger.info(f"    Cache HIT: {cache_file.name}")
                 return data
         return None
 
@@ -79,7 +79,7 @@ class CampaignMetricsCalculator:
         cache_file = self.cache_dir / f"{cache_key}.json"
         with open(cache_file, 'w') as f:
             json.dump(data, f, indent=2)
-        logger.info(f"   💾 Cache SAVED: {cache_file.name}")
+        logger.info(f"    Cache SAVED: {cache_file.name}")
 
     def _get_campaign_leads_from_meta(
         self,
@@ -102,10 +102,10 @@ class CampaignMetricsCalculator:
             period_end: Data fim (formato YYYY-MM-DD)
 
         Returns:
-            Dict mapeando campaign_id → {evento: contagem}
+            Dict mapeando campaign_id  {evento: contagem}
             Ex: {'120220370119870390': {'lead': 289, 'LeadQualified': 150, 'LeadQualifiedHighQuality': 80}}
         """
-        logger.info("   🔍 Buscando eventos 'lead' da Meta API...")
+        logger.info("    Buscando eventos 'lead' da Meta API...")
 
         # Tentar carregar do cache primeiro
         if self.use_cache:
@@ -135,8 +135,8 @@ class CampaignMetricsCalculator:
             fields = ['campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'actions', 'action_values', 'impressions']
 
             try:
-                logger.info(f"   🔍 Buscando no nível 'adset' para capturar eventos por adset...")
-                logger.info(f"   🎯 Usando janela de atribuição padrão da conta (não especificada na API)")
+                logger.info(f"    Buscando no nível 'adset' para capturar eventos por adset...")
+                logger.info(f"    Usando janela de atribuição padrão da conta (não especificada na API)")
                 # Usar action_breakdowns para separar eventos individuais
                 insights = self.meta_api.get_insights(
                     account_id=acc_id,
@@ -149,7 +149,7 @@ class CampaignMetricsCalculator:
 
                 # Log primeiros insights com datas para debug
                 if len(insights) > 0:
-                    logger.info(f"   📅 DEBUG - Primeiros 3 insights com datas:")
+                    logger.info(f"    DEBUG - Primeiros 3 insights com datas:")
                     for i, insight in enumerate(insights[:3]):
                         date_start = insight.get('date_start', 'N/A')
                         date_stop = insight.get('date_stop', 'N/A')
@@ -174,7 +174,7 @@ class CampaignMetricsCalculator:
 
                     # DEBUG: Log all custom event actions for ML campaign
                     if '120234062599950534' in campaign_id and actions:
-                        logger.info(f"   📋 DEBUG - Adset {adset_id[:15]}... ({adset_name[:50]}):")
+                        logger.info(f"    DEBUG - Adset {adset_id[:15]}... ({adset_name[:50]}):")
                         for action in actions:
                             action_type = action.get('action_type')
                             value = action.get('value', 0)
@@ -215,7 +215,7 @@ class CampaignMetricsCalculator:
                                     if custom_event and custom_event in ['LeadQualified', 'LeadQualifiedHighQuality', 'Faixa A']:
                                         # DEBUG: Log detalhado com nome do adset e impressions
                                         impressions = adset_data.get('impressions', 0)
-                                        logger.info(f"   🎯 Camp {campaign_id[:15]}..., Adset {adset_id[:15]}... ({adset_name[:50]}): {custom_event} = {value}, Impressions = {impressions}")
+                                        logger.info(f"    Camp {campaign_id[:15]}..., Adset {adset_id[:15]}... ({adset_name[:50]}): {custom_event} = {value}, Impressions = {impressions}")
 
                                         if custom_event in campaign_events[campaign_id]:
                                             campaign_events[campaign_id][custom_event] += value
@@ -225,7 +225,7 @@ class CampaignMetricsCalculator:
                                 logger.debug(f"      Erro ao buscar custom_event do adset {adset_id}: {e}")
 
             except Exception as e:
-                logger.error(f"   ❌ Erro ao buscar leads da conta {acc_id}: {e}")
+                logger.error(f"    Erro ao buscar leads da conta {acc_id}: {e}")
                 continue
 
         # Estatísticas de resumo
@@ -234,14 +234,14 @@ class CampaignMetricsCalculator:
         total_lead_qualified_hq = sum(events.get('LeadQualifiedHighQuality', 0) for events in campaign_events.values())
         total_faixa_a = sum(events.get('Faixa A', 0) for events in campaign_events.values())
 
-        logger.info(f"   ✅ {len(campaign_events)} campanhas encontradas")
-        logger.info(f"      • Leads: {total_leads}")
-        logger.info(f"      • LeadQualified: {total_lead_qualified}")
-        logger.info(f"      • LeadQualifiedHighQuality: {total_lead_qualified_hq}")
-        logger.info(f"      • Faixa A: {total_faixa_a}")
+        logger.info(f"    {len(campaign_events)} campanhas encontradas")
+        logger.info(f"       Leads: {total_leads}")
+        logger.info(f"       LeadQualified: {total_lead_qualified}")
+        logger.info(f"       LeadQualifiedHighQuality: {total_lead_qualified_hq}")
+        logger.info(f"       Faixa A: {total_faixa_a}")
 
         # DEBUG: Mostrar detalhes das campanhas com eventos personalizados
-        logger.info(f"   📋 DEBUG - Campanhas com eventos personalizados:")
+        logger.info(f"    DEBUG - Campanhas com eventos personalizados:")
         for campaign_id, events in campaign_events.items():
             if any(e in events for e in ['LeadQualified', 'LeadQualifiedHighQuality', 'Faixa A']):
                 # Buscar nome da campanha
@@ -253,12 +253,12 @@ class CampaignMetricsCalculator:
                     }, timeout=2)
                     if camp_response.status_code == 200:
                         camp_name = camp_response.json().get('name', 'Unknown')[:60]
-                        logger.info(f"      • {campaign_id}: {camp_name}")
+                        logger.info(f"       {campaign_id}: {camp_name}")
                         logger.info(f"        {events}")
                     else:
-                        logger.info(f"      • {campaign_id}: {events}")
+                        logger.info(f"       {campaign_id}: {events}")
                 except:
-                    logger.info(f"      • {campaign_id}: {events}")
+                    logger.info(f"       {campaign_id}: {events}")
 
         # Salvar no cache para próxima execução
         if self.use_cache:
@@ -350,11 +350,11 @@ class CampaignMetricsCalculator:
             - contribution_margin: Margem de contribuição (R$)
             - margin_percent: Margem (%)
         """
-        logger.info("📊 Calculando métricas por campanha...")
+        logger.info(" Calculando métricas por campanha...")
 
         # 0. FILTRAR respostas apenas de leads captados NO PERÍODO
         # TEMPORARIAMENTE DESATIVADO - usando todos os dados
-        logger.info("   ⚠️ Filtro temporal DESATIVADO - usando todos os dados do matched_df")
+        logger.info("    Filtro temporal DESATIVADO - usando todos os dados do matched_df")
         original_count = len(matched_df)
 
         if False and 'data_captura' in matched_df.columns:  # DESATIVADO
@@ -371,18 +371,18 @@ class CampaignMetricsCalculator:
             filtered_count = len(matched_df)
             excluded_count = original_count - filtered_count
 
-            logger.info(f"   ✅ Respostas no período: {filtered_count:,}")
-            logger.info(f"   🗑️  Respostas excluídas (captadas fora do período): {excluded_count:,}")
-            logger.info(f"   📊 Período de captura: {period_start} a {period_end}")
+            logger.info(f"    Respostas no período: {filtered_count:,}")
+            logger.info(f"     Respostas excluídas (captadas fora do período): {excluded_count:,}")
+            logger.info(f"    Período de captura: {period_start} a {period_end}")
         else:
-            logger.warning("   ⚠️  Coluna 'data_captura' não encontrada - não foi possível filtrar por período!")
-            logger.warning("   ⚠️  ATENÇÃO: % de resposta pode estar distorcido!")
+            logger.warning("     Coluna 'data_captura' não encontrada - não foi possível filtrar por período!")
+            logger.warning("     ATENÇÃO: % de resposta pode estar distorcido!")
 
         # 1. Agregar dados de conversão por campanha
         logger.info("   Agregando dados de conversão...")
 
         # FIX: Consolidar campanhas por campaign_id + nome base normalizado
-        logger.info("   🔧 Consolidando variações de campanha por Campaign ID...")
+        logger.info("    Consolidando variações de campanha por Campaign ID...")
 
         # Extrair campaign_id e nome base de cada linha
         matched_df['campaign_id_extracted'] = matched_df['campaign'].apply(
@@ -411,7 +411,7 @@ class CampaignMetricsCalculator:
 
         # Para cada ID, escolher o nome MAIS COMPLETO (maior length)
         campaign_id_to_best_name = {}
-        campaign_base_to_best_name = {}  # Mapeamento nome_base → melhor nome COM ID
+        campaign_base_to_best_name = {}  # Mapeamento nome_base  melhor nome COM ID
 
         for camp_id, variations in campaigns_by_id.items():
             # Escolher nome mais longo (mais completo)
@@ -454,12 +454,12 @@ class CampaignMetricsCalculator:
         # Log de consolidações
         consolidations = [(key, vars) for key, vars in campaigns_by_id.items() if len(vars) > 1]
         if consolidations:
-            logger.info(f"   ✅ {len(consolidations)} IDs com múltiplas variações serão consolidadas:")
+            logger.info(f"    {len(consolidations)} IDs com múltiplas variações serão consolidadas:")
             for key, variations in consolidations[:5]:  # Mostrar 5 primeiros
                 best_name = campaign_id_to_best_name[key]
                 # Truncar ID para exibição
                 display_key = key[:15] + "..." if len(key) > 15 else key
-                logger.info(f"      • ID {display_key}:")
+                logger.info(f"       ID {display_key}:")
                 logger.info(f"         Nome escolhido: {best_name[:70]}")
                 for full_name in variations:
                     count = len(matched_df[matched_df['campaign'] == full_name])
@@ -471,13 +471,13 @@ class CampaignMetricsCalculator:
         # DEBUG: Verificar vendas antes da agregação
         vendas_antes_groupby = matched_df['converted'].sum()
         vendas_unicas_antes = matched_df[matched_df['converted'] == True]['email'].nunique()
-        logger.info(f"   🔍 DEBUG - matched_df: {len(matched_df)} total de linhas, {int(vendas_antes_groupby)} conversões, {vendas_unicas_antes} emails únicos convertidos")
+        logger.info(f"    DEBUG - matched_df: {len(matched_df)} total de linhas, {int(vendas_antes_groupby)} conversões, {vendas_unicas_antes} emails únicos convertidos")
 
         # Verificar se há vendas com campaign_consolidated inválido
         vendas_df = matched_df[matched_df['converted'] == True]
         invalid_campaigns = vendas_df[vendas_df['campaign_consolidated'].isna()]
         if len(invalid_campaigns) > 0:
-            logger.warning(f"   ⚠️ {len(invalid_campaigns)} vendas com campaign_consolidated NULO!")
+            logger.warning(f"    {len(invalid_campaigns)} vendas com campaign_consolidated NULO!")
 
         # Groupby usando nome consolidado
         # CRÍTICO: Contar emails únicos para conversões, não somar linhas (evita duplicatas)
@@ -507,26 +507,26 @@ class CampaignMetricsCalculator:
 
         # DEBUG: Verificar vendas depois da agregação
         vendas_depois_groupby = campaign_stats['conversions'].sum()
-        logger.info(f"   🔍 DEBUG - Vendas depois do groupby: {int(vendas_depois_groupby)}")
+        logger.info(f"    DEBUG - Vendas depois do groupby: {int(vendas_depois_groupby)}")
         if vendas_antes_groupby != vendas_depois_groupby:
-            logger.warning(f"   ⚠️ PERDA DE VENDAS NO GROUPBY: {int(vendas_antes_groupby - vendas_depois_groupby)} vendas perdidas!")
+            logger.warning(f"    PERDA DE VENDAS NO GROUPBY: {int(vendas_antes_groupby - vendas_depois_groupby)} vendas perdidas!")
 
         # DEBUG: Mostrar campanhas com vendas e sua classificação
         campanhas_com_vendas = campaign_stats[campaign_stats['conversions'] > 0].copy()
         if len(campanhas_com_vendas) > 0:
-            logger.info(f"   📊 CAMPANHAS COM VENDAS ({len(campanhas_com_vendas)} campanhas):")
+            logger.info(f"    CAMPANHAS COM VENDAS ({len(campanhas_com_vendas)} campanhas):")
             for _, row in campanhas_com_vendas.iterrows():
                 grupo = row['ml_type']
                 campanha = str(row['campaign'])[:80]
                 vendas = int(row['conversions'])
-                logger.info(f"      • [{grupo}] {campanha}: {vendas} vendas")
+                logger.info(f"       [{grupo}] {campanha}: {vendas} vendas")
 
         # DEBUG: Verificar se comparison_group já existe no matched_df
         if 'comparison_group' in matched_df.columns:
             eventos_ml_matched = matched_df[matched_df['comparison_group'] == 'Eventos ML']
             total_leads_eventos_ml_matched = len(eventos_ml_matched)
             total_vendas_eventos_ml_matched = eventos_ml_matched['converted'].sum()
-            logger.info(f"   🔍 DEBUG - Eventos ML no matched_df: {total_leads_eventos_ml_matched} leads, {int(total_vendas_eventos_ml_matched)} vendas")
+            logger.info(f"    DEBUG - Eventos ML no matched_df: {total_leads_eventos_ml_matched} leads, {int(total_vendas_eventos_ml_matched)} vendas")
 
         # Limpar colunas auxiliares do matched_df
         matched_df = matched_df.drop(['campaign_id_extracted', 'campaign_base_normalized', 'campaign_consolidated'], axis=1)
@@ -541,7 +541,7 @@ class CampaignMetricsCalculator:
         logger.info(f"   Conversões totais em campaign_stats: {int(campaign_stats['conversions'].sum())}")
 
         # Usar dados dos relatórios Excel (não usar Meta API)
-        logger.info("   📊 Carregando leads dos relatórios Excel...")
+        logger.info("    Carregando leads dos relatórios Excel...")
 
         # Usar costs_hierarchy_consolidated que foi passado como parâmetro
         costs = costs_hierarchy_consolidated if costs_hierarchy_consolidated else {}
@@ -549,12 +549,11 @@ class CampaignMetricsCalculator:
         # DEBUG: Verificar IDs disponíveis
         if costs and costs.get('campaigns'):
             available_ids = list(costs['campaigns'].keys())
-            logger.info(f"   🔍 DEBUG - IDs disponíveis em costs_hierarchy: {len(available_ids)}")
-            logger.info(f"   🔍 DEBUG - Primeiros 3 IDs: {available_ids[:3]}")
-            logger.info(f"   🔍 DEBUG - Primeiras 3 campanhas em campaign_stats:")
+            logger.info(f"    DEBUG - Primeiros 3 IDs: {available_ids[:3]}")
+            logger.info(f"    DEBUG - Primeiras 3 campanhas em campaign_stats:")
             for camp in campaign_stats['campaign'].head(3):
                 extracted_id = self._extract_campaign_id(camp)
-                logger.info(f"      • {camp[:60]}... → ID: {extracted_id}")
+                logger.info(f"       {camp[:60]}...  ID: {extracted_id}")
 
         campaign_stats['leads'] = campaign_stats['campaign'].apply(
             lambda camp: self._get_campaign_leads_from_costs(camp, costs)
@@ -573,7 +572,7 @@ class CampaignMetricsCalculator:
         total_lq = campaign_stats['LeadQualified'].sum()
         total_lqhq = campaign_stats['LeadQualifiedHighQuality'].sum()
         total_faixa_a = campaign_stats['Faixa A'].sum()
-        logger.info(f"   ✅ Leads carregados do Excel: {total_leads_excel}")
+        logger.info(f"    Leads carregados do Excel: {total_leads_excel}")
         logger.info(f"      'lead' padrão: {total_leads_excel}")
         logger.info(f"      LeadQualified: {total_lq}")
         logger.info(f"      LeadQualifiedHighQuality: {total_lqhq}")
@@ -600,7 +599,7 @@ class CampaignMetricsCalculator:
         # Ajustar campanha especial com leads artificiais
         if total_leads_normal > 0 and total_lq_normal > 0:
             avg_ratio = total_lq_normal / total_leads_normal
-            logger.info(f"   📊 Proporção média LQ/Leads (campanhas normais): {avg_ratio:.2%}")
+            logger.info(f"    Proporção média LQ/Leads (campanhas normais): {avg_ratio:.2%}")
             logger.info(f"      Total leads: {int(total_leads_normal)}, Total LQ: {int(total_lq_normal)}")
 
             # Identificar e ajustar campanha especial
@@ -614,7 +613,7 @@ class CampaignMetricsCalculator:
                     if lq > 0 and avg_ratio > 0:
                         leads_artificial = int(lq / avg_ratio)
                         campaign_stats.at[idx, 'leads'] = leads_artificial
-                        logger.info(f"   🔧 Campanha especial ajustada ({camp_id[:15]}...):")
+                        logger.info(f"    Campanha especial ajustada ({camp_id[:15]}...):")
                         logger.info(f"      Leads original: {leads_original}")
                         logger.info(f"      LeadQualified: {lq}")
                         logger.info(f"      Leads artificial: {leads_artificial} (baseado em proporção {avg_ratio:.2%})")
@@ -653,16 +652,16 @@ class CampaignMetricsCalculator:
         # Salvar também total de respostas ANTES do filtro para comparação
         self.total_respostas_before_filter = campaign_stats['respostas_pesquisa'].sum()
 
-        logger.info(f"   ✅ Total de leads (Meta): {self.total_leads_meta_before_filter}")
+        logger.info(f"    Total de leads (Meta): {self.total_leads_meta_before_filter}")
         logger.info(f"      'lead' padrão: {total_leads_standard}")
         logger.info(f"      LeadQualified: {total_lq}")
         logger.info(f"      LeadQualifiedHighQuality: {total_lqhq}")
         logger.info(f"      Faixa A: {total_faixa_a}")
-        logger.info(f"   ✅ Total de respostas (antes do filtro): {self.total_respostas_before_filter}")
+        logger.info(f"    Total de respostas (antes do filtro): {self.total_respostas_before_filter}")
         # Calcular taxa de resposta média usando leads no denominador
         total_leads = campaign_stats['leads'].sum()
         taxa_media = campaign_stats['respostas_pesquisa'].sum() / total_leads * 100 if total_leads > 0 else 0
-        logger.info(f"   ✅ Taxa de resposta média: {taxa_media:.2f}%")
+        logger.info(f"    Taxa de resposta média: {taxa_media:.2f}%")
 
         # 2. Buscar custos via Meta API (se não fornecidos)
         if costs_hierarchy_consolidated:
@@ -677,7 +676,7 @@ class CampaignMetricsCalculator:
                     until_date=period_end
                 )
             except Exception as e:
-                logger.error(f"   ❌ Erro ao buscar custos Meta API: {e}")
+                logger.error(f"    Erro ao buscar custos Meta API: {e}")
                 logger.warning("   Usando spend = 0 para todas as campanhas")
                 costs_hierarchy = {'campaigns': {}}
 
@@ -696,21 +695,19 @@ class CampaignMetricsCalculator:
             )
 
             # DEBUG: Verificar quais IDs estamos tentando buscar
-            logger.info("   🔍 DEBUG - Tentando buscar optimization_goals para:")
+            logger.info("    DEBUG - Tentando buscar optimization_goals para:")
             ml_campaigns = campaign_stats[campaign_stats['ml_type'] == 'COM_ML']
             for idx, row in ml_campaigns.head(3).iterrows():
                 camp_name = row['campaign']
                 camp_id = self._extract_campaign_id(camp_name)
-                logger.info(f"      • {camp_name[:70]}...")
+                logger.info(f"       {camp_name[:70]}...")
                 logger.info(f"        Extracted ID: {camp_id}")
                 logger.info(f"        First 15: {camp_id[:15] if camp_id else 'None'}")
 
-            # Listar IDs disponíveis em costs_hierarchy
             if costs_hierarchy and costs_hierarchy.get('campaigns'):
-                logger.info("   🔍 DEBUG - IDs disponíveis em costs_hierarchy (primeiros 5):")
                 for camp_id in list(costs_hierarchy['campaigns'].keys())[:5]:
                     camp_data = costs_hierarchy['campaigns'][camp_id]
-                    logger.info(f"      • {camp_id} (first 15: {camp_id[:15]})")
+                    logger.info(f"       {camp_id} (first 15: {camp_id[:15]})")
                     logger.info(f"        Name: {camp_data.get('name', 'N/A')[:70]}")
 
             # Adicionar optimization_goals (eventos de conversão customizados)
@@ -724,18 +721,18 @@ class CampaignMetricsCalculator:
             )
 
             # ATUALIZAR nomes das campanhas: substituir UTMs desatualizados por nomes atuais da Meta
-            logger.info("   🔄 Atualizando nomes das campanhas (UTMs → Meta API)...")
+            logger.info("    Atualizando nomes das campanhas (UTMs  Meta API)...")
             campaign_stats['campaign'] = campaign_stats['campaign'].apply(
                 lambda camp: self._get_campaign_current_name(camp, costs_hierarchy)
             )
-            logger.info("   ✅ Nomes atualizados com sucesso")
+            logger.info("    Nomes atualizados com sucesso")
 
             # optimization_goal já é retornado como string por _get_campaign_optimization_goals()
             # Não precisa converter, apenas garantir que "-" vire ""
             campaign_stats['optimization_goal'] = campaign_stats['optimization_goal'].replace('-', '')
 
             total_spend = campaign_stats['spend'].sum()
-            logger.info(f"   ✅ Custos obtidos: R$ {total_spend:,.2f}")
+            logger.info(f"    Custos obtidos: R$ {total_spend:,.2f}")
         else:
             campaign_stats['spend'] = 0.0
             campaign_stats['budget'] = 0.0
@@ -765,14 +762,14 @@ class CampaignMetricsCalculator:
         conversions_after_filter = campaign_stats['conversions'].sum()
 
         if campaigns_filtered > 0:
-            logger.info(f"   ⚠️ {campaigns_filtered} campanhas removidas (spend = 0 E leads = 0, não ativas no período)")
+            logger.info(f"    {campaigns_filtered} campanhas removidas (spend = 0 E leads = 0, não ativas no período)")
             conversions_removed = conversions_before_filter - conversions_after_filter
             if conversions_removed > 0:
-                logger.warning(f"   ⚠️ {int(conversions_removed)} vendas removidas junto com essas campanhas!")
-                logger.warning(f"   ⚠️ Campanhas removidas com vendas:")
+                logger.warning(f"    {int(conversions_removed)} vendas removidas junto com essas campanhas!")
+                logger.warning(f"    Campanhas removidas com vendas:")
                 for _, row in removed_campaigns[removed_campaigns['conversions'] > 0].iterrows():
                     grupo = row.get('comparison_group', 'N/A')
-                    logger.warning(f"      • {int(row['conversions'])} vendas [{grupo}]: {row['campaign'][:70]}")
+                    logger.warning(f"       {int(row['conversions'])} vendas [{grupo}]: {row['campaign'][:70]}")
 
         # DEBUG: Verificar Eventos ML no campaign_stats após filtro
         if 'comparison_group' in campaign_stats.columns:
@@ -780,14 +777,14 @@ class CampaignMetricsCalculator:
             if len(eventos_ml_stats) > 0:
                 total_leads_eventos_ml_stats = eventos_ml_stats['leads'].sum()
                 total_vendas_eventos_ml_stats = eventos_ml_stats['conversions'].sum()
-                logger.info(f"   🔍 DEBUG - Eventos ML no campaign_stats (após filtro): {len(eventos_ml_stats)} campanhas, {int(total_leads_eventos_ml_stats)} leads, {int(total_vendas_eventos_ml_stats)} vendas")
+                logger.info(f"    DEBUG - Eventos ML no campaign_stats (após filtro): {len(eventos_ml_stats)} campanhas, {int(total_leads_eventos_ml_stats)} leads, {int(total_vendas_eventos_ml_stats)} vendas")
 
         # 3. Calcular métricas finais
         logger.info("   Calculando CPL, ROAS e Margem...")
 
         # Verificar se temos campanhas para calcular
         if len(campaign_stats) == 0:
-            logger.warning("   ⚠️ Nenhuma campanha com dados para calcular métricas")
+            logger.warning("    Nenhuma campanha com dados para calcular métricas")
             return pd.DataFrame()
 
         # Garantir que as colunas numéricas sejam do tipo correto
@@ -823,10 +820,10 @@ class CampaignMetricsCalculator:
         # Ordenar por margem de contribuição (maior para menor)
         campaign_stats = campaign_stats.sort_values('contribution_margin', ascending=False)
 
-        logger.info(f"   ✅ Métricas calculadas para {len(campaign_stats)} campanhas")
+        logger.info(f"    Métricas calculadas para {len(campaign_stats)} campanhas")
 
         # Adicionar métricas ajustadas por TMB
-        logger.info(f"   📊 Calculando métricas ajustadas por TMB...")
+        logger.info(f"    Calculando métricas ajustadas por TMB...")
         campaign_stats = add_adjusted_metrics_to_campaign_stats(
             campaign_stats,
             matched_df,
@@ -930,7 +927,7 @@ class CampaignMetricsCalculator:
             # Match exato primeiro
             if campaign_id in campaigns:
                 spend = float(campaigns[campaign_id].get('spend', 0))
-                logger.debug(f"   ✅ Match por ID: {campaign_id} → R$ {spend:.2f}")
+                logger.debug(f"    Match por ID: {campaign_id}  R$ {spend:.2f}")
                 return spend
 
             # FALLBACK: Match pelos primeiros 15 dígitos (ignora últimos 3 dígitos)
@@ -941,7 +938,7 @@ class CampaignMetricsCalculator:
                 cost_id_prefix = cost_id[:15] if len(cost_id) >= 15 else cost_id
                 if campaign_id_prefix == cost_id_prefix:
                     spend = float(cost_data.get('spend', 0))
-                    logger.debug(f"   ✅ Match por ID (15 dígitos): {campaign_id_prefix} → R$ {spend:.2f}")
+                    logger.debug(f"    Match por ID (15 dígitos): {campaign_id_prefix}  R$ {spend:.2f}")
                     return spend
 
         # MÉTODO 2: Fallback - match por nome EXATO (para campanhas sem ID no nome)
@@ -956,11 +953,11 @@ class CampaignMetricsCalculator:
             camp_name_lower = camp_data.get('name', '').lower().strip()
             if campaign_lower == camp_name_lower:
                 spend = float(camp_data.get('spend', 0))
-                logger.debug(f"   ✅ Match por nome: {campaign_name_clean} → R$ {spend:.2f}")
+                logger.debug(f"    Match por nome: {campaign_name_clean}  R$ {spend:.2f}")
                 return spend
 
         # Não encontrou - retornar 0 (REMOVIDO match parcial que causava duplicatas)
-        logger.debug(f"   ❌ Campanha não encontrada: {campaign_name}")
+        logger.debug(f"    Campanha não encontrada: {campaign_name}")
         return 0.0
 
     def _get_campaign_budget(self, campaign_name: str, costs_hierarchy: Dict) -> float:
@@ -1139,7 +1136,7 @@ class CampaignMetricsCalculator:
 
         if not camp_data:
             # DEBUG: Campanha não encontrada em costs_hierarchy
-            logger.debug(f"   ⚠️ Campanha não encontrada em costs_hierarchy: {campaign_name[:60]}")
+            logger.debug(f"    Campanha não encontrada em costs_hierarchy: {campaign_name[:60]}")
             logger.debug(f"      Extracted ID: {campaign_id}")
             return "-"
 
@@ -1161,7 +1158,7 @@ class CampaignMetricsCalculator:
                 return ", ".join(sorted(optimization_goals))
             else:
                 # DEBUG: Se não encontrou goals, logar informação
-                logger.debug(f"   ⚠️ Nenhum optimization_goal encontrado para campanha: {campaign_name[:60]}")
+                logger.debug(f"    Nenhum optimization_goal encontrado para campanha: {campaign_name[:60]}")
                 logger.debug(f"      Campaign ID: {campaign_id}")
                 logger.debug(f"      Adsets encontrados: {len(adsets)}")
 
@@ -1396,13 +1393,13 @@ class DecileMetricsCalculator:
             - revenue_guru: Receita Guru
             - revenue_total: Receita Total
         """
-        logger.info("📈 Calculando performance por decil...")
+        logger.info(" Calculando performance por decil...")
 
         # Filtrar apenas leads com decil definido
         df_with_decile = matched_df[matched_df['decile'].notna()].copy()
 
         if len(df_with_decile) == 0:
-            logger.warning("⚠️ Nenhum lead com decil definido")
+            logger.warning(" Nenhum lead com decil definido")
             return pd.DataFrame()
 
         logger.info(f"   {len(df_with_decile)} leads com decil definido")
@@ -1463,7 +1460,7 @@ class DecileMetricsCalculator:
         df_metrics = pd.DataFrame(decile_metrics)
 
         if len(df_metrics) > 0:
-            logger.info(f"   ✅ Métricas calculadas para {len(df_metrics)} decis")
+            logger.info(f"    Métricas calculadas para {len(df_metrics)} decis")
 
             # Log summary
             total_guru = df_metrics['revenue_guru'].sum()
@@ -1471,7 +1468,7 @@ class DecileMetricsCalculator:
             logger.info(f"      Receita Guru: R$ {total_guru:,.2f}")
             logger.info(f"      Receita Total: R$ {total_all:,.2f}")
         else:
-            logger.warning("   ⚠️ Nenhum decil com leads suficientes")
+            logger.warning("    Nenhum decil com leads suficientes")
 
         return df_metrics
 
@@ -1491,7 +1488,7 @@ def compare_ml_vs_non_ml(campaign_metrics: pd.DataFrame) -> Dict:
             'difference': {leads_diff, conversions_diff, conversion_rate_diff, revenue_diff, spend_diff, cpl_diff, roas_diff, margin_diff}
         }
     """
-    logger.info("⚖️ Comparando COM_ML vs SEM_ML...")
+    logger.info(" Comparando COM_ML vs SEM_ML...")
 
     # Separar por tipo
     com_ml = campaign_metrics[campaign_metrics['ml_type'] == 'COM_ML']
@@ -1576,12 +1573,12 @@ def compare_ml_vs_non_ml(campaign_metrics: pd.DataFrame) -> Dict:
 
     if com_ml_agg['roas'] > sem_ml_agg['roas']:
         improvement = difference['roas_diff']
-        logger.info(f"   🏆 VENCEDOR: COM_ML (ROAS {improvement:.1f}% maior)")
+        logger.info(f"    VENCEDOR: COM_ML (ROAS {improvement:.1f}% maior)")
     elif sem_ml_agg['roas'] > com_ml_agg['roas']:
         decline = abs(difference['roas_diff'])
-        logger.warning(f"   ⚠️ SEM_ML performou {decline:.1f}% melhor")
+        logger.warning(f"    SEM_ML performou {decline:.1f}% melhor")
     else:
-        logger.info(f"   ➖ Empate técnico")
+        logger.info(f"    Empate técnico")
 
     return {
         'com_ml': com_ml_agg,
@@ -1636,7 +1633,7 @@ def calculate_overall_stats(
             conversions_guru_total = len(sales_df[sales_df['origem'] == 'guru'])
             conversions_tmb_total = len(sales_df[sales_df['origem'] == 'tmb'])
         else:
-            logger.warning("⚠️ Coluna 'origem' não encontrada em sales_df")
+            logger.warning(" Coluna 'origem' não encontrada em sales_df")
             conversions_guru_total = 0
             conversions_tmb_total = 0
 
@@ -1651,7 +1648,7 @@ def calculate_overall_stats(
                 (matched_df['sale_origin'] == 'tmb')
             ])
         else:
-            logger.warning("⚠️ Coluna 'sale_origin' não encontrada em matched_df")
+            logger.warning(" Coluna 'sale_origin' não encontrada em matched_df")
             conversions_guru_matched = 0
             conversions_tmb_matched = 0
 
@@ -1664,7 +1661,7 @@ def calculate_overall_stats(
 
     else:
         # Fallback: usar apenas vendas matched
-        logger.warning("⚠️ sales_df não fornecido, usando apenas vendas matched para estatísticas gerais")
+        logger.warning(" sales_df não fornecido, usando apenas vendas matched para estatísticas gerais")
         total_conversions = matched_conversions
         total_revenue = matched_df[matched_df['converted'] == True]['sale_value'].sum()
 
@@ -1687,12 +1684,12 @@ def calculate_overall_stats(
     # Tentar obter do CampaignMetricsCalculator (salvo antes do filtro)
     if campaign_calc and hasattr(campaign_calc, 'total_leads_meta_before_filter'):
         total_leads_meta = campaign_calc.total_leads_meta_before_filter
-        logger.info(f"   📊 Usando total de leads salvo antes do filtro: {total_leads_meta}")
+        logger.info(f"    Usando total de leads salvo antes do filtro: {total_leads_meta}")
     # Fallback: usar campaign_metrics (pode estar incorreto se campanhas foram filtradas)
     elif 'leads' in campaign_metrics.columns and not campaign_metrics.empty:
         total_leads_meta = campaign_metrics['leads'].sum()
     else:
-        logger.warning("⚠️ 'leads' não encontrado ou campaign_metrics vazio")
+        logger.warning(" 'leads' não encontrado ou campaign_metrics vazio")
 
     # Métricas gerais (baseadas em TODAS as vendas)
     conversion_rate = (total_conversions / total_leads * 100) if total_leads > 0 else 0
@@ -1727,11 +1724,11 @@ def calculate_overall_stats(
     if lead_source_stats:
         # Priorizar: usar total do período (métrica independente)
         result['survey_leads'] = lead_source_stats.get('survey_leads', 0)
-        logger.info(f"   📊 Respostas na pesquisa (período): {result['survey_leads']}")
+        logger.info(f"    Respostas na pesquisa (período): {result['survey_leads']}")
     elif campaign_calc and hasattr(campaign_calc, 'total_respostas_before_filter'):
         # Fallback: usar respostas das campanhas analisadas
         result['survey_leads'] = campaign_calc.total_respostas_before_filter
-        logger.warning(f"   ⚠️ Usando respostas das campanhas analisadas (não do período todo): {result['survey_leads']}")
+        logger.warning(f"    Usando respostas das campanhas analisadas (não do período todo): {result['survey_leads']}")
     else:
         result['survey_leads'] = 0
 
@@ -1771,16 +1768,16 @@ def calculate_comparison_group_metrics(
     """
     # Verificar se a coluna comparison_group existe
     if 'comparison_group' not in matched_df.columns:
-        logger.warning("⚠️ Coluna 'comparison_group' não encontrada. Retornando DataFrame vazio.")
+        logger.warning(" Coluna 'comparison_group' não encontrada. Retornando DataFrame vazio.")
         return pd.DataFrame()
 
     # DEBUG: Verificar quantas conversões existem no matched_df
     total_conversoes_linhas = len(matched_df[matched_df['converted'] == True])
     total_conversoes_unicas = matched_df[matched_df['converted'] == True]['email'].nunique()
-    logger.info(f"📊 Calculando métricas por grupo de comparação...")
-    logger.info(f"   🔍 DEBUG - matched_df: {len(matched_df)} total de linhas, {total_conversoes_linhas} conversões, {total_conversoes_unicas} emails únicos convertidos")
+    logger.info(f" Calculando métricas por grupo de comparação...")
+    logger.info(f"    DEBUG - matched_df: {len(matched_df)} total de linhas, {total_conversoes_linhas} conversões, {total_conversoes_unicas} emails únicos convertidos")
 
-    # Criar mapeamento campaign → spend
+    # Criar mapeamento campaign  spend
     campaign_spend_map = dict(zip(
         campaign_metrics['campaign'],
         campaign_metrics['spend']
@@ -1803,7 +1800,7 @@ def calculate_comparison_group_metrics(
         # DEBUG: Ver total de linhas vs emails únicos
         total_converted_rows = len(converted_df)
         if total_converted_rows != conversions:
-            logger.info(f"   🔍 DEBUG [{group}]: {total_converted_rows} linhas convertidas → {conversions} emails únicos")
+            logger.info(f"    DEBUG [{group}]: {total_converted_rows} linhas convertidas  {conversions} emails únicos")
 
         conversion_rate = (conversions / leads * 100) if leads > 0 else 0
         total_revenue = converted_df['sale_value'].sum()
@@ -1832,7 +1829,7 @@ def calculate_comparison_group_metrics(
     df_result = pd.DataFrame(groups_metrics)
 
     if len(df_result) > 0:
-        logger.info("   ✅ Métricas calculadas por grupo:")
+        logger.info("    Métricas calculadas por grupo:")
         for _, row in df_result.iterrows():
             logger.info(f"      {row['comparison_group']}: {row['leads']} leads, "
                        f"{row['conversions']} conversões ({row['conversion_rate']:.2f}%), "

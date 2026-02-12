@@ -81,7 +81,7 @@ class OperationalMonitor:
                     'type': 'no_leads_received',
                     'severity': severity,
                     'category': 'operational',
-                    'message': f"⚠️ Nenhum lead recebido nas últimas {hours_since:.1f} horas (último: {last_lead_time.isoformat()})",
+                    'message': f" Nenhum lead recebido nas últimas {hours_since:.1f} horas (último: {last_lead_time.isoformat()})",
                     'details': {
                         'last_lead_at': last_lead_time.isoformat(),
                         'hours_since': hours_since,
@@ -137,7 +137,7 @@ class OperationalMonitor:
                     'type': 'no_capi_sent',
                     'severity': severity,
                     'category': 'operational',
-                    'message': f"⚠️ Nenhum evento CAPI enviado nas últimas {hours_since:.1f} horas (último: {last_capi_time.isoformat()})",
+                    'message': f" Nenhum evento CAPI enviado nas últimas {hours_since:.1f} horas (último: {last_capi_time.isoformat()})",
                     'details': {
                         'last_capi_at': last_capi_time.isoformat(),
                         'hours_since': hours_since,
