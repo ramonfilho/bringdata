@@ -31,7 +31,7 @@ def calcular_thresholds_decis(y_prob: np.ndarray, decis: pd.Series) -> dict:
             ...
         }
     """
-    logger.info("Calculando thresholds fixos de decis...")
+    logger.debug("Calculando thresholds fixos de decis...")
 
     # Criar DataFrame para análise
     df_analise = pd.DataFrame({
@@ -58,13 +58,13 @@ def calcular_thresholds_decis(y_prob: np.ndarray, decis: pd.Series) -> dict:
             'std_probability': float(decil_probs.std())
         }
 
-        logger.info(f"   {decil_label}: [{decil_probs.min():.4f}, {decil_probs.max():.4f}] "
+        logger.debug(f"   {decil_label}: [{decil_probs.min():.4f}, {decil_probs.max():.4f}] "
                    f"(n={len(decil_probs)}, mean={decil_probs.mean():.4f})")
 
     # Validar thresholds
     _validar_thresholds(thresholds)
 
-    logger.info(f"✅ Thresholds calculados para {len(thresholds)} decis")
+    logger.debug(f"✅ Thresholds calculados para {len(thresholds)} decis")
 
     return thresholds
 
