@@ -174,14 +174,15 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("")
     logger.info("PIPELINE DE TREINO")
     logger.info("")
-    logger.info(f" Output sendo salvo em: {log_path}")
+    logger.info(f"    Output sendo salvo em: {log_path}")
     logger.info("")
-    logger.info(f" CONFIGURAÇÃO:")
-    logger.info(f"   Método de matching inicial (célula 15): {initial_matching}")
-    logger.info(f"   Salvar arquivos locais: {save_files}")
-    logger.info(f"   Hyperparameter tuning: {tune_hyperparams}")
+    logger.info(f"  CONFIGURAÇÃO:")
+    logger.info(f"    Método de matching inicial (célula 15): {initial_matching}")
+    logger.info(f"    Salvar arquivos locais: {save_files}")
+    logger.info(f"    Hyperparameter tuning: {tune_hyperparams}")
     if tune_hyperparams:
-        logger.info(f"   Grid size: {grid_size}")
+        logger.info(f"    Grid size: {grid_size}")
+
     logger.info("=" * 80)
 
     # Carregar configuração
@@ -191,7 +192,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
 
     # === CÉLULA 1: Upload/Leitura de arquivos ===
     logger.info("")
-    logger.info(" CÉLULA 1: LEITURA DE ARQUIVOS")
+    logger.info("CÉLULA 1: LEITURA DE ARQUIVOS")
     data_dir = config['ingestion']['training_data_dir']
 
     # Custom sorting para replicar ordem do notebook
@@ -208,15 +209,15 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
 
     # NORMAL: Número de arquivos + fonte de dados
     logger.info("")
-    logger.info(f"Arquivos carregados: {len(filepaths)}")
+    logger.info(f"  Arquivos carregados: {len(filepaths)}")
 
     # Fonte de dados
     if include_api_data:
-        logger.info(f"Fonte de dados: Arquivos locais + Google Sheets API")
+        logger.info(f"  Fonte de dados: Arquivos locais + Google Sheets API")
         if api_start_date or api_end_date:
             logger.debug(f"   Período API: {api_start_date or 'início'} até {api_end_date or 'hoje'}")
     else:
-        logger.info(f"Fonte de dados: Arquivos locais")
+        logger.info(f"  Fonte de dados: Arquivos locais")
 
     # DEBUG: Lista completa de arquivos
     logger.debug(f"\nLista de arquivos:")
@@ -247,7 +248,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("=" * 80)
     # === CÉLULA 2: Filtragem + Remoção de Duplicatas ===
     logger.info("")
-    logger.info(" CÉLULA 2: FILTRAGEM DE ABAS + REMOÇÃO DE DUPLICATAS")
+    logger.info("CÉLULA 2: FILTRAGEM DE ABAS + REMOÇÃO DE DUPLICATAS")
 
     # Filtrar abas
     filtered_data, filter_report = filter_sheets(
@@ -285,14 +286,14 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
 
     # NORMAL: Apenas resumo final
     logger.info("")
-    logger.info(f" RESUMO:")
-    logger.info(f"Arquivos processados: {len(clean_data)}")
-    logger.info(f"Abas mantidas: {abas_mantidas}")
-    logger.info(f"Abas removidas: {abas_removidas}")
-    logger.info(f"Linhas totais após processamento: {total_final:,}")
-    logger.info(f"Duplicatas removidas: {total_duplicatas:,}")
+    logger.info(f"  RESUMO:")
+    logger.info(f"    Arquivos processados: {len(clean_data)}")
+    logger.info(f"    Abas mantidas: {abas_mantidas}")
+    logger.info(f"    Abas removidas: {abas_removidas}")
+    logger.info(f"    Linhas totais após processamento: {total_final:,}")
+    logger.info(f"    Duplicatas removidas: {total_duplicatas:,}")
     if total_original > 0:
-        logger.info(f"Redução por duplicatas: {(total_duplicatas/total_original*100):.2f}%")
+        logger.info(f"    Redução por duplicatas: {(total_duplicatas/total_original*100):.2f}%")
     logger.info("")
 
     # DEBUG: Tabela detalhada
@@ -321,7 +322,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     # === CÉLULA 3: Remoção de colunas desnecessárias ===
     logger.info("=" * 80)
     logger.info("")
-    logger.info(" CÉLULA 3: REMOÇÃO DE COLUNAS DESNECESSÁRIAS")
+    logger.info("CÉLULA 3: REMOÇÃO DE COLUNAS DESNECESSÁRIAS")
 
     clean_data_cols, cols_report = remove_unnecessary_columns(
         clean_data,
@@ -352,13 +353,13 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.debug(f"{'TOTAL':<35} {'':<20} {total_antes:>10} {total_depois:>10} {total_removidas_cols:>10}")
 
     logger.info("")
-    logger.info(f" RESUMO:")
-    logger.info(f"Total de colunas removidas: {total_removidas_cols}")
+    logger.info(f"  RESUMO:")
+    logger.info(f"    Total de colunas removidas: {total_removidas_cols}")
 
     # === CÉLULA 4: Consolidação de datasets ===
     logger.info("=" * 80)
     logger.info("")
-    logger.info(" CÉLULA 4: CONSOLIDAÇÃO DE DATASETS - PESQUISA E VENDAS")
+    logger.info("CÉLULA 4: CONSOLIDAÇÃO DE DATASETS - PESQUISA E VENDAS")
 
     df_pesquisa, df_vendas = consolidate_datasets(
         clean_data_cols,
@@ -388,14 +389,14 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     gerar_relatorio_colunas(df_vendas, "DATASET VENDAS")
 
     logger.info("")
-    logger.info(f"RESUMO:")
-    logger.info(f"Dataset Pesquisa: {len(df_pesquisa):,} registros, {len(df_pesquisa.columns)} colunas")
-    logger.info(f"Dataset Vendas: {len(df_vendas):,} registros, {len(df_vendas.columns)} colunas")
+    logger.info(f"  RESUMO:")
+    logger.info(f"    Dataset Pesquisa: {len(df_pesquisa):,} registros, {len(df_pesquisa.columns)} colunas")
+    logger.info(f"    Dataset Vendas: {len(df_vendas):,} registros, {len(df_vendas.columns)} colunas")
 
     logger.info("=" * 80)
     # === CÉLULA 5: Unificação de colunas duplicadas ===
     logger.info("")
-    logger.info(" CÉLULA 5: UNIFICAÇÃO DE COLUNAS DUPLICADAS")
+    logger.info("CÉLULA 5: UNIFICAÇÃO DE COLUNAS DUPLICADAS")
 
     # Parte 1: Unificar colunas de PESQUISA
     df_pesquisa_unificado = unificar_colunas_pesquisa(df_pesquisa)
@@ -406,21 +407,21 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("=" * 80)
     # === CÉLULA 5.1: Filtro temporal ===
     logger.info("")
-    logger.info(" CÉLULA 5.1: FILTRO TEMPORAL")
+    logger.info("CÉLULA 5.1: FILTRO TEMPORAL")
 
     df_vendas_temporal = aplicar_filtro_temporal(df_vendas_unificado, df_pesquisa_unificado)
 
     logger.info("=" * 80)
     # === CÉLULA 5.2: Remoção de colunas UTM ===
     logger.info("")
-    logger.info(" CÉLULA 5.2: REMOÇÃO DE COLUNAS UTM COM ALTA % AUSENTES")
+    logger.info("CÉLULA 5.2: REMOÇÃO DE COLUNAS UTM COM ALTA % AUSENTES")
 
     df_vendas_sem_utm = remover_colunas_utm_ausentes(df_vendas_temporal)
 
     logger.info("=" * 80)
     # === CÉLULA 5.3: Filtro de status e risco ===
     logger.info("")
-    logger.info(" CÉLULA 5.3: FILTRO DE STATUS E RISCO")
+    logger.info("CÉLULA 5.3: FILTRO DE STATUS E RISCO")
 
     df_vendas_final = aplicar_filtro_status_risco(df_vendas_sem_utm, tmb_risk_filter=tmb_risk_filter)
 
@@ -434,7 +435,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("=" * 80)
     # === CÉLULA 7: Unificação completa de categorias ===
     logger.info("")
-    logger.info("  CÉLULA 7: UNIFICAÇÃO COMPLETA DE CATEGORIAS")
+    logger.info("CÉLULA 7: UNIFICAÇÃO COMPLETA DE CATEGORIAS")
 
     df_pesquisa_final_unificado = unificar_categorias_completo(df_pesquisa_final)
 
@@ -444,7 +445,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("=" * 80)
     # === CÉLULA 8: Remoção de features desnecessárias ===
     logger.info("")
-    logger.info("  CÉLULA 8: REMOÇÃO DE FEATURES DESNECESSÁRIAS")
+    logger.info("CÉLULA 8: REMOÇÃO DE FEATURES DESNECESSÁRIAS")
 
     # Determinar se deve remover Medium (opção 3)
     remover_medium = (medium_strategy == 'remove')
@@ -486,17 +487,17 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     # === QUALITY GATE HOOK: Validar qualidade de dados antes de continuar ===
     if quality_gate_hook:
         logger.info("")
-        logger.info(f" QUALITY GATE HOOK: Validando qualidade de dados antes de continuar...")
+        logger.info(f"  QUALITY GATE HOOK: Validando qualidade de dados antes de continuar...")
         should_continue = quality_gate_hook(missing_rates_baseline, df_features_removidas, df_vendas_final)
         if not should_continue:
-            logger.error(" Quality gate falhou - abortando treino")
+            logger.error("    Quality gate falhou - abortando treino")
             return {'status': 'ABORTED_BY_QUALITY_GATE', 'missing_rates': missing_rates_baseline}
-        logger.info(" Quality gate passou - prosseguindo com treino")
+        logger.info("    Quality gate passou - prosseguindo com treino")
 
     logger.info("=" * 80)
     # === CÉLULA 10: Unificação de UTM Source e Term ===
     logger.info("")
-    logger.info(" CÉLULA 10: UNIFICAÇÃO DE UTM SOURCE E TERM")
+    logger.info("CÉLULA 10: UNIFICAÇÃO DE UTM SOURCE E TERM")
 
     df_utm_unificado = unificar_utm_source_term(df_features_removidas)
 
@@ -508,7 +509,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     # (Pulada se medium_strategy='remove')
     if 'Medium' in df_utm_unificado.columns:
         logger.info("")
-        logger.info(" CÉLULA 11: UNIFICAÇÃO DE UTM MEDIUM - EXTRAÇÃO DE PÚBLICOS")
+        logger.info("CÉLULA 11: UNIFICAÇÃO DE UTM MEDIUM - EXTRAÇÃO DE PÚBLICOS")
 
         df_medium_unificado = extrair_publico_medium(df_utm_unificado)
 
@@ -516,16 +517,16 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         relatorio_final_medium(df_medium_unificado)
     else:
         logger.info("")
-        logger.info("  CÉLULA 11: Pulando (Medium foi removido na célula 8 - strategy='remove')")
+        logger.info("CÉLULA 11: Pulando (Medium foi removido na célula 8 - strategy='remove')")
         df_medium_unificado = df_utm_unificado.copy()
 
     logger.info("=" * 80)
     # === CÉLULA 11.1: Unificação de Medium para Produção ===
     if 'Medium' in df_medium_unificado.columns:
         logger.info("")
-        logger.info(" CÉLULA 11.1: UNIFICAÇÃO DE UTM MEDIUM PARA PRODUÇÃO")
+        logger.info("CÉLULA 11.1: UNIFICAÇÃO DE UTM MEDIUM PARA PRODUÇÃO")
 
-        logger.info("Iniciando processo de unificação para produção...")
+        logger.info("  Iniciando processo de unificação para produção...")
         df_original = df_medium_unificado.copy()
         df_medium_producao = unificar_medium_para_producao(df_medium_unificado)
 
@@ -533,13 +534,13 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         relatorio_unificacao_producao(df_original, df_medium_producao)
     else:
         logger.info("")
-        logger.info("  CÉLULA 11.1: Pulando (Medium foi removido na célula 8 - strategy='remove')")
+        logger.info("CÉLULA 11.1: Pulando (Medium foi removido na célula 8 - strategy='remove')")
         df_medium_producao = df_medium_unificado.copy()
 
     logger.info("=" * 80)
     # === CÉLULA 13: Criação de versão do dataset por missing rate ===
     logger.info("")
-    logger.info(" CÉLULA 13: CRIAÇÃO DE VERSÕES DO DATASET POR MISSING RATE")
+    logger.info("CÉLULA 13: CRIAÇÃO DE VERSÕES DO DATASET POR MISSING RATE")
 
     df_pos_cutoff = criar_dataset_pos_cutoff(df_medium_producao)
 
@@ -549,7 +550,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("=" * 80)
     # === CÉLULA 15: Matching robusto por email e telefone ===
     logger.info("")
-    logger.info(f" CÉLULA 15: MATCHING DE LEADS COM VENDAS ({initial_matching.upper().replace('_', ' ')})")
+    logger.info(f"CÉLULA 15: MATCHING DE LEADS COM VENDAS ({initial_matching.upper().replace('_', ' ')})")
 
     # Filtro TMB já foi aplicado em unificar_colunas_datasets
     df_vendas_matching = df_vendas_final.copy()
@@ -577,7 +578,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     # === CÉLULA 17: Filtragem DevClub ===
     logger.info("=" * 80)
     logger.info("")
-    logger.info(f" CÉLULA 17: FILTRAGEM DEVCLUB")
+    logger.info(f"CÉLULA 17: FILTRAGEM DEVCLUB")
 
     dataset_v1_devclub = criar_dataset_devclub(dataset_v1_final, df_vendas_final)
 
@@ -750,7 +751,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("=" * 80)
     # === CÉLULA 17.1: Janela de Conversão ===
     logger.info("")
-    logger.info(f" CÉLULA 17.1: JANELA DE CONVERSÃO")
+    logger.info(f"CÉLULA 17.1: JANELA DE CONVERSÃO")
 
     # Aplicar janela de conversão de 20 dias (captação + CPL + carrinho)
     # Captação: 7 dias (terça-segunda) + CPL: 6 dias (terça-domingo) + Carrinho: 7 dias (segunda-domingo) = 20 dias
@@ -763,7 +764,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("=" * 80)
     # === CÉLULA 18: Feature Engineering ===
     logger.info("")
-    logger.info(f"  CÉLULA 18: FEATURE ENGINEERING")
+    logger.info(f"CÉLULA 18: FEATURE ENGINEERING")
     # IMPORTANTE: FE será aplicado no dataset COM ou SEM temporais
     # Se temporais foram adicionadas, FE vai criar 7 features E remover Data/Nome/etc
     # Resultado final: 4 temporais + 7 FE + 15 base = 26 colunas
@@ -772,18 +773,18 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     # === VALIDATION HOOK (opcional - usado pelo retreino mensal) ===
     if validation_hook:
         logger.info("")
-        logger.info(f" VALIDATION HOOK: Validando dados antes de prosseguir...")
+        logger.info(f"  VALIDATION HOOK: Validando dados antes de prosseguir...")
         should_continue = validation_hook(dataset_v1_devclub_fe)
         if not should_continue:
-            logger.error(" Validação falhou - abortando treino")
+            logger.error("    Validação falhou - abortando treino")
             return {'status': 'ABORTED_BY_VALIDATION'}
-        logger.info(" Validação passou - prosseguindo com treino")
+        logger.info("    Validação passou - prosseguindo com treino")
 
     logger.info("=" * 80)
     # === CÉLULA 18.5: Capturar categorias para monitoramento ===
     logger.info("")
-    logger.info(f" CAPTURANDO CATEGORIAS E DISTRIBUIÇÕES PARA MONITORAMENTO (DRIFT DETECTION)")
-    logger.info("Identificando e salvando categorias únicas para detecção de drift...")
+    logger.info(f"CAPTURANDO CATEGORIAS E DISTRIBUIÇÕES PARA MONITORAMENTO (DRIFT DETECTION)")
+    logger.info("  Identificando e salvando categorias únicas para detecção de drift...")
 
     # Salvar categorias apenas se save_files=True
     # O arquivo será salvo na mesma pasta do modelo pelo registrar_features_e_modelo_devclub
@@ -791,14 +792,14 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     categorias_capturadas = capture_training_categories(dataset_v1_devclub_fe, output_path=None)
 
     logger.info("")
-    logger.info("Capturando distribuições completas (proporções + estatísticas)...")
+    logger.info("  Capturando distribuições completas (proporções + estatísticas)...")
     distribuicoes_capturadas = capture_training_distributions(dataset_v1_devclub_fe, output_path=None)
 
     logger.info("=" * 80)
     # === CÉLULA 20: Encoding Estratégico ===
     logger.info("=" * 80)
     logger.info("")
-    logger.info(f" CÉLULA 20: ENCODING ESTRATÉGICO")
+    logger.info(f"CÉLULA 20: ENCODING ESTRATÉGICO")
     dataset_v1_devclub_encoded = aplicar_encoding_estrategico(dataset_v1_devclub_fe, medium_strategy=medium_strategy)
 
     # === HYPERPARAMETER TUNING (opcional) ===
@@ -816,14 +817,14 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         if resultado_tuning and resultado_tuning['usar_tunado']:
             melhores_params = resultado_tuning['melhores_params']
             logger.info("")
-            logger.info(f" Usando hiperparâmetros tunados no treino final")
+            logger.info(f"  Usando hiperparâmetros tunados no treino final")
         else:
             logger.warning(f"\n  Mantendo hiperparâmetros baseline (tuning não trouxe ganho significativo)")
 
     logger.info("=" * 80)
     # === CÉLULA 21: Treino e Registro do Modelo ===
     logger.info("")
-    logger.info(f" CÉLULA 21: TREINO E REGISTRO DO MODELO")
+    logger.info(f"CÉLULA 21: TREINO E REGISTRO DO MODELO")
 
     resultado_registro_devclub = registrar_features_e_modelo_devclub(
         dataset_v1_devclub_encoded,
