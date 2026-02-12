@@ -354,8 +354,6 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("")
     logger.info(f" RESUMO:")
     logger.info(f"Total de colunas removidas: {total_removidas_cols}")
-    logger.info("")
-    logger.info(f" Dados sem colunas desnecessárias disponíveis")
 
     # === CÉLULA 4: Consolidação de datasets ===
     logger.info("=" * 80)
@@ -393,10 +391,6 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info(f"RESUMO:")
     logger.info(f"Dataset Pesquisa: {len(df_pesquisa):,} registros, {len(df_pesquisa.columns)} colunas")
     logger.info(f"Dataset Vendas: {len(df_vendas):,} registros, {len(df_vendas.columns)} colunas")
-
-    logger.info("")
-    logger.info(f"- dataset_pesquisa_final")
-    logger.info(f"- dataset_vendas_final")
 
     logger.info("=" * 80)
     # === CÉLULA 5: Unificação de colunas duplicadas ===
@@ -537,9 +531,6 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
 
         # Gerar relatório
         relatorio_unificacao_producao(df_original, df_medium_producao)
-
-        logger.info("")
-        logger.info(f"Dataset final disponível em: pesquisa_medium_producao_unificado")
     else:
         logger.info("")
         logger.info("  CÉLULA 11.1: Pulando (Medium foi removido na célula 8 - strategy='remove')")
