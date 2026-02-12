@@ -849,7 +849,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--initial-matching',
         type=str,
-        choices=['email_only', 'email_telefone', 'variantes', 'robusto', 'validation'],
+        choices=['email_only', 'email_telefone', 'variantes', 'robusto', 'validation', 'unified_last6'],
         default='email_telefone',
         help='Método de matching inicial (célula 15) - padrão: email_telefone (+16.5%% dados, melhor separação D10/D1)'
     )
