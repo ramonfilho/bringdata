@@ -40,7 +40,7 @@ def atualizar_business_config_com_recall(model_metadata: dict):
     import re
     from pathlib import Path
 
-    print("\n🔄 ATUALIZANDO BUSINESS_CONFIG.PY COM RECALL REAL")
+    logger.info("\n🔄 ATUALIZANDO BUSINESS_CONFIG.PY COM RECALL REAL")
 
     # Extrair métricas de recall
     recall_metrics = model_metadata.get('recall_metrics', {})
@@ -48,19 +48,19 @@ def atualizar_business_config_com_recall(model_metadata: dict):
     recall = recall_metrics.get('recall')
 
     if not fator_correcao:
-        print("⚠️  Recall metrics não encontradas. Pulando atualização.")
+        logger.info("⚠️  Recall metrics não encontradas. Pulando atualização.")
         return
 
-    print(f"📊 Recall real: {recall:.4f} ({recall*100:.2f}%)")
-    print(f"🔢 Fator de correção: {fator_correcao:.3f}x")
+    logger.info(f"📊 Recall real: {recall:.4f} ({recall*100:.2f}%)")
+    logger.info(f"🔢 Fator de correção: {fator_correcao:.3f}x")
 
     # Calcular taxas corrigidas a partir do decil_analysis
     decil_analysis = model_metadata.get('decil_analysis', {})
     taxas_corrigidas = {}
 
-    print(f"\n📈 Calculando taxas corrigidas:")
-    print(f"{'Decil':<6} | {'Observada':<10} | {'Corrigida':<10}")
-    print("-" * 35)
+    logger.info(f"\n📈 Calculando taxas corrigidas:")
+    logger.info(f"{'Decil':<6} | {'Observada':<10} | {'Corrigida':<10}")
+    logger.info("-" * 35)
 
     for i in range(1, 11):
         decil_key = f"decil_{i}"
@@ -71,13 +71,13 @@ def atualizar_business_config_com_recall(model_metadata: dict):
             taxa_corrigida = taxa_observada * fator_correcao
             taxas_corrigidas[decil_label] = taxa_corrigida
 
-            print(f"{decil_label:<6} | {taxa_observada*100:>8.2f}% | {taxa_corrigida*100:>8.2f}%")
+            logger.info(f"{decil_label:<6} | {taxa_observada*100:>8.2f}% | {taxa_corrigida*100:>8.2f}%")
 
     # Ler arquivo business_config.py
     config_path = Path(__file__).parent.parent.parent / "api" / "business_config.py"
 
     if not config_path.exists():
-        print(f"❌ Arquivo não encontrado: {config_path}")
+        logger.info(f"❌ Arquivo não encontrado: {config_path}")
         return
 
     with open(config_path, 'r', encoding='utf-8') as f:
@@ -107,11 +107,11 @@ def atualizar_business_config_com_recall(model_metadata: dict):
         with open(config_path, 'w', encoding='utf-8') as f:
             f.write(content_novo)
 
-        print(f"\n✅ business_config.py atualizado com sucesso!")
-        print(f"   Path: {config_path}")
-        print(f"   Taxas corrigidas automaticamente com recall real ({recall*100:.2f}%)")
+        logger.info(f"\n✅ business_config.py atualizado com sucesso!")
+        logger.info(f"   Path: {config_path}")
+        logger.info(f"   Taxas corrigidas automaticamente com recall real ({recall*100:.2f}%)")
     else:
-        print(f"⚠️  Padrão CONVERSION_RATES não encontrado no arquivo")
+        logger.info(f"⚠️  Padrão CONVERSION_RATES não encontrado no arquivo")
 
 
 def registrar_features_e_modelo_devclub(
@@ -225,13 +225,13 @@ def registrar_features_e_modelo_devclub(
             y_train = y[mask_treino]
             y_test = y[mask_teste]
 
-            print(f"\nSplit temporal (70% dos dias):")
-            print(f"  Período: {data_min.strftime('%Y-%m-%d')} a {data_max.strftime('%Y-%m-%d')}")
-            print(f"  Data corte: {data_corte.strftime('%Y-%m-%d')}")
-            print(f"  Treino: {len(X_train):,} registros ({len(X_train)/len(X_clean)*100:.1f}%)")
-            print(f"  Teste: {len(X_test):,} registros ({len(X_test)/len(X_clean)*100:.1f}%)")
-            print(f"  Taxa treino: {y_train.mean()*100:.2f}%")
-            print(f"  Taxa teste: {y_test.mean()*100:.2f}%")
+            logger.info(f"\nSplit temporal (70% dos dias):")
+            logger.info(f"  Período: {data_min.strftime('%Y-%m-%d')} a {data_max.strftime('%Y-%m-%d')}")
+            logger.info(f"  Data corte: {data_corte.strftime('%Y-%m-%d')}")
+            logger.info(f"  Treino: {len(X_train):,} registros ({len(X_train)/len(X_clean)*100:.1f}%)")
+            logger.info(f"  Teste: {len(X_test):,} registros ({len(X_test)/len(X_clean)*100:.1f}%)")
+            logger.info(f"  Taxa treino: {y_train.mean()*100:.2f}%")
+            logger.info(f"  Taxa teste: {y_test.mean()*100:.2f}%")
 
             # Logar dados do split
             mlflow.log_param("split_method", "temporal")
@@ -239,7 +239,7 @@ def registrar_features_e_modelo_devclub(
 
             # === ANÁLISE TEMPORAL TEMPORÁRIA - MEDIUM TRAIN vs TEST ===
             if 'Medium' in dataset_original.columns:
-                print("📋 ANÁLISE TEMPORAL TEMPORÁRIA: MEDIUM - DISTRIBUIÇÃO TRAIN vs TEST")
+                logger.info("📋 ANÁLISE TEMPORAL TEMPORÁRIA: MEDIUM - DISTRIBUIÇÃO TRAIN vs TEST")
 
                 train_medium = dataset_original[mask_treino]['Medium']
                 test_medium = dataset_original[mask_teste]['Medium']
@@ -247,8 +247,8 @@ def registrar_features_e_modelo_devclub(
                 # Top 20 categorias no dataset completo
                 top_medium = dataset_original['Medium'].value_counts().head(20)
 
-                print(f"\n{'MEDIUM':<68} {'TRAIN':>12} {'TEST':>12}")
-                print("-"*92)
+                logger.info(f"\n{'MEDIUM':<68} {'TRAIN':>12} {'TEST':>12}")
+                logger.info("-"*92)
 
                 for medium, total in top_medium.items():
                     train_count = (train_medium == medium).sum()
@@ -258,7 +258,7 @@ def registrar_features_e_modelo_devclub(
                     test_pct = (test_count / len(test_medium) * 100) if len(test_medium) > 0 else 0
 
                     medium_name = str(medium)[:66] if len(str(medium)) > 66 else str(medium)
-                    print(f"{medium_name:<68} {train_count:>6,} ({train_pct:>4.1f}%) {test_count:>6,} ({test_pct:>4.1f}%)")
+                    logger.info(f"{medium_name:<68} {train_count:>6,} ({train_pct:>4.1f}%) {test_count:>6,} ({test_pct:>4.1f}%)")
 
                 # Categorias que só aparecem no test
                 train_medium_set = set(train_medium.dropna().unique())
@@ -266,27 +266,27 @@ def registrar_features_e_modelo_devclub(
                 only_test = test_medium_set - train_medium_set
 
                 if only_test:
-                    print(f"\n⚠️  CATEGORIAS NOVAS NO TEST (modelo nunca viu): {len(only_test)}")
+                    logger.info(f"\n⚠️  CATEGORIAS NOVAS NO TEST (modelo nunca viu): {len(only_test)}")
                     for i, medium in enumerate(sorted(only_test)[:10], 1):
                         count = (test_medium == medium).sum()
                         pct = (count / len(test_medium) * 100)
-                        print(f"   {i:2d}. {str(medium)[:60]:<60} {count:>5,} ({pct:>4.1f}%)")
+                        logger.info(f"   {i:2d}. {str(medium)[:60]:<60} {count:>5,} ({pct:>4.1f}%)")
                     if len(only_test) > 10:
-                        print(f"   ... e mais {len(only_test) - 10} categorias")
+                        logger.info(f"   ... e mais {len(only_test) - 10} categorias")
 
                 # Categorias que desapareceram (só no train)
                 only_train = train_medium_set - test_medium_set
                 if only_train:
-                    print(f"\n⚠️  CATEGORIAS DESCONTINUADAS (só no train, não aparecem no test): {len(only_train)}")
+                    logger.info(f"\n⚠️  CATEGORIAS DESCONTINUADAS (só no train, não aparecem no test): {len(only_train)}")
                     # Ordenar por volume no train
                     only_train_counts = [(m, (train_medium == m).sum()) for m in only_train]
                     only_train_counts.sort(key=lambda x: x[1], reverse=True)
 
                     for i, (medium, count) in enumerate(only_train_counts[:10], 1):
                         pct = (count / len(train_medium) * 100)
-                        print(f"   {i:2d}. {str(medium)[:60]:<60} {count:>5,} ({pct:>4.1f}%)")
+                        logger.info(f"   {i:2d}. {str(medium)[:60]:<60} {count:>5,} ({pct:>4.1f}%)")
                     if len(only_train) > 10:
-                        print(f"   ... e mais {len(only_train) - 10} categorias")
+                        logger.info(f"   ... e mais {len(only_train) - 10} categorias")
 
 
         elif split_method == 'temporal_leads':
@@ -320,24 +320,24 @@ def registrar_features_e_modelo_devclub(
             dias_treino = (data_corte - data_min).days
             dias_teste = (data_max - data_inicio_teste).days
 
-            print(f"\nSplit temporal por LEADS (70% dos leads):")
-            print(f"  Período total: {data_min.strftime('%Y-%m-%d')} a {data_max.strftime('%Y-%m-%d')} ({(data_max - data_min).days} dias)")
-            print(f"  Treino: {len(X_train):,} leads ({len(X_train)/n_total*100:.1f}%)")
-            print(f"    Período: {data_min.strftime('%Y-%m-%d')} a {data_corte.strftime('%Y-%m-%d')} ({dias_treino} dias)")
-            print(f"    Taxa conversão: {y_train.mean()*100:.2f}%")
-            print(f"  Teste: {len(X_test):,} leads ({len(X_test)/n_total*100:.1f}%)")
-            print(f"    Período: {data_inicio_teste.strftime('%Y-%m-%d')} a {data_max.strftime('%Y-%m-%d')} ({dias_teste} dias)")
-            print(f"    Taxa conversão: {y_test.mean()*100:.2f}%")
+            logger.info(f"\nSplit temporal por LEADS (70% dos leads):")
+            logger.info(f"  Período total: {data_min.strftime('%Y-%m-%d')} a {data_max.strftime('%Y-%m-%d')} ({(data_max - data_min).days} dias)")
+            logger.info(f"  Treino: {len(X_train):,} leads ({len(X_train)/n_total*100:.1f}%)")
+            logger.info(f"    Período: {data_min.strftime('%Y-%m-%d')} a {data_corte.strftime('%Y-%m-%d')} ({dias_treino} dias)")
+            logger.info(f"    Taxa conversão: {y_train.mean()*100:.2f}%")
+            logger.info(f"  Teste: {len(X_test):,} leads ({len(X_test)/n_total*100:.1f}%)")
+            logger.info(f"    Período: {data_inicio_teste.strftime('%Y-%m-%d')} a {data_max.strftime('%Y-%m-%d')} ({dias_teste} dias)")
+            logger.info(f"    Taxa conversão: {y_test.mean()*100:.2f}%")
 
             # Quantificar data leakage
-            print(f"\n🔍 Análise de data leakage:")
+            logger.info(f"\n🔍 Análise de data leakage:")
             train_emails = set(dataset_original.iloc[train_indices]['E-mail'].dropna().str.lower().str.strip())
             test_emails = set(dataset_original.iloc[test_indices]['E-mail'].dropna().str.lower().str.strip())
             train_emails.discard('')
             test_emails.discard('')
             emails_leak = len(train_emails & test_emails)
             leak_pct = emails_leak / len(test_emails) * 100 if test_emails else 0
-            print(f"  Emails em ambos train/test: {emails_leak} ({leak_pct:.2f}% do test)")
+            logger.info(f"  Emails em ambos train/test: {emails_leak} ({leak_pct:.2f}% do test)")
 
             # Logar dados do split
             mlflow.log_param("split_method", "temporal_leads")
@@ -348,7 +348,7 @@ def registrar_features_e_modelo_devclub(
 
             # === ANÁLISE TEMPORAL TEMPORÁRIA - MEDIUM TRAIN vs TEST ===
             if 'Medium' in dataset_original.columns:
-                print("📋 ANÁLISE TEMPORAL TEMPORÁRIA: MEDIUM - DISTRIBUIÇÃO TRAIN vs TEST")
+                logger.info("📋 ANÁLISE TEMPORAL TEMPORÁRIA: MEDIUM - DISTRIBUIÇÃO TRAIN vs TEST")
 
                 train_medium = dataset_original.iloc[train_indices]['Medium']
                 test_medium = dataset_original.iloc[test_indices]['Medium']
@@ -356,8 +356,8 @@ def registrar_features_e_modelo_devclub(
                 # Top 20 categorias no dataset completo
                 top_medium = dataset_original['Medium'].value_counts().head(20)
 
-                print(f"\n{'MEDIUM':<68} {'TRAIN':>12} {'TEST':>12}")
-                print("-"*92)
+                logger.info(f"\n{'MEDIUM':<68} {'TRAIN':>12} {'TEST':>12}")
+                logger.info("-"*92)
 
                 for medium, total in top_medium.items():
                     train_count = (train_medium == medium).sum()
@@ -367,7 +367,7 @@ def registrar_features_e_modelo_devclub(
                     test_pct = (test_count / len(test_medium) * 100) if len(test_medium) > 0 else 0
 
                     medium_name = str(medium)[:66] if len(str(medium)) > 66 else str(medium)
-                    print(f"{medium_name:<68} {train_count:>6,} ({train_pct:>4.1f}%) {test_count:>6,} ({test_pct:>4.1f}%)")
+                    logger.info(f"{medium_name:<68} {train_count:>6,} ({train_pct:>4.1f}%) {test_count:>6,} ({test_pct:>4.1f}%)")
 
                 # Categorias que só aparecem no test
                 train_medium_set = set(train_medium.dropna().unique())
@@ -375,32 +375,32 @@ def registrar_features_e_modelo_devclub(
                 only_test = test_medium_set - train_medium_set
 
                 if only_test:
-                    print(f"\n⚠️  CATEGORIAS NOVAS NO TEST (modelo nunca viu): {len(only_test)}")
+                    logger.info(f"\n⚠️  CATEGORIAS NOVAS NO TEST (modelo nunca viu): {len(only_test)}")
                     for i, medium in enumerate(sorted(only_test)[:10], 1):
                         count = (test_medium == medium).sum()
                         pct = (count / len(test_medium) * 100)
-                        print(f"   {i:2d}. {str(medium)[:60]:<60} {count:>5,} ({pct:>4.1f}%)")
+                        logger.info(f"   {i:2d}. {str(medium)[:60]:<60} {count:>5,} ({pct:>4.1f}%)")
                     if len(only_test) > 10:
-                        print(f"   ... e mais {len(only_test) - 10} categorias")
+                        logger.info(f"   ... e mais {len(only_test) - 10} categorias")
 
                 # Categorias que desapareceram (só no train)
                 only_train = train_medium_set - test_medium_set
                 if only_train:
-                    print(f"\n⚠️  CATEGORIAS DESCONTINUADAS (só no train, não aparecem no test): {len(only_train)}")
+                    logger.info(f"\n⚠️  CATEGORIAS DESCONTINUADAS (só no train, não aparecem no test): {len(only_train)}")
                     # Ordenar por volume no train
                     only_train_counts = [(m, (train_medium == m).sum()) for m in only_train]
                     only_train_counts.sort(key=lambda x: x[1], reverse=True)
 
                     for i, (medium, count) in enumerate(only_train_counts[:10], 1):
                         pct = (count / len(train_medium) * 100)
-                        print(f"   {i:2d}. {str(medium)[:60]:<60} {count:>5,} ({pct:>4.1f}%)")
+                        logger.info(f"   {i:2d}. {str(medium)[:60]:<60} {count:>5,} ({pct:>4.1f}%)")
                     if len(only_train) > 10:
-                        print(f"   ... e mais {len(only_train) - 10} categorias")
+                        logger.info(f"   ... e mais {len(only_train) - 10} categorias")
 
 
         else:  # stratified
             # Split stratified POR PESSOA usando componentes conectados: garantir zero leakage
-            print(f"\n🔒 Split estratificado POR PESSOA (componentes conectados - zero leakage):")
+            logger.info(f"\n🔒 Split estratificado POR PESSOA (componentes conectados - zero leakage):")
 
             # 1. Extrair emails e telefones válidos
             email_serie = dataset_original['E-mail'].fillna('')
@@ -462,40 +462,40 @@ def registrar_features_e_modelo_devclub(
                 grupos[grupo_id].append(idx)
 
             # === ANÁLISE DETALHADA DOS GRUPOS ===
-            print(f"\n📊 ANÁLISE DE GRUPOS CONECTADOS:")
+            logger.info(f"\n📊 ANÁLISE DE GRUPOS CONECTADOS:")
 
             tamanhos_grupos = [len(indices) for indices in grupos.values()]
             grupos_tamanho_1 = sum(1 for t in tamanhos_grupos if t == 1)
             grupos_tamanho_2_plus = sum(1 for t in tamanhos_grupos if t > 1)
             registros_em_grupos_2_plus = sum(t for t in tamanhos_grupos if t > 1)
 
-            print(f"\nEstatísticas gerais:")
-            print(f"  Total de grupos: {len(grupos):,}")
-            print(f"  Total de registros: {sum(tamanhos_grupos):,}")
-            print(f"  Grupos com 1 registro: {grupos_tamanho_1:,} ({grupos_tamanho_1/len(grupos)*100:.1f}%)")
-            print(f"  Grupos com 2+ registros: {grupos_tamanho_2_plus:,} ({grupos_tamanho_2_plus/len(grupos)*100:.1f}%)")
-            print(f"  Registros agrupados: {registros_em_grupos_2_plus:,} ({registros_em_grupos_2_plus/sum(tamanhos_grupos)*100:.1f}%)")
+            logger.info(f"\nEstatísticas gerais:")
+            logger.info(f"  Total de grupos: {len(grupos):,}")
+            logger.info(f"  Total de registros: {sum(tamanhos_grupos):,}")
+            logger.info(f"  Grupos com 1 registro: {grupos_tamanho_1:,} ({grupos_tamanho_1/len(grupos)*100:.1f}%)")
+            logger.info(f"  Grupos com 2+ registros: {grupos_tamanho_2_plus:,} ({grupos_tamanho_2_plus/len(grupos)*100:.1f}%)")
+            logger.info(f"  Registros agrupados: {registros_em_grupos_2_plus:,} ({registros_em_grupos_2_plus/sum(tamanhos_grupos)*100:.1f}%)")
 
             import numpy as np
             from collections import Counter
-            print(f"\nEstatísticas de tamanho:")
-            print(f"  Média: {np.mean(tamanhos_grupos):.2f} registros/grupo")
-            print(f"  Mediana: {np.median(tamanhos_grupos):.0f}")
-            print(f"  Máximo: {max(tamanhos_grupos)} registros")
+            logger.info(f"\nEstatísticas de tamanho:")
+            logger.info(f"  Média: {np.mean(tamanhos_grupos):.2f} registros/grupo")
+            logger.info(f"  Mediana: {np.median(tamanhos_grupos):.0f}")
+            logger.info(f"  Máximo: {max(tamanhos_grupos)} registros")
 
-            print(f"\nDistribuição por tamanho:")
+            logger.info(f"\nDistribuição por tamanho:")
             distribuicao = Counter(tamanhos_grupos)
             for tamanho in sorted(distribuicao.keys())[:10]:
                 count = distribuicao[tamanho]
                 registros_total = tamanho * count
-                print(f"  {tamanho:2d} registro(s): {count:6,} grupos ({count/len(grupos)*100:5.1f}%) = {registros_total:6,} registros")
+                logger.info(f"  {tamanho:2d} registro(s): {count:6,} grupos ({count/len(grupos)*100:5.1f}%) = {registros_total:6,} registros")
 
             if max(tamanhos_grupos) > 10:
                 grandes = sum(1 for t in tamanhos_grupos if t > 10)
                 registros_grandes = sum(t for t in tamanhos_grupos if t > 10)
-                print(f"  11+ registros:  {grandes:6,} grupos ({grandes/len(grupos)*100:5.1f}%) = {registros_grandes:6,} registros")
+                logger.info(f"  11+ registros:  {grandes:6,} grupos ({grandes/len(grupos)*100:5.1f}%) = {registros_grandes:6,} registros")
 
-            print(f"\nTop 5 maiores grupos (exemplos reais):")
+            logger.info(f"\nTop 5 maiores grupos (exemplos reais):")
             grupos_ordenados = sorted(grupos.items(), key=lambda x: len(x[1]), reverse=True)
             for i, (grupo_id, indices) in enumerate(grupos_ordenados[:5], 1):
                 emails_grupo = set()
@@ -508,11 +508,11 @@ def registrar_features_e_modelo_devclub(
                     if phone and phone != '':
                         telefones_grupo.add(phone)
 
-                print(f"  {i}. Grupo com {len(indices)} registros:")
-                print(f"     Emails únicos: {len(emails_grupo)} - {', '.join(str(e) for e in list(emails_grupo)[:2])}{'...' if len(emails_grupo) > 2 else ''}")
-                print(f"     Telefones únicos: {len(telefones_grupo)} - {', '.join(str(t) for t in list(telefones_grupo)[:2])}{'...' if len(telefones_grupo) > 2 else ''}")
+                logger.info(f"  {i}. Grupo com {len(indices)} registros:")
+                logger.info(f"     Emails únicos: {len(emails_grupo)} - {', '.join(str(e) for e in list(emails_grupo)[:2])}{'...' if len(emails_grupo) > 2 else ''}")
+                logger.info(f"     Telefones únicos: {len(telefones_grupo)} - {', '.join(str(t) for t in list(telefones_grupo)[:2])}{'...' if len(telefones_grupo) > 2 else ''}")
 
-            print()
+            logger.info()
 
             # 4. Criar DataFrame de grupos com target agregado
             grupos_data = []
@@ -531,9 +531,9 @@ def registrar_features_e_modelo_devclub(
             registros_totais = n_records
             pessoas_duplicadas = registros_totais - pessoas_unicas
 
-            print(f"  Total de registros: {registros_totais:,}")
-            print(f"  Grupos (pessoas únicas): {pessoas_unicas:,}")
-            print(f"  Registros agrupados: {pessoas_duplicadas:,} ({pessoas_duplicadas/registros_totais*100:.1f}%)")
+            logger.info(f"  Total de registros: {registros_totais:,}")
+            logger.info(f"  Grupos (pessoas únicas): {pessoas_unicas:,}")
+            logger.info(f"  Registros agrupados: {pessoas_duplicadas:,} ({pessoas_duplicadas/registros_totais*100:.1f}%)")
 
             # 5. Split GRUPOS com estratificação
             pessoas_train, pessoas_test = train_test_split(
@@ -561,24 +561,24 @@ def registrar_features_e_modelo_devclub(
             telefones_test = set(dataset_original.iloc[idx_test]['Telefone'].dropna())
             telefones_leakage = telefones_train & telefones_test
 
-            print(f"\n  Split por grupos conectados:")
-            print(f"  Grupos em TRAIN: {len(pessoas_train):,} ({len(pessoas_train)/len(grupos_df)*100:.1f}%)")
-            print(f"  Grupos em TEST: {len(pessoas_test):,} ({len(pessoas_test)/len(grupos_df)*100:.1f}%)")
-            print(f"\n  Registros resultantes:")
-            print(f"  Treino: {len(X_train):,} registros ({len(X_train)/len(X_clean)*100:.1f}%)")
-            print(f"  Teste: {len(X_test):,} registros ({len(X_test)/len(X_clean)*100:.1f}%)")
-            print(f"\n  Distribuição do target:")
-            print(f"  Taxa treino: {y_train.mean()*100:.4f}%")
-            print(f"  Taxa teste: {y_test.mean()*100:.4f}%")
-            print(f"  Diferença: {abs(y_train.mean() - y_test.mean())*100:.4f}pp")
-            print(f"\n  Validação de leakage (zero esperado):")
-            print(f"  {'✅' if len(emails_leakage) == 0 else '❌'} Emails em ambos: {len(emails_leakage)}")
-            print(f"  {'✅' if len(telefones_leakage) == 0 else '❌'} Telefones em ambos: {len(telefones_leakage)}")
+            logger.info(f"\n  Split por grupos conectados:")
+            logger.info(f"  Grupos em TRAIN: {len(pessoas_train):,} ({len(pessoas_train)/len(grupos_df)*100:.1f}%)")
+            logger.info(f"  Grupos em TEST: {len(pessoas_test):,} ({len(pessoas_test)/len(grupos_df)*100:.1f}%)")
+            logger.info(f"\n  Registros resultantes:")
+            logger.info(f"  Treino: {len(X_train):,} registros ({len(X_train)/len(X_clean)*100:.1f}%)")
+            logger.info(f"  Teste: {len(X_test):,} registros ({len(X_test)/len(X_clean)*100:.1f}%)")
+            logger.info(f"\n  Distribuição do target:")
+            logger.info(f"  Taxa treino: {y_train.mean()*100:.4f}%")
+            logger.info(f"  Taxa teste: {y_test.mean()*100:.4f}%")
+            logger.info(f"  Diferença: {abs(y_train.mean() - y_test.mean())*100:.4f}pp")
+            logger.info(f"\n  Validação de leakage (zero esperado):")
+            logger.info(f"  {'✅' if len(emails_leakage) == 0 else '❌'} Emails em ambos: {len(emails_leakage)}")
+            logger.info(f"  {'✅' if len(telefones_leakage) == 0 else '❌'} Telefones em ambos: {len(telefones_leakage)}")
 
             if len(emails_leakage) > 0 or len(telefones_leakage) > 0:
-                print(f"\n  ⚠️  AVISO: Leakage detectado! Verificar implementação de componentes conectados.")
+                logger.info(f"\n  ⚠️  AVISO: Leakage detectado! Verificar implementação de componentes conectados.")
             else:
-                print(f"\n  ✅ SUCESSO: Zero leakage! Split por pessoa implementado corretamente.")
+                logger.info(f"\n  ✅ SUCESSO: Zero leakage! Split por pessoa implementado corretamente.")
 
             # Logar dados do split
             mlflow.log_param("split_method", "stratified_connected_components")
@@ -621,10 +621,10 @@ def registrar_features_e_modelo_devclub(
 
         # Usar custom_hyperparams se fornecido (do tuning)
         if custom_hyperparams is not None:
-            print(f"\n🔧 Usando hiperparâmetros do tuning:")
+            logger.info(f"\n🔧 Usando hiperparâmetros do tuning:")
             for key, value in custom_hyperparams.items():
                 if key in hyperparams and custom_hyperparams[key] != hyperparams[key]:
-                    print(f"   {key}: {hyperparams[key]} → {value}")
+                    logger.info(f"   {key}: {hyperparams[key]} → {value}")
                     hyperparams[key] = value
 
         modelo_final = RandomForestClassifier(**hyperparams)
@@ -637,17 +637,17 @@ def registrar_features_e_modelo_devclub(
         mlflow.log_param("hyperparameter_tuning", custom_hyperparams is not None)
 
         # === DEBUG: PRINT COLUNAS EXATAS ANTES DO FIT ===
-        print("🔍 COLUNAS EXATAS PASSADAS PARA O MODELO (X_train.columns):")
+        logger.info("🔍 COLUNAS EXATAS PASSADAS PARA O MODELO (X_train.columns):")
         for i, col in enumerate(X_train.columns, 1):
-            print(f"  {i:2d}. {col}")
-        print(f"\nTotal: {len(X_train.columns)} features")
-        print(f"Shape: {X_train.shape}")
+            logger.info(f"  {i:2d}. {col}")
+        logger.info(f"\nTotal: {len(X_train.columns)} features")
+        logger.info(f"Shape: {X_train.shape}")
 
         modelo_final.fit(X_train, y_train)
         y_prob = modelo_final.predict_proba(X_test)[:, 1]
         auc_final = roc_auc_score(y_test, y_prob)
 
-        print(f"Modelo treinado - AUC: {auc_final:.3f}")
+        logger.info(f"Modelo treinado - AUC: {auc_final:.3f}")
 
         # Feature importance
         feature_importance = pd.DataFrame({
@@ -656,11 +656,11 @@ def registrar_features_e_modelo_devclub(
             'importance': modelo_final.feature_importances_
         }).sort_values('importance', ascending=False)
 
-        print(f"Feature importance calculada para {len(feature_importance)} features")
+        logger.info(f"Feature importance calculada para {len(feature_importance)} features")
 
         # 2. CRIAR REGISTRY DE FEATURES
-        print("\n2. CRIANDO FEATURE REGISTRY")
-        print("-" * 50)
+        logger.info("\n2. CRIANDO FEATURE REGISTRY")
+        logger.info("-" * 50)
 
         # Categorizar features
         features_utm = []
@@ -771,15 +771,15 @@ def registrar_features_e_modelo_devclub(
             }
         }
 
-        print(f"Feature registry criado:")
-        print(f"  - Features UTM: {len(features_utm)}")
-        print(f"  - Features Pesquisa: {len(features_pesquisa)}")
-        print(f"  - Features Derivadas: {len(features_derivadas)}")
-        print(f"  - Features Outras: {len(features_outras)}")
+        logger.info(f"Feature registry criado:")
+        logger.info(f"  - Features UTM: {len(features_utm)}")
+        logger.info(f"  - Features Pesquisa: {len(features_pesquisa)}")
+        logger.info(f"  - Features Derivadas: {len(features_derivadas)}")
+        logger.info(f"  - Features Outras: {len(features_outras)}")
 
         # 3. CRIAR METADADOS DO MODELO
-        print("\n3. CRIANDO METADADOS DO MODELO")
-        print("-" * 50)
+        logger.info("\n3. CRIANDO METADADOS DO MODELO")
+        logger.info("-" * 50)
 
         # Calcular métricas detalhadas
         df_analise = pd.DataFrame({
@@ -797,12 +797,12 @@ def registrar_features_e_modelo_devclub(
         # ====================================================================
         # CALCULAR THRESHOLDS FIXOS DE DECIS (para uso em produção)
         # ====================================================================
-        print("CALCULANDO THRESHOLDS FIXOS DE DECIS")
+        logger.info("CALCULANDO THRESHOLDS FIXOS DE DECIS")
 
         decil_thresholds = calcular_thresholds_decis(y_prob, df_analise['decil'])
 
         # Validar thresholds: classificar test set usando thresholds e comparar
-        print("\n📊 Validando thresholds: classificando test set...")
+        logger.info("\n📊 Validando thresholds: classificando test set...")
         decis_via_threshold = atribuir_decis_batch(y_prob, decil_thresholds)
         comparacao = comparar_distribuicoes(
             df_analise['decil'],
@@ -810,10 +810,10 @@ def registrar_features_e_modelo_devclub(
             verbose=True
         )
 
-        print(f"\n✅ Validação concluída:")
-        print(f"   Diferença média: {comparacao['media_diferenca_absoluta']:.1f} leads por decil")
-        print(f"   Diferença máxima: {comparacao['max_diferenca_absoluta']} leads")
-        print(f"   Diferença máxima %: {comparacao['max_diferenca_percentual']:.1f}%")
+        logger.info(f"\n✅ Validação concluída:")
+        logger.info(f"   Diferença média: {comparacao['media_diferenca_absoluta']:.1f} leads por decil")
+        logger.info(f"   Diferença máxima: {comparacao['max_diferenca_absoluta']} leads")
+        logger.info(f"   Diferença máxima %: {comparacao['max_diferenca_percentual']:.1f}%")
 
         analise_decis = df_analise.groupby('decil', observed=True).agg({
             'target_real': ['count', 'sum', 'mean']
@@ -939,21 +939,21 @@ def registrar_features_e_modelo_devclub(
             }
         }
 
-        print(f"Metadados do modelo criados:")
-        print(f"  - AUC: {auc_final:.3f}")
-        print(f"  - Top 3 decis: {top3_conversoes:.1f}%")
-        print(f"  - Lift máximo: {lift_maximo:.1f}x")
-        print(f"  - Monotonia: {monotonia:.1f}%")
+        logger.info(f"Metadados do modelo criados:")
+        logger.info(f"  - AUC: {auc_final:.3f}")
+        logger.info(f"  - Top 3 decis: {top3_conversoes:.1f}%")
+        logger.info(f"  - Lift máximo: {lift_maximo:.1f}x")
+        logger.info(f"  - Monotonia: {monotonia:.1f}%")
 
         # Logar modelo no MLflow
         mlflow.sklearn.log_model(modelo_final, "model")
-        print("✓ Modelo registrado no MLflow")
+        logger.info("✓ Modelo registrado no MLflow")
 
         # 4. SALVAR ARQUIVOS LOCAIS (OPCIONAL)
         output_dir = None
         if save_files:
-            print("\n4. SALVANDO ARQUIVOS LOCAIS")
-            print("-" * 50)
+            logger.info("\n4. SALVANDO ARQUIVOS LOCAIS")
+            logger.info("-" * 50)
 
             # Criar pasta com timestamp no diretório V2/files/
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -965,18 +965,18 @@ def registrar_features_e_modelo_devclub(
             registry_filename = f'{output_dir}/feature_registry_v1_devclub_rf_{split_method}_single.json'
             with open(registry_filename, 'w', encoding='utf-8') as f:
                 json.dump(feature_registry, f, indent=2, ensure_ascii=False)
-            print(f"✓ {registry_filename} salvo")
+            logger.info(f"✓ {registry_filename} salvo")
 
             # Salvar metadados do modelo
             metadata_filename = f'{output_dir}/model_metadata_v1_devclub_rf_{split_method}_single.json'
             with open(metadata_filename, 'w', encoding='utf-8') as f:
                 json.dump(model_metadata, f, indent=2, ensure_ascii=False)
-            print(f"✓ {metadata_filename} salvo")
+            logger.info(f"✓ {metadata_filename} salvo")
 
             # Salvar modelo
             model_filename = f'{output_dir}/modelo_lead_scoring_v1_devclub_rf_{split_method}_single.pkl'
             joblib.dump(modelo_final, model_filename)
-            print(f"✓ {model_filename} salvo")
+            logger.info(f"✓ {model_filename} salvo")
 
             # Salvar features ordenadas
             features_filename = f'{output_dir}/features_ordenadas_v1_devclub_rf_{split_method}_single.json'
@@ -988,14 +988,14 @@ def registrar_features_e_modelo_devclub(
             }
             with open(features_filename, 'w', encoding='utf-8') as f:
                 json.dump(features_ordenadas, f, indent=2, ensure_ascii=False)
-            print(f"✓ {features_filename} salvo")
+            logger.info(f"✓ {features_filename} salvo")
 
             # Salvar categorias esperadas (para drift detection)
             if categorias_treino:
                 categorias_filename = f'{output_dir}/categorias_esperadas.json'
                 with open(categorias_filename, 'w', encoding='utf-8') as f:
                     json.dump(categorias_treino, f, indent=2, ensure_ascii=False)
-                print(f"✓ {categorias_filename} salvo ({len(categorias_treino)} colunas rastreadas)")
+                logger.info(f"✓ {categorias_filename} salvo ({len(categorias_treino)} colunas rastreadas)")
 
             # Salvar distribuições esperadas (para distribution drift detection)
             if distribuicoes_treino:
@@ -1004,7 +1004,7 @@ def registrar_features_e_modelo_devclub(
                     json.dump(distribuicoes_treino, f, indent=2, ensure_ascii=False)
                 cat_count = len(distribuicoes_treino.get('categorical', {}))
                 num_count = len(distribuicoes_treino.get('numerical', {}))
-                print(f"✓ {distribuicoes_filename} salvo ({cat_count} categóricas, {num_count} numéricas)")
+                logger.info(f"✓ {distribuicoes_filename} salvo ({cat_count} categóricas, {num_count} numéricas)")
 
             # Salvar test set com predições
             test_set_filename = f'{output_dir}/test_set_predictions.csv'
@@ -1012,14 +1012,14 @@ def registrar_features_e_modelo_devclub(
             df_test_predictions['target_real'] = y_test.values
             df_test_predictions['probabilidade'] = y_prob
             df_test_predictions.to_csv(test_set_filename, index=False)
-            print(f"✓ {test_set_filename} salvo")
+            logger.info(f"✓ {test_set_filename} salvo")
 
             logger.info(f"✅ Arquivos locais salvos em {output_dir}")
 
             # Atualizar active_model.yaml se solicitado
             if set_active:
-                print("\n5. ATUALIZANDO MODELO ATIVO")
-                print("-" * 50)
+                logger.info("\n5. ATUALIZANDO MODELO ATIVO")
+                logger.info("-" * 50)
 
                 import yaml
                 from pathlib import Path
@@ -1045,40 +1045,40 @@ def registrar_features_e_modelo_devclub(
                     f.write("# 1. Treine um novo modelo: python src/train_pipeline.py --split-method temporal_leads --save-files --set-active\n")
                     f.write("# 2. Ou edite este arquivo manualmente apontando para outro model_path\n")
 
-                print(f"✓ {config_path} atualizado")
-                print(f"  Modelo ativo: v1_devclub_rf_{split_method}_single")
-                print(f"  Path: {output_dir}")
+                logger.info(f"✓ {config_path} atualizado")
+                logger.info(f"  Modelo ativo: v1_devclub_rf_{split_method}_single")
+                logger.info(f"  Path: {output_dir}")
 
                 # Atualizar business_config.py com recall real
                 atualizar_business_config_com_recall(model_metadata)
         else:
-            print("\n4. ARQUIVOS LOCAIS NÃO SALVOS (--save-files=False)")
-            print("-" * 50)
-            print("Use --save-files para salvar arquivos locais")
+            logger.info("\n4. ARQUIVOS LOCAIS NÃO SALVOS (--save-files=False)")
+            logger.info("-" * 50)
+            logger.info("Use --save-files para salvar arquivos locais")
 
             if set_active:
-                print("\n⚠️  AVISO: --set-active requer --save-files")
-                print("   Modelo ativo não foi atualizado")
+                logger.info("\n⚠️  AVISO: --set-active requer --save-files")
+                logger.info("   Modelo ativo não foi atualizado")
 
         # Sempre logar metadata como artifact no MLflow
         mlflow.log_dict(model_metadata, "model_metadata.json")
         mlflow.log_dict(feature_registry, "feature_registry.json")
-        print("✓ Metadados registrados no MLflow")
+        logger.info("✓ Metadados registrados no MLflow")
 
         # 5. RESUMO FINAL
-        print("MODELO DEVCLUB REGISTRADO COM SUCESSO")
-        print(f"Modelo: v1_devclub_rf_temporal_single")
-        print(f"Algoritmo: RandomForestClassifier")
-        print(f"Split: temporal")
-        print(f"Matching: {matching_method}")
-        print(f"AUC: {auc_final:.3f}")
-        print(f"Monotonia: {monotonia:.1f}%")
-        print(f"Features: {len(X_clean.columns)}")
-        print(f"MLflow Run ID: {mlflow.active_run().info.run_id}")
+        logger.info("MODELO DEVCLUB REGISTRADO COM SUCESSO")
+        logger.info(f"Modelo: v1_devclub_rf_temporal_single")
+        logger.info(f"Algoritmo: RandomForestClassifier")
+        logger.info(f"Split: temporal")
+        logger.info(f"Matching: {matching_method}")
+        logger.info(f"AUC: {auc_final:.3f}")
+        logger.info(f"Monotonia: {monotonia:.1f}%")
+        logger.info(f"Features: {len(X_clean.columns)}")
+        logger.info(f"MLflow Run ID: {mlflow.active_run().info.run_id}")
         if output_dir:
-            print(f"Arquivos locais: {output_dir}")
+            logger.info(f"Arquivos locais: {output_dir}")
         else:
-            print(f"Arquivos locais: não salvos")
+            logger.info(f"Arquivos locais: não salvos")
 
         # Retornar model_metadata completo para uso pelo orquestrador de retreino
         # Adicionar informações extras que não estão no metadata

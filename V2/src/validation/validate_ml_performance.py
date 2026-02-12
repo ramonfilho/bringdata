@@ -71,6 +71,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ============================================================================
+# CONFIGURAÇÃO: CAMPANHAS EXCLUÍDAS DA ANÁLISE
+# ============================================================================
+# Lista de IDs de campanhas (15 dígitos) que devem ser excluídas da análise.
+# Útil para remover temporariamente campanhas de teste ou com comportamento atípico.
+#
+# Formato: IDs de 15 dígitos (primeiros 15 dígitos do Campaign ID)
+# Exemplo: '120220370119870' para campanha 120220370119870390
+EXCLUDE_CAMPAIGN_IDS = [
+    '120220370119870',  # DEVLF | CAP | FRIO | FASE 01 | ABERTO ADV+ | PG2 | SCORE (fase de teste)
+]
+
+# Para desabilitar a exclusão, deixe a lista vazia:
+# EXCLUDE_CAMPAIGN_IDS = []
+# ============================================================================
+
 
 def validate_tmb_sales_freshness(sales_df, sales_start, sales_end):
     """
@@ -1351,6 +1367,38 @@ def main():
         costs_hierarchy_consolidated=costs_hierarchy_consolidated
     )
     logger.info(f"   ✅ Métricas calculadas para {len(campaign_metrics)} campanhas")
+
+    # FILTRAR CAMPANHAS EXCLUÍDAS (se configurado)
+    if EXCLUDE_CAMPAIGN_IDS and len(campaign_metrics) > 0:
+        import re
+        def extract_campaign_id_15(campaign_name):
+            """Extrai primeiros 15 dígitos do campaign_id do nome"""
+            if pd.isna(campaign_name):
+                return None
+            match = re.search(r'1\d{14,}', str(campaign_name))
+            if match:
+                return match.group(0)[:15]
+            return None
+
+        # Extrair IDs das campanhas
+        campaign_metrics['_temp_id'] = campaign_metrics['campaign'].apply(extract_campaign_id_15)
+
+        # Identificar campanhas excluídas
+        excluded_mask = campaign_metrics['_temp_id'].isin(EXCLUDE_CAMPAIGN_IDS)
+        excluded_campaigns = campaign_metrics[excluded_mask]
+
+        if len(excluded_campaigns) > 0:
+            logger.info(f"   🚫 Excluindo {len(excluded_campaigns)} campanha(s) de teste da análise:")
+            for idx, row in excluded_campaigns.iterrows():
+                logger.info(f"      • {row['campaign'][:70]}...")
+                logger.info(f"        Gasto: R$ {row['spend']:,.2f} | Leads: {int(row['leads'])} | Conversões: {int(row['conversions'])}")
+
+            # Filtrar campanhas
+            campaign_metrics = campaign_metrics[~excluded_mask].copy()
+            logger.info(f"   ✅ {len(campaign_metrics)} campanhas restantes após exclusão")
+
+        # Cleanup: remover coluna temporária
+        campaign_metrics = campaign_metrics.drop(columns=['_temp_id'])
 
     # Adicionar comparison_group ao campaign_metrics (se disponível)
     if 'comparison_group' in matched_df.columns and len(campaign_metrics) > 0:

@@ -104,7 +104,8 @@ def criar_features_derivadas(df_devclub: pd.DataFrame) -> pd.DataFrame:
     logger.debug(f"Registros: {len(df):,}")
 
     # NORMAL: Número de colunas antes
-    logger.info(f"Colunas antes: {len(df.columns)}")
+    colunas_antes = len(df.columns)
+    logger.info(f"Colunas antes: {colunas_antes}")
 
     # NORMAL: Lista de nomes das colunas antes
     logger.info("Nomes das colunas antes:")
@@ -190,12 +191,19 @@ def criar_features_derivadas(df_devclub: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"  - {col}")
 
     # NORMAL: Número de colunas depois
-    logger.info(f"Colunas depois: {len(df.columns)}")
+    colunas_depois = len(df.columns)
+    logger.info(f"Colunas depois: {colunas_depois}")
 
     # NORMAL: Lista de nomes das colunas depois
     logger.info("Nomes das colunas depois:")
     for i, col in enumerate(df.columns, 1):
         logger.info(f"  {i:2d}. {col}")
+
+    # NORMAL: Features removidas e adicionadas
+    features_removidas = colunas_antes - colunas_depois + len(colunas_existentes)
+    features_adicionadas = colunas_depois - colunas_antes + len(colunas_existentes)
+    logger.info(f"Features removidas: {features_removidas}")
+    logger.info(f"Features adicionadas: {features_adicionadas}")
 
     # 4. DEBUG: ESTATÍSTICAS DAS NOVAS FEATURES
     logger.debug(f"\nEstatísticas das features criadas:")

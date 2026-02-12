@@ -12,10 +12,13 @@ Detecta:
 import json
 import pandas as pd
 import numpy as np
+import logging
 from typing import Dict, Set, List, Tuple
 from pathlib import Path
 from unidecode import unidecode
 import re
+
+logger = logging.getLogger(__name__)
 
 
 def normalizar_categoria_para_comparacao(texto):
@@ -113,7 +116,7 @@ def capture_training_categories(df: pd.DataFrame, output_path: str = None) -> Di
     Returns:
         Dict com {coluna: [categorias]}
     """
-    print("\n🔍 Identificando colunas categóricas automaticamente...")
+    logger.debug("\n🔍 Identificando colunas categóricas automaticamente...")
 
     categorias_por_coluna = {}
 
@@ -153,15 +156,15 @@ def capture_training_categories(df: pd.DataFrame, output_path: str = None) -> Di
 
             categorias_por_coluna[col] = sorted(valores_unicos_str)
 
-            print(f"   ✓ {col}: {len(valores_unicos_str)} categorias")
+            logger.debug(f"   ✓ {col}: {len(valores_unicos_str)} categorias")
 
-    print(f"\n📊 Total: {len(categorias_por_coluna)} colunas categóricas identificadas")
+    logger.debug(f"\n📊 Total: {len(categorias_por_coluna)} colunas categóricas identificadas")
 
     # Salvar se caminho fornecido
     if output_path:
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(categorias_por_coluna, f, indent=2, ensure_ascii=False)
-        print(f"✅ Categorias salvas em: {output_path}")
+        logger.debug(f"✅ Categorias salvas em: {output_path}")
 
     return categorias_por_coluna
 
@@ -305,7 +308,7 @@ def capture_training_distributions(df: pd.DataFrame, output_path: str = None) ->
             }
         }
     """
-    print("\n📊 Capturando distribuições de treino...")
+    logger.debug("\n📊 Capturando distribuições de treino...")
 
     distribuicoes = {
         "categorical": {},
@@ -346,7 +349,7 @@ def capture_training_distributions(df: pd.DataFrame, output_path: str = None) ->
             proporcoes_str = {str(k): float(v) for k, v in proporcoes.items()}
 
             distribuicoes["categorical"][col] = proporcoes_str
-            print(f"   ✓ {col}: {len(proporcoes)} categorias")
+            logger.debug(f"   ✓ {col}: {len(proporcoes)} categorias")
 
         else:
             # Capturar estatísticas numéricas (apenas para numéricas reais, não booleanas)
@@ -363,23 +366,23 @@ def capture_training_distributions(df: pd.DataFrame, output_path: str = None) ->
                 }
 
                 distribuicoes["numerical"][col] = stats
-                print(f"   ✓ {col}: μ={stats['mean']:.2f}, σ={stats['std']:.2f}")
+                logger.debug(f"   ✓ {col}: μ={stats['mean']:.2f}, σ={stats['std']:.2f}")
             except (TypeError, ValueError) as e:
                 # Se não conseguir calcular estatísticas, tratar como categórica
-                print(f"   ⚠️ {col}: não foi possível calcular estatísticas numéricas, tratando como categórica")
+                logger.debug(f"   ⚠️ {col}: não foi possível calcular estatísticas numéricas, tratando como categórica")
                 contagens = df[col].value_counts()
                 proporcoes = (contagens / total_nao_nulos).to_dict()
                 proporcoes_str = {str(k): float(v) for k, v in proporcoes.items()}
                 distribuicoes["categorical"][col] = proporcoes_str
 
-    print(f"\n📊 Total: {len(distribuicoes['categorical'])} categóricas, "
+    logger.debug(f"\n📊 Total: {len(distribuicoes['categorical'])} categóricas, "
           f"{len(distribuicoes['numerical'])} numéricas")
 
     # Salvar se caminho fornecido
     if output_path:
         with open(output_path, 'w', encoding='utf-8') as f:
             json.dump(distribuicoes, f, indent=2, ensure_ascii=False)
-        print(f"✅ Distribuições salvas em: {output_path}")
+        logger.debug(f"✅ Distribuições salvas em: {output_path}")
 
     return distribuicoes
 
