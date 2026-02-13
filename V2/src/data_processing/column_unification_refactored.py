@@ -1,11 +1,12 @@
 """
 Módulo para unificação de colunas duplicadas - REFATORADO.
 
-Separa a lógica da célula 5 original em 4 sub-células:
+Separa a lógica da célula 5 original em 5 sub-células:
 - CÉLULA 5: Unificação de colunas duplicadas
 - CÉLULA 5.1: Filtro temporal
 - CÉLULA 5.2: Remoção de colunas UTM com alta % ausentes
 - CÉLULA 5.3: Filtro de status e risco
+- CÉLULA 5.4: Filtro de produtos DevClub
 """
 
 import pandas as pd
@@ -478,3 +479,48 @@ def aplicar_filtro_status_risco(
     logger.info("")
 
     return df_vendas_filtrado
+
+
+def filtrar_vendas_devclub(df_vendas: pd.DataFrame) -> pd.DataFrame:
+    """
+    CÉLULA 5.4: Filtra vendas para manter apenas produtos DevClub.
+
+    Args:
+        df_vendas: DataFrame de vendas
+
+    Returns:
+        DataFrame de vendas filtrado (apenas DevClub)
+    """
+    df_vendas_devclub = df_vendas.copy()
+
+    if 'produto' not in df_vendas_devclub.columns:
+        logger.warning("  Coluna 'produto' não encontrada - filtro não aplicado")
+        return df_vendas_devclub
+
+    vendas_antes = len(df_vendas_devclub)
+
+    # Filtrar apenas produtos que contêm "devclub" (case-insensitive)
+    mask_devclub = df_vendas_devclub['produto'].fillna('').str.lower().str.contains('devclub', na=False)
+    df_vendas_devclub = df_vendas_devclub[mask_devclub].copy()
+
+    vendas_depois = len(df_vendas_devclub)
+    vendas_removidas = vendas_antes - vendas_depois
+
+    # Contar produtos únicos DevClub
+    produtos_devclub = df_vendas_devclub['produto'].value_counts()
+
+    # NORMAL: Resumo do filtro
+    logger.info(f"  Vendas antes: {vendas_antes:,}")
+    logger.info(f"  Vendas DevClub: {vendas_depois:,}")
+    logger.info(f"  Vendas removidas (outros produtos): {vendas_removidas:,}")
+    logger.info(f"  Produtos DevClub únicos: {len(produtos_devclub)}")
+
+    # DEBUG: Lista de produtos DevClub
+    logger.debug("")
+    logger.debug("Produtos DevClub encontrados:")
+    for produto, count in produtos_devclub.items():
+        logger.debug(f"  {produto}: {count:,} vendas")
+
+    logger.info("")
+
+    return df_vendas_devclub

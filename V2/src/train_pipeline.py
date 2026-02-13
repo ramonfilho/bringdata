@@ -29,7 +29,8 @@ from src.data_processing.column_unification_refactored import (
     unificar_colunas_vendas,
     aplicar_filtro_temporal,
     remover_colunas_utm_ausentes,
-    aplicar_filtro_status_risco
+    aplicar_filtro_status_risco,
+    filtrar_vendas_devclub
 )
 from src.data_processing.category_unification import unificar_categorias_completo, gerar_relatorio_final_categorias
 from src.data_processing.feature_removal import remover_features_desnecessarias, listar_colunas_restantes
@@ -43,7 +44,6 @@ from src.matching.matching_email_only import fazer_matching_email_only
 from src.matching.matching_email_with_validation import fazer_matching_email_with_validation
 from src.matching.matching_email_telefone import fazer_matching_email_telefone
 from src.matching.matching_unified import match_leads_to_sales_unified
-from src.data_processing.devclub_filtering_training import criar_dataset_devclub
 from src.data_processing.conversion_window import aplicar_janela_conversao
 from src.features.feature_engineering_training import criar_features_derivadas
 from src.features.encoding_training import aplicar_encoding_estrategico
@@ -427,7 +427,15 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("CÉLULA 5.3: FILTRO DE STATUS E RISCO")
     logger.info("")
 
-    df_vendas_final = aplicar_filtro_status_risco(df_vendas_sem_utm, tmb_risk_filter=tmb_risk_filter)
+    df_vendas_filtrado = aplicar_filtro_status_risco(df_vendas_sem_utm, tmb_risk_filter=tmb_risk_filter)
+
+    logger.info("=" * 80)
+    # === CÉLULA 5.4: Filtro de produtos DevClub ===
+    logger.info("")
+    logger.info("CÉLULA 5.4: FILTRO DE PRODUTOS DEVCLUB")
+    logger.info("")
+
+    df_vendas_final = filtrar_vendas_devclub(df_vendas_filtrado)
 
     # Usar os datasets finais
     df_pesquisa_final = df_pesquisa_unificado
@@ -580,184 +588,14 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     else:
         raise ValueError(f"Método de matching inicial inválido: {initial_matching}. Use 'email_only', 'email_telefone', 'variantes', 'robusto', 'validation' ou 'unified_last6'")
 
-    logger.info("=" * 80)
-    # === CÉLULA 17: Filtragem DevClub ===
-    logger.info("")
-    logger.info(f"CÉLULA 17: FILTRAGEM DEVCLUB")
-    logger.info("")
-
-    dataset_v1_devclub = criar_dataset_devclub(dataset_v1_final, df_vendas_final)
-
-    # === LOG: VERIFICAÇÃO DE PRODUTOS DEVCLUB ===
-    logger.debug("\n" + "=" * 80)
-    logger.debug("VERIFICAÇÃO DE PRODUTOS DEVCLUB - Análise Completa")
-    logger.debug("=" * 80)
-
-    # 1. Listar TODOS os produtos que contêm "devclub"
-    logger.debug("\n TODOS OS PRODUTOS COM 'DEVCLUB' NO NOME:")
-    logger.debug("-" * 80)
-
-    produtos_com_devclub = df_vendas_final[
-        df_vendas_final['produto'].fillna('').str.lower().str.contains('devclub', na=False)
-    ]['produto'].value_counts()
-
-    logger.debug(f"\nTotal de variações encontradas: {len(produtos_com_devclub)}")
-    logger.debug("\nProdutos e quantidade de vendas:")
-    for produto, count in produtos_com_devclub.items():
-        logger.debug(f"  {count:>5} vendas | {produto}")
-
-    # 2. Lista atual de produtos que estamos usando (SINCRONIZADA com devclub_filtering_training.py)
-    produtos_devclub_lista_atual = [
-        'DevClub - Full Stack 2025',
-        'DevClub FullStack Pro - OFICIAL',
-        'Formação DevClub FullStack Pro - OFICI',
-        'Formação DevClub FullStack Pro - OFICIAL',  # Nome completo (não truncado)
-        'DevClub - Full Stack 2025 - EV',
-        'DevClub - FS - Vitalício',
-        '[Vitalício] Formação DevClub FullStack',
-        '[Vitalício] Formação DevClub FullStack Pro - OFICIAL',  # Vitalício completo
-        'Formação DevClub FullStack Pro - COMER',
-        'Formação DevClub FullStack Pro - COMERCIAL',  # Nome completo (não truncado)
-        'Formação DevClub FullStack Pro',  # Sem sufixo
-        'DevClub Vitalício',
-        'DevClub 3.0 - 2024',
-        '(Desativado) DevClub 3.0 - 2024',
-        '(Desativado) DevClub 3.0 - 2024 - Novo'
-    ]
-
-    # 3. Verificar produtos que EXISTEM mas NÃO estão na lista
-    logger.debug("\n" + "=" * 80)
-    logger.debug("  PRODUTOS NÃO CONTABILIZADOS (existem mas não estão na lista):")
-    logger.debug("-" * 80)
-
-    produtos_nao_contabilizados = []
-    vendas_perdidas = 0
-
-    for produto in produtos_com_devclub.index:
-        if produto not in produtos_devclub_lista_atual:
-            produtos_nao_contabilizados.append(produto)
-            vendas_perdidas += produtos_com_devclub[produto]
-            logger.debug(f"  {produtos_com_devclub[produto]:>5} vendas | {produto}")
-
-    if not produtos_nao_contabilizados:
-        logger.debug("   Nenhum produto perdido! Todos estão sendo contabilizados.")
-    else:
-        logger.debug(f"\n    TOTAL DE VENDAS PERDIDAS: {vendas_perdidas}")
-
-    # 4. Verificar produtos na lista que NÃO existem
-    logger.debug("\n" + "=" * 80)
-    logger.debug(" PRODUTOS NA LISTA MAS SEM VENDAS:")
-    logger.debug("-" * 80)
-
-    produtos_sem_vendas = []
-    for produto in produtos_devclub_lista_atual:
-        if produto not in produtos_com_devclub.index:
-            produtos_sem_vendas.append(produto)
-            logger.debug(f"    {produto}")
-
-    if not produtos_sem_vendas:
-        logger.debug("   Todos os produtos da lista têm vendas!")
-
-    # 5. Usar lista hardcoded (investigada manualmente)
-    produtos_devclub = produtos_devclub_lista_atual
-
-    logger.debug("\n" + "=" * 80)
-    logger.debug(" USANDO LISTA HARDCODED (investigada manualmente)")
-    logger.debug("=" * 80)
-    logger.debug(f"Total de produtos na lista: {len(produtos_devclub)}")
-
-    if produtos_nao_contabilizados:
-        logger.debug(f"\n  ATENÇÃO: {vendas_perdidas} vendas de produtos não contabilizados serão IGNORADAS")
-        logger.debug(f"   (Produtos descobertos automaticamente mas não na lista hardcoded)")
-
-    if produtos_sem_vendas:
-        logger.debug(f"\n  ATENÇÃO: {len(produtos_sem_vendas)} produtos na lista NÃO têm vendas no período")
-        logger.debug(f"   (Produtos hardcoded mas sem vendas encontradas)")
-
-    # === LOG: CÁLCULO DE RECALL E FATOR DE CORREÇÃO ===
-    logger.debug("\n" + "=" * 80)
-    logger.debug("CÁLCULO DE RECALL - Conversões Observadas vs Vendas Reais")
-    logger.debug("=" * 80)
-
-    # Contar conversões observadas (matches)
-    conversoes_observadas = dataset_v1_devclub['target'].sum()
-    total_leads = len(dataset_v1_devclub)
-
-    # Filtrar vendas DevClub
-    vendas_devclub = df_vendas_final[
-        df_vendas_final['produto'].isin(produtos_devclub)
-    ].copy()
-
-    # Filtrar por período (mesmo período dos leads + janela de conversão)
-    if 'data' in vendas_devclub.columns:
-        vendas_devclub['data_dt'] = pd.to_datetime(vendas_devclub['data'], errors='coerce', dayfirst=True)
-        # Período dos leads: 2025-03-01 a 2025-11-04
-        # Janela de conversão: +20 dias após última data dos leads
-        periodo_inicio = pd.to_datetime('2025-03-01')
-        periodo_fim = pd.to_datetime('2025-11-04') + pd.Timedelta(days=20)  # 2025-11-24
-        vendas_periodo = vendas_devclub[
-            (vendas_devclub['data_dt'] >= periodo_inicio) &
-            (vendas_devclub['data_dt'] <= periodo_fim)
-        ].copy()
-    else:
-        vendas_periodo = vendas_devclub.copy()
-
-    # Remover duplicatas (mesmo email/telefone + produto + data + valor)
-    vendas_periodo['email_lower'] = vendas_periodo['email'].fillna('').astype(str).str.lower().str.strip()
-    vendas_periodo['telefone_clean'] = vendas_periodo['telefone'].fillna('').astype(str).str.strip()
-    vendas_periodo['produto_clean'] = vendas_periodo['produto'].fillna('').astype(str).str.strip()
-    vendas_periodo['data_str'] = vendas_periodo['data_dt'].astype(str) if 'data_dt' in vendas_periodo.columns else vendas_periodo['data'].astype(str)
-    vendas_periodo['valor_str'] = vendas_periodo['valor'].fillna(0).astype(str)
-
-    vendas_periodo['chave_dedup'] = (
-        vendas_periodo['email_lower'] + '|' +
-        vendas_periodo['telefone_clean'] + '|' +
-        vendas_periodo['produto_clean'] + '|' +
-        vendas_periodo['data_str'] + '|' +
-        vendas_periodo['valor_str']
-    )
-    vendas_unicas = vendas_periodo.drop_duplicates(subset='chave_dedup', keep='first')
-
-    # Calcular métricas
-    vendas_reais = len(vendas_unicas)
-    recall = conversoes_observadas / vendas_reais if vendas_reais > 0 else 0
-    fator_correcao = 1 / recall if recall > 0 else 0
-
-    taxa_observada = conversoes_observadas / total_leads if total_leads > 0 else 0
-    taxa_real = vendas_reais / total_leads if total_leads > 0 else 0
-
-    logger.debug(f"\n DADOS:")
-    logger.debug(f"  Total de leads: {total_leads:,}")
-    logger.debug(f"  Conversões OBSERVADAS (matches): {conversoes_observadas}")
-    logger.debug(f"  Vendas REAIS (sem duplicatas): {vendas_reais:,}")
-
-    logger.debug(f"\n TAXAS:")
-    logger.debug(f"  Taxa OBSERVADA: {taxa_observada*100:.4f}%")
-    logger.debug(f"  Taxa REAL: {taxa_real*100:.4f}%")
-
-    logger.debug(f"\n MÉTRICAS:")
-    logger.debug(f"  Recall: {recall*100:.1f}%")
-    logger.debug(f"  Fator de correção: {fator_correcao:.3f}x")
-
-    if fator_correcao > 1:
-        logger.debug(f"\n IMPACTO:")
-        logger.debug(f"  Estamos SUBESTIMANDO em {fator_correcao:.3f}x")
-        logger.debug(f"  Valores CAPI deveriam ser {(fator_correcao-1)*100:.0f}% maiores")
-
-    logger.debug("=" * 80)
-
-    # Criar dicionário com métricas de recall para passar ao registro do modelo
-    recall_metrics = {
-        'vendas_devclub_total': vendas_reais,
-        'vendas_matched': conversoes_observadas,
-        'recall': recall,
-        'fator_correcao': fator_correcao
-    }
+    # Vendas já foram filtradas para DevClub na CÉLULA 5.4
+    # Target já reflete apenas matches com vendas DevClub
+    dataset_v1_devclub = dataset_v1_final.copy()
 
     logger.info("=" * 80)
-    # === CÉLULA 17.1: Janela de Conversão ===
+    # === CÉLULA 17: Janela de Conversão ===
     logger.info("")
-    logger.info(f"CÉLULA 17.1: APLICAR JANELA DE CONVERSÃO DE 20 DIAS")
+    logger.info(f"CÉLULA 17: APLICAR JANELA DE CONVERSÃO DE 20 DIAS")
     logger.info("")
 
     # Aplicar janela de conversão de 20 dias (captação + CPL + carrinho)
@@ -767,6 +605,9 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         df_vendas=df_vendas_final,
         janela_dias=20
     )
+
+    # Recall metrics (não calculado após reorganização - vendas já filtradas na CÉLULA 5.4)
+    recall_metrics = None
 
     logger.info("=" * 80)
     # === CÉLULA 18: Feature Engineering ===
