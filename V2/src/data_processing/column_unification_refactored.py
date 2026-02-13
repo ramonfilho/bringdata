@@ -137,19 +137,29 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
         df_vendas_unificado = df_vendas_unificado.drop(columns=['valor produtos'])
         logger.debug("  valor produtos  valor")
 
-    # Unificar produto
-    if 'Produto' in df_vendas_unificado.columns and 'nome produto' in df_vendas_unificado.columns:
-        df_vendas_unificado['produto'] = df_vendas_unificado['Produto'].fillna(df_vendas_unificado['nome produto'])
-        df_vendas_unificado = df_vendas_unificado.drop(columns=['Produto', 'nome produto'])
-        logger.debug("  Produto + nome produto  produto")
-    elif 'Produto' in df_vendas_unificado.columns:
-        df_vendas_unificado['produto'] = df_vendas_unificado['Produto']
-        df_vendas_unificado = df_vendas_unificado.drop(columns=['Produto'])
-        logger.debug("  Produto  produto")
-    elif 'nome produto' in df_vendas_unificado.columns:
-        df_vendas_unificado['produto'] = df_vendas_unificado['nome produto']
-        df_vendas_unificado = df_vendas_unificado.drop(columns=['nome produto'])
-        logger.debug("  nome produto  produto")
+    # Unificar produto (hierarquia: Produto [Guru] > Lançamento [TMB] > nome produto [fallback])
+    colunas_produto_disponiveis = []
+    if 'Produto' in df_vendas_unificado.columns:
+        colunas_produto_disponiveis.append('Produto')
+    if 'Lançamento' in df_vendas_unificado.columns:
+        colunas_produto_disponiveis.append('Lançamento')
+    if 'nome produto' in df_vendas_unificado.columns:
+        colunas_produto_disponiveis.append('nome produto')
+
+    if colunas_produto_disponiveis:
+        # Unificar com hierarquia: pegar primeira coluna não-nula
+        df_vendas_unificado['produto'] = df_vendas_unificado[colunas_produto_disponiveis[0]]
+        for col in colunas_produto_disponiveis[1:]:
+            df_vendas_unificado['produto'] = df_vendas_unificado['produto'].fillna(df_vendas_unificado[col])
+
+        # Remover colunas originais
+        df_vendas_unificado = df_vendas_unificado.drop(columns=colunas_produto_disponiveis)
+
+        # Log de quais colunas foram unificadas
+        if len(colunas_produto_disponiveis) > 1:
+            logger.debug(f"  {' + '.join(colunas_produto_disponiveis)}  produto")
+        else:
+            logger.debug(f"  {colunas_produto_disponiveis[0]}  produto")
 
     # Unificar nome
     if 'Cliente Nome' in df_vendas_unificado.columns and 'nome contato' in df_vendas_unificado.columns:
@@ -515,11 +525,58 @@ def filtrar_vendas_devclub(df_vendas: pd.DataFrame) -> pd.DataFrame:
     logger.info(f"  Vendas removidas (outros produtos): {vendas_removidas:,}")
     logger.info(f"  Produtos DevClub únicos: {len(produtos_devclub)}")
 
+    # DEBUG: Top 20 produtos ANTES do filtro (para ver o que tem em TMB)
+    logger.debug("")
+    logger.debug("TOP 20 PRODUTOS - ANTES DO FILTRO DEVCLUB:")
+    logger.debug("-" * 80)
+    produtos_antes = df_vendas['produto'].value_counts().head(20)
+    for produto, count in produtos_antes.items():
+        pct = (count / vendas_antes) * 100
+        is_devclub = 'devclub' in str(produto).lower()
+        marca = "[DevClub]" if is_devclub else "[Outros] "
+        logger.debug(f"  {marca} {str(produto)[:55]:<57} {count:>5,} ({pct:>5.1f}%)")
+    logger.debug("-" * 80)
+
     # DEBUG: Lista de produtos DevClub
     logger.debug("")
     logger.debug("Produtos DevClub encontrados:")
     for produto, count in produtos_devclub.items():
         logger.debug(f"  {produto}: {count:,} vendas")
+
+    # DEBUG: Distribuição por arquivo de origem (ANTES do filtro)
+    if 'arquivo_origem' in df_vendas.columns:
+        logger.debug("")
+        logger.debug("DISTRIBUIÇÃO POR ARQUIVO - ANTES DO FILTRO DEVCLUB:")
+        logger.debug("-" * 80)
+        vendas_por_arquivo_antes = df_vendas['arquivo_origem'].value_counts()
+        for arquivo, count in vendas_por_arquivo_antes.items():
+            pct = (count / vendas_antes) * 100
+            logger.debug(f"  {arquivo:<50} {count:>6,} vendas ({pct:>5.1f}%)")
+        logger.debug("-" * 80)
+        logger.debug(f"  TOTAL: {vendas_antes:,} vendas")
+
+    # DEBUG: Distribuição por arquivo de origem (DEPOIS do filtro - apenas DevClub)
+    if 'arquivo_origem' in df_vendas_devclub.columns:
+        logger.debug("")
+        logger.debug("DISTRIBUIÇÃO POR ARQUIVO - VENDAS DEVCLUB:")
+        logger.debug("-" * 80)
+        vendas_por_arquivo_devclub = df_vendas_devclub['arquivo_origem'].value_counts()
+        for arquivo, count in vendas_por_arquivo_devclub.items():
+            pct = (count / vendas_depois) * 100
+            logger.debug(f"  {arquivo:<50} {count:>6,} vendas ({pct:>5.1f}%)")
+        logger.debug("-" * 80)
+        logger.debug(f"  TOTAL DEVCLUB: {vendas_depois:,} vendas")
+        logger.debug("")
+
+        # Mostrar conversão (quantos % de cada arquivo viraram DevClub)
+        logger.debug("TAXA DE CONVERSÃO DEVCLUB POR ARQUIVO:")
+        logger.debug("-" * 80)
+        for arquivo in vendas_por_arquivo_antes.index:
+            antes = vendas_por_arquivo_antes.get(arquivo, 0)
+            depois = vendas_por_arquivo_devclub.get(arquivo, 0)
+            taxa = (depois / antes * 100) if antes > 0 else 0
+            logger.debug(f"  {arquivo:<50} {depois:>6,}/{antes:>6,} ({taxa:>5.1f}%)")
+        logger.debug("-" * 80)
 
     logger.info("")
 

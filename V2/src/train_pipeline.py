@@ -863,6 +863,23 @@ if __name__ == "__main__":
         default='normal',
         help='Nível de verbosidade dos logs: silent (apenas erros), minimal (warnings+erros), normal (info+warnings+erros), debug (tudo incluindo análises detalhadas) - padrão: normal'
     )
+    parser.add_argument(
+        '--include-api-data',
+        action='store_true',
+        help='Incluir dados da API Guru e Google Sheets além dos arquivos locais (padrão: False)'
+    )
+    parser.add_argument(
+        '--api-start-date',
+        type=str,
+        default=None,
+        help='Data de início para buscar dados da API (formato: YYYY-MM-DD). Requer --include-api-data'
+    )
+    parser.add_argument(
+        '--api-end-date',
+        type=str,
+        default=None,
+        help='Data de fim para buscar dados da API (formato: YYYY-MM-DD). Requer --include-api-data'
+    )
 
     args = parser.parse_args()
 
@@ -876,5 +893,8 @@ if __name__ == "__main__":
         tmb_risk_filter=args.tmb_risk_filter,
         set_active=args.set_active,
         medium_strategy=args.medium_strategy,
-        verbosity=args.verbosity
+        verbosity=args.verbosity,
+        include_api_data=args.include_api_data,
+        api_start_date=args.api_start_date,
+        api_end_date=args.api_end_date
     )

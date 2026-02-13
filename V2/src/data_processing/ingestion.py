@@ -89,41 +89,52 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
 
                     # Agregar por pedido único
                     if 'Pedido' in df.columns:
-                        # Preservar colunas importantes ANTES de agregar
-                        colunas_preservar = ['Grau de risco', 'Status Pedido', 'Cliente Nome',
-                                            'Cliente E-mail', 'Ticket', 'Data Efetivado',
-                                            'Lançamento', 'Oferta']
+                        # ETAPA 1: Filtrar apenas pedidos EFETIVADOS (antes de agregar)
+                        # Remove parcelas de pedidos cancelados
+                        if 'Status Pedido' in df.columns:
+                            total_parcelas_antes = len(df)
+                            pedidos_antes = df['Pedido'].nunique()
+                            df_efetivado = df[df['Status Pedido'] == 'Efetivado'].copy()
+                            parcelas_removidas = total_parcelas_antes - len(df_efetivado)
+                            pedidos_cancelados = pedidos_antes - df_efetivado['Pedido'].nunique()
 
-                        # Agregar por Pedido (pegar primeira linha de cada pedido)
+                            if parcelas_removidas > 0:
+                                logger.debug(f"         Removidas {parcelas_removidas:,} parcelas de {pedidos_cancelados:,} pedidos cancelados")
+
+                            df = df_efetivado
+
+                        # ETAPA 2: Detectar coluna de risco (variações de nome)
+                        coluna_risco = None
+                        for possivel_nome in ['Grau de risco', 'Grau de Risco', 'grau de risco', 'risco', 'Risco']:
+                            if possivel_nome in df.columns:
+                                coluna_risco = possivel_nome
+                                logger.debug(f"         Coluna de risco detectada: '{coluna_risco}'")
+                                break
+
+                        # ETAPA 3: Agregar por Pedido único (pegar primeira linha de cada pedido)
+                        # Todas as parcelas de um pedido têm o mesmo risco, então .first() é suficiente
                         df_agregado = df.groupby('Pedido', as_index=False).first()
 
-                        # Filtrar apenas pedidos efetivados (remover cancelados)
-                        if 'Status Pedido' in df_agregado.columns:
-                            total_antes = len(df_agregado)
-                            df_agregado = df_agregado[df_agregado['Status Pedido'] == 'Efetivado'].copy()
-                            cancelados = total_antes - len(df_agregado)
-                            if cancelados > 0:
-                                logger.debug(f"         {cancelados} pedidos cancelados removidos")
+                        logger.debug(f"        Agregado: {len(df_agregado):,} pedidos únicos (de {len(df):,} parcelas)")
 
-                        df_agregado = df_agregado
-
-                        # Renomear colunas para formato esperado pelo pipeline
+                        # ETAPA 4: Renomear colunas para formato esperado pelo pipeline
                         rename_map = {
                             'Cliente E-mail': 'Cliente Email',
                             'Ticket': 'Ticket (R$)',
-                            'Lançamento': 'Criado Em'
+                            'Lançamento': 'nome produto'  # TMB: Lançamento contém nome do produto
                         }
                         df_agregado = df_agregado.rename(columns=rename_map)
 
-                        logger.debug(f"        Agregado por pedido único: {len(df_agregado):,} pedidos")
-                        logger.debug(f"        Coluna 'Grau de risco' preservada")
-
-                        # Mostrar distribuição de risco
-                        if 'Grau de risco' in df_agregado.columns:
-                            dist_risco = df_agregado['Grau de risco'].value_counts(dropna=False)
-                            logger.debug(f"       Distribuição de risco:")
+                        # ETAPA 5: Verificar e reportar distribuição de risco
+                        if coluna_risco and coluna_risco in df_agregado.columns:
+                            dist_risco = df_agregado[coluna_risco].value_counts(dropna=False)
+                            logger.debug(f"        Distribuição de risco ({len(df_agregado):,} pedidos):")
                             for risco, count in dist_risco.items():
-                                logger.debug(f"         - {risco}: {count:,} pedidos")
+                                pct = (count / len(df_agregado)) * 100
+                                risco_display = 'Sem Classificação' if str(risco).strip() == '-' else str(risco)
+                                logger.debug(f"          {risco_display}: {count:,} pedidos ({pct:.1f}%)")
+                        else:
+                            logger.warning(f"        ⚠️  Coluna de risco não encontrada no arquivo TMB!")
 
                         df = df_agregado
                     else:
