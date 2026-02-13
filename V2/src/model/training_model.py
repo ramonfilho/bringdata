@@ -1019,10 +1019,13 @@ def registrar_features_e_modelo_devclub(
                     json.dump(features_ordenadas, f, indent=2, ensure_ascii=False)
 
             config_path = Path(__file__).parent.parent.parent / "configs" / "active_model.yaml"
+            current_run_id = mlflow.active_run().info.run_id
+
             active_config = {
                 'active_model': {
                     'model_name': f"v1_devclub_rf_{split_method}_single",
-                    'model_path': f"files/{timestamp}",
+                    'mlflow_run_id': current_run_id,
+                    'model_path': f"files/{timestamp}",  # DEPRECATED - mantido para backward compatibility
                     'trained_at': model_metadata['model_info']['trained_at'],
                     'split_method': split_method,
                     'performance': {
@@ -1037,11 +1040,15 @@ def registrar_features_e_modelo_devclub(
                 yaml.dump(active_config, f, default_flow_style=False, sort_keys=False)
                 f.write("\n# Para mudar o modelo ativo:\n")
                 f.write("# 1. Treine um novo modelo: python src/train_pipeline.py --split-method temporal_leads --set-active\n")
-                f.write("# 2. Ou edite este arquivo manualmente apontando para outro model_path\n")
+                f.write("# 2. Ou edite manualmente o mlflow_run_id acima\n")
+                f.write("#\n")
+                f.write("# NOTA: mlflow_run_id é a fonte preferencial (carrega direto do MLflow)\n")
+                f.write("#       model_path mantido apenas para backward compatibility\n")
 
             logger.debug(f" {config_path} atualizado")
             logger.debug(f"  Modelo ativo: v1_devclub_rf_{split_method}_single")
-            logger.debug(f"  Path: {output_dir}")
+            logger.debug(f"  MLflow Run ID: {current_run_id}")
+            logger.debug(f"  Path local (backward compatibility): {output_dir}")
 
             # Atualizar business_config.py com recall real
             atualizar_business_config_com_recall(model_metadata)

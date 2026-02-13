@@ -18,24 +18,34 @@ logger = logging.getLogger(__name__)
 class LeadScoringPredictor:
     """Classe para realizar predições de lead scoring."""
 
-    def __init__(self, model_name: str = None, model_path: str = None, use_active_model: bool = True):
+    def __init__(self, model_name: str = None, model_path: str = None, mlflow_run_id: str = None, use_active_model: bool = True):
         """
         Inicializa o preditor com um modelo específico.
 
         Args:
             model_name: Nome do modelo a ser carregado (sem extensão). Se None, usa modelo ativo do config.
             model_path: Caminho customizado para a pasta do modelo (opcional). Se None, usa modelo ativo do config.
+            mlflow_run_id: Run ID do MLflow para carregar modelo diretamente (RECOMENDADO - elimina arquivos locais)
             use_active_model: Se True (padrão), carrega modelo do configs/active_model.yaml se model_name e model_path forem None
         """
         self.model = None
         self.feature_names = None
         self.metadata = None
+        self.mlflow_run_id = mlflow_run_id
+        self.model_path = None
+        self.model_name = model_name
 
-        # Prioridade: 1) model_path/model_name fornecidos, 2) config active_model, 3) fallback padrão
-        if model_path and model_name:
-            # Modo explícito: usar parâmetros fornecidos
+        # Prioridade: 1) mlflow_run_id, 2) model_path/model_name fornecidos, 3) config active_model, 4) fallback padrão
+        if mlflow_run_id:
+            # Modo MLflow (RECOMENDADO): carregar diretamente do MLflow
+            logger.info(f"Modo MLflow: carregando modelo do run {mlflow_run_id}")
+            self.mlflow_run_id = mlflow_run_id
+            # model_path e model_name não são necessários neste modo
+        elif model_path and model_name:
+            # Modo explícito: usar parâmetros fornecidos (arquivos locais)
             self.model_path = Path(model_path)
             self.model_name = model_name
+            logger.info(f"Modo arquivos locais: {self.model_name} @ {self.model_path}")
         elif use_active_model:
             # Modo config: carregar do active_model.yaml
             try:
@@ -43,9 +53,16 @@ class LeadScoringPredictor:
                 with open(config_path, 'r') as f:
                     config = yaml.safe_load(f)
 
-                self.model_name = config['active_model']['model_name']
-                self.model_path = Path(__file__).parent.parent.parent / config['active_model']['model_path']
-                logger.info(f"Carregando modelo ativo do config: {self.model_name} @ {self.model_path}")
+                # Verificar se tem mlflow_run_id no config (NOVO - preferencial)
+                if 'mlflow_run_id' in config['active_model']:
+                    self.mlflow_run_id = config['active_model']['mlflow_run_id']
+                    self.model_name = config['active_model']['model_name']
+                    logger.info(f"Carregando modelo ativo do MLflow: {self.model_name} (run: {self.mlflow_run_id})")
+                else:
+                    # Fallback: usar model_path (ANTIGO - backward compatibility)
+                    self.model_name = config['active_model']['model_name']
+                    self.model_path = Path(__file__).parent.parent.parent / config['active_model']['model_path']
+                    logger.info(f"Carregando modelo ativo de arquivos locais: {self.model_name} @ {self.model_path}")
             except Exception as e:
                 logger.warning(f"Falha ao carregar active_model.yaml: {e}. Usando fallback padrão.")
                 # Fallback para o padrão antigo
@@ -58,11 +75,22 @@ class LeadScoringPredictor:
 
     def load_model(self):
         """Carrega o modelo pickle e seus metadados."""
+
+        # MODO 1: Carregar do MLflow (RECOMENDADO)
+        if self.mlflow_run_id:
+            logger.info(f"Carregando modelo do MLflow run: {self.mlflow_run_id}")
+            self._load_from_mlflow()
+            return
+
+        # MODO 2: Carregar de arquivos locais (BACKWARD COMPATIBILITY)
+        if not self.model_path:
+            raise ValueError("model_path ou mlflow_run_id devem ser fornecidos")
+
         model_file = self.model_path / f"modelo_lead_scoring_{self.model_name}.pkl"
         features_file = self.model_path / f"features_ordenadas_{self.model_name}.json"
         metadata_file = self.model_path / f"model_metadata_{self.model_name}.json"
 
-        logger.info(f"Carregando modelo: {model_file}")
+        logger.info(f"Carregando modelo de arquivos locais: {model_file}")
         try:
             # Tentar primeiro com joblib (mais robusto)
             self.model = joblib.load(model_file)
@@ -89,6 +117,53 @@ class LeadScoringPredictor:
         logger.info(f"Carregando metadados: {metadata_file}")
         with open(metadata_file, 'r') as f:
             self.metadata = json.load(f)
+
+    def _load_from_mlflow(self):
+        """Carrega modelo e artifacts diretamente do MLflow."""
+        # Carregar direto dos artifacts (não depende de meta.yaml ou API)
+        mlruns_path = Path(__file__).parent.parent.parent / "mlruns" / "1" / self.mlflow_run_id / "artifacts"
+
+        if not mlruns_path.exists():
+            raise FileNotFoundError(f"MLflow run não encontrado: {mlruns_path}")
+
+        logger.info(f"Carregando artifacts de: {mlruns_path}")
+
+        # 1. Carregar feature_registry e extrair features ordenadas
+        registry_path = mlruns_path / "feature_registry.json"
+        if not registry_path.exists():
+            raise FileNotFoundError(f"feature_registry.json não encontrado em {mlruns_path}")
+
+        with open(registry_path, 'r') as f:
+            feature_registry = json.load(f)
+
+        if 'model_input_features' in feature_registry:
+            self.feature_names = feature_registry['model_input_features']['ordered_list']
+            logger.info(f"Features carregadas ({len(self.feature_names)} features)")
+        else:
+            raise ValueError("feature_registry não contém 'model_input_features'")
+
+        # 2. Carregar modelo
+        model_path = mlruns_path / "model" / "model.pkl"
+        if not model_path.exists():
+            raise FileNotFoundError(f"model.pkl não encontrado em {mlruns_path / 'model'}")
+
+        try:
+            self.model = joblib.load(model_path)
+            logger.info(f"Modelo carregado ({type(self.model).__name__})")
+        except Exception as e:
+            logger.warning(f"Joblib falhou ({e}), tentando pickle...")
+            with open(model_path, 'rb') as f:
+                self.model = pickle.load(f)
+            logger.info(f"Modelo carregado com pickle ({type(self.model).__name__})")
+
+        # 3. Carregar metadata
+        metadata_path = mlruns_path / "model_metadata.json"
+        if not metadata_path.exists():
+            raise FileNotFoundError(f"model_metadata.json não encontrado em {mlruns_path}")
+
+        with open(metadata_path, 'r') as f:
+            self.metadata = json.load(f)
+        logger.info("Metadata carregado")
 
         # Normalizar thresholds para formato D01-D10 (causa raiz do bug D09 vs D9)
         if 'decil_thresholds' in self.metadata and 'thresholds' in self.metadata['decil_thresholds']:
