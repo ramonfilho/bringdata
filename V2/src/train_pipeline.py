@@ -128,7 +128,7 @@ def setup_logging(verbosity='normal'):
 logger = logging.getLogger(__name__)
 
 
-def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=False, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal'):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=False, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal'):
     """Executa pipeline de treino completo.
 
     Args:
@@ -161,6 +161,11 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
 
     # Configurar logging com nível de verbosidade DEPOIS do redirect
     setup_logging(verbosity)
+
+    # Backward compatibility: se save_files=True, ativar save_test_predictions
+    if save_files and not save_test_predictions:
+        logger.warning("⚠️  --save-files está DEPRECADO, use --save-test-predictions")
+        save_test_predictions = True
 
     # Registrar função de cleanup para fechar arquivo ao terminar
     def cleanup():
@@ -699,7 +704,8 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     resultado_registro_devclub = registrar_features_e_modelo_devclub(
         dataset_v1_devclub_encoded,
         dataset_v1_devclub,
-        save_files=save_files,
+        save_files=save_files,  # DEPRECATED - mantido para backward compatibility
+        save_test_predictions=save_test_predictions,
         categorias_treino=categorias_capturadas,
         distribuicoes_treino=distribuicoes_capturadas,
         matching_method=initial_matching,
@@ -805,7 +811,12 @@ if __name__ == "__main__":
     parser.add_argument(
         '--save-files',
         action='store_true',
-        help='Salvar arquivos locais em files/{timestamp} (padrão: False - apenas MLflow)'
+        help='[DEPRECADO] Use --save-test-predictions. Salvar arquivos locais em files/{timestamp} (padrão: False - apenas MLflow)'
+    )
+    parser.add_argument(
+        '--save-test-predictions',
+        action='store_true',
+        help='Salvar predições do test set em files/{timestamp}/test_set_predictions.csv (padrão: False)'
     )
     parser.add_argument(
         '--tune-hyperparams',
@@ -836,7 +847,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '--set-active',
         action='store_true',
-        help='Definir este modelo como ativo em configs/active_model.yaml (requer --save-files)'
+        help='Definir este modelo como ativo em configs/active_model.yaml (baixa arquivos do MLflow automaticamente)'
     )
     parser.add_argument(
         '--medium-strategy',
@@ -857,7 +868,8 @@ if __name__ == "__main__":
 
     main(
         initial_matching=args.initial_matching,
-        save_files=args.save_files,
+        save_files=args.save_files,  # DEPRECATED
+        save_test_predictions=args.save_test_predictions,
         tune_hyperparams=args.tune_hyperparams,
         grid_size=args.grid_size,
         split_method=args.split_method,

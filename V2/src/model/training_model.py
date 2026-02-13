@@ -117,7 +117,8 @@ def atualizar_business_config_com_recall(model_metadata: dict):
 def registrar_features_e_modelo_devclub(
     dataset_devclub_encoded: pd.DataFrame,
     dataset_devclub_original: pd.DataFrame,
-    save_files: bool = False,
+    save_files: bool = False,  # DEPRECATED - mantido para backward compatibility
+    save_test_predictions: bool = False,
     matching_method: str = 'email_only',
     custom_hyperparams: dict = None,
     split_method: str = 'temporal',
@@ -146,9 +147,14 @@ def registrar_features_e_modelo_devclub(
     """
     # Iniciar MLflow run
     with mlflow.start_run():
+        # Backward compatibility: se save_files=True, ativar save_test_predictions
+        if save_files:
+            logger.warning("⚠️  --save-files está DEPRECADO, use --save-test-predictions")
+            save_test_predictions = True
+
         # Logar parâmetros do experimento
         mlflow.log_param("matching_method", matching_method)
-        mlflow.log_param("save_files", save_files)
+        mlflow.log_param("save_test_predictions", save_test_predictions)
 
         # 1. PREPARAR DADOS E TREINAR MODELO FINAL
         logger.info("  Removendo a coluna Target")
@@ -763,6 +769,11 @@ def registrar_features_e_modelo_devclub(
                 "total_expected_features": len(X.columns),
                 "target_required": True,
                 "missing_value_strategy": "model_will_fail_if_missing_features"
+            },
+            "model_input_features": {
+                "ordered_list": list(X_clean.columns),
+                "count": len(X_clean.columns),
+                "description": "Ordered list of features expected by the model (for production inference)"
             }
         }
 
@@ -933,9 +944,9 @@ def registrar_features_e_modelo_devclub(
         mlflow.sklearn.log_model(modelo_final, "model")
         logger.debug(" Modelo registrado no MLflow")
 
-        # 4. SALVAR ARQUIVOS LOCAIS (OPCIONAL)
+        # 4. SALVAR ARQUIVOS LOCAIS (OPCIONAL - SIMPLIFICADO)
         output_dir = None
-        if save_files:
+        if save_test_predictions or set_active:
             logger.debug("\n4. SALVANDO ARQUIVOS LOCAIS")
             logger.debug("-" * 50)
 
@@ -945,109 +956,117 @@ def registrar_features_e_modelo_devclub(
             output_dir = os.path.join(base_dir, timestamp)
             os.makedirs(output_dir, exist_ok=True)
 
-            # Salvar feature registry
-            registry_filename = f'{output_dir}/feature_registry_v1_devclub_rf_{split_method}_single.json'
-            with open(registry_filename, 'w', encoding='utf-8') as f:
-                json.dump(feature_registry, f, indent=2, ensure_ascii=False)
-            logger.debug(f" {registry_filename} salvo")
+            # Se set_active: salvar arquivos necessários para produção (backward compatibility)
+            if set_active:
+                # Salvar feature registry (cópia do MLflow)
+                registry_filename = f'{output_dir}/feature_registry_v1_devclub_rf_{split_method}_single.json'
+                with open(registry_filename, 'w', encoding='utf-8') as f:
+                    json.dump(feature_registry, f, indent=2, ensure_ascii=False)
+                logger.debug(f" {registry_filename} salvo")
 
-            # Salvar metadados do modelo
-            metadata_filename = f'{output_dir}/model_metadata_v1_devclub_rf_{split_method}_single.json'
-            with open(metadata_filename, 'w', encoding='utf-8') as f:
-                json.dump(model_metadata, f, indent=2, ensure_ascii=False)
-            logger.debug(f" {metadata_filename} salvo")
+                # Salvar features ordenadas (BACKWARD COMPATIBILITY com prediction.py)
+                features_filename = f'{output_dir}/features_ordenadas_v1_devclub_rf_{split_method}_single.json'
+                features_ordenadas = {
+                    "feature_names": list(X_clean.columns),
+                    "feature_count": len(X_clean.columns),
+                    "created_at": datetime.now().isoformat(),
+                    "model_name": f"v1_devclub_rf_{split_method}_single"
+                }
+                with open(features_filename, 'w', encoding='utf-8') as f:
+                    json.dump(features_ordenadas, f, indent=2, ensure_ascii=False)
+                logger.debug(f" {features_filename} salvo (backward compatibility)")
 
-            # Salvar modelo
-            model_filename = f'{output_dir}/modelo_lead_scoring_v1_devclub_rf_{split_method}_single.pkl'
-            joblib.dump(modelo_final, model_filename)
-            logger.debug(f" {model_filename} salvo")
-
-            # Salvar features ordenadas
-            features_filename = f'{output_dir}/features_ordenadas_v1_devclub_rf_{split_method}_single.json'
-            features_ordenadas = {
-                "feature_names": list(X_clean.columns),
-                "feature_count": len(X_clean.columns),
-                "created_at": datetime.now().isoformat(),
-                "model_name": f"v1_devclub_rf_{split_method}_single"
-            }
-            with open(features_filename, 'w', encoding='utf-8') as f:
-                json.dump(features_ordenadas, f, indent=2, ensure_ascii=False)
-            logger.debug(f" {features_filename} salvo")
-
-            # Salvar categorias esperadas (para drift detection)
-            if categorias_treino:
-                categorias_filename = f'{output_dir}/categorias_esperadas.json'
-                with open(categorias_filename, 'w', encoding='utf-8') as f:
-                    json.dump(categorias_treino, f, indent=2, ensure_ascii=False)
-                logger.debug(f" {categorias_filename} salvo ({len(categorias_treino)} colunas rastreadas)")
-
-            # Salvar distribuições esperadas (para distribution drift detection)
-            if distribuicoes_treino:
-                distribuicoes_filename = f'{output_dir}/distribuicoes_esperadas.json'
-                with open(distribuicoes_filename, 'w', encoding='utf-8') as f:
-                    json.dump(distribuicoes_treino, f, indent=2, ensure_ascii=False)
-                cat_count = len(distribuicoes_treino.get('categorical', {}))
-                num_count = len(distribuicoes_treino.get('numerical', {}))
-                logger.debug(f" {distribuicoes_filename} salvo ({cat_count} categóricas, {num_count} numéricas)")
-
-            # Salvar test set com predições
-            test_set_filename = f'{output_dir}/test_set_predictions.csv'
-            df_test_predictions = X_test.copy()
-            df_test_predictions['target_real'] = y_test.values
-            df_test_predictions['probabilidade'] = y_prob
-            df_test_predictions.to_csv(test_set_filename, index=False)
-            logger.debug(f" {test_set_filename} salvo")
+            # Se save_test_predictions: salvar predições do test set
+            if save_test_predictions:
+                test_set_filename = f'{output_dir}/test_set_predictions.csv'
+                df_test_predictions = X_test.copy()
+                df_test_predictions['target_real'] = y_test.values
+                df_test_predictions['probabilidade'] = y_prob
+                df_test_predictions.to_csv(test_set_filename, index=False)
+                logger.debug(f" {test_set_filename} salvo")
 
             logger.info("")
             logger.info(f"Arquivos locais salvos em: {output_dir}")
 
-            # Atualizar active_model.yaml se solicitado
-            if set_active:
-                logger.debug("\n5. ATUALIZANDO MODELO ATIVO")
-                logger.debug("-" * 50)
+        # Atualizar active_model.yaml se solicitado (INDEPENDENTE de save_files)
+        if set_active:
+            logger.debug("\n5. ATUALIZANDO MODELO ATIVO")
+            logger.debug("-" * 50)
 
-                import yaml
-                from pathlib import Path
+            import yaml
+            from pathlib import Path
 
-                config_path = Path(__file__).parent.parent.parent / "configs" / "active_model.yaml"
-                active_config = {
-                    'active_model': {
-                        'model_name': f"v1_devclub_rf_{split_method}_single",
-                        'model_path': f"files/{timestamp}",
-                        'trained_at': model_metadata['model_info']['trained_at'],
-                        'split_method': split_method,
-                        'performance': {
-                            'auc': float(auc_final),
-                            'monotonia_percentage': float(monotonia),
-                            'lift_maximum': float(lift_maximo)
-                        }
+            # Se não criou output_dir ainda, criar agora
+            if not output_dir:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                base_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'files')
+                output_dir = os.path.join(base_dir, timestamp)
+                os.makedirs(output_dir, exist_ok=True)
+
+                # Baixar arquivos necessários do MLflow
+                registry_filename = f'{output_dir}/feature_registry_v1_devclub_rf_{split_method}_single.json'
+                with open(registry_filename, 'w', encoding='utf-8') as f:
+                    json.dump(feature_registry, f, indent=2, ensure_ascii=False)
+
+                features_filename = f'{output_dir}/features_ordenadas_v1_devclub_rf_{split_method}_single.json'
+                features_ordenadas = {
+                    "feature_names": list(X_clean.columns),
+                    "feature_count": len(X_clean.columns),
+                    "created_at": datetime.now().isoformat(),
+                    "model_name": f"v1_devclub_rf_{split_method}_single"
+                }
+                with open(features_filename, 'w', encoding='utf-8') as f:
+                    json.dump(features_ordenadas, f, indent=2, ensure_ascii=False)
+
+            config_path = Path(__file__).parent.parent.parent / "configs" / "active_model.yaml"
+            active_config = {
+                'active_model': {
+                    'model_name': f"v1_devclub_rf_{split_method}_single",
+                    'model_path': f"files/{timestamp}",
+                    'trained_at': model_metadata['model_info']['trained_at'],
+                    'split_method': split_method,
+                    'performance': {
+                        'auc': float(auc_final),
+                        'monotonia_percentage': float(monotonia),
+                        'lift_maximum': float(lift_maximo)
                     }
                 }
+            }
 
-                with open(config_path, 'w') as f:
-                    yaml.dump(active_config, f, default_flow_style=False, sort_keys=False)
-                    f.write("\n# Para mudar o modelo ativo:\n")
-                    f.write("# 1. Treine um novo modelo: python src/train_pipeline.py --split-method temporal_leads --save-files --set-active\n")
-                    f.write("# 2. Ou edite este arquivo manualmente apontando para outro model_path\n")
+            with open(config_path, 'w') as f:
+                yaml.dump(active_config, f, default_flow_style=False, sort_keys=False)
+                f.write("\n# Para mudar o modelo ativo:\n")
+                f.write("# 1. Treine um novo modelo: python src/train_pipeline.py --split-method temporal_leads --set-active\n")
+                f.write("# 2. Ou edite este arquivo manualmente apontando para outro model_path\n")
 
-                logger.debug(f" {config_path} atualizado")
-                logger.debug(f"  Modelo ativo: v1_devclub_rf_{split_method}_single")
-                logger.debug(f"  Path: {output_dir}")
+            logger.debug(f" {config_path} atualizado")
+            logger.debug(f"  Modelo ativo: v1_devclub_rf_{split_method}_single")
+            logger.debug(f"  Path: {output_dir}")
 
-                # Atualizar business_config.py com recall real
-                atualizar_business_config_com_recall(model_metadata)
-        else:
-            logger.debug("\n4. ARQUIVOS LOCAIS NÃO SALVOS (--save-files=False)")
+            # Atualizar business_config.py com recall real
+            atualizar_business_config_com_recall(model_metadata)
+
+        elif not save_test_predictions and not set_active:
+            logger.debug("\n4. ARQUIVOS LOCAIS NÃO SALVOS")
             logger.debug("-" * 50)
-            logger.debug("Use --save-files para salvar arquivos locais")
-
-            if set_active:
-                logger.debug("\n  AVISO: --set-active requer --save-files")
-                logger.debug("   Modelo ativo não foi atualizado")
+            logger.debug("Use --save-test-predictions para salvar predições do test set")
+            logger.debug("Use --set-active para ativar este modelo em produção")
 
         # Sempre logar metadata como artifact no MLflow
         mlflow.log_dict(model_metadata, "model_metadata.json")
         mlflow.log_dict(feature_registry, "feature_registry.json")
+
+        # Sempre logar categorias e distribuições esperadas (drift detection)
+        if categorias_treino:
+            mlflow.log_dict(categorias_treino, "categorias_esperadas.json")
+            logger.debug(f" categorias_esperadas.json registrado no MLflow ({len(categorias_treino)} colunas)")
+
+        if distribuicoes_treino:
+            mlflow.log_dict(distribuicoes_treino, "distribuicoes_esperadas.json")
+            cat_count = len(distribuicoes_treino.get('categorical', {}))
+            num_count = len(distribuicoes_treino.get('numerical', {}))
+            logger.debug(f" distribuicoes_esperadas.json registrado no MLflow ({cat_count} categóricas, {num_count} numéricas)")
+
         logger.debug(" Metadados adicionais registrados no MLflow")
 
         # 5. RESUMO FINAL
