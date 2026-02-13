@@ -15,6 +15,7 @@ import logging
 import argparse
 import pandas as pd
 import atexit
+import time
 from datetime import datetime
 from src.data_processing.ingestion import (
     read_excel_files,
@@ -189,7 +190,12 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 
+    # Timers para cada célula
+    cell_timers = {}
+    pipeline_start_time = time.time()
+
     # === CÉLULA 1: Upload/Leitura de arquivos ===
+    cell_start = time.time()
     logger.info("")
     logger.info("CÉLULA 1: LEITURA DE ARQUIVOS")
     logger.info("")
@@ -245,8 +251,11 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         num_sheets_api=1  # Retreino: apenas aba 0 do Google Sheets
     )
 
+    cell_timers['Célula 1'] = time.time() - cell_start
+    logger.info(f"   Tempo: {cell_timers['Célula 1']:.1f}s")
     logger.info("=" * 80)
     # === CÉLULA 2: Filtragem + Remoção de Duplicatas ===
+    cell_start = time.time()
     logger.info("")
     logger.info("CÉLULA 2: FILTRAGEM DE ABAS + REMOÇÃO DE DUPLICATAS")
     logger.info("")
@@ -317,6 +326,9 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.debug("-" * 80)
     logger.debug(f"{'TOTAL':<35} {'':<20} {total_original:>10,} {total_final:>10,} {total_duplicatas:>10,}")
     logger.debug("=" * 80)
+
+    cell_timers['Célula 2'] = time.time() - cell_start
+    logger.info(f"   Tempo: {cell_timers['Célula 2']:.1f}s")
 
     # === CÉLULA 3: Remoção de colunas desnecessárias ===
     logger.info("=" * 80)
@@ -562,6 +574,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
 
     logger.info("=" * 80)
     # === CÉLULA 15: Matching robusto por email e telefone ===
+    cell_start = time.time()
     logger.info("")
     logger.info(f"CÉLULA 15: MATCHING DE LEADS COM VENDAS")
     logger.info("")
@@ -592,6 +605,8 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     # Target já reflete apenas matches com vendas DevClub
     dataset_v1_devclub = dataset_v1_final.copy()
 
+    cell_timers['Célula 15'] = time.time() - cell_start
+    logger.info(f"   Tempo: {cell_timers['Célula 15']:.1f}s")
     logger.info("=" * 80)
     # === CÉLULA 17: Janela de Conversão ===
     logger.info("")
@@ -611,6 +626,7 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
 
     logger.info("=" * 80)
     # === CÉLULA 18: Feature Engineering ===
+    cell_start = time.time()
     logger.info("")
     logger.info(f"CÉLULA 18: FEATURE ENGINEERING")
     logger.info("")
@@ -642,8 +658,11 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
     logger.info("")
     distribuicoes_capturadas = capture_training_distributions(dataset_v1_devclub_fe, output_path=None)
 
+    cell_timers['Célula 18'] = time.time() - cell_start
+    logger.info(f"   Tempo: {cell_timers['Célula 18']:.1f}s")
     logger.info("=" * 80)
     # === CÉLULA 20: Encoding Estratégico ===
+    cell_start = time.time()
     logger.info("")
     logger.info(f"CÉLULA 20: ENCODING ESTRATÉGICO")
     logger.info("")
@@ -668,8 +687,11 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         else:
             logger.warning(f"\n  Mantendo hiperparâmetros baseline (tuning não trouxe ganho significativo)")
 
+    cell_timers['Célula 20'] = time.time() - cell_start
+    logger.info(f"   Tempo: {cell_timers['Célula 20']:.1f}s")
     logger.info("=" * 80)
     # === CÉLULA 21: Treino e Registro do Modelo ===
+    cell_start = time.time()
     logger.info("")
     logger.info(f"CÉLULA 21: TREINO E REGISTRO DO MODELO")
     logger.info("")
@@ -687,6 +709,85 @@ def main(initial_matching='email_telefone', save_files=False, tune_hyperparams=F
         recall_metrics=recall_metrics,
         missing_rates_baseline=missing_rates_baseline
     )
+
+    cell_timers['Célula 21'] = time.time() - cell_start
+    logger.info(f"   Tempo: {cell_timers['Célula 21']:.1f}s")
+
+    # Comparação com run anterior
+    try:
+        import mlflow
+        from mlflow.tracking import MlflowClient
+
+        client = MlflowClient()
+        experiment = mlflow.get_experiment_by_name("devclub_lead_scoring")
+
+        if experiment:
+            # Buscar últimas 2 runs (atual + anterior)
+            runs = client.search_runs(
+                experiment_ids=[experiment.experiment_id],
+                order_by=["start_time DESC"],
+                max_results=2
+            )
+
+            if len(runs) >= 2:
+                run_atual = runs[0]
+                run_anterior = runs[1]
+
+                # Buscar model_type dos artifacts
+                import json
+                import tempfile
+
+                def get_model_type(run):
+                    try:
+                        # Download model_metadata.json artifact
+                        artifact_path = client.download_artifacts(run.info.run_id, "model_metadata.json")
+                        with open(artifact_path, 'r') as f:
+                            metadata = json.load(f)
+                            return metadata.get('model_info', {}).get('model_type', 'N/A')
+                    except:
+                        return 'N/A'
+
+                model_type_atual = get_model_type(run_atual)
+                model_type_anterior = get_model_type(run_anterior)
+
+                logger.info("")
+                logger.info("=" * 80)
+                logger.info("COMPARAÇÃO COM RUN ANTERIOR")
+                logger.info("=" * 80)
+
+                # Run atual
+                logger.info("Run atual:")
+                logger.info(f"  Algoritmo: {model_type_atual}")
+                logger.info(f"  Split: {run_atual.data.params.get('split_method', 'N/A')}")
+                logger.info(f"  Matching: {run_atual.data.params.get('matching_method', 'N/A')}")
+                logger.info(f"  AUC: {float(run_atual.data.metrics.get('auc', 0)):.3f}")
+                logger.info(f"  Top 3 decis: {float(run_atual.data.metrics.get('top3_decil_concentration', 0)):.1f}%")
+                logger.info(f"  Lift máximo: {float(run_atual.data.metrics.get('lift_maximum', 0)):.1f}x")
+                logger.info(f"  Monotonia: {float(run_atual.data.metrics.get('monotonia_percentage', 0)):.1f}%")
+
+                logger.info("")
+                logger.info("Run anterior:")
+                logger.info(f"  Algoritmo: {model_type_anterior}")
+                logger.info(f"  Split: {run_anterior.data.params.get('split_method', 'N/A')}")
+                logger.info(f"  Matching: {run_anterior.data.params.get('matching_method', 'N/A')}")
+                logger.info(f"  AUC: {float(run_anterior.data.metrics.get('auc', 0)):.3f}")
+                logger.info(f"  Top 3 decis: {float(run_anterior.data.metrics.get('top3_decil_concentration', 0)):.1f}%")
+                logger.info(f"  Lift máximo: {float(run_anterior.data.metrics.get('lift_maximum', 0)):.1f}x")
+                logger.info(f"  Monotonia: {float(run_anterior.data.metrics.get('monotonia_percentage', 0)):.1f}%")
+    except Exception as e:
+        logger.debug(f"Não foi possível comparar com run anterior: {e}")
+
+    # Tempo total do pipeline
+    pipeline_total_time = time.time() - pipeline_start_time
+    logger.info("")
+    logger.info("=" * 80)
+    logger.info("  RESUMO DE TEMPOS")
+    logger.info("=" * 80)
+    for cell_name, cell_time in cell_timers.items():
+        logger.info(f"  {cell_name}: {cell_time:.1f}s")
+    logger.info("-" * 80)
+    logger.info(f"  TEMPO TOTAL: {pipeline_total_time:.1f}s ({pipeline_total_time/60:.1f} min)")
+    logger.info("=" * 80)
 
     # Retornar metadata completo para uso pelo orquestrador de retreino
     return resultado_registro_devclub
