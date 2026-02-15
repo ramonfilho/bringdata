@@ -137,29 +137,41 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
         df_vendas_unificado = df_vendas_unificado.drop(columns=['valor produtos'])
         logger.debug("  valor produtos  valor")
 
-    # Unificar produto (hierarquia: Produto [Guru] > Lançamento [TMB] > nome produto [fallback])
-    colunas_produto_disponiveis = []
-    if 'Produto' in df_vendas_unificado.columns:
-        colunas_produto_disponiveis.append('Produto')
-    if 'Lançamento' in df_vendas_unificado.columns:
-        colunas_produto_disponiveis.append('Lançamento')
-    if 'nome produto' in df_vendas_unificado.columns:
-        colunas_produto_disponiveis.append('nome produto')
+    # Unificar produto - ESTRATÉGIA: Preservar 'produto' existente quando possível
+    # Se 'produto' já existe e tem valores, apenas preencher os vazios com outras colunas
+    if 'produto' in df_vendas_unificado.columns and df_vendas_unificado['produto'].notna().sum() > 0:
+        # 'produto' já existe com valores (ex: API), apenas preencher vazios
+        produto_base = df_vendas_unificado['produto'].copy()
 
-    if colunas_produto_disponiveis:
-        # Unificar com hierarquia: pegar primeira coluna não-nula
-        df_vendas_unificado['produto'] = df_vendas_unificado[colunas_produto_disponiveis[0]]
-        for col in colunas_produto_disponiveis[1:]:
-            df_vendas_unificado['produto'] = df_vendas_unificado['produto'].fillna(df_vendas_unificado[col])
+        # Preencher vazios com Produto, Lançamento ou nome produto
+        if 'Produto' in df_vendas_unificado.columns:
+            produto_base = produto_base.fillna(df_vendas_unificado['Produto'])
+            df_vendas_unificado = df_vendas_unificado.drop(columns=['Produto'])
+        if 'Lançamento' in df_vendas_unificado.columns:
+            produto_base = produto_base.fillna(df_vendas_unificado['Lançamento'])
+            df_vendas_unificado = df_vendas_unificado.drop(columns=['Lançamento'])
+        if 'nome produto' in df_vendas_unificado.columns:
+            produto_base = produto_base.fillna(df_vendas_unificado['nome produto'])
+            df_vendas_unificado = df_vendas_unificado.drop(columns=['nome produto'])
 
-        # Remover colunas originais
-        df_vendas_unificado = df_vendas_unificado.drop(columns=colunas_produto_disponiveis)
+        df_vendas_unificado['produto'] = produto_base
+        logger.debug("  produto (preservado) + Produto/Lançamento/nome produto (fill)  produto")
+    else:
+        # 'produto' não existe ou está vazio, criar do zero
+        colunas_produto_disponiveis = []
+        if 'Produto' in df_vendas_unificado.columns:
+            colunas_produto_disponiveis.append('Produto')
+        if 'Lançamento' in df_vendas_unificado.columns:
+            colunas_produto_disponiveis.append('Lançamento')
+        if 'nome produto' in df_vendas_unificado.columns:
+            colunas_produto_disponiveis.append('nome produto')
 
-        # Log de quais colunas foram unificadas
-        if len(colunas_produto_disponiveis) > 1:
+        if colunas_produto_disponiveis:
+            df_vendas_unificado['produto'] = df_vendas_unificado[colunas_produto_disponiveis[0]]
+            for col in colunas_produto_disponiveis[1:]:
+                df_vendas_unificado['produto'] = df_vendas_unificado['produto'].fillna(df_vendas_unificado[col])
+            df_vendas_unificado = df_vendas_unificado.drop(columns=colunas_produto_disponiveis)
             logger.debug(f"  {' + '.join(colunas_produto_disponiveis)}  produto")
-        else:
-            logger.debug(f"  {colunas_produto_disponiveis[0]}  produto")
 
     # Unificar nome
     if 'Cliente Nome' in df_vendas_unificado.columns and 'nome contato' in df_vendas_unificado.columns:
@@ -196,6 +208,18 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
 
     date_format = '%d/%m/%Y %H:%M:%S'
 
+    # DEBUG: Verificar quais colunas de data existem
+    colunas_data_disponiveis = [c for c in df_vendas_unificado.columns if 'data' in c.lower() or c in ['Criado Em', 'Data Efetivado']]
+    if colunas_data_disponiveis:
+        logger.debug(f"  Colunas de data disponíveis: {colunas_data_disponiveis}")
+
+    # DEBUG: Verificar quais condições são atendidas
+    has_criado_em = 'Criado Em' in df_vendas_unificado.columns
+    has_data_aprovacao = 'data aprovacao' in df_vendas_unificado.columns
+    has_data_efetivado = 'Data Efetivado' in df_vendas_unificado.columns
+    has_data = 'data' in df_vendas_unificado.columns
+    logger.debug(f"  Condições: Criado Em={has_criado_em}, data aprovacao={has_data_aprovacao}, Data Efetivado={has_data_efetivado}, data={has_data}")
+
     if 'Criado Em' in df_vendas_unificado.columns and 'data aprovacao' in df_vendas_unificado.columns and 'Data Efetivado' in df_vendas_unificado.columns:
         df_vendas_unificado['Criado Em'] = fix_datetime_format(df_vendas_unificado['Criado Em'])
         df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
@@ -231,6 +255,43 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
         df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], format=date_format, errors='coerce')
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Criado Em'])
         logger.debug("  Criado Em  data (formato BR corrigido)")
+    elif 'data aprovacao' in df_vendas_unificado.columns and 'data' in df_vendas_unificado.columns:
+        # Caso especial: AMBAS colunas existem (guru.xlsx histórico + API Guru)
+        # ESTRATÉGIA: Preservar 'data' existente (API), preencher vazios com 'data aprovacao' (guru.xlsx)
+        # DEBUG: Verificar max de cada coluna ANTES do merge
+        logger.debug(f"    Antes do merge:")
+        logger.debug(f"      'data' dtype: {df_vendas_unificado['data'].dtype}")
+        logger.debug(f"      'data' max: {pd.to_datetime(df_vendas_unificado['data'], errors='coerce').max()}")
+        logger.debug(f"      'data aprovacao' max: {pd.to_datetime(df_vendas_unificado['data aprovacao'], errors='coerce', dayfirst=True).max()}")
+        logger.debug(f"      'data' non-null: {df_vendas_unificado['data'].notna().sum()}")
+        logger.debug(f"      'data aprovacao' non-null: {df_vendas_unificado['data aprovacao'].notna().sum()}")
+
+        # IMPORTANTE: NÃO sobrescrever 'data' existente!
+        # Apenas preencher linhas onde 'data' está vazia
+
+        # 1. Preservar 'data' existente (já datetime para API)
+        data_preservada = df_vendas_unificado['data'].copy()
+
+        # 2. Converter 'data aprovacao' para preencher vazios
+        df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
+        data_aprovacao_dt = pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce')
+
+        # 3. Preencher apenas onde 'data' está vazia
+        # CUIDADO: não usar fillna() diretamente pois pode converter dtype
+        # Usar mask para selecionar apenas linhas vazias
+        mask_vazio = data_preservada.isna()
+        data_preservada[mask_vazio] = data_aprovacao_dt[mask_vazio]
+
+        # 4. Atribuir de volta
+        df_vendas_unificado['data'] = data_preservada
+
+        # DEBUG: Verificar max DEPOIS do merge
+        logger.debug(f"    Depois do merge:")
+        logger.debug(f"      'data' max: {df_vendas_unificado['data'].max()}")
+        logger.debug(f"      'data' non-null: {df_vendas_unificado['data'].notna().sum()}")
+
+        df_vendas_unificado = df_vendas_unificado.drop(columns=['data aprovacao'])
+        logger.debug("  data (preservada) + data aprovacao (fill vazios)  data")
     elif 'data aprovacao' in df_vendas_unificado.columns:
         df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
         df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce')
@@ -274,6 +335,13 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
     colunas_depois = len(df_vendas_unificado.columns)
     colunas_unificadas = colunas_antes - colunas_depois
 
+    # DEBUG: Verificar estado FINAL antes de retornar
+    if 'data' in df_vendas_unificado.columns:
+        logger.debug(f"  DEBUG FIM unificar_colunas_vendas:")
+        logger.debug(f"    'data' dtype: {df_vendas_unificado['data'].dtype}")
+        logger.debug(f"    'data' non-null: {df_vendas_unificado['data'].notna().sum()}/{len(df_vendas_unificado)}")
+        logger.debug(f"    'data' max: {df_vendas_unificado['data'].max()}")
+
     logger.info(f"  Vendas - Colunas antes: {colunas_antes}, depois: {colunas_depois} (unificadas: {colunas_unificadas})")
     logger.info("")
 
@@ -294,6 +362,10 @@ def aplicar_filtro_temporal(
     Returns:
         DataFrame de vendas filtrado
     """
+    # DEBUG: Estado ANTES do filtro temporal
+    if 'data' in df_vendas.columns:
+        logger.debug(f"  DEBUG ANTES filtro_temporal: data max = {df_vendas['data'].max()}, non-null = {df_vendas['data'].notna().sum()}")
+
     df_vendas_filtrado = df_vendas.copy()
 
     if 'data' in df_vendas_filtrado.columns and 'Data' in df_pesquisa.columns:
@@ -334,6 +406,10 @@ def aplicar_filtro_temporal(
             logger.debug(f"Validação temporal OK: nenhuma venda futura detectada (max lead date: {data_max_leads.strftime('%Y-%m-%d')})")
     else:
         logger.debug("Validação temporal não aplicada (colunas de data não encontradas)")
+
+    # DEBUG: Estado DEPOIS do filtro temporal
+    if 'data' in df_vendas_filtrado.columns:
+        logger.debug(f"  DEBUG DEPOIS filtro_temporal: data max = {df_vendas_filtrado['data'].max()}, non-null = {df_vendas_filtrado['data'].notna().sum()}")
 
     return df_vendas_filtrado
 
@@ -490,6 +566,10 @@ def aplicar_filtro_status_risco(
     logger.info(f"  TOTAL FINAL: {after:,} vendas")
     logger.info("")
 
+    # DEBUG: Verificar max de 'data' antes de retornar
+    if 'data' in df_vendas_filtrado.columns:
+        logger.debug(f"  DEBUG FIM filtro_status_risco: data max = {df_vendas_filtrado['data'].max()}, non-null = {df_vendas_filtrado['data'].notna().sum()}")
+
     return df_vendas_filtrado
 
 
@@ -581,5 +661,9 @@ def filtrar_vendas_devclub(df_vendas: pd.DataFrame) -> pd.DataFrame:
         logger.debug("-" * 80)
 
     logger.info("")
+
+    # DEBUG: Verificar max de 'data' antes de retornar
+    if 'data' in df_vendas_devclub.columns:
+        logger.debug(f"  DEBUG FIM filtrar_vendas_devclub: data max = {df_vendas_devclub['data'].max()}, non-null = {df_vendas_devclub['data'].notna().sum()}")
 
     return df_vendas_devclub

@@ -587,6 +587,7 @@ def read_all_training_sources(
                 guru_formatted['valor'] = guru_df['sale_value']
                 guru_formatted['utm_campaign'] = guru_df.get('utm_campaign', '')
                 guru_formatted['produto'] = 'DevClub'  # Produto padrão
+                guru_formatted['status'] = guru_df.get('status', 'Aprovada')  # Status para filtro (já pré-filtrado pela API)
                 guru_formatted['arquivo_origem'] = '[API] Guru'
 
                 api_data['[API] Vendas Guru'] = {
