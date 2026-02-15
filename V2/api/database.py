@@ -4,7 +4,7 @@ Gerencia conexão com Cloud SQL e operações CRUD
 """
 
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Text, TIMESTAMP, func
+from sqlalchemy import create_engine, Column, Integer, String, Text, TIMESTAMP, DECIMAL, func
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
@@ -53,6 +53,24 @@ class LeadCAPI(Base):
     # Outros
     tem_comp = Column(String(50))
 
+    # Dados da Pesquisa (mapeados do Google Sheets)
+    genero = Column(String(50))
+    idade = Column(String(50))
+    ocupacao = Column(String(255))
+    faixa_salarial = Column(String(100))
+    cartao_credito = Column(String(50))
+    interesse_evento = Column(Text)
+    estudou_programacao = Column(String(50))
+    pretende_faculdade = Column(String(100))
+    investiu_curso_online = Column(String(50))
+    interesse_programacao = Column(Text)
+    cidade = Column(String(100))
+
+    # ML Scores
+    lead_score = Column(DECIMAL(10, 8))
+    decil = Column(String(10))
+    scored_at = Column(TIMESTAMP)
+
     # Controle CAPI
     capi_sent_at = Column(TIMESTAMP, nullable=True, index=True)  # Quando foi enviado para CAPI
     capi_response_status = Column(String(20), nullable=True)  # "success", "error", "partial"
@@ -85,6 +103,20 @@ class LeadCAPI(Base):
             'utm_term': self.utm_term,
             'utm_content': self.utm_content,
             'tem_comp': self.tem_comp,
+            'genero': self.genero,
+            'idade': self.idade,
+            'ocupacao': self.ocupacao,
+            'faixa_salarial': self.faixa_salarial,
+            'cartao_credito': self.cartao_credito,
+            'interesse_evento': self.interesse_evento,
+            'estudou_programacao': self.estudou_programacao,
+            'pretende_faculdade': self.pretende_faculdade,
+            'investiu_curso_online': self.investiu_curso_online,
+            'interesse_programacao': self.interesse_programacao,
+            'cidade': self.cidade,
+            'lead_score': float(self.lead_score) if self.lead_score else None,
+            'decil': self.decil,
+            'scored_at': self.scored_at.isoformat() if self.scored_at else None,
             'capi_sent_at': self.capi_sent_at.isoformat() if self.capi_sent_at else None,
             'capi_response_status': self.capi_response_status,
             'capi_response_message': self.capi_response_message,

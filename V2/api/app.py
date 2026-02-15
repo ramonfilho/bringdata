@@ -24,6 +24,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Importar pipeline V2
 from src.production_pipeline import LeadScoringPipeline
+from src.features.engineering import create_derived_features
+from src.features.encoding import apply_categorical_encoding
 
 # Importar integrações
 from api.meta_integration import MetaAdsIntegration, enrich_utm_analysis_with_costs, enrich_utm_with_hierarchy
@@ -35,6 +37,8 @@ from api.database import get_db, init_database, create_lead_capi, count_leads, c
 from api.capi_integration import send_batch_events
 from fastapi import Depends, Request
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+from src.model.decil_thresholds import atribuir_decil_por_threshold
 
 # Padrões de UTMs inválidos (bare names e genéricos)
 BARE_CAMPAIGN_NAMES = ['DEVLF', 'devlf']                      # Prefixos incompletos
@@ -503,6 +507,19 @@ class LeadCaptureRequest(BaseModel):
     # Outros
     tem_comp: Optional[str] = None
 
+    # Dados da Pesquisa (Página 2)
+    genero: Optional[str] = None
+    idade: Optional[str] = None
+    ocupacao: Optional[str] = None
+    faixa_salarial: Optional[str] = None
+    cartao_credito: Optional[str] = None
+    interesse_evento: Optional[str] = None
+    estudou_programacao: Optional[str] = None
+    pretende_faculdade: Optional[str] = None
+    investiu_curso_online: Optional[str] = None
+    interesse_programacao: Optional[str] = None
+    cidade: Optional[str] = None
+
 @app.post("/webhook/lead_capture")
 async def webhook_lead_capture(
     request: Request,
@@ -547,7 +564,19 @@ async def webhook_lead_capture(
             'utm_campaign': lead_data.utm_campaign,
             'utm_term': lead_data.utm_term,
             'utm_content': lead_data.utm_content,
-            'tem_comp': lead_data.tem_comp
+            'tem_comp': lead_data.tem_comp,
+            # Dados da pesquisa
+            'genero': lead_data.genero,
+            'idade': lead_data.idade,
+            'ocupacao': lead_data.ocupacao,
+            'faixa_salarial': lead_data.faixa_salarial,
+            'cartao_credito': lead_data.cartao_credito,
+            'interesse_evento': lead_data.interesse_evento,
+            'estudou_programacao': lead_data.estudou_programacao,
+            'pretende_faculdade': lead_data.pretende_faculdade,
+            'investiu_curso_online': lead_data.investiu_curso_online,
+            'interesse_programacao': lead_data.interesse_programacao,
+            'cidade': lead_data.cidade
         }
 
         # Salvar no banco
@@ -555,11 +584,124 @@ async def webhook_lead_capture(
 
         logger.info(f"✅ Lead capturado: {lead_data.email} (ID: {lead_record.id}, Event ID: {lead_data.event_id})")
 
+        # ================================================================
+        # NOVO: SCORING ML + CAPI (se tem dados da pesquisa)
+        # ================================================================
+        has_survey_data = any([
+            lead_data.genero, lead_data.idade, lead_data.ocupacao,
+            lead_data.faixa_salarial, lead_data.cartao_credito,
+            lead_data.interesse_evento, lead_data.estudou_programacao,
+            lead_data.pretende_faculdade, lead_data.investiu_curso_online,
+            lead_data.interesse_programacao, lead_data.cidade
+        ])
+
+        if has_survey_data:
+            try:
+                logger.info(f"🔮 Gerando score ML para {lead_data.email}...")
+
+                # 1. MAPEAMENTO: PostgreSQL → Google Sheets (nomes de colunas)
+                # O modelo foi treinado com nomes originais do Sheets
+                lead_dict_raw = lead_record.to_dict()
+
+                # Mapeamento de colunas normalizadas → nomes do Sheets
+                column_mapping = {
+                    'email': 'E-mail',
+                    'name': 'Nome Completo',
+                    'phone': 'Telefone',
+                    'genero': 'O seu gênero:',
+                    'idade': 'Qual a sua idade?',
+                    'ocupacao': 'O que você faz atualmente?',
+                    'faixa_salarial': 'Atualmente, qual a sua faixa salarial?',
+                    'cartao_credito': 'Você possui cartão de crédito?',
+                    'interesse_evento': 'O que mais você quer ver no evento?',
+                    'estudou_programacao': 'Já estudou programação?',
+                    'pretende_faculdade': 'Você já fez/faz/pretende fazer faculdade?',
+                    'investiu_curso_online': 'Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?',
+                    'interesse_programacao': 'O que mais te chama atenção na profissão de Programador?',
+                    'cidade': 'cidade'
+                }
+
+                # Aplicar mapeamento
+                lead_dict_mapped = {}
+                for col_pg, col_sheets in column_mapping.items():
+                    if col_pg in lead_dict_raw:
+                        lead_dict_mapped[col_sheets] = lead_dict_raw[col_pg]
+
+                # 2. SCORING - Usar pipeline existente com nomes do Sheets
+                lead_df = pd.DataFrame([lead_dict_mapped])
+                logger.info(f"   DataFrame criado: {lead_df.shape}, colunas={list(lead_df.columns)[:10]}")
+
+                # DEBUG: Verificar se tem coluna Data (pode estar filtrando)
+                if 'Data' in lead_df.columns:
+                    logger.info(f"   Coluna Data: {lead_df['Data'].iloc[0] if len(lead_df) > 0 else 'vazio'}")
+
+                # Processar dados (feature engineering + encoding)
+                pipeline.data = lead_df
+                pipeline.original_data = lead_df.copy()
+
+                # Aplicar apenas transformações essenciais (SEM filtros de data/duplicatas)
+                logger.info("   Aplicando feature engineering...")
+                processed_df = create_derived_features(lead_df)
+
+                logger.info("   Aplicando encoding categórico...")
+                processed_df = apply_categorical_encoding(processed_df)
+
+                logger.info(f"   DataFrame processado: {processed_df.shape}")
+
+                # Fazer predição com dados processados
+                result_df = pipeline.predictor.predict(processed_df, original_df=lead_df)
+
+                # 3. Calcular decil usando thresholds do modelo
+                lead_score_value = float(result_df['lead_score'].iloc[0])
+                thresholds = pipeline.predictor.metadata.get('decil_thresholds', {}).get('thresholds', {})
+
+                if thresholds:
+                    decil_value = atribuir_decil_por_threshold(lead_score_value, thresholds)
+                else:
+                    logger.warning("⚠️ Thresholds não encontrados no modelo, usando decil padrão")
+                    decil_value = "D05"  # Fallback
+
+                # 4. Atualizar banco com score + decil
+                lead_record.lead_score = lead_score_value
+                lead_record.decil = str(decil_value)
+                lead_record.scored_at = func.now()
+                db.commit()
+                db.refresh(lead_record)
+
+                logger.info(f"✅ Score gerado: {lead_record.lead_score:.4f} ({lead_record.decil})")
+
+                # 3. CAPI - Usar função existente (batch com 1 lead)
+                logger.info(f"📤 Enviando evento CAPI para {lead_data.email}...")
+
+                capi_result = send_batch_events([{
+                    'email': lead_record.email,
+                    'phone': lead_record.phone,
+                    'first_name': lead_record.first_name,
+                    'last_name': lead_record.last_name,
+                    'lead_score': lead_record.lead_score,
+                    'decil': lead_record.decil,
+                    'event_id': lead_record.event_id,
+                    'fbp': lead_record.fbp,
+                    'fbc': lead_record.fbc,
+                    'user_agent': lead_record.user_agent,
+                    'client_ip': lead_record.client_ip,
+                    'event_source_url': lead_record.event_source_url
+                }], db)
+
+                logger.info(f"✅ CAPI enviado: {capi_result.get('success', 0)}/{capi_result.get('total', 0)} eventos")
+
+            except Exception as e:
+                logger.error(f"⚠️ Erro ao processar ML/CAPI (lead salvo): {str(e)}")
+                # Não falhar o webhook - lead já está salvo no banco
+
         return {
             "status": "success",
             "message": "Lead capturado com sucesso",
             "lead_id": lead_record.id,
-            "event_id": lead_data.event_id
+            "event_id": lead_data.event_id,
+            "scored": has_survey_data,
+            "lead_score": float(lead_record.lead_score) if lead_record.lead_score else None,
+            "decil": lead_record.decil
         }
 
     except Exception as e:
