@@ -169,6 +169,7 @@ async def root():
         "endpoints": {
             "health": "/health",
             "predict": "/predict/batch (POST)",
+            "model_info": "/model/info (GET)",
             "docs": "/docs"
         }
     }
@@ -520,6 +521,42 @@ class LeadCaptureRequest(BaseModel):
     interesse_programacao: Optional[str] = None
     cidade: Optional[str] = None
 
+class UpdateSurveyRequest(BaseModel):
+    """Dados da Página 2 - Pesquisa (atualiza lead existente)"""
+    # Identificação (para buscar lead existente)
+    email: str
+
+    # Dados básicos (opcionais - vindos da URL da Página 1)
+    name: Optional[str] = None
+    phone: Optional[str] = None
+
+    # Dados CAPI (Página 2 também captura fbp/fbc)
+    fbp: Optional[str] = None
+    fbc: Optional[str] = None
+    event_id: str
+    user_agent: Optional[str] = None
+    event_source_url: Optional[str] = None
+
+    # UTMs
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_term: Optional[str] = None
+    utm_content: Optional[str] = None
+
+    # Dados da Pesquisa (obrigatórios na Página 2)
+    genero: Optional[str] = None
+    idade: Optional[str] = None
+    ocupacao: Optional[str] = None
+    faixa_salarial: Optional[str] = None
+    cartao_credito: Optional[str] = None
+    interesse_evento: Optional[str] = None
+    estudou_programacao: Optional[str] = None
+    pretende_faculdade: Optional[str] = None
+    investiu_curso_online: Optional[str] = None
+    interesse_programacao: Optional[str] = None
+    cidade: Optional[str] = None
+
 @app.post("/webhook/lead_capture")
 async def webhook_lead_capture(
     request: Request,
@@ -531,12 +568,13 @@ async def webhook_lead_capture(
     Chamado pelo formulário frontend após envio do lead
     """
     try:
-        # Verificar se é página de parabéns - IGNORAR para evitar duplicatas
-        # Página de Parabéns captura dados incompletos (sem first_name/last_name)
+        # Verificar se é página de parabéns ANTIGA - IGNORAR para evitar duplicatas
+        # Página de Parabéns antiga captura dados incompletos (sem first_name/last_name)
         # Lead já foi capturado corretamente na LP (inscricao)
+        # IMPORTANTE: Página v2 (parabens-psq-devf-v2) usa endpoint separado /webhook/update_survey
         event_url = lead_data.event_source_url or ''
-        if 'parabens' in event_url.lower():
-            logger.info(f"⏭️ Ignorando captura da página de Parabéns: {lead_data.email}")
+        if 'parabens' in event_url.lower() and 'v2' not in event_url.lower():
+            logger.info(f"⏭️ Ignorando captura da página de Parabéns antiga: {lead_data.email}")
             return {
                 "status": "success",
                 "message": "Captura já realizada na LP",
@@ -582,20 +620,16 @@ async def webhook_lead_capture(
         # Salvar no banco
         lead_record = create_lead_capi(db, lead_dict)
 
-        logger.info(f"✅ Lead capturado: {lead_data.email} (ID: {lead_record.id}, Event ID: {lead_data.event_id})")
+        logger.info(f"✅ Lead capturado na Página 1 (Inscrição): {lead_data.email} (ID: {lead_record.id}, Event ID: {lead_data.event_id})")
 
         # ================================================================
-        # NOVO: SCORING ML + CAPI (se tem dados da pesquisa)
+        # NOTA: Scoring ML será feito no endpoint /webhook/update_survey
+        # (Página 2 - Pesquisa) quando o lead preencher os dados da pesquisa
         # ================================================================
-        has_survey_data = any([
-            lead_data.genero, lead_data.idade, lead_data.ocupacao,
-            lead_data.faixa_salarial, lead_data.cartao_credito,
-            lead_data.interesse_evento, lead_data.estudou_programacao,
-            lead_data.pretende_faculdade, lead_data.investiu_curso_online,
-            lead_data.interesse_programacao, lead_data.cidade
-        ])
 
-        if has_survey_data:
+        # DEPRECATED: Lógica antiga que tentava fazer scoring aqui
+        # Página 1 nunca tem dados de pesquisa, então isso nunca executava
+        if False:  # Desabilitado - mantido apenas para referência
             try:
                 logger.info(f"🔮 Gerando score ML para {lead_data.email}...")
 
@@ -644,7 +678,9 @@ async def webhook_lead_capture(
                 processed_df = create_derived_features(lead_df)
 
                 logger.info("   Aplicando encoding categórico...")
-                processed_df = apply_categorical_encoding(processed_df)
+                # Passar mlflow_run_id para garantir que todas as features esperadas sejam criadas
+                mlflow_run_id = pipeline.predictor.mlflow_run_id if hasattr(pipeline.predictor, 'mlflow_run_id') else None
+                processed_df = apply_categorical_encoding(processed_df, mlflow_run_id=mlflow_run_id)
 
                 logger.info(f"   DataFrame processado: {processed_df.shape}")
 
@@ -696,17 +732,240 @@ async def webhook_lead_capture(
 
         return {
             "status": "success",
-            "message": "Lead capturado com sucesso",
+            "message": "Lead capturado na Página 1 (Inscrição) - aguardando dados da pesquisa",
             "lead_id": lead_record.id,
             "event_id": lead_data.event_id,
-            "scored": has_survey_data,
-            "lead_score": float(lead_record.lead_score) if lead_record.lead_score else None,
-            "decil": lead_record.decil
+            "email": lead_record.email,
+            "next_step": "Página 2 deve chamar /webhook/update_survey"
         }
 
     except Exception as e:
         logger.error(f"❌ Erro ao capturar lead: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro ao capturar lead: {str(e)}")
+
+@app.post("/webhook/update_survey")
+async def webhook_update_survey(
+    request: Request,
+    survey_data: UpdateSurveyRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Webhook para atualizar lead com dados da Página 2 - Pesquisa
+
+    Fluxo:
+    1. Busca lead existente por email (criado na Página 1)
+    2. Atualiza com dados da pesquisa
+    3. Gera score ML + decil
+    4. Envia para CAPI
+
+    Chamado pelo formulário da Página 2 após preenchimento da pesquisa
+    """
+    try:
+        from api.database import get_lead_by_email
+
+        logger.info(f"📊 Página 2 - Atualizando lead com dados da pesquisa: {survey_data.email}")
+
+        # 1. BUSCAR LEAD EXISTENTE
+        existing_lead = get_lead_by_email(db, survey_data.email)
+
+        if not existing_lead:
+            logger.error(f"❌ Lead não encontrado: {survey_data.email}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Lead não encontrado. Por favor, preencha a Página 1 primeiro."
+            )
+
+        logger.info(f"✅ Lead encontrado: ID {existing_lead.id} (criado em {existing_lead.created_at})")
+
+        # 2. ATUALIZAR COM DADOS DA PESQUISA
+        # Capturar IP do cliente
+        client_ip = request.headers.get('X-Forwarded-For', request.client.host).split(',')[0].strip()
+
+        # Atualizar campos de pesquisa
+        existing_lead.genero = survey_data.genero
+        existing_lead.idade = survey_data.idade
+        existing_lead.ocupacao = survey_data.ocupacao
+        existing_lead.faixa_salarial = survey_data.faixa_salarial
+        existing_lead.cartao_credito = survey_data.cartao_credito
+        existing_lead.interesse_evento = survey_data.interesse_evento
+        existing_lead.estudou_programacao = survey_data.estudou_programacao
+        existing_lead.pretende_faculdade = survey_data.pretende_faculdade
+        existing_lead.investiu_curso_online = survey_data.investiu_curso_online
+        existing_lead.interesse_programacao = survey_data.interesse_programacao
+        existing_lead.cidade = survey_data.cidade
+
+        # Atualizar dados CAPI da Página 2 (podem ser diferentes da Página 1)
+        if survey_data.fbp:
+            existing_lead.fbp = survey_data.fbp
+        if survey_data.fbc:
+            existing_lead.fbc = survey_data.fbc
+        if survey_data.user_agent:
+            existing_lead.user_agent = survey_data.user_agent
+        if survey_data.event_source_url:
+            existing_lead.event_source_url = survey_data.event_source_url
+
+        # Salvar alterações
+        db.commit()
+        db.refresh(existing_lead)
+
+        logger.info(f"✅ Lead atualizado com dados da pesquisa: {survey_data.email}")
+
+        # 3. SCORING ML + CAPI
+        try:
+            logger.info(f"🔮 Gerando score ML para {survey_data.email}...")
+
+            # Verificar se tem dados mínimos para scoring
+            has_survey_data = any([
+                existing_lead.genero, existing_lead.idade, existing_lead.ocupacao,
+                existing_lead.faixa_salarial, existing_lead.cartao_credito,
+                existing_lead.interesse_evento, existing_lead.estudou_programacao,
+                existing_lead.pretende_faculdade, existing_lead.investiu_curso_online,
+                existing_lead.interesse_programacao, existing_lead.cidade
+            ])
+
+            if not has_survey_data:
+                logger.warning(f"⚠️ Dados de pesquisa incompletos para {survey_data.email}")
+                return {
+                    "status": "success",
+                    "message": "Lead atualizado, mas sem dados suficientes para scoring",
+                    "lead_id": existing_lead.id,
+                    "scored": False
+                }
+
+            # Preparar dados para ML (com mapeamento de colunas)
+            lead_dict_raw = existing_lead.to_dict()
+
+            # Mapeamento: PostgreSQL → Google Sheets (nomes originais do modelo)
+            column_mapping = {
+                'email': 'E-mail',
+                'name': 'Nome Completo',
+                'phone': 'Telefone',
+                'genero': 'O seu gênero:',
+                'idade': 'Qual a sua idade?',
+                'ocupacao': 'O que você faz atualmente?',
+                'faixa_salarial': 'Atualmente, qual a sua faixa salarial?',
+                'cartao_credito': 'Você possui cartão de crédito?',
+                'interesse_evento': 'O que mais você quer ver no evento?',
+                'estudou_programacao': 'Já estudou programação?',
+                'pretende_faculdade': 'Você já fez/faz/pretende fazer faculdade?',
+                'investiu_curso_online': 'Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?',
+                'interesse_programacao': 'O que mais te chama atenção na profissão de Programador?',
+                'cidade': 'cidade',
+                # Campos adicionados para fix de scoring (features faltantes)
+                'created_at': 'Data',
+                'utm_source': 'Source',
+                'utm_medium': 'Medium',
+                'utm_campaign': 'Campaign',
+                'utm_term': 'Term',
+                'tem_comp': 'Tem computador/notebook?'
+            }
+
+            # Aplicar mapeamento
+            lead_dict_mapped = {}
+            for col_pg, col_sheets in column_mapping.items():
+                if col_pg in lead_dict_raw:
+                    lead_dict_mapped[col_sheets] = lead_dict_raw[col_pg]
+
+            # Criar DataFrame com nomes do Sheets
+            lead_df = pd.DataFrame([lead_dict_mapped])
+            logger.info(f"   DataFrame criado: {lead_df.shape}, colunas={list(lead_df.columns)[:10]}")
+
+            # Processar dados (feature engineering + encoding)
+            pipeline.data = lead_df
+            pipeline.original_data = lead_df.copy()
+
+            logger.info("   Aplicando feature engineering...")
+            processed_df = create_derived_features(lead_df)
+
+            logger.info("   Aplicando encoding categórico...")
+            # Passar mlflow_run_id OU model_path para garantir features corretas
+            if hasattr(pipeline.predictor, 'mlflow_run_id') and pipeline.predictor.mlflow_run_id:
+                processed_df = apply_categorical_encoding(processed_df, mlflow_run_id=pipeline.predictor.mlflow_run_id)
+            elif hasattr(pipeline.predictor, 'model_path') and pipeline.predictor.model_path:
+                processed_df = apply_categorical_encoding(processed_df, model_path=str(pipeline.predictor.model_path))
+            else:
+                processed_df = apply_categorical_encoding(processed_df)
+
+            logger.info(f"   DataFrame processado: {processed_df.shape}")
+
+            # Fazer predição
+            result_df = pipeline.predictor.predict(processed_df, original_df=lead_df)
+
+            # Calcular decil usando thresholds do modelo
+            lead_score_value = float(result_df['lead_score'].iloc[0])
+            thresholds = pipeline.predictor.metadata.get('decil_thresholds', {}).get('thresholds', {})
+
+            if thresholds:
+                decil_value = atribuir_decil_por_threshold(lead_score_value, thresholds)
+            else:
+                logger.warning("⚠️ Thresholds não encontrados, usando decil padrão")
+                decil_value = "D05"
+
+            # Atualizar banco com score + decil
+            existing_lead.lead_score = lead_score_value
+            existing_lead.decil = str(decil_value)
+            existing_lead.scored_at = func.now()
+            db.commit()
+            db.refresh(existing_lead)
+
+            logger.info(f"✅ Score gerado: {existing_lead.lead_score:.4f} ({existing_lead.decil})")
+
+            # 4. ENVIAR PARA CAPI
+            logger.info(f"📤 Enviando evento CAPI para {survey_data.email}...")
+
+            # Usar timestamp atual (não created_at) para evitar problema de relógio adiantado
+            import time
+            event_timestamp = int(time.time()) - 60  # Subtrair 60 segundos para garantir que não está no futuro
+
+            capi_result = send_batch_events([{
+                'email': existing_lead.email,
+                'phone': existing_lead.phone,
+                'first_name': existing_lead.first_name,
+                'last_name': existing_lead.last_name,
+                'lead_score': existing_lead.lead_score,
+                'decil': existing_lead.decil,
+                'event_id': survey_data.event_id,  # Event ID da Página 2
+                'fbp': existing_lead.fbp,
+                'fbc': existing_lead.fbc,
+                'user_agent': existing_lead.user_agent,
+                'client_ip': client_ip,
+                'event_source_url': existing_lead.event_source_url,
+                'event_timestamp': event_timestamp,  # Timestamp do lead original
+                'survey_data': {  # Dados da pesquisa para matching na Meta
+                    'genero': existing_lead.genero,
+                    'cidade': existing_lead.cidade
+                }
+            }], db)
+
+            logger.info(f"✅ CAPI enviado: {capi_result.get('success', 0)}/{capi_result.get('total', 0)} eventos")
+
+            return {
+                "status": "success",
+                "message": "Lead atualizado com dados da pesquisa + scoring ML + CAPI enviado",
+                "lead_id": existing_lead.id,
+                "event_id": survey_data.event_id,
+                "scored": True,
+                "lead_score": float(existing_lead.lead_score),
+                "decil": existing_lead.decil,
+                "capi_sent": capi_result.get('success', 0) > 0
+            }
+
+        except Exception as e:
+            logger.error(f"⚠️ Erro ao processar ML/CAPI: {str(e)}")
+            # Não falhar o webhook - lead já está atualizado com dados da pesquisa
+            return {
+                "status": "partial_success",
+                "message": "Lead atualizado, mas erro ao gerar score ou enviar CAPI",
+                "lead_id": existing_lead.id,
+                "error": str(e),
+                "scored": False
+            }
+
+    except HTTPException:
+        raise  # Re-lançar HTTPException (404 se lead não encontrado)
+    except Exception as e:
+        logger.error(f"❌ Erro ao atualizar lead com pesquisa: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao atualizar lead: {str(e)}")
 
 @app.get("/webhook/lead_capture/stats")
 async def lead_capture_stats(
