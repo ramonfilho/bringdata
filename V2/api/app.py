@@ -870,26 +870,25 @@ async def webhook_update_survey(
             lead_df = pd.DataFrame([lead_dict_mapped])
             logger.info(f"   DataFrame criado: {lead_df.shape}, colunas={list(lead_df.columns)[:10]}")
 
-            # Processar dados (feature engineering + encoding)
-            pipeline.data = lead_df
-            pipeline.original_data = lead_df.copy()
+            # Usar pipeline.run() completo (igual /predict/batch)
+            # Isso garante que TODAS as transformações de dados sejam aplicadas
+            temp_file = None
+            try:
+                # Salvar em CSV temporário
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp:
+                    lead_df.to_csv(tmp, index=False)
+                    temp_file = tmp.name
 
-            logger.info("   Aplicando feature engineering...")
-            processed_df = create_derived_features(lead_df)
+                logger.info("   Executando pipeline completo...")
+                result_df = pipeline.run(temp_file, with_predictions=True)
 
-            logger.info("   Aplicando encoding categórico...")
-            # Passar mlflow_run_id OU model_path para garantir features corretas
-            if hasattr(pipeline.predictor, 'mlflow_run_id') and pipeline.predictor.mlflow_run_id:
-                processed_df = apply_categorical_encoding(processed_df, mlflow_run_id=pipeline.predictor.mlflow_run_id)
-            elif hasattr(pipeline.predictor, 'model_path') and pipeline.predictor.model_path:
-                processed_df = apply_categorical_encoding(processed_df, model_path=str(pipeline.predictor.model_path))
-            else:
-                processed_df = apply_categorical_encoding(processed_df)
+                if result_df is None or len(result_df) == 0:
+                    raise HTTPException(status_code=500, detail="Pipeline retornou resultado vazio")
 
-            logger.info(f"   DataFrame processado: {processed_df.shape}")
-
-            # Fazer predição
-            result_df = pipeline.predictor.predict(processed_df, original_df=lead_df)
+            finally:
+                # Limpar arquivo temporário
+                if temp_file and os.path.exists(temp_file):
+                    os.remove(temp_file)
 
             # Calcular decil usando thresholds do modelo
             lead_score_value = float(result_df['lead_score'].iloc[0])
