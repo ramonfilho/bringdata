@@ -61,7 +61,7 @@ def load_ordinal_mappings_from_training(model_path: str) -> Dict[str, list]:
     return ordinal_mappings
 
 
-def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", medium_strategy: str = "binary_top3", model_path: str = None) -> pd.DataFrame:
+def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", medium_strategy: str = "binary_top3", model_path: str = None, mlflow_run_id: str = None) -> pd.DataFrame:
     """
     Aplica encoding em um dataset específico.
 
@@ -71,10 +71,13 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
         medium_strategy: Estratégia para Medium
             - 'binary_top3': Features binárias para 3 categorias mais estáveis (PADRÃO)
             - 'full': One-hot completo (comportamento antigo)
-        model_path: Caminho para pasta do modelo (opcional)
+        mlflow_run_id: ID do MLflow run (preferencial)
+            - Se fornecido, carrega feature_registry direto do MLflow
+            - Garante todas as features esperadas pelo modelo
+        model_path: Caminho para pasta do modelo (DEPRECATED - usar mlflow_run_id)
+            - Mantido apenas para backward compatibility
             - Se fornecido, carrega mapeamentos ordinais de categorias_esperadas.json
             - Valida features geradas contra features_ordenadas.json do modelo
-            - Se não fornecido, usa mapeamentos hardcoded e pula validação
 
     Função EXATA copiada da Seção 20 do notebook original, com suporte a medium_strategy.
     """
@@ -266,47 +269,82 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
 
     logger.info(f"  Total de colunas final: {len(df_encoded.columns)}")
 
-    # VALIDAÇÃO DE FEATURES (OPCIONAL - se model_path fornecido)
-    # Carrega ordem esperada dinamicamente do arquivo features_ordenadas.json do modelo
-    if model_path:
-        logger.info(f"\nValidando features com modelo: {model_path}")
+    # GARANTIR TODAS AS FEATURES ESPERADAS
+    # Prioriza MLflow (mlflow_run_id), fallback para model_path (backward compatibility)
+    ordem_esperada = None
 
-        features_file = Path(model_path) / "features_ordenadas_v1_devclub_rf_temporal_leads_single.json"
+    if mlflow_run_id:
+        logger.info(f"\nGarantindo features esperadas do MLflow run: {mlflow_run_id}")
 
-        if features_file.exists():
-            with open(features_file, 'r') as f:
-                features_data = json.load(f)
-                ordem_esperada = features_data.get('feature_names', [])
+        # Carregar do MLflow
+        mlruns_path = Path(__file__).parent.parent.parent / "mlruns" / "1" / mlflow_run_id / "artifacts"
+        feature_registry_file = mlruns_path / "feature_registry.json"
 
-            logger.info(f"  Carregada ordem esperada de {len(ordem_esperada)} features do modelo")
-
-            # Verificar compatibilidade
-            colunas_faltando = [col for col in ordem_esperada if col not in df_encoded.columns]
-            colunas_extras = [col for col in df_encoded.columns if col not in ordem_esperada]
-
-            if colunas_faltando:
-                logger.warning(f"    {len(colunas_faltando)} features esperadas pelo modelo estão ausentes:")
-                for col in colunas_faltando[:5]:
-                    logger.warning(f"    - {col}")
-                if len(colunas_faltando) > 5:
-                    logger.warning(f"    ... e mais {len(colunas_faltando) - 5}")
-
-            if colunas_extras:
-                logger.info(f"  ℹ  {len(colunas_extras)} features extras geradas (não usadas pelo modelo):")
-                for col in colunas_extras[:5]:
-                    logger.info(f"    + {col}")
-                if len(colunas_extras) > 5:
-                    logger.info(f"    ... e mais {len(colunas_extras) - 5}")
-
-            if not colunas_faltando and not colunas_extras:
-                logger.info(f"   Todas as features estão corretas e alinhadas com o modelo")
-            else:
-                logger.info(f"  ℹ  Features extras/faltando serão tratadas pelo prediction.py")
+        if feature_registry_file.exists():
+            try:
+                with open(feature_registry_file, 'r') as f:
+                    registry_data = json.load(f)
+                    if 'model_input_features' in registry_data and 'ordered_list' in registry_data['model_input_features']:
+                        ordem_esperada = registry_data['model_input_features']['ordered_list']
+                        logger.info(f"  ✅ Carregadas {len(ordem_esperada)} features do MLflow Feature Registry")
+            except Exception as e:
+                logger.warning(f"  ⚠️  Erro ao ler Feature Registry do MLflow: {e}")
         else:
-            logger.warning(f"    Arquivo features_ordenadas.json não encontrado em {model_path}")
-            logger.warning(f"  Pulando validação de features (não afeta predições)")
+            logger.warning(f"  ⚠️  Feature Registry não encontrado no MLflow: {feature_registry_file}")
+
+    elif model_path:
+        logger.info(f"\nGarantindo features esperadas do model_path (DEPRECATED): {model_path}")
+
+        # Tentar carregar do Feature Registry primeiro (novo formato)
+        feature_registry_file = Path(model_path) / f"feature_registry_{versao}_devclub_rf_temporal_leads_single.json"
+        features_ordenadas_file = Path(model_path) / f"features_ordenadas_{versao}_devclub_rf_temporal_leads_single.json"
+
+        # Prioridade 1: Feature Registry (novo formato com model_input_features.ordered_list)
+        if feature_registry_file.exists():
+            try:
+                with open(feature_registry_file, 'r') as f:
+                    registry_data = json.load(f)
+                    if 'model_input_features' in registry_data and 'ordered_list' in registry_data['model_input_features']:
+                        ordem_esperada = registry_data['model_input_features']['ordered_list']
+                        logger.info(f"  ✅ Carregadas {len(ordem_esperada)} features do Feature Registry")
+            except Exception as e:
+                logger.warning(f"  ⚠️  Erro ao ler Feature Registry: {e}")
+
+        # Prioridade 2: features_ordenadas.json (formato antigo, backward compatibility)
+        if ordem_esperada is None and features_ordenadas_file.exists():
+            try:
+                with open(features_ordenadas_file, 'r') as f:
+                    features_data = json.load(f)
+                    ordem_esperada = features_data.get('feature_names', [])
+                    logger.info(f"  ✅ Carregadas {len(ordem_esperada)} features de features_ordenadas.json")
+            except Exception as e:
+                logger.warning(f"  ⚠️  Erro ao ler features_ordenadas.json: {e}")
+
+    if ordem_esperada:
+        # Verificar features faltantes
+        colunas_faltando = [col for col in ordem_esperada if col not in df_encoded.columns]
+
+        if colunas_faltando:
+            logger.info(f"  📝 Criando {len(colunas_faltando)} features faltantes (preenchidas com 0)")
+            for col in colunas_faltando:
+                df_encoded[col] = 0
+
+        # Reordenar colunas para seguir ordem esperada + extras no final
+        colunas_ordenadas = [col for col in ordem_esperada if col in df_encoded.columns]
+        colunas_extras = [col for col in df_encoded.columns if col not in ordem_esperada]
+        if colunas_extras:
+            logger.info(f"  ℹ️  {len(colunas_extras)} features extras (serão ignoradas pelo modelo)")
+            colunas_ordenadas += colunas_extras
+
+        df_encoded = df_encoded[colunas_ordenadas]
+
+        logger.info(f"  ✅ Features alinhadas: {len(df_encoded.columns)} colunas ({len(ordem_esperada)} esperadas)")
     else:
-        logger.info(f"\nValidação de features pulada (model_path não fornecido)")
+        if not mlflow_run_id and not model_path:
+            logger.info(f"\nGarantia de features pulada (mlflow_run_id e model_path não fornecidos)")
+        else:
+            logger.warning(f"  ⚠️  Não foi possível carregar features esperadas")
+            logger.warning(f"  Predição pode falhar se features estiverem faltando")
 
     # TRATAMENTO DE NaN REMANESCENTES
     logger.info(f"\nVerificando NaN remanescentes após encoding...")
