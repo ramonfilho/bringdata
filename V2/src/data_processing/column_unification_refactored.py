@@ -315,23 +315,25 @@ def aplicar_filtro_temporal(
         vendas_depois = len(df_vendas_filtrado)
         vendas_removidas = vendas_antes - vendas_depois
 
-        # DEBUG: Detalhes do filtro temporal
+        # VALIDAÇÃO DE QUALIDADE: Alerta apenas se detectar vendas futuras (problema de dados)
         if vendas_removidas > 0:
-            logger.debug("")
-            logger.debug(f"Filtro temporal (até {data_max_leads.strftime('%Y-%m-%d')}):")
-            logger.debug(f"  Vendas antes: {vendas_antes:,}")
-            logger.debug(f"  Vendas após: {vendas_depois:,}")
-            logger.debug(f"  Vendas futuras removidas: {vendas_removidas:,}")
-            logger.debug(f"  (Data calculada dinamicamente dos leads)")
+            logger.warning("")
+            logger.warning("=" * 80)
+            logger.warning("⚠️  ALERTA DE QUALIDADE DE DADOS: VENDAS FUTURAS DETECTADAS")
+            logger.warning("=" * 80)
+            logger.warning(f"Data máxima dos leads: {data_max_leads.strftime('%Y-%m-%d')}")
+            logger.warning(f"Vendas antes da validação: {vendas_antes:,}")
+            logger.warning(f"Vendas com data futura (removidas): {vendas_removidas:,}")
+            logger.warning(f"Vendas após validação: {vendas_depois:,}")
+            logger.warning("")
+            logger.warning("AÇÃO RECOMENDADA: Verificar fonte de dados de vendas")
+            logger.warning("=" * 80)
+            logger.warning("")
         else:
-            logger.debug("Nenhuma venda futura encontrada (todas dentro do período dos leads)")
+            # Tudo OK - validação passou silenciosamente
+            logger.debug(f"Validação temporal OK: nenhuma venda futura detectada (max lead date: {data_max_leads.strftime('%Y-%m-%d')})")
     else:
-        logger.debug("Filtro temporal não aplicado (colunas de data não encontradas)")
-
-    # NORMAL: Data do filtro e vendas antes/depois
-    logger.info(f"  Filtro temporal aplicado: até {data_max_leads.strftime('%Y-%m-%d')}")
-    logger.info(f"  Vendas antes: {vendas_antes:,} | Vendas após: {vendas_depois:,}")
-    logger.info("")
+        logger.debug("Validação temporal não aplicada (colunas de data não encontradas)")
 
     return df_vendas_filtrado
 

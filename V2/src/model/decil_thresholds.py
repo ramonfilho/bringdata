@@ -169,8 +169,6 @@ def atribuir_decil_por_threshold(score: float, thresholds: dict) -> str:
         return d1_key
 
     # Caso extremo: buscar decil mais próximo
-    logger.warning(f"  Score {score:.4f} não encontrado em nenhum threshold, usando decil mais próximo")
-
     distancias = []
     for decil, limits in thresholds.items():
         mid_point = (limits['threshold_min'] + limits['threshold_max']) / 2

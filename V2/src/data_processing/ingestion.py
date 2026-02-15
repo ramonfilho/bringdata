@@ -560,7 +560,7 @@ def read_all_training_sources(
                 api_data['[API] Leads Google Sheets'] = {
                     '[LF] Pesquisa - API': sheets_formatted
                 }
-                logger.info(f"    {len(sheets_formatted)} leads carregados do Sheets")
+                # Resumo já mostrado por load_leads_from_sheets()
             else:
                 logger.warning("     Nenhum lead encontrado no Sheets")
 
@@ -592,7 +592,7 @@ def read_all_training_sources(
                 api_data['[API] Vendas Guru'] = {
                     'Sheet1': guru_formatted
                 }
-                logger.info(f"    {len(guru_formatted)} vendas carregadas da API Guru")
+                # Resumo já mostrado por load_guru_sales_from_api() com detalhes de filtros
             else:
                 logger.warning("     Nenhuma venda encontrada na API Guru")
 

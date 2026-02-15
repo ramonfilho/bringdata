@@ -91,16 +91,11 @@ def setup_output_logging(output_subdir='training'):
     log_prefix = 'retraining' if output_subdir == 'retraining' else 'training'
     log_path = os.path.join(outputs_dir, f'{log_prefix}_{timestamp}.log')
 
-    # Redirecionar stdout e stderr para Tee
-    tee = Tee(log_path)
-    sys.stdout = tee
-    sys.stderr = tee
-
-    return log_path, tee
+    return log_path
 
 
 
-def setup_logging(verbosity='normal'):
+def setup_logging(verbosity='normal', log_file=None):
     """
     Configura logging com níveis de verbosidade
 
@@ -110,6 +105,7 @@ def setup_logging(verbosity='normal'):
             - 'minimal': Warnings + erros
             - 'normal': Info + warnings + erros (padrão)
             - 'debug': Todos os logs incluindo análises detalhadas
+        log_file: Caminho do arquivo de log (opcional)
     """
     LEVEL_MAP = {
         'silent': logging.ERROR,
@@ -118,11 +114,27 @@ def setup_logging(verbosity='normal'):
         'debug': logging.DEBUG
     }
 
-    logging.basicConfig(
-        level=LEVEL_MAP.get(verbosity, logging.INFO),
-        format='%(asctime)s [%(levelname)-8s] %(message)s',
-        datefmt='%H:%M:%S'
-    )
+    # Limpar handlers existentes para evitar duplicação
+    root_logger = logging.getLogger()
+    root_logger.handlers = []
+
+    # Formato de log
+    log_format = '%(asctime)s [%(levelname)-8s] %(message)s'
+    date_format = '%Y-%m-%d %H:%M:%S'
+
+    # Handler para console (stdout)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+    root_logger.addHandler(console_handler)
+
+    # Handler para arquivo (se fornecido)
+    if log_file:
+        file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
+        file_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+        root_logger.addHandler(file_handler)
+
+    # Configurar nível
+    root_logger.setLevel(LEVEL_MAP.get(verbosity, logging.INFO))
 
 # Logger global do módulo
 logger = logging.getLogger(__name__)
@@ -156,24 +168,22 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         output_subdir: Subdiretório para logs ('training' ou 'retraining')
     """
 
-    # Configurar redirecionamento de output para arquivo PRIMEIRO
-    log_path, tee = setup_output_logging(output_subdir)
+    # Configurar caminho do arquivo de log
+    log_path = setup_output_logging(output_subdir)
 
-    # Configurar logging com nível de verbosidade DEPOIS do redirect
-    setup_logging(verbosity)
+    # Configurar logging com nível de verbosidade e arquivo de log
+    setup_logging(verbosity, log_file=log_path)
 
     # Backward compatibility: se save_files=True, ativar save_test_predictions
     if save_files and not save_test_predictions:
         logger.warning("⚠️  --save-files está DEPRECADO, use --save-test-predictions")
         save_test_predictions = True
 
-    # Registrar função de cleanup para fechar arquivo ao terminar
+    # Registrar função de cleanup para mensagem final
     def cleanup():
         logger.info("")
         logger.info(f" Pipeline concluído! Output salvo em: {log_path}")
-        tee.close()
-        sys.stdout = tee.terminal
-        sys.stderr = tee.terminal
+        # FileHandlers são fechados automaticamente ao finalizar
 
     atexit.register(cleanup)
 

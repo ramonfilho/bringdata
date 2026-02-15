@@ -235,8 +235,8 @@ class MonitoringOrchestrator:
         critical_summary = self._generate_critical_summary(alerts, funnel_metrics)
 
         # Mensagem de conclusão
-        print(f"\n Monitoramento concluído!")
-        print(f" Log completo salvo em: {log_path}\n")
+        logger.info(f"\n Monitoramento concluído!")
+        logger.info(f" Log completo salvo em: {log_path}\n")
 
         return {
             'total_alerts': len(alerts),
@@ -629,7 +629,7 @@ class MonitoringOrchestrator:
 
         # Juntar todas as linhas e printar + retornar
         summary = '\n'.join(lines)
-        print(summary)
+        logger.info(summary)
         return summary
 
     def _generate_summary(self, alerts: List[Alert]) -> Dict:

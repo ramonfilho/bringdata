@@ -119,11 +119,11 @@ class LeadDataLoader:
         if use_cache and cache_file.exists():
             file_age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
             if file_age_hours < cache_max_age_hours:
-                logger.info(f" Usando cache local (idade: {file_age_hours:.1f}h)")
-                logger.info(f"   Arquivo: {cache_file}")
+                logger.debug(f" Usando cache local (idade: {file_age_hours:.1f}h)")
+                logger.debug(f"   Arquivo: {cache_file}")
                 try:
                     df = pd.read_csv(cache_file, parse_dates=['Data'])
-                    logger.info(f"    {len(df)} linhas carregadas do cache")
+                    logger.debug(f"    {len(df)} linhas carregadas do cache")
 
                     # Filtrar por período se especificado
                     if start_date or end_date:
@@ -134,15 +134,20 @@ class LeadDataLoader:
                         if end_date:
                             end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1)
                             df = df[df['Data'] < end_dt]
-                        logger.info(f"    Filtrado por período: {original_len}  {len(df)} leads")
+                        logger.debug(f"    Filtrado por período: {original_len}  {len(df)} leads")
 
                     # Normalizar
-                    return self._normalize_leads_dataframe(df)
+                    df_normalized = self._normalize_leads_dataframe(df, show_summary=False)
+
+                    # Mostrar resumo final
+                    logger.info(f"    Google Sheets [cache]: {len(df_normalized)} leads carregados")
+
+                    return df_normalized
                 except Exception as e:
                     logger.warning(f"    Erro ao ler cache, recarregando do Sheets: {e}")
 
-        logger.info(f" Carregando leads do Google Sheets (produção)")
-        logger.info(f"   URL: {sheets_url[:50]}...")
+        logger.debug(f" Carregando leads do Google Sheets (produção)")
+        logger.debug(f"   URL: {sheets_url[:50]}...")
 
         try:
             # HÍBRIDO: Usar gspread APENAS para listar abas/GIDs, curl para baixar dados
@@ -151,7 +156,7 @@ class LeadDataLoader:
             import gspread
 
             # 1. Usar gspread para descobrir todas as abas e seus GIDs (operação rápida)
-            logger.info("    Descobrindo abas da planilha...")
+            logger.debug("    Descobrindo abas da planilha...")
             scopes = [
                 'https://www.googleapis.com/auth/spreadsheets.readonly',
                 'https://www.googleapis.com/auth/drive.readonly'
@@ -161,20 +166,22 @@ class LeadDataLoader:
             spreadsheet = gc.open_by_url(sheets_url)
 
             worksheets = spreadsheet.worksheets()
-            logger.info(f"    {len(worksheets)} abas encontradas")
+            logger.debug(f"    {len(worksheets)} abas encontradas")
 
             # Pegar apenas as N primeiras abas (índices 0, 1, ...)
             # Aba [0]: [LF] Pesquisa | Aba [1]: [LF] Pesquisa v2
             abas_pesquisa = worksheets[:num_sheets]
-            logger.info(f"    Usando {len(abas_pesquisa)} aba(s):")
+            logger.debug(f"    Usando {len(abas_pesquisa)} aba(s):")
             for idx, ws in enumerate(abas_pesquisa):
-                logger.info(f"      [{idx}] {ws.title} (gid={ws.id})")
+                logger.debug(f"      [{idx}] {ws.title} (gid={ws.id})")
 
             # 2. Baixar dados de cada aba via curl (workaround para gspread.get_all_values() travar)
             dfs_to_combine = []
+            tab_names = []
 
             for idx, ws in enumerate(abas_pesquisa):
-                logger.info(f"    Carregando aba [{idx}]: {ws.title} (gid={ws.id})")
+                logger.debug(f"    Carregando aba [{idx}]: {ws.title} (gid={ws.id})")
+                tab_names.append(ws.title)
 
                 url_aba = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={ws.id}"
 
@@ -186,17 +193,30 @@ class LeadDataLoader:
                     )
 
                     if result.returncode != 0:
-                        logger.warning(f"       Curl falhou para aba {ws.title}: {result.stderr.decode()}")
+                        stderr_msg = result.stderr.decode().strip() if result.stderr else "(sem mensagem de erro)"
+                        logger.error(f"       Curl falhou para aba {ws.title}:")
+                        logger.error(f"         Exit code: {result.returncode}")
+                        logger.error(f"         Stderr: {stderr_msg}")
+                        logger.error(f"         URL: {url_aba}")
                         os.unlink(tmp.name)
                         continue
 
                     try:
+                        # Verificar se arquivo foi baixado e tem conteúdo
+                        import os as os_module
+                        file_size = os_module.path.getsize(tmp.name)
+                        if file_size == 0:
+                            logger.error(f"       Arquivo baixado está vazio (0 bytes) para aba {ws.title}")
+                            os.unlink(tmp.name)
+                            continue
+
+                        logger.debug(f"       Arquivo baixado: {file_size} bytes")
                         df_aba = pd.read_csv(tmp.name, low_memory=False)
                         os.unlink(tmp.name)
 
                         # Remover duplicatas de colunas
                         df_aba = df_aba.loc[:, ~df_aba.columns.duplicated(keep='first')]
-                        logger.info(f"       {len(df_aba)} linhas, {len(df_aba.columns)} colunas únicas")
+                        logger.debug(f"       {len(df_aba)} linhas, {len(df_aba.columns)} colunas únicas")
 
                         # Normalizar coluna de data
                         if 'Data' in df_aba.columns:
@@ -215,21 +235,29 @@ class LeadDataLoader:
             # Combinar ambas as abas
             # Como têm colunas diferentes, concat criará NaN onde não houver match
             # O normalizador (_normalize_leads_dataframe) só usa as colunas que precisa
+            if not dfs_to_combine:
+                raise ValueError(
+                    f"Nenhuma aba pôde ser carregada do Google Sheets!\n"
+                    f"Tentativas: {len(abas_pesquisa)} aba(s)\n"
+                    f"Sucesso: 0 aba(s)\n"
+                    f"Verifique os logs acima para detalhes dos erros de cada aba."
+                )
+
             df = pd.concat(dfs_to_combine, ignore_index=True, sort=False)
 
             # Verificar e remover duplicatas de colunas no resultado final
             if df.columns.duplicated().any():
-                logger.warning(f"    Resultado do concat tem colunas duplicadas, removendo...")
+                logger.debug(f"    Resultado do concat tem colunas duplicadas, removendo...")
                 df = df.loc[:, ~df.columns.duplicated(keep='first')]
 
             num_abas = len(dfs_to_combine)
-            logger.info(f"    {len(df)} linhas TOTAIS lidas do Google Sheets ({num_abas} aba{'s' if num_abas > 1 else ''} combinada{'s' if num_abas > 1 else ''})")
+            logger.debug(f"    {len(df)} linhas TOTAIS lidas do Google Sheets ({num_abas} aba{'s' if num_abas > 1 else ''} combinada{'s' if num_abas > 1 else ''})")
 
             # Salvar no cache (antes de filtrar por período)
             try:
                 cache_dir.mkdir(parents=True, exist_ok=True)
                 df.to_csv(cache_file, index=False)
-                logger.info(f"    Cache salvo: {cache_file}")
+                logger.debug(f"    Cache salvo: {cache_file}")
             except Exception as e:
                 logger.warning(f"    Erro ao salvar cache (não crítico): {e}")
 
@@ -243,21 +271,29 @@ class LeadDataLoader:
                     end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1)  # Incluir fim do dia
                     df = df[df['Data'] < end_dt]
 
-                logger.info(f"    Filtrado por período: {original_len}  {len(df)} leads")
+                logger.debug(f"    Filtrado por período: {original_len}  {len(df)} leads")
 
             # Normalizar usando mesma lógica do CSV
-            return self._normalize_leads_dataframe(df)
+            df_normalized = self._normalize_leads_dataframe(df, show_summary=False)
+
+            # Mostrar resumo final em INFO level
+            tab_names_str = ', '.join(tab_names) if len(tab_names) > 1 else tab_names[0]
+            logger.info(f"    Google Sheets [{tab_names_str}]: {len(df_normalized)} leads carregados")
+
+            return df_normalized
 
         except Exception as e:
             logger.error(f" Erro ao carregar do Google Sheets: {e}")
             raise
 
-    def _normalize_leads_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _normalize_leads_dataframe(self, df: pd.DataFrame, show_summary: bool = False, source_info: str = None) -> pd.DataFrame:
         """
         Normaliza DataFrame de leads (interno - usado por CSV e Sheets).
 
         Args:
             df: DataFrame bruto com colunas originais
+            show_summary: Se True, mostra resumo final em INFO level
+            source_info: Informação da fonte para incluir no resumo (ex: "Google Sheets [[LF] Pesquisa]")
 
         Returns:
             DataFrame normalizado
@@ -348,9 +384,9 @@ class LeadDataLoader:
         non_facebook = df_norm['source'].notna() & (df_norm['source'] != 'facebook-ads')
         if non_facebook.sum() > 0:
             sources_count = df_norm[non_facebook]['source'].value_counts()
-            logger.info(f"   ℹ  {non_facebook.sum()} leads de outras fontes (não facebook-ads):")
+            logger.debug(f"   ℹ  {non_facebook.sum()} leads de outras fontes (não facebook-ads):")
             for source, count in sources_count.head(5).items():
-                logger.info(f"      - {source}: {count} leads")
+                logger.debug(f"      - {source}: {count} leads")
 
         # Lead Score e Decil
         df_norm['lead_score'] = df.get('lead_score', np.nan)
@@ -360,19 +396,19 @@ class LeadDataLoader:
             if df['lead_score'].notna().any():
                 # PRIORITY 1: ML model scores
                 df_norm['decile'] = df['lead_score'].apply(self._assign_decile_from_score)
-                logger.info(f"    Decis atribuídos via lead_score: {df_norm['decile'].notna().sum()}/{len(df_norm)}")
+                logger.debug(f"    Decis atribuídos via lead_score: {df_norm['decile'].notna().sum()}/{len(df_norm)}")
             else:
                 df_norm['decile'] = None
         elif 'Faixa' in df.columns:
             if df['Faixa'].notna().any():
                 # FALLBACK: Legacy classification
                 df_norm['decile'] = df['Faixa']
-                logger.info(f"    Decis atribuídos via Faixa (legacy): {df_norm['decile'].notna().sum()}/{len(df_norm)}")
+                logger.debug(f"    Decis atribuídos via Faixa (legacy): {df_norm['decile'].notna().sum()}/{len(df_norm)}")
             else:
                 df_norm['decile'] = None
         else:
             df_norm['decile'] = None
-            logger.warning(" Nenhuma coluna de score/decil encontrada")
+            logger.debug(" Nenhuma coluna de score/decil encontrada")
 
         # Remover linhas com email inválido
         before = len(df_norm)
@@ -380,9 +416,14 @@ class LeadDataLoader:
         after = len(df_norm)
 
         if before != after:
-            logger.warning(f" {before - after} leads removidos (email inválido)")
+            logger.debug(f" {before - after} leads removidos (email inválido)")
 
-        logger.info(f"    {len(df_norm)} leads carregados e normalizados")
+        # Mostrar resumo final apenas se solicitado
+        if show_summary:
+            if source_info:
+                logger.info(f"    {source_info}: {len(df_norm)} leads carregados")
+            else:
+                logger.info(f"    {len(df_norm)} leads carregados e normalizados")
 
         return df_norm
 
@@ -921,8 +962,6 @@ class SalesDataLoader:
         # Drop status column if not needed (manter apenas se include_canceled=True para debug)
         if not include_canceled and 'status' in df_norm.columns:
             df_norm = df_norm.drop(columns=['status'])
-
-        logger.info(f"    {len(df_norm)} vendas Guru API carregadas e normalizadas")
 
         return df_norm
 

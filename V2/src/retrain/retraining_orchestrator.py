@@ -265,18 +265,187 @@ class RetreinoMensal:
 
             training_config = self.config.get('training', {})
 
-            # Datas da API: buscar da config ou usar últimos 60 dias
+            # Datas da API: calcular dinamicamente baseado no champion
             from datetime import datetime, timedelta
+
+            # Data final: sempre hoje
             api_end_date = training_config.get('api_end_date', datetime.now().strftime('%Y-%m-%d'))
 
+            # Data inicial: calcular dinamicamente
             if 'api_start_date' in training_config:
+                # Se especificado no config, usar (útil para testes/debug)
                 api_start_date = training_config['api_start_date']
+                logger.info(f"    Usando api_start_date do config: {api_start_date}")
             else:
-                # Default: 60 dias atrás
-                start_dt = datetime.now() - timedelta(days=60)
-                api_start_date = start_dt.strftime('%Y-%m-%d')
+                # DEFAULT: Buscar última venda do champion e usar dia seguinte
+                logger.info(f"    Calculando api_start_date dinamicamente...")
 
-            logger.info(f"    Período de dados API: {api_start_date} a {api_end_date}")
+                try:
+                    import json
+                    import glob
+                    model_path = get_active_model_path()
+                    logger.info(f"      Champion model: {model_path}")
+
+                    metadata_pattern = str(Path(model_path) / 'model_metadata*.json')
+                    metadata_files = glob.glob(metadata_pattern)
+
+                    if not metadata_files:
+                        logger.error(f"       Metadata não encontrado em: {model_path}")
+                        raise FileNotFoundError(
+                            f"Metadata do champion não encontrado!\n"
+                            f"Path procurado: {metadata_pattern}\n\n"
+                            f"AÇÃO: Certifique-se que o modelo champion existe e tem metadata.\n"
+                            f"       Se for o primeiro retreino, especifique api_start_date no config."
+                        )
+
+                    with open(metadata_files[0], 'r') as f:
+                        champion_metadata = json.load(f)
+
+                    # Pegar última venda do champion
+                    period_end = champion_metadata.get('training_data', {}).get('temporal_split', {}).get('period_end')
+
+                    if not period_end:
+                        logger.error(f"       'period_end' não encontrado no metadata")
+                        raise ValueError(
+                            f"Metadata inválido: 'period_end' não encontrado!\n"
+                            f"Arquivo: {metadata_files[0]}\n\n"
+                            f"AÇÃO: O metadata do champion está corrompido ou desatualizado.\n"
+                            f"       Re-treine o modelo ou especifique api_start_date no config."
+                        )
+
+                    # Usar DIA SEGUINTE à última venda (para não duplicar)
+                    last_sale_date = datetime.strptime(period_end, '%Y-%m-%d')
+                    api_start_date = (last_sale_date + timedelta(days=1)).strftime('%Y-%m-%d')
+
+                    logger.info(f"      Última venda do champion: {period_end}")
+                    logger.info(f"      Buscando dados NOVOS a partir de: {api_start_date}")
+
+                    # Validar se há dados novos para treinar
+                    days_since_last_train = (datetime.now() - last_sale_date).days
+                    if days_since_last_train < 1:
+                        logger.warning(f"\n{'='*80}")
+                        logger.warning(f" ALERTA: Nenhum dado novo disponível!")
+                        logger.warning(f"{'='*80}")
+                        logger.warning(f"Última venda do champion: {period_end}")
+                        logger.warning(f"Data atual: {datetime.now().strftime('%Y-%m-%d')}")
+                        logger.warning(f"Dias desde último treino: {days_since_last_train}")
+                        logger.warning(f"\nO modelo já está treinado com os dados mais recentes.")
+                        logger.warning(f"Não há dados novos para retreinar.")
+                        logger.warning(f"{'='*80}\n")
+
+                        return {
+                            'status': 'SKIPPED',
+                            'reason': 'No new data available since last training',
+                            'execution_id': self.execution_id,
+                            'last_training_date': period_end,
+                            'current_date': datetime.now().strftime('%Y-%m-%d')
+                        }
+
+                except (FileNotFoundError, ValueError) as e:
+                    # Erros esperados: logar e abortar
+                    logger.error(f"\n{'='*80}")
+                    logger.error(f" ERRO: Não foi possível calcular api_start_date")
+                    logger.error(f"{'='*80}")
+                    logger.error(f"{str(e)}")
+                    logger.error(f"{'='*80}\n")
+
+                    return {
+                        'status': 'ABORTED',
+                        'reason': 'Cannot calculate api_start_date - no champion metadata',
+                        'execution_id': self.execution_id,
+                        'error': str(e)
+                    }
+
+                except Exception as e:
+                    # Erros inesperados: logar com stack trace e abortar
+                    logger.error(f"\n{'='*80}")
+                    logger.error(f" ERRO INESPERADO ao calcular api_start_date")
+                    logger.error(f"{'='*80}")
+                    logger.error(f"{str(e)}", exc_info=True)
+                    logger.error(f"{'='*80}\n")
+
+                    return {
+                        'status': 'ERROR',
+                        'reason': 'Unexpected error calculating api_start_date',
+                        'execution_id': self.execution_id,
+                        'error': str(e)
+                    }
+
+            logger.info(f"\n    Período de dados API: {api_start_date} a {api_end_date}")
+
+            # ========================================
+            # VALIDAR ARQUIVO TMB ATUALIZADO
+            # ========================================
+            logger.info(f"\n Verificando arquivo TMB...")
+
+            import glob
+            # Buscar arquivo TMB na pasta de treino (um nível acima do V2)
+            tmb_pattern = str(Path(__file__).parent.parent.parent.parent / 'data' / 'devclub' / 'treino' / 'tmb.xlsx')
+            tmb_files = glob.glob(tmb_pattern)
+
+            if not tmb_files:
+                logger.error(f"\n{'='*80}")
+                logger.error(f" ERRO CRÍTICO: Arquivo TMB não encontrado!")
+                logger.error(f"{'='*80}")
+                logger.error(f"Path esperado: {tmb_pattern}")
+                logger.error(f"\n AÇÃO NECESSÁRIA:")
+                logger.error(f"   1. Baixar arquivo TMB atualizado com vendas de {api_start_date} a {api_end_date}")
+                logger.error(f"   2. Colocar arquivo em: data/devclub/treino/tmb.xlsx")
+                logger.error(f"   3. Executar retreino novamente")
+                logger.error(f"{'='*80}\n")
+
+                return {
+                    'status': 'ABORTED',
+                    'reason': 'TMB file not found',
+                    'execution_id': self.execution_id,
+                    'expected_path': tmb_pattern,
+                    'api_period': f"{api_start_date} a {api_end_date}"
+                }
+
+            # Verificar data de modificação do arquivo TMB
+            import os
+            from datetime import datetime, timedelta
+            tmb_file = tmb_files[0]
+            tmb_mod_time = datetime.fromtimestamp(os.path.getmtime(tmb_file))
+            days_since_mod = (datetime.now() - tmb_mod_time).days
+
+            logger.info(f"   Arquivo TMB encontrado: {Path(tmb_file).name}")
+            logger.info(f"   Última modificação: {tmb_mod_time.strftime('%Y-%m-%d %H:%M:%S')} ({days_since_mod} dias atrás)")
+
+            # Verificar se arquivo é mais antigo que o período de retreino
+            api_start_dt = datetime.strptime(api_start_date, '%Y-%m-%d')
+            if tmb_mod_time < api_start_dt:
+                logger.warning(f"\n{'='*80}")
+                logger.warning(f" ALERTA: Arquivo TMB pode estar desatualizado!")
+                logger.warning(f"{'='*80}")
+                logger.warning(f"Última modificação do arquivo: {tmb_mod_time.strftime('%Y-%m-%d')}")
+                logger.warning(f"Período de retreino: {api_start_date} a {api_end_date}")
+                logger.warning(f"\nO arquivo TMB foi modificado ANTES do período de retreino.")
+                logger.warning(f"Verifique se o arquivo contém vendas até {api_end_date}.")
+                logger.warning(f"\n AÇÃO RECOMENDADA:")
+                logger.warning(f"   1. Baixar arquivo TMB mais recente (até {api_end_date})")
+                logger.warning(f"   2. Substituir: data/devclub/treino/tmb.xlsx")
+                logger.warning(f"   3. Executar retreino novamente")
+                logger.warning(f"\n Para continuar mesmo assim, pressione Ctrl+C e re-execute.")
+                logger.warning(f"{'='*80}\n")
+
+                return {
+                    'status': 'ABORTED',
+                    'reason': 'TMB file potentially outdated - modified before retraining period',
+                    'execution_id': self.execution_id,
+                    'tmb_last_modified': tmb_mod_time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'api_period': f"{api_start_date} a {api_end_date}",
+                    'warning': 'TMB file was last modified before the retraining period starts'
+                }
+
+            logger.info(f" Arquivo TMB validado OK\n")
+
+            # Verbosity: config > default (normal)
+            verbosity = training_config.get('verbosity', 'normal')
+            if hasattr(self, 'verbosity_override'):
+                verbosity = self.verbosity_override
+
+            logger.info(f"    Verbosity do pipeline: {verbosity}")
 
             challenger_metadata = train_main(
                 initial_matching=training_config.get('initial_matching', 'email_telefone'),
@@ -292,7 +461,7 @@ class RetreinoMensal:
                 api_start_date=api_start_date,
                 api_end_date=api_end_date,
                 output_subdir='retraining',  #  LOGS vão para outputs/retraining/
-                verbosity='minimal'  #  CONTROLE DE LOGS: só warnings e erros do train_pipeline
+                verbosity=verbosity  #  CONTROLE DE LOGS: configurável via config/CLI
             )
 
             # Verificar se foi abortado pelo quality gate
@@ -441,13 +610,20 @@ def main():
         default='configs/retreino_mensal.yaml',
         help='Caminho para arquivo de configuração (default: configs/retreino_mensal.yaml)'
     )
+    parser.add_argument(
+        '--verbosity',
+        type=str,
+        choices=['silent', 'minimal', 'normal', 'debug'],
+        default=None,
+        help='Nível de verbosidade dos logs (sobrescreve config): silent, minimal, normal, debug'
+    )
     args = parser.parse_args()
 
     # Banner
-    print("SMART ADS - RETREINO MENSAL AUTOMATIZADO")
-    print("Arquitetura: Hook-Based (Reutiliza train_pipeline.py)")
-    print(f"Config: {args.config}")
-    print(f"Timestamp: {datetime.now().isoformat()}")
+    logger.info("SMART ADS - RETREINO MENSAL AUTOMATIZADO")
+    logger.info("Arquitetura: Hook-Based (Reutiliza train_pipeline.py)")
+    logger.info(f"Config: {args.config}")
+    logger.info(f"Timestamp: {datetime.now().isoformat()}")
 
     # Verificar se config existe
     if not os.path.exists(args.config):
@@ -457,14 +633,20 @@ def main():
 
     # Executar retreino
     orquestrador = RetreinoMensal(args.config)
+
+    # Aplicar verbosity override via CLI se fornecido
+    if args.verbosity:
+        orquestrador.verbosity_override = args.verbosity
+        logger.info(f" Verbosity CLI override: {args.verbosity}")
+
     resultado = orquestrador.run()
 
     # Exibir resultado
-    print("RESULTADO FINAL")
-    print(f"Status: {resultado['status']}")
-    print(f"Execution ID: {resultado['execution_id']}")
+    logger.info("RESULTADO FINAL")
+    logger.info(f"Status: {resultado['status']}")
+    logger.info(f"Execution ID: {resultado['execution_id']}")
     if 'notes' in resultado:
-        print(f"Notas: {resultado['notes']}")
+        logger.info(f"Notas: {resultado['notes']}")
 
     # Exit code
     sys.exit(0 if resultado['status'].startswith('SUCCESS') else 1)

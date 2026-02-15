@@ -895,9 +895,9 @@ class DataQualityMonitor:
 
         alerts = []
 
-        print(" DEBUG: _check_extra_features() INICIADO")
-        print(f"DataFrame recebido: {df.shape[0]} linhas, {df.shape[1]} colunas")
-        print(f"Colunas: {sorted(df.columns.tolist())[:10]}...")
+        logger.debug(" DEBUG: _check_extra_features() INICIADO")
+        logger.debug(f"DataFrame recebido: {df.shape[0]} linhas, {df.shape[1]} colunas")
+        logger.debug(f"Colunas: {sorted(df.columns.tolist())[:10]}...")
 
         try:
             # 1. Aplicar encoding nos dados (necessário para comparar features finais)
@@ -921,18 +921,18 @@ class DataQualityMonitor:
 
             extra_features = actual_features - expected_features
 
-            print(f"\n Features esperadas: {len(expected_features)}")
-            print(f" Features encontradas: {len(actual_features)}")
-            print(f" Features extras: {len(extra_features)}")
+            logger.debug(f"\n Features esperadas: {len(expected_features)}")
+            logger.debug(f" Features encontradas: {len(actual_features)}")
+            logger.debug(f" Features extras: {len(extra_features)}")
 
             if extra_features:
                 extra_features_list = sorted(list(extra_features))
 
-                print(f"\n  DETECTOU {len(extra_features)} FEATURES EXTRAS:")
+                logger.debug(f"\n  DETECTOU {len(extra_features)} FEATURES EXTRAS:")
                 for feat in extra_features_list[:10]:
-                    print(f"   - {feat}")
+                    logger.debug(f"   - {feat}")
                 if len(extra_features) > 10:
-                    print(f"   ... e mais {len(extra_features) - 10}")
+                    logger.debug(f"   ... e mais {len(extra_features) - 10}")
 
                 # Determinar severidade baseado na quantidade
                 if len(extra_features) > 10:
@@ -965,13 +965,13 @@ class DataQualityMonitor:
                     'threshold': 0  # Qualquer feature extra merece atenção
                 })
 
-                print(f"\n Alerta criado: {alert_msg}")
+                logger.debug(f"\n Alerta criado: {alert_msg}")
             else:
-                print(f"\n Nenhuma feature extra detectada")
+                logger.debug(f"\n Nenhuma feature extra detectada")
 
 
         except Exception as e:
-            print(f"\n ERRO em _check_extra_features(): {e}")
+            logger.error(f"\n ERRO em _check_extra_features(): {e}")
             import traceback
             traceback.print_exc()
 

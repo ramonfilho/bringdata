@@ -13,8 +13,11 @@ import pandas as pd
 from datetime import datetime
 from typing import List, Dict, Any
 import time
+import logging
 
 from api.guru_config import GURU_CONFIG, GURU_HEADERS
+
+logger = logging.getLogger(__name__)
 
 
 class GuruSalesExtractor:
@@ -59,8 +62,6 @@ class GuruSalesExtractor:
             'per_page': 100,  # Máximo permitido pela API
         }
 
-        print(f' Buscando transações de {start_date} a {end_date}...')
-
         while True:
             if cursor:
                 params['cursor'] = cursor
@@ -74,15 +75,15 @@ class GuruSalesExtractor:
                 )
 
                 if response.status_code != 200:
-                    print(f' Erro na requisição: {response.status_code}')
-                    print(response.text[:500])
+                    logger.error(f' Erro na requisição: {response.status_code}')
+                    logger.error(response.text[:500])
                     break
 
                 data = response.json()
                 transactions = data.get('data', [])
                 all_transactions.extend(transactions)
 
-                print(f'   Página {page}: {len(transactions)} transações')
+                logger.debug(f'   Página {page}: {len(transactions)} transações')
 
                 # Verificar se tem mais páginas
                 if not data.get('has_more_pages'):
@@ -95,10 +96,10 @@ class GuruSalesExtractor:
                 time.sleep(0.2)
 
             except Exception as e:
-                print(f' Erro ao buscar página {page}: {e}')
+                logger.error(f' Erro ao buscar página {page}: {e}')
                 break
 
-        print(f' Total de transações buscadas: {len(all_transactions)}')
+        logger.info(f' Total de transações buscadas: {len(all_transactions)}')
         return all_transactions
 
     def map_transaction_to_row(self, transaction: Dict[str, Any]) -> Dict[str, Any]:
@@ -301,8 +302,8 @@ class GuruSalesExtractor:
             transactions = self.fetch_transactions(start_date, end_date)
         else:
             # Dividir em chunks de 180 dias
-            print(f'\n  Período de {total_days} dias excede limite de 180 dias')
-            print(f' Dividindo em múltiplas requisições...\n')
+            logger.debug(f'\n  Período de {total_days} dias excede limite de 180 dias')
+            logger.debug(f' Dividindo em múltiplas requisições...\n')
 
             transactions = []
             current_start = start
@@ -315,7 +316,7 @@ class GuruSalesExtractor:
                 chunk_start_str = current_start.strftime('%Y-%m-%d')
                 chunk_end_str = current_end.strftime('%Y-%m-%d')
 
-                print(f' Chunk {chunk_num}: {chunk_start_str} a {chunk_end_str}')
+                logger.debug(f' Chunk {chunk_num}: {chunk_start_str} a {chunk_end_str}')
                 chunk_transactions = self.fetch_transactions(chunk_start_str, chunk_end_str)
                 transactions.extend(chunk_transactions)
 
@@ -327,10 +328,9 @@ class GuruSalesExtractor:
                 if current_start < end:
                     time.sleep(0.5)
 
-            print(f'\n Total de transações de todos os chunks: {len(transactions)}')
+            logger.debug(f'\n Total de transações de todos os chunks: {len(transactions)}')
 
         # Mapear para DataFrame
-        print(f'\n Mapeando {len(transactions)} transações...')
         rows = [self.map_transaction_to_row(t) for t in transactions]
         df = pd.DataFrame(rows)
 
@@ -365,9 +365,9 @@ class GuruSalesExtractor:
 
         # Salvar se caminho fornecido
         if output_path:
-            print(f'\n Salvando relatório: {output_path}')
+            logger.info(f' Salvando relatório: {output_path}')
             df.to_excel(output_path, index=False)
-            print(f' Relatório salvo com sucesso!')
+            logger.info(f' Relatório salvo com sucesso!')
 
         return df
 
@@ -408,4 +408,4 @@ if __name__ == '__main__':
         output_path='V2/files/validation/vendas/Guru-Vendas-API-ultimos-7-dias.xlsx'
     )
 
-    print(f'\n Relatório gerado com {len(df)} transações')
+    logger.info(f' Relatório gerado com {len(df)} transações')

@@ -187,15 +187,14 @@ class LeadScoringPredictor:
             DataFrame com features alinhadas ao modelo
         """
         logger.info(f"Preparando features para predição...")
-
-        # PRINT ANTES DA REORDENAÇÃO/FILTRAGEM
-        print(" COLUNAS ANTES DA REORDENAÇÃO/FILTRAGEM (df processado):")
-        for idx, col in enumerate(sorted(df.columns), 1):
-            print(f"  {idx:2d}. {col}")
-        print(f"\nTotal: {len(df.columns)} features")
-        print(f"Shape: {df.shape}")
-
         logger.info(f"Colunas recebidas: {len(df.columns)}")
+
+        # DEBUG: Detalhamento das colunas (só aparece com --verbosity debug)
+        logger.debug(" COLUNAS ANTES DA REORDENAÇÃO/FILTRAGEM (df processado):")
+        for idx, col in enumerate(sorted(df.columns), 1):
+            logger.debug(f"  {idx:2d}. {col}")
+        logger.debug(f"\nTotal: {len(df.columns)} features")
+        logger.debug(f"Shape: {df.shape}")
 
         # Criar DataFrame com as features esperadas
         X = pd.DataFrame()
@@ -216,12 +215,12 @@ class LeadScoringPredictor:
         # Garantir ordem correta das colunas
         X = X[self.feature_names]
 
-        # PRINT DEPOIS DA REORDENAÇÃO/FILTRAGEM (equivalente ao pipeline de treino)
-        print(" COLUNAS EXATAS PASSADAS PARA O MODELO (X.columns):")
+        # DEBUG DEPOIS DA REORDENAÇÃO/FILTRAGEM (equivalente ao pipeline de treino)
+        logger.debug(" COLUNAS EXATAS PASSADAS PARA O MODELO (X.columns):")
         for idx, col in enumerate(X.columns, 1):
-            print(f"  {idx:2d}. {col}")
-        print(f"\nTotal: {len(X.columns)} features")
-        print(f"Shape: {X.shape}")
+            logger.debug(f"  {idx:2d}. {col}")
+        logger.debug(f"\nTotal: {len(X.columns)} features")
+        logger.debug(f"Shape: {X.shape}")
 
         # Guardar lista de features ausentes para uso posterior (ex: monitoramento)
         self.last_missing_features = missing_features
