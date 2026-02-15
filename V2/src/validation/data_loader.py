@@ -394,9 +394,15 @@ class LeadDataLoader:
         # Extrair decil: PRIORIZAR lead_score (ML) sobre Faixa (legacy)
         if 'lead_score' in df.columns:
             if df['lead_score'].notna().any():
-                # PRIORITY 1: ML model scores
-                df_norm['decile'] = df['lead_score'].apply(self._assign_decile_from_score)
-                logger.debug(f"    Decis atribuídos via lead_score: {df_norm['decile'].notna().sum()}/{len(df_norm)}")
+                try:
+                    # PRIORITY 1: ML model scores
+                    df_norm['decile'] = df['lead_score'].apply(self._assign_decile_from_score)
+                    logger.debug(f"    Decis atribuídos via lead_score: {df_norm['decile'].notna().sum()}/{len(df_norm)}")
+                except (FileNotFoundError, KeyError) as e:
+                    # Durante treino, modelo ativo pode não ter model_path (só mlflow_run_id)
+                    # Nesse caso, pular cálculo de decis (não necessário para treino)
+                    logger.debug(f"    Pulando cálculo de decis (contexto: treino): {e}")
+                    df_norm['decile'] = None
             else:
                 df_norm['decile'] = None
         elif 'Faixa' in df.columns:

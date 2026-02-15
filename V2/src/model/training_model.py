@@ -944,10 +944,10 @@ def registrar_features_e_modelo_devclub(
         mlflow.sklearn.log_model(modelo_final, "model")
         logger.debug(" Modelo registrado no MLflow")
 
-        # 4. SALVAR ARQUIVOS LOCAIS (OPCIONAL - SIMPLIFICADO)
-        output_dir = None
-        if save_test_predictions or set_active:
-            logger.debug("\n4. SALVANDO ARQUIVOS LOCAIS")
+        # 4. SALVAR ARQUIVOS LOCAIS (OPCIONAL - APENAS TEST PREDICTIONS)
+        output_dir = None  # Inicializar variável
+        if save_test_predictions:
+            logger.debug("\n4. SALVANDO PREDIÇÕES DO TEST SET")
             logger.debug("-" * 50)
 
             # Criar pasta com timestamp no diretório V2/files/
@@ -956,67 +956,28 @@ def registrar_features_e_modelo_devclub(
             output_dir = os.path.join(base_dir, timestamp)
             os.makedirs(output_dir, exist_ok=True)
 
-            # Se set_active: salvar arquivos necessários para produção (backward compatibility)
-            if set_active:
-                # Salvar feature registry (cópia do MLflow)
-                registry_filename = f'{output_dir}/feature_registry_v1_devclub_rf_{split_method}_single.json'
-                with open(registry_filename, 'w', encoding='utf-8') as f:
-                    json.dump(feature_registry, f, indent=2, ensure_ascii=False)
-                logger.debug(f" {registry_filename} salvo")
-
-                # Salvar features ordenadas (BACKWARD COMPATIBILITY com prediction.py)
-                features_filename = f'{output_dir}/features_ordenadas_v1_devclub_rf_{split_method}_single.json'
-                features_ordenadas = {
-                    "feature_names": list(X_clean.columns),
-                    "feature_count": len(X_clean.columns),
-                    "created_at": datetime.now().isoformat(),
-                    "model_name": f"v1_devclub_rf_{split_method}_single"
-                }
-                with open(features_filename, 'w', encoding='utf-8') as f:
-                    json.dump(features_ordenadas, f, indent=2, ensure_ascii=False)
-                logger.debug(f" {features_filename} salvo (backward compatibility)")
-
-            # Se save_test_predictions: salvar predições do test set
-            if save_test_predictions:
-                test_set_filename = f'{output_dir}/test_set_predictions.csv'
-                df_test_predictions = X_test.copy()
-                df_test_predictions['target_real'] = y_test.values
-                df_test_predictions['probabilidade'] = y_prob
-                df_test_predictions.to_csv(test_set_filename, index=False)
-                logger.debug(f" {test_set_filename} salvo")
+            # Salvar predições do test set
+            test_set_filename = f'{output_dir}/test_set_predictions.csv'
+            df_test_predictions = X_test.copy()
+            df_test_predictions['target_real'] = y_test.values
+            df_test_predictions['probabilidade'] = y_prob
+            df_test_predictions.to_csv(test_set_filename, index=False)
+            logger.debug(f" ✅ {test_set_filename} salvo")
 
             logger.info("")
-            logger.info(f"Arquivos locais salvos em: {output_dir}")
+            logger.info(f"✅ Predições do test set salvas em: {output_dir}")
+        else:
+            logger.debug("\n4. ARQUIVOS LOCAIS NÃO SALVOS")
+            logger.debug("-" * 50)
+            logger.debug("Use --save-test-predictions para salvar predições do test set")
 
-        # Atualizar active_model.yaml se solicitado (INDEPENDENTE de save_files)
+        # Atualizar active_model.yaml se solicitado
         if set_active:
             logger.debug("\n5. ATUALIZANDO MODELO ATIVO")
             logger.debug("-" * 50)
 
             import yaml
             from pathlib import Path
-
-            # Se não criou output_dir ainda, criar agora
-            if not output_dir:
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                base_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'files')
-                output_dir = os.path.join(base_dir, timestamp)
-                os.makedirs(output_dir, exist_ok=True)
-
-                # Baixar arquivos necessários do MLflow
-                registry_filename = f'{output_dir}/feature_registry_v1_devclub_rf_{split_method}_single.json'
-                with open(registry_filename, 'w', encoding='utf-8') as f:
-                    json.dump(feature_registry, f, indent=2, ensure_ascii=False)
-
-                features_filename = f'{output_dir}/features_ordenadas_v1_devclub_rf_{split_method}_single.json'
-                features_ordenadas = {
-                    "feature_names": list(X_clean.columns),
-                    "feature_count": len(X_clean.columns),
-                    "created_at": datetime.now().isoformat(),
-                    "model_name": f"v1_devclub_rf_{split_method}_single"
-                }
-                with open(features_filename, 'w', encoding='utf-8') as f:
-                    json.dump(features_ordenadas, f, indent=2, ensure_ascii=False)
 
             config_path = Path(__file__).parent.parent.parent / "configs" / "active_model.yaml"
             current_run_id = mlflow.active_run().info.run_id
@@ -1025,7 +986,6 @@ def registrar_features_e_modelo_devclub(
                 'active_model': {
                     'model_name': f"v1_devclub_rf_{split_method}_single",
                     'mlflow_run_id': current_run_id,
-                    'model_path': f"files/{timestamp}",  # DEPRECATED - mantido para backward compatibility
                     'trained_at': model_metadata['model_info']['trained_at'],
                     'split_method': split_method,
                     'performance': {
@@ -1042,22 +1002,15 @@ def registrar_features_e_modelo_devclub(
                 f.write("# 1. Treine um novo modelo: python src/train_pipeline.py --split-method temporal_leads --set-active\n")
                 f.write("# 2. Ou edite manualmente o mlflow_run_id acima\n")
                 f.write("#\n")
-                f.write("# NOTA: mlflow_run_id é a fonte preferencial (carrega direto do MLflow)\n")
-                f.write("#       model_path mantido apenas para backward compatibility\n")
+                f.write("# NOTA: Modelo e features carregados direto do MLflow (zero dependência de files/)\n")
 
-            logger.debug(f" {config_path} atualizado")
+            logger.debug(f" ✅ {config_path} atualizado")
             logger.debug(f"  Modelo ativo: v1_devclub_rf_{split_method}_single")
             logger.debug(f"  MLflow Run ID: {current_run_id}")
-            logger.debug(f"  Path local (backward compatibility): {output_dir}")
+            logger.info(f"\n✅ Modelo ativado! Produção carregará direto do MLflow run: {current_run_id}")
 
             # Atualizar business_config.py com recall real
             atualizar_business_config_com_recall(model_metadata)
-
-        elif not save_test_predictions and not set_active:
-            logger.debug("\n4. ARQUIVOS LOCAIS NÃO SALVOS")
-            logger.debug("-" * 50)
-            logger.debug("Use --save-test-predictions para salvar predições do test set")
-            logger.debug("Use --set-active para ativar este modelo em produção")
 
         # Sempre logar metadata como artifact no MLflow
         mlflow.log_dict(model_metadata, "model_metadata.json")

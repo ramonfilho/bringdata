@@ -333,11 +333,16 @@ class LeadScoringPipeline:
         logger.info(" [10/12] Aplicando encoding categórico...")
         cols_before_encoding = len(self.data.columns)
 
+        # Priorizar mlflow_run_id, fallback para model_path (backward compatibility)
+        mlflow_run_id = self.predictor.mlflow_run_id if hasattr(self.predictor, 'mlflow_run_id') else None
+        model_path = str(self.predictor.model_path) if self.predictor.model_path and not mlflow_run_id else None
+
         self.data = apply_categorical_encoding(
             self.data,
             versao="v1",
             medium_strategy="binary_top3",
-            model_path=str(self.predictor.model_path)
+            mlflow_run_id=mlflow_run_id,
+            model_path=model_path
         )
 
         encoding_cols_added = len(self.data.columns) - cols_before_encoding

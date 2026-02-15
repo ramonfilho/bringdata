@@ -628,6 +628,13 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info(f"CÉLULA 17: APLICAR JANELA DE CONVERSÃO DE 20 DIAS")
     logger.info("")
 
+    # DEBUG: Verificar estado de df_vendas_final ANTES de passar para aplicar_janela_conversao
+    logger.debug(f"  DEBUG CÉLULA 17: df_vendas_final shape: {df_vendas_final.shape}")
+    logger.debug(f"  DEBUG CÉLULA 17: 'data' dtype: {df_vendas_final['data'].dtype if 'data' in df_vendas_final.columns else 'NOT FOUND'}")
+    if 'data' in df_vendas_final.columns:
+        logger.debug(f"  DEBUG CÉLULA 17: 'data' non-null: {df_vendas_final['data'].notna().sum()}/{len(df_vendas_final)}")
+        logger.debug(f"  DEBUG CÉLULA 17: 'data' max: {df_vendas_final['data'].max()}")
+
     # Aplicar janela de conversão de 20 dias (captação + CPL + carrinho)
     # Captação: 7 dias (terça-segunda) + CPL: 6 dias (terça-domingo) + Carrinho: 7 dias (segunda-domingo) = 20 dias
     dataset_v1_devclub = aplicar_janela_conversao(
