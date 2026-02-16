@@ -115,19 +115,25 @@ ALTER TABLE leads_capi ADD COLUMN IF NOT EXISTS
 
 ### 3. Frontend - Página 2 JavaScript ⚠️ PENDENTE DEPLOY
 
-**Problema identificado:** Inputs do formulário **não têm** atributos `name`, então `FormData` não captura nada.
+**Arquivo:** `V2/docs/pagina2_codigo_modificado.js` ✅
 
-**Solução implementada:** Modificar `submitFormData()` para coletar respostas manualmente.
+**Estratégia:** Shadow Deploy (dual write)
+- ✅ MANTÉM envio para Google Sheets (form.action original)
+- ✅ ADICIONA envio paralelo para PostgreSQL (/webhook/update_survey)
+- ✅ Ambos executam simultaneamente
+- ✅ Falhas não bloqueiam UX
 
-**Arquivo criado:** `V2/docs/pagina2_codigo_modificado.js` ✅
+**O que muda:**
+- Substitui função `submitFormData()` existente
+- Coleta manual de 10 campos (steps 7 e 10 ignorados - colunas indevidas)
+- NÃO envia fbp/fbc/UTMs (já capturados na Página 1)
 
-**Mudanças principais:**
-1. Função `getSelectedAnswer(stepIndex)` - coleta resposta selecionada de cada step
-2. Payload completo com 11 campos de pesquisa
-3. **Endpoint atualizado:** `/webhook/update_survey` (antes era `/webhook/lead_capture`)
-4. Event_id único para Página 2 (diferente da Página 1)
+**Como testar após deploy:**
+1. Console (F12): deve aparecer logs `[SHADOW DEPLOY]`, `[1/2] Google Sheets`, `[2/2] PostgreSQL`
+2. Network (F12): deve ter 2 requests (Sheets + /webhook/update_survey → Status 200)
+3. UX: loading funciona, tela final aparece normalmente
 
-**Próximo passo:** Aplicar código na landing page `https://lp.devclub.com.br/parabens-psq-devf-v2/`
+**Landing Page:** https://lp.devclub.com.br/parabens-psq-devf-v2/
 
 ---
 
