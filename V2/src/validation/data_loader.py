@@ -62,8 +62,9 @@ def get_active_model_path() -> Path:
 
     return model_path
 
-# URL padrão do Google Sheets (pode ser sobrescrito via env var)
+# URLs padrão dos Google Sheets (pode ser sobrescrito via env var)
 DEFAULT_SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1VYti8jX277VNMkvzrfnJSR_Ko8L1LQFDdMEeD6D8_Vo'
+SECONDARY_SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1OqNYA5zU9ix1uf52ovRYIdLhcugzwgfKOheKxE_zgvE'
 
 
 class LeadDataLoader:
@@ -84,7 +85,7 @@ class LeadDataLoader:
         self.required_columns = ['Data', 'E-mail', 'Campaign']
         self._thresholds_cache = None  # Cache dos thresholds do modelo
 
-    def load_leads_from_sheets(self, sheets_url: Optional[str] = None, start_date: Optional[str] = None, end_date: Optional[str] = None, use_cache: bool = True, num_sheets: int = 2) -> pd.DataFrame:
+    def load_leads_from_sheets(self, sheets_url: Optional[str] = None, start_date: Optional[str] = None, end_date: Optional[str] = None, use_cache: bool = True, num_sheets: int = 2, include_secondary: bool = True) -> pd.DataFrame:
         """
         Carrega leads diretamente do Google Sheets (produção) com cache local.
 
@@ -94,59 +95,77 @@ class LeadDataLoader:
             end_date: Data fim para filtro (YYYY-MM-DD) - opcional
             use_cache: Se True, usa cache local se disponível e válido (default: True)
             num_sheets: Número de abas para carregar (default: 2 para validação, 1 para retreino)
+            include_secondary: Se True, também carrega da planilha secundária (aba 0 apenas)
 
         Returns:
             DataFrame normalizado (mesmo formato que load_leads_csv)
         """
-        # Determinar URL
+        # Determinar URLs
+        urls_to_load = []
+
         if sheets_url is None:
             sheets_url = os.getenv('GOOGLE_SHEETS_URL', DEFAULT_SHEETS_URL)
 
+        urls_to_load.append(('Principal', sheets_url, num_sheets))
+
+        # Adicionar planilha secundária se solicitado
+        if include_secondary:
+            secondary_url = os.getenv('SECONDARY_SHEETS_URL', SECONDARY_SHEETS_URL)
+            urls_to_load.append(('Secundária', secondary_url, 1))  # Apenas aba 0
+
+        # Carregar de todas as planilhas
+        all_dfs = []
+
+        for planilha_nome, current_url, n_sheets in urls_to_load:
+            logger.debug(f" Carregando planilha {planilha_nome}")
+            df_planilha = self._load_single_spreadsheet(current_url, start_date, end_date, use_cache, n_sheets)
+            if df_planilha is not None and len(df_planilha) > 0:
+                all_dfs.append(df_planilha)
+                logger.info(f"    Planilha {planilha_nome}: {len(df_planilha)} leads carregados")
+
+        # Combinar todas as planilhas
+        if not all_dfs:
+            logger.warning("    Nenhum lead carregado de nenhuma planilha")
+            return pd.DataFrame()
+
+        if len(all_dfs) == 1:
+            return all_dfs[0]
+
+        df_combined = pd.concat(all_dfs, ignore_index=True, sort=False)
+
+        # Remover duplicatas por email (após normalização usa 'email' minúsculo)
+        email_col = 'email' if 'email' in df_combined.columns else 'E-mail'
+
+        if email_col not in df_combined.columns:
+            logger.warning(f"    Coluna de email não encontrada. Colunas: {list(df_combined.columns[:10])}")
+            logger.info(f"    Google Sheets [TOTAL]: {len(df_combined)} leads (sem remoção de duplicatas)")
+            return df_combined
+
+        original_len = len(df_combined)
+        df_combined = df_combined.drop_duplicates(subset=[email_col], keep='first')
+        duplicates = original_len - len(df_combined)
+        if duplicates > 0:
+            logger.info(f"    Removidas {duplicates} duplicatas entre planilhas")
+
+        logger.info(f"    Google Sheets [TOTAL]: {len(df_combined)} leads únicos")
+
+        return df_combined
+
+    def _load_single_spreadsheet(self, sheets_url: str, start_date: Optional[str], end_date: Optional[str], use_cache: bool, num_sheets: int) -> pd.DataFrame:
+        """
+        Carrega leads de uma única planilha do Google Sheets.
+
+        Returns:
+            DataFrame normalizado ou None em caso de erro
+        """
         # Extrair SHEET_ID da URL
         import re
         match = re.search(r'/spreadsheets/d/([a-zA-Z0-9-_]+)', sheets_url)
         if not match:
-            raise ValueError(f"URL inválida do Google Sheets: {sheets_url}")
+            logger.error(f"URL inválida do Google Sheets: {sheets_url}")
+            return None
         sheet_id = match.group(1)
 
-        # Configurar cache
-        import time
-        cache_dir = Path.home() / '.cache' / 'smart_ads'
-        cache_file = cache_dir / 'sheets_leads_cache.csv'
-        cache_max_age_hours = 24
-
-        # Verificar se deve usar cache
-        if use_cache and cache_file.exists():
-            file_age_hours = (time.time() - cache_file.stat().st_mtime) / 3600
-            if file_age_hours < cache_max_age_hours:
-                logger.debug(f" Usando cache local (idade: {file_age_hours:.1f}h)")
-                logger.debug(f"   Arquivo: {cache_file}")
-                try:
-                    df = pd.read_csv(cache_file, parse_dates=['Data'])
-                    logger.debug(f"    {len(df)} linhas carregadas do cache")
-
-                    # Filtrar por período se especificado
-                    if start_date or end_date:
-                        original_len = len(df)
-                        if start_date:
-                            start_dt = pd.to_datetime(start_date)
-                            df = df[df['Data'] >= start_dt]
-                        if end_date:
-                            end_dt = pd.to_datetime(end_date) + pd.Timedelta(days=1)
-                            df = df[df['Data'] < end_dt]
-                        logger.debug(f"    Filtrado por período: {original_len}  {len(df)} leads")
-
-                    # Normalizar
-                    df_normalized = self._normalize_leads_dataframe(df, show_summary=False)
-
-                    # Mostrar resumo final
-                    logger.info(f"    Google Sheets [cache]: {len(df_normalized)} leads carregados")
-
-                    return df_normalized
-                except Exception as e:
-                    logger.warning(f"    Erro ao ler cache, recarregando do Sheets: {e}")
-
-        logger.debug(f" Carregando leads do Google Sheets (produção)")
         logger.debug(f"   URL: {sheets_url[:50]}...")
 
         try:
@@ -253,13 +272,10 @@ class LeadDataLoader:
             num_abas = len(dfs_to_combine)
             logger.debug(f"    {len(df)} linhas TOTAIS lidas do Google Sheets ({num_abas} aba{'s' if num_abas > 1 else ''} combinada{'s' if num_abas > 1 else ''})")
 
-            # Salvar no cache (antes de filtrar por período)
-            try:
-                cache_dir.mkdir(parents=True, exist_ok=True)
-                df.to_csv(cache_file, index=False)
-                logger.debug(f"    Cache salvo: {cache_file}")
-            except Exception as e:
-                logger.warning(f"    Erro ao salvar cache (não crítico): {e}")
+            # Garantir que coluna Data existe antes de filtrar
+            if 'Data' not in df.columns:
+                logger.error("    Coluna 'Data' não encontrada no DataFrame")
+                return None
 
             # Filtrar por período se especificado
             if start_date or end_date:
