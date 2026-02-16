@@ -94,18 +94,19 @@ url_csv = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&
 df = pd.read_csv(url_csv)
 ```
 
-### 5. Planilha Atual em Produção
+### 5. Planilhas
 
-**Nome:** `[LF] Pesquisa - Mai25`
+#### Planilha Principal
 
 **ID:** `1VYti8jX277VNMkvzrfnJSR_Ko8L1LQFDdMEeD6D8_Vo`
 
-**Total de abas:** 14
+**Aba principal:** `[LF] Pesquisa`
 
-**Aba principal:**
-- Nome: `[LF] Pesquisa`
-- GID: 0
-- Leads: ~55,000
+#### Planilha Backup
+
+**ID:** `1OqNYA5zU9ix1uf52ovRYIdLhcugzwgfKOheKxE_zgvE`
+
+**Aba principal:** `[LF] Pesquisa`
 
 ### 6. Limitações e Considerações
 

@@ -857,6 +857,7 @@ async def webhook_update_survey(
                 'utm_medium': 'Medium',
                 'utm_campaign': 'Campaign',
                 'utm_term': 'Term',
+                'utm_content': 'Content',
                 'tem_comp': 'Tem computador/notebook?'
             }
 

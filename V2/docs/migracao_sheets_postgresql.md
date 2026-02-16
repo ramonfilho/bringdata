@@ -1,3 +1,29 @@
+## ✅ INVESTIGAÇÃO CONCLUÍDA - Scores Históricos (16/02/2026)
+
+**Deploy 00202-4wl (30/01 14:35)**: Modelo `20260117_123914` → `20260130_090227`
+
+**Testes:**
+- Janeiro (13-27/01): -5.30% diferença
+- Fevereiro (01-05/02): -0.29% diferença ✅
+- Código 30/01 vs atual: IDÊNTICOS (ambos -2.93%)
+
+**Conclusão**: Commits 15/02 não causaram regressão. Sistema estável desde 30/01
+
+## ✅ WEBHOOK VALIDADO - End-to-End (16/02/2026)
+
+**Teste:** 15 leads reais fev/26 via `/webhook/lead_capture` + `/webhook/update_survey`
+
+**Resultados:**
+- 15/15 processados (0 erros)
+- Diferença média: **+0.04%**
+- 13/15 < 5% diferença
+
+**Fix:** `'utm_content': 'Content'` adicionado ao mapeamento (app.py:861)
+
+**Status:** Backend pronto para produção. Próximo passo: alteração front-end Página 2
+
+---
+
 ## 🚨 BUG CRÍTICO ENCONTRADO - Scoring ML (15/02/2026)
 
 **Problema:** Scores gerados pela API PostgreSQL são 41% menores que os esperados (lead D10 do Sheets recalculado vira D7). **Causa raiz:** O pipeline de encoding (`apply_categorical_encoding`) usa `pd.get_dummies()` que só cria colunas one-hot para valores presentes nos dados. Com 1 único lead, cada campo categórico tem apenas 1 valor, então cria apenas 1 coluna em vez de todas as possibilidades (ex: `ocupacao="Sou CLT"` cria só `ocupacao_sou_clt`, mas modelo espera também `ocupacao_sou_autonomo`, `ocupacao_aposentado`, etc.). Resultado: 36 de 52 features ficam ausentes (preenchidas com 0), causando scores drasticamente errados. **Solução em andamento:** Modificar `encoding.py` para usar Feature Registry (`model_input_features.ordered_list`) do MLflow e garantir que TODAS as 52 features esperadas sejam criadas, mesmo que não apareçam nos dados de predição. Isso exige também adicionar campos faltantes no mapeamento PostgreSQL→Sheets (`created_at`, `utm_source`, `utm_medium`, `utm_term`, `tem_comp`) que não estavam sendo passados para o pipeline. **Status:** Testando localmente antes de deploy em produção.
