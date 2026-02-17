@@ -39,6 +39,7 @@ def unificar_medium_para_producao(df_medium_unificado: pd.DataFrame) -> pd.DataF
         'Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação',
         'Lookalike 2% Alunos + Interesse Linguagem de Programação',
         'Lookalike 2% Cadastrados - DEV 2.0 + Interesses',
+        'Mix Quente',
         'Outros',
         'dgen'
     }
@@ -66,6 +67,7 @@ def unificar_medium_para_producao(df_medium_unificado: pd.DataFrame) -> pd.DataF
         'Lookalike 2% Alunos + Interesse Linguagem de Programação': 'Lookalike 2% Alunos + Interesse Linguagem de Programação',
         'dgen': 'dgen',
         'Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação': 'Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação',
+        'Mix Quente': 'Mix Quente',
         'nan': 'nan',
 
         # DESCONTINUADAS - Direcionar para 'Outros' (5 categorias)
@@ -200,10 +202,11 @@ def relatorio_unificacao_producao(df_original: pd.DataFrame, df_unificado: pd.Da
     # Verificar se temos exatamente as 8 categorias + nan
     categorias_finais = set(df_unificado['Medium'].dropna().unique())
     categorias_esperadas = {
-        'Aberto', 'Interesse Programação', 'Linguagem de programação',
+        'Aberto', 'Linguagem de programação',
         'Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação',
         'Lookalike 2% Alunos + Interesse Linguagem de Programação',
         'Lookalike 2% Cadastrados - DEV 2.0 + Interesses',
+        'Mix Quente',
         'Outros', 'dgen'
     }
 

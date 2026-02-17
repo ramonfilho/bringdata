@@ -183,12 +183,15 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     if 'Atualmente, qual a sua faixa salarial?' in df.columns:
         df['Atualmente, qual a sua faixa salarial?'] = df['Atualmente, qual a sua faixa salarial?'].apply(limpar_texto)
 
-        # Remover pontos finais
-        df.loc[df['Atualmente, qual a sua faixa salarial?'] == 'Não tenho renda.', 'Atualmente, qual a sua faixa salarial?'] = 'Não tenho renda'
-        df.loc[df['Atualmente, qual a sua faixa salarial?'] == 'Entre R$1.000 a R$2.000 reais ao mês.', 'Atualmente, qual a sua faixa salarial?'] = 'Entre R$1.000 a R$2.000 reais ao mês'
-        df.loc[df['Atualmente, qual a sua faixa salarial?'] == 'Entre R$2.001 a R$3.000 reais ao mês.', 'Atualmente, qual a sua faixa salarial?'] = 'Entre R$2.001 a R$3.000 reais ao mês'
-        df.loc[df['Atualmente, qual a sua faixa salarial?'] == 'Entre R$3.001 a R$5.000 reais ao mês.', 'Atualmente, qual a sua faixa salarial?'] = 'Entre R$3.001 a R$5.000 reais ao mês'
-        df.loc[df['Atualmente, qual a sua faixa salarial?'] == 'Mais de R$5.001 reais ao mês.', 'Atualmente, qual a sua faixa salarial?'] = 'Mais de R$5.001 reais ao mês'
+        # Mapeamento pós-normalização: variantes → categorias canônicas (compatível com produção)
+        mapa_faixa = {
+            'nenhuma renda':   'nao tenho renda',
+            'ate r 2000':      'entre r1000 a r2000 reais ao mes',
+            'r 2001 a 3000':   'entre r2001 a r3000 reais ao mes',
+            'r 3001 a 5000':   'entre r3001 a r5000 reais ao mes',
+            'acima de r 5000': 'mais de r5001 reais ao mes',
+        }
+        df['Atualmente, qual a sua faixa salarial?'] = df['Atualmente, qual a sua faixa salarial?'].replace(mapa_faixa)
 
         valores_unicos = df['Atualmente, qual a sua faixa salarial?'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
@@ -206,6 +209,17 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     logger.info("  6. Unificando O que você faz atualmente?")
     if 'O que você faz atualmente?' in df.columns:
         df['O que você faz atualmente?'] = df['O que você faz atualmente?'].apply(limpar_texto)
+
+        # Mapeamento pós-normalização: variantes → categorias canônicas (compatível com produção)
+        mapa_faz = {
+            'clt funcionario publico':              'sou cltfuncionario publico',
+            'autonomo empreendedor':                'sou autonomo',
+            'desempregado':                         'nao trabalho e nem estudo',
+            'estudante':                            'sou apenas estudante',
+            'aposentado':                           'sou aposentado',
+            'atualmente nao trabalho e nem estudo': 'nao trabalho e nem estudo',
+        }
+        df['O que você faz atualmente?'] = df['O que você faz atualmente?'].replace(mapa_faz)
 
         # Rastrear normalizações
         normalizacoes_faz = []
@@ -264,9 +278,16 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     if 'Qual a sua idade?' in df.columns:
         df['Qual a sua idade?'] = df['Qual a sua idade?'].apply(limpar_texto)
 
-        # Remover pontos finais
-        df.loc[df['Qual a sua idade?'] == 'Menos de 18 anos.', 'Qual a sua idade?'] = 'Menos de 18 anos'
-        df.loc[df['Qual a sua idade?'] == 'Mais de 55 anos.', 'Qual a sua idade?'] = 'Mais de 55 anos'
+        # Mapeamento pós-normalização: variantes sem "anos" → categorias canônicas (compatível com produção)
+        mapa_idade = {
+            '18 24':       '18 24 anos',
+            '25 34':       '25 34 anos',
+            '35 44':       '35 44 anos',
+            '45 54':       '45 54 anos',
+            'menos de 18': 'menos de 18 anos',
+            '55':          'mais de 55 anos',
+        }
+        df['Qual a sua idade?'] = df['Qual a sua idade?'].replace(mapa_idade)
 
         valores_unicos = df['Qual a sua idade?'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")

@@ -95,6 +95,27 @@ def setup_output_logging(output_subdir='training'):
 
 
 
+class _TrainingFormatter(logging.Formatter):
+    """
+    Formatter que garante que todas as linhas tenham timestamp.
+
+    Mensagens com \\n inicial eram usadas para adicionar separação visual,
+    mas causavam linhas sem timestamp no log. Este formatter detecta esse
+    padrão e emite uma linha em branco (com timestamp) antes do conteúdo.
+    """
+
+    def format(self, record):
+        import copy
+        if isinstance(record.msg, str) and record.msg.startswith('\n'):
+            blank = copy.copy(record)
+            blank.msg = ''
+            blank.args = ()
+            content = copy.copy(record)
+            content.msg = record.msg.lstrip('\n')
+            return super().format(blank) + '\n' + super().format(content)
+        return super().format(record)
+
+
 def setup_logging(verbosity='normal', log_file=None):
     """
     Configura logging com níveis de verbosidade
@@ -124,17 +145,23 @@ def setup_logging(verbosity='normal', log_file=None):
 
     # Handler para console (stdout)
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+    console_handler.setFormatter(_TrainingFormatter(log_format, datefmt=date_format))
     root_logger.addHandler(console_handler)
 
     # Handler para arquivo (se fornecido)
     if log_file:
         file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
-        file_handler.setFormatter(logging.Formatter(log_format, datefmt=date_format))
+        file_handler.setFormatter(_TrainingFormatter(log_format, datefmt=date_format))
         root_logger.addHandler(file_handler)
 
     # Configurar nível
     root_logger.setLevel(LEVEL_MAP.get(verbosity, logging.INFO))
+
+    # Suprimir loggers verbosos de bibliotecas externas
+    for noisy_logger in ('urllib3', 'urllib3.connectionpool', 'urllib3.util.retry',
+                         'requests', 'google.auth', 'google.auth._default',
+                         'google.auth.transport', 'googleapiclient'):
+        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
 
 # Logger global do módulo
 logger = logging.getLogger(__name__)
@@ -466,10 +493,6 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
 
     # Usar os datasets finais
     df_pesquisa_final = df_pesquisa_unificado
-
-    # Gerar relatórios finais (apenas em DEBUG)
-    gerar_relatorio_colunas(df_pesquisa_final, "DATASET PESQUISA")
-    gerar_relatorio_colunas(df_vendas_final, "DATASET VENDAS")
 
     logger.info("=" * 80)
     # === CÉLULA 7: Unificação completa de categorias ===

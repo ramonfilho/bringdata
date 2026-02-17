@@ -163,6 +163,7 @@ def extrair_publico_medium(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     unificacoes_manuais = {
         # Case sensitivity
         'ABERTO': 'Aberto',
+        'MIX QUENTE': 'Mix Quente',
 
         # Lookalikes similares mas diferentes percentuais (manter separados como solicitado)
         # Interesses similares mas diferentes especificidades (manter separados como solicitado)

@@ -47,7 +47,10 @@ def unificar_utm_source_term(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         df['Source'] = df['Source'].astype('object')  # Garantir tipo object
 
         # Agrupar outras categorias em "outros"
-        outras_sources = ['fb', 'teste', '[field id="utm_source"]', 'facebook-ads-SiteLink', 'utm_source']
+        outras_sources = [
+            'fb', 'teste', '[field id="utm_source"]', 'facebook-ads-SiteLink', 'utm_source',
+            'manychat', 'organico', 'youtube-bio',
+        ]
 
         for source in outras_sources:
             if source in df['Source'].values:

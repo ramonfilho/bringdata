@@ -83,8 +83,6 @@ class GuruSalesExtractor:
                 transactions = data.get('data', [])
                 all_transactions.extend(transactions)
 
-                logger.debug(f'   Página {page}: {len(transactions)} transações')
-
                 # Verificar se tem mais páginas
                 if not data.get('has_more_pages'):
                     break
