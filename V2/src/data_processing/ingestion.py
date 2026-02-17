@@ -527,12 +527,13 @@ def read_all_training_sources(
                 start_date=api_start_date,  # None = sem filtro de data
                 end_date=api_end_date,      # None = sem filtro de data
                 use_cache=False,  # Sempre buscar dados frescos no retreino
-                num_sheets=num_sheets_api  # Retreino: apenas aba 0
+                num_sheets=num_sheets_api,  # Retreino: apenas aba 0
+                training_mode=True  # Colunas demográficas chegam com nomes originais para a Célula 5 renomear
             )
 
             if not sheets_df.empty:
                 # Converter para formato esperado: {filename: {sheetname: DataFrame}}
-                # Renomear colunas para formato do notebook
+                # Colunas de identidade/UTM: mapeadas de snake_case para nomes do notebook
                 sheets_formatted = pd.DataFrame()
                 sheets_formatted['E-mail'] = sheets_df['email']
                 sheets_formatted['Nome Completo'] = sheets_df.get('nome', '')
@@ -545,19 +546,13 @@ def read_all_training_sources(
                 sheets_formatted['Content'] = sheets_df.get('content', '')
                 sheets_formatted['lead_score'] = sheets_df.get('lead_score', None)
 
-                # Colunas demográficas (perguntas do formulário)
-                sheets_formatted['O seu gênero:'] = sheets_df.get('genero', None)
-                sheets_formatted['Qual a sua idade?'] = sheets_df.get('idade', None)
-                sheets_formatted['O que você faz atualmente?'] = sheets_df.get('ocupacao', None)
-                sheets_formatted['Atualmente, qual a sua faixa salar'] = sheets_df.get('faixa_salarial', None)
-                sheets_formatted['Você possui cartão de crédito?'] = sheets_df.get('cartao_credito', None)
-                sheets_formatted['O que mais você quer ver no evento?'] = sheets_df.get('interesse_evento', None)
-                sheets_formatted['Tem computador/notebook?'] = sheets_df.get('tem_computador', None)
-                sheets_formatted['Já estudou programação?'] = sheets_df.get('estudou_programacao', None)
-                sheets_formatted['Você já fez/faz/pretende fazer faculdade?'] = sheets_df.get('pretende_faculdade', None)
-                # Usar nomes completos para ser consistente com arquivos locais (column_unification.py fará a unificação)
-                sheets_formatted['Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?'] = sheets_df.get('investiu_curso_online', None)
-                sheets_formatted['O que mais te chama atenção na profissão de Programador?'] = sheets_df.get('interesse_programacao', None)
+                # Colunas demográficas: em training_mode, chegam com nomes originais do formulário.
+                # Passamos tudo que não foi já consumido acima — a Célula 5 renomeia igual aos Excels.
+                cols_consumidas = {'email', 'nome', 'telefone', 'data_captura', 'campaign',
+                                   'source', 'medium', 'term', 'content', 'lead_score', 'decile'}
+                for col in sheets_df.columns:
+                    if col not in cols_consumidas and col not in sheets_formatted.columns:
+                        sheets_formatted[col] = sheets_df[col]
 
                 api_data['[API] Leads Google Sheets'] = {
                     '[LF] Pesquisa - API': sheets_formatted

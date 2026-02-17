@@ -85,7 +85,7 @@ class LeadDataLoader:
         self.required_columns = ['Data', 'E-mail', 'Campaign']
         self._thresholds_cache = None  # Cache dos thresholds do modelo
 
-    def load_leads_from_sheets(self, sheets_url: Optional[str] = None, start_date: Optional[str] = None, end_date: Optional[str] = None, use_cache: bool = True, num_sheets: int = 2, include_secondary: bool = True) -> pd.DataFrame:
+    def load_leads_from_sheets(self, sheets_url: Optional[str] = None, start_date: Optional[str] = None, end_date: Optional[str] = None, use_cache: bool = True, num_sheets: int = 2, include_secondary: bool = True, training_mode: bool = False) -> pd.DataFrame:
         """
         Carrega leads diretamente do Google Sheets (produção) com cache local.
 
@@ -96,6 +96,9 @@ class LeadDataLoader:
             use_cache: Se True, usa cache local se disponível e válido (default: True)
             num_sheets: Número de abas para carregar (default: 2 para validação, 1 para retreino)
             include_secondary: Se True, também carrega da planilha secundária (aba 0 apenas)
+            training_mode: Se True, colunas demográficas passam com nomes originais para a
+                           Célula 5 normalizar (igual aos arquivos Excel). Se False (produção),
+                           normaliza para snake_case para alimentar o modelo diretamente.
 
         Returns:
             DataFrame normalizado (mesmo formato que load_leads_csv)
@@ -118,7 +121,7 @@ class LeadDataLoader:
 
         for planilha_nome, current_url, n_sheets in urls_to_load:
             logger.debug(f" Carregando planilha {planilha_nome}")
-            df_planilha = self._load_single_spreadsheet(current_url, start_date, end_date, use_cache, n_sheets)
+            df_planilha = self._load_single_spreadsheet(current_url, start_date, end_date, use_cache, n_sheets, training_mode=training_mode)
             if df_planilha is not None and len(df_planilha) > 0:
                 all_dfs.append(df_planilha)
                 logger.info(f"    Planilha {planilha_nome}: {len(df_planilha)} leads carregados")
@@ -151,7 +154,7 @@ class LeadDataLoader:
 
         return df_combined
 
-    def _load_single_spreadsheet(self, sheets_url: str, start_date: Optional[str], end_date: Optional[str], use_cache: bool, num_sheets: int) -> pd.DataFrame:
+    def _load_single_spreadsheet(self, sheets_url: str, start_date: Optional[str], end_date: Optional[str], use_cache: bool, num_sheets: int, training_mode: bool = False) -> pd.DataFrame:
         """
         Carrega leads de uma única planilha do Google Sheets.
 
@@ -290,7 +293,7 @@ class LeadDataLoader:
                 logger.debug(f"    Filtrado por período: {original_len}  {len(df)} leads")
 
             # Normalizar usando mesma lógica do CSV
-            df_normalized = self._normalize_leads_dataframe(df, show_summary=False)
+            df_normalized = self._normalize_leads_dataframe(df, show_summary=False, training_mode=training_mode)
 
             # Mostrar resumo final em INFO level
             tab_names_str = ', '.join(tab_names) if len(tab_names) > 1 else tab_names[0]
@@ -302,7 +305,7 @@ class LeadDataLoader:
             logger.error(f" Erro ao carregar do Google Sheets: {e}")
             raise
 
-    def _normalize_leads_dataframe(self, df: pd.DataFrame, show_summary: bool = False, source_info: str = None) -> pd.DataFrame:
+    def _normalize_leads_dataframe(self, df: pd.DataFrame, show_summary: bool = False, source_info: str = None, training_mode: bool = False) -> pd.DataFrame:
         """
         Normaliza DataFrame de leads (interno - usado por CSV e Sheets).
 
@@ -310,6 +313,9 @@ class LeadDataLoader:
             df: DataFrame bruto com colunas originais
             show_summary: Se True, mostra resumo final em INFO level
             source_info: Informação da fonte para incluir no resumo (ex: "Google Sheets [[LF] Pesquisa]")
+            training_mode: Se True, colunas demográficas passam com nomes originais do formulário
+                           para a Célula 5 (column_unification) normalizar junto com os arquivos Excel.
+                           Se False (produção), normaliza para snake_case.
 
         Returns:
             DataFrame normalizado
@@ -370,17 +376,31 @@ class LeadDataLoader:
         df_norm['content'] = df.get('Content', np.nan)
 
         # Colunas demográficas (perguntas do formulário)
-        df_norm['genero'] = df.get('genero', np.nan)
-        df_norm['idade'] = df.get('idade', np.nan)
-        df_norm['ocupacao'] = df.get('o_que_faz_atualmente', np.nan)
-        df_norm['faixa_salarial'] = df.get('faixa_salarial', np.nan)
-        df_norm['cartao_credito'] = df.get('tem_cartao_credito', np.nan)
-        df_norm['interesse_evento'] = df.get('o_que_quer_ver_evento', np.nan)
-        df_norm['tem_computador'] = df.get('tem_computador', np.nan)
-        df_norm['estudou_programacao'] = df.get('estudou_programacao', np.nan)
-        df_norm['pretende_faculdade'] = df.get('fez_faculdade', np.nan)
-        df_norm['investiu_curso_online'] = df.get('Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?', np.nan)
-        df_norm['interesse_programacao'] = df.get('O que mais te chama atenção na profissão de Programador?', np.nan)
+        if training_mode:
+            # No treino, as colunas demográficas passam com seus nomes originais do formulário.
+            # A Célula 5 (column_unification_refactored.py) é o único responsável por renomear,
+            # igual ao que faz com os arquivos Excel. Assim o mapeamento existe em um só lugar.
+            cols_ja_consumidas = {
+                'E-mail', 'Nome Completo', 'Telefone', 'Data', 'Data do Envio',
+                'Campaign', 'Source', 'Medium', 'Content', 'Term',
+                'lead_score', 'Faixa', 'Faixa A', 'Faixa B', 'Faixa C', 'Faixa D',
+                'Pontuação', 'Score',
+            }
+            for col in df.columns:
+                if col not in cols_ja_consumidas and col not in df_norm.columns:
+                    df_norm[col] = df[col]
+        else:
+            df_norm['genero'] = df.get('genero', np.nan)
+            df_norm['idade'] = df.get('idade', np.nan)
+            df_norm['ocupacao'] = df.get('o_que_faz_atualmente', np.nan)
+            df_norm['faixa_salarial'] = df.get('faixa_salarial', np.nan)
+            df_norm['cartao_credito'] = df.get('tem_cartao_credito', np.nan)
+            df_norm['interesse_evento'] = df.get('o_que_quer_ver_evento', np.nan)
+            df_norm['tem_computador'] = df.get('tem_computador', np.nan)
+            df_norm['estudou_programacao'] = df.get('estudou_programacao', np.nan)
+            df_norm['pretende_faculdade'] = df.get('fez_faculdade', np.nan)
+            df_norm['investiu_curso_online'] = df.get('Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?', np.nan)
+            df_norm['interesse_programacao'] = df.get('O que mais te chama atenção na profissão de Programador?', np.nan)
 
         # LIMPEZA DE UTMs: Detectar e limpar casos problemáticos
 
