@@ -87,12 +87,14 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         # Limpar textos primeiro
         df['interesse_programacao'] = df['interesse_programacao'].apply(limpar_texto)
 
-        # Mapping após limpeza
-        df.loc[df['interesse_programacao'] == 'Todas as alternativas.', 'interesse_programacao'] = 'Todas as alternativas'
-        df.loc[df['interesse_programacao'] == 'Poder trabalhar de qualquer lugar do mundo.', 'interesse_programacao'] = 'Poder trabalhar de qualquer lugar do mundo'
-        df.loc[df['interesse_programacao'] == 'A possibilidade de ganhar altos salários.', 'interesse_programacao'] = 'A possibilidade de ganhar altos salários'
-        df.loc[df['interesse_programacao'] == 'Trabalhar para outros países e ganhar em outra moeda.', 'interesse_programacao'] = 'Trabalhar para outros países e ganhar em outra moeda'
-        df.loc[df['interesse_programacao'] == 'A ideia de nunca faltar emprego na área.', 'interesse_programacao'] = 'A ideia de nunca faltar emprego na área'
+        # Mapeamento semântico pós-normalização: variantes com mesmo significado → categoria canônica
+        mapa_interesse = {
+            'trabalhar de qualquer lugar':        'poder trabalhar de qualquer lugar do mundo',
+            'ganhar mais dinheiro bons salarios': 'a possibilidade de ganhar altos salarios',
+            'estabilidade nunca faltar emprego':  'a ideia de nunca faltar emprego na area',
+            'trabalhar para fora dolar':          'trabalhar para outros paises e ganhar em outra moeda',
+        }
+        df['interesse_programacao'] = df['interesse_programacao'].replace(mapa_interesse)
 
         valores_unicos = df['interesse_programacao'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
@@ -114,10 +116,6 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     if 'Tem computador/notebook?' in df.columns:
         df['Tem computador/notebook?'] = df['Tem computador/notebook?'].apply(limpar_texto)
 
-        df.loc[df['Tem computador/notebook?'] == 'SIM', 'Tem computador/notebook?'] = 'Sim'
-        df.loc[df['Tem computador/notebook?'] == 'não', 'Tem computador/notebook?'] = 'Não'
-        df.loc[df['Tem computador/notebook?'] == 'NÃO', 'Tem computador/notebook?'] = 'Não'
-
         valores_unicos = df['Tem computador/notebook?'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
@@ -135,14 +133,19 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     if 'O que mais você quer ver no evento?' in df.columns:
         df['O que mais você quer ver no evento?'] = df['O que mais você quer ver no evento?'].apply(limpar_texto)
 
-        # Unificar "conseguir" vs "consegui" (usar texto normalizado após limpar_texto)
-        df.loc[df['O que mais você quer ver no evento?'] == 'fazer transicao de carreira e consegui meu primeiro emprego na area', 'O que mais você quer ver no evento?'] = 'fazer transicao de carreira e conseguir meu primeiro emprego na area'
-
-        # Unificar "Quero saber se é para mim" (com espaços especiais)
-        df.loc[df['O que mais você quer ver no evento?'].str.contains('Quero saber.*é.*para.*mim', na=False, regex=True), 'O que mais você quer ver no evento?'] = 'Quero saber se é para mim'
-
-        # Unificar recrutadora
-        df.loc[df['O que mais você quer ver no evento?'] == 'A aula com a recrutadora;', 'O que mais você quer ver no evento?'] = 'A aula com a recrutadora'
+        # Mapeamento semântico pós-normalização: variantes com mesmo significado → categoria canônica
+        mapa_evento = {
+            # Erro tipográfico: 'consegui' em vez de 'conseguir'
+            'fazer transicao de carreira e consegui meu primeiro emprego na area':
+                'fazer transicao de carreira e conseguir meu primeiro emprego na area',
+            # Versões curtas/alternativas de categorias existentes
+            'projeto na pratica':               'fazer um projeto na pratica',
+            'como conseguir emprego':           'fazer transicao de carreira e conseguir meu primeiro emprego na area',
+            'como fazer transicao de carreira': 'fazer transicao de carreira e conseguir meu primeiro emprego na area',
+            'quero saber se e pra mim':         'quero saber se e para mim',
+            'como fazer freelancer':            'fazer freelancer como programador',
+        }
+        df['O que mais você quer ver no evento?'] = df['O que mais você quer ver no evento?'].replace(mapa_evento)
 
         valores_unicos = df['O que mais você quer ver no evento?'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
@@ -162,9 +165,6 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     logger.info("  4. Unificando Você possui cartão de crédito?")
     if 'Você possui cartão de crédito?' in df.columns:
         df['Você possui cartão de crédito?'] = df['Você possui cartão de crédito?'].apply(limpar_texto)
-
-        # Todos os "Sim" (com ou sem caracteres especiais)
-        df.loc[df['Você possui cartão de crédito?'].str.contains('Sim', na=False), 'Você possui cartão de crédito?'] = 'Sim'
 
         valores_unicos = df['Você possui cartão de crédito?'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
@@ -210,57 +210,25 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     if 'O que você faz atualmente?' in df.columns:
         df['O que você faz atualmente?'] = df['O que você faz atualmente?'].apply(limpar_texto)
 
-        # Mapeamento pós-normalização: variantes → categorias canônicas (compatível com produção)
+        # Mapeamento semântico pós-normalização: variantes → categorias canônicas (compatível com produção)
         mapa_faz = {
+            # Variantes de formulários antigos (formas curtas)
             'clt funcionario publico':              'sou cltfuncionario publico',
             'autonomo empreendedor':                'sou autonomo',
             'desempregado':                         'nao trabalho e nem estudo',
             'estudante':                            'sou apenas estudante',
             'aposentado':                           'sou aposentado',
             'atualmente nao trabalho e nem estudo': 'nao trabalho e nem estudo',
+            # Autônomo com descrição → autônomo genérico
+            'sou autonomo uber freela vendedor etc': 'sou autonomo',
+            # Variantes de faculdade → categoria unificada
+            'estudo ti na faculdade mas quero aprender mais por fora': 'estudo na faculdade',
+            'faco outro curso na faculdade e quero mudar para ti':     'estudo na faculdade',
         }
         df['O que você faz atualmente?'] = df['O que você faz atualmente?'].replace(mapa_faz)
 
-        # Rastrear normalizações
-        normalizacoes_faz = []
-
-        # Corrigir "autonomo" para "autônomo"
-        if 'Sou autonomo' in df['O que você faz atualmente?'].values:
-            count = (df['O que você faz atualmente?'] == 'Sou autonomo').sum()
-            normalizacoes_faz.append(f"'Sou autonomo'  'Sou autônomo' ({count} leads)")
-            df.loc[df['O que você faz atualmente?'] == 'Sou autonomo', 'O que você faz atualmente?'] = 'Sou autônomo'
-
-        # Unificar "autônomo" com descrição
-        if 'Sou autônomo (Uber, freela, vendedor, etc).' in df['O que você faz atualmente?'].values:
-            count = (df['O que você faz atualmente?'] == 'Sou autônomo (Uber, freela, vendedor, etc).').sum()
-            normalizacoes_faz.append(f"'Sou autônomo (Uber,...)'  'Sou autônomo' ({count} leads)")
-            df.loc[df['O que você faz atualmente?'] == 'Sou autônomo (Uber, freela, vendedor, etc).', 'O que você faz atualmente?'] = 'Sou autônomo'
-
-        # Unificar "não trabalho"
-        if 'Atualmente não trabalho e nem estudo.' in df['O que você faz atualmente?'].values:
-            count = (df['O que você faz atualmente?'] == 'Atualmente não trabalho e nem estudo.').sum()
-            normalizacoes_faz.append(f"'Atualmente não trabalho...'  'Não trabalho e nem estudo' ({count} leads)")
-            df.loc[df['O que você faz atualmente?'] == 'Atualmente não trabalho e nem estudo.', 'O que você faz atualmente?'] = 'Não trabalho e nem estudo'
-
-        # Remover ponto final de "Trabalho em outra área"
-        if 'Trabalho em outra área e quero fazer transição para tecnologia.' in df['O que você faz atualmente?'].values:
-            count = (df['O que você faz atualmente?'] == 'Trabalho em outra área e quero fazer transição para tecnologia.').sum()
-            if count > 0:
-                normalizacoes_faz.append(f"Remoção de ponto final: {count} leads")
-            df.loc[df['O que você faz atualmente?'] == 'Trabalho em outra área e quero fazer transição para tecnologia.', 'O que você faz atualmente?'] = 'Trabalho em outra área e quero fazer transição para tecnologia'
-
-        # Remover ponto final de outras categorias
-        df.loc[df['O que você faz atualmente?'] == 'Estou no ensino médio ou acabei de sair e quero entrar na programação.', 'O que você faz atualmente?'] = 'Estou no ensino médio ou acabei de sair e quero entrar na programação'
-        df.loc[df['O que você faz atualmente?'] == 'Estudo T.I. na faculdade mas quero aprender mais por fora.', 'O que você faz atualmente?'] = 'Estudo T.I. na faculdade mas quero aprender mais por fora'
-        df.loc[df['O que você faz atualmente?'] == 'Faço outro curso na faculdade e quero mudar para T.I.', 'O que você faz atualmente?'] = 'Faço outro curso na faculdade e quero mudar para T.I'
-
         valores_unicos = df['O que você faz atualmente?'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
-
-        if normalizacoes_faz:
-            logger.debug(f"    Normalizações aplicadas:")
-            for norm in normalizacoes_faz:
-                logger.debug(f"      - {norm}")
 
         # Mostrar distribuição final
         total = len(df)
