@@ -637,45 +637,6 @@ def filtrar_vendas_devclub(df_vendas: pd.DataFrame) -> pd.DataFrame:
     for produto, count in produtos_devclub.items():
         logger.debug(f"  {produto}: {count:,} vendas")
 
-    # DEBUG: Distribuição por arquivo de origem (ANTES do filtro)
-    if 'arquivo_origem' in df_vendas.columns:
-        logger.debug("")
-        logger.debug("DISTRIBUIÇÃO POR ARQUIVO - ANTES DO FILTRO DEVCLUB:")
-        logger.debug("-" * 80)
-        vendas_por_arquivo_antes = df_vendas['arquivo_origem'].value_counts()
-        for arquivo, count in vendas_por_arquivo_antes.items():
-            pct = (count / vendas_antes) * 100
-            logger.debug(f"  {arquivo:<50} {count:>6,} vendas ({pct:>5.1f}%)")
-        logger.debug("-" * 80)
-        logger.debug(f"  TOTAL: {vendas_antes:,} vendas")
-
-    # DEBUG: Distribuição por arquivo de origem (DEPOIS do filtro - apenas DevClub)
-    if 'arquivo_origem' in df_vendas_devclub.columns:
-        logger.debug("")
-        logger.debug("DISTRIBUIÇÃO POR ARQUIVO - VENDAS DEVCLUB:")
-        logger.debug("-" * 80)
-        vendas_por_arquivo_devclub = df_vendas_devclub['arquivo_origem'].value_counts()
-        for arquivo, count in vendas_por_arquivo_devclub.items():
-            pct = (count / vendas_depois) * 100
-            logger.debug(f"  {arquivo:<50} {count:>6,} vendas ({pct:>5.1f}%)")
-        logger.debug("-" * 80)
-        logger.debug(f"  TOTAL DEVCLUB: {vendas_depois:,} vendas")
-        logger.debug("")
-
-        # Mostrar conversão (quantos % de cada arquivo viraram DevClub)
-        logger.debug("TAXA DE CONVERSÃO DEVCLUB POR ARQUIVO:")
-        logger.debug("-" * 80)
-        for arquivo in vendas_por_arquivo_antes.index:
-            antes = vendas_por_arquivo_antes.get(arquivo, 0)
-            depois = vendas_por_arquivo_devclub.get(arquivo, 0)
-            taxa = (depois / antes * 100) if antes > 0 else 0
-            logger.debug(f"  {arquivo:<50} {depois:>6,}/{antes:>6,} ({taxa:>5.1f}%)")
-        logger.debug("-" * 80)
-
     logger.info("")
-
-    # DEBUG: Verificar max de 'data' antes de retornar
-    if 'data' in df_vendas_devclub.columns:
-        logger.debug(f"  DEBUG FIM filtrar_vendas_devclub: data max = {df_vendas_devclub['data'].max()}, non-null = {df_vendas_devclub['data'].notna().sum()}")
 
     return df_vendas_devclub

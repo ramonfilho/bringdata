@@ -55,24 +55,6 @@ from src.monitoring.data_quality import capture_training_categories, capture_tra
 # Logging será configurado no main() via setup_logging(verbosity)
 
 
-class Tee:
-    """Duplica output para console e arquivo (como comando tee do Unix)."""
-    def __init__(self, file_path):
-        self.terminal = sys.stdout
-        self.log = open(file_path, 'w', encoding='utf-8')
-
-    def write(self, message):
-        self.terminal.write(message)
-        self.log.write(message)
-        self.log.flush()  # Força escrita imediata
-
-    def flush(self):
-        self.terminal.flush()
-        self.log.flush()
-
-    def close(self):
-        self.log.close()
-
 
 def setup_output_logging(output_subdir='training'):
     """
@@ -143,16 +125,17 @@ def setup_logging(verbosity='normal', log_file=None):
     log_format = '%(asctime)s [%(levelname)-8s] %(message)s'
     date_format = '%Y-%m-%d %H:%M:%S'
 
-    # Handler para console (stdout)
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(_TrainingFormatter(log_format, datefmt=date_format))
-    root_logger.addHandler(console_handler)
-
-    # Handler para arquivo (se fornecido)
+    # Handler para arquivo (obrigatório — garante que o log vai para outputs/training/)
+    # Usar FileHandler diretamente evita qualquer redirecionamento de shell (> /tmp/...)
     if log_file:
         file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
         file_handler.setFormatter(_TrainingFormatter(log_format, datefmt=date_format))
         root_logger.addHandler(file_handler)
+
+    # Handler para stderr (não afetado por redirecionamento de stdout)
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setFormatter(_TrainingFormatter(log_format, datefmt=date_format))
+    root_logger.addHandler(stderr_handler)
 
     # Configurar nível
     root_logger.setLevel(LEVEL_MAP.get(verbosity, logging.INFO))
