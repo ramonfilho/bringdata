@@ -80,12 +80,41 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     """
     df = df_pesquisa.copy()
 
+    # NORMALIZAÇÃO INICIAL: aplica limpar_texto em todas as colunas categóricas de uma vez.
+    # Colunas excluídas intencionalmente:
+    #   - E-mail, Telefone: limpar_texto remove pontuação (@, -, parênteses) — quebra o dado
+    #   - Data: não é texto categórico
+    #   - Medium: usa separador '|' para parsing posterior (célula 11) — não pode normalizar
+    #   - arquivo_origem, aba_origem: metadados internos, não viram features do modelo
+    COLUNAS_CATEGORICAS = [
+        # Survey — respostas de formulário
+        'interesse_programacao',
+        'Tem computador/notebook?',
+        'O que mais você quer ver no evento?',
+        'Você possui cartão de crédito?',
+        'Atualmente, qual a sua faixa salarial?',
+        'O que você faz atualmente?',
+        'Qual a sua idade?',
+        'O seu gênero:',
+        'Já estudou programação?',
+        'Você já fez/faz/pretende fazer faculdade?',
+        'investiu_curso_online',
+        'Qual o seu nível em programação?',
+        # Identificadores usados para feature engineering (nome_comprimento, nome_valido, etc.)
+        'Nome Completo',
+        # UTM — processamento próprio na célula 10, mas sem separadores especiais
+        'Source',
+        'Term',
+    ]
+    colunas_presentes = [c for c in COLUNAS_CATEGORICAS if c in df.columns]
+    for coluna in colunas_presentes:
+        df[coluna] = df[coluna].apply(limpar_texto)
+    logger.info(f"  Normalização inicial: {len(colunas_presentes)} colunas normalizadas")
+
     # NORMAL: Apenas cabeçalho
     logger.info("  Aplicando limpeza e unificação completa...")
     logger.info("  1. Unificando interesse_programacao")
     if 'interesse_programacao' in df.columns:
-        # Limpar textos primeiro
-        df['interesse_programacao'] = df['interesse_programacao'].apply(limpar_texto)
 
         # Mapeamento semântico pós-normalização: variantes com mesmo significado → categoria canônica
         mapa_interesse = {
@@ -114,8 +143,6 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     # 2. TEM COMPUTADOR/NOTEBOOK
     logger.info("  2. Unificando Tem computador/notebook?")
     if 'Tem computador/notebook?' in df.columns:
-        df['Tem computador/notebook?'] = df['Tem computador/notebook?'].apply(limpar_texto)
-
         valores_unicos = df['Tem computador/notebook?'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
@@ -131,8 +158,6 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     # 3. O QUE MAIS VOCÊ QUER VER NO EVENTO
     logger.info("  3. Unificando O que mais você quer ver no evento?")
     if 'O que mais você quer ver no evento?' in df.columns:
-        df['O que mais você quer ver no evento?'] = df['O que mais você quer ver no evento?'].apply(limpar_texto)
-
         # Mapeamento semântico pós-normalização: variantes com mesmo significado → categoria canônica
         mapa_evento = {
             # Erro tipográfico: 'consegui' em vez de 'conseguir'
@@ -164,8 +189,6 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     # 4. VOCÊ POSSUI CARTÃO DE CRÉDITO
     logger.info("  4. Unificando Você possui cartão de crédito?")
     if 'Você possui cartão de crédito?' in df.columns:
-        df['Você possui cartão de crédito?'] = df['Você possui cartão de crédito?'].apply(limpar_texto)
-
         valores_unicos = df['Você possui cartão de crédito?'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
@@ -181,8 +204,6 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     # 5. ATUALMENTE, QUAL A SUA FAIXA SALARIAL
     logger.info("  5. Unificando Atualmente, qual a sua faixa salarial?")
     if 'Atualmente, qual a sua faixa salarial?' in df.columns:
-        df['Atualmente, qual a sua faixa salarial?'] = df['Atualmente, qual a sua faixa salarial?'].apply(limpar_texto)
-
         # Mapeamento pós-normalização: variantes → categorias canônicas (compatível com produção)
         mapa_faixa = {
             'nenhuma renda':   'nao tenho renda',
@@ -208,8 +229,6 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     # 6. O QUE VOCÊ FAZ ATUALMENTE
     logger.info("  6. Unificando O que você faz atualmente?")
     if 'O que você faz atualmente?' in df.columns:
-        df['O que você faz atualmente?'] = df['O que você faz atualmente?'].apply(limpar_texto)
-
         # Mapeamento semântico pós-normalização: variantes → categorias canônicas (compatível com produção)
         mapa_faz = {
             # Variantes de formulários antigos (formas curtas)
@@ -244,8 +263,6 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     # 7. QUAL A SUA IDADE
     logger.info("  7. Unificando Qual a sua idade?")
     if 'Qual a sua idade?' in df.columns:
-        df['Qual a sua idade?'] = df['Qual a sua idade?'].apply(limpar_texto)
-
         # Mapeamento pós-normalização: variantes sem "anos" → categorias canônicas (compatível com produção)
         mapa_idade = {
             '18 24':       '18 24 anos',
@@ -269,12 +286,13 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             valor_str = str(valor) if pd.notna(valor) else 'NaN'
             logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
-    # 8. OUTRAS COLUNAS CATEGÓRICAS (não processadas acima)
+    # 8. OUTRAS COLUNAS CATEGÓRICAS (normalizadas no batch inicial, sem mapeamento semântico)
     outras_colunas = [
         'O seu gênero:',
         'Já estudou programação?',
         'Você já fez/faz/pretende fazer faculdade?',
-        'investiu_curso_online'
+        'investiu_curso_online',
+        'Qual o seu nível em programação?',
     ]
 
     total = len(df)
