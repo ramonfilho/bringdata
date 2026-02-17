@@ -94,6 +94,27 @@ A Célula 11 está implementada em dois arquivos (`medium_training.py` e `medium
 
 ---
 
+## Plano de Investigação — Missing Rate em Colunas Categóricas
+
+Quatro colunas com missing relevante após a Célula 7. Investigar nas Células 8 e 13.
+
+| Coluna | Missing | Prioridade |
+|---|---|---|
+| `nivel_programacao` | 87.4% | Alta |
+| `tem_computador` | 42.2% | Alta |
+| `fez_faculdade` | 12.9% | Média |
+| `estudou_programacao` | 12.6% | Média |
+
+**Célula 8 — Verificar:**
+- `nivel_programacao` está sendo removida? Com 87.4% NaN é inutilizável como feature.
+- `tem_computador` está sendo mantida? Se sim, o NaN deve virar categoria `"nao_informado"`, não imputation por moda.
+
+**Célula 13 — Verificar:**
+- O filtro pós-cutoff (2025-03-01) melhora o missing de `estudou_programacao` e `fez_faculdade`? Esperado que sim, pois são perguntas adicionadas em eventos mais recentes.
+- Após o filtro, `nivel_programacao` e `tem_computador` ainda têm missing crítico?
+
+---
+
 ## Anotações — Células 15 em diante
 
 <!-- Espaço reservado para anotações das células 15+ -->

@@ -148,16 +148,16 @@ def verificar_consistencia_utm(df: pd.DataFrame):
         logger.debug("Tabela cruzada Source x Term:")
         logger.debug(str(tabela_cruzada))
 
-        # Verificar lógica: Term só deveria ser instagram/facebook quando Source = facebook-ads
-        # Term = instagram/facebook mas Source != facebook-ads
+        # Verificar lógica: Term só deveria ser instagram/facebook quando Source = facebookads
+        # (após limpar_texto, 'facebook-ads' vira 'facebookads' — sem hífen)
         mask_term_fb = df['Term'].isin(['instagram', 'facebook'])
-        mask_source_nao_fb = df['Source'] != 'facebook-ads'
+        mask_source_nao_fb = df['Source'] != 'facebookads'
 
         inconsistentes = df[mask_term_fb & mask_source_nao_fb]
 
         if len(inconsistentes) > 0:
             logger.debug(f"\nInconsistências encontradas: {len(inconsistentes)} registros")
-            logger.debug("Term = instagram/facebook mas Source != facebook-ads")
+            logger.debug("Term = instagram/facebook mas Source != facebookads")
 
             for idx, row in inconsistentes.head(5).iterrows():
                 logger.debug(f"  Source: {row['Source']}, Term: {row['Term']}")

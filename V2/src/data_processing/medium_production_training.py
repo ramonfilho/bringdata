@@ -120,15 +120,6 @@ def unificar_medium_para_producao(df_medium_unificado: pd.DataFrame) -> pd.DataF
 
     logger.debug(f"Mapeamento criado para {len(mapping_dict)} categorias")
 
-    # DEBUG: Distribuição antes da unificação
-    logger.debug("")
-    logger.debug("Distribuição antes da unificação (top 10):")
-    medium_antes = df['Medium'].value_counts(dropna=False)
-    for i, (valor, count) in enumerate(medium_antes.head(10).items(), 1):
-        pct = count / len(df) * 100
-        valor_str = str(valor) if pd.notna(valor) else 'nan'
-        logger.debug(f"{i:2d}. {valor_str[:50]:<52} {count:>6,} ({pct:>5.1f}%)")
-
     # FUNÇÃO DE UNIFICAÇÃO COM TRATAMENTO DE VALORES NÃO VISTOS
     # Sets para coletar valores não vistos (evitar duplicatas nos logs)
     valores_nao_mapeados = set()
@@ -198,34 +189,6 @@ def relatorio_unificacao_producao(df_original: pd.DataFrame, df_unificado: pd.Da
     logger.debug(f"Categorias antes: {antes_count}")
     logger.debug(f"Categorias depois: {depois_count}")
     logger.debug(f"Redução: {reducao} categorias ({reducao_pct:.1f}%)")
-
-    # Verificar se temos exatamente as 8 categorias + nan
-    categorias_finais = set(df_unificado['Medium'].dropna().unique())
-    categorias_esperadas = {
-        'Aberto', 'Linguagem de programação',
-        'Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação',
-        'Lookalike 2% Alunos + Interesse Linguagem de Programação',
-        'Lookalike 2% Cadastrados - DEV 2.0 + Interesses',
-        'Outros', 'dgen'
-        # Mix Quente: público válido de produção, mas ausente no dataset histórico de treino
-    }
-
-    logger.debug(f"\nVERIFICAÇÃO DE CONFORMIDADE COM PRODUÇÃO:")
-    if categorias_finais == categorias_esperadas:
-        logger.debug(f" SUCESSO: Dataset tem exatamente as {len(categorias_esperadas)} categorias esperadas para produção")
-    else:
-        categorias_extras = categorias_finais - categorias_esperadas
-        categorias_faltando = categorias_esperadas - categorias_finais
-
-        if categorias_extras:
-            logger.debug(f" ATENÇÃO: {len(categorias_extras)} categorias extras encontradas:")
-            for cat in sorted(categorias_extras):
-                logger.debug(f"    - {cat}")
-
-        if categorias_faltando:
-            logger.debug(f" ATENÇÃO: {len(categorias_faltando)} categorias esperadas estão faltando:")
-            for cat in sorted(categorias_faltando):
-                logger.debug(f"    - {cat}")
 
     # Distribuição final
     logger.debug(f"\nDistribuição final das categorias:")
