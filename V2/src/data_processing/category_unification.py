@@ -240,9 +240,10 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             'atualmente nao trabalho e nem estudo': 'nao trabalho e nem estudo',
             # Autônomo com descrição → autônomo genérico
             'sou autonomo uber freela vendedor etc': 'sou autonomo',
-            # Variantes de faculdade → categoria unificada
-            'estudo ti na faculdade mas quero aprender mais por fora': 'estudo na faculdade',
-            'faco outro curso na faculdade e quero mudar para ti':     'estudo na faculdade',
+            # Variantes de faculdade → sou apenas estudante
+            'estudo na faculdade':                                     'sou apenas estudante',
+            'estudo ti na faculdade mas quero aprender mais por fora': 'sou apenas estudante',
+            'faco outro curso na faculdade e quero mudar para ti':     'sou apenas estudante',
         }
         df['o_que_faz_atualmente'] = df['o_que_faz_atualmente'].replace(mapa_faz)
 

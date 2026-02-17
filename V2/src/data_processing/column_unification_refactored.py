@@ -219,119 +219,40 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
         df_vendas_unificado = df_vendas_unificado.drop(columns=['email contato'])
         logger.debug("  email contato  email")
 
-    # Unificar data
-    def fix_datetime_format(col):
-        """Converte datetime para string DD/MM/YYYY HH:MM:SS ou mantém NaT"""
-        return col.apply(lambda x: x.strftime('%d/%m/%Y %H:%M:%S') if pd.notna(x) and hasattr(x, 'strftime') else x)
+    # Unificar data — dinâmico: detecta colunas de data por dtype/nome, ordena por completude,
+    # preenche 'data' greedily da mais completa para a menos. Nenhum nome hardcoded.
+    date_keywords = ['data', 'date', 'criado', 'aprovacao', 'efetivado', 'pago']
 
-    date_format = '%d/%m/%Y %H:%M:%S'
+    candidatas_data = []
+    for col in df_vendas_unificado.columns:
+        if col == 'data':
+            continue
+        col_lower = col.lower()
+        if pd.api.types.is_datetime64_any_dtype(df_vendas_unificado[col]) or \
+                any(kw in col_lower for kw in date_keywords):
+            candidatas_data.append((col, int(df_vendas_unificado[col].notna().sum())))
 
-    # DEBUG: Verificar quais colunas de data existem
-    colunas_data_disponiveis = [c for c in df_vendas_unificado.columns if 'data' in c.lower() or c in ['Criado Em', 'Data Efetivado', 'Pago em']]
-    if colunas_data_disponiveis:
-        logger.debug(f"  Colunas de data disponíveis: {colunas_data_disponiveis}")
+    candidatas_data.sort(key=lambda x: x[1], reverse=True)
 
-    # DEBUG: Verificar quais condições são atendidas
-    has_criado_em = 'Criado Em' in df_vendas_unificado.columns
-    has_data_aprovacao = 'data aprovacao' in df_vendas_unificado.columns
-    has_data_efetivado = 'Data Efetivado' in df_vendas_unificado.columns
-    has_data = 'data' in df_vendas_unificado.columns
-    logger.debug(f"  Condições: Criado Em={has_criado_em}, data aprovacao={has_data_aprovacao}, Data Efetivado={has_data_efetivado}, data={has_data}")
+    logger.debug(f"  Colunas de data candidatas (ordenadas por completude):")
+    for col, nn in candidatas_data:
+        pct_miss = (1 - nn / len(df_vendas_unificado)) * 100 if len(df_vendas_unificado) > 0 else 0
+        logger.debug(f"    '{col}': {nn:,} preenchidos ({pct_miss:.1f}% missing)")
 
-    if 'Criado Em' in df_vendas_unificado.columns and 'data aprovacao' in df_vendas_unificado.columns and 'Data Efetivado' in df_vendas_unificado.columns:
-        df_vendas_unificado['Criado Em'] = fix_datetime_format(df_vendas_unificado['Criado Em'])
-        df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
-        df_vendas_unificado['Data Efetivado'] = fix_datetime_format(df_vendas_unificado['Data Efetivado'])
-        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], format=date_format, errors='coerce').fillna(
-            pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce')).fillna(
-            pd.to_datetime(df_vendas_unificado['Data Efetivado'], format=date_format, errors='coerce'))
-        df_vendas_unificado = df_vendas_unificado.drop(columns=['Criado Em', 'data aprovacao', 'Data Efetivado'])
-        logger.debug("  Criado Em + data aprovacao + Data Efetivado  data (formato BR corrigido)")
-    elif 'Criado Em' in df_vendas_unificado.columns and 'data aprovacao' in df_vendas_unificado.columns:
-        df_vendas_unificado['Criado Em'] = fix_datetime_format(df_vendas_unificado['Criado Em'])
-        df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
-        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], format=date_format, errors='coerce').fillna(
-            pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce'))
-        df_vendas_unificado = df_vendas_unificado.drop(columns=['Criado Em', 'data aprovacao'])
-        logger.debug("  Criado Em + data aprovacao  data (formato BR corrigido)")
-    elif 'Criado Em' in df_vendas_unificado.columns and 'Data Efetivado' in df_vendas_unificado.columns:
-        df_vendas_unificado['Criado Em'] = fix_datetime_format(df_vendas_unificado['Criado Em'])
-        df_vendas_unificado['Data Efetivado'] = fix_datetime_format(df_vendas_unificado['Data Efetivado'])
-        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], format=date_format, errors='coerce').fillna(
-            pd.to_datetime(df_vendas_unificado['Data Efetivado'], format=date_format, errors='coerce'))
-        df_vendas_unificado = df_vendas_unificado.drop(columns=['Criado Em', 'Data Efetivado'])
-        logger.debug("  Criado Em + Data Efetivado  data (formato BR corrigido)")
-    elif 'data aprovacao' in df_vendas_unificado.columns and 'Data Efetivado' in df_vendas_unificado.columns:
-        df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
-        df_vendas_unificado['Data Efetivado'] = fix_datetime_format(df_vendas_unificado['Data Efetivado'])
-        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce').fillna(
-            pd.to_datetime(df_vendas_unificado['Data Efetivado'], format=date_format, errors='coerce'))
-        df_vendas_unificado = df_vendas_unificado.drop(columns=['data aprovacao', 'Data Efetivado'])
-        logger.debug("  data aprovacao + Data Efetivado  data (formato BR corrigido)")
-    elif 'Criado Em' in df_vendas_unificado.columns:
-        df_vendas_unificado['Criado Em'] = fix_datetime_format(df_vendas_unificado['Criado Em'])
-        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Criado Em'], format=date_format, errors='coerce')
-        df_vendas_unificado = df_vendas_unificado.drop(columns=['Criado Em'])
-        logger.debug("  Criado Em  data (formato BR corrigido)")
-    elif 'data aprovacao' in df_vendas_unificado.columns and 'data' in df_vendas_unificado.columns:
-        # Caso especial: AMBAS colunas existem (guru.xlsx histórico + API Guru)
-        # ESTRATÉGIA: Preservar 'data' existente (API), preencher vazios com 'data aprovacao' (guru.xlsx)
-        # DEBUG: Verificar max de cada coluna ANTES do merge
-        logger.debug(f"    Antes do merge:")
-        logger.debug(f"      'data' dtype: {df_vendas_unificado['data'].dtype}")
-        logger.debug(f"      'data' max: {pd.to_datetime(df_vendas_unificado['data'], errors='coerce').max()}")
-        logger.debug(f"      'data aprovacao' max: {pd.to_datetime(df_vendas_unificado['data aprovacao'], errors='coerce', dayfirst=True).max()}")
-        logger.debug(f"      'data' non-null: {df_vendas_unificado['data'].notna().sum()}")
-        logger.debug(f"      'data aprovacao' non-null: {df_vendas_unificado['data aprovacao'].notna().sum()}")
+    if 'data' not in df_vendas_unificado.columns:
+        df_vendas_unificado['data'] = pd.NaT
 
-        # IMPORTANTE: NÃO sobrescrever 'data' existente!
-        # Apenas preencher linhas onde 'data' está vazia
-
-        # 1. Preservar 'data' existente (já datetime para API)
-        data_preservada = df_vendas_unificado['data'].copy()
-
-        # 2. Converter 'data aprovacao' para preencher vazios
-        df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
-        data_aprovacao_dt = pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce')
-
-        # 3. Preencher apenas onde 'data' está vazia
-        # CUIDADO: não usar fillna() diretamente pois pode converter dtype
-        # Usar mask para selecionar apenas linhas vazias
-        mask_vazio = data_preservada.isna()
-        data_preservada[mask_vazio] = data_aprovacao_dt[mask_vazio]
-
-        # 4. Atribuir de volta
-        df_vendas_unificado['data'] = data_preservada
-
-        # DEBUG: Verificar max DEPOIS do merge
-        logger.debug(f"    Depois do merge:")
-        logger.debug(f"      'data' max: {df_vendas_unificado['data'].max()}")
-        logger.debug(f"      'data' non-null: {df_vendas_unificado['data'].notna().sum()}")
-
-        df_vendas_unificado = df_vendas_unificado.drop(columns=['data aprovacao'])
-        logger.debug("  data (preservada) + data aprovacao (fill vazios)  data")
-    elif 'data aprovacao' in df_vendas_unificado.columns:
-        df_vendas_unificado['data aprovacao'] = fix_datetime_format(df_vendas_unificado['data aprovacao'])
-        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['data aprovacao'], format=date_format, errors='coerce')
-        df_vendas_unificado = df_vendas_unificado.drop(columns=['data aprovacao'])
-        logger.debug("  data aprovacao  data (formato BR corrigido)")
-    elif 'Data Efetivado' in df_vendas_unificado.columns:
-        df_vendas_unificado['Data Efetivado'] = fix_datetime_format(df_vendas_unificado['Data Efetivado'])
-        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Data Efetivado'], errors='coerce', dayfirst=True)
-        df_vendas_unificado = df_vendas_unificado.drop(columns=['Data Efetivado'])
-        logger.debug("  Data Efetivado  data (formato BR corrigido)")
-    elif 'Pago em' in df_vendas_unificado.columns and 'data' not in df_vendas_unificado.columns:
-        # Caso TMB-only: sem colunas de data padrão e sem 'data' já criada, usar 'Pago em' diretamente
-        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Pago em'], errors='coerce', dayfirst=True)
-        logger.debug("  Pago em → data (TMB-only, sem data aprovacao)")
-
-    # Preencher vazios em 'data' com 'Pago em' (registros TMB que não têm data aprovacao)
-    if 'Pago em' in df_vendas_unificado.columns and 'data' in df_vendas_unificado.columns:
-        pago_em_dt = pd.to_datetime(df_vendas_unificado['Pago em'], errors='coerce', dayfirst=True)
+    for col, _ in candidatas_data:
         mask_vazio = df_vendas_unificado['data'].isna()
-        df_vendas_unificado.loc[mask_vazio, 'data'] = pago_em_dt[mask_vazio]
-        filled = int(mask_vazio.sum()) - int(df_vendas_unificado['data'].isna().sum())
-        logger.debug(f"  Pago em → data: preencheu {filled:,} vazios (TMB)")
+        antes = int(mask_vazio.sum())
+        if antes > 0:
+            col_dt = pd.to_datetime(df_vendas_unificado[col], errors='coerce', dayfirst=True)
+            df_vendas_unificado.loc[mask_vazio, 'data'] = col_dt[mask_vazio]
+            filled = antes - int(df_vendas_unificado['data'].isna().sum())
+            logger.debug(f"  '{col}' → data: preencheu {filled:,} vazios")
+        else:
+            logger.debug(f"  'data' completa, descartando '{col}' sem usar")
+        df_vendas_unificado = df_vendas_unificado.drop(columns=[col])
 
     # Unificar telefone
     if 'Telefone' in df_vendas_unificado.columns and 'telefone contato' in df_vendas_unificado.columns:
