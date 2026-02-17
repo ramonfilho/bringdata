@@ -35,25 +35,25 @@ def load_ordinal_mappings_from_training(model_path: str) -> Dict[str, list]:
     ordinal_mappings = {}
 
     # Idade: ordem por faixa etária crescente
-    if 'Qual a sua idade?' in categorias:
-        idade_cats = categorias['Qual a sua idade?']
+    if 'idade' in categorias:
+        idade_cats = categorias['idade']
         # Ordenar por idade: menos de 18, 18-24, 25-34, 35-44, 45-54, mais de 55
         ordem_idade = []
         for cat in ['menos de 18 anos', '18 24 anos', '25 34 anos', '35 44 anos', '45 54 anos', 'mais de 55 anos']:
             if cat in idade_cats:
                 ordem_idade.append(cat)
-        ordinal_mappings['Qual a sua idade?'] = ordem_idade
+        ordinal_mappings['idade'] = ordem_idade
 
     # Salário: ordem por faixa salarial crescente
-    if 'Atualmente, qual a sua faixa salarial?' in categorias:
-        salario_cats = categorias['Atualmente, qual a sua faixa salarial?']
+    if 'faixa_salarial' in categorias:
+        salario_cats = categorias['faixa_salarial']
         # Ordenar por salário: sem renda, r1000-2000, r2001-3000, r3001-5000, r5001+
         ordem_salario = []
         for cat in ['nao tenho renda', 'entre r1000 a r2000 reais ao mes', 'entre r2001 a r3000 reais ao mes',
                     'entre r3001 a r5000 reais ao mes', 'mais de r5001 reais ao mes']:
             if cat in salario_cats:
                 ordem_salario.append(cat)
-        ordinal_mappings['Atualmente, qual a sua faixa salarial?'] = ordem_salario
+        ordinal_mappings['faixa_salarial'] = ordem_salario
 
     # dia_semana sempre numérico
     ordinal_mappings['dia_semana'] = [0, 1, 2, 3, 4, 5, 6]
@@ -106,9 +106,9 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
             # Fallback para hardcoded se arquivo não existe
             logger.warning("Usando mapeamentos ordinais hardcoded (fallback)")
             variaveis_ordinais = {
-                'Qual a sua idade?': ['menos de 18 anos', '18 24 anos', '25 34 anos',
+                'idade': ['menos de 18 anos', '18 24 anos', '25 34 anos',
                                       '35 44 anos', '45 54 anos', 'mais de 55 anos'],
-                'Atualmente, qual a sua faixa salarial?': ['nao tenho renda', 'entre r1000 a r2000 reais ao mes',
+                'faixa_salarial': ['nao tenho renda', 'entre r1000 a r2000 reais ao mes',
                                                            'entre r2001 a r3000 reais ao mes',
                                                            'entre r3001 a r5000 reais ao mes',
                                                            'mais de r5001 reais ao mes'],
@@ -118,9 +118,9 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
         # Training ou desenvolvimento sem model_path
         logger.info("Usando mapeamentos ordinais hardcoded (treino)")
         variaveis_ordinais = {
-            'Qual a sua idade?': ['menos de 18 anos', '18 24 anos', '25 34 anos',
+            'idade': ['menos de 18 anos', '18 24 anos', '25 34 anos',
                                   '35 44 anos', '45 54 anos', 'mais de 55 anos'],
-            'Atualmente, qual a sua faixa salarial?': ['nao tenho renda', 'entre r1000 a r2000 reais ao mes',
+            'faixa_salarial': ['nao tenho renda', 'entre r1000 a r2000 reais ao mes',
                                                        'entre r2001 a r3000 reais ao mes',
                                                        'entre r3001 a r5000 reais ao mes',
                                                        'mais de r5001 reais ao mes'],

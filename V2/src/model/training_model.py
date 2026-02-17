@@ -732,7 +732,7 @@ def registrar_features_e_modelo_devclub(
                 "name_mapping": mapeamento_nomes,
                 "encoding_applied": {
                     "categorical_encoding": "one-hot",
-                    "ordinal_features": ["Qual a sua idade?", "Atualmente, qual a sua faixa salarial?"],
+                    "ordinal_features": ["idade", "faixa_salarial"],
                     "binary_features": ["dia_semana"],
                     "removed_reference_categories": ["telefone_comprimento_8"]
                 },

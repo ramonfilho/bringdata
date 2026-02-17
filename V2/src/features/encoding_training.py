@@ -44,9 +44,9 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
     # IMPORTANTE: Usar valores NORMALIZADOS (após unificar_categorias_completo)
     # Estes valores devem dar match com o que está em categorias_esperadas.json
     variaveis_ordinais = {
-        'Qual a sua idade?': ['menos de 18 anos', '18 24 anos', '25 34 anos',
+        'idade': ['menos de 18 anos', '18 24 anos', '25 34 anos',
                               '35 44 anos', '45 54 anos', 'mais de 55 anos'],
-        'Atualmente, qual a sua faixa salarial?': ['nao tenho renda', 'entre r1000 a r2000 reais ao mes',
+        'faixa_salarial': ['nao tenho renda', 'entre r1000 a r2000 reais ao mes',
                                                    'entre r2001 a r3000 reais ao mes',
                                                    'entre r3001 a r5000 reais ao mes',
                                                    'mais de r5001 reais ao mes'],

@@ -502,17 +502,17 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     # IMPORTANTE: Captura APÓS célula 8 (remoção de features) para monitorar apenas colunas que vão para o modelo
     # Colunas críticas usadas no modelo - monitorar mudanças em qualidade de dados
     colunas_criticas_modelo = [
-        'O seu gênero:',
-        'Qual a sua idade?',
-        'O que você faz atualmente?',
-        'Atualmente, qual a sua faixa salarial?',  # Nome completo esperado
-        'Você possui cartão de crédito?',
-        'O que mais você quer ver no evento?',
-        'Já estudou programação?',
-        'Você já fez/faz/pretende fazer faculdade?',
+        'genero',
+        'idade',
+        'o_que_faz_atualmente',
+        'faixa_salarial',  # Nome completo esperado
+        'tem_cartao_credito',
+        'o_que_quer_ver_evento',
+        'estudou_programacao',
+        'fez_faculdade',
         'investiu_curso_online',
         'interesse_programacao',
-        'Tem computador/notebook?'
+        'tem_computador'
     ]
 
     missing_rates_baseline = {}

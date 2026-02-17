@@ -98,5 +98,5 @@ MISSING_RATE_IGNORE_COLUMNS = [
     'Qual estado você mora?',
 
     # Campo que pode estar vazio temporariamente
-    'Tem computador/notebook?',
+    'tem_computador',
 ]

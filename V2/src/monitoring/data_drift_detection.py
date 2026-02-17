@@ -30,16 +30,16 @@ PERIODO_D10_ALTO_JAN_FIM = '2026-01-14'
 
 # Features para analisar
 FEATURES_CATEGORICAS = [
-    'O seu gênero:',
-    'Qual a sua idade?',
-    'O que você faz atualmente?',
-    'Atualmente, qual a sua faixa salarial?',
-    'Você possui cartão de crédito?',
-    'Já estudou programação?',
-    'Você já fez/faz/pretende fazer faculdade?',
+    'genero',
+    'idade',
+    'o_que_faz_atualmente',
+    'faixa_salarial',
+    'tem_cartao_credito',
+    'estudou_programacao',
+    'fez_faculdade',
     'Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?',
     'O que mais te chama atenção na profissão de Programador?',
-    'O que mais você quer ver no evento?',
+    'o_que_quer_ver_evento',
     'Source',
     'Medium'
 ]

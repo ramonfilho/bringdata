@@ -310,6 +310,25 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
                 valor_str = str(valor) if pd.notna(valor) else 'NaN'
                 logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
+    # RENOMEAÇÃO FINAL: nomes de coluna padronizados (snake_case, sem acentos/pontuação)
+    # Feito ao final para que todo o processamento acima use os nomes originais sem alteração.
+    rename_colunas = {
+        'O seu gênero:':                          'genero',
+        'Tem computador/notebook?':               'tem_computador',
+        'O que mais você quer ver no evento?':    'o_que_quer_ver_evento',
+        'Você possui cartão de crédito?':         'tem_cartao_credito',
+        'Atualmente, qual a sua faixa salarial?': 'faixa_salarial',
+        'O que você faz atualmente?':             'o_que_faz_atualmente',
+        'Qual a sua idade?':                      'idade',
+        'Já estudou programação?':                'estudou_programacao',
+        'Você já fez/faz/pretende fazer faculdade?': 'fez_faculdade',
+        'Qual o seu nível em programação?':       'nivel_programacao',
+    }
+    colunas_para_renomear = {k: v for k, v in rename_colunas.items() if k in df.columns}
+    if colunas_para_renomear:
+        df = df.rename(columns=colunas_para_renomear)
+        logger.info(f"  Colunas renomeadas: {len(colunas_para_renomear)}")
+
     logger.info("")
 
     return df

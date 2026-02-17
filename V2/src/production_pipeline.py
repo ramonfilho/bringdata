@@ -236,10 +236,10 @@ class LeadScoringPipeline:
         # Contar categorias antes para tracking
         categorias_antes = {}
         colunas_pesquisa = [
-            'interesse_programacao', 'Tem computador/notebook?',
-            'O que mais você quer ver no evento?', 'Você possui cartão de crédito?',
-            'Atualmente, qual a sua faixa salarial?', 'O que você faz atualmente?',
-            'Qual a sua idade?', 'Você já fez/faz/pretende fazer faculdade?'
+            'interesse_programacao', 'tem_computador',
+            'o_que_quer_ver_evento', 'tem_cartao_credito',
+            'faixa_salarial', 'o_que_faz_atualmente',
+            'idade', 'fez_faculdade'
         ]
         for col in colunas_pesquisa:
             if col in self.data.columns:

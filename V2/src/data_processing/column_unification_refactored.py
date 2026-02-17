@@ -87,12 +87,12 @@ def unificar_colunas_pesquisa(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
     # Unificar colunas de faixa salarial (nome truncado da API vs nome completo dos arquivos locais)
     colunas_faixa_salarial = [
-        'Atualmente, qual a sua faixa salarial?',  # Arquivos locais (nome completo)
+        'faixa_salarial',  # Arquivos locais (nome completo)
         'Atualmente, qual a sua faixa salar'        # API (nome truncado)
     ]
 
     if all(col in df_pesquisa_unificado.columns for col in colunas_faixa_salarial):
-        df_pesquisa_unificado['Atualmente, qual a sua faixa salarial?'] = (
+        df_pesquisa_unificado['faixa_salarial'] = (
             df_pesquisa_unificado[colunas_faixa_salarial[0]]
             .fillna(df_pesquisa_unificado[colunas_faixa_salarial[1]])
         )
