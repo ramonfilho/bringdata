@@ -33,7 +33,7 @@ from src.data_processing.column_unification_refactored import (
     aplicar_filtro_status_risco,
     filtrar_vendas_devclub
 )
-from src.data_processing.category_unification import unificar_categorias_completo, gerar_relatorio_final_categorias
+from src.data_processing.category_unification import unificar_categorias_completo
 from src.data_processing.feature_removal import remover_features_desnecessarias, listar_colunas_restantes
 from src.data_processing.utm_training import unificar_utm_source_term, verificar_consistencia_utm
 from src.data_processing.medium_training import extrair_publico_medium, relatorio_final_medium
@@ -484,9 +484,6 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("")
 
     df_pesquisa_final_unificado = unificar_categorias_completo(df_pesquisa_final)
-
-    # Gerar relatório final
-    gerar_relatorio_final_categorias(df_pesquisa_final_unificado)
 
     logger.info("=" * 80)
     # === CÉLULA 8: Remoção de features desnecessárias ===
