@@ -209,7 +209,7 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
     date_format = '%d/%m/%Y %H:%M:%S'
 
     # DEBUG: Verificar quais colunas de data existem
-    colunas_data_disponiveis = [c for c in df_vendas_unificado.columns if 'data' in c.lower() or c in ['Criado Em', 'Data Efetivado']]
+    colunas_data_disponiveis = [c for c in df_vendas_unificado.columns if 'data' in c.lower() or c in ['Criado Em', 'Data Efetivado', 'Pago em']]
     if colunas_data_disponiveis:
         logger.debug(f"  Colunas de data disponíveis: {colunas_data_disponiveis}")
 
@@ -302,6 +302,18 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
         df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Data Efetivado'], errors='coerce', dayfirst=True)
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Data Efetivado'])
         logger.debug("  Data Efetivado  data (formato BR corrigido)")
+    elif 'Pago em' in df_vendas_unificado.columns and 'data' not in df_vendas_unificado.columns:
+        # Caso TMB-only: sem colunas de data padrão e sem 'data' já criada, usar 'Pago em' diretamente
+        df_vendas_unificado['data'] = pd.to_datetime(df_vendas_unificado['Pago em'], errors='coerce', dayfirst=True)
+        logger.debug("  Pago em → data (TMB-only, sem data aprovacao)")
+
+    # Preencher vazios em 'data' com 'Pago em' (registros TMB que não têm data aprovacao)
+    if 'Pago em' in df_vendas_unificado.columns and 'data' in df_vendas_unificado.columns:
+        pago_em_dt = pd.to_datetime(df_vendas_unificado['Pago em'], errors='coerce', dayfirst=True)
+        mask_vazio = df_vendas_unificado['data'].isna()
+        df_vendas_unificado.loc[mask_vazio, 'data'] = pago_em_dt[mask_vazio]
+        filled = int(mask_vazio.sum()) - int(df_vendas_unificado['data'].isna().sum())
+        logger.debug(f"  Pago em → data: preencheu {filled:,} vazios (TMB)")
 
     # Unificar telefone
     if 'Telefone' in df_vendas_unificado.columns and 'telefone contato' in df_vendas_unificado.columns:

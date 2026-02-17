@@ -9,7 +9,6 @@ ingestion:
     - "Pesquisa"
     - "Vendas"
     - "tmb"
-    - "Guru"
     - "Sheet"
 
   termos_remover:

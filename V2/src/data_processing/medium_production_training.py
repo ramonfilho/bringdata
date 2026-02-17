@@ -206,8 +206,8 @@ def relatorio_unificacao_producao(df_original: pd.DataFrame, df_unificado: pd.Da
         'Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação',
         'Lookalike 2% Alunos + Interesse Linguagem de Programação',
         'Lookalike 2% Cadastrados - DEV 2.0 + Interesses',
-        'Mix Quente',
         'Outros', 'dgen'
+        # Mix Quente: público válido de produção, mas ausente no dataset histórico de treino
     }
 
     logger.debug(f"\nVERIFICAÇÃO DE CONFORMIDADE COM PRODUÇÃO:")

@@ -167,7 +167,7 @@ def setup_logging(verbosity='normal', log_file=None):
 logger = logging.getLogger(__name__)
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=False, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal'):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal'):
     """Executa pipeline de treino completo.
 
     Args:
@@ -906,7 +906,8 @@ if __name__ == "__main__":
     parser.add_argument(
         '--include-api-data',
         action='store_true',
-        help='Incluir dados da API Guru e Google Sheets além dos arquivos locais (padrão: False)'
+        default=True,
+        help='Incluir dados da API Guru e Google Sheets além dos arquivos locais (padrão: True)'
     )
     parser.add_argument(
         '--api-start-date',

@@ -11,6 +11,7 @@ Extraído do notebook DevClub e tornado configurável.
 
 import pandas as pd
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -211,8 +212,12 @@ def filter_sheets(
                 'LF06' not in filename
             )
 
+            # Critério: excluir arquivos locais Guru (substituídos por dados da API Guru)
+            # Excluir apenas arquivos locais (.xlsx), não dados da API (que têm '[API]' no nome)
+            eh_guru_local = 'guru' in filename.lower() and '[API]' not in filename
+
             # Decidir se mantém a aba
-            if (nao_esta_vazia and not deve_remover_por_termo and not eh_lf_com_vendas and
+            if (nao_esta_vazia and not deve_remover_por_termo and not eh_lf_com_vendas and not eh_guru_local and
                 (tem_termo_permitido or tem_linhas_suficientes)):
 
                 # Aba MANTIDA
@@ -506,10 +511,6 @@ def read_all_training_sources(
     logger.debug(" BUSCANDO DADOS ADICIONAIS (API/Sheets)")
     logger.debug("-" * 60)
 
-    if not api_start_date or not api_end_date:
-        logger.warning("  Datas da API não fornecidas, pulando ingestão API")
-        return local_data
-
     try:
         # Importar loaders
         from src.validation.data_loader import LeadDataLoader, SalesDataLoader
@@ -517,13 +518,14 @@ def read_all_training_sources(
         api_data = {}
 
         # === LEADS DO GOOGLE SHEETS ===
+        # Quando sem datas, carrega tudo (sem filtro) — datas serão calculadas depois
         logger.info("\n 1/2: Leads do Google Sheets")
         try:
             lead_loader = LeadDataLoader()
             sheets_df = lead_loader.load_leads_from_sheets(
                 sheets_url=None,  # Usa default ou env var
-                start_date=api_start_date,
-                end_date=api_end_date,
+                start_date=api_start_date,  # None = sem filtro de data
+                end_date=api_end_date,      # None = sem filtro de data
                 use_cache=False,  # Sempre buscar dados frescos no retreino
                 num_sheets=num_sheets_api  # Retreino: apenas aba 0
             )
@@ -567,38 +569,56 @@ def read_all_training_sources(
         except Exception as e:
             logger.error(f"    Erro ao buscar leads do Sheets: {e}")
 
+        # === CALCULAR DATAS DOS LEADS SE NÃO FORNECIDAS ===
+        # Usa a data de cutoff do dataset (2025-03-01) como start, evitando carregar
+        # histórico antigo que seria descartado pelo filtro pós-cutoff no pipeline.
+        guru_start = api_start_date
+        guru_end = api_end_date
+
+        if not guru_start:
+            # DATA_CUTOFF: data de início do dataset de treino (definida em dataset_versioning_training.py)
+            # Subtrair 30 dias como buffer para cobrir a janela de conversão de 20 dias
+            from datetime import timedelta
+            DATA_CUTOFF = datetime(2025, 3, 1)
+            guru_start = (DATA_CUTOFF - timedelta(days=30)).strftime('%Y-%m-%d')
+            guru_end = datetime.today().strftime('%Y-%m-%d')
+            logger.info(f"\n  Período calculado: {guru_start} → {guru_end} (baseado no cutoff {DATA_CUTOFF.strftime('%Y-%m-%d')} - 30 dias)")
+
         # === VENDAS DA API GURU ===
         logger.info("\n 2/2: Vendas da API Guru")
-        try:
-            sales_loader = SalesDataLoader()
-            guru_df = sales_loader.load_guru_sales_from_api(
-                start_date=api_start_date,
-                end_date=api_end_date,
-                save_excel=False
-            )
+        if not guru_start or not guru_end:
+            logger.warning("  Datas não disponíveis, pulando Guru API")
+        else:
+            try:
+                sales_loader = SalesDataLoader()
+                guru_df = sales_loader.load_guru_sales_from_api(
+                    start_date=guru_start,
+                    end_date=guru_end,
+                    save_excel=False
+                )
 
-            if not guru_df.empty:
-                # Converter para formato esperado
-                guru_formatted = pd.DataFrame()
-                guru_formatted['email'] = guru_df['email']
-                guru_formatted['nome'] = guru_df.get('nome', '')
-                guru_formatted['telefone'] = guru_df.get('telefone', '')
-                guru_formatted['data'] = guru_df['sale_date']
-                guru_formatted['valor'] = guru_df['sale_value']
-                guru_formatted['utm_campaign'] = guru_df.get('utm_campaign', '')
-                guru_formatted['produto'] = 'DevClub'  # Produto padrão
-                guru_formatted['status'] = guru_df.get('status', 'Aprovada')  # Status para filtro (já pré-filtrado pela API)
-                guru_formatted['arquivo_origem'] = '[API] Guru'
+                if not guru_df.empty:
+                    # Converter para formato esperado
+                    guru_formatted = pd.DataFrame()
+                    guru_formatted['email'] = guru_df['email']
+                    guru_formatted['nome'] = guru_df.get('nome', '')
+                    guru_formatted['telefone'] = guru_df.get('telefone', '')
+                    guru_formatted['data'] = guru_df['sale_date']
+                    guru_formatted['valor'] = guru_df['sale_value']
+                    guru_formatted['utm_campaign'] = guru_df.get('utm_campaign', '')
+                    guru_formatted['produto'] = 'DevClub'  # Produto padrão
+                    guru_formatted['status'] = guru_df.get('status', 'Aprovada')  # Status para filtro (já pré-filtrado pela API)
+                    guru_formatted['arquivo_origem'] = '[API] Guru'
 
-                api_data['[API] Vendas Guru'] = {
-                    'Sheet1': guru_formatted
-                }
-                # Resumo já mostrado por load_guru_sales_from_api() com detalhes de filtros
-            else:
-                logger.warning("     Nenhuma venda encontrada na API Guru")
+                    api_data['[API] Vendas Guru'] = {
+                        'Sheet1': guru_formatted
+                    }
+                    # Resumo já mostrado por load_guru_sales_from_api() com detalhes de filtros
+                else:
+                    logger.warning("     Nenhuma venda encontrada na API Guru")
 
-        except Exception as e:
-            logger.error(f"    Erro ao buscar vendas da API Guru: {e}")
+            except Exception as e:
+                logger.error(f"    Erro ao buscar vendas da API Guru: {e}")
 
         # 3. COMBINAR DADOS LOCAIS + API
         if api_data:
