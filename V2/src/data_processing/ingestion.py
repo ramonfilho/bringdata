@@ -577,12 +577,11 @@ def read_all_training_sources(
 
         if not guru_start:
             # DATA_CUTOFF: data de início do dataset de treino (definida em dataset_versioning_training.py)
-            # Subtrair 30 dias como buffer para cobrir a janela de conversão de 20 dias
-            from datetime import timedelta
+            # Leads começam em 2025-03-01 → vendas também começam em 2025-03-01 (janela de conversão vai para frente)
             DATA_CUTOFF = datetime(2025, 3, 1)
-            guru_start = (DATA_CUTOFF - timedelta(days=30)).strftime('%Y-%m-%d')
+            guru_start = DATA_CUTOFF.strftime('%Y-%m-%d')
             guru_end = datetime.today().strftime('%Y-%m-%d')
-            logger.info(f"\n  Período calculado: {guru_start} → {guru_end} (baseado no cutoff {DATA_CUTOFF.strftime('%Y-%m-%d')} - 30 dias)")
+            logger.info(f"\n  Guru API: {guru_start} → {guru_end}  (a partir do cutoff do dataset)")
 
         # === VENDAS DA API GURU ===
         logger.info("\n 2/2: Vendas da API Guru")

@@ -615,9 +615,9 @@ def filtrar_vendas_devclub(df_vendas: pd.DataFrame) -> pd.DataFrame:
 
     # NORMAL: Resumo do filtro
     logger.info(f"  Vendas antes: {vendas_antes:,}")
-    logger.info(f"  Vendas DevClub: {vendas_depois:,}")
     logger.info(f"  Vendas removidas (outros produtos): {vendas_removidas:,}")
     logger.info(f"  Produtos DevClub únicos: {len(produtos_devclub)}")
+    logger.info(f"  TOTAL FINAL: {vendas_depois:,} vendas DevClub")
 
     # DEBUG: Top 20 produtos ANTES do filtro (para ver o que tem em TMB)
     logger.debug("")
