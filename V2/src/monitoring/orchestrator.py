@@ -451,6 +451,11 @@ class MonitoringOrchestrator:
         lines.append(" SUMÁRIO CRÍTICO DO SISTEMA")
         lines.append("="*72)
 
+        # Período de análise
+        window = funnel_metrics.get('window', {})
+        if window:
+            lines.append(f"\n Período analisado (BRT): {window['start_brt']} → {window['end_brt']}")
+
         # 1. Categorias não vistas no treino
         new_categories = [a for a in alerts if 'nova categoria' in a.message.lower() or 'não vista no treino' in a.message.lower()]
         if new_categories:
@@ -662,7 +667,17 @@ class MonitoringOrchestrator:
         from api.database import LeadCAPI
 
         metrics = {}
-        lookback_time = datetime.now(timezone.utc) - timedelta(hours=12)
+        now = datetime.now(timezone.utc)
+        lookback_time = now - timedelta(hours=12)
+
+        # Guardar janela de análise para exibir no sumário
+        brt = timezone(timedelta(hours=-3))
+        metrics['window'] = {
+            'start_utc': lookback_time.isoformat(),
+            'end_utc': now.isoformat(),
+            'start_brt': lookback_time.astimezone(brt).strftime('%d/%m/%Y %H:%M'),
+            'end_brt': now.astimezone(brt).strftime('%d/%m/%Y %H:%M'),
+        }
 
         # ETAPA 1: CAPTURA DE LEADS
         total_sheets_tab1 = len(leads_data) if leads_data else 0
