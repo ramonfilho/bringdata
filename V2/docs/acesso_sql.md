@@ -1,4 +1,94 @@
-# Acesso ao Banco PostgreSQL (Cloud SQL)
+# Acesso aos Bancos PostgreSQL
+
+---
+
+## Banco 2 — Railway (novo, produção futura)
+
+### Credenciais
+
+| Campo    | Valor |
+|----------|-------|
+| HOST     | `shortline.proxy.rlwy.net` |
+| PORT     | `11594` |
+| USER     | `postgres` |
+| PASSWORD | `$RAILWAY_DB_PASSWORD` (ver `.env`) |
+| DB       | `railway` |
+
+Conexão pública direta — **sem proxy**.
+
+### Conexão Python
+
+```python
+import pg8000.native
+import os
+
+conn = pg8000.native.Connection(
+    host=os.environ['RAILWAY_DB_HOST'],
+    port=int(os.environ['RAILWAY_DB_PORT']),
+    database=os.environ['RAILWAY_DB_NAME'],
+    user=os.environ['RAILWAY_DB_USER'],
+    password=os.environ['RAILWAY_DB_PASSWORD']
+)
+rows = conn.run('SELECT COUNT(*) FROM "Lead"')
+print(rows)
+conn.close()
+```
+
+### Tabela Principal: `Lead`
+
+Gerenciada pelo Prisma (frontend). Colunas:
+
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| `id` | text | PK |
+| `data` | timestamp | Data/hora do lead |
+| `hora` | text | Hora formatada |
+| `nomeCompleto` | text | Nome |
+| `email` | text | Email |
+| `telefone` | text | Telefone |
+| `pesquisa` | jsonb | Respostas da pesquisa (survey completo) |
+| `source` | text | UTM source |
+| `campaign` | text | UTM campaign |
+| `medium` | text | UTM medium |
+| `content` | text | UTM content |
+| `term` | text | UTM term |
+| `remoteIp` | text | IP do usuário |
+| `userAgent` | text | User agent |
+| `fbc` | text | Facebook click ID |
+| `fbp` | text | Facebook browser ID |
+| `pageUrl` | text | URL da página |
+| `leadScore` | double | Score ML (preenchido pelo pipeline) |
+| `decil` | integer | Decil 1-10 (preenchido pelo pipeline) |
+| `createdAt` | timestamp | Criação do registro |
+| `updatedAt` | timestamp | Última atualização |
+
+### Queries de Referência
+
+```sql
+-- Leads de hoje
+SELECT email, "nomeCompleto", "leadScore", decil, "createdAt"
+FROM "Lead"
+WHERE "createdAt"::date = CURRENT_DATE
+ORDER BY "createdAt" DESC;
+
+-- Leads sem score (pendentes de processamento ML)
+SELECT COUNT(*) FROM "Lead" WHERE "leadScore" IS NULL;
+
+-- Distribuição por decil
+SELECT decil, COUNT(*) as total
+FROM "Lead"
+WHERE decil IS NOT NULL
+GROUP BY decil ORDER BY decil;
+```
+
+### Notas
+- Tabela usa camelCase (padrão Prisma) — usar aspas duplas nas queries
+- `pesquisa` é JSONB com as respostas do formulário de pesquisa
+- `leadScore` e `decil` são nullable — preenchidos pelo pipeline ML após chegada do lead
+
+---
+
+## Banco 1 — Cloud SQL GCP (legado)
 
 ## Instância
 - **Projeto:** smart-ads-451319
@@ -6,7 +96,7 @@
 - **Região:** us-central1
 - **Banco:** smart_ads
 - **Usuário:** postgres
-- **Senha:** SmartAds2026DB!
+- **Senha:** `$CLOUDSQL_PASSWORD` (ver `.env`)
 
 ## Como Acessar Localmente
 
@@ -19,10 +109,11 @@ sleep 8  # aguardar proxy autenticar
 
 # 2. Conectar via Python (pg8000 já está no projeto)
 python3 << 'EOF'
-import pg8000.native
+import pg8000.native, os
 conn = pg8000.native.Connection(
     host='127.0.0.1', port=5432,
-    database='smart_ads', user='postgres', password='SmartAds2026DB!'
+    database='smart_ads', user='postgres',
+    password=os.environ['CLOUDSQL_PASSWORD']
 )
 rows = conn.run('SELECT COUNT(*) FROM leads_capi')
 print(rows)
