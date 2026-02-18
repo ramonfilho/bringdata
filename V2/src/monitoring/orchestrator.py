@@ -720,21 +720,24 @@ class MonitoringOrchestrator:
             }
 
         # ETAPA 4: ENVIO PARA META CAPI
+        # Filtra por created_at para contar apenas leads da janela atual,
+        # evitando inflacionar com backlog histórico processado pelo polling de 5min
         sent_to_capi = self.db.query(LeadCAPI).filter(
-            LeadCAPI.capi_sent_at >= lookback_time
+            LeadCAPI.created_at >= lookback_time,
+            LeadCAPI.capi_sent_at.isnot(None)
         ).count()
 
         estimated_events = int(sent_to_capi * 1.3)  # Aproximação
 
         metrics['capi_sent'] = {
             'leads_sent': sent_to_capi,
-            'send_rate': (sent_to_capi / total_sheets * 100) if total_sheets > 0 else 0,
+            'send_rate': (sent_to_capi / total_db * 100) if total_db > 0 else 0,
             'estimated_events': estimated_events
         }
 
         # ETAPA 5: RESPOSTA DA META
         with_response = self.db.query(LeadCAPI).filter(
-            LeadCAPI.capi_sent_at >= lookback_time,
+            LeadCAPI.created_at >= lookback_time,
             LeadCAPI.capi_response_status.isnot(None)
         ).all()
 
