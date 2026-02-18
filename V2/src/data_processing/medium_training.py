@@ -210,14 +210,14 @@ def relatorio_final_medium(df: pd.DataFrame):
     logger.debug(f"Públicos únicos: {valores_unicos}")
 
     logger.debug("")
-    logger.debug("Distribuição final dos públicos (top 20):")
+    logger.debug("Distribuição final dos públicos:")
     logger.debug("-" * 80)
     logger.debug(f"{'#':<3} {'PÚBLICO':<55} {'COUNT':<8} {'%':<6}")
     logger.debug("-" * 80)
 
     medium_final = df['Medium'].value_counts(dropna=False)
 
-    for i, (valor, count) in enumerate(medium_final.head(20).items(), 1):
+    for i, (valor, count) in enumerate(medium_final.items(), 1):
         pct = count / total_registros * 100
         valor_str = str(valor) if pd.notna(valor) else 'nan'
 
@@ -229,8 +229,6 @@ def relatorio_final_medium(df: pd.DataFrame):
 
         logger.debug(f"{i:<3} {valor_display:<55} {count:<8,} {pct:<6.1f}%")
 
-    if len(medium_final) > 20:
-        logger.debug(f"... e mais {len(medium_final) - 20} públicos")
 
 
 def exportar_categorias_medium(df: pd.DataFrame, arquivo_csv: str = 'categorias_medium_publicos.csv'):

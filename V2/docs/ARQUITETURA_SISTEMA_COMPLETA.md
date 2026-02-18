@@ -1,7 +1,7 @@
 # MAPEAMENTO COMPLETO DO SISTEMA SMART ADS V2
 
 > **DOCUMENTO CRÍTICO**: Leia este documento no início de TODA sessão de desenvolvimento.
-> Última atualização: 2025-11-18
+> Última atualização: 2026-02-17
 
 ---
 
@@ -21,7 +21,7 @@ A conexão com Cloud SQL PostgreSQL está **FUNCIONANDO** corretamente via Unix 
 CLOUD_SQL_CONNECTION_NAME=smart-ads-451319:us-central1:smart-ads-db
 DB_NAME=smart_ads
 DB_USER=postgres
-DB_PASSWORD=SmartAds2025!
+DB_PASSWORD=SmartAds2026DB!
 ```
 
 **Nota sobre Landing Page:** A página de captura usa `fetch` com `keepalive: true` (não `sendBeacon`).
@@ -66,7 +66,8 @@ DB_PASSWORD=SmartAds2025!
 |----------|--------|-----------|
 | `/health` | GET | Verificar pipeline e modelo |
 | `/predict/batch` | POST | Predição em batch via JSON |
-| `/webhook/lead_capture` | POST | Captura leads com FBP/FBC |
+| `/webhook/lead_capture` | POST | Captura leads Página 1 (com FBP/FBC/UTMs) |
+| `/webhook/update_survey` | POST | Atualiza lead com pesquisa Página 2 + scoring ML |
 | `/webhook/lead_capture/stats` | GET | Estatísticas de leads capturados |
 | `/webhook/lead_capture/recent` | GET | Últimos N leads capturados |
 | `/capi/process_daily_batch` | POST | Processa batch diário CAPI |
@@ -97,29 +98,10 @@ class LeadCaptureRequest:
 **Tecnologia:** SQLAlchemy ORM
 **Banco:** PostgreSQL (produção) ou SQLite (desenvolvimento)
 
-#### ⚠️ PROBLEMA CRÍTICO DE CONFIGURAÇÃO
+#### Conexão (RESOLVIDO 18/11/2025)
 
-```python
-def get_database_url() -> str:
-    # Opção 1: URL completa
-    if os.getenv('DATABASE_URL'):
-        return os.getenv('DATABASE_URL')
+O `database.py` detecta `CLOUD_SQL_CONNECTION_NAME` e conecta via Unix socket com pg8000:
 
-    # Opção 2: Componentes individuais (Cloud SQL)
-    db_host = os.getenv('DB_HOST')
-    db_password = os.getenv('DB_PASSWORD')
-
-    if db_host and db_password:  # ← NUNCA É TRUE NO CLOUD RUN!
-        return f"postgresql://..."
-
-    # Opção 3: Fallback SQLite ← SEMPRE CAI AQUI EM PRODUÇÃO!
-    return "sqlite:////tmp/smart_ads_dev.db"
-```
-
-**O Cloud Run tem:**
-- `run.googleapis.com/cloudsql-instances: smart-ads-451319:us-central1:smart-ads-db`
-
-**Mas o código NÃO sabe usar isso!** Precisa conectar via:
 ```
 postgresql+pg8000://postgres@/smart_ads?unix_sock=/cloudsql/smart-ads-451319:us-central1:smart-ads-db/.s.PGSQL.5432
 ```
@@ -266,7 +248,7 @@ Define qual modelo está em produção:
 ```yaml
 active_model:
   model_name: "v1_devclub_rf_temporal_single"
-  model_path: "files/20251111_212345"
+  model_path: "files/20260130_090227"
 ```
 
 ---
@@ -358,7 +340,7 @@ run.googleapis.com/cloudsql-instances: smart-ads-451319:us-central1:smart-ads-db
 **Solução implementada:**
 - Adicionado suporte a `CLOUD_SQL_CONNECTION_NAME` em database.py
 - Usa pg8000 driver com `URL.create()` e `unix_sock` parameter
-- Configurado `DB_PASSWORD=SmartAds2025!`
+- Configurado `DB_PASSWORD=SmartAds2026DB!`
 - Migration aplicada para adicionar colunas `first_name` e `last_name`
 
 ### 18/11/2025 - Nome/Sobrenome 0% cobertura
@@ -469,19 +451,18 @@ Para acessar o database localmente, você precisa:
 
 **Opção 1: Cloud SQL Auth Proxy** (recomendado)
 ```bash
-# Instalar proxy
-gcloud components install cloud-sql-proxy
-
-# Executar proxy
-cloud-sql-proxy smart-ads-451319:us-central1:smart-ads-db
+# Executar proxy (v2 já instalado via homebrew)
+cloud-sql-proxy smart-ads-451319:us-central1:smart-ads-db --port=5432 &
+sleep 8  # ⚠️ aguardar 8 segundos para autenticar antes de conectar
 
 # Configurar env vars
 export DB_HOST=127.0.0.1
 export DB_PORT=5432
 export DB_NAME=smart_ads
 export DB_USER=postgres
-export DB_PASSWORD=SmartAds2025!
+export DB_PASSWORD=SmartAds2026DB!
 ```
+> Ver detalhes completos em `docs/acesso_sql.md`
 
 **Opção 2: gcloud auth**
 ```bash
