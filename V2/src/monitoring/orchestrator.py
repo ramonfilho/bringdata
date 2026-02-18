@@ -414,7 +414,7 @@ class MonitoringOrchestrator:
                     return {'score': 0, 'd9': 0, 'd10': 0, 'count': 0}
 
                 score_mean = df_period['lead_score_float'].mean()
-                d9_pct = (df_period['decil'] == 'D09').sum() / len(df_period) * 100
+                d9_pct = (df_period['decil'] == 'D9').sum() / len(df_period) * 100
                 d10_pct = (df_period['decil'] == 'D10').sum() / len(df_period) * 100
 
                 return {
