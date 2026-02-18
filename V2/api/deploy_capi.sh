@@ -250,6 +250,23 @@ deploy_to_cloud_run() {
             exit 1
         }
 
+    # Garantir que 100% do tráfego vai para a nova revisão.
+    # Necessário quando o serviço está em modo de tráfego manual
+    # (ocorre após usar update-traffic manualmente).
+    NEW_REVISION=$(gcloud run revisions list \
+        --service=$SERVICE_NAME \
+        --region=$REGION \
+        --format="value(metadata.name)" \
+        --limit=1)
+
+    print_info "Direcionando 100% do tráfego para: $NEW_REVISION"
+    gcloud run services update-traffic $SERVICE_NAME \
+        --region=$REGION \
+        --to-revisions="$NEW_REVISION=100" \
+        --quiet || {
+            print_warning "Falha ao redirecionar tráfego (pode já estar correto)"
+        }
+
     print_success "Deploy concluído"
 
     # Se acesso público temporário
