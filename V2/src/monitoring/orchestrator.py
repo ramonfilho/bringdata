@@ -259,7 +259,7 @@ class MonitoringOrchestrator:
         """
         import gspread
         from google.auth import default as gauth_default
-        from datetime import timezone
+        from datetime import timezone, timedelta
 
         try:
             # Importar URL da planilha do app.py
@@ -309,9 +309,11 @@ class MonitoringOrchestrator:
                             # Parse com formato brasileiro (DD/MM/YYYY HH:MM:SS)
                             row_date = pd.to_datetime(row[date_col_idx], format='%d/%m/%Y %H:%M:%S', errors='coerce')
                             if pd.notna(row_date):
-                                # Converter para timezone-aware UTC se necessário
+                                # Aba 2 usa formato brasileiro (DD/MM/YYYY) → datas em BRT.
+                                # Atribuir BRT (não UTC) para comparar corretamente com lookback_time.
                                 if row_date.tzinfo is None:
-                                    row_date = row_date.replace(tzinfo=timezone.utc)
+                                    brt = timezone(timedelta(hours=-3))
+                                    row_date = row_date.replace(tzinfo=brt)
 
                                 if row_date >= lookback_time:
                                     count += 1

@@ -2610,7 +2610,12 @@ def fetch_leads_from_sheets(hours: int = 24) -> List[Dict[str, Any]]:
             if date_columns:
                 date_col = date_columns[0]
                 df[date_col] = pd.to_datetime(df[date_col], errors='coerce')
-                cutoff = datetime.now() - timedelta(hours=hours)
+                # Sheets armazena datas em BRT (naive). Cloud Run roda em UTC.
+                # datetime.now() em Cloud Run = UTC, causando janela 3h curta.
+                # Usar BRT naive para comparar com datas BRT do Sheets.
+                from datetime import timezone as _tz
+                _brt = _tz(timedelta(hours=-3))
+                cutoff = datetime.now(_tz.utc).astimezone(_brt).replace(tzinfo=None) - timedelta(hours=hours)
                 df_filtered = df[df[date_col] >= cutoff]
 
                 if len(df_filtered) > 0:
