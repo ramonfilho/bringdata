@@ -662,7 +662,7 @@ class MonitoringOrchestrator:
         from api.database import LeadCAPI
 
         metrics = {}
-        lookback_time = datetime.now(timezone.utc) - timedelta(hours=24)
+        lookback_time = datetime.now(timezone.utc) - timedelta(hours=12)
 
         # ETAPA 1: CAPTURA DE LEADS
         total_sheets_tab1 = len(leads_data) if leads_data else 0

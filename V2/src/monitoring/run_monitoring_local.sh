@@ -61,7 +61,7 @@ from api.app import fetch_leads_from_sheets, get_db
 
 # Buscar leads do Google Sheets
 print('🔍 Buscando leads do Google Sheets...')
-leads_data = fetch_leads_from_sheets(hours=24)
+leads_data = fetch_leads_from_sheets(hours=12)
 print(f'✅ {len(leads_data)} leads encontrados\n')
 
 # Obter model_path do modelo ativo
