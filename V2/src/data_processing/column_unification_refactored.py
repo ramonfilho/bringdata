@@ -106,24 +106,6 @@ def unificar_colunas_pesquisa(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         )
         df_pesquisa_unificado = df_pesquisa_unificado.drop(columns=[colunas_faixa_salarial[1]])
 
-    # RENOMEAÇÃO: nomes de coluna padronizados (snake_case, sem acentos/pontuação)
-    # Feito aqui (célula 5) após toda unificação de fontes, para que células 6+ usem nomes novos.
-    rename_colunas = {
-        'O seu gênero:':                             'genero',
-        'Tem computador/notebook?':                  'tem_computador',
-        'O que mais você quer ver no evento?':       'o_que_quer_ver_evento',
-        'Você possui cartão de crédito?':            'tem_cartao_credito',
-        'Atualmente, qual a sua faixa salarial?':    'faixa_salarial',
-        'O que você faz atualmente?':                'o_que_faz_atualmente',
-        'Qual a sua idade?':                         'idade',
-        'Já estudou programação?':                   'estudou_programacao',
-        'Você já fez/faz/pretende fazer faculdade?': 'fez_faculdade',
-        'Qual o seu nível em programação?':          'nivel_programacao',
-    }
-    colunas_para_renomear = {k: v for k, v in rename_colunas.items() if k in df_pesquisa_unificado.columns}
-    if colunas_para_renomear:
-        df_pesquisa_unificado = df_pesquisa_unificado.rename(columns=colunas_para_renomear)
-
     # NORMAL: Resumo com colunas antes/depois
     colunas_depois = len(df_pesquisa_unificado.columns)
     colunas_unificadas = colunas_antes - colunas_depois

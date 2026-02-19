@@ -51,8 +51,8 @@ def criar_dataset_pos_cutoff(df_medium_producao: pd.DataFrame) -> pd.DataFrame:
     # Dataset pós-cutoff (período com menor missing das features críticas)
     df_pos_cutoff = df[df['Data'] >= cutoff_date].copy()
 
-    # Remover manualmente a coluna "nivel_programacao"
-    coluna_remover = 'nivel_programacao'
+    # Remover manualmente a coluna "Qual o seu nível em programação?"
+    coluna_remover = 'Qual o seu nível em programação?'
     if coluna_remover in df_pos_cutoff.columns:
         df_pos_cutoff = df_pos_cutoff.drop(columns=[coluna_remover])
         logger.debug(f"Coluna removida: '{coluna_remover}'")
@@ -61,10 +61,11 @@ def criar_dataset_pos_cutoff(df_medium_producao: pd.DataFrame) -> pd.DataFrame:
 
     # Definir features com missing crítico para análise
     features_missing_critico = [
-        'estudou_programacao',
-        'fez_faculdade',
-        'tem_computador',
-        'nivel_programacao',
+        'Já estudou programação?',
+        'Você já fez/faz/pretende fazer',
+        'Você já fez/faz/pretende fazer faculdade?',
+        'Tem computador/notebook?',
+        'Qual o seu nível em programação?'
     ]
 
     # Verificar quais features existem no dataset
