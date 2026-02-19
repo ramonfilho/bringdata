@@ -280,4 +280,10 @@ def rename_long_column_names(df: pd.DataFrame) -> pd.DataFrame:
         'O que mais te chama atenção na profissão de Programador?': 'interesse_programacao',
     }
 
+    # Aplicar apenas colunas que existem no DataFrame
+    cols_to_rename = {k: v for k, v in rename_mapping.items() if k in df_clean.columns}
+    if cols_to_rename:
+        df_clean = df_clean.rename(columns=cols_to_rename)
+        logger.info(f"Colunas renomeadas: {list(cols_to_rename.keys())}")
+
     return df_clean

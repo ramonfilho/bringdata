@@ -426,9 +426,20 @@ def check_distribution_drift(df_producao: pd.DataFrame,
             if norm_key:
                 proporcoes_producao_norm[norm_key] = proporcoes_producao_norm.get(norm_key, 0.0) + float(v)
 
+        # Normalizar também as keys de treino para comparação simétrica.
+        # distribuicoes_esperadas.json armazena keys originais ('Não', 'Sim', 'Feminino'),
+        # mas proporcoes_producao_norm já está normalizado ('nao', 'sim', 'feminino').
+        # Sem essa normalização, 'Não' (treino) nunca encontra match em 'nao' (produção)
+        # e gera diff = prop_treino → alerta HIGH falso sempre.
+        proporcoes_treino_norm = {}
+        for k, v in proporcoes_treino.items():
+            norm_key = normalizar_categoria_para_comparacao(str(k))
+            if norm_key:
+                proporcoes_treino_norm[norm_key] = proporcoes_treino_norm.get(norm_key, 0.0) + float(v)
+
         # Comparar cada categoria
         mudancas_significativas = []
-        for categoria, prop_treino in proporcoes_treino.items():
+        for categoria, prop_treino in proporcoes_treino_norm.items():
             prop_producao = proporcoes_producao_norm.get(categoria, 0.0)
             diff = abs(prop_producao - prop_treino)
 

@@ -86,8 +86,14 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     #   - Data: não é texto categórico
     #   - Medium: usa separador '|' para parsing posterior (célula 11) — não pode normalizar
     #   - arquivo_origem, aba_origem: metadados internos, não viram features do modelo
+    # Colunas que recebem limpar_texto (lowercase + unidecode + remove pontuação).
+    # IMPORTANTE: incluir apenas colunas cujo modelo foi treinado com valores já normalizados.
+    # Colunas binárias 'Não'/'Sim' e de gênero 'Feminino'/'Masculino' NÃO devem entrar aqui:
+    # o modelo Jan-30 espera os feature names gerados a partir do valor original com acento/capital.
+    # Ex.: 'Não' → regex normalização → sufixo '_N_o'  (feature: J_estudou_programa_o_N_o)
+    #       'nao' → regex normalização → sufixo '_nao'  (feature: J_estudou_programa_o_nao) ← ERRADO
     COLUNAS_CATEGORICAS = [
-        # Survey — respostas de formulário
+        # Survey — respostas treinadas com valores já normalizados (modelo espera lowercase)
         'interesse_programacao',
         'Tem computador/notebook?',
         'O que mais você quer ver no evento?',
@@ -95,16 +101,16 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         'Atualmente, qual a sua faixa salarial?',
         'O que você faz atualmente?',
         'Qual a sua idade?',
-        'O seu gênero:',
-        'Já estudou programação?',
-        'Você já fez/faz/pretende fazer faculdade?',
-        'investiu_curso_online',
-        'Qual o seu nível em programação?',
         # Identificadores usados para feature engineering (nome_comprimento, nome_valido, etc.)
         'Nome Completo',
         # UTM — processamento próprio na célula 10, mas sem separadores especiais
         'Source',
         'Term',
+        # EXCLUÍDAS INTENCIONALMENTE — modelo Jan-30 espera valor original com capital/acento:
+        # 'O seu gênero:'                             → espera 'Feminino'/'Masculino'
+        # 'Já estudou programação?'                   → espera 'Não'/'Sim'
+        # 'Você já fez/faz/pretende fazer faculdade?' → espera 'Não'/'Sim'
+        # 'investiu_curso_online'                     → espera 'Não'/'Sim'
     ]
     colunas_presentes = [c for c in COLUNAS_CATEGORICAS if c in df.columns]
     for coluna in colunas_presentes:
