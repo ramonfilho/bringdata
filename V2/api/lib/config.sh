@@ -54,6 +54,16 @@ DB_USER="${DB_USER:-postgres}"
 DB_PASSWORD="${DB_PASSWORD:-SmartAds2026DB!}"
 
 # =============================================================================
+# RAILWAY POSTGRESQL (LEAD SCORING — CAMINHO B)
+# =============================================================================
+
+RAILWAY_DB_HOST="${RAILWAY_DB_HOST:-shortline.proxy.rlwy.net}"
+RAILWAY_DB_PORT="${RAILWAY_DB_PORT:-11594}"
+RAILWAY_DB_NAME="${RAILWAY_DB_NAME:-railway}"
+RAILWAY_DB_USER="${RAILWAY_DB_USER:-postgres}"
+RAILWAY_DB_PASSWORD="${RAILWAY_DB_PASSWORD:-THxguXxQPZaSWIzquYRiLlVhJBnPoRGu}"
+
+# =============================================================================
 # CLOUD STORAGE (VALIDATION REPORTS)
 # =============================================================================
 
@@ -115,6 +125,11 @@ build_env_vars() {
     ENV_VARS="$ENV_VARS,VALIDATION_REPORTS_BUCKET=$BUCKET_NAME"
     ENV_VARS="$ENV_VARS,SLACK_WEBHOOK_URL=$SLACK_WEBHOOK_URL"
     ENV_VARS="$ENV_VARS,TZ=America/Sao_Paulo"
+    ENV_VARS="$ENV_VARS,RAILWAY_DB_HOST=$RAILWAY_DB_HOST"
+    ENV_VARS="$ENV_VARS,RAILWAY_DB_PORT=$RAILWAY_DB_PORT"
+    ENV_VARS="$ENV_VARS,RAILWAY_DB_NAME=$RAILWAY_DB_NAME"
+    ENV_VARS="$ENV_VARS,RAILWAY_DB_USER=$RAILWAY_DB_USER"
+    ENV_VARS="$ENV_VARS,RAILWAY_DB_PASSWORD=$RAILWAY_DB_PASSWORD"
 
     # Preserva META_ACCESS_TOKEN existente
     local CURRENT_META_TOKEN=$(gcloud run services describe "$SERVICE_NAME" \

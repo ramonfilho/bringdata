@@ -3125,6 +3125,209 @@ def _parse_validation_metrics(stdout: str) -> dict:
     return metrics
 
 
+# =============================================================================
+# RAILWAY POSTGRESQL — Polling de leads pendentes
+# =============================================================================
+
+@app.post("/railway/process-pending")
+async def railway_process_pending():
+    """
+    Processa leads pendentes do Railway PostgreSQL (leadScore IS NULL).
+
+    Chamado pelo Cloud Scheduler a cada 5 minutos.
+
+    Fluxo:
+    1. Conecta ao Railway PostgreSQL via pg8000
+    2. Busca até 50 leads sem score (ORDER BY createdAt ASC)
+    3. Converte pesquisa JSONB → formato Google Sheets via railway_mapping
+    4. Roda pipeline ML em batch → lead_score + decil
+    5. Atualiza Railway: leadScore, decil, updatedAt
+    6. Envia eventos CAPI para Meta
+    """
+    if pipeline is None:
+        raise HTTPException(status_code=503, detail="Pipeline não inicializado")
+
+    import pg8000.native
+    import json as _json
+    from api.railway_mapping import railway_lead_to_sheets_row
+
+    railway_conn = None
+    try:
+        # 1. Conectar ao Railway PostgreSQL
+        railway_conn = pg8000.native.Connection(
+            host=os.environ['RAILWAY_DB_HOST'],
+            port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+            database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+            user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+            password=os.environ['RAILWAY_DB_PASSWORD'],
+        )
+
+        # 2. Buscar leads sem score (máximo 50 por execução)
+        rows = railway_conn.run(
+            'SELECT id, data, "nomeCompleto", email, telefone, pesquisa, '
+            'source, medium, campaign, content, term, '
+            '"remoteIp", "userAgent", fbc, fbp, "pageUrl" '
+            'FROM "Lead" WHERE "leadScore" IS NULL '
+            'ORDER BY "createdAt" ASC LIMIT 50'
+        )
+
+        if not rows:
+            logger.info("✅ Railway polling: nenhum lead pendente")
+            return {"processed": 0, "skipped": 0, "message": "Nenhum lead pendente"}
+
+        logger.info(f"📋 Railway polling: {len(rows)} leads pendentes encontrados")
+
+        # 3. Construir lista de dicts (pg8000.native retorna listas, não dicts)
+        col_names = [
+            'id', 'data', 'nomeCompleto', 'email', 'telefone', 'pesquisa',
+            'source', 'medium', 'campaign', 'content', 'term',
+            'remoteIp', 'userAgent', 'fbc', 'fbp', 'pageUrl',
+        ]
+
+        lead_dicts = []
+        for row in rows:
+            lead = dict(zip(col_names, row))
+            # pesquisa JSONB: pg8000 pode retornar string ou dict
+            if isinstance(lead.get('pesquisa'), str):
+                try:
+                    lead['pesquisa'] = _json.loads(lead['pesquisa'])
+                except Exception:
+                    lead['pesquisa'] = {}
+            elif lead.get('pesquisa') is None:
+                lead['pesquisa'] = {}
+            lead_dicts.append(lead)
+
+        # 4. Converter para formato Google Sheets via railway_mapping
+        sheets_rows = []
+        valid_leads = []
+        for lead in lead_dicts:
+            try:
+                sheets_row = railway_lead_to_sheets_row(lead)
+                sheets_rows.append(sheets_row)
+                valid_leads.append(lead)
+            except Exception as e:
+                logger.warning(f"⚠️ Erro ao mapear lead {lead.get('email')}: {e}")
+
+        if not sheets_rows:
+            return {
+                "processed": 0,
+                "skipped": len(lead_dicts),
+                "message": "Todos os leads falharam no mapeamento",
+            }
+
+        # 5. Rodar pipeline ML em batch
+        leads_df = pd.DataFrame(sheets_rows)
+        temp_file = None
+        result_df = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp:
+                leads_df.to_csv(tmp, index=False)
+                temp_file = tmp.name
+
+            logger.info(f"   Executando pipeline para {len(sheets_rows)} leads Railway...")
+            result_df = pipeline.run(temp_file, with_predictions=True)
+        finally:
+            if temp_file and os.path.exists(temp_file):
+                os.remove(temp_file)
+
+        if result_df is None or len(result_df) == 0:
+            raise HTTPException(status_code=500, detail="Pipeline retornou resultado vazio")
+
+        # 6. Obter thresholds do modelo
+        thresholds = pipeline.predictor.metadata.get('decil_thresholds', {}).get('thresholds', {})
+        if not thresholds:
+            logger.warning("⚠️ Thresholds não encontrados, usando D05 como padrão")
+
+        # 7. Atualizar Railway + preparar payload CAPI
+        processed = 0
+        skipped = 0
+        capi_leads = []
+
+        for i, lead in enumerate(valid_leads):
+            try:
+                lead_score_value = float(result_df['lead_score'].iloc[i])
+
+                if thresholds:
+                    decil_str = atribuir_decil_por_threshold(lead_score_value, thresholds)
+                else:
+                    decil_str = "D05"
+
+                decil_int = int(decil_str[1:])  # 'D05' → 5
+
+                # Atualizar Railway (pg8000 named parameters com :name)
+                railway_conn.run(
+                    'UPDATE "Lead" SET "leadScore" = :score, decil = :decil, '
+                    '"updatedAt" = NOW() WHERE id = :lead_id',
+                    score=lead_score_value,
+                    decil=decil_int,
+                    lead_id=lead['id'],
+                )
+                processed += 1
+
+                # Preparar evento CAPI
+                nome = (lead.get('nomeCompleto') or '').strip()
+                parts = nome.split(' ', 1)
+                capi_leads.append({
+                    'email':            lead.get('email'),
+                    'phone':            lead.get('telefone'),
+                    'first_name':       parts[0] if parts else None,
+                    'last_name':        parts[1] if len(parts) > 1 else None,
+                    'lead_score':       lead_score_value,
+                    'decil':            decil_str,
+                    'event_id':         str(uuid.uuid4()),
+                    'fbp':              lead.get('fbp'),
+                    'fbc':              lead.get('fbc'),
+                    'user_agent':       lead.get('userAgent'),
+                    'client_ip':        lead.get('remoteIp'),
+                    'event_source_url': lead.get('pageUrl'),
+                    'event_timestamp':  int(time.time()) - 60,
+                    'survey_data':      None,
+                })
+
+                logger.info(
+                    f"   ✅ {lead.get('email')}: score={lead_score_value:.4f} ({decil_str})"
+                )
+
+            except Exception as e:
+                logger.error(f"⚠️ Erro ao processar lead {lead.get('email')}: {e}")
+                skipped += 1
+
+        # 8. Enviar eventos CAPI (db=None — Railway não usa Cloud SQL)
+        capi_result: Dict = {"success": 0, "total": 0, "errors": 0}
+        if capi_leads:
+            logger.info(f"📤 Enviando {len(capi_leads)} eventos CAPI (Railway)...")
+            capi_result = send_batch_events(capi_leads, db=None)
+            logger.info(
+                f"✅ CAPI Railway: {capi_result.get('success', 0)}/"
+                f"{capi_result.get('total', 0)} enviados"
+            )
+
+        logger.info(
+            f"✅ Railway polling concluído: {processed} processados, "
+            f"{skipped} erros, {capi_result.get('success', 0)} CAPI enviados"
+        )
+
+        return {
+            "processed":   processed,
+            "skipped":     skipped,
+            "capi_sent":   capi_result.get('success', 0),
+            "capi_errors": capi_result.get('errors', 0),
+            "timestamp":   datetime.now().isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erro no polling Railway: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro no polling Railway: {str(e)}")
+    finally:
+        if railway_conn:
+            try:
+                railway_conn.close()
+            except Exception:
+                pass
+
+
 if __name__ == "__main__":
     import uvicorn
 
