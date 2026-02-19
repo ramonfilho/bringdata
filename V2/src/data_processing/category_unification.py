@@ -89,17 +89,17 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     COLUNAS_CATEGORICAS = [
         # Survey — respostas de formulário
         'interesse_programacao',
-        'tem_computador',
-        'o_que_quer_ver_evento',
-        'tem_cartao_credito',
-        'faixa_salarial',
-        'o_que_faz_atualmente',
-        'idade',
-        'genero',
-        'estudou_programacao',
-        'fez_faculdade',
+        'Tem computador/notebook?',
+        'O que mais você quer ver no evento?',
+        'Você possui cartão de crédito?',
+        'Atualmente, qual a sua faixa salarial?',
+        'O que você faz atualmente?',
+        'Qual a sua idade?',
+        'O seu gênero:',
+        'Já estudou programação?',
+        'Você já fez/faz/pretende fazer faculdade?',
         'investiu_curso_online',
-        'nivel_programacao',
+        'Qual o seu nível em programação?',
         # Identificadores usados para feature engineering (nome_comprimento, nome_valido, etc.)
         'Nome Completo',
         # UTM — processamento próprio na célula 10, mas sem separadores especiais
@@ -141,14 +141,14 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 2. TEM COMPUTADOR/NOTEBOOK
-    logger.info("  2. Unificando tem_computador")
-    if 'tem_computador' in df.columns:
-        valores_unicos = df['tem_computador'].nunique()
+    logger.info("  2. Unificando Tem computador/notebook?")
+    if 'Tem computador/notebook?' in df.columns:
+        valores_unicos = df['Tem computador/notebook?'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
-        counts = df['tem_computador'].value_counts(dropna=False)
+        counts = df['Tem computador/notebook?'].value_counts(dropna=False)
         logger.debug(f"    Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
@@ -156,8 +156,8 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 3. O QUE MAIS VOCÊ QUER VER NO EVENTO
-    logger.info("  3. Unificando o_que_quer_ver_evento")
-    if 'o_que_quer_ver_evento' in df.columns:
+    logger.info("  3. Unificando O que mais você quer ver no evento?")
+    if 'O que mais você quer ver no evento?' in df.columns:
         # Mapeamento semântico pós-normalização: variantes com mesmo significado → categoria canônica
         mapa_evento = {
             # Erro tipográfico: 'consegui' em vez de 'conseguir'
@@ -170,14 +170,14 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             'quero saber se e pra mim':         'quero saber se e para mim',
             'como fazer freelancer':            'fazer freelancer como programador',
         }
-        df['o_que_quer_ver_evento'] = df['o_que_quer_ver_evento'].replace(mapa_evento)
+        df['O que mais você quer ver no evento?'] = df['O que mais você quer ver no evento?'].replace(mapa_evento)
 
-        valores_unicos = df['o_que_quer_ver_evento'].nunique()
+        valores_unicos = df['O que mais você quer ver no evento?'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
-        counts = df['o_que_quer_ver_evento'].value_counts(dropna=False)
+        counts = df['O que mais você quer ver no evento?'].value_counts(dropna=False)
         logger.debug(f"    Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
@@ -187,14 +187,14 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 4. VOCÊ POSSUI CARTÃO DE CRÉDITO
-    logger.info("  4. Unificando tem_cartao_credito")
-    if 'tem_cartao_credito' in df.columns:
-        valores_unicos = df['tem_cartao_credito'].nunique()
+    logger.info("  4. Unificando Você possui cartão de crédito?")
+    if 'Você possui cartão de crédito?' in df.columns:
+        valores_unicos = df['Você possui cartão de crédito?'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
-        counts = df['tem_cartao_credito'].value_counts(dropna=False)
+        counts = df['Você possui cartão de crédito?'].value_counts(dropna=False)
         logger.debug(f"    Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
@@ -202,8 +202,8 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 5. ATUALMENTE, QUAL A SUA FAIXA SALARIAL
-    logger.info("  5. Unificando faixa_salarial")
-    if 'faixa_salarial' in df.columns:
+    logger.info("  5. Unificando Atualmente, qual a sua faixa salarial?")
+    if 'Atualmente, qual a sua faixa salarial?' in df.columns:
         # Mapeamento pós-normalização: variantes → categorias canônicas (compatível com produção)
         mapa_faixa = {
             'nenhuma renda':   'nao tenho renda',
@@ -212,14 +212,14 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             'r 3001 a 5000':   'entre r3001 a r5000 reais ao mes',
             'acima de r 5000': 'mais de r5001 reais ao mes',
         }
-        df['faixa_salarial'] = df['faixa_salarial'].replace(mapa_faixa)
+        df['Atualmente, qual a sua faixa salarial?'] = df['Atualmente, qual a sua faixa salarial?'].replace(mapa_faixa)
 
-        valores_unicos = df['faixa_salarial'].nunique()
+        valores_unicos = df['Atualmente, qual a sua faixa salarial?'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
-        counts = df['faixa_salarial'].value_counts(dropna=False)
+        counts = df['Atualmente, qual a sua faixa salarial?'].value_counts(dropna=False)
         logger.debug(f"    Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
@@ -227,8 +227,8 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 6. O QUE VOCÊ FAZ ATUALMENTE
-    logger.info("  6. Unificando o_que_faz_atualmente")
-    if 'o_que_faz_atualmente' in df.columns:
+    logger.info("  6. Unificando O que você faz atualmente?")
+    if 'O que você faz atualmente?' in df.columns:
         # Mapeamento semântico pós-normalização: variantes → categorias canônicas (compatível com produção)
         mapa_faz = {
             # Variantes de formulários antigos (formas curtas)
@@ -245,14 +245,14 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             'estudo ti na faculdade mas quero aprender mais por fora': 'sou apenas estudante',
             'faco outro curso na faculdade e quero mudar para ti':     'sou apenas estudante',
         }
-        df['o_que_faz_atualmente'] = df['o_que_faz_atualmente'].replace(mapa_faz)
+        df['O que você faz atualmente?'] = df['O que você faz atualmente?'].replace(mapa_faz)
 
-        valores_unicos = df['o_que_faz_atualmente'].nunique()
+        valores_unicos = df['O que você faz atualmente?'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
-        counts = df['o_que_faz_atualmente'].value_counts(dropna=False)
+        counts = df['O que você faz atualmente?'].value_counts(dropna=False)
         logger.debug(f"    Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
@@ -262,8 +262,8 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             logger.debug(f"      - '{valor_str}': {count} leads ({pct:.1f}%)")
 
     # 7. QUAL A SUA IDADE
-    logger.info("  7. Unificando idade")
-    if 'idade' in df.columns:
+    logger.info("  7. Unificando Qual a sua idade?")
+    if 'Qual a sua idade?' in df.columns:
         # Mapeamento pós-normalização: variantes sem "anos" → categorias canônicas (compatível com produção)
         mapa_idade = {
             '18 24':       '18 24 anos',
@@ -273,14 +273,14 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
             'menos de 18': 'menos de 18 anos',
             '55':          'mais de 55 anos',
         }
-        df['idade'] = df['idade'].replace(mapa_idade)
+        df['Qual a sua idade?'] = df['Qual a sua idade?'].replace(mapa_idade)
 
-        valores_unicos = df['idade'].nunique()
+        valores_unicos = df['Qual a sua idade?'].nunique()
         logger.debug(f"   Resultado: {valores_unicos} valores únicos")
 
         # Mostrar distribuição final
         total = len(df)
-        counts = df['idade'].value_counts(dropna=False)
+        counts = df['Qual a sua idade?'].value_counts(dropna=False)
         logger.debug(f"    Distribuição final:")
         for valor, count in counts.items():
             pct = (count / total) * 100
@@ -289,11 +289,11 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
 
     # 8. OUTRAS COLUNAS CATEGÓRICAS (normalizadas no batch inicial, sem mapeamento semântico)
     outras_colunas = [
-        'genero',
-        'estudou_programacao',
-        'fez_faculdade',
+        'O seu gênero:',
+        'Já estudou programação?',
+        'Você já fez/faz/pretende fazer faculdade?',
         'investiu_curso_online',
-        'nivel_programacao',
+        'Qual o seu nível em programação?',
     ]
 
     total = len(df)

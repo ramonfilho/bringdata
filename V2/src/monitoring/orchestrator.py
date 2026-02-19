@@ -148,16 +148,9 @@ class MonitoringOrchestrator:
                 medium_depois = df['Medium'].nunique()
                 logger.info(f" Medium unificado: {medium_antes}  {medium_depois} categorias únicas")
 
-            # Renomear colunas longas (no-op — renomeação centralizada na Célula 5)
+            # Renomear colunas longas (investiu_curso_online, interesse_programacao)
             from data_processing.preprocessing import rename_long_column_names
             df = rename_long_column_names(df)
-
-            # Unificar e renomear colunas de pesquisa para snake_case (Célula 5)
-            # Responsabilidade única: único ponto que mapeia nomes originais → snake_case,
-            # espelhando o pipeline de treino.
-            from data_processing.column_unification_refactored import unificar_colunas_pesquisa
-            df = unificar_colunas_pesquisa(df)
-            logger.info(f" Colunas de pesquisa renomeadas para snake_case (Célula 5)")
 
             # Aplicar unificação de categorias (mesmo processamento que produção)
             # Limpa e normaliza valores das categorias

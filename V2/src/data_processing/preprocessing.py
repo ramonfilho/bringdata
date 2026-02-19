@@ -275,8 +275,9 @@ def rename_long_column_names(df: pd.DataFrame) -> pd.DataFrame:
     """
     df_clean = df.copy()
 
-    # Renomeação movida para column_unification_refactored.py (Célula 5),
-    # que é o único responsável por renomear colunas do formulário de pesquisa.
-    rename_mapping = {}
+    rename_mapping = {
+        'Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?': 'investiu_curso_online',
+        'O que mais te chama atenção na profissão de Programador?': 'interesse_programacao',
+    }
 
     return df_clean
