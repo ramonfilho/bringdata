@@ -2929,8 +2929,14 @@ async def daily_monitoring_check_railway(
                 'error_count': capi_error,
                 'partial_count': 0,
                 'acceptance_rate': (capi_success / capi_sent * 100) if capi_sent > 0 else 0,
-                'events_received': 0,
-                'events_rejected': 0,
+                # Railway não armazena eventos individuais recebidos/rejeitados pela Meta
+                'events_received': None,
+                'events_rejected': None,
+            },
+            'conversion': {
+                # No Railway pesquisa e inscrição chegam juntos — 100% dos leads têm pesquisa
+                'total_with_survey': stats['scored'] or 0,
+                'survey_rate': 100.0 if (stats['scored'] or 0) > 0 else 0,
             },
         }
 
@@ -2966,21 +2972,22 @@ async def daily_monitoring_check_railway(
                 'count': n,
             }
 
-        now_naive = datetime.now()
-        cut_24h   = now_naive - timedelta(hours=24)
-        cut_week  = now_naive - timedelta(days=7)
-        cut_month = now_naive - timedelta(days=30)
+        # Cortes em UTC — Railway armazena createdAt em UTC
+        now_utc_q = datetime.now(_tz.utc)
+        cut_24h   = now_utc_q - timedelta(hours=24)
+        cut_week  = now_utc_q - timedelta(days=7)
+        cut_month = now_utc_q - timedelta(days=30)
 
         def _after(rows_q, cutoff):
             # quality_rows: (leadScore, decil, createdAt)
-            # createdAt pode vir como datetime ou string
+            # Garante comparação UTC vs UTC
             result_q = []
             for r in rows_q:
                 created = r[2]
                 if created is None:
                     continue
-                if hasattr(created, 'tzinfo') and created.tzinfo is not None:
-                    created = created.replace(tzinfo=None)
+                if hasattr(created, 'tzinfo') and created.tzinfo is None:
+                    created = created.replace(tzinfo=_tz.utc)  # assume UTC se naive
                 if created >= cutoff:
                     result_q.append(r)
             return result_q
