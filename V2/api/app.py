@@ -3268,6 +3268,7 @@ async def railway_process_pending():
                 nome = (lead.get('nomeCompleto') or '').strip()
                 parts = nome.split(' ', 1)
                 capi_leads.append({
+                    '_railway_id':      lead['id'],   # para UPDATE capiSentAt/capiStatus
                     'email':            lead.get('email'),
                     'phone':            lead.get('telefone'),
                     'first_name':       parts[0] if parts else None,
@@ -3301,6 +3302,22 @@ async def railway_process_pending():
                 f"✅ CAPI Railway: {capi_result.get('success', 0)}/"
                 f"{capi_result.get('total', 0)} enviados"
             )
+
+        # 9. Atualizar capiSentAt + capiStatus no Railway
+        details = capi_result.get('details', [])
+        for i, detail in enumerate(details):
+            if i >= len(capi_leads):
+                break
+            capi_status = 'success' if detail.get('status') == 'success' else 'error'
+            try:
+                railway_conn.run(
+                    'UPDATE "Lead" SET "capiSentAt" = NOW(), "capiStatus" = :status, '
+                    '"updatedAt" = NOW() WHERE id = :lead_id',
+                    status=capi_status,
+                    lead_id=capi_leads[i]['_railway_id'],
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ Erro ao atualizar capiSentAt para {capi_leads[i].get('email')}: {e}")
 
         logger.info(
             f"✅ Railway polling concluído: {processed} processados, "

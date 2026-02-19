@@ -1,3 +1,72 @@
+## ✅ CAMINHO B — Railway PostgreSQL Polling (19/02/2026)
+
+### Arquitetura de dois caminhos
+
+O sistema roda dois caminhos em paralelo:
+
+**Caminho A: Google Sheets (Apps Script)** — clientes sem banco SQL
+```
+Google Sheets → Apps Script (polling 5min)
+  → POST /predict/batch       (ML scoring)
+  → escreve score no Sheets
+  → POST /capi/process_daily_batch (Meta CAPI)
+```
+
+**Caminho B: Railway PostgreSQL (Python polling)** — clientes com banco SQL
+```
+Frontend (Prisma) → Railway PostgreSQL
+                         ↓
+              Cloud Scheduler (*/5min)
+              POST /railway/process-pending
+                         ↓
+              SELECT * FROM "Lead" WHERE "leadScore" IS NULL
+                         ↓
+              railway_mapping.py
+              pesquisa JSONB (camelCase) → formato Google Sheets
+                         ↓
+              ML pipeline → lead_score + decil
+                         ↓
+              UPDATE "Lead" SET "leadScore", "decil", "updatedAt"
+                         ↓
+              Meta CAPI → UPDATE "Lead" SET "capiSentAt", "capiStatus"
+```
+
+Decisão de usar polling (não webhook): webhook requer coordenação com dev externo
+e cria acoplamento. LISTEN/NOTIFY requer processo persistente no Cloud Run.
+O polling funciona como safety net — qualquer lead perdido é capturado na próxima execução.
+
+### Implementação
+
+| Artefato | Arquivo |
+|---|---|
+| Endpoint `POST /railway/process-pending` | `V2/api/app.py` |
+| Mapeamento pesquisa JSONB → colunas Sheets | `V2/api/railway_mapping.py` |
+| Variáveis `RAILWAY_DB_*` no deploy | `V2/api/lib/config.sh` |
+| Cloud Scheduler job `railway-polling` | us-central1, `*/5 * * * *` |
+
+### Resultado do rollout (19/02/2026)
+
+- Backlog inicial de 405 leads processados em ~4 minutos
+- 436 eventos CAPI enviados com 0 erros
+- Meta respondeu `events_received: 1, events_rejected: 0` em 100% dos envios
+- Scheduler rodando a cada 5 minutos, processando leads em tempo real
+
+### Deduplicação entre Caminho A e Caminho B
+
+Investigação em 19/02/2026: Railway e Sheets capturam **populações distintas** —
+dois formulários diferentes na mesma landing page (`parabens-psq-devf-v2`).
+Overlap de emails = 0% no período analisado (404 Sheets vs 426 Railway, mesmo período).
+Deduplicação cross-path não é necessária para o cliente atual (DevClub).
+
+### Colunas Railway `capiSentAt` e `capiStatus`
+
+Colunas já existem na tabela `Lead` via Prisma migration (nullable).
+O endpoint as popula após cada envio CAPI:
+- `capiSentAt`: timestamp do envio bem-sucedido
+- `capiStatus`: `'success'` ou `'error'`
+
+---
+
 ## ✅ INVESTIGAÇÃO CONCLUÍDA - Scores Históricos (16/02/2026)
 
 **Deploy 00202-4wl (30/01 14:35)**: Modelo `20260117_123914` → `20260130_090227`
@@ -113,7 +182,7 @@ ALTER TABLE leads_capi ADD COLUMN IF NOT EXISTS
 - `LeadCaptureRequest` - Página 1 (dados básicos)
 - `UpdateSurveyRequest` - Página 2 (email + pesquisa)
 
-### 3. Frontend - Página 2 JavaScript ⚠️ PENDENTE DEPLOY
+### 3. Frontend - Página 2 JavaScript ✅ OBSOLETO — Railway já em produção
 
 **Arquivo:** `V2/docs/pagina2_codigo_modificado.js` ✅
 
