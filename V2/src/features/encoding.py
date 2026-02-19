@@ -35,8 +35,11 @@ def load_ordinal_mappings_from_training(model_path: str) -> Dict[str, list]:
     ordinal_mappings = {}
 
     # Idade: ordem por faixa etária crescente
-    if 'idade' in categorias:
-        idade_cats = categorias['idade']
+    # Shim de compatibilidade: JSON gerado antes do commit 6be0f16 usa nome original do
+    # formulário; modelos treinados depois usam snake_case. Aceitar os dois.
+    idade_key = 'idade' if 'idade' in categorias else 'Qual a sua idade?'
+    if idade_key in categorias:
+        idade_cats = categorias[idade_key]
         # Ordenar por idade: menos de 18, 18-24, 25-34, 35-44, 45-54, mais de 55
         ordem_idade = []
         for cat in ['menos de 18 anos', '18 24 anos', '25 34 anos', '35 44 anos', '45 54 anos', 'mais de 55 anos']:
@@ -45,8 +48,10 @@ def load_ordinal_mappings_from_training(model_path: str) -> Dict[str, list]:
         ordinal_mappings['idade'] = ordem_idade
 
     # Salário: ordem por faixa salarial crescente
-    if 'faixa_salarial' in categorias:
-        salario_cats = categorias['faixa_salarial']
+    # Shim de compatibilidade: mesmo motivo acima.
+    salario_key = 'faixa_salarial' if 'faixa_salarial' in categorias else 'Atualmente, qual a sua faixa salarial?'
+    if salario_key in categorias:
+        salario_cats = categorias[salario_key]
         # Ordenar por salário: sem renda, r1000-2000, r2001-3000, r3001-5000, r5001+
         ordem_salario = []
         for cat in ['nao tenho renda', 'entre r1000 a r2000 reais ao mes', 'entre r2001 a r3000 reais ao mes',
