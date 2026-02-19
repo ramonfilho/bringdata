@@ -417,12 +417,19 @@ def check_distribution_drift(df_producao: pd.DataFrame,
 
         contagens = df_producao[col].value_counts()
         proporcoes_producao = (contagens / total_nao_nulos).to_dict()
-        proporcoes_producao_str = {str(k): float(v) for k, v in proporcoes_producao.items()}
+
+        # Normalizar keys de produção para comparação com treino
+        # Ex: "25 - 34 anos" → "25 34 anos", "Sou CLT/Funcionário Público" → "sou cltfuncionario publico"
+        proporcoes_producao_norm = {}
+        for k, v in proporcoes_producao.items():
+            norm_key = normalizar_categoria_para_comparacao(str(k))
+            if norm_key:
+                proporcoes_producao_norm[norm_key] = proporcoes_producao_norm.get(norm_key, 0.0) + float(v)
 
         # Comparar cada categoria
         mudancas_significativas = []
         for categoria, prop_treino in proporcoes_treino.items():
-            prop_producao = proporcoes_producao_str.get(categoria, 0.0)
+            prop_producao = proporcoes_producao_norm.get(categoria, 0.0)
             diff = abs(prop_producao - prop_treino)
 
             # Alertar se mudança > threshold

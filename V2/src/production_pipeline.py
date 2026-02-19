@@ -13,6 +13,7 @@ from datetime import datetime
 from .data_processing.preprocessing import remove_duplicates, clean_columns, remove_campaign_features, remove_technical_fields, rename_long_column_names
 from .data_processing.utm_unification import unify_utm_columns
 from .data_processing.medium_unification import unify_medium_columns
+from .data_processing.column_unification_refactored import unificar_colunas_pesquisa
 from .data_processing.category_unification import unificar_categorias_completo
 from .features.engineering import create_derived_features
 from .features.encoding import apply_categorical_encoding
@@ -219,15 +220,16 @@ class LeadScoringPipeline:
         logger.info(f"    Medium: {medium_before}{medium_after} categorias")
         logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
-        # 5.5. Renomear colunas longas (usando componente importado)
-        # IMPORTANTE: Deve vir ANTES da unificação de categorias pois cria as colunas:
-        # - 'interesse_programacao' (de 'O que mais te chama atenção na profissão de Programador?')
-        # - 'investiu_curso_online' (de 'Já investiu em algum curso online...')
-        logger.info(" [5.5/11] Renomeando colunas longas...")
+        # 5.5. Renomear colunas longas (no-op — renomeação agora centralizada na Célula 5)
+        logger.info(" [5.5/11] Renomeando colunas longas (no-op)...")
         self.data = rename_long_column_names(self.data)
+        logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
-        # Número de colunas deveria permanecer o mesmo (renomeação não adiciona/remove)
-        logger.info(f"    Colunas renomeadas (mantém total): {len(self.data.columns)}")
+        # 5.7. Unificar e renomear colunas de pesquisa para snake_case (Célula 5)
+        # Responsabilidade única: column_unification_refactored.py é o único ponto
+        # que mapeia nomes originais do formulário → snake_case, espelhando o pipeline de treino.
+        logger.info(" [5.7/11] Unificando colunas de pesquisa (Célula 5)...")
+        self.data = unificar_colunas_pesquisa(self.data)
         logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
         # 6. Unificar categorias de pesquisa (usando componente importado)

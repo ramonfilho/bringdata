@@ -67,11 +67,15 @@ def unificar_colunas_pesquisa(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     ]
 
     if all(col in df_pesquisa_unificado.columns for col in colunas_investiu):
+        # Ambas as versões presentes (dados históricos com duplicata): unificar
         df_pesquisa_unificado['investiu_curso_online'] = (
             df_pesquisa_unificado[colunas_investiu[0]]
             .fillna(df_pesquisa_unificado[colunas_investiu[1]])
         )
         df_pesquisa_unificado = df_pesquisa_unificado.drop(columns=colunas_investiu)
+    elif colunas_investiu[0] in df_pesquisa_unificado.columns:
+        # Apenas versão original presente (produção/webhook): renomear diretamente
+        df_pesquisa_unificado = df_pesquisa_unificado.rename(columns={colunas_investiu[0]: 'investiu_curso_online'})
 
     colunas_atencao = [
         'O que mais te chama atenção na profissão de Programador?',
@@ -79,11 +83,15 @@ def unificar_colunas_pesquisa(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
     ]
 
     if all(col in df_pesquisa_unificado.columns for col in colunas_atencao):
+        # Ambas as versões presentes (dados históricos com duplicata): unificar
         df_pesquisa_unificado['interesse_programacao'] = (
             df_pesquisa_unificado[colunas_atencao[0]]
             .fillna(df_pesquisa_unificado[colunas_atencao[1]])
         )
         df_pesquisa_unificado = df_pesquisa_unificado.drop(columns=colunas_atencao)
+    elif colunas_atencao[0] in df_pesquisa_unificado.columns:
+        # Apenas versão original presente (produção/webhook): renomear diretamente
+        df_pesquisa_unificado = df_pesquisa_unificado.rename(columns={colunas_atencao[0]: 'interesse_programacao'})
 
     # Unificar colunas de faixa salarial (nome truncado da API vs nome completo dos arquivos locais)
     colunas_faixa_salarial = [

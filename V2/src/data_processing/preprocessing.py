@@ -275,16 +275,8 @@ def rename_long_column_names(df: pd.DataFrame) -> pd.DataFrame:
     """
     df_clean = df.copy()
 
-    # Mapeamento de nomes longos para nomes curtos (baseado no notebook)
-    rename_mapping = {
-        'Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?': 'investiu_curso_online',
-        'O que mais te chama atenção na profissão de Programador?': 'interesse_programacao'
-    }
-
-    # Aplicar renomeação se as colunas existirem
-    for old_name, new_name in rename_mapping.items():
-        if old_name in df_clean.columns:
-            df_clean[new_name] = df_clean[old_name]
-            df_clean = df_clean.drop(columns=[old_name])
+    # Renomeação movida para column_unification_refactored.py (Célula 5),
+    # que é o único responsável por renomear colunas do formulário de pesquisa.
+    rename_mapping = {}
 
     return df_clean
