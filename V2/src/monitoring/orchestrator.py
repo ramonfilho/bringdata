@@ -8,6 +8,7 @@ import logging
 import pandas as pd
 from typing import List, Dict
 from sqlalchemy.orm import Session
+from sqlalchemy import func, distinct
 import sys
 import os
 from datetime import datetime
@@ -686,9 +687,11 @@ class MonitoringOrchestrator:
         total_sheets_tab2 = self._count_sheet_tab2_responses(lookback_time)
         total_sheets = total_sheets_tab1 + total_sheets_tab2
 
-        total_db = self.db.query(LeadCAPI).filter(
+        total_db = self.db.query(
+            func.count(distinct(LeadCAPI.email))
+        ).filter(
             LeadCAPI.created_at >= lookback_time
-        ).count()
+        ).scalar()
 
         metrics['capture'] = {
             'total_sheets_tab1': total_sheets_tab1,
