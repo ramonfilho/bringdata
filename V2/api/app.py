@@ -2754,28 +2754,33 @@ async def daily_monitoring_check_railway(
     db: Session = Depends(get_db)
 ):
     """
-    Executa check diário de monitoramento com dados do Railway PostgreSQL.
+    Executa check diário de monitoramento 100% com dados do Railway PostgreSQL.
 
-    Mesmo pipeline do /monitoring/daily-check (Sheets), mas usando os leads
-    do Railway como fonte. Fluxo:
-    1. Busca leads das últimas N horas no Railway (com leadScore preenchido)
-    2. Converte cada lead via railway_mapping.railway_lead_to_sheets_row()
-    3. Chama orchestrator.run_daily_check() — mesmo pipeline de monitoramento
+    Fluxo:
+    1. Busca leads scored das últimas N horas (para alertas/drift ML)
+    2. Busca stats agregados da janela (total, CAPI, qualidade de dados)
+    3. Busca todos os leads scored (para métricas de qualidade por período)
+    4. Constrói funnel_metrics e lead_quality_metrics do Railway — sem Sheets/Cloud SQL
+    5. Executa orchestrator.run_daily_check() para gerar alertas de drift/qualidade
+    6. Substitui funnel_metrics e lead_quality_metrics pelo resultado Railway
 
     Args:
         hours: Número de horas para buscar (padrão: 24)
-        db: Sessão PostgreSQL Cloud SQL (para checks operacionais CAPI)
+        db: Sessão PostgreSQL Cloud SQL (mantida para assinatura, não usada nas métricas)
     """
     import pg8000.native
     import json as _json
     import yaml
     from src.monitoring.orchestrator import MonitoringOrchestrator
     from api.railway_mapping import railway_lead_to_sheets_row
+    from datetime import timezone as _tz, timedelta
 
     start_time = time.time()
 
     try:
-        # 1. Buscar leads do Railway das últimas N horas
+        # ------------------------------------------------------------------
+        # 1. Conectar ao Railway e buscar todos os dados necessários
+        # ------------------------------------------------------------------
         railway_conn = pg8000.native.Connection(
             host=os.environ['RAILWAY_DB_HOST'],
             port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
@@ -2784,20 +2789,49 @@ async def daily_monitoring_check_railway(
             password=os.environ['RAILWAY_DB_PASSWORD'],
         )
 
-        rows = railway_conn.run(
+        # 1a. Leads com score na janela (para alertas de drift ML)
+        scored_rows = railway_conn.run(
             'SELECT id, data, "nomeCompleto", email, telefone, pesquisa, '
             'source, medium, campaign, content, term, '
             '"remoteIp", "userAgent", fbc, fbp, "pageUrl", '
             '"leadScore", decil '
             'FROM "Lead" '
             'WHERE "leadScore" IS NOT NULL '
-            'AND "createdAt" >= NOW() - :intervalo * INTERVAL \'1 hour\' '
+            'AND "createdAt" >= NOW() - :h * INTERVAL \'1 hour\' '
             'ORDER BY "createdAt" DESC',
-            intervalo=hours
+            h=hours
         )
+
+        # 1b. Stats agregados da janela (total, CAPI, fbp/fbc)
+        stats_row = railway_conn.run(
+            'SELECT '
+            '  COUNT(*) AS total, '
+            '  COUNT(*) FILTER (WHERE "leadScore" IS NOT NULL) AS scored, '
+            '  COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL) AS capi_sent, '
+            '  COUNT(*) FILTER (WHERE "capiStatus" = \'success\') AS capi_success, '
+            '  COUNT(*) FILTER (WHERE "capiStatus" = \'error\') AS capi_error, '
+            '  COUNT(*) FILTER (WHERE fbp IS NOT NULL AND fbp <> \'\') AS with_fbp, '
+            '  COUNT(*) FILTER (WHERE fbc IS NOT NULL AND fbc <> \'\') AS with_fbc, '
+            '  COUNT(*) FILTER (WHERE telefone IS NOT NULL AND telefone <> \'\') AS with_phone '
+            'FROM "Lead" '
+            'WHERE "createdAt" >= NOW() - :h * INTERVAL \'1 hour\'',
+            h=hours
+        )
+
+        # 1c. Todos os leads com score (para métricas de qualidade por período)
+        quality_rows = railway_conn.run(
+            'SELECT "leadScore"::float, decil::int, "createdAt" '
+            'FROM "Lead" '
+            'WHERE "leadScore" IS NOT NULL AND decil IS NOT NULL '
+            'ORDER BY "createdAt" DESC'
+        )
+
         railway_conn.close()
 
-        if not rows:
+        # ------------------------------------------------------------------
+        # 2. Processar scored_rows → leads_data (para o orquestrador)
+        # ------------------------------------------------------------------
+        if not scored_rows:
             logger.info(f"⚠️ Railway: nenhum lead com score nas últimas {hours}h")
             return DailyCheckResponse(
                 total_alerts=0,
@@ -2808,9 +2842,8 @@ async def daily_monitoring_check_railway(
                 timestamp=datetime.now().isoformat()
             )
 
-        logger.info(f"🔍 Railway monitoring: {len(rows)} leads das últimas {hours}h")
+        logger.info(f"🔍 Railway monitoring: {len(scored_rows)} leads com score nas últimas {hours}h")
 
-        # 2. Converter para formato Sheets via railway_mapping
         col_names = [
             'id', 'data', 'nomeCompleto', 'email', 'telefone', 'pesquisa',
             'source', 'medium', 'campaign', 'content', 'term',
@@ -2819,7 +2852,7 @@ async def daily_monitoring_check_railway(
         ]
 
         leads_data = []
-        for row in rows:
+        for row in scored_rows:
             lead = dict(zip(col_names, row))
 
             if isinstance(lead.get('pesquisa'), str):
@@ -2832,16 +2865,136 @@ async def daily_monitoring_check_railway(
 
             try:
                 sheets_row = railway_lead_to_sheets_row(lead)
-                # Adicionar lead_score e decil no formato esperado pelo orquestrador
                 sheets_row['lead_score'] = float(lead['leadScore']) if lead.get('leadScore') else None
                 sheets_row['decil']      = f"D{int(lead['decil']):02d}" if lead.get('decil') else None
                 leads_data.append(sheets_row)
             except Exception as e:
                 logger.warning(f"⚠️ Erro ao mapear lead {lead.get('email')}: {e}")
 
-        logger.info(f"✅ {len(leads_data)} leads convertidos para formato Sheets")
+        logger.info(f"✅ {len(leads_data)} leads convertidos")
 
-        # 3. Carregar model_path
+        # ------------------------------------------------------------------
+        # 3. Construir funnel_metrics 100% Railway
+        # ------------------------------------------------------------------
+        stats = dict(zip(
+            ['total', 'scored', 'capi_sent', 'capi_success', 'capi_error',
+             'with_fbp', 'with_fbc', 'with_phone'],
+            stats_row[0]
+        ))
+        total = stats['total'] or 0
+        capi_sent = stats['capi_sent'] or 0
+        capi_success = stats['capi_success'] or 0
+        capi_error = stats['capi_error'] or 0
+        with_fbp = stats['with_fbp'] or 0
+        with_fbc = stats['with_fbc'] or 0
+        with_phone = stats['with_phone'] or 0
+
+        now_utc = datetime.now(_tz.utc)
+        brt = _tz(timedelta(hours=-3))
+        window_start = now_utc - timedelta(hours=hours)
+
+        railway_funnel_metrics = {
+            'window': {
+                'start_utc': window_start.isoformat(),
+                'end_utc': now_utc.isoformat(),
+                'start_brt': window_start.astimezone(brt).strftime('%d/%m/%Y %H:%M'),
+                'end_brt': now_utc.astimezone(brt).strftime('%d/%m/%Y %H:%M'),
+            },
+            'capture': {
+                'total_database': total,
+                'total_scored': stats['scored'] or 0,
+            },
+            'data_quality': {
+                'total_leads': total,
+                'fbp_present': with_fbp,
+                'fbp_percentage': (with_fbp / total * 100) if total > 0 else 0,
+                'fbc_present': with_fbc,
+                'fbc_percentage': (with_fbc / total * 100) if total > 0 else 0,
+                'phone_present': with_phone,
+                'phone_percentage': (with_phone / total * 100) if total > 0 else 0,
+            },
+            'scoring': {
+                'total_scored': len(leads_data),
+                'decil_distribution': {},
+                'avg_score': None,
+            },
+            'capi_sent': {
+                'leads_sent': capi_sent,
+                'send_rate': (capi_sent / total * 100) if total > 0 else 0,
+                'estimated_events': int(capi_sent * 1.3),
+            },
+            'meta_response': {
+                'leads_with_response': capi_sent,
+                'success_count': capi_success,
+                'error_count': capi_error,
+                'partial_count': 0,
+                'acceptance_rate': (capi_success / capi_sent * 100) if capi_sent > 0 else 0,
+                'events_received': 0,
+                'events_rejected': 0,
+            },
+        }
+
+        # Distribuição de decis e score médio dos leads da janela
+        if leads_data:
+            decil_dist: dict = {}
+            scores = []
+            for ld in leads_data:
+                d = ld.get('decil')
+                if d:
+                    decil_dist[d] = decil_dist.get(d, 0) + 1
+                s = ld.get('lead_score')
+                if s is not None:
+                    scores.append(s)
+            railway_funnel_metrics['scoring']['decil_distribution'] = decil_dist
+            railway_funnel_metrics['scoring']['avg_score'] = (
+                sum(scores) / len(scores) if scores else None
+            )
+
+        # ------------------------------------------------------------------
+        # 4. Construir lead_quality_metrics 100% Railway
+        # ------------------------------------------------------------------
+        def _calc_quality(rows_subset):
+            if not rows_subset:
+                return {'score': 0, 'd9': 0, 'd10': 0, 'count': 0}
+            scores_q = [r[0] for r in rows_subset if r[0] is not None]
+            decils_q  = [r[1] for r in rows_subset if r[1] is not None]
+            n = len(rows_subset)
+            return {
+                'score': sum(scores_q) / len(scores_q) if scores_q else 0,
+                'd9':  (sum(1 for d in decils_q if d == 9)  / n * 100) if n > 0 else 0,
+                'd10': (sum(1 for d in decils_q if d == 10) / n * 100) if n > 0 else 0,
+                'count': n,
+            }
+
+        now_naive = datetime.now()
+        cut_24h   = now_naive - timedelta(hours=24)
+        cut_week  = now_naive - timedelta(days=7)
+        cut_month = now_naive - timedelta(days=30)
+
+        def _after(rows_q, cutoff):
+            # quality_rows: (leadScore, decil, createdAt)
+            # createdAt pode vir como datetime ou string
+            result_q = []
+            for r in rows_q:
+                created = r[2]
+                if created is None:
+                    continue
+                if hasattr(created, 'tzinfo') and created.tzinfo is not None:
+                    created = created.replace(tzinfo=None)
+                if created >= cutoff:
+                    result_q.append(r)
+            return result_q
+
+        railway_lead_quality = {
+            'historico':     _calc_quality(quality_rows),
+            'ultimo_mes':    _calc_quality(_after(quality_rows, cut_month)),
+            'ultima_semana': _calc_quality(_after(quality_rows, cut_week)),
+            'ultimas_24h':   _calc_quality(_after(quality_rows, cut_24h)),
+        }
+
+        # ------------------------------------------------------------------
+        # 5. Executar orquestrador (apenas para alertas de drift/qualidade ML)
+        # ------------------------------------------------------------------
         config_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             'configs/active_model.yaml'
@@ -2854,9 +3007,12 @@ async def daily_monitoring_check_railway(
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             model_path = os.path.join(base_dir, model_path)
 
-        # 4. Executar pipeline de monitoramento
         orchestrator = MonitoringOrchestrator(model_path=model_path, db=db)
         result = orchestrator.run_daily_check(leads_data)
+
+        # Substituir funnel_metrics e lead_quality_metrics pelos dados Railway
+        result['funnel_metrics'] = railway_funnel_metrics
+        result['lead_quality_metrics'] = railway_lead_quality
 
         processing_time = time.time() - start_time
         logger.info(f"✅ Railway monitoring concluído em {processing_time:.2f}s — "
