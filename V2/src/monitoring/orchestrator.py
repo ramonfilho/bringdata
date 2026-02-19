@@ -230,6 +230,9 @@ class MonitoringOrchestrator:
         # NOVO: Gerar métricas do funil completo
         funnel_metrics = self._generate_funnel_metrics(leads_data, df if leads_data else None)
 
+        # NOVO: Calcular métricas de qualidade dos leads por período
+        lead_quality_metrics = self._calculate_lead_quality_metrics()
+
         # NOVO: Gerar sumário crítico consolidado
         critical_summary = self._generate_critical_summary(alerts, funnel_metrics)
 
@@ -243,6 +246,7 @@ class MonitoringOrchestrator:
             'alerts_by_category': summary['by_category'],
             'alerts': [alert.to_dict() for alert in alerts],
             'funnel_metrics': funnel_metrics,
+            'lead_quality_metrics': lead_quality_metrics,
             'critical_summary': critical_summary
         }
 

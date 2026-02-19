@@ -94,6 +94,8 @@ class DailyCheckResponse(BaseModel):
     alerts: List[Dict[str, Any]]
     critical_summary: str
     timestamp: str
+    funnel_metrics: Optional[Dict[str, Any]] = None
+    lead_quality_metrics: Optional[Dict[str, Any]] = None
 
 # Inicializar a aplicação FastAPI
 app = FastAPI(
@@ -2730,7 +2732,9 @@ async def daily_monitoring_check_auto(
             alerts_by_category=result['alerts_by_category'],
             alerts=result['alerts'],
             critical_summary=result.get('critical_summary', ''),
-            timestamp=datetime.now().isoformat()
+            timestamp=datetime.now().isoformat(),
+            funnel_metrics=result.get('funnel_metrics'),
+            lead_quality_metrics=result.get('lead_quality_metrics'),
         )
 
     except FileNotFoundError as e:
@@ -2742,6 +2746,140 @@ async def daily_monitoring_check_auto(
         import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Erro no monitoramento: {str(e)}")
+
+
+@app.get("/monitoring/daily-check/railway", response_model=DailyCheckResponse)
+async def daily_monitoring_check_railway(
+    hours: int = 24,
+    db: Session = Depends(get_db)
+):
+    """
+    Executa check diário de monitoramento com dados do Railway PostgreSQL.
+
+    Mesmo pipeline do /monitoring/daily-check (Sheets), mas usando os leads
+    do Railway como fonte. Fluxo:
+    1. Busca leads das últimas N horas no Railway (com leadScore preenchido)
+    2. Converte cada lead via railway_mapping.railway_lead_to_sheets_row()
+    3. Chama orchestrator.run_daily_check() — mesmo pipeline de monitoramento
+
+    Args:
+        hours: Número de horas para buscar (padrão: 24)
+        db: Sessão PostgreSQL Cloud SQL (para checks operacionais CAPI)
+    """
+    import pg8000.native
+    import json as _json
+    import yaml
+    from src.monitoring.orchestrator import MonitoringOrchestrator
+    from api.railway_mapping import railway_lead_to_sheets_row
+
+    start_time = time.time()
+
+    try:
+        # 1. Buscar leads do Railway das últimas N horas
+        railway_conn = pg8000.native.Connection(
+            host=os.environ['RAILWAY_DB_HOST'],
+            port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+            database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+            user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+            password=os.environ['RAILWAY_DB_PASSWORD'],
+        )
+
+        rows = railway_conn.run(
+            'SELECT id, data, "nomeCompleto", email, telefone, pesquisa, '
+            'source, medium, campaign, content, term, '
+            '"remoteIp", "userAgent", fbc, fbp, "pageUrl", '
+            '"leadScore", decil '
+            'FROM "Lead" '
+            'WHERE "leadScore" IS NOT NULL '
+            'AND "createdAt" >= NOW() - :intervalo * INTERVAL \'1 hour\' '
+            'ORDER BY "createdAt" DESC',
+            intervalo=hours
+        )
+        railway_conn.close()
+
+        if not rows:
+            logger.info(f"⚠️ Railway: nenhum lead com score nas últimas {hours}h")
+            return DailyCheckResponse(
+                total_alerts=0,
+                alerts_by_severity={"HIGH": 0, "MEDIUM": 0, "LOW": 0},
+                alerts_by_category={},
+                alerts=[],
+                critical_summary=f"Nenhum lead Railway nas últimas {hours}h.",
+                timestamp=datetime.now().isoformat()
+            )
+
+        logger.info(f"🔍 Railway monitoring: {len(rows)} leads das últimas {hours}h")
+
+        # 2. Converter para formato Sheets via railway_mapping
+        col_names = [
+            'id', 'data', 'nomeCompleto', 'email', 'telefone', 'pesquisa',
+            'source', 'medium', 'campaign', 'content', 'term',
+            'remoteIp', 'userAgent', 'fbc', 'fbp', 'pageUrl',
+            'leadScore', 'decil',
+        ]
+
+        leads_data = []
+        for row in rows:
+            lead = dict(zip(col_names, row))
+
+            if isinstance(lead.get('pesquisa'), str):
+                try:
+                    lead['pesquisa'] = _json.loads(lead['pesquisa'])
+                except Exception:
+                    lead['pesquisa'] = {}
+            elif lead.get('pesquisa') is None:
+                lead['pesquisa'] = {}
+
+            try:
+                sheets_row = railway_lead_to_sheets_row(lead)
+                # Adicionar lead_score e decil no formato esperado pelo orquestrador
+                sheets_row['lead_score'] = float(lead['leadScore']) if lead.get('leadScore') else None
+                sheets_row['decil']      = f"D{int(lead['decil']):02d}" if lead.get('decil') else None
+                leads_data.append(sheets_row)
+            except Exception as e:
+                logger.warning(f"⚠️ Erro ao mapear lead {lead.get('email')}: {e}")
+
+        logger.info(f"✅ {len(leads_data)} leads convertidos para formato Sheets")
+
+        # 3. Carregar model_path
+        config_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            'configs/active_model.yaml'
+        )
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+            model_path = config['active_model']['model_path']
+
+        if not os.path.isabs(model_path):
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            model_path = os.path.join(base_dir, model_path)
+
+        # 4. Executar pipeline de monitoramento
+        orchestrator = MonitoringOrchestrator(model_path=model_path, db=db)
+        result = orchestrator.run_daily_check(leads_data)
+
+        processing_time = time.time() - start_time
+        logger.info(f"✅ Railway monitoring concluído em {processing_time:.2f}s — "
+                    f"{result['total_alerts']} alertas")
+
+        return DailyCheckResponse(
+            total_alerts=result['total_alerts'],
+            alerts_by_severity=result['alerts_by_severity'],
+            alerts_by_category=result['alerts_by_category'],
+            alerts=result['alerts'],
+            critical_summary=result.get('critical_summary', ''),
+            timestamp=datetime.now().isoformat(),
+            funnel_metrics=result.get('funnel_metrics'),
+            lead_quality_metrics=result.get('lead_quality_metrics'),
+        )
+
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=f"Modelo não encontrado: {str(e)}")
+    except Exception as e:
+        logger.error(f"❌ Erro no Railway monitoring: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Erro no Railway monitoring: {str(e)}")
 
 
 @app.post("/monitoring/daily-check", response_model=DailyCheckResponse)
@@ -2823,7 +2961,9 @@ async def daily_monitoring_check(
             alerts_by_category=result['alerts_by_category'],
             alerts=result['alerts'],
             critical_summary=result.get('critical_summary', ''),
-            timestamp=datetime.now().isoformat()
+            timestamp=datetime.now().isoformat(),
+            funnel_metrics=result.get('funnel_metrics'),
+            lead_quality_metrics=result.get('lead_quality_metrics'),
         )
 
     except FileNotFoundError as e:
