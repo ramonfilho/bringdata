@@ -2751,6 +2751,8 @@ async def daily_monitoring_check_auto(
 @app.get("/monitoring/daily-check/railway", response_model=DailyCheckResponse)
 async def daily_monitoring_check_railway(
     hours: int = 24,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -2765,7 +2767,9 @@ async def daily_monitoring_check_railway(
     6. Substitui funnel_metrics e lead_quality_metrics pelo resultado Railway
 
     Args:
-        hours: Número de horas para buscar (padrão: 24)
+        hours: Número de horas para buscar (padrão: 24). Ignorado se start_date/end_date forem passados.
+        start_date: Data de início no formato YYYY-MM-DD (BRT). Ex: 2026-02-01
+        end_date: Data de fim no formato YYYY-MM-DD (BRT). Ex: 2026-02-20
         db: Sessão PostgreSQL Cloud SQL (mantida para assinatura, não usada nas métricas)
     """
     import pg8000.native
@@ -2778,6 +2782,36 @@ async def daily_monitoring_check_railway(
     start_time = time.time()
 
     try:
+        # ------------------------------------------------------------------
+        # 0. Calcular janela de tempo (UTC) — start_date/end_date têm prioridade
+        # ------------------------------------------------------------------
+        brt = _tz(timedelta(hours=-3))
+        now_utc = datetime.now(_tz.utc)
+
+        if start_date and end_date:
+            try:
+                from datetime import date as _date
+                _start = datetime.strptime(start_date, '%Y-%m-%d').replace(
+                    hour=0, minute=0, second=0,
+                    tzinfo=brt
+                ).astimezone(_tz.utc)
+                _end = datetime.strptime(end_date, '%Y-%m-%d').replace(
+                    hour=23, minute=59, second=59,
+                    tzinfo=brt
+                ).astimezone(_tz.utc)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Formato de data inválido. Use YYYY-MM-DD. Ex: start_date=2026-02-01&end_date=2026-02-20"
+                )
+            window_start = _start
+            window_end   = _end
+            window_label = f"{start_date} → {end_date}"
+        else:
+            window_start = now_utc - timedelta(hours=hours)
+            window_end   = now_utc
+            window_label = f"últimas {hours}h"
+
         # ------------------------------------------------------------------
         # 1. Conectar ao Railway e buscar todos os dados necessários
         # ------------------------------------------------------------------
@@ -2797,9 +2831,10 @@ async def daily_monitoring_check_railway(
             '"leadScore", decil '
             'FROM "Lead" '
             'WHERE "leadScore" IS NOT NULL '
-            'AND "createdAt" >= NOW() - :h * INTERVAL \'1 hour\' '
+            'AND "createdAt" >= :start AND "createdAt" <= :end '
             'ORDER BY "createdAt" DESC',
-            h=hours
+            start=window_start,
+            end=window_end
         )
 
         # 1b. Stats agregados da janela (total, CAPI, fbp/fbc)
@@ -2814,8 +2849,9 @@ async def daily_monitoring_check_railway(
             '  COUNT(*) FILTER (WHERE fbc IS NOT NULL AND fbc <> \'\') AS with_fbc, '
             '  COUNT(*) FILTER (WHERE telefone IS NOT NULL AND telefone <> \'\') AS with_phone '
             'FROM "Lead" '
-            'WHERE "createdAt" >= NOW() - :h * INTERVAL \'1 hour\'',
-            h=hours
+            'WHERE "createdAt" >= :start AND "createdAt" <= :end',
+            start=window_start,
+            end=window_end
         )
 
         # 1c. Todos os leads com score (para métricas de qualidade por período)
@@ -2832,17 +2868,17 @@ async def daily_monitoring_check_railway(
         # 2. Processar scored_rows → leads_data (para o orquestrador)
         # ------------------------------------------------------------------
         if not scored_rows:
-            logger.info(f"⚠️ Railway: nenhum lead com score nas últimas {hours}h")
+            logger.info(f"⚠️ Railway: nenhum lead com score no período {window_label}")
             return DailyCheckResponse(
                 total_alerts=0,
                 alerts_by_severity={"HIGH": 0, "MEDIUM": 0, "LOW": 0},
                 alerts_by_category={},
                 alerts=[],
-                critical_summary=f"Nenhum lead Railway nas últimas {hours}h.",
+                critical_summary=f"Nenhum lead Railway no período {window_label}.",
                 timestamp=datetime.now().isoformat()
             )
 
-        logger.info(f"🔍 Railway monitoring: {len(scored_rows)} leads com score nas últimas {hours}h")
+        logger.info(f"🔍 Railway monitoring: {len(scored_rows)} leads com score — {window_label}")
 
         col_names = [
             'id', 'data', 'nomeCompleto', 'email', 'telefone', 'pesquisa',
@@ -2889,16 +2925,12 @@ async def daily_monitoring_check_railway(
         with_fbc = stats['with_fbc'] or 0
         with_phone = stats['with_phone'] or 0
 
-        now_utc = datetime.now(_tz.utc)
-        brt = _tz(timedelta(hours=-3))
-        window_start = now_utc - timedelta(hours=hours)
-
         railway_funnel_metrics = {
             'window': {
                 'start_utc': window_start.isoformat(),
-                'end_utc': now_utc.isoformat(),
+                'end_utc': window_end.isoformat(),
                 'start_brt': window_start.astimezone(brt).strftime('%d/%m/%Y %H:%M'),
-                'end_brt': now_utc.astimezone(brt).strftime('%d/%m/%Y %H:%M'),
+                'end_brt': window_end.astimezone(brt).strftime('%d/%m/%Y %H:%M'),
             },
             'capture': {
                 'total_database': total,

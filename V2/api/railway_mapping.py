@@ -262,9 +262,8 @@ def railway_lead_to_sheets_row(lead_row: Dict) -> Dict:
     # → passar sem normalização
     row['Já estudou programação?'] = pesquisa.get('estudouProgramacao')
 
-    # Faculdade: Railway NÃO tem este campo → None
-    # Modelo foi treinado com este campo mas Railway não coleta
-    row['Você já fez/faz/pretende fazer faculdade?'] = None
+    # Faculdade: modelo espera 'Não'/'Sim' → passar sem normalização
+    row['Você já fez/faz/pretende fazer faculdade?'] = pesquisa.get('faculdade')
 
     # Investiu em curso: modelo espera 'Não'/'Sim' → passar sem normalização
     # Coluna snake_case porque rename_long_column_names já a processou
@@ -277,7 +276,7 @@ def railway_lead_to_sheets_row(lead_row: Dict) -> Dict:
 
     # ------------------------------------------------------------------
     # 3. Campos Railway ignorados (não são features do modelo)
-    # barreira, urgencia, investimento → não incluídos no row
+    # barreira, urgencia, investimento, estudouIA, porqueGestor → não incluídos no row
     # ------------------------------------------------------------------
 
     # Log para debug

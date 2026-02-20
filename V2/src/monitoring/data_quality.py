@@ -456,14 +456,13 @@ def check_distribution_drift(df_producao: pd.DataFrame,
             # Ordenar por maior diferença
             mudancas_significativas.sort(key=lambda x: x['diff'], reverse=True)
 
-            # Formatar mensagem
+            # Formatar mensagem com todas as mudanças
             mudancas_msg = []
-            for m in mudancas_significativas[:3]:  # Mostrar top 3
+            for m in mudancas_significativas:
                 mudancas_msg.append(
-                    f"'{m['categoria']}': {m['treino']*100:.1f}%{m['producao']*100:.1f}% "
+                    f"'{m['categoria']}': {m['treino']*100:.1f}%→{m['producao']*100:.1f}% "
                     f"({m['diff']*100:+.1f}pp)"
                 )
-            mais_msg = f" (e mais {len(mudancas_significativas)-3})" if len(mudancas_significativas) > 3 else ""
 
             # Determinar severidade pela maior mudança
             max_diff = mudancas_significativas[0]['diff']
@@ -480,7 +479,7 @@ def check_distribution_drift(df_producao: pd.DataFrame,
                 'changes': mudancas_significativas,
                 'severity': severity,
                 'message': f" {col}: {len(mudancas_significativas)} mudança(s) significativa(s) nas proporções\n"
-                          f"   {', '.join(mudancas_msg)}{mais_msg}"
+                          f"   {', '.join(mudancas_msg)}"
             })
 
     # 2. Verificar mudanças em distribuições numéricas
