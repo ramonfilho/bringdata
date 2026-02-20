@@ -103,14 +103,16 @@ def unificar_categorias_completo(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         'Qual a sua idade?',
         # Identificadores usados para feature engineering (nome_comprimento, nome_valido, etc.)
         'Nome Completo',
-        # UTM — processamento próprio na célula 10, mas sem separadores especiais
-        'Source',
+        # UTM — Term não tem hífens, pode normalizar
         'Term',
         # EXCLUÍDAS INTENCIONALMENTE — modelo Jan-30 espera valor original com capital/acento:
         # 'O seu gênero:'                             → espera 'Feminino'/'Masculino'
         # 'Já estudou programação?'                   → espera 'Não'/'Sim'
         # 'Você já fez/faz/pretende fazer faculdade?' → espera 'Não'/'Sim'
         # 'investiu_curso_online'                     → espera 'Não'/'Sim'
+        # 'Source'                                    → tem hífens ('facebook-ads', 'google-ads')
+        #                                               limpar_texto remove hífens → 'facebookads'
+        #                                               encoding produziria Source_facebookads ≠ Source_facebook_ads
     ]
     colunas_presentes = [c for c in COLUNAS_CATEGORICAS if c in df.columns]
     for coluna in colunas_presentes:
