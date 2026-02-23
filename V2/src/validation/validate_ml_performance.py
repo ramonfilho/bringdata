@@ -576,6 +576,96 @@ def enrich_campaign_ids(leads_df: pd.DataFrame, account_ids: list, access_token:
     return leads_df
 
 
+def _download_cpa_historico(bucket_name: str) -> pd.DataFrame:
+    """Baixa o histórico de CPA do GCS. Retorna DataFrame vazio se não existir."""
+    try:
+        import io
+        from google.cloud import storage
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob('historico/cpa_historico.csv')
+        if not blob.exists():
+            return pd.DataFrame()
+        content = blob.download_as_bytes()
+        return pd.read_csv(io.BytesIO(content))
+    except Exception as e:
+        print(f"    Aviso: não foi possível baixar histórico de CPA: {e}", flush=True)
+        return pd.DataFrame()
+
+
+def _build_cpa_rows(
+    campaign_metrics: pd.DataFrame,
+    start_date: str,
+    end_date: str,
+    sales_start: str,
+    sales_end: str,
+    tracking_rate_pct: float
+) -> pd.DataFrame:
+    """Constrói linhas do histórico de CPA para o período atual (somente Eventos ML)."""
+    import re
+
+    if campaign_metrics is None or campaign_metrics.empty:
+        return pd.DataFrame()
+    if 'comparison_group' not in campaign_metrics.columns:
+        return pd.DataFrame()
+
+    ml_df = campaign_metrics[campaign_metrics['comparison_group'] == 'Eventos ML']
+    if ml_df.empty:
+        return pd.DataFrame()
+
+    tracking_rate = tracking_rate_pct / 100.0 if tracking_rate_pct > 0 else 0.5
+
+    def extract_short_name(camp):
+        if '|' in str(camp):
+            parts = str(camp).split('|')
+            if parts[-1].strip().isdigit() and len(parts[-1].strip()) >= 15:
+                return '|'.join(parts[:-1]).strip()
+        return str(camp)
+
+    def extract_campaign_id(camp):
+        m = re.search(r'1\d{14,}', str(camp))
+        return m.group(0)[:15] if m else ''
+
+    rows = []
+    for _, r in ml_df.iterrows():
+        conv_traqueadas = int(r.get('conversions', 0))
+        conv_reais = conv_traqueadas / tracking_rate if tracking_rate > 0 else conv_traqueadas
+        gasto = float(r.get('spend', 0))
+        cpa = gasto / conv_reais if conv_reais > 0 else 0
+        rows.append({
+            'periodo_captacao': f"{start_date} a {end_date}",
+            'periodo_vendas': f"{sales_start} a {sales_end}",
+            'campaign_id': extract_campaign_id(r['campaign']),
+            'campaign_name': extract_short_name(r['campaign']),
+            'gasto': round(gasto, 2),
+            'leads': int(r.get('leads', 0)),
+            'conversoes_traqueadas': conv_traqueadas,
+            'taxa_tracking_pct': round(tracking_rate_pct, 1),
+            'conversoes_reais_est': round(conv_reais, 2),
+            'cpa': round(cpa, 2),
+            'roas': round(float(r.get('roas', 0)), 2),
+            'roas_adj_tmb': round(float(r.get('roas_adjusted', r.get('roas', 0))), 2),
+            'receita_traqueada': round(float(r.get('total_revenue', 0)), 2),
+            'margem': round(float(r.get('contribution_margin', 0)), 2),
+            'gerado_em': datetime.now().strftime('%Y-%m-%d %H:%M'),
+        })
+    return pd.DataFrame(rows)
+
+
+def _upload_cpa_historico(df: pd.DataFrame, bucket_name: str):
+    """Faz upload do histórico de CPA atualizado para o GCS."""
+    try:
+        from google.cloud import storage
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob('historico/cpa_historico.csv')
+        csv_bytes = df.to_csv(index=False).encode('utf-8')
+        blob.upload_from_string(csv_bytes, content_type='text/csv')
+        print(f"    Histórico de CPA salvo no GCS ({len(df)} registros)", flush=True)
+    except Exception as e:
+        print(f"    Aviso: não foi possível salvar histórico de CPA: {e}", flush=True)
+
+
 def main():
     """
     Função principal do CLI.
@@ -1893,6 +1983,27 @@ def main():
         'merge_otimizacao_ml_with_controle': config.get('merge_otimizacao_ml_with_controle', False)
     }
 
+    # Histórico de CPA: baixar do GCS, montar linhas do período atual e combinar
+    _bucket_name = os.getenv('VALIDATION_REPORTS_BUCKET')
+    cpa_historico_df = pd.DataFrame()
+    if _bucket_name:
+        print("  Carregando histórico de CPA do GCS...", flush=True)
+        cpa_historico_df = _download_cpa_historico(_bucket_name)
+
+    _tracking_rate_pct = matching_stats.get('tracking_rate', 100.0) if matching_stats else 100.0
+    _sales_start = getattr(args, 'sales_start_date', None) or start_date
+    _sales_end = getattr(args, 'sales_end_date', None) or end_date
+    _new_rows = _build_cpa_rows(
+        campaign_metrics, start_date, end_date,
+        _sales_start, _sales_end, _tracking_rate_pct
+    )
+    if not _new_rows.empty:
+        cpa_historico_df = pd.concat([cpa_historico_df, _new_rows], ignore_index=True)
+        # Manter apenas a entrada mais recente por (período, campanha)
+        cpa_historico_df = cpa_historico_df.drop_duplicates(
+            subset=['periodo_captacao', 'periodo_vendas', 'campaign_id'], keep='last'
+        ).reset_index(drop=True)
+
     report_gen = ValidationReportGenerator()
     report_gen.generate_excel_report(
         campaign_metrics,
@@ -1913,7 +2024,8 @@ def main():
         matched_ads_in_matched_adsets_comparisons=matched_ads_in_matched_adsets_comparisons,
         matched_adsets_faixa_a=matched_adsets_faixa_a,
         faixa_a_instances_detail=faixa_a_instances_detail,
-        ml_monitoring_metrics=ml_monitoring_metrics
+        ml_monitoring_metrics=ml_monitoring_metrics,
+        cpa_historico_df=cpa_historico_df if not cpa_historico_df.empty else None
     )
     print(f"    Excel salvo: {excel_path}", flush=True)
     print(flush=True)
@@ -1971,6 +2083,10 @@ def main():
             excel_url = None
     else:
         print("   ℹ  VALIDATION_REPORTS_BUCKET não configurado, upload ignorado", flush=True)
+
+    # Upload do histórico de CPA (CSV) para o GCS
+    if bucket_name and not cpa_historico_df.empty:
+        _upload_cpa_historico(cpa_historico_df, bucket_name)
 
     print(flush=True)
 

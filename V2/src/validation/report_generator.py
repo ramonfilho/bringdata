@@ -50,7 +50,8 @@ class ValidationReportGenerator:
         matched_ads_in_matched_adsets_comparisons: Optional[Dict] = None,
         matched_adsets_faixa_a: Optional[pd.DataFrame] = None,
         faixa_a_instances_detail: Optional[pd.DataFrame] = None,
-        ml_monitoring_metrics: Optional[Dict] = None
+        ml_monitoring_metrics: Optional[Dict] = None,
+        cpa_historico_df: Optional[pd.DataFrame] = None
     ) -> str:
         """
         Gera relatório Excel completo com 5-6 abas.
@@ -85,7 +86,11 @@ class ValidationReportGenerator:
         logger.info("   Gerando aba: Performance Geral")
         self._write_performance_geral(writer, overall_stats, matching_stats, campaign_metrics, formats)
 
-        # Aba 2: Performance por Campanha - REMOVIDA conforme solicitação
+        # Aba 2: Performance ML (ranking campanhas ML + histórico de CPA)
+        logger.info("   Gerando aba: Performance ML")
+        self._write_performance_ml(writer, campaign_metrics, matching_stats, cpa_historico_df, formats)
+
+        # Aba 3: Performance por Campanha - REMOVIDA conforme solicitação
         # logger.info("   Gerando aba: Performance por Campanha")
         # self._write_performance_campanhas(writer, campaign_metrics, formats)
 
@@ -1951,6 +1956,135 @@ class ValidationReportGenerator:
         # Ajustar larguras
         worksheet.set_column(0, 0, 30)
         worksheet.set_column(1, 1, 50)
+
+    def _write_performance_ml(
+        self,
+        writer: pd.ExcelWriter,
+        campaign_metrics: pd.DataFrame,
+        matching_stats: Dict,
+        cpa_historico_df: Optional[pd.DataFrame],
+        formats: Dict
+    ):
+        """
+        Escreve aba 'Performance ML' com duas tabelas:
+        1. Ranking por CPA das campanhas Eventos ML do período atual.
+        2. Histórico de CPA por campanha (todos os períodos, carregado do GCS).
+        """
+        worksheet = writer.book.add_worksheet('Performance ML')
+        row = 0
+
+        tracking_rate_pct = matching_stats.get('tracking_rate', 100.0) if matching_stats else 100.0
+        tracking_rate = tracking_rate_pct / 100.0
+
+        def extract_short_name(camp):
+            if '|' in str(camp):
+                parts = str(camp).split('|')
+                if parts[-1].strip().isdigit() and len(parts[-1].strip()) >= 15:
+                    return '|'.join(parts[:-1]).strip()
+            return str(camp)
+
+        # ── TABELA 1: Ranking por CPA ────────────────────────────────────────
+        worksheet.write(row, 0, ' PERFORMANCE CAMPANHAS ML — PERÍODO ATUAL', formats['title'])
+        row += 1
+        worksheet.write(
+            row, 0,
+            f'Conversões Reais Estimadas = Conv. Traqueadas ÷ {tracking_rate_pct:.1f}% de tracking',
+            formats['subtitle']
+        )
+        row += 2
+
+        headers1 = [
+            'Campanha', 'Gasto', 'Leads', 'Conv. Traqueadas',
+            'Conv. Reais (Est.)', 'Taxa Conv. Real', 'CPA',
+            'ROAS', 'ROAS Adj. TMB', 'Receita Traqueada', 'Margem Traqueada'
+        ]
+        for col, h in enumerate(headers1):
+            worksheet.write(row, col, h, formats['header'])
+        row += 1
+
+        has_ml = (
+            campaign_metrics is not None
+            and not campaign_metrics.empty
+            and 'comparison_group' in campaign_metrics.columns
+        )
+        if has_ml:
+            ml_df = campaign_metrics[campaign_metrics['comparison_group'] == 'Eventos ML'].copy()
+            if not ml_df.empty:
+                ml_df['_conv_reais'] = ml_df['conversions'].apply(
+                    lambda c: c / tracking_rate if tracking_rate > 0 else float(c)
+                )
+                ml_df['_cpa'] = ml_df.apply(
+                    lambda r: r['spend'] / r['_conv_reais'] if r['_conv_reais'] > 0 else 0, axis=1
+                )
+                ml_df['_taxa_real'] = ml_df.apply(
+                    lambda r: r['_conv_reais'] / r['leads'] if r['leads'] > 0 else 0, axis=1
+                )
+                ml_df = ml_df.sort_values('_cpa', ascending=True)
+
+                for _, r in ml_df.iterrows():
+                    c = 0
+                    worksheet.write(row, c, extract_short_name(r['campaign']), formats['text']); c += 1
+                    worksheet.write(row, c, float(r['spend']), formats['currency']); c += 1
+                    worksheet.write(row, c, int(r['leads']), formats['number']); c += 1
+                    worksheet.write(row, c, int(r['conversions']), formats['number']); c += 1
+                    worksheet.write(row, c, round(float(r['_conv_reais']), 1), formats['decimal']); c += 1
+                    worksheet.write(row, c, float(r['_taxa_real']), formats['percent']); c += 1
+                    worksheet.write(row, c, float(r['_cpa']), formats['currency']); c += 1
+                    worksheet.write(row, c, float(r['roas']), formats['decimal']); c += 1
+                    roas_adj = float(r.get('roas_adjusted', r['roas']))
+                    worksheet.write(row, c, roas_adj, formats['decimal']); c += 1
+                    worksheet.write(row, c, float(r['total_revenue']), formats['currency']); c += 1
+                    margin = float(r.get('contribution_margin', r['total_revenue'] - r['spend']))
+                    worksheet.write(row, c, margin, formats['currency'])
+                    row += 1
+            else:
+                worksheet.write(row, 0, 'Nenhuma campanha Eventos ML encontrada no período.', formats['text'])
+                row += 1
+        else:
+            worksheet.write(row, 0, 'Dados de campanha não disponíveis.', formats['text'])
+            row += 1
+
+        row += 2
+
+        # ── TABELA 2: Histórico de CPA ───────────────────────────────────────
+        worksheet.write(row, 0, ' HISTÓRICO DE CPA — CAMPANHAS ML (todos os períodos)', formats['title'])
+        row += 2
+
+        headers2 = [
+            'Período Captação', 'Período Vendas', 'Campanha',
+            'Gasto', 'Leads', 'Conv. Reais (Est.)', 'CPA',
+            'ROAS', 'ROAS Adj. TMB', 'Gerado em'
+        ]
+        for col, h in enumerate(headers2):
+            worksheet.write(row, col, h, formats['header'])
+        row += 1
+
+        if cpa_historico_df is not None and not cpa_historico_df.empty:
+            hist = cpa_historico_df.sort_values(
+                ['periodo_captacao', 'campaign_name'], ascending=[False, True]
+            )
+            for _, r in hist.iterrows():
+                c = 0
+                worksheet.write(row, c, str(r.get('periodo_captacao', '')), formats['text']); c += 1
+                worksheet.write(row, c, str(r.get('periodo_vendas', '')), formats['text']); c += 1
+                worksheet.write(row, c, str(r.get('campaign_name', '')), formats['text']); c += 1
+                worksheet.write(row, c, float(r.get('gasto', 0)), formats['currency']); c += 1
+                worksheet.write(row, c, int(r.get('leads', 0)), formats['number']); c += 1
+                worksheet.write(row, c, float(r.get('conversoes_reais_est', 0)), formats['decimal']); c += 1
+                worksheet.write(row, c, float(r.get('cpa', 0)), formats['currency']); c += 1
+                worksheet.write(row, c, float(r.get('roas', 0)), formats['decimal']); c += 1
+                worksheet.write(row, c, float(r.get('roas_adj_tmb', 0)), formats['decimal']); c += 1
+                worksheet.write(row, c, str(r.get('gerado_em', '')), formats['text'])
+                row += 1
+        else:
+            worksheet.write(
+                row, 0,
+                'Nenhum histórico disponível. Será populado a partir do próximo run com VALIDATION_REPORTS_BUCKET configurado.',
+                formats['text']
+            )
+
+        worksheet.set_column(0, 0, 55)
+        worksheet.set_column(1, 10, 16)
 
     def _write_fair_comparison(
         self,
