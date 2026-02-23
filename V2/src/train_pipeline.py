@@ -150,7 +150,7 @@ def setup_logging(verbosity='normal', log_file=None):
 logger = logging.getLogger(__name__)
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal'):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=False, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal'):
     """Executa pipeline de treino completo.
 
     Args:
@@ -172,7 +172,9 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         set_active: Se True, atualiza configs/active_model.yaml com este modelo (requer save_files=True)
         validation_hook: Função opcional chamada após feature engineering para validação.
                         Recebe dataset_fe e retorna True (continuar) ou False (abortar)
-        include_api_data: Se True, busca dados adicionais de API/Sheets (usado no retreino)
+        include_api_data: Se True, busca dados adicionais de API/Guru (padrão: False)
+        include_sheets_api: Se True (padrão), busca leads do Google Sheets quando include_api_data=True.
+                            Passar False quando os leads já foram baixados manualmente como Excel.
         api_start_date: Data início para buscar dados da API (YYYY-MM-DD)
         api_end_date: Data fim para buscar dados da API (YYYY-MM-DD)
         output_subdir: Subdiretório para logs ('training' ou 'retraining')
@@ -243,7 +245,10 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
 
     # Fonte de dados
     if include_api_data:
-        logger.info(f"  Fonte de dados: Arquivos locais + Google Sheets API")
+        fontes = ["Arquivos locais", "API Guru"]
+        if include_sheets_api:
+            fontes.append("Google Sheets API")
+        logger.info(f"  Fonte de dados: {' + '.join(fontes)}")
         if api_start_date or api_end_date:
             logger.debug(f"   Período API: {api_start_date or 'início'} até {api_end_date or 'hoje'}")
     else:
@@ -273,7 +278,8 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         include_api_data=include_api_data,
         api_start_date=api_start_date,
         api_end_date=api_end_date,
-        num_sheets_api=1  # Retreino: apenas aba 0 do Google Sheets
+        num_sheets_api=1,  # Retreino: apenas aba 0 do Google Sheets
+        include_sheets_api=include_sheets_api
     )
 
     cell_timers['Célula 1'] = time.time() - cell_start
@@ -886,8 +892,14 @@ if __name__ == "__main__":
     parser.add_argument(
         '--include-api-data',
         action='store_true',
-        default=True,
-        help='Incluir dados da API Guru e Google Sheets além dos arquivos locais (padrão: True)'
+        default=False,
+        help='Incluir dados da API Guru além dos arquivos locais (padrão: False)'
+    )
+    parser.add_argument(
+        '--no-sheets-api',
+        action='store_true',
+        default=False,
+        help='Desligar busca de leads via Google Sheets API (usar quando os leads já foram baixados como Excel). Relevante apenas com --include-api-data'
     )
     parser.add_argument(
         '--api-start-date',
@@ -916,6 +928,7 @@ if __name__ == "__main__":
         medium_strategy=args.medium_strategy,
         verbosity=args.verbosity,
         include_api_data=args.include_api_data,
+        include_sheets_api=not args.no_sheets_api,
         api_start_date=args.api_start_date,
         api_end_date=args.api_end_date
     )

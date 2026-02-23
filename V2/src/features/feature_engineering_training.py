@@ -177,7 +177,10 @@ def criar_features_derivadas(df_devclub: pd.DataFrame) -> pd.DataFrame:
     # 3. REMOVER COLUNAS DESNECESSÁRIAS
     colunas_remover = [
         'aba_origem', 'arquivo_origem', 'Data',
-        'Nome Completo', 'E-mail', 'Telefone', 'telefone_normalizado'
+        'Nome Completo', 'E-mail', 'Telefone', 'telefone_normalizado',
+        # Variantes de identificadores de formatos alternativos (sheets CRM antigos + Guru API)
+        # Já usados no matching (Célula 15) — não entram no encoding
+        'Nome', 'Email', 'EMAIL',
     ]
 
     # Verificar quais colunas existem antes de remover

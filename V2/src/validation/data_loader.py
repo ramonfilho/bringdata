@@ -62,9 +62,9 @@ def get_active_model_path() -> Path:
 
     return model_path
 
-# URLs padrão dos Google Sheets (pode ser sobrescrito via env var)
-DEFAULT_SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1VYti8jX277VNMkvzrfnJSR_Ko8L1LQFDdMEeD6D8_Vo'
-SECONDARY_SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1OqNYA5zU9ix1uf52ovRYIdLhcugzwgfKOheKxE_zgvE'
+# URLs dos Google Sheets (pode ser sobrescrito via env var)
+PRODUCAO_SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1VYti8jX277VNMkvzrfnJSR_Ko8L1LQFDdMEeD6D8_Vo'  # [LF] Pesquisa - Produção
+BACKUP_SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1OqNYA5zU9ix1uf52ovRYIdLhcugzwgfKOheKxE_zgvE'    # [LF] Pesquisa - Backup
 
 
 class LeadDataLoader:
@@ -90,7 +90,7 @@ class LeadDataLoader:
         Carrega leads diretamente do Google Sheets (produção) com cache local.
 
         Args:
-            sheets_url: URL do Google Sheets (default: usar variável de ambiente ou DEFAULT_SHEETS_URL)
+            sheets_url: URL do Google Sheets (default: usar variável de ambiente ou PRODUCAO_SHEETS_URL)
             start_date: Data início para filtro (YYYY-MM-DD) - opcional
             end_date: Data fim para filtro (YYYY-MM-DD) - opcional
             use_cache: Se True, usa cache local se disponível e válido (default: True)
@@ -107,14 +107,14 @@ class LeadDataLoader:
         urls_to_load = []
 
         if sheets_url is None:
-            sheets_url = os.getenv('GOOGLE_SHEETS_URL', DEFAULT_SHEETS_URL)
+            sheets_url = os.getenv('GOOGLE_SHEETS_URL', PRODUCAO_SHEETS_URL)
 
-        urls_to_load.append(('Principal', sheets_url, num_sheets))
+        urls_to_load.append(('Produção', sheets_url, num_sheets))
 
-        # Adicionar planilha secundária se solicitado
+        # Adicionar planilha de backup se solicitado
         if include_secondary:
-            secondary_url = os.getenv('SECONDARY_SHEETS_URL', SECONDARY_SHEETS_URL)
-            urls_to_load.append(('Secundária', secondary_url, 1))  # Apenas aba 0
+            secondary_url = os.getenv('SECONDARY_SHEETS_URL', BACKUP_SHEETS_URL)
+            urls_to_load.append(('Backup', secondary_url, 1))  # Apenas aba 0
 
         # Carregar de todas as planilhas
         all_dfs = []
@@ -810,20 +810,25 @@ class SalesDataLoader:
 
         # Combinar todos os DataFrames
         df_combined = pd.concat(all_sales, ignore_index=True)
+        logger.info(f"   Total bruto: {len(df_combined)} linhas (com parcelas)")
 
         # Filtrar vendas por status
-        if 'Status' in df_combined.columns:
+        # Suporta formato com parcelas ('Status Pedido') e formato simples ('Status')
+        status_col = 'Status Pedido' if 'Status Pedido' in df_combined.columns else 'Status'
+        if status_col in df_combined.columns:
             before = len(df_combined)
             if include_canceled:
-                # Fechamento: incluir Efetivado E Cancelado
-                df_combined = df_combined[df_combined['Status'].isin(['Efetivado', 'Cancelado'])].copy()
-                after = len(df_combined)
-                logger.info(f"   Filtradas {after} vendas TMB (Efetivado + Cancelado) de {before} total")
+                df_combined = df_combined[df_combined[status_col].isin(['Efetivado', 'Cancelado'])].copy()
             else:
-                # Pós-devoluções: apenas Efetivado
-                df_combined = df_combined[df_combined['Status'] == 'Efetivado'].copy()
-                after = len(df_combined)
-                logger.info(f"   Filtradas {after} vendas efetivadas de {before} total")
+                df_combined = df_combined[df_combined[status_col] == 'Efetivado'].copy()
+            logger.info(f"   Após filtro de status: {len(df_combined)} linhas (de {before})")
+
+        # Agregar parcelas: formato 'contas a receber' tem 1 linha por parcela
+        # Agrupar por Pedido mantendo a primeira ocorrência (mesmo que pipeline de treino)
+        if 'Pedido' in df_combined.columns:
+            before = len(df_combined)
+            df_combined = df_combined.groupby('Pedido', as_index=False).first()
+            logger.info(f"   Após agrupamento por Pedido: {len(df_combined)} pedidos únicos (de {before} parcelas)")
 
         # Normalizar colunas
         df_norm = pd.DataFrame()
@@ -866,6 +871,10 @@ class SalesDataLoader:
 
         # UTM Campaign
         df_norm['utm_campaign'] = df_combined.get('utm_campaign', np.nan)
+
+        # Grau de risco (específico TMB — formato com parcelas)
+        if 'Grau de risco' in df_combined.columns:
+            df_norm['Grau de risco'] = df_combined['Grau de risco'].values
 
         # Origem
         df_norm['origem'] = 'tmb'

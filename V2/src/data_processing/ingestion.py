@@ -141,6 +141,30 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
                     else:
                         logger.warning(f"      Coluna 'Pedido' não encontrada, usando dados como estão")
 
+                # NORMALIZAÇÃO DE COLUNAS: Formato novo (maiúsculas) → formato padrão
+                # Arquivos de leads a partir de LF08 usam nomes de coluna em maiúsculo
+                # (DATA, E-MAIL, TELEFONE, etc.) enquanto o pipeline espera o formato
+                # dos arquivos antigos (Data, E-mail, Telefone, etc.)
+                if not is_tmb_parcelas:
+                    leads_col_map = {
+                        'DATA': 'Data',
+                        'E-MAIL': 'E-mail',
+                        'EMAIL': 'E-mail',   # LF25 e outros usam EMAIL em vez de E-MAIL
+                        'TELEFONE': 'Telefone',
+                        'NOME COMPLETO': 'Nome Completo',
+                        'NOME': 'Nome Completo',
+                        'SOURCE': 'Source',
+                        'MEDIUM': 'Medium',
+                        'CAMPAIGN': 'Campaign',
+                        'TERM': 'Term',
+                        'CONTENT': 'Content',
+                        'TEM COMPUTADOR': 'Tem computador/notebook?',
+                    }
+                    rename_needed = {k: v for k, v in leads_col_map.items() if k in df.columns}
+                    if rename_needed:
+                        df = df.rename(columns=rename_needed)
+                        logger.debug(f"     Colunas normalizadas ({len(rename_needed)}): {list(rename_needed.keys())}")
+
                 file_data[sheet_name] = df
                 logger.debug(f"     Aba '{sheet_name}': {len(df)} linhas, {len(df.columns)} colunas")
 
@@ -216,8 +240,24 @@ def filter_sheets(
             # Excluir apenas arquivos locais (.xlsx), não dados da API (que têm '[API]' no nome)
             eh_guru_local = 'guru' in filename.lower() and '[API]' not in filename
 
+            # Critério: excluir aba LEADS quando o mesmo arquivo já tem aba de Pesquisa
+            # (a Pesquisa tem dados de survey completos; o LEADS é só CRM sem respostas)
+            # Só inclui LEADS quando é o único dado disponível no arquivo (LF08+ novo formato)
+            arquivo_tem_pesquisa = any('pesquisa' in s.lower() for s in sheets.keys())
+            eh_leads_redundante = (
+                'leads' in sheet_name.lower() and arquivo_tem_pesquisa
+            )
+
+            # Critério: excluir abas com 10 ou menos colunas preenchidas com dados
+            # Abas CRM-only (contato + UTM sem survey) têm 8 colunas
+            # Novo formato LEADS (LF08+) tem exatamente 10 colunas — sem survey, não interessa
+            # Abas de pesquisa com survey têm 11+ colunas
+            colunas_preenchidas = int(df.notna().any().sum())
+            tem_colunas_suficientes = colunas_preenchidas > 10
+
             # Decidir se mantém a aba
             if (nao_esta_vazia and not deve_remover_por_termo and not eh_lf_com_vendas and not eh_guru_local and
+                not eh_leads_redundante and tem_colunas_suficientes and
                 (tem_termo_permitido or tem_linhas_suficientes)):
 
                 # Aba MANTIDA
@@ -455,7 +495,8 @@ def read_all_training_sources(
     include_api_data: bool = False,
     api_start_date: str = None,
     api_end_date: str = None,
-    num_sheets_api: int = 1
+    num_sheets_api: int = 1,
+    include_sheets_api: bool = True
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
     Lê dados de treino de TODAS as fontes: arquivos locais + API/Sheets (opcional).
@@ -466,16 +507,18 @@ def read_all_training_sources(
     Fluxo:
     1. Lê arquivos Excel locais (sempre)
     2. Se include_api_data=True:
-       - Busca leads do Google Sheets (apenas aba 0 para retreino)
+       - Busca leads do Google Sheets (apenas aba 0 para retreino) — se include_sheets_api=True
        - Busca vendas da API Guru
        - Converte para formato dict e adiciona aos dados locais
 
     Args:
         filepaths: Lista de caminhos para arquivos Excel locais
-        include_api_data: Se True, busca dados adicionais de API/Sheets
+        include_api_data: Se True, busca dados adicionais de API/Guru
         api_start_date: Data início para buscar dados da API (formato: YYYY-MM-DD)
         api_end_date: Data fim para buscar dados da API (formato: YYYY-MM-DD)
         num_sheets_api: Número de abas do Sheets para carregar (default: 1 para retreino)
+        include_sheets_api: Se True (padrão), busca leads do Google Sheets quando include_api_data=True.
+                            Passar False quando os leads já foram baixados manualmente como Excel.
 
     Returns:
         Dicionário no mesmo formato que read_excel_files():
@@ -518,51 +561,54 @@ def read_all_training_sources(
         api_data = {}
 
         # === LEADS DO GOOGLE SHEETS ===
-        # Quando sem datas, carrega tudo (sem filtro) — datas serão calculadas depois
-        logger.info("\n 1/2: Leads do Google Sheets")
-        try:
-            lead_loader = LeadDataLoader()
-            sheets_df = lead_loader.load_leads_from_sheets(
-                sheets_url=None,  # Usa default ou env var
-                start_date=api_start_date,  # None = sem filtro de data
-                end_date=api_end_date,      # None = sem filtro de data
-                use_cache=False,  # Sempre buscar dados frescos no retreino
-                num_sheets=num_sheets_api,  # Retreino: apenas aba 0
-                training_mode=True  # Colunas demográficas chegam com nomes originais para a Célula 5 renomear
-            )
+        if not include_sheets_api:
+            logger.info("\n 1/2: Leads do Google Sheets — DESLIGADO (leads baixados manualmente como Excel)")
+        else:
+            # Quando sem datas, carrega tudo (sem filtro) — datas serão calculadas depois
+            logger.info("\n 1/2: Leads do Google Sheets")
+            try:
+                lead_loader = LeadDataLoader()
+                sheets_df = lead_loader.load_leads_from_sheets(
+                    sheets_url=None,  # Usa default ou env var
+                    start_date=api_start_date,  # None = sem filtro de data
+                    end_date=api_end_date,      # None = sem filtro de data
+                    use_cache=False,  # Sempre buscar dados frescos no retreino
+                    num_sheets=num_sheets_api,  # Retreino: apenas aba 0
+                    training_mode=True  # Colunas demográficas chegam com nomes originais para a Célula 5 renomear
+                )
 
-            if not sheets_df.empty:
-                # Converter para formato esperado: {filename: {sheetname: DataFrame}}
-                # Colunas de identidade/UTM: mapeadas de snake_case para nomes do notebook
-                sheets_formatted = pd.DataFrame()
-                sheets_formatted['E-mail'] = sheets_df['email']
-                sheets_formatted['Nome Completo'] = sheets_df.get('nome', '')
-                sheets_formatted['Telefone'] = sheets_df.get('telefone', '')
-                sheets_formatted['Data'] = sheets_df['data_captura']
-                sheets_formatted['Campaign'] = sheets_df['campaign']
-                sheets_formatted['Source'] = sheets_df.get('source', '')
-                sheets_formatted['Medium'] = sheets_df.get('medium', '')
-                sheets_formatted['Term'] = sheets_df.get('term', '')
-                sheets_formatted['Content'] = sheets_df.get('content', '')
-                sheets_formatted['lead_score'] = sheets_df.get('lead_score', None)
+                if not sheets_df.empty:
+                    # Converter para formato esperado: {filename: {sheetname: DataFrame}}
+                    # Colunas de identidade/UTM: mapeadas de snake_case para nomes do notebook
+                    sheets_formatted = pd.DataFrame()
+                    sheets_formatted['E-mail'] = sheets_df['email']
+                    sheets_formatted['Nome Completo'] = sheets_df.get('nome', '')
+                    sheets_formatted['Telefone'] = sheets_df.get('telefone', '')
+                    sheets_formatted['Data'] = sheets_df['data_captura']
+                    sheets_formatted['Campaign'] = sheets_df['campaign']
+                    sheets_formatted['Source'] = sheets_df.get('source', '')
+                    sheets_formatted['Medium'] = sheets_df.get('medium', '')
+                    sheets_formatted['Term'] = sheets_df.get('term', '')
+                    sheets_formatted['Content'] = sheets_df.get('content', '')
+                    sheets_formatted['lead_score'] = sheets_df.get('lead_score', None)
 
-                # Colunas demográficas: em training_mode, chegam com nomes originais do formulário.
-                # Passamos tudo que não foi já consumido acima — a Célula 5 renomeia igual aos Excels.
-                cols_consumidas = {'email', 'nome', 'telefone', 'data_captura', 'campaign',
-                                   'source', 'medium', 'term', 'content', 'lead_score', 'decile'}
-                for col in sheets_df.columns:
-                    if col not in cols_consumidas and col not in sheets_formatted.columns:
-                        sheets_formatted[col] = sheets_df[col]
+                    # Colunas demográficas: em training_mode, chegam com nomes originais do formulário.
+                    # Passamos tudo que não foi já consumido acima — a Célula 5 renomeia igual aos Excels.
+                    cols_consumidas = {'email', 'nome', 'telefone', 'data_captura', 'campaign',
+                                       'source', 'medium', 'term', 'content', 'lead_score', 'decile'}
+                    for col in sheets_df.columns:
+                        if col not in cols_consumidas and col not in sheets_formatted.columns:
+                            sheets_formatted[col] = sheets_df[col]
 
-                api_data['[API] Leads Google Sheets'] = {
-                    '[LF] Pesquisa - API': sheets_formatted
-                }
-                # Resumo já mostrado por load_leads_from_sheets()
-            else:
-                logger.warning("     Nenhum lead encontrado no Sheets")
+                    api_data['[API] Leads Google Sheets'] = {
+                        '[LF] Pesquisa - API': sheets_formatted
+                    }
+                    # Resumo já mostrado por load_leads_from_sheets()
+                else:
+                    logger.warning("     Nenhum lead encontrado no Sheets")
 
-        except Exception as e:
-            logger.error(f"    Erro ao buscar leads do Sheets: {e}")
+            except Exception as e:
+                logger.error(f"    Erro ao buscar leads do Sheets: {e}")
 
         # === CALCULAR DATAS DOS LEADS SE NÃO FORNECIDAS ===
         # Usa a data de cutoff do dataset (2025-03-01) como start, evitando carregar

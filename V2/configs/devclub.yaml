@@ -2,7 +2,7 @@
 
 # Ingestão - Diretório com arquivos de treino
 ingestion:
-  training_data_dir: "/Users/ramonmoreira/Desktop/smart_ads/data/devclub/treino/"
+  training_data_dir: "/Users/ramonmoreira/Desktop/smart_ads/V2/data/devclub/"
 
   # Critérios de filtragem de abas (linhas 31-33 do notebook)
   termos_manter:
@@ -10,6 +10,7 @@ ingestion:
     - "Vendas"
     - "tmb"
     - "Sheet"
+    - "LEADS"
 
   termos_remover:
     - "Pontuação"
@@ -20,7 +21,6 @@ ingestion:
     - "Alunos"
     - "Guru"
     - "TMB"
-    - "LEADS"
 
   min_linhas: 230
 
@@ -149,6 +149,7 @@ cleaning:
 consolidation:
   pesquisa_keywords:
     - "pesquisa"
+    - "leads"
   
   vendas_keywords:
     - "vendas"
