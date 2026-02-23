@@ -628,7 +628,6 @@ def main():
         cache_dir = Path(__file__).parent.parent.parent / 'files' / 'validation' / 'cache'
         if cache_dir.exists():
             shutil.rmtree(cache_dir)
-            cache_dir.mkdir(parents=True, exist_ok=True)
             print("  Cache limpo com sucesso!", flush=True)
             print(flush=True)
         else:
@@ -694,13 +693,13 @@ def main():
         logger.info(f"    Pasta do período (derivada): {periodo_folder}")
 
     # Determinar caminhos baseados na pasta do período
-    periodo_base_path = f'files/validation/{periodo_folder}'
+    periodo_base_path = f'V2/outputs/validation/{periodo_folder}'
 
-    # vendas_path: se especificado via CLI, usa; senão, usa pasta validation raiz
+    # vendas_path: se especificado via CLI, usa; senão, usa pasta de dados devclub
     if args.vendas_path:
         vendas_path = args.vendas_path
     else:
-        vendas_path = 'files/validation'  # Buscar na pasta raiz validation
+        vendas_path = 'V2/data/devclub'  # Mesma pasta do pipeline de treino
 
     # output_dir: usa pasta do período por padrão
     if args.ml_monitoring_output:
@@ -935,14 +934,21 @@ def main():
 
         guru_df = sales_loader.load_guru_sales(guru_files, include_canceled=include_canceled) if guru_files else None
 
-    # Buscar arquivos TMB baseado no tipo de relatório
-    # tmb_fechamento.xlsx: vendas com devoluções ainda em aberto (Efetivado + Cancelado)
-    # tmb_pos_devolucoes.xlsx: vendas após período de devolução (apenas Efetivado)
-    if args.report_type == 'fechamento':
-        tmb_files = sorted(glob(f"{vendas_path}/[Tt][Mm][Bb]_[Ff][Ee][Cc][Hh][Aa][Mm][Ee][Nn][Tt][Oo]*.xlsx"))
-    else:
-        tmb_files = sorted(glob(f"{vendas_path}/[Tt][Mm][Bb]_[Pp][Oo][Ss]_[Dd][Ee][Vv][Oo][Ll][Uu][Cc][Oo][Ee][Ss]*.xlsx") +
-                          glob(f"{vendas_path}/[Tt][Mm][Bb]_[Pp][Oo][Ss]_[Dd][Ee][Vv][Oo][Ll][Uu][Cc][Aa][Oo]*.xlsx"))
+    # Detectar arquivos TMB por estrutura de colunas (igual ao pipeline de treino)
+    # Identifica pelo trio: Pedido + Parcela + Grau de risco — independente do nome do arquivo
+    all_xlsx = sorted(glob(f"{vendas_path}/*.xlsx"))
+    tmb_files = []
+    for xlsx_path in all_xlsx:
+        # Pular arquivos Guru (já carregados acima)
+        if any(x in Path(xlsx_path).name.lower() for x in ['guru']):
+            continue
+        try:
+            cols = pd.read_excel(xlsx_path, nrows=0).columns.tolist()
+            if 'Pedido' in cols and 'Parcela' in cols and 'Grau de risco' in cols:
+                tmb_files.append(xlsx_path)
+                logger.info(f"   TMB detectado por colunas: {Path(xlsx_path).name}")
+        except Exception:
+            pass
 
     if args.report_type == 'fechamento':
         logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)} (incluirá Efetivado + Cancelado)")
