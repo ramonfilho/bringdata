@@ -3461,6 +3461,11 @@ async def railway_process_pending():
                     lead['pesquisa'] = {}
             elif lead.get('pesquisa') is None:
                 lead['pesquisa'] = {}
+            # Fallback: fbp/fbc podem estar no JSONB pesquisa (frontend v2)
+            if not lead.get('fbp') and lead['pesquisa'].get('fbp'):
+                lead['fbp'] = lead['pesquisa']['fbp']
+            if not lead.get('fbc') and lead['pesquisa'].get('fbc'):
+                lead['fbc'] = lead['pesquisa']['fbc']
             lead_dicts.append(lead)
 
         # 4. Converter para formato Google Sheets via railway_mapping
