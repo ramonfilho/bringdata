@@ -2652,100 +2652,31 @@ def fetch_leads_from_sheets(hours: int = 24) -> List[Dict[str, Any]]:
 @app.get("/monitoring/daily-check", response_model=DailyCheckResponse)
 async def daily_monitoring_check_auto(
     hours: int = 24,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
-    Executa check diário de monitoramento com dados do Google Sheets.
+    Executa check diário de monitoramento com dados do Railway PostgreSQL.
 
-    Busca automaticamente leads das últimas N horas e executa todos os checks:
-    - Data Quality: category drift, distribution drift, missing rate, score distribution
-    - Operational: 6h sem leads, 6h sem CAPI
-    - CAPI Quality: missing rate fbp/fbc
+    Delega para /monitoring/daily-check/railway, que é a fonte primária de dados.
+    Railway cobre 99.9% dos leads (verificado em 23/02/2026).
 
     Args:
-        hours: Número de horas para buscar (padrão: 24)
+        hours: Número de horas para buscar (padrão: 24). Ignorado se start_date/end_date forem passados.
+        start_date: Data de início no formato YYYY-MM-DD (BRT). Ex: 2026-02-01
+        end_date: Data de fim no formato YYYY-MM-DD (BRT). Ex: 2026-02-20
         db: Sessão PostgreSQL (injetada automaticamente)
 
     Returns:
         Alertas consolidados por severidade e categoria
     """
-    from src.monitoring.orchestrator import MonitoringOrchestrator
-    import yaml
-
-    start_time = time.time()
-
-    try:
-        # Buscar dados do Google Sheets
-        leads_data = fetch_leads_from_sheets(hours=hours)
-
-        logger.info(f"🔍 Executando check diário de monitoramento ({len(leads_data)} leads)")
-
-        # Obter model_path do modelo ativo
-        config_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'configs/active_model.yaml'
-        )
-
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-            model_path = config['active_model']['model_path']
-
-        # Garantir path absoluto
-        if not os.path.isabs(model_path):
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            model_path = os.path.join(base_dir, model_path)
-
-        logger.info(f"📂 Usando modelo: {model_path}")
-
-        # Inicializar orquestrador
-        orchestrator = MonitoringOrchestrator(model_path=model_path, db=db)
-
-        # Executar checks
-        result = orchestrator.run_daily_check(leads_data)
-
-        processing_time = time.time() - start_time
-
-        logger.info(f"✅ Check concluído em {processing_time:.2f}s")
-        logger.info(f"📊 Alertas: {result['total_alerts']} total "
-                   f"(HIGH: {result['alerts_by_severity']['HIGH']}, "
-                   f"MEDIUM: {result['alerts_by_severity']['MEDIUM']}, "
-                   f"LOW: {result['alerts_by_severity']['LOW']})")
-
-        # Logar alertas detalhados
-        if result['total_alerts'] > 0:
-            logger.info(f"\n🚨 ALERTAS DETECTADOS ({result['total_alerts']}):\n")
-
-            # Logar TODOS os alertas (sem limite)
-            for i, alert in enumerate(result['alerts'], 1):
-                logger.info(f"{i}. [{alert['severity']}] {alert['type']}")
-                logger.info(f"   {alert['message']}")
-                if alert.get('metric_value'):
-                    threshold_msg = f" (threshold: {alert['threshold']})" if alert.get('threshold') else ""
-                    logger.info(f"   Valor: {alert['metric_value']}{threshold_msg}")
-                logger.info("")  # Linha em branco
-        else:
-            logger.info("✅ Nenhum alerta detectado - sistema operando normalmente")
-
-        return DailyCheckResponse(
-            total_alerts=result['total_alerts'],
-            alerts_by_severity=result['alerts_by_severity'],
-            alerts_by_category=result['alerts_by_category'],
-            alerts=result['alerts'],
-            critical_summary=result.get('critical_summary', ''),
-            timestamp=datetime.now().isoformat(),
-            funnel_metrics=result.get('funnel_metrics'),
-            lead_quality_metrics=result.get('lead_quality_metrics'),
-        )
-
-    except FileNotFoundError as e:
-        logger.error(f"❌ Arquivo não encontrado: {e}")
-        raise HTTPException(status_code=500, detail=f"Modelo não encontrado: {str(e)}")
-    except Exception as e:
-        logger.error(f"❌ Erro no check de monitoramento: {str(e)}")
-        logger.error(f"Traceback: {e.__class__.__name__}")
-        import traceback
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Erro no monitoramento: {str(e)}")
+    return await daily_monitoring_check_railway(
+        hours=hours,
+        start_date=start_date,
+        end_date=end_date,
+        db=db,
+    )
 
 
 @app.get("/monitoring/daily-check/railway", response_model=DailyCheckResponse)
