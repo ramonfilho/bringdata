@@ -3,6 +3,7 @@
 **Data:** 2026-02-23
 **Status:** Ativo — v1.0
 **Motivação imediata:** Segundo cliente confirmado, chegada em ~1 semana.
+**Branch:** todo o desenvolvimento acontece em branch alternativa — `main` e produção não são afetados até merge explícito e validado.
 
 ---
 
@@ -54,7 +55,7 @@ smart_ads/V2/
 │   ├── train_pipeline.py            # Existente — importa de core/
 │   ├── production_pipeline.py       # Existente — importa de core/
 │   ├── monitoring/                  # Existente — importa de core/
-│   ├── retrain/                     # Existente — sem mudança estrutural
+│   ├── retrain/                     # Existente — verificar se está ok
 │   └── validation/                  # Existente — usa core/ onde aplicável
 └── configs/
     ├── clients/                     # NOVO
@@ -86,6 +87,8 @@ Dataclass tipado carregado de `configs/clients/{client}.yaml`. Sub-configs:
 | `IngestionConfig` | Colunas de detecção TMB, identificadores, bare_campaign_names |
 
 Interface: `ClientConfig.from_yaml(path)` + `ClientConfig.validate()` com mensagens acionáveis.
+
+> **`ClientConfig` é um arquivo vivo.** A cada novo cliente, a varredura pode revelar necessidades de parametrização que clientes anteriores não tinham — seja um campo novo em um sub-config existente ou um sub-config inteiro novo. Quando isso acontecer, atualizar o dataclass e o `client_template.yaml`. Todo campo novo deve ter um **valor default**, garantindo que os clientes já existentes continuem funcionando sem alterar seus YAMLs.
 
 ### 5.2 Módulo `src/core/`
 
@@ -136,7 +139,7 @@ Para campos de texto livre em respostas de formulário (sentimento, intenção, 
 
 ## 7. Hardcodes a Mover para Config
 
-<!-- TODO: Fazer varredura completa em train_pipeline.py e production_pipeline.py (e demais arquivos de src/) para confirmar que esta lista está completa. A análise identificou os casos mais críticos, mas podem existir outros valores hardcoded de cliente espalhados no código. -->
+> **Esta lista é preliminar.** Foi identificada por análise de código e cobre os casos mais críticos, mas provavelmente está incompleta. A varredura sistemática descrita na seção 8 é o pré-requisito para finalizá-la. Só começar a implementar o `ClientConfig` após a varredura estar concluída.
 
 | # | Localização atual | Chave no YAML |
 |---|---|---|
@@ -153,20 +156,97 @@ Para campos de texto livre em respostas de formulário (sentimento, intenção, 
 
 ---
 
-## 8. Fases de Migração
+## 8. Varredura de Hardcodes (Pré-requisito da Fase 1)
+
+A lista da seção 7 foi identificada por análise de código e pode estar incompleta. Antes de iniciar qualquer implementação, fazer varredura manual e sistemática nos seguintes arquivos:
+
+**Processo:** percorrer cada arquivo célula a célula, função por função, anotando todo valor literal que seja específico do cliente (strings, listas, dicionários, números de negócio). Não conta como hardcode valores que são constantes do algoritmo (ex: `random_state=42`).
+
+**Arquivos a varrer, organizados por pipeline:**
+
+**`train_pipeline.py` e seus módulos:**
+| Arquivo | Módulo |
+|---|---|
+| `src/train_pipeline.py` | Pipeline principal |
+| `src/data_processing/ingestion.py` | data_processing |
+| `src/data_processing/column_unification_refactored.py` | data_processing |
+| `src/data_processing/category_unification.py` | data_processing |
+| `src/data_processing/feature_removal.py` | data_processing |
+| `src/data_processing/utm_training.py` | data_processing |
+| `src/data_processing/medium_training.py` | data_processing |
+| `src/data_processing/medium_production_training.py` | data_processing |
+| `src/data_processing/dataset_versioning_training.py` | data_processing |
+| `src/data_processing/conversion_window.py` | data_processing |
+| `src/matching/matching_training.py` | matching |
+| `src/matching/matching_robusto.py` | matching |
+| `src/matching/matching_email_only.py` | matching |
+| `src/matching/matching_email_with_validation.py` | matching |
+| `src/matching/matching_email_telefone.py` | matching |
+| `src/matching/matching_unified.py` | matching |
+| `src/features/feature_engineering_training.py` | features |
+| `src/features/encoding_training.py` | features |
+| `src/model/training_model.py` | model |
+| `src/model/hyperparameter_tuning.py` | model |
+| `src/monitoring/data_quality.py` | monitoring |
+
+**`production_pipeline.py` e seus módulos:**
+| Arquivo | Módulo |
+|---|---|
+| `src/production_pipeline.py` | Pipeline de produção |
+| `src/data_processing/preprocessing.py` | data_processing |
+| `src/data_processing/utm_unification.py` | data_processing |
+| `src/data_processing/medium_unification.py` | data_processing |
+| `src/features/engineering.py` | features |
+| `src/features/encoding.py` | features |
+| `src/model/prediction.py` | model |
+
+**`monitoring/orchestrator.py` e seus módulos:**
+| Arquivo | Módulo |
+|---|---|
+| `src/monitoring/orchestrator.py` | monitoring |
+| `src/monitoring/operational_monitor.py` | monitoring |
+| `src/monitoring/capi_monitor.py` | monitoring |
+| `src/monitoring/models.py` | monitoring |
+| `src/monitoring/config.py` | monitoring |
+| `src/monitoring/data_drift_detection.py` | monitoring |
+
+**`retrain/retraining_orchestrator.py` e seus módulos:**
+| Arquivo | Módulo |
+|---|---|
+| `src/retrain/retraining_orchestrator.py` | retrain |
+| `src/retrain/data_validation.py` | retrain |
+| `src/retrain/model_comparison.py` | retrain |
+
+**Arquivos presentes nos módulos mas não importados diretamente — também varrer:**
+| Arquivo | Observação |
+|---|---|
+| `src/data_processing/column_unification.py` | Versão antiga (não refatorada) — verificar se ainda é usada |
+| `src/data_processing/devclub_filtering_training.py` | Filtros específicos DevClub |
+| `src/features/utm_removal.py` | Remoção de UTMs |
+| `api/app.py` | Padrões de campanha e URLs hardcoded |
+
+**Output esperado:** tabela completa substituindo a seção 7, com todos os hardcodes mapeados, sua localização exata (arquivo:linha) e a chave correspondente no sub-config de destino.
+
+**Critério de conclusão da varredura:** todos os arquivos acima percorridos e nenhum valor específico de cliente restante sem mapeamento.
+
+---
+
+## 9. Fases de Migração
 
 ### Fase 1 — Foundation (Semana 1–2)
 
-- Implementar `ClientConfig` dataclass com todos os sub-configs
-- Criar `configs/templates/client_template.yaml` documentando todas as chaves
-- Rodar EDA no dataset DevClub e validar que o gerador produz config correta
-- Criar `configs/clients/devclub.yaml` a partir dos hardcodes atuais
-- Criar esqueleto de `src/core/` (arquivos com assinaturas definidas)
-- Criar diretório `src/nlp/` com README de interface
+1. **Executar varredura completa de hardcodes** (seção 8) e finalizar tabela da seção 7
+2. **Implementar `ClientConfig`** dataclass com todos os sub-configs identificados na varredura
+3. **Criar `configs/templates/client_template.yaml`** documentando todas as chaves do `ClientConfig`
+4. **Construir `src/eda/generate_client_config.py`** — o gerador de config a partir de dados brutos
+5. **Rodar o EDA no dataset DevClub** e validar que o output cobre todos os campos do template
+6. **Criar `configs/clients/devclub.yaml`** combinando o output do EDA com os hardcodes mapeados na varredura
+7. **Criar esqueleto de `src/core/`** — arquivos com assinaturas definidas, sem implementação ainda
+8. **Criar `src/nlp/`** com README de interface
 
 **Critério de saída:** `ClientConfig.from_yaml('configs/clients/devclub.yaml').validate()` passa sem erros.
 
-### Fase 2 — Consolidação (Semana 2–3)
+### Fase 2 — Consolidação (Semana 2–3) -- PAREI AQUI >>>
 
 Em ordem de criticidade de divergência:
 
@@ -181,6 +261,24 @@ Em ordem de criticidade de divergência:
 9. Atualizar `validation/` para usar `core/` onde há reimplementação paralela
 
 **Critério de saída:** treino e produção aplicam exatamente as mesmas transformações, verificável por teste de paridade em amostra DevClub.
+
+> **Como executar o teste de paridade:**
+> 1. Separar um snapshot fixo de ~500 leads reais do DevClub (salvar em `tests/fixtures/paridade_sample.csv`)
+> 2. Rodar a amostra pelos dois pipelines até o ponto pós-encoding (antes do modelo)
+> 3. Comparar os DataFrames coluna por coluna — qualquer diferença é uma divergência
+>
+> ```python
+> df_train = train_pipeline.preprocess(amostra)
+> df_prod  = production_pipeline.preprocess(amostra)
+>
+> assert df_train.shape == df_prod.shape
+> for col in df_train.columns:
+>     diffs = (df_train[col] != df_prod[col]).sum()
+>     if diffs > 0:
+>         print(f"{col}: {diffs} divergências")
+> ```
+>
+> Rodar **antes** de iniciar a Fase 2 (estabelece baseline e revela divergências não mapeadas) e **após cada componente consolidado** (confirma que o comportamento foi preservado).
 
 ### Fase 3 — Cliente B (Semana 3–4)
 
@@ -200,7 +298,7 @@ Em ordem de criticidade de divergência:
 
 ---
 
-## 9. O Que NÃO Muda
+## 10. O Que NÃO Muda
 
 - Estrutura de orquestração do `train_pipeline.py` (21 células)
 - Estrutura de classe do `production_pipeline.py`
@@ -214,7 +312,7 @@ Em ordem de criticidade de divergência:
 
 ---
 
-## 10. Compatibilidade com Sprint 2–3
+## 11. Compatibilidade com Sprint 2–3
 
 `train_pipeline.main()` passa a aceitar `config: ClientConfig`. O retrain orchestrator deve ser atualizado simultaneamente na Fase 2 para passar o config correto. Sprints 2 e 3 (comparação de modelos e deploy automático) podem prosseguir após a conclusão da Fase 2. A Fase 1 não bloqueia nenhum sprint existente — é aditiva.
 
@@ -222,7 +320,7 @@ Em ordem de criticidade de divergência:
 
 ---
 
-## 11. Componentes Já Compartilhados (Referência)
+## 12. Componentes Já Compartilhados (Referência)
 
 | Componente | Usado por |
 |---|---|
@@ -233,7 +331,7 @@ Em ordem de criticidade de divergência:
 
 ---
 
-## 12. Caminho para MLOps Nível 3
+## 13. Caminho para MLOps Nível 3
 
 O refactor atual (Fases 1–3) leva o projeto do Nível 1 para o Nível 2. O Nível 3 exige infraestrutura adicional e só faz sentido com 5+ clientes ou quando o retreino manual virar gargalo operacional real.
 
