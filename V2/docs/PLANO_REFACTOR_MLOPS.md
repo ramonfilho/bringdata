@@ -262,11 +262,12 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 | 66 | `training_model.py:677` | Prefixos de features derivadas para categorização no feature registry: `['nome_', 'email_', 'telefone_', 'dia_semana']` | `feature.derived_feature_prefixes_for_registry` |
 | 67 | `utm_unification.py:117` | Threshold de comprimento para classificar valor de Term como ID longo: `len > 10` | `utm.term_long_id_threshold` |
 | 68 | `preprocessing.py:278-281` | Mapeamento de renomeação de colunas longas: `'Já investiu em algum curso online...'`→`'investiu_curso_online'`, `'O que mais te chama atenção...'`→`'interesse_programacao'` (mesmas strings de #13 e #14 — operação diferente) | `ingestion.column_rename_mapping` |
+| 69 | `preprocessing.py:41-62` + `preprocessing.py:236-248` + `configs/devclub.yaml:cleaning.colunas_remover` | Lista de colunas a remover — treino e produção usam a mesma chave; colunas inexistentes ignoradas via `errors='ignore'`; substitui as duas funções estáticas de produção e o `cleaning.colunas_remover` do treino | `ingestion.columns_to_remove` (lista única) |
 
 **Observações de qualidade (não hardcodes — corrigir separadamente):**
 - `hyperparameter_tuning.py`: usa `print()` ao longo de todo o corpo em vez de `logger` — inconsistente com o restante do projeto
 
-> Pipeline de treino varrido — 66 hardcodes registrados. Pipelines de produção, monitoring e retrain pendentes.
+> Pipeline de treino varrido — 66 hardcodes registrados. Pipeline de produção em andamento (#67–#69 do pipeline de produção). Monitoring e retrain pendentes.
 
 **Arquivos a varrer, organizados por pipeline:**
 
