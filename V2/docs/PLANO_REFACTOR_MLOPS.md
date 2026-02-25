@@ -113,7 +113,7 @@ Funções puras. Assinatura padrão: `transform(df, config: SubConfig, **artifac
 - **`dataset_versioning.py`** — `criar_dataset_pos_cutoff`, `aplicar_janela_conversao` — só treino; requer todas as unificações anteriores
 - **`feature_engineering.py`** — `create_features(df, config: FeatureConfig)` — guards de colunas unificados
 - **`encoding.py`** — `apply_encoding(df, config: EncodingConfig, artifacts)` — versão produção é canônica
-- **`preprocessing.py`** — lista de colunas vem do config, não estática
+- **`preprocessing.py`** — orquestra a sequência canônica de pré-processamento: `remove_duplicates` → `clean_columns` → `remove_campaign_features` → `rename_long_column_names` → `remove_technical_fields`; chama `utils.remove_columns` com as listas do config; treino e produção chamam `preprocess(df, config)` — sequência idêntica garantida por construção; monitoring chama a mesma função com wrapper de preservação de `decil`/`lead_score` em torno dela
 
 ### 5.3 EDA → Config Generator (`src/eda/generate_client_config.py`)
 
@@ -146,7 +146,7 @@ Para campos de texto livre em respostas de formulário (sentimento, intenção, 
 |---|---|
 | `train_pipeline.py` | Importa 100% de `core/` para transformações; recebe `config: ClientConfig` |
 | `production_pipeline.py` | Importa 100% de `core/`; comportamento idêntico ao treino por construção |
-| `monitoring/orchestrator.py` | Usa as mesmas funções `core/` que produção — proibido reimplementar localmente |
+| `monitoring/orchestrator.py` | Chama `core.preprocessing.preprocess(df, config)` com wrapper de preservação de `decil`/`lead_score` em torno dela — mesma sequência canônica de treino e produção, garantindo ausência de training-serving skew |
 | `retrain/retraining_orchestrator.py` | Passa `ClientConfig` para `train_pipeline.main()`; hook architecture preservada |
 | `validation/` | Usa `core/` para carregamento de dados, busca de vendas e matching |
 
@@ -172,7 +172,7 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 | mapeamento de colunas API→pipeline | `ingestion.py:584-601` (inline, sem função nomeada) | — (confirmar na varredura produção) | `core/ingestion.py` ou `core/preprocessing.py` |
 | `remove_duplicates_per_sheet` | `ingestion.py` | `preprocessing.py` (`remove_duplicates`) | `core/ingestion.py` |
 | `filter_sheets` | `ingestion.py` | — (provavelmente só treino — confirmar) | `core/ingestion.py` (condicionado a extrair lógica inline #57-#59 para config) |
-| `remove_unnecessary_columns` + `remover_colunas_utm_ausentes` + `remover_features_desnecessarias` | `ingestion.py`, `column_unification_refactored.py`, `feature_removal.py` | `clean_columns` + `remove_technical_fields` + `remove_campaign_features` (`preprocessing.py`) | `core/utils.py` como `remove_columns(df, columns: List[str], prefixes: List[str] = None)` — mesmas colunas e prefixos nos dois pipelines; listas vêm do config |
+| `remove_unnecessary_columns` + `remover_colunas_utm_ausentes` + `remover_features_desnecessarias` | `ingestion.py`, `column_unification_refactored.py`, `feature_removal.py` | `clean_columns` + `remove_technical_fields` + `remove_campaign_features` (`preprocessing.py`) | primitiva genérica `remove_columns(df, columns, errors='ignore')` em `core/utils.py`; as três funções nomeadas colapsam em chamadas parametrizadas a ela dentro de `core/preprocessing.py`, que define a sequência canônica única para treino, produção e monitoring — ordem garantida por construção, eliminando risco de training-serving skew |
 | `consolidate_datasets` | `ingestion.py` | — (confirmar na varredura produção) | `core/ingestion.py` (sem condicionantes — completamente parametrizada) |
 | `unificar_colunas_pesquisa` + `unificar_colunas_vendas` | `column_unification_refactored.py` | — (confirmar na varredura produção) | `core/column_unification.py` como função única `unify_columns(df, merge_rules)` — padrão genérico, apenas os nomes de colunas (#13–#20) vão para config |
 | `aplicar_filtro_temporal` | `column_unification_refactored.py` | — (confirmar na varredura produção) | `core/column_unification.py` (sem condicionantes — lógica puramente genérica) |
@@ -267,11 +267,21 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 | 70 | `encoding.py:243-248` | Mapeamentos específicos de correção de nomes de colunas pós-normalização: `'O_que_voc_faz_atualmente_Sou_autonomo'`→`'..._aut_nomo'`, `'Tem_computador_notebook_SIM'`→`'...Sim'`, etc. (4 entradas DevClub) | `encoding.column_name_corrections` |
 | 71 | `encoding.py:280` + `prediction.py:124` | ID do experimento MLflow hardcoded no path de artefatos: `"mlruns" / "1" / mlflow_run_id` | `model.mlflow_experiment_id` |
 | 72 | `prediction.py:70,74` | Diretório legado de modelos: `"arquivos_modelo"` (fallback quando `active_model.yaml` falha) | `model.legacy_model_dir` |
+| 73 | `orchestrator.py:286` | Índice da aba de survey no Google Sheets: `1` (segunda aba) | `monitoring.survey_sheet_tab_index` |
+| 74 | `orchestrator.py:313` | Formato de data da aba 2 do Google Sheets DevClub: `'%d/%m/%Y %H:%M:%S'` (formato brasileiro) | `monitoring.sheet_date_format` |
+| 75 | `orchestrator.py:318` | Offset de timezone Brasil: `timedelta(hours=-3)` (BRT) | `monitoring.timezone_offset_hours` |
+| 76 | `orchestrator.py:371` | Índice da aba principal no Google Sheets: `0` | `monitoring.main_sheet_tab_index` |
+| 77 | `orchestrator.py:386` | Valor de decil inválido a filtrar do histórico: `'MODELO 6 ML'` (nome do modelo antigo DevClub que aparecia no campo decil antes do modelo atual) | `monitoring.invalid_decil_values` |
+| 78 | `orchestrator.py:398` | Formato de data da aba principal do Google Sheets: `'%Y-%m-%d %H:%M:%S'` (formato de saída do pipeline de produção) | `monitoring.main_sheet_date_format` |
+| 79 | `orchestrator.py:422,423` | Decis de alta qualidade monitorados: `'D9'` e `'D10'` — top 20% num modelo de 10 decis; outro cliente pode usar número diferente de decis | `model.top_decils_to_monitor` |
+| 80 | `orchestrator.py:676` | Janela de lookback do funil de leads: `hours=12` | `monitoring.funnel_lookback_hours` |
+| 81 | `orchestrator.py:683,684` | Formato de exibição de data no sumário: `'%d/%m/%Y %H:%M'` (convenção brasileira) | `monitoring.display_date_format` |
+| 82 | `orchestrator.py:752` | Fator de estimativa de eventos CAPI por lead: `1.3` (cada lead gera em média 1.3 eventos no DevClub) | `monitoring.capi_events_per_lead_estimate` |
 
 **Observações de qualidade (não hardcodes — corrigir separadamente):**
 - `hyperparameter_tuning.py`: usa `print()` ao longo de todo o corpo em vez de `logger` — inconsistente com o restante do projeto
 
-> Pipelines de treino e produção varridos — 72 hardcodes registrados. Monitoring e retrain pendentes.
+> Pipelines de treino e produção varridos — 72 hardcodes registrados. `orchestrator.py` varrido — 82 hardcodes no total. Demais módulos de monitoring e retrain pendentes.
 
 **Arquivos a varrer, organizados por pipeline:**
 
@@ -311,10 +321,10 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 | `src/features/encoding.py` | features |
 | `src/model/prediction.py` | model |
 
-**`monitoring/orchestrator.py` e seus módulos — ⏳ pendente:**
+**`monitoring/orchestrator.py` e seus módulos — ⏳ em andamento:**
 | Arquivo | Módulo |
 |---|---|
-| `src/monitoring/orchestrator.py` | monitoring |
+| `src/monitoring/orchestrator.py` ✅ | monitoring |
 | `src/monitoring/operational_monitor.py` | monitoring |
 | `src/monitoring/capi_monitor.py` | monitoring |
 | `src/monitoring/models.py` | monitoring |
@@ -360,14 +370,32 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 Em ordem de criticidade de divergência:
 
 1. `core/utm.py` — resolve divergência `.lower()` ativa (mais urgente)
+   - Atualizar import em `train_pipeline.py` → `core.utm`
+   - Atualizar import em `production_pipeline.py` → `core.utm`
+   - Atualizar import em `monitoring/orchestrator.py` → `core.utm`
 2. `core/feature_engineering.py` — unifica guards de colunas
+   - Atualizar import em `train_pipeline.py` → `core.feature_engineering`
+   - Atualizar import em `production_pipeline.py` → `core.feature_engineering`
+   - Atualizar import em `monitoring/orchestrator.py` → `core.feature_engineering`
 3. `core/encoding.py` — versão produção é canônica, absorve versão treino
+   - Atualizar import em `train_pipeline.py` → `core.encoding`
+   - Atualizar import em `production_pipeline.py` → `core.encoding`
 4. `core/medium.py` — consolida 3 arquivos em 1 parametrizado por config (etapa mais trabalhosa)
-5. `core/preprocessing.py` — lista de colunas vem do config
-6. Atualizar `train_pipeline.py` para importar 100% de `core/`
-7. Atualizar `production_pipeline.py` para importar 100% de `core/`
-8. Atualizar `monitoring/orchestrator.py` para usar funções `core/` (mesmas de produção)
-9. Atualizar `validation/` para usar `core/` onde há reimplementação paralela
+   - Atualizar import em `train_pipeline.py` → `core.medium`
+   - Atualizar import em `production_pipeline.py` → `core.medium`
+   - Atualizar import em `monitoring/orchestrator.py` → `core.medium`
+5. `core/preprocessing.py` — define sequência canônica única: `remove_duplicates` → `clean_columns` → `remove_campaign_features` → `rename_long_column_names` → `remove_technical_fields`; listas de colunas vêm do config; chama `core/utils.remove_columns` internamente
+   - Atualizar `train_pipeline.py` → chamar `core.preprocessing.preprocess(df, config)`
+   - Atualizar `production_pipeline.py` → chamar `core.preprocessing.preprocess(df, config)`
+   - Atualizar `monitoring/orchestrator.py` → chamar `core.preprocessing.preprocess(df, config)` com wrapper de preservação de `decil`/`lead_score`
+6. `core/category_unification.py` — já compartilhado; migrar para `core/` formaliza o contrato
+   - Atualizar import em `train_pipeline.py` → `core.category_unification`
+   - Atualizar import em `production_pipeline.py` → `core.category_unification`
+   - Atualizar import em `monitoring/orchestrator.py` → `core.category_unification`
+7. Atualizar `train_pipeline.py` para importar 100% de `core/`
+8. Atualizar `production_pipeline.py` para importar 100% de `core/`
+9. Atualizar `monitoring/orchestrator.py` para importar 100% de `core/` (itens 1–6 acima cobrem os módulos de transformação; verificar se restam outros)
+10. Atualizar `validation/` para usar `core/` onde há reimplementação paralela
 
 **Critério de saída:** treino e produção aplicam exatamente as mesmas transformações, verificável por teste de paridade em amostra DevClub.
 
