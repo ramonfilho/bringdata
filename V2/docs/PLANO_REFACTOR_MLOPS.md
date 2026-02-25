@@ -32,7 +32,7 @@ Rejeitamos Option A (consolidar arquivos com `config: dict`, depois extrair tipa
 | UTM | `utm_training.py` | `utm_unification.py` | Produção aplica `.lower()`, treino não |
 | Medium | `medium_training.py` + `medium_production_training.py` | `medium_unification.py` | Função `aplicar_unificacao_robusta` com lógica diferente entre treino e produção; 3 arquivos com listas de mapeamento distintas |
 | Feature engineering | `feature_engineering_training.py` | `engineering.py` | Guards de existência de colunas diferentes |
-| Encoding | `encoding_training.py` | `encoding.py` | Produção tem feature registry + reordenação; treino não |
+| Encoding | `encoding_training.py` | `encoding.py` | Produção tem feature registry + reordenação; treino não. Adicionalmente: treino usa nomes de colunas normalizados (`'idade'`, `'faixa_salarial'`) no ordinal encoding; produção usa nomes longos do formulário (`'Qual a sua idade?'`, `'Atualmente, qual a sua faixa salarial?'`) |
 | Preprocessing | inline em `train_pipeline.py` | `preprocessing.py` | Lista de colunas diferente (YAML vs estática) |
 | Limpeza de nomes de colunas | `training_model.py:179-182` (inline antes do fit) | — (confirmar na varredura produção) | Regex `[^A-Za-z0-9_]`→`_` aplicada no treino; momento e forma de aplicação na produção a confirmar |
 
@@ -166,7 +166,7 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 
 | Função | Arquivos (treino) | Arquivos (produção) | Destino sugerido |
 |---|---|---|---|
-| `normalizar_telefone_robusto` | `matching_email_telefone.py`, `matching_robusto.py`, `matching_training.py`, `feature_engineering_training.py` | — (confirmar na varredura produção) | `core/utils.py` |
+| `normalizar_telefone_robusto` | `matching_email_telefone.py`, `matching_robusto.py`, `matching_training.py`, `feature_engineering_training.py` | `engineering.py:14` | `core/utils.py` |
 | `normalizar_email` | `matching_email_only.py`, `matching_email_telefone.py`, `matching_robusto.py`, `matching_training.py`, `matching_email_with_validation.py` | — (confirmar na varredura produção) | `core/utils.py` |
 | `limpar_texto` + `normalizar_para_comparacao` | `category_unification.py`, `medium_training.py` (mesma lógica, nomes diferentes) | — (confirmar na varredura produção) | `core/utils.py` (consolidar em uma única função de normalização de texto) |
 | mapeamento de colunas API→pipeline | `ingestion.py:584-601` (inline, sem função nomeada) | — (confirmar na varredura produção) | `core/ingestion.py` ou `core/preprocessing.py` |
@@ -185,8 +185,8 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 | `criar_dataset_pos_cutoff` | `dataset_versioning_training.py` | — (provavelmente só treino — confirmar) | `core/dataset_versioning.py` — executado após todas as unificações; hardcodes #38, #39, #40 vão para config |
 | `aplicar_janela_conversao` | `conversion_window.py` | — (só treino — produção não aplica) | `core/dataset_versioning.py` — sem condicionantes; hardcode #9 está no chamador e vai para config |
 | `fazer_matching_email_only` + `fazer_matching_email_telefone` + `fazer_matching_robusto` + `fazer_matching_variantes` + `fazer_matching_email_with_validation` + `match_leads_to_sales_unified` | `matching_*.py` (6 arquivos) | — (confirmar na varredura produção) | `core/matching.py` como função única `match_leads(df_leads, df_vendas, config: MatchingConfig)` — estratégia controlada por config; hardcodes #41–#46 vão para config |
-| `criar_features_derivadas` | `feature_engineering_training.py` | — (confirmar na varredura produção — divergência de guards já conhecida) | `core/feature_engineering.py` como `create_features(df, config: FeatureConfig)` — já previsto na arquitetura; hardcodes #47, #48 vão para config |
-| `aplicar_encoding_estrategico` | `encoding_training.py` | `encoding.py` (confirmar na varredura produção — versão produção é canônica, tem feature registry + reordenação) | `core/encoding.py` como `apply_encoding(df, config: EncodingConfig, artifacts)` — hardcodes #49, #50, #51, #64 vão para config |
+| `criar_features_derivadas` | `feature_engineering_training.py` | `engineering.py` (`create_derived_features`) — divergência confirmada: produção tem guard `arquivo_origem` (linha 183) para detectar contexto treino vs monitoring; some ao migrar para `core/` com `FeatureConfig` | `core/feature_engineering.py` como `create_features(df, config: FeatureConfig)` — hardcodes #41, #42, #47, #48 vão para config |
+| `aplicar_encoding_estrategico` | `encoding_training.py` | `encoding.py` (`apply_categorical_encoding`) — confirmado: versão produção é canônica (tem feature registry, reordenação, `mapeamentos_especificos`); divergência de nomes de colunas ordinais confirmada (ver Seção 3) | `core/encoding.py` como `apply_encoding(df, config: EncodingConfig, artifacts)` — hardcodes #49, #50, #51, #64, #70, #71 vão para config |
 | `UnionFind` (classe inline) | `training_model.py:410-428` | — (só treino — confirmar) | `core/utils.py` — algoritmo genérico de componentes conectados; sem hardcodes |
 | `clean_column_names` (inline, linhas 179-182) | `training_model.py` | — (confirmar na varredura produção — produção provavelmente faz o mesmo) | `core/utils.py` como `clean_column_names(df) -> df` — regex genérica `[^A-Za-z0-9_]`→`_`; sem hardcodes |
 
@@ -234,19 +234,19 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 | 38 | `dataset_versioning_training.py:33` | Data de corte do dataset: `'2025-03-01'` (quando features críticas passaram a ser preenchidas) | `ingestion.dataset_cutoff_date` |
 | 39 | `dataset_versioning_training.py:55` | Coluna removida pós-cutoff por alto missing: `'Qual o seu nível em programação?'` | `feature.columns_to_remove_post_cutoff` |
 | 40 | `dataset_versioning_training.py:63-69` | Lista de features com missing crítico a monitorar — **sobrepõe com #3** (mesma chave, dois locais no código) → unificar em `feature.critical_columns` ao implementar |
-| 41 | `matching_*.py:múltiplas linhas` | Nome da coluna de email na pesquisa: `'E-mail'` | `matching.pesquisa_email_column` |
-| 42 | `matching_*.py:múltiplas linhas` | Nome da coluna de telefone na pesquisa: `'Telefone'` | `matching.pesquisa_phone_column` |
+| 41 | `matching_*.py:múltiplas linhas` + `engineering.py:170` | Nome da coluna de email na pesquisa: `'E-mail'` | `matching.pesquisa_email_column` |
+| 42 | `matching_*.py:múltiplas linhas` + `engineering.py:174` | Nome da coluna de telefone na pesquisa: `'Telefone'` | `matching.pesquisa_phone_column` |
 | 43 | `matching_email_telefone.py` + `matching_robusto.py` | Validação de telefone brasileiro: código de país `55`, comprimento 10-11 dígitos | `matching.country_code` + `matching.phone_digits` |
 | 44 | `matching_email_with_validation.py:35` | Path do arquivo de validação cruzada: `'../data/devclub/alunos TODOS.xlsx'` | `matching.alunos_todos_path` |
 | 45 | `matching_email_with_validation.py:91-103` | Lista de nomes de produtos para validação cruzada (10 produtos DevClub) | `matching.validation_products` |
 | 46 | `matching_email_with_validation.py:132` | Coluna de email no arquivo de alunos: `'Qual seu e-mail ?'` | `matching.alunos_email_column` |
-| 47 | `feature_engineering_training.py:152-154` | Nome da coluna de nome no formulário: `'Nome Completo'` | `feature.pesquisa_name_column` |
-| 48 | `feature_engineering_training.py:178-184` | Lista de colunas a remover após feature engineering (inclui nomes DevClub + variantes CRM antigo) | `feature.columns_to_drop_after_fe` |
-| 49 | `encoding_training.py:46-53` | Categorias canônicas para encoding ordinal de `idade` e `faixa_salarial` — devem estar em sincronia com `mapa_idade` e `mapa_faixa` da Célula 7 | `encoding.ordinal_variables` |
-| 50 | `encoding_training.py:74-76` | 3 categorias Medium para binary_top3: `'Linguagem de programação'`, `'Aberto'`, `'Lookalike 2% Cadastrados - DEV 2.0 + Interesses'` | `medium.binary_top3_categories` |
-| 51 | `encoding_training.py:105-106` | Feature removida após encoding: `'telefone_comprimento_8'` | `encoding.features_to_drop_after_encoding` |
+| 47 | `feature_engineering_training.py:152-154` + `engineering.py:164` | Nome da coluna de nome no formulário: `'Nome Completo'` | `feature.pesquisa_name_column` |
+| 48 | `feature_engineering_training.py:178-184` + `engineering.py:200-206` | Lista de colunas a remover após feature engineering (inclui nomes DevClub + variantes CRM antigo) | `feature.columns_to_drop_after_fe` |
+| 49 | `encoding_training.py:46-53` + `encoding.py:108-128` | Categorias canônicas para encoding ordinal de `idade` e `faixa_salarial` — devem estar em sincronia com `mapa_idade` e `mapa_faixa` da Célula 7 (divergência de nomes: treino usa normalizados, produção usa nomes longos — ver Seção 3) | `encoding.ordinal_variables` |
+| 50 | `encoding_training.py:74-76` + `encoding.py:177-179` | 3 categorias Medium para binary_top3: `'Linguagem de programação'`, `'Aberto'`, `'Lookalike 2% Cadastrados - DEV 2.0 + Interesses'` | `medium.binary_top3_categories` |
+| 51 | `encoding_training.py:105-106` + `encoding.py:209-210` | Feature removida após encoding: `'telefone_comprimento_8'` | `encoding.features_to_drop_after_encoding` |
 | 52 | `training_model.py:675` | Stems de nomes de colunas de pesquisa para categorização no feature registry: `['gênero', 'idade', 'faz', 'faixa', 'cartão', 'estudou', 'faculdade', 'evento']` | `feature.survey_column_stems` |
-| 53 | `training_model.py:691,853,987,1008,1036` | Template do nome do modelo com cliente e versão hardcoded: `f"v1_devclub_rf_{split_method}_single"` | `model.model_name_template` |
+| 53 | `training_model.py:691,853,987,1008,1036` + `encoding.py:299-300` | Template do nome do modelo com cliente e versão hardcoded: `f"v1_devclub_rf_{split_method}_single"` | `model.model_name_template` |
 | 54 | `training_model.py:982` | Path do arquivo de modelo ativo: `configs/active_model.yaml` (pré-refactor — será `configs/active_models/devclub.yaml`) | resolvido pela estrutura de diretórios da Fase 1 |
 | 55 | `training_model.py:77` | Path hardcoded para `api/business_config.py` na função `atualizar_business_config_com_recall` | `model.business_config_path` |
 | 56 | `hyperparameter_tuning.py:328,331,344` | Thresholds de decisão para adotar params tunados: `>1.0%` (recomendado), `>0.3%` (marginal/considerar) — regra de negócio embutida no código | `model.tuning_improvement_thresholds` |
@@ -263,11 +263,13 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 | 67 | `utm_unification.py:117` | Threshold de comprimento para classificar valor de Term como ID longo: `len > 10` | `utm.term_long_id_threshold` |
 | 68 | `preprocessing.py:278-281` | Mapeamento de renomeação de colunas longas: `'Já investiu em algum curso online...'`→`'investiu_curso_online'`, `'O que mais te chama atenção...'`→`'interesse_programacao'` (mesmas strings de #13 e #14 — operação diferente) | `ingestion.column_rename_mapping` |
 | 69 | `preprocessing.py:41-62` + `preprocessing.py:236-248` + `configs/devclub.yaml:cleaning.colunas_remover` | Lista de colunas a remover — treino e produção usam a mesma chave; colunas inexistentes ignoradas via `errors='ignore'`; substitui as duas funções estáticas de produção e o `cleaning.colunas_remover` do treino | `ingestion.columns_to_remove` (lista única) |
+| 70 | `encoding.py:243-248` | Mapeamentos específicos de correção de nomes de colunas pós-normalização: `'O_que_voc_faz_atualmente_Sou_autonomo'`→`'..._aut_nomo'`, `'Tem_computador_notebook_SIM'`→`'...Sim'`, etc. (4 entradas DevClub) | `encoding.column_name_corrections` |
+| 71 | `encoding.py:280` | ID do experimento MLflow hardcoded no path de artefatos: `"mlruns" / "1" / mlflow_run_id` | `model.mlflow_experiment_id` |
 
 **Observações de qualidade (não hardcodes — corrigir separadamente):**
 - `hyperparameter_tuning.py`: usa `print()` ao longo de todo o corpo em vez de `logger` — inconsistente com o restante do projeto
 
-> Pipeline de treino varrido — 66 hardcodes registrados. Pipeline de produção em andamento (#67–#69 do pipeline de produção). Monitoring e retrain pendentes.
+> Pipeline de treino varrido — 66 hardcodes registrados. Pipeline de produção em andamento — 71 hardcodes total (#67–#71 do pipeline de produção). Falta: `prediction.py`. Monitoring e retrain pendentes.
 
 **Arquivos a varrer, organizados por pipeline:**
 
