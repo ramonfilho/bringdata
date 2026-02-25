@@ -188,7 +188,8 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 | `criar_features_derivadas` | `feature_engineering_training.py` | `engineering.py` (`create_derived_features`) — divergência confirmada: produção tem guard `arquivo_origem` (linha 183) para detectar contexto treino vs monitoring; some ao migrar para `core/` com `FeatureConfig` | `core/feature_engineering.py` como `create_features(df, config: FeatureConfig)` — hardcodes #41, #42, #47, #48 vão para config |
 | `aplicar_encoding_estrategico` | `encoding_training.py` | `encoding.py` (`apply_categorical_encoding`) — confirmado: versão produção é canônica (tem feature registry, reordenação, `mapeamentos_especificos`); divergência de nomes de colunas ordinais confirmada (ver Seção 3) | `core/encoding.py` como `apply_encoding(df, config: EncodingConfig, artifacts)` — hardcodes #49, #50, #51, #64, #70, #71 vão para config |
 | `UnionFind` (classe inline) | `training_model.py:410-428` | — (só treino — confirmar) | `core/utils.py` — algoritmo genérico de componentes conectados; sem hardcodes |
-| `clean_column_names` (inline, linhas 179-182) | `training_model.py` | — (confirmar na varredura produção — produção provavelmente faz o mesmo) | `core/utils.py` como `clean_column_names(df) -> df` — regex genérica `[^A-Za-z0-9_]`→`_`; sem hardcodes |
+| `clean_column_names` (inline, linhas 179-182) | `training_model.py` | `encoding.py:238-240` (mesma regex aplicada em produção no encoding) | `core/utils.py` como `clean_column_names(df) -> df` — regex genérica `[^A-Za-z0-9_]`→`_`; sem hardcodes |
+| `prepare_features` | — (só produção) | `prediction.py:179-229` | `core/utils.py` como `align_features(df, expected_features) -> df` — preenche features ausentes com 0 e reordena; sem hardcodes |
 
 **Hardcodes mapeados — pipeline de treino varrido célula por célula (#1–#66):**
 
@@ -246,8 +247,8 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 | 50 | `encoding_training.py:74-76` + `encoding.py:177-179` | 3 categorias Medium para binary_top3: `'Linguagem de programação'`, `'Aberto'`, `'Lookalike 2% Cadastrados - DEV 2.0 + Interesses'` | `medium.binary_top3_categories` |
 | 51 | `encoding_training.py:105-106` + `encoding.py:209-210` | Feature removida após encoding: `'telefone_comprimento_8'` | `encoding.features_to_drop_after_encoding` |
 | 52 | `training_model.py:675` | Stems de nomes de colunas de pesquisa para categorização no feature registry: `['gênero', 'idade', 'faz', 'faixa', 'cartão', 'estudou', 'faculdade', 'evento']` | `feature.survey_column_stems` |
-| 53 | `training_model.py:691,853,987,1008,1036` + `encoding.py:299-300` | Template do nome do modelo com cliente e versão hardcoded: `f"v1_devclub_rf_{split_method}_single"` | `model.model_name_template` |
-| 54 | `training_model.py:982` | Path do arquivo de modelo ativo: `configs/active_model.yaml` (pré-refactor — será `configs/active_models/devclub.yaml`) | resolvido pela estrutura de diretórios da Fase 1 |
+| 53 | `training_model.py:691,853,987,1008,1036` + `encoding.py:299-300` + `prediction.py:69,73` | Template do nome do modelo com cliente e versão hardcoded: `f"v1_devclub_rf_{split_method}_single"` | `model.model_name_template` |
+| 54 | `training_model.py:982` + `prediction.py:52` | Path do arquivo de modelo ativo: `configs/active_model.yaml` (pré-refactor — será `configs/active_models/devclub.yaml`) | resolvido pela estrutura de diretórios da Fase 1 |
 | 55 | `training_model.py:77` | Path hardcoded para `api/business_config.py` na função `atualizar_business_config_com_recall` | `model.business_config_path` |
 | 56 | `hyperparameter_tuning.py:328,331,344` | Thresholds de decisão para adotar params tunados: `>1.0%` (recomendado), `>0.3%` (marginal/considerar) — regra de negócio embutida no código | `model.tuning_improvement_thresholds` |
 | 57 | `ingestion.py:233-236` | Convenção de nomes de arquivo DevClub: `'LF'` (arquivos de leads) e `'LF06'` (exceção — mantém abas Guru/TMB) | `ingestion.lf_file_prefix` + `ingestion.lf_guru_exception_files` |
@@ -264,12 +265,13 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 | 68 | `preprocessing.py:278-281` | Mapeamento de renomeação de colunas longas: `'Já investiu em algum curso online...'`→`'investiu_curso_online'`, `'O que mais te chama atenção...'`→`'interesse_programacao'` (mesmas strings de #13 e #14 — operação diferente) | `ingestion.column_rename_mapping` |
 | 69 | `preprocessing.py:41-62` + `preprocessing.py:236-248` + `configs/devclub.yaml:cleaning.colunas_remover` | Lista de colunas a remover — treino e produção usam a mesma chave; colunas inexistentes ignoradas via `errors='ignore'`; substitui as duas funções estáticas de produção e o `cleaning.colunas_remover` do treino | `ingestion.columns_to_remove` (lista única) |
 | 70 | `encoding.py:243-248` | Mapeamentos específicos de correção de nomes de colunas pós-normalização: `'O_que_voc_faz_atualmente_Sou_autonomo'`→`'..._aut_nomo'`, `'Tem_computador_notebook_SIM'`→`'...Sim'`, etc. (4 entradas DevClub) | `encoding.column_name_corrections` |
-| 71 | `encoding.py:280` | ID do experimento MLflow hardcoded no path de artefatos: `"mlruns" / "1" / mlflow_run_id` | `model.mlflow_experiment_id` |
+| 71 | `encoding.py:280` + `prediction.py:124` | ID do experimento MLflow hardcoded no path de artefatos: `"mlruns" / "1" / mlflow_run_id` | `model.mlflow_experiment_id` |
+| 72 | `prediction.py:70,74` | Diretório legado de modelos: `"arquivos_modelo"` (fallback quando `active_model.yaml` falha) | `model.legacy_model_dir` |
 
 **Observações de qualidade (não hardcodes — corrigir separadamente):**
 - `hyperparameter_tuning.py`: usa `print()` ao longo de todo o corpo em vez de `logger` — inconsistente com o restante do projeto
 
-> Pipeline de treino varrido — 66 hardcodes registrados. Pipeline de produção em andamento — 71 hardcodes total (#67–#71 do pipeline de produção). Falta: `prediction.py`. Monitoring e retrain pendentes.
+> Pipelines de treino e produção varridos — 72 hardcodes registrados. Monitoring e retrain pendentes.
 
 **Arquivos a varrer, organizados por pipeline:**
 
@@ -298,7 +300,7 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 | `src/model/hyperparameter_tuning.py` | model |
 | `src/monitoring/data_quality.py` | monitoring |
 
-**`production_pipeline.py` e seus módulos — ⏳ pendente:**
+**`production_pipeline.py` e seus módulos — ✅ varrido:**
 | Arquivo | Módulo |
 |---|---|
 | `src/production_pipeline.py` | Pipeline de produção |
