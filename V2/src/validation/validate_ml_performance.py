@@ -576,21 +576,38 @@ def enrich_campaign_ids(leads_df: pd.DataFrame, account_ids: list, access_token:
     return leads_df
 
 
+LOCAL_CPA_HISTORICO_PATH = Path(__file__).parent.parent.parent / 'outputs' / 'validation' / 'historico' / 'cpa_historico.csv'
+
+
 def _download_cpa_historico(bucket_name: str) -> pd.DataFrame:
-    """Baixa o histórico de CPA do GCS. Retorna DataFrame vazio se não existir."""
-    try:
-        import io
-        from google.cloud import storage
-        client = storage.Client()
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob('historico/cpa_historico.csv')
-        if not blob.exists():
-            return pd.DataFrame()
-        content = blob.download_as_bytes()
-        return pd.read_csv(io.BytesIO(content))
-    except Exception as e:
-        print(f"    Aviso: não foi possível baixar histórico de CPA: {e}", flush=True)
-        return pd.DataFrame()
+    """
+    Baixa o histórico de CPA. Tenta GCS primeiro; usa arquivo local como fallback.
+    Retorna DataFrame vazio se nenhuma fonte estiver disponível.
+    """
+    # 1. Tentar GCS
+    if bucket_name:
+        try:
+            import io
+            from google.cloud import storage
+            client = storage.Client()
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob('historico/cpa_historico.csv')
+            if blob.exists():
+                content = blob.download_as_bytes()
+                df = pd.read_csv(io.BytesIO(content))
+                print(f"    Histórico de CPA carregado do GCS ({len(df)} registros)", flush=True)
+                return df
+            print("    Histórico de CPA não encontrado no GCS (arquivo novo será criado)", flush=True)
+        except Exception as e:
+            print(f"    Aviso: GCS indisponível ({e}), tentando fallback local...", flush=True)
+
+    # 2. Fallback: arquivo local
+    if LOCAL_CPA_HISTORICO_PATH.exists():
+        df = pd.read_csv(LOCAL_CPA_HISTORICO_PATH)
+        print(f"    Histórico de CPA carregado do arquivo local ({len(df)} registros)", flush=True)
+        return df
+
+    return pd.DataFrame()
 
 
 def _build_cpa_rows(
@@ -653,17 +670,33 @@ def _build_cpa_rows(
 
 
 def _upload_cpa_historico(df: pd.DataFrame, bucket_name: str):
-    """Faz upload do histórico de CPA atualizado para o GCS."""
+    """
+    Salva o histórico de CPA atualizado. Tenta GCS primeiro; salva localmente como fallback.
+    """
+    csv_bytes = df.to_csv(index=False).encode('utf-8')
+
+    # 1. Tentar GCS
+    gcs_ok = False
+    if bucket_name:
+        try:
+            from google.cloud import storage
+            client = storage.Client()
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob('historico/cpa_historico.csv')
+            blob.upload_from_string(csv_bytes, content_type='text/csv')
+            print(f"    Histórico de CPA salvo no GCS ({len(df)} registros)", flush=True)
+            gcs_ok = True
+        except Exception as e:
+            print(f"    Aviso: não foi possível salvar no GCS ({e}), salvando localmente...", flush=True)
+
+    # 2. Sempre salvar localmente (garante fallback para próxima execução)
     try:
-        from google.cloud import storage
-        client = storage.Client()
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob('historico/cpa_historico.csv')
-        csv_bytes = df.to_csv(index=False).encode('utf-8')
-        blob.upload_from_string(csv_bytes, content_type='text/csv')
-        print(f"    Histórico de CPA salvo no GCS ({len(df)} registros)", flush=True)
+        LOCAL_CPA_HISTORICO_PATH.parent.mkdir(parents=True, exist_ok=True)
+        LOCAL_CPA_HISTORICO_PATH.write_bytes(csv_bytes)
+        if not gcs_ok:
+            print(f"    Histórico de CPA salvo localmente: {LOCAL_CPA_HISTORICO_PATH} ({len(df)} registros)", flush=True)
     except Exception as e:
-        print(f"    Aviso: não foi possível salvar histórico de CPA: {e}", flush=True)
+        print(f"    Aviso: não foi possível salvar histórico localmente: {e}", flush=True)
 
 
 def main():
@@ -1983,12 +2016,10 @@ def main():
         'merge_otimizacao_ml_with_controle': config.get('merge_otimizacao_ml_with_controle', False)
     }
 
-    # Histórico de CPA: baixar do GCS, montar linhas do período atual e combinar
+    # Histórico de CPA: baixar do GCS (ou fallback local), montar linhas do período atual e combinar
     _bucket_name = os.getenv('VALIDATION_REPORTS_BUCKET')
-    cpa_historico_df = pd.DataFrame()
-    if _bucket_name:
-        print("  Carregando histórico de CPA do GCS...", flush=True)
-        cpa_historico_df = _download_cpa_historico(_bucket_name)
+    print("  Carregando histórico de CPA...", flush=True)
+    cpa_historico_df = _download_cpa_historico(_bucket_name)
 
     _tracking_rate_pct = matching_stats.get('tracking_rate', 100.0) if matching_stats else 100.0
     _sales_start = getattr(args, 'sales_start_date', None) or start_date
@@ -2084,8 +2115,8 @@ def main():
     else:
         print("   ℹ  VALIDATION_REPORTS_BUCKET não configurado, upload ignorado", flush=True)
 
-    # Upload do histórico de CPA (CSV) para o GCS
-    if bucket_name and not cpa_historico_df.empty:
+    # Salvar histórico de CPA (GCS + fallback local)
+    if not cpa_historico_df.empty:
         _upload_cpa_historico(cpa_historico_df, bucket_name)
 
     print(flush=True)

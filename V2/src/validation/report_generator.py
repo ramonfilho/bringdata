@@ -1983,6 +1983,64 @@ class ValidationReportGenerator:
                     return '|'.join(parts[:-1]).strip()
             return str(camp)
 
+        # ── TABELA 0: Resumo agregado das campanhas ML ───────────────────────
+        worksheet.write(row, 0, ' RESUMO — CAMPANHAS MACHINE LEARNING (PERÍODO ATUAL)', formats['title'])
+        row += 1
+        worksheet.write(
+            row, 0,
+            f'Taxa de tracking: {tracking_rate_pct:.1f}%  |  Conv. Reais = Conv. Traqueadas ÷ {tracking_rate_pct:.1f}%',
+            formats['subtitle']
+        )
+        row += 2
+
+        has_data = (
+            campaign_metrics is not None
+            and not campaign_metrics.empty
+            and 'comparison_group' in campaign_metrics.columns
+        )
+
+        if has_data:
+            ml_df = campaign_metrics[campaign_metrics['comparison_group'] == 'Eventos ML'].copy()
+
+            total_spend   = ml_df['spend'].sum()
+            total_leads   = ml_df['leads'].sum() if 'leads' in ml_df.columns else 0
+            total_conv    = ml_df['conversions'].sum() if 'conversions' in ml_df.columns else 0
+            total_revenue = ml_df['total_revenue'].sum() if 'total_revenue' in ml_df.columns else 0
+            total_rev_adj = ml_df['total_revenue_adjusted'].sum() if 'total_revenue_adjusted' in ml_df.columns else total_revenue
+            total_margin  = total_revenue - total_spend
+            total_margin_adj = total_rev_adj - total_spend
+
+            conv_reais = total_conv / tracking_rate if tracking_rate > 0 else 0
+            cpa = total_spend / conv_reais if conv_reais > 0 else 0
+            roas = total_revenue / total_spend if total_spend > 0 else 0
+            roas_adj = total_rev_adj / total_spend if total_spend > 0 else 0
+
+            summary_headers = [
+                'Gasto Total', 'Leads', 'Conv. Traqueadas', 'Conv. Reais (Est.)',
+                'CPA (R$)', 'ROAS', 'ROAS Adj. TMB', 'Receita Traqueada', 'Margem Traqueada', 'Margem Adj. TMB'
+            ]
+            summary_values = [
+                total_spend, total_leads, total_conv, round(conv_reais, 1),
+                cpa, roas, roas_adj, total_revenue, total_margin, total_margin_adj
+            ]
+            summary_formats = [
+                formats['currency'], formats['number'], formats['number'], formats['decimal'],
+                formats['currency'], formats['decimal'], formats['decimal'],
+                formats['currency'], formats['currency'], formats['currency']
+            ]
+
+            for col, h in enumerate(summary_headers):
+                worksheet.write(row, col, h, formats['header'])
+            row += 1
+            for col, (val, fmt) in enumerate(zip(summary_values, summary_formats)):
+                worksheet.write(row, col, val, fmt)
+            row += 1
+        else:
+            worksheet.write(row, 0, 'Dados de campanhas ML não disponíveis.', formats['text'])
+            row += 1
+
+        row += 2
+
         # ── TABELA 1: Ranking por CPA ────────────────────────────────────────
         worksheet.write(row, 0, ' PERFORMANCE CAMPANHAS ML — PERÍODO ATUAL', formats['title'])
         row += 1

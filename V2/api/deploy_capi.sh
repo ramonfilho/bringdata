@@ -576,16 +576,7 @@ main() {
     print_info "Serviço: $SERVICE_NAME"
     echo ""
 
-    if [ "$YES_FLAG" = false ]; then
-        read -p "Continuar com o deploy? (y/n) " -n 1 -r
-        echo ""
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_warning "Deploy cancelado pelo usuário"
-            exit 0
-        fi
-    else
-        print_success "Confirmação pulada (--yes)"
-    fi
+    print_success "Confirmação automática (--yes)"
 
     # Executar pipeline de deploy
     validate_prerequisites
