@@ -36,7 +36,7 @@ def unify_utm_source(df: pd.DataFrame) -> pd.DataFrame:
     df_unified['Source'] = df_unified['Source'].str.lower()
 
     # Valores minoritários para unificar em "outros"
-    outras_sources = ['fb', 'teste', '[field id="utm_source"]', 'facebook-ads-sitelink', 'youtube', 'youtube-bio', 'bio', 'organico', 'ig', 'manychat']
+    outras_sources = ['fb', 'teste', '[field id="utm_source"]', 'facebook-ads-sitelink', 'youtube', 'youtube-bio', 'bio', 'organico', 'ig', 'manychat', 'org']
 
     # Aplicar unificação e logar conversões
     conversoes = []
