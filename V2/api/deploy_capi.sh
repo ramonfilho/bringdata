@@ -148,8 +148,8 @@ validate_prerequisites() {
         print_warning "Nenhuma revisão anterior encontrada (primeiro deploy?)"
     fi
 
-    # 1.10 ⚠️ CRÍTICO: Verificar Cloud SQL (da lib/common.sh)
-    validate_cloud_sql "$CLOUD_SQL_INSTANCE" "$REGION" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"
+    # Cloud SQL descomissionado em 25/02/2026 — descomentar para novos clientes com Cloud SQL
+    # validate_cloud_sql "$CLOUD_SQL_INSTANCE" "$REGION" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"
 
     echo ""
 }
@@ -243,7 +243,6 @@ deploy_to_cloud_run() {
         --max-instances $MAX_INSTANCES \
         --concurrency $CONCURRENCY \
         --update-env-vars="$ENV_VARS" \
-        --add-cloudsql-instances="$CLOUD_SQL_CONNECTION" \
         $AUTH_FLAG \
         --quiet || {
             print_error "Falha no deploy para Cloud Run"
