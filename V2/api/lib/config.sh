@@ -44,14 +44,15 @@ JOB_TIMEOUT="${JOB_TIMEOUT:-1200}"  # 20 minutos para validação completa com A
 ENVIRONMENT="${ENVIRONMENT:-production}"
 
 # =============================================================================
-# CLOUD SQL (POSTGRESQL) - ⚠️  CRÍTICO PARA EVITAR PERDA DE DADOS
+# CLOUD SQL (POSTGRESQL) - Descomissionado em 25/02/2026 (DevClub usa Railway)
+# Manter comentado como template para novos clientes que precisem de Cloud SQL
 # =============================================================================
 
-CLOUD_SQL_INSTANCE="${CLOUD_SQL_INSTANCE:-smart-ads-db}"
-CLOUD_SQL_CONNECTION="${CLOUD_SQL_CONNECTION:-$PROJECT_ID:$REGION:$CLOUD_SQL_INSTANCE}"
-DB_NAME="${DB_NAME:-smart_ads}"
-DB_USER="${DB_USER:-postgres}"
-DB_PASSWORD="${DB_PASSWORD:-SmartAds2026DB!}"
+# CLOUD_SQL_INSTANCE="${CLOUD_SQL_INSTANCE:-smart-ads-db}"
+# CLOUD_SQL_CONNECTION="${CLOUD_SQL_CONNECTION:-$PROJECT_ID:$REGION:$CLOUD_SQL_INSTANCE}"
+# DB_NAME="${DB_NAME:-smart_ads}"
+# DB_USER="${DB_USER:-postgres}"
+# DB_PASSWORD="${DB_PASSWORD:-SmartAds2026DB!}"
 
 # =============================================================================
 # RAILWAY POSTGRESQL (LEAD SCORING — CAMINHO B)
@@ -116,10 +117,6 @@ BUSINESS_CONFIG="${BUSINESS_CONFIG:-$SCRIPT_DIR/business_config.py}"
 # Preserva META_ACCESS_TOKEN se já estiver configurado
 build_env_vars() {
     local ENV_VARS="ENVIRONMENT=$ENVIRONMENT"
-    ENV_VARS="$ENV_VARS,CLOUD_SQL_CONNECTION_NAME=$CLOUD_SQL_CONNECTION"
-    ENV_VARS="$ENV_VARS,DB_NAME=$DB_NAME"
-    ENV_VARS="$ENV_VARS,DB_USER=$DB_USER"
-    ENV_VARS="$ENV_VARS,DB_PASSWORD=$DB_PASSWORD"
     ENV_VARS="$ENV_VARS,META_DATA_SOURCE=$META_DATA_SOURCE"
     ENV_VARS="$ENV_VARS,GURU_DATA_SOURCE=$GURU_DATA_SOURCE"
     ENV_VARS="$ENV_VARS,VALIDATION_REPORTS_BUCKET=$BUCKET_NAME"
@@ -166,15 +163,15 @@ validate_config() {
         ERRORS=$((ERRORS + 1))
     fi
 
-    if [ -z "$CLOUD_SQL_INSTANCE" ]; then
-        echo "ERROR: CLOUD_SQL_INSTANCE não está definido" >&2
-        ERRORS=$((ERRORS + 1))
-    fi
-
-    if [ -z "$DB_NAME" ] || [ -z "$DB_USER" ] || [ -z "$DB_PASSWORD" ]; then
-        echo "ERROR: Credenciais do banco de dados não estão completas" >&2
-        ERRORS=$((ERRORS + 1))
-    fi
+    # Cloud SQL descomissionado em 25/02/2026 — descomentar para novos clientes com Cloud SQL
+    # if [ -z "$CLOUD_SQL_INSTANCE" ]; then
+    #     echo "ERROR: CLOUD_SQL_INSTANCE não está definido" >&2
+    #     ERRORS=$((ERRORS + 1))
+    # fi
+    # if [ -z "$DB_NAME" ] || [ -z "$DB_USER" ] || [ -z "$DB_PASSWORD" ]; then
+    #     echo "ERROR: Credenciais do banco de dados não estão completas" >&2
+    #     ERRORS=$((ERRORS + 1))
+    # fi
 
     if [ $ERRORS -gt 0 ]; then
         return 1

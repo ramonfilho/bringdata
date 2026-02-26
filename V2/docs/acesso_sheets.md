@@ -96,17 +96,44 @@ df = pd.read_csv(url_csv)
 
 ### 5. Planilhas
 
-#### Planilha Principal
+As definições canônicas estão em `src/validation/data_loader.py` (linhas 66–67):
+
+```python
+PRODUCAO_SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1VYti8jX277VNMkvzrfnJSR_Ko8L1LQFDdMEeD6D8_Vo'  # [LF] Pesquisa - Produção
+BACKUP_SHEETS_URL   = 'https://docs.google.com/spreadsheets/d/1OqNYA5zU9ix1uf52ovRYIdLhcugzwgfKOheKxE_zgvE'  # [LF] Pesquisa - Backup
+```
+
+Variáveis de ambiente que sobrescrevem os defaults:
+- `GOOGLE_SHEETS_URL` → produção (default: `PRODUCAO_SHEETS_URL`)
+- `SECONDARY_SHEETS_URL` → backup (default: `BACKUP_SHEETS_URL`)
+
+Cada planilha tem seus dados de leads na **aba 0** (`[LF] Pesquisa`). A aba 1 existe em cada planilha mas é usada apenas para consulta — não é carregada no treino.
+
+O pipeline de treino (`train_pipeline.py`) carrega **ambas** as planilhas (produção + backup), sempre aba 0 de cada:
+- `num_sheets_api=1` → aba 0 apenas
+- `include_secondary=True` (default no `LeadDataLoader`) → carrega produção + backup
+
+#### Planilha de Produção (`PRODUCAO_SHEETS_URL`)
 
 **ID:** `1VYti8jX277VNMkvzrfnJSR_Ko8L1LQFDdMEeD6D8_Vo`
 
-**Aba principal:** `[LF] Pesquisa`
+**URL:** `https://docs.google.com/spreadsheets/d/1VYti8jX277VNMkvzrfnJSR_Ko8L1LQFDdMEeD6D8_Vo`
 
-#### Planilha Backup
+**Nome:** `[LF] Pesquisa - Produção`
+
+**Aba de dados:** aba 0 (`[LF] Pesquisa`)
+
+Usada por: pipeline de treino, monitoring (`data_drift_detection.py`), API (`app.py`).
+
+#### Planilha de Backup (`BACKUP_SHEETS_URL`)
 
 **ID:** `1OqNYA5zU9ix1uf52ovRYIdLhcugzwgfKOheKxE_zgvE`
 
-**Aba principal:** `[LF] Pesquisa`
+**URL:** `https://docs.google.com/spreadsheets/d/1OqNYA5zU9ix1uf52ovRYIdLhcugzwgfKOheKxE_zgvE`
+
+**Nome:** `[LF] Pesquisa - Backup`
+
+**Aba de dados:** aba 0 (`[LF] Pesquisa`)
 
 ### 6. Limitações e Considerações
 

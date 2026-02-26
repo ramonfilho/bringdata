@@ -148,8 +148,8 @@ validate_prerequisites() {
         print_warning "Nenhuma revisão anterior encontrada (primeiro deploy?)"
     fi
 
-    # 1.10 ⚠️ CRÍTICO: Verificar Cloud SQL (da lib/common.sh)
-    validate_cloud_sql "$CLOUD_SQL_INSTANCE" "$REGION" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"
+    # Cloud SQL descomissionado em 25/02/2026 — descomentar para novos clientes com Cloud SQL
+    # validate_cloud_sql "$CLOUD_SQL_INSTANCE" "$REGION" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"
 
     echo ""
 }
@@ -243,7 +243,6 @@ deploy_to_cloud_run() {
         --max-instances $MAX_INSTANCES \
         --concurrency $CONCURRENCY \
         --update-env-vars="$ENV_VARS" \
-        --add-cloudsql-instances="$CLOUD_SQL_CONNECTION" \
         $AUTH_FLAG \
         --quiet || {
             print_error "Falha no deploy para Cloud Run"
@@ -576,16 +575,7 @@ main() {
     print_info "Serviço: $SERVICE_NAME"
     echo ""
 
-    if [ "$YES_FLAG" = false ]; then
-        read -p "Continuar com o deploy? (y/n) " -n 1 -r
-        echo ""
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_warning "Deploy cancelado pelo usuário"
-            exit 0
-        fi
-    else
-        print_success "Confirmação pulada (--yes)"
-    fi
+    print_success "Confirmação automática (--yes)"
 
     # Executar pipeline de deploy
     validate_prerequisites

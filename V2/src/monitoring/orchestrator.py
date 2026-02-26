@@ -671,6 +671,9 @@ class MonitoringOrchestrator:
         from datetime import datetime, timedelta, timezone
         from api.database import LeadCAPI
 
+        if self.db is None:
+            return {}
+
         metrics = {}
         now = datetime.now(timezone.utc)
         lookback_time = now - timedelta(hours=12)

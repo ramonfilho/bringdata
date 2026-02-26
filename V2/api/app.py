@@ -2654,7 +2654,6 @@ async def daily_monitoring_check_auto(
     hours: int = 24,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    db: Session = Depends(get_db)
 ):
     """
     Executa check diário de monitoramento com dados do Railway PostgreSQL.
@@ -2666,7 +2665,6 @@ async def daily_monitoring_check_auto(
         hours: Número de horas para buscar (padrão: 24). Ignorado se start_date/end_date forem passados.
         start_date: Data de início no formato YYYY-MM-DD (BRT). Ex: 2026-02-01
         end_date: Data de fim no formato YYYY-MM-DD (BRT). Ex: 2026-02-20
-        db: Sessão PostgreSQL (injetada automaticamente)
 
     Returns:
         Alertas consolidados por severidade e categoria
@@ -2675,7 +2673,6 @@ async def daily_monitoring_check_auto(
         hours=hours,
         start_date=start_date,
         end_date=end_date,
-        db=db,
     )
 
 
@@ -2684,7 +2681,6 @@ async def daily_monitoring_check_railway(
     hours: int = 24,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
-    db: Session = Depends(get_db)
 ):
     """
     Executa check diário de monitoramento 100% com dados do Railway PostgreSQL.
@@ -2977,7 +2973,7 @@ async def daily_monitoring_check_railway(
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             model_path = os.path.join(base_dir, model_path)
 
-        orchestrator = MonitoringOrchestrator(model_path=model_path, db=db)
+        orchestrator = MonitoringOrchestrator(model_path=model_path, db=None)
         result = orchestrator.run_daily_check(leads_data)
 
         # Substituir funnel_metrics e lead_quality_metrics pelos dados Railway

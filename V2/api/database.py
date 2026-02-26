@@ -1,11 +1,10 @@
 """
 Configuração do banco de dados PostgreSQL
-Gerencia conexão com Cloud SQL e operações CRUD
+Gerencia conexão com Railway PostgreSQL e operações CRUD
 """
 
 import os
 from sqlalchemy import create_engine, Column, Integer, String, Text, TIMESTAMP, DECIMAL, func
-from sqlalchemy.engine import URL
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Optional, List, Dict
@@ -132,78 +131,30 @@ class LeadCAPI(Base):
 
 def get_database_url() -> str:
     """
-    Retorna URL de conexão com o banco
+    Retorna URL de conexão com o banco.
 
     Ordem de prioridade:
-    1. DATABASE_URL (env var completa)
-    2. CLOUD_SQL_CONNECTION_NAME (Cloud Run via Unix socket)
-    3. Componentes individuais (DB_HOST, DB_NAME, etc)
-    4. Fallback para SQLite local (desenvolvimento)
+    1. DATABASE_URL (env var completa — genérico para qualquer cliente)
+    2. RAILWAY_DB_* (variáveis Railway — cliente DevClub)
     """
     # Opção 1: URL completa
     if os.getenv('DATABASE_URL'):
         return os.getenv('DATABASE_URL')
 
-    # Opção 2: Cloud SQL via Unix socket (Cloud Run)
-    # Usa pg8000 driver que suporta Unix sockets
-    instance_connection = os.getenv('CLOUD_SQL_CONNECTION_NAME')
-    if instance_connection:
-        db_name = os.getenv('DB_NAME', 'smart_ads')
-        db_user = os.getenv('DB_USER', 'postgres')
-        db_password = os.getenv('DB_PASSWORD', '')
-        unix_socket_path = f"/cloudsql/{instance_connection}"
-        logger.info(f"Conectando ao Cloud SQL via Unix socket: {instance_connection}")
-        # Usar URL.create() para formato correto com pg8000
-        return URL.create(
-            drivername="postgresql+pg8000",
-            username=db_user,
-            password=db_password,
-            database=db_name,
-            query={"unix_sock": f"{unix_socket_path}/.s.PGSQL.5432"}
-        )
+    # Opção 2: Railway PostgreSQL
+    railway_host = os.getenv('RAILWAY_DB_HOST')
+    railway_password = os.getenv('RAILWAY_DB_PASSWORD')
+    if railway_host and railway_password:
+        port = os.getenv('RAILWAY_DB_PORT', '5432')
+        name = os.getenv('RAILWAY_DB_NAME', 'railway')
+        user = os.getenv('RAILWAY_DB_USER', 'postgres')
+        logger.info(f"Conectando ao Railway PostgreSQL: {railway_host}:{port}/{name}")
+        return f"postgresql://{user}:{railway_password}@{railway_host}:{port}/{name}"
 
-    # Opção 3: Componentes individuais (Cloud SQL via IP)
-    db_host = os.getenv('DB_HOST')
-    db_port = os.getenv('DB_PORT', '5432')
-    db_name = os.getenv('DB_NAME', 'smart_ads')
-    db_user = os.getenv('DB_USER', 'postgres')
-    db_password = os.getenv('DB_PASSWORD')
-
-    if db_host and db_password:
-        return f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-
-    # Opção 4: BLOQUEADO - SQLite não é permitido em produção
-    # Se chegou aqui, nenhuma configuração de PostgreSQL foi encontrada
-    environment = os.getenv('ENVIRONMENT', 'development')
-
-    if environment == 'production':
-        # PRODUÇÃO: BLOQUEAR DEPLOY SEM POSTGRESQL
-        logger.critical("=" * 80)
-        logger.critical("🚨 DEPLOY BLOQUEADO - CONFIGURAÇÃO DE BANCO DE DADOS AUSENTE 🚨")
-        logger.critical("=" * 80)
-        logger.critical("")
-        logger.critical("NENHUMA das seguintes variáveis de ambiente foi encontrada:")
-        logger.critical("  ❌ DATABASE_URL")
-        logger.critical("  ❌ CLOUD_SQL_CONNECTION_NAME")
-        logger.critical("  ❌ DB_HOST + DB_PASSWORD")
-        logger.critical("")
-        logger.critical("SQLite NÃO É PERMITIDO EM PRODUÇÃO!")
-        logger.critical("Todos os dados de leads CAPI serão PERDIDOS a cada deploy com SQLite.")
-        logger.critical("")
-        logger.critical("SOLUÇÃO:")
-        logger.critical("Configure Cloud SQL no deploy.sh ou adicione variáveis de ambiente:")
-        logger.critical("  --update-env-vars=\"CLOUD_SQL_CONNECTION_NAME=smart-ads-451319:us-central1:smart-ads-db,DB_NAME=smart_ads,DB_USER=postgres,DB_PASSWORD=<senha>\"")
-        logger.critical("")
-        logger.critical("=" * 80)
-        raise RuntimeError(
-            "🚨 DEPLOY BLOQUEADO: PostgreSQL não configurado. "
-            "SQLite não é permitido em produção devido a perda de dados em deploys."
-        )
-
-    # DESENVOLVIMENTO: Avisar mas permitir SQLite
-    logger.warning("⚠️ Usando SQLite (desenvolvimento) - Configure PostgreSQL para produção!")
-    logger.warning("⚠️ DADOS SERÃO PERDIDOS A CADA DEPLOY! Configure CLOUD_SQL_CONNECTION_NAME.")
-    return "sqlite:////tmp/smart_ads_dev.db"
+    raise RuntimeError(
+        "Configuração de banco de dados ausente. "
+        "Defina DATABASE_URL ou RAILWAY_DB_HOST + RAILWAY_DB_PASSWORD."
+    )
 
 def get_engine():
     """Cria engine SQLAlchemy"""

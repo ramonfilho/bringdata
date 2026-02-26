@@ -54,7 +54,8 @@ class CampaignMetricsCalculator:
         self.product_value = product_value
         self.use_cache = use_cache
         self.cache_dir = Path(__file__).parent.parent.parent / 'files' / 'validation' / 'cache'
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        if self.use_cache:
+            self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_cache_key(self, prefix: str, account_id: str, period_start: str, period_end: str) -> str:
         """Gera chave única para cache baseado nos parâmetros"""
