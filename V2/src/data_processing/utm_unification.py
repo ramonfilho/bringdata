@@ -35,6 +35,9 @@ def unify_utm_source(df: pd.DataFrame) -> pd.DataFrame:
     # Normalizar para lowercase para unificação consistente
     df_unified['Source'] = df_unified['Source'].str.lower()
 
+    # Strings vazias → NaN (evita coluna 'Source_' → 'Source' após encoding)
+    df_unified['Source'] = df_unified['Source'].replace('', None)
+
     # Valores minoritários para unificar em "outros"
     outras_sources = ['fb', 'teste', '[field id="utm_source"]', 'facebook-ads-sitelink', 'youtube', 'youtube-bio', 'bio', 'organico', 'ig', 'manychat', 'org']
 
