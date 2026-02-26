@@ -2764,7 +2764,7 @@ async def daily_monitoring_check_railway(
             end=window_end
         )
 
-        # 1b. Stats agregados da janela (total, CAPI, fbp/fbc)
+        # 1b. Stats agregados da janela (total, CAPI, phone)
         stats_row = railway_conn.run(
             'SELECT '
             '  COUNT(*) AS total, '
@@ -2772,11 +2772,21 @@ async def daily_monitoring_check_railway(
             '  COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL) AS capi_sent, '
             '  COUNT(*) FILTER (WHERE "capiStatus" = \'success\') AS capi_success, '
             '  COUNT(*) FILTER (WHERE "capiStatus" = \'error\') AS capi_error, '
-            '  COUNT(*) FILTER (WHERE fbp IS NOT NULL AND fbp <> \'\') AS with_fbp, '
-            '  COUNT(*) FILTER (WHERE fbc IS NOT NULL AND fbc <> \'\') AS with_fbc, '
             '  COUNT(*) FILTER (WHERE telefone IS NOT NULL AND telefone <> \'\') AS with_phone '
             'FROM "Lead" '
             'WHERE "createdAt" >= :start AND "createdAt" <= :end',
+            start=window_start,
+            end=window_end
+        )
+
+        # 1b2. FBP/FBC da tabela leads_capi (fonte correta — populada pelo sendBeacon)
+        capi_fbp_row = railway_conn.run(
+            'SELECT '
+            '  COUNT(*) AS total, '
+            '  COUNT(*) FILTER (WHERE fbp IS NOT NULL AND fbp <> \'\') AS with_fbp, '
+            '  COUNT(*) FILTER (WHERE fbc IS NOT NULL AND fbc <> \'\') AS with_fbc '
+            'FROM leads_capi '
+            'WHERE created_at >= :start AND created_at <= :end',
             start=window_start,
             end=window_end
         )
@@ -2840,17 +2850,20 @@ async def daily_monitoring_check_railway(
         # 3. Construir funnel_metrics 100% Railway
         # ------------------------------------------------------------------
         stats = dict(zip(
-            ['total', 'scored', 'capi_sent', 'capi_success', 'capi_error',
-             'with_fbp', 'with_fbc', 'with_phone'],
+            ['total', 'scored', 'capi_sent', 'capi_success', 'capi_error', 'with_phone'],
             stats_row[0]
         ))
         total = stats['total'] or 0
         capi_sent = stats['capi_sent'] or 0
         capi_success = stats['capi_success'] or 0
         capi_error = stats['capi_error'] or 0
-        with_fbp = stats['with_fbp'] or 0
-        with_fbc = stats['with_fbc'] or 0
         with_phone = stats['with_phone'] or 0
+
+        # FBP/FBC lidos da leads_capi (fonte correta)
+        capi_fbp_stats = dict(zip(['total_capi', 'with_fbp', 'with_fbc'], capi_fbp_row[0]))
+        with_fbp = capi_fbp_stats['with_fbp'] or 0
+        with_fbc = capi_fbp_stats['with_fbc'] or 0
+        total_capi = capi_fbp_stats['total_capi'] or 0
 
         railway_funnel_metrics = {
             'window': {
@@ -2866,9 +2879,10 @@ async def daily_monitoring_check_railway(
             'data_quality': {
                 'total_leads': total,
                 'fbp_present': with_fbp,
-                'fbp_percentage': (with_fbp / total * 100) if total > 0 else 0,
+                'fbp_percentage': (with_fbp / total_capi * 100) if total_capi > 0 else 0,
                 'fbc_present': with_fbc,
-                'fbc_percentage': (with_fbc / total * 100) if total > 0 else 0,
+                'fbc_percentage': (with_fbc / total_capi * 100) if total_capi > 0 else 0,
+                'total_capi_captured': total_capi,
                 'phone_present': with_phone,
                 'phone_percentage': (with_phone / total * 100) if total > 0 else 0,
             },
