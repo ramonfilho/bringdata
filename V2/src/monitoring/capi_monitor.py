@@ -31,6 +31,9 @@ class CAPIQualityMonitor:
         Returns:
             Lista de alertas no formato dict
         """
+        if self.db is None:
+            return []
+
         from .config import THRESHOLDS
 
         alerts = []

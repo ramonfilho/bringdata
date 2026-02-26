@@ -2973,7 +2973,7 @@ async def daily_monitoring_check_railway(
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             model_path = os.path.join(base_dir, model_path)
 
-        orchestrator = MonitoringOrchestrator(model_path=model_path, db=db)
+        orchestrator = MonitoringOrchestrator(model_path=model_path, db=None)
         result = orchestrator.run_daily_check(leads_data)
 
         # Substituir funnel_metrics e lead_quality_metrics pelos dados Railway
