@@ -128,6 +128,8 @@ Funções puras. Assinatura padrão: `transform(df, config: SubConfig, **artifac
 
 ### 4.3 EDA → Config Generator (`src/eda/generate_client_config.py`)
 
+> **Implementado na Fase 4** — após `devclub.yaml` e `clientb.yaml` serem escritos manualmente. Construir antes seria prematuro: o padrão real só fica claro depois de ter passado pelo processo manual duas vezes.
+
 Script que analisa dados brutos do cliente e gera automaticamente a maior parte de `configs/clients/{client}.yaml`.
 
 **Auto-gerado:**
@@ -601,57 +603,54 @@ Duplicatas encontradas (resolução via campo já mapeado):
 
 ## 7. Fases de Migração
 
-### Fase 1 — Foundation (Semana 1–2)
+### Fase 1 — Foundation (Semana 1)
 
 1. ~~**Executar varredura completa de hardcodes** (seção 6) e finalizar a tabela de mapeamento~~ ✅ **Concluído** — 153 hardcodes mapeados; sub-configs atualizados na seção 4.1
-2. **Implementar `ClientConfig`** dataclass com os sub-configs do **Grupo A** (seção 4.1) — `InfraConfig` até `CAPIConfig`. `ValidationConfig` (Grupo C) não entra nesta fase.
-3. **Criar `configs/templates/client_template.yaml`** documentando todas as chaves do `ClientConfig`
-4. **Construir `src/eda/generate_client_config.py`** — o gerador de config a partir de dados brutos
-5. **Rodar o EDA no dataset DevClub** e validar que o output cobre todos os campos do template
-6. **Criar `configs/clients/devclub.yaml`** combinando o output do EDA com os hardcodes mapeados na varredura
-7. **Criar esqueleto de `src/core/`** — arquivos com assinaturas definidas, sem implementação ainda
-8. **Criar `src/nlp/`** com README de interface
+2. **Criar estrutura base do `ClientConfig`** — classe e sub-configs com assinaturas definidas; sem preencher valores ainda (os valores entram componente a componente na Fase 2)
+3. **Criar `configs/clients/devclub.yaml`** com esqueleto de chaves vazias — preenchido incrementalmente durante a Fase 2 conforme cada componente é migrado
+4. **Criar esqueleto de `src/core/`** — arquivos com assinaturas definidas, sem implementação ainda
+5. **Criar `src/nlp/`** com README de interface
+6. **Estabelecer snapshot de paridade** — ~500 leads reais em `tests/fixtures/paridade_sample.csv`; rodar ambos os pipelines e salvar outputs como baseline
 
-**Critério de saída:** `ClientConfig.from_yaml('configs/clients/devclub.yaml').validate()` passa sem erros.
+> `configs/templates/client_template.yaml` e `src/eda/generate_client_config.py` são adiados: o template emerge do `devclub.yaml` ao final da Fase 2; o gerador de EDA é construído na Fase 4, depois de dois configs escritos manualmente.
+
+**Critério de saída:** `src/core/` existe com assinaturas; snapshot de paridade estabelecido; `ClientConfig` instancia sem erros.
 
 ### Fase 2 — Consolidação (Semana 2–3)
 
-Em ordem de criticidade de divergência:
+**Ciclo por componente** — para cada item abaixo, o loop é sempre o mesmo:
+1. Implementar a função em `src/core/` parametrizada por config
+2. Extrair os hardcodes desse componente para `configs/clients/devclub.yaml`
+3. Atualizar imports nos pipelines afetados
+4. Rodar shadow mode (velha e nova em paralelo, ao menos 1 ciclo de scoring em produção)
+5. Validar paridade contra o snapshot da Fase 1
+6. Remover implementação antiga
 
-1. `core/utm.py` — resolve divergência `.lower()` ativa (mais urgente)
-   - Atualizar import em `train_pipeline.py` → `core.utm`
-   - Atualizar import em `production_pipeline.py` → `core.utm`
-   - Atualizar import em `monitoring/orchestrator.py` → `core.utm`
-2. `core/feature_engineering.py` — unifica guards de colunas
-   - Atualizar import em `train_pipeline.py` → `core.feature_engineering`
-   - Atualizar import em `production_pipeline.py` → `core.feature_engineering`
-   - Atualizar import em `monitoring/orchestrator.py` → `core.feature_engineering`
-3. `core/encoding.py` — versão produção é canônica, absorve versão treino
-   - Atualizar import em `train_pipeline.py` → `core.encoding`
-   - Atualizar import em `production_pipeline.py` → `core.encoding`
-4. `core/medium.py` — consolida 3 arquivos em 1 parametrizado por config (etapa mais trabalhosa)
-   - Atualizar import em `train_pipeline.py` → `core.medium`
-   - Atualizar import em `production_pipeline.py` → `core.medium`
-   - Atualizar import em `monitoring/orchestrator.py` → `core.medium`
-5. `core/preprocessing.py` — define sequência canônica única: `remove_duplicates` → `clean_columns` → `remove_campaign_features` → `rename_long_column_names` → `remove_technical_fields`; listas de colunas vêm do config; chama `core/utils.remove_columns` internamente
-   - Atualizar `train_pipeline.py` → chamar `core.preprocessing.preprocess(df, config)`
-   - Atualizar `production_pipeline.py` → chamar `core.preprocessing.preprocess(df, config)`
-   - Atualizar `monitoring/orchestrator.py` → chamar `core.preprocessing.preprocess(df, config)` com wrapper de preservação de `decil`/`lead_score`
-6. `core/category_unification.py` — já compartilhado; migrar para `core/` formaliza o contrato
-   - Atualizar import em `train_pipeline.py` → `core.category_unification`
-   - Atualizar import em `production_pipeline.py` → `core.category_unification`
-   - Atualizar import em `monitoring/orchestrator.py` → `core.category_unification`
-7. Atualizar `train_pipeline.py` para importar 100% de `core/`
-8. Atualizar `production_pipeline.py` para importar 100% de `core/`
-9. Atualizar `monitoring/orchestrator.py` para importar 100% de `core/` (itens 1–6 acima cobrem os módulos de transformação; verificar se restam outros)
-10. Atualizar `validation/` para usar `core/` onde há reimplementação paralela
+**Componentes em ordem de criticidade:**
 
-**Critério de saída:** treino e produção aplicam exatamente as mesmas transformações, verificável por teste de paridade em amostra DevClub.
+1. `core/utm.py` — divergência `.lower()` ativa; hardcodes #35, #63, #67 → `UTMConfig`
+   - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py`
+2. `core/feature_engineering.py` — unifica guards de colunas; hardcodes #41, #42, #47, #48 → `FeatureConfig`
+   - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py`
+3. `core/encoding.py` — versão produção é canônica; hardcodes #49, #50, #51, #64, #70, #71 → `EncodingConfig`
+   - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`
+4. `core/medium.py` — consolida 3 arquivos; hardcodes #7, #36, #37 → `MediumConfig` (etapa mais trabalhosa)
+   - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py`
+5. `core/preprocessing.py` — sequência canônica única; hardcodes #34, #68, #69 → `FeatureConfig`/`IngestionConfig`
+   - Atualizar: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py` (com wrapper de preservação de `decil`/`lead_score`)
+6. `core/category_unification.py` — já compartilhado; hardcodes #27–#33 → `CategoryConfig`
+   - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py`
+7. Demais módulos `core/` (ingestion, matching, utils, dataset_versioning, column_unification) — mesmo ciclo
+8. `validation/` — atualizar onde há reimplementação paralela
+
+Ao concluir o último componente: `configs/clients/devclub.yaml` está completamente preenchido → gerar `configs/templates/client_template.yaml` a partir dele.
+
+**Critério de saída:** treino e produção importam 100% de `core/`; `configs/clients/devclub.yaml` completamente preenchido; `ClientConfig.from_yaml('configs/clients/devclub.yaml').validate()` passa sem erros.
 
 > **Shadow mode por componente:** a cada módulo migrado para `core/`, rodar a versão antiga e a nova em paralelo sobre os mesmos dados reais por pelo menos 1 ciclo de scoring antes de remover a versão antiga. Divergências detectadas em produção antes do corte, não depois.
 
 > **Como executar o teste de paridade:**
-> 1. Separar um snapshot fixo de ~500 leads reais do DevClub (salvar em `tests/fixtures/paridade_sample.csv`)
+> 1. Usar o snapshot da Fase 1 (`tests/fixtures/paridade_sample.csv`)
 > 2. Rodar a amostra pelos dois pipelines até o ponto pós-encoding (antes do modelo)
 > 3. Comparar os DataFrames coluna por coluna — qualquer diferença é uma divergência
 >
@@ -666,19 +665,26 @@ Em ordem de criticidade de divergência:
 >         print(f"{col}: {diffs} divergências")
 > ```
 >
-> Rodar **antes** de iniciar a Fase 2 (estabelece baseline e revela divergências não mapeadas) e **após cada componente consolidado** (confirma que o comportamento foi preservado).
+> Rodar **após cada componente consolidado** para confirmar que o comportamento foi preservado.
 
 ### Fase 3 — Cliente B (Semana 3–4)
 
-- Rodar EDA no dataset do Cliente B
-- Gerar e revisar `configs/clients/clientb.yaml`
+- Escrever `configs/clients/clientb.yaml` manualmente usando `configs/templates/client_template.yaml` como guia (gerado ao final da Fase 2)
 - Executar `train_pipeline.main(config=clientb_config)`
 - Validar primeiras predições do Cliente B
 - Configurar `configs/active_models/clientb.yaml`
 
 **Critério de saída:** pipeline completo roda para Cliente B sem alterar código, apenas config.
 
-### Fase 4 — NLP (Futuro, sem data)
+### Fase 4 — EDA Generator (após Cliente B estável)
+
+Com dois configs escritos manualmente (`devclub.yaml` e `clientb.yaml`), o padrão está claro o suficiente para automatizá-lo:
+
+- Construir `src/eda/generate_client_config.py`
+- Validar rodando sobre o dataset DevClub e comparando output com `devclub.yaml` existente
+- Usar para onboarding de clientes seguintes
+
+### Fase 5 — NLP (Futuro, sem data)
 
 - Definir interface final de `src/nlp/`
 - Implementar extração de features de texto
