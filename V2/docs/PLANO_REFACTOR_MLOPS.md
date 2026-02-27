@@ -25,20 +25,7 @@ Rejeitamos Option A (consolidar arquivos com `config: dict`, depois extrair tipa
 
 ---
 
-## 3. Divergências Ativas a Corrigir
-
-| Componente | Arquivo Treino | Arquivo Produção | Divergência |
-|---|---|---|---|
-| UTM | `utm_training.py` | `utm_unification.py` | Produção aplica `.lower()`, treino não |
-| Medium | `medium_training.py` + `medium_production_training.py` | `medium_unification.py` | Função `aplicar_unificacao_robusta` com lógica diferente entre treino e produção; 3 arquivos com listas de mapeamento distintas |
-| Feature engineering | `feature_engineering_training.py` | `engineering.py` | Guards de existência de colunas diferentes |
-| Encoding | `encoding_training.py` | `encoding.py` | Produção tem feature registry + reordenação; treino não. Adicionalmente: treino usa nomes de colunas normalizados (`'idade'`, `'faixa_salarial'`) no ordinal encoding; produção usa nomes longos do formulário (`'Qual a sua idade?'`, `'Atualmente, qual a sua faixa salarial?'`) |
-| Preprocessing | inline em `train_pipeline.py` | `preprocessing.py` | Lista de colunas diferente (YAML vs estática) |
-| Limpeza de nomes de colunas | `training_model.py:179-182` (inline antes do fit) | `engineering.py` via `align_features()` (hardcode #72, confirmado na varredura) | Regex `[^A-Za-z0-9_]`→`_` aplicada em ambos, mas em momentos diferentes do pipeline: treino aplica antes do fit; produção aplica durante engineering. Resolver em `core/preprocessing.py` na Fase 2. |
-
----
-
-## 4. Nova Estrutura de Diretórios
+## 3. Nova Estrutura de Diretórios
 
 ```
 smart_ads/V2/
@@ -77,9 +64,9 @@ smart_ads/V2/
 
 ---
 
-## 5. Componentes Novos
+## 4. Componentes Novos
 
-### 5.1 ClientConfig (`src/core/client_config.py`)
+### 4.1 ClientConfig (`src/core/client_config.py`)
 
 Dataclass tipado carregado de `configs/clients/{client}.yaml`. Sub-configs organizados por pipeline e fase de implementação:
 
@@ -123,7 +110,7 @@ Interface: `ClientConfig.from_yaml(path)` + `ClientConfig.validate()` com mensag
 
 > **`ClientConfig` é um arquivo vivo.** A cada novo cliente, a varredura pode revelar necessidades de parametrização que clientes anteriores não tinham — seja um campo novo em um sub-config existente ou um sub-config inteiro novo. Quando isso acontecer, atualizar o dataclass e o `client_template.yaml`. Todo campo novo deve ter um **valor default**, garantindo que os clientes já existentes continuem funcionando sem alterar seus YAMLs.
 
-### 5.2 Módulo `src/core/`
+### 4.2 Módulo `src/core/`
 
 Funções puras. Assinatura padrão: `transform(df, config: SubConfig, **artifacts) -> df`.
 
@@ -139,7 +126,7 @@ Funções puras. Assinatura padrão: `transform(df, config: SubConfig, **artifac
 - **`encoding.py`** — `apply_encoding(df, config: EncodingConfig, artifacts)` — versão produção é canônica
 - **`preprocessing.py`** — orquestra a sequência canônica de pré-processamento: `remove_duplicates` → `clean_columns` → `remove_campaign_features` → `rename_long_column_names` → `remove_technical_fields`; chama `utils.remove_columns` com as listas do config; treino e produção chamam `preprocess(df, config)` — sequência idêntica garantida por construção; monitoring chama a mesma função com wrapper de preservação de `decil`/`lead_score` em torno dela
 
-### 5.3 EDA → Config Generator (`src/eda/generate_client_config.py`)
+### 4.3 EDA → Config Generator (`src/eda/generate_client_config.py`)
 
 Script que analisa dados brutos do cliente e gera automaticamente a maior parte de `configs/clients/{client}.yaml`.
 
@@ -158,13 +145,13 @@ Script que analisa dados brutos do cliente e gera automaticamente a maior parte 
 - Validação das colunas identificadoras detectadas
 - Colunas a excluir do treino
 
-### 5.4 NLP Module (`src/nlp/`) — Futuro
+### 4.4 NLP Module (`src/nlp/`) — Futuro
 
 Para campos de texto livre em respostas de formulário (sentimento, intenção, nível de maturidade). Fora do escopo do sprint atual. O diretório é criado com README de interface. `FeatureConfig` já prevê o campo `nlp_columns: []`.
 
 ---
 
-## 6. Regras de Sincronização por Pipeline
+## 5. Regras de Sincronização por Pipeline
 
 | Pipeline | Regra |
 |---|---|
@@ -176,7 +163,7 @@ Para campos de texto livre em respostas de formulário (sentimento, intenção, 
 
 ---
 
-## 7. Varredura e Mapeamento de Hardcodes (Pré-requisito da Fase 1)
+## 6. Varredura e Mapeamento de Hardcodes (Pré-requisito da Fase 1)
 
 Antes de implementar qualquer coisa, mapear todos os valores específicos de cliente que estão hardcoded no código. Sem essa lista completa, não é possível definir os sub-configs do `ClientConfig` corretamente.
 
@@ -267,7 +254,7 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 | 46 | `matching_email_with_validation.py:132` | Coluna de email no arquivo de alunos: `'Qual seu e-mail ?'` | `matching.alunos_email_column` |
 | 47 | `feature_engineering_training.py:152-154` + `engineering.py:164` | Nome da coluna de nome no formulário: `'Nome Completo'` | `feature.pesquisa_name_column` |
 | 48 | `feature_engineering_training.py:178-184` + `engineering.py:200-206` | Lista de colunas a remover após feature engineering (inclui nomes DevClub + variantes CRM antigo) | `feature.columns_to_drop_after_fe` |
-| 49 | `encoding_training.py:46-53` + `encoding.py:108-128` | Categorias canônicas para encoding ordinal de `idade` e `faixa_salarial` — devem estar em sincronia com `mapa_idade` e `mapa_faixa` da Célula 7 (divergência de nomes: treino usa normalizados, produção usa nomes longos — ver Seção 3) | `encoding.ordinal_variables` |
+| 49 | `encoding_training.py:46-53` + `encoding.py:108-128` | Categorias canônicas para encoding ordinal de `idade` e `faixa_salarial` — devem estar em sincronia com `mapa_idade` e `mapa_faixa` da Célula 7 (divergência de nomes: treino usa `'idade'` e `'faixa_salarial'`; produção usa `'Qual a sua idade?'` e `'Atualmente, qual a sua faixa salarial?'`) | `encoding.ordinal_variables` |
 | 50 | `encoding_training.py:74-76` + `encoding.py:177-179` | 3 categorias Medium para binary_top3: `'Linguagem de programação'`, `'Aberto'`, `'Lookalike 2% Cadastrados - DEV 2.0 + Interesses'` | `medium.binary_top3_categories` |
 | 51 | `encoding_training.py:105-106` + `encoding.py:209-210` | Feature removida após encoding: `'telefone_comprimento_8'` | `encoding.features_to_drop_after_encoding` |
 | 52 | `training_model.py:675` | Stems de nomes de colunas de pesquisa para categorização no feature registry: `['gênero', 'idade', 'faz', 'faixa', 'cartão', 'estudou', 'faculdade', 'evento']` | `feature.survey_column_stems` |
@@ -612,12 +599,12 @@ Duplicatas encontradas (resolução via campo já mapeado):
 
 ---
 
-## 8. Fases de Migração
+## 7. Fases de Migração
 
 ### Fase 1 — Foundation (Semana 1–2)
 
-1. ~~**Executar varredura completa de hardcodes** (seção 7) e finalizar a tabela de mapeamento~~ ✅ **Concluído** — 153 hardcodes mapeados; sub-configs atualizados na seção 5.1
-2. **Implementar `ClientConfig`** dataclass com os sub-configs do **Grupo A** (seção 5.1) — `InfraConfig` até `CAPIConfig`. `ValidationConfig` (Grupo C) não entra nesta fase.
+1. ~~**Executar varredura completa de hardcodes** (seção 6) e finalizar a tabela de mapeamento~~ ✅ **Concluído** — 153 hardcodes mapeados; sub-configs atualizados na seção 4.1
+2. **Implementar `ClientConfig`** dataclass com os sub-configs do **Grupo A** (seção 4.1) — `InfraConfig` até `CAPIConfig`. `ValidationConfig` (Grupo C) não entra nesta fase.
 3. **Criar `configs/templates/client_template.yaml`** documentando todas as chaves do `ClientConfig`
 4. **Construir `src/eda/generate_client_config.py`** — o gerador de config a partir de dados brutos
 5. **Rodar o EDA no dataset DevClub** e validar que o output cobre todos os campos do template
@@ -699,7 +686,7 @@ Em ordem de criticidade de divergência:
 
 ---
 
-## 9. O Que NÃO Muda
+## 8. O Que NÃO Muda
 
 - Estrutura de orquestração do `train_pipeline.py` (21 células)
 - Estrutura de classe do `production_pipeline.py`
@@ -713,7 +700,7 @@ Em ordem de criticidade de divergência:
 
 ---
 
-## 10. Compatibilidade com Sprint 2–3
+## 9. Compatibilidade com Sprint 2–3
 
 `train_pipeline.main()` passa a aceitar `config: ClientConfig`. O retrain orchestrator deve ser atualizado simultaneamente na Fase 2 para passar o config correto. Sprints 2 e 3 (comparação de modelos e deploy automático) podem prosseguir após a conclusão da Fase 2. A Fase 1 não bloqueia nenhum sprint existente — é aditiva.
 
@@ -721,7 +708,7 @@ Em ordem de criticidade de divergência:
 
 ---
 
-## 11. Componentes Já Compartilhados (Referência)
+## 10. Componentes Já Compartilhados (Referência)
 
 | Componente | Usado por |
 |---|---|
@@ -741,7 +728,7 @@ Em ordem de criticidade de divergência:
 
 ---
 
-## 12. Caminho para MLOps Nível 3
+## 11. Caminho para MLOps Nível 3
 
 O refactor atual (Fases 1–3) leva o projeto do Nível 1 para o Nível 2. O Nível 3 exige infraestrutura adicional e só faz sentido com 5+ clientes ou quando o retreino manual virar gargalo operacional real.
 
@@ -761,7 +748,7 @@ O refactor atual (Fases 1–3) leva o projeto do Nível 1 para o Nível 2. O Ní
 
 ---
 
-## 13. Backlog (fora do escopo das Fases 1–3)
+## 12. Backlog (fora do escopo das Fases 1–3)
 
 | Item | Descrição |
 |---|---|
