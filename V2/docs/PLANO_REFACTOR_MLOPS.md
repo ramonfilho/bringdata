@@ -603,18 +603,18 @@ Duplicatas encontradas (resolução via campo já mapeado):
 
 ## 7. Fases de Migração
 
-### Fase 1 — Foundation (Semana 1)
+### Fase 1 — Foundation (em andamento)
 
-1. ~~**Executar varredura completa de hardcodes** (seção 6) e finalizar a tabela de mapeamento~~ ✅ **Concluído** — 153 hardcodes mapeados; sub-configs atualizados na seção 4.1
-2. **Criar estrutura base do `ClientConfig`** — classe e sub-configs com assinaturas definidas; sem preencher valores ainda (os valores entram componente a componente na Fase 2)
-3. **Criar `configs/clients/devclub.yaml`** com esqueleto de chaves vazias — preenchido incrementalmente durante a Fase 2 conforme cada componente é migrado
-4. **Criar esqueleto de `src/core/`** — arquivos com assinaturas definidas, sem implementação ainda
-5. **Criar `src/nlp/`** com README de interface
-6. **Estabelecer snapshot de paridade** — ~500 leads reais em `tests/fixtures/paridade_sample.csv`; rodar ambos os pipelines e salvar outputs como baseline
+1. ~~**Executar varredura completa de hardcodes** (seção 6) e finalizar a tabela de mapeamento~~ ✅ — 153 hardcodes mapeados; sub-configs atualizados na seção 4.1
+2. ~~**Criar estrutura base do `ClientConfig`**~~ ✅ — `src/core/client_config.py` com 13 sub-configs tipados; `from_yaml()` + `validate()` funcionais (commit c0d38ca)
+3. ~~**Criar `configs/clients/devclub.yaml`**~~ ✅ — esqueleto com todas as chaves; cada campo referencia o número do hardcode; valores `null` preenchidos na Fase 2
+4. ~~**Criar esqueleto de `src/core/`**~~ ✅ — 11 módulos com assinaturas e `NotImplementedError` (commit c0d38ca)
+5. ~~**Criar `src/nlp/`** com README de interface~~ ✅
+6. **Estabelecer snapshot de paridade** ⏳ — ~500 leads reais em `tests/fixtures/paridade_sample.csv`; rodar ambos os pipelines e salvar outputs como baseline; executar antes de iniciar a Fase 2
 
 > `configs/templates/client_template.yaml` e `src/eda/generate_client_config.py` são adiados: o template emerge do `devclub.yaml` ao final da Fase 2; o gerador de EDA é construído na Fase 4, depois de dois configs escritos manualmente.
 
-**Critério de saída:** `src/core/` existe com assinaturas; snapshot de paridade estabelecido; `ClientConfig` instancia sem erros.
+**Critério de saída:** ✅ `src/core/` existe com assinaturas; ✅ `ClientConfig.from_yaml('configs/clients/devclub.yaml').validate()` passa; ⏳ snapshot de paridade pendente.
 
 ### Fase 2 — Consolidação (Semana 2–3)
 
