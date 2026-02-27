@@ -610,11 +610,11 @@ Duplicatas encontradas (resolução via campo já mapeado):
 3. ~~**Criar `configs/clients/devclub.yaml`**~~ ✅ — esqueleto com todas as chaves; cada campo referencia o número do hardcode; valores `null` preenchidos na Fase 2
 4. ~~**Criar esqueleto de `src/core/`**~~ ✅ — 11 módulos com assinaturas e `NotImplementedError` (commit c0d38ca)
 5. ~~**Criar `src/nlp/`** com README de interface~~ ✅
-6. **Estabelecer snapshot de paridade** ⏳ — ~500 leads reais em `tests/fixtures/paridade_sample.csv`; rodar ambos os pipelines e salvar outputs como baseline; executar antes de iniciar a Fase 2
+6. **Audit de divergências treino × produção** ⏳ — para cada função compartilhada (UTM, Medium, Categories, FE, Encoding): (1) capturar snapshot real em parquet na entrada da função durante uma execução do pipeline de treino; (2) injetar o mesmo snapshot nas duas implementações (treino e produção) separadamente e comparar outputs coluna a coluna; (3) documentar cada divergência encontrada; (4) para cada divergência, decidir qual implementação está correta — produção é canônica por padrão, mas cada caso deve ser verificado; (5) registrar a decisão como especificação para a implementação em `core/`. Executar antes de iniciar a Fase 2.
 
 > `configs/templates/client_template.yaml` e `src/eda/generate_client_config.py` são adiados: o template emerge do `devclub.yaml` ao final da Fase 2; o gerador de EDA é construído na Fase 4, depois de dois configs escritos manualmente.
 
-**Critério de saída:** ✅ `src/core/` existe com assinaturas; ✅ `ClientConfig.from_yaml('configs/clients/devclub.yaml').validate()` passa; ⏳ snapshot de paridade pendente.
+**Critério de saída:** ✅ `src/core/` existe com assinaturas; ✅ `ClientConfig.from_yaml('configs/clients/devclub.yaml').validate()` passa; ⏳ audit de divergências pendente — snapshots capturados, divergências documentadas e decisão registrada para cada função compartilhada.
 
 ### Fase 2 — Consolidação (Semana 2–3)
 
@@ -650,22 +650,34 @@ Ao concluir o último componente: `configs/clients/devclub.yaml` está completam
 > **Shadow mode por componente:** a cada módulo migrado para `core/`, rodar a versão antiga e a nova em paralelo sobre os mesmos dados reais por pelo menos 1 ciclo de scoring antes de remover a versão antiga. Divergências detectadas em produção antes do corte, não depois.
 
 > **Como executar o teste de paridade:**
-> 1. Usar o snapshot da Fase 1 (`tests/fixtures/paridade_sample.csv`)
-> 2. Rodar a amostra pelos dois pipelines até o ponto pós-encoding (antes do modelo)
-> 3. Comparar os DataFrames coluna por coluna — qualquer diferença é uma divergência
+> 1. Usar os snapshots do audit da Fase 1 — um parquet por função compartilhada (ex: `tests/fixtures/snapshot_utm_input.parquet`)
+> 2. Para cada função migrada para `core/`, injetar o snapshot na implementação canônica de produção (baseline) e na nova implementação; comparar outputs coluna a coluna
+> 3. Qualquer divergência entre a nova `core/` e o baseline é uma regressão a corrigir
 >
 > ```python
-> df_train = train_pipeline.preprocess(amostra)
-> df_prod  = production_pipeline.preprocess(amostra)
+> # Exemplo para UTM — mesmo padrão para cada função compartilhada
+> df_snapshot = pd.read_parquet("tests/fixtures/snapshot_utm_input.parquet")
 >
-> assert df_train.shape == df_prod.shape
-> for col in df_train.columns:
->     diffs = (df_train[col] != df_prod[col]).sum()
+> output_baseline = unify_utm_producao(df_snapshot.copy())          # implementação atual de produção
+> output_novo     = core.utm.unify_utm(df_snapshot.copy(), config.utm)  # nova core/
+>
+> for col in output_baseline.columns:
+>     diffs = (output_baseline[col] != output_novo[col]).sum()
 >     if diffs > 0:
->         print(f"{col}: {diffs} divergências")
+>         print(f"UTM - {col}: {diffs} divergências")
 > ```
 >
 > Rodar **após cada componente consolidado** para confirmar que o comportamento foi preservado.
+>
+> **Por que o snapshot de treino é o input correto:** treino e produção recebem dados de fontes diferentes (Excel histórico vs API em tempo real) e passam por steps não-compartilhados antes e entre as funções compartilhadas — portanto não é possível comparar os dois pipelines de ponta a ponta. O snapshot serializado na entrada de cada função compartilhada durante uma execução de treino fornece um input idêntico para ambas as implementações, isolando a comparação ao comportamento da função em si. Qualquer divergência encontrada é de lógica de transformação, não de dados upstream. A `preprocessing.py` canônica garante estruturalmente que, em produção, os dados chegam às funções compartilhadas pela mesma sequência de passos — completando a garantia que o parity test não pode dar sozinho.
+>
+> **Três camadas de validação, cada uma cobrindo um risco distinto:**
+>
+> | Camada | O que verifica | Dados usados |
+> |---|---|---|
+> | Parity test (acima) | Implementação idêntica entre treino e nova `core/` | Snapshot real de treino |
+> | Shadow mode (acima) | Nova `core/` não quebra com dados reais de produção | Leads reais em produção |
+> | Métricas do modelo (`validate_ml_performance.py`) | Performance do modelo preservada após refactor | Dataset histórico |
 
 ### Fase 3 — Cliente B (Semana 3–4)
 
