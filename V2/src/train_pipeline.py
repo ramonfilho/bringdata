@@ -150,7 +150,7 @@ def setup_logging(verbosity='normal', log_file=None):
 logger = logging.getLogger(__name__)
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=False, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal'):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=False, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False):
     """Executa pipeline de treino completo.
 
     Args:
@@ -178,6 +178,9 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         api_start_date: Data início para buscar dados da API (YYYY-MM-DD)
         api_end_date: Data fim para buscar dados da API (YYYY-MM-DD)
         output_subdir: Subdiretório para logs ('training' ou 'retraining')
+        capture_parity_snapshots: Se True, serializa (input, output) de cada função
+                                  compartilhada em tests/fixtures/ para o audit de paridade.
+                                  Usar apenas uma vez para gerar os snapshots baseline.
     """
 
     # Configurar caminho do arquivo de log
@@ -550,7 +553,17 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 10: UNIFICAÇÃO DE UTM SOURCE E TERM")
     logger.info("")
 
+    if capture_parity_snapshots:
+        _fixtures = os.path.join(os.path.dirname(__file__), '..', 'tests', 'fixtures')
+        os.makedirs(_fixtures, exist_ok=True)
+        df_features_removidas.to_parquet(os.path.join(_fixtures, 'snapshot_utm_input.parquet'), index=False)
+        logger.info("  [PARITY] snapshot_utm_input.parquet salvo")
+
     df_utm_unificado = unificar_utm_source_term(df_features_removidas)
+
+    if capture_parity_snapshots:
+        df_utm_unificado.to_parquet(os.path.join(_fixtures, 'snapshot_utm_output.parquet'), index=False)
+        logger.info("  [PARITY] snapshot_utm_output.parquet salvo")
 
     # Verificar consistência
     verificar_consistencia_utm(df_utm_unificado)
@@ -562,6 +575,10 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         logger.info("")
         logger.info("CÉLULA 11: UNIFICAÇÃO DE UTM MEDIUM - EXTRAÇÃO DE PÚBLICOS")
         logger.info("")
+
+        if capture_parity_snapshots:
+            df_utm_unificado.to_parquet(os.path.join(_fixtures, 'snapshot_medium_input.parquet'), index=False)
+            logger.info("  [PARITY] snapshot_medium_input.parquet salvo")
 
         df_medium_unificado = extrair_publico_medium(df_utm_unificado)
 
@@ -584,6 +601,10 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         logger.info("")
         logger.info("CÉLULA 11.1: Pulando (Medium foi removido na célula 8 - strategy='remove')")
         df_medium_producao = df_medium_unificado.copy()
+
+    if capture_parity_snapshots:
+        df_medium_producao.to_parquet(os.path.join(_fixtures, 'snapshot_medium_output.parquet'), index=False)
+        logger.info("  [PARITY] snapshot_medium_output.parquet salvo")
 
     logger.info("=" * 80)
     # === CÉLULA 13: Criação de versão do dataset por missing rate ===
@@ -664,7 +685,16 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     # IMPORTANTE: FE será aplicado no dataset COM ou SEM temporais
     # Se temporais foram adicionadas, FE vai criar 7 features E remover Data/Nome/etc
     # Resultado final: 4 temporais + 7 FE + 15 base = 26 colunas
+
+    if capture_parity_snapshots:
+        dataset_v1_devclub.to_parquet(os.path.join(_fixtures, 'snapshot_fe_input.parquet'), index=False)
+        logger.info("  [PARITY] snapshot_fe_input.parquet salvo")
+
     dataset_v1_devclub_fe = criar_features_derivadas(dataset_v1_devclub)
+
+    if capture_parity_snapshots:
+        dataset_v1_devclub_fe.to_parquet(os.path.join(_fixtures, 'snapshot_fe_output.parquet'), index=False)
+        logger.info("  [PARITY] snapshot_fe_output.parquet salvo")
 
     # === VALIDATION HOOK (opcional - usado pelo retreino mensal) ===
     if validation_hook:
@@ -697,7 +727,16 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("")
     logger.info(f"CÉLULA 20: ENCODING ESTRATÉGICO")
     logger.info("")
+
+    if capture_parity_snapshots:
+        dataset_v1_devclub_fe.to_parquet(os.path.join(_fixtures, 'snapshot_encoding_input.parquet'), index=False)
+        logger.info("  [PARITY] snapshot_encoding_input.parquet salvo")
+
     dataset_v1_devclub_encoded = aplicar_encoding_estrategico(dataset_v1_devclub_fe, medium_strategy=medium_strategy)
+
+    if capture_parity_snapshots:
+        dataset_v1_devclub_encoded.to_parquet(os.path.join(_fixtures, 'snapshot_encoding_output.parquet'), index=False)
+        logger.info("  [PARITY] snapshot_encoding_output.parquet salvo")
 
     # === HYPERPARAMETER TUNING (opcional) ===
     melhores_params = None
