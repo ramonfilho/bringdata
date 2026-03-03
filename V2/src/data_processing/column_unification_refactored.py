@@ -196,6 +196,11 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
         logger.debug("  nome contato  nome")
 
     # Unificar email
+    # Preservar coluna 'email' já existente como fallback — garante que fontes que já
+    # entregam 'email' diretamente (ex: API Guru) não percam os valores após o concat
+    # com fontes TMB que usam 'Cliente Email'.
+    _email_fallback = df_vendas_unificado['email'].copy() if 'email' in df_vendas_unificado.columns else None
+
     if 'Cliente Email' in df_vendas_unificado.columns and 'email contato' in df_vendas_unificado.columns:
         df_vendas_unificado['email'] = df_vendas_unificado['Cliente Email'].fillna(df_vendas_unificado['email contato'])
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Cliente Email', 'email contato'])
@@ -208,6 +213,13 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
         df_vendas_unificado['email'] = df_vendas_unificado['email contato']
         df_vendas_unificado = df_vendas_unificado.drop(columns=['email contato'])
         logger.debug("  email contato  email")
+
+    if _email_fallback is not None:
+        antes = df_vendas_unificado['email'].isna().sum()
+        df_vendas_unificado['email'] = df_vendas_unificado['email'].fillna(_email_fallback)
+        recuperados = antes - df_vendas_unificado['email'].isna().sum()
+        if recuperados > 0:
+            logger.debug(f"  email fallback: recuperados {recuperados:,} emails de coluna 'email' pré-existente")
 
     # Unificar data — dinâmico: detecta colunas de data por dtype/nome, ordena por completude,
     # preenche 'data' greedily da mais completa para a menos. Nenhum nome hardcoded.
@@ -245,6 +257,11 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
         df_vendas_unificado = df_vendas_unificado.drop(columns=[col])
 
     # Unificar telefone
+    # Preservar coluna 'telefone' já existente como fallback — garante que fontes que já
+    # entregam 'telefone' diretamente (ex: API Guru) não percam os valores após o concat
+    # com fontes TMB que usam 'Telefone' (capitalizado).
+    _telefone_fallback = df_vendas_unificado['telefone'].copy() if 'telefone' in df_vendas_unificado.columns else None
+
     if 'Telefone' in df_vendas_unificado.columns and 'telefone contato' in df_vendas_unificado.columns:
         df_vendas_unificado['telefone'] = df_vendas_unificado['Telefone'].fillna(df_vendas_unificado['telefone contato'])
         df_vendas_unificado = df_vendas_unificado.drop(columns=['Telefone', 'telefone contato'])
@@ -257,6 +274,16 @@ def unificar_colunas_vendas(df_vendas: pd.DataFrame) -> pd.DataFrame:
         df_vendas_unificado['telefone'] = df_vendas_unificado['telefone contato']
         df_vendas_unificado = df_vendas_unificado.drop(columns=['telefone contato'])
         logger.debug("  telefone contato  telefone")
+    else:
+        df_vendas_unificado['telefone'] = pd.NA
+        logger.warning("  (sem coluna de telefone em df_vendas) → telefone=NA, matching por telefone desabilitado")
+
+    if _telefone_fallback is not None:
+        antes = df_vendas_unificado['telefone'].isna().sum()
+        df_vendas_unificado['telefone'] = df_vendas_unificado['telefone'].fillna(_telefone_fallback)
+        recuperados = antes - df_vendas_unificado['telefone'].isna().sum()
+        if recuperados > 0:
+            logger.debug(f"  telefone fallback: recuperados {recuperados:,} telefones de coluna 'telefone' pré-existente")
 
     # Unificar UTMs (manter as versões 'last' quando disponíveis)
     utms_map = [
@@ -451,7 +478,7 @@ def aplicar_filtro_status_risco(
             mask_tmb = is_tmb
     else:
         if tmb_risk_filter in ['low', 'low_medium']:
-            logger.warning(f"  Coluna 'Grau de risco' não encontrada, mantendo todos TMB")
+            logger.info(f"  TMB dual-source: 'Grau de risco' ausente no df_vendas (esperado) — filtro de risco aplicado pós-matching em Célula 15.1")
         mask_tmb = is_tmb
 
     # Aplicar filtros combinados

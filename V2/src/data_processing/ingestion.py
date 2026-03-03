@@ -141,11 +141,47 @@ def read_excel_files(filepaths: List[str]) -> Dict[str, Dict[str, pd.DataFrame]]
                     else:
                         logger.warning(f"      Coluna 'Pedido' não encontrada, usando dados como estão")
 
+                    df['_tmb_tipo'] = 'parcelas'
+
+                # TRATAMENTO ESPECIAL: Arquivo TMB de pedidos (tem email + telefone, sem risco)
+                # Relatório "pedidos" da TMB — fonte primária para matching (email + telefone).
+                # O risco será injetado via join com o arquivo de parcelas em consolidate_datasets().
+                is_tmb_pedidos = (
+                    not is_tmb_parcelas and
+                    'ID do Pedido' in df.columns and
+                    'E-mail do Cliente' in df.columns and
+                    'Telefone do Cliente' in df.columns
+                )
+
+                if is_tmb_pedidos:
+                    logger.debug(f"     Detectado arquivo TMB de pedidos (matching): {filename}")
+                    total_antes = len(df)
+
+                    # Filtrar apenas pedidos não-cancelados via coluna 'Situação'
+                    # (Vigente / Quitado = manter; Cancelado = excluir)
+                    if 'Situação' in df.columns:
+                        df = df[df['Situação'] != 'Cancelado'].copy()
+                        removidos = total_antes - len(df)
+                        if removidos > 0:
+                            logger.debug(f"       Removidos {removidos:,} pedidos cancelados")
+
+                    # Renomear colunas para formato canônico do pipeline
+                    rename_pedidos = {
+                        'ID do Pedido': 'Pedido',
+                        'E-mail do Cliente': 'Cliente Email',
+                        'Telefone do Cliente': 'Telefone',
+                        'Nome do Produto': 'nome produto',
+                        'Ticket do pedido': 'Ticket (R$)',
+                    }
+                    df = df.rename(columns={k: v for k, v in rename_pedidos.items() if k in df.columns})
+                    df['_tmb_tipo'] = 'pedidos'
+                    logger.debug(f"     TMB pedidos: {len(df):,} pedidos ativos")
+
                 # NORMALIZAÇÃO DE COLUNAS: Formato novo (maiúsculas) → formato padrão
                 # Arquivos de leads a partir de LF08 usam nomes de coluna em maiúsculo
                 # (DATA, E-MAIL, TELEFONE, etc.) enquanto o pipeline espera o formato
                 # dos arquivos antigos (Data, E-mail, Telefone, etc.)
-                if not is_tmb_parcelas:
+                if not is_tmb_parcelas and not is_tmb_pedidos:
                     leads_col_map = {
                         'DATA': 'Data',
                         'E-MAIL': 'E-mail',
@@ -252,13 +288,16 @@ def filter_sheets(
             # Abas CRM-only (contato + UTM sem survey) têm 8 colunas
             # Novo formato LEADS (LF08+) tem exatamente 10 colunas — sem survey, não interessa
             # Abas de pesquisa com survey têm 11+ colunas
+            # Dados da API são construídos programaticamente — sempre têm poucas colunas (vendas),
+            # mas são explicitamente requisitados e nunca devem ser filtrados por contagem.
             colunas_preenchidas = int(df.notna().any().sum())
             tem_colunas_suficientes = colunas_preenchidas > 10
+            eh_api_data = '[API]' in filename  # API data bypassa heurística de colunas
 
             # Decidir se mantém a aba
             if (nao_esta_vazia and not deve_remover_por_termo and not eh_lf_com_vendas and not eh_guru_local and
-                not eh_leads_redundante and tem_colunas_suficientes and
-                (tem_termo_permitido or tem_linhas_suficientes)):
+                not eh_leads_redundante and (tem_colunas_suficientes or eh_api_data) and
+                (tem_termo_permitido or tem_linhas_suficientes or eh_api_data)):
 
                 # Aba MANTIDA
                 abas_filtradas[sheet_name] = df
@@ -481,13 +520,55 @@ def consolidate_datasets(
 
     # Consolidar em DataFrames únicos (linhas 278-279)
     df_pesquisa_consolidado = pd.concat(dados_pesquisa, ignore_index=True) if dados_pesquisa else pd.DataFrame()
-    df_vendas_consolidado = pd.concat(dados_vendas, ignore_index=True) if dados_vendas else pd.DataFrame()
+
+    # Merge TMB dual-source: quando pedidos + parcelas estão presentes, usa pedidos como
+    # fonte primária (email + telefone). O lookup de risco é retornado separadamente para
+    # ser aplicado pós-matching em train_pipeline.py — garantindo que todos os pedidos
+    # estejam disponíveis para matching por telefone, independente do filtro de risco.
+    # Se só parcelas: comportamento legado preservado (sem lookup separado).
+    parcelas_frames = [df for df in dados_vendas if '_tmb_tipo' in df.columns and df['_tmb_tipo'].iloc[0] == 'parcelas']
+    pedidos_frames  = [df for df in dados_vendas if '_tmb_tipo' in df.columns and df['_tmb_tipo'].iloc[0] == 'pedidos']
+    outros_frames   = [df for df in dados_vendas if '_tmb_tipo' not in df.columns]
+
+    tmb_risk_lookup: dict = {}  # {email_normalizado → Grau de risco}
+
+    if parcelas_frames and pedidos_frames:
+        df_parcelas_all = pd.concat(parcelas_frames, ignore_index=True)
+
+        # Lookup por 'Cliente Email' normalizado — 'Pedido' é removido por colunas_remover
+        # antes desta função ser chamada (Célula 3), então não pode ser usado como chave.
+        tmb_risk_lookup = (
+            df_parcelas_all
+            .dropna(subset=['Cliente Email'])
+            .assign(**{'_email_norm': lambda x: x['Cliente Email'].str.strip().str.lower()})
+            .groupby('_email_norm')['Grau de risco']
+            .first()
+            .to_dict()
+        )
+        logger.info(f"  TMB dual-source: {len(tmb_risk_lookup):,} emails com grau de risco (lookup para pós-matching)")
+
+        # df_vendas = pedidos (email + telefone) — sem injetar Grau de risco aqui.
+        # O filtro de risco em aplicar_filtro_status_risco() não encontrará a coluna e
+        # manterá todos os pedidos, garantindo cobertura completa para matching.
+        df_pedidos_all = pd.concat(pedidos_frames, ignore_index=True)
+        dados_vendas_final = [df_pedidos_all] + outros_frames
+    else:
+        if parcelas_frames:
+            logger.debug("  TMB: usando apenas arquivo de parcelas (comportamento legado)")
+        dados_vendas_final = dados_vendas
+
+    # Remover coluna temporária de tipo TMB antes de consolidar
+    for df in dados_vendas_final:
+        if '_tmb_tipo' in df.columns:
+            df.drop(columns=['_tmb_tipo'], inplace=True)
+
+    df_vendas_consolidado = pd.concat(dados_vendas_final, ignore_index=True) if dados_vendas_final else pd.DataFrame()
 
     # DEBUG: Informações parciais (serão mostradas no resumo final)
     logger.debug(f"  Dataset Pesquisa: {len(df_pesquisa_consolidado):,} registros, {len(df_pesquisa_consolidado.columns)} colunas")
     logger.debug(f"  Dataset Vendas: {len(df_vendas_consolidado):,} registros, {len(df_vendas_consolidado.columns)} colunas")
 
-    return df_pesquisa_consolidado, df_vendas_consolidado
+    return df_pesquisa_consolidado, df_vendas_consolidado, tmb_risk_lookup
 
 
 def read_all_training_sources(
