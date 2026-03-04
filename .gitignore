@@ -1,6 +1,6 @@
 # Pastas desnecessárias
 claude/
-clients/
+/clients/
 V1/
 reports
 data copy/
@@ -53,6 +53,9 @@ cache/
 # Configurações locais
 .vscode/
 **/.claude/settings.local.json
+
+# Test fixtures (binários grandes, regenerar localmente)
+V2/tests/fixtures/
 
 inference/params/
 inference/output/

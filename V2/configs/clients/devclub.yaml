@@ -1,0 +1,197 @@
+# configs/clients/devclub.yaml
+# Configuração do cliente DevClub para o pipeline MLOps refatorado.
+#
+# ESTADO ATUAL: esqueleto — chaves definidas, valores preenchidos
+# incrementalmente durante a Fase 2 conforme cada componente é migrado.
+# Chaves com null ainda não foram migradas.
+#
+# Referência de hardcodes: V2/docs/PLANO_REFACTOR_MLOPS.md, Seção 6.
+
+client_id: devclub
+
+# ---------------------------------------------------------------------------
+# InfraConfig — hardcodes #101, #102, #120, #124, #150, #153
+# ---------------------------------------------------------------------------
+infra:
+  gcp_project_id: null          # #101, #153 — usar env var GCP_PROJECT_ID
+  cloud_run_url: null            # #124 — usar env var INTERNAL_API_URL
+  validation_bucket: null        # #120, #136
+  bigquery_dataset_id: null      # #102
+  bigquery_table_id: null        # #102
+  guru_api_base_url: null        # #150
+  guru_api_transactions_endpoint: null  # #150
+
+# ---------------------------------------------------------------------------
+# IngestionConfig — hardcodes #6–#26, #38, #57–#62, #68–#69
+# ---------------------------------------------------------------------------
+ingestion:
+  training_data_dir: null        # path local ao dataset de treino
+  tmb_detection_columns: null    # #6
+  bare_campaign_names: null      # #8
+  api_source_name: null          # #11
+  has_tmb: null                  # #12 — bool
+  sales_platform_identifier: null  # #21
+  approved_status_value: null    # #22
+  tmb_risk_column: null          # #23
+  tmb_risk_values: null          # #62
+  tmb_risk_filter_default: null  # #26
+  product_filter_keyword: null   # #24
+  pesquisa_date_column: null     # #25
+  lf_file_prefix: null           # #57
+  lf_guru_exception_files: null  # #57
+  local_sales_filename_identifier: null  # #58
+  min_survey_columns: null       # #59
+  score_column_prefixes: null    # #60
+  vendas_utm_columns_to_remove: null  # #61
+  columns_to_remove: null        # #69 — lista unificada (substitui cleaning.colunas_remover)
+  column_rename_mapping: null    # #68
+  dataset_cutoff_date: null      # #38
+  column_unification:            # #13–#20
+    pesquisa_merges: null        # #13, #14, #15
+    valor_columns: null          # #16
+    produto_columns: null        # #17
+    nome_columns: null           # #18
+    email_columns: null          # #19
+    telefone_columns: null       # #20
+
+# ---------------------------------------------------------------------------
+# UTMConfig — hardcodes #35, #63, #67 (Componente 1 — Fase 2)
+# ---------------------------------------------------------------------------
+utm:
+  source_to_outros: null         # #35
+  term_mappings: null            # #63
+  term_outros_patterns: null     # #63
+  term_long_id_threshold: null   # #67
+
+# ---------------------------------------------------------------------------
+# MediumConfig — hardcodes #7, #36, #37, #50 (Componente 4 — Fase 2)
+# ---------------------------------------------------------------------------
+medium:
+  valid_categories: null         # #7
+  discontinued_categories: null  # #7
+  category_mappings: null        # #7
+  adv_prefix: null               # #36
+  manual_unifications: null      # #37
+  binary_top3_categories: null   # #50
+
+# ---------------------------------------------------------------------------
+# CategoryConfig — hardcodes #27–#33 (Componente 6 — Fase 2)
+# ---------------------------------------------------------------------------
+category:
+  categorical_columns: null      # #27
+  category_mappings:             # #28–#33
+    interesse_programacao: null  # #28
+    o_que_quer_ver_evento: null  # #29
+    faixa_salarial: null         # #30
+    o_que_faz_atualmente: null   # #31
+    idade: null                  # #32
+    outras_colunas: null         # #33
+
+# ---------------------------------------------------------------------------
+# MatchingConfig — hardcodes #41–#46
+# ---------------------------------------------------------------------------
+matching:
+  strategy: null
+  pesquisa_email_column: null    # #41
+  pesquisa_phone_column: null    # #42
+  country_code: null             # #43
+  phone_digits: null             # #43
+  alunos_todos_path: null        # #44
+  validation_products: null      # #45
+  alunos_email_column: null      # #46
+
+# ---------------------------------------------------------------------------
+# FeatureConfig — hardcodes #2, #3, #34, #39, #40, #47, #48, #52, #65, #66
+# ---------------------------------------------------------------------------
+feature:
+  critical_columns: null         # #3, #40
+  columns_to_remove: null        # #34
+  columns_to_remove_post_cutoff: null  # #39
+  columns_to_drop_after_fe: null # #48
+  pesquisa_name_column: null     # #47
+  ordering_rules: null           # #2
+  survey_column_stems: null      # #52
+  utm_feature_prefixes_for_registry: null    # #65
+  derived_feature_prefixes_for_registry: null  # #66
+  nlp_columns: []                # reservado — manter vazio
+
+# ---------------------------------------------------------------------------
+# EncodingConfig — hardcodes #49, #51, #64, #70, #71 (Componente 3 — Fase 2)
+# ---------------------------------------------------------------------------
+encoding:
+  ordinal_variables: null        # #49 — inclui nomes longos do formulário (versão produção)
+  categorical_detection_max_unique: null  # #64
+  features_to_drop_after_encoding: null  # #51
+  column_name_corrections: null  # #70
+
+# ---------------------------------------------------------------------------
+# ModelConfig — hardcodes #1, #10, #53, #55, #56, #71, #72, #79, #89
+# ---------------------------------------------------------------------------
+model:
+  hyperparameters: null          # #1
+  mlflow_experiment_name: null   # #10
+  mlflow_experiment_id: null     # #71
+  model_name_template: null      # #53
+  legacy_model_dir: null         # #72
+  business_config_path: null     # #55
+  tuning_improvement_thresholds: null  # #56
+  metadata_filename_pattern: null  # #89
+  top_decils_to_monitor: null    # #79
+
+# ---------------------------------------------------------------------------
+# MonitoringConfig — hardcodes #4, #5, #9, #73–#86
+# ---------------------------------------------------------------------------
+monitoring:
+  model_name: null               # #5
+  conversion_window_days: null   # #9
+  medium_strategy: null          # #4
+  survey_sheet_tab_index: null   # #73
+  sheet_date_format: null        # #74
+  timezone_offset_hours: null    # #75
+  main_sheet_tab_index: null     # #76
+  invalid_decil_values: null     # #77
+  main_sheet_date_format: null   # #78
+  funnel_lookback_hours: null    # #80
+  display_date_format: null      # #81
+  capi_events_per_lead_estimate: null  # #82
+  thresholds: null               # #83
+  missing_rate_ignore_columns: null    # #84
+  sheets_url: null               # #85
+  backup_sheets_url: null        # #128
+  drift_features_to_analyze: null  # #86
+
+# ---------------------------------------------------------------------------
+# CAPIConfig — hardcodes #103–#106, #140
+# ---------------------------------------------------------------------------
+capi:
+  pixel_id: null                 # #103 — usar env var META_PIXEL_ID
+  event_name_with_value: null    # #104
+  event_name_high_quality: null  # #104
+  event_name_faixa_a: null       # #140
+  high_quality_decils: null      # #105
+  country_code: null             # #106
+  currency: null                 # #106
+  decil_to_value: null
+
+# ---------------------------------------------------------------------------
+# APIConfig — hardcodes #8, #109–#122 (Grupo B — Fase 2)
+# ---------------------------------------------------------------------------
+api:
+  cors_origins: null             # #111
+  batch_processing_size: null    # #114
+  railway_polling_batch_size: null  # #122
+  default_analysis_period_days: null  # #115
+  utm_main_sources: null         # #116
+  bare_medium_names: null        # #109
+  generic_utm_terms: null        # #109, #117
+  generic_utms_set: null         # #118
+  sheets_column_names: null      # #100, #113
+  railway_field_mappings: null   # #99
+  utm_campaign_structure: null   # #107
+
+# ---------------------------------------------------------------------------
+# RetainConfig — hardcodes #87, #88, #89
+# ---------------------------------------------------------------------------
+retrain:
+  quality_gate_warning_threshold: null   # #87
+  quality_gate_critical_threshold: null  # #87

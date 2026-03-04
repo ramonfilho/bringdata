@@ -150,7 +150,7 @@ def setup_logging(verbosity='normal', log_file=None):
 logger = logging.getLogger(__name__)
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=False, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal'):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=False, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False):
     """Executa pipeline de treino completo.
 
     Args:
@@ -178,6 +178,9 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         api_start_date: Data início para buscar dados da API (YYYY-MM-DD)
         api_end_date: Data fim para buscar dados da API (YYYY-MM-DD)
         output_subdir: Subdiretório para logs ('training' ou 'retraining')
+        capture_parity_snapshots: Se True, serializa (input, output) de cada função
+                                  compartilhada em tests/fixtures/ para o audit de paridade.
+                                  Usar apenas uma vez para gerar os snapshots baseline.
     """
 
     # Configurar caminho do arquivo de log
@@ -404,7 +407,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 4: CONSOLIDAÇÃO DE DATASETS - PESQUISA E VENDAS")
     logger.info("")
 
-    df_pesquisa, df_vendas = consolidate_datasets(
+    df_pesquisa, df_vendas, tmb_risk_lookup = consolidate_datasets(
         clean_data_cols,
         pesquisa_keywords=config['consolidation']['pesquisa_keywords'],
         vendas_keywords=config['consolidation']['vendas_keywords']
@@ -550,7 +553,17 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 10: UNIFICAÇÃO DE UTM SOURCE E TERM")
     logger.info("")
 
+    if capture_parity_snapshots:
+        _fixtures = os.path.join(os.path.dirname(__file__), '..', 'tests', 'fixtures')
+        os.makedirs(_fixtures, exist_ok=True)
+        df_features_removidas.to_pickle(os.path.join(_fixtures, 'snapshot_utm_input.pkl'))
+        logger.info("  [PARITY] snapshot_utm_input.pkl salvo")
+
     df_utm_unificado = unificar_utm_source_term(df_features_removidas)
+
+    if capture_parity_snapshots:
+        df_utm_unificado.to_pickle(os.path.join(_fixtures, 'snapshot_utm_output.pkl'))
+        logger.info("  [PARITY] snapshot_utm_output.pkl salvo")
 
     # Verificar consistência
     verificar_consistencia_utm(df_utm_unificado)
@@ -562,6 +575,10 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         logger.info("")
         logger.info("CÉLULA 11: UNIFICAÇÃO DE UTM MEDIUM - EXTRAÇÃO DE PÚBLICOS")
         logger.info("")
+
+        if capture_parity_snapshots:
+            df_utm_unificado.to_pickle(os.path.join(_fixtures, 'snapshot_medium_input.pkl'))
+            logger.info("  [PARITY] snapshot_medium_input.pkl salvo")
 
         df_medium_unificado = extrair_publico_medium(df_utm_unificado)
 
@@ -584,6 +601,10 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         logger.info("")
         logger.info("CÉLULA 11.1: Pulando (Medium foi removido na célula 8 - strategy='remove')")
         df_medium_producao = df_medium_unificado.copy()
+
+    if capture_parity_snapshots:
+        df_medium_producao.to_pickle(os.path.join(_fixtures, 'snapshot_medium_output.pkl'))
+        logger.info("  [PARITY] snapshot_medium_output.pkl salvo")
 
     logger.info("=" * 80)
     # === CÉLULA 13: Criação de versão do dataset por missing rate ===
@@ -632,6 +653,35 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     cell_timers['Célula 15'] = time.time() - cell_start
     logger.info(f"   Tempo: {cell_timers['Célula 15']:.1f}s")
     logger.info("=" * 80)
+
+    # === CÉLULA 15.1: Filtro de risco TMB pós-matching ===
+    # Aplicado apenas no modo dual-source (tmb_risk_lookup preenchido) e filtros strict.
+    # Garante que todos os modos de tmb_risk_filter funcionem corretamente sem bloquear
+    # o matching por telefone antes da Célula 15.
+    if tmb_risk_lookup and tmb_risk_filter in ('low', 'low_medium'):
+        logger.info("")
+        logger.info("CÉLULA 15.1: FILTRO DE RISCO TMB PÓS-MATCHING")
+        logger.info("")
+
+        allowed_risk = {'Baixo'} if tmb_risk_filter == 'low' else {'Baixo', 'Médio'}
+        target_1_idx = dataset_v1_devclub[dataset_v1_devclub['target'] == 1].index
+        demoted = 0
+
+        for idx in target_1_idx:
+            email_raw = dataset_v1_devclub.at[idx, 'E-mail']
+            if pd.isna(email_raw):
+                continue
+            email_norm = str(email_raw).strip().lower()
+            risk = tmb_risk_lookup.get(email_norm)
+            # risk == None: match Guru ou TMB sem email na parcelas → não demoter
+            if risk is not None and risk not in allowed_risk:
+                dataset_v1_devclub.at[idx, 'target'] = 0
+                demoted += 1
+
+        logger.info(f"  Filtro '{tmb_risk_filter}': {demoted:,} leads demovidos (risco fora de {allowed_risk})")
+        logger.info(f"  Positivos restantes: {dataset_v1_devclub['target'].sum():,}")
+        logger.info("")
+        logger.info("=" * 80)
     # === CÉLULA 17: Janela de Conversão ===
     logger.info("")
     logger.info(f"CÉLULA 17: APLICAR JANELA DE CONVERSÃO DE 20 DIAS")
@@ -664,7 +714,16 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     # IMPORTANTE: FE será aplicado no dataset COM ou SEM temporais
     # Se temporais foram adicionadas, FE vai criar 7 features E remover Data/Nome/etc
     # Resultado final: 4 temporais + 7 FE + 15 base = 26 colunas
+
+    if capture_parity_snapshots:
+        dataset_v1_devclub.to_pickle(os.path.join(_fixtures, 'snapshot_fe_input.pkl'))
+        logger.info("  [PARITY] snapshot_fe_input.pkl salvo")
+
     dataset_v1_devclub_fe = criar_features_derivadas(dataset_v1_devclub)
+
+    if capture_parity_snapshots:
+        dataset_v1_devclub_fe.to_pickle(os.path.join(_fixtures, 'snapshot_fe_output.pkl'))
+        logger.info("  [PARITY] snapshot_fe_output.pkl salvo")
 
     # === VALIDATION HOOK (opcional - usado pelo retreino mensal) ===
     if validation_hook:
@@ -697,7 +756,16 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("")
     logger.info(f"CÉLULA 20: ENCODING ESTRATÉGICO")
     logger.info("")
+
+    if capture_parity_snapshots:
+        dataset_v1_devclub_fe.to_pickle(os.path.join(_fixtures, 'snapshot_encoding_input.pkl'))
+        logger.info("  [PARITY] snapshot_encoding_input.pkl salvo")
+
     dataset_v1_devclub_encoded = aplicar_encoding_estrategico(dataset_v1_devclub_fe, medium_strategy=medium_strategy)
+
+    if capture_parity_snapshots:
+        dataset_v1_devclub_encoded.to_pickle(os.path.join(_fixtures, 'snapshot_encoding_output.pkl'))
+        logger.info("  [PARITY] snapshot_encoding_output.pkl salvo")
 
     # === HYPERPARAMETER TUNING (opcional) ===
     melhores_params = None
