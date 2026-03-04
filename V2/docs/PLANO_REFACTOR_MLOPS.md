@@ -214,7 +214,7 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 | 4 | `monitoring/data_quality.py:863` | `monitoring.medium_strategy` |
 | 5 | `monitoring/data_quality.py:868` | `monitoring.model_name` |
 | 6 | `ingestion.py:78-100` | `ingestion.tmb_detection_columns` |
-| 7 | `medium_production_training.py:36-119` + `medium_unification.py:151-218` | Categorias válidas, descontinuadas e mapeamento histórico completo (~50 variantes) → `medium.valid_categories` + `medium.discontinued_categories` + `medium.category_mappings` (listas diferem entre treino e produção — confirmar ao consolidar) |
+| 7 | ~~`medium_production_training.py:36-119`~~ + `medium_unification.py:151-218` | **[dev/retreino — PARCIALMENTE RESOLVIDO]** `medium_production_training.py` agora deriva categorias válidas/descontinuadas automaticamente comparando dados atuais com `distribuicoes_esperadas.json` do modelo ativo (thresholds: válida ≥ 2.5%, nova ≥ 5%). Mapeamento de variantes históricas mantido. Ainda hardcoded em `medium_unification.py` (produção) — pendente ao migrar para `core/medium.py`. Ao migrar: `medium.variant_mappings` + `medium.threshold_valid` + `medium.threshold_new` no config. |
 | 8 | `api/app.py:44` | `ingestion.bare_campaign_names` |
 | 9 | `train_pipeline.py:652` (`janela_dias=20`) | `monitoring.conversion_window_days` |
 | 10 | `training_model.py:27` | `model.mlflow_experiment_name` |

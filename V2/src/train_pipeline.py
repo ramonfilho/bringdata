@@ -36,8 +36,8 @@ from src.data_processing.column_unification_refactored import (
 from src.data_processing.category_unification import unificar_categorias_completo
 from src.data_processing.feature_removal import remover_features_desnecessarias, listar_colunas_restantes
 from src.data_processing.utm_training import unificar_utm_source_term, verificar_consistencia_utm
-from src.data_processing.medium_training import extrair_publico_medium, relatorio_final_medium
-from src.data_processing.medium_production_training import unificar_medium_para_producao, relatorio_unificacao_producao
+from src.data_processing.medium_training import extrair_publico_medium
+from src.data_processing.medium_production_training import unificar_medium_para_producao
 from src.data_processing.dataset_versioning_training import criar_dataset_pos_cutoff, disponibilizar_dataset
 from src.matching.matching_training import fazer_matching_robusto as fazer_matching_variantes
 from src.matching.matching_robusto import fazer_matching_robusto
@@ -569,38 +569,34 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     verificar_consistencia_utm(df_utm_unificado)
 
     logger.info("=" * 80)
-    # === CÉLULA 11: Unificação de UTM Medium - Extração de Públicos ===
-    # (Pulada se medium_strategy='remove')
+    # === CÉLULA 11: Unificação de UTM Medium ===
+    logger.info("")
+    logger.info("CÉLULA 11: UNIFICAÇÃO DE UTM MEDIUM")
+    logger.info("")
     if 'Medium' in df_utm_unificado.columns:
-        logger.info("")
-        logger.info("CÉLULA 11: UNIFICAÇÃO DE UTM MEDIUM - EXTRAÇÃO DE PÚBLICOS")
+        n_bruto_medium = df_utm_unificado['Medium'].nunique()
+        n_leads_medium = len(df_utm_unificado)
+        logger.info(f"  Input: {n_leads_medium:,} leads — {n_bruto_medium} valores brutos de Medium")
         logger.info("")
 
         if capture_parity_snapshots:
             df_utm_unificado.to_pickle(os.path.join(_fixtures, 'snapshot_medium_input.pkl'))
             logger.info("  [PARITY] snapshot_medium_input.pkl salvo")
 
-        df_medium_unificado = extrair_publico_medium(df_utm_unificado)
+        df_medium_unificado, n_apos_extracao = extrair_publico_medium(df_utm_unificado)
+        n_apos_norm = df_medium_unificado['Medium'].nunique()
 
-        # Gerar relatório final
-        relatorio_final_medium(df_medium_unificado)
-    else:
         logger.info("")
-        logger.info("CÉLULA 11: Pulando (Medium foi removido na célula 8 - strategy='remove')")
+        df_medium_producao = unificar_medium_para_producao(
+            df_medium_unificado,
+            n_bruto=n_bruto_medium,
+            n_apos_extracao=n_apos_extracao,
+            n_apos_norm=n_apos_norm,
+        )
+    else:
+        logger.info("  Pulando (Medium foi removido na célula 8 - strategy='remove')")
         df_medium_unificado = df_utm_unificado.copy()
-
-    # === CÉLULA 11.1: Unificação de Medium para Produção ===
-    # (Consolidado na CÉLULA 11)
-    if 'Medium' in df_medium_unificado.columns:
-        df_original = df_medium_unificado.copy()
-        df_medium_producao = unificar_medium_para_producao(df_medium_unificado)
-
-        # Gerar relatório
-        relatorio_unificacao_producao(df_original, df_medium_producao)
-    else:
-        logger.info("")
-        logger.info("CÉLULA 11.1: Pulando (Medium foi removido na célula 8 - strategy='remove')")
-        df_medium_producao = df_medium_unificado.copy()
+        df_medium_producao = df_utm_unificado.copy()
 
     if capture_parity_snapshots:
         df_medium_producao.to_pickle(os.path.join(_fixtures, 'snapshot_medium_output.pkl'))
