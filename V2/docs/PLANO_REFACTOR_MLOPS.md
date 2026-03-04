@@ -663,13 +663,13 @@ Ao concluir o último componente: `configs/clients/devclub.yaml` está completam
 > **Shadow mode por componente:** a cada módulo migrado para `core/`, rodar a versão antiga e a nova em paralelo sobre os mesmos dados reais por pelo menos 1 ciclo de scoring antes de remover a versão antiga. Divergências detectadas em produção antes do corte, não depois.
 
 > **Como executar o teste de paridade:**
-> 1. Usar os snapshots do audit da Fase 1 — um parquet por função compartilhada (ex: `tests/fixtures/snapshot_utm_input.parquet`)
+> 1. Usar os snapshots do audit da Fase 1 — um pickle por função compartilhada (ex: `tests/fixtures/snapshot_utm_input.pkl`)
 > 2. Para cada função migrada para `core/`, injetar o snapshot na implementação canônica de produção (baseline) e na nova implementação; comparar outputs coluna a coluna
 > 3. Qualquer divergência entre a nova `core/` e o baseline é uma regressão a corrigir
 >
 > ```python
 > # Exemplo para UTM — mesmo padrão para cada função compartilhada
-> df_snapshot = pd.read_parquet("tests/fixtures/snapshot_utm_input.parquet")
+> df_snapshot = pd.read_pickle("tests/fixtures/snapshot_utm_input.pkl")
 >
 > output_baseline = unify_utm_producao(df_snapshot.copy())          # implementação atual de produção
 > output_novo     = core.utm.unify_utm(df_snapshot.copy(), config.utm)  # nova core/

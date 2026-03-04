@@ -54,6 +54,9 @@ cache/
 .vscode/
 **/.claude/settings.local.json
 
+# Test fixtures (binários grandes, regenerar localmente)
+V2/tests/fixtures/
+
 inference/params/
 inference/output/
 scr/preprocessing/02_params/
