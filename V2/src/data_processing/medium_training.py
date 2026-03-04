@@ -111,42 +111,29 @@ def extrair_publico_medium(df_pesquisa: pd.DataFrame):
                     processados.add(outro_valor)
         if len(grupo) > 1:
             contagens = [(v, (df['Medium'] == v).sum()) for v in grupo]
-            representante = max(contagens, key=lambda x: x[1])[0]
+            # Preferir versão não-all-caps (mais legível); fallback para mais frequente
+            nao_allcaps = [(v, c) for v, c in contagens if v != v.upper()]
+            representante = max(nao_allcaps if nao_allcaps else contagens, key=lambda x: x[1])[0]
             grupos_similares[representante] = grupo
         processados.add(valor)
 
     if grupos_similares:
         logger.debug("")
-        logger.debug("Grupos similares encontrados para unificação:")
+        logger.debug("Variantes de escrita unificadas:")
         for representante, grupo in grupos_similares.items():
             if len(grupo) > 1:
-                count_total = sum((df['Medium'] == v).sum() for v in grupo)
-                logger.debug(f"\nUnificando em: '{representante}' ({count_total:,} registros)")
-                for valor in grupo:
-                    if valor != representante:
-                        count_individual = (df['Medium'] == valor).sum()
-                        logger.debug(f"  '{valor}' ({count_individual:,})")
-                        df.loc[df['Medium'] == valor, 'Medium'] = representante
+                count_repr = (df['Medium'] == representante).sum()
+                absorcoes = [(v, (df['Medium'] == v).sum()) for v in grupo if v != representante]
+                count_total = count_repr + sum(c for _, c in absorcoes)
+                partes = " + ".join(f"'{v}' ({c:,})" for v, c in [(representante, count_repr)] + absorcoes)
+                logger.debug(f"  '{representante}' ← {partes}  [total: {count_total:,}]")
+                for valor, _ in absorcoes:
+                    df.loc[df['Medium'] == valor, 'Medium'] = representante
     else:
-        logger.debug("Nenhum grupo similar detectado automaticamente")
-
-    unificacoes_manuais = {
-        'ABERTO': 'Aberto',
-        'MIX QUENTE': 'Mix Quente',
-    }
-
-    unificacoes_aplicadas = []
-    for original, unificado in unificacoes_manuais.items():
-        if original in df['Medium'].values:
-            count = (df['Medium'] == original).sum()
-            df.loc[df['Medium'] == original, 'Medium'] = unificado
-            unificacoes_aplicadas.append(f"'{original}' → '{unificado}' ({count:,})")
-            logger.debug(f"  '{original}' → '{unificado}' ({count:,} registros)")
+        logger.debug("Nenhuma variante de escrita detectada")
 
     n_apos_norm = df['Medium'].nunique()
     logger.info(f"    {n_apos_extracao} → {n_apos_norm} valores únicos")
-    if unificacoes_aplicadas:
-        logger.info(f"    Unificações: {', '.join(unificacoes_aplicadas)}")
 
     # Relatório detalhado dos 58 públicos (apenas no nível debug)
     relatorio_final_medium(df)
