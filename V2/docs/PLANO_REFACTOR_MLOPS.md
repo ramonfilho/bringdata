@@ -590,6 +590,19 @@ Duplicatas encontradas (resolução via campo já mapeado):
 | `api/meta_config.py` ✅ | ⚠️ token Meta hardcoded — já usa env var `META_ACCESS_TOKEN` mas token fica no arquivo |
 | `api/app.py` ✅ | (#109–#122) padrões de campanha, CORS, column_mapping, batch sizes, URLs |
 
+**Hardcodes introduzidos pela branch `dev/tmb-dual-source` (2026-03-03) — TMB dual-source:**
+| # | Localização atual | Hardcode | Campo sugerido |
+|---|---|---|---|
+| 154 | `ingestion.py` (novo bloco `is_tmb_pedidos`) | Colunas de detecção do arquivo TMB "pedidos" (relatório de alunos com telefone): `'ID do Pedido'`, `'E-mail do Cliente'`, `'Telefone do Cliente'` — complementa #6 (que documenta apenas o arquivo de parcelas `is_tmb_parcelas`) | `ingestion.tmb_pedidos_detection_columns` |
+| 155 | `ingestion.py` (novo bloco `is_tmb_pedidos`) | Mapa de renomeação de colunas do arquivo TMB "pedidos" para formato canônico: `'ID do Pedido'→'Pedido'`, `'E-mail do Cliente'→'Cliente Email'`, `'Telefone do Cliente'→'Telefone'`, `'Nome do Produto'→'nome produto'`, `'Ticket do pedido'→'Ticket (R$)'` | `ingestion.tmb_pedidos_column_mapping` |
+| 156 | `ingestion.py` (`is_tmb_pedidos` filter) | Critério de filtro do arquivo de pedidos TMB: `Situação != 'Cancelado'` (Vigente + Quitado = manter) — difere do arquivo de parcelas que usa `Status Pedido == 'Aprovada'` (#22) | `ingestion.tmb_pedidos_active_status_exclude` |
+
+> **Comportamento novo em `consolidate_datasets`:** quando ambos os tipos TMB estão presentes, a função constrói um `tmb_risk_lookup` — dict `{email_normalizado → Grau de risco}` — a partir do arquivo de parcelas, e usa o arquivo de **pedidos** como `df_vendas` (tem email + telefone). O lookup é retornado como terceiro valor e aplicado **pós-matching** na Célula 15.1 do `train_pipeline.py`, demovendo para `target=0` os leads com risco fora do filtro configurado. O lookup é por **email** (não por `'Pedido'`) porque a coluna `'Pedido'` é removida na Célula 3 (`colunas_remover`) antes de `consolidate_datasets` ser chamada. O arquivo de parcelas é descartado após o lookup.
+>
+> **`filter_sheets`:** dados carregados via API (filename contém `'[API]'`) bypassam a heurística de contagem de colunas (`> 10`) para não serem filtrados indevidamente.
+>
+> **Ao migrar para `core/ingestion.py`:** comportamento dual-source controlado por `ingestion.has_tmb` (#12) + `ingestion.tmb_pedidos_detection_columns` (#154). A Célula 15.1 (filtro pós-matching) deve ser preservada como step separado em `train_pipeline.py` — não faz parte da lógica de `core/matching.py`, que não conhece risco TMB.
+
 **Arquivos confirmados como código morto — deletar no refactor:**
 | Arquivo | Observação |
 |---|---|
@@ -610,7 +623,7 @@ Duplicatas encontradas (resolução via campo já mapeado):
 3. ~~**Criar `configs/clients/devclub.yaml`**~~ ✅ — esqueleto com todas as chaves; cada campo referencia o número do hardcode; valores `null` preenchidos na Fase 2
 4. ~~**Criar esqueleto de `src/core/`**~~ ✅ — 11 módulos com assinaturas e `NotImplementedError` (commit c0d38ca)
 5. ~~**Criar `src/nlp/`** com README de interface~~ ✅
-6. **Audit de divergências treino × produção** ⏳ — para cada função compartilhada (UTM, Medium, Categories, FE, Encoding): (1) capturar snapshot real em parquet na entrada da função durante uma execução do pipeline de treino; (2) injetar o mesmo snapshot nas duas implementações (treino e produção) separadamente e comparar outputs coluna a coluna; (3) documentar cada divergência encontrada; (4) para cada divergência, decidir qual implementação está correta — produção é canônica por padrão, mas cada caso deve ser verificado; (5) registrar a decisão como especificação para a implementação em `core/`. Executar antes de iniciar a Fase 2.
+6. **Audit de divergências treino × produção** ⏳ — para cada função compartilhada (UTM, Medium, Categories, FE, Encoding): (1) capturar snapshot real em pickle (`capture_parity_snapshots=True` no `train_pipeline.main()`) na entrada da função durante uma execução do pipeline de treino; (2) injetar o mesmo snapshot nas duas implementações (treino e produção) separadamente e comparar outputs coluna a coluna; (3) documentar cada divergência encontrada; (4) para cada divergência, decidir qual implementação está correta — produção é canônica por padrão, mas cada caso deve ser verificado; (5) registrar a decisão como especificação para a implementação em `core/`. Executar antes de iniciar a Fase 2.
 
 > `configs/templates/client_template.yaml` e `src/eda/generate_client_config.py` são adiados: o template emerge do `devclub.yaml` ao final da Fase 2; o gerador de EDA é construído na Fase 4, depois de dois configs escritos manualmente.
 
@@ -650,13 +663,13 @@ Ao concluir o último componente: `configs/clients/devclub.yaml` está completam
 > **Shadow mode por componente:** a cada módulo migrado para `core/`, rodar a versão antiga e a nova em paralelo sobre os mesmos dados reais por pelo menos 1 ciclo de scoring antes de remover a versão antiga. Divergências detectadas em produção antes do corte, não depois.
 
 > **Como executar o teste de paridade:**
-> 1. Usar os snapshots do audit da Fase 1 — um parquet por função compartilhada (ex: `tests/fixtures/snapshot_utm_input.parquet`)
+> 1. Usar os snapshots do audit da Fase 1 — um pickle por função compartilhada (ex: `tests/fixtures/snapshot_utm_input.pkl`)
 > 2. Para cada função migrada para `core/`, injetar o snapshot na implementação canônica de produção (baseline) e na nova implementação; comparar outputs coluna a coluna
 > 3. Qualquer divergência entre a nova `core/` e o baseline é uma regressão a corrigir
 >
 > ```python
 > # Exemplo para UTM — mesmo padrão para cada função compartilhada
-> df_snapshot = pd.read_parquet("tests/fixtures/snapshot_utm_input.parquet")
+> df_snapshot = pd.read_pickle("tests/fixtures/snapshot_utm_input.pkl")
 >
 > output_baseline = unify_utm_producao(df_snapshot.copy())          # implementação atual de produção
 > output_novo     = core.utm.unify_utm(df_snapshot.copy(), config.utm)  # nova core/
