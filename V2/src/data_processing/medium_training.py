@@ -118,19 +118,26 @@ def extrair_publico_medium(df_pesquisa: pd.DataFrame):
         processados.add(valor)
 
     if grupos_similares:
+        GCOL = 46
         logger.debug("")
-        logger.debug("Variantes de escrita unificadas:")
+        logger.debug(f"  Grupos de variantes normalizados ({len(grupos_similares)}):")
+        logger.debug(f"  {'CANÔNICO':<{GCOL}} {'TOTAL':>7}   ABSORVEU")
+        logger.debug(f"  {'─' * GCOL}  {'─' * 7}   {'─' * 35}")
         for representante, grupo in grupos_similares.items():
             if len(grupo) > 1:
                 count_repr = (df['Medium'] == representante).sum()
                 absorcoes = [(v, (df['Medium'] == v).sum()) for v in grupo if v != representante]
                 count_total = count_repr + sum(c for _, c in absorcoes)
-                partes = " + ".join(f"'{v}' ({c:,})" for v, c in [(representante, count_repr)] + absorcoes)
-                logger.debug(f"  '{representante}' ← {partes}  [total: {count_total:,}]")
+                abs_parts = [
+                    f"{v[:35]}... ({c:,})" if len(v) > 38 else f"{v} ({c:,})"
+                    for v, c in absorcoes
+                ]
+                rep_display = representante if len(representante) <= GCOL else representante[:GCOL - 3] + '...'
+                logger.debug(f"  {rep_display:<{GCOL}} {count_total:>7,}   {',  '.join(abs_parts)}")
                 for valor, _ in absorcoes:
                     df.loc[df['Medium'] == valor, 'Medium'] = representante
     else:
-        logger.debug("Nenhuma variante de escrita detectada")
+        logger.debug("  Nenhuma variante de escrita detectada")
 
     n_apos_norm = df['Medium'].nunique()
     logger.info(f"    {n_apos_extracao} → {n_apos_norm} valores únicos")

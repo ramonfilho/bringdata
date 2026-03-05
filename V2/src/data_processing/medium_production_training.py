@@ -185,9 +185,8 @@ def unificar_medium_para_producao(
     }
 
     # Passo 3 — Classificação para produção
-    logger.info(f"  Passo 3 — Classificação para produção (modelo ativo: {len(categorias_modelo_ativo)} categorias, {len(mapping_dict)} aliases)")
-    logger.debug("         (ex: variantes '+'/espaços em Lookalike, URLs codificadas, lixo→'Outros')")
-    logger.debug("         Valores ausentes nessa tabela são classificados por frequência.")
+    logger.debug("")
+    logger.info(f"  Passo 3 — Classificação para produção")
 
     # Pass 1 — classificar valores não mapeados por frequência
     freq_atual = df['Medium'].value_counts(normalize=True, dropna=True)
@@ -206,7 +205,7 @@ def unificar_medium_para_producao(
             mapping_dict[valor_str] = 'Outros'
 
     if novos_para_outros:
-        logger.debug(f"         Novos valores pequenos (< {THRESHOLD_NOVA*100:.0f}%) → Outros: {sorted(novos_para_outros)}")
+        logger.debug(f"    Novos com freq < {THRESHOLD_NOVA*100:.0f}% → Outros: {sorted(novos_para_outros)}")
 
     # Aplicar mapping de variantes
     df['Medium'] = df['Medium'].apply(
@@ -259,7 +258,8 @@ def unificar_medium_para_producao(
 
     logger.info(f"    {SEP}")
     freq_outros = freq_canonical.get('Outros', 0)
-    logger.info(f"    {'Outros (agrupamento)':<{COL}} {'—':>6}  {freq_outros*100:>5.1f}%")
+    logger.info(f"    {'Outros  (agrupamento de categorias menores)':<{COL}} {'—':>6}  {freq_outros*100:>5.1f}%  {'—':>8}")
+    logger.info(f"    {SEP}")
     logger.info(f"")
 
     # Alertas: descontinuadas e novas
@@ -301,7 +301,7 @@ def unificar_medium_para_producao(
         partes_funnel.append(str(n_apos_extracao))
     if n_apos_norm is not None:
         partes_funnel.append(str(n_apos_norm))
-    partes_funnel.append(f"{n_final} categorias finais")
+    partes_funnel.append(f"{len(categorias_validas)} categorias + Outros")
     logger.info(f"  RESULTADO: {' → '.join(partes_funnel)}")
     logger.info("")
 
