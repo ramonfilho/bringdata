@@ -150,7 +150,7 @@ def setup_logging(verbosity='normal', log_file=None):
 logger = logging.getLogger(__name__)
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=False, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False):
     """Executa pipeline de treino completo.
 
     Args:
@@ -172,7 +172,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         set_active: Se True, atualiza configs/active_model.yaml com este modelo (requer save_files=True)
         validation_hook: Função opcional chamada após feature engineering para validação.
                         Recebe dataset_fe e retorna True (continuar) ou False (abortar)
-        include_api_data: Se True, busca dados adicionais de API/Guru (padrão: False)
+        include_api_data: Se True (padrão), busca dados adicionais de API/Guru e Google Sheets
         include_sheets_api: Se True (padrão), busca leads do Google Sheets quando include_api_data=True.
                             Passar False quando os leads já foram baixados manualmente como Excel.
         api_start_date: Data início para buscar dados da API (YYYY-MM-DD)
@@ -954,10 +954,10 @@ if __name__ == "__main__":
         help='Nível de verbosidade dos logs: silent (apenas erros), minimal (warnings+erros), normal (info+warnings+erros), debug (tudo incluindo análises detalhadas) - padrão: normal'
     )
     parser.add_argument(
-        '--include-api-data',
+        '--no-api-data',
         action='store_true',
         default=False,
-        help='Incluir dados da API Guru além dos arquivos locais (padrão: False)'
+        help='Desligar busca de dados da API Guru e Google Sheets (usar apenas arquivos locais)'
     )
     parser.add_argument(
         '--no-sheets-api',
@@ -991,7 +991,7 @@ if __name__ == "__main__":
         set_active=args.set_active,
         medium_strategy=args.medium_strategy,
         verbosity=args.verbosity,
-        include_api_data=args.include_api_data,
+        include_api_data=not args.no_api_data,
         include_sheets_api=not args.no_sheets_api,
         api_start_date=args.api_start_date,
         api_end_date=args.api_end_date

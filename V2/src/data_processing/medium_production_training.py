@@ -268,14 +268,14 @@ def unificar_medium_para_producao(
         for cat in sorted(categorias_descontinuadas):
             logger.info(f"      ✗ {cat}")
     else:
-        logger.info(f"    Descontinuadas: nenhuma")
+        logger.info(f"    Descontinuadas (< {THRESHOLD_VALIDA*100:.0f}%, eram do modelo ativo): nenhuma")
 
     if novos_validos:
-        logger.info(f"    Novas incluídas (>= {THRESHOLD_NOVA*100:.0f}%):")
+        logger.info(f"    Novas incluídas (>= {THRESHOLD_NOVA*100:.0f}%, não estavam no modelo ativo):")
         for cat in sorted(novos_validos):
             logger.info(f"      ★ {cat}")
     else:
-        logger.info(f"    Novas incluídas: nenhuma")
+        logger.info(f"    Novas incluídas (>= {THRESHOLD_NOVA*100:.0f}%, não estavam no modelo ativo): nenhuma")
 
     # Distribuição final com contagens absolutas (debug)
     n_final = df['Medium'].nunique()
