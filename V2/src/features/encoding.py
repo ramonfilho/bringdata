@@ -244,7 +244,14 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
         'O_que_voc_faz_atualmente_Sou_autonomo': 'O_que_voc_faz_atualmente_Sou_aut_nomo',
         'Tem_computador_notebook_SIM': 'Tem_computador_notebook_Sim',
         'Tem_computador_notebook_N_O': 'Tem_computador_notebook_N_o',  # NÃO maiúsculo  regex remove ã
-        'Medium_outros': 'Medium_Outros'  # Corrigir capitalização
+        'Medium_outros': 'Medium_Outros',  # Corrigir capitalização
+        # Valores que chegam sem passar por unificar_categorias_completo (ex: monitoramento)
+        # Em produção esses mapeamentos nunca disparam (unificação já lowercasa antes do OHE)
+        'Voc_possui_cart_o_de_cr_dito_Sim': 'Voc_possui_cart_o_de_cr_dito_sim',
+        'Tem_computador_notebook_Sim': 'Tem_computador_notebook_sim',
+        'O_que_voc_faz_atualmente_Sou_CLT_Funcion_rio_P_blico': 'O_que_voc_faz_atualmente_sou_cltfuncionario_publico',
+        'O_que_mais_voc_quer_ver_no_evento_Fazer_transi_o_de_carreira_e_conseguir_meu_primeiro_emprego_na_rea': 'O_que_mais_voc_quer_ver_no_evento_fazer_transicao_de_carreira_e_conseguir_meu_primeiro_emprego_na_area',
+        'interesse_programacao_Todas_as_alternativas': 'interesse_programacao_todas_as_alternativas',
     }
 
     # Aplicar mapeamentos (evitando colisões)
