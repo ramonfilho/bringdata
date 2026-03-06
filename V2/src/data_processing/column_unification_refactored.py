@@ -427,7 +427,8 @@ def remover_colunas_utm_ausentes(df_vendas: pd.DataFrame) -> pd.DataFrame:
 
 def aplicar_filtro_status_risco(
     df_vendas: pd.DataFrame,
-    tmb_risk_filter: str = 'all'
+    tmb_risk_filter: str = 'all',
+    tmb_risk_lookup: dict = None
 ) -> pd.DataFrame:
     """
     CÉLULA 5.3: Filtra vendas por status (Guru) e risco (TMB).
@@ -439,6 +440,8 @@ def aplicar_filtro_status_risco(
             - 'none': Nenhum aluno TMB (só Guru)
             - 'low': Apenas baixo risco
             - 'low_medium': Baixo + médio risco
+        tmb_risk_lookup: Dict {email_norm: grau_de_risco} para filtrar quando
+            'Grau de risco' não está no df_vendas (modo dual-source)
 
     Returns:
         DataFrame de vendas filtrado
@@ -469,6 +472,7 @@ def aplicar_filtro_status_risco(
     elif tmb_risk_filter == 'all':
         mask_tmb = is_tmb
     elif 'Grau de risco' in df_vendas_filtrado.columns:
+        # Coluna presente diretamente no dataframe
         if tmb_risk_filter == 'low':
             mask_tmb = (is_tmb & (df_vendas_filtrado['Grau de risco'] == 'Baixo'))
         elif tmb_risk_filter == 'low_medium':
@@ -476,9 +480,23 @@ def aplicar_filtro_status_risco(
         else:
             logger.warning(f"  tmb_risk_filter '{tmb_risk_filter}' inválido, usando 'all'")
             mask_tmb = is_tmb
+    elif tmb_risk_lookup and tmb_risk_filter in ('low', 'low_medium'):
+        # Modo dual-source: usar lookup de emails para filtrar vendas TMB por risco
+        # antes do matching, garantindo que vendas de alto risco não influenciem os labels
+        allowed_risk = {'Baixo'} if tmb_risk_filter == 'low' else {'Baixo', 'Médio'}
+        if 'email' in df_vendas_filtrado.columns:
+            def _tmb_risk_ok(row):
+                if not is_tmb[row.name]:
+                    return False
+                email = str(row['email']).strip().lower() if pd.notna(row['email']) else ''
+                risk = tmb_risk_lookup.get(email)
+                # email não encontrado no lookup → TMB sem dados de risco → manter
+                return risk is None or risk in allowed_risk
+            mask_tmb = df_vendas_filtrado.apply(_tmb_risk_ok, axis=1)
+        else:
+            logger.warning("  TMB: coluna 'email' não encontrada em df_vendas — mantendo todas as TMB")
+            mask_tmb = is_tmb
     else:
-        if tmb_risk_filter in ['low', 'low_medium']:
-            logger.info(f"  TMB dual-source: 'Grau de risco' ausente no df_vendas (esperado) — filtro de risco aplicado pós-matching em Célula 15.1")
         mask_tmb = is_tmb
 
     # Aplicar filtros combinados

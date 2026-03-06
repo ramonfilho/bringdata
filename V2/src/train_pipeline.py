@@ -473,7 +473,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 5.3: FILTRO DE STATUS E RISCO")
     logger.info("")
 
-    df_vendas_filtrado = aplicar_filtro_status_risco(df_vendas_sem_utm, tmb_risk_filter=tmb_risk_filter)
+    df_vendas_filtrado = aplicar_filtro_status_risco(df_vendas_sem_utm, tmb_risk_filter=tmb_risk_filter, tmb_risk_lookup=tmb_risk_lookup)
 
     logger.info("=" * 80)
     # === CÉLULA 5.4: Filtro de produtos DevClub ===
@@ -650,40 +650,6 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info(f"   Tempo: {cell_timers['Célula 15']:.1f}s")
     logger.info("=" * 80)
 
-    # === CÉLULA 15.1: Filtro de risco TMB pós-matching ===
-    # Aplicado apenas no modo dual-source (tmb_risk_lookup preenchido) e filtros strict.
-    # Remove COMPLETAMENTE (leads e vendas) os alunos TMB fora do risco permitido —
-    # tanto compradores quanto não-compradores — para não influenciarem o modelo.
-    if tmb_risk_lookup and tmb_risk_filter in ('low', 'low_medium'):
-        logger.info("")
-        logger.info("CÉLULA 15.1: FILTRO DE RISCO TMB PÓS-MATCHING")
-        logger.info("")
-
-        allowed_risk = {'Baixo'} if tmb_risk_filter == 'low' else {'Baixo', 'Médio'}
-
-        # Coletar emails de todos os alunos TMB fora do risco permitido
-        emails_remover = {
-            email for email, risk in tmb_risk_lookup.items()
-            if risk is not None and risk not in allowed_risk
-        }
-
-        antes = len(dataset_v1_devclub)
-        positivos_antes = int(dataset_v1_devclub['target'].sum())
-
-        # Remover todas as linhas (comprador e não-comprador) desses emails
-        mask_remover = dataset_v1_devclub['E-mail'].apply(
-            lambda e: str(e).strip().lower() in emails_remover if pd.notna(e) else False
-        )
-        dataset_v1_devclub = dataset_v1_devclub[~mask_remover].copy()
-
-        removidos = antes - len(dataset_v1_devclub)
-        positivos_depois = int(dataset_v1_devclub['target'].sum())
-
-        logger.info(f"  Filtro '{tmb_risk_filter}': {removidos:,} leads removidos (risco fora de {allowed_risk})")
-        logger.info(f"  Compradores removidos: {positivos_antes - positivos_depois:,}")
-        logger.info(f"  Positivos restantes: {positivos_depois:,}")
-        logger.info("")
-        logger.info("=" * 80)
     # === CÉLULA 17: Janela de Conversão ===
     logger.info("")
     logger.info(f"CÉLULA 17: APLICAR JANELA DE CONVERSÃO DE 20 DIAS")
