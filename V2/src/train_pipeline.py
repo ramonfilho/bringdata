@@ -150,7 +150,7 @@ def setup_logging(verbosity='normal', log_file=None):
 logger = logging.getLogger(__name__)
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True):
     """Executa pipeline de treino completo.
 
     Args:
@@ -763,6 +763,37 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info(f"CÉLULA 21: TREINO E REGISTRO DO MODELO")
     logger.info("")
 
+    # === Pesos por tipo de comprador (sample_weight) ===
+    # Reflete valor real após inadimplência TMB (% recebido vs Guru à vista)
+    # Fonte: análise de contas a receber (analyze_tmb_inadimplencia.py)
+    PESOS_COMPRADOR = {
+        'guru':    1.00,   # Guru: à vista, 100% recebido
+        'tmb_baixo': 0.84, # TMB Baixo: 83.5% recebido
+        'tmb_medio': 0.67, # TMB Médio: 67.1% recebido
+        'tmb_alto':  0.49, # TMB Alto: 48.6% recebido
+        'tmb_sem':   0.42, # TMB Sem class.: 42.1% recebido
+    }
+
+    def _get_peso(row):
+        if row.get('target', 0) == 0:
+            return 1.0
+        email = str(row.get('E-mail', '')).strip().lower()
+        risk = tmb_risk_lookup.get(email)
+        if risk is None:
+            return PESOS_COMPRADOR['guru']   # não está no lookup TMB → Guru
+        mapa = {'Baixo': 'tmb_baixo', 'Médio': 'tmb_medio', 'Alto': 'tmb_alto'}
+        return PESOS_COMPRADOR.get(mapa.get(risk, 'tmb_sem'), PESOS_COMPRADOR['tmb_sem'])
+
+    if use_buyer_weights:
+        buyer_weights = dataset_v1_devclub.apply(_get_peso, axis=1)
+        buyer_weights.index = dataset_v1_devclub_encoded.index
+        compradores_mask = dataset_v1_devclub['target'] == 1
+        peso_medio = buyer_weights[compradores_mask].mean()
+        logger.info(f"  Pesos ativos — peso médio compradores: {peso_medio:.3f} (Guru=1.0, TMB Alto=0.49)")
+    else:
+        buyer_weights = None
+        logger.info(f"  Pesos desabilitados (--no-weights) — todos compradores com peso 1.0")
+
     resultado_registro_devclub = registrar_features_e_modelo_devclub(
         dataset_v1_devclub_encoded,
         dataset_v1_devclub,
@@ -775,7 +806,8 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         split_method=split_method,
         set_active=set_active,
         recall_metrics=recall_metrics,
-        missing_rates_baseline=missing_rates_baseline
+        missing_rates_baseline=missing_rates_baseline,
+        buyer_weights=buyer_weights
     )
 
     cell_timers['Célula 21'] = time.time() - cell_start
@@ -938,6 +970,12 @@ if __name__ == "__main__":
         help='Desligar busca de leads via Google Sheets API (usar quando os leads já foram baixados como Excel). Relevante apenas com --include-api-data'
     )
     parser.add_argument(
+        '--no-weights',
+        action='store_true',
+        default=False,
+        help='Desabilitar sample weights por tipo de comprador (treino sem ponderação, baseline)'
+    )
+    parser.add_argument(
         '--api-start-date',
         type=str,
         default=None,
@@ -966,5 +1004,6 @@ if __name__ == "__main__":
         include_api_data=not args.no_api_data,
         include_sheets_api=not args.no_sheets_api,
         api_start_date=args.api_start_date,
-        api_end_date=args.api_end_date
+        api_end_date=args.api_end_date,
+        use_buyer_weights=not args.no_weights
     )
