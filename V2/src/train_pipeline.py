@@ -652,30 +652,36 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
 
     # === CÉLULA 15.1: Filtro de risco TMB pós-matching ===
     # Aplicado apenas no modo dual-source (tmb_risk_lookup preenchido) e filtros strict.
-    # Garante que todos os modos de tmb_risk_filter funcionem corretamente sem bloquear
-    # o matching por telefone antes da Célula 15.
+    # Remove COMPLETAMENTE (leads e vendas) os alunos TMB fora do risco permitido —
+    # tanto compradores quanto não-compradores — para não influenciarem o modelo.
     if tmb_risk_lookup and tmb_risk_filter in ('low', 'low_medium'):
         logger.info("")
         logger.info("CÉLULA 15.1: FILTRO DE RISCO TMB PÓS-MATCHING")
         logger.info("")
 
         allowed_risk = {'Baixo'} if tmb_risk_filter == 'low' else {'Baixo', 'Médio'}
-        target_1_idx = dataset_v1_devclub[dataset_v1_devclub['target'] == 1].index
-        demoted = 0
 
-        for idx in target_1_idx:
-            email_raw = dataset_v1_devclub.at[idx, 'E-mail']
-            if pd.isna(email_raw):
-                continue
-            email_norm = str(email_raw).strip().lower()
-            risk = tmb_risk_lookup.get(email_norm)
-            # risk == None: match Guru ou TMB sem email na parcelas → não demoter
-            if risk is not None and risk not in allowed_risk:
-                dataset_v1_devclub.at[idx, 'target'] = 0
-                demoted += 1
+        # Coletar emails de todos os alunos TMB fora do risco permitido
+        emails_remover = {
+            email for email, risk in tmb_risk_lookup.items()
+            if risk is not None and risk not in allowed_risk
+        }
 
-        logger.info(f"  Filtro '{tmb_risk_filter}': {demoted:,} leads demovidos (risco fora de {allowed_risk})")
-        logger.info(f"  Positivos restantes: {dataset_v1_devclub['target'].sum():,}")
+        antes = len(dataset_v1_devclub)
+        positivos_antes = int(dataset_v1_devclub['target'].sum())
+
+        # Remover todas as linhas (comprador e não-comprador) desses emails
+        mask_remover = dataset_v1_devclub['E-mail'].apply(
+            lambda e: str(e).strip().lower() in emails_remover if pd.notna(e) else False
+        )
+        dataset_v1_devclub = dataset_v1_devclub[~mask_remover].copy()
+
+        removidos = antes - len(dataset_v1_devclub)
+        positivos_depois = int(dataset_v1_devclub['target'].sum())
+
+        logger.info(f"  Filtro '{tmb_risk_filter}': {removidos:,} leads removidos (risco fora de {allowed_risk})")
+        logger.info(f"  Compradores removidos: {positivos_antes - positivos_depois:,}")
+        logger.info(f"  Positivos restantes: {positivos_depois:,}")
         logger.info("")
         logger.info("=" * 80)
     # === CÉLULA 17: Janela de Conversão ===

@@ -784,6 +784,7 @@ O refactor atual (Fases 1–3) leva o projeto do Nível 1 para o Nível 2. O Ní
 | Item | Descrição |
 |---|---|
 | Detecção contínua de training-serving skew | Adicionar ao monitoring orchestrator um check periódico que compara distribuições de features entre os dados que chegam em produção e o snapshot de treino — hoje o skew só é verificado pontualmente na Fase 2. Trigger de retreino quando skew acumulado ultrapassar threshold definido em `MonitoringConfig`. |
+| Janela deslizante de treino (90–120 dias) | Em vez de treinar com todos os dados históricos pós-cutoff de missing, usar apenas os últimos N dias (ex: 90 ou 120). Motivação observada empiricamente: modelos com menos registros e mais recentes performaram melhor (AUC 0.751 com ~4 meses vs dados mais antigos) porque o comportamento do lead muda com o tempo — perguntas do formulário mudam, públicos mudam, lançamentos mudam. A janela deslizante descarta dados defasados automaticamente, sem depender de retreino manual para "esquecer" padrões obsoletos. Implementação: parâmetro `training_window_days` em `IngestionConfig`; `dataset_versioning.py` aplica `df[df['Data'] >= (data_max - timedelta(days=training_window_days))]` após o cutoff de missing. Testar 90 vs 120 vs sem janela e comparar AUC + lift + monotonia. |
 
 ---
 

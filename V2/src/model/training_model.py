@@ -961,6 +961,11 @@ def registrar_features_e_modelo_devclub(
             df_test_predictions = X_test.copy()
             df_test_predictions['target_real'] = y_test.values
             df_test_predictions['probabilidade'] = y_prob
+            # Adicionar data do lead para análise temporal
+            if 'test_indices' in dir() or 'test_indices' in locals():
+                df_test_predictions.insert(0, 'data_lead', data_dt.iloc[test_indices].values)
+            elif 'mask_teste' in locals():
+                df_test_predictions.insert(0, 'data_lead', data_dt[mask_teste].values)
             df_test_predictions.to_csv(test_set_filename, index=False)
             logger.debug(f" ✅ {test_set_filename} salvo")
 
