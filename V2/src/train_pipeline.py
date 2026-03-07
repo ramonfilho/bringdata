@@ -150,7 +150,7 @@ def setup_logging(verbosity='normal', log_file=None):
 logger = logging.getLogger(__name__)
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False):
     """Executa pipeline de treino completo.
 
     Args:
@@ -735,37 +735,15 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         dataset_v1_devclub_encoded.to_pickle(os.path.join(_fixtures, 'snapshot_encoding_output.pkl'))
         logger.info("  [PARITY] snapshot_encoding_output.pkl salvo")
 
-    # === HYPERPARAMETER TUNING (opcional) ===
-    melhores_params = None
-    if tune_hyperparams:
-        logger.info("")
-        logger.info("EXECUTANDO HYPERPARAMETER TUNING")
+    if save_encoded:
+        _encoded_path = os.path.join(os.path.dirname(__file__), '..', 'compare_encoded.parquet')
+        _encoded_path = os.path.abspath(_encoded_path)
+        df_encoded_with_date = dataset_v1_devclub_encoded.copy()
+        df_encoded_with_date['__Data__'] = pd.to_datetime(dataset_v1_devclub['Data'], errors='coerce').values
+        df_encoded_with_date.to_parquet(_encoded_path, index=False)
+        logger.info(f"  [compare_models] Dataset encodado salvo em: {_encoded_path}")
 
-        resultado_tuning = hyperparameter_tuning(
-            dataset_v1_devclub_encoded,
-            dataset_v1_devclub,
-            grid_size=grid_size
-        )
-
-        if resultado_tuning and resultado_tuning['usar_tunado']:
-            melhores_params = resultado_tuning['melhores_params']
-            logger.info("")
-            logger.info(f"  Usando hiperparâmetros tunados no treino final")
-        else:
-            logger.warning(f"\n  Mantendo hiperparâmetros baseline (tuning não trouxe ganho significativo)")
-
-    cell_timers['Célula 20'] = time.time() - cell_start
-    logger.info(f"   Tempo: {cell_timers['Célula 20']:.1f}s")
-    logger.info("=" * 80)
-    # === CÉLULA 21: Treino e Registro do Modelo ===
-    cell_start = time.time()
-    logger.info("")
-    logger.info(f"CÉLULA 21: TREINO E REGISTRO DO MODELO")
-    logger.info("")
-
-    # === Pesos por tipo de comprador (sample_weight) ===
-    # Reflete valor real após inadimplência TMB (% recebido vs Guru à vista)
-    # Fonte: análise de contas a receber (analyze_tmb_inadimplencia.py)
+    # === Pesos por tipo de comprador (calculado antes do tuning para uso em ambos) ===
     PESOS_COMPRADOR = {
         'guru':    1.00,   # Guru: à vista, 100% recebido
         'tmb_baixo': 0.84, # TMB Baixo: 83.5% recebido
@@ -787,11 +765,43 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     if use_buyer_weights:
         buyer_weights = dataset_v1_devclub.apply(_get_peso, axis=1)
         buyer_weights.index = dataset_v1_devclub_encoded.index
+    else:
+        buyer_weights = None
+
+    # === HYPERPARAMETER TUNING (opcional) ===
+    melhores_params = None
+    if tune_hyperparams:
+        logger.info("")
+        logger.info("EXECUTANDO HYPERPARAMETER TUNING")
+
+        resultado_tuning = hyperparameter_tuning(
+            dataset_v1_devclub_encoded,
+            dataset_v1_devclub,
+            grid_size=grid_size,
+            buyer_weights=buyer_weights,
+        )
+
+        if resultado_tuning and resultado_tuning['usar_tunado']:
+            melhores_params = resultado_tuning['melhores_params']
+            logger.info("")
+            logger.info(f"  Usando hiperparâmetros tunados no treino final")
+        else:
+            logger.warning(f"\n  Mantendo hiperparâmetros baseline (tuning não trouxe ganho significativo)")
+
+    cell_timers['Célula 20'] = time.time() - cell_start
+    logger.info(f"   Tempo: {cell_timers['Célula 20']:.1f}s")
+    logger.info("=" * 80)
+    # === CÉLULA 21: Treino e Registro do Modelo ===
+    cell_start = time.time()
+    logger.info("")
+    logger.info(f"CÉLULA 21: TREINO E REGISTRO DO MODELO")
+    logger.info("")
+
+    if use_buyer_weights:
         compradores_mask = dataset_v1_devclub['target'] == 1
         peso_medio = buyer_weights[compradores_mask].mean()
         logger.info(f"  Pesos ativos — peso médio compradores: {peso_medio:.3f} (Guru=1.0, TMB Alto=0.49)")
     else:
-        buyer_weights = None
         logger.info(f"  Pesos desabilitados (--no-weights) — todos compradores com peso 1.0")
 
     resultado_registro_devclub = registrar_features_e_modelo_devclub(
@@ -976,6 +986,12 @@ if __name__ == "__main__":
         help='Desabilitar sample weights por tipo de comprador (treino sem ponderação, baseline)'
     )
     parser.add_argument(
+        '--save-encoded',
+        action='store_true',
+        default=False,
+        help='Salvar dataset encodado em compare_encoded.parquet para uso em compare_models.py'
+    )
+    parser.add_argument(
         '--api-start-date',
         type=str,
         default=None,
@@ -1005,5 +1021,6 @@ if __name__ == "__main__":
         include_sheets_api=not args.no_sheets_api,
         api_start_date=args.api_start_date,
         api_end_date=args.api_end_date,
-        use_buyer_weights=not args.no_weights
+        use_buyer_weights=not args.no_weights,
+        save_encoded=args.save_encoded
     )

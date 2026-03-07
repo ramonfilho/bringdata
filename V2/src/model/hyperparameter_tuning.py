@@ -88,7 +88,8 @@ def hyperparameter_tuning(
     dataset_encoded: pd.DataFrame,
     dataset_original: pd.DataFrame,
     baseline_params: dict = None,
-    grid_size: str = 'small'
+    grid_size: str = 'medium',
+    buyer_weights: pd.Series = None,
 ):
     """
     Executa hyperparameter tuning focado e rápido.
@@ -118,19 +119,19 @@ def hyperparameter_tuning(
             'n_jobs': -1
         }
 
-    # Split temporal 70/30 para tuning
-    print("\n Criando split temporal para tuning...")
+    # Split temporal_leads 70/30 para tuning (igual ao pipeline principal)
+    print("\n Criando split temporal_leads para tuning...")
 
     data_dt = pd.to_datetime(dataset_original['Data'], errors='coerce')
     data_min = data_dt.min()
     data_max = data_dt.max()
 
-    dias_totais = (data_max - data_min).days
-    dias_treino = int(dias_totais * 0.7)
-    data_corte = data_min + pd.Timedelta(days=dias_treino)
-
-    mask_treino = data_dt <= data_corte
-    mask_teste = data_dt > data_corte
+    df_indices = pd.DataFrame({'index': range(len(dataset_original)), 'Data': data_dt}).sort_values('Data').reset_index(drop=True)
+    n_total = len(df_indices)
+    n_train = int(n_total * 0.7)
+    train_indices = df_indices['index'].iloc[:n_train].values
+    test_indices = df_indices['index'].iloc[n_train:].values
+    data_corte = df_indices['Data'].iloc[n_train - 1]
 
     X = dataset_encoded.drop(columns=['target'])
     y = dataset_encoded['target']
@@ -140,15 +141,18 @@ def hyperparameter_tuning(
     X.columns = X.columns.str.replace('__+', '_', regex=True)
     X.columns = X.columns.str.strip('_')
 
-    X_train = X[mask_treino]
-    X_test = X[mask_teste]
-    y_train = y[mask_treino]
-    y_test = y[mask_teste]
+    X_train = X.iloc[train_indices]
+    X_test = X.iloc[test_indices]
+    y_train = y.iloc[train_indices]
+    y_test = y.iloc[test_indices]
+
+    # Sample weights alinhados com o treino
+    w_train = buyer_weights.iloc[train_indices].values if buyer_weights is not None else None
 
     print(f"  Período: {data_min.date()} a {data_max.date()}")
     print(f"  Corte: {data_corte.date()}")
-    print(f"  Treino: {len(X_train):,} registros | Taxa: {y_train.mean()*100:.2f}%")
-    print(f"  Teste: {len(X_test):,} registros | Taxa: {y_test.mean()*100:.2f}%")
+    print(f"  Treino: {len(X_train):,} leads | Taxa: {y_train.mean()*100:.2f}%")
+    print(f"  Teste: {len(X_test):,} leads | Taxa: {y_test.mean()*100:.2f}%")
 
     # Definir grid de hiperparâmetros
     print(f"\n Definindo grid de hiperparâmetros (size={grid_size})...")
@@ -201,7 +205,7 @@ def hyperparameter_tuning(
     start_time = time.time()
 
     baseline_rf = RandomForestClassifier(**baseline_params)
-    baseline_rf.fit(X_train, y_train)
+    baseline_rf.fit(X_train, y_train, sample_weight=w_train)
     baseline_prob = baseline_rf.predict_proba(X_test)[:, 1]
     baseline_metricas = calcular_metricas_ranking(y_test, baseline_prob)
 
@@ -229,7 +233,7 @@ def hyperparameter_tuning(
         try:
             start_model = time.time()
             rf = RandomForestClassifier(**full_params)
-            rf.fit(X_train, y_train)
+            rf.fit(X_train, y_train, sample_weight=w_train)
             y_prob = rf.predict_proba(X_test)[:, 1]
             model_time = time.time() - start_model
 
