@@ -298,12 +298,14 @@ def hyperparameter_tuning(
     print(f"\nBASELINE:")
     print(f"  AUC: {baseline_metricas['auc']:.4f}")
     print(f"  Top 3 decis: {baseline_metricas['top3_conv']:.1f}%")
+    print(f"  Lift máximo: {baseline_metricas['lift_max']:.2f}x")
     print(f"  Separação D10/D1: {baseline_metricas['separacao_d10_d1']:.2f}x")
     print(f"  Monotonia: {baseline_metricas['monotonia']:.1f}%")
 
     print(f"\nMELHOR:")
     print(f"  AUC: {melhor['auc']:.4f}")
     print(f"  Top 3 decis: {melhor['top3_conv']:.1f}%")
+    print(f"  Lift máximo: {melhor['lift_max']:.2f}x")
     print(f"  Separação D10/D1: {melhor['separacao_d10_d1']:.2f}x")
     print(f"  Monotonia: {melhor['monotonia']:.1f}%")
 

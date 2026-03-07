@@ -768,6 +768,18 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     else:
         buyer_weights = None
 
+    # Hiperparâmetros padrão do modelo (baseline real para comparação no tuning)
+    DEFAULT_HYPERPARAMS = {
+        'n_estimators': 300,
+        'max_depth': 8,
+        'min_samples_split': 2,
+        'min_samples_leaf': 1,
+        'max_features': 'sqrt',
+        'class_weight': 'balanced',
+        'random_state': 42,
+        'n_jobs': -1,
+    }
+
     # === HYPERPARAMETER TUNING (opcional) ===
     melhores_params = None
     if tune_hyperparams:
@@ -777,6 +789,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         resultado_tuning = hyperparameter_tuning(
             dataset_v1_devclub_encoded,
             dataset_v1_devclub,
+            baseline_params=DEFAULT_HYPERPARAMS,
             grid_size=grid_size,
             buyer_weights=buyer_weights,
         )
