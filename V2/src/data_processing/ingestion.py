@@ -690,6 +690,10 @@ def read_all_training_sources(
 
             except Exception as e:
                 logger.error(f"    Erro ao buscar leads do Sheets: {e}")
+                raise RuntimeError(
+                    f"Google Sheets falhou (include_sheets_api=True) — dataset incompleto interromperia o treino. "
+                    f"Use --no-sheets-api para treinar só com arquivos locais. Erro original: {e}"
+                ) from e
 
         # === CALCULAR DATAS DOS LEADS SE NÃO FORNECIDAS ===
         # Usa a data de cutoff do dataset (2025-03-01) como start, evitando carregar
