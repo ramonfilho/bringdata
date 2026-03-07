@@ -46,10 +46,14 @@ def unificar_utm_source_term(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         # Aplicar unificação
         df['Source'] = df['Source'].astype('object')  # Garantir tipo object
 
+        # youtube-bio → youtube (mesmo canal, variante orgânica)
+        if 'youtube-bio' in df['Source'].values:
+            df.loc[df['Source'] == 'youtube-bio', 'Source'] = 'youtube'
+
         # Agrupar outras categorias em "outros"
         outras_sources = [
             'fb', 'teste', '[field id="utm_source"]', 'facebook-ads-SiteLink', 'utm_source',
-            'manychat', 'organico', 'youtube-bio',
+            'manychat', 'organico', 'BIO', 'livesemanal',
         ]
 
         for source in outras_sources:

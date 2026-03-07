@@ -185,7 +185,7 @@ def registrar_features_e_modelo_devclub(
         # Reordenar features telefone_comprimento para ordem crescente DEPOIS da limpeza
         colunas_telefone = [col for col in X_clean.columns if col.startswith('telefone_comprimento_')]
         if colunas_telefone:
-            colunas_telefone_ordenadas = sorted(colunas_telefone, key=lambda x: int(x.split('_')[-1]))
+            colunas_telefone_ordenadas = sorted(colunas_telefone, key=lambda x: (0, int(x.split('_')[-1])) if x.split('_')[-1].isdigit() else (1, x))
             outras_colunas = [col for col in X_clean.columns if not col.startswith('telefone_comprimento_')]
 
             # Encontrar posição das colunas telefone na ordem original
