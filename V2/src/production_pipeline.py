@@ -11,7 +11,8 @@ import logging
 import atexit
 from datetime import datetime
 from .data_processing.preprocessing import remove_duplicates, clean_columns, remove_campaign_features, remove_technical_fields, rename_long_column_names
-from .data_processing.utm_unification import unify_utm_columns
+from .core.client_config import ClientConfig
+from .core.utm import unify_utm
 from .data_processing.medium_unification import unify_medium_columns
 from .data_processing.category_unification import unificar_categorias_completo
 from .features.engineering import create_derived_features
@@ -97,6 +98,10 @@ class LeadScoringPipeline:
         self.data = None
         self.original_data = None  # Preservar dados originais
         self.predictor = LeadScoringPredictor(model_name, model_path=model_path, use_active_model=True)
+
+        # Carregar ClientConfig — usado progressivamente à medida que core/ é implementado
+        _config_path = os.path.join(os.path.dirname(__file__), '..', 'configs', 'clients', 'devclub.yaml')
+        self._client_config = ClientConfig.from_yaml(os.path.abspath(_config_path))
 
         # Carregar modelo e metadados automaticamente
         self.predictor.load_model()
@@ -201,7 +206,7 @@ class LeadScoringPipeline:
         utm_source_before = self.data['Source'].nunique() if 'Source' in self.data.columns else 0
         utm_term_before = self.data['Term'].nunique() if 'Term' in self.data.columns else 0
 
-        self.data = unify_utm_columns(self.data)
+        self.data = unify_utm(self.data, self._client_config.utm)
 
         utm_source_after = self.data['Source'].nunique() if 'Source' in self.data.columns else 0
         utm_term_after = self.data['Term'].nunique() if 'Term' in self.data.columns else 0

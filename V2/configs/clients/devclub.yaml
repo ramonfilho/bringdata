@@ -58,10 +58,27 @@ ingestion:
 # UTMConfig — hardcodes #35, #63, #67 (Componente 1 — Fase 2)
 # ---------------------------------------------------------------------------
 utm:
-  source_to_outros: null         # #35
-  term_mappings: null            # #63
-  term_outros_patterns: null     # #63
-  term_long_id_threshold: null   # #67
+  source_to_outros:              # #35 — lista canônica do treino (audit 2026-03-08)
+    - fb
+    - teste
+    - "[field id=\"utm_source\"]"
+    - facebook-ads-sitelink
+    - utm_source
+    - manychat
+    - organico
+    - bio
+    - livesemanal
+    - ig
+    - org
+  source_to_channel_mapping:     # dev/retreino — sources orgânicas que colapsam em canal existente
+    youtube-bio: youtube
+  term_mappings:                 # #63
+    ig: instagram
+    fb: facebook
+  term_outros_patterns:          # #63
+    - "--"
+    - "{"
+  term_long_id_threshold: 10     # #67
 
 # ---------------------------------------------------------------------------
 # MediumConfig — hardcodes #7, #36, #37, #50 (Componente 4 — Fase 2)

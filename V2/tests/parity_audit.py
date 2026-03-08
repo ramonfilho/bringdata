@@ -107,14 +107,16 @@ def _compare(df_treino: pd.DataFrame, df_prod: pd.DataFrame, label: str) -> bool
 # ---------------------------------------------------------------------------
 
 def audit_utm():
-    from V2.src.data_processing.utm_training import unificar_utm_source_term
+    from V2.src.core.utm import unify_utm
+    from V2.src.core.client_config import ClientConfig
     from V2.src.data_processing.utm_unification import unify_utm_columns
 
+    config = ClientConfig.from_yaml(os.path.join(ROOT, 'V2', 'configs', 'clients', 'devclub.yaml'))
     df_input = _load('snapshot_utm_input')
-    df_treino = unificar_utm_source_term(df_input.copy())
-    df_prod   = unify_utm_columns(df_input.copy())
-    return _compare(df_treino, df_prod,
-                    "UTM — unificar_utm_source_term (treino) vs unify_utm_columns (produção)")
+    df_core = unify_utm(df_input.copy(), config.utm)
+    df_prod  = unify_utm_columns(df_input.copy())
+    return _compare(df_core, df_prod,
+                    "UTM — core/utm.unify_utm vs utm_unification.unify_utm_columns (produção)")
 
 
 def audit_medium():
