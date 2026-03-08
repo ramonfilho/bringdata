@@ -625,13 +625,24 @@ Duplicatas encontradas (resolução via campo já mapeado):
 3. ~~**Criar `configs/clients/devclub.yaml`**~~ ✅ — esqueleto com todas as chaves; cada campo referencia o número do hardcode; valores `null` preenchidos na Fase 2
 4. ~~**Criar esqueleto de `src/core/`**~~ ✅ — 11 módulos com assinaturas e `NotImplementedError` (commit c0d38ca)
 5. ~~**Criar `src/nlp/`** com README de interface~~ ✅
-6. **Audit de divergências treino × produção** ⏳ — para cada função compartilhada (UTM, Medium, Categories, FE, Encoding): (1) capturar snapshot real em pickle (`capture_parity_snapshots=True` no `train_pipeline.main()`) na entrada da função durante uma execução do pipeline de treino; (2) injetar o mesmo snapshot nas duas implementações (treino e produção) separadamente e comparar outputs coluna a coluna; (3) documentar cada divergência encontrada; (4) para cada divergência, decidir qual implementação está correta — produção é canônica por padrão, mas cada caso deve ser verificado; (5) registrar a decisão como especificação para a implementação em `core/`. Executar antes de iniciar a Fase 2.
+6. ~~**Audit de divergências treino × produção**~~ ✅ — executado em 2026-03-08 com `python -m V2.src.train_pipeline --capture-parity-snapshots --no-api-data`; comparação via `V2/tests/parity_audit.py`. Snapshots em `V2/tests/fixtures/`. Divergências encontradas e decisão canônica registrada abaixo.
+
+**Resultado do audit — divergências e decisão canônica:**
+
+| Função | Divergência | Impacto | Canônico | Ação em `core/` |
+|---|---|---|---|---|
+| UTM | `'utm_source'` não está em `source_to_outros` da produção | 1 lead (0.0%) | Treino | Incluir `'utm_source'` na lista `utm.source_to_outros` |
+| Medium | `'Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação'` → produção classifica como `'Outros'`, treino mantém como categoria válida | 44 leads (0.04%) | Treino | `core/medium.py` deve reconhecer esta variante como categoria válida |
+| Feature Engineering | Produção cria `email_valido`, `nome_valido`, `telefone_valido` — removidas do treino em `dev/retreino` | 3 colunas a mais na produção | Treino | `core/feature_engineering.py` não deve criar essas 3 features; atualizar `engineering.py` de produção antes do merge |
+| Feature Engineering | `telefone_comprimento`: produção retém valores inteiros 4 e 10, treino agrupa em `'outros'` | 1.835 leads (1.8%) | Treino | `core/feature_engineering.py` aplica grouping via `feature.telefone_comprimento_outros_values` (#157) |
+| Encoding | Treino mantém nomes de colunas com caracteres especiais (`'Qual a sua idade?_18 24 anos'`); produção normaliza para snake_case via `clean_column_names()` (`'Qual_a_sua_idade'`) | Estrutural — 59 cols treino vs 50 produção | **Produção** | `core/encoding.py` aplica `clean_column_names()` após get_dummies — mesmo comportamento da produção |
+| Encoding | Medium: treino gera one-hot dinâmico com nomes completos; produção usa nomes normalizados (binary_top3 foi removido do treino em `dev/retreino`) | Estrutural | **Produção** (nomes normalizados) | `core/encoding.py` normaliza nomes de colunas Medium junto com as demais |
 
 > `configs/templates/client_template.yaml` e `src/eda/generate_client_config.py` são adiados: o template emerge do `devclub.yaml` ao final da Fase 2; o gerador de EDA é construído na Fase 4, depois de dois configs escritos manualmente.
 
-**Critério de saída:** ✅ `src/core/` existe com assinaturas; ✅ `ClientConfig.from_yaml('configs/clients/devclub.yaml').validate()` passa; ⏳ audit de divergências pendente — snapshots capturados, divergências documentadas e decisão registrada para cada função compartilhada.
+**Critério de saída:** ✅ `src/core/` existe com assinaturas; ✅ `ClientConfig.from_yaml('configs/clients/devclub.yaml').validate()` passa; ✅ audit de divergências concluído — snapshots capturados, divergências documentadas e decisão canônica registrada para cada função compartilhada. **Fase 1 concluída.**
 
-### Fase 2 — Consolidação (Semana 2–3)
+### Fase 2 — Consolidação (em andamento)
 
 **Ciclo por componente** — para cada item abaixo, o loop é sempre o mesmo:
 1. Implementar a função em `src/core/` parametrizada por config
@@ -643,7 +654,7 @@ Duplicatas encontradas (resolução via campo já mapeado):
 
 **Componentes em ordem de criticidade:**
 
-1. `core/utm.py` — divergência `.lower()` ativa; hardcodes #35, #63, #67 → `UTMConfig`
+1. `core/utm.py` ⏳ — divergência `.lower()` ativa; hardcodes #35, #63, #67 → `UTMConfig`; audit confirmou treino canônico para `source_to_outros` (inclui `'utm_source'`)
    - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py`
 2. `core/feature_engineering.py` — unifica guards de colunas; hardcodes #41, #42, #47, #48 → `FeatureConfig`
    - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py`

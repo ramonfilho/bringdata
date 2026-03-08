@@ -1016,6 +1016,12 @@ if __name__ == "__main__":
         default=None,
         help='Data de fim para buscar dados da API (formato: YYYY-MM-DD). Requer --include-api-data'
     )
+    parser.add_argument(
+        '--capture-parity-snapshots',
+        action='store_true',
+        default=False,
+        help='Serializar (input, output) de cada função compartilhada em tests/fixtures/ para audit de paridade treino×produção'
+    )
 
     args = parser.parse_args()
 
@@ -1035,5 +1041,6 @@ if __name__ == "__main__":
         api_start_date=args.api_start_date,
         api_end_date=args.api_end_date,
         use_buyer_weights=not args.no_weights,
-        save_encoded=args.save_encoded
+        save_encoded=args.save_encoded,
+        capture_parity_snapshots=args.capture_parity_snapshots
     )
