@@ -151,26 +151,28 @@ def criar_features_derivadas(df_devclub: pd.DataFrame) -> pd.DataFrame:
     # Nome
     df['nome_comprimento'] = df['Nome Completo'].astype(str).str.len()
     df['nome_tem_sobrenome'] = df['Nome Completo'].astype(str).str.split().str.len() >= 2
-    df['nome_valido'] = df['Nome Completo'].apply(validar_nome_robusto)
-
-    # Email
-    df['email_valido'] = df['E-mail'].apply(validar_email_robusto)
 
     # Telefone
     df['telefone_normalizado'] = df['Telefone'].apply(normalizar_telefone_robusto)
-    df['telefone_valido'] = df['telefone_normalizado'].notna()
     df['telefone_comprimento'] = df['telefone_normalizado'].astype(str).str.len()
+    # Agrupar comprimentos raros (4=inválido, 10=obsoleto) em 'outros'
+    df['telefone_comprimento'] = df['telefone_comprimento'].apply(
+        lambda x: x if x in [9, 11] else 'outros'
+    )
 
     # DEBUG: ANÁLISE DE TELEFONES VÁLIDOS POR ARQUIVO DE ORIGEM
     if 'arquivo_origem' in df.columns:
         logger.debug(f"\n% de telefones válidos por arquivo de origem:")
-        telefone_por_arquivo = df.groupby('arquivo_origem')['telefone_valido'].agg(['count', 'sum', 'mean']).round(3)
-        telefone_por_arquivo['pct_valido'] = (telefone_por_arquivo['mean'] * 100).round(1)
+        tel_valido = df['telefone_normalizado'].notna()
+        telefone_por_arquivo = df.groupby('arquivo_origem').apply(
+            lambda g: pd.Series({'total': len(g), 'validos': g['telefone_normalizado'].notna().sum()})
+        )
+        telefone_por_arquivo['pct_valido'] = (telefone_por_arquivo['validos'] / telefone_por_arquivo['total'] * 100).round(1)
         telefone_por_arquivo = telefone_por_arquivo.sort_values('pct_valido', ascending=False)
 
         for arquivo in telefone_por_arquivo.index:
-            total = telefone_por_arquivo.loc[arquivo, 'count']
-            validos = telefone_por_arquivo.loc[arquivo, 'sum']
+            total = telefone_por_arquivo.loc[arquivo, 'total']
+            validos = telefone_por_arquivo.loc[arquivo, 'validos']
             pct = telefone_por_arquivo.loc[arquivo, 'pct_valido']
             logger.debug(f"  {arquivo}: {validos:,}/{total:,} ({pct}%)")
 
@@ -212,10 +214,7 @@ def criar_features_derivadas(df_devclub: pd.DataFrame) -> pd.DataFrame:
 
     # 4. DEBUG: ESTATÍSTICAS DAS NOVAS FEATURES
     logger.debug(f"\nEstatísticas das features criadas:")
-    logger.debug(f"Nome válido: {df['nome_valido'].sum():,} ({df['nome_valido'].mean()*100:.1f}%)")
     logger.debug(f"Nome com sobrenome: {df['nome_tem_sobrenome'].sum():,} ({df['nome_tem_sobrenome'].mean()*100:.1f}%)")
-    logger.debug(f"Email válido: {df['email_valido'].sum():,} ({df['email_valido'].mean()*100:.1f}%)")
-    logger.debug(f"Telefone válido: {df['telefone_valido'].sum():,} ({df['telefone_valido'].mean()*100:.1f}%)")
 
     # 5. DEBUG: DISTRIBUIÇÃO DA FEATURE TEMPORAL
     logger.debug(f"\nDistribuição da feature temporal:")

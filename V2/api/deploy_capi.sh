@@ -48,6 +48,7 @@ SKIP_TESTS=false
 ALLOW_PUBLIC=true  # Temporário - mudar para false em produção
 PREVIOUS_REVISION=""
 YES_FLAG=false  # Pula confirmação se true
+NO_TRAFFIC=false  # Se true, deploy sem redirecionar tráfego (para teste)
 
 # =============================================================================
 # VALIDAÇÕES PRÉ-DEPLOY
@@ -83,40 +84,71 @@ validate_prerequisites() {
         exit 1
     fi
 
-    # Extrair model_path do YAML
+    # Detectar modo: mlflow_run_id (novo) ou model_path (legado)
+    MLFLOW_RUN_ID=$(grep "mlflow_run_id:" "$CONFIG_FILE" | awk '{print $2}')
     MODEL_PATH=$(grep "model_path:" "$CONFIG_FILE" | awk '{print $2}')
-    if [ -z "$MODEL_PATH" ]; then
-        print_error "model_path não encontrado em active_model.yaml"
-        exit 1
-    fi
 
-    FULL_MODEL_DIR="$PROJECT_ROOT/$MODEL_PATH"
-    if [ ! -d "$FULL_MODEL_DIR" ]; then
-        print_error "Diretório do modelo não existe: $FULL_MODEL_DIR"
-        exit 1
-    fi
-    print_success "Modelo ativo: $MODEL_PATH"
+    if [ -n "$MLFLOW_RUN_ID" ]; then
+        # Modo MLflow: artifacts do run ficam em mlruns/1/{run_id}/artifacts
+        # O Dockerfile reutiliza ARG MODEL_PATH — sem mudanças no Dockerfile
+        MODEL_PATH="mlruns/1/${MLFLOW_RUN_ID}/artifacts"
+        FULL_MODEL_DIR="$PROJECT_ROOT/$MODEL_PATH"
 
-    # 1.7 Arquivos do modelo
-    print_info "Verificando arquivos do modelo..."
-    MODEL_PKL=$(find "$FULL_MODEL_DIR" -name "*.pkl" | head -n 1)
-    if [ -z "$MODEL_PKL" ]; then
-        print_error "Arquivo .pkl não encontrado em: $FULL_MODEL_DIR"
-        exit 1
-    fi
+        if [ ! -d "$FULL_MODEL_DIR" ]; then
+            print_error "MLflow artifacts não encontrados: $FULL_MODEL_DIR"
+            exit 1
+        fi
 
-    MODEL_METADATA=$(find "$FULL_MODEL_DIR" -name "model_metadata_*.json" | head -n 1)
-    if [ -z "$MODEL_METADATA" ]; then
-        print_error "model_metadata_*.json não encontrado em: $FULL_MODEL_DIR"
-        exit 1
-    fi
+        # 1.7 Arquivos do modelo (modo MLflow)
+        print_info "Verificando arquivos do modelo (modo MLflow)..."
+        if [ ! -f "$FULL_MODEL_DIR/model/model.pkl" ]; then
+            print_error "model.pkl não encontrado em: $FULL_MODEL_DIR/model/"
+            exit 1
+        fi
+        if [ ! -f "$FULL_MODEL_DIR/model_metadata.json" ]; then
+            print_error "model_metadata.json não encontrado em: $FULL_MODEL_DIR"
+            exit 1
+        fi
+        if [ ! -f "$FULL_MODEL_DIR/feature_registry.json" ]; then
+            print_error "feature_registry.json não encontrado em: $FULL_MODEL_DIR"
+            exit 1
+        fi
+        print_success "Modo MLflow — run: $MLFLOW_RUN_ID"
 
-    FEATURES_JSON=$(find "$FULL_MODEL_DIR" -name "features_ordenadas_*.json" | head -n 1)
-    if [ -z "$FEATURES_JSON" ]; then
-        print_error "features_ordenadas_*.json não encontrado em: $FULL_MODEL_DIR"
+    elif [ -n "$MODEL_PATH" ]; then
+        # Modo local (legado): files/{timestamp}
+        FULL_MODEL_DIR="$PROJECT_ROOT/$MODEL_PATH"
+
+        if [ ! -d "$FULL_MODEL_DIR" ]; then
+            print_error "Diretório do modelo não existe: $FULL_MODEL_DIR"
+            exit 1
+        fi
+
+        # 1.7 Arquivos do modelo (modo local)
+        print_info "Verificando arquivos do modelo (modo local)..."
+        MODEL_PKL=$(find "$FULL_MODEL_DIR" -name "*.pkl" | head -n 1)
+        if [ -z "$MODEL_PKL" ]; then
+            print_error "Arquivo .pkl não encontrado em: $FULL_MODEL_DIR"
+            exit 1
+        fi
+
+        MODEL_METADATA=$(find "$FULL_MODEL_DIR" -name "model_metadata_*.json" | head -n 1)
+        if [ -z "$MODEL_METADATA" ]; then
+            print_error "model_metadata_*.json não encontrado em: $FULL_MODEL_DIR"
+            exit 1
+        fi
+
+        FEATURES_JSON=$(find "$FULL_MODEL_DIR" -name "features_ordenadas_*.json" | head -n 1)
+        if [ -z "$FEATURES_JSON" ]; then
+            print_error "features_ordenadas_*.json não encontrado em: $FULL_MODEL_DIR"
+            exit 1
+        fi
+        print_success "Modo local — modelo: $MODEL_PATH"
+
+    else
+        print_error "active_model.yaml não contém mlflow_run_id nem model_path"
         exit 1
     fi
-    print_success "Arquivos do modelo validados"
 
     # 1.8 business_config.py
     print_info "Verificando business_config.py..."
@@ -174,12 +206,7 @@ build_docker_image() {
     print_info "Tag da imagem: $IMAGE_TAG"
     print_info "Imagem completa: $IMAGE_FULL"
 
-    # Ler MODEL_PATH do active_model.yaml
-    MODEL_PATH=$(grep "model_path:" "$CONFIG_FILE" | awk '{print $2}')
-    if [ -z "$MODEL_PATH" ]; then
-        print_error "model_path não encontrado em active_model.yaml"
-        exit 1
-    fi
+    # MODEL_PATH já definido por validate_prerequisites (suporta modo local e MLflow)
     print_info "Modelo ativo: $MODEL_PATH"
 
     # Build para linux/amd64 (Cloud Run requer)
@@ -232,6 +259,12 @@ deploy_to_cloud_run() {
     ENV_VARS=$(build_env_vars)
     print_success "Variáveis de ambiente configuradas (via lib/config.sh)"
 
+    TRAFFIC_FLAG=""
+    if [ "$NO_TRAFFIC" = true ]; then
+        TRAFFIC_FLAG="--no-traffic"
+        print_warning "Modo --no-traffic: nova revisão NÃO receberá tráfego (apenas para teste)"
+    fi
+
     gcloud run deploy $SERVICE_NAME \
         --image "$IMAGE_TO_DEPLOY" \
         --platform managed \
@@ -244,27 +277,42 @@ deploy_to_cloud_run() {
         --concurrency $CONCURRENCY \
         --update-env-vars="$ENV_VARS" \
         $AUTH_FLAG \
+        $TRAFFIC_FLAG \
         --quiet || {
             print_error "Falha no deploy para Cloud Run"
             exit 1
         }
 
-    # Garantir que 100% do tráfego vai para a nova revisão.
-    # Necessário quando o serviço está em modo de tráfego manual
-    # (ocorre após usar update-traffic manualmente).
+    # Obter a nova revisão (necessário para tráfego e para --no-traffic informar URL)
     NEW_REVISION=$(gcloud run revisions list \
         --service=$SERVICE_NAME \
         --region=$REGION \
         --format="value(metadata.name)" \
         --limit=1)
 
-    print_info "Direcionando 100% do tráfego para: $NEW_REVISION"
-    gcloud run services update-traffic $SERVICE_NAME \
-        --region=$REGION \
-        --to-revisions="$NEW_REVISION=100" \
-        --quiet || {
-            print_warning "Falha ao redirecionar tráfego (pode já estar correto)"
-        }
+    if [ "$NO_TRAFFIC" = true ]; then
+        # Modo teste: mostrar URL da revisão para teste direto
+        REVISION_URL=$(gcloud run revisions describe "$NEW_REVISION" \
+            --region=$REGION \
+            --format="value(status.url)" 2>/dev/null || echo "")
+        print_warning "Revisão criada sem tráfego: $NEW_REVISION"
+        if [ -n "$REVISION_URL" ]; then
+            print_info "URL para teste direto: $REVISION_URL"
+        fi
+        print_info "Para promover: gcloud run services update-traffic $SERVICE_NAME --region=$REGION --to-revisions=$NEW_REVISION=100"
+        print_info "Para descartar: gcloud run revisions delete $NEW_REVISION --region=$REGION"
+    else
+        # Garantir que 100% do tráfego vai para a nova revisão.
+        # Necessário quando o serviço está em modo de tráfego manual
+        # (ocorre após usar update-traffic manualmente).
+        print_info "Direcionando 100% do tráfego para: $NEW_REVISION"
+        gcloud run services update-traffic $SERVICE_NAME \
+            --region=$REGION \
+            --to-revisions="$NEW_REVISION=100" \
+            --quiet || {
+                print_warning "Falha ao redirecionar tráfego (pode já estar correto)"
+            }
+    fi
 
     print_success "Deploy concluído"
 
@@ -431,9 +479,9 @@ print_final_report() {
 
     # Detalhes do modelo
     MODEL_NAME=$(grep "model_name:" "$CONFIG_FILE" | awk '{print $2}')
-    MODEL_PATH=$(grep "model_path:" "$CONFIG_FILE" | awk '{print $2}')
     AUC=$(grep "auc:" "$CONFIG_FILE" | awk '{print $2}')
     MONOTONIA=$(grep "monotonia_percentage:" "$CONFIG_FILE" | awk '{print $2}')
+    # MODEL_PATH já definido por validate_prerequisites (local ou mlruns/...)
 
     echo -e "${BLUE}📊 Modelo:${NC}"
     echo "   Nome: $MODEL_NAME"
@@ -506,12 +554,14 @@ usage() {
     echo "  --model-version VER    Versão do modelo (ex: 20260109_110657) [default: timestamp]"
     echo "  --skip-tests           Pular testes pós-deploy"
     echo "  --no-public            Deploy sem acesso público (requer Service Account)"
+    echo "  --no-traffic           Deploy sem redirecionar tráfego (para testar nova revisão)"
     echo "  --yes, -y              Pular confirmação (não perguntar)"
     echo "  -h, --help             Mostrar esta mensagem"
     echo ""
     echo "Exemplos:"
     echo "  $0"
     echo "  $0 --yes"
+    echo "  $0 --no-traffic --yes   # Testa novo modelo sem afetar produção"
     echo "  $0 --env production --model-version 20260109_110657"
     echo "  $0 --skip-tests --no-public --yes"
     exit 1
@@ -534,6 +584,10 @@ parse_arguments() {
                 ;;
             --no-public)
                 ALLOW_PUBLIC=false
+                shift
+                ;;
+            --no-traffic)
+                NO_TRAFFIC=true
                 shift
                 ;;
             --yes|-y)

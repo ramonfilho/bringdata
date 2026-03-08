@@ -168,31 +168,13 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
                     pct_nan = (nan_depois / len(df)) * 100
                     logger.warning(f"       Resultado: {nan_depois} NaN ({pct_nan:.1f}%) - serão preenchidos com 0")
 
-    # 1.5. PROCESSAR MEDIUM CONFORME ESTRATÉGIA
-    if 'Medium' in df.columns and medium_strategy != 'full':
-        logger.info(f"\nProcessando Medium com estratégia: {medium_strategy}")
-
-        if medium_strategy == 'binary_top3':
-            # Criar features para as 3 categorias mais estáveis temporalmente
-            df['Medium_Linguagem_programacao'] = (df['Medium'] == 'Linguagem de programação').astype(int)
-            df['Medium_Aberto'] = (df['Medium'] == 'Aberto').astype(int)
-            df['Medium_Lookalike_2pct_Cadastrados'] = (df['Medium'] == 'Lookalike 2% Cadastrados - DEV 2.0 + Interesses').astype(int)
-            df = df.drop(columns=['Medium'])
-            logger.info(f"   Criadas features binárias (top 3 mais estáveis):")
-            logger.info(f"    Linguagem de programação: {df['Medium_Linguagem_programacao'].sum():,} registros ({df['Medium_Linguagem_programacao'].mean()*100:.1f}%)")
-            logger.info(f"    Aberto: {df['Medium_Aberto'].sum():,} registros ({df['Medium_Aberto'].mean()*100:.1f}%)")
-            logger.info(f"    Lookalike 2% Cadastrados: {df['Medium_Lookalike_2pct_Cadastrados'].sum():,} registros ({df['Medium_Lookalike_2pct_Cadastrados'].mean()*100:.1f}%)")
-            logger.info(f"   Categorias não cobertas (32% dos dados)  [0, 0, 0]")
-
     # 2. ONE-HOT ENCODING para variáveis categóricas nominais
+    # Medium já foi reduzido a categorias válidas pela Célula 11 — entra aqui como qualquer outra categórica.
     variaveis_one_hot = []
 
     # Identificar variáveis categóricas (excluindo ordinais já processadas e target)
     for col in df.columns:
         if col not in ['target'] and col not in variaveis_ordinais and col != 'nome_comprimento':
-            # Excluir features Medium_ já criadas pelo binary_top3
-            if medium_strategy == 'binary_top3' and col.startswith('Medium_'):
-                continue
             # Verificar se é categórica (object ou poucos valores únicos)
             if df[col].dtype == 'object' or df[col].nunique() <= 20:
                 variaveis_one_hot.append(col)
@@ -244,7 +226,14 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
         'O_que_voc_faz_atualmente_Sou_autonomo': 'O_que_voc_faz_atualmente_Sou_aut_nomo',
         'Tem_computador_notebook_SIM': 'Tem_computador_notebook_Sim',
         'Tem_computador_notebook_N_O': 'Tem_computador_notebook_N_o',  # NÃO maiúsculo  regex remove ã
-        'Medium_outros': 'Medium_Outros'  # Corrigir capitalização
+        'Medium_outros': 'Medium_Outros',  # Corrigir capitalização
+        # Valores que chegam sem passar por unificar_categorias_completo (ex: monitoramento)
+        # Em produção esses mapeamentos nunca disparam (unificação já lowercasa antes do OHE)
+        'Voc_possui_cart_o_de_cr_dito_Sim': 'Voc_possui_cart_o_de_cr_dito_sim',
+        'Tem_computador_notebook_Sim': 'Tem_computador_notebook_sim',
+        'O_que_voc_faz_atualmente_Sou_CLT_Funcion_rio_P_blico': 'O_que_voc_faz_atualmente_sou_cltfuncionario_publico',
+        'O_que_mais_voc_quer_ver_no_evento_Fazer_transi_o_de_carreira_e_conseguir_meu_primeiro_emprego_na_rea': 'O_que_mais_voc_quer_ver_no_evento_fazer_transicao_de_carreira_e_conseguir_meu_primeiro_emprego_na_area',
+        'interesse_programacao_Todas_as_alternativas': 'interesse_programacao_todas_as_alternativas',
     }
 
     # Aplicar mapeamentos (evitando colisões)

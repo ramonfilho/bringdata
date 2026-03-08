@@ -118,6 +118,14 @@ class LeadScoringPredictor:
         with open(metadata_file, 'r') as f:
             self.metadata = json.load(f)
 
+        # Normalizar thresholds para formato D01-D10 (mesmo comportamento do modo MLflow)
+        if 'decil_thresholds' in self.metadata and 'thresholds' in self.metadata['decil_thresholds']:
+            from src.model.decil_thresholds import normalizar_thresholds
+            thresholds_originais = self.metadata['decil_thresholds']['thresholds']
+            thresholds_normalizados = normalizar_thresholds(thresholds_originais)
+            self.metadata['decil_thresholds']['thresholds'] = thresholds_normalizados
+            logger.info(f"Thresholds normalizados: {list(thresholds_normalizados.keys())}")
+
     def _load_from_mlflow(self):
         """Carrega modelo e artifacts diretamente do MLflow."""
         # Carregar direto dos artifacts (não depende de meta.yaml ou API)

@@ -66,31 +66,13 @@ def aplicar_encoding_estrategico(df_devclub_fe: pd.DataFrame, medium_strategy: s
                 df[var] = df[var].map(mapeamento)
                 logger.debug(f"  {var}: {len(ordem)} categorias  0-{len(ordem)-1}")
 
-    # 1.5. DEBUG: PROCESSAR MEDIUM COM BINARY_TOP3
-    if 'Medium' in df.columns:
-        logger.debug(f"\nProcessando Medium com estratégia: {medium_strategy}")
-
-        # Criar features binárias para as 3 categorias mais estáveis temporalmente
-        df['Medium_Linguagem_programacao'] = (df['Medium'] == 'Linguagem de programação').astype(int)
-        df['Medium_Aberto'] = (df['Medium'] == 'Aberto').astype(int)
-        df['Medium_Lookalike_2pct_Cadastrados'] = (df['Medium'] == 'Lookalike 2% Cadastrados - DEV 2.0 + Interesses').astype(int)
-        df = df.drop(columns=['Medium'])
-
-        logger.debug(f"   Criadas 3 features binárias:")
-        logger.debug(f"    Medium_Linguagem_programacao: {df['Medium_Linguagem_programacao'].sum():,} ({df['Medium_Linguagem_programacao'].mean()*100:.1f}%)")
-        logger.debug(f"    Medium_Aberto: {df['Medium_Aberto'].sum():,} ({df['Medium_Aberto'].mean()*100:.1f}%)")
-        logger.debug(f"    Medium_Lookalike_2pct_Cadastrados: {df['Medium_Lookalike_2pct_Cadastrados'].sum():,} ({df['Medium_Lookalike_2pct_Cadastrados'].mean()*100:.1f}%)")
-        logger.debug(f"   Categorias não cobertas (outros)  [0, 0, 0]")
-
     # 2. ONE-HOT ENCODING para variáveis categóricas nominais
+    # Medium já foi reduzido a categorias válidas pela Célula 11 — entra aqui como qualquer outra categórica.
     variaveis_one_hot = []
 
     # Identificar variáveis categóricas (excluindo ordinais já processadas e target)
     for col in df.columns:
         if col not in ['target'] and col not in variaveis_ordinais and col != 'nome_comprimento':
-            # Excluir features Medium_ já criadas (são binárias, não precisam de one-hot)
-            if col.startswith('Medium_'):
-                continue
             # Verificar se é categórica (object ou poucos valores únicos)
             if df[col].dtype == 'object' or df[col].nunique() <= 20:
                 variaveis_one_hot.append(col)

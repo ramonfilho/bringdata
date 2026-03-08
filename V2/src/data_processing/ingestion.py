@@ -690,6 +690,10 @@ def read_all_training_sources(
 
             except Exception as e:
                 logger.error(f"    Erro ao buscar leads do Sheets: {e}")
+                raise RuntimeError(
+                    f"Google Sheets falhou (include_sheets_api=True) — dataset incompleto interromperia o treino. "
+                    f"Use --no-sheets-api para treinar só com arquivos locais. Erro original: {e}"
+                ) from e
 
         # === CALCULAR DATAS DOS LEADS SE NÃO FORNECIDAS ===
         # Usa a data de cutoff do dataset (2025-03-01) como start, evitando carregar
@@ -698,12 +702,29 @@ def read_all_training_sources(
         guru_end = api_end_date
 
         if not guru_start:
-            # DATA_CUTOFF: data de início do dataset de treino (definida em dataset_versioning_training.py)
-            # Leads começam em 2025-03-01 → vendas também começam em 2025-03-01 (janela de conversão vai para frente)
-            DATA_CUTOFF = datetime(2025, 3, 1)
-            guru_start = DATA_CUTOFF.strftime('%Y-%m-%d')
+            # Detectar a data do primeiro lead em TODAS as fontes já carregadas:
+            # arquivos locais + Google Sheets API.
+            # As vendas precisam cobrir todo esse período — o cutoff temporal (Célula 13)
+            # filtra os leads depois, mas as vendas precisam chegar completas para o matching.
+            data_min = None
+            todas_fontes = {**local_data, **api_data}
+            for _, abas in todas_fontes.items():
+                for _, df_sheet in abas.items():
+                    if 'Data' in df_sheet.columns:
+                        datas = pd.to_datetime(df_sheet['Data'], errors='coerce', dayfirst=True).dropna()
+                        if not datas.empty:
+                            sheet_min = datas.min()
+                            if data_min is None or sheet_min < data_min:
+                                data_min = sheet_min
+
+            if data_min is not None:
+                guru_start = data_min.strftime('%Y-%m-%d')
+            else:
+                guru_start = datetime(2020, 1, 1).strftime('%Y-%m-%d')
+                logger.warning("  Não foi possível detectar data mínima dos leads — usando 2020-01-01 como fallback")
+
             guru_end = datetime.today().strftime('%Y-%m-%d')
-            logger.info(f"\n  Guru API: {guru_start} → {guru_end}  (a partir do cutoff do dataset)")
+            logger.info(f"\n  Guru API: {guru_start} → {guru_end}  (a partir do primeiro lead em todas as fontes)")
 
         # === VENDAS DA API GURU ===
         logger.info("\n 2/2: Vendas da API Guru")

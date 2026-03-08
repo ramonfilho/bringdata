@@ -72,9 +72,11 @@ def aplicar_janela_conversao(
     logger.info(f"  Antes do filtro: {total_antes:,} leads, {target_antes:,} target=1 ({target_antes/total_antes*100:.2f}%)")
 
     # 5. Filtrar leads
-    # Lógica correta: manter leads até data_limite OU que já converteram (target=1)
-    # Remover apenas: leads com target=0 após data_limite (potenciais falsos negativos)
-    df_filtrado = df[(df['Data'] <= data_limite_leads) | (df['target'] == 1)].copy()
+    # Remover TODOS os leads após data_limite (target=0 E target=1).
+    # Leads recentes com target=1 têm label correto mas não têm contrapartida negativa
+    # no mesmo período (não-compradores foram removidos) → distribuição enviesada no teste.
+    # Solução: só avaliar leads cuja janela de conversão foi completamente observada.
+    df_filtrado = df[df['Data'] <= data_limite_leads].copy()
 
     # 6. Estatísticas depois
     total_depois = len(df_filtrado)
