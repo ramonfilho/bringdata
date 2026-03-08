@@ -654,8 +654,8 @@ Duplicatas encontradas (resolução via campo já mapeado):
 
 **Componentes em ordem de criticidade:**
 
-1. `core/utm.py` ⏳ — divergência `.lower()` ativa; hardcodes #35, #63, #67 → `UTMConfig`; audit confirmou treino canônico para `source_to_outros` (inclui `'utm_source'`)
-   - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py`
+1. ~~`core/utm.py`~~ ✅ — implementado, imports atualizados nos 3 pipelines, `utm_training.py` e `utm_unification.py` removidos. Paridade validada via parity audit (479 divergências intencionais documentadas).
+   - Hardcodes #35, #63, #67 + `source_to_channel_mapping` → `configs/clients/devclub.yaml`
 2. `core/feature_engineering.py` — unifica guards de colunas; hardcodes #41, #42, #47, #48 → `FeatureConfig`
    - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py`
 3. `core/encoding.py` — versão produção é canônica; hardcodes #49, #50, #51, #64, #70, #71 → `EncodingConfig`
