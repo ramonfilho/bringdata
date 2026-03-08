@@ -126,7 +126,8 @@ def registrar_features_e_modelo_devclub(
     recall_metrics: dict = None,
     categorias_treino: dict = None,
     distribuicoes_treino: dict = None,
-    missing_rates_baseline: dict = None
+    missing_rates_baseline: dict = None,
+    buyer_weights: pd.Series = None
 ) -> dict:
     """
     Registra features e salva modelo DevClub para produção.
@@ -184,7 +185,7 @@ def registrar_features_e_modelo_devclub(
         # Reordenar features telefone_comprimento para ordem crescente DEPOIS da limpeza
         colunas_telefone = [col for col in X_clean.columns if col.startswith('telefone_comprimento_')]
         if colunas_telefone:
-            colunas_telefone_ordenadas = sorted(colunas_telefone, key=lambda x: int(x.split('_')[-1]))
+            colunas_telefone_ordenadas = sorted(colunas_telefone, key=lambda x: (0, int(x.split('_')[-1])) if x.split('_')[-1].isdigit() else (1, x))
             outras_colunas = [col for col in X_clean.columns if not col.startswith('telefone_comprimento_')]
 
             # Encontrar posição das colunas telefone na ordem original
@@ -645,7 +646,17 @@ def registrar_features_e_modelo_devclub(
 
         logger.info("")
         logger.info("  Treinando modelo...")
-        modelo_final.fit(X_train, y_train)
+
+        # Pesos por comprador: reflete valor real após inadimplência (% recebido)
+        # target=0 sempre peso 1.0; target=1 usa peso do tipo de comprador
+        # Alinha pelo índice do X_train — funciona para qualquer split_method
+        if buyer_weights is not None:
+            w_train = buyer_weights.loc[X_train.index].values
+            logger.info(f"  Sample weights ativos — peso médio compradores treino: {w_train[y_train.values == 1].mean():.3f}")
+        else:
+            w_train = None
+
+        modelo_final.fit(X_train, y_train, sample_weight=w_train)
         y_prob = modelo_final.predict_proba(X_test)[:, 1]
         auc_final = roc_auc_score(y_test, y_prob)
         logger.info("")
@@ -961,6 +972,14 @@ def registrar_features_e_modelo_devclub(
             df_test_predictions = X_test.copy()
             df_test_predictions['target_real'] = y_test.values
             df_test_predictions['probabilidade'] = y_prob
+            # Adicionar data do lead para análise temporal
+            if 'test_indices' in dir() or 'test_indices' in locals():
+                df_test_predictions.insert(0, 'data_lead', data_dt.iloc[test_indices].values)
+            elif 'mask_teste' in locals():
+                df_test_predictions.insert(0, 'data_lead', data_dt[mask_teste].values)
+            # Adicionar email para análise por fonte (Guru vs TMB)
+            if 'E-mail' in dataset_original.columns:
+                df_test_predictions.insert(1, 'email', dataset_original.loc[X_test.index, 'E-mail'].values)
             df_test_predictions.to_csv(test_set_filename, index=False)
             logger.debug(f" ✅ {test_set_filename} salvo")
 

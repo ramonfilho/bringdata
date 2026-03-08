@@ -36,8 +36,8 @@ from src.data_processing.column_unification_refactored import (
 from src.data_processing.category_unification import unificar_categorias_completo
 from src.data_processing.feature_removal import remover_features_desnecessarias, listar_colunas_restantes
 from src.data_processing.utm_training import unificar_utm_source_term, verificar_consistencia_utm
-from src.data_processing.medium_training import extrair_publico_medium, relatorio_final_medium
-from src.data_processing.medium_production_training import unificar_medium_para_producao, relatorio_unificacao_producao
+from src.data_processing.medium_training import extrair_publico_medium
+from src.data_processing.medium_production_training import unificar_medium_para_producao
 from src.data_processing.dataset_versioning_training import criar_dataset_pos_cutoff, disponibilizar_dataset
 from src.matching.matching_training import fazer_matching_robusto as fazer_matching_variantes
 from src.matching.matching_robusto import fazer_matching_robusto
@@ -150,7 +150,7 @@ def setup_logging(verbosity='normal', log_file=None):
 logger = logging.getLogger(__name__)
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=False, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False):
     """Executa pipeline de treino completo.
 
     Args:
@@ -172,7 +172,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         set_active: Se True, atualiza configs/active_model.yaml com este modelo (requer save_files=True)
         validation_hook: Função opcional chamada após feature engineering para validação.
                         Recebe dataset_fe e retorna True (continuar) ou False (abortar)
-        include_api_data: Se True, busca dados adicionais de API/Guru (padrão: False)
+        include_api_data: Se True (padrão), busca dados adicionais de API/Guru e Google Sheets
         include_sheets_api: Se True (padrão), busca leads do Google Sheets quando include_api_data=True.
                             Passar False quando os leads já foram baixados manualmente como Excel.
         api_start_date: Data início para buscar dados da API (YYYY-MM-DD)
@@ -473,7 +473,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 5.3: FILTRO DE STATUS E RISCO")
     logger.info("")
 
-    df_vendas_filtrado = aplicar_filtro_status_risco(df_vendas_sem_utm, tmb_risk_filter=tmb_risk_filter)
+    df_vendas_filtrado = aplicar_filtro_status_risco(df_vendas_sem_utm, tmb_risk_filter=tmb_risk_filter, tmb_risk_lookup=tmb_risk_lookup)
 
     logger.info("=" * 80)
     # === CÉLULA 5.4: Filtro de produtos DevClub ===
@@ -569,38 +569,34 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     verificar_consistencia_utm(df_utm_unificado)
 
     logger.info("=" * 80)
-    # === CÉLULA 11: Unificação de UTM Medium - Extração de Públicos ===
-    # (Pulada se medium_strategy='remove')
+    # === CÉLULA 11: Unificação de UTM Medium ===
+    logger.info("")
+    logger.info("CÉLULA 11: UNIFICAÇÃO DE UTM MEDIUM")
+    logger.info("")
     if 'Medium' in df_utm_unificado.columns:
-        logger.info("")
-        logger.info("CÉLULA 11: UNIFICAÇÃO DE UTM MEDIUM - EXTRAÇÃO DE PÚBLICOS")
+        n_bruto_medium = df_utm_unificado['Medium'].nunique()
+        n_leads_medium = len(df_utm_unificado)
+        logger.info(f"  Input: {n_leads_medium:,} leads — {n_bruto_medium} valores brutos de Medium")
         logger.info("")
 
         if capture_parity_snapshots:
             df_utm_unificado.to_pickle(os.path.join(_fixtures, 'snapshot_medium_input.pkl'))
             logger.info("  [PARITY] snapshot_medium_input.pkl salvo")
 
-        df_medium_unificado = extrair_publico_medium(df_utm_unificado)
+        df_medium_unificado, n_apos_extracao = extrair_publico_medium(df_utm_unificado)
+        n_apos_norm = df_medium_unificado['Medium'].nunique()
 
-        # Gerar relatório final
-        relatorio_final_medium(df_medium_unificado)
-    else:
         logger.info("")
-        logger.info("CÉLULA 11: Pulando (Medium foi removido na célula 8 - strategy='remove')")
+        df_medium_producao = unificar_medium_para_producao(
+            df_medium_unificado,
+            n_bruto=n_bruto_medium,
+            n_apos_extracao=n_apos_extracao,
+            n_apos_norm=n_apos_norm,
+        )
+    else:
+        logger.info("  Pulando (Medium foi removido na célula 8 - strategy='remove')")
         df_medium_unificado = df_utm_unificado.copy()
-
-    # === CÉLULA 11.1: Unificação de Medium para Produção ===
-    # (Consolidado na CÉLULA 11)
-    if 'Medium' in df_medium_unificado.columns:
-        df_original = df_medium_unificado.copy()
-        df_medium_producao = unificar_medium_para_producao(df_medium_unificado)
-
-        # Gerar relatório
-        relatorio_unificacao_producao(df_original, df_medium_producao)
-    else:
-        logger.info("")
-        logger.info("CÉLULA 11.1: Pulando (Medium foi removido na célula 8 - strategy='remove')")
-        df_medium_producao = df_medium_unificado.copy()
+        df_medium_producao = df_utm_unificado.copy()
 
     if capture_parity_snapshots:
         df_medium_producao.to_pickle(os.path.join(_fixtures, 'snapshot_medium_output.pkl'))
@@ -654,34 +650,6 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info(f"   Tempo: {cell_timers['Célula 15']:.1f}s")
     logger.info("=" * 80)
 
-    # === CÉLULA 15.1: Filtro de risco TMB pós-matching ===
-    # Aplicado apenas no modo dual-source (tmb_risk_lookup preenchido) e filtros strict.
-    # Garante que todos os modos de tmb_risk_filter funcionem corretamente sem bloquear
-    # o matching por telefone antes da Célula 15.
-    if tmb_risk_lookup and tmb_risk_filter in ('low', 'low_medium'):
-        logger.info("")
-        logger.info("CÉLULA 15.1: FILTRO DE RISCO TMB PÓS-MATCHING")
-        logger.info("")
-
-        allowed_risk = {'Baixo'} if tmb_risk_filter == 'low' else {'Baixo', 'Médio'}
-        target_1_idx = dataset_v1_devclub[dataset_v1_devclub['target'] == 1].index
-        demoted = 0
-
-        for idx in target_1_idx:
-            email_raw = dataset_v1_devclub.at[idx, 'E-mail']
-            if pd.isna(email_raw):
-                continue
-            email_norm = str(email_raw).strip().lower()
-            risk = tmb_risk_lookup.get(email_norm)
-            # risk == None: match Guru ou TMB sem email na parcelas → não demoter
-            if risk is not None and risk not in allowed_risk:
-                dataset_v1_devclub.at[idx, 'target'] = 0
-                demoted += 1
-
-        logger.info(f"  Filtro '{tmb_risk_filter}': {demoted:,} leads demovidos (risco fora de {allowed_risk})")
-        logger.info(f"  Positivos restantes: {dataset_v1_devclub['target'].sum():,}")
-        logger.info("")
-        logger.info("=" * 80)
     # === CÉLULA 17: Janela de Conversão ===
     logger.info("")
     logger.info(f"CÉLULA 17: APLICAR JANELA DE CONVERSÃO DE 20 DIAS")
@@ -767,6 +735,51 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         dataset_v1_devclub_encoded.to_pickle(os.path.join(_fixtures, 'snapshot_encoding_output.pkl'))
         logger.info("  [PARITY] snapshot_encoding_output.pkl salvo")
 
+    if save_encoded:
+        _encoded_path = os.path.join(os.path.dirname(__file__), '..', 'compare_encoded.parquet')
+        _encoded_path = os.path.abspath(_encoded_path)
+        df_encoded_with_date = dataset_v1_devclub_encoded.copy()
+        df_encoded_with_date['__Data__'] = pd.to_datetime(dataset_v1_devclub['Data'], errors='coerce').values
+        df_encoded_with_date.to_parquet(_encoded_path, index=False)
+        logger.info(f"  [compare_models] Dataset encodado salvo em: {_encoded_path}")
+
+    # === Pesos por tipo de comprador (calculado antes do tuning para uso em ambos) ===
+    PESOS_COMPRADOR = {
+        'guru':    1.00,   # Guru: à vista, 100% recebido
+        'tmb_baixo': 0.84, # TMB Baixo: 83.5% recebido
+        'tmb_medio': 0.67, # TMB Médio: 67.1% recebido
+        'tmb_alto':  0.49, # TMB Alto: 48.6% recebido
+        'tmb_sem':   0.42, # TMB Sem class.: 42.1% recebido
+    }
+
+    def _get_peso(row):
+        if row.get('target', 0) == 0:
+            return 1.0
+        email = str(row.get('E-mail', '')).strip().lower()
+        risk = tmb_risk_lookup.get(email)
+        if risk is None:
+            return PESOS_COMPRADOR['guru']   # não está no lookup TMB → Guru
+        mapa = {'Baixo': 'tmb_baixo', 'Médio': 'tmb_medio', 'Alto': 'tmb_alto'}
+        return PESOS_COMPRADOR.get(mapa.get(risk, 'tmb_sem'), PESOS_COMPRADOR['tmb_sem'])
+
+    if use_buyer_weights:
+        buyer_weights = dataset_v1_devclub.apply(_get_peso, axis=1)
+        buyer_weights.index = dataset_v1_devclub_encoded.index
+    else:
+        buyer_weights = None
+
+    # Hiperparâmetros padrão do modelo (baseline real para comparação no tuning)
+    DEFAULT_HYPERPARAMS = {
+        'n_estimators': 300,
+        'max_depth': 8,
+        'min_samples_split': 2,
+        'min_samples_leaf': 1,
+        'max_features': 'sqrt',
+        'class_weight': 'balanced',
+        'random_state': 42,
+        'n_jobs': -1,
+    }
+
     # === HYPERPARAMETER TUNING (opcional) ===
     melhores_params = None
     if tune_hyperparams:
@@ -776,7 +789,9 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         resultado_tuning = hyperparameter_tuning(
             dataset_v1_devclub_encoded,
             dataset_v1_devclub,
-            grid_size=grid_size
+            baseline_params=DEFAULT_HYPERPARAMS,
+            grid_size=grid_size,
+            buyer_weights=buyer_weights,
         )
 
         if resultado_tuning and resultado_tuning['usar_tunado']:
@@ -795,6 +810,13 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info(f"CÉLULA 21: TREINO E REGISTRO DO MODELO")
     logger.info("")
 
+    if use_buyer_weights:
+        compradores_mask = dataset_v1_devclub['target'] == 1
+        peso_medio = buyer_weights[compradores_mask].mean()
+        logger.info(f"  Pesos ativos — peso médio compradores: {peso_medio:.3f} (Guru=1.0, TMB Alto=0.49)")
+    else:
+        logger.info(f"  Pesos desabilitados (--no-weights) — todos compradores com peso 1.0")
+
     resultado_registro_devclub = registrar_features_e_modelo_devclub(
         dataset_v1_devclub_encoded,
         dataset_v1_devclub,
@@ -807,7 +829,8 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         split_method=split_method,
         set_active=set_active,
         recall_metrics=recall_metrics,
-        missing_rates_baseline=missing_rates_baseline
+        missing_rates_baseline=missing_rates_baseline,
+        buyer_weights=buyer_weights
     )
 
     cell_timers['Célula 21'] = time.time() - cell_start
@@ -958,16 +981,28 @@ if __name__ == "__main__":
         help='Nível de verbosidade dos logs: silent (apenas erros), minimal (warnings+erros), normal (info+warnings+erros), debug (tudo incluindo análises detalhadas) - padrão: normal'
     )
     parser.add_argument(
-        '--include-api-data',
+        '--no-api-data',
         action='store_true',
         default=False,
-        help='Incluir dados da API Guru além dos arquivos locais (padrão: False)'
+        help='Desligar busca de dados da API Guru e Google Sheets (usar apenas arquivos locais)'
     )
     parser.add_argument(
         '--no-sheets-api',
         action='store_true',
         default=False,
         help='Desligar busca de leads via Google Sheets API (usar quando os leads já foram baixados como Excel). Relevante apenas com --include-api-data'
+    )
+    parser.add_argument(
+        '--no-weights',
+        action='store_true',
+        default=False,
+        help='Desabilitar sample weights por tipo de comprador (treino sem ponderação, baseline)'
+    )
+    parser.add_argument(
+        '--save-encoded',
+        action='store_true',
+        default=False,
+        help='Salvar dataset encodado em compare_encoded.parquet para uso em compare_models.py'
     )
     parser.add_argument(
         '--api-start-date',
@@ -995,8 +1030,10 @@ if __name__ == "__main__":
         set_active=args.set_active,
         medium_strategy=args.medium_strategy,
         verbosity=args.verbosity,
-        include_api_data=args.include_api_data,
+        include_api_data=not args.no_api_data,
         include_sheets_api=not args.no_sheets_api,
         api_start_date=args.api_start_date,
-        api_end_date=args.api_end_date
+        api_end_date=args.api_end_date,
+        use_buyer_weights=not args.no_weights,
+        save_encoded=args.save_encoded
     )
