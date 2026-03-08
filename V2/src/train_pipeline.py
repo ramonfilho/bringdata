@@ -35,9 +35,7 @@ from src.data_processing.column_unification_refactored import (
 )
 from src.data_processing.category_unification import unificar_categorias_completo
 from src.data_processing.feature_removal import remover_features_desnecessarias, listar_colunas_restantes
-from src.core.client_config import ClientConfig
-from src.core.utm import unify_utm
-from src.data_processing.utm_training import verificar_consistencia_utm  # verificação de consistência mantida
+from src.data_processing.utm_training import unificar_utm_source_term, verificar_consistencia_utm
 from src.data_processing.medium_training import extrair_publico_medium
 from src.data_processing.medium_production_training import unificar_medium_para_producao
 from src.data_processing.dataset_versioning_training import criar_dataset_pos_cutoff, disponibilizar_dataset
@@ -203,10 +201,6 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         # FileHandlers são fechados automaticamente ao finalizar
 
     atexit.register(cleanup)
-
-    # Carregar ClientConfig — usado progressivamente à medida que core/ é implementado
-    _config_path = os.path.join(os.path.dirname(__file__), '..', 'configs', 'clients', 'devclub.yaml')
-    client_config = ClientConfig.from_yaml(os.path.abspath(_config_path))
 
     logger.info("")
     logger.info("PIPELINE DE TREINO")
@@ -565,7 +559,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         df_features_removidas.to_pickle(os.path.join(_fixtures, 'snapshot_utm_input.pkl'))
         logger.info("  [PARITY] snapshot_utm_input.pkl salvo")
 
-    df_utm_unificado = unify_utm(df_features_removidas, client_config.utm)
+    df_utm_unificado = unificar_utm_source_term(df_features_removidas)
 
     if capture_parity_snapshots:
         df_utm_unificado.to_pickle(os.path.join(_fixtures, 'snapshot_utm_output.pkl'))
