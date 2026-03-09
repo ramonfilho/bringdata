@@ -120,6 +120,8 @@ class FeatureConfig:
     columns_to_remove_post_cutoff: Optional[List[str]] = None  # #39
     columns_to_drop_after_fe: Optional[List[str]] = None    # #48
     pesquisa_name_column: Optional[str] = None              # #47
+    pesquisa_phone_column: Optional[str] = None             # #42 (também em MatchingConfig)
+    telefone_comprimento_keep_values: Optional[List[int]] = None  # #157 — valores válidos (ex: [9, 11]); resto → 'outros'
     ordering_rules: Optional[Dict[str, Any]] = None         # #2
     survey_column_stems: Optional[List[str]] = None         # #52
     utm_feature_prefixes_for_registry: Optional[List[str]] = None   # #65
@@ -140,6 +142,7 @@ class EncodingConfig:
 class ModelConfig:
     """Treino e artefatos de modelo. (#1, #10, #53, #54, #55, #56, #71, #72, #89)"""
     hyperparameters: Optional[Dict[str, Any]] = None        # #1
+    buyer_weights: Optional[Dict[str, float]] = None        # #158 — PESOS_COMPRADOR por decil (dev/retreino)
     mlflow_experiment_name: Optional[str] = None            # #10
     mlflow_experiment_id: Optional[str] = None              # #71
     model_name_template: Optional[str] = None               # #53

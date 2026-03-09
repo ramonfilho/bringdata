@@ -656,10 +656,13 @@ Duplicatas encontradas (resolução via campo já mapeado):
 
 1. ~~`core/utm.py`~~ ✅ — implementado, imports atualizados nos 3 pipelines, `utm_training.py` e `utm_unification.py` removidos. Paridade validada via parity audit (479 divergências intencionais documentadas).
    - Hardcodes #35, #63, #67 + `source_to_channel_mapping` → `configs/clients/devclub.yaml`
-2. `core/feature_engineering.py` — unifica guards de colunas; hardcodes #41, #42, #47, #48 → `FeatureConfig`
-   - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py`
-3. `core/encoding.py` — versão produção é canônica; hardcodes #49, #50, #51, #64, #70, #71 → `EncodingConfig`
-   - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`
+2. ~~`core/feature_engineering.py`~~ ✅ — implementado, imports atualizados em `train_pipeline.py` e `monitoring/orchestrator.py`. `feature_engineering_training.py` e `engineering.py` removidos. Smoke test passando.
+   - Estratégia train-first: `production_pipeline.py` mantém import antigo até próximo retreino.
+   - Hardcodes #47, #48 → `configs/clients/devclub.yaml`
+3. ~~`core/encoding.py`~~ ✅ — implementado, import atualizado em `train_pipeline.py`, `encoding_training.py` removido. Divergências estruturais documentadas e intencionais (`clean_column_names()` normaliza para snake_case; nomes ordinais longos vs curtos resolvidos ao migrar category_unification).
+   - Estratégia train-first: produção (`production_pipeline.py`) mantém import antigo até próximo retreino.
+   - `column_name_corrections` no YAML são transitórios — remover após próximo retreino.
+   - Hardcodes #49, #50, #51, #64, #70, #71 → `configs/clients/devclub.yaml`
 4. `core/medium.py` — consolida 3 arquivos; hardcodes #7, #36, #37 → `MediumConfig` (etapa mais trabalhosa)
    - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py`
 5. `core/preprocessing.py` — sequência canônica única; hardcodes #34, #68, #69 → `FeatureConfig`/`IngestionConfig`
@@ -704,6 +707,42 @@ Ao concluir o último componente: `configs/clients/devclub.yaml` está completam
 > | Parity test (acima) | Implementação idêntica entre treino e nova `core/` | Snapshot real de treino |
 > | Shadow mode (acima) | Nova `core/` não quebra com dados reais de produção | Leads reais em produção |
 > | Métricas do modelo (`validate_ml_performance.py`) | Performance do modelo preservada após refactor | Dataset histórico |
+
+---
+
+## Modelos candidatos à produção (baseline de referência)
+
+Identificados em 2026-03-08 como referência para validação pós-refactor de encoding.
+
+**Como rastrear:** os runs MLflow têm `run_id="1"` em todos os metadados (bug de tracking — experiment ID não separou os runs corretamente). A forma confiável de identificar os runs é pelos **arquivos de log** em `V2/outputs/training/` + **metadados MLflow** em `V2/mlruns/1/*/artifacts/model_metadata.json`, correlacionando pelo horário de `trained_at`.
+
+### Modelo A — baseline sem tuning, tmb_risk_filter='all'
+
+- **Log:** `V2/outputs/training/training_20260307_143328.log`
+- **MLflow metadata:** `V2/mlruns/1/*/artifacts/model_metadata.json` com `trained_at: 2026-03-07T14:39:54`
+- **tmb_risk_filter:** `all` (7.019 leads TMB mantidos — todos os graus de risco)
+- **Hyperparameter tuning:** ativado, mas params default venceram o baseline (não adotou tunado)
+- **Hiperparâmetros:**
+  - `n_estimators: 300`, `max_depth: 8`, `min_samples_leaf: 1`, `max_features: sqrt`
+  - `class_weight: balanced`, `random_state: 42`
+- **Métricas:** AUC=0.7241, top-3 decis=63.1%
+- **Total records:** 37.544
+
+### Modelo B — tunado, tmb_risk_filter='none'
+
+- **Log:** `V2/outputs/training/training_20260307_144014.log`
+- **MLflow metadata:** `V2/mlruns/1/*/artifacts/model_metadata.json` com `trained_at: 2026-03-07T14:46:23`
+- **tmb_risk_filter:** `none` (0 leads TMB — sem filtro, exclui toda a base TMB do treino)
+- **Hyperparameter tuning:** ativado e adotado (`min_samples_leaf: 1→3`, `n_estimators: 300→200`, `max_features: sqrt→log2`)
+- **Hiperparâmetros tunados:**
+  - `n_estimators: 200`, `max_depth: 8`, `min_samples_leaf: 3`, `max_features: log2`
+  - `class_weight: balanced`, `random_state: 42`
+- **Métricas:** AUC=0.7449, top-3 decis=65.3%
+- **Total records:** 37.544
+
+**Referência de validação:** após migração de `core/encoding.py`, rodar ambos os cenários e confirmar que AUC não cai >0.5% em relação a esses valores.
+
+---
 
 ### Fase 3 — Cliente B (Semana 3–4)
 

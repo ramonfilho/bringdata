@@ -15,7 +15,7 @@ from .core.client_config import ClientConfig
 from .core.utm import unify_utm
 from .data_processing.medium_unification import unify_medium_columns
 from .data_processing.category_unification import unificar_categorias_completo
-from .features.engineering import create_derived_features
+from .core.feature_engineering import create_features as _create_features
 from .features.encoding import apply_categorical_encoding
 from .model.prediction import LeadScoringPredictor
 from .monitoring.data_quality import check_category_drift, load_training_categories, check_distribution_drift, load_training_distributions
@@ -321,7 +321,7 @@ class LeadScoringPipeline:
         available_fe_cols = [col for col in fe_input_cols if col in self.data.columns]
         logger.info(f"    Colunas disponíveis para FE: {available_fe_cols}")
 
-        self.data = create_derived_features(self.data)
+        self.data = _create_features(self.data, self._client_config.feature)
 
 
         cols_added = len(self.data.columns) - cols_before_fe

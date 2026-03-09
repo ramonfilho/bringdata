@@ -6,7 +6,7 @@ Coordena execução de todos os monitors e consolida alertas.
 
 import logging
 import pandas as pd
-from typing import List, Dict
+from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct
 import sys
@@ -17,10 +17,15 @@ from .data_quality import DataQualityMonitor
 from .operational_monitor import OperationalMonitor
 from .capi_monitor import CAPIQualityMonitor
 from .models import Alert
+from core.client_config import ClientConfig
 
 # Importar unificação de Medium (mesmo processamento que treino e produção)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data_processing.medium_unification import unify_medium_columns
+
+_DEFAULT_CONFIG_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..', '..', 'configs', 'clients', 'devclub.yaml')
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,14 +87,16 @@ class MonitoringOrchestrator:
     Orquestrador central que executa todos os monitors e consolida alertas.
     """
 
-    def __init__(self, model_path: str, db: Session):
+    def __init__(self, model_path: str, db: Session, client_config: Optional[ClientConfig] = None):
         """
         Args:
-            model_path: Caminho para pasta do modelo ativo
-            db: Sessão SQLAlchemy do PostgreSQL
+            model_path:    Caminho para pasta do modelo ativo
+            db:            Sessão SQLAlchemy do PostgreSQL
+            client_config: Configuração do cliente; se None, carrega devclub.yaml
         """
         self.model_path = model_path
         self.db = db
+        self._client_config = client_config or ClientConfig.from_yaml(_DEFAULT_CONFIG_PATH)
 
         # Inicializar monitors
         self.monitors = {
@@ -134,12 +141,9 @@ class MonitoringOrchestrator:
             # Aplicar unificação de UTM Source/Term (mesmo processamento que produção)
             # Isso garante que 'fb', 'youtube', etc sejam normalizados para 'outros'
             if 'Source' in df.columns or 'Term' in df.columns:
-                from core.client_config import ClientConfig
                 from core.utm import unify_utm
-                _config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'configs', 'clients', 'devclub.yaml')
-                _client_config = ClientConfig.from_yaml(os.path.abspath(_config_path))
                 utm_antes = df['Source'].nunique() if 'Source' in df.columns else 0
-                df = unify_utm(df, _client_config.utm)
+                df = unify_utm(df, self._client_config.utm)
                 utm_depois = df['Source'].nunique() if 'Source' in df.columns else 0
                 logger.info(f" UTM unificado: Source {utm_antes}  {utm_depois} categorias únicas")
 
@@ -208,10 +212,9 @@ class MonitoringOrchestrator:
             logger.info(f" Campos técnicos removidos: {campos_removidos} (total: {colunas_depois_tech})")
 
             # Aplicar feature engineering (mesmo processamento que produção)
-            # Cria: nome_valido, email_valido, telefone_valido, telefone_comprimento, nome_tem_sobrenome
-            from features.engineering import create_derived_features
+            from core.feature_engineering import create_features as _fe_create
             colunas_antes_fe = len(df.columns)
-            df = create_derived_features(df)
+            df = _fe_create(df, self._client_config.feature)
             colunas_depois_fe = len(df.columns)
             saldo_fe = colunas_depois_fe - colunas_antes_fe
             logger.info(f" Features derivadas criadas: {saldo_fe:+d} colunas (total: {colunas_depois_fe})")

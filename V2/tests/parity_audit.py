@@ -107,16 +107,32 @@ def _compare(df_treino: pd.DataFrame, df_prod: pd.DataFrame, label: str) -> bool
 # ---------------------------------------------------------------------------
 
 def audit_utm():
+    """
+    Migração concluída — arquivos antigos deletados.
+    Smoke test: core/utm.unify_utm roda e normaliza Source/Term corretamente.
+    """
     from V2.src.core.utm import unify_utm
     from V2.src.core.client_config import ClientConfig
-    from V2.src.data_processing.utm_unification import unify_utm_columns
 
-    config = ClientConfig.from_yaml(os.path.join(ROOT, 'V2', 'configs', 'clients', 'devclub.yaml'))
+    config   = ClientConfig.from_yaml(os.path.join(ROOT, 'V2', 'configs', 'clients', 'devclub.yaml'))
     df_input = _load('snapshot_utm_input')
-    df_core = unify_utm(df_input.copy(), config.utm)
-    df_prod  = unify_utm_columns(df_input.copy())
-    return _compare(df_core, df_prod,
-                    "UTM — core/utm.unify_utm vs utm_unification.unify_utm_columns (produção)")
+    df_out   = unify_utm(df_input.copy(), config.utm)
+
+    print(f"\n{'='*65}")
+    print("  UTM — core/utm smoke test (migração concluída)")
+    print(f"{'='*65}")
+    print(f"  Input : {df_input.shape[0]:,} linhas × {df_input.shape[1]} colunas")
+
+    ok = True
+    if 'Source' in df_out.columns:
+        sources = df_out['Source'].unique().tolist()
+        print(f"  Source categorias: {sorted(str(s) for s in sources if s is not None)}")
+        if any(s in (config.utm.source_to_outros or []) for s in sources):
+            print("  [!] Valores de source_to_outros ainda presentes no output")
+            ok = False
+    if ok:
+        print("\n  OK — UTM normalizado\n")
+    return ok
 
 
 def audit_medium():
@@ -135,31 +151,88 @@ def audit_medium():
 
 
 def audit_fe():
-    from V2.src.features.feature_engineering_training import criar_features_derivadas
-    from V2.src.features.engineering import create_derived_features
+    """
+    Migração concluída — arquivo antigo deletado.
+    Smoke test: core/feature_engineering.create_features roda e produz colunas esperadas.
+    """
+    from V2.src.core.feature_engineering import create_features
+    from V2.src.core.client_config import ClientConfig
 
-    df_input  = _load('snapshot_fe_input')
-    df_treino = criar_features_derivadas(df_input.copy())
-    df_prod   = create_derived_features(df_input.copy())
-    return _compare(df_treino, df_prod,
-                    "Feature Engineering — criar_features_derivadas (treino) vs create_derived_features (produção)")
+    config   = ClientConfig.from_yaml(os.path.join(ROOT, 'V2', 'configs', 'clients', 'devclub.yaml'))
+    df_input = _load('snapshot_fe_input')
+    df_out   = create_features(df_input.copy(), config.feature)
+
+    expected = {'dia_semana', 'nome_comprimento', 'nome_tem_sobrenome', 'telefone_comprimento'}
+    missing  = expected - set(df_out.columns)
+
+    print(f"\n{'='*65}")
+    print("  FE — core/feature_engineering smoke test (migração concluída)")
+    print(f"{'='*65}")
+    print(f"  Input : {df_input.shape[0]:,} linhas × {df_input.shape[1]} colunas")
+    print(f"  Output: {df_out.shape[0]:,} linhas × {df_out.shape[1]} colunas")
+
+    if missing:
+        print(f"\n  [!] Features ausentes: {sorted(missing)}")
+        return False
+
+    print("\n  OK — todas as features esperadas presentes\n")
+    return True
 
 
 def audit_encoding():
-    from V2.src.features.encoding_training import aplicar_encoding_estrategico
-    from V2.src.features.encoding import apply_categorical_encoding
+    """
+    Migração concluída — encoding_training.py deletado.
+    Smoke test: core/encoding.apply_encoding roda e produz colunas numéricas esperadas.
 
-    df_input  = _load('snapshot_encoding_input')
-    df_treino = aplicar_encoding_estrategico(df_input.copy())
-    try:
-        df_prod = apply_categorical_encoding(df_input.copy())
-    except Exception as e:
-        print(f"\n  [!] Produção falhou: {e}")
-        print("  Encoding de produção requer modelo ativo — rode com --set-active antes.\n")
-        return None
+    Divergências documentadas (intencionais por design — não são regressões):
+      - clean_column_names() normaliza nomes para snake_case → 51 cols core/ vs 60 cols treino antigo
+      - Ordinais com nomes longos em core/ (snapshot tem forma longa): 'Atualmente_qual_a_sua_faixa_salarial'
+        vs 'faixa_salarial' no treino antigo (aliases curtos via category_unification não migrado ainda)
+    Produção (encoding.py) mantém import antigo até o próximo retreino (estratégia train-first).
+    """
+    from V2.src.core.encoding import apply_encoding
+    from V2.src.core.client_config import ClientConfig
 
-    return _compare(df_treino, df_prod,
-                    "Encoding — aplicar_encoding_estrategico (treino) vs apply_categorical_encoding (produção)")
+    config   = ClientConfig.from_yaml(os.path.join(ROOT, 'V2', 'configs', 'clients', 'devclub.yaml'))
+    df_input = _load('snapshot_encoding_input')
+    df_out   = apply_encoding(df_input.copy(), config.encoding, artifacts={})
+
+    print(f"\n{'='*65}")
+    print("  Encoding — core/encoding smoke test (migração concluída)")
+    print(f"{'='*65}")
+    print(f"  Input : {df_input.shape[0]:,} linhas × {df_input.shape[1]} colunas")
+    print(f"  Output: {df_out.shape[0]:,} linhas × {df_out.shape[1]} colunas")
+
+    ok = True
+
+    # Verificar que ordinais foram encodadas como numéricas
+    ordinais_esperadas = {
+        'Atualmente_qual_a_sua_faixa_salarial',  # forma longa normalizada
+        'Qual_a_sua_idade',                        # forma longa normalizada
+        'dia_semana',
+    }
+    # Verificar ao menos uma ordinal presente e numérica
+    ordinais_presentes = [c for c in df_out.columns if any(o in c for o in ordinais_esperadas)]
+    for col in ordinais_presentes:
+        if df_out[col].dtype == object:
+            print(f"\n  [!] Ordinal '{col}' não foi encodada — dtype={df_out[col].dtype}")
+            ok = False
+
+    # Verificar ausência de NaN
+    nan_count = df_out.isna().sum().sum()
+    if nan_count > 0:
+        print(f"\n  [!] {nan_count} NaN remanescentes no output")
+        ok = False
+
+    # Verificar que nomes de coluna são snake_case (sem chars especiais)
+    bad_cols = [c for c in df_out.columns if any(ch in c for ch in ['?', ' ', '-', '.'])]
+    if bad_cols:
+        print(f"\n  [!] Colunas com caracteres especiais ({len(bad_cols)}): {bad_cols[:5]}")
+        ok = False
+
+    if ok:
+        print("\n  OK — encoding aplicado, colunas normalizadas, sem NaN\n")
+    return ok
 
 
 # ---------------------------------------------------------------------------

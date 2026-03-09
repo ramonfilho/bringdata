@@ -37,7 +37,6 @@ from src.data_processing.category_unification import unificar_categorias_complet
 from src.data_processing.feature_removal import remover_features_desnecessarias, listar_colunas_restantes
 from src.core.client_config import ClientConfig
 from src.core.utm import unify_utm
-from src.data_processing.utm_training import verificar_consistencia_utm  # verificação de consistência mantida
 from src.data_processing.medium_training import extrair_publico_medium
 from src.data_processing.medium_production_training import unificar_medium_para_producao
 from src.data_processing.dataset_versioning_training import criar_dataset_pos_cutoff, disponibilizar_dataset
@@ -48,8 +47,8 @@ from src.matching.matching_email_with_validation import fazer_matching_email_wit
 from src.matching.matching_email_telefone import fazer_matching_email_telefone
 from src.matching.matching_unified import match_leads_to_sales_unified
 from src.data_processing.conversion_window import aplicar_janela_conversao
-from src.features.feature_engineering_training import criar_features_derivadas
-from src.features.encoding_training import aplicar_encoding_estrategico
+from src.core.feature_engineering import create_features as _create_features
+from src.core.encoding import apply_encoding as _apply_encoding
 from src.model.training_model import registrar_features_e_modelo_devclub
 from src.model.hyperparameter_tuning import hyperparameter_tuning
 from src.monitoring.data_quality import capture_training_categories, capture_training_distributions, calculate_missing_rate
@@ -571,8 +570,6 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         df_utm_unificado.to_pickle(os.path.join(_fixtures, 'snapshot_utm_output.pkl'))
         logger.info("  [PARITY] snapshot_utm_output.pkl salvo")
 
-    # Verificar consistência
-    verificar_consistencia_utm(df_utm_unificado)
 
     logger.info("=" * 80)
     # === CÉLULA 11: Unificação de UTM Medium ===
@@ -693,7 +690,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         dataset_v1_devclub.to_pickle(os.path.join(_fixtures, 'snapshot_fe_input.pkl'))
         logger.info("  [PARITY] snapshot_fe_input.pkl salvo")
 
-    dataset_v1_devclub_fe = criar_features_derivadas(dataset_v1_devclub)
+    dataset_v1_devclub_fe = _create_features(dataset_v1_devclub, client_config.feature)
 
     if capture_parity_snapshots:
         dataset_v1_devclub_fe.to_pickle(os.path.join(_fixtures, 'snapshot_fe_output.pkl'))
@@ -735,7 +732,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         dataset_v1_devclub_fe.to_pickle(os.path.join(_fixtures, 'snapshot_encoding_input.pkl'))
         logger.info("  [PARITY] snapshot_encoding_input.pkl salvo")
 
-    dataset_v1_devclub_encoded = aplicar_encoding_estrategico(dataset_v1_devclub_fe, medium_strategy=medium_strategy)
+    dataset_v1_devclub_encoded = _apply_encoding(dataset_v1_devclub_fe, client_config.encoding, artifacts={})
 
     if capture_parity_snapshots:
         dataset_v1_devclub_encoded.to_pickle(os.path.join(_fixtures, 'snapshot_encoding_output.pkl'))
