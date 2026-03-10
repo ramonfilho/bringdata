@@ -20,6 +20,16 @@ import argparse
 import sys
 import os
 from pathlib import Path
+
+# Carregar variáveis de ambiente do V2/.env automaticamente
+_env_file = Path(__file__).parent.parent.parent / '.env'
+if _env_file.exists():
+    with open(_env_file) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith('#') and '=' in _line:
+                _k, _v = _line.split('=', 1)
+                os.environ.setdefault(_k.strip(), _v.strip())
 from datetime import datetime, timedelta
 from glob import glob
 import yaml
@@ -808,12 +818,16 @@ def main():
         logger.info(f"   Período customizado: {start_date} a {end_date}")
 
     # Derivar pasta do período automaticamente se não fornecida
+    # Usa datas de VENDAS quando disponíveis (padrão histórico), senão captação
     if args.periodo_folder:
         periodo_folder = args.periodo_folder
         logger.info(f"    Pasta do período (manual): {periodo_folder}")
+    elif args.sales_start_date and args.sales_end_date:
+        periodo_folder = get_periodo_folder_from_dates(args.sales_start_date, args.sales_end_date)
+        logger.info(f"    Pasta do período (derivada de vendas): {periodo_folder}")
     else:
         periodo_folder = get_periodo_folder_from_dates(start_date, end_date)
-        logger.info(f"    Pasta do período (derivada): {periodo_folder}")
+        logger.info(f"    Pasta do período (derivada de captação): {periodo_folder}")
 
     # Determinar caminhos baseados na pasta do período
     periodo_base_path = f'V2/outputs/validation/{periodo_folder}'
@@ -877,139 +891,273 @@ def main():
         lead_loader = LeadDataLoader()
         use_cache = not args.no_cache
 
-        # Carregar Pesquisa do Google Sheets (carrega AMBAS as abas)
-        survey_df = lead_loader.load_leads_from_sheets(
-            start_date=start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d'),
-            end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d'),
-            use_cache=use_cache
-        )
-        logger.info(f"    {len(survey_df)} leads da pesquisa carregados do Google Sheets")
+        # Carregar Pesquisa do Google Sheets sem filtro de data — deduplicar sobre o
+        # dataset completo e filtrar por período depois (garante contagem consistente)
+        survey_df_all = lead_loader.load_leads_from_sheets(use_cache=use_cache)
+        _s = start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d')
+        _e = end_date   if isinstance(end_date,   str) else end_date.strftime('%Y-%m-%d')
+        if not survey_df_all.empty and 'data_captura' in survey_df_all.columns:
+            survey_df = survey_df_all[
+                (survey_df_all['data_captura'] >= pd.to_datetime(_s)) &
+                (survey_df_all['data_captura'] <  pd.to_datetime(_e) + pd.Timedelta(days=1))
+            ].copy()
+        else:
+            survey_df = survey_df_all
+        logger.info(f"    {len(survey_df_all)} leads totais nas planilhas → {len(survey_df)} no período")
 
-        survey_emails = set(survey_df['email'].unique())
-        logger.info(f"    {len(survey_emails)} emails únicos na pesquisa")
+        if survey_df.empty or 'email' not in survey_df.columns:
+            logger.warning("    Nenhum lead carregado do Google Sheets para o período.")
+            leads_df = pd.DataFrame()
+            lead_source_stats = {'survey_leads': 0, 'capi_leads_extras': 0, 'capi_leads_total': 0}
+        else:
+            survey_emails = set(survey_df['email'].unique())
+            logger.info(f"    {len(survey_emails)} emails únicos na pesquisa")
 
-        # Buscar e combinar com leads CAPI extras (mesma lógica do modo CSV)
-        # WORKAROUND: usar curl (requests estava travando)
-        import subprocess
-        import json as json_module
-        import re
+            # Buscar leads CAPI extras (Cloud SQL backup + Railway PostgreSQL)
+            import re
 
-        logger.info("    Buscando leads no CAPI...")
-
-        try:
-            # Usar localhost se rodando dentro do container (chamado via endpoint /validation/weekly)
-            # Senão usar URL pública (execução standalone)
-            API_URL = os.getenv('INTERNAL_API_URL', 'https://smart-ads-api-12955519745.us-central1.run.app')
+            # Railway começa em 18/02/2026 — antes disso usar o backup do Cloud SQL
+            RAILWAY_CUTOVER = '2026-02-18'
+            CLOUDSQL_BACKUP = Path(__file__).parent.parent.parent / 'data' / 'backups' / 'cloud-sql-final-export-20260225.sql'
 
             start_str = start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d')
-            end_str = end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d')
+            end_str   = end_date   if isinstance(end_date,   str) else end_date.strftime('%Y-%m-%d')
 
-            url = f"{API_URL}/webhook/lead_capture/recent?start_date={start_str}&end_date={end_str}&limit=10000"
-            logger.info(f"    URL CAPI: {url}")
+            capi_leads_data = []
 
-            result_curl = subprocess.run(
-                ['curl', '-s', '--max-time', '30', url],
-                capture_output=True,
-                text=True,
-                timeout=35
-            )
+            # --- Fonte 1: Cloud SQL backup (para datas < 18/02/2026) ---
+            if start_str < RAILWAY_CUTOVER and CLOUDSQL_BACKUP.exists():
+                backup_end = min(end_str, '2026-02-17')
+                logger.info(f"    Buscando leads no Cloud SQL backup ({start_str} a {backup_end})...")
 
+                # Colunas: id,email,name,phone,fbp,fbc,event_id,user_agent,client_ip,
+                #          event_source_url,utm_source,utm_medium,utm_campaign,utm_term,
+                #          utm_content,tem_comp,created_at,...,lead_score,decil,...
+                COL = dict(email=1, name=2, phone=3, fbp=4, fbc=5,
+                           utm_source=10, utm_medium=11, utm_campaign=12,
+                           utm_term=13, utm_content=14, created_at=16,
+                           lead_score=36, decil=37)
 
-            if result_curl.returncode == 0:
-                result = json_module.loads(result_curl.stdout)
-                capi_leads_data = result.get('leads', [])
+                in_copy = False
+                backup_count = 0
+                with open(CLOUDSQL_BACKUP, 'r', encoding='utf-8') as bf:
+                    for line in bf:
+                        if 'COPY public.leads_capi' in line:
+                            in_copy = True
+                            continue
+                        if not in_copy:
+                            continue
+                        if line.strip() == '\\.':
+                            break
+                        cols = line.rstrip('\n').split('\t')
+                        if len(cols) <= COL['created_at']:
+                            continue
+                        dt = cols[COL['created_at']][:10]
+                        if dt < start_str or dt > backup_end:
+                            continue
+                        def _val(c):
+                            v = cols[c] if c < len(cols) else '\\N'
+                            return None if v == '\\N' else v
+                        decil_raw = _val(COL['decil'])
+                        ls_raw    = _val(COL['lead_score'])
+                        capi_leads_data.append({
+                            'email':        _val(COL['email']),
+                            'name':         _val(COL['name']),
+                            'phone':        _val(COL['phone']),
+                            'utm_campaign': _val(COL['utm_campaign']),
+                            'utm_medium':   _val(COL['utm_medium']),
+                            'utm_source':   _val(COL['utm_source']),
+                            'utm_content':  _val(COL['utm_content']),
+                            'utm_term':     _val(COL['utm_term']),
+                            'lead_score':   float(ls_raw) if ls_raw else None,
+                            'decil':        f"D{decil_raw}" if decil_raw else None,
+                            'fbc':          _val(COL['fbc']),
+                            'fbp':          _val(COL['fbp']),
+                            'created_at':   _val(COL['created_at']),
+                        })
+                        backup_count += 1
+                logger.info(f"    Cloud SQL backup: {backup_count} leads encontrados")
+            elif start_str < RAILWAY_CUTOVER and not CLOUDSQL_BACKUP.exists():
+                logger.warning(f"    Backup Cloud SQL não encontrado em {CLOUDSQL_BACKUP}")
 
-                logger.info(f"    CAPI: {len(capi_leads_data)} leads encontrados")
-
-                if capi_leads_data:
-                    # Converter para DataFrame
-                    capi_df = pd.DataFrame(capi_leads_data)
-
-                    # Normalizar
-                    from src.validation.data_loader import normalizar_email, normalizar_telefone_robusto
-
-                    capi_norm = pd.DataFrame()
-                    capi_norm['email'] = capi_df['email'].apply(lambda x: normalizar_email(x) if pd.notna(x) else None)
-                    capi_norm['nome'] = capi_df.get('name', np.nan)
-                    capi_norm['telefone'] = capi_df.get('phone', np.nan).apply(
-                        lambda x: normalizar_telefone_robusto(str(x)) if pd.notna(x) else None
+            # --- Fonte 2: Railway (para datas >= 18/02/2026) ---
+            if end_str >= RAILWAY_CUTOVER:
+                railway_start = max(start_str, RAILWAY_CUTOVER)
+                end_excl = (pd.to_datetime(end_str) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                logger.info(f"    Buscando leads no Railway ({railway_start} a {end_str})...")
+                try:
+                    import pg8000.native
+                    railway_conn = pg8000.native.Connection(
+                        host=os.environ.get('RAILWAY_DB_HOST', 'shortline.proxy.rlwy.net'),
+                        port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+                        database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+                        user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+                        password=os.environ['RAILWAY_DB_PASSWORD'],
                     )
-                    capi_norm['data_captura'] = pd.to_datetime(capi_df['created_at'], errors='coerce')
-                    capi_norm['campaign'] = capi_df.get('utm_campaign', np.nan)
-                    capi_norm['source'] = capi_df.get('utm_source', np.nan)
-                    capi_norm['medium'] = capi_df.get('utm_medium', np.nan)
-                    capi_norm['term'] = capi_df.get('utm_term', np.nan)
-                    capi_norm['content'] = capi_df.get('utm_content', np.nan)
-                    capi_norm['lead_score'] = np.nan
-                    capi_norm['decile'] = None
-                    capi_norm['source_type'] = 'capi'
+                    rows = railway_conn.run(
+                        """
+                        SELECT email, "nomeCompleto", telefone,
+                               campaign, medium, source, content, term,
+                               "leadScore", decil, fbc, fbp, "createdAt"
+                        FROM "Lead"
+                        WHERE "createdAt" >= :start_date
+                          AND "createdAt" <  :end_date_excl
+                        ORDER BY "createdAt" DESC
+                        LIMIT 10000
+                        """,
+                        start_date=railway_start,
+                        end_date_excl=end_excl,
+                    )
+                    railway_conn.close()
+                    railway_leads = [
+                        {
+                            'email':        r[0],
+                            'name':         r[1],
+                            'phone':        r[2],
+                            'utm_campaign': r[3],
+                            'utm_medium':   r[4],
+                            'utm_source':   r[5],
+                            'utm_content':  r[6],
+                            'utm_term':     r[7],
+                            'lead_score':   float(r[8]) if r[8] is not None else None,
+                            'decil':        f"D{r[9]}" if r[9] is not None else None,
+                            'fbc':          r[10],
+                            'fbp':          r[11],
+                            'created_at':   r[12],
+                        }
+                        for r in rows
+                    ]
+                    logger.info(f"    Railway: {len(railway_leads)} leads encontrados")
+                    capi_leads_data.extend(railway_leads)
+                except Exception as e:
+                    logger.warning(f"    Erro ao conectar com Railway: {e}")
 
-                    # Remover leads sem email
-                    capi_norm = capi_norm[capi_norm['email'].notna()].copy()
+            logger.info(f"    CAPI total (backup + Railway): {len(capi_leads_data)} leads")
 
-                    # FILTRO: campaign_id Meta válido
-                    def extract_campaign_id_meta(utm_campaign):
-                        if pd.isna(utm_campaign):
-                            return None
-                        match = re.search(r'\|(\d{15,})$', str(utm_campaign))
-                        return match.group(1)[:15] if match else None
+            if capi_leads_data:
+                from src.validation.data_loader import normalizar_email, normalizar_telefone_robusto
 
-                    total_antes = len(capi_norm)
-                    capi_norm['campaign_id_meta'] = capi_norm['campaign'].apply(extract_campaign_id_meta)
-                    capi_norm = capi_norm[capi_norm['campaign_id_meta'].notna()].copy()
+                capi_df = pd.DataFrame(capi_leads_data)
+                capi_norm = pd.DataFrame()
+                capi_norm['email'] = capi_df['email'].apply(lambda x: normalizar_email(x) if pd.notna(x) else None)
+                capi_norm['nome'] = capi_df.get('name', np.nan)
+                capi_norm['telefone'] = capi_df.get('phone', np.nan).apply(
+                    lambda x: normalizar_telefone_robusto(str(x)) if pd.notna(x) else None
+                )
+                capi_norm['data_captura'] = pd.to_datetime(capi_df['created_at'], errors='coerce')
+                capi_norm['campaign'] = capi_df.get('utm_campaign', np.nan)
+                capi_norm['source'] = capi_df.get('utm_source', np.nan)
+                capi_norm['medium'] = capi_df.get('utm_medium', np.nan)
+                capi_norm['term'] = capi_df.get('utm_term', np.nan)
+                capi_norm['content'] = capi_df.get('utm_content', np.nan)
+                capi_norm['lead_score'] = capi_df.get('lead_score', np.nan)
+                capi_norm['decile'] = capi_df.get('decil', None)
+                capi_norm['source_type'] = 'capi'
 
-                    removidos = total_antes - len(capi_norm)
-                    if removidos > 0:
-                        logger.info(f"    Filtrado: {removidos} sem campaign_id Meta ({len(capi_norm)} restaram)")
+                capi_norm = capi_norm[capi_norm['email'].notna()].copy()
 
-                    # Leads CAPI que NÃO estão na pesquisa
-                    capi_emails = set(capi_norm['email'].unique())
-                    capi_extras = capi_emails - survey_emails
-                    capi_extra_leads = capi_norm[capi_norm['email'].isin(capi_extras)].copy()
+                def extract_campaign_id_meta(utm_campaign):
+                    if pd.isna(utm_campaign):
+                        return None
+                    match = re.search(r'\|(\d{15,})$', str(utm_campaign))
+                    return match.group(1)[:15] if match else None
 
-                    logger.info(f"    Leads extras do CAPI: {len(capi_extra_leads)} (não estão na pesquisa)")
+                total_antes = len(capi_norm)
+                capi_norm['campaign_id_meta'] = capi_norm['campaign'].apply(extract_campaign_id_meta)
+                capi_norm = capi_norm[capi_norm['campaign_id_meta'].notna()].copy()
+                removidos = total_antes - len(capi_norm)
+                if removidos > 0:
+                    logger.info(f"    Filtrado: {removidos} sem campaign_id Meta ({len(capi_norm)} restaram)")
 
-                    # Combinar
-                    if len(capi_extra_leads) > 0:
-                        leads_df = pd.concat([survey_df, capi_extra_leads], ignore_index=True)
-                        logger.info(f"    Total combinado: {len(leads_df)} ({len(survey_df)} pesquisa + {len(capi_extra_leads)} CAPI)")
-                    else:
-                        leads_df = survey_df
-                        logger.info(f"    Total: {len(leads_df)} (apenas pesquisa)")
+                capi_emails = set(capi_norm['email'].unique())
+                capi_extras = capi_emails - survey_emails
+                capi_extra_leads = capi_norm[capi_norm['email'].isin(capi_extras)].copy()
+                logger.info(f"    Leads extras do CAPI: {len(capi_extra_leads)} (não estão na pesquisa)")
 
-                    # Estatísticas
-                    lead_source_stats = {
-                        'survey_leads': len(survey_df),
-                        'capi_leads_extras': len(capi_extra_leads),
-                        'capi_leads_total': len(capi_norm['email'].unique())
-                    }
+                if len(capi_extra_leads) > 0:
+                    leads_df = pd.concat([survey_df, capi_extra_leads], ignore_index=True)
+                    logger.info(f"    Total combinado: {len(leads_df)} ({len(survey_df)} pesquisa + {len(capi_extra_leads)} CAPI)")
                 else:
-                    logger.info("    Nenhum lead CAPI encontrado")
                     leads_df = survey_df
-                    lead_source_stats = {
-                        'survey_leads': len(survey_df),
-                        'capi_leads_extras': 0,
-                        'capi_leads_total': 0
-                    }
-            else:
-                logger.warning(f"    Curl para API CAPI falhou")
-                leads_df = survey_df
+                    logger.info(f"    Total: {len(leads_df)} (apenas pesquisa)")
+
                 lead_source_stats = {
                     'survey_leads': len(survey_df),
-                    'capi_leads_extras': 0,
-                    'capi_leads_total': 0
+                    'capi_leads_extras': len(capi_extra_leads),
+                    'capi_leads_total': len(capi_norm['email'].unique()),
                 }
-
-        except Exception as e:
-            logger.warning(f"    Erro ao buscar CAPI: {e}")
-            leads_df = survey_df
-            lead_source_stats = {
-                'survey_leads': len(survey_df),
-                'capi_leads_extras': 0,
-                'capi_leads_total': 0
-            }
+            else:
+                logger.info("    Nenhum lead CAPI encontrado")
+                leads_df = survey_df
+                lead_source_stats = {'survey_leads': len(survey_df), 'capi_leads_extras': 0, 'capi_leads_total': 0}
 
         logger.info(f"    Estatísticas: {lead_source_stats['survey_leads']} pesquisa + {lead_source_stats['capi_leads_extras']} CAPI extras")
+
+        # --- Fonte adicional: xlsx de leads (auto-detecção por sobreposição de datas) ---
+        xlsx_leads_folder = Path('V2/outputs/validation')
+        xlsx_candidates = sorted(xlsx_leads_folder.glob('* Leads.xlsx')) + \
+                          sorted(xlsx_leads_folder.glob('*Leads.xlsx'))
+        xlsx_candidates = list(dict.fromkeys(xlsx_candidates))  # dedup mantendo ordem
+
+        if xlsx_candidates:
+            logger.info(f"    Verificando {len(xlsx_candidates)} arquivo(s) xlsx de leads...")
+            from src.validation.data_loader import normalizar_email, normalizar_telefone_robusto
+            period_start = pd.to_datetime(_s)
+            period_end   = pd.to_datetime(_e) + pd.Timedelta(days=1)
+            xlsx_extras_all = []
+
+            for xlsx_path in xlsx_candidates:
+                try:
+                    xlsx_df = pd.read_excel(xlsx_path, sheet_name='LEADS',
+                                            usecols=lambda c: c in
+                                            ['NOME','E-MAIL','TELEFONE','SOURCE','MEDIUM',
+                                             'CAMPAIGN','TERM','CONTENT','DATA'])
+                    dates = pd.to_datetime(xlsx_df['DATA'], errors='coerce')
+                    # Só carrega se houver sobreposição com o período
+                    if dates.max() < period_start or dates.min() >= period_end:
+                        continue
+
+                    xlsx_norm = pd.DataFrame()
+                    xlsx_norm['email'] = xlsx_df['E-MAIL'].apply(
+                        lambda x: normalizar_email(x) if pd.notna(x) else None)
+                    xlsx_norm['nome']     = xlsx_df.get('NOME',    pd.Series(dtype=str))
+                    xlsx_norm['telefone'] = xlsx_df['TELEFONE'].apply(
+                        lambda x: normalizar_telefone_robusto(str(x)) if pd.notna(x) else None
+                    ) if 'TELEFONE' in xlsx_df.columns else None
+                    xlsx_norm['data_captura'] = dates
+                    xlsx_norm['campaign'] = xlsx_df.get('CAMPAIGN', pd.Series(dtype=str))
+                    xlsx_norm['source']   = xlsx_df.get('SOURCE',   pd.Series(dtype=str))
+                    xlsx_norm['medium']   = xlsx_df.get('MEDIUM',   pd.Series(dtype=str))
+                    xlsx_norm['term']     = xlsx_df.get('TERM',     pd.Series(dtype=str))
+                    xlsx_norm['content']  = xlsx_df.get('CONTENT',  pd.Series(dtype=str))
+                    xlsx_norm['lead_score']  = np.nan
+                    xlsx_norm['decile']      = None
+                    xlsx_norm['source_type'] = 'xlsx'
+
+                    xlsx_norm = xlsx_norm[
+                        xlsx_norm['email'].notna() &
+                        (xlsx_norm['data_captura'] >= period_start) &
+                        (xlsx_norm['data_captura'] <  period_end)
+                    ].copy()
+
+                    existing_emails = set(leads_df['email'].dropna().unique())
+                    xlsx_extras = xlsx_norm[~xlsx_norm['email'].isin(existing_emails)].copy()
+                    logger.info(f"    {xlsx_path.name}: {len(xlsx_norm)} leads no período → {len(xlsx_extras)} extras")
+
+                    if len(xlsx_extras) > 0:
+                        xlsx_extras_all.append(xlsx_extras)
+                        existing_emails.update(xlsx_extras['email'].dropna().unique())
+
+                except Exception as e:
+                    logger.warning(f"    Erro ao processar {xlsx_path.name}: {e}")
+
+            if xlsx_extras_all:
+                all_extras = pd.concat(xlsx_extras_all, ignore_index=True)
+                leads_df = pd.concat([leads_df, all_extras], ignore_index=True)
+                lead_source_stats['xlsx_leads_extras'] = len(all_extras)
+                logger.info(f"    Total com xlsx: {len(leads_df)} (+{len(all_extras)} extras)")
+            else:
+                lead_source_stats['xlsx_leads_extras'] = 0
 
     # Vendas
     sales_loader = SalesDataLoader()
@@ -1362,17 +1510,16 @@ def main():
         # Carregar dataset COMPLETO de leads do Google Sheets (SEM filtro de período para ver histórico)
         temp_loader = LeadDataLoader()
 
-        # Primeiro: dataset do período atual (com filtro)
-        period_leads_df = temp_loader.load_leads_from_sheets(
-            start_date=start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d'),
-            end_date=end_date if isinstance(end_date, str) else end_date.strftime('%Y-%m-%d')
-        )
+        # Reusar survey_df_all já carregado no início (evita chamadas repetidas ao Sheets)
+        try:
+            period_leads_df = survey_df_all[
+                (survey_df_all['data_captura'] >= pd.to_datetime(_s)) &
+                (survey_df_all['data_captura'] <  pd.to_datetime(_e) + pd.Timedelta(days=1))
+            ].copy() if not survey_df_all.empty and 'data_captura' in survey_df_all.columns else survey_df_all
+        except Exception:
+            period_leads_df = pd.DataFrame()
 
-        # Segundo: dataset histórico completo (SEM filtro de período)
-        historical_leads_df = temp_loader.load_leads_from_sheets(
-            start_date='2020-01-01',  # Data antiga para pegar todo o histórico
-            end_date='2030-12-31'
-        )
+        historical_leads_df = survey_df_all
 
         logger.info(f"   Dataset do período: {len(period_leads_df)} leads")
         logger.info(f"   Dataset histórico: {len(historical_leads_df)} leads")
@@ -1992,7 +2139,10 @@ def main():
 
     # Adicionar prefixo baseado no tipo de relatório
     report_type_prefix = args.report_type.upper().replace('-', '_')
-    excel_filename = f"validation_report_{report_type_prefix}_{start_date}_to_{end_date}_{timestamp}.xlsx"
+    # Nome do arquivo usa datas de vendas quando disponíveis (padrão histórico)
+    _file_start = args.sales_start_date if args.sales_start_date else start_date
+    _file_end   = args.sales_end_date   if args.sales_end_date   else end_date
+    excel_filename = f"validation_report_{report_type_prefix}_{_file_start}_to_{_file_end}_{timestamp}.xlsx"
     excel_path = str(Path(output_dir) / excel_filename)
     logger.info(f"    Criando relatório: {excel_filename}")
 

@@ -1272,40 +1272,59 @@ class CAPILeadDataLoader:
 
         logger.info(f"    Pesquisa (período): {len(survey_period)} leads, {len(survey_emails)} emails únicos")
 
-        # 3. Buscar TODOS os leads do CAPI no período
-        logger.info("    Buscando leads no CAPI...")
-
-        # WORKAROUND: requests está travando, usar curl via subprocess
-        import subprocess
-        import json as json_module
-
-        url = f"{self.api_url}/webhook/lead_capture/recent?start_date={start_date}&end_date={end_date}&limit=10000"
+        # 3. Buscar TODOS os leads do CAPI no período (Railway PostgreSQL)
+        logger.info("    Buscando leads no CAPI (Railway)...")
 
         try:
-            # Usar curl com timeout de 30s
-            result_curl = subprocess.run(
-                ['curl', '-s', '--max-time', '30', url],
-                capture_output=True,
-                text=True,
-                timeout=35
+            import pg8000.native
+
+            railway_conn = pg8000.native.Connection(
+                host=os.environ.get('RAILWAY_DB_HOST', 'shortline.proxy.rlwy.net'),
+                port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+                database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+                user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+                password=os.environ['RAILWAY_DB_PASSWORD'],
             )
 
-            if result_curl.returncode == 0:
-                result = json_module.loads(result_curl.stdout)
-                response_ok = True
-            else:
-                logger.warning(f"    Curl falhou (exit code {result_curl.returncode})")
-                response_ok = False
+            rows = railway_conn.run(
+                """
+                SELECT email, "nomeCompleto", telefone,
+                       campaign, medium, source, content, term,
+                       "leadScore", decil, fbc, fbp, "createdAt"
+                FROM "Lead"
+                WHERE "createdAt" >= :start_date
+                  AND "createdAt" <  :end_date_excl
+                ORDER BY "createdAt" DESC
+                LIMIT 10000
+                """,
+                start_date=start_date,
+                end_date_excl=(
+                    pd.to_datetime(end_date) + pd.Timedelta(days=1)
+                ).strftime('%Y-%m-%d'),
+            )
+            railway_conn.close()
 
-            # response = requests.get(url, params=params, timeout=60)
+            capi_leads_data = [
+                {
+                    'email':        r[0],
+                    'name':         r[1],
+                    'phone':        r[2],
+                    'utm_campaign': r[3],
+                    'utm_medium':   r[4],
+                    'utm_source':   r[5],
+                    'utm_content':  r[6],
+                    'utm_term':     r[7],
+                    'lead_score':   float(r[8]) if r[8] is not None else None,
+                    'decil':        f"D{r[9]}" if r[9] is not None else None,
+                    'fbc':          r[10],
+                    'fbp':          r[11],
+                    'created_at':   r[12],
+                }
+                for r in rows
+            ]
+            logger.info(f"    CAPI: {len(capi_leads_data)} leads encontrados")
 
-            if response_ok:
-                # result já foi carregado acima
-                capi_leads_data = result.get('leads', [])
-
-                logger.info(f"    CAPI (período): {len(capi_leads_data)} leads")
-
-                if capi_leads_data:
+            if capi_leads_data:
                     # Converter para DataFrame
                     capi_df = pd.DataFrame(capi_leads_data)
 
@@ -1322,8 +1341,8 @@ class CAPILeadDataLoader:
                     capi_norm['medium'] = capi_df.get('utm_medium', np.nan)
                     capi_norm['term'] = capi_df.get('utm_term', np.nan)
                     capi_norm['content'] = capi_df.get('utm_content', np.nan)
-                    capi_norm['lead_score'] = np.nan
-                    capi_norm['decile'] = None
+                    capi_norm['lead_score'] = capi_df.get('lead_score', np.nan)
+                    capi_norm['decile'] = capi_df.get('decil', None)
                     capi_norm['source_type'] = 'capi'
 
                     # Remover leads sem email
@@ -1425,26 +1444,16 @@ class CAPILeadDataLoader:
                     else:
                         logger.info(f"    Total: {len(survey_period)} leads (apenas pesquisa)")
                         return survey_period, stats
-                else:
-                    logger.info("    Nenhum lead encontrado no CAPI")
-                    stats = {
-                        'survey_leads': len(survey_period),
-                        'capi_leads_total': 0,
-                        'capi_leads_extras': 0
-                    }
-                    return survey_period, stats
             else:
-                logger.warning(f"    Erro ao buscar CAPI via curl (falhou)")
-                logger.info(f"    Usando apenas pesquisa: {len(survey_period)} leads")
+                logger.info("    Nenhum lead encontrado no CAPI")
                 stats = {
                     'survey_leads': len(survey_period),
                     'capi_leads_total': 0,
                     'capi_leads_extras': 0
                 }
                 return survey_period, stats
-
         except Exception as e:
-            logger.warning(f"    Erro ao conectar com CAPI: {str(e)}")
+            logger.warning(f"    Erro ao conectar com Railway: {str(e)}")
             logger.info(f"    Usando apenas pesquisa: {len(survey_period)} leads")
             stats = {
                 'survey_leads': len(survey_period),
