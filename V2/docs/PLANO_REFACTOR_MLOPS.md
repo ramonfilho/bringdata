@@ -676,6 +676,27 @@ Ao concluir o último componente: `configs/clients/devclub.yaml` está completam
 
 **Critério de saída:** treino e produção importam 100% de `core/`; `configs/clients/devclub.yaml` completamente preenchido; `ClientConfig.from_yaml('configs/clients/devclub.yaml').validate()` passa sem erros.
 
+---
+
+### Checklist pós-retreino (antes de subir para produção)
+
+Quando o próximo retreino for executado com os componentes `core/` já migrados, os seguintes passos devem ser feitos **antes** de atualizar `production_pipeline.py`:
+
+1. **Verificar feature registry do novo modelo** — confirmar que os nomes das features estão em snake_case normalizado (sem `ã`, `ç`, `?`). Isso confirma que `core/encoding.py` foi usado no treino.
+
+2. **Atualizar imports em `production_pipeline.py`:**
+   - `from .features.engineering import ...` → `from .core.feature_engineering import create_features`
+   - `from .features.encoding import apply_categorical_encoding` → `from .core.encoding import apply_encoding`
+   - (e demais componentes já migrados no momento)
+
+3. **Limpar `encoding.column_name_corrections` em `devclub.yaml`** — esvaziar o dict `{}`. As correções existem apenas para o modelo atual (treinado com nomes históricos); o novo modelo não precisa delas.
+
+4. **Remover aliases curtos de `encoding.ordinal_variables`** — após `category_unification` migrado, as chaves `"idade"` e `"faixa_salarial"` podem ser removidas; manter apenas as formas longas.
+
+5. **Rodar parity audit completo** (`python V2/tests/parity_audit.py --function all`) contra dados reais de produção antes de liberar o deploy.
+
+6. **Confirmar que `nome_valido`, `email_valido`, `telefone_valido` NÃO aparecem** no feature registry do novo modelo — essas features foram removidas no `dev/retreino` e `core/feature_engineering.py` não as cria.
+
 > **Shadow mode por componente:** a cada módulo migrado para `core/`, rodar a versão antiga e a nova em paralelo sobre os mesmos dados reais por pelo menos 1 ciclo de scoring antes de remover a versão antiga. Divergências detectadas em produção antes do corte, não depois.
 
 > **Como executar o teste de paridade:**
