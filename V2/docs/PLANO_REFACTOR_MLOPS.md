@@ -404,6 +404,8 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 | `src/features/encoding.py` | features |
 | `src/model/prediction.py` | model |
 
+> **Investigação `prediction.py` — zeros legítimos confirmados (2026-03-10):** os "Features ausentes (preenchidas com 0)" registrados nos logs do Cloud Run (11–29 por batch) são **zeros one-hot corretos**, não erros de encoding nem naming mismatch. Testado com lead real do Railway: as 19 features com valor 1 correspondem exatamente às respostas do formulário (`O_seu_g_nero_Masculino=1`, `Tem_computador_notebook_sim=1`, `Voc_possui_cart_o_de_cr_dito_sim=1`, etc.); as 31 com valor 0 são as categorias negativas das variáveis one-hot (ex: `O_que_voc_faz_atualmente_sou_autonomo=0` porque o lead é CLT). O WARNING aparece porque o encoding gera apenas as colunas dos valores presentes no batch — categorias ausentes do batch ficam como features "missing" até o step "Garantindo features esperadas" em `encoding.py` ou `prepare_features` em `prediction.py` preenchê-las com 0. Comportamento correto por construção. Hipóteses A (race condition: lead pontuado antes da pesquisa chegar) e B (naming mismatch camelCase vs snake_case) também investigadas e descartadas na mesma sessão: JSONB `pesquisa` no Railway sempre tem 18 chaves preenchidas (0 leads com `pesquisa NULL`), e as chaves são camelCase — match exato com `railway_mapping.py`.
+
 **`monitoring/orchestrator.py` e seus módulos — ✅ varrido:**
 | Arquivo | Módulo |
 |---|---|
@@ -724,12 +726,14 @@ Com dois configs escritos manualmente (`devclub.yaml` e `clientb.yaml`), o padr�
 - Estrutura de orquestração do `train_pipeline.py` (21 células)
 - Estrutura de classe do `production_pipeline.py`
 - Arquitetura de hooks do retrain orchestrator
-- Integração MLflow
+- Integração MLflow *(ver nota abaixo)*
 - Endpoints da API e banco de dados
 - Funções de drift detection em `monitoring/data_quality.py`
 - **Algoritmos** de matching (a lógica não muda; os 6 arquivos são consolidados em `core/matching.py` sem alterar o comportamento)
 - **Algoritmo** de `category_unification.py` (o código migra para `core/category_unification.py` sem alterar a lógica)
 - `model/decil_thresholds.py`
+
+> **MLflow — problema atual e evolução:** `training_model.py` usa `sqlite:///mlflow.db` com caminho relativo. Se o script for executado fora de `V2/`, o MLflow cria um novo banco e `mlruns/` no diretório atual — o que já aconteceu (dois `mlruns/` paralelos em `smart_ads/` e `smart_ads/V2/`). **Fix imediato aplicado (2026-03-11):** trocar para caminho absoluto baseado em `Path(__file__)`. **Evolução de longo prazo:** migrar para MLflow Tracking Server remoto — backend em Cloud SQL (Postgres já existente) + artifact store em GCS. Necessário de qualquer forma quando o retreino automático rodar no Cloud Run. Fazer junto com a Sprint 3 (deploy automático).
 
 ---
 

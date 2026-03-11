@@ -807,8 +807,18 @@ def build_excel(rows: list[dict], output_path: Path):
              None, ['R$#,##0']*len(names)); r += 1
     data_row(r, 'Gasto Campanhas ML (R$)',     col('gasto_ml'),
              None, ['R$#,##0']*len(names)); r += 1
+    pct_ml = [
+        f"{ml/total*100:.1f}%" if isinstance(ml, (int,float)) and isinstance(total, (int,float)) and total > 0 else 'n/d'
+        for ml, total in zip(col('gasto_ml'), col('gasto_total'))
+    ]
+    data_row(r, '% Orçamento em ML', pct_ml,
+             bw([float(v.rstrip('%')) if isinstance(v,str) and v!='n/d' else None for v in pct_ml])); r += 1
+    data_row(r, 'Leads totais do lançamento',  col('leads_meta'),
+             None, ['#,##0']*len(names)); r += 1
     data_row(r, 'Leads em Campanhas ML',       col('leads_ml'),
              bw(col('leads_ml')), ['#,##0']*len(names)); r += 1
+    data_row(r, 'Conversões totais',           col('vendas_total'),
+             None, ['#,##0']*len(names)); r += 1
     data_row(r, 'Conversões ML Reais (Est.)',  col('conv_real'),
              bw(col('conv_real')), ['#,##0.0']*len(names)); r += 1
     taxa_conv = [
@@ -830,28 +840,9 @@ def build_excel(rows: list[dict], output_path: Path):
              bw(col('auc_prod')), ['0.0000']*len(names)); r += 1
     data_row(r, 'AUC Test Set (referência)',  col('auc_test'),
              None, ['0.0000']*len(names)); r += 1
-    delta_fills = []
-    for v in col('auc_delta'):
-        if isinstance(v, float):
-            delta_fills.append(BEST_FILL if v > 0 else (WORST_FILL if v < -0.08 else WARN_FILL))
-        else:
-            delta_fills.append(None)
-    data_row(r, 'AUC Delta (Prod − Test)', col('auc_delta'),
-             delta_fills, ['+0.0000;-0.0000;0.0000']*len(names)); r += 1
     data_row(r, 'Concentração Top 3 Decis (D8/D9/D10)',
              [f"{v:.1%}" if isinstance(v, float) else v for v in col('top3_decis')],
              bw(col('top3_decis'))); r += 1
-    data_row(r, 'Concentração Top 5 Decis (D6–D10)',
-             [f"{v:.1%}" if isinstance(v, float) else v for v in col('top5_decis')],
-             bw(col('top5_decis'))); r += 1
-    corr_fills = []
-    for v in col('corr_tmb_auc'):
-        if isinstance(v, float):
-            corr_fills.append(WORST_FILL if v < -0.8 else (BEST_FILL if v > 0.5 else WARN_FILL))
-        else:
-            corr_fills.append(None)
-    data_row(r, 'Correlação %TMB vs AUC ← negativo = TMB degrada AUC',
-             col('corr_tmb_auc'), corr_fills, ['+0.000;-0.000;0.000']*len(names)); r += 1
 
     # ── CAPI ──
     section(r, 'EVENTOS CAPI — META'); r += 1
@@ -870,9 +861,6 @@ def build_excel(rows: list[dict], output_path: Path):
         else:
             s_d10_fills.append(None)
     data_row(r, '% D10 nas Sheets ← ≥40% = alerta loop CAPI', s_d10_vals, s_d10_fills); r += 1
-    data_row(r, '% D10 no DB/Railway (verificação independente)',
-             [f"{v:.1f}%" if isinstance(v, float) else 'n/d' for v in col('d10_pct')],
-             [WORST_FILL if isinstance(v, float) and v >= 40 else None for v in col('d10_pct')]); r += 1
 
     # ── Lift por Decil — resumo no sheet principal ──
     section(r, 'LIFT POR DECIL — CONVERSÃO REAL (leads × compradores)'); r += 1
@@ -952,10 +940,6 @@ def build_excel(rows: list[dict], output_path: Path):
             else:
                 combined.append(f"{cr}  (lift {lf}x)")
         data_row(r, f'Decil {d} — taxa conv. (lift vs baseline)', combined, lift_fills); r += 1
-
-    d10d1_vals, d10d1_fills = _d10_d1_lift(rows)
-    data_row(r, 'Lift D10/D1 (vezes que D10 converte mais que D1)',
-             d10d1_vals, d10d1_fills); r += 1
 
     # ── Notas ──
     r += 1
