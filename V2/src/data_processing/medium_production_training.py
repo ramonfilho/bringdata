@@ -159,9 +159,13 @@ def unificar_medium_para_producao(
         'Interesse Python':                            'Outros',
         'Interesse Ciência da computação':             'Outros',
 
-        # Aberto — variantes
+        # Aberto — variantes (incluindo uppercase que o extrair_publico_medium preserva)
         'Aberto':             'Aberto',
+        'ABERTO':             'Aberto',
         'Aberto++AD08-1002':  'Outros',
+
+        # Valores frequentes em lançamentos recentes que não são categorias válidas
+        'MIX QUENTE':         'Outros',
 
         # Outras canonicas
         'Linguagem de programação': 'Linguagem de programação',

@@ -740,6 +740,8 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         _encoded_path = os.path.abspath(_encoded_path)
         df_encoded_with_date = dataset_v1_devclub_encoded.copy()
         df_encoded_with_date['__Data__'] = pd.to_datetime(dataset_v1_devclub['Data'], errors='coerce').values
+        if 'E-mail' in dataset_v1_devclub.columns:
+            df_encoded_with_date['__email__'] = dataset_v1_devclub['E-mail'].str.strip().str.lower().values
         df_encoded_with_date.to_parquet(_encoded_path, index=False)
         logger.info(f"  [compare_models] Dataset encodado salvo em: {_encoded_path}")
 

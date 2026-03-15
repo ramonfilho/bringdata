@@ -54,6 +54,7 @@ def unificar_utm_source_term(df_pesquisa: pd.DataFrame) -> pd.DataFrame:
         outras_sources = [
             'fb', 'teste', '[field id="utm_source"]', 'facebook-ads-SiteLink', 'utm_source',
             'manychat', 'organico', 'BIO', 'livesemanal',
+            'ig', 'org',  # presentes em utm_unification.py mas ausentes aqui
         ]
 
         for source in outras_sources:
