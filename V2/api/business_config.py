@@ -22,15 +22,15 @@ PRODUCT_VALUE = 1563.75
 # Sem fator de recall aplicado (recall_metrics=null no modelo atual)
 
 CONVERSION_RATES = {
-    "D1":  0.002048,  # 0.205% | 3 conv / 1.465 leads
-    "D2":  0.004781,  # 0.478% | 7 conv / 1.464 leads
-    "D3":  0.004781,  # 0.478% | 7 conv / 1.464 leads
-    "D4":  0.005461,  # 0.546% | 8 conv / 1.465 leads
-    "D5":  0.008880,  # 0.888% | 13 conv / 1.464 leads
-    "D6":  0.011612,  # 1.161% | 17 conv / 1.464 leads
-    "D7":  0.014334,  # 1.433% | 21 conv / 1.465 leads
-    "D8":  0.015710,  # 1.571% | 23 conv / 1.464 leads
-    "D9":  0.019126,  # 1.913% | 28 conv / 1.464 leads
+    "D01": 0.002048,  # 0.205% | 3 conv / 1.465 leads
+    "D02": 0.004781,  # 0.478% | 7 conv / 1.464 leads
+    "D03": 0.004781,  # 0.478% | 7 conv / 1.464 leads
+    "D04": 0.005461,  # 0.546% | 8 conv / 1.465 leads
+    "D05": 0.008880,  # 0.888% | 13 conv / 1.464 leads
+    "D06": 0.011612,  # 1.161% | 17 conv / 1.464 leads
+    "D07": 0.014334,  # 1.433% | 21 conv / 1.465 leads
+    "D08": 0.015710,  # 1.571% | 23 conv / 1.464 leads
+    "D09": 0.019126,  # 1.913% | 28 conv / 1.464 leads
     "D10": 0.055973,  # 5.597% | 82 conv / 1.465 leads
 }
 
