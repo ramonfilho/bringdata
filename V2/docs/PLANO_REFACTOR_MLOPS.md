@@ -7,6 +7,38 @@
 
 ---
 
+> ## ⚠️ AÇÃO URGENTE — PRAZO: 15/04/2026
+>
+> **Retreino com importance weighting (DevClub)**
+>
+> A campanha de controle (10–20% do orçamento fora do ML) foi ativada em
+> 15/03/2026. A partir desse momento, o dataset começa a acumular dados de
+> leads captados por um perfil menos enviesado — o insumo necessário para
+> o retreino com pesos.
+>
+> **Por quê é urgente:** foi confirmado na reunião de 11/03/2026 que o modelo
+> sofre feedback loop ativo (D10 chegou a 41% dos leads no LF45, vs 10%
+> esperado). O modelo atual foi treinado em dados já enviesados: o Meta
+> entregou predominantemente para perfis D10, o que super-representa esse
+> grupo no treino e sub-representa D1–D6. Sem correção, o modelo continuará
+> otimizando para um público progressivamente mais estreito.
+>
+> **O que fazer:**
+> 1. Após o LF46 encerrar (~2 semanas), coletar os leads da campanha de
+>    controle como amostra menos enviesada.
+> 2. Retreinar usando importance weighting: atribuir peso maior aos leads
+>    provenientes da campanha de controle e peso menor aos leads D10
+>    sobre-representados, numa janela deslizante de 90 dias.
+> 3. Avaliar se a distribuição de decis voltou a se aproximar da uniforme
+>    (alerta: D10 > 40% indica loop ainda ativo).
+> 4. Implementar como hook no `retraining_orchestrator.py` para que os
+>    pesos sejam calculados automaticamente a cada retreino mensal.
+>
+> **Critério de conclusão:** modelo retreinado com pesos, D10 estável em
+> dois lançamentos consecutivos abaixo do limiar de 40%.
+
+---
+
 ## 1. Contexto e Motivação
 
 O sistema atual foi construído para um único cliente (DevClub). O código funciona, mas contém 5 componentes duplicados entre treino e produção com divergências conhecidas que já causaram quebra em produção. Com um segundo cliente confirmado, qualquer expansão sem refatoração resultará em triplicação de código e divergências incontroláveis.
