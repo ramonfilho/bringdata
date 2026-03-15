@@ -38,8 +38,14 @@ def unify_utm_source(df: pd.DataFrame) -> pd.DataFrame:
     # Strings vazias → NaN (evita coluna 'Source_' → 'Source' após encoding)
     df_unified['Source'] = df_unified['Source'].replace('', None)
 
+    # youtube-bio → youtube (mesmo canal, variante orgânica)
+    if 'youtube-bio' in df_unified['Source'].values:
+        count = (df_unified['Source'] == 'youtube-bio').sum()
+        df_unified.loc[df_unified['Source'] == 'youtube-bio', 'Source'] = 'youtube'
+        logger.info(f"    Source 'youtube-bio' → 'youtube': {count} leads")
+
     # Valores minoritários para unificar em "outros"
-    outras_sources = ['fb', 'teste', '[field id="utm_source"]', 'facebook-ads-sitelink', 'youtube', 'youtube-bio', 'bio', 'organico', 'ig', 'manychat', 'org']
+    outras_sources = ['fb', 'teste', '[field id="utm_source"]', 'facebook-ads-sitelink', 'bio', 'organico', 'ig', 'manychat', 'org']
 
     # Aplicar unificação e logar conversões
     conversoes = []

@@ -164,17 +164,16 @@ def create_derived_features(df: pd.DataFrame) -> pd.DataFrame:
     if 'Nome Completo' in df_fe.columns:
         df_fe['nome_comprimento'] = df_fe['Nome Completo'].astype(str).str.len()
         df_fe['nome_tem_sobrenome'] = df_fe['Nome Completo'].astype(str).str.split().str.len() >= 2
-        df_fe['nome_valido'] = df_fe['Nome Completo'].apply(validar_nome_robusto)
-
-    # Email
-    if 'E-mail' in df_fe.columns:
-        df_fe['email_valido'] = df_fe['E-mail'].apply(validar_email_robusto)
 
     # Telefone
     if 'Telefone' in df_fe.columns:
         df_fe['telefone_normalizado'] = df_fe['Telefone'].apply(normalizar_telefone_robusto)
         df_fe['telefone_valido'] = df_fe['telefone_normalizado'].notna()
         df_fe['telefone_comprimento'] = df_fe['telefone_normalizado'].astype(str).str.len()
+        # Agrupar comprimentos raros (não 9 nem 11) em 'outros'
+        df_fe['telefone_comprimento'] = df_fe['telefone_comprimento'].apply(
+            lambda x: x if x in [9, 11] else 'outros'
+        )
 
         # ANÁLISE DE TELEFONES VÁLIDOS POR ORIGEM
         logger.info(f"\n% de telefones válidos por arquivo de origem:")
@@ -202,8 +201,9 @@ def create_derived_features(df: pd.DataFrame) -> pd.DataFrame:
         'Nome Completo', 'E-mail', 'Telefone'
     ]
 
-    # Remover coluna intermediária criada durante feature engineering
-    colunas_intermediarias = ['telefone_normalizado']
+    # Remover colunas intermediárias criadas durante feature engineering
+    # nome_valido, email_valido, telefone_valido: removidos do feature space (não estão no modelo)
+    colunas_intermediarias = ['telefone_normalizado', 'nome_valido', 'email_valido', 'telefone_valido']
 
     # Verificar quais colunas de dados brutos existem antes de remover
     colunas_brutos_existentes = [col for col in colunas_dados_brutos if col in df_fe.columns]
@@ -335,7 +335,6 @@ def get_created_features_list() -> List[str]:
     """
     return [
         'dia_semana',
-        'nome_comprimento', 'nome_tem_sobrenome', 'nome_valido',
-        'email_valido',
-        'telefone_valido', 'telefone_comprimento'
+        'nome_comprimento', 'nome_tem_sobrenome',
+        'telefone_comprimento'
     ]
