@@ -16,23 +16,22 @@ PRODUCT_VALUE = 1563.75
 # =============================================================================
 
 # CONTEXTO:
-# Modelo: TMB All 15/03 (MLflow: 109f64c4e53b4d0d85f8843443f2a52f)
-# Período test set: 2026-01-30 → 2026-02-22 | 14.644 leads | 197 conversões
-# Taxas brutas do test set com isotonic regression (monotonicidade para Meta Value Optimization)
-# D7 e D8 poolados: (24+19)/(1465+1464) = 1.468% — único par não-monotônico
+# Modelo: TMB All 15/03 (MLflow: 2a98e51ca4834697bbc94ec3dd31fcf7)
+# Período test set: 2026-01-30 → 2026-02-22 | 14.644 leads | 209 conversões
+# Taxas brutas do test set — já monotônicas (modelo com 100% monotonia, sem pooling necessário)
 # Sem fator de recall aplicado (recall_metrics=null no modelo atual)
 
 CONVERSION_RATES = {
-    "D1":  0.002730,  # 0.273% | 4 conv / 1.465 leads
-    "D2":  0.003415,  # 0.342% | 5 conv / 1.464 leads
+    "D1":  0.002048,  # 0.205% | 3 conv / 1.465 leads
+    "D2":  0.004781,  # 0.478% | 7 conv / 1.464 leads
     "D3":  0.004781,  # 0.478% | 7 conv / 1.464 leads
-    "D4":  0.007509,  # 0.751% | 11 conv / 1.465 leads
-    "D5":  0.008197,  # 0.820% | 12 conv / 1.464 leads
-    "D6":  0.008197,  # 0.820% | 12 conv / 1.464 leads
-    "D7":  0.014681,  # 1.468% | poolado com D8: (24+19)/(1465+1464)
-    "D8":  0.014681,  # 1.468% | poolado com D7
-    "D9":  0.015710,  # 1.571% | 23 conv / 1.464 leads
-    "D10": 0.054608,  # 5.461% | 80 conv / 1.465 leads
+    "D4":  0.005461,  # 0.546% | 8 conv / 1.465 leads
+    "D5":  0.008880,  # 0.888% | 13 conv / 1.464 leads
+    "D6":  0.011612,  # 1.161% | 17 conv / 1.464 leads
+    "D7":  0.014334,  # 1.433% | 21 conv / 1.465 leads
+    "D8":  0.015710,  # 1.571% | 23 conv / 1.464 leads
+    "D9":  0.019126,  # 1.913% | 28 conv / 1.464 leads
+    "D10": 0.055973,  # 5.597% | 82 conv / 1.465 leads
 }
 
 # =============================================================================
