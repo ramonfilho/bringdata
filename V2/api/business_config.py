@@ -2,41 +2,36 @@
 # 1. MÉTRICAS DE PRODUTO
 # =============================================================================
 
-# Valor médio do produto (baseado em análise real de conversões - Dez 02-15, 2025)
-# Fonte: Relatórios de validação (149 conversões)
-# - Guru: R$ 1.973,95 (71 conversões = 47.7%, 100% realizado)
-# - TMB: R$ 1.354,61 (78 conversões = 52.3%, 62.11% realizado após inadimplência)
-# Valor ponderado: (71×1973.95 + 78×1354.61) / 149 = R$ 1.649,73
-PRODUCT_VALUE = 1649.73
+# Valor médio do produto (atualizado em 15/03/2026)
+# Fonte: analyze_tmb_inadimplencia.py — 5.608 pedidos maduros (files/analises/tmb_inadimplencia_relatorio.xlsx)
+# - Guru: R$ 1.973,95 (42.3% das conversões, 100% realizado)
+# - TMB:  R$ 1.262,86 (57.7% das conversões, 57.4% realizado — média ponderada por grau de risco)
+#   Alto 48.6% (R$1.068,47) | Médio 67.1% (R$1.475,47) | Baixo 83.5% (R$1.837,40) | S/C 42.1% (R$925,27)
+# Proporção baseada no modelo TMB All 15/03 (109f64c4e53b4d0d85f8843443f2a52f): 317 Guru / 433 TMB
+# Valor ponderado: 0.423×1973.95 + 0.577×1262.86 = R$ 1.563,75
+PRODUCT_VALUE = 1563.75
 
 # =============================================================================
 # 2. TAXAS DE CONVERSÃO CORRIGIDAS POR RECALL
 # =============================================================================
 
-# CONTEXTO DO RECALL:
-# - Conversões observadas (matching email/telefone): 678
-# - Vendas reais (Google Sheets): 1.970
-# - Recall: 34.4% (678/1970)
-# - Fator de correção: 2.906x (1/0.344)
-#
-# MOTIVOS DO BAIXO RECALL:
-# - Emails diferentes entre pesquisa e compra
-# - Telefones inválidos/incomparáveis
-# - Dados ausentes
-#
-# MÉTODO: Taxa corrigida = Taxa observada / Recall
+# CONTEXTO:
+# Modelo: TMB All 15/03 (MLflow: 2a98e51ca4834697bbc94ec3dd31fcf7)
+# Período test set: 2026-01-30 → 2026-02-22 | 14.644 leads | 209 conversões
+# Taxas brutas do test set — já monotônicas (modelo com 100% monotonia, sem pooling necessário)
+# Sem fator de recall aplicado (recall_metrics=null no modelo atual)
 
 CONVERSION_RATES = {
-    "D1": 0.001505,   # 0.15% | Corrigido de 0.09% (×1.672) | 3 conversões / 3,316 leads
-    "D2": 0.002007,   # 0.20% | Corrigido de 0.12% (×1.672) | 4 conversões / 3,316 leads
-    "D3": 0.002508,   # 0.25% | Corrigido de 0.15% (×1.672) | 5 conversões / 3,314 leads
-    "D4": 0.005016,   # 0.50% | Corrigido de 0.30% (×1.672) | 10 conversões / 3,315 leads
-    "D5": 0.007524,   # 0.75% | Corrigido de 0.45% (×1.672) | 15 conversões / 3,315 leads
-    "D6": 0.009029,   # 0.90% | Corrigido de 0.54% (×1.672) | 18 conversões / 3,316 leads
-    "D7": 0.014046,   # 1.40% | Corrigido de 0.84% (×1.672) | 28 conversões / 3,316 leads
-    "D8": 0.013042,   # 1.30% | Corrigido de 0.78% (×1.672) | 26 conversões / 3,315 leads
-    "D9": 0.026252,   # 2.63% | Corrigido de 1.57% (×1.672) | 52 conversões / 3,313 leads
-    "D10": 0.029262,   # 2.93% | Corrigido de 1.75% (×1.672) | 58 conversões / 3,316 leads
+    "D01": 0.002048,  # 0.205% | 3 conv / 1.465 leads
+    "D02": 0.004781,  # 0.478% | 7 conv / 1.464 leads
+    "D03": 0.004781,  # 0.478% | 7 conv / 1.464 leads
+    "D04": 0.005461,  # 0.546% | 8 conv / 1.465 leads
+    "D05": 0.008880,  # 0.888% | 13 conv / 1.464 leads
+    "D06": 0.011612,  # 1.161% | 17 conv / 1.464 leads
+    "D07": 0.014334,  # 1.433% | 21 conv / 1.465 leads
+    "D08": 0.015710,  # 1.571% | 23 conv / 1.464 leads
+    "D09": 0.019126,  # 1.913% | 28 conv / 1.464 leads
+    "D10": 0.055973,  # 5.597% | 82 conv / 1.465 leads
 }
 
 # =============================================================================

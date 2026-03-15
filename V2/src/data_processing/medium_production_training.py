@@ -49,7 +49,12 @@ def _carregar_medium_modelo_ativo() -> dict:
     with open(config_path) as f:
         active_cfg = yaml.safe_load(f)
 
-    model_path = active_cfg['active_model']['model_path']
+    active_model = active_cfg['active_model']
+    if 'mlflow_run_id' in active_model:
+        run_id = active_model['mlflow_run_id']
+        model_path = os.path.join('mlruns', '1', run_id, 'artifacts')
+    else:
+        model_path = active_model['model_path']
     dist_path = os.path.join(base, model_path, 'distribuicoes_esperadas.json')
 
     if not os.path.exists(dist_path):
@@ -159,9 +164,13 @@ def unificar_medium_para_producao(
         'Interesse Python':                            'Outros',
         'Interesse Ciência da computação':             'Outros',
 
-        # Aberto — variantes
+        # Aberto — variantes (incluindo uppercase que o extrair_publico_medium preserva)
         'Aberto':             'Aberto',
+        'ABERTO':             'Aberto',
         'Aberto++AD08-1002':  'Outros',
+
+        # Valores frequentes em lançamentos recentes que não são categorias válidas
+        'MIX QUENTE':         'Outros',
 
         # Outras canonicas
         'Linguagem de programação': 'Linguagem de programação',

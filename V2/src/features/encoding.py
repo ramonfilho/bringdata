@@ -106,24 +106,18 @@ def apply_categorical_encoding(df_original: pd.DataFrame, versao: str = "v1", me
             # Fallback para hardcoded se arquivo não existe
             logger.warning("Usando mapeamentos ordinais hardcoded (fallback)")
             variaveis_ordinais = {
-                'Qual a sua idade?': ['menos de 18 anos', '18 24 anos', '25 34 anos',
-                                      '35 44 anos', '45 54 anos', 'mais de 55 anos'],
-                'Atualmente, qual a sua faixa salarial?': ['nao tenho renda', 'entre r1000 a r2000 reais ao mes',
-                                                           'entre r2001 a r3000 reais ao mes',
-                                                           'entre r3001 a r5000 reais ao mes',
-                                                           'mais de r5001 reais ao mes'],
                 'dia_semana': [0, 1, 2, 3, 4, 5, 6]
             }
     else:
         # Training ou desenvolvimento sem model_path
+        # NOTA: 'Qual a sua idade?' e 'Atualmente, qual a sua faixa salarial?' eram
+        # ordinais aqui mas encoding_training.py usa nomes curtos ('idade', 'faixa_salarial')
+        # que não existem no DataFrame → ordinal falha silenciosamente → one-hot.
+        # Para paridade com o modelo b58e2b98 (treinado via one-hot acidental),
+        # removemos essas colunas do dict ordinal aqui também (Opção A).
+        # Próximo retreino: corrigir encoding_training.py e restaurar ordinal em ambos.
         logger.info("Usando mapeamentos ordinais hardcoded (treino)")
         variaveis_ordinais = {
-            'Qual a sua idade?': ['menos de 18 anos', '18 24 anos', '25 34 anos',
-                                  '35 44 anos', '45 54 anos', 'mais de 55 anos'],
-            'Atualmente, qual a sua faixa salarial?': ['nao tenho renda', 'entre r1000 a r2000 reais ao mes',
-                                                       'entre r2001 a r3000 reais ao mes',
-                                                       'entre r3001 a r5000 reais ao mes',
-                                                       'mais de r5001 reais ao mes'],
             'dia_semana': [0, 1, 2, 3, 4, 5, 6]
         }
 
