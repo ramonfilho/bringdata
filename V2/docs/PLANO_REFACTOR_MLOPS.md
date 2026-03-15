@@ -303,8 +303,8 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 **`api/business_config.py` — arquivo inteiro é DevClub-specific:**
 | # | Arquivo | Hardcode | Campo sugerido |
 |---|---------|----------|---------------|
-| 90 | `api/business_config.py:10` | Valor médio do produto: `PRODUCT_VALUE = 1649.73` (ponderado Guru + TMB, 149 conversões Dez/2025) | `business.product_value` |
-| 91 | `api/business_config.py:29-40` | Taxas de conversão corrigidas por decil: `CONVERSION_RATES = {"D1": 0.001505, ..., "D10": 0.029262}` — calibradas para DevClub | `business.conversion_rates` |
+| 90 | `api/business_config.py:10` | Valor médio do produto: `PRODUCT_VALUE = 1563.75` (ponderado Guru + TMB, atualizado 15/03/2026 — análise de inadimplência TMB com 5.608 pedidos: Guru R$1.973,95 × 42.3% + TMB R$1.262,86 × 57.7%) | `business.product_value` |
+| 91 | `api/business_config.py:24-35` | Taxas de conversão por decil: `CONVERSION_RATES = {"D01": 0.002048, ..., "D10": 0.055973}` — calibradas para DevClub, modelo 2a98e51c (209 conv, 100% monotonia). **⚠️ Formato canônico dos decis é `"D01"`–`"D10"` (com zero à esquerda) — o modelo atual emite esse formato. Modelos antigos emitiam `"D1"`–`"D9"` (sem zero). O formato do dict DEVE casar com o output do modelo ativo; ao migrar para `CAPIConfig`, documentar o formato como obrigatório e validar no `ClientConfig.validate()`.** | `business.conversion_rates` |
 | 92 | `api/business_config.py:50` | Threshold de gasto sem leads: `SPEND_THRESHOLD_ZERO_LEADS = 100.0` | `business.spend_threshold_zero_leads` |
 | 93 | `api/business_config.py:54` | Mínimo de leads para dados suficientes: `MINIMUM_LEADS_THRESHOLD = 3` | `business.minimum_leads_threshold` |
 | 94 | `api/business_config.py:62-67` | Thresholds de cor da coluna Ação (Google Sheets): `COLOR_THRESHOLDS = {"green_min": 30, "yellow_min": 1}` | `business.color_thresholds` |
@@ -330,7 +330,7 @@ Não conta como hardcode constantes do algoritmo (ex: `random_state=42`) nem par
 |---|---------|----------|---------------|
 | 103 | `api/capi_integration.py:26` | Pixel ID como fallback hardcoded: `os.getenv('META_PIXEL_ID', '241752320666130')` — Pixel de produção DevClub exposto | `capi.pixel_id` (env var já existe; remover fallback hardcoded) |
 | 104 | `api/capi_integration.py:366,591` | Nomes dos eventos CAPI: `'LeadQualified'` e `'LeadQualifiedHighQuality'` — convenção de nomenclatura DevClub usada em múltiplos lugares | `capi.event_name_with_value` + `capi.event_name_high_quality` |
-| 105 | `api/capi_integration.py:514` | Decis da estratégia high quality: `if decil not in ['D09', 'D10']` — threshold cliente-specific | `capi.high_quality_decils` |
+| 105 | `api/capi_integration.py:514` | Decis da estratégia high quality: `if decil not in ['D09', 'D10']` — threshold cliente-specific. **Formato `"D09"`/`"D10"` (com zero) é o canônico — deve ser consistente com `CONVERSION_RATES` (#91) e com o output do modelo ativo.** | `capi.high_quality_decils` |
 | 106 | `api/capi_integration.py:298,534,793` | País e moeda hardcoded: `country = 'br'`, `currency='BRL'` | `capi.country_code` + `capi.currency` |
 
 **`api/meta_integration.py`:**
