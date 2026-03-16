@@ -84,12 +84,87 @@ utm:
 # MediumConfig — hardcodes #7, #36, #37, #50 (Componente 4 — Fase 2)
 # ---------------------------------------------------------------------------
 medium:
-  valid_categories: null         # #7
-  discontinued_categories: null  # #7
-  category_mappings: null        # #7
-  adv_prefix: null               # #36
-  manual_unifications: null      # #37
-  binary_top3_categories: null   # #50
+  adv_prefix: "ADV"             # #36 — prefixo removido na extração do público
+  frequency_threshold: 0.025    # #7  — >= 2.5% nos dados → categoria válida (modo treino)
+  valid_categories: null        # null = modo treino (computed from data); preenchido em produção (whitelist do feature registry)
+  discontinued_categories: null # deprecated — nova arquitetura não usa
+  manual_unifications: null     # #37 — deprecated — absorvido em category_mappings
+  binary_top3_categories: null  # #50 — pendente resolução em encoding.py
+
+  category_mappings:            # #7 — mapeamento canônico de variantes históricas
+    # Lookalike 2% Cadastrados — variantes
+    "Lookalike 2% Cadastrados - DEV 2.0 + Interesses":              "Lookalike 2% Cadastrados - DEV 2.0 + Interesses"
+    "Lookalike 2% Cadastrados - DEV 2.0   Interesses":              "Lookalike 2% Cadastrados - DEV 2.0 + Interesses"
+    "Lookalike 2%+Cadastrados - DEV 2.0   Interesses":              "Lookalike 2% Cadastrados - DEV 2.0 + Interesses"
+    "Lookalike% Cadastrados - DEV 2.0 + Interesse Linguagem de Programação": "Outros"
+    "ADV+%7C+Lookalike+2%25+Cadastrados+-+DEV+2.0+%2B+Interesses": "Lookalike 2% Cadastrados - DEV 2.0 + Interesses"
+
+    # Lookalike 2% Alunos — variantes
+    "Lookalike 2% Alunos + Interesse Linguagem de Programação":     "Lookalike 2% Alunos + Interesse Linguagem de Programação"
+    "Lookalike 2% Alunos   Interesse Linguagem de Programação":     "Lookalike 2% Alunos + Interesse Linguagem de Programação"
+    "Lookalike 2% Alunos Interesse Ciência da Computação":          "Outros"
+    "Lookalike 2% Alunos + Interesse Ciência da Computação":        "Outros"
+
+    # Lookalike 1% Cadastrados — variantes
+    "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação":    "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação"
+    "Lookalike 1% Cadastrados - DEV 2.0   Interesse Ciência da Computação":    "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação"
+    "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Linguagem de Programação": "Outros"
+    "Lookalike 1% Cadastrados - DEV 2.0   Interesse Linguagem de Programação": "Outros"
+    "Lookalike 1% Cadastrados - DEV 2.0 Interesse Linguagem de Programação":   "Outros"
+
+    # Lookalike 3% — todos para Outros
+    "Lookalike 3% Alunos + Interesses":                                          "Outros"
+    "Lookalike 3% Alunos + Interesse Ciência da Computação":                     "Outros"
+    "Lookalike 3% Alunos + Interesse Linguagem de Programação":                  "Outros"
+    "Lookalike 3% Alunos Interesse Ciência da Computação":                       "Outros"
+    "Lookalike 3% Cadastrados - DEV 2.0 + Interesses":                          "Outros"
+    "Lookalike 3% Cadastrados - DEV 2.0 + Interesse Ciência da Computação":     "Outros"
+    "Lookalike 3% Cadastrados - DEV 2.0 + Interesse Linguagem de Programação":  "Outros"
+
+    # Lookalike Envolvimento — todos para Outros
+    "Lookalike Envolvimento 30D Salvou 180D Direct 180D Interesse Ciência da Computação":                  "Outros"
+    "Lookalike Envolvimento 30D   Salvou 180D   Direct 180D   Interesse Linguagem de Programação":         "Outros"
+    "Lookalike Envolvimento 30D + Salvou80D + Direct80D + Interesse Linguagem de Programação":             "Outros"
+    "Lookalike Envolvimento 30D + Salvou 180D + Direct 180D + Interesse Linguagem de Programação":         "Outros"
+    "Lookalike Envolvimento 30D + Salvou 180D + Direct 180D + Interesse Ciência da Computação":            "Outros"
+    "Lookalike Envolvimento 60D Salvou 365D Direct 365D Interesse Ciência da Computação":                  "Outros"
+    "Lookalike Envolvimento 60D + Salvou 365D + Direct 365D + Interesse Ciência da Computação":            "Outros"
+    "Lookalike Envolvimento 60D + Salvou 365D + Direct 365D + Interesse Linguagem de Programação":         "Outros"
+
+    # Interesse — variantes
+    "Interesse Linguagem de programação":           "Linguagem de programação"
+    "Interesse Programação":                        "Outros"
+    "Interesse Python (linguagem de programação)":  "Outros"
+    "Interesse Python":                             "Outros"
+    "Interesse Ciência da computação":              "Outros"
+
+    # Aberto — variantes (incluindo uppercase preservado pelo extrair_publico)
+    "Aberto":             "Aberto"
+    "ABERTO":             "Aberto"
+    "Aberto++AD08-1002":  "Outros"
+
+    # Valores de lançamentos recentes que não são categorias válidas
+    "MIX QUENTE": "Outros"
+
+    # Outras canônicas
+    "Linguagem de programação": "Linguagem de programação"
+    "dgen":                     "dgen"
+    "nan":                      "nan"
+
+    # Lixo / placeholders
+    "{{adset.name}}":                                                                             "Outros"
+    "paid":                                                                                       "Outros"
+    "Interesses":                                                                                 "Outros"
+    "search":                                                                                     "Outros"
+    "pmax":                                                                                       "Outros"
+    "gdn":                                                                                        "Outros"
+    "teste":                                                                                      "Outros"
+    "[field id=\"utm_medium\"]":                                                                  "Outros"
+    "ADV %7C Linguagem de programação":                                                           "Outros"
+    "Desenvolvimento profissional":                                                               "Outros"
+    "Funcionários de médias empresas B2B (200 a 500 funcionários)":                               "Outros"
+    "Funcionários de pequenas empresas B2B (10 a 200 funcionários)":                              "Outros"
+    "Funcionários de grandes empresas B2B (mais de 500 funcionários) — Cópia":                    "Outros"
 
 # ---------------------------------------------------------------------------
 # CategoryConfig — hardcodes #27–#33 (Componente 6 — Fase 2)

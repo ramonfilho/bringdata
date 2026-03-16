@@ -127,7 +127,8 @@ def registrar_features_e_modelo_devclub(
     categorias_treino: dict = None,
     distribuicoes_treino: dict = None,
     missing_rates_baseline: dict = None,
-    buyer_weights: pd.Series = None
+    buyer_weights: pd.Series = None,
+    cli_args: dict = None
 ) -> dict:
     """
     Registra features e salva modelo DevClub para produção.
@@ -869,6 +870,7 @@ def registrar_features_e_modelo_devclub(
                 "trained_at": datetime.now().isoformat(),
                 "training_duration_info": f"Trained with {split_method} split"
             },
+            "cli_args": cli_args or {},
             "hyperparameters": hyperparams,
             "training_data": {
                 "dataset_name": f"dataset_devclub_rf_{split_method}",

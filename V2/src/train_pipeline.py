@@ -37,8 +37,7 @@ from src.data_processing.category_unification import unificar_categorias_complet
 from src.data_processing.feature_removal import remover_features_desnecessarias, listar_colunas_restantes
 from src.core.client_config import ClientConfig
 from src.core.utm import unify_utm
-from src.data_processing.medium_training import extrair_publico_medium
-from src.data_processing.medium_production_training import unificar_medium_para_producao
+from src.core.medium import unify_medium
 from src.data_processing.dataset_versioning_training import criar_dataset_pos_cutoff, disponibilizar_dataset
 from src.matching.matching_training import fazer_matching_robusto as fazer_matching_variantes
 from src.matching.matching_robusto import fazer_matching_robusto
@@ -151,7 +150,7 @@ def setup_logging(verbosity='normal', log_file=None):
 logger = logging.getLogger(__name__)
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None):
     """Executa pipeline de treino completo.
 
     Args:
@@ -586,16 +585,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
             df_utm_unificado.to_pickle(os.path.join(_fixtures, 'snapshot_medium_input.pkl'))
             logger.info("  [PARITY] snapshot_medium_input.pkl salvo")
 
-        df_medium_unificado, n_apos_extracao = extrair_publico_medium(df_utm_unificado)
-        n_apos_norm = df_medium_unificado['Medium'].nunique()
-
-        logger.info("")
-        df_medium_producao = unificar_medium_para_producao(
-            df_medium_unificado,
-            n_bruto=n_bruto_medium,
-            n_apos_extracao=n_apos_extracao,
-            n_apos_norm=n_apos_norm,
-        )
+        df_medium_producao = unify_medium(df_utm_unificado, client_config.medium)
     else:
         logger.info("  Pulando (Medium foi removido na célula 8 - strategy='remove')")
         df_medium_unificado = df_utm_unificado.copy()
@@ -835,7 +825,8 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         set_active=set_active,
         recall_metrics=recall_metrics,
         missing_rates_baseline=missing_rates_baseline,
-        buyer_weights=buyer_weights
+        buyer_weights=buyer_weights,
+        cli_args=cli_args
     )
 
     cell_timers['Célula 21'] = time.time() - cell_start
@@ -1047,5 +1038,6 @@ if __name__ == "__main__":
         api_end_date=args.api_end_date,
         use_buyer_weights=not args.no_weights,
         save_encoded=args.save_encoded,
-        capture_parity_snapshots=args.capture_parity_snapshots
+        capture_parity_snapshots=args.capture_parity_snapshots,
+        cli_args=vars(args)
     )

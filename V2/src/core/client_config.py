@@ -84,12 +84,13 @@ class UTMConfig:
 @dataclass
 class MediumConfig:
     """Unificação de Medium — consolida 3 arquivos atuais. (#7, #36, #37, #50)"""
-    valid_categories: Optional[List[str]] = None            # #7
-    discontinued_categories: Optional[List[str]] = None     # #7
-    category_mappings: Optional[Dict[str, str]] = None      # #7
-    adv_prefix: Optional[str] = None                        # #36
-    manual_unifications: Optional[Dict[str, str]] = None    # #37
-    binary_top3_categories: Optional[List[str]] = None      # #50
+    valid_categories: Optional[List[str]] = None            # #7 — None = modo treino (threshold); preenchido = modo produção (whitelist)
+    discontinued_categories: Optional[List[str]] = None     # #7 — deprecated; mantido para compatibilidade
+    category_mappings: Optional[Dict[str, str]] = None      # #7 — mapeamento de variantes históricas
+    adv_prefix: Optional[str] = None                        # #36 — prefixo a remover (ex: 'ADV')
+    manual_unifications: Optional[Dict[str, str]] = None    # #37 — unificações adicionais pós-mapping
+    binary_top3_categories: Optional[List[str]] = None      # #50 — pendente resolução em encoding
+    frequency_threshold: float = 0.025                      # #7 — freq mínima para categoria válida no treino
 
 
 @dataclass
