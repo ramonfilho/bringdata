@@ -1205,32 +1205,37 @@ def main():
 
         guru_df = sales_loader.load_guru_sales(guru_files, include_canceled=include_canceled) if guru_files else None
 
-    # Detectar arquivos TMB por estrutura de colunas (igual ao pipeline de treino)
-    # Identifica pelo trio: Pedido + Parcela + Grau de risco — independente do nome do arquivo
-    all_xlsx = sorted(glob(f"{vendas_path}/*.xlsx"))
+    # Detectar arquivos TMB e HotPay por estrutura de colunas
+    all_vendas_files = sorted(glob(f"{vendas_path}/*.xlsx")) + sorted(glob(f"{vendas_path}/*.xls"))
     tmb_files = []
-    for xlsx_path in all_xlsx:
-        # Pular arquivos Guru (já carregados acima)
-        if any(x in Path(xlsx_path).name.lower() for x in ['guru']):
+    hotpay_files = []
+    for fpath in all_vendas_files:
+        if any(x in Path(fpath).name.lower() for x in ['guru']):
             continue
         try:
-            cols = pd.read_excel(xlsx_path, nrows=0).columns.tolist()
+            cols = pd.read_excel(fpath, nrows=0).columns.tolist()
             if 'Pedido' in cols and 'Parcela' in cols and 'Grau de risco' in cols:
-                tmb_files.append(xlsx_path)
-                logger.info(f"   TMB detectado por colunas: {Path(xlsx_path).name}")
+                tmb_files.append(fpath)
+                logger.info(f"   TMB detectado por colunas: {Path(fpath).name}")
+            elif 'chave' in cols and 'Data de Confirmação' in cols and 'Código do Produto' in cols:
+                hotpay_files.append(fpath)
+                logger.info(f"   HotPay detectado por colunas: {Path(fpath).name}")
         except Exception:
             pass
 
     if args.report_type == 'fechamento':
         logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)} (incluirá Efetivado + Cancelado)")
+        logger.info(f"   Arquivos HotPay encontrados: {len(hotpay_files)} (incluirá Aprovado + Cancelado)")
     else:
         logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)} (incluirá apenas Efetivado)")
+        logger.info(f"   Arquivos HotPay encontrados: {len(hotpay_files)} (incluirá apenas Aprovado)")
 
-    # Combinar vendas Guru + TMB
+    # Combinar vendas Guru + TMB + HotPay
     # Se não houver arquivos TMB locais, tentará buscar do Cloud Storage baseado em report_type
     sales_df = sales_loader.combine_sales(
         guru_df=guru_df,
         tmb_paths=tmb_files if tmb_files else None,
+        hotpay_paths=hotpay_files if hotpay_files else None,
         report_type=args.report_type,
         include_canceled=include_canceled
     )
@@ -1239,7 +1244,7 @@ def main():
         logger.error(" Nenhuma venda carregada. Verifique os arquivos de vendas.")
         sys.exit(1)
 
-    logger.info(f"    {len(sales_df)} vendas carregadas (Guru + TMB)")
+    logger.info(f"    {len(sales_df)} vendas carregadas (Guru + TMB + HotPay)")
     print(flush=True)
 
     # 4. Filtrar por período
@@ -1760,7 +1765,10 @@ def main():
 
     # Carregar modelo ativo do active_model.yaml
     active_model_path = get_active_model_path()
-    model_metadata_path = str(active_model_path / "model_metadata_v1_devclub_rf_temporal_leads_single.json")
+    # Suporta tanto o nome legado (files/) quanto o nome MLflow (model_metadata.json)
+    _legacy = active_model_path / "model_metadata_v1_devclub_rf_temporal_leads_single.json"
+    _mlflow = active_model_path / "model_metadata.json"
+    model_metadata_path = str(_legacy if _legacy.exists() else _mlflow)
 
     ml_monitoring_calc = MLMonitoringCalculator(
         model_metadata_path=model_metadata_path

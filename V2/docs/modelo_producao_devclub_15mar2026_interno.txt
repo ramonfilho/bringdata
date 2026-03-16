@@ -1,0 +1,178 @@
+================================================================================
+MODELO DE LEAD SCORING — DEVCLUB
+Documentação interna — versão em produção — 15/03/2026
+================================================================================
+
+MLflow Run ID:  2a98e51ca4834697bbc94ec3dd31fcf7
+Nome interno:   TMB All 15/03
+Algoritmo:      Random Forest (sklearn)
+Deploy:         15/03/2026 — Cloud Run revision 00241-zsm
+
+
+================================================================================
+1. DADOS DE TREINO E TESTE
+================================================================================
+
+Período total do dataset: 04/11/2025 → 22/02/2026 (110 dias)
+
+Split temporal (sem vazamento): os dados de treino encerram antes do início do
+teste. Leads da janela de validação nunca foram vistos pelo modelo durante o
+treinamento.
+
+                     Início          Fim           Dias    Leads    Conversões
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │  TREINO     04/11/2025    29/01/2026     87 dias   34.168      561       │
+  │  TESTE      30/01/2026    22/02/2026     23 dias   14.644      209       │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+Total do dataset:    48.812 leads    770 conversões
+Número de features:  59 variáveis preditoras
+
+As conversões registradas correspondem a compras confirmadas via Guru.
+Compras via TMB não foram incluídas como positivos no treino — apenas como
+exemplos positivos adicionais para balanceamento (sem label de conversão),
+por indisponibilidade de matching confiável na janela de treino.
+
+Taxa de conversão de referência (baseline): 1,43%
+  → É a taxa média no período de teste. Serve de referência para interpretar
+    o lift: um decil com lift 3,92x converte 3,92 vezes mais que a média.
+
+
+================================================================================
+2. MÉTRICAS DE PERFORMANCE
+================================================================================
+
+AUC — 0,745 (74,5%)
+  Mede a capacidade do modelo de separar leads que vão converter dos que não
+  vão. 0,5 = aleatório; 1,0 = perfeito. 0,745 significa que em 74,5% das
+  vezes o modelo atribui score mais alto a um lead que converte do que a um
+  que não converte.
+
+  Para problemas de lead scoring com baixíssima taxa de conversão (< 2%) e
+  alta variância de comportamento entre lançamentos, AUC acima de 0,70 é
+  considerado sólido pela literatura. O que importa operacionalmente não é
+  a perfeição do score absoluto, mas a separação relativa — e o lift de 3,92x
+  no D10 demonstra que essa separação é economicamente expressiva.
+
+Lift máximo (D10) — 3,92x
+  O decil 10 (os 10% melhores leads) converte 3,92 vezes mais que a média.
+  Com taxa de referência de 1,43%, o D10 converte a 5,60%.
+
+  ⚠ Estes números refletem o período de teste histórico. A taxa real em
+  produção pode diferir — por mudanças na distribuição do público captado,
+  sazonalidade entre lançamentos, ou concentração de orçamento no perfil D10
+  ao longo do tempo (feedback loop). O monitoramento contínuo entre
+  lançamentos é necessário para avaliar a estabilidade dessas taxas.
+
+  Hipótese de feedback loop ativa: D10 passou de 25,8% (LF40) para 40,8%
+  (LF45) dos leads, vs. 10% esperado. Causa provável: Meta concentra budget
+  em perfil D10 → dados de treino ficam enviesados → modelo reforça
+  concentração. Ação corretiva planejada: retreino com importance weighting
+  usando campanha de controle (prazo: 15/04/2026). Ver PLANO_REFACTOR_MLOPS.md.
+
+Monotonia — 100%
+  Garante que decis mais altos sempre tenham taxa de conversão maior que decis
+  mais baixos. 100% significa que a ordenação é perfeitamente consistente —
+  nenhum decil "desobedece" a hierarquia esperada.
+
+Concentração de conversões
+  Top 3 decis (D8, D9, D10): 63,6% de todas as conversões do teste
+  Top 5 decis (D6 a D10):    81,8% de todas as conversões do teste
+  → Os 30% melhores leads capturam 63,6% das vendas.
+
+
+================================================================================
+3. THRESHOLDS DO MODELO (score de corte por decil)
+================================================================================
+
+O modelo atribui a cada lead um score de 0 a 1 (probabilidade de conversão).
+Os thresholds abaixo determinam a qual decil cada score pertence — são fixos
+em produção para garantir estabilidade entre batches de diferentes tamanhos.
+Calculados no conjunto de treino e congelados no YAML do modelo ativo.
+
+  Decil  │  Score mínimo  │  Score máximo  │  Score médio
+  ───────┼────────────────┼────────────────┼──────────────
+  D01    │     0,0000     │     0,2608     │    0,2346
+  D02    │     0,2608     │     0,2726     │    0,2671
+  D03    │     0,2726     │     0,2858     │    0,2791
+  D04    │     0,2859     │     0,3162     │    0,3012
+  D05    │     0,3163     │     0,3457     │    0,3316
+  D06    │     0,3457     │     0,3732     │    0,3594
+  D07    │     0,3732     │     0,4027     │    0,3877
+  D08    │     0,4028     │     0,4447     │    0,4233
+  D09    │     0,4447     │     0,4944     │    0,4687
+  D10    │     0,4945     │     0,8205     │    0,5372
+
+
+================================================================================
+4. VALOR CONFIGURADO POR DECIL
+================================================================================
+
+PRODUCT_VALUE = R$ 1.563,75
+  Ticket médio ponderado pela composição real de vendas:
+    Guru:   R$ 1.973,95 × 42,3% de participação
+    TMB:    R$ 1.262,86 × 57,7% de participação
+  Descontando inadimplência média observada em 5.608 pedidos maduros
+  (análise de março/2026 sobre base completa de pedidos Guru + TMB).
+
+Valor por decil = PRODUCT_VALUE × taxa_conversão_decil
+  Enviado ao Meta via evento LeadQualified (CAPI) ~5 min após preenchimento
+  da pesquisa. Meta usa o valor para otimizar lances em direção ao público
+  de maior valor esperado.
+
+  Nota técnica (bug resolvido em 15/03/2026): o modelo novo (2a98e51c) passou
+  a gerar decis com zero à esquerda ("D01"–"D09") em vez do formato antigo
+  ("D1"–"D9"). As chaves do dicionário CONVERSION_RATES em business_config.py
+  foram corrigidas para o novo formato na revision 00241-zsm. Revisions 00239
+  e 00240 enviaram R$ 0,00 para todos os decis exceto D10 (141 eventos
+  impactados, ~16 minutos de janela).
+
+  Decil  │  Leads (teste) │  Conversões  │  Taxa conv.  │  Lift    │  Valor configurado
+  ───────┼────────────────┼──────────────┼──────────────┼──────────┼───────────────────
+  D01    │     1.465      │       3      │    0,205%    │  0,14x   │  R$   3,20
+  D02    │     1.464      │       7      │    0,478%    │  0,33x   │  R$   7,48
+  D03    │     1.464      │       7      │    0,478%    │  0,33x   │  R$   7,48
+  D04    │     1.465      │       8      │    0,546%    │  0,38x   │  R$   8,54
+  D05    │     1.464      │      13      │    0,888%    │  0,62x   │  R$  13,89
+  D06    │     1.464      │      17      │    1,161%    │  0,81x   │  R$  18,16
+  D07    │     1.465      │      21      │    1,433%    │  1,00x   │  R$  22,41
+  D08    │     1.464      │      23      │    1,571%    │  1,10x   │  R$  24,57
+  D09    │     1.464      │      28      │    1,913%    │  1,34x   │  R$  29,91
+  D10    │     1.465      │      82      │    5,597%    │  3,92x   │  R$  87,52
+  ───────┴────────────────┴──────────────┴──────────────┴──────────┴───────────────────
+  TOTAL  │    14.644      │     209      │    1,429%    │   1,00x  │  (baseline)
+
+  Nota: D02 e D03 têm o mesmo valor porque apresentaram taxa de conversão
+  idêntica no período de teste (7 conversões cada). O modelo mantém 100% de
+  monotonia: nenhum decil tem valor menor que o anterior.
+
+
+================================================================================
+5. EVENTO LEADQUALIFIED — LÓGICA DE NEGÓCIO
+================================================================================
+
+O evento LeadQualified é o núcleo do sistema de value-based bidding via CAPI.
+É enviado ~5 minutos após o lead preencher a pesquisa no Facebook/Instagram.
+
+Fluxo:
+  1. Lead preenche pesquisa → webhook chega à API (Cloud Run)
+  2. production_pipeline.py processa features e aplica modelo → score + decil
+  3. capi_integration.py calcula:
+       valor_proj = PRODUCT_VALUE × CONVERSION_RATES[decil]
+  4. Evento enviado ao Meta com:
+       event_name: "LeadQualified"
+       value: valor_proj
+       currency: "BRL"
+  5. Meta usa o valor para otimizar CPA em direção aos leads de maior valor
+
+Motivação estratégica:
+  Sem ML: Meta recebe sinal de compra 7–21 dias após o lead (janela de vendas
+  do lançamento). Com ML: Meta recebe sinal valorado em ~5 minutos → otimiza
+  56x mais rápido que esperar a compra real. O diferencial não é o modelo em
+  si, mas a antecipação do sinal de valor ao algoritmo do Meta.
+
+Configuração de referência:
+  PRODUCT_VALUE e CONVERSION_RATES vivem em api/business_config.py.
+  Devem ser atualizados a cada novo modelo em produção.
+
+================================================================================
