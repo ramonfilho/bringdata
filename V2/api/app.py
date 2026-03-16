@@ -2981,7 +2981,11 @@ async def daily_monitoring_check_railway(
         )
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
-            model_path = config['active_model']['model_path']
+            active_model = config['active_model']
+            if 'mlflow_run_id' in active_model:
+                model_path = os.path.join('mlruns', '1', active_model['mlflow_run_id'], 'artifacts')
+            else:
+                model_path = active_model['model_path']
 
         if not os.path.isabs(model_path):
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -3053,7 +3057,11 @@ async def daily_monitoring_check(
 
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
-            model_path = config['active_model']['model_path']
+            active_model = config['active_model']
+            if 'mlflow_run_id' in active_model:
+                model_path = os.path.join('mlruns', '1', active_model['mlflow_run_id'], 'artifacts')
+            else:
+                model_path = active_model['model_path']
 
         # Garantir path absoluto
         if not os.path.isabs(model_path):
