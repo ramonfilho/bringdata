@@ -9,6 +9,7 @@ import os
 import logging
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import json
 import yaml
 import glob
 import logging
@@ -150,7 +151,7 @@ def setup_logging(verbosity='normal', log_file=None):
 logger = logging.getLogger(__name__)
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None):
     """Executa pipeline de treino completo.
 
     Args:
@@ -280,14 +281,29 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         logger.debug(f"   - Usando vendas Guru + alunos TMB de BAIXO e MÉDIO risco")
 
     # Ler TODOS os arquivos (incluindo TMB) + dados da API se retreino
-    all_data = read_all_training_sources(
-        filepaths,
-        include_api_data=include_api_data,
-        api_start_date=api_start_date,
-        api_end_date=api_end_date,
-        num_sheets_api=1,  # Retreino: apenas aba 0 do Google Sheets
-        include_sheets_api=include_sheets_api
-    )
+    _cache_dir = os.path.join(os.path.dirname(__file__), '..', 'outputs', 'cache')
+    _cache_key = api_end_date or 'latest'
+    _cache_path = os.path.join(_cache_dir, f'raw_data_{_cache_key}.pkl')
+
+    if use_cached_data and os.path.exists(_cache_path):
+        import pickle
+        logger.info(f"  Carregando dados do cache: {os.path.basename(_cache_path)}")
+        with open(_cache_path, 'rb') as f:
+            all_data = pickle.load(f)
+    else:
+        all_data = read_all_training_sources(
+            filepaths,
+            include_api_data=include_api_data,
+            api_start_date=api_start_date,
+            api_end_date=api_end_date,
+            num_sheets_api=1,  # Retreino: apenas aba 0 do Google Sheets
+            include_sheets_api=include_sheets_api
+        )
+        import pickle
+        os.makedirs(_cache_dir, exist_ok=True)
+        with open(_cache_path, 'wb') as f:
+            pickle.dump(all_data, f)
+        logger.info(f"  Cache salvo: {os.path.basename(_cache_path)}")
 
     cell_timers['Célula 1'] = time.time() - cell_start
     logger.info(f"   Tempo: {cell_timers['Célula 1']:.1f}s")
@@ -777,7 +793,14 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
 
     # === HYPERPARAMETER TUNING (opcional) ===
     melhores_params = None
-    if tune_hyperparams:
+    if fixed_hyperparams:
+        melhores_params = {**DEFAULT_HYPERPARAMS, **fixed_hyperparams}
+        logger.info("")
+        logger.info("HIPERPARÂMETROS FIXOS (--hyperparams)")
+        for k, v in fixed_hyperparams.items():
+            logger.info(f"  {k}: {DEFAULT_HYPERPARAMS.get(k, '?')}  {v}")
+        logger.info("")
+    elif tune_hyperparams:
         logger.info("")
         logger.info("EXECUTANDO HYPERPARAMETER TUNING")
 
@@ -1018,6 +1041,18 @@ if __name__ == "__main__":
         default=False,
         help='Serializar (input, output) de cada função compartilhada em tests/fixtures/ para audit de paridade treino×produção'
     )
+    parser.add_argument(
+        '--use-cached-data',
+        action='store_true',
+        default=False,
+        help='Usar cache de dados brutos de outputs/cache/raw_data_{api_end_date}.pkl (pula chamadas à API). Salva automaticamente o cache se não existir.'
+    )
+    parser.add_argument(
+        '--hyperparams',
+        type=str,
+        default=None,
+        help='Hiperparâmetros fixos em JSON (pula tuning). Ex: \'{"n_estimators": 200, "max_features": "log2", "min_samples_leaf": 3}\''
+    )
 
     args = parser.parse_args()
 
@@ -1039,5 +1074,7 @@ if __name__ == "__main__":
         use_buyer_weights=not args.no_weights,
         save_encoded=args.save_encoded,
         capture_parity_snapshots=args.capture_parity_snapshots,
-        cli_args=vars(args)
+        cli_args=vars(args),
+        use_cached_data=args.use_cached_data,
+        fixed_hyperparams=json.loads(args.hyperparams) if args.hyperparams else None,
     )
