@@ -223,35 +223,11 @@ feature:
 # EncodingConfig — hardcodes #49, #51, #64, #70, #71 (Componente 3 — Fase 2)
 # ---------------------------------------------------------------------------
 encoding:
-  ordinal_variables:             # #49 — canonical: produção (nomes longos do formulário)
-    # Nomes longos (produção — canonical)
-    "Qual a sua idade?":
-      - "menos de 18 anos"
-      - "18 24 anos"
-      - "25 34 anos"
-      - "35 44 anos"
-      - "45 54 anos"
-      - "mais de 55 anos"
-    "Atualmente, qual a sua faixa salarial?":
-      - "nao tenho renda"
-      - "entre r1000 a r2000 reais ao mes"
-      - "entre r2001 a r3000 reais ao mes"
-      - "entre r3001 a r5000 reais ao mes"
-      - "mais de r5001 reais ao mes"
-    # Nomes curtos (treino — alias durante migração até category_unification ser migrado)
-    "idade":
-      - "menos de 18 anos"
-      - "18 24 anos"
-      - "25 34 anos"
-      - "35 44 anos"
-      - "45 54 anos"
-      - "mais de 55 anos"
-    "faixa_salarial":
-      - "nao tenho renda"
-      - "entre r1000 a r2000 reais ao mes"
-      - "entre r2001 a r3000 reais ao mes"
-      - "entre r3001 a r5000 reais ao mes"
-      - "mais de r5001 reais ao mes"
+  ordinal_variables:             # #49 — fix 15/03: idade e faixa_salarial removidas (Opção A)
+    # idade e faixa_salarial removidas para paridade com modelo ativo (2a98e51c).
+    # No pipeline antigo o ordinal falhava silenciosamente (nomes curtos não existiam no df)
+    # → one-hot acidental → 59 features. core/encoding.py lê este yaml e executaria o ordinal
+    # corretamente → 50 features. Fix: manter só dia_semana até próximo retreino intencional.
     "dia_semana": [0, 1, 2, 3, 4, 5, 6]
   categorical_detection_max_unique: 20   # #64
   features_to_drop_after_encoding: []    # #51 — telefone_comprimento_8 não existe mais após grouping (#157)
