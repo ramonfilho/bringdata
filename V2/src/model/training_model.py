@@ -23,8 +23,23 @@ from src.model.decil_thresholds import calcular_thresholds_decis, comparar_distr
 logger = logging.getLogger(__name__)
 
 # Configurar MLflow
-mlflow.set_tracking_uri("sqlite:///mlflow.db")
-mlflow.set_experiment("devclub_lead_scoring")
+# Tracking: Cloud SQL PostgreSQL centralizado (compartilhado entre worktrees e Cloud Run)
+# Artifacts: GCS (configurado no experimento)
+_default_tracking = (
+    "postgresql+psycopg2://postgres:SmartAds2026DB!@104.197.138.129:5432/mlflow"
+)
+_tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", _default_tracking)
+mlflow.set_tracking_uri(_tracking_uri)
+
+_client = mlflow.tracking.MlflowClient()
+_exp = _client.get_experiment_by_name("devclub_lead_scoring")
+if _exp is None or _exp.lifecycle_stage == "deleted":
+    mlflow.create_experiment(
+        "devclub_lead_scoring",
+        artifact_location="gs://smart-ads-mlflow/artifacts",
+    )
+else:
+    mlflow.set_experiment("devclub_lead_scoring")
 
 
 def atualizar_business_config_com_recall(model_metadata: dict):
