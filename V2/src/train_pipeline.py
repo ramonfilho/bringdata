@@ -35,7 +35,7 @@ from src.data_processing.column_unification_refactored import (
     filtrar_vendas_devclub
 )
 from src.data_processing.category_unification import unificar_categorias_completo
-from src.data_processing.feature_removal import remover_features_desnecessarias, listar_colunas_restantes
+from src.core.preprocessing import preprocess as core_preprocess
 from src.core.client_config import ClientConfig
 from src.core.utm import unify_utm
 from src.core.medium import unify_medium
@@ -522,10 +522,14 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
 
     # Determinar se deve remover Medium (opção 3)
     remover_medium = (medium_strategy == 'remove')
-    df_features_removidas = remover_features_desnecessarias(df_pesquisa_final_unificado, remover_medium=remover_medium)
-
-    # Listar colunas restantes
-    listar_colunas_restantes(df_features_removidas)
+    extra = ['Medium'] if remover_medium else None
+    df_features_removidas = core_preprocess(
+        df_pesquisa_final_unificado,
+        client_config.ingestion,
+        client_config.feature,
+        extra_columns_to_remove=extra,
+    )
+    logger.info(f"  Dataset final: {len(df_features_removidas)} registros, {len(df_features_removidas.columns)} colunas")
 
     # === CAPTURAR MISSING RATES PARA MONITORAMENTO (QUALITY GATE) ===
     # IMPORTANTE: Captura APÓS célula 8 (remoção de features) para monitorar apenas colunas que vão para o modelo

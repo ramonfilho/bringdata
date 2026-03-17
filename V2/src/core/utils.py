@@ -39,12 +39,30 @@ def limpar_texto(texto: str) -> str:
 def remove_columns(df: pd.DataFrame, columns: List[str],
                    errors: str = "ignore") -> pd.DataFrame:
     """Remove colunas do DataFrame. errors='ignore' ignora colunas ausentes."""
-    raise NotImplementedError
+    return df.drop(columns=columns, errors=errors)
 
 
 def detect_problematic_columns(df: pd.DataFrame) -> List[str]:
     """Detecta colunas com nome vazio, None, NaN ou comprimento <= 2."""
-    raise NotImplementedError
+    problematic = []
+    for col in df.columns:
+        try:
+            is_nan = pd.isna(col)
+        except (TypeError, ValueError):
+            is_nan = False
+
+        if col is None or is_nan:
+            problematic.append(col)
+        elif col == '' or (isinstance(col, str) and col.strip() == ''):
+            problematic.append(col)
+
+    # Fallback: se nenhum claramente problemático, inclui nomes muito curtos
+    if not problematic:
+        for col in df.columns:
+            if isinstance(col, str) and len(col.strip()) <= 2:
+                problematic.append(col)
+
+    return problematic
 
 
 def clean_column_names(df: pd.DataFrame) -> pd.DataFrame:

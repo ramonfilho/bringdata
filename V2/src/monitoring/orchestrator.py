@@ -19,9 +19,7 @@ from .capi_monitor import CAPIQualityMonitor
 from .models import Alert
 from core.client_config import ClientConfig
 
-# Importar unificação de Medium (mesmo processamento que treino e produção)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from data_processing.medium_unification import unify_medium_columns
 
 _DEFAULT_CONFIG_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), '..', '..', 'configs', 'clients', 'devclub.yaml')
@@ -150,66 +148,39 @@ class MonitoringOrchestrator:
             # Aplicar unificação de Medium (mesmo processamento que treino e produção)
             # Isso garante que 'ABERTO | AD0022' seja normalizado para 'Aberto'
             if 'Medium' in df.columns:
+                from core.medium import unify_medium
                 medium_antes = df['Medium'].nunique()
-                df = unify_medium_columns(df)
+                df = unify_medium(df, self._client_config.medium)
                 medium_depois = df['Medium'].nunique()
                 logger.info(f" Medium unificado: {medium_antes}  {medium_depois} categorias únicas")
 
-            # Renomear colunas longas (investiu_curso_online, interesse_programacao)
-            from data_processing.preprocessing import rename_long_column_names
-            df = rename_long_column_names(df)
+            # Converter lead_score para float antes do preprocessing
+            # (pode vir como string com vírgula do Google Sheets)
+            if 'lead_score' in df.columns and df['lead_score'].dtype == 'object':
+                df['lead_score'] = (
+                    pd.to_numeric(
+                        df['lead_score'].str.replace(',', '.').replace('', None),
+                        errors='coerce'
+                    )
+                )
 
             # Aplicar unificação de categorias (mesmo processamento que produção)
-            # Limpa e normaliza valores das categorias
             from data_processing.category_unification import unificar_categorias_completo
             df = unificar_categorias_completo(df)
             logger.info(f" Categorias unificadas")
 
-            # Preservar colunas de score/decil ANTES de remover (necessário para monitoramento)
-            # Essas colunas vêm do Google Sheets (pipeline de produção já atribuiu)
-            decil_col = df['decil'].copy() if 'decil' in df.columns else None
-            lead_score_col = df['lead_score'].copy() if 'lead_score' in df.columns else None
+            # Sequência canônica de preprocessing com preservação de decil/lead_score
+            colunas_antes_pre = len(df.columns)
+            from core.preprocessing import preprocess_for_monitoring
+            df = preprocess_for_monitoring(df, self._client_config.ingestion, self._client_config.feature)
+            colunas_depois_pre = len(df.columns)
+            logger.info(f" Preprocessing: {colunas_antes_pre} → {colunas_depois_pre} colunas")
 
-            # Remover colunas de score/faixa (mesmo processamento que produção)
-            # Remove: Pontuação, Score, Faixa, Faixa A-D, lead_score, decil
-            from data_processing.preprocessing import clean_columns
-            colunas_antes_score = len(df.columns)
-            df = clean_columns(df)
-            colunas_depois_score = len(df.columns)
-            score_removidos = colunas_antes_score - colunas_depois_score
-            logger.info(f" Colunas de score/faixa removidas: {score_removidos} (total: {colunas_depois_score})")
-
-            # Restaurar colunas de score/decil APÓS limpeza (para monitoramento de distribuição)
-            if decil_col is not None:
-                df['decil'] = decil_col
-                logger.info(f" Coluna 'decil' preservada para monitoramento (distribuição: {df['decil'].value_counts().sort_index().to_dict()})")
-            if lead_score_col is not None:
-                # Converter lead_score para float (pode vir como string com vírgula do Google Sheets)
-                if lead_score_col.dtype == 'object':
-                    # Substituir vírgula por ponto e tratar strings vazias
-                    lead_score_col = lead_score_col.str.replace(',', '.').replace('', None)
-                    lead_score_col = pd.to_numeric(lead_score_col, errors='coerce')
-                df['lead_score'] = lead_score_col
+            if 'decil' in df.columns:
+                logger.info(f" Coluna 'decil' preservada (distribuição: {df['decil'].value_counts().sort_index().to_dict()})")
+            if 'lead_score' in df.columns:
                 valid_scores = df['lead_score'].notna().sum()
-                logger.info(f" Coluna 'lead_score' preservada para monitoramento ({valid_scores}/{len(df)} válidos, média: {df['lead_score'].mean():.4f})")
-
-            # Remover features de campanha (mesmo processamento que produção)
-            # Remove: Campaign, Content, e colunas vazias/problemáticas
-            from data_processing.preprocessing import remove_campaign_features
-            colunas_antes_campaign = len(df.columns)
-            df = remove_campaign_features(df)
-            colunas_depois_campaign = len(df.columns)
-            campaign_removidos = colunas_antes_campaign - colunas_depois_campaign
-            logger.info(f" Features de campanha removidas: {campaign_removidos} (total: {colunas_depois_campaign})")
-
-            # Remover campos técnicos (mesmo processamento que produção)
-            # Remove: Remote IP, User Agent, fbc, fbp, cidade, estado, pais, cep, externalid, Page URL, etc
-            from data_processing.preprocessing import remove_technical_fields
-            colunas_antes_tech = len(df.columns)
-            df = remove_technical_fields(df)
-            colunas_depois_tech = len(df.columns)
-            campos_removidos = colunas_antes_tech - colunas_depois_tech
-            logger.info(f" Campos técnicos removidos: {campos_removidos} (total: {colunas_depois_tech})")
+                logger.info(f" Coluna 'lead_score' preservada ({valid_scores}/{len(df)} válidos, média: {df['lead_score'].mean():.4f})")
 
             # Aplicar feature engineering (mesmo processamento que produção)
             from core.feature_engineering import create_features as _fe_create
