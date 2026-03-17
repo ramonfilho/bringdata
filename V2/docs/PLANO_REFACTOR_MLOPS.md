@@ -156,7 +156,7 @@ Funções puras. Assinatura padrão: `transform(df, config: SubConfig, **artifac
 - **`dataset_versioning.py`** — `criar_dataset_pos_cutoff`, `aplicar_janela_conversao` — só treino; requer todas as unificações anteriores
 - **`feature_engineering.py`** — `create_features(df, config: FeatureConfig)` — guards de colunas unificados
 - **`encoding.py`** — `apply_encoding(df, config: EncodingConfig, artifacts)` — versão produção é canônica
-- **`preprocessing.py`** — orquestra a sequência canônica de pré-processamento: `remove_duplicates` → `clean_columns` → `remove_campaign_features` → `rename_long_column_names` → `remove_technical_fields`; chama `utils.remove_columns` com as listas do config; treino e produção chamam `preprocess(df, config)` — sequência idêntica garantida por construção; monitoring chama a mesma função com wrapper de preservação de `decil`/`lead_score` em torno dela
+- **`preprocessing.py`** — orquestra a sequência canônica de pré-processamento: `remove_duplicates` → `clean_columns` → `remove_campaign_features` → `rename_long_column_names`; chama `utils.remove_columns` com as listas do config; treino e produção chamam `preprocess(df, config)` — sequência idêntica garantida por construção; monitoring chama a mesma função com wrapper de preservação de `decil`/`lead_score` em torno dela. **⚠️ RESTRIÇÃO CRÍTICA DE ORDEM:** remoção de colunas de score (`Pontuação`, `Score`, `Faixa A/B/C/D`, `lead_score`, `decil`) deve acontecer APÓS `criar_dataset_pos_cutoff` no pipeline de treino — essas colunas são o sinal implícito que o detector de cutoff usa para identificar "quando o modelo foi ao ar" (alta missing em lançamentos pré-modelo, baixa missing em lançamentos pós-modelo). Remover antes destrói o sinal e o cutoff regride para datas anteriores, inflando o dataset com dados irrelevantes. Em produção, a remoção pode ocorrer normalmente pois não há detecção de cutoff.
 
 ### 4.3 EDA → Config Generator (`src/eda/generate_client_config.py`)
 
@@ -888,7 +888,26 @@ O refactor atual (Fases 1–3) leva o projeto do Nível 1 para o Nível 2. O Ní
 
 ---
 
-## 12. Backlog (fora do escopo das Fases 1–3)
+## 12. Lições Aprendidas
+
+### Regra: implementar exatamente o que a função original faz — nada mais
+
+**Incidente:** Componente 5 (`core/preprocessing.py`) — implementação inicial removeu colunas de score (`Pontuação`, `Score`, `Faixa A/B/C/D`) além do que `remover_features_desnecessarias()` fazia. Isso destruiu o sinal implícito usado pelo detector de Feature Missing cutoff, regressindo o cutoff de Nov/2025 para Jan/2025 e inflando o dataset de 48k para 117k registros (AUC de 0.745 para 0.651).
+
+**Causa raiz:** a implementação foi feita do ponto de vista do que "semanticamente faz sentido" para produção, sem verificar diff explícito contra o comportamento real da função original no treino. A regra do plano ("match exato → depois consolida") não foi seguida.
+
+**Regra obrigatória para toda migração de componente:**
+
+1. Antes de implementar, listar explicitamente o que a função original remove/transforma (verificar no código, não na memória)
+2. Implementar exatamente isso — nem mais, nem menos
+3. Rodar o pipeline de treino completo e comparar: dataset size, cutoff date, AUC e monotonia com o modelo de referência (`2a98e51c`: 48.812 registros, cutoff 2025-11-04, AUC 0.745, monotonia 100%)
+4. Só após paridade confirmada, expandir com transformações adicionais (se necessário)
+
+**Sinal de alarme:** se o número de registros pós-cutoff mudar entre o run de referência e o run de validação, há regressão — não prosseguir.
+
+---
+
+## 13. Backlog (fora do escopo das Fases 1–3)
 
 | Item | Descrição |
 |---|---|
