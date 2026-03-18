@@ -23,8 +23,11 @@ Componente 4 da Fase 2.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -90,10 +93,61 @@ def _construir_mapa_normalizacao(df: pd.DataFrame) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Artifacts — carregamento de valid_categories do modelo ativo
+# ---------------------------------------------------------------------------
+
+def _load_valid_categories(artifacts: Dict[str, Any]) -> Optional[List[str]]:
+    """
+    Carrega lista de categorias Medium válidas do modelo ativo.
+
+    Lê distribuicoes_esperadas.json → categorical['Medium'] → retorna as chaves
+    (nomes de categoria originais, com acentos) excluindo 'Outros' e 'nan'.
+
+    artifacts keys (em ordem de prioridade):
+        'mlflow_run_id': str — ID do MLflow run (preferencial)
+        'model_path':    str — path para pasta do modelo (deprecated, backward compat)
+
+    Returns:
+        Lista de categorias válidas, ou None se não disponível.
+    """
+    mlflow_run_id = artifacts.get('mlflow_run_id')
+    model_path = artifacts.get('model_path')
+
+    candidates = []
+
+    if mlflow_run_id:
+        experiment_id = artifacts.get('mlflow_experiment_id', '1')
+        candidates.append(
+            Path(__file__).parent.parent.parent
+            / 'mlruns' / experiment_id / mlflow_run_id / 'artifacts' / 'distribuicoes_esperadas.json'
+        )
+
+    if model_path:
+        candidates.append(Path(model_path) / 'distribuicoes_esperadas.json')
+
+    SKIP = {'Outros', 'nan'}
+    for path in candidates:
+        if path.exists():
+            try:
+                with open(path, 'r') as f:
+                    data = json.load(f)
+                medium_dist = data.get('categorical', {}).get('Medium', {})
+                if medium_dist:
+                    valid = [cat for cat in medium_dist if cat not in SKIP]
+                    logger.debug(f"  Medium: {len(valid)} categorias carregadas de {path.name}")
+                    return valid
+            except Exception as e:
+                logger.warning(f"  Medium: erro ao ler {path}: {e}")
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Função pública
 # ---------------------------------------------------------------------------
 
-def unify_medium(df: pd.DataFrame, config: MediumConfig) -> pd.DataFrame:
+def unify_medium(df: pd.DataFrame, config: MediumConfig,
+                 artifacts: Optional[Dict[str, Any]] = None) -> pd.DataFrame:
     """
     Unifica coluna Medium em categorias canônicas.
 
@@ -102,14 +156,22 @@ def unify_medium(df: pd.DataFrame, config: MediumConfig) -> pd.DataFrame:
       2. Normaliza variantes de escrita (case-insensitive dedup puro nos dados)
       3. Aplica mapeamento de variantes históricas (config.category_mappings)
       4. Aplica unificações adicionais opcionais (config.manual_unifications)
-      5a. Modo treino  (config.valid_categories=None):
+      5a. Modo treino  (valid_categories não resolvido):
               freq >= config.frequency_threshold → mantém; resto → 'Outros'
-      5b. Modo produção (config.valid_categories preenchido):
+      5b. Modo produção (valid_categories resolvido via config ou artifacts):
               whitelist; não-listadas → 'Outros'
 
+    Resolução de valid_categories (em ordem de prioridade):
+      1. config.valid_categories (valor explícito no YAML)
+      2. artifacts → distribuicoes_esperadas.json do modelo ativo
+      3. None → modo treino (frequência nos dados)
+
     Args:
-        df:     DataFrame com coluna 'Medium'
-        config: MediumConfig carregado de configs/clients/{client}.yaml
+        df:        DataFrame com coluna 'Medium'
+        config:    MediumConfig carregado de configs/clients/{client}.yaml
+        artifacts: Dict com referência ao modelo ativo para carregar valid_categories.
+                   Keys: 'mlflow_run_id' (preferencial) ou 'model_path'.
+                   Pode ser None/vazio para treino.
 
     Returns:
         Novo DataFrame com Medium unificado.
@@ -170,15 +232,21 @@ def unify_medium(df: pd.DataFrame, config: MediumConfig) -> pd.DataFrame:
     # ------------------------------------------------------------------
     SKIP = {'Outros', 'nan'}
 
-    if config.valid_categories is not None:
-        # ---- Modo produção: whitelist do feature registry ----
-        valid_set = set(config.valid_categories)
+    # Resolver valid_categories: config explícito > artifacts > None (treino)
+    valid_categories = config.valid_categories
+    if valid_categories is None and artifacts:
+        valid_categories = _load_valid_categories(artifacts)
+
+    if valid_categories is not None:
+        # ---- Modo produção: whitelist (config ou artifacts) ----
+        valid_set = set(valid_categories)
         df['Medium'] = df['Medium'].apply(
             lambda v: v if (pd.isna(v) or str(v) in valid_set or str(v) in SKIP)
                       else 'Outros'
         )
         n_final = df['Medium'].nunique()
-        logger.info(f"  Medium passo 5 (produção — whitelist {len(valid_set)} categorias): "
+        origem = 'config' if config.valid_categories is not None else 'artifacts'
+        logger.info(f"  Medium passo 5 (produção — whitelist {len(valid_set)} categorias via {origem}): "
                     f"{n_final} valores únicos")
 
     else:

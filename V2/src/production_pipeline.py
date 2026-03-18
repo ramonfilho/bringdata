@@ -13,7 +13,7 @@ from datetime import datetime
 from .data_processing.preprocessing import remove_duplicates, clean_columns, remove_campaign_features, remove_technical_fields, rename_long_column_names
 from .core.client_config import ClientConfig
 from .core.utm import unify_utm
-from .data_processing.medium_unification import unify_medium_columns
+from .core.medium import unify_medium as _unify_medium
 from .data_processing.category_unification import unificar_categorias_completo
 from .core.feature_engineering import create_features as _create_features
 from .core.encoding import apply_encoding as _apply_encoding
@@ -218,7 +218,15 @@ class LeadScoringPipeline:
         logger.info(" [5/11] Unificando categorias Medium...")
         medium_before = self.data['Medium'].nunique() if 'Medium' in self.data.columns else 0
 
-        self.data = unify_medium_columns(self.data)
+        mlflow_run_id = self.predictor.mlflow_run_id if hasattr(self.predictor, 'mlflow_run_id') else None
+        model_path = str(self.predictor.model_path) if self.predictor.model_path and not mlflow_run_id else None
+        medium_artifacts = {}
+        if mlflow_run_id:
+            medium_artifacts['mlflow_run_id'] = mlflow_run_id
+        elif model_path:
+            medium_artifacts['model_path'] = model_path
+
+        self.data = _unify_medium(self.data, self._client_config.medium, medium_artifacts)
 
         medium_after = self.data['Medium'].nunique() if 'Medium' in self.data.columns else 0
         logger.info(f"    Medium: {medium_before}{medium_after} categorias")
