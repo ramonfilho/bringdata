@@ -1078,8 +1078,8 @@ def main():
                 def extract_campaign_id_meta(utm_campaign):
                     if pd.isna(utm_campaign):
                         return None
-                    match = re.search(r'\|(\d{15,})$', str(utm_campaign))
-                    return match.group(1)[:15] if match else None
+                    match = re.search(r'\|\s*(\d{10,})\s*$', str(utm_campaign))
+                    return match.group(1)[:15] if match else None  # primeiros 15, igual ao campaigns_df
 
                 total_antes = len(capi_norm)
                 capi_norm['campaign_id_meta'] = capi_norm['campaign'].apply(extract_campaign_id_meta)
@@ -1123,8 +1123,14 @@ def main():
 
         logger.info(f"    Estatísticas: {lead_source_stats['survey_leads']} pesquisa + {lead_source_stats['capi_leads_extras']} CAPI extras")
 
-        # --- Fonte adicional: xlsx de leads (auto-detecção por sobreposição de datas) ---
-        xlsx_leads_folder = Path('V2/outputs/validation')
+        # --- Fonte primária opcional: xlsx de leads (auto-detecção por sobreposição de datas) ---
+        # Quando encontrado, o xlsx define quais leads pertencem ao lançamento.
+        # Sheets/Railway são usados apenas para enriquecimento (campaign_id_meta, lead_score, decil).
+        capi_norm  = locals().get('capi_norm')   # pode não estar definido se survey_df estava vazio
+        survey_df  = locals().get('survey_df', pd.DataFrame())
+        xlsx_leads_folder = Path('outputs/validation/arquivos_leads')
+        if not xlsx_leads_folder.exists():
+            xlsx_leads_folder = Path('outputs/validation')
         xlsx_candidates = sorted(xlsx_leads_folder.glob('* Leads.xlsx')) + \
                           sorted(xlsx_leads_folder.glob('*Leads.xlsx'))
         xlsx_candidates = list(dict.fromkeys(xlsx_candidates))  # dedup mantendo ordem
@@ -1134,60 +1140,106 @@ def main():
             from src.validation.data_loader import normalizar_email, normalizar_telefone_robusto
             period_start = pd.to_datetime(_s)
             period_end   = pd.to_datetime(_e) + pd.Timedelta(days=1)
-            xlsx_extras_all = []
+
+            # Selecionar o arquivo xlsx com maior sobreposição com o período de captação
+            best_xlsx = None
+            best_overlap_count = 0
 
             for xlsx_path in xlsx_candidates:
                 try:
-                    xlsx_df = pd.read_excel(xlsx_path, sheet_name='LEADS',
+                    xlsx_df_dates = pd.read_excel(xlsx_path, sheet_name='LEADS', usecols=['DATA'])
+                    dates = pd.to_datetime(xlsx_df_dates['DATA'], errors='coerce')
+                    in_period = ((dates >= period_start) & (dates < period_end)).sum()
+                    logger.info(f"    {xlsx_path.name}: {in_period} leads no período")
+                    if in_period > best_overlap_count:
+                        best_overlap_count = in_period
+                        best_xlsx = xlsx_path
+                except Exception as e:
+                    logger.warning(f"    Erro ao verificar {xlsx_path.name}: {e}")
+
+            if best_xlsx is not None and best_overlap_count > 0:
+                logger.info(f"    Usando como fonte primária: {best_xlsx.name} ({best_overlap_count} leads no período)")
+                try:
+                    xlsx_df = pd.read_excel(best_xlsx, sheet_name='LEADS',
                                             usecols=lambda c: c in
                                             ['NOME','E-MAIL','TELEFONE','SOURCE','MEDIUM',
                                              'CAMPAIGN','TERM','CONTENT','DATA'])
-                    dates = pd.to_datetime(xlsx_df['DATA'], errors='coerce')
-                    # Só carrega se houver sobreposição com o período
-                    if dates.max() < period_start or dates.min() >= period_end:
-                        continue
+                    dates_full = pd.to_datetime(xlsx_df['DATA'], errors='coerce')
 
-                    xlsx_norm = pd.DataFrame()
-                    xlsx_norm['email'] = xlsx_df['E-MAIL'].apply(
+                    xlsx_primary = pd.DataFrame()
+                    xlsx_primary['email'] = xlsx_df['E-MAIL'].apply(
                         lambda x: normalizar_email(x) if pd.notna(x) else None)
-                    xlsx_norm['nome']     = xlsx_df.get('NOME',    pd.Series(dtype=str))
-                    xlsx_norm['telefone'] = xlsx_df['TELEFONE'].apply(
+                    xlsx_primary['nome']     = xlsx_df.get('NOME',    pd.Series(dtype=str))
+                    xlsx_primary['telefone'] = xlsx_df['TELEFONE'].apply(
                         lambda x: normalizar_telefone_robusto(str(x)) if pd.notna(x) else None
-                    ) if 'TELEFONE' in xlsx_df.columns else None
-                    xlsx_norm['data_captura'] = dates
-                    xlsx_norm['campaign'] = xlsx_df.get('CAMPAIGN', pd.Series(dtype=str))
-                    xlsx_norm['source']   = xlsx_df.get('SOURCE',   pd.Series(dtype=str))
-                    xlsx_norm['medium']   = xlsx_df.get('MEDIUM',   pd.Series(dtype=str))
-                    xlsx_norm['term']     = xlsx_df.get('TERM',     pd.Series(dtype=str))
-                    xlsx_norm['content']  = xlsx_df.get('CONTENT',  pd.Series(dtype=str))
-                    xlsx_norm['lead_score']  = np.nan
-                    xlsx_norm['decile']      = None
-                    xlsx_norm['source_type'] = 'xlsx'
+                    ) if 'TELEFONE' in xlsx_df.columns else pd.Series(dtype=str)
+                    xlsx_primary['data_captura'] = dates_full
+                    xlsx_primary['campaign'] = xlsx_df.get('CAMPAIGN', pd.Series(dtype=str))
+                    xlsx_primary['source']   = xlsx_df.get('SOURCE',   pd.Series(dtype=str))
+                    xlsx_primary['medium']   = xlsx_df.get('MEDIUM',   pd.Series(dtype=str))
+                    xlsx_primary['term']     = xlsx_df.get('TERM',     pd.Series(dtype=str))
+                    xlsx_primary['content']  = xlsx_df.get('CONTENT',  pd.Series(dtype=str))
+                    xlsx_primary['lead_score']  = np.nan
+                    xlsx_primary['decile']      = None
+                    xlsx_primary['campaign_id_meta'] = None
+                    xlsx_primary['source_type'] = 'xlsx'
 
-                    xlsx_norm = xlsx_norm[
-                        xlsx_norm['email'].notna() &
-                        (xlsx_norm['data_captura'] >= period_start) &
-                        (xlsx_norm['data_captura'] <  period_end)
+                    xlsx_primary = xlsx_primary[
+                        xlsx_primary['email'].notna() &
+                        (xlsx_primary['data_captura'] >= period_start) &
+                        (xlsx_primary['data_captura'] <  period_end)
                     ].copy()
+                    xlsx_primary = xlsx_primary.drop_duplicates(subset=['email']).copy()
 
-                    existing_emails = set(leads_df['email'].dropna().unique())
-                    xlsx_extras = xlsx_norm[~xlsx_norm['email'].isin(existing_emails)].copy()
-                    logger.info(f"    {xlsx_path.name}: {len(xlsx_norm)} leads no período → {len(xlsx_extras)} extras")
+                    # Enriquecer com Railway/Cloud SQL: campaign_id_meta, lead_score, decil
+                    enrichment_sources = []
+                    if capi_norm is not None and len(capi_norm) > 0:
+                        enrichment_sources.append(capi_norm[['email','campaign','campaign_id_meta','lead_score','decile']].copy())
+                    if not survey_df.empty and 'email' in survey_df.columns:
+                        survey_enrich = survey_df[['email'] + [c for c in ['campaign','lead_score','decile'] if c in survey_df.columns]].copy()
+                        enrichment_sources.append(survey_enrich)
 
-                    if len(xlsx_extras) > 0:
-                        xlsx_extras_all.append(xlsx_extras)
-                        existing_emails.update(xlsx_extras['email'].dropna().unique())
+                    if enrichment_sources:
+                        enrich_df = pd.concat(enrichment_sources, ignore_index=True)
+                        enrich_df = enrich_df.drop_duplicates(subset=['email'], keep='first')
+                        xlsx_primary = xlsx_primary.merge(
+                            enrich_df.rename(columns={
+                                'campaign': 'campaign_enrich',
+                                'lead_score': 'lead_score_enrich',
+                                'decile': 'decile_enrich',
+                                'campaign_id_meta': 'campaign_id_meta_enrich',
+                            }),
+                            on='email', how='left'
+                        )
+                        # Preencher com valores do enriquecimento onde o xlsx não tem
+                        if 'campaign_enrich' in xlsx_primary.columns:
+                            mask_no_camp = xlsx_primary['campaign'].isna() | (xlsx_primary['campaign'] == '')
+                            xlsx_primary.loc[mask_no_camp, 'campaign'] = xlsx_primary.loc[mask_no_camp, 'campaign_enrich']
+                            xlsx_primary.drop(columns=['campaign_enrich'], inplace=True, errors='ignore')
+                        if 'lead_score_enrich' in xlsx_primary.columns:
+                            xlsx_primary['lead_score'] = xlsx_primary['lead_score_enrich']
+                            xlsx_primary.drop(columns=['lead_score_enrich'], inplace=True, errors='ignore')
+                        if 'decile_enrich' in xlsx_primary.columns:
+                            xlsx_primary['decile'] = xlsx_primary['decile_enrich']
+                            xlsx_primary.drop(columns=['decile_enrich'], inplace=True, errors='ignore')
+                        if 'campaign_id_meta_enrich' in xlsx_primary.columns:
+                            xlsx_primary['campaign_id_meta'] = xlsx_primary['campaign_id_meta_enrich']
+                            xlsx_primary.drop(columns=['campaign_id_meta_enrich'], inplace=True, errors='ignore')
+
+                    leads_df = xlsx_primary
+                    lead_source_stats['xlsx_primary'] = len(xlsx_primary)
+                    lead_source_stats['xlsx_enriched'] = int(xlsx_primary['campaign_id_meta'].notna().sum())
+                    logger.info(f"    Fonte primária xlsx: {len(xlsx_primary)} leads únicos no período")
+                    logger.info(f"    Enriquecidos com campaign_id_meta: {lead_source_stats['xlsx_enriched']}")
 
                 except Exception as e:
-                    logger.warning(f"    Erro ao processar {xlsx_path.name}: {e}")
-
-            if xlsx_extras_all:
-                all_extras = pd.concat(xlsx_extras_all, ignore_index=True)
-                leads_df = pd.concat([leads_df, all_extras], ignore_index=True)
-                lead_source_stats['xlsx_leads_extras'] = len(all_extras)
-                logger.info(f"    Total com xlsx: {len(leads_df)} (+{len(all_extras)} extras)")
+                    logger.warning(f"    Erro ao usar xlsx como fonte primária ({best_xlsx.name}): {e} — mantendo Sheets/Railway")
+                    lead_source_stats['xlsx_leads_extras'] = 0
             else:
+                logger.info("    Nenhum xlsx com leads no período — mantendo Sheets/Railway como fonte")
                 lead_source_stats['xlsx_leads_extras'] = 0
+        else:
+            lead_source_stats['xlsx_leads_extras'] = 0
 
     # Vendas
     sales_loader = SalesDataLoader()
@@ -1447,6 +1499,38 @@ def main():
         logger.info(f"      COM_ML: {len(ml_campaign_ids)} campanhas")
         logger.info(f"      SEM_ML (Controle): {len(control_campaign_ids)} campanhas")
         logger.info(f"      EXCLUÍDAS: {len(campaigns_df) - len(campaigns_df_filtered)} campanhas")
+
+        # =====================================================================
+        # FILTRO UTM: remover leads de outros lançamentos que vazaram pela janela de datas
+        # Usa IDs reais da Meta API (campaigns_df), que coincidem com os IDs no UTM do Railway.
+        # Leads sem campaign_id (Sheets sem UTM numérico) são mantidos conservadoramente.
+        # Ativar: filter_leads_by_campaign_id: true no validation_config.yaml
+        # =====================================================================
+        if config.get('filter_leads_by_campaign_id', False):
+            # ml_campaign_ids e control_campaign_ids já são strings de 15 dígitos (campaigns_df[:15])
+            # campaign_id_meta em leads_df também é 15 dígitos (extract_campaign_id_meta[:15])
+            # → comparação direta, sem transformação adicional
+            allowed_ids = set(str(i)[:15] for i in ml_campaign_ids + control_campaign_ids)
+
+            if 'campaign_id_meta' not in leads_df.columns:
+                def _extract_utm_id_15(camp):
+                    if pd.isna(camp):
+                        return None
+                    m = re.search(r'\|\s*(\d{10,})\s*$', str(camp))
+                    return m.group(1)[:15] if m else None
+                leads_df['campaign_id_meta'] = leads_df['campaign'].apply(_extract_utm_id_15)
+
+            before = len(leads_df)
+            has_id = leads_df['campaign_id_meta'].notna()
+            id_matches = leads_df['campaign_id_meta'].isin(allowed_ids)
+            # Mantém: sem ID (Sheets sem UTM numérico) OU ID pertence ao lançamento atual
+            leads_df = leads_df[~has_id | id_matches].copy()
+            removed = before - len(leads_df)
+            logger.info(f"   Filtro UTM (filter_leads_by_campaign_id=True):")
+            logger.info(f"     IDs permitidos: {len(allowed_ids)} campanhas ({len(ml_campaign_ids)} ML + {len(control_campaign_ids)} Controle)")
+            logger.info(f"     Leads com campaign_id identificável: {has_id.sum()}")
+            logger.info(f"     Removidos (outro lançamento): {removed}")
+            logger.info(f"     Restaram: {len(leads_df)}")
 
         if ml_campaign_ids and control_campaign_ids:
             # Usar função refinada que distingue Eventos ML vs Otimização ML

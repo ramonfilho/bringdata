@@ -13,6 +13,12 @@ meta_account_ids:
 product_value: 2000.00  # Valor do produto em R$
 max_match_days: 30      # Janela máxima para matching leads-vendas
 
+# Filtrar leads pelo campaign_id do lançamento atual?
+# True: remove leads cujo campaign_id (UTM) pertence a outro lançamento — resolve double-counting em janelas sobrepostas
+# False (padrão): filtra apenas por data — comportamento legado
+# Pré-requisito: eventos_ml_campaigns e controle_campaigns devem estar preenchidos com os IDs do lançamento atual
+filter_leads_by_campaign_id: false
+
 # Agrupar campanhas "Otimização ML" junto com "Controle" na comparação?
 # False (padrão): Otimização ML é filtrado da comparação (apenas Eventos ML vs Controle)
 # True: Otimização ML é agrupado com Controle (Eventos ML vs [Controle + Otimização ML])
