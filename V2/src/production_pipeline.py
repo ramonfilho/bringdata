@@ -214,19 +214,20 @@ class LeadScoringPipeline:
         logger.info(f"    Term: {utm_term_before}{utm_term_after} categorias")
         logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
+        # Construir artifacts uma vez — reutilizado por medium e encoding
+        mlflow_run_id = self.predictor.mlflow_run_id if hasattr(self.predictor, 'mlflow_run_id') else None
+        model_path = str(self.predictor.model_path) if self.predictor.model_path and not mlflow_run_id else None
+        _artifacts = {}
+        if mlflow_run_id:
+            _artifacts['mlflow_run_id'] = mlflow_run_id
+        elif model_path:
+            _artifacts['model_path'] = model_path
+
         # 5. Unificar categorias Medium (usando componente importado)
         logger.info(" [5/11] Unificando categorias Medium...")
         medium_before = self.data['Medium'].nunique() if 'Medium' in self.data.columns else 0
 
-        mlflow_run_id = self.predictor.mlflow_run_id if hasattr(self.predictor, 'mlflow_run_id') else None
-        model_path = str(self.predictor.model_path) if self.predictor.model_path and not mlflow_run_id else None
-        medium_artifacts = {}
-        if mlflow_run_id:
-            medium_artifacts['mlflow_run_id'] = mlflow_run_id
-        elif model_path:
-            medium_artifacts['model_path'] = model_path
-
-        self.data = _unify_medium(self.data, self._client_config.medium, medium_artifacts)
+        self.data = _unify_medium(self.data, self._client_config.medium, _artifacts or None)
 
         medium_after = self.data['Medium'].nunique() if 'Medium' in self.data.columns else 0
         logger.info(f"    Medium: {medium_before}{medium_after} categorias")
@@ -340,17 +341,7 @@ class LeadScoringPipeline:
         logger.info(" [10/12] Aplicando encoding categórico...")
         cols_before_encoding = len(self.data.columns)
 
-        # Priorizar mlflow_run_id, fallback para model_path (backward compatibility)
-        mlflow_run_id = self.predictor.mlflow_run_id if hasattr(self.predictor, 'mlflow_run_id') else None
-        model_path = str(self.predictor.model_path) if self.predictor.model_path and not mlflow_run_id else None
-
-        artifacts = {}
-        if mlflow_run_id:
-            artifacts['mlflow_run_id'] = mlflow_run_id
-        elif model_path:
-            artifacts['model_path'] = model_path
-
-        self.data = _apply_encoding(self.data, self._client_config.encoding, artifacts)
+        self.data = _apply_encoding(self.data, self._client_config.encoding, _artifacts)
 
         encoding_cols_added = len(self.data.columns) - cols_before_encoding
         logger.info(f"    Colunas adicionadas pelo encoding: {encoding_cols_added}")
