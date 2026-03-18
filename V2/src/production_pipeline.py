@@ -14,7 +14,7 @@ from .data_processing.preprocessing import remove_duplicates, clean_columns, rem
 from .core.client_config import ClientConfig
 from .core.utm import unify_utm
 from .core.medium import unify_medium as _unify_medium
-from .data_processing.category_unification import unificar_categorias_completo
+from .core.category_unification import unify_categories as _unify_categories
 from .core.feature_engineering import create_features as _create_features
 from .core.encoding import apply_encoding as _apply_encoding
 from .model.prediction import LeadScoringPredictor
@@ -252,7 +252,7 @@ class LeadScoringPipeline:
             if col in self.data.columns:
                 categorias_antes[col] = self.data[col].nunique()
 
-        self.data = unificar_categorias_completo(self.data)
+        self.data = _unify_categories(self.data, self._client_config.category)
 
         # Contar categorias depois
         categorias_normalizadas = 0

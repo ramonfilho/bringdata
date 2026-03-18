@@ -165,8 +165,8 @@ class MonitoringOrchestrator:
                 )
 
             # Aplicar unificação de categorias (mesmo processamento que produção)
-            from data_processing.category_unification import unificar_categorias_completo
-            df = unificar_categorias_completo(df)
+            from core.category_unification import unify_categories as _unify_categories
+            df = _unify_categories(df, self._client_config.category)
             logger.info(f" Categorias unificadas")
 
             # Sequência canônica de preprocessing com preservação de decil/lead_score

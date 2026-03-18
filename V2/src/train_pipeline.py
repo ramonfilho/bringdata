@@ -34,7 +34,7 @@ from src.data_processing.column_unification_refactored import (
     aplicar_filtro_status_risco,
     filtrar_vendas_devclub
 )
-from src.data_processing.category_unification import unificar_categorias_completo
+from src.core.category_unification import unify_categories as _unify_categories
 from src.data_processing.feature_removal import remover_features_desnecessarias, listar_colunas_restantes
 from src.core.client_config import ClientConfig
 from src.core.utm import unify_utm
@@ -512,7 +512,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 7: UNIFICAÇÃO COMPLETA DE CATEGORIAS")
     logger.info("")
 
-    df_pesquisa_final_unificado = unificar_categorias_completo(df_pesquisa_final)
+    df_pesquisa_final_unificado = _unify_categories(df_pesquisa_final, client_config.category)
 
     logger.info("=" * 80)
     # === CÉLULA 8: Remoção de features desnecessárias ===

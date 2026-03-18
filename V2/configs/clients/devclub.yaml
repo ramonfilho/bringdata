@@ -170,14 +170,55 @@ medium:
 # CategoryConfig — hardcodes #27–#33 (Componente 6 — Fase 2)
 # ---------------------------------------------------------------------------
 category:
-  categorical_columns: null      # #27
-  category_mappings:             # #28–#33
-    interesse_programacao: null  # #28
-    o_que_quer_ver_evento: null  # #29
-    faixa_salarial: null         # #30
-    o_que_faz_atualmente: null   # #31
-    idade: null                  # #32
-    outras_colunas: null         # #33
+  categorical_columns:           # #27 — recebem limpar_texto (lowercase + unidecode + sem pontuação)
+    - "interesse_programacao"
+    - "Tem computador/notebook?"
+    - "O que mais você quer ver no evento?"
+    - "Você possui cartão de crédito?"
+    - "Atualmente, qual a sua faixa salarial?"
+    - "O que você faz atualmente?"
+    - "Qual a sua idade?"
+    - "Nome Completo"
+    - "Term"
+    # EXCLUÍDAS INTENCIONALMENTE: E-mail, Telefone, Data, Medium, Source
+    # e colunas binárias Não/Sim (feature names dependem do acento original)
+  category_mappings:             # #28–#33 — mapeamentos semânticos pós-limpar_texto
+    "interesse_programacao":     # #28
+      "trabalhar de qualquer lugar":        "poder trabalhar de qualquer lugar do mundo"
+      "ganhar mais dinheiro bons salarios": "a possibilidade de ganhar altos salarios"
+      "estabilidade nunca faltar emprego":  "a ideia de nunca faltar emprego na area"
+      "trabalhar para fora dolar":          "trabalhar para outros paises e ganhar em outra moeda"
+    "O que mais você quer ver no evento?":  # #29
+      "fazer transicao de carreira e consegui meu primeiro emprego na area": "fazer transicao de carreira e conseguir meu primeiro emprego na area"
+      "projeto na pratica":               "fazer um projeto na pratica"
+      "como conseguir emprego":           "fazer transicao de carreira e conseguir meu primeiro emprego na area"
+      "como fazer transicao de carreira": "fazer transicao de carreira e conseguir meu primeiro emprego na area"
+      "quero saber se e pra mim":         "quero saber se e para mim"
+      "como fazer freelancer":            "fazer freelancer como programador"
+    "Atualmente, qual a sua faixa salarial?":  # #30
+      "nenhuma renda":   "nao tenho renda"
+      "ate r 2000":      "entre r1000 a r2000 reais ao mes"
+      "r 2001 a 3000":   "entre r2001 a r3000 reais ao mes"
+      "r 3001 a 5000":   "entre r3001 a r5000 reais ao mes"
+      "acima de r 5000": "mais de r5001 reais ao mes"
+    "O que você faz atualmente?":          # #31
+      "clt funcionario publico":              "sou cltfuncionario publico"
+      "autonomo empreendedor":                "sou autonomo"
+      "desempregado":                         "nao trabalho e nem estudo"
+      "estudante":                            "sou apenas estudante"
+      "aposentado":                           "sou aposentado"
+      "atualmente nao trabalho e nem estudo": "nao trabalho e nem estudo"
+      "sou autonomo uber freela vendedor etc": "sou autonomo"
+      "estudo na faculdade":                                     "sou apenas estudante"
+      "estudo ti na faculdade mas quero aprender mais por fora": "sou apenas estudante"
+      "faco outro curso na faculdade e quero mudar para ti":     "sou apenas estudante"
+    "Qual a sua idade?":                   # #32
+      "18 24":       "18 24 anos"
+      "25 34":       "25 34 anos"
+      "35 44":       "35 44 anos"
+      "45 54":       "45 54 anos"
+      "menos de 18": "menos de 18 anos"
+      "55":          "mais de 55 anos"
 
 # ---------------------------------------------------------------------------
 # MatchingConfig — hardcodes #41–#46
