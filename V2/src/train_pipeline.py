@@ -48,7 +48,7 @@ from src.matching.matching_email_telefone import fazer_matching_email_telefone
 from src.matching.matching_unified import match_leads_to_sales_unified
 from src.data_processing.conversion_window import aplicar_janela_conversao
 from src.core.feature_engineering import create_features as _create_features
-from src.features.encoding_training import aplicar_encoding_estrategico
+from src.core.encoding import apply_encoding as _apply_encoding
 from src.model.training_model import registrar_features_e_modelo_devclub
 from src.model.hyperparameter_tuning import hyperparameter_tuning
 from src.monitoring.data_quality import capture_training_categories, capture_training_distributions, calculate_missing_rate
@@ -738,7 +738,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         dataset_v1_devclub_fe.to_pickle(os.path.join(_fixtures, 'snapshot_encoding_input.pkl'))
         logger.info("  [PARITY] snapshot_encoding_input.pkl salvo")
 
-    dataset_v1_devclub_encoded = aplicar_encoding_estrategico(dataset_v1_devclub_fe, medium_strategy=medium_strategy)
+    dataset_v1_devclub_encoded = _apply_encoding(dataset_v1_devclub_fe, client_config.encoding)
 
     if capture_parity_snapshots:
         dataset_v1_devclub_encoded.to_pickle(os.path.join(_fixtures, 'snapshot_encoding_output.pkl'))

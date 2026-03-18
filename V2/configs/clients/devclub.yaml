@@ -231,16 +231,8 @@ encoding:
     "dia_semana": [0, 1, 2, 3, 4, 5, 6]
   categorical_detection_max_unique: 20   # #64
   features_to_drop_after_encoding: []    # #51 — telefone_comprimento_8 não existe mais após grouping (#157)
-  column_name_corrections:       # #70 — mapeamentos_especificos da produção (transitório até próximo retreino)
-    "O_que_voc_faz_atualmente_Sou_autonomo": "O_que_voc_faz_atualmente_Sou_aut_nomo"
-    "Tem_computador_notebook_SIM": "Tem_computador_notebook_Sim"
-    "Tem_computador_notebook_N_O": "Tem_computador_notebook_N_o"
-    "Medium_outros": "Medium_Outros"
-    "Voc_possui_cart_o_de_cr_dito_Sim": "Voc_possui_cart_o_de_cr_dito_sim"
-    "Tem_computador_notebook_Sim": "Tem_computador_notebook_sim"
-    "O_que_voc_faz_atualmente_Sou_CLT_Funcion_rio_P_blico": "O_que_voc_faz_atualmente_sou_cltfuncionario_publico"
-    "O_que_mais_voc_quer_ver_no_evento_Fazer_transi_o_de_carreira_e_conseguir_meu_primeiro_emprego_na_rea": "O_que_mais_voc_quer_ver_no_evento_fazer_transicao_de_carreira_e_conseguir_meu_primeiro_emprego_na_area"
-    "interesse_programacao_Todas_as_alternativas": "interesse_programacao_todas_as_alternativas"
+  column_name_corrections: {}    # #70 — confirmado obsoleto em 18/03/2026: core/encoding.py produz
+                                  # nomes normalizados que já batem com o feature registry de produção sem correções
 
 # ---------------------------------------------------------------------------
 # ModelConfig — hardcodes #1, #10, #53, #55, #56, #71, #72, #79, #89
