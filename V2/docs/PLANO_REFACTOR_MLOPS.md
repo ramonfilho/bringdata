@@ -907,6 +907,50 @@ O refactor atual (Fases 1–3) leva o projeto do Nível 1 para o Nível 2. O Ní
 
 ---
 
+### Protocolo obrigatório: `validate_parity_snapshots.py`
+
+Para tornar o passo 3 acima objetivo e automático, existe o script `V2/scripts/validate_parity_snapshots.py`. Ele captura snapshots do DataFrame em 6 checkpoints do pipeline e compara row count, conjunto de colunas e distribuições de categorias contra um golden baseline.
+
+**Fluxo obrigatório para qualquer migração de componente do `train_pipeline.py`:**
+
+```bash
+# ANTES de tocar qualquer código — com o código em estado anterior confirmado:
+python scripts/validate_parity_snapshots.py --generate-golden
+# Nota: tests/fixtures/ está no .gitignore (binários, regenerar localmente).
+# O golden fica em tests/fixtures/golden/ — não commitar, só manter localmente.
+
+# Implementar o componente...
+
+# APÓS implementar — antes de commitar o código novo:
+python scripts/validate_parity_snapshots.py --validate
+# Se ❌ CRÍTICO → não commitar, investigar a regressão
+# Se ✅ OK       → pode commitar
+```
+
+**Checkpoints monitorados:**
+
+| Snapshot | O que verifica | Crítico? |
+|---|---|---|
+| `snapshot_utm_input` | Saída da Célula 8 — remoção de features (entrada do UTM) | Sim |
+| `snapshot_utm_output` | Saída UTM unification — distribuição de Source/Term | Sim |
+| `snapshot_medium_output` | Saída Medium unification — distribuição de Medium | Sim |
+| `snapshot_fe_input` | **Entrada do Feature Engineering** — row count = tamanho do dataset pós-cutoff | **Sim** |
+| `snapshot_fe_output` | Saída Feature Engineering | Não (aviso) |
+| `snapshot_encoding_output` | Saída Encoding — feature count e nomes finais do modelo | Sim |
+
+**`snapshot_fe_input` é o mais crítico:** uma variação de row count > 0.5% neste ponto indica que o cutoff de Feature Missing foi alterado — comportamento idêntico ao que ocorreu no incidente do Componente 5.
+
+**Parâmetros de tolerância:**
+
+```python
+ROW_TOLERANCE  = 0.005   # 0.5% — diferença de row count aceitável
+DIST_TOLERANCE = 0.02    # 2pp  — diferença de distribuição categórica aceitável
+```
+
+**Referência do golden baseline:** run `2a98e51c` — 48.812 registros, cutoff 2025-11-04, AUC 0.745, monotonia 100%.
+
+---
+
 ## 13. Backlog (fora do escopo das Fases 1–3)
 
 | Item | Descrição |
