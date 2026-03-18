@@ -93,6 +93,7 @@ def run_pipeline_with_snapshots(output_dir: Path) -> None:
         [
             sys.executable, '-m', 'V2.src.train_pipeline',
             '--no-api-data', '--use-cached-data',
+            '--api-end-date', '2026-03-15',
             '--capture-parity-snapshots',
         ],
         capture_output=True, text=True,
