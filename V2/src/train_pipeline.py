@@ -38,8 +38,7 @@ from src.data_processing.category_unification import unificar_categorias_complet
 from src.data_processing.feature_removal import remover_features_desnecessarias, listar_colunas_restantes
 from src.core.client_config import ClientConfig
 from src.data_processing.utm_training import unificar_utm_source_term, verificar_consistencia_utm
-from src.data_processing.medium_training import extrair_publico_medium
-from src.data_processing.medium_production_training import unificar_medium_para_producao
+from src.core.medium import unify_medium
 from src.data_processing.dataset_versioning_training import criar_dataset_pos_cutoff, disponibilizar_dataset
 from src.matching.matching_training import fazer_matching_robusto as fazer_matching_variantes
 from src.matching.matching_robusto import fazer_matching_robusto
@@ -604,15 +603,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
             df_utm_unificado.to_pickle(os.path.join(_fixtures, 'snapshot_medium_input.pkl'))
             logger.info("  [PARITY] snapshot_medium_input.pkl salvo")
 
-        df_medium_unificado, n_apos_extracao = extrair_publico_medium(df_utm_unificado)
-        n_apos_norm = df_medium_unificado['Medium'].nunique()
-
-        df_medium_producao = unificar_medium_para_producao(
-            df_medium_unificado,
-            n_bruto=n_bruto_medium,
-            n_apos_extracao=n_apos_extracao,
-            n_apos_norm=n_apos_norm,
-        )
+        df_medium_producao = unify_medium(df_utm_unificado, client_config.medium)
     else:
         logger.info("  Pulando (Medium foi removido na célula 8 - strategy='remove')")
         df_medium_unificado = df_utm_unificado.copy()
