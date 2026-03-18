@@ -224,14 +224,14 @@ category:
 # MatchingConfig — hardcodes #41–#46
 # ---------------------------------------------------------------------------
 matching:
-  strategy: null
-  pesquisa_email_column: null    # #41
-  pesquisa_phone_column: null    # #42
-  country_code: null             # #43
-  phone_digits: null             # #43
-  alunos_todos_path: null        # #44
-  validation_products: null      # #45
-  alunos_email_column: null      # #46
+  strategy: email_telefone       # estratégia ativa no train_pipeline.py
+  pesquisa_email_column: "E-mail"   # #41
+  pesquisa_phone_column: "Telefone" # #42
+  country_code: 55               # #43
+  phone_digits: [10, 11]         # #43 — comprimentos válidos para matching
+  alunos_todos_path: null        # #44 — não usado na estratégia email_telefone
+  validation_products: null      # #45 — não usado na estratégia email_telefone
+  alunos_email_column: null      # #46 — não usado na estratégia email_telefone
 
 # ---------------------------------------------------------------------------
 # FeatureConfig — hardcodes #2, #3, #34, #39, #40, #47, #48, #52, #65, #66

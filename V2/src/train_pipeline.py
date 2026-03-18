@@ -40,12 +40,7 @@ from src.core.client_config import ClientConfig
 from src.core.utm import unify_utm
 from src.core.medium import unify_medium
 from src.data_processing.dataset_versioning_training import criar_dataset_pos_cutoff, disponibilizar_dataset
-from src.matching.matching_training import fazer_matching_robusto as fazer_matching_variantes
-from src.matching.matching_robusto import fazer_matching_robusto
-from src.matching.matching_email_only import fazer_matching_email_only
-from src.matching.matching_email_with_validation import fazer_matching_email_with_validation
-from src.matching.matching_email_telefone import fazer_matching_email_telefone
-from src.matching.matching_unified import match_leads_to_sales_unified
+from src.core.matching import match_leads as _match_leads
 from src.data_processing.conversion_window import aplicar_janela_conversao
 from src.core.feature_engineering import create_features as _create_features
 from src.core.encoding import apply_encoding as _apply_encoding
@@ -632,24 +627,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     # Filtro TMB já foi aplicado em unificar_colunas_datasets
     df_vendas_matching = df_vendas_final.copy()
 
-    if initial_matching == 'email_only':
-        dataset_v1_final = fazer_matching_email_only(df_pos_cutoff, df_vendas_matching)
-    elif initial_matching == 'email_telefone':
-        dataset_v1_final = fazer_matching_email_telefone(df_pos_cutoff, df_vendas_matching)
-    elif initial_matching == 'variantes':
-        dataset_v1_final = fazer_matching_variantes(df_pos_cutoff, df_vendas_matching)
-    elif initial_matching == 'robusto':
-        dataset_v1_final = fazer_matching_robusto(df_pos_cutoff, df_vendas_matching)
-    elif initial_matching == 'validation':
-        dataset_v1_final = fazer_matching_email_with_validation(df_pos_cutoff, df_vendas_matching)
-    elif initial_matching == 'unified_last6':
-        dataset_v1_final = match_leads_to_sales_unified(
-            df_pos_cutoff,
-            df_vendas_matching,
-            mode='training'
-        )
-    else:
-        raise ValueError(f"Método de matching inicial inválido: {initial_matching}. Use 'email_only', 'email_telefone', 'variantes', 'robusto', 'validation' ou 'unified_last6'")
+    dataset_v1_final = _match_leads(df_pos_cutoff, df_vendas_matching, client_config.matching)
 
     # Vendas já foram filtradas para DevClub na CÉLULA 5.4
     # Target já reflete apenas matches com vendas DevClub

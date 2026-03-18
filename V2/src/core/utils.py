@@ -20,15 +20,56 @@ from typing import List
 import pandas as pd
 
 
-def normalizar_telefone_robusto(telefone: str, country_code: int = 55,
-                                 phone_digits: List[int] = None) -> str:
-    """Normaliza número de telefone removendo caracteres não numéricos."""
-    raise NotImplementedError
+def normalizar_telefone_robusto(telefone, country_code: int = 55,
+                                phone_digits: List[int] = None) -> str:
+    """
+    Normaliza número de telefone para dígitos apenas, sem código de país.
+
+    Aceita floats (notação científica), strings com pontuação, códigos de país.
+    Retorna string de dígitos ou None se inválido.
+
+    phone_digits: lista de comprimentos válidos após normalização (ex: [10, 11]).
+                  None = aceita [8, 9, 10, 11].
+    """
+    if pd.isna(telefone):
+        return None
+
+    if isinstance(telefone, float):
+        tel_str = str(int(telefone))
+    else:
+        tel_str = str(telefone)
+
+    if 'e+' in tel_str.lower():
+        try:
+            tel_str = str(int(float(tel_str)))
+        except Exception:
+            pass
+
+    tel_str = tel_str.replace('.0', '')
+    digitos = re.sub(r'\D', '', tel_str)
+
+    if len(digitos) < 8:
+        return None
+
+    country_prefix = str(country_code)
+    if digitos.startswith(country_prefix) and len(digitos) > len(country_prefix) + 8:
+        digitos = digitos[len(country_prefix):]
+
+    valid_lengths = phone_digits if phone_digits else [8, 9, 10, 11]
+    if len(digitos) in valid_lengths:
+        return digitos
+
+    return None
 
 
-def normalizar_email(email: str) -> str:
-    """Normaliza email para lowercase e strip."""
-    raise NotImplementedError
+def normalizar_email(email) -> str:
+    """Normaliza email: strip + lowercase. Retorna None se inválido."""
+    if pd.isna(email):
+        return None
+    s = str(email).strip().lower()
+    if '@' in s and s != 'nan' and len(s) > 5:
+        return s
+    return None
 
 
 def limpar_texto(texto: str) -> str:
