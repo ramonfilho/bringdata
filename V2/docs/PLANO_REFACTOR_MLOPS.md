@@ -708,16 +708,12 @@ Duplicatas encontradas (resolução via campo já mapeado):
    - Hardcodes #7, #36, #37 → `configs/clients/devclub.yaml`
    - Pendente: atualizar `production_pipeline.py` e `monitoring/orchestrator.py`
 
-4. `core/encoding.py` — **PENDENTE — migração coordenada**
-   - Motivo: `apply_encoding()` aplica `clean_column_names()` que normaliza para snake_case.
-     `encoding_training.py` mantém nomes originais com acentos/espaços. O golden tem 59
-     features com nomes originais; `core/encoding.py` gera 59 features com nomes normalizados
-     → `snapshot_encoding_output` falha em column names (não em count).
-   - Não é regressão — é mudança intencional de nomes. Requer migração coordenada:
-     1. Ativar `core/encoding.py` em `train_pipeline.py`
-     2. Retreinar o modelo → novo `feature_registry.json` com nomes normalizados
-     3. Atualizar `production_pipeline.py` para usar `core/encoding.py`
-     4. Limpar `encoding.column_name_corrections` em `devclub.yaml`
+4. ~~`core/encoding.py`~~ ✅ **ATIVO em `train_pipeline.py` + `production_pipeline.py`** (18/03/2026)
+   - Substitui `aplicar_encoding_estrategico` (encoding_training.py) e `apply_categorical_encoding` (features/encoding.py)
+   - Confirmado: modelos já treinados desde ~15/03 já tinham nomes normalizados no feature
+     registry — retreino não necessário. `core/encoding.py` produz 59 features idênticas ao
+     modelo de produção 2a98e51c (match programático confirmado).
+   - `column_name_corrections` em devclub.yaml limpo (era patch transitório, obsoleto)
    - Hardcodes #49, #50, #51, #64, #70, #71 → `configs/clients/devclub.yaml`
 
 5. `core/preprocessing.py` (Célula 8) — **DECISÃO: NÃO MIGRAR CÉLULA 8**
