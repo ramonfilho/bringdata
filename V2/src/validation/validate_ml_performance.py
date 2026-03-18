@@ -119,18 +119,11 @@ def validate_tmb_sales_freshness(sales_df, sales_start, sales_end):
     tmb_sales = sales_df[sales_df['origem'] == 'tmb'] if 'origem' in sales_df.columns else pd.DataFrame()
 
     if tmb_sales.empty:
-        logger.error(" ERRO CRÍTICO: Nenhuma venda TMB encontrada no período!")
-        logger.error(f"   Período analisado: {sales_start} a {sales_end}")
-        logger.error("   ")
-        logger.error("     AÇÃO NECESSÁRIA:")
-        logger.error("   1. Baixar arquivo TMB atualizado")
-        logger.error("   2. Colocar arquivo na pasta do período: files/validation/{periodo}/tmb.xlsx")
-        logger.error("   3. Fazer novo deploy do job ou rodar localmente")
-        logger.error("   ")
+        logger.info(" Nenhuma venda TMB no período — normal quando vendas são via Guru/Hotmart/Asaas")
         return {
-            'status': 'error',
-            'message': 'Nenhuma venda TMB no período',
-            'stop_execution': True
+            'status': 'ok',
+            'message': 'Sem vendas TMB no período',
+            'stop_execution': False
         }
 
     # Verificar data mais recente das vendas TMB
@@ -375,6 +368,20 @@ Exemplos de uso:
         choices=['default', 'unified_last6'],
         default='default',
         help='Método de matching leads-vendas: default (email+telefone completo) ou unified_last6 (email+telefone+últimos 6 dígitos) - default: default'
+    )
+
+    # Purchase events CAPI
+    parser.add_argument(
+        '--send-purchase-events',
+        action='store_true',
+        help='Após validação, envia eventos Purchase ao Meta CAPI para o período de vendas'
+    )
+
+    parser.add_argument(
+        '--purchase-test-event-code',
+        type=str,
+        default=None,
+        help='Código de teste do Meta para purchase events (ex: TEST51740). Implica dry-run no Meta.'
     )
 
     args = parser.parse_args()
@@ -923,7 +930,19 @@ def main():
             start_str = start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d')
             end_str   = end_date   if isinstance(end_date,   str) else end_date.strftime('%Y-%m-%d')
 
-            capi_leads_data = []
+            # Cache CAPI (Cloud SQL + Railway combinados)
+            _capi_cache_dir = Path(__file__).parent.parent.parent / 'files' / 'validation' / 'cache'
+            _capi_cache_dir.mkdir(parents=True, exist_ok=True)
+            _capi_cache_file = _capi_cache_dir / f"capi_{start_str}_{end_str}.parquet"
+
+            if use_cache and _capi_cache_file.exists():
+                logger.info(f"    Cache HIT CAPI: {_capi_cache_file.name}")
+                capi_norm = pd.read_parquet(_capi_cache_file)
+                capi_leads_data = []  # skip DB queries
+                _capi_from_cache = True
+            else:
+                _capi_from_cache = False
+                capi_leads_data = []
 
             # --- Fonte 1: Cloud SQL backup (para datas < 18/02/2026) ---
             if start_str < RAILWAY_CUTOVER and CLOUDSQL_BACKUP.exists():
@@ -1032,9 +1051,10 @@ def main():
                 except Exception as e:
                     logger.warning(f"    Erro ao conectar com Railway: {e}")
 
-            logger.info(f"    CAPI total (backup + Railway): {len(capi_leads_data)} leads")
-
-            if capi_leads_data:
+            if _capi_from_cache:
+                logger.info(f"    Cache HIT CAPI: {len(capi_norm)} leads (do cache)")
+            elif capi_leads_data:
+                logger.info(f"    CAPI total (backup + Railway): {len(capi_leads_data)} leads")
                 from src.validation.data_loader import normalizar_email, normalizar_telefone_robusto
 
                 capi_df = pd.DataFrame(capi_leads_data)
@@ -1053,7 +1073,6 @@ def main():
                 capi_norm['lead_score'] = capi_df.get('lead_score', np.nan)
                 capi_norm['decile'] = capi_df.get('decil', None)
                 capi_norm['source_type'] = 'capi'
-
                 capi_norm = capi_norm[capi_norm['email'].notna()].copy()
 
                 def extract_campaign_id_meta(utm_campaign):
@@ -1069,6 +1088,17 @@ def main():
                 if removidos > 0:
                     logger.info(f"    Filtrado: {removidos} sem campaign_id Meta ({len(capi_norm)} restaram)")
 
+                # Salvar CAPI no cache
+                if use_cache:
+                    try:
+                        capi_norm.to_parquet(_capi_cache_file, index=False)
+                        logger.info(f"    Cache SAVED CAPI: {_capi_cache_file.name}")
+                    except Exception as ce:
+                        logger.warning(f"    Não foi possível salvar cache CAPI: {ce}")
+            else:
+                capi_norm = None
+
+            if capi_norm is not None:
                 capi_emails = set(capi_norm['email'].unique())
                 capi_extras = capi_emails - survey_emails
                 capi_extra_leads = capi_norm[capi_norm['email'].isin(capi_extras)].copy()
@@ -1205,7 +1235,8 @@ def main():
 
         guru_df = sales_loader.load_guru_sales(guru_files, include_canceled=include_canceled) if guru_files else None
 
-    # Detectar arquivos TMB e HotPay por estrutura de colunas
+    # Detectar arquivos TMB por estrutura de colunas
+    # Hotmart agora é carregado via API; arquivos HotPay legados ainda são detectados como fallback
     all_vendas_files = sorted(glob(f"{vendas_path}/*.xlsx")) + sorted(glob(f"{vendas_path}/*.xls"))
     tmb_files = []
     hotpay_files = []
@@ -1219,23 +1250,32 @@ def main():
                 logger.info(f"   TMB detectado por colunas: {Path(fpath).name}")
             elif 'chave' in cols and 'Data de Confirmação' in cols and 'Código do Produto' in cols:
                 hotpay_files.append(fpath)
-                logger.info(f"   HotPay detectado por colunas: {Path(fpath).name}")
+                logger.info(f"   HotPay (arquivo legado) detectado: {Path(fpath).name}")
         except Exception:
             pass
 
+    # Hotmart via API (usa sales_start_date / sales_end_date)
+    hotmart_start = args.sales_start_date if args.sales_start_date else None
+    hotmart_end   = args.sales_end_date   if args.sales_end_date   else None
+    if hotmart_start and hotmart_end:
+        logger.info(f"   Hotmart API: buscará vendas de {hotmart_start} a {hotmart_end}")
+        # Se a API está ativa, ignorar arquivos HotPay para evitar double-counting
+        if hotpay_files:
+            logger.info(f"   Hotmart API ativa — ignorando {len(hotpay_files)} arquivo(s) HotPay (mesmos dados)")
+            hotpay_files = []
+
     if args.report_type == 'fechamento':
         logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)} (incluirá Efetivado + Cancelado)")
-        logger.info(f"   Arquivos HotPay encontrados: {len(hotpay_files)} (incluirá Aprovado + Cancelado)")
     else:
         logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)} (incluirá apenas Efetivado)")
-        logger.info(f"   Arquivos HotPay encontrados: {len(hotpay_files)} (incluirá apenas Aprovado)")
 
-    # Combinar vendas Guru + TMB + HotPay
-    # Se não houver arquivos TMB locais, tentará buscar do Cloud Storage baseado em report_type
+    # Combinar vendas Guru + TMB + HotPay (legado) + Hotmart (API)
     sales_df = sales_loader.combine_sales(
         guru_df=guru_df,
         tmb_paths=tmb_files if tmb_files else None,
         hotpay_paths=hotpay_files if hotpay_files else None,
+        hotmart_api_start=hotmart_start,
+        hotmart_api_end=hotmart_end,
         report_type=args.report_type,
         include_canceled=include_canceled
     )
@@ -1244,7 +1284,7 @@ def main():
         logger.error(" Nenhuma venda carregada. Verifique os arquivos de vendas.")
         sys.exit(1)
 
-    logger.info(f"    {len(sales_df)} vendas carregadas (Guru + TMB + HotPay)")
+    logger.info(f"    {len(sales_df)} vendas carregadas (Guru + TMB + HotPay + Hotmart)")
     print(flush=True)
 
     # 4. Filtrar por período
@@ -1373,7 +1413,7 @@ def main():
 
     # Passar account_ids para o loader (necessário no modo API para buscar múltiplas contas)
     # Usar meta_reports_dir definido anteriormente (baseado na pasta do período)
-    loader = MetaReportsLoader(meta_reports_dir, data_source=data_source, account_ids=args.account_id if data_source == 'api' else None)
+    loader = MetaReportsLoader(meta_reports_dir, data_source=data_source, account_ids=args.account_id if data_source == 'api' else None, use_cache=use_cache)
     costs_hierarchy_temp = loader.build_costs_hierarchy(start_date, end_date)
 
     # Obter DataFrame de campanhas
@@ -2359,6 +2399,27 @@ def main():
             print(f"     Erro ao enviar Slack: {slack_error}", flush=True)
     else:
         print("   ℹ  SLACK_WEBHOOK_URL não configurado, notificação ignorada", flush=True)
+
+    # Envio de Purchase events ao Meta CAPI
+    if args.send_purchase_events:
+        if not args.sales_start_date or not args.sales_end_date:
+            print("   ⚠  --send-purchase-events requer --sales-start-date e --sales-end-date", flush=True)
+        else:
+            print(flush=True)
+            print(" ENVIANDO PURCHASE EVENTS AO META CAPI", flush=True)
+            try:
+                from src.validation.send_purchase_events import send_purchase_events
+                result = send_purchase_events(
+                    sales_start_date=args.sales_start_date,
+                    sales_end_date=args.sales_end_date,
+                    dry_run=False,
+                    test_event_code=args.purchase_test_event_code,
+                )
+                print(f"   Enviados:  {result.get('enviados')}", flush=True)
+                print(f"   Anomalias: {result.get('anomalias')}  (sem FBP/FBC no Railway)", flush=True)
+                print(f"   Erros:     {result.get('erros')}", flush=True)
+            except Exception as e:
+                print(f"   ❌  Erro ao enviar purchase events: {e}", flush=True)
 
     print(flush=True)
 

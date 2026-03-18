@@ -68,7 +68,7 @@ class MetaReportsLoader:
     - Ads---[Conta]-Anúncios-[período].xlsx
     """
 
-    def __init__(self, reports_dir: str, data_source: str = "local", account_ids: Optional[List[str]] = None):
+    def __init__(self, reports_dir: str, data_source: str = "local", account_ids: Optional[List[str]] = None, use_cache: bool = True):
         """
         Inicializa o loader.
 
@@ -76,10 +76,12 @@ class MetaReportsLoader:
             reports_dir: Diretório contendo os relatórios Excel
             data_source: "local" (arquivos) ou "api" (Meta Marketing API)
             account_ids: Lista de IDs de contas Meta (usado apenas no modo API)
+            use_cache: Se True, usa cache em arquivo para evitar chamadas repetidas à Meta API
         """
         self.reports_dir = Path(reports_dir)
         self.data_source = data_source.lower()
         self.account_ids = account_ids or []
+        self._use_cache = use_cache
 
         # Validar data_source
         if self.data_source not in ["local", "api"]:
@@ -209,6 +211,24 @@ class MetaReportsLoader:
         Returns:
             Dict com DataFrames de campaigns, adsets, ads (formato normalizado)
         """
+        import json
+        import hashlib
+
+        # Cache: chave por contas + período
+        accounts_key = '_'.join(sorted(self.account_ids or [])) if self.account_ids else 'default'
+        cache_key = hashlib.md5(f"meta_{accounts_key}_{start_date}_{end_date}".encode()).hexdigest()
+        cache_dir = Path(__file__).parent.parent.parent / 'files' / 'validation' / 'cache'
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        cache_file = cache_dir / f"meta_api_{cache_key}.json"
+
+        use_cache = getattr(self, '_use_cache', True)
+
+        if use_cache and cache_file.exists():
+            logger.info(f"    Cache HIT Meta API: {cache_file.name}")
+            with open(cache_file, 'r') as f:
+                cached = json.load(f)
+            return {k: pd.DataFrame(v) for k, v in cached.items()}
+
         logger.info(f" Extraindo relatórios da Meta API...")
         logger.info(f"   Período: {start_date} a {end_date}")
 
@@ -258,11 +278,22 @@ class MetaReportsLoader:
 
         logger.info(f"    Dados normalizados e prontos para uso")
 
-        return {
+        result = {
             'campaigns': campaigns_df,
             'adsets': adsets_df,
             'ads': ads_df
         }
+
+        # Salvar no cache
+        if use_cache:
+            try:
+                with open(cache_file, 'w') as f:
+                    json.dump({k: v.to_dict(orient='records') for k, v in result.items()}, f)
+                logger.info(f"    Cache SAVED Meta API: {cache_file.name}")
+            except Exception as ce:
+                logger.warning(f"    Não foi possível salvar cache Meta API: {ce}")
+
+        return result
 
     def _normalize_api_data(
         self,
