@@ -37,7 +37,7 @@ from src.data_processing.column_unification_refactored import (
 from src.data_processing.category_unification import unificar_categorias_completo
 from src.data_processing.feature_removal import remover_features_desnecessarias, listar_colunas_restantes
 from src.core.client_config import ClientConfig
-from src.data_processing.utm_training import unificar_utm_source_term, verificar_consistencia_utm
+from src.core.utm import unify_utm
 from src.core.medium import unify_medium
 from src.data_processing.dataset_versioning_training import criar_dataset_pos_cutoff, disponibilizar_dataset
 from src.matching.matching_training import fazer_matching_robusto as fazer_matching_variantes
@@ -579,9 +579,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         df_features_removidas.to_pickle(os.path.join(_fixtures, 'snapshot_utm_input.pkl'))
         logger.info("  [PARITY] snapshot_utm_input.pkl salvo")
 
-    df_utm_unificado = unificar_utm_source_term(df_features_removidas)
-
-    verificar_consistencia_utm(df_utm_unificado)
+    df_utm_unificado = unify_utm(df_features_removidas, client_config.utm)
 
     if capture_parity_snapshots:
         df_utm_unificado.to_pickle(os.path.join(_fixtures, 'snapshot_utm_output.pkl'))
