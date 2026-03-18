@@ -686,21 +686,50 @@ Duplicatas encontradas (resolução via campo já mapeado):
 5. Validar paridade contra o snapshot da Fase 1
 6. Remover implementação antiga
 
+**Protocolo obrigatório por componente** — ver §12 para instruções completas de `validate_parity_snapshots.py`.
+
 **Componentes em ordem de criticidade:**
 
-1. ~~`core/utm.py`~~ ✅ — implementado, imports atualizados nos 3 pipelines, `utm_training.py` e `utm_unification.py` removidos. Paridade validada via parity audit (479 divergências intencionais documentadas).
-   - Hardcodes #35, #63, #67 + `source_to_channel_mapping` → `configs/clients/devclub.yaml`
-2. ~~`core/feature_engineering.py`~~ ✅ — implementado, imports atualizados em `train_pipeline.py` e `monitoring/orchestrator.py`. `feature_engineering_training.py` e `engineering.py` removidos. Smoke test passando.
-   - Estratégia train-first: `production_pipeline.py` mantém import antigo até próximo retreino.
+1. ~~`core/utm.py`~~ ✅ **ATIVO em `train_pipeline.py`** (18/03/2026)
+   - Substitui `unificar_utm_source_term` + `verificar_consistencia_utm` de `utm_training.py`
+   - Validado: `validate_parity_snapshots.py --validate` — todos 6 snapshots ✅
+   - Hardcodes #35, #63, #67 → `configs/clients/devclub.yaml`
+
+2. ~~`core/feature_engineering.py`~~ ✅ **ATIVO em `train_pipeline.py`** (18/03/2026)
+   - Substitui `criar_features_derivadas` de `features/feature_engineering_training.py`
+   - Validado: todos 6 snapshots ✅ — `fe_input` row count preservado (49.214)
    - Hardcodes #47, #48 → `configs/clients/devclub.yaml`
-3. ~~`core/encoding.py`~~ ✅ — implementado, import atualizado em `train_pipeline.py`, `encoding_training.py` removido. Divergências estruturais documentadas e intencionais (`clean_column_names()` normaliza para snake_case; nomes ordinais longos vs curtos resolvidos ao migrar category_unification).
-   - Estratégia train-first: produção (`production_pipeline.py`) mantém import antigo até próximo retreino.
-   - `column_name_corrections` no YAML são transitórios — remover após próximo retreino.
+   - Pendente: atualizar `production_pipeline.py` e `monitoring/orchestrator.py`
+
+3. ~~`core/medium.py`~~ ✅ **ATIVO em `train_pipeline.py`** (18/03/2026)
+   - Substitui `extrair_publico_medium` + `unificar_medium_para_producao` (dois arquivos)
+   - `valid_categories: null` = modo treino (frequency threshold 2.5%)
+   - Validado: todos 6 snapshots ✅ — distribuição Medium preservada
+   - Hardcodes #7, #36, #37 → `configs/clients/devclub.yaml`
+   - Pendente: atualizar `production_pipeline.py` e `monitoring/orchestrator.py`
+
+4. `core/encoding.py` — **PENDENTE — migração coordenada**
+   - Motivo: `apply_encoding()` aplica `clean_column_names()` que normaliza para snake_case.
+     `encoding_training.py` mantém nomes originais com acentos/espaços. O golden tem 59
+     features com nomes originais; `core/encoding.py` gera 59 features com nomes normalizados
+     → `snapshot_encoding_output` falha em column names (não em count).
+   - Não é regressão — é mudança intencional de nomes. Requer migração coordenada:
+     1. Ativar `core/encoding.py` em `train_pipeline.py`
+     2. Retreinar o modelo → novo `feature_registry.json` com nomes normalizados
+     3. Atualizar `production_pipeline.py` para usar `core/encoding.py`
+     4. Limpar `encoding.column_name_corrections` em `devclub.yaml`
    - Hardcodes #49, #50, #51, #64, #70, #71 → `configs/clients/devclub.yaml`
-4. `core/medium.py` — consolida 3 arquivos; hardcodes #7, #36, #37 → `MediumConfig` (etapa mais trabalhosa)
-   - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py`
-5. `core/preprocessing.py` — sequência canônica única; hardcodes #34, #68, #69 → `FeatureConfig`/`IngestionConfig`
-   - Atualizar: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py` (com wrapper de preservação de `decil`/`lead_score`)
+
+5. `core/preprocessing.py` (Célula 8) — **DECISÃO: NÃO MIGRAR CÉLULA 8**
+   - `feature_removal.py` permanece em Célula 8. Motivo: remove `Campaign`/`Content` mas
+     **preserva colunas de score** (`Pontuação`, `Score`, `Faixa A/B/C/D`) até a Célula 13.
+     `core/preprocessing.py` → `preprocess()` remove score columns — isso destrói o sinal
+     de cutoff do detector de feature missing (ver §12 — incidente Componente 5).
+   - `feature_removal.py` é lógica exclusiva do treino (timing constraint). Não é lógica
+     compartilhada → não pertence a `core/`.
+   - `core/preprocessing.py` → `preprocess()` é para produção e monitoramento (onde não
+     há detecção de cutoff). `preprocess_for_monitoring()` já ativo em `monitoring/orchestrator.py`.
+
 6. `core/category_unification.py` — já compartilhado; hardcodes #27–#33 → `CategoryConfig`
    - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py`
 7. Demais módulos `core/` (ingestion, matching, utils, dataset_versioning, column_unification) — mesmo ciclo
