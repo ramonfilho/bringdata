@@ -39,9 +39,8 @@ from src.data_processing.feature_removal import remover_features_desnecessarias,
 from src.core.client_config import ClientConfig
 from src.core.utm import unify_utm
 from src.core.medium import unify_medium
-from src.data_processing.dataset_versioning_training import criar_dataset_pos_cutoff, disponibilizar_dataset
+from src.core.dataset_versioning import criar_dataset_pos_cutoff, aplicar_janela_conversao as _aplicar_janela_conversao
 from src.core.matching import match_leads as _match_leads
-from src.data_processing.conversion_window import aplicar_janela_conversao
 from src.core.feature_engineering import create_features as _create_features
 from src.core.encoding import apply_encoding as _apply_encoding
 from src.model.training_model import registrar_features_e_modelo_devclub
@@ -612,10 +611,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 13: FILTRO TEMPORAL POR MISSING RATE")
     logger.info("")
 
-    df_pos_cutoff = criar_dataset_pos_cutoff(df_medium_producao)
-
-    # Disponibilizar dataset
-    disponibilizar_dataset(df_pos_cutoff)
+    df_pos_cutoff = criar_dataset_pos_cutoff(df_medium_producao, client_config.ingestion)
 
     logger.info("=" * 80)
     # === CÉLULA 15: Matching robusto por email e telefone ===
@@ -651,10 +647,10 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
 
     # Aplicar janela de conversão de 20 dias (captação + CPL + carrinho)
     # Captação: 7 dias (terça-segunda) + CPL: 6 dias (terça-domingo) + Carrinho: 7 dias (segunda-domingo) = 20 dias
-    dataset_v1_devclub = aplicar_janela_conversao(
+    dataset_v1_devclub = _aplicar_janela_conversao(
         df_leads=dataset_v1_devclub,
         df_vendas=df_vendas_final,
-        janela_dias=20
+        config=client_config.monitoring,
     )
 
     # Recall metrics (não calculado após reorganização - vendas já filtradas na CÉLULA 5.4)

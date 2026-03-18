@@ -300,7 +300,7 @@ model:
 # ---------------------------------------------------------------------------
 monitoring:
   model_name: null               # #5
-  conversion_window_days: null   # #9
+  conversion_window_days: 20     # #9 — 7d captação + 6d CPL + 7d carrinho
   medium_strategy: null          # #4
   survey_sheet_tab_index: null   # #73
   sheet_date_format: null        # #74
