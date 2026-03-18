@@ -832,7 +832,9 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         set_active=set_active,
         recall_metrics=recall_metrics,
         missing_rates_baseline=missing_rates_baseline,
-        buyer_weights=buyer_weights
+        buyer_weights=buyer_weights,
+        tmb_risk_filter=tmb_risk_filter,
+        use_buyer_weights=use_buyer_weights
     )
 
     cell_timers['Célula 21'] = time.time() - cell_start

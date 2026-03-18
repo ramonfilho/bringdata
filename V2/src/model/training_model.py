@@ -127,7 +127,9 @@ def registrar_features_e_modelo_devclub(
     categorias_treino: dict = None,
     distribuicoes_treino: dict = None,
     missing_rates_baseline: dict = None,
-    buyer_weights: pd.Series = None
+    buyer_weights: pd.Series = None,
+    tmb_risk_filter: str = 'none',
+    use_buyer_weights: bool = False
 ) -> dict:
     """
     Registra features e salva modelo DevClub para produção.
@@ -156,6 +158,8 @@ def registrar_features_e_modelo_devclub(
         # Logar parâmetros do experimento
         mlflow.log_param("matching_method", matching_method)
         mlflow.log_param("save_test_predictions", save_test_predictions)
+        mlflow.log_param("tmb_risk_filter", tmb_risk_filter)
+        mlflow.log_param("use_buyer_weights", use_buyer_weights)
 
         # 1. PREPARAR DADOS E TREINAR MODELO FINAL
         logger.info("  Removendo a coluna Target")
