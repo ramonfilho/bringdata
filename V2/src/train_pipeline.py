@@ -48,7 +48,7 @@ from src.matching.matching_email_with_validation import fazer_matching_email_wit
 from src.matching.matching_email_telefone import fazer_matching_email_telefone
 from src.matching.matching_unified import match_leads_to_sales_unified
 from src.data_processing.conversion_window import aplicar_janela_conversao
-from src.features.feature_engineering_training import criar_features_derivadas
+from src.core.feature_engineering import create_features as _create_features
 from src.features.encoding_training import aplicar_encoding_estrategico
 from src.model.training_model import registrar_features_e_modelo_devclub
 from src.model.hyperparameter_tuning import hyperparameter_tuning
@@ -707,7 +707,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         dataset_v1_devclub.to_pickle(os.path.join(_fixtures, 'snapshot_fe_input.pkl'))
         logger.info("  [PARITY] snapshot_fe_input.pkl salvo")
 
-    dataset_v1_devclub_fe = criar_features_derivadas(dataset_v1_devclub)
+    dataset_v1_devclub_fe = _create_features(dataset_v1_devclub, client_config.feature)
 
     if capture_parity_snapshots:
         dataset_v1_devclub_fe.to_pickle(os.path.join(_fixtures, 'snapshot_fe_output.pkl'))
