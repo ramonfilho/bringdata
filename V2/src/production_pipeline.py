@@ -16,7 +16,7 @@ from .core.utm import unify_utm
 from .data_processing.medium_unification import unify_medium_columns
 from .data_processing.category_unification import unificar_categorias_completo
 from .core.feature_engineering import create_features as _create_features
-from .features.encoding import apply_categorical_encoding
+from .core.encoding import apply_encoding as _apply_encoding
 from .model.prediction import LeadScoringPredictor
 from .monitoring.data_quality import check_category_drift, load_training_categories, check_distribution_drift, load_training_distributions
 
@@ -336,13 +336,13 @@ class LeadScoringPipeline:
         mlflow_run_id = self.predictor.mlflow_run_id if hasattr(self.predictor, 'mlflow_run_id') else None
         model_path = str(self.predictor.model_path) if self.predictor.model_path and not mlflow_run_id else None
 
-        self.data = apply_categorical_encoding(
-            self.data,
-            versao="v1",
-            medium_strategy="binary_top3",
-            mlflow_run_id=mlflow_run_id,
-            model_path=model_path
-        )
+        artifacts = {}
+        if mlflow_run_id:
+            artifacts['mlflow_run_id'] = mlflow_run_id
+        elif model_path:
+            artifacts['model_path'] = model_path
+
+        self.data = _apply_encoding(self.data, self._client_config.encoding, artifacts)
 
         encoding_cols_added = len(self.data.columns) - cols_before_encoding
         logger.info(f"    Colunas adicionadas pelo encoding: {encoding_cols_added}")
