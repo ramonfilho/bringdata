@@ -51,7 +51,11 @@ def get_active_model_path() -> Path:
     with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
 
-    model_path_str = config['active_model']['model_path']
+    active_model = config['active_model']
+    if 'mlflow_run_id' in active_model:
+        model_path_str = str(Path('mlruns') / '1' / active_model['mlflow_run_id'] / 'artifacts')
+    else:
+        model_path_str = active_model['model_path']
     model_path = Path(__file__).parent.parent.parent / model_path_str
 
     if not model_path.exists():
@@ -894,6 +898,103 @@ class SalesDataLoader:
 
         return df_norm
 
+    def load_hotpay_sales(self, hotpay_paths: List[str], include_canceled: bool = False) -> pd.DataFrame:
+        """
+        Carrega arquivos de vendas da plataforma HotPay.
+
+        Colunas esperadas:
+        - Email: Email do comprador
+        - Nome: Nome completo
+        - DDD + Telefone: Telefone com DDD separado
+        - Preço Total: Valor da transação
+        - Data de Venda: Data/hora da venda (DD/MM/YYYY HH:MM:SS)
+        - Status: 'Aprovado' (ou 'Cancelado')
+
+        Args:
+            hotpay_paths: Lista de caminhos para arquivos HotPay (.xls ou .xlsx)
+            include_canceled: Se True, inclui vendas canceladas
+
+        Returns:
+            DataFrame normalizado com origem='hotpay'
+        """
+        logger.info(f" Carregando vendas HotPay de {len(hotpay_paths)} arquivo(s)")
+
+        all_sales = []
+        for path in hotpay_paths:
+            try:
+                df = pd.read_excel(path)
+                logger.info(f"   {len(df)} linhas de {Path(path).name}")
+                all_sales.append(df)
+            except Exception as e:
+                logger.error(f" Erro ao ler {path}: {e}")
+                continue
+
+        if not all_sales:
+            logger.warning(" Nenhuma venda HotPay carregada")
+            return pd.DataFrame()
+
+        df_combined = pd.concat(all_sales, ignore_index=True)
+
+        # Filtrar por status
+        if 'Status' in df_combined.columns:
+            before = len(df_combined)
+            if include_canceled:
+                df_combined = df_combined[df_combined['Status'].isin(['Aprovado', 'Cancelado'])].copy()
+            else:
+                df_combined = df_combined[df_combined['Status'] == 'Aprovado'].copy()
+            logger.info(f"   Após filtro de status: {len(df_combined)} linhas (de {before})")
+
+        if df_combined.empty:
+            return pd.DataFrame()
+
+        df_norm = pd.DataFrame()
+
+        # Email
+        df_norm['email'] = df_combined['Email'].apply(
+            lambda x: normalizar_email(x) if pd.notna(x) else None
+        )
+
+        # Nome
+        df_norm['nome'] = df_combined.get('Nome', np.nan)
+
+        # Telefone: concatenar DDD + Telefone
+        if 'DDD' in df_combined.columns and 'Telefone' in df_combined.columns:
+            def _montar_fone(row):
+                ddd = str(int(row['DDD'])) if pd.notna(row['DDD']) else ''
+                tel = str(int(row['Telefone'])) if pd.notna(row['Telefone']) else ''
+                return normalizar_telefone_robusto(ddd + tel) if ddd and tel else None
+            df_norm['telefone'] = df_combined.apply(_montar_fone, axis=1)
+        else:
+            df_norm['telefone'] = None
+
+        # Valor da venda
+        df_norm['sale_value'] = pd.to_numeric(df_combined.get('Preço Total', 0), errors='coerce')
+
+        # Data da venda
+        df_norm['sale_date'] = pd.to_datetime(
+            df_combined.get('Data de Venda', pd.Series([pd.NaT] * len(df_combined))),
+            errors='coerce',
+            dayfirst=True
+        )
+
+        # Origem
+        df_norm['origem'] = 'hotpay'
+
+        # Remover sem email ou data
+        before = len(df_norm)
+        df_norm = df_norm[df_norm['email'].notna() & df_norm['sale_date'].notna()].copy()
+        if before != len(df_norm):
+            logger.warning(f" {before - len(df_norm)} vendas HotPay removidas (email/data inválido)")
+
+        # Deduplicar por email (manter primeira ocorrência por data)
+        before = len(df_norm)
+        df_norm = df_norm.sort_values('sale_date').drop_duplicates(subset=['email'], keep='first')
+        if before != len(df_norm):
+            logger.info(f"   Deduplicação HotPay: {before - len(df_norm)} removidas ({len(df_norm)} únicas)")
+
+        logger.info(f"    {len(df_norm)} vendas HotPay carregadas e normalizadas")
+        return df_norm
+
     def load_guru_sales_from_api(self, start_date: str, end_date: str, save_excel: bool = False, output_path: str = None, include_canceled: bool = False) -> pd.DataFrame:
         """
         Carrega vendas da Guru via API (alternativa aos arquivos Excel).
@@ -1017,23 +1118,27 @@ class SalesDataLoader:
         return df_norm
 
     def combine_sales(self, guru_df: pd.DataFrame = None, tmb_df: pd.DataFrame = None,
+                     hotpay_df: pd.DataFrame = None,
                      guru_paths: List[str] = None, tmb_paths: List[str] = None,
+                     hotpay_paths: List[str] = None,
                      report_type: str = 'fechamento', include_canceled: bool = False) -> pd.DataFrame:
         """
-        Combina vendas da Guru e TMB em um único DataFrame.
+        Combina vendas da Guru, TMB e HotPay em um único DataFrame.
 
         Args:
             guru_df: DataFrame já carregado da Guru (opcional)
             tmb_df: DataFrame já carregado da TMB (opcional)
+            hotpay_df: DataFrame já carregado da HotPay (opcional)
             guru_paths: Caminhos para arquivos Guru (se guru_df não fornecido)
             tmb_paths: Caminhos para arquivos TMB (se tmb_df não fornecido)
+            hotpay_paths: Caminhos para arquivos HotPay (se hotpay_df não fornecido)
             report_type: Tipo de relatório ('fechamento' ou 'pos-devolucoes') para buscar TMB no GCS
             include_canceled: Se True, inclui vendas canceladas da Guru (para relatório de fechamento)
 
         Returns:
             DataFrame combinado e deduplicado (prioriza Guru em caso de conflito)
         """
-        logger.info(" Combinando vendas Guru + TMB")
+        logger.info(" Combinando vendas Guru + TMB + HotPay")
 
         # Carregar se necessário
         if guru_df is None and guru_paths:
@@ -1044,6 +1149,8 @@ class SalesDataLoader:
         elif tmb_df is None and tmb_paths is None:
             # Se tmb_paths é None, tentar buscar do GCS
             tmb_df = self.load_tmb_sales(tmb_paths=None, report_type=report_type, include_canceled=include_canceled)
+        if hotpay_df is None and hotpay_paths:
+            hotpay_df = self.load_hotpay_sales(hotpay_paths, include_canceled=include_canceled)
 
         # Combinar DataFrames
         dfs = []
@@ -1051,6 +1158,8 @@ class SalesDataLoader:
             dfs.append(guru_df)
         if tmb_df is not None and len(tmb_df) > 0:
             dfs.append(tmb_df)
+        if hotpay_df is not None and len(hotpay_df) > 0:
+            dfs.append(hotpay_df)
 
         if not dfs:
             logger.warning(" Nenhuma venda para combinar")
@@ -1094,6 +1203,7 @@ class SalesDataLoader:
         logger.info(f"    {len(combined)} vendas únicas combinadas")
         logger.info(f"      Guru: {len(combined[combined['origem'] == 'guru'])}")
         logger.info(f"      TMB: {len(combined[combined['origem'] == 'tmb'])}")
+        logger.info(f"      HotPay: {len(combined[combined['origem'] == 'hotpay'])}")
 
         return combined
 

@@ -1490,6 +1490,236 @@ async def check_capi_sent(
         logger.error(f"❌ Erro ao verificar logs CAPI: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro ao verificar logs: {str(e)}")
 
+# ============================================================================
+# CAPI: PURCHASE EVENTS
+# ============================================================================
+
+class PurchaseSaleItem(BaseModel):
+    """Uma venda confirmada a ser enviada como evento Purchase"""
+    email: str
+    nome: Optional[str] = None
+    telefone: Optional[str] = None
+    valor_venda: float
+    sale_date: str  # "YYYY-MM-DD" ou "YYYY-MM-DD HH:MM:SS"
+
+class SendPurchaseEventsRequest(BaseModel):
+    """
+    Request para envio de eventos Purchase.
+
+    A lista de sales deve ser extraída dos arquivos TMB/Guru via SalesDataLoader
+    antes de chamar este endpoint.
+    """
+    sales: List[PurchaseSaleItem]
+    dry_run: bool = False
+    test_event_code: Optional[str] = None
+
+
+def _lookup_railway_capi_data(emails: List[str]) -> Dict[str, Dict]:
+    """
+    Busca FBP, FBC, telefone e nome no Railway para uma lista de emails.
+
+    Returns:
+        {email_normalizado: {fbp, fbc, phone, nome, event_id}}
+    """
+    import pg8000.native
+
+    if not emails:
+        return {}
+
+    try:
+        conn = pg8000.native.Connection(
+            host=os.environ.get('RAILWAY_DB_HOST', 'shortline.proxy.rlwy.net'),
+            port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+            database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+            user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+            password=os.environ['RAILWAY_DB_PASSWORD'],
+        )
+
+        emails_lower = [e.lower().strip() for e in emails if e]
+
+        rows = conn.run(
+            'SELECT email, "nomeCompleto", telefone, fbp, fbc, id::text'
+            ' FROM "Lead" WHERE LOWER(email) = ANY(:emails)',
+            emails=emails_lower
+        )
+        conn.close()
+
+        result = {}
+        for row in rows:
+            email_norm = row[0].lower().strip() if row[0] else None
+            if email_norm:
+                result[email_norm] = {
+                    'nome':     row[1],
+                    'phone':    row[2],
+                    'fbp':      row[3],
+                    'fbc':      row[4],
+                    'event_id': row[5],
+                }
+
+        return result
+
+    except Exception as e:
+        logger.error(f"❌ Erro ao consultar Railway para FBP/FBC: {e}")
+        return {}
+
+
+def _send_single_purchase_event(
+    email: str,
+    phone: Optional[str],
+    nome: Optional[str],
+    valor_venda: float,
+    purchase_timestamp: int,
+    fbp: Optional[str],
+    fbc: Optional[str],
+    event_id: str,
+    test_event_code: Optional[str] = None,
+) -> Dict:
+    """Envia um evento Purchase para a Meta CAPI."""
+    import hashlib
+    from facebook_business.api import FacebookAdsApi
+    from facebook_business.adobjects.serverside.event import Event
+    from facebook_business.adobjects.serverside.event_request import EventRequest
+    from facebook_business.adobjects.serverside.user_data import UserData
+    from facebook_business.adobjects.serverside.custom_data import CustomData
+    from facebook_business.adobjects.serverside.action_source import ActionSource
+
+    access_token = os.getenv('META_ACCESS_TOKEN')
+    pixel_id = os.getenv('META_PIXEL_ID', '241752320666130')
+
+    if not access_token:
+        return {"status": "error", "message": "META_ACCESS_TOKEN não configurado"}
+
+    def _hash(value) -> Optional[str]:
+        if not value:
+            return None
+        return hashlib.sha256(str(value).lower().strip().encode('utf-8')).hexdigest()
+
+    first_name, last_name = None, None
+    if nome:
+        parts = str(nome).strip().split(' ', 1)
+        first_name = parts[0] if parts else None
+        last_name = parts[1] if len(parts) > 1 else None
+
+    try:
+        FacebookAdsApi.init(access_token=access_token)
+
+        user_data = UserData(
+            emails=[_hash(email)] if email else None,
+            phones=[_hash(phone)] if phone else None,
+            first_names=[_hash(first_name)] if first_name else None,
+            last_names=[_hash(last_name)] if last_name else None,
+            fbp=fbp,
+            fbc=fbc,
+        )
+
+        custom_data = CustomData(value=valor_venda, currency='BRL')
+
+        event = Event(
+            event_name='Purchase',
+            event_time=purchase_timestamp,
+            event_id=f"purchase_{event_id}",
+            user_data=user_data,
+            custom_data=custom_data,
+            action_source=ActionSource.SYSTEM_GENERATED,
+        )
+
+        params = {
+            'events': [event],
+            'pixel_id': pixel_id,
+            'access_token': access_token,
+        }
+        if test_event_code:
+            params['test_event_code'] = test_event_code
+
+        response = EventRequest(**params).execute()
+        return {"status": "success", "response": str(response)}
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/capi/send_purchase_events")
+async def send_purchase_events(request: SendPurchaseEventsRequest):
+    """
+    Envia eventos Purchase para a Meta CAPI para compradores confirmados de um lançamento.
+
+    Fluxo:
+    1. Recebe lista de vendas (extraída do TMB/Guru via SalesDataLoader)
+    2. Busca FBP/FBC no Railway por email (batch)
+    3. Envia evento Purchase com timestamp real da compra e valor real da venda
+    4. Retorna resumo: enviados / anomalias (sem FBP/FBC no Railway) / erros
+
+    Uso: chamado manualmente após fechamento do carrinho + período de devoluções.
+    Anomalias = compradores não encontrados no Railway — enviados sem FBP/FBC,
+    com matching menos preciso na Meta. Quantidade registrada para auditoria.
+    """
+    if not request.sales:
+        raise HTTPException(status_code=400, detail="Nenhuma venda fornecida")
+
+    emails = [s.email.lower().strip() for s in request.sales if s.email]
+    railway_data = _lookup_railway_capi_data(emails)
+
+    results = {
+        "total":      len(request.sales),
+        "enviados":   0,
+        "anomalias":  0,
+        "erros":      0,
+        "dry_run":    request.dry_run,
+    }
+
+    for sale in request.sales:
+        email_norm = sale.email.lower().strip() if sale.email else None
+        lead = railway_data.get(email_norm, {})
+        has_cookies = bool(lead.get('fbp') or lead.get('fbc'))
+
+        if not has_cookies:
+            results["anomalias"] += 1
+
+        try:
+            purchase_ts = int(pd.to_datetime(sale.sale_date).timestamp())
+        except Exception:
+            logger.warning(f"⚠️ Data inválida para {email_norm}: {sale.sale_date}")
+            results["erros"] += 1
+            continue
+
+        event_id = lead.get('event_id') or email_norm or str(uuid.uuid4())
+
+        if request.dry_run:
+            logger.info(
+                f"[DRY RUN] Purchase: {email_norm} | "
+                f"R$ {sale.valor_venda:.2f} | "
+                f"fbp={'sim' if has_cookies else 'não'}"
+            )
+            results["enviados"] += 1
+            continue
+
+        result = _send_single_purchase_event(
+            email=sale.email,
+            phone=sale.telefone or lead.get('phone'),
+            nome=sale.nome or lead.get('nome'),
+            valor_venda=sale.valor_venda,
+            purchase_timestamp=purchase_ts,
+            fbp=lead.get('fbp'),
+            fbc=lead.get('fbc'),
+            event_id=event_id,
+            test_event_code=request.test_event_code,
+        )
+
+        if result["status"] == "success":
+            results["enviados"] += 1
+        else:
+            logger.error(f"❌ Falha ao enviar Purchase para {email_norm}: {result.get('message')}")
+            results["erros"] += 1
+
+    logger.info(
+        f"📊 Purchase events: {results['enviados']} enviados | "
+        f"{results['anomalias']} anomalias (sem FBP/FBC) | "
+        f"{results['erros']} erros"
+    )
+
+    return results
+
+
 # === ANÁLISE UTM COM CUSTOS ===
 
 class UTMAnalysisRequest(BaseModel):
@@ -2981,7 +3211,11 @@ async def daily_monitoring_check_railway(
         )
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
-            model_path = config['active_model']['model_path']
+            active_model = config['active_model']
+            if 'mlflow_run_id' in active_model:
+                model_path = os.path.join('mlruns', '1', active_model['mlflow_run_id'], 'artifacts')
+            else:
+                model_path = active_model['model_path']
 
         if not os.path.isabs(model_path):
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -3053,7 +3287,11 @@ async def daily_monitoring_check(
 
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
-            model_path = config['active_model']['model_path']
+            active_model = config['active_model']
+            if 'mlflow_run_id' in active_model:
+                model_path = os.path.join('mlruns', '1', active_model['mlflow_run_id'], 'artifacts')
+            else:
+                model_path = active_model['model_path']
 
         # Garantir path absoluto
         if not os.path.isabs(model_path):
