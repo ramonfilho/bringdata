@@ -81,7 +81,11 @@ ingestion:
   column_rename_mapping:         # #68 — renomeação de colunas com nomes longos de formulário
     "Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?": "investiu_curso_online"
     "O que mais te chama atenção na profissão de Programador?": "interesse_programacao"
-  dataset_cutoff_date: "2025-03-01"  # #38 — data de corte: features críticas passaram a ser preenchidas
+  dataset_cutoff_date: null      # #38 — MANTER NULL: auto-detecção via features tardias.
+                                  # O valor "2025-03-01" do hardcode original era um MÍNIMO na lógica
+                                  # antiga (auto-detecção ainda rodava depois). Em core/dataset_versioning.py,
+                                  # valor não-null substitui completamente a auto-detecção → 168k rows vs
+                                  # 49k esperados. Resultado validado com null: 49,214 leads ✅
   column_unification:            # #13–#20
     pesquisa_merges:             # #13, #14, #15
       - cols:

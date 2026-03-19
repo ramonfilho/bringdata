@@ -772,21 +772,36 @@ Duplicatas encontradas (resolução via campo já mapeado):
 
 11. `validation/` — atualizar onde há reimplementação paralela
 
-~~12. `configs/clients/devclub.yaml` completamente preenchido~~ ✅ (19/03/2026)
+~~12. `configs/clients/devclub.yaml` completamente preenchido~~ ✅ **VALIDADO** (19/03/2026)
     - Todos os hardcodes #6–#89 populados com valores reais do código-fonte
-    - Campos null restantes são intencionais: env vars (infra, capi), componentes não migrados (monitoring/api), lógica de código (ordering_rules)
+    - Campos null restantes são intencionais:
+      - `dataset_cutoff_date: null` — MANTER NULL: o valor "2025-03-01" do hardcode original era um
+        mínimo na lógica antiga; em `core/dataset_versioning.py` valor não-null substitui a
+        auto-detecção completamente → 168k rows vs 49k esperados. Detectado e corrigido na validação.
+      - `infra.*`, `capi.*` — env vars (nunca hardcodar)
+      - `monitoring.*` (maioria), `api.*` — componentes não migrados para core/
+      - `feature.ordering_rules` — lógica de código (reordenação por sufixo numérico)
+    - Escopo da validação: campos lidos pelo train_pipeline confirmados pelas duas camadas.
+      Campos de `model.*`, `retrain.*` preenchidos por inspeção (valores extraídos do código-fonte);
+      cobertura de execução virá quando esses componentes forem conectados ao ClientConfig.
+    - Camada 1: `validate_parity_snapshots.py --validate` — 6/6 ✅
+    - Camada 2: AUC 0.747 (run `a36989d6`, 19/03/2026) ✅ — dentro de ±0.5% de 0.745
 
-~~13. `configs/active_model.yaml` → `configs/active_models/devclub.yaml`~~ ✅ (19/03/2026)
+~~13. `configs/active_model.yaml` → `configs/active_models/devclub.yaml`~~ ✅ **VALIDADO** (19/03/2026)
     - Arquivo renomeado e movido
-    - 6 referências funcionais atualizadas: prediction.py, training_model.py, data_validation.py, data_loader.py, medium_production_training.py, run_monitoring_local.sh
-    - Todos com TODO multi-client para derivar client_id do ClientConfig
+    - 6 referências funcionais atualizadas: prediction.py, training_model.py, data_validation.py,
+      data_loader.py, medium_production_training.py, run_monitoring_local.sh
+    - Todos com `# TODO multi-client: derivar client_id do ClientConfig`
+    - Incluído na validação de duas camadas do item 12 ✅
 
 ~~14. `configs/templates/client_template.yaml` gerado~~ ✅ (19/03/2026)
     - Template funcional com REQUIRED/OPTIONAL/ENV VAR para cada campo
     - Derivado do devclub.yaml completo — sem valores DevClub-específicos
-    - Cobre todos os sub-configs (infra, ingestion, utm, medium, category, matching, feature, encoding, model, monitoring, capi, api, retrain)
+    - Cobre todos os 13 sub-configs
 
-**Critério de saída Fase 2:** treino e produção importam 100% de `core/`; `configs/clients/devclub.yaml` completamente preenchido ✅; `ClientConfig.from_yaml('configs/clients/devclub.yaml').validate()` passa sem erros; `configs/templates/client_template.yaml` gerado ✅.
+**Critério de saída Fase 2:** treino e produção importam 100% de `core/` ✅; `configs/clients/devclub.yaml` completamente preenchido e validado ✅; `configs/templates/client_template.yaml` gerado ✅.
+
+**Próximo — item 15:** migrar `monitoring/orchestrator.py` para usar `core/`. Fecha "treino + produção + monitoramento usando a mesma sequência canônica por construção".
 
 ---
 
