@@ -1,9 +1,13 @@
 # configs/clients/devclub.yaml
 # Configuração do cliente DevClub para o pipeline MLOps refatorado.
 #
-# ESTADO ATUAL: esqueleto — chaves definidas, valores preenchidos
-# incrementalmente durante a Fase 2 conforme cada componente é migrado.
-# Chaves com null ainda não foram migradas.
+# ESTADO: Completo para pipelines ML core (train + production + monitoring).
+# Campos null restantes:
+#   - infra.*      — valores via env vars (GCP_PROJECT_ID, INTERNAL_API_URL, etc.)
+#   - capi.*       — valores via env vars (META_PIXEL_ID, etc.)
+#   - monitoring.* — maioria: componente ainda não migrado para core/
+#   - api.*        — não prioritário para Fase 2 ML core
+#   - feature.ordering_rules — lógica de código, não config simples
 #
 # Referência de hardcodes: V2/docs/PLANO_REFACTOR_MLOPS.md, Seção 6.
 
@@ -25,27 +29,59 @@ infra:
 # IngestionConfig — hardcodes #6–#26, #38, #57–#62, #68–#69
 # ---------------------------------------------------------------------------
 ingestion:
-  training_data_dir: null        # path local ao dataset de treino
-  tmb_detection_columns: null    # #6
-  bare_campaign_names: null      # #8
-  api_source_name: null          # #11
-  has_tmb: null                  # #12 — bool
-  sales_platform_identifier: null  # #21
+  training_data_dir: null        # path local ao dataset de treino (definido por argumento CLI)
+  tmb_detection_columns:         # #6 — colunas que identificam arquivo TMB de parcelas
+    - "Pedido"
+    - "Parcela"
+    - "Grau de risco"
+  bare_campaign_names:           # #8 — prefixos de campanha incompletos a ignorar
+    - "DEVLF"
+    - "devlf"
+  api_source_name: "API Guru"    # #11 — nome da fonte de dados da API Guru nos logs
+  has_tmb: true                  # #12 — DevClub usa TMB (plataforma de pagamento parcelado)
+  sales_platform_identifier: "guru"  # #21 — identificador da plataforma de vendas no nome do arquivo
   approved_status_value: "Aprovada"  # #22
   tmb_risk_column: "Grau de risco"   # #23
   tmb_risk_values: ["Baixo", "Médio"]  # #62 — 'low'=first, 'low_medium'=all
   tmb_risk_filter_default: "all"     # #26
   product_filter_keyword: "devclub"  # #24
   pesquisa_date_column: "Data"       # #25
-  lf_file_prefix: null           # #57
-  lf_guru_exception_files: null  # #57
-  local_sales_filename_identifier: null  # #58
-  min_survey_columns: null       # #59
-  score_column_prefixes: null    # #60
+  lf_file_prefix: "LF"           # #57 — prefixo dos arquivos de leads do lançamento
+  lf_guru_exception_files:       # #57 — arquivos LF que mantêm abas TMB/Guru (exceção à regra)
+    - "LF06"
+  local_sales_filename_identifier: "guru"  # #58 — identificador de arquivo de vendas local (excluído: substituído pela API)
+  min_survey_columns: 10         # #59 — mínimo de colunas para considerar aba com survey
+  score_column_prefixes:         # #60 — prefixos de colunas de score a remover por pattern matching
+    - "score"
+    - "faixa"
+    - "pontuação"
+    - "pontuacao"
+    - "lead_score"
+    - "decil"
   vendas_utm_columns_to_remove: ["source", "medium", "campaign", "content"]  # #61
-  columns_to_remove: null        # #69 — lista unificada (substitui cleaning.colunas_remover)
-  column_rename_mapping: null    # #68
-  dataset_cutoff_date: null      # #38
+  columns_to_remove:             # #69 — colunas a remover (score/técnicas sempre ausentes em produção)
+    - "Pontuação"
+    - "Score"
+    - "Faixa"
+    - "Faixa A"
+    - "Faixa B"
+    - "Faixa C"
+    - "Faixa D"
+    - "Remote IP"
+    - "User Agent"
+    - "fbc"
+    - "fbp"
+    - "cidade"
+    - "estado"
+    - "pais"
+    - "cep"
+    - "externalid"
+    - "Page URL"
+    - "Qual estado você mora?"
+  column_rename_mapping:         # #68 — renomeação de colunas com nomes longos de formulário
+    "Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?": "investiu_curso_online"
+    "O que mais te chama atenção na profissão de Programador?": "interesse_programacao"
+  dataset_cutoff_date: "2025-03-01"  # #38 — data de corte: features críticas passaram a ser preenchidas
   column_unification:            # #13–#20
     pesquisa_merges:             # #13, #14, #15
       - cols:
@@ -249,9 +285,23 @@ matching:
 # FeatureConfig — hardcodes #2, #3, #34, #39, #40, #47, #48, #52, #65, #66
 # ---------------------------------------------------------------------------
 feature:
-  critical_columns: null         # #3, #40
-  columns_to_remove: null        # #34
-  columns_to_remove_post_cutoff: null  # #39
+  critical_columns:              # #3, #40 — features a monitorar para mudanças de qualidade
+    - "genero"
+    - "idade"
+    - "o_que_faz_atualmente"
+    - "faixa_salarial"
+    - "tem_cartao_credito"
+    - "o_que_quer_ver_evento"
+    - "estudou_programacao"
+    - "fez_faculdade"
+    - "investiu_curso_online"
+    - "interesse_programacao"
+    - "tem_computador"
+  columns_to_remove:             # #34 — colunas removidas por data leakage (específicas do lançamento)
+    - "Campaign"
+    - "Content"
+  columns_to_remove_post_cutoff: # #39 — colunas removidas após cutoff por alto missing
+    - "Qual o seu nível em programação?"
   columns_to_drop_after_fe:     # #48 — lista canônica do treino (audit 2026-03-08)
     - aba_origem
     - arquivo_origem
@@ -266,10 +316,25 @@ feature:
   pesquisa_name_column: "Nome Completo"  # #47
   pesquisa_phone_column: "Telefone"     # #42
   telefone_comprimento_keep_values: [9, 11]  # #157 — 4=inválido, 10=obsoleto → 'outros'
-  ordering_rules: null           # #2
-  survey_column_stems: null      # #52
-  utm_feature_prefixes_for_registry: null    # #65
-  derived_feature_prefixes_for_registry: null  # #66
+  ordering_rules: null           # #2 — lógica de reordenação em código (telefone_comprimento_* por sufixo numérico)
+  survey_column_stems:           # #52 — stems para categorizar features de pesquisa no feature registry
+    - "gênero"
+    - "idade"
+    - "faz"
+    - "faixa"
+    - "cartão"
+    - "estudou"
+    - "faculdade"
+    - "evento"
+  utm_feature_prefixes_for_registry:    # #65 — prefixos de features UTM no feature registry
+    - "Source_"
+    - "Medium_"
+    - "Term_"
+  derived_feature_prefixes_for_registry:  # #66 — prefixos de features derivadas no feature registry
+    - "nome_"
+    - "email_"
+    - "telefone_"
+    - "dia_semana"
   nlp_columns: []                # reservado — manter vazio
 
 # ---------------------------------------------------------------------------
@@ -291,21 +356,33 @@ encoding:
 # ModelConfig — hardcodes #1, #10, #53, #55, #56, #71, #72, #79, #89
 # ---------------------------------------------------------------------------
 model:
-  hyperparameters: null          # #1
+  hyperparameters:               # #1 — hiperparâmetros baseline (antes do tuning)
+    n_estimators: 300
+    max_depth: 8
+    min_samples_split: 2
+    min_samples_leaf: 1
+    max_features: "sqrt"
+    class_weight: "balanced"
+    random_state: 42
+    n_jobs: -1
   buyer_weights:                 # #158 — PESOS_COMPRADOR (dev/retreino); % recebido real por tipo
     guru:      1.00              # Guru: à vista, 100% recebido
     tmb_baixo: 0.84              # TMB Baixo: 83.5% recebido
     tmb_medio: 0.67              # TMB Médio: 67.1% recebido
     tmb_alto:  0.49              # TMB Alto: 48.6% recebido
     tmb_sem:   0.42              # TMB Sem classificação: 42.1% recebido
-  mlflow_experiment_name: null   # #10
-  mlflow_experiment_id: null     # #71
-  model_name_template: null      # #53
-  legacy_model_dir: null         # #72
-  business_config_path: null     # #55
-  tuning_improvement_thresholds: null  # #56
-  metadata_filename_pattern: null  # #89
-  top_decils_to_monitor: null    # #79
+  mlflow_experiment_name: "devclub_lead_scoring"  # #10
+  mlflow_experiment_id: "1"      # #71 — ID do experimento MLflow (usado no path de artefatos)
+  model_name_template: "v1_devclub_rf_{split_method}_single"  # #53
+  legacy_model_dir: "arquivos_modelo"  # #72 — diretório legado (fallback quando active_model.yaml falha)
+  business_config_path: "api/business_config.py"  # #55 — path para atualização automática de recall
+  tuning_improvement_thresholds:  # #56 — thresholds para adotar hiperparâmetros tunados
+    recommended: 1.0              # > 1.0% melhoria → adotar automaticamente
+    marginal: 0.3                 # > 0.3% melhoria → considerar manualmente
+  metadata_filename_pattern: "model_metadata*.json"  # #89
+  top_decils_to_monitor:         # #79 — decis de alta qualidade monitorados
+    - "D9"
+    - "D10"
 
 # ---------------------------------------------------------------------------
 # MonitoringConfig — hardcodes #4, #5, #9, #73–#86
@@ -362,5 +439,5 @@ api:
 # RetainConfig — hardcodes #87, #88, #89
 # ---------------------------------------------------------------------------
 retrain:
-  quality_gate_warning_threshold: null   # #87
-  quality_gate_critical_threshold: null  # #87
+  quality_gate_warning_threshold: 0.10   # #87 — 10pp de mudança em missing rate → alerta
+  quality_gate_critical_threshold: 0.20  # #87 — 20pp de mudança em missing rate → crítico

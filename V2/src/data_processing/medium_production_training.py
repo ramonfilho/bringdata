@@ -38,11 +38,12 @@ def _carregar_medium_modelo_ativo() -> dict:
                            não existir — falha explicitamente (sem fallback).
     """
     base = _base_dir()
-    config_path = os.path.join(base, 'configs', 'active_model.yaml')
+    # TODO multi-client: derivar client_id do ClientConfig e usar active_models/{client_id}.yaml
+    config_path = os.path.join(base, 'configs', 'active_models', 'devclub.yaml')
 
     if not os.path.exists(config_path):
         raise FileNotFoundError(
-            f"configs/active_model.yaml não encontrado em {base}. "
+            f"configs/active_models/devclub.yaml não encontrado em {base}. "
             f"Configure o modelo ativo antes de treinar."
         )
 

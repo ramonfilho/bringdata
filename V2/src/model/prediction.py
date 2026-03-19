@@ -47,9 +47,10 @@ class LeadScoringPredictor:
             self.model_name = model_name
             logger.info(f"Modo arquivos locais: {self.model_name} @ {self.model_path}")
         elif use_active_model:
-            # Modo config: carregar do active_model.yaml
+            # Modo config: carregar do active_models/devclub.yaml
+            # TODO multi-client: derivar client_id do ClientConfig e usar active_models/{client_id}.yaml
             try:
-                config_path = Path(__file__).parent.parent.parent / "configs" / "active_model.yaml"
+                config_path = Path(__file__).parent.parent.parent / "configs" / "active_models" / "devclub.yaml"
                 with open(config_path, 'r') as f:
                     config = yaml.safe_load(f)
 

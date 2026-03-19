@@ -314,11 +314,12 @@ def get_active_model_path() -> str:
     """
     import yaml
 
-    config_path = Path(__file__).parent.parent.parent / 'configs' / 'active_model.yaml'
+    # TODO multi-client: derivar client_id do ClientConfig e usar active_models/{client_id}.yaml
+    config_path = Path(__file__).parent.parent.parent / 'configs' / 'active_models' / 'devclub.yaml'
 
     if not config_path.exists():
         raise FileNotFoundError(
-            f"Arquivo active_model.yaml não encontrado: {config_path}\n"
+            f"Arquivo active_models/devclub.yaml não encontrado: {config_path}\n"
             "Execute um treino com --set-active para configurar."
         )
 
@@ -328,6 +329,6 @@ def get_active_model_path() -> str:
     model_path = active_config.get('active_model', {}).get('model_path')
 
     if not model_path:
-        raise ValueError("model_path não configurado em active_model.yaml")
+        raise ValueError("model_path não configurado em active_models/devclub.yaml")
 
     return model_path

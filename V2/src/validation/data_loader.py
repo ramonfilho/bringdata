@@ -40,7 +40,8 @@ def get_active_model_path() -> Path:
         FileNotFoundError: Se active_model.yaml não existir
         KeyError: Se estrutura do YAML estiver incorreta
     """
-    config_path = Path(__file__).parent.parent.parent / "configs" / "active_model.yaml"
+    # TODO multi-client: derivar client_id do ClientConfig e usar active_models/{client_id}.yaml
+    config_path = Path(__file__).parent.parent.parent / "configs" / "active_models" / "devclub.yaml"
 
     if not config_path.exists():
         raise FileNotFoundError(

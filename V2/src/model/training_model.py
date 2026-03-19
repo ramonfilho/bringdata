@@ -1007,7 +1007,8 @@ def registrar_features_e_modelo_devclub(
             logger.debug("-" * 50)
             logger.debug("Use --save-test-predictions para salvar predições do test set")
 
-        # Atualizar active_model.yaml se solicitado
+        # Atualizar active_models/devclub.yaml se solicitado
+        # TODO multi-client: derivar client_id do ClientConfig e usar active_models/{client_id}.yaml
         if set_active:
             logger.debug("\n5. ATUALIZANDO MODELO ATIVO")
             logger.debug("-" * 50)
@@ -1015,7 +1016,7 @@ def registrar_features_e_modelo_devclub(
             import yaml
             from pathlib import Path
 
-            config_path = Path(__file__).parent.parent.parent / "configs" / "active_model.yaml"
+            config_path = Path(__file__).parent.parent.parent / "configs" / "active_models" / "devclub.yaml"
             current_run_id = mlflow.active_run().info.run_id
 
             active_config = {

@@ -772,9 +772,21 @@ Duplicatas encontradas (resolução via campo já mapeado):
 
 11. `validation/` — atualizar onde há reimplementação paralela
 
-Ao concluir o último componente: `configs/clients/devclub.yaml` está completamente preenchido → gerar `configs/templates/client_template.yaml` a partir dele.
+~~12. `configs/clients/devclub.yaml` completamente preenchido~~ ✅ (19/03/2026)
+    - Todos os hardcodes #6–#89 populados com valores reais do código-fonte
+    - Campos null restantes são intencionais: env vars (infra, capi), componentes não migrados (monitoring/api), lógica de código (ordering_rules)
 
-**Critério de saída:** treino e produção importam 100% de `core/`; `configs/clients/devclub.yaml` completamente preenchido; `ClientConfig.from_yaml('configs/clients/devclub.yaml').validate()` passa sem erros.
+~~13. `configs/active_model.yaml` → `configs/active_models/devclub.yaml`~~ ✅ (19/03/2026)
+    - Arquivo renomeado e movido
+    - 6 referências funcionais atualizadas: prediction.py, training_model.py, data_validation.py, data_loader.py, medium_production_training.py, run_monitoring_local.sh
+    - Todos com TODO multi-client para derivar client_id do ClientConfig
+
+~~14. `configs/templates/client_template.yaml` gerado~~ ✅ (19/03/2026)
+    - Template funcional com REQUIRED/OPTIONAL/ENV VAR para cada campo
+    - Derivado do devclub.yaml completo — sem valores DevClub-específicos
+    - Cobre todos os sub-configs (infra, ingestion, utm, medium, category, matching, feature, encoding, model, monitoring, capi, api, retrain)
+
+**Critério de saída Fase 2:** treino e produção importam 100% de `core/`; `configs/clients/devclub.yaml` completamente preenchido ✅; `ClientConfig.from_yaml('configs/clients/devclub.yaml').validate()` passa sem erros; `configs/templates/client_template.yaml` gerado ✅.
 
 ---
 
