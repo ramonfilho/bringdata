@@ -57,6 +57,10 @@ logger = logging.getLogger('shadow_compare')
 from V2.src.data_processing.medium_unification import unify_medium_columns as _old_unify_medium
 from V2.src.data_processing.category_unification import unificar_categorias_completo as _old_unify_categories
 from V2.src.features.encoding import apply_categorical_encoding as _old_apply_encoding
+from V2.src.data_processing.preprocessing import (
+    remove_duplicates, clean_columns, remove_campaign_features,
+    remove_technical_fields, rename_long_column_names,
+)
 
 # ---------------------------------------------------------------------------
 # Import NEW core/ components
@@ -64,15 +68,12 @@ from V2.src.features.encoding import apply_categorical_encoding as _old_apply_en
 from V2.src.core.medium import unify_medium as _new_unify_medium
 from V2.src.core.category_unification import unify_categories as _new_unify_categories
 from V2.src.core.encoding import apply_encoding as _new_apply_encoding
+from V2.src.core.preprocessing import preprocess as _new_preprocess
 from V2.src.core.client_config import ClientConfig
 
 # ---------------------------------------------------------------------------
 # Shared components (idênticos nos dois pipelines)
 # ---------------------------------------------------------------------------
-from V2.src.data_processing.preprocessing import (
-    remove_duplicates, clean_columns, remove_campaign_features,
-    remove_technical_fields, rename_long_column_names,
-)
 from V2.src.core.utm import unify_utm
 from V2.src.core.feature_engineering import create_features as _create_features
 
@@ -167,17 +168,12 @@ def _load_from_sheets() -> pd.DataFrame:
 # Pipeline helpers
 # ---------------------------------------------------------------------------
 
-def _apply_shared_preprocessing(df: pd.DataFrame, config: ClientConfig) -> pd.DataFrame:
-    """Passos idênticos nos dois pipelines (1–4)."""
+def _pipeline_old(df: pd.DataFrame, config: ClientConfig, artifacts: Dict) -> pd.DataFrame:
+    """Pipeline antigo — funções individuais de data_processing/."""
     df = remove_duplicates(df)
     df = clean_columns(df)
     df = remove_campaign_features(df)
     df = unify_utm(df, config.utm)
-    return df
-
-
-def _pipeline_old(df: pd.DataFrame, config: ClientConfig, artifacts: Dict) -> pd.DataFrame:
-    df = _apply_shared_preprocessing(df, config)
     df = _old_unify_medium(df)
     df = rename_long_column_names(df)
     df = _old_unify_categories(df)
@@ -194,15 +190,15 @@ def _pipeline_old(df: pd.DataFrame, config: ClientConfig, artifacts: Dict) -> pd
 
 
 def _pipeline_new(df: pd.DataFrame, config: ClientConfig, artifacts: Dict) -> pd.DataFrame:
-    df = _apply_shared_preprocessing(df, config)
+    """Pipeline novo — 100% core/. Espelho exato de production_pipeline.py."""
+    df = _new_preprocess(df, config.ingestion, config.feature)
+    df = unify_utm(df, config.utm)
     df = _new_unify_medium(
         df,
         config.medium,
         artifacts if (artifacts.get('mlflow_run_id') or artifacts.get('model_path')) else None,
     )
-    df = rename_long_column_names(df)
     df = _new_unify_categories(df, config.category)
-    df = remove_technical_fields(df)
     df = _create_features(df, config.feature)
     df = _new_apply_encoding(df, config.encoding, artifacts)
     return df
@@ -270,7 +266,8 @@ def compare_dataframes(old: pd.DataFrame, new: pd.DataFrame, component: str, ver
 # ---------------------------------------------------------------------------
 
 def compare_medium(df_raw: pd.DataFrame, config: ClientConfig, artifacts: Dict, verbose: bool) -> dict:
-    base = _apply_shared_preprocessing(df_raw.copy(), config)
+    base = _new_preprocess(df_raw.copy(), config.ingestion, config.feature)
+    base = unify_utm(base, config.utm)
     old = _old_unify_medium(base.copy())
     new = _new_unify_medium(
         base.copy(),
@@ -301,9 +298,9 @@ def compare_medium(df_raw: pd.DataFrame, config: ClientConfig, artifacts: Dict, 
 
 
 def compare_category(df_raw: pd.DataFrame, config: ClientConfig, artifacts: Dict, verbose: bool) -> dict:
-    base = _apply_shared_preprocessing(df_raw.copy(), config)
+    base = _new_preprocess(df_raw.copy(), config.ingestion, config.feature)
+    base = unify_utm(base, config.utm)
     base = _old_unify_medium(base)   # mesmo medium nos dois ramos
-    base = rename_long_column_names(base)
     old = _old_unify_categories(base.copy())
     new = _new_unify_categories(base.copy(), config.category)
     return compare_dataframes(old, new, 'category', verbose)
@@ -311,11 +308,10 @@ def compare_category(df_raw: pd.DataFrame, config: ClientConfig, artifacts: Dict
 
 def compare_encoding(df_raw: pd.DataFrame, config: ClientConfig, artifacts: Dict, verbose: bool) -> dict:
     # Aplicar todos os passos anteriores identicamente
-    base = _apply_shared_preprocessing(df_raw.copy(), config)
+    base = _new_preprocess(df_raw.copy(), config.ingestion, config.feature)
+    base = unify_utm(base, config.utm)
     base = _old_unify_medium(base)
-    base = rename_long_column_names(base)
     base = _old_unify_categories(base)
-    base = remove_technical_fields(base)
     base = _create_features(base, config.feature)
     old = _old_apply_encoding(
         base.copy(),

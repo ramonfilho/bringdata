@@ -683,10 +683,23 @@ Duplicatas encontradas (resolução via campo já mapeado):
 2. Extrair os hardcodes desse componente para `configs/clients/devclub.yaml`
 3. Atualizar imports nos pipelines afetados
 4. Rodar shadow mode (velha e nova em paralelo, ao menos 1 ciclo de scoring em produção)
-5. Validar paridade contra o snapshot da Fase 1
-6. Remover implementação antiga
+5. Validar paridade contra o snapshot da Fase 1 (ver §12)
+6. **Validar integridade do pipeline de treino** — rodar treino completo com os mesmos argumentos do modelo de referência e confirmar que o AUC não regride além da margem de tolerância (ver critério abaixo)
+7. Remover implementação antiga
 
 **Protocolo obrigatório por componente** — ver §12 para instruções completas de `validate_parity_snapshots.py`.
+
+> ⚠️ **CRITÉRIO DE APROVAÇÃO DE COMPONENTE — DUAS CAMADAS OBRIGATÓRIAS:**
+>
+> **Camada 1 — Paridade de snapshots (§12):** `validate_parity_snapshots.py --validate` com os mesmos argumentos usados no `--generate-golden`. Garante que os dados nos 6 checkpoints intermediários são bit-a-bit idênticos antes e depois da migração do componente.
+>
+> **Camada 2 — Integridade do pipeline de treino:** rodar `train_pipeline.py` com os argumentos exatos do modelo de referência em produção (`--initial-matching email_telefone --tmb-risk-filter all --api-end-date 2026-03-15 --hyperparams '{"n_estimators": 200, "max_features": "log2", "min_samples_leaf": 3, "min_samples_split": 2, "max_depth": 8}'`) e confirmar que o AUC reproduzido está dentro de ±0.5% do AUC de referência (0.745). **Atenção: o modelo de referência é `2a98e51c` (TMB All, 15/03/2026, AUC 0.7450) — usar `--tmb-risk-filter all`, não `none`.**
+>
+> **Por que duas camadas são necessárias:**
+> - A Camada 1 prova que a lógica do componente migrado é idêntica à original para os dados dos checkpoints. Mas não detecta falhas que ocorrem entre checkpoints ou que dependem do dataset completo.
+> - A Camada 2 prova que o pipeline de ponta a ponta — com dados reais e na mesma janela temporal do modelo em produção — produz o mesmo resultado. Um componente só está aprovado quando passa nas duas camadas.
+>
+> **Ambas as camadas são necessárias e não substituem uma à outra.** Camada 1 sem Camada 2 é insuficiente; Camada 2 sem Camada 1 não isola a origem de eventuais regressões.
 
 **Componentes em ordem de criticidade:**
 
@@ -726,10 +739,38 @@ Duplicatas encontradas (resolução via campo já mapeado):
    - `core/preprocessing.py` → `preprocess()` é para produção e monitoramento (onde não
      há detecção de cutoff). `preprocess_for_monitoring()` já ativo em `monitoring/orchestrator.py`.
 
-6. `core/category_unification.py` — já compartilhado; hardcodes #27–#33 → `CategoryConfig`
-   - Atualizar imports: `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py`
-7. Demais módulos `core/` (ingestion, matching, utils, dataset_versioning, column_unification) — mesmo ciclo
-8. `validation/` — atualizar onde há reimplementação paralela
+6. ~~`core/category_unification.py`~~ ✅ **ATIVO em `train_pipeline.py`** (19/03/2026)
+   - Já era compartilhado entre treino/produção/monitoring; hardcodes #27–#33 → `CategoryConfig`
+   - Validado: `validate_parity_snapshots.py --validate` — todos 6 snapshots ✅
+   - Camada 2: AUC 0.747 (run `ffc20588`, 19/03/2026) ✅ — dentro de ±0.5% do baseline 0.745
+   - Pendente: atualizar imports em `production_pipeline.py` e `monitoring/orchestrator.py`
+
+7. ~~`core/column_unification.py`~~ ✅ **ATIVO em `train_pipeline.py`** (19/03/2026)
+   - Substitui `unificar_colunas_pesquisa` + `unificar_colunas_vendas` + `aplicar_filtro_temporal` de `column_unification_refactored.py`
+   - Validado: todos 6 snapshots ✅
+   - Camada 2: AUC 0.747 (run `ffc20588`, 19/03/2026) ✅
+   - Hardcodes #13–#22 → `configs/clients/devclub.yaml`
+
+8. ~~`core/matching.py`~~ ✅ **ATIVO em `train_pipeline.py`** (19/03/2026)
+   - Consolida 6 arquivos `src/matching/` em função única `match_leads()`
+   - Validado: todos 6 snapshots ✅ — `fe_input` row count e `target` distribution preservados
+   - Camada 2: AUC 0.747 (run `ffc20588`, 19/03/2026) ✅
+   - Hardcodes #41–#46 → `configs/clients/devclub.yaml`
+
+9. ~~`core/dataset_versioning.py`~~ ✅ **ATIVO em `train_pipeline.py`** (19/03/2026)
+   - Substitui `criar_dataset_pos_cutoff` + `aplicar_janela_conversao`
+   - Janela de conversão simétrica implementada (remove TODOS os leads após `date_limite`)
+   - Validado: todos 6 snapshots ✅
+   - Camada 2: AUC 0.747 (run `ffc20588`, 19/03/2026) ✅
+   - Hardcodes #38, #39, #40 → `configs/clients/devclub.yaml`
+
+10. ~~`core/ingestion.py`~~ ✅ **ATIVO em `train_pipeline.py`** (19/03/2026)
+    - Substitui `filter_sheets`, `remove_duplicates_per_sheet`, `consolidate_datasets`, `filter_sales_by_product`, `aplicar_filtro_status_risco`
+    - Validado: todos 6 snapshots ✅
+    - Camada 2: AUC 0.747 (run `ffc20588`, 19/03/2026) ✅
+    - Hardcodes #6, #8, #11, #12, #22–#25 → `configs/clients/devclub.yaml`
+
+11. `validation/` — atualizar onde há reimplementação paralela
 
 Ao concluir o último componente: `configs/clients/devclub.yaml` está completamente preenchido → gerar `configs/templates/client_template.yaml` a partir dele.
 
@@ -940,17 +981,19 @@ Para tornar o passo 3 acima objetivo e automático, existe o script `V2/scripts/
 
 ```bash
 # ANTES de tocar qualquer código — com o código em estado anterior confirmado:
-python scripts/validate_parity_snapshots.py --generate-golden
+python scripts/validate_parity_snapshots.py --generate-golden [ARGS]
 # Nota: tests/fixtures/ está no .gitignore (binários, regenerar localmente).
 # O golden fica em tests/fixtures/golden/ — não commitar, só manter localmente.
 
 # Implementar o componente...
 
 # APÓS implementar — antes de commitar o código novo:
-python scripts/validate_parity_snapshots.py --validate
+python scripts/validate_parity_snapshots.py --validate [ARGS]
 # Se ❌ CRÍTICO → não commitar, investigar a regressão
 # Se ✅ OK       → pode commitar
 ```
+
+> ⚠️ **RESTRIÇÃO CRÍTICA — ARGUMENTOS IDÊNTICOS:** `--generate-golden` e `--validate` devem ser chamados com **exatamente os mesmos argumentos** (ex: `--no-api-data`, `--tmb-risk-filter`, `--initial-matching`). Se os argumentos diferirem, o golden e o atual refletem execuções de pipelines diferentes — o teste compara maçãs com laranjas e não prova nada. O resultado `✅ OK` com argumentos diferentes é um falso positivo que invalida toda a validação. Sempre regenerar o golden quando os argumentos de referência mudarem.
 
 **Checkpoints monitorados:**
 
@@ -972,7 +1015,7 @@ ROW_TOLERANCE  = 0.005   # 0.5% — diferença de row count aceitável
 DIST_TOLERANCE = 0.02    # 2pp  — diferença de distribuição categórica aceitável
 ```
 
-**Referência do golden baseline:** run `2a98e51c` — 48.812 registros, cutoff 2025-11-04, AUC 0.745, monotonia 100%.
+**Referência do golden baseline:** run `2a98e51c` — 48.812 registros, cutoff 2025-11-04, AUC 0.745, monotonia 100%. Gerado com `python -m V2.src.train_pipeline --capture-parity-snapshots --no-api-data --initial-matching email_telefone`. O `--validate` deve usar **os mesmos argumentos** — qualquer divergência de argumentos invalida a comparação.
 
 ---
 

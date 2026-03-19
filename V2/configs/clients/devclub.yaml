@@ -31,28 +31,40 @@ ingestion:
   api_source_name: null          # #11
   has_tmb: null                  # #12 — bool
   sales_platform_identifier: null  # #21
-  approved_status_value: null    # #22
-  tmb_risk_column: null          # #23
-  tmb_risk_values: null          # #62
-  tmb_risk_filter_default: null  # #26
-  product_filter_keyword: null   # #24
-  pesquisa_date_column: null     # #25
+  approved_status_value: "Aprovada"  # #22
+  tmb_risk_column: "Grau de risco"   # #23
+  tmb_risk_values: ["Baixo", "Médio"]  # #62 — 'low'=first, 'low_medium'=all
+  tmb_risk_filter_default: "all"     # #26
+  product_filter_keyword: "devclub"  # #24
+  pesquisa_date_column: "Data"       # #25
   lf_file_prefix: null           # #57
   lf_guru_exception_files: null  # #57
   local_sales_filename_identifier: null  # #58
   min_survey_columns: null       # #59
   score_column_prefixes: null    # #60
-  vendas_utm_columns_to_remove: null  # #61
+  vendas_utm_columns_to_remove: ["source", "medium", "campaign", "content"]  # #61
   columns_to_remove: null        # #69 — lista unificada (substitui cleaning.colunas_remover)
   column_rename_mapping: null    # #68
   dataset_cutoff_date: null      # #38
   column_unification:            # #13–#20
-    pesquisa_merges: null        # #13, #14, #15
-    valor_columns: null          # #16
-    produto_columns: null        # #17
-    nome_columns: null           # #18
-    email_columns: null          # #19
-    telefone_columns: null       # #20
+    pesquisa_merges:             # #13, #14, #15
+      - cols:
+          - "Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?"
+          - "Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro? "
+        target: "investiu_curso_online"
+      - cols:
+          - "O que mais te chama atenção na profissão de Programador?"
+          - "O que mais te chama atenção na profissão de Programador? "
+        target: "interesse_programacao"
+      - cols:
+          - "Atualmente, qual a sua faixa salarial?"
+          - "Atualmente, qual a sua faixa salar"
+        target: "Atualmente, qual a sua faixa salarial?"
+    valor_columns: ["Ticket (R$)", "valor produtos"]            # #16
+    produto_columns: ["Produto", "Lançamento", "nome produto"]  # #17
+    nome_columns: ["Cliente Nome", "nome contato"]              # #18
+    email_columns: ["Cliente Email", "email contato"]           # #19
+    telefone_columns: ["Telefone", "telefone contato"]          # #20
 
 # ---------------------------------------------------------------------------
 # UTMConfig — hardcodes #35, #63, #67 (Componente 1 — Fase 2)

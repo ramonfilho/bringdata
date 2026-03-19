@@ -10,8 +10,8 @@ import pandas as pd
 import logging
 import atexit
 from datetime import datetime
-from .data_processing.preprocessing import remove_duplicates, clean_columns, remove_campaign_features, remove_technical_fields, rename_long_column_names
 from .core.client_config import ClientConfig
+from .core.preprocessing import preprocess as _preprocess
 from .core.utm import unify_utm
 from .core.medium import unify_medium as _unify_medium
 from .core.category_unification import unify_categories as _unify_categories
@@ -175,31 +175,13 @@ class LeadScoringPipeline:
 
         logger.info(f" INÍCIO DO PIPELINE: {initial_rows} linhas, {initial_cols} colunas")
 
-        # 1. Remover duplicatas (usando componente importado)
-        logger.info(" [1/11] Removendo duplicatas...")
-        self.data = remove_duplicates(self.data)
-
-        duplicates_removed = initial_rows - len(self.data)
-        logger.info(f"    Duplicatas removidas: {duplicates_removed}")
-        logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
-
-        # 2. Limpar colunas desnecessárias (usando componente importado)
-        logger.info(" [2/11] Removendo colunas score/faixa...")
-        cols_before_clean = len(self.data.columns)
-        self.data = clean_columns(self.data)
-
-        columns_removed = cols_before_clean - len(self.data.columns)
-        logger.info(f"    Colunas de score/faixa removidas: {columns_removed}")
-        logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
-
-        # 3. Remover features de campanha (usando componente importado)
-        logger.info(" [3/11] Removendo features de campanha...")
-        cols_before_campaign = len(self.data.columns)
-        self.data = remove_campaign_features(self.data)
-
-        campaign_cols_removed = cols_before_campaign - len(self.data.columns)
-        logger.info(f"    Features de campanha removidas: {campaign_cols_removed}")
-        logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
+        # 1–3 + rename + remove_technical: sequência canônica via core/preprocessing.py
+        logger.info(" [1/8] Pré-processamento (dedup + limpeza de colunas + renomeação)...")
+        rows_before = len(self.data)
+        cols_before = len(self.data.columns)
+        self.data = _preprocess(self.data, self._client_config.ingestion, self._client_config.feature)
+        logger.info(f"    Linhas: {rows_before} → {len(self.data)} (removidas: {rows_before - len(self.data)})")
+        logger.info(f"    Colunas: {cols_before} → {len(self.data.columns)}")
 
         # 4. Unificar categorias UTM (usando componente importado)
         logger.info(" [4/11] Unificando categorias UTM...")
@@ -233,11 +215,6 @@ class LeadScoringPipeline:
         logger.info(f"    Medium: {medium_before}{medium_after} categorias")
         logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
-        # 5.5. Renomear colunas longas (investiu_curso_online, interesse_programacao)
-        logger.info(" [5.5/11] Renomeando colunas longas...")
-        self.data = rename_long_column_names(self.data)
-        logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
-
         # 6. Unificar categorias de pesquisa (usando componente importado)
         logger.info(" [6/11] Unificando categorias de pesquisa...")
 
@@ -265,15 +242,6 @@ class LeadScoringPipeline:
                     categorias_normalizadas += (antes - depois)
 
         logger.info(f"    Categorias normalizadas: {categorias_normalizadas}")
-        logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
-
-        # 7. Remover campos técnicos (usando componente importado)
-        logger.info(" [7/11] Removendo campos técnicos...")
-        cols_before_tech = len(self.data.columns)
-        self.data = remove_technical_fields(self.data)
-
-        tech_cols_removed = cols_before_tech - len(self.data.columns)
-        logger.info(f"    Campos técnicos removidos: {tech_cols_removed}")
         logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
         # 8. Verificar category drift ANTES do encoding

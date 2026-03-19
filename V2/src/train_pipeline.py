@@ -26,13 +26,15 @@ from src.data_processing.ingestion import (
     remove_unnecessary_columns,
     consolidate_datasets
 )
-from src.data_processing.column_unification_refactored import (
-    unificar_colunas_pesquisa,
-    unificar_colunas_vendas,
-    aplicar_filtro_temporal,
-    remover_colunas_utm_ausentes,
-    aplicar_filtro_status_risco,
-    filtrar_vendas_devclub
+from src.core.column_unification import (
+    unify_survey_columns as _unify_survey,
+    unify_sales_columns as _unify_sales,
+    aplicar_filtro_temporal as _filtro_temporal,
+    remover_colunas_utm_ausentes as _remover_utm,
+)
+from src.core.ingestion import (
+    aplicar_filtro_status_risco as _filtro_status_risco,
+    filter_sales_by_product as _filtrar_produto,
 )
 from src.core.category_unification import unify_categories as _unify_categories
 from src.data_processing.feature_removal import remover_features_desnecessarias, listar_colunas_restantes
@@ -145,7 +147,7 @@ def setup_logging(verbosity='normal', log_file=None):
 logger = logging.getLogger(__name__)
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None):
     """Executa pipeline de treino completo.
 
     Args:
@@ -452,6 +454,21 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info(f"  Dataset Vendas: {len(df_vendas):,} registros, {len(df_vendas.columns)} colunas")
     logger.info("")
 
+    # Filtro de data máxima — para reproduzir runs anteriores com o mesmo corte temporal
+    if max_date:
+        max_date_ts = pd.Timestamp(max_date)
+        if 'Data' in df_pesquisa.columns:
+            df_pesquisa['Data'] = pd.to_datetime(df_pesquisa['Data'], errors='coerce', dayfirst=True)
+            antes = len(df_pesquisa)
+            df_pesquisa = df_pesquisa[df_pesquisa['Data'] <= max_date_ts].copy()
+            logger.info(f"  --max-date {max_date}: pesquisa {antes:,} → {len(df_pesquisa):,} registros")
+        if 'data' in df_vendas.columns:
+            df_vendas['data'] = pd.to_datetime(df_vendas['data'], errors='coerce', dayfirst=True)
+            antes = len(df_vendas)
+            df_vendas = df_vendas[df_vendas['data'] <= max_date_ts].copy()
+            logger.info(f"  --max-date {max_date}: vendas {antes:,} → {len(df_vendas):,} registros")
+        logger.info("")
+
     logger.info("=" * 80)
     logger.info("")
 
@@ -460,10 +477,10 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("")
 
     # Parte 1: Unificar colunas de PESQUISA
-    df_pesquisa_unificado = unificar_colunas_pesquisa(df_pesquisa)
+    df_pesquisa_unificado = _unify_survey(df_pesquisa, client_config.ingestion)
 
     # Parte 2: Unificar colunas de VENDAS
-    df_vendas_unificado = unificar_colunas_vendas(df_vendas)
+    df_vendas_unificado = _unify_sales(df_vendas, client_config.ingestion)
 
     logger.info("=" * 80)
     # === CÉLULA 5.1: Filtro temporal ===
@@ -471,7 +488,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 5.1: FILTRO TEMPORAL")
     logger.info("")
 
-    df_vendas_temporal = aplicar_filtro_temporal(df_vendas_unificado, df_pesquisa_unificado)
+    df_vendas_temporal = _filtro_temporal(df_vendas_unificado, df_pesquisa_unificado, client_config.ingestion)
 
     logger.info("=" * 80)
     # === CÉLULA 5.2: Remoção de colunas UTM ===
@@ -479,7 +496,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 5.2: REMOÇÃO DE COLUNAS UTM COM ALTA % AUSENTES")
     logger.info("")
 
-    df_vendas_sem_utm = remover_colunas_utm_ausentes(df_vendas_temporal)
+    df_vendas_sem_utm = _remover_utm(df_vendas_temporal, client_config.ingestion)
 
     logger.info("=" * 80)
     # === CÉLULA 5.3: Filtro de status e risco ===
@@ -487,7 +504,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 5.3: FILTRO DE STATUS E RISCO")
     logger.info("")
 
-    df_vendas_filtrado = aplicar_filtro_status_risco(df_vendas_sem_utm, tmb_risk_filter=tmb_risk_filter, tmb_risk_lookup=tmb_risk_lookup)
+    df_vendas_filtrado = _filtro_status_risco(df_vendas_sem_utm, client_config.ingestion, tmb_risk_filter=tmb_risk_filter, tmb_risk_lookup=tmb_risk_lookup)
 
     logger.info("=" * 80)
     # === CÉLULA 5.4: Filtro de produtos DevClub ===
@@ -495,7 +512,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 5.4: FILTRO DE PRODUTOS DEVCLUB")
     logger.info("")
 
-    df_vendas_final = filtrar_vendas_devclub(df_vendas_filtrado)
+    df_vendas_final = _filtrar_produto(df_vendas_filtrado, client_config.ingestion)
 
     # Usar os datasets finais
     df_pesquisa_final = df_pesquisa_unificado
@@ -1027,6 +1044,12 @@ if __name__ == "__main__":
         default=None,
         help='Hiperparâmetros fixos em JSON (pula tuning). Ex: \'{"n_estimators": 200, "max_features": "log2", "min_samples_leaf": 3}\''
     )
+    parser.add_argument(
+        '--max-date',
+        type=str,
+        default=None,
+        help='Data máxima dos leads (YYYY-MM-DD). Filtra pesquisa e vendas até essa data — usado para reproduzir runs anteriores com o mesmo corte temporal.'
+    )
 
     args = parser.parse_args()
 
@@ -1051,4 +1074,5 @@ if __name__ == "__main__":
         cli_args=vars(args),
         use_cached_data=args.use_cached_data,
         fixed_hyperparams=json.loads(args.hyperparams) if args.hyperparams else None,
+        max_date=args.max_date,
     )
