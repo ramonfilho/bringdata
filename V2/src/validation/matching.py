@@ -207,6 +207,7 @@ def get_matching_stats(matched_df: pd.DataFrame, total_sales: int = None) -> Dic
 
     conversions_guru = len(converted[converted['sale_origin'] == 'guru'])
     conversions_tmb = len(converted[converted['sale_origin'] == 'tmb'])
+    conversions_asaas = len(converted[converted['sale_origin'] == 'asaas'])
 
     return {
         'total_leads': total_leads,
@@ -222,6 +223,7 @@ def get_matching_stats(matched_df: pd.DataFrame, total_sales: int = None) -> Dic
         'avg_ticket': round(avg_ticket, 2),
         'conversions_guru': conversions_guru,
         'conversions_tmb': conversions_tmb,
+        'conversions_asaas': conversions_asaas,
     }
 
 
@@ -249,6 +251,7 @@ def print_matching_summary(stats: Dict):
     print(f"\n Origem das Vendas:")
     print(f"   Guru: {stats['conversions_guru']:,} conversões")
     print(f"   TMB: {stats['conversions_tmb']:,} conversões")
+    print(f"   Asaas: {stats.get('conversions_asaas', 0):,} conversões")
 
 
 def filter_by_period(

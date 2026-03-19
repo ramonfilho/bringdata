@@ -1290,32 +1290,69 @@ class SalesDataLoader:
 
         return df_norm
 
+    def load_asaas_sales(self, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        Carrega vendas da API do Asaas no período (com cache parquet).
+
+        Args:
+            start_date: Data inicial (YYYY-MM-DD) — filtra por clientPaymentDate
+            end_date: Data final (YYYY-MM-DD)
+
+        Returns:
+            DataFrame normalizado com origem='asaas'
+        """
+        cache_file = self._cache_path('asaas', start_date, end_date)
+        if cache_file.exists():
+            logger.info(f"    Cache HIT Asaas: {cache_file.name}")
+            return pd.read_parquet(cache_file)
+
+        from src.validation.asaas_sales_extractor import AsaasSalesExtractor
+        extractor = AsaasSalesExtractor()
+        df = extractor.generate_report(start_date=start_date, end_date=end_date)
+        # Remover colunas internas de debug antes de salvar
+        debug_cols = [c for c in df.columns if c.startswith('_')]
+        if debug_cols:
+            df = df.drop(columns=debug_cols)
+
+        try:
+            df.to_parquet(cache_file, index=False)
+            logger.info(f"    Cache SAVED Asaas: {cache_file.name}")
+        except Exception as ce:
+            logger.warning(f"    Não foi possível salvar cache Asaas: {ce}")
+
+        return df
+
     def combine_sales(self, guru_df: pd.DataFrame = None, tmb_df: pd.DataFrame = None,
                      hotpay_df: pd.DataFrame = None, hotmart_df: pd.DataFrame = None,
+                     asaas_df: pd.DataFrame = None,
                      guru_paths: List[str] = None, tmb_paths: List[str] = None,
                      hotpay_paths: List[str] = None,
                      hotmart_api_start: str = None, hotmart_api_end: str = None,
+                     asaas_api_start: str = None, asaas_api_end: str = None,
                      report_type: str = 'fechamento', include_canceled: bool = False) -> pd.DataFrame:
         """
-        Combina vendas da Guru, TMB, HotPay e Hotmart em um único DataFrame.
+        Combina vendas da Guru, TMB, HotPay, Hotmart e Asaas em um único DataFrame.
 
         Args:
             guru_df: DataFrame já carregado da Guru (opcional)
             tmb_df: DataFrame já carregado da TMB (opcional)
             hotpay_df: DataFrame já carregado do HotPay via arquivo (opcional)
             hotmart_df: DataFrame já carregado da Hotmart via API (opcional)
+            asaas_df: DataFrame já carregado do Asaas via API (opcional)
             guru_paths: Caminhos para arquivos Guru (se guru_df não fornecido)
             tmb_paths: Caminhos para arquivos TMB (se tmb_df não fornecido)
             hotpay_paths: Caminhos para arquivos HotPay (se hotpay_df não fornecido)
             hotmart_api_start: Data início para buscar vendas Hotmart via API (YYYY-MM-DD)
             hotmart_api_end: Data fim para buscar vendas Hotmart via API (YYYY-MM-DD)
+            asaas_api_start: Data início para buscar vendas Asaas via API (YYYY-MM-DD)
+            asaas_api_end: Data fim para buscar vendas Asaas via API (YYYY-MM-DD)
             report_type: Tipo de relatório ('fechamento' ou 'pos-devolucoes') para buscar TMB no GCS
             include_canceled: Se True, inclui vendas canceladas da Guru (para relatório de fechamento)
 
         Returns:
             DataFrame combinado e deduplicado (prioriza Guru em caso de conflito)
         """
-        logger.info(" Combinando vendas Guru + TMB + HotPay + Hotmart")
+        logger.info(" Combinando vendas Guru + TMB + HotPay + Hotmart + Asaas")
 
         # Carregar se necessário
         if guru_df is None and guru_paths:
@@ -1330,6 +1367,8 @@ class SalesDataLoader:
             hotpay_df = self.load_hotpay_sales(hotpay_paths, include_canceled=include_canceled)
         if hotmart_df is None and hotmart_api_start and hotmart_api_end:
             hotmart_df = self.load_hotmart_sales_from_api(hotmart_api_start, hotmart_api_end)
+        if asaas_df is None and asaas_api_start and asaas_api_end:
+            asaas_df = self.load_asaas_sales(asaas_api_start, asaas_api_end)
 
         # Combinar DataFrames
         dfs = []
@@ -1341,6 +1380,8 @@ class SalesDataLoader:
             dfs.append(hotpay_df)
         if hotmart_df is not None and len(hotmart_df) > 0:
             dfs.append(hotmart_df)
+        if asaas_df is not None and len(asaas_df) > 0:
+            dfs.append(asaas_df)
 
         if not dfs:
             logger.warning(" Nenhuma venda para combinar")
@@ -1386,6 +1427,7 @@ class SalesDataLoader:
         logger.info(f"      TMB: {len(combined[combined['origem'] == 'tmb'])}")
         logger.info(f"      HotPay: {len(combined[combined['origem'] == 'hotpay'])}")
         logger.info(f"      Hotmart: {len(combined[combined['origem'] == 'hotmart'])}")
+        logger.info(f"      Asaas: {len(combined[combined['origem'] == 'asaas'])}")
 
         return combined
 

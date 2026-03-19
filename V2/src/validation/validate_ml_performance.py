@@ -837,13 +837,15 @@ def main():
         logger.info(f"    Pasta do período (derivada de captação): {periodo_folder}")
 
     # Determinar caminhos baseados na pasta do período
-    periodo_base_path = f'V2/outputs/validation/{periodo_folder}'
+    # Usa caminho absoluto baseado na localização do script (independe do cwd)
+    _V2_ROOT = Path(__file__).parent.parent.parent
+    periodo_base_path = str(_V2_ROOT / 'outputs' / 'validation' / periodo_folder)
 
     # vendas_path: se especificado via CLI, usa; senão, usa pasta de dados devclub
     if args.vendas_path:
         vendas_path = args.vendas_path
     else:
-        vendas_path = 'V2/data/devclub'  # Mesma pasta do pipeline de treino
+        vendas_path = str(_V2_ROOT / 'data' / 'devclub')
 
     # output_dir: usa pasta do período por padrão
     if args.ml_monitoring_output:
@@ -854,7 +856,7 @@ def main():
         output_dir = periodo_base_path
 
     # meta_reports_dir: também usa pasta validation raiz
-    meta_reports_dir = 'files/validation'
+    meta_reports_dir = str(_V2_ROOT / 'files' / 'validation')
 
     logger.info(f"   Vendas (TMB): {vendas_path}")
     logger.info(f"   Meta Reports: {meta_reports_dir}")
@@ -1128,9 +1130,9 @@ def main():
         # Sheets/Railway são usados apenas para enriquecimento (campaign_id_meta, lead_score, decil).
         capi_norm  = locals().get('capi_norm')   # pode não estar definido se survey_df estava vazio
         survey_df  = locals().get('survey_df', pd.DataFrame())
-        xlsx_leads_folder = Path('outputs/validation/arquivos_leads')
+        xlsx_leads_folder = _V2_ROOT / 'outputs' / 'validation' / 'arquivos_leads'
         if not xlsx_leads_folder.exists():
-            xlsx_leads_folder = Path('outputs/validation')
+            xlsx_leads_folder = _V2_ROOT / 'outputs' / 'validation'
         xlsx_candidates = sorted(xlsx_leads_folder.glob('* Leads.xlsx')) + \
                           sorted(xlsx_leads_folder.glob('*Leads.xlsx'))
         xlsx_candidates = list(dict.fromkeys(xlsx_candidates))  # dedup mantendo ordem
@@ -1316,18 +1318,30 @@ def main():
             logger.info(f"   Hotmart API ativa — ignorando {len(hotpay_files)} arquivo(s) HotPay (mesmos dados)")
             hotpay_files = []
 
+    # Asaas via API — ativo se ASAAS_API_KEY estiver definida e período de vendas fornecido
+    asaas_start = args.sales_start_date if args.sales_start_date else None
+    asaas_end   = args.sales_end_date   if args.sales_end_date   else None
+    asaas_key = os.environ.get('ASAAS_API_KEY', '')
+    if asaas_key and asaas_start and asaas_end:
+        logger.info(f"   Asaas API: buscará vendas de {asaas_start} a {asaas_end}")
+    elif not asaas_key:
+        logger.info("   Asaas API: ASAAS_API_KEY não definida — fonte ignorada")
+        asaas_start = asaas_end = None
+
     if args.report_type == 'fechamento':
         logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)} (incluirá Efetivado + Cancelado)")
     else:
         logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)} (incluirá apenas Efetivado)")
 
-    # Combinar vendas Guru + TMB + HotPay (legado) + Hotmart (API)
+    # Combinar vendas Guru + TMB + HotPay (legado) + Hotmart (API) + Asaas (API)
     sales_df = sales_loader.combine_sales(
         guru_df=guru_df,
         tmb_paths=tmb_files if tmb_files else None,
         hotpay_paths=hotpay_files if hotpay_files else None,
         hotmart_api_start=hotmart_start,
         hotmart_api_end=hotmart_end,
+        asaas_api_start=asaas_start,
+        asaas_api_end=asaas_end,
         report_type=args.report_type,
         include_canceled=include_canceled
     )
@@ -1336,7 +1350,7 @@ def main():
         logger.error(" Nenhuma venda carregada. Verifique os arquivos de vendas.")
         sys.exit(1)
 
-    logger.info(f"    {len(sales_df)} vendas carregadas (Guru + TMB + HotPay + Hotmart)")
+    logger.info(f"    {len(sales_df)} vendas carregadas (Guru + TMB + HotPay + Hotmart + Asaas)")
     print(flush=True)
 
     # 4. Filtrar por período

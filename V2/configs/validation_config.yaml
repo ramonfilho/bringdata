@@ -4,6 +4,10 @@
 # Token de acesso da Meta Ads API
 meta_access_token: "EAAV..."  # TODO: Substituir pelo token real
 
+# Asaas API — chave carregada do .env (ASAAS_API_KEY)
+# Deixe vazio para usar o .env. Preencha aqui apenas para override.
+asaas_api_key: ""
+
 # Account IDs Meta Ads (usar ambos na validação)
 meta_account_ids:
   - act_188005769808959  # Ads - Rodolfo Mori
