@@ -17,12 +17,18 @@ class CAPIQualityMonitor:
     Verifica qualidade dos dados de Conversion API do Facebook.
     """
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, client_config=None):
         """
         Args:
-            db: Sessão SQLAlchemy do PostgreSQL
+            db:            Sessão SQLAlchemy do PostgreSQL
+            client_config: ClientConfig opcional — thresholds de monitoring.thresholds
         """
+        from .config import THRESHOLDS
         self.db = db
+        monitoring = client_config.monitoring if client_config else None
+        self._thresholds = (
+            monitoring.thresholds if monitoring and monitoring.thresholds else THRESHOLDS
+        )
 
     def check(self) -> List[Dict]:
         """
@@ -34,11 +40,9 @@ class CAPIQualityMonitor:
         if self.db is None:
             return []
 
-        from .config import THRESHOLDS
-
         alerts = []
 
-        if THRESHOLDS['capi_quality']['enabled']:
+        if self._thresholds['capi_quality']['enabled']:
             alerts.extend(self._check_capi_missing_rate())
             alerts.extend(self._check_capi_rejection_rate())
 
@@ -46,12 +50,11 @@ class CAPIQualityMonitor:
 
     def _check_capi_missing_rate(self) -> List[Dict]:
         """Verifica missing rate de fbp/fbc nas últimas 24h"""
-        from .config import THRESHOLDS
         from api.database import LeadCAPI
 
         alerts = []
 
-        threshold = THRESHOLDS['capi_quality']['missing_rate']
+        threshold = self._thresholds['capi_quality']['missing_rate']
         lookback_hours = 24
         lookback_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 
@@ -136,13 +139,12 @@ class CAPIQualityMonitor:
 
         Query no banco: leads enviados nas últimas 24h com resposta da Meta
         """
-        from .config import THRESHOLDS
         from api.database import LeadCAPI
 
         alerts = []
 
         # Threshold configurável (padrão: 10%)
-        threshold = THRESHOLDS['capi_quality'].get('rejection_rate', 0.10)
+        threshold = self._thresholds['capi_quality'].get('rejection_rate', 0.10)
         lookback_hours = 24
         lookback_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
 

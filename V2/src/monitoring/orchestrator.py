@@ -99,8 +99,8 @@ class MonitoringOrchestrator:
         # Inicializar monitors
         self.monitors = {
             'data_quality': DataQualityMonitor(model_path, client_config=self._client_config),
-            'operational': OperationalMonitor(db),
-            'capi_quality': CAPIQualityMonitor(db)
+            'operational': OperationalMonitor(db, client_config=self._client_config),
+            'capi_quality': CAPIQualityMonitor(db, client_config=self._client_config)
         }
 
     def run_daily_check(self, leads_data: List[Dict]) -> Dict:
