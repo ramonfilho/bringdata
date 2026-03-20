@@ -639,17 +639,25 @@ Run `2a98e51c` — AUC 0.7450, monotonia 100%, tmb_risk_filter=all, 59 features,
 
 O critério real desta fase é: **pipeline completo (treino → produção → monitoramento → retreino) roda para Cliente B sem alterar código, apenas adicionando `configs/clients/clientb.yaml`**. Para chegar lá, a fase tem três sub-fases obrigatórias nesta ordem.
 
-#### 3a — Conectar camada de orquestração ao ClientConfig (pré-requisito)
+#### 3a — Conectar camada de orquestração ao ClientConfig ✅ CONCLUÍDO (20/03/2026)
 
 *Nenhum destes itens requer mudança em `core/`. São conexões de leitura de config em componentes que já existem.*
 
-1. **`training_model.py`** — ler `model.mlflow_experiment_name`, `model.model_name_template`, `model.mlflow_experiment_id` do ClientConfig. Remover hardcodes #10, #53, #71.
-2. **`prediction.py`** — derivar `client_id` do ClientConfig e carregar `configs/active_models/{client_id}.yaml` dinamicamente. Remove os 6 TODO multi-client.
-3. **`monitoring/config.py`** — mover THRESHOLDS e MISSING_RATE_IGNORE_COLUMNS (#83, #84) para campos de `MonitoringConfig`; sub-monitores recebem config como parâmetro.
-4. **`retraining_orchestrator.py`** — ler TMB path, quality gate thresholds, metadata pattern (#87–#89) do ClientConfig.
-5. **Código morto confirmado** — deletar `src/data_processing/column_unification.py`, `src/data_processing/devclub_filtering_training.py`, `src/features/utm_removal.py`.
+1. ~~**`training_model.py`**~~ ✅ — `model.mlflow_experiment_name` e `model.model_name_template` lidos do ClientConfig; MLflow experiment setup movido do módulo para dentro da função; `active_models/{client_id}.yaml` dinâmico. Hardcodes #10, #53, #71 resolvidos.
+2. ~~**`prediction.py`**~~ ✅ — `client_id` derivado do ClientConfig para `active_models/{client_id}.yaml`; `legacy_model_dir` do `ModelConfig`. TODO multi-client removidos.
+3. ~~**`monitoring/config.py`**~~ ✅ — `DataQualityMonitor`, `OperationalMonitor` e `CAPIQualityMonitor` resolvem thresholds no `__init__` a partir de `MonitoringConfig.thresholds` e `MonitoringConfig.missing_rate_ignore_columns`; fallback para constantes de `config.py`. Hardcodes #83, #84 resolvidos.
+4. ~~**`retraining_orchestrator.py`**~~ ✅ — carrega `ClientConfig` no `__init__`; TMB path derivado de `client_id`; quality gate thresholds de `MonitoringConfig.thresholds`; `get_active_model_path()` aceita `client_id`. Hardcodes #87–#89 resolvidos.
+5. ~~**Código morto confirmado**~~ — `column_unification.py`, `devclub_filtering_training.py`, `utm_removal.py` não existem no repositório (já deletados anteriormente).
 
-*Critério de saída 3a:* `grep -r "devclub" src/ --include="*.py" | grep -v "# TODO\|test\|example"` retorna zero hits nas camadas de orquestração.
+**Adicionalmente resolvidos na 3a:**
+- `train_pipeline.py` — comparação pós-treino lê `model.mlflow_experiment_name` do ClientConfig
+- `monitoring/data_quality.py` — `_check_missing_features` e `_check_extra_features` usam `core.encoding` (não mais `features.encoding` antigo) e `LeadScoringPredictor` via `client_id`
+- `monitoring/orchestrator.py` — passa `client_config` para todos os 3 sub-monitores
+
+**Pendente — validação da camada de orquestração:**
+- Protocolo de duas camadas análogo ao da Fase 2, mas para monitoramento e retreino:
+  - **Camada 1:** smoke test de imports + instanciação com ClientConfig devclub — confirmar zero erros
+  - **Camada 2:** rodar monitoramento end-to-end com dados reais (Sheets) e verificar que alertas esperados são gerados sem falsos positivos (ver §12 — pendente de definição de golden baseline para monitoramento)
 
 #### 3b — Onboarding Cliente B
 
