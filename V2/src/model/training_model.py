@@ -19,27 +19,16 @@ import logging
 import mlflow
 import mlflow.sklearn
 from src.model.decil_thresholds import calcular_thresholds_decis, comparar_distribuicoes, atribuir_decis_batch
+from src.core.client_config import ClientConfig
 
 logger = logging.getLogger(__name__)
 
-# Configurar MLflow
-# Tracking: Cloud SQL PostgreSQL centralizado (compartilhado entre worktrees e Cloud Run)
-# Artifacts: GCS (configurado no experimento)
+# Configurar MLflow tracking URI (apenas URI, não o experimento — feito dentro da função)
 _default_tracking = (
     "postgresql+psycopg2://postgres:SmartAds2026DB!@104.197.138.129:5432/mlflow"
 )
 _tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", _default_tracking)
 mlflow.set_tracking_uri(_tracking_uri)
-
-_client = mlflow.tracking.MlflowClient()
-_exp = _client.get_experiment_by_name("devclub_lead_scoring")
-if _exp is None or _exp.lifecycle_stage == "deleted":
-    mlflow.create_experiment(
-        "devclub_lead_scoring",
-        artifact_location="gs://smart-ads-mlflow/artifacts",
-    )
-else:
-    mlflow.set_experiment("devclub_lead_scoring")
 
 
 def atualizar_business_config_com_recall(model_metadata: dict):
@@ -143,7 +132,8 @@ def registrar_features_e_modelo_devclub(
     distribuicoes_treino: dict = None,
     missing_rates_baseline: dict = None,
     buyer_weights: pd.Series = None,
-    cli_args: dict = None
+    cli_args: dict = None,
+    client_config: ClientConfig = None
 ) -> dict:
     """
     Registra features e salva modelo DevClub para produção.
@@ -162,6 +152,26 @@ def registrar_features_e_modelo_devclub(
     Returns:
         Dicionário com resultados do registro
     """
+    # Configurar experimento MLflow a partir do ClientConfig (ou fallback para padrão DevClub)
+    experiment_name = (
+        client_config.model.mlflow_experiment_name
+        if client_config and client_config.model and client_config.model.mlflow_experiment_name
+        else "devclub_lead_scoring"
+    )
+    _mlflow_client = mlflow.tracking.MlflowClient()
+    _exp = _mlflow_client.get_experiment_by_name(experiment_name)
+    if _exp is None or _exp.lifecycle_stage == "deleted":
+        mlflow.create_experiment(experiment_name, artifact_location="gs://smart-ads-mlflow/artifacts")
+    else:
+        mlflow.set_experiment(experiment_name)
+
+    # Nome do modelo derivado do template de config (ou fallback)
+    model_name = (
+        client_config.model.model_name_template.format(split_method=split_method)
+        if client_config and client_config.model and client_config.model.model_name_template
+        else f"v1_devclub_rf_{split_method}_single"
+    )
+
     # Iniciar MLflow run
     with mlflow.start_run():
         # Backward compatibility: se save_files=True, ativar save_test_predictions
@@ -715,7 +725,7 @@ def registrar_features_e_modelo_devclub(
         feature_registry = {
             "metadata": {
                 "created_at": datetime.now().isoformat(),
-                "model_name": f"v1_devclub_rf_{split_method}_single",
+                "model_name": model_name,
                 "dataset_name": f"dataset_devclub_rf_{split_method}",
                 "total_features": len(X.columns),
                 "total_records": len(dataset_final),
@@ -877,7 +887,7 @@ def registrar_features_e_modelo_devclub(
         # Metadados do modelo
         model_metadata = {
             "model_info": {
-                "model_name": f"v1_devclub_rf_{split_method}_single",
+                "model_name": model_name,
                 "model_type": "RandomForestClassifier",
                 "split_type": split_method,
                 "library": "scikit-learn",
@@ -1007,8 +1017,7 @@ def registrar_features_e_modelo_devclub(
             logger.debug("-" * 50)
             logger.debug("Use --save-test-predictions para salvar predições do test set")
 
-        # Atualizar active_models/devclub.yaml se solicitado
-        # TODO multi-client: derivar client_id do ClientConfig e usar active_models/{client_id}.yaml
+        # Atualizar active_models/{client_id}.yaml se solicitado
         if set_active:
             logger.debug("\n5. ATUALIZANDO MODELO ATIVO")
             logger.debug("-" * 50)
@@ -1016,12 +1025,13 @@ def registrar_features_e_modelo_devclub(
             import yaml
             from pathlib import Path
 
-            config_path = Path(__file__).parent.parent.parent / "configs" / "active_models" / "devclub.yaml"
+            client_id = client_config.client_id if client_config and client_config.client_id else "devclub"
+            config_path = Path(__file__).parent.parent.parent / "configs" / "active_models" / f"{client_id}.yaml"
             current_run_id = mlflow.active_run().info.run_id
 
             active_config = {
                 'active_model': {
-                    'model_name': f"v1_devclub_rf_{split_method}_single",
+                    'model_name': model_name,
                     'mlflow_run_id': current_run_id,
                     'trained_at': model_metadata['model_info']['trained_at'],
                     'split_method': split_method,
@@ -1042,7 +1052,7 @@ def registrar_features_e_modelo_devclub(
                 f.write("# NOTA: Modelo e features carregados direto do MLflow (zero dependência de files/)\n")
 
             logger.debug(f" ✅ {config_path} atualizado")
-            logger.debug(f"  Modelo ativo: v1_devclub_rf_{split_method}_single")
+            logger.debug(f"  Modelo ativo: {model_name}")
             logger.debug(f"  MLflow Run ID: {current_run_id}")
             logger.info(f"\n✅ Modelo ativado! Produção carregará direto do MLflow run: {current_run_id}")
 
@@ -1070,7 +1080,7 @@ def registrar_features_e_modelo_devclub(
         logger.info(" MODELO DEVCLUB REGISTRADO COM SUCESSO")
         logger.info("")
         logger.info("  Informações do modelo:")
-        logger.info(f"  Modelo: v1_devclub_rf_{split_method}_single")
+        logger.info(f"  Modelo: {model_name}")
         logger.info(f"  Algoritmo: RandomForestClassifier")
         logger.info(f"  Split: {split_method}")
         logger.info(f"  Matching: {matching_method}")

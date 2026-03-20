@@ -11,6 +11,7 @@ import numpy as np
 from pathlib import Path
 import logging
 import yaml
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 class LeadScoringPredictor:
     """Classe para realizar predições de lead scoring."""
 
-    def __init__(self, model_name: str = None, model_path: str = None, mlflow_run_id: str = None, use_active_model: bool = True):
+    def __init__(self, model_name: str = None, model_path: str = None, mlflow_run_id: str = None, use_active_model: bool = True, client_config=None):
         """
         Inicializa o preditor com um modelo específico.
 
@@ -47,10 +48,10 @@ class LeadScoringPredictor:
             self.model_name = model_name
             logger.info(f"Modo arquivos locais: {self.model_name} @ {self.model_path}")
         elif use_active_model:
-            # Modo config: carregar do active_models/devclub.yaml
-            # TODO multi-client: derivar client_id do ClientConfig e usar active_models/{client_id}.yaml
+            # Modo config: carregar do active_models/{client_id}.yaml
             try:
-                config_path = Path(__file__).parent.parent.parent / "configs" / "active_models" / "devclub.yaml"
+                client_id = client_config.client_id if client_config and client_config.client_id else "devclub"
+                config_path = Path(__file__).parent.parent.parent / "configs" / "active_models" / f"{client_id}.yaml"
                 with open(config_path, 'r') as f:
                     config = yaml.safe_load(f)
 
@@ -66,13 +67,22 @@ class LeadScoringPredictor:
                     logger.info(f"Carregando modelo ativo de arquivos locais: {self.model_name} @ {self.model_path}")
             except Exception as e:
                 logger.warning(f"Falha ao carregar active_model.yaml: {e}. Usando fallback padrão.")
-                # Fallback para o padrão antigo
+                legacy_dir = (
+                    client_config.model.legacy_model_dir
+                    if client_config and client_config.model and client_config.model.legacy_model_dir
+                    else "arquivos_modelo"
+                )
                 self.model_name = model_name or "v1_devclub_rf_temporal"
-                self.model_path = Path(__file__).parent.parent.parent / "arquivos_modelo"
+                self.model_path = Path(__file__).parent.parent.parent / legacy_dir
         else:
             # Modo legacy: usar padrão antigo
+            legacy_dir = (
+                client_config.model.legacy_model_dir
+                if client_config and client_config.model and client_config.model.legacy_model_dir
+                else "arquivos_modelo"
+            )
             self.model_name = model_name or "v1_devclub_rf_temporal"
-            self.model_path = Path(__file__).parent.parent.parent / "arquivos_modelo"
+            self.model_path = Path(__file__).parent.parent.parent / legacy_dir
 
     def load_model(self):
         """Carrega o modelo pickle e seus metadados."""

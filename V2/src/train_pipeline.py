@@ -840,7 +840,8 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         recall_metrics=recall_metrics,
         missing_rates_baseline=missing_rates_baseline,
         buyer_weights=buyer_weights,
-        cli_args=cli_args
+        cli_args=cli_args,
+        client_config=client_config
     )
 
     cell_timers['Célula 21'] = time.time() - cell_start
