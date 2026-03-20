@@ -853,7 +853,12 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         from mlflow.tracking import MlflowClient
 
         client = MlflowClient()
-        experiment = mlflow.get_experiment_by_name("devclub_lead_scoring")
+        _exp_name = (
+            client_config.model.mlflow_experiment_name
+            if client_config and client_config.model and client_config.model.mlflow_experiment_name
+            else "devclub_lead_scoring"
+        )
+        experiment = mlflow.get_experiment_by_name(_exp_name)
 
         if experiment:
             # Buscar últimas 2 runs (atual + anterior)

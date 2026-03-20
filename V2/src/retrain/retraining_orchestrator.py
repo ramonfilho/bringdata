@@ -132,7 +132,7 @@ class RetreinoMensal:
 
                 # Obter baseline do champion
                 try:
-                    model_path = get_active_model_path()
+                    model_path = get_active_model_path(self.client_config.client_id or "devclub")
                     logger.info(f"   Champion: {model_path}")
 
                     # Carregar metadata do champion
@@ -237,7 +237,7 @@ class RetreinoMensal:
 
                 try:
                     # Obter modelo ativo para baseline
-                    model_path = get_active_model_path()
+                    model_path = get_active_model_path(self.client_config.client_id or "devclub")
                     logger.info(f"   Baseline (champion): {model_path}")
                 except Exception as e:
                     logger.warning(f"     Modelo ativo não encontrado: {e}")
@@ -297,7 +297,7 @@ class RetreinoMensal:
                 try:
                     import json
                     import glob
-                    model_path = get_active_model_path()
+                    model_path = get_active_model_path(self.client_config.client_id or "devclub")
                     logger.info(f"      Champion model: {model_path}")
 
                     metadata_pattern = str(Path(model_path) / 'model_metadata*.json')
