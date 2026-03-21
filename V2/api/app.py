@@ -1620,7 +1620,7 @@ def _send_single_purchase_event(
             event_id=f"purchase_{event_id}",
             user_data=user_data,
             custom_data=custom_data,
-            action_source=ActionSource.SYSTEM_GENERATED,
+            action_source=ActionSource.WEBSITE,
         )
 
         params = {

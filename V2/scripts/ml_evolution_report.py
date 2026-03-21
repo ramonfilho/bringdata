@@ -87,6 +87,20 @@ PERIODS = [
         'vendas_start': '2026-03-02',
         'vendas_end':   '2026-03-08',
     },
+    {
+        'name':        'LF46',
+        'cap_start':   '2026-02-24',
+        'cap_end':     '2026-03-03',
+        'vendas_start': '2026-03-09',
+        'vendas_end':   '2026-03-15',
+    },
+    {
+        'name':        'LF47',
+        'cap_start':   '2026-03-10',
+        'cap_end':     '2026-03-17',
+        'vendas_start': '2026-03-16',
+        'vendas_end':   '2026-03-22',
+    },
 ]
 
 # Google Sheets IDs
@@ -1102,7 +1116,27 @@ def _build_lift_sheet(wb, rows, HEADER_FILL, SECTION_FILL, ALT_FILL,
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 
-def main():
+def run(extra_period: dict = None):
+    """
+    Gera o relatório de evolução. Pode ser chamado diretamente de outros scripts.
+
+    Args:
+        extra_period: dict opcional com keys name, cap_start, cap_end,
+                      vendas_start, vendas_end — adicionado ao PERIODS se
+                      ainda não estiver na lista (match por vendas_start+vendas_end).
+    """
+    import copy
+    periods = copy.deepcopy(PERIODS)
+
+    if extra_period:
+        existing = {(p['vendas_start'], p['vendas_end']) for p in periods}
+        key = (extra_period['vendas_start'], extra_period['vendas_end'])
+        if key not in existing:
+            periods.append(extra_period)
+            print(f"  + Período adicionado dinamicamente: {extra_period['name']}")
+    else:
+        periods = PERIODS
+
     print("=" * 60)
     print("ml_evolution_report.py — carregando fontes...")
     print("=" * 60)
@@ -1111,7 +1145,6 @@ def main():
     print("\n[1/5] Google Sheets")
     sheets_df = load_sheets_data()
 
-    # Detectar gap entre backup e produção para Cloud Run logs
     gap_start = gap_end = None
     if not sheets_df.empty and '_source' in sheets_df.columns:
         b_max = sheets_df[sheets_df['_source'] == 'backup']['data'].max()
@@ -1135,12 +1168,11 @@ def main():
 
     print("\n[5/5] Validation xlsx reports")
 
-    # ── Processar cada período ──
     print("\n" + "=" * 60)
     print("Processando períodos...")
     all_rows = []
 
-    for p in PERIODS:
+    for p in periods:
         name = p['name']
         print(f"\n  {name} ({p['cap_start']} → {p['cap_end']})")
 
@@ -1152,7 +1184,6 @@ def main():
             'vendas_end':   p['vendas_end'],
         }
 
-        # xlsx metrics
         xlsx_path = find_xlsx_for_period(p['vendas_start'], p['vendas_end'])
         if xlsx_path:
             print(f"    xlsx: {xlsx_path.name}")
@@ -1161,22 +1192,16 @@ def main():
             print(f"    xlsx: NÃO ENCONTRADO para {p['vendas_start']} → {p['vendas_end']}")
             xlsx_path = None
 
-        # CAPI stats (DB + logs)
-        stats = capi_stats_for_period(
-            p['cap_start'], p['cap_end'],
-            csql_df, rail_df, cloudrun_df
-        )
+        stats = capi_stats_for_period(p['cap_start'], p['cap_end'], csql_df, rail_df, cloudrun_df)
         row.update(stats)
         print(f"    DB leads: {stats.get('db_leads', 0):,} | CAPI sent: {stats.get('capi_sent', 0):,} "
               f"| Scored: {stats.get('db_scored', 0):,} | D10%: {stats.get('d10_pct', 'n/d')}")
 
-        # Sheets decil stats
         s_stats = sheets_decil_stats(sheets_df, p['cap_start'], p['cap_end'])
         row.update(s_stats)
         if s_stats:
             print(f"    Sheets scored: {s_stats.get('sheets_scored', 0):,} | D10%: {s_stats.get('sheets_d10_pct', 'n/d')}")
 
-        # Lift por decil (leads × compradores)
         lift_df = compute_decil_lift(xlsx_path, sheets_df, p['cap_start'], p['cap_end'], rail_df)
         row['decil_lift_df'] = lift_df
         if not lift_df.empty:
@@ -1187,7 +1212,6 @@ def main():
 
         all_rows.append(row)
 
-    # ── Gerar Excel ──
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     output_path = OUTPUT_DIR / f"evolucao_ml_devclub_{ts}.xlsx"
     print(f"\nGerando Excel: {output_path}")
@@ -1196,6 +1220,31 @@ def main():
 
     import subprocess as sp
     sp.run(['open', str(output_path)], check=False)
+
+    return output_path
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Gera relatório de evolução ML DevClub.")
+    parser.add_argument('--name',         help='Nome do lançamento extra (ex: LF48)')
+    parser.add_argument('--cap-start',    help='Início captação (YYYY-MM-DD)')
+    parser.add_argument('--cap-end',      help='Fim captação (YYYY-MM-DD)')
+    parser.add_argument('--vendas-start', help='Início vendas (YYYY-MM-DD)')
+    parser.add_argument('--vendas-end',   help='Fim vendas (YYYY-MM-DD)')
+    args = parser.parse_args()
+
+    extra = None
+    if args.name and args.cap_start and args.cap_end and args.vendas_start and args.vendas_end:
+        extra = {
+            'name':         args.name,
+            'cap_start':    args.cap_start,
+            'cap_end':      args.cap_end,
+            'vendas_start': args.vendas_start,
+            'vendas_end':   args.vendas_end,
+        }
+
+    run(extra)
 
 
 if __name__ == '__main__':

@@ -119,18 +119,11 @@ def validate_tmb_sales_freshness(sales_df, sales_start, sales_end):
     tmb_sales = sales_df[sales_df['origem'] == 'tmb'] if 'origem' in sales_df.columns else pd.DataFrame()
 
     if tmb_sales.empty:
-        logger.error(" ERRO CRÍTICO: Nenhuma venda TMB encontrada no período!")
-        logger.error(f"   Período analisado: {sales_start} a {sales_end}")
-        logger.error("   ")
-        logger.error("     AÇÃO NECESSÁRIA:")
-        logger.error("   1. Baixar arquivo TMB atualizado")
-        logger.error("   2. Colocar arquivo na pasta do período: files/validation/{periodo}/tmb.xlsx")
-        logger.error("   3. Fazer novo deploy do job ou rodar localmente")
-        logger.error("   ")
+        logger.info(" Nenhuma venda TMB no período — normal quando vendas são via Guru/Hotmart/Asaas")
         return {
-            'status': 'error',
-            'message': 'Nenhuma venda TMB no período',
-            'stop_execution': True
+            'status': 'ok',
+            'message': 'Sem vendas TMB no período',
+            'stop_execution': False
         }
 
     # Verificar data mais recente das vendas TMB
@@ -375,6 +368,34 @@ Exemplos de uso:
         choices=['default', 'unified_last6'],
         default='default',
         help='Método de matching leads-vendas: default (email+telefone completo) ou unified_last6 (email+telefone+últimos 6 dígitos) - default: default'
+    )
+
+    # Purchase events CAPI
+    parser.add_argument(
+        '--send-purchase-events',
+        action='store_true',
+        help='Após validação, envia eventos Purchase ao Meta CAPI para o período de vendas'
+    )
+
+    parser.add_argument(
+        '--purchase-test-event-code',
+        type=str,
+        default=None,
+        help='Código de teste do Meta para purchase events (ex: TEST51740). Implica dry-run no Meta.'
+    )
+
+    # Evolução DevClub
+    parser.add_argument(
+        '--update-evolution',
+        action='store_true',
+        help='Após validação, regenera a planilha Evolução DevClub incluindo este lançamento'
+    )
+
+    parser.add_argument(
+        '--evolution-name',
+        type=str,
+        default=None,
+        help='Nome do lançamento para a planilha de evolução (ex: LF48). Se omitido, gerado automaticamente.'
     )
 
     args = parser.parse_args()
@@ -830,13 +851,15 @@ def main():
         logger.info(f"    Pasta do período (derivada de captação): {periodo_folder}")
 
     # Determinar caminhos baseados na pasta do período
-    periodo_base_path = f'V2/outputs/validation/{periodo_folder}'
+    # Usa caminho absoluto baseado na localização do script (independe do cwd)
+    _V2_ROOT = Path(__file__).parent.parent.parent
+    periodo_base_path = str(_V2_ROOT / 'outputs' / 'validation' / periodo_folder)
 
     # vendas_path: se especificado via CLI, usa; senão, usa pasta de dados devclub
     if args.vendas_path:
         vendas_path = args.vendas_path
     else:
-        vendas_path = 'V2/data/devclub'  # Mesma pasta do pipeline de treino
+        vendas_path = str(_V2_ROOT / 'data' / 'devclub')
 
     # output_dir: usa pasta do período por padrão
     if args.ml_monitoring_output:
@@ -847,7 +870,7 @@ def main():
         output_dir = periodo_base_path
 
     # meta_reports_dir: também usa pasta validation raiz
-    meta_reports_dir = 'files/validation'
+    meta_reports_dir = str(_V2_ROOT / 'files' / 'validation')
 
     logger.info(f"   Vendas (TMB): {vendas_path}")
     logger.info(f"   Meta Reports: {meta_reports_dir}")
@@ -923,7 +946,19 @@ def main():
             start_str = start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d')
             end_str   = end_date   if isinstance(end_date,   str) else end_date.strftime('%Y-%m-%d')
 
-            capi_leads_data = []
+            # Cache CAPI (Cloud SQL + Railway combinados)
+            _capi_cache_dir = Path(__file__).parent.parent.parent / 'files' / 'validation' / 'cache'
+            _capi_cache_dir.mkdir(parents=True, exist_ok=True)
+            _capi_cache_file = _capi_cache_dir / f"capi_{start_str}_{end_str}.parquet"
+
+            if use_cache and _capi_cache_file.exists():
+                logger.info(f"    Cache HIT CAPI: {_capi_cache_file.name}")
+                capi_norm = pd.read_parquet(_capi_cache_file)
+                capi_leads_data = []  # skip DB queries
+                _capi_from_cache = True
+            else:
+                _capi_from_cache = False
+                capi_leads_data = []
 
             # --- Fonte 1: Cloud SQL backup (para datas < 18/02/2026) ---
             if start_str < RAILWAY_CUTOVER and CLOUDSQL_BACKUP.exists():
@@ -1032,9 +1067,10 @@ def main():
                 except Exception as e:
                     logger.warning(f"    Erro ao conectar com Railway: {e}")
 
-            logger.info(f"    CAPI total (backup + Railway): {len(capi_leads_data)} leads")
-
-            if capi_leads_data:
+            if _capi_from_cache:
+                logger.info(f"    Cache HIT CAPI: {len(capi_norm)} leads (do cache)")
+            elif capi_leads_data:
+                logger.info(f"    CAPI total (backup + Railway): {len(capi_leads_data)} leads")
                 from src.validation.data_loader import normalizar_email, normalizar_telefone_robusto
 
                 capi_df = pd.DataFrame(capi_leads_data)
@@ -1053,14 +1089,13 @@ def main():
                 capi_norm['lead_score'] = capi_df.get('lead_score', np.nan)
                 capi_norm['decile'] = capi_df.get('decil', None)
                 capi_norm['source_type'] = 'capi'
-
                 capi_norm = capi_norm[capi_norm['email'].notna()].copy()
 
                 def extract_campaign_id_meta(utm_campaign):
                     if pd.isna(utm_campaign):
                         return None
-                    match = re.search(r'\|(\d{15,})$', str(utm_campaign))
-                    return match.group(1)[:15] if match else None
+                    match = re.search(r'\|\s*(\d{10,})\s*$', str(utm_campaign))
+                    return match.group(1)[:15] if match else None  # primeiros 15, igual ao campaigns_df
 
                 total_antes = len(capi_norm)
                 capi_norm['campaign_id_meta'] = capi_norm['campaign'].apply(extract_campaign_id_meta)
@@ -1069,6 +1104,17 @@ def main():
                 if removidos > 0:
                     logger.info(f"    Filtrado: {removidos} sem campaign_id Meta ({len(capi_norm)} restaram)")
 
+                # Salvar CAPI no cache
+                if use_cache:
+                    try:
+                        capi_norm.to_parquet(_capi_cache_file, index=False)
+                        logger.info(f"    Cache SAVED CAPI: {_capi_cache_file.name}")
+                    except Exception as ce:
+                        logger.warning(f"    Não foi possível salvar cache CAPI: {ce}")
+            else:
+                capi_norm = None
+
+            if capi_norm is not None:
                 capi_emails = set(capi_norm['email'].unique())
                 capi_extras = capi_emails - survey_emails
                 capi_extra_leads = capi_norm[capi_norm['email'].isin(capi_extras)].copy()
@@ -1093,8 +1139,14 @@ def main():
 
         logger.info(f"    Estatísticas: {lead_source_stats['survey_leads']} pesquisa + {lead_source_stats['capi_leads_extras']} CAPI extras")
 
-        # --- Fonte adicional: xlsx de leads (auto-detecção por sobreposição de datas) ---
-        xlsx_leads_folder = Path('V2/outputs/validation')
+        # --- Fonte primária opcional: xlsx de leads (auto-detecção por sobreposição de datas) ---
+        # Quando encontrado, o xlsx define quais leads pertencem ao lançamento.
+        # Sheets/Railway são usados apenas para enriquecimento (campaign_id_meta, lead_score, decil).
+        capi_norm  = locals().get('capi_norm')   # pode não estar definido se survey_df estava vazio
+        survey_df  = locals().get('survey_df', pd.DataFrame())
+        xlsx_leads_folder = _V2_ROOT / 'outputs' / 'validation' / 'arquivos_leads'
+        if not xlsx_leads_folder.exists():
+            xlsx_leads_folder = _V2_ROOT / 'outputs' / 'validation'
         xlsx_candidates = sorted(xlsx_leads_folder.glob('* Leads.xlsx')) + \
                           sorted(xlsx_leads_folder.glob('*Leads.xlsx'))
         xlsx_candidates = list(dict.fromkeys(xlsx_candidates))  # dedup mantendo ordem
@@ -1104,60 +1156,106 @@ def main():
             from src.validation.data_loader import normalizar_email, normalizar_telefone_robusto
             period_start = pd.to_datetime(_s)
             period_end   = pd.to_datetime(_e) + pd.Timedelta(days=1)
-            xlsx_extras_all = []
+
+            # Selecionar o arquivo xlsx com maior sobreposição com o período de captação
+            best_xlsx = None
+            best_overlap_count = 0
 
             for xlsx_path in xlsx_candidates:
                 try:
-                    xlsx_df = pd.read_excel(xlsx_path, sheet_name='LEADS',
+                    xlsx_df_dates = pd.read_excel(xlsx_path, sheet_name='LEADS', usecols=['DATA'])
+                    dates = pd.to_datetime(xlsx_df_dates['DATA'], errors='coerce')
+                    in_period = ((dates >= period_start) & (dates < period_end)).sum()
+                    logger.info(f"    {xlsx_path.name}: {in_period} leads no período")
+                    if in_period > best_overlap_count:
+                        best_overlap_count = in_period
+                        best_xlsx = xlsx_path
+                except Exception as e:
+                    logger.warning(f"    Erro ao verificar {xlsx_path.name}: {e}")
+
+            if best_xlsx is not None and best_overlap_count > 0:
+                logger.info(f"    Usando como fonte primária: {best_xlsx.name} ({best_overlap_count} leads no período)")
+                try:
+                    xlsx_df = pd.read_excel(best_xlsx, sheet_name='LEADS',
                                             usecols=lambda c: c in
                                             ['NOME','E-MAIL','TELEFONE','SOURCE','MEDIUM',
                                              'CAMPAIGN','TERM','CONTENT','DATA'])
-                    dates = pd.to_datetime(xlsx_df['DATA'], errors='coerce')
-                    # Só carrega se houver sobreposição com o período
-                    if dates.max() < period_start or dates.min() >= period_end:
-                        continue
+                    dates_full = pd.to_datetime(xlsx_df['DATA'], errors='coerce')
 
-                    xlsx_norm = pd.DataFrame()
-                    xlsx_norm['email'] = xlsx_df['E-MAIL'].apply(
+                    xlsx_primary = pd.DataFrame()
+                    xlsx_primary['email'] = xlsx_df['E-MAIL'].apply(
                         lambda x: normalizar_email(x) if pd.notna(x) else None)
-                    xlsx_norm['nome']     = xlsx_df.get('NOME',    pd.Series(dtype=str))
-                    xlsx_norm['telefone'] = xlsx_df['TELEFONE'].apply(
+                    xlsx_primary['nome']     = xlsx_df.get('NOME',    pd.Series(dtype=str))
+                    xlsx_primary['telefone'] = xlsx_df['TELEFONE'].apply(
                         lambda x: normalizar_telefone_robusto(str(x)) if pd.notna(x) else None
-                    ) if 'TELEFONE' in xlsx_df.columns else None
-                    xlsx_norm['data_captura'] = dates
-                    xlsx_norm['campaign'] = xlsx_df.get('CAMPAIGN', pd.Series(dtype=str))
-                    xlsx_norm['source']   = xlsx_df.get('SOURCE',   pd.Series(dtype=str))
-                    xlsx_norm['medium']   = xlsx_df.get('MEDIUM',   pd.Series(dtype=str))
-                    xlsx_norm['term']     = xlsx_df.get('TERM',     pd.Series(dtype=str))
-                    xlsx_norm['content']  = xlsx_df.get('CONTENT',  pd.Series(dtype=str))
-                    xlsx_norm['lead_score']  = np.nan
-                    xlsx_norm['decile']      = None
-                    xlsx_norm['source_type'] = 'xlsx'
+                    ) if 'TELEFONE' in xlsx_df.columns else pd.Series(dtype=str)
+                    xlsx_primary['data_captura'] = dates_full
+                    xlsx_primary['campaign'] = xlsx_df.get('CAMPAIGN', pd.Series(dtype=str))
+                    xlsx_primary['source']   = xlsx_df.get('SOURCE',   pd.Series(dtype=str))
+                    xlsx_primary['medium']   = xlsx_df.get('MEDIUM',   pd.Series(dtype=str))
+                    xlsx_primary['term']     = xlsx_df.get('TERM',     pd.Series(dtype=str))
+                    xlsx_primary['content']  = xlsx_df.get('CONTENT',  pd.Series(dtype=str))
+                    xlsx_primary['lead_score']  = np.nan
+                    xlsx_primary['decile']      = None
+                    xlsx_primary['campaign_id_meta'] = None
+                    xlsx_primary['source_type'] = 'xlsx'
 
-                    xlsx_norm = xlsx_norm[
-                        xlsx_norm['email'].notna() &
-                        (xlsx_norm['data_captura'] >= period_start) &
-                        (xlsx_norm['data_captura'] <  period_end)
+                    xlsx_primary = xlsx_primary[
+                        xlsx_primary['email'].notna() &
+                        (xlsx_primary['data_captura'] >= period_start) &
+                        (xlsx_primary['data_captura'] <  period_end)
                     ].copy()
+                    xlsx_primary = xlsx_primary.drop_duplicates(subset=['email']).copy()
 
-                    existing_emails = set(leads_df['email'].dropna().unique())
-                    xlsx_extras = xlsx_norm[~xlsx_norm['email'].isin(existing_emails)].copy()
-                    logger.info(f"    {xlsx_path.name}: {len(xlsx_norm)} leads no período → {len(xlsx_extras)} extras")
+                    # Enriquecer com Railway/Cloud SQL: campaign_id_meta, lead_score, decil
+                    enrichment_sources = []
+                    if capi_norm is not None and len(capi_norm) > 0:
+                        enrichment_sources.append(capi_norm[['email','campaign','campaign_id_meta','lead_score','decile']].copy())
+                    if not survey_df.empty and 'email' in survey_df.columns:
+                        survey_enrich = survey_df[['email'] + [c for c in ['campaign','lead_score','decile'] if c in survey_df.columns]].copy()
+                        enrichment_sources.append(survey_enrich)
 
-                    if len(xlsx_extras) > 0:
-                        xlsx_extras_all.append(xlsx_extras)
-                        existing_emails.update(xlsx_extras['email'].dropna().unique())
+                    if enrichment_sources:
+                        enrich_df = pd.concat(enrichment_sources, ignore_index=True)
+                        enrich_df = enrich_df.drop_duplicates(subset=['email'], keep='first')
+                        xlsx_primary = xlsx_primary.merge(
+                            enrich_df.rename(columns={
+                                'campaign': 'campaign_enrich',
+                                'lead_score': 'lead_score_enrich',
+                                'decile': 'decile_enrich',
+                                'campaign_id_meta': 'campaign_id_meta_enrich',
+                            }),
+                            on='email', how='left'
+                        )
+                        # Preencher com valores do enriquecimento onde o xlsx não tem
+                        if 'campaign_enrich' in xlsx_primary.columns:
+                            mask_no_camp = xlsx_primary['campaign'].isna() | (xlsx_primary['campaign'] == '')
+                            xlsx_primary.loc[mask_no_camp, 'campaign'] = xlsx_primary.loc[mask_no_camp, 'campaign_enrich']
+                            xlsx_primary.drop(columns=['campaign_enrich'], inplace=True, errors='ignore')
+                        if 'lead_score_enrich' in xlsx_primary.columns:
+                            xlsx_primary['lead_score'] = xlsx_primary['lead_score_enrich']
+                            xlsx_primary.drop(columns=['lead_score_enrich'], inplace=True, errors='ignore')
+                        if 'decile_enrich' in xlsx_primary.columns:
+                            xlsx_primary['decile'] = xlsx_primary['decile_enrich']
+                            xlsx_primary.drop(columns=['decile_enrich'], inplace=True, errors='ignore')
+                        if 'campaign_id_meta_enrich' in xlsx_primary.columns:
+                            xlsx_primary['campaign_id_meta'] = xlsx_primary['campaign_id_meta_enrich']
+                            xlsx_primary.drop(columns=['campaign_id_meta_enrich'], inplace=True, errors='ignore')
+
+                    leads_df = xlsx_primary
+                    lead_source_stats['xlsx_primary'] = len(xlsx_primary)
+                    lead_source_stats['xlsx_enriched'] = int(xlsx_primary['campaign_id_meta'].notna().sum())
+                    logger.info(f"    Fonte primária xlsx: {len(xlsx_primary)} leads únicos no período")
+                    logger.info(f"    Enriquecidos com campaign_id_meta: {lead_source_stats['xlsx_enriched']}")
 
                 except Exception as e:
-                    logger.warning(f"    Erro ao processar {xlsx_path.name}: {e}")
-
-            if xlsx_extras_all:
-                all_extras = pd.concat(xlsx_extras_all, ignore_index=True)
-                leads_df = pd.concat([leads_df, all_extras], ignore_index=True)
-                lead_source_stats['xlsx_leads_extras'] = len(all_extras)
-                logger.info(f"    Total com xlsx: {len(leads_df)} (+{len(all_extras)} extras)")
+                    logger.warning(f"    Erro ao usar xlsx como fonte primária ({best_xlsx.name}): {e} — mantendo Sheets/Railway")
+                    lead_source_stats['xlsx_leads_extras'] = 0
             else:
+                logger.info("    Nenhum xlsx com leads no período — mantendo Sheets/Railway como fonte")
                 lead_source_stats['xlsx_leads_extras'] = 0
+        else:
+            lead_source_stats['xlsx_leads_extras'] = 0
 
     # Vendas
     sales_loader = SalesDataLoader()
@@ -1205,7 +1303,8 @@ def main():
 
         guru_df = sales_loader.load_guru_sales(guru_files, include_canceled=include_canceled) if guru_files else None
 
-    # Detectar arquivos TMB e HotPay por estrutura de colunas
+    # Detectar arquivos TMB por estrutura de colunas
+    # Hotmart agora é carregado via API; arquivos HotPay legados ainda são detectados como fallback
     all_vendas_files = sorted(glob(f"{vendas_path}/*.xlsx")) + sorted(glob(f"{vendas_path}/*.xls"))
     tmb_files = []
     hotpay_files = []
@@ -1219,23 +1318,44 @@ def main():
                 logger.info(f"   TMB detectado por colunas: {Path(fpath).name}")
             elif 'chave' in cols and 'Data de Confirmação' in cols and 'Código do Produto' in cols:
                 hotpay_files.append(fpath)
-                logger.info(f"   HotPay detectado por colunas: {Path(fpath).name}")
+                logger.info(f"   HotPay (arquivo legado) detectado: {Path(fpath).name}")
         except Exception:
             pass
 
+    # Hotmart via API (usa sales_start_date / sales_end_date)
+    hotmart_start = args.sales_start_date if args.sales_start_date else None
+    hotmart_end   = args.sales_end_date   if args.sales_end_date   else None
+    if hotmart_start and hotmart_end:
+        logger.info(f"   Hotmart API: buscará vendas de {hotmart_start} a {hotmart_end}")
+        # Se a API está ativa, ignorar arquivos HotPay para evitar double-counting
+        if hotpay_files:
+            logger.info(f"   Hotmart API ativa — ignorando {len(hotpay_files)} arquivo(s) HotPay (mesmos dados)")
+            hotpay_files = []
+
+    # Asaas via API — ativo se ASAAS_API_KEY estiver definida e período de vendas fornecido
+    asaas_start = args.sales_start_date if args.sales_start_date else None
+    asaas_end   = args.sales_end_date   if args.sales_end_date   else None
+    asaas_key = os.environ.get('ASAAS_API_KEY', '')
+    if asaas_key and asaas_start and asaas_end:
+        logger.info(f"   Asaas API: buscará vendas de {asaas_start} a {asaas_end}")
+    elif not asaas_key:
+        logger.info("   Asaas API: ASAAS_API_KEY não definida — fonte ignorada")
+        asaas_start = asaas_end = None
+
     if args.report_type == 'fechamento':
         logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)} (incluirá Efetivado + Cancelado)")
-        logger.info(f"   Arquivos HotPay encontrados: {len(hotpay_files)} (incluirá Aprovado + Cancelado)")
     else:
         logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)} (incluirá apenas Efetivado)")
-        logger.info(f"   Arquivos HotPay encontrados: {len(hotpay_files)} (incluirá apenas Aprovado)")
 
-    # Combinar vendas Guru + TMB + HotPay
-    # Se não houver arquivos TMB locais, tentará buscar do Cloud Storage baseado em report_type
+    # Combinar vendas Guru + TMB + HotPay (legado) + Hotmart (API) + Asaas (API)
     sales_df = sales_loader.combine_sales(
         guru_df=guru_df,
         tmb_paths=tmb_files if tmb_files else None,
         hotpay_paths=hotpay_files if hotpay_files else None,
+        hotmart_api_start=hotmart_start,
+        hotmart_api_end=hotmart_end,
+        asaas_api_start=asaas_start,
+        asaas_api_end=asaas_end,
         report_type=args.report_type,
         include_canceled=include_canceled
     )
@@ -1244,7 +1364,7 @@ def main():
         logger.error(" Nenhuma venda carregada. Verifique os arquivos de vendas.")
         sys.exit(1)
 
-    logger.info(f"    {len(sales_df)} vendas carregadas (Guru + TMB + HotPay)")
+    logger.info(f"    {len(sales_df)} vendas carregadas (Guru + TMB + HotPay + Hotmart + Asaas)")
     print(flush=True)
 
     # 4. Filtrar por período
@@ -1373,7 +1493,7 @@ def main():
 
     # Passar account_ids para o loader (necessário no modo API para buscar múltiplas contas)
     # Usar meta_reports_dir definido anteriormente (baseado na pasta do período)
-    loader = MetaReportsLoader(meta_reports_dir, data_source=data_source, account_ids=args.account_id if data_source == 'api' else None)
+    loader = MetaReportsLoader(meta_reports_dir, data_source=data_source, account_ids=args.account_id if data_source == 'api' else None, use_cache=use_cache)
     costs_hierarchy_temp = loader.build_costs_hierarchy(start_date, end_date)
 
     # Obter DataFrame de campanhas
@@ -1407,6 +1527,38 @@ def main():
         logger.info(f"      COM_ML: {len(ml_campaign_ids)} campanhas")
         logger.info(f"      SEM_ML (Controle): {len(control_campaign_ids)} campanhas")
         logger.info(f"      EXCLUÍDAS: {len(campaigns_df) - len(campaigns_df_filtered)} campanhas")
+
+        # =====================================================================
+        # FILTRO UTM: remover leads de outros lançamentos que vazaram pela janela de datas
+        # Usa IDs reais da Meta API (campaigns_df), que coincidem com os IDs no UTM do Railway.
+        # Leads sem campaign_id (Sheets sem UTM numérico) são mantidos conservadoramente.
+        # Ativar: filter_leads_by_campaign_id: true no validation_config.yaml
+        # =====================================================================
+        if config.get('filter_leads_by_campaign_id', False):
+            # ml_campaign_ids e control_campaign_ids já são strings de 15 dígitos (campaigns_df[:15])
+            # campaign_id_meta em leads_df também é 15 dígitos (extract_campaign_id_meta[:15])
+            # → comparação direta, sem transformação adicional
+            allowed_ids = set(str(i)[:15] for i in ml_campaign_ids + control_campaign_ids)
+
+            if 'campaign_id_meta' not in leads_df.columns:
+                def _extract_utm_id_15(camp):
+                    if pd.isna(camp):
+                        return None
+                    m = re.search(r'\|\s*(\d{10,})\s*$', str(camp))
+                    return m.group(1)[:15] if m else None
+                leads_df['campaign_id_meta'] = leads_df['campaign'].apply(_extract_utm_id_15)
+
+            before = len(leads_df)
+            has_id = leads_df['campaign_id_meta'].notna()
+            id_matches = leads_df['campaign_id_meta'].isin(allowed_ids)
+            # Mantém: sem ID (Sheets sem UTM numérico) OU ID pertence ao lançamento atual
+            leads_df = leads_df[~has_id | id_matches].copy()
+            removed = before - len(leads_df)
+            logger.info(f"   Filtro UTM (filter_leads_by_campaign_id=True):")
+            logger.info(f"     IDs permitidos: {len(allowed_ids)} campanhas ({len(ml_campaign_ids)} ML + {len(control_campaign_ids)} Controle)")
+            logger.info(f"     Leads com campaign_id identificável: {has_id.sum()}")
+            logger.info(f"     Removidos (outro lançamento): {removed}")
+            logger.info(f"     Restaram: {len(leads_df)}")
 
         if ml_campaign_ids and control_campaign_ids:
             # Usar função refinada que distingue Eventos ML vs Otimização ML
@@ -2359,6 +2511,60 @@ def main():
             print(f"     Erro ao enviar Slack: {slack_error}", flush=True)
     else:
         print("   ℹ  SLACK_WEBHOOK_URL não configurado, notificação ignorada", flush=True)
+
+    # Envio de Purchase events ao Meta CAPI
+    if args.send_purchase_events:
+        if not args.sales_start_date or not args.sales_end_date:
+            print("   ⚠  --send-purchase-events requer --sales-start-date e --sales-end-date", flush=True)
+        else:
+            print(flush=True)
+            print(" ENVIANDO PURCHASE EVENTS AO META CAPI", flush=True)
+            try:
+                from src.validation.send_purchase_events import send_purchase_events
+                result = send_purchase_events(
+                    sales_start_date=args.sales_start_date,
+                    sales_end_date=args.sales_end_date,
+                    dry_run=False,
+                    test_event_code=args.purchase_test_event_code,
+                )
+                print(f"   Enviados:  {result.get('enviados')}", flush=True)
+                print(f"   Anomalias: {result.get('anomalias')}  (sem FBP/FBC no Railway)", flush=True)
+                print(f"   Erros:     {result.get('erros')}", flush=True)
+            except Exception as e:
+                print(f"   ❌  Erro ao enviar purchase events: {e}", flush=True)
+
+    # Atualizar planilha Evolução DevClub
+    if args.update_evolution:
+        if not (args.start_date and args.end_date and args.sales_start_date and args.sales_end_date):
+            print("   ⚠  --update-evolution requer --start-date, --end-date, --sales-start-date e --sales-end-date", flush=True)
+        else:
+            print(flush=True)
+            print(" ATUALIZANDO PLANILHA EVOLUÇÃO DEVCLUB", flush=True)
+            try:
+                import sys as _sys
+                from pathlib import Path as _Path
+                _scripts_dir = str(_Path(__file__).parent.parent.parent / 'scripts')
+                if _scripts_dir not in _sys.path:
+                    _sys.path.insert(0, _scripts_dir)
+                import ml_evolution_report as _evol
+
+                # Nome do lançamento: --evolution-name ou gerado pelo período de vendas
+                ev_name = args.evolution_name
+                if not ev_name:
+                    ev_name = f"LF_{args.sales_start_date}"
+
+                extra_period = {
+                    'name':         ev_name,
+                    'cap_start':    args.start_date,
+                    'cap_end':      args.end_date,
+                    'vendas_start': args.sales_start_date,
+                    'vendas_end':   args.sales_end_date,
+                }
+
+                output = _evol.run(extra_period=extra_period)
+                print(f"   Planilha gerada: {output}", flush=True)
+            except Exception as e:
+                print(f"   ❌  Erro ao gerar evolução: {e}", flush=True)
 
     print(flush=True)
 

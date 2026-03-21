@@ -159,6 +159,14 @@ class LeadDataLoader:
 
         return df_combined
 
+    _CACHE_DIR = Path(__file__).parent.parent.parent / 'files' / 'validation' / 'cache'
+
+    @classmethod
+    def _cache_path(cls, prefix: str, *parts: str) -> Path:
+        cls._CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        key = '_'.join(str(p) for p in parts if p)
+        return cls._CACHE_DIR / f"{prefix}_{key}.parquet"
+
     def _load_single_spreadsheet(self, sheets_url: str, start_date: Optional[str], end_date: Optional[str], use_cache: bool, num_sheets: int, training_mode: bool = False) -> pd.DataFrame:
         """
         Carrega leads de uma única planilha do Google Sheets.
@@ -173,6 +181,13 @@ class LeadDataLoader:
             logger.error(f"URL inválida do Google Sheets: {sheets_url}")
             return None
         sheet_id = match.group(1)
+
+        # Cache: chave por sheet_id + período (sem filtro de data = 'all')
+        if use_cache and not training_mode:
+            cache_file = self._cache_path('sheets', sheet_id, start_date or 'all', end_date or 'all')
+            if cache_file.exists():
+                logger.info(f"    Cache HIT Sheets: {cache_file.name}")
+                return pd.read_parquet(cache_file)
 
         logger.debug(f"   URL: {sheets_url[:50]}...")
 
@@ -303,6 +318,14 @@ class LeadDataLoader:
             # Mostrar resumo final em INFO level
             tab_names_str = ', '.join(tab_names) if len(tab_names) > 1 else tab_names[0]
             logger.info(f"    Google Sheets [{tab_names_str}]: {len(df_normalized)} leads carregados")
+
+            # Salvar no cache
+            if use_cache and not training_mode:
+                try:
+                    df_normalized.to_parquet(cache_file, index=False)
+                    logger.info(f"    Cache SAVED Sheets: {cache_file.name}")
+                except Exception as ce:
+                    logger.warning(f"    Não foi possível salvar cache Sheets: {ce}")
 
             return df_normalized
 
@@ -578,6 +601,14 @@ class SalesDataLoader:
     Combina dados de ambas as plataformas em formato padronizado.
     """
 
+    _CACHE_DIR = Path(__file__).parent.parent.parent / 'files' / 'validation' / 'cache'
+
+    @classmethod
+    def _cache_path(cls, prefix: str, *parts: str) -> Path:
+        cls._CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        key = '_'.join(str(p) for p in parts if p)
+        return cls._CACHE_DIR / f"{prefix}_{key}.parquet"
+
     def __init__(self):
         pass
 
@@ -755,7 +786,8 @@ class SalesDataLoader:
                 return []
 
             blob.download_to_filename(temp_path)
-            logger.info(f"    Arquivo baixado: {blob_name} ({blob.size / 1024:.1f} KB)")
+            size_kb = f"{blob.size / 1024:.1f} KB" if blob.size else "tamanho desconhecido"
+            logger.info(f"    Arquivo baixado: {blob_name} ({size_kb})")
 
             return [temp_path]
 
@@ -787,14 +819,9 @@ class SalesDataLoader:
         Returns:
             DataFrame normalizado com origem='tmb'
         """
-        # Se não forneceu paths, baixar do Cloud Storage
         if not tmb_paths:
-            logger.info(f" Buscando vendas TMB no Cloud Storage (report_type={report_type})...")
-            tmb_paths = self._download_tmb_from_gcs(report_type)
-
-            if not tmb_paths:
-                logger.warning(" Nenhum arquivo TMB encontrado no Cloud Storage")
-                return pd.DataFrame()
+            logger.info(" Nenhum arquivo TMB local encontrado — sem vendas TMB neste período")
+            return pd.DataFrame()
 
         logger.info(f" Carregando vendas TMB de {len(tmb_paths)} arquivo(s)")
 
@@ -996,6 +1023,138 @@ class SalesDataLoader:
         logger.info(f"    {len(df_norm)} vendas HotPay carregadas e normalizadas")
         return df_norm
 
+    def load_hotmart_sales_from_api(self, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        Carrega vendas da Hotmart via API REST para um período de vendas.
+
+        Busca transações com status APPROVED e COMPLETE (ambas representam vendas válidas).
+        O campo telefone não é fornecido pela API — matching feito apenas por email.
+
+        Args:
+            start_date: Data inicial do período de vendas (YYYY-MM-DD)
+            end_date:   Data final do período de vendas (YYYY-MM-DD), inclusive
+
+        Returns:
+            DataFrame normalizado com origem='hotmart'
+        """
+        import requests
+        from datetime import datetime, timedelta
+
+        basic = os.getenv('HOTMART_BASIC')
+        if not basic:
+            logger.error(" HOTMART_BASIC não encontrado no ambiente — configure V2/.env")
+            return pd.DataFrame()
+
+        logger.info(f" Carregando vendas Hotmart via API ({start_date} → {end_date})")
+
+        # Cache
+        cache_file = self._cache_path('hotmart', start_date, end_date)
+        if cache_file.exists():
+            logger.info(f"    Cache HIT Hotmart: {cache_file.name}")
+            return pd.read_parquet(cache_file)
+
+        # Autenticar
+        try:
+            token_resp = requests.post(
+                'https://api-sec-vlc.hotmart.com/security/oauth/token',
+                headers={'Authorization': basic, 'Content-Type': 'application/json'},
+                params={'grant_type': 'client_credentials'},
+                timeout=30
+            )
+            token_resp.raise_for_status()
+            token = token_resp.json()['access_token']
+        except Exception as e:
+            logger.error(f" Falha na autenticação Hotmart: {e}")
+            return pd.DataFrame()
+
+        # Converter datas para milliseconds (end_date inclusive)
+        start_ms = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp() * 1000)
+        end_ms   = int((datetime.strptime(end_date, '%Y-%m-%d') + timedelta(days=1)).timestamp() * 1000)
+
+        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+
+        # Paginar todos os resultados para APPROVED e COMPLETE
+        all_items = []
+        for status in ['APPROVED', 'COMPLETE']:
+            next_page_token = None
+            while True:
+                params = {
+                    'transaction_status': status,
+                    'start_date': start_ms,
+                    'end_date': end_ms,
+                    'max_results': 50,
+                }
+                if next_page_token:
+                    params['page_token'] = next_page_token
+                try:
+                    resp = requests.get(
+                        'https://developers.hotmart.com/payments/api/v1/sales/history',
+                        headers=headers,
+                        params=params,
+                        timeout=30
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception as e:
+                    logger.error(f" Erro ao buscar vendas Hotmart ({status}): {e}")
+                    break
+
+                items = data.get('items', [])
+                all_items.extend(items)
+                next_page_token = data.get('page_info', {}).get('next_page_token')
+                if not next_page_token or not items:
+                    break
+
+        logger.info(f"   {len(all_items)} transações brutas obtidas da API Hotmart")
+
+        if not all_items:
+            return pd.DataFrame()
+
+        # Normalizar
+        rows = []
+        for item in all_items:
+            buyer    = item.get('buyer', {})
+            purchase = item.get('purchase', {})
+            price    = purchase.get('price', {})
+
+            email = normalizar_email(buyer.get('email', ''))
+            if not email:
+                continue
+
+            approved_ms = purchase.get('approved_date') or purchase.get('order_date')
+            if approved_ms:
+                sale_date = pd.to_datetime(approved_ms, unit='ms', utc=True).tz_convert('America/Sao_Paulo').tz_localize(None)
+            else:
+                sale_date = pd.NaT
+
+            rows.append({
+                'email':      email,
+                'nome':       buyer.get('name'),
+                'telefone':   None,
+                'sale_value': price.get('value'),
+                'sale_date':  sale_date,
+                'origem':     'hotmart',
+            })
+
+        df_norm = pd.DataFrame(rows)
+        df_norm = df_norm[df_norm['sale_date'].notna()].copy()
+
+        # Deduplicar por email (manter primeira compra)
+        before = len(df_norm)
+        df_norm = df_norm.sort_values('sale_date').drop_duplicates(subset=['email'], keep='first')
+        if before != len(df_norm):
+            logger.info(f"   Deduplicação Hotmart: {before - len(df_norm)} removidas ({len(df_norm)} únicas)")
+
+        logger.info(f"    {len(df_norm)} vendas Hotmart carregadas e normalizadas")
+
+        try:
+            df_norm.to_parquet(cache_file, index=False)
+            logger.info(f"    Cache SAVED Hotmart: {cache_file.name}")
+        except Exception as ce:
+            logger.warning(f"    Não foi possível salvar cache Hotmart: {ce}")
+
+        return df_norm
+
     def load_guru_sales_from_api(self, start_date: str, end_date: str, save_excel: bool = False, output_path: str = None, include_canceled: bool = False) -> pd.DataFrame:
         """
         Carrega vendas da Guru via API (alternativa aos arquivos Excel).
@@ -1011,6 +1170,13 @@ class SalesDataLoader:
             DataFrame normalizado com origem='guru'
         """
         logger.info(f" Buscando vendas Guru via API ({start_date} a {end_date})")
+
+        # Cache: chave por período + include_canceled
+        status_key = 'fechamento' if include_canceled else 'pos-dev'
+        cache_file = self._cache_path('guru', start_date, end_date, status_key)
+        if cache_file.exists():
+            logger.info(f"    Cache HIT Guru: {cache_file.name}")
+            return pd.read_parquet(cache_file)
 
         # Importar função do extrator
         from src.validation.guru_sales_extractor import fetch_guru_sales_from_api
@@ -1116,30 +1282,78 @@ class SalesDataLoader:
         if not include_canceled and 'status' in df_norm.columns:
             df_norm = df_norm.drop(columns=['status'])
 
+        # Salvar no cache
+        try:
+            df_norm.to_parquet(cache_file, index=False)
+            logger.info(f"    Cache SAVED Guru: {cache_file.name}")
+        except Exception as ce:
+            logger.warning(f"    Não foi possível salvar cache Guru: {ce}")
+
         return df_norm
 
+    def load_asaas_sales(self, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        Carrega vendas da API do Asaas no período (com cache parquet).
+
+        Args:
+            start_date: Data inicial (YYYY-MM-DD) — filtra por clientPaymentDate
+            end_date: Data final (YYYY-MM-DD)
+
+        Returns:
+            DataFrame normalizado com origem='asaas'
+        """
+        cache_file = self._cache_path('asaas', start_date, end_date)
+        if cache_file.exists():
+            logger.info(f"    Cache HIT Asaas: {cache_file.name}")
+            return pd.read_parquet(cache_file)
+
+        from src.validation.asaas_sales_extractor import AsaasSalesExtractor
+        extractor = AsaasSalesExtractor()
+        df = extractor.generate_report(start_date=start_date, end_date=end_date)
+        # Remover colunas internas de debug antes de salvar
+        debug_cols = [c for c in df.columns if c.startswith('_')]
+        if debug_cols:
+            df = df.drop(columns=debug_cols)
+
+        try:
+            df.to_parquet(cache_file, index=False)
+            logger.info(f"    Cache SAVED Asaas: {cache_file.name}")
+        except Exception as ce:
+            logger.warning(f"    Não foi possível salvar cache Asaas: {ce}")
+
+        return df
+
     def combine_sales(self, guru_df: pd.DataFrame = None, tmb_df: pd.DataFrame = None,
-                     hotpay_df: pd.DataFrame = None,
+                     hotpay_df: pd.DataFrame = None, hotmart_df: pd.DataFrame = None,
+                     asaas_df: pd.DataFrame = None,
                      guru_paths: List[str] = None, tmb_paths: List[str] = None,
                      hotpay_paths: List[str] = None,
+                     hotmart_api_start: str = None, hotmart_api_end: str = None,
+                     asaas_api_start: str = None, asaas_api_end: str = None,
                      report_type: str = 'fechamento', include_canceled: bool = False) -> pd.DataFrame:
         """
-        Combina vendas da Guru, TMB e HotPay em um único DataFrame.
+        Combina vendas da Guru, TMB, HotPay, Hotmart e Asaas em um único DataFrame.
 
         Args:
             guru_df: DataFrame já carregado da Guru (opcional)
             tmb_df: DataFrame já carregado da TMB (opcional)
-            hotpay_df: DataFrame já carregado da HotPay (opcional)
+            hotpay_df: DataFrame já carregado do HotPay via arquivo (opcional)
+            hotmart_df: DataFrame já carregado da Hotmart via API (opcional)
+            asaas_df: DataFrame já carregado do Asaas via API (opcional)
             guru_paths: Caminhos para arquivos Guru (se guru_df não fornecido)
             tmb_paths: Caminhos para arquivos TMB (se tmb_df não fornecido)
             hotpay_paths: Caminhos para arquivos HotPay (se hotpay_df não fornecido)
+            hotmart_api_start: Data início para buscar vendas Hotmart via API (YYYY-MM-DD)
+            hotmart_api_end: Data fim para buscar vendas Hotmart via API (YYYY-MM-DD)
+            asaas_api_start: Data início para buscar vendas Asaas via API (YYYY-MM-DD)
+            asaas_api_end: Data fim para buscar vendas Asaas via API (YYYY-MM-DD)
             report_type: Tipo de relatório ('fechamento' ou 'pos-devolucoes') para buscar TMB no GCS
             include_canceled: Se True, inclui vendas canceladas da Guru (para relatório de fechamento)
 
         Returns:
             DataFrame combinado e deduplicado (prioriza Guru em caso de conflito)
         """
-        logger.info(" Combinando vendas Guru + TMB + HotPay")
+        logger.info(" Combinando vendas Guru + TMB + HotPay + Hotmart + Asaas")
 
         # Carregar se necessário
         if guru_df is None and guru_paths:
@@ -1152,6 +1366,10 @@ class SalesDataLoader:
             tmb_df = self.load_tmb_sales(tmb_paths=None, report_type=report_type, include_canceled=include_canceled)
         if hotpay_df is None and hotpay_paths:
             hotpay_df = self.load_hotpay_sales(hotpay_paths, include_canceled=include_canceled)
+        if hotmart_df is None and hotmart_api_start and hotmart_api_end:
+            hotmart_df = self.load_hotmart_sales_from_api(hotmart_api_start, hotmart_api_end)
+        if asaas_df is None and asaas_api_start and asaas_api_end:
+            asaas_df = self.load_asaas_sales(asaas_api_start, asaas_api_end)
 
         # Combinar DataFrames
         dfs = []
@@ -1161,6 +1379,10 @@ class SalesDataLoader:
             dfs.append(tmb_df)
         if hotpay_df is not None and len(hotpay_df) > 0:
             dfs.append(hotpay_df)
+        if hotmart_df is not None and len(hotmart_df) > 0:
+            dfs.append(hotmart_df)
+        if asaas_df is not None and len(asaas_df) > 0:
+            dfs.append(asaas_df)
 
         if not dfs:
             logger.warning(" Nenhuma venda para combinar")
@@ -1205,6 +1427,8 @@ class SalesDataLoader:
         logger.info(f"      Guru: {len(combined[combined['origem'] == 'guru'])}")
         logger.info(f"      TMB: {len(combined[combined['origem'] == 'tmb'])}")
         logger.info(f"      HotPay: {len(combined[combined['origem'] == 'hotpay'])}")
+        logger.info(f"      Hotmart: {len(combined[combined['origem'] == 'hotmart'])}")
+        logger.info(f"      Asaas: {len(combined[combined['origem'] == 'asaas'])}")
 
         return combined
 
