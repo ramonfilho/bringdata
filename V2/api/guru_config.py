@@ -6,11 +6,14 @@ IMPORTANTE: Este token carrega muitos privilégios.
 Não compartilhe, não exponha no frontend, e guarde com segurança.
 
 Documentação: https://docs.digitalmanager.guru/developers/
+
+Env var obrigatória: GURU_API_TOKEN
 """
+import os
 
 # Credenciais Guru API
 GURU_CONFIG = {
-    "user_token": "a0e3cf5b-f07f-4ca4-a816-6a3dcf326063|Y4DflXgqFwbBtueBmye8CAB1LgnOO6CsRpdhgr22e32ef538",
+    "user_token": os.getenv("GURU_API_TOKEN"),  # Obrigatório via env var — nunca hardcodar
     "api_base_url": "https://digitalmanager.guru/api/v2",
     "transactions_endpoint": "https://digitalmanager.guru/api/v2/transactions",
 }

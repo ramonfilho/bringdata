@@ -194,7 +194,9 @@ model:
                                   # null desativa weighting (apropriado para cliente sem TMB)
                                   # Ex: {guru: 1.0, tmb_baixo: 0.84, tmb_medio: 0.67}
   mlflow_experiment_name: null   # REQUIRED: nome do experimento MLflow (ex: "clientb_lead_scoring")
-  mlflow_experiment_id: "1"      # OPTIONAL: ID do experimento MLflow (default "1")
+  mlflow_experiment_id: "1"      # DEPRECATED: não usar em novos clientes — IDs mudam se o tracking server for migrado.
+                                  # Criar o experimento primeiro: mlflow.create_experiment("clientb_lead_scoring")
+                                  # e usar o ID retornado. O código derivará o ID do nome do experimento em runtime.
   model_name_template: null      # REQUIRED: template do nome do modelo (ex: "v1_clientb_rf_{split_method}_single")
   legacy_model_dir: "arquivos_modelo"  # OPTIONAL: diretório legado de fallback
   business_config_path: null     # OPTIONAL: path para atualização automática de taxas de conversão
@@ -209,7 +211,8 @@ model:
 # ---------------------------------------------------------------------------
 monitoring:
   model_name: null               # REQUIRED se usa monitoring: nome do modelo (ex: "v1_clientb_rf_temporal_leads_single")
-  conversion_window_days: 20     # REQUIRED: duração do ciclo de venda em dias (captação + CPL + carrinho)
+  conversion_window_days: 20     # REQUIRED: duração do ciclo de venda em dias — NÃO copiar 20 do DevClub.
+                                  # Calcular: captacao_days + cpl_days + vendas_days do ciclo real do cliente.
   medium_strategy: null          # OPTIONAL: estratégia de medium no monitoring
   survey_sheet_tab_index: null   # REQUIRED se usa Google Sheets: índice da aba com pesquisa (ex: 1)
   sheet_date_format: null        # REQUIRED se usa Google Sheets: formato de data da aba de pesquisa
@@ -238,7 +241,10 @@ capi:
   country_code: null             # REQUIRED: código de país ISO (ex: "br")
   currency: null                 # REQUIRED: código de moeda ISO (ex: "BRL")
   decil_to_value: null           # REQUIRED: mapeamento decil → valor enviado ao Meta
-                                  # Ex: {"D01": 10, "D02": 20, ..., "D10": 100}
+                                  # ⚠️ ATENÇÃO: chaves DEVEM ter zero à esquerda: "D01"..."D10"
+                                  # O modelo emite "D01"; sem zero a chave não casa e o valor enviado é silenciosamente zero.
+                                  # Ex: {"D01": 10, "D02": 20, "D03": 30, "D04": 40, "D05": 50,
+                                  #      "D06": 60, "D07": 70, "D08": 80, "D09": 90, "D10": 100}
 
 # ---------------------------------------------------------------------------
 # APIConfig — REQUIRED se usa a API FastAPI

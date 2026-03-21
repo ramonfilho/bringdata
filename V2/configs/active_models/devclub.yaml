@@ -1,6 +1,7 @@
 active_model:
   model_name: v1_devclub_rf_temporal_leads_single
   mlflow_run_id: 2a98e51ca4834697bbc94ec3dd31fcf7
+  model_path: files/20251111_212345
   trained_at: '2026-03-15T13:57:52.190132'
   split_method: temporal_leads
   performance:

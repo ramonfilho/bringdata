@@ -54,6 +54,13 @@ cache/
 .vscode/
 **/.claude/settings.local.json
 
+# Credenciais — nunca commitar
+**/token*.txt
+**/credentials*.txt
+**/secrets*.txt
+**/.env.local
+**/.env.production
+
 # Test fixtures (binários grandes, regenerar localmente)
 V2/tests/fixtures/
 
