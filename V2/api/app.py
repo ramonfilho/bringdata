@@ -107,16 +107,35 @@ app = FastAPI(
 )
 
 # Adicionar CORS para Google Apps Script e Landing Pages
+# Origins base (infra-independente de cliente)
+_BASE_ORIGINS = [
+    "https://script.google.com",
+    "https://script.googleusercontent.com",
+    "http://localhost:8001",
+    "http://localhost:8000",
+]
+
+# Carregar origins específicas de cada cliente a partir de configs/clients/*.yaml
+_client_origins: list = []
+try:
+    from pathlib import Path
+    from src.core.client_config import ClientConfig as _ClientConfig
+    _clients_dir = Path(__file__).parent.parent / 'configs' / 'clients'
+    for _cfg_path in sorted(_clients_dir.glob('*.yaml')):
+        try:
+            _cfg = _ClientConfig.from_yaml(str(_cfg_path))
+            if _cfg.api and _cfg.api.cors_origins:
+                _client_origins.extend(_cfg.api.cors_origins)
+        except Exception:
+            pass
+except Exception:
+    pass
+
+_ALL_ORIGINS = _BASE_ORIGINS + list(dict.fromkeys(_client_origins))  # preserva ordem, remove dups
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://script.google.com",
-        "https://script.googleusercontent.com",
-        "http://localhost:8001",
-        "http://localhost:8000",
-        "https://lp.devclub.com.br",
-        "*"  # Permitir todos (TEMPORÁRIO - em produção especificar domínios)
-    ],
+    allow_origins=_ALL_ORIGINS,
     allow_methods=["POST", "GET", "OPTIONS"],
     allow_headers=["*"],
     allow_credentials=True,
@@ -639,23 +658,12 @@ async def webhook_lead_capture(
                 # O modelo foi treinado com nomes originais do Sheets
                 lead_dict_raw = lead_record.to_dict()
 
-                # Mapeamento de colunas normalizadas → nomes do Sheets
-                column_mapping = {
-                    'email': 'E-mail',
-                    'name': 'Nome Completo',
-                    'phone': 'Telefone',
-                    'genero': 'O seu gênero:',
-                    'idade': 'Qual a sua idade?',
-                    'ocupacao': 'O que você faz atualmente?',
-                    'faixa_salarial': 'Atualmente, qual a sua faixa salarial?',
-                    'cartao_credito': 'Você possui cartão de crédito?',
-                    'interesse_evento': 'O que mais você quer ver no evento?',
-                    'estudou_programacao': 'Já estudou programação?',
-                    'pretende_faculdade': 'Você já fez/faz/pretende fazer faculdade?',
-                    'investiu_curso_online': 'Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?',
-                    'interesse_programacao': 'O que mais te chama atenção na profissão de Programador?',
-                    'cidade': 'cidade'
-                }
+                # Mapeamento de colunas normalizadas → nomes do Sheets (vem de ClientConfig)
+                column_mapping = (
+                    pipeline._client_config.api.sheets_column_names
+                    if pipeline and pipeline._client_config.api and pipeline._client_config.api.sheets_column_names
+                    else {}
+                )
 
                 # Aplicar mapeamento
                 lead_dict_mapped = {}
@@ -837,31 +845,12 @@ async def webhook_update_survey(
             # Preparar dados para ML (com mapeamento de colunas)
             lead_dict_raw = existing_lead.to_dict()
 
-            # Mapeamento: PostgreSQL → Google Sheets (nomes originais do modelo)
-            column_mapping = {
-                'email': 'E-mail',
-                'name': 'Nome Completo',
-                'phone': 'Telefone',
-                'genero': 'O seu gênero:',
-                'idade': 'Qual a sua idade?',
-                'ocupacao': 'O que você faz atualmente?',
-                'faixa_salarial': 'Atualmente, qual a sua faixa salarial?',
-                'cartao_credito': 'Você possui cartão de crédito?',
-                'interesse_evento': 'O que mais você quer ver no evento?',
-                'estudou_programacao': 'Já estudou programação?',
-                'pretende_faculdade': 'Você já fez/faz/pretende fazer faculdade?',
-                'investiu_curso_online': 'Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?',
-                'interesse_programacao': 'O que mais te chama atenção na profissão de Programador?',
-                'cidade': 'cidade',
-                # Campos adicionados para fix de scoring (features faltantes)
-                'created_at': 'Data',
-                'utm_source': 'Source',
-                'utm_medium': 'Medium',
-                'utm_campaign': 'Campaign',
-                'utm_term': 'Term',
-                'utm_content': 'Content',
-                'tem_comp': 'Tem computador/notebook?'
-            }
+            # Mapeamento: PostgreSQL → Google Sheets (nomes originais do modelo, vem de ClientConfig)
+            column_mapping = (
+                pipeline._client_config.api.sheets_column_names
+                if pipeline and pipeline._client_config.api and pipeline._client_config.api.sheets_column_names
+                else {}
+            )
 
             # Aplicar mapeamento
             lead_dict_mapped = {}

@@ -427,7 +427,8 @@ capi:
 # APIConfig — hardcodes #8, #109–#122 (Grupo B — Fase 2)
 # ---------------------------------------------------------------------------
 api:
-  cors_origins: null             # #111
+  cors_origins:                  # #111
+    - "https://lp.devclub.com.br"
   batch_processing_size: null    # #114
   railway_polling_batch_size: null  # #122
   default_analysis_period_days: null  # #115
@@ -435,7 +436,28 @@ api:
   bare_medium_names: null        # #109
   generic_utm_terms: null        # #109, #117
   generic_utms_set: null         # #118
-  sheets_column_names: null      # #100, #113
+  sheets_column_names:           # #100, #113  PostgreSQL col → Sheets col
+    email: "E-mail"
+    name: "Nome Completo"
+    phone: "Telefone"
+    genero: "O seu gênero:"
+    idade: "Qual a sua idade?"
+    ocupacao: "O que você faz atualmente?"
+    faixa_salarial: "Atualmente, qual a sua faixa salarial?"
+    cartao_credito: "Você possui cartão de crédito?"
+    interesse_evento: "O que mais você quer ver no evento?"
+    estudou_programacao: "Já estudou programação?"
+    pretende_faculdade: "Você já fez/faz/pretende fazer faculdade?"
+    investiu_curso_online: "Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?"
+    interesse_programacao: "O que mais te chama atenção na profissão de Programador?"
+    cidade: "cidade"
+    created_at: "Data"
+    utm_source: "Source"
+    utm_medium: "Medium"
+    utm_campaign: "Campaign"
+    utm_term: "Term"
+    utm_content: "Content"
+    tem_comp: "Tem computador/notebook?"
   railway_field_mappings: null   # #99
   utm_campaign_structure: null   # #107
 
