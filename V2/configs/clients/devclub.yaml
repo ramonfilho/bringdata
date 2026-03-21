@@ -414,14 +414,14 @@ monitoring:
 # CAPIConfig — hardcodes #103–#106, #140
 # ---------------------------------------------------------------------------
 capi:
-  pixel_id: null                 # #103 — usar env var META_PIXEL_ID
-  event_name_with_value: null    # #104
-  event_name_high_quality: null  # #104
-  event_name_faixa_a: null       # #140
-  high_quality_decils: null      # #105
-  country_code: null             # #106
-  currency: null                 # #106
-  decil_to_value: null
+  pixel_id: "241752320666130"    # Pixel de BM - Campanhas
+  event_name_with_value: "LeadQualified"
+  event_name_high_quality: "LeadQualifiedHighQuality"
+  event_name_faixa_a: null       # #140 — não usado atualmente
+  high_quality_decils: ["D09", "D10"]
+  country_code: "br"
+  currency: "BRL"
+  decil_to_value: null           # Ainda derivado de business_config.py (Fase 3c item 12)
 
 # ---------------------------------------------------------------------------
 # APIConfig — hardcodes #8, #109–#122 (Grupo B — Fase 2)

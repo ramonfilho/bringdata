@@ -724,7 +724,7 @@ async def webhook_lead_capture(
                     'user_agent': lead_record.user_agent,
                     'client_ip': lead_record.client_ip,
                     'event_source_url': lead_record.event_source_url
-                }], db)
+                }], db, capi_config=pipeline._client_config.capi if pipeline else None)
 
                 logger.info(f"✅ CAPI enviado: {capi_result.get('success', 0)}/{capi_result.get('total', 0)} eventos")
 
@@ -937,7 +937,7 @@ async def webhook_update_survey(
                     'genero': existing_lead.genero,
                     'cidade': existing_lead.cidade
                 }
-            }], db)
+            }], db, capi_config=pipeline._client_config.capi if pipeline else None)
 
             logger.info(f"✅ CAPI enviado: {capi_result.get('success', 0)}/{capi_result.get('total', 0)} eventos")
 
@@ -1427,7 +1427,7 @@ async def process_daily_batch_capi(
         logger.info(f"      - Com AMBOS: {leads_with_both}/{len(enriched_leads)} ({leads_with_both/len(enriched_leads)*100:.1f}%)")
 
         # Enviar batch (com db session para registrar envios)
-        results = send_batch_events(enriched_leads, db=db)
+        results = send_batch_events(enriched_leads, db=db, capi_config=pipeline._client_config.capi if pipeline else None)
 
         logger.info(f"✅ Batch CAPI processado: {results['success']}/{results['total']} enviados")
 
@@ -3816,7 +3816,7 @@ async def railway_process_pending():
         capi_result: Dict = {"success": 0, "total": 0, "errors": 0}
         if capi_leads:
             logger.info(f"📤 Enviando {len(capi_leads)} eventos CAPI (Railway)...")
-            capi_result = send_batch_events(capi_leads, db=None)
+            capi_result = send_batch_events(capi_leads, db=None, capi_config=pipeline._client_config.capi if pipeline else None)
             logger.info(
                 f"✅ CAPI Railway: {capi_result.get('success', 0)}/"
                 f"{capi_result.get('total', 0)} enviados"
