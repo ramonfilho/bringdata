@@ -384,6 +384,20 @@ Exemplos de uso:
         help='Código de teste do Meta para purchase events (ex: TEST51740). Implica dry-run no Meta.'
     )
 
+    # Evolução DevClub
+    parser.add_argument(
+        '--update-evolution',
+        action='store_true',
+        help='Após validação, regenera a planilha Evolução DevClub incluindo este lançamento'
+    )
+
+    parser.add_argument(
+        '--evolution-name',
+        type=str,
+        default=None,
+        help='Nome do lançamento para a planilha de evolução (ex: LF48). Se omitido, gerado automaticamente.'
+    )
+
     args = parser.parse_args()
 
     # Validações
@@ -2518,6 +2532,39 @@ def main():
                 print(f"   Erros:     {result.get('erros')}", flush=True)
             except Exception as e:
                 print(f"   ❌  Erro ao enviar purchase events: {e}", flush=True)
+
+    # Atualizar planilha Evolução DevClub
+    if args.update_evolution:
+        if not (args.start_date and args.end_date and args.sales_start_date and args.sales_end_date):
+            print("   ⚠  --update-evolution requer --start-date, --end-date, --sales-start-date e --sales-end-date", flush=True)
+        else:
+            print(flush=True)
+            print(" ATUALIZANDO PLANILHA EVOLUÇÃO DEVCLUB", flush=True)
+            try:
+                import sys as _sys
+                from pathlib import Path as _Path
+                _scripts_dir = str(_Path(__file__).parent.parent.parent / 'scripts')
+                if _scripts_dir not in _sys.path:
+                    _sys.path.insert(0, _scripts_dir)
+                import ml_evolution_report as _evol
+
+                # Nome do lançamento: --evolution-name ou gerado pelo período de vendas
+                ev_name = args.evolution_name
+                if not ev_name:
+                    ev_name = f"LF_{args.sales_start_date}"
+
+                extra_period = {
+                    'name':         ev_name,
+                    'cap_start':    args.start_date,
+                    'cap_end':      args.end_date,
+                    'vendas_start': args.sales_start_date,
+                    'vendas_end':   args.sales_end_date,
+                }
+
+                output = _evol.run(extra_period=extra_period)
+                print(f"   Planilha gerada: {output}", flush=True)
+            except Exception as e:
+                print(f"   ❌  Erro ao gerar evolução: {e}", flush=True)
 
     print(flush=True)
 

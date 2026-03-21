@@ -149,14 +149,33 @@ O caso mais crítico é o LF44, onde o budget ML quase dobrou (36% → 74%): o R
 
 ### 5.1 Períodos sem Controle (LF45–LF46)
 
-Sem grupo Controle, o proxy é o ROAS Controle histórico mediano dos períodos anteriores (1,372x).
+Sem grupo Controle, o proxy é o ROAS Controle histórico dos períodos anteriores, **excluindo DEV19** (lançamento de escala atípica que distorceria a média).
 
-| Período | ROAS ML | ROAS Ctrl histórico | Ganho estimado |
+| Período Controle | ROAS Ctrl |
+|---|---|
+| LF40 | 0,907 |
+| LF41 | 3,291 ← outlier sazonal (fim de ano) |
+| LF42 | 1,388 |
+| LF43 | 1,356 |
+| LF44 | 1,196 |
+| **Média (excl. DEV19)** | **1,628** |
+| **Mediana (excl. DEV19)** | **1,356** |
+
+O LF41 tem ROAS excepcionalmente alto por sazonalidade de fim de ano, puxando a média para cima. A mediana (1,356x) é o benchmark mais robusto para comparação.
+
+| Período | ROAS ML | Mediana Ctrl histórica | Média Ctrl histórica | Δ vs mediana | Δ vs média |
+|---|---|---|---|---|---|
+| LF45 | 2,292 | 1,356 | 1,628 | **+69%** | **+41%** |
+| LF46 | 1,372 | 1,356 | 1,628 | **+1%** (neutro) | −16% |
+
+| Período | ROAS ML | ROAS Ctrl histórico (mediana) | Ganho estimado |
 |---|---|---|---|
-| LF45 | 2,292 | 1,372 | **+R$99.801** |
-| LF46 | 1,372 | 1,372 | ~R$0 (neutro) |
+| LF45 | 2,292 | 1,356 | **+R$101.867** |
+| LF46 | 1,372 | 1,356 | ~R$888 (neutro) |
 
-**LF46** é o único período em que o ML entregou ROAS equivalente ao baseline histórico de Controle. Isso pode indicar saturação de audiência após o LF45 de grande escala (R$108k de gasto, 27.553 leads), ou simplesmente condições adversas de mercado naquela semana.
+**LF45** ficou 69% acima da mediana histórica do Controle — desempenho sólido mesmo sem grupo de referência simultâneo.
+
+**LF46** ficou praticamente no nível da mediana Controle (+1%). Primeiro período neutro após 6 positivos. Pode indicar saturação de audiência após o LF45 de grande escala (R$108k de gasto, 27.553 leads), ou condições adversas de mercado naquela semana.
 
 ---
 
@@ -170,7 +189,17 @@ Sem grupo Controle, o proxy é o ROAS Controle histórico mediano dos períodos 
 | D | Taxa de conversão ML maior? | **Sim em 4/6 períodos; CPL menor em todos os 6** |
 | E | CPL ML maior (lead mais caro)? | **Não — CPL ML 28–44% abaixo do Controle** |
 
-**Ganho total estimado atribuível ao ML (LF40–LF46): ~R$435k**, sobre R$338k investidos em campanhas ML. Retorno sobre o investimento em ML de aproximadamente **128%**.
+### Distinção entre ganho verificado e ganho estimado
+
+| Escopo | Valor | Método |
+|---|---|---|
+| **LF40–LF44** (Controle simultâneo) | **+R$335k** | Contrafactual direto — ROAS Ctrl do mesmo período |
+| **LF45–LF46** (apenas ML) | **~R$103k** | Estimativa — ROAS Ctrl histórico mediano (1,356x) como proxy |
+| **Total LF40–LF46** | **~R$438k** | Combinação dos dois métodos acima |
+
+O número auditável e sem premissas é **R$335k** (LF40–LF44). O R$438k total incorpora uma estimativa para os períodos sem grupo Controle, sujeita à premissa de que o baseline histórico seria mantido.
+
+**Ganho total estimado atribuível ao ML (LF40–LF46): ~R$438k**, sobre R$338k investidos em campanhas ML. Retorno sobre o investimento em ML de aproximadamente **130%**.
 
 ---
 

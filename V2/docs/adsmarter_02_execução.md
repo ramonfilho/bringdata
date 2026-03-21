@@ -12,7 +12,9 @@
 
 ### *“Quais são os dados mais estratégicos que permitirão diferenciação para a estratégia de AI e como podemos gerar ou aproveitar esses dados dentro da empresa para desenvolvê-los?”*
 
-### Nadella argumenta que a complexidade e o valor surgem quando você usa o modelo de IA não apenas para responder perguntas, mas para orquestrar um fluxo de trabalho complexo. Essa capacidade de orquestrar múltiplas ferramentas de forma inteligente para completar um objetivo de negócio é onde a "mágica" acontece.
+### Nadella argumenta o valor surge quando você usa o modelo para orquestrar um fluxo de trabalho complexo. Essa capacidade de orquestrar múltiplas ferramentas de forma inteligente para completar um objetivo de negócio é onde a "mágica" acontece.
+
+### Quanto mais você aprofunda a integração com as fontes de dados do cliente (pesquisa, TMB, Guru, WhatsApp), mais insubstituível você fica.
 
 # V2:
 
@@ -120,16 +122,16 @@
 
 9. # Validação
 
-   - [x] ~~Validar os resultados de janeiro.~~  
-         - [x] ~~Monitorar AUC e conversão por decil~~  
-         - [x] ~~Fazer a de validação ficar no automático~~  
-         - [x] ~~Output no slack~~  
-         - [x] ~~02/02 (Segunda), enviar fechamento e pós devoluções~~  
-               - [x] ~~Captação: 16/12 \- 12/01~~   
-               - [x] ~~Vendas: 19/01 \- 25/01~~  
-         - [x] ~~09/02 (Segunda), enviar fechamento:~~  
-               - [x] ~~Captação 13/01 \- 26/01~~  
-               - [x] ~~Vendas 02/02 \- 08/02~~  
+   - [ ] Validar os resultados de janeiro.  
+         - [ ] Monitorar AUC e conversão por decil  
+         - [ ] Fazer a de validação ficar no automático  
+         - [ ] Output no slack  
+         - [ ] 02/02 (Segunda), enviar fechamento e pós devoluções  
+               - [ ] Captação: 16/12 \- 12/01   
+               - [ ] Vendas: 19/01 \- 25/01  
+         - [ ] 09/02 (Segunda), enviar fechamento:  
+               - [ ] Captação 13/01 \- 26/01  
+               - [ ] Vendas 02/02 \- 08/02  
          - [ ] Data: 09/03(segunda)  
                - [ ] Rodar a validação do lançamento atípico manualmente com datas explícitas: \--start-date 2026-02-02 \--end-date 2026-02-22 \--sales-start-date 2026-03-02 \--sales-end-date 2026-03-08  
          - [ ] Data: 16/03(segunda)  
@@ -137,26 +139,26 @@
 
 10. # Monitoramento
 
-    - [x] ~~Novas categorias não vistas no treino~~  
-          - [x] ~~Mudanças drásticas nas proporções colunas (categóricas e numéricas)~~  
-          - [x] ~~Missing rate alto de qualquer coluna~~  
-          - [x] ~~Missing features~~  
-          - [x] ~~Mudança significativa nas proporções de score e decil~~  
-          - [x] ~~Missing rate algo de dados de capi \> 50%~~  
-          - [x] ~~Mais de 6 horas sem receber leads~~  
-          - [x] ~~Mais de 6 horas sem enviar evento CAPI~~  
-          - [x] ~~Taxa de resposta, etc. (planilha de monitoramento 30d)~~  
-          - [x] ~~Testar monitoramento na planilha app script.~~  
-          - [x] ~~Output: slack~~  
-          - [x] ~~Criar novo webbook e trocar url no app scripts~~  
-          - [x] ~~Criar if else com alerta no head em caso crítico~~  
-          - [x] ~~Incluir score médio do lançamento atual~~  
-          - [x] ~~Enviar API para o Henrique~~  
-                - [x] ~~Deixar configurável de data no payload, em vez de 12h. Colocar data. Dia mês e ano. Start date e end date.~~  
-                - [x] ~~Colocar o detalhe do medium no payload no get, não está aparecendo o medium que mudou.~~   
-                - [x] ~~Testar o get antes de enviar.~~  
-          - [x] ~~Ver feature alerta source inexistente~~  
-          - [x] ~~Desligar DB existente~~  
+    - [ ] Novas categorias não vistas no treino  
+          - [ ] Mudanças drásticas nas proporções colunas (categóricas e numéricas)  
+          - [ ] Missing rate alto de qualquer coluna  
+          - [ ] Missing features  
+          - [ ] Mudança significativa nas proporções de score e decil  
+          - [ ] Missing rate algo de dados de capi \> 50%  
+          - [ ] Mais de 6 horas sem receber leads  
+          - [ ] Mais de 6 horas sem enviar evento CAPI  
+          - [ ] Taxa de resposta, etc. (planilha de monitoramento 30d)  
+          - [ ] Testar monitoramento na planilha app script.  
+          - [ ] Output: slack  
+          - [ ] Criar novo webbook e trocar url no app scripts  
+          - [ ] Criar if else com alerta no head em caso crítico  
+          - [ ] Incluir score médio do lançamento atual  
+          - [ ] Enviar API para o Henrique  
+                - [ ] Deixar configurável de data no payload, em vez de 12h. Colocar data. Dia mês e ano. Start date e end date.  
+                - [ ] Colocar o detalhe do medium no payload no get, não está aparecendo o medium que mudou.   
+                - [ ] Testar o get antes de enviar.  
+          - [ ] Ver feature alerta source inexistente  
+          - [ ] Desligar DB existente  
           - [ ] Duplicação de eventos?   
           - [ ] Receber colunas fbc e fbp  
           - [ ] Solicitar coluna de user agent  
@@ -167,35 +169,46 @@
 11. # Retreino
 
     - [x] ~~Aplicar as funções de monitoramento~~  
-          - [x] ~~[Limpar output](https://docs.google.com/document/d/1tUKm46-XxCZV8OzWpGKWslMV3Q-uOic5GKgGQ4T533E/edit?usp=sharing) do pipeline de treino~~  
-          - [x] ~~Testar telefone ultimos 6~~  
-          - [x] ~~Verificar se todas as funções são comuns para treino e retreino~~  
-          - [x] ~~Testar usar TMB risco médio e baixo~~  
-          - [x] ~~Pegar todos os lançamentos / toda a performance ML~~  
-          - [x] ~~Emitir relatórios atualizados~~  
-          - [x] ~~Fazer análise comparativa~~  
-          - [x] ~~[Testar hipóteses](https://docs.google.com/document/d/12qfzQ5YTxtK26ROb8cAFdOEdzD84rT7SIaj-Zm9zvr0/edit?usp=sharing)~~  
-          - [x] ~~Retreinar modelo~~  
-          - [ ] Proposta Guilherme  
-          - [ ] Resposta Luciano  \- devo dar alguma agora?  
-          - [ ] Claude code gerando leads?  
-          - [ ] Servir modelo retreinado  
-                - [x] ~~Cutoff por missing~~  
-                - [x] ~~Checar número de registros removidos na janela de conversão célula 17~~  
-                - [x] ~~Resolver filtro de risco tmb e testar os 4~~  
-                - [x] ~~Remover ou agrupar categorias novas com alto missing combinando representatividade \+ feature importance~~  
-                - [x] ~~Remover binary TOP3 do encoding~~  
-                - [x] ~~Incluir mês e semana (Se tiver 12m)~~  
-                - [x] ~~Quantidade de lançamentos que já participou~~  
-                - [x] ~~Rodar teste de hyperparametros~~  
-                - [x] ~~Com pesos vs sem pesos~~  
-                - [ ] Atualizar pipeline de produção  
-                - [ ] Atualizar decis e valores (verificar valores)  
-                - [ ] Atualizar plano de refactor  
-                - [ ] Programar data para retreino  
-                      - [ ] 30D  
-          - [ ] Automatizar retreino  
-          - [x] ~~Testar múltiplos algoritmos no treino.~~
+    - [x] ~~[Limpar output](https://docs.google.com/document/d/1tUKm46-XxCZV8OzWpGKWslMV3Q-uOic5GKgGQ4T533E/edit?usp=sharing) do pipeline de treino~~  
+    - [x] ~~Testar telefone ultimos 6~~  
+    - [x] ~~Verificar se todas as funções são comuns para treino e retreino~~  
+    - [x] ~~Testar usar TMB risco médio e baixo~~  
+    - [x] ~~Pegar todos os lançamentos / toda a performance ML~~  
+    - [x] ~~Emitir relatórios atualizados~~  
+    - [x] ~~Fazer análise comparativa~~  
+    - [x] ~~[Testar hipóteses](https://docs.google.com/document/d/12qfzQ5YTxtK26ROb8cAFdOEdzD84rT7SIaj-Zm9zvr0/edit?usp=sharing)~~  
+    - [x] ~~Retreinar modelo~~  
+          - [x] ~~Cutoff por missing~~  
+          - [x] ~~Checar número de registros removidos na janela de conversão célula 17~~  
+          - [x] ~~Resolver filtro de risco tmb e testar os 4~~  
+          - [x] ~~Remover ou agrupar categorias novas com alto missing combinando representatividade \+ feature importance~~  
+          - [x] ~~Remover binary TOP3 do encoding~~  
+          - [x] ~~Incluir mês e semana (Se tiver 12m)~~  
+          - [x] ~~Quantidade de lançamentos que já participou~~  
+          - [x] ~~Rodar teste de hyperparametros~~  
+          - [x] ~~Com pesos vs sem pesos~~  
+          - [x] ~~Testar múltiplos algoritmos no treino.~~  
+    - [x] ~~Servir modelo retreinado~~  
+          - [x] ~~Atualizar pipeline de produção~~  
+          - [x] ~~Atualizar decis e valores (verificar valores)~~  
+          - [x] ~~Atualizar plano de refactor com mudanças feitas \+ necessidade de treino ponderado~~  
+          - [x] ~~Isotonic é prioridade? Pra suavizar a curva entre os demais e o D10 em termos de espaço do score (range)?~~  
+    - [x] ~~Fazer o ROAS devclub ao longo do tempo e concluir se sistema de fato aumentou ROAS ou margem de contrib?~~  
+          - [x] ~~Dar último check na consistência dos dados~~  
+          - [x] ~~Tirar relatório da semana~~  
+                - [x] ~~Atualizar com vendas Asaas~~  
+                - [x] ~~Garantir que as campanhas de um lançamento só tenham o gasto daquela data.~~  
+          - [x] ~~Gerar pdf comercial mais enxuto e numericamente mais preciso.~~  
+          - [ ] Margem contrib devclub hoje é maior que antes do ML? Escalaram? Estão ganhando mais dinheiro ?  
+          - [ ] Refactor de smart\_ads para AdSmarter  
+                - [ ] [Registrar domínio](https://checkout.hostgator.com.br)  
+    - [ ] Teste AB de modelos:  
+          - [ ] Discutir arquitetura  
+          - [ ] Criar eventos  
+          - [ ] Criar valores de UTM que cada evento vai reconhecer  
+          - [ ] Criar lógica para, de acordo com a UTM, enviar score para cada evento  
+    - [ ] Entender de fato o open claw e o que o ceo da nvidia disse. Fora do uso pra telefone no WhatsApp, o que mais dá pra fazer?  
+    - [ ] Automatizar retreino
 
 12. # Refactor 
 
@@ -217,12 +230,14 @@
 
 14. # Backlog:
 
-    - [ ] Impacto imediato RM:  
-          - [ ] Enviar evento de compra (pesquisa)  
-          - [ ] Integrar claude code para otimizar?  
-          - [ ] Usar GTM no checkout para melhorar o matching (pesquisa)  
+    - [ ] Enviar evento de compra  
+    - [ ] Usar GTM no checkout para melhorar o matching (pesquisa)  
     - [ ] Outros:  
-          - [ ] Olhar API sendflow  
+          - [ ] Olhar API sendflow para criar featues “entrou no grupo de whatsapp”.  
+          - [ ] Integrar claude code para otimizar campanhas de tráfego?  
+          - [ ] Otimização do formulário da pesquisa como produto (sugerir remoção e adição de features)  
+          - [ ] Integração com CRM/time de vendas para que o time de vendas ligue primeiro para os D9-D10. Isso transforma o Smart Ads em ferramenta de sales ops, não só de marketing.  
+          - [ ] Forecasting pré-lançamento: Baseado nos primeiros 300-500 leads da captação, prever: "esperamos 40-55 vendas nesse lançamento com base na qualidade dos leads até agora." Um dashboard que o cliente olha todo dia durante a captação.   
           - [ ] Pergunta aberta  
           - [ ] Pesquisa: enviar evento para Google  
           - [ ] Automatizar a criação e atualização de públicos D10 ou D10+D9  
@@ -230,10 +245,10 @@
                 - [ ] User agent  
                 - [ ] similar\_leads\_converteram\_taxa  
                 - [ ] Teste com features tráfego  
-                      - [ ] Feature store para não precisar chamar api meta múltiplas vezes?  
-                      - [ ] Posicionamento  
-                      - [ ] CPC, CTR, CPM, etc.  
-                      - [ ] Outros dados disponíveis?  
+                      1. Feature store para não precisar chamar api meta múltiplas vezes?  
+                      2. Posicionamento  
+                      3. CPC, CTR, CPM, etc.  
+                      4. Outros dados disponíveis?  
                 - [ ] LTV (se renovou)  
                 - [ ] Interação na página  
                 - [ ] Lead\_score\_de\_modelos\_anteriores  
@@ -242,8 +257,8 @@
 15. # Escala:
 
     - [ ] **FASE 1 (Agora):** Validação \+ MVP Monitoramento  
-          - [x] ~~Cliente usando~~  
-          - [x] ~~Script simples de monitoramento (performance, drift simples)~~  
+          - [ ] Cliente usando  
+          - [ ] Script simples de monitoramento (performance, drift simples)  
           - [ ] Script simples de retreino  
     - [ ] **FASE 2:** Profissionalização  
           - [ ] Cria os componentes de unificação de dados e EDA que geram os dados para as configurações de treino  
@@ -264,46 +279,36 @@
 
 16. # Moat / Valor do negócio:
 
-    - [ ] “Machine Learning” do VK metrics:  
-          - [ ] Lead scoring é individual, e características preditivas para um nicho podem não ser para outro. Inclusive os leads podem mentir atributos.   
-    - [ ] Custom Data dos alunos:  
+    - [ ] Funciona para perpétuo desde que tenha um produto médio ou alto ticket no funil e queiramos otimizar para clientes que compram esse produto.  
+    - [ ] É diferente de análise de dados feita por LLM  
+    - [ ] Diferentes features utilizadas  
+    - [ ] Barreira técnica  
+    - [ ] Barreira de contexto de negócio  
+    - [ ] Mesmo com agentes criando pipelines de processamento de dados e modelos de ML, precisa entender MLOps para servir, monitorar e retreinar, gerenciando as ferramentas para tal. Um errinho aqui custa caro, e estamos falando de investimento.  
+    - [ ] É contexto demais hoje, e mesmo quando não for, vamos ter um moat Data flywheel com transfer learning.  
+    - [ ] Inadimplência como sinal negativo.   
+          - [ ] Você já integra TMB com dados de risco/inadimplência. Isso significa que seu modelo pode otimizar não só por "vai comprar?" mas por "vai  
+          - [ ]   comprar E não cancelar/inadimplir?".  
+    - [ ] Sobre custom Data dos alunos (enviar dados dos leads com pesquisa para a meta aprender features preditivas à medida que enviamos os eventos de conversão, mesmo com delay de 21 dias):  
           - [ ] Velocidade do Sinal (Feedback Loop Acelerado)  
-                - [ ] Com ML: Sinal de qualidade enviado em 3 horas após o lead chegar  
+                - [ ] Com ML: Sinal de qualidade enviado em 5 min após o lead chegar  
                 - [ ] Sem ML: Sinal só após compra real em 7-21 dias  
-                - [ ] Impacto: Meta otimiza 56x mais rápido (21 dias vs 3 horas)  
           - [ ] Volume de Eventos  
-                - [ ] Com ML: 100 leads → 30-40 eventos LeadQualified em 1 dia  
-                - [ ] Sem ML: 100 leads → 10 eventos Purchase em 21 dias  
-                - [ ] Impacto: Meta recebe 3-4x mais sinais \+ 21x mais rápido \= 63-84x mais aprendizado  
+                - [ ] Com ML: milhares ou dezenas de milhares de eventos por dia  
+                - [ ] Sem ML: dezenas ou centenas de eventos Purchase em 21 dias  
           - [ ] Eliminação do Cold Start  
-                - [ ] Com ML: 50-100 conversões na primeira semana (meta mínima para otimização)  
-                - [ ] Sem ML: 50-100 conversões só após 3-4 semanas  
-                - [ ] Impacto: Campanhas novas saem do "modo exploração" em 7 dias vs 35-70 dias  
+                - [ ] Com ML: milhares de conversões na primeira semana (meta mínima para otimização)  
+                - [ ] Sem ML: algumas conversões após 3-4 semanas  
+          - [ ] Features utilizadas:  
+                - [ ] Usamos mais do que as respostas da pesquisa, com contexto maior, selecionando exatamente os dados que treinamos com quais pesos e garantimos que estamos enviando o melhor sinal, com menos ruído, enquanto a meta só pega tudo e joga num bolo.  
+                - [ ] Extraímos significado semântico.  
           - [ ] Controle e Transparência  
                 - [ ] Você sabe EXATAMENTE qual feature está influenciando o score  
                 - [ ] Meta é uma "caixa preta" (não explica por que priorizou um lead)  
-          - [ ] 4\. Inteligência Avançada (Features Engineered)  
-                - [ ] ML gera características que custom data puro não possui:  
-                      - [ ] Interações entre campos: tem\_cnpj=true × faixa\_etaria="25-34" pode ter padrão específico  
-                      - [ ] Análise semântica de campos abertos: Sentimento, intenção, nível de maturidade em respostas textuais  
-                      - [ ] Features de tráfego: utm\_source, utm\_campaign, device\_type, hora\_do\_dia  
-                      - [ ] Behavioral features: Tempo para preencher formulário, taxa de engajamento com conteúdo  
-                      - [ ] Temporal features: Dia da semana, sazonalidade, tendências  
           - [ ] Calibração Contínua  
                 - [ ] ML é re-treinado com novos dados de conversão reais  
           - [ ] Portabilidade Multi-Plataforma  
                 - [ ] Mesmo ML pode alimentar Google Ads, TikTok, LinkedIn  
                 - [ ] Custom data precisa ser reconfigurado em cada plataforma  
                 - [ ] Impacto: 1 modelo → N plataformas (escalabilidade)  
-                - [ ] Meta \+ Google \+ Tik Tok. Vamos não só dizer como otimizar dentro da meta, mas também entre os canais.  
-    - [ ] ADV+:  
-          - [ ] Por que quando um cliente quer ter um controle real e absoluto do público, ele não usa ADV+.  
-    - [ ] Data Flywheel:   
-          - [ ] com o passar do tempo, vamos ter algoritmos com aprendizado multinicho, e saberemos as features mais preditivas (transfer learning multi clientes e multinicho). O cliente além de ter mais inteligência, não terá problemas com cold start.  
-          - [ ] Transfer learning sobre o histórico de otimizações da meta.  
-    - [ ] Outros possíveis diferenciais:  
-          - [ ] Integrar ferramenta via API para criar novos criativos com base nos que estão dando certo.  
-          - [ ] Alocação preditiva (detecta tendência intradia e otimiza para isso)  
-          - [ ] Personalizar llm (chatbot) de atendimento / vendas com base nas respostas da pesquisa  
-    - [ ] Perpétuo:  
-          - [ ] Geralmente os produtos perpétuo são low ticket com a intenção de converter para um produto de ticket maior, então o enriquecimento do CAPI \+ otimização será feito com base nos leads que geram maior LTV, em vez de maior probabilidade de comprar o produto único.
+                - [ ] Meta \+ Google \+ Tik Tok. Vamos não só dizer como otimizar dentro da meta, mas também entre os canais.
