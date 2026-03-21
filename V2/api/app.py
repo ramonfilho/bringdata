@@ -3057,7 +3057,7 @@ async def daily_monitoring_check_railway(
                 lead['pesquisa'] = {}
 
             try:
-                sheets_row = railway_lead_to_sheets_row(lead)
+                sheets_row = railway_lead_to_sheets_row(lead, client_config=pipeline._client_config if pipeline else None)
                 sheets_row['lead_score'] = float(lead['leadScore']) if lead.get('leadScore') else None
                 sheets_row['decil']      = f"D{int(lead['decil']):02d}" if lead.get('decil') else None
                 leads_data.append(sheets_row)
@@ -3711,7 +3711,7 @@ async def railway_process_pending():
         valid_leads = []
         for lead in lead_dicts:
             try:
-                sheets_row = railway_lead_to_sheets_row(lead)
+                sheets_row = railway_lead_to_sheets_row(lead, client_config=pipeline._client_config if pipeline else None)
                 sheets_rows.append(sheets_row)
                 valid_leads.append(lead)
             except Exception as e:

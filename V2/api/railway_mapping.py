@@ -187,7 +187,7 @@ MAPA_ATRACAO_PROFISSAO: Dict[str, str] = {
 # Função principal de conversão
 # ---------------------------------------------------------------------------
 
-def railway_lead_to_sheets_row(lead_row: Dict) -> Dict:
+def railway_lead_to_sheets_row(lead_row: Dict, client_config=None) -> Dict:
     """
     Converte um lead do Railway PostgreSQL para o formato de entrada do pipeline ML.
 
@@ -201,6 +201,8 @@ def railway_lead_to_sheets_row(lead_row: Dict) -> Dict:
         lead_row: Dict com todos os campos do Railway Lead (retornado pela query SQL).
                   Campos esperados: id, data, nomeCompleto, email, telefone,
                   pesquisa (dict/JSONB), source, medium, campaign, content, term.
+        client_config: ClientConfig do cliente — se fornecido, usa os mapas e nomes de colunas
+                       definidos em api.railway_field_mappings (fallback para defaults DevClub).
 
     Returns:
         Dict com chaves no formato Google Sheets, pronto para o pipeline ML.
@@ -213,66 +215,70 @@ def railway_lead_to_sheets_row(lead_row: Dict) -> Dict:
     """
     pesquisa: Dict = lead_row.get('pesquisa') or {}
 
+    # Carregar mapas: preferir ClientConfig, fallback para módulo-level defaults
+    _mappings: Dict = {}
+    if client_config and hasattr(client_config, 'api') and client_config.api and client_config.api.railway_field_mappings:
+        _mappings = client_config.api.railway_field_mappings
+
+    _mapa_faixa_salarial = _mappings.get('mapa_faixa_salarial', MAPA_FAIXA_SALARIAL)
+    _mapa_ocupacao       = _mappings.get('mapa_ocupacao', MAPA_OCUPACAO)
+    _mapa_idade          = _mappings.get('mapa_idade', MAPA_IDADE)
+    _mapa_interesse      = _mappings.get('mapa_interesse_evento', MAPA_INTERESSE_EVENTO)
+    _mapa_atracao        = _mappings.get('mapa_atracao_profissao', MAPA_ATRACAO_PROFISSAO)
+
+    _direct = _mappings.get('direct_field_map', {
+        'email': 'E-mail', 'nomeCompleto': 'Nome Completo', 'telefone': 'Telefone',
+        'data': 'Data', 'source': 'Source', 'medium': 'Medium',
+        'campaign': 'Campaign', 'term': 'Term', 'content': 'Content',
+    })
+    _pesquisa_map = _mappings.get('pesquisa_field_map', {
+        'genero': 'O seu gênero:',
+        'idade': 'Qual a sua idade?',
+        'ocupacao': 'O que você faz atualmente?',
+        'faixaSalarial': 'Atualmente, qual a sua faixa salarial?',
+        'cartaoCredito': 'Você possui cartão de crédito?',
+        'interesseEvento': 'O que mais você quer ver no evento?',
+        'computador': 'Tem computador/notebook?',
+        'estudouProgramacao': 'Já estudou programação?',
+        'faculdade': 'Você já fez/faz/pretende fazer faculdade?',
+        'investiuCurso': 'investiu_curso_online',
+        'atracaoProfissao': 'interesse_programacao',
+    })
+
     # ------------------------------------------------------------------
     # 1. Campos diretos da tabela Lead
+    # Construir row a partir do direct_field_map (Railway key → Sheets col)
     # ------------------------------------------------------------------
-    row: Dict = {
-        'E-mail':        lead_row.get('email'),
-        'Nome Completo': lead_row.get('nomeCompleto'),
-        'Telefone':      lead_row.get('telefone'),
-        'Data':          lead_row.get('data'),          # timestamp → feature engineering usa para dia_semana
-        # UTMs (Railway usa lowercase, pipeline espera capitalizados)
-        'Source':        lead_row.get('source'),
-        'Medium':        lead_row.get('medium'),
-        'Campaign':      lead_row.get('campaign'),
-        'Term':          lead_row.get('term'),
-        'Content':       lead_row.get('content'),
-    }
+    row: Dict = {}
+    for railway_key, sheets_col in _direct.items():
+        row[sheets_col] = lead_row.get(railway_key)
 
     # ------------------------------------------------------------------
     # 2. Campos do JSONB pesquisa → Sheets column names + normalização
     # ------------------------------------------------------------------
+    # Campos com mapa semântico específico
+    _col_idade     = _pesquisa_map.get('idade', 'Qual a sua idade?')
+    _col_ocupacao  = _pesquisa_map.get('ocupacao', 'O que você faz atualmente?')
+    _col_salarial  = _pesquisa_map.get('faixaSalarial', 'Atualmente, qual a sua faixa salarial?')
+    _col_interesse = _pesquisa_map.get('interesseEvento', 'O que mais você quer ver no evento?')
+    _col_atracao   = _pesquisa_map.get('atracaoProfissao', 'interesse_programacao')
 
-    # Gênero: Railway 'Masculino'/'Feminino' → modelo espera exatamente esses valores
-    row['O seu gênero:'] = pesquisa.get('genero')
+    # Gênero: passar sem normalização semântica
+    _col_genero = _pesquisa_map.get('genero', 'O seu gênero:')
+    row[_col_genero] = pesquisa.get('genero')
 
-    # Idade: Railway '25 – 34' → normalizar → '25 34 anos'
-    row['Qual a sua idade?'] = _normalizar(pesquisa.get('idade'), MAPA_IDADE)
+    row[_col_idade]     = _normalizar(pesquisa.get('idade'), _mapa_idade)
+    row[_col_ocupacao]  = _normalizar(pesquisa.get('ocupacao'), _mapa_ocupacao)
+    row[_col_salarial]  = _normalizar(pesquisa.get('faixaSalarial'), _mapa_faixa_salarial)
+    row[_pesquisa_map.get('cartaoCredito', 'Você possui cartão de crédito?')] = _normalizar(pesquisa.get('cartaoCredito'))
+    row[_col_interesse] = _normalizar(pesquisa.get('interesseEvento'), _mapa_interesse)
+    row[_pesquisa_map.get('computador', 'Tem computador/notebook?')] = _normalizar(pesquisa.get('computador'))
 
-    # Ocupação: Railway 'CLT / Funcionário Público' → normalizar → 'sou cltfuncionario publico'
-    row['O que você faz atualmente?'] = _normalizar(pesquisa.get('ocupacao'), MAPA_OCUPACAO)
-
-    # Faixa salarial: Railway 'R$ 3.001 a 5.000' → normalizar → 'entre r3001 a r5000 reais ao mes'
-    row['Atualmente, qual a sua faixa salarial?'] = _normalizar(
-        pesquisa.get('faixaSalarial'), MAPA_FAIXA_SALARIAL
-    )
-
-    # Cartão de crédito: Railway 'Não'/'Sim' → normalizar → 'nao'/'sim'
-    row['Você possui cartão de crédito?'] = _normalizar(pesquisa.get('cartaoCredito'))
-
-    # Interesse no evento: Railway 'Projeto na prática' → normalizar → 'fazer um projeto na pratica'
-    row['O que mais você quer ver no evento?'] = _normalizar(
-        pesquisa.get('interesseEvento'), MAPA_INTERESSE_EVENTO
-    )
-
-    # Computador: Railway 'SIM'/'NÃO' → normalizar → 'sim'/'nao'
-    row['Tem computador/notebook?'] = _normalizar(pesquisa.get('computador'))
-
-    # Estudou programação: modelo espera 'Não'/'Sim' (com acento, capitalizado)
-    # → passar sem normalização
-    row['Já estudou programação?'] = pesquisa.get('estudouProgramacao')
-
-    # Faculdade: modelo espera 'Não'/'Sim' → passar sem normalização
-    row['Você já fez/faz/pretende fazer faculdade?'] = pesquisa.get('faculdade')
-
-    # Investiu em curso: modelo espera 'Não'/'Sim' → passar sem normalização
-    # Coluna snake_case porque rename_long_column_names já a processou
-    row['investiu_curso_online'] = pesquisa.get('investiuCurso')
-
-    # Atração pela profissão: Railway 'Trabalhar de qualquer lugar' → normalizar
-    row['interesse_programacao'] = _normalizar(
-        pesquisa.get('atracaoProfissao'), MAPA_ATRACAO_PROFISSAO
-    )
+    # Campos sem mapa semântico (passam direto)
+    row[_pesquisa_map.get('estudouProgramacao', 'Já estudou programação?')] = pesquisa.get('estudouProgramacao')
+    row[_pesquisa_map.get('faculdade', 'Você já fez/faz/pretende fazer faculdade?')] = pesquisa.get('faculdade')
+    row[_pesquisa_map.get('investiuCurso', 'investiu_curso_online')] = pesquisa.get('investiuCurso')
+    row[_col_atracao] = _normalizar(pesquisa.get('atracaoProfissao'), _mapa_atracao)
 
     # ------------------------------------------------------------------
     # 3. Campos Railway ignorados (não são features do modelo)
@@ -282,9 +288,9 @@ def railway_lead_to_sheets_row(lead_row: Dict) -> Dict:
     # Log para debug
     logger.debug(
         f"[railway_mapping] Lead {lead_row.get('email', '?')} → "
-        f"idade={row['Qual a sua idade?']}, "
-        f"ocupacao={row['O que você faz atualmente?']}, "
-        f"faixaSalarial={row['Atualmente, qual a sua faixa salarial?']}"
+        f"idade={row.get(_col_idade)}, "
+        f"ocupacao={row.get(_col_ocupacao)}, "
+        f"faixaSalarial={row.get(_col_salarial)}"
     )
 
     return row
