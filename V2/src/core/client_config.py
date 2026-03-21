@@ -216,6 +216,21 @@ class RetainConfig:
     quality_gate_critical_threshold: float = 0.20          # #87
 
 
+@dataclass
+class BusinessConfig:
+    """Métricas de negócio e parâmetros de otimização de budget. (#90–#98)"""
+    product_value: float = 1563.75                          # #90 — valor médio ponderado Guru + TMB
+    conversion_rates: Optional[Dict[str, float]] = None    # #91 — taxa por decil D01–D10
+    spend_threshold_zero_leads: float = 100.0               # #92 — R$ mínimo com 0 leads para pausar
+    minimum_leads_threshold: int = 3                        # #93 — leads mínimos para dados suficientes
+    color_thresholds: Optional[Dict[str, int]] = None      # #94 — thresholds de cor (green_min, yellow_min)
+    min_roas_safety: float = 2.5                            # #95 — ROAS mínimo de segurança
+    cap_variation_max: float = 100.0                        # #96 — cap de aumento de budget (%)
+    confidence_sigmoid_l50: float = 15.0                    # #97 — ponto médio da sigmoid de confiança
+    confidence_sigmoid_k: float = 0.15                      # #97 — inclinação da sigmoid
+    roas_target: float = 8.0                                # #98 — ROAS alvo para confiança máxima
+
+
 # ---------------------------------------------------------------------------
 # ClientConfig — ponto de entrada
 # ---------------------------------------------------------------------------
@@ -243,6 +258,7 @@ class ClientConfig:
     capi: CAPIConfig = field(default_factory=CAPIConfig)
     api: APIConfig = field(default_factory=APIConfig)
     retrain: RetainConfig = field(default_factory=RetainConfig)
+    business: BusinessConfig = field(default_factory=BusinessConfig)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "ClientConfig":
@@ -263,6 +279,7 @@ class ClientConfig:
             capi=_make(CAPIConfig, data.get("capi", {})),
             api=_make(APIConfig, data.get("api", {})),
             retrain=_make(RetainConfig, data.get("retrain", {})),
+            business=_make(BusinessConfig, data.get("business", {})),
         )
 
     def validate(self) -> None:

@@ -1784,9 +1784,10 @@ async def analyze_utms_with_costs(request: UTMAnalysisRequest):
 
     try:
         # Configuração
-        product_value = request.product_value or BUSINESS_CONFIG['product_value']
-        min_roas = request.min_roas or BUSINESS_CONFIG['min_roas']
-        conversion_rates = BUSINESS_CONFIG['conversion_rates']
+        _biz = pipeline._client_config.business if pipeline else None
+        product_value = request.product_value or (_biz.product_value if _biz else BUSINESS_CONFIG['product_value'])
+        min_roas = request.min_roas or (_biz.min_roas_safety if _biz else BUSINESS_CONFIG['min_roas'])
+        conversion_rates = (_biz.conversion_rates if _biz and _biz.conversion_rates else BUSINESS_CONFIG['conversion_rates'])
 
         logger.info(f"   Product Value: R$ {product_value:.2f} | Min ROAS: {min_roas}x")
 

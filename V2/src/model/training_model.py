@@ -31,17 +31,20 @@ _tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", _default_tracking)
 mlflow.set_tracking_uri(_tracking_uri)
 
 
-def atualizar_business_config_com_recall(model_metadata: dict):
+def atualizar_business_config_com_recall(model_metadata: dict, client_config: "ClientConfig" = None):
     """
-    Atualiza api/business_config.py com taxas de conversão corrigidas pelo recall real.
+    Atualiza api/business_config.py e configs/clients/{client_id}.yaml com taxas de conversão
+    corrigidas pelo recall real.
 
     Lê as taxas observadas do model_metadata (decil_analysis), aplica o fator de correção
-    calculado a partir do recall real, e atualiza o arquivo business_config.py.
+    calculado a partir do recall real, e atualiza ambos os arquivos.
 
     Args:
         model_metadata: Dict com metadata do modelo (deve conter recall_metrics e decil_analysis)
+        client_config: ClientConfig do cliente — se fornecido, também atualiza o yaml do cliente
     """
     import re
+    import yaml
     from pathlib import Path
 
     logger.info("\n ATUALIZANDO BUSINESS_CONFIG.PY COM RECALL REAL")
@@ -116,6 +119,29 @@ def atualizar_business_config_com_recall(model_metadata: dict):
         logger.info(f"   Taxas corrigidas automaticamente com recall real ({recall*100:.2f}%)")
     else:
         logger.info(f"  Padrão CONVERSION_RATES não encontrado no arquivo")
+
+    # Também atualizar configs/clients/{client_id}.yaml (fonte de verdade multi-cliente)
+    if client_config and client_config.client_id:
+        yaml_path = (
+            Path(__file__).parent.parent.parent
+            / "configs" / "clients" / f"{client_config.client_id}.yaml"
+        )
+        if yaml_path.exists():
+            with open(yaml_path, 'r', encoding='utf-8') as f:
+                yaml_data = yaml.safe_load(f) or {}
+
+            if 'business' not in yaml_data:
+                yaml_data['business'] = {}
+            yaml_data['business']['conversion_rates'] = {
+                k: round(v, 6) for k, v in taxas_corrigidas.items()
+            }
+
+            with open(yaml_path, 'w', encoding='utf-8') as f:
+                yaml.dump(yaml_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+            logger.info(f"   {yaml_path.name} atualizado com conversion_rates corrigidas")
+        else:
+            logger.info(f"   YAML do cliente não encontrado: {yaml_path}")
 
 
 def registrar_features_e_modelo_devclub(
@@ -1058,8 +1084,8 @@ def registrar_features_e_modelo_devclub(
             logger.debug(f"  MLflow Run ID: {current_run_id}")
             logger.info(f"\n✅ Modelo ativado! Produção carregará direto do MLflow run: {current_run_id}")
 
-            # Atualizar business_config.py com recall real
-            atualizar_business_config_com_recall(model_metadata)
+            # Atualizar business_config.py e yaml do cliente com recall real
+            atualizar_business_config_com_recall(model_metadata, client_config=client_config)
 
         # Sempre logar metadata como artifact no MLflow
         mlflow.log_dict(model_metadata, "model_metadata.json")

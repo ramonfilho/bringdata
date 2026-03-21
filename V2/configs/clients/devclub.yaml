@@ -467,3 +467,32 @@ api:
 retrain:
   quality_gate_warning_threshold: 0.10   # #87 — 10pp de mudança em missing rate → alerta
   quality_gate_critical_threshold: 0.20  # #87 — 20pp de mudança em missing rate → crítico
+
+# ---------------------------------------------------------------------------
+# BusinessConfig — hardcodes #90–#98
+# Atualizado automaticamente pelo training_model.py após cada treino (conversion_rates)
+# ---------------------------------------------------------------------------
+business:
+  product_value: 1563.75                 # #90 — valor médio ponderado Guru+TMB (atualizado 15/03/2026)
+  # Taxas de conversão por decil (atualizadas pelo treino com recall real)
+  conversion_rates:                      # #91
+    D01: 0.002048   # 0.205% | 3 conv / 1.465 leads
+    D02: 0.004781   # 0.478% | 7 conv / 1.464 leads
+    D03: 0.004781   # 0.478% | 7 conv / 1.464 leads
+    D04: 0.005461   # 0.546% | 8 conv / 1.465 leads
+    D05: 0.008880   # 0.888% | 13 conv / 1.464 leads
+    D06: 0.011612   # 1.161% | 17 conv / 1.464 leads
+    D07: 0.014334   # 1.433% | 21 conv / 1.465 leads
+    D08: 0.015710   # 1.571% | 23 conv / 1.464 leads
+    D09: 0.019126   # 1.913% | 28 conv / 1.464 leads
+    D10: 0.055973   # 5.597% | 82 conv / 1.465 leads
+  spend_threshold_zero_leads: 100.0      # #92 — R$ mínimo com 0 leads para pausar/remover
+  minimum_leads_threshold: 3             # #93 — leads mínimos para não mostrar "Aguardar dados"
+  color_thresholds:                      # #94
+    green_min: 30
+    yellow_min: 1
+  min_roas_safety: 2.5                   # #95 — ROAS mínimo de segurança para escalar
+  cap_variation_max: 100.0               # #96 — cap de aumento de budget (%)
+  confidence_sigmoid_l50: 15.0           # #97 — ponto médio da sigmoid (15 leads = 50% confiança)
+  confidence_sigmoid_k: 0.15            # #97 — inclinação da sigmoid
+  roas_target: 8.0                       # #98 — ROAS alvo para confiança máxima (multiplicador = 1.0)
