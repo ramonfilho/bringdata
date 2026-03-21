@@ -24,6 +24,7 @@ infra:
   bigquery_table_id: null        # #102
   guru_api_base_url: null        # #150
   guru_api_transactions_endpoint: null  # #150
+  db_url_env_var: "RAILWAY"    # "RAILWAY" = compor URL de RAILWAY_DB_* env vars; Cloud SQL = nome da env var com URL completa
 
 # ---------------------------------------------------------------------------
 # IngestionConfig — hardcodes #6–#26, #38, #57–#62, #68–#69

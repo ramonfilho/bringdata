@@ -254,7 +254,8 @@ def send_lead_qualified_with_value(
     test_event_code: Optional[str] = None,
     survey_data: Optional[Dict] = None,
     db = None,
-    capi_config: Optional[CAPIConfig] = None
+    capi_config: Optional[CAPIConfig] = None,
+    client_id: str = 'devclub'
 ) -> Dict:
     """
     ESTRATÉGIA 1: Envia TODOS os leads (D1-D10) com VALOR DIFERENCIADO por decil
@@ -426,7 +427,8 @@ def send_lead_qualified_with_value(
                     status=parsed_response['status'],
                     events_received=parsed_response['events_received'],
                     events_rejected=parsed_response['events_rejected'],
-                    error_message=parsed_response['error_message']
+                    error_message=parsed_response['error_message'],
+                    client_id=client_id
                 )
             except Exception as db_err:
                 logger.warning(f"⚠️  Erro ao salvar CAPI response no banco para {email}: {db_err}")
@@ -485,7 +487,8 @@ def send_lead_qualified_high_quality(
     test_event_code: Optional[str] = None,
     survey_data: Optional[Dict] = None,
     db = None,
-    capi_config: Optional[CAPIConfig] = None
+    capi_config: Optional[CAPIConfig] = None,
+    client_id: str = 'devclub'
 ) -> Dict:
     """
     ESTRATÉGIA 2: Envia APENAS D9 e D10 SEM VALOR
@@ -638,7 +641,8 @@ def send_lead_qualified_high_quality(
                     status=parsed_response['status'],
                     events_received=parsed_response['events_received'],
                     events_rejected=parsed_response['events_rejected'],
-                    error_message=parsed_response['error_message']
+                    error_message=parsed_response['error_message'],
+                    client_id=client_id
                 )
             except Exception as db_err:
                 logger.warning(f"⚠️  Erro ao salvar CAPI response no banco para {email}: {db_err}")
@@ -683,7 +687,8 @@ def send_both_lead_events(
     test_event_code: Optional[str] = None,
     survey_data: Optional[Dict] = None,
     db = None,
-    capi_config: Optional[CAPIConfig] = None
+    capi_config: Optional[CAPIConfig] = None,
+    client_id: str = 'devclub'
 ) -> Dict:
     """
     TESTE A/B: Envia AMBOS os eventos para permitir teste de 2 estratégias
@@ -725,7 +730,8 @@ def send_both_lead_events(
         test_event_code=test_event_code,
         survey_data=survey_data,
         db=db,
-        capi_config=capi_config
+        capi_config=capi_config,
+        client_id=client_id
     )
 
     # Enviar evento 2: SEM VALOR (D9-D10 only)
@@ -746,7 +752,8 @@ def send_both_lead_events(
         test_event_code=test_event_code,
         survey_data=survey_data,
         db=db,
-        capi_config=capi_config
+        capi_config=capi_config,
+        client_id=client_id
     )
 
     return {
@@ -858,7 +865,7 @@ def send_purchase_event(
             "message": str(e)
         }
 
-def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConfig] = None) -> Dict:
+def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConfig] = None, client_id: str = 'devclub') -> Dict:
     """
     Envia múltiplos eventos CAPI em batch (AMBAS AS ESTRATÉGIAS)
     Usado pelo processamento diário
@@ -913,7 +920,8 @@ def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConf
             event_timestamp=lead['event_timestamp'],
             survey_data=lead.get('survey_data'),  # Dados da pesquisa
             db=db,  # Passar db session para salvar resposta CAPI
-            capi_config=capi_config
+            capi_config=capi_config,
+            client_id=client_id
             # test_event_code=None (padrão) -> vai para PRODUÇÃO
         )
 
@@ -924,7 +932,7 @@ def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConf
             if db:
                 try:
                     from api.database import mark_lead_capi_sent
-                    mark_lead_capi_sent(db, lead['email'])
+                    mark_lead_capi_sent(db, lead['email'], client_id=client_id)
                 except Exception as mark_error:
                     logger.warning(f"⚠️ Não foi possível marcar CAPI sent para {lead['email']}: {mark_error}")
         else:

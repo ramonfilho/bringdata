@@ -40,6 +40,10 @@ class InfraConfig:
     bigquery_table_id: Optional[str] = None
     guru_api_base_url: Optional[str] = None
     guru_api_transactions_endpoint: Optional[str] = None
+    # Banco de dados (prep para A2 — pipeline dict por cliente)
+    # "RAILWAY" = compor URL a partir de RAILWAY_DB_* env vars (DevClub)
+    # Qualquer outro valor = nome da env var que contém a URL completa (Cloud SQL)
+    db_url_env_var: str = 'DATABASE_URL'
 
 
 @dataclass

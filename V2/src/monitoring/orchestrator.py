@@ -669,10 +669,13 @@ class MonitoringOrchestrator:
         total_sheets_tab2 = self._count_sheet_tab2_responses(lookback_time)
         total_sheets = total_sheets_tab1 + total_sheets_tab2
 
+        _client_id = self._client_config.client_id if self._client_config else 'devclub'
+
         total_db = self.db.query(
             func.count(distinct(LeadCAPI.email))
         ).filter(
-            LeadCAPI.created_at >= lookback_time
+            LeadCAPI.created_at >= lookback_time,
+            LeadCAPI.client_id == _client_id
         ).scalar()
 
         metrics['capture'] = {
@@ -685,7 +688,8 @@ class MonitoringOrchestrator:
 
         # ETAPA 2: QUALIDADE DOS DADOS CAPI
         recent_leads = self.db.query(LeadCAPI).filter(
-            LeadCAPI.created_at >= lookback_time
+            LeadCAPI.created_at >= lookback_time,
+            LeadCAPI.client_id == _client_id
         ).all()
 
         if recent_leads:
@@ -726,7 +730,8 @@ class MonitoringOrchestrator:
         # evitando inflacionar com backlog histórico processado pelo polling de 5min
         sent_to_capi = self.db.query(LeadCAPI).filter(
             LeadCAPI.created_at >= lookback_time,
-            LeadCAPI.capi_sent_at.isnot(None)
+            LeadCAPI.capi_sent_at.isnot(None),
+            LeadCAPI.client_id == _client_id
         ).count()
 
         estimated_events = int(sent_to_capi * 1.3)  # Aproximação
@@ -740,7 +745,8 @@ class MonitoringOrchestrator:
         # ETAPA 5: RESPOSTA DA META
         with_response = self.db.query(LeadCAPI).filter(
             LeadCAPI.created_at >= lookback_time,
-            LeadCAPI.capi_response_status.isnot(None)
+            LeadCAPI.capi_response_status.isnot(None),
+            LeadCAPI.client_id == _client_id
         ).all()
 
         if with_response:

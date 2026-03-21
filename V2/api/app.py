@@ -144,6 +144,15 @@ app.add_middleware(
 # Variável global para o pipeline
 pipeline = None
 
+
+def _get_client_id() -> str:
+    """
+    Retorna o client_id do pipeline ativo.
+    Fase A1: singleton — sempre retorna o client_id do pipeline carregado.
+    Fase A2: será substituído por roteamento via header X-Client-ID.
+    """
+    return pipeline._client_config.client_id if pipeline else 'devclub'
+
 def initialize_pipeline():
     """Inicializa o pipeline de lead scoring com modelo ativo do configs/active_model.yaml"""
     global pipeline
@@ -635,7 +644,8 @@ async def webhook_lead_capture(
             'pretende_faculdade': lead_data.pretende_faculdade,
             'investiu_curso_online': lead_data.investiu_curso_online,
             'interesse_programacao': lead_data.interesse_programacao,
-            'cidade': lead_data.cidade
+            'cidade': lead_data.cidade,
+            'client_id': _get_client_id(),
         }
 
         # Salvar no banco
@@ -732,7 +742,8 @@ async def webhook_lead_capture(
                     'user_agent': lead_record.user_agent,
                     'client_ip': lead_record.client_ip,
                     'event_source_url': lead_record.event_source_url
-                }], db, capi_config=pipeline._client_config.capi if pipeline else None)
+                }], db, capi_config=pipeline._client_config.capi if pipeline else None,
+                    client_id=_get_client_id())
 
                 logger.info(f"✅ CAPI enviado: {capi_result.get('success', 0)}/{capi_result.get('total', 0)} eventos")
 
@@ -776,7 +787,7 @@ async def webhook_update_survey(
         logger.info(f"📊 Página 2 - Atualizando lead com dados da pesquisa: {survey_data.email}")
 
         # 1. BUSCAR LEAD EXISTENTE
-        existing_lead = get_lead_by_email(db, survey_data.email)
+        existing_lead = get_lead_by_email(db, survey_data.email, client_id=_get_client_id())
 
         if not existing_lead:
             logger.error(f"❌ Lead não encontrado: {survey_data.email}")
@@ -926,7 +937,8 @@ async def webhook_update_survey(
                     'genero': existing_lead.genero,
                     'cidade': existing_lead.cidade
                 }
-            }], db, capi_config=pipeline._client_config.capi if pipeline else None)
+            }], db, capi_config=pipeline._client_config.capi if pipeline else None,
+                client_id=_get_client_id())
 
             logger.info(f"✅ CAPI enviado: {capi_result.get('success', 0)}/{capi_result.get('total', 0)} eventos")
 
@@ -1048,7 +1060,7 @@ async def get_recent_leads_endpoint(
             leads = query.order_by(LeadCAPI.created_at.desc()).limit(limit).all()
         else:
             # Sem filtros, usar função existente
-            leads = get_recent_leads(db, limit=limit)
+            leads = get_recent_leads(db, limit=limit, client_id=_get_client_id())
 
         return {
             "total": len(leads),
@@ -1087,7 +1099,7 @@ async def get_leads_by_emails_endpoint(
             raise HTTPException(status_code=400, detail="Lista de emails é obrigatória")
 
         # Buscar leads
-        leads = get_leads_by_emails(db, emails)
+        leads = get_leads_by_emails(db, emails, client_id=_get_client_id())
 
         # Filtrar por data se fornecido
         if start_date or end_date:
@@ -1303,7 +1315,7 @@ async def process_daily_batch_capi(
         # ETAPA 3: BUSCAR DADOS CAPI DO BANCO
         # ====================================================================
         emails = list(decil_map.keys())
-        leads_capi = get_leads_by_emails(db, emails)
+        leads_capi = get_leads_by_emails(db, emails, client_id=_get_client_id())
 
         # Criar mapeamento email → dados CAPI
         # Prioriza registros com first_name preenchido (evita sobrescrever com registro incompleto)
@@ -1416,7 +1428,8 @@ async def process_daily_batch_capi(
         logger.info(f"      - Com AMBOS: {leads_with_both}/{len(enriched_leads)} ({leads_with_both/len(enriched_leads)*100:.1f}%)")
 
         # Enviar batch (com db session para registrar envios)
-        results = send_batch_events(enriched_leads, db=db, capi_config=pipeline._client_config.capi if pipeline else None)
+        results = send_batch_events(enriched_leads, db=db, capi_config=pipeline._client_config.capi if pipeline else None,
+                                    client_id=_get_client_id())
 
         logger.info(f"✅ Batch CAPI processado: {results['success']}/{results['total']} enviados")
 
@@ -1464,7 +1477,7 @@ async def check_capi_sent(
         logger.info(f"🔍 Verificando {len(request.emails)} emails nos logs CAPI")
 
         # Buscar leads já enviados
-        sent_emails = get_leads_already_sent_to_capi(db, request.emails)
+        sent_emails = get_leads_already_sent_to_capi(db, request.emails, client_id=_get_client_id())
 
         logger.info(f"✅ {len(sent_emails)}/{len(request.emails)} já foram enviados para CAPI")
 
@@ -3806,7 +3819,8 @@ async def railway_process_pending():
         capi_result: Dict = {"success": 0, "total": 0, "errors": 0}
         if capi_leads:
             logger.info(f"📤 Enviando {len(capi_leads)} eventos CAPI (Railway)...")
-            capi_result = send_batch_events(capi_leads, db=None, capi_config=pipeline._client_config.capi if pipeline else None)
+            capi_result = send_batch_events(capi_leads, db=None, capi_config=pipeline._client_config.capi if pipeline else None,
+                                            client_id=_get_client_id())
             logger.info(
                 f"✅ CAPI Railway: {capi_result.get('success', 0)}/"
                 f"{capi_result.get('total', 0)} enviados"
