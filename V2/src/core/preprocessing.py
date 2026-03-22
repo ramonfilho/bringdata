@@ -131,6 +131,15 @@ def preprocess(df: pd.DataFrame,
 
     extra_columns_to_remove: colunas adicionais a remover no step 3 (ex: ['Medium']
         quando medium_strategy='remove' no train_pipeline).
+
+    IMPORTANTE — exceção de treino:
+    No treino, score columns (Pontuação, Faixa A/B/C/D, decil etc.) NÃO são removidas
+    aqui — isso é feito em data_processing/feature_removal.py (Célula 8), deliberadamente
+    mais tarde no pipeline. O motivo: o detector de feature cutoff (Célula 7) usa essas
+    colunas como sinal para identificar o ponto de corte temporal. Se removidas antes,
+    o detector falha silenciosamente e a janela de conversão fica incorreta.
+    Esta função (preprocess) é chamada no treino apenas pelo monitoring snapshot path,
+    onde o timing constraint não existe. Não "corrigir" essa aparente inconsistência.
     """
     n_inicio = len(df)
 

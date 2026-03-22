@@ -772,18 +772,15 @@ Toda validação atual é integration test (pipeline de treino ponta a ponta, ~1
 
 **Fix:** escrever testes parametrizados por `ClientConfig` para as funções de `core/` com maior superfície de mudança (`utm.py`, `medium.py`, `encoding.py`). Padrão: `pytest tests/core/test_utm.py --client devclub --client clientb`. Investimento estimado: 1–2 sessões. Retorno: detecção de regressão em segundos, não horas.
 
-### DT-3 — `preprocessing.py` em `core/` não documenta a exceção de score columns
+### ~~DT-3 — `preprocessing.py` em `core/` não documenta a exceção de score columns~~ ✅ RESOLVIDO (22/03/2026)
 
-`core/preprocessing.py` remove score columns no preprocessing de produção, mas no treino essa remoção acontece em `data_processing/feature_removal.py` (por necessidade de sinal para cutoff detection). Essa exceção não está documentada no código — um desenvolvedor novo pode "corrigir" a inconsistência e quebrar o cutoff silenciosamente.
+Comentário adicionado ao docstring de `preprocess()` em `core/preprocessing.py` explicando o timing constraint: no treino, score columns são removidas em `feature_removal.py` (Célula 8) para preservar o sinal do detector de cutoff temporal; `preprocess()` aqui é só para produção e monitoring.
 
-**Fix:** adicionar comentário em `core/preprocessing.py` explicando por que score columns não são removidas aqui no contexto de treino.
+### ~~DT-4 — `client_template.yaml` incompleto~~ ✅ RESOLVIDO (22/03/2026)
 
-### DT-4 — `client_template.yaml` incompleto
-
-Campos ausentes identificados; adicionar ao template e ao dataclass `ClientConfig` antes do onboarding de Cliente B:
-- Seção `business:` (product_value, conversion_rates, min_roas_safety) — necessária para Fase 3c `business_config.py`
-- `ingestion.tmb_pedidos_detection_columns` e `ingestion.tmb_pedidos_column_mapping` — hardcodes #154–#156 de TMB dual-source
-- `ingestion.tmb_pedidos_active_status_exclude` — critério de filtro do arquivo TMB de pedidos
+Campos adicionados ao template, ao dataclass e ao `devclub.yaml`:
+- Seção `business:` completa (product_value, conversion_rates, spend_threshold, color_thresholds, min_roas_safety, cap_variation_max, confidence_sigmoid, roas_target)
+- `ingestion.tmb_pedidos_detection_columns`, `tmb_pedidos_column_mapping`, `tmb_pedidos_active_status_exclude` (#154–#156)
 
 ---
 

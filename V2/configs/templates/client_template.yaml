@@ -42,9 +42,21 @@ ingestion:
 
   # Detecção de arquivos TMB (plataforma de pagamento parcelado)
   # Se o cliente não usa TMB, definir has_tmb: false e ignorar campos tmb_*
-  tmb_detection_columns: null    # REQUIRED se has_tmb: true — colunas que identificam arquivo TMB
+  tmb_detection_columns: null    # REQUIRED se has_tmb: true — colunas que identificam arquivo TMB de parcelas
                                   # Exemplo: ["Pedido", "Parcela", "Grau de risco"]
   has_tmb: false                  # REQUIRED: true se o cliente tem dados TMB, false caso contrário
+
+  # TMB dual-source: arquivo de pedidos (tem email + telefone, sem risco)
+  # Hardcodes #154–#156. Preencher apenas se o cliente tem exportação de pedidos separada.
+  tmb_pedidos_detection_columns: null  # OPTIONAL: colunas que identificam o arquivo TMB de pedidos
+                                        # Ex: ["ID do Pedido", "E-mail do Cliente", "Telefone do Cliente"]
+  tmb_pedidos_column_mapping: null     # OPTIONAL: renomeação de colunas do arquivo de pedidos para
+                                        # o formato canônico do pipeline. Ex:
+                                        # {"ID do Pedido": "Pedido", "E-mail do Cliente": "Cliente Email",
+                                        #  "Telefone do Cliente": "Telefone", "Nome do Produto": "nome produto",
+                                        #  "Ticket do pedido": "Ticket (R$)"}
+  tmb_pedidos_active_status_exclude: null  # OPTIONAL: valor de status a excluir no filtro de pedidos ativos
+                                            # Ex: "Cancelado" — mantém Vigente + Quitado
 
   bare_campaign_names: []        # OPTIONAL: prefixos de campanha incompletos a ignorar (ex: ["DEVLF"])
 
@@ -261,6 +273,37 @@ api:
   sheets_column_names: null      # REQUIRED: mapeamento de campos → nomes de colunas do formulário
   railway_field_mappings: null   # REQUIRED se usa Railway: mapeamentos de respostas do formulário
   utm_campaign_structure: null   # OPTIONAL: prefixos de nomenclatura de campanha
+
+# ---------------------------------------------------------------------------
+# BusinessConfig — REQUIRED se usa API com recomendação de budget ou CAPI com valor
+# Hardcodes #90–#98. Atualizado pelo training_model.py após cada treino (conversion_rates).
+# ---------------------------------------------------------------------------
+business:
+  product_value: null            # REQUIRED: valor médio ponderado do produto em R$
+                                  # (considerar diferentes plataformas de venda e inadimplência real)
+                                  # Ex: 1563.75
+
+  conversion_rates: null         # REQUIRED: taxas de conversão por decil, calibradas para este cliente.
+                                  # ⚠️ Chaves DEVEM ter zero à esquerda: "D01"..."D10"
+                                  # (consistente com capi.decil_to_value e output do modelo).
+                                  # Ex:
+                                  # D01: 0.002048
+                                  # D02: 0.004781
+                                  # ...
+                                  # D10: 0.055973
+
+  spend_threshold_zero_leads: null   # OPTIONAL: gasto mínimo (R$) sem leads para acionar alerta (ex: 100.0)
+  minimum_leads_threshold: null      # OPTIONAL: mínimo de leads para considerar dados suficientes (ex: 3)
+
+  color_thresholds:                  # OPTIONAL: thresholds de cor no Google Sheets (ação recomendada)
+    green_min: null                  # Ex: 30 (≥ 30 → verde = escalar)
+    yellow_min: null                 # Ex: 1 (≥ 1 → amarelo = manter; < 1 → vermelho = pausar)
+
+  min_roas_safety: null          # OPTIONAL: ROAS mínimo de segurança para escalar (ex: 2.5)
+  cap_variation_max: null        # OPTIONAL: cap máximo de variação de budget em % (ex: 100.0)
+  confidence_sigmoid_l50: null   # OPTIONAL: ponto médio da sigmoid de confiança em número de leads (ex: 15.0)
+  confidence_sigmoid_k: null     # OPTIONAL: inclinação da sigmoid (ex: 0.15)
+  roas_target: null              # OPTIONAL: ROAS alvo para confiança máxima (ex: 8.0)
 
 # ---------------------------------------------------------------------------
 # RetainConfig — OPTIONAL

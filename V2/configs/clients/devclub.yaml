@@ -35,6 +35,17 @@ ingestion:
     - "Pedido"
     - "Parcela"
     - "Grau de risco"
+  tmb_pedidos_detection_columns: # #154 — colunas que identificam o arquivo TMB de pedidos (dual-source)
+    - "ID do Pedido"
+    - "E-mail do Cliente"
+    - "Telefone do Cliente"
+  tmb_pedidos_column_mapping:    # #155 — renomeação para formato canônico do pipeline
+    "ID do Pedido": "Pedido"
+    "E-mail do Cliente": "Cliente Email"
+    "Telefone do Cliente": "Telefone"
+    "Nome do Produto": "nome produto"
+    "Ticket do pedido": "Ticket (R$)"
+  tmb_pedidos_active_status_exclude: "Cancelado"  # #156 — excluir cancelados; manter Vigente + Quitado
   bare_campaign_names:           # #8 — prefixos de campanha incompletos a ignorar
     - "DEVLF"
     - "devlf"

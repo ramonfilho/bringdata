@@ -70,6 +70,10 @@ class IngestionConfig:
     columns_to_remove: Optional[List[str]] = None           # #69 — substitui cleaning.colunas_remover
     column_rename_mapping: Optional[Dict[str, str]] = None  # #68
     dataset_cutoff_date: Optional[str] = None               # #38
+    # TMB dual-source: arquivo de pedidos (email + telefone, sem risco) (#154–#156)
+    tmb_pedidos_detection_columns: Optional[List[str]] = None   # #154 — colunas que identificam arquivo de pedidos
+    tmb_pedidos_column_mapping: Optional[Dict[str, str]] = None  # #155 — renomeação para formato canônico
+    tmb_pedidos_active_status_exclude: Optional[str] = None      # #156 — valor de status a excluir (ex: "Cancelado")
     # Unificação de colunas (#13–#20) — sub-dict com pesquisa_merges,
     # valor_columns, produto_columns, nome_columns, email_columns, telefone_columns
     column_unification: Optional[Dict[str, Any]] = None
