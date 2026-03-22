@@ -422,7 +422,17 @@ capi:
   high_quality_decils: ["D09", "D10"]
   country_code: "br"
   currency: "BRL"
-  decil_to_value: null           # Ainda derivado de business_config.py (Fase 3c item 12)
+  decil_to_value:                # PRODUCT_VALUE=1563.75 × CONVERSION_RATES[decil] (Fase 3c item 12)
+    D01: 3.20
+    D02: 7.48
+    D03: 7.48
+    D04: 8.54
+    D05: 13.89
+    D06: 18.16
+    D07: 22.41
+    D08: 24.57
+    D09: 29.91
+    D10: 87.53
 
 # ---------------------------------------------------------------------------
 # APIConfig — hardcodes #8, #109–#122 (Grupo B — Fase 2)
@@ -430,13 +440,29 @@ capi:
 api:
   cors_origins:                  # #111
     - "https://lp.devclub.com.br"
-  batch_processing_size: null    # #114
-  railway_polling_batch_size: null  # #122
-  default_analysis_period_days: null  # #115
-  utm_main_sources: null         # #116
-  bare_medium_names: null        # #109
-  generic_utm_terms: null        # #109, #117
-  generic_utms_set: null         # #118
+  batch_processing_size: 500     # #114
+  railway_polling_batch_size: 50 # #122
+  default_analysis_period_days: 30  # #115
+  utm_main_sources:              # #116 — fontes UTM principais a rastrear
+    - "facebook-ads"
+    - "google-ads"
+  bare_medium_names:             # #109 — termos de Medium sem estrutura a ignorar
+    - "dgen"
+    - "paid"
+  generic_utm_terms:             # #109, #117 — terms genéricos a excluir de análises
+    - "fb"
+    - "ig"
+    - "instagram"
+    - "facebook"
+  generic_utms_set:              # #118 — set de UTMs genéricos para análise de Medium
+    - "paid"
+    - "dgen"
+    - "facebook"
+    - "instagram"
+    - "meta"
+    - "fb"
+    - "ig"
+    - "cpc"
   sheets_column_names:           # #100, #113  PostgreSQL col → Sheets col
     email: "E-mail"
     name: "Nome Completo"
@@ -552,7 +578,9 @@ api:
       "a possibilidade de ganhar altos salarios": "a possibilidade de ganhar altos salarios"
       "a ideia de nunca faltar emprego na area": "a ideia de nunca faltar emprego na area"
       "trabalhar para outros paises e ganhar em outra moeda": "trabalhar para outros paises e ganhar em outra moeda"
-  utm_campaign_structure: null   # #107
+  utm_campaign_structure:        # #107 — prefixos de segmentos no UTM de campaign
+    phase_prefix: "FASE "        # ex: "FASE 01" identifica a fase no UTM
+    page_prefix: "PG"            # ex: "PG2" identifica a página/grupo de anúncio
 
 # ---------------------------------------------------------------------------
 # RetainConfig — hardcodes #87, #88, #89

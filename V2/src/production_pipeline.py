@@ -81,13 +81,14 @@ class LeadScoringPipeline:
     Reproduz EXATAMENTE a lógica do notebook com parâmetros configuráveis.
     """
 
-    def __init__(self, model_name: str = None, model_path: str = None):
+    def __init__(self, model_name: str = None, model_path: str = None, client_id: str = 'devclub'):
         """
         Inicializa o pipeline com configuração fixa.
 
         Args:
             model_name: Nome do modelo a usar para predições (default: None = usa active_model.yaml)
             model_path: Caminho customizado para a pasta do modelo (opcional)
+            client_id: Identificador do cliente — carrega configs/clients/{client_id}.yaml (default: 'devclub')
 
         Configuração:
         - Mantém features UTM (com_utm=True)
@@ -99,8 +100,8 @@ class LeadScoringPipeline:
         self.original_data = None  # Preservar dados originais
         self.predictor = LeadScoringPredictor(model_name, model_path=model_path, use_active_model=True)
 
-        # Carregar ClientConfig — usado progressivamente à medida que core/ é implementado
-        _config_path = os.path.join(os.path.dirname(__file__), '..', 'configs', 'clients', 'devclub.yaml')
+        # Carregar ClientConfig a partir do client_id — nunca hardcodar 'devclub'
+        _config_path = os.path.join(os.path.dirname(__file__), '..', 'configs', 'clients', f'{client_id}.yaml')
         self._client_config = ClientConfig.from_yaml(os.path.abspath(_config_path))
 
         # Carregar modelo e metadados automaticamente

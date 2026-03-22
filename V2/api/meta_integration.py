@@ -530,7 +530,10 @@ class MetaAdsIntegration:
         return results
 
 
-def extract_adset_name_from_campaign_utm(utm_value: str) -> Optional[str]:
+def extract_adset_name_from_campaign_utm(
+    utm_value: str,
+    utm_campaign_structure: Optional[Dict[str, str]] = None
+) -> Optional[str]:
     """
     Extrai nome do ADSET de um UTM de campaign
 
@@ -541,11 +544,19 @@ def extract_adset_name_from_campaign_utm(utm_value: str) -> Optional[str]:
     1. Remover Campaign ID do final (|números)
     2. Remover data (| YYYY-MM-DD)
     3. O nome do adset está entre o prefixo fixo e a data
+
+    Args:
+        utm_value: String UTM de campaign
+        utm_campaign_structure: Dict com 'phase_prefix' e 'page_prefix' do ClientConfig.
+                                Defaults: 'FASE ' e 'PG'.
     """
     import re
 
     if not utm_value or not isinstance(utm_value, str):
         return None
+
+    phase_prefix = (utm_campaign_structure or {}).get('phase_prefix', 'FASE ')
+    page_prefix = (utm_campaign_structure or {}).get('page_prefix', 'PG')
 
     # Remover Campaign ID do final
     clean = re.sub(r'\|\d{18}$', '', utm_value)
@@ -562,19 +573,19 @@ def extract_adset_name_from_campaign_utm(utm_value: str) -> Optional[str]:
     # Estratégia: O UTM tem estrutura:
     # DEVLF | CAP | FRIO | FASE XX | [NOME ADSET] | PG2
     #
-    # Nome do adset = tudo entre FASE XX e PG2
+    # Nome do adset = tudo entre phase_prefix e page_prefix
 
-    # Encontrar índice de "FASE XX"
+    # Encontrar índice do segmento de fase
     fase_idx = None
     for i, part in enumerate(parts):
-        if part.startswith('FASE '):
+        if part.startswith(phase_prefix):
             fase_idx = i
             break
 
-    # Encontrar índice de "PG" ou último elemento
+    # Encontrar índice do segmento de página
     pg_idx = None
     for i, part in enumerate(parts):
-        if part.startswith('PG'):
+        if part.startswith(page_prefix):
             pg_idx = i
             break
 
@@ -763,7 +774,8 @@ def enrich_utm_analysis_with_costs(
 def enrich_utm_with_hierarchy(
     utm_analysis_df: pd.DataFrame,
     hierarchy: Dict,
-    dimension: str
+    dimension: str,
+    utm_campaign_structure: Optional[Dict[str, str]] = None
 ) -> pd.DataFrame:
     """
     Enriquece análise UTM usando hierarquia completa (evita duplicação de custos)
@@ -772,6 +784,7 @@ def enrich_utm_with_hierarchy(
         utm_analysis_df: DataFrame com análise UTM
         hierarchy: Hierarquia completa de campaigns/adsets/ads
         dimension: Dimensão sendo analisada
+        utm_campaign_structure: Dict com 'phase_prefix' e 'page_prefix' do ClientConfig
 
     Returns:
         DataFrame enriquecido com coluna 'spend'
@@ -803,7 +816,7 @@ def enrich_utm_with_hierarchy(
                 has_budget = campaign.get('has_campaign_budget', True)  # Default True (CBO)
 
                 # Extrair nome do adset do UTM
-                adset_name_candidate = extract_adset_name_from_campaign_utm(value)
+                adset_name_candidate = extract_adset_name_from_campaign_utm(value, utm_campaign_structure)
 
                 if adset_name_candidate:
                     # Tentar fazer matching do adset

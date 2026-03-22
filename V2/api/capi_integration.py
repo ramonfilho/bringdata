@@ -15,7 +15,6 @@ from facebook_business.adobjects.serverside.user_data import UserData
 from facebook_business.adobjects.serverside.custom_data import CustomData
 from facebook_business.adobjects.serverside.action_source import ActionSource
 from facebook_business.adobjects.serverside.gender import Gender
-from api.business_config import PRODUCT_VALUE, CONVERSION_RATES
 from src.core.client_config import CAPIConfig
 
 logger = logging.getLogger(__name__)
@@ -338,16 +337,19 @@ def send_lead_qualified_with_value(
             fbc=fbc
         )
 
-        # CustomData (valor projetado baseado em taxa de conversão)
-        taxa_conversao = CONVERSION_RATES.get(decil, 0.0)
-        valor_projetado = PRODUCT_VALUE * taxa_conversao
+        # CustomData (valor projetado via capi_config.decil_to_value)
+        valor_projetado = (
+            capi_config.decil_to_value.get(decil, 0.0)
+            if (capi_config and capi_config.decil_to_value)
+            else 0.0
+        )
 
         # Preparar custom_properties com dados ML
         # IMPORTANTE: Converter valores para string para compatibilidade com Meta API
         custom_props = {
             'lead_score': str(lead_score),
             'decil': decil,  # já é string
-            'taxa_conversao': str(taxa_conversao)
+            'valor_projetado': str(valor_projetado)
         }
 
         # Adicionar dados da pesquisa se disponíveis (enriquecem targeting)
