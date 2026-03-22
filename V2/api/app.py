@@ -252,7 +252,8 @@ async def get_model_info(pipeline: PipelineDep):
         try:
             import json
             from pathlib import Path
-            mapping_file = Path(__file__).parent.parent / "arquivos_modelo" / "feature_name_mapping_v1_devclub_rf_temporal_single.json"
+            model_name = metadata.get("model_info", {}).get("model_name", "")
+            mapping_file = Path(__file__).parent.parent / "arquivos_modelo" / f"feature_name_mapping_{model_name}.json"
             if mapping_file.exists():
                 with open(mapping_file) as f:
                     mapping_data = json.load(f)
