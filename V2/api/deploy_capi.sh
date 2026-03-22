@@ -150,21 +150,23 @@ validate_prerequisites() {
         exit 1
     fi
 
-    # 1.8 business_config.py
-    print_info "Verificando business_config.py..."
-    if [ ! -f "$BUSINESS_CONFIG" ]; then
-        print_error "business_config.py não encontrado em: $BUSINESS_CONFIG"
+    # 1.8 configs/clients/{CLIENT_ID}.yaml (produto e taxas de conversão)
+    print_info "Verificando configs/clients/${CLIENT_ID}.yaml..."
+    if [ ! -f "$CLIENT_CONFIG_FILE" ]; then
+        print_error "ClientConfig não encontrado em: $CLIENT_CONFIG_FILE"
         exit 1
     fi
 
-    # Verificar se PRODUCT_VALUE está definido
-    if ! grep -q "^PRODUCT_VALUE = " "$BUSINESS_CONFIG"; then
-        print_error "PRODUCT_VALUE não encontrado em business_config.py"
-        exit 1
-    fi
-
-    PRODUCT_VALUE=$(grep "^PRODUCT_VALUE = " "$BUSINESS_CONFIG" | awk '{print $3}')
-    print_success "PRODUCT_VALUE: R$ $PRODUCT_VALUE"
+    PRODUCT_VALUE=$(python3 -c "
+import yaml, sys
+with open('$CLIENT_CONFIG_FILE') as f:
+    cfg = yaml.safe_load(f)
+v = cfg.get('business', {}).get('product_value')
+if v is None:
+    sys.exit(1)
+print(v)
+" 2>/dev/null) || { print_error "business.product_value não encontrado em $CLIENT_CONFIG_FILE"; exit 1; }
+    print_success "PRODUCT_VALUE (${CLIENT_ID}): R$ $PRODUCT_VALUE"
 
     # 1.9 Obter revisão atual (para rollback)
     print_info "Obtendo revisão atual do Cloud Run..."
