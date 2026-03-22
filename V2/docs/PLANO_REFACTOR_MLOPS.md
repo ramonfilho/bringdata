@@ -587,11 +587,16 @@ A Fase 2 focou na camada de transformação de dados — e a resolveu completame
 | **Monitoring config** | `monitoring/config.py` — THRESHOLDS e MISSING_RATE_IGNORE_COLUMNS hardcoded (#83, #84) | Client B seria monitorado com thresholds e lista de colunas do DevClub |
 | **API** | `app.py`, `capi_integration.py`, `business_config.py`, `railway_mapping.py` (#90–#122) | CAPI enviaria para Pixel DevClub; CORS rejeitaria domínio Client B; taxas de conversão erradas |
 
-**Pendente — validação do monitoramento:**
-O protocolo de duas camadas foi aplicado ao `train_pipeline.py`. O `monitoring/orchestrator.py` ainda não tem validação equivalente:
-- **Camada 1:** snapshot do output do monitor (alertas gerados) com dados reais fixos — comparar contra golden após qualquer mudança em `core/`.
-- **Camada 2:** rodar monitoramento end-to-end com dados de um lançamento conhecido e verificar que os alertas esperados são gerados (sem falsos positivos/negativos).
-Bloquear antes de: (a) qualquer mudança em `core/preprocessing.py` ou `core/feature_engineering.py` que afete o path de monitoramento; (b) onboarding de Cliente B com monitoramento ativo.
+**Pendente — validação do monitoramento (golden snapshot):**
+
+O protocolo de duas camadas foi aplicado ao `train_pipeline.py`. O `monitoring/orchestrator.py` ainda não tem validação equivalente. A forma concreta de fechar esta lacuna é o **golden snapshot**:
+
+- **O que é:** rodar `MonitoringOrchestrator.run_daily_check(reference_date=date(2026, 3, 15), dry_run=True)` com data fixa e salvar o output (contagem e tipos de alertas) em `docs/monitoring_golden_snapshot.json`.
+- **Quando capturar:** **antes do merge do PR** — com o código atual, para ter a referência pré-refactor.
+- **Quando comparar:** imediatamente após o deploy, ainda sem tráfego (Etapa 4D do `CHECKLIST_DEPLOY_REFACTOR.md`). Qualquer divergência na contagem ou tipo de alertas indica regressão no path de monitoramento.
+- **Uso contínuo:** sempre que houver mudança em `core/preprocessing.py` ou `core/feature_engineering.py`, rodar novamente e comparar com o golden. Se divergir, investigar antes de deployar.
+
+**Condição para bloquear:** (a) qualquer mudança em `core/preprocessing.py` ou `core/feature_engineering.py` que afete o path de monitoramento; (b) onboarding de Cliente B com monitoramento ativo — nesse momento o golden deve existir para devclub e será criado um novo para clientb.
 
 **⚠️ Segurança — não deveria esperar uma fase de refatoração:**
 - `api/guru_config.py` — Guru API token hardcoded no arquivo (flag #guru_config)
@@ -700,6 +705,15 @@ O critério real desta fase é: **pipeline completo (treino → produção → m
 ~~17. **`api/deploy_capi.sh`**~~ ✅ RESOLVIDO (22/03/2026) — DT-6: lê de `configs/clients/{CLIENT_ID}.yaml`.
 ~~18. **Merge com main**~~ ✅ — main já incorporado em merge anterior (`d57db08`); zero commits pendentes.
 
+**19. Deploy do refactor para produção** ⏳
+
+Executar `docs/CHECKLIST_DEPLOY_REFACTOR.md` na íntegra. Etapas obrigatórias em ordem:
+1. Capturar golden snapshot do monitoring (Etapa 1E) — **antes do merge**
+2. Merge do PR
+3. Deploy sem tráfego + validações (Etapas 3–4)
+4. Migrar tráfego (Etapa 5)
+5. Confirmar job de monitoramento diário no dia seguinte (Etapa 6B)
+
 *Critério de saída Fase 3:* pipeline completo roda para Cliente B sem alterar código. Modelo nomeado, registrado, servido e monitorado com identidade "clientb".
 
 #### Limpeza de código morto
@@ -766,6 +780,10 @@ Itens identificados na revisão de 20/03/2026 que **não bloqueiam** Fase 3b/3c 
 Toda validação atual é integration test (pipeline de treino ponta a ponta, ~10–20 minutos). Não há testes unitários isolados para `core/utm.py`, `core/medium.py`, `core/encoding.py`. Com dois clientes, qualquer mudança em `core/` requererá validação para ambos — sem testes unitários, isso é um pipeline completo por cliente.
 
 **Fix:** escrever testes parametrizados por `ClientConfig` para as funções de `core/` com maior superfície de mudança (`utm.py`, `medium.py`, `encoding.py`). Padrão: `pytest tests/core/test_utm.py --client devclub --client clientb`. Investimento estimado: 1–2 sessões. Retorno: detecção de regressão em segundos, não horas.
+
+**Condição para fazer:** após dados do Cliente B chegarem. Motivo: o principal valor dos testes é serem parametrizados por dois `ClientConfig` reais — escrever com um só cliente entrega metade do valor e provavelmente exige reescrita quando o segundo chegar. Não bloqueia o PR nem o deploy.
+
+**Condição para não adiar mais:** antes de qualquer mudança em `core/utm.py`, `core/medium.py` ou `core/encoding.py` com dois clientes ativos.
 
 ### ~~DT-3 — `preprocessing.py` em `core/` não documenta a exceção de score columns~~ ✅ RESOLVIDO (22/03/2026)
 
