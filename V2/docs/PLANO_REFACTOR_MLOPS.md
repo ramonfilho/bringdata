@@ -692,30 +692,38 @@ O critério real desta fase é: **pipeline completo (treino → produção → m
 > - `capi.decil_to_value`: o formato das chaves **deve ser** `"D01"`, `"D02"` ... `"D10"` (zero à esquerda). O modelo emite `"D01"` — sem zero, o valor enviado ao Meta seria silenciosamente zero.
 > - `mlflow_experiment_id`: não reusar `"1"`. Criar o experimento MLflow primeiro via `mlflow.create_experiment("clientb_lead_scoring")` e usar o ID retornado.
 
-#### 3c — API multi-cliente
+#### 3c — API multi-cliente ✅ CONCLUÍDA (22/03/2026)
 
-> ⚠️ Esta fase **não é condicional**. Deve ser executada durante a espera pelos dados de Cliente B (1–2 semanas), pois corrige riscos ativos em produção: Pixel ID DevClub hardcoded enviaria eventos ao Pixel errado para Cliente B; CORS rejeitaria qualquer webhook de Cliente B. A ordem abaixo é obrigatória.
+~~10. **`api/capi_integration.py`**~~ ✅ — Pixel ID, event names, high_quality_decils (#103–#106) lidos de `CAPIConfig`.
+~~11. **`api/app.py`**~~ ✅ — CORS origins, column_mapping, batch sizes, UTM filters (#109–#116) lidos do ClientConfig. `analyze_utms_with_costs` removido (código morto).
+~~12. **`api/business_config.py`**~~ ✅ — `decil_to_value` pré-computado em `CAPIConfig`; write-back do treino atualiza também o YAML.
+~~13. **`api/railway_mapping.py`**~~ ✅ — mapeamentos de formulário (#99–#100) lidos do ClientConfig.
 
-10. **`api/capi_integration.py`** — Pixel ID, event names, high_quality_decils (#103–#106) lidos de `CAPIConfig`. *Prioridade máxima: risco financeiro direto.*
-11. **`api/app.py`** — CORS origins, column_mapping, batch sizes, UTM filters (#109–#116) lidos do ClientConfig. *Segundo: bloqueia qualquer webhook de Cliente B.*
-12. **`api/business_config.py`** — taxas de conversão, ROAS targets (#90–#98) lidos do ClientConfig.
-13. **`api/railway_mapping.py`** — mapeamentos de formulário (#99–#100) lidos do ClientConfig.
+**Itens pendentes para completar a Fase 3 antes do merge:**
+
+14. **`api/capi_integration.py`** — reverter pré-cômputo de `capi.decil_to_value` para cálculo em runtime via `client_config.business` (ver DT-5). Elimina estado duplicado.
+15. **`api/app.py:255`** — `feature_name_mapping_v1_devclub_rf_temporal_single.json` hardcoded (#112). Derivar do `model_name` lido do `active_models/{client_id}.yaml`.
+16. **`src/validation/metrics_calculator.py`** — migrar `PRODUCT_VALUE, CONVERSION_RATES` de `business_config.py` para `ClientConfig` passado como parâmetro (documentado em seção 6 como duplicata de #90–#98).
+17. **`api/deploy_capi.sh`** — script lê `PRODUCT_VALUE` de `business_config.py` com `grep` (ver DT-6). Atualizar para ler do YAML.
+18. **Merge com main** — incorporar 5 commits da main (`b009fa8`…`4c647cf`) antes do PR. Potenciais conflitos: `app.py`, `validation/`, `train_pipeline.py`. Smoke tests obrigatórios: API sobe + `/predict/batch` + monitoring dry run.
 
 *Critério de saída Fase 3:* pipeline completo roda para Cliente B sem alterar código. Modelo nomeado, registrado, servido e monitorado com identidade "clientb".
 
-#### Limpeza de código morto (fazer junto com 3c)
+#### Limpeza de código morto
 
-Arquivos a deletar após confirmar zero callers (`grep -r "from src.<modulo>" src/` retorna vazio):
+| Arquivo | Status | Substituído por |
+|---|---|---|
+| `src/data_processing/medium_training.py` | ✅ Deletado (22/03/2026) | `core/medium.py` |
+| `src/data_processing/medium_unification.py` | ✅ Deletado (22/03/2026) | `core/medium.py` |
+| `src/data_processing/medium_production_training.py` | ✅ Deletado (22/03/2026) | `core/medium.py` |
+| `src/data_processing/utm_training.py` | ✅ Deletado (22/03/2026) | `core/utm.py` |
+| `src/features/feature_engineering_training.py` | ✅ Deletado (22/03/2026) | `core/feature_engineering.py` |
+| `src/features/encoding_training.py` | ✅ Deletado (22/03/2026) | `core/encoding.py` |
+| `src/matching/` (6 arquivos) | ⏳ Bloqueado | `core/matching.py` |
 
-| Arquivo | Substituído por |
-|---|---|
-| `src/matching/` (6 arquivos) | `core/matching.py` |
-| `src/data_processing/medium_training.py` | `core/medium.py` |
-| `src/data_processing/medium_unification.py` | `core/medium.py` |
-| `src/data_processing/medium_production_training.py` | Verificar se é caller ativo ou morto antes de deletar |
-| `src/data_processing/utm_training.py` | `core/utm.py` |
-| `src/features/feature_engineering_training.py` | `core/feature_engineering.py` |
-| `src/features/encoding_training.py` | `core/encoding.py` |
+**`src/matching/` — o que bloqueia a deleção:**
+- `src/validation/data_loader.py:27` e `src/validation/asaas_sales_extractor.py:30` importam `normalizar_email`, `normalizar_telefone_robusto` de `src.matching.matching_email_telefone` — ambas já existem em `src.core.utils`, troca direta.
+- `src/validation/validate_ml_performance.py:1633` importa `match_leads_to_sales_unified` de `src.matching.matching_unified` — expor via `core/matching.py` como re-export ou wrapper.
 
 > Não deletar em lote — verificar callers um a um. Um arquivo "morto" com caller oculto (ex: import dinâmico, script ad-hoc) pode causar regressão silenciosa.
 
@@ -775,6 +783,23 @@ Toda validação atual é integration test (pipeline de treino ponta a ponta, ~1
 ### ~~DT-3 — `preprocessing.py` em `core/` não documenta a exceção de score columns~~ ✅ RESOLVIDO (22/03/2026)
 
 Comentário adicionado ao docstring de `preprocess()` em `core/preprocessing.py` explicando o timing constraint: no treino, score columns são removidas em `feature_removal.py` (Célula 8) para preservar o sinal do detector de cutoff temporal; `preprocess()` aqui é só para produção e monitoring.
+
+### DT-5 — `capi.decil_to_value` fica obsoleto após retreino
+
+A implementação atual (Fase 3c, item 12) pré-computa `decil_to_value = PRODUCT_VALUE × CONVERSION_RATES[decil]` e grava no YAML. O write-back pós-treino em `training_model.py` atualiza `business.conversion_rates` no YAML mas **não recalcula `capi.decil_to_value`**. Após um retreino, os valores enviados ao Meta ficam congelados nos valores antigos sem nenhum erro.
+
+Adicionalmente: o write-back usa `f"D{i}"` (produz `D1`, `D2`...) em vez de `f"D{i:02d}"` (`D01`, `D02`...), divergindo do formato canônico declarado no #91.
+
+**Fix (Opção B — aprovada 22/03/2026):** reverter o pré-cômputo. `capi_integration.py` volta a calcular em runtime:
+```python
+taxa = client_config.business.conversion_rates.get(decil, 0.0)
+valor_projetado = client_config.business.product_value * taxa
+```
+Elimina `capi.decil_to_value` do YAML e do dataclass. Corrigir também `f"D{i}"` → `f"D{i:02d}"` no write-back. Sem estado duplicado; sempre em sincronia com o modelo ativo.
+
+### DT-6 — `api/deploy_capi.sh` lê `PRODUCT_VALUE` de `business_config.py` via `grep`
+
+Script de deploy faz `grep "^PRODUCT_VALUE = " business_config.py` para exibir o valor no log. Para Cliente B o arquivo continuaria apontando para os valores do DevClub. Fix: ler de `configs/clients/{client_id}.yaml` via `python -c`.
 
 ### ~~DT-4 — `client_template.yaml` incompleto~~ ✅ RESOLVIDO (22/03/2026)
 
