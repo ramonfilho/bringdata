@@ -699,13 +699,11 @@ O critério real desta fase é: **pipeline completo (treino → produção → m
 ~~12. **`api/business_config.py`**~~ ✅ — `decil_to_value` pré-computado em `CAPIConfig`; write-back do treino atualiza também o YAML.
 ~~13. **`api/railway_mapping.py`**~~ ✅ — mapeamentos de formulário (#99–#100) lidos do ClientConfig.
 
-**Itens pendentes para completar a Fase 3 antes do merge:**
-
-14. **`api/capi_integration.py`** — reverter pré-cômputo de `capi.decil_to_value` para cálculo em runtime via `client_config.business` (ver DT-5). Elimina estado duplicado.
-15. **`api/app.py:255`** — `feature_name_mapping_v1_devclub_rf_temporal_single.json` hardcoded (#112). Derivar do `model_name` lido do `active_models/{client_id}.yaml`.
-16. **`src/validation/metrics_calculator.py`** — migrar `PRODUCT_VALUE, CONVERSION_RATES` de `business_config.py` para `ClientConfig` passado como parâmetro (documentado em seção 6 como duplicata de #90–#98).
-17. **`api/deploy_capi.sh`** — script lê `PRODUCT_VALUE` de `business_config.py` com `grep` (ver DT-6). Atualizar para ler do YAML.
-18. **Merge com main** — incorporar 5 commits da main (`b009fa8`…`4c647cf`) antes do PR. Potenciais conflitos: `app.py`, `validation/`, `train_pipeline.py`. Smoke tests obrigatórios: API sobe + `/predict/batch` + monitoring dry run.
+~~14. **`api/capi_integration.py`**~~ ✅ RESOLVIDO (22/03/2026) — DT-5: cálculo em runtime.
+~~15. **`api/app.py:255`**~~ ✅ RESOLVIDO (22/03/2026) — derivado de `metadata.model_info.model_name`.
+~~16. **`src/validation/metrics_calculator.py`**~~ ✅ RESOLVIDO (22/03/2026) — `DecileMetricsCalculator` aceita `conversion_rates` como parâmetro.
+~~17. **`api/deploy_capi.sh`**~~ ✅ RESOLVIDO (22/03/2026) — DT-6: lê de `configs/clients/{CLIENT_ID}.yaml`.
+~~18. **Merge com main**~~ ✅ — main já incorporado em merge anterior (`d57db08`); zero commits pendentes.
 
 *Critério de saída Fase 3:* pipeline completo roda para Cliente B sem alterar código. Modelo nomeado, registrado, servido e monitorado com identidade "clientb".
 
@@ -719,13 +717,7 @@ O critério real desta fase é: **pipeline completo (treino → produção → m
 | `src/data_processing/utm_training.py` | ✅ Deletado (22/03/2026) | `core/utm.py` |
 | `src/features/feature_engineering_training.py` | ✅ Deletado (22/03/2026) | `core/feature_engineering.py` |
 | `src/features/encoding_training.py` | ✅ Deletado (22/03/2026) | `core/encoding.py` |
-| `src/matching/` (6 arquivos) | ⏳ Bloqueado | `core/matching.py` |
-
-**`src/matching/` — o que bloqueia a deleção:**
-- `src/validation/data_loader.py:27` e `src/validation/asaas_sales_extractor.py:30` importam `normalizar_email`, `normalizar_telefone_robusto` de `src.matching.matching_email_telefone` — ambas já existem em `src.core.utils`, troca direta.
-- `src/validation/validate_ml_performance.py:1633` importa `match_leads_to_sales_unified` de `src.matching.matching_unified` — expor via `core/matching.py` como re-export ou wrapper.
-
-> Não deletar em lote — verificar callers um a um. Um arquivo "morto" com caller oculto (ex: import dinâmico, script ad-hoc) pode causar regressão silenciosa.
+| `src/matching/` (6 arquivos) | ✅ Deletado (22/03/2026) | `core/matching.py` |
 
 ### Fase 4 — EDA Generator (após Cliente B estável)
 
