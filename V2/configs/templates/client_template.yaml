@@ -252,11 +252,8 @@ capi:
   high_quality_decils: null      # REQUIRED: lista de decis high quality (ex: ["D09", "D10"])
   country_code: null             # REQUIRED: código de país ISO (ex: "br")
   currency: null                 # REQUIRED: código de moeda ISO (ex: "BRL")
-  decil_to_value: null           # REQUIRED: mapeamento decil → valor enviado ao Meta
-                                  # ⚠️ ATENÇÃO: chaves DEVEM ter zero à esquerda: "D01"..."D10"
-                                  # O modelo emite "D01"; sem zero a chave não casa e o valor enviado é silenciosamente zero.
-                                  # Ex: {"D01": 10, "D02": 20, "D03": 30, "D04": 40, "D05": 50,
-                                  #      "D06": 60, "D07": 70, "D08": 80, "D09": 90, "D10": 100}
+  # decil_to_value: REMOVIDO (DT-5) — calculado em runtime como business.product_value × business.conversion_rates[decil]
+  # Não adicionar este campo. Preencher business.product_value e business.conversion_rates.
 
 # ---------------------------------------------------------------------------
 # APIConfig — REQUIRED se usa a API FastAPI
@@ -285,7 +282,7 @@ business:
 
   conversion_rates: null         # REQUIRED: taxas de conversão por decil, calibradas para este cliente.
                                   # ⚠️ Chaves DEVEM ter zero à esquerda: "D01"..."D10"
-                                  # (consistente com capi.decil_to_value e output do modelo).
+                                  # Chaves DEVEM ter zero à esquerda: "D01"..."D10" (formato canônico do modelo).
                                   # Ex:
                                   # D01: 0.002048
                                   # D02: 0.004781

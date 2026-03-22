@@ -194,7 +194,7 @@ class CAPIConfig:
     high_quality_decils: Optional[List[str]] = None         # #105
     country_code: Optional[str] = None                      # #106
     currency: Optional[str] = None                          # #106
-    decil_to_value: Optional[Dict[str, float]] = None
+    # decil_to_value removido (DT-5): calculado em runtime como business.product_value × business.conversion_rates[decil]
 
 
 # ---------------------------------------------------------------------------

@@ -71,7 +71,7 @@ def atualizar_business_config_com_recall(model_metadata: dict, client_config: "C
 
     for i in range(1, 11):
         decil_key = f"decil_{i}"
-        decil_label = f"D{i}"
+        decil_label = f"D{i:02d}"  # formato canônico D01–D10
 
         if decil_key in decil_analysis:
             taxa_observada = decil_analysis[decil_key]['conversion_rate']
@@ -93,7 +93,7 @@ def atualizar_business_config_com_recall(model_metadata: dict, client_config: "C
     # Montar novo bloco CONVERSION_RATES
     novo_bloco = "CONVERSION_RATES = {\n"
     for i in range(1, 11):
-        decil_label = f"D{i}"
+        decil_label = f"D{i:02d}"  # formato canônico D01–D10
         taxa = taxas_corrigidas.get(decil_label, 0.0)
         conversoes = decil_analysis[f"decil_{i}"]["conversions"]
         total_leads = decil_analysis[f"decil_{i}"]["total_leads"]

@@ -784,7 +784,7 @@ Toda validação atual é integration test (pipeline de treino ponta a ponta, ~1
 
 Comentário adicionado ao docstring de `preprocess()` em `core/preprocessing.py` explicando o timing constraint: no treino, score columns são removidas em `feature_removal.py` (Célula 8) para preservar o sinal do detector de cutoff temporal; `preprocess()` aqui é só para produção e monitoring.
 
-### DT-5 — `capi.decil_to_value` fica obsoleto após retreino
+### ~~DT-5 — `capi.decil_to_value` fica obsoleto após retreino~~ ✅ RESOLVIDO (22/03/2026)
 
 A implementação atual (Fase 3c, item 12) pré-computa `decil_to_value = PRODUCT_VALUE × CONVERSION_RATES[decil]` e grava no YAML. O write-back pós-treino em `training_model.py` atualiza `business.conversion_rates` no YAML mas **não recalcula `capi.decil_to_value`**. Após um retreino, os valores enviados ao Meta ficam congelados nos valores antigos sem nenhum erro.
 

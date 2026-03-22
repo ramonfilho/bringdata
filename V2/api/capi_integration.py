@@ -15,7 +15,7 @@ from facebook_business.adobjects.serverside.user_data import UserData
 from facebook_business.adobjects.serverside.custom_data import CustomData
 from facebook_business.adobjects.serverside.action_source import ActionSource
 from facebook_business.adobjects.serverside.gender import Gender
-from src.core.client_config import CAPIConfig
+from src.core.client_config import CAPIConfig, BusinessConfig
 
 logger = logging.getLogger(__name__)
 
@@ -254,6 +254,7 @@ def send_lead_qualified_with_value(
     survey_data: Optional[Dict] = None,
     db = None,
     capi_config: Optional[CAPIConfig] = None,
+    business_config: Optional[BusinessConfig] = None,
     client_id: str = 'devclub'
 ) -> Dict:
     """
@@ -337,12 +338,12 @@ def send_lead_qualified_with_value(
             fbc=fbc
         )
 
-        # CustomData (valor projetado via capi_config.decil_to_value)
-        valor_projetado = (
-            capi_config.decil_to_value.get(decil, 0.0)
-            if (capi_config and capi_config.decil_to_value)
-            else 0.0
-        )
+        # CustomData (valor projetado = product_value × taxa_conversao do decil)
+        if business_config and business_config.conversion_rates:
+            taxa = business_config.conversion_rates.get(decil, 0.0)
+            valor_projetado = round(business_config.product_value * taxa, 2)
+        else:
+            valor_projetado = 0.0
 
         # Preparar custom_properties com dados ML
         # IMPORTANTE: Converter valores para string para compatibilidade com Meta API
@@ -690,6 +691,7 @@ def send_both_lead_events(
     survey_data: Optional[Dict] = None,
     db = None,
     capi_config: Optional[CAPIConfig] = None,
+    business_config: Optional[BusinessConfig] = None,
     client_id: str = 'devclub'
 ) -> Dict:
     """
@@ -733,6 +735,7 @@ def send_both_lead_events(
         survey_data=survey_data,
         db=db,
         capi_config=capi_config,
+        business_config=business_config,
         client_id=client_id
     )
 
@@ -867,7 +870,7 @@ def send_purchase_event(
             "message": str(e)
         }
 
-def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConfig] = None, client_id: str = 'devclub') -> Dict:
+def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConfig] = None, business_config: Optional[BusinessConfig] = None, client_id: str = 'devclub') -> Dict:
     """
     Envia múltiplos eventos CAPI em batch (AMBAS AS ESTRATÉGIAS)
     Usado pelo processamento diário
@@ -923,6 +926,7 @@ def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConf
             survey_data=lead.get('survey_data'),  # Dados da pesquisa
             db=db,  # Passar db session para salvar resposta CAPI
             capi_config=capi_config,
+            business_config=business_config,
             client_id=client_id
             # test_event_code=None (padrão) -> vai para PRODUÇÃO
         )

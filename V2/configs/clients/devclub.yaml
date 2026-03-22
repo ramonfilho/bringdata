@@ -433,17 +433,7 @@ capi:
   high_quality_decils: ["D09", "D10"]
   country_code: "br"
   currency: "BRL"
-  decil_to_value:                # PRODUCT_VALUE=1563.75 × CONVERSION_RATES[decil] (Fase 3c item 12)
-    D01: 3.20
-    D02: 7.48
-    D03: 7.48
-    D04: 8.54
-    D05: 13.89
-    D06: 18.16
-    D07: 22.41
-    D08: 24.57
-    D09: 29.91
-    D10: 87.53
+  # decil_to_value removido (DT-5): calculado em runtime como product_value × conversion_rates[decil]
 
 # ---------------------------------------------------------------------------
 # APIConfig — hardcodes #8, #109–#122 (Grupo B — Fase 2)
