@@ -1630,7 +1630,7 @@ def main():
     # Usar método de matching selecionado
     if args.matching_method == 'unified_last6':
         logger.info("    Usando método: EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS")
-        from src.matching.matching_unified import match_leads_to_sales_unified
+        from src.core.matching import match_leads_to_sales_unified
         matched_df = match_leads_to_sales_unified(
             leads_df,
             sales_df,

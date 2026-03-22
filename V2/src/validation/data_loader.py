@@ -24,7 +24,7 @@ from google.auth import default as gauth_default
 # Importar funções de normalização existentes
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from src.matching.matching_email_telefone import normalizar_email, normalizar_telefone_robusto
+from src.core.utils import normalizar_email, normalizar_telefone_robusto
 
 logger = logging.getLogger(__name__)
 
