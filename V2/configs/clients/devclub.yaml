@@ -377,7 +377,7 @@ model:
     tmb_alto:  0.49              # TMB Alto: 48.6% recebido
     tmb_sem:   0.42              # TMB Sem classificação: 42.1% recebido
   mlflow_experiment_name: "devclub_lead_scoring"  # #10
-  mlflow_experiment_id: "1"      # #71 — ID do experimento MLflow (usado no path de artefatos)
+  mlflow_experiment_id: "1"      # #71 — DEPRECATED: derivado em runtime via mlflow.get_run(). Mantido apenas como fallback de emergência para dev local sem tracking server.
   model_name_template: "v1_devclub_rf_{split_method}_single"  # #53
   legacy_model_dir: "arquivos_modelo"  # #72 — diretório legado (fallback quando active_model.yaml falha)
   business_config_path: "api/business_config.py"  # #55 — path para atualização automática de recall

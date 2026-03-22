@@ -140,7 +140,12 @@ class LeadScoringPredictor:
     def _load_from_mlflow(self):
         """Carrega modelo e artifacts diretamente do MLflow."""
         # Carregar direto dos artifacts (não depende de meta.yaml ou API)
-        mlruns_path = Path(__file__).parent.parent.parent / "mlruns" / "1" / self.mlflow_run_id / "artifacts"
+        try:
+            import mlflow as _mlflow
+            experiment_id = _mlflow.get_run(self.mlflow_run_id).info.experiment_id
+        except Exception:
+            experiment_id = '1'
+        mlruns_path = Path(__file__).parent.parent.parent / "mlruns" / experiment_id / self.mlflow_run_id / "artifacts"
 
         if not mlruns_path.exists():
             raise FileNotFoundError(f"MLflow run não encontrado: {mlruns_path}")

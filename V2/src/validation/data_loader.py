@@ -54,7 +54,13 @@ def get_active_model_path() -> Path:
 
     active_model = config['active_model']
     if 'mlflow_run_id' in active_model:
-        model_path_str = str(Path('mlruns') / '1' / active_model['mlflow_run_id'] / 'artifacts')
+        _run_id = active_model['mlflow_run_id']
+        try:
+            import mlflow as _mlflow
+            _experiment_id = _mlflow.get_run(_run_id).info.experiment_id
+        except Exception:
+            _experiment_id = '1'
+        model_path_str = str(Path('mlruns') / _experiment_id / _run_id / 'artifacts')
     else:
         model_path_str = active_model['model_path']
     model_path = Path(__file__).parent.parent.parent / model_path_str

@@ -116,7 +116,11 @@ def _load_valid_categories(artifacts: Dict[str, Any]) -> Optional[List[str]]:
     candidates = []
 
     if mlflow_run_id:
-        experiment_id = artifacts.get('mlflow_experiment_id', '1')
+        try:
+            import mlflow as _mlflow
+            experiment_id = _mlflow.get_run(mlflow_run_id).info.experiment_id
+        except Exception:
+            experiment_id = artifacts.get('mlflow_experiment_id', '1')
         candidates.append(
             Path(__file__).parent.parent.parent
             / 'mlruns' / experiment_id / mlflow_run_id / 'artifacts' / 'distribuicoes_esperadas.json'

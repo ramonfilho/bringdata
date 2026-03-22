@@ -762,11 +762,9 @@ Com dois configs escritos manualmente (`devclub.yaml` e `clientb.yaml`), o padr�
 
 Itens identificados na revisão de 20/03/2026 que **não bloqueiam** Fase 3b/3c mas devem ser endereçados antes de escalar para 3+ clientes.
 
-### DT-1 — `mlflow_experiment_id: "1"` é frágil
+### ~~DT-1 — `mlflow_experiment_id: "1"` é frágil~~ ✅ RESOLVIDO (22/03/2026)
 
-`devclub.yaml` tem `mlflow_experiment_id: "1"` hardcoded. Se o tracking server for recriado ou migrado (já aconteceu uma vez — 50 runs migrados do SQLite para Cloud SQL), os IDs mudam e o path de artefatos do DevClub pode colidir com Cliente B.
-
-**Fix:** derivar o experiment ID em runtime via `mlflow.get_experiment_by_name(name).experiment_id` na `training_model.py`. Remover `mlflow_experiment_id` do YAML ou marcar como DEPRECATED. Não bloqueia hoje, mas deve ser feito antes do segundo treino de Cliente B.
+`core/encoding.py`, `core/medium.py`, `src/model/prediction.py` e `src/validation/data_loader.py` agora derivam o experiment_id em runtime via `mlflow.get_run(run_id).info.experiment_id`, com fallback para o valor do YAML apenas em caso de falha. `mlflow_experiment_id` no YAML e dataclass marcado como DEPRECATED.
 
 ### DT-2 — Ausência de testes unitários em `src/core/`
 

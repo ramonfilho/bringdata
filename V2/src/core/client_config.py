@@ -149,7 +149,7 @@ class ModelConfig:
     hyperparameters: Optional[Dict[str, Any]] = None        # #1
     buyer_weights: Optional[Dict[str, float]] = None        # #158 — PESOS_COMPRADOR por decil (dev/retreino)
     mlflow_experiment_name: Optional[str] = None            # #10
-    mlflow_experiment_id: Optional[str] = None              # #71
+    mlflow_experiment_id: Optional[str] = None              # #71 — DEPRECATED: derivado em runtime via mlflow.get_run(). Mantido como fallback de emergência.
     model_name_template: Optional[str] = None               # #53
     legacy_model_dir: Optional[str] = None                  # #72
     business_config_path: Optional[str] = None              # #55
