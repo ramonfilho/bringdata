@@ -669,14 +669,9 @@ O critério real desta fase é: **pipeline completo (treino → produção → m
 
 > Estas tarefas devem ser concluídas **antes** do onboarding de Cliente B. São independentes dos dados do cliente e devem ser feitas durante o período de espera pelo material.
 
-**P1 — Credenciais hardcoded → env vars** *(segurança — fazer primeiro)*
-- `api/guru_config.py` — `GURU_API_TOKEN` como fallback hardcoded. Mover para env var pura; remover o fallback do arquivo.
-- `api/meta_config.py` — `META_ACCESS_TOKEN` com fallback comentado mas presente no código. Mesma ação.
-- Critério: `grep -r "Bearer " src/api/` retorna zero resultados.
+~~**P1 — Credenciais hardcoded → env vars**~~ ✅ — `guru_config.py` e `meta_config.py` leem 100% de env vars; sem fallback hardcoded.
 
-**P2 — Patch `production_pipeline.py` linha 103**
-- `_config_path` aponta para `devclub.yaml` hardcoded como fallback. Se Cliente B for servido sem este patch, produção roda com config errada silenciosamente — sem erro, com feature registry errado.
-- Fix: derivar `client_id` do `ClientConfig` passado; sem fallback para "devclub".
+~~**P2 — Patch `production_pipeline.py` linha 103**~~ ✅ — `_config_path` usa `{client_id}` dinamicamente; `client_id='devclub'` é apenas o default do parâmetro Python, não hardcode no path.
 
 #### 3b — Onboarding Cliente B
 
@@ -689,8 +684,8 @@ O critério real desta fase é: **pipeline completo (treino → produção → m
 
 > **Atenção ao preencher o template:**
 > - `monitoring.conversion_window_days`: não copiar 20 do DevClub. Calcular como `captacao_days + cpl_days + vendas_days` do ciclo real de Cliente B.
-> - `capi.decil_to_value`: o formato das chaves **deve ser** `"D01"`, `"D02"` ... `"D10"` (zero à esquerda). O modelo emite `"D01"` — sem zero, o valor enviado ao Meta seria silenciosamente zero.
-> - `mlflow_experiment_id`: não reusar `"1"`. Criar o experimento MLflow primeiro via `mlflow.create_experiment("clientb_lead_scoring")` e usar o ID retornado.
+> - `business.conversion_rates`: o formato das chaves **deve ser** `"D01"`, `"D02"` ... `"D10"` (zero à esquerda). O valor enviado ao Meta é calculado em runtime como `product_value × conversion_rates[decil]` — sem zero à esquerda, o lookup retorna 0.0 silenciosamente.
+> - `mlflow_experiment_id`: campo DEPRECATED — experiment_id é derivado em runtime via `mlflow.get_run()`. Não precisa preencher.
 
 #### 3c — API multi-cliente ✅ CONCLUÍDA (22/03/2026)
 
@@ -789,9 +784,9 @@ valor_projetado = client_config.business.product_value * taxa
 ```
 Elimina `capi.decil_to_value` do YAML e do dataclass. Corrigir também `f"D{i}"` → `f"D{i:02d}"` no write-back. Sem estado duplicado; sempre em sincronia com o modelo ativo.
 
-### DT-6 — `api/deploy_capi.sh` lê `PRODUCT_VALUE` de `business_config.py` via `grep`
+### ~~DT-6 — `api/deploy_capi.sh` lê `PRODUCT_VALUE` de `business_config.py` via `grep`~~ ✅ RESOLVIDO (22/03/2026)
 
-Script de deploy faz `grep "^PRODUCT_VALUE = " business_config.py` para exibir o valor no log. Para Cliente B o arquivo continuaria apontando para os valores do DevClub. Fix: ler de `configs/clients/{client_id}.yaml` via `python -c`.
+`lib/config.sh` agora define `CLIENT_ID=devclub` e `CLIENT_CONFIG_FILE`. O script lê `business.product_value` de `configs/clients/{CLIENT_ID}.yaml` via `python3 + yaml` em vez de grep em `business_config.py`.
 
 ### ~~DT-4 — `client_template.yaml` incompleto~~ ✅ RESOLVIDO (22/03/2026)
 
