@@ -814,19 +814,16 @@ Campos adicionados ao template, ao dataclass e ao `devclub.yaml`:
 
 ---
 
-## 12. Caminho para MLOps Nível 3
+## 12. Caminho para Nível 2 e além
 
-O refactor atual (Fases 1–3) leva o projeto do Nível 1 para o Nível 2. O Nível 3 exige infraestrutura adicional e só faz sentido com 5+ clientes ou quando o retreino manual virar gargalo operacional real.
+Ver **`docs/ROADMAP_MLOPS_MATURIDADE.md`** para o guia completo.
 
-| O que muda | Hoje | Nível 3 |
-|---|---|---|
-| Orquestração de pipelines | `train_pipeline.py` manual | Vertex AI Pipelines / Kubeflow |
-| Feature engineering | Recalculada a cada treino | Feature Store (Vertex AI) |
-| Trigger de retreino | Cloud Scheduler mensal fixo | Event-driven por drift detectado |
-| Deploy de modelo | Manual / semi-automático (Sprint 2–3) | CI/CD com shadow deployment e traffic split |
-| Versionamento de dados | Arquivos Excel / Sheets | Data versioning (DVC) + data contracts |
-| Observabilidade | Logs + Slack | Dashboards de lineage, model cards automáticos |
-| Multi-plataforma | Só Meta | Meta + Google + TikTok com mesmo modelo |
+Resumo: o refactor (Fases 1–3) entrega o Nível 1 sólido (Google MLOps Level 1 — pipeline automatizado, skew eliminado, multi-cliente por config). Os próximos passos imediatos são os dois gaps do Nível 1 ainda abertos:
+
+1. **Validação de dados pré-treino** (`src/core/validation.py`) — antes do segundo cliente
+2. **Quality gate automático pós-treino** (Sprint 2 do `retraining_orchestrator.py`) — qualquer momento
+
+O Nível 2 (CI/CD para código ML) e o stack GCP completo (Pub/Sub, Dataflow, Vertex AI, BigQuery Feature Store) têm condições de negócio explícitas documentadas no roadmap — não são compromissos imediatos.
 
 ---
 
