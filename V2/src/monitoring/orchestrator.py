@@ -234,7 +234,7 @@ class MonitoringOrchestrator:
         lead_quality_metrics = self._calculate_lead_quality_metrics()
 
         # NOVO: Gerar sumário crítico consolidado
-        critical_summary = self._generate_critical_summary(alerts, funnel_metrics)
+        critical_summary = self._generate_critical_summary(alerts, funnel_metrics, lead_quality_metrics)
 
         # Mensagem de conclusão
         logger.info(f"\n Monitoramento concluído!")
@@ -440,7 +440,7 @@ class MonitoringOrchestrator:
             logger.warning(f" Erro ao calcular métricas de qualidade: {e}")
             return {}
 
-    def _generate_critical_summary(self, alerts: List[Alert], funnel_metrics: Dict) -> str:
+    def _generate_critical_summary(self, alerts: List[Alert], funnel_metrics: Dict, lead_quality_metrics: Dict = None) -> str:
         """
         Gera sumário crítico consolidado do sistema.
 
@@ -593,7 +593,7 @@ class MonitoringOrchestrator:
         lines.append(f"    - Resposta pesquisa: {response_rate:.1f}%")
 
         # 11. Qualidade dos Leads
-        quality_metrics = self._calculate_lead_quality_metrics()
+        quality_metrics = lead_quality_metrics if lead_quality_metrics is not None else self._calculate_lead_quality_metrics()
         if quality_metrics:
             lines.append(f"\n11. Qualidade dos Leads:")
             lines.append(f"    ")
