@@ -2290,7 +2290,7 @@ async def daily_monitoring_check_railway(
         # ------------------------------------------------------------------
         config_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'configs/active_model.yaml'
+            'configs/active_models/devclub.yaml'
         )
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
@@ -2407,7 +2407,7 @@ async def daily_monitoring_check(
         # Obter model_path do modelo ativo
         config_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'configs/active_model.yaml'
+            'configs/active_models/devclub.yaml'
         )
 
         with open(config_path, 'r') as f:
