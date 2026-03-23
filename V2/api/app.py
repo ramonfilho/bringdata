@@ -24,8 +24,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Importar pipeline V2
 from src.production_pipeline import LeadScoringPipeline
-from src.features.engineering import create_derived_features
-from src.features.encoding import apply_categorical_encoding
 
 # Importar integrações
 
