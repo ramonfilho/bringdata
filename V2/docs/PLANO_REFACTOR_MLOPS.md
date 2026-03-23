@@ -680,12 +680,7 @@ O critério real desta fase é: **pipeline completo (treino → produção → m
 
 #### 3b — Onboarding Cliente B
 
-*Bloqueia: dados reais do cliente (formulário XLS, export vendas, cadência do lançamento).*
-
-6. Escrever `configs/clients/clientb.yaml` usando `configs/templates/client_template.yaml`.
-7. Executar `train_pipeline.main(config=clientb_config)` — confirmar que nome do modelo, experimento MLflow e path de saída contêm "clientb", não "devclub".
-8. Configurar `configs/active_models/clientb.yaml` após primeiro treino validado (AUC e monotonia).
-9. Validar primeiras predições de produção com `prediction.py` carregando o modelo correto.
+> **Execução:** ver `ROADMAP_MLOPS_MATURIDADE.md` item 11 — é a fonte de verdade para o que fazer. O contexto abaixo é histórico.
 
 > **Atenção ao preencher o template:**
 > - `monitoring.conversion_window_days`: não copiar 20 do DevClub. Calcular como `captacao_days + cpl_days + vendas_days` do ciclo real de Cliente B.
@@ -729,6 +724,8 @@ Executar `docs/CHECKLIST_DEPLOY_REFACTOR.md` na íntegra. Etapas obrigatórias e
 | `src/matching/` (6 arquivos) | ✅ Deletado (22/03/2026) | `core/matching.py` |
 
 ### Fase 4 — EDA Generator (após Cliente B estável)
+
+> **Execução:** ver `ROADMAP_MLOPS_MATURIDADE.md` item 12 — é a fonte de verdade para o que fazer. O contexto abaixo é histórico.
 
 Com dois configs escritos manualmente (`devclub.yaml` e `clientb.yaml`), o padrão está claro o suficiente para automatizá-lo:
 
