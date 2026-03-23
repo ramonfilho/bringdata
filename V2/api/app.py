@@ -1961,6 +1961,7 @@ def fetch_leads_from_sheets(hours: int = 24) -> List[Dict[str, Any]]:
 
 @app.get("/monitoring/daily-check", response_model=DailyCheckResponse)
 async def daily_monitoring_check_auto(
+    pipeline: PipelineOptDep,
     hours: int = 24,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -1980,6 +1981,7 @@ async def daily_monitoring_check_auto(
         Alertas consolidados por severidade e categoria
     """
     return await daily_monitoring_check_railway(
+        pipeline=pipeline,
         hours=hours,
         start_date=start_date,
         end_date=end_date,
