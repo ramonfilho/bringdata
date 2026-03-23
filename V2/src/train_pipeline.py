@@ -849,7 +849,8 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         buyer_weights=buyer_weights,
         cli_args=cli_args,
         client_config=client_config,
-        tmb_risk_filter=tmb_risk_filter
+        tmb_risk_filter=tmb_risk_filter,
+        use_buyer_weights=use_buyer_weights
     )
 
     cell_timers['Célula 21'] = time.time() - cell_start
