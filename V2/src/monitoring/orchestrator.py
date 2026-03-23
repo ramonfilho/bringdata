@@ -440,7 +440,7 @@ class MonitoringOrchestrator:
             logger.warning(f" Erro ao calcular métricas de qualidade: {e}")
             return {}
 
-    def _generate_critical_summary(self, alerts: List[Alert], funnel_metrics: Dict, lead_quality_metrics: Dict = None) -> str:
+    def _generate_critical_summary(self, alerts: List[Alert], funnel_metrics: Dict, lead_quality_metrics: Dict = None, meta_metrics: Dict = None) -> str:
         """
         Gera sumário crítico consolidado do sistema.
 
@@ -634,6 +634,22 @@ class MonitoringOrchestrator:
                 lines.append(f"       Última semana:  {semana['d10']:.2f}%")
             if dia.get('count', 0) > 0:
                 lines.append(f"       Últimas 24h:    {dia['d10']:.2f}%")
+
+        # 12. Métricas Meta Ads (campanhas CAP, hoje)
+        if meta_metrics:
+            date_ref = meta_metrics.get('date', 'hoje')
+            spend    = meta_metrics.get('spend', 0)
+            clicks   = meta_metrics.get('clicks', 0)
+            cpl      = meta_metrics.get('cpl')
+            taxa     = meta_metrics.get('taxa_clique_lead')
+
+            lines.append(f"\n12. Meta Ads — CAP ({date_ref}):")
+            lines.append(f"    - Investimento:      R$ {spend:,.2f}")
+            lines.append(f"    - Cliques:           {clicks:,}")
+            if cpl is not None:
+                lines.append(f"    - Custo por Lead:    R$ {cpl:.2f}")
+            if taxa is not None:
+                lines.append(f"    - Taxa Clique→Lead:  {taxa:.1f}%")
 
         lines.append("\n" + "="*72)
 
