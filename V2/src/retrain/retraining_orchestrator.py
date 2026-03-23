@@ -45,6 +45,13 @@ from typing import Dict, Optional
 # Adicionar V2/ ao path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Carregar variáveis de ambiente do .env (deve ser ANTES de qualquer import que use os.getenv)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent.parent.parent / '.env')
+except ImportError:
+    pass
+
 # Imports do projeto
 from src.train_pipeline import main as train_main
 from src.retrain.data_validation import RetrainingDataValidator, get_active_model_path

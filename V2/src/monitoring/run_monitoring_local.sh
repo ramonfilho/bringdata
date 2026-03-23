@@ -47,14 +47,22 @@ export DB_NAME=smart_ads
 export DB_USER=postgres
 export DB_PASSWORD=SmartAds2025!
 
-# Executar monitoramento
+# Carregar .env (trata o | no GURU_API_TOKEN corretamente via python-dotenv)
 python -c "
 import sys
 import os
 import yaml
+from pathlib import Path
 
 # Adicionar diretório ao path
 sys.path.insert(0, os.path.dirname(os.path.abspath('__file__')))
+
+# Carregar variáveis de ambiente
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path('.env'))
+except ImportError:
+    pass
 
 from src.monitoring.orchestrator import MonitoringOrchestrator
 from api.app import fetch_leads_from_sheets, get_db

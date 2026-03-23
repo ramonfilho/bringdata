@@ -9,6 +9,13 @@ import os
 import logging
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# Carregar variáveis de ambiente do .env (deve ser ANTES de qualquer import que use os.getenv)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
+except ImportError:
+    pass
+
 import json
 import yaml
 import glob
