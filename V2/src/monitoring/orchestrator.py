@@ -6,21 +6,24 @@ Coordena execução de todos os monitors e consolida alertas.
 
 import logging
 import pandas as pd
-from typing import List, Dict
+from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func, distinct
+from sqlalchemy import func, distinct, text
 import sys
 import os
 from datetime import datetime
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from .data_quality import DataQualityMonitor
 from .operational_monitor import OperationalMonitor
 from .capi_monitor import CAPIQualityMonitor
 from .models import Alert
+from core.client_config import ClientConfig
 
-# Importar unificação de Medium (mesmo processamento que treino e produção)
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from data_processing.medium_unification import unify_medium_columns
+_DEFAULT_CONFIG_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..', '..', 'configs', 'clients', 'devclub.yaml')
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,20 +85,29 @@ class MonitoringOrchestrator:
     Orquestrador central que executa todos os monitors e consolida alertas.
     """
 
-    def __init__(self, model_path: str, db: Session):
+    def __init__(self, model_path: str, db: Session, client_config: Optional[ClientConfig] = None):
         """
         Args:
-            model_path: Caminho para pasta do modelo ativo
-            db: Sessão SQLAlchemy do PostgreSQL
+            model_path:    Caminho para pasta do modelo ativo
+            db:            Sessão SQLAlchemy do PostgreSQL
+            client_config: Configuração do cliente; se None, carrega devclub.yaml
         """
         self.model_path = model_path
         self.db = db
+        self._client_config = client_config or ClientConfig.from_yaml(_DEFAULT_CONFIG_PATH)
+
+        # Verificar suporte a filtro multi-cliente (depende do schema do banco)
+        if db is not None:
+            from api.database import has_client_id_column
+            self._filter_by_client = has_client_id_column(db)
+        else:
+            self._filter_by_client = False
 
         # Inicializar monitors
         self.monitors = {
-            'data_quality': DataQualityMonitor(model_path),
-            'operational': OperationalMonitor(db),
-            'capi_quality': CAPIQualityMonitor(db)
+            'data_quality': DataQualityMonitor(model_path, client_config=self._client_config),
+            'operational': OperationalMonitor(db, client_config=self._client_config),
+            'capi_quality': CAPIQualityMonitor(db, client_config=self._client_config)
         }
 
     def run_daily_check(self, leads_data: List[Dict]) -> Dict:
@@ -134,81 +146,53 @@ class MonitoringOrchestrator:
             # Aplicar unificação de UTM Source/Term (mesmo processamento que produção)
             # Isso garante que 'fb', 'youtube', etc sejam normalizados para 'outros'
             if 'Source' in df.columns or 'Term' in df.columns:
-                from data_processing.utm_unification import unify_utm_columns
+                from core.utm import unify_utm
                 utm_antes = df['Source'].nunique() if 'Source' in df.columns else 0
-                df = unify_utm_columns(df)
+                df = unify_utm(df, self._client_config.utm)
                 utm_depois = df['Source'].nunique() if 'Source' in df.columns else 0
                 logger.info(f" UTM unificado: Source {utm_antes}  {utm_depois} categorias únicas")
 
             # Aplicar unificação de Medium (mesmo processamento que treino e produção)
             # Isso garante que 'ABERTO | AD0022' seja normalizado para 'Aberto'
             if 'Medium' in df.columns:
+                from core.medium import unify_medium
                 medium_antes = df['Medium'].nunique()
-                df = unify_medium_columns(df)
+                df = unify_medium(df, self._client_config.medium)
                 medium_depois = df['Medium'].nunique()
                 logger.info(f" Medium unificado: {medium_antes}  {medium_depois} categorias únicas")
 
-            # Renomear colunas longas (investiu_curso_online, interesse_programacao)
-            from data_processing.preprocessing import rename_long_column_names
-            df = rename_long_column_names(df)
+            # Converter lead_score para float antes do preprocessing
+            # (pode vir como string com vírgula do Google Sheets)
+            if 'lead_score' in df.columns and df['lead_score'].dtype == 'object':
+                df['lead_score'] = (
+                    pd.to_numeric(
+                        df['lead_score'].str.replace(',', '.').replace('', None),
+                        errors='coerce'
+                    )
+                )
 
             # Aplicar unificação de categorias (mesmo processamento que produção)
-            # Limpa e normaliza valores das categorias
-            from data_processing.category_unification import unificar_categorias_completo
-            df = unificar_categorias_completo(df)
+            from core.category_unification import unify_categories as _unify_categories
+            df = _unify_categories(df, self._client_config.category)
             logger.info(f" Categorias unificadas")
 
-            # Preservar colunas de score/decil ANTES de remover (necessário para monitoramento)
-            # Essas colunas vêm do Google Sheets (pipeline de produção já atribuiu)
-            decil_col = df['decil'].copy() if 'decil' in df.columns else None
-            lead_score_col = df['lead_score'].copy() if 'lead_score' in df.columns else None
+            # Sequência canônica de preprocessing com preservação de decil/lead_score
+            colunas_antes_pre = len(df.columns)
+            from core.preprocessing import preprocess_for_monitoring
+            df = preprocess_for_monitoring(df, self._client_config.ingestion, self._client_config.feature)
+            colunas_depois_pre = len(df.columns)
+            logger.info(f" Preprocessing: {colunas_antes_pre} → {colunas_depois_pre} colunas")
 
-            # Remover colunas de score/faixa (mesmo processamento que produção)
-            # Remove: Pontuação, Score, Faixa, Faixa A-D, lead_score, decil
-            from data_processing.preprocessing import clean_columns
-            colunas_antes_score = len(df.columns)
-            df = clean_columns(df)
-            colunas_depois_score = len(df.columns)
-            score_removidos = colunas_antes_score - colunas_depois_score
-            logger.info(f" Colunas de score/faixa removidas: {score_removidos} (total: {colunas_depois_score})")
-
-            # Restaurar colunas de score/decil APÓS limpeza (para monitoramento de distribuição)
-            if decil_col is not None:
-                df['decil'] = decil_col
-                logger.info(f" Coluna 'decil' preservada para monitoramento (distribuição: {df['decil'].value_counts().sort_index().to_dict()})")
-            if lead_score_col is not None:
-                # Converter lead_score para float (pode vir como string com vírgula do Google Sheets)
-                if lead_score_col.dtype == 'object':
-                    # Substituir vírgula por ponto e tratar strings vazias
-                    lead_score_col = lead_score_col.str.replace(',', '.').replace('', None)
-                    lead_score_col = pd.to_numeric(lead_score_col, errors='coerce')
-                df['lead_score'] = lead_score_col
+            if 'decil' in df.columns:
+                logger.info(f" Coluna 'decil' preservada (distribuição: {df['decil'].value_counts().sort_index().to_dict()})")
+            if 'lead_score' in df.columns:
                 valid_scores = df['lead_score'].notna().sum()
-                logger.info(f" Coluna 'lead_score' preservada para monitoramento ({valid_scores}/{len(df)} válidos, média: {df['lead_score'].mean():.4f})")
-
-            # Remover features de campanha (mesmo processamento que produção)
-            # Remove: Campaign, Content, e colunas vazias/problemáticas
-            from data_processing.preprocessing import remove_campaign_features
-            colunas_antes_campaign = len(df.columns)
-            df = remove_campaign_features(df)
-            colunas_depois_campaign = len(df.columns)
-            campaign_removidos = colunas_antes_campaign - colunas_depois_campaign
-            logger.info(f" Features de campanha removidas: {campaign_removidos} (total: {colunas_depois_campaign})")
-
-            # Remover campos técnicos (mesmo processamento que produção)
-            # Remove: Remote IP, User Agent, fbc, fbp, cidade, estado, pais, cep, externalid, Page URL, etc
-            from data_processing.preprocessing import remove_technical_fields
-            colunas_antes_tech = len(df.columns)
-            df = remove_technical_fields(df)
-            colunas_depois_tech = len(df.columns)
-            campos_removidos = colunas_antes_tech - colunas_depois_tech
-            logger.info(f" Campos técnicos removidos: {campos_removidos} (total: {colunas_depois_tech})")
+                logger.info(f" Coluna 'lead_score' preservada ({valid_scores}/{len(df)} válidos, média: {df['lead_score'].mean():.4f})")
 
             # Aplicar feature engineering (mesmo processamento que produção)
-            # Cria: nome_valido, email_valido, telefone_valido, telefone_comprimento, nome_tem_sobrenome
-            from features.engineering import create_derived_features
+            from core.feature_engineering import create_features as _fe_create
             colunas_antes_fe = len(df.columns)
-            df = create_derived_features(df)
+            df = _fe_create(df, self._client_config.feature)
             colunas_depois_fe = len(df.columns)
             saldo_fe = colunas_depois_fe - colunas_antes_fe
             logger.info(f" Features derivadas criadas: {saldo_fe:+d} colunas (total: {colunas_depois_fe})")
@@ -226,6 +210,14 @@ class MonitoringOrchestrator:
 
         # Gerar sumário
         summary = self._generate_summary(alerts)
+
+        # Garantir que a sessão está limpa antes de queries de funil
+        # (monitors podem deixar transação abortada em caso de erro interno)
+        if self.db is not None:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
 
         # NOVO: Gerar métricas do funil completo
         funnel_metrics = self._generate_funnel_metrics(leads_data, df if leads_data else None)
@@ -708,11 +700,14 @@ class MonitoringOrchestrator:
         total_sheets_tab2 = self._count_sheet_tab2_responses(lookback_time)
         total_sheets = total_sheets_tab1 + total_sheets_tab2
 
-        total_db = self.db.query(
-            func.count(distinct(LeadCAPI.email))
-        ).filter(
+        _client_id = self._client_config.client_id if self._client_config else 'devclub'
+
+        _q_total = self.db.query(func.count(distinct(LeadCAPI.email))).filter(
             LeadCAPI.created_at >= lookback_time
-        ).scalar()
+        )
+        if self._filter_by_client:
+            _q_total = _q_total.filter(text("leads_capi.client_id = :cid").bindparams(cid=_client_id))
+        total_db = _q_total.scalar()
 
         metrics['capture'] = {
             'total_sheets_tab1': total_sheets_tab1,
@@ -723,9 +718,10 @@ class MonitoringOrchestrator:
         }
 
         # ETAPA 2: QUALIDADE DOS DADOS CAPI
-        recent_leads = self.db.query(LeadCAPI).filter(
-            LeadCAPI.created_at >= lookback_time
-        ).all()
+        _q_recent = self.db.query(LeadCAPI).filter(LeadCAPI.created_at >= lookback_time)
+        if self._filter_by_client:
+            _q_recent = _q_recent.filter(text("leads_capi.client_id = :cid").bindparams(cid=_client_id))
+        recent_leads = _q_recent.all()
 
         if recent_leads:
             with_fbp = sum(1 for lead in recent_leads if lead.fbp and lead.fbp.strip())
@@ -763,10 +759,13 @@ class MonitoringOrchestrator:
         # ETAPA 4: ENVIO PARA META CAPI
         # Filtra por created_at para contar apenas leads da janela atual,
         # evitando inflacionar com backlog histórico processado pelo polling de 5min
-        sent_to_capi = self.db.query(LeadCAPI).filter(
+        _q_sent = self.db.query(LeadCAPI).filter(
             LeadCAPI.created_at >= lookback_time,
             LeadCAPI.capi_sent_at.isnot(None)
-        ).count()
+        )
+        if self._filter_by_client:
+            _q_sent = _q_sent.filter(text("leads_capi.client_id = :cid").bindparams(cid=_client_id))
+        sent_to_capi = _q_sent.count()
 
         estimated_events = int(sent_to_capi * 1.3)  # Aproximação
 
@@ -777,10 +776,13 @@ class MonitoringOrchestrator:
         }
 
         # ETAPA 5: RESPOSTA DA META
-        with_response = self.db.query(LeadCAPI).filter(
+        _q_response = self.db.query(LeadCAPI).filter(
             LeadCAPI.created_at >= lookback_time,
             LeadCAPI.capi_response_status.isnot(None)
-        ).all()
+        )
+        if self._filter_by_client:
+            _q_response = _q_response.filter(text("leads_capi.client_id = :cid").bindparams(cid=_client_id))
+        with_response = _q_response.all()
 
         if with_response:
             status_counts = {}

@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Imports do projeto
 from src.train_pipeline import main as train_main
 from src.retrain.data_validation import RetrainingDataValidator, get_active_model_path
+from src.core.client_config import ClientConfig
 
 # Configurar logging
 logging.basicConfig(
@@ -61,16 +62,28 @@ logger = logging.getLogger(__name__)
 class RetreinoMensal:
     """Orquestrador de retreino mensal automatizado."""
 
-    def __init__(self, config_path: str):
+    def __init__(self, config_path: str, client_config_path: str = None):
         """
         Inicializa orquestrador.
 
         Args:
             config_path: Caminho para configs/retreino_mensal.yaml
+            client_config_path: Caminho para configs/clients/{cliente}.yaml (opcional)
         """
         self.config = self._load_config(config_path)
         self.execution_id = datetime.now().strftime('%Y%m%d_%H%M%S')
         self.validation_result = None  # Preenchido pelo hook
+
+        # Carregar ClientConfig (fallback para devclub se não especificado)
+        _default_client_config = str(Path(__file__).parent.parent.parent / "configs" / "clients" / "devclub.yaml")
+        _client_config_path = client_config_path or _default_client_config
+        try:
+            self.client_config = ClientConfig.from_yaml(_client_config_path)
+            logger.info(f" ClientConfig carregado: {self.client_config.client_id}")
+        except Exception as e:
+            logger.warning(f"Falha ao carregar ClientConfig de {_client_config_path}: {e}. Usando defaults.")
+            self.client_config = ClientConfig()
+
         logger.info(f" Retreino Mensal iniciado - Execution ID: {self.execution_id}")
 
     def _load_config(self, config_path: str) -> dict:
@@ -119,7 +132,7 @@ class RetreinoMensal:
 
                 # Obter baseline do champion
                 try:
-                    model_path = get_active_model_path()
+                    model_path = get_active_model_path(self.client_config.client_id or "devclub")
                     logger.info(f"   Champion: {model_path}")
 
                     # Carregar metadata do champion
@@ -153,9 +166,10 @@ class RetreinoMensal:
                     logger.info(f"   Continuando sem comparação")
                     return True
 
-                # Comparar missing rates
-                THRESHOLD_WARNING = 0.10  # 10pp
-                THRESHOLD_CRITICAL = 0.20  # 20pp
+                # Comparar missing rates (thresholds do ClientConfig com fallback para defaults)
+                _mon_thresholds = self.client_config.monitoring.thresholds or {}
+                THRESHOLD_WARNING = _mon_thresholds.get('missing_rate_warning', 0.10)
+                THRESHOLD_CRITICAL = _mon_thresholds.get('missing_rate_critical', 0.20)
 
                 alerts = []
                 for col in missing_rates:
@@ -223,7 +237,7 @@ class RetreinoMensal:
 
                 try:
                     # Obter modelo ativo para baseline
-                    model_path = get_active_model_path()
+                    model_path = get_active_model_path(self.client_config.client_id or "devclub")
                     logger.info(f"   Baseline (champion): {model_path}")
                 except Exception as e:
                     logger.warning(f"     Modelo ativo não encontrado: {e}")
@@ -283,7 +297,7 @@ class RetreinoMensal:
                 try:
                     import json
                     import glob
-                    model_path = get_active_model_path()
+                    model_path = get_active_model_path(self.client_config.client_id or "devclub")
                     logger.info(f"      Champion model: {model_path}")
 
                     metadata_pattern = str(Path(model_path) / 'model_metadata*.json')
@@ -379,8 +393,9 @@ class RetreinoMensal:
             logger.info(f"\n Verificando arquivo TMB...")
 
             import glob
-            # Buscar arquivo TMB na pasta de treino (um nível acima do V2)
-            tmb_pattern = str(Path(__file__).parent.parent.parent.parent / 'data' / 'devclub' / 'treino' / 'tmb.xlsx')
+            # Buscar arquivo TMB — path derivado do ClientConfig (client_id) ou fallback para devclub
+            client_id = self.client_config.client_id if self.client_config.client_id else "devclub"
+            tmb_pattern = str(Path(__file__).parent.parent.parent.parent / 'data' / client_id / 'treino' / 'tmb.xlsx')
             tmb_files = glob.glob(tmb_pattern)
 
             if not tmb_files:
@@ -390,7 +405,7 @@ class RetreinoMensal:
                 logger.error(f"Path esperado: {tmb_pattern}")
                 logger.error(f"\n AÇÃO NECESSÁRIA:")
                 logger.error(f"   1. Baixar arquivo TMB atualizado com vendas de {api_start_date} a {api_end_date}")
-                logger.error(f"   2. Colocar arquivo em: data/devclub/treino/tmb.xlsx")
+                logger.error(f"   2. Colocar arquivo em: data/{client_id}/treino/tmb.xlsx")
                 logger.error(f"   3. Executar retreino novamente")
                 logger.error(f"{'='*80}\n")
 

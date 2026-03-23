@@ -20,7 +20,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from api.meta_integration import MetaAdsIntegration
 from api.economic_metrics import calculate_cpl, calculate_contribution_margin
-from api.business_config import CONVERSION_RATES, PRODUCT_VALUE
+from api.business_config import CONVERSION_RATES
 
 # Importar módulo de ajuste TMB
 from src.validation.tmb_adjuster import (
@@ -1363,10 +1363,14 @@ class DecileMetricsCalculator:
     - Guru+TMB: Performance em todos os dados (generalização)
     """
 
-    def __init__(self):
-        """Inicializa calculadora de métricas de decil."""
-        # Carregar taxas de conversão esperadas do modelo
-        self.expected_rates = CONVERSION_RATES
+    def __init__(self, conversion_rates: Optional[Dict[str, float]] = None):
+        """Inicializa calculadora de métricas de decil.
+
+        Args:
+            conversion_rates: taxas de conversão esperadas por decil (ClientConfig.business.conversion_rates).
+                              Se None, usa CONVERSION_RATES de business_config.py (devclub legacy).
+        """
+        self.expected_rates = conversion_rates if conversion_rates is not None else CONVERSION_RATES
 
     def calculate_decile_performance(
         self,

@@ -40,6 +40,10 @@ class InfraConfig:
     bigquery_table_id: Optional[str] = None
     guru_api_base_url: Optional[str] = None
     guru_api_transactions_endpoint: Optional[str] = None
+    # Banco de dados (prep para A2 — pipeline dict por cliente)
+    # "RAILWAY" = compor URL a partir de RAILWAY_DB_* env vars (DevClub)
+    # Qualquer outro valor = nome da env var que contém a URL completa (Cloud SQL)
+    db_url_env_var: str = 'DATABASE_URL'
 
 
 @dataclass
@@ -66,6 +70,10 @@ class IngestionConfig:
     columns_to_remove: Optional[List[str]] = None           # #69 — substitui cleaning.colunas_remover
     column_rename_mapping: Optional[Dict[str, str]] = None  # #68
     dataset_cutoff_date: Optional[str] = None               # #38
+    # TMB dual-source: arquivo de pedidos (email + telefone, sem risco) (#154–#156)
+    tmb_pedidos_detection_columns: Optional[List[str]] = None   # #154 — colunas que identificam arquivo de pedidos
+    tmb_pedidos_column_mapping: Optional[Dict[str, str]] = None  # #155 — renomeação para formato canônico
+    tmb_pedidos_active_status_exclude: Optional[str] = None      # #156 — valor de status a excluir (ex: "Cancelado")
     # Unificação de colunas (#13–#20) — sub-dict com pesquisa_merges,
     # valor_columns, produto_columns, nome_columns, email_columns, telefone_columns
     column_unification: Optional[Dict[str, Any]] = None
@@ -75,6 +83,7 @@ class IngestionConfig:
 class UTMConfig:
     """Unificação de UTMs. (#35, #63, #67)"""
     source_to_outros: Optional[List[str]] = None            # #35
+    source_to_channel_mapping: Optional[Dict[str, str]] = None  # dev/retreino — ex: {'youtube-bio': 'youtube'}
     term_mappings: Optional[Dict[str, str]] = None          # #63
     term_outros_patterns: Optional[List[str]] = None        # #63
     term_long_id_threshold: int = 10                        # #67
@@ -83,12 +92,13 @@ class UTMConfig:
 @dataclass
 class MediumConfig:
     """Unificação de Medium — consolida 3 arquivos atuais. (#7, #36, #37, #50)"""
-    valid_categories: Optional[List[str]] = None            # #7
-    discontinued_categories: Optional[List[str]] = None     # #7
-    category_mappings: Optional[Dict[str, str]] = None      # #7
-    adv_prefix: Optional[str] = None                        # #36
-    manual_unifications: Optional[Dict[str, str]] = None    # #37
-    binary_top3_categories: Optional[List[str]] = None      # #50
+    valid_categories: Optional[List[str]] = None            # #7 — None = modo treino (threshold); preenchido = modo produção (whitelist)
+    discontinued_categories: Optional[List[str]] = None     # #7 — deprecated; mantido para compatibilidade
+    category_mappings: Optional[Dict[str, str]] = None      # #7 — mapeamento de variantes históricas
+    adv_prefix: Optional[str] = None                        # #36 — prefixo a remover (ex: 'ADV')
+    manual_unifications: Optional[Dict[str, str]] = None    # #37 — unificações adicionais pós-mapping
+    binary_top3_categories: Optional[List[str]] = None      # #50 — pendente resolução em encoding
+    frequency_threshold: float = 0.025                      # #7 — freq mínima para categoria válida no treino
 
 
 @dataclass
@@ -119,6 +129,8 @@ class FeatureConfig:
     columns_to_remove_post_cutoff: Optional[List[str]] = None  # #39
     columns_to_drop_after_fe: Optional[List[str]] = None    # #48
     pesquisa_name_column: Optional[str] = None              # #47
+    pesquisa_phone_column: Optional[str] = None             # #42 (também em MatchingConfig)
+    telefone_comprimento_keep_values: Optional[List[int]] = None  # #157 — valores válidos (ex: [9, 11]); resto → 'outros'
     ordering_rules: Optional[Dict[str, Any]] = None         # #2
     survey_column_stems: Optional[List[str]] = None         # #52
     utm_feature_prefixes_for_registry: Optional[List[str]] = None   # #65
@@ -139,8 +151,9 @@ class EncodingConfig:
 class ModelConfig:
     """Treino e artefatos de modelo. (#1, #10, #53, #54, #55, #56, #71, #72, #89)"""
     hyperparameters: Optional[Dict[str, Any]] = None        # #1
+    buyer_weights: Optional[Dict[str, float]] = None        # #158 — PESOS_COMPRADOR por decil (dev/retreino)
     mlflow_experiment_name: Optional[str] = None            # #10
-    mlflow_experiment_id: Optional[str] = None              # #71
+    mlflow_experiment_id: Optional[str] = None              # #71 — DEPRECATED: derivado em runtime via mlflow.get_run(). Mantido como fallback de emergência.
     model_name_template: Optional[str] = None               # #53
     legacy_model_dir: Optional[str] = None                  # #72
     business_config_path: Optional[str] = None              # #55
@@ -181,7 +194,7 @@ class CAPIConfig:
     high_quality_decils: Optional[List[str]] = None         # #105
     country_code: Optional[str] = None                      # #106
     currency: Optional[str] = None                          # #106
-    decil_to_value: Optional[Dict[str, float]] = None
+    # decil_to_value removido (DT-5): calculado em runtime como business.product_value × business.conversion_rates[decil]
 
 
 # ---------------------------------------------------------------------------
@@ -211,6 +224,21 @@ class RetainConfig:
     quality_gate_critical_threshold: float = 0.20          # #87
 
 
+@dataclass
+class BusinessConfig:
+    """Métricas de negócio e parâmetros de otimização de budget. (#90–#98)"""
+    product_value: float = 1563.75                          # #90 — valor médio ponderado Guru + TMB
+    conversion_rates: Optional[Dict[str, float]] = None    # #91 — taxa por decil D01–D10
+    spend_threshold_zero_leads: float = 100.0               # #92 — R$ mínimo com 0 leads para pausar
+    minimum_leads_threshold: int = 3                        # #93 — leads mínimos para dados suficientes
+    color_thresholds: Optional[Dict[str, int]] = None      # #94 — thresholds de cor (green_min, yellow_min)
+    min_roas_safety: float = 2.5                            # #95 — ROAS mínimo de segurança
+    cap_variation_max: float = 100.0                        # #96 — cap de aumento de budget (%)
+    confidence_sigmoid_l50: float = 15.0                    # #97 — ponto médio da sigmoid de confiança
+    confidence_sigmoid_k: float = 0.15                      # #97 — inclinação da sigmoid
+    roas_target: float = 8.0                                # #98 — ROAS alvo para confiança máxima
+
+
 # ---------------------------------------------------------------------------
 # ClientConfig — ponto de entrada
 # ---------------------------------------------------------------------------
@@ -238,6 +266,7 @@ class ClientConfig:
     capi: CAPIConfig = field(default_factory=CAPIConfig)
     api: APIConfig = field(default_factory=APIConfig)
     retrain: RetainConfig = field(default_factory=RetainConfig)
+    business: BusinessConfig = field(default_factory=BusinessConfig)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "ClientConfig":
@@ -258,6 +287,7 @@ class ClientConfig:
             capi=_make(CAPIConfig, data.get("capi", {})),
             api=_make(APIConfig, data.get("api", {})),
             retrain=_make(RetainConfig, data.get("retrain", {})),
+            business=_make(BusinessConfig, data.get("business", {})),
         )
 
     def validate(self) -> None:

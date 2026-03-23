@@ -24,7 +24,7 @@ from google.auth import default as gauth_default
 # Importar funções de normalização existentes
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from src.matching.matching_email_telefone import normalizar_email, normalizar_telefone_robusto
+from src.core.utils import normalizar_email, normalizar_telefone_robusto
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,8 @@ def get_active_model_path() -> Path:
         FileNotFoundError: Se active_model.yaml não existir
         KeyError: Se estrutura do YAML estiver incorreta
     """
-    config_path = Path(__file__).parent.parent.parent / "configs" / "active_model.yaml"
+    # TODO multi-client: derivar client_id do ClientConfig e usar active_models/{client_id}.yaml
+    config_path = Path(__file__).parent.parent.parent / "configs" / "active_models" / "devclub.yaml"
 
     if not config_path.exists():
         raise FileNotFoundError(
@@ -53,7 +54,13 @@ def get_active_model_path() -> Path:
 
     active_model = config['active_model']
     if 'mlflow_run_id' in active_model:
-        model_path_str = str(Path('mlruns') / '1' / active_model['mlflow_run_id'] / 'artifacts')
+        _run_id = active_model['mlflow_run_id']
+        try:
+            import mlflow as _mlflow
+            _experiment_id = _mlflow.get_run(_run_id).info.experiment_id
+        except Exception:
+            _experiment_id = '1'
+        model_path_str = str(Path('mlruns') / _experiment_id / _run_id / 'artifacts')
     else:
         model_path_str = active_model['model_path']
     model_path = Path(__file__).parent.parent.parent / model_path_str

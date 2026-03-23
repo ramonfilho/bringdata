@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+from typing import Annotated, List, Dict, Any, Optional
 import io
 import time
 import tempfile
@@ -24,26 +24,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Importar pipeline V2
 from src.production_pipeline import LeadScoringPipeline
-from src.features.engineering import create_derived_features
-from src.features.encoding import apply_categorical_encoding
 
 # Importar integrações
-from api.meta_integration import MetaAdsIntegration, enrich_utm_analysis_with_costs, enrich_utm_with_hierarchy
-from api.meta_config import META_CONFIG, BUSINESS_CONFIG
-from api.economic_metrics import enrich_utm_with_economic_metrics
 
 # Importar módulos CAPI
 from api.database import get_db, init_database, create_lead_capi, count_leads, count_leads_with_fbp, count_leads_with_fbc, get_leads_by_emails, LeadCAPI
 from api.capi_integration import send_batch_events
-from fastapi import Depends, Request
+from fastapi import Depends, Header, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from src.model.decil_thresholds import atribuir_decil_por_threshold
-
-# Padrões de UTMs inválidos (bare names e genéricos)
-BARE_CAMPAIGN_NAMES = ['DEVLF', 'devlf']                      # Prefixos incompletos
-BARE_MEDIUM_NAMES = ['dgen', 'paid']                          # Termos genéricos sem estrutura
-GENERIC_TERMS = ['fb', 'ig', 'instagram', 'facebook']         # Apenas redes sociais
 
 # URL do Google Sheets para monitoramento
 GOOGLE_SHEETS_URL = os.getenv(
@@ -107,36 +97,84 @@ app = FastAPI(
 )
 
 # Adicionar CORS para Google Apps Script e Landing Pages
+# Origins base (infra-independente de cliente)
+_BASE_ORIGINS = [
+    "https://script.google.com",
+    "https://script.googleusercontent.com",
+    "http://localhost:8001",
+    "http://localhost:8000",
+]
+
+# Carregar origins específicas de cada cliente a partir de configs/clients/*.yaml
+_client_origins: list = []
+try:
+    from pathlib import Path
+    from src.core.client_config import ClientConfig as _ClientConfig
+    _clients_dir = Path(__file__).parent.parent / 'configs' / 'clients'
+    for _cfg_path in sorted(_clients_dir.glob('*.yaml')):
+        try:
+            _cfg = _ClientConfig.from_yaml(str(_cfg_path))
+            if _cfg.api and _cfg.api.cors_origins:
+                _client_origins.extend(_cfg.api.cors_origins)
+        except Exception:
+            pass
+except Exception:
+    pass
+
+_ALL_ORIGINS = _BASE_ORIGINS + list(dict.fromkeys(_client_origins))  # preserva ordem, remove dups
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://script.google.com",
-        "https://script.googleusercontent.com",
-        "http://localhost:8001",
-        "http://localhost:8000",
-        "https://lp.devclub.com.br",
-        "*"  # Permitir todos (TEMPORÁRIO - em produção especificar domínios)
-    ],
+    allow_origins=_ALL_ORIGINS,
     allow_methods=["POST", "GET", "OPTIONS"],
     allow_headers=["*"],
     allow_credentials=True,
 )
 
-# Variável global para o pipeline
-pipeline = None
+# A2: dicionário de pipelines indexado por client_id
+pipelines: Dict[str, LeadScoringPipeline] = {}
 
-def initialize_pipeline():
-    """Inicializa o pipeline de lead scoring com modelo ativo do configs/active_model.yaml"""
-    global pipeline
-    try:
-        logger.info("Inicializando pipeline de Lead Scoring...")
-        # Usar modelo ativo do configs/active_model.yaml (não passar model_name)
-        pipeline = LeadScoringPipeline()
-        logger.info("Pipeline inicializado com sucesso!")
-        return True
-    except Exception as e:
-        logger.error(f"Erro ao inicializar pipeline: {e}")
-        return False
+
+def initialize_pipelines() -> bool:
+    """Inicializa pipelines para todos os clientes em configs/clients/*.yaml"""
+    global pipelines
+    from pathlib import Path
+    configs_dir = Path(__file__).parent.parent / 'configs' / 'clients'
+    success = False
+    for cfg_path in sorted(configs_dir.glob('*.yaml')):
+        client_id = cfg_path.stem
+        try:
+            logger.info(f"Inicializando pipeline '{client_id}'...")
+            pipelines[client_id] = LeadScoringPipeline(client_id=client_id)
+            logger.info(f"Pipeline '{client_id}' inicializado com sucesso!")
+            success = True
+        except Exception as e:
+            logger.error(f"Erro ao inicializar pipeline '{client_id}': {e}")
+    return success
+
+
+def get_active_pipeline(
+    x_client_id: str = Header(default='devclub', alias='X-Client-ID')
+) -> LeadScoringPipeline:
+    """Dependency: retorna pipeline do cliente indicado pelo header X-Client-ID."""
+    p = pipelines.get(x_client_id)
+    if p is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cliente '{x_client_id}' nao configurado. Clientes ativos: {list(pipelines.keys())}"
+        )
+    return p
+
+
+def get_optional_pipeline(
+    x_client_id: str = Header(default='devclub', alias='X-Client-ID')
+) -> Optional[LeadScoringPipeline]:
+    """Dependency: retorna pipeline ou None se cliente nao configurado."""
+    return pipelines.get(x_client_id)
+
+
+PipelineDep = Annotated[LeadScoringPipeline, Depends(get_active_pipeline)]
+PipelineOptDep = Annotated[Optional[LeadScoringPipeline], Depends(get_optional_pipeline)]
 
 # DEPRECATED: Decis agora são calculados por janela de análise
 # def convert_decile_to_numeric(decile_str: str) -> int:
@@ -150,10 +188,10 @@ def initialize_pipeline():
 async def startup_event():
     """Inicialização da aplicação"""
     logger.info("🚀 Iniciando Smart Ads API V2...")
-    if not initialize_pipeline():
-        logger.error("❌ Falha ao inicializar pipeline!")
+    if not initialize_pipelines():
+        logger.error("❌ Falha ao inicializar pipelines!")
     else:
-        logger.info("✅ API V2 pronta para receber requisições!")
+        logger.info(f"✅ API V2 pronta — pipelines ativos: {list(pipelines.keys())}")
 
     # Inicializar database
     if init_database():
@@ -179,24 +217,23 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check detalhado"""
-    pipeline_status = "healthy" if pipeline is not None else "unhealthy"
-    model_loaded = pipeline is not None
+    pipeline_status = "healthy" if pipelines else "unhealthy"
+    model_loaded = bool(pipelines)
 
     return {
         "status": "healthy",
         "pipeline_status": pipeline_status,
         "model_loaded": model_loaded,
+        "active_clients": list(pipelines.keys()),
         "timestamp": datetime.now().isoformat(),
         "version": "2.0.0"
     }
 
 @app.get("/model/info")
-async def get_model_info():
+async def get_model_info(pipeline: PipelineDep):
     """
     Retorna informações sobre o modelo: metadados, performance e feature importances
     """
-    if pipeline is None:
-        raise HTTPException(status_code=503, detail="Pipeline não inicializado")
 
     try:
         # Garantir que o modelo está carregado
@@ -213,7 +250,8 @@ async def get_model_info():
         try:
             import json
             from pathlib import Path
-            mapping_file = Path(__file__).parent.parent / "arquivos_modelo" / "feature_name_mapping_v1_devclub_rf_temporal_single.json"
+            model_name = metadata.get("model_info", {}).get("model_name", "")
+            mapping_file = Path(__file__).parent.parent / "arquivos_modelo" / f"feature_name_mapping_{model_name}.json"
             if mapping_file.exists():
                 with open(mapping_file) as f:
                     mapping_data = json.load(f)
@@ -247,17 +285,11 @@ async def get_model_info():
         raise HTTPException(status_code=500, detail=f"Erro ao obter informações do modelo: {str(e)}")
 
 @app.post("/predict/batch", response_model=BatchPredictionResponse)
-async def predict_batch_json(request: BatchPredictionRequest):
+async def predict_batch_json(request: BatchPredictionRequest, pipeline: PipelineDep):
     """
     Predição em batch via JSON
     Otimizado para Google Apps Script
     """
-    global pipeline
-
-    # Verificar pipeline
-    if pipeline is None:
-        if not initialize_pipeline():
-            raise HTTPException(status_code=500, detail="Pipeline não inicializado")
 
     start_time = time.time()
     logger.info(f"📊 Processando {len(request.leads)} leads (Request ID: {request.request_id})")
@@ -352,16 +384,11 @@ async def predict_batch_json(request: BatchPredictionRequest):
             os.remove(temp_file)
 
 @app.post("/predict/csv")
-async def predict_batch_csv(file: UploadFile = File(...)):
+async def predict_batch_csv(pipeline: PipelineDep, file: UploadFile = File(...)):
     """
     Predição em batch via upload CSV
     Para testes ou uploads manuais
     """
-    global pipeline
-
-    if pipeline is None:
-        if not initialize_pipeline():
-            raise HTTPException(status_code=500, detail="Pipeline não inicializado")
 
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Apenas arquivos CSV são aceitos")
@@ -429,7 +456,7 @@ class DecilCalculationResponse(BaseModel):
     timestamp: str
 
 @app.post("/calculate_decils", response_model=DecilCalculationResponse)
-async def calculate_decils(request: DecilCalculationRequest):
+async def calculate_decils(request: DecilCalculationRequest, pipeline: PipelineDep):
     """
     Calcula decis para scores já existentes (útil para backfill).
 
@@ -439,11 +466,6 @@ async def calculate_decils(request: DecilCalculationRequest):
     Returns:
         Lista de scores + decis calculados
     """
-    global pipeline
-
-    if pipeline is None:
-        if not initialize_pipeline():
-            raise HTTPException(status_code=500, detail="Pipeline não inicializado")
 
     try:
         logger.info(f"🎯 Calculando decis para {len(request.scores)} scores...")
@@ -563,6 +585,7 @@ class UpdateSurveyRequest(BaseModel):
 async def webhook_lead_capture(
     request: Request,
     lead_data: LeadCaptureRequest,
+    pipeline: PipelineDep,
     db: Session = Depends(get_db)
 ):
     """
@@ -616,7 +639,8 @@ async def webhook_lead_capture(
             'pretende_faculdade': lead_data.pretende_faculdade,
             'investiu_curso_online': lead_data.investiu_curso_online,
             'interesse_programacao': lead_data.interesse_programacao,
-            'cidade': lead_data.cidade
+            'cidade': lead_data.cidade,
+            'client_id': pipeline._client_config.client_id,
         }
 
         # Salvar no banco
@@ -639,23 +663,12 @@ async def webhook_lead_capture(
                 # O modelo foi treinado com nomes originais do Sheets
                 lead_dict_raw = lead_record.to_dict()
 
-                # Mapeamento de colunas normalizadas → nomes do Sheets
-                column_mapping = {
-                    'email': 'E-mail',
-                    'name': 'Nome Completo',
-                    'phone': 'Telefone',
-                    'genero': 'O seu gênero:',
-                    'idade': 'Qual a sua idade?',
-                    'ocupacao': 'O que você faz atualmente?',
-                    'faixa_salarial': 'Atualmente, qual a sua faixa salarial?',
-                    'cartao_credito': 'Você possui cartão de crédito?',
-                    'interesse_evento': 'O que mais você quer ver no evento?',
-                    'estudou_programacao': 'Já estudou programação?',
-                    'pretende_faculdade': 'Você já fez/faz/pretende fazer faculdade?',
-                    'investiu_curso_online': 'Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?',
-                    'interesse_programacao': 'O que mais te chama atenção na profissão de Programador?',
-                    'cidade': 'cidade'
-                }
+                # Mapeamento de colunas normalizadas → nomes do Sheets (vem de ClientConfig)
+                column_mapping = (
+                    pipeline._client_config.api.sheets_column_names
+                    if pipeline and pipeline._client_config.api and pipeline._client_config.api.sheets_column_names
+                    else {}
+                )
 
                 # Aplicar mapeamento
                 lead_dict_mapped = {}
@@ -724,7 +737,9 @@ async def webhook_lead_capture(
                     'user_agent': lead_record.user_agent,
                     'client_ip': lead_record.client_ip,
                     'event_source_url': lead_record.event_source_url
-                }], db)
+                }], db, capi_config=pipeline._client_config.capi,
+                    business_config=pipeline._client_config.business,
+                    client_id=pipeline._client_config.client_id)
 
                 logger.info(f"✅ CAPI enviado: {capi_result.get('success', 0)}/{capi_result.get('total', 0)} eventos")
 
@@ -749,6 +764,7 @@ async def webhook_lead_capture(
 async def webhook_update_survey(
     request: Request,
     survey_data: UpdateSurveyRequest,
+    pipeline: PipelineDep,
     db: Session = Depends(get_db)
 ):
     """
@@ -768,7 +784,7 @@ async def webhook_update_survey(
         logger.info(f"📊 Página 2 - Atualizando lead com dados da pesquisa: {survey_data.email}")
 
         # 1. BUSCAR LEAD EXISTENTE
-        existing_lead = get_lead_by_email(db, survey_data.email)
+        existing_lead = get_lead_by_email(db, survey_data.email, client_id=pipeline._client_config.client_id)
 
         if not existing_lead:
             logger.error(f"❌ Lead não encontrado: {survey_data.email}")
@@ -837,31 +853,12 @@ async def webhook_update_survey(
             # Preparar dados para ML (com mapeamento de colunas)
             lead_dict_raw = existing_lead.to_dict()
 
-            # Mapeamento: PostgreSQL → Google Sheets (nomes originais do modelo)
-            column_mapping = {
-                'email': 'E-mail',
-                'name': 'Nome Completo',
-                'phone': 'Telefone',
-                'genero': 'O seu gênero:',
-                'idade': 'Qual a sua idade?',
-                'ocupacao': 'O que você faz atualmente?',
-                'faixa_salarial': 'Atualmente, qual a sua faixa salarial?',
-                'cartao_credito': 'Você possui cartão de crédito?',
-                'interesse_evento': 'O que mais você quer ver no evento?',
-                'estudou_programacao': 'Já estudou programação?',
-                'pretende_faculdade': 'Você já fez/faz/pretende fazer faculdade?',
-                'investiu_curso_online': 'Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?',
-                'interesse_programacao': 'O que mais te chama atenção na profissão de Programador?',
-                'cidade': 'cidade',
-                # Campos adicionados para fix de scoring (features faltantes)
-                'created_at': 'Data',
-                'utm_source': 'Source',
-                'utm_medium': 'Medium',
-                'utm_campaign': 'Campaign',
-                'utm_term': 'Term',
-                'utm_content': 'Content',
-                'tem_comp': 'Tem computador/notebook?'
-            }
+            # Mapeamento: PostgreSQL → Google Sheets (nomes originais do modelo, vem de ClientConfig)
+            column_mapping = (
+                pipeline._client_config.api.sheets_column_names
+                if pipeline and pipeline._client_config.api and pipeline._client_config.api.sheets_column_names
+                else {}
+            )
 
             # Aplicar mapeamento
             lead_dict_mapped = {}
@@ -937,7 +934,9 @@ async def webhook_update_survey(
                     'genero': existing_lead.genero,
                     'cidade': existing_lead.cidade
                 }
-            }], db)
+            }], db, capi_config=pipeline._client_config.capi,
+                business_config=pipeline._client_config.business,
+                client_id=pipeline._client_config.client_id)
 
             logger.info(f"✅ CAPI enviado: {capi_result.get('success', 0)}/{capi_result.get('total', 0)} eventos")
 
@@ -1023,6 +1022,7 @@ async def lead_capture_stats(
 
 @app.get("/webhook/lead_capture/recent")
 async def get_recent_leads_endpoint(
+    pipeline: PipelineOptDep,
     limit: int = 10,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -1059,7 +1059,7 @@ async def get_recent_leads_endpoint(
             leads = query.order_by(LeadCAPI.created_at.desc()).limit(limit).all()
         else:
             # Sem filtros, usar função existente
-            leads = get_recent_leads(db, limit=limit)
+            leads = get_recent_leads(db, limit=limit, client_id=pipeline._client_config.client_id if pipeline else 'devclub')
 
         return {
             "total": len(leads),
@@ -1073,6 +1073,7 @@ async def get_recent_leads_endpoint(
 
 @app.post("/webhook/lead_capture/by_emails")
 async def get_leads_by_emails_endpoint(
+    pipeline: PipelineOptDep,
     request: dict,
     db: Session = Depends(get_db)
 ):
@@ -1098,7 +1099,7 @@ async def get_leads_by_emails_endpoint(
             raise HTTPException(status_code=400, detail="Lista de emails é obrigatória")
 
         # Buscar leads
-        leads = get_leads_by_emails(db, emails)
+        leads = get_leads_by_emails(db, emails, client_id=pipeline._client_config.client_id if pipeline else 'devclub')
 
         # Filtrar por data se fornecido
         if start_date or end_date:
@@ -1188,6 +1189,7 @@ class CapiCheckSentRequest(BaseModel):
 @app.post("/capi/process_daily_batch")
 async def process_daily_batch_capi(
     request: CapiBatchRequest,
+    pipeline: PipelineDep,
     db: Session = Depends(get_db)
 ):
     """
@@ -1314,7 +1316,7 @@ async def process_daily_batch_capi(
         # ETAPA 3: BUSCAR DADOS CAPI DO BANCO
         # ====================================================================
         emails = list(decil_map.keys())
-        leads_capi = get_leads_by_emails(db, emails)
+        leads_capi = get_leads_by_emails(db, emails, client_id=pipeline._client_config.client_id)
 
         # Criar mapeamento email → dados CAPI
         # Prioriza registros com first_name preenchido (evita sobrescrever com registro incompleto)
@@ -1427,7 +1429,9 @@ async def process_daily_batch_capi(
         logger.info(f"      - Com AMBOS: {leads_with_both}/{len(enriched_leads)} ({leads_with_both/len(enriched_leads)*100:.1f}%)")
 
         # Enviar batch (com db session para registrar envios)
-        results = send_batch_events(enriched_leads, db=db)
+        results = send_batch_events(enriched_leads, db=db, capi_config=pipeline._client_config.capi,
+                                    business_config=pipeline._client_config.business,
+                                    client_id=pipeline._client_config.client_id)
 
         logger.info(f"✅ Batch CAPI processado: {results['success']}/{results['total']} enviados")
 
@@ -1453,6 +1457,7 @@ async def process_daily_batch_capi(
 @app.post("/capi/check_sent")
 async def check_capi_sent(
     request: CapiCheckSentRequest,
+    pipeline: PipelineOptDep,
     db: Session = Depends(get_db)
 ):
     """
@@ -1475,7 +1480,7 @@ async def check_capi_sent(
         logger.info(f"🔍 Verificando {len(request.emails)} emails nos logs CAPI")
 
         # Buscar leads já enviados
-        sent_emails = get_leads_already_sent_to_capi(db, request.emails)
+        sent_emails = get_leads_already_sent_to_capi(db, request.emails, client_id=pipeline._client_config.client_id if pipeline else 'devclub')
 
         logger.info(f"✅ {len(sent_emails)}/{len(request.emails)} já foram enviados para CAPI")
 
@@ -1719,931 +1724,6 @@ async def send_purchase_events(request: SendPurchaseEventsRequest):
 
     return results
 
-
-# === ANÁLISE UTM COM CUSTOS ===
-
-class UTMAnalysisRequest(BaseModel):
-    """Request para análise UTM com custos"""
-    leads: List[LeadData] = Field(..., min_items=1)  # Sem limite máximo - batching interno
-    account_id: str = Field(..., description="ID da conta Meta Ads (ex: act_123456)")
-    product_value: Optional[float] = Field(default=None, description="Valor do produto (padrão: config)")
-    min_roas: Optional[float] = Field(default=None, description="ROAS mínimo (padrão: 2.0)")
-
-class UTMDimensionMetrics(BaseModel):
-    """Métricas de uma dimensão UTM"""
-    campaign: Optional[str] = None  # Para adsets e ads: nome da campanha de origem
-    adset: Optional[str] = None     # Para ads: nome do adset de origem
-    value: str
-    leads: int
-    spend: float
-    cpl: float
-    taxa_proj: float
-    receita_proj: float     # Receita projetada (NOVO - Margem de Contribuição)
-    margem_contrib: float   # Margem de Contribuição (NOVO - substitui margem%)
-    roas_proj: float
-    acao: str
-    budget_current: float  # Orçamento atual (gasto do período)
-    budget_target: float   # Orçamento alvo (baseado na ação)
-
-class UTMPeriodAnalysis(BaseModel):
-    """Análise UTM para um período"""
-    campaign: List[UTMDimensionMetrics]
-    medium: List[UTMDimensionMetrics]
-    ad: List[UTMDimensionMetrics]
-    google_ads: List[UTMDimensionMetrics]
-    # Metadados do período
-    period_start: str  # Data/hora do lead mais antigo (ISO format)
-    period_end: str    # Data/hora do lead mais recente (ISO format)
-    total_leads: int   # Total de leads analisados
-    meta_leads: int    # Leads do Meta/Facebook
-    google_leads: int  # Leads do Google Ads
-
-class UTMAnalysisResponse(BaseModel):
-    """Response completa da análise UTM"""
-    request_id: str
-    periods: Dict[str, UTMPeriodAnalysis]  # '1D', '3D', '7D', 'Total'
-    config: Dict[str, Any]  # product_value, min_roas usado
-    processing_time_seconds: float
-    timestamp: str
-
-@app.post("/analyze_utms_with_costs", response_model=UTMAnalysisResponse)
-async def analyze_utms_with_costs(request: UTMAnalysisRequest):
-    """
-    Análise UTM enriquecida com custos do Meta Ads e métricas econômicas
-
-    Fluxo:
-    1. Executar predições (lead_score, decile)
-    2. Buscar custos da API Meta (1D, 3D, 7D, Total)
-    3. Calcular análise UTM por dimensão
-    4. Enriquecer com métricas econômicas (CPL, ROAS, Margem, Ação)
-    5. Retornar estrutura por período
-    """
-    global pipeline
-
-    # Verificar pipeline
-    if pipeline is None:
-        if not initialize_pipeline():
-            raise HTTPException(status_code=500, detail="Pipeline não inicializado")
-
-    start_time = time.time()
-    request_id = str(uuid.uuid4())
-
-    logger.info(f"📊 Iniciando análise UTM com custos (Request ID: {request_id})")
-    logger.info(f"   Leads: {len(request.leads)} | Account: {request.account_id}")
-
-    temp_file = None  # Para limpeza no finally (apenas para caso de lote único)
-
-    try:
-        # Configuração
-        product_value = request.product_value or BUSINESS_CONFIG['product_value']
-        min_roas = request.min_roas or BUSINESS_CONFIG['min_roas']
-        conversion_rates = BUSINESS_CONFIG['conversion_rates']
-
-        logger.info(f"   Product Value: R$ {product_value:.2f} | Min ROAS: {min_roas}x")
-
-        # 1. VERIFICAR SE JÁ EXISTEM PREDIÇÕES
-        total_leads = len(request.leads)
-        logger.info(f"   Total de leads: {total_leads}")
-
-        # Debug: mostrar estrutura do primeiro lead
-        if total_leads > 0:
-            first_lead = request.leads[0].data
-            logger.info(f"   🔍 DEBUG: Chaves do primeiro lead: {list(first_lead.keys())[:10]}...")
-            logger.info(f"   🔍 DEBUG: Tem 'lead_score'? {'lead_score' in first_lead}")
-            logger.info(f"   🔍 DEBUG: Tem 'decile'? {'decile' in first_lead}")
-
-            # Verificar se leads já têm predições (apenas lead_score é necessário)
-            has_predictions = 'lead_score' in first_lead
-            logger.info(f"   🔍 DEBUG: has_predictions = {has_predictions}")
-        else:
-            logger.error("   ❌ ERRO: Nenhum lead recebido!")
-            raise HTTPException(status_code=400, detail="Nenhum lead recebido")
-
-        if has_predictions:
-            logger.info("✅ Leads já possuem predições existentes, pulando etapa de predição...")
-
-            # Construir DataFrame com predições existentes
-            lead_rows = []
-            for i, lead in enumerate(request.leads):
-                row = lead.data.copy()
-                row['_email'] = lead.email
-                row['_row_id'] = lead.row_id or str(i)
-                lead_rows.append(row)
-
-            result_df = pd.DataFrame(lead_rows)
-            result_df['email'] = result_df['_email']
-            result_df['row_id'] = result_df['_row_id']
-            result_df = result_df.drop(columns=['_email', '_row_id'], errors='ignore')
-
-            # Renomear colunas se necessário para padronizar
-            if 'decile' in result_df.columns:
-                result_df = result_df.rename(columns={'decile': 'decil'})
-
-            logger.info(f"✅ {len(result_df)} leads carregados com predições existentes")
-
-        else:
-            # 1. PREDIÇÕES COM BATCHING INTERNO
-            logger.info("🔄 Executando predições...")
-
-            # Processar em lotes se necessário
-            BATCH_SIZE = 500
-            all_results = []
-
-            if total_leads <= BATCH_SIZE:
-                # Processar todos de uma vez
-                logger.info("   Processando em lote único")
-                lead_rows = []
-                for i, lead in enumerate(request.leads):
-                    row = lead.data.copy()
-                    row['_email'] = lead.email
-                    row['_row_id'] = lead.row_id or str(i)
-                    lead_rows.append(row)
-
-                df = pd.DataFrame(lead_rows)
-
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp:
-                    model_df = df.drop(columns=['_email', '_row_id'], errors='ignore')
-                    model_df.to_csv(tmp, index=False)
-                    temp_file = tmp.name
-
-                result_df = pipeline.run(temp_file, with_predictions=True)
-
-                if result_df is None or len(result_df) == 0:
-                    raise HTTPException(status_code=500, detail="Pipeline retornou resultado vazio")
-
-                result_df['email'] = df['_email'].values
-                result_df['row_id'] = df['_row_id'].values
-
-                all_results.append(result_df)
-
-            else:
-                # Processar em lotes
-                num_batches = (total_leads + BATCH_SIZE - 1) // BATCH_SIZE
-                logger.info(f"   Processando em {num_batches} lotes de ~{BATCH_SIZE} leads")
-
-                for batch_idx in range(num_batches):
-                    start_idx = batch_idx * BATCH_SIZE
-                    end_idx = min(start_idx + BATCH_SIZE, total_leads)
-                    batch_leads = request.leads[start_idx:end_idx]
-
-                    logger.info(f"   Lote {batch_idx + 1}/{num_batches}: {len(batch_leads)} leads")
-
-                    lead_rows = []
-                    for i, lead in enumerate(batch_leads):
-                        row = lead.data.copy()
-                        row['_email'] = lead.email
-                        row['_row_id'] = lead.row_id or str(start_idx + i)
-                        lead_rows.append(row)
-
-                    batch_df = pd.DataFrame(lead_rows)
-
-                    batch_temp_file = None
-                    try:
-                        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp:
-                            model_df = batch_df.drop(columns=['_email', '_row_id'], errors='ignore')
-                            model_df.to_csv(tmp, index=False)
-                            batch_temp_file = tmp.name
-
-                        batch_result = pipeline.run(batch_temp_file, with_predictions=True)
-
-                        if batch_result is None or len(batch_result) == 0:
-                            logger.warning(f"   Lote {batch_idx + 1} retornou vazio")
-                            continue
-
-                        batch_result['email'] = batch_df['_email'].values
-                        batch_result['row_id'] = batch_df['_row_id'].values
-
-                        all_results.append(batch_result)
-
-                    finally:
-                        if batch_temp_file and os.path.exists(batch_temp_file):
-                            os.remove(batch_temp_file)
-
-            # Consolidar resultados
-            if not all_results:
-                raise HTTPException(status_code=500, detail="Nenhum resultado de predição obtido")
-
-            result_df = pd.concat(all_results, ignore_index=True)
-            logger.info(f"✅ Predições concluídas: {len(result_df)} leads consolidados")
-
-        # 2. CALCULAR JANELAS TEMPORAIS (dias completos: 00:00-23:59)
-        now = pd.Timestamp.now(tz=None)
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-
-        # Usar até 00:00 de hoje (= fim de ontem 23:59:59)
-        cutoff_end = today_start
-
-        # Calcular início para cada período
-        period_windows = {
-            '1D': cutoff_end - pd.Timedelta(days=1),
-            '3D': cutoff_end - pd.Timedelta(days=3),
-            '7D': cutoff_end - pd.Timedelta(days=7)
-        }
-
-        logger.info(f"📅 Janelas temporais (dias completos):")
-        for period, start_date in period_windows.items():
-            logger.info(f"   {period}: {start_date.strftime('%Y-%m-%d %H:%M')} até {cutoff_end.strftime('%Y-%m-%d %H:%M')}")
-
-        # 3. BUSCAR CUSTOS DA API META (HIERARQUIA COMPLETA POR PERÍODO)
-        logger.info("💰 Buscando hierarquia de custos da API Meta...")
-        meta_client = MetaAdsIntegration(
-            access_token=META_CONFIG['access_token'],
-            api_version=META_CONFIG['api_version']
-        )
-
-        # Buscar hierarquia completa para cada período separadamente
-        # IMPORTANTE: Meta API retorna dados AGREGADOS do período solicitado
-        # Não é possível buscar 7D e filtrar para 1D - os custos são diferentes!
-        hierarchy_by_period = {}
-        for period_key, start_date in period_windows.items():
-            # Converter timestamps para strings no formato YYYY-MM-DD
-            since_str = start_date.strftime('%Y-%m-%d')
-            until_str = cutoff_end.strftime('%Y-%m-%d')
-
-            logger.info(f"🔍 Buscando hierarquia Meta para {period_key} (de {since_str} até {until_str} exclusivo)...")
-
-            hierarchy_by_period[period_key] = meta_client.get_costs_hierarchy(
-                account_id=request.account_id,
-                since_date=since_str,
-                until_date=until_str
-            )
-
-        logger.info(f"✅ Hierarquia obtida para {len(hierarchy_by_period)} períodos")
-
-        # Log detalhado de hierarquia por período
-        for period_key, hierarchy in hierarchy_by_period.items():
-            total_campaigns = len(hierarchy['campaigns'])
-            total_spend = sum(c['spend'] for c in hierarchy['campaigns'].values())
-            total_adsets = sum(len(c['adsets']) for c in hierarchy['campaigns'].values())
-            total_ads = sum(sum(len(a['ads']) for a in c['adsets'].values()) for c in hierarchy['campaigns'].values())
-            logger.info(f"   {period_key}: {total_campaigns} campaigns, {total_adsets} adsets, {total_ads} ads | R$ {total_spend:.2f}")
-
-        # 4. CALCULAR DECIS USANDO THRESHOLDS FIXOS DO MODELO
-        logger.info("📊 Calculando decis usando thresholds fixos do modelo...")
-
-        from src.model.decil_thresholds import atribuir_decis_batch
-
-        # Carregar thresholds do modelo ativo
-        thresholds = pipeline.predictor.metadata.get('decil_thresholds', {}).get('thresholds')
-        threshold_name = pipeline.predictor.metadata.get('decil_thresholds', {}).get('name', 'unknown')
-
-        if not thresholds:
-            logger.error("❌ Thresholds não encontrados no modelo!")
-            raise HTTPException(status_code=500, detail="Thresholds do modelo não configurados")
-
-        logger.info(f"   ✅ Thresholds carregados: {threshold_name}")
-
-        # Garantir que lead_score é numérico
-        result_df['lead_score'] = pd.to_numeric(result_df['lead_score'], errors='coerce')
-
-        # Remover linhas com lead_score inválido
-        result_df = result_df[result_df['lead_score'].notna()].copy()
-
-        # Atribuir decis usando thresholds fixos
-        result_df['decil'] = atribuir_decis_batch(
-            result_df['lead_score'].values,
-            thresholds
-        )
-
-        logger.info(f"✅ Decis calculados para {len(result_df)} leads (thresholds fixos)")
-        logger.info(f"   📊 Distribuição: {result_df['decil'].value_counts().sort_index().to_dict()}")
-
-        # 5. GERAR ANÁLISE UTM POR PERÍODO E DIMENSÃO
-        logger.info("📈 Gerando análise UTM...")
-
-        periods_analysis = {}
-
-        for period_key, hierarchy in hierarchy_by_period.items():
-            logger.info(f"   Processando período: {period_key}")
-
-            # Extrair número de dias do período ('1D' → 1, '3D' → 3, etc.)
-            if period_key == 'Total':
-                # Para Total, calcular diferença real entre datas
-                period_days = 30  # Default conservador
-            else:
-                try:
-                    period_days = int(period_key.replace('D', ''))
-                except:
-                    period_days = 1  # Fallback
-
-            # Usar janela pré-calculada
-            cutoff_start = period_windows[period_key]
-
-            # Filtrar do dataset (que já tem decis calculados via thresholds)
-            if 'Data' in result_df.columns:
-                dates_df = pd.to_datetime(result_df['Data'], errors='coerce')
-                if dates_df.dt.tz is not None:
-                    dates_df = dates_df.dt.tz_localize(None)
-
-                # Filtrar: Data >= cutoff_start AND Data < cutoff_end
-                valid_dates_mask = dates_df.notna()
-                period_df = result_df[valid_dates_mask & (dates_df >= cutoff_start) & (dates_df < cutoff_end)].copy()
-                logger.info(f"   Leads no período {period_key}: {len(period_df)}")
-            else:
-                period_df = result_df.copy()
-                logger.warning(f"   Coluna 'Data' não encontrada, usando todos os leads")
-
-            # Capturar metadados: timestamps reais dos leads dentro da janela
-            if 'Data' in period_df.columns and len(period_df) > 0:
-                period_dates = pd.to_datetime(period_df['Data'], errors='coerce')
-                if period_dates.dt.tz is not None:
-                    period_dates = period_dates.dt.tz_localize(None)
-
-                # Filtrar apenas datas válidas para min/max
-                valid_period_dates = period_dates[period_dates.notna()]
-                if len(valid_period_dates) > 0:
-                    period_start = valid_period_dates.min().isoformat()
-                    period_end = valid_period_dates.max().isoformat()
-                else:
-                    period_start = cutoff_start.isoformat()
-                    period_end = cutoff_end.isoformat()
-            else:
-                period_start = cutoff_start.isoformat()
-                period_end = cutoff_end.isoformat()
-
-            # Contar leads por fonte
-            total_leads = len(period_df)
-            if 'Source' in period_df.columns:
-                meta_leads = (period_df['Source'] == 'facebook-ads').sum()
-                google_leads = (period_df['Source'] == 'google-ads').sum()
-            else:
-                meta_leads = total_leads
-                google_leads = 0
-
-            logger.info(f"   📊 Metadados: {period_start} até {period_end} | Total: {total_leads} | Meta: {meta_leads} | Google: {google_leads}")
-
-            # Validar que temos leads e decis
-            if len(period_df) == 0:
-                logger.warning(f"   ⚠️ Nenhum lead no período {period_key}")
-                continue
-
-            if 'decil' not in period_df.columns:
-                logger.error(f"   ❌ ERRO: Coluna 'decil' não encontrada após filtro")
-                # Fallback emergencial
-                period_df['decil'] = 'D5'
-
-            period_analysis = {}
-
-            # Dimensões a analisar (incluindo google_ads como dimensão separada)
-            # Removido 'term' - não tem custo no Meta API, análise inútil
-            dimensions = ['campaign', 'medium', 'ad', 'google_ads']
-
-            for dimension in dimensions:
-                # Tratamento especial para Google Ads
-                if dimension == 'google_ads':
-                    # Filtrar apenas leads do Google Ads
-                    if 'Source' in period_df.columns:
-                        google_df = period_df[period_df['Source'] == 'google-ads']
-
-                        if len(google_df) == 0:
-                            logger.info(f"   ℹ️ Nenhum lead Google Ads no período {period_key}")
-                            period_analysis[dimension] = []
-                            continue
-
-                        logger.info(f"   📊 {len(google_df)} leads Google Ads no período {period_key}")
-
-                        # Agrupar por Term (formato: "keyword--campaign_id--ad_id")
-                        # Extrair apenas keyword (primeira parte)
-                        def extract_keyword_from_term(term_value):
-                            """Extrai keyword da primeira parte do Term"""
-                            if pd.isna(term_value) or str(term_value).strip() == '':
-                                return None
-                            # Formato: "keyword--campaign_id--ad_id"
-                            parts = str(term_value).split('--')
-                            if len(parts) >= 1 and parts[0].strip() != '':
-                                return parts[0].strip()  # Keyword
-                            return None
-
-                        google_df['keyword'] = google_df['Term'].apply(extract_keyword_from_term)
-
-                        # Filtrar valores genéricos e vazios
-                        google_df_filtered = google_df[
-                            google_df['keyword'].notna() &
-                            ~google_df['keyword'].isin(['fb', 'ig', 'instagram', 'facebook'])
-                        ].copy()
-
-                        if len(google_df_filtered) == 0:
-                            logger.info(f"   ⚠️ Nenhum keyword válido encontrado para Google Ads")
-                            period_analysis[dimension] = []
-                            continue
-
-                        grouped = google_df_filtered.groupby('keyword').agg({
-                            'lead_score': 'count',
-                            'decil': lambda x: (x == 'D10').sum() / len(x) * 100 if len(x) > 0 else 0,
-                        }).rename(columns={'lead_score': 'leads', 'decil': 'pct_d10'})
-
-                        # Calcular distribuição de decis
-                        for value in grouped.index:
-                            value_df = google_df_filtered[google_df_filtered['keyword'] == value]
-                            for i in range(1, 11):
-                                decile_key = f'D{i}'
-                                pct = (value_df['decil'] == decile_key).sum() / len(value_df) * 100 if len(value_df) > 0 else 0
-                                grouped.at[value, f'%{decile_key}'] = pct
-
-                        grouped = grouped.reset_index().rename(columns={'keyword': 'value'})
-
-                        # Google Ads não tem custos no Meta API
-                        grouped['spend'] = 0.0
-
-                        # Enriquecer com métricas econômicas (todas zeradas/não aplicáveis)
-                        enriched = enrich_utm_with_economic_metrics(
-                            utm_df=grouped,
-                            product_value=product_value,
-                            min_roas=min_roas,
-                            conversion_rates=conversion_rates,
-                            dimension=dimension,
-                            period_days=period_days
-                        )
-
-                        enriched = enriched.fillna({
-                            'leads': 0,
-                            'spend': 0.0,
-                            'cpl': 0.0,
-                            'taxa_proj': 0.0,
-                            'receita_proj': 0.0,
-                            'margem_contrib': 0.0,
-                            'roas_proj': 0.0,
-                            'acao': 'N/A - Google Ads',
-                            'budget_current': 0.0,
-                            'budget_target': 0.0
-                        })
-
-                        period_analysis[dimension] = [
-                            UTMDimensionMetrics(
-                                campaign=None,
-                                value=str(row['value']) if pd.notna(row['value']) else '(vazio)',
-                                leads=int(row['leads']),
-                                spend=float(row['spend']),
-                                cpl=float(row['cpl']),
-                                taxa_proj=float(row['taxa_proj']),
-                                receita_proj=float(row['receita_proj']),
-                                margem_contrib=float(row['margem_contrib']),
-                                roas_proj=float(row['roas_proj']),
-                                acao=str(row['acao']),
-                                budget_current=float(row.get('budget_current', 0.0)),
-                                budget_target=float(row.get('budget_target', 0.0))
-                            )
-                            for _, row in enriched.iterrows()
-                        ]
-
-                        logger.info(f"✅ Google Ads analisado: {len(period_analysis[dimension])} grupos")
-                        continue
-                    else:
-                        period_analysis[dimension] = []
-                        continue
-
-                # Processar dimensões Meta normalmente
-                # Mapear para coluna do DataFrame
-                utm_col_map = {
-                    'campaign': 'Campaign',
-                    'medium': 'Medium',
-                    'term': 'Term',
-                    'ad': 'Content'  # Ad = Criativo = Coluna Content
-                }
-
-                utm_col = utm_col_map.get(dimension, 'Campaign')
-
-                # Agrupar por dimensão
-                if utm_col not in period_df.columns:
-                    logger.warning(f"⚠️  Coluna '{utm_col}' não encontrada, pulando dimensão '{dimension}'")
-                    period_analysis[dimension] = []
-                    continue
-
-                # Filtrar UTMs vazios e inválidos
-                utm_mask = (
-                    (period_df[utm_col].notna()) &
-                    (period_df[utm_col] != '') &
-                    (~period_df[utm_col].astype(str).str.contains('{{', regex=False))  # Placeholders
-                )
-
-                # Filtros específicos por dimensão
-                if dimension == 'campaign':
-                    # Remover bare names (case insensitive)
-                    for bare in BARE_CAMPAIGN_NAMES:
-                        utm_mask &= ~(period_df[utm_col].astype(str).str.upper() == bare.upper())
-
-                elif dimension == 'medium':
-                    # Remover bare names
-                    for bare in BARE_MEDIUM_NAMES:
-                        utm_mask &= ~(period_df[utm_col].astype(str).str.upper() == bare.upper())
-
-                elif dimension == 'term':
-                    # Remover termos genéricos (fb, ig, etc)
-                    for generic in GENERIC_TERMS:
-                        utm_mask &= ~(period_df[utm_col].astype(str).str.upper() == generic.upper())
-
-                # Aplicar filtro
-                period_df_filtered = period_df[utm_mask]
-
-                # Log detalhado de valores filtrados
-                filtered_count = len(period_df) - len(period_df_filtered)
-                if filtered_count > 0:
-                    filtered_df = period_df[~utm_mask]
-                    filtered_values = filtered_df[utm_col].value_counts()
-
-                    logger.info(f"   ⚠️ {filtered_count} leads filtrados de '{dimension}' ({period_key}):")
-                    for val, count in filtered_values.head(5).items():
-                        logger.info(f"      - '{val}': {count} leads (bare name/genérico)")
-
-                if len(period_df_filtered) == 0:
-                    logger.warning(f"⚠️ Nenhum lead com '{utm_col}' válido no período, pulando dimensão '{dimension}'")
-                    period_analysis[dimension] = []
-                    continue
-
-                # CORREÇÃO: Para Campaign, agrupar por Campaign ID (não por UTM completo)
-                if dimension == 'campaign':
-                    from api.meta_integration import extract_id_from_utm
-
-                    # Extrair Campaign ID de cada UTM
-                    period_df_filtered = period_df_filtered.copy()
-                    period_df_filtered['campaign_id'] = period_df_filtered[utm_col].apply(extract_id_from_utm)
-
-                    # Remover linhas sem Campaign ID
-                    period_df_filtered = period_df_filtered[period_df_filtered['campaign_id'].notna()]
-
-                    # Agrupar por Campaign ID
-                    grouped = period_df_filtered.groupby('campaign_id').agg({
-                        'lead_score': 'count',
-                        'decil': lambda x: (x == 'D10').sum() / len(x) * 100 if len(x) > 0 else 0,
-                    }).rename(columns={'lead_score': 'leads', 'decil': 'pct_d10'})
-
-                    # Calcular distribuição de decis
-                    for campaign_id in grouped.index:
-                        value_df = period_df_filtered[period_df_filtered['campaign_id'] == campaign_id]
-                        for i in range(1, 11):
-                            decile_key = f'D{i}'
-                            pct = (value_df['decil'] == decile_key).sum() / len(value_df) * 100 if len(value_df) > 0 else 0
-                            grouped.at[campaign_id, f'%{decile_key}'] = pct
-
-                    # Resetar index e renomear para 'value' (será o Campaign ID)
-                    grouped = grouped.reset_index().rename(columns={'campaign_id': 'value'})
-
-                elif dimension == 'medium':
-                    # Para adsets, agrupar por (campaign, adset) para separar mesmo nome em campanhas diferentes
-                    # Extrair campaign_id da coluna Campaign
-                    period_df_filtered = period_df_filtered.copy()
-
-                    # Verificar se temos coluna Campaign (utm_campaign)
-                    if 'Campaign' not in period_df_filtered.columns:
-                        logger.warning(f"⚠️  Coluna 'Campaign' não encontrada para matchear adsets. Usando apenas nome do adset.")
-                        # Fallback: agrupar só por nome do adset (comportamento antigo)
-                        grouped = period_df_filtered.groupby(utm_col).agg({
-                            'lead_score': 'count',
-                            'decil': lambda x: (x == 'D10').sum() / len(x) * 100 if len(x) > 0 else 0,
-                        }).rename(columns={'lead_score': 'leads', 'decil': 'pct_d10'})
-
-                        for value in grouped.index:
-                            value_df = period_df_filtered[period_df_filtered[utm_col] == value]
-                            for i in range(1, 11):
-                                decile_key = f'D{i}'
-                                pct = (value_df['decil'] == decile_key).sum() / len(value_df) * 100 if len(value_df) > 0 else 0
-                                grouped.at[value, f'%{decile_key}'] = pct
-
-                        grouped = grouped.reset_index().rename(columns={utm_col: 'value'})
-                        grouped['campaign_name'] = None  # Sem campaign info
-                    else:
-                        period_df_filtered['campaign_id'] = period_df_filtered['Campaign'].apply(extract_id_from_utm)
-
-                        # Criar mapeamento (campaign_id, adset_name) → adset_id da hierarquia
-                        campaign_adset_to_info = {}
-                        for campaign_id, campaign_data in hierarchy['campaigns'].items():
-                            for adset_id, adset_data in campaign_data['adsets'].items():
-                                key = (campaign_id, adset_data['name'])
-                                campaign_adset_to_info[key] = {
-                                    'adset_id': adset_id,
-                                    'campaign_name': campaign_data['name']
-                                }
-
-                        # Matchear cada lead para adset_id específico
-                        def match_adset(row):
-                            campaign_id = row['campaign_id']
-                            adset_name = row[utm_col]
-                            if pd.isna(campaign_id) or pd.isna(adset_name):
-                                return None, None
-                            key = (str(campaign_id), str(adset_name))
-                            info = campaign_adset_to_info.get(key)
-                            if info:
-                                return info['adset_id'], info['campaign_name']
-                            return None, None
-
-                        period_df_filtered[['adset_id', 'campaign_name']] = period_df_filtered.apply(
-                            match_adset, axis=1, result_type='expand'
-                        )
-
-                        # Remover linhas sem match
-                        before_match = len(period_df_filtered)
-                        period_df_filtered = period_df_filtered[period_df_filtered['adset_id'].notna()]
-                        after_match = len(period_df_filtered)
-                        if before_match > after_match:
-                            logger.info(f"   ⚠️  {before_match - after_match} leads sem match campaign+adset (removidos)")
-
-                        # Agrupar por adset_id (já é único por campanha)
-                        grouped = period_df_filtered.groupby('adset_id').agg({
-                            'lead_score': 'count',
-                            'campaign_name': 'first',  # Pegar o nome da campanha
-                            'decil': lambda x: (x == 'D10').sum() / len(x) * 100 if len(x) > 0 else 0,
-                        }).rename(columns={'lead_score': 'leads', 'decil': 'pct_d10'})
-
-                        # Calcular distribuição de decis
-                        for adset_id in grouped.index:
-                            value_df = period_df_filtered[period_df_filtered['adset_id'] == adset_id]
-                            for i in range(1, 11):
-                                decile_key = f'D{i}'
-                                pct = (value_df['decil'] == decile_key).sum() / len(value_df) * 100 if len(value_df) > 0 else 0
-                                grouped.at[adset_id, f'%{decile_key}'] = pct
-
-                        # Resetar index e renomear
-                        grouped = grouped.reset_index().rename(columns={'adset_id': 'value'})
-
-                elif dimension == 'ad':
-                    # Para ads, agrupar por nome e extrair campaign/adset das colunas Campaign/Medium
-                    period_df_filtered = period_df_filtered.copy()
-
-                    # Extrair campaign e adset names das colunas UTM
-                    if 'Campaign' in period_df_filtered.columns and 'Medium' in period_df_filtered.columns:
-                        # Campaign: extrair ID (formato "nome|ID")
-                        period_df_filtered['campaign_id'] = period_df_filtered['Campaign'].apply(extract_id_from_utm)
-
-                        # Medium: já contém NOME do adset (não ID), usar diretamente
-                        period_df_filtered['adset_name_from_utm'] = period_df_filtered['Medium']
-
-                        # Mapear campaign_id para nome
-                        campaign_id_to_name = {
-                            campaign_id: campaign_data['name']
-                            for campaign_id, campaign_data in hierarchy['campaigns'].items()
-                        }
-
-                        def get_campaign_name(row):
-                            """Obtém nome da campanha por ID, com fallback para nome do UTM"""
-                            campaign_id = row['campaign_id']
-                            if pd.notna(campaign_id):
-                                # Tentar buscar na hierarquia primeiro
-                                name = campaign_id_to_name.get(str(campaign_id))
-                                if name:
-                                    return name
-                            # Fallback: extrair nome do UTM Campaign (remover data e ID)
-                            campaign_utm = row.get('Campaign')
-                            if pd.notna(campaign_utm):
-                                import re
-                                # Remover campaign ID do final (|números)
-                                clean = re.sub(r'\|\d{18}$', '', str(campaign_utm))
-                                # Remover data do final (| YYYY-MM-DD)
-                                clean = re.sub(r'\|\s*\d{4}-\d{2}-\d{2}$', '', clean)
-                                return clean.strip()
-                            return None
-
-                        period_df_filtered['campaign_name'] = period_df_filtered.apply(get_campaign_name, axis=1)
-
-                        # adset_name inicial vem da coluna Medium
-                        period_df_filtered['adset_name'] = period_df_filtered['adset_name_from_utm']
-
-                        # CORREÇÃO: Detectar e corrigir UTMs genéricas usando hierarquia Meta
-                        GENERIC_UTMS = {'paid', 'dgen', 'facebook', 'instagram', 'meta', 'fb', 'ig', 'cpc'}
-
-                        def correct_generic_adset(row):
-                            """Corrige adset_name genérico buscando na hierarquia Meta por nome do ad"""
-                            try:
-                                adset_name = row['adset_name'] if 'adset_name' in row else None
-                                ad_name = row[utm_col] if utm_col in row else None
-
-                                # Se adset_name não é genérico ou está vazio, retornar como está
-                                if pd.isna(adset_name) or str(adset_name).lower() not in GENERIC_UTMS:
-                                    return adset_name
-
-                                # Se ad_name está vazio, não podemos corrigir
-                                if pd.isna(ad_name) or str(ad_name).strip() == '':
-                                    logger.debug(f"      ⚠️ Ad sem nome: adset_name='{adset_name}' (será filtrado)")
-                                    return None  # Será filtrado
-
-                                # Buscar ad_name na hierarquia para encontrar adset correto
-                                ad_name_lower = str(ad_name).lower()
-                                for campaign_id, campaign_data in hierarchy['campaigns'].items():
-                                    if not isinstance(campaign_data, dict) or 'adsets' not in campaign_data:
-                                        continue
-                                    for adset_id, adset_data in campaign_data['adsets'].items():
-                                        if not isinstance(adset_data, dict) or 'ads' not in adset_data:
-                                            continue
-                                        for ad_id, ad_data in adset_data['ads'].items():
-                                            if not isinstance(ad_data, dict) or 'name' not in ad_data:
-                                                continue
-                                            # Match por nome (case insensitive)
-                                            if ad_data['name'].lower() == ad_name_lower:
-                                                logger.info(f"      ✓ Corrigido '{adset_name}' → '{adset_data.get('name', 'Unknown')}' (ad: {str(ad_name)[:40]}...)")
-                                                return adset_data.get('name')
-
-                                # Não encontrou na hierarquia, filtrar
-                                logger.info(f"      🗑️ UTM genérica sem match: adset='{adset_name}', ad='{str(ad_name)[:40]}...'")
-                                return None
-                            except Exception as e:
-                                logger.error(f"      ❌ Erro em correct_generic_adset: {str(e)}")
-                                return row.get('adset_name') if hasattr(row, 'get') else None
-
-                        # Aplicar correção
-                        logger.info(f"   🔍 Verificando UTMs genéricas em {len(period_df_filtered)} ads...")
-                        period_df_filtered['adset_name'] = period_df_filtered.apply(correct_generic_adset, axis=1)
-
-                        # Filtrar ads com adset_name None (genéricos sem match)
-                        before_filter = len(period_df_filtered)
-                        period_df_filtered = period_df_filtered[period_df_filtered['adset_name'].notna()].copy()
-                        after_filter = len(period_df_filtered)
-                        if before_filter > after_filter:
-                            removed = before_filter - after_filter
-                            logger.info(f"   🗑️ Removidos {removed} ads com UTMs genéricas (sem match na hierarquia)")
-                    else:
-                        logger.warning(f"   ⚠️ Colunas Campaign ou Medium não encontradas para ads")
-                        period_df_filtered['campaign_name'] = None
-                        period_df_filtered['adset_name'] = None
-
-                    # Agrupar por nome do ad (coluna Content)
-                    grouped = period_df_filtered.groupby(utm_col).agg({
-                        'lead_score': 'count',
-                        'campaign_name': 'first',  # Pegar primeira ocorrência
-                        'adset_name': 'first',
-                        'decil': lambda x: (x == 'D10').sum() / len(x) * 100 if len(x) > 0 else 0,
-                    }).rename(columns={'lead_score': 'leads', 'decil': 'pct_d10'})
-
-                    # Calcular distribuição de decis
-                    for value in grouped.index:
-                        value_df = period_df_filtered[period_df_filtered[utm_col] == value]
-                        for i in range(1, 11):
-                            decile_key = f'D{i}'
-                            pct = (value_df['decil'] == decile_key).sum() / len(value_df) * 100 if len(value_df) > 0 else 0
-                            grouped.at[value, f'%{decile_key}'] = pct
-
-                    # Resetar index e renomear
-                    grouped = grouped.reset_index().rename(columns={utm_col: 'value'})
-
-                else:
-                    # Para outras dimensões, agrupar normalmente pelo UTM
-                    grouped = period_df_filtered.groupby(utm_col).agg({
-                        'lead_score': 'count',  # Número de leads
-                        'decil': lambda x: (x == 'D10').sum() / len(x) * 100 if len(x) > 0 else 0,  # %D10
-                    }).rename(columns={'lead_score': 'leads', 'decil': 'pct_d10'})
-
-                    # Calcular distribuição de decis para cada valor
-                    for value in grouped.index:
-                        value_df = period_df_filtered[period_df_filtered[utm_col] == value]
-                        for i in range(1, 11):
-                            decile_key = f'D{i}'
-                            pct = (value_df['decil'] == decile_key).sum() / len(value_df) * 100 if len(value_df) > 0 else 0
-                            grouped.at[value, f'%{decile_key}'] = pct
-
-                    grouped = grouped.reset_index().rename(columns={utm_col: 'value'})
-
-                # Adicionar custos usando hierarquia (evita duplicação)
-                grouped = enrich_utm_with_hierarchy(
-                    utm_analysis_df=grouped,
-                    hierarchy=hierarchy,
-                    dimension=dimension
-                )
-
-                # FILTRO: Para Campaign, remover linhas com spend=0 (indicam Campaign IDs inválidos)
-                if dimension == 'campaign':
-                    before_filter = len(grouped)
-                    grouped = grouped[grouped['spend'] > 0].copy()
-                    after_filter = len(grouped)
-                    if before_filter > after_filter:
-                        removed = before_filter - after_filter
-                        logger.info(f"   🗑️ Removidas {removed} campanhas com spend=0 (IDs inválidos)")
-
-                    # Substituir Campaign ID pelo nome legível
-                    id_to_name = {
-                        campaign_id: campaign_data['name']
-                        for campaign_id, campaign_data in hierarchy['campaigns'].items()
-                    }
-
-                    grouped['value'] = grouped['value'].apply(
-                        lambda x: id_to_name.get(str(x), str(x))
-                    )
-                    logger.info(f"   ✏️ IDs substituídos por nomes de campanha para exibição")
-
-                elif dimension == 'medium':
-                    # Filtrar adsets com spend=0
-                    before_filter = len(grouped)
-                    grouped = grouped[grouped['spend'] > 0].copy()
-                    after_filter = len(grouped)
-                    if before_filter > after_filter:
-                        removed = before_filter - after_filter
-                        logger.info(f"   🗑️ Removidos {removed} adsets com spend=0 (IDs inválidos)")
-
-                    # Substituir Adset ID pelo nome legível
-                    id_to_info = {}
-                    for campaign_id, campaign_data in hierarchy['campaigns'].items():
-                        for adset_id, adset_data in campaign_data['adsets'].items():
-                            id_to_info[adset_id] = adset_data['name']
-
-                    grouped['value'] = grouped['value'].apply(
-                        lambda x: id_to_info.get(str(x), str(x))
-                    )
-                    logger.info(f"   ✏️ IDs substituídos por nomes de adset para exibição")
-
-                elif dimension == 'ad':
-                    # Filtrar ads com spend=0
-                    before_filter = len(grouped)
-                    grouped = grouped[grouped['spend'] > 0].copy()
-                    after_filter = len(grouped)
-                    if before_filter > after_filter:
-                        removed = before_filter - after_filter
-                        logger.info(f"   🗑️ Removidos {removed} ads com spend=0")
-
-                    # Para ads, 'value' já é o nome (não ID), então não precisa substituir
-                    logger.info(f"   ✅ {len(grouped)} ads com custo > 0")
-
-                # Enriquecer com métricas econômicas
-                # Para campaigns e adsets (medium), usar budget info para condicionar ação
-                if dimension == 'campaign':
-                    budget_control_col = 'has_campaign_budget'
-                elif dimension == 'medium':
-                    budget_control_col = 'has_adset_budget'
-                else:
-                    budget_control_col = None
-
-                enriched = enrich_utm_with_economic_metrics(
-                    utm_df=grouped,
-                    product_value=product_value,
-                    min_roas=min_roas,
-                    conversion_rates=conversion_rates,
-                    dimension=dimension,
-                    budget_control_col=budget_control_col,
-                    period_days=period_days
-                )
-
-                # Tratar NaN em métricas calculadas (podem surgir de divisões por zero)
-                enriched = enriched.fillna({
-                    'leads': 0,
-                    'spend': 0.0,
-                    'cpl': 0.0,
-                    'taxa_proj': 0.0,
-                    'receita_proj': 0.0,
-                    'margem_contrib': 0.0,
-                    'roas_proj': 0.0,
-                    'acao': ''
-                })
-
-                # Converter para lista de dicts
-                metrics_list = []
-                for _, row in enriched.iterrows():
-                    # Para adsets, incluir campaign_name
-                    # Para ads, incluir campaign_name e adset_name
-                    campaign_value = None
-                    adset_value = None
-
-                    if dimension == 'medium':
-                        campaign_value = row.get('campaign_name')
-                    elif dimension == 'ad':
-                        campaign_value = row.get('campaign_name')
-                        adset_value = row.get('adset_name')
-
-                    metrics_list.append(UTMDimensionMetrics(
-                        campaign=campaign_value,
-                        adset=adset_value,
-                        value=str(row['value']) if pd.notna(row['value']) else '(vazio)',
-                        leads=int(row['leads']),
-                        spend=float(row['spend']),
-                        cpl=float(row['cpl']),
-                        taxa_proj=float(row['taxa_proj']),
-                        receita_proj=float(row['receita_proj']),
-                        margem_contrib=float(row['margem_contrib']),
-                        roas_proj=float(row['roas_proj']),
-                        acao=row['acao'],
-                        budget_current=float(row.get('budget_current', 0.0)),
-                        budget_target=float(row.get('budget_target', 0.0))
-                    ))
-
-                period_analysis[dimension] = metrics_list
-
-            # Adicionar metadados do período
-            period_analysis['period_start'] = period_start
-            period_analysis['period_end'] = period_end
-            period_analysis['total_leads'] = total_leads
-            period_analysis['meta_leads'] = meta_leads
-            period_analysis['google_leads'] = google_leads
-
-            periods_analysis[period_key] = UTMPeriodAnalysis(**period_analysis)
-
-        processing_time = time.time() - start_time
-
-        logger.info(f"✅ Análise concluída em {processing_time:.2f}s")
-
-        return UTMAnalysisResponse(
-            request_id=request_id,
-            periods=periods_analysis,
-            config={
-                'product_value': product_value,
-                'min_roas': min_roas
-            },
-            processing_time_seconds=round(processing_time, 2),
-            timestamp=datetime.now().isoformat()
-        )
-
-    except Exception as e:
-        import traceback
-        logger.error(f"❌ Erro na análise UTM: {str(e)}")
-        logger.error(f"Traceback completo:\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Erro na análise: {str(e)}")
-    finally:
-        if temp_file and os.path.exists(temp_file):
-            os.remove(temp_file)
 
 # =============================================================================
 # BIGQUERY SYNC ENDPOINTS
@@ -2908,6 +1988,7 @@ async def daily_monitoring_check_auto(
 
 @app.get("/monitoring/daily-check/railway", response_model=DailyCheckResponse)
 async def daily_monitoring_check_railway(
+    pipeline: PipelineOptDep,
     hours: int = 24,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -3067,7 +2148,7 @@ async def daily_monitoring_check_railway(
                 lead['pesquisa'] = {}
 
             try:
-                sheets_row = railway_lead_to_sheets_row(lead)
+                sheets_row = railway_lead_to_sheets_row(lead, client_config=pipeline._client_config if pipeline else None)
                 sheets_row['lead_score'] = float(lead['leadScore']) if lead.get('leadScore') else None
                 sheets_row['decil']      = f"D{int(lead['decil']):02d}" if lead.get('decil') else None
                 leads_data.append(sheets_row)
@@ -3686,7 +2767,7 @@ def _parse_validation_metrics(stdout: str) -> dict:
 # =============================================================================
 
 @app.post("/railway/process-pending")
-async def railway_process_pending():
+async def railway_process_pending(pipeline: PipelineDep):
     """
     Processa leads pendentes do Railway PostgreSQL (leadScore IS NULL).
 
@@ -3700,8 +2781,6 @@ async def railway_process_pending():
     5. Atualiza Railway: leadScore, decil, updatedAt
     6. Envia eventos CAPI para Meta
     """
-    if pipeline is None:
-        raise HTTPException(status_code=503, detail="Pipeline não inicializado")
 
     import pg8000.native
     import json as _json
@@ -3718,13 +2797,14 @@ async def railway_process_pending():
             password=os.environ['RAILWAY_DB_PASSWORD'],
         )
 
-        # 2. Buscar leads sem score (máximo 50 por execução)
+        # 2. Buscar leads sem score (máximo configurável por execução)
+        _polling_limit = pipeline._client_config.api.railway_polling_batch_size
         rows = railway_conn.run(
             'SELECT id, data, "nomeCompleto", email, telefone, pesquisa, '
             'source, medium, campaign, content, term, '
             '"remoteIp", "userAgent", fbc, fbp, "pageUrl" '
-            'FROM "Lead" WHERE "leadScore" IS NULL '
-            'ORDER BY "createdAt" ASC LIMIT 50'
+            f'FROM "Lead" WHERE "leadScore" IS NULL '
+            f'ORDER BY "createdAt" ASC LIMIT {_polling_limit}'
         )
 
         if not rows:
@@ -3763,7 +2843,7 @@ async def railway_process_pending():
         valid_leads = []
         for lead in lead_dicts:
             try:
-                sheets_row = railway_lead_to_sheets_row(lead)
+                sheets_row = railway_lead_to_sheets_row(lead, client_config=pipeline._client_config if pipeline else None)
                 sheets_rows.append(sheets_row)
                 valid_leads.append(lead)
             except Exception as e:
@@ -3858,7 +2938,9 @@ async def railway_process_pending():
         capi_result: Dict = {"success": 0, "total": 0, "errors": 0}
         if capi_leads:
             logger.info(f"📤 Enviando {len(capi_leads)} eventos CAPI (Railway)...")
-            capi_result = send_batch_events(capi_leads, db=None)
+            capi_result = send_batch_events(capi_leads, db=None, capi_config=pipeline._client_config.capi,
+                                            business_config=pipeline._client_config.business,
+                                            client_id=pipeline._client_config.client_id)
             logger.info(
                 f"✅ CAPI Railway: {capi_result.get('success', 0)}/"
                 f"{capi_result.get('total', 0)} enviados"
@@ -3909,12 +2991,12 @@ async def railway_process_pending():
 if __name__ == "__main__":
     import uvicorn
 
-    # Inicializar pipeline antes de iniciar o servidor
-    print("Inicializando pipeline...")
-    if initialize_pipeline():
-        print("Pipeline inicializado com sucesso!")
+    # Inicializar pipelines antes de iniciar o servidor
+    print("Inicializando pipelines...")
+    if initialize_pipelines():
+        print(f"Pipelines inicializados: {list(pipelines.keys())}")
     else:
-        print("AVISO: Pipeline não foi inicializado. Será inicializado na primeira requisição.")
+        print("AVISO: Nenhum pipeline inicializado.")
 
     # Iniciar o servidor
     print("Iniciando servidor na porta 8080...")

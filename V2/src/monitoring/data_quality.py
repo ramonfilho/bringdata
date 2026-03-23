@@ -569,12 +569,26 @@ class DataQualityMonitor:
     - Mudanças na distribuição de scores/decis
     """
 
-    def __init__(self, model_path: str):
+    def __init__(self, model_path: str, client_config=None):
         """
         Args:
-            model_path: Caminho para pasta do modelo ativo
+            model_path:    Caminho para pasta do modelo ativo
+            client_config: ClientConfig opcional — usado para encoding via core/,
+                           carregamento do modelo correto por client_id, e
+                           overrides de thresholds/missing_rate_ignore_columns
         """
+        from .config import THRESHOLDS, MISSING_RATE_IGNORE_COLUMNS
         self.model_path = model_path
+        self.client_config = client_config
+        monitoring = client_config.monitoring if client_config else None
+        self._thresholds = (
+            monitoring.thresholds if monitoring and monitoring.thresholds else THRESHOLDS
+        )
+        self._missing_rate_ignore_columns = (
+            monitoring.missing_rate_ignore_columns
+            if monitoring and monitoring.missing_rate_ignore_columns
+            else MISSING_RATE_IGNORE_COLUMNS
+        )
 
     def check(self, df: pd.DataFrame) -> List[Dict]:
         """
@@ -586,25 +600,25 @@ class DataQualityMonitor:
         Returns:
             Lista de alertas no formato dict (compatível com Alert.from_dict)
         """
-        from .config import THRESHOLDS, EXPECTED_DECIL_DISTRIBUTION
+        from .config import EXPECTED_DECIL_DISTRIBUTION
         from datetime import datetime, timezone
 
         alerts = []
 
         # 1. Category drift
-        if THRESHOLDS['category_drift']['enabled']:
+        if self._thresholds['category_drift']['enabled']:
             alerts.extend(self._check_category_drift(df))
 
         # 2. Distribution drift
-        if THRESHOLDS['distribution_drift']['enabled']:
+        if self._thresholds['distribution_drift']['enabled']:
             alerts.extend(self._check_distribution_drift(df))
 
         # 3. Missing rate
-        if THRESHOLDS['missing_rate']['enabled']:
+        if self._thresholds['missing_rate']['enabled']:
             alerts.extend(self._check_missing_rate(df))
 
         # 4. Score distribution
-        if THRESHOLDS['score_distribution']['enabled']:
+        if self._thresholds['score_distribution']['enabled']:
             alerts.extend(self._check_score_distribution(df))
 
         # Remover colunas de output do modelo ANTES do check de features
@@ -660,14 +674,13 @@ class DataQualityMonitor:
 
     def _check_distribution_drift(self, df: pd.DataFrame) -> List[Dict]:
         """Verifica mudanças drásticas nas proporções"""
-        from .config import THRESHOLDS
         from datetime import datetime, timezone
         alerts = []
 
         try:
             distribuicoes_esperadas = load_training_distributions(self.model_path)
-            threshold_cat = THRESHOLDS['distribution_drift']['categorical']
-            threshold_num = THRESHOLDS['distribution_drift']['numerical']
+            threshold_cat = self._thresholds['distribution_drift']['categorical']
+            threshold_num = self._thresholds['distribution_drift']['numerical']
 
             drift_results = check_distribution_drift(
                 df, distribuicoes_esperadas,
@@ -716,10 +729,9 @@ class DataQualityMonitor:
 
     def _check_missing_rate(self, df: pd.DataFrame) -> List[Dict]:
         """Verifica colunas com missing rate alto"""
-        from .config import THRESHOLDS, MISSING_RATE_IGNORE_COLUMNS
         from datetime import datetime, timezone
         alerts = []
-        threshold = THRESHOLDS['missing_rate']['threshold']
+        threshold = self._thresholds['missing_rate']['threshold']
 
         total_rows = len(df)
         if total_rows == 0:
@@ -730,7 +742,7 @@ class DataQualityMonitor:
 
         for col in df.columns:
             # Ignorar colunas da whitelist
-            if col in MISSING_RATE_IGNORE_COLUMNS:
+            if col in self._missing_rate_ignore_columns:
                 continue
 
             # Usar função centralizada para calcular missing rate
@@ -770,14 +782,14 @@ class DataQualityMonitor:
 
     def _check_score_distribution(self, df: pd.DataFrame) -> List[Dict]:
         """Verifica mudanças na distribuição de decis"""
-        from .config import THRESHOLDS, EXPECTED_DECIL_DISTRIBUTION
+        from .config import EXPECTED_DECIL_DISTRIBUTION
         from datetime import datetime, timezone
         alerts = []
 
         if 'decil' not in df.columns:
             return alerts
 
-        threshold = THRESHOLDS['score_distribution']['threshold']
+        threshold = self._thresholds['score_distribution']['threshold']
         total_leads = len(df)
 
         if total_leads == 0:
@@ -858,14 +870,17 @@ class DataQualityMonitor:
         alerts = []
 
         try:
-            # 1. Aplicar encoding nos dados (necessário para validar features finais)
-            from features.encoding import apply_categorical_encoding
-            df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3', model_path=self.model_path)
+            # 1. Aplicar encoding via core/ (se client_config disponível) ou fallback antigo
+            if self.client_config and self.client_config.encoding:
+                from core.encoding import apply_encoding
+                df_encoded = apply_encoding(df.copy(), self.client_config.encoding)
+            else:
+                from features.encoding import apply_categorical_encoding
+                df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3', model_path=self.model_path)
 
-            # 2. Usar Predictor para validar features
+            # 2. Usar Predictor para validar features — carrega modelo correto via ClientConfig
             from model.prediction import LeadScoringPredictor
-            model_name = "v1_devclub_rf_temporal_leads_single"
-            predictor = LeadScoringPredictor(model_name=model_name, model_path=self.model_path)
+            predictor = LeadScoringPredictor(use_active_model=True, client_config=self.client_config)
 
             # 3. Validar features (NÃO faz predição, só valida)
             validation = predictor.validate_features(df_encoded)
@@ -917,14 +932,17 @@ class DataQualityMonitor:
         logger.debug(f"Colunas: {sorted(df.columns.tolist())[:10]}...")
 
         try:
-            # 1. Aplicar encoding nos dados (necessário para comparar features finais)
-            from features.encoding import apply_categorical_encoding
-            df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3', model_path=self.model_path)
+            # 1. Aplicar encoding via core/ (se client_config disponível) ou fallback antigo
+            if self.client_config and self.client_config.encoding:
+                from core.encoding import apply_encoding
+                df_encoded = apply_encoding(df.copy(), self.client_config.encoding)
+            else:
+                from features.encoding import apply_categorical_encoding
+                df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3', model_path=self.model_path)
 
-            # 2. Usar Predictor para obter lista de features esperadas
+            # 2. Usar Predictor para obter lista de features esperadas — carrega modelo correto via ClientConfig
             from model.prediction import LeadScoringPredictor
-            model_name = "v1_devclub_rf_temporal_leads_single"
-            predictor = LeadScoringPredictor(model_name=model_name, model_path=self.model_path)
+            predictor = LeadScoringPredictor(use_active_model=True, client_config=self.client_config)
 
             # Garantir que feature_names está carregado
             if predictor.feature_names is None:

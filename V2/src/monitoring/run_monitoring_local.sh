@@ -65,7 +65,8 @@ leads_data = fetch_leads_from_sheets(hours=12)
 print(f'✅ {len(leads_data)} leads encontrados\n')
 
 # Obter model_path do modelo ativo
-with open('configs/active_model.yaml', 'r') as f:
+# TODO multi-client: derivar client_id do ClientConfig e usar active_models/{client_id}.yaml
+with open('configs/active_models/devclub.yaml', 'r') as f:
     config = yaml.safe_load(f)
     model_path = config['active_model']['model_path']
 

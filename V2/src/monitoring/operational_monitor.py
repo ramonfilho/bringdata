@@ -18,12 +18,18 @@ class OperationalMonitor:
     Usa PostgreSQL para verificar timestamps.
     """
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, client_config=None):
         """
         Args:
-            db: Sessão SQLAlchemy do PostgreSQL
+            db:            Sessão SQLAlchemy do PostgreSQL
+            client_config: ClientConfig opcional — thresholds de monitoring.thresholds
         """
+        from .config import THRESHOLDS
         self.db = db
+        monitoring = client_config.monitoring if client_config else None
+        self._thresholds = (
+            monitoring.thresholds if monitoring and monitoring.thresholds else THRESHOLDS
+        )
 
     def check(self) -> List[Dict]:
         """
@@ -35,11 +41,9 @@ class OperationalMonitor:
         if self.db is None:
             return []
 
-        from .config import THRESHOLDS
-
         alerts = []
 
-        if THRESHOLDS['operational']['enabled']:
+        if self._thresholds['operational']['enabled']:
             alerts.extend(self._check_no_leads())
             alerts.extend(self._check_no_capi())
 
@@ -47,13 +51,12 @@ class OperationalMonitor:
 
     def _check_no_leads(self) -> List[Dict]:
         """Verifica se não recebeu leads nas últimas N horas"""
-        from .config import THRESHOLDS
         # Import aqui para evitar circular import
         from api.database import LeadCAPI
 
         alerts = []
 
-        threshold_hours = THRESHOLDS['operational']['no_leads_hours']
+        threshold_hours = self._thresholds['operational']['no_leads_hours']
         threshold_time = datetime.now(timezone.utc) - timedelta(hours=threshold_hours)
 
         try:
@@ -102,12 +105,11 @@ class OperationalMonitor:
 
     def _check_no_capi(self) -> List[Dict]:
         """Verifica se não enviou CAPI nas últimas N horas"""
-        from .config import THRESHOLDS
         from api.database import LeadCAPI
 
         alerts = []
 
-        threshold_hours = THRESHOLDS['operational']['no_capi_hours']
+        threshold_hours = self._thresholds['operational']['no_capi_hours']
         threshold_time = datetime.now(timezone.utc) - timedelta(hours=threshold_hours)
 
         try:

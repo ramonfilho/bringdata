@@ -4,7 +4,7 @@ Gerencia conexão com Railway PostgreSQL e operações CRUD
 """
 
 import os
-from sqlalchemy import create_engine, Column, Integer, String, Text, TIMESTAMP, DECIMAL, func
+from sqlalchemy import create_engine, Column, Integer, String, Text, TIMESTAMP, DECIMAL, func, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from typing import Optional, List, Dict
@@ -24,6 +24,12 @@ class LeadCAPI(Base):
     __tablename__ = 'leads_capi'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Multi-cliente: client_id NÃO está mapeado aqui intencionalmente.
+    # O schema Railway legado não tem essa coluna.
+    # Quando um banco futuro tiver client_id, adicionar a linha abaixo e
+    # re-ativar os filtros condicionais em has_client_id_column():
+    #   client_id = Column(String(50), nullable=False, server_default=text("'devclub'"), index=True)
 
     # Identificação
     email = Column(String(255), nullable=False, index=True)
@@ -85,6 +91,7 @@ class LeadCAPI(Base):
         """Converte para dict"""
         return {
             'id': self.id,
+            'client_id': self.client_id,
             'email': self.email,
             'name': self.name,
             'first_name': self.first_name,
@@ -196,6 +203,39 @@ def init_database():
         logger.error(f"❌ Erro ao inicializar database: {e}")
         return False
 
+# Cache: None = não verificado ainda; True/False = resultado da verificação
+_client_id_column_exists: Optional[bool] = None
+
+def has_client_id_column(db: Session) -> bool:
+    """
+    Verifica se a coluna client_id existe em leads_capi.
+
+    Cacheado em memória — a verificação ocorre apenas uma vez por processo.
+    Quando a coluna não existe (ex: Railway legado), os filtros por client_id
+    são omitidos automaticamente. Quando existir em futuros bancos, o filtro
+    passa a ser aplicado sem nenhuma mudança de código.
+    """
+    global _client_id_column_exists
+    if _client_id_column_exists is None:
+        try:
+            result = db.execute(text(
+                "SELECT COUNT(*) FROM information_schema.columns "
+                "WHERE table_name = 'leads_capi' AND column_name = 'client_id'"
+            ))
+            _client_id_column_exists = result.scalar() > 0
+            if _client_id_column_exists:
+                logger.info("✅ Coluna client_id detectada — filtro multi-cliente ativo")
+            else:
+                logger.info("ℹ️  Coluna client_id ausente — filtro multi-cliente desativado (schema legado)")
+        except Exception as e:
+            logger.warning(f"⚠️  Erro ao verificar coluna client_id: {e} — assumindo ausente")
+            _client_id_column_exists = False
+            try:
+                db.rollback()
+            except Exception:
+                pass
+    return _client_id_column_exists
+
 def get_db() -> Session:
     """
     Dependency para FastAPI
@@ -212,46 +252,65 @@ def get_db() -> Session:
 # =============================================================================
 
 def create_lead_capi(db: Session, lead_data: Dict) -> LeadCAPI:
-    """Cria novo lead no banco"""
+    """Cria novo lead no banco. lead_data deve conter 'client_id'."""
     lead = LeadCAPI(**lead_data)
     db.add(lead)
     db.commit()
     db.refresh(lead)
     return lead
 
-def get_lead_by_email(db: Session, email: str) -> Optional[LeadCAPI]:
-    """Busca lead por email (mais recente)"""
-    return db.query(LeadCAPI).filter(LeadCAPI.email == email).order_by(LeadCAPI.created_at.desc()).first()
+def get_lead_by_email(db: Session, email: str, client_id: str = 'devclub') -> Optional[LeadCAPI]:
+    """Busca lead por email (mais recente) dentro do cliente."""
+    q = db.query(LeadCAPI).filter(LeadCAPI.email == email)
+    if has_client_id_column(db):
+        q = q.filter(text("leads_capi.client_id = :cid").bindparams(cid=client_id))
+    return q.order_by(LeadCAPI.created_at.desc()).first()
 
 def get_lead_by_event_id(db: Session, event_id: str) -> Optional[LeadCAPI]:
-    """Busca lead por event_id"""
+    """Busca lead por event_id (global — event_id já é único por construção)."""
     return db.query(LeadCAPI).filter(LeadCAPI.event_id == event_id).first()
 
-def get_leads_by_emails(db: Session, emails: List[str]) -> List[LeadCAPI]:
-    """Busca múltiplos leads por email (batch)"""
-    return db.query(LeadCAPI).filter(LeadCAPI.email.in_(emails)).all()
+def get_leads_by_emails(db: Session, emails: List[str], client_id: str = 'devclub') -> List[LeadCAPI]:
+    """Busca múltiplos leads por email dentro do cliente."""
+    q = db.query(LeadCAPI).filter(LeadCAPI.email.in_(emails))
+    if has_client_id_column(db):
+        q = q.filter(text("leads_capi.client_id = :cid").bindparams(cid=client_id))
+    return q.all()
 
-def get_recent_leads(db: Session, limit: int = 100) -> List[LeadCAPI]:
-    """Retorna leads mais recentes"""
-    return db.query(LeadCAPI).order_by(LeadCAPI.created_at.desc()).limit(limit).all()
+def get_recent_leads(db: Session, limit: int = 100, client_id: str = 'devclub') -> List[LeadCAPI]:
+    """Retorna leads mais recentes do cliente."""
+    q = db.query(LeadCAPI)
+    if has_client_id_column(db):
+        q = q.filter(text("leads_capi.client_id = :cid").bindparams(cid=client_id))
+    return q.order_by(LeadCAPI.created_at.desc()).limit(limit).all()
 
-def count_leads(db: Session) -> int:
-    """Conta total de leads"""
-    return db.query(LeadCAPI).count()
+def count_leads(db: Session, client_id: str = 'devclub') -> int:
+    """Conta total de leads do cliente."""
+    q = db.query(LeadCAPI)
+    if has_client_id_column(db):
+        q = q.filter(text("leads_capi.client_id = :cid").bindparams(cid=client_id))
+    return q.count()
 
-def count_leads_with_fbp(db: Session) -> int:
-    """Conta leads com FBP preenchido"""
-    return db.query(LeadCAPI).filter(LeadCAPI.fbp.isnot(None)).count()
+def count_leads_with_fbp(db: Session, client_id: str = 'devclub') -> int:
+    """Conta leads com FBP preenchido do cliente."""
+    q = db.query(LeadCAPI).filter(LeadCAPI.fbp.isnot(None))
+    if has_client_id_column(db):
+        q = q.filter(text("leads_capi.client_id = :cid").bindparams(cid=client_id))
+    return q.count()
 
-def count_leads_with_fbc(db: Session) -> int:
-    """Conta leads com FBC preenchido"""
-    return db.query(LeadCAPI).filter(LeadCAPI.fbc.isnot(None)).count()
+def count_leads_with_fbc(db: Session, client_id: str = 'devclub') -> int:
+    """Conta leads com FBC preenchido do cliente."""
+    q = db.query(LeadCAPI).filter(LeadCAPI.fbc.isnot(None))
+    if has_client_id_column(db):
+        q = q.filter(text("leads_capi.client_id = :cid").bindparams(cid=client_id))
+    return q.count()
 
-def mark_lead_capi_sent(db: Session, email: str) -> bool:
-    """Marca TODOS os registros do lead como enviado para CAPI"""
+def mark_lead_capi_sent(db: Session, email: str, client_id: str = 'devclub') -> bool:
+    """Marca TODOS os registros do lead (deste cliente) como enviado para CAPI"""
     try:
-        # Buscar TODOS os registros com esse email (pode haver duplicatas)
-        leads = db.query(LeadCAPI).filter(LeadCAPI.email == email).all()
+        leads = db.query(LeadCAPI).filter(
+            LeadCAPI.email == email, LeadCAPI.client_id == client_id
+        ).all()
 
         if not leads:
             logger.warning(f"⚠️ Lead {email} não encontrado no banco")
@@ -275,7 +334,8 @@ def update_capi_response(
     status: str,
     events_received: int = 0,
     events_rejected: int = 0,
-    error_message: Optional[str] = None
+    error_message: Optional[str] = None,
+    client_id: str = 'devclub'
 ) -> bool:
     """
     Atualiza o status da resposta CAPI da Meta
@@ -287,13 +347,15 @@ def update_capi_response(
         events_received: Número de eventos que a Meta confirmou receber
         events_rejected: Número de eventos que a Meta rejeitou
         error_message: Mensagem de erro se houver
+        client_id: Identificador do cliente
 
     Returns:
         True se atualizou com sucesso
     """
     try:
-        # Buscar TODOS os registros com esse email (pode haver duplicatas)
-        leads = db.query(LeadCAPI).filter(LeadCAPI.email == email).all()
+        leads = db.query(LeadCAPI).filter(
+            LeadCAPI.email == email, LeadCAPI.client_id == client_id
+        ).all()
 
         if not leads:
             logger.warning(f"⚠️ Lead {email} não encontrado no banco para atualizar CAPI response")
@@ -314,17 +376,43 @@ def update_capi_response(
         db.rollback()
         return False
 
-def get_leads_not_sent_to_capi(db: Session, emails: List[str]) -> List[LeadCAPI]:
-    """Busca leads que ainda NÃO foram enviados para CAPI"""
+def get_leads_not_sent_to_capi(db: Session, emails: List[str], client_id: str = 'devclub') -> List[LeadCAPI]:
+    """Busca leads que ainda NÃO foram enviados para CAPI (deste cliente)."""
     return db.query(LeadCAPI).filter(
         LeadCAPI.email.in_(emails),
+        LeadCAPI.client_id == client_id,
         LeadCAPI.capi_sent_at.is_(None)
     ).all()
 
-def get_leads_already_sent_to_capi(db: Session, emails: List[str]) -> List[str]:
-    """Retorna lista de emails que já foram enviados para CAPI"""
+def get_leads_already_sent_to_capi(db: Session, emails: List[str], client_id: str = 'devclub') -> List[str]:
+    """Retorna lista de emails que já foram enviados para CAPI (deste cliente)."""
     leads = db.query(LeadCAPI.email).filter(
         LeadCAPI.email.in_(emails),
+        LeadCAPI.client_id == client_id,
         LeadCAPI.capi_sent_at.isnot(None)
     ).all()
     return [lead[0] for lead in leads]
+
+
+def get_database_url_for_client(client_config) -> str:
+    """
+    Retorna URL de conexão para o banco do cliente específico.
+    Usa InfraConfig.db_url_env_var como nome da env var a ler.
+    Fallback para get_database_url() (comportamento legado).
+
+    Preparado para A2 (pipeline dict por cliente).
+    """
+    if client_config and hasattr(client_config, 'infra') and client_config.infra:
+        env_var = getattr(client_config.infra, 'db_url_env_var', None)
+        if env_var == 'RAILWAY':
+            # Modo Railway: compor URL a partir de RAILWAY_DB_* env vars
+            host = os.getenv('RAILWAY_DB_HOST')
+            password = os.getenv('RAILWAY_DB_PASSWORD')
+            if host and password:
+                port = os.getenv('RAILWAY_DB_PORT', '5432')
+                name = os.getenv('RAILWAY_DB_NAME', 'railway')
+                user = os.getenv('RAILWAY_DB_USER', 'postgres')
+                return f"postgresql://{user}:{password}@{host}:{port}/{name}"
+        elif env_var and os.getenv(env_var):
+            return os.getenv(env_var)
+    return get_database_url()

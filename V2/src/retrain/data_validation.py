@@ -301,24 +301,27 @@ class RetrainingDataValidator:
 # FUNÇÕES AUXILIARES
 # =============================================================================
 
-def get_active_model_path() -> str:
+def get_active_model_path(client_id: str = "devclub") -> str:
     """
-    Obtém path do modelo ativo de configs/active_model.yaml.
+    Obtém path do modelo ativo de configs/active_models/{client_id}.yaml.
+
+    Args:
+        client_id: Identificador do cliente (default: "devclub")
 
     Returns:
         Path do modelo ativo (ex: files/20260117_123456)
 
     Raises:
-        FileNotFoundError: Se active_model.yaml não existir
+        FileNotFoundError: Se active_models/{client_id}.yaml não existir
         ValueError: Se path não estiver configurado
     """
     import yaml
 
-    config_path = Path(__file__).parent.parent.parent / 'configs' / 'active_model.yaml'
+    config_path = Path(__file__).parent.parent.parent / 'configs' / 'active_models' / f'{client_id}.yaml'
 
     if not config_path.exists():
         raise FileNotFoundError(
-            f"Arquivo active_model.yaml não encontrado: {config_path}\n"
+            f"Arquivo active_models/{client_id}.yaml não encontrado: {config_path}\n"
             "Execute um treino com --set-active para configurar."
         )
 
@@ -328,6 +331,6 @@ def get_active_model_path() -> str:
     model_path = active_config.get('active_model', {}).get('model_path')
 
     if not model_path:
-        raise ValueError("model_path não configurado em active_model.yaml")
+        raise ValueError(f"model_path não configurado em active_models/{client_id}.yaml")
 
     return model_path

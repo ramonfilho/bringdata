@@ -9,6 +9,7 @@ import os
 import logging
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+import json
 import yaml
 import glob
 import logging
@@ -25,29 +26,25 @@ from src.data_processing.ingestion import (
     remove_unnecessary_columns,
     consolidate_datasets
 )
-from src.data_processing.column_unification_refactored import (
-    unificar_colunas_pesquisa,
-    unificar_colunas_vendas,
-    aplicar_filtro_temporal,
-    remover_colunas_utm_ausentes,
-    aplicar_filtro_status_risco,
-    filtrar_vendas_devclub
+from src.core.column_unification import (
+    unify_survey_columns as _unify_survey,
+    unify_sales_columns as _unify_sales,
+    aplicar_filtro_temporal as _filtro_temporal,
+    remover_colunas_utm_ausentes as _remover_utm,
 )
-from src.data_processing.category_unification import unificar_categorias_completo
+from src.core.ingestion import (
+    aplicar_filtro_status_risco as _filtro_status_risco,
+    filter_sales_by_product as _filtrar_produto,
+)
+from src.core.category_unification import unify_categories as _unify_categories
 from src.data_processing.feature_removal import remover_features_desnecessarias, listar_colunas_restantes
-from src.data_processing.utm_training import unificar_utm_source_term, verificar_consistencia_utm
-from src.data_processing.medium_training import extrair_publico_medium
-from src.data_processing.medium_production_training import unificar_medium_para_producao
-from src.data_processing.dataset_versioning_training import criar_dataset_pos_cutoff, disponibilizar_dataset
-from src.matching.matching_training import fazer_matching_robusto as fazer_matching_variantes
-from src.matching.matching_robusto import fazer_matching_robusto
-from src.matching.matching_email_only import fazer_matching_email_only
-from src.matching.matching_email_with_validation import fazer_matching_email_with_validation
-from src.matching.matching_email_telefone import fazer_matching_email_telefone
-from src.matching.matching_unified import match_leads_to_sales_unified
-from src.data_processing.conversion_window import aplicar_janela_conversao
-from src.features.feature_engineering_training import criar_features_derivadas
-from src.features.encoding_training import aplicar_encoding_estrategico
+from src.core.client_config import ClientConfig
+from src.core.utm import unify_utm
+from src.core.medium import unify_medium
+from src.core.dataset_versioning import criar_dataset_pos_cutoff, aplicar_janela_conversao as _aplicar_janela_conversao
+from src.core.matching import match_leads as _match_leads
+from src.core.feature_engineering import create_features as _create_features
+from src.core.encoding import apply_encoding as _apply_encoding
 from src.model.training_model import registrar_features_e_modelo_devclub
 from src.model.hyperparameter_tuning import hyperparameter_tuning
 from src.monitoring.data_quality import capture_training_categories, capture_training_distributions, calculate_missing_rate
@@ -150,7 +147,7 @@ def setup_logging(verbosity='normal', log_file=None):
 logger = logging.getLogger(__name__)
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None):
     """Executa pipeline de treino completo.
 
     Args:
@@ -201,6 +198,10 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         # FileHandlers são fechados automaticamente ao finalizar
 
     atexit.register(cleanup)
+
+    # Carregar ClientConfig — usado progressivamente à medida que core/ é implementado
+    _config_path = os.path.join(os.path.dirname(__file__), '..', 'configs', 'clients', 'devclub.yaml')
+    client_config = ClientConfig.from_yaml(os.path.abspath(_config_path))
 
     logger.info("")
     logger.info("PIPELINE DE TREINO")
@@ -276,14 +277,29 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         logger.debug(f"   - Usando vendas Guru + alunos TMB de BAIXO e MÉDIO risco")
 
     # Ler TODOS os arquivos (incluindo TMB) + dados da API se retreino
-    all_data = read_all_training_sources(
-        filepaths,
-        include_api_data=include_api_data,
-        api_start_date=api_start_date,
-        api_end_date=api_end_date,
-        num_sheets_api=1,  # Retreino: apenas aba 0 do Google Sheets
-        include_sheets_api=include_sheets_api
-    )
+    _cache_dir = os.path.join(os.path.dirname(__file__), '..', 'outputs', 'cache')
+    _cache_key = api_end_date or 'latest'
+    _cache_path = os.path.join(_cache_dir, f'raw_data_{_cache_key}.pkl')
+
+    if use_cached_data and os.path.exists(_cache_path):
+        import pickle
+        logger.info(f"  Carregando dados do cache: {os.path.basename(_cache_path)}")
+        with open(_cache_path, 'rb') as f:
+            all_data = pickle.load(f)
+    else:
+        all_data = read_all_training_sources(
+            filepaths,
+            include_api_data=include_api_data,
+            api_start_date=api_start_date,
+            api_end_date=api_end_date,
+            num_sheets_api=1,  # Retreino: apenas aba 0 do Google Sheets
+            include_sheets_api=include_sheets_api
+        )
+        import pickle
+        os.makedirs(_cache_dir, exist_ok=True)
+        with open(_cache_path, 'wb') as f:
+            pickle.dump(all_data, f)
+        logger.info(f"  Cache salvo: {os.path.basename(_cache_path)}")
 
     cell_timers['Célula 1'] = time.time() - cell_start
     logger.info(f"   Tempo: {cell_timers['Célula 1']:.1f}s")
@@ -438,6 +454,21 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info(f"  Dataset Vendas: {len(df_vendas):,} registros, {len(df_vendas.columns)} colunas")
     logger.info("")
 
+    # Filtro de data máxima — para reproduzir runs anteriores com o mesmo corte temporal
+    if max_date:
+        max_date_ts = pd.Timestamp(max_date)
+        if 'Data' in df_pesquisa.columns:
+            df_pesquisa['Data'] = pd.to_datetime(df_pesquisa['Data'], errors='coerce', dayfirst=True)
+            antes = len(df_pesquisa)
+            df_pesquisa = df_pesquisa[df_pesquisa['Data'] <= max_date_ts].copy()
+            logger.info(f"  --max-date {max_date}: pesquisa {antes:,} → {len(df_pesquisa):,} registros")
+        if 'data' in df_vendas.columns:
+            df_vendas['data'] = pd.to_datetime(df_vendas['data'], errors='coerce', dayfirst=True)
+            antes = len(df_vendas)
+            df_vendas = df_vendas[df_vendas['data'] <= max_date_ts].copy()
+            logger.info(f"  --max-date {max_date}: vendas {antes:,} → {len(df_vendas):,} registros")
+        logger.info("")
+
     logger.info("=" * 80)
     logger.info("")
 
@@ -446,10 +477,10 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("")
 
     # Parte 1: Unificar colunas de PESQUISA
-    df_pesquisa_unificado = unificar_colunas_pesquisa(df_pesquisa)
+    df_pesquisa_unificado = _unify_survey(df_pesquisa, client_config.ingestion)
 
     # Parte 2: Unificar colunas de VENDAS
-    df_vendas_unificado = unificar_colunas_vendas(df_vendas)
+    df_vendas_unificado = _unify_sales(df_vendas, client_config.ingestion)
 
     logger.info("=" * 80)
     # === CÉLULA 5.1: Filtro temporal ===
@@ -457,7 +488,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 5.1: FILTRO TEMPORAL")
     logger.info("")
 
-    df_vendas_temporal = aplicar_filtro_temporal(df_vendas_unificado, df_pesquisa_unificado)
+    df_vendas_temporal = _filtro_temporal(df_vendas_unificado, df_pesquisa_unificado, client_config.ingestion)
 
     logger.info("=" * 80)
     # === CÉLULA 5.2: Remoção de colunas UTM ===
@@ -465,7 +496,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 5.2: REMOÇÃO DE COLUNAS UTM COM ALTA % AUSENTES")
     logger.info("")
 
-    df_vendas_sem_utm = remover_colunas_utm_ausentes(df_vendas_temporal)
+    df_vendas_sem_utm = _remover_utm(df_vendas_temporal, client_config.ingestion)
 
     logger.info("=" * 80)
     # === CÉLULA 5.3: Filtro de status e risco ===
@@ -473,7 +504,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 5.3: FILTRO DE STATUS E RISCO")
     logger.info("")
 
-    df_vendas_filtrado = aplicar_filtro_status_risco(df_vendas_sem_utm, tmb_risk_filter=tmb_risk_filter, tmb_risk_lookup=tmb_risk_lookup)
+    df_vendas_filtrado = _filtro_status_risco(df_vendas_sem_utm, client_config.ingestion, tmb_risk_filter=tmb_risk_filter, tmb_risk_lookup=tmb_risk_lookup)
 
     logger.info("=" * 80)
     # === CÉLULA 5.4: Filtro de produtos DevClub ===
@@ -481,7 +512,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 5.4: FILTRO DE PRODUTOS DEVCLUB")
     logger.info("")
 
-    df_vendas_final = filtrar_vendas_devclub(df_vendas_filtrado)
+    df_vendas_final = _filtrar_produto(df_vendas_filtrado, client_config.ingestion)
 
     # Usar os datasets finais
     df_pesquisa_final = df_pesquisa_unificado
@@ -492,7 +523,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 7: UNIFICAÇÃO COMPLETA DE CATEGORIAS")
     logger.info("")
 
-    df_pesquisa_final_unificado = unificar_categorias_completo(df_pesquisa_final)
+    df_pesquisa_final_unificado = _unify_categories(df_pesquisa_final, client_config.category)
 
     logger.info("=" * 80)
     # === CÉLULA 8: Remoção de features desnecessárias ===
@@ -559,14 +590,12 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         df_features_removidas.to_pickle(os.path.join(_fixtures, 'snapshot_utm_input.pkl'))
         logger.info("  [PARITY] snapshot_utm_input.pkl salvo")
 
-    df_utm_unificado = unificar_utm_source_term(df_features_removidas)
+    df_utm_unificado = unify_utm(df_features_removidas, client_config.utm)
 
     if capture_parity_snapshots:
         df_utm_unificado.to_pickle(os.path.join(_fixtures, 'snapshot_utm_output.pkl'))
         logger.info("  [PARITY] snapshot_utm_output.pkl salvo")
 
-    # Verificar consistência
-    verificar_consistencia_utm(df_utm_unificado)
 
     logger.info("=" * 80)
     # === CÉLULA 11: Unificação de UTM Medium ===
@@ -583,16 +612,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
             df_utm_unificado.to_pickle(os.path.join(_fixtures, 'snapshot_medium_input.pkl'))
             logger.info("  [PARITY] snapshot_medium_input.pkl salvo")
 
-        df_medium_unificado, n_apos_extracao = extrair_publico_medium(df_utm_unificado)
-        n_apos_norm = df_medium_unificado['Medium'].nunique()
-
-        logger.info("")
-        df_medium_producao = unificar_medium_para_producao(
-            df_medium_unificado,
-            n_bruto=n_bruto_medium,
-            n_apos_extracao=n_apos_extracao,
-            n_apos_norm=n_apos_norm,
-        )
+        df_medium_producao = unify_medium(df_utm_unificado, client_config.medium)
     else:
         logger.info("  Pulando (Medium foi removido na célula 8 - strategy='remove')")
         df_medium_unificado = df_utm_unificado.copy()
@@ -608,10 +628,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 13: FILTRO TEMPORAL POR MISSING RATE")
     logger.info("")
 
-    df_pos_cutoff = criar_dataset_pos_cutoff(df_medium_producao)
-
-    # Disponibilizar dataset
-    disponibilizar_dataset(df_pos_cutoff)
+    df_pos_cutoff = criar_dataset_pos_cutoff(df_medium_producao, client_config.ingestion)
 
     logger.info("=" * 80)
     # === CÉLULA 15: Matching robusto por email e telefone ===
@@ -623,24 +640,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     # Filtro TMB já foi aplicado em unificar_colunas_datasets
     df_vendas_matching = df_vendas_final.copy()
 
-    if initial_matching == 'email_only':
-        dataset_v1_final = fazer_matching_email_only(df_pos_cutoff, df_vendas_matching)
-    elif initial_matching == 'email_telefone':
-        dataset_v1_final = fazer_matching_email_telefone(df_pos_cutoff, df_vendas_matching)
-    elif initial_matching == 'variantes':
-        dataset_v1_final = fazer_matching_variantes(df_pos_cutoff, df_vendas_matching)
-    elif initial_matching == 'robusto':
-        dataset_v1_final = fazer_matching_robusto(df_pos_cutoff, df_vendas_matching)
-    elif initial_matching == 'validation':
-        dataset_v1_final = fazer_matching_email_with_validation(df_pos_cutoff, df_vendas_matching)
-    elif initial_matching == 'unified_last6':
-        dataset_v1_final = match_leads_to_sales_unified(
-            df_pos_cutoff,
-            df_vendas_matching,
-            mode='training'
-        )
-    else:
-        raise ValueError(f"Método de matching inicial inválido: {initial_matching}. Use 'email_only', 'email_telefone', 'variantes', 'robusto', 'validation' ou 'unified_last6'")
+    dataset_v1_final = _match_leads(df_pos_cutoff, df_vendas_matching, client_config.matching)
 
     # Vendas já foram filtradas para DevClub na CÉLULA 5.4
     # Target já reflete apenas matches com vendas DevClub
@@ -664,10 +664,10 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
 
     # Aplicar janela de conversão de 20 dias (captação + CPL + carrinho)
     # Captação: 7 dias (terça-segunda) + CPL: 6 dias (terça-domingo) + Carrinho: 7 dias (segunda-domingo) = 20 dias
-    dataset_v1_devclub = aplicar_janela_conversao(
+    dataset_v1_devclub = _aplicar_janela_conversao(
         df_leads=dataset_v1_devclub,
         df_vendas=df_vendas_final,
-        janela_dias=20
+        config=client_config.monitoring,
     )
 
     # Recall metrics (não calculado após reorganização - vendas já filtradas na CÉLULA 5.4)
@@ -687,7 +687,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         dataset_v1_devclub.to_pickle(os.path.join(_fixtures, 'snapshot_fe_input.pkl'))
         logger.info("  [PARITY] snapshot_fe_input.pkl salvo")
 
-    dataset_v1_devclub_fe = criar_features_derivadas(dataset_v1_devclub)
+    dataset_v1_devclub_fe = _create_features(dataset_v1_devclub, client_config.feature)
 
     if capture_parity_snapshots:
         dataset_v1_devclub_fe.to_pickle(os.path.join(_fixtures, 'snapshot_fe_output.pkl'))
@@ -729,7 +729,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         dataset_v1_devclub_fe.to_pickle(os.path.join(_fixtures, 'snapshot_encoding_input.pkl'))
         logger.info("  [PARITY] snapshot_encoding_input.pkl salvo")
 
-    dataset_v1_devclub_encoded = aplicar_encoding_estrategico(dataset_v1_devclub_fe, medium_strategy=medium_strategy)
+    dataset_v1_devclub_encoded = _apply_encoding(dataset_v1_devclub_fe, client_config.encoding)
 
     if capture_parity_snapshots:
         dataset_v1_devclub_encoded.to_pickle(os.path.join(_fixtures, 'snapshot_encoding_output.pkl'))
@@ -784,7 +784,14 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
 
     # === HYPERPARAMETER TUNING (opcional) ===
     melhores_params = None
-    if tune_hyperparams:
+    if fixed_hyperparams:
+        melhores_params = {**DEFAULT_HYPERPARAMS, **fixed_hyperparams}
+        logger.info("")
+        logger.info("HIPERPARÂMETROS FIXOS (--hyperparams)")
+        for k, v in fixed_hyperparams.items():
+            logger.info(f"  {k}: {DEFAULT_HYPERPARAMS.get(k, '?')}  {v}")
+        logger.info("")
+    elif tune_hyperparams:
         logger.info("")
         logger.info("EXECUTANDO HYPERPARAMETER TUNING")
 
@@ -833,8 +840,8 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         recall_metrics=recall_metrics,
         missing_rates_baseline=missing_rates_baseline,
         buyer_weights=buyer_weights,
-        tmb_risk_filter=tmb_risk_filter,
-        use_buyer_weights=use_buyer_weights
+        cli_args=cli_args,
+        client_config=client_config
     )
 
     cell_timers['Célula 21'] = time.time() - cell_start
@@ -846,7 +853,12 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         from mlflow.tracking import MlflowClient
 
         client = MlflowClient()
-        experiment = mlflow.get_experiment_by_name("devclub_lead_scoring")
+        _exp_name = (
+            client_config.model.mlflow_experiment_name
+            if client_config and client_config.model and client_config.model.mlflow_experiment_name
+            else "devclub_lead_scoring"
+        )
+        experiment = mlflow.get_experiment_by_name(_exp_name)
 
         if experiment:
             # Buscar últimas 2 runs (atual + anterior)
@@ -1020,6 +1032,30 @@ if __name__ == "__main__":
         default=None,
         help='Data de fim para buscar dados da API (formato: YYYY-MM-DD). Requer --include-api-data'
     )
+    parser.add_argument(
+        '--capture-parity-snapshots',
+        action='store_true',
+        default=False,
+        help='Serializar (input, output) de cada função compartilhada em tests/fixtures/ para audit de paridade treino×produção'
+    )
+    parser.add_argument(
+        '--use-cached-data',
+        action='store_true',
+        default=False,
+        help='Usar cache de dados brutos de outputs/cache/raw_data_{api_end_date}.pkl (pula chamadas à API). Salva automaticamente o cache se não existir.'
+    )
+    parser.add_argument(
+        '--hyperparams',
+        type=str,
+        default=None,
+        help='Hiperparâmetros fixos em JSON (pula tuning). Ex: \'{"n_estimators": 200, "max_features": "log2", "min_samples_leaf": 3}\''
+    )
+    parser.add_argument(
+        '--max-date',
+        type=str,
+        default=None,
+        help='Data máxima dos leads (YYYY-MM-DD). Filtra pesquisa e vendas até essa data — usado para reproduzir runs anteriores com o mesmo corte temporal.'
+    )
 
     args = parser.parse_args()
 
@@ -1039,5 +1075,10 @@ if __name__ == "__main__":
         api_start_date=args.api_start_date,
         api_end_date=args.api_end_date,
         use_buyer_weights=not args.no_weights,
-        save_encoded=args.save_encoded
+        save_encoded=args.save_encoded,
+        capture_parity_snapshots=args.capture_parity_snapshots,
+        cli_args=vars(args),
+        use_cached_data=args.use_cached_data,
+        fixed_hyperparams=json.loads(args.hyperparams) if args.hyperparams else None,
+        max_date=args.max_date,
     )

@@ -10,12 +10,13 @@ import pandas as pd
 import logging
 import atexit
 from datetime import datetime
-from .data_processing.preprocessing import remove_duplicates, clean_columns, remove_campaign_features, remove_technical_fields, rename_long_column_names
-from .data_processing.utm_unification import unify_utm_columns
-from .data_processing.medium_unification import unify_medium_columns
-from .data_processing.category_unification import unificar_categorias_completo
-from .features.engineering import create_derived_features
-from .features.encoding import apply_categorical_encoding
+from .core.client_config import ClientConfig
+from .core.preprocessing import preprocess as _preprocess
+from .core.utm import unify_utm
+from .core.medium import unify_medium as _unify_medium
+from .core.category_unification import unify_categories as _unify_categories
+from .core.feature_engineering import create_features as _create_features
+from .core.encoding import apply_encoding as _apply_encoding
 from .model.prediction import LeadScoringPredictor
 from .monitoring.data_quality import check_category_drift, load_training_categories, check_distribution_drift, load_training_distributions
 
@@ -80,13 +81,14 @@ class LeadScoringPipeline:
     Reproduz EXATAMENTE a lógica do notebook com parâmetros configuráveis.
     """
 
-    def __init__(self, model_name: str = None, model_path: str = None):
+    def __init__(self, model_name: str = None, model_path: str = None, client_id: str = 'devclub'):
         """
         Inicializa o pipeline com configuração fixa.
 
         Args:
             model_name: Nome do modelo a usar para predições (default: None = usa active_model.yaml)
             model_path: Caminho customizado para a pasta do modelo (opcional)
+            client_id: Identificador do cliente — carrega configs/clients/{client_id}.yaml (default: 'devclub')
 
         Configuração:
         - Mantém features UTM (com_utm=True)
@@ -97,6 +99,10 @@ class LeadScoringPipeline:
         self.data = None
         self.original_data = None  # Preservar dados originais
         self.predictor = LeadScoringPredictor(model_name, model_path=model_path, use_active_model=True)
+
+        # Carregar ClientConfig a partir do client_id — nunca hardcodar 'devclub'
+        _config_path = os.path.join(os.path.dirname(__file__), '..', 'configs', 'clients', f'{client_id}.yaml')
+        self._client_config = ClientConfig.from_yaml(os.path.abspath(_config_path))
 
         # Carregar modelo e metadados automaticamente
         self.predictor.load_model()
@@ -170,38 +176,20 @@ class LeadScoringPipeline:
 
         logger.info(f" INÍCIO DO PIPELINE: {initial_rows} linhas, {initial_cols} colunas")
 
-        # 1. Remover duplicatas (usando componente importado)
-        logger.info(" [1/11] Removendo duplicatas...")
-        self.data = remove_duplicates(self.data)
-
-        duplicates_removed = initial_rows - len(self.data)
-        logger.info(f"    Duplicatas removidas: {duplicates_removed}")
-        logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
-
-        # 2. Limpar colunas desnecessárias (usando componente importado)
-        logger.info(" [2/11] Removendo colunas score/faixa...")
-        cols_before_clean = len(self.data.columns)
-        self.data = clean_columns(self.data)
-
-        columns_removed = cols_before_clean - len(self.data.columns)
-        logger.info(f"    Colunas de score/faixa removidas: {columns_removed}")
-        logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
-
-        # 3. Remover features de campanha (usando componente importado)
-        logger.info(" [3/11] Removendo features de campanha...")
-        cols_before_campaign = len(self.data.columns)
-        self.data = remove_campaign_features(self.data)
-
-        campaign_cols_removed = cols_before_campaign - len(self.data.columns)
-        logger.info(f"    Features de campanha removidas: {campaign_cols_removed}")
-        logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
+        # 1–3 + rename + remove_technical: sequência canônica via core/preprocessing.py
+        logger.info(" [1/8] Pré-processamento (dedup + limpeza de colunas + renomeação)...")
+        rows_before = len(self.data)
+        cols_before = len(self.data.columns)
+        self.data = _preprocess(self.data, self._client_config.ingestion, self._client_config.feature)
+        logger.info(f"    Linhas: {rows_before} → {len(self.data)} (removidas: {rows_before - len(self.data)})")
+        logger.info(f"    Colunas: {cols_before} → {len(self.data.columns)}")
 
         # 4. Unificar categorias UTM (usando componente importado)
         logger.info(" [4/11] Unificando categorias UTM...")
         utm_source_before = self.data['Source'].nunique() if 'Source' in self.data.columns else 0
         utm_term_before = self.data['Term'].nunique() if 'Term' in self.data.columns else 0
 
-        self.data = unify_utm_columns(self.data)
+        self.data = unify_utm(self.data, self._client_config.utm)
 
         utm_source_after = self.data['Source'].nunique() if 'Source' in self.data.columns else 0
         utm_term_after = self.data['Term'].nunique() if 'Term' in self.data.columns else 0
@@ -209,19 +197,23 @@ class LeadScoringPipeline:
         logger.info(f"    Term: {utm_term_before}{utm_term_after} categorias")
         logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
+        # Construir artifacts uma vez — reutilizado por medium e encoding
+        mlflow_run_id = self.predictor.mlflow_run_id if hasattr(self.predictor, 'mlflow_run_id') else None
+        model_path = str(self.predictor.model_path) if self.predictor.model_path and not mlflow_run_id else None
+        _artifacts = {}
+        if mlflow_run_id:
+            _artifacts['mlflow_run_id'] = mlflow_run_id
+        elif model_path:
+            _artifacts['model_path'] = model_path
+
         # 5. Unificar categorias Medium (usando componente importado)
         logger.info(" [5/11] Unificando categorias Medium...")
         medium_before = self.data['Medium'].nunique() if 'Medium' in self.data.columns else 0
 
-        self.data = unify_medium_columns(self.data)
+        self.data = _unify_medium(self.data, self._client_config.medium, _artifacts or None)
 
         medium_after = self.data['Medium'].nunique() if 'Medium' in self.data.columns else 0
         logger.info(f"    Medium: {medium_before}{medium_after} categorias")
-        logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
-
-        # 5.5. Renomear colunas longas (investiu_curso_online, interesse_programacao)
-        logger.info(" [5.5/11] Renomeando colunas longas...")
-        self.data = rename_long_column_names(self.data)
         logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
         # 6. Unificar categorias de pesquisa (usando componente importado)
@@ -239,7 +231,7 @@ class LeadScoringPipeline:
             if col in self.data.columns:
                 categorias_antes[col] = self.data[col].nunique()
 
-        self.data = unificar_categorias_completo(self.data)
+        self.data = _unify_categories(self.data, self._client_config.category)
 
         # Contar categorias depois
         categorias_normalizadas = 0
@@ -251,15 +243,6 @@ class LeadScoringPipeline:
                     categorias_normalizadas += (antes - depois)
 
         logger.info(f"    Categorias normalizadas: {categorias_normalizadas}")
-        logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
-
-        # 7. Remover campos técnicos (usando componente importado)
-        logger.info(" [7/11] Removendo campos técnicos...")
-        cols_before_tech = len(self.data.columns)
-        self.data = remove_technical_fields(self.data)
-
-        tech_cols_removed = cols_before_tech - len(self.data.columns)
-        logger.info(f"    Campos técnicos removidos: {tech_cols_removed}")
         logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
         # 8. Verificar category drift ANTES do encoding
@@ -316,7 +299,7 @@ class LeadScoringPipeline:
         available_fe_cols = [col for col in fe_input_cols if col in self.data.columns]
         logger.info(f"    Colunas disponíveis para FE: {available_fe_cols}")
 
-        self.data = create_derived_features(self.data)
+        self.data = _create_features(self.data, self._client_config.feature)
 
 
         cols_added = len(self.data.columns) - cols_before_fe
@@ -327,17 +310,7 @@ class LeadScoringPipeline:
         logger.info(" [10/12] Aplicando encoding categórico...")
         cols_before_encoding = len(self.data.columns)
 
-        # Priorizar mlflow_run_id, fallback para model_path (backward compatibility)
-        mlflow_run_id = self.predictor.mlflow_run_id if hasattr(self.predictor, 'mlflow_run_id') else None
-        model_path = str(self.predictor.model_path) if self.predictor.model_path and not mlflow_run_id else None
-
-        self.data = apply_categorical_encoding(
-            self.data,
-            versao="v1",
-            medium_strategy="binary_top3",
-            mlflow_run_id=mlflow_run_id,
-            model_path=model_path
-        )
+        self.data = _apply_encoding(self.data, self._client_config.encoding, _artifacts)
 
         encoding_cols_added = len(self.data.columns) - cols_before_encoding
         logger.info(f"    Colunas adicionadas pelo encoding: {encoding_cols_added}")

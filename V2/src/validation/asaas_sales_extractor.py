@@ -27,7 +27,7 @@ if _env_file.exists():
                 _k, _v = _line.split('=', 1)
                 os.environ.setdefault(_k.strip(), _v.strip())
 
-from src.matching.matching_email_telefone import normalizar_email, normalizar_telefone_robusto
+from src.core.utils import normalizar_email, normalizar_telefone_robusto
 
 logger = logging.getLogger(__name__)
 

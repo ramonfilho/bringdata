@@ -15,7 +15,7 @@ from facebook_business.adobjects.serverside.user_data import UserData
 from facebook_business.adobjects.serverside.custom_data import CustomData
 from facebook_business.adobjects.serverside.action_source import ActionSource
 from facebook_business.adobjects.serverside.gender import Gender
-from api.business_config import PRODUCT_VALUE, CONVERSION_RATES
+from src.core.client_config import CAPIConfig, BusinessConfig
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,6 @@ logger = logging.getLogger(__name__)
 # CONFIGURAÇÃO
 # =============================================================================
 
-PIXEL_ID = os.getenv('META_PIXEL_ID', '241752320666130')  # Pixel de BM - Campanhas
 ACCESS_TOKEN = os.getenv('META_ACCESS_TOKEN')  # Obrigatório via env var
 
 # =============================================================================
@@ -253,7 +252,10 @@ def send_lead_qualified_with_value(
     event_timestamp: int,
     test_event_code: Optional[str] = None,
     survey_data: Optional[Dict] = None,
-    db = None
+    db = None,
+    capi_config: Optional[CAPIConfig] = None,
+    business_config: Optional[BusinessConfig] = None,
+    client_id: str = 'devclub'
 ) -> Dict:
     """
     ESTRATÉGIA 1: Envia TODOS os leads (D1-D10) com VALOR DIFERENCIADO por decil
@@ -289,13 +291,19 @@ def send_lead_qualified_with_value(
         logger.error("❌ META_ACCESS_TOKEN não configurado")
         return {"status": "error", "message": "ACCESS_TOKEN não configurado"}
 
+    # Resolver valores do CAPIConfig (com fallbacks para compatibilidade)
+    pixel_id = (capi_config.pixel_id if capi_config and capi_config.pixel_id else os.getenv('META_PIXEL_ID'))
+    event_name = (capi_config.event_name_with_value if capi_config and capi_config.event_name_with_value else 'LeadQualified')
+    currency = (capi_config.currency if capi_config and capi_config.currency else 'BRL')
+    country_code = (capi_config.country_code if capi_config and capi_config.country_code else 'br')
+
     try:
         # Extrair dados adicionais para melhor matching
         # 1. Estado: inferir do DDD do telefone
         state = get_state_from_phone(phone)
 
-        # 2. País: Brasil como padrão (telefones brasileiros)
-        country = 'br' if phone else None
+        # 2. País: do CAPIConfig ou Brasil como padrão
+        country = country_code if phone else None
 
         # 3. Cidade, CEP e Gênero: do survey_data se disponível
         city = None
@@ -330,16 +338,19 @@ def send_lead_qualified_with_value(
             fbc=fbc
         )
 
-        # CustomData (valor projetado baseado em taxa de conversão)
-        taxa_conversao = CONVERSION_RATES.get(decil, 0.0)
-        valor_projetado = PRODUCT_VALUE * taxa_conversao
+        # CustomData (valor projetado = product_value × taxa_conversao do decil)
+        if business_config and business_config.conversion_rates:
+            taxa = business_config.conversion_rates.get(decil, 0.0)
+            valor_projetado = round(business_config.product_value * taxa, 2)
+        else:
+            valor_projetado = 0.0
 
         # Preparar custom_properties com dados ML
         # IMPORTANTE: Converter valores para string para compatibilidade com Meta API
         custom_props = {
             'lead_score': str(lead_score),
             'decil': decil,  # já é string
-            'taxa_conversao': str(taxa_conversao)
+            'valor_projetado': str(valor_projetado)
         }
 
         # Adicionar dados da pesquisa se disponíveis (enriquecem targeting)
@@ -350,7 +361,7 @@ def send_lead_qualified_with_value(
 
         custom_data = CustomData(
             value=valor_projetado,
-            currency='BRL',
+            currency=currency,
             custom_properties=custom_props
         )
 
@@ -363,7 +374,7 @@ def send_lead_qualified_with_value(
 
         # Event
         event = Event(
-            event_name='LeadQualified',
+            event_name=event_name,
             event_time=event_timestamp,
             event_id=f"qualified_{event_id}",  # Prefixo para diferenciar do Pixel
             user_data=user_data,
@@ -375,7 +386,7 @@ def send_lead_qualified_with_value(
         # EventRequest
         event_request_params = {
             'events': [event],
-            'pixel_id': PIXEL_ID,
+            'pixel_id': pixel_id,
             'access_token': ACCESS_TOKEN
         }
         if test_event_code:
@@ -419,7 +430,8 @@ def send_lead_qualified_with_value(
                     status=parsed_response['status'],
                     events_received=parsed_response['events_received'],
                     events_rejected=parsed_response['events_rejected'],
-                    error_message=parsed_response['error_message']
+                    error_message=parsed_response['error_message'],
+                    client_id=client_id
                 )
             except Exception as db_err:
                 logger.warning(f"⚠️  Erro ao salvar CAPI response no banco para {email}: {db_err}")
@@ -477,7 +489,9 @@ def send_lead_qualified_high_quality(
     event_timestamp: int,
     test_event_code: Optional[str] = None,
     survey_data: Optional[Dict] = None,
-    db = None
+    db = None,
+    capi_config: Optional[CAPIConfig] = None,
+    client_id: str = 'devclub'
 ) -> Dict:
     """
     ESTRATÉGIA 2: Envia APENAS D9 e D10 SEM VALOR
@@ -509,16 +523,22 @@ def send_lead_qualified_high_quality(
     Returns:
         Dict com resultado do envio (ou skipped se não for D9-D10)
     """
-    # Filtro: só envia D09, D10 (formato normalizado com zeros)
-    # Nota: thresholds foram normalizados em prediction.py para garantir formato D01-D10
-    if decil not in ['D09', 'D10']:
-        logger.debug(f"⏭️  Lead {decil} ignorado (estratégia D09-D10 only)")
+    # Resolver valores do CAPIConfig (com fallbacks para compatibilidade)
+    pixel_id = (capi_config.pixel_id if capi_config and capi_config.pixel_id else os.getenv('META_PIXEL_ID'))
+    event_name_hq = (capi_config.event_name_high_quality if capi_config and capi_config.event_name_high_quality else 'LeadQualifiedHighQuality')
+    high_quality_decils = (capi_config.high_quality_decils if capi_config and capi_config.high_quality_decils else ['D09', 'D10'])
+    currency = (capi_config.currency if capi_config and capi_config.currency else 'BRL')
+    country_code = (capi_config.country_code if capi_config and capi_config.country_code else 'br')
+
+    # Filtro: só envia decis de alta qualidade (do config ou D09-D10 como fallback)
+    if decil not in high_quality_decils:
+        logger.debug(f"⏭️  Lead {decil} ignorado (estratégia high quality only: {high_quality_decils})")
         return {
             "status": "skipped",
             "event_id": event_id,
             "email": email,
             "decil": decil,
-            "reason": "Decil abaixo de D09 (filtrado)"
+            "reason": f"Decil fora de {high_quality_decils} (filtrado)"
         }
 
     if not ACCESS_TOKEN:
@@ -530,8 +550,8 @@ def send_lead_qualified_high_quality(
         # 1. Estado: inferir do DDD do telefone
         state = get_state_from_phone(phone)
 
-        # 2. País: Brasil como padrão (telefones brasileiros)
-        country = 'br' if phone else None
+        # 2. País: do CAPIConfig ou Brasil como padrão
+        country = country_code if phone else None
 
         # 3. Cidade, CEP e Gênero: do survey_data se disponível
         city = None
@@ -582,13 +602,13 @@ def send_lead_qualified_high_quality(
             custom_props.update(survey_clean)
 
         custom_data = CustomData(
-            currency='BRL',
+            currency=currency,
             custom_properties=custom_props
         )
 
         # Event
         event = Event(
-            event_name='LeadQualifiedHighQuality',  # Nome diferente!
+            event_name=event_name_hq,
             event_time=event_timestamp,
             event_id=f"hq_{event_id}",  # Prefixo diferente para evitar dedup
             user_data=user_data,
@@ -600,7 +620,7 @@ def send_lead_qualified_high_quality(
         # EventRequest
         event_request_params = {
             'events': [event],
-            'pixel_id': PIXEL_ID,
+            'pixel_id': pixel_id,
             'access_token': ACCESS_TOKEN
         }
         if test_event_code:
@@ -624,7 +644,8 @@ def send_lead_qualified_high_quality(
                     status=parsed_response['status'],
                     events_received=parsed_response['events_received'],
                     events_rejected=parsed_response['events_rejected'],
-                    error_message=parsed_response['error_message']
+                    error_message=parsed_response['error_message'],
+                    client_id=client_id
                 )
             except Exception as db_err:
                 logger.warning(f"⚠️  Erro ao salvar CAPI response no banco para {email}: {db_err}")
@@ -668,7 +689,10 @@ def send_both_lead_events(
     event_timestamp: int,
     test_event_code: Optional[str] = None,
     survey_data: Optional[Dict] = None,
-    db = None
+    db = None,
+    capi_config: Optional[CAPIConfig] = None,
+    business_config: Optional[BusinessConfig] = None,
+    client_id: str = 'devclub'
 ) -> Dict:
     """
     TESTE A/B: Envia AMBOS os eventos para permitir teste de 2 estratégias
@@ -709,7 +733,10 @@ def send_both_lead_events(
         event_timestamp=event_timestamp,
         test_event_code=test_event_code,
         survey_data=survey_data,
-        db=db
+        db=db,
+        capi_config=capi_config,
+        business_config=business_config,
+        client_id=client_id
     )
 
     # Enviar evento 2: SEM VALOR (D9-D10 only)
@@ -729,7 +756,9 @@ def send_both_lead_events(
         event_timestamp=event_timestamp,
         test_event_code=test_event_code,
         survey_data=survey_data,
-        db=db
+        db=db,
+        capi_config=capi_config,
+        client_id=client_id
     )
 
     return {
@@ -751,7 +780,8 @@ def send_purchase_event(
     fbc: Optional[str],
     user_agent: Optional[str],
     client_ip: Optional[str],
-    event_source_url: Optional[str]
+    event_source_url: Optional[str],
+    capi_config: Optional[CAPIConfig] = None
 ) -> Dict:
     """
     Envia evento Purchase quando lead vira venda
@@ -770,6 +800,9 @@ def send_purchase_event(
     Returns:
         Dict com resultado do envio
     """
+    pixel_id = (capi_config.pixel_id if capi_config and capi_config.pixel_id else os.getenv('META_PIXEL_ID'))
+    currency = (capi_config.currency if capi_config and capi_config.currency else 'BRL')
+
     if not ACCESS_TOKEN:
         logger.error("❌ META_ACCESS_TOKEN não configurado")
         return {"status": "error", "message": "ACCESS_TOKEN não configurado"}
@@ -790,7 +823,7 @@ def send_purchase_event(
         # CustomData (valor REAL da venda)
         custom_data = CustomData(
             value=valor_venda,
-            currency='BRL'
+            currency=currency
         )
 
         # Event
@@ -807,7 +840,7 @@ def send_purchase_event(
         # EventRequest
         event_request_params = {
             'events': [event],
-            'pixel_id': PIXEL_ID,
+            'pixel_id': pixel_id,
             'access_token': ACCESS_TOKEN
         }
         if test_event_code:
@@ -837,7 +870,7 @@ def send_purchase_event(
             "message": str(e)
         }
 
-def send_batch_events(leads: List[Dict], db=None) -> Dict:
+def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConfig] = None, business_config: Optional[BusinessConfig] = None, client_id: str = 'devclub') -> Dict:
     """
     Envia múltiplos eventos CAPI em batch (AMBAS AS ESTRATÉGIAS)
     Usado pelo processamento diário
@@ -891,7 +924,10 @@ def send_batch_events(leads: List[Dict], db=None) -> Dict:
             event_source_url=lead.get('event_source_url'),
             event_timestamp=lead['event_timestamp'],
             survey_data=lead.get('survey_data'),  # Dados da pesquisa
-            db=db  # Passar db session para salvar resposta CAPI
+            db=db,  # Passar db session para salvar resposta CAPI
+            capi_config=capi_config,
+            business_config=business_config,
+            client_id=client_id
             # test_event_code=None (padrão) -> vai para PRODUÇÃO
         )
 
@@ -902,7 +938,7 @@ def send_batch_events(leads: List[Dict], db=None) -> Dict:
             if db:
                 try:
                     from api.database import mark_lead_capi_sent
-                    mark_lead_capi_sent(db, lead['email'])
+                    mark_lead_capi_sent(db, lead['email'], client_id=client_id)
                 except Exception as mark_error:
                     logger.warning(f"⚠️ Não foi possível marcar CAPI sent para {lead['email']}: {mark_error}")
         else:

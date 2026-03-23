@@ -1,0 +1,310 @@
+# configs/templates/client_template.yaml
+# Template para configuração de novo cliente no pipeline MLOps Smart Ads.
+#
+# Como usar:
+#   1. Copiar este arquivo para configs/clients/{client_id}.yaml
+#   2. Preencher todos os campos marcados como REQUIRED
+#   3. Revisar campos OPTIONAL e ajustar conforme necessário
+#   4. Criar configs/active_models/{client_id}.yaml após o primeiro treino (--set-active)
+#   5. Rodar ClientConfig.from_yaml(path).validate() e corrigir erros
+#
+# Convenções:
+#   - REQUIRED   — pipeline quebra sem este valor
+#   - OPTIONAL   — tem default razoável no código; preencher se o cliente difere
+#   - ENV VAR    — nunca hardcodar; ler de variável de ambiente
+#   - DEPRECATED — não usar em novos clientes
+#
+# Gerado a partir de: configs/clients/devclub.yaml (2026-03-19)
+# Referência completa: V2/docs/PLANO_REFACTOR_MLOPS.md, Seção 6
+
+# ---------------------------------------------------------------------------
+# Identificação — REQUIRED
+# ---------------------------------------------------------------------------
+client_id: null  # REQUIRED: string única sem espaços (ex: "clientb", "acme")
+
+# ---------------------------------------------------------------------------
+# InfraConfig — todos via env vars
+# ---------------------------------------------------------------------------
+infra:
+  gcp_project_id: null          # ENV VAR: GCP_PROJECT_ID — project ID do GCP
+  cloud_run_url: null            # ENV VAR: INTERNAL_API_URL — URL do Cloud Run
+  validation_bucket: null        # ENV VAR ou config: nome do bucket GCS para relatórios
+  bigquery_dataset_id: null      # REQUIRED se usar BigQuery: nome do dataset
+  bigquery_table_id: null        # REQUIRED se usar BigQuery: nome da tabela
+  guru_api_base_url: null        # REQUIRED se usar API Guru: "https://digitalmanager.guru/api/v2"
+  guru_api_transactions_endpoint: null  # REQUIRED se usar API Guru: "/transactions"
+
+# ---------------------------------------------------------------------------
+# IngestionConfig — REQUIRED para pipeline funcionar
+# ---------------------------------------------------------------------------
+ingestion:
+  training_data_dir: null        # OPTIONAL: path local ao dataset; normalmente via argumento CLI
+
+  # Detecção de arquivos TMB (plataforma de pagamento parcelado)
+  # Se o cliente não usa TMB, definir has_tmb: false e ignorar campos tmb_*
+  tmb_detection_columns: null    # REQUIRED se has_tmb: true — colunas que identificam arquivo TMB de parcelas
+                                  # Exemplo: ["Pedido", "Parcela", "Grau de risco"]
+  has_tmb: false                  # REQUIRED: true se o cliente tem dados TMB, false caso contrário
+
+  # TMB dual-source: arquivo de pedidos (tem email + telefone, sem risco)
+  # Hardcodes #154–#156. Preencher apenas se o cliente tem exportação de pedidos separada.
+  tmb_pedidos_detection_columns: null  # OPTIONAL: colunas que identificam o arquivo TMB de pedidos
+                                        # Ex: ["ID do Pedido", "E-mail do Cliente", "Telefone do Cliente"]
+  tmb_pedidos_column_mapping: null     # OPTIONAL: renomeação de colunas do arquivo de pedidos para
+                                        # o formato canônico do pipeline. Ex:
+                                        # {"ID do Pedido": "Pedido", "E-mail do Cliente": "Cliente Email",
+                                        #  "Telefone do Cliente": "Telefone", "Nome do Produto": "nome produto",
+                                        #  "Ticket do pedido": "Ticket (R$)"}
+  tmb_pedidos_active_status_exclude: null  # OPTIONAL: valor de status a excluir no filtro de pedidos ativos
+                                            # Ex: "Cancelado" — mantém Vigente + Quitado
+
+  bare_campaign_names: []        # OPTIONAL: prefixos de campanha incompletos a ignorar (ex: ["DEVLF"])
+
+  api_source_name: null          # REQUIRED se usa API de vendas: nome da fonte nos logs (ex: "API Guru")
+  sales_platform_identifier: null  # REQUIRED: string no nome do arquivo local de vendas (ex: "guru")
+
+  approved_status_value: "Aprovada"   # OPTIONAL: valor de status de venda aprovada (default Guru)
+  tmb_risk_column: "Grau de risco"    # OPTIONAL: nome da coluna de risco no arquivo TMB
+  tmb_risk_values: ["Baixo", "Médio"] # OPTIONAL: valores de risco a considerar (ordem: low, low_medium)
+  tmb_risk_filter_default: "all"      # OPTIONAL: "all" | "low" | "low_medium"
+  product_filter_keyword: null        # REQUIRED: palavra-chave do produto do cliente no arquivo TMB
+                                       # (ex: "devclub") — filtra vendas de outros produtos
+  pesquisa_date_column: "Data"        # OPTIONAL: nome da coluna de data no formulário de pesquisa
+
+  # Convenções de nomenclatura dos arquivos do lançamento
+  lf_file_prefix: null           # REQUIRED: prefixo dos arquivos de leads (ex: "LF")
+  lf_guru_exception_files: []    # OPTIONAL: arquivos LF que mantêm abas de vendas (ex: ["LF06"])
+  local_sales_filename_identifier: null  # OPTIONAL: identificador no nome do arquivo de vendas local a excluir
+
+  min_survey_columns: 10         # OPTIONAL: mínimo de colunas preenchidas para detectar aba com survey
+  score_column_prefixes:         # OPTIONAL: prefixos de colunas de score a remover (resultado do modelo)
+    - "score"
+    - "faixa"
+    - "pontuação"
+    - "pontuacao"
+    - "lead_score"
+    - "decil"
+
+  vendas_utm_columns_to_remove: ["source", "medium", "campaign", "content"]  # OPTIONAL
+
+  columns_to_remove: []          # REQUIRED: lista de colunas a remover do formulário de leads
+                                  # (colunas de score, técnicas, sempre ausentes em produção)
+                                  # Ver devclub.yaml para exemplo completo
+
+  column_rename_mapping: {}      # REQUIRED se há colunas com nomes longos:
+                                  # mapeamento "Nome longo do formulário" → "nome_curto"
+                                  # Ex: {"Já investiu em algum curso...?": "investiu_curso_online"}
+
+  dataset_cutoff_date: null      # REQUIRED: "YYYY-MM-DD" — data a partir da qual features críticas
+                                  # estão disponíveis (quando o formulário foi padronizado)
+
+  # Unificação de colunas — mescla variantes do mesmo campo
+  column_unification:
+    pesquisa_merges: []          # REQUIRED: lista de merges de colunas de pesquisa
+                                  # Estrutura: [{cols: ["Coluna A", "Coluna B"], target: "coluna_destino"}]
+    valor_columns: []            # REQUIRED: nomes de colunas de valor monetário (ex: ["Ticket (R$)"])
+    produto_columns: []          # REQUIRED: nomes de colunas de produto (ex: ["Produto", "Lançamento"])
+    nome_columns: []             # REQUIRED: nomes de colunas de nome do comprador
+    email_columns: []            # REQUIRED: nomes de colunas de email do comprador
+    telefone_columns: []         # REQUIRED se has_tmb: true — nomes de colunas de telefone
+
+# ---------------------------------------------------------------------------
+# UTMConfig — REQUIRED para unificação UTM correta
+# ---------------------------------------------------------------------------
+utm:
+  source_to_outros: []           # REQUIRED: valores de utm_source a colapsar em "outros"
+                                  # (fontes com baixo volume ou placeholders do formulário)
+  source_to_channel_mapping: {}  # OPTIONAL: mapeamento de sources orgânicas para canal existente
+                                  # Ex: {"youtube-bio": "youtube"}
+  term_mappings: {}              # OPTIONAL: mapeamento de abreviações de term
+                                  # Ex: {"ig": "instagram", "fb": "facebook"}
+  term_outros_patterns: []       # OPTIONAL: padrões de term a colapsar em "outros"
+                                  # Ex: ["--", "{"]
+  term_long_id_threshold: 10     # OPTIONAL: comprimento máximo antes de classificar como ID longo
+
+# ---------------------------------------------------------------------------
+# MediumConfig — REQUIRED para unificação Medium correta
+# ---------------------------------------------------------------------------
+medium:
+  adv_prefix: null               # REQUIRED se usa prefixo nos públicos: string a remover
+                                  # Ex: "ADV" remove "ADV|Aberto" → "Aberto"
+  frequency_threshold: 0.025     # OPTIONAL: >= 2.5% nos dados → categoria válida (modo treino)
+  valid_categories: null         # null = modo treino (derivado dos dados); preencher em produção
+  discontinued_categories: null  # DEPRECATED
+  manual_unifications: null      # DEPRECATED
+  binary_top3_categories: null   # DEPRECATED (removido do treino em dev/retreino)
+
+  category_mappings: {}          # REQUIRED: mapeamento de variantes históricas de nomes de públicos
+                                  # Ex: {"Nome variante": "Nome canônico", "Lixo": "Outros"}
+                                  # Ver devclub.yaml para exemplo com ~40 entradas
+
+# ---------------------------------------------------------------------------
+# CategoryConfig — REQUIRED para normalização de respostas de pesquisa
+# ---------------------------------------------------------------------------
+category:
+  categorical_columns: []        # REQUIRED: colunas de pesquisa a normalizar (lowercase + unidecode)
+                                  # Excluir: E-mail, Telefone, Data, Medium, Source e binárias
+
+  category_mappings: {}          # REQUIRED: mapeamentos semânticos por coluna após normalização
+                                  # Estrutura: {nome_coluna: {variante: canonical}}
+                                  # Colunas típicas: interesse_programacao, faixa_salarial, idade,
+                                  # o_que_faz_atualmente, o_que_quer_ver_evento
+                                  # Ver devclub.yaml para exemplo com 30+ entradas
+
+# ---------------------------------------------------------------------------
+# MatchingConfig — REQUIRED para matching leads × vendas
+# ---------------------------------------------------------------------------
+matching:
+  strategy: email_telefone        # REQUIRED: "email_only" | "email_telefone" | "robusto"
+  pesquisa_email_column: "E-mail" # REQUIRED: nome da coluna de email no formulário de leads
+  pesquisa_phone_column: "Telefone"  # REQUIRED se strategy inclui telefone
+  country_code: 55                # OPTIONAL: código de país para validação de telefone
+  phone_digits: [10, 11]          # OPTIONAL: comprimentos válidos de telefone (sem DDD9)
+  alunos_todos_path: null         # OPTIONAL: path para validação cruzada (estratégia email_with_validation)
+  validation_products: null       # OPTIONAL: produtos para validação cruzada
+  alunos_email_column: null       # OPTIONAL: coluna de email no arquivo de alunos
+
+# ---------------------------------------------------------------------------
+# FeatureConfig — REQUIRED para feature engineering
+# ---------------------------------------------------------------------------
+feature:
+  critical_columns: []           # REQUIRED: features a monitorar para mudanças de qualidade de dados
+                                  # (colunas derivadas pós-encoding, ex: "genero", "interesse_programacao")
+  columns_to_remove: []          # REQUIRED: colunas a remover por data leakage
+                                  # Ex: ["Campaign", "Content"]
+  columns_to_remove_post_cutoff: []  # OPTIONAL: colunas com alto missing pós-cutoff
+  columns_to_drop_after_fe: []   # REQUIRED: colunas a remover após feature engineering
+                                  # (identificadores, datas brutas, colunas auxiliares)
+  pesquisa_name_column: "Nome Completo"  # OPTIONAL: coluna de nome no formulário
+  pesquisa_phone_column: "Telefone"      # OPTIONAL: coluna de telefone no formulário
+  telefone_comprimento_keep_values: [9, 11]  # OPTIONAL: comprimentos válidos; resto → "outros"
+  ordering_rules: null           # OPTIONAL: regras de reordenação de features (lógica no código)
+  survey_column_stems: []        # REQUIRED se usa feature registry: stems de colunas de pesquisa
+                                  # Ex: ["gênero", "idade", "faz", "faixa", "cartão"]
+  utm_feature_prefixes_for_registry: ["Source_", "Medium_", "Term_"]  # OPTIONAL
+  derived_feature_prefixes_for_registry: ["nome_", "email_", "telefone_", "dia_semana"]  # OPTIONAL
+  nlp_columns: []                # RESERVADO: manter vazio até implementação de NLP
+
+# ---------------------------------------------------------------------------
+# EncodingConfig — REQUIRED para encoding consistente treino/produção
+# ---------------------------------------------------------------------------
+encoding:
+  ordinal_variables: {}          # OPTIONAL: variáveis com encoding ordinal e suas categorias em ordem
+                                  # Ex: {"dia_semana": [0, 1, 2, 3, 4, 5, 6]}
+                                  # ATENÇÃO: só adicionar variáveis que existem com esse nome exato no df
+  categorical_detection_max_unique: 20  # OPTIONAL: máximo de valores únicos para detectar categórica
+  features_to_drop_after_encoding: []   # OPTIONAL: features a remover pós-encoding
+  column_name_corrections: {}    # OPTIONAL: correções de nomes pós-normalização (geralmente vazio)
+
+# ---------------------------------------------------------------------------
+# ModelConfig — OPTIONAL (tem defaults no código)
+# ---------------------------------------------------------------------------
+model:
+  hyperparameters: null          # OPTIONAL: hiperparâmetros baseline (antes do tuning)
+                                  # Default: {n_estimators: 300, max_depth: 8, max_features: sqrt, ...}
+  buyer_weights: null            # OPTIONAL: pesos por tipo de comprador para sample_weight
+                                  # null desativa weighting (apropriado para cliente sem TMB)
+                                  # Ex: {guru: 1.0, tmb_baixo: 0.84, tmb_medio: 0.67}
+  mlflow_experiment_name: null   # REQUIRED: nome do experimento MLflow (ex: "clientb_lead_scoring")
+  mlflow_experiment_id: "1"      # DEPRECATED: não usar em novos clientes — IDs mudam se o tracking server for migrado.
+                                  # Criar o experimento primeiro: mlflow.create_experiment("clientb_lead_scoring")
+                                  # e usar o ID retornado. O código derivará o ID do nome do experimento em runtime.
+  model_name_template: null      # REQUIRED: template do nome do modelo (ex: "v1_clientb_rf_{split_method}_single")
+  legacy_model_dir: "arquivos_modelo"  # OPTIONAL: diretório legado de fallback
+  business_config_path: null     # OPTIONAL: path para atualização automática de taxas de conversão
+  tuning_improvement_thresholds: # OPTIONAL: thresholds para adotar hiperparâmetros tunados
+    recommended: 1.0             # > 1.0% melhoria AUC → adotar automaticamente
+    marginal: 0.3                # > 0.3% melhoria AUC → considerar manualmente
+  metadata_filename_pattern: "model_metadata*.json"  # OPTIONAL
+  top_decils_to_monitor: ["D9", "D10"]  # OPTIONAL: decis de alta qualidade a monitorar
+
+# ---------------------------------------------------------------------------
+# MonitoringConfig — OPTIONAL para lançamento inicial; preencher para monitoramento
+# ---------------------------------------------------------------------------
+monitoring:
+  model_name: null               # REQUIRED se usa monitoring: nome do modelo (ex: "v1_clientb_rf_temporal_leads_single")
+  conversion_window_days: 20     # REQUIRED: duração do ciclo de venda em dias — NÃO copiar 20 do DevClub.
+                                  # Calcular: captacao_days + cpl_days + vendas_days do ciclo real do cliente.
+  medium_strategy: null          # OPTIONAL: estratégia de medium no monitoring
+  survey_sheet_tab_index: null   # REQUIRED se usa Google Sheets: índice da aba com pesquisa (ex: 1)
+  sheet_date_format: null        # REQUIRED se usa Google Sheets: formato de data da aba de pesquisa
+  timezone_offset_hours: null    # REQUIRED: offset de timezone em horas (ex: -3 para BRT)
+  main_sheet_tab_index: null     # REQUIRED se usa Google Sheets: índice da aba principal (ex: 0)
+  invalid_decil_values: null     # OPTIONAL: valores de decil inválidos a filtrar do histórico
+  main_sheet_date_format: null   # REQUIRED se usa Google Sheets: formato de data da aba principal
+  funnel_lookback_hours: null    # OPTIONAL: janela de lookback do funil (ex: 12)
+  display_date_format: null      # OPTIONAL: formato de data para exibição (ex: "%d/%m/%Y %H:%M")
+  capi_events_per_lead_estimate: null  # OPTIONAL: média de eventos CAPI por lead (ex: 1.3)
+  thresholds: null               # OPTIONAL: thresholds de drift/qualidade por categoria
+  missing_rate_ignore_columns: null   # OPTIONAL: colunas a ignorar no check de missing rate
+  sheets_url: null               # REQUIRED se usa Google Sheets: ID da planilha principal
+  backup_sheets_url: null        # OPTIONAL: ID da planilha de backup
+  drift_features_to_analyze: null  # OPTIONAL: features para análise de drift categórico
+
+# ---------------------------------------------------------------------------
+# CAPIConfig — REQUIRED se envia eventos ao Meta CAPI
+# ---------------------------------------------------------------------------
+capi:
+  pixel_id: null                 # ENV VAR: META_PIXEL_ID
+  event_name_with_value: null    # REQUIRED: nome do evento com valor (ex: "LeadQualified")
+  event_name_high_quality: null  # REQUIRED: nome do evento high quality (ex: "LeadQualifiedHighQuality")
+  event_name_faixa_a: null       # OPTIONAL: evento adicional (ex: "Faixa A")
+  high_quality_decils: null      # REQUIRED: lista de decis high quality (ex: ["D09", "D10"])
+  country_code: null             # REQUIRED: código de país ISO (ex: "br")
+  currency: null                 # REQUIRED: código de moeda ISO (ex: "BRL")
+  # decil_to_value: REMOVIDO (DT-5) — calculado em runtime como business.product_value × business.conversion_rates[decil]
+  # Não adicionar este campo. Preencher business.product_value e business.conversion_rates.
+
+# ---------------------------------------------------------------------------
+# APIConfig — REQUIRED se usa a API FastAPI
+# ---------------------------------------------------------------------------
+api:
+  cors_origins: null             # REQUIRED: lista de origens permitidas pelo CORS
+  batch_processing_size: null    # OPTIONAL: tamanho do batch no processamento em lote (ex: 500)
+  railway_polling_batch_size: null  # OPTIONAL: limite de leads por execução no polling (ex: 50)
+  default_analysis_period_days: null  # OPTIONAL: dias default para período "Total" (ex: 30)
+  utm_main_sources: null         # REQUIRED: nomes das fontes UTM principais (ex: ["facebook-ads", "google-ads"])
+  bare_medium_names: null        # OPTIONAL: nomes de medium "puros" a ignorar (ex: ["dgen", "paid"])
+  generic_utm_terms: null        # OPTIONAL: terms genéricos a excluir de análises
+  generic_utms_set: null         # OPTIONAL: set de UTMs genéricos para análise de Medium
+  sheets_column_names: null      # REQUIRED: mapeamento de campos → nomes de colunas do formulário
+  railway_field_mappings: null   # REQUIRED se usa Railway: mapeamentos de respostas do formulário
+  utm_campaign_structure: null   # OPTIONAL: prefixos de nomenclatura de campanha
+
+# ---------------------------------------------------------------------------
+# BusinessConfig — REQUIRED se usa API com recomendação de budget ou CAPI com valor
+# Hardcodes #90–#98. Atualizado pelo training_model.py após cada treino (conversion_rates).
+# ---------------------------------------------------------------------------
+business:
+  product_value: null            # REQUIRED: valor médio ponderado do produto em R$
+                                  # (considerar diferentes plataformas de venda e inadimplência real)
+                                  # Ex: 1563.75
+
+  conversion_rates: null         # REQUIRED: taxas de conversão por decil, calibradas para este cliente.
+                                  # ⚠️ Chaves DEVEM ter zero à esquerda: "D01"..."D10"
+                                  # Chaves DEVEM ter zero à esquerda: "D01"..."D10" (formato canônico do modelo).
+                                  # Ex:
+                                  # D01: 0.002048
+                                  # D02: 0.004781
+                                  # ...
+                                  # D10: 0.055973
+
+  spend_threshold_zero_leads: null   # OPTIONAL: gasto mínimo (R$) sem leads para acionar alerta (ex: 100.0)
+  minimum_leads_threshold: null      # OPTIONAL: mínimo de leads para considerar dados suficientes (ex: 3)
+
+  color_thresholds:                  # OPTIONAL: thresholds de cor no Google Sheets (ação recomendada)
+    green_min: null                  # Ex: 30 (≥ 30 → verde = escalar)
+    yellow_min: null                 # Ex: 1 (≥ 1 → amarelo = manter; < 1 → vermelho = pausar)
+
+  min_roas_safety: null          # OPTIONAL: ROAS mínimo de segurança para escalar (ex: 2.5)
+  cap_variation_max: null        # OPTIONAL: cap máximo de variação de budget em % (ex: 100.0)
+  confidence_sigmoid_l50: null   # OPTIONAL: ponto médio da sigmoid de confiança em número de leads (ex: 15.0)
+  confidence_sigmoid_k: null     # OPTIONAL: inclinação da sigmoid (ex: 0.15)
+  roas_target: null              # OPTIONAL: ROAS alvo para confiança máxima (ex: 8.0)
+
+# ---------------------------------------------------------------------------
+# RetainConfig — OPTIONAL
+# ---------------------------------------------------------------------------
+retrain:
+  quality_gate_warning_threshold: 0.10   # OPTIONAL: 10pp mudança em missing rate → alerta
+  quality_gate_critical_threshold: 0.20  # OPTIONAL: 20pp mudança em missing rate → crítico
