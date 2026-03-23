@@ -2309,11 +2309,46 @@ async def daily_monitoring_check_railway(
         result['funnel_metrics'] = railway_funnel_metrics
         result['lead_quality_metrics'] = railway_lead_quality
 
+        # Buscar métricas Meta Ads (campanhas CAP, hoje) — falha silenciosa
+        meta_metrics = None
+        try:
+            from api.meta_integration import MetaAdsIntegration
+            from api.meta_config import META_CONFIG
+            _token = os.getenv('META_ACCESS_TOKEN')
+            _account = os.getenv('META_ACCOUNT_ID', META_CONFIG.get('account_id', 'act_188005769808959'))
+            if _token:
+                _today = datetime.now(_tz(timedelta(hours=-3))).strftime('%Y-%m-%d')
+                _meta = MetaAdsIntegration(access_token=_token)
+                _rows = _meta.get_insights(
+                    account_id=_account,
+                    level='campaign',
+                    fields=['campaign_name', 'spend', 'clicks'],
+                    since_date=_today,
+                    until_date=_today,
+                    filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}]
+                )
+                _spend  = sum(float(r.get('spend', 0) or 0) for r in _rows)
+                _clicks = sum(int(r.get('clicks', 0) or 0) for r in _rows)
+                # Usar meia-noite BRT como cutoff — mesma janela que Meta usa para "hoje"
+                _midnight_brt = datetime.now(brt).replace(hour=0, minute=0, second=0, microsecond=0)
+                _midnight_utc = _midnight_brt.astimezone(_tz.utc)
+                _leads_hoje = len(_after(quality_rows, _midnight_utc))
+                meta_metrics = {
+                    'date':             _today,
+                    'spend':            _spend,
+                    'clicks':           _clicks,
+                    'cpl':              (_spend / _leads_hoje) if _leads_hoje > 0 else None,
+                    'taxa_clique_lead': (_leads_hoje / _clicks * 100) if _clicks > 0 else None,
+                }
+                logger.info(f"📊 Meta Ads CAP: spend=R${_spend:.2f}, clicks={_clicks}, leads={_leads_hoje}")
+        except Exception as _e:
+            logger.warning(f"⚠️ Meta Ads metrics indisponível: {_e}")
+
         # Regenerar critical_summary com dados Railway (lead_quality_metrics corretos)
         from src.monitoring.models import Alert as AlertModel
         alerts_objs = [AlertModel.from_dict(a) for a in result['alerts']]
         result['critical_summary'] = orchestrator._generate_critical_summary(
-            alerts_objs, railway_funnel_metrics, railway_lead_quality
+            alerts_objs, railway_funnel_metrics, railway_lead_quality, meta_metrics
         )
 
         processing_time = time.time() - start_time
