@@ -17,6 +17,10 @@ V2/files/
 venv/
 ENV/
 
+# Tokens e credenciais
+token.txt
+*.token
+
 .joblib
 
 # Python cache

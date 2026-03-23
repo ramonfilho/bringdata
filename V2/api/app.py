@@ -2309,6 +2309,13 @@ async def daily_monitoring_check_railway(
         result['funnel_metrics'] = railway_funnel_metrics
         result['lead_quality_metrics'] = railway_lead_quality
 
+        # Regenerar critical_summary com dados Railway (lead_quality_metrics corretos)
+        from src.monitoring.models import Alert as AlertModel
+        alerts_objs = [AlertModel.from_dict(a) for a in result['alerts']]
+        result['critical_summary'] = orchestrator._generate_critical_summary(
+            alerts_objs, railway_funnel_metrics, railway_lead_quality
+        )
+
         processing_time = time.time() - start_time
         logger.info(f"✅ Railway monitoring concluído em {processing_time:.2f}s — "
                     f"{result['total_alerts']} alertas")
