@@ -159,7 +159,8 @@ def registrar_features_e_modelo_devclub(
     missing_rates_baseline: dict = None,
     buyer_weights: pd.Series = None,
     cli_args: dict = None,
-    client_config: ClientConfig = None
+    client_config: ClientConfig = None,
+    tmb_risk_filter: str = 'all'
 ) -> dict:
     """
     Registra features e salva modelo DevClub para produção.
