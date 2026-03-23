@@ -134,30 +134,29 @@ Estes componentes fazem sentido quando o volume de dados ou de clientes tornar a
 
 ---
 
-## Sequência de decisões
+## Backlog ordenado por prioridade
 
-```
-AGORA (pós-merge do refactor):
-  → Gap 1: src/core/validation.py    (antes do Cliente B)
-  → Gap 2 Sprint 2: quality gate     (qualquer momento)
-  → DT-2: testes unitários           (após dados do Cliente B)
+Lista única com todos os próximos passos em ordem. Cada item tem a condição que o desbloqueia ou o torna necessário.
 
-COM CLIENTE B ATIVO:
-  → Gap 2 Sprint 3: trigger por drift
-  → GitHub Actions CI (se DT-2 concluído)
-  → Looker Studio dashboard
-
-COM 3+ CLIENTES:
-  → Vertex AI Model Registry
-  → Artifact Registry formal
-
-COM 5+ CLIENTES OU ESCALA B2B:
-  → Pub/Sub + Dataflow
-  → BigQuery Feature Store
-  → Kubeflow / Vertex AI Pipelines
-  → Vertex AI Endpoints
-  → Vertex AI Model Monitoring
-```
+| # | Item | Condição | Onde está documentado |
+|---|---|---|---|
+| 1 | **Capturar golden snapshot do monitoring** (Etapa 1E) | Fazer antes do merge — referência pré-refactor | `CHECKLIST_DEPLOY_REFACTOR.md` Etapa 1E |
+| 2 | **Abrir e mergear o PR** (`refactor/mlops-core` → `main`) | Golden snapshot capturado | `CHECKLIST_DEPLOY_REFACTOR.md` Etapa 2 |
+| 3 | **Deploy sem tráfego + validações** (Pilares A, B, C, D) | PR merged | `CHECKLIST_DEPLOY_REFACTOR.md` Etapas 3–4 |
+| 4 | **Migrar tráfego para nova revisão** | Todas as validações da Etapa 4 passaram | `CHECKLIST_DEPLOY_REFACTOR.md` Etapa 5 |
+| 5 | **Confirmar job de monitoring diário** | Dia seguinte ao deploy | `CHECKLIST_DEPLOY_REFACTOR.md` Etapa 6B |
+| 6 | **Atualizar `ARQUITETURA_SISTEMA_COMPLETA.md`** | Deploy concluído — doc está desatualizado desde fev/2026 | `INDICE_DOCUMENTACAO.md` |
+| 7 | **`src/core/validation.py`** — schema check pré-treino | Antes do segundo cliente ativo. Sem isso, dado ruim do Cliente B pode corromper o pipeline silenciosamente | `ROADMAP_MLOPS_MATURIDADE.md` Gap 1 |
+| 8 | **Sprint 2 `retraining_orchestrator.py`** — quality gate automático pós-treino | Qualquer momento — baixa complexidade, arquitetura de hooks já existe | `ROADMAP_MLOPS_MATURIDADE.md` Gap 2 |
+| 9 | **Dados do Cliente B chegam** | Depende do cliente | — |
+| 10 | **DT-2 — testes unitários `src/core/`** | Dados do Cliente B disponíveis — testes devem ser parametrizados com dois `ClientConfig` reais | `PLANO_REFACTOR_MLOPS.md` DT-2 |
+| 11 | **Fase 3b — Onboarding Cliente B** (YAML + treino + validação) | Dados do Cliente B + itens 7 e 10 concluídos | `PLANO_REFACTOR_MLOPS.md` Fase 3b |
+| 12 | **Fase 4 — EDA Generator** (`src/eda/generate_client_config.py`) | Cliente B estável — padrão claro o suficiente para automatizar | `PLANO_REFACTOR_MLOPS.md` Fase 4 |
+| 13 | **GitHub Actions CI** — testes automáticos a cada push em `src/core/` | DT-2 concluído + 2 clientes ativos | `ROADMAP_MLOPS_MATURIDADE.md` Nível 2 |
+| 14 | **Sprint 3 `retraining_orchestrator.py`** — trigger de retreino por drift | 500+ leads/mês por cliente (volume mínimo para drift ser detectável) | `ROADMAP_MLOPS_MATURIDADE.md` Gap 2 Sprint 3 |
+| 15 | **Looker Studio dashboard** | Qualquer momento após Cliente B ativo — baixo esforço, alto valor de apresentação | `ROADMAP_MLOPS_MATURIDADE.md` Nível 2 |
+| 16 | **Vertex AI Model Registry** | 3+ clientes — substituir `configs/active_models/*.yaml` manual | `ROADMAP_MLOPS_MATURIDADE.md` Nível 2 |
+| 17 | **Stack GCP completo** (Pub/Sub, Dataflow, Kubeflow, Feature Store, Vertex AI Endpoints) | 5+ clientes ou escala B2B | `ROADMAP_MLOPS_MATURIDADE.md` Nível 3 |
 
 ---
 
