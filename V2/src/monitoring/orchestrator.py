@@ -8,7 +8,7 @@ import logging
 import pandas as pd
 from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func, distinct
+from sqlalchemy import func, distinct, text
 import sys
 import os
 from datetime import datetime
@@ -95,6 +95,13 @@ class MonitoringOrchestrator:
         self.model_path = model_path
         self.db = db
         self._client_config = client_config or ClientConfig.from_yaml(_DEFAULT_CONFIG_PATH)
+
+        # Verificar suporte a filtro multi-cliente (depende do schema do banco)
+        if db is not None:
+            from api.database import has_client_id_column
+            self._filter_by_client = has_client_id_column(db)
+        else:
+            self._filter_by_client = False
 
         # Inicializar monitors
         self.monitors = {
@@ -203,6 +210,14 @@ class MonitoringOrchestrator:
 
         # Gerar sumário
         summary = self._generate_summary(alerts)
+
+        # Garantir que a sessão está limpa antes de queries de funil
+        # (monitors podem deixar transação abortada em caso de erro interno)
+        if self.db is not None:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
 
         # NOVO: Gerar métricas do funil completo
         funnel_metrics = self._generate_funnel_metrics(leads_data, df if leads_data else None)
@@ -671,12 +686,12 @@ class MonitoringOrchestrator:
 
         _client_id = self._client_config.client_id if self._client_config else 'devclub'
 
-        total_db = self.db.query(
-            func.count(distinct(LeadCAPI.email))
-        ).filter(
-            LeadCAPI.created_at >= lookback_time,
-            LeadCAPI.client_id == _client_id
-        ).scalar()
+        _q_total = self.db.query(func.count(distinct(LeadCAPI.email))).filter(
+            LeadCAPI.created_at >= lookback_time
+        )
+        if self._filter_by_client:
+            _q_total = _q_total.filter(text("leads_capi.client_id = :cid").bindparams(cid=_client_id))
+        total_db = _q_total.scalar()
 
         metrics['capture'] = {
             'total_sheets_tab1': total_sheets_tab1,
@@ -687,10 +702,10 @@ class MonitoringOrchestrator:
         }
 
         # ETAPA 2: QUALIDADE DOS DADOS CAPI
-        recent_leads = self.db.query(LeadCAPI).filter(
-            LeadCAPI.created_at >= lookback_time,
-            LeadCAPI.client_id == _client_id
-        ).all()
+        _q_recent = self.db.query(LeadCAPI).filter(LeadCAPI.created_at >= lookback_time)
+        if self._filter_by_client:
+            _q_recent = _q_recent.filter(text("leads_capi.client_id = :cid").bindparams(cid=_client_id))
+        recent_leads = _q_recent.all()
 
         if recent_leads:
             with_fbp = sum(1 for lead in recent_leads if lead.fbp and lead.fbp.strip())
@@ -728,11 +743,13 @@ class MonitoringOrchestrator:
         # ETAPA 4: ENVIO PARA META CAPI
         # Filtra por created_at para contar apenas leads da janela atual,
         # evitando inflacionar com backlog histórico processado pelo polling de 5min
-        sent_to_capi = self.db.query(LeadCAPI).filter(
+        _q_sent = self.db.query(LeadCAPI).filter(
             LeadCAPI.created_at >= lookback_time,
-            LeadCAPI.capi_sent_at.isnot(None),
-            LeadCAPI.client_id == _client_id
-        ).count()
+            LeadCAPI.capi_sent_at.isnot(None)
+        )
+        if self._filter_by_client:
+            _q_sent = _q_sent.filter(text("leads_capi.client_id = :cid").bindparams(cid=_client_id))
+        sent_to_capi = _q_sent.count()
 
         estimated_events = int(sent_to_capi * 1.3)  # Aproximação
 
@@ -743,11 +760,13 @@ class MonitoringOrchestrator:
         }
 
         # ETAPA 5: RESPOSTA DA META
-        with_response = self.db.query(LeadCAPI).filter(
+        _q_response = self.db.query(LeadCAPI).filter(
             LeadCAPI.created_at >= lookback_time,
-            LeadCAPI.capi_response_status.isnot(None),
-            LeadCAPI.client_id == _client_id
-        ).all()
+            LeadCAPI.capi_response_status.isnot(None)
+        )
+        if self._filter_by_client:
+            _q_response = _q_response.filter(text("leads_capi.client_id = :cid").bindparams(cid=_client_id))
+        with_response = _q_response.all()
 
         if with_response:
             status_counts = {}
