@@ -106,9 +106,9 @@ GURU_DATA_SOURCE="${GURU_DATA_SOURCE:-api}"
 SCRIPT_DIR="${SCRIPT_DIR:-$( cd "$( dirname "${BASH_SOURCE[0]}" )/.." && pwd )}"
 PROJECT_ROOT="${PROJECT_ROOT:-$(dirname "$SCRIPT_DIR")}"
 MODEL_DIR="${MODEL_DIR:-$PROJECT_ROOT/files}"
-CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/configs/active_model.yaml}"
-BUSINESS_CONFIG="${BUSINESS_CONFIG:-$SCRIPT_DIR/business_config.py}"
 CLIENT_ID="${CLIENT_ID:-devclub}"
+CONFIG_FILE="${CONFIG_FILE:-$PROJECT_ROOT/configs/active_models/${CLIENT_ID}.yaml}"
+BUSINESS_CONFIG="${BUSINESS_CONFIG:-$SCRIPT_DIR/business_config.py}"
 CLIENT_CONFIG_FILE="${CLIENT_CONFIG_FILE:-$PROJECT_ROOT/configs/clients/${CLIENT_ID}.yaml}"
 
 # =============================================================================
