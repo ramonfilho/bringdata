@@ -55,6 +55,7 @@ from src.core.encoding import apply_encoding as _apply_encoding
 from src.model.training_model import registrar_features_e_modelo_devclub
 from src.model.hyperparameter_tuning import hyperparameter_tuning
 from src.monitoring.data_quality import capture_training_categories, capture_training_distributions, calculate_missing_rate
+from src.core.validation import validate_ingestion, validate_features
 
 # Logging será configurado no main() via setup_logging(verbosity)
 
@@ -461,6 +462,15 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info(f"  Dataset Vendas: {len(df_vendas):,} registros, {len(df_vendas.columns)} colunas")
     logger.info("")
 
+    # === VALIDAÇÃO DE INGESTÃO (pós-Célula 4) ===
+    val_ingestion = validate_ingestion(df_pesquisa, df_vendas, client_config.validation)
+    val_ingestion.log("validate_ingestion")
+    if not val_ingestion.passed:
+        if client_config.validation.on_error == "raise":
+            raise ValueError(f"Validação de ingestão falhou: {val_ingestion.errors}")
+        else:
+            logger.warning("  validate_ingestion: falhas ignoradas (on_error=warn)")
+
     # Filtro de data máxima — para reproduzir runs anteriores com o mesmo corte temporal
     if max_date:
         max_date_ts = pd.Timestamp(max_date)
@@ -545,22 +555,19 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     # Listar colunas restantes
     listar_colunas_restantes(df_features_removidas)
 
+    # === VALIDAÇÃO DE FEATURES (pós-Célula 8) ===
+    val_features = validate_features(df_features_removidas, client_config.validation)
+    val_features.log("validate_features")
+    if not val_features.passed:
+        if client_config.validation.on_error == "raise":
+            raise ValueError(f"Validação de features falhou: {val_features.errors}")
+        else:
+            logger.warning("  validate_features: falhas ignoradas (on_error=warn)")
+
     # === CAPTURAR MISSING RATES PARA MONITORAMENTO (QUALITY GATE) ===
     # IMPORTANTE: Captura APÓS célula 8 (remoção de features) para monitorar apenas colunas que vão para o modelo
-    # Colunas críticas usadas no modelo - monitorar mudanças em qualidade de dados
-    colunas_criticas_modelo = [
-        'genero',
-        'idade',
-        'o_que_faz_atualmente',
-        'faixa_salarial',  # Nome completo esperado
-        'tem_cartao_credito',
-        'o_que_quer_ver_evento',
-        'estudou_programacao',
-        'fez_faculdade',
-        'investiu_curso_online',
-        'interesse_programacao',
-        'tem_computador'
-    ]
+    # Lista de colunas críticas vem de ValidationConfig.feature_missing_thresholds (devclub.yaml)
+    colunas_criticas_modelo = list(client_config.validation.feature_missing_thresholds or {})
 
     missing_rates_baseline = {}
     for col in colunas_criticas_modelo:

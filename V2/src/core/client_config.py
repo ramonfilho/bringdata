@@ -239,6 +239,30 @@ class BusinessConfig:
     roas_target: float = 8.0                                # #98 — ROAS alvo para confiança máxima
 
 
+@dataclass
+class ValidationConfig:
+    """Validação de schema e qualidade de dados pré-treino. (DT item 7)
+
+    Dois pontos de uso no train_pipeline.py:
+      - validate_ingestion(): após Célula 4 — schema bruto (colunas obrigatórias, tamanho, datas)
+      - validate_features(): após Célula 8 — missing rates das features críticas
+
+    on_error: "raise" aborta o pipeline; "warn" loga e continua (útil durante exploração do Cliente B).
+    """
+    # Ponto A — schema de ingestão (df_pesquisa + df_vendas brutos)
+    required_survey_columns: Optional[List[str]] = None        # colunas obrigatórias no df_pesquisa
+    required_sales_columns: Optional[List[str]] = None         # colunas obrigatórias no df_vendas
+    min_survey_records: int = 500                              # mínimo de linhas em df_pesquisa
+    max_email_missing_rate: float = 0.30                       # threshold de nulos em coluna de email
+    min_date_parse_rate: float = 0.80                          # fração mínima de datas parseáveis
+
+    # Ponto B — qualidade de features (df pós-Célula 8)
+    feature_missing_thresholds: Optional[Dict[str, float]] = None  # {coluna: max_missing_rate}; None = sem validação
+
+    # Comportamento
+    on_error: str = "raise"                                    # "raise" | "warn"
+
+
 # ---------------------------------------------------------------------------
 # ClientConfig — ponto de entrada
 # ---------------------------------------------------------------------------
@@ -267,6 +291,7 @@ class ClientConfig:
     api: APIConfig = field(default_factory=APIConfig)
     retrain: RetainConfig = field(default_factory=RetainConfig)
     business: BusinessConfig = field(default_factory=BusinessConfig)
+    validation: ValidationConfig = field(default_factory=ValidationConfig)
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "ClientConfig":
@@ -288,6 +313,7 @@ class ClientConfig:
             api=_make(APIConfig, data.get("api", {})),
             retrain=_make(RetainConfig, data.get("retrain", {})),
             business=_make(BusinessConfig, data.get("business", {})),
+            validation=_make(ValidationConfig, data.get("validation", {})),
         )
 
     def validate(self) -> None:

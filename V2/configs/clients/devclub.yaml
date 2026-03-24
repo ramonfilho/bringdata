@@ -618,3 +618,42 @@ business:
   confidence_sigmoid_l50: 15.0           # #97 — ponto médio da sigmoid (15 leads = 50% confiança)
   confidence_sigmoid_k: 0.15            # #97 — inclinação da sigmoid
   roas_target: 8.0                       # #98 — ROAS alvo para confiança máxima (multiplicador = 1.0)
+
+# ---------------------------------------------------------------------------
+# ValidationConfig — validate_ingestion (pós-Célula 4) + validate_features (pós-Célula 8)
+# ---------------------------------------------------------------------------
+validation:
+  on_error: "raise"                    # "raise" aborta o treino; "warn" apenas loga
+
+  # Colunas obrigatórias no df_pesquisa bruto
+  required_survey_columns:
+    - "Data"
+    - "E-mail"
+
+  # Colunas obrigatórias no df_vendas bruto
+  required_sales_columns:
+    - "email"
+    - "data"
+
+  # Tamanho mínimo do dataset de leads
+  min_survey_records: 500
+
+  # Máximo de emails ausentes antes de alertar (matching prejudicado)
+  max_email_missing_rate: 0.30
+
+  # Mínimo de datas parseáveis na coluna Data
+  min_date_parse_rate: 0.80
+
+  # Missing rate máximo por feature crítica (pós-Célula 8, pré-treino)
+  feature_missing_thresholds:
+    genero: 0.30
+    idade: 0.30
+    o_que_faz_atualmente: 0.30
+    faixa_salarial: 0.50
+    tem_cartao_credito: 0.30
+    o_que_quer_ver_evento: 0.30
+    estudou_programacao: 0.30
+    fez_faculdade: 0.30
+    investiu_curso_online: 0.30
+    interesse_programacao: 0.30
+    tem_computador: 0.30
