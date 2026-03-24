@@ -32,76 +32,65 @@ import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CONFIG — atualizar aqui para novos lançamentos
+# CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 
 BASE = Path(__file__).parent.parent  # V2/
 
-PERIODS = [
-    {
-        'name':        'LF40',
-        'cap_start':   '2025-11-25',
-        'cap_end':     '2025-12-02',
-        'vendas_start': '2025-12-08',
-        'vendas_end':   '2025-12-14',
-    },
-    {
-        'name':        'LF41',
-        'cap_start':   '2025-12-02',
-        'cap_end':     '2025-12-09',
-        'vendas_start': '2025-12-15',
-        'vendas_end':   '2025-12-21',
-    },
-    {
-        'name':        'LF42',
-        'cap_start':   '2025-12-09',
-        'cap_end':     '2025-12-16',
-        'vendas_start': '2025-12-22',
-        'vendas_end':   '2025-12-28',
-    },
-    {
-        'name':        'DEV19',
-        'cap_start':   '2025-12-16',
-        'cap_end':     '2026-01-14',
-        'vendas_start': '2026-01-19',
-        'vendas_end':   '2026-01-25',
-    },
-    {
-        'name':        'LF43',
-        'cap_start':   '2026-01-13',
-        'cap_end':     '2026-01-26',
-        'vendas_start': '2026-02-02',
-        'vendas_end':   '2026-02-08',
-    },
-    {
-        'name':        'LF44',
-        'cap_start':   '2026-01-27',
-        'cap_end':     '2026-02-03',
-        'vendas_start': '2026-02-09',
-        'vendas_end':   '2026-02-15',
-    },
-    {
-        'name':        'LF45',
-        'cap_start':   '2026-02-03',
-        'cap_end':     '2026-02-23',
-        'vendas_start': '2026-03-02',
-        'vendas_end':   '2026-03-08',
-    },
-    {
-        'name':        'LF46',
-        'cap_start':   '2026-02-24',
-        'cap_end':     '2026-03-03',
-        'vendas_start': '2026-03-09',
-        'vendas_end':   '2026-03-15',
-    },
-    {
-        'name':        'LF47',
-        'cap_start':   '2026-03-10',
-        'cap_end':     '2026-03-17',
-        'vendas_start': '2026-03-16',
-        'vendas_end':   '2026-03-22',
-    },
-]
+# Mapeamento vendas_start → nome do lançamento.
+# Único lugar a editar ao criar um novo lançamento (apenas o nome, sem datas).
+PERIOD_NAMES = {
+    '2025-12-08': 'LF40',
+    '2025-12-15': 'LF41',
+    '2025-12-22': 'LF42',
+    '2026-01-19': 'DEV19',
+    '2026-02-02': 'LF43',
+    '2026-02-09': 'LF44',
+    '2026-03-02': 'LF45',
+    '2026-03-09': 'LF46',
+    '2026-03-16': 'LF47',
+}
+
+
+def discover_periods() -> list:
+    """
+    Auto-detecta períodos a partir das pastas de validação.
+    Lê 'Performance Geral' de cada relatório para extrair as datas reais.
+    Não contém datas hardcoded — adicionar apenas o nome em PERIOD_NAMES ao
+    criar um novo lançamento.
+    """
+    periods = []
+    for folder in sorted(VALIDATION_DIR.iterdir()):
+        if not folder.is_dir() or ':' not in folder.name:
+            continue
+        reports = sorted(folder.glob('validation_report_*.xlsx'))
+        if not reports:
+            continue
+        try:
+            pg = pd.read_excel(reports[-1], sheet_name='Performance Geral', header=None)
+            rows = {
+                str(r[0]).strip(): str(r.iloc[1]).strip()
+                for _, r in pg.iterrows()
+                if pd.notna(r[0]) and len(r) > 1 and pd.notna(r.iloc[1])
+            }
+            cap_str = rows.get('Período de Captação', '')
+            ven_str = rows.get('Período de Vendas', '')
+            if ' a ' not in cap_str or ' a ' not in ven_str:
+                continue
+            cap_start, cap_end       = [s.strip() for s in cap_str.split(' a ')]
+            vendas_start, vendas_end = [s.strip() for s in ven_str.split(' a ')]
+            name = PERIOD_NAMES.get(vendas_start, folder.name)
+            periods.append({
+                'name':         name,
+                'cap_start':    cap_start,
+                'cap_end':      cap_end,
+                'vendas_start': vendas_start,
+                'vendas_end':   vendas_end,
+            })
+        except Exception as e:
+            print(f"  Aviso: falha ao ler período {folder.name}: {e}")
+    periods.sort(key=lambda p: p['vendas_start'])
+    return periods
 
 # Google Sheets IDs
 SHEETS = {
@@ -123,6 +112,9 @@ CLOUDRUN_SERVICE = 'smart-ads-api'
 # Validation xlsx folder
 VALIDATION_DIR = BASE / 'outputs/validation'
 OUTPUT_DIR     = BASE / 'outputs/validation/historico'
+
+# Períodos auto-detectados das pastas de validação (sem datas hardcoded)
+PERIODS = discover_periods()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ENV
@@ -488,6 +480,33 @@ def parse_xlsx_report(path: Path) -> dict:
                 except (IndexError, ValueError, TypeError):
                     continue
 
+    # Fallback: Comparação ML (estrutura pós-18/03 — sem aba Performance ML)
+    if 'gasto_ml' not in metrics and 'Comparação ML' in xl.sheet_names:
+        cm = xl.parse('Comparação ML', header=None)
+        in_ml_section = False
+        for i, row in cm.iterrows():
+            vals = [v for v in row if pd.notna(v)]
+            if not vals:
+                continue
+            label = str(vals[0]).strip()
+            if 'COMPARAÇÃO ML' in label.upper():
+                in_ml_section = True
+                continue
+            if not in_ml_section:
+                continue
+            if len(vals) >= 2 and isinstance(vals[1], (int, float)):
+                if label == 'Gasto':
+                    metrics['gasto_ml'] = float(vals[1])
+                elif label == 'Leads':
+                    metrics['leads_ml'] = int(vals[1])
+                elif label == 'Conversões':
+                    metrics.setdefault('conv_track', float(vals[1]))
+                    metrics.setdefault('conv_real',  float(vals[1]))
+                elif label == 'ROAS':
+                    metrics['roas_ml'] = float(vals[1])
+                elif label == 'CPA':
+                    metrics['cpa_ml']  = float(vals[1])
+
     # ML Monitoring — AUC e concentrações
     if 'ML Monitoring' in xl.sheet_names:
         mm = xl.parse('ML Monitoring', header=None)
@@ -845,8 +864,6 @@ def build_excel(rows: list[dict], output_path: Path):
              bw(col('cpa_ml'), higher=False), ['R$#,##0.00']*len(names)); r += 1
     data_row(r, 'ROAS ML',       col('roas_ml'),
              bw(col('roas_ml')), ['0.00"x"']*len(names)); r += 1
-    data_row(r, 'ROAS Ajustado TMB', col('roas_adj'),
-             bw(col('roas_adj')), ['0.00"x"']*len(names)); r += 1
 
     # ── Qualidade ML ──
     section(r, 'QUALIDADE DO MODELO ML (AUC & CONCENTRAÇÃO)'); r += 1
@@ -854,9 +871,14 @@ def build_excel(rows: list[dict], output_path: Path):
              bw(col('auc_prod')), ['0.0000']*len(names)); r += 1
     data_row(r, 'AUC Test Set (referência)',  col('auc_test'),
              None, ['0.0000']*len(names)); r += 1
+    # top3_decis == 0.0 significa que nenhum comprador matched tinha score → dado indisponível
+    top3_fmt = [
+        f"{v:.1%}" if isinstance(v, float) and v > 0 else 'n/d'
+        for v in col('top3_decis')
+    ]
     data_row(r, 'Concentração Top 3 Decis (D8/D9/D10)',
-             [f"{v:.1%}" if isinstance(v, float) else v for v in col('top3_decis')],
-             bw(col('top3_decis'))); r += 1
+             top3_fmt,
+             bw([v if isinstance(v, float) and v > 0 else None for v in col('top3_decis')])); r += 1
 
     # ── CAPI ──
     section(r, 'EVENTOS CAPI — META'); r += 1
@@ -1217,6 +1239,18 @@ def run(extra_period: dict = None):
     print(f"\nGerando Excel: {output_path}")
     build_excel(all_rows, output_path)
     print(f"✅ Salvo: {output_path}")
+
+    # Adicionar sheet 'Margem & Contrafactual'
+    print("\nAdicionando sheet 'Margem & Contrafactual'...")
+    try:
+        import sys as _sys
+        _scripts_dir = str(Path(__file__).parent)
+        if _scripts_dir not in _sys.path:
+            _sys.path.insert(0, _scripts_dir)
+        from gerar_evolucao_margem import add_margem_sheet
+        add_margem_sheet(output_path, periods)
+    except Exception as _e:
+        print(f"  ⚠️  Falha ao adicionar 'Margem & Contrafactual': {_e}")
 
     import subprocess as sp
     sp.run(['open', str(output_path)], check=False)

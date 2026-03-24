@@ -417,7 +417,8 @@ class LeadDataLoader:
             cols_ja_consumidas = {
                 'E-mail', 'Nome Completo', 'Telefone', 'Data', 'Data do Envio',
                 'Campaign', 'Source', 'Medium', 'Content', 'Term',
-                'lead_score', 'Faixa', 'Faixa A', 'Faixa B', 'Faixa C', 'Faixa D',
+                'lead_score', 'decil',
+                'Faixa', 'Faixa A', 'Faixa B', 'Faixa C', 'Faixa D',
                 'Pontuação', 'Score',
             }
             for col in df.columns:
@@ -459,29 +460,38 @@ class LeadDataLoader:
                 logger.debug(f"      - {source}: {count} leads")
 
         # Lead Score e Decil
-        df_norm['lead_score'] = df.get('lead_score', np.nan)
+        # lead_score pode chegar como string com vírgula decimal (formato BR da planilha)
+        raw_score = df.get('lead_score', pd.Series(dtype=object))
+        df_norm['lead_score'] = pd.to_numeric(
+            raw_score.astype(str).str.replace(',', '.', regex=False),
+            errors='coerce'
+        ).where(raw_score.notna(), other=np.nan)
 
-        # Extrair decil: PRIORIZAR lead_score (ML) sobre Faixa (legacy)
-        if 'lead_score' in df.columns:
-            if df['lead_score'].notna().any():
-                try:
-                    # PRIORITY 1: ML model scores
-                    df_norm['decile'] = df['lead_score'].apply(self._assign_decile_from_score)
-                    logger.debug(f"    Decis atribuídos via lead_score: {df_norm['decile'].notna().sum()}/{len(df_norm)}")
-                except (FileNotFoundError, KeyError) as e:
-                    # Durante treino, modelo ativo pode não ter model_path (só mlflow_run_id)
-                    # Nesse caso, pular cálculo de decis (não necessário para treino)
-                    logger.debug(f"    Pulando cálculo de decis (contexto: treino): {e}")
-                    df_norm['decile'] = None
-            else:
+        # Extrair decil — prioridades:
+        # 1. Coluna 'decil' direto da planilha (já atribuído pelo modelo em produção)
+        # 2. Computar via lead_score + thresholds do modelo ativo
+        # 3. Fallback legado: coluna 'Faixa'
+        if 'decil' in df.columns and df['decil'].notna().any():
+            # Normalizar formato: D01→D1, D08→D8, D10→D10; descartar valores inválidos
+            def _norm_decil(v):
+                if pd.isna(v):
+                    return None
+                s = str(v).strip()
+                if s.startswith('D') and s[1:].isdigit():
+                    return f"D{int(s[1:])}"  # D01→D1, D10→D10
+                return None
+            df_norm['decile'] = df['decil'].apply(_norm_decil)
+            logger.debug(f"    Decis lidos direto da coluna 'decil': {df_norm['decile'].notna().sum()}/{len(df_norm)}")
+        elif df_norm['lead_score'].notna().any():
+            try:
+                df_norm['decile'] = df_norm['lead_score'].apply(self._assign_decile_from_score)
+                logger.debug(f"    Decis atribuídos via lead_score: {df_norm['decile'].notna().sum()}/{len(df_norm)}")
+            except (FileNotFoundError, KeyError) as e:
+                logger.debug(f"    Pulando cálculo de decis (contexto: treino): {e}")
                 df_norm['decile'] = None
-        elif 'Faixa' in df.columns:
-            if df['Faixa'].notna().any():
-                # FALLBACK: Legacy classification
-                df_norm['decile'] = df['Faixa']
-                logger.debug(f"    Decis atribuídos via Faixa (legacy): {df_norm['decile'].notna().sum()}/{len(df_norm)}")
-            else:
-                df_norm['decile'] = None
+        elif 'Faixa' in df.columns and df['Faixa'].notna().any():
+            df_norm['decile'] = df['Faixa']
+            logger.debug(f"    Decis atribuídos via Faixa (legacy): {df_norm['decile'].notna().sum()}/{len(df_norm)}")
         else:
             df_norm['decile'] = None
             logger.debug(" Nenhuma coluna de score/decil encontrada")

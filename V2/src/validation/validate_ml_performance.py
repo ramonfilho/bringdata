@@ -1208,12 +1208,15 @@ def main():
                     xlsx_primary = xlsx_primary.drop_duplicates(subset=['email']).copy()
 
                     # Enriquecer com Railway/Cloud SQL: campaign_id_meta, lead_score, decil
+                    # ORDEM IMPORTA: survey_df primeiro (tem lead_score) → capi_norm depois (sem score).
+                    # drop_duplicates(keep='first') preserva o score do survey quando o mesmo email
+                    # aparece nas duas fontes. Inverter a ordem descartaria os scores.
                     enrichment_sources = []
-                    if capi_norm is not None and len(capi_norm) > 0:
-                        enrichment_sources.append(capi_norm[['email','campaign','campaign_id_meta','lead_score','decile']].copy())
                     if not survey_df.empty and 'email' in survey_df.columns:
                         survey_enrich = survey_df[['email'] + [c for c in ['campaign','lead_score','decile'] if c in survey_df.columns]].copy()
                         enrichment_sources.append(survey_enrich)
+                    if capi_norm is not None and len(capi_norm) > 0:
+                        enrichment_sources.append(capi_norm[['email','campaign','campaign_id_meta','lead_score','decile']].copy())
 
                     if enrichment_sources:
                         enrich_df = pd.concat(enrichment_sources, ignore_index=True)
