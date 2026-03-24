@@ -809,6 +809,24 @@ Campos adicionados ao template, ao dataclass e ao `devclub.yaml`:
 - Seção `business:` completa (product_value, conversion_rates, spend_threshold, color_thresholds, min_roas_safety, cap_variation_max, confidence_sigmoid, roas_target)
 - `ingestion.tmb_pedidos_detection_columns`, `tmb_pedidos_column_mapping`, `tmb_pedidos_active_status_exclude` (#154–#156)
 
+### DT-7 — Threshold de Medium (Célula 11) calculado sobre janela errada
+
+O threshold de 2.5% que define categorias válidas de UTM Medium em `core/medium.py` (modo treino) é computado sobre o dataset completo **antes** do corte temporal da Célula 13. Isso faz com que campanhas com alta frequência histórica mas que desapareceram antes do final do training set passem no critério e entrem no feature registry — causando alertas de "features faltantes" no monitoramento de lançamentos futuros onde essas campanhas não rodam.
+
+**Evidência (lançamento março/2026 — investigado em 23/03/2026):**
+
+| Feature no registry | Última ocorrência | Posição no split |
+|---|---|---|
+| `Medium_Lookalike_1_Cadastrados_DEV_2_0_Interesse_Ci_ncia_da_Computa_o` | 2026-01-20 | Training set only |
+| `Medium_Lookalike_2_Alunos_Interesse_Linguagem_de_Programa_o` | 2026-01-14 | Training set only |
+| `Medium_Lookalike_2_Cadastrados_DEV_2_0_Interesses` | 2026-02-04 (1 lead) | Training + test (1 ocorrência) |
+
+Todas as três campanhas Lookalike representam >5% do dataset histórico completo (32k, 13k e 43k leads respectivamente), o que as manteve acima do threshold de 2.5%. Nenhuma delas aparece no banco Railway (lançamento atual), confirmando que estão genuinamente inativas.
+
+**Fix:** calcular o threshold de frequência sobre os dados pós-cutoff (janela efetiva de treino), ou exigir presença mínima no test set para que uma categoria entre no feature registry. Arquivo a modificar: `src/core/medium.py` — função `unify_medium`, passo 5a (modo treino).
+
+**Prioridade:** baixa — não impacta predições (modelo preenche com 0); apenas gera alertas corretos no monitoramento. Endereçar antes de escalar para 3+ clientes.
+
 ---
 
 ## 12. Caminho para Nível 2 e além
