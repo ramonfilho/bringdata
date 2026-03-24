@@ -367,7 +367,7 @@ def send_lead_qualified_with_value(
 
         # DEBUG: Log custom_properties e VALUE para verificar o que está sendo enviado
         logger.info(f"🔍 DEBUG LeadQualified para {email}:")
-        logger.info(f"   VALUE enviado: R$ {valor_projetado:.2f} (decil: {decil}, taxa: {taxa_conversao})")
+        logger.info(f"   VALUE enviado: R$ {valor_projetado:.2f} (decil: {decil}, taxa: {taxa})")
         logger.info(f"   Total de custom_properties: {len(custom_props)}")
         logger.info(f"   Keys: {list(custom_props.keys())}")
         logger.info(f"   Sample: {dict(list(custom_props.items())[:5])}")

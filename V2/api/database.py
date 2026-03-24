@@ -91,7 +91,7 @@ class LeadCAPI(Base):
         """Converte para dict"""
         return {
             'id': self.id,
-            'client_id': self.client_id,
+            'client_id': getattr(self, 'client_id', 'devclub'),
             'email': self.email,
             'name': self.name,
             'first_name': self.first_name,
@@ -252,8 +252,11 @@ def get_db() -> Session:
 # =============================================================================
 
 def create_lead_capi(db: Session, lead_data: Dict) -> LeadCAPI:
-    """Cria novo lead no banco. lead_data deve conter 'client_id'."""
-    lead = LeadCAPI(**lead_data)
+    """Cria novo lead no banco. lead_data pode conter 'client_id' (ignorado se coluna não existir)."""
+    data = dict(lead_data)
+    if not has_client_id_column(db):
+        data.pop('client_id', None)
+    lead = LeadCAPI(**data)
     db.add(lead)
     db.commit()
     db.refresh(lead)
@@ -308,9 +311,10 @@ def count_leads_with_fbc(db: Session, client_id: str = 'devclub') -> int:
 def mark_lead_capi_sent(db: Session, email: str, client_id: str = 'devclub') -> bool:
     """Marca TODOS os registros do lead (deste cliente) como enviado para CAPI"""
     try:
-        leads = db.query(LeadCAPI).filter(
-            LeadCAPI.email == email, LeadCAPI.client_id == client_id
-        ).all()
+        q = db.query(LeadCAPI).filter(LeadCAPI.email == email)
+        if has_client_id_column(db):
+            q = q.filter(text("leads_capi.client_id = :cid").bindparams(cid=client_id))
+        leads = q.all()
 
         if not leads:
             logger.warning(f"⚠️ Lead {email} não encontrado no banco")
@@ -353,9 +357,10 @@ def update_capi_response(
         True se atualizou com sucesso
     """
     try:
-        leads = db.query(LeadCAPI).filter(
-            LeadCAPI.email == email, LeadCAPI.client_id == client_id
-        ).all()
+        q = db.query(LeadCAPI).filter(LeadCAPI.email == email)
+        if has_client_id_column(db):
+            q = q.filter(text("leads_capi.client_id = :cid").bindparams(cid=client_id))
+        leads = q.all()
 
         if not leads:
             logger.warning(f"⚠️ Lead {email} não encontrado no banco para atualizar CAPI response")
@@ -378,19 +383,23 @@ def update_capi_response(
 
 def get_leads_not_sent_to_capi(db: Session, emails: List[str], client_id: str = 'devclub') -> List[LeadCAPI]:
     """Busca leads que ainda NÃO foram enviados para CAPI (deste cliente)."""
-    return db.query(LeadCAPI).filter(
+    q = db.query(LeadCAPI).filter(
         LeadCAPI.email.in_(emails),
-        LeadCAPI.client_id == client_id,
         LeadCAPI.capi_sent_at.is_(None)
-    ).all()
+    )
+    if has_client_id_column(db):
+        q = q.filter(text("leads_capi.client_id = :cid").bindparams(cid=client_id))
+    return q.all()
 
 def get_leads_already_sent_to_capi(db: Session, emails: List[str], client_id: str = 'devclub') -> List[str]:
     """Retorna lista de emails que já foram enviados para CAPI (deste cliente)."""
-    leads = db.query(LeadCAPI.email).filter(
+    q = db.query(LeadCAPI.email).filter(
         LeadCAPI.email.in_(emails),
-        LeadCAPI.client_id == client_id,
         LeadCAPI.capi_sent_at.isnot(None)
-    ).all()
+    )
+    if has_client_id_column(db):
+        q = q.filter(text("leads_capi.client_id = :cid").bindparams(cid=client_id))
+    leads = q.all()
     return [lead[0] for lead in leads]
 
 
