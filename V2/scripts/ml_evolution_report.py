@@ -490,10 +490,15 @@ def parse_xlsx_report(path: Path) -> dict:
                 continue
             label = str(vals[0]).strip()
             if 'COMPARAÇÃO ML' in label.upper():
+                if in_ml_section:
+                    # Segunda ocorrência = seção Matched Pairs — parar aqui
+                    break
                 in_ml_section = True
                 continue
             if not in_ml_section:
                 continue
+            if 'ADSETS' in label.upper() or 'MATCHED' in label.upper():
+                break
             if len(vals) >= 2 and isinstance(vals[1], (int, float)):
                 if label == 'Gasto':
                     metrics['gasto_ml'] = float(vals[1])
@@ -834,12 +839,36 @@ def build_excel(rows: list[dict], output_path: Path):
     pct = [f"{v:.1%}" if isinstance(v, float) else v for v in col('pct_tracking')]
     data_row(r, '% Trackeamento', pct, bw(col('pct_tracking'))); r += 1
 
-    # ── Performance Financeira ──
-    section(r, 'PERFORMANCE FINANCEIRA — CAMPANHAS ML'); r += 1
+    # ── Helpers financeiros (fonte única: Comparação ML — All Campaigns) ──
+    def _mval(key):
+        return [rd.get('margem_data', {}).get(key) for rd in rows]
+
+    def _brl(v):
+        if v is None:
+            return 'n/d'
+        try:
+            fv = float(v)
+            return 'n/d' if np.isnan(fv) else f"R$ {fv:,.0f}"
+        except (TypeError, ValueError):
+            return 'n/d'
+
+    def _rfmt(v):
+        if v is None:
+            return 'n/d'
+        try:
+            fv = float(v)
+            return 'n/d' if np.isnan(fv) else f"{fv:.2f}x"
+        except (TypeError, ValueError):
+            return 'n/d'
+
+    # ── Performance Financeira — Investimento & Resultados ──
+    section(r, 'PERFORMANCE FINANCEIRA — INVESTIMENTO & RESULTADOS'); r += 1
     data_row(r, 'Gasto Total Lançamento (R$)', col('gasto_total'),
              None, ['R$#,##0']*len(names)); r += 1
     data_row(r, 'Gasto Campanhas ML (R$)',     col('gasto_ml'),
              None, ['R$#,##0']*len(names)); r += 1
+    data_row(r, 'Gasto Controle (R$)',
+             [_brl(v) for v in _mval('gasto_ctrl')]); r += 1
     pct_ml = [
         f"{ml/total*100:.1f}%" if isinstance(ml, (int,float)) and isinstance(total, (int,float)) and total > 0 else 'n/d'
         for ml, total in zip(col('gasto_ml'), col('gasto_total'))
@@ -858,20 +887,62 @@ def build_excel(rows: list[dict], output_path: Path):
         f"{v/l*100:.2f}%" if isinstance(v, (int,float)) and isinstance(l, (int,float)) and l > 0 else 'n/d'
         for v, l in zip(col('conv_real'), col('leads_ml'))
     ]
-    data_row(r, 'Taxa de conversão (conv. reais / leads ML)', taxa_conv,
+    data_row(r, 'Taxa de conversão ML (conv. reais / leads ML)', taxa_conv,
              bw([float(v.rstrip('%')) if isinstance(v,str) and v!='n/d' else None for v in taxa_conv])); r += 1
     data_row(r, 'CPA ML (R$) ← menor é melhor', col('cpa_ml'),
              bw(col('cpa_ml'), higher=False), ['R$#,##0.00']*len(names)); r += 1
-    data_row(r, 'ROAS ML',       col('roas_ml'),
-             bw(col('roas_ml')), ['0.00"x"']*len(names)); r += 1
 
-    # ── Qualidade ML ──
-    section(r, 'QUALIDADE DO MODELO ML (AUC & CONCENTRAÇÃO)'); r += 1
+    # ── Receita & ROAS ──
+    section(r, 'RECEITA & ROAS — ML vs CONTROLE'); r += 1
+    data_row(r, 'Receita ML (R$)',
+             [_brl(v) for v in _mval('receita_ml')],
+             bw(_mval('receita_ml'))); r += 1
+    data_row(r, 'Receita Controle (R$)',
+             [_brl(v) for v in _mval('receita_ctrl')]); r += 1
+    data_row(r, 'Receita Total (R$)',
+             [_brl(v) for v in _mval('receita_total')],
+             bw(_mval('receita_total'))); r += 1
+    data_row(r, 'ROAS ML',
+             [_rfmt(v) for v in _mval('roas_ml')],
+             bw(_mval('roas_ml'))); r += 1
+    data_row(r, 'ROAS Controle',
+             [_rfmt(v) for v in _mval('roas_ctrl')]); r += 1
+    data_row(r, 'ROAS Total do Lançamento',
+             [_rfmt(v) for v in _mval('roas_total')],
+             bw(_mval('roas_total'))); r += 1
+
+    # ── Margem de Contribuição ──
+    section(r, 'MARGEM DE CONTRIBUIÇÃO'); r += 1
+    data_row(r, 'Margem ML (R$)',
+             [_brl(v) for v in _mval('margem_ml')],
+             bw(_mval('margem_ml'))); r += 1
+    data_row(r, 'Margem Controle (R$)',
+             [_brl(v) for v in _mval('margem_ctrl')]); r += 1
+    data_row(r, 'Margem Total (R$)',
+             [_brl(v) for v in _mval('margem_total')],
+             bw(_mval('margem_total'))); r += 1
+
+    # ── Análise Contrafactual ──
+    section(r, 'ANÁLISE CONTRAFACTUAL (e se todo spend fosse ao ROAS Controle?)'); r += 1
+    data_row(r, 'Receita Contrafactual (R$)',
+             [_brl(v) for v in _mval('receita_cf')]); r += 1
+    data_row(r, 'Margem Contrafactual (R$)',
+             [_brl(v) for v in _mval('margem_cf')]); r += 1
+    _ganho_vals = _mval('ganho_margem')
+    _ganho_fills = [
+        (BEST_FILL  if isinstance(v, (int, float)) and v > 0 else
+         WORST_FILL if isinstance(v, (int, float)) and v < 0 else None)
+        for v in _ganho_vals
+    ]
+    data_row(r, 'Ganho de Margem vs Contrafactual (R$)',
+             [_brl(v) for v in _ganho_vals], _ganho_fills); r += 1
+
+    # ── Qualidade do Modelo ML ──
+    section(r, 'QUALIDADE DO MODELO ML'); r += 1
     data_row(r, 'AUC Produção ← >0.7 = bom', col('auc_prod'),
              bw(col('auc_prod')), ['0.0000']*len(names)); r += 1
     data_row(r, 'AUC Test Set (referência)',  col('auc_test'),
              None, ['0.0000']*len(names)); r += 1
-    # top3_decis == 0.0 significa que nenhum comprador matched tinha score → dado indisponível
     top3_fmt = [
         f"{v:.1%}" if isinstance(v, float) and v > 0 else 'n/d'
         for v in col('top3_decis')
@@ -879,27 +950,20 @@ def build_excel(rows: list[dict], output_path: Path):
     data_row(r, 'Concentração Top 3 Decis (D8/D9/D10)',
              top3_fmt,
              bw([v if isinstance(v, float) and v > 0 else None for v in col('top3_decis')])); r += 1
-
-    # ── CAPI ──
-    section(r, 'EVENTOS CAPI — META'); r += 1
     data_row(r, 'Eventos CAPI enviados à Meta (LeadQualified)', col('capi_sent'),
              bw(col('capi_sent')), ['#,##0']*len(names)); r += 1
-
-    # ── Decil — fonte Sheets (mais completa para todos os períodos) ──
-    section(r, 'DISTRIBUIÇÃO DE DECIL — Google Sheets (Produção + Backup)'); r += 1
     data_row(r, 'Leads com decil nas Sheets (por período, dedup)',
              col('sheets_scored'), bw(col('sheets_scored')), ['#,##0']*len(names)); r += 1
     s_d10_vals = [f"{v:.1f}%" if isinstance(v, float) else (v or 'n/d') for v in col('sheets_d10_pct')]
-    s_d10_fills = []
-    for v in col('sheets_d10_pct'):
-        if isinstance(v, float):
-            s_d10_fills.append(WORST_FILL if v >= 40 else (WARN_FILL if v >= 30 else None))
-        else:
-            s_d10_fills.append(None)
+    s_d10_fills = [
+        (WORST_FILL if isinstance(v, float) and v >= 40 else
+         WARN_FILL  if isinstance(v, float) and v >= 30 else None)
+        for v in col('sheets_d10_pct')
+    ]
     data_row(r, '% D10 nas Sheets ← ≥40% = alerta loop CAPI', s_d10_vals, s_d10_fills); r += 1
 
-    # ── Lift por Decil — resumo no sheet principal ──
-    section(r, 'LIFT POR DECIL — CONVERSÃO REAL (leads × compradores)'); r += 1
+    # ── Lift por Decil — D1–D10 completo ──
+    section(r, 'LIFT POR DECIL — CONVERSÃO REAL D1–D10 (leads × compradores)'); r += 1
 
     def _lift_val(rows_data, decil, field, pct=False):
         results = []
@@ -934,30 +998,10 @@ def build_excel(rows: list[dict], output_path: Path):
                 results.append('n/d')
         return results
 
-    def _d10_d1_lift(rows_data):
-        results, fills = [], []
-        for rd in rows_data:
-            df = rd.get('decil_lift_df')
-            if df is None or df.empty:
-                results.append('n/d'); fills.append(None); continue
-            d10r = df[df['decil'] == 'D10']
-            d1r  = df[df['decil'] == 'D1']
-            if d10r.empty or d1r.empty:
-                results.append('n/d'); fills.append(None); continue
-            d10_cr = d10r.iloc[0]['conv_rate_pct']
-            d1_cr  = d1r.iloc[0]['conv_rate_pct']
-            if d1_cr > 0:
-                ratio = round(d10_cr / d1_cr, 1)
-                results.append(f"{ratio}x")
-                fills.append(BEST_FILL if ratio >= 3 else (WARN_FILL if ratio >= 1.5 else WORST_FILL))
-            else:
-                results.append('n/d'); fills.append(None)
-        return results, fills
-
     data_row(r, 'Taxa de conversão baseline (todos os decis com score)',
              _baseline_conv(rows)); r += 1
 
-    for d in ['D10', 'D9', 'D8', 'D5', 'D2', 'D1']:
+    for d in [f'D{i}' for i in range(10, 0, -1)]:
         cr_vals   = _lift_val(rows, d, 'conv_rate_pct', pct=True)
         lift_vals = _lift_val(rows, d, 'lift')
         lift_fills = [
@@ -966,7 +1010,6 @@ def build_excel(rows: list[dict], output_path: Path):
              WORST_FILL if isinstance(v, float) else None)
             for v in lift_vals
         ]
-        # Mostrar "taxa (lift)" como string combinada
         combined = []
         for cr, lf in zip(cr_vals, lift_vals):
             if cr == 'n/d':
@@ -1002,27 +1045,44 @@ def build_excel(rows: list[dict], output_path: Path):
         ws.column_dimensions[chr(ord('B') + i)].width = 18
     ws.freeze_panes = 'B5'
 
-    # ── Aba "Lift por Decil" — tabela completa D1-D10 por lançamento ──
-    _build_lift_sheet(wb, rows, HEADER_FILL, SECTION_FILL, ALT_FILL,
-                      BEST_FILL, WORST_FILL, WARN_FILL, WHITE_FILL,
-                      HEADER_FONT, SECTION_FONT, NORMAL, SMALL,
-                      CENTER, LEFT, BORDER)
+    # ── Aba Resumo (inserida como primeira aba) ──
+    _build_summary_sheet(wb, rows)
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     wb.save(output_path)
 
 
-def _build_lift_sheet(wb, rows, HEADER_FILL, SECTION_FILL, ALT_FILL,
-                      BEST_FILL, WORST_FILL, WARN_FILL, WHITE_FILL,
-                      HEADER_FONT, SECTION_FONT, NORMAL, SMALL,
-                      CENTER, LEFT, BORDER):
-    """Cria aba 'Lift por Decil' com tabela completa D1-D10 por lançamento."""
-    ws = wb.create_sheet("Lift por Decil")
+# ─────────────────────────────────────────────────────────────────────────────
+# ABA RESUMO EXECUTIVO
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_summary_sheet(wb, rows):
+    """
+    Cria aba 'Resumo' como primeira aba do workbook.
+    Métricas-chave por lançamento em formato compacto para leitura rápida.
+    """
+    ws = wb.create_sheet("Resumo", 0)  # posição 0 = primeira aba
+
+    HEADER_FILL  = PatternFill("solid", fgColor="1F3864")
+    SECTION_FILL = PatternFill("solid", fgColor="2E75B6")
+    ALT_FILL     = PatternFill("solid", fgColor="D9E1F2")
+    BEST_FILL    = PatternFill("solid", fgColor="C6EFCE")
+    WORST_FILL   = PatternFill("solid", fgColor="FFC7CE")
+    WHITE_FILL   = PatternFill("solid", fgColor="FFFFFF")
+
+    HEADER_FONT  = Font(bold=True, color="FFFFFF", size=11)
+    SECTION_FONT = Font(bold=True, color="FFFFFF", size=10)
+    NORMAL       = Font(size=10)
+    SMALL        = Font(size=9, italic=True, color="595959")
+
+    CENTER = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    LEFT   = Alignment(horizontal='left',   vertical='center')
+
+    thin   = Side(style='thin', color='B8CCE4')
+    BORDER = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     names = [r['name'] for r in rows]
-    # Colunas: Decil | Leads | Compras | Taxa (%) | Lift  × cada lançamento
-    subcols = ['Leads', 'Compras', 'Taxa conv (%)', 'Lift']
-    total_cols = 1 + len(names) * len(subcols)
+    ncols = 1 + len(names)
 
     def sc(row, col, value, font=None, fill=None, align=None, num_fmt=None):
         c = ws.cell(row=row, column=col, value=value)
@@ -1033,104 +1093,136 @@ def _build_lift_sheet(wb, rows, HEADER_FILL, SECTION_FILL, ALT_FILL,
         c.border = BORDER
         return c
 
+    def section(row, text):
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncols)
+        c = ws.cell(row=row, column=1, value=text)
+        c.font = SECTION_FONT; c.fill = SECTION_FILL
+        c.alignment = CENTER; c.border = BORDER
+        ws.row_dimensions[row].height = 18
+
+    def data_row(row, label, values, fills=None, fmt=None):
+        sc(row, 1, label, font=NORMAL, fill=WHITE_FILL, align=LEFT)
+        for i, v in enumerate(values):
+            f = fills[i] if fills else None
+            sc(row, i + 2, v, font=NORMAL, fill=f or WHITE_FILL, align=CENTER,
+               num_fmt=fmt[i] if fmt else None)
+        ws.row_dimensions[row].height = 18
+
+    def bw(vals, higher=True):
+        nums = [(i, v) for i, v in enumerate(vals) if isinstance(v, (int, float))]
+        if len(nums) < 2:
+            return [None] * len(vals)
+        best_i  = (max if higher else min)(nums, key=lambda x: x[1])[0]
+        worst_i = (min if higher else max)(nums, key=lambda x: x[1])[0]
+        out = [None] * len(vals)
+        out[best_i]  = BEST_FILL
+        out[worst_i] = WORST_FILL
+        return out
+
+    def col(key):
+        return [rd.get(key) for rd in rows]
+
+    def mval(key):
+        return [rd.get('margem_data', {}).get(key) for rd in rows]
+
+    def brl_str(v):
+        if v is None: return 'n/d'
+        try:
+            fv = float(v)
+            return 'n/d' if np.isnan(fv) else f"R$ {fv:,.0f}"
+        except (TypeError, ValueError):
+            return 'n/d'
+
     r = 1
+
     # Título
-    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=total_cols)
-    c = ws.cell(row=r, column=1, value="LIFT POR DECIL — Taxa de Conversão Real por Decil × Lançamento")
-    c.font = Font(bold=True, color="FFFFFF", size=13); c.fill = HEADER_FILL
-    c.alignment = CENTER
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncols)
+    c = ws.cell(row=r, column=1, value="RESUMO — PERFORMANCE ML por LANÇAMENTO")
+    c.font = Font(bold=True, color="FFFFFF", size=14)
+    c.fill = HEADER_FILL; c.alignment = CENTER
     ws.row_dimensions[r].height = 28; r += 1
 
-    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=total_cols)
+    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=ncols)
     c = ws.cell(row=r, column=1,
-                value="Leads com decil (Sheets + Railway) × compradores trackeados (Detalhes das Conversões)  |  "
-                      "Lift = taxa do decil / taxa baseline")
+                value=f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}  |  DevClub")
     c.font = SMALL; c.alignment = CENTER; c.fill = ALT_FILL
-    ws.row_dimensions[r].height = 15; r += 1
+    ws.row_dimensions[r].height = 15; r += 2
 
-    # Header linha 1: lançamentos agrupados
-    sc(r, 1, 'Decil', font=HEADER_FONT, fill=HEADER_FILL, align=CENTER)
-    col_idx = 2
-    for name in names:
-        ws.merge_cells(start_row=r, start_column=col_idx,
-                       end_row=r, end_column=col_idx + len(subcols) - 1)
-        c = ws.cell(row=r, column=col_idx, value=name)
-        c.font = HEADER_FONT; c.fill = HEADER_FILL; c.alignment = CENTER; c.border = BORDER
-        col_idx += len(subcols)
+    # Headers de lançamento
+    sc(r, 1, 'Métrica', font=HEADER_FONT, fill=HEADER_FILL, align=CENTER)
+    for i, name in enumerate(names):
+        sc(r, i + 2, name, font=HEADER_FONT, fill=HEADER_FILL, align=CENTER)
     ws.row_dimensions[r].height = 22; r += 1
 
-    # Header linha 2: subcolumns
-    sc(r, 1, '', font=HEADER_FONT, fill=HEADER_FILL, align=CENTER)
-    col_idx = 2
-    for _ in names:
-        for sub in subcols:
-            sc(r, col_idx, sub, font=HEADER_FONT, fill=SECTION_FILL, align=CENTER)
-            col_idx += 1
-    ws.row_dimensions[r].height = 18; r += 1
+    # ── Período ──
+    section(r, 'PERÍODO'); r += 1
+    data_row(r, 'Captação início', col('cap_start')); r += 1
+    data_row(r, 'Captação fim',    col('cap_end'));   r += 1
+    data_row(r, 'Vendas início',   col('vendas_start')); r += 1
+    data_row(r, 'Vendas fim',      col('vendas_end'));   r += 1
 
-    # Linha de baseline
-    ws.merge_cells(start_row=r, start_column=1, end_row=r, end_column=1)
-    sc(r, 1, 'Baseline (média)', font=Font(bold=True, size=10),
-       fill=ALT_FILL, align=CENTER)
-    col_idx = 2
-    for rd in rows:
-        df = rd.get('decil_lift_df', pd.DataFrame())
-        if df is not None and not df.empty:
-            total_leads  = df['leads'].sum()
-            total_buyers = df['buyers'].sum()
-            bl = total_buyers / total_leads * 100 if total_leads > 0 else 0
-            sc(r, col_idx,     total_leads,  font=NORMAL, fill=ALT_FILL, align=CENTER, num_fmt='#,##0')
-            sc(r, col_idx + 1, total_buyers, font=NORMAL, fill=ALT_FILL, align=CENTER, num_fmt='#,##0')
-            sc(r, col_idx + 2, round(bl, 3), font=NORMAL, fill=ALT_FILL, align=CENTER, num_fmt='0.000"%"')
-            sc(r, col_idx + 3, '1.00x',      font=NORMAL, fill=ALT_FILL, align=CENTER)
-        else:
-            for offset in range(len(subcols)):
-                sc(r, col_idx + offset, 'n/d', font=SMALL, fill=ALT_FILL, align=CENTER)
-        col_idx += len(subcols)
-    ws.row_dimensions[r].height = 18; r += 1
+    # ── Investimento ──
+    section(r, 'INVESTIMENTO'); r += 1
+    data_row(r, 'Gasto total (R$)', col('gasto_total'),
+             None, ['R$#,##0'] * len(names)); r += 1
+    data_row(r, 'Gasto ML (R$)', col('gasto_ml'),
+             None, ['R$#,##0'] * len(names)); r += 1
+    pct_ml = [
+        f"{ml / total * 100:.1f}%"
+        if isinstance(ml, (int, float)) and isinstance(total, (int, float)) and total > 0
+        else 'n/d'
+        for ml, total in zip(col('gasto_ml'), col('gasto_total'))
+    ]
+    data_row(r, '% Orçamento em ML', pct_ml,
+             bw([float(v.rstrip('%')) if isinstance(v, str) and v != 'n/d' else None
+                 for v in pct_ml])); r += 1
 
-    # Dados D1–D10
-    DECILS = [f'D{i}' for i in range(1, 11)]
-    for idx, d in enumerate(DECILS):
-        row_fill = ALT_FILL if idx % 2 == 0 else WHITE_FILL
-        sc(r, 1, d, font=Font(bold=True, size=10), fill=row_fill, align=CENTER)
-        col_idx = 2
-        for rd in rows:
-            df = rd.get('decil_lift_df', pd.DataFrame())
-            if df is not None and not df.empty:
-                row_d = df[df['decil'] == d]
-                if not row_d.empty:
-                    leads = row_d.iloc[0]['leads']
-                    buyers = row_d.iloc[0]['buyers']
-                    cr = row_d.iloc[0]['conv_rate_pct']
-                    lift = row_d.iloc[0]['lift']
+    # ── Leads & Conversão ──
+    section(r, 'LEADS & CONVERSÃO'); r += 1
+    data_row(r, 'Leads', col('leads_meta'),
+             bw(col('leads_meta')), ['#,##0'] * len(names)); r += 1
+    cpl_vals = [
+        round(g / l, 2)
+        if isinstance(g, (int, float)) and isinstance(l, (int, float)) and l > 0
+        else None
+        for g, l in zip(col('gasto_total'), col('leads_meta'))
+    ]
+    data_row(r, 'CPL (R$)', cpl_vals,
+             bw(cpl_vals, higher=False), ['R$#,##0.00'] * len(names)); r += 1
+    data_row(r, 'Vendas', col('vendas_total'),
+             bw(col('vendas_total')), ['#,##0'] * len(names)); r += 1
+    pct_conv = [
+        f"{v / l * 100:.2f}%"
+        if isinstance(v, (int, float)) and isinstance(l, (int, float)) and l > 0
+        else 'n/d'
+        for v, l in zip(col('vendas_total'), col('leads_meta'))
+    ]
+    data_row(r, '% Conversão', pct_conv,
+             bw([float(v.rstrip('%')) if isinstance(v, str) and v != 'n/d' else None
+                 for v in pct_conv])); r += 1
 
-                    lift_fill = (BEST_FILL  if isinstance(lift, float) and lift >= 2.0 else
-                                 WARN_FILL  if isinstance(lift, float) and lift >= 1.0 else
-                                 WORST_FILL if isinstance(lift, float) else row_fill)
-
-                    sc(r, col_idx,     int(leads),  font=NORMAL, fill=row_fill, align=CENTER, num_fmt='#,##0')
-                    sc(r, col_idx + 1, int(buyers), font=NORMAL, fill=row_fill, align=CENTER, num_fmt='#,##0')
-                    sc(r, col_idx + 2, round(cr, 3), font=NORMAL, fill=row_fill, align=CENTER, num_fmt='0.000"%"')
-                    lv = f"{lift:.2f}x" if isinstance(lift, float) else 'n/d'
-                    sc(r, col_idx + 3, lv, font=NORMAL, fill=lift_fill, align=CENTER)
-                else:
-                    for offset in range(len(subcols)):
-                        sc(r, col_idx + offset, 'n/d', font=SMALL, fill=row_fill, align=CENTER)
-            else:
-                for offset in range(len(subcols)):
-                    sc(r, col_idx + offset, 'n/d', font=SMALL, fill=row_fill, align=CENTER)
-            col_idx += len(subcols)
-        ws.row_dimensions[r].height = 18; r += 1
+    # ── Resultado Financeiro ──
+    section(r, 'RESULTADO FINANCEIRO'); r += 1
+    data_row(r, 'Receita (R$)', [brl_str(v) for v in mval('receita_total')],
+             bw(mval('receita_total'))); r += 1
+    roas_vals = mval('roas_total')
+    roas_fmt  = [f"{v:.2f}x" if isinstance(v, float) else 'n/d' for v in roas_vals]
+    data_row(r, 'ROAS', roas_fmt, bw(roas_vals)); r += 1
+    data_row(r, 'Margem (R$)', [brl_str(v) for v in mval('margem_total')],
+             bw(mval('margem_total'))); r += 1
+    cpa_total = [
+        round(g / v, 2)
+        if isinstance(g, (int, float)) and isinstance(v, (int, float)) and v > 0
+        else None
+        for g, v in zip(col('gasto_total'), col('vendas_total'))
+    ]
+    data_row(r, 'CPA (R$)', cpa_total,
+             bw(cpa_total, higher=False), ['R$#,##0.00'] * len(names)); r += 1
 
     # Larguras
-    ws.column_dimensions['A'].width = 14
-    col_idx = 2
-    for _ in names:
-        for j, sub in enumerate(subcols):
-            col_letter = openpyxl.utils.get_column_letter(col_idx)
-            ws.column_dimensions[col_letter].width = 14 if 'Taxa' in sub or 'Lift' in sub else 10
-            col_idx += 1
+    ws.column_dimensions['A'].width = 25
+    for i in range(len(names)):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i + 2)].width = 15
     ws.freeze_panes = 'B5'
 
 
@@ -1210,9 +1302,20 @@ def run(extra_period: dict = None):
         if xlsx_path:
             print(f"    xlsx: {xlsx_path.name}")
             row.update(parse_xlsx_report(xlsx_path))
+            try:
+                import sys as _sys_m
+                _scripts_dir_m = str(Path(__file__).parent)
+                if _scripts_dir_m not in _sys_m.path:
+                    _sys_m.path.insert(0, _scripts_dir_m)
+                from gerar_evolucao_margem import parse_comparacao_ml as _pcm
+                row['margem_data'] = _pcm(xlsx_path)
+            except Exception as _em:
+                print(f"    Aviso: margem_data falhou — {_em}")
+                row['margem_data'] = {}
         else:
             print(f"    xlsx: NÃO ENCONTRADO para {p['vendas_start']} → {p['vendas_end']}")
             xlsx_path = None
+            row['margem_data'] = {}
 
         stats = capi_stats_for_period(p['cap_start'], p['cap_end'], csql_df, rail_df, cloudrun_df)
         row.update(stats)
@@ -1239,18 +1342,6 @@ def run(extra_period: dict = None):
     print(f"\nGerando Excel: {output_path}")
     build_excel(all_rows, output_path)
     print(f"✅ Salvo: {output_path}")
-
-    # Adicionar sheet 'Margem & Contrafactual'
-    print("\nAdicionando sheet 'Margem & Contrafactual'...")
-    try:
-        import sys as _sys
-        _scripts_dir = str(Path(__file__).parent)
-        if _scripts_dir not in _sys.path:
-            _sys.path.insert(0, _scripts_dir)
-        from gerar_evolucao_margem import add_margem_sheet
-        add_margem_sheet(output_path, periods)
-    except Exception as _e:
-        print(f"  ⚠️  Falha ao adicionar 'Margem & Contrafactual': {_e}")
 
     import subprocess as sp
     sp.run(['open', str(output_path)], check=False)

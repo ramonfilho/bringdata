@@ -479,6 +479,174 @@ class MetaAPIClient:
         }
 
 
+
+    def get_daily_campaign_metrics(
+        self,
+        date_start: str,
+        date_end: str,
+        apply_filters: bool = True,
+    ) -> pd.DataFrame:
+        """
+        Busca métricas diárias por campanha para feature engineering.
+
+        Uma linha por (campanha, dia). Inclui impressions, reach, frequency.
+        Usado como fallback quando utm_content não identifica o anúncio.
+
+        Retorna colunas:
+            campaign_id_15, campaign_name, date,
+            spend_dia, impressions_dia, reach_dia, frequency_dia,
+            leads_dia, cpl_dia, cpm_dia
+        """
+        FIELDS = [
+            'campaign_id', 'campaign_name', 'date_start',
+            'spend', 'impressions', 'reach', 'frequency', 'actions',
+        ]
+        params = {
+            'time_range': {'since': date_start, 'until': date_end},
+            'level': 'campaign',
+            'time_increment': 1,
+            'filtering': [],
+            'breakdowns': [],
+        }
+        return self._parse_daily_insights(
+            self._get_insights_with_retry(params, FIELDS, 'DailyCampaign'),
+            level='campaign',
+            apply_filters=apply_filters,
+        )
+
+    def get_daily_adset_metrics(
+        self,
+        date_start: str,
+        date_end: str,
+        apply_filters: bool = True,
+    ) -> pd.DataFrame:
+        """
+        Busca métricas diárias por adset para feature engineering.
+
+        Retorna colunas:
+            adset_id, adset_name, campaign_id, date,
+            spend_dia, impressions_dia, reach_dia, frequency_dia,
+            leads_dia, cpl_dia, cpm_dia
+        """
+        FIELDS = [
+            'adset_id', 'adset_name',
+            'campaign_id', 'campaign_name', 'date_start',
+            'spend', 'impressions', 'reach', 'frequency', 'actions',
+        ]
+        params = {
+            'time_range': {'since': date_start, 'until': date_end},
+            'level': 'adset',
+            'time_increment': 1,
+            'filtering': [],
+            'breakdowns': [],
+        }
+        return self._parse_daily_insights(
+            self._get_insights_with_retry(params, FIELDS, 'DailyAdset'),
+            level='adset',
+            apply_filters=apply_filters,
+        )
+
+    def get_ad_adset_mapping(
+        self,
+        date_start: str,
+        date_end: str,
+    ) -> pd.DataFrame:
+        """
+        Retorna mapeamento ad_name → adset_id para o período.
+
+        Usado para enriquecer leads via utm_content:
+            utm_content → ad_name → adset_id → métricas diárias de adset
+
+        Retorna colunas:
+            ad_id, ad_name, adset_id, adset_name, campaign_id
+        """
+        FIELDS = ['ad_id', 'ad_name', 'adset_id', 'adset_name', 'campaign_id', 'campaign_name']
+        params = {
+            'time_range': {'since': date_start, 'until': date_end},
+            'level': 'ad',
+            'time_increment': 'all_days',
+            'filtering': [],
+            'breakdowns': [],
+        }
+        insights = self._get_insights_with_retry(params, FIELDS, 'AdAdsetMapping')
+        if not insights:
+            return pd.DataFrame()
+
+        rows = []
+        for ins in insights:
+            if 'CAP' not in ins.get('campaign_name', '').upper():
+                continue
+            rows.append({
+                'ad_id':       ins.get('ad_id', ''),
+                'ad_name':     ins.get('ad_name', ''),
+                'adset_id':    ins.get('adset_id', ''),
+                'adset_name':  ins.get('adset_name', ''),
+                'campaign_id': ins.get('campaign_id', ''),
+            })
+        return pd.DataFrame(rows)
+
+    @staticmethod
+    def _parse_daily_insights(
+        insights: list,
+        level: str,
+        apply_filters: bool,
+    ) -> pd.DataFrame:
+        """
+        Converte lista de insights diários em DataFrame normalizado.
+        Compartilhado por get_daily_campaign_metrics e get_daily_adset_metrics.
+        """
+        if not insights:
+            return pd.DataFrame()
+
+        rows = []
+        for ins in insights:
+            spend       = float(ins.get('spend', 0) or 0)
+            impressions = int(ins.get('impressions', 0) or 0)
+            frequency   = float(ins.get('frequency', 0) or 0)
+            reach       = int(ins.get('reach', 0) or 0)
+            campaign_name = ins.get('campaign_name', '')
+
+            leads = 0
+            for action in (ins.get('actions') or []):
+                if action.get('action_type') == 'offsite_conversion.fb_pixel_lead':
+                    try:
+                        leads = int(float(action.get('value', 0)))
+                    except (ValueError, TypeError):
+                        pass
+
+            if apply_filters:
+                if spend == 0:
+                    continue
+                if 'CAP' not in campaign_name.upper():
+                    continue
+
+            cpl_dia = round(spend / leads, 2)       if leads > 0       else None
+            cpm_dia = round(spend / impressions * 1000, 2) if impressions > 0 else None
+
+            row = {
+                'campaign_id':    ins.get('campaign_id', ''),
+                'campaign_name':  campaign_name,
+                'date':           ins.get('date_start', ''),
+                'spend_dia':      round(spend, 2),
+                'impressions_dia': impressions,
+                'reach_dia':      reach,
+                'frequency_dia':  round(frequency, 4),
+                'leads_dia':      leads,
+                'cpl_dia':        cpl_dia,
+                'cpm_dia':        cpm_dia,
+            }
+
+            if level == 'adset':
+                row['adset_id']   = ins.get('adset_id', '')
+                row['adset_name'] = ins.get('adset_name', '')
+            else:
+                campaign_id = str(ins.get('campaign_id', ''))
+                row['campaign_id_15'] = campaign_id[:15]
+
+            rows.append(row)
+
+        return pd.DataFrame(rows)
+
 # =============================================================================
 # FUNÇÃO AUXILIAR PARA USO STANDALONE
 # =============================================================================
@@ -536,6 +704,7 @@ def extract_meta_reports(
         print(f"\n Arquivos salvos em: {output_dir}")
 
     return data
+
 
 
 if __name__ == '__main__':

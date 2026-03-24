@@ -19,11 +19,10 @@ Uso:
 """
 
 import argparse
-import json
+import hashlib
 import logging
 import os
 import sys
-import urllib.request
 from io import StringIO
 from pathlib import Path
 
@@ -35,9 +34,12 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).parent.parent
 VALIDATION_DIR = ROOT / "outputs" / "validation"
 CLOUD_SQL_BACKUP = ROOT / "data" / "backups" / "cloud-sql-final-export-20260225.sql"
-API_URL = "https://smart-ads-api-12955519745.us-central1.run.app/capi/send_purchase_events"
 
 load_dotenv(ROOT / ".env")
+
+# Meta CAPI — lidos do .env
+META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN")
+META_PIXEL_ID     = os.environ.get("META_PIXEL_ID", "241752320666130")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -97,105 +99,135 @@ def load_all_buyers(lancamento_filter: str = None) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# 2. Carregar FBP/FBC do backup Cloud SQL (arquivo .sql local)
+# 2. Carregar FBP/FBC da tabela leads_capi do Cloud SQL (via proxy local)
 # ---------------------------------------------------------------------------
+
+CLOUDSQL_HOST     = os.environ.get("DB_HOST", "127.0.0.1")
+CLOUDSQL_PORT     = int(os.environ.get("DB_PORT", "5433"))
+CLOUDSQL_DB       = os.environ.get("DB_NAME", "smart_ads")
+CLOUDSQL_USER     = os.environ.get("DB_USER", "postgres")
+CLOUDSQL_PASSWORD = os.environ.get("DB_PASSWORD") or os.environ.get("CLOUDSQL_PASSWORD", "SmartAds2026DB!")
+
 
 def load_cloudsql_capi_data() -> dict:
     """
-    Parseia o backup Cloud SQL e retorna dict {email: {fbp, fbc, nome, telefone}}.
+    Lê FBP/FBC diretamente da tabela leads_capi no Cloud SQL via proxy local.
+    Fallback: parseia o arquivo de backup .sql se o proxy não estiver disponível.
     """
-    logger.info("Carregando FBP/FBC do backup Cloud SQL...")
+    import psycopg2
 
+    logger.info("Carregando FBP/FBC da tabela leads_capi (Cloud SQL)...")
+
+    try:
+        conn = psycopg2.connect(
+            host=CLOUDSQL_HOST,
+            port=CLOUDSQL_PORT,
+            dbname=CLOUDSQL_DB,
+            user=CLOUDSQL_USER,
+            password=CLOUDSQL_PASSWORD,
+            connect_timeout=5,
+        )
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT LOWER(email), fbp, fbc, name, phone "
+            "FROM leads_capi "
+            "WHERE email IS NOT NULL AND (fbp IS NOT NULL OR fbc IS NOT NULL)"
+        )
+        result = {}
+        for email, fbp, fbc, nome, telefone in cursor.fetchall():
+            if email and email not in result:
+                result[email] = {"fbp": fbp, "fbc": fbc, "nome": nome, "telefone": telefone}
+        cursor.close()
+        conn.close()
+        logger.info(f"  {len(result)} leads com FBP/FBC na tabela leads_capi")
+        return result
+
+    except Exception as e:
+        logger.warning(f"Cloud SQL indisponível ({e}) — usando backup .sql local")
+
+    # Fallback: backup .sql
     if not CLOUD_SQL_BACKUP.exists():
-        logger.warning(f"Backup não encontrado: {CLOUD_SQL_BACKUP}")
+        logger.warning(f"Backup também não encontrado: {CLOUD_SQL_BACKUP}")
         return {}
 
     with open(CLOUD_SQL_BACKUP, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Extrair o bloco COPY da tabela leads_capi
     start_marker = "COPY public.leads_capi ("
     start = content.find(start_marker)
     if start == -1:
         logger.warning("Tabela leads_capi não encontrada no backup.")
         return {}
 
-    # Pegar cabeçalho das colunas
     header_start = content.index("(", start) + 1
     header_end = content.index(")", header_start)
     columns = [c.strip() for c in content[header_start:header_end].split(",")]
 
-    # Pegar linhas de dados (entre FROM stdin; e \.)
     data_start = content.index("FROM stdin;\n", start) + len("FROM stdin;\n")
     data_end = content.index("\n\\.", data_start)
     data_block = content[data_start:data_end]
 
-    # Parsear com pandas
-    df = pd.read_csv(
-        StringIO(data_block),
-        sep="\t",
-        header=None,
-        names=columns,
-        na_values=["\\N"],
-        low_memory=False,
-    )
-
+    df = pd.read_csv(StringIO(data_block), sep="\t", header=None, names=columns,
+                     na_values=["\\N"], low_memory=False)
     df["email"] = df["email"].str.strip().str.lower()
     df = df[df["email"].notna()]
 
-    # Montar dict de lookup
     result = {}
     for _, row in df.iterrows():
         email = row["email"]
         if email not in result:
             result[email] = {
-                "fbp": row.get("fbp") if pd.notna(row.get("fbp")) else None,
-                "fbc": row.get("fbc") if pd.notna(row.get("fbc")) else None,
-                "nome": row.get("name") if pd.notna(row.get("name")) else None,
+                "fbp":      row.get("fbp")   if pd.notna(row.get("fbp"))   else None,
+                "fbc":      row.get("fbc")   if pd.notna(row.get("fbc"))   else None,
+                "nome":     row.get("name")  if pd.notna(row.get("name"))  else None,
                 "telefone": row.get("phone") if pd.notna(row.get("phone")) else None,
             }
 
-    logger.info(f"  {len(result)} leads únicos no backup Cloud SQL")
+    logger.info(f"  {len(result)} leads únicos no backup Cloud SQL (fallback)")
     return result
 
 
 # ---------------------------------------------------------------------------
-# 3. Carregar FBP/FBC do Railway
+# 3. Carregar FBP/FBC do Railway (por período de captação)
 # ---------------------------------------------------------------------------
 
-def load_railway_capi_data(emails: list) -> dict:
-    """Busca FBP/FBC no Railway para a lista de emails fornecida."""
-    logger.info(f"Buscando {len(emails)} emails no Railway...")
+def load_railway_capi_data(cap_start: str, cap_end: str) -> dict:
+    """
+    Busca FBP/FBC no Railway pelo período de captação do lançamento.
+    Usa named parameters (:start_date, :end_date_excl) — mesma abordagem
+    do validate_ml_performance.py, que funciona com pg8000.native.
+    """
+    end_excl = (pd.to_datetime(cap_end) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+    logger.info(f"Buscando leads no Railway (captação {cap_start} a {cap_end})...")
 
     try:
         conn = pg8000.native.Connection(
-            host=os.environ["RAILWAY_DB_HOST"],
-            port=int(os.environ["RAILWAY_DB_PORT"]),
-            database=os.environ["RAILWAY_DB_NAME"],
-            user=os.environ["RAILWAY_DB_USER"],
-            password=os.environ["RAILWAY_DB_PASSWORD"],
+            host=os.environ.get('RAILWAY_DB_HOST', 'shortline.proxy.rlwy.net'),
+            port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+            database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+            user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+            password=os.environ['RAILWAY_DB_PASSWORD'],
         )
-
-        placeholders = ", ".join([f"${i+1}" for i in range(len(emails))])
         rows = conn.run(
-            f'SELECT LOWER(email), "nomeCompleto", telefone, fbp, fbc '
-            f'FROM "Lead" WHERE LOWER(email) = ANY(ARRAY[{placeholders}])',
-            *emails,
+            """
+            SELECT LOWER(email), name, phone, fbp, fbc
+            FROM leads_capi
+            WHERE created_at >= :start_date
+              AND created_at <  :end_date_excl
+              AND email IS NOT NULL
+            """,
+            start_date=cap_start,
+            end_date_excl=end_excl,
         )
         conn.close()
 
         result = {}
-        for row in rows:
-            email, nome, telefone, fbp, fbc = row
+        for email, nome, telefone, fbp, fbc in rows:
             if email and email not in result:
-                result[email] = {
-                    "fbp": fbp,
-                    "fbc": fbc,
-                    "nome": nome,
-                    "telefone": telefone,
-                }
+                result[email] = {"fbp": fbp, "fbc": fbc, "nome": nome, "telefone": telefone}
 
-        logger.info(f"  {len(result)} emails encontrados no Railway")
+        with_cookies = sum(1 for v in result.values() if v.get("fbp"))
+        logger.info(f"  {len(result)} leads encontrados | {with_cookies} com FBP/FBC")
         return result
 
     except Exception as e:
@@ -215,11 +247,19 @@ def build_payload(buyers_df: pd.DataFrame, railway_data: dict, cloudsql_data: di
     for _, row in buyers_df.iterrows():
         email = row["email"]
 
-        # Prioridade: Railway > Cloud SQL > sem cookies
-        capi = railway_data.get(email) or cloudsql_data.get(email) or {}
+        # Prioridade FBP/FBC: Railway (se tiver fbp) > Cloud SQL (se tiver fbp) > sem cookies
+        # Não usa `or` diretamente: dict Railway sem fbp é truthy e bloquearia o fallback
+        railway_entry  = railway_data.get(email, {})
+        cloudsql_entry = cloudsql_data.get(email, {})
+        if railway_entry.get("fbp"):
+            capi = railway_entry
+        elif cloudsql_entry.get("fbp"):
+            capi = cloudsql_entry
+        else:
+            capi = railway_entry or cloudsql_entry or {}
 
         if capi.get("fbp"):
-            if email in railway_data:
+            if railway_entry.get("fbp"):
                 stats["railway"] += 1
             else:
                 stats["cloudsql"] += 1
@@ -259,20 +299,98 @@ def build_payload(buyers_df: pd.DataFrame, railway_data: dict, cloudsql_data: di
     return sales
 
 
-def call_endpoint(sales: list, dry_run: bool, test_event_code: str = None) -> dict:
-    payload = {"sales": sales, "dry_run": dry_run}
-    if test_event_code:
-        payload["test_event_code"] = test_event_code
+def _hash(value: str) -> str | None:
+    if not value:
+        return None
+    return hashlib.sha256(str(value).lower().strip().encode("utf-8")).hexdigest()
 
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        API_URL,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=300) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+
+def call_endpoint(sales: list, dry_run: bool, test_event_code: str = None) -> dict:
+    """Envia eventos Purchase diretamente ao Meta CAPI usando token do .env."""
+    from facebook_business.api import FacebookAdsApi
+    from facebook_business.adobjects.serverside.event import Event
+    from facebook_business.adobjects.serverside.event_request import EventRequest
+    from facebook_business.adobjects.serverside.user_data import UserData
+    from facebook_business.adobjects.serverside.custom_data import CustomData
+    from facebook_business.adobjects.serverside.action_source import ActionSource
+
+    if not META_ACCESS_TOKEN:
+        logger.error("META_ACCESS_TOKEN não encontrado no .env")
+        return {"total": len(sales), "enviados": 0, "anomalias": 0, "erros": len(sales)}
+
+    FacebookAdsApi.init(access_token=META_ACCESS_TOKEN)
+
+    results = {"total": len(sales), "enviados": 0, "anomalias": 0, "erros": 0}
+
+    for sale in sales:
+        email     = sale.get("email", "")
+        telefone  = sale.get("telefone")
+        nome      = sale.get("nome")
+        fbp       = sale.get("fbp")
+        fbc       = sale.get("fbc")
+        valor     = float(sale.get("valor_venda") or 0)
+        sale_date = sale.get("sale_date", "")
+
+        has_cookies = bool(fbp or fbc)
+        if not has_cookies:
+            results["anomalias"] += 1
+
+        try:
+            purchase_ts = int(pd.to_datetime(sale_date).timestamp())
+        except Exception:
+            logger.warning(f"Data inválida para {email}: {sale_date}")
+            results["erros"] += 1
+            continue
+
+        if dry_run:
+            logger.info(
+                f"[DRY RUN] Purchase: {email} | R$ {valor:.2f} | "
+                f"fbp={'sim' if has_cookies else 'não'}"
+            )
+            results["enviados"] += 1
+            continue
+
+        try:
+            first_name, last_name = None, None
+            if nome:
+                parts = str(nome).strip().split(" ", 1)
+                first_name = parts[0] if parts else None
+                last_name  = parts[1] if len(parts) > 1 else None
+
+            user_data = UserData(
+                emails=[_hash(email)] if email else None,
+                phones=[_hash(telefone)] if telefone else None,
+                first_names=[_hash(first_name)] if first_name else None,
+                last_names=[_hash(last_name)]   if last_name  else None,
+                fbp=fbp,
+                fbc=fbc,
+            )
+            custom_data = CustomData(value=valor, currency="BRL")
+            event = Event(
+                event_name="Purchase",
+                event_time=purchase_ts,
+                event_id=f"purchase_{email}_{purchase_ts}",
+                user_data=user_data,
+                custom_data=custom_data,
+                action_source=ActionSource.WEBSITE,
+            )
+
+            params = {
+                "events":       [event],
+                "pixel_id":     META_PIXEL_ID,
+                "access_token": META_ACCESS_TOKEN,
+            }
+            if test_event_code:
+                params["test_event_code"] = test_event_code
+
+            EventRequest(**params).execute()
+            results["enviados"] += 1
+
+        except Exception as e:
+            logger.error(f"Erro ao enviar Purchase para {email}: {e}")
+            results["erros"] += 1
+
+    return results
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +402,8 @@ def main():
         description="Envia eventos Purchase históricos ao Meta CAPI."
     )
     parser.add_argument("--lancamento", metavar="PASTA", help="Enviar só um lançamento (ex: '09:03 - 15:03')")
+    parser.add_argument("--cap-start", metavar="YYYY-MM-DD", help="Início da captação (para lookup Railway)")
+    parser.add_argument("--cap-end",   metavar="YYYY-MM-DD", help="Fim da captação (para lookup Railway)")
     parser.add_argument("--dry-run", action="store_true", help="Simula sem enviar ao Meta")
     parser.add_argument("--test-event-code", metavar="CODIGO", help="Código de teste do Meta")
     args = parser.parse_args()
@@ -297,8 +417,11 @@ def main():
     logger.info(f"Total: {len(buyers_df)} compradores únicos em {buyers_df['lancamento'].nunique()} lançamentos")
 
     # 2. Carregar FBP/FBC
-    emails = buyers_df["email"].tolist()
-    railway_data = load_railway_capi_data(emails)
+    if args.cap_start and args.cap_end:
+        railway_data = load_railway_capi_data(args.cap_start, args.cap_end)
+    else:
+        logger.warning("--cap-start/--cap-end não fornecidos — Railway ignorado. Use para recuperar FBP/FBC.")
+        railway_data = {}
     cloudsql_data = load_cloudsql_capi_data()
 
     # 3. Construir payload
