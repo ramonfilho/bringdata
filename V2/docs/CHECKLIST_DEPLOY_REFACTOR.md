@@ -351,20 +351,22 @@ O rollback leva ~30 segundos. O cliente não percebe.
 
 ## Status do checklist
 
+**Deploy concluído em 2026-03-24. Revisão em produção: `00254-dh5` (100% tráfego).**
+
 | Etapa | Status | Data |
 |---|---|---|
-| 1A — Treino → serve local | ⏳ | |
-| 1B — Smoke tests imports | ⏳ | |
-| 1C — Parity checks 6/6 | ⏳ | |
-| 1D — Smoke monitoring | ⏳ | |
-| 1E — Golden snapshot capturado | ⏳ | |
-| 2 — PR merged | ⏳ | |
-| 3 — Deploy sem tráfego | ⏳ | |
-| 4A — Health check OK | ⏳ | |
-| 4B — Predição idêntica | ⏳ | |
-| 4C — Monitoring endpoint OK | ⏳ | |
-| 4D — Golden snapshot PASS | ⏳ | |
-| 5 — Tráfego migrado | ⏳ | |
-| 6A — Decis normais (3h) | ⏳ | |
-| 6B — Job diário executou | ⏳ | |
-| 6C — Relatório validação OK | ⏳ | |
+| 1A — Treino → serve local | ✅ | 2026-03-23 |
+| 1B — Smoke tests imports | ✅ | 2026-03-23 |
+| 1C — Parity checks 6/6 | ✅ | 2026-03-23 |
+| 1D — Smoke monitoring | ✅ | 2026-03-23 |
+| 1E — Golden snapshot capturado | ✅ | 2026-03-23 |
+| 2 — PR merged | ✅ | 2026-03-23 |
+| 3 — Deploy sem tráfego | ✅ | 2026-03-24 |
+| 4A — Health check OK | ✅ | 2026-03-24 |
+| 4B — Predição idêntica | ✅ | 2026-03-24 |
+| 4C — Monitoring endpoint OK | ✅ | 2026-03-24 |
+| 4D — Golden snapshot PASS | ✅ | 2026-03-24 |
+| 5 — Tráfego migrado | ✅ | 2026-03-24 |
+| 6A — Decis normais (3h) | ✅ | 2026-03-24 |
+| 6B — Job diário executou | ✅ | 2026-03-24 |
+| 6C — Relatório validação OK | ✅ | 2026-03-24 |
