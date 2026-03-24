@@ -46,50 +46,71 @@ Cloud Run · Cloud Scheduler · MLflow + Cloud SQL · Cloud Storage · Cloud Log
   Adicionar step de validação no início do `train_pipeline.py`: schema esperado, nulos em features obrigatórias, ranges críticos. Sem isso, dado ruim do Cliente B pode corromper o pipeline silenciosamente sem erro explícito.
   **→ Fazer antes do segundo cliente ativo.**
 
-- [ ] **8. Sprint 2 `retraining_orchestrator.py` — quality gate automático**
+- [ ] **8. Teste A/B champion/challenger em produção**
+  Validar o challenger em produção antes de promovê-lo. A métrica final é ROAS no Meta Ads Manager — não AUC.
+
+  **Arquitetura:**
+  - O gestor de tráfego cria dois conjuntos de campanhas com UTMs distintas (ex: tag `ML_V1` vs `ML_V2`)
+  - O pipeline detecta pelo UTM do lead qual modelo rodar
+  - Cada modelo envia um **evento CAPI com nome diferente** (ex: `LeadQualified` vs `LeadQualifiedChallenger`)
+  - O Meta atribui compras a cada evento separadamente → ROAS por modelo é visível direto no Ads Manager
+
+  **Config:** bloco `ab_test` em `configs/active_models/{client_id}.yaml`:
+  - `variants[champion]`: `run_id`, `utm_pattern`, `capi_event_name`
+  - `variants[challenger]`: `run_id`, `utm_pattern`, `capi_event_name`
+
+  **Escopo do teste:** sistema completo — cada variante usa seu próprio modelo **e** seus próprios `CONVERSION_RATES`. Leads cujo UTM não casa com nenhuma variante não são processados pelo pipeline de A/B (ficam fora do teste).
+
+  **Critério de promoção:** ROAS do challenger ≥ champion após 1 lançamento completo com janela de conversão fechada (≥ 27 dias). AUC retrospectivo como critério secundário de sanidade.
+
+  **Challenger imediato:** modelo retreinado com importance weighting (ver bloco urgente no `PLANO_REFACTOR_MLOPS.md` — prazo 15/04/2026).
+
+  **→ Desbloqueado quando:** deploy do refactor concluído (item 4) + challenger treinado.
+
+- [ ] **9. Sprint 2 `retraining_orchestrator.py` — quality gate automático**
   Após treino, comparar AUC e monotonia do novo modelo contra o modelo em produção. Só promover se melhor ou equivalente. Hoje essa comparação é feita manualmente. A arquitetura de hooks já existe (Sprint 1.1 implementado).
-  **→ Qualquer momento — baixa complexidade, não depende de dados do Cliente B.**
+  **→ Desbloqueado quando:** item 8 validado em pelo menos um ciclo completo (a análise do A/B alimenta os thresholds do quality gate automático).**
 
 ---
 
 ### Fase Cliente B
 
-- [ ] **9. Dados do Cliente B chegam**
+- [ ] **10. Dados do Cliente B chegam**
   Formulário XLS + export de vendas + cadência do lançamento.
   **→ Depende do cliente.**
 
-- [ ] **10. DT-2 — testes unitários `src/core/`**
+- [ ] **11. DT-2 — testes unitários `src/core/`**
   `pytest tests/core/ --client devclub --client clientb` para `utm.py`, `medium.py`, `encoding.py`. Devem ser parametrizados com dois `ClientConfig` reais — escrever com um só entrega metade do valor.
-  **→ Desbloqueado quando:** dados do Cliente B disponíveis (item 9).
+  **→ Desbloqueado quando:** dados do Cliente B disponíveis (item 10).
 
-- [ ] **11. Onboarding Cliente B** — Fase 3b
+- [ ] **12. Onboarding Cliente B** — Fase 3b
   1. Escrever `configs/clients/clientb.yaml` usando `configs/templates/client_template.yaml`
   2. Executar `train_pipeline.py` — confirmar que nome do modelo e experimento MLflow contêm "clientb"
   3. Configurar `configs/active_models/clientb.yaml`
   4. Validar predições de produção
-  **→ Desbloqueado quando:** itens 7, 9 e 10 concluídos. Instrução: `PLANO_REFACTOR_MLOPS.md` Fase 3b.**
+  **→ Desbloqueado quando:** itens 7, 10 e 11 concluídos. Instrução: `PLANO_REFACTOR_MLOPS.md` Fase 3b.**
 
-- [ ] **12. EDA Generator** — `src/eda/generate_client_config.py`
+- [ ] **13. EDA Generator** — `src/eda/generate_client_config.py`
   Gera `clientX.yaml` automaticamente a partir dos dados brutos do cliente. Com dois configs escritos manualmente, o padrão está claro o suficiente para automatizar.
-  **→ Desbloqueado quando:** Cliente B estável (item 11 completo).**
+  **→ Desbloqueado quando:** Cliente B estável (item 12 completo).**
 
 ---
 
 ### Fase 2–4 clientes
 
-- [ ] **13. GitHub Actions CI — testes automáticos a cada push em `src/core/`**
+- [ ] **14. GitHub Actions CI — testes automáticos a cada push em `src/core/`**
   Push → lint → `pytest tests/core/ --client devclub --client clientb` → parity check → merge liberado.
-  **→ Desbloqueado quando:** DT-2 concluído (item 10) + 2 clientes ativos.**
+  **→ Desbloqueado quando:** DT-2 concluído (item 11) + 2 clientes ativos.**
 
-- [ ] **14. Sprint 3 `retraining_orchestrator.py` — trigger de retreino por drift**
+- [ ] **15. Sprint 3 `retraining_orchestrator.py` — trigger de retreino por drift**
   `monitoring/orchestrator.py` já detecta drift. Conectar ao `retraining_orchestrator.py`: se drift acumulado ultrapassar threshold por N dias consecutivos, disparar retreino automaticamente.
   **→ Desbloqueado quando:** 500+ leads/mês por cliente (volume mínimo para drift ser estatisticamente detectável).**
 
-- [ ] **15. Looker Studio — dashboard de performance**
+- [ ] **16. Looker Studio — dashboard de performance**
   Visualização de ROAS, CPL, distribuição de decis e taxa de conversão por cliente e lançamento.
   **→ Qualquer momento após Cliente B ativo. Baixo esforço, alto valor de apresentação.**
 
-- [ ] **16. Vertex AI Model Registry**
+- [ ] **17. Vertex AI Model Registry**
   Substituir `configs/active_models/*.yaml` manual por registro centralizado com promoção policy-based.
   **→ Desbloqueado quando:** 3+ clientes ativos.**
 
@@ -99,7 +120,7 @@ Cloud Run · Cloud Scheduler · MLflow + Cloud SQL · Cloud Storage · Cloud Log
 
 Estes componentes só fazem sentido quando a infraestrutura atual virar gargalo real.
 
-- [ ] **17. Stack GCP completo**
+- [ ] **18. Stack GCP completo**
 
   | Componente | Substitui | Condição real |
   |---|---|---|
