@@ -759,14 +759,12 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         df_encoded_with_date.to_parquet(_encoded_path, index=False)
         logger.info(f"  [compare_models] Dataset encodado salvo em: {_encoded_path}")
 
-    # === Pesos por tipo de comprador (calculado antes do tuning para uso em ambos) ===
-    PESOS_COMPRADOR = {
-        'guru':    1.00,   # Guru: à vista, 100% recebido
-        'tmb_baixo': 0.84, # TMB Baixo: 83.5% recebido
-        'tmb_medio': 0.67, # TMB Médio: 67.1% recebido
-        'tmb_alto':  0.49, # TMB Alto: 48.6% recebido
-        'tmb_sem':   0.42, # TMB Sem class.: 42.1% recebido
-    }
+    # === Pesos por tipo de comprador (lidos do ClientConfig — configs/clients/{client}.yaml) ===
+    PESOS_COMPRADOR = (
+        client_config.model.buyer_weights
+        if client_config and client_config.model and client_config.model.buyer_weights
+        else {'guru': 1.00, 'tmb_baixo': 0.84, 'tmb_medio': 0.67, 'tmb_alto': 0.49, 'tmb_sem': 0.42}
+    )
 
     def _get_peso(row):
         if row.get('target', 0) == 0:
@@ -784,17 +782,14 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     else:
         buyer_weights = None
 
-    # Hiperparâmetros padrão do modelo (baseline real para comparação no tuning)
-    DEFAULT_HYPERPARAMS = {
-        'n_estimators': 300,
-        'max_depth': 8,
-        'min_samples_split': 2,
-        'min_samples_leaf': 1,
-        'max_features': 'sqrt',
-        'class_weight': 'balanced',
-        'random_state': 42,
-        'n_jobs': -1,
-    }
+    # Hiperparâmetros padrão do modelo (lidos do ClientConfig — configs/clients/{client}.yaml)
+    DEFAULT_HYPERPARAMS = (
+        client_config.model.hyperparameters
+        if client_config and client_config.model and client_config.model.hyperparameters
+        else {'n_estimators': 300, 'max_depth': 8, 'min_samples_split': 2,
+              'min_samples_leaf': 1, 'max_features': 'sqrt', 'class_weight': 'balanced',
+              'random_state': 42, 'n_jobs': -1}
+    )
 
     # === HYPERPARAMETER TUNING (opcional) ===
     melhores_params = None
