@@ -1,16 +1,58 @@
 active_model:
-  model_name: v1_devclub_rf_temporal_leads_single
-  mlflow_run_id: 2a98e51ca4834697bbc94ec3dd31fcf7
-  model_path: files/20251111_212345
-  trained_at: '2026-03-15T13:57:52.190132'
+  model_name: v1_devclub_rf_temporal_leads_single_jan30
+  mlflow_run_id: d51757f5041c44b7ab1a056fce8c3c35
+  model_path: files/20260130_090227
+  trained_at: '2026-01-30T09:02:24.891076'
   split_method: temporal_leads
   performance:
-    auc: 0.744995632956182
-    monotonia_percentage: 100.0
-    lift_maximum: 3.92
+    auc: 0.7311170167409214
+    monotonia_percentage: 88.89
+    lift_maximum: 2.65
 
 # Para mudar o modelo ativo:
-# 1. Treine um novo modelo: python src/train_pipeline.py --split-method temporal_leads --set-active
-# 2. Ou edite manualmente o mlflow_run_id acima
-#
-# NOTA: Modelo e features carregados direto do MLflow (zero dependência de files/)
+# 1. Treine um novo modelo: python -m src.train_pipeline --set-active
+# 2. Ative um run existente: python -m src.train_pipeline --activate-run <run_id>
+
+# =============================================================================
+# TESTE A/B — Guru Only Jan/30 vs Guru Only Mar/24
+# Ambos tmb_risk_filter=none, LQ com valor apenas D07+, LQHQ em D09-D10
+# Ativar: mudar enabled para true + alinhar utm_pattern com gestor de tráfego
+# =============================================================================
+ab_test:
+  enabled: true
+  variants:
+    guru_jan30:
+      run_id: d51757f5041c44b7ab1a056fce8c3c35  # Guru Only — treinado 30/01/2026, registrado GCS 25/03/2026
+      utm_pattern:  # OR logic — basta 1 campo casar. Alinhar com gestor.
+        utm_campaign: "ML_JAN"
+        utm_content: "ML_JAN"
+      capi_event_name: LeadQualified
+      capi_event_name_high_quality: LeadQualifiedHighQuality
+      conversion_rates:  # D01-D06 zerados (LQ só envia valor para D07+). PAV aplicado em D07/D08.
+        D01: 0.000000
+        D02: 0.000000
+        D03: 0.000000
+        D04: 0.000000
+        D05: 0.000000
+        D06: 0.000000
+        D07: 0.008100  # obs: 0.840% → PAV pooled com D08
+        D08: 0.008100  # obs: 0.780% → PAV pooled com D07
+        D09: 0.015700  # obs: 1.570% | 52 conv / 3,313 leads
+        D10: 0.017500  # obs: 1.750% | 58 conv / 3,316 leads
+    guru_mar24:
+      run_id: a859c68b1cb94c3b93767a3131eda89a  # Guru Only — treinado 24/03/2026
+      utm_pattern:  # Apenas utm_campaign — adset não ativa o Challenger sozinho.
+        utm_campaign: "ML_MAR"
+      capi_event_name: LeadQualifiedCha
+      capi_event_name_high_quality: LeadQualifiedChaHighQuality
+      conversion_rates:  # D01-D06 zerados. PAV aplicado em D02/D03.
+        D01: 0.000000
+        D02: 0.000000
+        D03: 0.000000
+        D04: 0.000000
+        D05: 0.000000
+        D06: 0.000000
+        D07: 0.005900  # obs: 0.590% | 12 conv / 2,023 leads
+        D08: 0.006400  # obs: 0.640% | 13 conv / 2,024 leads
+        D09: 0.007900  # obs: 0.790% | 16 conv / 2,024 leads
+        D10: 0.015300  # obs: 1.530% | 31 conv / 2,024 leads
