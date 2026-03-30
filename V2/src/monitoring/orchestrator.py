@@ -20,6 +20,11 @@ from .operational_monitor import OperationalMonitor
 from .capi_monitor import CAPIQualityMonitor
 from .models import Alert
 from core.client_config import ClientConfig
+from core.utm import unify_utm
+from core.medium import unify_medium
+from core.category_unification import unify_categories as _unify_categories
+from core.preprocessing import preprocess_for_monitoring
+from core.feature_engineering import create_features as _fe_create
 
 _DEFAULT_CONFIG_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), '..', '..', 'configs', 'clients', 'devclub.yaml')
@@ -146,7 +151,6 @@ class MonitoringOrchestrator:
             # Aplicar unificação de UTM Source/Term (mesmo processamento que produção)
             # Isso garante que 'fb', 'youtube', etc sejam normalizados para 'outros'
             if 'Source' in df.columns or 'Term' in df.columns:
-                from core.utm import unify_utm
                 utm_antes = df['Source'].nunique() if 'Source' in df.columns else 0
                 df = unify_utm(df, self._client_config.utm)
                 utm_depois = df['Source'].nunique() if 'Source' in df.columns else 0
@@ -155,7 +159,6 @@ class MonitoringOrchestrator:
             # Aplicar unificação de Medium (mesmo processamento que treino e produção)
             # Isso garante que 'ABERTO | AD0022' seja normalizado para 'Aberto'
             if 'Medium' in df.columns:
-                from core.medium import unify_medium
                 medium_antes = df['Medium'].nunique()
                 df = unify_medium(df, self._client_config.medium)
                 medium_depois = df['Medium'].nunique()
@@ -172,13 +175,11 @@ class MonitoringOrchestrator:
                 )
 
             # Aplicar unificação de categorias (mesmo processamento que produção)
-            from core.category_unification import unify_categories as _unify_categories
             df = _unify_categories(df, self._client_config.category)
             logger.info(f" Categorias unificadas")
 
             # Sequência canônica de preprocessing com preservação de decil/lead_score
             colunas_antes_pre = len(df.columns)
-            from core.preprocessing import preprocess_for_monitoring
             df = preprocess_for_monitoring(df, self._client_config.ingestion, self._client_config.feature)
             colunas_depois_pre = len(df.columns)
             logger.info(f" Preprocessing: {colunas_antes_pre} → {colunas_depois_pre} colunas")
@@ -190,7 +191,6 @@ class MonitoringOrchestrator:
                 logger.info(f" Coluna 'lead_score' preservada ({valid_scores}/{len(df)} válidos, média: {df['lead_score'].mean():.4f})")
 
             # Aplicar feature engineering (mesmo processamento que produção)
-            from core.feature_engineering import create_features as _fe_create
             colunas_antes_fe = len(df.columns)
             df = _fe_create(df, self._client_config.feature)
             colunas_depois_fe = len(df.columns)
