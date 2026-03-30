@@ -311,8 +311,8 @@ def hyperparameter_tuning(
 
     # Melhorias
     melhoria_auc = ((melhor['auc'] - baseline_metricas['auc']) / baseline_metricas['auc']) * 100
-    melhoria_separacao = ((melhor['separacao_d10_d1'] - baseline_metricas['separacao_d10_d1']) /
-                          baseline_metricas['separacao_d10_d1']) * 100
+    sep_base = baseline_metricas['separacao_d10_d1']
+    melhoria_separacao = ((melhor['separacao_d10_d1'] - sep_base) / sep_base) * 100 if sep_base != 0 else 0.0
 
     print(f"\nMELHORIAS:")
     print(f"  AUC: {melhoria_auc:+.2f}%")

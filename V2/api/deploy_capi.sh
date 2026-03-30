@@ -189,6 +189,77 @@ print(v)
 }
 
 # =============================================================================
+# STAGING DE ARTIFACTS PARA O DOCKER BUILD
+# =============================================================================
+#
+# Monta mlruns_build/1/ com apenas os runs necessários:
+#   - champion (active_model.mlflow_run_id)
+#   - variantes A/B (ab_test.variants.*.run_id) quando ab_test.enabled = true
+#
+# O Dockerfile faz COPY ./mlruns_build/ ./mlruns/ — imagem enxuta, A/B pronto.
+# O diretório é removido após o build (cleanup em build_docker_image).
+# =============================================================================
+
+stage_model_artifacts() {
+    print_header "1.5 STAGING DE ARTIFACTS"
+
+    STAGE_DIR="$PROJECT_ROOT/mlruns_build"
+    STAGE_EXPERIMENT="$STAGE_DIR/1"
+
+    # Limpar staging anterior se existir
+    rm -rf "$STAGE_DIR"
+    mkdir -p "$STAGE_EXPERIMENT"
+
+    # --- Champion ---
+    CHAMPION_SRC="$PROJECT_ROOT/mlruns/1/${MLFLOW_RUN_ID}/artifacts"
+    if [ ! -d "$CHAMPION_SRC" ]; then
+        print_error "Artifacts do champion não encontrados: $CHAMPION_SRC"
+        exit 1
+    fi
+    cp -r "$PROJECT_ROOT/mlruns/1/${MLFLOW_RUN_ID}" "$STAGE_EXPERIMENT/"
+    print_success "Champion staged: $MLFLOW_RUN_ID"
+
+    # --- Variantes A/B (apenas se enabled: true) ---
+    AB_ENABLED=$(python3 -c "
+import yaml
+with open('$CONFIG_FILE') as f:
+    cfg = yaml.safe_load(f)
+ab = cfg.get('ab_test', {})
+print('true' if ab.get('enabled') else 'false')
+" 2>/dev/null)
+
+    if [ "$AB_ENABLED" = "true" ]; then
+        VARIANT_RUN_IDS=$(python3 -c "
+import yaml
+with open('$CONFIG_FILE') as f:
+    cfg = yaml.safe_load(f)
+variants = cfg.get('ab_test', {}).get('variants', {})
+for name, v in variants.items():
+    print(v.get('run_id', ''))
+" 2>/dev/null)
+
+        for VARIANT_RUN_ID in $VARIANT_RUN_IDS; do
+            [ -z "$VARIANT_RUN_ID" ] && continue
+            VARIANT_SRC="$PROJECT_ROOT/mlruns/1/${VARIANT_RUN_ID}/artifacts"
+            if [ ! -d "$VARIANT_SRC" ]; then
+                print_error "Artifacts da variante não encontrados: $VARIANT_SRC"
+                print_error "Rode: python -c \"import mlflow; mlflow.artifacts.download_artifacts(run_id='${VARIANT_RUN_ID}', dst_path='mlruns/1/${VARIANT_RUN_ID}/artifacts')\""
+                exit 1
+            fi
+            cp -r "$PROJECT_ROOT/mlruns/1/${VARIANT_RUN_ID}" "$STAGE_EXPERIMENT/"
+            print_success "Variante A/B staged: $VARIANT_RUN_ID"
+        done
+    else
+        print_info "A/B test desabilitado — apenas champion no build"
+    fi
+
+    # MODEL_PATH aponta para o staging (relativo à raiz do projeto)
+    MODEL_PATH="mlruns_build"
+    print_success "Staging pronto: $STAGE_DIR"
+    echo ""
+}
+
+# =============================================================================
 # BUILD DA IMAGEM DOCKER
 # =============================================================================
 
@@ -224,8 +295,12 @@ build_docker_image() {
         --push \
         . || {
             print_error "Falha no build da imagem Docker"
+            rm -rf "$PROJECT_ROOT/mlruns_build"
             exit 1
         }
+
+    # Limpar staging (não precisa mais após o build)
+    rm -rf "$PROJECT_ROOT/mlruns_build"
 
     print_success "Imagem construída e enviada para GCR"
     print_success "Tag: $IMAGE_TAG"
@@ -635,6 +710,7 @@ main() {
 
     # Executar pipeline de deploy
     validate_prerequisites
+    stage_model_artifacts
     build_docker_image
     deploy_to_cloud_run
 

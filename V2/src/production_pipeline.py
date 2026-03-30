@@ -10,7 +10,8 @@ import pandas as pd
 import logging
 import atexit
 from datetime import datetime
-from .core.client_config import ClientConfig
+from typing import Dict, Optional
+from .core.client_config import ClientConfig, ABTestConfig, ABTestVariantConfig
 from .core.preprocessing import preprocess as _preprocess
 from .core.utm import unify_utm
 from .core.medium import unify_medium as _unify_medium
@@ -104,8 +105,40 @@ class LeadScoringPipeline:
         _config_path = os.path.join(os.path.dirname(__file__), '..', 'configs', 'clients', f'{client_id}.yaml')
         self._client_config = ClientConfig.from_yaml(os.path.abspath(_config_path))
 
+        # Carregar ABTestConfig de configs/active_models/{client_id}.yaml
+        _active_models_path = os.path.join(os.path.dirname(__file__), '..', 'configs', 'active_models', f'{client_id}.yaml')
+        self._ab_test_config = ABTestConfig.from_active_model_yaml(os.path.abspath(_active_models_path))
+
         # Carregar modelo e metadados automaticamente
         self.predictor.load_model()
+
+        # Se A/B test habilitado, carregar predictor por variante
+        self._variant_predictors: Dict[str, LeadScoringPredictor] = {}
+        if self._ab_test_config.enabled:
+            for variant_name, variant in self._ab_test_config.variants.items():
+                vpredictor = LeadScoringPredictor(mlflow_run_id=variant.run_id)
+                vpredictor.load_model()
+                self._variant_predictors[variant_name] = vpredictor
+                logger.info(f"A/B test: variante '{variant_name}' carregada (run_id={variant.run_id})")
+
+    def get_ab_variant(self, lead_utms: Dict[str, Optional[str]]) -> Optional[ABTestVariantConfig]:
+        """
+        Retorna a variante A/B que casa com os UTMs do lead (OR logic).
+        Retorna None se o teste estiver desabilitado ou nenhuma variante casar
+        (lead fica fora do teste e é processado normalmente).
+
+        lead_utms: dict com chaves utm_source, utm_medium, utm_campaign,
+                   utm_content, utm_term (valores podem ser None).
+        """
+        if not self._ab_test_config.enabled:
+            return None
+        return self._ab_test_config.match_variant(lead_utms)
+
+    def get_variant_predictor(self, variant_name: str) -> LeadScoringPredictor:
+        """Retorna o predictor carregado para a variante especificada."""
+        if variant_name not in self._variant_predictors:
+            raise KeyError(f"Variante '{variant_name}' não encontrada. Variantes disponíveis: {list(self._variant_predictors)}")
+        return self._variant_predictors[variant_name]
 
     def load_data(self, filepath: str) -> pd.DataFrame:
         """
@@ -331,12 +364,13 @@ class LeadScoringPipeline:
 
         return self.data
 
-    def predict(self, df: pd.DataFrame = None) -> pd.DataFrame:
+    def predict(self, df: pd.DataFrame = None, predictor_override: "LeadScoringPredictor" = None) -> pd.DataFrame:
         """
         Realiza predições no DataFrame processado.
 
         Args:
             df: DataFrame a ser usado (se None, usa self.data)
+            predictor_override: Predictor alternativo a usar (ex: variante A/B). Se None, usa self.predictor.
 
         Returns:
             DataFrame original com scores de predição
@@ -346,14 +380,14 @@ class LeadScoringPipeline:
                 raise ValueError("Nenhum dado disponível para predição. Execute preprocess() primeiro.")
             df = self.data
 
+        predictor = predictor_override or self.predictor
         logger.info("=== Iniciando Predições ===")
-        # Passar tanto o DataFrame processado quanto o original
-        result = self.predictor.predict(df, self.original_data)
+        result = predictor.predict(df, self.original_data)
         logger.info("=== Predições Concluídas ===")
 
         return result
 
-    def run(self, filepath: str, with_predictions: bool = False) -> pd.DataFrame:
+    def run(self, filepath: str, with_predictions: bool = False, predictor_override: "LeadScoringPredictor" = None) -> pd.DataFrame:
         """
         Executa o pipeline completo.
 
@@ -387,7 +421,7 @@ class LeadScoringPipeline:
 
         # Fazer predições se solicitado
         if with_predictions:
-            self.data = self.predict()
+            self.data = self.predict(predictor_override=predictor_override)
 
         logger.info("=== Pipeline concluído ===")
         print(f"\n Output completo salvo em: {log_path}\n")

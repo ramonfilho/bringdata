@@ -919,14 +919,17 @@ def main():
         survey_df_all = lead_loader.load_leads_from_sheets(use_cache=use_cache)
         _s = start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d')
         _e = end_date   if isinstance(end_date,   str) else end_date.strftime('%Y-%m-%d')
+        # Estender janela de leads para 60 dias antes do início da captação
+        # para capturar compradores que se cadastraram em lançamentos anteriores
+        _s_extended = (pd.to_datetime(_s) - pd.Timedelta(days=60)).strftime('%Y-%m-%d')
         if not survey_df_all.empty and 'data_captura' in survey_df_all.columns:
             survey_df = survey_df_all[
-                (survey_df_all['data_captura'] >= pd.to_datetime(_s)) &
+                (survey_df_all['data_captura'] >= pd.to_datetime(_s_extended)) &
                 (survey_df_all['data_captura'] <  pd.to_datetime(_e) + pd.Timedelta(days=1))
             ].copy()
         else:
             survey_df = survey_df_all
-        logger.info(f"    {len(survey_df_all)} leads totais nas planilhas → {len(survey_df)} no período")
+        logger.info(f"    {len(survey_df_all)} leads totais nas planilhas → {len(survey_df)} no período (janela 60d)")
 
         if survey_df.empty or 'email' not in survey_df.columns:
             logger.warning("    Nenhum lead carregado do Google Sheets para o período.")

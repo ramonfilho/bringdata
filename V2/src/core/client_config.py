@@ -264,6 +264,68 @@ class ValidationConfig:
 
 
 # ---------------------------------------------------------------------------
+# ABTestConfig — carregado de configs/active_models/{client_id}.yaml
+# Independente do ClientConfig (que vem de configs/clients/).
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ABTestVariantConfig:
+    """Configuração de uma variante do teste A/B (champion ou challenger)."""
+    run_id: str
+    utm_pattern: Dict[str, str]          # OR logic: basta 1 campo casar
+    capi_event_name: str
+    capi_event_name_high_quality: str
+    conversion_rates: Dict[str, float]   # D01–D10, com PAV aplicado se necessário
+
+
+@dataclass
+class ABTestConfig:
+    """
+    Teste A/B champion/challenger. Carregado pelo LeadScoringPipeline de
+    configs/active_models/{client_id}.yaml (bloco 'ab_test').
+
+    Quando enabled=False, o pipeline ignora completamente este config.
+    """
+    enabled: bool = False
+    variants: Dict[str, ABTestVariantConfig] = field(default_factory=dict)
+
+    @classmethod
+    def from_active_model_yaml(cls, path: str | Path) -> "ABTestConfig":
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        ab = data.get("ab_test", {})
+        if not ab or not ab.get("enabled", False):
+            return cls(enabled=False)
+        variants = {}
+        for name, vdata in ab.get("variants", {}).items():
+            variants[name] = ABTestVariantConfig(
+                run_id=vdata["run_id"],
+                utm_pattern=vdata.get("utm_pattern") or {},
+                capi_event_name=vdata["capi_event_name"],
+                capi_event_name_high_quality=vdata["capi_event_name_high_quality"],
+                conversion_rates=vdata["conversion_rates"],
+            )
+        return cls(enabled=True, variants=variants)
+
+    def match_variant(self, lead_utms: Dict[str, Optional[str]]) -> Optional[ABTestVariantConfig]:
+        """
+        Retorna a variante cuja utm_pattern casa com os UTMs do lead (OR logic).
+        Retorna None se nenhuma variante casar — lead fica fora do teste.
+
+        lead_utms: dict com chaves utm_source, utm_medium, utm_campaign,
+                   utm_content, utm_term (valores podem ser None).
+        """
+        for variant in self.variants.values():
+            if not variant.utm_pattern:
+                continue
+            for field_name, pattern in variant.utm_pattern.items():
+                value = lead_utms.get(field_name) or ""
+                if pattern.lower() in value.lower():
+                    return variant
+        return None
+
+
+# ---------------------------------------------------------------------------
 # ClientConfig — ponto de entrada
 # ---------------------------------------------------------------------------
 

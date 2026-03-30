@@ -34,53 +34,85 @@ mlflow.set_tracking_uri(_tracking_uri)
 def atualizar_business_config_com_recall(model_metadata: dict, client_config: "ClientConfig" = None):
     """
     Atualiza api/business_config.py e configs/clients/{client_id}.yaml com taxas de conversão
-    corrigidas pelo recall real.
+    do modelo treinado, com duas transformações aplicadas em sequência:
 
-    Lê as taxas observadas do model_metadata (decil_analysis), aplica o fator de correção
-    calculado a partir do recall real, e atualiza ambos os arquivos.
+    1. Fator de recall (opcional): corrige sub-contagem de vendas não matcheadas.
+       Se recall_metrics não disponível, usa taxas brutas do test set.
+    2. Regressão isotônica (sempre): garante D01 ≤ D02 ≤ ... ≤ D10 antes de escrever
+       nos arquivos de produção, sem afetar as métricas de monotonia registradas no MLflow
+       (que continuam refletindo os dados reais do test set).
 
     Args:
-        model_metadata: Dict com metadata do modelo (deve conter recall_metrics e decil_analysis)
+        model_metadata: Dict com metadata do modelo (deve conter decil_analysis)
         client_config: ClientConfig do cliente — se fornecido, também atualiza o yaml do cliente
     """
     import re
     import yaml
     from pathlib import Path
+    from sklearn.isotonic import IsotonicRegression
 
-    logger.info("\n ATUALIZANDO BUSINESS_CONFIG.PY COM RECALL REAL")
+    logger.info("\n ATUALIZANDO CONVERSION RATES (business_config + yaml do cliente)")
 
-    # Extrair métricas de recall
+    decil_analysis = model_metadata.get('decil_analysis', {})
+    if not decil_analysis:
+        logger.info("  decil_analysis não encontrado. Pulando atualização.")
+        return
+
+    # Extrair métricas de recall (opcional)
     recall_metrics = model_metadata.get('recall_metrics', {})
     fator_correcao = recall_metrics.get('fator_correcao')
     recall = recall_metrics.get('recall')
 
-    if not fator_correcao:
-        logger.info("  Recall metrics não encontradas. Pulando atualização.")
-        return
+    if fator_correcao:
+        logger.info(f" Recall real: {recall:.4f} ({recall*100:.2f}%) | Fator: {fator_correcao:.3f}x")
+    else:
+        logger.info(" Recall metrics não disponíveis — usando taxas brutas do test set")
+        fator_correcao = 1.0
 
-    logger.info(f" Recall real: {recall:.4f} ({recall*100:.2f}%)")
-    logger.info(f" Fator de correção: {fator_correcao:.3f}x")
-
-    # Calcular taxas corrigidas a partir do decil_analysis
-    decil_analysis = model_metadata.get('decil_analysis', {})
-    taxas_corrigidas = {}
-
-    logger.info(f"\n Calculando taxas corrigidas:")
-    logger.info(f"{'Decil':<6} | {'Observada':<10} | {'Corrigida':<10}")
-    logger.info("-" * 35)
-
+    # Calcular taxas (brutas × fator de recall)
+    taxas = {}
     for i in range(1, 11):
         decil_key = f"decil_{i}"
-        decil_label = f"D{i:02d}"  # formato canônico D01–D10
-
+        decil_label = f"D{i:02d}"
         if decil_key in decil_analysis:
-            taxa_observada = decil_analysis[decil_key]['conversion_rate']
-            taxa_corrigida = taxa_observada * fator_correcao
-            taxas_corrigidas[decil_label] = taxa_corrigida
+            taxa_obs = decil_analysis[decil_key]['conversion_rate']
+            taxas[decil_label] = taxa_obs * fator_correcao
 
-            logger.info(f"{decil_label:<6} | {taxa_observada*100:>8.2f}% | {taxa_corrigida*100:>8.2f}%")
+    # Aplicar regressão isotônica para garantir monotonia D01→D10
+    # Necessário porque valores enviados ao Meta via CAPI devem ser crescentes.
+    # PAV não altera taxas já monotônicas. Não afeta métricas salvas no MLflow.
+    decis_ord = [f"D{i:02d}" for i in range(1, 11) if f"D{i:02d}" in taxas]
+    if len(decis_ord) >= 2:
+        rates_raw = np.array([taxas[d] for d in decis_ord])
+        rates_pav = IsotonicRegression(increasing=True, out_of_bounds='clip').fit_transform(
+            np.arange(len(decis_ord), dtype=float), rates_raw
+        )
+        ajustes = []
+        for d, r_orig, r_new in zip(decis_ord, rates_raw, rates_pav):
+            if abs(r_new - r_orig) > 1e-9:
+                ajustes.append(f"{d}: {r_orig*100:.3f}%→{r_new*100:.3f}%")
+            taxas[d] = float(r_new)
+        if ajustes:
+            logger.info(f" Isotônica corrigiu quebras: {', '.join(ajustes)}")
+        else:
+            logger.info(" Isotônica: taxas já monotônicas, sem ajuste")
 
-    # Ler arquivo business_config.py
+    # Zerar D01-D06: LeadQualified só envia valor para D07+ (decisão de negócio).
+    # Evita que o Meta otimize ROAS trazendo leads baratos de baixa qualidade.
+    for d in [f"D{i:02d}" for i in range(1, 7)]:
+        if d in taxas:
+            taxas[d] = 0.0
+    logger.info(" D01-D06 zerados — LQ com valor apenas para D07+")
+
+    logger.info(f"\n{'Decil':<6} | {'Observada':>10} | {'Final (CAPI)':>13}")
+    logger.info("-" * 36)
+    for i in range(1, 11):
+        d = f"D{i:02d}"
+        if d in taxas and f"decil_{i}" in decil_analysis:
+            obs = decil_analysis[f"decil_{i}"]["conversion_rate"]
+            logger.info(f"{d}    | {obs*100:>9.3f}% | {taxas[d]*100:>12.3f}%")
+
+    # Atualizar api/business_config.py
     config_path = Path(__file__).parent.parent.parent / "api" / "business_config.py"
 
     if not config_path.exists():
@@ -90,37 +122,26 @@ def atualizar_business_config_com_recall(model_metadata: dict, client_config: "C
     with open(config_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # Montar novo bloco CONVERSION_RATES
     novo_bloco = "CONVERSION_RATES = {\n"
     for i in range(1, 11):
-        decil_label = f"D{i:02d}"  # formato canônico D01–D10
-        taxa = taxas_corrigidas.get(decil_label, 0.0)
+        d = f"D{i:02d}"
+        taxa = taxas.get(d, 0.0)
         conversoes = decil_analysis[f"decil_{i}"]["conversions"]
         total_leads = decil_analysis[f"decil_{i}"]["total_leads"]
         taxa_obs = decil_analysis[f"decil_{i}"]["conversion_rate"]
-
-        novo_bloco += f'    "{decil_label}": {taxa:.6f},   # {taxa*100:.2f}% | Corrigido de {taxa_obs*100:.2f}% (×{fator_correcao:.3f}) | {conversoes} conversões / {total_leads:,} leads\n'
+        novo_bloco += f'    "{d}": {taxa:.6f},   # {taxa*100:.3f}% | obs: {taxa_obs*100:.3f}% | {conversoes} conv / {total_leads:,} leads\n'
     novo_bloco += "}"
 
-    # Substituir bloco CONVERSION_RATES (não comentado)
-    # Padrão: Linha que começa com CONVERSION_RATES (não com # CONVERSION_RATES)
-    # Buscar de forma mais específica: início de linha + CONVERSION_RATES
     pattern = r'(?m)^CONVERSION_RATES\s*=\s*\{[^}]*\}'
-
     if re.search(pattern, content, re.DOTALL | re.MULTILINE):
         content_novo = re.sub(pattern, novo_bloco, content, count=1, flags=re.DOTALL | re.MULTILINE)
-
-        # Salvar arquivo atualizado
         with open(config_path, 'w', encoding='utf-8') as f:
             f.write(content_novo)
-
-        logger.info(f"\n business_config.py atualizado com sucesso!")
-        logger.info(f"   Path: {config_path}")
-        logger.info(f"   Taxas corrigidas automaticamente com recall real ({recall*100:.2f}%)")
+        logger.info(f" business_config.py atualizado")
     else:
-        logger.info(f"  Padrão CONVERSION_RATES não encontrado no arquivo")
+        logger.info(f"  Padrão CONVERSION_RATES não encontrado em business_config.py")
 
-    # Também atualizar configs/clients/{client_id}.yaml (fonte de verdade multi-cliente)
+    # Atualizar configs/clients/{client_id}.yaml
     if client_config and client_config.client_id:
         yaml_path = (
             Path(__file__).parent.parent.parent
@@ -129,19 +150,91 @@ def atualizar_business_config_com_recall(model_metadata: dict, client_config: "C
         if yaml_path.exists():
             with open(yaml_path, 'r', encoding='utf-8') as f:
                 yaml_data = yaml.safe_load(f) or {}
-
             if 'business' not in yaml_data:
                 yaml_data['business'] = {}
             yaml_data['business']['conversion_rates'] = {
-                k: round(v, 6) for k, v in taxas_corrigidas.items()
+                k: round(v, 6) for k, v in taxas.items()
             }
-
             with open(yaml_path, 'w', encoding='utf-8') as f:
                 yaml.dump(yaml_data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-
-            logger.info(f"   {yaml_path.name} atualizado com conversion_rates corrigidas")
+            logger.info(f" {yaml_path.name} atualizado")
         else:
-            logger.info(f"   YAML do cliente não encontrado: {yaml_path}")
+            logger.info(f"  YAML do cliente não encontrado: {yaml_path}")
+
+
+def ativar_run_existente(run_id: str, client_config: "ClientConfig" = None):
+    """
+    Ativa um run MLflow existente como modelo de produção sem retreinar.
+
+    1. Baixa model_metadata.json do MLflow para o run_id informado
+    2. Atualiza configs/active_models/devclub.yaml
+    3. Chama atualizar_business_config_com_recall() para atualizar conversion_rates
+       em business_config.py e configs/clients/devclub.yaml (com PAV aplicado)
+
+    Args:
+        run_id: MLflow run ID completo (ex: 'a859c68b1cb94c3b93767a3131eda89a')
+        client_config: ClientConfig do cliente
+    """
+    import tempfile
+    import yaml
+    from pathlib import Path
+
+    print(f"\nATIVANDO RUN EXISTENTE: {run_id}")
+
+    # 1. Baixar metadata do MLflow
+    client = mlflow.tracking.MlflowClient()
+    try:
+        run = client.get_run(run_id)
+    except Exception as e:
+        print(f"Run não encontrado no MLflow: {e}")
+        raise
+
+    with tempfile.TemporaryDirectory() as tmp:
+        meta_path = client.download_artifacts(run_id, 'model_metadata.json', tmp)
+        with open(meta_path) as f:
+            model_metadata = json.load(f)
+
+    model_info = model_metadata.get('model_info', {})
+    perf = model_metadata.get('performance_metrics', {})
+    split = model_metadata.get('training_data', {})
+
+    print(f"  Modelo: {model_info.get('model_name', 'N/A')}")
+    print(f"  Treinado em: {model_info.get('trained_at', 'N/A')}")
+    print(f"  AUC: {perf.get('auc', 0):.4f} | Monotonia: {perf.get('monotonia_percentage', 0):.1f}% | Lift: {perf.get('lift_maximum', 0):.2f}x")
+    print(f"  Split: {model_info.get('split_type', 'N/A')} | Records: {split.get('total_records', 'N/A'):,}")
+
+    # 2. Atualizar configs/active_models/devclub.yaml
+    config_path = Path(__file__).parent.parent.parent / "configs" / "active_models" / "devclub.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    active_config = {
+        'active_model': {
+            'model_name': model_info.get('model_name', 'v1_devclub_rf_temporal_leads_single'),
+            'mlflow_run_id': run_id,
+            'model_path': f"files/{model_info.get('trained_at', '')[:10].replace('-', '')}",
+            'trained_at': model_info.get('trained_at', ''),
+            'split_method': model_info.get('split_type', 'temporal_leads'),
+            'performance': {
+                'auc': round(perf.get('auc', 0), 12),
+                'monotonia_percentage': perf.get('monotonia_percentage', 0),
+                'lift_maximum': perf.get('lift_maximum', 0),
+            }
+        }
+    }
+
+    with open(config_path, 'w') as f:
+        yaml.dump(active_config, f, default_flow_style=False, sort_keys=False)
+        f.write("\n# Para mudar o modelo ativo:\n")
+        f.write("# 1. Treine um novo modelo: python -m src.train_pipeline --set-active\n")
+        f.write("# 2. Ative um run existente: python -m src.train_pipeline --activate-run <run_id>\n")
+
+    print(f"  configs/active_models/devclub.yaml atualizado")
+
+    # 3. Atualizar conversion_rates (com PAV)
+    atualizar_business_config_com_recall(model_metadata, client_config=client_config)
+
+    print(f"\nRun {run_id[:8]}... ativado com sucesso.")
+    print(f"Para deploy: gcloud run deploy (ou push da imagem Docker)")
 
 
 def registrar_features_e_modelo_devclub(

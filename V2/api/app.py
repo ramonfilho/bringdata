@@ -870,6 +870,25 @@ async def webhook_update_survey(
             lead_df = pd.DataFrame([lead_dict_mapped])
             logger.info(f"   DataFrame criado: {lead_df.shape}, colunas={list(lead_df.columns)[:10]}")
 
+            # A/B test routing: identificar variante pelos UTMs do lead
+            lead_utms = {
+                'utm_source': existing_lead.utm_source,
+                'utm_medium': existing_lead.utm_medium,
+                'utm_campaign': existing_lead.utm_campaign,
+                'utm_term': existing_lead.utm_term,
+                'utm_content': existing_lead.utm_content,
+            }
+            ab_variant = pipeline.get_ab_variant(lead_utms)
+            predictor_override = None
+            if ab_variant:
+                # Encontrar nome da variante para obter o predictor correspondente
+                ab_variant_name = next(
+                    name for name, v in pipeline._ab_test_config.variants.items()
+                    if v is ab_variant
+                )
+                predictor_override = pipeline.get_variant_predictor(ab_variant_name)
+                logger.info(f"🔀 A/B test: variante '{ab_variant_name}' selecionada para {existing_lead.email}")
+
             # Usar pipeline.run() completo (igual /predict/batch)
             # Isso garante que TODAS as transformações de dados sejam aplicadas
             temp_file = None
@@ -880,7 +899,7 @@ async def webhook_update_survey(
                     temp_file = tmp.name
 
                 logger.info("   Executando pipeline completo...")
-                result_df = pipeline.run(temp_file, with_predictions=True)
+                result_df = pipeline.run(temp_file, with_predictions=True, predictor_override=predictor_override)
 
                 if result_df is None or len(result_df) == 0:
                     raise HTTPException(status_code=500, detail="Pipeline retornou resultado vazio")
@@ -890,9 +909,10 @@ async def webhook_update_survey(
                 if temp_file and os.path.exists(temp_file):
                     os.remove(temp_file)
 
-            # Calcular decil usando thresholds do modelo
+            # Calcular decil usando thresholds do modelo ativo para este lead
+            active_predictor = predictor_override or pipeline.predictor
             lead_score_value = float(result_df['lead_score'].iloc[0])
-            thresholds = pipeline.predictor.metadata.get('decil_thresholds', {}).get('thresholds', {})
+            thresholds = active_predictor.metadata.get('decil_thresholds', {}).get('thresholds', {})
 
             if thresholds:
                 decil_value = atribuir_decil_por_threshold(lead_score_value, thresholds)
@@ -916,7 +936,8 @@ async def webhook_update_survey(
             import time
             event_timestamp = int(time.time()) - 60  # Subtrair 60 segundos para garantir que não está no futuro
 
-            capi_result = send_batch_events([{
+            # Montar lead dict com overrides A/B se variante identificada
+            lead_capi_dict = {
                 'email': existing_lead.email,
                 'phone': existing_lead.phone,
                 'first_name': existing_lead.first_name,
@@ -934,7 +955,15 @@ async def webhook_update_survey(
                     'genero': existing_lead.genero,
                     'cidade': existing_lead.cidade
                 }
-            }], db, capi_config=pipeline._client_config.capi,
+            }
+            if ab_variant:
+                lead_capi_dict['ab_event_name'] = ab_variant.capi_event_name
+                lead_capi_dict['ab_event_name_hq'] = ab_variant.capi_event_name_high_quality
+                lead_capi_dict['ab_conversion_rates'] = ab_variant.conversion_rates
+
+            capi_result = send_batch_events(
+                [lead_capi_dict], db,
+                capi_config=pipeline._client_config.capi,
                 business_config=pipeline._client_config.business,
                 client_id=pipeline._client_config.client_id)
 
@@ -2858,28 +2887,68 @@ async def railway_process_pending(pipeline: PipelineDep):
                 "message": "Todos os leads falharam no mapeamento",
             }
 
-        # 5. Rodar pipeline ML em batch
-        leads_df = pd.DataFrame(sheets_rows)
-        temp_file = None
-        result_df = None
-        try:
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp:
-                leads_df.to_csv(tmp, index=False)
-                temp_file = tmp.name
+        # 5. A/B routing: particionar leads por variante antes de rodar o pipeline
+        # Cada grupo usa o predictor e os thresholds da sua variante
+        ab_variant_per_lead = []   # índice → ABTestVariantConfig ou None
+        ab_name_per_lead = []      # índice → nome da variante ou None
+        for lead in valid_leads:
+            lead_utms = {
+                'utm_campaign': lead.get('campaign'),
+                'utm_content':  lead.get('content'),
+                'utm_source':   lead.get('source'),
+                'utm_medium':   lead.get('medium'),
+                'utm_term':     lead.get('term'),
+            }
+            ab_variant = pipeline.get_ab_variant(lead_utms)
+            ab_variant_per_lead.append(ab_variant)
+            if ab_variant:
+                ab_variant_name = next(
+                    n for n, v in pipeline._ab_test_config.variants.items() if v is ab_variant
+                )
+                ab_name_per_lead.append(ab_variant_name)
+            else:
+                ab_name_per_lead.append(None)
 
-            logger.info(f"   Executando pipeline para {len(sheets_rows)} leads Railway...")
-            result_df = pipeline.run(temp_file, with_predictions=True)
-        finally:
-            if temp_file and os.path.exists(temp_file):
-                os.remove(temp_file)
+        # Agrupar índices por nome de variante (None = fora do teste)
+        from collections import defaultdict
+        variant_groups = defaultdict(list)   # variant_name_or_None → [i, ...]
+        for i, vname in enumerate(ab_name_per_lead):
+            variant_groups[vname].append(i)
 
-        if result_df is None or len(result_df) == 0:
-            raise HTTPException(status_code=500, detail="Pipeline retornou resultado vazio")
+        # Rodar pipeline por grupo, coletar score+decil por índice
+        score_by_index = {}   # i → (lead_score, decil_str)
+        for vname, indices in variant_groups.items():
+            predictor_ov = pipeline.get_variant_predictor(vname) if vname else pipeline.predictor
+            group_sheets = [sheets_rows[i] for i in indices]
+            group_df = pd.DataFrame(group_sheets)
+            temp_file = None
+            group_result = None
+            try:
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp:
+                    group_df.to_csv(tmp, index=False)
+                    temp_file = tmp.name
+                group_label = vname or 'default'
+                logger.info(f"   Executando pipeline para {len(group_sheets)} leads [{group_label}]...")
+                group_result = pipeline.run(temp_file, with_predictions=True, predictor_override=predictor_ov)
+            finally:
+                if temp_file and os.path.exists(temp_file):
+                    os.remove(temp_file)
 
-        # 6. Obter thresholds do modelo
-        thresholds = pipeline.predictor.metadata.get('decil_thresholds', {}).get('thresholds', {})
-        if not thresholds:
-            logger.warning("⚠️ Thresholds não encontrados, usando D05 como padrão")
+            if group_result is None or len(group_result) == 0:
+                logger.warning(f"⚠️ Pipeline retornou resultado vazio para grupo [{vname}]")
+                continue
+
+            group_thresholds = predictor_ov.metadata.get('decil_thresholds', {}).get('thresholds', {})
+            for j, orig_i in enumerate(indices):
+                try:
+                    score = float(group_result['lead_score'].iloc[j])
+                    decil = atribuir_decil_por_threshold(score, group_thresholds) if group_thresholds else "D05"
+                    score_by_index[orig_i] = (score, decil)
+                except Exception as e:
+                    logger.warning(f"⚠️ Erro ao extrair score para índice {orig_i}: {e}")
+
+        if not score_by_index:
+            raise HTTPException(status_code=500, detail="Pipeline retornou resultado vazio para todos os grupos")
 
         # 7. Atualizar Railway + preparar payload CAPI
         processed = 0
@@ -2888,13 +2957,11 @@ async def railway_process_pending(pipeline: PipelineDep):
 
         for i, lead in enumerate(valid_leads):
             try:
-                lead_score_value = float(result_df['lead_score'].iloc[i])
+                if i not in score_by_index:
+                    skipped += 1
+                    continue
 
-                if thresholds:
-                    decil_str = atribuir_decil_por_threshold(lead_score_value, thresholds)
-                else:
-                    decil_str = "D05"
-
+                lead_score_value, decil_str = score_by_index[i]
                 decil_int = int(decil_str[1:])  # 'D05' → 5
 
                 # Atualizar Railway (pg8000 named parameters com :name)
@@ -2907,10 +2974,10 @@ async def railway_process_pending(pipeline: PipelineDep):
                 )
                 processed += 1
 
-                # Preparar evento CAPI
+                # Preparar evento CAPI com overrides A/B se variante identificada
                 nome = (lead.get('nomeCompleto') or '').strip()
                 parts = nome.split(' ', 1)
-                capi_leads.append({
+                capi_lead = {
                     '_railway_id':      lead['id'],   # para UPDATE capiSentAt/capiStatus
                     'email':            lead.get('email'),
                     'phone':            lead.get('telefone'),
@@ -2926,7 +2993,13 @@ async def railway_process_pending(pipeline: PipelineDep):
                     'event_source_url': lead.get('pageUrl'),
                     'event_timestamp':  int(time.time()) - 60,
                     'survey_data':      None,
-                })
+                }
+                ab_v = ab_variant_per_lead[i]
+                if ab_v:
+                    capi_lead['ab_event_name'] = ab_v.capi_event_name
+                    capi_lead['ab_event_name_hq'] = ab_v.capi_event_name_high_quality
+                    capi_lead['ab_conversion_rates'] = ab_v.conversion_rates
+                capi_leads.append(capi_lead)
 
                 logger.info(
                     f"   ✅ {lead.get('email')}: score={lead_score_value:.4f} ({decil_str})"

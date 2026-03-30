@@ -1072,8 +1072,22 @@ if __name__ == "__main__":
         default=None,
         help='Data máxima dos leads (YYYY-MM-DD). Filtra pesquisa e vendas até essa data — usado para reproduzir runs anteriores com o mesmo corte temporal.'
     )
+    parser.add_argument(
+        '--activate-run',
+        type=str,
+        default=None,
+        metavar='RUN_ID',
+        help='Ativar um run MLflow existente sem retreinar. Atualiza active_models/devclub.yaml, business_config.py e devclub.yaml. Ex: --activate-run a859c68b1cb94c3b93767a3131eda89a'
+    )
 
     args = parser.parse_args()
+
+    if args.activate_run:
+        from src.model.training_model import ativar_run_existente
+        _config_path = os.path.join(os.path.dirname(__file__), '..', 'configs', 'clients', 'devclub.yaml')
+        client_config = ClientConfig.from_yaml(os.path.abspath(_config_path))
+        ativar_run_existente(args.activate_run, client_config=client_config)
+        sys.exit(0)
 
     main(
         initial_matching=args.initial_matching,

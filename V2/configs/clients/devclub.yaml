@@ -1,659 +1,586 @@
-# configs/clients/devclub.yaml
-# Configuração do cliente DevClub para o pipeline MLOps refatorado.
-#
-# ESTADO: Completo para pipelines ML core (train + production + monitoring).
-# Campos null restantes:
-#   - infra.*      — valores via env vars (GCP_PROJECT_ID, INTERNAL_API_URL, etc.)
-#   - capi.*       — valores via env vars (META_PIXEL_ID, etc.)
-#   - monitoring.* — maioria: componente ainda não migrado para core/
-#   - api.*        — não prioritário para Fase 2 ML core
-#   - feature.ordering_rules — lógica de código, não config simples
-#
-# Referência de hardcodes: V2/docs/PLANO_REFACTOR_MLOPS.md, Seção 6.
-
 client_id: devclub
-
-# ---------------------------------------------------------------------------
-# InfraConfig — hardcodes #101, #102, #120, #124, #150, #153
-# ---------------------------------------------------------------------------
 infra:
-  gcp_project_id: null          # #101, #153 — usar env var GCP_PROJECT_ID
-  cloud_run_url: null            # #124 — usar env var INTERNAL_API_URL
-  validation_bucket: null        # #120, #136
-  bigquery_dataset_id: null      # #102
-  bigquery_table_id: null        # #102
-  guru_api_base_url: null        # #150
-  guru_api_transactions_endpoint: null  # #150
-  db_url_env_var: "RAILWAY"    # "RAILWAY" = compor URL de RAILWAY_DB_* env vars; Cloud SQL = nome da env var com URL completa
-
-# ---------------------------------------------------------------------------
-# IngestionConfig — hardcodes #6–#26, #38, #57–#62, #68–#69
-# ---------------------------------------------------------------------------
+  gcp_project_id: null
+  cloud_run_url: null
+  validation_bucket: null
+  bigquery_dataset_id: null
+  bigquery_table_id: null
+  guru_api_base_url: null
+  guru_api_transactions_endpoint: null
+  db_url_env_var: RAILWAY
 ingestion:
-  training_data_dir: null        # path local ao dataset de treino (definido por argumento CLI)
-  tmb_detection_columns:         # #6 — colunas que identificam arquivo TMB de parcelas
-    - "Pedido"
-    - "Parcela"
-    - "Grau de risco"
-  tmb_pedidos_detection_columns: # #154 — colunas que identificam o arquivo TMB de pedidos (dual-source)
-    - "ID do Pedido"
-    - "E-mail do Cliente"
-    - "Telefone do Cliente"
-  tmb_pedidos_column_mapping:    # #155 — renomeação para formato canônico do pipeline
-    "ID do Pedido": "Pedido"
-    "E-mail do Cliente": "Cliente Email"
-    "Telefone do Cliente": "Telefone"
-    "Nome do Produto": "nome produto"
-    "Ticket do pedido": "Ticket (R$)"
-  tmb_pedidos_active_status_exclude: "Cancelado"  # #156 — excluir cancelados; manter Vigente + Quitado
-  bare_campaign_names:           # #8 — prefixos de campanha incompletos a ignorar
-    - "DEVLF"
-    - "devlf"
-  api_source_name: "API Guru"    # #11 — nome da fonte de dados da API Guru nos logs
-  has_tmb: true                  # #12 — DevClub usa TMB (plataforma de pagamento parcelado)
-  sales_platform_identifier: "guru"  # #21 — identificador da plataforma de vendas no nome do arquivo
-  approved_status_value: "Aprovada"  # #22
-  tmb_risk_column: "Grau de risco"   # #23
-  tmb_risk_values: ["Baixo", "Médio"]  # #62 — 'low'=first, 'low_medium'=all
-  tmb_risk_filter_default: "all"     # #26
-  product_filter_keyword: "devclub"  # #24
-  pesquisa_date_column: "Data"       # #25
-  lf_file_prefix: "LF"           # #57 — prefixo dos arquivos de leads do lançamento
-  lf_guru_exception_files:       # #57 — arquivos LF que mantêm abas TMB/Guru (exceção à regra)
-    - "LF06"
-  local_sales_filename_identifier: "guru"  # #58 — identificador de arquivo de vendas local (excluído: substituído pela API)
-  min_survey_columns: 10         # #59 — mínimo de colunas para considerar aba com survey
-  score_column_prefixes:         # #60 — prefixos de colunas de score a remover por pattern matching
-    - "score"
-    - "faixa"
-    - "pontuação"
-    - "pontuacao"
-    - "lead_score"
-    - "decil"
-  vendas_utm_columns_to_remove: ["source", "medium", "campaign", "content"]  # #61
-  columns_to_remove:             # #69 — colunas a remover (score/técnicas sempre ausentes em produção)
-    - "Pontuação"
-    - "Score"
-    - "Faixa"
-    - "Faixa A"
-    - "Faixa B"
-    - "Faixa C"
-    - "Faixa D"
-    - "Remote IP"
-    - "User Agent"
-    - "fbc"
-    - "fbp"
-    - "cidade"
-    - "estado"
-    - "pais"
-    - "cep"
-    - "externalid"
-    - "Page URL"
-    - "Qual estado você mora?"
-  column_rename_mapping:         # #68 — renomeação de colunas com nomes longos de formulário
-    "Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?": "investiu_curso_online"
-    "O que mais te chama atenção na profissão de Programador?": "interesse_programacao"
-  dataset_cutoff_date: null      # #38 — MANTER NULL: auto-detecção via features tardias.
-                                  # O valor "2025-03-01" do hardcode original era um MÍNIMO na lógica
-                                  # antiga (auto-detecção ainda rodava depois). Em core/dataset_versioning.py,
-                                  # valor não-null substitui completamente a auto-detecção → 168k rows vs
-                                  # 49k esperados. Resultado validado com null: 49,214 leads ✅
-  column_unification:            # #13–#20
-    pesquisa_merges:             # #13, #14, #15
-      - cols:
-          - "Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?"
-          - "Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro? "
-        target: "investiu_curso_online"
-      - cols:
-          - "O que mais te chama atenção na profissão de Programador?"
-          - "O que mais te chama atenção na profissão de Programador? "
-        target: "interesse_programacao"
-      - cols:
-          - "Atualmente, qual a sua faixa salarial?"
-          - "Atualmente, qual a sua faixa salar"
-        target: "Atualmente, qual a sua faixa salarial?"
-    valor_columns: ["Ticket (R$)", "valor produtos"]            # #16
-    produto_columns: ["Produto", "Lançamento", "nome produto"]  # #17
-    nome_columns: ["Cliente Nome", "nome contato"]              # #18
-    email_columns: ["Cliente Email", "email contato"]           # #19
-    telefone_columns: ["Telefone", "telefone contato"]          # #20
-
-# ---------------------------------------------------------------------------
-# UTMConfig — hardcodes #35, #63, #67 (Componente 1 — Fase 2)
-# ---------------------------------------------------------------------------
+  training_data_dir: null
+  tmb_detection_columns:
+  - Pedido
+  - Parcela
+  - Grau de risco
+  tmb_pedidos_detection_columns:
+  - ID do Pedido
+  - E-mail do Cliente
+  - Telefone do Cliente
+  tmb_pedidos_column_mapping:
+    ID do Pedido: Pedido
+    E-mail do Cliente: Cliente Email
+    Telefone do Cliente: Telefone
+    Nome do Produto: nome produto
+    Ticket do pedido: Ticket (R$)
+  tmb_pedidos_active_status_exclude: Cancelado
+  bare_campaign_names:
+  - DEVLF
+  - devlf
+  api_source_name: API Guru
+  has_tmb: true
+  sales_platform_identifier: guru
+  approved_status_value: Aprovada
+  tmb_risk_column: Grau de risco
+  tmb_risk_values:
+  - Baixo
+  - Médio
+  tmb_risk_filter_default: all
+  product_filter_keyword: devclub
+  pesquisa_date_column: Data
+  lf_file_prefix: LF
+  lf_guru_exception_files:
+  - LF06
+  local_sales_filename_identifier: guru
+  min_survey_columns: 10
+  score_column_prefixes:
+  - score
+  - faixa
+  - pontuação
+  - pontuacao
+  - lead_score
+  - decil
+  vendas_utm_columns_to_remove:
+  - source
+  - medium
+  - campaign
+  - content
+  columns_to_remove:
+  - Pontuação
+  - Score
+  - Faixa
+  - Faixa A
+  - Faixa B
+  - Faixa C
+  - Faixa D
+  - Remote IP
+  - User Agent
+  - fbc
+  - fbp
+  - cidade
+  - estado
+  - pais
+  - cep
+  - externalid
+  - Page URL
+  - Qual estado você mora?
+  column_rename_mapping:
+    Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?: investiu_curso_online
+    O que mais te chama atenção na profissão de Programador?: interesse_programacao
+  dataset_cutoff_date: null
+  column_unification:
+    pesquisa_merges:
+    - cols:
+      - Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?
+      - 'Já investiu em algum curso online para aprender uma nova forma de ganhar
+        dinheiro? '
+      target: investiu_curso_online
+    - cols:
+      - O que mais te chama atenção na profissão de Programador?
+      - 'O que mais te chama atenção na profissão de Programador? '
+      target: interesse_programacao
+    - cols:
+      - Atualmente, qual a sua faixa salarial?
+      - Atualmente, qual a sua faixa salar
+      target: Atualmente, qual a sua faixa salarial?
+    valor_columns:
+    - Ticket (R$)
+    - valor produtos
+    produto_columns:
+    - Produto
+    - Lançamento
+    - nome produto
+    nome_columns:
+    - Cliente Nome
+    - nome contato
+    email_columns:
+    - Cliente Email
+    - email contato
+    telefone_columns:
+    - Telefone
+    - telefone contato
 utm:
-  source_to_outros:              # #35 — lista canônica do treino (audit 2026-03-08)
-    - fb
-    - teste
-    - "[field id=\"utm_source\"]"
-    - facebook-ads-sitelink
-    - utm_source
-    - manychat
-    - organico
-    - bio
-    - livesemanal
-    - ig
-    - org
-  source_to_channel_mapping:     # dev/retreino — sources orgânicas que colapsam em canal existente
+  source_to_outros:
+  - fb
+  - teste
+  - '[field id="utm_source"]'
+  - facebook-ads-sitelink
+  - utm_source
+  - manychat
+  - organico
+  - bio
+  - livesemanal
+  - ig
+  - org
+  source_to_channel_mapping:
     youtube-bio: youtube
-  term_mappings:                 # #63
+  term_mappings:
     ig: instagram
     fb: facebook
-  term_outros_patterns:          # #63
-    - "--"
-    - "{"
-  term_long_id_threshold: 10     # #67
-
-# ---------------------------------------------------------------------------
-# MediumConfig — hardcodes #7, #36, #37, #50 (Componente 4 — Fase 2)
-# ---------------------------------------------------------------------------
+  term_outros_patterns:
+  - --
+  - '{'
+  term_long_id_threshold: 10
 medium:
-  adv_prefix: "ADV"             # #36 — prefixo removido na extração do público
-  frequency_threshold: 0.025    # #7  — >= 2.5% nos dados → categoria válida (modo treino)
-  valid_categories: null        # null = modo treino (computed from data); preenchido em produção (whitelist do feature registry)
-  discontinued_categories: null # deprecated — nova arquitetura não usa
-  manual_unifications: null     # #37 — deprecated — absorvido em category_mappings
-  binary_top3_categories: null  # #50 — pendente resolução em encoding.py
-
-  category_mappings:            # #7 — mapeamento canônico de variantes históricas
-    # Lookalike 2% Cadastrados — variantes
-    "Lookalike 2% Cadastrados - DEV 2.0 + Interesses":              "Lookalike 2% Cadastrados - DEV 2.0 + Interesses"
-    "Lookalike 2% Cadastrados - DEV 2.0   Interesses":              "Lookalike 2% Cadastrados - DEV 2.0 + Interesses"
-    "Lookalike 2%+Cadastrados - DEV 2.0   Interesses":              "Lookalike 2% Cadastrados - DEV 2.0 + Interesses"
-    "Lookalike% Cadastrados - DEV 2.0 + Interesse Linguagem de Programação": "Outros"
-    "ADV+%7C+Lookalike+2%25+Cadastrados+-+DEV+2.0+%2B+Interesses": "Lookalike 2% Cadastrados - DEV 2.0 + Interesses"
-
-    # Lookalike 2% Alunos — variantes
-    "Lookalike 2% Alunos + Interesse Linguagem de Programação":     "Lookalike 2% Alunos + Interesse Linguagem de Programação"
-    "Lookalike 2% Alunos   Interesse Linguagem de Programação":     "Lookalike 2% Alunos + Interesse Linguagem de Programação"
-    "Lookalike 2% Alunos Interesse Ciência da Computação":          "Outros"
-    "Lookalike 2% Alunos + Interesse Ciência da Computação":        "Outros"
-
-    # Lookalike 1% Cadastrados — variantes
-    "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação":    "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação"
-    "Lookalike 1% Cadastrados - DEV 2.0   Interesse Ciência da Computação":    "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação"
-    "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Linguagem de Programação": "Outros"
-    "Lookalike 1% Cadastrados - DEV 2.0   Interesse Linguagem de Programação": "Outros"
-    "Lookalike 1% Cadastrados - DEV 2.0 Interesse Linguagem de Programação":   "Outros"
-
-    # Lookalike 3% — todos para Outros
-    "Lookalike 3% Alunos + Interesses":                                          "Outros"
-    "Lookalike 3% Alunos + Interesse Ciência da Computação":                     "Outros"
-    "Lookalike 3% Alunos + Interesse Linguagem de Programação":                  "Outros"
-    "Lookalike 3% Alunos Interesse Ciência da Computação":                       "Outros"
-    "Lookalike 3% Cadastrados - DEV 2.0 + Interesses":                          "Outros"
-    "Lookalike 3% Cadastrados - DEV 2.0 + Interesse Ciência da Computação":     "Outros"
-    "Lookalike 3% Cadastrados - DEV 2.0 + Interesse Linguagem de Programação":  "Outros"
-
-    # Lookalike Envolvimento — todos para Outros
-    "Lookalike Envolvimento 30D Salvou 180D Direct 180D Interesse Ciência da Computação":                  "Outros"
-    "Lookalike Envolvimento 30D   Salvou 180D   Direct 180D   Interesse Linguagem de Programação":         "Outros"
-    "Lookalike Envolvimento 30D + Salvou80D + Direct80D + Interesse Linguagem de Programação":             "Outros"
-    "Lookalike Envolvimento 30D + Salvou 180D + Direct 180D + Interesse Linguagem de Programação":         "Outros"
-    "Lookalike Envolvimento 30D + Salvou 180D + Direct 180D + Interesse Ciência da Computação":            "Outros"
-    "Lookalike Envolvimento 60D Salvou 365D Direct 365D Interesse Ciência da Computação":                  "Outros"
-    "Lookalike Envolvimento 60D + Salvou 365D + Direct 365D + Interesse Ciência da Computação":            "Outros"
-    "Lookalike Envolvimento 60D + Salvou 365D + Direct 365D + Interesse Linguagem de Programação":         "Outros"
-
-    # Interesse — variantes
-    "Interesse Linguagem de programação":           "Linguagem de programação"
-    "Interesse Programação":                        "Outros"
-    "Interesse Python (linguagem de programação)":  "Outros"
-    "Interesse Python":                             "Outros"
-    "Interesse Ciência da computação":              "Outros"
-
-    # Aberto — variantes (incluindo uppercase preservado pelo extrair_publico)
-    "Aberto":             "Aberto"
-    "ABERTO":             "Aberto"
-    "Aberto++AD08-1002":  "Outros"
-
-    # Valores de lançamentos recentes que não são categorias válidas
-    "MIX QUENTE": "Outros"
-
-    # Outras canônicas
-    "Linguagem de programação": "Linguagem de programação"
-    "dgen":                     "dgen"
-    "nan":                      "nan"
-
-    # Lixo / placeholders
-    "{{adset.name}}":                                                                             "Outros"
-    "paid":                                                                                       "Outros"
-    "Interesses":                                                                                 "Outros"
-    "search":                                                                                     "Outros"
-    "pmax":                                                                                       "Outros"
-    "gdn":                                                                                        "Outros"
-    "teste":                                                                                      "Outros"
-    "[field id=\"utm_medium\"]":                                                                  "Outros"
-    "ADV %7C Linguagem de programação":                                                           "Outros"
-    "Desenvolvimento profissional":                                                               "Outros"
-    "Funcionários de médias empresas B2B (200 a 500 funcionários)":                               "Outros"
-    "Funcionários de pequenas empresas B2B (10 a 200 funcionários)":                              "Outros"
-    "Funcionários de grandes empresas B2B (mais de 500 funcionários) — Cópia":                    "Outros"
-
-# ---------------------------------------------------------------------------
-# CategoryConfig — hardcodes #27–#33 (Componente 6 — Fase 2)
-# ---------------------------------------------------------------------------
+  adv_prefix: ADV
+  frequency_threshold: 0.025
+  valid_categories: null
+  discontinued_categories: null
+  manual_unifications: null
+  binary_top3_categories: null
+  category_mappings:
+    Lookalike 2% Cadastrados - DEV 2.0 + Interesses: Lookalike 2% Cadastrados - DEV
+      2.0 + Interesses
+    Lookalike 2% Cadastrados - DEV 2.0   Interesses: Lookalike 2% Cadastrados - DEV
+      2.0 + Interesses
+    Lookalike 2%+Cadastrados - DEV 2.0   Interesses: Lookalike 2% Cadastrados - DEV
+      2.0 + Interesses
+    Lookalike% Cadastrados - DEV 2.0 + Interesse Linguagem de Programação: Outros
+    ADV+%7C+Lookalike+2%25+Cadastrados+-+DEV+2.0+%2B+Interesses: Lookalike 2% Cadastrados
+      - DEV 2.0 + Interesses
+    Lookalike 2% Alunos + Interesse Linguagem de Programação: Lookalike 2% Alunos
+      + Interesse Linguagem de Programação
+    Lookalike 2% Alunos   Interesse Linguagem de Programação: Lookalike 2% Alunos
+      + Interesse Linguagem de Programação
+    Lookalike 2% Alunos Interesse Ciência da Computação: Outros
+    Lookalike 2% Alunos + Interesse Ciência da Computação: Outros
+    Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação: Lookalike
+      1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação
+    Lookalike 1% Cadastrados - DEV 2.0   Interesse Ciência da Computação: Lookalike
+      1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação
+    Lookalike 1% Cadastrados - DEV 2.0 + Interesse Linguagem de Programação: Outros
+    Lookalike 1% Cadastrados - DEV 2.0   Interesse Linguagem de Programação: Outros
+    Lookalike 1% Cadastrados - DEV 2.0 Interesse Linguagem de Programação: Outros
+    Lookalike 3% Alunos + Interesses: Outros
+    Lookalike 3% Alunos + Interesse Ciência da Computação: Outros
+    Lookalike 3% Alunos + Interesse Linguagem de Programação: Outros
+    Lookalike 3% Alunos Interesse Ciência da Computação: Outros
+    Lookalike 3% Cadastrados - DEV 2.0 + Interesses: Outros
+    Lookalike 3% Cadastrados - DEV 2.0 + Interesse Ciência da Computação: Outros
+    Lookalike 3% Cadastrados - DEV 2.0 + Interesse Linguagem de Programação: Outros
+    Lookalike Envolvimento 30D Salvou 180D Direct 180D Interesse Ciência da Computação: Outros
+    Lookalike Envolvimento 30D   Salvou 180D   Direct 180D   Interesse Linguagem de Programação: Outros
+    Lookalike Envolvimento 30D + Salvou80D + Direct80D + Interesse Linguagem de Programação: Outros
+    Lookalike Envolvimento 30D + Salvou 180D + Direct 180D + Interesse Linguagem de Programação: Outros
+    Lookalike Envolvimento 30D + Salvou 180D + Direct 180D + Interesse Ciência da Computação: Outros
+    Lookalike Envolvimento 60D Salvou 365D Direct 365D Interesse Ciência da Computação: Outros
+    Lookalike Envolvimento 60D + Salvou 365D + Direct 365D + Interesse Ciência da Computação: Outros
+    Lookalike Envolvimento 60D + Salvou 365D + Direct 365D + Interesse Linguagem de Programação: Outros
+    Interesse Linguagem de programação: Linguagem de programação
+    Interesse Programação: Outros
+    Interesse Python (linguagem de programação): Outros
+    Interesse Python: Outros
+    Interesse Ciência da computação: Outros
+    Aberto: Aberto
+    ABERTO: Aberto
+    Aberto++AD08-1002: Outros
+    MIX QUENTE: Outros
+    Linguagem de programação: Linguagem de programação
+    dgen: dgen
+    nan: nan
+    '{{adset.name}}': Outros
+    paid: Outros
+    Interesses: Outros
+    search: Outros
+    pmax: Outros
+    gdn: Outros
+    teste: Outros
+    '[field id="utm_medium"]': Outros
+    ADV %7C Linguagem de programação: Outros
+    Desenvolvimento profissional: Outros
+    Funcionários de médias empresas B2B (200 a 500 funcionários): Outros
+    Funcionários de pequenas empresas B2B (10 a 200 funcionários): Outros
+    Funcionários de grandes empresas B2B (mais de 500 funcionários) — Cópia: Outros
 category:
-  categorical_columns:           # #27 — recebem limpar_texto (lowercase + unidecode + sem pontuação)
-    - "interesse_programacao"
-    - "Tem computador/notebook?"
-    - "O que mais você quer ver no evento?"
-    - "Você possui cartão de crédito?"
-    - "Atualmente, qual a sua faixa salarial?"
-    - "O que você faz atualmente?"
-    - "Qual a sua idade?"
-    - "Nome Completo"
-    - "Term"
-    # EXCLUÍDAS INTENCIONALMENTE: E-mail, Telefone, Data, Medium, Source
-    # e colunas binárias Não/Sim (feature names dependem do acento original)
-  category_mappings:             # #28–#33 — mapeamentos semânticos pós-limpar_texto
-    "interesse_programacao":     # #28
-      "trabalhar de qualquer lugar":        "poder trabalhar de qualquer lugar do mundo"
-      "ganhar mais dinheiro bons salarios": "a possibilidade de ganhar altos salarios"
-      "estabilidade nunca faltar emprego":  "a ideia de nunca faltar emprego na area"
-      "trabalhar para fora dolar":          "trabalhar para outros paises e ganhar em outra moeda"
-    "O que mais você quer ver no evento?":  # #29
-      "fazer transicao de carreira e consegui meu primeiro emprego na area": "fazer transicao de carreira e conseguir meu primeiro emprego na area"
-      "projeto na pratica":               "fazer um projeto na pratica"
-      "como conseguir emprego":           "fazer transicao de carreira e conseguir meu primeiro emprego na area"
-      "como fazer transicao de carreira": "fazer transicao de carreira e conseguir meu primeiro emprego na area"
-      "quero saber se e pra mim":         "quero saber se e para mim"
-      "como fazer freelancer":            "fazer freelancer como programador"
-    "Atualmente, qual a sua faixa salarial?":  # #30
-      "nenhuma renda":   "nao tenho renda"
-      "ate r 2000":      "entre r1000 a r2000 reais ao mes"
-      "r 2001 a 3000":   "entre r2001 a r3000 reais ao mes"
-      "r 3001 a 5000":   "entre r3001 a r5000 reais ao mes"
-      "acima de r 5000": "mais de r5001 reais ao mes"
-    "O que você faz atualmente?":          # #31
-      "clt funcionario publico":              "sou cltfuncionario publico"
-      "autonomo empreendedor":                "sou autonomo"
-      "desempregado":                         "nao trabalho e nem estudo"
-      "estudante":                            "sou apenas estudante"
-      "aposentado":                           "sou aposentado"
-      "atualmente nao trabalho e nem estudo": "nao trabalho e nem estudo"
-      "sou autonomo uber freela vendedor etc": "sou autonomo"
-      "estudo na faculdade":                                     "sou apenas estudante"
-      "estudo ti na faculdade mas quero aprender mais por fora": "sou apenas estudante"
-      "faco outro curso na faculdade e quero mudar para ti":     "sou apenas estudante"
-    "Qual a sua idade?":                   # #32
-      "18 24":       "18 24 anos"
-      "25 34":       "25 34 anos"
-      "35 44":       "35 44 anos"
-      "45 54":       "45 54 anos"
-      "menos de 18": "menos de 18 anos"
-      "55":          "mais de 55 anos"
-
-# ---------------------------------------------------------------------------
-# MatchingConfig — hardcodes #41–#46
-# ---------------------------------------------------------------------------
+  categorical_columns:
+  - interesse_programacao
+  - Tem computador/notebook?
+  - O que mais você quer ver no evento?
+  - Você possui cartão de crédito?
+  - Atualmente, qual a sua faixa salarial?
+  - O que você faz atualmente?
+  - Qual a sua idade?
+  - Nome Completo
+  - Term
+  category_mappings:
+    interesse_programacao:
+      trabalhar de qualquer lugar: poder trabalhar de qualquer lugar do mundo
+      ganhar mais dinheiro bons salarios: a possibilidade de ganhar altos salarios
+      estabilidade nunca faltar emprego: a ideia de nunca faltar emprego na area
+      trabalhar para fora dolar: trabalhar para outros paises e ganhar em outra moeda
+    O que mais você quer ver no evento?:
+      fazer transicao de carreira e consegui meu primeiro emprego na area: fazer transicao
+        de carreira e conseguir meu primeiro emprego na area
+      projeto na pratica: fazer um projeto na pratica
+      como conseguir emprego: fazer transicao de carreira e conseguir meu primeiro
+        emprego na area
+      como fazer transicao de carreira: fazer transicao de carreira e conseguir meu
+        primeiro emprego na area
+      quero saber se e pra mim: quero saber se e para mim
+      como fazer freelancer: fazer freelancer como programador
+    Atualmente, qual a sua faixa salarial?:
+      nenhuma renda: nao tenho renda
+      ate r 2000: entre r1000 a r2000 reais ao mes
+      r 2001 a 3000: entre r2001 a r3000 reais ao mes
+      r 3001 a 5000: entre r3001 a r5000 reais ao mes
+      acima de r 5000: mais de r5001 reais ao mes
+    O que você faz atualmente?:
+      clt funcionario publico: sou cltfuncionario publico
+      autonomo empreendedor: sou autonomo
+      desempregado: nao trabalho e nem estudo
+      estudante: sou apenas estudante
+      aposentado: sou aposentado
+      atualmente nao trabalho e nem estudo: nao trabalho e nem estudo
+      sou autonomo uber freela vendedor etc: sou autonomo
+      estudo na faculdade: sou apenas estudante
+      estudo ti na faculdade mas quero aprender mais por fora: sou apenas estudante
+      faco outro curso na faculdade e quero mudar para ti: sou apenas estudante
+    Qual a sua idade?:
+      18 24: 18 24 anos
+      25 34: 25 34 anos
+      35 44: 35 44 anos
+      45 54: 45 54 anos
+      menos de 18: menos de 18 anos
+      '55': mais de 55 anos
 matching:
-  strategy: email_telefone       # estratégia ativa no train_pipeline.py
-  pesquisa_email_column: "E-mail"   # #41
-  pesquisa_phone_column: "Telefone" # #42
-  country_code: 55               # #43
-  phone_digits: [10, 11]         # #43 — comprimentos válidos para matching
-  alunos_todos_path: null        # #44 — não usado na estratégia email_telefone
-  validation_products: null      # #45 — não usado na estratégia email_telefone
-  alunos_email_column: null      # #46 — não usado na estratégia email_telefone
-
-# ---------------------------------------------------------------------------
-# FeatureConfig — hardcodes #2, #3, #34, #39, #40, #47, #48, #52, #65, #66
-# ---------------------------------------------------------------------------
+  strategy: email_telefone
+  pesquisa_email_column: E-mail
+  pesquisa_phone_column: Telefone
+  country_code: 55
+  phone_digits:
+  - 10
+  - 11
+  alunos_todos_path: null
+  validation_products: null
+  alunos_email_column: null
 feature:
-  critical_columns:              # #3, #40 — features a monitorar para mudanças de qualidade
-    - "genero"
-    - "idade"
-    - "o_que_faz_atualmente"
-    - "faixa_salarial"
-    - "tem_cartao_credito"
-    - "o_que_quer_ver_evento"
-    - "estudou_programacao"
-    - "fez_faculdade"
-    - "investiu_curso_online"
-    - "interesse_programacao"
-    - "tem_computador"
-  columns_to_remove:             # #34 — colunas removidas por data leakage (específicas do lançamento)
-    - "Campaign"
-    - "Content"
-  columns_to_remove_post_cutoff: # #39 — colunas removidas após cutoff por alto missing
-    - "Qual o seu nível em programação?"
-  columns_to_drop_after_fe:     # #48 — lista canônica do treino (audit 2026-03-08)
-    - aba_origem
-    - arquivo_origem
-    - Data
-    - Nome Completo
-    - E-mail
-    - Telefone
-    - telefone_normalizado
-    - Nome
-    - Email
-    - EMAIL
-  pesquisa_name_column: "Nome Completo"  # #47
-  pesquisa_phone_column: "Telefone"     # #42
-  telefone_comprimento_keep_values: [9, 11]  # #157 — 4=inválido, 10=obsoleto → 'outros'
-  ordering_rules: null           # #2 — lógica de reordenação em código (telefone_comprimento_* por sufixo numérico)
-  survey_column_stems:           # #52 — stems para categorizar features de pesquisa no feature registry
-    - "gênero"
-    - "idade"
-    - "faz"
-    - "faixa"
-    - "cartão"
-    - "estudou"
-    - "faculdade"
-    - "evento"
-  utm_feature_prefixes_for_registry:    # #65 — prefixos de features UTM no feature registry
-    - "Source_"
-    - "Medium_"
-    - "Term_"
-  derived_feature_prefixes_for_registry:  # #66 — prefixos de features derivadas no feature registry
-    - "nome_"
-    - "email_"
-    - "telefone_"
-    - "dia_semana"
-  nlp_columns: []                # reservado — manter vazio
-
-# ---------------------------------------------------------------------------
-# EncodingConfig — hardcodes #49, #51, #64, #70, #71 (Componente 3 — Fase 2)
-# ---------------------------------------------------------------------------
+  critical_columns:
+  - genero
+  - idade
+  - o_que_faz_atualmente
+  - faixa_salarial
+  - tem_cartao_credito
+  - o_que_quer_ver_evento
+  - estudou_programacao
+  - fez_faculdade
+  - investiu_curso_online
+  - interesse_programacao
+  - tem_computador
+  columns_to_remove:
+  - Campaign
+  - Content
+  columns_to_remove_post_cutoff:
+  - Qual o seu nível em programação?
+  columns_to_drop_after_fe:
+  - aba_origem
+  - arquivo_origem
+  - Data
+  - Nome Completo
+  - E-mail
+  - Telefone
+  - telefone_normalizado
+  - Nome
+  - Email
+  - EMAIL
+  pesquisa_name_column: Nome Completo
+  pesquisa_phone_column: Telefone
+  telefone_comprimento_keep_values:
+  - 9
+  - 11
+  ordering_rules: null
+  survey_column_stems:
+  - gênero
+  - idade
+  - faz
+  - faixa
+  - cartão
+  - estudou
+  - faculdade
+  - evento
+  utm_feature_prefixes_for_registry:
+  - Source_
+  - Medium_
+  - Term_
+  derived_feature_prefixes_for_registry:
+  - nome_
+  - email_
+  - telefone_
+  - dia_semana
+  nlp_columns: []
 encoding:
-  ordinal_variables:             # #49 — fix 15/03: idade e faixa_salarial removidas (Opção A)
-    # idade e faixa_salarial removidas para paridade com modelo ativo (2a98e51c).
-    # No pipeline antigo o ordinal falhava silenciosamente (nomes curtos não existiam no df)
-    # → one-hot acidental → 59 features. core/encoding.py lê este yaml e executaria o ordinal
-    # corretamente → 50 features. Fix: manter só dia_semana até próximo retreino intencional.
-    "dia_semana": [0, 1, 2, 3, 4, 5, 6]
-  categorical_detection_max_unique: 20   # #64
-  features_to_drop_after_encoding: []    # #51 — telefone_comprimento_8 não existe mais após grouping (#157)
-  column_name_corrections: {}    # #70 — confirmado obsoleto em 18/03/2026: core/encoding.py produz
-                                  # nomes normalizados que já batem com o feature registry de produção sem correções
-
-# ---------------------------------------------------------------------------
-# ModelConfig — hardcodes #1, #10, #53, #55, #56, #71, #72, #79, #89
-# ---------------------------------------------------------------------------
+  ordinal_variables:
+    dia_semana:
+    - 0
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+  categorical_detection_max_unique: 20
+  features_to_drop_after_encoding: []
+  column_name_corrections: {}
 model:
-  hyperparameters:               # #1 — hiperparâmetros baseline (antes do tuning)
+  hyperparameters:
     n_estimators: 300
     max_depth: 8
     min_samples_split: 2
     min_samples_leaf: 1
-    max_features: "sqrt"
-    class_weight: "balanced"
+    max_features: sqrt
+    class_weight: balanced
     random_state: 42
     n_jobs: -1
-  buyer_weights:                 # #158 — PESOS_COMPRADOR (dev/retreino); % recebido real por tipo
-    guru:      1.00              # Guru: à vista, 100% recebido
-    tmb_baixo: 0.84              # TMB Baixo: 83.5% recebido
-    tmb_medio: 0.67              # TMB Médio: 67.1% recebido
-    tmb_alto:  0.49              # TMB Alto: 48.6% recebido
-    tmb_sem:   0.42              # TMB Sem classificação: 42.1% recebido
-  mlflow_experiment_name: "devclub_lead_scoring"  # #10
-  mlflow_experiment_id: "1"      # #71 — DEPRECATED: derivado em runtime via mlflow.get_run(). Mantido apenas como fallback de emergência para dev local sem tracking server.
-  model_name_template: "v1_devclub_rf_{split_method}_single"  # #53
-  legacy_model_dir: "arquivos_modelo"  # #72 — diretório legado (fallback quando active_model.yaml falha)
-  business_config_path: "api/business_config.py"  # #55 — path para atualização automática de recall
-  tuning_improvement_thresholds:  # #56 — thresholds para adotar hiperparâmetros tunados
-    recommended: 1.0              # > 1.0% melhoria → adotar automaticamente
-    marginal: 0.3                 # > 0.3% melhoria → considerar manualmente
-  metadata_filename_pattern: "model_metadata*.json"  # #89
-  top_decils_to_monitor:         # #79 — decis de alta qualidade monitorados
-    - "D9"
-    - "D10"
-
-# ---------------------------------------------------------------------------
-# MonitoringConfig — hardcodes #4, #5, #9, #73–#86
-# ---------------------------------------------------------------------------
+  buyer_weights:
+    guru: 1.0
+    tmb_baixo: 0.84
+    tmb_medio: 0.67
+    tmb_alto: 0.49
+    tmb_sem: 0.42
+  mlflow_experiment_name: devclub_lead_scoring
+  mlflow_experiment_id: '1'
+  model_name_template: v1_devclub_rf_{split_method}_single
+  legacy_model_dir: arquivos_modelo
+  business_config_path: api/business_config.py
+  tuning_improvement_thresholds:
+    recommended: 1.0
+    marginal: 0.3
+  metadata_filename_pattern: model_metadata*.json
+  top_decils_to_monitor:
+  - D9
+  - D10
 monitoring:
-  model_name: null               # #5
-  conversion_window_days: 20     # #9 — 7d captação + 6d CPL + 7d carrinho
-  medium_strategy: null          # #4
-  survey_sheet_tab_index: null   # #73
-  sheet_date_format: null        # #74
-  timezone_offset_hours: null    # #75
-  main_sheet_tab_index: null     # #76
-  invalid_decil_values: null     # #77
-  main_sheet_date_format: null   # #78
-  funnel_lookback_hours: null    # #80
-  display_date_format: null      # #81
-  capi_events_per_lead_estimate: null  # #82
-  thresholds: null               # #83
-  missing_rate_ignore_columns: null    # #84
-  sheets_url: null               # #85
-  backup_sheets_url: null        # #128
-  drift_features_to_analyze: null  # #86
-
-# ---------------------------------------------------------------------------
-# CAPIConfig — hardcodes #103–#106, #140
-# ---------------------------------------------------------------------------
+  model_name: null
+  conversion_window_days: 20
+  medium_strategy: null
+  survey_sheet_tab_index: null
+  sheet_date_format: null
+  timezone_offset_hours: null
+  main_sheet_tab_index: null
+  invalid_decil_values: null
+  main_sheet_date_format: null
+  funnel_lookback_hours: null
+  display_date_format: null
+  capi_events_per_lead_estimate: null
+  thresholds: null
+  missing_rate_ignore_columns: null
+  sheets_url: null
+  backup_sheets_url: null
+  drift_features_to_analyze: null
 capi:
-  pixel_id: "241752320666130"    # Pixel de BM - Campanhas
-  event_name_with_value: "LeadQualified"
-  event_name_high_quality: "LeadQualifiedHighQuality"
-  event_name_faixa_a: null       # #140 — não usado atualmente
-  high_quality_decils: ["D09", "D10"]
-  country_code: "br"
-  currency: "BRL"
-  # decil_to_value removido (DT-5): calculado em runtime como product_value × conversion_rates[decil]
-
-# ---------------------------------------------------------------------------
-# APIConfig — hardcodes #8, #109–#122 (Grupo B — Fase 2)
-# ---------------------------------------------------------------------------
+  pixel_id: '241752320666130'
+  event_name_with_value: LeadQualified
+  event_name_high_quality: LeadQualifiedHighQuality
+  event_name_faixa_a: null
+  high_quality_decils:
+  - D09
+  - D10
+  country_code: br
+  currency: BRL
 api:
-  cors_origins:                  # #111
-    - "https://lp.devclub.com.br"
-  batch_processing_size: 500     # #114
-  railway_polling_batch_size: 50 # #122
-  default_analysis_period_days: 30  # #115
-  utm_main_sources:              # #116 — fontes UTM principais a rastrear
-    - "facebook-ads"
-    - "google-ads"
-  bare_medium_names:             # #109 — termos de Medium sem estrutura a ignorar
-    - "dgen"
-    - "paid"
-  generic_utm_terms:             # #109, #117 — terms genéricos a excluir de análises
-    - "fb"
-    - "ig"
-    - "instagram"
-    - "facebook"
-  generic_utms_set:              # #118 — set de UTMs genéricos para análise de Medium
-    - "paid"
-    - "dgen"
-    - "facebook"
-    - "instagram"
-    - "meta"
-    - "fb"
-    - "ig"
-    - "cpc"
-  sheets_column_names:           # #100, #113  PostgreSQL col → Sheets col
-    email: "E-mail"
-    name: "Nome Completo"
-    phone: "Telefone"
-    genero: "O seu gênero:"
-    idade: "Qual a sua idade?"
-    ocupacao: "O que você faz atualmente?"
-    faixa_salarial: "Atualmente, qual a sua faixa salarial?"
-    cartao_credito: "Você possui cartão de crédito?"
-    interesse_evento: "O que mais você quer ver no evento?"
-    estudou_programacao: "Já estudou programação?"
-    pretende_faculdade: "Você já fez/faz/pretende fazer faculdade?"
-    investiu_curso_online: "Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?"
-    interesse_programacao: "O que mais te chama atenção na profissão de Programador?"
-    cidade: "cidade"
-    created_at: "Data"
-    utm_source: "Source"
-    utm_medium: "Medium"
-    utm_campaign: "Campaign"
-    utm_term: "Term"
-    utm_content: "Content"
-    tem_comp: "Tem computador/notebook?"
-  railway_field_mappings:        # #99 — mapeamentos Railway JSONB → formato pipeline ML
-    # Campos diretos da tabela Lead (Railway field → Sheets column name)
+  cors_origins:
+  - https://lp.devclub.com.br
+  batch_processing_size: 500
+  railway_polling_batch_size: 50
+  default_analysis_period_days: 30
+  utm_main_sources:
+  - facebook-ads
+  - google-ads
+  bare_medium_names:
+  - dgen
+  - paid
+  generic_utm_terms:
+  - fb
+  - ig
+  - instagram
+  - facebook
+  generic_utms_set:
+  - paid
+  - dgen
+  - facebook
+  - instagram
+  - meta
+  - fb
+  - ig
+  - cpc
+  sheets_column_names:
+    email: E-mail
+    name: Nome Completo
+    phone: Telefone
+    genero: 'O seu gênero:'
+    idade: Qual a sua idade?
+    ocupacao: O que você faz atualmente?
+    faixa_salarial: Atualmente, qual a sua faixa salarial?
+    cartao_credito: Você possui cartão de crédito?
+    interesse_evento: O que mais você quer ver no evento?
+    estudou_programacao: Já estudou programação?
+    pretende_faculdade: Você já fez/faz/pretende fazer faculdade?
+    investiu_curso_online: Já investiu em algum curso online para aprender uma nova
+      forma de ganhar dinheiro?
+    interesse_programacao: O que mais te chama atenção na profissão de Programador?
+    cidade: cidade
+    created_at: Data
+    utm_source: Source
+    utm_medium: Medium
+    utm_campaign: Campaign
+    utm_term: Term
+    utm_content: Content
+    tem_comp: Tem computador/notebook?
+  railway_field_mappings:
     direct_field_map:
-      email: "E-mail"
-      nomeCompleto: "Nome Completo"
-      telefone: "Telefone"
-      data: "Data"
-      source: "Source"
-      medium: "Medium"
-      campaign: "Campaign"
-      term: "Term"
-      content: "Content"
-    # Campos do JSONB pesquisa (chave JSONB → Sheets column name ou snake_case do modelo)
+      email: E-mail
+      nomeCompleto: Nome Completo
+      telefone: Telefone
+      data: Data
+      source: Source
+      medium: Medium
+      campaign: Campaign
+      term: Term
+      content: Content
     pesquisa_field_map:
-      genero: "O seu gênero:"
-      idade: "Qual a sua idade?"
-      ocupacao: "O que você faz atualmente?"
-      faixaSalarial: "Atualmente, qual a sua faixa salarial?"
-      cartaoCredito: "Você possui cartão de crédito?"
-      interesseEvento: "O que mais você quer ver no evento?"
-      computador: "Tem computador/notebook?"
-      estudouProgramacao: "Já estudou programação?"
-      faculdade: "Você já fez/faz/pretende fazer faculdade?"
-      investiuCurso: "investiu_curso_online"
-      atracaoProfissao: "interesse_programacao"
-    # Mapas semânticos: texto normalizado (após limpar_texto) → categoria esperada pelo modelo
+      genero: 'O seu gênero:'
+      idade: Qual a sua idade?
+      ocupacao: O que você faz atualmente?
+      faixaSalarial: Atualmente, qual a sua faixa salarial?
+      cartaoCredito: Você possui cartão de crédito?
+      interesseEvento: O que mais você quer ver no evento?
+      computador: Tem computador/notebook?
+      estudouProgramacao: Já estudou programação?
+      faculdade: Você já fez/faz/pretende fazer faculdade?
+      investiuCurso: investiu_curso_online
+      atracaoProfissao: interesse_programacao
     mapa_idade:
-      "18 24": "18 24 anos"
-      "25 34": "25 34 anos"
-      "35 44": "35 44 anos"
-      "45 54": "45 54 anos"
-      "menos de 18": "menos de 18 anos"
-      "mais de 55": "mais de 55 anos"
-      "acima de 55": "mais de 55 anos"
-      "55": "mais de 55 anos"
-      "18 24 anos": "18 24 anos"
-      "25 34 anos": "25 34 anos"
-      "35 44 anos": "35 44 anos"
-      "45 54 anos": "45 54 anos"
-      "menos de 18 anos": "menos de 18 anos"
-      "mais de 55 anos": "mais de 55 anos"
+      18 24: 18 24 anos
+      25 34: 25 34 anos
+      35 44: 35 44 anos
+      45 54: 45 54 anos
+      menos de 18: menos de 18 anos
+      mais de 55: mais de 55 anos
+      acima de 55: mais de 55 anos
+      '55': mais de 55 anos
+      18 24 anos: 18 24 anos
+      25 34 anos: 25 34 anos
+      35 44 anos: 35 44 anos
+      45 54 anos: 45 54 anos
+      menos de 18 anos: menos de 18 anos
+      mais de 55 anos: mais de 55 anos
     mapa_faixa_salarial:
-      "r 1000 a 2000": "entre r1000 a r2000 reais ao mes"
-      "r 2001 a 3000": "entre r2001 a r3000 reais ao mes"
-      "r 3001 a 5000": "entre r3001 a r5000 reais ao mes"
-      "acima de r 5000": "mais de r5001 reais ao mes"
-      "mais de r 5000": "mais de r5001 reais ao mes"
-      "mais de r 5001": "mais de r5001 reais ao mes"
-      "sem renda": "nao tenho renda"
-      "nao tenho renda": "nao tenho renda"
-      "nenhuma renda": "nao tenho renda"
-      "ate r 2000": "entre r1000 a r2000 reais ao mes"
-      "acima de r 5001": "mais de r5001 reais ao mes"
-      "entre r1000 a r2000 reais ao mes": "entre r1000 a r2000 reais ao mes"
-      "entre r2001 a r3000 reais ao mes": "entre r2001 a r3000 reais ao mes"
-      "entre r3001 a r5000 reais ao mes": "entre r3001 a r5000 reais ao mes"
-      "mais de r5001 reais ao mes": "mais de r5001 reais ao mes"
+      r 1000 a 2000: entre r1000 a r2000 reais ao mes
+      r 2001 a 3000: entre r2001 a r3000 reais ao mes
+      r 3001 a 5000: entre r3001 a r5000 reais ao mes
+      acima de r 5000: mais de r5001 reais ao mes
+      mais de r 5000: mais de r5001 reais ao mes
+      mais de r 5001: mais de r5001 reais ao mes
+      sem renda: nao tenho renda
+      nao tenho renda: nao tenho renda
+      nenhuma renda: nao tenho renda
+      ate r 2000: entre r1000 a r2000 reais ao mes
+      acima de r 5001: mais de r5001 reais ao mes
+      entre r1000 a r2000 reais ao mes: entre r1000 a r2000 reais ao mes
+      entre r2001 a r3000 reais ao mes: entre r2001 a r3000 reais ao mes
+      entre r3001 a r5000 reais ao mes: entre r3001 a r5000 reais ao mes
+      mais de r5001 reais ao mes: mais de r5001 reais ao mes
     mapa_ocupacao:
-      "clt funcionario publico": "sou cltfuncionario publico"
-      "autonomo": "sou autonomo"
-      "autonomo empreendedor": "sou autonomo"
-      "desempregado": "nao trabalho e nem estudo"
-      "estudante": "sou apenas estudante"
-      "aposentado": "sou aposentado"
-      "atualmente nao trabalho e nem estudo": "nao trabalho e nem estudo"
-      "sou autonomo uber freela vendedor etc": "sou autonomo"
-      "estudo na faculdade": "sou apenas estudante"
-      "nao trabalho e nem estudo": "nao trabalho e nem estudo"
-      "sou apenas estudante": "sou apenas estudante"
-      "sou aposentado": "sou aposentado"
-      "sou autonomo": "sou autonomo"
-      "sou cltfuncionario publico": "sou cltfuncionario publico"
+      clt funcionario publico: sou cltfuncionario publico
+      autonomo: sou autonomo
+      autonomo empreendedor: sou autonomo
+      desempregado: nao trabalho e nem estudo
+      estudante: sou apenas estudante
+      aposentado: sou aposentado
+      atualmente nao trabalho e nem estudo: nao trabalho e nem estudo
+      sou autonomo uber freela vendedor etc: sou autonomo
+      estudo na faculdade: sou apenas estudante
+      nao trabalho e nem estudo: nao trabalho e nem estudo
+      sou apenas estudante: sou apenas estudante
+      sou aposentado: sou aposentado
+      sou autonomo: sou autonomo
+      sou cltfuncionario publico: sou cltfuncionario publico
     mapa_interesse_evento:
-      "projeto na pratica": "fazer um projeto na pratica"
-      "como conseguir emprego": "fazer transicao de carreira e conseguir meu primeiro emprego na area"
-      "como fazer transicao de carreira": "fazer transicao de carreira e conseguir meu primeiro emprego na area"
-      "como fazer freelancer": "fazer freelancer como programador"
-      "quero saber se e pra mim": "quero saber se e para mim"
-      "quero saber se e para mim": "quero saber se e para mim"
-      "a aula com a recrutadora": "a aula com a recrutadora"
-      "fazer um projeto na pratica": "fazer um projeto na pratica"
-      "fazer freelancer como programador": "fazer freelancer como programador"
-      "fazer transicao de carreira e conseguir meu primeiro emprego na area": "fazer transicao de carreira e conseguir meu primeiro emprego na area"
+      projeto na pratica: fazer um projeto na pratica
+      como conseguir emprego: fazer transicao de carreira e conseguir meu primeiro
+        emprego na area
+      como fazer transicao de carreira: fazer transicao de carreira e conseguir meu
+        primeiro emprego na area
+      como fazer freelancer: fazer freelancer como programador
+      quero saber se e pra mim: quero saber se e para mim
+      quero saber se e para mim: quero saber se e para mim
+      a aula com a recrutadora: a aula com a recrutadora
+      fazer um projeto na pratica: fazer um projeto na pratica
+      fazer freelancer como programador: fazer freelancer como programador
+      fazer transicao de carreira e conseguir meu primeiro emprego na area: fazer
+        transicao de carreira e conseguir meu primeiro emprego na area
     mapa_atracao_profissao:
-      "trabalhar de qualquer lugar": "poder trabalhar de qualquer lugar do mundo"
-      "ganhar mais dinheiro bons salarios": "a possibilidade de ganhar altos salarios"
-      "estabilidade nunca faltar emprego": "a ideia de nunca faltar emprego na area"
-      "trabalhar para fora dolar": "trabalhar para outros paises e ganhar em outra moeda"
-      "todas as alternativas": "todas as alternativas"
-      "poder trabalhar de qualquer lugar do mundo": "poder trabalhar de qualquer lugar do mundo"
-      "a possibilidade de ganhar altos salarios": "a possibilidade de ganhar altos salarios"
-      "a ideia de nunca faltar emprego na area": "a ideia de nunca faltar emprego na area"
-      "trabalhar para outros paises e ganhar em outra moeda": "trabalhar para outros paises e ganhar em outra moeda"
-  utm_campaign_structure:        # #107 — prefixos de segmentos no UTM de campaign
-    phase_prefix: "FASE "        # ex: "FASE 01" identifica a fase no UTM
-    page_prefix: "PG"            # ex: "PG2" identifica a página/grupo de anúncio
-
-# ---------------------------------------------------------------------------
-# RetainConfig — hardcodes #87, #88, #89
-# ---------------------------------------------------------------------------
+      trabalhar de qualquer lugar: poder trabalhar de qualquer lugar do mundo
+      ganhar mais dinheiro bons salarios: a possibilidade de ganhar altos salarios
+      estabilidade nunca faltar emprego: a ideia de nunca faltar emprego na area
+      trabalhar para fora dolar: trabalhar para outros paises e ganhar em outra moeda
+      todas as alternativas: todas as alternativas
+      poder trabalhar de qualquer lugar do mundo: poder trabalhar de qualquer lugar
+        do mundo
+      a possibilidade de ganhar altos salarios: a possibilidade de ganhar altos salarios
+      a ideia de nunca faltar emprego na area: a ideia de nunca faltar emprego na
+        area
+      trabalhar para outros paises e ganhar em outra moeda: trabalhar para outros
+        paises e ganhar em outra moeda
+  utm_campaign_structure:
+    phase_prefix: 'FASE '
+    page_prefix: PG
 retrain:
-  quality_gate_warning_threshold: 0.10   # #87 — 10pp de mudança em missing rate → alerta
-  quality_gate_critical_threshold: 0.20  # #87 — 20pp de mudança em missing rate → crítico
-
-# ---------------------------------------------------------------------------
-# BusinessConfig — hardcodes #90–#98
-# Atualizado automaticamente pelo training_model.py após cada treino (conversion_rates)
-# ---------------------------------------------------------------------------
+  quality_gate_warning_threshold: 0.1
+  quality_gate_critical_threshold: 0.2
 business:
-  product_value: 1563.75                 # #90 — valor médio ponderado Guru+TMB (atualizado 15/03/2026)
-  # Taxas de conversão por decil (atualizadas pelo treino com recall real)
-  conversion_rates:                      # #91
-    D01: 0.002048   # 0.205% | 3 conv / 1.465 leads
-    D02: 0.004781   # 0.478% | 7 conv / 1.464 leads
-    D03: 0.004781   # 0.478% | 7 conv / 1.464 leads
-    D04: 0.005461   # 0.546% | 8 conv / 1.465 leads
-    D05: 0.008880   # 0.888% | 13 conv / 1.464 leads
-    D06: 0.011612   # 1.161% | 17 conv / 1.464 leads
-    D07: 0.014334   # 1.433% | 21 conv / 1.465 leads
-    D08: 0.015710   # 1.571% | 23 conv / 1.464 leads
-    D09: 0.019126   # 1.913% | 28 conv / 1.464 leads
-    D10: 0.055973   # 5.597% | 82 conv / 1.465 leads
-  spend_threshold_zero_leads: 100.0      # #92 — R$ mínimo com 0 leads para pausar/remover
-  minimum_leads_threshold: 3             # #93 — leads mínimos para não mostrar "Aguardar dados"
-  color_thresholds:                      # #94
+  product_value: 1563.75
+  conversion_rates:
+    D01: 0.0000
+    D02: 0.0000
+    D03: 0.0000
+    D04: 0.0000
+    D05: 0.0000
+    D06: 0.0000
+    D07: 0.0081  # PAV pooled D07+D08
+    D08: 0.0081  # PAV pooled D07+D08
+    D09: 0.0157
+    D10: 0.0175
+  spend_threshold_zero_leads: 100.0
+  minimum_leads_threshold: 3
+  color_thresholds:
     green_min: 30
     yellow_min: 1
-  min_roas_safety: 2.5                   # #95 — ROAS mínimo de segurança para escalar
-  cap_variation_max: 100.0               # #96 — cap de aumento de budget (%)
-  confidence_sigmoid_l50: 15.0           # #97 — ponto médio da sigmoid (15 leads = 50% confiança)
-  confidence_sigmoid_k: 0.15            # #97 — inclinação da sigmoid
-  roas_target: 8.0                       # #98 — ROAS alvo para confiança máxima (multiplicador = 1.0)
-
-# ---------------------------------------------------------------------------
-# ValidationConfig — validate_ingestion (pós-Célula 4) + validate_features (pós-Célula 8)
-# ---------------------------------------------------------------------------
+  min_roas_safety: 2.5
+  cap_variation_max: 100.0
+  confidence_sigmoid_l50: 15.0
+  confidence_sigmoid_k: 0.15
+  roas_target: 8.0
 validation:
-  on_error: "raise"                    # "raise" aborta o treino; "warn" apenas loga
-
-  # Colunas obrigatórias no df_pesquisa bruto
+  on_error: raise
   required_survey_columns:
-    - "Data"
-    - "E-mail"
-
-  # Colunas obrigatórias no df_vendas bruto
+  - Data
+  - E-mail
   required_sales_columns:
-    - "email"
-    - "data"
-
-  # Tamanho mínimo do dataset de leads
+  - email
+  - data
   min_survey_records: 500
-
-  # Máximo de emails ausentes antes de alertar (matching prejudicado)
-  max_email_missing_rate: 0.30
-
-  # Mínimo de datas parseáveis na coluna Data
-  min_date_parse_rate: 0.80
-
-  # Missing rate máximo por feature crítica (pós-Célula 8, pré-treino)
+  max_email_missing_rate: 0.3
+  min_date_parse_rate: 0.8
   feature_missing_thresholds:
-    genero: 0.30
-    idade: 0.30
-    o_que_faz_atualmente: 0.30
-    faixa_salarial: 0.50
-    tem_cartao_credito: 0.30
-    o_que_quer_ver_evento: 0.30
-    estudou_programacao: 0.30
-    fez_faculdade: 0.30
-    investiu_curso_online: 0.30
-    interesse_programacao: 0.30
-    tem_computador: 0.30
+    genero: 0.3
+    idade: 0.3
+    o_que_faz_atualmente: 0.3
+    faixa_salarial: 0.5
+    tem_cartao_credito: 0.3
+    o_que_quer_ver_evento: 0.3
+    estudou_programacao: 0.3
+    fez_faculdade: 0.3
+    investiu_curso_online: 0.3
+    interesse_programacao: 0.3
+    tem_computador: 0.3

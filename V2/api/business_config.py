@@ -16,22 +16,22 @@ PRODUCT_VALUE = 1563.75
 # =============================================================================
 
 # CONTEXTO:
-# Modelo: TMB All 15/03 (MLflow: 2a98e51ca4834697bbc94ec3dd31fcf7)
-# Período test set: 2026-01-30 → 2026-02-22 | 14.644 leads | 209 conversões
-# Taxas brutas do test set — já monotônicas (modelo com 100% monotonia, sem pooling necessário)
-# Sem fator de recall aplicado (recall_metrics=null no modelo atual)
+# Modelo: Guru Only Jan/30 (MLflow: d51757f5041c44b7ab1a056fce8c3c35)
+# Período test set: 2025-09-24 → 2025-11-04 | 33.152 leads | 219 conversões
+# D01-D06 zerados — Meta não otimiza para perfis de baixa qualidade
+# D07/D08 PAV pooled (quebra de monotonia). Taxas brutas sem fator de recall aplicado.
 
 CONVERSION_RATES = {
-    "D01": 0.002048,  # 0.205% | 3 conv / 1.465 leads
-    "D02": 0.004781,  # 0.478% | 7 conv / 1.464 leads
-    "D03": 0.004781,  # 0.478% | 7 conv / 1.464 leads
-    "D04": 0.005461,  # 0.546% | 8 conv / 1.465 leads
-    "D05": 0.008880,  # 0.888% | 13 conv / 1.464 leads
-    "D06": 0.011612,  # 1.161% | 17 conv / 1.464 leads
-    "D07": 0.014334,  # 1.433% | 21 conv / 1.465 leads
-    "D08": 0.015710,  # 1.571% | 23 conv / 1.464 leads
-    "D09": 0.019126,  # 1.913% | 28 conv / 1.464 leads
-    "D10": 0.055973,  # 5.597% | 82 conv / 1.465 leads
+    "D01": 0.000000,
+    "D02": 0.000000,
+    "D03": 0.000000,
+    "D04": 0.000000,
+    "D05": 0.000000,
+    "D06": 0.000000,
+    "D07": 0.008100,   # PAV pooled D07+D08 | obs: 0.840% | 28 conv / 3,316 leads
+    "D08": 0.008100,   # PAV pooled D07+D08 | obs: 0.780% | 26 conv / 3,315 leads
+    "D09": 0.015700,   # obs: 1.570% | 52 conv / 3,313 leads
+    "D10": 0.017500,   # obs: 1.750% | 58 conv / 3,316 leads
 }
 
 # =============================================================================

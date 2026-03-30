@@ -44,12 +44,12 @@ COPY ./configs/ ./configs/
 
 # ARG para path do modelo (lido do active_model.yaml pelo deploy.sh)
 # Valor padrão para desenvolvimento local
-ARG MODEL_PATH=files/20260115_080140
+ARG MODEL_PATH=mlruns_build
 
-# Copiar APENAS o modelo ativo (não todos os modelos antigos)
-# Isso reduz o tamanho da imagem de ~47MB para ~11MB
-# O path é dinâmico - deploy.sh passa via --build-arg MODEL_PATH=...
-COPY ./${MODEL_PATH}/ ./${MODEL_PATH}/
+# Copiar artifacts dos modelos necessários (champion + variantes A/B se ativo).
+# deploy_capi.sh monta mlruns_build/1/{run_id}/artifacts/ com apenas os runs
+# necessários antes do build — mantém a imagem enxuta e suporta A/B out-of-the-box.
+COPY ./${MODEL_PATH}/ ./mlruns/
 
 # DESABILITADO: Copiar relatórios Meta CSV (será descontinuado)
 # COPY ./files/validation/meta_reports/ ./files/validation/meta_reports/

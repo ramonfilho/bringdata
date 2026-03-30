@@ -255,7 +255,9 @@ def send_lead_qualified_with_value(
     db = None,
     capi_config: Optional[CAPIConfig] = None,
     business_config: Optional[BusinessConfig] = None,
-    client_id: str = 'devclub'
+    client_id: str = 'devclub',
+    event_name_override: Optional[str] = None,
+    conversion_rates_override: Optional[Dict[str, float]] = None,
 ) -> Dict:
     """
     ESTRATÉGIA 1: Envia TODOS os leads (D1-D10) com VALOR DIFERENCIADO por decil
@@ -293,7 +295,7 @@ def send_lead_qualified_with_value(
 
     # Resolver valores do CAPIConfig (com fallbacks para compatibilidade)
     pixel_id = (capi_config.pixel_id if capi_config and capi_config.pixel_id else os.getenv('META_PIXEL_ID'))
-    event_name = (capi_config.event_name_with_value if capi_config and capi_config.event_name_with_value else 'LeadQualified')
+    event_name = event_name_override or (capi_config.event_name_with_value if capi_config and capi_config.event_name_with_value else 'LeadQualified')
     currency = (capi_config.currency if capi_config and capi_config.currency else 'BRL')
     country_code = (capi_config.country_code if capi_config and capi_config.country_code else 'br')
 
@@ -339,8 +341,11 @@ def send_lead_qualified_with_value(
         )
 
         # CustomData (valor projetado = product_value × taxa_conversao do decil)
-        if business_config and business_config.conversion_rates:
-            taxa = business_config.conversion_rates.get(decil, 0.0)
+        # conversion_rates_override tem prioridade (usado no A/B test para a variante challenger)
+        rates = conversion_rates_override or (business_config.conversion_rates if business_config and business_config.conversion_rates else None)
+        taxa = 0.0
+        if rates and business_config:
+            taxa = rates.get(decil, 0.0)
             valor_projetado = round(business_config.product_value * taxa, 2)
         else:
             valor_projetado = 0.0
@@ -367,7 +372,7 @@ def send_lead_qualified_with_value(
 
         # DEBUG: Log custom_properties e VALUE para verificar o que está sendo enviado
         logger.info(f"🔍 DEBUG LeadQualified para {email}:")
-        logger.info(f"   VALUE enviado: R$ {valor_projetado:.2f} (decil: {decil}, taxa: {taxa})")
+        logger.info(f"   VALUE enviado: R$ {valor_projetado:.2f} (decil: {decil}, taxa: {taxa if rates else 'n/a'})")
         logger.info(f"   Total de custom_properties: {len(custom_props)}")
         logger.info(f"   Keys: {list(custom_props.keys())}")
         logger.info(f"   Sample: {dict(list(custom_props.items())[:5])}")
@@ -491,7 +496,8 @@ def send_lead_qualified_high_quality(
     survey_data: Optional[Dict] = None,
     db = None,
     capi_config: Optional[CAPIConfig] = None,
-    client_id: str = 'devclub'
+    client_id: str = 'devclub',
+    event_name_override: Optional[str] = None,
 ) -> Dict:
     """
     ESTRATÉGIA 2: Envia APENAS D9 e D10 SEM VALOR
@@ -525,7 +531,7 @@ def send_lead_qualified_high_quality(
     """
     # Resolver valores do CAPIConfig (com fallbacks para compatibilidade)
     pixel_id = (capi_config.pixel_id if capi_config and capi_config.pixel_id else os.getenv('META_PIXEL_ID'))
-    event_name_hq = (capi_config.event_name_high_quality if capi_config and capi_config.event_name_high_quality else 'LeadQualifiedHighQuality')
+    event_name_hq = event_name_override or (capi_config.event_name_high_quality if capi_config and capi_config.event_name_high_quality else 'LeadQualifiedHighQuality')
     high_quality_decils = (capi_config.high_quality_decils if capi_config and capi_config.high_quality_decils else ['D09', 'D10'])
     currency = (capi_config.currency if capi_config and capi_config.currency else 'BRL')
     country_code = (capi_config.country_code if capi_config and capi_config.country_code else 'br')
@@ -692,7 +698,10 @@ def send_both_lead_events(
     db = None,
     capi_config: Optional[CAPIConfig] = None,
     business_config: Optional[BusinessConfig] = None,
-    client_id: str = 'devclub'
+    client_id: str = 'devclub',
+    event_name_override: Optional[str] = None,
+    event_name_hq_override: Optional[str] = None,
+    conversion_rates_override: Optional[Dict[str, float]] = None,
 ) -> Dict:
     """
     TESTE A/B: Envia AMBOS os eventos para permitir teste de 2 estratégias
@@ -736,7 +745,9 @@ def send_both_lead_events(
         db=db,
         capi_config=capi_config,
         business_config=business_config,
-        client_id=client_id
+        client_id=client_id,
+        event_name_override=event_name_override,
+        conversion_rates_override=conversion_rates_override,
     )
 
     # Enviar evento 2: SEM VALOR (D9-D10 only)
@@ -758,7 +769,8 @@ def send_both_lead_events(
         survey_data=survey_data,
         db=db,
         capi_config=capi_config,
-        client_id=client_id
+        client_id=client_id,
+        event_name_override=event_name_hq_override,
     )
 
     return {
@@ -927,7 +939,11 @@ def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConf
             db=db,  # Passar db session para salvar resposta CAPI
             capi_config=capi_config,
             business_config=business_config,
-            client_id=client_id
+            client_id=client_id,
+            # A/B test overrides — preenchidos pelo app.py quando variante identificada
+            event_name_override=lead.get('ab_event_name'),
+            event_name_hq_override=lead.get('ab_event_name_hq'),
+            conversion_rates_override=lead.get('ab_conversion_rates'),
             # test_event_code=None (padrão) -> vai para PRODUÇÃO
         )
 

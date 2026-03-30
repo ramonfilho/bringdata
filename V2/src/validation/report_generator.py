@@ -1664,11 +1664,13 @@ class ValidationReportGenerator:
         # === TOTAIS COMBINADOS ===
         tot_leads   = ml('Leads')   + cv('Leads', 0)
         tot_spend   = ml('Valor gasto') + cv('Valor gasto', 0)
-        tot_margem  = ml('Margem de contribuição') + cv('Margem de contribuição', 0)
 
         # Usar totais reais (todas as fontes) quando disponíveis
         tot_vendas  = total_sales_real if total_sales_real is not None else ml('Vendas') + cv('Vendas', 0)
         tot_receita = total_revenue_real if total_revenue_real is not None else ml('Receita Total') + cv('Receita Total', 0)
+
+        # Margem calculada a partir da receita real (consistente com ROAS e Receita exibidos)
+        tot_margem  = tot_receita - tot_spend
 
         tot_conv    = tot_vendas / tot_leads * 100 if tot_leads > 0 else 0
         tot_ticket  = tot_receita / tot_vendas if tot_vendas > 0 else 0

@@ -56,8 +56,10 @@ Cloud Run · Cloud Scheduler · MLflow + Cloud SQL · Cloud Storage · Cloud Log
   - O Meta atribui compras a cada evento separadamente → ROAS por modelo é visível direto no Ads Manager
 
   **Config:** bloco `ab_test` em `configs/active_models/{client_id}.yaml`:
-  - `variants[champion]`: `run_id`, `utm_pattern`, `capi_event_name`
-  - `variants[challenger]`: `run_id`, `utm_pattern`, `capi_event_name`
+  - `variants[champion]`: `run_id`, `utm_pattern` (dict de campos UTM — match AND lógico, suporta `utm_campaign`, `utm_content`, `utm_term` ou qualquer combinação), `capi_event_name`, `capi_event_name_high_quality`, `conversion_rates`
+  - `variants[challenger]`: idem
+
+  **Pré-condição Meta:** criar os novos event names no Meta Events Manager via API antes de ativar o teste — eventos precisam existir para poder ser usados como objetivo de otimização nas campanhas do challenger.
 
   **Escopo do teste:** sistema completo — cada variante usa seu próprio modelo **e** seus próprios `CONVERSION_RATES`. Leads cujo UTM não casa com nenhuma variante não são processados pelo pipeline de A/B (ficam fora do teste).
 
