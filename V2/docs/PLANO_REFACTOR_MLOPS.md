@@ -700,14 +700,9 @@ O critério real desta fase é: **pipeline completo (treino → produção → m
 ~~17. **`api/deploy_capi.sh`**~~ ✅ RESOLVIDO (22/03/2026) — DT-6: lê de `configs/clients/{CLIENT_ID}.yaml`.
 ~~18. **Merge com main**~~ ✅ — main já incorporado em merge anterior (`d57db08`); zero commits pendentes.
 
-**19. Deploy do refactor para produção** ⏳
+~~**19. Deploy do refactor para produção**~~ ✅ CONCLUÍDO (26/03/2026)
 
-Executar `docs/CHECKLIST_DEPLOY_REFACTOR.md` na íntegra. Etapas obrigatórias em ordem:
-1. Capturar golden snapshot do monitoring (Etapa 1E) — **antes do merge**
-2. Merge do PR
-3. Deploy sem tráfego + validações (Etapas 3–4)
-4. Migrar tráfego (Etapa 5)
-5. Confirmar job de monitoramento diário no dia seguinte (Etapa 6B)
+`CHECKLIST_DEPLOY_REFACTOR.md` executado. A/B test ativo: jan30 (Champion, `d51757f5`) vs mar24 (Challenger, `a859c68b`), roteamento por `utm_campaign`. Golden snapshot do monitoring: não capturado antes do deploy (lacuna — cobrir na próxima mudança estrutural em `core/`). Commit de configuração: `73e371b`.
 
 *Critério de saída Fase 3:* pipeline completo roda para Cliente B sem alterar código. Modelo nomeado, registrado, servido e monitorado com identidade "clientb".
 
@@ -722,6 +717,32 @@ Executar `docs/CHECKLIST_DEPLOY_REFACTOR.md` na íntegra. Etapas obrigatórias e
 | `src/features/feature_engineering_training.py` | ✅ Deletado (22/03/2026) | `core/feature_engineering.py` |
 | `src/features/encoding_training.py` | ✅ Deletado (22/03/2026) | `core/encoding.py` |
 | `src/matching/` (6 arquivos) | ✅ Deletado (22/03/2026) | `core/matching.py` |
+
+---
+
+### Divergências residuais — Auditoria 30/03/2026
+
+Auditoria sistemática após o deploy revelou que o critério "Fase 2 concluída" garantiu que `core/` está correto, mas não que todos os pipelines usam os mesmos contratos com `core/`. As divergências abaixo não estão na camada `core/` — estão nas pontas (train, produção, monitoramento) que chamam `core/` de forma inconsistente.
+
+**Estado geral:** `core/` está correto. Os pipelines chegam lá mas com contratos diferentes. O resultado é que o sistema funciona para DevClub (o modelo compensa silenciosamente), mas quebra para Cliente B ou após retreino com alteração de features.
+
+#### Pré-condições obrigatórias antes de Fase 3b (ordem de execução)
+
+| # | Divergência | Criticidade | Arquivo | Ação |
+|---|---|---|---|---|
+| **R1** | `production_pipeline.py` cria `nome_valido`, `email_valido`, `telefone_valido` — features que `core/feature_engineering.py` não cria e o modelo nunca viu | **ALTO** | `src/production_pipeline.py` | Remover a criação das 3 features + confirmar ausência no feature registry. → DT-8 |
+| **R2** | `PESOS_COMPRADOR` e `DEFAULT_HYPERPARAMS` hardcoded em `train_pipeline.py` — valores já existem em `devclub.yaml` (`model.buyer_weights`, `model.hyperparameters`), mas o treino reimplementa inline. Para Cliente B, o treino usará pesos do DevClub sem nenhum erro. | **MÉDIO** | `src/train_pipeline.py:~763,~788` | Substituir por `client_config.model.buyer_weights` e `client_config.model.hyperparameters`. Rodar Camada 2 (AUC ±0.5%) para confirmar. → DT-10 |
+| **R3** | Encoding ordinal — verificar se `'idade'`/`'faixa_salarial'` ainda existem como chaves em `devclub.yaml > encoding.ordinal_variables`. Checklist pós-retreino (item 4) mandou remover os aliases curtos, mas não foi marcado como feito. Se ainda existem, verificar se o nome da coluna que chega ao `apply_encoding` é idêntico em treino e produção. | **MÉDIO** | `configs/clients/devclub.yaml`, `src/core/encoding.py` | Confirmar estado; remover aliases se obsoletos. → DT-9 |
+| **R4** | `medium.unify_medium` tem condicional em `train_pipeline.py` (`if 'Medium' in df.columns: ...`) que não existe em produção — produção sempre chama a função. Se Medium desaparecer do formulário no futuro, produção quebrará enquanto treino continuaria silenciosamente. | **BAIXO** | `src/train_pipeline.py:~619`, `src/production_pipeline.py` | Alinhar comportamento: produção deve ter o mesmo guard ou `core/medium.py` deve absorver o caso de coluna ausente. |
+| **R5** | Imports de `core/` em `monitoring/orchestrator.py` estão dentro do método `run_daily_check()` em vez do topo do módulo. Funcional, inconsistente. | **BAIXO** | `src/monitoring/orchestrator.py` | Mover imports para o topo. → DT-11 |
+
+> **R1 é o único que afeta a integridade em produção hoje** (código desnecessário rodando). R2 e R3 bloqueiam o critério multi-cliente. R4 e R5 são limpeza antes de escalar.
+
+#### O que foi resolvido na auditoria (30/03/2026)
+
+- ~~**`monitoring/data_quality.py` sem `artifacts`**~~ ✅ — `_check_missing_features` e `_check_extra_features` agora criam o `LeadScoringPredictor` antes do encoding, extraem `mlflow_run_id` e passam como `artifacts` para `apply_encoding`. Step 7 (feature registry alignment) executa em monitoramento — mesmo contrato que produção. Eliminado falso-positivo de 12 features faltantes. Commit `d519ee6`. → DT resolvido sem número formal.
+
+---
 
 ### Fase 4 — EDA Generator (após Cliente B estável)
 
@@ -826,6 +847,49 @@ Todas as três campanhas Lookalike representam >5% do dataset histórico complet
 **Fix:** calcular o threshold de frequência sobre os dados pós-cutoff (janela efetiva de treino), ou exigir presença mínima no test set para que uma categoria entre no feature registry. Arquivo a modificar: `src/core/medium.py` — função `unify_medium`, passo 5a (modo treino).
 
 **Prioridade:** baixa — não impacta predições (modelo preenche com 0); apenas gera alertas corretos no monitoramento. Endereçar antes de escalar para 3+ clientes.
+
+### DT-8 — Features fantasmas em `production_pipeline.py`
+
+`production_pipeline.py` cria `nome_valido`, `email_valido` e `telefone_valido` no passo de feature engineering, mas `core/feature_engineering.py` não cria essas colunas (foram removidas como decisão canônica — treino é a fonte de verdade). O feature registry do modelo ativo não contém nenhuma das 3. O predictor as descarta silenciosamente via `prepare_features`, mas o código executa trabalho desnecessário e cria divergência estrutural com o treino.
+
+**Fix:**
+1. `grep -n "nome_valido\|email_valido\|telefone_valido" src/production_pipeline.py` — localizar criação
+2. Remover o bloco que cria as 3 features
+3. Confirmar com `grep -r "nome_valido" mlruns/1/$(cat configs/active_models/devclub.yaml | grep mlflow_run_id | awk '{print $2}')/` que não estão no registry
+4. Deploy — não requer retreino
+
+**Condição para fazer:** antes do onboarding de Cliente B (R1 na tabela de pré-condições).
+
+### DT-9 — Encoding ordinal: verificar consistência de nomes de coluna
+
+`configs/clients/devclub.yaml > encoding.ordinal_variables` pode ainda ter `'idade'` e `'faixa_salarial'` como aliases transitórios — o checklist pós-retreino (item 4, Fase 2) mandou removê-los mas não foi marcado como feito. Se o alias curto está no YAML mas o df chega ao `apply_encoding` com o nome longo (`'Qual a sua idade?'`), o encoding ordinal é silenciosamente pulado — sem erro, sem log.
+
+**Fix:**
+1. `grep "ordinal_variables" -A 10 configs/clients/devclub.yaml` — ver estado atual
+2. `grep "ordinal_variables" src/core/encoding.py` — ver como a chave é usada
+3. Confirmar que o nome da coluna no YAML corresponde ao nome que aparece no df após `category_unification` (que é onde os renomes acontecem)
+4. Se `'idade'` está no YAML mas o df tem `'Qual a sua idade?'` → corrigir o YAML para a forma longa, ou confirmar que `category_unification` renomeia antes
+
+**Condição para fazer:** antes do onboarding de Cliente B (R3 na tabela de pré-condições).
+
+### DT-10 — Hardcodes de modelo em `train_pipeline.py`
+
+`PESOS_COMPRADOR` (linha ~763) e `DEFAULT_HYPERPARAMS` (linha ~788) são replicados inline em `train_pipeline.py` apesar de existirem em `configs/clients/devclub.yaml` como `model.buyer_weights` e `model.hyperparameters`. Para Cliente B, o treino usará os pesos e hiperparâmetros do DevClub sem nenhum aviso.
+
+**Fix:**
+1. Em `train_pipeline.py`, substituir `PESOS_COMPRADOR = {...}` por `PESOS_COMPRADOR = client_config.model.buyer_weights`
+2. Substituir `DEFAULT_HYPERPARAMS = {...}` por `DEFAULT_HYPERPARAMS = vars(client_config.model.hyperparameters)` (ou equivalente dependendo do tipo do campo)
+3. Rodar Camada 2: `python -m src.train_pipeline --api-end-date 2026-03-15 ...` — AUC deve ficar dentro de ±0.5% de 0.745. Os valores em `devclub.yaml` são idênticos aos hardcodes, então a paridade é esperada.
+
+**Condição para fazer:** antes do onboarding de Cliente B (R2 na tabela de pré-condições).
+
+### DT-11 — Imports dinâmicos em `monitoring/orchestrator.py`
+
+Imports de `core/utm`, `core/medium`, `core/category_unification`, `core/preprocessing`, `core/feature_engineering` estão dentro do corpo de `run_daily_check()` em vez do topo do arquivo. Funcional, mas inconsistente: se qualquer desses módulos não for encontrado, o erro só aparece quando o monitoramento roda — não na inicialização.
+
+**Fix:** mover os 5 imports para o topo de `monitoring/orchestrator.py`, junto com os outros imports existentes.
+
+**Prioridade:** baixa — não impacta correção, apenas observabilidade de erros de import.
 
 ---
 
