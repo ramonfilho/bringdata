@@ -870,17 +870,23 @@ class DataQualityMonitor:
         alerts = []
 
         try:
-            # 1. Aplicar encoding via core/ (se client_config disponível) ou fallback antigo
+            # 1. Criar predictor primeiro para obter run_id antes do encoding
+            from model.prediction import LeadScoringPredictor
+            predictor = LeadScoringPredictor(use_active_model=True, client_config=self.client_config)
+
+            # 2. Aplicar encoding com artifacts para que step 7 (registry alignment) execute
+            #    — sem artifacts, step 7 é pulado e categorias OHE ausentes viram falsos alertas
             if self.client_config and self.client_config.encoding:
                 from core.encoding import apply_encoding
-                df_encoded = apply_encoding(df.copy(), self.client_config.encoding)
+                artifacts = {}
+                if predictor.mlflow_run_id:
+                    artifacts['mlflow_run_id'] = predictor.mlflow_run_id
+                elif predictor.model_path:
+                    artifacts['model_path'] = str(predictor.model_path)
+                df_encoded = apply_encoding(df.copy(), self.client_config.encoding, artifacts=artifacts)
             else:
                 from features.encoding import apply_categorical_encoding
                 df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3', model_path=self.model_path)
-
-            # 2. Usar Predictor para validar features — carrega modelo correto via ClientConfig
-            from model.prediction import LeadScoringPredictor
-            predictor = LeadScoringPredictor(use_active_model=True, client_config=self.client_config)
 
             # 3. Validar features (NÃO faz predição, só valida)
             validation = predictor.validate_features(df_encoded)
@@ -932,17 +938,23 @@ class DataQualityMonitor:
         logger.debug(f"Colunas: {sorted(df.columns.tolist())[:10]}...")
 
         try:
-            # 1. Aplicar encoding via core/ (se client_config disponível) ou fallback antigo
+            # 1. Criar predictor primeiro para obter run_id antes do encoding
+            from model.prediction import LeadScoringPredictor
+            predictor = LeadScoringPredictor(use_active_model=True, client_config=self.client_config)
+
+            # 2. Aplicar encoding com artifacts para que step 7 (registry alignment) execute
+            #    — sem artifacts, step 7 é pulado e categorias OHE ausentes viram falsos alertas
             if self.client_config and self.client_config.encoding:
                 from core.encoding import apply_encoding
-                df_encoded = apply_encoding(df.copy(), self.client_config.encoding)
+                artifacts = {}
+                if predictor.mlflow_run_id:
+                    artifacts['mlflow_run_id'] = predictor.mlflow_run_id
+                elif predictor.model_path:
+                    artifacts['model_path'] = str(predictor.model_path)
+                df_encoded = apply_encoding(df.copy(), self.client_config.encoding, artifacts=artifacts)
             else:
                 from features.encoding import apply_categorical_encoding
                 df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3', model_path=self.model_path)
-
-            # 2. Usar Predictor para obter lista de features esperadas — carrega modelo correto via ClientConfig
-            from model.prediction import LeadScoringPredictor
-            predictor = LeadScoringPredictor(use_active_model=True, client_config=self.client_config)
 
             # Garantir que feature_names está carregado
             if predictor.feature_names is None:
