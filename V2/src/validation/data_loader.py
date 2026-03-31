@@ -782,7 +782,7 @@ class SalesDataLoader:
             import tempfile
             import os
 
-            bucket_name = os.environ.get('VALIDATION_REPORTS_BUCKET', 'smart-ads-validation-reports')
+            bucket_name = os.environ.get('VALIDATION_REPORTS_BUCKET', 'bring-data-validation-reports')
             blob_name = f'vendas/tmb_{report_type}.xlsx'
 
             logger.info(f"   Baixando gs://{bucket_name}/{blob_name}...")
@@ -1458,7 +1458,7 @@ class CAPILeadDataLoader:
     extras do CAPI que não responderam a pesquisa.
     """
 
-    def __init__(self, api_url: str = "https://smart-ads-api-12955519745.us-central1.run.app"):
+    def __init__(self, api_url: str = "https://bring-data-api-12955519745.us-central1.run.app"):
         self.api_url = api_url
         self._thresholds_cache = None
 

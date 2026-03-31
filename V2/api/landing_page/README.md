@@ -75,7 +75,7 @@ const { firstName, lastName } = splitName(fullname); // fullname = nome capturad
 console.log('📊 CAPI - FBP:', fbp || '❌ ausente', '| FBC:', fbc || '⚠️ ausente');
 
 // 3. Enviar para webhook
-fetch('https://smart-ads-api-12955519745.us-central1.run.app/webhook/lead_capture', {
+fetch('https://bring-data-api-12955519745.us-central1.run.app/webhook/lead_capture', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -134,7 +134,7 @@ Se sua página usa IDs diferentes, ajuste no arquivo JS.
 
 5. **Confirme no banco:**
    ```bash
-   curl https://smart-ads-api-12955519745.us-central1.run.app/webhook/lead_capture/recent
+   curl https://bring-data-api-12955519745.us-central1.run.app/webhook/lead_capture/recent
    ```
 
 ## 📊 Verificar Event Quality Score na Meta

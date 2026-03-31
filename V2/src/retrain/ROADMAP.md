@@ -1,4 +1,4 @@
-# Roadmap: Pipeline de Retreino Mensal - Smart Ads
+# Roadmap: Pipeline de Retreino Mensal - Bring Data
 
 ## 🎯 Objetivo
 
@@ -357,7 +357,7 @@ class RetreinoMensal:
 
 ```yaml
 # Dados
-training_data_dir: "gs://smart-ads/data/devclub/treino/"
+training_data_dir: "gs://bring-data/data/devclub/treino/"
 min_records: 100
 
 # Validação
@@ -384,7 +384,7 @@ comparison:
 
 # Deploy
 deployment:
-  gcs_bucket: "smart-ads-ml-artifacts"
+  gcs_bucket: "bring-data-ml-artifacts"
   models_path: "models/"
   active_config_path: "configs/active_model.yaml"
 

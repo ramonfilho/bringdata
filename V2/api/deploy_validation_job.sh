@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Script de Deploy - Smart Ads ML Validation Job (Cloud Run Job)
+# Script de Deploy - Bring Data ML Validation Job (Cloud Run Job)
 # =============================================================================
 #
 # Descrição: Deploy do Job de Validação Semanal do Modelo ML
@@ -213,8 +213,8 @@ deploy_validation_job() {
     print_info "    --args='--auto-calculate-dates,--report-type,fechamento'"
     print_info ""
     print_info "Arquivos TMB serão buscados do Cloud Storage:"
-    print_info "  gs://smart-ads-validation-reports/vendas/tmb_fechamento.xlsx"
-    print_info "  gs://smart-ads-validation-reports/vendas/tmb_pos-devolucoes.xlsx"
+    print_info "  gs://bring-data-validation-reports/vendas/tmb_fechamento.xlsx"
+    print_info "  gs://bring-data-validation-reports/vendas/tmb_pos-devolucoes.xlsx"
     echo ""
 }
 
@@ -272,8 +272,8 @@ print_final_report() {
     echo -e "${BLUE}📦 Upload de Arquivos TMB (semanal):${NC}"
     echo ""
     echo "   Upload arquivos TMB para Cloud Storage:"
-    echo "   gsutil cp tmb_fechamento.xlsx gs://smart-ads-validation-reports/vendas/"
-    echo "   gsutil cp tmb_pos_devolucoes.xlsx gs://smart-ads-validation-reports/vendas/"
+    echo "   gsutil cp tmb_fechamento.xlsx gs://bring-data-validation-reports/vendas/"
+    echo "   gsutil cp tmb_pos_devolucoes.xlsx gs://bring-data-validation-reports/vendas/"
     echo ""
 
     echo -e "${BLUE}🔧 Comandos de Execução:${NC}"
@@ -370,7 +370,7 @@ main() {
     echo ""
     echo "╔════════════════════════════════════════════════════════════════╗"
     echo "║                                                                ║"
-    echo "║    Smart Ads - Deploy do Job de Validação ML (Cloud Run)      ║"
+    echo "║    Bring Data - Deploy do Job de Validação ML (Cloud Run)      ║"
     echo "║                                                                ║"
     echo "║    ⚠️  IMPORTANTE: Este é o JOB de validação, NÃO a API      ║"
     echo "║    A API de produção usa: deploy.sh                           ║"

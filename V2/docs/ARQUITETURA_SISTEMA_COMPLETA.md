@@ -197,8 +197,8 @@ pipeline = LeadScoringPipeline(client_id='devclub')
 
 ## API REST (`api/app.py`)
 
-**Runtime:** FastAPI + Uvicorn | **Produção:** Cloud Run `smart-ads-api-00254-dh5`
-**URL:** `https://smart-ads-api-gazrm25mda-uc.a.run.app`
+**Runtime:** FastAPI + Uvicorn | **Produção:** Cloud Run `bring-data-api-00254-dh5`
+**URL:** `https://bring-data-api-gazrm25mda-uc.a.run.app`
 
 **Padrão A2 — pipeline dict por client_id:**
 ```python
@@ -273,18 +273,18 @@ Range atual: 2026-02-26 → presente (~107k leads)
 
 **Cloud SQL (MLflow tracking):**
 ```
-Instância: smart-ads-451319:us-central1:smart-ads-db
+Instância: smart-ads-451319:us-central1:bring-data-db
 DB: mlflow | Acesso direto: 104.197.138.129:5432
 MLFLOW_TRACKING_URI=postgresql+psycopg2://postgres:SmartAds2026DB!@104.197.138.129:5432/mlflow
 ```
 
-**Artifacts MLflow:** `gs://smart-ads-mlflow/artifacts/`
+**Artifacts MLflow:** `gs://bring-data-mlflow/artifacts/`
 
 **Acesso local via proxy:**
 ```bash
-cloud-sql-proxy smart-ads-451319:us-central1:smart-ads-db --port=5432 &
+cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db --port=5432 &
 sleep 8
-# Conecta ao MLflow DB (não ao smart_ads — esse está no Railway)
+# Conecta ao MLflow DB (não ao bring_data — esse está no Railway)
 ```
 
 ---
@@ -352,18 +352,18 @@ GCP_PROJECT_ID=smart-ads-451319
 bash api/deploy_capi.sh
 
 # Redirecionar tráfego
-gcloud run services update-traffic smart-ads-api \
+gcloud run services update-traffic bring-data-api \
   --to-revisions REVISION=100 --region us-central1
 
 # Ver revisões ativas
-gcloud run revisions list --service smart-ads-api --region us-central1
+gcloud run revisions list --service bring-data-api --region us-central1
 
 # Rollback
-gcloud run services update-traffic smart-ads-api \
+gcloud run services update-traffic bring-data-api \
   --to-revisions REVISAO_ANTERIOR=100 --region us-central1
 ```
 
-**Revisão atual:** `smart-ads-api-00254-dh5` (24/03/2026)
+**Revisão atual:** `bring-data-api-00254-dh5` (24/03/2026)
 
 ---
 
@@ -371,7 +371,7 @@ gcloud run services update-traffic smart-ads-api \
 
 ```bash
 # Logs Cloud Run (última revisão)
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=smart-ads-api" --limit=50
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=bring-data-api" --limit=50
 
 # Treinar modelo (parâmetros baseline)
 python -m src.train_pipeline \
@@ -385,7 +385,7 @@ python -m src.train_pipeline \
 bash src/monitoring/run_monitoring_local.sh
 
 # Monitoramento via API
-curl -s "https://smart-ads-api-gazrm25mda-uc.a.run.app/monitoring/daily-check?hours=24"
+curl -s "https://bring-data-api-gazrm25mda-uc.a.run.app/monitoring/daily-check?hours=24"
 
 # Retreino mensal
 python src/retrain/retraining_orchestrator.py --config configs/retreino_mensal.yaml

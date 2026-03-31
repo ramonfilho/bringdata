@@ -19,9 +19,9 @@ Checks:
   2f  training    — experiment_name e model_name derivados do ClientConfig são corretos
 
 Uso:
-    cloud-sql-proxy smart-ads-451319:us-central1:smart-ads-db &
+    cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db &
     sleep 5
-    export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=smart_ads DB_USER=postgres DB_PASSWORD=SmartAds2026DB!
+    export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bring_data DB_USER=postgres DB_PASSWORD=SmartAds2026DB!
     python scripts/validate_orchestration_layer.py
 """
 

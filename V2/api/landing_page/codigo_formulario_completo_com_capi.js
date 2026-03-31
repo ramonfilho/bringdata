@@ -68,7 +68,7 @@ function sendToCapiAPI(name, email, phone, hasComputer, utm, fbp, fbc, eventID, 
   // Isso resolve o problema de 48% de cobertura (requests cancelados pelo navegador)
   const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
   const success = navigator.sendBeacon(
-    'https://smart-ads-api-12955519745.us-central1.run.app/webhook/lead_capture',
+    'https://bring-data-api-12955519745.us-central1.run.app/webhook/lead_capture',
     blob
   );
 
@@ -77,7 +77,7 @@ function sendToCapiAPI(name, email, phone, hasComputer, utm, fbp, fbc, eventID, 
   } else {
     // Fallback para fetch se sendBeacon falhar (navegadores antigos)
     console.warn('⚠️ sendBeacon falhou, tentando fetch...');
-    fetch('https://smart-ads-api-12955519745.us-central1.run.app/webhook/lead_capture', {
+    fetch('https://bring-data-api-12955519745.us-central1.run.app/webhook/lead_capture', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Configuração Centralizada - Smart Ads Deploy Scripts
+# Configuração Centralizada - Bring Data Deploy Scripts
 # =============================================================================
 #
 # Single Source of Truth para todas as configurações do projeto.
@@ -24,7 +24,7 @@ PROJECT_ID="${PROJECT_ID:-smart-ads-451319}"
 REGION="${REGION:-us-central1}"
 
 # Cloud Run
-SERVICE_NAME="${SERVICE_NAME:-smart-ads-api}"
+SERVICE_NAME="${SERVICE_NAME:-bring-data-api}"
 GCR_REGISTRY="${GCR_REGISTRY:-gcr.io}"
 
 # Recursos do Container - SERVICE (CAPI + Monitoramento)
@@ -48,9 +48,9 @@ ENVIRONMENT="${ENVIRONMENT:-production}"
 # Manter comentado como template para novos clientes que precisem de Cloud SQL
 # =============================================================================
 
-# CLOUD_SQL_INSTANCE="${CLOUD_SQL_INSTANCE:-smart-ads-db}"
+# CLOUD_SQL_INSTANCE="${CLOUD_SQL_INSTANCE:-bring-data-db}"
 # CLOUD_SQL_CONNECTION="${CLOUD_SQL_CONNECTION:-$PROJECT_ID:$REGION:$CLOUD_SQL_INSTANCE}"
-# DB_NAME="${DB_NAME:-smart_ads}"
+# DB_NAME="${DB_NAME:-bring_data}"
 # DB_USER="${DB_USER:-postgres}"
 # DB_PASSWORD="${DB_PASSWORD:-SmartAds2026DB!}"
 
@@ -68,7 +68,7 @@ RAILWAY_DB_PASSWORD="${RAILWAY_DB_PASSWORD:-THxguXxQPZaSWIzquYRiLlVhJBnPoRGu}"
 # CLOUD STORAGE (VALIDATION REPORTS)
 # =============================================================================
 
-BUCKET_NAME="${BUCKET_NAME:-smart-ads-validation-reports}"
+BUCKET_NAME="${BUCKET_NAME:-bring-data-validation-reports}"
 
 # =============================================================================
 # CLOUD SCHEDULER (VALIDATION AUTOMATION)

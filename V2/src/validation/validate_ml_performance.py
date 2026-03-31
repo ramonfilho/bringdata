@@ -906,7 +906,7 @@ def main():
 
         # Limpar cache se solicitado
         if args.clear_cache:
-            cache_file = Path.home() / '.cache' / 'smart_ads' / 'sheets_leads_cache.csv'
+            cache_file = Path.home() / '.cache' / 'bring_data' / 'sheets_leads_cache.csv'
             if cache_file.exists():
                 cache_file.unlink()
                 logger.info(f"     Cache limpo: {cache_file}")

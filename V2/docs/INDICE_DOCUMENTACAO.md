@@ -1,4 +1,4 @@
-# Índice de Documentação — Smart Ads V2
+# Índice de Documentação — Bring Data V2
 
 **Atualizado:** 2026-03-22
 **Propósito:** mapa de todos os documentos da pasta `docs/`, seus papéis, status e como se relacionam.
@@ -49,7 +49,7 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Ação sugerida:** executar, preencher a tabela de status, arquivar após deploy bem-sucedido.
 
 ### `ROADMAP_MLOPS_MATURIDADE.md` *(a criar)*
-**Papel:** guia de longo prazo mapeando os níveis de maturidade MLOps (Google Levels 0→2) para o contexto do Smart Ads. Define o que cada nível significa em termos concretos de stack, com condições de negócio para avançar — não um compromisso de execução imediata.
+**Papel:** guia de longo prazo mapeando os níveis de maturidade MLOps (Google Levels 0→2) para o contexto do Bring Data. Define o que cada nível significa em termos concretos de stack, com condições de negócio para avançar — não um compromisso de execução imediata.
 **Status:** ⏳ a criar.
 **Relação:** é o "para onde vamos". Referenciado pela seção 12 do plano de refactor e pelo `adsmarter_02_execução.md` (FASE 3: MLOps completo). Inclui a visão de stack GCP (Pub/Sub, Dataflow, Vertex AI, BigQuery Feature Store) com condições explícitas de quando cada peça entra.
 

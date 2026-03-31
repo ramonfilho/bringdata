@@ -44,7 +44,7 @@ campanhas_atipicas:
 
     # Payload para testar via API:
     curl_test: |
-      curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/validation/manual \
+      curl -X POST https://bring-data-api-12955519745.us-central1.run.app/validation/manual \
         -H "Content-Type: application/json" \
         -d '{
           "start_date": "2025-12-16",
@@ -86,7 +86,7 @@ campanhas_atipicas:
 
     # Payload para testar via API:
     curl_test: |
-      curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/validation/manual \
+      curl -X POST https://bring-data-api-12955519745.us-central1.run.app/validation/manual \
         -H "Content-Type: application/json" \
         -d '{
           "start_date": "2026-01-13",

@@ -107,7 +107,7 @@ RAILWAY_CUTOVER = pd.Timestamp('2026-02-18')
 
 # Cloud Run
 CLOUDRUN_PROJECT = 'smart-ads-451319'
-CLOUDRUN_SERVICE = 'smart-ads-api'
+CLOUDRUN_SERVICE = 'bring-data-api'
 
 # Validation xlsx folder
 VALIDATION_DIR = BASE / 'outputs/validation'

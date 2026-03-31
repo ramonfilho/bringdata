@@ -1,4 +1,4 @@
-# CLAUDE.md — Smart Ads V2
+# CLAUDE.md — Bring Data V2
 
 Leia este arquivo no início de toda sessão antes de qualquer tarefa.
 
@@ -89,9 +89,9 @@ Nunca adicionar hardcodes dentro de funções `core/`. Todo valor específico de
 
 ```bash
 # Banco de dados (Cloud SQL Proxy)
-cloud-sql-proxy smart-ads-451319:us-central1:smart-ads-db --port=5432 &
+cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db --port=5432 &
 sleep 8
-export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=smart_ads DB_USER=postgres DB_PASSWORD=SmartAds2026DB!
+export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bring_data DB_USER=postgres DB_PASSWORD=SmartAds2026DB!
 
 # Treinar modelo
 python -m src.train_pipeline --initial-matching email_telefone --set-active
@@ -136,13 +136,13 @@ python src/retrain/retraining_orchestrator.py --config configs/retreino_mensal.y
 
 ## Infraestrutura de produção
 
-- **API:** FastAPI + Uvicorn em Cloud Run (`https://smart-ads-api-12955519745.us-central1.run.app`)
-- **Banco:** PostgreSQL Cloud SQL (`smart-ads-451319:us-central1:smart-ads-db`)
+- **API:** FastAPI + Uvicorn em Cloud Run (`https://bring-data-api-12955519745.us-central1.run.app`)
+- **Banco:** PostgreSQL Cloud SQL (`smart-ads-451319:us-central1:bring-data-db`)
 - **Tabela principal:** `leads_capi`
 - **Scheduler:** Cloud Scheduler → Cloud Run Job (monitoramento diário, retreino mensal)
 - **Notificações:** Slack
 
 ```bash
 # Ver logs do Cloud Run
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=smart-ads-api" --limit=50
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=bring-data-api" --limit=50
 ```

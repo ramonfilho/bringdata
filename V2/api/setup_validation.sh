@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Setup de Validação Semanal - Smart Ads ML
+# Setup de Validação Semanal - Bring Data ML
 # =============================================================================
 #
 # Descrição: Configura infraestrutura completa para validação semanal automática
@@ -372,7 +372,7 @@ main() {
     echo ""
     echo "╔════════════════════════════════════════════════════════════════╗"
     echo "║                                                                ║"
-    echo "║      Smart Ads - Setup de Validação Semanal Automatizada      ║"
+    echo "║      Bring Data - Setup de Validação Semanal Automatizada      ║"
     echo "║                                                                ║"
     echo "╚════════════════════════════════════════════════════════════════╝"
     echo ""

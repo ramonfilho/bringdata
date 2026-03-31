@@ -92,9 +92,9 @@ GROUP BY decil ORDER BY decil;
 
 ## Instância
 - **Projeto:** smart-ads-451319
-- **Instância:** smart-ads-db
+- **Instância:** bring-data-db
 - **Região:** us-central1
-- **Banco:** smart_ads
+- **Banco:** bring_data
 - **Usuário:** postgres
 - **Senha:** `$CLOUDSQL_PASSWORD` (ver `.env`)
 
@@ -104,7 +104,7 @@ O banco não aceita conexão IPv6 direta. Usar **Cloud SQL Proxy v2**:
 
 ```bash
 # 1. Iniciar proxy (manter em background)
-cloud-sql-proxy smart-ads-451319:us-central1:smart-ads-db --port=5432 &
+cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db --port=5432 &
 sleep 8  # aguardar proxy autenticar
 
 # 2. Conectar via Python (pg8000 já está no projeto)
@@ -112,7 +112,7 @@ python3 << 'EOF'
 import pg8000.native, os
 conn = pg8000.native.Connection(
     host='127.0.0.1', port=5432,
-    database='smart_ads', user='postgres',
+    database='bring_data', user='postgres',
     password=os.environ['CLOUDSQL_PASSWORD']
 )
 rows = conn.run('SELECT COUNT(*) FROM leads_capi')

@@ -1,5 +1,5 @@
 # configs/templates/client_template.yaml
-# Template para configuração de novo cliente no pipeline MLOps Smart Ads.
+# Template para configuração de novo cliente no pipeline MLOps Bring Data.
 #
 # Como usar:
 #   1. Copiar este arquivo para configs/clients/{client_id}.yaml

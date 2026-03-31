@@ -19,7 +19,7 @@
 O objetivo é confirmar que um novo modelo treinado com o refactor pode ser servido imediatamente, sem quebrar o pipeline de produção.
 
 ```bash
-cd /Users/ramonmoreira/Desktop/smart_ads_refactor/V2
+cd /Users/ramonmoreira/Desktop/bring_data_refactor/V2
 
 # 1. Treinar com flag --set-active (usa dados reais, atualiza active_models/devclub.yaml)
 python -m src.train_pipeline \
@@ -56,7 +56,7 @@ print('OK')
 ### 1B — Smoke tests de imports
 
 ```bash
-cd /Users/ramonmoreira/Desktop/smart_ads_refactor/V2
+cd /Users/ramonmoreira/Desktop/bring_data_refactor/V2
 
 python -c "
 from src.production_pipeline import LeadScoringPipeline
@@ -73,7 +73,7 @@ print('Todos os imports OK')
 ### 1C — Pilar A: parity checks (scores idênticos)
 
 ```bash
-cd /Users/ramonmoreira/Desktop/smart_ads_refactor/V2
+cd /Users/ramonmoreira/Desktop/bring_data_refactor/V2
 python scripts/validate_orchestration_layer.py
 ```
 
@@ -84,7 +84,7 @@ python scripts/validate_orchestration_layer.py
 ### 1D — Pilar B: smoke do monitoring
 
 ```bash
-cd /Users/ramonmoreira/Desktop/smart_ads_refactor/V2
+cd /Users/ramonmoreira/Desktop/bring_data_refactor/V2
 
 python -c "
 from src.monitoring.orchestrator import MonitoringOrchestrator
@@ -102,12 +102,12 @@ print('OK — MonitoringOrchestrator instanciado com ClientConfig')
 Este é o snapshot de referência. Ele é capturado com o código atual e serve para comparação após o deploy. Se os alertas divergirem, há uma regressão no path de monitoramento.
 
 ```bash
-cd /Users/ramonmoreira/Desktop/smart_ads_refactor/V2
+cd /Users/ramonmoreira/Desktop/bring_data_refactor/V2
 
 # Subir proxy do banco
-cloud-sql-proxy smart-ads-451319:us-central1:smart-ads-db --port=5432 &
+cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db --port=5432 &
 sleep 8
-export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=smart_ads DB_USER=postgres DB_PASSWORD=SmartAds2026DB!
+export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bring_data DB_USER=postgres DB_PASSWORD=SmartAds2026DB!
 
 # Capturar snapshot — dry-run com data fixa para reprodutibilidade
 python -c "
@@ -160,13 +160,13 @@ gh pr merge --squash  # ou --merge, conforme preferência do repo
 ## Etapa 3 — Deploy sem tráfego
 
 ```bash
-cd /Users/ramonmoreira/Desktop/smart_ads_refactor/V2/api
+cd /Users/ramonmoreira/Desktop/bring_data_refactor/V2/api
 
 # Deploy da nova revisão — zero tráfego
 ./deploy_capi.sh --no-traffic
 
 # Anotar a URL da nova revisão (impressa pelo script)
-# Ex: https://smart-ads-api-00043-abc123-uc.a.run.app
+# Ex: https://bring-data-api-00043-abc123-uc.a.run.app
 NEW_REVISION_URL="<url-impressa-pelo-script>"
 ```
 
@@ -188,7 +188,7 @@ curl -s "$NEW_REVISION_URL/health" | python3 -m json.tool
 
 ```bash
 # Salvar resposta da revisão ATUAL (produção)
-curl -s -X POST "https://smart-ads-api-12955519745.us-central1.run.app/predict/single" \
+curl -s -X POST "https://bring-data-api-12955519745.us-central1.run.app/predict/single" \
   -H "Content-Type: application/json" \
   -H "X-Client-ID: devclub" \
   -d '{"email": "teste@checklist.com", "telefone": "11999990000", "fonte": "checklist"}' \
@@ -234,9 +234,9 @@ curl -s "$NEW_REVISION_URL/monitoring/status" \
 
 ```bash
 # Subir proxy local se ainda não estiver ativo
-cloud-sql-proxy smart-ads-451319:us-central1:smart-ads-db --port=5432 &
+cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db --port=5432 &
 sleep 8
-export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=smart_ads DB_USER=postgres DB_PASSWORD=SmartAds2026DB!
+export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bring_data DB_USER=postgres DB_PASSWORD=SmartAds2026DB!
 
 python -c "
 import json
@@ -274,7 +274,7 @@ else:
 Somente após todos os checks da Etapa 4 passarem:
 
 ```bash
-gcloud run services update-traffic smart-ads-api \
+gcloud run services update-traffic bring-data-api \
   --to-latest \
   --region=us-central1
 ```
@@ -337,10 +337,10 @@ Se qualquer check falhar após migração de tráfego:
 
 ```bash
 # Listar revisões disponíveis
-gcloud run revisions list --service=smart-ads-api --region=us-central1
+gcloud run revisions list --service=bring-data-api --region=us-central1
 
 # Rollback para revisão anterior (substituir REVISION_NAME)
-gcloud run services update-traffic smart-ads-api \
+gcloud run services update-traffic bring-data-api \
   --to-revisions=REVISION_NAME=100 \
   --region=us-central1
 ```

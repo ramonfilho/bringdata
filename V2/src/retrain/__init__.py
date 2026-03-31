@@ -1,5 +1,5 @@
 """
-Módulo de retreinamento automatizado - Smart Ads ML
+Módulo de retreinamento automatizado - Bring Data ML
 
 Componentes:
     - retraining_orchestrator.py: Orquestrador principal do pipeline de retreino

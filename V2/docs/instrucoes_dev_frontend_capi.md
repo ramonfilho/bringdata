@@ -109,7 +109,7 @@ async function sendToCapiAPI(name, email, phone, hasComputer, utm, fbp, fbc, eve
   };
 
   try {
-    const response = await fetch('https://smart-ads-api-12955519745.us-central1.run.app/webhook/lead_capture', {
+    const response = await fetch('https://bring-data-api-12955519745.us-central1.run.app/webhook/lead_capture', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)

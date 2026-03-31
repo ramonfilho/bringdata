@@ -63,7 +63,7 @@ REPORTS = [
     },
 ]
 
-BASE = Path('/Users/ramonmoreira/Desktop/smart_ads')
+BASE = Path('/Users/ramonmoreira/Desktop/bring_data')
 CLOUDSQL_PATH = BASE / 'V2/data/backups/cloud-sql-final-export-20260225.sql'
 
 # ─────────────────────────────────────────────────────────────────────────────

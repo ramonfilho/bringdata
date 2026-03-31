@@ -5,7 +5,7 @@
 | Componente | Onde |
 |---|---|
 | Tracking (runs, params, metrics) | Cloud SQL PostgreSQL `104.197.138.129:5432/mlflow` |
-| Artifacts (model.pkl, feature_registry.json, etc.) | `gs://smart-ads-mlflow/artifacts/` |
+| Artifacts (model.pkl, feature_registry.json, etc.) | `gs://bring-data-mlflow/artifacts/` |
 
 ---
 
@@ -74,7 +74,7 @@ local_dir = mlflow.artifacts.download_artifacts(
 Ou direto pelo gsutil:
 
 ```bash
-gsutil -m cp -r gs://smart-ads-mlflow/artifacts/{run_id}/artifacts/ ./modelo/
+gsutil -m cp -r gs://bring-data-mlflow/artifacts/{run_id}/artifacts/ ./modelo/
 ```
 
 ---
@@ -97,4 +97,4 @@ O run ativo também está definido em `configs/active_model.yaml`.
 
 - **Nome:** `devclub_lead_scoring`
 - **ID:** `1`
-- **Artifact location:** `gs://smart-ads-mlflow/artifacts/`
+- **Artifact location:** `gs://bring-data-mlflow/artifacts/`

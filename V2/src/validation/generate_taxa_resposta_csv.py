@@ -33,7 +33,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-API_URL = "https://smart-ads-api-12955519745.us-central1.run.app"
+API_URL = "https://bring-data-api-12955519745.us-central1.run.app"
 
 
 def get_capi_leads_by_day(start_date: str, end_date: str) -> Dict[str, int]:

@@ -12,7 +12,7 @@
 # -----------------------------------------------------------------------------
 cloud_storage:
   # Bucket para armazenar relatórios Excel de validação
-  bucket_name: smart-ads-validation-reports
+  bucket_name: bring-data-validation-reports
   region: us-central1
   public_access: true  # Permite links públicos nos Excels
 
@@ -21,8 +21,8 @@ cloud_storage:
 
   # Comandos para criação (executar uma vez):
   setup_commands:
-    - "gsutil mb -l us-central1 gs://smart-ads-validation-reports"
-    - "gsutil iam ch allUsers:objectViewer gs://smart-ads-validation-reports"
+    - "gsutil mb -l us-central1 gs://bring-data-validation-reports"
+    - "gsutil iam ch allUsers:objectViewer gs://bring-data-validation-reports"
 
 # -----------------------------------------------------------------------------
 # CLOUD SCHEDULER
@@ -37,7 +37,7 @@ cloud_scheduler:
   schedule_description: "Segunda-feira 7h (horário de Brasília -3h)"
 
   # Endpoint da API
-  target_uri: "https://smart-ads-api-12955519745.us-central1.run.app/validation/weekly"
+  target_uri: "https://bring-data-api-12955519745.us-central1.run.app/validation/weekly"
   http_method: POST
 
   # Configurações
@@ -53,7 +53,7 @@ cloud_scheduler:
     gcloud scheduler jobs create http validation-weekly \
       --location=us-central1 \
       --schedule="0 10 * * MON" \
-      --uri="https://smart-ads-api-12955519745.us-central1.run.app/validation/weekly" \
+      --uri="https://bring-data-api-12955519745.us-central1.run.app/validation/weekly" \
       --http-method=POST \
       --headers="Content-Type=application/json" \
       --description="Validação semanal do modelo ML (toda segunda 10h)"
@@ -71,21 +71,21 @@ cloud_scheduler:
 # CLOUD RUN (Environment Variables)
 # -----------------------------------------------------------------------------
 cloud_run:
-  service_name: smart-ads-api
+  service_name: bring-data-api
   region: us-central1
 
   # Variáveis de ambiente necessárias
   environment_variables:
     META_DATA_SOURCE: "local"  # Usar CSV local (trocar para 'api' em produção)
     GURU_DATA_SOURCE: "api"    # Sempre usar API da Guru
-    VALIDATION_REPORTS_BUCKET: "smart-ads-validation-reports"
+    VALIDATION_REPORTS_BUCKET: "bring-data-validation-reports"
     SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/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"
 
   # Comando para atualizar env vars:
   update_env_command: |
-    gcloud run services update smart-ads-api \
+    gcloud run services update bring-data-api \
       --region=us-central1 \
-      --update-env-vars=META_DATA_SOURCE=local,VALIDATION_REPORTS_BUCKET=smart-ads-validation-reports \
+      --update-env-vars=META_DATA_SOURCE=local,VALIDATION_REPORTS_BUCKET=bring-data-validation-reports \
       --quiet
 
 # -----------------------------------------------------------------------------
@@ -97,7 +97,7 @@ slack:
 
   # Formato da mensagem
   message_format:
-    title: "📊 Validação Semanal ML - Smart Ads"
+    title: "📊 Validação Semanal ML - Bring Data"
 
     fields:
       - title: "📅 Período Analisado"
@@ -260,7 +260,7 @@ monitoring:
   logs:
     validation_execution: |
       gcloud logging read "resource.type=cloud_run_revision
-      AND resource.labels.service_name=smart-ads-api
+      AND resource.labels.service_name=bring-data-api
       AND textPayload=~'validação semanal'" --limit=50
 
     scheduler_execution: |
@@ -269,7 +269,7 @@ monitoring:
 
     errors: |
       gcloud logging read "resource.type=cloud_run_revision
-      AND resource.labels.service_name=smart-ads-api
+      AND resource.labels.service_name=bring-data-api
       AND severity>=ERROR
       AND textPayload=~'validation'" --limit=20
 

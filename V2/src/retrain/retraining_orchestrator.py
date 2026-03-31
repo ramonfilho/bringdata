@@ -1,5 +1,5 @@
 """
-Orquestrador de Retreino Mensal - Smart Ads ML
+Orquestrador de Retreino Mensal - Bring Data ML
 
 Pipeline automatizado de retreino com validação, comparação e deploy condicional.
 
@@ -624,7 +624,7 @@ class RetreinoMensal:
 def main():
     """Entry point do script."""
     parser = argparse.ArgumentParser(
-        description='Orquestrador de Retreino Mensal - Smart Ads ML'
+        description='Orquestrador de Retreino Mensal - Bring Data ML'
     )
     parser.add_argument(
         '--config',

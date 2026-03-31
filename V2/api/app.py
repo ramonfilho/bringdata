@@ -89,7 +89,7 @@ class DailyCheckResponse(BaseModel):
 
 # Inicializar a aplicação FastAPI
 app = FastAPI(
-    title="Smart Ads Lead Scoring API V2",
+    title="Bring Data Lead Scoring API V2",
     description="API otimizada para predições em batch via Google Sheets",
     version="2.0.0",
     docs_url="/docs",
@@ -187,7 +187,7 @@ PipelineOptDep = Annotated[Optional[LeadScoringPipeline], Depends(get_optional_p
 @app.on_event("startup")
 async def startup_event():
     """Inicialização da aplicação"""
-    logger.info("🚀 Iniciando Smart Ads API V2...")
+    logger.info("🚀 Iniciando Bring Data API V2...")
     if not initialize_pipelines():
         logger.error("❌ Falha ao inicializar pipelines!")
     else:
@@ -203,7 +203,7 @@ async def startup_event():
 async def root():
     """Endpoint raiz"""
     return {
-        "message": "Smart Ads Lead Scoring API V2",
+        "message": "Bring Data Lead Scoring API V2",
         "status": "online",
         "version": "2.0.0",
         "endpoints": {
@@ -2541,7 +2541,7 @@ async def test_validation_dependencies():
 
         # 3. Testar env vars
         meta_source = os.getenv('META_DATA_SOURCE', 'local')
-        bucket_name = os.getenv('VALIDATION_REPORTS_BUCKET', 'smart-ads-validation-reports')
+        bucket_name = os.getenv('VALIDATION_REPORTS_BUCKET', 'bring-data-validation-reports')
 
         # 4. Testar Cloud Storage
         try:
@@ -2674,7 +2674,7 @@ async def execute_weekly_validation(db: Session = Depends(get_db)):
         logger.info(f"📊 Excel encontrado: {latest_excel.name}")
 
         # 4. Upload para Cloud Storage
-        bucket_name = os.getenv('VALIDATION_REPORTS_BUCKET', 'smart-ads-validation-reports')
+        bucket_name = os.getenv('VALIDATION_REPORTS_BUCKET', 'bring-data-validation-reports')
 
         try:
             storage_client = storage.Client()
