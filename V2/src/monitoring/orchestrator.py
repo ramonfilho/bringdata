@@ -664,6 +664,115 @@ class MonitoringOrchestrator:
             'by_category': by_category
         }
 
+    def _generate_revenue_forecast(
+        self,
+        decil_distribution: Dict,
+        funnel_metrics: Dict,
+        lead_quality_metrics: Dict,
+    ) -> Dict:
+        """
+        Gera previsão de faturamento com base na distribuição de decis atual e
+        taxas de conversão históricas corrigidas pelo tracking rate.
+
+        Suposições documentadas:
+        - Tracking rate uniforme entre decis (não verificado empiricamente).
+          Erro potencial estimado: ~23% no D10. Absorvido pela faixa de ±40%.
+        - D01–D06 agrupados como bloco único (volume histórico insuficiente
+          para taxas individuais confiáveis).
+
+        Output (apresentação ao cliente):
+            R$ {piso} ──────●────────── R$ {teto}
+                         R$ {base}
+            Baseado em 6 lançamentos com o mesmo modelo (LF42–LF47).
+        """
+        biz = self._client_config.business
+        conv_rates = biz.conversion_rates or {}
+        ticket = biz.product_value
+        tracking_rate = biz.tracking_rate
+
+        if not conv_rates or ticket <= 0 or tracking_rate <= 0:
+            return {}
+
+        total_leads = sum(decil_distribution.values()) if decil_distribution else 0
+        if total_leads == 0:
+            return {}
+
+        HIGH_DECILS = ['D07', 'D08', 'D09', 'D10']
+        LOW_DECILS  = [f'D{i:02d}' for i in range(1, 7)]
+
+        def _calc(factor: float) -> Dict:
+            buyers = 0.0
+
+            # D07–D10: taxa individual por decil
+            for d in HIGH_DECILS:
+                obs_rate  = conv_rates.get(d, 0.0)
+                real_rate = (obs_rate / tracking_rate) * factor
+                buyers   += decil_distribution.get(d, 0) * real_rate
+
+            # D01–D06: bloco único com taxa média agregada
+            low_leads    = sum(decil_distribution.get(d, 0) for d in LOW_DECILS)
+            low_obs_rates = [conv_rates.get(d, 0.0) for d in LOW_DECILS if conv_rates.get(d, 0.0) > 0]
+            if low_obs_rates:
+                avg_low_obs  = sum(low_obs_rates) / len(low_obs_rates)
+                real_low_rate = (avg_low_obs / tracking_rate) * factor
+                buyers       += low_leads * real_low_rate
+
+            return {
+                'faturamento': round(buyers * ticket),
+                'compradores_estimados': round(buyers, 1),
+            }
+
+        base       = _calc(1.0)
+        pessimista = _calc(biz.scenario_pessimistic_factor)
+        otimista   = _calc(biz.scenario_optimistic_factor)
+
+        # Indexação vs mediana histórica
+        benchmark_comparison = None
+        bench = biz.launch_benchmark
+        if bench:
+            bench_leads       = bench.get('leads_mediana', 0)
+            bench_faturamento = bench.get('faturamento_mediana', 0)
+            bench_pct         = bench.get('pct_d9d10_mediana', 0)
+
+            quality_now  = (lead_quality_metrics.get('ultima_semana') or
+                            lead_quality_metrics.get('ultimas_24h') or {})
+            current_pct  = quality_now.get('d9', 0) + quality_now.get('d10', 0)
+
+            idx_volume   = total_leads / bench_leads if bench_leads > 0 else None
+            idx_qualidade = current_pct / bench_pct  if bench_pct   > 0 else None
+
+            if idx_volume and idx_qualidade:
+                fat_indexado = bench_faturamento * idx_volume * idx_qualidade
+            elif idx_volume:
+                fat_indexado = bench_faturamento * idx_volume
+            else:
+                fat_indexado = None
+
+            benchmark_comparison = {
+                'referencia':           bench.get('periodo_referencia', 'mediana histórica'),
+                'indice_volume':        round(idx_volume,    3) if idx_volume    else None,
+                'indice_qualidade':     round(idx_qualidade, 3) if idx_qualidade else None,
+                'faturamento_indexado': round(fat_indexado)     if fat_indexado  else None,
+            }
+
+        return {
+            'cenario_pessimista':   pessimista,
+            'cenario_base':         base,
+            'cenario_otimista':     otimista,
+            'inputs': {
+                'total_leads_pontuados': total_leads,
+                'ticket_medio':          ticket,
+                'tracking_rate_usado':   tracking_rate,
+            },
+            'benchmark_vs_historico': benchmark_comparison,
+            'nota': (
+                'Suposição: tracking rate uniforme entre decis. '
+                'D01–D06 agrupados como bloco único. '
+                'Faixa de incerteza histórica: ±40% em torno do cenário base. '
+                'Base: 6 lançamentos com modelo jan30 (LF42–LF47).'
+            ),
+        }
+
     def _generate_funnel_metrics(self, leads_data: List[Dict], df: pd.DataFrame = None) -> Dict:
         """
         Gera métricas completas do funil de leads.

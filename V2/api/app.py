@@ -86,6 +86,7 @@ class DailyCheckResponse(BaseModel):
     timestamp: str
     funnel_metrics: Optional[Dict[str, Any]] = None
     lead_quality_metrics: Optional[Dict[str, Any]] = None
+    revenue_forecast: Optional[Dict[str, Any]] = None
 
 # Inicializar a aplicação FastAPI
 app = FastAPI(
@@ -2382,6 +2383,17 @@ async def daily_monitoring_check_railway(
             alerts_objs, railway_funnel_metrics, railway_lead_quality, meta_metrics
         )
 
+        # Gerar previsão de faturamento (falha silenciosa — não deve bloquear monitoring)
+        revenue_forecast = None
+        try:
+            revenue_forecast = orchestrator._generate_revenue_forecast(
+                decil_distribution=railway_funnel_metrics.get('scoring', {}).get('decil_distribution', {}),
+                funnel_metrics=railway_funnel_metrics,
+                lead_quality_metrics=railway_lead_quality,
+            ) or None
+        except Exception as _fe:
+            logger.warning(f"⚠️ revenue_forecast indisponível: {_fe}")
+
         processing_time = time.time() - start_time
         logger.info(f"✅ Railway monitoring concluído em {processing_time:.2f}s — "
                     f"{result['total_alerts']} alertas")
@@ -2395,6 +2407,7 @@ async def daily_monitoring_check_railway(
             timestamp=datetime.now().isoformat(),
             funnel_metrics=result.get('funnel_metrics'),
             lead_quality_metrics=result.get('lead_quality_metrics'),
+            revenue_forecast=revenue_forecast if revenue_forecast else None,
         )
 
     except FileNotFoundError as e:
