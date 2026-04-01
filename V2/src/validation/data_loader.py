@@ -1646,7 +1646,6 @@ class CAPILeadDataLoader:
                 WHERE "createdAt" >= :start_date
                   AND "createdAt" <  :end_date_excl
                 ORDER BY "createdAt" DESC
-                LIMIT 10000
                 """,
                 start_date=start_date,
                 end_date_excl=(
