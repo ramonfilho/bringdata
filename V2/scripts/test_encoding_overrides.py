@@ -227,57 +227,47 @@ def check_encoding_features(df: pd.DataFrame, variant_name: str) -> bool:
 # 5. Teste sintético para jan30 (quando não há leads reais com UTM ML_JAN)
 # ---------------------------------------------------------------------------
 
-def build_synthetic_jan30_leads() -> list[dict]:
+def run_real_data_as_jan30(pipeline, no_variant_leads: list[dict]) -> bool:
     """
-    Cria leads sintéticos com todas as combinações de idade × faixa salarial
-    para garantir que o ordinal encoding cobre todo o range (0-5 / 0-4).
+    Testa jan30 com leads reais do Railway que não têm UTM ML_JAN.
+
+    O survey é idêntico entre campanhas — só o UTM difere. Portanto leads
+    no_variant têm os mesmos campos de idade/salário e servem para validar
+    que encoding_overrides produz ordinal correto com dados reais.
     """
-    idades   = ["menos de 18 anos", "18 24 anos", "25 34 anos",
-                "35 44 anos", "45 54 anos", "mais de 55 anos"]
-    salarios = ["nao tenho renda", "entre r1000 a r2000 reais ao mes",
-                "entre r2001 a r3000 reais ao mes", "entre r3001 a r5000 reais ao mes",
-                "mais de r5001 reais ao mes"]
+    from api.railway_mapping import railway_lead_to_sheets_row
 
-    leads = []
-    for i, idade in enumerate(idades):
-        for j, salario in enumerate(salarios):
-            leads.append({
-                "Data":          "2026-01-15",
-                "Nome Completo": f"Teste {i}-{j}",
-                "E-mail":        f"teste{i}{j}@ml-jan.com",
-                "Telefone":      f"1190000{i:02d}{j:02d}",
-                "Source":        "facebook",
-                "Medium":        "paid",
-                "Campaign":      "ML_JAN_TEST",
-                "Term":          None,
-                "Content":       "ML_JAN",
-                "O seu gênero:":                           "masculino",
-                "Qual a sua idade?":                       idade,
-                "O que você faz atualmente?":              "sou cltfuncionario publico",
-                "Atualmente, qual a sua faixa salarial?":  salario,
-                "Você possui cartão de crédito?":          "sim",
-                "O que mais você quer ver no evento?":     "fazer um projeto na pratica",
-                "Tem computador/notebook?":                "sim",
-                "Já estudou programação?":                 "nao",
-                "Você já fez/faz/pretende fazer faculdade?": None,
-                "investiu_curso_online":                   None,
-                "interesse_programacao":                   "a possibilidade de ganhar altos salarios",
-            })
-    return leads
+    print(f"\n[guru_jan30] UTM ML_JAN sem tráfego real — testando com {len(no_variant_leads)} leads "
+          f"reais do Railway (mesma estrutura de survey, UTM diferente).")
 
+    sheets_rows = []
+    for lead in no_variant_leads:
+        try:
+            row = railway_lead_to_sheets_row(lead)
+            if row:
+                sheets_rows.append(row)
+        except Exception as e:
+            logger.warning(f"Erro ao mapear lead {lead.get('email')}: {e}")
 
-def run_synthetic_jan30(pipeline) -> bool:
-    """Testa jan30 com leads sintéticos. Retorna True se encoding ordinal correto."""
-    print("\n[guru_jan30] Sem leads reais com UTM ML_JAN — usando leads sintéticos.")
+    if not sheets_rows:
+        print("  Nenhum lead mapeado com sucesso.")
+        return False
 
-    leads = build_synthetic_jan30_leads()
-    print(f"  Criados {len(leads)} leads sintéticos (6 idades × 5 salários)")
+    group_df = pd.DataFrame(sheets_rows)
+
+    # Mostrar distribuição de idade/salário reais para confirmar que não são nulos
+    col_idade   = "Qual a sua idade?"
+    col_salario = "Atualmente, qual a sua faixa salarial?"
+    if col_idade in group_df.columns:
+        dist = group_df[col_idade].value_counts().to_dict()
+        print(f"  Distribuição real de idade ({group_df[col_idade].notna().sum()} preenchidos): {dict(list(dist.items())[:4])}...")
+    if col_salario in group_df.columns:
+        dist = group_df[col_salario].value_counts().to_dict()
+        print(f"  Distribuição real de salário ({group_df[col_salario].notna().sum()} preenchidos): {dict(list(dist.items())[:4])}...")
 
     variant      = pipeline._ab_test_config.variants["guru_jan30"]
     predictor_ov = pipeline.get_variant_predictor("guru_jan30")
     enc_overrides = variant.encoding_overrides
-
-    group_df = pd.DataFrame(leads)
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as tmp:
         group_df.to_csv(tmp, index=False)
@@ -294,27 +284,18 @@ def run_synthetic_jan30(pipeline) -> bool:
         os.remove(temp_file)
 
     if result is None or len(result) == 0:
-        print("  Pipeline retornou vazio para guru_jan30 sintético")
+        print("  Pipeline retornou vazio.")
         return False
 
     ok = check_encoding_features(result, "guru_jan30")
 
-    # Verificação extra: cada valor ordinal distinto deve aparecer
     if "Qual_a_sua_idade" in result.columns:
-        valores_idade   = sorted(result["Qual_a_sua_idade"].dropna().unique())
-        esperados_idade = list(range(6))
-        if valores_idade == esperados_idade:
-            print(f"  ✅ Ordinal idade: todos os 6 valores presentes {valores_idade}")
-        else:
-            print(f"  ⚠️  Ordinal idade: esperado {esperados_idade}, obtido {valores_idade}")
+        valores = sorted(result["Qual_a_sua_idade"].dropna().unique().tolist())
+        print(f"  Valores ordinais de idade encontrados: {valores} (esperado: subconjunto de 0-5)")
 
     if "Atualmente_qual_a_sua_faixa_salarial" in result.columns:
-        valores_sal   = sorted(result["Atualmente_qual_a_sua_faixa_salarial"].dropna().unique())
-        esperados_sal = list(range(5))
-        if valores_sal == esperados_sal:
-            print(f"  ✅ Ordinal salário: todos os 5 valores presentes {valores_sal}")
-        else:
-            print(f"  ⚠️  Ordinal salário: esperado {esperados_sal}, obtido {valores_sal}")
+        valores = sorted(result["Atualmente_qual_a_sua_faixa_salarial"].dropna().unique().tolist())
+        print(f"  Valores ordinais de salário encontrados: {valores} (esperado: subconjunto de 0-4)")
 
     return ok
 
@@ -364,8 +345,12 @@ def main():
 
         if not group:
             if vname == "guru_jan30":
-                # Fallback: teste sintético para jan30 (UTM ML_JAN sem tráfego real ainda)
-                ok = run_synthetic_jan30(pipeline)
+                # Fallback: usa leads reais no_variant (survey idêntico, UTM diferente)
+                no_variant = groups.get("no_variant", [])
+                if not no_variant:
+                    print(f"\n[{vname}] Sem leads reais disponíveis para teste.")
+                    continue
+                ok = run_real_data_as_jan30(pipeline, no_variant)
                 if not ok:
                     all_ok = False
                 results[vname] = True  # marcador de presença
