@@ -881,6 +881,7 @@ async def webhook_update_survey(
             }
             ab_variant = pipeline.get_ab_variant(lead_utms)
             predictor_override = None
+            enc_overrides_single = None
             if ab_variant:
                 # Encontrar nome da variante para obter o predictor correspondente
                 ab_variant_name = next(
@@ -888,7 +889,16 @@ async def webhook_update_survey(
                     if v is ab_variant
                 )
                 predictor_override = pipeline.get_variant_predictor(ab_variant_name)
+                enc_overrides_single = ab_variant.encoding_overrides
                 logger.info(f"🔀 A/B test: variante '{ab_variant_name}' selecionada para {existing_lead.email}")
+            elif pipeline._ab_test_config.enabled:
+                # Sem variante → Champion. Buscar encoding_overrides do Champion pelo run_id.
+                champion_run_id = pipeline.predictor.mlflow_run_id if hasattr(pipeline.predictor, 'mlflow_run_id') else None
+                champion_cfg = next(
+                    (v for v in pipeline._ab_test_config.variants.values() if v.run_id == champion_run_id),
+                    None,
+                ) if champion_run_id else None
+                enc_overrides_single = champion_cfg.encoding_overrides if champion_cfg else None
 
             # Usar pipeline.run() completo (igual /predict/batch)
             # Isso garante que TODAS as transformações de dados sejam aplicadas
@@ -900,7 +910,7 @@ async def webhook_update_survey(
                     temp_file = tmp.name
 
                 logger.info("   Executando pipeline completo...")
-                result_df = pipeline.run(temp_file, with_predictions=True, predictor_override=predictor_override)
+                result_df = pipeline.run(temp_file, with_predictions=True, predictor_override=predictor_override, encoding_overrides=enc_overrides_single)
 
                 if result_df is None or len(result_df) == 0:
                     raise HTTPException(status_code=500, detail="Pipeline retornou resultado vazio")
@@ -2932,8 +2942,17 @@ async def railway_process_pending(pipeline: PipelineDep):
         score_by_index = {}   # i → (lead_score, decil_str)
         for vname, indices in variant_groups.items():
             predictor_ov = pipeline.get_variant_predictor(vname) if vname else pipeline.predictor
-            # DT-12: encoding_overrides por variante (ex: jan30 usa ordinal para idade/salário)
-            variant_cfg = pipeline._ab_test_config.variants.get(vname) if vname else None
+            # DT-12: encoding_overrides por variante (ex: jan30 usa ordinal para idade/salário).
+            # Leads sem variante (vname=None) vão para o Champion — buscar o config da variante
+            # cujo run_id coincide com pipeline.predictor para aplicar os mesmos overrides.
+            if vname:
+                variant_cfg = pipeline._ab_test_config.variants.get(vname)
+            else:
+                champion_run_id = pipeline.predictor.mlflow_run_id if hasattr(pipeline.predictor, 'mlflow_run_id') else None
+                variant_cfg = next(
+                    (v for v in pipeline._ab_test_config.variants.values() if v.run_id == champion_run_id),
+                    None,
+                ) if champion_run_id else None
             enc_overrides = variant_cfg.encoding_overrides if variant_cfg else None
             group_sheets = [sheets_rows[i] for i in indices]
             group_df = pd.DataFrame(group_sheets)
