@@ -96,9 +96,13 @@ def parse_comparacao_ml(xlsx_path: Path) -> dict:
     mml  = result['margem_ml']  or 0
     mctl = result['margem_ctrl'] or 0
 
-    result['gasto_total']   = gml + gctl
-    result['receita_total'] = rml + rctl
-    result['margem_total']  = mml + mctl
+    # Usar totais reais do lançamento (bloco "TOTAIS DO LANÇAMENTO") quando disponível.
+    # Esses valores cobrem TODAS as campanhas, não só ML+Controle.
+    result['gasto_total']   = result.get('gasto_all')   or (gml + gctl)
+    result['receita_total'] = result.get('receita_all') or (rml + rctl)
+    # Margem = Receita - Gasto, calculada consistentemente (não usar margem_all do xlsx
+    # pois ela usa base diferente de cálculo dependendo do relatório)
+    result['margem_total']  = result['receita_total'] - result['gasto_total']
 
     roas_ctrl = result['roas_ctrl']
     if roas_ctrl and roas_ctrl > 0 and result['gasto_total'] > 0:
@@ -112,7 +116,9 @@ def parse_comparacao_ml(xlsx_path: Path) -> dict:
 
     result['pct_budget_ml'] = (gml / result['gasto_total'] * 100) if result['gasto_total'] > 0 else 100.0
 
-    if result['gasto_total'] > 0:
+    if result.get('roas_all') is not None:
+        result['roas_total'] = result['roas_all']
+    elif result['gasto_total'] > 0:
         result['roas_total'] = result['receita_total'] / result['gasto_total']
     else:
         result['roas_total'] = None
@@ -122,6 +128,47 @@ def parse_comparacao_ml(xlsx_path: Path) -> dict:
 
 def _parse_novo(df: pd.DataFrame, result: dict):
     """Formato novo (18/03): seção 'COMPARAÇÃO ML vs CONTROLE' com labels em col A."""
+    # --- Bloco "TOTAIS DO LANÇAMENTO" (primeiras linhas) ---
+    # Estrutura:
+    #   Título: 'TOTAIS DO LANÇAMENTO — CAMPANHAS'
+    #   Linha de valores: [Leads, Conversões, Taxa, Gasto, CPL]
+    #   Linha de labels:  ['Leads', 'Conversões', ...]
+    #   Linha de valores: [Receita, ROAS, CPA, Margem, Ticket Médio]
+    #   Linha de labels:  ['Receita', 'ROAS', ...]
+    in_totais = False
+    totais_first_vals = None  # [Leads, Conv, Taxa, Gasto, CPL]
+    totais_second_vals = None  # [Receita, ROAS, CPA, Margem, Ticket]
+    numeric_block_count = 0
+
+    for _, row in df.iterrows():
+        label = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ''
+        if 'TOTAIS DO LANÇAMENTO' in label:
+            in_totais = True
+            numeric_block_count = 0
+            continue
+        if in_totais and ('COMPARAÇÃO ML' in label or 'ADSETS' in label.upper()):
+            break
+        if in_totais:
+            # Verifica se a célula é realmente numérica (não string de label)
+            raw = row.iloc[0]
+            is_numeric = isinstance(raw, (int, float)) and not pd.isna(raw)
+            if is_numeric:
+                numeric_block_count += 1
+                if numeric_block_count == 1:
+                    totais_first_vals = [_to_float(row.iloc[i]) for i in range(min(5, len(row)))]
+                elif numeric_block_count == 2:
+                    totais_second_vals = [_to_float(row.iloc[i]) for i in range(min(5, len(row)))]
+                    break
+
+    if totais_first_vals and totais_second_vals:
+        # totais_first_vals:  [Leads, Conversões, Taxa, Gasto, CPL]
+        # totais_second_vals: [Receita, ROAS, CPA, Margem, Ticket Médio]
+        result['receita_all'] = totais_second_vals[0] if totais_second_vals[0] else None
+        result['roas_all']    = totais_second_vals[1] if totais_second_vals[1] else None
+        result['margem_all']  = totais_second_vals[3] if totais_second_vals[3] else None
+        result['gasto_all']   = totais_first_vals[3]  if totais_first_vals[3]  else None
+
+    # --- Bloco "COMPARAÇÃO ML vs CONTROLE" ---
     in_comparacao = False
     for _, row in df.iterrows():
         label = str(row.iloc[0]).strip() if pd.notna(row.iloc[0]) else ''
