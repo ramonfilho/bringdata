@@ -893,6 +893,29 @@ Imports de `core/utm`, `core/medium`, `core/category_unification`, `core/preproc
 
 ---
 
+### DT-12 — Encoding por variante A/B (`encoding_overrides`)
+
+**Problema:** `ClientConfig.encoding` é config de cliente — global para todos os modelos. Com o A/B test Champion jan30 × Challenger mar24, os dois modelos têm expectativas opostas para idade e faixa salarial: jan30 foi treinado com ordinal (coluna única `Qual_a_sua_idade = 0..5`), mar24 com OHE (`Qual_a_sua_idade_18_24_anos` etc.). A produção usa OHE → jan30 recebe `Qual_a_sua_idade = 0` para todos os leads → skew de treino/produção silencioso nos dois features mais preditivos de renda.
+
+**Raiz histórica:** `encoding_training.py` usava nomes curtos (`'idade'`) que não existiam no DataFrame → ordinal falhava silenciosamente → OHE acidental no treino. O fix de 15/03 (`9b86d37`) alinhou produção ao OHE do modelo ativo na época; jan30 foi promovido a Champion depois sem reverter. Mar24 foi treinado após o fix, com OHE correto.
+
+**Solução config-driven (princípio de reprodutibilidade):**
+
+1. `ABTestVariantConfig` recebe campo `encoding_overrides: Optional[EncodingConfig] = None`
+2. `merge_encoding(base, override)` em `core/encoding.py` — copia base e aplica campos não-None do override; `ordinal_variables` é merged (union, override vence conflitos)
+3. `production_pipeline.preprocess(encoding_overrides=None)` aplica `merge_encoding` antes de chamar `apply_encoding`
+4. `production_pipeline.run(encoding_overrides=None)` repassa para `preprocess`
+5. `api/app.py` passa `ab_variant.encoding_overrides` ao chamar `pipeline.run()` por grupo A/B
+6. `active_models/devclub.yaml` → variante `guru_jan30` recebe `encoding_overrides.ordinal_variables` com os mapeamentos de idade e salário
+
+**Impacto:** mar24 sem `encoding_overrides` → comportamento idêntico ao atual (OHE). Jan30 com overrides → ordinal correto. Funciona para Cliente B sem nenhum código extra — se o cliente não tiver A/B ou não precisar de override, o campo simplesmente fica `None`.
+
+**Arquivos:** `src/core/client_config.py`, `src/core/encoding.py`, `src/production_pipeline.py`, `api/app.py`, `configs/active_models/devclub.yaml`
+
+**Prioridade:** alta — A/B test atual está com jan30 em desvantagem estrutural.
+
+---
+
 ## 12. Caminho para Nível 2 e além
 
 Ver **`docs/ROADMAP_MLOPS_MATURIDADE.md`** para o guia completo.

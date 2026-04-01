@@ -2919,6 +2919,9 @@ async def railway_process_pending(pipeline: PipelineDep):
         score_by_index = {}   # i → (lead_score, decil_str)
         for vname, indices in variant_groups.items():
             predictor_ov = pipeline.get_variant_predictor(vname) if vname else pipeline.predictor
+            # DT-12: encoding_overrides por variante (ex: jan30 usa ordinal para idade/salário)
+            variant_cfg = pipeline._ab_test_config.variants.get(vname) if vname else None
+            enc_overrides = variant_cfg.encoding_overrides if variant_cfg else None
             group_sheets = [sheets_rows[i] for i in indices]
             group_df = pd.DataFrame(group_sheets)
             temp_file = None
@@ -2929,7 +2932,7 @@ async def railway_process_pending(pipeline: PipelineDep):
                     temp_file = tmp.name
                 group_label = vname or 'default'
                 logger.info(f"   Executando pipeline para {len(group_sheets)} leads [{group_label}]...")
-                group_result = pipeline.run(temp_file, with_predictions=True, predictor_override=predictor_ov)
+                group_result = pipeline.run(temp_file, with_predictions=True, predictor_override=predictor_ov, encoding_overrides=enc_overrides)
             finally:
                 if temp_file and os.path.exists(temp_file):
                     os.remove(temp_file)

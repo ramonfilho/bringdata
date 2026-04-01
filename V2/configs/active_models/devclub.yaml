@@ -23,6 +23,24 @@ ab_test:
   variants:
     guru_jan30:
       run_id: d51757f5041c44b7ab1a056fce8c3c35  # Guru Only — treinado 30/01/2026, registrado GCS 25/03/2026
+      # DT-12: jan30 foi treinado com ordinal encoding para idade e faixa salarial.
+      # Mar24 usa OHE (padrão do cliente). Sem este override, jan30 recebe 0 para
+      # Qual_a_sua_idade e Atualmente_qual_a_sua_faixa_salarial em todas as predições.
+      encoding_overrides:
+        ordinal_variables:
+          "Qual a sua idade?":
+            - "menos de 18 anos"
+            - "18 24 anos"
+            - "25 34 anos"
+            - "35 44 anos"
+            - "45 54 anos"
+            - "mais de 55 anos"
+          "Atualmente, qual a sua faixa salarial?":
+            - "nao tenho renda"
+            - "entre r1000 a r2000 reais ao mes"
+            - "entre r2001 a r3000 reais ao mes"
+            - "entre r3001 a r5000 reais ao mes"
+            - "mais de r5001 reais ao mes"
       utm_pattern:  # OR logic — basta 1 campo casar. Alinhar com gestor.
         utm_campaign: "ML_JAN"
         utm_content: "ML_JAN"

@@ -17,7 +17,7 @@ from .core.utm import unify_utm
 from .core.medium import unify_medium as _unify_medium
 from .core.category_unification import unify_categories as _unify_categories
 from .core.feature_engineering import create_features as _create_features
-from .core.encoding import apply_encoding as _apply_encoding
+from .core.encoding import apply_encoding as _apply_encoding, merge_encoding as _merge_encoding
 from .model.prediction import LeadScoringPredictor
 from .monitoring.data_quality import check_category_drift, load_training_categories, check_distribution_drift, load_training_distributions
 
@@ -194,7 +194,7 @@ class LeadScoringPipeline:
             logger.error(f" Erro ao verificar category drift: {e}")
             return []
 
-    def preprocess(self) -> pd.DataFrame:
+    def preprocess(self, encoding_overrides=None) -> pd.DataFrame:
         """
         Aplica pré-processamento aos dados.
 
@@ -343,7 +343,8 @@ class LeadScoringPipeline:
         logger.info(" [10/12] Aplicando encoding categórico...")
         cols_before_encoding = len(self.data.columns)
 
-        self.data = _apply_encoding(self.data, self._client_config.encoding, _artifacts)
+        effective_encoding = _merge_encoding(self._client_config.encoding, encoding_overrides)
+        self.data = _apply_encoding(self.data, effective_encoding, _artifacts)
 
         encoding_cols_added = len(self.data.columns) - cols_before_encoding
         logger.info(f"    Colunas adicionadas pelo encoding: {encoding_cols_added}")
@@ -387,7 +388,7 @@ class LeadScoringPipeline:
 
         return result
 
-    def run(self, filepath: str, with_predictions: bool = False, predictor_override: "LeadScoringPredictor" = None) -> pd.DataFrame:
+    def run(self, filepath: str, with_predictions: bool = False, predictor_override: "LeadScoringPredictor" = None, encoding_overrides=None) -> pd.DataFrame:
         """
         Executa o pipeline completo.
 
@@ -417,7 +418,7 @@ class LeadScoringPipeline:
         self.load_data(filepath)
 
         # Pré-processar
-        self.preprocess()
+        self.preprocess(encoding_overrides=encoding_overrides)
 
         # Fazer predições se solicitado
         if with_predictions:

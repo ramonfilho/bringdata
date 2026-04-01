@@ -276,6 +276,7 @@ class ABTestVariantConfig:
     capi_event_name: str
     capi_event_name_high_quality: str
     conversion_rates: Dict[str, float]   # D01–D10, com PAV aplicado se necessário
+    encoding_overrides: Optional["EncodingConfig"] = None  # DT-12 — encoding específico do modelo
 
 
 @dataclass
@@ -298,12 +299,20 @@ class ABTestConfig:
             return cls(enabled=False)
         variants = {}
         for name, vdata in ab.get("variants", {}).items():
+            enc_raw = vdata.get("encoding_overrides")
+            encoding_overrides = EncodingConfig(
+                ordinal_variables=enc_raw.get("ordinal_variables"),
+                categorical_detection_max_unique=enc_raw.get("categorical_detection_max_unique", 20),
+                features_to_drop_after_encoding=enc_raw.get("features_to_drop_after_encoding"),
+                column_name_corrections=enc_raw.get("column_name_corrections"),
+            ) if enc_raw else None
             variants[name] = ABTestVariantConfig(
                 run_id=vdata["run_id"],
                 utm_pattern=vdata.get("utm_pattern") or {},
                 capi_event_name=vdata["capi_event_name"],
                 capi_event_name_high_quality=vdata["capi_event_name_high_quality"],
                 conversion_rates=vdata["conversion_rates"],
+                encoding_overrides=encoding_overrides,
             )
         return cls(enabled=True, variants=variants)
 

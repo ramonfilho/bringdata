@@ -105,6 +105,52 @@ def _load_feature_registry(artifacts: Dict[str, Any]) -> Optional[List[str]]:
 
 
 # ---------------------------------------------------------------------------
+# Merge de configs de encoding (DT-12)
+# ---------------------------------------------------------------------------
+
+def merge_encoding(
+    base: "EncodingConfig",
+    override: Optional["EncodingConfig"],
+) -> "EncodingConfig":
+    """
+    Retorna um EncodingConfig efetivo: copia base e aplica campos não-None do override.
+
+    ordinal_variables é merged (union de dicts — override vence conflitos de chave),
+    para que o override adicione/substitua mapeamentos sem perder os do cliente base
+    (ex: dia_semana do cliente + Qual a sua idade? da variante).
+
+    Usado por production_pipeline.preprocess(encoding_overrides) — DT-12.
+    """
+    if override is None:
+        return base
+
+    from .client_config import EncodingConfig as _EC
+
+    merged_ordinal = dict(base.ordinal_variables or {})
+    if override.ordinal_variables:
+        merged_ordinal.update(override.ordinal_variables)
+
+    return _EC(
+        ordinal_variables=merged_ordinal if merged_ordinal else None,
+        categorical_detection_max_unique=(
+            override.categorical_detection_max_unique
+            if override.categorical_detection_max_unique != 20
+            else base.categorical_detection_max_unique
+        ),
+        features_to_drop_after_encoding=(
+            override.features_to_drop_after_encoding
+            if override.features_to_drop_after_encoding is not None
+            else base.features_to_drop_after_encoding
+        ),
+        column_name_corrections=(
+            override.column_name_corrections
+            if override.column_name_corrections is not None
+            else base.column_name_corrections
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Encoding principal
 # ---------------------------------------------------------------------------
 
