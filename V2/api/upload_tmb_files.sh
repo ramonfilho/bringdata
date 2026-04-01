@@ -29,7 +29,7 @@ source "$SCRIPT_DIR/lib/common.sh"
 # VARIÁVEIS
 # =============================================================================
 
-BUCKET_NAME="smart-ads-validation-reports"
+BUCKET_NAME="bring-data-validation-reports"
 BUCKET_PATH="vendas"
 
 FILE_FECHAMENTO=""
@@ -134,7 +134,7 @@ main() {
     echo ""
     echo "╔════════════════════════════════════════════════════════════════╗"
     echo "║                                                                ║"
-    echo "║        Smart Ads - Upload de Arquivos TMB (Cloud Storage)     ║"
+    echo "║        Bring Data - Upload de Arquivos TMB (Cloud Storage)     ║"
     echo "║                                                                ║"
     echo "╚════════════════════════════════════════════════════════════════╝"
     echo ""

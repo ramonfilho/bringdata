@@ -238,6 +238,20 @@ class BusinessConfig:
     confidence_sigmoid_k: float = 0.15                      # #97 — inclinação da sigmoid
     roas_target: float = 8.0                                # #98 — ROAS alvo para confiança máxima
 
+    # --- Previsão de faturamento (base empírica: LF42–LF47, modelo jan30) ---
+    # Suposição: tracking rate uniforme entre decis (não verificado por ausência
+    # de dados por decil nos relatórios históricos). Decis D01–D06 agrupados como
+    # bloco único (volume histórico insuficiente para taxas individuais confiáveis).
+    tracking_rate: float = 0.528                           # mediana histórica dos 6 lançamentos (range: 43.9%–66.4%)
+    scenario_pessimistic_factor: float = 0.88              # fator empírico — pior lançamento vs mediana
+    scenario_optimistic_factor: float = 1.13               # fator empírico — melhor lançamento vs mediana
+    launch_benchmark: Optional[Dict[str, Any]] = None      # mediana histórica para indexação comparativa
+    # Estrutura esperada de launch_benchmark:
+    #   periodo_referencia: str     (ex: "mediana_LF42-LF47")
+    #   leads_mediana: int          (mediana de leads dos 6 lançamentos)
+    #   faturamento_mediana: float  (mediana de faturamento real)
+    #   pct_d9d10_mediana: float    (mediana de % D9+D10)
+
 
 @dataclass
 class ValidationConfig:
@@ -276,6 +290,7 @@ class ABTestVariantConfig:
     capi_event_name: str
     capi_event_name_high_quality: str
     conversion_rates: Dict[str, float]   # D01–D10, com PAV aplicado se necessário
+    encoding_overrides: Optional["EncodingConfig"] = None  # DT-12 — encoding específico do modelo
 
 
 @dataclass
@@ -298,12 +313,20 @@ class ABTestConfig:
             return cls(enabled=False)
         variants = {}
         for name, vdata in ab.get("variants", {}).items():
+            enc_raw = vdata.get("encoding_overrides")
+            encoding_overrides = EncodingConfig(
+                ordinal_variables=enc_raw.get("ordinal_variables"),
+                categorical_detection_max_unique=enc_raw.get("categorical_detection_max_unique", 20),
+                features_to_drop_after_encoding=enc_raw.get("features_to_drop_after_encoding"),
+                column_name_corrections=enc_raw.get("column_name_corrections"),
+            ) if enc_raw else None
             variants[name] = ABTestVariantConfig(
                 run_id=vdata["run_id"],
                 utm_pattern=vdata.get("utm_pattern") or {},
                 capi_event_name=vdata["capi_event_name"],
                 capi_event_name_high_quality=vdata["capi_event_name_high_quality"],
                 conversion_rates=vdata["conversion_rates"],
+                encoding_overrides=encoding_overrides,
             )
         return cls(enabled=True, variants=variants)
 

@@ -7,7 +7,7 @@ redirects = []
 [functions."*"]
 
 [build]
-publish = "/Users/ramonmoreira/Desktop/smart_ads"
+publish = "/Users/ramonmoreira/Desktop/bring_data"
 publishOrigin = "default"
 
 [build.environment]

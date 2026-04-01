@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 echo -e "${YELLOW}🔌 Iniciando Cloud SQL Proxy...${NC}"
 
 # Iniciar Cloud SQL Proxy em background
-cloud-sql-proxy smart-ads-451319:us-central1:smart-ads-db &
+cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db &
 PROXY_PID=$!
 
 # Função para matar o proxy ao sair
@@ -43,7 +43,7 @@ echo -e "${GREEN}✅ Cloud SQL Proxy pronto (PID: $PROXY_PID)${NC}\n"
 # Configurar variáveis de ambiente para PostgreSQL (mesmas do Cloud Run)
 export DB_HOST=127.0.0.1
 export DB_PORT=5432
-export DB_NAME=smart_ads
+export DB_NAME=bring_data
 export DB_USER=postgres
 export DB_PASSWORD=SmartAds2025!
 

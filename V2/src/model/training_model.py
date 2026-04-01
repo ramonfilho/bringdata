@@ -282,7 +282,7 @@ def registrar_features_e_modelo_devclub(
     _mlflow_client = mlflow.tracking.MlflowClient()
     _exp = _mlflow_client.get_experiment_by_name(experiment_name)
     if _exp is None or _exp.lifecycle_stage == "deleted":
-        mlflow.create_experiment(experiment_name, artifact_location="gs://smart-ads-mlflow/artifacts")
+        mlflow.create_experiment(experiment_name, artifact_location="gs://bring-data-mlflow/artifacts")
     else:
         mlflow.set_experiment(experiment_name)
 

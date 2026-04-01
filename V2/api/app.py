@@ -86,10 +86,11 @@ class DailyCheckResponse(BaseModel):
     timestamp: str
     funnel_metrics: Optional[Dict[str, Any]] = None
     lead_quality_metrics: Optional[Dict[str, Any]] = None
+    revenue_forecast: Optional[Dict[str, Any]] = None
 
 # Inicializar a aplicação FastAPI
 app = FastAPI(
-    title="Smart Ads Lead Scoring API V2",
+    title="Bring Data Lead Scoring API V2",
     description="API otimizada para predições em batch via Google Sheets",
     version="2.0.0",
     docs_url="/docs",
@@ -187,7 +188,7 @@ PipelineOptDep = Annotated[Optional[LeadScoringPipeline], Depends(get_optional_p
 @app.on_event("startup")
 async def startup_event():
     """Inicialização da aplicação"""
-    logger.info("🚀 Iniciando Smart Ads API V2...")
+    logger.info("🚀 Iniciando Bring Data API V2...")
     if not initialize_pipelines():
         logger.error("❌ Falha ao inicializar pipelines!")
     else:
@@ -203,7 +204,7 @@ async def startup_event():
 async def root():
     """Endpoint raiz"""
     return {
-        "message": "Smart Ads Lead Scoring API V2",
+        "message": "Bring Data Lead Scoring API V2",
         "status": "online",
         "version": "2.0.0",
         "endpoints": {
@@ -2382,6 +2383,17 @@ async def daily_monitoring_check_railway(
             alerts_objs, railway_funnel_metrics, railway_lead_quality, meta_metrics
         )
 
+        # Gerar previsão de faturamento (falha silenciosa — não deve bloquear monitoring)
+        revenue_forecast = None
+        try:
+            revenue_forecast = orchestrator._generate_revenue_forecast(
+                decil_distribution=railway_funnel_metrics.get('scoring', {}).get('decil_distribution', {}),
+                funnel_metrics=railway_funnel_metrics,
+                lead_quality_metrics=railway_lead_quality,
+            ) or None
+        except Exception as _fe:
+            logger.warning(f"⚠️ revenue_forecast indisponível: {_fe}")
+
         processing_time = time.time() - start_time
         logger.info(f"✅ Railway monitoring concluído em {processing_time:.2f}s — "
                     f"{result['total_alerts']} alertas")
@@ -2395,6 +2407,7 @@ async def daily_monitoring_check_railway(
             timestamp=datetime.now().isoformat(),
             funnel_metrics=result.get('funnel_metrics'),
             lead_quality_metrics=result.get('lead_quality_metrics'),
+            revenue_forecast=revenue_forecast if revenue_forecast else None,
         )
 
     except FileNotFoundError as e:
@@ -2541,7 +2554,7 @@ async def test_validation_dependencies():
 
         # 3. Testar env vars
         meta_source = os.getenv('META_DATA_SOURCE', 'local')
-        bucket_name = os.getenv('VALIDATION_REPORTS_BUCKET', 'smart-ads-validation-reports')
+        bucket_name = os.getenv('VALIDATION_REPORTS_BUCKET', 'bring-data-validation-reports')
 
         # 4. Testar Cloud Storage
         try:
@@ -2674,7 +2687,7 @@ async def execute_weekly_validation(db: Session = Depends(get_db)):
         logger.info(f"📊 Excel encontrado: {latest_excel.name}")
 
         # 4. Upload para Cloud Storage
-        bucket_name = os.getenv('VALIDATION_REPORTS_BUCKET', 'smart-ads-validation-reports')
+        bucket_name = os.getenv('VALIDATION_REPORTS_BUCKET', 'bring-data-validation-reports')
 
         try:
             storage_client = storage.Client()
@@ -2919,6 +2932,9 @@ async def railway_process_pending(pipeline: PipelineDep):
         score_by_index = {}   # i → (lead_score, decil_str)
         for vname, indices in variant_groups.items():
             predictor_ov = pipeline.get_variant_predictor(vname) if vname else pipeline.predictor
+            # DT-12: encoding_overrides por variante (ex: jan30 usa ordinal para idade/salário)
+            variant_cfg = pipeline._ab_test_config.variants.get(vname) if vname else None
+            enc_overrides = variant_cfg.encoding_overrides if variant_cfg else None
             group_sheets = [sheets_rows[i] for i in indices]
             group_df = pd.DataFrame(group_sheets)
             temp_file = None
@@ -2929,7 +2945,7 @@ async def railway_process_pending(pipeline: PipelineDep):
                     temp_file = tmp.name
                 group_label = vname or 'default'
                 logger.info(f"   Executando pipeline para {len(group_sheets)} leads [{group_label}]...")
-                group_result = pipeline.run(temp_file, with_predictions=True, predictor_override=predictor_ov)
+                group_result = pipeline.run(temp_file, with_predictions=True, predictor_override=predictor_ov, encoding_overrides=enc_overrides)
             finally:
                 if temp_file and os.path.exists(temp_file):
                     os.remove(temp_file)

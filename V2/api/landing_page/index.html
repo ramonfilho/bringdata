@@ -501,7 +501,7 @@
 
             const blob = new Blob([JSON.stringify(capiPayload)], { type: 'application/json' });
             const beaconSuccess = navigator.sendBeacon(
-                'https://smart-ads-api-12955519745.us-central1.run.app/webhook/lead_capture',
+                'https://bring-data-api-12955519745.us-central1.run.app/webhook/lead_capture',
                 blob
             );
 
@@ -510,7 +510,7 @@
             } else {
                 // Fallback para fetch se sendBeacon falhar
                 console.warn('⚠️ sendBeacon falhou, tentando fetch...');
-                fetch('https://smart-ads-api-12955519745.us-central1.run.app/webhook/lead_capture', {
+                fetch('https://bring-data-api-12955519745.us-central1.run.app/webhook/lead_capture', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(capiPayload),

@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Biblioteca Compartilhada - Smart Ads Deploy Scripts
+# Biblioteca Compartilhada - Bring Data Deploy Scripts
 # =============================================================================
 #
 # Funções e validações compartilhadas entre deploy.sh e setup_validation.sh

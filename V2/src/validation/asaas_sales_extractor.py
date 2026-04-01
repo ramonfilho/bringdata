@@ -50,7 +50,7 @@ class AsaasSalesExtractor:
         self.headers = {
             'access_token': self.api_key,
             'Content-Type': 'application/json',
-            'User-Agent': 'SmartAds-ValidationSystem',
+            'User-Agent': 'BringData-ValidationSystem',
         }
         self._customer_cache: Dict[str, Dict] = {}
 

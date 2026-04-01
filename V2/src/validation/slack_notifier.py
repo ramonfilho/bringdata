@@ -87,7 +87,7 @@ class ValidationSlackNotifier:
                                 "short": False
                             }
                         ],
-                        "footer": "Smart Ads Validation System",
+                        "footer": "Bring Data Validation System",
                         "ts": int(datetime.now().timestamp())
                     }
                 ]
@@ -158,7 +158,7 @@ class ValidationSlackNotifier:
                                 "short": False
                             }
                         ],
-                        "footer": "Smart Ads Validation System",
+                        "footer": "Bring Data Validation System",
                         "ts": int(datetime.now().timestamp())
                     }
                 ]

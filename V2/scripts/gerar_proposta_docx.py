@@ -1,5 +1,5 @@
 """
-Gera smart_ads_proposta_v2.docx com formatação equivalente ao padrão Google Docs.
+Gera bring_data_proposta_v2.docx com formatação equivalente ao padrão Google Docs.
 """
 
 from docx import Document
@@ -11,7 +11,7 @@ from docx.oxml import OxmlElement
 from pathlib import Path
 import copy
 
-OUTPUT = Path(__file__).parent.parent / "propostas_e_apresentacoes" / "smart_ads_proposta_v2.docx"
+OUTPUT = Path(__file__).parent.parent / "propostas_e_apresentacoes" / "bring_data_proposta_v2.docx"
 
 # ── cores ──────────────────────────────────────────────────────────────────────
 BLACK      = RGBColor(0x1a, 0x1a, 0x1a)
@@ -271,7 +271,7 @@ def build():
     p = doc.add_paragraph()
     p.paragraph_format.space_before = Pt(0)
     p.paragraph_format.space_after = Pt(4)
-    run = p.add_run("Smart Ads — Proposta de Parceria")
+    run = p.add_run("Bring Data — Proposta de Parceria")
     run.font.size = Pt(26)
     run.font.bold = True
     run.font.color.rgb = BLACK
@@ -311,10 +311,10 @@ def build():
     add_rule(doc)
 
     # ── 2. O QUE O SMART ADS FAZ ─────────────────────────────────────────────
-    add_heading(doc, "Como o Smart Ads funciona", level=2, space_before=14, space_after=6)
+    add_heading(doc, "Como o Bring Data funciona", level=2, space_before=14, space_after=6)
 
     add_para(doc,
-        "A cada lead que preenche a pesquisa, o Smart Ads atribui um score de propensão à compra "
+        "A cada lead que preenche a pesquisa, o Bring Data atribui um score de propensão à compra "
         "e envia esse sinal ao Meta via CAPI — em menos de 5 minutos. "
         "O Meta aprende que aquele perfil de pessoa converte, passa a encontrá-la com mais eficiência "
         "no leilão e reduz o custo por lead. Com o mesmo orçamento, você chega a mais compradores — "
@@ -392,7 +392,7 @@ def build():
 
     add_para(doc,
         "Comportamentos de compra mudam. Um modelo que funciona hoje pode degradar em seis meses "
-        "se não for atualizado. O Smart Ads inclui retreino periódico com os dados mais recentes "
+        "se não for atualizado. O Bring Data inclui retreino periódico com os dados mais recentes "
         "de conversão do seu negócio — garantindo que o sinal enviado ao Meta continue preciso. "
         "Um painel de monitoramento acompanha diariamente a qualidade dos dados, "
         "a distribuição dos leads e desvios no público. Se algo começa a mudar, "
@@ -688,7 +688,7 @@ def build():
         space_after=10)
 
     add_para(doc,
-        "O Smart Ads oferece a alternativa: sistema funcionando desde o primeiro dia, "
+        "O Bring Data oferece a alternativa: sistema funcionando desde o primeiro dia, "
         "sem meses de desenvolvimento às suas custas, "
         "com contexto acumulado de mais de 120 lançamentos executados.",
         space_after=8)

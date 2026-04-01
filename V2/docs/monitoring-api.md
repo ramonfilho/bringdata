@@ -6,7 +6,7 @@
 GET /monitoring/daily-check/railway
 ```
 
-**Base URL:** `https://smart-ads-api-gazrm25mda-uc.a.run.app`
+**Base URL:** `https://bring-data-api-gazrm25mda-uc.a.run.app`
 
 ---
 

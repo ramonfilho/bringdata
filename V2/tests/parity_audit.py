@@ -5,7 +5,7 @@ Carrega os snapshots gerados por train_pipeline.py --capture-parity-snapshots
 e compara o output das implementações de treino e produção sobre o mesmo input.
 
 Uso:
-    cd smart_ads/
+    cd bring_data/
     python V2/tests/parity_audit.py [--function utm|medium|fe|encoding|all]
 
 Pré-requisito:

@@ -1,4 +1,4 @@
-# Roadmap MLOps — Smart Ads V2
+# Roadmap MLOps — Bring Data V2
 
 **Contexto em 30 segundos:** o refactor (`refactor/mlops-core`) está completo e validado. O sistema suporta múltiplos clientes via config, sem duplicar código. Este documento é o guia do que fazer a seguir — em ordem, com a condição que desbloqueia cada item.
 

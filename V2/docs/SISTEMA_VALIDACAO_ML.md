@@ -94,7 +94,7 @@ Todas as 62 vendas do período (trackeadas e não-trackeadas), com: email, telef
 ## 7. COMO RODAR
 
 ```bash
-# Rodar da pasta raiz smart_ads/
+# Rodar da pasta raiz bring_data/
 python V2/src/validation/validate_ml_performance.py \
   --config V2/configs/validation_config.yaml \
   --start-date 2026-02-24 \      # início captação
@@ -107,7 +107,7 @@ python V2/src/validation/validate_ml_performance.py \
 #   --report-type pos-devolucoes   (padrão: fechamento)
 ```
 
-**Atenção:** o script deve ser rodado de `smart_ads/` (pai de `V2/`). O path `V2/data/devclub` é relativo a esse diretório.
+**Atenção:** o script deve ser rodado de `bring_data/` (pai de `V2/`). O path `V2/data/devclub` é relativo a esse diretório.
 
 ---
 

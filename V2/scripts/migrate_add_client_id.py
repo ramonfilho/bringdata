@@ -2,7 +2,7 @@
 Migration: adiciona coluna client_id à tabela leads_capi.
 
 Execução:
-    cd /Users/ramonmoreira/Desktop/smart_ads_refactor/V2
+    cd /Users/ramonmoreira/Desktop/bring_data_refactor/V2
     # Railway (DevClub):
     export RAILWAY_DB_HOST=... RAILWAY_DB_PASSWORD=...
     python scripts/migrate_add_client_id.py

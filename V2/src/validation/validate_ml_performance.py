@@ -906,7 +906,7 @@ def main():
 
         # Limpar cache se solicitado
         if args.clear_cache:
-            cache_file = Path.home() / '.cache' / 'smart_ads' / 'sheets_leads_cache.csv'
+            cache_file = Path.home() / '.cache' / 'bring_data' / 'sheets_leads_cache.csv'
             if cache_file.exists():
                 cache_file.unlink()
                 logger.info(f"     Cache limpo: {cache_file}")
@@ -1041,7 +1041,6 @@ def main():
                         WHERE "createdAt" >= :start_date
                           AND "createdAt" <  :end_date_excl
                         ORDER BY "createdAt" DESC
-                        LIMIT 10000
                         """,
                         start_date=railway_start,
                         end_date_excl=end_excl,
@@ -1117,6 +1116,18 @@ def main():
             else:
                 capi_norm = None
 
+            # Contar respostas de pesquisa apenas dentro da janela real de captação
+            # (survey_df usa _s_extended de 60d para matching de compradores, mas
+            # "Respostas na pesquisa" deve refletir só o período de captação _s→_e)
+            if not survey_df_all.empty and 'data_captura' in survey_df_all.columns:
+                survey_df_captacao = survey_df_all[
+                    (survey_df_all['data_captura'] >= pd.to_datetime(_s)) &
+                    (survey_df_all['data_captura'] <  pd.to_datetime(_e) + pd.Timedelta(days=1))
+                ]
+                survey_leads_count = len(survey_df_captacao)
+            else:
+                survey_leads_count = len(survey_df)
+
             if capi_norm is not None:
                 capi_emails = set(capi_norm['email'].unique())
                 capi_extras = capi_emails - survey_emails
@@ -1131,14 +1142,14 @@ def main():
                     logger.info(f"    Total: {len(leads_df)} (apenas pesquisa)")
 
                 lead_source_stats = {
-                    'survey_leads': len(survey_df),
+                    'survey_leads': survey_leads_count,
                     'capi_leads_extras': len(capi_extra_leads),
                     'capi_leads_total': len(capi_norm['email'].unique()),
                 }
             else:
                 logger.info("    Nenhum lead CAPI encontrado")
                 leads_df = survey_df
-                lead_source_stats = {'survey_leads': len(survey_df), 'capi_leads_extras': 0, 'capi_leads_total': 0}
+                lead_source_stats = {'survey_leads': survey_leads_count, 'capi_leads_extras': 0, 'capi_leads_total': 0}
 
         logger.info(f"    Estatísticas: {lead_source_stats['survey_leads']} pesquisa + {lead_source_stats['capi_leads_extras']} CAPI extras")
 

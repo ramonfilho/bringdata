@@ -104,7 +104,7 @@ def load_all_buyers(lancamento_filter: str = None) -> pd.DataFrame:
 
 CLOUDSQL_HOST     = os.environ.get("DB_HOST", "127.0.0.1")
 CLOUDSQL_PORT     = int(os.environ.get("DB_PORT", "5433"))
-CLOUDSQL_DB       = os.environ.get("DB_NAME", "smart_ads")
+CLOUDSQL_DB       = os.environ.get("DB_NAME", "bring_data")
 CLOUDSQL_USER     = os.environ.get("DB_USER", "postgres")
 CLOUDSQL_PASSWORD = os.environ.get("DB_PASSWORD") or os.environ.get("CLOUDSQL_PASSWORD", "SmartAds2026DB!")
 

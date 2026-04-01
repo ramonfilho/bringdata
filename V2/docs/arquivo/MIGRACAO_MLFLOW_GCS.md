@@ -8,9 +8,9 @@
 ## Problema atual
 
 ```
-smart_ads/V2/mlruns/1/2a98e51c...   ← modelo ativo (worktree main)
-smart_ads_refactor/V2/mlruns/1/...  ← runs do refactor (worktree refactor)
-smart_ads_refactor/mlruns/1/972cf3  ← run criado na raiz (bug de path relativo)
+bring_data/V2/mlruns/1/2a98e51c...   ← modelo ativo (worktree main)
+bring_data_refactor/V2/mlruns/1/...  ← runs do refactor (worktree refactor)
+bring_data_refactor/mlruns/1/972cf3  ← run criado na raiz (bug de path relativo)
 ```
 
 Cada vez que `python -m V2.src.train_pipeline` é executado fora de `V2/`, o SQLite e o `mlruns/` são criados no diretório de trabalho atual. Resultado: runs perdidos, comparações inviáveis, modelo ativo inacessível de outro worktree.
@@ -65,13 +65,13 @@ MLflow 2.x suporta GCS como artifact store **sem precisar de servidor MLflow sep
 ```
 Ambiente local / Cloud Run
          │
-         ├── Tracking URI: gs://smart-ads-mlflow/
+         ├── Tracking URI: gs://bring-data-mlflow/
          │   └── mlflow/<experiment_id>/<run_id>/
          │       ├── metrics/
          │       ├── params/
          │       └── tags/
          │
-         └── Artifact Store: gs://smart-ads-mlflow/artifacts/
+         └── Artifact Store: gs://bring-data-mlflow/artifacts/
              └── <run_id>/
                  ├── model/
                  ├── model_metadata.json
@@ -89,7 +89,7 @@ Tudo no mesmo bucket. Acessível de qualquer worktree e do Cloud Run, desde que 
 ### Passo 1 — Criar bucket GCS
 
 ```bash
-gcloud storage buckets create gs://smart-ads-mlflow \
+gcloud storage buckets create gs://bring-data-mlflow \
   --project=smart-ads-451319 \
   --location=us-central1 \
   --uniform-bucket-level-access
@@ -98,8 +98,8 @@ gcloud storage buckets create gs://smart-ads-mlflow \
 Dar permissão à service account do Cloud Run:
 
 ```bash
-gcloud storage buckets add-iam-policy-binding gs://smart-ads-mlflow \
-  --member="serviceAccount:$(gcloud run services describe smart-ads-api \
+gcloud storage buckets add-iam-policy-binding gs://bring-data-mlflow \
+  --member="serviceAccount:$(gcloud run services describe bring-data-api \
     --region=us-central1 --format='value(spec.template.spec.serviceAccountName)')" \
   --role="roles/storage.admin"
 ```
@@ -110,16 +110,16 @@ Copiar os runs locais (todos os worktrees) para o GCS antes de mudar o código.
 
 ```bash
 # Worktree main (modelo ativo 2a98e51c)
-gsutil -m cp -r /Users/ramonmoreira/Desktop/smart_ads/V2/mlruns/ \
-  gs://smart-ads-mlflow/mlruns/
+gsutil -m cp -r /Users/ramonmoreira/Desktop/bring_data/V2/mlruns/ \
+  gs://bring-data-mlflow/mlruns/
 
 # Worktree refactor (runs do refactor)
-gsutil -m cp -r /Users/ramonmoreira/Desktop/smart_ads_refactor/V2/mlruns/ \
-  gs://smart-ads-mlflow/mlruns/
+gsutil -m cp -r /Users/ramonmoreira/Desktop/bring_data_refactor/V2/mlruns/ \
+  gs://bring-data-mlflow/mlruns/
 
 # Run na raiz do refactor (bug de path)
-gsutil -m cp -r /Users/ramonmoreira/Desktop/smart_ads_refactor/mlruns/ \
-  gs://smart-ads-mlflow/mlruns/
+gsutil -m cp -r /Users/ramonmoreira/Desktop/bring_data_refactor/mlruns/ \
+  gs://bring-data-mlflow/mlruns/
 ```
 
 > **Nota:** Se houver runs com o mesmo `run_id` em múltiplos worktrees (improvável mas possível), o último `cp` vence. Verificar antes.
@@ -136,13 +136,13 @@ mlflow.set_tracking_uri("sqlite:///mlflow.db")
 import os
 _MLFLOW_TRACKING_URI = os.environ.get(
     "MLFLOW_TRACKING_URI",
-    "gs://smart-ads-mlflow"   # default remoto
+    "gs://bring-data-mlflow"   # default remoto
 )
 mlflow.set_tracking_uri(_MLFLOW_TRACKING_URI)
 ```
 
 O `MLFLOW_TRACKING_URI` pode ser sobrescrito por env var, o que permite:
-- Produção/Cloud Run: usa `gs://smart-ads-mlflow` (default ou var explícita)
+- Produção/Cloud Run: usa `gs://bring-data-mlflow` (default ou var explícita)
 - Testes locais sem GCS: `MLFLOW_TRACKING_URI=sqlite:///mlflow.db python -m ...`
 
 ### Passo 4 — Atualizar leitura de artefatos (prediction.py, encoding.py)
@@ -170,9 +170,9 @@ mlruns_path = Path(mlflow.artifacts.download_artifacts(
 ### Passo 5 — Variável de ambiente no Cloud Run
 
 ```bash
-gcloud run services update smart-ads-api \
+gcloud run services update bring-data-api \
   --region=us-central1 \
-  --set-env-vars MLFLOW_TRACKING_URI=gs://smart-ads-mlflow
+  --set-env-vars MLFLOW_TRACKING_URI=gs://bring-data-mlflow
 ```
 
 ### Passo 6 — Adicionar mlflow a api/requirements.txt
@@ -198,7 +198,7 @@ google-cloud-storage>=2.14.0  # já está, confirmar versão
 
 | Componente | Antes | Depois | Risco |
 |---|---|---|---|
-| `training_model.py` | Salva em `sqlite:///mlflow.db` local | Salva em `gs://smart-ads-mlflow` | **Zero produção** — só treino local |
+| `training_model.py` | Salva em `sqlite:///mlflow.db` local | Salva em `gs://bring-data-mlflow` | **Zero produção** — só treino local |
 | `prediction.py` | Lê de `mlruns/1/{run_id}/` dentro do container | `mlflow.artifacts.download_artifacts()` | Apenas em novos deploys |
 | `core/encoding.py` | Lê de `mlruns/` dentro do container | Idem | Apenas em novos deploys |
 | `features/encoding.py` | Idem | Idem | Apenas em novos deploys |
@@ -257,17 +257,17 @@ google-cloud-storage>=2.14.0
 
 ```bash
 # 1. Confirmar que o run está no GCS
-gsutil ls gs://smart-ads-mlflow/1/2a98e51ca4834697bbc94ec3dd31fcf7/
+gsutil ls gs://bring-data-mlflow/1/2a98e51ca4834697bbc94ec3dd31fcf7/
 
 # 2. Confirmar que o treino salva no GCS
-MLFLOW_TRACKING_URI=gs://smart-ads-mlflow \
+MLFLOW_TRACKING_URI=gs://bring-data-mlflow \
   python -m V2.src.train_pipeline --no-api-data --use-cached-data
 
 # 3. Confirmar que o novo run aparece de ambos os worktrees
-# (rodar de smart_ads/ e de smart_ads_refactor/ e ver o mesmo run)
+# (rodar de bring_data/ e de bring_data_refactor/ e ver o mesmo run)
 
 # 4. Confirmar que a API ainda pontua corretamente após deploy
-curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/batch \
+curl -X POST https://bring-data-api-12955519745.us-central1.run.app/predict/batch \
   -H "Content-Type: application/json" \
   -d '{"leads": [...]}'
 ```

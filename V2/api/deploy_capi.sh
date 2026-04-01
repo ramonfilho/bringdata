@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Script de Deploy Automatizado - Smart Ads Lead Scoring API
+# Script de Deploy Automatizado - Bring Data Lead Scoring API
 # =============================================================================
 #
 # Descrição: Automatiza todo o processo de deploy da API no Google Cloud Run
@@ -694,7 +694,7 @@ main() {
     echo ""
     echo "╔════════════════════════════════════════════════════════════════╗"
     echo "║                                                                ║"
-    echo "║       Smart Ads Lead Scoring API - Deploy Automatizado        ║"
+    echo "║       Bring Data Lead Scoring API - Deploy Automatizado        ║"
     echo "║                                                                ║"
     echo "╚════════════════════════════════════════════════════════════════╝"
     echo ""

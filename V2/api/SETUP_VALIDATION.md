@@ -1,4 +1,4 @@
-# 📊 Setup de Validação Semanal - Smart Ads ML
+# 📊 Setup de Validação Semanal - Bring Data ML
 
 Guia completo para configurar o sistema de validação semanal automatizada do modelo ML com notificações no Slack.
 
@@ -75,16 +75,16 @@ Este sistema utiliza **arquitetura modular** seguindo princípios de MLOps:
 # GCP
 PROJECT_ID="smart-ads-451319"
 REGION="us-central1"
-SERVICE_NAME="smart-ads-api"
+SERVICE_NAME="bring-data-api"
 
 # Cloud SQL (PostgreSQL) - CRÍTICO
-CLOUD_SQL_INSTANCE="smart-ads-db"
-DB_NAME="smart_ads"
+CLOUD_SQL_INSTANCE="bring-data-db"
+DB_NAME="bring_data"
 DB_USER="postgres"
 DB_PASSWORD="SmartAds2026DB!"
 
 # Validação
-BUCKET_NAME="smart-ads-validation-reports"
+BUCKET_NAME="bring-data-validation-reports"
 SCHEDULER_JOB="validation-weekly"
 SLACK_WEBHOOK_URL="https://hooks.slack.com/..."
 ```
@@ -121,7 +121,7 @@ export PROJECT_ID="novo-cliente-123"
 ### ⚠️ Por que PostgreSQL é Obrigatório?
 
 **Problema:**
-- SQLite armazena dados em `/tmp/smart_ads_dev.db`
+- SQLite armazena dados em `/tmp/bring_data_dev.db`
 - Cloud Run **destroi** `/tmp/` a cada deploy
 - **TODOS os 20,000+ leads CAPI são PERDIDOS**
 
@@ -139,7 +139,7 @@ O script `setup_validation.sh` **BLOQUEIA** o setup se:
 
 **Você verá este erro se PostgreSQL não estiver OK:**
 ```
-❌ Cloud SQL instance 'smart-ads-db' NÃO ENCONTRADA!
+❌ Cloud SQL instance 'bring-data-db' NÃO ENCONTRADA!
 
 🚨 SETUP BLOQUEADO - POSTGRESQL OBRIGATÓRIO 🚨
 
@@ -155,24 +155,24 @@ PERDIDOS a cada deploy (SQLite fica em /tmp/ que é destruído).
 
 **Verificar se existe:**
 ```bash
-gcloud sql instances describe smart-ads-db --format="value(state)"
+gcloud sql instances describe bring-data-db --format="value(state)"
 # Esperado: RUNNABLE
 ```
 
 **Se não existir, criar:**
 ```bash
 # Criar instance
-gcloud sql instances create smart-ads-db \
+gcloud sql instances create bring-data-db \
   --database-version=POSTGRES_15 \
   --tier=db-f1-micro \
   --region=us-central1
 
 # Criar banco de dados
-gcloud sql databases create smart_ads --instance=smart-ads-db
+gcloud sql databases create bring_data --instance=bring-data-db
 
 # Configurar senha
 gcloud sql users set-password postgres \
-  --instance=smart-ads-db \
+  --instance=bring-data-db \
   --password=SmartAds2026DB!
 ```
 
@@ -200,10 +200,10 @@ Se preferir fazer passo a passo sem o script automatizado:
 
 ```bash
 # Criar bucket
-gsutil mb -l us-central1 gs://smart-ads-validation-reports
+gsutil mb -l us-central1 gs://bring-data-validation-reports
 
 # Tornar público (para links compartilháveis no Slack)
-gsutil iam ch allUsers:objectViewer gs://smart-ads-validation-reports
+gsutil iam ch allUsers:objectViewer gs://bring-data-validation-reports
 ```
 
 ### 2️⃣ Criar Cloud Scheduler Job
@@ -212,7 +212,7 @@ gsutil iam ch allUsers:objectViewer gs://smart-ads-validation-reports
 gcloud scheduler jobs create http validation-weekly \
   --location=us-central1 \
   --schedule="0 10 * * MON" \
-  --uri="https://smart-ads-api-gazrm25mda-uc.a.run.app/validation/weekly" \
+  --uri="https://bring-data-api-gazrm25mda-uc.a.run.app/validation/weekly" \
   --http-method=POST \
   --headers="Content-Type=application/json" \
   --description="Validação semanal do modelo ML (toda segunda 10h UTC)"
@@ -221,15 +221,15 @@ gcloud scheduler jobs create http validation-weekly \
 ### 3️⃣ Configurar Environment Variables
 
 ```bash
-gcloud run services update smart-ads-api \
+gcloud run services update bring-data-api \
   --region=us-central1 \
   --update-env-vars="ENVIRONMENT=production,\
-CLOUD_SQL_CONNECTION_NAME=smart-ads-451319:us-central1:smart-ads-db,\
-DB_NAME=smart_ads,\
+CLOUD_SQL_CONNECTION_NAME=smart-ads-451319:us-central1:bring-data-db,\
+DB_NAME=bring_data,\
 DB_USER=postgres,\
 DB_PASSWORD=SmartAds2026DB!,\
 META_DATA_SOURCE=api,\
-VALIDATION_REPORTS_BUCKET=smart-ads-validation-reports,\
+VALIDATION_REPORTS_BUCKET=bring-data-validation-reports,\
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/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"
 ```
 
@@ -254,13 +254,13 @@ gcloud scheduler jobs run validation-weekly --location=us-central1
 
 ```bash
 # Logs do Cloud Run
-gcloud logging tail "resource.type=cloud_run_revision AND resource.labels.service_name=smart-ads-api"
+gcloud logging tail "resource.type=cloud_run_revision AND resource.labels.service_name=bring-data-api"
 
 # Logs do Scheduler
 gcloud logging read "resource.type=cloud_scheduler_job AND resource.labels.job_id=validation-weekly" --limit=20
 
 # Logs de erros
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=smart-ads-api AND severity>=ERROR" --limit=20
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=bring-data-api AND severity>=ERROR" --limit=20
 ```
 
 ### Pausar/Retomar Validações
@@ -284,17 +284,17 @@ gcloud scheduler jobs describe validation-weekly --location=us-central1 \
   --format="value(scheduleTime)"
 
 # Listar relatórios gerados
-gsutil ls -lh gs://smart-ads-validation-reports/validation/
+gsutil ls -lh gs://bring-data-validation-reports/validation/
 ```
 
 ### Testar Endpoint Manualmente
 
 ```bash
 # Testar dependências (rápido)
-curl https://smart-ads-api-gazrm25mda-uc.a.run.app/validation/test
+curl https://bring-data-api-gazrm25mda-uc.a.run.app/validation/test
 
 # Executar validação completa (lento - ~3-5 minutos)
-curl -X POST https://smart-ads-api-gazrm25mda-uc.a.run.app/validation/weekly
+curl -X POST https://bring-data-api-gazrm25mda-uc.a.run.app/validation/weekly
 ```
 
 ---
@@ -330,7 +330,7 @@ curl -X POST https://smart-ads-api-gazrm25mda-uc.a.run.app/validation/weekly
                      ▼
 ┌──────────────────────────────────────────────────────────┐
 │ 4. Upload Cloud Storage                                  │
-│    gs://smart-ads-validation-reports/validation/...     │
+│    gs://bring-data-validation-reports/validation/...     │
 │    URL pública gerada automaticamente                    │
 └────────────────────┬─────────────────────────────────────┘
                      │
@@ -346,7 +346,7 @@ curl -X POST https://smart-ads-api-gazrm25mda-uc.a.run.app/validation/weekly
 ### Formato da Notificação Slack
 
 ```
-📊 Validação Semanal ML - Smart Ads
+📊 Validação Semanal ML - Bring Data
 
 📅 Período Analisado
    Captação: 2025-12-16
@@ -399,14 +399,14 @@ TIMEOUT="900"  # 15 minutos
 
 **Verificar bucket:**
 ```bash
-gsutil ls -lh gs://smart-ads-validation-reports/validation/
+gsutil ls -lh gs://bring-data-validation-reports/validation/
 ```
 
 **Se vazio:** Problema no script de validação ou upload
 
 **Verificar permissões:**
 ```bash
-gsutil iam get gs://smart-ads-validation-reports
+gsutil iam get gs://bring-data-validation-reports
 ```
 
 Deve conter: `"members": ["allUsers"]`
@@ -432,7 +432,7 @@ gcloud logging read "resource.type=cloud_run_revision AND textPayload=~'validati
 **Solução:**
 1. Verificar Cloud SQL:
    ```bash
-   gcloud sql instances describe smart-ads-db
+   gcloud sql instances describe bring-data-db
    ```
 
 2. Re-executar setup:

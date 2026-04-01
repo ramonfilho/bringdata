@@ -17,7 +17,7 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-API_URL = "https://smart-ads-api-12955519745.us-central1.run.app/capi/send_purchase_events"
+API_URL = "https://bring-data-api-12955519745.us-central1.run.app/capi/send_purchase_events"
 VENDAS_DIR = "V2/data/devclub"
 
 

@@ -64,7 +64,7 @@ def get_capi_events_from_logs(
     start_date: str,
     end_date: str,
     project_id: str = 'smart-ads-451319',
-    service_name: str = 'smart-ads-api'
+    service_name: str = 'bring-data-api'
 ) -> Dict[str, List[str]]:
     """
     Busca eventos CAPI dos logs do Cloud Run
@@ -334,7 +334,7 @@ def count_capi_events_by_campaign(
     start_date: str,
     end_date: str,
     project_id: str = 'smart-ads-451319',
-    service_name: str = 'smart-ads-api',
+    service_name: str = 'bring-data-api',
     csv_path: str = None
 ) -> Dict[str, Dict[str, int]]:
     """

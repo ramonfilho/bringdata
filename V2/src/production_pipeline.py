@@ -17,7 +17,7 @@ from .core.utm import unify_utm
 from .core.medium import unify_medium as _unify_medium
 from .core.category_unification import unify_categories as _unify_categories
 from .core.feature_engineering import create_features as _create_features
-from .core.encoding import apply_encoding as _apply_encoding
+from .core.encoding import apply_encoding as _apply_encoding, merge_encoding as _merge_encoding
 from .model.prediction import LeadScoringPredictor
 from .monitoring.data_quality import check_category_drift, load_training_categories, check_distribution_drift, load_training_distributions
 
@@ -194,9 +194,15 @@ class LeadScoringPipeline:
             logger.error(f" Erro ao verificar category drift: {e}")
             return []
 
-    def preprocess(self) -> pd.DataFrame:
+    def preprocess(self, encoding_overrides=None, predictor_override=None) -> pd.DataFrame:
         """
         Aplica pré-processamento aos dados.
+
+        Args:
+            encoding_overrides: EncodingConfig com overrides a mesclar (DT-12).
+            predictor_override: Predictor da variante A/B. Quando fornecido, o feature
+                                registry desse predictor é usado para alinhar features no
+                                encoding (passo 7), em vez do predictor base da pipeline.
 
         Returns:
             DataFrame pré-processado
@@ -230,9 +236,12 @@ class LeadScoringPipeline:
         logger.info(f"    Term: {utm_term_before}{utm_term_after} categorias")
         logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
-        # Construir artifacts uma vez — reutilizado por medium e encoding
-        mlflow_run_id = self.predictor.mlflow_run_id if hasattr(self.predictor, 'mlflow_run_id') else None
-        model_path = str(self.predictor.model_path) if self.predictor.model_path and not mlflow_run_id else None
+        # Construir artifacts uma vez — reutilizado por medium e encoding.
+        # Usa o predictor da variante quando fornecido (DT-12): garante que o feature
+        # registry do modelo correto seja usado no passo 7 do encoding.
+        _effective_predictor = predictor_override or self.predictor
+        mlflow_run_id = _effective_predictor.mlflow_run_id if hasattr(_effective_predictor, 'mlflow_run_id') else None
+        model_path = str(_effective_predictor.model_path) if _effective_predictor.model_path and not mlflow_run_id else None
         _artifacts = {}
         if mlflow_run_id:
             _artifacts['mlflow_run_id'] = mlflow_run_id
@@ -343,7 +352,8 @@ class LeadScoringPipeline:
         logger.info(" [10/12] Aplicando encoding categórico...")
         cols_before_encoding = len(self.data.columns)
 
-        self.data = _apply_encoding(self.data, self._client_config.encoding, _artifacts)
+        effective_encoding = _merge_encoding(self._client_config.encoding, encoding_overrides)
+        self.data = _apply_encoding(self.data, effective_encoding, _artifacts)
 
         encoding_cols_added = len(self.data.columns) - cols_before_encoding
         logger.info(f"    Colunas adicionadas pelo encoding: {encoding_cols_added}")
@@ -387,7 +397,7 @@ class LeadScoringPipeline:
 
         return result
 
-    def run(self, filepath: str, with_predictions: bool = False, predictor_override: "LeadScoringPredictor" = None) -> pd.DataFrame:
+    def run(self, filepath: str, with_predictions: bool = False, predictor_override: "LeadScoringPredictor" = None, encoding_overrides=None) -> pd.DataFrame:
         """
         Executa o pipeline completo.
 
@@ -416,8 +426,8 @@ class LeadScoringPipeline:
         # Carregar dados
         self.load_data(filepath)
 
-        # Pré-processar
-        self.preprocess()
+        # Pré-processar (passa predictor_override para usar o feature registry correto — DT-12)
+        self.preprocess(encoding_overrides=encoding_overrides, predictor_override=predictor_override)
 
         # Fazer predições se solicitado
         if with_predictions:

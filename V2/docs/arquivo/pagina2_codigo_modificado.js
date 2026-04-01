@@ -172,7 +172,7 @@ function submitFormData() {
   console.log('📦 Payload PostgreSQL montado:', payload);
 
   // 5. Enviar para webhook do Cloud Run (PostgreSQL)
-  const webhookURL = 'https://smart-ads-api-12955519745.us-central1.run.app/webhook/update_survey';
+  const webhookURL = 'https://bring-data-api-12955519745.us-central1.run.app/webhook/update_survey';
 
   fetch(webhookURL, {
     method: 'POST',

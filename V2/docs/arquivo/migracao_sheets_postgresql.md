@@ -231,10 +231,10 @@ WHERE created_at > NOW() - INTERVAL '24 hours';
 
 ```bash
 # SQL
-gcloud sql connect smart-ads-db --user=postgres --project=smart-ads-451319
+gcloud sql connect bring-data-db --user=postgres --project=smart-ads-451319
 
 # Deploy
-gcloud run deploy smart-ads-api --source . --region us-central1
+gcloud run deploy bring-data-api --source . --region us-central1
 
 # Logs
 gcloud logs tail --filter="resource.type=cloud_run_revision"

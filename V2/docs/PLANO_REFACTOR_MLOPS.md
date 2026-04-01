@@ -1,4 +1,4 @@
-# Plano de Refatoração MLOps — Smart Ads V2
+# Plano de Refatoração MLOps — Bring Data V2
 
 **Data:** 2026-02-23
 **Status:** Ativo — v1.0
@@ -58,7 +58,7 @@ O sistema atual foi construído para um único cliente (DevClub). O código func
 ## 3. Nova Estrutura de Diretórios
 
 ```
-smart_ads/V2/
+bring_data/V2/
 ├── src/
 │   ├── core/                        # NOVO — Single Source of Truth
 │   │   ├── client_config.py         # ClientConfig dataclass + todos os sub-configs
@@ -252,7 +252,7 @@ Varredura concluída — 153 hardcodes mapeados. Hardcodes #1–#89 (treino, pro
 | 117 | `api/app.py:1892` | Lista de termos genéricos para excluir da análise de Term: `['fb', 'ig', 'instagram', 'facebook']` | resolvido por `api.generic_utm_terms` (mesmo que #109) |
 | 118 | `api/app.py:2171` | Set de UTMs genéricos para excluir de análise de Medium: `GENERIC_UTMS = {'paid', 'dgen', 'facebook', 'instagram', 'meta', 'fb', 'ig', 'cpc'}` | `api.generic_utms_set` |
 | 119 | `api/app.py:2897` | Fator multiplicador de eventos CAPI por lead: `1.3` — duplicata de `orchestrator.py:752` (#82) | resolvido por `monitoring.capi_events_per_lead_estimate` (mesmo que #82) |
-| 120 | `api/app.py:3152,3285` | Nome do bucket GCS para relatórios de validação como fallback: `'smart-ads-validation-reports'` | `infra.validation_bucket` |
+| 120 | `api/app.py:3152,3285` | Nome do bucket GCS para relatórios de validação como fallback: `'bring-data-validation-reports'` | `infra.validation_bucket` |
 | 121 | `api/app.py:3217-3220` | ⚠️ TEMPORÁRIO — datas de campanha hardcoded no endpoint `/validation/weekly`: `'2025-12-16'`, `'2026-01-12'` etc. — o próprio código tem TODO | remover — endpoint deve usar `PeriodCalculator` automaticamente |
 | 122 | `api/app.py:3447` | Limite de leads por execução no polling Railway: `LIMIT 50` | `api.railway_polling_batch_size` |
 
@@ -271,7 +271,7 @@ Varredura concluída — 153 hardcodes mapeados. Hardcodes #1–#89 (treino, pro
 | # | Arquivo | Hardcode | Campo sugerido |
 |---|---------|----------|---------------|
 | 123 | `validate_ml_performance.py:825` | Path default para dados de vendas: `'V2/data/devclub'` — contém nome do cliente | `validation.default_vendas_path` |
-| 124 | `validate_ml_performance.py:902` | URL do Cloud Run como fallback de `INTERNAL_API_URL`: `'https://smart-ads-api-12955519745.us-central1.run.app'` — URL específica do projeto DevClub | `infra.api_url` (env var `INTERNAL_API_URL` já existe; remover fallback hardcoded) |
+| 124 | `validate_ml_performance.py:902` | URL do Cloud Run como fallback de `INTERNAL_API_URL`: `'https://bring-data-api-12955519745.us-central1.run.app'` — URL específica do projeto DevClub | `infra.api_url` (env var `INTERNAL_API_URL` já existe; remover fallback hardcoded) |
 | 125 | `validate_ml_performance.py:1933-1944` | Keywords de nomes de campanha DevClub na função `format_campaign_name`: `'MACHINE LEARNING'`, `'ESCALA SCORE'`, `'FAIXA A'`, `'FAIXA B'`, `'FAIXA C'` — estrutura de nomenclatura específica DevClub | `validation.campaign_type_keywords` |
 | 126 | `validate_ml_performance.py:1951-1952` | Tipo e temperatura de campanha DevClub: `'CAP'`, `'RET'` (tipo) e `'FRIO'`, `'MORNO'` (temperatura) — convenção de nomenclatura DevClub | `validation.campaign_type_labels` + `validation.campaign_temp_labels` |
 | 127 | `validate_ml_performance.py:633` | Taxa de tracking default: `0.5` (50%) — estimativa de cobertura de conversões para DevClub | `validation.default_tracking_rate` |
@@ -296,8 +296,8 @@ Duplicatas encontradas (resolução via campo já mapeado):
 | 132 | `data_loader.py:817,821,823` | Status TMB: `'Status Pedido'`/`'Status'` (coluna) e `'Efetivado'`/`'Cancelado'` (valores) | `validation.tmb_status_column` + `validation.tmb_status_values` |
 | 133 | `data_loader.py:828-876` | Colunas TMB: `'Pedido'`, `'Cliente Email'`, `'Cliente E-mail'`, `'Cliente Nome'`, `'Cliente Telefone'`, `'Ticket (R$)'`, `'Data Efetivado'`, `'Criado Em'`, `'Grau de risco'` — estrutura do arquivo TMB DevClub | `validation.tmb_column_names` |
 | 134 | `data_loader.py:700,1003` | Priority map para deduplicação de vendas Guru: `{'Aprovada': 1, 'Cancelada': 2}` — depende dos status values (#130) | resolves via `validation.guru_status_values` (mesmo que #130) |
-| 135 | `data_loader.py:1110` | URL do Cloud Run como default do `CAPILeadDataLoader`: `"https://smart-ads-api-12955519745.us-central1.run.app"` — duplicata de #124 no contexto de `__init__` | resolves via `infra.api_url` (mesmo que #124) |
-| 136 | `data_loader.py:733` | `VALIDATION_REPORTS_BUCKET` fallback: `'smart-ads-validation-reports'` | resolves via `infra.validation_bucket` (mesmo que #120) |
+| 135 | `data_loader.py:1110` | URL do Cloud Run como default do `CAPILeadDataLoader`: `"https://bring-data-api-12955519745.us-central1.run.app"` — duplicata de #124 no contexto de `__init__` | resolves via `infra.api_url` (mesmo que #124) |
+| 136 | `data_loader.py:733` | `VALIDATION_REPORTS_BUCKET` fallback: `'bring-data-validation-reports'` | resolves via `infra.validation_bucket` (mesmo que #120) |
 | 137 | `data_loader.py:734` | Path do blob TMB no GCS: `f'vendas/tmb_{report_type}.xlsx'` — convenção de nomenclatura do projeto | `validation.tmb_gcs_blob_prefix` |
 
 **`src/validation/campaign_classifier.py` — ✅ varrido (#138–#139):**
@@ -890,6 +890,29 @@ Imports de `core/utm`, `core/medium`, `core/category_unification`, `core/preproc
 **Fix:** mover os 5 imports para o topo de `monitoring/orchestrator.py`, junto com os outros imports existentes.
 
 **Prioridade:** baixa — não impacta correção, apenas observabilidade de erros de import.
+
+---
+
+### DT-12 — Encoding por variante A/B (`encoding_overrides`)
+
+**Problema:** `ClientConfig.encoding` é config de cliente — global para todos os modelos. Com o A/B test Champion jan30 × Challenger mar24, os dois modelos têm expectativas opostas para idade e faixa salarial: jan30 foi treinado com ordinal (coluna única `Qual_a_sua_idade = 0..5`), mar24 com OHE (`Qual_a_sua_idade_18_24_anos` etc.). A produção usa OHE → jan30 recebe `Qual_a_sua_idade = 0` para todos os leads → skew de treino/produção silencioso nos dois features mais preditivos de renda.
+
+**Raiz histórica:** `encoding_training.py` usava nomes curtos (`'idade'`) que não existiam no DataFrame → ordinal falhava silenciosamente → OHE acidental no treino. O fix de 15/03 (`9b86d37`) alinhou produção ao OHE do modelo ativo na época; jan30 foi promovido a Champion depois sem reverter. Mar24 foi treinado após o fix, com OHE correto.
+
+**Solução config-driven (princípio de reprodutibilidade):**
+
+1. `ABTestVariantConfig` recebe campo `encoding_overrides: Optional[EncodingConfig] = None`
+2. `merge_encoding(base, override)` em `core/encoding.py` — copia base e aplica campos não-None do override; `ordinal_variables` é merged (union, override vence conflitos)
+3. `production_pipeline.preprocess(encoding_overrides=None)` aplica `merge_encoding` antes de chamar `apply_encoding`
+4. `production_pipeline.run(encoding_overrides=None)` repassa para `preprocess`
+5. `api/app.py` passa `ab_variant.encoding_overrides` ao chamar `pipeline.run()` por grupo A/B
+6. `active_models/devclub.yaml` → variante `guru_jan30` recebe `encoding_overrides.ordinal_variables` com os mapeamentos de idade e salário
+
+**Impacto:** mar24 sem `encoding_overrides` → comportamento idêntico ao atual (OHE). Jan30 com overrides → ordinal correto. Funciona para Cliente B sem nenhum código extra — se o cliente não tiver A/B ou não precisar de override, o campo simplesmente fica `None`.
+
+**Arquivos:** `src/core/client_config.py`, `src/core/encoding.py`, `src/production_pipeline.py`, `api/app.py`, `configs/active_models/devclub.yaml`
+
+**Prioridade:** alta — A/B test atual está com jan30 em desvantagem estrutural.
 
 ---
 

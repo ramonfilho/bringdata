@@ -12,7 +12,7 @@
 // CONFIGURAÇÕES
 // =============================================================================
 
-const API_URL = 'https://smart-ads-api-12955519745.us-central1.run.app';
+const API_URL = 'https://bring-data-api-12955519745.us-central1.run.app';
 const SERVICE_ACCOUNT_EMAIL = 'smart-ads-451319@appspot.gserviceaccount.com';
 const META_ACCOUNT_ID = 'act_188005769808959';  // Los Angeles Producciones LTDA (PRODUÇÃO)
 const SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/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';
@@ -26,7 +26,7 @@ const SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/T09UCF22L9Z/B0AAPM5N
  */
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
-  ui.createMenu('Smart Ads')
+  ui.createMenu('Bring Data')
     .addItem('Ativar Polling 5min', 'agendarGatilho5Min')
     .addSeparator()
     .addItem('Reprocessar leads sem score', 'reprocessarLeadsSemScore')
@@ -323,7 +323,7 @@ function executarPolling5Min() {
  * Processa até 500 leads por execução (limite de 6min do Apps Script).
  * Execute novamente até zerar os pendentes — cada run pula automaticamente
  * os leads que já ganharam score na execução anterior.
- * Executar pelo menu: Smart Ads → Reprocessar leads sem score
+ * Executar pelo menu: Bring Data → Reprocessar leads sem score
  */
 function reprocessarLeadsSemScore() {
   const CHUNK_SIZE = 500;
@@ -527,11 +527,11 @@ function enviarSumarioParaSlack(summaryText, totalAlerts) {
     const color = totalAlerts > 0 ? '#ff0000' : '#36a64f';
 
     const payload = {
-      text: '🔍 *Relatório de Monitoramento Smart Ads*',
+      text: '🔍 *Relatório de Monitoramento Bring Data*',
       attachments: [{
         color: color,
         text: '```\n' + summaryText + '\n```',
-        footer: 'Smart Ads Monitoring System',
+        footer: 'Bring Data Monitoring System',
         footer_icon: 'https://platform.slack-edge.com/img/default_application_icon.png',
         ts: Math.floor(Date.now() / 1000)
       }]

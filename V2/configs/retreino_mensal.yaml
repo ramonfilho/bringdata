@@ -1,5 +1,5 @@
 # =============================================================================
-# Configuração do Pipeline de Retreino Mensal - Smart Ads ML
+# Configuração do Pipeline de Retreino Mensal - Bring Data ML
 # =============================================================================
 #
 # Este arquivo configura o pipeline automatizado de retreino mensal com:
@@ -134,7 +134,7 @@ comparison:
 # =============================================================================
 deployment:
   # Google Cloud Storage
-  gcs_bucket: "smart-ads-ml-artifacts"
+  gcs_bucket: "bring-data-ml-artifacts"
   models_path: "models/"
 
   # Configuração do modelo ativo

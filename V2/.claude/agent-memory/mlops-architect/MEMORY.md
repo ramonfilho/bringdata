@@ -1,4 +1,4 @@
-# Smart Ads - MLOps Architect Memory
+# Bring Data - MLOps Architect Memory
 
 ## Project Overview
 - Lead scoring system for DevClub (educational product)
@@ -6,7 +6,7 @@
 - Migrating from Google Sheets + Cloud SQL (GCP) to Railway PostgreSQL
 
 ## Architecture (AS-IS)
-- **API**: FastAPI on Cloud Run (`/Users/ramonmoreira/Desktop/smart_ads/V2/api/app.py`)
+- **API**: FastAPI on Cloud Run (`/Users/ramonmoreira/Desktop/bring_data/V2/api/app.py`)
 - **ML Pipeline**: `src/production_pipeline.py` - LeadScoringPipeline class (11 steps, 0.5-5s)
 - **Monitoring**: `src/monitoring/orchestrator.py` - MonitoringOrchestrator (drift, CAPI quality, Slack)
 - **Cloud SQL (GCP)**: `leads_capi` table (SQLAlchemy model in `api/database.py`)
