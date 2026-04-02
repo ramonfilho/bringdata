@@ -1307,13 +1307,16 @@ class SalesDataLoader:
 
         return df_norm
 
-    def load_asaas_sales(self, start_date: str, end_date: str) -> pd.DataFrame:
+    def load_asaas_sales(self, start_date: str, end_date: str,
+                         product_value: float = None) -> pd.DataFrame:
         """
         Carrega vendas da API do Asaas no período (com cache parquet).
 
         Args:
             start_date: Data inicial (YYYY-MM-DD) — filtra por clientPaymentDate
             end_date: Data final (YYYY-MM-DD)
+            product_value: Valor total do produto para entradas sem parcelamento registrado.
+                           Ignorado se cache já existir.
 
         Returns:
             DataFrame normalizado com origem='asaas'
@@ -1325,7 +1328,9 @@ class SalesDataLoader:
 
         from src.validation.asaas_sales_extractor import AsaasSalesExtractor
         extractor = AsaasSalesExtractor()
-        df = extractor.generate_report(start_date=start_date, end_date=end_date)
+        df = extractor.generate_report(
+            start_date=start_date, end_date=end_date, product_value=product_value
+        )
         # Remover colunas internas de debug antes de salvar
         debug_cols = [c for c in df.columns if c.startswith('_')]
         if debug_cols:
@@ -1346,6 +1351,7 @@ class SalesDataLoader:
                      hotpay_paths: List[str] = None,
                      hotmart_api_start: str = None, hotmart_api_end: str = None,
                      asaas_api_start: str = None, asaas_api_end: str = None,
+                     asaas_product_value: float = None,
                      report_type: str = 'fechamento', include_canceled: bool = False) -> pd.DataFrame:
         """
         Combina vendas da Guru, TMB, HotPay, Hotmart e Asaas em um único DataFrame.
@@ -1363,6 +1369,7 @@ class SalesDataLoader:
             hotmart_api_end: Data fim para buscar vendas Hotmart via API (YYYY-MM-DD)
             asaas_api_start: Data início para buscar vendas Asaas via API (YYYY-MM-DD)
             asaas_api_end: Data fim para buscar vendas Asaas via API (YYYY-MM-DD)
+            asaas_product_value: Valor total do produto Asaas para entradas sem parcelamento
             report_type: Tipo de relatório ('fechamento' ou 'pos-devolucoes') para buscar TMB no GCS
             include_canceled: Se True, inclui vendas canceladas da Guru (para relatório de fechamento)
 
@@ -1385,7 +1392,9 @@ class SalesDataLoader:
         if hotmart_df is None and hotmart_api_start and hotmart_api_end:
             hotmart_df = self.load_hotmart_sales_from_api(hotmart_api_start, hotmart_api_end)
         if asaas_df is None and asaas_api_start and asaas_api_end:
-            asaas_df = self.load_asaas_sales(asaas_api_start, asaas_api_end)
+            asaas_df = self.load_asaas_sales(
+                asaas_api_start, asaas_api_end, product_value=asaas_product_value
+            )
 
         # Combinar DataFrames
         dfs = []

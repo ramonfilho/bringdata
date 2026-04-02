@@ -1344,6 +1344,18 @@ def run(extra_period: dict = None):
     build_excel(all_rows, output_path)
     print(f"✅ Salvo: {output_path}")
 
+    # Adicionar Síntese Executiva automaticamente
+    try:
+        import sys as _sys
+        _scripts_dir = str(Path(__file__).parent)
+        if _scripts_dir not in _sys.path:
+            _sys.path.insert(0, _scripts_dir)
+        from gerar_evolucao_margem import update_sintese
+        print("\nGerando Síntese Executiva...")
+        update_sintese(output_path, periods)
+    except Exception as _e:
+        print(f"  Aviso: erro ao gerar Síntese Executiva: {_e}")
+
     import subprocess as sp
     sp.run(['open', str(output_path)], check=False)
 

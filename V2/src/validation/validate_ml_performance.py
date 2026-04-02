@@ -1373,6 +1373,7 @@ def main():
         hotmart_api_end=hotmart_end,
         asaas_api_start=asaas_start,
         asaas_api_end=asaas_end,
+        asaas_product_value=config.get('ticket_contracted') or config.get('product_value'),
         report_type=args.report_type,
         include_canceled=include_canceled
     )

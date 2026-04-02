@@ -96,13 +96,18 @@ def parse_comparacao_ml(xlsx_path: Path) -> dict:
     mml  = result['margem_ml']  or 0
     mctl = result['margem_ctrl'] or 0
 
-    # Usar totais reais do lançamento (bloco "TOTAIS DO LANÇAMENTO") quando disponível.
-    # Esses valores cobrem TODAS as campanhas, não só ML+Controle.
-    result['gasto_total']   = result.get('gasto_all')   or (gml + gctl)
+    # gasto_total: usa TOTAIS DO LANÇAMENTO (cobre TODAS as campanhas)
+    result['gasto_total'] = result.get('gasto_all') or (gml + gctl)
+
+    # receita_total para DISPLAY: usa TOTAIS extrapolado quando disponível
     result['receita_total'] = result.get('receita_all') or (rml + rctl)
-    # Margem = Receita - Gasto, calculada consistentemente (não usar margem_all do xlsx
-    # pois ela usa base diferente de cálculo dependendo do relatório)
-    result['margem_total']  = result['receita_total'] - result['gasto_total']
+
+    # receita para CÁLCULO DE MARGEM/GANHO: usa receita rastreada (ML + Controle)
+    # roas_ctrl vem da seção de comparação (base rastreada). Misturar com receita
+    # extrapolada do TOTAIS infla o ganho artificialmente — bases incompatíveis.
+    tracked_receita = (rml or 0) + (rctl or 0)
+    receita_calc = tracked_receita if tracked_receita > 0 else result['receita_total']
+    result['margem_total'] = receita_calc - result['gasto_total']
 
     roas_ctrl = result['roas_ctrl']
     if roas_ctrl and roas_ctrl > 0 and result['gasto_total'] > 0:
@@ -195,6 +200,8 @@ def _parse_novo(df: pd.DataFrame, result: dict):
             result['roas_ml'], result['roas_ctrl'] = v1, v2
         elif label == 'Margem':
             result['margem_ml'], result['margem_ctrl'] = v1, v2
+        elif label == 'Conversões':
+            result['conv_ml'], result['conv_ctrl'] = v1, v2
 
 
 def _parse_antigo(df: pd.DataFrame, result: dict):
@@ -550,7 +557,364 @@ def _gerar_graficos(data: dict, lancamentos: list):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. MAIN (standalone)
+# 6. SÍNTESE EXECUTIVA
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Critérios de flag de outlier (incluídos nos totais, mas identificados)
+_OUTLIER_GASTO_MIN   = 35_000   # lançamentos muito pequenos → ruído
+_OUTLIER_CTRL_ROAS   = 2.5      # controle sazonalmente alto → distorce baseline
+_OUTLIER_GASTO_MAX   = 150_000  # lançamentos de escala atípica (ex: DEV19)
+_OUTLIER_CONV_CTRL   = 10       # grupo Ctrl com < 10 conversões → estimativa instável
+
+
+def _flags(m: dict) -> list[str]:
+    flags = []
+    gasto = m.get('gasto_total') or 0
+    if gasto < _OUTLIER_GASTO_MIN:
+        flags.append('baixo gasto')
+    if gasto > _OUTLIER_GASTO_MAX:
+        flags.append('escala atípica')
+    ctrl = m.get('roas_ctrl')
+    if ctrl and ctrl > _OUTLIER_CTRL_ROAS:
+        flags.append('ctrl sazonal')
+    conv_ctrl = m.get('conv_ctrl') or 0
+    if ctrl and 0 < conv_ctrl < _OUTLIER_CONV_CTRL:
+        flags.append('ctrl insuficiente')
+    return flags
+
+
+def add_sintese_sheet(xlsx_path: Path, data: dict, lancamentos: list) -> None:
+    """
+    Adiciona/atualiza sheet 'Síntese Executiva' no xlsx de evolução.
+
+    Separa dois regimes:
+      - A/B Verificado: lançamentos com grupo Controle simultâneo
+      - ML-only Estimado: sem Controle; usa mediana histórica como baseline
+
+    Args:
+        xlsx_path:    caminho para o arquivo xlsx de evolução
+        data:         dict {name: metrics} já calculado por add_margem_sheet
+        lancamentos:  lista ordenada de nomes de lançamentos
+    """
+    if not data or not lancamentos:
+        print("  Síntese: sem dados disponíveis")
+        return
+
+    # ── 1. Classificar lançamentos ────────────────────────────────────────────
+    ab_launches   = []   # tem Controle real
+    ml_only       = []   # sem Controle
+
+    for name in lancamentos:
+        m = data[name]
+        has_ctrl = (m.get('roas_ctrl') or 0) > 0 and (m.get('gasto_ctrl') or 0) > 0
+        if has_ctrl:
+            ab_launches.append(name)
+        else:
+            ml_only.append(name)
+
+    # ── 2. Baseline Control: mediana dos A/B sem nenhum flag ─────────────────────
+    baseline_roas_vals = []
+    for name in ab_launches:
+        m = data[name]
+        ctrl = m.get('roas_ctrl')
+        if ctrl and not _flags(m):  # exclui baixo gasto, ctrl sazonal e escala atípica
+            baseline_roas_vals.append(ctrl)
+
+    baseline = float(np.median(baseline_roas_vals)) if baseline_roas_vals else 1.356
+
+    # ── 3. Calcular ganho para ML-only usando baseline ─────────────────────────
+    for name in ml_only:
+        m = data[name]
+        gt = m.get('gasto_total') or 0
+        if gt > 0:
+            m['roas_ctrl_proxy']  = baseline
+            m['margem_cf']        = gt * baseline - gt
+            m['ganho_margem']     = (m.get('margem_total') or 0) - m['margem_cf']
+        else:
+            m['roas_ctrl_proxy']  = None
+            m['margem_cf']        = None
+            m['ganho_margem']     = None
+
+    # ── 4. Totais ─────────────────────────────────────────────────────────────
+    def _sum(names, key):
+        return sum(data[n].get(key) or 0 for n in names)
+
+    def _agg(names):
+        gasto  = _sum(names, 'gasto_total')
+        ganho  = _sum(names, 'ganho_margem')
+        wins   = sum(1 for n in names if (data[n].get('ganho_margem') or 0) > 0)
+        return gasto, ganho, wins
+
+    ab_gasto,  ab_ganho,  ab_wins  = _agg(ab_launches)
+    ml_gasto,  ml_ganho,  ml_wins  = _agg(ml_only)
+    tot_gasto = ab_gasto + ml_gasto
+    tot_ganho = ab_ganho + ml_ganho
+
+    # A/B sem outliers
+    ab_clean = [n for n in ab_launches if not _flags(data[n])]
+    ab_clean_gasto, ab_clean_ganho, ab_clean_wins = _agg(ab_clean)
+
+    def _median_roas_ml(names):
+        vals = [data[n].get('roas_ml') for n in names if data[n].get('roas_ml')]
+        return float(np.median(vals)) if vals else None
+
+    def _median_roas_ctrl(names):
+        vals = [data[n].get('roas_ctrl') for n in names if data[n].get('roas_ctrl')]
+        return float(np.median(vals)) if vals else None
+
+    # ── 5. Estilos ─────────────────────────────────────────────────────────────
+    AZUL_ESC   = PatternFill('solid', fgColor='1E3A5F')
+    AZUL_CLAR  = PatternFill('solid', fgColor='D0E4F7')
+    CINZA      = PatternFill('solid', fgColor='E8EAED')
+    VERDE      = PatternFill('solid', fgColor='C6EFCE')
+    AMARELO    = PatternFill('solid', fgColor='FFEB9C')
+    VERMELHO   = PatternFill('solid', fgColor='FFCCCC')
+    LARANJA    = PatternFill('solid', fgColor='FCE4D6')
+
+    fnt_titulo  = Font(bold=True, size=13, color='1E3A5F')
+    fnt_header  = Font(bold=True, size=10, color='FFFFFF')
+    fnt_section = Font(bold=True, size=10, color='1E3A5F')
+    fnt_normal  = Font(size=10)
+    fnt_small   = Font(size=9, italic=True, color='666666')
+    fnt_bold    = Font(bold=True, size=10)
+    fnt_kpi     = Font(bold=True, size=14, color='1E3A5F')
+
+    al_ctr = Alignment(horizontal='center', vertical='center')
+    al_lft = Alignment(horizontal='left',   vertical='center')
+
+    def _write(ws, row, col, val, font=None, fill=None, align=None):
+        c = ws.cell(row, col, val)
+        if font:  c.font  = font
+        if fill:  c.fill  = fill
+        if align: c.alignment = align
+        return c
+
+    def _header_row(ws, row, labels, fills=None):
+        for i, lbl in enumerate(labels, 1):
+            f = fills[i-1] if fills else AZUL_ESC
+            _write(ws, row, i, lbl, font=fnt_header, fill=f, align=al_ctr)
+
+    def _section_title(ws, row, title, ncols=8):
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=ncols)
+        c = ws.cell(row, 1, title)
+        c.font  = fnt_section
+        c.fill  = AZUL_CLAR
+        c.alignment = al_lft
+        return row + 1
+
+    def _brl(v):
+        if v is None: return '—'
+        sign = '+' if v > 0 else ''
+        return f"{sign}R$ {v:,.0f}".replace(',', 'X').replace('.', ',').replace('X', '.')
+
+    def _roas(v):
+        return f'{v:.2f}x' if v else '—'
+
+    def _cents(ganho, gasto):
+        if not gasto: return '—'
+        return f'{ganho/gasto*100:.0f}¢/R$1'
+
+    def _pct(ganho, cf):
+        if not cf or cf == 0: return '—'
+        return f'+{ganho/cf*100:.0f}%'
+
+    # ── 6. Criar/Recriar sheet ─────────────────────────────────────────────────
+    wb = load_workbook(xlsx_path)
+    if 'Síntese Executiva' in wb.sheetnames:
+        del wb['Síntese Executiva']
+    ws = wb.create_sheet('Síntese Executiva', 0)  # primeira aba
+
+    # Larguras de coluna
+    col_widths = [22, 10, 14, 12, 16, 14, 10, 20]
+    for i, w in enumerate(col_widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = w
+
+    row = 1
+
+    # ── Título ────────────────────────────────────────────────────────────────
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
+    _write(ws, row, 1, 'SÍNTESE EXECUTIVA — Performance ML', font=fnt_titulo, align=al_lft)
+    ws.row_dimensions[row].height = 24
+    row += 1
+
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
+    _write(ws, row, 1,
+           f'Atualizado em {datetime.now().strftime("%d/%m/%Y %H:%M")}  |  '
+           f'{len(lancamentos)} lançamentos  |  Baseline Controle: {baseline:.3f}x',
+           font=fnt_small, align=al_lft)
+    row += 2
+
+    # ── KPI Cards ─────────────────────────────────────────────────────────────
+    row = _section_title(ws, row, 'RESUMO GERAL', ncols=8)
+    kpis = [
+        ('Ganho Total\n(A/B + estimado)', _brl(tot_ganho), VERDE),
+        ('¢ extras/R$1\n(total)', _cents(tot_ganho, tot_gasto), VERDE),
+        ('Ganho A/B\nverificado', _brl(ab_ganho), AZUL_CLAR),
+        ('¢ extras/R$1\n(A/B)', _cents(ab_ganho, ab_gasto), AZUL_CLAR),
+        ('Ganho A/B\n(sem outliers)', _brl(ab_clean_ganho), AZUL_CLAR),
+        ('¢ extras/R$1\n(sem outliers)', _cents(ab_clean_ganho, ab_clean_gasto), AZUL_CLAR),
+        ('Win rate\ngeral', f'{ab_wins + ml_wins}/{len(lancamentos)}', CINZA),
+        ('Baseline\nControle', _roas(baseline), CINZA),
+    ]
+    ws.row_dimensions[row].height = 36
+    ws.row_dimensions[row+1].height = 36
+    for i, (lbl, val, fill) in enumerate(kpis, 1):
+        _write(ws, row,   i, lbl, font=fnt_small, fill=fill, align=al_ctr)
+        _write(ws, row+1, i, val, font=fnt_kpi,   fill=fill, align=al_ctr)
+    row += 3
+
+    # ── Tabela por Lançamento ─────────────────────────────────────────────────
+    row = _section_title(ws, row, 'RESULTADO POR LANÇAMENTO', ncols=8)
+    _header_row(ws, row, ['Lançamento', 'Tipo', 'Gasto', 'ROAS ML', 'ROAS Ctrl / Base', 'Ganho ML', 'Ganho %', 'Flags'])
+    row += 1
+
+    for name in lancamentos:
+        m = data[name]
+        flags = _flags(m)
+        is_ab = name in ab_launches
+        tipo  = 'A/B' if is_ab else 'ML-only'
+
+        roas_ref = m.get('roas_ctrl') if is_ab else m.get('roas_ctrl_proxy')
+        ganho    = m.get('ganho_margem')
+        cf       = m.get('margem_cf')
+
+        # Cor da linha
+        if ganho is None:
+            row_fill = CINZA
+        elif ganho > 0:
+            row_fill = VERDE if not flags else AMARELO
+        else:
+            row_fill = VERMELHO
+
+        vals = [
+            name,
+            tipo,
+            _brl(m.get('gasto_total')).replace('+', ''),
+            _roas(m.get('roas_ml')),
+            (_roas(roas_ref) + ('' if is_ab else ' *')),
+            _brl(ganho),
+            _pct(ganho, cf) if ganho and cf else '—',
+            ', '.join(flags) if flags else '✓',
+        ]
+        for col, val in enumerate(vals, 1):
+            _write(ws, row, col, val, font=fnt_normal, fill=row_fill, align=al_ctr if col > 1 else al_lft)
+        row += 1
+
+    # Nota proxy
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
+    _write(ws, row, 1, f'* ML-only: sem Controle simultâneo; contrafactual estimado usando baseline {baseline:.3f}x (mediana histórica)',
+           font=fnt_small, align=al_lft)
+    row += 2
+
+    # ── Detalhe Regime A/B ────────────────────────────────────────────────────
+    row = _section_title(ws, row, f'REGIME A/B — VERIFICADO  ({len(ab_launches)} lançamentos com Controle simultâneo)', ncols=8)
+    ab_rows = [
+        ('Gasto total',            _brl(ab_gasto).replace('+', '')),
+        ('Margem CF total',        _brl(_sum(ab_launches, "margem_cf"))),
+        ('Margem real total',      _brl(_sum(ab_launches, "margem_total"))),
+        ('Ganho incremental',      _brl(ab_ganho)),
+        ('¢ extras por R$1',       _cents(ab_ganho, ab_gasto)),
+        ('ROAS ML mediana',        _roas(_median_roas_ml(ab_launches))),
+        ('ROAS Ctrl mediana',      _roas(_median_roas_ctrl(ab_launches))),
+        ('Razão ML/Ctrl mediana',  f'{_median_roas_ml(ab_launches)/_median_roas_ctrl(ab_launches):.2f}x'
+                                   if _median_roas_ml(ab_launches) and _median_roas_ctrl(ab_launches) else '—'),
+        ('Win rate',               f'{ab_wins}/{len(ab_launches)}'),
+        ('— sem outliers ({}) —'.format(len(ab_clean)), ''),
+        ('Gasto (sem outliers)',   _brl(ab_clean_gasto).replace('+', '')),
+        ('Ganho (sem outliers)',   _brl(ab_clean_ganho)),
+        ('¢ extras/R$1 (limpo)',   _cents(ab_clean_ganho, ab_clean_gasto)),
+    ]
+    for lbl, val in ab_rows:
+        fill = AZUL_CLAR if lbl.startswith('—') else None
+        _write(ws, row, 1, lbl,  font=fnt_bold if 'extras' in lbl else fnt_normal, fill=fill, align=al_lft)
+        _write(ws, row, 2, val,  font=fnt_bold if 'extras' in lbl else fnt_normal, fill=fill, align=al_lft)
+        row += 1
+    row += 1
+
+    # ── Detalhe Regime ML-only ────────────────────────────────────────────────
+    if ml_only:
+        row = _section_title(ws, row, f'REGIME ML-ONLY — ESTIMADO  ({len(ml_only)} lançamentos, baseline {baseline:.3f}x)', ncols=8)
+        ml_rows = [
+            ('Gasto total',        _brl(ml_gasto).replace('+', '')),
+            ('Ganho estimado',     _brl(ml_ganho)),
+            ('¢ extras por R$1',   _cents(ml_ganho, ml_gasto)),
+            ('Win rate',           f'{ml_wins}/{len(ml_only)}'),
+        ]
+        for lbl, val in ml_rows:
+            _write(ws, row, 1, lbl,  font=fnt_bold if 'extras' in lbl else fnt_normal, align=al_lft)
+            _write(ws, row, 2, val,  font=fnt_bold if 'extras' in lbl else fnt_normal, align=al_lft)
+            row += 1
+        row += 1
+
+    # ── Baseline detalhe ──────────────────────────────────────────────────────
+    row = _section_title(ws, row, 'BASELINE CONTROLE (usado para estimativas ML-only)', ncols=8)
+    _header_row(ws, row, ['Lançamento', 'ROAS Ctrl', 'Flag', '', '', '', '', ''],
+                fills=[AZUL_ESC]*3 + [CINZA]*5)
+    row += 1
+    for name in ab_launches:
+        m     = data[name]
+        flags = _flags(m)
+        ctrl  = m.get('roas_ctrl')
+        used  = not _flags(m)  # sem nenhum flag → usado no baseline
+        fill  = VERDE if used else AMARELO
+        _write(ws, row, 1, name,           font=fnt_normal, fill=fill, align=al_lft)
+        _write(ws, row, 2, _roas(ctrl),    font=fnt_normal, fill=fill, align=al_ctr)
+        _write(ws, row, 3, ', '.join(flags) if flags else '✓ usado no baseline',
+               font=fnt_normal, fill=fill, align=al_lft)
+        row += 1
+
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
+    _write(ws, row, 1,
+           f'Baseline = mediana dos ROAS Controle sem flags = {baseline:.4f}x  '
+           f'(lançamentos usados: {", ".join(n for n in ab_launches if not _flags(data[n]))})',
+           font=fnt_small, align=al_lft)
+    row += 2
+
+    # ── Detalhe Financeiro ML vs Controle ────────────────────────────────────
+    row = _section_title(ws, row, 'DETALHE FINANCEIRO — ML vs CONTROLE', ncols=8)
+    _header_row(ws, row, ['Lançamento', 'Receita ML', 'Receita Ctrl', 'Gasto ML', 'Gasto Ctrl', '% Budget ML', 'Margem ML', 'Margem Ctrl'])
+    row += 1
+
+    for name in lancamentos:
+        m = data[name]
+        has_ctrl = (m.get('roas_ctrl') or 0) > 0 and (m.get('gasto_ctrl') or 0) > 0
+        rec_ml  = m.get('receita_ml') or 0
+        rec_ct  = m.get('receita_ctrl') or 0
+        g_ml    = m.get('gasto_ml') or 0
+        g_ct    = m.get('gasto_ctrl') or 0
+        mar_ml  = m.get('margem_ml') or 0
+        mar_ct  = m.get('margem_ctrl') or 0
+        pct_ml  = g_ml / (g_ml + g_ct) * 100 if (g_ml + g_ct) > 0 else 100.0
+
+        def _brln(v): return brl(v) if v else '—'
+
+        vals = [
+            name,
+            _brln(rec_ml),
+            _brln(rec_ct) if has_ctrl else '—',
+            brl(g_ml).replace('+', ''),
+            brl(g_ct).replace('+', '') if has_ctrl else '—',
+            f'{pct_ml:.0f}%',
+            brl(mar_ml),
+            brl(mar_ct) if has_ctrl else '—',
+        ]
+        for col, val in enumerate(vals, 1):
+            _write(ws, row, col, val, font=fnt_normal,
+                   align=al_ctr if col > 1 else al_lft)
+        row += 1
+
+    ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
+    _write(ws, row, 1,
+           'Receita e Margem = valores rastreados (base matched). '
+           'Tracking rate parcial → valores conservadores.',
+           font=fnt_small, align=al_lft)
+
+    wb.save(xlsx_path)
+    print(f"  Sheet 'Síntese Executiva' salva em {xlsx_path.name}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. MAIN (standalone)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _discover_periods_from_validation() -> list:
@@ -567,6 +931,7 @@ def _discover_periods_from_validation() -> list:
         '2026-03-02': 'LF45',
         '2026-03-09': 'LF46',
         '2026-03-16': 'LF47',
+        '2026-03-23': 'LF48',
     }
     validation_dir = BASE / 'outputs' / 'validation'
     periods = []
@@ -603,6 +968,50 @@ def _discover_periods_from_validation() -> list:
     return periods
 
 
+def update_sintese(xlsx_path: Path, periods: list) -> None:
+    """
+    Adiciona/atualiza a sheet 'Síntese Executiva' num xlsx já existente.
+
+    Pensado para ser chamado diretamente de ml_evolution_report.run() logo
+    após o build_excel(), sem precisar rodar gerar_evolucao_margem standalone.
+
+    Args:
+        xlsx_path: caminho para o arquivo evolucao_ml_devclub_*.xlsx recém-criado
+        periods:   lista de dicts com keys name, cap_start, cap_end,
+                   vendas_start, vendas_end (mesmo formato de PERIODS)
+    """
+    # Remover aba legada se existir
+    try:
+        from openpyxl import load_workbook as _lw
+        _wb = _lw(xlsx_path)
+        for _sheet in ['Margem & Contrafactual']:
+            if _sheet in _wb.sheetnames:
+                del _wb[_sheet]
+        _wb.save(xlsx_path)
+    except Exception as _e:
+        print(f"  Aviso ao limpar abas legadas: {_e}")
+
+    # Coletar dados de cada período
+    data = {}
+    for p in periods:
+        vs = pd.Timestamp(p['vendas_start'])
+        ve = pd.Timestamp(p['vendas_end'])
+        folder = f"{vs.day:02d}:{vs.month:02d} - {ve.day:02d}:{ve.month:02d}"
+        xlsx = get_latest_report(folder)
+        if not xlsx:
+            continue
+        try:
+            m = parse_comparacao_ml(xlsx)
+            m['name'] = p['name']
+            data[p['name']] = m
+        except Exception:
+            pass
+
+    lancamentos = [p['name'] for p in periods if p['name'] in data]
+    add_sintese_sheet(xlsx_path, data, lancamentos)
+    _gerar_graficos(data, lancamentos)
+
+
 def main():
     historico = BASE / 'outputs' / 'validation' / 'historico'
     candidates = sorted(historico.glob('evolucao_ml_devclub_*.xlsx'))
@@ -615,30 +1024,7 @@ def main():
     periods = _discover_periods_from_validation()
     print(f"Períodos auto-detectados: {[p['name'] for p in periods]}\n")
 
-    print("Coletando dados para sheet 'Margem & Contrafactual'...")
-    add_margem_sheet(xlsx_path, periods)
-
-    # Gráficos — rebuild data for chart generation
-    data = {}
-    for p in periods:
-        name = p['name']
-        vs = pd.Timestamp(p['vendas_start'])
-        ve = pd.Timestamp(p['vendas_end'])
-        folder = f"{vs.day:02d}:{vs.month:02d} - {ve.day:02d}:{ve.month:02d}"
-        xlsx = get_latest_report(folder)
-        if not xlsx:
-            continue
-        try:
-            m = parse_comparacao_ml(xlsx)
-            m['name'] = name
-            data[name] = m
-        except Exception:
-            pass
-
-    lancamentos = [p['name'] for p in periods if p['name'] in data]
-    if lancamentos:
-        print("\nGerando gráficos...")
-        _gerar_graficos(data, lancamentos)
+    update_sintese(xlsx_path, periods)
 
     print("\nConcluído.")
 

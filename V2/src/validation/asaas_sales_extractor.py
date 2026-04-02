@@ -53,6 +53,7 @@ class AsaasSalesExtractor:
             'User-Agent': 'BringData-ValidationSystem',
         }
         self._customer_cache: Dict[str, Dict] = {}
+        self._installment_cache: Dict[str, Dict] = {}
 
     def _get(self, endpoint: str, params: Dict = None) -> Dict:
         """Faz GET na API Asaas com retry básico."""
@@ -149,6 +150,39 @@ class AsaasSalesExtractor:
         self._customer_cache[customer_id] = data
         return data
 
+    def fetch_installment(self, installment_id: str) -> Dict[str, Any]:
+        """
+        Busca dados do plano de parcelamento pelo ID (com cache).
+
+        Returns dict com 'value' (total do plano) e 'installmentCount'.
+        """
+        if installment_id in self._installment_cache:
+            return self._installment_cache[installment_id]
+
+        data = self._get(f'/installments/{installment_id}')
+        self._installment_cache[installment_id] = data
+        return data
+
+    def fetch_installments_batch(self, payments: List[Dict[str, Any]]) -> None:
+        """
+        Pré-busca dados de parcelamento para todos os pagamentos que têm campo 'installment'.
+
+        Atualiza self._installment_cache in-place.
+        """
+        ids = list({
+            p['installment'] for p in payments
+            if p.get('installment') and p['installment'] not in self._installment_cache
+        })
+        if not ids:
+            return
+
+        logger.info(f' Buscando dados de {len(ids)} planos de parcelamento...')
+        for i, inst_id in enumerate(ids, 1):
+            self.fetch_installment(inst_id)
+            if i % 50 == 0:
+                logger.debug(f'   {i}/{len(ids)} planos carregados')
+            time.sleep(0.1)
+
     def fetch_customers_batch(self, customer_ids: List[str]) -> Dict[str, Dict]:
         """
         Busca dados de múltiplos clientes, evitando requests repetidos.
@@ -176,13 +210,21 @@ class AsaasSalesExtractor:
         self,
         payment: Dict[str, Any],
         customer: Dict[str, Any],
+        product_value: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Mapeia pagamento + cliente para as colunas padronizadas do sistema.
 
+        sale_value é sempre o valor total do contrato (ticket_contracted):
+        - Se product_value fornecido: usa esse valor para TODAS as entradas, independente do
+          valor do plano Asaas (que pode ser apenas a parcela de entrada, não o contrato cheio)
+        - Fallback: payment.value (valor bruto da cobrança)
+
         Args:
             payment: Objeto de pagamento da API
             customer: Objeto de cliente da API
+            product_value: Valor nominal do contrato (ticket_contracted, ex: R$2200).
+                           Quando fornecido, é usado como sale_value para todos os pagamentos.
 
         Returns:
             Dicionário com colunas: email, nome, telefone, sale_value, sale_date, utm_campaign, origem
@@ -198,8 +240,12 @@ class AsaasSalesExtractor:
         # Nome
         nome = customer.get('name') or ''
 
-        # Valor
-        sale_value = float(payment.get('value') or 0)
+        # Valor do contrato: sempre ticket_contracted quando fornecido,
+        # independente do valor do plano Asaas (que pode ser só a parcela de entrada)
+        if product_value:
+            sale_value = float(product_value)
+        else:
+            sale_value = float(payment.get('value') or 0)
 
         # Data: clientPaymentDate (data que o cliente pagou)
         date_str = payment.get('clientPaymentDate') or payment.get('paymentDate') or ''
@@ -228,6 +274,7 @@ class AsaasSalesExtractor:
         start_date: str,
         end_date: str,
         output_path: str = None,
+        product_value: Optional[float] = None,
     ) -> pd.DataFrame:
         """
         Gera DataFrame de vendas Asaas no período.
@@ -236,6 +283,9 @@ class AsaasSalesExtractor:
             start_date: Data inicial (YYYY-MM-DD)
             end_date: Data final (YYYY-MM-DD)
             output_path: Se fornecido, salva Excel
+            product_value: Valor nominal do contrato (ticket_contracted, ex: 2200.0).
+                           Quando fornecido, é usado como sale_value para TODOS os pagamentos,
+                           independente do valor do plano Asaas.
 
         Returns:
             DataFrame padronizado com origem='asaas'
@@ -258,7 +308,7 @@ class AsaasSalesExtractor:
         for payment in payments:
             customer_id = payment.get('customer', '')
             customer = self._customer_cache.get(customer_id, {})
-            row = self.map_payment_to_row(payment, customer)
+            row = self.map_payment_to_row(payment, customer, product_value=product_value)
             rows.append(row)
 
         df = pd.DataFrame(rows)
@@ -290,6 +340,7 @@ def fetch_asaas_sales(
     api_key: str = None,
     save_excel: bool = False,
     output_path: str = None,
+    product_value: Optional[float] = None,
 ) -> pd.DataFrame:
     """
     Função auxiliar para buscar vendas Asaas — interface equivalente a fetch_guru_sales_from_api().
@@ -300,6 +351,7 @@ def fetch_asaas_sales(
         api_key: Chave da API (usa ASAAS_API_KEY do .env se não fornecida)
         save_excel: Se True, salva Excel
         output_path: Caminho do Excel (obrigatório se save_excel=True)
+        product_value: Valor total do produto para entradas sem parcelamento registrado
 
     Returns:
         DataFrame com vendas Asaas
@@ -309,6 +361,7 @@ def fetch_asaas_sales(
         start_date=start_date,
         end_date=end_date,
         output_path=output_path if save_excel else None,
+        product_value=product_value,
     )
 
 
