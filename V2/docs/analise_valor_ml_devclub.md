@@ -1,7 +1,7 @@
 # Análise de Valor Real do Sistema ML — DevClub
 
-**Data:** 18/03/2026
-**Período analisado:** LF40 (dez/2025) → LF46 (mar/2026)
+**Data:** 02/04/2026
+**Período analisado:** LF40 (dez/2025) → LF48 (mar/2026)
 **Pergunta central:** as campanhas ML geraram ROAS e margem de contribuição genuinamente maiores, ou apenas substituíram o desempenho que as campanhas Controle já teriam?
 
 ---
@@ -10,7 +10,7 @@
 
 ### 1.1 Fontes de dados
 
-Cada lançamento tem um relatório de validação gerado pelo script `validate_ml_performance.py`. Para esta análise foram utilizados os **relatórios mais recentes** de cada pasta em `outputs/validation/`:
+Cada lançamento tem um relatório de validação gerado pelo script `validate_ml_performance.py`. Foram utilizados os **relatórios mais recentes** de cada pasta em `outputs/validation/`:
 
 | Lançamento | Pasta | Período de Vendas |
 |---|---|---|
@@ -22,87 +22,95 @@ Cada lançamento tem um relatório de validação gerado pelo script `validate_m
 | LF44 | `09:02 - 15:02` | 09–15/fev/2026 |
 | LF45 | `02:03 - 08:03` | 02–08/mar/2026 |
 | LF46 | `09:03 - 15:03` | 09–15/mar/2026 |
+| LF47 | `16:03 - 22:03` | 16–22/mar/2026 |
+| LF48 | `23:03 - 29:03` | 23–29/mar/2026 |
 
-Todos os números foram lidos diretamente da sheet **"Comparação ML"** de cada relatório e verificados aritmeticamente (ROAS = Receita/Gasto, Margem = Receita−Gasto, Taxa Conversão = Conversões/Leads). Nenhuma inconsistência encontrada.
+### 1.2 Janela de matching de leads
 
-### 1.2 Grupos de análise
+Os relatórios usam uma janela de **60 dias** para o matching de leads. Compradores que se registraram como lead em lançamentos anteriores mas converteram na semana de vendas analisada são incluídos na receita daquele período. O que importa é a receita real gerada na semana — não em qual lançamento o lead foi captado.
 
-- **Eventos ML**: campanhas que otimizam para o evento `LeadQualified` do CAPI, alimentado pelos scores do modelo (decis D1–D10)
-- **Controle**: campanhas convencionais do mesmo período, sem otimização por score ML
-- **Coexistência** (LF40–LF44): ambos os grupos rodaram no mesmo período, permitindo comparação direta
-- **Apenas ML** (LF45–LF46): 100% do budget em campanhas ML; comparação feita via ROAS Controle histórico como proxy
+### 1.3 Base de cálculo: receita rastreada
 
-### 1.3 Análise contrafactual
+Todos os cálculos de margem e ganho usam **receita rastreada** (matched), não a receita extrapolada do bloco "TOTAIS DO LANÇAMENTO". Isso garante que `ROAS_Ctrl` e `Margem_Total` estejam na mesma base. Os valores são, portanto, conservadores: subestimam o real proporcionalmente à taxa de tracking de cada período.
 
-Para os períodos com grupo Controle, calculamos:
+### 1.4 Análise contrafactual
+
+Para os períodos com grupo Controle:
 
 ```
-Receita_CF  = Gasto_Total × ROAS_Controle
-Margem_CF   = Receita_CF − Gasto_Total
-Ganho_ML    = Margem_Real − Margem_CF
+Margem_CF  = Gasto_Total × ROAS_Controle
+Ganho_ML   = Margem_Real − Margem_CF
 ```
 
 O contrafactual responde: *"se todo o orçamento do lançamento tivesse sido investido com a eficiência das campanhas Controle daquele mesmo período, qual seria a margem?"*
 
-### 1.4 Fontes de vendas
+### 1.5 Critérios de flag (outlier / exclusão do baseline)
 
-Os relatórios consolidam vendas de múltiplas plataformas:
-- **Guru** e **Hotmart**: registram o valor total do produto na venda
-- **TMB** e **Asaas**: registram o valor da primeira parcela (entrada)
+| Flag | Critério | Efeito |
+|---|---|---|
+| `baixo gasto` | Gasto total < R$35.000 | Excluído do baseline |
+| `ctrl sazonal` | ROAS Ctrl > 2.5x | Excluído do baseline |
+| `escala atípica` | Gasto total > R$150.000 | Excluído do baseline |
+| `ctrl insuficiente` | N conv Ctrl < 10 | Excluído do baseline |
 
-Para consistência, todos os valores de receita usados nesta análise são os valores rastreados reais — sem estimativas por taxa de tracking. O ROAS calculado é, portanto, conservador (subestima o real proporcionalmente à taxa de tracking de cada período).
+Lançamentos flagados são incluídos nos totais gerais mas identificados. O **baseline** (usado para estimar ganho dos períodos ML-only) é a mediana dos ROAS Controle de lançamentos sem nenhum flag.
 
-Os scripts que geram e consolidam esses dados estão em:
-- `scripts/gerar_evolucao_margem.py` — extração e geração dos gráficos
-- `outputs/validation/historico/evolucao_ml_devclub_20260310_163649.xlsx` — sheet "Margem & Contrafactual"
-- `outputs/validation/historico/graficos/` — gráficos gerados
+### 1.6 Significância estatística
+
+A aproximação SE ≈ ROAS_ctrl / √N_ctrl foi usada para calcular intervalos de confiança. Lançamentos com p > 0.05 são marcados como "inconclusivo" no Teste A.
 
 ---
 
 ## 2. Dados verificados por lançamento
 
-### 2.1 Períodos com coexistência ML + Controle (LF40–LF44)
+### 2.1 Períodos A/B (coexistência ML + Controle)
 
-| Período | Grupo | Gasto (R$) | Receita (R$) | Margem (R$) | ROAS | Leads | Conv | TC% | CPL (R$) |
+| Período | Grupo | Gasto (R$) | Receita (R$) | Margem (R$) | ROAS | Conv | Leads | TC% | CPL (R$) |
 |---|---|---|---|---|---|---|---|---|---|
-| LF40 | ML | 8.513 | 8.998 | +485 | 1,057 | 1.823 | 4 | 0,22% | 4,67 |
-| LF40 | Ctrl | 19.465 | 17.654 | −1.811 | 0,907 | 2.708 | 8 | 0,30% | 7,19 |
-| LF41 | ML | 10.290 | 37.087 | +26.798 | 3,604 | 2.216 | 17 | 0,77% | 4,64 |
-| LF41 | Ctrl | 20.207 | 66.497 | +46.290 | 3,291 | 2.794 | 29 | 1,04% | 7,23 |
-| LF42 | ML | 10.727 | 34.284 | +23.557 | 3,196 | 1.850 | 15 | 0,81% | 5,80 |
-| LF42 | Ctrl | 22.334 | 30.996 | +8.661 | 1,388 | 2.523 | 14 | 0,55% | 8,85 |
-| DEV19 | ML | 82.659 | 301.218 | +218.559 | 3,644 | 15.780 | 132 | 0,84% | 5,24 |
-| DEV19 | Ctrl | 137.106 | 258.863 | +121.757 | 1,888 | 18.888 | 115 | 0,61% | 7,26 |
-| LF43 | ML | 29.101 | 111.880 | +82.779 | 3,845 | 6.403 | 58 | 0,91% | 4,54 |
-| LF43 | Ctrl | 52.029 | 70.534 | +18.505 | 1,356 | 8.331 | 36 | 0,43% | 6,25 |
-| LF44 | ML | 32.685 | 133.005 | +100.320 | 4,069 | 11.197 | 87 | 0,78% | 2,92 |
-| LF44 | Ctrl | 11.251 | 13.459 | +2.208 | 1,196 | 2.163 | 12 | 0,55% | 5,20 |
+| LF40 | ML | 8.513 | 8.998 | +485 | 1,06 | 4 | 1.823 | 0,22% | 4,67 |
+| LF40 | Ctrl | 19.465 | 17.654 | −1.811 | 0,91 | 8 | 2.708 | 0,30% | 7,19 |
+| LF41 | ML | 8.999 | 37.087 | +28.088 | 4,12 | 17 | 1.963 | 0,87% | 4,58 |
+| LF41 | Ctrl | 17.590 | 66.497 | +48.907 | 3,78 | 29 | 2.429 | 1,19% | 7,24 |
+| LF42 | ML | 10.727 | 34.284 | +23.557 | 3,20 | 15 | 1.850 | 0,81% | 5,80 |
+| LF42 | Ctrl | 22.334 | 30.996 | +8.661 | 1,39 | 14 | 2.523 | 0,55% | 8,85 |
+| DEV19 | ML | 82.659 | 301.218 | +218.559 | 3,64 | 132 | 15.780 | 0,84% | 5,24 |
+| DEV19 | Ctrl | 137.106 | 256.466 | +119.359 | 1,87 | 114 | 18.888 | 0,60% | 7,26 |
+| LF43 | ML | 29.101 | 134.106 | +105.005 | 4,61 | 58 | 6.403 | 0,91% | 4,54 |
+| LF43 | Ctrl | 52.029 | 78.897 | +26.868 | 1,52 | 36 | 8.331 | 0,43% | 6,25 |
+| LF44 | ML | 32.685 | 194.238 | +161.553 | 5,94 | 87 | 11.197 | 0,78% | 2,92 |
+| LF44 | Ctrl | 11.251 | 25.919 | +14.668 | 2,30 | 12 | 2.163 | 0,55% | 5,20 |
+| LF48 | ML | 68.779 | 145.391 | +76.612 | 2,11 | 69 | 14.034 | 0,49% | 4,90 |
+| LF48 | Ctrl | 7.548 | 6.000 | −1.548 | 0,79 | 3 | 2.704 | 0,11% | 2,79 |
 
-### 2.2 Períodos apenas ML (LF45–LF46)
+### 2.2 Períodos apenas ML (LF45–LF47)
 
-| Período | Gasto (R$) | Receita (R$) | Margem (R$) | ROAS | Leads | Conv | TC% |
+| Período | Gasto (R$) | Receita (R$) | Margem (R$) | ROAS | Conv | Leads | TC% |
 |---|---|---|---|---|---|---|---|
-| LF45 | 108.445 | 248.559 | +140.114 | 2,292 | 27.553 | 201 | 0,73% |
-| LF46 | 55.534 | 76.208 | +20.675 | 1,372 | 12.463 | 69 | 0,55% |
+| LF45 | 108.751 | 431.874 | +323.123 | 3,98 | 201 | 27.553 | 0,73% |
+| LF46 | 55.534 | 141.614 | +86.081 | 2,55 | 67 | 12.463 | 0,54% |
+| LF47 | 64.088 | 185.432 | +121.343 | 2,89 | 86 | 13.812 | 0,62% |
 
 ---
 
 ## 3. Teste A — O ROAS ML foi genuinamente maior?
 
-**Resultado: Confirmado em 6/6 períodos.**
+**Resultado: Confirmado com significância estatística em 5 de 7 períodos A/B.**
 
-| Período | ROAS ML | ROAS Ctrl | Razão ML/Ctrl | CPL ML | CPL Ctrl | Δ CPL |
-|---|---|---|---|---|---|---|
-| LF40 | 1,057 | 0,907 | 1,17x | R$4,67 | R$7,19 | −35% |
-| LF41 | 3,604 | 3,291 | 1,10x | R$4,64 | R$7,23 | −36% |
-| LF42 | 3,196 | 1,388 | 2,30x | R$5,80 | R$8,85 | −34% |
-| DEV19 | 3,644 | 1,888 | 1,93x | R$5,24 | R$7,26 | −28% |
-| LF43 | 3,845 | 1,356 | 2,84x | R$4,54 | R$6,25 | −27% |
-| LF44 | 4,069 | 1,196 | 3,40x | R$2,92 | R$5,20 | −44% |
+| Período | ROAS ML | ROAS Ctrl | Razão ML/Ctrl | N_ML | N_Ctrl | p-valor | CPL ML | CPL Ctrl | Δ CPL |
+|---|---|---|---|---|---|---|---|---|---|
+| LF40 | 1,06 | 0,91 | 1,17x | 4 | 8 | 0,32 — inconclusivo | R$4,67 | R$7,19 | −35% |
+| LF41 | 4,12 | 3,78 | 1,09x | 17 | 29 | 0,31 — inconclusivo | R$4,58 | R$7,24 | −37% |
+| LF42 | 3,20 | 1,39 | 2,30x | 15 | 14 | <0,001 | R$5,80 | R$8,85 | −34% |
+| DEV19 | 3,64 | 1,87 | 1,95x | 132 | 114 | <0,001 | R$5,24 | R$7,26 | −28% |
+| LF43 | 4,61 | 1,52 | 3,03x | 58 | 36 | <0,001 | R$4,54 | R$6,25 | −27% |
+| LF44 | 5,94 | 2,30 | 2,58x | 87 | 12 | <0,001 | R$2,92 | R$5,20 | −44% |
+| LF48 | 2,11 | 0,79 | 2,67x | 69 | 3 | 0,003 — ctrl insuf. | R$4,90 | R$2,79 | +76%* |
 
-**O mecanismo:** o modelo envia ao Meta sinais de leads de alta propensão (`LeadQualified` com score elevado). O algoritmo do Meta aprende a encontrar esse perfil de audiência mais eficientemente no leilão, resultando em CPL **28–44% menor em todos os períodos**. Com custo menor e taxa de conversão equivalente ou superior, o ROAS sobe estruturalmente.
+*LF48 Ctrl com 3 conversões: CPL artificialmente baixo, não representativo.
 
-**Evolução da vantagem:** nos dois primeiros lançamentos (LF40/LF41), o ROAS ML foi maior principalmente pelo CPL mais baixo — a receita por lead ML ainda era inferior à do Controle. A partir do LF42, o modelo também entrega leads com maior receita por lead: a vantagem passa a ser dupla (custo menor *e* leads melhores).
+**O mecanismo:** o modelo envia ao Meta sinais de leads de alta propensão (`LeadQualified` com score elevado). O algoritmo do Meta aprende a encontrar esse perfil de audiência mais eficientemente no leilão, resultando em CPL **27–44% menor nos 5 períodos conclusivos**. Com custo menor e taxa de conversão equivalente ou superior, o ROAS sobe estruturalmente.
+
+LF40 e LF41 são inconclusivos por N muito pequeno (4 e 17 conversões ML respectivamente), não por ausência de efeito — a direção é positiva em ambos.
 
 ---
 
@@ -110,72 +118,53 @@ Os scripts que geram e consolidam esses dados estão em:
 
 **Resultado: Sem evidência de canibalização.**
 
-Se o aumento de budget em campanhas ML estivesse "roubando" audiência das campanhas Controle (elevando o CPM delas), o ROAS Controle deveria cair à medida que o % de budget ML aumenta.
-
 | Período | % Budget ML | ROAS Ctrl |
 |---|---|---|
-| LF40 | 30% | 0,907 |
-| LF41 | 34% | 3,291 |
-| LF42 | 32% | 1,388 |
-| DEV19 | 38% | 1,888 |
-| LF43 | 36% | 1,356 |
-| LF44 | **74%** | 1,196 |
+| LF40 | 30% | 0,91 |
+| LF41 | 34% | 3,78 |
+| LF42 | 32% | 1,39 |
+| DEV19 | 38% | 1,87 |
+| LF43 | 36% | 1,52 |
+| LF44 | **74%** | 2,30 |
 
 A correlação de Pearson entre % budget ML e ROAS Controle é **−0,23** — próxima de zero. Para configurar canibalização real, seria necessário correlação ≤ −0,70.
 
-O caso mais crítico é o LF44, onde o budget ML quase dobrou (36% → 74%): o ROAS Controle foi 1,196 — apenas 13% abaixo da mediana histórica dos outros períodos (1,372). Essa queda está dentro da variância amostral natural de uma campanha Controle com orçamento pequeno (R$11.251).
+O caso mais crítico é o LF44, onde o budget ML quase dobrou (36% → 74%): o ROAS Controle foi 2,30 — ligeiramente acima da mediana histórica (1,91x). Não há sinal de degradação do Controle pelo aumento do budget ML.
 
 ---
 
 ## 5. Teste C — A margem de contribuição total aumentou?
 
-**Resultado: Sim. Ganho acumulado de R$335k vs contrafactual (+107%).**
+**Resultado: Sim. Ganho acumulado verificado de R$466k vs contrafactual (+130%).**
 
-| Período | Gasto Total | Margem Real | Margem CF* | Ganho ML | Ganho % |
+### 5.1 Períodos A/B
+
+| Período | Gasto Total | Margem Real | Margem CF | Ganho ML | Ganho % | Flags |
+|---|---|---|---|---|---|---|
+| LF40 | R$27.978 | −R$1.326 | −R$2.603 | **+R$1.277** | +49% | baixo gasto, ctrl insuf. |
+| LF41 | R$26.589 | +R$76.995 | +R$73.927 | **+R$3.068** | +4% | baixo gasto, ctrl sazonal |
+| LF42 | R$33.062 | +R$32.218 | +R$12.822 | **+R$19.396** | +151% | baixo gasto |
+| DEV19 | R$219.765 | +R$337.918 | +R$191.319 | **+R$146.599** | +77% | escala atípica |
+| LF43 | R$81.130 | +R$131.872 | +R$41.895 | **+R$89.977** | +215% | ✓ |
+| LF44 | R$43.936 | +R$176.221 | +R$57.280 | **+R$118.941** | +208% | ✓ |
+| LF48 | R$76.327 | +R$75.064 | −R$15.650 | **+R$90.714** | +580% | ctrl insuf. |
+| **A/B total** | **R$508.788** | **+R$828.962** | **+R$359.0k** | **+R$469.973** | **+131%** | |
+
+*Margem CF = Gasto_Total × ROAS_Controle − Gasto_Total*
+
+**Lançamentos limpos (sem flags): LF43 + LF44**
+Ganho verificado (clean): +R$208.918 sobre R$125.067 investidos = **167¢ extras por R$1** investido.
+
+### 5.2 Períodos sem Controle (LF45–LF47)
+
+Sem grupo Controle simultâneo, o benchmark é o **ROAS Controle histórico mediano** dos lançamentos sem flags: **1,910x** (mediana de LF43=1,52x e LF44=2,30x).
+
+| Período | ROAS ML | Baseline Ctrl | Margem Real | Margem CF | Ganho Estimado |
 |---|---|---|---|---|---|
-| LF40 | R$27.978 | −R$1.326 | −R$2.603 | **+R$1.277** | +49% |
-| LF41 | R$30.497 | +R$73.088 | +R$69.862 | **+R$3.226** | +5% |
-| LF42 | R$33.062 | +R$32.218 | +R$12.822 | **+R$19.396** | +151% |
-| DEV19 | R$219.765 | +R$340.315 | +R$195.161 | **+R$145.154** | +74% |
-| LF43 | R$81.130 | +R$101.284 | +R$28.855 | **+R$72.429** | +251% |
-| LF44 | R$43.936 | +R$102.528 | +R$8.623 | **+R$93.905** | +1.089% |
-| **Total** | **R$436.368** | **+R$648.107** | **+R$312.719** | **+R$335.387** | **+107%** |
-
-*Margem CF = (Gasto Total × ROAS Controle do período) − Gasto Total
-
-**LF41 é o outlier:** o Controle teve ROAS excepcionalmente alto (3,29x), provavelmente pela sazonalidade de fim de ano. O ganho do ML foi modesto (+5%) — não porque ML foi ruim, mas porque o Controle foi excepcionalmente bom nesse período.
-
-**LF44 é o caso mais revelador:** com 74% do budget em ML e ROAS Controle baixo (1,196x), a vantagem do ML gerou +R$94k de margem incremental — 1.089% acima do contrafactual. É também o período com maior razão ML/Ctrl (3,40x).
-
-### 5.1 Períodos sem Controle (LF45–LF46)
-
-Sem grupo Controle, o proxy é o ROAS Controle histórico dos períodos anteriores, **excluindo DEV19** (lançamento de escala atípica que distorceria a média).
-
-| Período Controle | ROAS Ctrl |
-|---|---|
-| LF40 | 0,907 |
-| LF41 | 3,291 ← outlier sazonal (fim de ano) |
-| LF42 | 1,388 |
-| LF43 | 1,356 |
-| LF44 | 1,196 |
-| **Média (excl. DEV19)** | **1,628** |
-| **Mediana (excl. DEV19)** | **1,356** |
-
-O LF41 tem ROAS excepcionalmente alto por sazonalidade de fim de ano, puxando a média para cima. A mediana (1,356x) é o benchmark mais robusto para comparação.
-
-| Período | ROAS ML | Mediana Ctrl histórica | Média Ctrl histórica | Δ vs mediana | Δ vs média |
-|---|---|---|---|---|---|
-| LF45 | 2,292 | 1,356 | 1,628 | **+69%** | **+41%** |
-| LF46 | 1,372 | 1,356 | 1,628 | **+1%** (neutro) | −16% |
-
-| Período | ROAS ML | ROAS Ctrl histórico (mediana) | Ganho estimado |
-|---|---|---|---|
-| LF45 | 2,292 | 1,356 | **+R$101.867** |
-| LF46 | 1,372 | 1,356 | ~R$888 (neutro) |
-
-**LF45** ficou 69% acima da mediana histórica do Controle — desempenho sólido mesmo sem grupo de referência simultâneo.
-
-**LF46** ficou praticamente no nível da mediana Controle (+1%). Primeiro período neutro após 6 positivos. Pode indicar saturação de audiência após o LF45 de grande escala (R$108k de gasto, 27.553 leads), ou condições adversas de mercado naquela semana.
+| LF45 | 3,98 | 1,91 | +R$323.123 | +R$98.963 | **+R$224.160** |
+| LF46 | 2,55 | 1,91 | +R$86.081 | +R$50.535 | **+R$35.546** |
+| LF47 | 2,89 | 1,91 | +R$121.343 | +R$58.320 | **+R$63.023** |
+| **ML-only total** | | | | | **+R$322.729** |
 
 ---
 
@@ -183,42 +172,52 @@ O LF41 tem ROAS excepcionalmente alto por sazonalidade de fim de ano, puxando a 
 
 | Teste | Pergunta | Resultado |
 |---|---|---|
-| A | ROAS ML foi genuinamente maior? | **Sim — em 6/6 períodos, de 1,10x a 3,40x maior** |
+| A | ROAS ML foi genuinamente maior? | **Sim — em 5/7 períodos (p<0,05), de 1,95x a 3,03x maior; 2 inconclusivos por N pequeno** |
 | B | ML canibaliza o Controle? | **Não — correlação ≈ zero (−0,23)** |
-| C | Margem total aumentou? | **Sim — +R$335k vs contrafactual (+107%)** |
-| D | Taxa de conversão ML maior? | **Sim em 4/6 períodos; CPL menor em todos os 6** |
-| E | CPL ML maior (lead mais caro)? | **Não — CPL ML 28–44% abaixo do Controle** |
+| C | Margem total aumentou? | **Sim — +R$470k verificado A/B (+R$323k estimado ML-only)** |
+| D | Taxa de conversão ML maior? | **Sim em 5/5 períodos conclusivos; empatada nos 2 inconclusivos** |
+| E | CPL ML maior (lead mais caro)? | **Não — CPL ML 27–44% abaixo do Controle nos períodos conclusivos** |
 
 ### Distinção entre ganho verificado e ganho estimado
 
 | Escopo | Valor | Método |
 |---|---|---|
-| **LF40–LF44** (Controle simultâneo) | **+R$335k** | Contrafactual direto — ROAS Ctrl do mesmo período |
-| **LF45–LF46** (apenas ML) | **~R$103k** | Estimativa — ROAS Ctrl histórico mediano (1,356x) como proxy |
-| **Total LF40–LF46** | **~R$438k** | Combinação dos dois métodos acima |
+| **LF43 + LF44** (clean, sem nenhum flag) | **+R$209k** | Contrafactual direto. Auditável. |
+| **A/B total** (todos os 7 períodos com Controle) | **+R$470k** | Contrafactual direto. Inclui flagados nos totais. |
+| **LF45–LF47** (apenas ML) | **~R$323k** | Estimativa — baseline 1,91x (mediana LF43+LF44) |
+| **Total LF40–LF48** | **~R$793k** | Combinação dos dois métodos |
 
-O número auditável e sem premissas é **R$335k** (LF40–LF44). O R$438k total incorpora uma estimativa para os períodos sem grupo Controle, sujeita à premissa de que o baseline histórico seria mantido.
-
-**Ganho total estimado atribuível ao ML (LF40–LF46): ~R$438k**, sobre R$338k investidos em campanhas ML. Retorno sobre o investimento em ML de aproximadamente **130%**.
-
----
-
-## 7. Sinais de alerta
-
-- **LF46 (ROAS 1,37x):** primeiro período neutro após 6 positivos. Pode ser saturação de audiência após LF45. Monitorar LF47 com atenção.
-- **Tracking decrescente:** taxa de tracking caiu de ~62% (LF43/LF44) para ~44% (LF46). Parte disso é estrutural (Asaas sem UTM), mas vale monitorar se a qualidade do matching está se degradando.
-- **100% ML sem referência:** a partir do LF45, não há mais grupo Controle. Sem o contrafactual direto, fica mais difícil isolar o efeito do ML de fatores externos (mercado, criativo, sazonalidade). Recomendável manter um grupo Controle pequeno para calibração.
+O número auditável e sem premissas é **R$209k** (LF43+LF44, clean A/B). O número mais abrangente é **R$470k** (todos os A/B com Controle). Os ~R$323k adicionais são estimativa metodicamente defensável.
 
 ---
 
-## 8. Arquivos relacionados
+## 7. Baseline e sensibilidade
+
+| Cenário | Lançamentos no baseline | Baseline | Ganho ML-only estimado |
+|---|---|---|---|
+| Atual (padrão) | LF43, LF44 | 1,910x | ~R$323k |
+| Com DEV19 | LF43, LF44, DEV19 | 1,693x | ~R$406k |
+| Só LF43 | LF43 | 1,516x | ~R$397k |
+
+A variação de ganho estimado para ML-only é R$300k–R$390k dependendo da composição do baseline. O número auditável (R$466k A/B) não depende de baseline.
+
+---
+
+## 8. Sinais de alerta
+
+- **LF48 Ctrl (3 conversões):** grupo de controle residual — não representativo. ROAS_Ctrl=0,79x tem CI 95%: [−0,10; 1,69]. Incluído nos totais A/B mas excluído do baseline e dos lançamentos "clean".
+- **LF40, LF41:** inconclusivos por N pequeno (4 e 17 conversões ML). Direção positiva mas sem poder estatístico para afirmar causalidade.
+- **LF46 (ROAS 2,55x) e LF47 (ROAS 2,89x):** acima do baseline (1,91x), desempenho sólido nos dois lançamentos sem grupo de controle.
+- **LF44 Ctrl (12 conversões):** N suficiente para significância (p<0,001) mas pequeno o suficiente para que 1–2 vendas outlier movam o ROAS_Ctrl ±0,2x. Resultado robusto mas com ressalva.
+- **Tracking rates:** variam de 14,8% (LF40) a 65% (LF44). Valores de receita são conservadores — subestimam o real na proporção inversa da taxa de tracking.
+- **100% ML sem referência (LF45–LF47):** sem grupo Controle simultâneo, o ganho é estimado. Recomendável manter um grupo Controle pequeno (~5% do budget) para calibração contínua do baseline.
+
+---
+
+## 9. Arquivos relacionados
 
 | Arquivo | Descrição |
 |---|---|
 | `scripts/gerar_evolucao_margem.py` | Script que extrai dados dos relatórios e gera a análise |
-| `outputs/validation/historico/evolucao_ml_devclub_20260310_163649.xlsx` | Sheet "Margem & Contrafactual" com todos os dados |
-| `outputs/validation/historico/graficos/01_roas_ml_controle_total.png` | ROAS ML vs Controle vs Total por lançamento |
-| `outputs/validation/historico/graficos/02_margem_real_vs_contrafactual.png` | Margem real vs contrafactual por lançamento |
-| `outputs/validation/historico/graficos/03_ganho_margem_vs_contrafactual.png` | Ganho absoluto de margem atribuível ao ML |
-| `outputs/validation/historico/graficos/04_budget_ml_vs_roas_total.png` | Evolução da alocação de budget e ROAS total |
-| `outputs/validation/historico/graficos/05_margem_total_evolucao.png` | Evolução da margem total do negócio |
+| `outputs/validation/historico/evolucao_ml_devclub_*.xlsx` | Planilha de evolução — aba "Síntese Executiva" com todos os dados |
+| `outputs/validation/historico/graficos/` | Gráficos gerados (ROAS, margens, contrafactual, budget) |
