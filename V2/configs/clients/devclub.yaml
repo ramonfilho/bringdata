@@ -540,6 +540,10 @@ retrain:
   quality_gate_critical_threshold: 0.2
 business:
   product_value: 1563.75
+  ticket_contracted: 2200.0          # valor nominal contratado — base da previsão de faturamento (Guru e TMB)
+  pct_cartao_historico: 0.469        # % cartão mediana LF44–LF47 (exclui LF42 vol.pequeno e LF43 efeito pós-Dev19)
+  scenario_pessimistic_factor: 0.97  # piso conv. rate — calibrado no CV real de 2% (LF42–LF47)
+  scenario_optimistic_factor: 1.03   # teto conv. rate — calibrado no CV real de 2% (LF42–LF47)
   conversion_rates:
     D01: 0.0000
     D02: 0.0000

@@ -243,14 +243,23 @@ class BusinessConfig:
     # de dados por decil nos relatórios históricos). Decis D01–D06 agrupados como
     # bloco único (volume histórico insuficiente para taxas individuais confiáveis).
     tracking_rate: float = 0.528                           # mediana histórica dos 6 lançamentos (range: 43.9%–66.4%)
-    scenario_pessimistic_factor: float = 0.88              # fator empírico — pior lançamento vs mediana
-    scenario_optimistic_factor: float = 1.13               # fator empírico — melhor lançamento vs mediana
+    scenario_pessimistic_factor: float = 0.97              # fator empírico — piso da conv. rate histórica vs mediana
+    scenario_optimistic_factor: float = 1.03               # fator empírico — teto da conv. rate histórica vs mediana
     launch_benchmark: Optional[Dict[str, Any]] = None      # mediana histórica para indexação comparativa
     # Estrutura esperada de launch_benchmark:
     #   periodo_referencia: str     (ex: "mediana_LF42-LF47")
     #   leads_mediana: int          (mediana de leads dos 6 lançamentos)
-    #   faturamento_mediana: float  (mediana de faturamento real)
+    #   vendas_mediana: int         (mediana de vendas totais)
     #   pct_d9d10_mediana: float    (mediana de % D9+D10)
+
+    # Ticket contratado (valor nominal da venda, sem desconto de inadimplência)
+    # Guru (cartão) e TMB (boleto parcelado) têm o mesmo ticket contratado.
+    # Inadimplência do boleto é risco operacional — não entra na previsão de faturamento.
+    ticket_contracted: float = 2200.0                      # valor nominal do produto — base do faturamento previsto
+
+    # Proporção histórica cartão/boleto (mediana LF42–LF47, audience-dependent)
+    # Cartão = Guru + Hotmart | Boleto = TMB + ASAAS
+    pct_cartao_historico: float = 0.468                    # % mediana de vendas via cartão (Guru + Hotmart)
 
 
 @dataclass

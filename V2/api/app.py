@@ -1578,6 +1578,7 @@ def _lookup_railway_capi_data(emails: List[str]) -> Dict[str, Dict]:
             database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
             user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
             password=os.environ['RAILWAY_DB_PASSWORD'],
+            timeout=30,
         )
 
         emails_lower = [e.lower().strip() for e in emails if e]
@@ -2101,6 +2102,7 @@ async def daily_monitoring_check_railway(
             database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
             user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
             password=os.environ['RAILWAY_DB_PASSWORD'],
+            timeout=30,
         )
 
         # 1a. Leads com score na janela (para alertas de drift ML)
@@ -2849,6 +2851,7 @@ async def railway_process_pending(pipeline: PipelineDep):
             database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
             user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
             password=os.environ['RAILWAY_DB_PASSWORD'],
+            timeout=30,
         )
 
         # 2. Buscar leads sem score (máximo configurável por execução)

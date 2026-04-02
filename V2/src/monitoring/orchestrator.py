@@ -671,24 +671,30 @@ class MonitoringOrchestrator:
         lead_quality_metrics: Dict,
     ) -> Dict:
         """
-        Gera previsão de faturamento com base na distribuição de decis atual e
-        taxas de conversão históricas corrigidas pelo tracking rate.
+        Gera previsão de faturamento e breakdown Guru/TMB.
 
-        Suposições documentadas:
-        - Tracking rate uniforme entre decis (não verificado empiricamente).
-          Erro potencial estimado: ~23% no D10. Absorvido pela faixa de ±40%.
-        - D01–D06 agrupados como bloco único (volume histórico insuficiente
-          para taxas individuais confiáveis).
+        Ticket = R$2.200 (valor contratado, igual para Guru e TMB).
+        Inadimplência do boleto é risco operacional — não entra aqui.
 
-        Output (apresentação ao cliente):
-            R$ {piso} ──────●────────── R$ {teto}
-                         R$ {base}
-            Baseado em 6 lançamentos com o mesmo modelo (LF42–LF47).
+        Guru  = vendas via cartão (Guru + Hotmart)
+        TMB   = vendas via boleto parcelado (TMB + ASAAS)
+        Split baseado na proporção histórica (mediana LF42–LF47: 46.8% cartão).
+
+        Suposição documentada: tracking rate uniforme entre decis.
+        D01–D06 agrupados como bloco único (volume histórico insuficiente).
+
+        Output:
+            Guru: N1 vendas (R$ N1 × 2.200)
+            TMB:  N2 vendas (R$ N2 × 2.200)
+            ─────────────────────────────
+            Total: N vendas | R$piso ──●── R$teto
         """
-        biz = self._client_config.business
-        conv_rates = biz.conversion_rates or {}
-        ticket = biz.product_value
+        biz          = self._client_config.business
+        conv_rates   = biz.conversion_rates or {}
+        ticket       = biz.ticket_contracted
         tracking_rate = biz.tracking_rate
+        pct_cartao   = biz.pct_cartao_historico
+        pct_boleto   = 1.0 - pct_cartao
 
         if not conv_rates or ticket <= 0 or tracking_rate <= 0:
             return {}
@@ -710,16 +716,21 @@ class MonitoringOrchestrator:
                 buyers   += decil_distribution.get(d, 0) * real_rate
 
             # D01–D06: bloco único com taxa média agregada
-            low_leads    = sum(decil_distribution.get(d, 0) for d in LOW_DECILS)
+            low_leads     = sum(decil_distribution.get(d, 0) for d in LOW_DECILS)
             low_obs_rates = [conv_rates.get(d, 0.0) for d in LOW_DECILS if conv_rates.get(d, 0.0) > 0]
             if low_obs_rates:
-                avg_low_obs  = sum(low_obs_rates) / len(low_obs_rates)
+                avg_low_obs   = sum(low_obs_rates) / len(low_obs_rates)
                 real_low_rate = (avg_low_obs / tracking_rate) * factor
                 buyers       += low_leads * real_low_rate
 
+            vendas_guru = round(buyers * pct_cartao, 1)
+            vendas_tmb  = round(buyers * pct_boleto, 1)
+
             return {
-                'faturamento': round(buyers * ticket),
-                'compradores_estimados': round(buyers, 1),
+                'faturamento':   round(buyers * ticket),
+                'vendas_total':  round(buyers, 1),
+                'vendas_guru':   vendas_guru,
+                'vendas_tmb':    vendas_tmb,
             }
 
         base       = _calc(1.0)
@@ -730,46 +741,48 @@ class MonitoringOrchestrator:
         benchmark_comparison = None
         bench = biz.launch_benchmark
         if bench:
-            bench_leads       = bench.get('leads_mediana', 0)
-            bench_faturamento = bench.get('faturamento_mediana', 0)
-            bench_pct         = bench.get('pct_d9d10_mediana', 0)
+            bench_leads   = bench.get('leads_mediana', 0)
+            bench_vendas  = bench.get('vendas_mediana', 0)
+            bench_pct     = bench.get('pct_d9d10_mediana', 0)
 
             quality_now  = (lead_quality_metrics.get('ultima_semana') or
                             lead_quality_metrics.get('ultimas_24h') or {})
             current_pct  = quality_now.get('d9', 0) + quality_now.get('d10', 0)
 
-            idx_volume   = total_leads / bench_leads if bench_leads > 0 else None
-            idx_qualidade = current_pct / bench_pct  if bench_pct   > 0 else None
+            idx_volume    = total_leads   / bench_leads  if bench_leads  > 0 else None
+            idx_qualidade = current_pct   / bench_pct    if bench_pct    > 0 else None
 
             if idx_volume and idx_qualidade:
-                fat_indexado = bench_faturamento * idx_volume * idx_qualidade
+                vendas_indexadas = bench_vendas * idx_volume * idx_qualidade
             elif idx_volume:
-                fat_indexado = bench_faturamento * idx_volume
+                vendas_indexadas = bench_vendas * idx_volume
             else:
-                fat_indexado = None
+                vendas_indexadas = None
 
             benchmark_comparison = {
-                'referencia':           bench.get('periodo_referencia', 'mediana histórica'),
-                'indice_volume':        round(idx_volume,    3) if idx_volume    else None,
-                'indice_qualidade':     round(idx_qualidade, 3) if idx_qualidade else None,
-                'faturamento_indexado': round(fat_indexado)     if fat_indexado  else None,
+                'referencia':       bench.get('periodo_referencia', 'mediana histórica'),
+                'indice_volume':    round(idx_volume,    3) if idx_volume    else None,
+                'indice_qualidade': round(idx_qualidade, 3) if idx_qualidade else None,
+                'vendas_indexadas': round(vendas_indexadas) if vendas_indexadas else None,
+                'faturamento_indexado': round(vendas_indexadas * ticket) if vendas_indexadas else None,
             }
 
         return {
-            'cenario_pessimista':   pessimista,
-            'cenario_base':         base,
-            'cenario_otimista':     otimista,
+            'cenario_pessimista':     pessimista,
+            'cenario_base':           base,
+            'cenario_otimista':       otimista,
             'inputs': {
-                'total_leads_pontuados': total_leads,
-                'ticket_medio':          ticket,
-                'tracking_rate_usado':   tracking_rate,
+                'total_leads_pontuados':  total_leads,
+                'ticket_contracted':      ticket,
+                'pct_cartao_historico':   pct_cartao,
+                'tracking_rate_usado':    tracking_rate,
             },
             'benchmark_vs_historico': benchmark_comparison,
             'nota': (
+                'Ticket = R$2.200 contratado (Guru e TMB). '
+                'Split Guru/TMB baseado na mediana histórica (46.8% cartão, LF42–LF47). '
                 'Suposição: tracking rate uniforme entre decis. '
-                'D01–D06 agrupados como bloco único. '
-                'Faixa de incerteza histórica: ±40% em torno do cenário base. '
-                'Base: 6 lançamentos com modelo jan30 (LF42–LF47).'
+                'D01–D06 agrupados como bloco único.'
             ),
         }
 
