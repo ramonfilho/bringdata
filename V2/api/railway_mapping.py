@@ -263,9 +263,9 @@ def railway_lead_to_sheets_row(lead_row: Dict, client_config=None) -> Dict:
     _col_interesse = _pesquisa_map.get('interesseEvento', 'O que mais você quer ver no evento?')
     _col_atracao   = _pesquisa_map.get('atracaoProfissao', 'interesse_programacao')
 
-    # Gênero: passar sem normalização semântica
+    # Gênero: passar sem normalização semântica; string vazia → None (evita OHE de categoria vazia)
     _col_genero = _pesquisa_map.get('genero', 'O seu gênero:')
-    row[_col_genero] = pesquisa.get('genero')
+    row[_col_genero] = pesquisa.get('genero') or None
 
     row[_col_idade]     = _normalizar(pesquisa.get('idade'), _mapa_idade)
     row[_col_ocupacao]  = _normalizar(pesquisa.get('ocupacao'), _mapa_ocupacao)
@@ -274,10 +274,10 @@ def railway_lead_to_sheets_row(lead_row: Dict, client_config=None) -> Dict:
     row[_col_interesse] = _normalizar(pesquisa.get('interesseEvento'), _mapa_interesse)
     row[_pesquisa_map.get('computador', 'Tem computador/notebook?')] = _normalizar(pesquisa.get('computador'))
 
-    # Campos sem mapa semântico (passam direto)
-    row[_pesquisa_map.get('estudouProgramacao', 'Já estudou programação?')] = pesquisa.get('estudouProgramacao')
-    row[_pesquisa_map.get('faculdade', 'Você já fez/faz/pretende fazer faculdade?')] = pesquisa.get('faculdade')
-    row[_pesquisa_map.get('investiuCurso', 'investiu_curso_online')] = pesquisa.get('investiuCurso')
+    # Campos sem mapa semântico; string vazia → None (evita OHE de categoria vazia)
+    row[_pesquisa_map.get('estudouProgramacao', 'Já estudou programação?')] = pesquisa.get('estudouProgramacao') or None
+    row[_pesquisa_map.get('faculdade', 'Você já fez/faz/pretende fazer faculdade?')] = pesquisa.get('faculdade') or None
+    row[_pesquisa_map.get('investiuCurso', 'investiu_curso_online')] = pesquisa.get('investiuCurso') or None
     row[_col_atracao] = _normalizar(pesquisa.get('atracaoProfissao'), _mapa_atracao)
 
     # ------------------------------------------------------------------
