@@ -2135,10 +2135,11 @@ async def daily_monitoring_check_railway(
         )
 
         # FBP/FBC vêm da leads_capi (populada pelo sendBeacon, não pelo Lead table)
+        # DISTINCT email para evitar dupla contagem quando um lead tem múltiplos registros
         capi_fbp_row = railway_conn.run(
             'SELECT '
-            '  COUNT(*) FILTER (WHERE fbp IS NOT NULL AND fbp <> \'\') AS with_fbp, '
-            '  COUNT(*) FILTER (WHERE fbc IS NOT NULL AND fbc <> \'\') AS with_fbc '
+            '  COUNT(DISTINCT CASE WHEN fbp IS NOT NULL AND fbp <> \'\' THEN email END) AS with_fbp, '
+            '  COUNT(DISTINCT CASE WHEN fbc IS NOT NULL AND fbc <> \'\' THEN email END) AS with_fbc '
             'FROM leads_capi '
             'WHERE created_at >= :start AND created_at <= :end',
             start=window_start,
