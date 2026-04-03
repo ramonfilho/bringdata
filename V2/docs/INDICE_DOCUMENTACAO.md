@@ -73,6 +73,10 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Papel:** documentação dos endpoints de monitoring para o front-end.
 **Status:** ativo enquanto a API de monitoring estiver sendo consumida externamente.
 
+### `revenue_forecast.md`
+**Papel:** documentação completa da feature de previsão de faturamento por lançamento — metodologia, parâmetros calibrados, backtest, estrutura do response e limitações conhecidas.
+**Status:** ativo. Implementado em abril/2026. MAE 2,6% validado em LF42–LF47.
+
 ### `instrucoes_dev_frontend_capi.md` e `instrucao_frontend_fbp_fbc.txt`
 **Papel:** instruções para o dev front-end sobre CAPI e captura de FBP/FBC.
 **Status:** ativo (entregue a terceiros).
