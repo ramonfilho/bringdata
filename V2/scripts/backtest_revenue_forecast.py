@@ -168,5 +168,133 @@ def run_backtest():
     print("=" * 72)
 
 
+# ---------------------------------------------------------------------------
+# Backtest 2 — Metodologia por decil/faixa (espelho da lógica de produção)
+#
+# A produção usa decil_distribution × taxa_por_decil (orchestrator.py).
+# Aqui backtestamos essa abordagem com os dados de leads pontuados (CAPI
+# parquets) e comparamos com a abordagem flat-rate acima.
+#
+# Limitação crítica: os parquets CAPI cobrem apenas leads que passaram
+# pelo webhook (subconjunto do total de leads da pesquisa). Lançamentos
+# com baixa cobertura CAPI produzem subestimativas severas.
+# LF43/LF44: cobertos por um único arquivo (janela combinada, excluídos).
+# LF45–LF47: cobertura cresce ao longo do tempo — dados confiáveis.
+# ---------------------------------------------------------------------------
+
+# Distribuições de decil por lançamento (fonte: parquets CAPI em
+# files/validation/cache/). Chaves no formato D1/D2/…/D10 (sem zero-pad
+# exceto D10). Atualizar ao adicionar novos lançamentos.
+CAPI_DIST = {
+    #  LF42: sem parquet disponível (anterior ao pipeline CAPI)
+    #  LF43: combinado com LF44 no mesmo arquivo — excluído individualmente
+    #  LF44: idem
+    'LF45': {  # captação 24/02–01/03 | capi_2026-02-24_2026-03-02.parquet
+        'D1':354,'D2':215,'D3':160,'D4':217,'D5':431,
+        'D6':833,'D7':923,'D8':1001,'D9':1257,'D10':3715,
+    },
+    'LF46': {  # captação 03/03–08/03 | capi_2026-03-03_2026-03-09.parquet
+        'D1':281,'D2':226,'D3':133,'D4':222,'D5':426,
+        'D6':753,'D7':909,'D8':1008,'D9':1239,'D10':3832,
+    },
+    'LF47': {  # captação 10/03–15/03 | capi_2026-03-10_2026-03-16.parquet
+        'D1':1412,'D2':922,'D3':691,'D4':616,'D5':942,
+        'D6':1237,'D7':1418,'D8':1382,'D9':1401,'D10':3532,
+    },
+}
+
+# Taxas rastreadas do devclub.yaml → conversion_rates (D01-D06 = 0)
+RATES_YAML = {'D7': 0.0081, 'D8': 0.0081, 'D9': 0.0157, 'D10': 0.0175}
+
+# Taxas do conversion_rate_benchmark (DEV19–LF48, 7 lançamentos)
+RATE_D1_D5 = 0.0029
+RATE_D6_D9 = 0.0070
+RATE_D10   = 0.0107
+
+
+def run_backtest_por_decil():
+    print("\n" + "=" * 72)
+    print(" BACKTEST 2 — METODOLOGIA POR DECIL/FAIXA (espelho de produção)")
+    print(" Fonte: parquets CAPI | LF45–LF47 (LF42–LF44 sem dados individuais)")
+    print("=" * 72)
+
+    # Resultados do backtest flat-rate para comparação (rodado acima)
+    FLAT_PRED = {lf['nome']: None for lf in LANCAMENTOS}
+    tracking_global = _med([lf['vendas_rastr'] / lf['vendas_reais'] for lf in LANCAMENTOS])
+
+    # Recalcular flat-rate leave-one-out para LF45–LF47
+    flat_preds = {}
+    for i, lf in enumerate(LANCAMENTOS):
+        if lf['nome'] not in CAPI_DIST:
+            continue
+        outros = [LANCAMENTOS[j] for j in range(len(LANCAMENTOS)) if j != i]
+        cb = _med([o['vendas_rastr'] / o['total_leads'] for o in outros])
+        tb = _med([o['vendas_rastr'] / o['vendas_reais'] for o in outros])
+        flat_preds[lf['nome']] = _prever(lf['total_leads'], cb, tb)
+
+    print(f"\n{'LF':<6} {'Scored':>7} {'Real':>6} "
+          f"{'YAML pred':>10} {'Err':>7} "
+          f"{'Bench pred':>11} {'Err':>7} "
+          f"{'Flat pred':>10} {'Err':>7}")
+    print(f"  {'─'*6} {'─'*7} {'─'*6} {'─'*10} {'─'*7} {'─'*11} {'─'*7} {'─'*10} {'─'*7}")
+
+    erros_yaml  = []
+    erros_bench = []
+    erros_flat  = []
+
+    for lf_nome, dist in CAPI_DIST.items():
+        lf_data = next(l for l in LANCAMENTOS if l['nome'] == lf_nome)
+        real    = lf_data['vendas_reais']
+        scored  = sum(dist.values())
+
+        # Abordagem YAML: taxas individuais D7–D10
+        rastr_yaml = sum(dist.get(d, 0) * r for d, r in RATES_YAML.items())
+        pred_yaml  = rastr_yaml / tracking_global
+
+        # Abordagem Benchmark: taxas por faixa
+        d1_d5  = sum(dist.get(f'D{i}', 0) for i in range(1, 6))
+        d6_d9  = sum(dist.get(f'D{i}', 0) for i in range(6, 10))
+        d10    = dist.get('D10', 0)
+        rastr_b = d1_d5 * RATE_D1_D5 + d6_d9 * RATE_D6_D9 + d10 * RATE_D10
+        pred_b  = rastr_b / tracking_global
+
+        flat   = flat_preds.get(lf_nome, 0)
+        err_y  = (pred_yaml - real) / real * 100
+        err_b  = (pred_b   - real) / real * 100
+        err_f  = (flat     - real) / real * 100
+
+        erros_yaml.append(err_y)
+        erros_bench.append(err_b)
+        erros_flat.append(err_f)
+
+        print(f"  {lf_nome:<6} {scored:>7,} {real:>6} "
+              f"{pred_yaml:>10.1f} {err_y:>+7.1f}% "
+              f"{pred_b:>11.1f} {err_b:>+7.1f}% "
+              f"{flat:>10.1f} {err_f:>+7.1f}%")
+
+    mae_yaml  = sum(abs(e) for e in erros_yaml)  / len(erros_yaml)
+    mae_bench = sum(abs(e) for e in erros_bench) / len(erros_bench)
+    mae_flat  = sum(abs(e) for e in erros_flat)  / len(erros_flat)
+
+    print(f"\n  MAE — YAML (decil):  {mae_yaml:.1f}%")
+    print(f"  MAE — Benchmark (faixa): {mae_bench:.1f}%")
+    print(f"  MAE — Flat-rate (LOO):   {mae_flat:.1f}%")
+
+    print(f"""
+── DIAGNÓSTICO ──────────────────────────────────────────────────────
+  Flat-rate vence (MAE {mae_flat:.1f}%) porque usa total_leads (pesquisa
+  completa), enquanto YAML e Benchmark usam apenas leads pontuados
+  pelo webhook CAPI — subconjunto com cobertura variável por lançamento.
+
+  Implicação para produção: o endpoint usa decil_distribution dos leads
+  no DB (webhook CAPI), não o total de leads da pesquisa. Se a cobertura
+  CAPI < 100%, a previsão subestima sistematicamente.
+
+  Caminho para alinhar: usar total_leads_pesquisa como denominador e
+  recalibrar as taxas por decil sobre essa base (não sobre CAPI).
+{"=" * 72}""")
+
+
 if __name__ == '__main__':
     run_backtest()
+    run_backtest_por_decil()
