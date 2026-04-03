@@ -689,12 +689,16 @@ class MonitoringOrchestrator:
             ─────────────────────────────
             Total: N vendas | R$piso ──●── R$teto
         """
-        biz          = self._client_config.business
-        conv_rates   = biz.conversion_rates or {}
-        ticket       = biz.ticket_contracted
-        tracking_rate = biz.tracking_rate
-        pct_cartao   = biz.pct_cartao_historico
-        pct_boleto   = 1.0 - pct_cartao
+        biz               = self._client_config.business
+        conv_rates        = biz.conversion_rates or {}
+        ticket            = biz.ticket_contracted
+        guru_ticket       = biz.guru_ticket_price or ticket      # preço real Guru (≠ ticket contratado)
+        guru_realizacao   = biz.guru_realizacao_factor           # absorve cancelamentos/chargebacks Guru
+        tracking_rate     = biz.tracking_rate
+        pct_cartao        = biz.pct_cartao_historico
+        pct_boleto        = 1.0 - pct_cartao
+        n_parcelas        = biz.n_parcelas_boleto or 12
+        parcela_tmb       = ticket / n_parcelas                  # 1ª parcela do boleto TMB
 
         if not conv_rates or ticket <= 0 or tracking_rate <= 0:
             return {}
@@ -726,11 +730,15 @@ class MonitoringOrchestrator:
             vendas_guru = round(buyers * pct_cartao, 1)
             vendas_tmb  = round(buyers * pct_boleto, 1)
 
+            # faturamento_recebido = cartão Guru líquido (ticket real × realizacao) + 1ª parcela boleto TMB
+            fat_recebido = round(vendas_guru * guru_ticket * guru_realizacao + vendas_tmb * parcela_tmb)
+
             return {
-                'faturamento':   round(buyers * ticket),
-                'vendas_total':  round(buyers, 1),
-                'vendas_guru':   vendas_guru,
-                'vendas_tmb':    vendas_tmb,
+                'faturamento':          round(buyers * ticket),
+                'faturamento_recebido': fat_recebido,
+                'vendas_total':         round(buyers, 1),
+                'vendas_guru':          vendas_guru,
+                'vendas_tmb':           vendas_tmb,
             }
 
         base       = _calc(1.0)

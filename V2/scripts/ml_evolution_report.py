@@ -903,6 +903,37 @@ def build_excel(rows: list[dict], output_path: Path):
     data_row(r, 'Receita Total (R$)',
              [_brl(v) for v in _mval('receita_total')],
              bw(_mval('receita_total'))); r += 1
+
+    # ── Faturamento contratado e recebido (previsão de faturamento) ──
+    TICKET           = 2_200.0
+    GURU_TICKET      = 1_997.0   # preço real Guru (payment.gross via API) — ≠ ticket contratado
+    GURU_REALIZACAO  = 0.87      # fator de realização: ~13% cancelamentos/chargebacks (back-calculado LF42–LF47)
+    PCT_CARTAO       = 0.469     # mediana LF44–LF47
+    N_PARCELAS       = 12        # entrada + 11x (fonte: contas_a_receber TMB)
+    PARCELA_TMB      = TICKET / N_PARCELAS
+
+    def _fat_contratado(vendas):
+        if vendas is None or not isinstance(vendas, (int, float)):
+            return None
+        return vendas * TICKET
+
+    def _fat_recebido(vendas):
+        if vendas is None or not isinstance(vendas, (int, float)):
+            return None
+        v_guru = vendas * PCT_CARTAO
+        v_tmb  = vendas * (1 - PCT_CARTAO)
+        return v_guru * GURU_TICKET * GURU_REALIZACAO + v_tmb * PARCELA_TMB
+
+    fat_cont_vals = [_fat_contratado(v) for v in col('vendas_total')]
+    fat_rec_vals  = [_fat_recebido(v)  for v in col('vendas_total')]
+
+    data_row(r, 'Fat. Contratado (R$) — vendas × R$2.200',
+             [_brl(v) for v in fat_cont_vals],
+             bw(fat_cont_vals)); r += 1
+    data_row(r, 'Fat. Recebido Est. (R$) — cartão integral + 1ª parc. boleto',
+             [_brl(v) for v in fat_rec_vals],
+             bw(fat_rec_vals)); r += 1
+
     data_row(r, 'ROAS ML',
              [_rfmt(v) for v in _mval('roas_ml')],
              bw(_mval('roas_ml'))); r += 1

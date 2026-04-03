@@ -540,8 +540,11 @@ retrain:
   quality_gate_critical_threshold: 0.2
 business:
   product_value: 1563.75
-  ticket_contracted: 2200.0          # valor nominal contratado — base da previsão de faturamento (Guru e TMB)
+  ticket_contracted: 2200.0          # valor nominal contratado — base do faturamento total (Guru e TMB)
+  guru_ticket_price: 1997.0          # preço real no Guru (payment.gross via API) — ≠ ticket contratado R$2.200
+  guru_realizacao_factor: 0.87       # fator de realização Guru: ~13% de cancelamentos/chargebacks (back-calculado de LF42–LF47)
   pct_cartao_historico: 0.469        # % cartão mediana LF44–LF47 (exclui LF42 vol.pequeno e LF43 efeito pós-Dev19)
+  n_parcelas_boleto: 12              # entrada + 11 mensais (fonte: contas_a_receber TMB)
   scenario_pessimistic_factor: 0.97  # piso conv. rate — calibrado no CV real de 2% (LF42–LF47)
   scenario_optimistic_factor: 1.03   # teto conv. rate — calibrado no CV real de 2% (LF42–LF47)
   conversion_rates:

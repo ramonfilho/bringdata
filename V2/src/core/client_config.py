@@ -255,11 +255,22 @@ class BusinessConfig:
     # Ticket contratado (valor nominal da venda, sem desconto de inadimplência)
     # Guru (cartão) e TMB (boleto parcelado) têm o mesmo ticket contratado.
     # Inadimplência do boleto é risco operacional — não entra na previsão de faturamento.
-    ticket_contracted: float = 2200.0                      # valor nominal do produto — base do faturamento previsto
+    ticket_contracted: float = 2200.0                      # valor nominal do produto — base do faturamento total
+
+    # Guru: preço real e fator de realização
+    # O ticket_contracted (R$2.200) é o objetivo de negócio, mas o Guru vende a R$1.997 (payment.gross via API).
+    # guru_realizacao_factor absorve cancelamentos + chargebacks (~13%, back-calculado de LF42–LF47).
+    guru_ticket_price: float = 1997.0                      # preço real no Guru (payment.gross) — ≠ ticket contratado
+    guru_realizacao_factor: float = 0.87                   # fator de realização Guru (1 - taxa cancelamento/chargeback)
 
     # Proporção histórica cartão/boleto (mediana LF42–LF47, audience-dependent)
     # Cartão = Guru + Hotmart | Boleto = TMB + ASAAS
     pct_cartao_historico: float = 0.468                    # % mediana de vendas via cartão (Guru + Hotmart)
+
+    # Parcelas do boleto TMB/ASAAS (entrada + N mensais)
+    # Fonte: contas_a_receber TMB — oferta padrão "Entr. + 11x" = 12 pagamentos
+    # Usado para calcular faturamento_recebido = cartão líquido Guru + 1ª parcela boleto
+    n_parcelas_boleto: int = 12                            # número total de pagamentos (entrada + mensais)
 
 
 @dataclass
