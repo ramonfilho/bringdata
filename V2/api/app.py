@@ -2154,6 +2154,21 @@ async def daily_monitoring_check_railway(
             'ORDER BY "createdAt" DESC'
         )
 
+        # 1d. Leads do lançamento atual (desde terça-feira BRT) — exclusivo para revenue_forecast
+        now_brt = now_utc.astimezone(brt)
+        days_since_tuesday = (now_brt.weekday() - 1) % 7  # terça = weekday 1
+        launch_window_start = now_brt.replace(hour=0, minute=0, second=0, microsecond=0) \
+            - timedelta(days=days_since_tuesday)
+        launch_window_start_utc = launch_window_start.astimezone(_tz.utc)
+
+        forecast_decil_rows = railway_conn.run(
+            'SELECT decil '
+            'FROM "Lead" '
+            'WHERE "leadScore" IS NOT NULL AND decil IS NOT NULL '
+            'AND "createdAt" >= :start',
+            start=launch_window_start_utc,
+        )
+
         railway_conn.close()
 
         # ------------------------------------------------------------------
@@ -2396,13 +2411,24 @@ async def daily_monitoring_check_railway(
         )
 
         # Gerar previsão de faturamento (falha silenciosa — não deve bloquear monitoring)
+        # Usa leads desde a terça-feira BRT (início do lançamento), não a janela de 24h
         revenue_forecast = None
         try:
+            forecast_decil_dist: Dict[str, int] = {}
+            for (decil_val,) in forecast_decil_rows:
+                if decil_val is not None:
+                    key = f"D{int(decil_val):02d}"
+                    forecast_decil_dist[key] = forecast_decil_dist.get(key, 0) + 1
+
             revenue_forecast = orchestrator._generate_revenue_forecast(
-                decil_distribution=railway_funnel_metrics.get('scoring', {}).get('decil_distribution', {}),
+                decil_distribution=forecast_decil_dist,
                 funnel_metrics=railway_funnel_metrics,
                 lead_quality_metrics=railway_lead_quality,
             ) or None
+
+            if revenue_forecast:
+                revenue_forecast['inputs']['launch_window_start_brt'] = \
+                    launch_window_start.strftime('%d/%m/%Y')
         except Exception as _fe:
             logger.warning(f"⚠️ revenue_forecast indisponível: {_fe}")
 
