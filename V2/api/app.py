@@ -2127,11 +2127,20 @@ async def daily_monitoring_check_railway(
             '  COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL) AS capi_sent, '
             '  COUNT(*) FILTER (WHERE "capiStatus" = \'success\') AS capi_success, '
             '  COUNT(*) FILTER (WHERE "capiStatus" = \'error\') AS capi_error, '
-            '  COUNT(*) FILTER (WHERE telefone IS NOT NULL AND telefone <> \'\') AS with_phone, '
-            '  COUNT(*) FILTER (WHERE fbp IS NOT NULL AND fbp <> \'\') AS with_fbp, '
-            '  COUNT(*) FILTER (WHERE fbc IS NOT NULL AND fbc <> \'\') AS with_fbc '
+            '  COUNT(*) FILTER (WHERE telefone IS NOT NULL AND telefone <> \'\') AS with_phone '
             'FROM "Lead" '
             'WHERE "createdAt" >= :start AND "createdAt" <= :end',
+            start=window_start,
+            end=window_end
+        )
+
+        # FBP/FBC vêm da leads_capi (populada pelo sendBeacon, não pelo Lead table)
+        capi_fbp_row = railway_conn.run(
+            'SELECT '
+            '  COUNT(*) FILTER (WHERE fbp IS NOT NULL AND fbp <> \'\') AS with_fbp, '
+            '  COUNT(*) FILTER (WHERE fbc IS NOT NULL AND fbc <> \'\') AS with_fbc '
+            'FROM leads_capi '
+            'WHERE created_at >= :start AND created_at <= :end',
             start=window_start,
             end=window_end
         )
@@ -2210,7 +2219,7 @@ async def daily_monitoring_check_railway(
         # 3. Construir funnel_metrics 100% Railway
         # ------------------------------------------------------------------
         stats = dict(zip(
-            ['total', 'scored', 'capi_sent', 'capi_success', 'capi_error', 'with_phone', 'with_fbp', 'with_fbc'],
+            ['total', 'scored', 'capi_sent', 'capi_success', 'capi_error', 'with_phone'],
             stats_row[0]
         ))
         total = stats['total'] or 0
@@ -2218,8 +2227,10 @@ async def daily_monitoring_check_railway(
         capi_success = stats['capi_success'] or 0
         capi_error = stats['capi_error'] or 0
         with_phone = stats['with_phone'] or 0
-        with_fbp = stats['with_fbp'] or 0
-        with_fbc = stats['with_fbc'] or 0
+
+        fbp_stats = dict(zip(['with_fbp', 'with_fbc'], capi_fbp_row[0]))
+        with_fbp = fbp_stats['with_fbp'] or 0
+        with_fbc = fbp_stats['with_fbc'] or 0
 
         railway_funnel_metrics = {
             'window': {
