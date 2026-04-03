@@ -777,13 +777,6 @@ class MonitoringOrchestrator:
                 'pct_cartao_historico':   pct_cartao,
                 'tracking_rate_usado':    tracking_rate,
             },
-            'benchmark_vs_historico': benchmark_comparison,
-            'nota': (
-                'Ticket = R$2.200 contratado (Guru e TMB). '
-                'Split Guru/TMB baseado na mediana histórica (46.8% cartão, LF42–LF47). '
-                'Suposição: tracking rate uniforme entre decis. '
-                'D01–D06 agrupados como bloco único.'
-            ),
         }
 
     def _generate_funnel_metrics(self, leads_data: List[Dict], df: pd.DataFrame = None) -> Dict:
