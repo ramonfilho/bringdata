@@ -24,7 +24,7 @@ PROJECT_ID="${PROJECT_ID:-smart-ads-451319}"
 REGION="${REGION:-us-central1}"
 
 # Cloud Run
-SERVICE_NAME="${SERVICE_NAME:-bring-data-api}"
+SERVICE_NAME="${SERVICE_NAME:-smart-ads-api}"
 GCR_REGISTRY="${GCR_REGISTRY:-gcr.io}"
 
 # Recursos do Container - SERVICE (CAPI + Monitoramento)

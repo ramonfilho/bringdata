@@ -136,7 +136,8 @@ python src/retrain/retraining_orchestrator.py --config configs/retreino_mensal.y
 
 ## Infraestrutura de produção
 
-- **API:** FastAPI + Uvicorn em Cloud Run (`https://bring-data-api-12955519745.us-central1.run.app`)
+- **API:** FastAPI + Uvicorn em Cloud Run (`https://smart-ads-api-12955519745.us-central1.run.app`)
+  - Serviço ativo: `smart-ads-api` (Cloud Scheduler aponta aqui — `bring-data-api` existe mas não recebe tráfego)
 - **Banco:** PostgreSQL Cloud SQL (`smart-ads-451319:us-central1:bring-data-db`)
 - **Tabela principal:** `leads_capi`
 - **Scheduler:** Cloud Scheduler → Cloud Run Job (monitoramento diário, retreino mensal)
