@@ -2,11 +2,16 @@
 Backtest da previsão de faturamento — LF42 a LF47 (modelo jan30).
 
 Metodologia: leave-one-out cross-validation.
-  Para cada lançamento i, usa a mediana dos outros 5 como taxa base.
+  Para cada lançamento i, usa a mediana dos outros como taxa base.
   Roda a previsão e compara com o faturamento contratado real.
 
 Ticket = R$2.200 (valor nominal, Guru e TMB).
 Faturamento real = vendas_reais × R$2.200 (visão do dono do negócio).
+
+Fonte dos dados: evolucao_ml_devclub_20260402_140902.xlsx (autoritativo)
+  total_leads  = Leads Meta (row 11) — total de leads da campanha
+  vendas_reais = Vendas totais no período (row 14)
+  vendas_rastr = Vendas identificadas/matched (row 15)
 
 Rodar: python scripts/backtest_revenue_forecast.py
 """
@@ -16,16 +21,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # ---------------------------------------------------------------------------
 # Dados históricos — 6 lançamentos válidos (modelo jan30, LF42–LF47)
-# Fonte: validation reports + Leads.xlsx
+# Fonte: outputs/validation/historico/evolucao_ml_devclub_20260402_140902.xlsx
+# total_leads = Leads Meta (total); vendas_rastr = vendas matched/identificadas
+# cartao/boleto = proporção das vendas rastreadas (usado só como ratio)
 # ---------------------------------------------------------------------------
 
 LANCAMENTOS = [
-    {'nome': 'LF42', 'periodo': '22/12–28/12/2025', 'total_leads': 4_301,  'vendas_reais': 54,  'vendas_rastr': 29,  'cartao': 11, 'boleto': 19},
-    {'nome': 'LF43', 'periodo': '02/02–08/02/2026', 'total_leads': 13_609, 'vendas_reais': 161, 'vendas_rastr': 94,  'cartao': 60, 'boleto': 38},
-    {'nome': 'LF44', 'periodo': '09/02–15/02/2026', 'total_leads': 12_286, 'vendas_reais': 149, 'vendas_rastr': 99,  'cartao': 63, 'boleto': 61},
-    {'nome': 'LF45', 'periodo': '02/03–08/03/2026', 'total_leads': 32_068, 'vendas_reais': 388, 'vendas_rastr': 201, 'cartao': 109,'boleto': 105},
-    {'nome': 'LF46', 'periodo': '09/03–15/03/2026', 'total_leads': 12_903, 'vendas_reais': 157, 'vendas_rastr': 69,  'cartao': 30, 'boleto': 40},
-    {'nome': 'LF47', 'periodo': '16/03–22/03/2026', 'total_leads': 14_243, 'vendas_reais': 174, 'vendas_rastr': 83,  'cartao': 36, 'boleto': 48},
+    {'nome': 'LF42', 'periodo': '22/12–28/12/2025', 'total_leads': 4_373,  'vendas_reais': 54,  'vendas_rastr': 29,  'cartao': 11, 'boleto': 19},
+    {'nome': 'LF43', 'periodo': '02/02–08/02/2026', 'total_leads': 14_734, 'vendas_reais': 161, 'vendas_rastr': 94,  'cartao': 60, 'boleto': 38},
+    {'nome': 'LF44', 'periodo': '09/02–15/02/2026', 'total_leads': 13_360, 'vendas_reais': 149, 'vendas_rastr': 99,  'cartao': 63, 'boleto': 61},
+    {'nome': 'LF45', 'periodo': '02/03–08/03/2026', 'total_leads': 27_615, 'vendas_reais': 386, 'vendas_rastr': 201, 'cartao': 109,'boleto': 105},
+    {'nome': 'LF46', 'periodo': '09/03–15/03/2026', 'total_leads': 12_463, 'vendas_reais': 154, 'vendas_rastr': 67,  'cartao': 30, 'boleto': 40},
+    {'nome': 'LF47', 'periodo': '16/03–22/03/2026', 'total_leads': 13_812, 'vendas_reais': 175, 'vendas_rastr': 86,  'cartao': 36, 'boleto': 48},
 ]
 
 TICKET       = 2_200.0   # valor contratado — base da previsão de faturamento
@@ -35,6 +42,7 @@ FATOR_OPT    = 1.03      # teto de conversão histórica vs mediana
 
 # LF42 excluído do split: amostra pequena (30 vendas rastreadas) — estatisticamente pouco confiável
 # LF43 excluído do split: efeito pós-Dev19 — base inundada com leads frescos distorceu audiência (61.2% cartão vs cluster 42–51%)
+# LF48 excluído: outlier severo (+38% erro) — taxa conv. real 0.89% vs mediana 1.23%; A/B com ctrl insuficiente (ROAS Ctrl=0.79x)
 LANCAMENTOS_SPLIT = ['LF44', 'LF45', 'LF46', 'LF47']
 
 
@@ -185,22 +193,33 @@ def run_backtest():
 # Distribuições de decil por lançamento (fonte: parquets CAPI em
 # files/validation/cache/). Chaves no formato D1/D2/…/D10 (sem zero-pad
 # exceto D10). Atualizar ao adicionar novos lançamentos.
+#
+# ATENÇÃO: mapeamentos abaixo precisam ser revalidados contra as datas de
+# captação reais (evolução ML, rows 6-7):
+#   LF45 captação: 03/02–23/02 | LF46 captação: 24/02–02/03
+#   LF47 captação: 03/03–09/03 | LF48 captação: 10/03–16/03
+# O total de CAPI_DIST deve ser ≤ "Leads com decil nas Sheets" (row 48):
+#   LF45=15.079 | LF46=11.463 | LF47=12.024 | LF48=14.065
+# LF47 abaixo soma 13.553 > 12.024 → parquet errado (janela deslocada).
+# Revalidar antes de usar CAPI_DIST para decisões de produção.
 CAPI_DIST = {
     #  LF42: sem parquet disponível (anterior ao pipeline CAPI)
     #  LF43: combinado com LF44 no mesmo arquivo — excluído individualmente
     #  LF44: idem
-    'LF45': {  # captação 24/02–01/03 | capi_2026-02-24_2026-03-02.parquet
+    'LF45': {  # captação 03/02–23/02 | parquet a revalidar — soma=9.106, Sheets=15.079
         'D1':354,'D2':215,'D3':160,'D4':217,'D5':431,
         'D6':833,'D7':923,'D8':1001,'D9':1257,'D10':3715,
     },
-    'LF46': {  # captação 03/03–08/03 | capi_2026-03-03_2026-03-09.parquet
+    'LF46': {  # captação 24/02–02/03 | parquet a revalidar — soma=9.029, Sheets=11.463
         'D1':281,'D2':226,'D3':133,'D4':222,'D5':426,
         'D6':753,'D7':909,'D8':1008,'D9':1239,'D10':3832,
     },
-    'LF47': {  # captação 10/03–15/03 | capi_2026-03-10_2026-03-16.parquet
+    'LF47': {  # captação 03/03–09/03 | parquet a revalidar — soma=13.553 > Sheets=12.024 (janela deslocada!)
         'D1':1412,'D2':922,'D3':691,'D4':616,'D5':942,
         'D6':1237,'D7':1418,'D8':1382,'D9':1401,'D10':3532,
     },
+    # LF48: distribuição por decil pendente de extração do parquet correto
+    # captação 10/03–16/03 | Sheets=14.065 leads com decil
 }
 
 # Taxas rastreadas do devclub.yaml → conversion_rates (D01-D06 = 0)

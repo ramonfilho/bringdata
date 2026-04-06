@@ -87,6 +87,7 @@ class DailyCheckResponse(BaseModel):
     funnel_metrics: Optional[Dict[str, Any]] = None
     lead_quality_metrics: Optional[Dict[str, Any]] = None
     revenue_forecast: Optional[Dict[str, Any]] = None
+    # revenue_forecast inclui expected_conversion quando conversion_rate_benchmark está configurado
 
 # Inicializar a aplicação FastAPI
 app = FastAPI(
@@ -2169,6 +2170,13 @@ async def daily_monitoring_check_railway(
             start=launch_window_start_utc,
         )
 
+        # Distribuição de decis na janela do lançamento — usada pelo expected_conversion
+        forecast_decil_dist: Dict[str, int] = {}
+        for (decil_val,) in forecast_decil_rows:
+            if decil_val is not None:
+                key = f"D{int(decil_val):02d}"
+                forecast_decil_dist[key] = forecast_decil_dist.get(key, 0) + 1
+
         railway_conn.close()
 
         # ------------------------------------------------------------------
@@ -2367,15 +2375,19 @@ async def daily_monitoring_check_railway(
 
         # Buscar métricas Meta Ads (campanhas CAP, hoje) — falha silenciosa
         meta_metrics = None
+        total_meta_leads_forecast = 0   # leads Meta na janela do lançamento — usado no revenue_forecast
         try:
             from api.meta_integration import MetaAdsIntegration
             from api.meta_config import META_CONFIG
             _token = os.getenv('META_ACCESS_TOKEN')
             _account = os.getenv('META_ACCOUNT_ID', META_CONFIG.get('account_id', 'act_188005769808959'))
             if _token:
-                _today = datetime.now(_tz(timedelta(hours=-3))).strftime('%Y-%m-%d')
+                _today      = datetime.now(_tz(timedelta(hours=-3))).strftime('%Y-%m-%d')
+                _launch_str = launch_window_start.strftime('%Y-%m-%d')
                 _meta = MetaAdsIntegration(access_token=_token)
-                _rows = _meta.get_insights(
+
+                # --- métricas do dia (spend/clicks) ---
+                _rows_hoje = _meta.get_insights(
                     account_id=_account,
                     level='campaign',
                     fields=['campaign_name', 'spend', 'clicks'],
@@ -2383,9 +2395,8 @@ async def daily_monitoring_check_railway(
                     until_date=_today,
                     filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}]
                 )
-                _spend  = sum(float(r.get('spend', 0) or 0) for r in _rows)
-                _clicks = sum(int(r.get('clicks', 0) or 0) for r in _rows)
-                # Usar meia-noite BRT como cutoff — mesma janela que Meta usa para "hoje"
+                _spend  = sum(float(r.get('spend', 0) or 0) for r in _rows_hoje)
+                _clicks = sum(int(r.get('clicks', 0) or 0) for r in _rows_hoje)
                 _midnight_brt = datetime.now(brt).replace(hour=0, minute=0, second=0, microsecond=0)
                 _midnight_utc = _midnight_brt.astimezone(_tz.utc)
                 _leads_hoje = len(_after(quality_rows, _midnight_utc))
@@ -2397,6 +2408,23 @@ async def daily_monitoring_check_railway(
                     'taxa_clique_lead': (_leads_hoje / _clicks * 100) if _clicks > 0 else None,
                 }
                 logger.info(f"📊 Meta Ads CAP: spend=R${_spend:.2f}, clicks={_clicks}, leads={_leads_hoje}")
+
+                # --- total de leads Meta desde o início da janela de lançamento ---
+                # Usado pelo revenue_forecast (flat-rate) como denominador real da população.
+                # Inclui leads que não responderam à pesquisa e não chegam ao DB.
+                _rows_launch = _meta.get_insights(
+                    account_id=_account,
+                    level='campaign',
+                    fields=['campaign_name', 'actions'],
+                    since_date=_launch_str,
+                    until_date=_today,
+                    filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}]
+                )
+                for _r in _rows_launch:
+                    for _a in (_r.get('actions') or []):
+                        if _a.get('action_type') == 'offsite_conversion.fb_pixel_lead':
+                            total_meta_leads_forecast += int(_a.get('value', 0) or 0)
+                logger.info(f"📊 Meta leads janela lançamento ({_launch_str}–{_today}): {total_meta_leads_forecast}")
         except Exception as _e:
             logger.warning(f"⚠️ Meta Ads metrics indisponível: {_e}")
 
@@ -2408,19 +2436,15 @@ async def daily_monitoring_check_railway(
         )
 
         # Gerar previsão de faturamento (falha silenciosa — não deve bloquear monitoring)
-        # Usa leads desde a terça-feira BRT (início do lançamento), não a janela de 24h
+        # Metodologia flat-rate: buyers = total_leads_meta × (conv_rastr_mediana / tracking_rate)
+        # total_leads_meta vem da Meta Ads API (janela desde terça BRT) — inclui não-respondentes.
         revenue_forecast = None
         try:
-            forecast_decil_dist: Dict[str, int] = {}
-            for (decil_val,) in forecast_decil_rows:
-                if decil_val is not None:
-                    key = f"D{int(decil_val):02d}"
-                    forecast_decil_dist[key] = forecast_decil_dist.get(key, 0) + 1
-
             revenue_forecast = orchestrator._generate_revenue_forecast(
-                decil_distribution=forecast_decil_dist,
+                total_meta_leads=total_meta_leads_forecast,
                 funnel_metrics=railway_funnel_metrics,
                 lead_quality_metrics=railway_lead_quality,
+                decil_distribution=forecast_decil_dist or None,
             ) or None
 
             if revenue_forecast:

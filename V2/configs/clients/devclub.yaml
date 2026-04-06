@@ -545,19 +545,14 @@ business:
   guru_realizacao_factor: 0.87       # fator de realização Guru: ~13% de cancelamentos/chargebacks (back-calculado de LF42–LF47)
   pct_cartao_historico: 0.469        # % cartão mediana LF44–LF47 (exclui LF42 vol.pequeno e LF43 efeito pós-Dev19)
   n_parcelas_boleto: 12              # entrada + 11 mensais (fonte: contas_a_receber TMB)
+  conv_rastr_mediana: 0.0065         # mediana LF42–LF47: vendas_matched/total_leads_meta → forecast flat-rate
   scenario_pessimistic_factor: 0.97  # piso conv. rate — calibrado no CV real de 2% (LF42–LF47)
   scenario_optimistic_factor: 1.03   # teto conv. rate — calibrado no CV real de 2% (LF42–LF47)
-  conversion_rates:
-    D01: 0.0000
-    D02: 0.0000
-    D03: 0.0000
-    D04: 0.0000
-    D05: 0.0000
-    D06: 0.0000
-    D07: 0.0081  # PAV pooled D07+D08
-    D08: 0.0081  # PAV pooled D07+D08
-    D09: 0.0157
-    D10: 0.0175
+  conversion_rate_benchmark:              # taxas observadas em produção — DEV19–LF48 (7 lançamentos)
+    periodo_referencia: "DEV19–LF48"     # base de calibração (exclui LF40/41 inconclusivos e LF42 sazonalidade Natal)
+    D1_D5: 0.0029                        # 0,29% — faixa de baixa intenção (D1–D5)
+    D6_D9: 0.0070                        # 0,70% — faixa de média intenção (D6–D9)
+    D10:   0.0107                        # 1,07% — faixa de alta intenção (D10)
   spend_threshold_zero_leads: 100.0
   minimum_leads_threshold: 3
   color_thresholds:

@@ -666,66 +666,46 @@ class MonitoringOrchestrator:
 
     def _generate_revenue_forecast(
         self,
-        decil_distribution: Dict,
+        total_meta_leads: int,
         funnel_metrics: Dict,
         lead_quality_metrics: Dict,
+        decil_distribution: Dict = None,
     ) -> Dict:
         """
-        Gera previsão de faturamento e breakdown Guru/TMB.
+        Gera previsão de faturamento — metodologia flat-rate (espelho do backtest).
 
-        Ticket = R$2.200 (valor contratado, igual para Guru e TMB).
-        Inadimplência do boleto é risco operacional — não entra aqui.
+        Metodologia validada em backtest leave-one-out LF42–LF47, MAE 7.5%:
+            buyers = total_leads_meta × (conv_rastr_mediana / tracking_rate)
 
-        Guru  = vendas via cartão (Guru + Hotmart)
-        TMB   = vendas via boleto parcelado (TMB + ASAAS)
-        Split baseado na proporção histórica (mediana LF42–LF47: 46.8% cartão).
-
-        Suposição documentada: tracking rate uniforme entre decis.
-        D01–D06 agrupados como bloco único (volume histórico insuficiente).
-
-        Output:
-            Guru: N1 vendas (R$ N1 × 2.200)
-            TMB:  N2 vendas (R$ N2 × 2.200)
-            ─────────────────────────────
-            Total: N vendas | R$piso ──●── R$teto
+        total_meta_leads: total de leads vindos da Meta (via Meta Ads API), inclui
+            respondentes e não-respondentes à pesquisa. Evita subestimativa por
+            leads que não chegam ao DB.
+        conv_rastr_mediana: mediana histórica de vendas_matched/total_leads_meta.
+        tracking_rate: mediana histórica de vendas_matched/vendas_reais.
+        taxa_real = conv_rastr_mediana / tracking_rate = vendas_reais/total_leads_meta.
         """
-        biz               = self._client_config.business
-        conv_rates        = biz.conversion_rates or {}
-        ticket            = biz.ticket_contracted
-        guru_ticket       = biz.guru_ticket_price or ticket      # preço real Guru (≠ ticket contratado)
-        guru_realizacao   = biz.guru_realizacao_factor           # absorve cancelamentos/chargebacks Guru
-        tracking_rate     = biz.tracking_rate
-        pct_cartao        = biz.pct_cartao_historico
-        pct_boleto        = 1.0 - pct_cartao
-        n_parcelas        = biz.n_parcelas_boleto or 12
-        parcela_tmb       = ticket / n_parcelas                  # 1ª parcela do boleto TMB
+        biz             = self._client_config.business
+        ticket          = biz.ticket_contracted
+        guru_ticket     = biz.guru_ticket_price or ticket
+        guru_realizacao = biz.guru_realizacao_factor
+        pct_cartao      = biz.pct_cartao_historico
+        pct_boleto      = 1.0 - pct_cartao
+        n_parcelas      = biz.n_parcelas_boleto or 12
+        parcela_tmb     = ticket / n_parcelas
+        conv_rastr      = biz.conv_rastr_mediana   # mediana histórica LF42–LF47
+        tracking_rate   = biz.tracking_rate         # mediana histórica LF42–LF47
 
-        if not conv_rates or ticket <= 0 or tracking_rate <= 0:
+        if ticket <= 0 or total_meta_leads <= 0 or tracking_rate <= 0:
             return {}
 
-        total_leads = sum(decil_distribution.values()) if decil_distribution else 0
-        if total_leads == 0:
-            return {}
-
-        HIGH_DECILS = ['D07', 'D08', 'D09', 'D10']
-        LOW_DECILS  = [f'D{i:02d}' for i in range(1, 7)]
+        # taxa_real = vendas_reais / total_leads_meta
+        # = (conv_rastr / tracking_rate)
+        # onde conv_rastr = vendas_matched/total_leads_meta
+        #       tracking_rate = vendas_matched/vendas_reais
+        taxa_real = conv_rastr / tracking_rate
 
         def _calc(factor: float) -> Dict:
-            buyers = 0.0
-
-            # D07–D10: taxa individual por decil
-            for d in HIGH_DECILS:
-                obs_rate  = conv_rates.get(d, 0.0)
-                real_rate = (obs_rate / tracking_rate) * factor
-                buyers   += decil_distribution.get(d, 0) * real_rate
-
-            # D01–D06: bloco único com taxa média agregada
-            low_leads     = sum(decil_distribution.get(d, 0) for d in LOW_DECILS)
-            low_obs_rates = [conv_rates.get(d, 0.0) for d in LOW_DECILS if conv_rates.get(d, 0.0) > 0]
-            if low_obs_rates:
-                avg_low_obs   = sum(low_obs_rates) / len(low_obs_rates)
-                real_low_rate = (avg_low_obs / tracking_rate) * factor
-                buyers       += low_leads * real_low_rate
+            buyers = total_meta_leads * taxa_real * factor
 
             vendas_guru = round(buyers * pct_cartao, 1)
             vendas_tmb  = round(buyers * pct_boleto, 1)
@@ -745,47 +725,86 @@ class MonitoringOrchestrator:
         pessimista = _calc(biz.scenario_pessimistic_factor)
         otimista   = _calc(biz.scenario_optimistic_factor)
 
-        # Indexação vs mediana histórica
-        benchmark_comparison = None
-        bench = biz.launch_benchmark
-        if bench:
-            bench_leads   = bench.get('leads_mediana', 0)
-            bench_vendas  = bench.get('vendas_mediana', 0)
-            bench_pct     = bench.get('pct_d9d10_mediana', 0)
+        # ------------------------------------------------------------------
+        # expected_conversion — bottom-up por faixa de decil (diagnóstico)
+        # Usa leads DB do lançamento × taxas históricas por faixa (DEV19–LF48).
+        # Denominador diferente do flat-rate (DB leads, não Meta leads) —
+        # não comparar diretamente com cenario_base.
+        # ------------------------------------------------------------------
+        expected_conversion = None
+        bench = biz.conversion_rate_benchmark or {}
+        if bench and decil_distribution:
+            rate_d1_d5 = bench.get('D1_D5', 0.0)
+            rate_d6_d9 = bench.get('D6_D9', 0.0)
+            rate_d10   = bench.get('D10',   0.0)
 
-            quality_now  = (lead_quality_metrics.get('ultima_semana') or
-                            lead_quality_metrics.get('ultimas_24h') or {})
-            current_pct  = quality_now.get('d9', 0) + quality_now.get('d10', 0)
+            leads_d1_d5 = sum(decil_distribution.get(f'D{i:02d}', 0) for i in range(1, 6))
+            leads_d6_d9 = sum(decil_distribution.get(f'D{i:02d}', 0) for i in range(6, 10))
+            leads_d10   = decil_distribution.get('D10', 0)
+            total_db    = leads_d1_d5 + leads_d6_d9 + leads_d10
 
-            idx_volume    = total_leads   / bench_leads  if bench_leads  > 0 else None
-            idx_qualidade = current_pct   / bench_pct    if bench_pct    > 0 else None
+            if total_db > 0 and tracking_rate > 0:
+                # Os rates do yaml são vendas_matched/leads_DB.
+                # Dividir por tracking_rate converte para vendas_reais/leads_DB —
+                # mesma base de "vendas reais" do flat-rate.
+                rate_d1_d5_corr = rate_d1_d5 / tracking_rate
+                rate_d6_d9_corr = rate_d6_d9 / tracking_rate
+                rate_d10_corr   = rate_d10   / tracking_rate
 
-            if idx_volume and idx_qualidade:
-                vendas_indexadas = bench_vendas * idx_volume * idx_qualidade
-            elif idx_volume:
-                vendas_indexadas = bench_vendas * idx_volume
-            else:
-                vendas_indexadas = None
+                buyers_d1_d5 = leads_d1_d5 * rate_d1_d5_corr
+                buyers_d6_d9 = leads_d6_d9 * rate_d6_d9_corr
+                buyers_d10   = leads_d10   * rate_d10_corr
+                total_buyers = buyers_d1_d5 + buyers_d6_d9 + buyers_d10
 
-            benchmark_comparison = {
-                'referencia':       bench.get('periodo_referencia', 'mediana histórica'),
-                'indice_volume':    round(idx_volume,    3) if idx_volume    else None,
-                'indice_qualidade': round(idx_qualidade, 3) if idx_qualidade else None,
-                'vendas_indexadas': round(vendas_indexadas) if vendas_indexadas else None,
-                'faturamento_indexado': round(vendas_indexadas * ticket) if vendas_indexadas else None,
-            }
+                # taxa_implicita_meta = total_buyers / total_meta_leads
+                # → mesmo denominador do flat-rate, comparação direta com taxa_real_implicita
+                taxa_impl_meta = (total_buyers / total_meta_leads * 100) if total_meta_leads > 0 else None
+                response_rate  = round(total_db / total_meta_leads * 100, 1) if total_meta_leads > 0 else None
 
-        return {
-            'cenario_pessimista':     pessimista,
-            'cenario_base':           base,
-            'cenario_otimista':       otimista,
+                expected_conversion = {
+                    'fonte': bench.get('periodo_referencia', 'DEV19–LF48'),
+                    'distribuicao_leads': {
+                        'D1_D5': {'leads': leads_d1_d5, 'pct': round(leads_d1_d5 / total_db * 100, 1)},
+                        'D6_D9': {'leads': leads_d6_d9, 'pct': round(leads_d6_d9 / total_db * 100, 1)},
+                        'D10':   {'leads': leads_d10,   'pct': round(leads_d10   / total_db * 100, 1)},
+                        'total_db': total_db,
+                        'response_rate_pct': response_rate,
+                    },
+                    'compradores_esperados': {
+                        'D1_D5': round(buyers_d1_d5, 1),
+                        'D6_D9': round(buyers_d6_d9, 1),
+                        'D10':   round(buyers_d10,   1),
+                        'total': round(total_buyers,  1),
+                        'taxa_media_corrigida': round(total_buyers / total_db * 100, 3),
+                    },
+                    # Taxas já corrigidas pelo tracking_rate (vendas_reais/leads_DB)
+                    'taxas_corrigidas': {
+                        'D1_D5': round(rate_d1_d5_corr * 100, 3),
+                        'D6_D9': round(rate_d6_d9_corr * 100, 3),
+                        'D10':   round(rate_d10_corr   * 100, 3),
+                        'tracking_rate_aplicado': round(tracking_rate * 100, 1),
+                    },
+                    # Mesma base do flat-rate → comparação direta com taxa_real_implicita
+                    'taxa_implicita_por_meta_lead': round(taxa_impl_meta, 3) if taxa_impl_meta else None,
+                }
+
+        result = {
+            'cenario_pessimista': pessimista,
+            'cenario_base':       base,
+            'cenario_otimista':   otimista,
             'inputs': {
-                'total_leads_pontuados':  total_leads,
-                'ticket_contracted':      ticket,
-                'pct_cartao_historico':   pct_cartao,
-                'tracking_rate_usado':    tracking_rate,
+                'total_leads_meta':     total_meta_leads,
+                'conv_rastr_mediana':   conv_rastr,
+                'tracking_rate_usado':  tracking_rate,
+                'taxa_real_implicita':  round(taxa_real * 100, 3),
+                'ticket_contracted':    ticket,
+                'pct_cartao_historico': pct_cartao,
+                'metodologia':          'flat-rate LOO LF42-LF47 MAE=7.5%',
             },
         }
+        if expected_conversion:
+            result['expected_conversion'] = expected_conversion
+        return result
 
     def _generate_funnel_metrics(self, leads_data: List[Dict], df: pd.DataFrame = None) -> Dict:
         """

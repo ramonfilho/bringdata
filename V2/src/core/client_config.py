@@ -272,6 +272,18 @@ class BusinessConfig:
     # Usado para calcular faturamento_recebido = cartão líquido Guru + 1ª parcela boleto
     n_parcelas_boleto: int = 12                            # número total de pagamentos (entrada + mensais)
 
+    # Benchmark de taxa de conversão por faixa de decil (base: produção observada)
+    # Usado para calcular tc_esperada do lançamento em curso a partir da distribuição atual de leads.
+    # Estrutura: { periodo_referencia, D1_D5, D6_D9, D10 }
+    conversion_rate_benchmark: Optional[Dict[str, Any]] = None
+
+    # Taxa de conversão rastreada mediana — base do forecast flat-rate (metodologia do backtest)
+    # conv_rastr = vendas_matched / total_leads_meta
+    # Mediana LF42–LF47: [0.54%, 0.62%, 0.64%, 0.66%, 0.73%, 0.74%] → mediana = 0.65%
+    # forecast: buyers = total_leads_meta × (conv_rastr_mediana / tracking_rate)
+    conv_rastr_mediana: float = 0.0065                      # mediana histórica LF42–LF47
+
+
 
 @dataclass
 class ValidationConfig:
