@@ -187,6 +187,23 @@ def get_periodo_folder_from_dates(start_date: str, end_date: str) -> str:
     return folder_name
 
 
+def get_month_folder_from_date(start_date: str) -> str:
+    """
+    Retorna a pasta de mês (YYYY-MM) baseada na data de início do período de vendas.
+
+    Estrutura: outputs/validation/YYYY-MM/{periodo_folder}/
+    Exemplo: 2026-03-30 → "2026-03"
+
+    Args:
+        start_date: Data início no formato YYYY-MM-DD
+
+    Returns:
+        Nome da pasta de mês no formato YYYY-MM
+    """
+    dt = datetime.strptime(start_date, '%Y-%m-%d')
+    return f"{dt.year}-{dt.month:02d}"
+
+
 def parse_args():
     """
     Parse argumentos da linha de comando.
@@ -304,6 +321,13 @@ Exemplos de uso:
         '--periodo-folder',
         type=str,
         help='Nome da pasta do período (ex: "16:12 - 12:01"). Se não especificado, deriva automaticamente de --start-date e --end-date'
+    )
+
+    parser.add_argument(
+        '--lf-name',
+        type=str,
+        required=True,
+        help='Identificador do lançamento (ex: LF49, LF50, DEV19). Usado como prefixo do arquivo de saída.'
     )
 
     # Configurações
@@ -853,7 +877,12 @@ def main():
     # Determinar caminhos baseados na pasta do período
     # Usa caminho absoluto baseado na localização do script (independe do cwd)
     _V2_ROOT = Path(__file__).parent.parent.parent
-    periodo_base_path = str(_V2_ROOT / 'outputs' / 'validation' / periodo_folder)
+
+    # Pasta de mês: YYYY-MM baseado no início do período de vendas (ou captação como fallback)
+    _month_ref = args.sales_start_date if args.sales_start_date else start_date
+    month_folder = get_month_folder_from_date(_month_ref)
+
+    periodo_base_path = str(_V2_ROOT / 'outputs' / 'validation' / month_folder / periodo_folder)
 
     # vendas_path: se especificado via CLI, usa; senão, usa pasta de dados devclub
     if args.vendas_path:
@@ -861,13 +890,14 @@ def main():
     else:
         vendas_path = str(_V2_ROOT / 'data' / 'devclub')
 
-    # output_dir: usa pasta do período por padrão
+    # output_dir: usa pasta mensal (YYYY-MM), sem subpasta de período
+    _month_output = str(_V2_ROOT / 'outputs' / 'validation' / month_folder)
     if args.ml_monitoring_output:
         output_dir = args.ml_monitoring_output
     elif args.output_dir:
         output_dir = args.output_dir
     else:
-        output_dir = periodo_base_path
+        output_dir = _month_output
 
     # meta_reports_dir: também usa pasta validation raiz
     meta_reports_dir = str(_V2_ROOT / 'files' / 'validation')
@@ -1187,7 +1217,12 @@ def main():
                 except Exception as e:
                     logger.warning(f"    Erro ao verificar {xlsx_path.name}: {e}")
 
-            if best_xlsx is not None and best_overlap_count > 0:
+            # Limiar mínimo: xlsx só é fonte primária se tiver sobreposição expressiva.
+            # Um overlap muito pequeno (ex.: 81 leads em um ficheiro do lançamento anterior)
+            # indica leads residuais no limite de data, não o ficheiro correto do período.
+            # Limiar = 500 leads ou 5% dos leads Railway, o que for maior.
+            _min_xlsx_overlap = max(500, int(lead_source_stats.get('capi_leads_total', 0) * 0.05))
+            if best_xlsx is not None and best_overlap_count >= _min_xlsx_overlap:
                 logger.info(f"    Usando como fonte primária: {best_xlsx.name} ({best_overlap_count} leads no período)")
                 try:
                     xlsx_df = pd.read_excel(best_xlsx, sheet_name='LEADS',
@@ -1373,7 +1408,8 @@ def main():
         hotmart_api_end=hotmart_end,
         asaas_api_start=asaas_start,
         asaas_api_end=asaas_end,
-        asaas_product_value=config.get('ticket_contracted') or config.get('product_value'),
+        asaas_product_value=config.get('ticket_contracted'),  # None = usar valor real da API Asaas
+        asaas_customer_created_from=config.get('asaas_customer_since'),  # Data de início do Asaas para este cliente (fixo por cliente, não por LF)
         report_type=args.report_type,
         include_canceled=include_canceled
     )
@@ -2312,15 +2348,12 @@ def main():
     print(" Gerando relatório Excel...", flush=True)
     os.makedirs(output_dir, exist_ok=True)
 
-    # Sempre adicionar timestamp no nome do arquivo (nunca sobrescreve)
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-
-    # Adicionar prefixo baseado no tipo de relatório
-    report_type_prefix = args.report_type.upper().replace('-', '_')
-    # Nome do arquivo usa datas de vendas quando disponíveis (padrão histórico)
+    # Nome do arquivo: {LF} - {DD:MM} a {DD:MM}.xlsx
+    # Sem timestamp — re-rodar sobrescreve o arquivo anterior (sempre a versão mais recente).
     _file_start = args.sales_start_date if args.sales_start_date else start_date
     _file_end   = args.sales_end_date   if args.sales_end_date   else end_date
-    excel_filename = f"validation_report_{report_type_prefix}_{_file_start}_to_{_file_end}_{timestamp}.xlsx"
+    _periodo_label = get_periodo_folder_from_dates(_file_start, _file_end).replace(' - ', ' a ')
+    excel_filename = f"{args.lf_name} - {_periodo_label}.xlsx"
     excel_path = str(Path(output_dir) / excel_filename)
     logger.info(f"    Criando relatório: {excel_filename}")
 

@@ -14,8 +14,14 @@ meta_account_ids:
   - act_786790755803474  # Ads - Gestor de IA
 
 # Configurações globais
-product_value: 2000.00  # Valor do produto em R$
+product_value: 2000.00     # Valor esperado de conversão para ROAS (ticket médio ponderado)
+ticket_contracted: 2700.00 # Valor nominal do contrato — usado para Asaas (avg real ~R$2.700 por dashboard)
 max_match_days: 30      # Janela máxima para matching leads-vendas
+
+# Data de início do uso do Asaas por este cliente.
+# Filtra customers criados ANTES desta data (assinantes recorrentes de períodos anteriores ao uso do Asaas).
+# Deve ser ajustada apenas quando o cliente migra para Asaas — não muda por lançamento.
+asaas_customer_since: "2026-01-01"
 
 # Filtrar leads pelo campaign_id do lançamento atual?
 # True: remove leads cujo campaign_id (UTM) pertence a outro lançamento — resolve double-counting em janelas sobrepostas

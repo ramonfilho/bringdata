@@ -535,7 +535,6 @@ class ValidationReportGenerator:
         general_data = [
             ['Leads Meta', total_leads_meta],
             ['Pessoas únicas (CAPI)', capi_leads_total],
-            ['Respostas na pesquisa', survey_leads],
             ['Vendas no Período', total_vendas],
             ['Vendas identificadas', vendas_identificadas],
             ['% de trackeamento', pct_trackeamento],

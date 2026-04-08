@@ -81,7 +81,11 @@ class AsaasSalesExtractor:
         end_date: str,
     ) -> List[Dict[str, Any]]:
         """
-        Busca todas as cobranças pagas no período (por clientPaymentDate).
+        Busca todas as cobranças pagas no período (por dateCreated — data de criação da cobrança).
+
+        Usamos dateCreated em vez de clientPaymentDate porque o dashboard do cliente
+        conta contratos pelo momento em que a cobrança foi gerada (= data da venda),
+        não pela data em que o cliente efetivamente pagou (que pode ser dias depois).
 
         Args:
             start_date: Data inicial (YYYY-MM-DD)
@@ -95,12 +99,12 @@ class AsaasSalesExtractor:
         limit = 100
         page = 1
 
-        logger.info(f' Buscando pagamentos Asaas de {start_date} a {end_date}...')
+        logger.info(f' Buscando pagamentos Asaas de {start_date} a {end_date} (por dateCreated)...')
 
         while True:
             params = {
-                'clientPaymentDate[ge]': start_date,
-                'clientPaymentDate[le]': end_date,
+                'dateCreated[ge]': start_date,
+                'dateCreated[le]': end_date,
                 'limit': limit,
                 'offset': offset,
             }
@@ -275,21 +279,30 @@ class AsaasSalesExtractor:
         end_date: str,
         output_path: str = None,
         product_value: Optional[float] = None,
+        customer_created_from: Optional[str] = None,
     ) -> pd.DataFrame:
         """
         Gera DataFrame de vendas Asaas no período.
 
         Args:
-            start_date: Data inicial (YYYY-MM-DD)
-            end_date: Data final (YYYY-MM-DD)
+            start_date: Data inicial dos pagamentos (YYYY-MM-DD) — usado em clientPaymentDate
+            end_date: Data final dos pagamentos (YYYY-MM-DD)
             output_path: Se fornecido, salva Excel
             product_value: Valor nominal do contrato (ticket_contracted, ex: 2200.0).
-                           Quando fornecido, é usado como sale_value para TODOS os pagamentos,
-                           independente do valor do plano Asaas.
+                           Quando fornecido, é usado como sale_value para TODOS os pagamentos.
+            customer_created_from: Data mínima de criação do cliente (YYYY-MM-DD).
+                           Padrão: igual a start_date. Use a data de início da captação para incluir
+                           clientes que se cadastraram no Asaas antes do período de vendas (ex: LF43
+                           em que a captação começa em jan mas as vendas em fev).
 
         Returns:
             DataFrame padronizado com origem='asaas'
         """
+        # Data mínima para customer.dateCreated — padrão é start_date (vendas),
+        # mas deve ser a data de captação quando o lançamento tem período de captação
+        # anterior ao período de vendas (ex: LF43: capt jan, vendas fev).
+        _customer_from = customer_created_from or start_date
+
         # 1. Buscar pagamentos
         payments = self.fetch_payments(start_date, end_date)
         if not payments:
@@ -302,6 +315,40 @@ class AsaasSalesExtractor:
         # 2. Buscar clientes únicos em batch
         customer_ids = [p.get('customer') for p in payments if p.get('customer')]
         self.fetch_customers_batch(customer_ids)
+
+        # 2b. Filtrar por data de criação do cliente (customer.dateCreated >= _customer_from).
+        # Filtrando por customer.dateCreated garantimos apenas clientes novos (contratos do período).
+        # Nota: agora filtramos por charge.dateCreated (não clientPaymentDate), então este filtro
+        # captura o caso em que um cliente antigo gerou uma nova cobrança avulsa no período.
+        before_customer_filter = len(payments)
+        payments = [
+            p for p in payments
+            if self._customer_cache.get(p.get('customer', ''), {}).get('dateCreated', '') >= _customer_from
+        ]
+        filtered_by_customer = before_customer_filter - len(payments)
+        if filtered_by_customer > 0:
+            logger.info(
+                f' Asaas: {filtered_by_customer} pagamentos removidos por customer.dateCreated '
+                f'antes de {_customer_from} (clientes de lançamentos anteriores).'
+            )
+
+        # 2c. Deduplicar por customer_id — o dashboard conta contratos (clientes únicos),
+        # não cobranças individuais. Um cliente pode ter múltiplas cobranças no mesmo período
+        # (ex.: entrada + plano parcelado criados no mesmo dia). Mantemos apenas a primeira
+        # cobrança por cliente (a de menor dateCreated / id).
+        seen_customers: set = set()
+        deduped_payments = []
+        for p in payments:
+            cid = p.get('customer', '')
+            if cid not in seen_customers:
+                seen_customers.add(cid)
+                deduped_payments.append(p)
+        if len(deduped_payments) < len(payments):
+            logger.info(
+                f' Asaas: {len(payments) - len(deduped_payments)} cobranças duplicadas removidas '
+                f'({len(deduped_payments)} contratos únicos de {len(payments)} cobranças).'
+            )
+        payments = deduped_payments
 
         # 3. Mapear para linhas
         rows = []
@@ -341,17 +388,19 @@ def fetch_asaas_sales(
     save_excel: bool = False,
     output_path: str = None,
     product_value: Optional[float] = None,
+    customer_created_from: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Função auxiliar para buscar vendas Asaas — interface equivalente a fetch_guru_sales_from_api().
 
     Args:
-        start_date: Data inicial (YYYY-MM-DD)
-        end_date: Data final (YYYY-MM-DD)
+        start_date: Data inicial dos pagamentos (YYYY-MM-DD)
+        end_date: Data final dos pagamentos (YYYY-MM-DD)
         api_key: Chave da API (usa ASAAS_API_KEY do .env se não fornecida)
         save_excel: Se True, salva Excel
         output_path: Caminho do Excel (obrigatório se save_excel=True)
         product_value: Valor total do produto para entradas sem parcelamento registrado
+        customer_created_from: Data mínima de criação do cliente (padrão: start_date)
 
     Returns:
         DataFrame com vendas Asaas
@@ -362,6 +411,7 @@ def fetch_asaas_sales(
         end_date=end_date,
         output_path=output_path if save_excel else None,
         product_value=product_value,
+        customer_created_from=customer_created_from,
     )
 
 
