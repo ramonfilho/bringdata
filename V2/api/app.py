@@ -2159,6 +2159,7 @@ async def daily_monitoring_check_railway(
         # Se start_date/end_date foram passados, usa essa janela; senão, desde a última terça-feira BRT
         now_brt = now_utc.astimezone(brt)
         if start_date and end_date:
+            launch_window_start     = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=brt)
             launch_window_start_utc = window_start
             launch_window_end_utc   = window_end
             launch_window_label     = f"{start_date} → {end_date}"
