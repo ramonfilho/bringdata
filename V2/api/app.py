@@ -2155,19 +2155,28 @@ async def daily_monitoring_check_railway(
             'ORDER BY "createdAt" DESC'
         )
 
-        # 1d. Leads do lançamento atual (desde terça-feira BRT) — exclusivo para revenue_forecast
+        # 1d. Leads do lançamento atual — exclusivo para revenue_forecast
+        # Se start_date/end_date foram passados, usa essa janela; senão, desde a última terça-feira BRT
         now_brt = now_utc.astimezone(brt)
-        days_since_tuesday = (now_brt.weekday() - 1) % 7  # terça = weekday 1
-        launch_window_start = now_brt.replace(hour=0, minute=0, second=0, microsecond=0) \
-            - timedelta(days=days_since_tuesday)
-        launch_window_start_utc = launch_window_start.astimezone(_tz.utc)
+        if start_date and end_date:
+            launch_window_start_utc = window_start
+            launch_window_end_utc   = window_end
+            launch_window_label     = f"{start_date} → {end_date}"
+        else:
+            days_since_tuesday = (now_brt.weekday() - 1) % 7  # terça = weekday 1
+            launch_window_start = now_brt.replace(hour=0, minute=0, second=0, microsecond=0) \
+                - timedelta(days=days_since_tuesday)
+            launch_window_start_utc = launch_window_start.astimezone(_tz.utc)
+            launch_window_end_utc   = now_utc
+            launch_window_label     = launch_window_start.strftime('%d/%m/%Y')
 
         forecast_decil_rows = railway_conn.run(
             'SELECT decil '
             'FROM "Lead" '
             'WHERE "leadScore" IS NOT NULL AND decil IS NOT NULL '
-            'AND "createdAt" >= :start',
+            'AND "createdAt" >= :start AND "createdAt" <= :end',
             start=launch_window_start_utc,
+            end=launch_window_end_utc,
         )
 
         # Distribuição de decis na janela do lançamento — usada pelo expected_conversion
@@ -2448,8 +2457,7 @@ async def daily_monitoring_check_railway(
             ) or None
 
             if revenue_forecast:
-                revenue_forecast['inputs']['launch_window_start_brt'] = \
-                    launch_window_start.strftime('%d/%m/%Y')
+                revenue_forecast['inputs']['launch_window_start_brt'] = launch_window_label
         except Exception as _fe:
             logger.warning(f"⚠️ revenue_forecast indisponível: {_fe}")
 
