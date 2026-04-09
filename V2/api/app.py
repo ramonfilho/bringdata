@@ -3055,6 +3055,7 @@ async def railway_process_pending(pipeline: PipelineDep):
         processed = 0
         skipped = 0
         capi_leads = []
+        blocked_lead_ids = []  # leads bloqueados pelo UTM blocklist — marcar no Railway
 
         for i, lead in enumerate(valid_leads):
             try:
@@ -3106,6 +3107,7 @@ async def railway_process_pending(pipeline: PipelineDep):
                 _blocklist = pipeline._client_config.capi.utm_blocklist or []
                 if any(p.lower() in _utm_cam for p in _blocklist):
                     logger.info(f"   ⏭️ CAPI bloqueado por UTM blocklist: {lead.get('campaign')}")
+                    blocked_lead_ids.append(lead['id'])
                 else:
                     capi_leads.append(capi_lead)
 
@@ -3145,17 +3147,31 @@ async def railway_process_pending(pipeline: PipelineDep):
             except Exception as e:
                 logger.warning(f"⚠️ Erro ao atualizar capiSentAt para {capi_leads[i].get('email')}: {e}")
 
+        # 9b. Marcar leads bloqueados pelo UTM blocklist (não reprocessar em ciclos futuros)
+        for lead_id in blocked_lead_ids:
+            try:
+                railway_conn.run(
+                    'UPDATE "Lead" SET "capiSentAt" = NOW(), "capiStatus" = :status, '
+                    '"updatedAt" = NOW() WHERE id = :lead_id',
+                    status='blocked',
+                    lead_id=lead_id,
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ Erro ao marcar lead bloqueado {lead_id}: {e}")
+
         logger.info(
             f"✅ Railway polling concluído: {processed} processados, "
-            f"{skipped} erros, {capi_result.get('success', 0)} CAPI enviados"
+            f"{skipped} erros, {capi_result.get('success', 0)} CAPI enviados, "
+            f"{len(blocked_lead_ids)} bloqueados por UTM"
         )
 
         return {
-            "processed":   processed,
-            "skipped":     skipped,
-            "capi_sent":   capi_result.get('success', 0),
-            "capi_errors": capi_result.get('errors', 0),
-            "timestamp":   datetime.now().isoformat(),
+            "processed":    processed,
+            "skipped":      skipped,
+            "capi_sent":    capi_result.get('success', 0),
+            "capi_errors":  capi_result.get('errors', 0),
+            "capi_blocked": len(blocked_lead_ids),
+            "timestamp":    datetime.now().isoformat(),
         }
 
     except HTTPException:
