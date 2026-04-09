@@ -387,6 +387,8 @@ capi:
   - D10
   country_code: br
   currency: BRL
+  utm_blocklist:
+  - "LEAD | LQ"
 api:
   cors_origins:
   - https://lp.devclub.com.br

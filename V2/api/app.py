@@ -973,11 +973,18 @@ async def webhook_update_survey(
                 lead_capi_dict['ab_event_name_hq'] = ab_variant.capi_event_name_high_quality
                 lead_capi_dict['ab_conversion_rates'] = ab_variant.conversion_rates
 
-            capi_result = send_batch_events(
-                [lead_capi_dict], db,
-                capi_config=pipeline._client_config.capi,
-                business_config=pipeline._client_config.business,
-                client_id=pipeline._client_config.client_id)
+            # UTM blocklist: não enviar CAPI para campanhas que otimizam para evento genérico
+            _utm_cam = (existing_lead.utm_campaign or '').lower()
+            _blocklist = pipeline._client_config.capi.utm_blocklist or []
+            if any(p.lower() in _utm_cam for p in _blocklist):
+                logger.info(f"⏭️ CAPI bloqueado por UTM blocklist: {existing_lead.utm_campaign}")
+                capi_result = {"success": 0, "total": 0, "errors": 0}
+            else:
+                capi_result = send_batch_events(
+                    [lead_capi_dict], db,
+                    capi_config=pipeline._client_config.capi,
+                    business_config=pipeline._client_config.business,
+                    client_id=pipeline._client_config.client_id)
 
             logger.info(f"✅ CAPI enviado: {capi_result.get('success', 0)}/{capi_result.get('total', 0)} eventos")
 
@@ -3093,7 +3100,14 @@ async def railway_process_pending(pipeline: PipelineDep):
                     capi_lead['ab_event_name'] = ab_v.capi_event_name
                     capi_lead['ab_event_name_hq'] = ab_v.capi_event_name_high_quality
                     capi_lead['ab_conversion_rates'] = ab_v.conversion_rates
-                capi_leads.append(capi_lead)
+
+                # UTM blocklist: não enviar CAPI para campanhas que otimizam para evento genérico
+                _utm_cam = (lead.get('campaign') or '').lower()
+                _blocklist = pipeline._client_config.capi.utm_blocklist or []
+                if any(p.lower() in _utm_cam for p in _blocklist):
+                    logger.info(f"   ⏭️ CAPI bloqueado por UTM blocklist: {lead.get('campaign')}")
+                else:
+                    capi_leads.append(capi_lead)
 
                 logger.info(
                     f"   ✅ {lead.get('email')}: score={lead_score_value:.4f} ({decil_str})"

@@ -194,6 +194,7 @@ class CAPIConfig:
     high_quality_decils: Optional[List[str]] = None         # #105
     country_code: Optional[str] = None                      # #106
     currency: Optional[str] = None                          # #106
+    utm_blocklist: Optional[List[str]] = None               # substrings em utm_campaign que bloqueiam envio CAPI
     # decil_to_value removido (DT-5): calculado em runtime como business.product_value × business.conversion_rates[decil]
 
 
