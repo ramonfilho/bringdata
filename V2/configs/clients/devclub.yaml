@@ -389,6 +389,9 @@ capi:
   currency: BRL
   utm_blocklist:
   - "LEAD | LQ"
+  utm_source_allowlist:
+  - "facebook-ads"
+  - "instagram"
 api:
   cors_origins:
   - https://lp.devclub.com.br

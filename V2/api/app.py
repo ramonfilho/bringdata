@@ -973,11 +973,18 @@ async def webhook_update_survey(
                 lead_capi_dict['ab_event_name_hq'] = ab_variant.capi_event_name_high_quality
                 lead_capi_dict['ab_conversion_rates'] = ab_variant.conversion_rates
 
-            # UTM blocklist: não enviar CAPI para campanhas que otimizam para evento genérico
+            # UTM filter: blocklist por campaign + allowlist por source (DT-CAPI-01/02)
             _utm_cam = (existing_lead.utm_campaign or '').lower()
+            _utm_src = (existing_lead.utm_source or '').lower()
             _blocklist = pipeline._client_config.capi.utm_blocklist or []
-            if any(p.lower() in _utm_cam for p in _blocklist):
+            _allowlist = pipeline._client_config.capi.utm_source_allowlist or []
+            _capi_blocked = any(p.lower() in _utm_cam for p in _blocklist)
+            _capi_skipped = bool(_allowlist) and not any(s.lower() in _utm_src for s in _allowlist)
+            if _capi_blocked:
                 logger.info(f"⏭️ CAPI bloqueado por UTM blocklist: {existing_lead.utm_campaign}")
+                capi_result = {"success": 0, "total": 0, "errors": 0}
+            elif _capi_skipped:
+                logger.info(f"⏭️ CAPI ignorado — source não permitido: {existing_lead.utm_source}")
                 capi_result = {"success": 0, "total": 0, "errors": 0}
             else:
                 capi_result = send_batch_events(
@@ -3055,7 +3062,8 @@ async def railway_process_pending(pipeline: PipelineDep):
         processed = 0
         skipped = 0
         capi_leads = []
-        blocked_lead_ids = []  # leads bloqueados pelo UTM blocklist — marcar no Railway
+        blocked_lead_ids = []  # leads bloqueados (utm_blocklist) — capiStatus='blocked'
+        skipped_lead_ids = []  # leads ignorados (utm_source_allowlist) — capiStatus='skipped'
 
         for i, lead in enumerate(valid_leads):
             try:
@@ -3102,12 +3110,19 @@ async def railway_process_pending(pipeline: PipelineDep):
                     capi_lead['ab_event_name_hq'] = ab_v.capi_event_name_high_quality
                     capi_lead['ab_conversion_rates'] = ab_v.conversion_rates
 
-                # UTM blocklist: não enviar CAPI para campanhas que otimizam para evento genérico
+                # UTM filter: blocklist por campaign + allowlist por source (DT-CAPI-01/02)
                 _utm_cam = (lead.get('campaign') or '').lower()
+                _utm_src = (lead.get('source') or '').lower()
                 _blocklist = pipeline._client_config.capi.utm_blocklist or []
-                if any(p.lower() in _utm_cam for p in _blocklist):
+                _allowlist = pipeline._client_config.capi.utm_source_allowlist or []
+                _capi_blocked = any(p.lower() in _utm_cam for p in _blocklist)
+                _capi_skipped = bool(_allowlist) and not any(s.lower() in _utm_src for s in _allowlist)
+                if _capi_blocked:
                     logger.info(f"   ⏭️ CAPI bloqueado por UTM blocklist: {lead.get('campaign')}")
                     blocked_lead_ids.append(lead['id'])
+                elif _capi_skipped:
+                    logger.info(f"   ⏭️ CAPI ignorado — source não permitido: {lead.get('source')}")
+                    skipped_lead_ids.append(lead['id'])
                 else:
                     capi_leads.append(capi_lead)
 
@@ -3147,31 +3162,33 @@ async def railway_process_pending(pipeline: PipelineDep):
             except Exception as e:
                 logger.warning(f"⚠️ Erro ao atualizar capiSentAt para {capi_leads[i].get('email')}: {e}")
 
-        # 9b. Marcar leads bloqueados pelo UTM blocklist (não reprocessar em ciclos futuros)
-        for lead_id in blocked_lead_ids:
+        # 9b. Marcar leads bloqueados (utm_blocklist) e ignorados (utm_source_allowlist)
+        for lead_id, status in [(lid, 'blocked') for lid in blocked_lead_ids] + \
+                               [(lid, 'skipped') for lid in skipped_lead_ids]:
             try:
                 railway_conn.run(
                     'UPDATE "Lead" SET "capiSentAt" = NOW(), "capiStatus" = :status, '
                     '"updatedAt" = NOW() WHERE id = :lead_id',
-                    status='blocked',
+                    status=status,
                     lead_id=lead_id,
                 )
             except Exception as e:
-                logger.warning(f"⚠️ Erro ao marcar lead bloqueado {lead_id}: {e}")
+                logger.warning(f"⚠️ Erro ao marcar lead {status} {lead_id}: {e}")
 
         logger.info(
             f"✅ Railway polling concluído: {processed} processados, "
             f"{skipped} erros, {capi_result.get('success', 0)} CAPI enviados, "
-            f"{len(blocked_lead_ids)} bloqueados por UTM"
+            f"{len(blocked_lead_ids)} bloqueados, {len(skipped_lead_ids)} ignorados por source"
         )
 
         return {
-            "processed":    processed,
-            "skipped":      skipped,
-            "capi_sent":    capi_result.get('success', 0),
-            "capi_errors":  capi_result.get('errors', 0),
-            "capi_blocked": len(blocked_lead_ids),
-            "timestamp":    datetime.now().isoformat(),
+            "processed":     processed,
+            "skipped":       skipped,
+            "capi_sent":     capi_result.get('success', 0),
+            "capi_errors":   capi_result.get('errors', 0),
+            "capi_blocked":  len(blocked_lead_ids),
+            "capi_skipped":  len(skipped_lead_ids),
+            "timestamp":     datetime.now().isoformat(),
         }
 
     except HTTPException:

@@ -393,6 +393,40 @@ python src/retrain/retraining_orchestrator.py --config configs/retreino_mensal.y
 
 ---
 
+## QUALIDADE DO SINAL CAPI — DECISÕES ARQUITETURAIS
+
+### Roteamento por plataforma (DT-CAPI-01)
+
+**Descoberta em 09/04/2026:** O sistema envia eventos CAPI ao Meta para **todos** os leads que passam pelo webhook e pelo polling Railway, independente do `utm_source` de origem. Isso inclui leads vindos de Google Ads (`source=google-ads`, ~3.800/mês) e tráfego orgânico (YouTube Bio, NULL, ~400/mês).
+
+**Por que isso é um problema:** O Meta usa o sinal `LeadQualified` para aprender quais perfis de usuário tendem a comprar e direcionar novos anúncios. Incluir leads que o Meta nunca gerou faz o algoritmo aprender padrões que ele não consegue usar para targeting — dilui o sinal sem nenhum benefício para a otimização das campanhas Meta.
+
+**Correção parcial aplicada (09/04/2026):** `utm_source_allowlist` em `CAPIConfig` — o backend só envia CAPI se `utm_source` estiver na lista configurada. Para DevClub: `["facebook-ads", "instagram"]`. Leads de outras origens recebem `capiStatus = 'skipped'`.
+
+**Decisão arquitetural de longo prazo:** Um modelo único de scoring serve todas as plataformas — o perfil de comprador não muda por canal. O que muda é o dispatch de eventos: cada plataforma tem sua própria integração configurada com a lista de `utm_source` que alimenta. Ao adicionar Google Ads como canal otimizável, basta adicionar uma `GoogleAdsConfig` com `utm_source: ["google-ads"]` — o pipeline de treino e scoring não muda.
+
+```
+Lead scored (modelo único)
+        ↓
+utm_source == 'facebook-ads' / 'instagram'  →  Meta CAPI (LeadQualified)
+utm_source == 'google-ads'                  →  Google Ads API (futuro)
+utm_source == orgânico / outro              →  nenhum envio
+```
+
+**Esta refatoração deve acontecer quando:** o segundo canal pago (Google Ads ou outro) for ativado como objetivo de otimização. Não antes — o `utm_source_allowlist` mitiga o problema até lá.
+
+---
+
+### Contaminação histórica LEAD|LQ (DT-CAPI-02)
+
+**Descoberta em 09/04/2026:** Campanhas com `LEAD | LQ` no `utm_campaign` tinham seus adsets Meta otimizando para o evento padrão `lead` (genérico). O backend enviava `LeadQualified` (ML CAPI) para os mesmos leads, gerando dois eventos distintos para a mesma pessoa no mesmo pixel. Representava ~13% do volume total de leads.
+
+**Impacto:** O Meta aprendeu com sinal contaminado por aproximadamente 2 meses antes da correção. Os ~7.500 eventos já enviados não podem ser removidos retroativamente.
+
+**Correção aplicada (09/04/2026):** `utm_blocklist: ["LEAD | LQ"]` em `CAPIConfig` no `devclub.yaml`. Leads dessas campanhas recebem `capiStatus = 'blocked'` e não geram evento CAPI.
+
+---
+
 ## PONTOS CRÍTICOS ATIVOS
 
 | Risco | Impacto | Ação |
@@ -402,6 +436,8 @@ python src/retrain/retraining_orchestrator.py --config configs/retreino_mensal.y
 | Pipeline de retreino incompleto (Sprint 2–3) | Deploy manual necessário | Implementar quality gate automático + deploy condicional |
 | Dados TMB desatualizados | Retreino com dados errados | Verificar data do arquivo antes do retreino |
 | Threshold Medium calculado pré-cutoff (DT-7) | Alertas falsos de features ausentes | Baixa prioridade — endereçar antes de 3+ clientes |
+| Leads não-Meta recebendo CAPI (DT-CAPI-01) | Sinal Meta contaminado com Google/orgânico | `utm_source_allowlist` aplicado — refatorar dispatch ao ativar 2º canal pago |
+| Contaminação histórica LEAD\|LQ (DT-CAPI-02) | ~7.500 eventos poluídos já enviados | Bloqueio aplicado — monitorar recuperação do sinal Meta |
 
 ---
 
