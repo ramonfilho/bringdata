@@ -54,36 +54,57 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def load_all_buyers(lancamento_filter: str = None) -> pd.DataFrame:
-    """Lê aba 'Detalhes das Conversões' de todos os relatórios de validação."""
-    folders = sorted([f for f in VALIDATION_DIR.iterdir() if f.is_dir() and ":" in f.name])
+    """
+    Lê aba 'Detalhes das Conversões' de todos os relatórios de validação.
+
+    Suporta estrutura atual: outputs/validation/YYYY-MM/LFxx - DD:MM a DD:MM.xlsx
+    lancamento_filter: nome parcial do arquivo xlsx (ex: 'LF49') ou None para todos.
+    """
+    # Varrer pastas YYYY-MM (e também raiz para compatibilidade com formato antigo "DD:MM - DD:MM")
+    SKIP_DIRS = {"historico", "arquivos_leads", "feedback_loop", "meta_features_test", "serie_temporal"}
+    month_dirs = sorted([
+        f for f in VALIDATION_DIR.iterdir()
+        if f.is_dir() and f.name not in SKIP_DIRS
+    ])
+
     all_dfs = []
 
-    for folder in folders:
-        if lancamento_filter and folder.name != lancamento_filter:
-            continue
-
+    for folder in month_dirs:
         reports = sorted(folder.glob("*.xlsx"), key=lambda x: x.stat().st_mtime, reverse=True)
-        if not reports:
-            continue
-        latest = reports[0]
 
-        try:
-            xl = pd.ExcelFile(latest)
-            if "Detalhes das Conversões" not in xl.sheet_names:
+        for report in reports:
+            # Filtro por lançamento: compara com nome do arquivo
+            if lancamento_filter and lancamento_filter not in report.stem:
                 continue
 
-            df = pd.read_excel(latest, sheet_name="Detalhes das Conversões", header=1, skiprows=[2])
-            df.columns = [
-                "trackeado", "email", "telefone", "id_campanha", "nome_campanha",
-                "grupo", "data_captura", "data_venda", "valor_venda", "fonte_venda"
-            ]
-            df = df[df["email"].notna() & (df["email"] != "E-mail Comprador")].copy()
-            df["lancamento"] = folder.name
-            all_dfs.append(df)
-            logger.info(f"  {folder.name}: {len(df)} compradores ({latest.name})")
+            try:
+                xl = pd.ExcelFile(report)
+                if "Detalhes das Conversões" not in xl.sheet_names:
+                    continue
 
-        except Exception as e:
-            logger.warning(f"  {folder.name}: erro ao ler — {e}")
+                df = pd.read_excel(report, sheet_name="Detalhes das Conversões", header=1, skiprows=[2])
+                # Detectar se o Excel tem as colunas FBP/FBC (geradas após o fix)
+                # ou o formato antigo (sem fbp/fbc)
+                if len(df.columns) >= 12:
+                    df.columns = [
+                        "trackeado", "email", "telefone", "fbp", "fbc",
+                        "id_campanha", "nome_campanha", "grupo",
+                        "data_captura", "data_venda", "valor_venda", "fonte_venda"
+                    ]
+                else:
+                    df.columns = [
+                        "trackeado", "email", "telefone", "id_campanha", "nome_campanha",
+                        "grupo", "data_captura", "data_venda", "valor_venda", "fonte_venda"
+                    ]
+                    df["fbp"] = None
+                    df["fbc"] = None
+                df = df[df["email"].notna() & (df["email"] != "E-mail Comprador")].copy()
+                df["lancamento"] = report.stem  # ex: "LF49 - 30:03 a 05:04"
+                all_dfs.append(df)
+                logger.info(f"  {report.stem}: {len(df)} compradores")
+
+            except Exception as e:
+                logger.warning(f"  {report.name}: erro ao ler — {e}")
 
     if not all_dfs:
         return pd.DataFrame()
@@ -247,23 +268,26 @@ def build_payload(buyers_df: pd.DataFrame, railway_data: dict, cloudsql_data: di
     for _, row in buyers_df.iterrows():
         email = row["email"]
 
-        # Prioridade FBP/FBC: Railway (se tiver fbp) > Cloud SQL (se tiver fbp) > sem cookies
-        # Não usa `or` diretamente: dict Railway sem fbp é truthy e bloquearia o fallback
+        # Prioridade FBP/FBC: Excel (novo) > Railway > Cloud SQL > sem cookies
+        fbp_from_excel = row.get("fbp") if pd.notna(row.get("fbp", pd.NA)) else None
+        fbc_from_excel = row.get("fbc") if pd.notna(row.get("fbc", pd.NA)) else None
+
         railway_entry  = railway_data.get(email, {})
         cloudsql_entry = cloudsql_data.get(email, {})
-        if railway_entry.get("fbp"):
+
+        if fbp_from_excel:
+            capi = {"fbp": fbp_from_excel, "fbc": fbc_from_excel,
+                    "nome": railway_entry.get("nome") or cloudsql_entry.get("nome"),
+                    "telefone": railway_entry.get("telefone") or cloudsql_entry.get("telefone")}
+            stats["railway"] += 1  # conta como railway (já veio do Railway via pipeline)
+        elif railway_entry.get("fbp"):
             capi = railway_entry
+            stats["railway"] += 1
         elif cloudsql_entry.get("fbp"):
             capi = cloudsql_entry
+            stats["cloudsql"] += 1
         else:
             capi = railway_entry or cloudsql_entry or {}
-
-        if capi.get("fbp"):
-            if railway_entry.get("fbp"):
-                stats["railway"] += 1
-            else:
-                stats["cloudsql"] += 1
-        else:
             stats["sem_cookies"] += 1
 
         sale_date = row.get("data_venda")
@@ -372,7 +396,7 @@ def call_endpoint(sales: list, dry_run: bool, test_event_code: str = None) -> di
                 event_id=f"purchase_{email}_{purchase_ts}",
                 user_data=user_data,
                 custom_data=custom_data,
-                action_source=ActionSource.WEBSITE,
+                action_source=ActionSource.PHYSICAL_STORE,
             )
 
             params = {

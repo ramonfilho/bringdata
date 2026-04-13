@@ -26,6 +26,7 @@ import gzip
 from pathlib import Path
 from datetime import datetime
 
+import yaml
 import pandas as pd
 import numpy as np
 import openpyxl
@@ -38,19 +39,20 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 BASE = Path(__file__).parent.parent  # V2/
 
 # Mapeamento vendas_start → nome do lançamento.
-# Único lugar a editar ao criar um novo lançamento (apenas o nome, sem datas).
-PERIOD_NAMES = {
-    '2025-12-08': 'LF40',
-    '2025-12-15': 'LF41',
-    '2025-12-22': 'LF42',
-    '2026-01-19': 'DEV19',
-    '2026-02-02': 'LF43',
-    '2026-02-09': 'LF44',
-    '2026-03-02': 'LF45',
-    '2026-03-09': 'LF46',
-    '2026-03-16': 'LF47',
-    '2026-03-23': 'LF48',
-}
+# Carregado de configs/launches.yaml — adicionar novo LF lá, não aqui.
+def _load_period_names() -> dict:
+    launches_path = BASE / 'configs' / 'launches.yaml'
+    if not launches_path.exists():
+        return {}
+    with open(launches_path, 'r') as f:
+        launches = yaml.safe_load(f)
+    return {
+        v['vendas_start']: name
+        for name, v in launches.items()
+        if isinstance(v, dict) and 'vendas_start' in v
+    }
+
+PERIOD_NAMES = _load_period_names()
 
 
 def discover_periods() -> list:
@@ -59,37 +61,50 @@ def discover_periods() -> list:
     Lê 'Performance Geral' de cada relatório para extrair as datas reais.
     Não contém datas hardcoded — adicionar apenas o nome em PERIOD_NAMES ao
     criar um novo lançamento.
+
+    Suporta duas convenções de pastas:
+      - Legada:  "DD:MM - DD:MM"  (pasta por período)
+      - Atual:   "YYYY-MM"        (pasta por mês, arquivos "LF* - DD:MM a DD:MM.xlsx")
     """
     periods = []
     for folder in sorted(VALIDATION_DIR.iterdir()):
-        if not folder.is_dir() or ':' not in folder.name:
+        if not folder.is_dir():
             continue
-        reports = sorted(folder.glob('validation_report_*.xlsx'))
+        # Ignorar pasta de histórico e subpastas sem relatórios
+        if folder.name in ('historico', 'cache', 'leads', 'arquivos_leads', 'feedback_loop', 'meta_features_test'):
+            continue
+        # Convenção legada: pasta com ":" no nome
+        if ':' in folder.name:
+            reports = sorted(folder.glob('validation_report_*.xlsx'))
+        else:
+            # Convenção atual: pasta YYYY-MM, arquivos "LF* - DD:MM a DD:MM.xlsx"
+            reports = sorted(folder.glob('*.xlsx'))
         if not reports:
             continue
-        try:
-            pg = pd.read_excel(reports[-1], sheet_name='Performance Geral', header=None)
-            rows = {
-                str(r[0]).strip(): str(r.iloc[1]).strip()
-                for _, r in pg.iterrows()
-                if pd.notna(r[0]) and len(r) > 1 and pd.notna(r.iloc[1])
-            }
-            cap_str = rows.get('Período de Captação', '')
-            ven_str = rows.get('Período de Vendas', '')
-            if ' a ' not in cap_str or ' a ' not in ven_str:
-                continue
-            cap_start, cap_end       = [s.strip() for s in cap_str.split(' a ')]
-            vendas_start, vendas_end = [s.strip() for s in ven_str.split(' a ')]
-            name = PERIOD_NAMES.get(vendas_start, folder.name)
-            periods.append({
-                'name':         name,
-                'cap_start':    cap_start,
-                'cap_end':      cap_end,
-                'vendas_start': vendas_start,
-                'vendas_end':   vendas_end,
-            })
-        except Exception as e:
-            print(f"  Aviso: falha ao ler período {folder.name}: {e}")
+        for report in reports:
+            try:
+                pg = pd.read_excel(report, sheet_name='Performance Geral', header=None)
+                rows = {
+                    str(r[0]).strip(): str(r.iloc[1]).strip()
+                    for _, r in pg.iterrows()
+                    if pd.notna(r[0]) and len(r) > 1 and pd.notna(r.iloc[1])
+                }
+                cap_str = rows.get('Período de Captação', '')
+                ven_str = rows.get('Período de Vendas', '')
+                if ' a ' not in cap_str or ' a ' not in ven_str:
+                    continue
+                cap_start, cap_end       = [s.strip() for s in cap_str.split(' a ')]
+                vendas_start, vendas_end = [s.strip() for s in ven_str.split(' a ')]
+                name = PERIOD_NAMES.get(vendas_start, report.stem.split(' ')[0])
+                periods.append({
+                    'name':         name,
+                    'cap_start':    cap_start,
+                    'cap_end':      cap_end,
+                    'vendas_start': vendas_start,
+                    'vendas_end':   vendas_end,
+                })
+            except Exception as e:
+                print(f"  Aviso: falha ao ler período {report.name}: {e}")
     periods.sort(key=lambda p: p['vendas_start'])
     return periods
 
@@ -418,20 +433,38 @@ def load_cloudrun_logs(start_ts: str, end_ts: str) -> pd.DataFrame:
 def find_xlsx_for_period(vendas_start: str, vendas_end: str) -> Path | None:
     """
     Auto-detecta o relatório xlsx de validação para um período de vendas.
-    Procura pelo padrão: validation_report_FECHAMENTO_{vendas_start}_to_{vendas_end}_*.xlsx
+
+    Suporta duas convenções:
+      1. Legada:  validation_report_*{vendas_start}*{vendas_end}*.xlsx  (qualquer subpasta)
+      2. Legada:  pasta "DD:MM - DD:MM" com validation_report_*.xlsx
+      3. Atual:   pasta "YYYY-MM" com arquivo "LF* - DD:MM a DD:MM.xlsx"
     """
+    # 1. Padrão legado com nome de arquivo contendo datas ISO
     pattern = f"**/validation_report_*{vendas_start}*{vendas_end}*.xlsx"
     candidates = sorted(VALIDATION_DIR.glob(pattern))
     if candidates:
-        return candidates[-1]  # mais recente
+        return candidates[-1]
 
-    # Fallback: procura por pasta com datas de vendas (dd:mm)
     vs = pd.Timestamp(vendas_start)
     ve = pd.Timestamp(vendas_end)
+
+    # 2. Pasta legada "DD:MM - DD:MM"
     folder_pattern = f"{vs.day:02d}:{vs.month:02d} - {ve.day:02d}:{ve.month:02d}"
     folder = VALIDATION_DIR / folder_pattern
     if folder.exists():
         candidates = sorted(folder.glob('validation_report_*.xlsx'))
+        if candidates:
+            return candidates[-1]
+
+    # 3. Convenção atual: pasta YYYY-MM, arquivo "LF* - DD:MM a DD:MM.xlsx"
+    month_folder = VALIDATION_DIR / vs.strftime('%Y-%m')
+    if month_folder.exists():
+        start_tag = f"{vs.day:02d}:{vs.month:02d}"
+        end_tag   = f"{ve.day:02d}:{ve.month:02d}"
+        candidates = [
+            f for f in sorted(month_folder.glob('*.xlsx'))
+            if start_tag in f.name and end_tag in f.name
+        ]
         if candidates:
             return candidates[-1]
 

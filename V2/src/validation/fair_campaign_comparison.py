@@ -1,7 +1,7 @@
 """
 Módulo para comparação fair control em nível de ADSETS e ADS.
 
-Compara campanhas ML vs Controle no nível de conjuntos de anúncios e anúncios individuais.
+Compara campanhas Champion vs Challenger no nível de conjuntos de anúncios e anúncios individuais.
 Foco em métricas de negócio: ROAS, CPA, Margem de Contribuição, Taxa de Conversão.
 
 Princípio: "Maçãs com Maçãs"
@@ -50,9 +50,9 @@ def create_refined_campaign_map(
     Cria mapeamento refinado: campaign_id  comparison_group.
 
     Distingue entre:
-    - 'Eventos ML': Campanhas ML que usam eventos CAPI customizados (LeadQualified/LQHQ)
+    - 'Champion': Campanhas ML que usam eventos CAPI customizados (LeadQualified/LQHQ)
     - 'Otimização ML': Campanhas ML que NÃO usam eventos customizados
-    - 'Controle': Campanhas sem ML
+    - 'Challenger': Campanhas sem ML
 
     Args:
         campaigns_df: DataFrame com campanhas (deve ter optimization_goal)
@@ -60,7 +60,7 @@ def create_refined_campaign_map(
         control_campaign_ids: Lista de IDs de campanhas Controle
 
     Returns:
-        Dict mapping campaign_id  comparison_group ('Eventos ML', 'Otimização ML', ou 'Controle')
+        Dict mapping campaign_id  comparison_group ('Champion', 'Otimização ML', ou 'Challenger')
     """
     refined_map = {}
 
@@ -89,7 +89,7 @@ def create_refined_campaign_map(
         campaign_name_map = {}
 
     # Classificar campanhas ML
-    # REGRA: Se o nome contém "MACHINE LEARNING"  sempre "Eventos ML"
+    # REGRA: Se o nome contém "MACHINE LEARNING"  sempre "Champion"
     # Caso contrário, verificar optimization_goal (LeadQualified/LQHQ)
     for cid in ml_campaign_ids:
         cid_clean = str(cid)[:15]
@@ -98,7 +98,7 @@ def create_refined_campaign_map(
 
         # PRIORIDADE 1: Verificar se nome contém "MACHINE LEARNING"
         if 'machine learning' in campaign_name.lower():
-            refined_map[cid_clean] = 'Eventos ML'
+            refined_map[cid_clean] = 'Champion'
             logger.info(f"    Campanha classificada como Eventos ML (nome contém MACHINE LEARNING): {cid_clean}")
             continue
 
@@ -106,7 +106,7 @@ def create_refined_campaign_map(
         uses_custom_events = any(custom in opt_goal for custom in ['LeadQualified', 'LeadQualifiedHighQuality'])
 
         if uses_custom_events:
-            refined_map[cid_clean] = 'Eventos ML'
+            refined_map[cid_clean] = 'Champion'
         else:
             refined_map[cid_clean] = 'Otimização ML'
 
@@ -114,13 +114,13 @@ def create_refined_campaign_map(
     logger.info(f"    DEBUG - Classificando {len(control_campaign_ids)} campanhas Controle:")
     for cid in control_campaign_ids:
         cid_clean = str(cid)[:15]
-        refined_map[cid_clean] = 'Controle'  # USAR 15 DÍGITOS como chave
+        refined_map[cid_clean] = 'Challenger'  # USAR 15 DÍGITOS como chave
         logger.info(f"       {cid_clean}  Controle")
 
     logger.info(f"    Mapeamento refinado criado:")
-    eventos_ml = sum(1 for v in refined_map.values() if v == 'Eventos ML')
+    eventos_ml = sum(1 for v in refined_map.values() if v == 'Champion')
     otimiz_ml = sum(1 for v in refined_map.values() if v == 'Otimização ML')
-    controle = sum(1 for v in refined_map.values() if v == 'Controle')
+    controle = sum(1 for v in refined_map.values() if v == 'Challenger')
     logger.info(f"      Eventos ML: {eventos_ml}, Otimização ML: {otimiz_ml}, Controle: {controle}")
 
     return refined_map
@@ -281,7 +281,7 @@ def identify_matched_adset_pairs(
             for adset in sorted(missing_from_intersection):
                 logger.warning(f"       {repr(adset)}")
 
-    logger.info(f"    {len(matched_final)} adsets matched selecionados (Eventos ML vs Controle)")
+    logger.info(f"    {len(matched_final)} adsets matched selecionados (Eventos Champion vs Challenger)")
     logger.info(f"      ML adsets (total): {len(ml_adsets)}, Controle adsets (total): {len(control_adsets)}")
 
     # Criar DataFrame com métricas por adset
@@ -497,7 +497,7 @@ def identify_matched_adsets_faixa_a(
 
     # Classificar cada linha por grupo (Eventos ML ou Faixa A)
     matched_adsets_data['comparison_group'] = matched_adsets_data['campaign_id_15'].apply(
-        lambda cid: 'Eventos ML' if cid in eventos_ml_ids_15 else 'Faixa A'
+        lambda cid: 'Champion' if cid in eventos_ml_ids_15 else 'Faixa A'
     )
 
     # Agregar leads e spend dos relatórios Meta
@@ -527,7 +527,7 @@ def identify_matched_adsets_faixa_a(
 
                 # Classificar por grupo
                 matched_conversions['comparison_group'] = matched_conversions['campaign_id_15'].apply(
-                    lambda cid: 'Eventos ML' if cid in eventos_ml_ids_15 else 'Faixa A'
+                    lambda cid: 'Champion' if cid in eventos_ml_ids_15 else 'Faixa A'
                 )
 
                 # Contar conversões por grupo
@@ -618,7 +618,7 @@ def get_faixa_a_instances_detail(
         - adset_name: Nome do adset
         - campaign_name: Nome da campanha
         - campaign_id: ID da campanha
-        - comparison_group: 'Eventos ML' ou 'Faixa A'
+        - comparison_group: 'Champion' ou 'Faixa A'
         - spend: Valor gasto
         - leads: Número de leads
         - conversions: Número de vendas
@@ -738,7 +738,7 @@ def get_faixa_a_instances_detail(
                 'adset_name': adset_name,
                 'campaign_name': ml_campaign_name,
                 'campaign_id': ml_campaign_id,
-                'comparison_group': 'Eventos ML',
+                'comparison_group': 'Champion',
                 'spend': ml_spend if pd.notna(ml_spend) else 0,
                 'leads': ml_leads if pd.notna(ml_leads) else 0,
                 'conversions': 0,
@@ -788,7 +788,7 @@ def get_faixa_a_instances_detail(
     )
 
     logger.info(f"    {len(instances_df)} instâncias processadas com conversões")
-    logger.info(f"      Eventos ML: {len(instances_df[instances_df['comparison_group'] == 'Eventos ML'])} instâncias")
+    logger.info(f"      Eventos ML: {len(instances_df[instances_df['comparison_group'] == 'Champion'])} instâncias")
     logger.info(f"      Faixa A: {len(instances_df[instances_df['comparison_group'] == 'Faixa A'])} instâncias")
 
     return instances_df
@@ -807,7 +807,7 @@ def compare_all_adsets_performance(
     config: Optional[Dict] = None
 ) -> pd.DataFrame:
     """
-    Compara performance de TODOS os adsets (Eventos ML vs Controle), sem filtrar por matched pairs.
+    Compara performance de TODOS os adsets (Eventos Champion vs Challenger), sem filtrar por matched pairs.
 
     Args:
         adsets_df: DataFrame com TODOS os adsets do Excel (sem filtro de matched pairs)
@@ -817,9 +817,9 @@ def compare_all_adsets_performance(
         min_spend: Gasto mínimo para incluir adset (default: R$ 0)
 
     Returns:
-        DataFrame agregado com métricas por grupo (Eventos ML vs Controle)
+        DataFrame agregado com métricas por grupo (Eventos Champion vs Challenger)
     """
-    logger.info(" Comparando performance de TODOS os adsets (Eventos ML vs Controle)...")
+    logger.info(" Comparando performance de TODOS os adsets (Eventos Champion vs Challenger)...")
 
     # CRÍTICO: Contar LEADS (todos) e CONVERSÕES por CAMPAIGN + ADSET + COMPARISON_GROUP do matched_df
     # Isso garante consistência com a Tabela 1 (Comparação por Campanhas)
@@ -987,7 +987,7 @@ def compare_all_adsets_performance(
     logger.info(f"    DEBUG - Leads ANTES da agregação por grupo (do matched_df):")
     adsets_full_temp = adsets_full.copy()
     adsets_full_temp['comparison_group_temp'] = adsets_full_temp['campaign_id_clean'].map(comparison_group_map)
-    for group in ['Eventos ML', 'Controle']:
+    for group in ['Champion', 'Challenger']:
         group_rows = adsets_full_temp[adsets_full_temp['comparison_group_temp'] == group]
         if 'leads_count' in group_rows.columns:
             total_leads = group_rows['leads_count'].sum()
@@ -1042,7 +1042,7 @@ def compare_all_adsets_performance(
     logger.info(f"    DEBUG - Leads DEPOIS da agregação por grupo (do matched_df):")
     adsets_full_temp2 = adsets_full.copy()
     adsets_full_temp2['comparison_group_temp'] = adsets_full_temp2['campaign_id_clean'].map(comparison_group_map)
-    for group in ['Eventos ML', 'Controle']:
+    for group in ['Champion', 'Challenger']:
         group_rows = adsets_full_temp2[adsets_full_temp2['comparison_group_temp'] == group]
         if 'leads_count' in group_rows.columns:
             total_leads = group_rows['leads_count'].sum()
@@ -1077,7 +1077,7 @@ def compare_all_adsets_performance(
     logger.info(f"    DEBUG - Leads ANTES do filtro de adsets fantasma (do matched_df):")
     adsets_full_temp3 = adsets_full.copy()
     adsets_full_temp3['comparison_group_temp'] = adsets_full_temp3['campaign_id_clean'].map(comparison_group_map)
-    for group in ['Eventos ML', 'Controle']:
+    for group in ['Champion', 'Challenger']:
         group_rows = adsets_full_temp3[adsets_full_temp3['comparison_group_temp'] == group]
         total_leads = group_rows['leads'].sum()
         logger.info(f"      {group}: {len(group_rows)} linhas, {total_leads:.0f} leads (matched_df)")
@@ -1089,7 +1089,7 @@ def compare_all_adsets_performance(
     logger.info(f"    DEBUG - Leads DEPOIS do filtro de adsets fantasma (do matched_df):")
     adsets_full_temp4 = adsets_full.copy()
     adsets_full_temp4['comparison_group_temp'] = adsets_full_temp4['campaign_id_clean'].map(comparison_group_map)
-    for group in ['Eventos ML', 'Controle']:
+    for group in ['Champion', 'Challenger']:
         group_rows = adsets_full_temp4[adsets_full_temp4['comparison_group_temp'] == group]
         total_leads = group_rows['leads'].sum()
         logger.info(f"      {group}: {len(group_rows)} linhas, {total_leads:.0f} leads (matched_df)")
@@ -1138,31 +1138,31 @@ def compare_all_adsets_performance(
             group_count = len(adsets_full[adsets_full['comparison_group'] == group])
             logger.info(f"      {group}: {group_count} adsets, {group_leads:.0f} leads")
 
-    # Se configurado, agrupar "Otimização ML" com "Controle"
+    # Se configurado, agrupar "Otimização ML" com "Challenger"
     if config and config.get('merge_otimizacao_ml_with_controle', False):
-        logger.info("    Agrupando 'Otimização ML' com 'Controle' (merge_otimizacao_ml_with_controle=true)")
+        logger.info("    Agrupando 'Otimização ML' com 'Challenger' (merge_otimizacao_ml_with_controle=true)")
         adsets_full.loc[
             adsets_full['comparison_group'] == 'Otimização ML',
             'comparison_group'
-        ] = 'Controle'
+        ] = 'Challenger'
 
     # Filtrar apenas Eventos ML e Controle (remover Otimização ML e outros)
     # IMPORTANTE: Mostrar TODOS os adsets, independente de gasto, leads ou conversões
     # Isso garante que os totais batam com a tabela de Campanhas
-    adsets_filtered = adsets_full[adsets_full['comparison_group'].isin(['Eventos ML', 'Controle'])].copy()
+    adsets_filtered = adsets_full[adsets_full['comparison_group'].isin(['Champion', 'Challenger'])].copy()
 
     logger.info(f"    Todos os adsets das campanhas Eventos ML + Controle: {len(adsets_filtered)}")
 
     # DEBUG: Mostrar distribuição de leads por comparison_group DEPOIS do filtro
     logger.info(f"    DEBUG - Leads por comparison_group DEPOIS do filtro:")
-    for group in ['Eventos ML', 'Controle']:
+    for group in ['Champion', 'Challenger']:
         group_leads = adsets_filtered[adsets_filtered['comparison_group'] == group]['leads'].sum()
         group_count = len(adsets_filtered[adsets_filtered['comparison_group'] == group])
         logger.info(f"      {group}: {group_count} adsets, {group_leads:.0f} leads")
 
     # DEBUG: Verificar spend e leads por grupo
     logger.info(f"    DEBUG - Spend e Leads por grupo (leads do matched_df):")
-    for group in ['Eventos ML', 'Controle']:
+    for group in ['Champion', 'Challenger']:
         group_adsets = adsets_filtered[adsets_filtered['comparison_group'] == group]
         total_spend = group_adsets['spend'].sum()
         total_leads = group_adsets['leads'].sum()
@@ -1180,7 +1180,7 @@ def compare_all_adsets_performance(
 
     # DEBUG: Verificar se há duplicação de conversões por comparison_group
     logger.info(f"\n    DEBUG - Verificando conversões únicas por grupo:")
-    for group in ['Eventos ML', 'Controle']:
+    for group in ['Champion', 'Challenger']:
         group_adsets = adsets_filtered[adsets_filtered['comparison_group'] == group]
         total_convs = group_adsets['conversions'].sum()
 
@@ -1272,8 +1272,8 @@ def compare_all_adsets_performance(
         aggregated['margin_adjusted'] = aggregated['revenue_adjusted'] - aggregated['spend']
 
     logger.info(f"    Comparação completa de adsets calculada")
-    logger.info(f"      Eventos ML: {aggregated[aggregated['comparison_group']=='Eventos ML']['conversions'].sum():.0f} conversões")
-    logger.info(f"      Controle: {aggregated[aggregated['comparison_group']=='Controle']['conversions'].sum():.0f} conversões")
+    logger.info(f"      Eventos ML: {aggregated[aggregated['comparison_group']=='Champion']['conversions'].sum():.0f} conversões")
+    logger.info(f"      Controle: {aggregated[aggregated['comparison_group']=='Challenger']['conversions'].sum():.0f} conversões")
 
     return aggregated
 
@@ -1293,11 +1293,11 @@ def compare_adset_performance(
         matched_df: DataFrame com conversões matched (leadsvendas)
         ml_type_map: Mapeamento campaign_id  ml_type (DEPRECATED - usar comparison_group_map)
         product_value: Valor do produto em R$
-        comparison_group_map: Mapeamento campaign_id  comparison_group ('Eventos ML', 'Otimização ML', 'Controle')
+        comparison_group_map: Mapeamento campaign_id  comparison_group ('Champion', 'Otimização ML', 'Challenger')
 
     Returns:
         Dict com DataFrames:
-        - 'aggregated': Agregação ML vs Controle
+        - 'aggregated': Agregação Champion vs Challenger
         - 'detailed': Detalhamento adset-a-adset (CADA CAMPANHA SEPARADA)
     """
     logger.info(" Comparando performance de adsets...")
@@ -1754,7 +1754,7 @@ def compare_adset_performance(
         logger.warning(f"    'revenue_adjusted' NÃO encontrado em adsets_full")
         logger.warning(f"    Colunas em adsets_full: {adsets_full.columns.tolist()}")
 
-    # Agregação ML vs Controle
+    # Agregação Champion vs Challenger
     agg_dict_ml = {
         'adset_name': 'nunique',
         'spend': 'sum',
@@ -1860,7 +1860,7 @@ def compare_adset_performance(
         # DEBUG: Mostrar mapeamento das campanhas ML
         logger.info(f"\n      Mapeamento de campanhas ML:")
         for id_15, group in comparison_group_map.items():
-            if 'ML' in group or group == 'Eventos ML':
+            if 'ML' in group or group == 'Champion':
                 logger.info(f"         {id_15}  {group}")
 
         # Verificar se há IDs que não fazem match
@@ -1888,21 +1888,21 @@ def compare_adset_performance(
             """Conversão legacy: ml_type  comparison_group (sem refinamento)"""
             ml_type = row['ml_type']
             if ml_type == 'COM_ML':
-                return 'Eventos ML'  # Assume todos ML são Eventos (não ideal)
+                return 'Champion'  # Assume todos ML são Eventos (não ideal)
             elif ml_type == 'SEM_ML':
-                return 'Controle'
+                return 'Challenger'
             else:
                 return 'Outro'
 
         detailed['comparison_group'] = detailed.apply(classify_comparison_group_from_ml_type, axis=1)
         logger.warning("    Usando mapeamento legacy (sem distinção Eventos ML vs Otimização ML)")
 
-    # Filtrar apenas "Eventos ML" vs "Controle" (excluir "Otimização ML" e "Outro")
+    # Filtrar apenas "Champion" vs "Challenger" (excluir "Otimização ML" e "Outro")
     before_filter = len(detailed)
     conversions_before_filter = detailed['conversions'].sum()
 
     # DEBUG: Verificar quais conversões serão removidas pelo filtro
-    removed_by_filter = detailed[~detailed['comparison_group'].isin(['Eventos ML', 'Controle'])].copy()
+    removed_by_filter = detailed[~detailed['comparison_group'].isin(['Champion', 'Challenger'])].copy()
     if len(removed_by_filter) > 0:
         convs_removed = removed_by_filter['conversions'].sum()
         logger.warning(f"\n    CONVERSÕES REMOVIDAS PELO FILTRO (Otimização ML / Outro):")
@@ -1955,7 +1955,7 @@ def compare_adset_performance(
                     logger.warning(f"          Não encontrei os emails correspondentes em matched_df")
         logger.warning("")
 
-    detailed = detailed[detailed['comparison_group'].isin(['Eventos ML', 'Controle'])].copy()
+    detailed = detailed[detailed['comparison_group'].isin(['Champion', 'Challenger'])].copy()
     after_filter = len(detailed)
     conversions_after_filter = detailed['conversions'].sum()
 
@@ -2059,11 +2059,11 @@ def compare_ad_performance(
         matched_df: DataFrame com conversões matched (leadsvendas)
         ml_type_map: Mapeamento campaign_id  ml_type (DEPRECATED - usar comparison_group_map)
         product_value: Valor do produto em R$
-        comparison_group_map: Mapeamento campaign_id  comparison_group ('Eventos ML', 'Otimização ML', 'Controle')
+        comparison_group_map: Mapeamento campaign_id  comparison_group ('Champion', 'Otimização ML', 'Challenger')
 
     Returns:
         Dict com DataFrames:
-        - 'aggregated': Agregação ML vs Controle
+        - 'aggregated': Agregação Champion vs Challenger
         - 'detailed': Detalhamento anúncio-a-anúncio
     """
     logger.info(" Comparando performance de anúncios...")
@@ -2225,14 +2225,14 @@ def compare_ad_performance(
     else:
         # Fallback para ml_type
         ad_full['comparison_group'] = ad_full['ml_type'].map({
-            'COM_ML': 'Eventos ML',
-            'SEM_ML': 'Controle'
+            'COM_ML': 'Champion',
+            'SEM_ML': 'Challenger'
         })
         logger.warning("    comparison_group_map não disponível, usando classificação simples")
 
     # FILTRAR antes de agregar: apenas Eventos ML e Controle
     before_filter_count = len(ad_full)
-    ad_full_filtered = ad_full[ad_full['comparison_group'].isin(['Eventos ML', 'Controle'])].copy()
+    ad_full_filtered = ad_full[ad_full['comparison_group'].isin(['Champion', 'Challenger'])].copy()
     after_filter_count = len(ad_full_filtered)
 
     if before_filter_count != after_filter_count:
@@ -2324,13 +2324,13 @@ def compare_ads_in_matched_adsets(
 
     Returns:
         Dict com DataFrames:
-        - 'aggregated': Agregação ML vs Controle
+        - 'aggregated': Agregação Champion vs Challenger
         - 'detailed': Detalhamento anúncio-a-anúncio
     """
     logger.info(" Comparando performance de anúncios EM adsets matched...")
 
     # CORREÇÃO: Usar lista filtrada de adsets em vez da hardcoded
-    # Isso garante que apenas ads de adsets "Eventos ML" e "Controle" sejam incluídos
+    # Isso garante que apenas ads de adsets "Champion" e "Challenger" sejam incluídos
     # (excluindo "Otimização ML" e outros)
     adsets_to_use = filtered_matched_adsets if filtered_matched_adsets is not None else MATCHED_ADSETS
 
@@ -2415,13 +2415,13 @@ def compare_matched_ads_in_matched_adsets(
         ads_in_matched_adsets['comparison_group'] = ads_in_matched_adsets['campaign_id_15'].map(comparison_group_map)
     else:
         ads_in_matched_adsets['comparison_group'] = ads_in_matched_adsets['campaign_id'].map(ml_type_map).map({
-            'COM_ML': 'Eventos ML',
-            'SEM_ML': 'Controle'
+            'COM_ML': 'Champion',
+            'SEM_ML': 'Challenger'
         })
 
     # Filtrar apenas Eventos ML e Controle
     ads_filtered = ads_in_matched_adsets[
-        ads_in_matched_adsets['comparison_group'].isin(['Eventos ML', 'Controle'])
+        ads_in_matched_adsets['comparison_group'].isin(['Champion', 'Challenger'])
     ].copy()
 
     logger.info(f"    Ads após filtro de comparison_group: {len(ads_filtered)}")
@@ -2429,15 +2429,15 @@ def compare_matched_ads_in_matched_adsets(
     # Identificar quais ad_codes aparecem em AMBOS os grupos
     ad_codes_by_group = ads_filtered.groupby('comparison_group')['ad_code'].unique()
 
-    if 'Eventos ML' not in ad_codes_by_group or 'Controle' not in ad_codes_by_group:
+    if 'Champion' not in ad_codes_by_group or 'Challenger' not in ad_codes_by_group:
         logger.warning("    Não há ad_codes em ambos os grupos!")
         return {
             'aggregated': pd.DataFrame(),
             'detailed': pd.DataFrame()
         }
 
-    eventos_ml_codes = set(ad_codes_by_group['Eventos ML'])
-    controle_codes = set(ad_codes_by_group['Controle'])
+    eventos_ml_codes = set(ad_codes_by_group['Champion'])
+    controle_codes = set(ad_codes_by_group['Challenger'])
     matched_ad_codes = eventos_ml_codes & controle_codes
 
     logger.info(f"    Ad codes matched (aparecem em ML E Controle): {len(matched_ad_codes)}")
@@ -3247,9 +3247,9 @@ class FairCampaignMatcher:
 
         Returns:
             DataFrame com coluna 'comparison_group' adicionada:
-            - 'Eventos ML': Campanha com eventos customizados
+            - 'Champion': Campanha com eventos customizados
             - 'Otimização ML': Campanha com ML mas eventos padrão
-            - 'Controle': Campanha de controle justo
+            - 'Challenger': Campanha de controle justo
             - 'Outro': Outras campanhas
         """
         df = leads_df.copy()
@@ -3276,7 +3276,7 @@ class FairCampaignMatcher:
                 opt_goal_map = {}
                 for campaign_id, campaign_data in campaign_hierarchy.items():
                     # Verificar TODOS os adsets para detectar eventos customizados
-                    # Se qualquer adset usa evento customizado, a campanha é "Eventos ML"
+                    # Se qualquer adset usa evento customizado, a campanha é "Champion"
                     adsets = campaign_data.get('adsets', {})
                     optimization_goals = []
                     for adset_id, adset_data in adsets.items():
@@ -3356,7 +3356,7 @@ class FairCampaignMatcher:
                         uses_custom_events_by_date = True
 
                 if uses_custom_events_by_goal or uses_custom_events_by_set or uses_custom_events_by_date:
-                    return 'Eventos ML'
+                    return 'Champion'
                 else:
                     return 'Otimização ML'
 
@@ -3366,7 +3366,7 @@ class FairCampaignMatcher:
                 campaign_name in fair_control_names or
                 campaign_name_base in fair_control_names
             ):
-                return 'Controle'
+                return 'Challenger'
 
             # Outras campanhas
             else:
@@ -3376,7 +3376,7 @@ class FairCampaignMatcher:
 
         # Log da distribuição
         logger.info(f"\n    Distribuição de grupos de comparação:")
-        for group in ['Eventos ML', 'Otimização ML', 'Controle', 'Outro']:
+        for group in ['Champion', 'Otimização ML', 'Challenger', 'Outro']:
             count = len(df[df['comparison_group'] == group])
             pct = count / len(df) * 100 if len(df) > 0 else 0
             logger.info(f"      {group}: {count} leads ({pct:.1f}%)")

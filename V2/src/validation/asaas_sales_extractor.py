@@ -99,12 +99,12 @@ class AsaasSalesExtractor:
         limit = 100
         page = 1
 
-        logger.info(f' Buscando pagamentos Asaas de {start_date} a {end_date} (por dateCreated)...')
+        logger.info(f' Buscando pagamentos Asaas de {start_date} a {end_date} (por clientPaymentDate)...')
 
         while True:
             params = {
-                'dateCreated[ge]': start_date,
-                'dateCreated[le]': end_date,
+                'clientPaymentDate[ge]': start_date,
+                'clientPaymentDate[le]': end_date,
                 'limit': limit,
                 'offset': offset,
             }
@@ -280,6 +280,7 @@ class AsaasSalesExtractor:
         output_path: str = None,
         product_value: Optional[float] = None,
         customer_created_from: Optional[str] = None,
+        customer_created_until: Optional[str] = None,
     ) -> pd.DataFrame:
         """
         Gera DataFrame de vendas Asaas no período.
@@ -294,13 +295,16 @@ class AsaasSalesExtractor:
                            Padrão: igual a start_date. Use a data de início da captação para incluir
                            clientes que se cadastraram no Asaas antes do período de vendas (ex: LF43
                            em que a captação começa em jan mas as vendas em fev).
+            customer_created_until: Data máxima de criação do cliente (YYYY-MM-DD), inclusivo.
+                           Quando fornecido (= cap_end do LF), exclui compradores do LF anterior
+                           que pagaram nessa semana mas se cadastraram depois do fim da captação
+                           deste LF. Resolve o trade-off: LF(N-1) late payers vs LF(N) early payers.
 
         Returns:
             DataFrame padronizado com origem='asaas'
         """
-        # Data mínima para customer.dateCreated — padrão é start_date (vendas),
-        # mas deve ser a data de captação quando o lançamento tem período de captação
-        # anterior ao período de vendas (ex: LF43: capt jan, vendas fev).
+        # Janela de customer.dateCreated: [cap_start, cap_end] quando disponível,
+        # ou apenas >= cap_start (comportamento legado).
         _customer_from = customer_created_from or start_date
 
         # 1. Buscar pagamentos
@@ -316,20 +320,29 @@ class AsaasSalesExtractor:
         customer_ids = [p.get('customer') for p in payments if p.get('customer')]
         self.fetch_customers_batch(customer_ids)
 
-        # 2b. Filtrar por data de criação do cliente (customer.dateCreated >= _customer_from).
-        # Filtrando por customer.dateCreated garantimos apenas clientes novos (contratos do período).
-        # Nota: agora filtramos por charge.dateCreated (não clientPaymentDate), então este filtro
-        # captura o caso em que um cliente antigo gerou uma nova cobrança avulsa no período.
+        # 2b. Filtrar por data de criação do cliente.
+        # Um cliente "pertence" a este LF se se cadastrou durante a janela de captação:
+        #   customer.dateCreated >= cap_start  (exclui compradores de LFs anteriores)
+        #   customer.dateCreated <= cap_end    (exclui compradores do LF seguinte que pagam cedo)
+        # Quando customer_created_until não é fornecido, usamos apenas o limite inferior
+        # (comportamento legado).
         before_customer_filter = len(payments)
-        payments = [
-            p for p in payments
-            if self._customer_cache.get(p.get('customer', ''), {}).get('dateCreated', '') >= _customer_from
-        ]
+        filtered_payments = []
+        for p in payments:
+            cid = p.get('customer', '')
+            date_created = self._customer_cache.get(cid, {}).get('dateCreated', '')
+            if date_created < _customer_from:
+                continue
+            if customer_created_until and date_created > customer_created_until:
+                continue
+            filtered_payments.append(p)
+        payments = filtered_payments
         filtered_by_customer = before_customer_filter - len(payments)
         if filtered_by_customer > 0:
+            until_msg = f' e depois de {customer_created_until}' if customer_created_until else ''
             logger.info(
                 f' Asaas: {filtered_by_customer} pagamentos removidos por customer.dateCreated '
-                f'antes de {_customer_from} (clientes de lançamentos anteriores).'
+                f'antes de {_customer_from}{until_msg} (clientes de outros lançamentos).'
             )
 
         # 2c. Deduplicar por customer_id — o dashboard conta contratos (clientes únicos),
@@ -389,6 +402,7 @@ def fetch_asaas_sales(
     output_path: str = None,
     product_value: Optional[float] = None,
     customer_created_from: Optional[str] = None,
+    customer_created_until: Optional[str] = None,
 ) -> pd.DataFrame:
     """
     Função auxiliar para buscar vendas Asaas — interface equivalente a fetch_guru_sales_from_api().
@@ -400,7 +414,8 @@ def fetch_asaas_sales(
         save_excel: Se True, salva Excel
         output_path: Caminho do Excel (obrigatório se save_excel=True)
         product_value: Valor total do produto para entradas sem parcelamento registrado
-        customer_created_from: Data mínima de criação do cliente (padrão: start_date)
+        customer_created_from: Data mínima de criação do cliente (padrão: start_date = cap_start)
+        customer_created_until: Data máxima de criação do cliente (cap_end do LF)
 
     Returns:
         DataFrame com vendas Asaas
@@ -412,6 +427,7 @@ def fetch_asaas_sales(
         output_path=output_path if save_excel else None,
         product_value=product_value,
         customer_created_from=customer_created_from,
+        customer_created_until=customer_created_until,
     )
 
 

@@ -1,0 +1,116 @@
+# launches.yaml — Datas de cada lançamento DevClub
+#
+# Fonte: Controle de Vendas Global (Google Sheets)
+# Campos:
+#   cap_start / cap_end   — período de captação (leads preenchem pesquisa)
+#   vendas_start / vendas_end — período de vendas (carrinho aberto)
+#   notes                 — observações do cliente (opcional)
+#
+# Usado por:
+#   validate_ml_performance.py --lf LFxx    (carrega datas automaticamente)
+#   ml_evolution_report.py                   (mapeia vendas_start → nome)
+#   gerar_evolucao_margem.py                 (mapeia vendas_start → nome)
+
+LF40:
+  cap_start: "2025-11-25"
+  cap_end:   "2025-12-02"
+  vendas_start: "2025-12-08"
+  vendas_end:   "2025-12-14"
+
+LF41:
+  cap_start: "2025-12-02"
+  cap_end:   "2025-12-08"
+  vendas_start: "2025-12-15"
+  vendas_end:   "2025-12-21"
+
+LF42:
+  cap_start: "2025-12-09"
+  cap_end:   "2025-12-15"
+  vendas_start: "2025-12-22"
+  vendas_end:   "2025-12-28"
+  notes: "último lançamento do ano"
+
+DEV19:
+  cap_start: "2025-12-16"
+  cap_end:   "2026-01-14"
+  vendas_start: "2026-01-19"
+  vendas_end:   "2026-01-25"
+
+LF43:
+  cap_start: "2026-01-13"
+  cap_end:   "2026-01-26"
+  vendas_start: "2026-02-02"
+  vendas_end:   "2026-02-08"
+  notes: "2 semanas de captação"
+
+LF44:
+  cap_start: "2026-01-27"
+  cap_end:   "2026-02-03"
+  vendas_start: "2026-02-09"
+  vendas_end:   "2026-02-15"
+
+LF45:
+  cap_start: "2026-02-03"
+  cap_end:   "2026-02-23"
+  vendas_start: "2026-03-02"
+  vendas_end:   "2026-03-08"
+  notes: "Base FRIA e QUENTE"
+
+LF46:
+  cap_start: "2026-02-24"
+  cap_end:   "2026-03-02"
+  vendas_start: "2026-03-09"
+  vendas_end:   "2026-03-15"
+  notes: "Disparo p/ base errada"
+
+LF47:
+  cap_start: "2026-03-03"
+  cap_end:   "2026-03-09"
+  vendas_start: "2026-03-16"
+  vendas_end:   "2026-03-22"
+
+LF48:
+  cap_start: "2026-03-10"
+  cap_end:   "2026-03-16"
+  vendas_start: "2026-03-23"
+  vendas_end:   "2026-03-29"
+  notes: "Campanhas ML RUIM (11/03)"
+
+LF49:
+  cap_start: "2026-03-17"
+  cap_end:   "2026-03-23"
+  vendas_start: "2026-03-30"
+  vendas_end:   "2026-04-05"
+  notes: "Campanhas ML RUIM"
+
+LF50:
+  cap_start: "2026-03-24"
+  cap_end:   "2026-03-29"
+  vendas_start: "2026-04-01"
+  vendas_end:   "2026-04-06"
+  notes: "ML antigo - abre ao vivo"
+
+LF51:
+  cap_start: "2026-03-30"
+  cap_end:   "2026-04-06"
+  vendas_start: "2026-04-13"
+  vendas_end:   "2026-04-19"
+  notes: "Padrão Ouro"
+
+LF52:
+  cap_start: "2026-04-07"
+  cap_end:   "2026-04-12"
+  vendas_start: "2026-04-17"
+  vendas_end:   "2026-04-24"
+
+LF53:
+  cap_start: "2026-04-13"
+  cap_end:   "2026-04-20"
+  vendas_start: "2026-04-27"
+  vendas_end:   "2026-05-03"
+
+DEV20:
+  cap_start: "2026-04-21"
+  cap_end:   "2026-05-04"
+  vendas_start: "2026-05-11"
+  vendas_end:   "2026-05-17"

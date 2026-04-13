@@ -51,7 +51,8 @@ class ValidationReportGenerator:
         matched_adsets_faixa_a: Optional[pd.DataFrame] = None,
         faixa_a_instances_detail: Optional[pd.DataFrame] = None,
         ml_monitoring_metrics: Optional[Dict] = None,
-        cpa_historico_df: Optional[pd.DataFrame] = None
+        cpa_historico_df: Optional[pd.DataFrame] = None,
+        fbp_fbc_map: Optional[Dict] = None
     ) -> str:
         """
         Gera relatório Excel completo com 5-6 abas.
@@ -123,21 +124,21 @@ class ValidationReportGenerator:
 
         campanhas_df = None
         if 'comparison_group' in campaign_metrics.columns and not campaign_metrics.empty:
-            # Se configurado, agrupar "Otimização ML" com "Controle"
+            # Se configurado, agrupar "Otimização ML" com "Challenger"
             campaign_for_filtering = campaign_metrics.copy()
             merge_otimizacao = config_params.get('merge_otimizacao_ml_with_controle', False)
 
             if merge_otimizacao:
-                logger.info("    Agrupando 'Otimização ML' com 'Controle' (merge_otimizacao_ml_with_controle=true)")
-                # Substituir 'Otimização ML' por 'Controle' antes da agregação
+                logger.info("    Agrupando 'Otimização ML' com 'Challenger' (merge_otimizacao_ml_with_controle=true)")
+                # Substituir 'Otimização ML' por 'Challenger' antes da agregação
                 campaign_for_filtering.loc[
                     campaign_for_filtering['comparison_group'] == 'Otimização ML',
                     'comparison_group'
-                ] = 'Controle'
+                ] = 'Challenger'
 
-            # Filtrar apenas "Eventos ML" e "Controle" para consistência com adsets
+            # Filtrar apenas "Champion" e "Challenger" para consistência com adsets
             campaign_filtered = campaign_for_filtering[
-                campaign_for_filtering['comparison_group'].isin(['Eventos ML', 'Controle'])
+                campaign_for_filtering['comparison_group'].isin(['Champion', 'Challenger'])
             ].copy()
 
             # Agregar por comparison_group
@@ -270,7 +271,7 @@ class ValidationReportGenerator:
         # Aba FINAL: Detalhes das Conversões (movida para última posição)
         if sales_df is not None:
             logger.info("   Gerando aba: Detalhes das Conversões")
-            self._write_conversions_detail(writer, matched_df, sales_df, formats)
+            self._write_conversions_detail(writer, matched_df, sales_df, formats, fbp_fbc_map=fbp_fbc_map)
 
         # Salvar Excel
         writer.close()
@@ -724,7 +725,8 @@ class ValidationReportGenerator:
         writer: pd.ExcelWriter,
         matched_df: pd.DataFrame,
         sales_df: pd.DataFrame,
-        formats: Dict
+        formats: Dict,
+        fbp_fbc_map: Dict = None
     ):
         """
         Escreve aba 'Detalhes das Conversões' mostrando TODOS os compradores do período.
@@ -757,8 +759,16 @@ class ValidationReportGenerator:
                     'data_captura': conv.get('data_captura', ''),
                     'sale_date': conv.get('sale_date', ''),
                     'sale_origin': conv.get('sale_origin', ''),
-                    'match_method': conv.get('match_method', '')
+                    'match_method': conv.get('match_method', ''),
+                    'fbp': conv.get('fbp') or '',
+                    'fbc': conv.get('fbc') or '',
                 }
+                # Fallback: fbp_fbc_map para leads sem fbp no matched_df
+                if not tracking_data['fbp'] and fbp_fbc_map:
+                    email_key = str(conv.get('email', '')).strip().lower()
+                    entry = fbp_fbc_map.get(email_key, {})
+                    tracking_data['fbp'] = entry.get('fbp') or ''
+                    tracking_data['fbc'] = entry.get('fbc') or ''
 
                 # Indexar por email
                 email = str(conv.get('email', '')).strip().lower()
@@ -794,6 +804,8 @@ class ValidationReportGenerator:
                 'trackeado': 'Sim' if is_tracked else 'Não',
                 'email': sale.get('email', ''),
                 'telefone': sale.get('telefone', ''),
+                'fbp': tracking_data['fbp'] if is_tracked else '',
+                'fbc': tracking_data['fbc'] if is_tracked else '',
                 'sale_date': tracking_data['sale_date'] if is_tracked else sale.get('sale_date', ''),
                 'sale_value': sale.get('sale_value', 0),
                 'sale_origin': tracking_data['sale_origin'] if is_tracked else sale.get('origem', ''),
@@ -819,6 +831,8 @@ class ValidationReportGenerator:
             'trackeado',
             'email',
             'telefone',
+            'fbp',
+            'fbc',
             'campaign_id',
             'campaign',
             'comparison_group',
@@ -841,6 +855,8 @@ class ValidationReportGenerator:
             'Trackeado',
             'E-mail Comprador',
             'Telefone',
+            'FBP',
+            'FBC',
             'ID Campanha',
             'Nome Campanha',
             'Grupo',
@@ -858,24 +874,28 @@ class ValidationReportGenerator:
             worksheet.write(row_num, 0, row['trackeado'], formats['text'])
             worksheet.write(row_num, 1, row['email'] if row['email'] else '', formats['text'])
             worksheet.write(row_num, 2, row['telefone'] if row['telefone'] else '', formats['text'])
-            worksheet.write(row_num, 3, row['campaign_id'] if row['campaign_id'] else '', formats['text'])
-            worksheet.write(row_num, 4, row['campaign'] if row['campaign'] else '', formats['text'])
-            worksheet.write(row_num, 5, row['comparison_group'] if row['comparison_group'] else '', formats['text'])
-            worksheet.write(row_num, 6, str(row['data_captura']) if row['data_captura'] else '', formats['text'])
-            worksheet.write(row_num, 7, str(row['sale_date']) if row['sale_date'] else '', formats['text'])
-            worksheet.write(row_num, 8, row['sale_value'] if row['sale_value'] else 0, formats['currency'])
-            worksheet.write(row_num, 9, row['sale_origin'] if row['sale_origin'] else '', formats['text'])
+            worksheet.write(row_num, 3, str(row['fbp']) if pd.notna(row['fbp']) and row['fbp'] else '', formats['text'])
+            worksheet.write(row_num, 4, str(row['fbc']) if pd.notna(row['fbc']) and row['fbc'] else '', formats['text'])
+            worksheet.write(row_num, 5, row['campaign_id'] if row['campaign_id'] else '', formats['text'])
+            worksheet.write(row_num, 6, row['campaign'] if row['campaign'] else '', formats['text'])
+            worksheet.write(row_num, 7, row['comparison_group'] if row['comparison_group'] else '', formats['text'])
+            worksheet.write(row_num, 8, str(row['data_captura']) if row['data_captura'] else '', formats['text'])
+            worksheet.write(row_num, 9, str(row['sale_date']) if row['sale_date'] else '', formats['text'])
+            worksheet.write(row_num, 10, row['sale_value'] if row['sale_value'] else 0, formats['currency'])
+            worksheet.write(row_num, 11, row['sale_origin'] if row['sale_origin'] else '', formats['text'])
 
         # Ajustar larguras
         worksheet.set_column(0, 0, 12)  # Trackeado
         worksheet.set_column(1, 1, 30)  # E-mail
         worksheet.set_column(2, 2, 18)  # Telefone
-        worksheet.set_column(3, 3, 20)  # ID Campanha
-        worksheet.set_column(4, 4, 50)  # Nome Campanha
-        worksheet.set_column(5, 5, 12)  # Tipo ML
-        worksheet.set_column(6, 7, 18)  # Datas
-        worksheet.set_column(8, 8, 15)  # Valor
-        worksheet.set_column(9, 9, 15)  # Fonte
+        worksheet.set_column(3, 3, 40)  # FBP
+        worksheet.set_column(4, 4, 30)  # FBC
+        worksheet.set_column(5, 5, 20)  # ID Campanha
+        worksheet.set_column(6, 6, 50)  # Nome Campanha
+        worksheet.set_column(7, 7, 12)  # Grupo
+        worksheet.set_column(8, 9, 18)  # Datas
+        worksheet.set_column(10, 10, 15)  # Valor
+        worksheet.set_column(11, 11, 15)  # Fonte
 
     def _write_comparacao_ml(
         self,
@@ -895,7 +915,7 @@ class ValidationReportGenerator:
         """
         Escreve aba 'Comparação ML' com 4 tabelas consolidadas:
         1. Comparação por Campanhas (todas)
-        2. Comparação por Adsets (todos - Eventos ML vs Controle)
+        2. Comparação por Adsets (todos - Eventos Champion vs Challenger)
         3. Comparação por Adsets Matched (apenas matched pairs)
         4. Comparação por Ads MATCHED em Adsets Matched (interseção mais rigorosa)
 
@@ -921,11 +941,11 @@ class ValidationReportGenerator:
 
         current_row += 2  # Espaçamento
 
-        # TABELA 2: Comparação por TODOS os Adsets (Eventos ML vs Controle)
+        # TABELA 2: Comparação por TODOS os Adsets (Eventos Champion vs Challenger)
         # COMENTADO: Tabela redundante com a de campanhas acima
         # worksheet.write(current_row, 0, ' COMPARAÇÃO POR ADSETS (All vs All)', formats['title'])
         # current_row += 1
-        # worksheet.write(current_row, 0, 'Todos os adsets das campanhas Eventos ML vs Controle (sem filtros)', formats['subtitle'])
+        # worksheet.write(current_row, 0, 'Todos os adsets das campanhas Eventos Champion vs Challenger (sem filtros)', formats['subtitle'])
         # current_row += 2
         #
         # if all_adsets_df is not None and not all_adsets_df.empty:
@@ -1019,7 +1039,7 @@ class ValidationReportGenerator:
         # Preparar DataFrame para _write_consolidated_table
         # Filtrar Eventos ML (TODAS as campanhas Eventos ML, independente de ter Faixa A)
         eventos_ml = campaign_metrics[
-            campaign_metrics['comparison_group'] == 'Eventos ML'
+            campaign_metrics['comparison_group'] == 'Champion'
         ].copy()
 
         # Faixa A: campanhas com Faixa A > 0
@@ -1030,7 +1050,7 @@ class ValidationReportGenerator:
 
         # Adicionar coluna 'Grupo' com nomes personalizados
         if not eventos_ml.empty:
-            eventos_ml['Grupo'] = 'Eventos ML'
+            eventos_ml['Grupo'] = 'Champion'
         if not faixa_a.empty:
             faixa_a['Grupo'] = 'Faixa A (Legado)'
 
@@ -1111,7 +1131,7 @@ class ValidationReportGenerator:
         group_col = 'Grupo' if 'Grupo' in df.columns else 'comparison_group'
 
         # Filtrar apenas Eventos ML e Faixa A (Legado)
-        df_filtered = df[df[group_col].isin(['Eventos ML', 'Faixa A (Legado)'])].copy()
+        df_filtered = df[df[group_col].isin(['Champion', 'Faixa A (Legado)'])].copy()
 
         if df_filtered.empty:
             worksheet.write(start_row, 0, 'Nenhum dado encontrado', formats['text'])
@@ -1157,7 +1177,7 @@ class ValidationReportGenerator:
         aggregated = aggregated.replace([float('inf'), float('-inf')], 0)
 
         # Extrair dados de Eventos ML e Faixa A
-        ml_data = aggregated[aggregated[group_col] == 'Eventos ML']
+        ml_data = aggregated[aggregated[group_col] == 'Champion']
         faixa_a_data = aggregated[aggregated[group_col] == 'Faixa A (Legado)']
 
         if ml_data.empty and faixa_a_data.empty:
@@ -1191,7 +1211,7 @@ class ValidationReportGenerator:
         row = start_row
 
         # Cabeçalhos
-        headers = ['Métrica', 'Eventos ML', 'Faixa A (Legado)', 'Diferença %']
+        headers = ['Métrica', 'Champion', 'Faixa A (Legado)', 'Diferença %']
         for col, header in enumerate(headers):
             worksheet.write(row, col, header, formats['header'])
         row += 1
@@ -1232,7 +1252,7 @@ class ValidationReportGenerator:
         row += 1
         if ml_metrics['roas'] > faixa_a_metrics['roas']:
             diff_pct = calc_diff_pct(ml_metrics['roas'], faixa_a_metrics['roas'])
-            winner_text = f" VENCEDOR: Eventos ML (ROAS {diff_pct:.1f}% maior)"
+            winner_text = f" VENCEDOR: Champion (ROAS {diff_pct:.1f}% maior)"
             worksheet.write(row, 0, winner_text, formats['header_green'])
         elif faixa_a_metrics['roas'] > ml_metrics['roas']:
             diff_pct = abs(calc_diff_pct(ml_metrics['roas'], faixa_a_metrics['roas']))
@@ -1271,14 +1291,14 @@ class ValidationReportGenerator:
             return start_row + 1
 
         # Filtrar apenas Eventos ML e Faixa A
-        df_filtered = df[df['comparison_group'].isin(['Eventos ML', 'Faixa A'])].copy()
+        df_filtered = df[df['comparison_group'].isin(['Champion', 'Faixa A'])].copy()
 
         if df_filtered.empty:
             worksheet.write(start_row, 0, 'Nenhum dado encontrado', formats['text'])
             return start_row + 1
 
         # Extrair dados de Eventos ML e Faixa A
-        ml_data = df_filtered[df_filtered['comparison_group'] == 'Eventos ML']
+        ml_data = df_filtered[df_filtered['comparison_group'] == 'Champion']
         faixa_a_data = df_filtered[df_filtered['comparison_group'] == 'Faixa A']
 
         if ml_data.empty and faixa_a_data.empty:
@@ -1312,7 +1332,7 @@ class ValidationReportGenerator:
         row = start_row
 
         # Cabeçalhos
-        headers = ['Métrica', 'Eventos ML', 'Faixa A', 'Diferença %']
+        headers = ['Métrica', 'Champion', 'Faixa A', 'Diferença %']
         for col, header in enumerate(headers):
             worksheet.write(row, col, header, formats['header'])
         row += 1
@@ -1353,7 +1373,7 @@ class ValidationReportGenerator:
         row += 1
         if ml_metrics['roas'] > faixa_a_metrics['roas']:
             diff_pct = calc_diff_pct(ml_metrics['roas'], faixa_a_metrics['roas'])
-            winner_text = f" VENCEDOR: Eventos ML (ROAS {diff_pct:.1f}% maior)"
+            winner_text = f" VENCEDOR: Champion (ROAS {diff_pct:.1f}% maior)"
             worksheet.write(row, 0, winner_text, formats['header_green'])
         elif faixa_a_metrics['roas'] > ml_metrics['roas']:
             diff_pct = abs(calc_diff_pct(ml_metrics['roas'], faixa_a_metrics['roas']))
@@ -1390,7 +1410,7 @@ class ValidationReportGenerator:
         current_row += 2
 
         # Separar por grupo
-        eventos_ml_instances = instances_df[instances_df['comparison_group'] == 'Eventos ML'].copy()
+        eventos_ml_instances = instances_df[instances_df['comparison_group'] == 'Champion'].copy()
         faixa_a_instances = instances_df[instances_df['comparison_group'] == 'Faixa A'].copy()
 
         # Ordenar por adset_name e campaign_name
@@ -1493,7 +1513,7 @@ class ValidationReportGenerator:
 
             # Cabeçalhos
             worksheet.write(current_row, 0, 'Métrica', formats['header'])
-            worksheet.write(current_row, 1, 'Eventos ML', formats['header_green'])
+            worksheet.write(current_row, 1, 'Champion', formats['header_green'])
             worksheet.write(current_row, 2, 'Faixa A', formats['header'])
             worksheet.write(current_row, 3, 'Diferença', formats['header'])
             current_row += 1
@@ -1526,7 +1546,7 @@ class ValidationReportGenerator:
             current_row += 1
             if total_ml_roas > total_faixa_roas:
                 diff = ((total_ml_roas - total_faixa_roas) / total_faixa_roas * 100) if total_faixa_roas > 0 else 0
-                worksheet.write(current_row, 0, f' VENCEDOR: Eventos ML (ROAS {diff:.1f}% maior)', formats['header_green'])
+                worksheet.write(current_row, 0, f' VENCEDOR: Champion (ROAS {diff:.1f}% maior)', formats['header_green'])
             elif total_faixa_roas > total_ml_roas:
                 diff = ((total_faixa_roas - total_ml_roas) / total_ml_roas * 100) if total_ml_roas > 0 else 0
                 worksheet.write(current_row, 0, f' VENCEDOR: Faixa A (ROAS {diff:.1f}% maior)', formats['header_red'])
@@ -1554,7 +1574,7 @@ class ValidationReportGenerator:
         Escreve painel de performance em 3 seções:
         1. KPI Cards  — totais do lançamento (5 cards × 2 linhas)
         2. Funil      — fluxo Leads → Vendas → Receita com breakdown ML/Controle
-        3. Eficiência — comparação de métricas relativas ML vs Controle
+        3. Eficiência — comparação de métricas relativas Champion vs Challenger
 
         Args:
             worksheet: Worksheet do Excel
@@ -1579,7 +1599,7 @@ class ValidationReportGenerator:
             worksheet.write(start_row, 0, 'Coluna de grupo não encontrada', formats['text'])
             return start_row + 1
 
-        df_filtered = df[df[group_col].isin(['Eventos ML', 'Controle'])].copy()
+        df_filtered = df[df[group_col].isin(['Champion', 'Challenger'])].copy()
         if df_filtered.empty:
             worksheet.write(start_row, 0, 'Nenhum dado de Eventos ML ou Controle encontrado', formats['text'])
             return start_row + 1
@@ -1633,8 +1653,8 @@ class ValidationReportGenerator:
         aggregated['ROAS'] = aggregated['Receita Total'] / aggregated['Valor gasto']
         aggregated = aggregated.fillna(0).replace([float('inf'), float('-inf')], 0)
 
-        ml_data = aggregated[aggregated[group_col] == 'Eventos ML']
-        ctrl_data = aggregated[aggregated[group_col] == 'Controle']
+        ml_data = aggregated[aggregated[group_col] == 'Champion']
+        ctrl_data = aggregated[aggregated[group_col] == 'Challenger']
 
         if ml_data.empty:
             worksheet.write(start_row, 0, 'Dados incompletos (falta ML)', formats['text'])
@@ -1734,9 +1754,9 @@ class ValidationReportGenerator:
 
         # Cabeçalho
         worksheet.write(row, 0, 'Métrica', formats['header'])
-        worksheet.write(row, 1, 'Eventos ML', formats['header_green'])
-        worksheet.write(row, 2, 'Controle' if not no_control else '—', formats['header_red'] if not no_control else formats['header'])
-        worksheet.write(row, 3, 'Δ ML vs Controle', formats['header'])
+        worksheet.write(row, 1, 'Champion', formats['header_green'])
+        worksheet.write(row, 2, 'Challenger' if not no_control else '—', formats['header_red'] if not no_control else formats['header'])
+        worksheet.write(row, 3, 'Δ ML vs Challenger', formats['header'])
         row += 1
 
         # Colunas: métrica | ml_val | ctrl_val | fmt | higher_better | show_delta
@@ -1784,13 +1804,13 @@ class ValidationReportGenerator:
                                   '* Sem campanhas Controle neste período',
                                   formats['warning'])
         elif ctrl_roas == 0:
-            winner_text = f'Controle sem conversões — ROAS ML: {ml_roas:.2f}x (Controle: 0,00x)'
+            winner_text = f'Challenger sem conversões — ROAS ML: {ml_roas:.2f}x (Controle: 0,00x)'
             worksheet.merge_range(row, 0, row, NC_COMP - 1, winner_text, formats['warning'])
         elif d_roas is not None and d_roas > 0:
-            winner_text = f'VENCEDOR: Eventos ML — ROAS {d_roas * 100:.1f}% maior que Controle'
+            winner_text = f'VENCEDOR: Champion — ROAS {d_roas * 100:.1f}% maior que Controle'
             worksheet.merge_range(row, 0, row, NC_COMP - 1, winner_text, formats['header_green'])
         elif d_roas is not None and d_roas < 0:
-            winner_text = f'VENCEDOR: Controle — ROAS {abs(d_roas) * 100:.1f}% maior que ML'
+            winner_text = f'VENCEDOR: Challenger — ROAS {abs(d_roas) * 100:.1f}% maior que ML'
             worksheet.merge_range(row, 0, row, NC_COMP - 1, winner_text, formats['header_red'])
         else:
             worksheet.merge_range(row, 0, row, NC_COMP - 1, 'Empate técnico em ROAS', formats['header'])
@@ -1863,10 +1883,10 @@ class ValidationReportGenerator:
         formats: Dict,
         start_row: int = 3
     ):
-        """Escreve tabela de comparação justa (Eventos ML vs Controle)."""
+        """Escreve tabela de comparação justa (Eventos Champion vs Challenger)."""
         # Filtrar apenas Eventos ML e Controle
-        ml_data = comparison_group_metrics[comparison_group_metrics['comparison_group'] == 'Eventos ML']
-        fc_data = comparison_group_metrics[comparison_group_metrics['comparison_group'] == 'Controle']
+        ml_data = comparison_group_metrics[comparison_group_metrics['comparison_group'] == 'Champion']
+        fc_data = comparison_group_metrics[comparison_group_metrics['comparison_group'] == 'Challenger']
 
         if ml_data.empty or fc_data.empty:
             worksheet.write(start_row, 0, 'Dados insuficientes para comparação justa', formats['subtitle'])
@@ -1885,8 +1905,8 @@ class ValidationReportGenerator:
         # Headers
         row = start_row
         worksheet.write(row, 0, 'Métrica', formats['header'])
-        worksheet.write(row, 1, 'Eventos ML', formats['header_green'])
-        worksheet.write(row, 2, 'Controle', formats['header_red'])
+        worksheet.write(row, 1, 'Champion', formats['header_green'])
+        worksheet.write(row, 2, 'Challenger', formats['header_red'])
         worksheet.write(row, 3, 'Diferença %', formats['header'])
         row += 1
 
@@ -1923,11 +1943,11 @@ class ValidationReportGenerator:
 
         if ml_roas > fc_roas:
             diff_pct = calc_diff_pct(ml_roas, fc_roas)
-            winner_text = f" VENCEDOR: Eventos ML (ROAS {diff_pct:.1f}% maior)"
+            winner_text = f" VENCEDOR: Champion (ROAS {diff_pct:.1f}% maior)"
             worksheet.write(row, 0, winner_text, formats['header_green'])
         elif fc_roas > ml_roas:
             diff_pct = abs(calc_diff_pct(ml_roas, fc_roas))
-            winner_text = f" VENCEDOR: Controle (ROAS {diff_pct:.1f}% maior)"
+            winner_text = f" VENCEDOR: Challenger (ROAS {diff_pct:.1f}% maior)"
             worksheet.write(row, 0, winner_text, formats['header_red'])
         else:
             worksheet.write(row, 0, " Empate técnico em ROAS", formats['header'])
@@ -2047,7 +2067,7 @@ class ValidationReportGenerator:
         )
 
         if has_data:
-            ml_df = campaign_metrics[campaign_metrics['comparison_group'] == 'Eventos ML'].copy()
+            ml_df = campaign_metrics[campaign_metrics['comparison_group'] == 'Champion'].copy()
 
             total_spend   = ml_df['spend'].sum()
             total_leads   = ml_df['leads'].sum() if 'leads' in ml_df.columns else 0
@@ -2113,7 +2133,7 @@ class ValidationReportGenerator:
             and 'comparison_group' in campaign_metrics.columns
         )
         if has_ml:
-            ml_df = campaign_metrics[campaign_metrics['comparison_group'] == 'Eventos ML'].copy()
+            ml_df = campaign_metrics[campaign_metrics['comparison_group'] == 'Champion'].copy()
             if not ml_df.empty:
                 ml_df['_conv_reais'] = ml_df['conversions'].apply(
                     lambda c: c / tracking_rate if tracking_rate > 0 else float(c)
@@ -2237,7 +2257,7 @@ class ValidationReportGenerator:
         # Filtrar campanhas ML (Eventos ML + Otimização ML) e Controle
         # Incluir AMBOS os tipos de ML para comparação completa
         fair_campaigns = campaign_metrics[
-            campaign_metrics['comparison_group'].isin(['Eventos ML', 'Otimização ML', 'Controle'])
+            campaign_metrics['comparison_group'].isin(['Champion', 'Otimização ML', 'Challenger'])
         ].sort_values(['comparison_group', 'campaign'])
 
         # Escrever linhas das campanhas
@@ -2559,7 +2579,7 @@ class ValidationReportGenerator:
 
         # Título
         worksheet.write(0, 0, ' COMPARAÇÃO DETALHADA - ADSETS', formats['title'])
-        worksheet.write(1, 0, 'Comparação lado-a-lado (ML vs Controle)', formats['subtitle'])
+        worksheet.write(1, 0, 'Comparação lado-a-lado (Champion vs Challenger)', formats['subtitle'])
 
         # Cabeçalhos
         row = 3

@@ -5,6 +5,9 @@ Script CLI para Validação de Performance do Modelo de ML de Lead Scoring.
 Compara campanhas COM ML vs SEM ML e valida performance por decil D1-D10.
 
 Uso:
+    # Forma mais simples — datas automáticas de configs/launches.yaml
+    python scripts/validate_ml_performance.py --lf LF49
+
     python scripts/validate_ml_performance.py \
         --periodo periodo_1 \
         --account-id act_XXXXXXXXX
@@ -217,6 +220,9 @@ def parse_args():
         epilog="""
 Exemplos de uso:
 
+  # Usar lançamento do launches.yaml (recomendado)
+  python scripts/validate_ml_performance.py --lf LF49
+
   # Usar período pré-configurado
   python scripts/validate_ml_performance.py --periodo periodo_1 --account-id act_123456789
 
@@ -237,6 +243,12 @@ Exemplos de uso:
 
     # Período
     period_group = parser.add_mutually_exclusive_group()
+    period_group.add_argument(
+        '--lf',
+        type=str,
+        metavar='LFxx',
+        help='Identificador do lançamento (ex: LF46, DEV19). Carrega todas as datas de configs/launches.yaml automaticamente.'
+    )
     period_group.add_argument(
         '--periodo',
         type=str,
@@ -326,8 +338,9 @@ Exemplos de uso:
     parser.add_argument(
         '--lf-name',
         type=str,
-        required=True,
-        help='Identificador do lançamento (ex: LF49, LF50, DEV19). Usado como prefixo do arquivo de saída.'
+        required=False,
+        default=None,
+        help='Identificador do lançamento (ex: LF49, LF50, DEV19). Usado como prefixo do arquivo de saída. Inferido automaticamente quando --lf é especificado.'
     )
 
     # Configurações
@@ -430,8 +443,10 @@ Exemplos de uso:
     if args.end_date and not args.start_date:
         parser.error("--end-date requer --start-date")
 
-    if not args.periodo and not args.start_date and not args.auto_calculate_dates:
-        parser.error("É necessário especificar --periodo OU --start-date/--end-date (ou usar --auto-calculate-dates)")
+    if not args.lf and not args.periodo and not args.start_date and not args.auto_calculate_dates:
+        parser.error("É necessário especificar --lf LFxx OU --periodo OU --start-date/--end-date (ou usar --auto-calculate-dates)")
+    if not args.lf and not args.lf_name:
+        parser.error("--lf-name é obrigatório quando --lf não é especificado")
 
     return args
 
@@ -681,7 +696,7 @@ def _build_cpa_rows(
     if 'comparison_group' not in campaign_metrics.columns:
         return pd.DataFrame()
 
-    ml_df = campaign_metrics[campaign_metrics['comparison_group'] == 'Eventos ML']
+    ml_df = campaign_metrics[campaign_metrics['comparison_group'] == 'Champion']
     if ml_df.empty:
         return pd.DataFrame()
 
@@ -765,6 +780,28 @@ def main():
 
     # 1. Parse argumentos
     args = parse_args()
+
+    # 1.1. Carregar datas de launches.yaml quando --lf for especificado
+    if args.lf:
+        _launches_path = Path(__file__).parent.parent.parent / 'configs' / 'launches.yaml'
+        if not _launches_path.exists():
+            logger.error(f" configs/launches.yaml não encontrado em {_launches_path}")
+            sys.exit(1)
+        with open(_launches_path, 'r') as _f:
+            _launches = yaml.safe_load(_f)
+        if args.lf not in _launches:
+            logger.error(f" Lançamento '{args.lf}' não encontrado em launches.yaml. Disponíveis: {', '.join(_launches.keys())}")
+            sys.exit(1)
+        _lf_cfg = _launches[args.lf]
+        args.start_date = _lf_cfg['cap_start']
+        args.end_date   = _lf_cfg['cap_end']
+        args.sales_start_date = _lf_cfg['vendas_start']
+        args.sales_end_date   = _lf_cfg['vendas_end']
+        if not args.lf_name:
+            args.lf_name = args.lf
+        logger.info(f" Lançamento {args.lf} carregado de launches.yaml:")
+        logger.info(f"   Captação: {args.start_date} a {args.end_date}")
+        logger.info(f"   Vendas:   {args.sales_start_date} a {args.sales_end_date}")
 
     # 1.2. Calcular datas automaticamente se solicitado
     if args.auto_calculate_dates:
@@ -914,6 +951,7 @@ def main():
     print(flush=True)
 
     # Leads - PADRÃO: Google Sheets (produção), FALLBACK: CSV se --leads-path fornecido
+    fbp_fbc_map = {}
     if args.leads_path:
         # Modo CSV (legacy)
         logger.info(f"    Usando CSV: {args.leads_path}")
@@ -1075,6 +1113,26 @@ def main():
                         start_date=railway_start,
                         end_date_excl=end_excl,
                     )
+                    # fbp/fbc na tabela Lead são sempre NULL — buscamos de leads_capi
+                    try:
+                        capi_fbp_rows = railway_conn.run(
+                            """
+                            SELECT LOWER(email), fbp, fbc
+                            FROM leads_capi
+                            WHERE created_at >= :start_date
+                              AND created_at <  :end_date_excl
+                              AND email IS NOT NULL
+                              AND (fbp IS NOT NULL OR fbc IS NOT NULL)
+                            """,
+                            start_date=railway_start,
+                            end_date_excl=end_excl,
+                        )
+                        for _email, _fbp, _fbc in capi_fbp_rows:
+                            if _email:
+                                fbp_fbc_map[_email.strip()] = {'fbp': _fbp, 'fbc': _fbc}
+                        logger.info(f"    Railway leads_capi: {len(fbp_fbc_map)} emails com fbp/fbc")
+                    except Exception as _ce:
+                        logger.warning(f"    Aviso: não foi possível ler leads_capi do Railway: {_ce}")
                     railway_conn.close()
                     railway_leads = [
                         {
@@ -1309,6 +1367,14 @@ def main():
         else:
             lead_source_stats['xlsx_leads_extras'] = 0
 
+        # Enriquecer leads_df com fbp/fbc do Railway para todos os leads
+        if fbp_fbc_map:
+            leads_df['fbp'] = leads_df['email'].map({k: v.get('fbp') for k, v in fbp_fbc_map.items()})
+            leads_df['fbc'] = leads_df['email'].map({k: v.get('fbc') for k, v in fbp_fbc_map.items()})
+        else:
+            leads_df['fbp'] = None
+            leads_df['fbc'] = None
+
     # Vendas
     sales_loader = SalesDataLoader()
 
@@ -1409,7 +1475,7 @@ def main():
         asaas_api_start=asaas_start,
         asaas_api_end=asaas_end,
         asaas_product_value=config.get('ticket_contracted'),  # None = usar valor real da API Asaas
-        asaas_customer_created_from=config.get('asaas_customer_since'),  # Data de início do Asaas para este cliente (fixo por cliente, não por LF)
+        asaas_customer_created_from=start_date,  # cap_start — conta para mais, evita perder compradores reais
         report_type=args.report_type,
         include_canceled=include_canceled
     )
@@ -1561,7 +1627,7 @@ def main():
     comparison_group_map_15 = {}  # Mapa com IDs de 15 dígitos
 
     if 'ml_type' in leads_df.columns and not campaigns_df.empty:
-        # Identificar campanhas ML vs Controle usando classificação correta
+        # Identificar campanhas Champion vs Challenger usando classificação correta
         from src.validation.campaign_classifier import classify_campaign
 
         # Classificar cada campanha
@@ -1653,9 +1719,9 @@ def main():
 
                 # Fallback para ml_type
                 if row.get('ml_type') == 'SEM_ML':
-                    return 'Controle'
+                    return 'Challenger'
                 elif row.get('ml_type') == 'COM_ML':
-                    return 'Eventos ML'  # Apenas se não conseguimos o ID
+                    return 'Champion'  # Apenas se não conseguimos o ID
                 else:
                     return 'Outro'
 
@@ -1669,8 +1735,8 @@ def main():
             # Fallback: usar mapeamento simples
             logger.warning("    Não foi possível criar mapeamento refinado, usando simples")
             leads_df['comparison_group'] = leads_df['ml_type'].map({
-                'COM_ML': 'Eventos ML',
-                'SEM_ML': 'Controle'
+                'COM_ML': 'Champion',
+                'SEM_ML': 'Challenger'
             }).fillna('Outro')
     else:
         logger.warning("    Coluna ml_type não encontrada, pulando criação de grupos")
@@ -2099,11 +2165,11 @@ def main():
                         matching_campaigns = campaigns_df[campaigns_df['campaign_id'].astype(str).str.startswith(cid_15)]
                         if not matching_campaigns.empty:
                             full_id = matching_campaigns.iloc[0]['campaign_id']
-                            if group == 'Eventos ML':
+                            if group == 'Champion':
                                 eventos_ml_campaign_ids.append(full_id)
                             elif group == 'Otimização ML':
                                 otimizacao_ml_campaign_ids.append(full_id)
-                            elif group == 'Controle':
+                            elif group == 'Challenger':
                                 control_campaign_ids.append(full_id)
 
                     logger.info(f"    Campanhas por grupo:")
@@ -2114,15 +2180,15 @@ def main():
                     # Criar ml_type_map para compatibilidade (COM_ML para Eventos e Otimização)
                     ml_type_map = {}
                     for cid_15, group in comparison_group_map.items():
-                        if group in ['Eventos ML', 'Otimização ML']:
+                        if group in ['Champion', 'Otimização ML']:
                             ml_type_map[cid_15] = 'COM_ML'
-                        elif group == 'Controle':
+                        elif group == 'Challenger':
                             ml_type_map[cid_15] = 'SEM_ML'
                 else:
                     ml_type_map = {}
                     logger.warning("    comparison_group_map vazio, não será possível fazer comparação")
 
-                # 1. Comparação de TODOS os adsets (Eventos ML vs Controle)
+                # 1. Comparação de TODOS os adsets (Eventos Champion vs Challenger)
                 all_adsets_comparison = compare_all_adsets_performance(
                     adsets_df=adsets_df,
                     matched_df=matched_df,
@@ -2133,7 +2199,7 @@ def main():
                 )
                 logger.info(f"    Comparação de todos adsets concluída")
 
-                # 2. Identificar matched adset pairs (Eventos ML vs Controle apenas)
+                # 2. Identificar matched adset pairs (Eventos Champion vs Challenger apenas)
                 # IMPORTANTE: Usar apenas eventos_ml_campaign_ids (excluir Otimização ML)
                 matched_adsets, matched_adsets_df = identify_matched_adset_pairs(
                     adsets_df=adsets_df,
@@ -2144,7 +2210,7 @@ def main():
                 )
 
                 if matched_adsets:
-                    logger.info(f"    {len(matched_adsets)} adsets matched identificados (Eventos ML vs Controle)")
+                    logger.info(f"    {len(matched_adsets)} adsets matched identificados (Eventos Champion vs Challenger)")
 
                     # IMPORTANTE: Usar matched_adsets_df retornado por identify_matched_adset_pairs
                     # Este DataFrame já tem a coluna 'leads' criada a partir de 'leads_standard'
@@ -2417,7 +2483,8 @@ def main():
         matched_adsets_faixa_a=matched_adsets_faixa_a,
         faixa_a_instances_detail=faixa_a_instances_detail,
         ml_monitoring_metrics=ml_monitoring_metrics,
-        cpa_historico_df=cpa_historico_df if not cpa_historico_df.empty else None
+        cpa_historico_df=cpa_historico_df if not cpa_historico_df.empty else None,
+        fbp_fbc_map=fbp_fbc_map
     )
     print(f"    Excel salvo: {excel_path}", flush=True)
     print(flush=True)

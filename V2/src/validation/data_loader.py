@@ -1162,11 +1162,9 @@ class SalesDataLoader:
         df_norm = pd.DataFrame(rows)
         df_norm = df_norm[df_norm['sale_date'].notna()].copy()
 
-        # Deduplicar por email (manter primeira compra)
-        before = len(df_norm)
-        df_norm = df_norm.sort_values('sale_date').drop_duplicates(subset=['email'], keep='first')
-        if before != len(df_norm):
-            logger.info(f"   Deduplicação Hotmart: {before - len(df_norm)} removidas ({len(df_norm)} únicas)")
+        # Hotmart: não deduplicar por email — a mesma pessoa pode ter compras
+        # legítimas separadas (produto principal + upsell). Cada transação tem
+        # valor real distinto e deve ser contada individualmente.
 
         logger.info(f"    {len(df_norm)} vendas Hotmart carregadas e normalizadas")
 
@@ -1219,21 +1217,15 @@ class SalesDataLoader:
         # O DataFrame da API já vem com as colunas normalizadas
         # Mas precisamos normalizar para o formato esperado pelo pipeline
 
-        # Filtrar vendas por status
+        # Filtrar vendas por status — sempre apenas Aprovadas.
+        # "Cancelada" = pedido cancelado, nunca é receita real.
+        # O parâmetro include_canceled é preservado para compatibilidade mas não altera este filtro.
         if 'status' in df_raw.columns:
             before = len(df_raw)
-            if include_canceled:
-                # Fechamento: incluir Aprovadas E Canceladas
-                df_raw = df_raw[df_raw['status'].isin(['Aprovada', 'Cancelada'])].copy()
-                after = len(df_raw)
-                if before != after:
-                    logger.info(f"   Filtradas {after} vendas (Aprovadas + Canceladas) | Excluídas {before - after} com outros status")
-            else:
-                # Pós-devoluções: apenas Aprovadas
-                df_raw = df_raw[df_raw['status'] == 'Aprovada'].copy()
-                after = len(df_raw)
-                if before != after:
-                    logger.info(f"   Filtradas {after} vendas aprovadas (excluídas {before - after} não aprovadas)")
+            df_raw = df_raw[df_raw['status'] == 'Aprovada'].copy()
+            after = len(df_raw)
+            if before != after:
+                logger.info(f"   Guru: {after} vendas aprovadas (excluídas {before - after} canceladas/outros status)")
 
         # Normalizar colunas para o formato do pipeline
         df_norm = pd.DataFrame()
@@ -1316,15 +1308,20 @@ class SalesDataLoader:
 
     def load_asaas_sales(self, start_date: str, end_date: str,
                          product_value: float = None,
-                         customer_created_from: str = None) -> pd.DataFrame:
+                         customer_created_from: str = None,
+                         customer_created_until: str = None) -> pd.DataFrame:
         """
         Carrega vendas da API do Asaas no período (com cache parquet).
 
         Args:
-            start_date: Data inicial (YYYY-MM-DD) — filtra por dateCreated (data de criação da cobrança)
+            start_date: Data inicial (YYYY-MM-DD) — filtra por clientPaymentDate
             end_date: Data final (YYYY-MM-DD)
             product_value: Valor total do produto para entradas sem parcelamento registrado.
                            Ignorado se cache já existir.
+            customer_created_from: Data mínima de customer.dateCreated (= cap_start do LF)
+            customer_created_until: Data máxima de customer.dateCreated (= cap_end do LF).
+                           Quando fornecido, exclui compradores de LFs adjacentes que pagaram
+                           nesta semana mas se cadastraram fora da janela de captação deste LF.
 
         Returns:
             DataFrame normalizado com origem='asaas'
@@ -1339,6 +1336,7 @@ class SalesDataLoader:
         df = extractor.generate_report(
             start_date=start_date, end_date=end_date, product_value=product_value,
             customer_created_from=customer_created_from,
+            customer_created_until=customer_created_until,
         )
         # Remover colunas internas de debug antes de salvar
         debug_cols = [c for c in df.columns if c.startswith('_')]
@@ -1362,6 +1360,7 @@ class SalesDataLoader:
                      asaas_api_start: str = None, asaas_api_end: str = None,
                      asaas_product_value: float = None,
                      asaas_customer_created_from: str = None,
+                     asaas_customer_created_until: str = None,
                      report_type: str = 'fechamento', include_canceled: bool = False) -> pd.DataFrame:
         """
         Combina vendas da Guru, TMB, HotPay, Hotmart e Asaas em um único DataFrame.
@@ -1406,6 +1405,7 @@ class SalesDataLoader:
                 asaas_api_start, asaas_api_end,
                 product_value=asaas_product_value,
                 customer_created_from=asaas_customer_created_from,
+                customer_created_until=asaas_customer_created_until,
             )
 
         # Combinar DataFrames

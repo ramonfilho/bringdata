@@ -524,7 +524,7 @@ class CampaignMetricsCalculator:
 
         # DEBUG: Verificar se comparison_group já existe no matched_df
         if 'comparison_group' in matched_df.columns:
-            eventos_ml_matched = matched_df[matched_df['comparison_group'] == 'Eventos ML']
+            eventos_ml_matched = matched_df[matched_df['comparison_group'] == 'Champion']
             total_leads_eventos_ml_matched = len(eventos_ml_matched)
             total_vendas_eventos_ml_matched = eventos_ml_matched['converted'].sum()
             logger.info(f"    DEBUG - Eventos ML no matched_df: {total_leads_eventos_ml_matched} leads, {int(total_vendas_eventos_ml_matched)} vendas")
@@ -774,7 +774,7 @@ class CampaignMetricsCalculator:
 
         # DEBUG: Verificar Eventos ML no campaign_stats após filtro
         if 'comparison_group' in campaign_stats.columns:
-            eventos_ml_stats = campaign_stats[campaign_stats['comparison_group'] == 'Eventos ML']
+            eventos_ml_stats = campaign_stats[campaign_stats['comparison_group'] == 'Champion']
             if len(eventos_ml_stats) > 0:
                 total_leads_eventos_ml_stats = eventos_ml_stats['leads'].sum()
                 total_vendas_eventos_ml_stats = eventos_ml_stats['conversions'].sum()
@@ -1790,7 +1790,7 @@ def calculate_comparison_group_metrics(
 
     groups_metrics = []
 
-    for group in ['Eventos ML', 'Otimização ML', 'Controle', 'Outro']:
+    for group in ['Champion', 'Otimização ML', 'Challenger', 'Outro']:
         group_df = matched_df[matched_df['comparison_group'] == group]
 
         if len(group_df) == 0:

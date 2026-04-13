@@ -405,15 +405,15 @@ class ValidationSheetsUploader:
 
                         val_str = str(val)
 
-                        # Coluna "Eventos ML" - fundo verde
-                        if 'Eventos ML' in val_str:
+                        # Coluna "Champion" - fundo verde
+                        if 'Champion' in val_str:
                             worksheet.format(cell_range, {
                                 'textFormat': {'bold': True, 'foregroundColor': {'red': 0, 'green': 0, 'blue': 0}},
                                 'backgroundColor': COLOR_ML_GREEN,
                                 'horizontalAlignment': 'CENTER'
                             })
-                        # Coluna "Controle" - fundo vermelho
-                        elif 'Controle' in val_str:
+                        # Coluna "Challenger" - fundo vermelho
+                        elif 'Challenger' in val_str:
                             worksheet.format(cell_range, {
                                 'textFormat': {'bold': True, 'foregroundColor': {'red': 0, 'green': 0, 'blue': 0}},
                                 'backgroundColor': COLOR_CONTROLE_RED,
@@ -436,13 +436,13 @@ class ValidationSheetsUploader:
                 for col_idx, cell_value in enumerate(first_row, 1):
                     if col_idx > num_cols:
                         break
-                    if cell_value and 'Eventos ML' in str(cell_value):
+                    if cell_value and 'Champion' in str(cell_value):
                         col_letter = self._col_letter(col_idx)
                         worksheet.format(f'{col_letter}1:{col_letter}{num_rows}', {
                             'backgroundColor': COLOR_ML_GREEN
                         })
                         time.sleep(0.3)
-                    elif cell_value and 'Controle' in str(cell_value):
+                    elif cell_value and 'Challenger' in str(cell_value):
                         col_letter = self._col_letter(col_idx)
                         worksheet.format(f'{col_letter}1:{col_letter}{num_rows}', {
                             'backgroundColor': COLOR_CONTROLE_RED
