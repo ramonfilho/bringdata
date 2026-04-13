@@ -2139,7 +2139,7 @@ async def daily_monitoring_check_railway(
             'SELECT '
             '  COUNT(*) AS total, '
             '  COUNT(*) FILTER (WHERE "leadScore" IS NOT NULL) AS scored, '
-            '  COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL) AS capi_sent, '
+            '  COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL AND "capiStatus" NOT IN (\'blocked\', \'skipped\')) AS capi_sent, '
             '  COUNT(*) FILTER (WHERE "capiStatus" = \'success\') AS capi_success, '
             '  COUNT(*) FILTER (WHERE "capiStatus" = \'error\') AS capi_error, '
             '  COUNT(*) FILTER (WHERE telefone IS NOT NULL AND telefone <> \'\') AS with_phone '
