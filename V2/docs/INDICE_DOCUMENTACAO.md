@@ -93,6 +93,10 @@ HISTÓRICO           → decisões passadas, migrações concluídas
   - **A (recomendada):** atualizar para refletir a arquitetura pós-refactor, mantendo o papel de referência central.
   - **B:** arquivar e deixar o refactor plan + código como fonte de verdade. Mais simples, mas perde a visão holística.
 
+### `AB_TEST.md`
+**Papel:** documentação operacional do teste A/B champion/challenger — arquitetura de roteamento, configuração, teste atual (jan30 vs mar24), critério de promoção, como ler resultados, problema DT-12.
+**Status:** ativo. Criado em 2026-04-09.
+
 ### `SISTEMA_VALIDACAO_ML.md`
 **Papel:** documenta o sistema de validação — como `validate_ml_performance.py` funciona, métricas calculadas.
 **Status:** ativo, atualizado em 2026-03-17.
