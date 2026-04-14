@@ -49,6 +49,83 @@ ALLOW_PUBLIC=true  # Temporário - mudar para false em produção
 PREVIOUS_REVISION=""
 YES_FLAG=false  # Pula confirmação se true
 NO_TRAFFIC=false  # Se true, deploy sem redirecionar tráfego (para teste)
+FORCE_DEPLOY=false  # Requer --force-deploy para branches não autorizadas
+
+# =============================================================================
+# BRANCHES AUTORIZADAS PARA DEPLOY DE PRODUÇÃO
+# =============================================================================
+# Apenas commits/branches listados aqui podem ser deployados sem --force-deploy.
+# Para deployar qualquer outra branch (incluindo main), use:
+#   FORCE_DEPLOY=true ./deploy_capi.sh --force-deploy
+# com confirmação explícita adicional.
+#
+# Branches autorizadas:
+#   rollback/edf23e9  — worktree do rollback P1 (edf23e9, jan30, 05/03/2026)
+#
+# Para adicionar uma branch autorizada, edite AUTHORIZED_BRANCHES abaixo
+# E documente o motivo no commit.
+# =============================================================================
+AUTHORIZED_BRANCHES=("rollback/edf23e9" "HEAD" "detached")
+
+check_authorized_branch() {
+    local CURRENT_BRANCH
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+    local CURRENT_COMMIT
+    CURRENT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+    # Verificar se é detached HEAD (worktree de rollback) — permitido
+    if [ "$CURRENT_BRANCH" = "HEAD" ]; then
+        local COMMIT_MSG
+        COMMIT_MSG=$(git log -1 --pretty=format:"%s" 2>/dev/null || echo "")
+        echo ""
+        echo "  ✅  Branch: DETACHED HEAD @ ${CURRENT_COMMIT}"
+        echo "      Commit: ${COMMIT_MSG}"
+        echo ""
+        return 0
+    fi
+
+    # Verificar se branch está na lista autorizada
+    for authorized in "${AUTHORIZED_BRANCHES[@]}"; do
+        if [ "$CURRENT_BRANCH" = "$authorized" ]; then
+            echo "  ✅  Branch autorizada: ${CURRENT_BRANCH} @ ${CURRENT_COMMIT}"
+            return 0
+        fi
+    done
+
+    # Branch NÃO autorizada — exige --force-deploy
+    echo ""
+    echo "  ╔══════════════════════════════════════════════════════════════════╗"
+    echo "  ║  🚨  DEPLOY BLOQUEADO — BRANCH NÃO AUTORIZADA                  ║"
+    echo "  ╠══════════════════════════════════════════════════════════════════╣"
+    echo "  ║  Branch atual : ${CURRENT_BRANCH} @ ${CURRENT_COMMIT}"
+    echo "  ║  Produção deve rodar: rollback/edf23e9 (worktree, edf23e9)      ║"
+    echo "  ║                                                                  ║"
+    echo "  ║  Para deployar esta branch você precisa de autorização           ║"
+    echo "  ║  explícita. Execute com a flag abaixo E confirme o prompt:       ║"
+    echo "  ║                                                                  ║"
+    echo "  ║    FORCE_DEPLOY=true ./deploy_capi.sh --force-deploy            ║"
+    echo "  ║                                                                  ║"
+    echo "  ║  Documente o motivo antes de prosseguir.                        ║"
+    echo "  ╚══════════════════════════════════════════════════════════════════╝"
+    echo ""
+
+    if [ "$FORCE_DEPLOY" = "true" ]; then
+        echo "  ⚠️  --force-deploy ativado. Você está deployando uma branch NÃO autorizada."
+        echo "  Branch : ${CURRENT_BRANCH} @ ${CURRENT_COMMIT}"
+        echo ""
+        read -r -p "  Digite exatamente 'CONFIRMO DEPLOY DE ${CURRENT_BRANCH}' para continuar: " CONFIRMATION
+        if [ "$CONFIRMATION" != "CONFIRMO DEPLOY DE ${CURRENT_BRANCH}" ]; then
+            echo "  ❌  Confirmação incorreta. Deploy cancelado."
+            exit 1
+        fi
+        echo ""
+        echo "  ⚠️  Deploy autorizado manualmente para ${CURRENT_BRANCH}. Prosseguindo."
+        echo ""
+        return 0
+    fi
+
+    exit 1
+}
 
 # =============================================================================
 # VALIDAÇÕES PRÉ-DEPLOY
@@ -56,6 +133,10 @@ NO_TRAFFIC=false  # Se true, deploy sem redirecionar tráfego (para teste)
 
 validate_prerequisites() {
     print_header "1. VALIDAÇÕES PRÉ-DEPLOY"
+
+    # 1.0 Verificar branch autorizada (bloqueio de segurança)
+    print_info "Verificando branch autorizada para deploy..."
+    check_authorized_branch
 
     # 1.1 Docker (específico do deploy)
     validate_docker
@@ -633,6 +714,8 @@ usage() {
     echo "  --no-public            Deploy sem acesso público (requer Service Account)"
     echo "  --no-traffic           Deploy sem redirecionar tráfego (para testar nova revisão)"
     echo "  --yes, -y              Pular confirmação (não perguntar)"
+    echo "  --force-deploy         Autorizar deploy de branch NÃO listada em AUTHORIZED_BRANCHES"
+    echo "                         Exige confirmação manual digitada. Só use com FORCE_DEPLOY=true."
     echo "  -h, --help             Mostrar esta mensagem"
     echo ""
     echo "Exemplos:"
@@ -669,6 +752,10 @@ parse_arguments() {
                 ;;
             --yes|-y)
                 YES_FLAG=true
+                shift
+                ;;
+            --force-deploy)
+                FORCE_DEPLOY=true
                 shift
                 ;;
             -h|--help)
