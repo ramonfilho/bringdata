@@ -330,7 +330,13 @@ encoding:
     - 6
   categorical_detection_max_unique: 20
   features_to_drop_after_encoding: []
-  column_name_corrections: {}
+  column_name_corrections:
+    # OHE removes 'ç' from 'Linguagem de programação' → wrong column name
+    # Old pipeline (binary_top3) created this directly; new pipeline (OHE) needs correction.
+    # This is the 5th most important feature (5.31% importance) — must be correct.
+    Medium_Linguagem_de_programa_o: Medium_Linguagem_programacao
+    # OHE expands the full category string; old pipeline used shorthand name.
+    Medium_Lookalike_2_Cadastrados_DEV_2_0_Interesses: Medium_Lookalike_2pct_Cadastrados
 model:
   hyperparameters:
     n_estimators: 300
