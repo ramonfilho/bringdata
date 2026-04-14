@@ -328,6 +328,19 @@ encoding:
     - 4
     - 5
     - 6
+    "Qual a sua idade?":
+    - "menos de 18 anos"
+    - "18 24 anos"
+    - "25 34 anos"
+    - "35 44 anos"
+    - "45 54 anos"
+    - "mais de 55 anos"
+    "Atualmente, qual a sua faixa salarial?":
+    - "nao tenho renda"
+    - "entre r1000 a r2000 reais ao mes"
+    - "entre r2001 a r3000 reais ao mes"
+    - "entre r3001 a r5000 reais ao mes"
+    - "mais de r5001 reais ao mes"
   categorical_detection_max_unique: 20
   features_to_drop_after_encoding: []
   column_name_corrections:
