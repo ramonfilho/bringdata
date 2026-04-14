@@ -1645,7 +1645,7 @@ def _send_single_purchase_event(
     from facebook_business.adobjects.serverside.action_source import ActionSource
 
     access_token = os.getenv('META_ACCESS_TOKEN')
-    pixel_id = os.getenv('META_PIXEL_ID', '241752320666130')
+    pixel_id = os.getenv('META_PIXEL_ID', '1937807493703815')
 
     if not access_token:
         return {"status": "error", "message": "META_ACCESS_TOKEN não configurado"}

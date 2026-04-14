@@ -39,7 +39,7 @@ load_dotenv(ROOT / ".env")
 
 # Meta CAPI — lidos do .env
 META_ACCESS_TOKEN = os.environ.get("META_ACCESS_TOKEN")
-META_PIXEL_ID     = os.environ.get("META_PIXEL_ID", "241752320666130")
+META_PIXEL_ID     = os.environ.get("META_PIXEL_ID", "1937807493703815")
 
 logging.basicConfig(
     level=logging.INFO,

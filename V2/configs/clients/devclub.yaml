@@ -384,7 +384,7 @@ monitoring:
   backup_sheets_url: null
   drift_features_to_analyze: null
 capi:
-  pixel_id: '241752320666130'
+  pixel_id: '1937807493703815'
   event_name_with_value: LeadQualified
   event_name_high_quality: LeadQualifiedHighQuality
   event_name_faixa_a: null
