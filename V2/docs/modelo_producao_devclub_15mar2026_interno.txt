@@ -1,4 +1,6 @@
 ================================================================================
+⚠️ SNAPSHOT HISTÓRICO — 15/03/2026. O modelo ativo em produção hoje é jan30 (run d51757f5, treinado 30/01/2026). Este documento descreve o run 2a98e51c que esteve ativo entre 24/03 e 13/04/2026.
+================================================================================
 MODELO DE LEAD SCORING — DEVCLUB
 Documentação interna — versão em produção — 15/03/2026
 ================================================================================

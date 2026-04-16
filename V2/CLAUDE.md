@@ -8,10 +8,23 @@ Leia este arquivo no início de toda sessão antes de qualquer tarefa.
 
 | Documento | O que contém |
 |---|---|
+| `docs/PLANO_EXECUCAO.md` | **O que fazer agora** — fases ativas, prazos, dependências (Abr–Jun 2026) |
 | `docs/ARQUITETURA_SISTEMA_COMPLETA.md` | Arquitetura completa, fluxos, endpoints, comandos úteis |
-| `docs/PLANO_REFACTOR_MLOPS.md` | Plano de refactor em andamento, mapeamento de hardcodes, decisões arquiteturais |
+| `docs/PLANO_REFACTOR_MLOPS.md` | Histórico do refactor, mapeamento de 153 hardcodes, decisões arquiteturais |
+| `docs/PLANO_SAFEGUARD.md` | 19 itens de integridade por tier — encoding, CAPI, deploy, timezone, monitoramento |
+| `docs/INDICE_DOCUMENTACAO.md` | Mapa completo de toda a documentação com status e relacionamentos |
 
-Quando houver dúvida sobre o que um componente deve fazer, esses documentos são a fonte de verdade.
+Quando houver dúvida sobre o que fazer agora: `PLANO_EXECUCAO.md`.  
+Quando houver dúvida sobre como um componente deve funcionar: `ARQUITETURA_SISTEMA_COMPLETA.md` + `PLANO_REFACTOR_MLOPS.md`.
+
+## Skills disponíveis
+
+| Skill | Quando usar |
+|---|---|
+| `/investigate` | Investigar por que um lançamento foi ruim |
+| `/investigate-ab` | Verificar se o teste A/B está tecnicamente válido |
+| `/safeguard` | Auditoria completa de integridade do projeto |
+| `/plan-integrator` | Ler todos os docs, reconciliar status, emitir prioridade global |
 
 ---
 

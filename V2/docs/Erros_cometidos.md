@@ -5,6 +5,22 @@
 
 ---
 
+## Cinco lições fundamentais
+
+1. **Produção não é o lugar de aprender.** Cada bug descoberto ao vivo em vez de antes do deploy foi pago com sinal degradado, dados contaminados ou número errado apresentado ao cliente.
+
+2. **O modelo aprende com o que você decide mostrar a ele — se você não controlar isso, ele decide sozinho.** Sem grupo controle, o sistema criou os próprios dados de treino e entrou em colapso gradual sem que ninguém percebesse por três meses.
+
+3. **A função objetivo errada produz o resultado errado, não importa o quão bom seja o modelo.** O valor enviado ao Meta define o que o algoritmo deles vai otimizar — enquanto esse número estava errado, o resto do sistema estava trabalhando contra si mesmo.
+
+4. **Infraestrutura boa não substitui definição clara do problema.** O refactor, o YAML multi-cliente, o `src/core/` — tudo isso é sólido. Mas foi construído depois dos erros, não antes. Escalar para novos clientes exige inverter essa ordem: definir o problema corretamente primeiro, construir a infraestrutura em cima disso.
+
+5. **Você não pode confiar em um número que nunca foi conferido contra a realidade.** O relatório que prova o valor do sistema para o cliente acumulou erros de cálculo durante meses porque ninguém tinha um total de referência externo para comparar. Um número só é confiável quando existe outro número independente que deveria bater com ele — e esse check precisa ser automático.
+
+---
+
+---
+
 ## Erros estratégicos e operacionais
 
 ### 1. Cálculo errado do valor de conversão enviado ao Meta

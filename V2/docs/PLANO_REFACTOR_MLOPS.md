@@ -36,6 +36,8 @@
 >
 > **Critério de conclusão:** modelo retreinado com pesos, D10 estável em
 > dois lançamentos consecutivos abaixo do limiar de 40%.
+>
+> **Status (16/04/2026):** prazo vencido sem execução. Ação incorporada ao `PLANO_EXECUCAO.md` Fase 5 (retreino pós-resultado A/B). Dados da campanha de controle disponíveis desde 15/03/2026.
 
 ---
 

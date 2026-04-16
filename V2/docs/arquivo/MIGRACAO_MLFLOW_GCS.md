@@ -1,6 +1,6 @@
 # Migração MLflow → GCS Backend
 
-**Status:** Planejado — pendente execução
+**Status:** ✅ Concluído — 17/03/2026 (50 runs migrados para Cloud SQL `104.197.138.129:5432/mlflow`, artifacts em `gs://smart-ads-mlflow/artifacts/`)
 **Motivação:** MLflow com `sqlite:///mlflow.db` cria runs em diretórios diferentes dependendo de onde o script é executado. Com múltiplos worktrees e Cloud Run, os runs ficam espalhados e inacessíveis entre ambientes.
 
 ---

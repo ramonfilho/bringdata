@@ -184,6 +184,55 @@ Ver: `PLANO_REFACTOR_MLOPS.md` seção DT-12 para detalhes completos.
 
 ---
 
+## Janela de dados válidos para análise
+
+### Período limpo (dados confiáveis)
+
+| Evento | Data/hora (BRT) | O que mudou |
+|---|---|---|
+| A/B test ativado em produção | 31/03/2026 | Leads ML_MAR passam pelo Challenger |
+| encoding_overrides aplicado ao Champion | 01/04/2026 | jan30 recebe ordinal correto para ML_JAN |
+| **Rollback deployado** (sem A/B test) | **~13/04/2026 19:33 BRT** | ML_MAR passa a ser roteado para jan30 — eventos CAPI errados |
+| Canary promovido a 100% | 14/04/2026 | A/B test restaurado corretamente para todos |
+
+**Janela válida para análise retrospectiva (Challenger):** `01/04/2026 00:00 BRT` → `13/04/2026 19:33 BRT`
+
+- Dados de 03/31 têm volume baixo (32 leads) e o encoding_overrides ainda não estava no Champion — excluir da análise principal.
+- Dados de 04/14 são descartados inteiros por segurança — rollback estava ativo durante parte do dia.
+- Dados a partir da promoção a 100% (14/04) voltam a ser válidos para análise prospectiva.
+
+> **Query Railway para janela limpa:**
+> ```sql
+> WHERE "createdAt" >= '2026-04-01 03:00:00'   -- 00:00 BRT = 03:00 UTC
+>   AND "createdAt" <  '2026-04-13 22:33:56'   -- momento do rollback (UTC)
+> ```
+
+---
+
+## Próximo passo — patch no rollback (pendente execução)
+
+Para garantir ROAS válido até 27/04/2026, o Challenger precisa receber 100% do tráfego ML_MAR com o código e modelo corretos. Cloud Run não faz roteamento por conteúdo (UTM), então a solução é:
+
+**Patch no worktree `smart_ads_v2_rollback/` (edf23e9) adicionando A/B routing mínimo:**
+
+| # | Arquivo | Mudança |
+|---|---|---|
+| 1 | `configs/active_models/devclub.yaml` | CRIAR — bloco `ab_test` com jan30 + mar24 |
+| 2 | `configs/active_model.yaml` | MODIFICAR — `mlflow_run_id` explícito |
+| 3 | `src/core/client_config.py` | MODIFICAR — dataclasses `ABTestConfig` |
+| 4 | `src/production_pipeline.py` | MODIFICAR — `get_ab_variant()` + roteamento UTM |
+| 5 | `api/capi_integration.py` | MODIFICAR — `event_name_override` como parâmetro |
+| 6 | `api/app.py` | MODIFICAR — roteamento A/B no webhook |
+| 7 | `api/Dockerfile` | MODIFICAR — `MODEL_PATH=mlruns_build` |
+| 8 | `api/deploy_capi.sh` | MODIFICAR — `stage_model_artifacts()` |
+
+Leads não-ML_MAR → jan30 (Champion, código edf23e9 sem mudança de comportamento).  
+Leads ML_MAR → mar24 (Challenger, código novo só na lógica de roteamento).
+
+Após deploy: canary (00270-q2m) vai a 0%, nova revisão vai a 100%.
+
+---
+
 ## Análise estatística — LF51 (captação 30/03–06/04, vendas 13/04–19/04)
 
 | Grupo | Leads | Conversões | Taxa |
