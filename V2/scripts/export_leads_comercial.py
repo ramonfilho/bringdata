@@ -56,9 +56,6 @@ COLUNAS_EXPORT = {
     "estudouProgramacao":  "Estudou Programação",
     "computador":          "Tem Computador",
     "cartaoCredito":       "Tem Cartão de Crédito",
-    "source":              "Fonte",
-    "campaign":            "Campanha",
-    "medium":              "Medium",
     "data":                "Data Captação",
 }
 
@@ -100,9 +97,6 @@ def load_railway(cap_start: str, cap_end: str, decis: list[str]) -> pd.DataFrame
             pesquisa->>'estudouProgramacao' AS "estudouProgramacao",
             pesquisa->>'computador'     AS computador,
             pesquisa->>'cartaoCredito'  AS "cartaoCredito",
-            source,
-            campaign,
-            medium,
             data
         FROM "Lead"
         WHERE data >= :start_date
@@ -128,6 +122,8 @@ def load_railway(cap_start: str, cap_end: str, decis: list[str]) -> pd.DataFrame
 
 def export(df: pd.DataFrame, output_path: Path, lancamento: str, decis: list[str]):
     df_export = df.copy()
+    if "data" in df_export.columns:
+        df_export["data"] = pd.to_datetime(df_export["data"], utc=True).dt.strftime("%d/%m/%Y")
     df_export.rename(columns=COLUNAS_EXPORT, inplace=True)
 
     # Score: formatar como decimal BR
