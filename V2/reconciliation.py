@@ -8,7 +8,7 @@ import glob
 import pandas as pd
 import numpy as np
 
-BASE_DIR = "/Users/ramonmoreira/Desktop/smart_ads/V2"
+BASE_DIR = "/Users/ramonmoreira/Desktop/bring_data/V2"
 
 PERIODS = [
     ('LF44',  '02:02 - 08:02', '2026-02-02', '2026-02-08'),

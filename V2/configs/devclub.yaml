@@ -2,7 +2,7 @@
 
 # Ingestão - Diretório com arquivos de treino
 ingestion:
-  training_data_dir: "/Users/ramonmoreira/Desktop/smart_ads/V2/data/devclub/"
+  training_data_dir: "/Users/ramonmoreira/Desktop/bring_data/V2/data/devclub/"
 
   # Critérios de filtragem de abas (linhas 31-33 do notebook)
   termos_manter:
