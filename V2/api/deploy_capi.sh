@@ -474,6 +474,10 @@ deploy_to_cloud_run() {
 
     print_success "Deploy concluído"
 
+    # Tag git para rastrear qual commit originou cada revision do Cloud Run
+    DEPLOY_TAG="deploy/$(date +%Y-%m-%d)-${NEW_REVISION##*-api-}"
+    git tag "$DEPLOY_TAG" 2>/dev/null && print_info "Git tag criada: $DEPLOY_TAG" || print_warning "Git tag não criada (repo sujo ou tag já existe)"
+
     # Se acesso público temporário
     if [ "$ALLOW_PUBLIC" = true ]; then
         print_warning "Configurando acesso público (TEMPORÁRIO)"

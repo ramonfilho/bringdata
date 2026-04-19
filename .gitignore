@@ -1,5 +1,6 @@
 # Pastas desnecessárias
 claude/
+.claude/worktrees/
 /clients/
 V1/
 reports
