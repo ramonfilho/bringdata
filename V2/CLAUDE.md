@@ -2,6 +2,10 @@
 
 Leia este arquivo no início de toda sessão antes de qualquer tarefa.
 
+**Regra inegociável:** o `PLANO_EXECUCAO.md` define a ordem de execução. Seguir passo a passo, na sequência documentada. Nunca reordenar, pular ou antecipar itens sem instrução explícita do usuário.
+
+**Protocolo por item de safeguard:** cada T1-x / T2-x / T3-x é implementado, testado, commitado e deployado individualmente antes de avançar para o próximo. Ver protocolo completo em `docs/PLANO_SAFEGUARD.md` — seção "Protocolo obrigatório por item".
+
 ---
 
 ## Documentos autoritativos
@@ -34,6 +38,25 @@ Quando houver dúvida sobre como um componente deve funcionar: `ARQUITETURA_SIST
 - **Segundo cliente:** chegando em breve — toda decisão arquitetural deve considerar multi-cliente
 - **Fluxo de lançamento:** Semana 1 captação (7d) → Semana 2 CPL/nutrição (6d) → Semana 3 vendas/carrinho (7d)
 - **Sinal central:** lead preenche pesquisa → modelo atribui decil D1–D10 → evento `LeadQualified` enviado ao Meta em ~5 minutos com valor proporcional ao decil
+
+---
+
+## Regras de código — práticas permanentes
+
+### Fail-loud: nenhuma falha silenciosa em `src/core/`
+
+Todo transform novo em `src/core/` deve incluir pelo menos uma verificação que **falha alto** se o output for inesperadamente zero, nulo ou vazio. Exemplos:
+
+```python
+# Ao final de um transform crítico
+assert df[coluna_encoding].sum() > 0, f"[FALHA SILENCIOSA] {coluna_encoding} zerada — verificar encoding"
+assert df.shape[0] == n_original, "Linhas perdidas inesperadamente no transform"
+assert not df[feature_critica].isnull().all(), f"{feature_critica} toda nula após transform"
+```
+
+**Por quê:** `Medium_Linguagem_programacao` ficou zerada por semanas sem erro. D9 ficou sem eventos CAPI por 2 meses sem alerta. Falhas silenciosas degradam sinal sem avisar.
+
+**Regra:** se remover o assert não causaria confusão em produção, não precisa. Se causaria — obrigatório.
 
 ---
 

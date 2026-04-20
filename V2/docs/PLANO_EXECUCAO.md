@@ -1,6 +1,6 @@
 # Plano de Execução — Smart Ads V2
 
-**Atualizado:** 2026-04-16  
+**Atualizado:** 2026-04-20  
 **Horizonte:** Abril → Junho 2026
 
 Documento mestre de execução. Une os três trabalhos em andamento em uma sequência única com dependências explícitas.
@@ -21,8 +21,8 @@ Documentos de referência:
 | **Canary ativo** | `00270-q2m` com 10% de tráfego — main com A/B test, encoding_overrides correto |
 | **Modelo Champion** | jan30 (`d51757f5`) — treinado 30/01/2026, dados até 04/11/2025 |
 | **Modelo Challenger** | mar24 (`a859c68b`) — treinado 24/03/2026 |
-| **Janela A/B válida** | 01/04 → 13/04/2026 — dados limpos do Challenger disponíveis |
-| **Prazo do teste A/B** | 27/04/2026 — janela de conversão LF52 fechada |
+| **Janela A/B válida (LF51)** | 01/04 → 13/04/2026 — dados limpos do Challenger disponíveis |
+| **Prazo do teste A/B** | ~~27/04/2026~~ → após 17/05/2026 — janela LF51 insuficiente, decisão migrada para DEV20 |
 | **Branch main** | Não está em produção — produz resultado diferente de edf23e9 (discrepância a eliminar) |
 
 ---
@@ -50,10 +50,17 @@ TRABALHO A — A/B PATCH          TRABALHO B — SAFEGUARDS           TRABALHO C
 ---
 
 ## Fase 1 — A/B patch + resultado do teste
-**Prazo:** até 27/04/2026
+**Prazo:** sistema em produção antes de 21/04/2026 (início da captação DEV20) | decisão após 17/05/2026 (fim do carrinho)
 
 ### Objetivo
-Garantir que ML_MAR recebe 100% do Challenger com código e modelo corretos, e coletar dados suficientes para a decisão de promoção.
+Garantir que ML_MAR recebe 100% do Challenger com código e modelo corretos durante toda a captação do DEV20, e coletar dados suficientes para a decisão de promoção.
+
+**Calendário DEV20:**
+- Captação: 21/04 → 04/05/2026
+- Carrinho aberto: 11/05 → 17/05/2026
+- Resultados disponíveis para decisão: após 17/05/2026
+
+> **Contexto:** o prazo original de 27/04 foi baseado na janela de conversão do LF51, que fechou sem volume estatisticamente suficiente (Champion 0,24% vs Challenger 0,17%, p=0,52). A decisão migra para o DEV20.
 
 ### Trabalho
 
@@ -78,13 +85,13 @@ O rollback (`smart_ads_v2_rollback/`, edf23e9) precisa receber A/B routing míni
 - Smoke test: 5 leads ML_MAR → verificar `LeadQualifiedCha` nos logs
 - Promover para 100% | Canary `00270-q2m` → 0%
 
-**1.3 — Monitoramento até 27/04**
+**1.3 — Monitoramento durante DEV20 (21/04–04/05)**
 
-Acompanhar via Meta Ads Manager:
+Acompanhar via Meta Ads Manager durante toda a captação:
 - Campanhas ML_MAR HLQC: `LeadQualifiedChaHighQuality` recebendo eventos?
 - Volume de `LeadQualifiedCha` crescendo proporcionalmente ao gasto?
 
-Query de sanidade no Railway (ver `docs/AB_TEST.md` — seção "Janela de dados válidos"):
+Query de sanidade no Railway durante a captação:
 ```sql
 SELECT
     CASE WHEN campaign ILIKE '%ML_MAR%' THEN 'Challenger' ELSE 'Champion' END AS variante,
@@ -92,12 +99,12 @@ SELECT
     ROUND(AVG(decil::numeric), 2) AS decil_medio,
     ROUND(AVG("leadScore")::numeric, 4) AS score_medio
 FROM "Lead"
-WHERE "createdAt" >= '2026-04-14 17:09:00'  -- após canary promovido
+WHERE "createdAt" >= '2026-04-21 03:00:00'  -- início captação DEV20 (00:00 BRT)
   AND decil IS NOT NULL
 GROUP BY 1;
 ```
 
-**1.4 — Decisão de promoção (após 27/04)**
+**1.4 — Decisão de promoção (após 17/05)**
 
 Ver critério em `docs/AB_TEST.md` — seção "Critério de promoção":
 - ROAS Challenger ≥ ROAS Champion → promover mar24 como Champion
@@ -110,6 +117,8 @@ Ver critério em `docs/AB_TEST.md` — seção "Critério de promoção":
 **Referência completa:** `docs/PLANO_SAFEGUARD.md` — seção "Tier 1 — Bloqueadores"
 
 **Objetivo:** ter verificação automatizada antes de qualquer merge de branch, para não repetir o DT-12 e os bugs de divergência treino/produção.
+
+**Protocolo por item:** implementar → testar → commitar → deployar individualmente. Ver protocolo completo em `docs/PLANO_SAFEGUARD.md` — seção "Protocolo obrigatório por item".
 
 ### 7 itens a implementar
 
@@ -190,7 +199,7 @@ Destaques:
 ---
 
 ## Fase 5 — Retreino e novo ciclo A/B
-**Condição de entrada:** resultado do teste A/B disponível (pós 27/04) + código unificado
+**Condição de entrada:** resultado do teste A/B disponível (pós 17/05/2026, carrinho DEV20 fechado) + código unificado
 
 ### Se Challenger vencer (ROAS mar24 ≥ ROAS jan30)
 ```bash
@@ -210,12 +219,13 @@ Ver critério completo em `docs/AB_TEST.md` — seção "Critério de promoção
 
 | Data | Marco |
 |---|---|
-| 16/04/2026 (hoje) | Canary a 10%, rollback a 90% |
-| ~17–19/04 | Fase 1: A/B patch + deploy nova revisão |
-| ~20–24/04 | Fase 2: Tier 1 dos safeguards (7 itens) |
-| 27/04/2026 | Janela de conversão LF52 fechada — dados do teste disponíveis |
+| 20/04/2026 (hoje) | Canary `00271-cv7` a 10%, rollback `00269-jjn` a 90% |
+| 21/04–04/05 | **DEV20 captação** — sistema com A/B test ativo em produção |
+| ~20–25/04 | Fase 2: Tier 1 dos safeguards (9 itens) |
 | ~28/04–05/05 | Fase 3: Unificação de branches com parity audit |
-| Maio/2026 | Fase 4: Tier 2+3 + retreino com decisão do teste |
+| 11/05–17/05 | **DEV20 carrinho aberto** — coleta final de dados do teste |
+| após 17/05 | Fase 1 decisão: ROAS consolidado → promover ou manter Champion |
+| Maio–Jun/2026 | Fase 4: Tier 2+3 + retreino com decisão do teste |
 
 ---
 

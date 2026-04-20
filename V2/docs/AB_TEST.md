@@ -1,7 +1,7 @@
 # Teste A/B Champion/Challenger — Documentação Operacional
 
-**Atualizado:** 2026-04-09
-**Status atual:** ativo (desde 31/03/2026) — Champion vs Challenger em curso
+**Atualizado:** 2026-04-20
+**Status atual:** ativo — aguardando próximo lançamento (DEV20) para coleta de dados válidos
 
 ---
 
@@ -244,3 +244,27 @@ Após deploy: canary (00270-q2m) vai a 0%, nova revisão vai a 100%.
 - **Fisher's Exact:** p = 0,52 — Odds Ratio = 1,47
 
 **Conclusão:** diferença de +47% na taxa de conversão a favor do Champion, mas sem significância estatística (p > 0,05 em ambos os testes). Para detectar essa diferença com 80% de poder seriam necessários ~57.000 leads por grupo. O volume atual é insuficiente para qualquer decisão baseada em conversões.
+
+---
+
+## Próximo lançamento — DEV20
+
+O prazo original de 27/04/2026 não é mais viável: a janela de conversão do LF51 já fechou sem volume suficiente para decisão, e o próximo lançamento (DEV20) ainda está em captação.
+
+**Calendário do DEV20:**
+
+| Fase | Período |
+|---|---|
+| Captação de leads | 21/04/2026 → 04/05/2026 |
+| Carrinho aberto (vendas) | 11/05/2026 → 17/05/2026 |
+| Resultados disponíveis | após 17/05/2026 (carrinho fechado + janela de atribuição) |
+
+**O sistema precisa estar em produção com o A/B test ativo durante toda a captação (21/04–04/05).** Leads captados fora do sistema não entram na comparação.
+
+**Nova data de decisão:** após o fechamento do carrinho em 17/05/2026, quando o ROAS de cada variante estiver consolidado no Meta Ads Manager.
+
+> **Query Railway para análise do DEV20 (usar após 17/05):**
+> ```sql
+> WHERE "createdAt" >= '2026-04-21 03:00:00'   -- 00:00 BRT = 03:00 UTC
+>   AND "createdAt" <  '2026-05-05 03:00:00'   -- fim da captação
+> ```

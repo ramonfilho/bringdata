@@ -185,6 +185,11 @@ def apply_encoding(
 
     for var, ordem in variaveis_ordinais.items():
         if var not in df.columns:
+            logger.warning(
+                f"  [T1-1] Encoding ordinal: '{var}' não encontrada no DataFrame "
+                f"— encoding pulado silenciosamente. Verificar yaml vs nomes reais das colunas. "
+                f"Colunas disponíveis: {[c for c in df.columns if 'idade' in c.lower() or 'salar' in c.lower()]}"
+            )
             continue
         if var == 'dia_semana':
             logger.debug(f"  Encoding ordinal: {var} já é numérico")

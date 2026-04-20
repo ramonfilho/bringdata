@@ -1,6 +1,7 @@
 # Plano de Integridade — Smart Ads V2
 
 **Criado:** 2026-04-16  
+**Atualizado:** 2026-04-20  
 **Status:** Em execução
 
 Documento que consolida: audit de infraestrutura existente, gaps identificados, ordem de execução e plano de implementação.
@@ -8,6 +9,25 @@ Documento que consolida: audit de infraestrutura existente, gaps identificados, 
 Referências:
 - Erros históricos: `docs/Erros_cometidos.md`
 - Skills de investigação: `/investigate`, `/investigate-ab`, `/safeguard`
+
+---
+
+## Protocolo obrigatório por item (Tier 1, 2 e 3)
+
+**Cada item é implementado, testado, commitado e deployado individualmente — nenhuma exceção.**
+
+```
+Para cada T1-x / T2-x / T3-x:
+
+1. IMPLEMENTAR   — fazer a mudança no código
+2. TESTAR        — rodar o(s) teste(s) específicos listados em "Como testar cada item"
+                   O item só avança se os testes passarem
+3. COMMITAR      — commit isolado descrevendo o item (ex: "safeguard(T1-1): encoding ordinal fail-loud")
+4. DEPLOYAR      — deploy com --no-traffic → smoke test → canary → 100%
+5. MARCAR        — atualizar status na tabela de "Status de implementação" para Concluído
+```
+
+**Por que deploy por item:** cada safeguard é uma mudança independente de comportamento em produção. Agrupar vários itens num único deploy torna impossível identificar qual mudança causou um problema. Deploy granular = rollback preciso.
 
 ---
 
@@ -115,6 +135,22 @@ Referências:
 
 ---
 
+### BLOCO 10 — Autorização de processo: o deploy deveria acontecer?
+
+Adicionado em 20/04/2026 após incidente: `main` deployada e com 100% do tráfego por horas sem verificação de pré-requisitos. O safeguard audita integridade técnica; este bloco audita se o deploy está autorizado pelo processo.
+
+| Item | Status | Onde está | O que fazer |
+|---|---|---|---|
+| Branch autorizada para produção | ✗ Não verificado no safeguard | `api/deploy_capi.sh:68` | Adicionar ao safeguard: verificar se branch atual está em `AUTHORIZED_BRANCHES` |
+| Pré-requisitos Tier 1 concluídos | ✗ Não verificado | `docs/PLANO_SAFEGUARD.md` | Verificar que nenhum T1-x está "Pendente" antes de deployar `main` |
+| Parity check main vs produção | ✗ Não verificado no deploy | `tests/parity_audit.py` | Exigir `pytest parity_audit.py` passando antes de qualquer deploy de `main` |
+| Gate de progressão de tráfego | ✗ Protocolo não documentado | — | Documentar: 0% → 10% (1h mínimo) → 50% (confirmação) → 100% (confirmação + rollback nomeado) |
+| Trail de autorização de deploy | ✗ Não existe | — | Criar: cada mudança de split de tráfego deve ser registrada com motivo e autorização |
+
+**Ação prioritária (Tier 1 novo):** o deploy de `main` em produção causou degradação de sinal. Adicionar verificação de branch + parity check como gate obrigatório antes de qualquer deploy não-rollback.
+
+---
+
 ### BLOCO 6 — Fuso horário
 
 | Item | Status | Onde está | O que fazer |
@@ -192,6 +228,8 @@ Referências:
 | T1-5 | Monitoramento: D10% out-of-range | `src/monitoring/orchestrator.py` | Alerta se D10% < 15% ou > 50% |
 | T1-6 | `app.py` sem `load_dotenv` | `api/app.py` | Verificar se `META_ACCESS_TOKEN` carrega no Cloud Run |
 | T1-7 | Parity audit de encoding | `tests/parity_audit.py` | Estender para ordinal + UTM + snapshot |
+| T1-8 | Branch autorizada + gate de processo | `api/deploy_capi.sh`, safeguard | Verificar branch em AUTHORIZED_BRANCHES + parity audit passando antes de qualquer deploy de `main` |
+| T1-9 | Protocolo de progressão de tráfego | `docs/` | Documentar e enforçar: 0%→10%(1h)→50%(confirmação)→100%(confirmação) |
 
 ### Tier 2 — Qualidade de dados
 
@@ -262,13 +300,15 @@ curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/singl
 
 | Item | Status | Responsável | Data |
 |---|---|---|---|
-| T1-1 Encoding ordinal | Pendente | | |
+| T1-1 Encoding ordinal | Concluído | | 2026-04-20 |
 | T1-2 CAPI decil 0 eventos | Pendente | | |
 | T1-3 CAPI deduplicação | Pendente | | |
 | T1-4 Timezone UTC | Pendente | | |
 | T1-5 D10% alerta | Pendente | | |
 | T1-6 app.py load_dotenv | Pendente | | |
 | T1-7 Parity audit encoding | Pendente | | |
+| T1-8 Branch autorizada + gate de processo | Pendente | | Adicionado 20/04/2026 pós-incidente |
+| T1-9 Protocolo progressão de tráfego | Pendente | | Adicionado 20/04/2026 pós-incidente |
 | T2-1 Deduplicação treino | Pendente | | |
 | T2-2 Log por etapa | Pendente | | |
 | T2-3 Importance weighting | Pendente | | |
