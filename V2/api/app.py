@@ -87,6 +87,8 @@ class DailyCheckResponse(BaseModel):
     funnel_metrics: Optional[Dict[str, Any]] = None
     lead_quality_metrics: Optional[Dict[str, Any]] = None
     revenue_forecast: Optional[Dict[str, Any]] = None
+    survey_funnel_metrics: Optional[Dict[str, Any]] = None
+    traffic_metrics: Optional[Dict[str, Any]] = None
     # revenue_forecast inclui expected_conversion quando conversion_rate_benchmark está configurado
 
 # Inicializar a aplicação FastAPI
@@ -829,6 +831,20 @@ async def webhook_update_survey(
         db.refresh(existing_lead)
 
         logger.info(f"✅ Lead atualizado com dados da pesquisa: {survey_data.email}")
+
+        # [T1-3] Deduplicação CAPI: não enviar se já foi enviado
+        if existing_lead.capi_sent_at is not None:
+            logger.warning(
+                f"[T1-3] Lead {survey_data.email} já enviado ao CAPI em "
+                f"{existing_lead.capi_sent_at} — ignorando duplicata"
+            )
+            return {
+                "status": "success",
+                "message": "Lead já processado e enviado ao CAPI",
+                "lead_id": existing_lead.id,
+                "scored": True,
+                "capi_skipped": "already_sent",
+            }
 
         # 3. SCORING ML + CAPI
         try:
@@ -2201,6 +2217,52 @@ async def daily_monitoring_check_railway(
                 key = f"D{int(decil_val):02d}"
                 forecast_decil_dist[key] = forecast_decil_dist.get(key, 0) + 1
 
+        # 1e. Survey funnel metrics por janela histórica (DB side)
+        _sfm_db: Dict[str, Dict] = {}
+        try:
+            _sfm_windows = {
+                'historico':     datetime(2020, 1, 1, tzinfo=_tz.utc),
+                'ultimo_mes':    now_utc - timedelta(days=30),
+                'ultima_semana': now_utc - timedelta(days=7),
+                'ultimas_24h':   now_utc - timedelta(hours=24),
+            }
+            for _lbl, _cut in _sfm_windows.items():
+                _sfm_r = railway_conn.run(
+                    'SELECT '
+                    '  COUNT(*) AS db_leads, '
+                    '  COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL '
+                    '    AND "capiStatus" NOT IN (\'blocked\', \'skipped\')) AS capi_sent '
+                    'FROM "Lead" '
+                    'WHERE "createdAt" >= :start AND "createdAt" <= :end',
+                    start=_cut, end=now_utc
+                )
+                _r = _sfm_r[0] if _sfm_r else (0, 0)
+                _db_l, _capi_s = (_r[0] or 0), (_r[1] or 0)
+                _sfm_db[_lbl] = {
+                    'db_leads': _db_l,
+                    'capi_sent': _capi_s,
+                    'capi_rate': round(_capi_s / _db_l * 100, 1) if _db_l > 0 else 0,
+                }
+            # periodo_query usa a janela da query
+            _sfm_pq = railway_conn.run(
+                'SELECT '
+                '  COUNT(*) AS db_leads, '
+                '  COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL '
+                '    AND "capiStatus" NOT IN (\'blocked\', \'skipped\')) AS capi_sent '
+                'FROM "Lead" '
+                'WHERE "createdAt" >= :start AND "createdAt" <= :end',
+                start=window_start, end=window_end
+            )
+            _r_pq = _sfm_pq[0] if _sfm_pq else (0, 0)
+            _db_pq, _capi_pq = (_r_pq[0] or 0), (_r_pq[1] or 0)
+            _sfm_db['periodo_query'] = {
+                'db_leads': _db_pq,
+                'capi_sent': _capi_pq,
+                'capi_rate': round(_capi_pq / _db_pq * 100, 1) if _db_pq > 0 else 0,
+            }
+        except Exception as _sfm_e:
+            logger.warning(f"⚠️ survey_funnel DB queries: {_sfm_e}")
+
         railway_conn.close()
 
         # ------------------------------------------------------------------
@@ -2449,6 +2511,64 @@ async def daily_monitoring_check_railway(
                         if _a.get('action_type') == 'offsite_conversion.fb_pixel_lead':
                             total_meta_leads_forecast += int(_a.get('value', 0) or 0)
                 logger.info(f"📊 Meta leads janela lançamento ({_launch_str}–{_today}): {total_meta_leads_forecast}")
+
+                # --- métricas Meta por janela histórica (para survey_funnel_metrics e traffic_metrics) ---
+                _brt_now = datetime.now(_tz(timedelta(hours=-3)))
+                _meta_hist_windows = {
+                    'ultimo_mes':    (_brt_now - timedelta(days=30)).strftime('%Y-%m-%d'),
+                    'ultima_semana': (_brt_now - timedelta(days=7)).strftime('%Y-%m-%d'),
+                    'ultimas_24h':   (_brt_now - timedelta(hours=24)).strftime('%Y-%m-%d'),
+                    'periodo_query': _launch_str,
+                }
+                _meta_hist_end = {
+                    'ultimo_mes':    _today,
+                    'ultima_semana': _today,
+                    'ultimas_24h':   _today,
+                    'periodo_query': (_brt_now if not end_date else
+                                      datetime.strptime(end_date, '%Y-%m-%d').replace(
+                                          tzinfo=_tz(timedelta(hours=-3))
+                                      )).strftime('%Y-%m-%d'),
+                }
+                meta_window_data: Dict[str, Any] = {}
+
+                def _fetch_meta_window(_wlbl, _wsince, _wuntil):
+                    _wrows = _meta.get_insights(
+                        account_id=_account,
+                        level='campaign',
+                        fields=['campaign_name', 'spend', 'clicks', 'actions'],
+                        since_date=_wsince,
+                        until_date=_wuntil,
+                        filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}]
+                    )
+                    _w_spend  = sum(float(r.get('spend',  0) or 0) for r in _wrows)
+                    _w_clicks = sum(int(r.get('clicks', 0) or 0) for r in _wrows)
+                    _w_leads  = 0
+                    for _wr in _wrows:
+                        for _wa in (_wr.get('actions') or []):
+                            if _wa.get('action_type') == 'offsite_conversion.fb_pixel_lead':
+                                _w_leads += int(_wa.get('value', 0) or 0)
+                    return {
+                        'meta_leads': _w_leads,
+                        'clicks':     _w_clicks,
+                        'spend':      round(_w_spend, 2),
+                        'cpl':        round(_w_spend / _w_leads, 2) if _w_leads > 0 else None,
+                        'ctr_lead':   round(_w_leads / _w_clicks * 100, 1) if _w_clicks > 0 else None,
+                    }
+
+                import concurrent.futures as _cf
+                _meta_futures = {}
+                with _cf.ThreadPoolExecutor(max_workers=4) as _executor:
+                    for _wlbl, _wsince in _meta_hist_windows.items():
+                        _meta_futures[_wlbl] = _executor.submit(
+                            _fetch_meta_window, _wlbl, _wsince, _meta_hist_end[_wlbl]
+                        )
+                for _wlbl, _fut in _meta_futures.items():
+                    try:
+                        meta_window_data[_wlbl] = _fut.result(timeout=12)
+                    except Exception as _we:
+                        logger.warning(f"⚠️ Meta window {_wlbl}: {_we}")
+                        meta_window_data[_wlbl] = None
+
         except Exception as _e:
             logger.warning(f"⚠️ Meta Ads metrics indisponível: {_e}")
 
@@ -2476,6 +2596,31 @@ async def daily_monitoring_check_railway(
         except Exception as _fe:
             logger.warning(f"⚠️ revenue_forecast indisponível: {_fe}")
 
+        # ------------------------------------------------------------------
+        # Build survey_funnel_metrics e traffic_metrics
+        # ------------------------------------------------------------------
+        _meta_wd = locals().get('meta_window_data', {})
+
+        survey_funnel_metrics: Dict[str, Any] = {}
+        for _lbl, _sfm in _sfm_db.items():
+            _mw = _meta_wd.get(_lbl) if _meta_wd else None
+            _meta_leads = _mw['meta_leads'] if _mw else None
+            _db_leads   = _sfm['db_leads']
+            _rr = (round(_db_leads / _meta_leads * 100, 1)
+                   if (_meta_leads and _meta_leads > 0) else None)
+            survey_funnel_metrics[_lbl] = {
+                'db_leads':      _db_leads,
+                'capi_sent':     _sfm['capi_sent'],
+                'capi_rate':     _sfm['capi_rate'],
+                'meta_leads':    _meta_leads,
+                'response_rate': _rr,
+            }
+
+        traffic_metrics: Optional[Dict[str, Any]] = (
+            {k: v for k, v in _meta_wd.items() if v is not None}
+            if _meta_wd else None
+        ) or None
+
         processing_time = time.time() - start_time
         logger.info(f"✅ Railway monitoring concluído em {processing_time:.2f}s — "
                     f"{result['total_alerts']} alertas")
@@ -2490,6 +2635,8 @@ async def daily_monitoring_check_railway(
             funnel_metrics=result.get('funnel_metrics'),
             lead_quality_metrics=result.get('lead_quality_metrics'),
             revenue_forecast=revenue_forecast if revenue_forecast else None,
+            survey_funnel_metrics=survey_funnel_metrics or None,
+            traffic_metrics=traffic_metrics,
         )
 
     except FileNotFoundError as e:
