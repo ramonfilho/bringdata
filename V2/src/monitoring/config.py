@@ -38,8 +38,10 @@ THRESHOLDS = {
     # CAPI quality: detecta problemas de qualidade CAPI
     'capi_quality': {
         'enabled': True,
-        'missing_rate': 0.50,  # 50% de missing em fbp/fbc
-        'rejection_rate': 0.10 # 10% de taxa de rejeição pela Meta
+        'missing_rate': 0.50,            # 50% de missing em fbp/fbc
+        'rejection_rate': 0.10,          # 10% de taxa de rejeição pela Meta
+        'zero_decil_lookback_hours': 24, # [T1-2] janela de verificação de decis zerados
+        'zero_decil_min_leads': 20,      # [T1-2] mínimo de eventos para ativar o check
     }
 }
 

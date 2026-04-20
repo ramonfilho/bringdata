@@ -3,12 +3,16 @@ Monitor de qualidade CAPI - verifica qualidade dos dados de Conversion API.
 
 Verifica:
 - Missing rate alto de fbp/fbc (> 50%)
-- Alta taxa de rejeição de eventos CAPI (futuro - via logs)
+- Alta taxa de rejeição de eventos CAPI
+- [T1-2] Decis com 0 eventos CAPI nas últimas 24h (bug histórico: D9 ficou 2 meses invisível)
 """
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 
 class CAPIQualityMonitor:
@@ -45,6 +49,7 @@ class CAPIQualityMonitor:
         if self._thresholds['capi_quality']['enabled']:
             alerts.extend(self._check_capi_missing_rate())
             alerts.extend(self._check_capi_rejection_rate())
+            alerts.extend(self._check_zero_decil_events())
 
         return alerts
 
@@ -130,6 +135,71 @@ class CAPIQualityMonitor:
 
         except Exception:
             pass
+
+        return alerts
+
+    def _check_zero_decil_events(self) -> List[Dict]:
+        """
+        [T1-2] Verifica que todos os decis D01–D10 geraram eventos CAPI com sucesso.
+
+        Motivação: D9 ficou 2 meses com 0 eventos sem nenhum alerta.
+        Só dispara se o volume mínimo foi atingido no período (evita falso
+        positivo em dias sem captação ativa).
+        """
+        from api.database import LeadCAPI
+
+        alerts = []
+
+        lookback_hours = self._thresholds['capi_quality'].get('zero_decil_lookback_hours', 24)
+        min_leads = self._thresholds['capi_quality'].get('zero_decil_min_leads', 20)
+        lookback_time = datetime.now(timezone.utc) - timedelta(hours=lookback_hours)
+        all_decils = [f'D{str(i).zfill(2)}' for i in range(1, 11)]
+
+        try:
+            recent_capi = self.db.query(LeadCAPI).filter(
+                LeadCAPI.capi_sent_at >= lookback_time,
+                LeadCAPI.capi_response_status == 'success',
+                LeadCAPI.decil.isnot(None)
+            ).all()
+
+            if len(recent_capi) < min_leads:
+                logger.debug(
+                    f"  [T1-2] {len(recent_capi)} eventos em {lookback_hours}h "
+                    f"— abaixo do mínimo ({min_leads}), check ignorado"
+                )
+                return alerts
+
+            decil_counts = {d: 0 for d in all_decils}
+            for lead in recent_capi:
+                if lead.decil in decil_counts:
+                    decil_counts[lead.decil] += 1
+
+            zero_decils = [d for d in all_decils if decil_counts[d] == 0]
+
+            if zero_decils:
+                alerts.append({
+                    'type': 'capi_zero_decil_events',
+                    'severity': 'HIGH',
+                    'category': 'capi_quality',
+                    'message': (
+                        f"[T1-2] Decis sem eventos CAPI nas últimas {lookback_hours}h: "
+                        f"{', '.join(zero_decils)} — possível bug silencioso "
+                        f"(histórico: D9 por 2 meses)"
+                    ),
+                    'details': {
+                        'zero_decils': zero_decils,
+                        'decil_counts': decil_counts,
+                        'total_success_events': len(recent_capi),
+                        'period_hours': lookback_hours,
+                        'min_leads_threshold': min_leads,
+                    },
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'metric_value': len(zero_decils),
+                    'threshold': 0,
+                })
+
+        except Exception as e:
+            logger.warning(f"  [T1-2] _check_zero_decil_events: erro inesperado — {e}")
 
         return alerts
 
