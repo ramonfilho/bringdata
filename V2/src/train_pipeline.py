@@ -24,7 +24,7 @@ import argparse
 import pandas as pd
 import atexit
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from src.data_processing.ingestion import (
     read_excel_files,
     read_all_training_sources,
@@ -74,7 +74,7 @@ def setup_output_logging(output_subdir='training'):
     os.makedirs(outputs_dir, exist_ok=True)
 
     # Gerar timestamp no formato YYYYMMDD_HHMMSS
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
     log_prefix = 'retraining' if output_subdir == 'retraining' else 'training'
     log_path = os.path.join(outputs_dir, f'{log_prefix}_{timestamp}.log')
 

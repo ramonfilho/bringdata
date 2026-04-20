@@ -16,7 +16,7 @@ Uso:
 
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timezone
 import argparse
 import logging
 from pathlib import Path
@@ -178,7 +178,7 @@ def calculate_valor_real_venda(df_efetivado: pd.DataFrame, valor_nominal: float 
     logger.info(" ANÁLISE 2: Valor Real de uma Venda TMB")
 
     # Data de referência (hoje)
-    data_hoje = datetime.now()
+    data_hoje = datetime.now(timezone.utc)
 
     # Adicionar maturidade
     df_efetivado['data_venda'] = pd.to_datetime(df_efetivado['Data Efetivado'])
@@ -433,7 +433,7 @@ def generate_summary_report(
 
     # 1. Resumo geral
     resumo = pd.DataFrame([{
-        'Data Análise': datetime.now().strftime('%d/%m/%Y %H:%M:%S'),
+        'Data Análise': datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M:%S'),
         'Valor Nominal TMB': valor_real['valor_nominal'],
         'Valor Real Médio': valor_real['valor_real_medio'],
         'Valor Real Mediana': valor_real['valor_real_mediana'],

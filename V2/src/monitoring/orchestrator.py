@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, distinct, text
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -60,7 +60,7 @@ def setup_monitoring_logging():
     os.makedirs(outputs_dir, exist_ok=True)
 
     # Gerar timestamp no formato YYYYMMDD_HHMMSS
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
     log_path = os.path.join(outputs_dir, f'monitoring_{timestamp}.log')
 
     # Redirecionar stdout e stderr para Tee
@@ -394,7 +394,7 @@ class MonitoringOrchestrator:
                 return {}
 
             # Definir períodos
-            now = datetime.now()
+            now = datetime.now(timezone.utc)
             last_24h = now - timedelta(days=1)
             last_week = now - timedelta(days=7)
             last_month = now - timedelta(days=30)

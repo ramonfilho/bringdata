@@ -9,7 +9,7 @@ import os
 import pandas as pd
 import logging
 import atexit
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 from .core.client_config import ClientConfig, ABTestConfig, ABTestVariantConfig
 from .core.preprocessing import preprocess as _preprocess
@@ -52,7 +52,7 @@ def setup_output_logging():
     os.makedirs(outputs_dir, exist_ok=True)
 
     # Gerar timestamp no formato YYYYMMDD_HHMMSS
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
     log_path = os.path.join(outputs_dir, f'production_{timestamp}.log')
 
     # Redirecionar stdout e stderr para Tee
