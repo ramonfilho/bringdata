@@ -105,6 +105,63 @@ def _load_feature_registry(artifacts: Dict[str, Any]) -> Optional[List[str]]:
 
 
 # ---------------------------------------------------------------------------
+# [T1-10] Feature coverage check
+# ---------------------------------------------------------------------------
+
+def _load_top_features(artifacts: Dict[str, Any], min_importance: float = 0.01) -> List[Dict[str, Any]]:
+    """
+    [T1-10] Carrega top features (importância >= min_importance) do feature_registry.
+
+    Reutiliza a mesma lógica de resolução de path que _load_feature_registry.
+    Retorna lista vazia se não disponível — o check degrada graciosamente,
+    sem impedir o encoding de rodar.
+
+    Returns:
+        Lista de dicts: [{'name': str, 'importance': float, 'rank': int}, ...]
+    """
+    mlflow_run_id = artifacts.get('mlflow_run_id')
+    model_path = artifacts.get('model_path')
+    registry_path: Optional[Path] = None
+
+    if mlflow_run_id:
+        try:
+            import mlflow as _mlflow
+            experiment_id = _mlflow.get_run(mlflow_run_id).info.experiment_id
+        except Exception:
+            experiment_id = artifacts.get('mlflow_experiment_id', '1')
+        registry_path = (
+            Path(__file__).parent.parent.parent
+            / "mlruns" / experiment_id / mlflow_run_id / "artifacts" / "feature_registry.json"
+        )
+
+    if (registry_path is None or not registry_path.exists()) and model_path:
+        for candidate in list(Path(model_path).glob("feature_registry*.json"))[:1]:
+            registry_path = candidate
+            break
+
+    if registry_path is None or not registry_path.exists():
+        return []
+
+    try:
+        with open(registry_path, 'r') as f:
+            data = json.load(f)
+        top = data.get('feature_importance', {}).get('top_10_features', [])
+        result = []
+        for item in top:
+            imp = item.get('importance', 0)
+            if imp >= min_importance:
+                result.append({
+                    'name': item.get('feature_clean') or item.get('feature_original', ''),
+                    'importance': imp,
+                    'rank': item.get('rank', 0),
+                })
+        return result
+    except Exception as e:
+        logger.warning(f"  [T1-10] Erro ao ler top features de {registry_path}: {e}")
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Merge de configs de encoding (DT-12)
 # ---------------------------------------------------------------------------
 
@@ -266,7 +323,27 @@ def apply_encoding(
 
     if ordem_esperada:
         missing = [col for col in ordem_esperada if col not in df_encoded.columns]
+
+        # [T1-10] Feature coverage check — ANTES do fill com 0.
+        # Motivação: uma vez preenchida com 0, a feature parece existir mas o
+        # modelo está cego para seu sinal. Detectar ausência de features críticas
+        # (top 10 por importância no modelo ativo) antes da homogeneização.
         if missing:
+            top_features = _load_top_features(artifacts, min_importance=0.01)
+            if top_features:
+                missing_set = set(missing)
+                critical_missing = [f for f in top_features if f['name'] in missing_set]
+                for f in critical_missing:
+                    msg = (
+                        f"  [T1-10] Feature CRÍTICA ausente do DataFrame: '{f['name']}' "
+                        f"(rank {f['rank']}, importância {f['importance']*100:.2f}%) "
+                        f"— será preenchida com 0, modelo fica cego para esse sinal"
+                    )
+                    if f['importance'] >= 0.05:
+                        logger.error(msg)
+                    else:
+                        logger.warning(msg)
+
             logger.debug(f"  Encoding: {len(missing)} features faltantes criadas com 0")
             for col in missing:
                 df_encoded[col] = 0

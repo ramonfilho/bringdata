@@ -45,7 +45,7 @@ Antes de executar `FORCE_DEPLOY=true ./deploy_capi.sh --force-deploy` para subir
 - [ ] T1-7 (parity audit) — Concluído, audit passou
 - [ ] T1-8 (gate de parity no deploy) — Concluído
 - [ ] T1-9 (protocolo progressão de tráfego) — Concluído
-- [ ] T1-10 (feature coverage check) — Pendente (check manual até implementar)
+- [ ] T1-10 (feature coverage check) — Concluído
 
 **Gates automáticos que o script roda:**
 1. `check_authorized_branch()` — bloqueia se branch não-rollback sem `FORCE_DEPLOY=true`
@@ -433,7 +433,7 @@ curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/singl
 | T1-7 Parity audit encoding | Concluído | | 2026-04-21 — snapshot regenerado com dataset mar24, audit compara 67k linhas × 51 colunas, 0 divergências |
 | T1-8 Branch autorizada + gate de processo | Concluído | | 2026-04-21 — Gate A (parity audit) automatizado no deploy_capi.sh. Checklist de Tier 1 adicionado como responsabilidade de processo. |
 | T1-9 Protocolo progressão de tráfego | Concluído | | 2026-04-21 — tabela de critérios objetivos documentada, diferencia caso unificação (ROAS via DEV20) de deploys normais (send_rate / 5xx / feature coverage). |
-| T1-10 Feature coverage check | Pendente | | Adicionado 2026-04-21 — descoberto durante T1-9; implementar check antes do fill com 0 em encoding.py |
+| T1-10 Feature coverage check | Concluído | | 2026-04-21 — _load_top_features() + check antes do fill com 0 em core/encoding.py. ERROR para importância ≥ 5%, WARNING ≥ 1%. |
 | T2-1 Deduplicação treino | Pendente | | |
 | T2-2 Log por etapa | Pendente | | |
 | T2-3 Importance weighting | Pendente | | |
