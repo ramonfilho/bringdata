@@ -254,6 +254,24 @@ Adicionado em 20/04/2026 após incidente: `main` deployada e com 100% do tráfeg
 
 ---
 
+### BLOCO 11 — Exceções silenciosas (T2-6)
+
+Descoberto em 2026-04-21 durante investigação do T1-9. Pontos onde `except: pass`, `except Exception: pass` ou `except Exception: return {}` engolem erros sem log — se a operação falhar, ninguém fica sabendo.
+
+| Arquivo | Linha | Padrão | Problema | Severidade |
+|---|---|---|---|---|
+| `src/monitoring/orchestrator.py` | 219-220 | `except Exception: pass` (db.rollback) | Transação abortada não avisa — estado inconsistente no banco | MÉDIA |
+| `src/monitoring/orchestrator.py` | 315 | `except: continue` (gspread row parse) | Linhas puladas silenciosamente — funil de leads fica incompleto | MÉDIA |
+| `api/app.py` | 1638-1640 | `except Exception: return {}` (Railway CAPI lookup) | FBP/FBC indisponíveis retornam dict vazio sem log — CAPI qualidade degradada | ALTA |
+| `api/app.py` | 2263-2264 | `except Exception as _sfm_e: logger.warning` | Já tem log, OK mas warning baixo | BAIXA |
+| `api/app.py` | 2596-2597 | `except Exception: logger.warning` (revenue_forecast) | Já tem log, OK | BAIXA |
+
+**Ação (Tier 2):** converter os 3 primeiros para `except Exception as e: logger.error(f"[falha silenciosa CORRIGIDA] ...") + raise` ou `+ return default` com log. Os 2 últimos já estão adequados (têm logger).
+
+**Por que Tier 2 e não Tier 1:** esses pontos não são bloqueadores ativos de produção — são pontos onde se algo der errado, ficamos cegos. Não impedem a unificação das branches.
+
+---
+
 ### BLOCO 6 — Fuso horário
 
 | Item | Status | Onde está | O que fazer |
@@ -344,6 +362,8 @@ Adicionado em 20/04/2026 após incidente: `main` deployada e com 100% do tráfeg
 | T2-3 | Importance weighting grupo controle | `src/train_pipeline.py` | Implementar pesos maiores para leads de controle |
 | T2-4 | Limite 10.000 em queries de validação | `src/validation/` | Remover ou alertar se hit |
 | T2-5 | Filtro vendas não aprovadas | `src/validation/validate_ml_performance.py` | Confirmar ou adicionar filtro explícito |
+| T2-6 | Eliminar exceções silenciosas críticas | múltiplos | Converter `except: pass` e `except Exception: return {}` em `logger.error` nos pontos listados abaixo |
+| T2-7 | Validador pós-deploy automatizado | novo | Script que consulta `/monitoring/daily-check` após deploy e retorna go/no-go baseado nos critérios de T1-9 (send_rate, 5xx, divergência D10%). Elimina dependência de disciplina humana na progressão de tráfego. |
 
 ### Tier 3 — Observabilidade
 
@@ -419,6 +439,8 @@ curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/singl
 | T2-3 Importance weighting | Pendente | | |
 | T2-4 Limite 10k queries | Pendente | | |
 | T2-5 Filtro vendas aprovadas | Pendente | | |
+| T2-6 Eliminar exceções silenciosas | Pendente | | Adicionado 2026-04-21 — descoberto em T1-9, 3 pontos de severidade média/alta (BLOCO 11) |
+| T2-7 Validador pós-deploy automatizado | Pendente | | Adicionado 2026-04-21 — substituiria a disciplina humana na progressão de tráfego de T1-9 |
 | T3-1 Canary documentado | Pendente | | |
 | T3-2 Smoke test pós-deploy | Pendente | | |
 | T3-3 Branch protection | Pendente | | |
