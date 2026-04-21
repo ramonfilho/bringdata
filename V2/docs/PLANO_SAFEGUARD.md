@@ -45,6 +45,7 @@ Antes de executar `FORCE_DEPLOY=true ./deploy_capi.sh --force-deploy` para subir
 - [ ] T1-7 (parity audit) — Concluído, audit passou
 - [ ] T1-8 (gate de parity no deploy) — Concluído
 - [ ] T1-9 (protocolo progressão de tráfego) — Concluído
+- [ ] T1-10 (feature coverage check) — Pendente (check manual até implementar)
 
 **Gates automáticos que o script roda:**
 1. `check_authorized_branch()` — bloqueia se branch não-rollback sem `FORCE_DEPLOY=true`
@@ -57,6 +58,79 @@ Antes de executar `FORCE_DEPLOY=true ./deploy_capi.sh --force-deploy` para subir
 - Progressão de tráfego conforme T1-9 (0% → 10% → 50% — parar aqui para DEV20)
 
 **Em caso de dúvida:** se qualquer item acima não puder ser confirmado, a resposta certa é **não deployar** e resolver primeiro.
+
+---
+
+## Protocolo de progressão de tráfego [T1-9]
+
+Cada deploy no Cloud Run segue a progressão abaixo. Cada etapa exige **tempo mínimo de observação E critérios objetivos cumpridos** — não avançar sem ambos.
+
+### Etapas padrão
+
+| De | Para | Tempo mínimo | Critérios objetivos |
+|---|---|---|---|
+| Build | 0% (`--no-traffic`) | — | Smoke test 5 leads: score retorna, decil atribuído, CAPI log sem 5xx |
+| 0% | 10% | 1 hora | Taxa de 5xx na nova rev < 1%; top-5 features do modelo não zeradas nos smoke test leads |
+| 10% | 50% | 24 horas | `funnel_metrics.capi_sent.send_rate` ≥ 90%; `meta_response.acceptance_rate` ≥ 85%; nenhum decil com 0 eventos CAPI (alerta via T1-2); `lead_quality_metrics.ultimas_24h.d10` não diverge de `ultimo_mes` em mais de 10pp |
+| 50% | 100% | Caso a caso — ver abaixo | Caso a caso — ver abaixo |
+
+### 50% → 100% — dois cenários
+
+**(a) Unificação main → produção (caso atual, único):** aguardar o ciclo do DEV20 fechar (a partir de 17/05/2026). O critério aqui **é** ROAS, apesar da latência de ~21 dias, porque a janela de validação é única e a decisão é irreversível. Ver `AB_TEST.md` → "Estratégia de deploy — 50/50".
+
+**(b) Deploys normais (retreinos mensais, patches, fixes):** 1 semana em 50% sem regressão operacional:
+- `funnel_metrics.capi_sent.send_rate` estável (±5pp do baseline da revisão anterior)
+- Taxa de 5xx não aumentou vs revisão anterior (comparar via Cloud Run metrics)
+- Feature coverage não degradou (top-5 features do modelo não zeradas em > 5% dos leads)
+
+ROAS **não é critério** para o caminho (b) — o ciclo de 15-21 dias do DevClub paralisaria deploys normais se fosse exigido.
+
+### O que NÃO é critério de bloqueio
+
+| Sinal | Por que não bloqueia |
+|---|---|
+| D10% absoluto alto (> 20-30%) | Constante histórica do projeto por feedback loop — não específico ao deploy |
+| Features novas/não reconhecidas | Esperado em retreinos quando dados reais mudam; gera alerta mas não regressão |
+| Alertas HIGH genéricos do orchestrator | Muitos HIGH são drift de dados externos (Meta API, Sheets) alheios ao deploy |
+| Divergência absoluta entre revisões em métricas de negócio | Se a nova revisão for melhor (ex: ROAS maior), não bloqueia — a comparação é "não regrediu" |
+
+### Rollback nomeado
+
+**Antes de cada etapa de progressão**, documentar por escrito:
+- **Qual revisão é o rollback?** nome exato (ex: `smart-ads-api-00269-jjn`)
+- **Comando pronto para colar:**
+
+```bash
+gcloud run services update-traffic smart-ads-api --region us-central1 \
+    --to-revisions <ROLLBACK_REVISION>=100
+```
+
+- **Tempo de reversão esperado:** < 2 minutos (Cloud Run propagação)
+- **Onde observar o resultado do rollback:** logs do Cloud Run, monitoring endpoint, Railway
+
+### Comandos de referência
+
+```bash
+# Ver split atual
+gcloud run services describe smart-ads-api --region us-central1 \
+    --project smart-ads-451319 --format="value(spec.traffic)"
+
+# Progressão gradual (exemplo 0% → 10%)
+gcloud run services update-traffic smart-ads-api --region us-central1 \
+    --project smart-ads-451319 \
+    --to-revisions NEW_REV=10,OLD_REV=90
+
+# Rollback imediato (100% para a revisão antiga)
+gcloud run services update-traffic smart-ads-api --region us-central1 \
+    --project smart-ads-451319 \
+    --to-revisions OLD_REV=100
+```
+
+### Observação sobre o feature coverage check
+
+Até T1-10 ser implementado, o check de "top-5 features não zeradas" é responsabilidade **manual** — rodar uma consulta no banco pós-deploy para verificar que as features críticas (cartão de crédito, nome_comprimento, dia_semana, tem_computador) não estão zeradas em proporção anormal dos leads recentes.
+
+Com T1-10, esse check roda automaticamente em `src/core/encoding.py` **antes** do fill com 0, emitindo alerta HIGH se > 5% dos leads têm alguma top-5 feature zerada.
 
 ---
 
@@ -259,6 +333,7 @@ Adicionado em 20/04/2026 após incidente: `main` deployada e com 100% do tráfeg
 | T1-7 | Parity audit de encoding | `tests/parity_audit.py` | Estender para ordinal + UTM + snapshot |
 | T1-8 | Branch autorizada + gate de processo | `api/deploy_capi.sh`, safeguard | Verificar branch em AUTHORIZED_BRANCHES + parity audit passando antes de qualquer deploy de `main` |
 | T1-9 | Protocolo de progressão de tráfego | `docs/` | Documentar e enforçar: 0%→10%(1h)→50%(confirmação)→100%(confirmação). **Especial:** no deploy de main unificado, parar em 50/50 durante o DEV20 para não expor o cliente a 100% antes de ROAS validado. Ver `AB_TEST.md` → "Estratégia de deploy — 50/50". |
+| T1-10 | Feature coverage check (fail-loud) | `src/core/encoding.py` | Antes do fill com 0, verificar se top-N features (importância ≥ 1%) estão zeradas em mais de X% dos leads. Alerta HIGH se sim. Evita degradação silenciosa como `Medium_Linguagem_programacao`. |
 
 ### Tier 2 — Qualidade de dados
 
@@ -337,7 +412,8 @@ curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/singl
 | T1-6 app.py load_dotenv | Pulado | | Cloud Run injeta env vars antes do startup. capi_integration.py já tem guards explícitos (if not ACCESS_TOKEN → logger.error + return error). Falha ruidosa, não silenciosa. |
 | T1-7 Parity audit encoding | Concluído | | 2026-04-21 — snapshot regenerado com dataset mar24, audit compara 67k linhas × 51 colunas, 0 divergências |
 | T1-8 Branch autorizada + gate de processo | Concluído | | 2026-04-21 — Gate A (parity audit) automatizado no deploy_capi.sh. Checklist de Tier 1 adicionado como responsabilidade de processo. |
-| T1-9 Protocolo progressão de tráfego | Pendente | | Adicionado 20/04/2026 pós-incidente |
+| T1-9 Protocolo progressão de tráfego | Concluído | | 2026-04-21 — tabela de critérios objetivos documentada, diferencia caso unificação (ROAS via DEV20) de deploys normais (send_rate / 5xx / feature coverage). |
+| T1-10 Feature coverage check | Pendente | | Adicionado 2026-04-21 — descoberto durante T1-9; implementar check antes do fill com 0 em encoding.py |
 | T2-1 Deduplicação treino | Pendente | | |
 | T2-2 Log por etapa | Pendente | | |
 | T2-3 Importance weighting | Pendente | | |
