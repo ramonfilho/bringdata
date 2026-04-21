@@ -50,6 +50,7 @@ PREVIOUS_REVISION=""
 YES_FLAG=false  # Pula confirmação se true
 NO_TRAFFIC=false  # Se true, deploy sem redirecionar tráfego (para teste)
 FORCE_DEPLOY=false  # Requer --force-deploy para branches não autorizadas
+SKIP_PARITY_AUDIT=${SKIP_PARITY_AUDIT:-false}  # [T1-8] Escape hatch para pular parity audit em branch não-rollback
 
 # =============================================================================
 # BRANCHES AUTORIZADAS PARA DEPLOY DE PRODUÇÃO
@@ -128,6 +129,79 @@ check_authorized_branch() {
 }
 
 # =============================================================================
+# [T1-8] GATE DE PARITY AUDIT
+# =============================================================================
+# Quando FORCE_DEPLOY=true (deploy de branch não-rollback como main), exige
+# que V2/tests/parity_audit.py passe antes de prosseguir. Bloqueia o deploy
+# se treino × produção divergirem coluna-a-coluna em encoding ou UTM.
+#
+# Motivação: antes da unificação edf23e9 → main, a única prova técnica de
+# que main não regride produção é o parity audit. Subir main em produção
+# sem esse check repete o bug do Medium_Linguagem_programacao (feature
+# zerada por semanas sem aviso).
+#
+# Escape hatch: SKIP_PARITY_AUDIT=true exige confirmação manual digitada.
+# =============================================================================
+
+check_parity_audit() {
+    # Só roda quando branch não-rollback (FORCE_DEPLOY=true)
+    if [ "$FORCE_DEPLOY" != "true" ]; then
+        return 0
+    fi
+
+    echo ""
+    echo "  [T1-8] Verificando parity audit treino × produção..."
+
+    if [ "$SKIP_PARITY_AUDIT" = "true" ]; then
+        echo ""
+        echo "  ⚠️  SKIP_PARITY_AUDIT=true — você está pulando o gate de paridade."
+        echo "      Isso só deve acontecer se os snapshots não estão disponíveis"
+        echo "      e você aceitou o risco documentado."
+        echo ""
+        read -r -p "  Digite exatamente 'PULAR PARITY AUDIT' para continuar: " CONFIRMATION
+        if [ "$CONFIRMATION" != "PULAR PARITY AUDIT" ]; then
+            echo "  ❌  Confirmação incorreta. Deploy cancelado."
+            exit 1
+        fi
+        echo "  ⚠️  Parity audit pulado manualmente. Prosseguindo sob risco."
+        return 0
+    fi
+
+    local PROJECT_DIR
+    PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+    if ! command -v python3 >/dev/null 2>&1; then
+        echo "  ❌  python3 não disponível — não é possível rodar parity audit."
+        echo "      Use SKIP_PARITY_AUDIT=true se tiver certeza do que está fazendo."
+        exit 1
+    fi
+
+    if (cd "$PROJECT_DIR/.." && python3 V2/tests/parity_audit.py --function utm 2>&1 | tail -30 && \
+        python3 V2/tests/parity_audit.py --function encoding 2>&1 | tail -30) | tee /tmp/parity_audit_deploy.log; then
+        if grep -q "DIVERG" /tmp/parity_audit_deploy.log; then
+            echo ""
+            echo "  ╔══════════════════════════════════════════════════════════════════╗"
+            echo "  ║  🚨  DEPLOY BLOQUEADO — PARITY AUDIT FALHOU                      ║"
+            echo "  ╠══════════════════════════════════════════════════════════════════╣"
+            echo "  ║  Treino × produção divergem coluna-a-coluna.                     ║"
+            echo "  ║  Ver /tmp/parity_audit_deploy.log para detalhes.                 ║"
+            echo "  ║                                                                  ║"
+            echo "  ║  Corrija a divergência antes de deployar, OU use:                ║"
+            echo "  ║    SKIP_PARITY_AUDIT=true ./deploy_capi.sh --force-deploy        ║"
+            echo "  ║  (exige confirmação manual digitada)                             ║"
+            echo "  ╚══════════════════════════════════════════════════════════════════╝"
+            echo ""
+            exit 1
+        fi
+        echo "  ✅  Parity audit OK — treino × produção idênticos"
+    else
+        echo ""
+        echo "  ❌  Erro ao executar parity audit. Ver /tmp/parity_audit_deploy.log"
+        exit 1
+    fi
+}
+
+# =============================================================================
 # VALIDAÇÕES PRÉ-DEPLOY
 # =============================================================================
 
@@ -137,6 +211,9 @@ validate_prerequisites() {
     # 1.0 Verificar branch autorizada (bloqueio de segurança)
     print_info "Verificando branch autorizada para deploy..."
     check_authorized_branch
+
+    # 1.0b [T1-8] Parity audit treino × produção (só em FORCE_DEPLOY=true)
+    check_parity_audit
 
     # 1.1 Docker (específico do deploy)
     validate_docker

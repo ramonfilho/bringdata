@@ -31,6 +31,35 @@ Para cada T1-x / T2-x / T3-x:
 
 ---
 
+## Checklist antes de deployar `main` (pré-unificação)
+
+Antes de executar `FORCE_DEPLOY=true ./deploy_capi.sh --force-deploy` para subir a branch `main` em produção, confirmar manualmente cada item. Não é gate automatizado — é responsabilidade de processo.
+
+**Tier 1 obrigatório:**
+- [ ] T1-1 (encoding fail-loud) — Concluído
+- [ ] T1-2 (CAPI alerta decil zero) — Concluído
+- [ ] T1-3 (CAPI deduplicação) — Concluído
+- [ ] T1-4 (timezone UTC) — Concluído
+- [ ] T1-5 (D10% alerta) — Pulado ou Concluído
+- [ ] T1-6 (app.py load_dotenv) — Pulado ou Concluído
+- [ ] T1-7 (parity audit) — Concluído, audit passou
+- [ ] T1-8 (gate de parity no deploy) — Concluído
+- [ ] T1-9 (protocolo progressão de tráfego) — Concluído
+
+**Gates automáticos que o script roda:**
+1. `check_authorized_branch()` — bloqueia se branch não-rollback sem `FORCE_DEPLOY=true`
+2. `check_parity_audit()` — bloqueia se `parity_audit.py` detectar divergência treino × produção
+
+**Gates manuais (responsabilidade humana):**
+- Checklist acima revisado com status atual no arquivo
+- `--no-traffic` usado no primeiro deploy (nova revisão recebe 0%)
+- Smoke test pós-deploy: 5 leads → score + decil + CAPI log OK
+- Progressão de tráfego conforme T1-9 (0% → 10% → 50% — parar aqui para DEV20)
+
+**Em caso de dúvida:** se qualquer item acima não puder ser confirmado, a resposta certa é **não deployar** e resolver primeiro.
+
+---
+
 ## Ordem de execução
 
 ```
@@ -307,7 +336,7 @@ curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/singl
 | T1-5 D10% alerta | Pulado | | Alertas só aparecem no endpoint — usuário consulta manualmente. Sem notificação proativa, o item não agrega valor além do que já existe. Reavaliar junto com T3-5 (Slack). |
 | T1-6 app.py load_dotenv | Pulado | | Cloud Run injeta env vars antes do startup. capi_integration.py já tem guards explícitos (if not ACCESS_TOKEN → logger.error + return error). Falha ruidosa, não silenciosa. |
 | T1-7 Parity audit encoding | Concluído | | 2026-04-21 — snapshot regenerado com dataset mar24, audit compara 67k linhas × 51 colunas, 0 divergências |
-| T1-8 Branch autorizada + gate de processo | Pendente | | Adicionado 20/04/2026 pós-incidente |
+| T1-8 Branch autorizada + gate de processo | Concluído | | 2026-04-21 — Gate A (parity audit) automatizado no deploy_capi.sh. Checklist de Tier 1 adicionado como responsabilidade de processo. |
 | T1-9 Protocolo progressão de tráfego | Pendente | | Adicionado 20/04/2026 pós-incidente |
 | T2-1 Deduplicação treino | Pendente | | |
 | T2-2 Log por etapa | Pendente | | |
