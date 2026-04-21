@@ -433,7 +433,7 @@ curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/singl
 | T1-7 Parity audit encoding | Concluído | | 2026-04-21 — snapshot regenerado com dataset mar24, audit compara 67k linhas × 51 colunas, 0 divergências |
 | T1-8 Branch autorizada + gate de processo | Concluído | | 2026-04-21 — Gate A (parity audit) automatizado no deploy_capi.sh. Checklist de Tier 1 adicionado como responsabilidade de processo. |
 | T1-9 Protocolo progressão de tráfego | Concluído | | 2026-04-21 — tabela de critérios objetivos documentada, diferencia caso unificação (ROAS via DEV20) de deploys normais (send_rate / 5xx / feature coverage). |
-| T1-10 Feature coverage check | Concluído | | 2026-04-21 — _load_top_features() + check antes do fill com 0 em core/encoding.py. ERROR para importância ≥ 5%, WARNING ≥ 1%. |
+| T1-10 Feature coverage check | Concluído | | 2026-04-21 — (1) check fail-loud em core/encoding.py antes do fill com 0 (ERROR ≥5%, WARNING ≥1%); (2) smoke_test_revision.py valida sobre leads reais do Railway; (3) Gate B automático no deploy_capi.sh bloqueia se encontrar ERROR; (4) deploy agora usa --tag para URL direta da revisão canary. |
 | T2-1 Deduplicação treino | Pendente | | |
 | T2-2 Log por etapa | Pendente | | |
 | T2-3 Importance weighting | Pendente | | |

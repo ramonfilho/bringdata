@@ -495,9 +495,13 @@ deploy_to_cloud_run() {
     print_success "Variáveis de ambiente configuradas (via lib/config.sh)"
 
     TRAFFIC_FLAG=""
+    CANARY_TAG=""
     if [ "$NO_TRAFFIC" = true ]; then
         TRAFFIC_FLAG="--no-traffic"
-        print_warning "Modo --no-traffic: nova revisão NÃO receberá tráfego (apenas para teste)"
+        # [T1-8/T1-10] Tag garante URL direta para smoke test pós-deploy
+        CANARY_TAG="canary-$(date +%s)"
+        TRAFFIC_FLAG="$TRAFFIC_FLAG --tag=$CANARY_TAG"
+        print_warning "Modo --no-traffic: nova revisão NÃO receberá tráfego (tag: $CANARY_TAG)"
     fi
 
     gcloud run deploy $SERVICE_NAME \
@@ -534,7 +538,25 @@ deploy_to_cloud_run() {
         if [ -n "$REVISION_URL" ]; then
             print_info "URL para teste direto: $REVISION_URL"
         fi
+
+        # [T1-10 Gate B] Smoke test automático pós-deploy
+        SMOKE_SCRIPT="$SCRIPT_DIR/../scripts/smoke_test_revision.py"
+        if [ -f "$SMOKE_SCRIPT" ]; then
+            print_info "[T1-10 Gate B] Rodando smoke test contra revisão $NEW_REVISION..."
+            if python3 "$SMOKE_SCRIPT" "$NEW_REVISION" --region "$REGION" --project "$PROJECT_ID"; then
+                print_success "[T1-10 Gate B] Smoke test passou — revisão saudável"
+            else
+                print_error "[T1-10 Gate B] Smoke test FALHOU — features críticas ausentes no encoding"
+                print_warning "Revisão permanece em 0% de tráfego. NÃO progredir tráfego até resolver."
+                print_info "Para descartar: gcloud run revisions delete $NEW_REVISION --region=$REGION"
+                exit 1
+            fi
+        else
+            print_warning "Smoke test script não encontrado em $SMOKE_SCRIPT — pulado"
+        fi
+
         print_info "Para promover: gcloud run services update-traffic $SERVICE_NAME --region=$REGION --to-revisions=$NEW_REVISION=100"
+        print_info "Para re-rodar smoke test antes de progredir tráfego (Gate A): python3 $SMOKE_SCRIPT $NEW_REVISION"
         print_info "Para descartar: gcloud run revisions delete $NEW_REVISION --region=$REGION"
     else
         # Garantir que 100% do tráfego vai para a nova revisão.
