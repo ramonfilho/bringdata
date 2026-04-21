@@ -229,7 +229,7 @@ Adicionado em 20/04/2026 após incidente: `main` deployada e com 100% do tráfeg
 | T1-6 | `app.py` sem `load_dotenv` | `api/app.py` | Verificar se `META_ACCESS_TOKEN` carrega no Cloud Run |
 | T1-7 | Parity audit de encoding | `tests/parity_audit.py` | Estender para ordinal + UTM + snapshot |
 | T1-8 | Branch autorizada + gate de processo | `api/deploy_capi.sh`, safeguard | Verificar branch em AUTHORIZED_BRANCHES + parity audit passando antes de qualquer deploy de `main` |
-| T1-9 | Protocolo de progressão de tráfego | `docs/` | Documentar e enforçar: 0%→10%(1h)→50%(confirmação)→100%(confirmação) |
+| T1-9 | Protocolo de progressão de tráfego | `docs/` | Documentar e enforçar: 0%→10%(1h)→50%(confirmação)→100%(confirmação). **Especial:** no deploy de main unificado, parar em 50/50 durante o DEV20 para não expor o cliente a 100% antes de ROAS validado. Ver `AB_TEST.md` → "Estratégia de deploy — 50/50". |
 
 ### Tier 2 — Qualidade de dados
 
@@ -301,12 +301,12 @@ curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/singl
 | Item | Status | Responsável | Data |
 |---|---|---|---|
 | T1-1 Encoding ordinal | Concluído | | 2026-04-20 |
-| T1-2 CAPI decil 0 eventos | Pendente | | |
-| T1-3 CAPI deduplicação | Pendente | | |
-| T1-4 Timezone UTC | Pendente | | |
-| T1-5 D10% alerta | Pendente | | |
-| T1-6 app.py load_dotenv | Pendente | | |
-| T1-7 Parity audit encoding | Pendente | | |
+| T1-2 CAPI decil 0 eventos | Concluído | | 2026-04-20 |
+| T1-3 CAPI deduplicação | Concluído | | 2026-04-20 |
+| T1-4 Timezone UTC | Concluído | | 2026-04-20 |
+| T1-5 D10% alerta | Pulado | | Alertas só aparecem no endpoint — usuário consulta manualmente. Sem notificação proativa, o item não agrega valor além do que já existe. Reavaliar junto com T3-5 (Slack). |
+| T1-6 app.py load_dotenv | Pulado | | Cloud Run injeta env vars antes do startup. capi_integration.py já tem guards explícitos (if not ACCESS_TOKEN → logger.error + return error). Falha ruidosa, não silenciosa. |
+| T1-7 Parity audit encoding | Concluído | | 2026-04-21 — snapshot regenerado com dataset mar24, audit compara 67k linhas × 51 colunas, 0 divergências |
 | T1-8 Branch autorizada + gate de processo | Pendente | | Adicionado 20/04/2026 pós-incidente |
 | T1-9 Protocolo progressão de tráfego | Pendente | | Adicionado 20/04/2026 pós-incidente |
 | T2-1 Deduplicação treino | Pendente | | |

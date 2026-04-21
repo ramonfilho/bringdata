@@ -174,7 +174,14 @@ Para cada arquivo trazido do edf23e9 para main:
 | `configs/active_model.yaml` | Sem A/B test (edf23e9) vs com A/B test (main) | main correto — manter estrutura main |
 
 ### Resultado esperado
-Após a unificação: main em produção, edf23e9 aposentado, uma única fonte de verdade.
+
+Após a unificação, o deploy **não** vai direto para 100%. O target é **50/50** — main unificada e rollback `edf23e9` cada um com metade do tráfego. Decisão tomada em 21/04/2026; rationale completo em `AB_TEST.md` → seção "Estratégia de deploy — 50/50 em vez de 100%".
+
+- **Durante o 50/50:** o A/B test só roda na metade da main (rollback não tem código de roteamento). Amostra efetiva do A/B cai pela metade no DEV20.
+- **Pré-requisitos para o 50/50:** Tier 1 completo + parity audit passando + smoke test pós-deploy.
+- **Subir para 100%:** só após 3 dias sem alerta HIGH + ROAS por variante consolidado no DEV20.
+
+O edf23e9 só é aposentado de verdade quando main está a 100%.
 
 ---
 

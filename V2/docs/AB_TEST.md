@@ -268,3 +268,32 @@ O prazo original de 27/04/2026 não é mais viável: a janela de conversão do L
 > WHERE "createdAt" >= '2026-04-21 03:00:00'   -- 00:00 BRT = 03:00 UTC
 >   AND "createdAt" <  '2026-05-05 03:00:00'   -- fim da captação
 > ```
+
+---
+
+## Estratégia de deploy — 50/50 em vez de 100% (decisão 21/04/2026)
+
+A revisão com o A/B test ativo (branch `main` unificada) será promovida a **50% do tráfego**, não 100%. Os outros 50% permanecem no rollback (`edf23e9`).
+
+**Motivação:** proteger o cliente de exposição total à revisão nova antes da confirmação empírica de paridade. Mesmo com o parity audit passando coluna-a-coluna em `tests/parity_audit.py`, qualquer divergência não detectada pelo audit se manifestaria como queda de ROAS — e com 50/50 pelo menos metade do volume segue com a versão em produção conhecida enquanto a nova é validada em condições reais.
+
+**Impacto no A/B test:**
+- Apenas a metade na revisão unificada executa o roteamento Champion/Challenger (ML_MAR → mar24)
+- A metade no rollback envia tudo ao Champion jan30 — não tem código do A/B
+- Amostra efetiva do A/B cai pela metade — considerar no cálculo de significância estatística do DEV20
+
+**Pré-requisitos antes do 50/50:**
+1. Tier 1 dos safeguards concluído (`docs/PLANO_SAFEGUARD.md`)
+2. `python V2/tests/parity_audit.py` passa coluna-a-coluna contra os snapshots regenerados
+3. Smoke test pós-deploy: 5 leads → score + decil + CAPI log OK
+
+**Critério para subir para 100%:**
+- Nenhum alerta HIGH no monitoramento por 3 dias consecutivos após 50/50
+- ROAS por variante coletado no DEV20 permite comparação estatística confiável
+- Nenhuma regressão operacional (decis com 0 eventos, capiStatus blocked/null > 10%, etc.)
+
+**Comando de deploy:**
+```bash
+gcloud run services update-traffic smart-ads-api --region us-central1 \
+    --to-revisions <revision-main-unificada>=50,smart-ads-api-00269-jjn=50
+```

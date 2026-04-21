@@ -181,58 +181,51 @@ def audit_fe():
 
 def audit_encoding():
     """
-    Migração concluída — encoding_training.py deletado.
-    Smoke test: core/encoding.apply_encoding roda e produz colunas numéricas esperadas.
+    [T1-7] Parity audit de encoding — comparação coluna-a-coluna contra snapshot.
 
-    Divergências documentadas (intencionais por design — não são regressões):
-      - clean_column_names() normaliza nomes para snake_case → 51 cols core/ vs 60 cols treino antigo
-      - Ordinais com nomes longos em core/ (snapshot tem forma longa): 'Atualmente_qual_a_sua_faixa_salarial'
-        vs 'faixa_salarial' no treino antigo (aliases curtos via category_unification não migrado ainda)
-    Produção (encoding.py) mantém import antigo até o próximo retreino (estratégia train-first).
+    Snapshot regenerado em 21/04/2026 com os parâmetros exatos do modelo mar24
+    em produção (67,457 registros, split temporal_leads, medium_strategy binary_top3).
+
+    Smoke checks mantidos como segunda linha de defesa:
+      - Ordinais encodadas como numéricas
+      - Nenhum NaN no output
+      - Nomes de coluna em snake_case
     """
     from V2.src.core.encoding import apply_encoding
     from V2.src.core.client_config import ClientConfig
 
-    config   = ClientConfig.from_yaml(os.path.join(ROOT, 'V2', 'configs', 'clients', 'devclub.yaml'))
-    df_input = _load('snapshot_encoding_input')
-    df_out   = apply_encoding(df_input.copy(), config.encoding, artifacts={})
+    config     = ClientConfig.from_yaml(os.path.join(ROOT, 'V2', 'configs', 'clients', 'devclub.yaml'))
+    df_input   = _load('snapshot_encoding_input')
+    df_expect  = _load('snapshot_encoding_output')
+    df_actual  = apply_encoding(df_input.copy(), config.encoding, artifacts={})
 
-    print(f"\n{'='*65}")
-    print("  Encoding — core/encoding smoke test (migração concluída)")
-    print(f"{'='*65}")
-    print(f"  Input : {df_input.shape[0]:,} linhas × {df_input.shape[1]} colunas")
-    print(f"  Output: {df_out.shape[0]:,} linhas × {df_out.shape[1]} colunas")
+    ok_snap = _compare(df_expect, df_actual, "Encoding — snapshot (captura no treino) vs output atual")
 
-    ok = True
+    # Smoke checks adicionais
+    ok_smoke = True
 
-    # Verificar que ordinais foram encodadas como numéricas
     ordinais_esperadas = {
-        'Atualmente_qual_a_sua_faixa_salarial',  # forma longa normalizada
-        'Qual_a_sua_idade',                        # forma longa normalizada
+        'Atualmente_qual_a_sua_faixa_salarial',
+        'Qual_a_sua_idade',
         'dia_semana',
     }
-    # Verificar ao menos uma ordinal presente e numérica
-    ordinais_presentes = [c for c in df_out.columns if any(o in c for o in ordinais_esperadas)]
+    ordinais_presentes = [c for c in df_actual.columns if any(o in c for o in ordinais_esperadas)]
     for col in ordinais_presentes:
-        if df_out[col].dtype == object:
-            print(f"\n  [!] Ordinal '{col}' não foi encodada — dtype={df_out[col].dtype}")
-            ok = False
+        if df_actual[col].dtype == object:
+            print(f"  [!] Ordinal '{col}' não foi encodada — dtype={df_actual[col].dtype}")
+            ok_smoke = False
 
-    # Verificar ausência de NaN
-    nan_count = df_out.isna().sum().sum()
+    nan_count = df_actual.isna().sum().sum()
     if nan_count > 0:
-        print(f"\n  [!] {nan_count} NaN remanescentes no output")
-        ok = False
+        print(f"  [!] {nan_count} NaN remanescentes no output")
+        ok_smoke = False
 
-    # Verificar que nomes de coluna são snake_case (sem chars especiais)
-    bad_cols = [c for c in df_out.columns if any(ch in c for ch in ['?', ' ', '-', '.'])]
+    bad_cols = [c for c in df_actual.columns if any(ch in c for ch in ['?', ' ', '-', '.'])]
     if bad_cols:
-        print(f"\n  [!] Colunas com caracteres especiais ({len(bad_cols)}): {bad_cols[:5]}")
-        ok = False
+        print(f"  [!] Colunas com caracteres especiais ({len(bad_cols)}): {bad_cols[:5]}")
+        ok_smoke = False
 
-    if ok:
-        print("\n  OK — encoding aplicado, colunas normalizadas, sem NaN\n")
-    return ok
+    return ok_snap and ok_smoke
 
 
 # ---------------------------------------------------------------------------
