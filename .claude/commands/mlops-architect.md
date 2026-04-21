@@ -112,6 +112,7 @@ Antes de qualquer implementação, responda:
 - [ ] O novo campo em `ClientConfig` tem `default`?
 - [ ] O parity audit passa antes e depois da mudança?
 - [ ] A mudança está em treino, produção E monitoramento — ou só em um deles?
+- [ ] O novo transform tem assert/validação que falha alto se output for zero ou nulo inesperado? (fail-loud obrigatório)
 
 **Para retreino de modelo:**
 - [ ] O dataset tem grupo controle representado?

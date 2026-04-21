@@ -25,6 +25,8 @@ Quando houver dúvida sobre como um componente deve funcionar: `ARQUITETURA_SIST
 
 | Skill | Quando usar |
 |---|---|
+| `/ctx` | Contexto operacional do projeto — onboarding e desenvolvimento |
+| `/mlops-architect` | Contexto arquitetural profundo + checklists de segurança |
 | `/investigate` | Investigar por que um lançamento foi ruim |
 | `/investigate-ab` | Verificar se o teste A/B está tecnicamente válido |
 | `/safeguard` | Auditoria completa de integridade do projeto |
