@@ -281,6 +281,16 @@ O golden snapshot do monitoring (`docs/monitoring_golden_snapshot.json`) **não 
 - **Onde está documentado:** `PLANO_REFACTOR_MLOPS.md` — bloco de ação urgente no topo do documento.
 - **Incorporado a:** Fase 5 deste plano (retreino pós-resultado A/B).
 
+### Gatilho de retreino por drift de públicos (identificado 22/04/2026)
+
+- **Observação:** 5 das 6 categorias Medium do treino `jan30` sumiram do tráfego em produção. `Medium_Linguagem_programacao` (rank #6 no modelo, 5,31% da importância) = 0 para 100% dos leads. `Medium_Aberto` virou quase-constante (1 em 70% dos leads vs 14,5% no treino). `Medium_Lookalike_2pct_Cadastrados` = 0 para 100%.
+- **Impacto:** grupo `Medium_*` pesa 7,95% da importância total. A feature top do grupo está cega; as outras duas perderam poder discriminativo. Consistente com o drift de D10 observado (esperado 10%, atual 32,7%) e com o cluster 3 do `Erros_cometidos.md` (Medium_Linguagem_programacao zerada em 13/04 por causa distinta — encoding).
+- **Evidência:** `/monitoring/daily-check` 22/04/2026 — alertas `distribution_drift HIGH` em Medium e `score_distribution_change HIGH` em D10.
+- **O que fazer:** retreinar com dados pós-01/04/2026 (quando a composição atual de públicos estabilizou) antes de esperar o fechamento do A/B test. O feature registry do novo modelo refletirá o mix atual.
+- **Pré-requisitos:** idealmente após fix de DT-13 (brecha de `utm_term`) para não arrastar ruído pro treino novo; e após decisão sobre tratamento de `Source='org'` (hoje cai em `Outros`).
+- **Prioridade:** média — não bloqueia deploys imediatos, mas o modelo está operando com 7,95% da sua massa de decisão cega. Reavaliar a cada ciclo de investigação.
+- **Referência cruzada:** `INVESTIGACAO_BAIXO_DESEMPENHO.md`, `PLANO_REFACTOR_MLOPS.md` §11 DT-13, `PLANO_SAFEGUARD.md` T2-8.
+
 ### Fases futuras do refactor (sem prazo imediato)
 
 | Fase | Condição de entrada | Referência |

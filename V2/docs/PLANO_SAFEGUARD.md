@@ -364,6 +364,7 @@ Descoberto em 2026-04-21 durante investigação do T1-9. Pontos onde `except: pa
 | T2-5 | Filtro vendas não aprovadas | `src/validation/validate_ml_performance.py` | Confirmar ou adicionar filtro explícito |
 | T2-6 | Eliminar exceções silenciosas críticas | múltiplos | Converter `except: pass` e `except Exception: return {}` em `logger.error` nos pontos listados abaixo |
 | T2-7 | Validador pós-deploy automatizado | novo | Script que consulta `/monitoring/daily-check` após deploy e retorna go/no-go baseado nos critérios de T1-9 (send_rate, 5xx, divergência D10%). Elimina dependência de disciplina humana na progressão de tráfego. |
+| T2-8 | Alerta de feature importance-alta com variance baixa em produção | `src/monitoring/orchestrator.py` | Para cada feature com importance ≥ 1% no modelo ativo, disparar alerta quando a variance em produção cair abaixo de um limiar (feature quase-constante: >95% de leads no mesmo valor, ou 100% zerada). Complementa T1-10 (coverage após encoding) cobrindo o caso "categoria sumiu do mix de tráfego, não do encoding". Gatilho para retreino por drift. |
 
 ### Tier 3 — Observabilidade
 
@@ -441,6 +442,7 @@ curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/singl
 | T2-5 Filtro vendas aprovadas | Pendente | | |
 | T2-6 Eliminar exceções silenciosas | Pendente | | Adicionado 2026-04-21 — descoberto em T1-9, 3 pontos de severidade média/alta (BLOCO 11) |
 | T2-7 Validador pós-deploy automatizado | Pendente | | Adicionado 2026-04-21 — substituiria a disciplina humana na progressão de tráfego de T1-9 |
+| T2-8 Alerta feature importance-alta variance baixa | Pendente | | Adicionado 2026-04-22 — descoberto na investigação de drift de Medium (22/04); `Medium_Linguagem_programacao` (5,31% importance) zerada em produção sem alerta prévio. |
 | T3-1 Canary documentado | Pendente | | |
 | T3-2 Smoke test pós-deploy | Pendente | | |
 | T3-3 Branch protection | Pendente | | |

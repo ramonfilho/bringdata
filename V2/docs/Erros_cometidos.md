@@ -174,6 +174,8 @@ Três correções pontuais ao longo de dois meses, todas reativas — o problema
 
 A causa raiz é que a lista de origens conhecidas era estática e precisava ser atualizada manualmente sempre que uma nova tag de UTM aparecia nas campanhas. Qualquer origem nova que escapasse da lista criava ruído silencioso no modelo sem disparar nenhum alerta.
 
+**Reincidência em UTM Term — 22/04/2026.** A mesma lição se repetiu em outro eixo. O sistema agrupa termos não-reconhecidos em `'outros'` via regra de fallback em `core/utm.py`. A condição tinha uma exceção para preservar códigos numéricos curtos, mas nenhuma categoria numérica existia na whitelist de treino — a exceção só criava uma brecha. Em produção, o valor `utm_term='0405'` começou a aparecer (669 leads/dia, 16% do volume) e escapava para o modelo como categoria inédita, saindo do encoding com todas as três features de Term zeradas — combinação nunca vista no treino. O monitoramento detectou a categoria nova corretamente, mas a lógica da unificação continuava deixando escapar. Registrado como DT-13 em `PLANO_REFACTOR_MLOPS.md` §11 com fix de uma linha (remover a exceção numérica). Lição: regras de unificação UTM precisam ser *whitelist* estrita — o que não está na lista vai para `'outros'`, sem ramos condicionais que "preservam" casos específicos.
+
 ---
 
 ### 12. Dataset de treino com dois erros silenciosos de preparação

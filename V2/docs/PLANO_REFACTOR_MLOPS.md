@@ -916,6 +916,43 @@ Imports de `core/utm`, `core/medium`, `core/category_unification`, `core/preproc
 
 **Prioridade:** alta — A/B test atual está com jan30 em desvantagem estrutural.
 
+### DT-13 — Brecha de dígitos curtos em `_unify_term`
+
+`src/core/utm.py:118` — a condição de fallback `if not valor.isdigit() or len(valor) > threshold` foi escrita para mandar IDs longos para `'outros'` enquanto preservaria códigos numéricos curtos conhecidos. Na prática, nenhuma categoria numérica existe na whitelist DevClub (`Term: instagram / facebook / outros`), e a exceção apenas cria uma brecha: qualquer string 100% numérica com até 10 dígitos permanece como valor raw em vez de virar `'outros'`.
+
+**Evidência (investigado em 22/04/2026):**
+
+| `utm_term` raw | Leads 24h | Destino atual | Destino correto |
+|---|---|---|---|
+| `0405` | 669 | permanece `'0405'` | `'outros'` |
+| `{{site_source_name}}` | 40 | `'outros'` (pattern `{`) | — ok |
+| `120240527343300390` | 4 | `'outros'` (18 dígitos > threshold) | — ok |
+
+**Impacto:** os 669 leads/24h com `term='0405'` saem do encoding com `Term_facebook = Term_instagram = Term_outros = 0` — combinação nunca vista no treino, onde todo lead tinha exatamente um dos três = 1. A feature `Term_0405` é criada e descartada pelo modelo; o lead fica sem sinal de Term (grupo pesa 3,59% da importância). Efeito desprezível por lead, mas 16% do volume diário.
+
+**Fix (uma linha):** substituir o bloco da regra remainder por um teste simples de presença na whitelist:
+
+```python
+# Antes (src/core/utm.py:112-119)
+valores_conhecidos = set(direct_mappings.values()) | {'outros'}
+outros_mask = df['Term'].notna() & ~df['Term'].isin(valores_conhecidos)
+valores_restantes = df.loc[outros_mask, 'Term'].unique()
+for valor in valores_restantes:
+    if isinstance(valor, str):
+        if not valor.isdigit() or len(valor) > threshold:
+            df.loc[df['Term'] == valor, 'Term'] = 'outros'
+
+# Depois
+valores_conhecidos = set(direct_mappings.values()) | {'outros'}
+df.loc[df['Term'].notna() & ~df['Term'].isin(valores_conhecidos), 'Term'] = 'outros'
+```
+
+O parâmetro `config.term_long_id_threshold` pode ser marcado DEPRECATED no YAML e no dataclass. Validar em paridade com treino: rodar pipeline de treino pós-fix — a distribuição de Term no dataset não deve mudar (no treino histórico não existem valores numéricos curtos não-mapeados, pelo que `_load_valid_categories` mostra só instagram/facebook/outros).
+
+**Prioridade:** alta — bug ativo degradando 16% dos leads diários, fix trivial. Fechar antes de qualquer retreino (DT-13 precede "Gatilho de retreino por drift de públicos" no `PLANO_EXECUCAO.md`).
+
+**Referência cruzada:** `Erros_cometidos.md` item 11 (mesma lição, ocorrência anterior em UTM Source — 20/02–26/02/2026); `PLANO_EXECUCAO.md` "Gatilho de retreino por drift de públicos".
+
 ---
 
 ## 12. Caminho para Nível 2 e além
