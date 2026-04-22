@@ -324,6 +324,7 @@ gcloud run revisions list \
 
 ## SKILLS DISPONÍVEIS
 
+### ML / Infra
 | Skill | Quando usar |
 |---|---|
 | `/ctx` | Esta skill — contexto geral, onboarding, desenvolvimento |
@@ -332,6 +333,15 @@ gcloud run revisions list \
 | `/investigate-ab` | A/B test está funcionando? Roteamento correto? |
 | `/safeguard` | Auditoria completa de integridade pré-deploy/merge |
 | `/plan-integrator` | Ler toda a documentação e reconciliar estado atual |
+
+### Comercial
+| Skill | Quando usar |
+|---|---|
+| `/comercial` | Contexto das propostas em circulação (decks, case, preços) |
+| `/prospect` | Pesquisar contatos de uma empresa-alvo com protocolo de confiança (tier ranking, multi-source) |
+| `/copy` | Redigir ou revisar mensagens iniciais de outreach (email, LinkedIn, WhatsApp) |
+| `/pptx` | Ler ou editar texto dos decks em `V2/propostas_e_apresentacoes/` |
+| `/sheets` | Leitura/edição do CSV-fonte (`V2/comercial/contatos.csv`) e sync com Google Sheets |
 
 ---
 

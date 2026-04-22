@@ -75,3 +75,4 @@ scr/preprocessing/02_params/
 scr/preprocessing/03_params/
 scr/preprocessing/04_params/.netlify/
 db.sqlite3
+.drafts/
