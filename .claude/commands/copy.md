@@ -65,6 +65,43 @@ Variação curta (warm ou LinkedIn): omitir a segunda frase; manter as duas pont
 - Usar palavras-ingresso genéricas de IA ("revolucionar", "transformar", "exponencial").
 - Qualquer número que não esteja em `/comercial`.
 
+### Regra de scope — tenure confirmado, scope fuzzy
+
+Se a pessoa tem **tenure Tier 1 confirmado** (realmente trabalha lá, realmente é o cargo) mas o **escopo específico não é confirmado** (ex.: sócio-fundador sem mandato claro sobre MKT/growth/dados), **ainda enviar** — usando **copy genérica** que não alega escopo específico.
+
+**Não usar copy genérica para:**
+- Tenure não confirmado (só Tier 3) → verify_first ou skip
+- Nome não canonical → skip (risco de mandar pro destinatário errado)
+
+**Template de copy genérica (scope-agnóstico):**
+
+```
+Subject: Lead scoring por ML — Bring Data — verificando a via correta na [Empresa]
+
+[Nome], tudo bem?
+
+Meu nome é Ramon Filho, fundador da Bring Data. Estou em contato com algumas lideranças da [Empresa] em paralelo para apresentar um produto que potencialmente se encaixa em áreas de marketing, growth, dados ou captação digital. Se a decisão sobre esse tipo de tema passa por você ou por outra área, agradeço o direcionamento.
+
+Desenvolvemos um sistema de lead scoring por machine learning que envia sinais de propensão à Meta, Google e TikTok via API em menos de 5 minutos após o lead chegar. O modelo aprende com o histórico real da operação — quem preencheu o formulário e quem efetivamente abriu conta e virou cliente — e ensina o algoritmo da plataforma a trazer mais perfis com o padrão dos melhores clientes.
+
+Em operação verificada: 92 centavos de margem incremental para cada R$1 investido em anúncios, ROAS superior ao grupo de controle em 12 de 12 lançamentos e significância estatística em 5 testes A/B simultâneos.
+
+Gostaria de apresentar em uma conversa de 30 minutos — ou de saber se a via correta passa por outra pessoa.
+
+Atenciosamente,
+Ramon Filho
+Fundador — Bring Data
++55 37 99961-0179
+ramon@bring-data.com
+```
+
+### Regra de email compartilhado (mesmo destino, múltiplos decisores)
+
+Quando vários contatos da mesma empresa compartilham o **mesmo email institucional** (ex.: Pequod onde todos passam por `contato@`), **não enviar em batch no mesmo dia** — vira spam. Em vez disso:
+- 1 draft no dia com A/C da pessoa primária recomendada
+- Demais contatos ficam como **follow-up explícito em Observações**, com gatilho temporal (D+7, D+14) e A/C diferente por rodada
+- Nunca "cobrir" os demais com uma única mensagem mencionando-os — o propósito é ter pontos de entrada distintos em datas distintas, não consolidar
+
 ### Fatos sobre o destinatário — regra de staleness
 
 Sobre o **destinatário** (empresa/pessoa), usar apenas afirmações **direcionais e duráveis**. Números específicos envelhecem e, se errados, sinalizam bot.
