@@ -805,6 +805,39 @@ def read_all_training_sources(
         elif _hotmart_enabled:
             logger.warning("  Hotmart habilitado mas datas Guru ausentes — pulando")
 
+        # === LEADS DO RAILWAY POSTGRESQL (adicionado 2026-04-23) ===
+        # Cliente migrou para webhook → Railway tem os leads recentes, Sheets fica truncado.
+        # Sem isso, vendas recentes do Guru/Hotmart são removidas por parecerem "futuras".
+        _railway_enabled = bool(
+            client_config is not None
+            and getattr(client_config, 'ingestion', None) is not None
+            and getattr(client_config.ingestion, 'railway_enabled', False)
+        )
+        if _railway_enabled and guru_start and guru_end:
+            logger.info("\n 3/3: Leads do Railway PostgreSQL")
+            try:
+                sales_loader = SalesDataLoader()
+                railway_df = sales_loader.load_railway_leads(
+                    start_date=guru_start,
+                    end_date=guru_end,
+                    client_config=client_config,
+                )
+
+                if not railway_df.empty:
+                    # Railway vem no formato Sheets (mapper já aplicou railway_lead_to_sheets_row)
+                    # Entra direto em api_data com uma aba "Sheet1"
+                    api_data['[Railway] Leads'] = {
+                        'Sheet1': railway_df
+                    }
+                    logger.info(f"     {len(railway_df):,} leads Railway carregados")
+                else:
+                    logger.warning("     Nenhum lead encontrado no Railway")
+
+            except Exception as e:
+                logger.error(f"    Erro ao buscar leads do Railway: {e}")
+        elif _railway_enabled:
+            logger.warning("  Railway habilitado mas datas Guru ausentes — pulando")
+
         # 3. COMBINAR DADOS LOCAIS + API
         if api_data:
             logger.info("\n COMBINANDO DADOS")

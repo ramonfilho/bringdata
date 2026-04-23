@@ -80,6 +80,10 @@ class IngestionConfig:
     # negativos no dataset de treino — degradação de sinal proporcional ao volume Hotmart.
     hotmart_enabled: bool = False                                # liga/desliga ingestão Hotmart no treino
     hotmart_api_basic_auth_env_var: Optional[str] = None         # env var com credencial Basic Auth (ex: "HOTMART_BASIC")
+    # Railway PostgreSQL — fonte principal de leads desde que cliente migrou para webhook (2026-02-18+).
+    # Sheets fica truncado em ~1 mês atrás. Sem Railway, treino perde ~45k leads recentes e remove
+    # vendas recentes do Guru/Hotmart por parecerem "futuras" em relação ao último lead do Sheets.
+    railway_enabled: bool = False                                # liga/desliga ingestão Railway no treino
     # Unificação de colunas (#13–#20) — sub-dict com pesquisa_merges,
     # valor_columns, produto_columns, nome_columns, email_columns, telefone_columns
     column_unification: Optional[Dict[str, Any]] = None

@@ -35,6 +35,10 @@ ingestion:
   # o sinal proporcional ao volume Hotmart.
   hotmart_enabled: true
   hotmart_api_basic_auth_env_var: HOTMART_BASIC
+  # Railway PostgreSQL — fonte principal de leads desde 2026-02-18 (webhook).
+  # Sheets truncado em ~1 mês atrás; sem Railway o treino perde 45k+ leads recentes
+  # e remove vendas Guru/Hotmart recentes por parecerem "futuras".
+  railway_enabled: true
   has_tmb: true
   sales_platform_identifier: guru
   approved_status_value: Aprovada

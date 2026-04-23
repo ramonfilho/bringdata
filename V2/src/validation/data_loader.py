@@ -1306,6 +1306,98 @@ class SalesDataLoader:
 
         return df_norm
 
+    def load_railway_leads(self, start_date: str, end_date: str, client_config=None) -> pd.DataFrame:
+        """
+        Carrega leads do Railway PostgreSQL (tabela "Lead") no período informado
+        e converte para o formato esperado pelo pipeline de treino (equivalente ao
+        output do Google Sheets após unificação de colunas).
+
+        Usa o mapper api.railway_mapping.railway_lead_to_sheets_row() — mesmo que
+        a API de produção usa em runtime, garantindo paridade treino × produção.
+
+        Motivação: Sheets ficou truncado em 2026-03-27 — leads mais recentes vivem
+        apenas no Railway via webhook. Sem esta fonte, treino perde ~1 mês de dados
+        e remove vendas Guru/Hotmart por parecerem "futuras" frente à data máxima
+        dos leads do Sheets.
+
+        Args:
+            start_date: YYYY-MM-DD (inclusive)
+            end_date:   YYYY-MM-DD (inclusive)
+            client_config: opcional — se fornecido, passa para railway_lead_to_sheets_row()
+                           para usar mapas específicos do cliente
+
+        Returns:
+            DataFrame com colunas no formato Sheets (E-mail, Nome Completo, Data,
+            Source, Medium, Campaign, Term, Content, + perguntas da pesquisa como
+            "Qual a sua idade?", "Atualmente, qual a sua faixa salarial?", etc.)
+            Vazio se env vars RAILWAY_DB_* ausentes ou tabela vazia no período.
+        """
+        import pg8000.native
+
+        try:
+            _pw = os.environ['RAILWAY_DB_PASSWORD']
+        except KeyError:
+            logger.error(" RAILWAY_DB_PASSWORD não encontrado no ambiente — configure V2/.env")
+            return pd.DataFrame()
+
+        logger.info(f" Carregando leads Railway ({start_date} → {end_date})")
+
+        # Cache parquet
+        cache_file = self._cache_path('railway_leads', start_date, end_date)
+        if cache_file.exists():
+            logger.info(f"    Cache HIT Railway: {cache_file.name}")
+            return pd.read_parquet(cache_file)
+
+        try:
+            conn = pg8000.native.Connection(
+                host=os.environ.get('RAILWAY_DB_HOST', 'shortline.proxy.rlwy.net'),
+                port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+                database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+                user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+                password=_pw,
+            )
+            # end_date inclusive → somar 1 dia no filtro
+            rows = conn.run(
+                """
+                SELECT id, data, "nomeCompleto", email, telefone, pesquisa,
+                       source, medium, campaign, content, term,
+                       "createdAt"
+                FROM "Lead"
+                WHERE "createdAt" >= :start_date
+                  AND "createdAt" <  :end_date_excl
+                """,
+                start_date=start_date,
+                end_date_excl=(pd.to_datetime(end_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d'),
+            )
+            conn.close()
+        except Exception as e:
+            logger.error(f"    Erro ao conectar/consultar Railway: {e}")
+            return pd.DataFrame()
+
+        if not rows:
+            logger.warning("    Nenhum lead Railway encontrado no período")
+            return pd.DataFrame()
+
+        # Converter row tuple → dict com nomes das colunas
+        cols = ['id', 'data', 'nomeCompleto', 'email', 'telefone', 'pesquisa',
+                'source', 'medium', 'campaign', 'content', 'term', 'createdAt']
+        raw_leads = [dict(zip(cols, r)) for r in rows]
+
+        # Aplicar mapper para cada lead (Railway → Sheets format)
+        from api.railway_mapping import railway_lead_to_sheets_row
+        mapped = [railway_lead_to_sheets_row(r, client_config=client_config) for r in raw_leads]
+
+        df = pd.DataFrame(mapped)
+        logger.info(f"    {len(df):,} leads Railway carregados e convertidos para formato Sheets")
+
+        try:
+            df.to_parquet(cache_file, index=False)
+            logger.info(f"    Cache SAVED Railway: {cache_file.name}")
+        except Exception as ce:
+            logger.warning(f"    Não foi possível salvar cache Railway: {ce}")
+
+        return df
+
     def load_asaas_sales(self, start_date: str, end_date: str,
                          product_value: float = None,
                          customer_created_from: str = None,
