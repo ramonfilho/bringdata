@@ -2031,6 +2031,168 @@ def fetch_leads_from_sheets(hours: int = 24) -> List[Dict[str, Any]]:
 # MONITORING ENDPOINTS
 # =============================================================================
 
+@app.get("/monitoring/feature-report")
+async def feature_report(
+    hours: int = 24,
+    revision: Optional[str] = None,
+):
+    """
+    [T1-11 Peça B] Agrega os logs do feature_validator das últimas N horas
+    e retorna relatório consolidado do monitoramento pré-encoding.
+
+    Consome os logs estruturados [FV_JSON] emitidos por
+    `src/core/feature_validator.py` em produção (um log por batch scoreado).
+
+    Args:
+        hours:    janela em horas a consultar (default: 24)
+        revision: se informado, filtra só essa revisão Cloud Run
+
+    Returns:
+        {
+          'window': {'hours': N, 'since': iso_ts},
+          'total_batches': int,
+          'batches_by_severity': {'OK': N, 'INFO': N, 'WARNING': N, 'ERROR': N},
+          'issues_by_feature': {feature_name: {'count': N, 'problems': {problem_type: N}, 'latest_details': {...}}},
+          'overall_status': 'OK' | 'INFO' | 'WARNING' | 'ERROR',
+          'recommended_action': str,
+          'sample_error_log': {... snippet do log mais recente com severity=ERROR ...}  # se houver
+        }
+
+    Filtros Cloud Logging:
+      resource.type=cloud_run_revision AND
+      resource.labels.service_name=smart-ads-api AND
+      textPayload:"[FV_JSON]"
+    """
+    import subprocess
+    import json as _json
+    from datetime import timedelta
+
+    project = os.getenv('PROJECT_ID', 'smart-ads-451319')
+    service = 'smart-ads-api'
+
+    # Construir filtro
+    filter_parts = [
+        'resource.type=cloud_run_revision',
+        f'resource.labels.service_name={service}',
+        'textPayload:"[FV_JSON]"',
+    ]
+    if revision:
+        filter_parts.append(f'resource.labels.revision_name={revision}')
+    filter_str = ' AND '.join(filter_parts)
+
+    freshness = f'{hours}h'
+
+    try:
+        result = subprocess.run(
+            ['gcloud', 'logging', 'read', filter_str,
+             '--project', project,
+             '--freshness', freshness,
+             '--format=value(textPayload)',
+             '--limit', '5000'],
+            capture_output=True, text=True, check=True, timeout=60,
+        )
+        raw_lines = result.stdout.splitlines()
+    except subprocess.CalledProcessError as e:
+        raise HTTPException(status_code=500, detail=f"gcloud logging read falhou: {e.stderr.strip()[:300]}")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="Timeout ao consultar Cloud Logging (>60s)")
+
+    # Parse dos payloads
+    payloads = []
+    for line in raw_lines:
+        idx = line.find('[FV_JSON] ')
+        if idx < 0:
+            continue
+        try:
+            payload = _json.loads(line[idx + len('[FV_JSON] '):])
+            if payload.get('event') == 'feature_validator':
+                payloads.append(payload)
+        except Exception:
+            continue
+
+    # Agregação
+    batches_by_severity = {'OK': 0, 'INFO': 0, 'WARNING': 0, 'ERROR': 0}
+    issues_by_feature: Dict[str, Dict[str, Any]] = {}
+    latest_error_log = None
+    latest_error_ts = None
+
+    for p in payloads:
+        sev = p.get('severity', 'UNKNOWN')
+        batches_by_severity[sev] = batches_by_severity.get(sev, 0) + 1
+
+        if sev == 'ERROR':
+            ts = p.get('timestamp', '')
+            if latest_error_ts is None or ts > latest_error_ts:
+                latest_error_ts = ts
+                latest_error_log = p
+
+        for issue in p.get('issues', []):
+            feat = issue.get('feature', '?')
+            prob = issue.get('problem', '?')
+            entry = issues_by_feature.setdefault(feat, {
+                'count': 0,
+                'problems': {},
+                'latest_details': None,
+                'latest_timestamp': None,
+            })
+            entry['count'] += 1
+            entry['problems'][prob] = entry['problems'].get(prob, 0) + 1
+            ts = p.get('timestamp', '')
+            if entry['latest_timestamp'] is None or ts > entry['latest_timestamp']:
+                entry['latest_timestamp'] = ts
+                entry['latest_details'] = issue.get('details')
+
+    # Overall status e ação recomendada
+    if batches_by_severity['ERROR'] > 0:
+        overall_status = 'ERROR'
+        recommended_action = (
+            "BLOQUEAR progressão de tráfego. Investigar features com problem in "
+            "{missing_column, wrong_dtype, null_rate_high} — o modelo está sendo "
+            "scoreado com sinal incompleto. Ver sample_error_log para exemplo concreto."
+        )
+    elif batches_by_severity['WARNING'] > 0:
+        overall_status = 'WARNING'
+        recommended_action = (
+            "Avaliar novas categorias detectadas (drift em categóricas). Não bloqueia "
+            "progressão, mas pode indicar que o modelo está saindo do domínio de treino. "
+            "Se frequente, agendar retreino."
+        )
+    elif batches_by_severity['INFO'] > 0:
+        overall_status = 'INFO'
+        recommended_action = (
+            "Valores numéricos fora do range observado em treino (drift numérico suave). "
+            "Progressão liberada. Monitorar tendência para decidir retreino futuro."
+        )
+    elif batches_by_severity['OK'] > 0:
+        overall_status = 'OK'
+        recommended_action = "Nenhum problema detectado. Progressão de tráfego liberada do ponto de vista de T1-11."
+    else:
+        overall_status = 'NO_DATA'
+        recommended_action = (
+            "Nenhum log [FV_JSON] encontrado na janela. Pipeline pode não estar sendo "
+            "exercitado, schema pode não estar carregado na revisão, ou a revisão não "
+            "recebeu tráfego. Se revisão é nova, gerar tráfego antes de consultar."
+        )
+
+    now_utc = datetime.now(timezone.utc)
+    since_utc = now_utc - timedelta(hours=hours)
+
+    return {
+        'window': {
+            'hours': hours,
+            'since': since_utc.isoformat(),
+            'until': now_utc.isoformat(),
+        },
+        'revision_filter': revision,
+        'total_batches': sum(batches_by_severity.values()),
+        'batches_by_severity': batches_by_severity,
+        'issues_by_feature': issues_by_feature,
+        'overall_status': overall_status,
+        'recommended_action': recommended_action,
+        'sample_error_log': latest_error_log,
+    }
+
+
 @app.get("/monitoring/daily-check", response_model=DailyCheckResponse)
 async def daily_monitoring_check_auto(
     pipeline: PipelineOptDep,

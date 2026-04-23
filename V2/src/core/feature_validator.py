@@ -353,7 +353,13 @@ def load_schema_from_json(path: str) -> PreEncodingSchema:
 
 
 def _emit_structured_log(result: ValidationResult, schema: PreEncodingSchema) -> None:
-    """Emite log JSON estruturado para Cloud Logging."""
+    """
+    Emite log JSON estruturado para Cloud Logging.
+
+    Formato: sempre emite uma linha prefixada com [FV_JSON] contendo JSON válido,
+    para facilitar parsing via `gcloud logging read` + grep + json.loads.
+    Linha legível (severity + resumo) vai separadamente no nível apropriado do logger.
+    """
     payload = {
         'event': 'feature_validator',
         'timestamp': datetime.now(timezone.utc).isoformat(),
@@ -364,14 +370,17 @@ def _emit_structured_log(result: ValidationResult, schema: PreEncodingSchema) ->
         'issues': [asdict(i) for i in result.issues],
     }
 
-    msg = f"[T1-11] feature_validator severity={result.severity} " \
-          f"batch={result.batch_size} issues={len(result.issues)}"
+    json_line = "[FV_JSON] " + json.dumps(payload, default=str, separators=(',', ':'))
+    human_msg = f"[T1-11] feature_validator severity={result.severity} batch={result.batch_size} issues={len(result.issues)}"
+
+    # Linha JSON sempre em INFO (visível e filtrável); severity específica na linha humana
+    logger.info(json_line)
 
     if result.severity == 'ERROR':
-        logger.error(msg + " json=" + json.dumps(payload, default=str))
+        logger.error(human_msg)
     elif result.severity == 'WARNING':
-        logger.warning(msg + " json=" + json.dumps(payload, default=str))
+        logger.warning(human_msg)
     elif result.severity == 'INFO':
-        logger.info(msg + " json=" + json.dumps(payload, default=str))
+        logger.info(human_msg)
     else:
-        logger.debug(msg)
+        logger.debug(human_msg)
