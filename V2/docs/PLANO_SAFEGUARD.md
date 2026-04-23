@@ -296,7 +296,7 @@ Com T1-10, esse check roda automaticamente em `src/core/encoding.py` **antes** d
 | `stage_model_artifacts()` | ✓ Existe | `api/deploy_capi.sh:284-341` | — |
 | `load_dotenv()` no treino | ✓ Existe | `src/train_pipeline.py:14-17` | — |
 | `load_dotenv()` no app.py | ✗ Ausente | `api/app.py` | Verificar — Cloud Run injeta env vars, mas scripts locais precisam de `.env` |
-| Verificação de Meta token freshness | ✗ Não existe | — | Criar: alerta quando token está a < 10 dias de expirar (60d ciclo) |
+| ~~Verificação de Meta token freshness~~ | ✅ Não aplicável | — | Token é System User vitalício, não expira. Item cancelado. |
 | Validação MODEL_PATH vs yaml | ✗ Não existe | — | Criar: `deploy_capi.sh` valida que path no yaml existe antes do build |
 | MLflow experiment ID hardcoded | ✗ Risco não auditado | `src/` | Verificar: `grep -rn "experiment_id.*=.*[0-9]" V2/src/` |
 
@@ -456,7 +456,7 @@ Descoberto em 2026-04-21 durante investigação do T1-9. Pontos onde `except: pa
 | T3-1 | Progressão de canary documentada | `api/deploy_capi.sh` | Documentar fluxo 0% → 10% → 100% |
 | T3-2 | Script de smoke test pós-deploy | novo | 5 leads → score → decil → CAPI log |
 | T3-3 | Proteção de branch main | GitHub | Configurar require PR + aprovação |
-| T3-4 | Verificação token Meta (60d) | novo script | Alerta se < 10 dias para expirar |
+| ~~T3-4~~ | ~~Verificação token Meta~~ | — | **CANCELADO 2026-04-23** — token é System User vitalício, não expira. Premissa original errada. |
 | T3-5 | Relatório diário consolidado | `src/monitoring/` | N alertas HIGH/MEDIUM/LOW por dia |
 | T3-6 | Validação MODEL_PATH vs yaml | `api/deploy_capi.sh` | Build falha claro se divergência |
 | T3-7 | Reconciliação run_id no relatório | `src/validation/` | Assert que leadScore veio do modelo ativo |
@@ -530,7 +530,7 @@ curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/singl
 | T3-1 Canary documentado | Pendente | | |
 | T3-2 Smoke test pós-deploy | Pendente | | |
 | T3-3 Branch protection | Pendente | | |
-| T3-4 Token Meta alerta | Pendente | | |
+| T3-4 Token Meta alerta | **CANCELADO** | | 2026-04-23 — token é System User vitalício, não expira |
 | T3-5 Relatório consolidado | Pendente | | |
 | T3-6 MODEL_PATH validação | Pendente | | |
 | T3-7 Reconciliação run_id | Pendente | | |

@@ -118,7 +118,7 @@ Nunca adicionar hardcodes dentro de funções `core/`. Todo valor específico de
 
 - `configs/active_model.yaml` — aponta para o modelo em produção
 - `src/production_pipeline.py` em produção — qualquer mudança requer teste completo de paridade com treino
-- `META_ACCESS_TOKEN` — expira a cada 60 dias, não alterar
+- `META_ACCESS_TOKEN` — System User vitalício, não expira. Não alterar sem motivo claro (revogação quebraria CAPI imediato)
 - Pipelines em execução no Cloud Run
 
 ---

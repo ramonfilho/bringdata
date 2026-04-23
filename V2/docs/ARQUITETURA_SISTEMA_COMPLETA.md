@@ -331,7 +331,7 @@ RAILWAY_DB_PASSWORD=...
 
 # Meta
 META_PIXEL_ID=241752320666130
-META_ACCESS_TOKEN=...          # ⚠️ expira a cada 60 dias — renovar!
+META_ACCESS_TOKEN=...          # System User vitalício — não expira
 
 # Guru API
 GURU_API_TOKEN=...             # ⚠️ contém '|' — usar python-dotenv, não source
@@ -431,7 +431,7 @@ utm_source == orgânico / outro              →  nenhum envio
 
 | Risco | Impacto | Ação |
 |---|---|---|
-| Meta token expira (60 dias) | CAPI para de funcionar | Renovar `META_ACCESS_TOKEN` |
+| ~~Meta token expira (60 dias)~~ | N/A | Token é System User vitalício (não expira). Risco cancelado 2026-04-23. |
 | Guru token com `\|` no valor | Pipeline não lê token se usar `source .env` | Sempre usar `python-dotenv` — já implementado em todos os entry points |
 | Pipeline de retreino incompleto (Sprint 2–3) | Deploy manual necessário | Implementar quality gate automático + deploy condicional |
 | Dados TMB desatualizados | Retreino com dados errados | Verificar data do arquivo antes do retreino |

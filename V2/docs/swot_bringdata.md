@@ -100,10 +100,8 @@ D10 chegou a **41% dos leads no LF45** vs. 10% esperado. O mecanismo: Meta entre
 
 ---
 
-### W2 — Token Meta expira a cada 60 dias *(risco operacional imediato)*
-Token de acesso com TTL de 60 dias. Interrupção durante um lançamento com R$ 200k+ de verba pode custar dezenas de milhares em ROAS degradado sem alerta visível ao cliente.
-
-**É endereçável?** Sim — System Users com tokens de longa duração (sem expiração para Business Managers verificados). Solução técnica existente, não implementada.
+### ~~W2 — Token Meta expira a cada 60 dias~~ *(RESOLVIDO — análise inicial incorreta)*
+**Atualização 2026-04-23:** premissa original desta fraqueza estava errada. O token em uso é **System User vitalício**, que não expira. O risco de interrupção de CAPI por expiração de token não existe — o token só para de funcionar se for revogado manualmente. Item cancelado do SWOT.
 
 ---
 
@@ -290,7 +288,7 @@ RD Station (50k clientes) já oferece lead scoring por regras — a distância p
 ### Fraquezas a endereçar antes de escalar
 
 **Antes do terceiro cliente (crítico):**
-- **W2:** System User com token sem expiração — 2–4 horas de engenharia, risco de interrupção de produção em lançamento.
+- ~~**W2:** System User com token sem expiração~~ — RESOLVIDO (token em uso já é System User vitalício).
 - **W1:** Holdout contrafactual permanente (5–10% dos leads sem intervenção) — sem isso, o modelo se degrada silenciosamente e os resultados futuros podem não replicar os históricos.
 
 **Antes de 5+ clientes:**

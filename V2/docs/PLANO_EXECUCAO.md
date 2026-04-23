@@ -307,7 +307,7 @@ Destaques:
 **Tier 3 (observabilidade):**
 - Smoke test automatizado pós-deploy
 - Progressão de canary documentada no `deploy_capi.sh`
-- Alerta de token Meta a < 10 dias de expirar
+- ~~Alerta de token Meta a < 10 dias de expirar~~ — CANCELADO (token é System User vitalício)
 - Branch protection no GitHub
 
 ---
