@@ -46,7 +46,7 @@ Antes de executar `FORCE_DEPLOY=true ./deploy_capi.sh --force-deploy` para subir
 - [ ] T1-8 (gate de parity no deploy) — Concluído
 - [ ] T1-9 (protocolo progressão de tráfego) — Concluído
 - [ ] T1-10 (feature coverage check) — Concluído
-- [ ] T1-11 (validador pré-encoding de features) — Pendente (bloqueia progressão 10% → 50%)
+- [ ] T1-11 (validador pré-encoding de features) — Concluído
 
 **Gates automáticos que o script roda:**
 1. `check_authorized_branch()` — bloqueia se branch não-rollback sem `FORCE_DEPLOY=true`
@@ -518,7 +518,7 @@ curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/singl
 | T1-8 Branch autorizada + gate de processo | Concluído | | 2026-04-21 — Gate A (parity audit) automatizado no deploy_capi.sh. Checklist de Tier 1 adicionado como responsabilidade de processo. |
 | T1-9 Protocolo progressão de tráfego | Concluído | | 2026-04-21 — tabela de critérios objetivos documentada, diferencia caso unificação (ROAS via DEV20) de deploys normais (send_rate / 5xx / feature coverage). |
 | T1-10 Feature coverage check | Concluído | | 2026-04-21 — (1) check fail-loud em core/encoding.py antes do fill com 0 (ERROR ≥5%, WARNING ≥1%); (2) smoke_test_revision.py valida sobre leads reais do Railway; (3) Gate B automático no deploy_capi.sh bloqueia se encontrar ERROR; (4) deploy agora usa --tag para URL direta da revisão canary. |
-| T1-11 Validador pré-encoding de features | Pendente | | Adicionado 2026-04-21 — pré-requisito para progredir tráfego 10% → 50%. Arquitetura em 3 peças: validator + endpoint feature-report + critérios formalizados. Ver seção "Validador pré-encoding de features [T1-11]". |
+| T1-11 Validador pré-encoding de features | Concluído | | 2026-04-23 — Peça A (src/core/feature_validator.py + schema JSON + integração em production_pipeline.py, 7/7 testes passam) em commit 361fc62; Peça B (endpoint GET /monitoring/feature-report em api/app.py com agregação de logs e recomendação de ação) em commit ba43d30; Peça C (critérios de promoção formalizados) já estava integrada em T1-9 antes. |
 | T2-1 Deduplicação treino | Pendente | | |
 | T2-2 Log por etapa | Pendente | | |
 | T2-3 Importance weighting | Pendente | | |
