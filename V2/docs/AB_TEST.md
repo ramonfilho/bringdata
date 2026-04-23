@@ -298,6 +298,29 @@ O prazo original de 27/04/2026 não é mais viável: a janela de conversão do L
 
 ---
 
+## Eventos CAPI `LeadQualifiedCha` / `LeadQualifiedChaHighQuality` — DESCONTINUADOS (13/04/2026)
+
+Os dois eventos específicos do Challenger (`LeadQualifiedCha` e `LeadQualifiedChaHighQuality`) **pararam de ser enviados** desde o rollback executado em **13/04/2026**. Quando o rollback (`edf23e9`) foi deployado a 100%, ele não tem código de A/B routing interno — enviou todos os eventos como `LeadQualified` / `LeadQualifiedHighQuality`, independentemente do UTM do lead.
+
+Essa situação **foi mantida conscientemente a partir de 23/04/2026**, quando o Champion v4 (novo código + novo dataset) foi deployado em 10% com `ab_test.enabled: false` — arquitetura simplificada onde o split de tráfego Cloud Run decide qual modelo scora, sem roteamento por UTM:
+
+| Período | Event name | Motivo |
+|---|---|---|
+| Antes de 13/04/2026 | `LeadQualifiedCha` / `LeadQualifiedChaHighQuality` para leads ML_MAR; `LeadQualified` / `LeadQualifiedHighQuality` para o resto | A/B test via UTM no código main pre-rollback |
+| **13/04/2026 →** | **Apenas `LeadQualified` / `LeadQualifiedHighQuality` para todos os leads** | Rollback sem A/B + decisão de manter simplificado no deploy de 23/04 |
+
+**Implicação no Meta Ads:** campanhas configuradas para otimizar `LeadQualifiedCha` não recebem mais eventos do evento que otimizam desde 13/04. Elas ficaram 10 dias sem sinal quando o rollback estava a 100%, e continuam sem sinal na nova arquitetura. Consequências:
+
+- O Meta pode ter degradado o aprendizado dessas campanhas — cabe ao **gestor de tráfego reconfigurar as campanhas ML_MAR** no Ads Manager para otimizar `LeadQualified` se quiser manter o tráfego segmentado por UTM.
+- Ou retirar o UTM ML_MAR das campanhas (já que não serve mais ao A/B por UTM).
+- Sem nenhuma ação no Meta, as campanhas com UTM ML_MAR continuam rodando mas sem a otimização CAPI adequada.
+
+**Não há ação técnica pendente do lado do nosso código** — a arquitetura funciona, a escolha de modelo é feita pelo Cloud Run, os eventos CAPI chegam no Meta corretamente (com nomes default). A ação é puramente operacional, no Ads Manager.
+
+Para análises retrospectivas: qualquer comparação Champion × Challenger via eventos CAPI no Meta deve usar a janela **31/03–13/04/2026** como único período em que os eventos `Cha` foram enviados. Depois de 13/04, não há diferenciação de evento por variante.
+
+---
+
 ## Estratégia de deploy — 50/50 em vez de 100% (decisão 21/04/2026)
 
 A revisão com o A/B test ativo (branch `main` unificada) será promovida a **50% do tráfego**, não 100%. Os outros 50% permanecem no rollback (`edf23e9`).
