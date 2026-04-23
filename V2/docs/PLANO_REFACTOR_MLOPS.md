@@ -732,13 +732,13 @@ Auditoria sistemática após o deploy revelou que o critério "Fase 2 concluída
 
 | # | Divergência | Criticidade | Arquivo | Ação |
 |---|---|---|---|---|
-| **R1** | `production_pipeline.py` cria `nome_valido`, `email_valido`, `telefone_valido` — features que `core/feature_engineering.py` não cria e o modelo nunca viu | **ALTO** | `src/production_pipeline.py` | Remover a criação das 3 features + confirmar ausência no feature registry. → DT-8 |
+| **R1** | **REVISTO 2026-04-21:** `production_pipeline.py` cria `nome_valido`, `email_valido`, `telefone_valido`. A descrição original dizia "remover pois o modelo nunca viu" — isso era errado. O Champion (jan30, ATIVO) tem 6 features dependentes dessas (`nome_valido_True/False`, `email_valido_True/False`, `telefone_valido_True/False`) no seu feature registry. Remover cegaria o Champion em ~11% do input. A ação correta é PORTAR a criação dessas features para `src/core/feature_engineering.py` na unificação Fase 3 do `PLANO_EXECUCAO.md`. Só depois de retreinar o Champion sem essas features, pode-se removê-las. | **ALTO** | `src/core/feature_engineering.py`, `src/production_pipeline.py` | Portar criação das 3 features para `core/feature_engineering.py`. Depois de retreinar Champion sem elas (se desejado), remover do production_pipeline. → DT-8 |
 | **R2** | `PESOS_COMPRADOR` e `DEFAULT_HYPERPARAMS` hardcoded em `train_pipeline.py` — valores já existem em `devclub.yaml` (`model.buyer_weights`, `model.hyperparameters`), mas o treino reimplementa inline. Para Cliente B, o treino usará pesos do DevClub sem nenhum erro. | **MÉDIO** | `src/train_pipeline.py:~763,~788` | Substituir por `client_config.model.buyer_weights` e `client_config.model.hyperparameters`. Rodar Camada 2 (AUC ±0.5%) para confirmar. → DT-10 |
-| **R3** | Encoding ordinal — verificar se `'idade'`/`'faixa_salarial'` ainda existem como chaves em `devclub.yaml > encoding.ordinal_variables`. Checklist pós-retreino (item 4) mandou remover os aliases curtos, mas não foi marcado como feito. Se ainda existem, verificar se o nome da coluna que chega ao `apply_encoding` é idêntico em treino e produção. | **MÉDIO** | `configs/clients/devclub.yaml`, `src/core/encoding.py` | Confirmar estado; remover aliases se obsoletos. → DT-9 |
+| ~~**R3**~~ | ~~Encoding ordinal — verificar se `'idade'`/`'faixa_salarial'` ainda existem como chaves em `devclub.yaml > encoding.ordinal_variables`.~~ ✅ **RESOLVIDO 2026-04-21** — Confirmado via inspeção: config atual (`configs/clients/devclub.yaml`) usa apenas os nomes longos `"Qual a sua idade?"` e `"Atualmente, qual a sua faixa salarial?"`. Não há mais aliases curtos. | — | — | Fechado |
 | **R4** | `medium.unify_medium` tem condicional em `train_pipeline.py` (`if 'Medium' in df.columns: ...`) que não existe em produção — produção sempre chama a função. Se Medium desaparecer do formulário no futuro, produção quebrará enquanto treino continuaria silenciosamente. | **BAIXO** | `src/train_pipeline.py:~619`, `src/production_pipeline.py` | Alinhar comportamento: produção deve ter o mesmo guard ou `core/medium.py` deve absorver o caso de coluna ausente. |
 | **R5** | Imports de `core/` em `monitoring/orchestrator.py` estão dentro do método `run_daily_check()` em vez do topo do módulo. Funcional, inconsistente. | **BAIXO** | `src/monitoring/orchestrator.py` | Mover imports para o topo. → DT-11 |
 
-> **R1 é o único que afeta a integridade em produção hoje** (código desnecessário rodando). R2 e R3 bloqueiam o critério multi-cliente. R4 e R5 são limpeza antes de escalar.
+> **R1 (revisto) é pré-requisito da unificação Fase 3** — sem portar essas features para main, Champion perde sinal quando servido pela pipeline refatorada. R2 bloqueia o critério multi-cliente. R3 está resolvido. R4 e R5 são limpeza antes de escalar.
 
 #### O que foi resolvido na auditoria (30/03/2026)
 
@@ -916,17 +916,33 @@ Imports de `core/utm`, `core/medium`, `core/category_unification`, `core/preproc
 
 **Prioridade:** alta — A/B test atual está com jan30 em desvantagem estrutural.
 
+---
+
+#### Complemento — 2026-04-21 (descoberto durante preparação da Fase 3)
+
+A implementação original do DT-12 assumiu que o **default** do cliente era OHE. Na verdade, `configs/clients/devclub.yaml` manteve idade/salário em `ordinal_variables` como default, então:
+
+- **Jan30 com override ordinal:** funciona (override confirma o default)
+- **Mar24 sem override:** herda o default ordinal → **perde 11 features OHE esperadas pelo feature_registry** (6 de idade + 5 de salário). Situação inversa do que DT-12 descreve.
+
+Evidência: `mlruns/1/a859c68b1cb94c3b93767a3131eda89a/artifacts/feature_registry.json` tem `Qual_a_sua_idade_18_24_anos`, `Atualmente_qual_a_sua_faixa_salarial_entre_r1000_a_r2000_reais_ao_mes` etc. — ou seja, mar24 foi treinado com OHE.
+
+**Ação (Opção A):** na Fase 3 da unificação, remover idade/salário de `ordinal_variables` do `clients/devclub.yaml`. Jan30 mantém override ordinal (passa a ser a exceção explícita ao default). Mar24 herda OHE (como foi treinado). Ver `PLANO_EXECUCAO.md` → Fase 3 → "Decisão arquitetural — Opção A".
+
 ### DT-13 — Brecha de dígitos curtos em `_unify_term`
 
 `src/core/utm.py:118` — a condição de fallback `if not valor.isdigit() or len(valor) > threshold` foi escrita para mandar IDs longos para `'outros'` enquanto preservaria códigos numéricos curtos conhecidos. Na prática, nenhuma categoria numérica existe na whitelist DevClub (`Term: instagram / facebook / outros`), e a exceção apenas cria uma brecha: qualquer string 100% numérica com até 10 dígitos permanece como valor raw em vez de virar `'outros'`.
 
-**Evidência (investigado em 22/04/2026):**
+**Evidência (investigado em 22/04/2026; reconfirmado em 23/04/2026 com novo termo):**
 
-| `utm_term` raw | Leads 24h | Destino atual | Destino correto |
-|---|---|---|---|
-| `0405` | 669 | permanece `'0405'` | `'outros'` |
-| `{{site_source_name}}` | 40 | `'outros'` (pattern `{`) | — ok |
-| `120240527343300390` | 4 | `'outros'` (18 dígitos > threshold) | — ok |
+| `utm_term` raw | Leads 24h (22/04) | Leads 24h (23/04) | Destino atual | Destino correto |
+|---|---|---|---|---|
+| `0405` | 669 | 131 | permanece `'0405'` | `'outros'` |
+| `2104` | — | 232 | permanece `'2104'` | `'outros'` |
+| `{{site_source_name}}` | 40 | 29 | `'outros'` (pattern `{`) | — ok |
+| `120240527343300390` | 4 | 5 | `'outros'` (18 dígitos > threshold) | — ok |
+
+O padrão se confirmou em 23/04: o volume em `0405` caiu mas surgiu `2104` (232 leads) — o bug continua deixando passar qualquer novo código numérico de até 10 dígitos que o gestor de tráfego resolver usar. Total de leads afetados permanece na mesma ordem de magnitude (363 em 23/04 vs 669 em 22/04).
 
 **Impacto:** os 669 leads/24h com `term='0405'` saem do encoding com `Term_facebook = Term_instagram = Term_outros = 0` — combinação nunca vista no treino, onde todo lead tinha exatamente um dos três = 1. A feature `Term_0405` é criada e descartada pelo modelo; o lead fica sem sinal de Term (grupo pesa 3,59% da importância). Efeito desprezível por lead, mas 16% do volume diário.
 

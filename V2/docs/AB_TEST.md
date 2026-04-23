@@ -209,13 +209,19 @@ Ver: `PLANO_REFACTOR_MLOPS.md` seção DT-12 para detalhes completos.
 
 ---
 
-## Próximo passo — patch no rollback (pendente execução)
+## ~~Próximo passo — patch no rollback~~ (CANCELADO 2026-04-21)
 
-Para garantir ROAS válido até 27/04/2026, o Challenger precisa receber 100% do tráfego ML_MAR com o código e modelo corretos. Cloud Run não faz roteamento por conteúdo (UTM), então a solução é:
+> **Status:** CANCELADO. Esta rota (ab-patch na branch `rollback/edf23e9-ab-patch`, commit `c0e09d0`) foi descartada em favor da unificação estratégica da Fase 3 do `PLANO_EXECUCAO.md`.
+>
+> **Motivo da rejeição:** o patch carregaria adiante a pipeline não refatorada do rollback (sem `src/core/`), criando um caminho paralelo que depois precisaria ser abandonado para destravar multi-cliente (Fase 3b em diante). Unificar `edf23e9` → `main` mantém uma pipeline só, evolutiva.
+>
+> **Onde ler o que substituiu:** `docs/PLANO_EXECUCAO.md` → Fase 3 "Unificação de branches" (revista em 2026-04-21).
+>
+> **O que a ab-patch oferecia (para referência):** A/B routing sobre a pipeline do rollback — preservava as features `_valido_*` que Champion precisa. A unificação na main precisa **portar** essas features em vez de reaproveitar a pipeline antiga.
 
-**Patch no worktree `smart_ads_v2_rollback/` (edf23e9) adicionando A/B routing mínimo:**
+O conteúdo original do plano da ab-patch está preservado abaixo como histórico:
 
-| # | Arquivo | Mudança |
+| # | Arquivo | Mudança (NÃO EXECUTAR — rota cancelada) |
 |---|---|---|
 | 1 | `configs/active_models/devclub.yaml` | CRIAR — bloco `ab_test` com jan30 + mar24 |
 | 2 | `configs/active_model.yaml` | MODIFICAR — `mlflow_run_id` explícito |
@@ -226,10 +232,31 @@ Para garantir ROAS válido até 27/04/2026, o Challenger precisa receber 100% do
 | 7 | `api/Dockerfile` | MODIFICAR — `MODEL_PATH=mlruns_build` |
 | 8 | `api/deploy_capi.sh` | MODIFICAR — `stage_model_artifacts()` |
 
-Leads não-ML_MAR → jan30 (Champion, código edf23e9 sem mudança de comportamento).  
+Leads não-ML_MAR → jan30 (Champion, código edf23e9 sem mudança de comportamento).
 Leads ML_MAR → mar24 (Challenger, código novo só na lógica de roteamento).
 
 Após deploy: canary (00270-q2m) vai a 0%, nova revisão vai a 100%.
+
+---
+
+## Encoding por variante A/B (decisão arquitetural 2026-04-21)
+
+**Contexto:** Champion jan30 e Challenger mar24 foram treinados com encodings diferentes para idade e salário:
+- **Champion (jan30):** ordinal (coluna única `Qual_a_sua_idade` numérica)
+- **Challenger (mar24):** OHE (uma coluna por categoria: `Qual_a_sua_idade_18_24_anos` etc.)
+
+**Decisão (Opção A):** o **default** do cliente em `configs/clients/devclub.yaml` é **OHE** para idade e salário. A variante que difere do default declara explicitamente via `encoding_overrides`:
+
+| Variante | encoding_overrides em `active_models/devclub.yaml` | Comportamento efetivo |
+|---|---|---|
+| `guru_jan30` (Champion) | `ordinal_variables` com `"Qual a sua idade?"` + `"Atualmente, qual a sua faixa salarial?"` | Ordinal (como treinado) |
+| `guru_mar24` (Challenger) | Sem `encoding_overrides` | OHE (como treinado) |
+
+**Por que assim:** o default representa "o encoding mais comum nos modelos atuais e futuros". Overrides representam exceções declaradas explicitamente por variante. A alternativa (default ordinal + override OHE em mar24) exigiria que `merge_encoding` suportasse "anular override do base", o que é mais complexo.
+
+**Para cliente B no futuro:** escolher o default que bate com o encoding da maioria dos modelos esperados. Variantes exceções declaram override.
+
+**Arquivo de referência:** `src/core/encoding.py` → função `merge_encoding()`.
 
 ---
 

@@ -152,33 +152,67 @@ Todos os testes passando = Fase 2 concluída, Fase 3 pode começar.
 ## Fase 3 — Unificação de branches
 **Pré-requisito:** Fase 2 concluída (Tier 1 dos safeguards)
 
-### Objetivo
-Trazer o que é funcional e correto do edf23e9 (05/03/2026, em produção) para a branch main, eliminando a discrepância de encoding/scoring que faz os dois produzirem resultados diferentes.
+### Objetivo concreto (revisto em 2026-04-21)
 
-### Protocolo de merge por arquivo
+Trazer para a branch `main` o comportamento funcional do rollback `edf23e9` que é necessário para os dois modelos em produção (Champion jan30 e Challenger mar24) funcionarem corretamente quando servidos pela pipeline refatorada da main. Concretamente:
 
-Para cada arquivo trazido do edf23e9 para main:
+**Para o Champion (jan30) — 8 features ausentes em main:**
+- `nome_valido_True/False`, `email_valido_True/False`, `telefone_valido_True/False` — derivam do `feature_engineering` do rollback, não existem em `src/core/feature_engineering.py`
+- `telefone_comprimento_4`, `telefone_comprimento_10` — OHE de `telefone_comprimento` que no rollback vira categórica e em main é numérica
 
-1. **Rodar parity audit antes:** `python -m pytest tests/parity_audit.py -v`
-2. **Aplicar a mudança**
+**Para o Challenger (mar24) — 13 features ausentes em main, resolvidas por config:**
+- 6 OHE de idade + 5 OHE de salário — resolvidos via **Opção A** (ver abaixo)
+- `Medium_Linguagem_de_programa_o` — nome bugado pelo regex antigo; main já corrige via `column_name_corrections` mas o registry do mar24 tem o nome antigo. Resolver no retreino do mar24
+- `Medium_Lookalike_2_Cadastrados_DEV_2_0_Interesses` — investigar caso específico
+
+### Decisão arquitetural — Opção A para encoding de idade/salário
+
+Decisão tomada em 2026-04-21 sobre como representar idade e faixa salarial no encoding:
+
+- **Default do cliente (`configs/clients/devclub.yaml`):** idade e salário como **OHE** (remover de `ordinal_variables`)
+- **Champion (jan30):** mantém `encoding_overrides` com ordinal — é como foi treinado
+- **Challenger (mar24):** herda o default (OHE) — é como foi treinado
+
+Racional: o default representa "o encoding mais comum nos modelos atuais e futuros"; overrides representam exceções explícitas de uma variante específica. Alternativa (manter ordinal como default e adicionar override OHE para mar24) foi rejeitada porque exige que o `merge_encoding` suporte "anular override do base", o que aumenta complexidade.
+
+### Pré-requisitos antes do primeiro porte
+
+1. **Golden snapshot do monitoring capturado** — salvar resultado de `/monitoring/daily-check/railway?hours=720` rodado contra a revisão atual (`00269-jjn`, rollback em 100%) em `V2/docs/monitoring_golden_snapshot.json`. Sem ele, não há referência para detectar regressão em observabilidade durante a unificação.
+2. **Aplicar Opção A no `configs/clients/devclub.yaml`** — remover idade/salário de `ordinal_variables`, regenerar snapshots de parity com o config novo, confirmar que T1-7 passa.
+3. **Documentação do Momento 1** commitada antes de qualquer mudança de código.
+
+### Ordem de portes planejada
+
+| # | Arquivo | O que porta | Validação |
+|---|---|---|---|
+| 1 | `configs/clients/devclub.yaml` | Opção A — remover idade/salário de ordinal_variables; regenerar snapshots | T1-7 passa com snapshots novos |
+| 2 | `src/core/feature_engineering.py` | Criação das 3 features `nome_valido`, `email_valido`, `telefone_valido` | T1-7 + T1-11 passam; Champion ganha as 6 features derivadas |
+| 3 | `src/core/feature_engineering.py` ou `src/core/preprocessing.py` | Manter `telefone_comprimento` como categórica (não numérica), para OHE derivar `telefone_comprimento_4/10` | T1-7 + T1-11 passam; Champion ganha as 2 features restantes |
+| 4+ | A descobrir conforme a unificação avança | — | — |
+
+### Protocolo de porte (inalterado)
+
+Para cada arquivo portado de edf23e9 → main:
+
+1. **Rodar parity audit antes:** `python3 V2/tests/parity_audit.py --function utm --function encoding`
+2. **Aplicar a mudança** no código + atualizar devclub.yaml se necessário
 3. **Rodar parity audit depois:** mesmo comando
-4. **Se output diferente:** a mudança introduziu divergência — investigar antes de continuar
-5. **Se output igual:** seguro prosseguir
+4. **Rodar T1-11 (validador pré-encoding)** contra o snapshot e contra amostra real do Railway
+5. **Se qualquer gate falhar:** reverter commit, registrar FAIL na tabela de Log de portes abaixo, NÃO prosseguir para próximo porte
+6. **Se todos passarem:** commit isolado + push + registro OK no Log de portes
 
-### Arquivos prioritários a inspecionar (divergência conhecida)
+### Log de portes — Fase 3
 
-| Arquivo | Divergência confirmada | Resolução esperada |
-|---|---|---|
-| `src/features/encoding.py` | `binary_top3` (edf23e9) vs OHE (main) para Medium | Manter `binary_top3` — edf23e9 correto |
-| `src/production_pipeline.py` | Ordinal encoding built-in (edf23e9) vs `encoding_overrides` yaml (main) | Avaliar qual é mais sustentável para multi-cliente |
-| `configs/active_model.yaml` | Sem A/B test (edf23e9) vs com A/B test (main) | main correto — manter estrutura main |
+| Data | Arquivo | De | Para | T1-7 antes | T1-7 depois | T1-11 | Status | Observação |
+|---|---|---|---|---|---|---|---|---|
+| *(vazio até o primeiro porte)* | | | | | | | | |
 
 ### Resultado esperado
 
 Após a unificação, o deploy **não** vai direto para 100%. O target é **50/50** — main unificada e rollback `edf23e9` cada um com metade do tráfego. Decisão tomada em 21/04/2026; rationale completo em `AB_TEST.md` → seção "Estratégia de deploy — 50/50 em vez de 100%".
 
 - **Durante o 50/50:** o A/B test só roda na metade da main (rollback não tem código de roteamento). Amostra efetiva do A/B cai pela metade no DEV20.
-- **Pré-requisitos para o 50/50:** Tier 1 completo + parity audit passando + smoke test pós-deploy.
+- **Pré-requisitos para o 50/50:** Tier 1 completo + parity audit passando + smoke test pós-deploy + Fase 3 unificação concluída.
 - **Subir para 100%:** só após 3 dias sem alerta HIGH + ROAS por variante consolidado no DEV20.
 
 O edf23e9 só é aposentado de verdade quando main está a 100%.
@@ -284,7 +318,8 @@ O golden snapshot do monitoring (`docs/monitoring_golden_snapshot.json`) **não 
 ### Gatilho de retreino por drift de públicos (identificado 22/04/2026)
 
 - **Observação:** 5 das 6 categorias Medium do treino `jan30` sumiram do tráfego em produção. `Medium_Linguagem_programacao` (rank #6 no modelo, 5,31% da importância) = 0 para 100% dos leads. `Medium_Aberto` virou quase-constante (1 em 70% dos leads vs 14,5% no treino). `Medium_Lookalike_2pct_Cadastrados` = 0 para 100%.
-- **Impacto:** grupo `Medium_*` pesa 7,95% da importância total. A feature top do grupo está cega; as outras duas perderam poder discriminativo. Consistente com o drift de D10 observado (esperado 10%, atual 32,7%) e com o cluster 3 do `Erros_cometidos.md` (Medium_Linguagem_programacao zerada em 13/04 por causa distinta — encoding).
+- **Impacto:** grupo `Medium_*` pesa 7,95% da importância total. A feature top do grupo está cega; as outras duas perderam poder discriminativo. Consistente com o drift de D10 observado (esperado 10%) e com o cluster 3 do `Erros_cometidos.md` (Medium_Linguagem_programacao zerada em 13/04 por causa distinta — encoding).
+- **Evolução do D10 ao longo da semana:** histórico 29,5% → último mês 30,4% → última semana 34,1% → 22/04 32,7% → 23/04 **34,7%**. Tendência de aceleração, não estabilização.
 - **Evidência:** `/monitoring/daily-check` 22/04/2026 — alertas `distribution_drift HIGH` em Medium e `score_distribution_change HIGH` em D10.
 - **O que fazer:** retreinar com dados pós-01/04/2026 (quando a composição atual de públicos estabilizou) antes de esperar o fechamento do A/B test. O feature registry do novo modelo refletirá o mix atual.
 - **Pré-requisitos:** idealmente após fix de DT-13 (brecha de `utm_term`) para não arrastar ruído pro treino novo; e após decisão sobre tratamento de `Source='org'` (hoje cai em `Outros`).

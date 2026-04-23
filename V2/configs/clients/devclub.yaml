@@ -319,6 +319,11 @@ feature:
   - dia_semana
   nlp_columns: []
 encoding:
+  # Opção A (2026-04-21): idade e salário como OHE por DEFAULT.
+  # Modelos que foram treinados com ORDINAL (ex: Champion jan30) recebem o
+  # encoding via encoding_overrides em configs/active_models/devclub.yaml.
+  # Modelos treinados com OHE (ex: Challenger mar24) herdam esse default sem override.
+  # Detalhes: docs/PLANO_REFACTOR_MLOPS.md → DT-12 Complemento 2026-04-21.
   ordinal_variables:
     dia_semana:
     - 0
@@ -328,19 +333,6 @@ encoding:
     - 4
     - 5
     - 6
-    "Qual a sua idade?":
-    - "menos de 18 anos"
-    - "18 24 anos"
-    - "25 34 anos"
-    - "35 44 anos"
-    - "45 54 anos"
-    - "mais de 55 anos"
-    "Atualmente, qual a sua faixa salarial?":
-    - "nao tenho renda"
-    - "entre r1000 a r2000 reais ao mes"
-    - "entre r2001 a r3000 reais ao mes"
-    - "entre r3001 a r5000 reais ao mes"
-    - "mais de r5001 reais ao mes"
   categorical_detection_max_unique: 20
   features_to_drop_after_encoding: []
   column_name_corrections:
