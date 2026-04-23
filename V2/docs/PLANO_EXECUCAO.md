@@ -206,6 +206,7 @@ Para cada arquivo portado de edf23e9 → main:
 | Data | Arquivo | De | Para | T1-7 antes | T1-7 depois | T1-11 | Status | Observação |
 |---|---|---|---|---|---|---|---|---|
 | 2026-04-23 | `configs/clients/devclub.yaml` | ordinal idade/salário | OHE idade/salário (Opção A) | OK (51 cols) | OK (60 cols, 0 divergências) | n/a (é mudança de config, não envolve encoding de features derivadas) | ✅ OK | Gap do Challenger de 13 features caiu para 2 (`Medium_Linguagem_de_programa_o`, `Medium_Lookalike_2_Cadastrados_DEV_2_0_Interesses`) — casos específicos de nome/categoria para portes futuros. Champion continua com ordinal via override — comportamento preservado. |
+| 2026-04-23 | `src/core/feature_engineering.py` + `client_config.py` + `configs/clients/devclub.yaml` | `nome_valido`/`email_valido`/`telefone_valido` não criadas | Criadas via flag `create_valido_features=true` (portado do rollback edf23e9) | OK (60 cols) | OK (66 cols, 0 divergências) | Testes unitários + integração com 67k leads reais (99.9% de validade nas 3 features) | ✅ OK | Gap do Champion caiu de 8 para 2 features (`telefone_comprimento_4`, `telefone_comprimento_10`) — ambas requerem retreino do Champion com dados atuais. Challenger continua com as mesmas 2 ausentes do porte anterior. |
 
 ### Resultado esperado
 

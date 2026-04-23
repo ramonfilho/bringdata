@@ -129,8 +129,10 @@ class FeatureConfig:
     columns_to_remove_post_cutoff: Optional[List[str]] = None  # #39
     columns_to_drop_after_fe: Optional[List[str]] = None    # #48
     pesquisa_name_column: Optional[str] = None              # #47
+    pesquisa_email_column: Optional[str] = None             # #41 — usado em create_valido_features
     pesquisa_phone_column: Optional[str] = None             # #42 (também em MatchingConfig)
     telefone_comprimento_keep_values: Optional[List[int]] = None  # #157 — valores válidos (ex: [9, 11]); resto → 'outros'
+    create_valido_features: bool = False                    # Porte #2 Fase 3 — cria nome_valido/email_valido/telefone_valido (Champion jan30 depende)
     ordering_rules: Optional[Dict[str, Any]] = None         # #2
     survey_column_stems: Optional[List[str]] = None         # #52
     utm_feature_prefixes_for_registry: Optional[List[str]] = None   # #65

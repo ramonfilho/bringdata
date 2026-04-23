@@ -294,7 +294,12 @@ feature:
   - Email
   - EMAIL
   pesquisa_name_column: Nome Completo
+  pesquisa_email_column: E-mail
   pesquisa_phone_column: Telefone
+  # Porte #2 Fase 3 (2026-04-23): ativa criação de nome_valido/email_valido/telefone_valido.
+  # Champion jan30 (ativo) depende dessas 3 features após OHE (6 colunas binárias).
+  # Portado do rollback edf23e9.
+  create_valido_features: true
   telefone_comprimento_keep_values:
   - 9
   - 11

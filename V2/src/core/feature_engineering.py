@@ -5,7 +5,11 @@ Consolida feature_engineering_training.py e engineering.py.
 Canonical: treino (feature_engineering_training.py, dev/retreino).
 
 Divergências resolvidas vs produção (engineering.py):
-  - nome_valido, email_valido, telefone_valido: NÃO criados (noisy, removidos em dev/retreino)
+  - nome_valido, email_valido, telefone_valido: config-driven via
+    FeatureConfig.create_valido_features (default False). Champion jan30
+    (ativo) depende dessas 3 features — OHE gera 6 colunas binárias
+    usadas no scoring. Portado do rollback edf23e9 em 2026-04-23 como
+    Porte #2 da Fase 3 de unificação.
   - telefone_comprimento grouping: mantido (treino canonical) — config.telefone_comprimento_keep_values
   - arquivo_origem guard: removido — core/ não depende de contexto de execução
 
@@ -24,6 +28,33 @@ import pandas as pd
 from .client_config import FeatureConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _validar_email(email) -> bool:
+    """
+    [Porte #2] Valida email via regex clássico. Portado do rollback edf23e9.
+
+    Retorna True se o valor tem formato de email (usuário@dominio.tld).
+    Usado em create_valido_features para gerar feature binária email_valido.
+    """
+    if pd.isna(email):
+        return False
+    email_str = str(email).strip().lower()
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return bool(re.match(pattern, email_str))
+
+
+def _validar_nome(nome) -> bool:
+    """
+    [Porte #2] Valida se nome é plausível (tem letras, não é só números, len >= 2).
+    Portado do rollback edf23e9.
+    """
+    if pd.isna(nome):
+        return False
+    nome_str = str(nome).strip()
+    tem_letras = bool(re.search(r'[a-zA-ZÀ-ÿ]', nome_str))
+    nao_so_numeros = not nome_str.replace(' ', '').replace('.', '').replace('-', '').isdigit()
+    return tem_letras and nao_so_numeros and len(nome_str) >= 2
 
 
 def _normalizar_telefone(telefone) -> Optional[str]:
@@ -124,6 +155,29 @@ def create_features(df: pd.DataFrame, config: FeatureConfig) -> pd.DataFrame:
             logger.debug(f"  FE: telefone_comprimento agrupado (keep={keep_values})")
         else:
             logger.warning("  FE: telefone_comprimento_keep_values não configurado — sem agrupamento")
+
+    # -----------------------------------------------------------------------
+    # 3b. [Porte #2] Features de validação — config-driven
+    # -----------------------------------------------------------------------
+    # Champion jan30 (ativo) depende de nome_valido_True/False, email_valido_True/False,
+    # telefone_valido_True/False após OHE. Mantido atrás de flag para que modelos
+    # futuros treinados sem essas features (ex: Challenger mar24) não paguem
+    # o custo de features não usadas.
+    if config.create_valido_features:
+        if name_col in df.columns:
+            df['nome_valido'] = df[name_col].apply(_validar_nome)
+            logger.debug(f"  FE: nome_valido criado ({df['nome_valido'].mean()*100:.1f}% válidos)")
+
+        email_col = config.pesquisa_email_column
+        if email_col and email_col in df.columns:
+            df['email_valido'] = df[email_col].apply(_validar_email)
+            logger.debug(f"  FE: email_valido criado ({df['email_valido'].mean()*100:.1f}% válidos)")
+        elif email_col:
+            logger.warning(f"  FE: create_valido_features=true mas coluna {email_col!r} não existe — email_valido não criado")
+
+        if 'telefone_normalizado' in df.columns:
+            df['telefone_valido'] = df['telefone_normalizado'].notna()
+            logger.debug(f"  FE: telefone_valido criado ({df['telefone_valido'].mean()*100:.1f}% válidos)")
 
     # -----------------------------------------------------------------------
     # 4. Remover colunas brutas
