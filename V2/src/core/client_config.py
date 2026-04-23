@@ -74,6 +74,12 @@ class IngestionConfig:
     tmb_pedidos_detection_columns: Optional[List[str]] = None   # #154 — colunas que identificam arquivo de pedidos
     tmb_pedidos_column_mapping: Optional[Dict[str, str]] = None  # #155 — renomeação para formato canônico
     tmb_pedidos_active_status_exclude: Optional[str] = None      # #156 — valor de status a excluir (ex: "Cancelado")
+    # Hotmart API — segunda fonte de vendas além de Guru (adicionado 2026-04-23)
+    # Validação já integra Hotmart há tempos (src/validation/data_loader.py). Treino só
+    # agora ganha o suporte, para evitar que compradores Hotmart sejam rotulados como
+    # negativos no dataset de treino — degradação de sinal proporcional ao volume Hotmart.
+    hotmart_enabled: bool = False                                # liga/desliga ingestão Hotmart no treino
+    hotmart_api_basic_auth_env_var: Optional[str] = None         # env var com credencial Basic Auth (ex: "HOTMART_BASIC")
     # Unificação de colunas (#13–#20) — sub-dict com pesquisa_merges,
     # valor_columns, produto_columns, nome_columns, email_columns, telefone_columns
     column_unification: Optional[Dict[str, Any]] = None

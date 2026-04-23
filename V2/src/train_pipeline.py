@@ -301,7 +301,8 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
             api_start_date=api_start_date,
             api_end_date=api_end_date,
             num_sheets_api=1,  # Retreino: apenas aba 0 do Google Sheets
-            include_sheets_api=include_sheets_api
+            include_sheets_api=include_sheets_api,
+            client_config=client_config,  # para ativar Hotmart se hotmart_enabled=true
         )
         import pickle
         os.makedirs(_cache_dir, exist_ok=True)

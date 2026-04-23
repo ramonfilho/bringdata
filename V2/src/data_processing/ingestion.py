@@ -577,7 +577,8 @@ def read_all_training_sources(
     api_start_date: str = None,
     api_end_date: str = None,
     num_sheets_api: int = 1,
-    include_sheets_api: bool = True
+    include_sheets_api: bool = True,
+    client_config = None,
 ) -> Dict[str, Dict[str, pd.DataFrame]]:
     """
     Lê dados de treino de TODAS as fontes: arquivos locais + API/Sheets (opcional).
@@ -761,6 +762,48 @@ def read_all_training_sources(
 
             except Exception as e:
                 logger.error(f"    Erro ao buscar vendas da API Guru: {e}")
+
+        # === VENDAS DA API HOTMART (adicionado 2026-04-23) ===
+        # Segunda fonte de vendas além de Guru. Ativado via client_config.ingestion.hotmart_enabled.
+        # Reutiliza SalesDataLoader.load_hotmart_sales_from_api() que já existe em validação.
+        _hotmart_enabled = bool(
+            client_config is not None
+            and getattr(client_config, 'ingestion', None) is not None
+            and getattr(client_config.ingestion, 'hotmart_enabled', False)
+        )
+        if _hotmart_enabled and guru_start and guru_end:
+            logger.info("\n 2b/2: Vendas da API Hotmart")
+            try:
+                sales_loader = SalesDataLoader()
+                hotmart_df = sales_loader.load_hotmart_sales_from_api(
+                    start_date=guru_start,
+                    end_date=guru_end,
+                )
+
+                if not hotmart_df.empty:
+                    # Alinhar schema com o esperado pelo resto do pipeline (igual ao Guru)
+                    hotmart_formatted = pd.DataFrame()
+                    hotmart_formatted['email']        = hotmart_df['email']
+                    hotmart_formatted['nome']         = hotmart_df.get('nome', '')
+                    hotmart_formatted['telefone']     = hotmart_df.get('telefone', '')
+                    hotmart_formatted['data']         = hotmart_df['sale_date']
+                    hotmart_formatted['valor']        = hotmart_df['sale_value']
+                    hotmart_formatted['utm_campaign'] = ''   # Hotmart API não fornece UTM
+                    hotmart_formatted['produto']      = 'DevClub'
+                    hotmart_formatted['status']       = 'Aprovada'  # Hotmart API só retorna APPROVED/COMPLETE
+                    hotmart_formatted['arquivo_origem'] = '[API] Hotmart'
+
+                    api_data['[API] Vendas Hotmart'] = {
+                        'Sheet1': hotmart_formatted
+                    }
+                    logger.info(f"     {len(hotmart_formatted):,} vendas Hotmart carregadas")
+                else:
+                    logger.warning("     Nenhuma venda encontrada na API Hotmart")
+
+            except Exception as e:
+                logger.error(f"    Erro ao buscar vendas da API Hotmart: {e}")
+        elif _hotmart_enabled:
+            logger.warning("  Hotmart habilitado mas datas Guru ausentes — pulando")
 
         # 3. COMBINAR DADOS LOCAIS + API
         if api_data:
