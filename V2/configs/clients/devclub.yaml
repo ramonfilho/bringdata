@@ -614,6 +614,12 @@ validation:
     o_que_quer_ver_evento: 0.3
     estudou_programacao: 0.3
     fez_faculdade: 0.3
-    investiu_curso_online: 0.3
-    interesse_programacao: 0.3
+    # investiu_curso_online e interesse_programacao foram adicionadas à pesquisa
+    # em uma data posterior à maioria dos Sheets históricos. Em leads pre-webhook
+    # essas perguntas não existiam — ficam como null. O cutoff automático (Célula 14)
+    # remove esses leads depois, mas a validação de features roda ANTES do cutoff,
+    # então o threshold precisa tolerar os leads antigos que ainda estão no dataset
+    # nesse ponto. Depois do cutoff, o missing real cai para ~0%.
+    investiu_curso_online: 0.5
+    interesse_programacao: 0.5
     tem_computador: 0.3
