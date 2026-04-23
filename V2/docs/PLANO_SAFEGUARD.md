@@ -525,7 +525,7 @@ curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/singl
 | T2-4 Limite 10k queries | Pendente | | |
 | T2-5 Filtro vendas aprovadas | Pendente | | |
 | T2-6 Eliminar exceções silenciosas | Pendente | | Adicionado 2026-04-21 — descoberto em T1-9, 3 pontos de severidade média/alta (BLOCO 11) |
-| T2-7 Validador pós-deploy automatizado | Pendente | | Adicionado 2026-04-21 — substituiria a disciplina humana na progressão de tráfego de T1-9 |
+| T2-7 Validador pós-deploy automatizado | Concluído | | 2026-04-23 — scripts/progression_gate.py consome /monitoring/feature-report (T1-11) + /monitoring/daily-check/railway, consolida em PROMOTE/HOLD/ROLLBACK, executa gcloud run services update-traffic se --execute. Commit 42990b8. |
 | T2-8 Alerta feature importance-alta variance baixa | Pendente | | Adicionado 2026-04-22 — descoberto na investigação de drift de Medium (22/04); `Medium_Linguagem_programacao` (5,31% importance) zerada em produção sem alerta prévio. |
 | T3-1 Canary documentado | Pendente | | |
 | T3-2 Smoke test pós-deploy | Pendente | | |
