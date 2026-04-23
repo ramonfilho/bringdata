@@ -21,28 +21,191 @@ from .client_config import IngestionConfig
 logger = logging.getLogger(__name__)
 
 
-def filter_sheets(sheets: Dict[str, pd.DataFrame],
-                  config: IngestionConfig) -> Dict[str, pd.DataFrame]:
-    """
-    Filtra abas do Excel mantendo apenas as relevantes para treino.
-    Usa config.ingestion (termos_manter, termos_remover, min_survey_columns).
-    """
-    raise NotImplementedError
+# ---------------------------------------------------------------------------
+# [T2-1] Filtragem, dedup e consolidação — implementações portadas de
+# src/data_processing/ingestion.py para seguir o princípio de core/ como
+# Single Source of Truth. Assinatura config-driven (IngestionConfig).
+# ---------------------------------------------------------------------------
+
+_DEFAULT_TERMOS_MANTER = ["Pesquisa", "Vendas", "tmb", "Sheet", "LEADS"]
+_DEFAULT_TERMOS_REMOVER = ["Pontuação", "Lead Score", "DEBUG_LOG",
+                            "Tabela Dinâmica 1", "Detalhe1", "Alunos", "Guru", "TMB"]
+_DEFAULT_PESQUISA_KEYWORDS = ["pesquisa", "leads"]
+_DEFAULT_VENDAS_KEYWORDS = ["vendas", "sheet1"]
 
 
-def remove_duplicates_per_sheet(sheets: Dict[str, pd.DataFrame],
-                                 config: IngestionConfig) -> Dict[str, pd.DataFrame]:
-    """Remove duplicatas dentro de cada aba individualmente."""
-    raise NotImplementedError
+def filter_sheets(files_data: Dict[str, Dict[str, pd.DataFrame]],
+                  config: IngestionConfig
+                  ) -> Tuple[Dict[str, Dict[str, pd.DataFrame]], List[Dict]]:
+    """
+    Filtra abas de múltiplos arquivos Excel baseado em critérios do IngestionConfig.
+
+    Critérios (em ordem):
+      1. Aba tem pelo menos uma linha
+      2. Aba NÃO contém nenhum termo de `config.filter_termos_remover`
+      3. Aba tem >10 colunas preenchidas (exceto fontes [API], que bypass)
+      4. Aba contém pelo menos um termo de `config.filter_termos_manter` OU
+         tem >= `config.filter_min_linhas` linhas OU é fonte [API]
+      5. Heurísticas específicas DevClub: aba TMB/Guru em arquivo LF (exceto LF06)
+         é removida; arquivos locais 'guru' são removidos; aba LEADS em arquivo
+         com Pesquisa é redundante
+
+    Args:
+        files_data: Dict {filename: {sheet_name: DataFrame}}
+        config:    IngestionConfig do cliente
+
+    Returns:
+        (arquivos_filtrados, relatório com status por aba)
+    """
+    termos_manter  = config.filter_termos_manter  or _DEFAULT_TERMOS_MANTER
+    termos_remover = config.filter_termos_remover or _DEFAULT_TERMOS_REMOVER
+    min_linhas     = config.filter_min_linhas or 230
+
+    if not config.filter_termos_manter:
+        logger.warning(f"  filter_sheets: config.filter_termos_manter None — usando defaults {_DEFAULT_TERMOS_MANTER}")
+
+    logger.debug("  Filtrando abas por critérios...")
+    arquivos_filtrados: Dict[str, Dict[str, pd.DataFrame]] = {}
+    relatorio: List[Dict] = []
+
+    for filename, sheets in files_data.items():
+        abas_filtradas: Dict[str, pd.DataFrame] = {}
+        arquivo_tem_pesquisa = any('pesquisa' in s.lower() for s in sheets.keys())
+
+        for sheet_name, df in sheets.items():
+            linhas_original = len(df)
+            nome_lower = sheet_name.lower()
+
+            deve_remover = any(t.lower() in nome_lower for t in termos_remover)
+            tem_permitido = any(t.lower() in nome_lower for t in termos_manter)
+            tem_linhas = linhas_original >= min_linhas
+            nao_vazia = linhas_original > 0 and not df.empty
+
+            # Heurísticas DevClub (documentadas no notebook original)
+            eh_lf_com_vendas = (
+                'LF' in filename
+                and any(vt in nome_lower for vt in ['tmb', 'guru'])
+                and 'LF06' not in filename
+            )
+            eh_guru_local = 'guru' in filename.lower() and '[API]' not in filename
+            eh_leads_redundante = 'leads' in nome_lower and arquivo_tem_pesquisa
+            colunas_preenchidas = int(df.notna().any().sum())
+            tem_colunas = colunas_preenchidas > 10
+            eh_api_data = '[API]' in filename or '[Railway]' in filename
+
+            manter = (
+                nao_vazia
+                and not deve_remover
+                and not eh_lf_com_vendas
+                and not eh_guru_local
+                and not eh_leads_redundante
+                and (tem_colunas or eh_api_data)
+                and (tem_permitido or tem_linhas or eh_api_data)
+            )
+
+            relatorio.append({
+                'arquivo': filename,
+                'aba': sheet_name,
+                'linhas_original': linhas_original,
+                'status': 'MANTIDA' if manter else 'REMOVIDA',
+            })
+            if manter:
+                abas_filtradas[sheet_name] = df
+
+        if abas_filtradas:
+            arquivos_filtrados[filename] = abas_filtradas
+
+    mantidas = sum(1 for r in relatorio if r['status'] == 'MANTIDA')
+    removidas = len(relatorio) - mantidas
+    logger.debug(f"  filter_sheets: {mantidas} abas mantidas, {removidas} removidas")
+    return arquivos_filtrados, relatorio
 
 
-def consolidate_datasets(sheets: Dict[str, pd.DataFrame],
-                          config: IngestionConfig) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def remove_duplicates_per_sheet(files_data: Dict[str, Dict[str, pd.DataFrame]],
+                                 config: IngestionConfig = None
+                                 ) -> Tuple[Dict[str, Dict[str, pd.DataFrame]], Dict[str, Dict[str, int]]]:
     """
-    Consolida abas em dois DataFrames: pesquisa e vendas.
-    Retorna (df_pesquisa, df_vendas).
+    Remove duplicatas dentro de cada aba individualmente (não deduplica entre abas/arquivos).
+
+    Args:
+        files_data: Dict {filename: {sheet_name: DataFrame}}
+        config:    IngestionConfig (não usado — mantido na assinatura para consistência com outras funções core/)
+
+    Returns:
+        (arquivos_limpos, estatísticas {filename: {sheet_name: n_duplicatas_removidas}})
     """
-    raise NotImplementedError
+    logger.debug("  Removendo duplicatas por aba...")
+    arquivos_limpos: Dict[str, Dict[str, pd.DataFrame]] = {}
+    estatisticas: Dict[str, Dict[str, int]] = {}
+
+    for filename, sheets in files_data.items():
+        abas_limpas: Dict[str, pd.DataFrame] = {}
+        stats_arquivo: Dict[str, int] = {}
+
+        for sheet_name, df in sheets.items():
+            antes = len(df)
+            df_limpo = df.drop_duplicates(keep='first')
+            depois = len(df_limpo)
+            removidas = antes - depois
+            abas_limpas[sheet_name] = df_limpo
+            stats_arquivo[sheet_name] = removidas
+
+        arquivos_limpos[filename] = abas_limpas
+        estatisticas[filename] = stats_arquivo
+
+    total = sum(sum(s.values()) for s in estatisticas.values())
+    logger.debug(f"  remove_duplicates_per_sheet: {total:,} duplicatas removidas no total")
+    return arquivos_limpos, estatisticas
+
+
+def consolidate_datasets(files_data: Dict[str, Dict[str, pd.DataFrame]],
+                          config: IngestionConfig
+                          ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Consolida abas de múltiplos arquivos em dois DataFrames: pesquisa e vendas.
+
+    Classificação de aba por nome (case-insensitive):
+      - Se nome contém termo de `config.consolidate_pesquisa_keywords` → pesquisa
+      - Se nome contém termo de `config.consolidate_vendas_keywords` → vendas
+      - Caso contrário: ignorada
+
+    Adiciona colunas `arquivo_origem` e `aba_origem` em cada DataFrame para
+    rastreabilidade downstream (matching, filtros temporais, etc).
+
+    Args:
+        files_data: Dict {filename: {sheet_name: DataFrame}}
+        config:    IngestionConfig com consolidate_pesquisa_keywords e
+                   consolidate_vendas_keywords
+
+    Returns:
+        (df_pesquisa, df_vendas)
+    """
+    pesquisa_kws = config.consolidate_pesquisa_keywords or _DEFAULT_PESQUISA_KEYWORDS
+    vendas_kws   = config.consolidate_vendas_keywords   or _DEFAULT_VENDAS_KEYWORDS
+
+    if not config.consolidate_pesquisa_keywords:
+        logger.warning(f"  consolidate_datasets: pesquisa_keywords None — usando defaults {_DEFAULT_PESQUISA_KEYWORDS}")
+
+    dados_pesquisa: List[pd.DataFrame] = []
+    dados_vendas: List[pd.DataFrame] = []
+
+    for arquivo, abas_dict in files_data.items():
+        for aba_nome, df in abas_dict.items():
+            df_copia = df.copy()
+            df_copia['arquivo_origem'] = arquivo
+            df_copia['aba_origem'] = aba_nome
+            nome_lower = aba_nome.lower()
+
+            if any(t in nome_lower for t in pesquisa_kws):
+                dados_pesquisa.append(df_copia)
+            elif any(t in nome_lower for t in vendas_kws):
+                dados_vendas.append(df_copia)
+
+    df_pesquisa = pd.concat(dados_pesquisa, ignore_index=True) if dados_pesquisa else pd.DataFrame()
+    df_vendas   = pd.concat(dados_vendas,   ignore_index=True) if dados_vendas   else pd.DataFrame()
+
+    logger.debug(f"  consolidate_datasets: pesquisa={len(df_pesquisa):,}, vendas={len(df_vendas):,}")
+    return df_pesquisa, df_vendas
 
 
 def filter_sales_by_product(df_vendas: pd.DataFrame,

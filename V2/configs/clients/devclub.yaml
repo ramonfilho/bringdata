@@ -39,6 +39,31 @@ ingestion:
   # Sheets truncado em ~1 mês atrás; sem Railway o treino perde 45k+ leads recentes
   # e remove vendas Guru/Hotmart recentes por parecerem "futuras".
   railway_enabled: true
+  # [T2-1] Filtros de aba usados por src/core/ingestion.py:filter_sheets.
+  # Estes valores também existem em configs/devclub.yaml (legado) usado pelo
+  # train_pipeline.py. Duplicação intencional para backward compat até refactor completo.
+  filter_termos_manter:
+    - "Pesquisa"
+    - "Vendas"
+    - "tmb"
+    - "Sheet"
+    - "LEADS"
+  filter_termos_remover:
+    - "Pontuação"
+    - "Lead Score"
+    - "DEBUG_LOG"
+    - "Tabela Dinâmica 1"
+    - "Detalhe1"
+    - "Alunos"
+    - "Guru"
+    - "TMB"
+  filter_min_linhas: 230
+  consolidate_pesquisa_keywords:
+    - "pesquisa"
+    - "leads"
+  consolidate_vendas_keywords:
+    - "vendas"
+    - "sheet1"
   has_tmb: true
   sales_platform_identifier: guru
   approved_status_value: Aprovada

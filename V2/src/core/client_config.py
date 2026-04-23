@@ -74,6 +74,15 @@ class IngestionConfig:
     tmb_pedidos_detection_columns: Optional[List[str]] = None   # #154 — colunas que identificam arquivo de pedidos
     tmb_pedidos_column_mapping: Optional[Dict[str, str]] = None  # #155 — renomeação para formato canônico
     tmb_pedidos_active_status_exclude: Optional[str] = None      # #156 — valor de status a excluir (ex: "Cancelado")
+    # Filtragem de abas Excel e consolidação (adicionado 2026-04-23 — T2-1)
+    # Valores lidos também em configs/devclub.yaml (arquivo legado usado pelo
+    # train_pipeline.py) — duplicação intencional para backward compat. Quando a
+    # refatoração completa acontecer, configs/devclub.yaml pode ser deprecated.
+    filter_termos_manter: Optional[List[str]] = None         # abas que DEVEM conter ≥1 termo — ex: ["Pesquisa", "Vendas"]
+    filter_termos_remover: Optional[List[str]] = None        # abas que NÃO DEVEM conter nenhum termo — ex: ["Pontuação", "Lead Score"]
+    filter_min_linhas: int = 230                             # mínimo de linhas para manter uma aba
+    consolidate_pesquisa_keywords: Optional[List[str]] = None   # termos de aba que identificam "pesquisa" — ex: ["pesquisa", "leads"]
+    consolidate_vendas_keywords: Optional[List[str]] = None     # termos de aba que identificam "vendas" — ex: ["vendas", "sheet1"]
     # Hotmart API — segunda fonte de vendas além de Guru (adicionado 2026-04-23)
     # Validação já integra Hotmart há tempos (src/validation/data_loader.py). Treino só
     # agora ganha o suporte, para evitar que compradores Hotmart sejam rotulados como

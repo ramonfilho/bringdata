@@ -519,7 +519,7 @@ curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/singl
 | T1-9 Protocolo progressão de tráfego | Concluído | | 2026-04-21 — tabela de critérios objetivos documentada, diferencia caso unificação (ROAS via DEV20) de deploys normais (send_rate / 5xx / feature coverage). |
 | T1-10 Feature coverage check | Concluído | | 2026-04-21 — (1) check fail-loud em core/encoding.py antes do fill com 0 (ERROR ≥5%, WARNING ≥1%); (2) smoke_test_revision.py valida sobre leads reais do Railway; (3) Gate B automático no deploy_capi.sh bloqueia se encontrar ERROR; (4) deploy agora usa --tag para URL direta da revisão canary. |
 | T1-11 Validador pré-encoding de features | Concluído | | 2026-04-23 — Peça A (src/core/feature_validator.py + schema JSON + integração em production_pipeline.py, 7/7 testes passam) em commit 361fc62; Peça B (endpoint GET /monitoring/feature-report em api/app.py com agregação de logs e recomendação de ação) em commit ba43d30; Peça C (critérios de promoção formalizados) já estava integrada em T1-9 antes. |
-| T2-1 Deduplicação treino | Pendente | | |
+| T2-1 Deduplicação treino | Concluído | | 2026-04-23 — 3 funções implementadas em src/core/ingestion.py (filter_sheets, remove_duplicates_per_sheet, consolidate_datasets). Assinatura config-driven. 5 campos novos em IngestionConfig + configs/clients/devclub.yaml. data_processing/ingestion.py preservado (backward compat). T1-7 passa. |
 | T2-2 Log por etapa | Pendente | | |
 | T2-3 Importance weighting | Pendente | | |
 | T2-4 Limite 10k queries | Pendente | | |
