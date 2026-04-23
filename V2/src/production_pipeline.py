@@ -10,6 +10,7 @@ import pandas as pd
 import logging
 import atexit
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Optional
 from .core.client_config import ClientConfig, ABTestConfig, ABTestVariantConfig
 from .core.preprocessing import preprocess as _preprocess
@@ -18,6 +19,10 @@ from .core.medium import unify_medium as _unify_medium
 from .core.category_unification import unify_categories as _unify_categories
 from .core.feature_engineering import create_features as _create_features
 from .core.encoding import apply_encoding as _apply_encoding, merge_encoding as _merge_encoding
+from .core.feature_validator import (
+    load_schema_from_json as _load_fv_schema,
+    validate_pre_encoding as _validate_pre_encoding,
+)
 from .model.prediction import LeadScoringPredictor
 from .monitoring.data_quality import check_category_drift, load_training_categories, check_distribution_drift, load_training_distributions
 
@@ -347,6 +352,18 @@ class LeadScoringPipeline:
         cols_added = len(self.data.columns) - cols_before_fe
         logger.info(f"    Features criadas/processadas: {cols_added} novas colunas")
         logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
+
+        # [T1-11] Validador pré-encoding — monitoramento em produção
+        _fv_schema_path = Path(__file__).parent.parent / 'configs' / 'pre_encoding_schemas' / f'{self._client_config.client_id}.json'
+        if _fv_schema_path.exists():
+            try:
+                _fv_schema = _load_fv_schema(str(_fv_schema_path))
+                _fv_result = _validate_pre_encoding(self.data, _fv_schema, emit_log=True)
+                logger.info(f"    [T1-11] feature_validator: severity={_fv_result.severity}, issues={len(_fv_result.issues)}")
+            except Exception as _fv_err:
+                logger.warning(f"    [T1-11] feature_validator falhou: {_fv_err} — seguindo sem validação")
+        else:
+            logger.debug(f"    [T1-11] schema não encontrado em {_fv_schema_path} — validator ignorado")
 
         # 10. Encoding categórico (usando componente importado)
         logger.info(" [10/12] Aplicando encoding categórico...")

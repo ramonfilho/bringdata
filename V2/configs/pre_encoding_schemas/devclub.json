@@ -1,0 +1,218 @@
+{
+  "columns": {
+    "Atualmente, qual a sua faixa salarial?": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "entre r1000 a r2000 reais ao mes",
+        "entre r2001 a r3000 reais ao mes",
+        "entre r3001 a r5000 reais ao mes",
+        "mais de r5001 reais ao mes",
+        "nao tenho renda"
+      ],
+      "max_null_rate": 0.1,
+      "value_range": null
+    },
+    "J\u00e1 estudou programa\u00e7\u00e3o?": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "N\u00e3o",
+        "Sim"
+      ],
+      "max_null_rate": 0.1,
+      "value_range": null
+    },
+    "Medium": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "Aberto",
+        "Linguagem de programa\u00e7\u00e3o",
+        "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ci\u00eancia da Computa\u00e7\u00e3o",
+        "Lookalike 2% Alunos + Interesse Linguagem de Programa\u00e7\u00e3o",
+        "Lookalike 2% Cadastrados - DEV 2.0 + Interesses",
+        "Outros",
+        "dgen"
+      ],
+      "max_null_rate": 0.14556977037223712,
+      "value_range": null
+    },
+    "O que mais voc\u00ea quer ver no evento?": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "a aula com a recrutadora",
+        "fazer freelancer como programador",
+        "fazer transicao de carreira e conseguir meu primeiro emprego na area",
+        "fazer um projeto na pratica",
+        "quero saber se e para mim"
+      ],
+      "max_null_rate": 0.1,
+      "value_range": null
+    },
+    "O que voc\u00ea faz atualmente?": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "nao trabalho e nem estudo",
+        "sou apenas estudante",
+        "sou aposentado",
+        "sou autonomo",
+        "sou cltfuncionario publico"
+      ],
+      "max_null_rate": 0.1,
+      "value_range": null
+    },
+    "O seu g\u00eanero:": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "Feminino",
+        "Masculino"
+      ],
+      "max_null_rate": 0.1,
+      "value_range": null
+    },
+    "Qual a sua idade?": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "18 24 anos",
+        "25 34 anos",
+        "35 44 anos",
+        "45 54 anos",
+        "mais de 55 anos",
+        "menos de 18 anos"
+      ],
+      "max_null_rate": 0.1,
+      "value_range": null
+    },
+    "Source": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "facebook-ads",
+        "google-ads",
+        "outros",
+        "youtube"
+      ],
+      "max_null_rate": 0.12165824154646665,
+      "value_range": null
+    },
+    "Tem computador/notebook?": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "nao",
+        "sim"
+      ],
+      "max_null_rate": 0.33306699082378405,
+      "value_range": null
+    },
+    "Term": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "facebook",
+        "instagram",
+        "outros"
+      ],
+      "max_null_rate": 0.13903227241057267,
+      "value_range": null
+    },
+    "Voc\u00ea j\u00e1 fez/faz/pretende fazer faculdade?": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "N\u00e3o",
+        "Sim"
+      ],
+      "max_null_rate": 0.1284181033843782,
+      "value_range": null
+    },
+    "Voc\u00ea possui cart\u00e3o de cr\u00e9dito?": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "nao",
+        "sim"
+      ],
+      "max_null_rate": 0.1,
+      "value_range": null
+    },
+    "dia_semana": {
+      "dtype_category": "numeric",
+      "known_values": null,
+      "max_null_rate": 0.1,
+      "value_range": [
+        0.0,
+        6.0
+      ]
+    },
+    "email_valido": {
+      "dtype_category": "bool",
+      "known_values": null,
+      "max_null_rate": 0.1,
+      "value_range": null
+    },
+    "interesse_programacao": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "a ideia de nunca faltar emprego na area",
+        "a possibilidade de ganhar altos salarios",
+        "poder trabalhar de qualquer lugar do mundo",
+        "todas as alternativas",
+        "trabalhar para outros paises e ganhar em outra moeda"
+      ],
+      "max_null_rate": 0.1,
+      "value_range": null
+    },
+    "investiu_curso_online": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "N\u00e3o",
+        "Sim"
+      ],
+      "max_null_rate": 0.1,
+      "value_range": null
+    },
+    "nome_comprimento": {
+      "dtype_category": "numeric",
+      "known_values": null,
+      "max_null_rate": 0.1,
+      "value_range": [
+        1.0,
+        75.0
+      ]
+    },
+    "nome_tem_sobrenome": {
+      "dtype_category": "bool",
+      "known_values": null,
+      "max_null_rate": 0.1,
+      "value_range": null
+    },
+    "nome_valido": {
+      "dtype_category": "bool",
+      "known_values": null,
+      "max_null_rate": 0.1,
+      "value_range": null
+    },
+    "target": {
+      "dtype_category": "numeric",
+      "known_values": null,
+      "max_null_rate": 0.1,
+      "value_range": [
+        0.0,
+        1.0
+      ]
+    },
+    "telefone_comprimento": {
+      "dtype_category": "categorical",
+      "known_values": [
+        "11",
+        "9",
+        "outros"
+      ],
+      "max_null_rate": 0.1,
+      "value_range": null
+    },
+    "telefone_valido": {
+      "dtype_category": "bool",
+      "known_values": null,
+      "max_null_rate": 0.1,
+      "value_range": null
+    }
+  },
+  "generated_at": "2026-04-23T14:49:24.575900+00:00",
+  "model_run_id": "pipeline-devclub-2026-04-23",
+  "source": "V2/tests/fixtures/snapshot_encoding_input.pkl"
+}
