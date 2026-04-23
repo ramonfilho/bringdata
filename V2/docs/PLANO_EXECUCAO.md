@@ -208,12 +208,49 @@ Para cada arquivo portado de edf23e9 → main:
 | 2026-04-23 | `configs/clients/devclub.yaml` | ordinal idade/salário | OHE idade/salário (Opção A) | OK (51 cols) | OK (60 cols, 0 divergências) | n/a (é mudança de config, não envolve encoding de features derivadas) | ✅ OK | Gap do Challenger de 13 features caiu para 2 (`Medium_Linguagem_de_programa_o`, `Medium_Lookalike_2_Cadastrados_DEV_2_0_Interesses`) — casos específicos de nome/categoria para portes futuros. Champion continua com ordinal via override — comportamento preservado. |
 | 2026-04-23 | `src/core/feature_engineering.py` + `client_config.py` + `configs/clients/devclub.yaml` | `nome_valido`/`email_valido`/`telefone_valido` não criadas | Criadas via flag `create_valido_features=true` (portado do rollback edf23e9) | OK (60 cols) | OK (66 cols, 0 divergências) | Testes unitários + integração com 67k leads reais (99.9% de validade nas 3 features) | ✅ OK | Gap do Champion caiu de 8 para 2 features (`telefone_comprimento_4`, `telefone_comprimento_10`) — ambas requerem retreino do Champion com dados atuais. Challenger continua com as mesmas 2 ausentes do porte anterior. |
 
+### Retreinos coordenados — 2026-04-23
+
+Após portes #1 e #2, as 4 features ainda ausentes nos feature_registries (2 do Champion + 2 do Challenger) eram casos que só resolvem com retreino (`telefone_comprimento_4/10` do Champion, mismatch de normalização de nome do Medium no Challenger). Executei retreino coordenado dos dois modelos com a pipeline atual:
+
+| Modelo | Run ID antigo | Run ID novo | AUC antigo | AUC novo | Lift antigo | Lift novo | Compat snapshot |
+|---|---|---|---|---|---|---|---|
+| Champion (jan30) | `d51757f5...` | `d67bf550e51243b19d83687c4e7d9613` | 0.7311 | 0.724 | 2.65× | 3.4× ↑ | ✅ 0 features ausentes |
+| Challenger (mar24) | `a859c68b...` | `97bf18cde3d44129aa1eb58798d744f8` | 0.7372 | 0.728 | 3.26× | 3.4× | ✅ 0 features ausentes |
+
+Ambos os novos runs produziram feature_registries de 65 features, **100% compatíveis** com o output atual do encoding (66 colunas — snapshot tem 1 feature extra ignorada pelos modelos).
+
+AUC caiu ligeiramente (~0.007–0.009) pela uniformização de dataset e pipeline entre os dois modelos. Lift máximo subiu no Champion (2.65 → 3.4) — indica melhor separação nos decis altos. Monotonia caiu (88.9% → 66–78%) — vale observação durante canary mas não é bloqueador imediato (o Meta otimiza por ROAS, não monotonia).
+
+**Ação pendente antes do deploy:** atualizar `configs/active_models/devclub.yaml`:
+- `guru_jan30.run_id` → `d67bf550e51243b19d83687c4e7d9613`
+- `guru_mar24.run_id` → `97bf18cde3d44129aa1eb58798d744f8`
+- **Remover `encoding_overrides` do `guru_jan30`** — Champion novo foi treinado com OHE (default Opção A), não mais ordinal. Manter override quebraria o scoring.
+
+### Estado atual — 2026-04-23
+
+**Produção:**
+- 100% do tráfego no rollback `00269-jjn` (Champion jan30 ORIGINAL, sem A/B routing)
+- A/B test não está ativo — Challenger mar24 não recebe tráfego
+- DEV20 captação em andamento desde 21/04, janela fecha em 04/05
+
+**Código:**
+- Porte #1 (Opção A encoding) ✅
+- Porte #2 (valido features) ✅
+- Retreinos coordenados ✅
+- Commits locais feitos e pushados
+
+**Pendente antes do deploy:**
+- **T1-11 (validador pré-encoding de features)** — ÚNICO bloqueador restante. Garantia de monitoramento em produção da chegada, processamento e uso das features corretas pelos modelos. Documentado em `PLANO_SAFEGUARD.md`, arquitetura em 3 peças.
+- Atualização do `active_models/devclub.yaml` com novos run_ids (listado acima)
+
+**Por que T1-11 bloqueia:** sem ele, pós-deploy, não temos visibilidade automática de quando uma feature crítica está ausente, com tipo errado ou fora do domínio conhecido do treino. A pipeline preencheria com 0 e ninguém saberia. T1-10 detecta isso só DEPOIS do encoding (colunas OHE sumirem); T1-11 detecta ANTES (causa raiz). Sem essa camada, o deploy em 10% seria cego.
+
 ### Resultado esperado
 
 Após a unificação, o deploy **não** vai direto para 100%. O target é **50/50** — main unificada e rollback `edf23e9` cada um com metade do tráfego. Decisão tomada em 21/04/2026; rationale completo em `AB_TEST.md` → seção "Estratégia de deploy — 50/50 em vez de 100%".
 
 - **Durante o 50/50:** o A/B test só roda na metade da main (rollback não tem código de roteamento). Amostra efetiva do A/B cai pela metade no DEV20.
-- **Pré-requisitos para o 50/50:** Tier 1 completo + parity audit passando + smoke test pós-deploy + Fase 3 unificação concluída.
+- **Pré-requisitos para o 50/50:** Tier 1 completo + parity audit passando + smoke test pós-deploy + Fase 3 unificação concluída + T1-11 implementado.
 - **Subir para 100%:** só após 3 dias sem alerta HIGH + ROAS por variante consolidado no DEV20.
 
 O edf23e9 só é aposentado de verdade quando main está a 100%.
