@@ -1,76 +1,35 @@
 active_model:
-  model_name: v1_devclub_rf_temporal_leads_single_jan30
-  mlflow_run_id: d51757f5041c44b7ab1a056fce8c3c35
-  model_path: files/20260130_090227
-  trained_at: '2026-01-30T09:02:24.891076'
+  model_name: v1_devclub_rf_temporal_leads_single
+  mlflow_run_id: 60637bb98b94421b9c7579bb4ac1b1ad
+  trained_at: '2026-04-23T11:23:58.575484'
   split_method: temporal_leads
   performance:
-    auc: 0.7311170167409214
-    monotonia_percentage: 88.89
-    lift_maximum: 2.65
+    auc: 0.7236
+    monotonia_percentage: 77.78
+    lift_maximum: 3.37
+  # Contexto: Champion v4 — hyperparams idênticos ao jan30 em produção
+  # (n_estimators=300, max_features=sqrt), dataset expandido com Hotmart + Railway
+  # (192,386 leads, 1,104 positivos vs 67k/415 no jan30). Treinado em 23/04/2026
+  # com pipeline refatorada (src/core/). Deploy 10% em 23/04 contra rollback edf23e9
+  # (jan30) que mantém 90%. Progressão para 50% após 24h conforme T1-9.
 
 # Para mudar o modelo ativo:
 # 1. Treine um novo modelo: python -m src.train_pipeline --set-active
 # 2. Ative um run existente: python -m src.train_pipeline --activate-run <run_id>
 
 # =============================================================================
-# TESTE A/B — Guru Only Jan/30 vs Guru Only Mar/24
-# Ambos tmb_risk_filter=none, LQ com valor apenas D07+, LQHQ em D09-D10
-# Ativar: mudar enabled para true + alinhar utm_pattern com gestor de tráfego
+# A/B test desativado — rollback Cloud Run é o split primário
+# =============================================================================
+# Decisão 23/04/2026: em vez de roteamento A/B interno por UTM (ML_JAN vs ML_MAR),
+# o A/B agora é feito via split de tráfego Cloud Run entre duas revisões:
+#   - rollback/edf23e9-jjn (90-50%): serve jan30 (Champion) — código antigo
+#   - main nova revisão (10-50%):    serve este active_model — código+dados novos
+#
+# Vantagem: qualquer diferença de ROAS é atribuível ao binômio código+dados,
+# com hyperparam constante (300/sqrt) entre os dois modelos. Experimento limpo.
+#
+# Para reativar A/B interno por UTM no futuro: mudar enabled para true + definir
+# variants com utm_pattern + run_ids distintos (ver histórico Git pre-23/04/2026).
 # =============================================================================
 ab_test:
-  enabled: true
-  variants:
-    guru_jan30:
-      run_id: d51757f5041c44b7ab1a056fce8c3c35  # Guru Only — treinado 30/01/2026, registrado GCS 25/03/2026
-      # DT-12: jan30 foi treinado com ordinal encoding para idade e faixa salarial.
-      # Mar24 usa OHE (padrão do cliente). Sem este override, jan30 recebe 0 para
-      # Qual_a_sua_idade e Atualmente_qual_a_sua_faixa_salarial em todas as predições.
-      encoding_overrides:
-        ordinal_variables:
-          "Qual a sua idade?":
-            - "menos de 18 anos"
-            - "18 24 anos"
-            - "25 34 anos"
-            - "35 44 anos"
-            - "45 54 anos"
-            - "mais de 55 anos"
-          "Atualmente, qual a sua faixa salarial?":
-            - "nao tenho renda"
-            - "entre r1000 a r2000 reais ao mes"
-            - "entre r2001 a r3000 reais ao mes"
-            - "entre r3001 a r5000 reais ao mes"
-            - "mais de r5001 reais ao mes"
-      utm_pattern:  # OR logic — basta 1 campo casar. Alinhar com gestor.
-        utm_campaign: "ML_JAN"
-        utm_content: "ML_JAN"
-      capi_event_name: LeadQualified
-      capi_event_name_high_quality: LeadQualifiedHighQuality
-      conversion_rates:  # D01-D06 zerados (LQ só envia valor para D07+). PAV aplicado em D07/D08.
-        D01: 0.000000
-        D02: 0.000000
-        D03: 0.000000
-        D04: 0.000000
-        D05: 0.000000
-        D06: 0.000000
-        D07: 0.008100  # obs: 0.840% → PAV pooled com D08
-        D08: 0.008100  # obs: 0.780% → PAV pooled com D07
-        D09: 0.015700  # obs: 1.570% | 52 conv / 3,313 leads
-        D10: 0.017500  # obs: 1.750% | 58 conv / 3,316 leads
-    guru_mar24:
-      run_id: a859c68b1cb94c3b93767a3131eda89a  # Guru Only — treinado 24/03/2026
-      utm_pattern:  # Apenas utm_campaign — adset não ativa o Challenger sozinho.
-        utm_campaign: "ML_MAR"
-      capi_event_name: LeadQualifiedCha
-      capi_event_name_high_quality: LeadQualifiedChaHighQuality
-      conversion_rates:  # D01-D06 zerados. PAV aplicado em D02/D03.
-        D01: 0.000000
-        D02: 0.000000
-        D03: 0.000000
-        D04: 0.000000
-        D05: 0.000000
-        D06: 0.000000
-        D07: 0.005900  # obs: 0.590% | 12 conv / 2,023 leads
-        D08: 0.006400  # obs: 0.640% | 13 conv / 2,024 leads
-        D09: 0.007900  # obs: 0.790% | 16 conv / 2,024 leads
-        D10: 0.015300  # obs: 1.530% | 31 conv / 2,024 leads
+  enabled: false
