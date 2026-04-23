@@ -205,7 +205,7 @@ Para cada arquivo portado de edf23e9 → main:
 
 | Data | Arquivo | De | Para | T1-7 antes | T1-7 depois | T1-11 | Status | Observação |
 |---|---|---|---|---|---|---|---|---|
-| *(vazio até o primeiro porte)* | | | | | | | | |
+| 2026-04-23 | `configs/clients/devclub.yaml` | ordinal idade/salário | OHE idade/salário (Opção A) | OK (51 cols) | OK (60 cols, 0 divergências) | n/a (é mudança de config, não envolve encoding de features derivadas) | ✅ OK | Gap do Challenger de 13 features caiu para 2 (`Medium_Linguagem_de_programa_o`, `Medium_Lookalike_2_Cadastrados_DEV_2_0_Interesses`) — casos específicos de nome/categoria para portes futuros. Champion continua com ordinal via override — comportamento preservado. |
 
 ### Resultado esperado
 
