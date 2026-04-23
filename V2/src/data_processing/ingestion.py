@@ -824,10 +824,12 @@ def read_all_training_sources(
                 )
 
                 if not railway_df.empty:
-                    # Railway vem no formato Sheets (mapper já aplicou railway_lead_to_sheets_row)
-                    # Entra direto em api_data com uma aba "Sheet1"
+                    # Railway vem no formato Sheets (mapper já aplicou railway_lead_to_sheets_row).
+                    # CRÍTICO: nome da aba DEVE conter "pesquisa" para consolidate_datasets
+                    # classificar corretamente como df_pesquisa (não df_vendas). vendas_keywords
+                    # inclui "sheet1" → se aba fosse 'Sheet1' iria para vendas por engano.
                     api_data['[Railway] Leads'] = {
-                        'Sheet1': railway_df
+                        'Pesquisa': railway_df
                     }
                     logger.info(f"     {len(railway_df):,} leads Railway carregados")
                 else:
