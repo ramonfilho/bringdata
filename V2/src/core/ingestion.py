@@ -158,19 +158,94 @@ def remove_duplicates_per_sheet(files_data: Dict[str, Dict[str, pd.DataFrame]],
     return arquivos_limpos, estatisticas
 
 
+def _dedup_cross_source_por_email(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Dedup cross-source por email — evita que o mesmo lead apareça em Sheets E Railway.
+
+    Prioridade de origem: Railway (webhook) > API > arquivos locais. Leads sem email
+    são preservados (não participam da dedup).
+    """
+    if len(df) == 0 or 'E-mail' not in df.columns:
+        return df
+
+    def _source_priority(arquivo: str) -> int:
+        if '[Railway]' in str(arquivo):
+            return 0
+        if '[API]' in str(arquivo):
+            return 1
+        return 2
+
+    df = df.copy()
+    df['_email_norm'] = (
+        df['E-mail'].astype(str).str.strip().str.lower()
+        .replace({'nan': None, 'none': None, '': None})
+    )
+    df['_source_priority'] = df['arquivo_origem'].apply(_source_priority)
+
+    has_email = df['_email_norm'].notna()
+    df_com_email = df[has_email].sort_values('_source_priority').drop_duplicates(subset=['_email_norm'], keep='first')
+    df_sem_email = df[~has_email]
+
+    return (
+        pd.concat([df_com_email, df_sem_email], ignore_index=True)
+        .drop(columns=['_email_norm', '_source_priority'])
+    )
+
+
+def _tmb_dual_source_split(dados_vendas: List[pd.DataFrame]) -> Tuple[List[pd.DataFrame], dict]:
+    """
+    TMB dual-source: quando pedidos + parcelas estão presentes, usa pedidos como fonte
+    primária (email + telefone) e retorna lookup de risco separado para ser aplicado
+    pós-matching. Se só parcelas: comportamento legado preservado.
+
+    Returns: (dados_vendas_finais, tmb_risk_lookup {email_norm → grau_de_risco})
+    """
+    parcelas_frames = [df for df in dados_vendas if '_tmb_tipo' in df.columns and len(df) > 0 and df['_tmb_tipo'].iloc[0] == 'parcelas']
+    pedidos_frames  = [df for df in dados_vendas if '_tmb_tipo' in df.columns and len(df) > 0 and df['_tmb_tipo'].iloc[0] == 'pedidos']
+    outros_frames   = [df for df in dados_vendas if '_tmb_tipo' not in df.columns]
+
+    tmb_risk_lookup: dict = {}
+    if parcelas_frames and pedidos_frames:
+        df_parcelas_all = pd.concat(parcelas_frames, ignore_index=True)
+        tmb_risk_lookup = (
+            df_parcelas_all
+            .dropna(subset=['Cliente Email'])
+            .assign(**{'_email_norm': lambda x: x['Cliente Email'].str.strip().str.lower()})
+            .groupby('_email_norm')['Grau de risco']
+            .first()
+            .to_dict()
+        )
+        logger.info(f"  TMB dual-source: {len(tmb_risk_lookup):,} emails com grau de risco (lookup para pós-matching)")
+        df_pedidos_all = pd.concat(pedidos_frames, ignore_index=True)
+        dados_vendas_final = [df_pedidos_all] + outros_frames
+    else:
+        if parcelas_frames:
+            logger.debug("  TMB: usando apenas arquivo de parcelas (comportamento legado)")
+        dados_vendas_final = dados_vendas
+
+    for df in dados_vendas_final:
+        if '_tmb_tipo' in df.columns:
+            df.drop(columns=['_tmb_tipo'], inplace=True)
+
+    return dados_vendas_final, tmb_risk_lookup
+
+
 def consolidate_datasets(files_data: Dict[str, Dict[str, pd.DataFrame]],
                           config: IngestionConfig
-                          ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+                          ) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
     """
-    Consolida abas de múltiplos arquivos em dois DataFrames: pesquisa e vendas.
+    Consolida abas de múltiplos arquivos em dois DataFrames: pesquisa e vendas,
+    mais um lookup de risco TMB dual-source.
 
     Classificação de aba por nome (case-insensitive):
       - Se nome contém termo de `config.consolidate_pesquisa_keywords` → pesquisa
       - Se nome contém termo de `config.consolidate_vendas_keywords` → vendas
       - Caso contrário: ignorada
 
-    Adiciona colunas `arquivo_origem` e `aba_origem` em cada DataFrame para
-    rastreabilidade downstream (matching, filtros temporais, etc).
+    Pós-processamento:
+      1. Adiciona colunas `arquivo_origem` e `aba_origem` em cada DataFrame
+      2. Dedup cross-source por email no df_pesquisa (Railway > API > locais)
+      3. TMB dual-source: separa parcelas (lookup de risco) de pedidos (matching)
 
     Args:
         files_data: Dict {filename: {sheet_name: DataFrame}}
@@ -178,7 +253,7 @@ def consolidate_datasets(files_data: Dict[str, Dict[str, pd.DataFrame]],
                    consolidate_vendas_keywords
 
     Returns:
-        (df_pesquisa, df_vendas)
+        (df_pesquisa, df_vendas, tmb_risk_lookup)
     """
     pesquisa_kws = config.consolidate_pesquisa_keywords or _DEFAULT_PESQUISA_KEYWORDS
     vendas_kws   = config.consolidate_vendas_keywords   or _DEFAULT_VENDAS_KEYWORDS
@@ -202,10 +277,19 @@ def consolidate_datasets(files_data: Dict[str, Dict[str, pd.DataFrame]],
                 dados_vendas.append(df_copia)
 
     df_pesquisa = pd.concat(dados_pesquisa, ignore_index=True) if dados_pesquisa else pd.DataFrame()
-    df_vendas   = pd.concat(dados_vendas,   ignore_index=True) if dados_vendas   else pd.DataFrame()
 
-    logger.debug(f"  consolidate_datasets: pesquisa={len(df_pesquisa):,}, vendas={len(df_vendas):,}")
-    return df_pesquisa, df_vendas
+    # Dedup cross-source por email no df_pesquisa
+    _antes = len(df_pesquisa)
+    df_pesquisa = _dedup_cross_source_por_email(df_pesquisa)
+    if _antes != len(df_pesquisa):
+        logger.info(f"  Dedup cross-source por email: {_antes:,} → {len(df_pesquisa):,} leads ({_antes - len(df_pesquisa):,} duplicatas removidas)")
+
+    # TMB dual-source split
+    dados_vendas_final, tmb_risk_lookup = _tmb_dual_source_split(dados_vendas)
+    df_vendas = pd.concat(dados_vendas_final, ignore_index=True) if dados_vendas_final else pd.DataFrame()
+
+    logger.debug(f"  consolidate_datasets: pesquisa={len(df_pesquisa):,}, vendas={len(df_vendas):,}, tmb_lookup={len(tmb_risk_lookup):,}")
+    return df_pesquisa, df_vendas, tmb_risk_lookup
 
 
 def filter_sales_by_product(df_vendas: pd.DataFrame,

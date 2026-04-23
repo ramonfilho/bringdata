@@ -224,6 +224,29 @@ def filter_sheets(
     min_linhas: int
 ) -> Tuple[Dict[str, Dict[str, pd.DataFrame]], List[Dict]]:
     """
+    WRAPPER legado — delega para src.core.ingestion.filter_sheets (T2-1).
+
+    Preserva assinatura antiga (kwargs) por backward compat com
+    train_pipeline.py. Monta IngestionConfig ad-hoc e chama a impl
+    canônica em core/.
+    """
+    from src.core.ingestion import filter_sheets as _core_filter_sheets
+    from src.core.client_config import IngestionConfig
+    _cfg = IngestionConfig(
+        filter_termos_manter=termos_manter,
+        filter_termos_remover=termos_remover,
+        filter_min_linhas=min_linhas,
+    )
+    return _core_filter_sheets(files_data, _cfg)
+
+
+def _filter_sheets_legacy_impl(
+    files_data: Dict[str, Dict[str, pd.DataFrame]],
+    termos_manter: List[str],
+    termos_remover: List[str],
+    min_linhas: int
+) -> Tuple[Dict[str, Dict[str, pd.DataFrame]], List[Dict]]:
+    """
     Filtra abas de múltiplos arquivos Excel baseado em critérios configuráveis.
 
     Reproduz a lógica de filtragem das linhas 48-59 do notebook DevClub.
@@ -335,6 +358,16 @@ def filter_sheets(
 
 
 def remove_duplicates_per_sheet(
+    files_data: Dict[str, Dict[str, pd.DataFrame]]
+) -> Tuple[Dict[str, Dict[str, pd.DataFrame]], Dict[str, Dict[str, int]]]:
+    """
+    WRAPPER legado — delega para src.core.ingestion.remove_duplicates_per_sheet (T2-1).
+    """
+    from src.core.ingestion import remove_duplicates_per_sheet as _core_remove
+    return _core_remove(files_data, None)
+
+
+def _remove_duplicates_per_sheet_legacy_impl(
     files_data: Dict[str, Dict[str, pd.DataFrame]]
 ) -> Tuple[Dict[str, Dict[str, pd.DataFrame]], Dict[str, Dict[str, int]]]:
     """
@@ -471,6 +504,26 @@ def remove_unnecessary_columns(
 
 
 def consolidate_datasets(
+    files_data: Dict[str, Dict[str, pd.DataFrame]],
+    pesquisa_keywords: List[str],
+    vendas_keywords: List[str]
+) -> Tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """
+    WRAPPER legado — delega para src.core.ingestion.consolidate_datasets (T2-1).
+
+    Preserva assinatura antiga (kwargs) por backward compat com
+    train_pipeline.py. Retorna (df_pesquisa, df_vendas, tmb_risk_lookup).
+    """
+    from src.core.ingestion import consolidate_datasets as _core_consolidate
+    from src.core.client_config import IngestionConfig
+    _cfg = IngestionConfig(
+        consolidate_pesquisa_keywords=pesquisa_keywords,
+        consolidate_vendas_keywords=vendas_keywords,
+    )
+    return _core_consolidate(files_data, _cfg)
+
+
+def _consolidate_datasets_legacy_impl(
     files_data: Dict[str, Dict[str, pd.DataFrame]],
     pesquisa_keywords: List[str],
     vendas_keywords: List[str]
