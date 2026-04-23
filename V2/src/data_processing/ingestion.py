@@ -521,6 +521,44 @@ def consolidate_datasets(
     # Consolidar em DataFrames únicos (linhas 278-279)
     df_pesquisa_consolidado = pd.concat(dados_pesquisa, ignore_index=True) if dados_pesquisa else pd.DataFrame()
 
+    # Dedup cross-source por email — evita que mesmo lead apareça em Sheets E Railway.
+    # Prioridade: Railway (webhook) > Sheets > Excel local, pois Railway é o mais autoritativo
+    # desde 2026-02-18 quando o webhook foi ativado. Entre 18/02 e hoje, qualquer lead que
+    # também está em Sheets provavelmente veio pelo webhook primeiro.
+    # Regra de priorização: ordena por prioridade de origem, mantém o primeiro registro por email.
+    if len(df_pesquisa_consolidado) > 0 and 'E-mail' in df_pesquisa_consolidado.columns:
+        _antes = len(df_pesquisa_consolidado)
+
+        def _source_priority(arquivo: str) -> int:
+            if '[Railway]' in str(arquivo):
+                return 0  # melhor prioridade
+            if '[API]' in str(arquivo):
+                return 1
+            return 2  # arquivos locais
+
+        df_pesquisa_consolidado = df_pesquisa_consolidado.copy()
+        df_pesquisa_consolidado['_email_norm'] = (
+            df_pesquisa_consolidado['E-mail']
+            .astype(str).str.strip().str.lower()
+            .replace({'nan': None, 'none': None, '': None})
+        )
+        df_pesquisa_consolidado['_source_priority'] = (
+            df_pesquisa_consolidado['arquivo_origem'].apply(_source_priority)
+        )
+        # Ordenar por prioridade e manter primeiro por email (None fica preservado)
+        has_email = df_pesquisa_consolidado['_email_norm'].notna()
+        df_com_email = df_pesquisa_consolidado[has_email].sort_values('_source_priority')
+        df_com_email = df_com_email.drop_duplicates(subset=['_email_norm'], keep='first')
+        df_sem_email = df_pesquisa_consolidado[~has_email]
+        df_pesquisa_consolidado = (
+            pd.concat([df_com_email, df_sem_email], ignore_index=True)
+            .drop(columns=['_email_norm', '_source_priority'])
+        )
+
+        _depois = len(df_pesquisa_consolidado)
+        if _antes != _depois:
+            logger.info(f"  Dedup cross-source por email: {_antes:,} → {_depois:,} leads ({_antes - _depois:,} duplicatas removidas)")
+
     # Merge TMB dual-source: quando pedidos + parcelas estão presentes, usa pedidos como
     # fonte primária (email + telefone). O lookup de risco é retornado separadamente para
     # ser aplicado pós-matching em train_pipeline.py — garantindo que todos os pedidos
