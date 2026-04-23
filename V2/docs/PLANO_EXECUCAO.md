@@ -212,6 +212,41 @@ Para cada arquivo portado de edf23e9 → main:
 
 Após portes #1 e #2, as 4 features ainda ausentes nos feature_registries (2 do Champion + 2 do Challenger) eram casos que só resolvem com retreino (`telefone_comprimento_4/10` do Champion, mismatch de normalização de nome do Medium no Challenger). Executei retreino coordenado dos dois modelos com a pipeline atual:
 
+### Evolução dos retreinos (2026-04-23)
+
+Durante o dia foram feitos 5 retreinos em sequência, cada um corrigindo um gap descoberto no anterior:
+
+| Geração | Fontes | Dataset | Positivos | Janela limite | Champion AUC | Challenger AUC | Status |
+|---|---|---|---|---|---|---|---|
+| v0 originais (jan30/mar24) | Sheets + Guru (velhos) | ~110k / 67k | ~415 | — | 0.7311 | 0.7372 | Produção atual |
+| v1 cache 03/03 | Sheets + Guru | 67k | 415 | 2026-03-06 | 0.724 | 0.728 | MLflow apenas |
+| v2 fresh 06/03 | Sheets + Guru (fresh) | 72k | 430 | 2026-03-06 | 0.743 | 0.756 | MLflow apenas |
+| v3 + Hotmart | Sheets + Guru + Hotmart | 72k | 430 | 2026-03-06 | 0.743 | 0.756 | Hotmart não moveu ponteiro |
+| **v4 + Railway (final)** | **Sheets + Guru + Hotmart + Railway** | **192k** | **1,104** | **2026-04-02** | **0.748** | **0.745** | **✅ Candidato ao deploy** |
+
+Run IDs finais (v4, 2026-04-23):
+- Champion: `60637bb98b94421b9c7579bb4ac1b1ad`
+- Challenger: `7d08ae0302da420aa99559d4d4f55025`
+
+Observações sobre v4:
+- **2.6× mais positivos** que as gerações anteriores (1,104 vs 430) — muito mais robusto estatisticamente
+- **Janela de treino alcançou 2026-04-02** (vs 2026-03-06) — capta o período pós-explosão Hotmart em março
+- AUC similar a v2/v3 mas Top 3 decis subiu de 62.8% → 67.3% e Monotonia de 66.7% → 77.8%
+- **Compatibilidade snapshot: 60 features esperadas, 0 ausentes** em ambos os modelos. T1-7 parity audit passa.
+
+Gaps resolvidos em v4:
+- Hotmart carregado (219 vendas em 2024-12-30 → 2026-04-23, 131 em março)
+- Railway carregado (109,284 leads desde 2026-02-18 via webhook)
+- Dedup cross-source por email (118k duplicatas removidas, Railway prioritário sobre Sheets/Excel)
+- Threshold de missing rate ajustado (50% para `investiu_curso_online` e `interesse_programacao` — features adicionadas depois na pesquisa; cutoff posterior reduz missing real a ~1%)
+- Sheets truncado em 27/03 não bloqueia mais — Railway estende a data máxima para 23/04
+
+---
+
+### Retreinos coordenados — 2026-04-23 (primeira rodada, obsoleta)
+
+> **Obsoleto:** esta seção registra a primeira rodada de retreino (v1 — cache 03/03) antes das descobertas sobre Hotmart, Railway e Sheets truncado. Substituído pelos modelos v4 acima.
+
 | Modelo | Run ID antigo | Run ID novo | AUC antigo | AUC novo | Lift antigo | Lift novo | Compat snapshot |
 |---|---|---|---|---|---|---|---|
 | Champion (jan30) | `d51757f5...` | `d67bf550e51243b19d83687c4e7d9613` | 0.7311 | 0.724 | 2.65× | 3.4× ↑ | ✅ 0 features ausentes |
