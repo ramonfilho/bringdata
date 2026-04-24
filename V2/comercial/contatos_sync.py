@@ -64,6 +64,7 @@ STATUS_VALUES = [
     "A enviar",
     "Enviado",
     "Follow-up",
+    "Bouncing",
     "Sem resposta",
     "Reunião agendada",
     "Pós-reunião",
@@ -78,6 +79,7 @@ STATUS_ROW_COLORS: dict[str, tuple[float, float, float]] = {
     "Follow-up": (0.82, 0.92, 1.00),  # azul
     "Enviado":   (1.00, 0.98, 0.80),  # amarelo
     "A enviar":  (1.00, 0.87, 0.87),  # vermelho (inclui status vazio)
+    "Bouncing":  (1.00, 0.80, 0.60),  # laranja — email bounced, precisa canal alternativo
 }
 
 HEADER_BG  = (0.137, 0.196, 0.263)
@@ -281,11 +283,12 @@ def apply_ui_kit(sh: gspread.Spreadsheet, ws: gspread.Worksheet, n_rows: int) ->
             "index": 0,
         }}
 
-    # Insertion order (reverse of priority)
+    # Insertion order (reverse of priority — last inserted becomes top/winner)
     insert_rules = [
         (f'=AND(${STATUS_COL_LETTER}2="",$A2<>"")',   STATUS_ROW_COLORS["A enviar"]),
         (f'=${STATUS_COL_LETTER}2="A enviar"',        STATUS_ROW_COLORS["A enviar"]),
         (f'=${STATUS_COL_LETTER}2="Enviado"',         STATUS_ROW_COLORS["Enviado"]),
+        (f'=${STATUS_COL_LETTER}2="Bouncing"',        STATUS_ROW_COLORS["Bouncing"]),
         (f'=${STATUS_COL_LETTER}2="Follow-up"',       STATUS_ROW_COLORS["Follow-up"]),
         (f'=${STATUS_COL_LETTER}2="Fechado"',         STATUS_ROW_COLORS["Fechado"]),
     ]

@@ -50,11 +50,12 @@ Subtipo, Qualidade e Observações foram removidos do schema em abr/2026. Se qui
 |---|---|
 | `Fechado` | verde claro |
 | `Follow-up` | azul claro |
+| `Bouncing` | laranja — email bouncou, precisa canal alternativo (LinkedIn etc.) |
 | `Enviado` | amarelo claro |
 | `A enviar` (ou vazio com Nome preenchido) | vermelho claro |
 | `Sem resposta` / `Reunião agendada` / `Pós-reunião` / `Proposta enviada` / `Perdido` | sem cor (no dropdown, cor neutra) |
 
-Prioridade: Fechado > Follow-up > Enviado > A enviar. Definida em `insert_rules` em `apply_ui_kit`.
+Prioridade: Fechado > Follow-up > Bouncing > Enviado > A enviar. Definida em `insert_rules` em `apply_ui_kit`.
 
 ### Workflow para qualquer mudança de dados
 
