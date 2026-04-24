@@ -78,8 +78,8 @@ STATUS_ROW_COLORS: dict[str, tuple[float, float, float]] = {
     "Fechado":   (0.82, 0.95, 0.82),  # verde
     "Follow-up": (0.82, 0.92, 1.00),  # azul
     "Enviado":   (1.00, 0.98, 0.80),  # amarelo
-    "A enviar":  (1.00, 0.87, 0.87),  # vermelho (inclui status vazio)
-    "Bouncing":  (1.00, 0.80, 0.60),  # laranja — email bounced, precisa canal alternativo
+    "A enviar":  (1.00, 0.80, 0.60),  # laranja — ação pendente
+    "Bouncing":  (1.00, 0.87, 0.87),  # vermelho — email inválido, precisa canal alternativo
 }
 
 HEADER_BG  = (0.137, 0.196, 0.263)
