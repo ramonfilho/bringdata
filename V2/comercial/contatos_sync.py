@@ -13,6 +13,7 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,7 @@ from google.auth import default as gauth_default
 SHEET_ID = "1jJWKPiuFz5SbtQCkqE6CLUPn7FHe7taoQjnRelwcSvI"
 WORKSHEET = "Contatos"
 CSV_PATH = Path(__file__).parent / "contatos.csv"
+SENTINEL_PATH = Path(__file__).parent / ".last_push_count.json"   # sentinela contra rows ressuscitando
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -171,14 +173,47 @@ def fetch_sheet_df(ws: gspread.Worksheet) -> pd.DataFrame:
 
 
 def write_sheet_values(ws: gspread.Worksheet, df: pd.DataFrame) -> None:
-    # Limpa faixa ampla (valores apenas; formatação vem do UI kit)
-    ws.batch_clear([f"A2:{LAST_COL_LETTER}200"])
+    # Limpa faixa ampla (valores apenas; formatação vem do UI kit).
+    # 500 é safety: cobre rows órfãs que eventuais operações manuais tenham deixado fora do range antigo (200).
+    ws.batch_clear([f"A2:{LAST_COL_LETTER}500"])
     values = [COLUMN_NAMES] + df.values.tolist()
     ws.update(
         values=values,
         range_name=f"A1:{LAST_COL_LETTER}{len(df) + 1}",
         value_input_option="USER_ENTERED",
     )
+
+
+# ============================================================
+# SENTINELA — proteção contra rows ressuscitando/sumindo
+# ============================================================
+
+def read_sentinel() -> int | None:
+    """Retorna último row count conhecido após push, ou None se inexistente."""
+    if not SENTINEL_PATH.exists():
+        return None
+    try:
+        return int(json.loads(SENTINEL_PATH.read_text())["row_count"])
+    except (json.JSONDecodeError, KeyError, ValueError):
+        return None
+
+
+def write_sentinel(row_count: int) -> None:
+    """Persiste row count após push bem-sucedido."""
+    SENTINEL_PATH.write_text(json.dumps({"row_count": row_count}))
+
+
+def count_data_rows_in_sheet(ws: gspread.Worksheet) -> int:
+    """Conta linhas de dados (não-header, Nome preenchido, não-legenda) no Sheet."""
+    rows = ws.get_all_values()
+    count = 0
+    for r in rows[1:]:
+        a = (r[0] if r else "").strip()
+        if a.lower().startswith("legenda"):
+            break
+        if a:
+            count += 1
+    return count
 
 
 # ============================================================
@@ -313,39 +348,75 @@ def apply_ui_kit(sh: gspread.Spreadsheet, ws: gspread.Worksheet, n_rows: int) ->
 # OPERATIONS
 # ============================================================
 
-def push(dry_run: bool = False) -> None:
+def push(dry_run: bool = False, force: bool = False) -> None:
     df = load_csv()
-    print(f"CSV válido: {len(df)} linhas, {len(df.columns)} colunas.")
+    n_csv = len(df)
+    print(f"CSV válido: {n_csv} linhas, {len(df.columns)} colunas.")
     counts = df["Status de envio"].replace("", "A enviar (vazio)").value_counts()
     print(f"Distribuição de status:\n{counts.to_string()}")
+
+    # Sentinela — detecta mudança inesperada de contagem entre sessões
+    last_count = read_sentinel()
+    if last_count is not None and abs(n_csv - last_count) > 5 and not force:
+        diff = n_csv - last_count
+        print(f"\n⚠ ALERTA: CSV tem {n_csv} linhas, último push conhecido tinha {last_count} "
+              f"(diferença: {diff:+d}). Isso é intencional?")
+        print("   Se sim, rode com --force. Se não, investigue antes de sobrescrever o Sheet.")
+        raise RuntimeError(f"Sentinela bloqueou push: diff {diff:+d}. Use --force para prosseguir.")
+
     if dry_run:
         print("\nDRY-RUN: nada foi escrito no Sheet.")
         return
+
     sh, ws = connect()
     write_sheet_values(ws, df)
-    apply_ui_kit(sh, ws, n_rows=len(df))
-    print(f"\n✓ Push concluído: {len(df)} linhas escritas + UI kit reaplicado.")
+    apply_ui_kit(sh, ws, n_rows=n_csv)
+
+    # Verificação pós-push: re-lê Sheet e compara contagem
+    n_sheet_after = count_data_rows_in_sheet(ws)
+    if n_sheet_after != n_csv:
+        print(f"\n⚠ ALERTA: Sheet tem {n_sheet_after} linhas após push, CSV tinha {n_csv}. "
+              f"Possível row órfã fora do range de clear — investigar.")
+    else:
+        print(f"\n✓ Push concluído: {n_csv} linhas escritas + UI kit reaplicado "
+              f"(contagem verificada no Sheet).")
+
+    write_sentinel(n_csv)
 
 
-def pull(dry_run: bool = False) -> None:
+def pull(dry_run: bool = False, force: bool = False) -> None:
     sh, ws = connect()
     df_sheet = fetch_sheet_df(ws)
-    print(f"Sheet válido: {len(df_sheet)} linhas.")
+    n_sheet = len(df_sheet)
+    print(f"Sheet válido: {n_sheet} linhas.")
+
+    # Diff-guard: se Sheet tem mais rows que o esperado (CSV local ou sentinela), exigir force
+    last_count = read_sentinel()
+    if CSV_PATH.exists():
+        df_csv_atual = pd.read_csv(CSV_PATH, dtype=str, keep_default_na=False)
+        n_csv_atual = len(df_csv_atual)
+        added = set(df_sheet["Nome"]) - set(df_csv_atual["Nome"])
+        removed = set(df_csv_atual["Nome"]) - set(df_sheet["Nome"])
+        print(f"CSV atual: {n_csv_atual} linhas. Diff: +{len(added)} -{len(removed)}")
+        if added:
+            print(f"  Novos no Sheet: {sorted(added)[:5]}{'...' if len(added) > 5 else ''}")
+        if removed:
+            print(f"  Não presentes no Sheet: {sorted(removed)[:5]}{'...' if len(removed) > 5 else ''}")
+
+        # Sinal vermelho: Sheet cresceu >5 rows vs último push — pode ser edição manual legítima OU row ressuscitando
+        if last_count is not None and n_sheet - last_count > 5 and not force:
+            print(f"\n⚠ ALERTA: Sheet tem {n_sheet} linhas, último push conhecido tinha {last_count} "
+                  f"(+{n_sheet - last_count}). Pode ser edição manual legítima ou row ressuscitando.")
+            print("   Revise o diff acima. Para prosseguir: --force.")
+            raise RuntimeError("Sentinela bloqueou pull: crescimento inesperado.")
+
     if dry_run:
-        if CSV_PATH.exists():
-            df_csv = pd.read_csv(CSV_PATH, dtype=str, keep_default_na=False)
-            added = set(df_sheet["Nome"]) - set(df_csv["Nome"])
-            removed = set(df_csv["Nome"]) - set(df_sheet["Nome"])
-            print(f"CSV atual: {len(df_csv)} linhas.")
-            print(f"Diff: +{len(added)} -{len(removed)}")
-            if added:
-                print(f"  Novos: {sorted(added)[:5]}{'...' if len(added) > 5 else ''}")
-            if removed:
-                print(f"  Removidos: {sorted(removed)[:5]}{'...' if len(removed) > 5 else ''}")
         print("\nDRY-RUN: CSV não foi sobrescrito.")
         return
+
     save_csv(df_sheet)
-    print(f"\n✓ Pull concluído: {len(df_sheet)} linhas escritas em {CSV_PATH.name}.")
+    write_sentinel(n_sheet)
+    print(f"\n✓ Pull concluído: {n_sheet} linhas escritas em {CSV_PATH.name}.")
 
 
 # ============================================================
@@ -361,13 +432,15 @@ def main() -> int:
     mode.add_argument("--pull", action="store_true", help="Sheet → CSV (após edição no browser)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Não grava nada; só valida e mostra diff.")
+    parser.add_argument("--force", action="store_true",
+                        help="Ignora sentinela de row count (use quando a mudança é intencional).")
     args = parser.parse_args()
 
     try:
         if args.push:
-            push(dry_run=args.dry_run)
+            push(dry_run=args.dry_run, force=args.force)
         elif args.pull:
-            pull(dry_run=args.dry_run)
+            pull(dry_run=args.dry_run, force=args.force)
         return 0
     except SchemaError as e:
         print(f"\n✗ Schema error:\n{e}", file=sys.stderr)
