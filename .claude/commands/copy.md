@@ -249,7 +249,12 @@ Usar **só quando o destinatário não está na planilha** (teste rápido, conta
 ## PROTOCOLO DE ENVIO (após redigir)
 
 1. **Entregar no formato acima** (bloco pronto para copiar) — nunca enviar direto ao destinatário.
-2. Confirmar **Subject/assunto** (para email): padrão `Proposta de Parceria — Bring Data` para institucional; para outros, puxar do ângulo (ex.: "O sinal que você envia para a plataforma pode ser muito melhor — Bring Data").
+2. Confirmar **Subject/assunto** (para email): **SEMPRE começar com `Proposta Comercial — `** como prefixo fixo, seguido do ângulo específico. Exemplos:
+   - `Proposta Comercial — A plataforma aprende com o lead errado — Bring Data`
+   - `Proposta Comercial — Lead scoring por ML + CAPI — fit com a agenda de marketing da [Empresa]`
+   - `Proposta Comercial — verificando a via correta na [Empresa]`
+
+   Essa regra vale para **todos os emails novos** (institucional, nominal, cold, warm, follow-up). Ajuda destinatário a triar rapidamente e sinaliza intenção clara desde o assunto.
 3. Após o usuário confirmar que **enviou de fato**, registrar em `bring_data_contatos` via `/sheets`:
    - Coluna F (`Copy`) = mensagem completa com `Subject:` na primeira linha (para email) ou corpo puro (WhatsApp/LinkedIn). Se já houver histórico, **acrescentar** ao final em vez de sobrescrever.
    - Coluna G (`Status de envio`) = `Enviado` ou `Follow-up` conforme o estágio.
