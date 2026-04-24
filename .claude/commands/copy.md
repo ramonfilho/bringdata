@@ -25,18 +25,43 @@ Antes de escrever, confirmar com o usuário (pergunta curta, se não estiverem �
 ## ANATOMIA DA MENSAGEM
 
 ```
-[1] SAUDAÇÃO                 → "Prezados," (formal) | "Boa tarde," (resposta/warm)
-[2] GANCHO DE CONTEXTO       → só em warm/follow-up: quem redirecionou, referência, etc.
-[3] INTRO DO REMETENTE       → nome + empresa + especialização (1 linha)
-[4] OBJETIVO DO CONTATO      → opcional; usar só em cold institucional
-[5] NÚCLEO DO PRODUTO        → parágrafo-padrão (ver "INVARIANTES")
-[6] OFERTAS COMPLEMENTARES   → lista bulletada (cold longo) ou prosa condensada (warm curto)
-[7] FECHO                    → soft CTA (cold) | ask direto por data/horário (warm)
-[8] ASSINATURA               → Ramon Filho + contato
+[1] SAUDAÇÃO                 → "[Nome], tudo bem?" (nominal) | "Prezados," (institucional)
+[2] HOOK CLIENTE-PRIMEIRO    → OBRIGATÓRIO: fato observável sobre a pessoa OU a empresa, ligando
+                                a um ângulo onde o produto faz sentido. Vem ANTES de qualquer
+                                menção à Bring Data.
+[3] INTRO DO REMETENTE       → "Ramon Filho, fundador da Bring Data." (uma linha, depois do hook)
+[4] NÚCLEO DO PRODUTO        → parágrafo-padrão (ver "INVARIANTES")
+[5] CONEXÃO CLIENTE × PRODUTO → 1–2 linhas amarrando o hook [2] ao que o produto faz
+[6] RESULTADO VERIFICADO     → números (92c, 12/12, significância)
+[7] OFERTAS COMPLEMENTARES   → opcional; lista bulletada (cold longo) ou prosa condensada
+[8] FECHO                    → CTA 30min | pedido de redirecionamento
+[9] ASSINATURA               → Ramon Filho + contato
 ```
 
-Blocos **obrigatórios**: 1, 3, 5, 7, 8.
-Blocos **condicionais**: 2 (só warm), 4 (só cold institucional), 6 (opcional em warm curto).
+Blocos **obrigatórios**: 1, 2, 3, 4, 6, 8, 9.
+Blocos **condicionais**: 5 (se o hook [2] for forte, a conexão já fica implícita), 7 (cold longo apenas).
+
+### ⚠️ REGRA CENTRAL — cliente antes de Bring Data, sempre
+
+O email NUNCA começa (depois da saudação) falando do remetente ou do produto. A primeira linha substantiva é **um fato sobre o destinatário ou a empresa dele**. Só depois desse hook é que aparece "Ramon Filho, fundador da Bring Data" e então o produto.
+
+**Por quê:** o destinatário em 3 segundos decide se a mensagem é sobre ele ou sobre você vender. Começar com "A Bring Data tem um sistema..." sinaliza pitch genérico. Começar com "Patrimar + Novolar é o caso ideal porque..." sinaliza que você estudou o negócio dele.
+
+### Anti-patterns de abertura (proibidos)
+
+- ❌ "Meu nome é Ramon Filho, fundador da Bring Data. A Bring Data tem um sistema..." — self-first puro.
+- ❌ "Ramon Filho, fundador da Bring Data. Desenvolvemos um sistema..." — mesmo problema, mais curto não resolve.
+- ❌ "Sua cadeira de X é exatamente o perfil pra quem faz sentido levar o que estou desenvolvendo" — flattery + "estou desenvolvendo" (tom de trabalho em andamento, não de produto pronto).
+- ❌ "Como CFO de uma cia aberta, decisões sobre isso passam pela sua agenda" — flattery disfarçada de observação; passiva e vaga.
+- ❌ Qualquer verbo que sugira produto não-pronto: "estou desenvolvendo", "estamos construindo", "pretendo oferecer". Use presente/passado de coisa já existente: "A Bring Data tem", "o sistema foi treinado", "em operação verificada".
+
+### Exemplos de hook [2] que funcionam
+
+- *"Vi sua chegada à Monte Bravo como Head de Produtos Digitais — o mandato de plataformas, automação e integração de dados é o perímetro onde lead scoring por ML entrega diretamente."*
+- *"Patrimar + Novolar é o caso ideal para segmentação de sinal: duas marcas operando simultaneamente com personas radicalmente distintas mas competindo pelo mesmo orçamento de mídia."*
+- *"Sua fala no Morada Day 2024 foi sobre a camada interna de IA (atendimento, qualificação). Falta ao ciclo a camada externa — o sinal server-side que volta para Meta e Google."*
+
+Cada um desses **observa algo específico, verdadeiro e pesquisado** sobre a pessoa/empresa e **já insinua onde o produto se encaixa**, sem ainda ter falado de Bring Data.
 
 ---
 
