@@ -14,8 +14,13 @@ Use esta skill quando precisar pesquisar contatos em uma empresa-alvo antes de r
 4. **Role ≠ mandate** — título não implica decisão. Buscar evidência de escopo (projetos anunciados, contratações sob eles, áreas que responderam publicamente).
 5. **Email tier explícito**:
    - `confirmed_public` — publicado em site oficial ou press release
-   - `inferred_pattern` — padrão validado com ≥2 exemplos confirmados **na mesma empresa**
+   - `inferred_pattern` — padrão validado com **≥2 exemplos NOMINAIS reais** (ex.: `tiago.chrispin@`, `marcel.lima@`) na mesma empresa, **em fontes Tier 1 ou 2**
    - `guess` — padrão não validado → **não enviar** sem aprovação manual
+
+   **⚠️ ATENÇÃO — emails departamentais NÃO validam o padrão nominal.**
+   `atendimento@`, `imprensa@`, `dpo@`, `contato@`, `sac@`, `carreira@` validam apenas o **domínio**. NÃO podem ser usados como exemplos do formato `nome.sobrenome@`. Para validar o padrão nominal, preciso ver pelo menos 2 emails reais com primeiro nome + sobrenome.
+
+   **⚠️ Padrão vindo SÓ de RocketReach/ZoomInfo/ContactOut é `guess`, não `inferred_pattern`** — por mais que digam "40% dos emails seguem este padrão". Evidência empírica (abr/2026, SVN): 4/4 de emails `svni.com.br` inferidos via RocketReach foram bounce.
 6. **Red flags no topo** — M&A recente, reestruturação, rumor de saída, silêncio >12 meses. Não enterrar no meio do dossiê.
 
 ---
@@ -32,19 +37,25 @@ Regra: um fato precisa ter **pelo menos 1 fonte Tier 1 ou 2 Tier 2s**. RocketRea
 
 ---
 
-## CHECKLIST POR CONTATO (7 itens)
+## CHECKLIST POR CONTATO (8 itens)
 
 Para cada pessoa a reportar:
 
 - [ ] **Nome canonicamente grafado** (fonte Tier 1)
 - [ ] **Cargo atual confirmado** com data de entrada **ou** menção recente (<6 meses)
 - [ ] **Empresa tenure current** — não é "ex-empresa"
-- [ ] **Email**: `confirmed_public` **ou** `inferred_pattern` com ≥2 exemplos
+- [ ] **Email**: `confirmed_public` **ou** `inferred_pattern` com ≥2 exemplos **nominais** (não departamentais)
+- [ ] **Papel público ativo** — aparece em press releases, entrevistas, posts LinkedIn? Mailbox individual tende a existir para quem tem papel público ativo. Sem isso, risco alto de mailbox inexistente mesmo com cargo real.
 - [ ] **Relevância ao pitch**: evidência de escopo/mandato/budget
 - [ ] **Atividade recente** nos últimos 6 meses
 - [ ] **Sem red flag não-resolvido** (M&A, rumor de saída, silêncio longo)
 
 Cada item faltante **não** bloqueia — mas baixa a `confidence_overall`. Contatos com `confidence: low` não entram na lista de envio automaticamente; vão pra "verify_first".
+
+**⚠️ Heurística de bounce (aprendida em 2026-04-23)**: cargo confirmado ≠ mailbox existe.
+Evidência empírica: dos 10 envios em 2026-04-22, 7 bounced. Todos os 7 tinham email `inferred_pattern` sem exemplo nominal validado. Os 3 que entregaram: 1 canal publicado (`contato@`) + 1 nominal com padrão Tier 1 confirmado (Paulo Correa) + 1 provável delivered com papel público ativo (Bruno Hora, cofundador com quote em InfoMoney).
+
+**Regra operacional**: se a pessoa tem cargo confirmado mas **não aparece em nenhuma fonte ativa** (só LinkedIn passivo ou menção terceira), preferir **LinkedIn InMail direto** em vez de gerar draft de email — mesmo com padrão nominal validado na empresa.
 
 ---
 
