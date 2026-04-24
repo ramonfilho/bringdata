@@ -1,210 +1,117 @@
-# /investigate-ab — Investigação Técnica do Teste A/B
+# /investigate-ab — Investigação de equivalência de decis entre revisões Cloud Run
 
-Você é um engenheiro de MLOps verificando se o teste A/B Champion/Challenger está tecnicamente correto — roteamento, eventos CAPI, janela de dados limpa e poder estatístico.
+Você é um engenheiro de MLOps verificando se um **canary deploy** está entregando um sinal de scoring equivalente (ou melhor) que a revisão anterior. Hoje não temos Champion/Challenger por UTM — temos **duas revisões Cloud Run convivendo** (rollback vs main unificada) e queremos saber se a nova não está degradando o sinal.
 
-Referência: `V2/docs/AB_TEST.md` — leia antes de começar para ter o contexto dos eventos, UTMs e janela válida.
+Referência: `V2/docs/AB_TEST.md` seção "Estratégia de deploy — 50/50 em vez de 100%" e `V2/docs/PLANO_EXECUCAO.md` Fase 3.
 
----
-
-## Passo 1 — Configuração atual
-
-Leia `V2/configs/active_models/devclub.yaml` e extraia:
-
-- `ab_test.enabled` (true/false)
-- Variante Champion: run_id, utm_pattern, capi_event_name, capi_event_name_high_quality
-- Variante Challenger: run_id, utm_pattern, capi_event_name, capi_event_name_high_quality
-- `encoding_overrides` presentes no Champion? (crítico — DT-12)
-
-Se `enabled: false`, pare aqui — o teste não está ativo.
+**Premissa:** `ab_test.enabled` está `false`. Cada revisão scora 100% dos seus leads com um modelo único. O split é gerenciado pelo Cloud Run, não por UTM.
 
 ---
 
-## Passo 2 — Janela de dados válida
-
-A janela limpa atual é:
-
-```
-início: 2026-04-01 03:00:00 UTC  (00:00 BRT — encoding_overrides aplicado)
-fim:    2026-04-13 22:33:56 UTC  (rollback deployado sem A/B test)
-```
-
-Qualquer análise deve usar essa janela. Se houver nova janela após reativação do teste, confirme a data do deploy e atualize os limites.
-
----
-
-## Passo 3 — Volume por variante
-
-```sql
-SELECT
-    CASE
-        WHEN campaign ILIKE '%ML_MAR%' THEN 'Challenger (mar24)'
-        ELSE 'Champion (jan30)'
-    END AS variante,
-    COUNT(*) AS leads_totais,
-    COUNT(CASE WHEN decil IS NOT NULL THEN 1 END) AS leads_scored,
-    COUNT(CASE WHEN "capiStatus" = 'success' THEN 1 END) AS capi_success,
-    COUNT(CASE WHEN "capiStatus" = 'blocked' THEN 1 END) AS capi_blocked,
-    ROUND(COUNT(CASE WHEN decil = 10 THEN 1 END) * 100.0 / NULLIF(COUNT(CASE WHEN decil IS NOT NULL THEN 1 END), 0), 1) AS d10_pct
-FROM "Lead"
-WHERE "createdAt" >= '2026-04-01 03:00:00'
-  AND "createdAt" <  '2026-04-13 22:33:56'
-GROUP BY 1;
-```
-
-Verifique:
-- Challenger com < 10% do volume do Champion → UTM pode estar errado ou campanhas ML_MAR com baixo investimento
-- `capi_blocked` > 5% em qualquer variante → o Meta não está recebendo o sinal
-- `leads_scored = 0` → pipeline não está rodando para aquela variante
-
----
-
-## Passo 4 — Roteamento correto (leads ML_MAR indo para o Challenger)
-
-```sql
--- Leads ML_MAR: todos devem ter capiStatus != null e leadScore != null
-SELECT
-    campaign,
-    COUNT(*) AS total,
-    COUNT(CASE WHEN "leadScore" IS NOT NULL THEN 1 END) AS com_score,
-    COUNT(CASE WHEN "leadScore" IS NULL THEN 1 END) AS sem_score,
-    ROUND(AVG("leadScore")::numeric, 4) AS score_medio,
-    ROUND(AVG(decil::numeric), 2) AS decil_medio
-FROM "Lead"
-WHERE "createdAt" >= '2026-04-01 03:00:00'
-  AND "createdAt" <  '2026-04-13 22:33:56'
-  AND campaign ILIKE '%ML_MAR%'
-GROUP BY campaign
-ORDER BY total DESC
-LIMIT 20;
-```
-
-Alerta: se `sem_score > 0` para leads ML_MAR, o roteamento falhou silenciosamente.
-
----
-
-## Passo 5 — Eventos CAPI enviados por variante
-
-```sql
--- Verificar que ML_MAR recebe LeadQualifiedCha e não LeadQualified
-SELECT
-    CASE WHEN campaign ILIKE '%ML_MAR%' THEN 'Challenger' ELSE 'Champion' END AS variante,
-    -- capiEventName pode estar em campo separado ou inferido pela campaign
-    "capiStatus",
-    COUNT(*) AS eventos
-FROM "Lead"
-WHERE "createdAt" >= '2026-04-01 03:00:00'
-  AND "createdAt" <  '2026-04-13 22:33:56'
-  AND "capiSentAt" IS NOT NULL
-GROUP BY 1, 2
-ORDER BY 1, 2;
-```
-
-Se o banco não tiver campo de event_name, valide via logs do Cloud Run:
+## Passo 1 — Identificar as revisões em tráfego
 
 ```bash
-gcloud logging read \
-  "resource.type=cloud_run_revision AND resource.labels.service_name=smart-ads-api AND textPayload:LeadQualifiedCha" \
-  --limit=20 --format="value(textPayload)"
+gcloud run services describe smart-ads-api --region us-central1 \
+  --format="value(status.traffic[].revisionName,status.traffic[].percent,status.traffic[].tag)"
 ```
 
-Esperado:
-- Champion → `LeadQualified` / `LeadQualifiedHighQuality`
-- Challenger → `LeadQualifiedCha` / `LeadQualifiedChaHighQuality`
+Esperado: 2 revisões com tráfego > 0% (ex.: 90/10 ou 50/50). Revisões com tag `staging` ou `canary-*` com 0% não entram.
 
-Se Challenger estiver enviando `LeadQualified`, o roteamento de eventos CAPI está errado — os dados do teste são inválidos.
+Anote:
+- `REV_BASELINE` = revisão com maior tráfego (referência conhecida)
+- `REV_CANARY` = revisão com menor tráfego (a validar)
+- Confirmar `active_model.mlflow_run_id` de cada: ler `configs/active_models/devclub.yaml` na branch/commit deployado em cada revisão.
+
+Se só houver 1 revisão com tráfego, não há canary para validar — parar.
 
 ---
 
-## Passo 6 — Distribuição de decis por variante
+## Passo 2 — Distribuição de decis por revisão (últimas 24h)
 
-```sql
-SELECT
-    CASE WHEN campaign ILIKE '%ML_MAR%' THEN 'Challenger' ELSE 'Champion' END AS variante,
-    decil,
-    COUNT(*) AS leads,
-    ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (
-        PARTITION BY CASE WHEN campaign ILIKE '%ML_MAR%' THEN 'Challenger' ELSE 'Champion' END
-    ), 1) AS pct
-FROM "Lead"
-WHERE "createdAt" >= '2026-04-01 03:00:00'
-  AND "createdAt" <  '2026-04-13 22:33:56'
-  AND decil IS NOT NULL
-GROUP BY 1, 2
-ORDER BY 1, 2;
+Para cada revisão, contar decis a partir dos logs CAPI:
+
+```bash
+for REV in $REV_BASELINE $REV_CANARY; do
+  echo "=== $REV ==="
+  gcloud logging read "resource.type=cloud_run_revision \
+    AND resource.labels.service_name=smart-ads-api \
+    AND resource.labels.revision_name=$REV \
+    AND textPayload:\"LeadQualified enviado\"" \
+    --limit=2000 --freshness=24h --format="value(textPayload)" \
+    | grep -oE "decil: D[0-9]+" | sort | uniq -c | sort -rn
+done
 ```
 
-Procure por:
-- Champion com D10% muito diferente do Challenger → modelos com calibração diferente (esperado, mas documentar)
-- Qualquer variante com D10% < 5% → modelo pode estar produzindo scores comprimidos
+**Atenção ao formato dos decis:**
+- Modelos antigos (pré-refactor): `D1, D2, ..., D9, D10`
+- Modelos novos (pós-refactor): `D01, D02, ..., D09, D10`
+
+Um canary com formato diferente do baseline é **esperado** (o refactor normalizou para `D01`–`D10`). Mas a lógica de downstream (`decil_to_value`, `high_quality_decils`) precisa aceitar o formato emitido. Se não aceitar, o CAPI envia `value=0` ou filtra erradamente — investigar `api/business_config.py` e `api/capi_integration.py` se suspeitar.
 
 ---
 
-## Passo 7 — Contaminação pelo período de rollback
+## Passo 3 — Comparar distribuição
 
-Verifique se há leads ML_MAR que foram processados durante o rollback (sem A/B test) e receberam o evento errado:
+Normalize as contagens em percentuais e compare lado a lado. Exemplo:
 
-```sql
-SELECT
-    DATE_TRUNC('hour', "createdAt") AS hora,
-    COUNT(*) AS leads_ml_mar,
-    COUNT(CASE WHEN "leadScore" IS NOT NULL THEN 1 END) AS com_score
-FROM "Lead"
-WHERE campaign ILIKE '%ML_MAR%'
-  AND "createdAt" >= '2026-04-13 20:00:00'  -- 2h em torno do rollback
-  AND "createdAt" <= '2026-04-14 06:00:00'
-GROUP BY 1
-ORDER BY 1;
-```
+| Decil | Baseline (n=N_b) | Canary (n=N_c) | Δ pp | Diagnóstico |
+|---|---|---|---|---|
+| D10 | X% | Y% | ±Z pp | |
+| D09 | | | | |
+| ... | | | | |
+| D01 | | | | |
 
-Leads ML_MAR com score entre 22:33 UTC (13/04) e a reativação do A/B test estão contaminados — precisam ser excluídos da análise.
+Critérios de atenção:
+- **D10% > 25%** em qualquer revisão → colapso de D10 (esperado ~10%; drift conhecido no jan30 original).
+- **D10% < 5%** → scores comprimidos; modelo pode não estar discriminando.
+- **|Δ pp| > 10 em qualquer decil** → diferença estrutural entre modelos — esperada se o canary foi retreinado, mas precisa ser justificada.
+- **Distribuição do canary mais uniforme que baseline** → possivelmente *bom sinal* (correção do drift). Ainda assim, comparar contra expectativa de 10% por decil no dataset de treino.
 
 ---
 
-## Passo 8 — Poder estatístico (vale a pena continuar?)
+## Passo 4 — Volume proporcional ao split
 
-Com os volumes do Passo 3, calcule:
+Confirmar que o número de eventos CAPI por revisão é coerente com o split declarado. Com 10/90, espera-se ~11× mais eventos no baseline. Variação grande (ex.: 50×) pode indicar:
+- Um dos endpoints não está rodando numa revisão (ex.: Cloud Scheduler só bate num host fixo)
+- Canary ainda aquecendo (cold start) — refazer em algumas horas
+- Erro de roteamento na camada Cloud Run
 
-```python
-from scipy import stats
-import numpy as np
-
-n_champion = <leads_champion>
-n_challenger = <leads_challenger>
-
-# Taxa de conversão histórica do Champion (D10 é ~1.75%, mas para todos os leads usar baseline)
-p_champion = 0.0066  # baseline do modelo jan30
-
-# Para detectar melhoria de 20% no Challenger com 80% de poder:
-effect_size = 0.20
-p_challenger_detectavel = p_champion * (1 + effect_size)
-
-from statsmodels.stats.power import NormalIndPower
-analysis = NormalIndPower()
-n_needed = analysis.solve_power(
-    effect_size=abs(p_challenger_detectavel - p_champion) / np.sqrt(p_champion * (1 - p_champion)),
-    power=0.80,
-    alpha=0.05
-)
-print(f"Leads necessários por grupo: {n_needed:.0f}")
-print(f"Champion atual: {n_champion} ({'OK' if n_champion >= n_needed else 'INSUFICIENTE'})")
-print(f"Challenger atual: {n_challenger} ({'OK' if n_challenger >= n_needed else 'INSUFICIENTE'})")
+```bash
+for REV in $REV_BASELINE $REV_CANARY; do
+  N=$(gcloud logging read "resource.type=cloud_run_revision \
+    AND resource.labels.service_name=smart-ads-api \
+    AND resource.labels.revision_name=$REV \
+    AND textPayload:\"LeadQualified enviado\"" \
+    --limit=2000 --freshness=24h --format="value(textPayload)" | wc -l)
+  echo "$REV: $N eventos"
+done
 ```
 
 ---
 
-## Passo 9 — Síntese técnica
+## Passo 5 — Erros 5xx e simetria
 
-Produza uma tabela de status:
+```bash
+gcloud logging read "resource.type=cloud_run_revision \
+  AND resource.labels.service_name=smart-ads-api \
+  AND httpRequest.status>=500" \
+  --limit=100 --freshness=24h \
+  --format="value(timestamp,resource.labels.revision_name,httpRequest.status,httpRequest.requestUrl)"
+```
+
+Comparar taxa de 5xx entre as revisões. Erros **simétricos** (mesma URL, ambas as revisões) geralmente são upstream (Railway DB timeout, Cloud SQL indisponível). Erros **assimétricos** (só no canary) são regressão do novo código — investigar stack trace.
+
+---
+
+## Passo 6 — Síntese
 
 | Verificação | Status | Detalhe |
 |---|---|---|
-| A/B test habilitado | ✓/✗ | |
-| encoding_overrides no Champion | ✓/✗ | |
-| Roteamento ML_MAR → Challenger | ✓/✗ | |
-| Eventos CAPI corretos por variante | ✓/✗ | |
-| Volume Challenger ≥ 15% do Champion | ✓/✗ | |
-| Janela limpa identificada | ✓/✗ | início → fim |
-| Contaminação por rollback | sim/não | leads afetados |
-| Poder estatístico suficiente | ✓/✗ | leads necessários vs atuais |
+| Duas revisões com tráfego identificadas | ✓/✗ | baseline / canary / split |
+| Formato de decil consistente com downstream | ✓/✗ | D1–D10 ou D01–D10 |
+| D10% dentro do intervalo saudável (5–25%) | ✓/✗ | baseline X%, canary Y% |
+| Distribuição comparável ou canary ≥ saudável | ✓/✗ | resumo dos Δ |
+| Volume proporcional ao split | ✓/✗ | N_base / N_canary |
+| 5xx simétricos (upstream, não regressão) | ✓/✗ | lista de URLs |
 
-**Conclusão**: o teste está tecnicamente válido para análise? Se não, quais são os bloqueadores e o que precisa ser corrigido antes de tirar qualquer conclusão.
+**Conclusão:** o canary pode progredir para próxima fatia de tráfego? Se não, qual é o bloqueador e o que observar antes de reavaliar?

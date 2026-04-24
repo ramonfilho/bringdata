@@ -356,6 +356,55 @@ Confirme que vendas com status "não aprovado", "estornado" ou "inadimplente" es
 
 ---
 
+## BLOCO 10 — Autorização de processo: o deploy deveria acontecer?
+
+**Por que importa:** em 20/04/2026, código do branch `main` foi deployado e serviu 100% do tráfego por horas. O safeguard encontrou dois bugs de código, eles foram corrigidos, o usuário autorizou o deploy — mas ninguém verificou se `main` estava autorizada para produção nem se os pré-requisitos do PLANO_EXECUCAO.md estavam satisfeitos. O `deploy_capi.sh` tem proteção de branch, mas é contornável manualmente sem trail. O safeguard avalia integridade de código; este bloco verifica se o deploy deveria acontecer.
+
+### 10.1 — Branch atual está autorizada para produção
+
+```bash
+CURRENT_BRANCH=$(git -C V2 rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+echo "Branch atual: $CURRENT_BRANCH"
+grep -A3 "AUTHORIZED_BRANCHES" V2/api/deploy_capi.sh
+```
+
+Alerta: se a branch **não está** em `AUTHORIZED_BRANCHES`, o deploy requer `--force-deploy` com autorização documentada. Indicar explicitamente no relatório — não é decisão silenciosa.
+
+### 10.2 — Pré-requisitos T1 do PLANO_EXECUCAO.md satisfeitos antes de deployar `main`
+
+```bash
+grep "T1-[1-9]" V2/docs/PLANO_SAFEGUARD.md | grep "Pendente"
+# Esperado: nenhum resultado (todos implementados)
+```
+
+Alerta: qualquer item T1-1 a T1-7 ainda "Pendente" é pré-requisito não satisfeito. Deploy de `main` em produção requer Tier 1 concluído.
+
+### 10.3 — Parity check: `main` produz scores idênticos ao que está em produção?
+
+```bash
+python -m pytest V2/tests/parity_audit.py -v 2>&1 | tail -15
+```
+
+Alerta: qualquer falha significa que `main` produz scores diferentes da versão em produção. Deploy não autorizado até paridade comprovada.
+
+### 10.4 — Split de tráfego atual está documentado e rollback identificado
+
+```bash
+gcloud run services describe smart-ads-api \
+  --region us-central1 --project smart-ads-451319 \
+  --format="value(spec.traffic)"
+```
+
+Registrar: qual revisão tem quanto de tráfego. Qual é o rollback seguro. O protocolo obrigatório é:
+- Deploy sempre com `--no-traffic`
+- 10% → aguardar ao menos 1h de tráfego real, sem aumento de erros
+- 50% → requer confirmação explícita do usuário
+- 100% → requer confirmação explícita do usuário + rollback identificado por nome
+
+Alerta: qualquer salto além desse fluxo — especialmente 10% → 100% sem confirmação — é violação de protocolo.
+
+---
+
 ## SÍNTESE FINAL
 
 Produza uma tabela consolidada:
@@ -372,6 +421,10 @@ Produza uma tabela consolidada:
 | Infra | Token Meta válido | | CAPI para de enviar silenciosamente |
 | Deploy | Canário configurado | | Bug de modelo exposto a 100% do tráfego |
 | Deploy | Rollback identificado | | Recuperação lenta em emergência |
+| Deploy | Branch autorizada para produção | | Código não-autorizado servindo tráfego real |
+| Deploy | Pré-requisitos Tier 1 satisfeitos | | Bugs conhecidos chegam a produção |
+| Deploy | Parity check main vs produção | | Scores divergentes sem alerta |
+| Deploy | Gate de progressão de tráfego | | 100% de tráfego sem canário ou confirmação |
 | Timezone | UTC em todas as queries | | Leads perdidos ou atribuídos ao dia errado |
 | Monitoramento | Alertas de D10% e CAPI | | Bugs silenciosos por semanas |
 | Controle | Grupo controle ativo | | Feedback loop no próximo retreino |

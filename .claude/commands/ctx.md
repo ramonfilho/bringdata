@@ -99,11 +99,16 @@ cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db --port=5432 &
 # Credenciais: ver docs/acesso_sql.md
 ```
 
-### MLflow local
+### MLflow
 ```bash
-mlflow ui --backend-store-uri sqlite:///mlflow.db
-# Acesso: http://localhost:5000
-# MLflow remoto: http://104.197.138.129:5000
+# Remoto (canônico — tracking prod, backend Cloud SQL Postgres)
+export MLFLOW_TRACKING_URI="postgresql+psycopg2://postgres:SmartAds2026DB!@104.197.138.129:5432/mlflow"
+# Artifacts: gs://smart-ads-mlflow/artifacts/
+# Não há UI web ativa — use SDK Python (mlflow.tracking.MlflowClient) ou CLI.
+# Detalhes em docs/MLFLOW.md.
+
+# Local (apenas sandbox — mlflow.db SQLite + mlruns/ locais)
+mlflow ui --backend-store-uri sqlite:///mlflow.db   # http://localhost:5000
 ```
 
 ---
