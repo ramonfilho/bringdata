@@ -52,10 +52,24 @@ Para cada pessoa a reportar:
 
 Cada item faltante **não** bloqueia — mas baixa a `confidence_overall`. Contatos com `confidence: low` não entram na lista de envio automaticamente; vão pra "verify_first".
 
-**⚠️ Heurística de bounce (aprendida em 2026-04-23)**: cargo confirmado ≠ mailbox existe.
-Evidência empírica: dos 10 envios em 2026-04-22, 7 bounced. Todos os 7 tinham email `inferred_pattern` sem exemplo nominal validado. Os 3 que entregaram: 1 canal publicado (`contato@`) + 1 nominal com padrão Tier 1 confirmado (Paulo Correa) + 1 provável delivered com papel público ativo (Bruno Hora, cofundador com quote em InfoMoney).
+**⚠️ Heurística de bounce (aprendida em 2026-04-23, 9/20 bounces empíricos)**: cargo confirmado ≠ mailbox existe.
 
-**Regra operacional**: se a pessoa tem cargo confirmado mas **não aparece em nenhuma fonte ativa** (só LinkedIn passivo ou menção terceira), preferir **LinkedIn InMail direto** em vez de gerar draft de email — mesmo com padrão nominal validado na empresa.
+Dataset: 20 envios em 21-22/04/2026, 9 bounces (45%). Aprendizados:
+
+1. **Papel público ativo é bom proxy mas não determinístico.** Pedro Chufalo (Head MKT de campanha pública) → delivered. Vitor Santoro, Cauê Costa (papel passivo) → bounce. **Porém Paulo Correa (porta-voz forte, múltiplas entrevistas) bouncou** — mesmo com papel ativo o mailbox pode não existir quando a pessoa usa email pessoal/secretária.
+
+2. **Tamanho da empresa prediz comportamento do MX.**
+   - **Grandes** (Monte Bravo 6/6 delivered, InvestSmart 2/2 delivered): provavelmente **catch-all MX** — aceitam qualquer email, mesmo inexistente. Delivery ≠ sinal real. Email cai em caixa-preta que ninguém lê.
+   - **Médias/pequenas** (SVN 4/4 bounce, Valor 3/3 bounce, Blue3 2/4 bounce): **MX rigoroso** — bounce é informativo, delivered é sinal real.
+
+3. **Delivered sem resposta em D+7 = tratar como bounce efetivo** em empresas com catch-all suspeito. Não é delivered "aberto", é delivered "absorvido".
+
+4. **Padrão com 1 nominal + 1 departamental não valida**. Valor tinha `marcel.lima@` (nominal) + `atendimento@` (departamental) — contava como 2 no protocolo antigo, mas **3/3 bouncaram** incluindo Paulo Correa. **≥2 nominais reais é o único critério válido.**
+
+**Regra operacional consolidada**:
+- Se a pessoa tem cargo confirmado mas **não aparece em fonte ativa** → preferir LinkedIn InMail em vez de email.
+- Se a empresa é **média/pequena sem exemplos nominais confirmados** → só enviar email para canal publicado (`contato@`, `atendimento@`, `imprensa@`); abordagem nominal via LinkedIn.
+- Se a empresa é **grande com estrutura corporativa** → emails nominais podem ir via inferência, mas **reavaliar em D+7 sem resposta** como possível catch-all absorvido.
 
 ---
 
