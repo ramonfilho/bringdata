@@ -272,17 +272,20 @@ Range atual: 2026-02-26 → presente (~107k leads)
 > Railway é um banco externo — não há acesso para alterar schema. `database.py` detecta em runtime se colunas opcionais (ex: `client_id`) existem via `has_client_id_column()`.
 
 **Cloud SQL (MLflow tracking):**
+
+> ⚠️ Instância parada desde 2026-04-26 (`activation-policy=NEVER`). Subir antes de usar — ver `operacoes_gcp_custos.md`.
+
 ```
-Instância: smart-ads-451319:us-central1:bring-data-db
+Instância: smart-ads-451319:us-central1:smart-ads-db
 DB: mlflow | Acesso direto: 104.197.138.129:5432
 MLFLOW_TRACKING_URI=postgresql+psycopg2://postgres:SmartAds2026DB!@104.197.138.129:5432/mlflow
 ```
 
-**Artifacts MLflow:** `gs://bring-data-mlflow/artifacts/`
+**Artifacts MLflow:** `gs://smart-ads-mlflow/artifacts/`
 
 **Acesso local via proxy:**
 ```bash
-cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db --port=5432 &
+cloud-sql-proxy smart-ads-451319:us-central1:smart-ads-db --port=5432 &
 sleep 8
 # Conecta ao MLflow DB (não ao bring_data — esse está no Railway)
 ```

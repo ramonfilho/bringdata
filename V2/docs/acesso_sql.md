@@ -90,6 +90,10 @@ GROUP BY decil ORDER BY decil;
 
 ## Banco 1 — Cloud SQL GCP (legado)
 
+> ⚠️ **Instância `bring-data-db` foi descomissionada em 25/02/2026.** Banco operacional migrado para Railway (ver "Banco 2" acima). Os comandos abaixo não funcionam mais — mantidos como referência histórica.
+>
+> A única instância Cloud SQL ativa hoje é `smart-ads-db` (backend MLflow), atualmente parada — ver `operacoes_gcp_custos.md`.
+
 ## Instância
 - **Projeto:** smart-ads-451319
 - **Instância:** bring-data-db

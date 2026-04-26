@@ -137,7 +137,7 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 
 ### `ARQUITETURA_SISTEMA_COMPLETA.md`
 **Papel:** visão geral de toda a arquitetura — pipelines, componentes, fluxo de dados, decisões de design.
-**Status:** ⚠️ **parcialmente desatualizado**. Última atualização: 2026-03-24 (pós-deploy do refactor). Reflete `src/core/` e multi-cliente, mas não reflete o estado atual das branches (rollback em produção, canary ativo, A/B test) — foi atualizado antes do rollback de 13/04.
+**Status:** ⚠️ **parcialmente desatualizado**. Última atualização: 2026-03-24 (pós-deploy do refactor). Reflete `src/core/` e multi-cliente, mas não reflete o estado atual das branches (rollback em produção, canary ativo, A/B test) — foi atualizado antes do rollback de 13/04. Seções de Cloud SQL/MLflow corrigidas em 2026-04-26 com aviso da parada — ver `operacoes_gcp_custos.md`.
 **Relação:** é o documento de referência central (lido no início de toda sessão). Para o estado atual de branches e testes A/B, consultar `PLANO_EXECUCAO.md` e `AB_TEST.md`.
 **Ação sugerida:** atualizar para refletir que o rollback edf23e9 está em produção e o A/B test está ativo via canary.
 

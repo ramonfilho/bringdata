@@ -1,11 +1,13 @@
 # MLflow — Acesso e Uso
 
+> ⚠️ **A instância Cloud SQL está parada desde 2026-04-26** (`activation-policy=NEVER`) por motivo de custo. Antes de usar MLflow (retreino, exploração ad-hoc), subir a instância — ver `operacoes_gcp_custos.md` para o protocolo de start/stop.
+
 ## Infraestrutura
 
 | Componente | Onde |
 |---|---|
-| Tracking (runs, params, metrics) | Cloud SQL PostgreSQL `104.197.138.129:5432/mlflow` |
-| Artifacts (model.pkl, feature_registry.json, etc.) | `gs://bring-data-mlflow/artifacts/` |
+| Tracking (runs, params, metrics) | Cloud SQL PostgreSQL `104.197.138.129:5432/mlflow` (instância `smart-ads-db`) |
+| Artifacts (model.pkl, feature_registry.json, etc.) | `gs://smart-ads-mlflow/artifacts/` |
 
 ---
 
@@ -74,7 +76,7 @@ local_dir = mlflow.artifacts.download_artifacts(
 Ou direto pelo gsutil:
 
 ```bash
-gsutil -m cp -r gs://bring-data-mlflow/artifacts/{run_id}/artifacts/ ./modelo/
+gsutil -m cp -r gs://smart-ads-mlflow/artifacts/{run_id}/artifacts/ ./modelo/
 ```
 
 ---
@@ -97,4 +99,4 @@ O run ativo também está definido em `configs/active_model.yaml`.
 
 - **Nome:** `devclub_lead_scoring`
 - **ID:** `1`
-- **Artifact location:** `gs://bring-data-mlflow/artifacts/`
+- **Artifact location:** `gs://smart-ads-mlflow/artifacts/`

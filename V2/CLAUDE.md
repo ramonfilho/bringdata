@@ -125,20 +125,26 @@ Nunca adicionar hardcodes dentro de funções `core/`. Todo valor específico de
 
 ## Como rodar localmente
 
-```bash
-# Banco de dados (Cloud SQL Proxy)
-cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db --port=5432 &
-sleep 8
-export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bring_data DB_USER=postgres DB_PASSWORD=SmartAds2026DB!
+> Banco operacional (`leads_capi`, `Lead`) está no **Railway** desde 25/02/2026 — não usa Cloud SQL Proxy. Ver `docs/acesso_sql.md` "Banco 2 — Railway" para credenciais.
+>
+> **MLflow tracking** (necessário para treinar/retreinar) usa Cloud SQL `smart-ads-db`, **parado desde 26/04/2026**. Subir antes — ver `docs/operacoes_gcp_custos.md`.
 
-# Treinar modelo
+```bash
+# Subir Cloud SQL para MLflow (só antes de treinar/retreinar)
+gcloud sql instances patch smart-ads-db --activation-policy=ALWAYS --project=smart-ads-451319
+# Aguardar state=RUNNABLE (~2-3 min)
+
+# Treinar modelo (MLflow tracking via 104.197.138.129:5432/mlflow)
 python -m src.train_pipeline --initial-matching email_telefone --set-active
 
-# Monitoramento local
+# Monitoramento local (lê do Railway via env vars RAILWAY_DB_*)
 bash src/monitoring/run_monitoring_local.sh
 
 # Retreino mensal
 python src/retrain/retraining_orchestrator.py --config configs/retreino_mensal.yaml
+
+# Parar Cloud SQL após terminar (economia)
+gcloud sql instances patch smart-ads-db --activation-policy=NEVER --project=smart-ads-451319
 ```
 
 ---
@@ -175,10 +181,11 @@ python src/retrain/retraining_orchestrator.py --config configs/retreino_mensal.y
 ## Infraestrutura de produção
 
 - **API:** FastAPI + Uvicorn em Cloud Run (`https://smart-ads-api-12955519745.us-central1.run.app`)
-  - Serviço ativo: `smart-ads-api` (Cloud Scheduler aponta aqui — `bring-data-api` existe mas não recebe tráfego)
-- **Banco:** PostgreSQL Cloud SQL (`smart-ads-451319:us-central1:bring-data-db`)
-- **Tabela principal:** `leads_capi`
-- **Scheduler:** Cloud Scheduler → Cloud Run Job (monitoramento diário, retreino mensal)
+  - Serviço ativo: `smart-ads-api` (`bring-data-api` foi deletado em 26/04/2026 — sem tráfego)
+- **Banco operacional:** Railway PostgreSQL (env vars `RAILWAY_DB_*`) — Cloud SQL `bring-data-db` foi descomissionado em 25/02/2026
+- **Cloud SQL (MLflow tracking):** `smart-ads-451319:us-central1:smart-ads-db` — **parado desde 26/04/2026** (`activation-policy=NEVER`); subir manualmente antes de retreinar (ver `docs/operacoes_gcp_custos.md`)
+- **Tabela principal:** `leads_capi` (Railway) — espelhada em `Lead` quando vem do front (Prisma)
+- **Scheduler:** Cloud Scheduler → Cloud Run (monitoramento diário e polling Railway a cada 5min). Retreino é manual.
 - **Notificações:** Slack
 
 ```bash
