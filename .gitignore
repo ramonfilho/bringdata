@@ -77,3 +77,6 @@ scr/preprocessing/04_params/.netlify/
 db.sqlite3
 .drafts/
 V2/comercial/.last_push_count.json
+
+# Runtime lock files
+.claude/scheduled_tasks.lock
