@@ -57,6 +57,31 @@ Subtipo, Qualidade e Observações foram removidos do schema em abr/2026. Se qui
 
 Prioridade: Fechado > Follow-up > Bouncing > Enviado > A enviar. Definida em `insert_rules` em `apply_ui_kit`.
 
+### Ordenação obrigatória — Follow-up topo, categorias agrupadas, foco atual no topo
+
+Toda escrita no Sheet (push e pull) **ordena** as linhas por 3 chaves estáveis:
+
+1. **Status** (`STATUS_PRIORITY` em `contatos_sync.py`):
+
+   | Posição | Status |
+   |---|---|
+   | Topo | Follow-up |
+   | | Reunião agendada |
+   | | Pós-reunião |
+   | | Proposta enviada |
+   | | Bouncing |
+   | | Enviado |
+   | | A enviar **+** vazio (mesmo bucket — ação pendente) |
+   | | Sem resposta |
+   | | Fechado |
+   | Fim | Perdido |
+
+2. **Tipo de empresa em foco** (`CURRENT_FOCUS_TIPOS`): dentro de cada bucket de status, os tipos de foco atual sobem ao topo. Atualizar essa variável quando a campanha mudar de segmento. Exemplo: `{"Imobiliária"}` faz imobiliárias aparecerem antes de AAIs / Marketing Digital / etc.
+
+3. **Sub-status** (literal antes de vazio): dentro do mesmo (status, tipo), `Status de envio` literal vem antes de vazio.
+
+Aplicado em `push()` (antes de `save_csv` + `write_sheet_values`) e em `pull()` (após `fetch_sheet_df`). **Nunca deve haver gaps entre categorias** — se houver, é bug de sort.
+
 ### Workflow para qualquer mudança de dados
 
 1. **Edite o CSV** (`V2/comercial/contatos.csv`) — diretamente em editor/Cursor ou via pandas.

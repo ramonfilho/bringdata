@@ -75,6 +75,45 @@ STATUS_VALUES = [
     "Perdido",
 ]
 
+# Prioridade de exibição: Follow-up no topo, categorias agrupadas, sem gaps.
+# "A enviar" literal e vazio compartilham o mesmo bucket (mesma cor vermelha = mesma ação pendente).
+# Tertiary key garante literal antes de vazio dentro do mesmo (status, tipo).
+STATUS_PRIORITY: dict[str, int] = {
+    "Follow-up":         0,
+    "Reunião agendada":  1,
+    "Pós-reunião":       2,
+    "Proposta enviada":  3,
+    "Bouncing":          4,
+    "Enviado":           5,
+    "A enviar":          6,
+    "":                  6,
+    "Sem resposta":      7,
+    "Fechado":           8,
+    "Perdido":           9,
+}
+
+# Tipos de empresa em foco AGORA. Dentro de cada bucket de status, esses ficam no topo;
+# os demais vão pra baixo. Atualizar quando o foco de prospecção mudar.
+CURRENT_FOCUS_TIPOS: set[str] = {"Imobiliária"}
+
+
+def sort_by_status(df: pd.DataFrame) -> pd.DataFrame:
+    """Ordena por (status, foco-atual-do-tipo, literal-vs-vazio).
+    - Status: Follow-up topo, categorias agrupadas, sem gaps.
+    - Tipo: dentro de cada status, foco atual (CURRENT_FOCUS_TIPOS) fica no topo.
+    - Sub-status: dentro de (status, tipo), literal vem antes de vazio.
+    Estável: preserva ordem original em empates."""
+    df = df.copy()
+    df["_prio_status"] = df["Status de envio"].map(STATUS_PRIORITY).fillna(99)
+    df["_prio_tipo"] = df["Tipo de empresa"].apply(
+        lambda t: 0 if t in CURRENT_FOCUS_TIPOS else 1
+    )
+    df["_prio_substatus"] = (df["Status de envio"] == "").astype(int)
+    df = df.sort_values(
+        ["_prio_status", "_prio_tipo", "_prio_substatus"], kind="stable"
+    ).reset_index(drop=True)
+    return df.drop(columns=["_prio_status", "_prio_tipo", "_prio_substatus"])
+
 # Cor de fundo da LINHA INTEIRA por status
 STATUS_ROW_COLORS: dict[str, tuple[float, float, float]] = {
     "Fechado":   (0.82, 0.95, 0.82),  # verde
@@ -350,6 +389,8 @@ def apply_ui_kit(sh: gspread.Spreadsheet, ws: gspread.Worksheet, n_rows: int) ->
 
 def push(dry_run: bool = False, force: bool = False) -> None:
     df = load_csv()
+    df = sort_by_status(df)        # Follow-up topo, categorias agrupadas
+    save_csv(df)                    # persistir CSV ordenado para próximas operações
     n_csv = len(df)
     print(f"CSV válido: {n_csv} linhas, {len(df.columns)} colunas.")
     counts = df["Status de envio"].replace("", "A enviar (vazio)").value_counts()
@@ -414,6 +455,7 @@ def pull(dry_run: bool = False, force: bool = False) -> None:
         print("\nDRY-RUN: CSV não foi sobrescrito.")
         return
 
+    df_sheet = sort_by_status(df_sheet)   # mesma regra de ordenação no pull
     save_csv(df_sheet)
     write_sentinel(n_sheet)
     print(f"\n✓ Pull concluído: {n_sheet} linhas escritas em {CSV_PATH.name}.")
