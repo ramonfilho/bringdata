@@ -124,6 +124,11 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Papel:** instruções para o dev front-end sobre CAPI e captura de FBP/FBC.
 **Status:** ativo (entregue a terceiros).
 
+### `operacoes_gcp_custos.md`
+**Papel:** registro das otimizações de custo aplicadas no GCP em 2026-04-26 (~R$ 167/mês), procedimento de stop/start do Cloud SQL `smart-ads-db` para retreino, cleanup policy do Artifact Registry e bugs latentes descobertos durante a auditoria.
+**Status:** ativo. Atualizar quando novas otimizações forem aplicadas ou recursos parados forem retomados.
+**Relação:** referência operacional para retomar Cloud SQL antes de retreinar; consultar antes de mudar `min-instances`/`memory`/`cpu` do `smart-ads-api`.
+
 ---
 
 ---
