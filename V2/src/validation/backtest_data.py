@@ -1,0 +1,342 @@
+"""
+backtest_data.py — Orquestra "carrega leads + vendas + match + spend" para
+backtests offline e qualquer validação secundária que precise da mesma base
+de dados de um lançamento.
+
+Reusa os helpers existentes de src/validation/ para garantir paridade com
+validate_ml_performance.py (mesma fonte de leads, mesmas funções de match,
+mesma normalização de campanha pro spend).
+
+Uso típico:
+
+    from src.validation.backtest_data import load_match_spend_for_lf
+    df = load_match_spend_for_lf("LF52")
+    # df contém leads do período de captação, com:
+    #   - colunas brutas do formulário (Source, Medium, Campaign, Term, Content,
+    #     "Qual a sua idade?", "Atualmente, qual a sua faixa salarial?", etc.)
+    #   - colunas normalizadas: email, telefone, data_captura
+    #   - colunas de match: converted, sale_value, sale_date, sale_origin, match_method
+    #   - coluna de spend imputado: spend_imputado (CPL = spend_camp / leads_camp)
+
+A função NÃO scoreia — quem scoreia é quem chama (cada modelo tem seu pipeline).
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import pandas as pd
+import yaml
+
+logger = logging.getLogger(__name__)
+
+# Caminho relativo ao pacote — robust contra qualquer cwd
+_THIS_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = _THIS_DIR.parents[1]  # V2/
+LAUNCHES_PATH = PROJECT_ROOT / "configs" / "launches.yaml"
+VALIDATION_CONFIG_PATH = PROJECT_ROOT / "configs" / "validation_config.yaml"
+
+
+# --------------------------------------------------------------------------- #
+# API pública
+# --------------------------------------------------------------------------- #
+
+def load_match_spend_for_lf(
+    lf_name: str,
+    *,
+    output_path: Optional[Path] = None,
+    include_tmb: bool = False,
+    tmb_paths: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Pipeline completo "load + match + spend" para um lançamento.
+
+    Args:
+        lf_name: Identificador do lançamento (ex: "LF52", "DEV20"). Datas vêm
+            de configs/launches.yaml.
+        output_path: Se fornecido, persiste o DataFrame final como parquet.
+        include_tmb: Se True e tmb_paths fornecido, inclui vendas TMB do arquivo.
+            Default False (TMB exige arquivos locais — pular pra simplificar).
+        tmb_paths: Caminhos de arquivos TMB (.xlsx) a incluir nas vendas.
+
+    Returns:
+        DataFrame de leads do período de captação, com colunas adicionadas:
+        email, telefone, data_captura, converted, sale_value, sale_date,
+        sale_origin, match_method, spend_imputado.
+    """
+    lf = _load_launch_dates(lf_name)
+    cap_start, cap_end = lf["cap_start"], lf["cap_end"]
+    sales_start, sales_end = lf["vendas_start"], lf["vendas_end"]
+    logger.info(
+        f"[backtest_data] LF={lf_name} cap={cap_start}→{cap_end} "
+        f"vendas={sales_start}→{sales_end}"
+    )
+
+    leads_df = _load_leads(cap_start, cap_end)
+    sales_df = _load_sales(sales_start, sales_end, include_tmb=include_tmb,
+                           tmb_paths=tmb_paths)
+
+    leads_df = _normalize_lead_columns(leads_df)
+
+    # Filtros de período (defensivo — Railway/Sheets podem retornar fora)
+    from src.validation.matching import (
+        match_leads_to_sales,
+        filter_by_period,
+        filter_conversions_by_capture_period,
+        deduplicate_conversions,
+    )
+    leads_df = filter_by_period(leads_df, cap_start, cap_end, "data_captura")
+    sales_df = filter_by_period(sales_df, sales_start, sales_end, "sale_date")
+    logger.info(f"[backtest_data] após filtro: {len(leads_df)} leads, {len(sales_df)} vendas")
+
+    matched_df = match_leads_to_sales(leads_df, sales_df, use_temporal_validation=False)
+    matched_df = filter_conversions_by_capture_period(
+        matched_df, cap_start, cap_end
+    )
+    matched_df = deduplicate_conversions(matched_df)
+    n_conv = matched_df["converted"].sum()
+    logger.info(f"[backtest_data] match: {n_conv} conversões em {len(matched_df)} leads")
+
+    matched_df = _attach_imputed_spend(matched_df, cap_start, cap_end)
+
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        matched_df.to_parquet(output_path, index=False)
+        logger.info(f"[backtest_data] persistido em {output_path}")
+
+    return matched_df
+
+
+# --------------------------------------------------------------------------- #
+# Loaders
+# --------------------------------------------------------------------------- #
+
+def _load_launch_dates(lf_name: str) -> Dict[str, str]:
+    if not LAUNCHES_PATH.exists():
+        raise FileNotFoundError(f"{LAUNCHES_PATH} não encontrado")
+    with open(LAUNCHES_PATH) as f:
+        launches = yaml.safe_load(f)
+    if lf_name not in launches:
+        raise ValueError(f"Lançamento {lf_name} não está em {LAUNCHES_PATH}")
+    return launches[lf_name]
+
+
+def _load_leads(cap_start: str, cap_end: str) -> pd.DataFrame:
+    """Railway primário (única fonte com dados pós-2026-03-27). Sheets como fallback."""
+    from src.validation.data_loader import LeadDataLoader, SalesDataLoader
+
+    sales_loader = SalesDataLoader()
+    leads_df = sales_loader.load_railway_leads(start_date=cap_start, end_date=cap_end)
+    if len(leads_df) > 0:
+        logger.info(f"[backtest_data] {len(leads_df)} leads do Railway")
+        return leads_df
+
+    logger.warning("[backtest_data] Railway vazio — fallback Sheets")
+    leads_df = LeadDataLoader().load_leads_from_sheets(
+        start_date=cap_start, end_date=cap_end
+    )
+    logger.info(f"[backtest_data] {len(leads_df)} leads do Sheets (fallback)")
+    return leads_df
+
+
+def _load_sales(
+    sales_start: str,
+    sales_end: str,
+    *,
+    include_tmb: bool = False,
+    tmb_paths: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """Guru API + Hotmart API (+ TMB opcional). Combina e dedupa via combine_sales."""
+    from src.validation.data_loader import SalesDataLoader
+
+    sales_loader = SalesDataLoader()
+
+    guru_df = sales_loader.load_guru_sales_from_api(
+        start_date=sales_start, end_date=sales_end, save_excel=False
+    )
+    logger.info(f"[backtest_data] Guru: {0 if guru_df is None else len(guru_df)} vendas")
+
+    try:
+        hotmart_df = sales_loader.load_hotmart_sales_from_api(
+            start_date=sales_start, end_date=sales_end
+        )
+        logger.info(
+            f"[backtest_data] Hotmart: {0 if hotmart_df is None else len(hotmart_df)} vendas"
+        )
+    except Exception as e:
+        logger.warning(f"[backtest_data] Hotmart API falhou ({type(e).__name__}: {e})")
+        hotmart_df = None
+
+    tmb_df = None
+    if include_tmb and tmb_paths:
+        tmb_df = sales_loader.load_tmb_sales(tmb_paths=tmb_paths, report_type="fechamento")
+        logger.info(f"[backtest_data] TMB: {0 if tmb_df is None else len(tmb_df)} vendas")
+
+    sales_df = sales_loader.combine_sales(
+        guru_df=guru_df,
+        hotmart_df=hotmart_df,
+        tmb_df=tmb_df,
+    )
+    if sales_df is None or len(sales_df) == 0:
+        raise RuntimeError("Nenhuma venda carregada — abortando")
+    logger.info(f"[backtest_data] vendas combinadas: {len(sales_df)}")
+    return sales_df
+
+
+# --------------------------------------------------------------------------- #
+# Normalização
+# --------------------------------------------------------------------------- #
+
+_LEAD_COLUMN_ALIASES: Dict[str, List[str]] = {
+    "email": ["email", "E-mail", "e-mail", "E-Mail", "Email"],
+    "telefone": ["telefone", "Telefone", "phone", "Phone"],
+    "data_captura": ["data_captura", "Data", "data", "DATA", "createdAt", "Data Cadastro"],
+    "campaign": ["campaign", "Campaign", "utm_campaign"],
+}
+
+
+def _normalize_lead_columns(leads_df: pd.DataFrame) -> pd.DataFrame:
+    """Adiciona colunas canônicas (email/telefone/data_captura/campaign) se ausentes,
+    copiando de aliases conhecidos do schema Railway/Sheets. Mantém colunas
+    originais — a pipeline de scoring precisa delas pra preprocessar."""
+    df = leads_df.copy()
+    for canonical, aliases in _LEAD_COLUMN_ALIASES.items():
+        if canonical in df.columns:
+            continue
+        for alias in aliases:
+            if alias in df.columns:
+                df[canonical] = df[alias]
+                break
+
+    if "email" not in df.columns:
+        raise RuntimeError(
+            f"Coluna email não encontrada. Procurei {_LEAD_COLUMN_ALIASES['email']}; "
+            f"achei: {[c for c in df.columns if 'mail' in c.lower()]}"
+        )
+
+    df["email"] = df["email"].astype(str).str.lower().str.strip()
+    if "telefone" in df.columns:
+        df["telefone"] = (
+            df["telefone"].astype(str).str.replace(r"\D", "", regex=True)
+        )
+        df.loc[df["telefone"].isin(["", "nan", "<NA>", "None"]), "telefone"] = pd.NA
+    if "data_captura" in df.columns:
+        df["data_captura"] = pd.to_datetime(df["data_captura"], errors="coerce")
+    return df
+
+
+# --------------------------------------------------------------------------- #
+# Spend imputado
+# --------------------------------------------------------------------------- #
+
+def _attach_imputed_spend(
+    matched_df: pd.DataFrame, cap_start: str, cap_end: str
+) -> pd.DataFrame:
+    """Calcula spend por campanha via Meta API e imputa CPL = spend/n_leads
+    a cada lead. Casa nomes via _normalize_campaign_name (mesma normalização
+    que CampaignMetricsCalculator usa). Falha graciosamente — deixa NaN se
+    Meta API indisponível ou nomes não casarem."""
+    df = matched_df.copy()
+    df["spend_imputado"] = pd.NA
+
+    if "campaign" not in df.columns:
+        logger.warning("[backtest_data] coluna 'campaign' ausente — spend NaN")
+        return df
+
+    account_ids = _read_meta_account_ids()
+    if not account_ids:
+        logger.warning("[backtest_data] meta_account_ids vazio — spend NaN")
+        return df
+
+    meta_token = os.environ.get("META_ACCESS_TOKEN")
+    if not meta_token:
+        logger.warning("[backtest_data] META_ACCESS_TOKEN ausente — spend NaN")
+        return df
+
+    try:
+        from api.meta_integration import MetaAdsIntegration
+    except Exception as e:
+        logger.warning(f"[backtest_data] import MetaAdsIntegration falhou: {e}")
+        return df
+
+    try:
+        meta = MetaAdsIntegration(access_token=meta_token)
+    except Exception as e:
+        logger.warning(f"[backtest_data] MetaAdsIntegration init falhou: {e}")
+        return df
+
+    # until é exclusivo na API — somar 1 dia
+    until_inclusive = (
+        datetime.strptime(cap_end, "%Y-%m-%d") + timedelta(days=1)
+    ).strftime("%Y-%m-%d")
+
+    # Meta API entrega campaign_id em campo separado; lead.campaign tem o id
+    # concatenado ao final do nome UTM. Casamos pelo id (chave estável).
+    spend_by_campaign: Dict[str, float] = {}
+    for acc in account_ids:
+        try:
+            insights = meta.get_insights(
+                account_id=acc,
+                level="campaign",
+                since_date=cap_start,
+                until_date=until_inclusive,
+                fields=["campaign_id", "campaign_name", "spend"],
+            )
+        except Exception as e:
+            logger.warning(f"[backtest_data] get_insights({acc}) falhou: {e}")
+            continue
+        for row in insights:
+            cid = row.get("campaign_id")
+            try:
+                spend = float(row.get("spend", 0) or 0)
+            except (TypeError, ValueError):
+                spend = 0.0
+            if cid:
+                spend_by_campaign[str(cid)] = spend_by_campaign.get(str(cid), 0.0) + spend
+    logger.info(f"[backtest_data] spend coletado: {len(spend_by_campaign)} campanhas")
+
+    if not spend_by_campaign:
+        return df
+
+    # CPL por campanha (chave = campaign_id extraído do final do UTM do lead)
+    df["_camp_norm"] = df["campaign"].apply(_extract_campaign_id)
+    leads_per_camp = df.groupby("_camp_norm").size().to_dict()
+    cpl_per_camp = {
+        k: spend_by_campaign[k] / leads_per_camp[k]
+        for k in spend_by_campaign
+        if leads_per_camp.get(k, 0) > 0
+    }
+    df["spend_imputado"] = df["_camp_norm"].map(cpl_per_camp)
+    df = df.drop(columns=["_camp_norm"])
+
+    n_attributed = df["spend_imputado"].notna().sum()
+    logger.info(
+        f"[backtest_data] spend imputado: {n_attributed}/{len(df)} leads "
+        f"({100 * n_attributed / max(len(df), 1):.1f}%)"
+    )
+    return df
+
+
+def _read_meta_account_ids() -> List[str]:
+    if not VALIDATION_CONFIG_PATH.exists():
+        return []
+    with open(VALIDATION_CONFIG_PATH) as f:
+        cfg = yaml.safe_load(f) or {}
+    return cfg.get("meta_account_ids", []) or []
+
+
+def _extract_campaign_id(name: object) -> Optional[str]:
+    """Extrai o campaign_id (string numérica >=12 dígitos) do final do UTM.
+
+    Padrão observado nos leads: `DEVLF | ... | <campaign_id>` (id colado ao
+    último token, separado por `|`). Retorna o ID como string ou None.
+    """
+    if name is None or (isinstance(name, float) and pd.isna(name)):
+        return None
+    import re
+    m = re.search(r"(\d{12,})\s*$", str(name).strip())
+    return m.group(1) if m else None
