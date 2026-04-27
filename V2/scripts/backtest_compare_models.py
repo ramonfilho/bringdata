@@ -107,17 +107,21 @@ def run_prepare_mode(args) -> None:
 def run_score_mode(args) -> None:
     sys.path.insert(0, str(PROJECT_ROOT))
     from src.production_pipeline import LeadScoringPipeline
+    from src.model.prediction import LeadScoringPredictor
 
     base = pd.read_parquet(args.base_dataset)
     print(f"[score] {len(base)} leads do base_dataset, {base['converted'].sum()} conversões")
 
-    artifacts_dir = _resolve_artifacts_dir(args.run_id, args.mlruns_root)
-    print(f"[score] artifacts: {artifacts_dir}")
+    # IMPORTANTE: LeadScoringPipeline com use_active_model=True (default) ignora
+    # model_path/run_id passados — sempre carrega o active_model.yaml. Para
+    # forçar um run_id específico, criar LeadScoringPredictor com mlflow_run_id
+    # explícito e passar como predictor_override no pipeline.run().
+    predictor = LeadScoringPredictor(mlflow_run_id=args.run_id, use_active_model=False)
+    predictor.load_model()
+    print(f"[score] predictor carregado para run_id={args.run_id}")
 
-    pipeline = LeadScoringPipeline(
-        model_name=None, model_path=str(artifacts_dir), client_id="devclub"
-    )
-    scored = _score_via_pipeline(pipeline, base)
+    pipeline = LeadScoringPipeline(model_name=None, model_path=None, client_id="devclub")
+    scored = _score_via_pipeline(pipeline, base, predictor_override=predictor)
 
     thresholds = _load_decil_thresholds(args.run_id, args.mlruns_root)
     scored["decil"] = scored["lead_score"].apply(
@@ -137,13 +141,17 @@ def run_score_mode(args) -> None:
     print(f"[score]   distribuição decis: {scored['decil'].value_counts().to_dict()}")
 
 
-def _score_via_pipeline(pipeline, base: pd.DataFrame) -> pd.DataFrame:
-    """preprocess+predict via xlsx temporário (mesmo flow da produção)."""
+def _score_via_pipeline(pipeline, base: pd.DataFrame, predictor_override=None) -> pd.DataFrame:
+    """preprocess+predict via xlsx temporário, opcionalmente forçando o predictor."""
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
         tmp_path = tmp.name
     try:
         base.to_excel(tmp_path, index=False)
-        scored = pipeline.run(filepath=tmp_path, with_predictions=True)
+        scored = pipeline.run(
+            filepath=tmp_path,
+            with_predictions=True,
+            predictor_override=predictor_override,
+        )
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
@@ -214,14 +222,18 @@ def run_compare_mode(args) -> None:
         print(f"[compare] {label}: {len(df)} leads, {df['converted'].sum()} conv, "
               f"{df['spend_imputado'].notna().sum()} com spend")
 
+    # Dedup por email — base_dataset pode ter ~100 emails duplicados (ex: lead que
+    # respondeu duas pesquisas). Sem dedup, merge inner faz produto cartesiano e
+    # explode o n.
     base_label = args.labels[0]
     merged = parquets[base_label][
         ["email", "decil", "converted", "sale_value", "spend_imputado"]
-    ].rename(columns={"decil": f"decil_{base_label}"})
+    ].drop_duplicates("email").rename(columns={"decil": f"decil_{base_label}"})
     for label in args.labels[1:]:
-        df_l = parquets[label][["email", "decil"]].rename(columns={"decil": f"decil_{label}"})
+        df_l = parquets[label][["email", "decil"]].drop_duplicates("email") \
+            .rename(columns={"decil": f"decil_{label}"})
         merged = merged.merge(df_l, on="email", how="inner")
-    print(f"[compare] após merge: {len(merged)} leads em comum")
+    print(f"[compare] após merge (dedup por email): {len(merged)} leads em comum")
 
     decile_tables = {label: _decile_table(merged, f"decil_{label}") for label in args.labels}
     summary = _summary_table(merged, args.labels)
