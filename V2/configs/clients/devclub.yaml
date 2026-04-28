@@ -147,7 +147,6 @@ ingestion:
     - telefone contato
 utm:
   source_to_outros:
-  - fb
   - teste
   - '[field id="utm_source"]'
   - facebook-ads-sitelink
@@ -156,10 +155,13 @@ utm:
   - organico
   - bio
   - livesemanal
-  - ig
   - org
   source_to_channel_mapping:
     youtube-bio: youtube
+    # 'fb'/'ig' são abreviações de Meta — Source canônico é facebook-ads.
+    # Term continua diferenciando IG/FB via term_mappings logo abaixo.
+    fb: facebook-ads
+    ig: facebook-ads
   term_mappings:
     ig: instagram
     fb: facebook
