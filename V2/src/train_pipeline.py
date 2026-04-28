@@ -52,6 +52,7 @@ from src.core.dataset_versioning import criar_dataset_pos_cutoff, aplicar_janela
 from src.core.matching import match_leads as _match_leads
 from src.core.feature_engineering import create_features as _create_features
 from src.core.encoding import apply_encoding as _apply_encoding
+from src.validation.campaign_classifier import classify_campaign as _classify_campaign
 from src.model.training_model import registrar_features_e_modelo_devclub
 from src.model.hyperparameter_tuning import hyperparameter_tuning
 from src.monitoring.data_quality import capture_training_categories, capture_training_distributions, calculate_missing_rate
@@ -155,6 +156,57 @@ def setup_logging(verbosity='normal', log_file=None):
 logger = logging.getLogger(__name__)
 
 
+def _compute_control_weights(df: 'pd.DataFrame', alpha: float = 1.0,
+                              campaign_col: str = 'Campaign') -> 'pd.Series':
+    """T2-3: pesos por grupo (CONTROLE / ML / NEUTRO) via inverso de frequência com expoente alpha.
+
+    Identifica grupos a partir do nome da campanha (campaign_classifier):
+      - CONTROLE: campanha de captação SEM evento ML (DEVLF | CAP | FRIO sem 'machine learning')
+      - ML:       campanha de captação COM evento ML
+      - NEUTRO:   demais leads (orgânico, fora de captação) — peso 1.0 (não entra no reweighting)
+
+    Fórmula (Opção A, soft balancing):
+      peso_grupo = ((n_total_reweighted) / (k × n_grupo)) ** alpha
+      onde k = 2 (CONTROLE + ML), n_total_reweighted = n_control + n_ml.
+
+    alpha ∈ [0, 1]:
+      - 0   → todos os pesos = 1 (sem correção)
+      - 0.5 → meio caminho
+      - 1   → balanceamento pleno (CONTROLE e ML "pesam" igual no fit)
+
+    Retorna pd.Series de pesos alinhada ao índice do df (NEUTRO = 1.0).
+    """
+    if campaign_col not in df.columns:
+        logger.warning(f"  [control_weights] coluna '{campaign_col}' ausente — feature desabilitada (pesos=1)")
+        return pd.Series(1.0, index=df.index)
+
+    classes = df[campaign_col].apply(_classify_campaign)
+    n_control = (classes == 'SEM_ML').sum()
+    n_ml = (classes == 'COM_ML').sum()
+    n_neutro = (classes == 'EXCLUIR').sum()
+
+    if n_control == 0 or n_ml == 0:
+        logger.warning(
+            f"  [control_weights] grupo vazio (CONTROLE={n_control}, ML={n_ml}) — "
+            f"feature desabilitada (pesos=1)"
+        )
+        return pd.Series(1.0, index=df.index)
+
+    n_total = n_control + n_ml
+    w_control = (n_total / (2 * n_control)) ** alpha
+    w_ml = (n_total / (2 * n_ml)) ** alpha
+
+    weights = pd.Series(1.0, index=df.index)
+    weights.loc[classes == 'SEM_ML'] = w_control
+    weights.loc[classes == 'COM_ML'] = w_ml
+
+    logger.info(
+        f"  [control_weights] alpha={alpha} | CONTROLE: n={n_control:,} peso={w_control:.3f} | "
+        f"ML: n={n_ml:,} peso={w_ml:.3f} | NEUTRO: n={n_neutro:,} peso=1.000"
+    )
+    return weights
+
+
 def _log_step_count(step: str, df_after, df_before=None, target_col: str = 'target') -> None:
     """T2-2: log estruturado de N registros por etapa do pipeline.
 
@@ -172,7 +224,7 @@ def _log_step_count(step: str, df_after, df_before=None, target_col: str = 'targ
     logger.info("  " + " | ".join(parts))
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, use_control_weights=False):
     """Executa pipeline de treino completo.
 
     Args:
@@ -809,6 +861,22 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     else:
         buyer_weights = None
 
+    # === T2-3: Pesos por grupo Meta (CONTROLE / ML / NEUTRO) ===
+    # Aplicado multiplicativamente sobre buyer_weights — preserva o nome buyer_weights
+    # em todo o pipeline downstream (tuning, registro, MLflow).
+    if use_control_weights:
+        _cw_config = client_config.model.control_weights if (
+            client_config and client_config.model and client_config.model.control_weights
+        ) else {}
+        _cw_alpha = float(_cw_config.get('alpha', 1.0)) if isinstance(_cw_config, dict) else 1.0
+        control_weights = _compute_control_weights(dataset_v1_devclub, alpha=_cw_alpha)
+        control_weights.index = dataset_v1_devclub_encoded.index
+
+        if buyer_weights is None:
+            buyer_weights = control_weights
+        else:
+            buyer_weights = buyer_weights * control_weights
+
     # Hiperparâmetros padrão do modelo (lidos do ClientConfig — configs/clients/{client}.yaml)
     DEFAULT_HYPERPARAMS = (
         client_config.model.hyperparameters
@@ -1053,6 +1121,14 @@ if __name__ == "__main__":
         help='Desabilitar sample weights por tipo de comprador (treino sem ponderação, baseline)'
     )
     parser.add_argument(
+        '--control-group-weights',
+        action='store_true',
+        default=False,
+        help='T2-3: aplicar pesos por grupo Meta (CONTROLE / ML / NEUTRO) para corrigir feedback loop. '
+             'Identifica grupos pelo Campaign (DEVLF | CAP | FRIO + presença/ausência de "machine learning"). '
+             'Multiplicativo com --no-weights. Lê alpha de client_config.model.control_weights.alpha (default 1.0).'
+    )
+    parser.add_argument(
         '--save-encoded',
         action='store_true',
         default=False,
@@ -1133,4 +1209,5 @@ if __name__ == "__main__":
         use_cached_data=args.use_cached_data,
         fixed_hyperparams=json.loads(args.hyperparams) if args.hyperparams else None,
         max_date=args.max_date,
+        use_control_weights=args.control_group_weights,
     )

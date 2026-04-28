@@ -173,6 +173,7 @@ class ModelConfig:
     """Treino e artefatos de modelo. (#1, #10, #53, #54, #55, #56, #71, #72, #89)"""
     hyperparameters: Optional[Dict[str, Any]] = None        # #1
     buyer_weights: Optional[Dict[str, float]] = None        # #158 — PESOS_COMPRADOR por decil (dev/retreino)
+    control_weights: Optional[Dict[str, Any]] = None        # T2-3 — pesos por grupo Meta (CONTROLE/ML/NEUTRO). Ex: {alpha: 1.0}. None = feature desligada.
     mlflow_experiment_name: Optional[str] = None            # #10
     mlflow_experiment_id: Optional[str] = None              # #71 — DEPRECATED: derivado em runtime via mlflow.get_run(). Mantido como fallback de emergência.
     model_name_template: Optional[str] = None               # #53
