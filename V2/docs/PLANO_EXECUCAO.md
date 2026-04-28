@@ -1,6 +1,6 @@
 # Plano de Execução — Smart Ads V2 (Roadmap Único)
 
-**Atualizado:** 2026-04-27
+**Atualizado:** 2026-04-28
 **Propósito:** este é o **único** documento de "o que fazer e quando" no projeto. Toda a sequência de trabalho — segurança, A/B test, unificação, refactor multi-cliente, escala B2B, backlog de features — vive aqui, em horizontes ordenados por dependência.
 
 ## Como ler este documento
@@ -16,38 +16,29 @@
 
 ---
 
-## Estado atual (27/04/2026)
+## Estado atual (28/04/2026)
 
 | Componente | Estado |
 |---|---|
-| **Código em produção** | edf23e9 (05/03/2026) — rollback `00269-jjn`, 100% do tráfego |
-| **Modelo em produção** | jan30 ORIGINAL (`d51757f5`) — treinado 30/01/2026, dados até 04/11/2025 |
-| **Champion v4 (retreinado)** | `60637bb98b94421b9c7579bb4ac1b1ad` — 23/04/2026, janela até 02/04, AUC 0.748, OHE default |
-| **Challenger v4 (retreinado)** | `7d08ae0302da420aa99559d4d4f55025` — 23/04/2026, AUC 0.745 |
-| **Branch main** | Portes #1 e #2 da unificação aplicados (23/04); YAML aponta para v4 com `ab_test.enabled: false`. Não deployada |
-| **A/B test** | ⏸ **SUSPENSO desde 27/04** — depende do GATE de validação OOS abaixo |
+| **Validação OOS Champion v4** | ✅ **Atravessada favoravelmente em 28/04** — gate único do roadmap. Todo bloco STANDBY destravado. |
+| **Deploy main unificada** | 🔄 **Em execução** em sessão paralela — canary 10% → 50% → 100% conforme `AB_TEST.md` "Nova estratégia — canary direto". |
+| **Modelo no rollback** (90% / 50% / 0% conforme estágio do canary) | jan30 ORIGINAL (`d51757f5`) |
+| **Modelo no canary main** (10% / 50% / 100% conforme estágio) | Champion v4 (`60637bb98b94421b9c7579bb4ac1b1ad`) — AUC 0.748, OHE default |
+| **Challenger v4 (em standby até promoção do v4)** | `7d08ae0302da420aa99559d4d4f55025` — AUC 0.745 |
+| **A/B test** | 🔓 **Reaberto em 28/04** — frente ativa novamente após gate atravessado. Roteamento exato definido pela sessão de deploy. |
 | **Cloud SQL `smart-ads-db`** | Parado desde 26/04 (`activation-policy=NEVER`); subir antes de retreinar — ver `operacoes_gcp_custos.md` |
 | **Tier 1 safeguards** | ✅ 11/11 concluídos (até 23/04/2026) |
+| **T2-2 (log por etapa)** | ✅ 28/04/2026 — commits `8b46645` |
+| **T2-3 (importance weighting)** | ✅ 28/04/2026 — commits `c03d645`, `f8dc4f7`. Feature pronta no repertório (default desligado). Efeito interno marginal; sinal externo D9+D10 lift 6.88× confirma valor do ML em produção. |
+| **DT-13 (utm_term zerando)** | ✅ 28/04/2026 — commit `dafe85d` |
 
 ---
 
-## 🚦 GATE ÚNICO — Validação out-of-sample do Champion v4
+## 🚦 GATE ÚNICO — Validação out-of-sample do Champion v4 ✅ ATRAVESSADA (28/04/2026)
 
-**Pergunta a responder:** o Champion v4 (`60637bb9…`) prevê melhor que o jan30 ORIGINAL nos lançamentos que nenhum dos dois treinou?
+**Resultado:** decisão de seguir com o A/B — Champion v4 validado para entrar em produção via canary. Detalhes operacionais da validação ficam fora deste plano (registrados na sessão que executou o teste).
 
-**Lançamentos elegíveis para o teste:**
-- jan30 original treinou até **04/11/2025** → todos os lançamentos pós-novembro/2025 são não vistos
-- Champion v4 treinou até **02/04/2026** → lançamentos pós-02/04 (LF51 final + DEV20 quando disponível) são não vistos
-- A interseção (não vista por ambos) é o teste mais limpo para comparar diretamente
-
-**Saída esperada da validação:**
-- AUC, lift D10, monotonia, ROAS estimado de cada modelo nos mesmos leads não vistos
-- Diferença estatisticamente significativa? Em qual direção?
-
-**O que está em standby até esse gate:**
-- Qualquer deploy de main em produção (o YAML já aponta para v4 — deployar = servir v4 não validado)
-- Toda a frente de A/B test (patch, decisão, novo ciclo, encoding por variante)
-- Sprint 2 do `retraining_orchestrator.py` (quality gate automático)
+**Consequência imediata:** todo o bloco STANDBY abaixo está destravado. H2.1 (deploy canary main) entra em execução em sessão paralela; A/B test reabre como frente ativa; Sprint 2 do `retraining_orchestrator` volta para o backlog ativo.
 
 ---
 
@@ -62,29 +53,27 @@
 
 ## Cronograma agregado
 
-| Horizonte | Janela | Foco principal | Bloqueia? |
+| Horizonte | Janela | Foco principal | Status |
 |---|---|---|---|
-| **H1 — Agora** | semana 27/04 → 11/05 | Validar gate (H1.1). Snapshot e DT-13 deslocados | sim, gate único |
-| **H2 — Pós-validação** | +1-3 semanas após gate favorável | Deploy canary main (único item travado pelo gate) | depende H1 |
-| **Independente do gate** | qualquer momento (em fila por foco) | Importance weighting, log por etapa | não |
-| **H3 — Tier 2/3 restante** | maio-junho 2026 | Safeguards remanescentes (10 itens) | não |
+| **H1 — Concluído** | 27/04 → 28/04 | DT-13 ✅, ARQUITETURA ✅, gate atravessado ✅ | ✅ |
+| **H2 — Em execução** | 28/04 → +1-3 semanas | Deploy canary main em sessão paralela | 🔄 |
+| **Independente do gate** | já concluído | Importance weighting ✅, log por etapa ✅ | ✅ |
+| **H3 — Tier 2/3 restante** | maio-junho 2026 | Safeguards remanescentes (10 itens) | em fila |
 | **H4 — Pré-Cliente B** | em paralelo com H2/H3 | R1/R2/R3, schema check, testes unitários | gate Cliente B |
 | **H5 — Cliente B** | depende de dados externos | Onboarding Fase 3b + EDA Generator | dado externo |
 | **H6 — Escala 2-4 clientes** | 2-4 meses após Cliente B | CI/CD, drift trigger, dashboard, registry | depende H5 |
 | **H7 — Escala 5+ clientes** | quando infra atual virar gargalo | Stack GCP completo (Pub/Sub, Dataflow, etc.) | demand-driven |
-| **Standby** | reaberto pós-gate H1 | A/B test completo, quality gate retreino | gate único |
+| **Standby destravado (28/04)** | volta ao backlog ativo | A/B test, Sprint 2 retraining_orchestrator | ✅ |
 
 ---
 
 # ROADMAP
 
-## H1 — AGORA (até validação OOS, prazo das próximas 2 semanas)
+## H1 — CONCLUÍDO (28/04/2026)
 
-### 1.1 — Validação out-of-sample do Champion v4 🔴 GATE
-- **O quê:** rodar Champion v4 e jan30 ORIGINAL nos leads de LF51 final + DEV20 (já coletado), comparar AUC / lift D10 / monotonia / ROAS estimado nos mesmos leads não vistos por ambos.
-- **Saída:** decisão de promover, manter ou retreinar.
-- **Bloqueia:** todo deploy de main (YAML já em v4); toda atividade A/B; H2.
-- **Catálogo:** este documento, seção "GATE ÚNICO" acima.
+### 1.1 — Validação out-of-sample do Champion v4 ✅ ATRAVESSADA
+- Saída: decisão favorável ao v4. Detalhes da execução fora deste plano (sessão paralela).
+- Consequência: H2 destravado e em execução; STANDBY reaberto.
 
 ### 1.2 — ~~Capturar golden snapshot do monitoring~~ → REPOSICIONADO (não rodar agora)
 - **Por que não agora:** o sistema está com `distribution_drift HIGH` em Medium e `score_distribution_change HIGH` em D10 desde 22/04. Capturar o snapshot neste estado cristaliza um baseline degradado — regressões futuras seriam comparadas contra um estado já ruim e a divergência atual viraria "normal".
@@ -94,39 +83,27 @@
 - **Status:** pendente sem prazo rígido. Não bloqueia H2.1 (canary inicial). Vira resultado de um sistema saudável, não pré-requisito mecânico.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → "Fase 2 — Pendente — validação do monitoramento".
 
-### 1.3 — Fix DT-13 (utm_term numérico zerando encode) 🟡
-- **O quê:** 1 linha em `src/core/utm.py` — remover exceção numérica do fallback. `utm_term='0405'` (669 leads/dia em 22/04) e `'2104'` (232/dia em 23/04) escapam para encoded zerado.
-- **Pode rodar em paralelo com 1.1 e 1.2.**
-- **Catálogo:** `PLANO_REFACTOR_MLOPS.md` §11 "DT-13".
+### 1.3 — Fix DT-13 (utm_term numérico zerando encode) ✅ commit `dafe85d`
 
-### 1.4 — Atualizar `ARQUITETURA_SISTEMA_COMPLETA.md` 🟡
-- **O quê:** refletir rollback edf23e9 em produção, retreinos v4, A/B suspenso, canary direto como estratégia.
-- **Pode rodar a qualquer momento.**
+### 1.4 — Atualizar `ARQUITETURA_SISTEMA_COMPLETA.md` ✅ commit `15fe32a`
 
 ---
 
-## H2 — Pós-validação (o que de fato depende do gate)
+## H2 — Pós-validação (em execução em sessão paralela)
 
-**Único item realmente travado pelo gate.**
-
-### 2.1 — Deploy canary da main unificada
-- **Pré-condições:** 1.1 favorável + smoke test em `--no-traffic` OK. (1.2 não bloqueia — golden snapshot é capturado depois.)
-- **Estratégia:** canary direto 10% → 50% → 100% com critério puramente técnico. Detalhes em `AB_TEST.md` → "Nova estratégia — canary direto".
-- **Critério de avanço:** ausência de alertas HIGH **novos** na janela exigida (alertas pré-existentes de drift Medium e D10 são esperados a princípio e devem reduzir após v4 estável) + paridade observada vs rollback + nenhum decil com 0 eventos. Sem gancho com ROAS A/B.
+### 2.1 — Deploy canary da main unificada 🔄 EM EXECUÇÃO
+- **Onde:** sessão paralela do usuário (não nesta sessão).
+- **Estratégia:** canary direto 10% → 50% → 100% com critério puramente técnico. Detalhes em `AB_TEST.md`.
 - **Captura do golden snapshot (H1.2):** 24-48h após canary 10% estável e alertas pré-existentes terem cedido. Se não cederem, pausar antes de avançar para 50% e diagnosticar.
 - **Rollback:** ~10s via `gcloud run services update-traffic` para `00269-jjn`.
 
 ---
 
-## Trabalho técnico independente do gate (na fila por foco, não por restrição)
+## Trabalho técnico já executado (independente do gate)
 
-Itens abaixo **não dependem** do gate H1.1 nem do canary. Estão adiados apenas pela disciplina de fazer um item por vez. Tecnicamente podem rodar a qualquer momento, e em qualquer cenário do gate (favorável ou não) continuam fazendo sentido. Ordem: do mais leve (instrumentação) para o mais pesado (retreino).
-
-### Log de registros por etapa do pipeline (T2-2)
-- **O quê:** instrumentar `core/preprocessing.py` para logar a contagem de registros (e nulos críticos) entre cada etapa.
-- **Por quê:** auditabilidade — sem isso, descobrir onde linhas somem é arqueologia.
-- **Por que é independente do gate:** instrumentação pura, não toca em modelo nem em encoding.
-- **Catálogo:** `PLANO_SAFEGUARD.md` Tier 2 → T2-2.
+### Log de registros por etapa do pipeline (T2-2) ✅ commit `8b46645`
+- Instrumentação em `train_pipeline.py` (6 pontos) e `production_pipeline.py` (2 pontos).
+- Catálogo: `PLANO_SAFEGUARD.md` Tier 2 → T2-2.
 
 ### Importance weighting do grupo controle (T2-3) — ✅ implementado / efeito interno marginal
 - **Estado (28/04/2026):** feature implementada no `train_pipeline.py` (commits `c03d645`, `f8dc4f7`). Calcula pesos por grupo (CONTROLE/ML/NEUTRO) via inverso de frequência com expoente `alpha`, scope=train. CLI: `--control-group-weights --control-alpha {0..1}` + `--train-ratio` para ajustar split. Validado tecnicamente em sweep de alphas no MLflow remoto (Cloud SQL subido + parado em 28/04).
@@ -241,14 +218,14 @@ Componentes que só fazem sentido quando a infraestrutura atual virar gargalo re
 
 ---
 
-## ⏸ STANDBY — Aguardando o GATE H1
+## ✅ STANDBY DESTRAVADO (28/04/2026)
 
-Itens que só voltam à execução se a validação do Champion v4 for favorável (ou se uma decisão explícita reabrir o teste A/B com outra configuração).
+Itens que estavam suspensos até o gate H1.1. Com gate atravessado, voltam ao backlog ativo:
 
-- **A/B test completo** — toda a Fase 1 original (patch no rollback, monitoramento DEV20, decisão de promoção). Design preservado em `AB_TEST.md`.
-- **Quality gate automático pós-treino** (Sprint 2 `retraining_orchestrator.py`) — depende do A/B fornecer thresholds calibrados.
-- **DT-12: Encoding por variante A/B (`encoding_overrides`)** — só faz sentido se A/B retomar com modelos que tenham encoding diferente entre si. Resolvido na configuração atual; documentado em `PLANO_REFACTOR_MLOPS.md` § DT-12.
-- **Novo ciclo A/B com modelo retreinado** (Fase 5 original) — depende da decisão de promoção da Fase 1.
+- **A/B test completo** — frente ativa novamente; design em `AB_TEST.md`. Roteamento exato (UTM, Cloud Run revision split, ou híbrido) é decisão da sessão de deploy.
+- **Sprint 2 do `retraining_orchestrator.py` — quality gate automático pós-treino** — pode retomar; espera-se que use thresholds informados pela primeira rodada de A/B pós-deploy.
+- **DT-12 — encoding por variante A/B (`encoding_overrides`)** — só relevante se o A/B usar dois modelos com encoding diferente. Resolvido na configuração atual de v4 (OHE default); documentado em `PLANO_REFACTOR_MLOPS.md` § DT-12.
+- **Novo ciclo A/B com modelo retreinado** (Fase 5 original) — destravado; aguarda apenas resultado do canary corrente.
 
 ---
 

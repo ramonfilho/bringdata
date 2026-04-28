@@ -87,11 +87,11 @@ gsutil -m cp -r gs://smart-ads-mlflow/artifacts/{run_id}/artifacts/ ./modelo/
 - **Run ID:** `d51757f5` (jan30 ORIGINAL)
 - AUC ~0.7311 · Monotonia 88.9% · Treino até 04/11/2025 · Promovido a Champion em 31/03/2026
 
-**Retreinados em 23/04/2026 — pendentes de validação out-of-sample antes de promoção:**
-- **Champion v4:** `60637bb98b94421b9c7579bb4ac1b1ad` — AUC 0.748, monotonia 77.78%, 1.104 positivos, janela até 02/04/2026, OHE default (sem `encoding_overrides`)
-- **Challenger v4:** `7d08ae0302da420aa99559d4d4f55025` — AUC 0.745, monotonia 66.7%, mesma janela
+**Retreinados em 23/04/2026 — Champion v4 ✅ validado out-of-sample em 28/04 e em deploy via canary:**
+- **Champion v4:** `60637bb98b94421b9c7579bb4ac1b1ad` — AUC 0.748, monotonia 77.78%, 1.104 positivos, janela até 02/04/2026, OHE default (sem `encoding_overrides`). Em deploy de produção via canary em sessão paralela (28/04).
+- **Challenger v4:** `7d08ae0302da420aa99559d4d4f55025` — AUC 0.745, monotonia 66.7%, mesma janela. Em standby até promoção do Champion v4; entra como Challenger no próximo ciclo A/B.
 
-> ⏸ Nenhuma decisão de promoção é tomada antes da validação dos modelos v4 nos lançamentos não vistos por eles. A/B test segue suspenso. Ver `AB_TEST.md` e `PLANO_EXECUCAO.md` "Pré-requisito de validação".
+> 🔓 A/B test reaberto em 28/04 após validação OOS do Champion v4 atravessada. Ver `AB_TEST.md` e `PLANO_EXECUCAO.md`.
 
 **Histórico:**
 - `2a98e51ca4834697bbc94ec3dd31fcf7` — modelo P1 anterior ao jan30, AUC 0.745, 59 features, treino 04/11/2025–30/01/2026 (referência histórica)

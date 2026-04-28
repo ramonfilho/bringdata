@@ -9,7 +9,7 @@
 
 > **A prioridade global, fases, dependências e backlog vivem agora em `PLANO_EXECUCAO.md`** — único documento de "o que fazer e quando". Este índice mapeia papéis e relações entre docs; **não duplica o roadmap**.
 >
-> Estado atual em uma frase: rollback `edf23e9` (jan30 ORIGINAL) em produção 100%; main com retreinos v4 prontos mas não deployada; gate único = validação out-of-sample do Champion v4 (`60637bb9…`); A/B suspenso desde 27/04 enquanto o gate não passar.
+> Estado atual em uma frase: gate H1.1 (validação OOS do Champion v4) atravessado em 28/04; deploy main em execução em sessão paralela via canary; A/B test reaberto como frente ativa.
 
 ---
 
@@ -132,8 +132,8 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Ação sugerida:** atualizar para refletir que o rollback edf23e9 está em produção e o A/B test está ativo via canary.
 
 ### `AB_TEST.md`
-**Papel:** documentação operacional do teste A/B champion/challenger — arquitetura de roteamento, configuração, teste atual (jan30 vs mar24), critério de promoção, como ler resultados, problema DT-12, janela de dados válidos, próximos passos (patch no rollback).
-**Status:** ⏸ **SUSPENSO desde 2026-04-27.** Todo o fluxo A/B fica em Standby até validação out-of-sample do Champion v4 (`60637bb9…`) nos lançamentos não vistos. Documento permanece como referência operacional do design — quando o teste retomar, é a arquitetura a executar.
+**Papel:** documentação operacional do teste A/B champion/challenger — arquitetura de roteamento, configuração, critério de promoção, como ler resultados, problema DT-12, janela de dados válidos.
+**Status:** 🔓 **REABERTO em 2026-04-28** após validação out-of-sample do Champion v4 (`60637bb9…`) atravessada. Deploy do v4 em curso via canary em sessão paralela.
 
 ### `SISTEMA_VALIDACAO_ML.md`
 **Papel:** documenta o sistema de validação — como `validate_ml_performance.py` funciona, métricas calculadas.

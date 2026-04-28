@@ -1,11 +1,9 @@
 # Teste A/B Champion/Challenger — Documentação Operacional
 
-**Atualizado:** 2026-04-27
-**Status atual:** ⏸ **SUSPENSO desde 27/04/2026**
+**Atualizado:** 2026-04-28
+**Status atual:** 🔓 **REABERTO em 28/04/2026** após validação out-of-sample do Champion v4 (`60637bb98b94421b9c7579bb4ac1b1ad`) atravessada favoravelmente.
 
-> **Pré-requisito para retomar:** validação out-of-sample do Champion v4 (`60637bb98b94421b9c7579bb4ac1b1ad`, retreinado 23/04 com dados até 02/04) nos últimos lançamentos que ele nunca viu — teste válido para confirmar se a performance prevista se materializa em dados reais. Enquanto não houver essa leitura, **não se executa A/B test** (sem patch no rollback, sem deploy de Challenger, sem promoção, sem novo ciclo). Lançamentos elegíveis: pós-02/04/2026 (LF51 final + DEV20 quando coletado). Decisão de retomada depende dos resultados dessa validação.
->
-> O conteúdo deste documento permanece como referência operacional do design A/B — quando o teste for retomado, esta é a arquitetura a executar.
+> Deploy do Champion v4 em produção via canary está em execução em sessão paralela. Roteamento exato do A/B (por UTM, por split de tráfego Cloud Run, ou híbrido) é definido na sessão de deploy. As seções abaixo descrevem o design canônico — adaptar à estratégia em execução.
 
 ---
 
