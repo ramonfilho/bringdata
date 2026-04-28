@@ -106,17 +106,9 @@ def _unify_term(df: pd.DataFrame, config: UTMConfig) -> pd.DataFrame:
             logger.debug(f"  Term com '{pattern}' → 'outros' ({mask.sum()} leads)")
             df.loc[mask, 'Term'] = 'outros'
 
-    # 3. Valores restantes não reconhecidos → 'outros'
-    #    IDs longos (len > threshold) ou qualquer string que não seja um dos valores conhecidos
-    threshold = config.term_long_id_threshold
+    # 3. Valores restantes não reconhecidos → 'outros' (whitelist canônica)
     valores_conhecidos = set(direct_mappings.values()) | {'outros'}
-    outros_mask = df['Term'].notna() & ~df['Term'].isin(valores_conhecidos)
-    valores_restantes = df.loc[outros_mask, 'Term'].unique()
-
-    for valor in valores_restantes:
-        if isinstance(valor, str):
-            if not valor.isdigit() or len(valor) > threshold:
-                df.loc[df['Term'] == valor, 'Term'] = 'outros'
+    df.loc[df['Term'].notna() & ~df['Term'].isin(valores_conhecidos), 'Term'] = 'outros'
 
     term_depois = df['Term'].nunique()
     logger.info(f"  Term:   {term_antes} → {term_depois} valores únicos")
