@@ -55,7 +55,9 @@ def get_capi_leads_by_day(start_date: str, end_date: str) -> Dict[str, int]:
     start_dt = datetime.strptime(start_date, '%Y-%m-%d')
     end_dt = datetime.strptime(end_date, '%Y-%m-%d')
 
-    # Dividir em chunks de 7 dias para evitar limite de 10k
+    # Dividir em chunks de 7 dias. Limite alto + detecção de truncamento (T2-4):
+    # com volume de pico ~7k leads/dia, 7 dias podem chegar a ~49k.
+    LEAD_FETCH_LIMIT = 100000
     all_leads = []
     current_start = start_dt
     chunk_num = 0
@@ -69,7 +71,7 @@ def get_capi_leads_by_day(start_date: str, end_date: str) -> Dict[str, int]:
 
         logger.info(f"    Chunk {chunk_num}: {chunk_start_str} a {chunk_end_str}")
 
-        url = f"{API_URL}/webhook/lead_capture/recent?start_date={chunk_start_str}&end_date={chunk_end_str}&limit=10000"
+        url = f"{API_URL}/webhook/lead_capture/recent?start_date={chunk_start_str}&end_date={chunk_end_str}&limit={LEAD_FETCH_LIMIT}"
 
         try:
             # Usar curl (mais confiável que requests neste ambiente)
@@ -89,6 +91,14 @@ def get_capi_leads_by_day(start_date: str, end_date: str) -> Dict[str, int]:
             chunk_leads = response_data.get('leads', [])
 
             logger.info(f"       {len(chunk_leads)} leads encontrados")
+
+            # T2-4: detectar truncamento silencioso (resposta == limite exato)
+            if len(chunk_leads) >= LEAD_FETCH_LIMIT:
+                logger.error(
+                    f"   ⚠ TRUNCAMENTO POSSÍVEL no chunk {chunk_num} ({chunk_start_str} a {chunk_end_str}): "
+                    f"recebidos exatos {LEAD_FETCH_LIMIT} leads — pode haver mais. "
+                    f"Aumente LEAD_FETCH_LIMIT, reduza o tamanho do chunk ou pagine."
+                )
 
             all_leads.extend(chunk_leads)
 

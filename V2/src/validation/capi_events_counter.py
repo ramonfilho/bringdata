@@ -96,10 +96,13 @@ def get_capi_events_from_logs(
         f'timestamp>="{start_timestamp}" AND timestamp<="{end_timestamp}"'
     )
 
+    # T2-4: limite alto + detecção de truncamento. Lançamentos grandes geram > 10k eventos
+    # CAPI por semana; o limite anterior de 10k truncava silenciosamente.
+    GCLOUD_LOG_LIMIT = 200000
     cmd = [
         'gcloud', 'logging', 'read',
         filter_query,
-        '--limit=10000',
+        f'--limit={GCLOUD_LOG_LIMIT}',
         '--format=value(textPayload)',
         f'--project={project_id}'
     ]
@@ -109,11 +112,19 @@ def get_capi_events_from_logs(
             cmd,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=120,
             check=True
         )
 
         log_lines = result.stdout.strip().split('\n')
+
+        # T2-4: alerta se possivelmente truncado pelo gcloud
+        if len(log_lines) >= GCLOUD_LOG_LIMIT:
+            logger.error(
+                f" ⚠ TRUNCAMENTO POSSÍVEL: gcloud retornou exatos {GCLOUD_LOG_LIMIT} log lines "
+                f"para o período {start_date} a {end_date} — pode haver mais. "
+                f"Aumente GCLOUD_LOG_LIMIT ou paginate por sub-períodos."
+            )
 
         # Processar logs e agrupar por email
         events_by_email = defaultdict(list)
