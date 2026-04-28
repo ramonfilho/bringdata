@@ -216,8 +216,13 @@ class MonitoringOrchestrator:
         if self.db is not None:
             try:
                 self.db.rollback()
-            except Exception:
-                pass
+            except Exception as e:
+                # T2-6: rollback que falha indica estado inconsistente — log + segue (queries
+                # downstream provavelmente vão falhar também, mas pelo menos fica rastro).
+                logger.error(
+                    f"[T2-6] db.rollback() falhou — sessão pode estar em estado inconsistente: {e}",
+                    exc_info=True,
+                )
 
         # NOVO: Gerar métricas do funil completo
         funnel_metrics = self._generate_funnel_metrics(leads_data, df if leads_data else None)
@@ -297,6 +302,7 @@ class MonitoringOrchestrator:
             if date_columns and dados:
                 date_col_idx = date_columns[0]
                 count = 0
+                parse_errors = 0  # T2-6: contar linhas malformadas
 
                 for row in dados:
                     if date_col_idx < len(row) and row[date_col_idx]:
@@ -312,9 +318,16 @@ class MonitoringOrchestrator:
 
                                 if row_date >= lookback_time:
                                     count += 1
-                        except:
+                        except Exception:
+                            # T2-6: linha malformada — contar e seguir; log agregado no fim
+                            parse_errors += 1
                             continue
 
+                if parse_errors > 0:
+                    logger.warning(
+                        f"  [T2-6] {parse_errors} linha(s) da aba 2 com data ilegível "
+                        f"foram puladas no count de leads"
+                    )
                 return count
             else:
                 # Sem coluna de data, avisar

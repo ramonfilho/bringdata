@@ -118,13 +118,13 @@
 
 Implementar sobre o código unificado. Nenhum é bloqueador de produção. Status canônico em `PLANO_SAFEGUARD.md`.
 
-### Tier 2 (qualidade de dados — 2 restantes)
+### Tier 2 (qualidade de dados — 1 restante)
 
 | ID | Item curto | Status | Catálogo |
 |---|---|---|---|
 | T2-4 | Remover limite de 10.000 registros em queries de validação | ✅ commit `a578408` | `PLANO_SAFEGUARD.md` Tier 2 |
 | T2-5 | Filtro vendas aprovadas | ✅ já implementado em `data_loader.py` | `PLANO_SAFEGUARD.md` Tier 2 |
-| T2-6 | Eliminar exceções silenciosas (3 pontos em `app.py:1638-1640` e `orchestrator.py`) | em fila | `PLANO_SAFEGUARD.md` Tier 2 |
+| T2-6 | Eliminar exceções silenciosas (orchestrator.py db.rollback + parse gspread) | ✅ 28/04 | `PLANO_SAFEGUARD.md` Tier 2 |
 | T2-8 | Alerta para feature high-importance com variance baixa | em fila | `PLANO_SAFEGUARD.md` Tier 2 |
 
 ### Tier 3 (observabilidade — 7 itens)
