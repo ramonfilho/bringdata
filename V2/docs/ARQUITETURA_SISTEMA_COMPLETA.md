@@ -1,7 +1,14 @@
 # SMART ADS V2 — ARQUITETURA DO SISTEMA
 
 > **DOCUMENTO CRÍTICO**: Leia no início de TODA sessão de desenvolvimento.
-> Última atualização: 2026-03-24
+> Última atualização: 2026-04-28
+>
+> **Estado atual da produção (28/04/2026):**
+> - **Tráfego:** 100% no rollback `smart-ads-api-00269-jjn` (commit `edf23e9` de 05/03/2026, sem A/B routing).
+> - **Modelo servido:** jan30 ORIGINAL (`d51757f5`), treinado até 04/11/2025.
+> - **Branch `main` (não deployada):** unificação em curso; YAML `configs/active_models/devclub.yaml` aponta para Champion v4 (`60637bb98b94421b9c7579bb4ac1b1ad`) com `ab_test.enabled: false` desde 23/04. Challenger v4 (`7d08ae0302da420aa99559d4d4f55025`) também pronto.
+> - **A/B test:** ⏸ SUSPENSO desde 27/04/2026. Gate único = validação out-of-sample do Champion v4 nos lançamentos não vistos. Detalhes em `PLANO_EXECUCAO.md`.
+> - **Estratégia de deploy quando o gate passar:** canary direto (10% → 50% → 100%) com critério puramente técnico — substitui o 50/50 original que dependia do A/B. Detalhes em `AB_TEST.md` → "Nova estratégia — canary direto".
 
 ---
 
@@ -164,9 +171,12 @@ distribuicoes_esperadas.json        → proporções do treino (drift detection)
 missing_rates_baseline.json         → missing rates de referência (monitoramento)
 ```
 
-**Modelo de referência (produção em 24/03/2026):**
-- Run ID: `2a98e51c` | AUC: 0.745 | 59 features | tmb_risk_filter: all
-- Treino de confirmação pós-refactor: run `f3e816b6` | AUC: 0.747 | 49.214 leads | 777 positivos
+**Modelo em produção (28/04/2026):**
+- **Atualmente servido:** jan30 ORIGINAL — Run ID `d51757f5` | AUC: 0.7311 | treino até 04/11/2025 | rollback `00269-jjn` em 100%
+- **Retreinados em 23/04/2026, pendentes de validação out-of-sample:**
+  - Champion v4: `60637bb98b94421b9c7579bb4ac1b1ad` | AUC 0.748 | janela até 02/04/2026 | OHE default
+  - Challenger v4: `7d08ae0302da420aa99559d4d4f55025` | AUC 0.745
+- **Histórico:** `2a98e51c` (P1, AUC 0.745, ativo entre 24/03 e 13/04 antes do rollback); treino de confirmação pós-refactor `f3e816b6` (AUC 0.747, 49.214 leads).
 
 ---
 
@@ -197,8 +207,10 @@ pipeline = LeadScoringPipeline(client_id='devclub')
 
 ## API REST (`api/app.py`)
 
-**Runtime:** FastAPI + Uvicorn | **Produção:** Cloud Run `bring-data-api-00254-dh5`
-**URL:** `https://bring-data-api-gazrm25mda-uc.a.run.app`
+**Runtime:** FastAPI + Uvicorn | **Produção:** Cloud Run `smart-ads-api`, revisão atual `smart-ads-api-00269-jjn` (rollback edf23e9, 100% do tráfego)
+**URL:** `https://smart-ads-api-12955519745.us-central1.run.app`
+
+> O serviço Cloud Run anterior `bring-data-api` foi deletado em 26/04/2026 (sem tráfego desde o rollback). Histórico de revisões `bring-data-api-*` permanece em GCR como referência.
 
 **Padrão A2 — pipeline dict por client_id:**
 ```python
@@ -254,7 +266,7 @@ Recebe `ClientConfig` e passa para os 3 sub-monitores.
 
 **Output:** Slack + log em `outputs/monitoring/`
 
-**Golden snapshot:** `docs/monitoring_golden_snapshot.json` — 3.929 leads, 3 alertas. Referência pré-refactor para comparação pós-deploy.
+**Golden snapshot:** `docs/monitoring_golden_snapshot.json` — pendente de captura limpa. O snapshot anterior (3.929 leads, 3 alertas) era referência pré-refactor. Sistema atual está com `distribution_drift HIGH` em Medium e `score_distribution_change HIGH` em D10 desde 22/04, então capturar agora cristalizaria um baseline degradado. Captura reposicionada para "pós-canary v4 a 10% estável" — ver `PLANO_EXECUCAO.md` H1.2.
 
 > **Nota DT-7:** alertas `missing_features` para campanhas Lookalike são esperados e documentados. Threshold de Medium calculado sobre dataset histórico completo (pré-cutoff) — campanhas antigas com alta freq histórica mas inativas no lançamento atual aparecem como ausentes. Ver `PLANO_REFACTOR_MLOPS.md` DT-7.
 
@@ -317,7 +329,7 @@ export MLFLOW_TRACKING_URI=postgresql+psycopg2://postgres:SmartAds2026DB!@104.19
 mlflow ui  # abre em localhost:5000
 
 # Modelo em produção
-Run ID: 2a98e51c | Experiment: devclub_lead_scoring
+Run ID: d51757f5 (jan30 ORIGINAL) | Experiment: devclub_lead_scoring
 ```
 
 ---
@@ -355,18 +367,29 @@ GCP_PROJECT_ID=smart-ads-451319
 bash api/deploy_capi.sh
 
 # Redirecionar tráfego
-gcloud run services update-traffic bring-data-api \
+gcloud run services update-traffic smart-ads-api \
   --to-revisions REVISION=100 --region us-central1
 
 # Ver revisões ativas
-gcloud run revisions list --service bring-data-api --region us-central1
+gcloud run revisions list --service smart-ads-api --region us-central1
 
-# Rollback
-gcloud run services update-traffic bring-data-api \
-  --to-revisions REVISAO_ANTERIOR=100 --region us-central1
+# Rollback rápido (~10s)
+gcloud run services update-traffic smart-ads-api \
+  --to-revisions smart-ads-api-00269-jjn=100 --region us-central1
 ```
 
-**Revisão atual:** `bring-data-api-00254-dh5` (24/03/2026)
+**Revisão atual:** `smart-ads-api-00269-jjn` (rollback edf23e9, 100% do tráfego desde 13/04/2026).
+
+**Estratégia de canary quando o gate OOS passar** (substitui o 50/50 original):
+
+| Estágio | main | rollback | Critério |
+|---|---|---|---|
+| Smoke | 0% (--no-traffic) | 100% | 5 leads sintéticos OK |
+| Canary | 10% | 90% | 24h sem alerta HIGH novo + paridade |
+| Meio | 50% | 50% | 48h sem alerta HIGH novo + golden snapshot estável |
+| Final | 100% | 0% | (ou rollback ~10s se falhar) |
+
+Detalhes em `AB_TEST.md` → "Nova estratégia — canary direto".
 
 ---
 
@@ -374,7 +397,7 @@ gcloud run services update-traffic bring-data-api \
 
 ```bash
 # Logs Cloud Run (última revisão)
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=bring-data-api" --limit=50
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=smart-ads-api" --limit=50
 
 # Treinar modelo (parâmetros baseline)
 python -m src.train_pipeline \
@@ -388,7 +411,7 @@ python -m src.train_pipeline \
 bash src/monitoring/run_monitoring_local.sh
 
 # Monitoramento via API
-curl -s "https://bring-data-api-gazrm25mda-uc.a.run.app/monitoring/daily-check?hours=24"
+curl -s "https://smart-ads-api-12955519745.us-central1.run.app/monitoring/daily-check?hours=24"
 
 # Retreino mensal
 python src/retrain/retraining_orchestrator.py --config configs/retreino_mensal.yaml
@@ -446,16 +469,29 @@ utm_source == orgânico / outro              →  nenhum envio
 
 ## ROADMAP ATUAL
 
-Ver `ROADMAP_MLOPS_MATURIDADE.md` para backlog completo com dependências.
+Ver `PLANO_EXECUCAO.md` (roadmap único) para horizontes H1–H7, gate de validação, standby e backlog completo. O antigo `ROADMAP_MLOPS_MATURIDADE.md` foi absorvido e arquivado em `arquivo/`.
 
-**Fases 1–3 concluídas (22-24/03/2026):**
+**Concluído (jan-abril/2026):**
 - `src/core/` com 11 módulos — skew treino/produção eliminado estruturalmente
 - `ClientConfig` parametriza todos os pipelines
 - API multi-cliente (A2 pattern)
-- Deploy do refactor validado e em produção
+- Deploy do refactor (24/03/2026, item 19)
+- Tier 1 dos safeguards (11/11 itens, até 23/04)
+- Retreinos coordenados v4 (23/04)
+- DT-CAPI-01, DT-CAPI-02, DT-12 resolvidos
+- Otimização GCP (~R$167/mês, 26/04)
 
-**Próximos itens ativos:**
-- **Item 6:** Atualizar `ARQUITETURA_SISTEMA_COMPLETA.md` ✅ (este documento)
-- **Item 7:** `src/core/validation.py` — schema check pré-treino (antes do Cliente B)
-- **Item 8:** Teste A/B champion/challenger em produção
-- **Itens 10–12:** Onboarding Cliente B (aguardando dados)
+**Horizonte imediato (H1 do PLANO_EXECUCAO):**
+- **H1.1** — Validação out-of-sample do Champion v4 (gate único)
+- **H1.2** — Golden snapshot (reposicionado para pós-canary v4 estável)
+- **H1.3** — Fix DT-13 (utm_term zerando encode) ✅ commit `dafe85d`
+- **H1.4** — Atualizar este documento ✅ (em curso)
+
+**Pós-validação (depende do gate):**
+- Deploy canary da main unificada (10% → 50% → 100%)
+
+**Independente do gate (na fila por foco):**
+- T2-3 importance weighting | T2-2 log por etapa do pipeline
+
+**Em standby até o gate retomar:**
+- Toda a frente de A/B test, Sprint 2 do retraining_orchestrator (quality gate automático).
