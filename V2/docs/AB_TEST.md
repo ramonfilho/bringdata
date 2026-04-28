@@ -153,6 +153,8 @@ python scripts/dt12_impact_analysis.py --limit 500
 
 AUC retrospectivo como critério secundário de sanidade — se ROAS equivalente mas AUC do Challenger for significativamente menor, investigar antes de promover.
 
+> **Nota 28/04/2026:** enquanto o A/B online estiver suspenso, o critério de promoção foi substituído pelo **backtest offline pré-promoção** descrito mais abaixo. ROAS por variante via Meta Ads Manager não é mais coletável porque ambos modelos disparam o mesmo event name.
+
 ### Como promover
 
 1. Retreinar o Champion com o `run_id` do Challenger:
@@ -165,6 +167,203 @@ AUC retrospectivo como critério secundário de sanidade — se ROAS equivalente
    - Criar próximo Challenger para o ciclo seguinte
 3. Atualizar `conversion_rates` do novo Champion com as taxas observadas no teste.
 4. Avisar o gestor de tráfego para criar campanhas do novo Challenger com novo UTM.
+
+---
+
+## Backtest offline pré-promoção (28/04/2026 →)
+
+> **Substitui o critério online enquanto o A/B test está suspenso.** Candidato Champion deve mostrar discriminação ≥ Champion atual em backtest sobre lançamentos OOS antes de virar canary em produção.
+
+### Contexto
+
+A/B online via UTM foi suspenso em 27/04/2026 (canary Cloud Run substituiu o mecanismo de roteamento). Como ambos modelos passam a disparar o mesmo event name (`LeadQualified` / `LeadQualifiedHighQuality`), Meta Ads Manager não diferencia ROAS por variante.
+
+Necessário método offline pra avaliar candidatos antes da promoção. Primeira aplicação: **v4** (`60637bb98b94421b9c7579bb4ac1b1ad`, treinado 23/04/2026) **vs jan30** (`d51757f5041c44b7ab1a056fce8c3c35`, Champion atual em produção).
+
+### Metodologia
+
+**Lançamentos elegíveis (OOS para v4, cutoff treino 02/04/2026):**
+- LF52 (cap 07-12/04, vendas 17-24/04) — carrinho fechado
+- LF53 (cap 13-20/04, vendas 27/04-03/05) — carrinho aberto, D2 quando feito
+- LF51 parcial (cap 03-06/04, vendas 13-19/04) — só leads pós-cutoff via override de `cap_start`
+
+**Filtros aplicados:**
+- Excluir leads com UTM `ML_MAR` (durante A/B ativo, esses leads foram scoreados por mar24, não pelo Champion da época)
+- Janela de conversão: matching de leads ↔ vendas dentro do período de captação + vendas (sem temporal validation; carrinho curto e fechado)
+
+**Fontes de venda combinadas:**
+- Guru API (cartão à vista)
+- Hotmart API (cartão parcelado)
+- Asaas API (boleto à vista) — adicionada em 28/04 ao detectar que vendas boleto não vinham do TMB
+- TMB local (`contas_a_receber_*.xlsx`) — apenas vendas Crédito Acessível parcelado
+
+**Score:**
+- v4: rescore via `LeadScoringPredictor(mlflow_run_id=...)` aplicado ao base_dataset
+- jan30: lido direto da tabela `Lead` do Railway via coluna `decil` (decisão atribuída em runtime pela produção). Evita problema de pipeline mismatch (jan30 foi scorado em produção pelo código do momento, não pelo pipeline atual)
+
+**Métrica principal:** % de conversão D9 e D10 acima da média do lançamento (lift).
+
+### Resultado primário — Pooled OOS (cap 03/04→27/04, vendas 13/04→28/04)
+
+> **Métrica primária da decisão de promoção.** Pool único de leads OOS para v4 (todos capturados após cutoff de treino 02/04/2026), matched contra todas as vendas disponíveis no período. Evita distorções de janela apertada por LF específico.
+
+**Setup:** 32.179 leads únicos (sem ML_MAR), 173 conversões matched, baseline 0,54%.
+
+| Métrica | v4 | jan30 |
+|---|---|---|
+| conv% D9 | 0,78% | 0,63% |
+| **conv% D10** | **0,92%** | 0,75% |
+| **D9 acima média** | **+44%** | +18% |
+| **D10 acima média** | **+71%** | +40% |
+| **D9+D10 acima média** | **+59%** | +33% |
+| ROAS top-30 | 2,11 | 1,84 |
+| ROAS top-50 | 1,94 | 1,74 |
+| ROAS global | 1,48 | 1,48 |
+
+**v4 separa ~2× melhor que jan30 em D9 e D10.** Resultado robusto a 173 conversões.
+
+### Recorte secundário — por lançamento (mostra robustez do pooled)
+
+| LF | Modelo | n_conv | baseline | conv% D9 | conv% D10 | D10 acima |
+|---|---|---|---|---|---|---|
+| LF51 parcial | v4 | 40 | 0,68% | 0,76% | 1,29% | +89% |
+| LF51 parcial | jan30 | 40 | 0,68% | 0,65% | 0,89% | +30% |
+| LF52 | v4 | 57 | 0,68% | 1,26% | 1,45% | +112% |
+| LF52 | jan30 | 57 | 0,68% | 1,08% | 0,93% | +36% |
+| LF53 D2 carrinho | v4 | 52 | 0,52% | 0,81% | 0,56% | **+8%** ⚠ |
+| LF53 D2 carrinho | jan30 | 52 | 0,52% | 0,66% | 0,76% | +44% |
+
+O "v4 quebra no LF53" desaparece no pooled. Razão: leads capturados no LF53 (cap 13-20/04) ainda não tiveram tempo de comprar — carrinho abriu 27/04. No recorte por-LF, o numerador dos decis altos do v4 fica artificialmente baixo. No pooled, esses leads são contabilizados quando comprarem em qualquer carrinho posterior.
+
+### Conclusão (28/04/2026)
+
+- **v4 é candidato legítimo a promoção** — discrimina ~2× melhor que jan30 no pooled OOS com 173 conversões
+- Recorte por-LF tem variabilidade que **não reflete falha estrutural** — é artefato de janela curta no LF53
+- Recomendação: refazer pooled OOS após carrinho LF53 fechar (03/05) pra confirmar resultado com volume final, então decidir promoção
+
+**Pré-requisitos antes de canary v4 em produção:**
+1. Pooled OOS pós-LF53 fechado mantém v4 ≥ jan30 nas 3 métricas (D9, D10, D9+D10)
+2. TMB atualizado (lag de ~5 dias resolvido até lá)
+3. Smoke test paridade jan30 ainda passa
+
+### Reprodutibilidade
+
+- Script: `V2/scripts/backtest_compare_models.py` (3 modos: `prepare-dataset`, `score`, `compare`)
+- Módulo de carga: `V2/src/validation/backtest_data.py` (`load_match_spend_for_lf`)
+- Datasets persistidos em: `V2/files/validation/backtest_lf{51_partial,52,53}/`
+- Comandos exatos no docstring do script
+- Arquivos TMB local em `V2/data/devclub/contas_a_receber_*.xlsx` (gerados manualmente)
+
+### Próximas iterações
+
+- 04/05: refazer LF53 com carrinho fechado
+- Se LF53 fechado mantiver v4 ≥ jan30 nas 3 métricas (D9, D10, D9+D10): considerar canary v4
+- Se não: documentar viés Asaas e planejar retreino v5 com mix corrigido
+
+---
+
+## Auditoria de paridade — pipeline online vs offline (28/04/2026)
+
+> **Contexto:** antes de decidir arquitetura de roteamento UTM pro canary v4, foi necessário confirmar se o pipeline `main` produzia output idêntico ao pipeline `rollback edf23e9` quando servindo o mesmo modelo (jan30). A preocupação era "rodar modelo antigo com código novo" introduzindo viés silencioso.
+
+### Setup
+
+- Sample: 5.000 leads OOS (cap 03/04 → 27/04, sem ML_MAR), estratificado por dia de captação
+- Mesmo modelo: jan30 (`d51757f5...`)
+- Worktree do rollback recriado em `../smart_ads_v2_rollback` apontando pro commit `edf23e9`
+- Bateria de 9 camadas: paridade element-wise, estatística, decil, boundary D9/D10, edge cases, cross-val produção, estabilidade temporal, reprodutibilidade, robustez do mecanismo de override
+
+### Achado #1 — Encoding override é decisivo
+
+Sem aplicar `encoding_overrides` para jan30 ao chamar `pipeline.run()`, **96% dos leads** divergem (paridade falha catastroficamente: a feature ordinal `Qual_a_sua_idade` fica em 0 pra todos os 500 leads de teste).
+
+Com encoding_overrides aplicado corretamente: **98,4% match exato (<0,001)** e **99,6% match de decil**.
+
+Em produção, `app.py` linhas 902-918 já extrai o override correto via `ab_variant.encoding_overrides` quando `ab_test.enabled: true`. Pra teste offline foi necessário reconstruir o EncodingConfig manualmente (config foi removido do active_models/devclub.yaml quando A/B foi suspenso em 27/04).
+
+### Achado #2 — Paridade main vs rollback (com override)
+
+Bateria com 5.000 leads (com override aplicado):
+
+| Camada | Resultado | Critério rigoroso | Passa? |
+|---|---|---|---|
+| Element-wise (abs_diff) | 96% <0,001; máx 0,17 | 99,9% <0,001 | ❌ |
+| Estatística (Spearman) | ρ = 0,9986 | >0,999 | ❌ |
+| Decil operacional | 98,3% mesmo decil | ≥99,5% | ❌ |
+| **Boundary D9/D10 (LQHQ)** | **0,17% divergem** | <0,5% | ✅ |
+| Cross-val produção | 89,9% main+ovr | ≥99% | ❌ |
+| Estabilidade temporal | pior dia 96,2% | ≥99% | ❌ |
+
+**Sob critério "exaustivo e implacável", paridade não foi comprovada.** Mas a magnitude operacional é pequena: ~2% dos leads jan30 servidos por main code receberiam decil deslocado em ±1 (raramente ±2), e apenas 0,17% mudariam de decisão LQ vs LQHQ.
+
+### Achado #3 — Divergência INTRÍNSECA pipeline online vs offline (~6%)
+
+Investigação revelou que mesmo o **rollback rescorando offline** não bate 100% com `decil_production` gravado no Railway (que foi atribuído pelo rollback rodando online em produção).
+
+Estratificado por janela de captação:
+
+| Janela | n | rollback rescore ↔ prod online | main+ovr ↔ prod online |
+|---|---|---|---|
+| Pré-rollback (cap < 13/04) | 2.073 | 85,0% | 85,0% |
+| **Puro rollback (cap 13-22/04)** | 2.036 | **94,2%** | 93,7% |
+| Canary v4 ativo (cap 23-27/04) | 992 | 93,1% | 92,5% |
+
+**Mesmo pipeline (rollback), mesmo modelo (jan30), mesmo lead — rescore offline ≠ scoring online em ~6% dos casos.** Distribuição da `score_diff` em puro rollback:
+
+- Mediana: zero (5,5e-17 = float precision noise)
+- p25: 0 | p75: 0,003
+- Máximo: 0,41 (cauda)
+
+Padrão: 70% dos leads tem rescore IDÊNTICO ao online; 30% tem diff variável, sendo a maioria <0,003. **Algo no fluxo runtime de produção (webhook → app.py → score) não é replicado quando rescore-se offline em batch.**
+
+Hipóteses ainda não testadas (issue aberta):
+
+1. **Cache de cliente desatualizado** — algum lookup em runtime que escreve estado distinto
+2. **FBP/FBC ou enriquecimento** — produção pode buscar dados que rescore offline não tem
+3. **Reprocessing de leads** — alguns podem ter sido scoreados, sale_date corrigida, e re-scoreados
+4. **Timestamp `Data` vs `createdAt`** — Data armazenada vs momento real de scoring online
+5. **Race condition / state online** — múltiplas requests competindo
+
+**Esta divergência intrínseca não é causada pelo main code** — é uma propriedade do fluxo online vs offline. Promover main+ovr adiciona ~0,5pp adicional sobre essa base de 6%.
+
+### Achado #4 — Não é causa principal da degradação treino → produção
+
+A queda de lift D10 de 3,58 (treino) → 1,71 (produção real) **não é dominantemente explicada** por essa divergência rescore↔online:
+
+- Mediana zero significa que pra maioria dos leads o score é idêntico
+- A cauda da diff (máx 0,41) afeta poucos leads; impacto agregado no lift seria pequeno
+- A causa principal continua sendo **otimização Meta comprimindo distribuição** (corroborado por LFs históricos com mesmo padrão de degradação)
+
+### Decisão arquitetural — 28/04/2026
+
+Sob as restrições operacionais ditas pelo cliente:
+
+- Não usar single revisão main + UTM (preocupação inicial sobre paridade)
+- Não usar cross-revision RPC (complexidade)
+- Não exigir mudança no front-end
+- Latência tolerável desde que sem custo significativo
+
+E à luz dos achados:
+
+- Paridade main+ovr ≡ rollback é **praticamente equivalente** dentro da margem intrínseca de ~6% que existe em qualquer comparação rescore↔online
+- Promover main+ovr introduz apenas ~0,5pp adicional de divergência sobre o baseline rollback rescore vs prod
+- Shift de ~2% no decil é aceitável pelo cliente (decisão registrada)
+
+**Decisão:** Arquitetura 1 (single revisão main com UTM routing) volta como caminho viável pra promoção do v4. Substitui a recomendação inicial de "Arquitetura 5 (proxy)".
+
+**Pré-requisitos pra promoção:**
+1. Reativar `ab_test.enabled: true` em `active_models/devclub.yaml`
+2. Reconstruir variants com `encoding_overrides` corretos pra jan30 (preservados em git history em commit `c32e5f0`)
+3. Coordenar com gestor: criar evento `LeadQualifiedV4` no Meta Events Manager + campanha com UTM `ML_V4`
+4. Canary 10% main → 50% → 100% conforme Fase 3 do `PLANO_EXECUCAO.md`
+5. Smoke test em canary: 5 leads jan30 reais, verificar decil distribution similar à atual
+6. Investigação aberta: causa raiz da divergência intrínseca rescore↔online (~6%) — separada da decisão atual
+
+### Reprodutibilidade da auditoria
+
+- Worktree de teste: `git worktree add ../smart_ads_v2_rollback edf23e9`
+- Sample: `/tmp/parity_5k_sample.xlsx` (5.000 leads do pooled OOS estratificados por dia)
+- Scripts ad-hoc usados (não persistidos como módulo) — refazer requer recriar via histórico desta investigação ou via instrumentação de `tests/parity_audit.py`
 
 ---
 
