@@ -1,4 +1,10 @@
-# Roadmap MLOps — Bring Data V2
+# Roadmap MLOps — Bring Data V2 (ARQUIVADO)
+
+> **📦 ARQUIVADO em 2026-04-27.** Conteúdo absorvido pelo `docs/PLANO_EXECUCAO.md` (horizontes H1–H7) que agora é o roadmap único do projeto. Este arquivo permanece como referência histórica das fases imediata/pós-deploy/Cliente B/escala originalmente desenhadas. Não consultar para saber o que fazer agora — ir ao `PLANO_EXECUCAO.md`.
+
+---
+
+# Roadmap MLOps — Bring Data V2 (versão original)
 
 **Contexto em 30 segundos:** o refactor (`refactor/mlops-core`) está completo e validado. O sistema suporta múltiplos clientes via config, sem duplicar código. Este documento é o guia do que fazer a seguir — em ordem, com a condição que desbloqueia cada item.
 
@@ -46,7 +52,9 @@ Cloud Run · Cloud Scheduler · MLflow + Cloud SQL · Cloud Storage · Cloud Log
   Adicionar step de validação no início do `train_pipeline.py`: schema esperado, nulos em features obrigatórias, ranges críticos. Sem isso, dado ruim do Cliente B pode corromper o pipeline silenciosamente sem erro explícito.
   **→ Fazer antes do segundo cliente ativo.**
 
-- [ ] **8. Teste A/B champion/challenger em produção**
+- [ ] **8. Teste A/B champion/challenger em produção** ⏸ **SUSPENSO (2026-04-27)**
+  > **Standby até validação out-of-sample do Champion v4** (`60637bb98b94421b9c7579bb4ac1b1ad`, retreinado 23/04 com dados até 02/04) nos lançamentos não vistos por ele. Sem essa leitura, A/B não é executado. Ver topo de `AB_TEST.md` e seção "Pré-requisito de validação" em `PLANO_EXECUCAO.md`.
+
   Validar o challenger em produção antes de promovê-lo. A métrica final é ROAS no Meta Ads Manager — não AUC.
 
   **Arquitetura:**
@@ -69,9 +77,11 @@ Cloud Run · Cloud Scheduler · MLflow + Cloud SQL · Cloud Storage · Cloud Log
 
   **→ Desbloqueado quando:** deploy do refactor concluído (item 4) + challenger treinado.
 
-- [ ] **9. Sprint 2 `retraining_orchestrator.py` — quality gate automático**
+- [ ] **9. Sprint 2 `retraining_orchestrator.py` — quality gate automático** ⏸ **SUSPENSO (2026-04-27)**
+  > **Standby — depende do item 8.** Como o A/B test está suspenso até validação out-of-sample do Champion v4, este item segue o mesmo gate.
+
   Após treino, comparar AUC e monotonia do novo modelo contra o modelo em produção. Só promover se melhor ou equivalente. Hoje essa comparação é feita manualmente. A arquitetura de hooks já existe (Sprint 1.1 implementado).
-  **→ Desbloqueado quando:** item 8 validado em pelo menos um ciclo completo (a análise do A/B alimenta os thresholds do quality gate automático).**
+  **→ Desbloqueado quando:** item 8 retomado e validado em pelo menos um ciclo completo (a análise do A/B alimenta os thresholds do quality gate automático).**
 
 ---
 

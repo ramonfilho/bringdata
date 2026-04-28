@@ -1,9 +1,14 @@
-# Plano de Refatoração MLOps — Bring Data V2
+# Plano de Refatoração MLOps — Bring Data V2 (Catálogo Técnico + Histórico)
 
 **Data:** 2026-02-23
-**Status:** Ativo — v1.0
-**Motivação imediata:** Segundo cliente confirmado, chegada em ~1 semana.
-**Branch:** todo o desenvolvimento acontece em branch alternativa — `main` e produção não são afetados até merge explícito e validado.
+**Atualizado:** 2026-04-27
+**Papel:** (1) **histórico** completo do refactor MLOps (motivação, 153 hardcodes mapeados, decisões arquiteturais, fases já executadas), (2) **catálogo técnico** dos itens DT-X (dívida técnica) e R-X (pré-requisitos do Cliente B).
+
+> **Status canônico e prioridade vivem em `PLANO_EXECUCAO.md`.** Este documento descreve o "como" técnico de cada DT-X / R-X e preserva o histórico do refactor; o "quando" é definido lá. Quando houver conflito sobre prioridade ou status, o PLANO_EXECUCAO vence. Ao concluir um item, atualizar a marcação RESOLVIDO/✅ neste arquivo E mover/remover o item da seção correspondente do PLANO_EXECUCAO.
+
+Referências:
+- Roadmap (sequência de execução): `docs/PLANO_EXECUCAO.md`
+- Histórico do deploy do refactor: `docs/arquivo/CHECKLIST_DEPLOY_REFACTOR.md`
 
 ---
 
@@ -895,9 +900,11 @@ Imports de `core/utm`, `core/medium`, `core/category_unification`, `core/preproc
 
 ---
 
-### DT-12 — Encoding por variante A/B (`encoding_overrides`)
+### DT-12 — Encoding por variante A/B (`encoding_overrides`) — ✅ RESOLVIDO
 
-**Problema:** `ClientConfig.encoding` é config de cliente — global para todos os modelos. Com o A/B test Champion jan30 × Challenger mar24, os dois modelos têm expectativas opostas para idade e faixa salarial: jan30 foi treinado com ordinal (coluna única `Qual_a_sua_idade = 0..5`), mar24 com OHE (`Qual_a_sua_idade_18_24_anos` etc.). A produção usa OHE → jan30 recebe `Qual_a_sua_idade = 0` para todos os leads → skew de treino/produção silencioso nos dois features mais preditivos de renda.
+> **Status (2026-04-27):** RESOLVIDO em 01/04/2026 com `encoding_overrides` aplicado a `guru_jan30` em `configs/active_models/devclub.yaml`. Em 21/04/2026 a Opção A (remover idade/salário de `ordinal_variables` no `devclub.yaml`) foi aplicada e jan30 manteve o override ordinal como exceção explícita. **Atenção pós-retreino v4 (23/04):** o Champion v4 (`60637bb98b94421b9c7579bb4ac1b1ad`) foi treinado com OHE default (sem override). Quando v4 for promovido, o `encoding_overrides` do `guru_jan30` no YAML deve ser **removido** — manter quebraria o scoring do v4. Ação registrada em `PLANO_EXECUCAO.md` Fase 3 "Pendente antes do deploy".
+
+**Problema (histórico):** `ClientConfig.encoding` é config de cliente — global para todos os modelos. Com o A/B test Champion jan30 × Challenger mar24, os dois modelos têm expectativas opostas para idade e faixa salarial: jan30 foi treinado com ordinal (coluna única `Qual_a_sua_idade = 0..5`), mar24 com OHE (`Qual_a_sua_idade_18_24_anos` etc.). A produção usa OHE → jan30 recebe `Qual_a_sua_idade = 0` para todos os leads → skew de treino/produção silencioso nos dois features mais preditivos de renda.
 
 **Raiz histórica:** `encoding_training.py` usava nomes curtos (`'idade'`) que não existiam no DataFrame → ordinal falhava silenciosamente → OHE acidental no treino. O fix de 15/03 (`9b86d37`) alinhou produção ao OHE do modelo ativo na época; jan30 foi promovido a Champion depois sem reverter. Mar24 foi treinado após o fix, com OHE correto.
 

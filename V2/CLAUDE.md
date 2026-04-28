@@ -10,16 +10,20 @@ Leia este arquivo no início de toda sessão antes de qualquer tarefa.
 
 ## Documentos autoritativos
 
-| Documento | O que contém |
+| Documento | Papel |
 |---|---|
-| `docs/PLANO_EXECUCAO.md` | **O que fazer agora** — fases ativas, prazos, dependências (Abr–Jun 2026) |
-| `docs/ARQUITETURA_SISTEMA_COMPLETA.md` | Arquitetura completa, fluxos, endpoints, comandos úteis |
-| `docs/PLANO_REFACTOR_MLOPS.md` | Histórico do refactor, mapeamento de 153 hardcodes, decisões arquiteturais |
-| `docs/PLANO_SAFEGUARD.md` | 19 itens de integridade por tier — encoding, CAPI, deploy, timezone, monitoramento |
-| `docs/INDICE_DOCUMENTACAO.md` | Mapa completo de toda a documentação com status e relacionamentos |
+| `docs/PLANO_EXECUCAO.md` | ⭐ **Roadmap único** — única fonte de "o que fazer e quando" (horizontes H1–H7, gate único, A/B em Standby, backlog) |
+| `docs/ARQUITETURA_SISTEMA_COMPLETA.md` | Arquitetura, fluxos, endpoints, comandos |
+| `docs/PLANO_SAFEGUARD.md` | 📚 Catálogo técnico dos itens T1-X / T2-X / T3-X (especificação, não prioridade) |
+| `docs/PLANO_REFACTOR_MLOPS.md` | 📚 Catálogo técnico dos DT-X / R-X + histórico do refactor (especificação, não prioridade) |
+| `docs/AB_TEST.md` | 📚 Design do teste A/B (executar quando o gate for retomado) |
+| `docs/INDICE_DOCUMENTACAO.md` | Mapa de papéis e relações entre todos os docs |
 
-Quando houver dúvida sobre o que fazer agora: `PLANO_EXECUCAO.md`.  
-Quando houver dúvida sobre como um componente deve funcionar: `ARQUITETURA_SISTEMA_COMPLETA.md` + `PLANO_REFACTOR_MLOPS.md`.
+**Hierarquia:** `PLANO_EXECUCAO.md` é o roadmap único. Os catálogos (📚) descrevem o **como** técnico de cada item; o **quando** vive no PLANO_EXECUCAO. Quando houver conflito de status ou prioridade, o PLANO_EXECUCAO vence.
+
+Quando houver dúvida sobre o que fazer agora: `PLANO_EXECUCAO.md`.
+Quando houver dúvida sobre como um componente deve funcionar: `ARQUITETURA_SISTEMA_COMPLETA.md`.
+Quando houver dúvida sobre como implementar um item específico: ir ao catálogo correspondente.
 
 ## Skills disponíveis
 

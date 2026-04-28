@@ -81,17 +81,22 @@ gsutil -m cp -r gs://smart-ads-mlflow/artifacts/{run_id}/artifacts/ ./modelo/
 
 ---
 
-## Modelo em produção
+## Modelo em produção (27/04/2026)
 
-**Run ID:** `2a98e51ca4834697bbc94ec3dd31fcf7`
+**Atualmente servido (rollback `00269-jjn`, 100% do tráfego):**
+- **Run ID:** `d51757f5` (jan30 ORIGINAL)
+- AUC ~0.7311 · Monotonia 88.9% · Treino até 04/11/2025 · Promovido a Champion em 31/03/2026
 
-```python
-run = client.get_run("2a98e51ca4834697bbc94ec3dd31fcf7")
-# AUC: 0.745 | Monotonia: 100% | 59 features | tmb_risk_filter: none
-# Treino: 04/11/2025–30/01/2026 | Teste: 30/01/2026–22/02/2026
-```
+**Retreinados em 23/04/2026 — pendentes de validação out-of-sample antes de promoção:**
+- **Champion v4:** `60637bb98b94421b9c7579bb4ac1b1ad` — AUC 0.748, monotonia 77.78%, 1.104 positivos, janela até 02/04/2026, OHE default (sem `encoding_overrides`)
+- **Challenger v4:** `7d08ae0302da420aa99559d4d4f55025` — AUC 0.745, monotonia 66.7%, mesma janela
 
-O run ativo também está definido em `configs/active_model.yaml`.
+> ⏸ Nenhuma decisão de promoção é tomada antes da validação dos modelos v4 nos lançamentos não vistos por eles. A/B test segue suspenso. Ver `AB_TEST.md` e `PLANO_EXECUCAO.md` "Pré-requisito de validação".
+
+**Histórico:**
+- `2a98e51ca4834697bbc94ec3dd31fcf7` — modelo P1 anterior ao jan30, AUC 0.745, 59 features, treino 04/11/2025–30/01/2026 (referência histórica)
+
+O run ativo também está definido em `configs/active_models/devclub.yaml`.
 
 ---
 

@@ -113,6 +113,8 @@ Sprints 2–3 do `retraining_orchestrator.py` pendentes. Com 5+ clientes, retrei
 ### W4 — 100% concentrado em Meta como canal
 Nenhum envio para Google Ads (Enhanced Conversions), TikTok Events API ou LinkedIn Insight Tag. A TikTok cresce aceleradamente no Brasil especialmente para cursos (público jovem). A Meta encerrou a Offline Conversions API em maio/2025 sem aviso extenso — o histórico de depreciações é real.
 
+> **Mitigação parcial aplicada em 2026-04-09 (DT-CAPI-01):** `utm_source_allowlist` na pipeline CAPI faz com que apenas leads de `Meta`/`Instagram` sejam enviados; tráfego de outros canais (Google Ads, orgânico) é silenciosamente ignorado pelo CAPI em vez de poluir o sinal Meta. A arquitetura F8 (1 modelo → N canais) ainda não está implementada — diversificação ativa para Google/TikTok permanece pendente.
+
 ---
 
 ### W5 — Base de clientes unitária (1 cliente ativo)

@@ -1,12 +1,15 @@
-# Plano de Integridade — Smart Ads V2
+# Plano de Integridade — Smart Ads V2 (Catálogo Técnico)
 
-**Criado:** 2026-04-16  
-**Atualizado:** 2026-04-20  
-**Status:** Em execução
+**Criado:** 2026-04-16
+**Atualizado:** 2026-04-27
+**Papel:** **catálogo técnico** dos itens de safeguard. Especifica o que cada T1-X / T2-X / T3-X faz, como implementar, como testar.
 
-Documento que consolida: audit de infraestrutura existente, gaps identificados, ordem de execução e plano de implementação.
+> **Status canônico e prioridade vivem em `PLANO_EXECUCAO.md`.** Este documento descreve o "como" de cada item; o "quando" é definido lá. Quando houver conflito, o PLANO_EXECUCAO vence. Ao concluir um item, atualizar o status nas tabelas internas deste arquivo (linhas 437+) E remover o item da seção correspondente do PLANO_EXECUCAO (passa para "Concluído").
+
+Documento que consolida: audit de infraestrutura existente, gaps identificados, especificação por item, plano de implementação técnica.
 
 Referências:
+- Roadmap (sequência de execução): `docs/PLANO_EXECUCAO.md`
 - Erros históricos: `docs/Erros_cometidos.md`
 - Skills de investigação: `/investigate`, `/investigate-ab`, `/safeguard`
 

@@ -1,7 +1,11 @@
 # Teste A/B Champion/Challenger — Documentação Operacional
 
-**Atualizado:** 2026-04-20
-**Status atual:** ativo — aguardando próximo lançamento (DEV20) para coleta de dados válidos
+**Atualizado:** 2026-04-27
+**Status atual:** ⏸ **SUSPENSO desde 27/04/2026**
+
+> **Pré-requisito para retomar:** validação out-of-sample do Champion v4 (`60637bb98b94421b9c7579bb4ac1b1ad`, retreinado 23/04 com dados até 02/04) nos últimos lançamentos que ele nunca viu — teste válido para confirmar se a performance prevista se materializa em dados reais. Enquanto não houver essa leitura, **não se executa A/B test** (sem patch no rollback, sem deploy de Challenger, sem promoção, sem novo ciclo). Lançamentos elegíveis: pós-02/04/2026 (LF51 final + DEV20 quando coletado). Decisão de retomada depende dos resultados dessa validação.
+>
+> O conteúdo deste documento permanece como referência operacional do design A/B — quando o teste for retomado, esta é a arquitetura a executar.
 
 ---
 
@@ -321,25 +325,48 @@ Para análises retrospectivas: qualquer comparação Champion × Challenger via 
 
 ---
 
-## Estratégia de deploy — 50/50 em vez de 100% (decisão 21/04/2026)
+## ~~Estratégia de deploy — 50/50 em vez de 100%~~ (SUBSTITUÍDA — 2026-04-27)
 
-A revisão com o A/B test ativo (branch `main` unificada) será promovida a **50% do tráfego**, não 100%. Os outros 50% permanecem no rollback (`edf23e9`).
+> **Status:** SUBSTITUÍDA por **canary direto** (10% → 50% → 100%) com critério puramente técnico. Decisão de 27/04/2026 — o A/B test está suspenso (ver topo do documento), então o gancho "ROAS por variante consolidado no DEV20" deixa de existir como gatilho de promoção, e o 50/50 perde o objetivo de coletar amostra A/B em paralelo. O conteúdo original abaixo permanece como referência histórica da decisão de 21/04.
+>
+> **Pré-requisito adicional (mais alto que qualquer canary):** validação out-of-sample do Champion v4 (`60637bb9…`) nos lançamentos não vistos. Sem essa validação, **nenhuma porcentagem de tráfego** vai para a main — o YAML em main já está configurado para servir v4 (`configs/active_models/devclub.yaml` com `mlflow_run_id: 60637bb9…` e `ab_test.enabled: false` desde 23/04), portanto deployar 10% antes da validação significa servir v4 não validado a 10% dos leads. Não fazer.
 
-**Motivação:** proteger o cliente de exposição total à revisão nova antes da confirmação empírica de paridade. Mesmo com o parity audit passando coluna-a-coluna em `tests/parity_audit.py`, qualquer divergência não detectada pelo audit se manifestaria como queda de ROAS — e com 50/50 pelo menos metade do volume segue com a versão em produção conhecida enquanto a nova é validada em condições reais.
+### Nova estratégia — canary direto (a executar quando a validação OOS for favorável)
 
-**Impacto no A/B test:**
-- Apenas a metade na revisão unificada executa o roteamento Champion/Challenger (ML_MAR → mar24)
-- A metade no rollback envia tudo ao Champion jan30 — não tem código do A/B
-- Amostra efetiva do A/B cai pela metade — considerar no cálculo de significância estatística do DEV20
+| Estágio | Tráfego main | Tráfego rollback | Critério para avançar |
+|---|---|---|---|
+| 1. Smoke | 0% (--no-traffic) | 100% | 5 leads sintéticos → score + decil + CAPI log OK |
+| 2. Canary | 10% | 90% | 24h sem alerta HIGH; paridade observada vs rollback; nenhum decil com 0 eventos |
+| 3. Meio | 50% | 50% | 48h sem alerta HIGH; golden snapshot estável; ROAS observacional não regride |
+| 4. Final | 100% | 0% | (ou rollback rápido se algum critério falhar) |
+
+**Comando de canary inicial (quando autorizado):**
+```bash
+gcloud run services update-traffic smart-ads-api --region us-central1 \
+    --to-revisions <revision-main-unificada>=10,smart-ads-api-00269-jjn=90
+```
+
+---
+
+### ~~Conteúdo original (21/04/2026) — 50/50 com gancho A/B~~
+
+A revisão com o A/B test ativo (branch `main` unificada) seria promovida a **50% do tráfego**, não 100%. Os outros 50% permaneceriam no rollback (`edf23e9`).
+
+**Motivação:** proteger o cliente de exposição total à revisão nova antes da confirmação empírica de paridade. Mesmo com o parity audit passando coluna-a-coluna em `tests/parity_audit.py`, qualquer divergência não detectada pelo audit se manifestaria como queda de ROAS — e com 50/50 pelo menos metade do volume seguiria com a versão em produção conhecida enquanto a nova era validada em condições reais.
+
+**Impacto no A/B test (cancelado pela suspensão de 27/04):**
+- Apenas a metade na revisão unificada executaria o roteamento Champion/Challenger (ML_MAR → mar24)
+- A metade no rollback enviaria tudo ao Champion jan30 — não tem código do A/B
+- Amostra efetiva do A/B cairia pela metade — consideração obsoleta com A/B suspenso
 
 **Pré-requisitos antes do 50/50:**
-1. Tier 1 dos safeguards concluído (`docs/PLANO_SAFEGUARD.md`)
+1. Tier 1 dos safeguards concluído (`docs/PLANO_SAFEGUARD.md`) — ✅ 11/11 em 23/04
 2. `python V2/tests/parity_audit.py` passa coluna-a-coluna contra os snapshots regenerados
 3. Smoke test pós-deploy: 5 leads → score + decil + CAPI log OK
 
-**Critério para subir para 100%:**
+**Critério (original) para subir para 100%:**
 - Nenhum alerta HIGH no monitoramento por 3 dias consecutivos após 50/50
-- ROAS por variante coletado no DEV20 permite comparação estatística confiável
+- ROAS por variante coletado no DEV20 permite comparação estatística confiável ← obsoleto
 - Nenhuma regressão operacional (decis com 0 eventos, capiStatus blocked/null > 10%, etc.)
 
 **Comando de deploy:**
