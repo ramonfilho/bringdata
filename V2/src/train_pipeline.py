@@ -155,6 +155,23 @@ def setup_logging(verbosity='normal', log_file=None):
 logger = logging.getLogger(__name__)
 
 
+def _log_step_count(step: str, df_after, df_before=None, target_col: str = 'target') -> None:
+    """T2-2: log estruturado de N registros por etapa do pipeline.
+
+    Formato: "[step] N=12,345 | Δ=-234 (-1.9%) | positivos=89"
+    """
+    n_after = len(df_after)
+    parts = [f"[{step}] N={n_after:,}"]
+    if df_before is not None:
+        n_before = len(df_before)
+        delta = n_after - n_before
+        pct = (delta / n_before * 100) if n_before else 0.0
+        parts.append(f"Δ={delta:+,} ({pct:+.1f}%)")
+    if target_col in df_after.columns:
+        parts.append(f"positivos={int(df_after[target_col].sum()):,}")
+    logger.info("  " + " | ".join(parts))
+
+
 def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None):
     """Executa pipeline de treino completo.
 
@@ -507,6 +524,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("")
 
     df_vendas_temporal = _filtro_temporal(df_vendas_unificado, df_pesquisa_unificado, client_config.ingestion)
+    _log_step_count("filtro_temporal_vendas", df_vendas_temporal, df_before=df_vendas_unificado)
 
     logger.info("=" * 80)
     # === CÉLULA 5.2: Remoção de colunas UTM ===
@@ -523,6 +541,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("")
 
     df_vendas_filtrado = _filtro_status_risco(df_vendas_sem_utm, client_config.ingestion, tmb_risk_filter=tmb_risk_filter, tmb_risk_lookup=tmb_risk_lookup)
+    _log_step_count("filtro_status_risco_vendas", df_vendas_filtrado, df_before=df_vendas_sem_utm)
 
     logger.info("=" * 80)
     # === CÉLULA 5.4: Filtro de produtos DevClub ===
@@ -531,6 +550,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("")
 
     df_vendas_final = _filtrar_produto(df_vendas_filtrado, client_config.ingestion)
+    _log_step_count("filtro_produto_vendas", df_vendas_final, df_before=df_vendas_filtrado)
 
     # Usar os datasets finais
     df_pesquisa_final = df_pesquisa_unificado
@@ -644,6 +664,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("")
 
     df_pos_cutoff = criar_dataset_pos_cutoff(df_medium_producao, client_config.ingestion)
+    _log_step_count("cutoff_missing_rate_pesquisa", df_pos_cutoff, df_before=df_medium_producao)
 
     logger.info("=" * 80)
     # === CÉLULA 15: Matching robusto por email e telefone ===
@@ -656,6 +677,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     df_vendas_matching = df_vendas_final.copy()
 
     dataset_v1_final = _match_leads(df_pos_cutoff, df_vendas_matching, client_config.matching)
+    _log_step_count("matching_leads_vendas", dataset_v1_final, df_before=df_pos_cutoff)
 
     # Vendas já foram filtradas para DevClub na CÉLULA 5.4
     # Target já reflete apenas matches com vendas DevClub
@@ -679,11 +701,13 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
 
     # Aplicar janela de conversão de 20 dias (captação + CPL + carrinho)
     # Captação: 7 dias (terça-segunda) + CPL: 6 dias (terça-domingo) + Carrinho: 7 dias (segunda-domingo) = 20 dias
+    _dataset_v1_devclub_pre_janela = dataset_v1_devclub
     dataset_v1_devclub = _aplicar_janela_conversao(
         df_leads=dataset_v1_devclub,
         df_vendas=df_vendas_final,
         config=client_config.monitoring,
     )
+    _log_step_count("janela_conversao", dataset_v1_devclub, df_before=_dataset_v1_devclub_pre_janela)
 
     # Recall metrics (não calculado após reorganização - vendas já filtradas na CÉLULA 5.4)
     recall_metrics = None
@@ -745,6 +769,8 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         logger.info("  [PARITY] snapshot_encoding_input.pkl salvo")
 
     dataset_v1_devclub_encoded = _apply_encoding(dataset_v1_devclub_fe, client_config.encoding)
+    _log_step_count("encoding", dataset_v1_devclub_encoded, df_before=dataset_v1_devclub_fe)
+    logger.info(f"  [encoding] colunas: {dataset_v1_devclub_fe.shape[1]} → {dataset_v1_devclub_encoded.shape[1]}")
 
     if capture_parity_snapshots:
         dataset_v1_devclub_encoded.to_pickle(os.path.join(_fixtures, 'snapshot_encoding_output.pkl'))

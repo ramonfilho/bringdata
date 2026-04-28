@@ -31,6 +31,22 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 
+def _log_step_count(step: str, df_after, n_before=None, target_col: str = 'target') -> None:
+    """T2-2: log estruturado de N registros por etapa do pipeline (mesmo formato do train).
+
+    Aceita n_before (int) — produção sobrescreve self.data, então não há df_before disponível.
+    """
+    n_after = len(df_after)
+    parts = [f"[{step}] N={n_after:,}"]
+    if n_before is not None:
+        delta = n_after - n_before
+        pct = (delta / n_before * 100) if n_before else 0.0
+        parts.append(f"Δ={delta:+,} ({pct:+.1f}%)")
+    if target_col in df_after.columns:
+        parts.append(f"positivos={int(df_after[target_col].sum()):,}")
+    logger.info("  " + " | ".join(parts))
+
+
 class Tee:
     """Duplica output para console e arquivo (como comando tee do Unix)."""
     def __init__(self, file_path):
@@ -227,6 +243,7 @@ class LeadScoringPipeline:
         self.data = _preprocess(self.data, self._client_config.ingestion, self._client_config.feature)
         logger.info(f"    Linhas: {rows_before} → {len(self.data)} (removidas: {rows_before - len(self.data)})")
         logger.info(f"    Colunas: {cols_before} → {len(self.data.columns)}")
+        _log_step_count("preprocess_core", self.data, n_before=rows_before)
 
         # 4. Unificar categorias UTM (usando componente importado)
         logger.info(" [4/11] Unificando categorias UTM...")
@@ -370,11 +387,13 @@ class LeadScoringPipeline:
         cols_before_encoding = len(self.data.columns)
 
         effective_encoding = _merge_encoding(self._client_config.encoding, encoding_overrides)
+        rows_before_encoding = len(self.data)
         self.data = _apply_encoding(self.data, effective_encoding, _artifacts)
 
         encoding_cols_added = len(self.data.columns) - cols_before_encoding
         logger.info(f"    Colunas adicionadas pelo encoding: {encoding_cols_added}")
         logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
+        _log_step_count("encoding", self.data, n_before=rows_before_encoding)
 
         # 11. Manter features UTM (configuração fixa)
         logger.info(" [11/12] Mantendo features UTM")

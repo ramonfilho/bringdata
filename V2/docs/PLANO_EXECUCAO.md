@@ -120,19 +120,20 @@
 
 ## Trabalho técnico independente do gate (na fila por foco, não por restrição)
 
-Itens abaixo **não dependem** do gate H1.1 nem do canary. Estão adiados apenas pela disciplina de fazer um item por vez. Tecnicamente podem rodar a qualquer momento, e em qualquer cenário do gate (favorável ou não) continuam fazendo sentido.
-
-### Importance weighting do grupo controle (T2-3)
-- **O quê:** retreinar com pesos maiores para leads da campanha de controle e pesos menores para leads D10 sobre-representados; hook no `retraining_orchestrator.py`.
-- **Por quê:** corrige viés do feedback loop documentado (W1 SWOT, Erros_cometidos.md cluster 2). Prazo original era 15/04 — vencido.
-- **Por que é independente do gate:** produz um modelo novo independente do que aconteça com o Champion v4. Se v4 passar no gate, esse vira o próximo Challenger. Se v4 falhar, vira a alternativa direta.
-- **Catálogo:** `PLANO_SAFEGUARD.md` Tier 2 → T2-3.
+Itens abaixo **não dependem** do gate H1.1 nem do canary. Estão adiados apenas pela disciplina de fazer um item por vez. Tecnicamente podem rodar a qualquer momento, e em qualquer cenário do gate (favorável ou não) continuam fazendo sentido. Ordem: do mais leve (instrumentação) para o mais pesado (retreino).
 
 ### Log de registros por etapa do pipeline (T2-2)
 - **O quê:** instrumentar `core/preprocessing.py` para logar a contagem de registros (e nulos críticos) entre cada etapa.
 - **Por quê:** auditabilidade — sem isso, descobrir onde linhas somem é arqueologia.
 - **Por que é independente do gate:** instrumentação pura, não toca em modelo nem em encoding.
 - **Catálogo:** `PLANO_SAFEGUARD.md` Tier 2 → T2-2.
+
+### Importance weighting do grupo controle (T2-3)
+- **O quê:** retreinar com pesos maiores para leads da campanha de controle e pesos menores para leads D10 sobre-representados; hook no `retraining_orchestrator.py`.
+- **Por quê:** corrige viés do feedback loop documentado (W1 SWOT, Erros_cometidos.md cluster 2). Prazo original era 15/04 — vencido.
+- **Por que é independente do gate:** produz um modelo novo independente do que aconteça com o Champion v4. Se v4 passar no gate, esse vira o próximo Challenger. Se v4 falhar, vira a alternativa direta.
+- **Pré-condição operacional:** subir Cloud SQL `smart-ads-db` (parado desde 26/04) — protocolo em `operacoes_gcp_custos.md`.
+- **Catálogo:** `PLANO_SAFEGUARD.md` Tier 2 → T2-3.
 
 ---
 
