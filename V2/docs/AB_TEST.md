@@ -258,6 +258,111 @@ O "v4 quebra no LF53" desaparece no pooled. Razão: leads capturados no LF53 (ca
 
 ---
 
+## Auditoria de paridade — pipeline online vs offline (28/04/2026)
+
+> **Contexto:** antes de decidir arquitetura de roteamento UTM pro canary v4, foi necessário confirmar se o pipeline `main` produzia output idêntico ao pipeline `rollback edf23e9` quando servindo o mesmo modelo (jan30). A preocupação era "rodar modelo antigo com código novo" introduzindo viés silencioso.
+
+### Setup
+
+- Sample: 5.000 leads OOS (cap 03/04 → 27/04, sem ML_MAR), estratificado por dia de captação
+- Mesmo modelo: jan30 (`d51757f5...`)
+- Worktree do rollback recriado em `../smart_ads_v2_rollback` apontando pro commit `edf23e9`
+- Bateria de 9 camadas: paridade element-wise, estatística, decil, boundary D9/D10, edge cases, cross-val produção, estabilidade temporal, reprodutibilidade, robustez do mecanismo de override
+
+### Achado #1 — Encoding override é decisivo
+
+Sem aplicar `encoding_overrides` para jan30 ao chamar `pipeline.run()`, **96% dos leads** divergem (paridade falha catastroficamente: a feature ordinal `Qual_a_sua_idade` fica em 0 pra todos os 500 leads de teste).
+
+Com encoding_overrides aplicado corretamente: **98,4% match exato (<0,001)** e **99,6% match de decil**.
+
+Em produção, `app.py` linhas 902-918 já extrai o override correto via `ab_variant.encoding_overrides` quando `ab_test.enabled: true`. Pra teste offline foi necessário reconstruir o EncodingConfig manualmente (config foi removido do active_models/devclub.yaml quando A/B foi suspenso em 27/04).
+
+### Achado #2 — Paridade main vs rollback (com override)
+
+Bateria com 5.000 leads (com override aplicado):
+
+| Camada | Resultado | Critério rigoroso | Passa? |
+|---|---|---|---|
+| Element-wise (abs_diff) | 96% <0,001; máx 0,17 | 99,9% <0,001 | ❌ |
+| Estatística (Spearman) | ρ = 0,9986 | >0,999 | ❌ |
+| Decil operacional | 98,3% mesmo decil | ≥99,5% | ❌ |
+| **Boundary D9/D10 (LQHQ)** | **0,17% divergem** | <0,5% | ✅ |
+| Cross-val produção | 89,9% main+ovr | ≥99% | ❌ |
+| Estabilidade temporal | pior dia 96,2% | ≥99% | ❌ |
+
+**Sob critério "exaustivo e implacável", paridade não foi comprovada.** Mas a magnitude operacional é pequena: ~2% dos leads jan30 servidos por main code receberiam decil deslocado em ±1 (raramente ±2), e apenas 0,17% mudariam de decisão LQ vs LQHQ.
+
+### Achado #3 — Divergência INTRÍNSECA pipeline online vs offline (~6%)
+
+Investigação revelou que mesmo o **rollback rescorando offline** não bate 100% com `decil_production` gravado no Railway (que foi atribuído pelo rollback rodando online em produção).
+
+Estratificado por janela de captação:
+
+| Janela | n | rollback rescore ↔ prod online | main+ovr ↔ prod online |
+|---|---|---|---|
+| Pré-rollback (cap < 13/04) | 2.073 | 85,0% | 85,0% |
+| **Puro rollback (cap 13-22/04)** | 2.036 | **94,2%** | 93,7% |
+| Canary v4 ativo (cap 23-27/04) | 992 | 93,1% | 92,5% |
+
+**Mesmo pipeline (rollback), mesmo modelo (jan30), mesmo lead — rescore offline ≠ scoring online em ~6% dos casos.** Distribuição da `score_diff` em puro rollback:
+
+- Mediana: zero (5,5e-17 = float precision noise)
+- p25: 0 | p75: 0,003
+- Máximo: 0,41 (cauda)
+
+Padrão: 70% dos leads tem rescore IDÊNTICO ao online; 30% tem diff variável, sendo a maioria <0,003. **Algo no fluxo runtime de produção (webhook → app.py → score) não é replicado quando rescore-se offline em batch.**
+
+Hipóteses ainda não testadas (issue aberta):
+
+1. **Cache de cliente desatualizado** — algum lookup em runtime que escreve estado distinto
+2. **FBP/FBC ou enriquecimento** — produção pode buscar dados que rescore offline não tem
+3. **Reprocessing de leads** — alguns podem ter sido scoreados, sale_date corrigida, e re-scoreados
+4. **Timestamp `Data` vs `createdAt`** — Data armazenada vs momento real de scoring online
+5. **Race condition / state online** — múltiplas requests competindo
+
+**Esta divergência intrínseca não é causada pelo main code** — é uma propriedade do fluxo online vs offline. Promover main+ovr adiciona ~0,5pp adicional sobre essa base de 6%.
+
+### Achado #4 — Não é causa principal da degradação treino → produção
+
+A queda de lift D10 de 3,58 (treino) → 1,71 (produção real) **não é dominantemente explicada** por essa divergência rescore↔online:
+
+- Mediana zero significa que pra maioria dos leads o score é idêntico
+- A cauda da diff (máx 0,41) afeta poucos leads; impacto agregado no lift seria pequeno
+- A causa principal continua sendo **otimização Meta comprimindo distribuição** (corroborado por LFs históricos com mesmo padrão de degradação)
+
+### Decisão arquitetural — 28/04/2026
+
+Sob as restrições operacionais ditas pelo cliente:
+
+- Não usar single revisão main + UTM (preocupação inicial sobre paridade)
+- Não usar cross-revision RPC (complexidade)
+- Não exigir mudança no front-end
+- Latência tolerável desde que sem custo significativo
+
+E à luz dos achados:
+
+- Paridade main+ovr ≡ rollback é **praticamente equivalente** dentro da margem intrínseca de ~6% que existe em qualquer comparação rescore↔online
+- Promover main+ovr introduz apenas ~0,5pp adicional de divergência sobre o baseline rollback rescore vs prod
+- Shift de ~2% no decil é aceitável pelo cliente (decisão registrada)
+
+**Decisão:** Arquitetura 1 (single revisão main com UTM routing) volta como caminho viável pra promoção do v4. Substitui a recomendação inicial de "Arquitetura 5 (proxy)".
+
+**Pré-requisitos pra promoção:**
+1. Reativar `ab_test.enabled: true` em `active_models/devclub.yaml`
+2. Reconstruir variants com `encoding_overrides` corretos pra jan30 (preservados em git history em commit `c32e5f0`)
+3. Coordenar com gestor: criar evento `LeadQualifiedV4` no Meta Events Manager + campanha com UTM `ML_V4`
+4. Canary 10% main → 50% → 100% conforme Fase 3 do `PLANO_EXECUCAO.md`
+5. Smoke test em canary: 5 leads jan30 reais, verificar decil distribution similar à atual
+6. Investigação aberta: causa raiz da divergência intrínseca rescore↔online (~6%) — separada da decisão atual
+
+### Reprodutibilidade da auditoria
+
+- Worktree de teste: `git worktree add ../smart_ads_v2_rollback edf23e9`
+- Sample: `/tmp/parity_5k_sample.xlsx` (5.000 leads do pooled OOS estratificados por dia)
+- Scripts ad-hoc usados (não persistidos como módulo) — refazer requer recriar via histórico desta investigação ou via instrumentação de `tests/parity_audit.py`
+
+---
+
 ## Problema conhecido — DT-12 (encoding_overrides)
 
 O jan30 (Champion atual) foi treinado com **ordinal encoding** para idade e faixa salarial, mas por um bug silencioso na época do treino recebeu OHE acidental. Em produção, sem o `encoding_overrides`, essas features chegam zeradas ao modelo jan30.

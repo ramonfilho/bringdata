@@ -223,13 +223,17 @@ def _load_sales(
     asaas_df = None
     try:
         # product_value vem do business_config (DevClub default).
-        # NÃO usamos customer_created_from/until aqui: o `match_leads_to_sales`
-        # depois já restringe a leads do LF; filtrar antes excluiria recorrentes
-        # válidos (lead deste LF cuja conta Asaas é de LF anterior).
+        # customer_created_from='2020-01-01' desliga o filtro automático do
+        # asaas_sales_extractor (que usa start_date como default e exclui
+        # clientes mais antigos). Pra backtest queremos TODAS as vendas Asaas
+        # no período — match_leads_to_sales depois já restringe a leads do
+        # nosso pool. Sem isso, perdíamos ~9 vendas/janela de clientes Asaas
+        # que se cadastraram antes do sales_start mas pagaram dentro.
         from api.business_config import PRODUCT_VALUE
         asaas_df = sales_loader.load_asaas_sales(
             start_date=sales_start, end_date=sales_end,
             product_value=PRODUCT_VALUE,
+            customer_created_from='2020-01-01',
         )
         logger.info(
             f"[backtest_data] Asaas: {0 if asaas_df is None else len(asaas_df)} vendas"
