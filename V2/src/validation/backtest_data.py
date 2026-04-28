@@ -49,8 +49,13 @@ def load_match_spend_for_lf(
     lf_name: str,
     *,
     output_path: Optional[Path] = None,
-    include_tmb: bool = False,
     tmb_paths: Optional[List[str]] = None,
+    include_production_decil: bool = True,
+    exclude_utm_substrings: Optional[List[str]] = None,
+    cap_start_override: Optional[str] = None,
+    cap_end_override: Optional[str] = None,
+    sales_start_override: Optional[str] = None,
+    sales_end_override: Optional[str] = None,
 ) -> pd.DataFrame:
     """Pipeline completo "load + match + spend" para um lançamento.
 
@@ -58,28 +63,64 @@ def load_match_spend_for_lf(
         lf_name: Identificador do lançamento (ex: "LF52", "DEV20"). Datas vêm
             de configs/launches.yaml.
         output_path: Se fornecido, persiste o DataFrame final como parquet.
-        include_tmb: Se True e tmb_paths fornecido, inclui vendas TMB do arquivo.
-            Default False (TMB exige arquivos locais — pular pra simplificar).
-        tmb_paths: Caminhos de arquivos TMB (.xlsx) a incluir nas vendas.
+        tmb_paths: Lista de caminhos para arquivos TMB locais (.xlsx). Se None,
+            TMB não é incluído. (GCS fallback intencionalmente desabilitado —
+            TMB sempre via arquivo local.)
+        include_production_decil: Se True, busca o decil/leadScore que produção
+            atribuiu a cada lead (gravados no Railway na tabela "Lead") e
+            adiciona como colunas `decil_production` / `lead_score_production`.
+            Útil pra usar o modelo Champion atual como baseline sem precisar
+            rescore-lo localmente. Default True.
+        exclude_utm_substrings: Lista de substrings (case-insensitive) — leads
+            cuja `campaign` contenha qualquer uma delas são removidos antes do
+            match. Útil pra excluir, ex.: leads roteados a um Challenger
+            durante A/B test ativo (`ML_MAR`).
 
     Returns:
         DataFrame de leads do período de captação, com colunas adicionadas:
         email, telefone, data_captura, converted, sale_value, sale_date,
         sale_origin, match_method, spend_imputado.
+        Se include_production_decil: + decil_production, lead_score_production.
     """
     lf = _load_launch_dates(lf_name)
-    cap_start, cap_end = lf["cap_start"], lf["cap_end"]
-    sales_start, sales_end = lf["vendas_start"], lf["vendas_end"]
-    logger.info(
-        f"[backtest_data] LF={lf_name} cap={cap_start}→{cap_end} "
-        f"vendas={sales_start}→{sales_end}"
-    )
+    cap_start = cap_start_override or lf["cap_start"]
+    cap_end = cap_end_override or lf["cap_end"]
+    sales_start = sales_start_override or lf["vendas_start"]
+    sales_end = sales_end_override or lf["vendas_end"]
+    overridden = any([cap_start_override, cap_end_override, sales_start_override, sales_end_override])
+    if overridden:
+        logger.info(
+            f"[backtest_data] LF={lf_name} cap={cap_start}→{cap_end} "
+            f"vendas={sales_start}→{sales_end} (OVERRIDES aplicados — "
+            f"original cap={lf['cap_start']}→{lf['cap_end']}, "
+            f"vendas={lf['vendas_start']}→{lf['vendas_end']})"
+        )
+    else:
+        logger.info(
+            f"[backtest_data] LF={lf_name} cap={cap_start}→{cap_end} "
+            f"vendas={sales_start}→{sales_end}"
+        )
 
     leads_df = _load_leads(cap_start, cap_end)
-    sales_df = _load_sales(sales_start, sales_end, include_tmb=include_tmb,
-                           tmb_paths=tmb_paths)
+    sales_df = _load_sales(
+        sales_start, sales_end,
+        cap_start=cap_start, cap_end=cap_end,
+        tmb_paths=tmb_paths,
+    )
 
     leads_df = _normalize_lead_columns(leads_df)
+
+    if exclude_utm_substrings:
+        n_before = len(leads_df)
+        camp_str = leads_df["campaign"].astype(str).str.lower()
+        mask = pd.Series([False] * len(leads_df), index=leads_df.index)
+        for s in exclude_utm_substrings:
+            mask = mask | camp_str.str.contains(s.lower(), na=False)
+        leads_df = leads_df[~mask].copy()
+        logger.info(
+            f"[backtest_data] excluídos {n_before - len(leads_df)} leads por UTM "
+            f"({exclude_utm_substrings}) — restaram {len(leads_df)}"
+        )
 
     # Filtros de período (defensivo — Railway/Sheets podem retornar fora)
     from src.validation.matching import (
@@ -101,6 +142,9 @@ def load_match_spend_for_lf(
     logger.info(f"[backtest_data] match: {n_conv} conversões em {len(matched_df)} leads")
 
     matched_df = _attach_imputed_spend(matched_df, cap_start, cap_end)
+
+    if include_production_decil:
+        matched_df = _attach_production_decil(matched_df, cap_start, cap_end)
 
     if output_path is not None:
         output_path = Path(output_path)
@@ -147,10 +191,15 @@ def _load_sales(
     sales_start: str,
     sales_end: str,
     *,
-    include_tmb: bool = False,
+    cap_start: Optional[str] = None,
+    cap_end: Optional[str] = None,
     tmb_paths: Optional[List[str]] = None,
 ) -> pd.DataFrame:
-    """Guru API + Hotmart API (+ TMB opcional). Combina e dedupa via combine_sales."""
+    """Guru API + Hotmart API + Asaas API (+ TMB local se tmb_paths fornecido).
+
+    Asaas exige cap_start/cap_end — usados como filtro `customer_created`
+    pra excluir clientes que entraram em outros LFs mas pagaram nesta janela.
+    """
     from src.validation.data_loader import SalesDataLoader
 
     sales_loader = SalesDataLoader()
@@ -171,15 +220,47 @@ def _load_sales(
         logger.warning(f"[backtest_data] Hotmart API falhou ({type(e).__name__}: {e})")
         hotmart_df = None
 
+    asaas_df = None
+    try:
+        # product_value vem do business_config (DevClub default).
+        # NÃO usamos customer_created_from/until aqui: o `match_leads_to_sales`
+        # depois já restringe a leads do LF; filtrar antes excluiria recorrentes
+        # válidos (lead deste LF cuja conta Asaas é de LF anterior).
+        from api.business_config import PRODUCT_VALUE
+        asaas_df = sales_loader.load_asaas_sales(
+            start_date=sales_start, end_date=sales_end,
+            product_value=PRODUCT_VALUE,
+        )
+        logger.info(
+            f"[backtest_data] Asaas: {0 if asaas_df is None else len(asaas_df)} vendas"
+        )
+    except Exception as e:
+        logger.warning(f"[backtest_data] Asaas API falhou ({type(e).__name__}: {e})")
+        asaas_df = None
+
     tmb_df = None
-    if include_tmb and tmb_paths:
-        tmb_df = sales_loader.load_tmb_sales(tmb_paths=tmb_paths, report_type="fechamento")
-        logger.info(f"[backtest_data] TMB: {0 if tmb_df is None else len(tmb_df)} vendas")
+    if tmb_paths:
+        # Validar que os arquivos existem antes de chamar (load_tmb_sales pode
+        # cair em GCS fallback se não, e queremos exclusivamente local).
+        existing = [p for p in tmb_paths if Path(p).exists()]
+        if not existing:
+            logger.warning(f"[backtest_data] tmb_paths fornecidos mas nenhum existe: {tmb_paths}")
+        else:
+            tmb_df = sales_loader.load_tmb_sales(
+                tmb_paths=existing, report_type="fechamento"
+            )
+            logger.info(
+                f"[backtest_data] TMB local: {0 if tmb_df is None else len(tmb_df)} vendas "
+                f"(arquivos: {[Path(p).name for p in existing]})"
+            )
 
     sales_df = sales_loader.combine_sales(
         guru_df=guru_df,
         hotmart_df=hotmart_df,
         tmb_df=tmb_df,
+        asaas_df=asaas_df,
+        # tmb_paths=[] explicitamente para impedir GCS fallback no combine_sales
+        tmb_paths=[],
     )
     if sales_df is None or len(sales_df) == 0:
         raise RuntimeError("Nenhuma venda carregada — abortando")
@@ -317,6 +398,101 @@ def _attach_imputed_spend(
     logger.info(
         f"[backtest_data] spend imputado: {n_attributed}/{len(df)} leads "
         f"({100 * n_attributed / max(len(df), 1):.1f}%)"
+    )
+    return df
+
+
+def _attach_production_decil(
+    matched_df: pd.DataFrame, cap_start: str, cap_end: str
+) -> pd.DataFrame:
+    """Busca decil + leadScore que produção atribuiu, gravados na tabela "Lead"
+    do Railway, e anexa ao matched_df como `decil_production` e
+    `lead_score_production`. Match por email lowercased.
+
+    Útil pra usar o modelo Champion ativo (que scorou os leads em runtime) como
+    baseline em backtests, sem precisar rescore. Se Railway indisponível, deixa
+    NaN e segue.
+
+    Normaliza decil pra D01..D10 (formato canônico) caso esteja como D1..D9.
+    """
+    df = matched_df.copy()
+    df["decil_production"] = pd.NA
+    df["lead_score_production"] = pd.NA
+
+    try:
+        import pg8000.native
+    except ImportError:
+        logger.warning("[backtest_data] pg8000 não instalado — decil_production NaN")
+        return df
+
+    pwd = os.environ.get("RAILWAY_DB_PASSWORD")
+    if not pwd:
+        logger.warning("[backtest_data] RAILWAY_DB_PASSWORD ausente — decil_production NaN")
+        return df
+
+    end_excl = (
+        datetime.strptime(cap_end, "%Y-%m-%d") + timedelta(days=1)
+    ).strftime("%Y-%m-%d")
+
+    try:
+        conn = pg8000.native.Connection(
+            host=os.environ.get("RAILWAY_DB_HOST", "shortline.proxy.rlwy.net"),
+            port=int(os.environ.get("RAILWAY_DB_PORT", "11594")),
+            database=os.environ.get("RAILWAY_DB_NAME", "railway"),
+            user=os.environ.get("RAILWAY_DB_USER", "postgres"),
+            password=pwd,
+        )
+        rows = conn.run(
+            """
+            SELECT email, decil, "leadScore"
+            FROM "Lead"
+            WHERE "createdAt" >= :start_date
+              AND "createdAt" <  :end_excl
+              AND email IS NOT NULL
+            """,
+            start_date=cap_start,
+            end_excl=end_excl,
+        )
+        conn.close()
+    except Exception as e:
+        logger.warning(f"[backtest_data] Railway query falhou: {e}")
+        return df
+
+    if not rows:
+        logger.warning("[backtest_data] decil_production: nenhum lead retornado do Railway")
+        return df
+
+    prod = pd.DataFrame(rows, columns=["email", "decil_prod_raw", "lead_score_prod_raw"])
+    prod["email"] = prod["email"].astype(str).str.lower().str.strip()
+
+    def _normalize_decil(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return None
+        s = str(v).strip()
+        if not s:
+            return None
+        try:
+            num = int(s.lstrip("D"))
+            return f"D{num:02d}"
+        except (ValueError, AttributeError):
+            return s
+
+    prod["decil_production"] = prod["decil_prod_raw"].apply(_normalize_decil)
+    prod["lead_score_production"] = pd.to_numeric(
+        prod["lead_score_prod_raw"], errors="coerce"
+    )
+    # Dedup por email — fica com o último (mais recente) caso de duplicatas
+    prod = prod.drop_duplicates("email", keep="last")[
+        ["email", "decil_production", "lead_score_production"]
+    ]
+
+    df = df.drop(columns=["decil_production", "lead_score_production"])
+    df = df.merge(prod, on="email", how="left")
+
+    n = df["decil_production"].notna().sum()
+    logger.info(
+        f"[backtest_data] decil_production: {n}/{len(df)} leads enriquecidos "
+        f"({100 * n / max(len(df), 1):.1f}%)"
     )
     return df
 

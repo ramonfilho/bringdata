@@ -88,6 +88,12 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 
+def _setup_logging(verbose: bool) -> None:
+    import logging
+    level = logging.INFO if verbose else logging.WARNING
+    logging.basicConfig(level=level, format="%(levelname)s: %(message)s", force=True)
+
+
 # --------------------------------------------------------------------------- #
 # Modo PREPARE-DATASET
 # --------------------------------------------------------------------------- #
@@ -96,8 +102,40 @@ def run_prepare_mode(args) -> None:
     sys.path.insert(0, str(PROJECT_ROOT))
     from src.validation.backtest_data import load_match_spend_for_lf
 
-    df = load_match_spend_for_lf(args.lf, output_path=args.output)
+    df = load_match_spend_for_lf(
+        args.lf,
+        output_path=args.output,
+        tmb_paths=args.tmb_paths,
+        exclude_utm_substrings=args.exclude_utm,
+        cap_start_override=args.cap_start,
+        cap_end_override=args.cap_end,
+        sales_start_override=args.sales_start,
+        sales_end_override=args.sales_end,
+    )
     print(f"[prepare] ✅ {len(df)} leads, {df['converted'].sum()} conversões → {args.output}")
+
+    # Se o decil de produção (modelo ativo no momento da captação) está disponível,
+    # emitir um scored_production.parquet com mesmo schema dos demais scored — assim
+    # o `--mode compare` consegue tratar "production" como uma label normal.
+    if "decil_production" in df.columns and df["decil_production"].notna().any():
+        out_dir = Path(args.output).parent
+        prod_path = out_dir / "scored_production.parquet"
+        prod_df = df.rename(columns={
+            "decil_production": "decil",
+            "lead_score_production": "lead_score",
+        })
+        keep = [
+            "email", "campaign", "lead_score", "decil",
+            "converted", "sale_value", "sale_origin", "match_method",
+            "spend_imputado",
+        ]
+        keep = [c for c in keep if c in prod_df.columns]
+        prod_df = prod_df[keep].dropna(subset=["decil"])
+        prod_df.to_parquet(prod_path, index=False)
+        n_prod = len(prod_df)
+        dist = prod_df["decil"].value_counts().to_dict()
+        print(f"[prepare] ✅ scored_production: {n_prod} leads com decil de produção → {prod_path}")
+        print(f"[prepare]   distribuição: {dist}")
 
 
 # --------------------------------------------------------------------------- #
@@ -340,6 +378,18 @@ def main():
     )
     ap.add_argument("--mode", choices=["prepare-dataset", "score", "compare"], required=True)
     ap.add_argument("--lf", type=str, help="LF (ex: LF52) — modo prepare-dataset")
+    ap.add_argument("--tmb-paths", nargs="*", default=None,
+                    help="Caminhos para arquivos TMB locais (.xlsx) — modo prepare-dataset")
+    ap.add_argument("--exclude-utm", nargs="*", default=None,
+                    help="Substrings de UTM campaign a excluir (ex: ML_MAR) — modo prepare-dataset")
+    ap.add_argument("--cap-start", type=str, default=None,
+                    help="Override do cap_start (YYYY-MM-DD) — modo prepare-dataset")
+    ap.add_argument("--cap-end", type=str, default=None,
+                    help="Override do cap_end (YYYY-MM-DD) — modo prepare-dataset")
+    ap.add_argument("--sales-start", type=str, default=None,
+                    help="Override do vendas_start (YYYY-MM-DD) — modo prepare-dataset")
+    ap.add_argument("--sales-end", type=str, default=None,
+                    help="Override do vendas_end (YYYY-MM-DD) — modo prepare-dataset")
     ap.add_argument("--label", type=str, help="Label do modelo — modo score")
     ap.add_argument("--run-id", type=str, help="MLflow run_id — modo score")
     ap.add_argument("--base-dataset", type=Path, help="base_dataset.parquet — modo score")
@@ -347,8 +397,10 @@ def main():
     ap.add_argument("--labels", nargs="+", help="Labels a comparar — modo compare")
     ap.add_argument("--input-dir", type=Path, help="Dir com scored_<label>.parquet — modo compare")
     ap.add_argument("--output", type=Path, help="Caminho do output (parquet ou xlsx)")
+    ap.add_argument("-v", "--verbose", action="store_true", help="Logs INFO de módulos internos")
 
     args = ap.parse_args()
+    _setup_logging(args.verbose)
 
     def require(*names):
         missing = [n for n in names if getattr(args, n.replace("-", "_")) is None]

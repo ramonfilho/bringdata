@@ -149,6 +149,8 @@ python scripts/dt12_impact_analysis.py --limit 500
 
 AUC retrospectivo como critério secundário de sanidade — se ROAS equivalente mas AUC do Challenger for significativamente menor, investigar antes de promover.
 
+> **Nota 28/04/2026:** enquanto o A/B online estiver suspenso, o critério de promoção foi substituído pelo **backtest offline pré-promoção** descrito mais abaixo. ROAS por variante via Meta Ads Manager não é mais coletável porque ambos modelos disparam o mesmo event name.
+
 ### Como promover
 
 1. Retreinar o Champion com o `run_id` do Challenger:
@@ -161,6 +163,98 @@ AUC retrospectivo como critério secundário de sanidade — se ROAS equivalente
    - Criar próximo Challenger para o ciclo seguinte
 3. Atualizar `conversion_rates` do novo Champion com as taxas observadas no teste.
 4. Avisar o gestor de tráfego para criar campanhas do novo Challenger com novo UTM.
+
+---
+
+## Backtest offline pré-promoção (28/04/2026 →)
+
+> **Substitui o critério online enquanto o A/B test está suspenso.** Candidato Champion deve mostrar discriminação ≥ Champion atual em backtest sobre lançamentos OOS antes de virar canary em produção.
+
+### Contexto
+
+A/B online via UTM foi suspenso em 27/04/2026 (canary Cloud Run substituiu o mecanismo de roteamento). Como ambos modelos passam a disparar o mesmo event name (`LeadQualified` / `LeadQualifiedHighQuality`), Meta Ads Manager não diferencia ROAS por variante.
+
+Necessário método offline pra avaliar candidatos antes da promoção. Primeira aplicação: **v4** (`60637bb98b94421b9c7579bb4ac1b1ad`, treinado 23/04/2026) **vs jan30** (`d51757f5041c44b7ab1a056fce8c3c35`, Champion atual em produção).
+
+### Metodologia
+
+**Lançamentos elegíveis (OOS para v4, cutoff treino 02/04/2026):**
+- LF52 (cap 07-12/04, vendas 17-24/04) — carrinho fechado
+- LF53 (cap 13-20/04, vendas 27/04-03/05) — carrinho aberto, D2 quando feito
+- LF51 parcial (cap 03-06/04, vendas 13-19/04) — só leads pós-cutoff via override de `cap_start`
+
+**Filtros aplicados:**
+- Excluir leads com UTM `ML_MAR` (durante A/B ativo, esses leads foram scoreados por mar24, não pelo Champion da época)
+- Janela de conversão: matching de leads ↔ vendas dentro do período de captação + vendas (sem temporal validation; carrinho curto e fechado)
+
+**Fontes de venda combinadas:**
+- Guru API (cartão à vista)
+- Hotmart API (cartão parcelado)
+- Asaas API (boleto à vista) — adicionada em 28/04 ao detectar que vendas boleto não vinham do TMB
+- TMB local (`contas_a_receber_*.xlsx`) — apenas vendas Crédito Acessível parcelado
+
+**Score:**
+- v4: rescore via `LeadScoringPredictor(mlflow_run_id=...)` aplicado ao base_dataset
+- jan30: lido direto da tabela `Lead` do Railway via coluna `decil` (decisão atribuída em runtime pela produção). Evita problema de pipeline mismatch (jan30 foi scorado em produção pelo código do momento, não pelo pipeline atual)
+
+**Métrica principal:** % de conversão D9 e D10 acima da média do lançamento (lift).
+
+### Resultado primário — Pooled OOS (cap 03/04→27/04, vendas 13/04→28/04)
+
+> **Métrica primária da decisão de promoção.** Pool único de leads OOS para v4 (todos capturados após cutoff de treino 02/04/2026), matched contra todas as vendas disponíveis no período. Evita distorções de janela apertada por LF específico.
+
+**Setup:** 32.179 leads únicos (sem ML_MAR), 173 conversões matched, baseline 0,54%.
+
+| Métrica | v4 | jan30 |
+|---|---|---|
+| conv% D9 | 0,78% | 0,63% |
+| **conv% D10** | **0,92%** | 0,75% |
+| **D9 acima média** | **+44%** | +18% |
+| **D10 acima média** | **+71%** | +40% |
+| **D9+D10 acima média** | **+59%** | +33% |
+| ROAS top-30 | 2,11 | 1,84 |
+| ROAS top-50 | 1,94 | 1,74 |
+| ROAS global | 1,48 | 1,48 |
+
+**v4 separa ~2× melhor que jan30 em D9 e D10.** Resultado robusto a 173 conversões.
+
+### Recorte secundário — por lançamento (mostra robustez do pooled)
+
+| LF | Modelo | n_conv | baseline | conv% D9 | conv% D10 | D10 acima |
+|---|---|---|---|---|---|---|
+| LF51 parcial | v4 | 40 | 0,68% | 0,76% | 1,29% | +89% |
+| LF51 parcial | jan30 | 40 | 0,68% | 0,65% | 0,89% | +30% |
+| LF52 | v4 | 57 | 0,68% | 1,26% | 1,45% | +112% |
+| LF52 | jan30 | 57 | 0,68% | 1,08% | 0,93% | +36% |
+| LF53 D2 carrinho | v4 | 52 | 0,52% | 0,81% | 0,56% | **+8%** ⚠ |
+| LF53 D2 carrinho | jan30 | 52 | 0,52% | 0,66% | 0,76% | +44% |
+
+O "v4 quebra no LF53" desaparece no pooled. Razão: leads capturados no LF53 (cap 13-20/04) ainda não tiveram tempo de comprar — carrinho abriu 27/04. No recorte por-LF, o numerador dos decis altos do v4 fica artificialmente baixo. No pooled, esses leads são contabilizados quando comprarem em qualquer carrinho posterior.
+
+### Conclusão (28/04/2026)
+
+- **v4 é candidato legítimo a promoção** — discrimina ~2× melhor que jan30 no pooled OOS com 173 conversões
+- Recorte por-LF tem variabilidade que **não reflete falha estrutural** — é artefato de janela curta no LF53
+- Recomendação: refazer pooled OOS após carrinho LF53 fechar (03/05) pra confirmar resultado com volume final, então decidir promoção
+
+**Pré-requisitos antes de canary v4 em produção:**
+1. Pooled OOS pós-LF53 fechado mantém v4 ≥ jan30 nas 3 métricas (D9, D10, D9+D10)
+2. TMB atualizado (lag de ~5 dias resolvido até lá)
+3. Smoke test paridade jan30 ainda passa
+
+### Reprodutibilidade
+
+- Script: `V2/scripts/backtest_compare_models.py` (3 modos: `prepare-dataset`, `score`, `compare`)
+- Módulo de carga: `V2/src/validation/backtest_data.py` (`load_match_spend_for_lf`)
+- Datasets persistidos em: `V2/files/validation/backtest_lf{51_partial,52,53}/`
+- Comandos exatos no docstring do script
+- Arquivos TMB local em `V2/data/devclub/contas_a_receber_*.xlsx` (gerados manualmente)
+
+### Próximas iterações
+
+- 04/05: refazer LF53 com carrinho fechado
+- Se LF53 fechado mantiver v4 ≥ jan30 nas 3 métricas (D9, D10, D9+D10): considerar canary v4
+- Se não: documentar viés Asaas e planejar retreino v5 com mix corrigido
 
 ---
 
