@@ -128,11 +128,11 @@ Itens abaixo **não dependem** do gate H1.1 nem do canary. Estão adiados apenas
 - **Por que é independente do gate:** instrumentação pura, não toca em modelo nem em encoding.
 - **Catálogo:** `PLANO_SAFEGUARD.md` Tier 2 → T2-2.
 
-### Importance weighting do grupo controle (T2-3)
-- **O quê:** retreinar com pesos maiores para leads da campanha de controle e pesos menores para leads D10 sobre-representados; hook no `retraining_orchestrator.py`.
-- **Por quê:** corrige viés do feedback loop documentado (W1 SWOT, Erros_cometidos.md cluster 2). Prazo original era 15/04 — vencido.
-- **Por que é independente do gate:** produz um modelo novo independente do que aconteça com o Champion v4. Se v4 passar no gate, esse vira o próximo Challenger. Se v4 falhar, vira a alternativa direta.
-- **Pré-condição operacional:** subir Cloud SQL `smart-ads-db` (parado desde 26/04) — protocolo em `operacoes_gcp_custos.md`.
+### Importance weighting do grupo controle (T2-3) — ✅ implementado / efeito interno marginal
+- **Estado (28/04/2026):** feature implementada no `train_pipeline.py` (commits `c03d645`, `f8dc4f7`). Calcula pesos por grupo (CONTROLE/ML/NEUTRO) via inverso de frequência com expoente `alpha`, scope=train. CLI: `--control-group-weights --control-alpha {0..1}` + `--train-ratio` para ajustar split. Validado tecnicamente em sweep de alphas no MLflow remoto (Cloud SQL subido + parado em 28/04).
+- **Resultado do experimento (split 80/20, ~44k CONTROLE no train):** efeito sobre métricas de teste interno é marginal — range AUC 0.003 entre `alpha=0` e `alpha=1`; monotonia oscila sem padrão monotônico. A maior parte do ganho sobre o Champion v4 (AUC 0.748 → 0.756) veio do split 80/20 + 5 dias adicionais de dados, não do reweighting.
+- **Sinal positivo paralelo (validação real):** investigação D9/D10 ML × CTRL na janela limpa madura 26–30/03 mostrou **lift 6.88×** do top decil ML sobre CTRL total (CR 0.49% vs 0.07%) — o ML em produção funciona; reweighting interno apenas não muda métricas holdout.
+- **Conclusão prática:** feature fica pronta no repertório (default desligado). Próxima retomada faz sentido após gate H1.1 — se Champion v4 passar e for promovido, refazer o experimento pós-DEV20 com janela CONTROLE mais madura.
 - **Catálogo:** `PLANO_SAFEGUARD.md` Tier 2 → T2-3.
 
 ---
