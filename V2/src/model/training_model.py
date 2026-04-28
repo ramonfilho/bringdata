@@ -254,7 +254,8 @@ def registrar_features_e_modelo_devclub(
     cli_args: dict = None,
     client_config: ClientConfig = None,
     tmb_risk_filter: str = 'all',
-    use_buyer_weights: bool = True
+    use_buyer_weights: bool = True,
+    train_ratio: float = 0.7
 ) -> dict:
     """
     Registra features e salva modelo DevClub para produção.
@@ -367,7 +368,7 @@ def registrar_features_e_modelo_devclub(
         if split_method == 'temporal':
             # Split temporal: 70% dos DIAS para treino
             dias_totais = (data_max - data_min).days
-            dias_treino = int(dias_totais * 0.7)
+            dias_treino = int(dias_totais * train_ratio)
             data_corte = data_min + pd.Timedelta(days=dias_treino)
 
             mask_treino = data_dt <= data_corte
@@ -454,7 +455,7 @@ def registrar_features_e_modelo_devclub(
             }).sort_values('Data').reset_index(drop=True)
 
             n_total = len(df_indices)
-            n_train = int(n_total * 0.7)
+            n_train = int(n_total * train_ratio)
 
             # Índices de treino e teste (após ordenação por data)
             train_indices = df_indices['index'].iloc[:n_train].values
@@ -688,7 +689,7 @@ def registrar_features_e_modelo_devclub(
             # 5. Split GRUPOS com estratificação
             pessoas_train, pessoas_test = train_test_split(
                 grupos_df,
-                test_size=0.3,
+                test_size=1.0 - train_ratio,
                 stratify=grupos_df['target'],
                 random_state=42
             )

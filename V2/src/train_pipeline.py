@@ -157,7 +157,8 @@ logger = logging.getLogger(__name__)
 
 
 def _compute_control_weights(df: 'pd.DataFrame', alpha: float = 1.0,
-                              campaign_col: str = 'Campaign') -> 'pd.Series':
+                              campaign_col: str = 'Campaign',
+                              train_mask: 'pd.Series' = None) -> 'pd.Series':
     """T2-3: pesos por grupo (CONTROLE / ML / NEUTRO) via inverso de frequência com expoente alpha.
 
     Identifica grupos a partir do nome da campanha (campaign_classifier):
@@ -174,20 +175,32 @@ def _compute_control_weights(df: 'pd.DataFrame', alpha: float = 1.0,
       - 0.5 → meio caminho
       - 1   → balanceamento pleno (CONTROLE e ML "pesam" igual no fit)
 
+    train_mask: Series booleana alinhada a df.index. Se fornecida, n_control/n_ml são
+    contados APENAS sobre as linhas onde train_mask=True. Os pesos são aplicados a todas
+    as linhas (test recebe peso também, mas o fit do modelo só usa o train).
+
     Retorna pd.Series de pesos alinhada ao índice do df (NEUTRO = 1.0).
     """
     if campaign_col not in df.columns:
         logger.warning(f"  [control_weights] coluna '{campaign_col}' ausente — feature desabilitada (pesos=1)")
         return pd.Series(1.0, index=df.index)
 
-    classes = df[campaign_col].apply(_classify_campaign)
-    n_control = (classes == 'SEM_ML').sum()
-    n_ml = (classes == 'COM_ML').sum()
-    n_neutro = (classes == 'EXCLUIR').sum()
+    classes_full = df[campaign_col].apply(_classify_campaign)
+
+    if train_mask is not None:
+        classes_for_count = classes_full[train_mask]
+        scope = "train"
+    else:
+        classes_for_count = classes_full
+        scope = "full"
+
+    n_control = (classes_for_count == 'SEM_ML').sum()
+    n_ml = (classes_for_count == 'COM_ML').sum()
+    n_neutro = (classes_for_count == 'EXCLUIR').sum()
 
     if n_control == 0 or n_ml == 0:
         logger.warning(
-            f"  [control_weights] grupo vazio (CONTROLE={n_control}, ML={n_ml}) — "
+            f"  [control_weights] grupo vazio no {scope} (CONTROLE={n_control}, ML={n_ml}) — "
             f"feature desabilitada (pesos=1)"
         )
         return pd.Series(1.0, index=df.index)
@@ -197,11 +210,11 @@ def _compute_control_weights(df: 'pd.DataFrame', alpha: float = 1.0,
     w_ml = (n_total / (2 * n_ml)) ** alpha
 
     weights = pd.Series(1.0, index=df.index)
-    weights.loc[classes == 'SEM_ML'] = w_control
-    weights.loc[classes == 'COM_ML'] = w_ml
+    weights.loc[classes_full == 'SEM_ML'] = w_control
+    weights.loc[classes_full == 'COM_ML'] = w_ml
 
     logger.info(
-        f"  [control_weights] alpha={alpha} | CONTROLE: n={n_control:,} peso={w_control:.3f} | "
+        f"  [control_weights] alpha={alpha} (scope={scope}) | CONTROLE: n={n_control:,} peso={w_control:.3f} | "
         f"ML: n={n_ml:,} peso={w_ml:.3f} | NEUTRO: n={n_neutro:,} peso=1.000"
     )
     return weights
@@ -224,7 +237,7 @@ def _log_step_count(step: str, df_after, df_before=None, target_col: str = 'targ
     logger.info("  " + " | ".join(parts))
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, use_control_weights=False):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None):
     """Executa pipeline de treino completo.
 
     Args:
@@ -615,6 +628,13 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
 
     df_pesquisa_final_unificado = _unify_categories(df_pesquisa_final, client_config.category)
 
+    # T2-3: preservar 'Campaign' em coluna técnica antes da Célula 8 removê-la,
+    # para que _compute_control_weights tenha acesso ao classificador de campanha.
+    # A coluna técnica usa nome dunder para não ser confundida com feature do modelo.
+    if use_control_weights and 'Campaign' in df_pesquisa_final_unificado.columns:
+        df_pesquisa_final_unificado['__campaign_for_weights__'] = df_pesquisa_final_unificado['Campaign']
+        logger.debug("  T2-3: Campaign preservada em '__campaign_for_weights__' antes da Célula 8")
+
     logger.info("=" * 80)
     # === CÉLULA 8: Remoção de features desnecessárias ===
     logger.info("")
@@ -761,6 +781,44 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     )
     _log_step_count("janela_conversao", dataset_v1_devclub, df_before=_dataset_v1_devclub_pre_janela)
 
+    # T2-3: calcular control_weights AQUI (antes do FE/encoding), enquanto a coluna técnica
+    # '__campaign_for_weights__' ainda existe. Pesos são calculados com a distribuição do
+    # TRAIN SET (replica a lógica do split temporal_leads logo abaixo) — sem isso, leads
+    # CONTROLE concentrados pós-cutoff caem todos no test e os pesos saem irrelevantes.
+    if use_control_weights:
+        _cw_config = client_config.model.control_weights if (
+            client_config and client_config.model and client_config.model.control_weights
+        ) else {}
+        _cw_alpha = float(_cw_config.get('alpha', 1.0)) if isinstance(_cw_config, dict) else 1.0
+        if control_alpha is not None:
+            _cw_alpha = float(control_alpha)  # CLI override
+
+        # Replicar split temporal_leads para identificar quais leads vão para o train.
+        # Outras estratégias (temporal, stratified) caem no fallback "scope=full".
+        _train_mask = None
+        if split_method == 'temporal_leads' and 'Data' in dataset_v1_devclub.columns:
+            _data_dt = pd.to_datetime(dataset_v1_devclub['Data'], errors='coerce')
+            _order = _data_dt.sort_values(kind='mergesort').index
+            _n_train = int(len(_order) * train_ratio)
+            _train_indices = set(_order[:_n_train])
+            _train_mask = pd.Series(
+                [idx in _train_indices for idx in dataset_v1_devclub.index],
+                index=dataset_v1_devclub.index,
+            )
+
+        control_weights = _compute_control_weights(
+            dataset_v1_devclub,
+            alpha=_cw_alpha,
+            campaign_col='__campaign_for_weights__',
+            train_mask=_train_mask,
+        )
+    else:
+        control_weights = None
+
+    # Remover a coluna técnica antes do FE/encoding — modelo nunca vê essa coluna.
+    if '__campaign_for_weights__' in dataset_v1_devclub.columns:
+        dataset_v1_devclub = dataset_v1_devclub.drop(columns='__campaign_for_weights__')
+
     # Recall metrics (não calculado após reorganização - vendas já filtradas na CÉLULA 5.4)
     recall_metrics = None
 
@@ -861,17 +919,11 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     else:
         buyer_weights = None
 
-    # === T2-3: Pesos por grupo Meta (CONTROLE / ML / NEUTRO) ===
-    # Aplicado multiplicativamente sobre buyer_weights — preserva o nome buyer_weights
-    # em todo o pipeline downstream (tuning, registro, MLflow).
-    if use_control_weights:
-        _cw_config = client_config.model.control_weights if (
-            client_config and client_config.model and client_config.model.control_weights
-        ) else {}
-        _cw_alpha = float(_cw_config.get('alpha', 1.0)) if isinstance(_cw_config, dict) else 1.0
-        control_weights = _compute_control_weights(dataset_v1_devclub, alpha=_cw_alpha)
+    # === T2-3: combinar control_weights (calculados após a CÉLULA 17) com buyer_weights ===
+    # Aplicado multiplicativamente — preserva o nome buyer_weights em todo o pipeline
+    # downstream (tuning, registro, MLflow).
+    if control_weights is not None:
         control_weights.index = dataset_v1_devclub_encoded.index
-
         if buyer_weights is None:
             buyer_weights = control_weights
         else:
@@ -947,7 +999,8 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         cli_args=cli_args,
         client_config=client_config,
         tmb_risk_filter=tmb_risk_filter,
-        use_buyer_weights=use_buyer_weights
+        use_buyer_weights=use_buyer_weights,
+        train_ratio=train_ratio
     )
 
     cell_timers['Célula 21'] = time.time() - cell_start
@@ -1129,6 +1182,23 @@ if __name__ == "__main__":
              'Multiplicativo com --no-weights. Lê alpha de client_config.model.control_weights.alpha (default 1.0).'
     )
     parser.add_argument(
+        '--train-ratio',
+        type=float,
+        default=0.7,
+        help='Fração dos leads que vai para treino no split (default 0.7 = 70/30). '
+             'Aumentar para 0.8 ou 0.85 traz leads mais recentes para o train (útil para T2-3 quando '
+             'a campanha de controle é recente e estaria toda no test set com 0.7).'
+    )
+    parser.add_argument(
+        '--control-alpha',
+        type=float,
+        default=None,
+        help='Override de control_weights.alpha do YAML (T2-3, soft balancing). '
+             '0.0=sem correção, 0.5=meio caminho, 1.0=balanceamento pleno. '
+             'Default None usa o valor do YAML (1.0 se não especificado). '
+             'Útil para varrer alphas sem editar o YAML.'
+    )
+    parser.add_argument(
         '--save-encoded',
         action='store_true',
         default=False,
@@ -1210,4 +1280,6 @@ if __name__ == "__main__":
         fixed_hyperparams=json.loads(args.hyperparams) if args.hyperparams else None,
         max_date=args.max_date,
         use_control_weights=args.control_group_weights,
+        train_ratio=args.train_ratio,
+        control_alpha=args.control_alpha,
     )
