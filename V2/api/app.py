@@ -29,7 +29,7 @@ from src.production_pipeline import LeadScoringPipeline
 
 # Importar módulos CAPI
 from api.database import get_db, init_database, create_lead_capi, count_leads, count_leads_with_fbp, count_leads_with_fbc, get_leads_by_emails, LeadCAPI
-from api.capi_integration import send_batch_events
+from api.capi_integration import send_batch_events, should_send_to_destination
 from fastapi import Depends, Header, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -726,24 +726,33 @@ async def webhook_lead_capture(
                 logger.info(f"✅ Score gerado: {lead_record.lead_score:.4f} ({lead_record.decil})")
 
                 # 3. CAPI - Usar função existente (batch com 1 lead)
-                logger.info(f"📤 Enviando evento CAPI para {lead_data.email}...")
-
-                capi_result = send_batch_events([{
-                    'email': lead_record.email,
-                    'phone': lead_record.phone,
-                    'first_name': lead_record.first_name,
-                    'last_name': lead_record.last_name,
-                    'lead_score': lead_record.lead_score,
-                    'decil': lead_record.decil,
-                    'event_id': lead_record.event_id,
-                    'fbp': lead_record.fbp,
-                    'fbc': lead_record.fbc,
-                    'user_agent': lead_record.user_agent,
-                    'client_ip': lead_record.client_ip,
-                    'event_source_url': lead_record.event_source_url
-                }], db, capi_config=pipeline._client_config.capi,
-                    business_config=pipeline._client_config.business,
-                    client_id=pipeline._client_config.client_id)
+                # UTM filter: blocklist por campaign + allowlist por source (DT-CAPI-01/02)
+                _allowed, _reason = should_send_to_destination(
+                    {'source': lead_record.utm_source, 'campaign': lead_record.utm_campaign},
+                    pipeline._client_config.capi,
+                    destination='meta',
+                )
+                if not _allowed:
+                    logger.info(f"⏭️ CAPI {_reason}: source={lead_record.utm_source} campaign={lead_record.utm_campaign}")
+                    capi_result = {"success": 0, "total": 0, "errors": 0}
+                else:
+                    logger.info(f"📤 Enviando evento CAPI para {lead_data.email}...")
+                    capi_result = send_batch_events([{
+                        'email': lead_record.email,
+                        'phone': lead_record.phone,
+                        'first_name': lead_record.first_name,
+                        'last_name': lead_record.last_name,
+                        'lead_score': lead_record.lead_score,
+                        'decil': lead_record.decil,
+                        'event_id': lead_record.event_id,
+                        'fbp': lead_record.fbp,
+                        'fbc': lead_record.fbc,
+                        'user_agent': lead_record.user_agent,
+                        'client_ip': lead_record.client_ip,
+                        'event_source_url': lead_record.event_source_url
+                    }], db, capi_config=pipeline._client_config.capi,
+                        business_config=pipeline._client_config.business,
+                        client_id=pipeline._client_config.client_id)
 
                 logger.info(f"✅ CAPI enviado: {capi_result.get('success', 0)}/{capi_result.get('total', 0)} eventos")
 
@@ -990,17 +999,13 @@ async def webhook_update_survey(
                 lead_capi_dict['ab_conversion_rates'] = ab_variant.conversion_rates
 
             # UTM filter: blocklist por campaign + allowlist por source (DT-CAPI-01/02)
-            _utm_cam = (existing_lead.utm_campaign or '').lower()
-            _utm_src = (existing_lead.utm_source or '').lower()
-            _blocklist = pipeline._client_config.capi.utm_blocklist or []
-            _allowlist = pipeline._client_config.capi.utm_source_allowlist or []
-            _capi_blocked = any(p.lower() in _utm_cam for p in _blocklist)
-            _capi_skipped = bool(_allowlist) and not any(s.lower() in _utm_src for s in _allowlist)
-            if _capi_blocked:
-                logger.info(f"⏭️ CAPI bloqueado por UTM blocklist: {existing_lead.utm_campaign}")
-                capi_result = {"success": 0, "total": 0, "errors": 0}
-            elif _capi_skipped:
-                logger.info(f"⏭️ CAPI ignorado — source não permitido: {existing_lead.utm_source}")
+            _allowed, _reason = should_send_to_destination(
+                {'source': existing_lead.utm_source, 'campaign': existing_lead.utm_campaign},
+                pipeline._client_config.capi,
+                destination='meta',
+            )
+            if not _allowed:
+                logger.info(f"⏭️ CAPI {_reason}: source={existing_lead.utm_source} campaign={existing_lead.utm_campaign}")
                 capi_result = {"success": 0, "total": 0, "errors": 0}
             else:
                 capi_result = send_batch_events(
@@ -1482,25 +1487,46 @@ async def process_daily_batch_capi(
                 'client_ip': capi_data.client_ip if capi_data else None,
                 'event_source_url': capi_data.event_source_url if capi_data else None,
                 'event_timestamp': _safe_parse_timestamp(lead.get('data')),
-                'survey_data': survey_data
+                'survey_data': survey_data,
+                # Internos para filtro de allowlist/blocklist (DT-CAPI-01/02). Removidos
+                # antes do payload Meta em send_batch_events.
+                '_utm_source': lead.get('utm_source') or (capi_data.utm_source if capi_data else None),
+                '_utm_campaign': lead.get('utm_campaign') or (capi_data.utm_campaign if capi_data else None),
             }
 
             enriched_leads.append(lead_capi)
 
         logger.info(f"   {len(enriched_leads)} leads enriquecidos para envio CAPI")
 
-        # Logging de qualidade dos dados
-        leads_with_fbp = len([l for l in enriched_leads if l.get('fbp')])
-        leads_with_fbc = len([l for l in enriched_leads if l.get('fbc')])
-        leads_with_both = len([l for l in enriched_leads if l.get('fbp') and l.get('fbc')])
+        # UTM filter: blocklist por campaign + allowlist por source (DT-CAPI-01/02)
+        allowed_leads = []
+        skipped_by_reason = {}
+        for el in enriched_leads:
+            _allowed, _reason = should_send_to_destination(
+                {'source': el.get('_utm_source'), 'campaign': el.get('_utm_campaign')},
+                pipeline._client_config.capi,
+                destination='meta',
+            )
+            if _allowed:
+                allowed_leads.append(el)
+            else:
+                skipped_by_reason[_reason] = skipped_by_reason.get(_reason, 0) + 1
+        if skipped_by_reason:
+            logger.info(f"   ⏭️ CAPI batch — {sum(skipped_by_reason.values())} leads ignorados: {skipped_by_reason}")
 
-        logger.info(f"   📊 Qualidade dos dados CAPI:")
-        logger.info(f"      - Com FBP: {leads_with_fbp}/{len(enriched_leads)} ({leads_with_fbp/len(enriched_leads)*100:.1f}%)")
-        logger.info(f"      - Com FBC: {leads_with_fbc}/{len(enriched_leads)} ({leads_with_fbc/len(enriched_leads)*100:.1f}%)")
-        logger.info(f"      - Com AMBOS: {leads_with_both}/{len(enriched_leads)} ({leads_with_both/len(enriched_leads)*100:.1f}%)")
+        # Logging de qualidade dos dados (apenas leads que serão enviados)
+        leads_with_fbp = len([l for l in allowed_leads if l.get('fbp')])
+        leads_with_fbc = len([l for l in allowed_leads if l.get('fbc')])
+        leads_with_both = len([l for l in allowed_leads if l.get('fbp') and l.get('fbc')])
+
+        logger.info(f"   📊 Qualidade dos dados CAPI ({len(allowed_leads)} a enviar):")
+        if allowed_leads:
+            logger.info(f"      - Com FBP: {leads_with_fbp}/{len(allowed_leads)} ({leads_with_fbp/len(allowed_leads)*100:.1f}%)")
+            logger.info(f"      - Com FBC: {leads_with_fbc}/{len(allowed_leads)} ({leads_with_fbc/len(allowed_leads)*100:.1f}%)")
+            logger.info(f"      - Com AMBOS: {leads_with_both}/{len(allowed_leads)} ({leads_with_both/len(allowed_leads)*100:.1f}%)")
 
         # Enviar batch (com db session para registrar envios)
-        results = send_batch_events(enriched_leads, db=db, capi_config=pipeline._client_config.capi,
+        results = send_batch_events(allowed_leads, db=db, capi_config=pipeline._client_config.capi,
                                     business_config=pipeline._client_config.business,
                                     client_id=pipeline._client_config.client_id)
 
@@ -3420,18 +3446,13 @@ async def railway_process_pending(pipeline: PipelineDep):
                     capi_lead['ab_conversion_rates'] = ab_v.conversion_rates
 
                 # UTM filter: blocklist por campaign + allowlist por source (DT-CAPI-01/02)
-                _utm_cam = (lead.get('campaign') or '').lower()
-                _utm_src = (lead.get('source') or '').lower()
-                _blocklist = pipeline._client_config.capi.utm_blocklist or []
-                _allowlist = pipeline._client_config.capi.utm_source_allowlist or []
-                _capi_blocked = any(p.lower() in _utm_cam for p in _blocklist)
-                _capi_skipped = bool(_allowlist) and not any(s.lower() in _utm_src for s in _allowlist)
-                if _capi_blocked:
-                    logger.info(f"   ⏭️ CAPI bloqueado por UTM blocklist: {lead.get('campaign')}")
-                    blocked_lead_ids.append(lead['id'])
-                elif _capi_skipped:
-                    logger.info(f"   ⏭️ CAPI ignorado — source não permitido: {lead.get('source')}")
-                    skipped_lead_ids.append(lead['id'])
+                _allowed, _reason = should_send_to_destination(lead, pipeline._client_config.capi, destination='meta')
+                if not _allowed:
+                    logger.info(f"   ⏭️ CAPI {_reason}: source={lead.get('source')} campaign={lead.get('campaign')}")
+                    if _reason == 'blocked_by_blocklist':
+                        blocked_lead_ids.append(lead['id'])
+                    else:
+                        skipped_lead_ids.append(lead['id'])
                 else:
                     capi_leads.append(capi_lead)
 

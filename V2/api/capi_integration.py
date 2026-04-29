@@ -882,6 +882,63 @@ def send_purchase_event(
             "message": str(e)
         }
 
+
+def should_send_to_destination(
+    lead: Dict,
+    capi_config: Optional[CAPIConfig],
+    destination: str = 'meta',
+) -> tuple:
+    """
+    Decide se um lead deve enviar evento para uma plataforma de ads.
+
+    Centraliza a lógica de blocklist/allowlist por UTM que estava duplicada em 4
+    pontos do app.py. Resolve o vazamento histórico (DT-CAPI-01): leads não-Meta
+    indo para o Pixel da Meta via paths que esqueciam de aplicar o filtro.
+
+    Estrutura preparada para futuras integrações (Google Ads, TikTok): cada
+    destination tem seu próprio branch carregando allowlist/blocklist específicas
+    do CAPIConfig. Hoje suporta apenas 'meta'.
+
+    Args:
+        lead: dict com 'source'/'utm_source' e 'campaign'/'utm_campaign'.
+              Aceita ambas as nomenclaturas (ORM vs Railway dict vs payload bruto).
+        capi_config: CAPIConfig do cliente. Se None, retorna allowed=True
+                     (sem config = comportamento legado, não filtra).
+        destination: 'meta' (default). Outras destinations retornam allowed=False
+                     com reason='unknown_destination' até que sejam implementadas.
+
+    Returns:
+        (allowed: bool, reason: str)
+        reasons:
+          - 'allowed'              : passou nos filtros, deve enviar
+          - 'blocked_by_blocklist' : utm_campaign casou com blocklist
+          - 'skipped_by_allowlist' : utm_source não está na allowlist
+          - 'no_config'            : capi_config=None, passa por padrão
+          - 'unknown_destination'  : destination não suportado ainda
+    """
+    if capi_config is None:
+        return True, 'no_config'
+
+    src = (lead.get('source') or lead.get('utm_source') or '').lower()
+    cam = (lead.get('campaign') or lead.get('utm_campaign') or '').lower()
+
+    if destination == 'meta':
+        blocklist = capi_config.utm_blocklist or []
+        allowlist = capi_config.utm_source_allowlist or []
+    else:
+        # Quando integração Google Ads / TikTok for adicionada:
+        #   - adicionar campos `google_source_allowlist` etc. em CAPIConfig
+        #   - adicionar branch aqui carregando-os
+        # Até lá, qualquer destination diferente de 'meta' bloqueia por segurança.
+        return False, 'unknown_destination'
+
+    if blocklist and any(p.lower() in cam for p in blocklist):
+        return False, 'blocked_by_blocklist'
+    if allowlist and not any(s.lower() in src for s in allowlist):
+        return False, 'skipped_by_allowlist'
+    return True, 'allowed'
+
+
 def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConfig] = None, business_config: Optional[BusinessConfig] = None, client_id: str = 'devclub') -> Dict:
     """
     Envia múltiplos eventos CAPI em batch (AMBAS AS ESTRATÉGIAS)
