@@ -144,9 +144,9 @@ Itens independentes dos dados do Cliente B. Resolver antes de iniciar Fase 3b do
 - **O quê:** verificar `'idade'` e `'faixa_salarial'` em `encoding.ordinal_variables` do `configs/clients/devclub.yaml`. Se ainda presentes como aliases curtos, remover — o df chega com nomes longos, alias curto = encoding silenciosamente pulado.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-9.
 
-### Schema check pré-treino (`src/core/validation.py`)
-- **O quê:** novo módulo. Validação no início de `train_pipeline.py`: schema esperado, nulos em features obrigatórias, ranges críticos.
-- **Por quê:** sem isso, dado ruim do Cliente B pode corromper o pipeline silenciosamente.
+### Schema check pré-treino (`src/core/validation.py`) ✅ resolvido (29/04/2026)
+- **Estado atual:** módulo `src/core/validation.py` (201 linhas) já existe com `validate_ingestion` (colunas obrigatórias, tamanho do dataset, parseabilidade de datas) e `validate_features` (missing rates de features críticas vs thresholds do YAML). Integrados no `train_pipeline.py` em dois pontos: após Célula 4 (linhas 549-555) e após Célula 8 (linhas 652-658). `ValidationConfig` no `ClientConfig` controla thresholds e modo `on_error` (`raise` aborta, `warn` só registra).
+- **Quando ficou resolvido:** durante a Fase 2 do refactor (mar-2026). O item ficou listado como pendente no roadmap original mas, na verdade, foi entregue junto com o resto do `src/core/`.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` §12 "Caminho para Nível 2".
 
 ### DT-2: Testes unitários parametrizados em `src/core/`
