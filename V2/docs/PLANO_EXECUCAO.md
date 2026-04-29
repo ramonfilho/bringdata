@@ -20,7 +20,7 @@
 
 | Componente | Estado |
 |---|---|
-| **Validação OOS Champion v4** | ✅ **Atravessada favoravelmente em 28/04** — gate único do roadmap. Todo bloco STANDBY destravado. |
+| **Validação OOS Champion v4** | ✅ **Atravessada favoravelmente em 28/04** — gate único do roadmap. |
 | **Deploy main unificada** | 🔄 **Em execução** em sessão paralela — canary 10% → 50% → 100% conforme `AB_TEST.md` "Nova estratégia — canary direto". |
 | **Modelo no rollback** (90% / 50% / 0% conforme estágio do canary) | jan30 ORIGINAL (`d51757f5`) |
 | **Modelo no canary main** (10% / 50% / 100% conforme estágio) | Champion v4 (`60637bb98b94421b9c7579bb4ac1b1ad`) — AUC 0.748, OHE default |
@@ -38,7 +38,7 @@
 
 **Resultado:** decisão de seguir com o A/B — Champion v4 validado para entrar em produção via canary. Detalhes operacionais da validação ficam fora deste plano (registrados na sessão que executou o teste).
 
-**Consequência imediata:** todo o bloco STANDBY abaixo está destravado. H2.1 (deploy canary main) entra em execução em sessão paralela; A/B test reabre como frente ativa; Sprint 2 do `retraining_orchestrator` volta para o backlog ativo.
+**Consequência imediata:** H2.1 (deploy canary main) entra em execução em sessão paralela; A/B test reabre como frente ativa; Sprint 2 do `retraining_orchestrator` (quality gate automático pós-treino) volta ao backlog em H6.
 
 ---
 
@@ -55,15 +55,13 @@
 
 | Horizonte | Janela | Foco principal | Status |
 |---|---|---|---|
-| **H1 — Concluído** | 27/04 → 28/04 | DT-13 ✅, ARQUITETURA ✅, gate atravessado ✅ | ✅ |
-| **H2 — Em execução** | 28/04 → +1-3 semanas | Deploy canary main em sessão paralela | 🔄 |
-| **Independente do gate** | já concluído | Importance weighting ✅, log por etapa ✅ | ✅ |
-| **H3 — Tier 2/3 restante** | maio-junho 2026 | Safeguards remanescentes (10 itens) | em fila |
-| **H4 — Pré-Cliente B** | em paralelo com H2/H3 | R1/R2/R3, schema check, testes unitários | gate Cliente B |
-| **H5 — Cliente B** | depende de dados externos | Onboarding Fase 3b + EDA Generator | dado externo |
-| **H6 — Escala 2-4 clientes** | 2-4 meses após Cliente B | CI/CD, drift trigger, dashboard, registry | depende H5 |
-| **H7 — Escala 5+ clientes** | quando infra atual virar gargalo | Stack GCP completo (Pub/Sub, Dataflow, etc.) | demand-driven |
-| **Standby destravado (28/04)** | volta ao backlog ativo | A/B test, Sprint 2 retraining_orchestrator | ✅ |
+| **H1 — Agora** | 27/04 → 28/04 | DT-13, ARQUITETURA, gate de validação | ✅ concluído |
+| **H2 — Pós-validação** | 28/04 → +1-3 semanas | Deploy canary da main | 🔄 em execução (sessão paralela) |
+| **H3 — Tier 2/3 safeguards** | abr-maio 2026 | Safeguards de qualidade e observabilidade | ✅ concluído (T3-3 adiado) |
+| **H4 — Pré-Cliente B** | em curso | DT-9, schema check, testes unitários, bugs latentes | 🔄 atual |
+| **H5 — Cliente B** | depende de dados externos | Onboarding + EDA Generator | ⚪ aguardando |
+| **H6 — Escala 2-4 clientes** | 2-4 meses após H5 | CI/CD, retreino auto, dashboard, registry, redesign UTM, recalibração, Google Ads, TikTok | depende H5 |
+| **H7 — Escala 5+ clientes** | quando infra atual virar gargalo | Stack GCP completo + features data flywheel + LinkedIn + NLP | demand-driven |
 
 ---
 
@@ -73,7 +71,7 @@
 
 ### 1.1 — Validação out-of-sample do Champion v4 ✅ ATRAVESSADA
 - Saída: decisão favorável ao v4. Detalhes da execução fora deste plano (sessão paralela).
-- Consequência: H2 destravado e em execução; STANDBY reaberto.
+- Consequência: H2 destravado e em execução; frente A/B reaberta no roadmap.
 
 ### 1.2 — ~~Capturar golden snapshot do monitoring~~ → REPOSICIONADO (não rodar agora)
 - **Por que não agora:** o sistema está com `distribution_drift HIGH` em Medium e `score_distribution_change HIGH` em D10 desde 22/04. Capturar o snapshot neste estado cristaliza um baseline degradado — regressões futuras seriam comparadas contra um estado já ruim e a divergência atual viraria "normal".
@@ -96,32 +94,6 @@
 - **Estratégia:** canary direto 10% → 50% → 100% com critério puramente técnico. Detalhes em `AB_TEST.md`.
 - **Captura do golden snapshot (H1.2):** 24-48h após canary 10% estável e alertas pré-existentes terem cedido. Se não cederem, pausar antes de avançar para 50% e diagnosticar.
 - **Rollback:** ~10s via `gcloud run services update-traffic` para `00269-jjn`.
-
----
-
-## Trabalho técnico já executado (independente do gate)
-
-### Log de registros por etapa do pipeline (T2-2) ✅ commit `8b46645`
-- Instrumentação em `train_pipeline.py` (6 pontos) e `production_pipeline.py` (2 pontos).
-- Catálogo: `PLANO_SAFEGUARD.md` Tier 2 → T2-2.
-
-### Importance weighting do grupo controle (T2-3) — ✅ implementado / efeito interno marginal
-- **Estado (28/04/2026):** feature implementada no `train_pipeline.py` (commits `c03d645`, `f8dc4f7`). Calcula pesos por grupo (CONTROLE/ML/NEUTRO) via inverso de frequência com expoente `alpha`, scope=train. CLI: `--control-group-weights --control-alpha {0..1}` + `--train-ratio` para ajustar split. Validado tecnicamente em sweep de alphas no MLflow remoto (Cloud SQL subido + parado em 28/04).
-- **Resultado do experimento (split 80/20, ~44k CONTROLE no train):** efeito sobre métricas de teste interno é marginal — range AUC 0.003 entre `alpha=0` e `alpha=1`; monotonia oscila sem padrão monotônico. A maior parte do ganho sobre o Champion v4 (AUC 0.748 → 0.756) veio do split 80/20 + 5 dias adicionais de dados, não do reweighting.
-- **Sinal positivo paralelo (validação real):** investigação D9/D10 ML × CTRL na janela limpa madura 26–30/03 mostrou **lift 6.88×** do top decil ML sobre CTRL total (CR 0.49% vs 0.07%) — o ML em produção funciona; reweighting interno apenas não muda métricas holdout.
-- **Conclusão prática:** feature fica pronta no repertório (default desligado). Próxima retomada faz sentido após gate H1.1 — se Champion v4 passar e for promovido, refazer o experimento pós-DEV20 com janela CONTROLE mais madura.
-- **Catálogo:** `PLANO_SAFEGUARD.md` Tier 2 → T2-3.
-
-### Refatoração CAPI allowlist (DT-CAPI-01) — ✅ commit `41cc2bf` / pendente deploy
-- **Bug histórico (09/04 → 28/04/2026):** `utm_source_allowlist` foi adicionada em 09/04 (commit `6b8fc05`) mas aplicada em apenas 2 de 4 caminhos CAPI no `app.py`. Os paths `/webhook/lead_capture` (principal do frontend) e `/predict/batch` (Apps Script) ficaram sem filtro. Resultado: ~4.200 eventos não-Meta foram para o Pixel da Meta no período (google-ads 2.016, gruposantigos 552, (null) 461, API 431, tiktok 420, ig 159, outros).
-- **Fix (29/04/2026):** lógica centralizada em `should_send_to_destination(lead, capi_config, destination='meta')` em `capi_integration.py`. Os 4 paths chamam a mesma função. Parametrizado por `destination` — para ativar Google Ads basta adicionar branch lendo allowlist específica.
-- **Validações pré-commit (camadas 1-2):** sintaxe + imports OK; paridade 100% com lógica antiga em 50 casos sintéticos cobrindo allowlist hits/misses, blocklist matches, vazios/None, case sensitivity, chaves alternativas (`source` vs `utm_source`).
-- **Validação pós-deploy obrigatória:** critérios genéricos em `PLANO_SAFEGUARD.md` T1-9 (progressão de tráfego) + checks específicos do fix:
-  - **Smoke test:** 5 leads sintéticos via curl em produção (mix `facebook-ads`/`google-ads`/`tiktok`/`null`/campaign=`LEAD | LQ`) confirmando capiStatus esperado para cada source.
-  - **24h em produção:** `google-ads` com `capiStatus='success'` deve cair de ~91% para ~0% (efeito esperado); `facebook-ads` com `capiStatus='success'` deve permanecer ≥ 95%; `capi_sent` total cai 10-15%.
-  - **Meta Events Manager (Pixel `1937807493703815`):** match rate não pode piorar; volume diário de `LeadQualified` cai 10-15% conforme esperado.
-  - **Sinais de regressão para rollback:** `facebook-ads success` < 90% (refatoração quebrou); `acceptance_rate` Meta despenca; 5xx em `/webhook/lead_capture` aumentando.
-- **Catálogo:** `ARQUITETURA_SISTEMA_COMPLETA.md` → "Roteamento por plataforma (DT-CAPI-01)" (atualizado de "correção parcial" para "correção completa").
 
 ---
 
@@ -156,16 +128,16 @@ Implementar sobre o código unificado. Nenhum é bloqueador de produção. Statu
 
 Itens independentes dos dados do Cliente B. Resolver antes de iniciar Fase 3b do refactor.
 
-### 4.1 — R1 / DT-8: Remover features fantasmas em produção ✅ resolvido (29/04/2026)
+### 4.1 — DT-8: Remover features fantasmas em produção ✅ resolvido (29/04/2026)
 - **Estado atual:** verificação confirma que `production_pipeline.py` **não tem nenhuma criação inline** de `nome_valido`/`email_valido`/`telefone_valido`. Toda a lógica vive em `core/feature_engineering.py` atrás da flag `create_valido_features` (default False; DevClub usa True). Sem código fantasma para remover.
 - **Quando ficou resolvido:** durante o porte #2 da unificação Fase 3 (23/04/2026) — features migraram para `core/feature_engineering.py` e a versão inline em produção sumiu junto.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-8.
 
-### 4.2 — R2 / DT-10: Hardcodes de modelo em treino ✅ resolvido (29/04/2026)
+### 4.2 — DT-10: Hardcodes de modelo em treino ✅ resolvido (29/04/2026)
 - **Estado:** os fallbacks hardcoded de `PESOS_COMPRADOR` e `DEFAULT_HYPERPARAMS` em `train_pipeline.py` foram removidos. Agora o treino lê obrigatoriamente de `client_config.model.buyer_weights` e `client_config.model.hyperparameters`; se qualquer dos dois faltar no YAML do cliente, o treino aborta com `ValueError [R2/DT-10]` apontando exatamente o que adicionar. Cliente B esquecer = aborta loud em vez de treinar com pesos DevClub.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-10.
 
-### 4.3 — R3 / DT-9: Remover aliases ordinais transitórios
+### 4.3 — DT-9: Remover aliases ordinais transitórios
 - **O quê:** verificar `'idade'` e `'faixa_salarial'` em `encoding.ordinal_variables` do `configs/clients/devclub.yaml`. Se ainda presentes como aliases curtos, remover — o df chega com nomes longos, alias curto = encoding silenciosamente pulado.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-9.
 
@@ -178,6 +150,15 @@ Itens independentes dos dados do Cliente B. Resolver antes de iniciar Fase 3b do
 - **O quê:** `pytest tests/core/ --client devclub --client clientb` para `utm.py`, `medium.py`, `encoding.py`. Parametrizados com dois `ClientConfig` reais.
 - **Por quê:** hoje toda validação é integration test (~10–20 min). Bloqueia iteração rápida com 2+ clientes.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-2.
+
+### 4.6 — Bugs latentes (limpezas opcionais)
+Itens menores de qualidade técnica que valem fechar antes de escalar. Nenhum bloqueia produção; cada um é independente.
+- **DT-7** — `core/medium.py` calcula threshold de Medium sobre janela errada (pré-cutoff), gerando alertas falsos no monitoramento.
+- **DT-11** — `monitoring/orchestrator.py` tem 5 imports dentro de `run_daily_check()`; mover para o topo evita erro de import só visível em runtime.
+- **DT-CAPI-01 fix (commit `41cc2bf` pendente deploy)** — `should_send_to_destination` centraliza allowlist nos 4 paths de CAPI. Aplicado no canary em curso.
+- **Guard de coluna Medium em produção** — `production_pipeline.py` chama `medium.unify_medium` sem guard `if 'Medium' in df.columns`; treino tem o guard. Se Medium sumir do formulário, produção quebra.
+- **`/railway/process-pending`** — `.str` accessor em batches de 1 lead com NaN em UTM (~0,3% polls). Auto-recupera no próximo poll. `fillna('')` resolve.
+- **`/bigquery/stats`** — sync nunca foi ativado, retorna 0 rows. Considerar deletar se confirmado fora de uso.
 
 ---
 
@@ -203,12 +184,26 @@ Itens independentes dos dados do Cliente B. Resolver antes de iniciar Fase 3b do
 
 ## H6 — ESCALA 2-4 CLIENTES (após Cliente B estável)
 
-| ID | Item | Pré-condição | Catálogo |
-|---|---|---|---|
-| 6.1 | GitHub Actions CI — push → lint → `pytest tests/core/` → parity check → merge liberado | DT-2 (4.5) + 2 clientes ativos | absorvido |
-| 6.2 | Sprint 3 `retraining_orchestrator.py` — trigger de retreino por drift | 500+ leads/mês por cliente | absorvido |
-| 6.3 | Looker Studio — dashboard de ROAS, CPL, distribuição de decis por cliente/lançamento | Cliente B ativo | absorvido |
-| 6.4 | Vertex AI Model Registry — substituir `configs/active_models/*.yaml` manual por registro centralizado | 3+ clientes ativos | absorvido |
+### Infraestrutura
+| ID | Item | Pré-condição |
+|---|---|---|
+| 6.1 | GitHub Actions CI — push → lint → `pytest tests/core/` → parity check → merge liberado | DT-2 (4.5) + 2 clientes ativos |
+| 6.2 | Sprint 2 `retraining_orchestrator` — quality gate automático pós-treino (auto-promote por threshold de AUC/lift/monotonia) | thresholds calibrados pelo primeiro ciclo A/B pós-canary |
+| 6.3 | Sprint 3 `retraining_orchestrator` — trigger de retreino por drift | 500+ leads/mês por cliente |
+| 6.4 | Looker Studio — dashboard de ROAS, CPL, distribuição de decis por cliente/lançamento | Cliente B ativo |
+| 6.5 | Vertex AI Model Registry — substituir `configs/active_models/*.yaml` manual por registro centralizado | 3+ clientes ativos |
+
+### Modelo
+| ID | Item | Pré-condição |
+|---|---|---|
+| 6.6 | Redesign UTM — remover do scoring, manter só em atribuição downstream. UTM diluiu AUC em −0.0024 vs survey-only (`EXPERIMENTO_MOAT_MODELO`, 24/04). | retreino dedicado para validar |
+| 6.7 | Recalibração `revenue_forecast.md` — taxa histórica (1,23%) pode ficar desatualizada se audiência mudar. | fechamento DEV20 + LF48 com janela completa |
+
+### Diversificação de canais
+| ID | Item | Pré-condição |
+|---|---|---|
+| 6.8 | Google Ads Enhanced Conversions — arquitetura F8 já conceptualmente resolvida; falta implementação. Mitigação parcial via `utm_source_allowlist` (DT-CAPI-01) já aplicada. | budget significativo no canal |
+| 6.9 | TikTok Events API — público jovem em crescimento, especialmente cursos. | budget significativo no canal |
 
 ---
 
@@ -226,53 +221,17 @@ Componentes que só fazem sentido quando a infraestrutura atual virar gargalo re
 
 > MLflow permanece mesmo no stack completo — é portável e trackeia experimentos de forma que o Vertex AI não replica.
 
----
-
-## ✅ STANDBY DESTRAVADO (28/04/2026)
-
-Itens que estavam suspensos até o gate H1.1. Com gate atravessado, voltam ao backlog ativo:
-
-- **A/B test completo** — frente ativa novamente; design em `AB_TEST.md`. Roteamento exato (UTM, Cloud Run revision split, ou híbrido) é decisão da sessão de deploy.
-- **Sprint 2 do `retraining_orchestrator.py` — quality gate automático pós-treino** — pode retomar; espera-se que use thresholds informados pela primeira rodada de A/B pós-deploy.
-- **DT-12 — encoding por variante A/B (`encoding_overrides`)** — só relevante se o A/B usar dois modelos com encoding diferente. Resolvido na configuração atual de v4 (OHE default); documentado em `PLANO_REFACTOR_MLOPS.md` § DT-12.
-- **Novo ciclo A/B com modelo retreinado** (Fase 5 original) — destravado; aguarda apenas resultado do canary corrente.
-
----
-
-## 📋 BACKLOG — Features e melhorias sem prazo imediato
-
-### Modelo
-
-- **Redesign UTM:** remover do scoring, manter só em atribuição downstream. UTM diluiu AUC em −0.0024 vs survey-only no test set (Champion v4). Investigado em `EXPERIMENTO_MOAT_MODELO.md` (24/04).
-- **Holdout contrafactual permanente** 5–10% de leads sem ML para calibração contínua de baseline. W1 do SWOT — risco crítico antes de cliente B.
-- **Retreino com dados pós-01/04/2026** para refletir mix atual de públicos (5/6 categorias Medium do treino jan30 sumiram). Pré-requisitos: fix DT-13 (1.3) + decisão sobre `Source='org'`. Investigado em 22/04 — ver `INVESTIGACAO_BAIXO_DESEMPENHO.md`.
-- **Recalibração `revenue_forecast.md`** após fechamento DEV20 e LF48 — taxa histórica (1,23%) pode ficar desatualizada se audiência mudar.
-
-### Diversificação de canais (mitigação W4 SWOT)
-
-- **Google Ads Enhanced Conversions** — arquitetura F8 já conceptualmente resolvida; falta implementação. Mitigação parcial (utm_source_allowlist) aplicada em 09/04.
-- **TikTok Events API** — público jovem em crescimento, especialmente cursos.
-- **LinkedIn Insight Tag** — para verticais B2B futuros.
-
 ### Features futuras (data flywheel)
-
+Aproveitam volume agregado de múltiplos clientes:
 - **User Agent + dispositivos** — sinal hoje ausente.
-- **Similar leads** (kNN no espaço de features) — leverage do flywheel.
+- **Similar leads** (kNN no espaço de features) — leverage do flywheel cross-cliente.
 - **LTV por comprador** — recompra/upsell.
 - **Histórico de lead_scores anteriores** — quando o mesmo lead reaparece em lançamento posterior.
 - **Interação na página de checkout** — sinal de proximidade real à compra.
+- **NLP** (`src/nlp/`) — campo de texto livre no formulário. Fase 5 do refactor.
 
-### Bugs latentes (não bloqueadores)
-
-- **DT-7:** threshold de Medium calculado sobre janela errada (`src/core/medium.py`). Catálogo: `PLANO_REFACTOR_MLOPS.md` → DT-7.
-- **DT-11 / R5:** imports dinâmicos em `monitoring/orchestrator.py` (5 imports dentro de `run_daily_check()` em vez do topo). Catálogo: `PLANO_REFACTOR_MLOPS.md` → DT-11.
-- **R4:** guard de coluna Medium ausente em `production_pipeline.py` (treino tem; produção não).
-- **`/railway/process-pending`:** `.str accessor` em batches de 1 lead com NaN em UTM (~0,3% polls). Auto-recupera no próximo poll. Documentado em `operacoes_gcp_custos.md`.
-- **`/bigquery/stats`:** retorna 0 rows — sync nunca foi ativado; considerar deletar se não em uso.
-
-### NLP (sem prazo)
-
-- **`src/nlp/`** — campo de texto livre no formulário. Fase 5 do refactor. Catálogo: `PLANO_REFACTOR_MLOPS.md` §7 Fase 5.
+### Diversificação de canais (B2B / verticais novas)
+- **LinkedIn Insight Tag** — para verticais B2B futuros.
 
 ---
 
@@ -293,6 +252,14 @@ Itens que estavam suspensos até o gate H1.1. Com gate atravessado, voltam ao ba
 | Tier 1 safeguards (11/11 itens) | 20-23/04/2026 | `PLANO_SAFEGUARD.md` |
 | EXPERIMENTO_MOAT_MODELO — decomposição moat | 24/04/2026 | `EXPERIMENTO_MOAT_MODELO.md` |
 | Otimização GCP (~R$167/mês) | 26/04/2026 | `operacoes_gcp_custos.md` |
+| T2-2 (log por etapa do pipeline) | 28/04/2026 — commit `8b46645` | `PLANO_SAFEGUARD.md` Tier 2 |
+| T2-3 (importance weighting do grupo controle) | 28/04/2026 — commits `c03d645`, `f8dc4f7` | `PLANO_SAFEGUARD.md` Tier 2 |
+| Tier 2 safeguards (8/8 itens) | 23-29/04/2026 | `PLANO_SAFEGUARD.md` |
+| Tier 3 safeguards (5/5 ativos) | 21-29/04/2026 | `PLANO_SAFEGUARD.md` |
+| DT-CAPI-01 fix (allowlist nos 4 paths CAPI) | 29/04/2026 — commit `41cc2bf` | `ARQUITETURA_SISTEMA_COMPLETA.md` |
+| Validação OOS Champion v4 + gate atravessado | 28/04/2026 | sessão paralela |
+| Retreinos coordenados v4 → modelo treinado pós-01/04 | 23/04/2026 | acima |
+| DT-12 (encoding por variante A/B) | resolvido pela configuração v4 (OHE default) | `PLANO_REFACTOR_MLOPS.md` § DT-12 |
 
 ---
 
