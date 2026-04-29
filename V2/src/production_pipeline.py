@@ -23,6 +23,7 @@ from .core.feature_validator import (
     load_schema_from_json as _load_fv_schema,
     validate_pre_encoding as _validate_pre_encoding,
 )
+from .core.startup_checks import validate_model_loaded as _validate_model_loaded
 from .model.prediction import LeadScoringPredictor
 from .monitoring.data_quality import check_category_drift, load_training_categories, check_distribution_drift, load_training_distributions
 
@@ -133,12 +134,26 @@ class LeadScoringPipeline:
         # Carregar modelo e metadados automaticamente
         self.predictor.load_model()
 
+        # T3-6 + T3-7: validações loud no startup. Aborta se modelo não carregou
+        # ou se run_id em runtime divergir do YAML (deploy desalinhado).
+        # Ler mlflow_run_id direto do YAML como fonte independente (não via predictor).
+        _expected_run_id = None
+        try:
+            import yaml as _yaml
+            with open(os.path.abspath(_active_models_path)) as _f:
+                _am_yaml = _yaml.safe_load(_f)
+            _expected_run_id = (_am_yaml.get('active_model') or {}).get('mlflow_run_id')
+        except Exception as _exc:
+            logger.warning(f"[T3-7] não foi possível ler mlflow_run_id do YAML: {_exc}")
+        _validate_model_loaded(self.predictor, _expected_run_id, client_id=client_id)
+
         # Se A/B test habilitado, carregar predictor por variante
         self._variant_predictors: Dict[str, LeadScoringPredictor] = {}
         if self._ab_test_config.enabled:
             for variant_name, variant in self._ab_test_config.variants.items():
                 vpredictor = LeadScoringPredictor(mlflow_run_id=variant.run_id)
                 vpredictor.load_model()
+                _validate_model_loaded(vpredictor, variant.run_id, client_id=f"{client_id}/{variant_name}")
                 self._variant_predictors[variant_name] = vpredictor
                 logger.info(f"A/B test: variante '{variant_name}' carregada (run_id={variant.run_id})")
 
