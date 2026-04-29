@@ -127,16 +127,16 @@ Implementar sobre o código unificado. Nenhum é bloqueador de produção. Statu
 | T2-6 | Eliminar exceções silenciosas (orchestrator.py db.rollback + parse gspread) | ✅ 28/04 | `PLANO_SAFEGUARD.md` Tier 2 |
 | T2-8 | Alerta para feature high-importance com variance baixa | ✅ coberto por `check_distribution_drift` existente | `PLANO_SAFEGUARD.md` Tier 2 |
 
-### Tier 3 (observabilidade — 7 itens)
+### Tier 3 (observabilidade — 5 restantes)
 
 | ID | Item curto | Catálogo |
 |---|---|---|
-| T3-1 | Smoke test automatizado pós-deploy | `PLANO_SAFEGUARD.md` Tier 3 |
-| T3-2 | Progressão canary documentada no `deploy_capi.sh` | `PLANO_SAFEGUARD.md` Tier 3 |
-| T3-3 | Branch protection no GitHub | `PLANO_SAFEGUARD.md` Tier 3 |
-| T3-5 | Relatório consolidado de rotinas | `PLANO_SAFEGUARD.md` Tier 3 |
-| T3-6 | Validação MODEL_PATH | `PLANO_SAFEGUARD.md` Tier 3 |
-| T3-7 | Reconciliação run_id | `PLANO_SAFEGUARD.md` Tier 3 |
+| T3-1 | Progressão canary documentada no `deploy_capi.sh` | ✅ 29/04 | `PLANO_SAFEGUARD.md` Tier 3 |
+| T3-2 | Script de smoke test pós-deploy | ✅ via T1-10 Gate B (`smoke_test_revision.py` + `deploy_capi.sh:542`) | `PLANO_SAFEGUARD.md` Tier 3 |
+| T3-3 | Branch protection no GitHub | em fila | `PLANO_SAFEGUARD.md` Tier 3 |
+| T3-5 | Relatório consolidado de rotinas | em fila | `PLANO_SAFEGUARD.md` Tier 3 |
+| T3-6 | Validação MODEL_PATH | em fila | `PLANO_SAFEGUARD.md` Tier 3 |
+| T3-7 | Reconciliação run_id | em fila | `PLANO_SAFEGUARD.md` Tier 3 |
 | ~~T3-4~~ | ~~Alerta token Meta < 10 dias~~ — CANCELADO (System User vitalício) | — |
 
 ---

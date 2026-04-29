@@ -555,9 +555,27 @@ deploy_to_cloud_run() {
             print_warning "Smoke test script não encontrado em $SMOKE_SCRIPT — pulado"
         fi
 
-        print_info "Para promover: gcloud run services update-traffic $SERVICE_NAME --region=$REGION --to-revisions=$NEW_REVISION=100"
-        print_info "Para re-rodar smoke test antes de progredir tráfego (Gate A): python3 $SMOKE_SCRIPT $NEW_REVISION"
-        print_info "Para descartar: gcloud run revisions delete $NEW_REVISION --region=$REGION"
+        # [T3-1] Progressão de canary recomendada — não pular etapas.
+        # Critérios objetivos de avanço entre etapas estão em PLANO_SAFEGUARD.md "Protocolo
+        # de progressão de tráfego [T1-9]". Resumo dos comandos:
+        echo
+        print_info "==================== Progressão de canary (T3-1) ===================="
+        print_info "Etapa 0 → 10% (canary inicial, observar 24h):"
+        print_info "  gcloud run services update-traffic $SERVICE_NAME --region=$REGION \\"
+        print_info "    --to-revisions=$NEW_REVISION=10,${PREVIOUS_REVISION:-PREVIOUS_REVISION}=90"
+        print_info ""
+        print_info "Etapa 10% → 50% (após 24h sem alerta HIGH novo + paridade observada):"
+        print_info "  gcloud run services update-traffic $SERVICE_NAME --region=$REGION \\"
+        print_info "    --to-revisions=$NEW_REVISION=50,${PREVIOUS_REVISION:-PREVIOUS_REVISION}=50"
+        print_info ""
+        print_info "Etapa 50% → 100% (após 48h sem alerta HIGH + golden snapshot estável):"
+        print_info "  gcloud run services update-traffic $SERVICE_NAME --region=$REGION \\"
+        print_info "    --to-revisions=$NEW_REVISION=100"
+        print_info ""
+        print_info "Rollback rápido (~10s): voltar 100% para $PREVIOUS_REVISION."
+        print_info "Re-rodar smoke (Gate A) antes de qualquer avanço: python3 $SMOKE_SCRIPT $NEW_REVISION"
+        print_info "Descartar revisão: gcloud run revisions delete $NEW_REVISION --region=$REGION"
+        print_info "====================================================================="
     else
         # Garantir que 100% do tráfego vai para a nova revisão.
         # Necessário quando o serviço está em modo de tráfego manual
