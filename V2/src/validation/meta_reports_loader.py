@@ -25,6 +25,8 @@ except ImportError:
     META_API_AVAILABLE = False
     logger.warning("MetaAPIClient não disponível. Modo API desabilitado.")
 
+from src.validation.data_loader import _cache_is_fresh
+
 
 def normalize_unicode(text: str) -> str:
     """
@@ -223,7 +225,7 @@ class MetaReportsLoader:
 
         use_cache = getattr(self, '_use_cache', True)
 
-        if use_cache and cache_file.exists():
+        if use_cache and _cache_is_fresh(cache_file, end_date):
             logger.info(f"    Cache HIT Meta API: {cache_file.name}")
             with open(cache_file, 'r') as f:
                 cached = json.load(f)

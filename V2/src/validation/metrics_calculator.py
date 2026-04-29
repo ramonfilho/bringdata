@@ -29,6 +29,8 @@ from src.validation.tmb_adjuster import (
     FATOR_TMB_MEDIO
 )
 
+from src.validation.data_loader import _cache_is_fresh
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,10 +65,10 @@ class CampaignMetricsCalculator:
         key = f"{prefix}_{account_id}_{period_start}_{period_end}"
         return hashlib.md5(key.encode()).hexdigest()
 
-    def _load_from_cache(self, cache_key: str) -> Dict:
-        """Carrega dados do cache se existir"""
+    def _load_from_cache(self, cache_key: str, period_end: Optional[str] = None) -> Dict:
+        """Carrega dados do cache se existir e estiver dentro do TTL ancorado em period_end."""
         cache_file = self.cache_dir / f"{cache_key}.json"
-        if cache_file.exists():
+        if _cache_is_fresh(cache_file, period_end):
             import json
             with open(cache_file, 'r') as f:
                 data = json.load(f)
@@ -111,7 +113,7 @@ class CampaignMetricsCalculator:
         # Tentar carregar do cache primeiro
         if self.use_cache:
             cache_key = self._get_cache_key('leads', account_id, period_start, period_end)
-            cached_data = self._load_from_cache(cache_key)
+            cached_data = self._load_from_cache(cache_key, period_end)
             if cached_data is not None:
                 return cached_data
 
