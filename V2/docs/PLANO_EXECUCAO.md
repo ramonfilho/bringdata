@@ -133,7 +133,7 @@ Implementar sobre o código unificado. Nenhum é bloqueador de produção. Statu
 |---|---|---|
 | T3-1 | Progressão canary documentada no `deploy_capi.sh` | ✅ 29/04 | `PLANO_SAFEGUARD.md` Tier 3 |
 | T3-2 | Script de smoke test pós-deploy | ✅ via T1-10 Gate B (`smoke_test_revision.py` + `deploy_capi.sh:542`) | `PLANO_SAFEGUARD.md` Tier 3 |
-| T3-3 | Branch protection no GitHub | em fila | `PLANO_SAFEGUARD.md` Tier 3 |
+| T3-3 | Branch protection no GitHub | ⏸ adiável (exige plano Pro ou repo público) | `PLANO_SAFEGUARD.md` Tier 3 |
 | T3-5 | Relatório consolidado de rotinas | em fila | `PLANO_SAFEGUARD.md` Tier 3 |
 | T3-6 | Validação MODEL_PATH | em fila | `PLANO_SAFEGUARD.md` Tier 3 |
 | T3-7 | Reconciliação run_id | em fila | `PLANO_SAFEGUARD.md` Tier 3 |
