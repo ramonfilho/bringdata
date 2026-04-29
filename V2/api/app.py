@@ -897,7 +897,7 @@ async def webhook_update_survey(
             lead_df = pd.DataFrame([lead_dict_mapped])
             logger.info(f"   DataFrame criado: {lead_df.shape}, colunas={list(lead_df.columns)[:10]}")
 
-            # A/B test routing: identificar variante pelos UTMs do lead
+            # A/B test routing: identificar variante pelos UTMs ou URL do lead
             lead_utms = {
                 'utm_source': existing_lead.utm_source,
                 'utm_medium': existing_lead.utm_medium,
@@ -905,7 +905,7 @@ async def webhook_update_survey(
                 'utm_term': existing_lead.utm_term,
                 'utm_content': existing_lead.utm_content,
             }
-            ab_variant = pipeline.get_ab_variant(lead_utms)
+            ab_variant = pipeline.get_ab_variant(lead_utms, event_source_url=existing_lead.event_source_url)
             predictor_override = None
             enc_overrides_single = None
             if ab_variant:
@@ -3330,7 +3330,10 @@ async def railway_process_pending(pipeline: PipelineDep):
                 'utm_medium':   lead.get('medium'),
                 'utm_term':     lead.get('term'),
             }
-            ab_variant = pipeline.get_ab_variant(lead_utms)
+            ab_variant = pipeline.get_ab_variant(
+                lead_utms,
+                event_source_url=lead.get('pageUrl') or lead.get('event_source_url'),
+            )
             ab_variant_per_lead.append(ab_variant)
             if ab_variant:
                 ab_variant_name = next(

@@ -157,18 +157,23 @@ class LeadScoringPipeline:
                 self._variant_predictors[variant_name] = vpredictor
                 logger.info(f"A/B test: variante '{variant_name}' carregada (run_id={variant.run_id})")
 
-    def get_ab_variant(self, lead_utms: Dict[str, Optional[str]]) -> Optional[ABTestVariantConfig]:
+    def get_ab_variant(
+        self,
+        lead_utms: Dict[str, Optional[str]],
+        event_source_url: Optional[str] = None,
+    ) -> Optional[ABTestVariantConfig]:
         """
-        Retorna a variante A/B que casa com os UTMs do lead (OR logic).
+        Retorna a variante A/B que casa com os UTMs ou URL de origem do lead (OR logic).
         Retorna None se o teste estiver desabilitado ou nenhuma variante casar
         (lead fica fora do teste e é processado normalmente).
 
         lead_utms: dict com chaves utm_source, utm_medium, utm_campaign,
                    utm_content, utm_term (valores podem ser None).
+        event_source_url: URL da página de origem (opcional, usado p/ url_pattern da variante).
         """
         if not self._ab_test_config.enabled:
             return None
-        return self._ab_test_config.match_variant(lead_utms)
+        return self._ab_test_config.match_variant(lead_utms, event_source_url=event_source_url)
 
     def get_variant_predictor(self, variant_name: str) -> LeadScoringPredictor:
         """Retorna o predictor carregado para a variante especificada."""

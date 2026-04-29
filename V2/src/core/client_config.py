@@ -347,6 +347,7 @@ class ABTestVariantConfig:
     capi_event_name_high_quality: str
     conversion_rates: Dict[str, float]   # D01–D10, com PAV aplicado se necessário
     encoding_overrides: Optional["EncodingConfig"] = None  # DT-12 — encoding específico do modelo
+    url_pattern: Optional[str] = None    # Substring (case-insensitive) match em event_source_url; OR com utm_pattern
 
 
 @dataclass
@@ -383,24 +384,33 @@ class ABTestConfig:
                 capi_event_name_high_quality=vdata["capi_event_name_high_quality"],
                 conversion_rates=vdata["conversion_rates"],
                 encoding_overrides=encoding_overrides,
+                url_pattern=vdata.get("url_pattern"),
             )
         return cls(enabled=True, variants=variants)
 
-    def match_variant(self, lead_utms: Dict[str, Optional[str]]) -> Optional[ABTestVariantConfig]:
+    def match_variant(
+        self,
+        lead_utms: Dict[str, Optional[str]],
+        event_source_url: Optional[str] = None,
+    ) -> Optional[ABTestVariantConfig]:
         """
-        Retorna a variante cuja utm_pattern casa com os UTMs do lead (OR logic).
+        Retorna a variante cuja utm_pattern OU url_pattern casa com o lead (OR logic).
         Retorna None se nenhuma variante casar — lead fica fora do teste.
 
         lead_utms: dict com chaves utm_source, utm_medium, utm_campaign,
                    utm_content, utm_term (valores podem ser None).
+        event_source_url: URL da página de origem (opcional). Se a variante
+                   tiver url_pattern definido, faz substring match case-insensitive.
         """
+        url = (event_source_url or "").lower()
         for variant in self.variants.values():
-            if not variant.utm_pattern:
-                continue
-            for field_name, pattern in variant.utm_pattern.items():
-                value = lead_utms.get(field_name) or ""
-                if pattern.lower() in value.lower():
-                    return variant
+            if variant.utm_pattern:
+                for field_name, pattern in variant.utm_pattern.items():
+                    value = lead_utms.get(field_name) or ""
+                    if pattern.lower() in value.lower():
+                        return variant
+            if variant.url_pattern and url and variant.url_pattern.lower() in url:
+                return variant
         return None
 
 

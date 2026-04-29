@@ -1,35 +1,55 @@
 active_model:
-  model_name: v1_devclub_rf_temporal_leads_single
-  mlflow_run_id: 60637bb98b94421b9c7579bb4ac1b1ad
-  trained_at: '2026-04-23T11:23:58.575484'
+  model_name: v1_devclub_rf_temporal_leads_single_jan30
+  mlflow_run_id: d51757f5041c44b7ab1a056fce8c3c35
+  trained_at: '2026-01-30T09:02:24.891076'
   split_method: temporal_leads
   performance:
-    auc: 0.7236
-    monotonia_percentage: 77.78
-    lift_maximum: 3.37
-  # Contexto: Champion v4 — hyperparams idênticos ao jan30 em produção
-  # (n_estimators=300, max_features=sqrt), dataset expandido com Hotmart + Railway
-  # (192,386 leads, 1,104 positivos vs 67k/415 no jan30). Treinado em 23/04/2026
-  # com pipeline refatorada (src/core/). Deploy 10% em 23/04 contra rollback edf23e9
-  # (jan30) que mantém 90%. Progressão para 50% após 24h conforme T1-9.
+    auc: 0.7311
+    monotonia_percentage: 88.89
+    lift_maximum: 2.65
+  # Champion = jan30 — modelo em produção desde 30/01/2026 (servido via rollback edf23e9
+  # até 29/04/2026, depois servido pela revisão main com o mesmo run_id após reativação
+  # do A/B test interno por UTM).
 
 # Para mudar o modelo ativo:
 # 1. Treine um novo modelo: python -m src.train_pipeline --set-active
 # 2. Ative um run existente: python -m src.train_pipeline --activate-run <run_id>
 
 # =============================================================================
-# A/B test desativado — rollback Cloud Run é o split primário
+# A/B test reativado (29/04/2026) — Challenger abr28 via UTM term HQLB
 # =============================================================================
-# Decisão 23/04/2026: em vez de roteamento A/B interno por UTM (ML_JAN vs ML_MAR),
-# o A/B agora é feito via split de tráfego Cloud Run entre duas revisões:
-#   - rollback/edf23e9-jjn (90-50%): serve jan30 (Champion) — código antigo
-#   - main nova revisão (10-50%):    serve este active_model — código+dados novos
+# Champion (default, sem match): jan30 (active_model acima)
+# Challenger: abr28 — T2-3 alpha=1, importance weighting CONTROLE/ML/NEUTRO
 #
-# Vantagem: qualquer diferença de ROAS é atribuível ao binômio código+dados,
-# com hyperparam constante (300/sqrt) entre os dois modelos. Experimento limpo.
+# Roteamento:
+#   - utm_term contendo "HQLB" (case-insensitive) → Challenger abr28
+#   - qualquer outro UTM → default (jan30)
 #
-# Para reativar A/B interno por UTM no futuro: mudar enabled para true + definir
-# variants com utm_pattern + run_ids distintos (ver histórico Git pre-23/04/2026).
+# Eventos Meta:
+#   - Default arm (jan30): LeadQualified (com valor) + LeadQualifiedHighQuality (D9-D10)
+#   - Challenger (abr28): HQLB_LQ (D1-D10, value=0 — não criado no Pixel = ignorado pela Meta)
+#                       + HQLB (apenas D9-D10 — evento que o gestor otimiza)
+#
+# Pixel destino: 1513132406527995 (HQLB criado em 29/04/2026 via test event TEST25625)
 # =============================================================================
 ab_test:
-  enabled: false
+  enabled: true
+  variants:
+    challenger_abr28:
+      run_id: 5d158f0aa6e54b489498470446194a6c
+      utm_pattern:
+        utm_term: "HQLB"
+      url_pattern: "ml-inscricao-lf-v2-crt"   # OR com utm_pattern — redundância para o caso de UTM ser stripada
+      capi_event_name: HQLB_LQ
+      capi_event_name_high_quality: HQLB
+      conversion_rates:
+        D01: 0.0
+        D02: 0.0
+        D03: 0.0
+        D04: 0.0
+        D05: 0.0
+        D06: 0.0
+        D07: 0.0
+        D08: 0.0
+        D09: 0.0
+        D10: 0.0
