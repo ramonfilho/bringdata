@@ -38,7 +38,7 @@
 
 **Resultado:** decisão de seguir com o A/B — Champion v4 validado para entrar em produção via canary. Detalhes operacionais da validação ficam fora deste plano (registrados na sessão que executou o teste).
 
-**Consequência imediata:** H2.1 (deploy canary main) entra em execução em sessão paralela; A/B test reabre como frente ativa; Sprint 2 do `retraining_orchestrator` (quality gate automático pós-treino) volta ao backlog em H6.
+**Consequência imediata:** o deploy canary da main (H2) entra em execução em sessão paralela; A/B test reabre como frente ativa; Sprint 2 do `retraining_orchestrator` (quality gate automático pós-treino) volta ao backlog em H6.
 
 ---
 
@@ -69,30 +69,30 @@
 
 ## H1 — CONCLUÍDO (28/04/2026)
 
-### 1.1 — Validação out-of-sample do Champion v4 ✅ ATRAVESSADA
+### Validação out-of-sample do Champion v4 ✅ ATRAVESSADA
 - Saída: decisão favorável ao v4. Detalhes da execução fora deste plano (sessão paralela).
 - Consequência: H2 destravado e em execução; frente A/B reaberta no roadmap.
 
-### 1.2 — ~~Capturar golden snapshot do monitoring~~ → REPOSICIONADO (não rodar agora)
+### ~~Capturar golden snapshot do monitoring~~ → REPOSICIONADO (não rodar agora)
 - **Por que não agora:** o sistema está com `distribution_drift HIGH` em Medium e `score_distribution_change HIGH` em D10 desde 22/04. Capturar o snapshot neste estado cristaliza um baseline degradado — regressões futuras seriam comparadas contra um estado já ruim e a divergência atual viraria "normal".
-- **Quando capturar:** depois que o sistema estiver saudável. Dois caminhos possíveis (a decisão depende do resultado de H1.1):
+- **Quando capturar:** depois que o sistema estiver saudável. Dois caminhos possíveis (a decisão depende do resultado da validação OOS):
   - **Caminho A — pós-deploy v4 a 10%:** Champion v4 foi treinado com janela até 02/04 (pós-explosão Hotmart), então o feature registry dele já reflete o mix atual de Medium. Se promovido, os alertas HIGH tendem a cair sozinhos. Capturar 24-48h depois do canary 10% estável.
-  - **Caminho B — pós-retreino corretivo:** se H1.1 mostrar que v4 não resolve, retreinar com importance weighting (T2-3) ou outra correção; capturar só após estabilização.
-- **Status:** pendente sem prazo rígido. Não bloqueia H2.1 (canary inicial). Vira resultado de um sistema saudável, não pré-requisito mecânico.
+  - **Caminho B — pós-retreino corretivo:** se a validação OOS mostrar que v4 não resolve, retreinar com importance weighting (T2-3) ou outra correção; capturar só após estabilização.
+- **Status:** pendente sem prazo rígido. Não bloqueia o canary inicial. Vira resultado de um sistema saudável, não pré-requisito mecânico.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → "Fase 2 — Pendente — validação do monitoramento".
 
-### 1.3 — Fix DT-13 (utm_term numérico zerando encode) ✅ commit `dafe85d`
+### Fix DT-13 (utm_term numérico zerando encode) ✅ commit `dafe85d`
 
-### 1.4 — Atualizar `ARQUITETURA_SISTEMA_COMPLETA.md` ✅ commit `15fe32a`
+### Atualizar `ARQUITETURA_SISTEMA_COMPLETA.md` ✅ commit `15fe32a`
 
 ---
 
 ## H2 — Pós-validação (em execução em sessão paralela)
 
-### 2.1 — Deploy canary da main unificada 🔄 EM EXECUÇÃO
+### Deploy canary da main unificada 🔄 EM EXECUÇÃO
 - **Onde:** sessão paralela do usuário (não nesta sessão).
 - **Estratégia:** canary direto 10% → 50% → 100% com critério puramente técnico. Detalhes em `AB_TEST.md`.
-- **Captura do golden snapshot (H1.2):** 24-48h após canary 10% estável e alertas pré-existentes terem cedido. Se não cederem, pausar antes de avançar para 50% e diagnosticar.
+- **Captura do golden snapshot:** 24-48h após canary 10% estável e alertas pré-existentes terem cedido. Se não cederem, pausar antes de avançar para 50% e diagnosticar. (Ver "Capturar golden snapshot" em H1.)
 - **Rollback:** ~10s via `gcloud run services update-traffic` para `00269-jjn`.
 
 ---
@@ -128,30 +128,30 @@ Implementar sobre o código unificado. Nenhum é bloqueador de produção. Statu
 
 Itens independentes dos dados do Cliente B. Resolver antes de iniciar Fase 3b do refactor.
 
-### 4.1 — DT-8: Remover features fantasmas em produção ✅ resolvido (29/04/2026)
+### DT-8: Remover features fantasmas em produção ✅ resolvido (29/04/2026)
 - **Estado atual:** verificação confirma que `production_pipeline.py` **não tem nenhuma criação inline** de `nome_valido`/`email_valido`/`telefone_valido`. Toda a lógica vive em `core/feature_engineering.py` atrás da flag `create_valido_features` (default False; DevClub usa True). Sem código fantasma para remover.
 - **Quando ficou resolvido:** durante o porte #2 da unificação Fase 3 (23/04/2026) — features migraram para `core/feature_engineering.py` e a versão inline em produção sumiu junto.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-8.
 
-### 4.2 — DT-10: Hardcodes de modelo em treino ✅ resolvido (29/04/2026)
+### DT-10: Hardcodes de modelo em treino ✅ resolvido (29/04/2026)
 - **Estado:** os fallbacks hardcoded de `PESOS_COMPRADOR` e `DEFAULT_HYPERPARAMS` em `train_pipeline.py` foram removidos. Agora o treino lê obrigatoriamente de `client_config.model.buyer_weights` e `client_config.model.hyperparameters`; se qualquer dos dois faltar no YAML do cliente, o treino aborta com `ValueError [R2/DT-10]` apontando exatamente o que adicionar. Cliente B esquecer = aborta loud em vez de treinar com pesos DevClub.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-10.
 
-### 4.3 — DT-9: Remover aliases ordinais transitórios
+### DT-9: Remover aliases ordinais transitórios
 - **O quê:** verificar `'idade'` e `'faixa_salarial'` em `encoding.ordinal_variables` do `configs/clients/devclub.yaml`. Se ainda presentes como aliases curtos, remover — o df chega com nomes longos, alias curto = encoding silenciosamente pulado.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-9.
 
-### 4.4 — `src/core/validation.py` — schema check pré-treino
+### Schema check pré-treino (`src/core/validation.py`)
 - **O quê:** novo módulo. Validação no início de `train_pipeline.py`: schema esperado, nulos em features obrigatórias, ranges críticos.
 - **Por quê:** sem isso, dado ruim do Cliente B pode corromper o pipeline silenciosamente.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` §12 "Caminho para Nível 2".
 
-### 4.5 — DT-2: Testes unitários parametrizados em `src/core/`
+### DT-2: Testes unitários parametrizados em `src/core/`
 - **O quê:** `pytest tests/core/ --client devclub --client clientb` para `utm.py`, `medium.py`, `encoding.py`. Parametrizados com dois `ClientConfig` reais.
 - **Por quê:** hoje toda validação é integration test (~10–20 min). Bloqueia iteração rápida com 2+ clientes.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-2.
 
-### 4.6 — Bugs latentes (limpezas opcionais)
+### Bugs latentes (limpezas opcionais)
 Itens menores de qualidade técnica que valem fechar antes de escalar. Nenhum bloqueia produção; cada um é independente.
 - **DT-7** — `core/medium.py` calcula threshold de Medium sobre janela errada (pré-cutoff), gerando alertas falsos no monitoramento.
 - **DT-11** — `monitoring/orchestrator.py` tem 5 imports dentro de `run_daily_check()`; mover para o topo evita erro de import só visível em runtime.
@@ -164,18 +164,18 @@ Itens menores de qualidade técnica que valem fechar antes de escalar. Nenhum bl
 
 ## H5 — ONBOARDING CLIENTE B (depende de dado externo)
 
-### 5.1 — Dados do Cliente B chegam ⚪ BLOQUEADO
+### Dados do Cliente B chegam ⚪ BLOQUEADO
 - **O quê:** formulário XLS + export de vendas + cadência do lançamento.
 - **Bloqueio:** depende do cliente.
 
-### 5.2 — `clientb.yaml` + inspeção de dados
+### `clientb.yaml` + inspeção de dados
 - **Catálogo:** `CHECKLIST_ONBOARDING_NEW_CLIENT.md`.
 
-### 5.3 — Onboarding Cliente B (Fase 3b do refactor)
-- **Pré-condições:** 4.4 (schema check), 4.5 (testes unitários), 5.1 + 5.2.
+### Onboarding Cliente B (Fase 3b do refactor)
+- **Pré-condições:** schema check pré-treino + DT-2 testes unitários (de H4) + dados do Cliente B chegando + `clientb.yaml` escrito (ambos do início de H5).
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` §7 Fase 3b.
 
-### 5.4 — EDA Generator (`src/eda/generate_client_config.py`)
+### EDA Generator (`src/eda/generate_client_config.py`)
 - **O quê:** geração automática de `clientX.yaml` a partir dos dados brutos do cliente.
 - **Pré-condição:** dois configs (`devclub.yaml` + `clientb.yaml`) escritos manualmente — padrão claro o suficiente para automatizar.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` §7 Fase 4.
@@ -185,25 +185,25 @@ Itens menores de qualidade técnica que valem fechar antes de escalar. Nenhum bl
 ## H6 — ESCALA 2-4 CLIENTES (após Cliente B estável)
 
 ### Infraestrutura
-| ID | Item | Pré-condição |
-|---|---|---|
-| 6.1 | GitHub Actions CI — push → lint → `pytest tests/core/` → parity check → merge liberado | DT-2 (4.5) + 2 clientes ativos |
-| 6.2 | Sprint 2 `retraining_orchestrator` — quality gate automático pós-treino (auto-promote por threshold de AUC/lift/monotonia) | thresholds calibrados pelo primeiro ciclo A/B pós-canary |
-| 6.3 | Sprint 3 `retraining_orchestrator` — trigger de retreino por drift | 500+ leads/mês por cliente |
-| 6.4 | Looker Studio — dashboard de ROAS, CPL, distribuição de decis por cliente/lançamento | Cliente B ativo |
-| 6.5 | Vertex AI Model Registry — substituir `configs/active_models/*.yaml` manual por registro centralizado | 3+ clientes ativos |
+| Item | Pré-condição |
+|---|---|
+| GitHub Actions CI — push → lint → `pytest tests/core/` → parity check → merge liberado | DT-2 (testes unitários de H4) + 2 clientes ativos |
+| Sprint 2 `retraining_orchestrator` — quality gate automático pós-treino (auto-promote por threshold de AUC/lift/monotonia) | thresholds calibrados pelo primeiro ciclo A/B pós-canary |
+| Sprint 3 `retraining_orchestrator` — trigger de retreino por drift | 500+ leads/mês por cliente |
+| Looker Studio — dashboard de ROAS, CPL, distribuição de decis por cliente/lançamento | Cliente B ativo |
+| Vertex AI Model Registry — substituir `configs/active_models/*.yaml` manual por registro centralizado | 3+ clientes ativos |
 
 ### Modelo
-| ID | Item | Pré-condição |
-|---|---|---|
-| 6.6 | Redesign UTM — remover do scoring, manter só em atribuição downstream. UTM diluiu AUC em −0.0024 vs survey-only (`EXPERIMENTO_MOAT_MODELO`, 24/04). | retreino dedicado para validar |
-| 6.7 | Recalibração `revenue_forecast.md` — taxa histórica (1,23%) pode ficar desatualizada se audiência mudar. | fechamento DEV20 + LF48 com janela completa |
+| Item | Pré-condição |
+|---|---|
+| Redesign UTM — remover do scoring, manter só em atribuição downstream. UTM diluiu AUC em −0.0024 vs survey-only (`EXPERIMENTO_MOAT_MODELO`, 24/04). | retreino dedicado para validar |
+| Recalibração `revenue_forecast.md` — taxa histórica (1,23%) pode ficar desatualizada se audiência mudar. | fechamento DEV20 + LF48 com janela completa |
 
 ### Diversificação de canais
-| ID | Item | Pré-condição |
-|---|---|---|
-| 6.8 | Google Ads Enhanced Conversions — arquitetura F8 já conceptualmente resolvida; falta implementação. Mitigação parcial via `utm_source_allowlist` (DT-CAPI-01) já aplicada. | budget significativo no canal |
-| 6.9 | TikTok Events API — público jovem em crescimento, especialmente cursos. | budget significativo no canal |
+| Item | Pré-condição |
+|---|---|
+| Google Ads Enhanced Conversions — arquitetura F8 já conceptualmente resolvida; falta implementação. Mitigação parcial via `utm_source_allowlist` (DT-CAPI-01) já aplicada. | budget significativo no canal |
+| TikTok Events API — público jovem em crescimento, especialmente cursos. | budget significativo no canal |
 
 ---
 
