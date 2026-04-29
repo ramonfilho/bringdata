@@ -83,9 +83,19 @@ def load_all_buyers(lancamento_filter: str = None) -> pd.DataFrame:
                     continue
 
                 df = pd.read_excel(report, sheet_name="Detalhes das Conversões", header=1, skiprows=[2])
-                # Detectar se o Excel tem as colunas FBP/FBC (geradas após o fix)
-                # ou o formato antigo (sem fbp/fbc)
-                if len(df.columns) >= 12:
+                # Detectar layout pelo número de colunas:
+                #  13 = novo (com FBP/FBC + meio_pagamento)
+                #  12 = intermediário (com FBP/FBC, sem meio_pagamento)
+                #  10 = antigo (sem FBP/FBC)
+                ncols = len(df.columns)
+                if ncols >= 13:
+                    df.columns = [
+                        "trackeado", "email", "telefone", "fbp", "fbc",
+                        "id_campanha", "nome_campanha", "grupo",
+                        "data_captura", "data_venda", "valor_venda", "fonte_venda",
+                        "meio_pagamento"
+                    ][:ncols]
+                elif ncols >= 12:
                     df.columns = [
                         "trackeado", "email", "telefone", "fbp", "fbc",
                         "id_campanha", "nome_campanha", "grupo",
@@ -163,8 +173,11 @@ def load_cloudsql_capi_data() -> dict:
         logger.info(f"  {len(result)} leads com FBP/FBC na tabela leads_capi")
         return result
 
-    except Exception as e:
-        logger.warning(f"Cloud SQL indisponível ({e}) — usando backup .sql local")
+    except Exception:
+        logger.info(
+            "Cloud SQL bring-data-db descomissionado em 25/02/2026 — "
+            "usando snapshot .sql congelado nessa data"
+        )
 
     # Fallback: backup .sql
     if not CLOUD_SQL_BACKUP.exists():
