@@ -18,6 +18,21 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+_MEIO_PAGAMENTO_POR_ORIGEM = {
+    'guru':    'cartão',
+    'hotmart': 'cartão',
+    'asaas':   'boleto',
+    'tmb':     'boleto',
+}
+
+
+def _meio_pagamento(sale_origin: str) -> str:
+    """Mapeia origem da venda para meio de pagamento. Retorna '' se desconhecido."""
+    if not sale_origin:
+        return ''
+    return _MEIO_PAGAMENTO_POR_ORIGEM.get(str(sale_origin).strip().lower(), '')
+
+
 class ValidationReportGenerator:
     """
     Gera relatórios Excel formatados para validação de performance ML.
@@ -800,6 +815,7 @@ class ValidationReportGenerator:
 
             is_tracked = tracking_data is not None
 
+            sale_origin = tracking_data['sale_origin'] if is_tracked else sale.get('origem', '')
             sale_data = {
                 'trackeado': 'Sim' if is_tracked else 'Não',
                 'email': sale.get('email', ''),
@@ -808,7 +824,8 @@ class ValidationReportGenerator:
                 'fbc': tracking_data['fbc'] if is_tracked else '',
                 'sale_date': tracking_data['sale_date'] if is_tracked else sale.get('sale_date', ''),
                 'sale_value': sale.get('sale_value', 0),
-                'sale_origin': tracking_data['sale_origin'] if is_tracked else sale.get('origem', ''),
+                'sale_origin': sale_origin,
+                'meio_pagamento': _meio_pagamento(sale_origin),
                 'campaign_id': tracking_data['campaign_id'] if is_tracked else '',
                 'campaign': tracking_data['campaign'] if is_tracked else '',
                 'comparison_group': tracking_data['comparison_group'] if is_tracked else '',
@@ -839,7 +856,8 @@ class ValidationReportGenerator:
             'data_captura',
             'sale_date',
             'sale_value',
-            'sale_origin'
+            'sale_origin',
+            'meio_pagamento'
         ]]
 
         # Criar worksheet
@@ -863,7 +881,8 @@ class ValidationReportGenerator:
             'Data Captura',
             'Data Venda',
             'Valor Venda',
-            'Fonte Venda'
+            'Fonte Venda',
+            'Meio Pagamento'
         ]
 
         for col_num, header in enumerate(headers):
@@ -883,6 +902,7 @@ class ValidationReportGenerator:
             worksheet.write(row_num, 9, str(row['sale_date']) if row['sale_date'] else '', formats['text'])
             worksheet.write(row_num, 10, row['sale_value'] if row['sale_value'] else 0, formats['currency'])
             worksheet.write(row_num, 11, row['sale_origin'] if row['sale_origin'] else '', formats['text'])
+            worksheet.write(row_num, 12, row['meio_pagamento'] if row['meio_pagamento'] else '', formats['text'])
 
         # Ajustar larguras
         worksheet.set_column(0, 0, 12)  # Trackeado
@@ -896,6 +916,7 @@ class ValidationReportGenerator:
         worksheet.set_column(8, 9, 18)  # Datas
         worksheet.set_column(10, 10, 15)  # Valor
         worksheet.set_column(11, 11, 15)  # Fonte
+        worksheet.set_column(12, 12, 15)  # Meio Pagamento
 
     def _write_comparacao_ml(
         self,
