@@ -233,6 +233,9 @@ class MonitoringOrchestrator:
         # NOVO: Gerar sumário crítico consolidado
         critical_summary = self._generate_critical_summary(alerts, funnel_metrics, lead_quality_metrics)
 
+        # T3-5: rotinas operacionais consolidadas no mesmo log
+        operational_routines = self._generate_operational_routines_summary()
+
         # Mensagem de conclusão
         logger.info(f"\n Monitoramento concluído!")
         logger.info(f" Log completo salvo em: {log_path}\n")
@@ -244,8 +247,77 @@ class MonitoringOrchestrator:
             'alerts': [alert.to_dict() for alert in alerts],
             'funnel_metrics': funnel_metrics,
             'lead_quality_metrics': lead_quality_metrics,
-            'critical_summary': critical_summary
+            'critical_summary': critical_summary,
+            'operational_routines': operational_routines,
         }
+
+    def _generate_operational_routines_summary(self) -> Dict:
+        """T3-5: consolida status das rotinas operacionais no log de monitoramento.
+
+        Reporta: run_id do modelo ativo, Cloud Run revision, último scoring (proxy
+        do polling Railway), e contadores 24h de leads recebidos/scoreados/CAPI enviados.
+        Tudo num bloco único — evita ter que abrir log por log para checar saúde.
+        """
+        import os as _os
+        import yaml as _yaml
+        from sqlalchemy import func as _sa_func
+
+        result: Dict = {}
+        # 1. Modelo ativo (run_id do YAML)
+        client_id = getattr(self.client_config, 'client_id', 'devclub') if self.client_config else 'devclub'
+        active_yaml = _os.path.join(_os.path.dirname(__file__), '..', '..', 'configs', 'active_models', f'{client_id}.yaml')
+        try:
+            with open(_os.path.abspath(active_yaml)) as _f:
+                _am = _yaml.safe_load(_f) or {}
+            result['active_run_id'] = (_am.get('active_model') or {}).get('mlflow_run_id')
+            result['ab_test_enabled'] = bool((_am.get('ab_test') or {}).get('enabled'))
+        except Exception as _e:
+            logger.warning(f"  [T3-5] não foi possível ler active_model.yaml: {_e}")
+            result['active_run_id'] = None
+            result['ab_test_enabled'] = None
+
+        # 2. Cloud Run revision (definida pelo Cloud Run em runtime)
+        result['cloud_run_revision'] = _os.environ.get('K_REVISION')
+        result['cloud_run_service'] = _os.environ.get('K_SERVICE')
+
+        # 3. Polling Railway / contadores 24h via leads_capi
+        if self.db is not None:
+            try:
+                _now = datetime.now(timezone.utc)
+                _24h = _now - timedelta(hours=24)
+                from api.database import LeadCAPI as _LeadCAPI
+                _last_scored = self.db.query(_sa_func.max(_LeadCAPI.scored_at)).scalar()
+                _leads_24h = self.db.query(_sa_func.count(_LeadCAPI.id)).filter(_LeadCAPI.created_at >= _24h).scalar() or 0
+                _scored_24h = self.db.query(_sa_func.count(_LeadCAPI.id)).filter(_LeadCAPI.scored_at >= _24h).scalar() or 0
+                _capi_24h = self.db.query(_sa_func.count(_LeadCAPI.id)).filter(_LeadCAPI.capi_sent_at >= _24h).scalar() or 0
+                result['last_scored_at'] = _last_scored.isoformat() if _last_scored else None
+                result['leads_received_24h'] = int(_leads_24h)
+                result['leads_scored_24h'] = int(_scored_24h)
+                result['capi_sent_24h'] = int(_capi_24h)
+                # Lag desde último scoring (proxy de polling estar vivo)
+                if _last_scored is not None:
+                    if _last_scored.tzinfo is None:
+                        _last_scored = _last_scored.replace(tzinfo=timezone.utc)
+                    result['minutes_since_last_score'] = round((_now - _last_scored).total_seconds() / 60, 1)
+            except Exception as _e:
+                logger.warning(f"  [T3-5] falha ao coletar contadores 24h: {_e}")
+
+        # Log estruturado consolidado
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info(" Rotinas operacionais (T3-5)")
+        logger.info("=" * 60)
+        logger.info(f"  Modelo ativo (run_id): {result.get('active_run_id') or '(não lido)'}")
+        logger.info(f"  A/B test: {'enabled' if result.get('ab_test_enabled') else 'disabled'}")
+        if result.get('cloud_run_revision'):
+            logger.info(f"  Cloud Run: {result.get('cloud_run_service')} / {result.get('cloud_run_revision')}")
+        if 'last_scored_at' in result:
+            logger.info(f"  Último scoring: {result['last_scored_at']} ({result.get('minutes_since_last_score', '?')} min atrás)")
+            logger.info(f"  Leads (24h)  recebidos: {result.get('leads_received_24h', 0):>6,}")
+            logger.info(f"  Leads (24h)  scoreados: {result.get('leads_scored_24h', 0):>6,}")
+            logger.info(f"  Eventos CAPI (24h):     {result.get('capi_sent_24h', 0):>6,}")
+        logger.info("=" * 60)
+        return result
 
     def _count_sheet_tab2_responses(self, lookback_time) -> int:
         """
