@@ -896,12 +896,16 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         df_encoded_with_date.to_parquet(_encoded_path, index=False)
         logger.info(f"  [compare_models] Dataset encodado salvo em: {_encoded_path}")
 
-    # === Pesos por tipo de comprador (lidos do ClientConfig — configs/clients/{client}.yaml) ===
-    PESOS_COMPRADOR = (
-        client_config.model.buyer_weights
-        if client_config and client_config.model and client_config.model.buyer_weights
-        else {'guru': 1.00, 'tmb_baixo': 0.84, 'tmb_medio': 0.67, 'tmb_alto': 0.49, 'tmb_sem': 0.42}
-    )
+    # === Pesos por tipo de comprador — obrigatoriamente do ClientConfig (R2/DT-10) ===
+    # Sem fallback: pesos são específicos por cliente (TMB é DevClub). Se um cliente novo
+    # esquecer model.buyer_weights no YAML, abortar é melhor que treinar com pesos errados.
+    if not (client_config and client_config.model and client_config.model.buyer_weights):
+        raise ValueError(
+            "[R2/DT-10] client_config.model.buyer_weights ausente no YAML do cliente. "
+            "Esses pesos são específicos por cliente (Guru × TMB graus de risco). "
+            "Definir em configs/clients/{client_id}.yaml seção model.buyer_weights antes de treinar."
+        )
+    PESOS_COMPRADOR = client_config.model.buyer_weights
 
     def _get_peso(row):
         if row.get('target', 0) == 0:
@@ -929,14 +933,16 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         else:
             buyer_weights = buyer_weights * control_weights
 
-    # Hiperparâmetros padrão do modelo (lidos do ClientConfig — configs/clients/{client}.yaml)
-    DEFAULT_HYPERPARAMS = (
-        client_config.model.hyperparameters
-        if client_config and client_config.model and client_config.model.hyperparameters
-        else {'n_estimators': 300, 'max_depth': 8, 'min_samples_split': 2,
-              'min_samples_leaf': 1, 'max_features': 'sqrt', 'class_weight': 'balanced',
-              'random_state': 42, 'n_jobs': -1}
-    )
+    # Hiperparâmetros do modelo — obrigatoriamente do ClientConfig (R2/DT-10).
+    # Sem fallback: a calibração que serve DevClub não necessariamente serve outros clientes.
+    if not (client_config and client_config.model and client_config.model.hyperparameters):
+        raise ValueError(
+            "[R2/DT-10] client_config.model.hyperparameters ausente no YAML do cliente. "
+            "Definir em configs/clients/{client_id}.yaml seção model.hyperparameters antes "
+            "de treinar (chaves esperadas: n_estimators, max_depth, min_samples_split, "
+            "min_samples_leaf, max_features, class_weight, random_state, n_jobs)."
+        )
+    DEFAULT_HYPERPARAMS = client_config.model.hyperparameters
 
     # === HYPERPARAMETER TUNING (opcional) ===
     melhores_params = None

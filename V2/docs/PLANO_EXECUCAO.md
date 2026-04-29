@@ -161,10 +161,8 @@ Itens independentes dos dados do Cliente B. Resolver antes de iniciar Fase 3b do
 - **Quando ficou resolvido:** durante o porte #2 da unificação Fase 3 (23/04/2026) — features migraram para `core/feature_engineering.py` e a versão inline em produção sumiu junto.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-8.
 
-### 4.2 — R2 / DT-10: Hardcodes de modelo em treino
-- **O quê:** `src/train_pipeline.py:~763,~788` — `PESOS_COMPRADOR` e `DEFAULT_HYPERPARAMS` reimplementados inline apesar de existirem no YAML do cliente. Substituir por `client_config.model.buyer_weights` e `client_config.model.hyperparameters`.
-- **Por quê:** sem isso, treino do Cliente B usaria pesos DevClub silenciosamente.
-- **Validação:** Camada 2 (AUC ±0.5%) antes/depois.
+### 4.2 — R2 / DT-10: Hardcodes de modelo em treino ✅ resolvido (29/04/2026)
+- **Estado:** os fallbacks hardcoded de `PESOS_COMPRADOR` e `DEFAULT_HYPERPARAMS` em `train_pipeline.py` foram removidos. Agora o treino lê obrigatoriamente de `client_config.model.buyer_weights` e `client_config.model.hyperparameters`; se qualquer dos dois faltar no YAML do cliente, o treino aborta com `ValueError [R2/DT-10]` apontando exatamente o que adicionar. Cliente B esquecer = aborta loud em vez de treinar com pesos DevClub.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-10.
 
 ### 4.3 — R3 / DT-9: Remover aliases ordinais transitórios

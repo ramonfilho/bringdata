@@ -875,16 +875,11 @@ Todas as três campanhas Lookalike representam >5% do dataset histórico complet
 
 **Condição para fazer:** antes do onboarding de Cliente B (R3 na tabela de pré-condições).
 
-### DT-10 — Hardcodes de modelo em `train_pipeline.py`
+### DT-10 — Hardcodes de modelo em `train_pipeline.py` ✅ RESOLVIDO
 
-`PESOS_COMPRADOR` (linha ~763) e `DEFAULT_HYPERPARAMS` (linha ~788) são replicados inline em `train_pipeline.py` apesar de existirem em `configs/clients/devclub.yaml` como `model.buyer_weights` e `model.hyperparameters`. Para Cliente B, o treino usará os pesos e hiperparâmetros do DevClub sem nenhum aviso.
+> **Status (2026-04-29):** RESOLVIDO. Os fallbacks hardcoded de `PESOS_COMPRADOR` e `DEFAULT_HYPERPARAMS` em `train_pipeline.py` foram removidos. O treino agora lê **obrigatoriamente** de `client_config.model.buyer_weights` e `client_config.model.hyperparameters`. Se qualquer um dos dois estiver ausente no YAML, levanta `ValueError [R2/DT-10]` antes do fit, apontando o caminho exato a preencher. Cliente B esquecer = aborta loud (não treina com pesos DevClub silenciosamente).
 
-**Fix:**
-1. Em `train_pipeline.py`, substituir `PESOS_COMPRADOR = {...}` por `PESOS_COMPRADOR = client_config.model.buyer_weights`
-2. Substituir `DEFAULT_HYPERPARAMS = {...}` por `DEFAULT_HYPERPARAMS = vars(client_config.model.hyperparameters)` (ou equivalente dependendo do tipo do campo)
-3. Rodar Camada 2: `python -m src.train_pipeline --api-end-date 2026-03-15 ...` — AUC deve ficar dentro de ±0.5% de 0.745. Os valores em `devclub.yaml` são idênticos aos hardcodes, então a paridade é esperada.
-
-**Condição para fazer:** antes do onboarding de Cliente B (R2 na tabela de pré-condições).
+**Histórico do problema:** havia fallback inline no train_pipeline com valores específicos do DevClub (`{'guru': 1.0, 'tmb_baixo': 0.84, ...}` e os hyperparams). Como o fallback só ativava quando o YAML não tinha o campo, treino do DevClub funcionava porque o YAML tem tudo preenchido, mas qualquer cliente B novo sem esses campos cairia silenciosamente nos valores DevClub. A solução foi tornar o YAML obrigatório.
 
 ### DT-11 — Imports dinâmicos em `monitoring/orchestrator.py`
 
