@@ -46,7 +46,7 @@ from tabulate import tabulate
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Imports dos módulos de validação
-from src.validation.data_loader import LeadDataLoader, SalesDataLoader, CAPILeadDataLoader, get_active_model_path
+from src.validation.data_loader import LeadDataLoader, SalesDataLoader, CAPILeadDataLoader, get_active_model_path, _cache_is_fresh
 from src.validation.campaign_classifier import add_ml_classification
 from src.validation.matching import (
     match_leads_to_sales,
@@ -1022,7 +1022,7 @@ def main():
             _capi_cache_dir.mkdir(parents=True, exist_ok=True)
             _capi_cache_file = _capi_cache_dir / f"capi_{start_str}_{end_str}.parquet"
 
-            if use_cache and _capi_cache_file.exists():
+            if use_cache and _cache_is_fresh(_capi_cache_file, end_str):
                 logger.info(f"    Cache HIT CAPI: {_capi_cache_file.name}")
                 capi_norm = pd.read_parquet(_capi_cache_file)
                 capi_leads_data = []  # skip DB queries

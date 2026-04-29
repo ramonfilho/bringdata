@@ -78,6 +78,26 @@ PRODUCAO_SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1VYti8jX277VNMkvzr
 BACKUP_SHEETS_URL = 'https://docs.google.com/spreadsheets/d/1OqNYA5zU9ix1uf52ovRYIdLhcugzwgfKOheKxE_zgvE'    # [LF] Pesquisa - Backup
 
 
+def _cache_is_fresh(cache_file: Path, end_date: Optional[str], buffer_days: int = 2) -> bool:
+    """
+    Cache é fresco quando o arquivo foi gerado pelo menos `buffer_days` após
+    o `end_date` da janela coberta. Período em aberto (mtime < end_date+buffer)
+    invalida o cache para forçar refetch da API. Sem `end_date` (ex.: Sheets
+    'all'), trata como sem janela e mantém comportamento de existência.
+    """
+    from datetime import datetime, timedelta
+    if not cache_file.exists():
+        return False
+    if not end_date:
+        return True
+    try:
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        return True
+    mtime = datetime.fromtimestamp(cache_file.stat().st_mtime)
+    return mtime >= end_dt + timedelta(days=buffer_days)
+
+
 class LeadDataLoader:
     """
     Carrega e normaliza dados de leads do Google Sheets.
@@ -191,7 +211,7 @@ class LeadDataLoader:
         # Cache: chave por sheet_id + período (sem filtro de data = 'all')
         if use_cache and not training_mode:
             cache_file = self._cache_path('sheets', sheet_id, start_date or 'all', end_date or 'all')
-            if cache_file.exists():
+            if _cache_is_fresh(cache_file, end_date):
                 logger.info(f"    Cache HIT Sheets: {cache_file.name}")
                 return pd.read_parquet(cache_file)
 
@@ -1066,7 +1086,7 @@ class SalesDataLoader:
 
         # Cache
         cache_file = self._cache_path('hotmart', start_date, end_date)
-        if cache_file.exists():
+        if _cache_is_fresh(cache_file, end_date):
             logger.info(f"    Cache HIT Hotmart: {cache_file.name}")
             return pd.read_parquet(cache_file)
 
@@ -1195,7 +1215,7 @@ class SalesDataLoader:
         # Cache: chave por período + include_canceled
         status_key = 'fechamento' if include_canceled else 'pos-dev'
         cache_file = self._cache_path('guru', start_date, end_date, status_key)
-        if cache_file.exists():
+        if _cache_is_fresh(cache_file, end_date):
             logger.info(f"    Cache HIT Guru: {cache_file.name}")
             return pd.read_parquet(cache_file)
 
@@ -1344,7 +1364,7 @@ class SalesDataLoader:
 
         # Cache parquet
         cache_file = self._cache_path('railway_leads', start_date, end_date)
-        if cache_file.exists():
+        if _cache_is_fresh(cache_file, end_date):
             logger.info(f"    Cache HIT Railway: {cache_file.name}")
             return pd.read_parquet(cache_file)
 
@@ -1419,7 +1439,7 @@ class SalesDataLoader:
             DataFrame normalizado com origem='asaas'
         """
         cache_file = self._cache_path('asaas', start_date, end_date)
-        if cache_file.exists():
+        if _cache_is_fresh(cache_file, end_date):
             logger.info(f"    Cache HIT Asaas: {cache_file.name}")
             return pd.read_parquet(cache_file)
 
