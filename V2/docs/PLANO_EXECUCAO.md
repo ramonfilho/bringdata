@@ -145,8 +145,9 @@ Implementar sobre o código unificado. Nenhum é bloqueador de produção. Statu
 
 Itens independentes dos dados do Cliente B. Resolver antes de iniciar Fase 3b do refactor.
 
-### 4.1 — R1 / DT-8: Remover features fantasmas em produção
-- **O quê:** `src/production_pipeline.py` cria `nome_valido`/`email_valido`/`telefone_valido`. Após o porte #2 da Fase 3, essas features também passam a ser criadas via `core/feature_engineering.py` quando `create_valido_features=true` está no YAML — verificar e remover o bloco fantasma do `production_pipeline.py` para não duplicar.
+### 4.1 — R1 / DT-8: Remover features fantasmas em produção ✅ resolvido (29/04/2026)
+- **Estado atual:** verificação confirma que `production_pipeline.py` **não tem nenhuma criação inline** de `nome_valido`/`email_valido`/`telefone_valido`. Toda a lógica vive em `core/feature_engineering.py` atrás da flag `create_valido_features` (default False; DevClub usa True). Sem código fantasma para remover.
+- **Quando ficou resolvido:** durante o porte #2 da unificação Fase 3 (23/04/2026) — features migraram para `core/feature_engineering.py` e a versão inline em produção sumiu junto.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-8.
 
 ### 4.2 — R2 / DT-10: Hardcodes de modelo em treino

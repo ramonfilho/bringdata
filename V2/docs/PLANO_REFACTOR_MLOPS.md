@@ -855,17 +855,13 @@ Todas as três campanhas Lookalike representam >5% do dataset histórico complet
 
 **Prioridade:** baixa — não impacta predições (modelo preenche com 0); apenas gera alertas corretos no monitoramento. Endereçar antes de escalar para 3+ clientes.
 
-### DT-8 — Features fantasmas em `production_pipeline.py`
+### DT-8 — Features fantasmas em `production_pipeline.py` ✅ RESOLVIDO
 
-`production_pipeline.py` cria `nome_valido`, `email_valido` e `telefone_valido` no passo de feature engineering, mas `core/feature_engineering.py` não cria essas colunas (foram removidas como decisão canônica — treino é a fonte de verdade). O feature registry do modelo ativo não contém nenhuma das 3. O predictor as descarta silenciosamente via `prepare_features`, mas o código executa trabalho desnecessário e cria divergência estrutural com o treino.
+> **Status (2026-04-29):** RESOLVIDO. `production_pipeline.py` não tem mais criação inline das features `nome_valido`/`email_valido`/`telefone_valido` — toda a lógica está em `core/feature_engineering.py` atrás da flag `create_valido_features` (config-driven). Verificação `grep -nE "nome_valido|email_valido|telefone_valido" src/production_pipeline.py` retorna vazio. A migração aconteceu durante o porte #2 da Fase 3 da unificação (23/04/2026).
 
-**Fix:**
-1. `grep -n "nome_valido\|email_valido\|telefone_valido" src/production_pipeline.py` — localizar criação
-2. Remover o bloco que cria as 3 features
-3. Confirmar com `grep -r "nome_valido" mlruns/1/$(cat configs/active_models/devclub.yaml | grep mlflow_run_id | awk '{print $2}')/` que não estão no registry
-4. Deploy — não requer retreino
+**Histórico do problema:** `production_pipeline.py` criava as 3 features inline; `core/feature_engineering.py` não criava. Quando o Champion jan30 (que tem essas features no registry) era servido, funcionava por acaso porque a versão inline replicava a lógica histórica. Mas era código duplicado fora do core canônico.
 
-**Condição para fazer:** antes do onboarding de Cliente B (R1 na tabela de pré-condições).
+**Como foi resolvido:** o porte #2 (23/04/2026) migrou a criação para `core/feature_engineering.py` com flag opcional, e o bloco em produção sumiu junto. DevClub usa `create_valido_features=true` no YAML; clientes futuros que não precisam das features deixam o default `false`.
 
 ### DT-9 — Encoding ordinal: verificar consistência de nomes de coluna
 
