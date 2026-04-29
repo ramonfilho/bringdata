@@ -863,17 +863,11 @@ Todas as três campanhas Lookalike representam >5% do dataset histórico complet
 
 **Como foi resolvido:** o porte #2 (23/04/2026) migrou a criação para `core/feature_engineering.py` com flag opcional, e o bloco em produção sumiu junto. DevClub usa `create_valido_features=true` no YAML; clientes futuros que não precisam das features deixam o default `false`.
 
-### DT-9 — Encoding ordinal: verificar consistência de nomes de coluna
+### DT-9 — Encoding ordinal: verificar consistência de nomes de coluna ✅ RESOLVIDO
 
-`configs/clients/devclub.yaml > encoding.ordinal_variables` pode ainda ter `'idade'` e `'faixa_salarial'` como aliases transitórios — o checklist pós-retreino (item 4, Fase 2) mandou removê-los mas não foi marcado como feito. Se o alias curto está no YAML mas o df chega ao `apply_encoding` com o nome longo (`'Qual a sua idade?'`), o encoding ordinal é silenciosamente pulado — sem erro, sem log.
+> **Status (2026-04-29):** RESOLVIDO. `encoding.ordinal_variables` no `devclub.yaml` contém apenas `dia_semana`. Os aliases transitórios `'idade'` e `'faixa_salarial'` foram removidos durante a Opção A da unificação Fase 3 (23/04/2026), quando idade e faixa salarial migraram de ordinal para OHE como default do cliente.
 
-**Fix:**
-1. `grep "ordinal_variables" -A 10 configs/clients/devclub.yaml` — ver estado atual
-2. `grep "ordinal_variables" src/core/encoding.py` — ver como a chave é usada
-3. Confirmar que o nome da coluna no YAML corresponde ao nome que aparece no df após `category_unification` (que é onde os renomes acontecem)
-4. Se `'idade'` está no YAML mas o df tem `'Qual a sua idade?'` → corrigir o YAML para a forma longa, ou confirmar que `category_unification` renomeia antes
-
-**Condição para fazer:** antes do onboarding de Cliente B (R3 na tabela de pré-condições).
+**Histórico do problema:** o YAML tinha `'idade'` e `'faixa_salarial'` como chaves ordinais com nomes curtos, mas o df chegava ao `apply_encoding` com o nome longo (`'Qual a sua idade?'`, `'Atualmente, qual a sua faixa salarial?'`) — encoding ordinal era silenciosamente pulado. A Opção A resolveu o problema na raiz: idade/salário deixaram de ser ordinais por default; modelos antigos que ainda esperam ordinal recebem essa configuração via `encoding_overrides` na variante A/B (DT-12).
 
 ### DT-10 — Hardcodes de modelo em `train_pipeline.py` ✅ RESOLVIDO
 

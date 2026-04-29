@@ -137,7 +137,10 @@ Itens independentes dos dados do Cliente B. Resolver antes de iniciar Fase 3b do
 - **Estado:** os fallbacks hardcoded de `PESOS_COMPRADOR` e `DEFAULT_HYPERPARAMS` em `train_pipeline.py` foram removidos. Agora o treino lê obrigatoriamente de `client_config.model.buyer_weights` e `client_config.model.hyperparameters`; se qualquer dos dois faltar no YAML do cliente, o treino aborta com `ValueError [R2/DT-10]` apontando exatamente o que adicionar. Cliente B esquecer = aborta loud em vez de treinar com pesos DevClub.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-10.
 
-### DT-9: Remover aliases ordinais transitórios
+### DT-9: Remover aliases ordinais transitórios ✅ resolvido (29/04/2026)
+- **Estado atual:** `encoding.ordinal_variables` no `devclub.yaml` tem apenas `dia_semana`. Não há mais `'idade'` nem `'faixa_salarial'`.
+- **Quando ficou resolvido:** durante a Opção A da unificação Fase 3 (23/04/2026), quando idade e faixa salarial migraram de ordinal para OHE como default do cliente. Os aliases curtos saíram junto na mesma edição do YAML.
+- **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-9.
 - **O quê:** verificar `'idade'` e `'faixa_salarial'` em `encoding.ordinal_variables` do `configs/clients/devclub.yaml`. Se ainda presentes como aliases curtos, remover — o df chega com nomes longos, alias curto = encoding silenciosamente pulado.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-9.
 
