@@ -50,6 +50,7 @@ Antes de executar `FORCE_DEPLOY=true ./deploy_capi.sh --force-deploy` para subir
 - [ ] T1-9 (protocolo progressão de tráfego) — Concluído
 - [ ] T1-10 (feature coverage check) — Concluído
 - [ ] T1-11 (validador pré-encoding de features) — Concluído
+- [ ] T1-12 (smoke de paridade pipeline-modelo no treino) — **Backlog** (29/04/2026)
 
 **Gates automáticos que o script roda:**
 1. `check_authorized_branch()` — bloqueia se branch não-rollback sem `FORCE_DEPLOY=true`
@@ -438,6 +439,7 @@ Descoberto em 2026-04-21 durante investigação do T1-9. Pontos onde `except: pa
 | T1-9 | Protocolo de progressão de tráfego | `docs/` | Documentar e enforçar: 0%→10%(1h)→50%(confirmação)→100%(confirmação). **Especial:** no deploy de main unificado, parar em 50/50 durante o DEV20 para não expor o cliente a 100% antes de ROAS validado. Ver `AB_TEST.md` → "Estratégia de deploy — 50/50". |
 | T1-10 | Feature coverage check (fail-loud) | `src/core/encoding.py` | Antes do fill com 0, verificar se top-N features (importância ≥ 1%) estão zeradas em mais de X% dos leads. Alerta HIGH se sim. Evita degradação silenciosa como `Medium_Linguagem_programacao`. |
 | T1-11 | Validador pré-encoding de features | `src/core/feature_validator.py` (novo) + `production_pipeline.py` + `api/app.py` | Após feature_engineering e antes do apply_encoding, validar que cada feature pré-OHE esperada pelo modelo ativo existe no DataFrame com o tipo e valores dentro do domínio conhecido. Gera log estruturado JSON por batch + endpoint `/monitoring/feature-report` que agrega últimas N horas. Critério de promoção de tráfego formalizado nessa métrica. |
+| T1-12 | Smoke de paridade pipeline-modelo no treino | `src/train_pipeline.py` (final) + opcionalmente `model/training_model.py` | **Motivação**: hoje T1-10/T1-11 protegem em runtime. Mas o modelo é registrado no MLflow sem nenhum check de "esse modelo, com o pipeline atual, scoreia sem perder feature". Bug silencioso possível: registrar modelo cujo `feature_names_in_` não casa exatamente com o que `apply_encoding` produz no main code → primeiro deploy descobre. **Implementação**: ao final do `train_pipeline` (após salvar modelo, antes de `--set-active`), rodar amostra de ~100 leads via `production_pipeline.run` com o modelo recém-treinado e verificar (a) `set(model.feature_names_in_) ⊆ set(produced_columns)`, (b) score sem NaN no intervalo [0,1], (c) decis cobrem D01–D10. Falha ⇒ aborta `--set-active` e log loud. Reusa lógica de `scripts/smoke_test_revision.py`. **Custo**: ~30s adicionais por treino. **Status**: backlog, sem prazo. Implementar em sessão futura quando próximo retreino for feito. |
 
 ### Tier 2 — Qualidade de dados
 
@@ -529,7 +531,7 @@ curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/singl
 | T2-5 Filtro vendas aprovadas | Concluído | | 2026-04-28 — confirmado já implementado: `include_canceled` (default False) em load_guru_sales (linha 684), load_tmb_sales (linha 872), load_hotpay_sales, load_guru_sales_from_api (linha 1225). validate_ml_performance.py:1387 só permite `include_canceled=True` em relatório de fechamento. Sem mudança de código. |
 | T2-6 Eliminar exceções silenciosas | Concluído | | 2026-04-28 — orchestrator.py:219 (db.rollback) → logger.error com exc_info; orchestrator.py:315 (parse de linha gspread) → contador de skips com logger.warning agregado no fim do loop. app.py:1638-1640 confirmado: já tinha logger.error desde commit anterior. Restantes (linhas 2263, 2596) já tinham logger e foram classificados BAIXA no BLOCO 11. |
 | T2-7 Validador pós-deploy automatizado | Concluído | | 2026-04-23 — scripts/progression_gate.py consome /monitoring/feature-report (T1-11) + /monitoring/daily-check/railway, consolida em PROMOTE/HOLD/ROLLBACK, executa gcloud run services update-traffic se --execute. Commit 42990b8. |
-| T2-8 Alerta feature importance-alta variance baixa | Pendente | | Adicionado 2026-04-22 — descoberto na investigação de drift de Medium (22/04); `Medium_Linguagem_programacao` (5,31% importance) zerada em produção sem alerta prévio. |
+| T2-8 Alerta feature importance-alta variance baixa | Concluído | | 2026-04-29 — verificação confirma que `check_distribution_drift` (existente em `monitoring/data_quality.py`) já detecta o caso operacional do `Medium_Linguagem_programacao` (treino 14,5% → produção 0% gera drift HIGH). Cobertura sobreposta. Único ganho marginal seria ordenar a saída do alerta por feature_importance para destacar os casos high-impact primeiro — fica como melhoria opcional de UX, não como item separado. |
 | T3-1 Canary documentado | Pendente | | |
 | T3-2 Smoke test pós-deploy | Pendente | | |
 | T3-3 Branch protection | Pendente | | |
