@@ -112,6 +112,17 @@
 - **Conclusão prática:** feature fica pronta no repertório (default desligado). Próxima retomada faz sentido após gate H1.1 — se Champion v4 passar e for promovido, refazer o experimento pós-DEV20 com janela CONTROLE mais madura.
 - **Catálogo:** `PLANO_SAFEGUARD.md` Tier 2 → T2-3.
 
+### Refatoração CAPI allowlist (DT-CAPI-01) — ✅ commit `41cc2bf` / pendente deploy
+- **Bug histórico (09/04 → 28/04/2026):** `utm_source_allowlist` foi adicionada em 09/04 (commit `6b8fc05`) mas aplicada em apenas 2 de 4 caminhos CAPI no `app.py`. Os paths `/webhook/lead_capture` (principal do frontend) e `/predict/batch` (Apps Script) ficaram sem filtro. Resultado: ~4.200 eventos não-Meta foram para o Pixel da Meta no período (google-ads 2.016, gruposantigos 552, (null) 461, API 431, tiktok 420, ig 159, outros).
+- **Fix (29/04/2026):** lógica centralizada em `should_send_to_destination(lead, capi_config, destination='meta')` em `capi_integration.py`. Os 4 paths chamam a mesma função. Parametrizado por `destination` — para ativar Google Ads basta adicionar branch lendo allowlist específica.
+- **Validações pré-commit (camadas 1-2):** sintaxe + imports OK; paridade 100% com lógica antiga em 50 casos sintéticos cobrindo allowlist hits/misses, blocklist matches, vazios/None, case sensitivity, chaves alternativas (`source` vs `utm_source`).
+- **Validação pós-deploy obrigatória:** critérios genéricos em `PLANO_SAFEGUARD.md` T1-9 (progressão de tráfego) + checks específicos do fix:
+  - **Smoke test:** 5 leads sintéticos via curl em produção (mix `facebook-ads`/`google-ads`/`tiktok`/`null`/campaign=`LEAD | LQ`) confirmando capiStatus esperado para cada source.
+  - **24h em produção:** `google-ads` com `capiStatus='success'` deve cair de ~91% para ~0% (efeito esperado); `facebook-ads` com `capiStatus='success'` deve permanecer ≥ 95%; `capi_sent` total cai 10-15%.
+  - **Meta Events Manager (Pixel `1937807493703815`):** match rate não pode piorar; volume diário de `LeadQualified` cai 10-15% conforme esperado.
+  - **Sinais de regressão para rollback:** `facebook-ads success` < 90% (refatoração quebrou); `acceptance_rate` Meta despenca; 5xx em `/webhook/lead_capture` aumentando.
+- **Catálogo:** `ARQUITETURA_SISTEMA_COMPLETA.md` → "Roteamento por plataforma (DT-CAPI-01)" (atualizado de "correção parcial" para "correção completa").
+
 ---
 
 ## H3 — TIER 2 / TIER 3 SAFEGUARDS RESTANTES (maio–junho)

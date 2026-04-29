@@ -429,17 +429,21 @@ python src/retrain/retraining_orchestrator.py --config configs/retreino_mensal.y
 
 **Correção parcial aplicada (09/04/2026):** `utm_source_allowlist` em `CAPIConfig` — o backend só envia CAPI se `utm_source` estiver na lista configurada. Para DevClub: `["facebook-ads", "instagram"]`. Leads de outras origens recebem `capiStatus = 'skipped'`.
 
-**Decisão arquitetural de longo prazo:** Um modelo único de scoring serve todas as plataformas — o perfil de comprador não muda por canal. O que muda é o dispatch de eventos: cada plataforma tem sua própria integração configurada com a lista de `utm_source` que alimenta. Ao adicionar Google Ads como canal otimizável, basta adicionar uma `GoogleAdsConfig` com `utm_source: ["google-ads"]` — o pipeline de treino e scoring não muda.
+**Vazamento descoberto em 28/04/2026:** auditoria mostrou que a regra estava aplicada em apenas 2 de 4 caminhos CAPI no `app.py`. `/webhook/lead_capture` (path principal do frontend) e `/predict/batch` (Apps Script) ficaram sem filtro — entre 09/04 e 28/04 cerca de **4.200 eventos não-Meta** (google-ads 2.016, gruposantigos 552, (null) 461, API 431, tiktok 420, ig 159, outros) foram enviados ao Pixel.
+
+**Correção completa aplicada (29/04/2026, commit `41cc2bf`, pendente deploy):** lógica centralizada em `should_send_to_destination(lead, capi_config, destination='meta')` em `capi_integration.py`. Os 4 paths chamam a mesma função. Parâmetro `destination` parametriza a regra por plataforma — para ativar Google Ads basta adicionar branch que lê `capi_config.google_source_allowlist` (ou campo equivalente).
+
+**Decisão arquitetural de longo prazo:** Um modelo único de scoring serve todas as plataformas — o perfil de comprador não muda por canal. O que muda é o dispatch de eventos: cada plataforma tem sua própria integração configurada com a lista de `utm_source` que alimenta. Ao adicionar Google Ads como canal otimizável, basta acrescentar branch em `should_send_to_destination` para `destination='google'` lendo a allowlist específica — o pipeline de treino e scoring não muda.
 
 ```
 Lead scored (modelo único)
         ↓
-utm_source == 'facebook-ads' / 'instagram'  →  Meta CAPI (LeadQualified)
-utm_source == 'google-ads'                  →  Google Ads API (futuro)
-utm_source == orgânico / outro              →  nenhum envio
+should_send_to_destination(lead, capi_config, destination='meta')
+        ↓
+utm_source ∈ {facebook-ads, instagram}  →  Meta CAPI (LeadQualified)
+utm_source == 'google-ads'              →  Google Ads API (futuro — destination='google')
+utm_source == orgânico / outro          →  nenhum envio
 ```
-
-**Esta refatoração deve acontecer quando:** o segundo canal pago (Google Ads ou outro) for ativado como objetivo de otimização. Não antes — o `utm_source_allowlist` mitiga o problema até lá.
 
 ---
 
@@ -462,7 +466,7 @@ utm_source == orgânico / outro              →  nenhum envio
 | Pipeline de retreino incompleto (Sprint 2–3) | Deploy manual necessário | Implementar quality gate automático + deploy condicional |
 | Dados TMB desatualizados | Retreino com dados errados | Verificar data do arquivo antes do retreino |
 | Threshold Medium calculado pré-cutoff (DT-7) | Alertas falsos de features ausentes | Baixa prioridade — endereçar antes de 3+ clientes |
-| Leads não-Meta recebendo CAPI (DT-CAPI-01) | Sinal Meta contaminado com Google/orgânico | `utm_source_allowlist` aplicado — refatorar dispatch ao ativar 2º canal pago |
+| Leads não-Meta recebendo CAPI (DT-CAPI-01) | Sinal Meta contaminado com Google/orgânico (~4.200 eventos vazaram entre 09/04-28/04 por filtro incompleto) | Corrigido em commit `41cc2bf` (29/04/2026) via `should_send_to_destination` nos 4 paths — pendente deploy |
 | Contaminação histórica LEAD\|LQ (DT-CAPI-02) | ~7.500 eventos poluídos já enviados | Bloqueio aplicado — monitorar recuperação do sinal Meta |
 
 ---
