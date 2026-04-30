@@ -934,7 +934,9 @@ def should_send_to_destination(
 
     if blocklist and any(p.lower() in cam for p in blocklist):
         return False, 'blocked_by_blocklist'
-    if allowlist and not any(s.lower() in src for s in allowlist):
+    # Allowlist: exact match (case-insensitive). Substring match causa false positives
+    # — ex: "ig" no allowlist deixaria passar source=gruposantigos (contém "ig").
+    if allowlist and not any(s.lower() == src for s in allowlist):
         return False, 'skipped_by_allowlist'
     return True, 'allowed'
 

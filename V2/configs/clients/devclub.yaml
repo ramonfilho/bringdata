@@ -445,6 +445,8 @@ capi:
   utm_source_allowlist:
   - "facebook-ads"
   - "instagram"
+  - "ig"               # forma curta — Instagram (16 leads/24h estavam sendo bloqueados por engano)
+  - "fb"               # forma curta — Facebook
 api:
   cors_origins:
   - https://lp.devclub.com.br
