@@ -149,11 +149,6 @@ Itens independentes dos dados do Cliente B. Resolver antes de iniciar Fase 3b do
 - **Quando ficou resolvido:** durante a Fase 2 do refactor (mar-2026). O item ficou listado como pendente no roadmap original mas, na verdade, foi entregue junto com o resto do `src/core/`.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` §12 "Caminho para Nível 2".
 
-### DT-2: Testes unitários parametrizados em `src/core/`
-- **O quê:** `pytest tests/core/ --client devclub --client clientb` para `utm.py`, `medium.py`, `encoding.py`. Parametrizados com dois `ClientConfig` reais.
-- **Por quê:** hoje toda validação é integration test (~10–20 min). Bloqueia iteração rápida com 2+ clientes.
-- **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-2.
-
 ### Bugs latentes (limpezas opcionais)
 Itens menores de qualidade técnica que valem fechar antes de escalar. Nenhum bloqueia produção; cada um é independente.
 - **DT-7** — `core/medium.py` calcula threshold de Medium sobre janela errada (pré-cutoff), gerando alertas falsos no monitoramento.
@@ -175,8 +170,14 @@ Itens menores de qualidade técnica que valem fechar antes de escalar. Nenhum bl
 - **Catálogo:** `CHECKLIST_ONBOARDING_NEW_CLIENT.md`.
 
 ### Onboarding Cliente B (Fase 3b do refactor)
-- **Pré-condições:** schema check pré-treino + DT-2 testes unitários (de H4) + dados do Cliente B chegando + `clientb.yaml` escrito (ambos do início de H5).
+- **Pré-condições:** schema check pré-treino (de H4) + dados do Cliente B chegando + `clientb.yaml` escrito.
 - **Catálogo:** `PLANO_REFACTOR_MLOPS.md` §7 Fase 3b.
+
+### DT-2: Testes unitários parametrizados em `src/core/`
+- **O quê:** `pytest tests/core/ --client devclub --client clientb` para `utm.py`, `medium.py`, `encoding.py`. Parametrizados com dois `ClientConfig` reais.
+- **Por quê:** hoje toda validação é integration test (~10–20 min). Com 2 clientes ativos, qualquer mudança em `core/` exige rodar pipeline completo por cliente — inviável.
+- **Por que está em H5 (e não em H4):** a spec original diz "antes de qualquer mudança em `core/` com dois clientes ativos". Hoje só DevClub está ativo. Sem `clientb.yaml` real, parametrização vira teste único disfarçado. Faz sentido implementar logo após Cliente B onboardado.
+- **Catálogo:** `PLANO_REFACTOR_MLOPS.md` → DT-2.
 
 ### EDA Generator (`src/eda/generate_client_config.py`)
 - **O quê:** geração automática de `clientX.yaml` a partir dos dados brutos do cliente.
