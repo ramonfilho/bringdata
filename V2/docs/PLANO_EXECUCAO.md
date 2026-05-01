@@ -20,12 +20,11 @@
 
 | Componente | Estado |
 |---|---|
-| **Validação OOS Champion v4** | ✅ **Atravessada favoravelmente em 28/04** — gate único do roadmap. |
-| **Deploy main unificada** | 🔄 **Em execução** em sessão paralela — canary 10% → 50% → 100% conforme `AB_TEST.md` "Nova estratégia — canary direto". |
-| **Modelo no rollback** (90% / 50% / 0% conforme estágio do canary) | jan30 ORIGINAL (`d51757f5`) |
-| **Modelo no canary main** (10% / 50% / 100% conforme estágio) | Champion v4 (`60637bb98b94421b9c7579bb4ac1b1ad`) — AUC 0.748, OHE default |
-| **Challenger v4 (em standby até promoção do v4)** | `7d08ae0302da420aa99559d4d4f55025` — AUC 0.745 |
-| **A/B test** | 🔓 **Reaberto em 28/04** — frente ativa novamente após gate atravessado. Roteamento exato definido pela sessão de deploy. |
+| **Validação OOS Champion v4** | ✅ Atravessada favoravelmente em 28/04 — gate único do roadmap. |
+| **Código em produção** | ✅ `smart-ads-api-00371-jol` (commit `0e6e21f`) — main em 100% desde 30/04 11:44 BRT, após canary 10% → 50% → 100% (revisões 00367, 00368, 00369, 00371). |
+| **Modelo servido** | Champion v4 (`60637bb98b94421b9c7579bb4ac1b1ad`) — AUC 0.748, OHE default. |
+| **Challenger v4 (em standby até próximo ciclo A/B)** | `7d08ae0302da420aa99559d4d4f55025` — AUC 0.745. |
+| **A/B test** | 🔓 Reaberto em 28/04 — frente ativa. Roteamento por revisões Cloud Run substituiu o roteamento por UTM antigo. |
 | **Cloud SQL `smart-ads-db`** | Parado desde 26/04 (`activation-policy=NEVER`); subir antes de retreinar — ver `operacoes_gcp_custos.md` |
 | **Tier 1 safeguards** | ✅ 11/11 concluídos (até 23/04/2026) |
 | **T2-2 (log por etapa)** | ✅ 28/04/2026 — commits `8b46645` |
@@ -56,7 +55,7 @@
 | Horizonte | Janela | Foco principal | Status |
 |---|---|---|---|
 | **H1 — Agora** | 27/04 → 28/04 | DT-13, ARQUITETURA, gate de validação | ✅ concluído |
-| **H2 — Pós-validação** | 28/04 → +1-3 semanas | Deploy canary da main | 🔄 em execução (sessão paralela) |
+| **H2 — Pós-validação** | 28/04 → 30/04 | Deploy canary da main concluído (100% em `00371-jol`) | ✅ concluído |
 | **H3 — Tier 2/3 safeguards** | abr-maio 2026 | Safeguards de qualidade e observabilidade | ✅ concluído (T3-3 adiado) |
 | **H4 — Pré-Cliente B** | em curso | DT-9, schema check, testes unitários, bugs latentes | 🔄 atual |
 | **H5 — Cliente B** | depende de dados externos | Onboarding + EDA Generator | ⚪ aguardando |
@@ -87,13 +86,14 @@
 
 ---
 
-## H2 — Pós-validação (em execução em sessão paralela)
+## H2 — Pós-validação ✅ CONCLUÍDO (30/04/2026)
 
-### Deploy canary da main unificada 🔄 EM EXECUÇÃO
-- **Onde:** sessão paralela do usuário (não nesta sessão).
-- **Estratégia:** canary direto 10% → 50% → 100% com critério puramente técnico. Detalhes em `AB_TEST.md`.
-- **Captura do golden snapshot:** 24-48h após canary 10% estável e alertas pré-existentes terem cedido. Se não cederem, pausar antes de avançar para 50% e diagnosticar. (Ver "Capturar golden snapshot" em H1.)
-- **Rollback:** ~10s via `gcloud run services update-traffic` para `00269-jjn`.
+### Deploy canary da main unificada ✅
+- **Quando:** progredido em sessão paralela do usuário entre 29/04 e 30/04. Canary 10% → 50% → 100% executado em 4 revisões (`00367-cat`, `00368-yuq`, `00369-zul`, `00371-jol`).
+- **Em produção:** `smart-ads-api-00371-jol` (commit `0e6e21f`, tag `deploy/2026-04-30-00371-jol`) com 100% do tráfego desde 30/04 11:44 BRT. Inclui o fix DT-CAPI-01 (commit `41cc2bf`).
+- **Estratégia executada:** canary direto, critério técnico (sem gancho A/B). Detalhes em `AB_TEST.md`.
+- **Captura do golden snapshot:** ainda pendente — só faz sentido quando alertas HIGH pré-existentes (drift Medium / score_distribution_change D10) tiverem cedido com o v4 em 100%. Verificar 24-48h após estabilização.
+- **Rollback rápido:** ~10s via `gcloud run services update-traffic smart-ads-api --to-revisions=<revisão_anterior>=100` se necessário.
 
 ---
 
@@ -153,7 +153,7 @@ Itens independentes dos dados do Cliente B. Resolver antes de iniciar Fase 3b do
 Itens menores de qualidade técnica que valem fechar antes de escalar. Nenhum bloqueia produção; cada um é independente.
 - **DT-7** — `core/medium.py` calcula threshold de Medium sobre janela errada (pré-cutoff), gerando alertas falsos no monitoramento.
 - **DT-11** — ✅ resolvido (29/04/2026): verificação confirma que os 6 imports de `core/` já estão no topo do `monitoring/orchestrator.py` (linhas 22-27). `grep` por imports de core dentro de funções retorna vazio. Os imports lazy que ainda existem dentro de funções são de bibliotecas pesadas (`gspread`, `google.auth`) ou potenciais ciclos (`api.database`) — intencionais, não relacionados a DT-11.
-- **DT-CAPI-01 fix (commit `41cc2bf` pendente deploy)** — `should_send_to_destination` centraliza allowlist nos 4 paths de CAPI. Aplicado no canary em curso.
+- **DT-CAPI-01 fix** — ✅ deployado 30/04/2026: commit `41cc2bf` (refatoração `should_send_to_destination` centralizando allowlist nos 4 paths de CAPI) está em produção via revisão `smart-ads-api-00371-jol`. Eventos de `google-ads`, `gruposantigos`, `(null)`, `api`, `tiktok`, `ig` (que escapavam) deixam de ir ao Pixel Meta a partir desta revisão.
 - **Guard de coluna Medium em produção** — `production_pipeline.py` chama `medium.unify_medium` sem guard `if 'Medium' in df.columns`; treino tem o guard. Se Medium sumir do formulário, produção quebra.
 - **`/railway/process-pending`** — `.str` accessor em batches de 1 lead com NaN em UTM (~0,3% polls). Auto-recupera no próximo poll. `fillna('')` resolve.
 - **`/bigquery/stats`** — sync nunca foi ativado, retorna 0 rows. Considerar deletar se confirmado fora de uso.
