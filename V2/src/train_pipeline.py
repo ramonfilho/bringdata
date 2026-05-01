@@ -738,6 +738,18 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     df_pos_cutoff = criar_dataset_pos_cutoff(df_medium_producao, client_config.ingestion)
     _log_step_count("cutoff_missing_rate_pesquisa", df_pos_cutoff, df_before=df_medium_producao)
 
+    # DT-7: recalcular categorias válidas de Medium sobre a janela pós-cutoff.
+    # A primeira passada (CÉLULA 11) usou frequência sobre o dataset histórico
+    # completo — categorias com alto volume histórico mas mortas na janela
+    # efetiva de treino entravam no feature_registry e geravam alertas falsos
+    # em produção. Esta segunda passada é segura: produção usa modo whitelist
+    # (não recalcula freq), então paridade treino × produção fica preservada.
+    if 'Medium' in df_pos_cutoff.columns and client_config.medium.valid_categories is None:
+        logger.info("=" * 80)
+        logger.info("CÉLULA 13.1: REVALIDAÇÃO MEDIUM PÓS-CUTOFF (DT-7)")
+        logger.info("")
+        df_pos_cutoff = unify_medium(df_pos_cutoff, client_config.medium)
+
     logger.info("=" * 80)
     # === CÉLULA 15: Matching robusto por email e telefone ===
     cell_start = time.time()
