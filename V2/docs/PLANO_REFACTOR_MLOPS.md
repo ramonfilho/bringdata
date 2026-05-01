@@ -875,13 +875,11 @@ Todas as três campanhas Lookalike representam >5% do dataset histórico complet
 
 **Histórico do problema:** havia fallback inline no train_pipeline com valores específicos do DevClub (`{'guru': 1.0, 'tmb_baixo': 0.84, ...}` e os hyperparams). Como o fallback só ativava quando o YAML não tinha o campo, treino do DevClub funcionava porque o YAML tem tudo preenchido, mas qualquer cliente B novo sem esses campos cairia silenciosamente nos valores DevClub. A solução foi tornar o YAML obrigatório.
 
-### DT-11 — Imports dinâmicos em `monitoring/orchestrator.py`
+### DT-11 — Imports dinâmicos em `monitoring/orchestrator.py` ✅ RESOLVIDO
 
-Imports de `core/utm`, `core/medium`, `core/category_unification`, `core/preprocessing`, `core/feature_engineering` estão dentro do corpo de `run_daily_check()` em vez do topo do arquivo. Funcional, mas inconsistente: se qualquer desses módulos não for encontrado, o erro só aparece quando o monitoramento roda — não na inicialização.
+> **Status (2026-04-29):** RESOLVIDO. Verificação confirma que os imports de `core/` em `monitoring/orchestrator.py` já estão no topo do arquivo (linhas 22-27): `client_config`, `utm`, `medium`, `category_unification`, `preprocessing`, `feature_engineering`. `grep -nE "^[[:space:]]+(from|import)[[:space:]].*core" src/monitoring/orchestrator.py` retorna vazio.
 
-**Fix:** mover os 5 imports para o topo de `monitoring/orchestrator.py`, junto com os outros imports existentes.
-
-**Prioridade:** baixa — não impacta correção, apenas observabilidade de erros de import.
+**Histórico do problema:** os imports estavam dentro de `run_daily_check()` em alguma versão anterior, fazendo com que erros de import só aparecessem ao rodar o monitor. Em algum commit do refactor (provavelmente parte da consolidação `src/core/`) foram movidos para o topo. Imports lazy que persistem dentro de funções são de bibliotecas pesadas (`gspread`, `google.auth`) ou com risco de ciclo (`api.database`) — escolhas intencionais, não cobertas por este item.
 
 ---
 

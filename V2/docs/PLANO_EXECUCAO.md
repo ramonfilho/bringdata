@@ -152,7 +152,7 @@ Itens independentes dos dados do Cliente B. Resolver antes de iniciar Fase 3b do
 ### Bugs latentes (limpezas opcionais)
 Itens menores de qualidade técnica que valem fechar antes de escalar. Nenhum bloqueia produção; cada um é independente.
 - **DT-7** — `core/medium.py` calcula threshold de Medium sobre janela errada (pré-cutoff), gerando alertas falsos no monitoramento.
-- **DT-11** — `monitoring/orchestrator.py` tem 5 imports dentro de `run_daily_check()`; mover para o topo evita erro de import só visível em runtime.
+- **DT-11** — ✅ resolvido (29/04/2026): verificação confirma que os 6 imports de `core/` já estão no topo do `monitoring/orchestrator.py` (linhas 22-27). `grep` por imports de core dentro de funções retorna vazio. Os imports lazy que ainda existem dentro de funções são de bibliotecas pesadas (`gspread`, `google.auth`) ou potenciais ciclos (`api.database`) — intencionais, não relacionados a DT-11.
 - **DT-CAPI-01 fix (commit `41cc2bf` pendente deploy)** — `should_send_to_destination` centraliza allowlist nos 4 paths de CAPI. Aplicado no canary em curso.
 - **Guard de coluna Medium em produção** — `production_pipeline.py` chama `medium.unify_medium` sem guard `if 'Medium' in df.columns`; treino tem o guard. Se Medium sumir do formulário, produção quebra.
 - **`/railway/process-pending`** — `.str` accessor em batches de 1 lead com NaN em UTM (~0,3% polls). Auto-recupera no próximo poll. `fillna('')` resolve.
