@@ -121,12 +121,18 @@ def _load_valid_categories(artifacts: Dict[str, Any]) -> Optional[List[str]]:
             experiment_id = _mlflow.get_run(mlflow_run_id).info.experiment_id
         except Exception:
             experiment_id = artifacts.get('mlflow_experiment_id', '1')
-        candidates.append(
+        run_artifacts = (
             Path(__file__).parent.parent.parent
-            / 'mlruns' / experiment_id / mlflow_run_id / 'artifacts' / 'distribuicoes_esperadas.json'
+            / 'mlruns' / experiment_id / mlflow_run_id / 'artifacts'
         )
+        # mlflow.sklearn.log_model cria subdir 'model/' dentro de artifacts e logga
+        # distribuicoes_esperadas.json lá. Tenta esse caminho primeiro; mantém o
+        # legado (raiz de artifacts) como fallback para artifacts antigos.
+        candidates.append(run_artifacts / 'model' / 'distribuicoes_esperadas.json')
+        candidates.append(run_artifacts / 'distribuicoes_esperadas.json')
 
     if model_path:
+        candidates.append(Path(model_path) / 'model' / 'distribuicoes_esperadas.json')
         candidates.append(Path(model_path) / 'distribuicoes_esperadas.json')
 
     SKIP = {'Outros', 'nan'}
