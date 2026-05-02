@@ -152,6 +152,10 @@ def create_features(df: pd.DataFrame, config: FeatureConfig) -> pd.DataFrame:
             df['telefone_comprimento'] = df['telefone_comprimento'].apply(
                 lambda x: x if x in keep_values else 'outros'
             )
+            # Força object/string — sem isso, batches em que todos os telefones
+            # caem em keep_values (ex: só BR de 11 dígitos) ficam dtype int64,
+            # divergindo do schema categorical e do encoding OHE do treino.
+            df['telefone_comprimento'] = df['telefone_comprimento'].astype(str)
             logger.debug(f"  FE: telefone_comprimento agrupado (keep={keep_values})")
         else:
             logger.warning("  FE: telefone_comprimento_keep_values não configurado — sem agrupamento")

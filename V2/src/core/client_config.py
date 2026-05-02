@@ -103,6 +103,7 @@ class UTMConfig:
     """Unificação de UTMs. (#35, #63, #67)"""
     source_to_outros: Optional[List[str]] = None            # #35
     source_to_channel_mapping: Optional[Dict[str, str]] = None  # dev/retreino — ex: {'youtube-bio': 'youtube'}
+    source_canonical_values: Optional[List[str]] = None     # whitelist final pós-mapping; valores fora viram 'outros'
     term_mappings: Optional[Dict[str, str]] = None          # #63
     term_outros_patterns: Optional[List[str]] = None        # #63
     term_long_id_threshold: int = 10                        # #67

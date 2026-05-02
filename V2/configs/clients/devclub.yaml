@@ -162,6 +162,13 @@ utm:
     # Term continua diferenciando IG/FB via term_mappings logo abaixo.
     fb: facebook-ads
     ig: facebook-ads
+  # Whitelist final de Source (pós source_to_channel_mapping). Source fora
+  # desta lista vira 'outros' — espelha o fallback que _unify_term já tem.
+  source_canonical_values:
+  - facebook-ads
+  - google-ads
+  - youtube
+  - outros
   term_mappings:
     ig: instagram
     fb: facebook
