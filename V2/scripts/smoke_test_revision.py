@@ -30,11 +30,17 @@ Requer:
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
+
+# Issues do feature_validator que não devem bloquear progressão de tráfego.
+# 'target' é a label do treino — não existe em produção por design (é predict,
+# não fit). Outras features podem ser adicionadas via --ignore-feature.
+DEFAULT_IGNORE_FEATURES = frozenset(['target'])
 
 
 def get_revision_url(revision: str, region: str, project: str, service: str = 'smart-ads-api') -> str:
@@ -101,6 +107,52 @@ def trigger_encoding_pipeline(url: str, timeout: int = 300) -> tuple[int, str]:
         return 0, f"Erro de conexão: {e}"
 
 
+def check_feature_report_gate(
+    url: str,
+    revision: str,
+    ignore_features: frozenset = DEFAULT_IGNORE_FEATURES,
+    timeout: int = 60,
+) -> tuple[str, dict]:
+    """
+    [T1-11 Gate] Bate /monitoring/feature-report?hours=1 filtrando pela revisão
+    e decide se a progressão de tráfego deve ser bloqueada.
+
+    Bloqueia quando: overall_status == 'ERROR' AND existe issue em alguma feature
+    fora de ignore_features. 'target' é ignorado por default (label do treino;
+    não existe em produção por design).
+
+    Returns:
+        (decision, payload) onde decision ∈ {'pass', 'block', 'no_data', 'error'}
+    """
+    endpoint = f"{url}/monitoring/feature-report?hours=1&revision={revision}"
+    try:
+        req = urllib.request.Request(endpoint, method='GET')
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        body = resp.read().decode('utf-8', errors='replace')
+        payload = json.loads(body)
+    except urllib.error.HTTPError as e:
+        body = e.read(2000).decode('utf-8', errors='replace') if hasattr(e, 'read') else str(e)
+        return 'error', {'http_status': e.code, 'body': body[:500]}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        return 'error', {'reason': str(e)[:500]}
+
+    if payload.get('total_batches', 0) == 0:
+        return 'no_data', payload
+
+    if payload.get('overall_status') != 'ERROR':
+        return 'pass', payload
+
+    blocking = {
+        feat: info
+        for feat, info in payload.get('issues_by_feature', {}).items()
+        if feat not in ignore_features
+    }
+    if not blocking:
+        return 'pass', payload
+
+    return 'block', {**payload, 'blocking_issues': blocking}
+
+
 def fetch_revision_logs(revision: str, project: str, freshness_seconds: int = 600) -> str:
     """Busca logs da revisão com '[T1-10]' no payload, dos últimos N segundos."""
     query = (
@@ -132,6 +184,11 @@ def main() -> int:
                         help='Segundos para aguardar logs propagarem (default: 20)')
     parser.add_argument('--timeout-trigger', type=int, default=300,
                         help='Timeout da chamada de monitoring (default: 300s)')
+    parser.add_argument('--ignore-feature', action='append', default=[],
+                        help='Feature do feature-report a ignorar (repetível). '
+                             "Default: 'target' (label do treino, não existe em prod).")
+    parser.add_argument('--skip-feature-report-gate', action='store_true',
+                        help='Pula o gate do /monitoring/feature-report (T1-11).')
     args = parser.parse_args()
 
     print(f"[smoke test] Revisão: {args.revision}")
@@ -191,7 +248,43 @@ def main() -> int:
             print(f"  {line[:200]}")
         print("[smoke test] Não bloqueante — features de importância baixa ausentes.")
 
-    print("[smoke test] ✅ Nenhum alerta [T1-10] crítico na revisão. Prossegue.")
+    # [T1-11 Gate] feature-report agregado: bloqueia se ERROR em features de scoring
+    if args.skip_feature_report_gate:
+        print("[smoke test] ⚠️  --skip-feature-report-gate: pulando gate T1-11.")
+    else:
+        ignore = DEFAULT_IGNORE_FEATURES | frozenset(args.ignore_feature)
+        print(f"[smoke test] [T1-11] Consultando /monitoring/feature-report?hours=1...")
+        print(f"            Ignorando features: {sorted(ignore)}")
+        decision, fr_payload = check_feature_report_gate(url, args.revision, ignore_features=ignore)
+
+        if decision == 'block':
+            print()
+            print("╔══════════════════════════════════════════════════════════════════╗")
+            print("║  🚨 SMOKE TEST FALHOU — FEATURE-REPORT EM ERROR (T1-11)        ║")
+            print("╠══════════════════════════════════════════════════════════════════╣")
+            print(f"  total_batches: {fr_payload.get('total_batches')}")
+            print(f"  severities:    {fr_payload.get('batches_by_severity')}")
+            print(f"  bloqueantes:")
+            for feat, info in fr_payload.get('blocking_issues', {}).items():
+                print(f"    {feat}: count={info['count']}  problems={info['problems']}")
+            print("╚══════════════════════════════════════════════════════════════════╝")
+            print()
+            print("Ação: não progredir tráfego. Investigar issues acima — modelo está")
+            print("scoreando com sinal incompleto (missing_column/wrong_dtype/etc).")
+            return 1
+
+        if decision == 'error':
+            print(f"[smoke test] ⚠️  feature-report falhou: {fr_payload}")
+            print("[smoke test] Não bloqueante (gate não conseguiu opinar) — verifique manualmente.")
+        elif decision == 'no_data':
+            print("[smoke test] ⚠️  feature-report sem batches na janela de 1h.")
+            print("[smoke test] Não bloqueante — revisão pode não ter recebido tráfego ainda.")
+        else:  # 'pass'
+            print(f"[smoke test] ✅ feature-report OK "
+                  f"(total_batches={fr_payload.get('total_batches')}, "
+                  f"overall_status={fr_payload.get('overall_status')})")
+
+    print("[smoke test] ✅ Todos os gates passaram. Prossegue.")
     return 0
 
 
