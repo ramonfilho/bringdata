@@ -1,6 +1,6 @@
 # Plano de Execução — Smart Ads V2 (Roadmap Único)
 
-**Atualizado:** 2026-04-28
+**Atualizado:** 2026-05-02
 **Propósito:** este é o **único** documento de "o que fazer e quando" no projeto. Toda a sequência de trabalho — segurança, A/B test, unificação, refactor multi-cliente, escala B2B, backlog de features — vive aqui, em horizontes ordenados por dependência.
 
 ## Como ler este documento
@@ -30,6 +30,10 @@
 | **T2-2 (log por etapa)** | ✅ 28/04/2026 — commits `8b46645` |
 | **T2-3 (importance weighting)** | ✅ 28/04/2026 — commits `c03d645`, `f8dc4f7`. Feature pronta no repertório (default desligado). Efeito interno marginal; sinal externo D9+D10 lift 6.88× confirma valor do ML em produção. |
 | **DT-13 (utm_term zerando)** | ✅ 28/04/2026 — commit `dafe85d` |
+| **Bug do Medium em produção** | ✅ resolvido 02/05 — `_load_valid_categories` (em `core/medium.py:124`, introduzido em `2df0671`) buscava `distribuicoes_esperadas.json` no path errado, retornava `None` silenciosamente, e `unify_medium` caía em modo treino-frequência por batch em vez de aplicar a whitelist canônica. Whitelist Medium ficou desligada em prod desde 30/04 → encoding zerava `Medium_*` para valores fora das 7 categorias canônicas. Fix em `d711227`. |
+| **Endpoints `/monitoring/daily-check` e `/monitoring/feature-report`** | ✅ consertados 02/05 — typo no orchestrator (commit `7c69bfd`, T3-5) e subprocess `gcloud` no container Cloud Run (T1-11 Peça B), ambos em HTTP 500 desde a entrega. Commits `8718b00` (endpoints) + `f275d88` (path do drift por feature). |
+| **Sequela: Source/telefone_comprimento** | ✅ resolvido 02/05 — `_unify_source` sem fallback whitelist (deixava `tiktok` cru); `telefone_comprimento` ficava `int64` em batches só com telefones BR. Commit `f1082ff`. |
+| **Consertos estruturais (E1-E4)** | ✅ deployados 02/05 — fail-loud em `_load_valid_categories` (`fda24ce`), fix do path nos 2 leitores de drift em `data_quality.py` (`f275d88`), gate `/feature-report` no `smoke_test_revision.py` (`563a280`), integration test do `unify_medium` com artifact real (`c396b25`). |
 
 ---
 
@@ -158,6 +162,17 @@ Itens menores de qualidade técnica que valem fechar antes de escalar. Nenhum bl
 - **`/railway/process-pending`** — `.str` accessor em batches de 1 lead com NaN em UTM (~0,3% polls). Auto-recupera no próximo poll. `fillna('')` resolve.
 - **`/bigquery/stats`** — sync nunca foi ativado, retorna 0 rows. Considerar deletar se confirmado fora de uso.
 
+#### Sequelas / pendências da sessão de investigação 02/05/2026
+
+Itens descobertos enquanto rastreávamos o bug do Medium. Nenhum afeta scoring (esses já foram consertados em 02/05); são de qualidade do monitoramento + decisões de schema.
+
+- **F0** — schema `configs/pre_encoding_schemas/devclub.json` inclui `target` (label do treino), gerando 284 falsos positivos / 24h no `/monitoring/feature-report`. **Fix:** remover entrada `target` do JSON. Esforço: 1 minuto.
+- **F3** — `Term` `null_rate` em produção (14.3%) ultrapassou marginalmente o `max_null_rate` do schema (13.9%). **Decisão pendente:** investigar Meta Ads (`act_188005769808959`) se há ads/adsets ativos sem `utm_term` no `url_tags` → corrigir tracking, OU aumentar `max_null_rate` para ~0.18.
+- **F5** — coluna `Você já fez/faz/pretende fazer faculdade?` com `null_rate_high` recorrente. **Decisão pendente:** a pergunta continua opcional na pesquisa? Se sim, aumentar `max_null_rate` no schema; se virou obrigatória, investigar form/webhook.
+- **O1** — `daily-check.operational_routines` retorna campos `None` (`active_run_id`, `cloud_run_revision`, `leads_received_24h`). Endpoint não crasha mais (typo consertado em `8718b00`), mas os 3 sub-blocos do `_generate_operational_routines_summary` caem em fallback silencioso. Causas a investigar: (a) `K_REVISION`/`K_SERVICE` não chegam no contexto de chamada do endpoint, (b) `self.db` é `None` quando o orchestrator é instanciado pela rota. Bug informativo, baixa urgência. Local: `monitoring/orchestrator.py:_generate_operational_routines_summary`.
+- **E5** — `EXPECTED_DECIL_DISTRIBUTION` em `monitoring/config.py:50` está hardcoded como uniforme `{Dx: 0.10}`. Em produção D10 sempre rodou em ~30% (jamais em 10%), então o alerta `"D10: 10% → 32%"` é falso positivo crônico desde o início desse modelo. **Fix:** substituir por leitura de `model_metadata.json:decil_analysis` (distribuição real onde decis foram calibrados pelo treino). ~10 linhas.
+- **E7** — inverter o default do `deploy_capi.sh`: hoje o modo direto (100% tráfego antes do smoke) é o padrão e `--no-traffic` (canary com gate E3) é a flag. Inverter para que o **canary seja o padrão** e o modo direto exija `--full-traffic` com confirmação digitada. Sem isso, qualquer deploy futuro pode pular E3 por inércia. ~10 linhas. Local: `api/deploy_capi.sh` (parse_arguments + main).
+
 ---
 
 ## H5 — ONBOARDING CLIENTE B (depende de dado externo)
@@ -194,6 +209,7 @@ Itens menores de qualidade técnica que valem fechar antes de escalar. Nenhum bl
 | GitHub Actions CI — push → lint → `pytest tests/core/` → parity check → merge liberado | DT-2 (testes unitários de H4) + 2 clientes ativos |
 | Sprint 2 `retraining_orchestrator` — quality gate automático pós-treino (auto-promote por threshold de AUC/lift/monotonia) | thresholds calibrados pelo primeiro ciclo A/B pós-canary |
 | Sprint 3 `retraining_orchestrator` — trigger de retreino por drift | 500+ leads/mês por cliente |
+| **E6 — Rolling baseline 30d para drift de decis e features.** Comparar janela atual de produção contra histórico recente de produção (não contra treino). Hoje todo drift compara contra distribuições do treino, que divergem estruturalmente de produção (D10 calibrado a ~10% no treino, ~30% sustentado em produção desde o início do modelo). Detector real do que importa em prod: "mudou em relação ao normal" em vez de "mudou em relação ao treino". Design: query Railway com janela móvel + storage do baseline + recompute periódico. Discutir antes de implementar. | E5 implementado primeiro (corrige falso positivo crônico D10 sem mudar arquitetura) + 2+ clientes ativos OU sinal claro de que baseline atual é insuficiente |
 | Looker Studio — dashboard de ROAS, CPL, distribuição de decis por cliente/lançamento | Cliente B ativo |
 | Vertex AI Model Registry — substituir `configs/active_models/*.yaml` manual por registro centralizado | 3+ clientes ativos |
 
@@ -206,7 +222,7 @@ Itens menores de qualidade técnica que valem fechar antes de escalar. Nenhum bl
 ### Diversificação de canais
 | Item | Pré-condição |
 |---|---|
-| Google Ads Enhanced Conversions — arquitetura F8 já conceptualmente resolvida; falta implementação. Mitigação parcial via `utm_source_allowlist` (DT-CAPI-01) já aplicada. | budget significativo no canal |
+| Google Ads Enhanced Conversions — arquitetura F8 já conceptualmente resolvida; falta implementação. Mitigação parcial via `utm_source_allowlist` (DT-CAPI-01) já aplicada. Catálogo: `google_ads_pendencias.md`. | budget significativo no canal + gclid capturado no front |
 | TikTok Events API — público jovem em crescimento, especialmente cursos. | budget significativo no canal |
 
 ---
@@ -264,6 +280,10 @@ Aproveitam volume agregado de múltiplos clientes:
 | Validação OOS Champion v4 + gate atravessado | 28/04/2026 | sessão paralela |
 | Retreinos coordenados v4 → modelo treinado pós-01/04 | 23/04/2026 | acima |
 | DT-12 (encoding por variante A/B) | resolvido pela configuração v4 (OHE default) | `PLANO_REFACTOR_MLOPS.md` § DT-12 |
+| Conserto endpoints `/monitoring/daily-check` (typo `7c69bfd`) e `/monitoring/feature-report` (subprocess `gcloud` → `google-cloud-logging`) | 02/05/2026 — commits `8718b00`, `8a54de3` | sessão de investigação 02/05 |
+| Bug-mãe Medium em produção (`_load_valid_categories` path errado em `core/medium.py:124` — introduzido `2df0671`, 18/03; ativo em prod 30/04→02/05) | 02/05/2026 — commit `d711227` | sessão de investigação 02/05 |
+| Sequela Source/`telefone_comprimento` (Source sem fallback whitelist em `_unify_source`; `telefone_comprimento` ficava `int64` em batches só com BR) | 02/05/2026 — commit `f1082ff` | sessão de investigação 02/05 |
+| Consertos estruturais E1-E4 (fail-loud em `_load_valid_categories`; fix path nos 2 leitores de drift em `data_quality.py`; gate `/feature-report` no `smoke_test_revision.py`; integration test `unify_medium` com artifact real) | 02/05/2026 — commits `fda24ce`, `f275d88`, `563a280`, `c396b25` | sessão de investigação 02/05 |
 
 ---
 
