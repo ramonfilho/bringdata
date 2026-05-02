@@ -291,13 +291,18 @@ class LeadScoringPipeline:
             _artifacts['model_path'] = model_path
 
         # 5. Unificar categorias Medium (usando componente importado)
+        # Guard de coluna espelha o do train_pipeline.py — se a coluna Medium não vier
+        # no payload (ex: cliente sem Medium ou bug de webhook), pula a unificação em
+        # vez de quebrar com KeyError. Comportamento idêntico ao treino para preservar
+        # paridade. Leads com Medium=NaN seguem normalmente — viram 'Outros' no encoding.
         logger.info(" [5/11] Unificando categorias Medium...")
-        medium_before = self.data['Medium'].nunique() if 'Medium' in self.data.columns else 0
-
-        self.data = _unify_medium(self.data, self._client_config.medium, _artifacts or None)
-
-        medium_after = self.data['Medium'].nunique() if 'Medium' in self.data.columns else 0
-        logger.info(f"    Medium: {medium_before}{medium_after} categorias")
+        if 'Medium' in self.data.columns:
+            medium_before = self.data['Medium'].nunique()
+            self.data = _unify_medium(self.data, self._client_config.medium, _artifacts or None)
+            medium_after = self.data['Medium'].nunique()
+            logger.info(f"    Medium: {medium_before}{medium_after} categorias")
+        else:
+            logger.warning("    Medium ausente do DataFrame — pulando unify_medium (paridade com treino)")
         logger.info(f"    Estado atual: {len(self.data)} linhas, {len(self.data.columns)} colunas")
 
         # 6. Unificar categorias de pesquisa (usando componente importado)
