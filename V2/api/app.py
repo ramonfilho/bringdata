@@ -2089,39 +2089,38 @@ async def feature_report(
       resource.labels.service_name=smart-ads-api AND
       textPayload:"[FV_JSON]"
     """
-    import subprocess
     import json as _json
-    from datetime import timedelta
+    from datetime import timedelta, timezone
+    from google.cloud import logging as gcp_logging
 
     project = os.getenv('PROJECT_ID', 'smart-ads-451319')
     service = 'smart-ads-api'
 
-    # Construir filtro
+    now_utc = datetime.now(timezone.utc)
+    since_utc = now_utc - timedelta(hours=hours)
+    since_iso = since_utc.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    # Filtro Cloud Logging — equivalente ao gcloud logging read --freshness Nh
     filter_parts = [
-        'resource.type=cloud_run_revision',
-        f'resource.labels.service_name={service}',
+        'resource.type="cloud_run_revision"',
+        f'resource.labels.service_name="{service}"',
         'textPayload:"[FV_JSON]"',
+        f'timestamp>="{since_iso}"',
     ]
     if revision:
-        filter_parts.append(f'resource.labels.revision_name={revision}')
+        filter_parts.append(f'resource.labels.revision_name="{revision}"')
     filter_str = ' AND '.join(filter_parts)
 
-    freshness = f'{hours}h'
-
     try:
-        result = subprocess.run(
-            ['gcloud', 'logging', 'read', filter_str,
-             '--project', project,
-             '--freshness', freshness,
-             '--format=value(textPayload)',
-             '--limit', '5000'],
-            capture_output=True, text=True, check=True, timeout=60,
+        log_client = gcp_logging.Client(project=project)
+        entries = log_client.list_entries(
+            filter_=filter_str,
+            order_by=gcp_logging.DESCENDING,
+            max_results=5000,
         )
-        raw_lines = result.stdout.splitlines()
-    except subprocess.CalledProcessError as e:
-        raise HTTPException(status_code=500, detail=f"gcloud logging read falhou: {e.stderr.strip()[:300]}")
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="Timeout ao consultar Cloud Logging (>60s)")
+        raw_lines = [e.payload for e in entries if isinstance(e.payload, str)]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cloud Logging API falhou: {str(e)[:300]}")
 
     # Parse dos payloads
     payloads = []
@@ -2199,9 +2198,6 @@ async def feature_report(
             "exercitado, schema pode não estar carregado na revisão, ou a revisão não "
             "recebeu tráfego. Se revisão é nova, gerar tráfego antes de consultar."
         )
-
-    now_utc = datetime.now(timezone.utc)
-    since_utc = now_utc - timedelta(hours=hours)
 
     return {
         'window': {

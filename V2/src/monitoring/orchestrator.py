@@ -264,7 +264,7 @@ class MonitoringOrchestrator:
 
         result: Dict = {}
         # 1. Modelo ativo (run_id do YAML)
-        client_id = getattr(self.client_config, 'client_id', 'devclub') if self.client_config else 'devclub'
+        client_id = getattr(self._client_config, 'client_id', 'devclub') if self._client_config else 'devclub'
         active_yaml = _os.path.join(_os.path.dirname(__file__), '..', '..', 'configs', 'active_models', f'{client_id}.yaml')
         try:
             with open(_os.path.abspath(active_yaml)) as _f:
