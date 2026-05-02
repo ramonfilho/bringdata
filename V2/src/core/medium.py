@@ -108,7 +108,15 @@ def _load_valid_categories(artifacts: Dict[str, Any]) -> Optional[List[str]]:
         'model_path':    str — path para pasta do modelo (deprecated, backward compat)
 
     Returns:
-        Lista de categorias válidas, ou None se não disponível.
+        Lista de categorias válidas (modo produção), ou None quando artifacts
+        está vazio (modo treino).
+
+    Raises:
+        FileNotFoundError: quando artifacts foi passado em modo produção
+            (mlflow_run_id ou model_path) mas nenhum candidate path existe.
+            Não silenciar — modo produção exige whitelist; cair no modo
+            treino-frequência mascarou o bug do path por 6 semanas
+            (CLAUDE.md "Fail-loud: nenhuma falha silenciosa em src/core/").
     """
     mlflow_run_id = artifacts.get('mlflow_run_id')
     model_path = artifacts.get('model_path')
@@ -135,6 +143,10 @@ def _load_valid_categories(artifacts: Dict[str, Any]) -> Optional[List[str]]:
         candidates.append(Path(model_path) / 'model' / 'distribuicoes_esperadas.json')
         candidates.append(Path(model_path) / 'distribuicoes_esperadas.json')
 
+    # Modo treino: artifacts={} → candidates=[] → segue p/ frequência dinâmica
+    if not candidates:
+        return None
+
     SKIP = {'Outros', 'nan'}
     for path in candidates:
         if path.exists():
@@ -149,7 +161,12 @@ def _load_valid_categories(artifacts: Dict[str, Any]) -> Optional[List[str]]:
             except Exception as e:
                 logger.warning(f"  Medium: erro ao ler {path}: {e}")
 
-    return None
+    # Modo produção pediu whitelist mas nenhum path existe — fail-loud.
+    raise FileNotFoundError(
+        f"Medium whitelist não encontrada. Tentei: {[str(p) for p in candidates]}. "
+        f"Modo produção requer distribuicoes_esperadas.json do modelo ativo "
+        f"(mlflow_run_id={mlflow_run_id!r}, model_path={model_path!r})."
+    )
 
 
 # ---------------------------------------------------------------------------
