@@ -707,8 +707,8 @@ run_post_deploy_tests() {
     # Verificar se resposta contém "predictions"
     if echo "$PRED_RESPONSE" | grep -q '"predictions"'; then
         LEAD_SCORE=$(echo "$PRED_RESPONSE" | grep -o '"lead_score":[0-9.]*' | head -n 1 | cut -d':' -f2)
-        DECILE=$(echo "$PRED_RESPONSE" | grep -o '"decile":"[^"]*"' | head -n 1 | cut -d'"' -f4)
-        print_success "Predição: score=$LEAD_SCORE, decile=$DECILE"
+        DECIL=$(echo "$PRED_RESPONSE" | grep -o '"decil":"[^"]*"' | head -n 1 | cut -d'"' -f4)
+        print_success "Predição: score=$LEAD_SCORE, decil=$DECIL"
     else
         print_error "Predição falhou: resposta inválida"
         echo "$PRED_RESPONSE"
