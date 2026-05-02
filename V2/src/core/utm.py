@@ -56,7 +56,11 @@ def _unify_source(df: pd.DataFrame, config: UTMConfig) -> pd.DataFrame:
     df['Source'] = df['Source'].replace('', None)
 
     # 1. Normalizar para lowercase (produção canônica — garante consistência)
-    df['Source'] = df['Source'].str.lower()
+    # Guard: coage só não-NaN para str antes do .str para evitar
+    # 'Can only use .str accessor with string values!' quando JSONB do Railway
+    # entrega tipo inesperado (int/dict/bool) em batches pequenos.
+    _src_notna = df['Source'].notna()
+    df.loc[_src_notna, 'Source'] = df.loc[_src_notna, 'Source'].astype(str).str.lower()
 
     source_antes = df['Source'].nunique()
 
@@ -100,8 +104,10 @@ def _unify_term(df: pd.DataFrame, config: UTMConfig) -> pd.DataFrame:
             df.loc[mask, 'Term'] = destino
 
     # 2. Padrões que viram 'outros' (ex: '--', '{')
+    # Guard: força str-as-text só para o match (mesma motivação do _unify_source).
+    _term_as_str = df['Term'].where(df['Term'].notna(), '').astype(str)
     for pattern in (config.term_outros_patterns or []):
-        mask = df['Term'].str.contains(pattern, na=False)
+        mask = _term_as_str.str.contains(pattern, na=False)
         if mask.any():
             logger.debug(f"  Term com '{pattern}' → 'outros' ({mask.sum()} leads)")
             df.loc[mask, 'Term'] = 'outros'
