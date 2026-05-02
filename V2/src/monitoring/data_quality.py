@@ -277,11 +277,18 @@ def load_training_categories(model_path: str) -> Dict[str, List[str]]:
     Raises:
         FileNotFoundError: Se arquivo não existir
     """
-    json_path = Path(model_path) / "categorias_esperadas.json"
+    # mlflow.sklearn.log_model salva artifacts em subdir 'model/'.
+    # Tenta esse path primeiro; mantém o legado (raiz de model_path) como
+    # fallback para artifacts antigos / modelos não-mlflow.
+    candidates = [
+        Path(model_path) / "model" / "categorias_esperadas.json",
+        Path(model_path) / "categorias_esperadas.json",
+    ]
+    json_path = next((p for p in candidates if p.exists()), None)
 
-    if not json_path.exists():
+    if json_path is None:
         raise FileNotFoundError(
-            f"Arquivo de categorias não encontrado: {json_path}\n"
+            f"Arquivo de categorias não encontrado. Tentei: {[str(p) for p in candidates]}\n"
             f"Execute o treino novamente para gerar este arquivo."
         )
 
@@ -542,11 +549,16 @@ def load_training_distributions(model_path: str) -> Dict:
     Raises:
         FileNotFoundError: Se arquivo não existir
     """
-    json_path = Path(model_path) / "distribuicoes_esperadas.json"
+    # Mesma justificativa de path do load_training_categorias acima.
+    candidates = [
+        Path(model_path) / "model" / "distribuicoes_esperadas.json",
+        Path(model_path) / "distribuicoes_esperadas.json",
+    ]
+    json_path = next((p for p in candidates if p.exists()), None)
 
-    if not json_path.exists():
+    if json_path is None:
         raise FileNotFoundError(
-            f"Arquivo de distribuições não encontrado: {json_path}\n"
+            f"Arquivo de distribuições não encontrado. Tentei: {[str(p) for p in candidates]}\n"
             f"Execute o treino novamente para gerar este arquivo."
         )
 
