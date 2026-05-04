@@ -154,11 +154,11 @@ def check_feature_report_gate(
 
 
 def fetch_revision_logs(revision: str, project: str, freshness_seconds: int = 600) -> str:
-    """Busca logs da revisão com '[T1-10]' no payload, dos últimos N segundos."""
+    """Busca logs da revisão com '[T1-10]' OU '[STARTUP CHECK]' no payload, dos últimos N segundos."""
     query = (
         f'resource.type=cloud_run_revision AND '
         f'resource.labels.revision_name={revision} AND '
-        f'textPayload:"[T1-10]"'
+        f'(textPayload:"[T1-10]" OR textPayload:"[STARTUP CHECK]")'
     )
     try:
         result = subprocess.run(
@@ -215,9 +215,18 @@ def main() -> int:
 
     critical_lines = []
     warning_lines = []
+    startup_check_fatals = []
     for line in logs.splitlines():
         line = line.strip()
-        if not line or '[T1-10]' not in line:
+        if not line:
+            continue
+        # [S1] Gate startup check — pixel/event config inválida
+        if '[STARTUP CHECK]' in line and '❌ FATAL' in line:
+            parts = line.split('\t', 1)
+            payload = parts[1] if len(parts) > 1 else line
+            startup_check_fatals.append(payload)
+            continue
+        if '[T1-10]' not in line:
             continue
         if 'Feature CRÍTICA' in line:
             # Formato esperado do gcloud: "SEVERITY\tPAYLOAD"
@@ -228,6 +237,19 @@ def main() -> int:
                 critical_lines.append(payload)
             elif severity == 'WARNING':
                 warning_lines.append(payload)
+
+    if startup_check_fatals:
+        print()
+        print("╔══════════════════════════════════════════════════════════════════╗")
+        print("║  🚨 SMOKE TEST FALHOU — STARTUP CHECK CAPI (S1)                ║")
+        print("╠══════════════════════════════════════════════════════════════════╣")
+        for line in startup_check_fatals[:10]:
+            print(f"  {line[:200]}")
+        print("╚══════════════════════════════════════════════════════════════════╝")
+        print()
+        print("Ação: não progredir tráfego. Pixel ou token CAPI inválidos —")
+        print("revisar configs/clients/{cliente}.yaml + active_models/{cliente}.yaml.")
+        return 1
 
     if critical_lines:
         print()

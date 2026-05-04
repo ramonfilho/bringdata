@@ -203,6 +203,22 @@ async def startup_event():
     else:
         logger.warning("⚠️ Database não inicializado (desenvolvimento sem PostgreSQL?)")
 
+    # [S1] Validação de configuração CAPI: cada (pixel_id, event_name) tem que
+    # estar acessível via Meta API. Hard fail (config errada) gera log
+    # `[STARTUP CHECK] ❌ FATAL` que é detectado pelo smoke_test_revision.py
+    # e bloqueia progressão de tráfego.
+    try:
+        from api.startup_capi_check import validate_capi_destinations
+        for client_id, _pipeline in pipelines.items():
+            validate_capi_destinations(
+                _pipeline._client_config,
+                _pipeline._ab_test_config,
+                client_id=client_id,
+            )
+    except Exception as e:
+        # Falha do próprio check (não da config) — log e continua, sem bloquear startup
+        logger.warning(f"[STARTUP CHECK] ⚠️ erro ao executar validação: {e}")
+
 @app.get("/")
 async def root():
     """Endpoint raiz"""
