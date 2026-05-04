@@ -349,6 +349,7 @@ class ABTestVariantConfig:
     conversion_rates: Dict[str, float]   # D01–D10, com PAV aplicado se necessário
     encoding_overrides: Optional["EncodingConfig"] = None  # DT-12 — encoding específico do modelo
     url_pattern: Optional[str] = None    # Substring (case-insensitive) match em event_source_url; OR com utm_pattern
+    pixel_id_override: Optional[str] = None  # Override do pixel_id default — para variante enviar CAPI a outro pixel
 
 
 @dataclass
@@ -386,6 +387,7 @@ class ABTestConfig:
                 conversion_rates=vdata["conversion_rates"],
                 encoding_overrides=encoding_overrides,
                 url_pattern=vdata.get("url_pattern"),
+                pixel_id_override=vdata.get("pixel_id_override"),
             )
         return cls(enabled=True, variants=variants)
 

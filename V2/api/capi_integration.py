@@ -258,6 +258,7 @@ def send_lead_qualified_with_value(
     client_id: str = 'devclub',
     event_name_override: Optional[str] = None,
     conversion_rates_override: Optional[Dict[str, float]] = None,
+    pixel_id_override: Optional[str] = None,
 ) -> Dict:
     """
     ESTRATÉGIA 1: Envia TODOS os leads (D1-D10) com VALOR DIFERENCIADO por decil
@@ -294,7 +295,8 @@ def send_lead_qualified_with_value(
         return {"status": "error", "message": "ACCESS_TOKEN não configurado"}
 
     # Resolver valores do CAPIConfig (com fallbacks para compatibilidade)
-    pixel_id = (capi_config.pixel_id if capi_config and capi_config.pixel_id else os.getenv('META_PIXEL_ID'))
+    # pixel_id_override permite variante A/B enviar para pixel diferente do default.
+    pixel_id = pixel_id_override or (capi_config.pixel_id if capi_config and capi_config.pixel_id else os.getenv('META_PIXEL_ID'))
     event_name = event_name_override or (capi_config.event_name_with_value if capi_config and capi_config.event_name_with_value else 'LeadQualified')
     currency = (capi_config.currency if capi_config and capi_config.currency else 'BRL')
     country_code = (capi_config.country_code if capi_config and capi_config.country_code else 'br')
@@ -498,6 +500,7 @@ def send_lead_qualified_high_quality(
     capi_config: Optional[CAPIConfig] = None,
     client_id: str = 'devclub',
     event_name_override: Optional[str] = None,
+    pixel_id_override: Optional[str] = None,
 ) -> Dict:
     """
     ESTRATÉGIA 2: Envia APENAS D9 e D10 SEM VALOR
@@ -530,7 +533,7 @@ def send_lead_qualified_high_quality(
         Dict com resultado do envio (ou skipped se não for D9-D10)
     """
     # Resolver valores do CAPIConfig (com fallbacks para compatibilidade)
-    pixel_id = (capi_config.pixel_id if capi_config and capi_config.pixel_id else os.getenv('META_PIXEL_ID'))
+    pixel_id = pixel_id_override or (capi_config.pixel_id if capi_config and capi_config.pixel_id else os.getenv('META_PIXEL_ID'))
     event_name_hq = event_name_override or (capi_config.event_name_high_quality if capi_config and capi_config.event_name_high_quality else 'LeadQualifiedHighQuality')
     high_quality_decils = (capi_config.high_quality_decils if capi_config and capi_config.high_quality_decils else ['D09', 'D10'])
     currency = (capi_config.currency if capi_config and capi_config.currency else 'BRL')
@@ -702,6 +705,7 @@ def send_both_lead_events(
     event_name_override: Optional[str] = None,
     event_name_hq_override: Optional[str] = None,
     conversion_rates_override: Optional[Dict[str, float]] = None,
+    pixel_id_override: Optional[str] = None,
 ) -> Dict:
     """
     TESTE A/B: Envia AMBOS os eventos para permitir teste de 2 estratégias
@@ -748,6 +752,7 @@ def send_both_lead_events(
         client_id=client_id,
         event_name_override=event_name_override,
         conversion_rates_override=conversion_rates_override,
+        pixel_id_override=pixel_id_override,
     )
 
     # Enviar evento 2: SEM VALOR (D9-D10 only)
@@ -771,6 +776,7 @@ def send_both_lead_events(
         capi_config=capi_config,
         client_id=client_id,
         event_name_override=event_name_hq_override,
+        pixel_id_override=pixel_id_override,
     )
 
     return {
@@ -1003,6 +1009,7 @@ def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConf
             event_name_override=lead.get('ab_event_name'),
             event_name_hq_override=lead.get('ab_event_name_hq'),
             conversion_rates_override=lead.get('ab_conversion_rates'),
+            pixel_id_override=lead.get('ab_pixel_id'),
             # test_event_code=None (padrão) -> vai para PRODUÇÃO
         )
 

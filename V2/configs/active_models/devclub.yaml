@@ -38,8 +38,9 @@ ab_test:
     challenger_abr28:
       run_id: 5d158f0aa6e54b489498470446194a6c
       utm_pattern:
-        utm_term: "HQLB"
-      url_pattern: "ml-inscricao-lf-v2-crt"   # OR com utm_pattern — redundância para o caso de UTM ser stripada
+        utm_campaign: "PIXEL NOVO API"           # identificador do gestor para Campanha B
+      url_pattern: "ml-parabens-psq-devf"        # OR com utm_pattern — redundância (URL exclusiva pós-form Challenger)
+      pixel_id_override: "1513132406527995"      # CAPI Challenger envia pro pixel novo (onde HQLB está cadastrado)
       capi_event_name: HQLB_LQ
       capi_event_name_high_quality: HQLB
       conversion_rates:
