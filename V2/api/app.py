@@ -921,28 +921,21 @@ async def webhook_update_survey(
                 'utm_term': existing_lead.utm_term,
                 'utm_content': existing_lead.utm_content,
             }
-            # A/B routing: preferir Lead.* (Prisma, valores finais da LP de pesquisa) sobre
-            # leads_capi.* (valores capturados na primeira LP visitada — utm_term/campaign
-            # originais frequentemente perdem-se no redirect). Sem isso, leads que finalizam
-            # na LP ml-parabens-psq-devf não casam nem com url_pattern nem com utm_pattern
-            # e caem no default. Detalhe em ARQUITETURA "Armadilhas de schema".
+            # A/B routing: preferir Lead.pageUrl (URL final da LP de pesquisa, do Prisma) sobre
+            # leads_capi.event_source_url (URL da primeira LP visitada, geralmente a de inscrição).
+            # Sem isso, leads que finalizam na LP ml-parabens-psq-devf não casam com o url_pattern
+            # da variante challenger e caem no default. Detalhe em ARQUITETURA "Armadilhas de schema".
             from sqlalchemy import text as _sa_text
             url_for_variant_match = existing_lead.event_source_url
             try:
                 _row = db.execute(
-                    _sa_text('SELECT "pageUrl", source, medium, campaign, term, content FROM "Lead" '
-                             'WHERE LOWER(email) = LOWER(:e) ORDER BY "createdAt" DESC LIMIT 1'),
+                    _sa_text('SELECT "pageUrl" FROM "Lead" WHERE LOWER(email) = LOWER(:e) ORDER BY "createdAt" DESC LIMIT 1'),
                     {"e": existing_lead.email or ""}
                 ).fetchone()
-                if _row:
-                    if _row[0]: url_for_variant_match = _row[0]
-                    if _row[1]: lead_utms['utm_source']   = _row[1]
-                    if _row[2]: lead_utms['utm_medium']   = _row[2]
-                    if _row[3]: lead_utms['utm_campaign'] = _row[3]
-                    if _row[4]: lead_utms['utm_term']     = _row[4]
-                    if _row[5]: lead_utms['utm_content']  = _row[5]
+                if _row and _row[0]:
+                    url_for_variant_match = _row[0]
             except Exception as _e:
-                logger.warning(f"A/B routing: falha ao buscar Lead.* ({_e}); fallback p/ leads_capi.*")
+                logger.warning(f"A/B routing: falha ao buscar Lead.pageUrl ({_e}); fallback p/ event_source_url")
 
             ab_variant = pipeline.get_ab_variant(lead_utms, event_source_url=url_for_variant_match)
             predictor_override = None
