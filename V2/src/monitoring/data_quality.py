@@ -581,17 +581,22 @@ class DataQualityMonitor:
     - Mudanças na distribuição de scores/decis
     """
 
-    def __init__(self, model_path: str, client_config=None):
+    def __init__(self, model_path: str, client_config=None, db=None):
         """
         Args:
             model_path:    Caminho para pasta do modelo ativo
             client_config: ClientConfig opcional — usado para encoding via core/,
                            carregamento do modelo correto por client_id, e
                            overrides de thresholds/missing_rate_ignore_columns
+            db:            SQLAlchemy session opcional. Quando presente, _check_score_distribution
+                           usa rolling baseline 30d (produção atual vs produção recente) em vez
+                           de comparar contra treino — mais robusto para falsos positivos crônicos
+                           quando a distribuição de produção diverge estruturalmente da do treino.
         """
         from .config import THRESHOLDS, MISSING_RATE_IGNORE_COLUMNS
         self.model_path = model_path
         self.client_config = client_config
+        self.db = db
         monitoring = client_config.monitoring if client_config else None
         self._thresholds = (
             monitoring.thresholds if monitoring and monitoring.thresholds else THRESHOLDS
@@ -808,33 +813,62 @@ class DataQualityMonitor:
         if total_leads == 0:
             return alerts
 
-        # E5: tenta carregar distribuição real do modelo ativo (model_metadata.json:decil_analysis).
-        # Cai no EXPECTED_DECIL_DISTRIBUTION hardcoded (uniforme 10%) se não conseguir ler.
-        # Motivação: o hardcoded é teórico — o real do treino pode ser não-uniforme se os
-        # thresholds dos decis foram calibrados de forma diferente.
+        # E5+E6: precedência de baseline para "esperado":
+        #   1. Rolling 30d em produção (E6) — quando self.db disponível, mais robusto
+        #      contra divergência estrutural treino × produção (D10 ~30% em prod vs ~10% no treino)
+        #   2. model_metadata.json:decil_analysis (E5) — distribuição real do conjunto de
+        #      calibração do treino
+        #   3. EXPECTED_DECIL_DISTRIBUTION hardcoded (uniforme 10%) — fallback final
         expected_dist = dict(EXPECTED_DECIL_DISTRIBUTION)
-        try:
-            for cand in ('model_metadata.json',
-                         'model/model_metadata.json'):
-                p = _os.path.join(self.model_path, cand)
-                if _os.path.exists(p):
-                    md = _json.load(open(p))
-                    da = md.get('decil_analysis') or {}
-                    if da:
-                        total_train = sum(int(v.get('total_leads', 0)) for v in da.values() if isinstance(v, dict))
-                        if total_train > 0:
-                            real_dist = {}
-                            for k, v in da.items():
-                                if not isinstance(v, dict): continue
-                                # k='decil_1' → 'D1', 'decil_10' → 'D10'
-                                idx = str(k).replace('decil_', '')
-                                real_dist[f'D{idx}'] = int(v.get('total_leads', 0)) / total_train
-                            if len(real_dist) == 10:
-                                expected_dist = real_dist
-                                logger.debug(f"  [E5] EXPECTED_DECIL carregado de {cand}")
-                                break
-        except Exception as _e:
-            logger.warning(f"  [E5] falha ao carregar decil_analysis: {_e}; usando hardcoded")
+        baseline_source = 'hardcoded_uniform'
+
+        # Tentativa 1: rolling 30d em produção (E6)
+        if self.db is not None:
+            try:
+                from sqlalchemy import text as _sa_text
+                # Janela: últimos 30 dias antes da janela analisada (assume df = 24h atual)
+                rows = self.db.execute(_sa_text(
+                    'SELECT decil, COUNT(*) FROM "Lead" '
+                    'WHERE "createdAt" >= NOW() - INTERVAL \'31 days\' '
+                    '  AND "createdAt" <  NOW() - INTERVAL \'1 day\' '
+                    '  AND decil IS NOT NULL '
+                    'GROUP BY decil'
+                )).fetchall()
+                if rows:
+                    total_30d = sum(int(r[1]) for r in rows)
+                    if total_30d >= 1000:  # mínimo de amostra pra ser confiável
+                        rolling = {f'D{int(r[0])}': int(r[1]) / total_30d for r in rows}
+                        # Garantir que todas as 10 chaves existam (ausentes = 0)
+                        rolling = {f'D{i}': rolling.get(f'D{i}', 0.0) for i in range(1, 11)}
+                        expected_dist = rolling
+                        baseline_source = f'rolling_30d_n={total_30d}'
+            except Exception as _e:
+                logger.warning(f"  [E6] falha ao calcular rolling 30d: {_e}")
+
+        # Tentativa 2: model_metadata.json:decil_analysis (E5) — só se rolling não funcionou
+        if baseline_source == 'hardcoded_uniform':
+            try:
+                for cand in ('model_metadata.json', 'model/model_metadata.json'):
+                    p = _os.path.join(self.model_path, cand)
+                    if _os.path.exists(p):
+                        md = _json.load(open(p))
+                        da = md.get('decil_analysis') or {}
+                        if da:
+                            total_train = sum(int(v.get('total_leads', 0)) for v in da.values() if isinstance(v, dict))
+                            if total_train > 0:
+                                real_dist = {}
+                                for k, v in da.items():
+                                    if not isinstance(v, dict): continue
+                                    idx = str(k).replace('decil_', '')
+                                    real_dist[f'D{idx}'] = int(v.get('total_leads', 0)) / total_train
+                                if len(real_dist) == 10:
+                                    expected_dist = real_dist
+                                    baseline_source = f'training_metadata:{cand}'
+                                    break
+            except Exception as _e:
+                logger.warning(f"  [E5] falha ao carregar decil_analysis: {_e}")
+
+        logger.debug(f"  [score_distribution] baseline_source={baseline_source}")
 
         # Normalizar formato dos decis (D01  D1, D02  D2, etc)
         # Google Sheets pode ter 'D01' enquanto esperamos 'D1'

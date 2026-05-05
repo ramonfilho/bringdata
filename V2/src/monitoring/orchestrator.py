@@ -110,7 +110,7 @@ class MonitoringOrchestrator:
 
         # Inicializar monitors
         self.monitors = {
-            'data_quality': DataQualityMonitor(model_path, client_config=self._client_config),
+            'data_quality': DataQualityMonitor(model_path, client_config=self._client_config, db=db),
             'operational': OperationalMonitor(db, client_config=self._client_config),
             'capi_quality': CAPIQualityMonitor(db, client_config=self._client_config)
         }
