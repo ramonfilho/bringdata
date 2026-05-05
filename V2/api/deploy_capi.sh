@@ -48,7 +48,10 @@ SKIP_TESTS=false
 ALLOW_PUBLIC=true  # Temporário - mudar para false em produção
 PREVIOUS_REVISION=""
 YES_FLAG=false  # Pula confirmação se true
-NO_TRAFFIC=false  # Se true, deploy sem redirecionar tráfego (para teste)
+NO_TRAFFIC=true   # [E7] Canary obrigatório — deploy SEMPRE cria revisão com 0% de tráfego
+                  # e roda smoke test. Para progredir 10/50/100% use update-traffic à mão
+                  # (instruções impressas no fim do deploy). Para deploy direto à mão em
+                  # emergência: 'gcloud run services update-traffic' fora deste script.
 FORCE_DEPLOY=false  # Requer --force-deploy para branches não autorizadas
 SKIP_PARITY_AUDIT=${SKIP_PARITY_AUDIT:-false}  # [T1-8] Escape hatch para pular parity audit em branch não-rollback
 
@@ -576,18 +579,11 @@ deploy_to_cloud_run() {
         print_info "Re-rodar smoke (Gate A) antes de qualquer avanço: python3 $SMOKE_SCRIPT $NEW_REVISION"
         print_info "Descartar revisão: gcloud run revisions delete $NEW_REVISION --region=$REGION"
         print_info "====================================================================="
-    else
-        # Garantir que 100% do tráfego vai para a nova revisão.
-        # Necessário quando o serviço está em modo de tráfego manual
-        # (ocorre após usar update-traffic manualmente).
-        print_info "Direcionando 100% do tráfego para: $NEW_REVISION"
-        gcloud run services update-traffic $SERVICE_NAME \
-            --region=$REGION \
-            --to-revisions="$NEW_REVISION=100" \
-            --quiet || {
-                print_warning "Falha ao redirecionar tráfego (pode já estar correto)"
-            }
     fi
+    # [E7] Caminho de "deploy direto a 100%" foi removido. Canary é obrigatório
+    # — script sempre cai no bloco acima (NO_TRAFFIC=true por default).
+    # Bypass em emergência: rodar 'gcloud run services update-traffic ... --to-revisions=$NEW_REVISION=100'
+    # à mão, fora deste script, assumindo o risco explicitamente.
 
     print_success "Deploy concluído"
 
@@ -833,7 +829,8 @@ usage() {
     echo "  --model-version VER    Versão do modelo (ex: 20260109_110657) [default: timestamp]"
     echo "  --skip-tests           Pular testes pós-deploy"
     echo "  --no-public            Deploy sem acesso público (requer Service Account)"
-    echo "  --no-traffic           Deploy sem redirecionar tráfego (para testar nova revisão)"
+    echo "  --no-traffic           [E7] DEPRECATED — canary é o padrão agora. Flag mantida"
+    echo "                         por compatibilidade mas é no-op (sempre cria revisão sem tráfego)."
     echo "  --yes, -y              Pular confirmação (não perguntar)"
     echo "  --force-deploy         Autorizar deploy de branch NÃO listada em AUTHORIZED_BRANCHES"
     echo "                         Exige confirmação manual digitada. Só use com FORCE_DEPLOY=true."
@@ -842,7 +839,7 @@ usage() {
     echo "Exemplos:"
     echo "  $0"
     echo "  $0 --yes"
-    echo "  $0 --no-traffic --yes   # Testa novo modelo sem afetar produção"
+    echo "  $0 --yes                # Deploy padrão (canary) — cria revisão sem tráfego e roda smoke"
     echo "  $0 --env production --model-version 20260109_110657"
     echo "  $0 --skip-tests --no-public --yes"
     exit 1
@@ -868,6 +865,7 @@ parse_arguments() {
                 shift
                 ;;
             --no-traffic)
+                # [E7] no-op — canary já é o default
                 NO_TRAFFIC=true
                 shift
                 ;;
