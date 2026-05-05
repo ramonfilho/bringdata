@@ -655,6 +655,12 @@ class DataQualityMonitor:
         # 6. Extra features (colunas novas não esperadas pelo modelo)
         alerts.extend(self._check_extra_features(df))
 
+        # 7. [T1-10 surface] Top-N features por importância ausentes — espelha
+        #    a lógica de logger.error/warning emitida em apply_encoding pra
+        #    que o daily-check / monitoring report enxergue ausências críticas
+        #    sem precisar do operador grep nos logs do Cloud Run.
+        alerts.extend(self._check_critical_features_coverage(df))
+
         return alerts
 
     def _check_category_drift(self, df: pd.DataFrame) -> List[Dict]:
@@ -1142,6 +1148,106 @@ class DataQualityMonitor:
 
         except Exception as e:
             logger.error(f"\n ERRO em _check_extra_features(): {e}")
+            import traceback
+            traceback.print_exc()
+
+        return alerts
+
+    def _check_critical_features_coverage(self, df: pd.DataFrame) -> List[Dict]:
+        """
+        [T1-10 surface] Verifica cobertura das features TOP-N (por importância)
+        que estariam ausentes do DataFrame após encoding+alignment.
+
+        Espelha a lógica em src/core/encoding.py:330-348 mas, em vez de só
+        emitir logger.error/warning (que ficam invisíveis fora do Cloud Run),
+        gera alerta formal pro daily-check / monitoring report.
+
+        Severidade segue a regra do T1-10:
+          - importância >= 5% → severity 'HIGH'  (era logger.error)
+          - importância <  5% → severity 'MEDIUM' (era logger.warning)
+
+        Args:
+            df: DataFrame após feature engineering (mesmo input dos checks irmãos)
+
+        Returns:
+            Lista de alertas, um por feature TOP-N ausente.
+        """
+        from datetime import datetime, timezone
+
+        alerts = []
+
+        try:
+            from model.prediction import LeadScoringPredictor
+            predictor = LeadScoringPredictor(use_active_model=True, client_config=self.client_config)
+
+            # Sem core encoding, nada a checar (legacy path).
+            if not (self.client_config and self.client_config.encoding):
+                return alerts
+
+            from core.encoding import apply_encoding, merge_encoding, _load_top_features
+            artifacts = {}
+            if predictor.mlflow_run_id:
+                artifacts['mlflow_run_id'] = predictor.mlflow_run_id
+            elif predictor.model_path:
+                artifacts['model_path'] = str(predictor.model_path)
+
+            # Espelha o pattern de _check_missing/extra_features: aplica
+            # encoding_overrides do champion via ABTestConfig se houver.
+            effective_encoding = self.client_config.encoding
+            try:
+                from core.client_config import ABTestConfig
+                import os as _os
+                _active_path = _os.path.abspath(_os.path.join(
+                    _os.path.dirname(__file__), '..', '..', 'configs', 'active_models',
+                    f'{self.client_config.client_id}.yaml',
+                ))
+                _ab = ABTestConfig.from_active_model_yaml(_active_path)
+                if _ab.enabled and predictor.mlflow_run_id:
+                    _champion_v = next(
+                        (v for v in _ab.variants.values() if v.run_id == predictor.mlflow_run_id),
+                        None,
+                    )
+                    if _champion_v and _champion_v.encoding_overrides:
+                        effective_encoding = merge_encoding(self.client_config.encoding, _champion_v.encoding_overrides)
+            except Exception as _e:
+                logger.debug(f"  [T1-10 surface] encoding_overrides do champion não carregados: {_e}")
+
+            df_encoded = apply_encoding(df.copy(), effective_encoding, artifacts=artifacts)
+
+            # validate_features popula last_missing_features via prepare_features
+            validation = predictor.validate_features(df_encoded)
+            missing_features = set(validation.get('missing_features', []))
+
+            if not missing_features:
+                return alerts
+
+            # Top features por importância (mesma fonte do T1-10 do encoding.py)
+            top_features = _load_top_features(artifacts, min_importance=0.01)
+            critical_missing = [f for f in top_features if f['name'] in missing_features]
+
+            for f in critical_missing:
+                severity = 'HIGH' if f['importance'] >= 0.05 else 'MEDIUM'
+                alerts.append({
+                    'type': 'critical_feature_coverage',
+                    'severity': severity,
+                    'category': 'data_quality',
+                    'message': (
+                        f"[T1-10] Feature CRÍTICA ausente: '{f['name']}' "
+                        f"(rank {f['rank']}, importância {f['importance']*100:.2f}%) "
+                        f"— preenchida com 0, modelo cego para esse sinal"
+                    ),
+                    'details': {
+                        'feature_name': f['name'],
+                        'rank': f['rank'],
+                        'importance_pct': round(f['importance'] * 100, 2),
+                    },
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'metric_value': float(f['importance']),
+                    'threshold': 0.05,
+                })
+
+        except Exception as _e:
+            logger.error(f"\n ERRO em _check_critical_features_coverage(): {_e}")
             import traceback
             traceback.print_exc()
 
