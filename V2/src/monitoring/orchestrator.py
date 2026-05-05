@@ -286,8 +286,32 @@ class MonitoringOrchestrator:
                     with open(_path) as _f:
                         _am = _yaml.safe_load(_f) or {}
                     result['active_run_id'] = (_am.get('active_model') or {}).get('mlflow_run_id')
-                    result['ab_test_enabled'] = bool((_am.get('ab_test') or {}).get('enabled'))
+                    _ab = _am.get('ab_test') or {}
+                    result['ab_test_enabled'] = bool(_ab.get('enabled'))
                     result['active_model_yaml_path'] = _path
+                    # AB variants — listar Champion e Challenger separadamente quando AB ativo.
+                    # routing_active=True = variant pode capturar tráfego (utm_pattern não vazio
+                    # OU url_pattern definido). Champion shim (utm_pattern={} sem url_pattern)
+                    # nunca matcheia → routing_active=False → marcado como 'default'.
+                    _variants = []
+                    for _name, _v in (_ab.get('variants') or {}).items():
+                        if not isinstance(_v, dict):
+                            continue
+                        _utm = _v.get('utm_pattern') or {}
+                        _url = _v.get('url_pattern')
+                        _has_routing = bool(_utm) or bool(_url)
+                        _route_desc = []
+                        if _utm:
+                            _route_desc.append(', '.join(f"{k}={v}" for k, v in _utm.items()))
+                        if _url:
+                            _route_desc.append(f"url~{_url}")
+                        _variants.append({
+                            'name': _name,
+                            'run_id': _v.get('run_id'),
+                            'routing_active': _has_routing,
+                            'routing_desc': ' | '.join(_route_desc) if _route_desc else 'default (não match)',
+                        })
+                    result['ab_variants'] = _variants
                     _yaml_loaded = True
                     break
                 except Exception as _e:
@@ -296,6 +320,7 @@ class MonitoringOrchestrator:
             logger.warning(f"  [T3-5] active_model.yaml não encontrado — paths tentados: {_candidate_yamls}")
             result['active_run_id'] = None
             result['ab_test_enabled'] = None
+            result['ab_variants'] = []
 
         # 2. Cloud Run revision (definida pelo Cloud Run em runtime)
         result['cloud_run_revision'] = _os.environ.get('K_REVISION')
@@ -352,6 +377,11 @@ class MonitoringOrchestrator:
         logger.info("=" * 60)
         logger.info(f"  Modelo ativo (run_id): {result.get('active_run_id') or '(não lido)'}")
         logger.info(f"  A/B test: {'enabled' if result.get('ab_test_enabled') else 'disabled'}")
+        if result.get('ab_test_enabled') and result.get('ab_variants'):
+            for _v in result['ab_variants']:
+                _label = 'Challenger' if _v.get('routing_active') else 'Champion (default)'
+                _rid = _v.get('run_id') or '(sem run_id)'
+                logger.info(f"    {_label:20} {_rid} (rota: {_v.get('routing_desc')})")
         if result.get('cloud_run_revision'):
             logger.info(f"  Cloud Run: {result.get('cloud_run_service')} / {result.get('cloud_run_revision')}")
         if 'last_scored_at' in result:
