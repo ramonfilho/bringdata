@@ -64,12 +64,13 @@ SKIP_PARITY_AUDIT=${SKIP_PARITY_AUDIT:-false}  # [T1-8] Escape hatch para pular 
 # com confirmação explícita adicional.
 #
 # Branches autorizadas:
-#   rollback/edf23e9  — worktree do rollback P1 (edf23e9, jan30, 05/03/2026)
+#   main              — branch de produção corrente (desde 05/05/2026; champion jan30 + fixes acumulados em main)
+#   rollback/edf23e9  — worktree do rollback P1 (edf23e9, jan30, 05/03/2026; mantida como escape hatch)
 #
 # Para adicionar uma branch autorizada, edite AUTHORIZED_BRANCHES abaixo
 # E documente o motivo no commit.
 # =============================================================================
-AUTHORIZED_BRANCHES=("rollback/edf23e9" "HEAD" "detached")
+AUTHORIZED_BRANCHES=("main" "rollback/edf23e9" "HEAD" "detached")
 
 check_authorized_branch() {
     local CURRENT_BRANCH
@@ -102,7 +103,7 @@ check_authorized_branch() {
     echo "  ║  🚨  DEPLOY BLOQUEADO — BRANCH NÃO AUTORIZADA                  ║"
     echo "  ╠══════════════════════════════════════════════════════════════════╣"
     echo "  ║  Branch atual : ${CURRENT_BRANCH} @ ${CURRENT_COMMIT}"
-    echo "  ║  Produção deve rodar: rollback/edf23e9 (worktree, edf23e9)      ║"
+    echo "  ║  Branches autorizadas: main, rollback/edf23e9                   ║"
     echo "  ║                                                                  ║"
     echo "  ║  Para deployar esta branch você precisa de autorização           ║"
     echo "  ║  explícita. Execute com a flag abaixo E confirme o prompt:       ║"
