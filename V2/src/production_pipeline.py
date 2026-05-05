@@ -213,23 +213,18 @@ class LeadScoringPipeline:
         """
         Verifica se há novas categorias não vistas no treino.
 
-        Returns:
-            Lista de alertas (vazia se tudo OK)
+        Pulado quando predictor não expõe model_path (modo MLflow run_id em
+        produção via A/B test). O daily-check do orchestrator cobre o mesmo
+        sinal com janela maior e estatística mais robusta — fixar este
+        caminho não traria ganho operacional.
         """
+        if not self.predictor.model_path:
+            return []
         try:
-            # Carregar categorias esperadas do modelo ativo
-            model_path = self.predictor.model_path or self.predictor._get_active_model_path()
-            categorias_esperadas = load_training_categories(model_path)
-
-            # Verificar drift
-            alertas = check_category_drift(self.data, categorias_esperadas)
-
-            return alertas
-
+            categorias_esperadas = load_training_categories(self.predictor.model_path)
+            return check_category_drift(self.data, categorias_esperadas)
         except FileNotFoundError as e:
-            # Modelo antigo sem arquivo de categorias
             logger.warning(f" Arquivo de categorias não encontrado: {e}")
-            logger.warning("   Execute retreino para gerar categorias_esperadas.json")
             return []
         except Exception as e:
             logger.error(f" Erro ao verificar category drift: {e}")
@@ -351,33 +346,27 @@ class LeadScoringPipeline:
             logger.info("    Nenhuma categoria nova detectada")
 
         # 8.5. Verificar distribution drift (mudanças nas proporções)
-        logger.info(" [8.5/12] Verificando distribution drift...")
-        try:
-            # Carregar distribuições esperadas do modelo ativo
-            model_path = self.predictor.model_path or self.predictor._get_active_model_path()
-            distribuicoes_esperadas = load_training_distributions(model_path)
+        # Pulado quando predictor não expõe model_path (modo MLflow run_id via A/B test).
+        # Daily-check cobre o mesmo sinal com janela maior — ver check_category_drift().
+        if self.predictor.model_path:
+            logger.info(" [8.5/12] Verificando distribution drift...")
+            try:
+                distribuicoes_esperadas = load_training_distributions(self.predictor.model_path)
+                distribution_alerts = check_distribution_drift(self.data, distribuicoes_esperadas)
 
-            # Verificar drift nas distribuições
-            distribution_alerts = check_distribution_drift(self.data, distribuicoes_esperadas)
-
-            if distribution_alerts:
-                logger.warning(f"  {len(distribution_alerts)} alertas de distribution drift detectados:")
-                for alert in distribution_alerts:
-                    logger.warning(f"   {alert['message']}")
-
-                # Armazenar alertas
-                if not hasattr(self, 'alerts'):
-                    self.alerts = []
-                self.alerts.extend(distribution_alerts)
-            else:
-                logger.info("    Nenhuma mudança drástica nas distribuições")
-
-        except FileNotFoundError as e:
-            # Modelo antigo sem arquivo de distribuições
-            logger.warning(f" Arquivo de distribuições não encontrado: {e}")
-            logger.warning("   Execute retreino para gerar distribuicoes_esperadas.json")
-        except Exception as e:
-            logger.error(f" Erro ao verificar distribution drift: {e}")
+                if distribution_alerts:
+                    logger.warning(f"  {len(distribution_alerts)} alertas de distribution drift detectados:")
+                    for alert in distribution_alerts:
+                        logger.warning(f"   {alert['message']}")
+                    if not hasattr(self, 'alerts'):
+                        self.alerts = []
+                    self.alerts.extend(distribution_alerts)
+                else:
+                    logger.info("    Nenhuma mudança drástica nas distribuições")
+            except FileNotFoundError as e:
+                logger.warning(f" Arquivo de distribuições não encontrado: {e}")
+            except Exception as e:
+                logger.error(f" Erro ao verificar distribution drift: {e}")
 
         # 9. Engenharia de features (usando componente importado)
         logger.info(" [9/12] Aplicando engenharia de features...")
