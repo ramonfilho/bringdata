@@ -509,7 +509,7 @@ class MonitoringOrchestrator:
             df_valid['lead_score_float'] = df_valid['lead_score'].str.replace(',', '.').astype(float)
 
             # Parsear data
-            df_valid['data_parsed'] = pd.to_datetime(df_valid['Data'], format='%Y-%m-%d %H:%M:%S', errors='coerce')
+            df_valid['data_parsed'] = pd.to_datetime(df_valid['Data'], format='%Y-%m-%d %H:%M:%S', errors='coerce', utc=True)
             df_with_date = df_valid[df_valid['data_parsed'].notna()].copy()
 
             if len(df_with_date) == 0:
