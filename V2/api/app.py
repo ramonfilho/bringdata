@@ -2839,6 +2839,7 @@ async def daily_monitoring_check_railway(
             revenue_forecast=revenue_forecast if revenue_forecast else None,
             survey_funnel_metrics=survey_funnel_metrics or None,
             traffic_metrics=traffic_metrics,
+            operational_routines=result.get('operational_routines'),
         )
 
     except FileNotFoundError as e:
@@ -2936,6 +2937,7 @@ async def daily_monitoring_check(
             timestamp=datetime.now().isoformat(),
             funnel_metrics=result.get('funnel_metrics'),
             lead_quality_metrics=result.get('lead_quality_metrics'),
+            operational_routines=result.get('operational_routines'),
         )
 
     except FileNotFoundError as e:
