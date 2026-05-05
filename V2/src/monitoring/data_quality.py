@@ -796,6 +796,7 @@ class DataQualityMonitor:
         """Verifica mudanças na distribuição de decis"""
         from .config import EXPECTED_DECIL_DISTRIBUTION
         from datetime import datetime, timezone
+        import json as _json, os as _os
         alerts = []
 
         if 'decil' not in df.columns:
@@ -807,6 +808,34 @@ class DataQualityMonitor:
         if total_leads == 0:
             return alerts
 
+        # E5: tenta carregar distribuição real do modelo ativo (model_metadata.json:decil_analysis).
+        # Cai no EXPECTED_DECIL_DISTRIBUTION hardcoded (uniforme 10%) se não conseguir ler.
+        # Motivação: o hardcoded é teórico — o real do treino pode ser não-uniforme se os
+        # thresholds dos decis foram calibrados de forma diferente.
+        expected_dist = dict(EXPECTED_DECIL_DISTRIBUTION)
+        try:
+            for cand in ('model_metadata.json',
+                         'model/model_metadata.json'):
+                p = _os.path.join(self.model_path, cand)
+                if _os.path.exists(p):
+                    md = _json.load(open(p))
+                    da = md.get('decil_analysis') or {}
+                    if da:
+                        total_train = sum(int(v.get('total_leads', 0)) for v in da.values() if isinstance(v, dict))
+                        if total_train > 0:
+                            real_dist = {}
+                            for k, v in da.items():
+                                if not isinstance(v, dict): continue
+                                # k='decil_1' → 'D1', 'decil_10' → 'D10'
+                                idx = str(k).replace('decil_', '')
+                                real_dist[f'D{idx}'] = int(v.get('total_leads', 0)) / total_train
+                            if len(real_dist) == 10:
+                                expected_dist = real_dist
+                                logger.debug(f"  [E5] EXPECTED_DECIL carregado de {cand}")
+                                break
+        except Exception as _e:
+            logger.warning(f"  [E5] falha ao carregar decil_analysis: {_e}; usando hardcoded")
+
         # Normalizar formato dos decis (D01  D1, D02  D2, etc)
         # Google Sheets pode ter 'D01' enquanto esperamos 'D1'
         df['decil_normalized'] = df['decil'].astype(str).str.replace(r'^D0(\d)$', r'D\1', regex=True)
@@ -814,11 +843,11 @@ class DataQualityMonitor:
         decil_counts = df['decil_normalized'].value_counts()
         distribuicao_atual = {
             decil: decil_counts.get(decil, 0) / total_leads
-            for decil in EXPECTED_DECIL_DISTRIBUTION.keys()
+            for decil in expected_dist.keys()
         }
 
         diferencas_significativas = []
-        for decil, prop_esperada in EXPECTED_DECIL_DISTRIBUTION.items():
+        for decil, prop_esperada in expected_dist.items():
             prop_atual = distribuicao_atual.get(decil, 0)
             diff = abs(prop_atual - prop_esperada)
 
