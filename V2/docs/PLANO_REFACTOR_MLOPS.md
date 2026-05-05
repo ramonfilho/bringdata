@@ -1003,6 +1003,46 @@ O parâmetro `config.term_long_id_threshold` pode ser marcado DEPRECATED no YAML
 
 ---
 
+### DT-16 — Tornar `encoding_overrides` legado por convergência (estratégia preferida)
+
+**Contexto:** DT-12 introduziu `encoding_overrides` para resolver a divergência de encoding (ordinal vs OHE) entre Champion jan30 (treinado pré-Opção A com ordinal) e modelos novos (treinados com OHE default). DT-14 e DT-15 documentam débitos colaterais desse mecanismo: nomenclatura de configs que confunde, campos obrigatórios não-utilizáveis no shim do Champion, código duplicado em monitoring que precisa replicar a lógica de merge_encoding (resolvido em 05/05/2026 mas reforça o cheiro de design).
+
+**Estratégia mais simples que todas as anteriores:** matar o mecanismo por convergência. Se o único modelo em produção que precisa de override (jan30) for retreinado com OHE nativo, **`encoding_overrides` não tem mais usuário** e pode ser removido sem refactor estrutural.
+
+**Pré-requisito:** ter o jan30 retreinado com pipeline novo (OHE nativo, sem dependência de override). O usuário sinalizou em 02/05/2026 que esse retreino existe — falta validar.
+
+**Sequência de execução (assumindo retreino válido):**
+
+| Passo | Ação | Esforço |
+|---|---|---|
+| 1 | Validar metadados do jan30 retreinado: AUC, lift, monotonia comparáveis ao original; feature_registry com `Qual_a_sua_idade_18_24_anos` etc (OHE-expandido); idade/salário NÃO em colunas ordinais únicas | 5 min |
+| 2 | `configs/active_models/devclub.yaml`: trocar `active_model.mlflow_run_id` pro novo run_id; **remover entrada `champion_jan30`** dos `ab_test.variants` | 2 min |
+| 3 | Deploy canary + smoke (gate E3) + promoção 100% | 15 min |
+| 4 | Verificar nos logs Cloud Run: T1-10 deixa de citar `Qual_a_sua_idade` (ordinal) e passa a citar `Qual_a_sua_idade_*_anos` quando aplicável (esperado pra batches pequenos sem cobertura de todas categorias) | 5 min |
+| 5 | (Code cleanup, opcional) Marcar `ABTestVariantConfig.encoding_overrides` como `# DEPRECATED — manter campo por backward-compat enquanto algum YAML legado ainda usa; remover quando confirmar que nenhum YAML em produção tem essa chave` | 2 min |
+| 6 | (Refactor futuro, opcional) Após N semanas sem uso, remover totalmente: campo do dataclass, parser em `from_active_model_yaml`, função `merge_encoding`, parâmetro `encoding_overrides` em `production_pipeline.run/preprocess`, lookup do champion variant em `app.py:937-943` e `:3373-3380`, e o bloco em `monitoring/data_quality.py:_check_extra_features/_check_missing_features` | 30-60 min |
+
+**Total mínimo (passos 1-4):** ~30 min ponta a ponta. Resolve **simultaneamente**:
+- DT-12 (encoding por variante) — vira histórico, sem usuário ativo
+- DT-15 (campos obrigatórios não-utilizáveis) — não precisa mais do shim, parser fica honesto
+- Bug atual do jan30 cego em idade/salário (já foi mitigado com champion_jan30 shim em 02/05/2026, mas é definitivamente apagado aqui)
+- Bug do monitoring assimétrico (resolvido em 05/05/2026 mas torna-se irrelevante quando override some)
+
+**Não resolve diretamente:**
+- DT-14 (nomenclatura `clients/` vs `active_models/` confunde) — a separação dos dois arquivos continua, e o motivo da separação ainda existe (config estática vs dinâmica). Esse é refactor independente.
+
+**Trade-off:**
+- ✅ **Pra simplicidade:** caminho mais limpo. Encoding default (OHE) atende todos os modelos novos. `merge_encoding` vira código órfão e some no passo 6.
+- ⚠️ **Pra flexibilidade futura:** se algum dia houver modelo treinado com encoding diferente (target encoding, hash encoding pra cliente B), o mecanismo seria útil. Mas dá pra ressuscitar quando a necessidade aparecer — não precisa manter código preventivamente.
+
+**Sinalização do usuário (sessão 05/05/2026):** "Se decidimos optar por uma arquitetura única que serve apenas modelos com o modelo atual de código, ou seja, OHE para todas as features, toda essa questão desaparece, e encoding overrides vira legado. O quão fácil ou difícil seria fazer com que Encoding Override vire legado?"
+
+**Recomendação:** matar por convergência assim que o run_id do jan30 retreinado for confirmado. Bloqueio único: validar o retreino.
+
+**Prioridade:** alta — a soma de DT-12+DT-14+DT-15+bug monitoring é mais cara que esse passo único de deprecation.
+
+---
+
 ## 12. Caminho para Nível 2 e além
 
 Ver **`docs/ROADMAP_MLOPS_MATURIDADE.md`** para o guia completo.

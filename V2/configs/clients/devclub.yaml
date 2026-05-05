@@ -164,10 +164,17 @@ utm:
     ig: facebook-ads
   # Whitelist final de Source (pós source_to_channel_mapping). Source fora
   # desta lista vira 'outros' — espelha o fallback que _unify_term já tem.
+  # tiktok adicionado em 2026-05-05 — o gestor passou a rodar campanhas TikTok
+  # Ads e o Source vinha sendo rebatizado pra 'outros', gerando ruído de
+  # category drift no monitoring. Atualmente eventos TikTok não são enviados
+  # à Meta (DT-CAPI-01 filtra por destination), então isto é só pra silenciar
+  # o falso alerta. Se um dia conectar TikTok Ads server-side, o canônico já
+  # está pronto.
   source_canonical_values:
   - facebook-ads
   - google-ads
   - youtube
+  - tiktok
   - outros
   term_mappings:
     ig: instagram
@@ -229,6 +236,18 @@ medium:
     Aberto: Aberto
     ABERTO: Aberto
     Aberto++AD08-1002: Outros
+    # MIX QUENTE temporariamente mapeado para Outros — feature_registry do
+    # jan30 (Champion atual) não tem Medium_MIX_QUENTE. No próximo retreino,
+    # promover MIX QUENTE a categoria canônica distinta:
+    #   1. Auditar variações reais com:
+    #      SELECT DISTINCT medium FROM "Lead" WHERE medium ILIKE '%mix%quente%'
+    #   2. Mapear TODAS as variações (case/espaços/pontuação) para o mesmo
+    #      canônico (sugestão: "MIX QUENTE").
+    #   3. Aplicar simultaneamente ao retreino — o novo feature_registry
+    #      passa a conter Medium_MIX_QUENTE.
+    # Motivação: ~7.3% do volume histórico desperdiçado em Outros (ver
+    # docs/INVESTIGACAO_BAIXO_DESEMPENHO.md). Tracking em PLANO_EXECUCAO.md
+    # → "Sequelas 05/05/2026" item M1.
     MIX QUENTE: Outros
     Linguagem de programação: Linguagem de programação
     dgen: dgen

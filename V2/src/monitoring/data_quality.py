@@ -950,15 +950,40 @@ class DataQualityMonitor:
             predictor = LeadScoringPredictor(use_active_model=True, client_config=self.client_config)
 
             # 2. Aplicar encoding com artifacts para que step 7 (registry alignment) execute
-            #    — sem artifacts, step 7 é pulado e categorias OHE ausentes viram falsos alertas
+            #    — sem artifacts, step 7 é pulado e categorias OHE ausentes viram falsos alertas.
+            #    Usa encoding_overrides do Champion (se definidos no AB test config) para que
+            #    o check reflita o encoding real que o modelo recebe em produção. Sem isso,
+            #    monitoring usa OHE pra idade/salário enquanto produção usa ordinal (jan30) →
+            #    T1-10 falso positivo. Pattern espelhado de _check_extra_features.
             if self.client_config and self.client_config.encoding:
-                from core.encoding import apply_encoding
+                from core.encoding import apply_encoding, merge_encoding
                 artifacts = {}
                 if predictor.mlflow_run_id:
                     artifacts['mlflow_run_id'] = predictor.mlflow_run_id
                 elif predictor.model_path:
                     artifacts['model_path'] = str(predictor.model_path)
-                df_encoded = apply_encoding(df.copy(), self.client_config.encoding, artifacts=artifacts)
+
+                # Buscar encoding_overrides do Champion via ABTestConfig
+                effective_encoding = self.client_config.encoding
+                try:
+                    from core.client_config import ABTestConfig
+                    import os as _os
+                    _active_path = _os.path.abspath(_os.path.join(
+                        _os.path.dirname(__file__), '..', '..', 'configs', 'active_models',
+                        f'{self.client_config.client_id}.yaml',
+                    ))
+                    _ab = ABTestConfig.from_active_model_yaml(_active_path)
+                    if _ab.enabled and predictor.mlflow_run_id:
+                        _champion_v = next(
+                            (v for v in _ab.variants.values() if v.run_id == predictor.mlflow_run_id),
+                            None,
+                        )
+                        if _champion_v and _champion_v.encoding_overrides:
+                            effective_encoding = merge_encoding(self.client_config.encoding, _champion_v.encoding_overrides)
+                except Exception as _e:
+                    logger.debug(f"  monitoring: encoding_overrides do champion não carregados: {_e}")
+
+                df_encoded = apply_encoding(df.copy(), effective_encoding, artifacts=artifacts)
             else:
                 from features.encoding import apply_categorical_encoding
                 df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3', model_path=self.model_path)
