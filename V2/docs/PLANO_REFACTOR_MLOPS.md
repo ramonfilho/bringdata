@@ -1007,15 +1007,17 @@ O parâmetro `config.term_long_id_threshold` pode ser marcado DEPRECATED no YAML
 
 **Contexto:** DT-12 introduziu `encoding_overrides` para resolver a divergência de encoding (ordinal vs OHE) entre Champion jan30 (treinado pré-Opção A com ordinal) e modelos novos (treinados com OHE default). DT-14 e DT-15 documentam débitos colaterais desse mecanismo: nomenclatura de configs que confunde, campos obrigatórios não-utilizáveis no shim do Champion, código duplicado em monitoring que precisa replicar a lógica de merge_encoding (resolvido em 05/05/2026 mas reforça o cheiro de design).
 
-**Estratégia mais simples que todas as anteriores:** matar o mecanismo por convergência. Se o único modelo em produção que precisa de override (jan30) for retreinado com OHE nativo, **`encoding_overrides` não tem mais usuário** e pode ser removido sem refactor estrutural.
+**Estratégia mais simples que todas as anteriores:** matar o mecanismo por convergência. Se o único modelo em produção que precisa de override (jan30 hoje) for substituído por **qualquer modelo treinado com o pipeline atual** (OHE nativo, default desde Opção A em 21/04/2026), `encoding_overrides` não tem mais usuário e pode ser removido sem refactor estrutural.
 
-**Pré-requisito:** ter o jan30 retreinado com pipeline novo (OHE nativo, sem dependência de override). O usuário sinalizou em 02/05/2026 que esse retreino existe — falta validar.
+**Pré-requisito:** ter o **próximo Champion** treinado com pipeline atual ativo. **Não precisa ser "jan30 retreinado" especificamente.** Sinalização do usuário (sessão 05/05/2026): "o run do modelo retreinado jan30 com o novo pipeline, além de ter se perdido, utilizou dados muito diferentes do Challenger atual; eu realmente criaria um novo modelo, o que redundaria no Champion e tornaria esse ponto atual irrelevante." Ou seja: o jan30 retreinado está perdido + usaria dados antigos demais → o caminho real é **um novo modelo conceitualmente**, treinado com dados recentes, que vire o novo Champion.
 
-**Sequência de execução (assumindo retreino válido):**
+**Quando o override volta a ser potencialmente necessário?** Só se algum dia houver A/B entre dois modelos com **encodings divergentes** (ex: novo Challenger com hash encoding rodando contra Champion OHE). Hoje, qualquer modelo treinado pelo pipeline atual sai com OHE nativo → o A/B Champion vs novo Challenger nunca exige override. O usuário confirmou (05/05/2026): "o ponto só se tornaria relevante quando formos testar A/B entre o Challenger atual e um novo Challenger também retreinado na arquitetura atual — invalidando a necessidade do override de encodings."
+
+**Sequência de execução (assumindo novo Champion válido):**
 
 | Passo | Ação | Esforço |
 |---|---|---|
-| 1 | Validar metadados do jan30 retreinado: AUC, lift, monotonia comparáveis ao original; feature_registry com `Qual_a_sua_idade_18_24_anos` etc (OHE-expandido); idade/salário NÃO em colunas ordinais únicas | 5 min |
+| 1 | Validar metadados do novo Champion: AUC/lift/monotonia aceitáveis; feature_registry com `Qual_a_sua_idade_18_24_anos` etc (OHE-expandido); **idade/salário NÃO em colunas ordinais únicas** (sinal inequívoco de pipeline atual) | 5 min |
 | 2 | `configs/active_models/devclub.yaml`: trocar `active_model.mlflow_run_id` pro novo run_id; **remover entrada `champion_jan30`** dos `ab_test.variants` | 2 min |
 | 3 | Deploy canary + smoke (gate E3) + promoção 100% | 15 min |
 | 4 | Verificar nos logs Cloud Run: T1-10 deixa de citar `Qual_a_sua_idade` (ordinal) e passa a citar `Qual_a_sua_idade_*_anos` quando aplicável (esperado pra batches pequenos sem cobertura de todas categorias) | 5 min |
