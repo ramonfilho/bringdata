@@ -186,15 +186,6 @@
       "max_null_rate": 0.1,
       "value_range": null
     },
-    "target": {
-      "dtype_category": "numeric",
-      "known_values": null,
-      "max_null_rate": 0.1,
-      "value_range": [
-        0.0,
-        1.0
-      ]
-    },
     "telefone_comprimento": {
       "dtype_category": "categorical",
       "known_values": [
