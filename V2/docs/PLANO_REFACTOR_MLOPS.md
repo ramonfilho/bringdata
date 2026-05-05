@@ -961,6 +961,48 @@ O parâmetro `config.term_long_id_threshold` pode ser marcado DEPRECATED no YAML
 
 ---
 
+### DT-14 — Nomenclatura `clients/devclub.yaml` vs `active_models/devclub.yaml` confunde
+
+**Sintoma:** existem dois arquivos com o mesmo nome (`devclub.yaml`) em diretórios distintos: `configs/clients/devclub.yaml` e `configs/active_models/devclub.yaml`. A nomenclatura não comunica o papel de cada um, e a duplicação do nome força quem trabalha no projeto a memorizar o significado por convenção.
+
+**Papéis reais (descobertos só após leitura de código):**
+- `configs/clients/devclub.yaml` — config **estática** do cliente: encoding default, mapeamentos UTM/Medium, schema da pesquisa, hyperparameters do treino, business config. Muda raramente.
+- `configs/active_models/devclub.yaml` — config **dinâmica** do experimento: qual `mlflow_run_id` está em produção, variantes do A/B test, `encoding_overrides` por modelo. Muda a cada retreino/A/B.
+
+**Confusão registrada (sessão 02/05/2026):** o usuário relatou explicitamente que a nomenclatura "não deixa claro para que serve cada arquivo e por que precisamos de um active_model em um YAML separado". Sinalizou também que reorganizar é arriscado pelo número de funções que dependem dos paths atuais.
+
+**Impacto:** custo cognitivo recorrente em qualquer sessão envolvendo encoding, A/B test ou roteamento de modelo. Onboarding de Cliente B vai herdar o mesmo padrão e replicar a confusão.
+
+**Soluções possíveis (não decidir aqui — discutir com usuário):**
+1. **Renomear** preservando a separação: `configs/<cliente>/static.yaml` + `configs/<cliente>/experiment.yaml`. Comunica o papel pelo nome do arquivo.
+2. **Unificar em um arquivo só** com seções claras: `configs/<cliente>.yaml` com top-level `static:` e `experiment:`. Reduz arquivos mas obriga lock contention em mudanças simultâneas (ex: alguém atualizando run_id ativo enquanto outro mexe em encoding default).
+3. **Manter estrutura, melhorar nomes:** `configs/clients_static/<cliente>.yaml` + `configs/active_models/<cliente>.yaml`. Mudança mínima, comunica que clients_static é estático.
+
+**Custo do fix:** médio. Os paths estão referenciados em `production_pipeline.py:127-132`, `app.py:2642-2650, 2882-2891`, `train_pipeline.py`, `monitoring/orchestrator.py`, scripts de deploy. Renomear exige grep + replace consistente + smoke test completo. Sem urgência — registrar e voltar quando houver outra razão para tocar nesses paths (ex: onboarding Cliente B).
+
+**Prioridade:** baixa (não quebra nada). Reabrir quando houver janela para refactor de paths.
+
+---
+
+### DT-15 — `ABTestVariantConfig` tem campos obrigatórios não-utilizáveis pelo path Champion
+
+**Sintoma:** [`ABTestVariantConfig`](../src/core/client_config.py#L342-L352) declara `capi_event_name`, `capi_event_name_high_quality` e `conversion_rates` como obrigatórios no dataclass + parser ([client_config.py:382-388](../src/core/client_config.py#L382-L388)). Mas em produção esses campos só são consumidos quando `ab_v` (variante matcheada por `match_variant`) é truthy ([app.py:3458-3464](../api/app.py#L3458-L3464)). Pro path Champion (variante não matcheia, `ab_v=None`), event_name e conversion_rates vêm de `client_config.capi.*` em `clients/devclub.yaml`, e o pixel vem de `client_config.capi.pixel_id`.
+
+**Cheiro de design:** uma entrada tipo "shim" — variante existindo só pra hospedar `encoding_overrides` do Champion (caso DT-12 + workaround do bug do jan30 descoberto em 02/05/2026) — é forçada a preencher event_name, event_name_hq, conversion_rates como **lixo de parser**. O leitor do YAML acha que esses valores vão ser usados; eles não vão. Documentação fica enganosa, manutenção fica frágil (alguém pode "corrigir" um valor desses achando que é bug e na verdade nunca foi lido).
+
+**Confusão registrada (sessão 02/05/2026):** o usuário sinalizou explicitamente: "documenta essa puta confusão de nomes de eventos sendo lidos como tendo o override etc. Dá para simplificar muito isso."
+
+**Soluções possíveis (não decidir aqui):**
+1. **Tornar campos `Optional` no dataclass** + ajustar parser pra aceitar ausência + adaptar callers que assumem presença. Solução mínima.
+2. **Separar em dois dataclasses:** `RoutingVariantConfig` (variante real, com event_name/conversion_rates obrigatórios) vs `EncodingShimVariantConfig` (só `run_id` + `encoding_overrides`). YAML schema ganha 2 entradas em `ab_test`: `variants:` (routing) e `encoding_shims:` (só encoding).
+3. **Mover `encoding_overrides` pra fora de `variants`:** novo bloco top-level no `active_models/<cliente>.yaml` indexado por `run_id`. Variantes só descrevem roteamento; encoding por modelo é uma tabela à parte. Mais limpo conceitualmente, mas requer mudar todos os callers de `variant.encoding_overrides`.
+
+**Custo do fix:** baixo a médio dependendo da opção. Opção 1 (tornar opcional) ~30min + smoke. Opção 3 (refactor estrutural) ~2h.
+
+**Prioridade:** baixa, mas com alavancagem alta no esclarecimento. Bom candidato pra agrupar com DT-14 num único refactor de configs.
+
+---
+
 ## 12. Caminho para Nível 2 e além
 
 Ver **`docs/ROADMAP_MLOPS_MATURIDADE.md`** para o guia completo.

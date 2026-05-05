@@ -35,6 +35,57 @@ active_model:
 ab_test:
   enabled: true
   variants:
+    # =============================================================================
+    # Champion shim (DT-12 + correção 02/05/2026)
+    # =============================================================================
+    # Esta entrada NÃO faz roteamento (utm_pattern vazio + sem url_pattern → nunca
+    # matcheia em match_variant). Existe apenas para hospedar encoding_overrides
+    # do Champion jan30, que foi treinado com ordinal encoding em idade e salário.
+    #
+    # O código em api/app.py:937-943 (síncrono) e :3373-3380 (batch) busca o variant
+    # cujo run_id == active_model.mlflow_run_id quando o lead vai pelo path Champion
+    # (ab_v=None). Sem esta entrada, enc_overrides_single=None → jan30 recebe OHE →
+    # idade/salário ficam zeradas no passo 7 do encoding (~8.2% de feature importance
+    # perdida). Bug confirmado por logs T1-10 no Cloud Run em 02/05/2026.
+    #
+    # Os campos capi_event_name/_high_quality/conversion_rates são obrigatórios pelo
+    # parser (ABTestVariantConfig) mas NUNCA são lidos para leads do Champion —
+    # esses leads pegam event_name e pixel direto de client_config.capi.* em
+    # configs/clients/devclub.yaml. Ver DT-15 em PLANO_REFACTOR_MLOPS.md.
+    # =============================================================================
+    champion_jan30:
+      run_id: d51757f5041c44b7ab1a056fce8c3c35   # mesmo do active_model
+      utm_pattern: {}                            # vazio = nunca matcheia
+      # sem url_pattern (None) — também nunca matcheia
+      capi_event_name: LeadQualified              # lixo de parser — não usado
+      capi_event_name_high_quality: LeadQualifiedHighQuality  # idem
+      conversion_rates:                           # idem
+        D01: 0.0
+        D02: 0.0
+        D03: 0.0
+        D04: 0.0
+        D05: 0.0
+        D06: 0.0
+        D07: 0.0
+        D08: 0.0
+        D09: 0.0
+        D10: 0.0
+      encoding_overrides:
+        ordinal_variables:
+          "Qual a sua idade?":
+            - "menos de 18 anos"
+            - "18 24 anos"
+            - "25 34 anos"
+            - "35 44 anos"
+            - "45 54 anos"
+            - "mais de 55 anos"
+          "Atualmente, qual a sua faixa salarial?":
+            - "nao tenho renda"
+            - "entre r1000 a r2000 reais ao mes"
+            - "entre r2001 a r3000 reais ao mes"
+            - "entre r3001 a r5000 reais ao mes"
+            - "mais de r5001 reais ao mes"
+
     challenger_abr28:
       run_id: 5d158f0aa6e54b489498470446194a6c
       utm_pattern:
