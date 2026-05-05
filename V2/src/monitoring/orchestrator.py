@@ -90,12 +90,17 @@ class MonitoringOrchestrator:
     Orquestrador central que executa todos os monitors e consolida alertas.
     """
 
-    def __init__(self, model_path: str, db: Session, client_config: Optional[ClientConfig] = None):
+    def __init__(self, model_path: str, db: Session, client_config: Optional[ClientConfig] = None,
+                 expected_decil_dist: Optional[Dict[str, float]] = None):
         """
         Args:
             model_path:    Caminho para pasta do modelo ativo
             db:            Sessão SQLAlchemy do PostgreSQL
             client_config: Configuração do cliente; se None, carrega devclub.yaml
+            expected_decil_dist: Distribuição esperada de decis pré-computada (E6).
+                                 Caller (app.py:daily-check/railway) computa rolling 30d
+                                 via Railway e passa aqui — `db` legacy não tem a tabela Lead.
+                                 Quando None, DataQualityMonitor cai em E5/hardcoded.
         """
         self.model_path = model_path
         self.db = db
@@ -110,7 +115,8 @@ class MonitoringOrchestrator:
 
         # Inicializar monitors
         self.monitors = {
-            'data_quality': DataQualityMonitor(model_path, client_config=self._client_config, db=db),
+            'data_quality': DataQualityMonitor(model_path, client_config=self._client_config, db=db,
+                                               expected_decil_dist=expected_decil_dist),
             'operational': OperationalMonitor(db, client_config=self._client_config),
             'capi_quality': CAPIQualityMonitor(db, client_config=self._client_config)
         }

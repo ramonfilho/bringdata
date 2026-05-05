@@ -581,22 +581,24 @@ class DataQualityMonitor:
     - Mudanças na distribuição de scores/decis
     """
 
-    def __init__(self, model_path: str, client_config=None, db=None):
+    def __init__(self, model_path: str, client_config=None, db=None, expected_decil_dist=None):
         """
         Args:
             model_path:    Caminho para pasta do modelo ativo
             client_config: ClientConfig opcional — usado para encoding via core/,
                            carregamento do modelo correto por client_id, e
                            overrides de thresholds/missing_rate_ignore_columns
-            db:            SQLAlchemy session opcional. Quando presente, _check_score_distribution
-                           usa rolling baseline 30d (produção atual vs produção recente) em vez
-                           de comparar contra treino — mais robusto para falsos positivos crônicos
-                           quando a distribuição de produção diverge estruturalmente da do treino.
+            db:            SQLAlchemy session opcional (legacy Cloud SQL). Mantido pra outras queries.
+                           NÃO é usado para rolling 30d porque a tabela Lead vive no Railway.
+            expected_decil_dist: Dict {'D1':0.10,'D2':0.10,...,'D10':0.30} pré-computado pelo
+                           caller (Railway) para servir como baseline E6 (rolling 30d). Quando None,
+                           _check_score_distribution cai em E5 (model_metadata) ou hardcoded uniform.
         """
         from .config import THRESHOLDS, MISSING_RATE_IGNORE_COLUMNS
         self.model_path = model_path
         self.client_config = client_config
         self.db = db
+        self.expected_decil_dist = expected_decil_dist
         monitoring = client_config.monitoring if client_config else None
         self._thresholds = (
             monitoring.thresholds if monitoring and monitoring.thresholds else THRESHOLDS
@@ -828,28 +830,18 @@ class DataQualityMonitor:
         expected_dist = dict(EXPECTED_DECIL_DISTRIBUTION)
         baseline_source = 'hardcoded_uniform'
 
-        # Tentativa 1: rolling 30d em produção (E6)
-        if self.db is not None:
+        # Tentativa 1: rolling 30d pré-computado pelo caller (E6)
+        # Caller (app.py:daily-check/railway) tem acesso ao Railway e passa a distribuição
+        # já normalizada pra cá. Antes tentávamos via self.db, mas db é Cloud SQL legacy
+        # e não tem a tabela Lead — query falhava silenciosamente.
+        if self.expected_decil_dist:
             try:
-                from sqlalchemy import text as _sa_text
-                # Janela: últimos 30 dias antes da janela analisada (assume df = 24h atual)
-                rows = self.db.execute(_sa_text(
-                    'SELECT decil, COUNT(*) FROM "Lead" '
-                    'WHERE "createdAt" >= NOW() - INTERVAL \'31 days\' '
-                    '  AND "createdAt" <  NOW() - INTERVAL \'1 day\' '
-                    '  AND decil IS NOT NULL '
-                    'GROUP BY decil'
-                )).fetchall()
-                if rows:
-                    total_30d = sum(int(r[1]) for r in rows)
-                    if total_30d >= 1000:  # mínimo de amostra pra ser confiável
-                        rolling = {f'D{int(r[0])}': int(r[1]) / total_30d for r in rows}
-                        # Garantir que todas as 10 chaves existam (ausentes = 0)
-                        rolling = {f'D{i}': rolling.get(f'D{i}', 0.0) for i in range(1, 11)}
-                        expected_dist = rolling
-                        baseline_source = f'rolling_30d_n={total_30d}'
+                ed = self.expected_decil_dist
+                if isinstance(ed, dict) and len(ed) >= 10:
+                    expected_dist = {f'D{i}': float(ed.get(f'D{i}', 0.0)) for i in range(1, 11)}
+                    baseline_source = ed.get('_source', 'rolling_30d_precomputed')
             except Exception as _e:
-                logger.warning(f"  [E6] falha ao calcular rolling 30d: {_e}")
+                logger.warning(f"  [E6] falha ao usar expected_decil_dist injetado: {_e}")
 
         # Tentativa 2: model_metadata.json:decil_analysis (E5) — só se rolling não funcionou
         if baseline_source == 'hardcoded_uniform':
@@ -924,7 +916,8 @@ class DataQualityMonitor:
                 'message': f" Distribuição de decis mudou: {changes_msg}{mais_msg}",
                 'details': {
                     'changes': diferencas_significativas,
-                    'total_leads': total_leads
+                    'total_leads': total_leads,
+                    'baseline_source': baseline_source
                 },
                 'timestamp': datetime.now(timezone.utc).isoformat(),
                 'metric_value': max_diff,

@@ -2654,7 +2654,42 @@ async def daily_monitoring_check_railway(
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             model_path = os.path.join(base_dir, model_path)
 
-        orchestrator = MonitoringOrchestrator(model_path=model_path, db=None)
+        # E6: rolling 30d via Railway (Lead.decil) — usado como baseline em
+        # _check_score_distribution. Cálculo aqui porque o orchestrator/DataQualityMonitor
+        # recebe db=Cloud SQL legacy, que não tem a tabela Lead.
+        expected_decil_dist = None
+        try:
+            _r30 = railway_conn.run(
+                'SELECT decil, COUNT(*) FROM "Lead" '
+                'WHERE "createdAt" >= NOW() - INTERVAL \'31 days\' '
+                '  AND "createdAt" <  NOW() - INTERVAL \'1 day\' '
+                '  AND decil IS NOT NULL '
+                'GROUP BY decil'
+            )
+            _total_30d = sum(int(r[1]) for r in _r30) if _r30 else 0
+            if _total_30d >= 1000:
+                # Normaliza decil pro formato D1..D10 (sem leading zero) — formato usado
+                # internamente em _check_score_distribution após decil_normalized regex.
+                def _norm_decil(v):
+                    s = str(v).strip()
+                    if s.startswith('D'):
+                        s = s[1:]
+                    n = int(s)
+                    return f'D{n}'
+                _dist = {f'D{i}': 0.0 for i in range(1, 11)}
+                for r in _r30:
+                    try:
+                        _dist[_norm_decil(r[0])] = int(r[1]) / _total_30d
+                    except (ValueError, KeyError):
+                        pass
+                expected_decil_dist = dict(_dist)
+                expected_decil_dist['_source'] = f'rolling_30d_n={_total_30d}'
+                logger.info(f"📊 E6 baseline: rolling 30d n={_total_30d:,}, D10={_dist['D10']*100:.1f}%")
+        except Exception as _e:
+            logger.warning(f"⚠️ E6: falha calcular rolling 30d via Railway: {_e}")
+
+        orchestrator = MonitoringOrchestrator(model_path=model_path, db=None,
+                                              expected_decil_dist=expected_decil_dist)
         result = orchestrator.run_daily_check(leads_data)
 
         # Substituir funnel_metrics e lead_quality_metrics pelos dados Railway
