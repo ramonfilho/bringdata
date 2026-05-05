@@ -264,43 +264,80 @@ class MonitoringOrchestrator:
 
         result: Dict = {}
         # 1. Modelo ativo (run_id do YAML)
+        # [O1] Tenta múltiplos paths — em produção (Cloud Run) o WORKDIR é /app
+        # e o repo fica em /app/V2; em dev local fica em $REPO_ROOT/V2/...
         client_id = getattr(self._client_config, 'client_id', 'devclub') if self._client_config else 'devclub'
-        active_yaml = _os.path.join(_os.path.dirname(__file__), '..', '..', 'configs', 'active_models', f'{client_id}.yaml')
-        try:
-            with open(_os.path.abspath(active_yaml)) as _f:
-                _am = _yaml.safe_load(_f) or {}
-            result['active_run_id'] = (_am.get('active_model') or {}).get('mlflow_run_id')
-            result['ab_test_enabled'] = bool((_am.get('ab_test') or {}).get('enabled'))
-        except Exception as _e:
-            logger.warning(f"  [T3-5] não foi possível ler active_model.yaml: {_e}")
+        _candidate_yamls = [
+            _os.path.abspath(_os.path.join(_os.path.dirname(__file__), '..', '..', 'configs', 'active_models', f'{client_id}.yaml')),
+            f'/app/V2/configs/active_models/{client_id}.yaml',
+            f'/app/configs/active_models/{client_id}.yaml',
+            _os.path.abspath(_os.path.join(_os.getcwd(), 'configs', 'active_models', f'{client_id}.yaml')),
+        ]
+        _yaml_loaded = False
+        for _path in _candidate_yamls:
+            if _os.path.exists(_path):
+                try:
+                    with open(_path) as _f:
+                        _am = _yaml.safe_load(_f) or {}
+                    result['active_run_id'] = (_am.get('active_model') or {}).get('mlflow_run_id')
+                    result['ab_test_enabled'] = bool((_am.get('ab_test') or {}).get('enabled'))
+                    result['active_model_yaml_path'] = _path
+                    _yaml_loaded = True
+                    break
+                except Exception as _e:
+                    logger.warning(f"  [T3-5] erro ao parsear {_path}: {_e}")
+        if not _yaml_loaded:
+            logger.warning(f"  [T3-5] active_model.yaml não encontrado — paths tentados: {_candidate_yamls}")
             result['active_run_id'] = None
             result['ab_test_enabled'] = None
 
         # 2. Cloud Run revision (definida pelo Cloud Run em runtime)
         result['cloud_run_revision'] = _os.environ.get('K_REVISION')
         result['cloud_run_service'] = _os.environ.get('K_SERVICE')
+        if not result['cloud_run_revision']:
+            # K_REVISION/K_SERVICE são injetadas pelo Cloud Run em runtime. Ausentes = rodando
+            # local OU env não foi propagada. Logar pra debug.
+            logger.debug(f"  [T3-5] K_REVISION ausente; ambiente={['K_' + k for k in _os.environ if k.startswith('K_')]}")
 
-        # 3. Polling Railway / contadores 24h via leads_capi
-        if self.db is not None:
-            try:
+        # 3. Contadores 24h — query direta em Railway (Lead, fonte autoritativa pós-30/04).
+        # Antes usava self.db.query(LeadCAPI) que é Cloud SQL legado e parou de receber
+        # scoring em 30/04. Agora abrimos uma conexão Railway temporária pra pegar dados reais.
+        try:
+            import pg8000.native as _pg
+            _railway_host = _os.environ.get('RAILWAY_DB_HOST')
+            if _railway_host:
+                _conn = _pg.Connection(
+                    host=_railway_host,
+                    port=int(_os.environ.get('RAILWAY_DB_PORT', '11594')),
+                    database=_os.environ.get('RAILWAY_DB_NAME', 'railway'),
+                    user=_os.environ.get('RAILWAY_DB_USER', 'postgres'),
+                    password=_os.environ['RAILWAY_DB_PASSWORD'],
+                    timeout=15,
+                )
                 _now = datetime.now(timezone.utc)
-                _24h = _now - timedelta(hours=24)
-                from api.database import LeadCAPI as _LeadCAPI
-                _last_scored = self.db.query(_sa_func.max(_LeadCAPI.scored_at)).scalar()
-                _leads_24h = self.db.query(_sa_func.count(_LeadCAPI.id)).filter(_LeadCAPI.created_at >= _24h).scalar() or 0
-                _scored_24h = self.db.query(_sa_func.count(_LeadCAPI.id)).filter(_LeadCAPI.scored_at >= _24h).scalar() or 0
-                _capi_24h = self.db.query(_sa_func.count(_LeadCAPI.id)).filter(_LeadCAPI.capi_sent_at >= _24h).scalar() or 0
-                result['last_scored_at'] = _last_scored.isoformat() if _last_scored else None
-                result['leads_received_24h'] = int(_leads_24h)
-                result['leads_scored_24h'] = int(_scored_24h)
-                result['capi_sent_24h'] = int(_capi_24h)
-                # Lag desde último scoring (proxy de polling estar vivo)
-                if _last_scored is not None:
-                    if _last_scored.tzinfo is None:
-                        _last_scored = _last_scored.replace(tzinfo=timezone.utc)
-                    result['minutes_since_last_score'] = round((_now - _last_scored).total_seconds() / 60, 1)
-            except Exception as _e:
-                logger.warning(f"  [T3-5] falha ao coletar contadores 24h: {_e}")
+                _row = _conn.run(
+                    'SELECT '
+                    '  COUNT(*) FILTER (WHERE "createdAt" >= NOW() - INTERVAL \'24 hours\'),'
+                    '  COUNT(*) FILTER (WHERE "leadScore" IS NOT NULL AND "updatedAt" >= NOW() - INTERVAL \'24 hours\'),'
+                    '  COUNT(*) FILTER (WHERE "capiSentAt" >= NOW() - INTERVAL \'24 hours\'),'
+                    '  MAX("updatedAt") FILTER (WHERE "leadScore" IS NOT NULL) '
+                    'FROM "Lead"'
+                )
+                _conn.close()
+                if _row:
+                    _leads_24h, _scored_24h, _capi_24h, _last_scored = _row[0]
+                    result['leads_received_24h'] = int(_leads_24h or 0)
+                    result['leads_scored_24h'] = int(_scored_24h or 0)
+                    result['capi_sent_24h'] = int(_capi_24h or 0)
+                    if _last_scored is not None:
+                        if _last_scored.tzinfo is None:
+                            _last_scored = _last_scored.replace(tzinfo=timezone.utc)
+                        result['last_scored_at'] = _last_scored.isoformat()
+                        result['minutes_since_last_score'] = round((_now - _last_scored).total_seconds() / 60, 1)
+            else:
+                logger.warning("  [T3-5] RAILWAY_DB_HOST não setada — contadores 24h não disponíveis")
+        except Exception as _e:
+            logger.warning(f"  [T3-5] falha ao coletar contadores 24h via Railway: {_e}")
 
         # Log estruturado consolidado
         logger.info("")
