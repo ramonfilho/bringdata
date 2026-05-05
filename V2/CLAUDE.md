@@ -88,6 +88,10 @@ Já houve quebra em produção por divergência de normalização (UTM com `.low
 | Medium unification | `core/medium.py` — elimina os 3 arquivos atuais |
 | Matching | `core/matching.py` — consolida os 6 arquivos de `src/matching/` |
 | Janela de conversão | Simétrica — remove TODOS os leads após `date_limite`, não só `target=1` |
+| `fbp`/`fbc` | **Sempre `leads_capi.fbp`/`leads_capi.fbc`**. NUNCA `Lead.fbp`/`Lead.fbc` (colunas vestígio, sempre vazias). Para cruzar com `pageUrl`, JOIN `leads_capi × Lead ON LOWER(email)`. |
+| `pesquisa` (respostas) | **Sempre `Lead.pesquisa` (jsonb)**. NUNCA as colunas `leads_capi.pretende_faculdade`/`genero`/`idade`/etc. (vestígio, 100% NULL desde 30/04/2026). |
+| `pageUrl` | Existe **só em `Lead`**. Não há equivalente em `leads_capi` (`event_source_url` existe mas é frequentemente null). |
+| `leadScore`/`decil` | **Sempre `Lead.leadScore`/`Lead.decil`** (escritos pelo Cloud Run em produção desde 30/04/2026). `leads_capi.lead_score`/`leads_capi.decil` pararam de receber dados em 30/04. |
 
 ---
 
@@ -188,7 +192,10 @@ gcloud sql instances patch smart-ads-db --activation-policy=NEVER --project=smar
   - Serviço ativo: `smart-ads-api` (`bring-data-api` foi deletado em 26/04/2026 — sem tráfego)
 - **Banco operacional:** Railway PostgreSQL (env vars `RAILWAY_DB_*`) — Cloud SQL `bring-data-db` foi descomissionado em 25/02/2026
 - **Cloud SQL (MLflow tracking):** `smart-ads-451319:us-central1:smart-ads-db` — **parado desde 26/04/2026** (`activation-policy=NEVER`); subir manualmente antes de retreinar (ver `docs/operacoes_gcp_custos.md`)
-- **Tabela principal:** `leads_capi` (Railway) — espelhada em `Lead` quando vem do front (Prisma)
+- **Banco operacional Railway tem 2 tabelas com nomes parecidos mas papéis distintos:**
+  - **`Lead`** — populada **só pelo front (Prisma)** quando o lead completa a pesquisa. Tem `pesquisa` (jsonb), `pageUrl`, `leadScore`, `decil`. **Colunas `fbp`/`fbc` existem mas estão sempre vazias** — vestígio do schema antigo, ignorar.
+  - **`leads_capi`** — populada pelo `/webhook/lead_capture` quando o lead chega na LP de pesquisa. Tem `fbp`/`fbc` reais (~99% / 90% fill rate desde 26/02/2026), além de `utm_*`. **Colunas de pesquisa (`pretende_faculdade`, `genero`, `idade`, etc.) existem mas estão 100% NULL desde 30/04/2026** — vestígio do pipeline antigo, ignorar.
+  - **As tabelas NÃO se espelham.** Cada uma tem seu conjunto único de campos populados. Detalhes e regras de consulta em `docs/ARQUITETURA_SISTEMA_COMPLETA.md` § "BANCO DE DADOS — armadilhas de schema".
 - **Scheduler:** Cloud Scheduler → Cloud Run (monitoramento diário e polling Railway a cada 5min). Retreino é manual.
 - **Notificações:** Slack
 

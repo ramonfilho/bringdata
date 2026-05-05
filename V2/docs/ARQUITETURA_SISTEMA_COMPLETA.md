@@ -278,10 +278,28 @@ Recebe `ClientConfig` e passa para os 3 sub-monitores.
 ```
 Host: shortline.proxy.rlwy.net:11594
 DB: railway | User: postgres
-Tabela: leads_capi
-Range atual: 2026-02-26 → presente (~107k leads)
 ```
-> Railway é um banco externo — não há acesso para alterar schema. `database.py` detecta em runtime se colunas opcionais (ex: `client_id`) existem via `has_client_id_column()`.
+
+**Duas tabelas com papéis distintos (NÃO são espelho uma da outra):**
+
+| Tabela | Quem popula | Campos populados (use ESTES) | Campos vestígio (NÃO use) |
+|---|---|---|---|
+| **`Lead`** (Prisma, do front) | Front escreve via Prisma quando o lead completa a pesquisa | `pesquisa` (jsonb com todas as respostas), `pageUrl`, `leadScore`, `decil`, `nomeCompleto`, `email`, `telefone`, `source`/`medium`/`term`/`campaign`/`content`, `createdAt`, `capiSentAt`, `capiStatus` | `fbp`, `fbc` (sempre vazios — vestígio) |
+| **`leads_capi`** (legado / webhook) | Cloud Run escreve via `/webhook/lead_capture` quando o lead chega na LP de pesquisa | `fbp`, `fbc` (~99% / 90% desde 26/02/2026), `utm_source`, `utm_medium`, `utm_term`, `utm_campaign`, `utm_content`, `email`, `name`, `phone`, `client_ip`, `event_id`, `created_at` | `pretende_faculdade`, `genero`, `idade`, `ocupacao`, `faixa_salarial`, `cartao_credito`, `estudou_programacao`, `investiu_curso_online`, `interesse_programacao`, `interesse_evento` (todas 100% NULL desde 30/04/2026 — vestígio); `lead_score`, `decil`, `scored_at`, `capi_sent_at` (zerados desde 30/04 — pipeline mudou para escrever em `Lead`) |
+
+### Armadilhas de schema (impossível errar se ler isto)
+
+1. **Para `fbp` e `fbc` — sempre `leads_capi`.** Consulta a `Lead.fbp`/`Lead.fbc` retorna 0% e induz a conclusão errada de que o cookie não está sendo capturado. Ele está — mas só `leads_capi` tem.
+
+2. **Para respostas da pesquisa — sempre `Lead.pesquisa` (jsonb).** As colunas tabulares com nomes parecidos em `leads_capi` (`pretende_faculdade`, `genero`, `idade`, etc.) **são 100% NULL** desde 30/04/2026. Consultar elas vai dar "campo não preenchido" — mistura de leitura vai parecer regressão da ingestão e não é.
+
+3. **Para `pageUrl` — só `Lead`.** `leads_capi` não tem `pageUrl`. Há `event_source_url`, mas frequentemente vem null.
+
+4. **Para `leadScore` e `decil` — sempre `Lead`.** Antes de 30/04/2026 era em `leads_capi` (`lead_score`/`decil`). Após o deploy main 100%, o Cloud Run passou a escrever em `Lead`. `leads_capi.lead_score` está zerado para registros recentes.
+
+5. **Para cruzar campos das duas tabelas** (ex: `fbp` por `pageUrl`): `JOIN leads_capi lc ON LOWER(l.email) = LOWER(lc.email)`. Não há FK formal — a chave de junção é o email normalizado.
+
+> Railway é um banco externo — não há acesso para alterar schema. `database.py` detecta em runtime se colunas opcionais (ex: `client_id`) existem via `has_client_id_column()`. As colunas vestígio listadas acima continuarão existindo no schema, mas não devem ser consultadas para fins analíticos.
 
 **Cloud SQL (MLflow tracking):**
 
