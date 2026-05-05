@@ -89,6 +89,7 @@ class DailyCheckResponse(BaseModel):
     revenue_forecast: Optional[Dict[str, Any]] = None
     survey_funnel_metrics: Optional[Dict[str, Any]] = None
     traffic_metrics: Optional[Dict[str, Any]] = None
+    operational_routines: Optional[Dict[str, Any]] = None
     # revenue_forecast inclui expected_conversion quando conversion_rate_benchmark está configurado
 
 # Inicializar a aplicação FastAPI
