@@ -926,107 +926,174 @@ class DataQualityMonitor:
 
         return alerts
 
+    def _iter_active_variants(self):
+        """
+        Yields (variant_name, predictor, effective_encoding) para cada modelo
+        "ativo" que recebe tráfego em produção:
+
+          - Champion default (active_model.yaml) — sempre presente, mesmo com AB
+            desabilitado. Se há variant cujo run_id == active_model.mlflow_run_id
+            (DT-12 Champion shim), seu nome e encoding_overrides são adotados aqui;
+            essa variant NÃO vira um yield separado.
+          - Cada variant em ab_test.variants com run_id distinto do Champion
+            (Challenger e companhia) — instanciada com mlflow_run_id próprio.
+
+        Cada variant carrega seu próprio feature_names + (potencialmente) seu
+        próprio encoding via DT-12 encoding_overrides. Os checks de monitoring
+        precisam rodar contra TODAS as variants pra cobrir leads que possam ser
+        roteados pra qualquer uma delas em produção.
+
+        Falha ao carregar uma variant é loggada e a iteração segue (variant
+        offline não deve mascarar checks das outras). Falha no Champion é fatal
+        (sem Champion não há monitoring) e encerra a iteração.
+
+        Quando self.client_config.encoding é None (legacy path sem core/),
+        emite só o Champion com effective_encoding=None — caller usa fallback
+        legacy (apply_categorical_encoding).
+        """
+        from model.prediction import LeadScoringPredictor
+
+        # Legacy path — apenas Champion, sem encoding via core/
+        if not (self.client_config and self.client_config.encoding):
+            try:
+                predictor = LeadScoringPredictor(use_active_model=True, client_config=self.client_config)
+                yield ('champion (legacy)', predictor, None)
+            except Exception as _e:
+                logger.error(f" monitoring: falha ao carregar Champion (legacy): {_e}")
+            return
+
+        from core.encoding import merge_encoding
+        from core.client_config import ABTestConfig
+        import os as _os
+
+        # 1. Champion default
+        try:
+            champion_predictor = LeadScoringPredictor(use_active_model=True, client_config=self.client_config)
+        except Exception as _e:
+            logger.error(f" monitoring: falha ao carregar Champion (active_model): {_e}")
+            return
+
+        # 2. AB config (opcional)
+        ab = ABTestConfig(enabled=False)
+        try:
+            _active_path = _os.path.abspath(_os.path.join(
+                _os.path.dirname(__file__), '..', '..', 'configs', 'active_models',
+                f'{self.client_config.client_id}.yaml',
+            ))
+            ab = ABTestConfig.from_active_model_yaml(_active_path)
+        except Exception as _e:
+            logger.debug(f"  monitoring: ABTestConfig não carregado: {_e}")
+
+        # 3. Champion: nome + encoding via shim (se houver variant com mesmo run_id)
+        champion_name = 'champion'
+        champion_encoding = self.client_config.encoding
+        if ab.enabled and champion_predictor.mlflow_run_id:
+            for vname, v in ab.variants.items():
+                if v.run_id == champion_predictor.mlflow_run_id:
+                    champion_name = vname
+                    if v.encoding_overrides:
+                        champion_encoding = merge_encoding(self.client_config.encoding, v.encoding_overrides)
+                    break
+
+        yield (champion_name, champion_predictor, champion_encoding)
+        seen = {champion_predictor.mlflow_run_id}
+
+        # 4. Variants challenger (run_id distinto do Champion)
+        if not ab.enabled:
+            return
+        for vname, v in ab.variants.items():
+            if v.run_id in seen:
+                continue
+            try:
+                predictor = LeadScoringPredictor(
+                    mlflow_run_id=v.run_id,
+                    use_active_model=False,
+                    client_config=self.client_config,
+                )
+                encoding = self.client_config.encoding
+                if v.encoding_overrides:
+                    encoding = merge_encoding(self.client_config.encoding, v.encoding_overrides)
+                yield (vname, predictor, encoding)
+                seen.add(v.run_id)
+            except Exception as _e:
+                logger.error(f" monitoring: falha ao carregar variant {vname} (run {v.run_id}): {_e}")
+
     def _check_missing_features(self, df: pd.DataFrame) -> List[Dict]:
         """
-        Verifica se todas as features esperadas pelo modelo seriam criadas após encoding.
+        Verifica se todas as features esperadas por CADA variant ativa seriam
+        criadas após encoding.
 
-        Usa o método Predictor.validate_features() para detectar features ausentes
-        SEM fazer predição (apenas validação).
+        Itera sobre _iter_active_variants() (Champion + Challenger quando AB
+        ativo); cada variant pode ter feature_names e encoding distintos, então
+        o check é por-variant. Cada alerta carrega `variant_name` no payload.
 
         Args:
             df: DataFrame ANTES do encoding (após feature engineering)
 
         Returns:
-            Lista de alertas para features que estariam ausentes
+            Lista de alertas para features que estariam ausentes (1 alerta por
+            variant com features faltando)
         """
         from datetime import datetime, timezone
 
         alerts = []
 
-        try:
-            # 1. Criar predictor primeiro para obter run_id antes do encoding
-            from model.prediction import LeadScoringPredictor
-            predictor = LeadScoringPredictor(use_active_model=True, client_config=self.client_config)
+        for variant_name, predictor, effective_encoding in self._iter_active_variants():
+            try:
+                if effective_encoding is not None:
+                    from core.encoding import apply_encoding
+                    artifacts = {}
+                    if predictor.mlflow_run_id:
+                        artifacts['mlflow_run_id'] = predictor.mlflow_run_id
+                    elif predictor.model_path:
+                        artifacts['model_path'] = str(predictor.model_path)
+                    df_encoded = apply_encoding(df.copy(), effective_encoding, artifacts=artifacts)
+                else:
+                    from features.encoding import apply_categorical_encoding
+                    df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3', model_path=self.model_path)
 
-            # 2. Aplicar encoding com artifacts para que step 7 (registry alignment) execute
-            #    — sem artifacts, step 7 é pulado e categorias OHE ausentes viram falsos alertas.
-            #    Usa encoding_overrides do Champion (se definidos no AB test config) para que
-            #    o check reflita o encoding real que o modelo recebe em produção. Sem isso,
-            #    monitoring usa OHE pra idade/salário enquanto produção usa ordinal (jan30) →
-            #    T1-10 falso positivo. Pattern espelhado de _check_extra_features.
-            if self.client_config and self.client_config.encoding:
-                from core.encoding import apply_encoding, merge_encoding
-                artifacts = {}
-                if predictor.mlflow_run_id:
-                    artifacts['mlflow_run_id'] = predictor.mlflow_run_id
-                elif predictor.model_path:
-                    artifacts['model_path'] = str(predictor.model_path)
+                validation = predictor.validate_features(df_encoded)
+                if validation['is_valid']:
+                    continue
 
-                # Buscar encoding_overrides do Champion via ABTestConfig
-                effective_encoding = self.client_config.encoding
-                try:
-                    from core.client_config import ABTestConfig
-                    import os as _os
-                    _active_path = _os.path.abspath(_os.path.join(
-                        _os.path.dirname(__file__), '..', '..', 'configs', 'active_models',
-                        f'{self.client_config.client_id}.yaml',
-                    ))
-                    _ab = ABTestConfig.from_active_model_yaml(_active_path)
-                    if _ab.enabled and predictor.mlflow_run_id:
-                        _champion_v = next(
-                            (v for v in _ab.variants.values() if v.run_id == predictor.mlflow_run_id),
-                            None,
-                        )
-                        if _champion_v and _champion_v.encoding_overrides:
-                            effective_encoding = merge_encoding(self.client_config.encoding, _champion_v.encoding_overrides)
-                except Exception as _e:
-                    logger.debug(f"  monitoring: encoding_overrides do champion não carregados: {_e}")
-
-                df_encoded = apply_encoding(df.copy(), effective_encoding, artifacts=artifacts)
-            else:
-                from features.encoding import apply_categorical_encoding
-                df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3', model_path=self.model_path)
-
-            # 3. Validar features (NÃO faz predição, só valida)
-            validation = predictor.validate_features(df_encoded)
-
-            if not validation['is_valid']:
                 missing_features = validation['missing_features']
-
-                # Criar alerta
                 alerts.append({
                     'type': 'missing_expected_features',
                     'severity': 'HIGH',
                     'category': 'data_quality',
-                    'message': f" {len(missing_features)} feature(s) esperada(s) pelo modelo ausente(s) após encoding",
+                    'message': f" [{variant_name}] {len(missing_features)} feature(s) esperada(s) pelo modelo ausente(s) após encoding",
                     'details': {
+                        'variant_name': variant_name,
                         'missing_count': len(missing_features),
                         'missing_features': missing_features,
                         'total_expected': validation['total_expected'],
-                        'total_created': validation['total_received']
+                        'total_created': validation['total_received'],
                     },
                     'timestamp': datetime.now(timezone.utc).isoformat(),
                     'metric_value': len(missing_features),
-                    'threshold': 0  # Qualquer feature faltando é problema
+                    'threshold': 0,
                 })
-
-        except Exception:
-            pass
+            except Exception as _e:
+                logger.error(f" ERRO em _check_missing_features() para variant '{variant_name}': {_e}")
 
         return alerts
 
     def _check_extra_features(self, df: pd.DataFrame) -> List[Dict]:
         """
-        Verifica se apareceram features/colunas novas que não existiam no treino.
+        Verifica se apareceram features/colunas que não são esperadas por
+        NENHUMA variant ativa (Champion ∪ Challenger…).
 
-        Detecta colunas extras que foram criadas mas não são esperadas pelo modelo.
-        Isso pode indicar mudanças no formulário ou adição de novos campos.
+        Para evitar falso positivo quando uma feature é esperada por uma variant
+        mas não pela outra, o conjunto "expected" é a UNIÃO dos feature_names
+        de todas as variants. Mas o encoding aplicado pode diferir por variant
+        (DT-12 ordinal vs OHE), então o df_encoded é gerado por-variant e o
+        conjunto "actual" é a UNIÃO das colunas pós-encoding de todas elas.
 
         Args:
             df: DataFrame ANTES do encoding (após feature engineering)
 
         Returns:
-            Lista de alertas para features extras detectadas
+            Lista com no máximo 1 alerta (extra = actual_union - expected_union)
         """
         from datetime import datetime, timezone
 
@@ -1034,122 +1101,94 @@ class DataQualityMonitor:
 
         logger.debug(" DEBUG: _check_extra_features() INICIADO")
         logger.debug(f"DataFrame recebido: {df.shape[0]} linhas, {df.shape[1]} colunas")
-        logger.debug(f"Colunas: {sorted(df.columns.tolist())[:10]}...")
 
-        try:
-            # 1. Criar predictor primeiro para obter run_id antes do encoding
-            from model.prediction import LeadScoringPredictor
-            predictor = LeadScoringPredictor(use_active_model=True, client_config=self.client_config)
+        expected_union: Set[str] = set()
+        actual_union: Set[str] = set()
+        variants_checked = []
 
-            # 2. Aplicar encoding com artifacts para que step 7 (registry alignment) execute
-            #    — sem artifacts, step 7 é pulado e categorias OHE ausentes viram falsos alertas.
-            #    Usa encoding_overrides do Champion (se definidos no AB test config) para que
-            #    o check reflita o encoding real que o modelo recebe em produção.
-            if self.client_config and self.client_config.encoding:
-                from core.encoding import apply_encoding, merge_encoding
-                artifacts = {}
-                if predictor.mlflow_run_id:
-                    artifacts['mlflow_run_id'] = predictor.mlflow_run_id
-                elif predictor.model_path:
-                    artifacts['model_path'] = str(predictor.model_path)
-
-                # Buscar encoding_overrides do Champion via ABTestConfig
-                effective_encoding = self.client_config.encoding
-                try:
-                    from core.client_config import ABTestConfig
-                    import os as _os
-                    _active_path = _os.path.abspath(_os.path.join(
-                        _os.path.dirname(__file__), '..', '..', 'configs', 'active_models',
-                        f'{self.client_config.client_id}.yaml',
-                    ))
-                    _ab = ABTestConfig.from_active_model_yaml(_active_path)
-                    if _ab.enabled and predictor.mlflow_run_id:
-                        _champion_v = next(
-                            (v for v in _ab.variants.values() if v.run_id == predictor.mlflow_run_id),
-                            None,
-                        )
-                        if _champion_v and _champion_v.encoding_overrides:
-                            effective_encoding = merge_encoding(self.client_config.encoding, _champion_v.encoding_overrides)
-                except Exception as _e:
-                    logger.debug(f"  monitoring: encoding_overrides do champion não carregados: {_e}")
-
-                df_encoded = apply_encoding(df.copy(), effective_encoding, artifacts=artifacts)
-            else:
-                from features.encoding import apply_categorical_encoding
-                df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3', model_path=self.model_path)
-
-            # Garantir que feature_names está carregado
-            if predictor.feature_names is None:
-                predictor.load_model()
-
-            # 3. Identificar features extras (presentes no df mas não esperadas pelo modelo)
-            expected_features = set(predictor.feature_names)
-
-            # Remover 'target' se presente (só existe em treino, não em produção)
-            actual_features = set(df_encoded.columns) - {'target'}
-
-            extra_features = actual_features - expected_features
-
-            logger.debug(f"\n Features esperadas: {len(expected_features)}")
-            logger.debug(f" Features encontradas: {len(actual_features)}")
-            logger.debug(f" Features extras: {len(extra_features)}")
-
-            if extra_features:
-                extra_features_list = sorted(list(extra_features))
-
-                logger.debug(f"\n  DETECTOU {len(extra_features)} FEATURES EXTRAS:")
-                for feat in extra_features_list[:10]:
-                    logger.debug(f"   - {feat}")
-                if len(extra_features) > 10:
-                    logger.debug(f"   ... e mais {len(extra_features) - 10}")
-
-                # Determinar severidade baseado na quantidade
-                if len(extra_features) > 10:
-                    severity = 'MEDIUM'
-                elif len(extra_features) > 5:
-                    severity = 'LOW'
+        for variant_name, predictor, effective_encoding in self._iter_active_variants():
+            try:
+                if effective_encoding is not None:
+                    from core.encoding import apply_encoding
+                    artifacts = {}
+                    if predictor.mlflow_run_id:
+                        artifacts['mlflow_run_id'] = predictor.mlflow_run_id
+                    elif predictor.model_path:
+                        artifacts['model_path'] = str(predictor.model_path)
+                    df_encoded = apply_encoding(df.copy(), effective_encoding, artifacts=artifacts)
                 else:
-                    severity = 'LOW'
+                    from features.encoding import apply_categorical_encoding
+                    df_encoded = apply_categorical_encoding(df.copy(), versao='v1', medium_strategy='binary_top3', model_path=self.model_path)
 
-                # Limitar quantidade exibida na mensagem
-                features_to_show = extra_features_list[:5]
-                mais_msg = f" (e mais {len(extra_features) - 5})" if len(extra_features) > 5 else ""
+                if predictor.feature_names is None:
+                    predictor.load_model()
 
-                # Criar alerta
-                alert_msg = f"ℹ {len(extra_features)} feature(s) nova(s) detectada(s) após encoding (serão ignoradas pelo modelo)\n   Exemplos: {', '.join(features_to_show)}{mais_msg}"
+                expected_union |= set(predictor.feature_names)
+                actual_union |= set(df_encoded.columns) - {'target'}
+                variants_checked.append(variant_name)
 
-                alerts.append({
-                    'type': 'extra_unexpected_features',
-                    'severity': severity,
-                    'category': 'data_quality',
-                    'message': alert_msg,
-                    'details': {
-                        'extra_count': len(extra_features),
-                        'extra_features': extra_features_list,
-                        'total_expected': len(expected_features),
-                        'total_received': len(actual_features)
-                    },
-                    'timestamp': datetime.now(timezone.utc).isoformat(),
-                    'metric_value': len(extra_features),
-                    'threshold': 0  # Qualquer feature extra merece atenção
-                })
+            except Exception as _e:
+                logger.error(f" ERRO em _check_extra_features() para variant '{variant_name}': {_e}")
 
-                logger.debug(f"\n Alerta criado: {alert_msg}")
-            else:
-                logger.debug(f"\n Nenhuma feature extra detectada")
+        if not variants_checked:
+            return alerts
 
+        extra_features = actual_union - expected_union
 
-        except Exception as e:
-            logger.error(f"\n ERRO em _check_extra_features(): {e}")
-            import traceback
-            traceback.print_exc()
+        logger.debug(f"\n Variants checadas: {variants_checked}")
+        logger.debug(f" Features esperadas (união): {len(expected_union)}")
+        logger.debug(f" Features encontradas (união): {len(actual_union)}")
+        logger.debug(f" Features extras: {len(extra_features)}")
+
+        if not extra_features:
+            return alerts
+
+        extra_features_list = sorted(list(extra_features))
+
+        # Severity escala com magnitude — mas se o df está vazio (zero variants
+        # produziram encoded com valor) consideramos LOW por default.
+        if len(extra_features) > 10:
+            severity = 'MEDIUM'
+        else:
+            severity = 'LOW'
+
+        features_to_show = extra_features_list[:5]
+        mais_msg = f" (e mais {len(extra_features) - 5})" if len(extra_features) > 5 else ""
+        alert_msg = (
+            f"ℹ {len(extra_features)} feature(s) nova(s) não esperada(s) por NENHUMA "
+            f"variant ativa ({', '.join(variants_checked)}) — serão ignoradas pelo modelo\n"
+            f"   Exemplos: {', '.join(features_to_show)}{mais_msg}"
+        )
+
+        alerts.append({
+            'type': 'extra_unexpected_features',
+            'severity': severity,
+            'category': 'data_quality',
+            'message': alert_msg,
+            'details': {
+                'variants_checked': variants_checked,
+                'extra_count': len(extra_features),
+                'extra_features': extra_features_list,
+                'total_expected_union': len(expected_union),
+                'total_received_union': len(actual_union),
+            },
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'metric_value': len(extra_features),
+            'threshold': 0,
+        })
 
         return alerts
 
     def _check_critical_features_coverage(self, df: pd.DataFrame) -> List[Dict]:
         """
-        [T1-10 surface] Verifica cobertura das features TOP-N (por importância)
-        que estariam ausentes do DataFrame após encoding+alignment.
+        [T1-10 surface] Por VARIANT ativa, verifica cobertura das features TOP-N
+        (por importância) que estariam ausentes do DataFrame após encoding+
+        alignment.
+
+        Cada variant tem seu próprio MLflow run (e portanto sua própria lista
+        TOP-N de importância) — não dá pra tomar a união que nem em
+        _check_extra_features. O check é por-variant; cada alerta carrega
+        `variant_name`.
 
         Espelha a lógica em src/core/encoding.py:330-348 mas, em vez de só
         emitir logger.error/warning (que ficam invisíveis fora do Cloud Run),
@@ -1163,85 +1202,58 @@ class DataQualityMonitor:
             df: DataFrame após feature engineering (mesmo input dos checks irmãos)
 
         Returns:
-            Lista de alertas, um por feature TOP-N ausente.
+            Lista de alertas, um por (variant, feature TOP-N ausente).
         """
         from datetime import datetime, timezone
 
         alerts = []
 
-        try:
-            from model.prediction import LeadScoringPredictor
-            predictor = LeadScoringPredictor(use_active_model=True, client_config=self.client_config)
+        # Sem core encoding, nada a checar (legacy path) — top_features vive em artifacts MLflow.
+        if not (self.client_config and self.client_config.encoding):
+            return alerts
 
-            # Sem core encoding, nada a checar (legacy path).
-            if not (self.client_config and self.client_config.encoding):
-                return alerts
+        from core.encoding import apply_encoding, _load_top_features
 
-            from core.encoding import apply_encoding, merge_encoding, _load_top_features
-            artifacts = {}
-            if predictor.mlflow_run_id:
-                artifacts['mlflow_run_id'] = predictor.mlflow_run_id
-            elif predictor.model_path:
-                artifacts['model_path'] = str(predictor.model_path)
-
-            # Espelha o pattern de _check_missing/extra_features: aplica
-            # encoding_overrides do champion via ABTestConfig se houver.
-            effective_encoding = self.client_config.encoding
+        for variant_name, predictor, effective_encoding in self._iter_active_variants():
             try:
-                from core.client_config import ABTestConfig
-                import os as _os
-                _active_path = _os.path.abspath(_os.path.join(
-                    _os.path.dirname(__file__), '..', '..', 'configs', 'active_models',
-                    f'{self.client_config.client_id}.yaml',
-                ))
-                _ab = ABTestConfig.from_active_model_yaml(_active_path)
-                if _ab.enabled and predictor.mlflow_run_id:
-                    _champion_v = next(
-                        (v for v in _ab.variants.values() if v.run_id == predictor.mlflow_run_id),
-                        None,
-                    )
-                    if _champion_v and _champion_v.encoding_overrides:
-                        effective_encoding = merge_encoding(self.client_config.encoding, _champion_v.encoding_overrides)
+                artifacts = {}
+                if predictor.mlflow_run_id:
+                    artifacts['mlflow_run_id'] = predictor.mlflow_run_id
+                elif predictor.model_path:
+                    artifacts['model_path'] = str(predictor.model_path)
+
+                df_encoded = apply_encoding(df.copy(), effective_encoding, artifacts=artifacts)
+
+                validation = predictor.validate_features(df_encoded)
+                missing_features = set(validation.get('missing_features', []))
+                if not missing_features:
+                    continue
+
+                top_features = _load_top_features(artifacts, min_importance=0.01)
+                critical_missing = [f for f in top_features if f['name'] in missing_features]
+
+                for f in critical_missing:
+                    severity = 'HIGH' if f['importance'] >= 0.05 else 'MEDIUM'
+                    alerts.append({
+                        'type': 'critical_feature_coverage',
+                        'severity': severity,
+                        'category': 'data_quality',
+                        'message': (
+                            f"[T1-10][{variant_name}] Feature CRÍTICA ausente: '{f['name']}' "
+                            f"(rank {f['rank']}, importância {f['importance']*100:.2f}%) "
+                            f"— preenchida com 0, modelo cego para esse sinal"
+                        ),
+                        'details': {
+                            'variant_name': variant_name,
+                            'feature_name': f['name'],
+                            'rank': f['rank'],
+                            'importance_pct': round(f['importance'] * 100, 2),
+                        },
+                        'timestamp': datetime.now(timezone.utc).isoformat(),
+                        'metric_value': float(f['importance']),
+                        'threshold': 0.05,
+                    })
             except Exception as _e:
-                logger.debug(f"  [T1-10 surface] encoding_overrides do champion não carregados: {_e}")
-
-            df_encoded = apply_encoding(df.copy(), effective_encoding, artifacts=artifacts)
-
-            # validate_features popula last_missing_features via prepare_features
-            validation = predictor.validate_features(df_encoded)
-            missing_features = set(validation.get('missing_features', []))
-
-            if not missing_features:
-                return alerts
-
-            # Top features por importância (mesma fonte do T1-10 do encoding.py)
-            top_features = _load_top_features(artifacts, min_importance=0.01)
-            critical_missing = [f for f in top_features if f['name'] in missing_features]
-
-            for f in critical_missing:
-                severity = 'HIGH' if f['importance'] >= 0.05 else 'MEDIUM'
-                alerts.append({
-                    'type': 'critical_feature_coverage',
-                    'severity': severity,
-                    'category': 'data_quality',
-                    'message': (
-                        f"[T1-10] Feature CRÍTICA ausente: '{f['name']}' "
-                        f"(rank {f['rank']}, importância {f['importance']*100:.2f}%) "
-                        f"— preenchida com 0, modelo cego para esse sinal"
-                    ),
-                    'details': {
-                        'feature_name': f['name'],
-                        'rank': f['rank'],
-                        'importance_pct': round(f['importance'] * 100, 2),
-                    },
-                    'timestamp': datetime.now(timezone.utc).isoformat(),
-                    'metric_value': float(f['importance']),
-                    'threshold': 0.05,
-                })
-
-        except Exception as _e:
-            logger.error(f"\n ERRO em _check_critical_features_coverage(): {_e}")
-            import traceback
-            traceback.print_exc()
+                logger.error(f" ERRO em _check_critical_features_coverage() para variant '{variant_name}': {_e}")
 
         return alerts
