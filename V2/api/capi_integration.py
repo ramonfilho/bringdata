@@ -372,13 +372,6 @@ def send_lead_qualified_with_value(
             custom_properties=custom_props
         )
 
-        # DEBUG: Log custom_properties e VALUE para verificar o que está sendo enviado
-        logger.info(f"🔍 DEBUG LeadQualified para {email}:")
-        logger.info(f"   VALUE enviado: R$ {valor_projetado:.2f} (decil: {decil}, taxa: {taxa if rates else 'n/a'})")
-        logger.info(f"   Total de custom_properties: {len(custom_props)}")
-        logger.info(f"   Keys: {list(custom_props.keys())}")
-        logger.info(f"   Sample: {dict(list(custom_props.items())[:5])}")
-
         # Event
         event = Event(
             event_name=event_name,
@@ -401,26 +394,6 @@ def send_lead_qualified_with_value(
 
         event_request = EventRequest(**event_request_params)
 
-        # DEBUG: Log do payload JSON EXATO que será enviado para Meta API
-        import json
-        try:
-            # Usar o método export_value() do SDK para ver o JSON exato
-            if hasattr(custom_data, 'export_value'):
-                serialized = custom_data.export_value()
-                logger.info(f"🔍 DEBUG JSON EXATO enviado para Meta API (custom_data):")
-                logger.info(json.dumps(serialized, indent=2, ensure_ascii=False))
-            else:
-                # Fallback: extrair manualmente
-                payload_debug = {
-                    'value': custom_data.value if hasattr(custom_data, 'value') else None,
-                    'currency': custom_data.currency if hasattr(custom_data, 'currency') else None,
-                    'custom_properties': custom_data.custom_properties if hasattr(custom_data, 'custom_properties') else None
-                }
-                logger.info(f"🔍 DEBUG Payload custom_data enviado para Meta:")
-                logger.info(json.dumps(payload_debug, indent=2, ensure_ascii=False))
-        except Exception as debug_err:
-            logger.warning(f"⚠️  Erro ao extrair payload debug: {debug_err}")
-
         # Enviar
         response = event_request.execute()
 
@@ -442,20 +415,6 @@ def send_lead_qualified_with_value(
                 )
             except Exception as db_err:
                 logger.warning(f"⚠️  Erro ao salvar CAPI response no banco para {email}: {db_err}")
-
-        # DEBUG: Log da resposta da Meta para confirmar recebimento
-        import json
-        try:
-            # A resposta da Meta contém informações sobre eventos recebidos e processados
-            logger.info(f"🔍 DEBUG Resposta da Meta API:")
-            logger.info(f"   Response type: {type(response)}")
-            logger.info(f"   Response: {response}")
-            logger.info(f"   Parsed: {parsed_response}")
-            # Se for um objeto com atributos, tentar extrair
-            if hasattr(response, '__dict__'):
-                logger.info(f"   Response dict: {json.dumps(response.__dict__, default=str, indent=2)}")
-        except Exception as resp_err:
-            logger.warning(f"⚠️  Erro ao logar resposta: {resp_err}")
 
         logger.info(f"✅ LeadQualified enviado: {email} (decil: {decil}, valor proj: R$ {valor_projetado:.2f}, status: {parsed_response['status']})")
 
@@ -727,35 +686,13 @@ def send_both_lead_events(
     Returns:
         Dict com resultado de ambos os envios
     """
-    logger.info(f"📤 Enviando AMBOS eventos para teste A/B: {email} ({decil})")
+    # Apenas LeadQualifiedHighQuality é enviado — LeadQualified-com-valor desativado
+    # em 2026-05-06 para reduzir 2× chamadas Meta API por lead que estavam disparando
+    # worker timeout em batches grandes do /railway/process-pending.
+    # Reativar revertendo este bloco se voltar a otimizar campanhas por value.
+    result_with_value = {"status": "skipped", "reason": "LeadQualified-com-valor desativado (2026-05-06)"}
 
-    # Enviar evento 1: COM VALOR (D1-D10)
-    result_with_value = send_lead_qualified_with_value(
-        email=email,
-        phone=phone,
-        first_name=first_name,
-        last_name=last_name,
-        lead_score=lead_score,
-        decil=decil,
-        event_id=event_id,
-        fbp=fbp,
-        fbc=fbc,
-        user_agent=user_agent,
-        client_ip=client_ip,
-        event_source_url=event_source_url,
-        event_timestamp=event_timestamp,
-        test_event_code=test_event_code,
-        survey_data=survey_data,
-        db=db,
-        capi_config=capi_config,
-        business_config=business_config,
-        client_id=client_id,
-        event_name_override=event_name_override,
-        conversion_rates_override=conversion_rates_override,
-        pixel_id_override=pixel_id_override,
-    )
-
-    # Enviar evento 2: SEM VALOR (D9-D10 only)
+    # Enviar evento único: HighQuality SEM VALOR (D9-D10 only — função filtra internamente)
     result_high_quality = send_lead_qualified_high_quality(
         email=email,
         phone=phone,
@@ -981,9 +918,7 @@ def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConf
     }
 
     for lead in leads:
-        # DEBUG: Log do tipo de lead_score para identificar problema "'int' object is not iterable"
         lead_score_value = lead['lead_score']
-        logger.info(f"DEBUG: lead_score type={type(lead_score_value)}, value={lead_score_value}")
 
         # Usar send_both_lead_events para enviar ambas as estratégias
         result = send_both_lead_events(

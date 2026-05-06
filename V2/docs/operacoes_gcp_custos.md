@@ -123,3 +123,86 @@ O sync para BigQuery aparentemente nunca foi ativado em produção (ou foi desco
 2. **Migrar MLflow para SQLite + GCS** (option B descartada agora): eliminaria os ~R$ 9/mês remanescentes do storage da instância parada. Refactor pequeno mas precisa testar concorrência no retreino.
 3. **Revisões canário órfãs do `smart-ads-api`** (00270, 00271, 00357, 00360, 00274, 00275, 00276): 0% tráfego, podem ser deletadas via `gcloud run revisions delete` para destravar limpeza de imagens antigas.
 4. **Fix do bug `.str accessor`** no `/railway/process-pending`.
+
+---
+
+## Investigação de spike de custo — 2026-05-06
+
+Usuário recebeu alertas de budget consecutivos (90% à 00:23 BRT, 100% às 06:11 BRT do mesmo dia). Cumulativo do mês cruzou R$ 150 ainda no dia 6 — em pace de gasto ~3× o esperado.
+
+### Causa-raiz identificada
+
+Worker timeout do gunicorn em batches grandes do `/railway/process-pending`, alimentando ciclo de respawn que queima CPU continuamente.
+
+**Sequência:**
+
+1. `send_batch_events` chamava `send_both_lead_events` para cada lead, que enfileirava **2× chamadas síncronas para Meta CAPI API** (LeadQualified-com-valor + LeadQualifiedHighQuality), ~1-2s cada.
+2. Cada lead também emitia ~50-80 linhas de log debug (`🔍 DEBUG JSON EXATO enviado para Meta API`, `🔍 DEBUG Resposta da Meta API`, etc.) com `json.dumps(indent=2)` em payload nested — adicionava ~50-100ms de CPU por lead.
+3. Em batches grandes (lançamento ativo, ~3000 leads/dia), o tempo total ultrapassava `--timeout 1200s` do gunicorn (que já é 20 min) — worker era morto com SIGABRT.
+4. Master gunicorn spawnava worker novo, que recarregava o modelo na RAM (5-10s) e retomava o batch. Os requests reprocessavam parcialmente.
+5. Em janela de 1h pós-meianoite de 06/05: 25+ workers mortos, CPU em alta sustentada.
+
+**Frequência observada (SIGABRT/dia):**
+
+```
+01/05: 134
+02/05: 288
+03/05: 380
+04/05: 426
+05/05: 460  ← pico, véspera do alerta
+06/05: 312
+```
+
+Crescimento exponencial casava com aumento de tráfego do lançamento + acúmulo de DEBUG verboso.
+
+**Diagnóstico do que NÃO era a causa:**
+
+- Tráfego: 5–12k requests/dia, estável.
+- Volume de logs Cloud Logging: ~10 MB/dia (free tier de 50 GB/mês cobre).
+- Cloud SQL: confirmado parado (não foi reativado).
+- `bring-data-api`: ainda deletado.
+- Múltiplas instâncias Cloud Run em paralelo: máximo 1 por hora.
+
+### Mitigações aplicadas (2026-05-06)
+
+| Ação | Onde | Impacto esperado |
+|---|---|---|
+| Desativar evento `LeadQualified` (com valor) — manter apenas `LeadQualifiedHighQuality` | `api/capi_integration.py` `send_both_lead_events` | Cada lead passa de 2 chamadas Meta API → 1 (e zero para D1-D8 dado que HQ filtra D9-D10). Reduz tempo de processing por lead em ~50%. |
+| Remover 4 blocos `🔍 DEBUG` em `send_lead_qualified_with_value` (com `json.dumps` em payload nested) | `api/capi_integration.py` linhas 375-380, 404-422, 446-458, 986 (pré-edição) | Corta ~50-100ms por lead + ~50 linhas de log por lead |
+| Habilitar billing export para BigQuery | dataset `smart-ads-451319.billing_export` (criado, falta switch no Console) | Daqui em diante: query precisa por SKU/dia em `gcp_billing_export_v1_*` |
+
+**Não aplicado intencionalmente:**
+
+- **Aumentar gunicorn `--timeout`**: já está em `1200s` (20 min) no `Dockerfile:89`. Aumentar mais não resolveria — o problema não era timeout curto, mas batches que demoravam >20 min.
+- **Congelar deploys**: não viável — desenvolvimento ativo precisa de deploys. Investigação seguiu pelas duas mitigações de código acima.
+
+### Trade-offs do drop do `LeadQualified`-com-valor
+
+- ✅ Cessa a sangria de CPU/timeout no worker.
+- ⚠️ **Meta perde sinal de valor** (ROAS optimization). Campanhas que otimizam por value não terão dados.
+- ⚠️ **D1-D8 (80% dos leads) deixa de mandar evento Meta**: `LeadQualifiedHighQuality` filtra internamente para D9-D10. Em runtime, 80% das chamadas Meta API param.
+
+Decisão do usuário (2026-05-06): aceitar trade-off "por enquanto", pois campanhas ativas no Business Manager estão otimizando por `LeadQualifiedHighQuality`. Reativação do evento com-valor requer descomentar bloco em `send_both_lead_events` (marcado em comentário no código).
+
+### Procedimento para configurar billing export (passo manual)
+
+Dataset `billing_export` em `us` já criado em `smart-ads-451319`. Falta switch no Console:
+
+1. Acesse: `https://console.cloud.google.com/billing/<BILLING_ACCOUNT>/export`
+2. **Standard usage cost** → EDIT SETTINGS → projeto `smart-ads-451319`, dataset `billing_export` → Save
+3. (Opcional) **Detailed usage cost** → mesmo dataset → Save (granularidade por SKU)
+
+Após ~24h aparecem tabelas `gcp_billing_export_v1_*` e `gcp_billing_export_resource_v1_*`. Próxima investigação consegue isolar custo por SKU, projeto e dia.
+
+### Budget alerts já configurados
+
+Budget existente: **R$ 150 Alerta de orçamento mensal**. Thresholds:
+
+```
+50%  (R$ 75)
+90%  (R$ 135)  ← disparou 06/05 00:23 BRT
+100% (R$ 150)  ← disparou 06/05 06:11 BRT
+150% (R$ 225)  ← previne ultrapassagem maior
+```
+
+50% também está ativo — mas se o usuário não recebeu, provavelmente foi cruzado em silêncio em algum dia anterior do mês.
