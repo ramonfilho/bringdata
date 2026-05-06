@@ -686,13 +686,39 @@ def send_both_lead_events(
     Returns:
         Dict com resultado de ambos os envios
     """
-    # Apenas LeadQualifiedHighQuality é enviado — LeadQualified-com-valor desativado
-    # em 2026-05-06 para reduzir 2× chamadas Meta API por lead que estavam disparando
-    # worker timeout em batches grandes do /railway/process-pending.
-    # Reativar revertendo este bloco se voltar a otimizar campanhas por value.
-    result_with_value = {"status": "skipped", "reason": "LeadQualified-com-valor desativado (2026-05-06)"}
+    logger.info(f"📤 Enviando AMBOS eventos para teste A/B: {email} ({decil})")
 
-    # Enviar evento único: HighQuality SEM VALOR (D9-D10 only — função filtra internamente)
+    # Evento 1: COM VALOR (D1-D10)
+    # NOTA: reativado em 2026-05-06 — confirmação de que campanhas Meta ativas em
+    # produção usam o evento `LeadQualified` para otimização baseada em value.
+    # Mitigação do worker timeout que motivou a desativação anterior: blocos DEBUG
+    # foram removidos (~50-100ms/lead), reduzindo o tempo total de processing.
+    result_with_value = send_lead_qualified_with_value(
+        email=email,
+        phone=phone,
+        first_name=first_name,
+        last_name=last_name,
+        lead_score=lead_score,
+        decil=decil,
+        event_id=event_id,
+        fbp=fbp,
+        fbc=fbc,
+        user_agent=user_agent,
+        client_ip=client_ip,
+        event_source_url=event_source_url,
+        event_timestamp=event_timestamp,
+        test_event_code=test_event_code,
+        survey_data=survey_data,
+        db=db,
+        capi_config=capi_config,
+        business_config=business_config,
+        client_id=client_id,
+        event_name_override=event_name_override,
+        conversion_rates_override=conversion_rates_override,
+        pixel_id_override=pixel_id_override,
+    )
+
+    # Evento 2: HighQuality SEM VALOR (D9-D10 only — função filtra internamente)
     result_high_quality = send_lead_qualified_high_quality(
         email=email,
         phone=phone,

@@ -182,7 +182,18 @@ Crescimento exponencial casava com aumento de tráfego do lançamento + acúmulo
 - ⚠️ **Meta perde sinal de valor** (ROAS optimization). Campanhas que otimizam por value não terão dados.
 - ⚠️ **D1-D8 (80% dos leads) deixa de mandar evento Meta**: `LeadQualifiedHighQuality` filtra internamente para D9-D10. Em runtime, 80% das chamadas Meta API param.
 
-Decisão do usuário (2026-05-06): aceitar trade-off "por enquanto", pois campanhas ativas no Business Manager estão otimizando por `LeadQualifiedHighQuality`. Reativação do evento com-valor requer descomentar bloco em `send_both_lead_events` (marcado em comentário no código).
+**Atualização (2026-05-06, mesmo dia, pós-investigação):** o usuário confirmou que `LeadQualified` continua sendo usado em produção pelas campanhas Meta. **A desativação foi revertida** algumas horas depois — `send_both_lead_events` voltou a enviar os dois eventos por lead.
+
+Mitigação efetiva do worker timeout que ficou em produção:
+
+- Os 4 blocos `🔍 DEBUG` em `send_lead_qualified_with_value` que faziam `json.dumps(indent=2)` em payload nested **continuam removidos** (~50-100ms CPU/lead economizado).
+- O Dockerfile já tinha `--timeout 1200s` (20 min), que é o teto razoável — aumentar mais não resolve.
+
+Próximas opções para reduzir timeout, caso volte a ocorrer:
+
+1. Paralelizar as 2 chamadas Meta API com `asyncio.gather` em vez de chamar sequencialmente.
+2. Limitar batch size em `/railway/process-pending` (processar no máximo N leads por poll).
+3. Aumentar workers do gunicorn (atualmente `--workers 2`) se a memória do container suportar.
 
 ### Procedimento para configurar billing export (passo manual)
 
