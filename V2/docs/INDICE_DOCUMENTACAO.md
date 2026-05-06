@@ -67,7 +67,10 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Status:** histórico + catálogo. Status canônico de cada item vive em `PLANO_EXECUCAO.md`.
 - Fases 1, 2, 3a, 3c → ✅ concluídas
 - Item 19 (deploy do refactor) → ✅ CONCLUÍDO em 24/03/2026
-- DT-12 (encoding por variante A/B) → ✅ RESOLVIDO em 01/04
+- DT-12 (encoding por variante A/B) → ✅ RESOLVIDO em 01/04; ressurgiu via Champion shim em 02/05/2026, refactor monitoring per-variant em 06/05/2026 (ver DT-16)
+- DT-14 (nomenclatura `clients/` vs `active_models/` confunde) → registrado em 05/05/2026, prioridade baixa
+- DT-15 (`ABTestVariantConfig` campos não-utilizáveis) → registrado em 05/05/2026, candidato a agrupar com DT-14
+- DT-16 (matar `encoding_overrides` por convergência) → registrado em 05/05/2026, prioridade alta — bloqueado por treino do próximo Champion
 - Fase 3b, Fase 4 (EDA), Fase 5 (NLP) → bloqueadas/agendadas em H4-H5 do PLANO_EXECUCAO
 - Pré-requisitos R1, R2, R3 + DT-2, DT-7, DT-11, DT-13 → agendados no PLANO_EXECUCAO
 **Relação:** consultado por `PLANO_EXECUCAO.md` para detalhes técnicos de cada DT/R. Histórico do deploy em `arquivo/CHECKLIST_DEPLOY_REFACTOR.md`.
@@ -76,6 +79,11 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Papel:** runbook para onboarding de novo cliente — criar YAML, inspecionar dados brutos, treinar modelo, verificar MLflow, deploy.
 **Status:** ativo. Pronto para uso quando Cliente B chegar (H5 do PLANO_EXECUCAO).
 **Relação:** consumido em H5.3 (Onboarding Cliente B — Fase 3b refactor).
+
+### `google_ads_pendencias.md` 📚 Catálogo técnico (H6)
+**Papel:** especificação dos pré-requisitos e passos de implementação para envio de eventos ao Google Ads (Enhanced Conversions for Leads). Documenta decisões fixadas (estratégia, credenciais), bloqueantes abertos (gclid não capturado), e a infra já preparada (`should_send_to_destination`, `CAPIConfig`, dispatcher).
+**Status:** ativo. Atualizado em 2026-05-01.
+**Relação:** referenciado por `PLANO_EXECUCAO.md` em H6 → "Diversificação de canais". Tese estratégica em `swot_bringdata.md` (F8/W4/O4). Pré-condição: Cliente B estabilizado (H5).
 
 ### `arquivo/ROADMAP_MLOPS_MATURIDADE.md` 📦 ARQUIVADO
 **Status:** ✅ **ARQUIVADO em 27/04/2026.** Conteúdo absorvido pelos horizontes H1–H7 do `PLANO_EXECUCAO.md`. Consultar apenas como referência histórica.

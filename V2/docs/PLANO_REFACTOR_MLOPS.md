@@ -1005,7 +1005,7 @@ O parâmetro `config.term_long_id_threshold` pode ser marcado DEPRECATED no YAML
 
 ### DT-16 — Tornar `encoding_overrides` legado por convergência (estratégia preferida)
 
-**Contexto:** DT-12 introduziu `encoding_overrides` para resolver a divergência de encoding (ordinal vs OHE) entre Champion jan30 (treinado pré-Opção A com ordinal) e modelos novos (treinados com OHE default). DT-14 e DT-15 documentam débitos colaterais desse mecanismo: nomenclatura de configs que confunde, campos obrigatórios não-utilizáveis no shim do Champion, código duplicado em monitoring que precisa replicar a lógica de merge_encoding (resolvido em 05/05/2026 mas reforça o cheiro de design).
+**Contexto:** DT-12 introduziu `encoding_overrides` para resolver a divergência de encoding (ordinal vs OHE) entre Champion jan30 (treinado pré-Opção A com ordinal) e modelos novos (treinados com OHE default). DT-14 e DT-15 documentam débitos colaterais desse mecanismo: nomenclatura de configs que confunde, campos obrigatórios não-utilizáveis no shim do Champion, código duplicado em monitoring que precisa replicar a lógica de merge_encoding (resolvido em 05/05/2026 mas reforça o cheiro de design, e em 06/05/2026 transformado em loop per-variant via helper `_iter_active_variants` que itera Champion + Challenger emitindo alertas com `variant_name`).
 
 **Estratégia mais simples que todas as anteriores:** matar o mecanismo por convergência. Se o único modelo em produção que precisa de override (jan30 hoje) for substituído por **qualquer modelo treinado com o pipeline atual** (OHE nativo, default desde Opção A em 21/04/2026), `encoding_overrides` não tem mais usuário e pode ser removido sem refactor estrutural.
 
@@ -1022,7 +1022,7 @@ O parâmetro `config.term_long_id_threshold` pode ser marcado DEPRECATED no YAML
 | 3 | Deploy canary + smoke (gate E3) + promoção 100% | 15 min |
 | 4 | Verificar nos logs Cloud Run: T1-10 deixa de citar `Qual_a_sua_idade` (ordinal) e passa a citar `Qual_a_sua_idade_*_anos` quando aplicável (esperado pra batches pequenos sem cobertura de todas categorias) | 5 min |
 | 5 | (Code cleanup, opcional) Marcar `ABTestVariantConfig.encoding_overrides` como `# DEPRECATED — manter campo por backward-compat enquanto algum YAML legado ainda usa; remover quando confirmar que nenhum YAML em produção tem essa chave` | 2 min |
-| 6 | (Refactor futuro, opcional) Após N semanas sem uso, remover totalmente: campo do dataclass, parser em `from_active_model_yaml`, função `merge_encoding`, parâmetro `encoding_overrides` em `production_pipeline.run/preprocess`, lookup do champion variant em `app.py:937-943` e `:3373-3380`, e o bloco em `monitoring/data_quality.py:_check_extra_features/_check_missing_features` | 30-60 min |
+| 6 | (Refactor futuro, opcional) Após N semanas sem uso, remover totalmente: campo do dataclass, parser em `from_active_model_yaml`, função `merge_encoding`, parâmetro `encoding_overrides` em `production_pipeline.run/preprocess`, lookup do champion variant em `app.py:937-943` e `:3373-3380`, e os blocos em `monitoring/data_quality.py:_iter_active_variants, _check_missing_features, _check_extra_features e _check_critical_features_coverage (T1-10 surface)` | 30-60 min |
 
 **Total mínimo (passos 1-4):** ~30 min ponta a ponta. Resolve **simultaneamente**:
 - DT-12 (encoding por variante) — vira histórico, sem usuário ativo

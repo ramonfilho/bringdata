@@ -270,6 +270,22 @@ Recebe `ClientConfig` e passa para os 3 sub-monitores.
 
 > **Nota DT-7:** alertas `missing_features` para campanhas Lookalike são esperados e documentados. Threshold de Medium calculado sobre dataset histórico completo (pré-cutoff) — campanhas antigas com alta freq histórica mas inativas no lançamento atual aparecem como ausentes. Ver `PLANO_REFACTOR_MLOPS.md` DT-7.
 
+### Dois sistemas complementares de monitoramento de features
+
+| Aspecto | T1-11 / `/monitoring/feature-report` | Daily-check / `DataQualityMonitor` |
+|---|---|---|
+| Quando roda | A cada batch scoreado em produção (síncrono) | 1×/dia via Cloud Scheduler |
+| Onde | `production_pipeline.py:392` (entre feature_engineering e apply_encoding) | `monitoring/orchestrator.py` consumindo Sheets/Railway 24h |
+| O que valida | PRÉ-encoding: missing_column, wrong_dtype, null_rate_high, new_categories, value_out_of_range | PÓS-encoding: features esperadas pelo modelo não geradas / extras / TOP-N por importância ausentes |
+| Schema | `configs/pre_encoding_schemas/{client_id}.json` — agnóstico ao modelo (form bruto é único) | `feature_registry.json` por variant — específico de cada modelo (Champion + Challenger) |
+| Output | Log estruturado `[FV_JSON]` agregado pelo endpoint `/monitoring/feature-report` | Alertas no daily-check (Slack + endpoint `/monitoring/daily-check`) |
+| Gate de progressão | Smoke pós-deploy bloqueia se severity=ERROR (E3) | Não bloqueia deploy; informa drift |
+| Per-variant? | Não (schema agnóstico ao modelo) | Sim, desde 06/05/2026 — alertas carregam `variant_name` |
+
+Os dois são complementares. T1-11 protege a entrada do encoding em real-time (feature raw faltando, dtype errado, categoria nova). Daily-check protege a saída do encoding contra cada feature_registry de variant ativa (Champion + Challenger). Ver `PLANO_SAFEGUARD.md` § T1-10 / T1-11 para detalhes; ver `PLANO_REFACTOR_MLOPS.md` § DT-12 + DT-16 para a história do shim do Champion e estratégia de deprecation.
+
+> **Nota DT-12 — Champion shim:** `configs/active_models/devclub.yaml` contém uma entrada `champion_jan30` em `ab_test.variants` cujo único papel é hospedar `encoding_overrides` (idade/salário ordinal) do modelo Champion jan30. A entrada NÃO faz roteamento (`utm_pattern={}`). Sem ela, monitoring (e produção) usariam OHE pra idade/salário enquanto jan30 espera ordinal → 8.2% de feature importance perdida. Em 06/05/2026 o monitoring foi refatorado pra rodar per-variant via helper `_iter_active_variants` em `data_quality.py`, eliminando assimetria entre Champion (com shim) e Challenger (sem shim). Ver DT-12 e DT-16.
+
 ---
 
 ## BANCO DE DADOS
