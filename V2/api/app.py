@@ -2657,9 +2657,19 @@ async def daily_monitoring_check_railway(
         # E6: rolling 30d via Railway (Lead.decil) — usado como baseline em
         # _check_score_distribution. Cálculo aqui porque o orchestrator/DataQualityMonitor
         # recebe db=Cloud SQL legacy, que não tem a tabela Lead.
+        # Conexão original `railway_conn` já fechou em 2468 — abrir nova dedicada.
         expected_decil_dist = None
+        _e6_conn = None
         try:
-            _r30 = railway_conn.run(
+            _e6_conn = pg8000.native.Connection(
+                host=os.environ['RAILWAY_DB_HOST'],
+                port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+                database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+                user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+                password=os.environ['RAILWAY_DB_PASSWORD'],
+                timeout=30,
+            )
+            _r30 = _e6_conn.run(
                 'SELECT decil, COUNT(*) FROM "Lead" '
                 'WHERE "createdAt" >= NOW() - INTERVAL \'31 days\' '
                 '  AND "createdAt" <  NOW() - INTERVAL \'1 day\' '
@@ -2687,6 +2697,12 @@ async def daily_monitoring_check_railway(
                 logger.info(f"📊 E6 baseline: rolling 30d n={_total_30d:,}, D10={_dist['D10']*100:.1f}%")
         except Exception as _e:
             logger.warning(f"⚠️ E6: falha calcular rolling 30d via Railway: {_e}")
+        finally:
+            if _e6_conn is not None:
+                try:
+                    _e6_conn.close()
+                except Exception:
+                    pass
 
         orchestrator = MonitoringOrchestrator(model_path=model_path, db=None,
                                               expected_decil_dist=expected_decil_dist)
