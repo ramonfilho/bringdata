@@ -71,6 +71,7 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 - DT-14 (nomenclatura `clients/` vs `active_models/` confunde) → registrado em 05/05/2026, prioridade baixa
 - DT-15 (`ABTestVariantConfig` campos não-utilizáveis) → registrado em 05/05/2026, candidato a agrupar com DT-14
 - DT-16 (matar `encoding_overrides` por convergência) → registrado em 05/05/2026, prioridade alta — bloqueado por treino do próximo Champion
+- DT-17 (eliminar duplicação `api/business_config.py` × YAML — fluxo treino→MLflow artifact→`--set-active`→YAML) → registrado em 06/05/2026, prioridade alta arquiteturalmente, fases 1-3 sem dependência de retreino
 - Fase 3b, Fase 4 (EDA), Fase 5 (NLP) → bloqueadas/agendadas em H4-H5 do PLANO_EXECUCAO
 - Pré-requisitos R1, R2, R3 + DT-2, DT-7, DT-11, DT-13 → agendados no PLANO_EXECUCAO
 **Relação:** consultado por `PLANO_EXECUCAO.md` para detalhes técnicos de cada DT/R. Histórico do deploy em `arquivo/CHECKLIST_DEPLOY_REFACTOR.md`.

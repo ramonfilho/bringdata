@@ -626,6 +626,33 @@ retrain:
   quality_gate_critical_threshold: 0.2
 business:
   product_value: 1563.75
+  # =============================================================================
+  # conversion_rates — rates back-calculadas para reproduzir LEAD_VALUE_BY_DECILE_CHAMPION
+  # =============================================================================
+  # Fórmula: rate[decil] = LEAD_VALUE_BY_DECILE_CHAMPION[decil] / product_value
+  # Valores fonte: api/business_config.py:LEAD_VALUE_BY_DECILE_CHAMPION (06/05/2026)
+  # Frame: cash recebido à vista por lead em cada decil (não LTV)
+  #
+  # IMPORTANTE: este bloco era a "fonte de verdade" pretendida do refactor mas
+  # foi removido em 06/04/2026 (commit d40970a). Sem ele, capi_integration.py:347
+  # cai em valor_projetado = 0.0 e a Meta recebeu LeadQualified com value=0
+  # entre 30/04 e 06/05 (7 dias). Bug se manifestou quando rev. main pegou tráfego
+  # 100% (antes, rollback edf23e9 importava direto de business_config.py).
+  #
+  # Próximo passo arquitetural (DT-XX em PLANO_REFACTOR_MLOPS.md): trocar este
+  # mecanismo de "rate × product_value" por campo lead_values_by_decile direto,
+  # eliminando a duplicação com api/business_config.py.
+  conversion_rates:
+    D01: 0.000966   # 1.51 / 1563.75
+    D02: 0.001260   # 1.97 / 1563.75
+    D03: 0.001260   # 1.97 / 1563.75
+    D04: 0.001260   # 1.97 / 1563.75
+    D05: 0.003595   # 5.62 / 1563.75
+    D06: 0.003595   # 5.62 / 1563.75
+    D07: 0.003595   # 5.62 / 1563.75
+    D08: 0.004317   # 6.75 / 1563.75
+    D09: 0.004969   # 7.77 / 1563.75
+    D10: 0.009573   # 14.97 / 1563.75
   ticket_contracted: 2200.0          # valor nominal contratado — base do faturamento total (Guru e TMB)
   guru_ticket_price: 1997.0          # preço real no Guru (payment.gross via API) — ≠ ticket contratado R$2.200
   guru_realizacao_factor: 0.87       # fator de realização Guru: ~13% de cancelamentos/chargebacks (back-calculado de LF42–LF47)

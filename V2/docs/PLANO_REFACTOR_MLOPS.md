@@ -1045,6 +1045,72 @@ O parâmetro `config.term_long_id_threshold` pode ser marcado DEPRECATED no YAML
 
 ---
 
+### DT-17 — Eliminar duplicação `api/business_config.py` × YAML do cliente; fluxo "treino popula → promoção copia"
+
+**Contexto:** o sistema tem hoje **três** lugares onde dados de negócio são definidos, com responsabilidades sobrepostas:
+
+| Local | Conteúdo | Quem lê |
+|---|---|---|
+| `configs/clients/devclub.yaml:business` | `product_value`, `ticket_contracted`, `conversion_rates` (Fix A 06/05) etc. | Pipeline pós-refactor (`src/core/`, `api/capi_integration.py` via `BusinessConfig`) |
+| `BusinessConfig` em `src/core/client_config.py` | dataclass com defaults — `product_value: float = 1563.75` ⚠️ | Forma tipada do YAML acima |
+| `api/business_config.py` | `PRODUCT_VALUE`, `CONVERSION_RATES`, `LEAD_VALUE_BY_DECILE_CHAMPION/CHALLENGER` hardcoded | (1) `src/model/training_model.py:atualizar_business_config_com_recall` escreve aqui após cada treino; (2) revisão `edf23e9` (rollback) lia daqui via import direto até 29/04 |
+
+**O bug que esse débito causou (já mitigado com Fix A em 06/05):** entre 30/04 e 06/05, produção (revisão `main`) usava o YAML como fonte de verdade mas `conversion_rates` tinha sido removido em 06/04 (commit `d40970a`) sem ninguém atualizar o código de runtime. Resultado: 7 dias com 100% dos `LeadQualified` enviados com `value=0`. Detalhes em `docs/operacoes_gcp_custos.md` seção "Investigação de spike de custo — 2026-05-06" e em `PLANO_EXECUCAO.md` "Sequelas 02/05" item VAL=0.
+
+**Fix A aplicado em 06/05/2026:** `conversion_rates` recolocado no YAML, com rates back-calculadas a partir de `LEAD_VALUE_BY_DECILE_CHAMPION` (rate = lead_value / product_value). Próximo deploy aplica em produção. **Esse fix tampa o buraco mas não unifica nada** — `business_config.py` continua como fonte secundária, não-lida em produção.
+
+**DT-17 = fix arquitetural definitivo.** Objetivo: deletar `api/business_config.py` por convergência. YAML vira a única fonte de verdade. Mas com uma restrição importante explicitada pelo usuário em 06/05/2026:
+
+> "O fix C não pode ser o treino atualizando direto o YAML do cliente, a não ser que a gente queira colocar em produção. A atualização tem que ser no momento em que a gente aponta o container para usar o ID do MLflow com o modelo atualizado."
+
+Ou seja: **treino ≠ deploy.** O YAML do cliente é configuração de produção; alterar no momento do treino exporia rates de um modelo ainda não promovido. A sequência correta:
+
+```
+[treino] → escreve rates como artifact dentro do MLflow run (gs://smart-ads-mlflow/artifacts/{run_id}/business_rates.yaml)
+[--set-active] → lê o artifact do run que está sendo promovido
+              → copia rates para configs/clients/{client_id}.yaml (ou para configs/active_models/{client_id}.yaml — decidir no design)
+[deploy] → roda normalmente, lê do YAML
+```
+
+**Sequência de execução (assumindo arquitetura definida + próximo Champion treinado):**
+
+| Fase | Ação | Esforço | Bloqueio |
+|---|---|---|---|
+| 1 | Adicionar campo `lead_values_by_decile: Optional[Dict[str, float]]` em `BusinessConfig` (dataclass) e em `ABTestVariantConfig`. Modificar `capi_integration.py:347` para preferir esse campo quando setado: `value = lead_values_by_decile[decil]` direto, sem multiplicação por product_value | ~30 min | Nenhum — fix sai compatível com Fix A. Dois caminhos coexistem: `lead_values_by_decile` (novo) e `product_value × conversion_rates` (legado) | 
+| 2 | Remover defaults DevClub-específicos do dataclass (`product_value: float = 1563.75` → `0.0`); adicionar validação em `validate()` que levanta erro se cliente esquecer campo obrigatório | ~10 min | Nenhum |
+| 3 | Modificar `training_model.py:atualizar_business_config_com_recall` para **escrever um YAML artifact dentro do MLflow run** (`mlflow.log_artifact("business_rates.yaml")`) em vez de mexer em `api/business_config.py`. Manter escrita em `api/business_config.py` em paralelo (deprecation gradual) | ~20 min | Nenhum |
+| 4 | Modificar fluxo de promoção (`train_pipeline.py --set-active` ou novo comando dedicado): no momento de apontar `configs/active_models/{client_id}.yaml` pro novo `run_id`, baixar `business_rates.yaml` do MLflow run e copiar `lead_values_by_decile` para o YAML autoritativo | ~30 min | Decidir destino: `clients/{client_id}.yaml` (estático, polui git) ou `active_models/{client_id}.yaml` (dinâmico, já é convencionado para "estado mutável de produção"). Sugestão: `active_models` |
+| 5 | Próximo retreino real: validar fluxo ponta a ponta — modelo treinado → rates aparecem no MLflow → `--set-active` copia → deploy lê → valor correto sai pra Meta | depende do retreino | Aguarda próximo Champion |
+| 6 | Após N semanas com fluxo novo funcionando: deletar `api/business_config.py:CONVERSION_RATES`, `LEAD_VALUE_BY_DECILE_*` e `PRODUCT_VALUE`. Manter outros campos do arquivo (thresholds operacionais, color_thresholds etc.) ou migrar todos para YAML também (escopo maior) | ~10 min | Confirmar que ninguém mais lê `business_config.py` (grep) |
+
+**Total fases 1-3 (preparatórias, sem retreino):** ~1h.
+**Total fases 4-6 (executar com próximo retreino):** ~1h adicional + tempo natural do retreino.
+
+**Resolve simultaneamente:**
+
+- Bug latente "value=0" (Fix A já mitiga, DT-17 elimina a possibilidade de regressão futura)
+- Defaults DevClub-específicos no dataclass (impede contaminação silenciosa em multi-cliente)
+- Duplicação `business_config.py` × YAML (uma fonte só)
+- Frame ambíguo "rate × product_value vs lead_value direto" (usa lead_value direto, sem ginástica matemática)
+
+**Não resolve:**
+
+- Outros campos hardcoded em `business_config.py` (color_thresholds, MIN_ROAS_SAFETY, etc.) — esses ficam para uma rodada futura, sem urgência. Cada um deles tem path próprio: ou migra pra YAML (se específico do cliente) ou pode virar default sensato no código (se realmente genérico).
+
+**Sinalização do usuário (06/05/2026):** "não vejo sentido em usar dados do cliente hardcoded no dataclass" — afirmação correta. Os defaults atuais (`product_value: float = 1563.75`) violam o princípio multi-cliente do refactor.
+
+**Recomendação de momento:** **NÃO é o próximo passo imediato.** A sequência de prioridades pós-Fix A:
+
+1. **Próximo deploy** aplica Fix A → comprova value correto na Meta. (0,5h, depende de promoção do canary atual `00402-hoq` → 100%.)
+2. **DT-16** (matar `encoding_overrides`) — bloqueado pelo próximo Champion mas alta prioridade quando ele sair.
+3. **DT-17 fases 1-3** (preparação preditiva sem dependência de retreino) — pode ser feito em paralelo a (2). ~1h.
+4. **Próximo retreino** dispara DT-16 + DT-17 fases 4-5 simultaneamente. Execução conjunta é eficiente — uma sessão de promoção exercita os dois fluxos novos.
+5. DT-17 fase 6 (deletar legado) — depois de N semanas estáveis.
+
+**Prioridade:** ALTA arquiteturalmente, MÉDIA em urgência (Fix A já estancou o sangramento). Faz sentido enfileirar com DT-16 no mesmo trabalho de "convergência pós-próximo Champion".
+
+---
+
 ## 12. Caminho para Nível 2 e além
 
 Ver **`docs/ROADMAP_MLOPS_MATURIDADE.md`** para o guia completo.
