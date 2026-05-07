@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Ramon Moreira Filho — Machine Learning Engineer</title>
+<style>
+@page { size: A4; margin: 0.5in 0.6in; }
+
+* { box-sizing: border-box; }
+
+html, body {
+  font-family: -apple-system, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 10pt;
+  line-height: 1.42;
+  color: #1f2937;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.header { margin-bottom: 6px; }
+
+.name {
+  font-size: 24pt;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  margin: 0;
+  color: #111827;
+}
+
+.subtitle {
+  font-size: 11.5pt;
+  color: #14406f;
+  margin: 3px 0 0 0;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+
+.contact {
+  font-size: 9pt;
+  color: #6b7280;
+  margin: 5px 0 0 0;
+}
+.contact a { color: inherit; text-decoration: none; }
+
+hr.top-divider {
+  border: 0;
+  border-top: 2px solid #14406f;
+  margin: 12px 0 14px 0;
+}
+
+h2 {
+  font-size: 9.5pt;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  color: #14406f;
+  font-weight: 700;
+  margin: 11px 0 5px 0;
+  padding-bottom: 3px;
+  border-bottom: 1px solid #d1d9e6;
+  page-break-after: avoid;
+}
+
+.role {
+  margin-top: 8px;
+  page-break-inside: avoid;
+}
+.role-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11pt;
+  margin: 0;
+}
+.role-title { font-weight: 700; color: #111827; }
+.role-company { color: #14406f; font-weight: 700; }
+.role-dates { color: #6b7280; font-weight: 400; font-size: 9.5pt; white-space: nowrap; }
+
+.role-desc {
+  font-style: italic;
+  color: #4b5563;
+  margin: 3px 0 5px 0;
+  font-size: 9.5pt;
+}
+
+ul { margin: 4px 0 5px 0; padding-left: 16px; }
+li { margin-bottom: 2.5px; }
+li::marker { color: #14406f; }
+
+.summary { margin: 0; }
+.summary p { margin: 0 0 6px 0; }
+
+table.kv {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 4px 0 0 0;
+  font-size: 9.7pt;
+}
+table.kv td {
+  padding: 4px 0;
+  vertical-align: top;
+}
+table.kv td.k {
+  font-weight: 700;
+  color: #14406f;
+  width: 22%;
+  padding-right: 10px;
+  white-space: nowrap;
+}
+table.kv td.v { color: #1f2937; }
+
+.project-box {
+  background: #f6f8fb;
+  border-left: 3px solid #14406f;
+  padding: 9px 14px;
+  margin-top: 6px;
+}
+.project-box p { margin: 0 0 6px 0; }
+.project-box table.kv td { padding: 3px 0; }
+
+.languages { font-size: 10pt; color: #1f2937; margin: 2px 0 0 0; }
+
+strong { font-weight: 700; color: #111827; }
+
+a { color: #14406f; text-decoration: none; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1 class="name">Ramon Moreira Filho</h1>
+  <div class="subtitle">Machine Learning Engineer · MLOps · Data Scientist</div>
+  <div class="contact">
+    Belo Horizonte, MG, Brasil &nbsp;·&nbsp; +55 37 99961-0179 &nbsp;·&nbsp;
+    ramon@bring-data.com &nbsp;·&nbsp;
+    linkedin.com/in/ramon-moreira-filho
+  </div>
+  <div class="contact">
+    Idiomas: Português (nativo) &nbsp;·&nbsp; Inglês (fluente) &nbsp;·&nbsp; Espanhol (fluente)
+  </div>
+</div>
+
+<hr class="top-divider">
+
+<h2>Resumo</h2>
+<div class="summary">
+  <p>Machine Learning Engineer com 7 anos em captação digital (+120 ciclos de lançamento) e 4 anos em projetos de ciência de dados ponta-a-ponta. Fundador da <strong>Bring Data</strong>, onde desenvolvi sozinho um sistema de lead scoring em produção que envia sinais de propensão ao Meta via Conversions API em menos de 5 minutos.</p>
+  <p>Resultado verificado em operação real: <strong>R$ 470k de margem incremental em 4 meses</strong>, <strong>+92¢ por R$ 1 investido em anúncios</strong>, ROAS superior em <strong>12 de 12 lançamentos</strong> vs Controle (<strong>p&lt;0,05 em 5 de 7 testes A/B</strong>), CPL <strong>27–44% menor</strong>.</p>
+  <p>Especialista em MLOps end-to-end, arquitetura multi-cliente e patterns de produção: parity audit treino↔serving, feature registry, canary deploy gradual, fail-loud asserts, validador pré-encoding.</p>
+</div>
+
+<h2>Experiência Profissional</h2>
+
+<div class="role">
+  <div class="role-header">
+    <div><span class="role-title">Machine Learning Engineer</span> &nbsp;—&nbsp; <span class="role-company">Bring Data</span></div>
+    <div class="role-dates">Jan/2025 – Presente</div>
+  </div>
+  <div class="role-desc">Fundador e único desenvolvedor. Sistema de lead scoring por ML em produção no GCP, arquitetura multi-tenant.</div>
+  <ul>
+    <li><strong>Sistema end-to-end</strong> com RandomForest sobre 59 features (AUC 0,745); arquitetura multi-cliente via <code>ClientConfig</code> (153 hardcodes refatorados em 15 sub-configs tipadas em Python) — novos clientes onboardados sem alteração de código.</li>
+    <li><strong>Resultado verificado (DevClub, 4 meses):</strong> R$ 470k de margem incremental · +92¢ por R$ 1 em anúncios · ROAS superior em <strong>12/12 lançamentos</strong> vs Controle (<strong>p&lt;0,05 em 5/7</strong> testes A/B) · CPL <strong>27–44% menor</strong> · zero canibalização (Pearson −0,23).</li>
+    <li><strong>MLOps em produção:</strong> SSoT <code>src/core/</code> (15 módulos) elimina training-serving skew por construção; <strong>parity audit</strong> coluna-a-coluna entre treino e produção; <strong>feature registry</strong> sincronizado via MLflow; <strong>fail-loud asserts</strong> obrigatórios em transformações críticas; <strong>canary deploy</strong> gradual (<code>--no-traffic</code> → 5% → 10% → 100%) com <strong>progression gate</strong> automatizado; <strong>validador pré-encoding</strong> com snapshot offline.</li>
+    <li><strong>Infraestrutura GCP:</strong> 31 endpoints FastAPI em Cloud Run + Cloud Scheduler + MLflow (Cloud SQL Postgres + GCS) + Railway PostgreSQL (~100k leads em produção). 11 itens de safeguard Tier 1 entregues incrementalmente.</li>
+    <li><strong>Retraining mensal</strong> com hook injection (zero duplicação de lógica de treino) e quality gate em AUC, monotonia e concentração de positivos antes de promover. <strong>A/B champion/challenger</strong> em produção via UTM routing com event names CAPI distintos — ROAS por modelo lido direto no Ads Manager.</li>
+    <li><strong>Monitoramento diário automatizado</strong> (drift de features, qualidade CAPI/FBP/FBC, taxa de rejeição Meta, 12 pontos de verificação por ciclo) com alertas Slack. <strong>Integrações:</strong> Meta Conversions API, Guru, Hotmart, Google Sheets via Apps Script.</li>
+  </ul>
+</div>
+
+<div class="role">
+  <div class="role-header">
+    <div><span class="role-title">Cientista de Dados</span> &nbsp;—&nbsp; <span class="role-company">Data Mundo</span></div>
+    <div class="role-dates">Jun/2024 – Jan/2025</div>
+  </div>
+  <ul>
+    <li>Projetos end-to-end: EDA, modelagem preditiva, entrega em produção.</li>
+    <li>Pipelines ETL com SQL, Pandas e Apache Spark para grandes volumes de dados.</li>
+    <li>Modelos preditivos (Random Forest, XGBoost, LightGBM) para churn e otimização de campanhas — <strong>+20% ROI</strong>.</li>
+    <li>Dashboards em Power BI e Tableau; relatórios executivos para stakeholders não-técnicos.</li>
+  </ul>
+</div>
+
+<div class="role">
+  <div class="role-header">
+    <div><span class="role-title">Fundador &amp; Diretor de Dados</span> &nbsp;—&nbsp; <span class="role-company">Produções de Los Angeles</span></div>
+    <div class="role-dates">Jan/2017 – Jun/2024</div>
+  </div>
+  <ul>
+    <li>Estratégias data-driven para campanhas digitais — mais de <strong>US$ 450k anuais</strong> em receita.</li>
+    <li>Lead scoring com ML supervisionado — redução de <strong>15% no custo de aquisição</strong> de leads.</li>
+    <li>Integrações de coleta em tempo real via API (Google Ads, Meta Ads).</li>
+    <li><strong>+120 ciclos de lançamento</strong> em produtos de educação digital — domínio profundo do funil de captação.</li>
+  </ul>
+</div>
+
+<h2>Projeto Principal — Bring Data</h2>
+<div class="project-box">
+  <p>Sistema de ML que classifica leads em decis D1–D10 e envia sinal calibrado ao Meta via Conversions API em &lt;5 min — algoritmo do Meta otimiza para perfis com maior probabilidade de conversão real, não só de preenchimento de formulário.</p>
+  <table class="kv">
+    <tr><td class="k">Arquitetura</td><td class="v">FastAPI · Cloud Run · Cloud Scheduler · MLflow (Cloud SQL + GCS) · Railway PostgreSQL · scikit-learn (RandomForest, 59 features) · facebook-business · Apps Script</td></tr>
+    <tr><td class="k">Patterns MLOps</td><td class="v">Parity audit · feature registry · fail-loud · canary deploy · validador pré-encoding · dispatch CAPI por plataforma · A/B via UTM com event names distintos</td></tr>
+    <tr><td class="k">Resultado</td><td class="v">R$ 470k incremental · +92¢/R$ 1 · 12/12 lançamentos · p&lt;0,05 em 5/7 A/B · CPL −27% a −44% · top-2 decis converte 3× acima da média</td></tr>
+  </table>
+</div>
+
+<h2>Habilidades Técnicas</h2>
+<table class="kv">
+  <tr><td class="k">Linguagens</td><td class="v">Python, SQL, R, JavaScript (Node.js)</td></tr>
+  <tr><td class="k">ML</td><td class="v">Scikit-learn, XGBoost, LightGBM, RandomForest, SHAP, TensorFlow, PyTorch</td></tr>
+  <tr><td class="k">MLOps Patterns</td><td class="v">Parity audit (treino↔serving), feature registry, fail-loud asserts, canary deploy gradual, schema validation pré-treino, A/B via UTM routing, dispatch por plataforma, retraining com quality gate</td></tr>
+  <tr><td class="k">MLOps Tooling</td><td class="v">MLflow, FastAPI, Pydantic, SQLAlchemy, Docker, Cloud Run, Cloud Scheduler, Git/GitHub, CI/CD</td></tr>
+  <tr><td class="k">Cloud / Infra</td><td class="v">GCP (Cloud Run, Cloud SQL, Cloud Storage, BigQuery, Cloud Logging) · AWS (S3, EC2, SageMaker)</td></tr>
+  <tr><td class="k">Bancos de dados</td><td class="v">PostgreSQL (Railway, Cloud SQL), MySQL, BigQuery, SQLite</td></tr>
+  <tr><td class="k">Visualização</td><td class="v">Power BI, Tableau, Plotly, Matplotlib, ggplot2</td></tr>
+  <tr><td class="k">Big Data</td><td class="v">Apache Spark, Apache Airflow</td></tr>
+  <tr><td class="k">Integrações</td><td class="v">Meta Conversions API (facebook-business), Meta Ads API, Google Ads API, Google Sheets API + Apps Script, Guru API, Hotmart API</td></tr>
+</table>
+
+<h2>Formação &amp; Certificações</h2>
+<table class="kv">
+  <tr><td class="k">Stanford / DeepLearning.AI</td><td class="v">Machine Learning Specialization — Andrew Ng</td></tr>
+  <tr><td class="k">DeepLearning.AI</td><td class="v">Machine Learning in Production — MLOps Specialization</td></tr>
+  <tr><td class="k">Google</td><td class="v">Machine Learning Engineer Professional Certificate</td></tr>
+  <tr><td class="k">University of Michigan</td><td class="v">Python for Everybody</td></tr>
+  <tr><td class="k">IBM / Coursera</td><td class="v">Databases and SQL for Data Science</td></tr>
+  <tr><td class="k">MLOps Community</td><td class="v">First Stack MLOps</td></tr>
+  <tr><td class="k">Data Mundo</td><td class="v">Certificação em Ciência de Dados</td></tr>
+</table>
+
+</body>
+</html>

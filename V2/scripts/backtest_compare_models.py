@@ -142,6 +142,65 @@ def run_prepare_mode(args) -> None:
 # Modo SCORE
 # --------------------------------------------------------------------------- #
 
+def _load_encoding_overrides_for_run(run_id: str):
+    """Carrega encoding_overrides do variante cujo run_id bate em active_models/devclub.yaml.
+
+    Retorna EncodingConfig dataclass (não dict) — pipeline.preprocess espera dataclass.
+
+    Sem isso, jan30 (treinado com ordinal encoding em idade e salário) recebe OHE
+    no pipeline → colunas ordinais ausentes → modelo cego. O `app.py` (linhas 937-943
+    síncrono e 3373-3380 batch) faz esse lookup em produção; replicamos aqui.
+
+    Retorna None se nenhum variant matchear ou se variante não tem overrides.
+    """
+    sys.path.insert(0, str(PROJECT_ROOT))
+    from src.core.client_config import ABTestConfig
+    yaml_path = PROJECT_ROOT / "configs" / "active_models" / "devclub.yaml"
+    if not yaml_path.exists():
+        return None
+    cfg = ABTestConfig.from_active_model_yaml(yaml_path)
+    if not cfg.enabled:
+        return None
+    for variant in cfg.variants.values():
+        if variant.run_id == run_id:
+            return variant.encoding_overrides
+    return None
+
+
+def _apply_ablation(predictor, cols_to_zero: List[str]) -> List[str]:
+    """Monkey-patch predictor.model.predict_proba para zerar colunas antes da predição.
+
+    Simula bugs de produção em que features chegavam zeradas no input do modelo
+    (ex: Medium_Linguagem_programacao zerada por regex-removeu-cedilha; idade/salário
+    sem ordinal encoding viraram OHE com colunas ausentes). O modelo recebe a mesma
+    matriz que recebeu em prod com o bug — matematicamente equivalente.
+
+    Retorna a lista de colunas efetivamente zeradas (interseção com X.columns).
+    """
+    if predictor.model is None:
+        predictor.load_model()
+    base_predict_proba = predictor.model.predict_proba
+    matched: List[str] = []
+
+    def ablated_predict_proba(X):
+        nonlocal matched
+        if isinstance(X, pd.DataFrame):
+            X = X.copy()
+            this_match = [c for c in cols_to_zero if c in X.columns]
+            for c in this_match:
+                X[c] = 0
+            if not matched:
+                matched = this_match
+                missing = [c for c in cols_to_zero if c not in this_match]
+                if missing:
+                    print(f"[ablate] ⚠️ colunas não encontradas em X: {missing}")
+                print(f"[ablate] zeradas {len(this_match)}/{len(cols_to_zero)}: {this_match}")
+        return base_predict_proba(X)
+
+    predictor.model.predict_proba = ablated_predict_proba
+    return matched
+
+
 def run_score_mode(args) -> None:
     sys.path.insert(0, str(PROJECT_ROOT))
     from src.production_pipeline import LeadScoringPipeline
@@ -158,8 +217,20 @@ def run_score_mode(args) -> None:
     predictor.load_model()
     print(f"[score] predictor carregado para run_id={args.run_id}")
 
+    if args.ablate_features:
+        cols_to_zero = [c.strip() for c in args.ablate_features.split(",") if c.strip()]
+        _apply_ablation(predictor, cols_to_zero)
+        print(f"[score] modo ABLATION ativo — alvos: {cols_to_zero}")
+
+    encoding_overrides = _load_encoding_overrides_for_run(args.run_id)
+    if encoding_overrides:
+        ord_vars = list((encoding_overrides.ordinal_variables or {}).keys())
+        print(f"[score] encoding_overrides aplicados — ordinal: {ord_vars}")
+    else:
+        print(f"[score] ⚠️ encoding_overrides=None (run_id sem variant no YAML)")
+
     pipeline = LeadScoringPipeline(model_name=None, model_path=None, client_id="devclub")
-    scored = _score_via_pipeline(pipeline, base, predictor_override=predictor)
+    scored = _score_via_pipeline(pipeline, base, predictor_override=predictor, encoding_overrides=encoding_overrides)
 
     thresholds = _load_decil_thresholds(args.run_id, args.mlruns_root)
     scored["decil"] = scored["lead_score"].apply(
@@ -179,8 +250,11 @@ def run_score_mode(args) -> None:
     print(f"[score]   distribuição decis: {scored['decil'].value_counts().to_dict()}")
 
 
-def _score_via_pipeline(pipeline, base: pd.DataFrame, predictor_override=None) -> pd.DataFrame:
-    """preprocess+predict via xlsx temporário, opcionalmente forçando o predictor."""
+def _score_via_pipeline(pipeline, base: pd.DataFrame, predictor_override=None,
+                         encoding_overrides=None) -> pd.DataFrame:
+    """preprocess+predict via xlsx temporário, opcionalmente forçando o predictor
+    e passando encoding_overrides do variante (necessário pra Champion jan30 ter
+    ordinal em idade/salário)."""
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
         tmp_path = tmp.name
     try:
@@ -189,6 +263,7 @@ def _score_via_pipeline(pipeline, base: pd.DataFrame, predictor_override=None) -
             filepath=tmp_path,
             with_predictions=True,
             predictor_override=predictor_override,
+            encoding_overrides=encoding_overrides,
         )
     finally:
         Path(tmp_path).unlink(missing_ok=True)
@@ -394,6 +469,9 @@ def main():
     ap.add_argument("--run-id", type=str, help="MLflow run_id — modo score")
     ap.add_argument("--base-dataset", type=Path, help="base_dataset.parquet — modo score")
     ap.add_argument("--mlruns-root", type=Path, default=PROJECT_ROOT / "mlruns")
+    ap.add_argument("--ablate-features", type=str, default=None,
+                    help="Lista CSV de colunas a zerar antes do predict_proba (modo score). "
+                         "Simula bug de produção em que feature chegou zerada no input do modelo.")
     ap.add_argument("--labels", nargs="+", help="Labels a comparar — modo compare")
     ap.add_argument("--input-dir", type=Path, help="Dir com scored_<label>.parquet — modo compare")
     ap.add_argument("--output", type=Path, help="Caminho do output (parquet ou xlsx)")

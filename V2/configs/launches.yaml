@@ -114,3 +114,9 @@ DEV20:
   cap_end:   "2026-05-04"
   vendas_start: "2026-05-11"
   vendas_end:   "2026-05-17"
+
+LF54:
+  cap_start: "2026-05-05"
+  cap_end:   "2026-05-11"
+  vendas_start: "2026-05-18"
+  vendas_end:   "2026-05-24"

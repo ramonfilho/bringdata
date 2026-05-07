@@ -35,6 +35,59 @@ CONVERSION_RATES = {
 }
 
 # =============================================================================
+# 2.1 LEAD VALUE POR DECIL — VALOR RECEBIDO À VISTA (Champion + Challenger)
+# =============================================================================
+#
+# Substitui PRODUCT_VALUE × CONVERSION_RATES pelo valor recebido à vista
+# esperado por lead em cada decil. Este é o `value` que vai no LeadQualified.
+#
+# Frame: cash recebido na semana da venda (visão mensal do dono — não LTV).
+#   - cartão Guru/Hotmart: R$ 1.997 × 0,87 = R$ 1.737,39 (líquido após chargeback)
+#   - boleto Asaas/TMB:    R$ 2.200 / 12  = R$   183,33 (1ª parcela apenas)
+#
+# Pipeline de cálculo (script ad-hoc /tmp/decile_value_final.py):
+#   1. Pool LF46→LF53 — 8 lançamentos, ~96k leads, 555 buyers matched
+#   2. Match unificado email+telefone (core/matching.match_leads_to_sales_unified)
+#   3. TMB local incluído em LF46–LF52 (contas_a_receber_28042026_1033.xlsx);
+#      LF53 sem TMB (vendas iniciam 27/04, fora do contas_a_receber)
+#   4. Extrapolação per-LF: scale_lf = vendas_total_xlsx / buyers_pool_lf
+#      (1,34×–2,54×; hipótese: tracking uniforme entre decis — mesma do PDF
+#      assertividade)
+#   5. Shrinkage k=10 no avg_recv por decil (atenua decis de baixa amostra)
+#   6. IsotonicRegression(increasing=True) sobre lead_value final — mesma
+#      aplicação canônica de src/model/training_model.py:87 — garante
+#      monotonia D1→D10 sem inversão na hora de enviar pra Meta.
+#
+# Champion = jan30  (run_id d51757f5041c44b7ab1a056fce8c3c35) — modelo em prod
+# Challenger = abr28 (run_id 5d158f0aa6e54b489498470446194a6c) — A/B HQLB
+
+LEAD_VALUE_BY_DECILE_CHAMPION = {
+    "D01": 1.51,
+    "D02": 1.97,
+    "D03": 1.97,
+    "D04": 1.97,
+    "D05": 5.62,
+    "D06": 5.62,
+    "D07": 5.62,
+    "D08": 6.75,
+    "D09": 7.77,
+    "D10": 14.97,
+}
+
+LEAD_VALUE_BY_DECILE_CHALLENGER = {
+    "D01": 0.71,
+    "D02": 2.84,
+    "D03": 2.84,
+    "D04": 4.81,
+    "D05": 4.81,
+    "D06": 7.69,
+    "D07": 9.22,
+    "D08": 11.94,
+    "D09": 11.94,
+    "D10": 20.69,
+}
+
+# =============================================================================
 # 3. THRESHOLD DE GASTO SEM LEADS
 # =============================================================================
 
@@ -133,6 +186,8 @@ BUSINESS_CONFIG = {
     "product_value": PRODUCT_VALUE,
     "min_roas": MIN_ROAS_SAFETY,  # Usar ROAS de segurança (2.5x) como padrão
     "conversion_rates": CONVERSION_RATES,
+    "lead_value_by_decile_champion": LEAD_VALUE_BY_DECILE_CHAMPION,
+    "lead_value_by_decile_challenger": LEAD_VALUE_BY_DECILE_CHALLENGER,
 }
 
 # =============================================================================

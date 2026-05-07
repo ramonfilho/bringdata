@@ -1,7 +1,7 @@
 """
 Gera PDF de assertividade do modelo ML por faixa de intenção (D1-5 / D6-9 / D10).
 
-Lançamentos incluídos: DEV19, LF43, LF44, LF45, LF46, LF47, LF48
+Lançamentos incluídos: DEV19, LF43–LF53 (12 lançamentos)
 Excluídos: LF40, LF41 (volume insuficiente — inconclusivos), LF42 (semana de Natal)
 
 Saída: V2/propostas_e_apresentacoes/devclub_assertividade_modelo_ml.pdf
@@ -33,15 +33,18 @@ sys.path.insert(0, str(Path(__file__).parent))
 from ml_evolution_report import (
     load_sheets_data, load_railway,
     compute_decil_lift, discover_periods, find_xlsx_for_period,
+    parse_xlsx_report,
 )
 
 # ── Constantes ─────────────────────────────────────────────────────────────────
 OUTPUT = Path(__file__).parent.parent / "propostas_e_apresentacoes" / "devclub_assertividade_modelo_ml.pdf"
 
-INCLUDE    = ['DEV19', 'LF43', 'LF44', 'LF45', 'LF46', 'LF47', 'LF48']
+INCLUDE    = ['DEV19', 'LF43', 'LF44', 'LF45', 'LF46', 'LF47', 'LF48',
+              'LF49', 'LF50', 'LF51', 'LF52', 'LF53']
 TIER_D15   = [f'D{i}' for i in range(1, 6)]
 TIER_D69   = [f'D{i}' for i in range(6, 10)]
 TIER_D10   = ['D10']
+ALL_DECIS  = [f'D{i}' for i in range(1, 11)]
 
 # Cores (mesma paleta dos outros documentos Bring Data)
 C_BLACK      = HexColor('#1a1a1a')
@@ -61,12 +64,23 @@ C_CALLOUT_BD = HexColor('#f9a825')
 def pool(df: pd.DataFrame, decils: list) -> tuple[float, int, int]:
     sub = df[df['decil'].isin(decils)]
     tl  = int(sub['leads'].sum())
-    tb  = int(sub['buyers'].sum())
-    cr  = tb / tl * 100 if tl > 0 else 0.0
-    return cr, tl, tb
+    tb_float = float(sub['buyers'].sum())
+    cr  = tb_float / tl * 100 if tl > 0 else 0.0
+    return cr, tl, int(round(tb_float))
 
 
 def load_data() -> dict:
+    """
+    Retorna {name: df} com TC EXTRAPOLADA por LF.
+
+    Extrapolação:
+      scale_lf = vendas_total_lf / vendas_match_lf  (= 1 / taxa_de_tracking_lf)
+      df['buyers'] *= scale_lf
+      df['conv_rate_pct'] *= scale_lf
+
+    Hipótese: tracking uniforme entre decis (a sobra dos não-matched é
+    distribuída proporcionalmente). Caveat documentado em rodapé do PDF.
+    """
     print("Carregando dados das Sheets e Railway...")
     sheets_df = load_sheets_data()
     rail_df   = load_railway()
@@ -82,12 +96,29 @@ def load_data() -> dict:
             print(f"  {name}: relatório não encontrado")
             continue
         df = compute_decil_lift(xlsx_path, sheets_df, p['cap_start'], p['cap_end'], rail_df)
-        if not df.empty:
-            results[name] = df
-            cr10, _, _ = pool(df, TIER_D10)
-            cr69, _, _ = pool(df, TIER_D69)
-            cr15, _, _ = pool(df, TIER_D15)
-            print(f"  {name}: D1-5={cr15:.3f}% → D6-9={cr69:.3f}% → D10={cr10:.3f}%")
+        if df.empty:
+            continue
+
+        # Scale por LF: vendas totais / vendas matched
+        meta = parse_xlsx_report(xlsx_path)
+        v_total = meta.get('vendas_total') or meta.get('vendas') or 0
+        v_match = meta.get('vendas_match') or 0
+        if v_total and v_match and v_match > 0:
+            scale_lf = float(v_total) / float(v_match)
+        else:
+            scale_lf = 1.0
+            print(f"  {name}: scale=1.0 (vendas_total ou vendas_match faltando)")
+
+        df = df.copy()
+        df['buyers'] = df['buyers'].astype(float) * scale_lf
+        df['conv_rate_pct'] = df['conv_rate_pct'] * scale_lf
+
+        results[name] = df
+        cr10, _, _ = pool(df, TIER_D10)
+        cr69, _, _ = pool(df, TIER_D69)
+        cr15, _, _ = pool(df, TIER_D15)
+        print(f"  {name}: scale={scale_lf:.2f}x | D1-5={cr15:.3f}% → "
+              f"D6-9={cr69:.3f}% → D10={cr10:.3f}%")
 
     return results
 
@@ -179,6 +210,8 @@ def make_summary_table(results: dict, st: dict) -> Table:
         ('D10', 'Alta intenção',  TIER_D10, C_GREEN,      C_GREEN_LIGHT),
         ('D6–D9', 'Média intenção', TIER_D69, C_GREEN_MID, HexColor('#edf7f1')),
         ('D1–D5', 'Baixa intenção', TIER_D15, HexColor('#999999'), C_LIGHT_GRAY),
+        ('Média lanç.', 'Baseline (todos os decis)', ALL_DECIS,
+         HexColor('#777777'), HexColor('#e8e8e8')),
     ]
 
     all_crs = {}
@@ -245,19 +278,22 @@ def make_consistency_table(results: dict, st: dict) -> Table:
              [Paragraph('Média', st['table_hdr'])]
 
     tier_rows_def = [
-        ('D10',   TIER_D10,  C_GREEN_LIGHT),
-        ('D6–D9', TIER_D69,  HexColor('#edf7f1')),
-        ('D1–D5', TIER_D15,  C_LIGHT_GRAY),
+        ('D10',           TIER_D10,  C_GREEN_LIGHT),
+        ('D6–D9',         TIER_D69,  HexColor('#edf7f1')),
+        ('D1–D5',         TIER_D15,  C_LIGHT_GRAY),
+        ('Média lanç.',   ALL_DECIS, HexColor('#e8e8e8')),
     ]
 
     rows = [header]
+    # Padding adaptativo: aperta horizontal quando há muitos lançamentos
+    h_pad = 3 if len(launches) > 8 else 7
     style_cmds = [
         ('BACKGROUND',  (0, 0), (-1, 0), C_BLACK),
         ('GRID',        (0, 0), (-1, -1), 0.3, C_RULE),
         ('TOPPADDING',  (0, 0), (-1, -1), 6),
         ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-        ('LEFTPADDING', (0, 0), (-1, -1), 7),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 7),
+        ('LEFTPADDING', (0, 0), (-1, -1), h_pad),
+        ('RIGHTPADDING', (0, 0), (-1, -1), h_pad),
         ('VALIGN',      (0, 0), (-1, -1), 'MIDDLE'),
     ]
 
@@ -283,7 +319,12 @@ def make_consistency_table(results: dict, st: dict) -> Table:
         rows.append(cells)
         style_cmds.append(('BACKGROUND', (0, i), (-1, i), bg))
 
-    col_widths = [2.2*cm] + [2.15*cm] * len(launches) + [2.0*cm]
+    # Largura adaptativa: cabe sempre na área útil de 17 cm independente do nº de lançamentos
+    total_w  = 17.0 * cm
+    faixa_w  = 1.6 * cm
+    media_w  = 1.4 * cm
+    launch_w = (total_w - faixa_w - media_w) / max(len(launches), 1)
+    col_widths = [faixa_w] + [launch_w] * len(launches) + [media_w]
     t = Table(rows, colWidths=col_widths, repeatRows=1)
     t.setStyle(TableStyle(style_cmds))
     return t
@@ -324,7 +365,7 @@ def build_pdf(results: dict):
     elms.append(Paragraph('Assertividade do Modelo ML', st['title']))
     elms.append(Paragraph(
         'Conversão por faixa de intenção &nbsp;·&nbsp; DevClub &nbsp;·&nbsp; '
-        '7 lançamentos &nbsp;·&nbsp; jan/2026–mar/2026',
+        '12 lançamentos &nbsp;·&nbsp; jan/2026–mai/2026',
         st['subtitle'],
     ))
     elms.append(HRFlowable(width='100%', thickness=1, color=C_RULE, spaceAfter=14))
@@ -342,8 +383,8 @@ def build_pdf(results: dict):
 
     # Callout
     elms.append(make_callout(
-        'D10 converte 3,7× mais que D1–D5 — consistente em 6 de 7 lançamentos independentes  '
-        '(p = 0,002)',
+        'D10 converte ~3,2× mais que D1–D5 (mediana) — ranking D1-5 < D6-9 < D10 preservado em '
+        '11 de 12 lançamentos independentes (p ≈ 0,003)',
         st,
     ))
     elms.append(Spacer(1, 14))
@@ -358,7 +399,19 @@ def build_pdf(results: dict):
     elms.append(Spacer(1, 5))
     elms.append(Paragraph(
         'Valores D10 em <font color="#1d8a3e"><b>verde</b></font> quando acima de D6–D9; '
-        'em <font color="#e53935"><b>vermelho</b></font> quando abaixo (LF47: 0,75% vs 0,81% — margem de 0,06 pp).',
+        'em <font color="#e53935"><b>vermelho</b></font> quando abaixo (LF47: o único caso em 12 lançamentos).',
+        st['footnote'],
+    ))
+    elms.append(Spacer(1, 4))
+    elms.append(Paragraph(
+        '<b>Metodologia.</b> Taxas extrapoladas individualmente por lançamento: '
+        'TC = (compradores_matched / leads_com_score) × (vendas_totais / vendas_matched). '
+        'O fator (vendas_totais / vendas_matched) é o inverso da taxa de tracking de cada '
+        'lançamento e projeta o sinal medido nos compradores rastreáveis para o universo '
+        'completo de vendas. <b>Hipótese:</b> a taxa de tracking é uniforme entre decis '
+        '— a sobra dos não-matched se distribui proporcionalmente aos matched. '
+        'Caveat: se D10 trackeia mais que D1, o lift mostrado fica subestimado; se trackeia '
+        'menos, fica superestimado.',
         st['footnote'],
     ))
 
@@ -381,7 +434,7 @@ def build_pdf(results: dict):
         '<b>D1–D5 raramente converte por design do sistema.</b> '
         'O Meta recebe o score de cada lead e calibra seu algoritmo de leilão com base nesse sinal. '
         'Na prática, leads de D1 a D5 entram com muito menos frequência no funil de compra. '
-        'Em 4 dos 7 lançamentos analisados, D1 teve zero compradores; D3 também teve zero em 3 de 7. '
+        'Em vários dos 12 lançamentos analisados, D1 e D3 tiveram zero compradores. '
         'Com numerador frequentemente zero, qualquer taxa individual nesses decis é artefato amostral.',
         st['body'],
     ))
@@ -406,7 +459,7 @@ def build_pdf(results: dict):
         'Leads com score: Google Sheets de captação + Railway PostgreSQL, '
         'filtrados pelo período de cada lançamento e deduplicados por e-mail. '
         'Compradores: relatórios de validação por lançamento, cruzados por e-mail. '
-        'Lançamentos incluídos: DEV19, LF43, LF44, LF45, LF46, LF47, LF48. '
+        'Lançamentos incluídos: DEV19, LF43–LF53 (12 lançamentos). '
         'LF40 e LF41 excluídos por volume insuficiente de compradores ML (4 e 17, respectivamente). '
         'LF42 excluído por sazonalidade atípica (semana de Natal, 10 compradores totais).',
         st['footnote'],

@@ -1,5 +1,5 @@
 """
-Gera PDF: Custo e Retorno por Faixa de Intenção — DevClub (DEV19–LF48)
+Gera PDF: Custo e Retorno por Faixa de Intenção — DevClub (DEV19–LF53)
 
 Metodologia:
   Fase 1 — Dados reais (matched):
@@ -53,7 +53,8 @@ OUTPUT        = (Path(__file__).parent.parent
                  / "devclub_cpl_retorno_decil.pdf")
 BASE          = Path(__file__).parent.parent
 LAUNCHES_YAML = BASE / "configs/launches.yaml"
-INCLUDE       = ['DEV19', 'LF43', 'LF44', 'LF45', 'LF46', 'LF47', 'LF48']
+INCLUDE       = ['DEV19', 'LF43', 'LF44', 'LF45', 'LF46', 'LF47', 'LF48',
+                 'LF49', 'LF50', 'LF51', 'LF52', 'LF53']
 
 # Faixas canônicas
 TIER_D15  = [f'D{i}' for i in range(1, 6)]
@@ -71,7 +72,8 @@ TIER_DEFS = [
 MONTHS = [
     ('Janeiro/26',   ['DEV19']),
     ('Fevereiro/26', ['LF43', 'LF44']),
-    ('Março/26',     ['LF45', 'LF46', 'LF47', 'LF48']),
+    ('Março/26',     ['LF45', 'LF46', 'LF47', 'LF48', 'LF49']),
+    ('Abril/26',     ['LF50', 'LF51', 'LF52', 'LF53']),
 ]
 
 TICKET_CONTRATADO = 2_200.0   # valor nominal do contrato
@@ -946,7 +948,7 @@ def build_pdf(data: dict):
     elms.append(Paragraph('Custo e retorno por faixa — visão mensal', st['section']))
     elms.append(Paragraph(
         'Agrupamento por mês de vendas (jan/26: DEV19 · fev/26: LF43+LF44 · '
-        'mar/26: LF45–LF48). Permite avaliar consistência do padrão entre meses.',
+        'mar/26: LF45–LF49 · abr/26: LF50–LF53). Permite avaliar consistência do padrão entre meses.',
         st['body'],
     ))
     elms.append(Spacer(1, 4))
