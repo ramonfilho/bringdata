@@ -663,6 +663,13 @@ class DataQualityMonitor:
         #    sem precisar do operador grep nos logs do Cloud Run.
         alerts.extend(self._check_critical_features_coverage(df))
 
+        # 8. [T1-13] Audience profile drift — compara o último dia completo
+        #    BRT contra snapshot de referência (Top 5 ROAS) por categoria
+        #    canônica (gênero, idade, ocupação, faixa salarial, cartão,
+        #    programação, computador). Pré-encoding e independente de modelo.
+        if self._thresholds.get('audience_profile_drift', {}).get('enabled', False):
+            alerts.extend(self._check_audience_profile_drift(df))
+
         return alerts
 
     def _check_category_drift(self, df: pd.DataFrame) -> List[Dict]:
@@ -1255,5 +1262,298 @@ class DataQualityMonitor:
                     })
             except Exception as _e:
                 logger.error(f" ERRO em _check_critical_features_coverage() para variant '{variant_name}': {_e}")
+
+        return alerts
+
+    # ------------------------------------------------------------------
+    # [T1-13] Audience profile drift
+    # ------------------------------------------------------------------
+
+    # Mapeamento canônico de variantes do formulário → label canônico.
+    # Mantido em paralelo com scripts/perfil_audiencia.py:UNIFICATION para que
+    # o monitoring não dependa de scripts/. Mantenha sincronizado.
+    _AUDIENCE_UNIFICATION = {
+        'Qual a sua idade?': {
+            'menos de 18 anos': '<18', 'menos de 18': '<18',
+            '18 24 anos': '18-24', '18 24': '18-24',
+            '25 34 anos': '25-34', '25 34': '25-34',
+            '35 44 anos': '35-44', '35 44': '35-44',
+            '45 54 anos': '45-54', '45 54': '45-54',
+            'mais de 55 anos': '55+', '55': '55+',
+        },
+        'O que você faz atualmente?': {
+            'sou cltfuncionario publico': 'CLT/funcionário público',
+            'clt funcionario publico':    'CLT/funcionário público',
+            'sou autonomo':               'Autônomo',
+            'autonomo empreendedor':      'Autônomo',
+            'sou apenas estudante':       'Estudante',
+            'estudante':                  'Estudante',
+            'sou aposentado':             'Aposentado',
+            'aposentado':                 'Aposentado',
+            'nao trabalho e nem estudo':  'Não trabalho/nem estudo',
+            'desempregado':               'Não trabalho/nem estudo',
+        },
+        'Atualmente, qual a sua faixa salarial?': {
+            'entre r1000 a r2000 reais ao mes': 'Até R$2.000',
+            'ate r 2000':                       'Até R$2.000',
+            'entre r2001 a r3000 reais ao mes': 'R$2.001-3.000',
+            'r 2001 a 3000':                    'R$2.001-3.000',
+            'entre r3001 a r5000 reais ao mes': 'R$3.001-5.000',
+            'r 3001 a 5000':                    'R$3.001-5.000',
+            'mais de r5001 reais ao mes':       'Acima de R$5.000',
+            'acima de r 5000':                  'Acima de R$5.000',
+            'nao tenho renda':                  'Sem renda',
+            'nenhuma renda':                    'Sem renda',
+        },
+        'O seu gênero:':                  {'masculino': 'Masculino', 'feminino': 'Feminino'},
+        'Você possui cartão de crédito?': {'sim': 'Sim', 'nao': 'Não'},
+        'Já estudou programação?':        {'sim': 'Sim', 'nao': 'Não'},
+        'Tem computador/notebook?':       {'sim': 'Sim', 'nao': 'Não'},
+    }
+
+    def _load_reference_audience_profile(self):
+        """
+        Carrega o snapshot de referência de
+        configs/reference_audience_profiles/{client_id}.json.
+
+        Retorna (snapshot_dict, None) em sucesso, ou (None, error_dict) se
+        ausente / corrompido. error_dict tem chaves 'reason' e 'tried_paths'.
+        """
+        if not (self.client_config and getattr(self.client_config, 'client_id', None)):
+            return None, {'reason': 'client_id_missing', 'tried_paths': []}
+        client_id = self.client_config.client_id
+        candidates = [
+            Path('configs/reference_audience_profiles') / f'{client_id}.json',
+            Path(__file__).resolve().parents[2] / 'configs' / 'reference_audience_profiles' / f'{client_id}.json',
+        ]
+        path = next((p for p in candidates if p.exists()), None)
+        if path is None:
+            return None, {
+                'reason': 'snapshot_file_not_found',
+                'tried_paths': [str(p) for p in candidates],
+            }
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f), None
+        except Exception as e:
+            return None, {'reason': f'load_error: {e}', 'tried_paths': [str(path)]}
+
+    def _normalize_audience_series(self, s: pd.Series, col: str) -> pd.Series:
+        """Normaliza categoria + aplica mapeamento canônico para a coluna."""
+        s = s.fillna('(nulo)').astype(str).str.strip()
+        s = s.replace({'': '(nulo)', 'None': '(nulo)', 'nan': '(nulo)'})
+        s = s.apply(lambda v: '(nulo)' if v == '(nulo)' else (normalizar_categoria_para_comparacao(v) or '(nulo)'))
+        mapping = self._AUDIENCE_UNIFICATION.get(col)
+        if mapping:
+            s = s.map(lambda v: mapping.get(v, v))
+        return s
+
+    def _filter_to_previous_full_brt_day(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Filtra `df` para conter apenas leads do último dia completo BRT
+        (00:00→23:59 do dia anterior à data corrente, em horário de São Paulo).
+
+        Espera coluna 'Data' (formato Sheets) ou 'data' (Railway). Se nenhuma
+        existir, retorna df vazio.
+        """
+        from datetime import datetime, timedelta, timezone
+
+        col = 'Data' if 'Data' in df.columns else ('data' if 'data' in df.columns else None)
+        if col is None:
+            return df.iloc[0:0]
+
+        brt = timezone(timedelta(hours=-3))
+        now_brt = datetime.now(brt)
+        yesterday_brt = (now_brt - timedelta(days=1)).date()
+
+        ts = pd.to_datetime(df[col], errors='coerce')
+        if ts.dt.tz is None:
+            # createdAt do Railway é stored em UTC sem tz; localizar como UTC e converter.
+            ts_utc = ts.dt.tz_localize('UTC', nonexistent='shift_forward', ambiguous='NaT')
+        else:
+            ts_utc = ts.dt.tz_convert('UTC')
+        ts_brt = ts_utc.dt.tz_convert(brt)
+
+        mask = ts_brt.dt.date == yesterday_brt
+        return df.loc[mask].copy()
+
+    def _check_audience_profile_drift(self, df: pd.DataFrame) -> List[Dict]:
+        """
+        [T1-13] Compara o último dia completo BRT contra o snapshot de
+        referência (Top 5 ROAS) carregado de
+        configs/reference_audience_profiles/{client_id}.json.
+
+        Output: 1 alerta agregado com 2 sublistas:
+          - top_list:  |Δpp| ≥ top_threshold_pp     (críticos)
+          - down_list: down_min_pp ≤ |Δpp| < top_threshold_pp  (menores)
+          - < down_min_pp ignorado como ruído
+
+        Severity (NÃO depende de feature crítica):
+          - HIGH se top_list não-vazia
+          - MEDIUM se só down_list
+          - Nenhum alerta de drift se ambos vazios
+
+        Cada item das listas leva `is_critical` como flag informativa.
+
+        Skip que SIM gera alerta (config_missing):
+          - snapshot ausente / corrompido → emite alerta MEDIUM
+            audience_profile_drift_config_missing pra forçar visibilidade
+
+        Skip silencioso (info-level):
+          - df do dia anterior tem menos respostas que `min_responses`
+            (raramente acontece em produção; quando acontece é evidente)
+
+        O check é independente de modelo (pré-encoding), portanto NÃO usa
+        `_iter_active_variants`.
+        """
+        from datetime import datetime, timezone
+
+        alerts: List[Dict] = []
+        cfg = self._thresholds.get('audience_profile_drift', {})
+        top_threshold_pp = float(cfg.get('top_threshold_pp', 5.0))
+        down_min_pp = float(cfg.get('down_min_pp', 2.0))
+        min_responses = int(cfg.get('min_responses', 50))
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        snapshot, error = self._load_reference_audience_profile()
+        if snapshot is None:
+            client_id = getattr(self.client_config, 'client_id', '?') if self.client_config else '?'
+            alerts.append({
+                'type': 'audience_profile_drift_config_missing',
+                'severity': 'MEDIUM',
+                'category': 'data_quality',
+                'message': (
+                    f" Audience profile drift desativado para client_id={client_id}: "
+                    f"{error['reason']}. Gere o snapshot via "
+                    f"`python -m scripts.build_reference_audience_profile --client {client_id}`."
+                ),
+                'details': {
+                    'client_id': client_id,
+                    'reason': error['reason'],
+                    'tried_paths': error.get('tried_paths', []),
+                },
+                'timestamp': now_iso,
+                'metric_value': 0.0,
+                'threshold': 0.0,
+            })
+            return alerts
+
+        df_day = self._filter_to_previous_full_brt_day(df)
+        n_day = len(df_day)
+        if n_day < min_responses:
+            logger.info(
+                f"[audience_profile_drift] Janela do dia anterior tem {n_day} leads "
+                f"(< min_responses={min_responses}). Skip."
+            )
+            return alerts
+
+        critical = set(snapshot.get('is_critical', []))
+        ref_pool = snapshot.get('reference_pool', {})
+        ref_label = ref_pool.get('label', 'reference')
+        ref_n = ref_pool.get('n_leads', 0)
+
+        top_list: List[Dict] = []
+        down_list: List[Dict] = []
+        total_responses_day = 0
+
+        for col, ref_entry in snapshot.get('categorical_features', {}).items():
+            if col not in df_day.columns:
+                continue
+            s = self._normalize_audience_series(df_day[col], col)
+            s = s[s != '(nulo)']
+            if len(s) == 0:
+                continue
+            total_responses_day = max(total_responses_day, int(len(s)))
+            day_proportions = (s.value_counts() / len(s)).to_dict()
+            ref_proportions = ref_entry.get('proportions', {})
+            label = ref_entry.get('label', col)
+            is_critical_feat = col in critical
+
+            for cat in set(ref_proportions) | set(day_proportions):
+                ref_p = float(ref_proportions.get(cat, 0.0))
+                day_p = float(day_proportions.get(cat, 0.0))
+                delta_pp = (day_p - ref_p) * 100.0
+                abs_delta = abs(delta_pp)
+                if abs_delta < down_min_pp:
+                    continue
+                item = {
+                    'feature_column': col,
+                    'feature_label': label,
+                    'is_critical': is_critical_feat,
+                    'category': cat,
+                    'reference_pct': round(ref_p * 100, 1),
+                    'day_pct': round(day_p * 100, 1),
+                    'delta_pp': round(delta_pp, 1),
+                }
+                if abs_delta >= top_threshold_pp:
+                    top_list.append(item)
+                else:
+                    down_list.append(item)
+
+        # Sem nenhum drift relevante — não emite alerta
+        if not top_list and not down_list:
+            logger.info(
+                f"[audience_profile_drift] Sem drift relevante em {total_responses_day} respostas/dia "
+                f"(threshold {top_threshold_pp}pp / down_min {down_min_pp}pp)."
+            )
+            return alerts
+
+        # Ordenar por |Δ| desc dentro de cada lista
+        top_list.sort(key=lambda x: -abs(x['delta_pp']))
+        down_list.sort(key=lambda x: -abs(x['delta_pp']))
+
+        severity = 'HIGH' if top_list else 'MEDIUM'
+        max_abs_delta = max(
+            (abs(it['delta_pp']) for it in (top_list + down_list)),
+            default=0.0
+        )
+
+        # Período comparado — explicitar no alerta (último dia completo BRT vs pool de referência)
+        from datetime import timedelta as _td, timezone as _tz
+        brt = _tz(_td(hours=-3))
+        compared_day_brt = (datetime.now(brt) - _td(days=1)).date().isoformat()
+        compared_window_label = f"{compared_day_brt} BRT (último dia completo)"
+
+        # Mensagem compacta para Slack/dashboard
+        def _fmt(items, n=5):
+            head = ', '.join(
+                f"{it['feature_label']}: {it['category']} — "
+                f"{it['reference_pct']}%→{it['day_pct']}% ({it['delta_pp']:+.1f}pp)"
+                for it in items[:n]
+            )
+            tail = f" (+{len(items) - n})" if len(items) > n else ''
+            return head + tail
+
+        msg_parts = []
+        if top_list:
+            msg_parts.append(f"TOP ({len(top_list)} ≥{top_threshold_pp}pp): {_fmt(top_list)}")
+        if down_list:
+            msg_parts.append(f"DOWN ({len(down_list)} {down_min_pp}–{top_threshold_pp}pp): {_fmt(down_list)}")
+
+        alerts.append({
+            'type': 'audience_profile_drift',
+            'severity': severity,
+            'category': 'data_quality',
+            'message': (
+                f" Drift de perfil — comparando {compared_window_label} (n={total_responses_day}) "
+                f"vs {ref_label} (n={ref_n}). " + ' | '.join(msg_parts)
+            ),
+            'details': {
+                'compared_window': compared_window_label,
+                'compared_window_kind': 'previous_full_brt_day',
+                'reference_pool_label': ref_label,
+                'reference_pool_n': ref_n,
+                'day_n_responses': total_responses_day,
+                'top_threshold_pp': top_threshold_pp,
+                'down_min_pp': down_min_pp,
+                'top_list': top_list,
+                'down_list': down_list,
+                'top_count': len(top_list),
+                'down_count': len(down_list),
+            },
+            'timestamp': now_iso,
+            'metric_value': float(max_abs_delta),
+            'threshold': top_threshold_pp,
+        })
 
         return alerts

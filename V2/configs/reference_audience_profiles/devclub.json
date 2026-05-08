@@ -1,0 +1,90 @@
+{
+  "client_id": "devclub",
+  "generated_at": "2026-05-08",
+  "reference_pool": {
+    "label": "Top 5 ROAS",
+    "launches": [
+      "LF40",
+      "LF41",
+      "LF44",
+      "LF45",
+      "LF47"
+    ],
+    "n_leads": 39771
+  },
+  "is_critical": [
+    "O seu gênero:",
+    "O que você faz atualmente?",
+    "Você possui cartão de crédito?",
+    "Já estudou programação?",
+    "Tem computador/notebook?"
+  ],
+  "categorical_features": {
+    "O seu gênero:": {
+      "label": "Gênero",
+      "n_responses": 39757,
+      "proportions": {
+        "Masculino": 0.817315,
+        "Feminino": 0.182685
+      }
+    },
+    "Qual a sua idade?": {
+      "label": "Idade",
+      "n_responses": 39757,
+      "proportions": {
+        "25-34": 0.303896,
+        "35-44": 0.232588,
+        "18-24": 0.224262,
+        "45-54": 0.126997,
+        "<18": 0.079156,
+        "55+": 0.033101
+      }
+    },
+    "O que você faz atualmente?": {
+      "label": "Ocupação",
+      "n_responses": 39757,
+      "proportions": {
+        "CLT/funcionário público": 0.449506,
+        "Autônomo": 0.250623,
+        "Estudante": 0.184546,
+        "Não trabalho/nem estudo": 0.101089,
+        "Aposentado": 0.014236
+      }
+    },
+    "Atualmente, qual a sua faixa salarial?": {
+      "label": "Faixa Salarial",
+      "n_responses": 39757,
+      "proportions": {
+        "Até R$2.000": 0.288151,
+        "Sem renda": 0.263149,
+        "R$2.001-3.000": 0.204945,
+        "R$3.001-5.000": 0.157733,
+        "Acima de R$5.000": 0.086023
+      }
+    },
+    "Você possui cartão de crédito?": {
+      "label": "Tem Cartão de Crédito",
+      "n_responses": 39757,
+      "proportions": {
+        "Não": 0.582212,
+        "Sim": 0.417788
+      }
+    },
+    "Já estudou programação?": {
+      "label": "Já Estudou Programação",
+      "n_responses": 39757,
+      "proportions": {
+        "Não": 0.632367,
+        "Sim": 0.367633
+      }
+    },
+    "Tem computador/notebook?": {
+      "label": "Tem Computador",
+      "n_responses": 39756,
+      "proportions": {
+        "Sim": 0.874736,
+        "Não": 0.125264
+      }
+    }
+  }
+}

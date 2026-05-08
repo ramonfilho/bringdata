@@ -70,6 +70,7 @@ PESQUISA_KEYS = {
 UNIFICATION = {
     'Qual a sua idade?': {
         'menos de 18 anos':   '<18',
+        'menos de 18':        '<18',
         '18 24 anos':         '18-24',
         '18 24':              '18-24',
         '25 34 anos':         '25-34',
@@ -79,6 +80,7 @@ UNIFICATION = {
         '45 54 anos':         '45-54',
         '45 54':              '45-54',
         'mais de 55 anos':    '55+',
+        '55':                 '55+',
     },
     'O que você faz atualmente?': {
         'sou cltfuncionario publico': 'CLT/funcionário público',

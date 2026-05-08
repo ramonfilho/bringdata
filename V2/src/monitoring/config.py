@@ -42,6 +42,24 @@ THRESHOLDS = {
         'rejection_rate': 0.10,          # 10% de taxa de rejeição pela Meta
         'zero_decil_lookback_hours': 24, # [T1-2] janela de verificação de decis zerados
         'zero_decil_min_leads': 20,      # [T1-2] mínimo de eventos para ativar o check
+    },
+
+    # [T1-13] Audience profile drift: compara último dia completo de captação
+    # contra snapshot do pool de referência (Top 5 ROAS) em
+    # configs/reference_audience_profiles/{client_id}.json.
+    #
+    # Output: 1 alerta agregado por execução, com 2 sublistas:
+    #   - top_list:  itens com |Δpp| ≥ top_threshold_pp  (críticos)
+    #   - down_list: itens com down_min_pp ≤ |Δpp| < top_threshold_pp (menores, dignos de log)
+    # < down_min_pp = ruído (ignorado).
+    #
+    # Severity: HIGH se top_list não-vazia, MEDIUM se só down_list, sem alerta
+    # se ambos vazios. NÃO depende de "feature crítica" — flag informativa só.
+    'audience_profile_drift': {
+        'enabled': True,
+        'top_threshold_pp': 3.0,    # corte para top_list (sensibilidade ajustada 08/05/2026)
+        'down_min_pp': 2.0,         # corte inferior para down_list
+        'min_responses': 50,        # mínimo de respostas no dia para rodar o check
     }
 }
 
