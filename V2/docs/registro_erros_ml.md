@@ -371,7 +371,7 @@ Todas em produção, com data de deploy verificável. Atacam o bug-raiz "deploy 
 
 ### Detecção de features faltando (fail-loud)
 - **Validação pré-encoding:** features críticas com nome/tipo errado bloqueiam pipeline. *(23/abr)*
-- **Validação pós-encoding:** feature zerada em >5% dos leads gera alerta + bloqueia. *(21/abr)* — salvaguarda que faltava nos Clusters 3, 4, 5 e Erro 9.
+- ~~**Validação pós-encoding:** feature zerada em >5% dos leads gera alerta + bloqueia.~~ **STATUS REAL (verificado 08/05/2026): NÃO IMPLEMENTADA.** Existe apenas log de feature **ausente do DataFrame** em [encoding.py:337-344](../src/core/encoding.py#L337-L344) (importância ≥5% → ERROR; <5% → WARNING), mas log nunca bloqueia o pipeline e não detecta encoding **zerado** após `pd.get_dummies()`. Falsa segurança que contribuiu para Clusters 4 e 5 do Erro 2 passarem. Pendente — ver V.1.3 abaixo.
 - **Painel de cobertura de features:** dashboard últimas 24h. *(23/abr)*
 
 ### Paridade treino ↔ produção
@@ -401,15 +401,33 @@ Seção viva — listar pontos de fragilidade conhecidos que **não são bug ati
 
 ### V.1 — Por que parquets + smoke test pré-deploy não pegaram o Cluster 5 (idade/salário A/B reativado, 29/04)?
 
-**Pergunta a responder:** o smoke test pré-deploy (21/abr) e a auditoria automática treino↔produção (21/abr) já estavam ativos quando o A/B foi reativado em 29/abr. Mesmo assim, o bug do `encoding_overrides` ausente no caminho do Champion passou. Por quê?
+**Investigação concluída em 08/05/2026.** As 3 salvaguardas que existiam em 21/abr foram mapeadas. Resultado: **uma das 3 nunca foi implementada de fato (apenas declarada como entregue), e as outras 2 não cobrem o caminho A/B com `encoding_overrides`.** O bug do Cluster 5 passou pelas 3 sem disparo.
 
-**Hipóteses a verificar (não confirmadas):**
-1. Auditoria de paridade só roda no caminho do Challenger novo, não no Champion no contexto de A/B. Bug afetava o Champion (~90% do tráfego).
-2. Smoke test usa parquet de leads canônico que **não contém** `idade`/`faixa_salarial` em formato cru — só features pós-encoding. Como o encoding errado produz colunas zeradas mas não falha, smoke não detecta.
-3. Validação pós-encoding ">5% zerados → bloqueia" pode não estar incluindo `Qual_a_sua_idade` e `Atualmente_qual_a_sua_faixa_salarial` na lista de "features críticas".
-4. Smoke test pode estar rodando no caminho default (sem A/B ativo) e o caminho do A/B não foi testado.
+#### V.1.1 — Smoke test pré-deploy: roda no caminho default, não no A/B
 
-**Próximo passo:** ler `src/production_pipeline.py` + `src/abtest/` + scripts de smoke test, mapear quais caminhos cada salvaguarda cobre, e em quais cenários elas não disparam.
+**Localização:** [scripts/smoke_test_revision.py:91-107](../scripts/smoke_test_revision.py#L91-L107).
+**O que faz hoje:** chama `/monitoring/daily-check/railway?hours=1` na URL da revisão alvo, processa logs `[T1-10]` e `[STARTUP CHECK]`. O endpoint inicializa `LeadScoringPipeline(client_id=client_id)` **sem contexto A/B** — não passa `encoding_overrides` nem flags de variante.
+**Gap:** o Champion dentro de `/predict/batch` com A/B ativo chama `pipeline.run(..., predictor_override=predictor, encoding_overrides=champion_cfg.encoding_overrides)` ([api/app.py:1734-1738](../api/app.py#L1734-L1738)). O smoke test nunca exercita esse caminho. Hipótese **(d) confirmada**.
+
+**Fix proposto:** smoke test deve detectar `ab_test.enabled: true` em `configs/active_models/{client}.yaml` e, quando ativo, exercitar **cada variante explicitamente** (Champion + Challenger) — chamar endpoint que respeite o roteamento A/B com payloads que caem em ambos. Comparar o output (decil + score + value) com baseline esperado por variante.
+
+#### V.1.2 — Auditoria paridade treino↔produção: ignora `encoding_overrides`
+
+**Localização:** [tests/parity_audit.py:182-228](../tests/parity_audit.py#L182-L228).
+**O que faz hoje:** carrega `ClientConfig.from_yaml('devclub.yaml')`, chama `apply_encoding(df_input, config.encoding, artifacts={})` com `config.encoding` **padrão** e `artifacts={}` (sem feature_registry de variante).
+**Gap:** o teste roda como se A/B não existisse. Quando o Champion no A/B precisa de `encoding_overrides` (caso jan30 com ordinal_variables), a auditoria passa porque está testando a configuração base, não a configuração efetiva da variante. Hipótese **(a) confirmada**.
+
+**Fix proposto:** parity_audit deve iterar por variante ativa em `configs/active_models/{client}.yaml` quando `ab_test.enabled: true`. Para cada variante: aplicar o `encoding_overrides_merged` (config base + overrides), carregar o `feature_registry` correto, e comparar contra o output esperado da variante. Sem isso, qualquer divergência específica de variante passa silenciosa.
+
+#### V.1.3 — Validação ">5% zerados → bloqueia" não existe
+
+**Achado mais grave:** essa salvaguarda foi **declarada como entregue em 21/abr** (Seção IV deste documento, agora corrigida) mas nunca foi implementada. O que existe em [encoding.py:337-344](../src/core/encoding.py#L337-L344) é apenas log de feature **ausente do DataFrame** (não de feature zerada após encoding) — e o log nunca bloqueia o pipeline.
+
+**Por que importa:** o bug típico dos Clusters 3, 4, 5 do Erro 2 produz colunas que **existem no DataFrame** (`pd.get_dummies()` cria a coluna) mas chegam zeradas (sem casar com o valor esperado). O log atual não pega esse caso. Encoding zerado em 25% dos leads (Cluster 5) não dispararia nada.
+
+**Fix proposto:** implementar de fato. Pós-encoding, para cada feature com `importance ≥ 0.03` no `feature_registry` ativo, calcular `(df[feature] == 0).mean()`. Se >X% dos leads tiverem zero E a distribuição esperada do treino tiver <X% (capturada em `distribuicoes_esperadas.json`), `raise ValueError` com nome da feature e variante. Threshold X precisa ser feature-aware: features ordinais (idade, salário) podem ter "0" como categoria válida; features OHE (Medium_*) não.
+
+**Encaixe:** os 3 fixes acima são fortalecimento de salvaguardas existentes — natureza de **PLANO_SAFEGUARD.md (T1/T2)**, não de DT-X. Candidatos a virar T1-14, T1-15, T1-16 ou agrupados em um único item "smoke + parity + zerados-pós-encoding cobrindo A/B".
 
 ### V.2 — 4 features binárias passam raw sem `_normalizar`
 
