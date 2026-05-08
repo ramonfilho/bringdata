@@ -1348,34 +1348,75 @@ class DataQualityMonitor:
             s = s.map(lambda v: mapping.get(v, v))
         return s
 
-    def _filter_to_previous_full_brt_day(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _query_railway_previous_full_brt_day(self) -> pd.DataFrame:
         """
-        Filtra `df` para conter apenas leads do último dia completo BRT
+        Query Railway diretamente pra pegar o último dia completo BRT
         (00:00→23:59 do dia anterior à data corrente, em horário de São Paulo).
 
-        Espera coluna 'Data' (formato Sheets) ou 'data' (Railway). Se nenhuma
-        existir, retorna df vazio.
+        O df que `data_quality.check()` recebe via `orchestrator.run_daily_check`
+        já passou por feature_engineering, que remove a coluna 'Data' (config
+        `columns_to_drop_after_fe` em `configs/clients/{client}.yaml`). Por isso
+        o check faz sua própria query — independe do estado do df transformado.
+
+        Retorna df com colunas no formato Sheets (esperado pelo snapshot de
+        referência), ou df vazio em caso de erro / sem dados / config ausente.
         """
         from datetime import datetime, timedelta, timezone
-
-        col = 'Data' if 'Data' in df.columns else ('data' if 'data' in df.columns else None)
-        if col is None:
-            return df.iloc[0:0]
+        import os
 
         brt = timezone(timedelta(hours=-3))
         now_brt = datetime.now(brt)
         yesterday_brt = (now_brt - timedelta(days=1)).date()
+        # Janela em UTC: 00:00→23:59 BRT = 03:00 UTC do dia → 03:00 UTC do dia+1
+        start_utc = datetime(yesterday_brt.year, yesterday_brt.month, yesterday_brt.day,
+                             3, 0, 0, tzinfo=timezone.utc)
+        end_utc = start_utc + timedelta(days=1)
 
-        ts = pd.to_datetime(df[col], errors='coerce')
-        if ts.dt.tz is None:
-            # createdAt do Railway é stored em UTC sem tz; localizar como UTC e converter.
-            ts_utc = ts.dt.tz_localize('UTC', nonexistent='shift_forward', ambiguous='NaT')
-        else:
-            ts_utc = ts.dt.tz_convert('UTC')
-        ts_brt = ts_utc.dt.tz_convert(brt)
+        required_env = ['RAILWAY_DB_HOST', 'RAILWAY_DB_PORT', 'RAILWAY_DB_USER',
+                        'RAILWAY_DB_PASSWORD', 'RAILWAY_DB_NAME']
+        missing = [k for k in required_env if not os.environ.get(k)]
+        if missing:
+            logger.warning(
+                f"[audience_profile_drift] Env vars Railway ausentes: {missing}. "
+                f"Skip — check requer acesso direto ao banco."
+            )
+            return pd.DataFrame()
 
-        mask = ts_brt.dt.date == yesterday_brt
-        return df.loc[mask].copy()
+        try:
+            import pg8000.native
+            conn = pg8000.native.Connection(
+                host=os.environ['RAILWAY_DB_HOST'],
+                port=int(os.environ['RAILWAY_DB_PORT']),
+                user=os.environ['RAILWAY_DB_USER'],
+                password=os.environ['RAILWAY_DB_PASSWORD'],
+                database=os.environ['RAILWAY_DB_NAME'],
+                ssl_context=True,
+                timeout=15,
+            )
+            rows = conn.run(
+                'SELECT data, '
+                "  pesquisa->>'genero'             AS \"O seu gênero:\", "
+                "  pesquisa->>'idade'              AS \"Qual a sua idade?\", "
+                "  pesquisa->>'ocupacao'           AS \"O que você faz atualmente?\", "
+                "  pesquisa->>'faixaSalarial'      AS \"Atualmente, qual a sua faixa salarial?\", "
+                "  pesquisa->>'cartaoCredito'      AS \"Você possui cartão de crédito?\", "
+                "  pesquisa->>'estudouProgramacao' AS \"Já estudou programação?\", "
+                "  pesquisa->>'computador'         AS \"Tem computador/notebook?\" "
+                'FROM "Lead" '
+                'WHERE "createdAt" >= :s AND "createdAt" < :e',
+                s=start_utc, e=end_utc,
+            )
+            conn.close()
+        except Exception as e:
+            logger.error(f"[audience_profile_drift] Erro ao consultar Railway: {e}")
+            return pd.DataFrame()
+
+        cols = [
+            'data', 'O seu gênero:', 'Qual a sua idade?', 'O que você faz atualmente?',
+            'Atualmente, qual a sua faixa salarial?', 'Você possui cartão de crédito?',
+            'Já estudou programação?', 'Tem computador/notebook?',
+        ]
+        return pd.DataFrame(rows, columns=cols)
 
     def _check_audience_profile_drift(self, df: pd.DataFrame) -> List[Dict]:
         """
@@ -1438,7 +1479,10 @@ class DataQualityMonitor:
             })
             return alerts
 
-        df_day = self._filter_to_previous_full_brt_day(df)
+        # NOTE: o df que chega via check() já passou por feature_engineering,
+        # que remove a coluna 'Data' (columns_to_drop_after_fe). Por isso o
+        # check consulta o Railway diretamente — independe do df transformado.
+        df_day = self._query_railway_previous_full_brt_day()
         n_day = len(df_day)
         if n_day < min_responses:
             logger.info(
