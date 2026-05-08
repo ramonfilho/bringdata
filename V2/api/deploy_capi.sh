@@ -181,7 +181,8 @@ check_parity_audit() {
     fi
 
     if (cd "$PROJECT_DIR/.." && python3 V2/tests/parity_audit.py --function utm 2>&1 | tail -30 && \
-        python3 V2/tests/parity_audit.py --function encoding 2>&1 | tail -30) | tee /tmp/parity_audit_deploy.log; then
+        python3 V2/tests/parity_audit.py --function encoding 2>&1 | tail -30 && \
+        python3 V2/tests/parity_audit.py --function encoding_ab 2>&1 | tail -30) | tee /tmp/parity_audit_deploy.log; then
         if grep -q "DIVERG" /tmp/parity_audit_deploy.log; then
             echo ""
             echo "  ╔══════════════════════════════════════════════════════════════════╗"

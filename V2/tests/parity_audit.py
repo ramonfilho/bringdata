@@ -228,15 +228,118 @@ def audit_encoding():
     return ok_snap and ok_smoke
 
 
+def audit_encoding_ab_variants():
+    """
+    [T1-15] Parity audit por variante A/B — cobre encoding_overrides.
+
+    Cobre o gap V.1.2 do registro_erros_ml.md: audit_encoding tradicional
+    testa só config.encoding padrão (artifacts={}, sem overrides), portanto
+    não cobre Champion shim com encoding_overrides ordinal nem Challenger
+    no contexto A/B. O bug do Cluster 5 (Champion sem encoding_overrides
+    em A/B reativado, 29/abr–05/mai/2026) passou exatamente por esse gap.
+
+    Itera sobre cada variante ativa em configs/active_models/{client}.yaml,
+    aplica merge_encoding(base, variant.encoding_overrides) e roda
+    apply_encoding sobre o snapshot. Smoke checks por variante:
+      - ordinais devem virar numéricas (não dtype=object)
+      - sem NaN no output
+      - nomes de coluna válidos (sem ?, espaço, hífen)
+
+    Não compara contra snapshot por-variante (fica para próximo retreino
+    capturar). Smoke checks já pegam a classe específica do bug Cluster 5
+    (idade/salário ficando categóricas object em vez de numéricas).
+    """
+    from V2.src.core.encoding import apply_encoding, merge_encoding
+    from V2.src.core.client_config import ClientConfig, ABTestConfig
+
+    config = ClientConfig.from_yaml(
+        os.path.join(ROOT, 'V2', 'configs', 'clients', 'devclub.yaml')
+    )
+    ab_yaml = os.path.join(ROOT, 'V2', 'configs', 'active_models', 'devclub.yaml')
+
+    if not os.path.exists(ab_yaml):
+        print("  [SKIP] active_models/devclub.yaml ausente — sem A/B configurado")
+        return None
+
+    ab = ABTestConfig.from_active_model_yaml(ab_yaml)
+    if not ab.enabled:
+        print("  [SKIP] ab_test.enabled=false — sem variantes pra auditar")
+        return None
+    if not ab.variants:
+        print("  [!] ab_test.enabled=true mas nenhum variant declarado em variants:")
+        return False
+
+    df_input = _load('snapshot_encoding_input')
+    overall_ok = True
+    print(f"  Auditando {len(ab.variants)} variante(s) A/B...")
+
+    ordinais_esperadas = {
+        'Atualmente_qual_a_sua_faixa_salarial',
+        'Qual_a_sua_idade',
+        'dia_semana',
+    }
+
+    for variant_name, variant in ab.variants.items():
+        eff_encoding = merge_encoding(config.encoding, variant.encoding_overrides)
+
+        try:
+            df_actual = apply_encoding(df_input.copy(), eff_encoding, artifacts={})
+        except Exception as e:
+            print(f"  [!] '{variant_name}' QUEBROU em apply_encoding: "
+                  f"{type(e).__name__}: {str(e)[:200]}")
+            overall_ok = False
+            continue
+
+        ok_variant = True
+
+        # 1. Ordinais devem virar numéricas (não dtype=object)
+        ordinais_presentes = [
+            c for c in df_actual.columns
+            if any(o in c for o in ordinais_esperadas)
+        ]
+        for col in ordinais_presentes:
+            if df_actual[col].dtype == object:
+                print(f"  [!] '{variant_name}': ordinal '{col}' não foi encodada "
+                      f"— dtype={df_actual[col].dtype}")
+                ok_variant = False
+
+        # 2. Sem NaN
+        nan_count = int(df_actual.isna().sum().sum())
+        if nan_count > 0:
+            print(f"  [!] '{variant_name}': {nan_count} NaN remanescentes")
+            ok_variant = False
+
+        # 3. Nomes válidos
+        bad_cols = [
+            c for c in df_actual.columns
+            if any(ch in c for ch in ['?', ' ', '-', '.'])
+        ]
+        if bad_cols:
+            print(f"  [!] '{variant_name}': {len(bad_cols)} coluna(s) "
+                  f"com caracteres especiais: {bad_cols[:3]}")
+            ok_variant = False
+
+        if ok_variant:
+            n_ord = len(eff_encoding.ordinal_variables or {})
+            print(f"  [OK] '{variant_name}': {df_actual.shape[1]} colunas, "
+                  f"{n_ord} ordinais configuradas, "
+                  f"{len(ordinais_presentes)} colunas ordinais encodadas")
+        else:
+            overall_ok = False
+
+    return overall_ok
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 AUDITS = {
-    'utm':      audit_utm,
-    'medium':   audit_medium,
-    'fe':       audit_fe,
-    'encoding': audit_encoding,
+    'utm':         audit_utm,
+    'medium':      audit_medium,
+    'fe':          audit_fe,
+    'encoding':    audit_encoding,
+    'encoding_ab': audit_encoding_ab_variants,
 }
 
 def main():
