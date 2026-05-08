@@ -427,7 +427,12 @@ Seção viva — listar pontos de fragilidade conhecidos que **não são bug ati
 
 **Fix proposto:** implementar de fato. Pós-encoding, para cada feature com `importance ≥ 0.03` no `feature_registry` ativo, calcular `(df[feature] == 0).mean()`. Se >X% dos leads tiverem zero E a distribuição esperada do treino tiver <X% (capturada em `distribuicoes_esperadas.json`), `raise ValueError` com nome da feature e variante. Threshold X precisa ser feature-aware: features ordinais (idade, salário) podem ter "0" como categoria válida; features OHE (Medium_*) não.
 
-**Encaixe:** os 3 fixes acima são fortalecimento de salvaguardas existentes — natureza de **PLANO_SAFEGUARD.md (T1/T2)**, não de DT-X. Candidatos a virar T1-14, T1-15, T1-16 ou agrupados em um único item "smoke + parity + zerados-pós-encoding cobrindo A/B".
+**Encaixe (formalizado em 08/05/2026):** os 3 fixes foram registrados como itens no [PLANO_SAFEGUARD.md](PLANO_SAFEGUARD.md):
+- **T1-14** — smoke test exercita variantes A/B explicitamente (resolve V.1.1)
+- **T1-15** — parity audit itera por variante A/B aplicando `encoding_overrides_merged` (resolve V.1.2)
+- **T1-16** — validação pós-encoding ">X% zerados → raise" feature-aware (resolve V.1.3, item que estava declarado como entregue mas nunca foi implementado)
+
+Ordem de execução recomendada: T1-14 → T1-15 → T1-16. T1-14 e T1-15 são independentes mas T1-15 reusa lógica de variante que T1-14 também precisa. T1-16 tem pré-condição de novo snapshot `distribuicoes_esperadas.json` por feature, então fica para o próximo retreino.
 
 ### V.2 — 4 features binárias passam raw sem `_normalizar`
 
