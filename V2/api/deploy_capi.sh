@@ -578,6 +578,31 @@ deploy_to_cloud_run() {
             print_warning "Gate D script não encontrado em $GATE_D_SCRIPT — pulado"
         fi
 
+        # [Gate C] Equivalência de scoring entre revisões (08/05/2026).
+        # Compara decil per-lead entre $NEW_REVISION (alvo) e a revisão com 100% tráfego
+        # (referência). Cobertura A/B: metade dos leads é forçada pelo path Challenger
+        # via utm_campaign override. Bloqueia APENAS por divergência de decil — value
+        # e event_name divergentes são informativos (ver Gate D pra cobertura de value).
+        GATE_C_SCRIPT="$SCRIPT_DIR/../scripts/test_revision_equivalence.py"
+        ENV_FILE="$SCRIPT_DIR/../.env"
+        if [ -f "$GATE_C_SCRIPT" ] && [ -f "$ENV_FILE" ]; then
+            print_info "[Gate C] Equivalência de decil contra prod (rolling baseline)..."
+            # Carrega RAILWAY_DB_* (escopo seletivo evita problema com '|' em GURU_API_TOKEN)
+            eval "$(grep -E '^RAILWAY_DB_' "$ENV_FILE" | sed 's/^/export /')"
+            if python3 "$GATE_C_SCRIPT" "$NEW_REVISION" --region "$REGION" --project "$PROJECT_ID"; then
+                print_success "[Gate C] Decil idêntico entre $NEW_REVISION e prod"
+            else
+                print_error "[Gate C] FALHOU — divergência de decil entre revisões (regressão de scoring)"
+                print_warning "Revisão permanece em 0% de tráfego. NÃO progredir tráfego até resolver."
+                print_info "Se a mudança de decil é INTENCIONAL (novo modelo), re-rode com --expect-score-change."
+                exit 1
+            fi
+        elif [ ! -f "$GATE_C_SCRIPT" ]; then
+            print_warning "Gate C script não encontrado em $GATE_C_SCRIPT — pulado"
+        else
+            print_warning "Arquivo $ENV_FILE ausente — Gate C precisa de RAILWAY_DB_* — pulado"
+        fi
+
         # [T3-1] Progressão de canary recomendada — não pular etapas.
         # Critérios objetivos de avanço entre etapas estão em PLANO_SAFEGUARD.md "Protocolo
         # de progressão de tráfego [T1-9]". Resumo dos comandos:

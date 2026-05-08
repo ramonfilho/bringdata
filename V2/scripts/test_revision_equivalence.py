@@ -134,12 +134,21 @@ def fetch_leads_predict_mode(n: int) -> list[dict[str, Any]]:
     return leads
 
 
+CHALLENGER_UTM_CAMPAIGN = "PIXEL NOVO API"  # match challenger_abr28.utm_pattern em active_models/devclub.yaml
+
+
 def fetch_leads_capi_mode(n: int) -> list[dict[str, Any]]:
     """
     Pega N leads para /capi/process_daily_batch?dry_run=true.
 
-    Faz JOIN Lead × leads_capi pra montar payload com utm_*, FBP/FBC, lead_score
-    já populado. Esses campos são o que o A/B router lê pra decidir variant.
+    JOIN Lead × leads_capi pra montar payload com utm_*, FBP/FBC, lead_score
+    já populado. Para garantir cobertura dos DOIS paths do A/B test (Champion
+    via shim + Challenger), metade dos leads tem utm_campaign reescrito pra
+    forçar matching no challenger_abr28. A outra metade fica com utm_campaign
+    do banco — quase sempre vai pelo Champion shim.
+
+    Sem essa injeção sintética, o teste depende da data real ter leads com
+    `utm_campaign='PIXEL NOVO API'`, o que é raro e dá falsa confiança.
     """
     conn = _connect_railway()
     sql = """
@@ -179,6 +188,15 @@ def fetch_leads_capi_mode(n: int) -> list[dict[str, Any]]:
         d['email'] = email
         d = {k: v for k, v in d.items() if v is not None}
         leads.append(d)
+
+    # Força metade dos leads pra Challenger path. Mantém email/score real,
+    # só reescreve utm_campaign + email-suffix pra evitar dedupe via leads_capi
+    # do reference response colidir com target response.
+    half = len(leads) // 2
+    for lead in leads[half:]:
+        lead['utm_campaign'] = CHALLENGER_UTM_CAMPAIGN
+        lead['email'] = f"chlng+{lead['email']}"  # evita colisão com a metade Champion
+
     return leads
 
 
@@ -254,9 +272,21 @@ def compare_predict(ref: dict, tgt: dict, expect_change: bool) -> int:
 
 
 def compare_capi_dry_run(ref: dict, tgt: dict, expect_change: bool) -> int:
+    """
+    Critério de bloqueio: SOMENTE divergência de decil.
+
+    Value/event_name divergentes são informativos. Revisões frequentemente
+    mudam value/event_name intencionalmente (ex: Patch B em 08/05/2026 corrigiu
+    value=0 → values corretos por decil). Gate D já cobre regressão de
+    conversion_rates no nível do YAML interno da imagem.
+
+    Decil divergente é regressão de scoring real — sempre bloqueia, exceto
+    se o usuário forçar com --expect-score-change.
+    """
     ref_idx = _index_capi_dry_run(ref)
     tgt_idx = _index_capi_dry_run(tgt)
     ids = sorted(set(ref_idx) & set(tgt_idx))
+
     decil_diffs = [(rid, ref_idx[rid]['decil'], tgt_idx[rid]['decil'])
                    for rid in ids if ref_idx[rid]['decil'] != tgt_idx[rid]['decil']]
     value_diffs = []
@@ -267,18 +297,57 @@ def compare_capi_dry_run(ref: dict, tgt: dict, expect_change: bool) -> int:
             value_diffs.append((rid, rv, tv))
     name_diffs = [(rid, ref_idx[rid]['event_name'], tgt_idx[rid]['event_name'])
                   for rid in ids if ref_idx[rid]['event_name'] != tgt_idx[rid]['event_name']]
+
+    # Path coverage breakdown — usa event_name do TARGET pra classificar
+    # "LeadQualified" → Champion (default) ou shim. "HQLB_LQ" → Challenger.
+    path_counts = {'champion': 0, 'challenger': 0, 'unknown': 0}
+    for rid in ids:
+        en = (tgt_idx[rid].get('event_name') or '').strip()
+        if en == 'HQLB_LQ':
+            path_counts['challenger'] += 1
+        elif en in ('LeadQualified', ''):
+            path_counts['champion'] += 1
+        else:
+            path_counts['unknown'] += 1
+
     print()
     print(f"  Modo: capi-dry-run (path A/B coberto)")
     print(f"  Total comparados:    {len(ids)}")
-    print(f"  Decis divergentes:   {len(decil_diffs)}")
-    print(f"  Values divergentes:  {len(value_diffs)} (tol={VALUE_TOL})")
-    print(f"  Event names divergentes: {len(name_diffs)}")
-    if value_diffs:
+    print(f"  Path coverage:       Champion={path_counts['champion']}  Challenger={path_counts['challenger']}  Unknown={path_counts['unknown']}")
+    print(f"  Decis divergentes:   {len(decil_diffs)}  ← critério de bloqueio")
+    print(f"  Values divergentes:  {len(value_diffs)} (tol={VALUE_TOL})  [informativo, não bloqueia]")
+    print(f"  Event names divergentes: {len(name_diffs)}  [informativo, não bloqueia]")
+
+    if value_diffs and len(value_diffs) <= 20:
         print()
         print("  Amostras de divergência em value:")
-        for rid, rv, tv in value_diffs[:10]:
+        for rid, rv, tv in value_diffs[:5]:
             print(f"    {rid[:40]:40s}  ref={rv}  tgt={tv}")
-    return _verdict(bool(decil_diffs or value_diffs or name_diffs), expect_change, decil_diffs[:5])
+
+    if path_counts['challenger'] == 0:
+        print()
+        print("  ⚠️  Zero leads pegaram Challenger path. Cobertura de A/B incompleta.")
+
+    print()
+    if decil_diffs:
+        if expect_change:
+            print("  ✅ Mudança de decil detectada (esperada via --expect-score-change).")
+            for rid, rd, td in decil_diffs[:5]:
+                print(f"    {rid[:40]:40s}  ref={rd}  tgt={td}")
+            return 0
+        print("  ❌ FALHOU — decil divergente entre revisões (regressão de scoring).")
+        print("     Se intencional, re-rode com --expect-score-change.")
+        for rid, rd, td in decil_diffs[:5]:
+            print(f"    {rid[:40]:40s}  ref={rd}  tgt={td}")
+        return 1
+
+    if value_diffs or name_diffs:
+        print("  ✅ PASSOU — decil idêntico (scoring intacto).")
+        print("     Value/event_name diferentes = mudança intencional via YAML/código.")
+        return 0
+
+    print("  ✅ PASSOU — score, decil, value e event_name idênticos.")
+    return 0
 
 
 def _verdict(any_diff: bool, expect_change: bool, sample_decil_diffs: list) -> int:

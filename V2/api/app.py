@@ -1516,6 +1516,28 @@ async def process_daily_batch_capi(
                 '_utm_campaign': lead.get('utm_campaign') or (capi_data.utm_campaign if capi_data else None),
             }
 
+            # A/B routing: identificar variante pelos UTMs ou URL do lead.
+            # Espelha a lógica de /webhook/lead_capture (linha 920) e /railway/process-pending
+            # (linha 3395+) pra que /capi/process_daily_batch também respeite o A/B test —
+            # antes dessa adição, leads enviados por esse endpoint ignoravam routing e
+            # caíam sempre no fallback business_config.conversion_rates.
+            ab_test_cfg = getattr(pipeline, '_ab_test_config', None)
+            if ab_test_cfg and getattr(ab_test_cfg, 'enabled', False):
+                lead_utms = {
+                    'utm_source':   lead.get('utm_source') or (capi_data.utm_source if capi_data else None),
+                    'utm_medium':   lead.get('utm_medium') or (capi_data.utm_medium if capi_data else None),
+                    'utm_campaign': lead.get('utm_campaign') or (capi_data.utm_campaign if capi_data else None),
+                    'utm_term':     lead.get('utm_term') or (capi_data.utm_term if capi_data else None),
+                    'utm_content':  lead.get('utm_content') or (capi_data.utm_content if capi_data else None),
+                }
+                ev_url = lead.get('event_source_url') or (capi_data.event_source_url if capi_data else None)
+                ab_variant = pipeline.get_ab_variant(lead_utms, event_source_url=ev_url)
+                if ab_variant:
+                    lead_capi['ab_event_name'] = ab_variant.capi_event_name
+                    lead_capi['ab_event_name_hq'] = ab_variant.capi_event_name_high_quality
+                    lead_capi['ab_conversion_rates'] = ab_variant.conversion_rates
+                    lead_capi['ab_pixel_id'] = ab_variant.pixel_id_override
+
             enriched_leads.append(lead_capi)
 
         logger.info(f"   {len(enriched_leads)} leads enriquecidos para envio CAPI")
