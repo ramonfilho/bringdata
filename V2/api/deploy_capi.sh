@@ -579,22 +579,39 @@ deploy_to_cloud_run() {
         fi
 
         # [Gate C] Equivalência de scoring entre revisões (08/05/2026).
-        # Compara decil per-lead entre $NEW_REVISION (alvo) e a revisão com 100% tráfego
-        # (referência). Cobertura A/B: metade dos leads é forçada pelo path Challenger
-        # via utm_campaign override. Bloqueia APENAS por divergência de decil — value
-        # e event_name divergentes são informativos (ver Gate D pra cobertura de value).
+        # Compara entre $NEW_REVISION (alvo) e a revisão com 100% tráfego (referência)
+        # em DUAS dimensões com 50 leads em cada:
+        #   1. modo predict     — score raw (tol 1e-06) + decil, sem path A/B
+        #   2. modo capi-dry-run — decil + value + event_name, com path A/B
+        # Bloqueia APENAS por divergência de score (modo predict) ou decil (ambos modos).
+        # Value/event divergentes em capi-dry-run são informativos (ver Gate D).
         GATE_C_SCRIPT="$SCRIPT_DIR/../scripts/test_revision_equivalence.py"
         ENV_FILE="$SCRIPT_DIR/../.env"
+        GATE_C_N=50
         if [ -f "$GATE_C_SCRIPT" ] && [ -f "$ENV_FILE" ]; then
-            print_info "[Gate C] Equivalência de decil contra prod (rolling baseline)..."
             # Carrega RAILWAY_DB_* (escopo seletivo evita problema com '|' em GURU_API_TOKEN)
             eval "$(grep -E '^RAILWAY_DB_' "$ENV_FILE" | sed 's/^/export /')"
-            if python3 "$GATE_C_SCRIPT" "$NEW_REVISION" --region "$REGION" --project "$PROJECT_ID"; then
-                print_success "[Gate C] Decil idêntico entre $NEW_REVISION e prod"
+
+            print_info "[Gate C.1] modo predict — score raw + decil ($GATE_C_N leads)..."
+            if python3 "$GATE_C_SCRIPT" "$NEW_REVISION" \
+                --region "$REGION" --project "$PROJECT_ID" \
+                --mode predict --n $GATE_C_N; then
+                print_success "[Gate C.1] score raw idêntico entre $NEW_REVISION e prod"
             else
-                print_error "[Gate C] FALHOU — divergência de decil entre revisões (regressão de scoring)"
+                print_error "[Gate C.1] FALHOU — divergência de score raw ou decil"
                 print_warning "Revisão permanece em 0% de tráfego. NÃO progredir tráfego até resolver."
-                print_info "Se a mudança de decil é INTENCIONAL (novo modelo), re-rode com --expect-score-change."
+                print_info "Se a mudança de scoring é INTENCIONAL (novo modelo), re-rode com --expect-score-change."
+                exit 1
+            fi
+
+            print_info "[Gate C.2] modo capi-dry-run — decil + value + event_name + path A/B ($GATE_C_N leads)..."
+            if python3 "$GATE_C_SCRIPT" "$NEW_REVISION" \
+                --region "$REGION" --project "$PROJECT_ID" \
+                --mode capi-dry-run --n $GATE_C_N; then
+                print_success "[Gate C.2] decil idêntico em path A/B (Champion + Challenger)"
+            else
+                print_error "[Gate C.2] FALHOU — divergência de decil no path A/B"
+                print_warning "Revisão permanece em 0% de tráfego. NÃO progredir tráfego até resolver."
                 exit 1
             fi
         elif [ ! -f "$GATE_C_SCRIPT" ]; then
