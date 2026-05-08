@@ -672,73 +672,170 @@ class DataQualityMonitor:
 
         return alerts
 
+    def _resolve_variant_artifacts_dir(self, predictor) -> Path | None:
+        """
+        Resolve a pasta de artifacts pra um predictor (Champion ou Challenger).
+        Necessário pra carregar `categorias_esperadas.json` e
+        `distribuicoes_esperadas.json` de cada variant.
+
+        Estratégia:
+          1. predictor.model_path se já estiver setado (Champion via active_model.yaml)
+          2. glob em mlruns/*/{run_id}/artifacts/ (Challenger via mlflow_run_id)
+          3. None (logado, alerta é skipado pra essa variant)
+        """
+        if getattr(predictor, 'model_path', None):
+            p = Path(predictor.model_path)
+            if p.exists():
+                return p
+        if getattr(predictor, 'mlflow_run_id', None):
+            base = Path(__file__).resolve().parents[2] / 'mlruns'
+            if base.exists():
+                for exp_dir in base.iterdir():
+                    if not exp_dir.is_dir():
+                        continue
+                    candidate = exp_dir / predictor.mlflow_run_id / 'artifacts'
+                    if candidate.exists():
+                        return candidate
+        return None
+
     def _check_category_drift(self, df: pd.DataFrame) -> List[Dict]:
-        """Verifica categorias não vistas no treino"""
+        """
+        Verifica categorias não vistas no treino, POR VARIANT ativa.
+
+        Cada variant tem seu próprio `categorias_esperadas.json` (capturado no
+        treino correspondente), então as categorias "esperadas" diferem entre
+        Champion e Challenger. Iterar sobre _iter_active_variants() garante que
+        o monitoring detecta drift contra qualquer modelo servindo tráfego.
+
+        Cada alerta carrega `variant_name` e `mlflow_run_id` pra facilitar
+        filtragem downstream.
+        """
         from datetime import datetime, timezone
         alerts = []
 
-        try:
-            categorias_esperadas = load_training_categories(self.model_path)
-            drift_results = check_category_drift(df, categorias_esperadas)
+        for variant_name, predictor, _enc in self._iter_active_variants():
+            artifacts_dir = self._resolve_variant_artifacts_dir(predictor)
+            if artifacts_dir is None:
+                logger.warning(
+                    f"[category_drift] variant '{variant_name}' (run {predictor.mlflow_run_id}) — "
+                    f"artifacts_dir não localizado. Skip."
+                )
+                continue
 
-            if drift_results:
-                for result in drift_results:
-                    alerts.append({
-                        'type': 'category_drift',
-                        'severity': result['severity'],
-                        'category': 'data_quality',
-                        'message': result['message'],
-                        'details': {
-                            'column': result['column'],
-                            'new_categories': result.get('new_categories', []),
-                            'affected_count': result.get('count', 0),
-                            'percentage': result.get('percentage', 0)
-                        },
-                        'timestamp': datetime.now(timezone.utc).isoformat(),
-                        'metric_value': result.get('percentage', 0),
-                        'threshold': None
-                    })
+            try:
+                categorias_esperadas = load_training_categories(str(artifacts_dir))
+            except FileNotFoundError as e:
+                logger.warning(f"[category_drift] variant '{variant_name}': {e}")
+                continue
+            except Exception as e:
+                logger.error(f"[category_drift] variant '{variant_name}' erro carregando categorias: {e}")
+                continue
 
-        except (FileNotFoundError, Exception):
-            pass
+            try:
+                drift_results = check_category_drift(df, categorias_esperadas)
+            except Exception as e:
+                logger.error(f"[category_drift] variant '{variant_name}' erro check: {e}")
+                continue
+
+            for result in drift_results:
+                alerts.append({
+                    'type': 'category_drift',
+                    'severity': result['severity'],
+                    'category': 'data_quality',
+                    'message': f"[{variant_name}]{result['message']}",
+                    'details': {
+                        'variant_name': variant_name,
+                        'mlflow_run_id': getattr(predictor, 'mlflow_run_id', None),
+                        'column': result['column'],
+                        'new_categories': result.get('new_categories', []),
+                        'affected_count': result.get('count', 0),
+                        'percentage': result.get('percentage', 0),
+                    },
+                    'timestamp': datetime.now(timezone.utc).isoformat(),
+                    'metric_value': result.get('percentage', 0),
+                    'threshold': None,
+                })
 
         return alerts
 
     def _check_distribution_drift(self, df: pd.DataFrame) -> List[Dict]:
-        """Verifica mudanças drásticas nas proporções"""
+        """
+        Verifica mudanças drásticas nas proporções, POR VARIANT ativa.
+
+        Mesmo padrão do _check_category_drift: cada variant tem suas
+        `distribuicoes_esperadas.json` (proporções de cada categoria no treino),
+        então a baseline contra a qual o drift é medido difere entre Champion
+        e Challenger.
+
+        Cada alerta carrega `variant_name` e `mlflow_run_id`.
+        """
         from datetime import datetime, timezone
         alerts = []
+        threshold_cat = self._thresholds['distribution_drift']['categorical']
+        threshold_num = self._thresholds['distribution_drift']['numerical']
 
-        try:
-            distribuicoes_esperadas = load_training_distributions(self.model_path)
-            threshold_cat = self._thresholds['distribution_drift']['categorical']
-            threshold_num = self._thresholds['distribution_drift']['numerical']
+        for variant_name, predictor, _enc in self._iter_active_variants():
+            artifacts_dir = self._resolve_variant_artifacts_dir(predictor)
+            if artifacts_dir is None:
+                logger.warning(
+                    f"[distribution_drift] variant '{variant_name}' (run {predictor.mlflow_run_id}) — "
+                    f"artifacts_dir não localizado. Skip."
+                )
+                continue
 
-            drift_results = check_distribution_drift(
-                df, distribuicoes_esperadas,
-                threshold_categorical=threshold_cat,
-                threshold_numerical=threshold_num
-            )
+            try:
+                distribuicoes_esperadas = load_training_distributions(str(artifacts_dir))
+            except FileNotFoundError as e:
+                logger.warning(f"[distribution_drift] variant '{variant_name}': {e}")
+                continue
+            except Exception as e:
+                logger.error(f"[distribution_drift] variant '{variant_name}' erro carregando distribs: {e}")
+                continue
 
-            # Criar alertas para drift results
+            try:
+                drift_results = check_distribution_drift(
+                    df, distribuicoes_esperadas,
+                    threshold_categorical=threshold_cat,
+                    threshold_numerical=threshold_num,
+                )
+            except Exception as e:
+                logger.error(f"[distribution_drift] variant '{variant_name}' erro check: {e}")
+                continue
+
             for result in drift_results:
                 drift_type = result['type']
-
                 if drift_type == 'categorical_distribution_drift':
+                    column = result['column']
+                    changes = result['changes']
+                    # Enriquecer changes que são 'outros' com breakdown raw
+                    has_outros = any(c.get('categoria') == 'outros' for c in changes)
+                    if has_outros and column in ('Source', 'Term', 'Medium'):
+                        try:
+                            outros_breakdown = self._query_railway_outros_breakdown(column)
+                        except Exception as _e:
+                            logger.warning(f"[distribution_drift] outros_breakdown falhou para {column}: {_e}")
+                            outros_breakdown = []
+                        for c in changes:
+                            if c.get('categoria') == 'outros':
+                                c['outros_breakdown'] = outros_breakdown
                     details = {
-                        'column': result['column'],
-                        'changes': result['changes']
+                        'variant_name': variant_name,
+                        'mlflow_run_id': getattr(predictor, 'mlflow_run_id', None),
+                        'column': column,
+                        'changes': changes,
                     }
-                    metric_value = result['changes'][0]['diff'] if result['changes'] else 0
+                    metric_value = changes[0]['diff'] if changes else 0
                     threshold_used = threshold_cat
                 else:
                     details = {
+                        'variant_name': variant_name,
+                        'mlflow_run_id': getattr(predictor, 'mlflow_run_id', None),
                         'column': result['column'],
                         'mean_treino': result['mean_treino'],
                         'mean_producao': result['mean_producao'],
                         'std_treino': result['std_treino'],
                         'std_producao': result['std_producao'],
-                        'sigma_diff': result['sigma_diff']
+                        'sigma_diff': result['sigma_diff'],
                     }
                     metric_value = result['sigma_diff']
                     threshold_used = threshold_num
@@ -747,15 +844,12 @@ class DataQualityMonitor:
                     'type': 'distribution_drift',
                     'severity': result['severity'],
                     'category': 'data_quality',
-                    'message': result['message'],
+                    'message': f"[{variant_name}]{result['message']}",
                     'details': details,
                     'timestamp': datetime.now(timezone.utc).isoformat(),
                     'metric_value': metric_value,
-                    'threshold': threshold_used
+                    'threshold': threshold_used,
                 })
-
-        except (FileNotFoundError, Exception):
-            pass
 
         return alerts
 
@@ -1348,46 +1442,109 @@ class DataQualityMonitor:
             s = s.map(lambda v: mapping.get(v, v))
         return s
 
-    def _query_railway_previous_full_brt_day(self) -> pd.DataFrame:
-        """
-        Query Railway diretamente pra pegar o último dia completo BRT
-        (00:00→23:59 do dia anterior à data corrente, em horário de São Paulo).
+    def _railway_pesquisa_columns_select(self) -> str:
+        """SQL fragment com SELECT da pesquisa em formato canônico (mesmas colunas do snapshot)."""
+        return (
+            'SELECT data, '
+            "  pesquisa->>'genero'             AS \"O seu gênero:\", "
+            "  pesquisa->>'idade'              AS \"Qual a sua idade?\", "
+            "  pesquisa->>'ocupacao'           AS \"O que você faz atualmente?\", "
+            "  pesquisa->>'faixaSalarial'      AS \"Atualmente, qual a sua faixa salarial?\", "
+            "  pesquisa->>'cartaoCredito'      AS \"Você possui cartão de crédito?\", "
+            "  pesquisa->>'estudouProgramacao' AS \"Já estudou programação?\", "
+            "  pesquisa->>'computador'         AS \"Tem computador/notebook?\" "
+            'FROM "Lead" '
+            'WHERE "createdAt" >= :s AND "createdAt" < :e'
+        )
 
-        O df que `data_quality.check()` recebe via `orchestrator.run_daily_check`
-        já passou por feature_engineering, que remove a coluna 'Data' (config
-        `columns_to_drop_after_fe` em `configs/clients/{client}.yaml`). Por isso
-        o check faz sua própria query — independe do estado do df transformado.
+    def _railway_pesquisa_columns(self) -> List[str]:
+        return [
+            'data', 'O seu gênero:', 'Qual a sua idade?', 'O que você faz atualmente?',
+            'Atualmente, qual a sua faixa salarial?', 'Você possui cartão de crédito?',
+            'Já estudou programação?', 'Tem computador/notebook?',
+        ]
 
-        Retorna df com colunas no formato Sheets (esperado pelo snapshot de
-        referência), ou df vazio em caso de erro / sem dados / config ausente.
+    def _query_railway_pesquisa_window(self, start_utc, end_utc) -> pd.DataFrame:
         """
-        from datetime import datetime, timedelta, timezone
+        Query Railway pra leads numa janela arbitrária [start_utc, end_utc).
+        Retorna df com colunas pesquisa (formato Sheets), ou df vazio em erro.
+
+        Railway via proxy: pg8000 sem ssl_context (cert auto-assinado).
+        """
         import os
-
-        brt = timezone(timedelta(hours=-3))
-        now_brt = datetime.now(brt)
-        yesterday_brt = (now_brt - timedelta(days=1)).date()
-        # Janela em UTC: 00:00→23:59 BRT = 03:00 UTC do dia → 03:00 UTC do dia+1
-        start_utc = datetime(yesterday_brt.year, yesterday_brt.month, yesterday_brt.day,
-                             3, 0, 0, tzinfo=timezone.utc)
-        end_utc = start_utc + timedelta(days=1)
-
         required_env = ['RAILWAY_DB_HOST', 'RAILWAY_DB_PORT', 'RAILWAY_DB_USER',
                         'RAILWAY_DB_PASSWORD', 'RAILWAY_DB_NAME']
         missing = [k for k in required_env if not os.environ.get(k)]
         if missing:
-            logger.warning(
-                f"[audience_profile_drift] Env vars Railway ausentes: {missing}. "
-                f"Skip — check requer acesso direto ao banco."
-            )
+            logger.warning(f"[audience_profile_drift] Env vars Railway ausentes: {missing}.")
             return pd.DataFrame()
+        try:
+            import pg8000.native
+            conn = pg8000.native.Connection(
+                host=os.environ['RAILWAY_DB_HOST'],
+                port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+                user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+                password=os.environ['RAILWAY_DB_PASSWORD'],
+                database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+                timeout=15,
+            )
+            rows = conn.run(self._railway_pesquisa_columns_select(), s=start_utc, e=end_utc)
+            conn.close()
+        except Exception as e:
+            logger.error(f"[audience_profile_drift] Erro ao consultar Railway: {e}")
+            return pd.DataFrame()
+        return pd.DataFrame(rows, columns=self._railway_pesquisa_columns())
+
+    def _query_railway_previous_full_brt_day(self) -> pd.DataFrame:
+        """
+        Janela: 00:00→23:59 BRT do dia anterior. Usa _query_railway_pesquisa_window.
+        """
+        from datetime import datetime, timedelta, timezone
+        brt = timezone(timedelta(hours=-3))
+        now_brt = datetime.now(brt)
+        yesterday_brt = (now_brt - timedelta(days=1)).date()
+        start_utc = datetime(yesterday_brt.year, yesterday_brt.month, yesterday_brt.day,
+                             3, 0, 0, tzinfo=timezone.utc)
+        end_utc = start_utc + timedelta(days=1)
+        return self._query_railway_pesquisa_window(start_utc, end_utc)
+
+    def _query_railway_outros_breakdown(self, column: str, hours: int = 24, top_n: int = 8) -> List[Dict]:
+        """
+        Pra Source/Term/Medium: consulta o Railway nas últimas `hours` horas
+        com os valores RAW da coluna correspondente, aplica `unify_utm` ou
+        `unify_medium` (mesma rotina canônica) e devolve a lista dos raw_values
+        que viram 'outros' após unify, agrupados por valor (top_n maiores).
+
+        Output: [{'raw_value': str, 'count': int}, ...] — sem categorização,
+        sem interpretação. Cliente decide o que mostrar.
+
+        Skip silencioso (devolve []) se:
+          - column não é Source/Term/Medium
+          - env vars Railway ausentes
+          - client_config sem utm/medium config
+          - erro de query
+        """
+        import os
+        from datetime import datetime, timedelta, timezone
+
+        if column not in ('Source', 'Term', 'Medium'):
+            return []
+        if not (self.client_config and (self.client_config.utm or self.client_config.medium)):
+            return []
+
+        required_env = ['RAILWAY_DB_HOST', 'RAILWAY_DB_PORT', 'RAILWAY_DB_USER',
+                        'RAILWAY_DB_PASSWORD', 'RAILWAY_DB_NAME']
+        if any(not os.environ.get(k) for k in required_env):
+            return []
+
+        end_utc = datetime.now(timezone.utc)
+        start_utc = end_utc - timedelta(hours=hours)
+
+        # Carregar raw da coluna correspondente
+        raw_col = {'Source': 'source', 'Term': 'term', 'Medium': 'medium'}[column]
 
         try:
             import pg8000.native
-            # Railway via proxy: pg8000 conecta sem ssl_context (mesma config
-            # de api/app.py:1677-1684 e 2360-2367). ssl_context=True falha em
-            # Cloud Run com SSL: CERTIFICATE_VERIFY_FAILED — Railway proxy
-            # apresenta cert auto-assinado.
             conn = pg8000.native.Connection(
                 host=os.environ['RAILWAY_DB_HOST'],
                 port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
@@ -1397,29 +1554,60 @@ class DataQualityMonitor:
                 timeout=15,
             )
             rows = conn.run(
-                'SELECT data, '
-                "  pesquisa->>'genero'             AS \"O seu gênero:\", "
-                "  pesquisa->>'idade'              AS \"Qual a sua idade?\", "
-                "  pesquisa->>'ocupacao'           AS \"O que você faz atualmente?\", "
-                "  pesquisa->>'faixaSalarial'      AS \"Atualmente, qual a sua faixa salarial?\", "
-                "  pesquisa->>'cartaoCredito'      AS \"Você possui cartão de crédito?\", "
-                "  pesquisa->>'estudouProgramacao' AS \"Já estudou programação?\", "
-                "  pesquisa->>'computador'         AS \"Tem computador/notebook?\" "
-                'FROM "Lead" '
-                'WHERE "createdAt" >= :s AND "createdAt" < :e',
+                f'SELECT source, term, medium FROM "Lead" '
+                f'WHERE "createdAt" >= :s AND "createdAt" < :e',
                 s=start_utc, e=end_utc,
             )
             conn.close()
         except Exception as e:
-            logger.error(f"[audience_profile_drift] Erro ao consultar Railway: {e}")
-            return pd.DataFrame()
+            logger.error(f"[outros_breakdown] {column} erro Railway: {e}")
+            return []
 
-        cols = [
-            'data', 'O seu gênero:', 'Qual a sua idade?', 'O que você faz atualmente?',
-            'Atualmente, qual a sua faixa salarial?', 'Você possui cartão de crédito?',
-            'Já estudou programação?', 'Tem computador/notebook?',
-        ]
-        return pd.DataFrame(rows, columns=cols)
+        if not rows:
+            return []
+
+        df_raw = pd.DataFrame(rows, columns=['Source', 'Term', 'Medium'])
+        df_unified = df_raw.copy()
+
+        # Aplicar unify canônico — mesma rotina do orchestrator/produção
+        try:
+            if column in ('Source', 'Term') and self.client_config.utm:
+                from core.utm import unify_utm
+                df_unified = unify_utm(df_unified, self.client_config.utm)
+            elif column == 'Medium' and self.client_config.medium:
+                from core.medium import unify_medium
+                df_unified = unify_medium(df_unified, self.client_config.medium)
+        except Exception as e:
+            logger.error(f"[outros_breakdown] {column} erro unify: {e}")
+            return []
+
+        if column not in df_unified.columns:
+            return []
+
+        mask = df_unified[column] == 'outros'
+        if not mask.any():
+            return []
+
+        raw_values = df_raw.loc[mask, column].fillna('(vazio)').astype(str)
+        # Case-fold pra agrupamento estável (Sheets vs banco podem variar)
+        counts = raw_values.str.lower().value_counts().head(top_n)
+        return [{'raw_value': v, 'count': int(n)} for v, n in counts.items()]
+
+    def _query_railway_today_partial_brt(self) -> tuple[pd.DataFrame, str]:
+        """
+        Janela: 00:00 BRT de hoje até agora. Retorna (df, label_humano da janela).
+        Label inclui horário pra deixar claro que é parcial.
+        """
+        from datetime import datetime, timedelta, timezone
+        brt = timezone(timedelta(hours=-3))
+        now_brt = datetime.now(brt)
+        today_brt = now_brt.date()
+        start_utc = datetime(today_brt.year, today_brt.month, today_brt.day,
+                             3, 0, 0, tzinfo=timezone.utc)
+        end_utc = now_brt.astimezone(timezone.utc)
+        df = self._query_railway_pesquisa_window(start_utc, end_utc)
+        label = f"{today_brt.isoformat()} BRT 00:00→{now_brt.strftime('%H:%M')} (parcial)"
+        return df, label
 
     def _check_audience_profile_drift(self, df: pd.DataFrame) -> List[Dict]:
         """
@@ -1494,24 +1682,41 @@ class DataQualityMonitor:
             )
             return alerts
 
+        # Hoje parcial (00:00 BRT → agora) — coluna adicional pra cada categoria.
+        # Pode ter n=0 ou n pequeno; renderizar com horário pra deixar fraqueza
+        # de amostra explícita.
+        df_today, today_window_label = self._query_railway_today_partial_brt()
+        n_today = len(df_today)
+
         critical = set(snapshot.get('is_critical', []))
         ref_pool = snapshot.get('reference_pool', {})
         ref_label = ref_pool.get('label', 'reference')
         ref_n = ref_pool.get('n_leads', 0)
 
         top_list: List[Dict] = []
-        down_list: List[Dict] = []
         total_responses_day = 0
+        total_responses_today = 0
 
         for col, ref_entry in snapshot.get('categorical_features', {}).items():
             if col not in df_day.columns:
                 continue
-            s = self._normalize_audience_series(df_day[col], col)
-            s = s[s != '(nulo)']
-            if len(s) == 0:
+            # Proporções ontem (full)
+            s_day = self._normalize_audience_series(df_day[col], col)
+            s_day = s_day[s_day != '(nulo)']
+            if len(s_day) == 0:
                 continue
-            total_responses_day = max(total_responses_day, int(len(s)))
-            day_proportions = (s.value_counts() / len(s)).to_dict()
+            total_responses_day = max(total_responses_day, int(len(s_day)))
+            day_proportions = (s_day.value_counts() / len(s_day)).to_dict()
+
+            # Proporções hoje (partial). Pode estar vazia.
+            today_proportions = {}
+            if n_today > 0 and col in df_today.columns:
+                s_today = self._normalize_audience_series(df_today[col], col)
+                s_today = s_today[s_today != '(nulo)']
+                if len(s_today) > 0:
+                    total_responses_today = max(total_responses_today, int(len(s_today)))
+                    today_proportions = (s_today.value_counts() / len(s_today)).to_dict()
+
             ref_proportions = ref_entry.get('proportions', {})
             label = ref_entry.get('label', col)
             is_critical_feat = col in critical
@@ -1521,9 +1726,21 @@ class DataQualityMonitor:
                 day_p = float(day_proportions.get(cat, 0.0))
                 delta_pp = (day_p - ref_p) * 100.0
                 abs_delta = abs(delta_pp)
-                if abs_delta < down_min_pp:
+                # Só top_list (≥ top_threshold_pp). Items abaixo do threshold
+                # são ruído e não entram no payload.
+                if abs_delta < top_threshold_pp:
                     continue
-                item = {
+                # Hoje parcial — pode não ter dado pra essa categoria
+                if today_proportions:
+                    today_p = float(today_proportions.get(cat, 0.0))
+                    today_delta = (today_p - ref_p) * 100.0
+                    today_pct = round(today_p * 100, 1)
+                    today_delta_pp = round(today_delta, 1)
+                else:
+                    today_pct = None
+                    today_delta_pp = None
+
+                top_list.append({
                     'feature_column': col,
                     'feature_label': label,
                     'is_critical': is_critical_feat,
@@ -1531,37 +1748,26 @@ class DataQualityMonitor:
                     'reference_pct': round(ref_p * 100, 1),
                     'day_pct': round(day_p * 100, 1),
                     'delta_pp': round(delta_pp, 1),
-                }
-                if abs_delta >= top_threshold_pp:
-                    top_list.append(item)
-                else:
-                    down_list.append(item)
+                    'today_pct': today_pct,
+                    'today_delta_pp': today_delta_pp,
+                })
 
-        # Sem nenhum drift relevante — não emite alerta
-        if not top_list and not down_list:
+        if not top_list:
             logger.info(
                 f"[audience_profile_drift] Sem drift relevante em {total_responses_day} respostas/dia "
-                f"(threshold {top_threshold_pp}pp / down_min {down_min_pp}pp)."
+                f"(threshold {top_threshold_pp}pp)."
             )
             return alerts
 
-        # Ordenar por |Δ| desc dentro de cada lista
         top_list.sort(key=lambda x: -abs(x['delta_pp']))
-        down_list.sort(key=lambda x: -abs(x['delta_pp']))
+        max_abs_delta = max((abs(it['delta_pp']) for it in top_list), default=0.0)
 
-        severity = 'HIGH' if top_list else 'MEDIUM'
-        max_abs_delta = max(
-            (abs(it['delta_pp']) for it in (top_list + down_list)),
-            default=0.0
-        )
-
-        # Período comparado — explicitar no alerta (último dia completo BRT vs pool de referência)
+        # Período comparado
         from datetime import timedelta as _td, timezone as _tz
         brt = _tz(_td(hours=-3))
         compared_day_brt = (datetime.now(brt) - _td(days=1)).date().isoformat()
         compared_window_label = f"{compared_day_brt} BRT (último dia completo)"
 
-        # Mensagem compacta para Slack/dashboard
         def _fmt(items, n=5):
             head = ', '.join(
                 f"{it['feature_label']}: {it['category']} — "
@@ -1571,19 +1777,19 @@ class DataQualityMonitor:
             tail = f" (+{len(items) - n})" if len(items) > n else ''
             return head + tail
 
-        msg_parts = []
-        if top_list:
-            msg_parts.append(f"TOP ({len(top_list)} ≥{top_threshold_pp}pp): {_fmt(top_list)}")
-        if down_list:
-            msg_parts.append(f"DOWN ({len(down_list)} {down_min_pp}–{top_threshold_pp}pp): {_fmt(down_list)}")
+        today_clause = (
+            f" · hoje parcial: {today_window_label}, n={total_responses_today}"
+            if total_responses_today > 0 else ''
+        )
 
         alerts.append({
             'type': 'audience_profile_drift',
-            'severity': severity,
+            'severity': 'HIGH',
             'category': 'data_quality',
             'message': (
                 f" Drift de perfil — comparando {compared_window_label} (n={total_responses_day}) "
-                f"vs {ref_label} (n={ref_n}). " + ' | '.join(msg_parts)
+                f"vs {ref_label} (n={ref_n}){today_clause}. "
+                f"TOP ({len(top_list)} ≥{top_threshold_pp}pp): {_fmt(top_list)}"
             ),
             'details': {
                 'compared_window': compared_window_label,
@@ -1591,12 +1797,11 @@ class DataQualityMonitor:
                 'reference_pool_label': ref_label,
                 'reference_pool_n': ref_n,
                 'day_n_responses': total_responses_day,
+                'today_window': today_window_label,
+                'today_n_responses': total_responses_today,
                 'top_threshold_pp': top_threshold_pp,
-                'down_min_pp': down_min_pp,
                 'top_list': top_list,
-                'down_list': down_list,
                 'top_count': len(top_list),
-                'down_count': len(down_list),
             },
             'timestamp': now_iso,
             'metric_value': float(max_abs_delta),

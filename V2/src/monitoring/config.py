@@ -48,18 +48,17 @@ THRESHOLDS = {
     # contra snapshot do pool de referência (Top 5 ROAS) em
     # configs/reference_audience_profiles/{client_id}.json.
     #
-    # Output: 1 alerta agregado por execução, com 2 sublistas:
-    #   - top_list:  itens com |Δpp| ≥ top_threshold_pp  (críticos)
-    #   - down_list: itens com down_min_pp ≤ |Δpp| < top_threshold_pp (menores, dignos de log)
-    # < down_min_pp = ruído (ignorado).
+    # Cada item do top_list traz tanto a comparação contra ontem (`day_pct`,
+    # `delta_pp`) quanto contra hoje parcial 00:00 BRT → agora (`today_pct`,
+    # `today_delta_pp`). Detalhes do alerta carregam `today_window` (label
+    # com horário) e `today_n_responses` pra deixar fraqueza de amostra
+    # explícita.
     #
-    # Severity: HIGH se top_list não-vazia, MEDIUM se só down_list, sem alerta
-    # se ambos vazios. NÃO depende de "feature crítica" — flag informativa só.
+    # Severity: sempre HIGH se top_list não-vazia, sem alerta se vazia.
     'audience_profile_drift': {
         'enabled': True,
-        'top_threshold_pp': 3.0,    # corte para top_list (sensibilidade ajustada 08/05/2026)
-        'down_min_pp': 2.0,         # corte inferior para down_list
-        'min_responses': 50,        # mínimo de respostas no dia para rodar o check
+        'top_threshold_pp': 3.0,    # |Δpp vs ontem| mínimo pra entrar no top_list
+        'min_responses': 50,        # mínimo de respostas em ontem pra rodar o check
     }
 }
 
