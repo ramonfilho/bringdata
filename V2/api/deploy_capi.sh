@@ -559,6 +559,25 @@ deploy_to_cloud_run() {
             print_warning "Smoke test script não encontrado em $SMOKE_SCRIPT — pulado"
         fi
 
+        # [Gate D] Auditoria de config dentro da imagem deployada (08/05/2026).
+        # Pega bug "VAL=0" da família: business.conversion_rates ausente em clients/{cliente}.yaml
+        # ou variants ativos com conversion_rates zerado em active_models/{cliente}.yaml.
+        # Requer docker daemon disponível pra puxar a imagem e ler o YAML interno.
+        GATE_D_SCRIPT="$SCRIPT_DIR/../scripts/gate_d_config_audit.py"
+        if [ -f "$GATE_D_SCRIPT" ]; then
+            print_info "[Gate D] Auditando config dentro da imagem $NEW_REVISION..."
+            if python3 "$GATE_D_SCRIPT" "$NEW_REVISION" --region "$REGION" --project "$PROJECT_ID"; then
+                print_success "[Gate D] Config dentro da imagem está consistente"
+            else
+                print_error "[Gate D] FALHOU — invariantes de YAML quebradas (ver acima)"
+                print_warning "Revisão permanece em 0% de tráfego. NÃO progredir tráfego até resolver."
+                print_info "Para descartar: gcloud run revisions delete $NEW_REVISION --region=$REGION"
+                exit 1
+            fi
+        else
+            print_warning "Gate D script não encontrado em $GATE_D_SCRIPT — pulado"
+        fi
+
         # [T3-1] Progressão de canary recomendada — não pular etapas.
         # Critérios objetivos de avanço entre etapas estão em PLANO_SAFEGUARD.md "Protocolo
         # de progressão de tráfego [T1-9]". Resumo dos comandos:
