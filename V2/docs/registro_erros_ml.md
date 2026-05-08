@@ -206,7 +206,26 @@ Retreino com importance weighting (pesos maiores para leads da campanha de contr
 
 **Como foi descoberto:** 06/05/2026 via Q1 do BigQuery sink `cloudrun_logs.run_googleapis_com_stdout` (ver [bigquery_sinks.md](bigquery_sinks.md)) — query agrupando events `LeadQualified enviado` por `valor_projetado` mostrou que entre 30/04 e 06/05 todos saíam com `value=0`, expondo a remoção silenciosa de `conversion_rates` do YAML em 06/04 (commit `d40970a`). Esse é o fluxo de auditoria padrão pra detectar este tipo de bug em lançamentos futuros.
 
-**Corrigido:** 06/mai (DT-17, `conversion_rates` recolocado no YAML).
+**Corrigido:** 06/mai (Fix A — `conversion_rates` recolocado em `clients/devclub.yaml.business`, commit `8dd208f`). Solução arquitetural completa em DT-17 (`PLANO_REFACTOR_MLOPS.md`) — eliminar duplicação `business_config.py` × YAML.
+
+**§ I.8b — Bug irmão: variants A/B com `conversion_rates` zerado (08/05/2026)**
+
+Janela: descoberto durante o canary `00403-cez` em 10% (08/05). Não havia janela em produção 100% — Fix A do mesmo dia mascarou o bug irmão até o canary subir tráfego.
+
+Causa: em `configs/active_models/devclub.yaml`, os variants `champion_jan30` (shim) e `challenger_abr28` tinham `conversion_rates` declarado como `{D01: 0.0, ..., D10: 0.0}`. Comentário do YAML afirmava literalmente que esses campos "NUNCA são lidos" — mas eram lidos em `app.py:1016` (síncrono) e `app.py:3516` (batch Railway), populando `lead['ab_conversion_rates']` que vira `conversion_rates_override` em `capi_integration.py:347` (prioridade sobre `business_config.conversion_rates`).
+
+Sintoma: 17.6% dos events do canary saíram com `value=0` (D08=R$0, D09=R$0) — exatamente os leads que pegaram path A/B Champion via shim. Os outros 82.4% saíram com value correto (path direto, sem A/B match).
+
+Como descoberto: observação direta do canary em 10% via Q1 BQ — **não foi auditoria proativa**. Gate C v0 da sessão usava `/predict/batch` que não toca path A/B, então não pegou o bug pré-promoção.
+
+Corrigido: Patch B (commit `4c1d727`) — populou `conversion_rates` dos dois variants com valores back-calculados de `LEAD_VALUE_BY_DECILE_CHAMPION/CHALLENGER ÷ product_value`.
+
+Salvaguardas adicionadas no mesmo dia para fechar a classe inteira:
+- **T1-17 (Gate D)** — auditoria de YAML dentro da imagem deployada (D1: business.conversion_rates não vazio; D2: variants ativos com conversion_rates não-zero). Bloqueia deploy. Detalhes em [PLANO_SAFEGUARD.md](PLANO_SAFEGUARD.md).
+- **T1-18 (Gate C revisado)** — equivalência de score+decil entre revisões via `/capi/process_daily_batch?dry_run=true`, com cobertura forçada de Champion + Challenger paths. Detalhes em [PLANO_SAFEGUARD.md](PLANO_SAFEGUARD.md).
+- **A/B routing em `/capi/process_daily_batch`** (commit `266d79d`) — antes só `/webhook/lead_capture` e `/railway/process-pending` faziam routing; agora os três endpoints batem. Consistência arquitetural + viabilidade do Gate C.
+
+Drain: revisão `smart-ads-api-00412-rag` em 100% desde 08/05 ~14:25 BRT. Q1 pós-promoção: zero events value=0; D04=R$1.97, D05=R$5.62, D06=R$5.62, D08=R$6.75, D10=R$14.97 — todos batendo `LEAD_VALUE_BY_DECILE_CHAMPION`.
 
 ---
 
@@ -428,7 +447,7 @@ Seção viva — listar pontos de fragilidade conhecidos que **não são bug ati
 **Fix proposto:** implementar de fato. Pós-encoding, para cada feature com `importance ≥ 0.03` no `feature_registry` ativo, calcular `(df[feature] == 0).mean()`. Se >X% dos leads tiverem zero E a distribuição esperada do treino tiver <X% (capturada em `distribuicoes_esperadas.json`), `raise ValueError` com nome da feature e variante. Threshold X precisa ser feature-aware: features ordinais (idade, salário) podem ter "0" como categoria válida; features OHE (Medium_*) não.
 
 **Encaixe (formalizado em 08/05/2026):** os 3 fixes foram registrados como itens no [PLANO_SAFEGUARD.md](PLANO_SAFEGUARD.md):
-- **T1-14** — smoke test exercita variantes A/B explicitamente (resolve V.1.1)
+- **T1-14** ✅ **Concluído (08/05/2026)** — novo endpoint `GET /smoke/run-variants` em [api/app.py](../api/app.py) busca leads do Railway e força cada variante (Champion default + variantes do `ab_test.variants`, incluindo shims) a scorear com seu `predictor_override` + `encoding_overrides`. Valida score ∈ [0,1], decis ∈ {D01..D10}, e `mlflow_run_id` casando esperado. [scripts/smoke_test_revision.py](../scripts/smoke_test_revision.py) ganhou novo gate T1-14 que bloqueia o deploy quando qualquer variante quebra.
 - **T1-15** — parity audit itera por variante A/B aplicando `encoding_overrides_merged` (resolve V.1.2)
 - **T1-16** — validação pós-encoding ">X% zerados → raise" feature-aware (resolve V.1.3, item que estava declarado como entregue mas nunca foi implementado)
 

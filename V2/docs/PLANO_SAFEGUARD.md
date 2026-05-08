@@ -52,9 +52,11 @@ Antes de executar `FORCE_DEPLOY=true ./deploy_capi.sh --force-deploy` para subir
 - [ ] T1-11 (validador pré-encoding de features) — Concluído
 - [ ] T1-12 (smoke de paridade pipeline-modelo no treino) — **Backlog** (29/04/2026)
 - [ ] T1-13 (audience_profile_drift) — Concluído (08/05/2026)
-- [ ] T1-14 (smoke test exercita variantes A/B) — **Backlog descoberto via V.1** (08/05/2026)
+- [ ] T1-14 (smoke test exercita variantes A/B) — Concluído (08/05/2026)
 - [ ] T1-15 (parity audit por variante A/B) — **Backlog descoberto via V.1** (08/05/2026)
 - [ ] T1-16 (validação pós-encoding >X% zerados) — **Backlog descoberto via V.1; nunca foi implementada apesar de declarada em 21/abr** (08/05/2026)
+- [ ] T1-17 (Gate D — auditoria de YAML dentro da imagem) — Concluído (08/05/2026)
+- [ ] T1-18 (Gate C — equivalência de score+decil entre revisões) — Concluído (08/05/2026)
 
 **Gates automáticos que o script roda:**
 1. `check_authorized_branch()` — bloqueia se branch não-rollback sem `FORCE_DEPLOY=true`
@@ -534,7 +536,7 @@ curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/singl
 | T1-11 Validador pré-encoding de features | Concluído | | 2026-04-23 — Peça A (src/core/feature_validator.py + schema JSON + integração em production_pipeline.py, 7/7 testes passam) em commit 361fc62; Peça B (endpoint GET /monitoring/feature-report em api/app.py com agregação de logs e recomendação de ação) em commit ba43d30; Peça C (critérios de promoção formalizados) já estava integrada em T1-9 antes. |
 | T1-12 Smoke paridade pipeline-modelo no treino | **Backlog** | | 29/04/2026 — implementar em sessão futura quando próximo retreino for feito. |
 | T1-13 audience_profile_drift | Concluído | | 08/05/2026 — `_check_audience_profile_drift` em `monitoring/data_quality.py` + snapshot em `configs/reference_audience_profiles/devclub.json` (n=39.771, Top 5 ROAS) + gerador em `scripts/build_reference_audience_profile.py`. Especificação completa na linha do T1-13 acima. |
-| T1-14 Smoke test exercita variantes A/B | **Backlog (descoberto via V.1)** | | 08/05/2026 — investigação V.1 do registro_erros_ml.md confirmou hipótese (d): smoke test não cobre caminho A/B. Pré-condição lógica para T1-15. Implementar antes do próximo deploy com A/B reativado. |
+| T1-14 Smoke test exercita variantes A/B | Concluído | | 08/05/2026 — novo endpoint `GET /smoke/run-variants` em `api/app.py` busca N leads recentes do Railway, força cada variante (Champion default + variantes do `ab_test.variants`, incluindo shims) a scorear com seu `predictor_override` + `encoding_overrides`, valida score in [0,1], decis válidos e `mlflow_run_id` casando expected. `scripts/smoke_test_revision.py` ganhou novo gate T1-14 (chamado após T1-11) que bloqueia o deploy quando qualquer variante quebra. Flag `--skip-ab-variants-gate` para escape hatch. Cobre o gap descoberto via V.1.1 (smoke antigo só chamava `/monitoring/daily-check/railway` sem contexto A/B). |
 | T1-15 Parity audit por variante A/B | **Backlog (descoberto via V.1)** | | 08/05/2026 — investigação V.1 confirmou hipótese (a): `parity_audit.py` ignora `encoding_overrides`. Implementar antes do próximo deploy com A/B reativado. |
 | T1-16 Validação pós-encoding >X% zerados | **Backlog (descoberto via V.1)** | | 08/05/2026 — investigação V.1 descobriu que a salvaguarda foi declarada concluída em 21/abr mas **nunca foi implementada**. Pré-condição: `distribuicoes_esperadas.json` capturar `proporcao_esperada_zero` por feature no próximo retreino. |
 | T2-1 Deduplicação treino | Concluído | | 2026-04-23 — 3 funções implementadas em src/core/ingestion.py (filter_sheets, remove_duplicates_per_sheet, consolidate_datasets). Assinatura config-driven. 5 campos novos em IngestionConfig + configs/clients/devclub.yaml. data_processing/ingestion.py preservado (backward compat). T1-7 passa. |

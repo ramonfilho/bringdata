@@ -2930,6 +2930,187 @@ async def daily_monitoring_check_railway(
         raise HTTPException(status_code=500, detail=f"Erro no Railway monitoring: {str(e)}")
 
 
+@app.get("/smoke/run-variants")
+async def smoke_run_variants(
+    pipeline: PipelineDep,
+    limit: int = 5,
+    hours: int = 24,
+):
+    """
+    [T1-14] Roda o pipeline para cada variante A/B explicitamente.
+
+    Pega N leads recentes do Railway e força cada variante (incluindo o
+    Champion default) a scorear com seu predictor + encoding_overrides
+    correspondente. Retorna pass/fail por variante.
+
+    Cobre o gap descoberto via investigação V.1 (registro_erros_ml.md):
+    o smoke test antigo chamava `/monitoring/daily-check/railway` sem
+    contexto A/B e nunca exercitava Champion com encoding_overrides
+    nem variantes shim — bug do Cluster 5 (29/abr–05/mai/2026) passou
+    por isso.
+
+    Args:
+        limit: Quantos leads usar para o teste (default 5).
+        hours: Janela de leads recentes do Railway (default 24h).
+    """
+    import pg8000.native
+    from src.model.decil_thresholds import atribuir_decis_batch
+
+    start_time = time.time()
+    results: List[Dict[str, Any]] = []
+
+    # 1. Buscar leads recentes do Railway
+    try:
+        railway_conn = pg8000.native.Connection(
+            host=os.environ['RAILWAY_DB_HOST'],
+            port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+            database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+            user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+            password=os.environ['RAILWAY_DB_PASSWORD'],
+            timeout=30,
+        )
+        from datetime import timezone as _tz
+        cutoff = datetime.now(_tz.utc) - timedelta(hours=hours)
+        rows = railway_conn.run(
+            'SELECT id, data, "nomeCompleto", email, telefone, pesquisa, '
+            'source, medium, campaign, content, term, '
+            '"remoteIp", "userAgent", fbc, fbp, "pageUrl" '
+            'FROM "Lead" '
+            'WHERE pesquisa IS NOT NULL '
+            'AND "createdAt" >= :start '
+            'ORDER BY "createdAt" DESC '
+            'LIMIT :lim',
+            start=cutoff, lim=limit,
+        )
+        railway_conn.close()
+    except Exception as e:
+        return {
+            'overall_status': 'fail',
+            'reason': f'Falha ao buscar leads do Railway: {type(e).__name__}: {str(e)[:200]}',
+            'variants_tested': 0,
+            'results': [],
+        }
+
+    if not rows:
+        return {
+            'overall_status': 'no_data',
+            'reason': f'Nenhum lead com pesquisa nas últimas {hours}h',
+            'variants_tested': 0,
+            'results': [],
+        }
+
+    # 2. Converter para DataFrame no formato que o pipeline espera
+    from api.railway_mapping import railway_lead_to_sheets_row
+    col_names = [
+        'id', 'data', 'nomeCompleto', 'email', 'telefone', 'pesquisa',
+        'source', 'medium', 'campaign', 'content', 'term',
+        'remoteIp', 'userAgent', 'fbc', 'fbp', 'pageUrl',
+    ]
+    sheets_rows = [railway_lead_to_sheets_row(dict(zip(col_names, r))) for r in rows]
+    df_input_base = pd.DataFrame(sheets_rows)
+
+    # 3. Montar lista de variantes a testar
+    variants_to_test: List[Dict[str, Any]] = []
+
+    # Default Champion (sempre — sem A/B, ou caminho default em A/B)
+    variants_to_test.append({
+        'name': 'default',
+        'predictor_override': None,
+        'encoding_overrides': None,
+        'expected_run_id': pipeline.predictor.mlflow_run_id
+            if hasattr(pipeline.predictor, 'mlflow_run_id') else None,
+    })
+
+    # Variantes do A/B (se enabled)
+    ab_cfg = getattr(pipeline, '_ab_test_config', None)
+    if ab_cfg and getattr(ab_cfg, 'enabled', False):
+        for vname, variant in (ab_cfg.variants or {}).items():
+            try:
+                pred = pipeline.get_variant_predictor(vname)
+            except Exception as e:
+                results.append({
+                    'variant': vname,
+                    'status': 'fail',
+                    'expected_run_id': getattr(variant, 'run_id', None),
+                    'errors': f'get_variant_predictor falhou: {type(e).__name__}: {str(e)[:200]}',
+                })
+                continue
+            variants_to_test.append({
+                'name': vname,
+                'predictor_override': pred,
+                'encoding_overrides': getattr(variant, 'encoding_overrides', None),
+                'expected_run_id': variant.run_id,
+            })
+
+    # 4. Rodar pipeline para cada variante
+    for vinfo in variants_to_test:
+        name = vinfo['name']
+        try:
+            pipeline.data = df_input_base.copy()
+            df_processed = pipeline.preprocess(
+                encoding_overrides=vinfo['encoding_overrides'],
+                predictor_override=vinfo['predictor_override'],
+            )
+            predictor = vinfo['predictor_override'] or pipeline.predictor
+            actual_run_id = predictor.mlflow_run_id \
+                if hasattr(predictor, 'mlflow_run_id') else None
+
+            # Scoring
+            X = df_processed[predictor.feature_names]
+            scores = predictor.model.predict_proba(X)[:, 1]
+            score_min, score_max = float(scores.min()), float(scores.max())
+            scores_valid = (0 <= score_min) and (score_max <= 1)
+
+            # Decis
+            decis_dist: Dict[str, int] = {}
+            decis_valid = False
+            thresholds = (predictor.metadata or {}).get('decil_thresholds', {}).get('thresholds')
+            if thresholds:
+                decis = atribuir_decis_batch(scores, thresholds)
+                expected = {f"D{i:02d}" for i in range(1, 11)}
+                decis_valid = set(decis).issubset(expected)
+                decis_dist = pd.Series(decis).value_counts().sort_index().to_dict()
+
+            run_id_match = (vinfo['expected_run_id'] is None) or \
+                (actual_run_id == vinfo['expected_run_id'])
+
+            all_passed = scores_valid and decis_valid and run_id_match
+            results.append({
+                'variant': name,
+                'status': 'pass' if all_passed else 'fail',
+                'expected_run_id': vinfo['expected_run_id'],
+                'actual_run_id': actual_run_id,
+                'leads_scored': len(df_processed),
+                'score_range': [score_min, score_max],
+                'decis_distribution': decis_dist,
+                'validations': {
+                    'scores_in_range': scores_valid,
+                    'decis_valid': decis_valid,
+                    'run_id_match': run_id_match,
+                },
+                'errors': None,
+            })
+        except Exception as e:
+            import traceback
+            results.append({
+                'variant': name,
+                'status': 'fail',
+                'expected_run_id': vinfo.get('expected_run_id'),
+                'actual_run_id': None,
+                'errors': f"{type(e).__name__}: {str(e)[:300]}",
+                'traceback_snippet': traceback.format_exc()[-500:],
+            })
+
+    overall = 'pass' if all(r.get('status') == 'pass' for r in results) else 'fail'
+    return {
+        'overall_status': overall,
+        'leads_used': len(df_input_base),
+        'variants_tested': len(results),
+        'processing_time_seconds': round(time.time() - start_time, 2),
+        'results': results,
+    }
+
+
 @app.post("/monitoring/daily-check", response_model=DailyCheckResponse)
 async def daily_monitoring_check(
     request: DailyCheckRequest,

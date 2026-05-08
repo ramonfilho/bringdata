@@ -153,6 +153,38 @@ def check_feature_report_gate(
     return 'block', {**payload, 'blocking_issues': blocking}
 
 
+def check_ab_variants_smoke(url: str, timeout: int = 120) -> tuple[str, dict]:
+    """
+    [T1-14 Gate] Bate /smoke/run-variants?limit=5&hours=24 e decide se a
+    progressão de tráfego deve ser bloqueada.
+
+    Cada variante (incluindo Champion default e shims) é forçada a rodar
+    com seu predictor + encoding_overrides correspondentes. Bloqueia
+    quando overall_status == 'fail' (qualquer variante quebrou).
+
+    Returns:
+        (decision, payload) onde decision ∈ {'pass', 'block', 'no_data', 'error'}
+    """
+    endpoint = f"{url}/smoke/run-variants?limit=5&hours=24"
+    try:
+        req = urllib.request.Request(endpoint, method='GET')
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        body = resp.read().decode('utf-8', errors='replace')
+        payload = json.loads(body)
+    except urllib.error.HTTPError as e:
+        body = e.read(2000).decode('utf-8', errors='replace') if hasattr(e, 'read') else str(e)
+        return 'error', {'http_status': e.code, 'body': body[:500]}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        return 'error', {'reason': str(e)[:500]}
+
+    overall = payload.get('overall_status')
+    if overall == 'no_data':
+        return 'no_data', payload
+    if overall == 'pass':
+        return 'pass', payload
+    return 'block', payload
+
+
 def fetch_revision_logs(revision: str, project: str, freshness_seconds: int = 600) -> str:
     """Busca logs da revisão com '[T1-10]' OU '[STARTUP CHECK]' no payload, dos últimos N segundos."""
     query = (
@@ -189,6 +221,8 @@ def main() -> int:
                              "Default: 'target' (label do treino, não existe em prod).")
     parser.add_argument('--skip-feature-report-gate', action='store_true',
                         help='Pula o gate do /monitoring/feature-report (T1-11).')
+    parser.add_argument('--skip-ab-variants-gate', action='store_true',
+                        help='Pula o gate de variantes A/B (T1-14).')
     args = parser.parse_args()
 
     print(f"[smoke test] Revisão: {args.revision}")
@@ -305,6 +339,42 @@ def main() -> int:
             print(f"[smoke test] ✅ feature-report OK "
                   f"(total_batches={fr_payload.get('total_batches')}, "
                   f"overall_status={fr_payload.get('overall_status')})")
+
+    # [T1-14 Gate] /smoke/run-variants — exercita cada variante A/B explicitamente
+    if args.skip_ab_variants_gate:
+        print("[smoke test] ⚠️  --skip-ab-variants-gate: pulando gate T1-14.")
+    else:
+        print("[smoke test] [T1-14] Consultando /smoke/run-variants...")
+        ab_decision, ab_payload = check_ab_variants_smoke(url)
+
+        if ab_decision == 'block':
+            print()
+            print("╔══════════════════════════════════════════════════════════════════╗")
+            print("║  🚨 SMOKE TEST FALHOU — VARIANTE A/B QUEBROU (T1-14)           ║")
+            print("╠══════════════════════════════════════════════════════════════════╣")
+            print(f"  overall_status: {ab_payload.get('overall_status')}")
+            print(f"  variants_tested: {ab_payload.get('variants_tested')}")
+            for r in ab_payload.get('results', []):
+                if r.get('status') == 'fail':
+                    print(f"    ✗ {r.get('variant')}: {r.get('errors') or r.get('validations')}")
+                    if r.get('expected_run_id') != r.get('actual_run_id'):
+                        print(f"      run_id esperado={r.get('expected_run_id')}  recebido={r.get('actual_run_id')}")
+            print("╚══════════════════════════════════════════════════════════════════╝")
+            print()
+            print("Ação: não progredir tráfego. Variante A/B quebrou — provável bug de")
+            print("encoding_overrides ausente, predictor inválido ou run_id divergente.")
+            return 1
+
+        if ab_decision == 'error':
+            print(f"[smoke test] ⚠️  /smoke/run-variants falhou: {ab_payload}")
+            print("[smoke test] Não bloqueante (gate não conseguiu opinar) — verifique manualmente.")
+        elif ab_decision == 'no_data':
+            print("[smoke test] ⚠️  /smoke/run-variants sem leads recentes para testar.")
+            print(f"[smoke test] Não bloqueante — {ab_payload.get('reason', '')}")
+        else:  # 'pass'
+            n_variants = ab_payload.get('variants_tested', 0)
+            print(f"[smoke test] ✅ A/B variants OK ({n_variants} variantes testadas, "
+                  f"{ab_payload.get('leads_used')} leads)")
 
     print("[smoke test] ✅ Todos os gates passaram. Prossegue.")
     return 0
