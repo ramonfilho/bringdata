@@ -413,16 +413,43 @@ Seção viva — listar pontos de fragilidade conhecidos que **não são bug ati
 
 ### V.2 — 4 features binárias passam raw sem `_normalizar`
 
-**Estado atual:** as features `genero`, `estudouProgramacao`, `faculdade`, `investiuCurso` chegam ao modelo via `or None` direto da pesquisa, **sem passar pela função `_normalizar`** que padroniza casing e espaços.
+**Estado atual (mapeado em 08/05/2026):**
 
-**Por que não é bug hoje:** o front sempre manda no formato exato (`'Masculino'`/`'Feminino'`, `'Sim'`/`'Não'`). Modelo está protegido nas duplicações que existem hoje. Não há perda de sinal.
+| Feature (front camelCase) | Pós-`data_loader` ([validation/data_loader.py:448-458](../src/validation/data_loader.py#L448-L458)) | Em `categorias_esperadas.json` (treino jan30) | Valores canônicos |
+|---|---|---|---|
+| `genero` | `genero` | `'O seu gênero:'` | `['Feminino', 'Masculino']` |
+| `estudouProgramacao` | `estudou_programacao` | `'Já estudou programação?'` | `['Não', 'Sim']` |
+| `faculdade` | `pretende_faculdade` (sic — `df.get('fez_faculdade')`) | `'Você já fez/faz/pretende fazer faculdade?'` | `['Não', 'Sim']` |
+| `investiuCurso` | `investiu_curso_online` | `investiu_curso_online` | `['Não', 'Sim']` |
 
-**Por que é armadilha latente:** se um dia o front mandar `'sim'` minúsculo ou `'SIM'` em maiúsculo, vira coluna OHE nova que o modelo não aprendeu — **silencioso**. Mesma classe de bug do Cluster 1 (07/01: `'NÃO'` em "Tem computador?") e do Erro 15 (UTM Source/Term).
+**Por que ficaram fora da normalização (deliberado):** [category_unification.py:91-115](../src/data_processing/category_unification.py#L91-L115) tem comentário explícito documentando a exclusão. Modelo jan30 foi treinado com valores ORIGINAIS (com acento e capital). Passar pelo `limpar_texto` (lowercase + unidecode) quebraria o OHE — `'Não' → '_N_o'` viraria `'nao' → '_nao'`, feature inexistente no treino. Logo, **não é descuido — é a única forma de o modelo atual reconhecer essas features**.
 
-**Mitigação proposta:**
-1. Passar essas 4 features pelo `_normalizar` (`.lower().strip()`) — alinhamento direto com o que o modelo espera ver.
-2. Adicionar monitoramento de raw values: alerta quando uma feature binária recebe valor fora do conjunto canônico esperado.
-3. Considerar como parte do retreino: incluir o `.lower()` no pipeline de treino também, para tolerar variações no front futuramente.
+**Por que não é bug hoje:** o front sempre manda formato exato (`'Masculino'`/`'Feminino'`, `'Sim'`/`'Não'`). Modelo protegido nas duplicações que existem hoje. Não há perda de sinal.
+
+**Por que é armadilha latente:** se o front mandar `'sim'` minúsculo, `'SIM'` caps, ou whitespace extra, [encoding.py:265-274](../src/core/encoding.py#L265-L274) (`pd.get_dummies()` puro) gera coluna OHE inédita — **silencioso**. Mesma classe de bug do Cluster 1 (07/01: `'NÃO'` em "Tem computador?") e do Erro 15 (UTM Source/Term).
+
+**Caminho de produção confirmado (08/05/2026):** [production_pipeline.py:212-346](../src/production_pipeline.py#L212-L346). Sequência:
+1. `[1/8] _preprocess` (core/preprocessing.py) faz rename — snake → questão longa.
+2. `[4/11] unify_utm` → `[5/11] _unify_medium` → `[6/11] _unify_categories` (category_unification.py — onde as 4 features são deliberadamente excluídas, ver acima).
+3. `[8/12] check_category_drift` ([production_pipeline.py:333-346](../src/production_pipeline.py#L333-L346)) — quando este roda, os nomes já casam com `categorias_esperadas.json`. **Hipótese (a) confirmada: não há `missing_column` HIGH disparando hoje.**
+
+**Status real do monitoramento das 4 features:** `check_category_drift` já cobre tecnicamente — se `'sim'` minúsculo aparecesse, dispararia `new_categories` alert. **Porém** o alerta hoje só faz `logger.warning` e armazena em `self.alerts` ([production_pipeline.py:341-344](../src/production_pipeline.py#L341-L344) — comentário literal: *"Armazenar alertas para enviar depois (implementação futura)"*). Não chega ao Slack. Em outras palavras: o sensor existe; o cabo do alarme até a sirene não foi puxado.
+
+**Mitigação proposta — 3 vetores:**
+1. **Fail-loud no encoding (seguro, sem retreino):** validação em [encoding.py:265-274](../src/core/encoding.py#L265-L274) antes do `get_dummies`. Se valor fora de `{Sim, Não, Masculino, Feminino}` aparece em >0 leads, bloqueia e loga.
+2. **Normalização em `data_loader` (precisa retreino):** novo `_normalizar_categorico_binario` (strip + lower) em `core/`, aplicado em treino E produção. Exige retreinar para que o modelo aprenda com valores normalizados — não pode ser inserido sozinho em produção (quebraria jan30).
+3. **Alerta de monitoramento (defesa em profundidade):** `check_binary_feature_canonical_values` em `monitoring/data_quality.py` com dict explícito `{coluna: [valores_canônicos]}`. Alerta no Slack se valor fora aparece. Não bloqueia — apenas avisa.
+
+**Decisão na sessão de 08/05/2026:** atacar o vetor 3 primeiro (defesa em profundidade). Bloqueador antes de implementar: confirmar onde inserir o check no caminho de produção — se nomes são snake (pós-`data_loader`) ou longos (pós-renomeação a localizar) na hora em que o check rodar.
+
+**Implementado (08/05/2026) — vetor 3 fechado:** sem criar check novo. `check_category_drift` já cobre tecnicamente as 4 features (nomes alinhados pós-`_preprocess`). Lacuna real era leitura humana — alerts ficavam diluídos na lista completa do response. Mudanças aplicadas:
+- [orchestrator.py:215-237](../src/monitoring/orchestrator.py#L215-L237) — `alerts` ordenados por severity desc (HIGH → MEDIUM → LOW) + novo subset `actionable_alerts` (HIGH+MEDIUM, formato compacto `{type, severity, category, column, percentage, message}`).
+- `DailyCheckResponse` em `api/app.py:79-93` ganhou o campo `actionable_alerts` (default `[]`).
+- Endpoints `/monitoring/daily-check/railway` e `/monitoring/daily-check` passam o campo.
+
+**Vetores 1 e 2 ainda em aberto:**
+- Vetor 1 (fail-loud no encoding) — não implementado. Próximo passo se a V.2 ressurgir.
+- Vetor 2 (normalização + retreino) — entra junto do próximo retreino. Sem ele, o modelo continua frágil a casing variation; com defesa em profundidade do vetor 3, o operador tem como detectar se acontecer.
 
 ### V.3 — Backlog "tentar quebrar produção"
 

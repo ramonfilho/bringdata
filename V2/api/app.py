@@ -81,6 +81,9 @@ class DailyCheckResponse(BaseModel):
     total_alerts: int
     alerts_by_severity: Dict[str, int]
     alerts_by_category: Dict[str, int]
+    # Subset HIGH+MEDIUM em formato compacto (type, severity, column, percentage, message).
+    # Lista de leitura humana direta — ver V.2 de docs/registro_erros_ml.md.
+    actionable_alerts: List[Dict[str, Any]] = []
     alerts: List[Dict[str, Any]]
     critical_summary: str
     timestamp: str
@@ -2884,6 +2887,7 @@ async def daily_monitoring_check_railway(
             total_alerts=result['total_alerts'],
             alerts_by_severity=result['alerts_by_severity'],
             alerts_by_category=result['alerts_by_category'],
+            actionable_alerts=result.get('actionable_alerts', []),
             alerts=result['alerts'],
             critical_summary=result.get('critical_summary', ''),
             timestamp=datetime.now().isoformat(),
@@ -2985,6 +2989,7 @@ async def daily_monitoring_check(
             total_alerts=result['total_alerts'],
             alerts_by_severity=result['alerts_by_severity'],
             alerts_by_category=result['alerts_by_category'],
+            actionable_alerts=result.get('actionable_alerts', []),
             alerts=result['alerts'],
             critical_summary=result.get('critical_summary', ''),
             timestamp=datetime.now().isoformat(),

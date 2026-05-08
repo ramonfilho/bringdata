@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from .data_quality import DataQualityMonitor
 from .operational_monitor import OperationalMonitor
 from .capi_monitor import CAPIQualityMonitor
-from .models import Alert
+from .models import Alert, Severity
 from core.client_config import ClientConfig
 from core.utm import unify_utm
 from core.medium import unify_medium
@@ -214,6 +214,26 @@ class MonitoringOrchestrator:
         # Converter para objetos Alert
         alerts = [Alert.from_dict(alert_dict) for alert_dict in all_alerts_dict]
 
+        # Ordenar por severity desc (HIGH → MEDIUM → LOW) — destaca o que importa primeiro
+        # quando o response é lido manualmente no endpoint /monitoring/daily-check/railway.
+        _SEVERITY_RANK = {Severity.HIGH: 0, Severity.MEDIUM: 1, Severity.LOW: 2}
+        alerts.sort(key=lambda a: _SEVERITY_RANK.get(a.severity, 99))
+
+        # Subset acionável (HIGH+MEDIUM) — formato compacto pra leitura humana direta no JSON
+        # do endpoint, sem precisar varrer `alerts` completo. Cobre V.2 do registro_erros_ml.md.
+        actionable_alerts = [
+            {
+                'type': a.type,
+                'severity': a.severity.value,
+                'category': a.category.value,
+                'column': a.details.get('column') if isinstance(a.details, dict) else None,
+                'percentage': a.details.get('percentage') if isinstance(a.details, dict) else None,
+                'message': a.message,
+            }
+            for a in alerts
+            if a.severity in (Severity.HIGH, Severity.MEDIUM)
+        ]
+
         # Gerar sumário
         summary = self._generate_summary(alerts)
 
@@ -250,6 +270,7 @@ class MonitoringOrchestrator:
             'total_alerts': len(alerts),
             'alerts_by_severity': summary['by_severity'],
             'alerts_by_category': summary['by_category'],
+            'actionable_alerts': actionable_alerts,
             'alerts': [alert.to_dict() for alert in alerts],
             'funnel_metrics': funnel_metrics,
             'lead_quality_metrics': lead_quality_metrics,
