@@ -1111,6 +1111,57 @@ Ou seja: **treino ≠ deploy.** O YAML do cliente é configuração de produçã
 
 ---
 
+### DT-18 — Normalizar 4 features binárias raw (bloqueia A/B com Challenger novo)
+
+**Contexto:** quatro features categóricas vindas da pesquisa do front chegam ao modelo **sem normalização** (sem `.lower()`, sem `unidecode`, sem `.strip()`):
+
+| Coluna pós-`data_loader` | Valores canônicos atuais |
+|---|---|
+| `genero` | `'Masculino'`, `'Feminino'` |
+| `estudou_programacao` | `'Sim'`, `'Não'` |
+| `fez_faculdade` | `'Sim'`, `'Não'` |
+| `investiu_curso_online` | `'Sim'`, `'Não'` |
+
+A exclusão é **deliberada** e está documentada com comentário longo em [src/data_processing/category_unification.py:91-115](../src/data_processing/category_unification.py#L91-L115). Razão: o Champion atual (`jan30`, run `d51757f5041c44b7ab1a056fce8c3c35`) foi treinado com os valores ORIGINAIS — `pd.get_dummies()` gera nomes de coluna sufixados pelo valor cru (`'Não' → '_N_o'`). Se a normalização passar a rodar em produção, `'Não' → '_N_o'` vira `'nao' → '_nao'` (sufixo inexistente no `feature_registry`) e o modelo recebe **as 4 features zeradas pra 100% dos leads** — silencioso, sem erro.
+
+**Por que vira bug se o front mudar:** hoje protegidos porque o payload é estável (`'Sim'`/`'Não'` exatos). Se o front mandar `'sim'` minúsculo, `'SIM'` caps ou whitespace extra, o OHE gera coluna inédita e o sinal cai a zero do mesmo jeito. Mesma classe dos Clusters 1, 3, 4, 5 do Erro 2 do `registro_erros_ml.md`. Dependência implícita inadmissível em sistema multi-modelo/multi-cliente.
+
+**Fix obrigatório (vetor 2 da V.2 do registro_erros_ml.md):** aplicar `.strip().lower()` (ou equivalente) nas 4 features **em treino e produção juntos**. Remover a exclusão explícita em `category_unification.py:95-116` e incluir as 4 colunas no `COLUNAS_CATEGORICAS` que recebe `limpar_texto`.
+
+**🚨 Bloqueio crítico — fix isolado QUEBRA produção:**
+
+| Cenário | Champion (jan30) `feature_registry` | Produção (encoding) | Resultado |
+|---|---|---|---|
+| Hoje | OHE com sufixos `_Sim`/`_Não`/`_Masculino`/`_Feminino` | Strings raw | ✅ Funciona |
+| Fix só em produção | OHE com sufixos originais | Strings normalizadas (`_sim`/`_nao`) | ❌ **QUEBRA** — 100% das 4 features zeradas |
+| Fix só em treino | (jan30 não muda — já está em produção) | Strings raw | ✅ Funciona, mas próximos modelos divergem do legado |
+| Fix em treino + produção + retreino do Champion | OHE com sufixos normalizados | Strings normalizadas | ✅ Funciona e robusto a casing variation futura |
+
+**Conclusão dura:** **DT-18 não pode ser implementado isolado em produção enquanto `jan30` estiver como Champion.** Tem que ir junto com retreino do Champion. Sem isso, produção roda com 100% dos leads cegos pra essas 4 features (8% do peso somado, similar ao dano do Cluster 4/5 do Erro 2 — que custou ~R$4-8k de movimentação total entre decis em janelas de 6-7 dias).
+
+**Pré-requisitos para implementar:**
+1. Implementar normalização em `core/category_unification.py` (remover bloco de exclusão linhas 91-116 + adicionar as 4 colunas a `COLUNAS_CATEGORICAS`).
+2. Confirmar que treino (`train_pipeline.py`) e produção (`production_pipeline.py`) usam o mesmo código via `core/` — regra já existente, só validar que não há replicação fora.
+3. Treinar **próximo Champion** com o código novo. **NÃO promover sem retreino.**
+4. Validar no `categorias_esperadas.json` do novo run: as 4 features com valores normalizados (`'sim'`, `'nao'`, `'masculino'`, `'feminino'`).
+5. Promover via canary normal (gates A→B→C→D→E).
+
+**Dependência com DT-16:** DT-16 (matar `encoding_overrides`) já requer um novo Champion treinado com pipeline atual. **DT-18 deve entrar no MESMO retreino do DT-16** — qualquer modelo que vire o próximo Champion já sai com o fix. Faz UM retreino só, não dois.
+
+**A/B com Challenger é condicional:** se um A/B for ligado com Champion legado (jan30, sem fix) + Challenger novo (com fix), o caminho do Challenger funciona mas o do Champion roda exposto à variação de casing. O A/B fica enviesado pelos leads que caem no Champion. **Retreinar o Champion é pré-condição para qualquer A/B em que o Challenger use código com normalização.**
+
+**Mitigação de risco enquanto o fix não entra:** vetor 3 da V.2 implementado em 08/05/2026 — `actionable_alerts` no `/monitoring/daily-check` destaca HIGH+MEDIUM. Se o front mandar valor inesperado, `check_category_drift` dispara `new_categories` e aparece no topo do response. Isso não é fail-safe (continua silencioso pra produção até o próximo daily-check), mas dá detecção em até 24h.
+
+**Cross-refs:**
+- `V2/docs/registro_erros_ml.md` § V.2
+- `V2/src/data_processing/category_unification.py:91-115` (comentário longo no código)
+- `V2/docs/CHECKLIST_ONBOARDING_NEW_CLIENT.md` § 3 (treinar modelo)
+- `V2/docs/PLANO_EXECUCAO.md` (item de pré-requisito do próximo retreino)
+
+**Prioridade:** **alta** — bloqueia A/B com Challenger novo. Risco operacional atual baixo (front estável), mas a primeira variação de casing quebra silenciosamente.
+
+---
+
 ## 12. Caminho para Nível 2 e além
 
 Ver **`docs/ROADMAP_MLOPS_MATURIDADE.md`** para o guia completo.

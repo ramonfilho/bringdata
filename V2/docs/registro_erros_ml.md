@@ -449,7 +449,7 @@ Seção viva — listar pontos de fragilidade conhecidos que **não são bug ati
 
 **Vetores 1 e 2 ainda em aberto:**
 - Vetor 1 (fail-loud no encoding) — não implementado. Próximo passo se a V.2 ressurgir.
-- Vetor 2 (normalização + retreino) — entra junto do próximo retreino. Sem ele, o modelo continua frágil a casing variation; com defesa em profundidade do vetor 3, o operador tem como detectar se acontecer.
+- Vetor 2 (normalização + retreino) — formalizado como **DT-18** em [PLANO_REFACTOR_MLOPS.md](PLANO_REFACTOR_MLOPS.md) com bloqueio crítico documentado: **fix isolado em produção quebra Champion legado `jan30`** (100% das 4 features zeradas pra todos os leads, ~8% do peso do modelo). Pré-requisito: retreino do Champion com código novo. **A/B com Challenger usando código novo é condicional ao retreino do Champion** — sem isso, leads que caem no Champion ficam expostos à variação de casing. Cross-refs no checklist de [onboarding](CHECKLIST_ONBOARDING_NEW_CLIENT.md) e em [PLANO_EXECUCAO.md M4](PLANO_EXECUCAO.md).
 
 ### V.3 — Backlog "tentar quebrar produção"
 

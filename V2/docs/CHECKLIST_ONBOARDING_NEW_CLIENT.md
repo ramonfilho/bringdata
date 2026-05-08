@@ -45,6 +45,16 @@ O pipeline vai:
 - Validar missing rates na **Célula 8** (features críticas vs. thresholds)
 - Explodir com mensagem clara se algo estiver errado no formato dos dados
 
+### ⚠️ Antes de treinar — DT-18 (features binárias raw)
+
+Quatro features categóricas (`genero`, `estudou_programacao`, `fez_faculdade`, `investiu_curso_online`) estão hoje **excluídas da normalização** em [src/data_processing/category_unification.py:91-115](../src/data_processing/category_unification.py#L91-L115) por compatibilidade com o Champion legado `jan30`. Para o **primeiro Champion de um novo cliente** (ou para o próximo Champion DevClub):
+
+- [ ] Verificar se essas 4 colunas existem no formulário do cliente. Se sim, decidir: **(a)** mantém a exclusão (compatível com legado jan30, mas frágil a casing variation no front); **(b)** aplica DT-18 e treina já com normalização (recomendado para clientes novos sem legado).
+- [ ] Se opção (b): remover bloco de exclusão em `category_unification.py:91-116`, incluir as 4 colunas em `COLUNAS_CATEGORICAS`, treinar.
+- [ ] Após treino, validar que `categorias_esperadas.json` tem as 4 features com valores normalizados (`'sim'`, `'nao'`, `'masculino'`, `'feminino'`) — não as versões originais.
+
+**Por que importa:** se um cliente novo for treinado com a opção (a) e o front dele um dia mandar `'sim'` minúsculo, vira coluna OHE inédita → 8% do peso do modelo zerado para 100% dos leads, silencioso. Especificação completa em `docs/PLANO_REFACTOR_MLOPS.md` § DT-18.
+
 ---
 
 ## 4. Verificar no MLflow
