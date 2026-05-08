@@ -128,6 +128,11 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Status:** ativo. Atualizar quando novas otimizações forem aplicadas ou recursos parados forem retomados.
 **Relação:** referência operacional para retomar Cloud SQL antes de retreinar; consultar antes de mudar `min-instances`/`memory`/`cpu` do `smart-ads-api`.
 
+### `bigquery_sinks.md`
+**Papel:** mapa dos datasets BigQuery do projeto (`cloudrun_logs`, `devclub`, `billing_export`), schema de `run_googleapis_com_stdout`, queries comuns para investigar value/decil/erros por revisão.
+**Status:** ativo. Criado em 2026-05-08 após investigação do bug VAL=0 (que usou Q1 sem documentação).
+**Relação:** referência operacional para observar canary pós-deploy e investigar comportamento histórico do CAPI/scoring sem subir Cloud SQL.
+
 ---
 
 ---
@@ -160,6 +165,11 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 ### `analise_perfil_leads_devclub.md`
 **Papel:** breakdown de características dos leads por período P1/P2/P3 — composição de dispositivo, renda, medium, criativos.
 **Status:** snapshot — conclusões já integradas em `INVESTIGACAO_BAIXO_DESEMPENHO.md`.
+
+### `perfil_audiencia_dev20.md` e `perfil_audiencia_lf54.md`
+**Papel:** snapshots da comparação de perfil de público entre o lançamento corrente (DEV20 / LF54) e o pool Top 5 ROAS histórico (LF40, LF41, LF44, LF45, LF47, n=39.771). Identificam drift de audiência por característica (gênero, idade, ocupação, faixa salarial, cartão, programação, computador) com Δpp e chi².
+**Status:** ativos como artefatos de análise. Reproduzíveis via [scripts/perfil_audiencia.py](../scripts/perfil_audiencia.py) — `python -m scripts.perfil_audiencia --target <LF>`.
+**Relação:** motivam **T1-13** em `PLANO_SAFEGUARD.md` (`audience_profile_drift` no monitoring) e a sequela 08/05/2026 em `PLANO_EXECUCAO.md`. A ausência desse check no monitoring está registrada como erro em `registro_erros_ml.md` § V.4.
 
 ### `INVESTIGACAO_BAIXO_DESEMPENHO.md`
 **Papel:** investigação completa da queda do D10 de ~42% (P1) para ~30% (P3). Documenta hipóteses testadas, causas confirmadas (mudança LQHQ→LQ em 10/03, crash P2 por TMB All + encoding quebrado), análise do gap residual e rollback executado em 13/04/2026.

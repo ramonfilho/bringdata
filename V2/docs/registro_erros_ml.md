@@ -441,4 +441,21 @@ Lista aberta de cenários a estressar. Cada item: descrição + verificação pr
 
 **Critério para tirar do backlog:** cenário foi reproduzido em ambiente de staging ou validado por leitura de código + execução parcial; resultado documentado nesta seção; mitigação implementada (ou aceita como risco residual com justificativa).
 
+### V.4 — Ausência de check de drift de perfil de audiência vs Top 5 ROAS no monitoring (descoberto 08/05/2026)
+
+**Estado atual:** o `DataQualityMonitor` em [src/monitoring/data_quality.py:397](../src/monitoring/data_quality.py#L397) só compara distribuições contra `distribuicoes_esperadas.json` capturado **no treino**. Não há nenhum check contra um perfil de audiência **winner histórico** (ex.: Top 5 ROAS). Resultado: drift de público que afeta diretamente performance de lançamento passa silencioso até alguém abrir uma análise ad-hoc.
+
+**Como foi descoberto:** comparação manual em 08/05/2026 do LF54 em captação contra Top 5 ROAS histórico (LF40, LF41, LF44, LF45, LF47, n=39.771) revelou shift forte e estatisticamente robusto:
+- "Sem computador": 12,5% → 22,9% (+10,4pp, ⚠⚠)
+- Feminino: 18,3% → 28,0% (+9,7pp, ⚠⚠)
+- CLT/funcionário público: 44,9% → 35,6% (−9,3pp, ⚠⚠)
+- "Já estudou programação Sim": 36,8% → 30,9% (−5,9pp, ⚠⚠)
+- Tudo com chi² p < 1e-4.
+
+**Por que conta como erro:** o monitoring deveria ter levantado essa bandeira automaticamente. Não levantou. Cada lançamento entre o último Top 5 ROAS e hoje rodou às cegas para esse drift. Drift de público é causa direta de queda de ROAS — e o sistema atual não tem antena para isso.
+
+**Mitigação proposta (T1-13):** novo check method `audience_profile_drift` em `DataQualityMonitor`, comparando o último dia completo de captação contra snapshot estático do Top 5 ROAS (`configs/clients/devclub/reference_audience_profile.json`). Threshold ⚠ ≥ 5pp por categoria canônica; severity HIGH se ≥ 5pp nas 5 features socioeconômicas críticas (computador, gênero, ocupação CLT, programação, cartão). Especificação completa em [PLANO_SAFEGUARD.md § T1-13](PLANO_SAFEGUARD.md). Prioridade máxima registrada em [PLANO_EXECUCAO.md § H4 — Sequelas 08/05/2026](PLANO_EXECUCAO.md).
+
+**Lição estrutural:** monitoring de drift contra "snapshot do treino" é necessário mas não suficiente. Treino antigo + drift de público = baseline cego. Faltava monitoring contra um pool histórico de **performance** (não apenas estatístico).
+
 ---
