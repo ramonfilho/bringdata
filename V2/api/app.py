@@ -2969,8 +2969,8 @@ async def smoke_run_variants(
             password=os.environ['RAILWAY_DB_PASSWORD'],
             timeout=30,
         )
-        from datetime import timezone as _tz
-        cutoff = datetime.now(_tz.utc) - timedelta(hours=hours)
+        from datetime import timezone as _tz, timedelta as _td
+        cutoff = datetime.now(_tz.utc) - _td(hours=hours)
         rows = railway_conn.run(
             'SELECT id, data, "nomeCompleto", email, telefone, pesquisa, '
             'source, medium, campaign, content, term, '

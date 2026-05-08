@@ -354,6 +354,8 @@ def main() -> int:
             print("╠══════════════════════════════════════════════════════════════════╣")
             print(f"  overall_status: {ab_payload.get('overall_status')}")
             print(f"  variants_tested: {ab_payload.get('variants_tested')}")
+            if ab_payload.get('reason'):
+                print(f"  reason:         {ab_payload.get('reason')}")
             for r in ab_payload.get('results', []):
                 if r.get('status') == 'fail':
                     print(f"    ✗ {r.get('variant')}: {r.get('errors') or r.get('validations')}")
