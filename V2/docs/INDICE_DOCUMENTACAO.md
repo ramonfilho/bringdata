@@ -81,6 +81,11 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Status:** ativo. Pronto para uso quando Cliente B chegar (H5 do PLANO_EXECUCAO).
 **Relação:** consumido em H5.3 (Onboarding Cliente B — Fase 3b refactor).
 
+### `PROMOCAO_MODELO_CHECKLIST.md`
+**Papel:** protocolo obrigatório de promoção de modelo (Champion / Challenger). Mapeia a "pegadinha" em que `mlflow_run_id`, `encoding_overrides` e `conversion_rates` precisam ser atualizados em conjunto, com checklists separados por tipo (promoção leve, mudança de encoding, nova arm experimental). Documenta os incidentes de 02/05 e 08/05 como lições registradas.
+**Status:** ativo. Criado em 08/05/2026 após investigação do moat e cenário de retreino com `--exclude-features`.
+**Relação:** consumido por qualquer deploy que altere o `active_model.mlflow_run_id` em `configs/active_models/{cliente}.yaml`. Referencia DT-12, DT-16, DT-17 do `PLANO_REFACTOR_MLOPS.md`. Pré-requisito antes da skill `/safeguard` em deploys de modelo.
+
 ### `google_ads_pendencias.md` 📚 Catálogo técnico (H6)
 **Papel:** especificação dos pré-requisitos e passos de implementação para envio de eventos ao Google Ads (Enhanced Conversions for Leads). Documenta decisões fixadas (estratégia, credenciais), bloqueantes abertos (gclid não capturado), e a infra já preparada (`should_send_to_destination`, `CAPIConfig`, dispatcher).
 **Status:** ativo. Atualizado em 2026-05-01.

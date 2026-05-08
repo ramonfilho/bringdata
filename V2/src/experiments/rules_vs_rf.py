@@ -35,6 +35,7 @@ Uso:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -256,19 +257,62 @@ def eval_model(y_true: np.ndarray, y_score: np.ndarray, name: str) -> Dict[str, 
 # Main
 # ---------------------------------------------------------------------------
 
+def load_napkin_from_run(run_id: str, top_n: int = 5) -> Tuple[Dict[str, float], Dict[str, float]]:
+    """Deriva NAPKIN_WEIGHTS e IMPORTANCE_WEIGHTS de feature_registry.json do run.
+    Napkin = pesos inteiros 5,4,3,2,1 nas top-N features.
+    Importance-weighted = importance values diretos."""
+    repo_root = Path(__file__).resolve().parents[2]
+    fr_path = repo_root / "mlruns" / "1" / run_id / "artifacts" / "feature_registry.json"
+    if not fr_path.exists():
+        raise FileNotFoundError(f"feature_registry não encontrado para run {run_id}: {fr_path}")
+    with open(fr_path) as f:
+        fr = json.load(f)
+    top = fr.get("feature_importance", {}).get("top_10_features", [])[:top_n]
+    napkin = {row["feature_clean"]: float(top_n - i) for i, row in enumerate(top)}  # 5,4,3,2,1
+    importance = {row["feature_clean"]: row["importance"] for row in top}
+    return napkin, importance
+
+
+def load_run_meta(run_id: str) -> Dict:
+    """Carrega hyperparams + cut_date do model_metadata.json local."""
+    repo_root = Path(__file__).resolve().parents[2]
+    mm_path = repo_root / "mlruns" / "1" / run_id / "artifacts" / "model_metadata.json"
+    if not mm_path.exists():
+        return {}
+    with open(mm_path) as f:
+        return json.load(f)
+
+
 def main():
+    import json as _json
     p = argparse.ArgumentParser(description="Rules vs RF — moat do modelo de lead scoring.")
     p.add_argument("--dataset", default=None, help="Path para parquet encoded (default: V2/compare_encoded.parquet)")
-    p.add_argument("--cut-date", default="2026-03-01", help="Data de corte temporal (default: 2026-03-01, igual Champion v4)")
+    p.add_argument("--cut-date", default=None, help="Data de corte temporal (default: usa cut_date do --reference-run, ou 2026-03-01)")
+    p.add_argument("--reference-run", default=None, help="MLflow run_id de referência. Se informado, deriva NAPKIN/IMPORTANCE weights, hyperparams e cut_date dele. Default: usa pesos hardcoded do Champion v4.")
     p.add_argument("--mlflow-log", action="store_true", help="Loga métricas na experiment baselines_vs_champion_v4 do MLflow remoto")
     p.add_argument("--out", default=None, help="CSV de saída (default: stdout)")
     args = p.parse_args()
+
+    # Permite parametrizar referência via --reference-run
+    global NAPKIN_WEIGHTS, IMPORTANCE_WEIGHTS
+    ref_label = "champion_v4_hardcoded"
+    cut_date = args.cut_date or "2026-03-01"
+    if args.reference_run:
+        NAPKIN_WEIGHTS, IMPORTANCE_WEIGHTS = load_napkin_from_run(args.reference_run)
+        meta = load_run_meta(args.reference_run)
+        if not args.cut_date:
+            cd = meta.get("training_data", {}).get("temporal_split", {}).get("cut_date")
+            if cd:
+                cut_date = cd
+        ref_label = f"run_{args.reference_run[:8]}"
+        logger.info(f"Reference: {args.reference_run} (cut_date={cut_date})")
+        logger.info(f"  NAPKIN top-{len(NAPKIN_WEIGHTS)}: {list(NAPKIN_WEIGHTS.keys())}")
 
     repo_root = Path(__file__).resolve().parents[2]
     dataset_path = Path(args.dataset) if args.dataset else repo_root / "compare_encoded.parquet"
 
     df = load_dataset(dataset_path)
-    train, test = temporal_leads_split(df, cut_date=args.cut_date)
+    train, test = temporal_leads_split(df, cut_date=cut_date)
     X_train, y_train = drop_metadata_cols(train), train["target"].values
     X_test, y_test = drop_metadata_cols(test), test["target"].values
 
@@ -306,8 +350,8 @@ def main():
     cr_score, cr_weights = fit_conversion_rate_score(X_train, pd.Series(y_train))
     models.append(("conversion_rate_score", cr_score))
 
-    logger.info("[5/5] champion_v4_rf (RandomForest 300 árvores — referência)...")
-    models.append(("champion_v4_rf", fit_champion_v4_rf(X_train, y_train)))
+    logger.info(f"[5/5] reference_rf ({ref_label}) — RandomForest 300 árvores...")
+    models.append((f"reference_rf_{ref_label}", fit_champion_v4_rf(X_train, y_train)))
 
     rows = [eval_model(y_test, scorer(X_test), name) for name, scorer in models]
     df_out = pd.DataFrame(rows)
@@ -379,10 +423,11 @@ def main():
             "postgresql+psycopg2://postgres:SmartAds2026DB!@104.197.138.129:5432/mlflow",
         )
         import mlflow
-        mlflow.set_experiment("baselines_vs_champion_v4")
+        mlflow.set_experiment(f"baselines_vs_{ref_label}")
         for row in rows:
             with mlflow.start_run(run_name=row["model"]):
-                mlflow.log_param("cut_date", args.cut_date)
+                mlflow.log_param("cut_date", cut_date)
+                mlflow.log_param("reference_run", args.reference_run or "champion_v4_hardcoded")
                 mlflow.log_param("n_train", len(X_train))
                 mlflow.log_param("n_test", len(X_test))
                 mlflow.log_param("n_features", X_train.shape[1])
