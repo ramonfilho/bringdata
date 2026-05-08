@@ -1,3 +1,8 @@
+> **DEPRECADO em 2026-05-08.** Conteúdo migrado para [registro_erros_ml.md](../registro_erros_ml.md).
+> Este arquivo permanece para referência histórica.
+
+---
+
 # Erros cometidos — Smart Ads V2
 
 > Registro honesto de decisões erradas, bugs com impacto real e padrões que se repetiram.

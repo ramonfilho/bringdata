@@ -1,6 +1,6 @@
 # Índice de Documentação — Bring Data V2
 
-**Atualizado:** 2026-04-27
+**Atualizado:** 2026-05-08
 **Propósito:** mapa de todos os documentos da pasta `docs/`, seus papéis, status e como se relacionam.
 
 ---
@@ -166,10 +166,17 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Status:** ativo. Última atualização: 2026-04-13. Investigação encerrada — todas as hipóteses testadas, nenhuma pendente de verificação.
 **Relação:** documenta o contexto que motivou o rollback e o A/B test atual. Referenciado por `AB_TEST.md` e `PLANO_EXECUCAO.md`.
 
-### `Erros_cometidos.md`
-**Papel:** registro honesto de 13 erros com impacto real — encoding, deploy sem canary, feedback loop, timezone, valor CAPI incorreto, relatório com contagens erradas. Cada erro tem causa raiz e lição.
-**Status:** ativo. Documento vivo — adicionar novos erros conforme ocorrem.
-**Relação:** é a motivação de cada item do `PLANO_SAFEGUARD.md`. Leitura obrigatória antes de qualquer mudança de infraestrutura.
+### `registro_erros_ml.md` 🔄 SUBSTITUI `Erros_cometidos.md` + `auditoria_dano_bugs_ml.md`
+**Papel:** registro técnico unificado — bugs com impacto real, decisões erradas, padrões repetidos, **backtests contrafactuais (mar–mai/2026)** quantificando dano dos clusters de encoding, **medidas corretivas implementadas** (abr–mai/2026) e **frentes preventivas em aberto** (auditoria viva: por que parquets+smoke não pegaram Cluster 5, 4 features binárias raw, backlog "tentar quebrar produção").
+**Status:** ativo. Documento vivo — adicionar novos erros conforme ocorrem; expandir Seção V conforme cada cenário do backlog é validado.
+**Origem:** unificação de `Erros_cometidos.md` (criado abr/2026) + `auditoria_dano_bugs_ml.md` (criado mai/2026, audiência cliente externo, re-tecnicado para uso interno).
+**Relação:** é a motivação de cada item do `PLANO_SAFEGUARD.md`. Leitura obrigatória antes de qualquer mudança de infraestrutura. Seção V (Frentes preventivas em aberto) alimenta H1/H2 do `PLANO_EXECUCAO.md`.
+
+### `arquivo/Erros_cometidos.md` 📦 ARQUIVADO
+**Status:** ✅ **ARQUIVADO em 2026-05-08.** Conteúdo migrado para `registro_erros_ml.md`. Permanece para referência histórica.
+
+### `arquivo/auditoria_dano_bugs_ml.md` 📦 ARQUIVADO
+**Status:** ✅ **ARQUIVADO em 2026-05-08.** Conteúdo (audiência cliente externo) migrado e re-tecnicado para `registro_erros_ml.md`. PDF entregue ao cliente em `V2/propostas_e_apresentacoes/auditoria_dano_bugs_ml.pdf`.
 
 ### `modelo_producao_devclub_15mar2026_interno.txt`
 **Papel:** documentação interna do modelo em produção (run `2a98e51c`, 59 features, AUC 0.745).
@@ -276,4 +283,4 @@ Skills invocáveis via `/skill` para tarefas recorrentes:
 | `/investigate` | Investigar por que um lançamento foi ruim — números históricos, causas do baixo ROAS, D10% anormal | `INVESTIGACAO_BAIXO_DESEMPENHO.md` |
 | `/investigate-ab` | Verificar se o teste A/B está tecnicamente válido — roteamento correto, eventos chegando, janela limpa | `AB_TEST.md` |
 | `/safeguard` | Auditoria completa de integridade — encoding, CAPI, deploy, timezone, monitoramento | `PLANO_SAFEGUARD.md` |
-| `/plan-integrator` | Leitura completa de todos os docs + reconciliação de status + relatório integrado | Este índice |
+| `/docs` | Skill master de documentação — modos `mapear`, `unificar`, `arquivar`, `indexar`, `auditar`. Substitui `/plan-integrator`. | Este índice + `V2/.claude/skills/docs/SKILL.md` |

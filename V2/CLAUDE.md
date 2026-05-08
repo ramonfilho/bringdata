@@ -34,7 +34,7 @@ Quando houver dúvida sobre como implementar um item específico: ir ao catálog
 | `/investigate` | Investigar por que um lançamento foi ruim |
 | `/investigate-ab` | Verificar se o teste A/B está tecnicamente válido |
 | `/safeguard` | Auditoria completa de integridade do projeto |
-| `/plan-integrator` | Ler todos os docs, reconciliar status, emitir prioridade global |
+| `/docs` | Skill master de documentação — `mapear` (= antigo plan-integrator), `unificar`, `arquivar`, `indexar`, `auditar` |
 
 ---
 

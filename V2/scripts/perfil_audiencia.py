@@ -65,6 +65,63 @@ PESQUISA_KEYS = {
     'Tem computador/notebook?':               'computador',
 }
 
+# Mapeia variantes de rótulo do formulário para um único canônico (após normalize_series).
+# Chaves devem estar normalizadas (lower, sem acento). Valor = label canônico de exibição.
+UNIFICATION = {
+    'Qual a sua idade?': {
+        'menos de 18 anos':   '<18',
+        '18 24 anos':         '18-24',
+        '18 24':              '18-24',
+        '25 34 anos':         '25-34',
+        '25 34':              '25-34',
+        '35 44 anos':         '35-44',
+        '35 44':              '35-44',
+        '45 54 anos':         '45-54',
+        '45 54':              '45-54',
+        'mais de 55 anos':    '55+',
+    },
+    'O que você faz atualmente?': {
+        'sou cltfuncionario publico': 'CLT/funcionário público',
+        'clt funcionario publico':    'CLT/funcionário público',
+        'sou autonomo':               'Autônomo',
+        'autonomo empreendedor':      'Autônomo',
+        'sou apenas estudante':       'Estudante',
+        'estudante':                  'Estudante',
+        'sou aposentado':             'Aposentado',
+        'aposentado':                 'Aposentado',
+        'nao trabalho e nem estudo':  'Não trabalho/nem estudo',
+        'desempregado':               'Não trabalho/nem estudo',
+    },
+    'Atualmente, qual a sua faixa salarial?': {
+        'entre r1000 a r2000 reais ao mes': 'Até R$2.000',
+        'ate r 2000':                       'Até R$2.000',
+        'entre r2001 a r3000 reais ao mes': 'R$2.001-3.000',
+        'r 2001 a 3000':                    'R$2.001-3.000',
+        'entre r3001 a r5000 reais ao mes': 'R$3.001-5.000',
+        'r 3001 a 5000':                    'R$3.001-5.000',
+        'mais de r5001 reais ao mes':       'Acima de R$5.000',
+        'acima de r 5000':                  'Acima de R$5.000',
+        'nao tenho renda':                  'Sem renda',
+        'nenhuma renda':                    'Sem renda',
+    },
+    'O seu gênero:': {
+        'masculino': 'Masculino',
+        'feminino':  'Feminino',
+    },
+    'Você possui cartão de crédito?': {
+        'sim': 'Sim',
+        'nao': 'Não',
+    },
+    'Já estudou programação?': {
+        'sim': 'Sim',
+        'nao': 'Não',
+    },
+    'Tem computador/notebook?': {
+        'sim': 'Sim',
+        'nao': 'Não',
+    },
+}
+
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -127,17 +184,21 @@ def load_launch(name: str, launches: dict, sheets_cache: pd.DataFrame | None) ->
     return df, src
 
 
-def normalize_series(s: pd.Series) -> pd.Series:
+def normalize_series(s: pd.Series, col: str | None = None) -> pd.Series:
     s = s.fillna('(nulo)').astype(str).str.strip()
     s = s.replace({'': '(nulo)', 'None': '(nulo)', 'nan': '(nulo)'})
-    return s.apply(lambda v: '(nulo)' if v == '(nulo)' else (normalizar_categoria_para_comparacao(v) or '(nulo)'))
+    s = s.apply(lambda v: '(nulo)' if v == '(nulo)' else (normalizar_categoria_para_comparacao(v) or '(nulo)'))
+    if col and col in UNIFICATION:
+        mapping = UNIFICATION[col]
+        s = s.map(lambda v: mapping.get(v, v))
+    return s
 
 
 def compare(col: str, label: str, ref_pool: pd.DataFrame, ref_launch: pd.DataFrame | None,
             target: pd.DataFrame, ref_launch_name: str | None) -> dict:
-    rp = normalize_series(ref_pool[col]) if col in ref_pool.columns else pd.Series(dtype=str)
-    rl = normalize_series(ref_launch[col]) if (ref_launch is not None and col in ref_launch.columns) else pd.Series(dtype=str)
-    tg = normalize_series(target[col]) if col in target.columns else pd.Series(dtype=str)
+    rp = normalize_series(ref_pool[col], col) if col in ref_pool.columns else pd.Series(dtype=str)
+    rl = normalize_series(ref_launch[col], col) if (ref_launch is not None and col in ref_launch.columns) else pd.Series(dtype=str)
+    tg = normalize_series(target[col], col) if col in target.columns else pd.Series(dtype=str)
 
     rp_vc, rl_vc, tg_vc = rp.value_counts(), rl.value_counts(), tg.value_counts()
     rp_n, rl_n, tg_n = int(rp_vc.sum()), int(rl_vc.sum()), int(tg_vc.sum())

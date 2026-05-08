@@ -1,0 +1,444 @@
+---
+title: Registro de Erros — Smart Ads V2 (uso interno)
+data_unificacao: 2026-05-08
+audiencia: interno (engenharia + MLOps)
+origem:
+  - V2/docs/Erros_cometidos.md (mtime 2026-04-22)
+  - V2/docs/auditoria_dano_bugs_ml.md (mtime 2026-05-07)
+politica_merge: versão mais nova vence; auditoria foi re-tecnicada (Champion/Challenger, ordinal vs OHE, encoding_overrides, LQHQ vs LQ) para audiência interna.
+---
+
+# Registro de Erros — Smart Ads V2
+
+> Registro técnico consolidado: bugs com impacto real, decisões erradas, padrões que se repetiram, backtests contrafactuais (mar–mai/2026), medidas corretivas implementadas e frentes preventivas em aberto.
+
+---
+
+## Cinco lições fundamentais
+
+1. **Produção não é o lugar de aprender.** Cada bug descoberto ao vivo em vez de antes do deploy foi pago com sinal degradado, dados contaminados ou número errado apresentado ao cliente.
+2. **O modelo aprende com o que você decide mostrar a ele — se você não controlar isso, ele decide sozinho.** Sem grupo controle, o sistema criou os próprios dados de treino e entrou em colapso gradual sem que ninguém percebesse por três meses.
+3. **A função objetivo errada produz o resultado errado, não importa o quão bom seja o modelo.** O valor enviado ao Meta define o que o algoritmo deles vai otimizar — enquanto esse número estava errado, o resto do sistema estava trabalhando contra si mesmo.
+4. **Infraestrutura boa não substitui definição clara do problema.** O refactor, o YAML multi-cliente, o `src/core/` — tudo sólido, mas construído depois dos erros. Escalar para novos clientes exige inverter a ordem.
+5. **Você não pode confiar em um número que nunca foi conferido contra a realidade.** O relatório que prova o valor do sistema acumulou erros de cálculo durante meses porque ninguém tinha um total de referência externo. Um número só é confiável quando existe outro independente que deveria bater com ele — e esse check precisa ser automático.
+
+---
+
+## I. Erros estratégicos e operacionais
+
+### 1. Cálculo errado do valor de conversão enviado ao Meta
+
+O `value` enviado em cada `LeadQualified` (sinal que o algoritmo Meta usa para otimizar) foi calculado de forma incorreta em diferentes momentos.
+
+**Primeira forma — tabela hardcoded por decil:** valores fixos no código, descolados do produto em venda e do ticket real. Número arbitrário sem ancoragem no negócio.
+
+**Segunda forma (15/03/2026) — mismatch D1–D9 vs D01–D09:** ao corrigir o formato das chaves de configuração, o mapeamento de `D1`–`D9` para `D01`–`D09` foi feito em parte do código. 9 de 10 decis ficaram com `value=null` por alguns dias.
+
+**Terceira forma (22/03/2026) — fórmula `ticket_médio × taxa_de_conversão_do_decil`:** a tabela hardcoded foi substituída por cálculo em runtime, mas o `ticket_médio` ainda usava média simples — não ponderava Guru (à vista) com TMB (parcelado com inadimplência projetada).
+
+**Correção final (03/04/2026):** fórmula passa a usar ticket Guru real + fator de realização TMB. Só então o número fica consistente ponta a ponta.
+
+---
+
+### 2. Bugs de encoding e divergência treino/produção
+
+Cinco clusters distintos ao longo do período, cada um com causa raiz própria.
+
+#### Cluster 1 — Bugs isolados (jan/2026)
+
+Bootstrap do sistema, problemas pontuais corrigidos sem causa raiz comum:
+
+- **07/01:** features de Medium codificadas duas vezes — sinal duplicado.
+- **09–11/01:** ordinal encoding de `idade` e `faixa_salarial` quebrava por divergência de nome de coluna entre YAML e DataFrame em produção.
+- **09–11/01:** `'NÃO'` em maiúsculo em "Tem computador?" não era normalizado, gerando categoria nova a cada lançamento.
+- **17/01:** `'consegui'` → `'conseguir'` ausente — feature morta criada em produção.
+- **17/01:** `utm_source` sem `.lower()` — `Facebook-Ads` e `facebook-ads` viravam features distintas.
+
+#### Cluster 2 — Divergência sistêmica treino/produção (15/03/2026)
+
+Maior bug de encoding do projeto. Ao ativar o Challenger TMB All, percebeu-se que treino e produção aplicavam regras diferentes para encoding, Medium e UTM — divergências há meses no código, mascaradas porque o Champion anterior havia sido treinado e servido com as mesmas regras erradas. Com a troca de modelo, a divergência ficou visível: o score em produção não correspondia ao esperado pelo treino. Corrigido na mesma data, mas o modelo precisou ser retreinado para garantir consistência.
+
+#### Cluster 3 — `Medium_Linguagem_programacao` zerada (13/04/2026)
+
+Bug silencioso de encoding fazia com que `Medium_Linguagem_programacao` — 5ª feature mais importante do modelo (5,31% de peso) — fosse preenchida com zero para 100% dos leads desde que o modelo Challenger foi implantado. Não causava erro explícito, apenas eliminava o sinal.
+
+Descoberto ao investigar a queda de D10% após o rollback: mesmo com o Champion (jan30) correto, D10 estabilizou em ~30% em vez de retornar aos ~42% de P1.
+
+**Janela específica auditada (26/mar–13/abr, ~18 dias):** durante uma reorganização do código que processa origens, uma transformação de texto removeu acentos das categorias. "Linguagem de programação" virou "Linguagem de programacao" — o modelo, treinado com o nome anterior, não a reconhecia. Corrigido em 14/abr.
+
+**Backtest contrafactual (run jan30 ativo):** `Leads em D9–D10 sem bug = 14.227` vs `com bug = 14.234` (Δ +7). Conversões observadas em D9–D10 idênticas. **Dano direto ~R$0** porque a feature pesa ~5% globalmente, mas na janela analisada a audiência veio 78,9% de campanhas "aberto" e apenas 0,1% do segmento "Linguagem de programação" — a feature já estava praticamente vazia para essa audiência. O bug existiu, mas não teve onde causar dano.
+
+#### Cluster 4 — `idade` e `faixa_salarial` ausentes pós-rollback do Challenger (26/03–01/04)
+
+**Janela:** 6 dias.
+
+**Causa:** em 15/03 o Challenger TMB All foi colocado em produção, treinado em pipeline nova que esperava `idade` e `faixa_salarial` em formato distinto (OHE em vez do ordinal do Champion). Em 25/03 o resultado ficou ruim e foi feito rollback do modelo para o Champion (jan30) — mas só o `mlflow_run_id` voltou; o código de encoding permaneceu na versão preparada para o Challenger. O Champion passou a receber idade/salário em OHE em vez do ordinal_encoding que ele esperava — `Qual_a_sua_idade` e `Atualmente_qual_a_sua_faixa_salarial` chegaram zeradas para todos os leads. Essas duas variáveis representam ~8% do peso total das decisões do modelo. Corrigido em 01/04.
+
+**Backtest contrafactual (run jan30, ablação por monkey-patching de `predict_proba`):**
+
+| Decil sem bug | Total | Alterados | % alterado |
+|---|---|---|---|
+| D01 | 498 | 65 | 13,1% |
+| D02 | 491 | 153 | 31,2% |
+| D03 | 345 | 163 | 47,2% |
+| D04 | 375 | 171 | 45,6% |
+| D05 | 562 | 219 | 39,0% |
+| D06 | 911 | 327 | 35,9% |
+| D07 | 1.003 | 361 | 36,0% |
+| D08 | 1.138 | 336 | 29,5% |
+| D09 | 1.362 | 320 | 23,5% |
+| D10 | 3.891 | 260 | 6,7% |
+| **Total** | **10.576** | **2.375** | **22,5%** |
+
+**Dano direto** (referência histórica E clean, suavizada por isotonic regression para garantir monotonicidade D1→D10):
+- Rebaixamentos (perda real): R$ 2.620
+- Promoções espúrias: R$ 1.832
+- **Saldo líquido: R$ 788**
+- Movimentação total entre decis: R$ 4.451
+
+**Insight central:** saldo líquido modesto **não significa ausência de impacto**. O bug embaralhou a ordenação em vez de empurrá-la em uma direção — rebaixamentos e promoções se compensaram em valor médio. Mas:
+1. **Poder discriminativo degradado** — 22,5% dos leads com decil errado, taxa de erro >35% nos decis médios D3–D7.
+2. **Eventos `LeadQualified` enviados ao Meta com decis contaminados** — leads médios entram como D9–D10, parte dos D9–D10 reais cai para decis intermediários. Sinal de otimização ruidoso.
+3. **Otimização Meta perdida** durante a janela — algoritmo treinou em sinal contaminado, perdeu capacidade de buscar perfil correto. Efeito acumula no tempo, não quantificado aqui.
+
+#### Cluster 5 — `idade` e `faixa_salarial` ausentes em A/B reativado (29/04–05/05)
+
+**Janela:** 7 dias.
+
+**Causa:** ao reativar o teste A/B em 29/04 (Champion jan30 + Challenger `5d158f`), faltou propagar `encoding_overrides` (`ordinal_variables`) para o caminho do Champion no `configs/active_models/devclub.yaml` — só foi configurado para o Challenger novo. O Champion processava `idade` e `faixa_salarial` como OHE em vez do ordinal_encoding que ele esperava. Como o Champion captava ~90%+ do tráfego do A/B, a maioria dos leads chegou ao modelo sem essas duas variáveis. A correção equivalente já existia em outro trecho do código, mas não tinha sido replicada nesse caminho. Corrigido em 05/05.
+
+**Backtest contrafactual (run jan30, ablação):**
+
+| Decil sem bug | Total | Alterados | % alterado |
+|---|---|---|---|
+| D01 | 1.066 | 93 | 8,7% |
+| D02 | 718 | 209 | 29,1% |
+| D03 | 467 | 223 | 47,8% |
+| D04 | 596 | 271 | 45,5% |
+| D05 | 946 | 433 | 45,8% |
+| D06 | 1.652 | 698 | 42,3% |
+| D07 | 1.983 | 835 | 42,1% |
+| D08 | 2.034 | 674 | 33,1% |
+| D09 | 2.184 | 541 | 24,8% |
+| D10 | 5.779 | 394 | 6,8% |
+| **Total** | **17.425** | **4.371** | **25,1%** |
+
+**Dano direto:**
+- Rebaixamentos: R$ 4.218
+- Promoções espúrias: R$ 4.318
+- **Saldo líquido: ~R$ 0**
+- Movimentação total entre decis: R$ 8.536
+
+**Insight central:** mesma classe de dano oculto do Cluster 4. 25,1% dos leads com decil errado, taxa de erro >40% em D3–D7. Dano total = efeito direto (~R$0 medido) + degradação acumulada de otimização Meta (não quantificado). **Janela cruzada com Erros 8 e 10 abaixo** — degradação de sinal sobreposta.
+
+---
+
+### 3. D9 com 0% — decil não enviado ao Meta por ~2 meses
+
+**Janela:** ~mid-jan → 15/03/2026 (com fixes parciais ao longo do período).
+
+**Causa:** comparação de string fazia D9 ser sempre tratado como ausente — código comparava `'D9'` mas o sistema formatava decis como `'D09'`. O acréscimo do zero (`D09` em vez de `D9`) tinha sido pedido pelo gestor de tráfego para facilitar ordenação manual em Google Sheets, mas a mudança foi feita só em parte do código, criando a divergência. A comparação só casava para D10 (igual nos dois formatos) e falhava em D9. Múltiplos fixes parciais ao longo de fev–mar; o último em 15/03 fechou a janela.
+
+**Impacto:** durante ~2 meses, a Meta recebeu LQHQ (sinal de alta qualidade) de **apenas metade dos leads top** — ~10% do volume (apenas D10) em vez dos ~20% esperados (D9 + D10). Algoritmo otimizou para perfil mais estreito do que o ideal. Não há medição financeira direta possível, mas o efeito existiu.
+
+Não havia alerta automático para esse tipo de falha — só foi encontrado ao auditar a distribuição de decis no banco.
+
+---
+
+### 4. Deploy de novo modelo com 100% de tráfego imediato
+
+Em 15/03/2026, o Challenger TMB All foi ativado com 100% do tráfego de produção sem canário ou rollback gradual. A divergência de paridade treino/produção descrita no Cluster 2 veio à tona exatamente nesse momento: D10% colapsou de 20% para 5% em 48h.
+
+Rollback para o Champion jan30 foi feito manualmente alguns dias depois, após análise e confirmação de que o problema era o modelo novo, não a audiência. Tempo total com sinal degradado: ~10 dias.
+
+**Lição direta:** qualquer novo modelo deve ser ativado primeiro para 5–10% do tráfego (canário), com monitoramento de D10% e AUC em produção antes de escalar. Implementado em 21/04 (ver Seção IV).
+
+---
+
+### 5. Mudança de evento de otimização (LQHQ→LQ) com 100% do orçamento + valor superestimado
+
+Em 10/03/2026, o evento de otimização das campanhas foi migrado de `LQHQ` (enviado apenas para D9–D10, sinal de topo) para `LQ` (enviado para todos os decis com valor proporcional). A mudança foi feita de uma vez em todas as campanhas, sem grupo de controle e sem período de transição.
+
+**Erro composto da janela mar/2026:**
+
+1. **Cobertura ampliada:** evento `LeadQualified` passou de D9–D10 para todos os decis com valor proporcional.
+2. **Valor superestimado:** o `value` financeiro de cada conversão foi calibrado pelo total de longo prazo descontada a inadimplência projetada (TMB), não pelo recebido à vista. Isso superestimava o retorno reportado ao Meta a curto prazo (ver Erro 1, terceira forma).
+
+A combinação: Meta recebe sinal "todo decil é valioso" + valor inflado → algoritmo busca audiência mais ampla com expectativa irreal de retorno. O D10% caiu de ~42% para ~30% em dois dias. ROAS dos LFs do período abaixo dos LFs limpos (LF44/45). Coincide com instabilidade declarada da Meta em mar/2026, o que confunde atribuição.
+
+A criação do novo Pixel ajudou a cortar o efeito mais rapidamente. Revertido pouco antes do rollback de 13/04.
+
+**Lição:** mudanças de evento de otimização — especialmente as que alteram o perfil aprendido pelo Meta — deveriam ser testadas em subconjunto de campanhas ou com budget reduzido antes de aplicadas ao portfólio inteiro.
+
+---
+
+### 6. Ausência de grupo controle — feedback loop não detectado
+
+O modelo foi treinado em dados produzidos por ele mesmo: ao classificar leads em D10 e direcionar orçamento para esse perfil, o Meta entregou cada vez mais leads desse perfil, super-representados no próximo treino. D10 chegou a 41% dos leads no LF45 (esperado: ~10%), indicando otimização para público progressivamente mais estreito.
+
+O feedback loop estava ativo desde os primeiros lançamentos com o sistema ligado, mas só foi diagnosticado em 11/03/2026. Grupo controle (10–20% do budget fora do ML) ativado apenas em 15/03/2026 — modelo rodou em loop fechado por ~3 meses antes da correção estrutural.
+
+**Atualização (auditoria mai/2026):** testes com pesos por grupo em abril mostraram que o impacto real do feedback loop em performance era pequeno — variação <0,3%. A hipótese que motivou a mudança LQHQ→LQ (Erro 5) nem havia sido confirmada em volume. Mitigação atual: campanha de controle roda em paralelo, ML mostra **lift de 6,88× em D9+D10** sobre ela.
+
+Retreino com importance weighting (pesos maiores para leads da campanha de controle) está pendente para corrigir o viés acumulado no dataset.
+
+---
+
+### 7. Modelo em produção há 3+ meses sem retreino
+
+**Estado:** Champion `d51757f5041c44b7ab1a056fce8c3c35` (jan30) treinado com dados até 24/set/2025. Em produção há mais de 3 meses, com dados de treino com ~7 meses de defasagem.
+
+**Por que não foi resolvido:** tentativas de troca em 15/03 (TMB All, run `2a98e51c`), 25/03 (rollback) e 28/04 (Challenger `5d158f`) falharam por bugs de encoding (Clusters 4 e 5 acima).
+
+**Risco:** drift potencial de perfil de leads e comportamento de conversão. Não medido — depende de Challenger limpo em produção para comparação. Dívida técnica em aberto, não bug pontual. O próximo retreino + deploy controlado (com salvaguardas implementadas — Seção IV) fecha esse risco.
+
+---
+
+### 8. Evento LQ enviado sem `value` por 7 dias
+
+**Janela:** 29/04 → 06/05/2026 (~7 dias).
+
+**Causa:** durante a refatoração para mover valores hardcoded para configuração via YAML, a leitura do mapeamento `decil → value` foi removida do caminho de envio do CAPI sem ser substituída pela leitura de `conversion_rates` do YAML. `LeadQualified` continuou sendo disparado, mas com `value=null`.
+
+**Gasto direto:** **R$ 8.433,19** na campanha *DEVLF | CAP | FRIO | FASE 04 | ADV | PIXEL NOVO | MACHINE LEARNING | LQ | PG2 | 2025-04-15* (id `120242248118610390`).
+
+**Efeito indireto:** algoritmo Meta sem sinal econômico por 7 dias — perda de capacidade de refinar perfil de leads de maior retorno. Sobrepõe Cluster 5 e Erro 10 na mesma janela.
+
+**Corrigido:** 06/mai (DT-17, `conversion_rates` recolocado no YAML).
+
+---
+
+### 9. Lista de origens (`category_unification`) chegou vazia em produção
+
+**Janela:** 30/04 → 02/05/2026 (~2-3 dias em produção).
+
+**Causa:** `category_unification.py` grava o conjunto de categorias conhecidas em arquivo durante o treino; produção lê esse arquivo. Por divergência de path entre `train_pipeline.py` e `production_pipeline.py`, a lista chegou **vazia** em produção. Resultado: leads com origens raras (tags de criativo novo, lookalike novo, variante de campanha) tinham todas as colunas OHE de origem zeradas.
+
+**Janela curta** porque o bug existia desde meados de março, mas só atingiu produção quando a versão atual subiu a 100% em 30/abr — antes disso o sistema rodava versão anterior do código (rollback).
+
+**Natureza similar ao Cluster 3** (feature de origem zerando), com features distintas afetadas. Sem medição direta de dano financeiro pela curta duração, mas se soma à degradação de sinal vivenciada no mesmo período (Cluster 5, Erros 8 e 10).
+
+**Corrigido:** 02/mai.
+
+---
+
+### 10. A/B otimizando em evento HQLB não aprovado pela Meta
+
+**Janela:** 02/05 → 04/05/2026 (~2-3 dias).
+
+**Causa:** campanha A/B subiu otimizando no evento HQLB antes de a Meta aprovar o evento no painel. Erro inicial do gestor de tráfego (subir sem aprovação), somado à ausência de monitoramento que detectasse evento não aprovado em tempo hábil.
+
+**Gasto:** **R$ 1.444,89** na campanha *DEVLF | CAP | FRIO | FASE 04 | ADV | PIXEL NOVO API | MACHINE LEARNING | LEAD | PG2 | 2025-04-30* (id `120243354440640390`). Todo o gasto pode ser atribuído como desperdiçado — sem evento aprovado, Meta rodou só por entrega bruta.
+
+**Diferente do Erro 8** (LQ sem `value`): aqui não havia evento algum sendo recebido pela Meta.
+
+---
+
+## II. Erros de implementação e infraestrutura
+
+### 11. Erros sequenciais durante o bootstrap (Nov/25 – Fev/26)
+
+Bugs pequenos descobertos só quando algo parava em produção. Maioria de infra/configuração/integração:
+
+- **18/11/25:** conexão Cloud SQL com socket vs TCP errado — nenhuma consulta chegava ao banco.
+- **20/11/25:** envio CAPI iterando sobre int como se fosse lista — crash silencioso interrompia envio.
+- **24/11/25:** leads enviados ao Meta em duplicata — sem deduplicação por `event_id` nem por email em reprocessamento.
+- **19/11/25:** FBP/FBC capturados só após submit do form — abandono no meio perdia os cookies. Solução: capturar no `pageload` via `/webhook/lead_capture`.
+- **15/02/26:** crash com 1 lead — encoding categórico funcionava só com ≥2 linhas (`.str` accessor falhava em `Series` com 1 elemento de tipo não-string).
+- **23/03/26:** token Guru com `|` truncado quando carregado via terminal (`|` é separador de pipe). Funcionava só via `python-dotenv`.
+- **23/03/26:** credenciais `.env` carregadas em alguns entry points, ausentes em outros. Scripts CLI rodavam sem credenciais Railway/Meta, falhando sem erro claro.
+- **12–13/01/26:** modelo salvo pelo `train_pipeline` em path A; `production_pipeline` e Dockerfile buscavam em path B. Deploy subia sem modelo, servidor iniciava em estado inválido.
+- **22/03/26:** ID do experimento MLflow hardcoded — runs novos registrados no experimento errado.
+
+**Padrão:** cada componente novo (banco, CAPI, MLflow, deploy) estreou com pelo menos um bug de integração que só apareceu em produção. Causa raiz: ausência de testes de integração no bootstrap.
+
+---
+
+### 12. Migração de banco de dados sem inventário dos pontos de integração
+
+Quando o Cloud SQL `bring-data-db` foi descomissionado e o operacional migrou para Railway (25/02/2026), trocou-se o arquivo central de conexão **sem mapear todos os pontos do código que dependiam do banco antigo**.
+
+Três bugs em dois dias:
+
+- **25/02:** rotas de monitoramento da API ainda pediam conexão ao banco antigo a cada request. Banco antigo não existia mais → qualquer chamada de monitoramento retornava erro.
+- **25/02 (mesmo dia):** removida dependência do banco antigo dessas rotas, mas sem garantir que passassem a usar o novo.
+- **26/02:** após monitoramento corrigido para Railway, query de cobertura FBP/FBC fazia JOIN errado — resultado 0% para todos os leads.
+
+**Causa raiz:** migração feita sem inventário prévio de todos os pontos do sistema que faziam consultas — teria permitido atualizar tudo de forma coordenada.
+
+---
+
+### 13. Cobertura de cookies no monitoramento — 4 tentativas para acertar o cálculo
+
+FBP e FBC são cookies que o Meta instala no navegador ao clicar em anúncio. Quando o lead é enviado ao Meta via CAPI com esses cookies, o Meta identifica com certeza o anúncio de origem — qualidade de sinal aumenta.
+
+Quatro correções em 03/04/2026, em sequência:
+
+1. **Primeira:** query buscava todos os leads sem filtrar pelo período do lançamento atual — % refletia histórico inteiro.
+2. **Segunda:** filtro de período no numerador, mas denominador ainda era a tabela inteira — % artificialmente baixo.
+3. **Terceira:** denominador corrigido, mas a query trazia o mesmo lead várias vezes quando atualizado no banco — % inflado por dupla contagem.
+4. **Quarta (correta):** dedup por email antes de contar, período correto em ambas as pontas, JOIN pela coluna certa.
+
+**Padrão típico de cálculo incremental sem número de referência conhecido:** cada correção resolvia um problema mas criava outro porque não havia como confirmar o valor correto antes de terminar.
+
+---
+
+### 14. Fuso horário — bugs recorrentes em 3 componentes
+
+Cada integração nova tratou TZ de forma independente. Resultado inconsistente:
+
+- **17/01:** monitoramento comparava timestamps do banco (UTC) com datas do Sheets (BRT) sem converter — leads do fim do dia apareciam como dia seguinte.
+- **18/02:** filtro por data no Sheets aplicava correção TZ no sentido errado (somava 3h em vez de subtrair).
+- **19/02:** Railway armazena `created_at` em UTC; código de monitoramento comparava com `datetime.now()` do servidor sem converter — leads criados entre 21h e meia-noite BRT desapareciam do sumário diário.
+
+**Causa raiz:** convenção explícita de TZ nunca foi estabelecida para o sistema.
+
+---
+
+### 15. UTM Source: origens não mapeadas + UTM Term reincidência (DT-13)
+
+`utm_source` identifica origem do lead. Modelo aprende a partir das origens que existiam no treino. Origem nova em produção que não existia no treino → coluna OHE nova com valor zero para todo mundo, ruído sem benefício.
+
+Três correções pontuais reativas:
+
+- **20/02:** `'ig'` (Instagram informal) e `'manychat'` ausentes da lista — tratadas como origem desconhecida.
+- **25/02:** `'org'` (orgânico) adicionado.
+- **26/02:** `utm_source` vazio criava categoria fantasma `""` em vez de tratar como `null`.
+
+**Reincidência em UTM Term — 22/04/2026 (DT-13).** Mesma lição em outro eixo. `core/utm.py` agrupa termos não-reconhecidos em `'outros'` via fallback. A condição tinha exceção para preservar códigos numéricos curtos, mas nenhuma categoria numérica existia na whitelist de treino — exceção só criava brecha. Em produção, `utm_term='0405'` (669 leads/dia, 16% do volume) escapava para o modelo como categoria inédita, saindo do encoding com as três features de Term zeradas. Monitoramento detectou a categoria nova, mas a lógica de unificação continuava deixando escapar. Fix de uma linha (remover exceção numérica).
+
+**Lição:** regras de unificação UTM precisam ser whitelist estrita — o que não está na lista vai para `'outros'`, sem ramos condicionais que "preservam" casos específicos.
+
+---
+
+### 16. Dataset de treino com 2 erros silenciosos de preparação
+
+Corrigidos em 06/03/2026. Existiam desde o início do projeto, identificados só durante auditoria do refactor.
+
+**Janela de conversão com corte assimétrico:** o correto é remover do dataset todos os leads que chegaram tarde demais para terem tempo de comprar (independente do label). O código removia apenas os compradores que chegaram tarde — não-compradores que chegaram no mesmo período ficavam, criando ilusão de "leads que chegaram perto do fim raramente compram". Modelo aprendia padrão falso.
+
+**Filtro de risco TMB aplicado na ordem errada:** filtro existia para excluir compradores TMB com histórico de inadimplência ("compras" que não se concretizaram). Mas era aplicado **depois** do cruzamento leads × vendas: esses casos já estavam marcados como `target=1` antes de serem filtrados, e ao saírem do dataset deixavam o sinal positivo com menos exemplos do que deveria, sem remover os casos contaminados que já haviam influenciado a distribuição. Correção: aplicar filtro **antes** do cruzamento.
+
+---
+
+### 17. Relatório de validação com contagens e receitas imprecisas
+
+Documento principal para provar valor do sistema. Acumulou erros de cálculo durante meses, todos descobertos ao comparar com dados reais do lançamento:
+
+- **28–30/12/2025:** contagem de leads usava dados pós-processados em vez da fonte Meta original (deduplicações divergentes). Atribuição de campanha por ID numérico isolado em vez de `(ID, conta_anunciante)` — em contas com múltiplas campanhas, leads atribuídos à campanha errada. Vendas Guru com status "não aprovado" (estornos, recusas) contadas como conversões.
+- **17/01:** mapeamento conta ↔ anunciante errado ao cruzar relatórios manuais Meta com dados via API.
+- **01/04:** query de leads de pesquisa com `LIMIT 10000` interno — lançamentos maiores eram truncados silenciosamente (15.000 leads viram 10.000 sem aviso).
+- **02/04:** receita Asaas somada com duplicatas em alguns cenários; tabela de evolução histórica calculando variação % a partir de bases diferentes.
+- **03/04:** fórmula de faturamento com ticket médio em vez de ticket real (ver Erro 1).
+- **08/04:** ajustes nos filtros de valor mínimo de venda e tratamento de vendas parcialmente pagas via Asaas.
+
+**Padrão:** relatório construído adicionando uma fonte por vez (Guru, TMB, Asaas, Meta API) sem teste de consistência que comparasse total calculado com número real a cada adição.
+
+---
+
+## III. Backtests de dano (mar–mai/2026)
+
+Esta seção consolida os backtests contrafactuais executados em mai/2026 para quantificar dano dos bugs de encoding e features faltantes.
+
+**Metodologia:** ablação por monkey-patching de `LeadScoringPredictor.model.predict_proba` para zerar colunas pós-encoding antes do scoring. Implementação em [V2/scripts/backtest_compare_models.py](V2/scripts/backtest_compare_models.py) com flag `--ablate-features`. Comparação score com/sem bug usando o run MLflow ativo na janela. Valor por decil suavizado por isotonic regression sobre referência histórica E clean para garantir monotonicidade D1→D10.
+
+**Tabela consolidada:**
+
+| Erro | Janela | Run ativo | Leads | Alterados | Saldo líquido | Movimentação |
+|---|---|---|---|---|---|---|
+| Cluster 3 — `Medium_LP` zerada | 26/mar–13/abr | jan30 (`d51757f5`) | 14.227 | +7 (~0%) | ~R$ 0 | ~R$ 0 |
+| Cluster 4 — idade/salário pós-rollback | 26/mar–01/abr | jan30 | 10.576 | 2.375 (22,5%) | R$ 788 | R$ 4.451 |
+| Cluster 5 — idade/salário A/B reativado | 29/abr–05/mai | jan30 | 17.425 | 4.371 (25,1%) | ~R$ 0 | R$ 8.536 |
+
+**Insight transversal:** saldos líquidos próximos de zero **não significam ausência de dano**. O bug embaralha a ordenação dos leads em vez de empurrá-la em uma direção — rebaixamentos e promoções se compensam em valor médio. O dano real, não quantificado nestes números:
+
+1. **Poder discriminativo degradado** durante a janela (taxa de erro >35% nos decis médios D3–D7).
+2. **Eventos `LeadQualified` enviados ao Meta com decis contaminados** — leads médios entram como D9–D10 e D9–D10 reais caem para decis intermediários, contaminando o sinal de otimização da campanha.
+3. **Otimização Meta perdida** durante a janela — algoritmo treinou em sinal contaminado, perdeu capacidade de buscar perfil correto. Efeito acumula no tempo.
+
+---
+
+## IV. Medidas corretivas implementadas (abr–mai/2026)
+
+Todas em produção, com data de deploy verificável. Atacam o bug-raiz "deploy de modelo com 100% sem testes prévios + falhas silenciosas de encoding".
+
+### Deploy controlado e testado
+- **Progressão obrigatória 0% → 10% (1h) → 50% (24h) → 100%** com critérios de gate. Permite rollback instantâneo. *(21/abr)*
+- **Smoke test pré-deploy:** 5 leads de teste reais, bloqueia deploy se score/decil/evento divergem. *(21/abr)*
+- **Atalho de deploy direto a 100% removido** do código. *(02/mai)*
+
+### Detecção de features faltando (fail-loud)
+- **Validação pré-encoding:** features críticas com nome/tipo errado bloqueiam pipeline. *(23/abr)*
+- **Validação pós-encoding:** feature zerada em >5% dos leads gera alerta + bloqueia. *(21/abr)* — salvaguarda que faltava nos Clusters 3, 4, 5 e Erro 9.
+- **Painel de cobertura de features:** dashboard últimas 24h. *(23/abr)*
+
+### Paridade treino ↔ produção
+- **Auditoria automática pré-deploy:** dados do treino rodam no `production_pipeline`, comparam coluna a coluna, bloqueia se divergem. *(21/abr)*
+- **Verificação na inicialização:** modelo carregado vs declarado em `configs/active_models/devclub.yaml`. *(29/abr)*
+- **Reconciliação de `mlflow_run_id`:** confirma que o run em produção bate com o YAML. *(29/abr)*
+
+### Monitoramento e alertas
+- **Alerta para decis sem eventos:** D1–D10 sem evento por 24h → alerta vermelho. *(20/abr)* — preveniria Erro 3 (D9 invisível por 2 meses).
+- **Encoding falha alto:** divergência de nome de coluna treino/produção falha visível em vez de silenciosa. *(20/abr)*
+- **Eliminação de exceções silenciosas:** pontos com `except: pass` virados em falhas auditáveis. *(28/abr)*
+
+### Filtros e correções pontuais
+- **Whitelist de origens válidas para CAPI:** só envia evento para leads com `utm_source` rastreável. *(30/abr)*
+- **Path de `category_unification` corrigido** (Erro 9). *(02/mai)*
+
+### Itens em andamento
+- Auditoria automática de paridade durante o treino (próximo retreino).
+- Resolução final de categorias residuais de origem (próximo retreino).
+- Retreino com importance weighting para corrigir feedback loop acumulado (Erro 6).
+
+---
+
+## V. Frentes preventivas em aberto
+
+Seção viva — listar pontos de fragilidade conhecidos que **não são bug ativo hoje** mas merecem auditoria preventiva. Objetivo: tentar quebrar produção de propósito antes que ela quebre sozinha.
+
+### V.1 — Por que parquets + smoke test pré-deploy não pegaram o Cluster 5 (idade/salário A/B reativado, 29/04)?
+
+**Pergunta a responder:** o smoke test pré-deploy (21/abr) e a auditoria automática treino↔produção (21/abr) já estavam ativos quando o A/B foi reativado em 29/abr. Mesmo assim, o bug do `encoding_overrides` ausente no caminho do Champion passou. Por quê?
+
+**Hipóteses a verificar (não confirmadas):**
+1. Auditoria de paridade só roda no caminho do Challenger novo, não no Champion no contexto de A/B. Bug afetava o Champion (~90% do tráfego).
+2. Smoke test usa parquet de leads canônico que **não contém** `idade`/`faixa_salarial` em formato cru — só features pós-encoding. Como o encoding errado produz colunas zeradas mas não falha, smoke não detecta.
+3. Validação pós-encoding ">5% zerados → bloqueia" pode não estar incluindo `Qual_a_sua_idade` e `Atualmente_qual_a_sua_faixa_salarial` na lista de "features críticas".
+4. Smoke test pode estar rodando no caminho default (sem A/B ativo) e o caminho do A/B não foi testado.
+
+**Próximo passo:** ler `src/production_pipeline.py` + `src/abtest/` + scripts de smoke test, mapear quais caminhos cada salvaguarda cobre, e em quais cenários elas não disparam.
+
+### V.2 — 4 features binárias passam raw sem `_normalizar`
+
+**Estado atual:** as features `genero`, `estudouProgramacao`, `faculdade`, `investiuCurso` chegam ao modelo via `or None` direto da pesquisa, **sem passar pela função `_normalizar`** que padroniza casing e espaços.
+
+**Por que não é bug hoje:** o front sempre manda no formato exato (`'Masculino'`/`'Feminino'`, `'Sim'`/`'Não'`). Modelo está protegido nas duplicações que existem hoje. Não há perda de sinal.
+
+**Por que é armadilha latente:** se um dia o front mandar `'sim'` minúsculo ou `'SIM'` em maiúsculo, vira coluna OHE nova que o modelo não aprendeu — **silencioso**. Mesma classe de bug do Cluster 1 (07/01: `'NÃO'` em "Tem computador?") e do Erro 15 (UTM Source/Term).
+
+**Mitigação proposta:**
+1. Passar essas 4 features pelo `_normalizar` (`.lower().strip()`) — alinhamento direto com o que o modelo espera ver.
+2. Adicionar monitoramento de raw values: alerta quando uma feature binária recebe valor fora do conjunto canônico esperado.
+3. Considerar como parte do retreino: incluir o `.lower()` no pipeline de treino também, para tolerar variações no front futuramente.
+
+### V.3 — Backlog "tentar quebrar produção"
+
+Lista aberta de cenários a estressar. Cada item: descrição + verificação proposta + status.
+
+- [ ] **Front muda casing de feature binária** (`'sim'` em vez de `'Sim'`) — verificar se o modelo a recebe ou se vira OHE nova. Cobertura: V.2.
+- [ ] **Categoria nova de UTM Term** que escapa do fallback de `core/utm.py` — verificar se o monitoramento atual detecta antes de degradar score (DT-13 mitigou, mas a classe do bug persiste se aparecer em outros eixos).
+- [ ] **Lead com 1 único registro em batch** — `.str` accessor falha com tipo não-string (Erro 11, fev/26). Verificar se `_railway/process-pending` ainda quebra com batch=1 e UTM não-string (memória `projeto_bug_railway_polling_str.md` indica que sim — auto-recupera no próximo poll).
+- [ ] **Deploy de modelo com `mlflow_run_id` no YAML mas artefato ausente no GCS** — verificar se a inicialização do servidor falha alto (Erro 11 — modelo salvo em path diferente).
+- [ ] **Token Guru renovado com `|` na nova string** — verificar se o load via `python-dotenv` continua robusto.
+- [ ] **`utm_source` recebido como `null` vs `""` vs ausente** — verificar se as 3 variações vão todas para a mesma categoria no encoding (Erro 15 trata `""`, mas vale revalidar).
+- [ ] **Lead com TZ na borda (23h59 BRT)** — verificar se aparece no dia correto em todos os componentes (monitoramento, retreino, relatório de validação) — Erro 14 era em 3 lugares.
+- [ ] **A/B com 100% no Challenger e 0% no Champion** — verificar se as salvaguardas de paridade do Champion ainda disparam (cenário de "esvaziar Champion").
+- [ ] **Feature crítica com >5% de NaN em vez de 0** — verificar se a validação pós-encoding também bloqueia, não só zeros.
+- [ ] **Categoria de Medium nova que escapa de `core/medium.py`** — Cluster 3 era `Medium_Linguagem_programacao`. E se aparecer `Medium_Banco_de_Dados`?
+- [ ] **`Lead.pesquisa` jsonb com chave nova** que o `core/feature_engineering` não trata — verificar comportamento (silencioso ou fail-loud?).
+- [ ] **Cloud SQL MLflow parado durante retreino agendado** — verificar se a parada explícita (`activation-policy=NEVER` desde 26/abr) é detectada antes do treino tentar conectar.
+
+**Critério para tirar do backlog:** cenário foi reproduzido em ambiente de staging ou validado por leitura de código + execução parcial; resultado documentado nesta seção; mitigação implementada (ou aceita como risco residual com justificativa).
+
+---
