@@ -36,7 +36,7 @@ ab_test:
   enabled: true
   variants:
     # =============================================================================
-    # Champion shim (DT-12 + correção 02/05/2026)
+    # Champion shim (DT-12 + correção 02/05/2026, Patch B 08/05/2026)
     # =============================================================================
     # Esta entrada NÃO faz roteamento (utm_pattern vazio + sem url_pattern → nunca
     # matcheia em match_variant). Existe apenas para hospedar encoding_overrides
@@ -48,28 +48,33 @@ ab_test:
     # idade/salário ficam zeradas no passo 7 do encoding (~8.2% de feature importance
     # perdida). Bug confirmado por logs T1-10 no Cloud Run em 02/05/2026.
     #
-    # Os campos capi_event_name/_high_quality/conversion_rates são obrigatórios pelo
-    # parser (ABTestVariantConfig) mas NUNCA são lidos para leads do Champion —
-    # esses leads pegam event_name e pixel direto de client_config.capi.* em
-    # configs/clients/devclub.yaml. Ver DT-15 em PLANO_REFACTOR_MLOPS.md.
+    # ATENÇÃO: capi_event_name e conversion_rates DESTE shim SÃO LIDOS em produção.
+    # api/app.py:1016 e :3516 setam lead['ab_conversion_rates'] = ab_variant.conversion_rates
+    # quando o lead bate path A/B Champion. Isso vira conversion_rates_override em
+    # capi_integration.py:347 e tem prioridade sobre business_config.conversion_rates
+    # do client. Logo, todo decil precisa ter rate correto aqui — comentário antigo
+    # afirmando "NUNCA são lidos" estava errado e causou bug VAL=0 parcial no canary
+    # 00403-cez (08/05/2026). Os values aqui devem ser back-calculados de
+    # LEAD_VALUE_BY_DECILE_CHAMPION ÷ product_value (ver api/business_config.py).
+    # Solução arquitetural completa em DT-17 (PLANO_REFACTOR_MLOPS.md).
     # =============================================================================
     champion_jan30:
       run_id: d51757f5041c44b7ab1a056fce8c3c35   # mesmo do active_model
       utm_pattern: {}                            # vazio = nunca matcheia
       # sem url_pattern (None) — também nunca matcheia
-      capi_event_name: LeadQualified              # lixo de parser — não usado
-      capi_event_name_high_quality: LeadQualifiedHighQuality  # idem
-      conversion_rates:                           # idem
-        D01: 0.0
-        D02: 0.0
-        D03: 0.0
-        D04: 0.0
-        D05: 0.0
-        D06: 0.0
-        D07: 0.0
-        D08: 0.0
-        D09: 0.0
-        D10: 0.0
+      capi_event_name: LeadQualified
+      capi_event_name_high_quality: LeadQualifiedHighQuality
+      conversion_rates:                          # back-calculado de LEAD_VALUE_BY_DECILE_CHAMPION ÷ 1563.75
+        D01: 0.000966   # 1.51 / 1563.75
+        D02: 0.001260   # 1.97 / 1563.75
+        D03: 0.001260   # 1.97 / 1563.75
+        D04: 0.001260   # 1.97 / 1563.75
+        D05: 0.003595   # 5.62 / 1563.75
+        D06: 0.003595   # 5.62 / 1563.75
+        D07: 0.003595   # 5.62 / 1563.75
+        D08: 0.004317   # 6.75 / 1563.75
+        D09: 0.004969   # 7.77 / 1563.75
+        D10: 0.009573   # 14.97 / 1563.75
       encoding_overrides:
         ordinal_variables:
           "Qual a sua idade?":
@@ -94,14 +99,14 @@ ab_test:
       pixel_id_override: "1513132406527995"      # CAPI Challenger envia pro pixel novo (onde HQLB está cadastrado)
       capi_event_name: HQLB_LQ
       capi_event_name_high_quality: HQLB
-      conversion_rates:
-        D01: 0.0
-        D02: 0.0
-        D03: 0.0
-        D04: 0.0
-        D05: 0.0
-        D06: 0.0
-        D07: 0.0
-        D08: 0.0
-        D09: 0.0
-        D10: 0.0
+      conversion_rates:                          # back-calculado de LEAD_VALUE_BY_DECILE_CHALLENGER ÷ 1563.75 (Patch B 08/05/2026)
+        D01: 0.000454   # 0.71 / 1563.75
+        D02: 0.001816   # 2.84 / 1563.75
+        D03: 0.001816   # 2.84 / 1563.75
+        D04: 0.003076   # 4.81 / 1563.75
+        D05: 0.003076   # 4.81 / 1563.75
+        D06: 0.004918   # 7.69 / 1563.75
+        D07: 0.005896   # 9.22 / 1563.75
+        D08: 0.007635   # 11.94 / 1563.75
+        D09: 0.007635   # 11.94 / 1563.75
+        D10: 0.013231   # 20.69 / 1563.75

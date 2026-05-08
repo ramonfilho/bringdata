@@ -204,6 +204,8 @@ Retreino com importance weighting (pesos maiores para leads da campanha de contr
 
 **Efeito indireto:** algoritmo Meta sem sinal econômico por 7 dias — perda de capacidade de refinar perfil de leads de maior retorno. Sobrepõe Cluster 5 e Erro 10 na mesma janela.
 
+**Como foi descoberto:** 06/05/2026 via Q1 do BigQuery sink `cloudrun_logs.run_googleapis_com_stdout` (ver [bigquery_sinks.md](bigquery_sinks.md)) — query agrupando events `LeadQualified enviado` por `valor_projetado` mostrou que entre 30/04 e 06/05 todos saíam com `value=0`, expondo a remoção silenciosa de `conversion_rates` do YAML em 06/04 (commit `d40970a`). Esse é o fluxo de auditoria padrão pra detectar este tipo de bug em lançamentos futuros.
+
 **Corrigido:** 06/mai (DT-17, `conversion_rates` recolocado no YAML).
 
 ---

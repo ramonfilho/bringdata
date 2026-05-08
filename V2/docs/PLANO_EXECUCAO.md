@@ -188,7 +188,7 @@ Itens descobertos durante o fix do encoding ordinal jan30 (DT-12 complemento).
 Itens descobertos durante a investigação do spike de custo + comprovação CAPI no canary `00402-hoq`.
 
 - **DT-17 — Eliminar duplicação `api/business_config.py` × YAML do cliente.** Prioridade ALTA arquiteturalmente, MÉDIA em urgência (Fix A já estancou o sangramento). Bug latente que causou 7 dias 100% value=0 entre 30/04 e 06/05. Fluxo desejado: treino popula rates como artifact dentro do MLflow run; `--set-active` copia pro YAML autoritativo no momento da promoção (não no momento do treino). Sequência completa em PLANO_REFACTOR_MLOPS.md DT-17. Fases 1-3 (preparação) podem rodar em paralelo a DT-16; fases 4-5 disparam junto com próximo retreino.
-- **VAL=0 follow-up:** confirmar nos logs após próximo deploy que `valor proj` deixou de ser R$ 0.00 (esperado: D10 ≈ R$ 14.97 segundo `LEAD_VALUE_BY_DECILE_CHAMPION`). Query: `bq query "SELECT REGEXP_EXTRACT(textPayload, r'valor proj: R\\\\\$ ([0-9]+\\.[0-9]+)') AS v, COUNT(*) FROM cloudrun_logs.run_googleapis_com_stdout WHERE textPayload LIKE '%LeadQualified enviado%' AND DATE(timestamp) = CURRENT_DATE() GROUP BY v"`.
+- **VAL=0 follow-up:** confirmar nos logs após próximo deploy que `valor proj` deixou de ser R$ 0.00 (esperado: D10 ≈ R$ 14.97 segundo `LEAD_VALUE_BY_DECILE_CHAMPION`). Rodar Q1 de [bigquery_sinks.md](bigquery_sinks.md).
 
 #### Sequelas / pendências da sessão de investigação 08/05/2026
 

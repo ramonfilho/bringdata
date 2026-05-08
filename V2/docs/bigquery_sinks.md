@@ -132,8 +132,9 @@ ORDER BY dia
 
 - **VAL=0 (06/05/2026):** Q1 mostrou que entre 30/04 e 06/05 todos os
   `LeadQualified` saíam com `value=0`, expondo o bug do
-  `conversion_rates` removido do YAML. Ver `docs/registro_erros_ml.md`
-  e DT-17 em `docs/PLANO_REFACTOR_MLOPS.md`.
+  `conversion_rates` removido do YAML. História canônica em
+  [registro_erros_ml.md § I.8](registro_erros_ml.md);
+  solução arquitetural (DT-17) em [PLANO_REFACTOR_MLOPS.md](PLANO_REFACTOR_MLOPS.md).
 
 ## Limitações
 
