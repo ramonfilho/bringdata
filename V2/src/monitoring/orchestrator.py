@@ -889,15 +889,21 @@ class MonitoringOrchestrator:
             vendas_guru = round(buyers * pct_cartao, 1)
             vendas_tmb  = round(buyers * pct_boleto, 1)
 
-            # faturamento_recebido = cartão Guru líquido (ticket real × realizacao) + 1ª parcela boleto TMB
-            fat_recebido = round(vendas_guru * guru_ticket * guru_realizacao + vendas_tmb * parcela_tmb)
+            # Componentes do "recebido na 1ª janela":
+            # cartao_avista_liquido = preço Guru × fator de realização (líquido de chargeback)
+            # primeira_parcela_boleto = só 1ª parcela do boleto TMB (entrada)
+            cartao_avista_liquido   = round(vendas_guru * guru_ticket * guru_realizacao)
+            primeira_parcela_boleto = round(vendas_tmb * parcela_tmb)
+            fat_recebido = cartao_avista_liquido + primeira_parcela_boleto
 
             return {
-                'faturamento':          round(buyers * ticket),
-                'faturamento_recebido': fat_recebido,
-                'vendas_total':         round(buyers, 1),
-                'vendas_guru':          vendas_guru,
-                'vendas_tmb':           vendas_tmb,
+                'faturamento':              round(buyers * ticket),       # nominal contratado
+                'faturamento_recebido':     fat_recebido,                  # cartão líquido + 1ª parcela boleto
+                'cartao_avista_liquido':    cartao_avista_liquido,         # ⭐ foco do cliente — Guru líquido após realização
+                'primeira_parcela_boleto':  primeira_parcela_boleto,       # entrada do boleto TMB (11 parcelas restantes)
+                'vendas_total':             round(buyers, 1),
+                'vendas_guru':              vendas_guru,
+                'vendas_tmb':               vendas_tmb,
             }
 
         base       = _calc(1.0)
@@ -981,14 +987,17 @@ class MonitoringOrchestrator:
             buyers_ml = float(expected_conversion['compradores_esperados']['total'])
             vendas_guru_ml = round(buyers_ml * pct_cartao, 1)
             vendas_tmb_ml  = round(buyers_ml * pct_boleto, 1)
-            fat_recebido_ml = round(vendas_guru_ml * guru_ticket * guru_realizacao
-                                    + vendas_tmb_ml * parcela_tmb)
+            cartao_avista_liquido_ml   = round(vendas_guru_ml * guru_ticket * guru_realizacao)
+            primeira_parcela_boleto_ml = round(vendas_tmb_ml * parcela_tmb)
+            fat_recebido_ml = cartao_avista_liquido_ml + primeira_parcela_boleto_ml
             cenario_ml_aware = {
-                'faturamento':          round(buyers_ml * ticket),
-                'faturamento_recebido': fat_recebido_ml,
-                'vendas_total':         round(buyers_ml, 1),
-                'vendas_guru':          vendas_guru_ml,
-                'vendas_tmb':           vendas_tmb_ml,
+                'faturamento':              round(buyers_ml * ticket),
+                'faturamento_recebido':     fat_recebido_ml,
+                'cartao_avista_liquido':    cartao_avista_liquido_ml,         # ⭐ foco do cliente
+                'primeira_parcela_boleto':  primeira_parcela_boleto_ml,
+                'vendas_total':             round(buyers_ml, 1),
+                'vendas_guru':              vendas_guru_ml,
+                'vendas_tmb':               vendas_tmb_ml,
             }
 
         result = {
