@@ -1384,13 +1384,16 @@ class DataQualityMonitor:
 
         try:
             import pg8000.native
+            # Railway via proxy: pg8000 conecta sem ssl_context (mesma config
+            # de api/app.py:1677-1684 e 2360-2367). ssl_context=True falha em
+            # Cloud Run com SSL: CERTIFICATE_VERIFY_FAILED — Railway proxy
+            # apresenta cert auto-assinado.
             conn = pg8000.native.Connection(
                 host=os.environ['RAILWAY_DB_HOST'],
-                port=int(os.environ['RAILWAY_DB_PORT']),
-                user=os.environ['RAILWAY_DB_USER'],
+                port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+                user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
                 password=os.environ['RAILWAY_DB_PASSWORD'],
-                database=os.environ['RAILWAY_DB_NAME'],
-                ssl_context=True,
+                database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
                 timeout=15,
             )
             rows = conn.run(
