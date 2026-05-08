@@ -645,19 +645,19 @@ run_post_deploy_tests() {
     fi
     print_success "Health check: OK (200)"
 
-    # 4.2 Verificar logs de erro
-    print_info "Teste 2/3: Verificando logs de erro..."
+    # 4.2 Verificar logs de erro (BLOQUEADOR — escopo na revisão nova pra não pegar erros legados)
+    print_info "Teste 2/3: Verificando logs de erro da revisão $NEW_REVISION..."
     ERROR_COUNT=$(gcloud logging read \
-        "resource.type=cloud_run_revision AND resource.labels.service_name=$SERVICE_NAME AND severity>=ERROR AND timestamp>=\"$(date -u -v-5M +%Y-%m-%dT%H:%M:%SZ)\"" \
+        "resource.type=cloud_run_revision AND resource.labels.revision_name=$NEW_REVISION AND severity>=ERROR AND timestamp>=\"$(date -u -v-5M +%Y-%m-%dT%H:%M:%SZ)\"" \
         --limit=10 \
         --format="value(textPayload)" 2>/dev/null | wc -l | tr -d ' ')
 
     if [ "$ERROR_COUNT" -gt 0 ]; then
-        print_warning "Encontrados $ERROR_COUNT erros nos últimos 5 minutos"
-        print_info "Visualize com: gcloud logging read 'resource.type=cloud_run_revision AND resource.labels.service_name=$SERVICE_NAME AND severity>=ERROR' --limit=10"
-    else
-        print_success "Nenhum erro encontrado nos logs"
+        print_error "Encontrados $ERROR_COUNT erros nos últimos 5 minutos da revisão $NEW_REVISION"
+        print_info "Visualize: gcloud logging read 'resource.type=cloud_run_revision AND resource.labels.revision_name=$NEW_REVISION AND severity>=ERROR' --limit=10 --freshness=10m"
+        return 1
     fi
+    print_success "Nenhum erro encontrado nos logs da revisão"
 
     # 4.3 Teste de predição
     print_info "Teste 3/3: Teste de predição..."
