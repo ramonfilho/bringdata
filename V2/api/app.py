@@ -1275,6 +1275,7 @@ def _safe_parse_timestamp(data_value) -> int:
 class CapiBatchRequest(BaseModel):
     """Request para processamento batch CAPI"""
     leads: List[Dict[str, Any]] = Field(..., description="TODOS os leads do dia anterior (D1-D10)")
+    dry_run: bool = Field(default=False, description="Se True: roda routing A/B + cálculo de value sem chamar Meta nem escrever em DB. Usado por Gate C de equivalência de revisões.")
 
 class CapiCheckSentRequest(BaseModel):
     """Request para verificar quais leads já foram enviados"""
@@ -1543,10 +1544,11 @@ async def process_daily_batch_capi(
             logger.info(f"      - Com FBC: {leads_with_fbc}/{len(allowed_leads)} ({leads_with_fbc/len(allowed_leads)*100:.1f}%)")
             logger.info(f"      - Com AMBOS: {leads_with_both}/{len(allowed_leads)} ({leads_with_both/len(allowed_leads)*100:.1f}%)")
 
-        # Enviar batch (com db session para registrar envios)
+        # Enviar batch (com db session para registrar envios; em dry_run não escreve em DB nem chama Meta)
         results = send_batch_events(allowed_leads, db=db, capi_config=pipeline._client_config.capi,
                                     business_config=pipeline._client_config.business,
-                                    client_id=pipeline._client_config.client_id)
+                                    client_id=pipeline._client_config.client_id,
+                                    dry_run=request.dry_run)
 
         logger.info(f"✅ Batch CAPI processado: {results['success']}/{results['total']} enviados")
 

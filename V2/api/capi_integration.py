@@ -259,6 +259,7 @@ def send_lead_qualified_with_value(
     event_name_override: Optional[str] = None,
     conversion_rates_override: Optional[Dict[str, float]] = None,
     pixel_id_override: Optional[str] = None,
+    dry_run: bool = False,
 ) -> Dict:
     """
     ESTRATÉGIA 1: Envia TODOS os leads (D1-D10) com VALOR DIFERENCIADO por decil
@@ -394,6 +395,20 @@ def send_lead_qualified_with_value(
 
         event_request = EventRequest(**event_request_params)
 
+        # [Gate C dry_run] Skip Meta call e DB writes — preserva todo o caminho de
+        # routing A/B + cálculo de valor pra inspeção sem efeito colateral.
+        if dry_run:
+            logger.info(f"🧪 [DRY_RUN] LeadQualified calculado: {email} (decil: {decil}, valor proj: R$ {valor_projetado:.2f}, event_name: {event_name}, pixel: {pixel_id})")
+            return {
+                "status": "dry_run",
+                "event_id": event_id,
+                "email": email,
+                "decil": decil,
+                "valor_projetado": valor_projetado,
+                "event_name": event_name,
+                "pixel_id": pixel_id,
+            }
+
         # Enviar
         response = event_request.execute()
 
@@ -460,6 +475,7 @@ def send_lead_qualified_high_quality(
     client_id: str = 'devclub',
     event_name_override: Optional[str] = None,
     pixel_id_override: Optional[str] = None,
+    dry_run: bool = False,
 ) -> Dict:
     """
     ESTRATÉGIA 2: Envia APENAS D9 e D10 SEM VALOR
@@ -596,6 +612,20 @@ def send_lead_qualified_high_quality(
 
         event_request = EventRequest(**event_request_params)
 
+        # [Gate C dry_run] Skip Meta call e DB writes — preserva cálculo de event_name
+        # e pixel pra inspeção sem efeito colateral.
+        if dry_run:
+            logger.info(f"🧪 [DRY_RUN] LeadQualifiedHighQuality calculado: {email} (decil: {decil}, event_name: {event_name_hq}, pixel: {pixel_id})")
+            return {
+                "status": "dry_run",
+                "event_id": event_id,
+                "email": email,
+                "decil": decil,
+                "estrategia": "high_quality_only",
+                "event_name": event_name_hq,
+                "pixel_id": pixel_id,
+            }
+
         # Enviar
         response = event_request.execute()
 
@@ -665,6 +695,7 @@ def send_both_lead_events(
     event_name_hq_override: Optional[str] = None,
     conversion_rates_override: Optional[Dict[str, float]] = None,
     pixel_id_override: Optional[str] = None,
+    dry_run: bool = False,
 ) -> Dict:
     """
     TESTE A/B: Envia AMBOS os eventos para permitir teste de 2 estratégias
@@ -716,6 +747,7 @@ def send_both_lead_events(
         event_name_override=event_name_override,
         conversion_rates_override=conversion_rates_override,
         pixel_id_override=pixel_id_override,
+        dry_run=dry_run,
     )
 
     # Evento 2: HighQuality SEM VALOR (D9-D10 only — função filtra internamente)
@@ -740,6 +772,7 @@ def send_both_lead_events(
         client_id=client_id,
         event_name_override=event_name_hq_override,
         pixel_id_override=pixel_id_override,
+        dry_run=dry_run,
     )
 
     return {
@@ -910,7 +943,7 @@ def should_send_to_destination(
     return True, 'allowed'
 
 
-def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConfig] = None, business_config: Optional[BusinessConfig] = None, client_id: str = 'devclub') -> Dict:
+def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConfig] = None, business_config: Optional[BusinessConfig] = None, client_id: str = 'devclub', dry_run: bool = False) -> Dict:
     """
     Envia múltiplos eventos CAPI em batch (AMBAS AS ESTRATÉGIAS)
     Usado pelo processamento diário
@@ -971,14 +1004,15 @@ def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConf
             event_name_hq_override=lead.get('ab_event_name_hq'),
             conversion_rates_override=lead.get('ab_conversion_rates'),
             pixel_id_override=lead.get('ab_pixel_id'),
+            dry_run=dry_run,
             # test_event_code=None (padrão) -> vai para PRODUÇÃO
         )
 
         if result['status'] == 'success':
             results['success'] += 1
 
-            # Registrar envio no banco (se db session disponível)
-            if db:
+            # Registrar envio no banco (se db session disponível e não-dry_run)
+            if db and not dry_run:
                 try:
                     from api.database import mark_lead_capi_sent
                     mark_lead_capi_sent(db, lead['email'], client_id=client_id)
