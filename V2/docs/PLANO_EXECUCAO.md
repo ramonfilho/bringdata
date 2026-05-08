@@ -189,7 +189,7 @@ Itens descobertos durante o fix do encoding ordinal jan30 (DT-12 complemento).
 Itens descobertos durante a investigação do spike de custo + comprovação CAPI no canary `00402-hoq`.
 
 - **DT-17 — Eliminar duplicação `api/business_config.py` × YAML do cliente.** Prioridade ALTA arquiteturalmente, MÉDIA em urgência (Fix A já estancou o sangramento). Bug latente que causou 7 dias 100% value=0 entre 30/04 e 06/05. Fluxo desejado: treino popula rates como artifact dentro do MLflow run; `--set-active` copia pro YAML autoritativo no momento da promoção (não no momento do treino). Sequência completa em PLANO_REFACTOR_MLOPS.md DT-17. Fases 1-3 (preparação) podem rodar em paralelo a DT-16; fases 4-5 disparam junto com próximo retreino.
-- **VAL=0 follow-up:** confirmar nos logs após próximo deploy que `valor proj` deixou de ser R$ 0.00 (esperado: D10 ≈ R$ 14.97 segundo `LEAD_VALUE_BY_DECILE_CHAMPION`). Rodar Q1 de [bigquery_sinks.md](bigquery_sinks.md).
+- **VAL=0 follow-up** ✅ **RESOLVIDO 08/05/2026.** Revisão `smart-ads-api-00412-rag` em 100% desde 14:25 BRT após canary 0% → 10% → 100% com Gates B/D/C automatizados. Drain confirmado via Q1: zero events value=0 pós-promoção; D04=R$1.97, D05=R$5.62, D06=R$5.62, D08=R$6.75, D10=R$14.97 — todos batendo `LEAD_VALUE_BY_DECILE_CHAMPION`. Bug irmão dos variants A/B (`conversion_rates` zerado em `champion_jan30`/`challenger_abr28`) descoberto e corrigido durante o canary via Patch B (commit `4c1d727`). Salvaguardas T1-17 (Gate D) + T1-18 (Gate C) introduzidas pra fechar a classe — ver `registro_erros_ml.md § I.8b` e `PLANO_SAFEGUARD.md`. DT-17 (refactor arquitetural) continua pendente como solução estrutural.
 
 #### Sequelas / pendências da sessão de investigação 08/05/2026
 

@@ -136,6 +136,18 @@ ORDER BY dia
   [registro_erros_ml.md § I.8](registro_erros_ml.md);
   solução arquitetural (DT-17) em [PLANO_REFACTOR_MLOPS.md](PLANO_REFACTOR_MLOPS.md).
 
+- **VAL=0 v2 — variants A/B (08/05/2026):** Q1 contra canary `00403-cez`
+  (10%) mostrou 17.6% dos events com `value=0` quando o lead pegava
+  path A/B Champion via shim — variants em `active_models/devclub.yaml`
+  tinham `conversion_rates` zerado (comentário do YAML errado afirmava
+  "NUNCA lidos"). Bug irmão do VAL=0 original — os outros 82.4%
+  saíram com value correto pelo Fix A. Descoberto por **observação direta
+  do canary em produção**, não por auditoria proativa. Patch B
+  (commit `4c1d727`) populou `conversion_rates` dos variants. História
+  canônica em [registro_erros_ml.md § I.8b](registro_erros_ml.md);
+  salvaguardas T1-17 (Gate D) e T1-18 (Gate C) em
+  [PLANO_SAFEGUARD.md](PLANO_SAFEGUARD.md).
+
 ## Limitações
 
 - Sink tem latência de ~1-2 min do log emitido até estar queryable em BQ.

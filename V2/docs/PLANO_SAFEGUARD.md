@@ -153,6 +153,95 @@ Filtro Cloud Run Logs Explorer:
 
 ---
 
+## Gate D — Auditoria de YAML dentro da imagem deployada [T1-17]
+
+**Problema que resolve:** YAMLs de configuração (`clients/{cliente}.yaml`, `active_models/{cliente}.yaml`) viram parte da imagem Cloud Run via `COPY` no Dockerfile. Mudanças silenciosas (remoção de bloco, valores zerados) podem produzir runtime sem erro mas com sinal degradado.
+
+Bugs reais que motivaram a criação:
+- **VAL=0 (30/04→06/05/2026):** `business.conversion_rates` removido em commit `d40970a` sem alerta. Runtime caía em `valor_projetado = 0.0` silencioso. 7 dias de events `LeadQualified` com `value=0`.
+- **VAL=0 v2 (08/05/2026):** `champion_jan30` e `challenger_abr28` em `active_models/devclub.yaml` tinham `conversion_rates: {D01: 0.0, ..., D10: 0.0}` por copy-paste. Comentário do YAML afirmava "NUNCA são lidos" mas eram. Bug parcial só apareceu em canary (não em prod-only).
+
+Gate B (T1-10 + T1-11) cobre **encoding/features**, não **config de negócio**. Gate D fecha esse gap no nível da imagem deployada.
+
+### Arquitetura
+
+Script `V2/scripts/gate_d_config_audit.py`. Recebe nome de revisão Cloud Run, resolve image digest via `gcloud run revisions describe`, faz `docker pull` + `cat` de dentro do container.
+
+**Invariantes verificadas:**
+
+- **D1 — `clients/{cliente}.yaml`:** `business.conversion_rates` existe, cobre `D01..D10`, todos os valores `> 0`. Pega o bug original (VAL=0).
+- **D2 — `active_models/{cliente}.yaml`:** para cada variant em `ab_test.variants` que é "ativo" (matcheia roteamento OU `run_id == active_model.mlflow_run_id`), `conversion_rates` cobre `D01..D10` e `MAX(values) > 0`. Pega VAL=0 v2.
+
+Variant "ativo" = um dos:
+- `utm_pattern` não vazio (matcheia leads via UTM)
+- `url_pattern` não vazio (matcheia leads via URL)
+- `run_id == active_model.mlflow_run_id` (Champion shim — pega leads sem match)
+
+Bloqueia o deploy via `exit 1` se qualquer invariante falhar.
+
+### Integração
+
+Roda em `deploy_capi.sh` entre Gate B (smoke encoding) e progressão de canary. Pré-requisito: docker daemon local disponível.
+
+```
+[Gate D] Revisão: smart-ads-api-00408-yix
+[gate D] ✓ variant 'champion_jan30' ativo: run_id == active_model.mlflow_run_id (Champion shim)
+[gate D] ✓ variant 'challenger_abr28' ativo: utm_pattern=['utm_campaign']
+[gate D] ✅ Todas as invariantes passaram (D1 + D2).
+```
+
+### Relação com outros itens
+
+- **T1-18 (Gate C — equivalência de scoring):** complementar. Gate D cobre config; Gate C cobre runtime de scoring. Bugs onde rates não-zero mas erradas (ex: 0.5 em vez de 0.005) **não** são cobertos por D — viriam de revisão manual + Gate C `--expect-score-change`.
+- **DT-17 (eliminar duplicação `business_config.py` × YAML):** Gate D fica relevante até DT-17 fechar. Depois, autoridade fica no MLflow artifact + `--set-active`, e Gate D adapta para validar o artifact.
+
+---
+
+## Gate C — Equivalência de score+decil entre revisões [T1-18]
+
+**Problema que resolve:** mudanças não-intencionais no scoring (regressão de modelo, regressão de encoding, regressão de pipeline) só apareceriam em produção depois de promovidos. Custosa de detectar e reverter.
+
+Gate C compara scoring entre uma revisão alvo (canary recém-deployado) e uma revisão referência (rolling baseline = revisão com 100% de tráfego no momento). Mesmo conjunto de leads históricos do Railway, POST nas duas URLs, diff per-lead.
+
+**Critério de bloqueio:** somente divergência de decil. Value/event_name divergentes são **informativos** — revisões frequentemente mudam value/event_name intencionalmente (Patch B em 08/05 corrigiu value=0 → values corretos por decil). Para esse lado, Gate D já cobre regressão de `conversion_rates`.
+
+### Arquitetura
+
+Script `V2/scripts/test_revision_equivalence.py`.
+
+**Modo `capi-dry-run` (default):** usa `/capi/process_daily_batch?dry_run=true` que executa todo o caminho de routing A/B + cálculo de `valor_projetado` mas pula chamada Meta + DB writes. Cobre path A/B real.
+
+**Modo `predict` (legado):** usa `/predict/batch`. Não toca path A/B. Útil para validar pipeline de scoring isoladamente.
+
+### Cobertura forçada A/B
+
+Pegando leads aleatórios do Railway, raramente algum bate `utm_campaign='PIXEL NOVO API'` que rotearia para o Challenger. O fetcher reescreve `utm_campaign` da metade dos leads para forçar Challenger path, e prefixa `email` com `chlng+` pra evitar colisão de cache no `/capi/process_daily_batch`. Garante cobertura ≥50% Challenger.
+
+Resultado típico:
+
+```
+  Path coverage:       Champion=11  Challenger=10  Unknown=0
+  Decis divergentes:   0  ← critério de bloqueio
+  Values divergentes:  21 (tol=0.01)  [informativo, não bloqueia]
+  ✅ PASSOU — decil idêntico (scoring intacto).
+```
+
+### Integração
+
+Roda em `deploy_capi.sh` entre Gate D e progressão de canary. Pré-requisito: env vars `RAILWAY_DB_*` no `V2/.env`.
+
+### Override de mudança intencional
+
+Quando o objetivo da revisão **é** mudar scoring (novo modelo Champion, novo encoder), passar `--expect-score-change` pra aceitar divergência de decil como esperada.
+
+### Relação com outros itens
+
+- **T1-17 (Gate D):** complementar — ver acima.
+- **T1-7 (parity audit):** roda pré-build (treino × produção em código). Gate C roda pós-build (revisão A × revisão B em runtime). Diferentes momentos no fluxo.
+- **A/B routing em `/capi/process_daily_batch`:** Gate C precisa do A/B routing nesse endpoint pra cobrir path Challenger. Adicionado no commit `266d79d` junto com Gate C — antes só `/webhook/lead_capture` e `/railway/process-pending` faziam routing.
+
+---
+
 ## Protocolo de progressão de tráfego [T1-9]
 
 Cada deploy no Cloud Run segue a progressão abaixo. Cada etapa exige **tempo mínimo de observação E critérios objetivos cumpridos** — não avançar sem ambos.

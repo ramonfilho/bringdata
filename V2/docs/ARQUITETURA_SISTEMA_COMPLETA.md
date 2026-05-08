@@ -242,6 +242,35 @@ Cloud Scheduler (5min) → /railway/process-pending → LeadScoringPipeline → 
 Google Sheets → Apps Script → /predict/batch → LeadScoringPipeline → scores → Sheets
 ```
 
+### A/B routing — endpoints CAPI dispatchers
+
+Três endpoints despacham eventos CAPI e fazem A/B routing idêntico (consistência arquitetural — antes o `/capi/process_daily_batch` era o único sem routing, gap fechado em 08/05/2026 commit `266d79d`):
+
+| Endpoint | Quem chama | Quando |
+|---|---|---|
+| `/webhook/lead_capture` | Landing Page (JS) | Síncrono no submit da pesquisa |
+| `/railway/process-pending` | Cloud Scheduler (5/5 min) | Batch sobre leads pendentes do Railway |
+| `/capi/process_daily_batch` | Apps Script | Batch sobre leads scoreados pelo Sheets |
+
+**Lógica comum em todos:**
+1. Para cada lead, monta `lead_utms` a partir de `utm_*` + `event_source_url`
+2. Chama `pipeline.get_ab_variant(lead_utms, event_source_url)` — retorna o variant em `ab_test.variants` cujo `utm_pattern`/`url_pattern` matcheia, ou o Champion shim (variant cujo `run_id == active_model.mlflow_run_id`) como fallback
+3. Popula em `lead_capi_dict`: `ab_event_name`, `ab_event_name_hq`, `ab_conversion_rates`, `ab_pixel_id`
+4. `send_batch_events` repassa via `event_name_override`/`conversion_rates_override`/`pixel_id_override` pra `send_lead_qualified_with_value` (cap. integração)
+5. Cálculo final: `valor_projetado = product_value * (conversion_rates_override or business_config.conversion_rates).get(decil, 0.0)`
+
+**Implicação operacional:** mudanças em `active_models/{cliente}.yaml.ab_test.variants.*.conversion_rates` afetam runtime imediatamente após deploy. Bug VAL=0 v2 (08/05/2026) veio de `conversion_rates: {D01: 0.0, ..., D10: 0.0}` em variants ativos, que tem prioridade sobre o fallback `business_config.conversion_rates`. Salvaguarda: T1-17 (Gate D) audita YAML interno da imagem antes de promover tráfego.
+
+### `/capi/process_daily_batch?dry_run=true`
+
+Capability adicionada em 08/05/2026 (commit `c912db0`) pra permitir testes automatizados. Quando `dry_run=true`:
+- Executa todo o caminho de routing A/B + cálculo de `valor_projetado` (incluindo `conversion_rates_override`)
+- **Não** chama `event_request.execute()` (sem evento Meta)
+- **Não** escreve em DB (`mark_lead_capi_sent` e `update_capi_response` pulados)
+- Retorna `details[i].evento_com_valor` com `decil` + `valor_projetado` + `event_name` + `pixel_id` calculados
+
+Usado por T1-18 (Gate C — equivalência de score+decil entre revisões). Sem efeito colateral em produção (DB intocado, Meta intocado).
+
 ---
 
 ## MONITORAMENTO (`src/monitoring/`)
