@@ -967,6 +967,30 @@ class MonitoringOrchestrator:
                     'taxa_implicita_por_meta_lead': round(taxa_impl_meta, 3) if taxa_impl_meta else None,
                 }
 
+        # ------------------------------------------------------------------
+        # Cenário ML-aware: bottom-up por decil promovido a cenário próprio.
+        # Usa expected_conversion (taxas históricas por faixa × leads atuais
+        # do lançamento) e replica a estrutura do flat-rate (faturamento +
+        # faturamento_recebido + vendas total/guru/tmb) para comparação direta.
+        # Diferença de fonte entre os dois métodos:
+        #   flat-rate    → mediana global histórica × Meta leads (agnóstico de qualidade)
+        #   ml_aware     → taxas por faixa de decil × leads DB (sensível à qualidade do lote)
+        # ------------------------------------------------------------------
+        cenario_ml_aware = None
+        if expected_conversion:
+            buyers_ml = float(expected_conversion['compradores_esperados']['total'])
+            vendas_guru_ml = round(buyers_ml * pct_cartao, 1)
+            vendas_tmb_ml  = round(buyers_ml * pct_boleto, 1)
+            fat_recebido_ml = round(vendas_guru_ml * guru_ticket * guru_realizacao
+                                    + vendas_tmb_ml * parcela_tmb)
+            cenario_ml_aware = {
+                'faturamento':          round(buyers_ml * ticket),
+                'faturamento_recebido': fat_recebido_ml,
+                'vendas_total':         round(buyers_ml, 1),
+                'vendas_guru':          vendas_guru_ml,
+                'vendas_tmb':           vendas_tmb_ml,
+            }
+
         result = {
             'cenario_pessimista': pessimista,
             'cenario_base':       base,
@@ -978,9 +1002,16 @@ class MonitoringOrchestrator:
                 'taxa_real_implicita':  round(taxa_real * 100, 3),
                 'ticket_contracted':    ticket,
                 'pct_cartao_historico': pct_cartao,
-                'metodologia':          'flat-rate LOO LF42-LF47 MAE=7.5%',
+                'metodologia':          'flat-rate LF43-LF53 (recalibrado 08/05)',
+                'fonte_flat_rate':      'mediana histórica vendas_matched/total_leads_meta (LF43-LF53)',
             },
         }
+        if cenario_ml_aware:
+            result['cenario_ml_aware'] = cenario_ml_aware
+            result['inputs']['fonte_ml_aware'] = (
+                f"bottom-up por decil × benchmark {expected_conversion.get('fonte', 'DEV19-LF48')} "
+                f"(taxa implícita {expected_conversion.get('taxa_implicita_por_meta_lead')}% sobre Meta leads)"
+            )
         if expected_conversion:
             result['expected_conversion'] = expected_conversion
         return result

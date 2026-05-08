@@ -658,9 +658,12 @@ business:
   guru_realizacao_factor: 0.87       # fator de realização Guru: ~13% de cancelamentos/chargebacks (back-calculado de LF42–LF47)
   pct_cartao_historico: 0.469        # % cartão mediana LF44–LF47 (exclui LF42 vol.pequeno e LF43 efeito pós-Dev19)
   n_parcelas_boleto: 12              # entrada + 11 mensais (fonte: contas_a_receber TMB)
-  conv_rastr_mediana: 0.0065         # mediana LF42–LF47: vendas_matched/total_leads_meta → forecast flat-rate
-  scenario_pessimistic_factor: 0.97  # piso conv. rate — calibrado no CV real de 2% (LF42–LF47)
-  scenario_optimistic_factor: 1.03   # teto conv. rate — calibrado no CV real de 2% (LF42–LF47)
+  # Recalibração 08/05/2026: janela LF43–LF53 (11 lançamentos), exclui LF42 (dez/2025 desatualizado).
+  # Janela anterior LF42–LF47 ficou estagnada e ignorava degradação de conv geral observada em LF48–LF53.
+  conv_rastr_mediana: 0.005376       # mediana LF43–LF53: vendas_matched/total_leads_meta (range 0.31–0.74%, CV 24%)
+  tracking_rate: 0.5207              # mediana LF43–LF53: vendas_matched/vendas_reais (range 32–75%)
+  scenario_pessimistic_factor: 0.95  # piso conv. rate — alargado de 0.97 → 0.95 pra refletir CV real 24%
+  scenario_optimistic_factor: 1.05   # teto conv. rate — alargado de 1.03 → 1.05 pra refletir CV real 24%
   conversion_rate_benchmark:              # taxas observadas em produção — DEV19–LF48 (7 lançamentos)
     periodo_referencia: "DEV19–LF48"     # base de calibração (exclui LF40/41 inconclusivos e LF42 sazonalidade Natal)
     D1_D5: 0.0029                        # 0,29% — faixa de baixa intenção (D1–D5)
