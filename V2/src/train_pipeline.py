@@ -237,7 +237,7 @@ def _log_step_count(step: str, df_after, df_before=None, target_col: str = 'targ
     logger.info("  " + " | ".join(parts))
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, exclude_features=None):
     """Executa pipeline de treino completo.
 
     Args:
@@ -908,6 +908,30 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         df_encoded_with_date.to_parquet(_encoded_path, index=False)
         logger.info(f"  [compare_models] Dataset encodado salvo em: {_encoded_path}")
 
+    # === --exclude-features: drop por prefixo após encoding (experimentação ablativa) ===
+    # Aplica DEPOIS do save_encoded para que compare_encoded.parquet preserve todas
+    # as features (permite ablação posterior sem retreinar). O drop é antes do treino,
+    # então o feature_registry salvo no MLflow já reflete o subset reduzido — produção
+    # carrega o registry e só passa as features listadas (alinhamento em core/encoding.py).
+    if exclude_features:
+        cols_before = list(dataset_v1_devclub_encoded.columns)
+        to_drop = []
+        for prefix in exclude_features:
+            matches = [c for c in cols_before if c.startswith(prefix)]
+            if not matches:
+                raise ValueError(
+                    f"[--exclude-features] prefixo '{prefix}' não casou com nenhuma coluna. "
+                    f"Verificar typo. Total de colunas: {len(cols_before)}. "
+                    f"Amostra: {cols_before[:5]}..."
+                )
+            to_drop.extend(matches)
+        to_drop = list(dict.fromkeys(to_drop))
+        dataset_v1_devclub_encoded = dataset_v1_devclub_encoded.drop(columns=to_drop)
+        logger.info(f"  [exclude-features] removidas {len(to_drop)} colunas via prefixos {exclude_features}")
+        logger.info(f"  [exclude-features] colunas: {len(cols_before)} → {dataset_v1_devclub_encoded.shape[1]}")
+        for col in to_drop:
+            logger.info(f"    - {col}")
+
     # === Pesos por tipo de comprador — obrigatoriamente do ClientConfig (R2/DT-10) ===
     # Sem fallback: pesos são específicos por cliente (TMB é DevClub). Se um cliente novo
     # esquecer model.buyer_weights no YAML, abortar é melhor que treinar com pesos errados.
@@ -1265,6 +1289,15 @@ if __name__ == "__main__":
         metavar='RUN_ID',
         help='Ativar um run MLflow existente sem retreinar. Atualiza active_models/devclub.yaml, business_config.py e devclub.yaml. Ex: --activate-run a859c68b1cb94c3b93767a3131eda89a'
     )
+    parser.add_argument(
+        '--exclude-features',
+        type=str,
+        default=None,
+        help='Lista de prefixos (separados por vírgula) de features a remover após encoding. '
+             'Ex: --exclude-features "Atualmente_qual_a_sua_faixa_salarial_" remove os 5 OHE de salário. '
+             'Falha alto se um prefixo não casar com nenhuma coluna. Útil para ablações treinadas '
+             '(o feature_registry resultante reflete o subset reduzido).'
+    )
 
     args = parser.parse_args()
 
@@ -1300,4 +1333,5 @@ if __name__ == "__main__":
         use_control_weights=args.control_group_weights,
         train_ratio=args.train_ratio,
         control_alpha=args.control_alpha,
+        exclude_features=[p.strip() for p in args.exclude_features.split(',')] if args.exclude_features else None,
     )
