@@ -375,12 +375,52 @@ class MonitoringOrchestrator:
                     '  MAX("updatedAt") FILTER (WHERE "leadScore" IS NOT NULL) '
                     'FROM "Lead"'
                 )
+                # Per-variant scoring: aplica a MESMA função de roteamento que
+                # production_pipeline usa (ABTestConfig.match_variant). Lead.source/
+                # medium/etc. ↔ utm_source/utm_medium/etc. esperados pelo matcher.
+                # Leads que não matchearem nenhuma variante explícita caem na
+                # variante "default" (utm_pattern={} e sem url_pattern — Champion shim).
+                _by_variant: Dict[str, int] = {}
+                if result.get('ab_test_enabled') and result.get('active_model_yaml_path'):
+                    try:
+                        from src.core.client_config import ABTestConfig as _ABTestConfig
+                        _ab_cfg = _ABTestConfig.from_active_model_yaml(result['active_model_yaml_path'])
+                        _utm_rows = _conn.run(
+                            'SELECT source, medium, campaign, content, term, "pageUrl" '
+                            'FROM "Lead" '
+                            'WHERE "leadScore" IS NOT NULL '
+                            "  AND \"updatedAt\" >= NOW() - INTERVAL '24 hours'"
+                        )
+                        _by_variant = {n: 0 for n in _ab_cfg.variants.keys()}
+                        _default = next(
+                            (n for n, v in _ab_cfg.variants.items()
+                             if not v.utm_pattern and not v.url_pattern),
+                            None,
+                        )
+                        for _src, _med, _cmp, _cnt, _trm, _purl in _utm_rows:
+                            _lead_utms = {
+                                'utm_source': _src, 'utm_medium': _med,
+                                'utm_campaign': _cmp, 'utm_content': _cnt,
+                                'utm_term': _trm,
+                            }
+                            _matched = _ab_cfg.match_variant(_lead_utms, event_source_url=_purl)
+                            if _matched is not None:
+                                _name = next(
+                                    n for n, v in _ab_cfg.variants.items() if v is _matched
+                                )
+                                _by_variant[_name] += 1
+                            elif _default:
+                                _by_variant[_default] += 1
+                    except Exception as _e:
+                        logger.warning(f"  [T3-5] falha em leads_scored_by_variant_24h: {_e}")
                 _conn.close()
                 if _row:
                     _leads_24h, _scored_24h, _capi_24h, _last_scored = _row[0]
                     result['leads_received_24h'] = int(_leads_24h or 0)
                     result['leads_scored_24h'] = int(_scored_24h or 0)
                     result['capi_sent_24h'] = int(_capi_24h or 0)
+                    if _by_variant:
+                        result['leads_scored_by_variant_24h'] = _by_variant
                     if _last_scored is not None:
                         if _last_scored.tzinfo is None:
                             _last_scored = _last_scored.replace(tzinfo=timezone.utc)

@@ -374,12 +374,15 @@ def render_survey_funnel(p: dict, lines: list):
 
 def render_ab_test(p: dict, lines: list):
     op = p.get('operational_routines', {}) or {}
+    by_variant = op.get('leads_scored_by_variant_24h') or {}
     lines.append('🤖  A/B TEST')
     lines.append(f'    Active model run_id: {op.get("active_run_id","?")[:16]}…')
     lines.append(f'    AB enabled: {op.get("ab_test_enabled", False)}')
     for v in op.get('ab_variants', []) or []:
         ativo = '✓ ATIVO' if v.get('routing_active') else 'standby'
-        lines.append(f"    {v.get('name','?'):<22}  {ativo:<10}  {v.get('routing_desc','?')}")
+        scored = by_variant.get(v.get('name'))
+        scored_tag = f'  scored {scored:>4,}/24h' if scored is not None else ''
+        lines.append(f"    {v.get('name','?'):<22}  {ativo:<10}{scored_tag}  {v.get('routing_desc','?')}")
         lines.append(f"      run_id: {v.get('run_id','?')[:16]}…")
     lines.append(f'    Leads (24h): recebidos {op.get("leads_received_24h",0)}, '
                  f'scoreados {op.get("leads_scored_24h",0)}, '
