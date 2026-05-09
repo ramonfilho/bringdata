@@ -656,7 +656,7 @@ business:
   ticket_contracted: 2200.0          # valor nominal contratado — base do faturamento total (Guru e TMB)
   guru_ticket_price: 1997.0          # preço real no Guru (payment.gross via API) — ≠ ticket contratado R$2.200
   guru_realizacao_factor: 0.87       # fator de realização Guru: ~13% de cancelamentos/chargebacks (back-calculado de LF42–LF47)
-  pct_cartao_historico: 0.469        # % cartão mediana LF44–LF47 (exclui LF42 vol.pequeno e LF43 efeito pós-Dev19)
+  pct_cartao_historico: 0.422        # % cartão mediana LF43–LF53 (recalibrado 09/05; queda real de 47% → 42% em LF48–LF53)
   n_parcelas_boleto: 12              # entrada + 11 mensais (fonte: contas_a_receber TMB)
   # Recalibração 08/05/2026: janela LF43–LF53 (11 lançamentos), exclui LF42 (dez/2025 desatualizado).
   # Janela anterior LF42–LF47 ficou estagnada e ignorava degradação de conv geral observada em LF48–LF53.
