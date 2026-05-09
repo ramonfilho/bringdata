@@ -298,7 +298,10 @@ def audit_encoding_ab_variants():
 
         ok_variant = True
 
-        # 0. Comparação coluna-a-coluna contra snapshot por-variante (se existir)
+        # 0. Comparação coluna-a-coluna contra snapshot por-variante.
+        # Se ausente: bootstrap — salva o output atual como baseline e segue.
+        # Comparação real fica disponível a partir do próximo deploy nesta máquina.
+        # (Cross-machine: snapshots são gitignored; cada ambiente bootstrappa o seu.)
         snapshot_path = os.path.join(
             FIXTURES, f'snapshot_encoding_output_{variant_name}.pkl'
         )
@@ -311,9 +314,11 @@ def audit_encoding_ab_variants():
             if not ok_snap:
                 ok_variant = False
         else:
-            print(f"  [WARN] '{variant_name}': snapshot {os.path.basename(snapshot_path)} "
-                  "ausente — rodando só smoke checks. Capture com: "
-                  "python -m V2.tests.capture_encoding_snapshots_ab")
+            df_actual.to_pickle(snapshot_path)
+            print(f"  [BOOTSTRAP] '{variant_name}': snapshot ausente — output atual "
+                  f"({df_actual.shape[0]:,}×{df_actual.shape[1]}) salvo como baseline em "
+                  f"{os.path.basename(snapshot_path)}. Comparação real fica disponível "
+                  "a partir do próximo deploy.")
 
         # 1. Ordinais devem virar numéricas (não dtype=object)
         ordinais_presentes = [
