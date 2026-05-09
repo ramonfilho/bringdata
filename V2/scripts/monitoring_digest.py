@@ -86,6 +86,15 @@ def render_header(p: dict, lines: list):
 def render_audience_profile_drift(a: dict, lines: list):
     d = a.get('details', {}) or {}
     lines.append(f'🔴  AUDIENCE_PROFILE_DRIFT  ({a["severity"]})')
+
+    launch_n = d.get('launch_n_responses', 0)
+    launch_w = d.get('launch_window')
+    if launch_w:
+        if launch_n > 0:
+            lines.append(f'    Janela lanç.: {launch_w} (n={launch_n})')
+        else:
+            lines.append(f'    Janela lanç.: {launch_w} (sem dados)')
+
     lines.append(f'    Janela ontem: {d.get("compared_window","?")} (n={d.get("day_n_responses",0)})')
     today_n = d.get('today_n_responses', 0)
     today_w = d.get('today_window', '?')
@@ -103,26 +112,41 @@ def render_audience_profile_drift(a: dict, lines: list):
         lines.append('')
         return
 
+    has_launch = any(it.get('launch_pct') is not None for it in top)
     has_today = any(it.get('today_pct') is not None for it in top)
+
+    label_w = 36
+    ref_w = 6
+    cell_w = 14
+
+    headers = [f'{"Característica":<{label_w}}', f'{"Top5":>{ref_w}}']
+    if has_launch:
+        headers.append(f'{"Lanç. (Δ)":>{cell_w}}')
+    headers.append(f'{"Ontem (Δ)":>{cell_w}}')
     if has_today:
-        lines.append(f'    {"Característica":<40} {"Top5":>7}  {"Ontem (Δ)":>14}  {"Hoje (Δ)":>14}')
-        lines.append(f'    {"─" * 78}')
-        for it in top:
-            label = f"{it['feature_label']}: {it['category']}"[:40]
-            ref = fmt_pct(it.get('reference_pct'))
-            day = f'{fmt_pct(it.get("day_pct"))} ({fmt_pp(it.get("delta_pp")):>5})'
-            today_pct_v = it.get('today_pct')
-            today_dpp = it.get('today_delta_pp')
-            today = f'{fmt_pct(today_pct_v)} ({fmt_pp(today_dpp):>5})' if today_pct_v is not None else '       —'
-            lines.append(f'    {label:<40} {ref}  {day:>14}  {today:>14}')
-    else:
-        lines.append(f'    {"Característica":<40} {"Top5":>7}  {"Ontem (Δ)":>14}')
-        lines.append(f'    {"─" * 65}')
-        for it in top:
-            label = f"{it['feature_label']}: {it['category']}"[:40]
-            ref = fmt_pct(it.get('reference_pct'))
-            day = f'{fmt_pct(it.get("day_pct"))} ({fmt_pp(it.get("delta_pp")):>5})'
-            lines.append(f'    {label:<40} {ref}  {day:>14}')
+        headers.append(f'{"Hoje (Δ)":>{cell_w}}')
+
+    sep_width = label_w + ref_w + cell_w * (1 + int(has_launch) + int(has_today)) + 2 * (len(headers) - 1)
+    lines.append('    ' + '  '.join(headers))
+    lines.append('    ' + '─' * sep_width)
+
+    for it in top:
+        label = f"{it['feature_label']}: {it['category']}"[:label_w]
+        ref = fmt_pct(it.get('reference_pct'))
+        cells = [f'{label:<{label_w}}', f'{ref:>{ref_w}}']
+        if has_launch:
+            lp = it.get('launch_pct')
+            ld = it.get('launch_delta_pp')
+            cell = f'{fmt_pct(lp)} ({fmt_pp(ld):>5})' if lp is not None else '       —'
+            cells.append(f'{cell:>{cell_w}}')
+        day_cell = f'{fmt_pct(it.get("day_pct"))} ({fmt_pp(it.get("delta_pp")):>5})'
+        cells.append(f'{day_cell:>{cell_w}}')
+        if has_today:
+            tp = it.get('today_pct')
+            td = it.get('today_delta_pp')
+            cell = f'{fmt_pct(tp)} ({fmt_pp(td):>5})' if tp is not None else '       —'
+            cells.append(f'{cell:>{cell_w}}')
+        lines.append('    ' + '  '.join(cells))
     lines.append('')
 
 

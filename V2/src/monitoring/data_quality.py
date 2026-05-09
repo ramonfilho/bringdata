@@ -1609,6 +1609,77 @@ class DataQualityMonitor:
         label = f"{today_brt.isoformat()} BRT 00:00→{now_brt.strftime('%H:%M')} (parcial)"
         return df, label
 
+    def _resolve_current_launch_brt(self):
+        """
+        Lê configs/launches.yaml e retorna (lf_name, cap_start_str, cap_end_str)
+        do lançamento cujo período de captação inclui hoje BRT
+        (cap_start <= today_brt <= cap_end). Retorna None se nenhum bate.
+        """
+        from datetime import datetime, timedelta, timezone
+        try:
+            import yaml
+        except Exception:
+            return None
+        brt = timezone(timedelta(hours=-3))
+        today_brt = datetime.now(brt).date()
+        launches_path = Path(__file__).resolve().parents[2] / 'configs' / 'launches.yaml'
+        if not launches_path.exists():
+            return None
+        try:
+            with open(launches_path) as f:
+                launches = yaml.safe_load(f) or {}
+        except Exception as e:
+            logger.warning(f"[audience_profile_drift] Erro ao ler launches.yaml: {e}")
+            return None
+        for name, cfg in launches.items():
+            cs_str = cfg.get('cap_start')
+            ce_str = cfg.get('cap_end')
+            if not (cs_str and ce_str):
+                continue
+            try:
+                cs = datetime.strptime(cs_str, '%Y-%m-%d').date()
+                ce = datetime.strptime(ce_str, '%Y-%m-%d').date()
+            except ValueError:
+                continue
+            if cs <= today_brt <= ce:
+                return (name, cs_str, ce_str)
+        return None
+
+    def _query_railway_current_launch_brt(self) -> tuple[pd.DataFrame, Dict]:
+        """
+        Janela: cap_start 00:00 BRT do lançamento ativo até agora.
+        Retorna (df, info dict com lf_name/label/cap_start/cap_end/error).
+        Se nenhum lançamento ativo, retorna (df vazio, info com error).
+        """
+        from datetime import datetime, timedelta, timezone
+
+        info: Dict = {
+            'lf_name': None, 'label': None,
+            'cap_start': None, 'cap_end': None, 'error': None,
+        }
+        current = self._resolve_current_launch_brt()
+        if current is None:
+            info['error'] = 'no_active_launch'
+            return pd.DataFrame(), info
+
+        lf_name, cs_str, ce_str = current
+        info['lf_name'] = lf_name
+        info['cap_start'] = cs_str
+        info['cap_end'] = ce_str
+
+        cs = datetime.strptime(cs_str, '%Y-%m-%d').date()
+        start_utc = datetime(cs.year, cs.month, cs.day, 3, 0, 0,
+                             tzinfo=timezone.utc)
+        brt = timezone(timedelta(hours=-3))
+        now_brt = datetime.now(brt)
+        end_utc = now_brt.astimezone(timezone.utc)
+
+        df = self._query_railway_pesquisa_window(start_utc, end_utc)
+        info['label'] = (
+            f"{lf_name} {cs_str} BRT 00:00→{now_brt.strftime('%Y-%m-%d %H:%M')} (parcial)"
+        )
+        return df, info
+
     def _check_audience_profile_drift(self, df: pd.DataFrame) -> List[Dict]:
         """
         [T1-13] Compara o último dia completo BRT contra o snapshot de
@@ -1688,6 +1759,11 @@ class DataQualityMonitor:
         df_today, today_window_label = self._query_railway_today_partial_brt()
         n_today = len(df_today)
 
+        # Lançamento atual (cap_start → agora). Pode estar vazio se não houver
+        # lançamento ativo no launches.yaml (info['error'] == 'no_active_launch').
+        df_launch, launch_info = self._query_railway_current_launch_brt()
+        n_launch = len(df_launch)
+
         critical = set(snapshot.get('is_critical', []))
         ref_pool = snapshot.get('reference_pool', {})
         ref_label = ref_pool.get('label', 'reference')
@@ -1696,6 +1772,7 @@ class DataQualityMonitor:
         top_list: List[Dict] = []
         total_responses_day = 0
         total_responses_today = 0
+        total_responses_launch = 0
 
         for col, ref_entry in snapshot.get('categorical_features', {}).items():
             if col not in df_day.columns:
@@ -1716,6 +1793,15 @@ class DataQualityMonitor:
                 if len(s_today) > 0:
                     total_responses_today = max(total_responses_today, int(len(s_today)))
                     today_proportions = (s_today.value_counts() / len(s_today)).to_dict()
+
+            # Proporções lançamento atual desde cap_start. Pode estar vazia.
+            launch_proportions = {}
+            if n_launch > 0 and col in df_launch.columns:
+                s_launch = self._normalize_audience_series(df_launch[col], col)
+                s_launch = s_launch[s_launch != '(nulo)']
+                if len(s_launch) > 0:
+                    total_responses_launch = max(total_responses_launch, int(len(s_launch)))
+                    launch_proportions = (s_launch.value_counts() / len(s_launch)).to_dict()
 
             ref_proportions = ref_entry.get('proportions', {})
             label = ref_entry.get('label', col)
@@ -1740,12 +1826,24 @@ class DataQualityMonitor:
                     today_pct = None
                     today_delta_pp = None
 
+                # Lançamento atual desde cap_start
+                if launch_proportions:
+                    launch_p = float(launch_proportions.get(cat, 0.0))
+                    launch_delta = (launch_p - ref_p) * 100.0
+                    launch_pct = round(launch_p * 100, 1)
+                    launch_delta_pp = round(launch_delta, 1)
+                else:
+                    launch_pct = None
+                    launch_delta_pp = None
+
                 top_list.append({
                     'feature_column': col,
                     'feature_label': label,
                     'is_critical': is_critical_feat,
                     'category': cat,
                     'reference_pct': round(ref_p * 100, 1),
+                    'launch_pct': launch_pct,
+                    'launch_delta_pp': launch_delta_pp,
                     'day_pct': round(day_p * 100, 1),
                     'delta_pp': round(delta_pp, 1),
                     'today_pct': today_pct,
@@ -1781,6 +1879,10 @@ class DataQualityMonitor:
             f" · hoje parcial: {today_window_label}, n={total_responses_today}"
             if total_responses_today > 0 else ''
         )
+        launch_clause = (
+            f" · lançamento {launch_info.get('lf_name')}: n={total_responses_launch}"
+            if total_responses_launch > 0 and launch_info.get('lf_name') else ''
+        )
 
         alerts.append({
             'type': 'audience_profile_drift',
@@ -1788,7 +1890,7 @@ class DataQualityMonitor:
             'category': 'data_quality',
             'message': (
                 f" Drift de perfil — comparando {compared_window_label} (n={total_responses_day}) "
-                f"vs {ref_label} (n={ref_n}){today_clause}. "
+                f"vs {ref_label} (n={ref_n}){launch_clause}{today_clause}. "
                 f"TOP ({len(top_list)} ≥{top_threshold_pp}pp): {_fmt(top_list)}"
             ),
             'details': {
@@ -1799,6 +1901,11 @@ class DataQualityMonitor:
                 'day_n_responses': total_responses_day,
                 'today_window': today_window_label,
                 'today_n_responses': total_responses_today,
+                'launch_window': launch_info.get('label'),
+                'launch_n_responses': total_responses_launch,
+                'launch_lf_name': launch_info.get('lf_name'),
+                'launch_cap_start': launch_info.get('cap_start'),
+                'launch_cap_end': launch_info.get('cap_end'),
                 'top_threshold_pp': top_threshold_pp,
                 'top_list': top_list,
                 'top_count': len(top_list),
