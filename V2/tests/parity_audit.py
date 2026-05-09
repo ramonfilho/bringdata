@@ -240,14 +240,20 @@ def audit_encoding_ab_variants():
 
     Itera sobre cada variante ativa em configs/active_models/{client}.yaml,
     aplica merge_encoding(base, variant.encoding_overrides) e roda
-    apply_encoding sobre o snapshot. Smoke checks por variante:
-      - ordinais devem virar numéricas (não dtype=object)
-      - sem NaN no output
-      - nomes de coluna válidos (sem ?, espaço, hífen)
+    apply_encoding sobre o snapshot.
 
-    Não compara contra snapshot por-variante (fica para próximo retreino
-    capturar). Smoke checks já pegam a classe específica do bug Cluster 5
-    (idade/salário ficando categóricas object em vez de numéricas).
+    Comparação por variante (em ordem de severidade):
+      1. Coluna-a-coluna contra snapshot snapshot_encoding_output_{variant}.pkl
+         (capturado por V2/tests/capture_encoding_snapshots_ab.py).
+         Falha de schema ou de valor bloqueia. Smoke checks abaixo viram
+         second line of defense.
+      2. Smoke checks: ordinais numéricas, sem NaN, nomes válidos.
+         Rodam mesmo quando o snapshot por-variante está ausente.
+
+    Limitação restante (T1-19): este audit não valida o output contra o
+    feature_registry real de cada variante (que vive no MLflow do treino
+    dela). Pra isso seria preciso baixar/cachear o registry e passar como
+    artifacts={'feature_registry': variant_registry}.
     """
     from V2.src.core.encoding import apply_encoding, merge_encoding
     from V2.src.core.client_config import ClientConfig, ABTestConfig
@@ -291,6 +297,23 @@ def audit_encoding_ab_variants():
             continue
 
         ok_variant = True
+
+        # 0. Comparação coluna-a-coluna contra snapshot por-variante (se existir)
+        snapshot_path = os.path.join(
+            FIXTURES, f'snapshot_encoding_output_{variant_name}.pkl'
+        )
+        if os.path.exists(snapshot_path):
+            df_expect = pd.read_pickle(snapshot_path)
+            ok_snap = _compare(
+                df_expect, df_actual,
+                f"Encoding A/B — '{variant_name}': snapshot vs output atual",
+            )
+            if not ok_snap:
+                ok_variant = False
+        else:
+            print(f"  [WARN] '{variant_name}': snapshot {os.path.basename(snapshot_path)} "
+                  "ausente — rodando só smoke checks. Capture com: "
+                  "python -m V2.tests.capture_encoding_snapshots_ab")
 
         # 1. Ordinais devem virar numéricas (não dtype=object)
         ordinais_presentes = [
