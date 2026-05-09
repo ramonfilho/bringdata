@@ -1807,24 +1807,11 @@ class DataQualityMonitor:
             label = ref_entry.get('label', col)
             is_critical_feat = col in critical
 
-            for cat in set(ref_proportions) | set(day_proportions):
+            cats = set(ref_proportions) | set(day_proportions) | set(launch_proportions)
+            for cat in cats:
                 ref_p = float(ref_proportions.get(cat, 0.0))
                 day_p = float(day_proportions.get(cat, 0.0))
                 delta_pp = (day_p - ref_p) * 100.0
-                abs_delta = abs(delta_pp)
-                # Só top_list (≥ top_threshold_pp). Items abaixo do threshold
-                # são ruído e não entram no payload.
-                if abs_delta < top_threshold_pp:
-                    continue
-                # Hoje parcial — pode não ter dado pra essa categoria
-                if today_proportions:
-                    today_p = float(today_proportions.get(cat, 0.0))
-                    today_delta = (today_p - ref_p) * 100.0
-                    today_pct = round(today_p * 100, 1)
-                    today_delta_pp = round(today_delta, 1)
-                else:
-                    today_pct = None
-                    today_delta_pp = None
 
                 # Lançamento atual desde cap_start
                 if launch_proportions:
@@ -1835,6 +1822,26 @@ class DataQualityMonitor:
                 else:
                     launch_pct = None
                     launch_delta_pp = None
+
+                # Hoje parcial — pode não ter dado pra essa categoria.
+                # Hoje NÃO entra como gatilho (amostra parcial pode oscilar muito
+                # de manhã); fica só como enriquecimento na tabela.
+                if today_proportions:
+                    today_p = float(today_proportions.get(cat, 0.0))
+                    today_delta = (today_p - ref_p) * 100.0
+                    today_pct = round(today_p * 100, 1)
+                    today_delta_pp = round(today_delta, 1)
+                else:
+                    today_pct = None
+                    today_delta_pp = None
+
+                # Gatilho: max(|day_Δ|, |launch_Δ|) >= top_threshold_pp.
+                # Hoje fica de fora pra evitar ruído de sample size pequeno.
+                trigger_deltas = [abs(delta_pp)]
+                if launch_delta_pp is not None:
+                    trigger_deltas.append(abs(launch_delta_pp))
+                if max(trigger_deltas) < top_threshold_pp:
+                    continue
 
                 top_list.append({
                     'feature_column': col,
@@ -1857,8 +1864,13 @@ class DataQualityMonitor:
             )
             return alerts
 
-        top_list.sort(key=lambda x: -abs(x['delta_pp']))
-        max_abs_delta = max((abs(it['delta_pp']) for it in top_list), default=0.0)
+        # Ordenar pelo MAIOR drift entre lançamento e ontem (mesmo gatilho).
+        def _trigger_abs(it):
+            d = abs(it['delta_pp'])
+            l = it.get('launch_delta_pp')
+            return max(d, abs(l)) if l is not None else d
+        top_list.sort(key=lambda x: -_trigger_abs(x))
+        max_abs_delta = max((_trigger_abs(it) for it in top_list), default=0.0)
 
         # Período comparado
         from datetime import timedelta as _td, timezone as _tz
