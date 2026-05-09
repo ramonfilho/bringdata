@@ -32,6 +32,7 @@ def parse_args():
     p.add_argument('--save', action='store_true')
     p.add_argument('--cache', action='store_true', help='Usar /tmp/payload.json se existir')
     p.add_argument('--url', default=PROD_URL)
+    p.add_argument('--full', action='store_true', help='Inclui critical_summary (texto cru, redundante com tabelas)')
     return p.parse_args()
 
 
@@ -85,7 +86,6 @@ def render_header(p: dict, lines: list):
 def render_audience_profile_drift(a: dict, lines: list):
     d = a.get('details', {}) or {}
     lines.append(f'🔴  AUDIENCE_PROFILE_DRIFT  ({a["severity"]})')
-    lines.append(f'    {a.get("message","").strip()[:200]}…' if len(a.get('message','')) > 200 else '')
     lines.append(f'    Janela ontem: {d.get("compared_window","?")} (n={d.get("day_n_responses",0)})')
     today_n = d.get('today_n_responses', 0)
     today_w = d.get('today_window', '?')
@@ -205,7 +205,10 @@ def render_alerts(p: dict, lines: list):
     sev_order = {'HIGH': 0, 'MEDIUM': 1, 'LOW': 2}
     alerts_sorted = sorted(alerts, key=lambda a: sev_order.get(a.get('severity', 'LOW'), 9))
 
-    for a in alerts_sorted:
+    for i, a in enumerate(alerts_sorted):
+        if i > 0:
+            lines.append('· · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · ·')
+            lines.append('')
         t = a.get('type', '')
         if t == 'audience_profile_drift':
             render_audience_profile_drift(a, lines)
@@ -385,7 +388,8 @@ def main():
     render_revenue_forecast(payload, lines)
     render_traffic(payload, lines)
     render_ab_test(payload, lines)
-    render_critical_summary(payload, lines)
+    if args.full:
+        render_critical_summary(payload, lines)
 
     out = '\n'.join(lines)
     print(out)
