@@ -42,13 +42,17 @@ import pg8000.native
 
 
 PESQUISA_KEYS = {
-    'O seu gênero:':                          'genero',
-    'Qual a sua idade?':                      'idade',
-    'O que você faz atualmente?':             'ocupacao',
-    'Atualmente, qual a sua faixa salarial?': 'faixaSalarial',
-    'Você possui cartão de crédito?':         'cartaoCredito',
-    'Já estudou programação?':                'estudouProgramacao',
-    'Tem computador/notebook?':               'computador',
+    'O seu gênero:':                                                                'genero',
+    'Qual a sua idade?':                                                            'idade',
+    'O que você faz atualmente?':                                                   'ocupacao',
+    'Atualmente, qual a sua faixa salarial?':                                       'faixaSalarial',
+    'Você possui cartão de crédito?':                                               'cartaoCredito',
+    'Já estudou programação?':                                                      'estudouProgramacao',
+    'Tem computador/notebook?':                                                     'computador',
+    'Você já fez/faz/pretende fazer faculdade?':                                    'faculdade',
+    'O que mais te chama atenção na profissão de Programador?':                     'atracaoProfissao',
+    'Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?': 'investiuCurso',
+    'O que mais você quer ver no evento?':                                          'interesseEvento',
 }
 
 SCORE_TOL = 1e-6
@@ -111,6 +115,7 @@ def fetch_leads_predict_mode(n: int) -> list[dict[str, Any]]:
     cols = ', '.join(f'pesquisa->>\'{k}\' AS "{q}"' for q, k in PESQUISA_KEYS.items())
     sql = f"""
         SELECT email, data,
+               "nomeCompleto" AS "Nome Completo", telefone AS "Telefone",
                source AS "Source", medium AS "Medium", term AS "Term",
                {cols}
         FROM "Lead"
@@ -122,13 +127,19 @@ def fetch_leads_predict_mode(n: int) -> list[dict[str, Any]]:
     """
     rows = conn.run(sql, n=n)
     conn.close()
-    keys = ['email', 'Data', 'Source', 'Medium', 'Term'] + list(PESQUISA_KEYS.keys())
+    keys = ['email', 'Data', 'Nome Completo', 'Telefone',
+            'Source', 'Medium', 'Term'] + list(PESQUISA_KEYS.keys())
     leads = []
     for r in rows:
         d = dict(zip(keys, r))
         email = d.pop('email')
         if d.get('Data') is not None:
             d['Data'] = d['Data'].isoformat() if hasattr(d['Data'], 'isoformat') else str(d['Data'])
+        # feature_engineering espera coluna 'E-mail' (config.pesquisa_email_column) pra
+        # criar email_valido. O top-level 'email' do payload não vira coluna do DataFrame
+        # — só serve de id. Sem isto, email_valido fica missing no validator.
+        if email:
+            d['E-mail'] = email
         d = {k: v for k, v in d.items() if v is not None}
         leads.append({'email': email, 'data': d, 'row_id': email or f'row_{len(leads)}'})
     return leads
