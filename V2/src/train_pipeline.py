@@ -237,7 +237,7 @@ def _log_step_count(step: str, df_after, df_before=None, target_col: str = 'targ
     logger.info("  " + " | ".join(parts))
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, exclude_features=None):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, exclude_features=None, export_matched_dataset=None):
     """Executa pipeline de treino completo.
 
     Args:
@@ -793,6 +793,30 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     )
     _log_step_count("janela_conversao", dataset_v1_devclub, df_before=_dataset_v1_devclub_pre_janela)
 
+    # --export-matched-dataset: dump pré-FE/encoding e encerra. Útil para análise
+    # de qualidade de audiência sem treinar — features brutas + Data + target.
+    if export_matched_dataset:
+        _export_path = os.path.abspath(export_matched_dataset)
+        os.makedirs(os.path.dirname(_export_path), exist_ok=True)
+        # Object dtypes em pandas podem ter tipos mistos (str + int + None) que
+        # quebram parquet. Cast pra string preserva semântica pra análise univariada.
+        _df_export = dataset_v1_devclub.copy()
+        for _col in _df_export.select_dtypes(include='object').columns:
+            _df_export[_col] = _df_export[_col].astype('string')
+        _df_export.to_parquet(_export_path, index=False)
+        _target_col = 'target' if 'target' in _df_export.columns else None
+        _n_pos = int(_df_export[_target_col].sum()) if _target_col else None
+        _date_col = 'Data' if 'Data' in _df_export.columns else None
+        _date_min = pd.to_datetime(_df_export[_date_col]).min() if _date_col else 'n/a'
+        _date_max = pd.to_datetime(_df_export[_date_col]).max() if _date_col else 'n/a'
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info(f"  Dataset matcheado exportado: {_export_path}")
+        logger.info(f"  shape: {_df_export.shape}  ·  target=1: {_n_pos}")
+        logger.info(f"  Data range: {_date_min} → {_date_max}")
+        logger.info("=" * 70)
+        return {'export_path': _export_path, 'shape': _df_export.shape}
+
     # T2-3: calcular control_weights AQUI (antes do FE/encoding), enquanto a coluna técnica
     # '__campaign_for_weights__' ainda existe. Pesos são calculados com a distribuição do
     # TRAIN SET (replica a lógica do split temporal_leads logo abaixo) — sem isso, leads
@@ -1298,6 +1322,17 @@ if __name__ == "__main__":
              'Falha alto se um prefixo não casar com nenhuma coluna. Útil para ablações treinadas '
              '(o feature_registry resultante reflete o subset reduzido).'
     )
+    parser.add_argument(
+        '--export-matched-dataset',
+        type=str,
+        default=None,
+        metavar='PATH',
+        help='Exporta o dataset matcheado (após match com vendas + janela de conversão, '
+             'antes de feature engineering/encoding) como parquet em PATH e encerra. '
+             'Inclui coluna Data preservada + features brutas + target. Usado para análise '
+             'de qualidade de audiência sem rodar treino completo. Combina com --use-cached-data '
+             'para evitar re-pull das APIs.'
+    )
 
     args = parser.parse_args()
 
@@ -1334,4 +1369,5 @@ if __name__ == "__main__":
         train_ratio=args.train_ratio,
         control_alpha=args.control_alpha,
         exclude_features=[p.strip() for p in args.exclude_features.split(',')] if args.exclude_features else None,
+        export_matched_dataset=args.export_matched_dataset,
     )

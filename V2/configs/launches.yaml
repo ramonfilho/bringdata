@@ -16,12 +16,16 @@ LF40:
   cap_end:   "2025-12-02"
   vendas_start: "2025-12-08"
   vendas_end:   "2025-12-14"
+  excluded_from_reference: "BF"  # Captação 25/11-02/12 inclui Black Friday brasileira (28/11/2025)
+  excluded_reason: "Black Friday distorce composição/conversão de audiência — não comparável com base padrão"
 
 LF41:
   cap_start: "2025-12-02"
   cap_end:   "2025-12-08"
   vendas_start: "2025-12-15"
   vendas_end:   "2025-12-21"
+  excluded_from_reference: "BF"  # Captação 02-08/12 imediatamente pós-BF; conversão potencialmente influenciada por residual BF
+  excluded_reason: "Pós-Black Friday — público ainda em modo de compra atípica"
 
 LF42:
   cap_start: "2025-12-09"
@@ -108,6 +112,9 @@ LF53:
   cap_end:   "2026-04-20"
   vendas_start: "2026-04-27"
   vendas_end:   "2026-05-03"
+  excluded_from_reference: "multi_produto"
+  excluded_reason: "Vendas inflacionadas por upsell/segundo produto — ROAS não reflete só audiência DevClub padrão. Alternativa: usar 'first-peak' (vendas_start..+3d) como subset comparável."
+  first_peak_days: 3  # Quantos dias de vendas a partir de vendas_start contam como 'first peak' (vendas do produto principal)
 
 DEV20:
   cap_start: "2026-04-21"
