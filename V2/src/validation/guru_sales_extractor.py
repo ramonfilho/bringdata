@@ -332,6 +332,11 @@ class GuruSalesExtractor:
         rows = [self.map_transaction_to_row(t) for t in transactions]
         df = pd.DataFrame(rows)
 
+        # Sem transações no período (ex: lançamento futuro): devolve df vazio com
+        # colunas mínimas para o caller não quebrar.
+        if df.empty:
+            return pd.DataFrame(columns=['data pedido', 'status', 'email', 'valor liquido'])
+
         # Mapear status para português (igual ao export manual)
         status_map = {
             'approved': 'Aprovada',
@@ -342,7 +347,8 @@ class GuruSalesExtractor:
             'waiting_payment': 'Ag. Pagamento',
             'scheduled': 'Agendada',
         }
-        df['status'] = df['status'].map(status_map).fillna(df['status'])
+        if 'status' in df.columns:
+            df['status'] = df['status'].map(status_map).fillna(df['status'])
 
         # Ordenar por data pedido (do mais antigo para o mais recente)
         df['_data_pedido_sort'] = pd.to_datetime(df['data pedido'], errors='coerce')

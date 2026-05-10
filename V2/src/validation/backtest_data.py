@@ -170,7 +170,13 @@ def _load_launch_dates(lf_name: str) -> Dict[str, str]:
 
 
 def _load_leads(cap_start: str, cap_end: str) -> pd.DataFrame:
-    """Railway primário (única fonte com dados pós-2026-03-27). Sheets como fallback."""
+    """Railway primário (única fonte com dados pós-2026-03-27). Sheets como fallback.
+
+    Sheets é chamado com training_mode=True para preservar nomes originais do
+    formulário (PT-BR canônico, igual ao train_pipeline) — sem isso, leads pré-Railway
+    (LF≤41 / nov-dez 2025) chegam em schema lowercase incompatível com o pipeline
+    de scoring.
+    """
     from src.validation.data_loader import LeadDataLoader, SalesDataLoader
 
     sales_loader = SalesDataLoader()
@@ -179,9 +185,9 @@ def _load_leads(cap_start: str, cap_end: str) -> pd.DataFrame:
         logger.info(f"[backtest_data] {len(leads_df)} leads do Railway")
         return leads_df
 
-    logger.warning("[backtest_data] Railway vazio — fallback Sheets")
+    logger.warning("[backtest_data] Railway vazio — fallback Sheets (training_mode=True)")
     leads_df = LeadDataLoader().load_leads_from_sheets(
-        start_date=cap_start, end_date=cap_end
+        start_date=cap_start, end_date=cap_end, training_mode=True
     )
     logger.info(f"[backtest_data] {len(leads_df)} leads do Sheets (fallback)")
     return leads_df

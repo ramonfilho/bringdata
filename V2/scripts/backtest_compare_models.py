@@ -339,17 +339,26 @@ def run_compare_mode(args) -> None:
     # respondeu duas pesquisas). Sem dedup, merge inner faz produto cartesiano e
     # explode o n.
     base_label = args.labels[0]
-    merged = parquets[base_label][
-        ["email", "decil", "converted", "sale_value", "spend_imputado"]
-    ].drop_duplicates("email").rename(columns={"decil": f"decil_{base_label}"})
+    base_cols = ["email", "decil", "converted", "sale_value", "spend_imputado"]
+    if "lead_score" in parquets[base_label].columns:
+        base_cols.append("lead_score")
+    merged = parquets[base_label][base_cols].drop_duplicates("email").rename(
+        columns={"decil": f"decil_{base_label}", "lead_score": f"lead_score_{base_label}"}
+    )
     for label in args.labels[1:]:
-        df_l = parquets[label][["email", "decil"]].drop_duplicates("email") \
-            .rename(columns={"decil": f"decil_{label}"})
+        cols = ["email", "decil"]
+        if "lead_score" in parquets[label].columns:
+            cols.append("lead_score")
+        df_l = parquets[label][cols].drop_duplicates("email").rename(
+            columns={"decil": f"decil_{label}", "lead_score": f"lead_score_{label}"}
+        )
         merged = merged.merge(df_l, on="email", how="inner")
     print(f"[compare] após merge (dedup por email): {len(merged)} leads em comum")
 
-    decile_tables = {label: _decile_table(merged, f"decil_{label}") for label in args.labels}
+    decile_tables = {label: _decile_table(merged, f"decil_{label}", f"lead_score_{label}")
+                     for label in args.labels}
     summary = _summary_table(merged, args.labels)
+    calibration = _calibration_table(merged, args.labels)
 
     cross = pd.DataFrame()
     if len(args.labels) == 2:
@@ -382,25 +391,67 @@ def run_compare_mode(args) -> None:
         summary.to_excel(writer, sheet_name="summary", index=True)
         for label, tab in decile_tables.items():
             tab.to_excel(writer, sheet_name=f"decile_{label}", index=True)
+        calibration.to_excel(writer, sheet_name="calibration", index=True)
         if not cross.empty:
             cross.to_excel(writer, sheet_name="cross_tab", index=True)
         params.to_excel(writer, sheet_name="params", index=False)
     print(f"[compare] ✅ XLSX → {out}")
+    print()
+    print("=== CALIBRAÇÃO (Σscore × buyers reais por modelo) ===")
+    print(calibration.to_string())
 
 
-def _decile_table(df: pd.DataFrame, decil_col: str) -> pd.DataFrame:
-    g = df.groupby(decil_col).agg(
+def _decile_table(df: pd.DataFrame, decil_col: str, score_col: str = None) -> pd.DataFrame:
+    agg_dict = dict(
         leads=("email", "count"),
         conversions=("converted", "sum"),
         revenue=("sale_value", "sum"),
         spend=("spend_imputado", lambda x: x.dropna().sum()),
     )
+    if score_col and score_col in df.columns:
+        agg_dict["score_avg"] = (score_col, "mean")
+    g = df.groupby(decil_col).agg(**agg_dict)
     g["conv_pct"] = g["conversions"] / g["leads"]
     g["roas"] = np.where(g["spend"] > 0, g["revenue"] / g["spend"], np.nan)
     overall = df["converted"].sum() / len(df) if len(df) > 0 else 0
     g["lift"] = g["conv_pct"] / overall if overall > 0 else np.nan
     g["leads_pct"] = g["leads"] / g["leads"].sum() if g["leads"].sum() > 0 else np.nan
+    if "score_avg" in g.columns:
+        # ratio score médio / conv real — 1.0 = calibrado; >1 = over-prediction
+        g["calib_ratio"] = np.where(g["conv_pct"] > 0, g["score_avg"] / g["conv_pct"], np.nan)
     return g.reindex(DECIL_LABELS, fill_value=0).round(4)
+
+
+def _calibration_table(df: pd.DataFrame, labels: List[str]) -> pd.DataFrame:
+    """Calibração agregada por modelo. Σscore = buyers previstos.
+    calib_ratio = Σscore / buyers_reais. 1.0 = calibrado; >1 = over-prediction."""
+    n_leads = len(df)
+    actual_buyers = int(df["converted"].sum())
+    actual_conv_pct = actual_buyers / n_leads if n_leads else 0
+    rows = {}
+    for label in labels:
+        score_col = f"lead_score_{label}"
+        if score_col not in df.columns:
+            continue
+        scores = df[score_col]
+        pred_buyers = float(scores.sum())
+        pred_conv_pct = float(scores.mean())
+        rows[label] = {
+            "n_leads": n_leads,
+            "score_mean": round(pred_conv_pct, 4),
+            "actual_conv_pct": round(actual_conv_pct, 4),
+            "predicted_buyers": round(pred_buyers, 1),
+            "actual_buyers": actual_buyers,
+            "calib_ratio_global": round(pred_buyers / actual_buyers, 3) if actual_buyers else np.nan,
+            # Top 30 (D8-D10) — onde o sinal alto vai e Meta otimiza
+            "score_mean_top30": round(
+                df[df[f"decil_{label}"].isin(TOP30_DECILS)][score_col].mean(), 4
+            ),
+            "actual_conv_pct_top30": round(
+                df[df[f"decil_{label}"].isin(TOP30_DECILS)]["converted"].mean(), 4
+            ),
+        }
+    return pd.DataFrame(rows)
 
 
 def _summary_table(merged: pd.DataFrame, labels: List[str]) -> pd.DataFrame:
