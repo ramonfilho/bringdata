@@ -42,6 +42,14 @@ Para consumidores onde re-scorear é caro (volumes grandes, série temporal long
 
 A opção 1 é mais robusta. A opção 2 é paliativa.
 
+## Histórico vs futuro — o que entra no escopo e o que não entra
+
+O princípio "re-scorear ao invés de ler do Railway" só se aplica a **consumidores cuja decisão é tomada agora**. Para esses, um decil contaminado por versões antigas de código gera ruído ou decisão errada hoje — então a correção é olhar o passado com o pipeline atual.
+
+**Relatórios e métricas que descrevem o que de fato aconteceu no passado não devem ser tocados.** Cada lead foi escorado pela versão de código vigente no momento, recebeu o decil que recebeu, foi enviado pro Meta com aquele valor e gerou (ou não) a compra que está nos registros. Esse é o histórico operacional real. Re-scorear retroativamente cria uma "história alternativa" que nunca rodou — não é mais verdadeiro, é menos.
+
+Aplicando aos consumidores listados a seguir: itens que alimentam **decisões correntes** (forecast diário, baseline de detecção de drift, equivalência de revisão antes de deploy, validação de promoção de Challenger novo) entram no escopo. Itens que apenas **descrevem o passado** (ROI por decil ao longo dos lançamentos, séries temporais por LF) ficam como estão.
+
 ---
 
 ## Itens por prioridade
@@ -76,16 +84,14 @@ A opção 1 é mais robusta. A opção 2 é paliativa.
 
 ---
 
-#### L3. Relatório evolutivo de ML usa decis salvos como verdade histórica
+#### L3. Relatório evolutivo de ML — HISTÓRICO, preservar como está
 
-**O que precisa mudar:** `scripts/ml_evolution_report.py` faz match email × comprador e agrega por `Lead.decil` para gerar a tabela "ROI por decil" e "ticket médio por decil" usada como evidência do valor do sistema (incluindo nas propostas comerciais). Os decis vêm direto do Railway, somando códigos diferentes ao longo do tempo.
+**Decisão:** não remediar. `scripts/ml_evolution_report.py` agrega por `Lead.decil` para gerar a tabela "ROI por decil" e "ticket médio por decil" usada como evidência do sistema ao longo dos lançamentos. Esses números descrevem o que de fato aconteceu — cada lead foi enviado pro Meta com o decil que tinha naquela hora, gerando o ROI (ou a ausência dele) que está registrado. Re-scorear hoje misturaria realidade operacional com hipótese contrafactual.
 
-**Por quê:** esse relatório é o que sustenta as afirmações comerciais sobre o sistema. Se os decis estão errados, o ROI por decil também está, e qualquer comparação "lançamento A teve 10% mais D10 que B" vira artefato.
-
-**Como funcionaria:** o relatório precisa re-scorear todos os leads com o Champion atual antes de agregar. Como o relatório roda em ciclos longos (semanal/mensal, não diário), o custo de re-scorear ~200k leads é tolerável — ou cachear num parquet versionado pelo `mlflow_run_id` do Champion.
+**Como interpretar a partir de agora:** o relatório responde "qual ROI foi gerado pelos decis que foram efetivamente enviados ao Meta ao longo dos lançamentos", não "qual ROI o modelo atual atribuiria a esses leads se rodasse agora". A primeira leitura permanece válida; a segunda exigiria estudo separado.
 
 **Onde no código:**
-- `scripts/ml_evolution_report.py:351-358` — SELECT que carrega decis.
+- `scripts/ml_evolution_report.py:351-358` — sem mudança.
 
 ---
 
@@ -118,16 +124,14 @@ A opção 1 é mais robusta. A opção 2 é paliativa.
 
 ---
 
-#### L6. Métricas evolutivas por LF para análise interna
+#### L6. Métricas evolutivas por LF — HISTÓRICO, preservar como está
 
-**O que precisa mudar:** `scripts/extract_evolution_metrics.py` calcula `% D10`, taxa de CAPI, etc. por LF ao longo do tempo. Lê `Lead.decil` direto. Comparações LF42 vs LF54 misturam código de jan/2026 com código de mai/2026.
+**Decisão:** não remediar. `scripts/extract_evolution_metrics.py` calcula `% D10`, taxa de CAPI, etc. por LF ao longo do tempo. Esses números refletem o que foi gravado e enviado pro Meta em cada lançamento. Re-scorear retroativamente apagaria a realidade operacional.
 
-**Por quê:** esse script alimenta análises internas e ocasionalmente entra em discussões com o cliente. Não é tão crítico quanto L3, mas mesmo a comparação interna fica ruidosa.
-
-**Como funcionaria:** re-scorear os leads de cada LF com o Champion atual antes de agregar. Ou cachear (versionado por `run_id`).
+**Como interpretar a partir de agora:** as séries temporais mostram o que **rodou em cada lançamento** com a versão de código vigente, não o que o modelo atual produziria nos leads daquela época. Para comparar qualidade de público entre lançamentos sob um pipeline consistente, usar o sinal de qualidade de audiência (bloco `audience_quality_signal` do `/monitoring/daily-check`) daqui pra frente — ele re-scoreia em tempo real e garante consistência prospectiva.
 
 **Onde no código:**
-- `scripts/extract_evolution_metrics.py:139-174`.
+- `scripts/extract_evolution_metrics.py:139-174` — sem mudança.
 
 ---
 
@@ -172,16 +176,14 @@ A opção 1 é mais robusta. A opção 2 é paliativa.
 
 ## Ordem sugerida de execução
 
-A ordem de cima pra baixo respeita o impacto direto no cliente e a dependência entre itens:
+A ordem de cima pra baixo respeita o impacto direto no cliente e a dependência entre itens. **L3 e L6 não aparecem aqui — são relatórios históricos preservados como estão (ver seção "Histórico vs futuro").**
 
 1. **L1** (forecast). Mais alto impacto: afeta o número de faturamento esperado que aparece no digest diário e é consumido em decisões durante o lançamento.
-2. **L3** (relatório evolutivo). Afeta as afirmações comerciais sobre o sistema. Mais lento de remediar (re-scoring de ~200k leads), mas crítico em ciclo de propostas.
-3. **L2** (backtest comparativo). Crítico pra promoção de modelo. Só fica urgente quando houver Challenger novo pra avaliar.
-4. **L4** (teste de equivalência de revisão). Crítico pra confiança no deploy. Pode ser refatorado em conjunto com L2 — mesma técnica.
-5. **L5** + **L8** (rolling 30d + score distribution). Decisão de design entre re-scorear 150k leads/dia vs voltar pra E5 (model_metadata). E5 é a saída barata mas perde 30d-de-amostra-real como referência.
-6. **L6** (métricas evolutivas internas). Pode esperar até o próximo ciclo de análise comercial.
-7. **L7** (análise DT-12 retrospectiva). Item one-shot, ataca quando alguém precisar do número final do dano DT-12.
-8. **L9** (zero-decil CAPI). Só documentação.
+2. **L2** (backtest comparativo). Crítico pra promoção de modelo. Só fica urgente quando houver Challenger novo pra avaliar.
+3. **L4** (teste de equivalência de revisão). Crítico pra confiança no deploy. Pode ser refatorado em conjunto com L2 — mesma técnica.
+4. **L5** + **L8** (rolling 30d + score distribution). Decisão de design entre re-scorear 150k leads/dia vs voltar pra E5 (model_metadata). E5 é a saída barata mas perde 30d-de-amostra-real como referência.
+5. **L7** (análise retrospectiva do bug de codificação do Champion `jan30` cego em idade e faixa salarial — DT-12 do refactor). Item one-shot, ataca quando alguém precisar do número final do dano.
+6. **L9** (zero-decil CAPI). Só documentação.
 
 ## Princípio de aceitação
 
