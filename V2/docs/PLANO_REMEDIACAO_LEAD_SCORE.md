@@ -1,0 +1,201 @@
+# Plano de Remediação — `Lead.leadScore` / `Lead.decil` como fotografia do passado
+
+**Criado:** 2026-05-11.
+
+**Papel deste documento:** descrever o conjunto de mudanças necessárias para corrigir os consumidores do projeto que hoje leem `Lead.leadScore` e `Lead.decil` do Railway como se fossem verdade atemporal. Cada item explica **o que precisa mudar**, **por quê**, **como funcionaria** e **onde no código**.
+
+**Status canônico e prioridade vivem em `PLANO_EXECUCAO.md`.** Este documento é o "como"; o "quando" é definido lá.
+
+Referências:
+- Auditoria que originou o plano: `docs/relatorio_qualidade_audiencia_2026-05-11.md` (seção 8, limitação 3).
+- Memória persistente: `~/.claude/.../memory/projeto_lead_score_versao_codigo.md`.
+
+---
+
+## Contexto da descoberta
+
+Em 11/05/2026, enquanto integrávamos o novo bloco `audience_quality_signal` no `/monitoring/daily-check`, fizemos um teste de paridade: pegamos os leads do LF54 que sabidamente foram pelo Champion `jan30` em produção (default, sem UTM HQLB), re-scoreamos esses mesmos leads agora com o mesmo Champion `jan30`, e comparamos o score gravado em `Lead.leadScore` com o que acabamos de obter.
+
+**Resultado:** **23% de paridade exata em score, 52% em decil.** O mesmo lead, o mesmo modelo, scoreado em dois momentos diferentes, produz scores diferentes em mais de três quartos dos casos.
+
+Testamos e descartamos: round-trip de arquivo temporário (xlsx vs csv produzem score interno idêntico), race condition em `createdAt` vs `updatedAt`, divergência de UTM source entre o que o pipeline viu na hora e o que está agora no Railway. Nada disso correlaciona com a divergência.
+
+## Causa raiz
+
+A causa é **versão de código diferente entre o escorate em produção e o re-score atual**. O identificador do modelo no MLflow permaneceu constante (`d51757f5...` para o Champion `jan30`), mas o pipeline que processa o lead antes do `predict_proba` mudou ao longo do tempo, incluindo pelo menos:
+- a correção do bug em que o Champion `jan30` recebia codificação OHE em vez de ordinal em idade e faixa salarial (identificada nos registros do projeto como DT-12, corrigida em 02/05/2026 — ~8% de importância de features ficou cega antes disso);
+- o refactor do diretório `src/core/` (preprocessing, feature engineering e encoding reescritos como funções puras parametrizadas por `ClientConfig`);
+- o rollback do commit `edf23e9` para a versão pré-refactor, que ficou ativo em parte de abril/2026;
+- ajustes pontuais em normalização UTM e mapeamento de Medium.
+
+Cada lead foi escorado com o snapshot de código que estava live no instante exato em que o webhook processou ele.
+
+`Lead.leadScore` e `Lead.decil` são, portanto, **fotografias do código que rodou na hora**, não medições estáveis ao longo do tempo. Comparar `Lead.leadScore` de um lead de janeiro com um de maio não está comparando o mesmo "sistema".
+
+## Princípio único de remediação
+
+**Re-scorear ao invés de ler do Railway.** Qualquer consumidor que precise de score/decil comparável ao longo do tempo deve carregar os leads (com features brutas) e passar pelo `LeadScoringPipeline` atual no momento da consulta. O `_check_audience_quality_signal` que entregamos hoje já segue esse princípio — e é o único consumidor self-consistent do projeto atualmente.
+
+Para consumidores onde re-scorear é caro (volumes grandes, série temporal longa) há duas saídas:
+1. **Pré-computar e cachear** o resultado do re-score, invalidando o cache quando o modelo ou o código do pipeline muda.
+2. **Calibrar o erro** comparando uma amostra de leads re-scoreados vs gravados e aplicar um fator de correção. Só faz sentido se o erro for sistemático e estável — não é o caso aqui (a divergência tem variância alta).
+
+A opção 1 é mais robusta. A opção 2 é paliativa.
+
+---
+
+## Itens por prioridade
+
+### CRÍTICO — afeta números que vão pro cliente ou decisões importantes
+
+#### L1. Forecast de receita do daily-check usa decis contaminados
+
+**O que precisa mudar:** o `revenue_forecast` que aparece no `/monitoring/daily-check` calcula dois cenários de faturamento esperado — `expected_conversion` e `cenario_ml_aware` — multiplicando a contagem de leads por decil pelas taxas históricas de conversão por decil. A contagem de leads por decil vem direto de `Lead.decil` no Railway. Como esse campo é fotografia do passado, a previsão fica enviesada pela soma de versões de código diferentes.
+
+**Por quê:** esses dois números aparecem no digest diário e são lidos como "quanto o sistema espera faturar com o público atual". Decisões de ajuste de campanha durante o lançamento podem ser baseadas neles.
+
+**Como funcionaria:** trocar a query `SELECT decil FROM "Lead"` por re-scorear os leads do cap atual com o pipeline atual (mesma chain que já implementamos no `_check_audience_quality_signal`). Isso adiciona ~10-30s ao daily-check para uns 30k leads — aceitável porque já estamos chamando `pipeline.run` uma vez por dia.
+
+**Onde no código:**
+- `api/app.py:2433-2447` — query que alimenta `forecast_decil_dist`.
+- `src/monitoring/orchestrator.py:967-1041` — `_generate_revenue_forecast` (consome a distribuição).
+
+---
+
+#### L2. Backtest comparativo usa Champion contaminado como baseline
+
+**O que precisa mudar:** `_attach_production_decil` em `src/validation/backtest_data.py` anexa `Lead.decil` e `Lead.leadScore` aos resultados de `load_match_spend_for_lf`. Esse campo é consumido por `backtest_compare_models.py` como baseline "produção" para comparar com revisões novas. Como o decil de produção foi gravado por código que mudou várias vezes, a comparação "modelo novo vs produção" não tem baseline estável.
+
+**Por quê:** o backtest é usado pra validar se um Challenger candidato bate o Champion antes de promover. Se o "Champion" no baseline é uma média de versões diferentes, o teste produz conclusão ambígua — não dá pra saber se a diferença vem do modelo novo ou da inconsistência do baseline.
+
+**Como funcionaria:** dentro do `_attach_production_decil`, em vez de fazer `SELECT decil FROM "Lead"`, re-scorear os leads usando o Champion atual (o que está em `active_models/devclub.yaml`). Renomear o output de `decil_production` → `decil_champion_current` para deixar claro que é re-score atual, não fotografia.
+
+**Onde no código:**
+- `src/validation/backtest_data.py:415-464` — função `_attach_production_decil`.
+- `scripts/backtest_compare_models.py` — consumidor.
+
+---
+
+#### L3. Relatório evolutivo de ML usa decis salvos como verdade histórica
+
+**O que precisa mudar:** `scripts/ml_evolution_report.py` faz match email × comprador e agrega por `Lead.decil` para gerar a tabela "ROI por decil" e "ticket médio por decil" usada como evidência do valor do sistema (incluindo nas propostas comerciais). Os decis vêm direto do Railway, somando códigos diferentes ao longo do tempo.
+
+**Por quê:** esse relatório é o que sustenta as afirmações comerciais sobre o sistema. Se os decis estão errados, o ROI por decil também está, e qualquer comparação "lançamento A teve 10% mais D10 que B" vira artefato.
+
+**Como funcionaria:** o relatório precisa re-scorear todos os leads com o Champion atual antes de agregar. Como o relatório roda em ciclos longos (semanal/mensal, não diário), o custo de re-scorear ~200k leads é tolerável — ou cachear num parquet versionado pelo `mlflow_run_id` do Champion.
+
+**Onde no código:**
+- `scripts/ml_evolution_report.py:351-358` — SELECT que carrega decis.
+
+---
+
+#### L4. Teste de equivalência de revisão usa Champion gravado como baseline
+
+**O que precisa mudar:** `scripts/test_revision_equivalence.py` valida que uma revisão nova produz os mesmos scores que a anterior. Ele puxa `Lead.leadScore` do Railway pra usar como "ground truth" do Champion. Como o Champion gravado pode ter sido produto de várias versões de código, a equivalência fica testada contra um alvo móvel.
+
+**Por quê:** esse teste protege contra deploys que quebram o pipeline (ex: mudança em encoding que muda score de todo mundo). Se o alvo está sujo, o teste pode aprovar deploys ruins ou reprovar deploys bons.
+
+**Como funcionaria:** em vez de puxar `Lead.leadScore`, scorear a amostra duas vezes em paralelo — uma com o pipeline na revisão atual (rev N) e uma com o pipeline na revisão candidata (rev N+1). Comparar score lead-a-lead. Se a diferença média for menor que um threshold (ex: 1e-6), revisões são equivalentes.
+
+**Onde no código:**
+- `scripts/test_revision_equivalence.py:123-168` — uso de `Lead.leadScore`.
+
+---
+
+### MÉDIO — alertas e séries temporais ruidosos, mas não vão direto pro cliente
+
+#### L5. Rolling 30d (baseline E6) usa decis contaminados
+
+**O que precisa mudar:** o daily-check computa um baseline rolling 30d via `SELECT decil, COUNT(*) FROM "Lead" GROUP BY decil`. Essa distribuição é injetada no `_check_score_distribution` como "como a distribuição esperada deveria ser". A janela de 30d cobre múltiplos deploys e versões de código.
+
+**Por quê:** alimenta o check que detecta drift de distribuição de decis. Baseline contaminado significa: ou o alerta dispara à toa quando o sistema está saudável, ou demora a disparar quando há regressão real.
+
+**Como funcionaria:** ou re-scorear os leads dos últimos 30d com o Champion atual antes de fazer o `GROUP BY` (caro: ~150k leads), ou tornar o baseline rolling 30d disabled e usar o `model_metadata` (E5) como única referência, que é gerado uma vez e fica consistente até trocar de modelo.
+
+**Onde no código:**
+- `api/app.py:2700-2724` — query rolling 30d.
+- `src/monitoring/data_quality.py:922-1020` — `_check_score_distribution`.
+
+---
+
+#### L6. Métricas evolutivas por LF para análise interna
+
+**O que precisa mudar:** `scripts/extract_evolution_metrics.py` calcula `% D10`, taxa de CAPI, etc. por LF ao longo do tempo. Lê `Lead.decil` direto. Comparações LF42 vs LF54 misturam código de jan/2026 com código de mai/2026.
+
+**Por quê:** esse script alimenta análises internas e ocasionalmente entra em discussões com o cliente. Não é tão crítico quanto L3, mas mesmo a comparação interna fica ruidosa.
+
+**Como funcionaria:** re-scorear os leads de cada LF com o Champion atual antes de agregar. Ou cachear (versionado por `run_id`).
+
+**Onde no código:**
+- `scripts/extract_evolution_metrics.py:139-174`.
+
+---
+
+#### L7. Análise retrospectiva do bug de codificação no Champion (item DT-12 do refactor)
+
+**O que precisa mudar:** `scripts/dt12_impact_analysis.py` foi escrito pra quantificar quanto faturamento foi perdido enquanto o bug em que o Champion `jan30` recebia OHE em vez de ordinal em idade e faixa salarial (identificado no projeto como DT-12) esteve ativo. O script puxa `Lead.leadScore` e re-scoreia com o codificador corrigido pra comparar. O problema é que o "antes" (`Lead.leadScore`) inclui não só o efeito desse bug específico, mas também variações de outras versões de código no meio do caminho.
+
+**Por quê:** se a quantificação do dano fica confundida com outras variações, a estimativa de impacto financeiro do bug fica fraca.
+
+**Como funcionaria:** rodar o script duas vezes — uma com o pipeline atual sem encoding overrides (simulando o bug DT-12 ativo), outra com encoding overrides aplicados (estado corrigido). A diferença entre as duas execuções é o impacto puro do bug. Não usar `Lead.leadScore` em momento algum.
+
+**Onde no código:**
+- `scripts/dt12_impact_analysis.py:52`.
+
+---
+
+#### L8. `_check_score_distribution` (consumidor do baseline E6)
+
+**O que precisa mudar:** depende de L5 (baseline rolling 30d). Não tem código próprio a corrigir aqui — só lê o que L5 produz.
+
+**Por quê:** mencionado pra deixar explícito que o impacto se propaga.
+
+**Onde no código:**
+- `src/monitoring/data_quality.py:922-1020`.
+
+---
+
+### BAIXO — display, não afeta decisões
+
+#### L9. Alerta de zero-decil em CAPI
+
+**O que precisa mudar:** `src/monitoring/capi_monitor.py:_check_zero_decil_events` detecta se algum decil parou de receber eventos CAPI em 24h. Lê `LeadCAPI.decil` (não `Lead.decil`, tabela paralela). Tem o mesmo padrão de fotografia do passado.
+
+**Por quê:** o alerta funciona porque ele só pergunta "todos os decis tiveram pelo menos N eventos hoje?". Se a versão de código gravou decis ligeiramente diferentes nos eventos das últimas 24h, o alerta ainda funciona — todos os decis vão ter eventos.
+
+**Como funcionaria:** sem mudança imediata. Documentar no código que o `LeadCAPI.decil` é considerado válido pra alertas de cobertura (presença/ausência) mas não pra agregações finas.
+
+**Onde no código:**
+- `src/monitoring/capi_monitor.py:162-175`.
+
+---
+
+## Ordem sugerida de execução
+
+A ordem de cima pra baixo respeita o impacto direto no cliente e a dependência entre itens:
+
+1. **L1** (forecast). Mais alto impacto: afeta o número de faturamento esperado que aparece no digest diário e é consumido em decisões durante o lançamento.
+2. **L3** (relatório evolutivo). Afeta as afirmações comerciais sobre o sistema. Mais lento de remediar (re-scoring de ~200k leads), mas crítico em ciclo de propostas.
+3. **L2** (backtest comparativo). Crítico pra promoção de modelo. Só fica urgente quando houver Challenger novo pra avaliar.
+4. **L4** (teste de equivalência de revisão). Crítico pra confiança no deploy. Pode ser refatorado em conjunto com L2 — mesma técnica.
+5. **L5** + **L8** (rolling 30d + score distribution). Decisão de design entre re-scorear 150k leads/dia vs voltar pra E5 (model_metadata). E5 é a saída barata mas perde 30d-de-amostra-real como referência.
+6. **L6** (métricas evolutivas internas). Pode esperar até o próximo ciclo de análise comercial.
+7. **L7** (análise DT-12 retrospectiva). Item one-shot, ataca quando alguém precisar do número final do dano DT-12.
+8. **L9** (zero-decil CAPI). Só documentação.
+
+## Princípio de aceitação
+
+Cada item está concluído quando:
+1. O código não lê mais `Lead.leadScore` ou `Lead.decil` para gerar a métrica de saída.
+2. O score/decil é produzido pelo `LeadScoringPipeline` atual no momento da consulta (ou de cache versionado por `mlflow_run_id` + commit do `core/`).
+3. Existe teste/smoke que comprova que duas execuções consecutivas produzem o mesmo resultado (self-consistency).
+
+## O que não está neste plano
+
+- **Recalibração isotônica do score do Champion** — item separado no backlog, com propósito diferente (resolver `Σ(score)×ticket` para o forecast).
+- **Investigar causa raiz mais a fundo** — sabemos que é versão de código, não precisamos diagnosticar caso a caso. A remediação é a mesma para qualquer causa de drift de versão.
+- **Substituir `Lead.leadScore`/`Lead.decil` no banco** — manter os campos como histórico. Apenas parar de consumi-los como se fossem verdade atemporal.
+
+---
+
+*Plano gerado em 11/05/2026 após auditoria de paridade no `audience_quality_signal` (revisão `smart-ads-api-00439-fir`).*
