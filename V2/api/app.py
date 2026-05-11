@@ -2732,7 +2732,8 @@ async def daily_monitoring_check_railway(
                     pass
 
         orchestrator = MonitoringOrchestrator(model_path=model_path, db=None,
-                                              expected_decil_dist=expected_decil_dist)
+                                              expected_decil_dist=expected_decil_dist,
+                                              lead_scoring_pipeline=pipelines.get('devclub'))
         result = orchestrator.run_daily_check(leads_data)
 
         # Substituir funnel_metrics e lead_quality_metrics pelos dados Railway
@@ -3160,7 +3161,8 @@ async def daily_monitoring_check(
         logger.info(f"📂 Usando modelo: {model_path}")
 
         # Inicializar orquestrador
-        orchestrator = MonitoringOrchestrator(model_path=model_path, db=db)
+        orchestrator = MonitoringOrchestrator(model_path=model_path, db=db,
+                                              lead_scoring_pipeline=pipelines.get('devclub'))
 
         # Executar checks
         result = orchestrator.run_daily_check(request.leads)

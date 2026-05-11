@@ -1,0 +1,34 @@
+{
+  "client_id": "devclub",
+  "generated_at": "2026-05-10",
+  "model": {
+    "label": "challenger_abr28",
+    "run_id": "5d158f0aa6e54b489498470446194a6c",
+    "trained_at": "2026-04-28T15:33:50.538339",
+    "rationale": "Lift D10 OOS = 1.81-2.19x (vs Champion 1.37-1.39x). Mais discriminante."
+  },
+  "reference_pool": {
+    "label": "Top 5 ROAS realized",
+    "launches": [
+      "LF40",
+      "LF41",
+      "LF45",
+      "LF50",
+      "LF53"
+    ],
+    "n_leads": 35677,
+    "note": "LF53 = first peak (3 dias) para isolar produto principal."
+  },
+  "metrics": {
+    "score_mean": 0.4308,
+    "pct_d10": 0.1306,
+    "pct_d9_d10": 0.2548,
+    "pct_d8_d10": 0.3675
+  },
+  "thresholds": {
+    "delta_pct_d9_d10_warn": -0.03,
+    "delta_pct_d9_d10_alert": -0.05,
+    "delta_score_mean_pct_warn": -0.05,
+    "delta_score_mean_pct_alert": -0.1
+  }
+}

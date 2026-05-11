@@ -252,13 +252,14 @@ def run_score_mode(args) -> None:
 
 def _score_via_pipeline(pipeline, base: pd.DataFrame, predictor_override=None,
                          encoding_overrides=None) -> pd.DataFrame:
-    """preprocess+predict via xlsx temporário, opcionalmente forçando o predictor
-    e passando encoding_overrides do variante (necessário pra Champion jan30 ter
-    ordinal em idade/salário)."""
-    with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+    """preprocess+predict via CSV temporário (mesmo round-trip da produção em
+    api/app.py:337 batch e :954 síncrono — to_csv/read_csv preserva os mesmos
+    tipos que xlsx alteraria). Opcionalmente força predictor e encoding_overrides
+    do variante (necessário pra Champion jan30 ter ordinal em idade/salário)."""
+    with tempfile.NamedTemporaryFile(mode='w', suffix=".csv", delete=False) as tmp:
         tmp_path = tmp.name
     try:
-        base.to_excel(tmp_path, index=False)
+        base.to_csv(tmp_path, index=False)
         scored = pipeline.run(
             filepath=tmp_path,
             with_predictions=True,

@@ -91,7 +91,8 @@ class MonitoringOrchestrator:
     """
 
     def __init__(self, model_path: str, db: Session, client_config: Optional[ClientConfig] = None,
-                 expected_decil_dist: Optional[Dict[str, float]] = None):
+                 expected_decil_dist: Optional[Dict[str, float]] = None,
+                 lead_scoring_pipeline=None):
         """
         Args:
             model_path:    Caminho para pasta do modelo ativo
@@ -101,6 +102,10 @@ class MonitoringOrchestrator:
                                  Caller (app.py:daily-check/railway) computa rolling 30d
                                  via Railway e passa aqui — `db` legacy não tem a tabela Lead.
                                  Quando None, DataQualityMonitor cai em E5/hardcoded.
+            lead_scoring_pipeline: LeadScoringPipeline opcional já inicializado (api/app.py).
+                                 Usado por DataQualityMonitor._check_audience_quality_signal
+                                 para re-scorear leads do LF atual com chain de produção.
+                                 Quando None, esse check é skipado silenciosamente.
         """
         self.model_path = model_path
         self.db = db
@@ -116,7 +121,8 @@ class MonitoringOrchestrator:
         # Inicializar monitors
         self.monitors = {
             'data_quality': DataQualityMonitor(model_path, client_config=self._client_config, db=db,
-                                               expected_decil_dist=expected_decil_dist),
+                                               expected_decil_dist=expected_decil_dist,
+                                               lead_scoring_pipeline=lead_scoring_pipeline),
             'operational': OperationalMonitor(db, client_config=self._client_config),
             'capi_quality': CAPIQualityMonitor(db, client_config=self._client_config)
         }

@@ -150,6 +150,61 @@ def render_audience_profile_drift(a: dict, lines: list):
     lines.append('')
 
 
+def render_audience_quality_signal(a: dict, lines: list):
+    """Renderiza o alerta `audience_quality_signal` — re-score do LF atual
+    com Challenger vs baseline Top5 ROAS realized."""
+    d = a.get('details', {}) or {}
+    sev = a.get('severity', '?')
+    emoji = '🔴' if sev == 'HIGH' else '🟡' if sev == 'MEDIUM' else '🔵'
+    lf = d.get('lf_name', '?')
+    sinal = d.get('sinal', '?')
+    n_launch = d.get('n_leads_launch', 0)
+    baseline_label = d.get('baseline_pool_label', '?')
+    baseline_n = d.get('baseline_n_leads', 0)
+    model = d.get('model', {})
+    cur = d.get('current', {}) or {}
+    bl  = d.get('baseline', {}) or {}
+    dlt = d.get('delta', {}) or {}
+
+    lines.append(f'{emoji}  AUDIENCE_QUALITY_SIGNAL  ({sev}) · {lf} — {sinal}')
+    lines.append(f'    Modelo:       {model.get("label", "?")} (run_id={model.get("run_id","?")[:8]}…)')
+    lines.append(f'    Lançamento:   {lf} cap {d.get("cap_start","?")}→{d.get("cap_end","?")} '
+                 f'(n={n_launch:,})')
+    lines.append(f'    Baseline:     {baseline_label} (n={baseline_n:,})')
+    lines.append('')
+
+    # Tabela de comparação
+    rows = [
+        ('score médio', cur.get('score_mean'), bl.get('score_mean'),
+         dlt.get('score_pct'), 'pct'),
+        ('%D10',        cur.get('pct_d10'),    bl.get('pct_d10'),
+         dlt.get('pct_d10_pp'), 'pp'),
+        ('%D9-D10',     cur.get('pct_d9_d10'), bl.get('pct_d9_d10'),
+         dlt.get('pct_d9_d10_pp'), 'pp'),
+        ('%D8-D10',     cur.get('pct_d8_d10'), bl.get('pct_d8_d10'),
+         dlt.get('pct_d8_d10_pp'), 'pp'),
+    ]
+    label_w = 14
+    col_w = 10
+    lines.append('    ' + f'{"Métrica":<{label_w}}' + f'{"Atual":>{col_w}}'
+                 + f'{"Baseline":>{col_w}}' + f'{"Δ":>{col_w}}')
+    lines.append('    ' + '─' * (label_w + col_w * 3))
+    for label, cur_v, bl_v, dlt_v, dlt_kind in rows:
+        if cur_v is None or bl_v is None:
+            continue
+        if label == 'score médio':
+            cur_s = f'{cur_v:.4f}'
+            bl_s  = f'{bl_v:.4f}'
+            dlt_s = f'{dlt_v*100:+.1f}%' if dlt_v is not None else ''
+        else:
+            cur_s = f'{cur_v*100:.1f}%'
+            bl_s  = f'{bl_v*100:.1f}%'
+            dlt_s = f'{dlt_v*100:+.1f}pp' if dlt_v is not None else ''
+        lines.append('    ' + f'{label:<{label_w}}' + f'{cur_s:>{col_w}}'
+                     + f'{bl_s:>{col_w}}' + f'{dlt_s:>{col_w}}')
+    lines.append('')
+
+
 def render_distribution_drift(a: dict, lines: list):
     d = a.get('details', {}) or {}
     sev = a.get('severity', '?')
@@ -238,6 +293,8 @@ def render_alerts(p: dict, lines: list):
             render_audience_profile_drift(a, lines)
         elif t == 'audience_profile_drift_config_missing':
             render_audience_config_missing(a, lines)
+        elif t == 'audience_quality_signal':
+            render_audience_quality_signal(a, lines)
         elif t == 'distribution_drift':
             render_distribution_drift(a, lines)
         elif t == 'category_drift':

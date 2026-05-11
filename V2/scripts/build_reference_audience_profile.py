@@ -48,7 +48,7 @@ sys.path.insert(0, str(REPO_ROOT / 'scripts'))
 
 from ml_evolution_report import load_sheets_data
 from scripts.perfil_audiencia import (
-    SURVEY_MAP, slice_sheets, normalize_series,
+    SURVEY_MAP, slice_sheets, normalize_series, load_launch,
 )
 
 DEFAULT_TOP5 = ['LF40', 'LF41', 'LF44', 'LF45', 'LF47']
@@ -108,10 +108,13 @@ def main():
     sheets['data'] = pd.to_datetime(sheets['data'], errors='coerce')
     sheets = sheets.loc[:, ~sheets.columns.duplicated()]
 
+    # load_launch route por cap_start vs RAILWAY_CUTOVER:
+    # LFs pré-cutover (Sheets) usam slice_sheets(); pós-cutover (Railway) usam SQL direto.
+    # Sem isso, LF50/LF53 (pós-cutover) saem com 0 leads do Sheets.
     pool_frames = []
     for n in pool_names:
-        df = slice_sheets(sheets, launches[n])
-        print(f'  {n}: {len(df):,} leads')
+        df, src = load_launch(n, launches, sheets)
+        print(f'  {n}: {len(df):,} leads ({src})')
         pool_frames.append(df)
     pool = pd.concat(pool_frames, ignore_index=True)
     print(f'Pool {args.label}: {len(pool):,} leads')

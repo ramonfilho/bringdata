@@ -581,7 +581,8 @@ class DataQualityMonitor:
     - Mudanças na distribuição de scores/decis
     """
 
-    def __init__(self, model_path: str, client_config=None, db=None, expected_decil_dist=None):
+    def __init__(self, model_path: str, client_config=None, db=None, expected_decil_dist=None,
+                 lead_scoring_pipeline=None):
         """
         Args:
             model_path:    Caminho para pasta do modelo ativo
@@ -593,12 +594,16 @@ class DataQualityMonitor:
             expected_decil_dist: Dict {'D1':0.10,'D2':0.10,...,'D10':0.30} pré-computado pelo
                            caller (Railway) para servir como baseline E6 (rolling 30d). Quando None,
                            _check_score_distribution cai em E5 (model_metadata) ou hardcoded uniform.
+            lead_scoring_pipeline: LeadScoringPipeline opcional já inicializado (de api/app.py).
+                           Usado por _check_audience_quality_signal para re-scorear leads do LF
+                           atual com chain de produção. Quando None, esse check é skipado.
         """
         from .config import THRESHOLDS, MISSING_RATE_IGNORE_COLUMNS
         self.model_path = model_path
         self.client_config = client_config
         self.db = db
         self.expected_decil_dist = expected_decil_dist
+        self.lead_scoring_pipeline = lead_scoring_pipeline
         monitoring = client_config.monitoring if client_config else None
         self._thresholds = (
             monitoring.thresholds if monitoring and monitoring.thresholds else THRESHOLDS
@@ -669,6 +674,14 @@ class DataQualityMonitor:
         #    programação, computador). Pré-encoding e independente de modelo.
         if self._thresholds.get('audience_profile_drift', {}).get('enabled', False):
             alerts.extend(self._check_audience_profile_drift(df))
+
+        # 9. Audience quality signal — re-scoreia leads do LF atual com Challenger
+        #    via mesma chain de produção (LeadScoringPipeline.run) e compara
+        #    %D10/%D9-D10/score médio contra baseline pré-computado dos Top5
+        #    ROAS realized. Captura interação multivariada que o drift de mix
+        #    sozinho não pega.
+        if self._thresholds.get('audience_quality_signal', {}).get('enabled', True):
+            alerts.extend(self._check_audience_quality_signal())
 
         return alerts
 
@@ -1927,4 +1940,242 @@ class DataQualityMonitor:
             'threshold': top_threshold_pp,
         })
 
+        return alerts
+
+    def _load_audience_quality_baseline(self):
+        """Lê configs/reference_audience_profiles/{client_id}_quality_signal.json.
+
+        Retorna (baseline_dict, None) em sucesso, (None, error_dict) em falha.
+        """
+        client_id = getattr(self.client_config, 'client_id', 'devclub') if self.client_config else 'devclub'
+        candidate = Path(__file__).resolve().parents[2] / 'configs' / 'reference_audience_profiles' / f'{client_id}_quality_signal.json'
+        if not candidate.exists():
+            return None, {'reason': 'baseline_file_missing', 'tried_paths': [str(candidate)]}
+        try:
+            import json
+            with open(candidate) as f:
+                baseline = json.load(f)
+            return baseline, None
+        except Exception as e:
+            return None, {'reason': f'baseline_parse_error: {e}', 'tried_paths': [str(candidate)]}
+
+    def _check_audience_quality_signal(self) -> List[Dict]:
+        """
+        Re-scoreia leads do LF atual com Challenger via mesma chain de produção
+        (LeadScoringPipeline.run com CSV tempfile, igual api/app.py:345/959) e
+        compara %D10/%D9-D10/score_médio com baseline pré-computado dos Top5
+        ROAS realized salvo em configs/reference_audience_profiles/{client}_quality_signal.json.
+
+        Captura interação multivariada que o drift de mix categórico sozinho
+        (_check_audience_profile_drift) não consegue ver: 5 features cada uma
+        movendo 1pp combinam pelo modelo num drift de 5pp em D9-D10, e este
+        check pega.
+
+        Skip silencioso (com log INFO) se:
+          - lead_scoring_pipeline não foi injetado (rodando local sem API)
+          - baseline JSON ausente
+          - nenhum LF ativo
+          - n_leads do LF < min_n
+          - modelo Challenger não encontrado no ABTestConfig (run_id do baseline
+            não bate com nenhum variant)
+
+        Severity:
+          - HIGH se Δ%D9-D10 ≤ alert_threshold OU Δscore_pct ≤ alert_threshold
+          - MEDIUM se Δ%D9-D10 ≤ warn_threshold OU Δscore_pct ≤ warn_threshold
+          - Nenhum alerta crítico se ambos dentro do padrão (info-level com snapshot)
+        """
+        from datetime import datetime, timezone
+        import os, tempfile
+
+        alerts: List[Dict] = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+        pipeline = self.lead_scoring_pipeline
+        if pipeline is None:
+            logger.info("[audience_quality_signal] lead_scoring_pipeline=None — skip.")
+            return alerts
+
+        baseline, error = self._load_audience_quality_baseline()
+        if baseline is None:
+            logger.info(f"[audience_quality_signal] baseline indisponível: {error['reason']}.")
+            return alerts
+
+        bl_metrics = baseline.get('metrics', {})
+        bl_thresholds = baseline.get('thresholds', {})
+        baseline_run_id = baseline.get('model', {}).get('run_id')
+        baseline_pool_label = baseline.get('reference_pool', {}).get('label', 'Top5 ROAS realized')
+        baseline_n = baseline.get('reference_pool', {}).get('n_leads', 0)
+
+        # Resolver LF atual + leads via mesma origem que api/app.py usa em produção
+        # (SalesDataLoader.load_railway_leads devolve formato Sheets canônico).
+        current = self._resolve_current_launch_brt()
+        if current is None:
+            logger.info("[audience_quality_signal] sem LF ativo no momento — skip.")
+            return alerts
+        lf_name, cs_str, ce_str = current
+
+        try:
+            from src.validation.data_loader import SalesDataLoader
+            df_launch = SalesDataLoader().load_railway_leads(start_date=cs_str, end_date=ce_str,
+                                                              client_config=self.client_config)
+        except Exception as e:
+            logger.warning(f"[audience_quality_signal] load_railway_leads falhou: {e}")
+            return alerts
+
+        cfg = self._thresholds.get('audience_quality_signal', {})
+        min_n = int(cfg.get('min_n_leads', 200))
+        if len(df_launch) < min_n:
+            logger.info(f"[audience_quality_signal] LF {lf_name} com {len(df_launch)} leads "
+                        f"< min_n_leads={min_n}, skip.")
+            return alerts
+
+        # Localizar Challenger predictor + encoding_overrides via ABTestConfig
+        # (mesma lógica de api/app.py:937-947 ao decidir Champion shim).
+        ab_cfg = getattr(pipeline, '_ab_test_config', None)
+        if ab_cfg is None or not getattr(ab_cfg, 'enabled', False):
+            logger.info("[audience_quality_signal] ab_test não habilitado no pipeline — skip.")
+            return alerts
+        target_variant = None
+        target_variant_name = None
+        for vname, v in ab_cfg.variants.items():
+            if v.run_id == baseline_run_id:
+                target_variant = v
+                target_variant_name = vname
+                break
+        if target_variant is None:
+            logger.warning(f"[audience_quality_signal] run_id {baseline_run_id} do baseline não "
+                           f"está em ab_test.variants — skip.")
+            return alerts
+        try:
+            predictor = pipeline.get_variant_predictor(target_variant_name)
+        except Exception as e:
+            logger.warning(f"[audience_quality_signal] get_variant_predictor({target_variant_name}) "
+                           f"falhou: {e}")
+            return alerts
+        encoding_overrides = target_variant.encoding_overrides
+
+        # Re-scorear via mesma chain de produção: CSV tempfile + pipeline.run().
+        tmp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp:
+                tmp_path = tmp.name
+            df_launch.to_csv(tmp_path, index=False)
+            scored = pipeline.run(
+                filepath=tmp_path,
+                with_predictions=True,
+                predictor_override=predictor,
+                encoding_overrides=encoding_overrides,
+            )
+        except Exception as e:
+            logger.error(f"[audience_quality_signal] pipeline.run falhou: {e}")
+            return alerts
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+
+        if scored is None or 'lead_score' not in scored.columns:
+            logger.warning("[audience_quality_signal] pipeline.run não retornou lead_score.")
+            return alerts
+
+        # Atribuir decil usando thresholds do modelo (mesma função de produção)
+        try:
+            from src.model.decil_thresholds import atribuir_decis_batch
+            thresholds_dict = predictor.metadata.get('decil_thresholds', {}).get('thresholds', {})
+            if not thresholds_dict:
+                logger.warning("[audience_quality_signal] decil_thresholds ausente no predictor.")
+                return alerts
+            scored['decil'] = atribuir_decis_batch(scored['lead_score'].values, thresholds_dict)
+        except Exception as e:
+            logger.warning(f"[audience_quality_signal] decil assignment falhou: {e}")
+            return alerts
+
+        # Métricas atuais do LF
+        n_launch = len(scored)
+        score_mean_cur = float(scored['lead_score'].mean())
+        # Decil pode vir como "D10" ou "D01" (mesma convenção do baseline)
+        def _norm_dec(s):
+            s = str(s).strip().lstrip('D')
+            try: return f"D{int(float(s)):02d}"
+            except: return None
+        decis_norm = scored['decil'].apply(_norm_dec)
+        pct_d10_cur    = float((decis_norm == 'D10').mean())
+        pct_d9_d10_cur = float(decis_norm.isin(['D09', 'D10']).mean())
+        pct_d8_d10_cur = float(decis_norm.isin(['D08', 'D09', 'D10']).mean())
+
+        # Deltas vs baseline
+        bl_score    = float(bl_metrics.get('score_mean', 0.0))
+        bl_d10      = float(bl_metrics.get('pct_d10', 0.0))
+        bl_d9_d10   = float(bl_metrics.get('pct_d9_d10', 0.0))
+        bl_d8_d10   = float(bl_metrics.get('pct_d8_d10', 0.0))
+
+        d_score_pct = (score_mean_cur - bl_score) / bl_score if bl_score > 0 else 0.0
+        d_d10       = pct_d10_cur - bl_d10
+        d_d9_d10    = pct_d9_d10_cur - bl_d9_d10
+        d_d8_d10    = pct_d8_d10_cur - bl_d8_d10
+
+        # Thresholds (negativos: queda em relação ao baseline)
+        warn_d9_d10  = float(bl_thresholds.get('delta_pct_d9_d10_warn',     -0.03))
+        alert_d9_d10 = float(bl_thresholds.get('delta_pct_d9_d10_alert',    -0.05))
+        warn_score   = float(bl_thresholds.get('delta_score_mean_pct_warn', -0.05))
+        alert_score  = float(bl_thresholds.get('delta_score_mean_pct_alert',-0.10))
+
+        # Classificação
+        if d_d9_d10 <= alert_d9_d10 or d_score_pct <= alert_score:
+            severity = 'HIGH'
+            sinal = 'ABAIXO do padrão'
+        elif d_d9_d10 <= warn_d9_d10 or d_score_pct <= warn_score:
+            severity = 'MEDIUM'
+            sinal = 'levemente ABAIXO do padrão'
+        elif d_d9_d10 >= 0.03 and d_score_pct >= 0.05:
+            severity = 'INFO'
+            sinal = 'ACIMA do padrão'
+        else:
+            severity = 'INFO'
+            sinal = 'DENTRO do padrão'
+
+        details = {
+            'lf_name': lf_name,
+            'cap_start': cs_str,
+            'cap_end': ce_str,
+            'n_leads_launch': n_launch,
+            'model': baseline.get('model', {}),
+            'baseline_pool_label': baseline_pool_label,
+            'baseline_n_leads': baseline_n,
+            'current': {
+                'score_mean': round(score_mean_cur, 4),
+                'pct_d10': round(pct_d10_cur, 4),
+                'pct_d9_d10': round(pct_d9_d10_cur, 4),
+                'pct_d8_d10': round(pct_d8_d10_cur, 4),
+            },
+            'baseline': {
+                'score_mean': bl_score,
+                'pct_d10': bl_d10,
+                'pct_d9_d10': bl_d9_d10,
+                'pct_d8_d10': bl_d8_d10,
+            },
+            'delta': {
+                'score_pct': round(d_score_pct, 4),
+                'pct_d10_pp':    round(d_d10, 4),
+                'pct_d9_d10_pp': round(d_d9_d10, 4),
+                'pct_d8_d10_pp': round(d_d8_d10, 4),
+            },
+            'sinal': sinal,
+        }
+
+        alerts.append({
+            'type': 'audience_quality_signal',
+            'severity': severity,
+            'category': 'data_quality',
+            'message': (
+                f" Audiência {lf_name} (n={n_launch:,}) — {sinal} vs {baseline_pool_label} "
+                f"(n={baseline_n:,}). Δ%D9-D10={d_d9_d10*100:+.1f}pp · "
+                f"Δscore={d_score_pct*100:+.1f}% · %D10={pct_d10_cur*100:.1f}%"
+            ),
+            'details': details,
+            'timestamp': now_iso,
+            'metric_value': float(d_d9_d10),
+            'threshold': warn_d9_d10,
+        })
         return alerts

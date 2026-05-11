@@ -1,16 +1,16 @@
 {
   "client_id": "devclub",
-  "generated_at": "2026-05-08",
+  "generated_at": "2026-05-10",
   "reference_pool": {
-    "label": "Top 5 ROAS",
+    "label": "Top 5 ROAS realized",
     "launches": [
       "LF40",
       "LF41",
-      "LF44",
       "LF45",
-      "LF47"
+      "LF50",
+      "LF53"
     ],
-    "n_leads": 39771
+    "n_leads": 40968
   },
   "is_critical": [
     "O seu gênero:",
@@ -22,68 +22,68 @@
   "categorical_features": {
     "O seu gênero:": {
       "label": "Gênero",
-      "n_responses": 39757,
+      "n_responses": 40957,
       "proportions": {
-        "Masculino": 0.817315,
-        "Feminino": 0.182685
+        "Masculino": 0.788046,
+        "Feminino": 0.211954
       }
     },
     "Qual a sua idade?": {
       "label": "Idade",
-      "n_responses": 39757,
+      "n_responses": 40957,
       "proportions": {
-        "25-34": 0.303896,
-        "35-44": 0.232588,
-        "18-24": 0.224262,
-        "45-54": 0.126997,
-        "<18": 0.079156,
-        "55+": 0.033101
+        "25-34": 0.285983,
+        "35-44": 0.230388,
+        "18-24": 0.223381,
+        "45-54": 0.141636,
+        "<18": 0.078253,
+        "55+": 0.040359
       }
     },
     "O que você faz atualmente?": {
       "label": "Ocupação",
-      "n_responses": 39757,
+      "n_responses": 40957,
       "proportions": {
-        "CLT/funcionário público": 0.449506,
-        "Autônomo": 0.250623,
-        "Estudante": 0.184546,
-        "Não trabalho/nem estudo": 0.101089,
-        "Aposentado": 0.014236
+        "CLT/funcionário público": 0.427473,
+        "Autônomo": 0.26059,
+        "Estudante": 0.17909,
+        "Não trabalho/nem estudo": 0.115804,
+        "Aposentado": 0.017042
       }
     },
     "Atualmente, qual a sua faixa salarial?": {
       "label": "Faixa Salarial",
-      "n_responses": 39757,
+      "n_responses": 40957,
       "proportions": {
-        "Até R$2.000": 0.288151,
-        "Sem renda": 0.263149,
-        "R$2.001-3.000": 0.204945,
-        "R$3.001-5.000": 0.157733,
-        "Acima de R$5.000": 0.086023
+        "Até R$2.000": 0.292941,
+        "Sem renda": 0.276168,
+        "R$2.001-3.000": 0.195522,
+        "R$3.001-5.000": 0.14774,
+        "Acima de R$5.000": 0.087628
       }
     },
     "Você possui cartão de crédito?": {
       "label": "Tem Cartão de Crédito",
-      "n_responses": 39757,
+      "n_responses": 40957,
       "proportions": {
-        "Não": 0.582212,
-        "Sim": 0.417788
+        "Não": 0.60898,
+        "Sim": 0.39102
       }
     },
     "Já estudou programação?": {
       "label": "Já Estudou Programação",
-      "n_responses": 39757,
+      "n_responses": 40957,
       "proportions": {
-        "Não": 0.632367,
-        "Sim": 0.367633
+        "Não": 0.655639,
+        "Sim": 0.344361
       }
     },
     "Tem computador/notebook?": {
       "label": "Tem Computador",
-      "n_responses": 39756,
+      "n_responses": 40956,
       "proportions": {
-        "Sim": 0.874736,
-        "Não": 0.125264
+        "Sim": 0.833944,
+        "Não": 0.166056
       }
     }
   }
