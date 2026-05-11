@@ -1,0 +1,195 @@
+# Auditoria de quebra de produção
+
+Documento operacional, escrito em linguagem natural. Lista os cenários que **podem efetivamente quebrar produção** (degradar score em massa, zerar valor enviado ao Meta, bloquear retreino) e que **valem o tempo de atacar agora**.
+
+**Critério de entrada:** o cenário só está aqui se já tem **precedente histórico de quebrar produção** OU se tem **pré-condição clara hoje pra afetar ≥2% dos leads**. O resto vai pro fundo (seção "Documentado mas não atacar agora") com motivação curta.
+
+**Política de referência:** este doc é a camada operacional. Quando um cenário precisar de detalhe técnico de implementação, link direto pro arquivo correspondente em vez de duplicar conteúdo. Especificações técnicas continuam vivendo em [PLANO_SAFEGUARD.md](PLANO_SAFEGUARD.md), [PLANO_REFACTOR_MLOPS.md](PLANO_REFACTOR_MLOPS.md) e [registro_erros_ml.md](registro_erros_ml.md).
+
+---
+
+## 1. As features chegam certas no modelo?
+
+**O que esta seção cobre:** tudo que pode fazer uma feature crítica chegar **zerada**, com **tipo errado**, ou com **valor inesperado** pro modelo — degradando o score sem aviso. É a categoria de bug mais frequente e mais danosa do histórico desse projeto: quase todos os Erros 1-17 do registro de erros caem aqui.
+
+### Cenário 1.1 — Encoding desalinhado quando A/B reativar com Champion novo
+
+**O que aconteceria:** o próximo Champion é promovido pra rotação A/B e a configuração de encoding por variante (`encoding_overrides` em `configs/active_models/{client}.yaml`) não acompanha. Modelo recebe features encodadas no formato errado, score sai degradado.
+
+**Por que isso importa:** já aconteceu. De 29/abr a 05/mai, Champion `jan30` rodou no A/B sem `encoding_overrides` — `idade` e `faixa_salarial` chegaram zeradas em ~25% dos leads por 7 dias. Quando o próximo Champion sair (DT-16), o mesmo gap reabre se a checklist de promoção não cobrir explicitamente.
+
+**Como verificar:**
+- Ler [PROMOCAO_MODELO_CHECKLIST.md](PROMOCAO_MODELO_CHECKLIST.md) e confirmar que o checklist exige editar `encoding_overrides` da variante junto com `mlflow_run_id`.
+- Rodar `python V2/tests/parity_audit.py --function encoding_ab` antes de qualquer promoção — auditoria por variante já cobre o caso (instrumentação fechada hoje em commit `4c6c472`).
+
+**Critério de fechamento:** próximo deploy de Champion passar pelo Gate A do `deploy_capi.sh` com `--function encoding_ab` retornando OK.
+
+### Cenário 1.2 — Categoria nova de feature de alta importância escapa da whitelist canônica
+
+**O que aconteceria:** o gestor lança uma campanha com nova categoria de `Medium`/`Source`/`Term` (ex.: `Medium_Banco_de_Dados`). A whitelist canônica em `configs/distribuicoes_esperadas.json` não cobre, encoding zera essa coluna, e leads daquela categoria têm score degradado.
+
+**Por que isso importa:** já aconteceu duas vezes. Cluster 3 do Erro 2 foi `Medium_Linguagem_programacao` zerado. Cluster 4 foi padrão similar com outra categoria. Em cada vez, a feature ficou silenciosamente zerada por semanas porque o sensor que existia (`check_category_drift`) só logava warning sem bloquear.
+
+**Como verificar:**
+- Sample 30 dias de leads do Railway, agrupar `utm_medium` / `utm_source` / `utm_term` por categoria, e cruzar com a whitelist em `configs/distribuicoes_esperadas.json`.
+- Para cada categoria não-whitelisted que tem ≥2% do volume, decidir: aceitar como "outros" (atualizar whitelist) ou criar tratamento dedicado.
+
+**Critério de fechamento:** lista de categorias fora da whitelist com ≥2% volume nos últimos 30 dias = vazia, OU cada categoria tem decisão registrada.
+
+### Cenário 1.3 — Front muda formato das 4 features binárias raw (`genero`, `estudouProgramacao`, `faculdade`, `investiuCurso`)
+
+**O que aconteceria:** o front começa a mandar `'sim'` (minúsculo) em vez de `'Sim'`, ou `'Masculino '` (com espaço extra). Essas 4 features **não passam por normalização** no pipeline — vão direto pro `pd.get_dummies()`. Resultado: cria coluna OHE inédita (`Sim_lower`), modelo zera a feature original. Conjunto representa ~8% do peso do modelo Champion atual.
+
+**Por que isso importa:** sem precedente exato, mas a precondição é certa (sem normalização nessas 4 features) e foi documentada na seção V.2 do registro de erros. Mesma classe do Cluster 1 (07/jan: `'NÃO'` em "Tem computador?" quebrou OHE de outra feature). Risco operacional baixo enquanto front estiver estável, mas qualquer mudança de schema do form quebra silencioso.
+
+**Como verificar:**
+- Pull dos últimos 30 dias do `Lead.pesquisa` jsonb. Para cada uma das 4 chaves (`genero`, `estudouProgramacao`, `faculdade`, `investiuCurso`), listar todos os valores distintos e a contagem.
+- Se aparecer qualquer valor fora do canônico (`Sim`/`Não`/`Masculino`/`Feminino`), levantar como bug do front antes de virar problema do modelo.
+
+**Critério de fechamento:** zero valores fora do canônico nos últimos 30 dias, OU lista de exceções com volume <2% e plano de fix do front.
+
+---
+
+## 2. O modelo e a configuração estão consistentes?
+
+**O que esta seção cobre:** tudo que pode fazer com que o **modelo ativo**, o **encoding por variante A/B** e os **valores enviados ao Meta** saiam dessincronizados durante uma promoção. O ponto cego clássico: alguém troca uma coisa achando que é trivial, mas era a ponta de um trio.
+
+### Cenário 2.1 — Trocar `mlflow_run_id` sem ajustar `conversion_rates` por variante
+
+**O que aconteceria:** novo modelo Champion entra com decis recalibrados (faixa de score diferente), mas os `conversion_rates` por decil em `active_models/{client}.yaml` (variants A/B) continuam dos valores antigos. Resultado: `value` enviado ao Meta sai descalibrado em 100% dos leads do path Champion, ou pior, zera (caso conversion_rates dos variants foi setado pra 0.0 em algum momento).
+
+**Por que isso importa:** já aconteceu em 08/05 (bug VAL=0 v2 — variants A/B com `conversion_rates: {D01: 0.0, ..., D10: 0.0}` herdados de patch anterior, valor zerado pro Meta no path Champion durante canary).
+
+**Como verificar:**
+- Antes de qualquer promoção de modelo, rodar `python V2/scripts/audit_active_model_yaml.py` (Gate D em `deploy_capi.sh`) — confirma que `conversion_rates` de cada variant está dentro do esperado vs `business_config.conversion_rates`.
+- Manualmente: para cada variant em `active_models/{client}.yaml`, calcular `value × product_value` pelo decil mediano e comparar com baseline conhecido.
+
+**Critério de fechamento:** Gate D do `deploy_capi.sh` rodando obrigatoriamente antes de cada promoção, sem opção de skip.
+
+### Cenário 2.2 — Deploy aponta pra `run_id` cujo artefato sumiu do GCS
+
+**O que aconteceria:** alguém edita `active_models/{client}.yaml` com um `mlflow_run_id` cujo bucket GCS de artefatos foi limpo, ou nunca existiu. Cloud Run reinicia, modelo não carrega.
+
+**Por que isso importa:** já aconteceu (Erro 11 do registro). Sintoma na época: modelo "salvo em path diferente". Falha **alto** na inicialização do servidor (não silencioso) — então o impacto é "rollback necessário", não "leads scorreados errados".
+
+**Como verificar:**
+- Antes de cada promoção, listar `gs://smart-ads-mlflow/artifacts/<run_id>/` e confirmar que `model.pkl` existe.
+- Idealmente: pre-flight check no `deploy_capi.sh` que falha se o artefato não existir.
+
+**Critério de fechamento:** pre-flight check de existência do artefato no GCS implementado no `deploy_capi.sh`.
+
+---
+
+## 3. Promover nova versão não quebra produção?
+
+**O que esta seção cobre:** tudo que pode fazer com que uma revisão nova suba pra 100% de tráfego carregando bug que os gates de pré-deploy não pegaram. Diferente da seção 2 (configuração inconsistente), aqui o foco é o **gate ele mesmo ter falhado em detectar**.
+
+### Cenário 3.1 — Salvaguarda declarada como entregue mas nunca implementada — [✅ FECHADO 2026-05-11]
+
+**O que aconteceria:** o `PLANO_SAFEGUARD.md` lista uma salvaguarda como ✅ concluída, mas o código correspondente nunca foi mergeado, ou foi mergeado mas o caminho de invocação está quebrado, ou foi removido depois sem atualizar o doc.
+
+**Por que isso importa:** já aconteceu. A salvaguarda "feature zerada em >5% dos leads gera alerta + bloqueia" foi declarada como entregue em 21/abr no `PLANO_SAFEGUARD.md`, mas a investigação V.1.3 do registro de erros (08/mai) confirmou que **nunca foi implementada**. Existia apenas log de feature ausente do DataFrame, sem bloquear pipeline. Esse gap permitiu que o Cluster 5 (encoding zerado em 25% dos leads) passasse 7 dias sem detecção.
+
+**Resultado da auditoria (11/mai/2026):** 23 itens declarados ✅ auditados com leitura direta do código (`production_pipeline.py`, `api/app.py`, `deploy_capi.sh`, `orchestrator.py`, `core/encoding.py`, etc.). **Zero fantasmas adicionais encontrados além de T1-16 (que já estava marcado como 🟡 backlog no doc).** Resultado por categoria:
+
+- **19/23 ✅ FUNCIONA** — código existe na localização declarada E é invocado de caminho de produção real.
+- **4/23 ⚠️ DRIFT** de documentação (não bug de produção):
+  - **T1-3 (CAPI dedup)** — doc apontava `capi_integration.py`; na realidade dedup cliente-side vive em [`api/app.py:865-875`](../api/app.py#L865-L875) + endpoint `/capi/check_sent`. PLANO_SAFEGUARD.md atualizado.
+  - **T2-2 (log_step_count)** — doc dizia "6+2 pontos"; real é "8+3". PLANO_SAFEGUARD.md atualizado.
+  - **T2-5 (filtro vendas)** — loaders estão em [`src/validation/data_loader.py`](../src/validation/data_loader.py), não em `core/ingestion.py`. PLANO_SAFEGUARD.md atualizado.
+  - **T2-6 (exceções silenciosas)** — `app.py:1637` tinha `logger.error` mas faltava `exc_info=True`. Adicionado em 11/mai.
+- **0/23 ❌ FANTASMA** novo (T1-16 segue como o único fantasma conhecido, já catalogado como backlog).
+
+**Critério de fechamento:** ✅ atendido. Lista de salvaguardas com status real registrada acima; correções aplicadas. T1-16 continua sendo o único ❌ ativo e já tem dependência clara documentada (precisa do próximo retreino para capturar `proporcao_esperada_zero`).
+
+### Cenário 3.2 — Gates pré-deploy não exercitam todos os caminhos de produção
+
+**O que aconteceria:** o smoke test, o parity audit ou o Gate C cobrem só o caminho default. Caminhos específicos (variantes A/B, encoding overrides, predictor override) nunca são testados pré-deploy. Bug específico desse caminho passa.
+
+**Por que isso importa:** já aconteceu (mesma origem do Cluster 5). Smoke test antigo chamava `/monitoring/daily-check/railway` sem contexto A/B — nunca exercitava o Champion com `encoding_overrides`. Parity audit antigo testava só `config.encoding` padrão. Os dois gaps foram fechados em 08/mai (smoke variantes + parity por variante), mas a classe persiste — qualquer caminho novo que entre precisa de cobertura explícita.
+
+**Como verificar:**
+- Listar todos os endpoints de scoring (`/predict/single`, `/predict/batch`, `/railway/process-pending`, `/capi/process_daily_batch`) e todos os ramos condicionais dentro de `production_pipeline.py` (A/B variant, predictor override, encoding override).
+- Para cada combinação que exista hoje em produção, confirmar que existe gate pré-deploy que a exercita.
+
+**Critério de fechamento:** matriz `endpoint × variante × override` com cobertura confirmada pra cada célula com tráfego real.
+
+---
+
+## 4. Conseguimos detectar quando algo quebrou?
+
+**O que esta seção cobre:** quando a quebra escapa dos gates pré-deploy e chega em produção, em quanto tempo o sensor avisa? Quando o sensor não dispara, qual é o atalho de detecção manual? Aqui o foco é **observabilidade de falha em runtime**.
+
+### Cenário 4.1 — Drift de público que afeta performance do lançamento passa silencioso
+
+**O que aconteceria:** o tráfego do lançamento traz perfil de audiência que diverge do perfil do treino (ex.: idade média 10 anos abaixo, mix de gênero invertido). O modelo continua scorreando dentro do range conhecido (sem `null_rate_high` nem `wrong_dtype`), então os sensores existentes não disparam. Performance do lançamento cai sem causa visível.
+
+**Por que isso importa:** aconteceu no LF54 em 08/mai. Detectado manualmente por comparação ad-hoc contra Top 5 ROAS histórico. Mitigação foi implementada (`audience_profile_drift` rodando no daily-check), mas vale validar que o sensor está disparando E que está sendo lido por humano, não só logado.
+
+**Como verificar:**
+- Rodar `curl /monitoring/daily-check/railway` e confirmar presença de `audience_profile_drift` no `actionable_alerts` quando o pool difere do snapshot Top 5 ROAS.
+- Verificar que o snapshot `configs/reference_audience_profiles/devclub.json` foi atualizado depois do último lançamento winner.
+- Confirmar que existe rotina humana de leitura desse alerta (não basta logar — alguém tem que ver).
+
+**Critério de fechamento:** sensor disparando corretamente (validar com perfil simulado divergente), snapshot atualizado, e rotina de leitura definida.
+
+### Cenário 4.2 — Feature crítica do modelo zera em massa e ninguém é notificado
+
+**O que aconteceria:** uma feature de alta importância (ex.: `idade`, `faixa_salarial`, ou uma das `Medium_*`) começa a chegar com valor 0 ou ausente em ≥10% dos batches. Modelo continua scoreando, mas o sinal degrada. Sem alerta automático, descoberto só dias depois quando alguém olha relatório.
+
+**Por que isso importa:** mesma classe do Cluster 5 e da V.1.3. Aconteceu várias vezes no histórico. Mitigação prevista (validação ">X% zerados → bloqueia") **ainda não foi implementada** (declarada mas ausente — ver Cenário 3.1).
+
+**Como verificar:**
+- Implementar de fato a validação pós-encoding feature-aware. Para cada feature com `importance ≥ 0.03`, calcular `(df[feature] == 0).mean()`. Se >X% leads têm zero E a distribuição esperada do treino tinha <X%, raise.
+- Pré-condição: capturar `proporcao_esperada_zero` por feature em `distribuicoes_esperadas.json` no próximo retreino.
+
+**Critério de fechamento:** validação implementada e testada com batch sintético contendo feature zerada.
+
+---
+
+## 5. O retreino vai funcionar quando precisar?
+
+**O que esta seção cobre:** o retreino mensal pode falhar por **pré-condição operacional** (banco parado, snapshot ausente, dataset corrompido) que ninguém percebe até o momento de rodar. Custo dessa falha é alto: atrasa o retreino e o time fica reagindo em cima da hora.
+
+### Cenário 5.1 — Cloud SQL `smart-ads-db` em `activation-policy=NEVER` quando retreino disparar
+
+**O que aconteceria:** retreino é disparado (manual ou agendado), tenta conectar no MLflow tracking pra registrar o run, falha porque a instância está parada. Treino aborta no início, ninguém é notificado. Demora 2-3 minutos pra subir a instância depois que alguém percebe.
+
+**Por que isso importa:** estado atual confirmado — instância está em `activation-policy=NEVER` desde 26/abr (registrado em memória `projeto_cloudsql_parado_retreino.md`). Pré-condição clara, alta probabilidade de morder no próximo retreino se ninguém lembrar.
+
+**Como verificar:**
+- Adicionar passo no início do `train_pipeline.py`: `gcloud sql instances describe smart-ads-db --format='value(state)'` e abortar com mensagem clara se diferente de `RUNNABLE`.
+- Idealmente: rotina que sobe automaticamente no início do treino e para no fim (script já documentado em `operacoes_gcp_custos.md`).
+
+**Critério de fechamento:** pre-flight check rodando no `train_pipeline.py` ou wrapper bash que sobe e para a instância automaticamente.
+
+---
+
+## Documentado mas não atacar agora
+
+Cenários conhecidos que **não passam o critério de ≥2% de impacto OU não têm precedente direto**. Ficam aqui pra quando o tempo permitir, ou pra entrar quando contexto mudar.
+
+| Cenário | Por que não atacar agora |
+|---|---|
+| Macros literais TikTok no `utm_medium` | ~1.3% volume, score levemente degradado, ação está com gestor |
+| Gate C de deploy com payload incompleto | Corrigido hoje (commit `4c6c472`) |
+| In-app browser produzindo cliques sem `fbclid` | Não afeta score — é cosmético na atribuição |
+| Lead com TZ na borda 23:59 BRT | Sem precedente recente, baixíssima frequência |
+| `.str` accessor com batch=1 em `/railway/process-pending` | Auto-recupera no próximo poll |
+| Token Guru renovado com `\|` na string | Sem precedente, robustez do dotenv não validada mas baixo risco |
+| `utm_source` `null` vs `""` vs ausente | Esporádico, encoding já fallback pra `outros` |
+| A/B 100% Challenger / 0% Champion | Cenário hipotético, não há plano operacional pra isso |
+| `Lead.pesquisa` jsonb com chave nova | Front estável, sem mudança planejada |
+| Encurtadores sem `utm_source/medium/term` | ~8 leads/48h, baixíssimo impacto |
+| Pixel ID override em Challenger sem documentação | Funcional hoje, doc pendente mas não bloqueia |
+| Lead Forms (formulário nativo Meta) com UTM diferente | Atualmente sem volume |
+| Cobertura `feature_registry` real do MLflow no parity audit | Próximo passo natural depois da auditoria de paridade por variante; doc completo pendente |
+
+---
+
+## Como atualizar este doc
+
+- Cenário fechado: marcar `[x]` no título (ex.: `### Cenário 1.1 — Encoding desalinhado [✅ FECHADO]`) e adicionar 1 linha com data + commit/PR.
+- Cenário aprofundado: link pra issue/PR onde a investigação está detalhada.
+- Cenário sobe da tabela "não atacar agora" pra seção principal: motivo do upgrade (mudança de contexto, novo precedente, etc.).
+- Indexação: este doc vive em `INDICE_DOCUMENTACAO.md` na categoria "Operacional / Auditoria".

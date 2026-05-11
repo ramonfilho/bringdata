@@ -1634,7 +1634,7 @@ async def check_capi_sent(
         }
 
     except Exception as e:
-        logger.error(f"❌ Erro ao verificar logs CAPI: {str(e)}")
+        logger.error(f"❌ Erro ao verificar logs CAPI: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Erro ao verificar logs: {str(e)}")
 
 # ============================================================================
