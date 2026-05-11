@@ -2129,10 +2129,10 @@ class DataQualityMonitor:
             severity = 'MEDIUM'
             sinal = 'levemente ABAIXO do padrão'
         elif d_d9_d10 >= 0.03 and d_score_pct >= 0.05:
-            severity = 'INFO'
+            severity = 'LOW'
             sinal = 'ACIMA do padrão'
         else:
-            severity = 'INFO'
+            severity = 'LOW'
             sinal = 'DENTRO do padrão'
 
         details = {

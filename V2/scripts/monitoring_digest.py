@@ -155,7 +155,15 @@ def render_audience_quality_signal(a: dict, lines: list):
     com Challenger vs baseline Top5 ROAS realized."""
     d = a.get('details', {}) or {}
     sev = a.get('severity', '?')
-    emoji = '🔴' if sev == 'HIGH' else '🟡' if sev == 'MEDIUM' else '🔵'
+    # LOW é o severity "informativo" (DENTRO/ACIMA do padrão). Emoji muda
+    # para 🔵 (DENTRO) ou 🟢 (ACIMA) baseado no campo `sinal` quando severity=LOW.
+    if sev == 'HIGH':
+        emoji = '🔴'
+    elif sev == 'MEDIUM':
+        emoji = '🟡'
+    else:
+        sinal_str = (a.get('details', {}) or {}).get('sinal', '')
+        emoji = '🟢' if 'ACIMA' in sinal_str else '🔵'
     lf = d.get('lf_name', '?')
     sinal = d.get('sinal', '?')
     n_launch = d.get('n_leads_launch', 0)
