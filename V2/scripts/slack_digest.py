@@ -35,7 +35,8 @@ def parse_args():
     p.add_argument('--hours', type=int, default=72)
     p.add_argument('--cache', action='store_true', help='Usar /tmp/payload.json se existir')
     p.add_argument('--url', default=PROD_URL)
-    p.add_argument('--username', default='Smart Ads Monitoring')
+    p.add_argument('--username', default=None,
+                   help='Sobrescreve o nome do bot. Default: usa o display name configurado no Slack App.')
     return p.parse_args()
 
 
@@ -50,13 +51,14 @@ def fetch_payload(base_url: str, hours: int, use_cache: bool) -> dict:
     return json.loads(raw)
 
 
-def post_to_slack(token: str, channel: str, blocks: list, username: str) -> dict:
+def post_to_slack(token: str, channel: str, blocks: list, username: str | None) -> dict:
     body = {
         'channel': channel,
         'blocks': blocks,
-        'text': 'Daily Check Smart Ads',  # fallback pra notificações
-        'username': username,
+        'text': 'Daily Check — DevClub',  # fallback pra notificações
     }
+    if username:
+        body['username'] = username
     req = urllib.request.Request(
         SLACK_API,
         data=json.dumps(body).encode('utf-8'),

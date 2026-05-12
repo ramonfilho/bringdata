@@ -323,14 +323,21 @@ def _render_text_distribution_drifts_consolidated(alerts: list, L: list):
 
 
 def _render_text_category_drifts_consolidated(alerts: list, L: list):
-    L.append('Mudanças em categorias:')
+    # Agrupa por variant
+    by_variant: dict[str, list] = {}
     for a in alerts:
         d = a.get('details', {}) or {}
-        col = d.get('column', '?')
-        variant = _variant_label(d.get('variant_name', '?'))
-        new_cats = ', '.join(d.get('new_categories', []) or [])
-        n = d.get('affected_count', 0); pct = d.get('percentage', 0)
-        L.append(f"  • {col}: {new_cats}, {variant}  ·  {n} leads ({pct:.1f}%)")
+        var = _variant_label(d.get('variant_name', '?'))
+        by_variant.setdefault(var, []).append(d)
+
+    L.append('Mudanças em categorias:')
+    for variant, items in by_variant.items():
+        L.append(f'  {variant}:')
+        for d in items:
+            col = d.get('column', '?')
+            new_cats = ', '.join(d.get('new_categories', []) or [])
+            n = d.get('affected_count', 0); pct = d.get('percentage', 0)
+            L.append(f"    {col}: {new_cats}  ·  {n} leads ({pct:.1f}%)")
     L.append('')
 
 
@@ -376,7 +383,7 @@ def _render_text_funnel(v: dict, L: list):
     decis = sc.get('decil_distribution', {}) or {}
     if decis:
         total = sc.get('total_scored', 0) or 1
-        L.append('    Decis:')
+        L.append(f'    Decis  ·  {win.get("start_brt","?")} → {win.get("end_brt","?")} BRT  ·  {total:,} scoreados:')
         for d in ['D01','D02','D03','D04','D05','D06','D07','D08','D09','D10']:
             vv = decis.get(d, 0)
             pct = vv/total*100
@@ -438,15 +445,8 @@ def _render_text_revenue(v: dict, L: list):
     rf = v['revenue_forecast']
     if not rf: return
     inputs = rf.get('inputs', {}) or {}
-    L.append('💰  REVENUE FORECAST')
-    L.append(f'    Janela: {inputs.get("launch_window_start_brt","?")}  ·  {_n(inputs,"total_leads_meta"):,} leads Meta  ·  ticket R$ {_n(inputs,"ticket_contracted"):,.0f}')
-
-    # Referência: qualidade do LF anterior (vem de lead_quality_metrics)
-    lq = v.get('lead_quality') or {}
-    lf_label = lq.get('lf_referencia_label')
-    lf = lq.get('lf_referencia') or {}
-    if lf_label and lf:
-        L.append(f'    Referência {lf_label}: score {_n(lf,"score"):.4f} · D9 {_n(lf,"d9"):.1f}% · D10 {_n(lf,"d10"):.1f}% · {_n(lf,"count"):,} leads')
+    L.append('💰  PREVISÃO DE FATURAMENTO')
+    L.append(f'    Lançamento atual ({inputs.get("launch_window_start_brt","?")}): {_n(inputs,"total_leads_meta"):,} leads Meta  ·  ticket R$ {_n(inputs,"ticket_contracted"):,.0f}')
     L.append('')
 
     def _row(label, c):
@@ -462,23 +462,34 @@ def _render_text_revenue(v: dict, L: list):
 
     header = f'    {"Cenário":<16} {"Vendas":>7}  {"Faturamento":>14}  {"Recebido":>13}  {"Cartão à vista":>17}  {"1ª parc boleto":>17}  {"Guru":>6}  {"TMB":>6}'
 
-    # Método 1
-    L.append('  Método 1: taxa de conversão média LF43-LF53 (recalibrado 08/05)')
-    L.append(header)
-    for label, key in [('Pessimista','cenario_pessimista'),
-                       ('Base',      'cenario_base'),
-                       ('Otimista',  'cenario_otimista')]:
-        L.append(_row(label, rf.get(key, {}) or {}))
-    L.append('')
+    def _write_two_methods(forecast: dict):
+        L.append('  Método 1: taxa de conversão média LF43-LF53 (recalibrado 08/05)')
+        L.append(header)
+        for label, key in [('Pessimista','cenario_pessimista'),
+                           ('Base',      'cenario_base'),
+                           ('Otimista',  'cenario_otimista')]:
+            L.append(_row(label, forecast.get(key, {}) or {}))
+        L.append('')
+        L.append('  Método 2: previsão por ML')
+        L.append(header)
+        for label, key in [('Pessimista','cenario_ml_aware_pessimista'),
+                           ('Base',      'cenario_ml_aware'),
+                           ('Otimista',  'cenario_ml_aware_otimista')]:
+            L.append(_row(label, forecast.get(key, {}) or {}))
+        L.append('')
 
-    # Método 2 — agora com cenários nativos (sem hack no renderer)
-    L.append('  Método 2: previsão por ML')
-    L.append(header)
-    for label, key in [('Pessimista','cenario_ml_aware_pessimista'),
-                       ('Base',      'cenario_ml_aware'),
-                       ('Otimista',  'cenario_ml_aware_otimista')]:
-        L.append(_row(label, rf.get(key, {}) or {}))
-    L.append('')
+    # Lançamento atual
+    _write_two_methods(rf)
+
+    # Lançamento anterior — mesma metodologia aplicada ao volume Meta do LF anterior
+    lf_ant = rf.get('lf_anterior') or {}
+    if lf_ant:
+        lf_inputs = lf_ant.get('inputs', {}) or {}
+        lf_name = lf_inputs.get('lf_name', '?')
+        L.append(f'  Lançamento anterior ({lf_name} · {lf_inputs.get("launch_window_start_brt","?")}): {_n(lf_inputs,"total_leads_meta"):,} leads Meta')
+        L.append('')
+        _write_two_methods(lf_ant)
+
     L.append('    Mais detalhes sobre a metodologia no payload da API.')
     L.append('')
 
@@ -664,14 +675,21 @@ def _slack_alert_audience(a: dict, B: list):
 
 
 def _slack_category_drifts_consolidated(alerts: list, B: list):
-    lines = ['*Mudanças em categorias:*']
+    # Agrupa por variant
+    by_variant: dict[str, list] = {}
     for a in alerts:
         d = a.get('details', {}) or {}
-        col = d.get('column','?')
-        var = _variant_label(d.get('variant_name','?'))
-        new = ', '.join(d.get('new_categories', []) or [])
-        n = d.get('affected_count', 0); pct = d.get('percentage', 0)
-        lines.append(f"  • *{col}*: {new}, {var}  ·  {n} leads ({pct:.1f}%)")
+        var = _variant_label(d.get('variant_name', '?'))
+        by_variant.setdefault(var, []).append(d)
+
+    lines = ['*Mudanças em categorias:*']
+    for variant, items in by_variant.items():
+        lines.append(f"  *{variant}*:")
+        for d in items:
+            col = d.get('column', '?')
+            new = ', '.join(d.get('new_categories', []) or [])
+            n = d.get('affected_count', 0); pct = d.get('percentage', 0)
+            lines.append(f"    `{col}`: {new}  ·  {n} leads ({pct:.1f}%)")
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(lines)}})
 
 
@@ -719,7 +737,9 @@ def _slack_funnel(v: dict, B: list):
 
 
 def _slack_decis(v: dict, B: list):
-    sc = v['funnel'].get('scoring', {}) or {}
+    fm = v['funnel']
+    sc = fm.get('scoring', {}) or {}
+    win = fm.get('window', {}) or {}
     decis = sc.get('decil_distribution', {}) or {}
     total = sc.get('total_scored', 1) or 1
     rows = []
@@ -729,7 +749,9 @@ def _slack_decis(v: dict, B: list):
         rows.append(f"`{d}`: {vv:>4,}  ({pct:>4.1f}%)")
     left, right = rows[:5], rows[5:]
     two_col = "\n".join(f"{l}     {r}" for l, r in zip(left, right))
-    B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': f"*Distribuição de decis*\n```\n{two_col}\n```"}})
+    janela = f"_{win.get('start_brt','?')} → {win.get('end_brt','?')} BRT_"
+    B.append({'type': 'section', 'text': {'type': 'mrkdwn',
+        'text': f"*Distribuição de decis* · {janela} · {total:,} leads scoreados\n```\n{two_col}\n```"}})
 
 
 def _slack_lead_quality(v: dict, B: list):
@@ -806,36 +828,59 @@ def _slack_revenue(v: dict, B: list):
         m1_lines.append(_row(label, rf.get(key, {}) or {}))
     m1_lines.append("```")
 
-    # Referência: qualidade do LF anterior
-    lq = v.get('lead_quality') or {}
-    lf_label = lq.get('lf_referencia_label')
-    lf = lq.get('lf_referencia') or {}
-    ref_line = ''
-    if lf_label and lf:
-        ref_line = (f"\n_Referência *{lf_label}*: score {_n(lf,'score'):.4f} · "
-                    f"D9 {_n(lf,'d9'):.1f}% · D10 {_n(lf,'d10'):.1f}% · {_n(lf,'count'):,} leads_")
-
-    m1_text = (
-        f"*💰 Revenue Forecast*  ·  _janela {inputs.get('launch_window_start_brt','?')}_  ·  "
-        f"{_n(inputs,'total_leads_meta'):,} leads Meta  ·  ticket R$ {_n(inputs,'ticket_contracted'):,.0f}"
-        f"{ref_line}\n"
+    # Lançamento atual — Método 1
+    B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': (
+        f"*💰 Previsão de Faturamento*\n"
+        f"*Lançamento atual*  ·  _{inputs.get('launch_window_start_brt','?')}_  ·  "
+        f"{_n(inputs,'total_leads_meta'):,} leads Meta  ·  ticket R$ {_n(inputs,'ticket_contracted'):,.0f}\n"
         f"_*Método 1:* taxa de conversão média LF43-LF53 (recalibrado 08/05)_\n"
         + "\n".join(m1_lines)
-    )
-    B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': m1_text}})
+    )}})
 
-    # Método 2 — cenários ML nativos no payload
+    # Lançamento atual — Método 2 (cenários ML nativos)
     m2_lines = ["```", header_table,
                 _row('Pessim.', rf.get('cenario_ml_aware_pessimista', {}) or {}),
                 _row('Base',    rf.get('cenario_ml_aware', {}) or {}),
                 _row('Otim.',   rf.get('cenario_ml_aware_otimista', {}) or {}),
                 "```"]
-    m2_text = (
+    B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': (
         f"_*Método 2:* previsão por ML_\n"
         + "\n".join(m2_lines)
-        + "\n_Mais detalhes sobre a metodologia no payload da API._"
-    )
-    B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': m2_text}})
+    )}})
+
+    # Lançamento anterior — mesma metodologia aplicada ao volume do LF anterior
+    lf_ant = rf.get('lf_anterior') or {}
+    if lf_ant:
+        lf_inputs = lf_ant.get('inputs', {}) or {}
+        lf_name = lf_inputs.get('lf_name', '?')
+
+        m1_ant = ["```", header_table]
+        for label, key in [('Pessim.','cenario_pessimista'),
+                           ('Base',   'cenario_base'),
+                           ('Otim.',  'cenario_otimista')]:
+            m1_ant.append(_row(label, lf_ant.get(key, {}) or {}))
+        m1_ant.append("```")
+
+        m2_ant = ["```", header_table,
+                  _row('Pessim.', lf_ant.get('cenario_ml_aware_pessimista', {}) or {}),
+                  _row('Base',    lf_ant.get('cenario_ml_aware', {}) or {}),
+                  _row('Otim.',   lf_ant.get('cenario_ml_aware_otimista', {}) or {}),
+                  "```"]
+
+        B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': (
+            f"*Lançamento anterior — {lf_name}*  ·  _{lf_inputs.get('launch_window_start_brt','?')}_  ·  "
+            f"{_n(lf_inputs,'total_leads_meta'):,} leads Meta\n"
+            f"_*Método 1:* taxa de conversão média LF43-LF53_\n"
+            + "\n".join(m1_ant)
+        )}})
+        B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': (
+            f"_*Método 2:* previsão por ML_\n"
+            + "\n".join(m2_ant)
+        )}})
+
+    B.append({'type': 'context', 'elements': [
+        {'type': 'mrkdwn', 'text': '_Mais detalhes sobre a metodologia no payload da API._'}
+    ]})
 
 
 def _slack_traffic(v: dict, B: list):

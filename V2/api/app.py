@@ -2932,6 +2932,87 @@ async def daily_monitoring_check_railway(
         except Exception as _fe:
             logger.warning(f"⚠️ revenue_forecast indisponível: {_fe}")
 
+        # Previsão para o LF anterior (mesma metodologia aplicada ao lançamento
+        # anterior — permite comparar previsão atual com previsão histórica).
+        try:
+            lf_ref_name = railway_lead_quality.get('lf_referencia_label')
+            if revenue_forecast and lf_ref_name and os.path.exists(launches_path):
+                with open(launches_path) as _lf_f2:
+                    _launches_cfg2 = yaml.safe_load(_lf_f2) or {}
+                _lf_cfg = _launches_cfg2.get(lf_ref_name) or {}
+                _cs = _lf_cfg.get('cap_start'); _ce = _lf_cfg.get('cap_end')
+                if _cs and _ce:
+                    _cs_dt = datetime.strptime(_cs, '%Y-%m-%d').replace(tzinfo=brt).astimezone(_tz.utc)
+                    _ce_dt = datetime.strptime(_ce, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=brt).astimezone(_tz.utc)
+
+                    # Meta leads do LF anterior
+                    _lf_total_meta = 0
+                    _meta_token2 = os.getenv('META_ACCESS_TOKEN')
+                    if _meta_token2:
+                        try:
+                            from api.meta_integration import MetaAdsIntegration as _MI2
+                            from api.meta_config import META_CONFIG as _MC2
+                            _meta2 = _MI2(access_token=_meta_token2)
+                            _account2 = os.getenv('META_ACCOUNT_ID', _MC2.get('account_id', 'act_188005769808959'))
+                            _lf_rows_meta = _meta2.get_insights(
+                                account_id=_account2,
+                                level='campaign',
+                                fields=['campaign_name', 'actions'],
+                                since_date=_cs, until_date=_ce,
+                                filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}]
+                            )
+                            for _r in _lf_rows_meta:
+                                for _a in (_r.get('actions') or []):
+                                    if _a.get('action_type') == 'offsite_conversion.fb_pixel_lead':
+                                        _lf_total_meta += int(_a.get('value', 0) or 0)
+                        except Exception as _me:
+                            logger.warning(f"⚠️ Meta leads LF {lf_ref_name}: {_me}")
+
+                    # Distribuição de decis do LF anterior via Railway
+                    _lf_decil_dist: Dict[str, int] = {}
+                    _lf_conn = None
+                    try:
+                        _lf_conn = pg8000.native.Connection(
+                            host=os.environ['RAILWAY_DB_HOST'],
+                            port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+                            database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+                            user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+                            password=os.environ['RAILWAY_DB_PASSWORD'],
+                            timeout=30,
+                        )
+                        _lf_decil_rows = _lf_conn.run(
+                            'SELECT decil FROM "Lead" '
+                            'WHERE "leadScore" IS NOT NULL AND decil IS NOT NULL '
+                            'AND "createdAt" >= :start AND "createdAt" <= :end',
+                            start=_cs_dt, end=_ce_dt,
+                        )
+                        for (decil_val,) in _lf_decil_rows:
+                            if decil_val is not None:
+                                key = f"D{int(decil_val):02d}"
+                                _lf_decil_dist[key] = _lf_decil_dist.get(key, 0) + 1
+                    except Exception as _de:
+                        logger.warning(f"⚠️ decis LF {lf_ref_name}: {_de}")
+                    finally:
+                        if _lf_conn is not None:
+                            try: _lf_conn.close()
+                            except Exception: pass
+
+                    # Forecast aplicando a mesma metodologia ao volume LF anterior
+                    if _lf_total_meta > 0:
+                        _lf_forecast = orchestrator._generate_revenue_forecast(
+                            total_meta_leads=_lf_total_meta,
+                            funnel_metrics=railway_funnel_metrics,
+                            lead_quality_metrics=railway_lead_quality,
+                            decil_distribution=_lf_decil_dist or None,
+                        ) or None
+                        if _lf_forecast:
+                            _lf_forecast['inputs']['launch_window_start_brt'] = f"{_cs} → {_ce}"
+                            _lf_forecast['inputs']['lf_name'] = lf_ref_name
+                            revenue_forecast['lf_anterior'] = _lf_forecast
+                            logger.info(f"📊 lf_anterior forecast: {lf_ref_name} · {_lf_total_meta:,} Meta leads · {sum(_lf_decil_dist.values()):,} db leads")
+        except Exception as _lfe:
+            logger.warning(f"⚠️ revenue_forecast.lf_anterior indisponível: {_lfe}")
+
         # ------------------------------------------------------------------
         # Build survey_funnel_metrics e traffic_metrics
         # ------------------------------------------------------------------
