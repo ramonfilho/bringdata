@@ -279,6 +279,16 @@ Exemplos de uso:
         help='Data fim das vendas para matching (YYYY-MM-DD) - opcional'
     )
 
+    # Filtro de produto (Guru/Hotmart). Default = excluir "Mentoria".
+    # Passe substrings (case-insensitive) a excluir, separadas por espaço.
+    parser.add_argument(
+        '--product-exclude',
+        type=str,
+        nargs='+',
+        default=None,
+        help='Substrings (case-insensitive) no nome do produto a excluir (Guru/Hotmart). Default: ["Mentoria"]. Tudo o mais passa.'
+    )
+
     # Tipo de relatório
     parser.add_argument(
         '--report-type',
@@ -795,8 +805,12 @@ def main():
         _lf_cfg = _launches[args.lf]
         args.start_date = _lf_cfg['cap_start']
         args.end_date   = _lf_cfg['cap_end']
-        args.sales_start_date = _lf_cfg['vendas_start']
-        args.sales_end_date   = _lf_cfg['vendas_end']
+        # Defaults do launches.yaml — só aplicar se CLI não forneceu override explícito.
+        # Permite rodar `--lf LF53 --sales-end-date 2026-04-29` pra first peak.
+        if not args.sales_start_date:
+            args.sales_start_date = _lf_cfg['vendas_start']
+        if not args.sales_end_date:
+            args.sales_end_date   = _lf_cfg['vendas_end']
         if not args.lf_name:
             args.lf_name = args.lf
         logger.info(f" Lançamento {args.lf} carregado de launches.yaml:")
@@ -1466,6 +1480,14 @@ def main():
         logger.info(f"   Arquivos TMB encontrados: {len(tmb_files)} (incluirá apenas Efetivado)")
 
     # Combinar vendas Guru + TMB + HotPay (legado) + Hotmart (API) + Asaas (API)
+    # Blacklist de produtos (substring case-insensitive) — exclui upsells distintos do principal.
+    # Default: "Mentoria" (Programa de Aceleração de Carreira — Mentoria para Devs).
+    # Variantes do produto principal (Formação DevClub FullStack Pro, [Vitalício] Plano Dev,
+    # DevClub FullStack Pro - OFICIAL, COMBOs etc.) passam todas — só dropamos o que é upsell
+    # confirmadamente separado. Aplicado em canais com `product_name` (Guru/Hotmart);
+    # Asaas/TMB passam direto (gateways de parcelamento sem nome).
+    product_exclude = getattr(args, 'product_exclude', None) or ['Mentoria']
+
     sales_df = sales_loader.combine_sales(
         guru_df=guru_df,
         tmb_paths=tmb_files if tmb_files else None,
@@ -1477,7 +1499,8 @@ def main():
         asaas_product_value=config.get('ticket_contracted'),  # None = usar valor real da API Asaas
         asaas_customer_created_from=start_date,  # cap_start — conta para mais, evita perder compradores reais
         report_type=args.report_type,
-        include_canceled=include_canceled
+        include_canceled=include_canceled,
+        product_exclude_substrings=product_exclude,
     )
 
     if sales_df.empty:

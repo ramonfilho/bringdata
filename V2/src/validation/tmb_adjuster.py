@@ -1,9 +1,19 @@
 """
-Módulo para ajuste de métricas considerando inadimplência TMB.
+[DEPRECADO em 11/05/2026]
 
-TMB (Crédito Acessível) é um sistema de parcelamento via boleto que tem
-inadimplência significativa. Este módulo ajusta receitas e ROAS para refletir
-o valor real recebido, não o valor nominal das vendas.
+Este módulo aplicava um fator agregado de inadimplência TMB (0.6211) sobre
+`sale_value`. Foi substituído pela coluna `sale_value_realizado`, calculada em
+`src/validation/data_loader.py:combine_sales`, que aplica fatores **por canal**
+(GURU_REALIZACAO_FACTOR, HOTMART_REALIZACAO_FACTOR e 1ª parcela para boleto
+parcelado TMB/Asaas). Os fatores estão em `api/business_config.py`.
+
+Mantido temporariamente para não quebrar imports antigos. Deve ser removido
+após confirmar que nenhum consumidor ainda chama `adjust_revenue_for_tmb` /
+`add_adjusted_metrics_to_campaign_stats` / `calculate_overall_adjusted_stats`.
+
+Consumidor canônico do novo fluxo: `total_revenue` em
+`src/validation/metrics_calculator.py:calculate_campaign_metrics` agora soma
+`sale_value_realizado` em vez de `sale_value`.
 """
 
 import pandas as pd

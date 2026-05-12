@@ -487,9 +487,12 @@ class CampaignMetricsCalculator:
 
         # 1. Agregar respostas e receita (podem usar sum)
         # IMPORTANTE: dropna=False para incluir campanhas com nome NULL/estranho
+        # total_revenue usa sale_value_realizado (valor recebido à vista) quando disponível,
+        # senão cai pra sale_value nominal (compat com matched_df antigo sem a coluna).
+        revenue_col = 'sale_value_realizado' if 'sale_value_realizado' in matched_df.columns else 'sale_value'
         campaign_stats = matched_df.groupby(['ml_type', 'campaign_consolidated'], dropna=False).agg({
             'email': 'count',  # respostas na pesquisa (leads que responderam)
-            'sale_value': 'sum'  # revenue total
+            revenue_col: 'sum'  # revenue realizada (recebida à vista)
         }).reset_index()
         campaign_stats.columns = ['ml_type', 'campaign', 'respostas_pesquisa', 'total_revenue']
 
@@ -1659,8 +1662,12 @@ def calculate_overall_stats(
             conversions_guru_matched = 0
             conversions_tmb_matched = 0
 
-        # Receita TOTAL do período
-        if 'sale_value' in sales_df.columns:
+        # Receita TOTAL do período — valor realizado (à vista) quando disponível.
+        # sale_value_realizado é calculado em data_loader.py:combine_sales por canal
+        # (Guru/Hotmart × fator chargeback; TMB ÷ n_parcelas; Asaas = payment.value real).
+        if 'sale_value_realizado' in sales_df.columns:
+            total_revenue = sales_df['sale_value_realizado'].sum()
+        elif 'sale_value' in sales_df.columns:
             total_revenue = sales_df['sale_value'].sum()
         else:
             # Se não tiver sale_value, usar product_value * quantidade
@@ -1670,7 +1677,8 @@ def calculate_overall_stats(
         # Fallback: usar apenas vendas matched
         logger.warning(" sales_df não fornecido, usando apenas vendas matched para estatísticas gerais")
         total_conversions = matched_conversions
-        total_revenue = matched_df[matched_df['converted'] == True]['sale_value'].sum()
+        revenue_col = 'sale_value_realizado' if 'sale_value_realizado' in matched_df.columns else 'sale_value'
+        total_revenue = matched_df[matched_df['converted'] == True][revenue_col].sum()
 
         conversions_guru_total = len(matched_df[
             (matched_df['converted'] == True) &
@@ -1703,6 +1711,17 @@ def calculate_overall_stats(
     roas = (total_revenue / total_spend) if total_spend > 0 else 0
     margin = total_revenue - total_spend
 
+    # ROAS atribuível (matched-only) — só conta vendas que casaram com leads do LF.
+    # Receita atribuível = sale_value_realizado das vendas matched (converted=True).
+    # Diferença vs roas macro: o macro inclui vendas de leads de outros LFs que
+    # pagaram nesta janela (tail bias); o atribuível só conta o que veio dos leads
+    # captados neste LF. Pra LFs com tracking baixo, este número subestima.
+    revenue_col_matched = 'sale_value_realizado' if 'sale_value_realizado' in matched_df.columns else 'sale_value'
+    total_revenue_attrib = float(
+        matched_df[matched_df['converted'] == True][revenue_col_matched].sum()
+    )
+    roas_attrib = (total_revenue_attrib / total_spend) if total_spend > 0 else 0
+
     result = {
         'total_leads_meta': int(total_leads_meta),  # Leads da Meta (cadastros)
         'total_leads': total_leads,  # Respostas da pesquisa (apenas com UTM Meta válida)
@@ -1712,8 +1731,10 @@ def calculate_overall_stats(
         'matched_conversions': matched_conversions,  # Apenas vendas identificadas
         'conversion_rate': round(conversion_rate, 2),
         'total_revenue': round(total_revenue, 2),
+        'total_revenue_attrib': round(total_revenue_attrib, 2),  # receita matched-only (sem tail bias)
         'total_spend': round(total_spend, 2),
-        'roas': round(roas, 2),
+        'roas': round(roas, 2),                                  # macro — espelha dashboard cliente
+        'roas_attrib': round(roas_attrib, 2),                    # atribuível — só leads do LF
         'margin': round(margin, 2),
         'conversions_guru_total': conversions_guru_total,          # Total Guru (todas)
         'conversions_guru_matched': conversions_guru_matched,      # Guru identificadas

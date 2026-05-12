@@ -646,12 +646,37 @@ class MonitoringOrchestrator:
                     'count': len(df_period)
                 }
 
-            return {
+            result = {
                 'historico': calc_metrics(df_all),
                 'ultimo_mes': calc_metrics(df_month),
                 'ultima_semana': calc_metrics(df_week),
                 'ultimas_24h': calc_metrics(df_24h)
             }
+
+            # Lançamento de referência (ativo se houver; senão último terminado)
+            # Usado pra manter a qualidade do LF mais recente visível entre captações.
+            dqc = self.monitors.get('data_quality')
+            if dqc is not None:
+                try:
+                    lf = dqc._resolve_last_or_current_launch_brt()
+                except Exception as _e:
+                    logger.debug(f"_resolve_last_or_current_launch_brt falhou: {_e}")
+                    lf = None
+                if lf:
+                    lf_name, cs_str, ce_str = lf
+                    try:
+                        cs_ts = pd.Timestamp(cs_str, tz='UTC')
+                        ce_ts = pd.Timestamp(ce_str, tz='UTC') + pd.Timedelta(days=1, seconds=-1)
+                        df_lf = df_with_date[
+                            (df_with_date['data_parsed'] >= cs_ts) &
+                            (df_with_date['data_parsed'] <= ce_ts)
+                        ]
+                        result['lf_referencia'] = calc_metrics(df_lf)
+                        result['lf_referencia_label'] = lf_name
+                    except Exception as _e:
+                        logger.debug(f"filtragem LF referência falhou: {_e}")
+
+            return result
 
         except Exception as e:
             logger.warning(f" Erro ao calcular métricas de qualidade: {e}")
@@ -1028,23 +1053,30 @@ class MonitoringOrchestrator:
         #   flat-rate    → mediana global histórica × Meta leads (agnóstico de qualidade)
         #   ml_aware     → taxas por faixa de decil × leads DB (sensível à qualidade do lote)
         # ------------------------------------------------------------------
-        cenario_ml_aware = None
-        if expected_conversion:
-            buyers_ml = float(expected_conversion['compradores_esperados']['total'])
-            vendas_guru_ml = round(buyers_ml * pct_cartao, 1)
-            vendas_tmb_ml  = round(buyers_ml * pct_boleto, 1)
-            cartao_avista_liquido_ml   = round(vendas_guru_ml * guru_ticket * guru_realizacao)
-            primeira_parcela_boleto_ml = round(vendas_tmb_ml * parcela_tmb)
-            fat_recebido_ml = cartao_avista_liquido_ml + primeira_parcela_boleto_ml
-            cenario_ml_aware = {
-                'faturamento':              round(buyers_ml * ticket),
-                'faturamento_recebido':     fat_recebido_ml,
-                'cartao_avista_liquido':    cartao_avista_liquido_ml,         # ⭐ foco do cliente
-                'primeira_parcela_boleto':  primeira_parcela_boleto_ml,
-                'vendas_total':             round(buyers_ml, 1),
-                'vendas_guru':              vendas_guru_ml,
-                'vendas_tmb':               vendas_tmb_ml,
+        def _calc_ml(buyers: float) -> Dict:
+            """Computa estrutura de cenário a partir de N compradores estimados pelo ML."""
+            v_guru = round(buyers * pct_cartao, 1)
+            v_tmb  = round(buyers * pct_boleto, 1)
+            cartao = round(v_guru * guru_ticket * guru_realizacao)
+            boleto = round(v_tmb * parcela_tmb)
+            return {
+                'faturamento':              round(buyers * ticket),
+                'faturamento_recebido':     cartao + boleto,
+                'cartao_avista_liquido':    cartao,
+                'primeira_parcela_boleto':  boleto,
+                'vendas_total':             round(buyers, 1),
+                'vendas_guru':              v_guru,
+                'vendas_tmb':               v_tmb,
             }
+
+        cenario_ml_aware = None
+        cenario_ml_aware_pessimista = None
+        cenario_ml_aware_otimista = None
+        if expected_conversion:
+            buyers_ml_base = float(expected_conversion['compradores_esperados']['total'])
+            cenario_ml_aware            = _calc_ml(buyers_ml_base)
+            cenario_ml_aware_pessimista = _calc_ml(buyers_ml_base * biz.scenario_pessimistic_factor)
+            cenario_ml_aware_otimista   = _calc_ml(buyers_ml_base * biz.scenario_optimistic_factor)
 
         result = {
             'cenario_pessimista': pessimista,
@@ -1062,7 +1094,9 @@ class MonitoringOrchestrator:
             },
         }
         if cenario_ml_aware:
-            result['cenario_ml_aware'] = cenario_ml_aware
+            result['cenario_ml_aware']            = cenario_ml_aware
+            result['cenario_ml_aware_pessimista'] = cenario_ml_aware_pessimista
+            result['cenario_ml_aware_otimista']   = cenario_ml_aware_otimista
             result['inputs']['fonte_ml_aware'] = (
                 f"bottom-up por decil × benchmark {expected_conversion.get('fonte', 'DEV19-LF48')} "
                 f"(taxa implícita {expected_conversion.get('taxa_implicita_por_meta_lead')}% sobre Meta leads)"

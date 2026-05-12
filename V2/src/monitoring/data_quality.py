@@ -1627,6 +1627,9 @@ class DataQualityMonitor:
         Lê configs/launches.yaml e retorna (lf_name, cap_start_str, cap_end_str)
         do lançamento cujo período de captação inclui hoje BRT
         (cap_start <= today_brt <= cap_end). Retorna None se nenhum bate.
+
+        Use _resolve_last_or_current_launch_brt() pra fallback ao mais recente
+        finalizado quando não há captação ativa.
         """
         from datetime import datetime, timedelta, timezone
         try:
@@ -1658,11 +1661,68 @@ class DataQualityMonitor:
                 return (name, cs_str, ce_str)
         return None
 
+    def _resolve_last_or_current_launch_brt(self):
+        """
+        Igual a _resolve_current_launch_brt(), mas faz fallback ao lançamento
+        mais recente cuja captação já terminou quando não há nenhum em captação
+        hoje.
+
+        Uso: relatórios que devem mostrar dados de "último lançamento" mesmo
+        entre captações (ex.: audience_profile_drift entre LF54 e LF55).
+        """
+        from datetime import datetime, timedelta, timezone
+
+        # 1ª tentativa: lançamento ativo agora
+        current = self._resolve_current_launch_brt()
+        if current is not None:
+            return current
+
+        # 2ª tentativa: lançamento mais recente que já terminou (cap_end < hoje)
+        try:
+            import yaml
+        except Exception:
+            return None
+        brt = timezone(timedelta(hours=-3))
+        today_brt = datetime.now(brt).date()
+        launches_path = Path(__file__).resolve().parents[2] / 'configs' / 'launches.yaml'
+        if not launches_path.exists():
+            return None
+        try:
+            with open(launches_path) as f:
+                launches = yaml.safe_load(f) or {}
+        except Exception:
+            return None
+
+        finished = []
+        for name, cfg in launches.items():
+            cs_str = cfg.get('cap_start')
+            ce_str = cfg.get('cap_end')
+            if not (cs_str and ce_str):
+                continue
+            try:
+                cs = datetime.strptime(cs_str, '%Y-%m-%d').date()
+                ce = datetime.strptime(ce_str, '%Y-%m-%d').date()
+            except ValueError:
+                continue
+            if ce < today_brt:
+                finished.append((ce, name, cs_str, ce_str))
+
+        if not finished:
+            return None
+        finished.sort(reverse=True)
+        _, name, cs_str, ce_str = finished[0]
+        return (name, cs_str, ce_str)
+
     def _query_railway_current_launch_brt(self) -> tuple[pd.DataFrame, Dict]:
         """
-        Janela: cap_start 00:00 BRT do lançamento ativo até agora.
+        Janela: cap_start 00:00 BRT do "lançamento de referência" até agora
+        (se ativo) ou cap_end 23:59:59 BRT (se já terminado).
+
+        Lançamento de referência: ativo se houver, senão o mais recente que
+        terminou — pra que o relatório continue mostrando dados do LF anterior
+        entre captações.
+
         Retorna (df, info dict com lf_name/label/cap_start/cap_end/error).
-        Se nenhum lançamento ativo, retorna (df vazio, info com error).
         """
         from datetime import datetime, timedelta, timezone
 
@@ -1670,9 +1730,9 @@ class DataQualityMonitor:
             'lf_name': None, 'label': None,
             'cap_start': None, 'cap_end': None, 'error': None,
         }
-        current = self._resolve_current_launch_brt()
+        current = self._resolve_last_or_current_launch_brt()
         if current is None:
-            info['error'] = 'no_active_launch'
+            info['error'] = 'no_launch_found'
             return pd.DataFrame(), info
 
         lf_name, cs_str, ce_str = current
@@ -1680,17 +1740,28 @@ class DataQualityMonitor:
         info['cap_start'] = cs_str
         info['cap_end'] = ce_str
 
-        cs = datetime.strptime(cs_str, '%Y-%m-%d').date()
-        start_utc = datetime(cs.year, cs.month, cs.day, 3, 0, 0,
-                             tzinfo=timezone.utc)
         brt = timezone(timedelta(hours=-3))
-        now_brt = datetime.now(brt)
-        end_utc = now_brt.astimezone(timezone.utc)
+        today_brt = datetime.now(brt).date()
+        cs = datetime.strptime(cs_str, '%Y-%m-%d').date()
+        ce = datetime.strptime(ce_str, '%Y-%m-%d').date()
+
+        # cap_start 00:00 BRT → 03:00 UTC
+        start_utc = datetime(cs.year, cs.month, cs.day, 3, 0, 0, tzinfo=timezone.utc)
+
+        is_finished = ce < today_brt
+        if is_finished:
+            # cap_end 23:59:59 BRT → 02:59:59 UTC do dia seguinte
+            end_brt_dt = datetime(ce.year, ce.month, ce.day, 23, 59, 59, tzinfo=brt)
+            end_utc = end_brt_dt.astimezone(timezone.utc)
+            info['label'] = f"{lf_name} {cs_str}→{ce_str} BRT (encerrado)"
+        else:
+            now_brt = datetime.now(brt)
+            end_utc = now_brt.astimezone(timezone.utc)
+            info['label'] = (
+                f"{lf_name} {cs_str} BRT 00:00→{now_brt.strftime('%Y-%m-%d %H:%M')} (parcial)"
+            )
 
         df = self._query_railway_pesquisa_window(start_utc, end_utc)
-        info['label'] = (
-            f"{lf_name} {cs_str} BRT 00:00→{now_brt.strftime('%Y-%m-%d %H:%M')} (parcial)"
-        )
         return df, info
 
     def _check_audience_profile_drift(self, df: pd.DataFrame) -> List[Dict]:

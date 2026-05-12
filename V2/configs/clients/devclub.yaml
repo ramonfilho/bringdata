@@ -653,7 +653,7 @@ business:
     D08: 0.004317   # 6.75 / 1563.75
     D09: 0.004969   # 7.77 / 1563.75
     D10: 0.009573   # 14.97 / 1563.75
-  ticket_contracted: 2200.0          # valor nominal contratado — base do faturamento total (Guru e TMB)
+  ticket_contracted: 2000.0          # valor nominal contratado — base do faturamento total (Guru e TMB)
   guru_ticket_price: 1997.0          # preço real no Guru (payment.gross via API) — ≠ ticket contratado R$2.200
   guru_realizacao_factor: 0.87       # fator de realização Guru: ~13% de cancelamentos/chargebacks (back-calculado de LF42–LF47)
   pct_cartao_historico: 0.422        # % cartão mediana LF43–LF53 (recalibrado 09/05; queda real de 47% → 42% em LF48–LF53)

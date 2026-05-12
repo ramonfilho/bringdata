@@ -103,12 +103,15 @@ class ValidationReportGenerator:
         total_spend_all = overall_stats.get('total_spend', 0) or 0
         roas_total = round(total_revenue_all / total_spend_all, 2) if total_spend_all > 0 else 0
 
-        # Totais reais de vendas (todas as fontes, não apenas trackeadas)
+        # Totais reais de vendas (todas as fontes, não apenas trackeadas).
+        # Receita prioriza sale_value_realizado (valor à vista) quando disponível.
         total_sales_real = None
         total_revenue_real = None
         if sales_df is not None and not sales_df.empty:
             total_sales_real = len(sales_df)
-            if 'sale_value' in sales_df.columns:
+            if 'sale_value_realizado' in sales_df.columns:
+                total_revenue_real = float(sales_df['sale_value_realizado'].sum())
+            elif 'sale_value' in sales_df.columns:
                 total_revenue_real = float(sales_df['sale_value'].sum())
 
         # Aba 1: Performance Geral
@@ -555,6 +558,9 @@ class ValidationReportGenerator:
             ['Vendas identificadas', vendas_identificadas],
             ['% de trackeamento', pct_trackeamento],
             ['ROAS Total (Real)', roas_total],
+            ['ROAS Atribuível (matched only)', overall_stats.get('roas_attrib', 0)],
+            ['Receita Total (Real)', overall_stats.get('total_revenue', 0)],
+            ['Receita Atribuível (matched only)', overall_stats.get('total_revenue_attrib', 0)],
             ['Gasto Total', overall_stats.get('total_spend', 0)],
         ]
 

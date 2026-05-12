@@ -55,6 +55,7 @@ def match_leads_to_sales(
     # Inicializar colunas de resultado
     leads['converted'] = False
     leads['sale_value'] = 0.0
+    leads['sale_value_realizado'] = 0.0
     leads['sale_date'] = pd.NaT
     leads['sale_origin'] = None
     leads['match_method'] = None
@@ -67,11 +68,13 @@ def match_leads_to_sales(
     sales_by_email = {}
     sales_by_phone = {}
 
+    has_realizado = 'sale_value_realizado' in sales.columns
     for idx, sale in sales.iterrows():
         email = sale['email']
         phone = sale['telefone']
         sale_data = {
             'sale_value': sale['sale_value'],
+            'sale_value_realizado': sale['sale_value_realizado'] if has_realizado else sale['sale_value'],
             'sale_date': sale['sale_date'],
             'sale_origin': sale['origem']
         }
@@ -106,6 +109,7 @@ def match_leads_to_sales(
                 if not use_temporal_validation or _is_valid_match(lead_date, sale['sale_date']):
                     leads.at[idx, 'converted'] = True
                     leads.at[idx, 'sale_value'] = sale['sale_value']
+                    leads.at[idx, 'sale_value_realizado'] = sale['sale_value_realizado']
                     leads.at[idx, 'sale_date'] = sale['sale_date']
                     leads.at[idx, 'sale_origin'] = sale['sale_origin']
                     leads.at[idx, 'match_method'] = 'email'
@@ -119,6 +123,7 @@ def match_leads_to_sales(
                 if not use_temporal_validation or _is_valid_match(lead_date, sale['sale_date']):
                     leads.at[idx, 'converted'] = True
                     leads.at[idx, 'sale_value'] = sale['sale_value']
+                    leads.at[idx, 'sale_value_realizado'] = sale['sale_value_realizado']
                     leads.at[idx, 'sale_date'] = sale['sale_date']
                     leads.at[idx, 'sale_origin'] = sale['sale_origin']
                     leads.at[idx, 'match_method'] = 'telefone'

@@ -88,6 +88,35 @@ LEAD_VALUE_BY_DECILE_CHALLENGER = {
 }
 
 # =============================================================================
+# 2.2 FATORES DE REALIZAÇÃO POR CANAL — VALOR RECEBIDO À VISTA
+# =============================================================================
+#
+# Cada canal de venda tem uma taxa de chargeback/refund diferente. Esses fatores
+# são aplicados em src/validation/data_loader.py:combine_sales para gerar a coluna
+# `sale_value_realizado` — a receita que efetivamente entra no caixa na semana
+# da venda (não o valor nominal contratado).
+#
+# Substitui o sistema antigo (tmb_adjuster.py) que aplicava 0.6211 só nas vendas
+# TMB. Esse fator agregado escondia a heterogeneidade entre canais; agora cada
+# canal recebe o fator próprio derivado dos seus dados.
+#
+# Janela de cálculo: últimos 12 meses (2025-05-11 → 2026-05-11).
+# Calculados em 11/05/2026 via APIs Guru e Hotmart.
+#
+# Fórmulas por sale_origin (aplicadas em combine_sales):
+#   guru     → sale_value × GURU_REALIZACAO_FACTOR
+#   hotmart  → sale_value × HOTMART_REALIZACAO_FACTOR
+#   tmb      → sale_value / N_PARCELAS_BOLETO       (só a 1ª parcela)
+#   asaas    → depende de _asaas_billing_type:
+#                BOLETO/UNDEFINED → sale_value / N_PARCELAS_BOLETO
+#                CREDIT_CARD      → sale_value × HOTMART_REALIZACAO_FACTOR
+#                PIX              → sale_value × 1.0  (já entrou no caixa)
+
+GURU_REALIZACAO_FACTOR = 0.9198     # 2.364 aprov / (2.364 + 29 charge + 177 refund) — 12M, 4.743 txns
+HOTMART_REALIZACAO_FACTOR = 0.9121  # 218 aprov / (218 + 2 charge + 19 refund) — 12M, 239 txns
+N_PARCELAS_BOLETO = 12              # número de parcelas padrão do boleto parcelado DevClub
+
+# =============================================================================
 # 3. THRESHOLD DE GASTO SEM LEADS
 # =============================================================================
 

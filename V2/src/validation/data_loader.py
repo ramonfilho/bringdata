@@ -152,7 +152,11 @@ class LeadDataLoader:
 
         for planilha_nome, current_url, n_sheets in urls_to_load:
             logger.debug(f" Carregando planilha {planilha_nome}")
-            df_planilha = self._load_single_spreadsheet(current_url, start_date, end_date, use_cache, n_sheets, training_mode=training_mode)
+            try:
+                df_planilha = self._load_single_spreadsheet(current_url, start_date, end_date, use_cache, n_sheets, training_mode=training_mode)
+            except Exception as e:
+                logger.warning(f"    Planilha {planilha_nome} falhou: {e}. Seguindo para próxima fonte.")
+                continue
             if df_planilha is not None and len(df_planilha) > 0:
                 all_dfs.append(df_planilha)
                 logger.info(f"    Planilha {planilha_nome}: {len(df_planilha)} leads carregados")
@@ -788,58 +792,14 @@ class SalesDataLoader:
 
         return df_norm
 
-    def _download_tmb_from_gcs(self, report_type: str) -> List[str]:
-        """
-        Baixa arquivo TMB do Google Cloud Storage baseado no report_type.
-
-        Args:
-            report_type: 'fechamento' ou 'pos-devolucoes'
-
-        Returns:
-            Lista com caminho local do arquivo baixado, ou lista vazia se falhar
-        """
-        try:
-            from google.cloud import storage
-            import tempfile
-            import os
-
-            bucket_name = os.environ.get('VALIDATION_REPORTS_BUCKET', 'bring-data-validation-reports')
-            blob_name = f'vendas/tmb_{report_type}.xlsx'
-
-            logger.info(f"   Baixando gs://{bucket_name}/{blob_name}...")
-
-            # Criar arquivo temporário
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx')
-            temp_path = temp_file.name
-            temp_file.close()
-
-            # Baixar do bucket
-            client = storage.Client()
-            bucket = client.bucket(bucket_name)
-            blob = bucket.blob(blob_name)
-
-            if not blob.exists():
-                logger.error(f" Arquivo não encontrado: gs://{bucket_name}/{blob_name}")
-                return []
-
-            blob.download_to_filename(temp_path)
-            size_kb = f"{blob.size / 1024:.1f} KB" if blob.size else "tamanho desconhecido"
-            logger.info(f"    Arquivo baixado: {blob_name} ({size_kb})")
-
-            return [temp_path]
-
-        except Exception as e:
-            logger.error(f" Erro ao baixar TMB do Cloud Storage: {e}")
-            logger.warning(f"   Certifique-se que o arquivo existe em gs://{bucket_name}/vendas/tmb_{report_type}.xlsx")
-            return []
 
     def load_tmb_sales(self, tmb_paths: List[str] = None, report_type: str = 'fechamento', include_canceled: bool = False) -> pd.DataFrame:
         """
-        Carrega arquivos Excel de vendas da TMB.
+        Carrega arquivos Excel de vendas da TMB de caminhos locais.
 
-        Pode carregar de:
-        1. Caminhos locais fornecidos em tmb_paths
-        2. Google Cloud Storage (se tmb_paths vazio) baseado em report_type
+        TMB sempre via arquivo local — não há mais fallback para Google Cloud Storage
+        (removido em 11/05/2026; ver `combine_sales` e business_config para a nova
+        métrica `sale_value_realizado`).
 
         Colunas esperadas:
         - Cliente Email: Email do comprador
@@ -1153,6 +1113,7 @@ class SalesDataLoader:
             buyer    = item.get('buyer', {})
             purchase = item.get('purchase', {})
             price    = purchase.get('price', {})
+            product  = item.get('product', {})
 
             email = normalizar_email(buyer.get('email', ''))
             if not email:
@@ -1171,12 +1132,13 @@ class SalesDataLoader:
             net_value = gross - hotmart_fee
 
             rows.append({
-                'email':      email,
-                'nome':       buyer.get('name'),
-                'telefone':   None,
-                'sale_value': net_value,
-                'sale_date':  sale_date,
-                'origem':     'hotmart',
+                'email':       email,
+                'nome':        buyer.get('name'),
+                'telefone':    None,
+                'sale_value':  net_value,
+                'sale_date':   sale_date,
+                'origem':      'hotmart',
+                'product_name': product.get('name'),  # usado por combine_sales pra filtro de produto
             })
 
         df_norm = pd.DataFrame(rows)
@@ -1282,6 +1244,10 @@ class SalesDataLoader:
 
         # Origem
         df_norm['origem'] = 'guru'
+
+        # Nome do produto vendido — usado por combine_sales pra filtro de produto
+        # (ex: separar "Formação DevClub FullStack Pro" de upsells como "Mentoria").
+        df_norm['product_name'] = df_raw.get('nome produto', np.nan)
 
         # Status (para deduplicação)
         df_norm['status'] = df_raw.get('status', np.nan)
@@ -1450,8 +1416,12 @@ class SalesDataLoader:
             customer_created_from=customer_created_from,
             customer_created_until=customer_created_until,
         )
-        # Remover colunas internas de debug antes de salvar
-        debug_cols = [c for c in df.columns if c.startswith('_')]
+        # Remover colunas internas de debug antes de salvar.
+        # Mantém `_asaas_payment_value` (valor real cobrado na transação — distinto de
+        # sale_value que é forçado a PRODUCT_VALUE) e `_asaas_billing_type` (informativo).
+        # Ambos são consumidos por combine_sales pra calcular sale_value_realizado em Asaas.
+        keep_for_realizado = {'_asaas_payment_value', '_asaas_billing_type'}
+        debug_cols = [c for c in df.columns if c.startswith('_') and c not in keep_for_realizado]
         if debug_cols:
             df = df.drop(columns=debug_cols)
 
@@ -1473,7 +1443,8 @@ class SalesDataLoader:
                      asaas_product_value: float = None,
                      asaas_customer_created_from: str = None,
                      asaas_customer_created_until: str = None,
-                     report_type: str = 'fechamento', include_canceled: bool = False) -> pd.DataFrame:
+                     report_type: str = 'fechamento', include_canceled: bool = False,
+                     product_exclude_substrings: List[str] = None) -> pd.DataFrame:
         """
         Combina vendas da Guru, TMB, HotPay, Hotmart e Asaas em um único DataFrame.
 
@@ -1578,6 +1549,72 @@ class SalesDataLoader:
         logger.info(f"      HotPay: {len(combined[combined['origem'] == 'hotpay'])}")
         logger.info(f"      Hotmart: {len(combined[combined['origem'] == 'hotmart'])}")
         logger.info(f"      Asaas: {len(combined[combined['origem'] == 'asaas'])}")
+
+        # Filtro de produto (blacklist por substring, case-insensitive) — exclui upsells
+        # como "Mentoria para Devs" que são produtos distintos do principal.
+        # Só aplica em canais com `product_name` na transação (Guru/Hotmart). Asaas/TMB são
+        # gateways de parcelamento sem nome de produto → passam direto.
+        if product_exclude_substrings and 'product_name' in combined.columns:
+            mask_has_name = combined['product_name'].notna()
+            drop_mask = pd.Series(False, index=combined.index)
+            for sub in product_exclude_substrings:
+                sub_l = str(sub).lower()
+                drop_mask = drop_mask | (mask_has_name & combined['product_name'].astype(str).str.lower().str.contains(sub_l, na=False))
+            n_drop = int(drop_mask.sum())
+            if n_drop > 0:
+                n_before = len(combined)
+                dropped_by_origem = combined.loc[drop_mask, 'origem'].value_counts().to_dict()
+                dropped_revenue = combined.loc[drop_mask, 'sale_value'].sum()
+                combined = combined[~drop_mask].copy()
+                logger.info(
+                    f"    Filtro produto (exclui contém={product_exclude_substrings}): "
+                    f"removidas {n_drop} vendas ({n_before} → {len(combined)}); "
+                    f"por canal: {dropped_by_origem}; receita removida nominal: R${dropped_revenue:,.0f}"
+                )
+
+        # sale_value_realizado — valor que efetivamente entra no caixa na semana da venda.
+        #   Guru     → sale_value × GURU_REALIZACAO_FACTOR  (líquido após chargeback histórico)
+        #   Hotmart  → sale_value × HOTMART_REALIZACAO_FACTOR  (idem, fator próprio)
+        #   TMB      → sale_value / N_PARCELAS_BOLETO  (só a 1ª parcela do boleto parcelado)
+        #   Asaas    → _asaas_payment_value direto (valor real cobrado naquela transação;
+        #              o sale_value Asaas é forçado a PRODUCT_VALUE nominal e não reflete
+        #              o que entrou no caixa). Asaas só registra RECEIVED/CONFIRMED, então
+        #              não há fator de chargeback a aplicar.
+        #   outros   → sale_value × 1.0 (fallback)
+        from api.business_config import (
+            GURU_REALIZACAO_FACTOR,
+            HOTMART_REALIZACAO_FACTOR,
+            N_PARCELAS_BOLETO,
+        )
+
+        def _realizado(row):
+            v = row.get('sale_value', 0) or 0
+            origem = str(row.get('origem', '')).lower()
+            if origem == 'guru':
+                return v * GURU_REALIZACAO_FACTOR
+            if origem == 'hotmart':
+                return v * HOTMART_REALIZACAO_FACTOR
+            if origem == 'tmb' or origem == 'hotpay':
+                return v / N_PARCELAS_BOLETO
+            if origem == 'asaas':
+                # Valor real cobrado nesta transação (parcela ou pagamento único),
+                # NÃO o sale_value (que é product_value forçado).
+                pv = row.get('_asaas_payment_value', None)
+                try:
+                    return float(pv) if pv is not None else 0.0
+                except (TypeError, ValueError):
+                    return 0.0
+            return v
+
+        combined['sale_value_realizado'] = combined.apply(_realizado, axis=1)
+
+        total_nominal = combined['sale_value'].sum()
+        total_real = combined['sale_value_realizado'].sum()
+        if total_nominal > 0:
+            logger.info(
+                f"      sale_value_realizado: R${total_real:,.0f} de R${total_nominal:,.0f} nominal "
+                f"({total_real/total_nominal*100:.1f}% do bruto)"
+            )
 
         return combined
 

@@ -271,6 +271,10 @@ class AsaasSalesExtractor:
             '_asaas_customer_id': payment.get('customer'),
             '_asaas_billing_type': payment.get('billingType'),
             '_asaas_status': payment.get('status'),
+            # Valor efetivamente cobrado nesta transação (pode ser parcela ou pagamento único).
+            # Diferente de sale_value, que é forçado a product_value (ticket contratado nominal).
+            # combine_sales usa este campo pra calcular sale_value_realizado em vendas Asaas.
+            '_asaas_payment_value': float(payment.get('value') or 0),
         }
 
     def generate_report(

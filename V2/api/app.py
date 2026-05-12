@@ -2394,14 +2394,17 @@ async def daily_monitoring_check_railway(
             end=window_end
         )
 
-        # FBP/FBC: join Lead (janela) x leads_capi (fonte dos cookies) por email
+        # FBP/FBC: contagem sobre leads_capi (origem Meta) na janela.
+        # Antes o denominador era Lead.total, que inclui leads não-Meta — inflava
+        # artificialmente a "incompletude" de FBP/FBC. Agora numerador e
+        # denominador vivem na mesma população (leads Meta).
         capi_fbp_row = railway_conn.run(
             'SELECT '
-            '  COUNT(DISTINCT CASE WHEN lc.fbp IS NOT NULL AND lc.fbp <> \'\' THEN l.email END) AS with_fbp, '
-            '  COUNT(DISTINCT CASE WHEN lc.fbc IS NOT NULL AND lc.fbc <> \'\' THEN l.email END) AS with_fbc '
-            'FROM "Lead" l '
-            'LEFT JOIN leads_capi lc ON LOWER(l.email) = LOWER(lc.email) '
-            'WHERE l."createdAt" >= :start AND l."createdAt" <= :end',
+            '  COUNT(*) FILTER (WHERE fbp IS NOT NULL AND fbp <> \'\') AS with_fbp, '
+            '  COUNT(*) FILTER (WHERE fbc IS NOT NULL AND fbc <> \'\') AS with_fbc, '
+            '  COUNT(*) AS total_meta_leads '
+            'FROM leads_capi '
+            'WHERE created_at >= :start AND created_at <= :end',
             start=window_start,
             end=window_end
         )
@@ -2472,7 +2475,10 @@ async def daily_monitoring_check_railway(
                     'capi_sent': _capi_s,
                     'capi_rate': round(_capi_s / _db_l * 100, 1) if _db_l > 0 else 0,
                 }
-            # periodo_query usa a janela da query
+            # periodo_query = janela do lançamento atual (cap_start → now).
+            # Antes usava window_start/window_end (72h da query de monitoramento),
+            # o que dessincronizava com meta_leads (que é desde launch_start) e
+            # inflava artificialmente o %resp = db_leads/meta_leads.
             _sfm_pq = railway_conn.run(
                 'SELECT '
                 '  COUNT(*) AS db_leads, '
@@ -2480,7 +2486,7 @@ async def daily_monitoring_check_railway(
                 '    AND "capiStatus" NOT IN (\'blocked\', \'skipped\')) AS capi_sent '
                 'FROM "Lead" '
                 'WHERE "createdAt" >= :start AND "createdAt" <= :end',
-                start=window_start, end=window_end
+                start=launch_window_start_utc, end=launch_window_end_utc
             )
             _r_pq = _sfm_pq[0] if _sfm_pq else (0, 0)
             _db_pq, _capi_pq = (_r_pq[0] or 0), (_r_pq[1] or 0)
@@ -2552,9 +2558,10 @@ async def daily_monitoring_check_railway(
         capi_error = stats['capi_error'] or 0
         with_phone = stats['with_phone'] or 0
 
-        fbp_stats = dict(zip(['with_fbp', 'with_fbc'], capi_fbp_row[0]))
+        fbp_stats = dict(zip(['with_fbp', 'with_fbc', 'total_meta_leads'], capi_fbp_row[0]))
         with_fbp = fbp_stats['with_fbp'] or 0
         with_fbc = fbp_stats['with_fbc'] or 0
+        total_meta_leads_dq = fbp_stats['total_meta_leads'] or 0
 
         railway_funnel_metrics = {
             'window': {
@@ -2568,11 +2575,12 @@ async def daily_monitoring_check_railway(
                 'total_scored': stats['scored'] or 0,
             },
             'data_quality': {
-                'total_leads': total,
+                'total_leads': total,                              # leads no banco (Lead/pesquisa)
+                'total_meta_leads': total_meta_leads_dq,           # leads Meta na janela (leads_capi)
                 'fbp_present': with_fbp,
-                'fbp_percentage': (with_fbp / total * 100) if total > 0 else 0,
+                'fbp_percentage': (with_fbp / total_meta_leads_dq * 100) if total_meta_leads_dq > 0 else 0,
                 'fbc_present': with_fbc,
-                'fbc_percentage': (with_fbc / total * 100) if total > 0 else 0,
+                'fbc_percentage': (with_fbc / total_meta_leads_dq * 100) if total_meta_leads_dq > 0 else 0,
                 'phone_present': with_phone,
                 'phone_percentage': (with_phone / total * 100) if total > 0 else 0,
             },
