@@ -3067,6 +3067,79 @@ async def daily_monitoring_check_railway(
         raise HTTPException(status_code=500, detail=f"Erro no Railway monitoring: {str(e)}")
 
 
+@app.get("/monitoring/slack-digest")
+async def post_slack_digest(
+    pipeline: PipelineOptDep,
+    channel: str,
+    hours: int = 24,
+):
+    """
+    Renderiza o daily-check em blocos Slack e posta em `channel`.
+
+    Reusa o handler /monitoring/daily-check/railway in-process e aplica o
+    pipeline `extract_view → render_slack_blocks` do `src/monitoring/digest`.
+    Token vem do env `SLACK_BOT_TOKEN` (Secret Manager).
+
+    Args:
+        channel: ID do canal/DM ou `#nome`.
+        hours: janela de horas (default 24).
+    """
+    import os
+    import json as _json
+    import urllib.request
+    from src.monitoring.digest import (
+        extract_view, render_slack_blocks, PayloadSchemaDriftError,
+    )
+
+    token = os.environ.get('SLACK_BOT_TOKEN')
+    if not token:
+        raise HTTPException(status_code=500, detail="SLACK_BOT_TOKEN não configurado no ambiente")
+
+    response = await daily_monitoring_check_railway(
+        pipeline=pipeline,
+        hours=hours,
+        start_date=None,
+        end_date=None,
+    )
+    payload = response.model_dump() if hasattr(response, 'model_dump') else dict(response)
+
+    try:
+        view = extract_view(payload)
+    except PayloadSchemaDriftError as e:
+        raise HTTPException(status_code=500, detail=f"Payload schema drift: {e}")
+
+    blocks = render_slack_blocks(view)
+
+    body = {
+        'channel': channel,
+        'blocks': blocks,
+        'text': 'Daily Check — DevClub',
+    }
+    req = urllib.request.Request(
+        'https://slack.com/api/chat.postMessage',
+        data=_json.dumps(body).encode('utf-8'),
+        headers={
+            'Content-Type': 'application/json; charset=utf-8',
+            'Authorization': f'Bearer {token}',
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            resp = _json.load(r)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Falha ao chamar Slack: {e}")
+
+    if not resp.get('ok'):
+        raise HTTPException(status_code=502, detail=f"Slack rejeitou: {resp}")
+
+    return {
+        'ok': True,
+        'channel': resp.get('channel'),
+        'ts': resp.get('ts'),
+        'blocks_count': len(blocks),
+    }
+
+
 @app.get("/smoke/run-variants")
 async def smoke_run_variants(
     pipeline: PipelineDep,
