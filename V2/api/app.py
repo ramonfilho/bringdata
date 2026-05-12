@@ -2670,6 +2670,53 @@ async def daily_monitoring_check_railway(
             'ultimas_24h':   _calc_quality(_after(quality_rows, cut_24h)),
         }
 
+        # Qualidade do LF de referência (ativo se houver, senão último terminado).
+        # Resolve via launches.yaml; permite manter qualidade do LF mais recente
+        # visível entre captações.
+        try:
+            launches_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                'configs', 'launches.yaml'
+            )
+            if os.path.exists(launches_path):
+                with open(launches_path) as _lf_f:
+                    _launches_cfg = yaml.safe_load(_lf_f) or {}
+                _brt_date = datetime.now(brt).date()
+                _active = None
+                _finished: list = []
+                for _lf_name, _lf_cfg in _launches_cfg.items():
+                    _cs_str = _lf_cfg.get('cap_start'); _ce_str = _lf_cfg.get('cap_end')
+                    if not (_cs_str and _ce_str): continue
+                    try:
+                        _cs_d = datetime.strptime(_cs_str, '%Y-%m-%d').date()
+                        _ce_d = datetime.strptime(_ce_str, '%Y-%m-%d').date()
+                    except ValueError:
+                        continue
+                    if _cs_d <= _brt_date <= _ce_d:
+                        _active = (_lf_name, _cs_str, _ce_str); break
+                    if _ce_d < _brt_date:
+                        _finished.append((_ce_d, _lf_name, _cs_str, _ce_str))
+                _ref = _active
+                if _ref is None and _finished:
+                    _finished.sort(reverse=True)
+                    _, _ln, _cs, _ce = _finished[0]
+                    _ref = (_ln, _cs, _ce)
+                if _ref:
+                    _ln, _cs, _ce = _ref
+                    _cs_dt = datetime.strptime(_cs, '%Y-%m-%d').replace(tzinfo=brt).astimezone(_tz.utc)
+                    _ce_dt = datetime.strptime(_ce, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=brt).astimezone(_tz.utc)
+                    _lf_rows = [r for r in quality_rows
+                                if r[2] is not None and (
+                                    r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
+                                ) >= _cs_dt and (
+                                    r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
+                                ) <= _ce_dt]
+                    railway_lead_quality['lf_referencia'] = _calc_quality(_lf_rows)
+                    railway_lead_quality['lf_referencia_label'] = _ln
+                    logger.info(f"📊 lf_referencia: {_ln} ({_cs}→{_ce}, n={len(_lf_rows)})")
+        except Exception as _lf_e:
+            logger.warning(f"⚠️ lf_referencia falhou: {_lf_e}")
+
         # ------------------------------------------------------------------
         # 5. Executar orquestrador (apenas para alertas de drift/qualidade ML)
         # ------------------------------------------------------------------
