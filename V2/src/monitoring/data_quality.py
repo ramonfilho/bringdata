@@ -1583,7 +1583,8 @@ class DataQualityMonitor:
                 for it in result.get('breakdown', [])]
 
     def _query_railway_outros_breakdown_enriched(self, column: str, hours: int = 24,
-                                                  top_n: int = 8) -> Dict:
+                                                  top_n: int = 8,
+                                                  restrict_to_sources: List[str] | None = None) -> Dict:
         """
         Versão enriquecida do breakdown. Retorna dict com:
           - 'column'
@@ -1591,9 +1592,16 @@ class DataQualityMonitor:
           - 'outros_count'          — leads que caíram em 'outros' após unify
           - 'outros_pct_of_total'   — outros_count / total_count
           - 'breakdown'             — lista de dicts:
-              {'raw_value': str, 'count': int, 'pct_outros': float}
+              {'raw_value': str, 'count': int, 'pct_total': float}
             ordenada por count desc, limitada a top_n.
           - 'window_hours'
+          - 'restrict_to_sources'   — eco do filtro aplicado (ou None)
+
+        Param `restrict_to_sources` filtra os leads ANTES da contagem por valor
+        do Source canônico (pós-unify). Usado pra Term, onde leads não-Meta
+        legitimamente caem em 'outros' (Google Ads passa IDs no term, etc.).
+        Restringindo a `['facebook-ads']`, o alerta foca em misconfig real do
+        Meta (placeholders `{{...}}`, etc.) e ignora ruído estrutural.
 
         Retorna dict vazio {} em qualquer falha (env, config, query, etc.).
         """
@@ -1654,6 +1662,17 @@ class DataQualityMonitor:
         if column not in df_unified.columns:
             return {}
 
+        # Filtro de Source: aplica antes de tudo. Necessário pro Term porque
+        # leads não-Meta (Google passa IDs no term, etc.) caem em 'outros' por
+        # design — não é misconfig. Restringir a Meta foca o alerta no que
+        # realmente importa.
+        if restrict_to_sources:
+            if 'Source' not in df_unified.columns:
+                return {}
+            keep_mask = df_unified['Source'].isin(restrict_to_sources)
+            df_raw = df_raw.loc[keep_mask].reset_index(drop=True)
+            df_unified = df_unified.loc[keep_mask].reset_index(drop=True)
+
         # Total da coluna na janela = leads com valor não-nulo no raw
         # (alinha com a definição de "% do volume" do usuário).
         total_count = int(df_raw[column].notna().sum())
@@ -1682,6 +1701,7 @@ class DataQualityMonitor:
             'outros_pct_of_total': outros_pct_of_total,
             'breakdown': breakdown,
             'window_hours': hours,
+            'restrict_to_sources': list(restrict_to_sources) if restrict_to_sources else None,
         }
 
     def _check_outros_buckets(self) -> List[Dict]:
@@ -1698,6 +1718,12 @@ class DataQualityMonitor:
           - 'window_hours'       (int, default 24)
           - 'top_n'              (int, default 8 — top raw_values do breakdown)
           - 'columns'            (list, default ['Source','Term','Medium'])
+          - 'restrict_to_sources_by_column' (dict, default {'Term': ['facebook-ads']})
+            Por que: Term só faz sentido como sub-source no Meta (IG vs FB);
+            Google/TikTok/YouTube colocando IDs/strings no term cai em 'outros'
+            por design, não é misconfig. Restringir Term a `['facebook-ads']`
+            mantém o alerta sensível ao que importa (placeholders `{{...}}`,
+            criativos Meta mal-tageados) e ignora o ruído estrutural.
 
         Severity:
           - LOW se outros_pct < 5%
@@ -1711,12 +1737,17 @@ class DataQualityMonitor:
         hours = int(cfg.get('window_hours', 24))
         top_n = int(cfg.get('top_n', 8))
         columns = cfg.get('columns', ['Source', 'Term', 'Medium'])
+        restrict_map = cfg.get('restrict_to_sources_by_column',
+                                {'Term': ['facebook-ads']})
 
         alerts: List[Dict] = []
         now_iso = datetime.now(timezone.utc).isoformat()
 
         for column in columns:
-            data = self._query_railway_outros_breakdown_enriched(column, hours=hours, top_n=top_n)
+            restrict = restrict_map.get(column)
+            data = self._query_railway_outros_breakdown_enriched(
+                column, hours=hours, top_n=top_n, restrict_to_sources=restrict
+            )
             if not data:
                 continue
             pct = float(data.get('outros_pct_of_total', 0.0))
@@ -1733,6 +1764,7 @@ class DataQualityMonitor:
                 'outros_count': data.get('outros_count', 0),
                 'outros_pct_of_total': pct,
                 'min_pct_threshold': min_pct,
+                'restrict_to_sources': data.get('restrict_to_sources'),
                 'breakdown': data.get('breakdown', []),
                 'timestamp_utc': now_iso,
             })
@@ -2257,7 +2289,7 @@ class DataQualityMonitor:
                 })
             alerts.append({
                 'type': 'audience_profile_drift_by_variant',
-                'severity': 'INFO',
+                'severity': 'LOW',
                 'category': 'data_quality',
                 'message': f'Drift de público por variante — {window_label}',
                 'details': {
