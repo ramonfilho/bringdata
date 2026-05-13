@@ -103,6 +103,45 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'alerts[].details.total_expected_union':                                            (R, None),  # ex: None
     'alerts[].details.total_received_union':                                            (R, None),  # ex: None
     'alerts[].details.variant_name':                                                    (R, None),  # ex: 'champion_jan30'
+    # audience_quality_signal — sinal de qualidade vs baseline (terminal paralelo "Outros")
+    'alerts[].details.baseline':                                                        (R, None),
+    'alerts[].details.baseline.pct_d10':                                                (R, None),
+    'alerts[].details.baseline.pct_d8_d10':                                             (R, None),
+    'alerts[].details.baseline.pct_d9_d10':                                             (R, None),
+    'alerts[].details.baseline.score_mean':                                             (R, None),
+    'alerts[].details.baseline_n_leads':                                                (R, None),
+    'alerts[].details.baseline_pool_label':                                             (R, None),
+    'alerts[].details.cap_start':                                                       (R, None),
+    'alerts[].details.cap_end':                                                         (R, None),
+    'alerts[].details.current':                                                         (R, None),
+    'alerts[].details.current.pct_d10':                                                 (R, None),
+    'alerts[].details.current.pct_d8_d10':                                              (R, None),
+    'alerts[].details.current.pct_d9_d10':                                              (R, None),
+    'alerts[].details.current.score_mean':                                              (R, None),
+    'alerts[].details.delta':                                                           (R, None),
+    'alerts[].details.delta.pct_d10_pp':                                                (R, None),
+    'alerts[].details.delta.pct_d8_d10_pp':                                             (R, None),
+    'alerts[].details.delta.pct_d9_d10_pp':                                             (R, None),
+    'alerts[].details.delta.score_pct':                                                 (R, None),
+    'alerts[].details.lf_name':                                                         (R, None),
+    'alerts[].details.n_leads_launch':                                                  (R, None),
+    'alerts[].details.model':                                                           (R, None),
+    'alerts[].details.model.label':                                                     (R, None),
+    'alerts[].details.model.rationale':                                                 (R, None),
+    'alerts[].details.model.run_id':                                                    (R, None),
+    'alerts[].details.model.trained_at':                                                (R, None),
+    'alerts[].details.sinal':                                                           (R, None),
+    # outros_bucket_inflated — details breakdown (terminal paralelo "Outros")
+    'alerts[].details.breakdown':                                                       (R, None),
+    'alerts[].details.breakdown[].count':                                               (R, None),
+    'alerts[].details.breakdown[].pct_total':                                           (R, None),
+    'alerts[].details.breakdown[].raw_value':                                           (R, None),
+    'alerts[].details.min_pct_threshold':                                               (R, None),
+    'alerts[].details.outros_count':                                                    (R, None),
+    'alerts[].details.outros_pct_of_total':                                             (R, None),
+    'alerts[].details.restrict_to_sources':                                             (R, None),
+    'alerts[].details.total_count':                                                     (R, None),
+    'alerts[].details.window_hours':                                                    (R, None),
     'alerts[].details.variants_checked':                                                (S, 'alert type não é renderizado'),
     'alerts[].message':                                                                 (R, None),  # ex: "[champion_jan30] Medium: 3 mudança(s) significativa(s) nas …
     'alerts[].metric_value':                                                            (S, 'detalhe técnico, não pro relatório'),
@@ -143,9 +182,9 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'funnel_metrics.capture':                                                           (R, None),  # ex: dict(2)
     'funnel_metrics.capture.total_database':                                            (R, None),  # ex: 2124
     'funnel_metrics.capture.total_scored':                                              (S, 'duplicate de funnel_metrics.scoring.total_scored'),
-    'funnel_metrics.conversion':                                                        (S, 'redundante com survey_funnel_metrics'),
-    'funnel_metrics.conversion.survey_rate':                                            (S, 'redundante'),
-    'funnel_metrics.conversion.total_with_survey':                                      (S, 'redundante'),
+    'funnel_metrics.conversion':                                                        (S, 'trivial — Railway só registra Lead com pesquisa preenchida, survey_rate é 100% por construção'),
+    'funnel_metrics.conversion.survey_rate':                                            (S, 'trivial — sempre 100% (vide funnel_metrics.conversion)'),
+    'funnel_metrics.conversion.total_with_survey':                                      (S, 'igual a funnel_metrics.scoring.total_scored — Railway só registra Lead com pesquisa'),
     'funnel_metrics.data_quality':                                                      (R, None),  # ex: dict(7)
     'funnel_metrics.data_quality.fbc_percentage':                                       (R, None),  # ex: 81.73258003766477
     'funnel_metrics.data_quality.fbc_present':                                          (S, 'rendero só percentage'),
@@ -274,6 +313,17 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'operational_routines.cpl_by_variant_24h_brl.challenger_abr28':                     (R, None),  # ex: 1.95
     'operational_routines.cpl_by_variant_24h_brl.champion_jan30':                       (R, None),  # ex: 1.37
     'operational_routines.minutes_since_last_score':                                    (S, 'debug interno; último scoring não renderizado'),
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # LAUNCH_RESOLUTION — fonte da janela do LF atual (src.core.launches)
+    # ──────────────────────────────────────────────────────────────────────────
+    'launch_resolution':                                                                (R, None),  # ex: dict(6)
+    'launch_resolution.lf_name':                                                        (S, 'rendererizado embutido no label / aviso fallback'),
+    'launch_resolution.source':                                                         (R, None),  # ex: 'launches_yaml' | 'tuesday_heuristic' — DM avisa quando vier do fallback
+    'launch_resolution.inferred':                                                       (S, 'sinalizado visualmente no label/aviso, sem campo dedicado'),
+    'launch_resolution.cap_start':                                                      (S, 'já presente no label'),
+    'launch_resolution.cap_end':                                                        (S, 'já presente no label; None quando fallback'),
+    'launch_resolution.label':                                                          (S, 'consumido pelo aviso de fallback no DM'),
 
     # ──────────────────────────────────────────────────────────────────────────
     # REVENUE_FORECAST
@@ -454,39 +504,41 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'revenue_forecast.lf_anterior.inputs.ticket_contracted':                            (R, None),
     'revenue_forecast.lf_anterior.inputs.total_leads_meta':                             (R, None),
     'revenue_forecast.lf_anterior.inputs.tracking_rate_usado':                          (S, 'detalhes da metodologia no payload da API'),
-    # SURVEY_FUNNEL_METRICS
+    # SURVEY_FUNNEL_METRICS — renderer removido em 13/05/2026 (digest.py:
+    # _slack_survey/_render_text_survey já não são mais chamados). Campos
+    # mantidos no payload pra reuso futuro/debug; catalogados como SKIPPED.
     # ──────────────────────────────────────────────────────────────────────────
-    'survey_funnel_metrics':                                                            (R, None),  # ex: dict(5)
-    'survey_funnel_metrics.historico':                                                  (R, None),  # ex: dict(5)
-    'survey_funnel_metrics.historico.capi_rate':                                        (R, None),  # ex: 95.7
-    'survey_funnel_metrics.historico.capi_sent':                                        (R, None),  # ex: 134891
-    'survey_funnel_metrics.historico.db_leads':                                         (R, None),  # ex: 140991
-    'survey_funnel_metrics.historico.meta_leads':                                       (R, None),  # ex: None
-    'survey_funnel_metrics.historico.response_rate':                                    (R, None),  # ex: None
-    'survey_funnel_metrics.periodo_query':                                              (R, None),  # ex: dict(5)
-    'survey_funnel_metrics.periodo_query.capi_rate':                                    (R, None),  # ex: 89.5
-    'survey_funnel_metrics.periodo_query.capi_sent':                                    (R, None),  # ex: 1902
-    'survey_funnel_metrics.periodo_query.db_leads':                                     (R, None),  # ex: 2124
-    'survey_funnel_metrics.periodo_query.meta_leads':                                   (R, None),  # ex: 165
-    'survey_funnel_metrics.periodo_query.response_rate':                                (R, None),  # ex: 1287.3
-    'survey_funnel_metrics.ultima_semana':                                              (R, None),  # ex: dict(5)
-    'survey_funnel_metrics.ultima_semana.capi_rate':                                    (R, None),  # ex: 84.0
-    'survey_funnel_metrics.ultima_semana.capi_sent':                                    (R, None),  # ex: 4765
-    'survey_funnel_metrics.ultima_semana.db_leads':                                     (R, None),  # ex: 5670
-    'survey_funnel_metrics.ultima_semana.meta_leads':                                   (R, None),  # ex: 5536
-    'survey_funnel_metrics.ultima_semana.response_rate':                                (R, None),  # ex: 102.4
-    'survey_funnel_metrics.ultimas_24h':                                                (R, None),  # ex: dict(5)
-    'survey_funnel_metrics.ultimas_24h.capi_rate':                                      (R, None),  # ex: 85.5
-    'survey_funnel_metrics.ultimas_24h.capi_sent':                                      (R, None),  # ex: 653
-    'survey_funnel_metrics.ultimas_24h.db_leads':                                       (R, None),  # ex: 764
-    'survey_funnel_metrics.ultimas_24h.meta_leads':                                     (R, None),  # ex: 918
-    'survey_funnel_metrics.ultimas_24h.response_rate':                                  (R, None),  # ex: 83.2
-    'survey_funnel_metrics.ultimo_mes':                                                 (R, None),  # ex: dict(5)
-    'survey_funnel_metrics.ultimo_mes.capi_rate':                                       (R, None),  # ex: 89.5
-    'survey_funnel_metrics.ultimo_mes.capi_sent':                                       (R, None),  # ex: 41814
-    'survey_funnel_metrics.ultimo_mes.db_leads':                                        (R, None),  # ex: 46705
-    'survey_funnel_metrics.ultimo_mes.meta_leads':                                      (R, None),  # ex: 58805
-    'survey_funnel_metrics.ultimo_mes.response_rate':                                   (R, None),  # ex: 79.4
+    'survey_funnel_metrics':                                                            (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.historico':                                                  (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.historico.capi_rate':                                        (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.historico.capi_sent':                                        (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.historico.db_leads':                                         (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.historico.meta_leads':                                       (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.historico.response_rate':                                    (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.periodo_query':                                              (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.periodo_query.capi_rate':                                    (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.periodo_query.capi_sent':                                    (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.periodo_query.db_leads':                                     (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.periodo_query.meta_leads':                                   (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.periodo_query.response_rate':                                (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultima_semana':                                              (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultima_semana.capi_rate':                                    (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultima_semana.capi_sent':                                    (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultima_semana.db_leads':                                     (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultima_semana.meta_leads':                                   (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultima_semana.response_rate':                                (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultimas_24h':                                                (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultimas_24h.capi_rate':                                      (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultimas_24h.capi_sent':                                      (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultimas_24h.db_leads':                                       (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultimas_24h.meta_leads':                                     (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultimas_24h.response_rate':                                  (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultimo_mes':                                                 (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultimo_mes.capi_rate':                                       (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultimo_mes.capi_sent':                                       (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultimo_mes.db_leads':                                        (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultimo_mes.meta_leads':                                      (S, 'renderer removido do digest em 13/05/2026'),
+    'survey_funnel_metrics.ultimo_mes.response_rate':                                   (S, 'renderer removido do digest em 13/05/2026'),
 
     # ──────────────────────────────────────────────────────────────────────────
     # TIMESTAMP
