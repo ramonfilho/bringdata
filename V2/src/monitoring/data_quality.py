@@ -1754,7 +1754,7 @@ class DataQualityMonitor:
             if pct <= min_pct:
                 continue
 
-            severity = 'medium' if pct >= 0.05 else 'low'
+            severity = 'MEDIUM' if pct >= 0.05 else 'LOW'
             alerts.append({
                 'type': 'outros_bucket_inflated',
                 'severity': severity,
