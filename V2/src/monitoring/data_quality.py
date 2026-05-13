@@ -13,7 +13,7 @@ import json
 import pandas as pd
 import numpy as np
 import logging
-from typing import Dict, Set, List, Tuple
+from typing import Dict, Set, List, Tuple, Optional
 from pathlib import Path
 from unidecode import unidecode
 import re
@@ -608,6 +608,7 @@ class DataQualityMonitor:
         self._thresholds = (
             monitoring.thresholds if monitoring and monitoring.thresholds else THRESHOLDS
         )
+        self.include_today_partial = False  # /monitoring/* flag — coluna "Hoje" no audience_drift
         self._missing_rate_ignore_columns = (
             monitoring.missing_rate_ignore_columns
             if monitoring and monitoring.missing_rate_ignore_columns
@@ -673,7 +674,16 @@ class DataQualityMonitor:
         #    canônica (gênero, idade, ocupação, faixa salarial, cartão,
         #    programação, computador). Pré-encoding e independente de modelo.
         if self._thresholds.get('audience_profile_drift', {}).get('enabled', False):
-            alerts.extend(self._check_audience_profile_drift(df))
+            _audience_alerts = self._check_audience_profile_drift(df)
+            alerts.extend(_audience_alerts)
+            # 8b. Drift de público por variante A/B (Champion vs Challenger vs Top6),
+            #     uma tabela por janela (ontem + lançamento atual). Reusa o top_list
+            #     do alerta principal pra falar das mesmas features.
+            for _a in _audience_alerts:
+                if _a.get('type') == 'audience_profile_drift':
+                    _tl = (_a.get('details') or {}).get('top_list') or []
+                    if _tl:
+                        alerts.extend(self._check_audience_drift_by_variant(_tl))
 
         # 9. Audience quality signal — re-scoreia leads do LF atual com Challenger
         #    via mesma chain de produção (LeadScoringPipeline.run) e compara
@@ -682,6 +692,13 @@ class DataQualityMonitor:
         #    sozinho não pega.
         if self._thresholds.get('audience_quality_signal', {}).get('enabled', True):
             alerts.extend(self._check_audience_quality_signal())
+
+        # 10. Outros bucket inflado — independente de drift, checa quanto cada
+        #     coluna unificada (Source/Term/Medium) está caindo no bucket
+        #     'outros' nas últimas 24h. Se outros > 2% do total, emite breakdown
+        #     ordenado por contribuição ao bucket. Sinal informativo, não bloqueia.
+        if self._thresholds.get('outros_buckets', {}).get('enabled', True):
+            alerts.extend(self._check_outros_buckets())
 
         return alerts
 
@@ -1456,7 +1473,10 @@ class DataQualityMonitor:
         return s
 
     def _railway_pesquisa_columns_select(self) -> str:
-        """SQL fragment com SELECT da pesquisa em formato canônico (mesmas colunas do snapshot)."""
+        """SQL fragment com SELECT da pesquisa em formato canônico (mesmas colunas do snapshot).
+
+        Inclui UTMs e pageUrl pra suporte a split por variante A/B (match_variant).
+        """
         return (
             'SELECT data, '
             "  pesquisa->>'genero'             AS \"O seu gênero:\", "
@@ -1465,7 +1485,8 @@ class DataQualityMonitor:
             "  pesquisa->>'faixaSalarial'      AS \"Atualmente, qual a sua faixa salarial?\", "
             "  pesquisa->>'cartaoCredito'      AS \"Você possui cartão de crédito?\", "
             "  pesquisa->>'estudouProgramacao' AS \"Já estudou programação?\", "
-            "  pesquisa->>'computador'         AS \"Tem computador/notebook?\" "
+            "  pesquisa->>'computador'         AS \"Tem computador/notebook?\", "
+            '  source, medium, campaign, content, term, "pageUrl" '
             'FROM "Lead" '
             'WHERE "createdAt" >= :s AND "createdAt" < :e'
         )
@@ -1475,6 +1496,7 @@ class DataQualityMonitor:
             'data', 'O seu gênero:', 'Qual a sua idade?', 'O que você faz atualmente?',
             'Atualmente, qual a sua faixa salarial?', 'Você possui cartão de crédito?',
             'Já estudou programação?', 'Tem computador/notebook?',
+            'source', 'medium', 'campaign', 'content', 'term', 'pageUrl',
         ]
 
     def _query_railway_pesquisa_window(self, start_utc, end_utc) -> pd.DataFrame:
@@ -1521,6 +1543,19 @@ class DataQualityMonitor:
         end_utc = start_utc + timedelta(days=1)
         return self._query_railway_pesquisa_window(start_utc, end_utc)
 
+    def _query_railway_two_full_brt_days_ago(self) -> pd.DataFrame:
+        """
+        Janela: 00:00→23:59 BRT de anteontem (D-2). Usa _query_railway_pesquisa_window.
+        """
+        from datetime import datetime, timedelta, timezone
+        brt = timezone(timedelta(hours=-3))
+        now_brt = datetime.now(brt)
+        prev_brt = (now_brt - timedelta(days=2)).date()
+        start_utc = datetime(prev_brt.year, prev_brt.month, prev_brt.day,
+                             3, 0, 0, tzinfo=timezone.utc)
+        end_utc = start_utc + timedelta(days=1)
+        return self._query_railway_pesquisa_window(start_utc, end_utc)
+
     def _query_railway_outros_breakdown(self, column: str, hours: int = 24, top_n: int = 8) -> List[Dict]:
         """
         Pra Source/Term/Medium: consulta o Railway nas últimas `hours` horas
@@ -1531,30 +1566,52 @@ class DataQualityMonitor:
         Output: [{'raw_value': str, 'count': int}, ...] — sem categorização,
         sem interpretação. Cliente decide o que mostrar.
 
+        Mantido com assinatura antiga pra não quebrar o caller em
+        _check_distribution_drift. Quem quiser totais/percentuais usa
+        `_query_railway_outros_breakdown_enriched`.
+
         Skip silencioso (devolve []) se:
           - column não é Source/Term/Medium
           - env vars Railway ausentes
           - client_config sem utm/medium config
           - erro de query
         """
+        result = self._query_railway_outros_breakdown_enriched(column, hours=hours, top_n=top_n)
+        if not result:
+            return []
+        return [{'raw_value': it['raw_value'], 'count': it['count']}
+                for it in result.get('breakdown', [])]
+
+    def _query_railway_outros_breakdown_enriched(self, column: str, hours: int = 24,
+                                                  top_n: int = 8) -> Dict:
+        """
+        Versão enriquecida do breakdown. Retorna dict com:
+          - 'column'
+          - 'total_count'           — leads na janela com a coluna não-nula
+          - 'outros_count'          — leads que caíram em 'outros' após unify
+          - 'outros_pct_of_total'   — outros_count / total_count
+          - 'breakdown'             — lista de dicts:
+              {'raw_value': str, 'count': int, 'pct_outros': float}
+            ordenada por count desc, limitada a top_n.
+          - 'window_hours'
+
+        Retorna dict vazio {} em qualquer falha (env, config, query, etc.).
+        """
         import os
         from datetime import datetime, timedelta, timezone
 
         if column not in ('Source', 'Term', 'Medium'):
-            return []
+            return {}
         if not (self.client_config and (self.client_config.utm or self.client_config.medium)):
-            return []
+            return {}
 
         required_env = ['RAILWAY_DB_HOST', 'RAILWAY_DB_PORT', 'RAILWAY_DB_USER',
                         'RAILWAY_DB_PASSWORD', 'RAILWAY_DB_NAME']
         if any(not os.environ.get(k) for k in required_env):
-            return []
+            return {}
 
         end_utc = datetime.now(timezone.utc)
         start_utc = end_utc - timedelta(hours=hours)
-
-        # Carregar raw da coluna correspondente
-        raw_col = {'Source': 'source', 'Term': 'term', 'Medium': 'medium'}[column]
 
         try:
             import pg8000.native
@@ -1574,10 +1631,10 @@ class DataQualityMonitor:
             conn.close()
         except Exception as e:
             logger.error(f"[outros_breakdown] {column} erro Railway: {e}")
-            return []
+            return {}
 
         if not rows:
-            return []
+            return {}
 
         df_raw = pd.DataFrame(rows, columns=['Source', 'Term', 'Medium'])
         df_unified = df_raw.copy()
@@ -1592,19 +1649,95 @@ class DataQualityMonitor:
                 df_unified = unify_medium(df_unified, self.client_config.medium)
         except Exception as e:
             logger.error(f"[outros_breakdown] {column} erro unify: {e}")
-            return []
+            return {}
 
         if column not in df_unified.columns:
-            return []
+            return {}
+
+        # Total da coluna na janela = leads com valor não-nulo no raw
+        # (alinha com a definição de "% do volume" do usuário).
+        total_count = int(df_raw[column].notna().sum())
+        if total_count == 0:
+            return {}
 
         mask = df_unified[column] == 'outros'
-        if not mask.any():
-            return []
+        outros_count = int(mask.sum())
+        outros_pct_of_total = (outros_count / total_count) if total_count > 0 else 0.0
 
-        raw_values = df_raw.loc[mask, column].fillna('(vazio)').astype(str)
-        # Case-fold pra agrupamento estável (Sheets vs banco podem variar)
-        counts = raw_values.str.lower().value_counts().head(top_n)
-        return [{'raw_value': v, 'count': int(n)} for v, n in counts.items()]
+        breakdown: List[Dict] = []
+        if outros_count > 0:
+            raw_values = df_raw.loc[mask, column].fillna('(vazio)').astype(str)
+            # Case-fold pra agrupamento estável (Sheets vs banco podem variar)
+            counts = raw_values.str.lower().value_counts().head(top_n)
+            breakdown = [
+                {'raw_value': v, 'count': int(n),
+                 'pct_total': float(n) / total_count}
+                for v, n in counts.items()
+            ]
+
+        return {
+            'column': column,
+            'total_count': total_count,
+            'outros_count': outros_count,
+            'outros_pct_of_total': outros_pct_of_total,
+            'breakdown': breakdown,
+            'window_hours': hours,
+        }
+
+    def _check_outros_buckets(self) -> List[Dict]:
+        """
+        Independente do `categorical_distribution_drift`: pra cada coluna
+        monitorada (Source, Term, Medium), checa o tamanho do bucket 'outros'
+        na janela de 24h. Se outros_count / total_count > min_pct_threshold,
+        emite alerta `outros_bucket_inflated` com o breakdown raw_value→count
+        ordenado por contribuição ao bucket Outros.
+
+        Configurável via self._thresholds['outros_buckets']:
+          - 'enabled'            (bool, default True)
+          - 'min_pct_threshold'  (float, default 0.02 — emite quando >2%)
+          - 'window_hours'       (int, default 24)
+          - 'top_n'              (int, default 8 — top raw_values do breakdown)
+          - 'columns'            (list, default ['Source','Term','Medium'])
+
+        Severity:
+          - LOW se outros_pct < 5%
+          - MEDIUM se outros_pct >= 5%
+          (não bloqueia pipeline; é sinal informativo)
+        """
+        from datetime import datetime, timezone
+
+        cfg = self._thresholds.get('outros_buckets', {}) if hasattr(self, '_thresholds') else {}
+        min_pct = float(cfg.get('min_pct_threshold', 0.02))
+        hours = int(cfg.get('window_hours', 24))
+        top_n = int(cfg.get('top_n', 8))
+        columns = cfg.get('columns', ['Source', 'Term', 'Medium'])
+
+        alerts: List[Dict] = []
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        for column in columns:
+            data = self._query_railway_outros_breakdown_enriched(column, hours=hours, top_n=top_n)
+            if not data:
+                continue
+            pct = float(data.get('outros_pct_of_total', 0.0))
+            if pct <= min_pct:
+                continue
+
+            severity = 'medium' if pct >= 0.05 else 'low'
+            alerts.append({
+                'type': 'outros_bucket_inflated',
+                'severity': severity,
+                'column': column,
+                'window_hours': data.get('window_hours', hours),
+                'total_count': data.get('total_count', 0),
+                'outros_count': data.get('outros_count', 0),
+                'outros_pct_of_total': pct,
+                'min_pct_threshold': min_pct,
+                'breakdown': data.get('breakdown', []),
+                'timestamp_utc': now_iso,
+            })
+
+        return alerts
 
     def _query_railway_today_partial_brt(self) -> tuple[pd.DataFrame, str]:
         """
@@ -1624,142 +1757,63 @@ class DataQualityMonitor:
 
     def _resolve_current_launch_brt(self):
         """
-        Lê configs/launches.yaml e retorna (lf_name, cap_start_str, cap_end_str)
-        do lançamento cujo período de captação inclui hoje BRT
-        (cap_start <= today_brt <= cap_end). Retorna None se nenhum bate.
+        Wrapper de compatibilidade pra `src.core.launches.resolve_active_launch_brt`.
 
-        Use _resolve_last_or_current_launch_brt() pra fallback ao mais recente
-        finalizado quando não há captação ativa.
+        Retorna (lf_name, cap_start_str, cap_end_str) do LF cujo período de
+        captação inclui hoje BRT, ou None se não houver. **Não** cai em fallback
+        ao último encerrado por design — usa `core.launches.resolve_launch_window_brt`
+        quando precisar de uma janela garantida.
         """
-        from datetime import datetime, timedelta, timezone
-        try:
-            import yaml
-        except Exception:
+        from src.core.launches import resolve_active_launch_brt
+        active = resolve_active_launch_brt()
+        if active is None:
             return None
-        brt = timezone(timedelta(hours=-3))
-        today_brt = datetime.now(brt).date()
-        launches_path = Path(__file__).resolve().parents[2] / 'configs' / 'launches.yaml'
-        if not launches_path.exists():
-            return None
-        try:
-            with open(launches_path) as f:
-                launches = yaml.safe_load(f) or {}
-        except Exception as e:
-            logger.warning(f"[audience_profile_drift] Erro ao ler launches.yaml: {e}")
-            return None
-        for name, cfg in launches.items():
-            cs_str = cfg.get('cap_start')
-            ce_str = cfg.get('cap_end')
-            if not (cs_str and ce_str):
-                continue
-            try:
-                cs = datetime.strptime(cs_str, '%Y-%m-%d').date()
-                ce = datetime.strptime(ce_str, '%Y-%m-%d').date()
-            except ValueError:
-                continue
-            if cs <= today_brt <= ce:
-                return (name, cs_str, ce_str)
-        return None
-
-    def _resolve_last_or_current_launch_brt(self):
-        """
-        Igual a _resolve_current_launch_brt(), mas faz fallback ao lançamento
-        mais recente cuja captação já terminou quando não há nenhum em captação
-        hoje.
-
-        Uso: relatórios que devem mostrar dados de "último lançamento" mesmo
-        entre captações (ex.: audience_profile_drift entre LF54 e LF55).
-        """
-        from datetime import datetime, timedelta, timezone
-
-        # 1ª tentativa: lançamento ativo agora
-        current = self._resolve_current_launch_brt()
-        if current is not None:
-            return current
-
-        # 2ª tentativa: lançamento mais recente que já terminou (cap_end < hoje)
-        try:
-            import yaml
-        except Exception:
-            return None
-        brt = timezone(timedelta(hours=-3))
-        today_brt = datetime.now(brt).date()
-        launches_path = Path(__file__).resolve().parents[2] / 'configs' / 'launches.yaml'
-        if not launches_path.exists():
-            return None
-        try:
-            with open(launches_path) as f:
-                launches = yaml.safe_load(f) or {}
-        except Exception:
-            return None
-
-        finished = []
-        for name, cfg in launches.items():
-            cs_str = cfg.get('cap_start')
-            ce_str = cfg.get('cap_end')
-            if not (cs_str and ce_str):
-                continue
-            try:
-                cs = datetime.strptime(cs_str, '%Y-%m-%d').date()
-                ce = datetime.strptime(ce_str, '%Y-%m-%d').date()
-            except ValueError:
-                continue
-            if ce < today_brt:
-                finished.append((ce, name, cs_str, ce_str))
-
-        if not finished:
-            return None
-        finished.sort(reverse=True)
-        _, name, cs_str, ce_str = finished[0]
-        return (name, cs_str, ce_str)
+        return (active.name, active.cap_start.isoformat(), active.cap_end.isoformat())
 
     def _query_railway_current_launch_brt(self) -> tuple[pd.DataFrame, Dict]:
         """
-        Janela: cap_start 00:00 BRT do "lançamento de referência" até agora
-        (se ativo) ou cap_end 23:59:59 BRT (se já terminado).
+        Janela do "lançamento atual" via `src.core.launches.resolve_launch_window_brt`:
 
-        Lançamento de referência: ativo se houver, senão o mais recente que
-        terminou — pra que o relatório continue mostrando dados do LF anterior
-        entre captações.
+          1. LF do YAML com `cap_start ≤ hoje ≤ cap_end` → janela cap_start → now
+             (se em captação) ou cap_start → cap_end (se já encerrado mas o LF
+             ainda é o ativo no YAML, caso improvável).
+          2. Fallback explícito: heurística "desde a última terça BRT" → terça → now,
+             com label sinalizando que o YAML está desatualizado.
 
-        Retorna (df, info dict com lf_name/label/cap_start/cap_end/error).
+        Por design **não cai mais** no último LF encerrado — esse fallback
+        escondia gap no `launches.yaml` (bug detectado em 13/05/2026: LF54
+        aparecia rotulado como atual porque LF55 não estava cadastrado).
+
+        Retorna (df, info dict com lf_name/label/cap_start/cap_end/source/error).
         """
         from datetime import datetime, timedelta, timezone
+        from src.core.launches import resolve_launch_window_brt, BRT
 
         info: Dict = {
             'lf_name': None, 'label': None,
-            'cap_start': None, 'cap_end': None, 'error': None,
+            'cap_start': None, 'cap_end': None,
+            'source': None, 'error': None,
         }
-        current = self._resolve_last_or_current_launch_brt()
-        if current is None:
-            info['error'] = 'no_launch_found'
-            return pd.DataFrame(), info
 
-        lf_name, cs_str, ce_str = current
-        info['lf_name'] = lf_name
-        info['cap_start'] = cs_str
-        info['cap_end'] = ce_str
+        window = resolve_launch_window_brt()
+        info['lf_name'] = window.lf_name
+        info['cap_start'] = window.cap_start.isoformat()
+        info['cap_end'] = window.cap_end.isoformat() if window.cap_end else None
+        info['source'] = window.source
+        info['label'] = window.label
 
-        brt = timezone(timedelta(hours=-3))
-        today_brt = datetime.now(brt).date()
-        cs = datetime.strptime(cs_str, '%Y-%m-%d').date()
-        ce = datetime.strptime(ce_str, '%Y-%m-%d').date()
+        # cap_start 00:00 BRT → UTC
+        start_utc = datetime(window.cap_start.year, window.cap_start.month, window.cap_start.day,
+                             0, 0, 0, tzinfo=BRT).astimezone(timezone.utc)
 
-        # cap_start 00:00 BRT → 03:00 UTC
-        start_utc = datetime(cs.year, cs.month, cs.day, 3, 0, 0, tzinfo=timezone.utc)
-
-        is_finished = ce < today_brt
-        if is_finished:
-            # cap_end 23:59:59 BRT → 02:59:59 UTC do dia seguinte
-            end_brt_dt = datetime(ce.year, ce.month, ce.day, 23, 59, 59, tzinfo=brt)
-            end_utc = end_brt_dt.astimezone(timezone.utc)
-            info['label'] = f"{lf_name} {cs_str}→{ce_str} BRT (encerrado)"
+        today_brt = datetime.now(BRT).date()
+        if window.cap_end is not None and window.cap_end < today_brt:
+            # cap_end 23:59:59 BRT → UTC
+            end_utc = datetime(window.cap_end.year, window.cap_end.month, window.cap_end.day,
+                               23, 59, 59, tzinfo=BRT).astimezone(timezone.utc)
         else:
-            now_brt = datetime.now(brt)
-            end_utc = now_brt.astimezone(timezone.utc)
-            info['label'] = (
-                f"{lf_name} {cs_str} BRT 00:00→{now_brt.strftime('%Y-%m-%d %H:%M')} (parcial)"
-            )
+            # captação em curso (ou fallback de terça): janela até agora
+            end_utc = datetime.now(timezone.utc)
 
         df = self._query_railway_pesquisa_window(start_utc, end_utc)
         return df, info
@@ -1837,11 +1891,21 @@ class DataQualityMonitor:
             )
             return alerts
 
-        # Hoje parcial (00:00 BRT → agora) — coluna adicional pra cada categoria.
-        # Pode ter n=0 ou n pequeno; renderizar com horário pra deixar fraqueza
-        # de amostra explícita.
-        df_today, today_window_label = self._query_railway_today_partial_brt()
-        n_today = len(df_today)
+        # Anteontem completo (D-2 00:00→23:59 BRT) — coluna adicional pra cada categoria.
+        # Sempre puxa: dois dias completos lado a lado dão tendência sem oscilação de sample size.
+        df_prev_day = self._query_railway_two_full_brt_days_ago()
+        n_prev_day = len(df_prev_day)
+
+        # Hoje parcial (00:00 BRT → agora) — opt-in via self.include_today_partial.
+        # Default OFF: o cron das 6 AM caía com sample insignificante (~6h madrugada);
+        # chamadas manuais (ex: às 14h) podem ligar com ?include_today_partial=true.
+        if self.include_today_partial:
+            df_today, today_window_label = self._query_railway_today_partial_brt()
+            n_today = len(df_today)
+        else:
+            import pandas as _pd
+            df_today, today_window_label = _pd.DataFrame(), ''
+            n_today = 0
 
         # Lançamento atual (cap_start → agora). Pode estar vazio se não houver
         # lançamento ativo no launches.yaml (info['error'] == 'no_active_launch').
@@ -1855,6 +1919,7 @@ class DataQualityMonitor:
 
         top_list: List[Dict] = []
         total_responses_day = 0
+        total_responses_prev_day = 0
         total_responses_today = 0
         total_responses_launch = 0
 
@@ -1869,7 +1934,16 @@ class DataQualityMonitor:
             total_responses_day = max(total_responses_day, int(len(s_day)))
             day_proportions = (s_day.value_counts() / len(s_day)).to_dict()
 
-            # Proporções hoje (partial). Pode estar vazia.
+            # Proporções anteontem (full D-2). Pode estar vazia se DB ainda não tinha leads.
+            prev_day_proportions = {}
+            if n_prev_day > 0 and col in df_prev_day.columns:
+                s_prev = self._normalize_audience_series(df_prev_day[col], col)
+                s_prev = s_prev[s_prev != '(nulo)']
+                if len(s_prev) > 0:
+                    total_responses_prev_day = max(total_responses_prev_day, int(len(s_prev)))
+                    prev_day_proportions = (s_prev.value_counts() / len(s_prev)).to_dict()
+
+            # Proporções hoje (partial). Pode estar vazia (default OFF, ou se ninguém respondeu).
             today_proportions = {}
             if n_today > 0 and col in df_today.columns:
                 s_today = self._normalize_audience_series(df_today[col], col)
@@ -1891,7 +1965,7 @@ class DataQualityMonitor:
             label = ref_entry.get('label', col)
             is_critical_feat = col in critical
 
-            cats = set(ref_proportions) | set(day_proportions) | set(launch_proportions)
+            cats = set(ref_proportions) | set(day_proportions) | set(prev_day_proportions) | set(launch_proportions)
             for cat in cats:
                 ref_p = float(ref_proportions.get(cat, 0.0))
                 day_p = float(day_proportions.get(cat, 0.0))
@@ -1907,6 +1981,17 @@ class DataQualityMonitor:
                     launch_pct = None
                     launch_delta_pp = None
 
+                # Anteontem (D-2 full) — coluna adicional pra tendência ontem×anteontem.
+                # NÃO entra como gatilho (mesma lógica do ontem — só uma das duas dispara).
+                if prev_day_proportions:
+                    prev_day_p = float(prev_day_proportions.get(cat, 0.0))
+                    prev_day_delta = (prev_day_p - ref_p) * 100.0
+                    prev_day_pct = round(prev_day_p * 100, 1)
+                    prev_day_delta_pp = round(prev_day_delta, 1)
+                else:
+                    prev_day_pct = None
+                    prev_day_delta_pp = None
+
                 # Hoje parcial — pode não ter dado pra essa categoria.
                 # Hoje NÃO entra como gatilho (amostra parcial pode oscilar muito
                 # de manhã); fica só como enriquecimento na tabela.
@@ -1920,7 +2005,7 @@ class DataQualityMonitor:
                     today_delta_pp = None
 
                 # Gatilho: max(|day_Δ|, |launch_Δ|) >= top_threshold_pp.
-                # Hoje fica de fora pra evitar ruído de sample size pequeno.
+                # Anteontem/Hoje ficam de fora pra evitar duplicidade de trigger.
                 trigger_deltas = [abs(delta_pp)]
                 if launch_delta_pp is not None:
                     trigger_deltas.append(abs(launch_delta_pp))
@@ -1935,6 +2020,8 @@ class DataQualityMonitor:
                     'reference_pct': round(ref_p * 100, 1),
                     'launch_pct': launch_pct,
                     'launch_delta_pp': launch_delta_pp,
+                    'prev_day_pct': prev_day_pct,
+                    'prev_day_delta_pp': prev_day_delta_pp,
                     'day_pct': round(day_p * 100, 1),
                     'delta_pp': round(delta_pp, 1),
                     'today_pct': today_pct,
@@ -1995,6 +2082,7 @@ class DataQualityMonitor:
                 'reference_pool_label': ref_label,
                 'reference_pool_n': ref_n,
                 'day_n_responses': total_responses_day,
+                'prev_day_n_responses': total_responses_prev_day,
                 'today_window': today_window_label,
                 'today_n_responses': total_responses_today,
                 'launch_window': launch_info.get('label'),
@@ -2010,6 +2098,182 @@ class DataQualityMonitor:
             'metric_value': float(max_abs_delta),
             'threshold': top_threshold_pp,
         })
+
+        return alerts
+
+    def _check_audience_drift_by_variant(self, top_list: List[Dict]) -> List[Dict]:
+        """
+        Drift de público segmentado por variante A/B (Champion vs Challenger).
+
+        Produz 2 alertas (uma por janela: ontem + lançamento atual). Cada alerta
+        traz um top_list com `champion_pct/champion_delta_pp` e
+        `challenger_pct/challenger_delta_pp` calculados separadamente em cada
+        subset, mais um `winner` ('champion'|'challenger'|None) por linha
+        baseado no menor |Δpp|. As features/categorias mostradas são as MESMAS
+        do top_list passado como input (mantém coerência visual com o drift geral).
+
+        Skip silencioso (devolve []) se:
+          - ABTestConfig não está habilitado ou yaml ausente
+          - top_list vazio
+          - snapshot do baseline ausente
+        """
+        from datetime import datetime, timezone
+        alerts: List[Dict] = []
+        if not top_list:
+            return alerts
+
+        snapshot, _ = self._load_reference_audience_profile()
+        if snapshot is None:
+            return alerts
+
+        # Resolve active_model.yaml e carrega ABTestConfig
+        try:
+            from src.core.client_config import ABTestConfig as _ABTestConfig
+        except Exception as _e:
+            logger.warning(f"[audience_drift_by_variant] sem ABTestConfig: {_e}")
+            return alerts
+        # Caminho do active_model.yaml — segue mesma resolução do orchestrator
+        active_yaml_path = None
+        if self.client_config:
+            client_id = getattr(self.client_config, 'client_id', 'devclub')
+            candidate = Path(__file__).resolve().parents[2] / 'configs' / 'active_models' / f'{client_id}.yaml'
+            if candidate.exists():
+                active_yaml_path = str(candidate)
+        if not active_yaml_path:
+            return alerts
+        try:
+            ab_cfg = _ABTestConfig.from_active_model_yaml(active_yaml_path)
+        except Exception as _e:
+            logger.warning(f"[audience_drift_by_variant] erro lendo {active_yaml_path}: {_e}")
+            return alerts
+        if not ab_cfg.enabled or not ab_cfg.variants:
+            return alerts
+
+        # Identifica champion (utm/url vazios = fallback default) e challenger
+        champion_name = next(
+            (n for n, v in ab_cfg.variants.items() if not v.utm_pattern and not v.url_pattern),
+            None,
+        )
+        challenger_name = next(
+            (n for n in ab_cfg.variants.keys() if n != champion_name),
+            None,
+        )
+        if not champion_name or not challenger_name:
+            return alerts
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        def _split_df_by_variant(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+            """Divide df em {champion_name: df_ch, challenger_name: df_cl} via match_variant."""
+            if df is None or len(df) == 0:
+                return {champion_name: pd.DataFrame(), challenger_name: pd.DataFrame()}
+            # Preenche NaN com '' para match_variant lidar com missing UTMs sem crash
+            for c in ['source', 'medium', 'campaign', 'content', 'term', 'pageUrl']:
+                if c not in df.columns:
+                    df[c] = ''
+            ch_idx, cl_idx = [], []
+            for i, row in df.iterrows():
+                utms = {
+                    'utm_source':   row.get('source'),
+                    'utm_medium':   row.get('medium'),
+                    'utm_campaign': row.get('campaign'),
+                    'utm_content':  row.get('content'),
+                    'utm_term':     row.get('term'),
+                }
+                matched = ab_cfg.match_variant(utms, event_source_url=row.get('pageUrl'))
+                if matched is None:
+                    # Default = champion (utm_pattern vazio é o fallback)
+                    ch_idx.append(i)
+                else:
+                    matched_name = next(
+                        (n for n, v in ab_cfg.variants.items() if v is matched),
+                        None,
+                    )
+                    if matched_name == champion_name:
+                        ch_idx.append(i)
+                    else:
+                        cl_idx.append(i)
+            return {
+                champion_name:   df.loc[ch_idx],
+                challenger_name: df.loc[cl_idx],
+            }
+
+        def _category_pct(df: pd.DataFrame, col: str, cat: str) -> Optional[float]:
+            """% de leads em (col, cat) dentro do df (excluindo nulos). None se sample vazio."""
+            if df is None or len(df) == 0 or col not in df.columns:
+                return None
+            s = self._normalize_audience_series(df[col], col)
+            s = s[s != '(nulo)']
+            if len(s) == 0:
+                return None
+            return float((s == cat).sum()) / len(s) * 100.0
+
+        # Janela 1: ontem (full BRT day anterior)
+        df_day = self._query_railway_previous_full_brt_day()
+        # Janela 2: lançamento atual
+        df_launch, launch_info = self._query_railway_current_launch_brt()
+
+        for window_key, window_df, window_label in [
+            ('previous_day', df_day, 'Ontem (dia BRT anterior)'),
+            ('current_launch', df_launch, launch_info.get('label') or 'Lançamento atual'),
+        ]:
+            split = _split_df_by_variant(window_df)
+            df_ch = split[champion_name]
+            df_cl = split[challenger_name]
+            n_champion = int(len(df_ch))
+            n_challenger = int(len(df_cl))
+
+            rows = []
+            for entry in top_list:
+                col = entry.get('feature_column')
+                cat = entry.get('category')
+                ref_pct = entry.get('reference_pct')
+                if col is None or cat is None or ref_pct is None:
+                    continue
+                ch_pct = _category_pct(df_ch, col, cat)
+                cl_pct = _category_pct(df_cl, col, cat)
+                ch_delta = round(ch_pct - ref_pct, 1) if ch_pct is not None else None
+                cl_delta = round(cl_pct - ref_pct, 1) if cl_pct is not None else None
+                # Winner por linha: menor |Δpp|
+                if ch_delta is None and cl_delta is None:
+                    winner = None
+                elif ch_delta is None:
+                    winner = 'challenger'
+                elif cl_delta is None:
+                    winner = 'champion'
+                else:
+                    winner = 'champion' if abs(ch_delta) <= abs(cl_delta) else 'challenger'
+                rows.append({
+                    'feature_column': col,
+                    'feature_label': entry.get('feature_label', col),
+                    'category': cat,
+                    'is_critical': entry.get('is_critical', False),
+                    'reference_pct': ref_pct,
+                    'champion_pct': round(ch_pct, 1) if ch_pct is not None else None,
+                    'champion_delta_pp': ch_delta,
+                    'challenger_pct': round(cl_pct, 1) if cl_pct is not None else None,
+                    'challenger_delta_pp': cl_delta,
+                    'winner': winner,
+                })
+            alerts.append({
+                'type': 'audience_profile_drift_by_variant',
+                'severity': 'INFO',
+                'category': 'data_quality',
+                'message': f'Drift de público por variante — {window_label}',
+                'details': {
+                    'window': window_key,
+                    'window_label': window_label,
+                    'reference_pool_label': snapshot.get('reference_pool', {}).get('label', 'reference'),
+                    'champion_name': champion_name,
+                    'challenger_name': challenger_name,
+                    'champion_n': n_champion,
+                    'challenger_n': n_challenger,
+                    'top_list': rows,
+                },
+                'timestamp': now_iso,
+                'metric_value': 0.0,
+                'threshold': 0.0,
+            })
 
         return alerts
 

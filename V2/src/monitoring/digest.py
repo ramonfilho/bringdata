@@ -151,6 +151,58 @@ def _fmt_pct(p: float | None) -> str:
     return f'{p:>5.1f}%'
 
 
+def _fmt_brl(x: float | None) -> str:
+    if x is None: return '—'
+    s = f'{x:,.2f}'
+    return s.replace(',', '\x00').replace('.', ',').replace('\x00', '.')
+
+
+def _color_emoji(delta_pp: float | None) -> str:
+    """Bola colorida pelo |Δpp|: <2 verde, 2-4 amarelo, ≥4 vermelho.
+
+    None vira '·' (sem comparação possível).
+    """
+    if delta_pp is None: return '·'
+    a = abs(delta_pp)
+    if a < 2.0:  return '🟢'
+    if a < 4.0:  return '🟡'
+    return '🔴'
+
+
+def _render_decil_bar(decil_dist: dict, width: int = 20) -> list[str]:
+    """Renderiza distribuição de decis como barra horizontal ASCII.
+
+    decil_dist: dict no formato {'D01': {'count': int, 'pct': float}, ...}
+    ou {'D01': float_pct, ...}. Pcts em [0, 100].
+    """
+    lines: list[str] = []
+    # Ordem fixa D01-D10
+    keys = [f'D{i:02d}' for i in range(1, 11)]
+    # Maior pct define escala
+    raw_pcts = {}
+    raw_counts = {}
+    for k in keys:
+        v = decil_dist.get(k)
+        if isinstance(v, dict):
+            raw_pcts[k] = float(v.get('pct') or 0)
+            raw_counts[k] = int(v.get('count') or 0)
+        elif v is None:
+            raw_pcts[k] = 0.0
+            raw_counts[k] = 0
+        else:
+            raw_pcts[k] = float(v)
+            raw_counts[k] = 0
+    max_pct = max(raw_pcts.values()) if raw_pcts else 0
+    for k in keys:
+        pct = raw_pcts[k]
+        n = raw_counts[k]
+        bar_len = int(round((pct / max_pct) * width)) if max_pct > 0 else 0
+        bar = '▇' * bar_len + ' ' * (width - bar_len)
+        count_suffix = f"  ({n:,})" if n > 0 else ''
+        lines.append(f"{k} {bar} {pct:>4.1f}%{count_suffix}")
+    return lines
+
+
 def _sev_emoji(sev: str) -> str:
     return {'HIGH': '🔴', 'MEDIUM': '🟡', 'LOW': '⚪'}.get(sev, '·')
 
@@ -217,9 +269,10 @@ def _render_text_alerts(v: dict, L: list):
     distribution_drifts = [a for a in alerts if a.get('type') == 'distribution_drift']
     category_drifts     = [a for a in alerts if a.get('type') == 'category_drift']
     audience_drifts     = [a for a in alerts if a.get('type') == 'audience_profile_drift']
+    outros_inflated     = [a for a in alerts if a.get('type') == 'outros_bucket_inflated']
     other_alerts        = [a for a in alerts if a.get('type') not in (
         'distribution_drift', 'category_drift', 'audience_profile_drift',
-        'extra_unexpected_features',
+        'outros_bucket_inflated', 'extra_unexpected_features',
     )]
 
     sep = lambda: (L.append('· · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · ·'), L.append(''))
@@ -227,6 +280,10 @@ def _render_text_alerts(v: dict, L: list):
     # Header da seção
     L.append('🚨  Mudanças significativas')
     L.append('')
+
+    # 0) Outros bucket inflado — categorias raw caindo em 'outros' acima do threshold
+    if outros_inflated:
+        _render_text_outros_inflated_consolidated(outros_inflated, L)
 
     # 1) Distribution drifts agrupados por coluna
     if distribution_drifts:
@@ -254,7 +311,8 @@ def _render_text_alerts(v: dict, L: list):
 
 def _render_text_audience_drift(a: dict, L: list):
     d = a.get('details', {}) or {}
-    L.append('🔵  Características dos leads vs TOP 5 lançamentos com melhores ROAS à vista')
+    ref_label = d.get('reference_pool_label') or 'lançamentos referência'
+    L.append(f'🔵  Características dos leads vs {ref_label}')
     L.append('')
 
     top = d.get('top_list', []) or []
@@ -262,14 +320,17 @@ def _render_text_audience_drift(a: dict, L: list):
         L.append('    (sem dados na top_list)'); L.append(''); return
 
     has_launch = any(it.get('launch_pct') is not None for it in top)
+    has_prev   = any(it.get('prev_day_pct') is not None for it in top)
     has_today  = any(it.get('today_pct') is not None for it in top)
 
-    headers = [f'{"Característica":<36}', f'{"Top5":>6}']
+    headers = [f'{"Característica":<36}', f'{"Ref%":>6}']
     if has_launch: headers.append(f'{"Lanç. (Δ)":>14}')
+    if has_prev:   headers.append(f'{"Anteontem (Δ)":>14}')
     headers.append(f'{"Ontem (Δ)":>14}')
     if has_today:  headers.append(f'{"Hoje (Δ)":>14}')
     L.append('    ' + '  '.join(headers))
-    L.append('    ' + '─' * (36 + 6 + 14*(1+int(has_launch)+int(has_today)) + 2*(len(headers)-1)))
+    n_delta_cols = 1 + int(has_launch) + int(has_prev) + int(has_today)
+    L.append('    ' + '─' * (36 + 6 + 14*n_delta_cols + 2*(len(headers)-1)))
 
     for it in top:
         label = _short(f"{it['feature_label']}: {it['category']}", 36)
@@ -278,6 +339,10 @@ def _render_text_audience_drift(a: dict, L: list):
         if has_launch:
             lp, ld = it.get('launch_pct'), it.get('launch_delta_pp')
             cell = f'{_fmt_pct(lp)} ({_fmt_pp(ld):>5})' if lp is not None else '       —'
+            cells.append(f'{cell:>14}')
+        if has_prev:
+            pp, pd_ = it.get('prev_day_pct'), it.get('prev_day_delta_pp')
+            cell = f'{_fmt_pct(pp)} ({_fmt_pp(pd_):>5})' if pp is not None else '       —'
             cells.append(f'{cell:>14}')
         day_cell = f'{_fmt_pct(it.get("day_pct"))} ({_fmt_pp(it.get("delta_pp")):>5})'
         cells.append(f'{day_cell:>14}')
@@ -319,6 +384,30 @@ def _render_text_distribution_drifts_consolidated(alerts: list, L: list):
                         pct = (n/total*100) if total else 0
                         vv_disp = _short(vv, 50)
                         L.append(f"          {vv_disp:<50} {n:>5}  ({pct:>4.1f}%)")
+        L.append('')
+
+
+def _render_text_outros_inflated_consolidated(alerts: list, L: list):
+    """Renderiza alertas `outros_bucket_inflated` com breakdown raw → % do volume da coluna.
+
+    Cada alerta tem: column, outros_pct_of_total, outros_count, total_count,
+    breakdown=[{raw_value, count, pct_total}]. pct_total já vem como fração do
+    total da coluna, não do bucket Outros.
+    """
+    for a in alerts:
+        col   = a.get('column', '?')
+        tot   = a.get('total_count', 0)
+        outn  = a.get('outros_count', 0)
+        pct   = (a.get('outros_pct_of_total') or 0) * 100
+        hours = a.get('window_hours', 24)
+        bd    = a.get('breakdown') or []
+        L.append(f'Bucket "outros" inflado na UTM {col}: {outn}/{tot} leads ({pct:.1f}% do volume, janela {hours}h)')
+        if bd:
+            for it in bd[:8]:
+                raw = _short(it.get('raw_value', '') or '(vazio)', 50)
+                n = it.get('count', 0)
+                p = (it.get('pct_total') or 0) * 100
+                L.append(f"    {raw:<50} {n:>5}  ({p:>4.1f}% do total)")
         L.append('')
 
 
@@ -516,6 +605,8 @@ def _render_text_traffic(v: dict, L: list):
 def _render_text_ab(v: dict, L: list):
     op = v['ab_test']
     by_variant = op.get('leads_scored_by_variant_24h') or {}
+    by_spend = op.get('spend_by_variant_24h_brl') or {}
+    by_cpl = op.get('cpl_by_variant_24h_brl') or {}
     total_scored_24h = sum((n or 0) for n in by_variant.values())
     L.append('🤖  A/B TEST LIGADO')
     for vv in op.get('ab_variants', []) or []:
@@ -523,7 +614,13 @@ def _render_text_ab(v: dict, L: list):
         label = _variant_label(name)
         scored = by_variant.get(name) or 0
         pct = (scored / total_scored_24h * 100) if total_scored_24h else 0
-        L.append(f"    {label} ({name}) recebeu {scored:,} de {total_scored_24h:,} eventos ({pct:.1f}%) nas últimas 24h")
+        extras = []
+        if name in by_spend:
+            extras.append(f"R$ {_fmt_brl(by_spend[name])} investidos")
+        if by_cpl.get(name) is not None:
+            extras.append(f"CPL R$ {_fmt_brl(by_cpl[name])}")
+        suffix = (' · ' + ' · '.join(extras)) if extras else ''
+        L.append(f"    {label} ({name}) recebeu {scored:,} de {total_scored_24h:,} eventos ({pct:.1f}%) nas últimas 24h{suffix}")
     L.append('')
 
 
@@ -535,8 +632,14 @@ def _render_text_actionable(v: dict, L: list):
     if not aa: return
 
     L.append('🎯  Mudanças significativas:')
+    # Outros buckets primeiro — chama o mesmo renderer detalhado do bloco principal.
+    outros_inflated = [a for a in aa if a.get('type') == 'outros_bucket_inflated']
+    if outros_inflated:
+        _render_text_outros_inflated_consolidated(outros_inflated, L)
     for a in aa:
         t = a.get('type')
+        if t == 'outros_bucket_inflated':
+            continue  # já rendido acima
         msg = (a.get('message') or '').strip()
         if t == 'distribution_drift':
             # Tenta extrair variant + N de "[champion_jan30] Medium: 3 mudança(s) ..."
@@ -563,14 +666,15 @@ def _render_text_skipped_footer(v: dict, L: list):
 # ──────────────────────────────────────────────────────────────────────────
 
 def render_slack_blocks(view: dict) -> list[dict]:
+    """View 'DM' — tudo que não vai pro cliente (severity, alertas, funil, lead
+    quality completo, survey, revenue, tráfego). A/B test e drifts de público
+    e decis viraram exclusivos do cliente (render_slack_blocks_client)."""
     blocks: list[dict] = []
     _slack_header(view, blocks)
-    _slack_ab(view, blocks)
     blocks.append({'type': 'divider'})
-    _slack_alerts(view, blocks)
+    _slack_alerts(view, blocks, include_audience_drift=False)
     blocks.append({'type': 'divider'})
     _slack_funnel(view, blocks)
-    _slack_decis(view, blocks)
     blocks.append({'type': 'divider'})
     _slack_lead_quality(view, blocks)
     blocks.append({'type': 'divider'})
@@ -583,12 +687,47 @@ def render_slack_blocks(view: dict) -> list[dict]:
     return blocks
 
 
+def render_slack_blocks_client(view: dict) -> list[dict]:
+    """View 'cliente' — A/B test + 2 tabelas de drift por variante + drift geral
+    com cores 🟢🟡🔴 + 2 distribuições de decis (ontem + lançamento atual)."""
+    blocks: list[dict] = []
+    _slack_header(view, blocks)
+    _slack_ab(view, blocks)
+    blocks.append({'type': 'divider'})
+
+    # Per-variant drift tables (uma por janela)
+    audience_by_variant = [a for a in view.get('alerts', [])
+                           if a.get('type') == 'audience_profile_drift_by_variant']
+    # Ordena: previous_day primeiro, depois current_launch
+    audience_by_variant.sort(
+        key=lambda a: 0 if (a.get('details', {}) or {}).get('window') == 'previous_day' else 1
+    )
+    for a in audience_by_variant:
+        _slack_alert_audience_by_variant(a, blocks)
+        blocks.append({'type': 'divider'})
+
+    # Drift geral com cores
+    audience_general = [a for a in view.get('alerts', [])
+                        if a.get('type') == 'audience_profile_drift']
+    for a in audience_general:
+        _slack_alert_audience(a, blocks)
+        blocks.append({'type': 'divider'})
+
+    # Decis ontem + lançamento atual
+    _slack_decis_window(view, blocks, 'previous_day')
+    _slack_decis_window(view, blocks, 'current_launch')
+    return blocks
+
+
 def _slack_header(v: dict, B: list):
     ts = (v['meta'].get('timestamp') or '')[:10]
     B.append({'type': 'header', 'text': {'type': 'plain_text', 'text': f'📊 Daily Check — DevClub · {ts}', 'emoji': True}})
 
 
-def _slack_alerts(v: dict, B: list):
+def _slack_alerts(v: dict, B: list, include_audience_drift: bool = True):
+    """Renderer principal de alertas. `include_audience_drift=False` esconde
+    audience_profile_drift{,_by_variant} pra DM (cliente recebe tabelas
+    dedicadas com cores/✅)."""
     alerts = v['alerts']
     if not alerts:
         B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '✅ *Sem alertas.*'}})
@@ -597,12 +736,17 @@ def _slack_alerts(v: dict, B: list):
     distribution_drifts = [a for a in alerts if a.get('type') == 'distribution_drift']
     category_drifts     = [a for a in alerts if a.get('type') == 'category_drift']
     audience_drifts     = [a for a in alerts if a.get('type') == 'audience_profile_drift']
+    outros_inflated     = [a for a in alerts if a.get('type') == 'outros_bucket_inflated']
     others              = [a for a in alerts if a.get('type') not in (
         'distribution_drift', 'category_drift', 'audience_profile_drift',
-        'extra_unexpected_features',
+        'audience_profile_drift_by_variant',
+        'outros_bucket_inflated', 'extra_unexpected_features',
     )]
 
     B.append({'type': 'header', 'text': {'type': 'plain_text', 'text': '🚨 Mudanças significativas', 'emoji': True}})
+
+    if outros_inflated:
+        _slack_outros_inflated_consolidated(outros_inflated, B)
 
     if distribution_drifts:
         _slack_distribution_drifts_consolidated(distribution_drifts, B)
@@ -617,10 +761,31 @@ def _slack_alerts(v: dict, B: list):
         else:
             _slack_alert_other(a, B)
 
-    if audience_drifts:
+    if include_audience_drift and audience_drifts:
         B.append({'type': 'divider'})
         for a in audience_drifts:
             _slack_alert_audience(a, B)
+
+
+def _slack_outros_inflated_consolidated(alerts: list, B: list):
+    """Slack block para alertas `outros_bucket_inflated`. % do volume da coluna
+    (não do bucket Outros)."""
+    for a in alerts:
+        col   = a.get('column', '?')
+        tot   = a.get('total_count', 0)
+        outn  = a.get('outros_count', 0)
+        pct   = (a.get('outros_pct_of_total') or 0) * 100
+        hours = a.get('window_hours', 24)
+        bd    = a.get('breakdown') or []
+        lines = [f'*Bucket "outros" inflado na UTM {col}:* `{outn}/{tot}` leads '
+                 f'(`{pct:.1f}%` do volume, janela `{hours}h`)']
+        if bd:
+            for it in bd[:6]:
+                raw = _short(it.get('raw_value', '') or '(vazio)', 32)
+                n   = it.get('count', 0)
+                p   = (it.get('pct_total') or 0) * 100
+                lines.append(f"     `{raw:<32}` {n:>4} (`{p:>4.1f}%` do total)")
+        B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(lines)}})
 
 
 def _slack_distribution_drifts_consolidated(alerts: list, B: list):
@@ -656,21 +821,104 @@ def _slack_distribution_drifts_consolidated(alerts: list, B: list):
 
 
 def _slack_alert_audience(a: dict, B: list):
+    """Drift geral com cores 🟢🟡🔴 por célula Δ (0-2%, 2-4%, 4+%)."""
     d = a.get('details', {}) or {}
-    rows = [
-        '*Características dos leads vs TOP 5 lançamentos com melhores ROAS à vista:*',
-        f"`{'Característica':<32} {'Top5':>5}  {'Lanç(Δ)':>11}  {'Ontem(Δ)':>11}  {'Hoje(Δ)':>11}`",
-    ]
-    def cell(pct, delta):
-        if pct is None: return f"{'—':>11}"
-        return f"{pct:>5.1f}%({delta:+.1f})"
-    for it in d.get('top_list', []) or []:
+    ref_label = d.get('reference_pool_label') or 'lançamentos referência'
+    top = d.get('top_list', []) or []
+    has_launch = any(it.get('launch_pct') is not None for it in top)
+    has_prev   = any(it.get('prev_day_pct') is not None for it in top)
+    has_today  = any(it.get('today_pct') is not None for it in top)
+
+    # Header com legenda
+    header_parts = [f"*Drift de público geral vs {ref_label}* (🟢 <2pp · 🟡 2–4pp · 🔴 ≥4pp)"]
+    rows = [header_parts[0]]
+    col_header = [f"{'Característica':<32} {'Ref%':>5}"]
+    if has_launch: col_header.append(f"{'Lanç(Δ)':>15}")
+    if has_prev:   col_header.append(f"{'Anteontem(Δ)':>15}")
+    col_header.append(f"{'Ontem(Δ)':>15}")
+    if has_today:  col_header.append(f"{'Hoje(Δ)':>15}")
+    rows.append(f"`{'  '.join(col_header)}`")
+
+    def cell_colored(pct, delta):
+        if pct is None: return f"{'—':>15}"
+        return f"{_color_emoji(delta)} {pct:>5.1f}%({delta:+.1f})"
+
+    for it in top:
         label = _short(f"{it['feature_label']}: {it['category']}", 32)
-        ref = it.get('reference_pct',0)
-        rows.append(f"`{label:<32} {ref:>4.1f}%  "
-                    f"{cell(it.get('launch_pct'), it.get('launch_delta_pp')):>11}  "
-                    f"{cell(it.get('day_pct'), it.get('delta_pp')):>11}  "
-                    f"{cell(it.get('today_pct'), it.get('today_delta_pp')):>11}`")
+        ref = it.get('reference_pct', 0)
+        parts = [f"{label:<32} {ref:>4.1f}%"]
+        if has_launch:
+            parts.append(f"{cell_colored(it.get('launch_pct'), it.get('launch_delta_pp')):>15}")
+        if has_prev:
+            parts.append(f"{cell_colored(it.get('prev_day_pct'), it.get('prev_day_delta_pp')):>15}")
+        parts.append(f"{cell_colored(it.get('day_pct'), it.get('delta_pp')):>15}")
+        if has_today:
+            parts.append(f"{cell_colored(it.get('today_pct'), it.get('today_delta_pp')):>15}")
+        rows.append(f"`{'  '.join(parts)}`")
+    B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
+
+
+def _slack_alert_audience_by_variant(a: dict, B: list):
+    """Drift por variante (Champion vs Challenger) — ✅ na variante com menor |Δpp| por linha."""
+    d = a.get('details', {}) or {}
+    window_label = d.get('window_label') or 'janela'
+    champion_n = d.get('champion_n', 0) or 0
+    challenger_n = d.get('challenger_n', 0) or 0
+    ref_label = d.get('reference_pool_label') or 'referência'
+    top = d.get('top_list', []) or []
+
+    header = (
+        f"*📉 Drift por variante — {window_label}* "
+        f"(Champion n={champion_n:,} · Challenger n={challenger_n:,} · ref: {ref_label})"
+    )
+    rows = [header]
+    col_header = f"{'Característica':<32} {'Top%':>5}  {'Champion(Δ)':>16}  {'Challenger(Δ)':>16}"
+    rows.append(f"`{col_header}`")
+
+    def cell(pct, delta):
+        if pct is None or delta is None: return '—'
+        return f"{pct:>5.1f}%({delta:+.1f})"
+
+    for it in top:
+        label = _short(f"{it['feature_label']}: {it['category']}", 32)
+        ref = it.get('reference_pct', 0)
+        ch_str = cell(it.get('champion_pct'), it.get('champion_delta_pp'))
+        cl_str = cell(it.get('challenger_pct'), it.get('challenger_delta_pp'))
+        winner = it.get('winner')
+        ch_marker = ' ✅' if winner == 'champion' else '   '
+        cl_marker = ' ✅' if winner == 'challenger' else '   '
+        ch_cell = f"{ch_str:>13}{ch_marker}"
+        cl_cell = f"{cl_str:>13}{cl_marker}"
+        rows.append(f"`{label:<32} {ref:>4.1f}%  {ch_cell:>16}  {cl_cell:>16}`")
+    B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
+
+
+def _slack_decis_window(v: dict, B: list, window_key: str):
+    """Distribuição de decis por janela em barra horizontal.
+
+    window_key ∈ {'previous_day', 'current_launch'}.
+    Le de view['lead_quality'].decil_distribution_<window_key>.
+    """
+    lq = v.get('lead_quality') or {}
+    key = f'decil_distribution_{window_key}'
+    info = lq.get(key) or {}
+    if not info:
+        return
+    dist = info.get('distribution') or {}
+    total = info.get('total', 0) or 0
+    win_label = info.get('window_label', '?')
+    if total == 0:
+        return
+    # Converte counts → {D01: {'count', 'pct'}}
+    decil_dist = {}
+    for k in [f'D{i:02d}' for i in range(1, 11)]:
+        c = int(dist.get(k, 0) or 0)
+        decil_dist[k] = {'count': c, 'pct': (c / total * 100) if total else 0}
+    bar_lines = _render_decil_bar(decil_dist, width=20)
+    rows = [f'*📊 Distribuição de decis — {win_label}* (n={total:,})']
+    rows.append('```')
+    rows.extend(bar_lines)
+    rows.append('```')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
 
@@ -902,6 +1150,8 @@ def _slack_traffic(v: dict, B: list):
 def _slack_ab(v: dict, B: list):
     op = v['ab_test']
     by = op.get('leads_scored_by_variant_24h') or {}
+    by_spend = op.get('spend_by_variant_24h_brl') or {}
+    by_cpl = op.get('cpl_by_variant_24h_brl') or {}
     total_scored_24h = sum((n or 0) for n in by.values())
     lines = ['*🤖 A/B Test* — LIGADO']
     for vv in op.get('ab_variants', []) or []:
@@ -909,7 +1159,13 @@ def _slack_ab(v: dict, B: list):
         label = _variant_label(name)
         scored = by.get(name) or 0
         pct = (scored / total_scored_24h * 100) if total_scored_24h else 0
-        lines.append(f"• *{label}* (`{name}`) recebeu {scored:,} de {total_scored_24h:,} eventos ({pct:.1f}%) nas últimas 24h")
+        extras = []
+        if name in by_spend:
+            extras.append(f"R$ {_fmt_brl(by_spend[name])} investidos")
+        if by_cpl.get(name) is not None:
+            extras.append(f"CPL R$ {_fmt_brl(by_cpl[name])}")
+        suffix = (' · ' + ' · '.join(extras)) if extras else ''
+        lines.append(f"• *{label}* (`{name}`) recebeu {scored:,} de {total_scored_24h:,} eventos ({pct:.1f}%) nas últimas 24h{suffix}")
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': "\n".join(lines)}})
 
 

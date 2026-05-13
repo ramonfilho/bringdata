@@ -2266,6 +2266,7 @@ async def daily_monitoring_check_auto(
     hours: int = 24,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    include_today_partial: bool = False,
 ):
     """
     Executa check diário de monitoramento com dados do Railway PostgreSQL.
@@ -2286,6 +2287,7 @@ async def daily_monitoring_check_auto(
         hours=hours,
         start_date=start_date,
         end_date=end_date,
+        include_today_partial=include_today_partial,
     )
 
 
@@ -2295,6 +2297,7 @@ async def daily_monitoring_check_railway(
     hours: int = 24,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    include_today_partial: bool = False,
 ):
     """
     Executa check diário de monitoramento 100% com dados do Railway PostgreSQL.
@@ -2417,8 +2420,13 @@ async def daily_monitoring_check_railway(
             'ORDER BY "createdAt" DESC'
         )
 
-        # 1d. Leads do lançamento atual — exclusivo para revenue_forecast
-        # Se start_date/end_date foram passados, usa essa janela; senão, desde a última terça-feira BRT
+        # 1d. Leads do lançamento atual — exclusivo para revenue_forecast.
+        # Se start_date/end_date foram passados, usa essa janela.
+        # Senão, src.core.launches.resolve_launch_window_brt() resolve:
+        #   1) LF do launches.yaml com cap_start ≤ hoje ≤ cap_end, OU
+        #   2) Fallback: desde a última terça BRT (com warning no log).
+        # Nunca cai no último LF encerrado — esse fallback escondia o gap quando o YAML
+        # está desatualizado (vide caso LF55 detectado em 13/05/2026).
         now_brt = now_utc.astimezone(brt)
         if start_date and end_date:
             launch_window_start     = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=brt)
@@ -2426,12 +2434,25 @@ async def daily_monitoring_check_railway(
             launch_window_end_utc   = window_end
             launch_window_label     = f"{start_date} → {end_date}"
         else:
-            days_since_tuesday = (now_brt.weekday() - 1) % 7  # terça = weekday 1
-            launch_window_start = now_brt.replace(hour=0, minute=0, second=0, microsecond=0) \
-                - timedelta(days=days_since_tuesday)
+            from src.core.launches import resolve_launch_window_brt
+            _lw = resolve_launch_window_brt()
+            launch_window_start = datetime(
+                _lw.cap_start.year, _lw.cap_start.month, _lw.cap_start.day,
+                0, 0, 0, tzinfo=brt,
+            )
             launch_window_start_utc = launch_window_start.astimezone(_tz.utc)
             launch_window_end_utc   = now_utc
-            launch_window_label     = launch_window_start.strftime('%d/%m/%Y')
+            if _lw.lf_name:
+                launch_window_label = (
+                    f"{_lw.lf_name} {_lw.cap_start.strftime('%d/%m/%Y')} → "
+                    f"{now_brt.strftime('%d/%m/%Y')}"
+                )
+            else:
+                # Fallback de terça — sinaliza no label que o YAML precisa atualizar.
+                launch_window_label = (
+                    f"{_lw.cap_start.strftime('%d/%m/%Y')} → "
+                    f"{now_brt.strftime('%d/%m/%Y')} (LF não cadastrado em launches.yaml)"
+                )
 
         forecast_decil_rows = railway_conn.run(
             'SELECT decil '
@@ -2670,50 +2691,70 @@ async def daily_monitoring_check_railway(
             'ultimas_24h':   _calc_quality(_after(quality_rows, cut_24h)),
         }
 
-        # Qualidade do LF de referência (ativo se houver, senão último terminado).
-        # Resolve via launches.yaml; permite manter qualidade do LF mais recente
-        # visível entre captações.
+        # Decis distribution por janela — usado no digest do cliente (2 barras horizontais).
+        # quality_rows = [(leadScore, decil, createdAt), ...].
+        def _decil_dist(rows) -> Dict[str, int]:
+            dist = {f'D{i:02d}': 0 for i in range(1, 11)}
+            for r in rows:
+                d = r[1]
+                if d is None: continue
+                key = f'D{int(d):02d}'
+                if key in dist:
+                    dist[key] += 1
+            return dist
+
+        # Ontem completo BRT (00:00→23:59 BRT do dia anterior)
+        _brt = _tz(timedelta(hours=-3))
+        _today_brt_midnight = datetime.now(_brt).replace(hour=0, minute=0, second=0, microsecond=0)
+        _yesterday_brt_midnight = _today_brt_midnight - timedelta(days=1)
+        _yest_start_utc = _yesterday_brt_midnight.astimezone(_tz.utc)
+        _yest_end_utc = _today_brt_midnight.astimezone(_tz.utc)
+        _yest_rows = [r for r in quality_rows
+                      if r[2] is not None and (
+                          r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
+                      ) >= _yest_start_utc and (
+                          r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
+                      ) < _yest_end_utc]
+        railway_lead_quality['decil_distribution_previous_day'] = {
+            'distribution': _decil_dist(_yest_rows),
+            'total': len(_yest_rows),
+            'window_label': f"{_yesterday_brt_midnight.strftime('%d/%m')} BRT (24h)",
+        }
+
+        # Qualidade do LF de referência — apenas LF ativo no launches.yaml,
+        # sem fallback ao encerrado (vide commit que adicionou src/core/launches.py).
         try:
-            launches_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                'configs', 'launches.yaml'
-            )
-            if os.path.exists(launches_path):
-                with open(launches_path) as _lf_f:
-                    _launches_cfg = yaml.safe_load(_lf_f) or {}
-                _brt_date = datetime.now(brt).date()
-                _active = None
-                _finished: list = []
-                for _lf_name, _lf_cfg in _launches_cfg.items():
-                    _cs_str = _lf_cfg.get('cap_start'); _ce_str = _lf_cfg.get('cap_end')
-                    if not (_cs_str and _ce_str): continue
-                    try:
-                        _cs_d = datetime.strptime(_cs_str, '%Y-%m-%d').date()
-                        _ce_d = datetime.strptime(_ce_str, '%Y-%m-%d').date()
-                    except ValueError:
-                        continue
-                    if _cs_d <= _brt_date <= _ce_d:
-                        _active = (_lf_name, _cs_str, _ce_str); break
-                    if _ce_d < _brt_date:
-                        _finished.append((_ce_d, _lf_name, _cs_str, _ce_str))
-                _ref = _active
-                if _ref is None and _finished:
-                    _finished.sort(reverse=True)
-                    _, _ln, _cs, _ce = _finished[0]
-                    _ref = (_ln, _cs, _ce)
-                if _ref:
-                    _ln, _cs, _ce = _ref
-                    _cs_dt = datetime.strptime(_cs, '%Y-%m-%d').replace(tzinfo=brt).astimezone(_tz.utc)
-                    _ce_dt = datetime.strptime(_ce, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=brt).astimezone(_tz.utc)
-                    _lf_rows = [r for r in quality_rows
-                                if r[2] is not None and (
-                                    r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
-                                ) >= _cs_dt and (
-                                    r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
-                                ) <= _ce_dt]
-                    railway_lead_quality['lf_referencia'] = _calc_quality(_lf_rows)
-                    railway_lead_quality['lf_referencia_label'] = _ln
-                    logger.info(f"📊 lf_referencia: {_ln} ({_cs}→{_ce}, n={len(_lf_rows)})")
+            # lf_referencia = qualidade do LF ativo no launches.yaml.
+            # Sem fallback ao último encerrado (bug detectado em 13/05/2026: rotulava
+            # LF54 como atual com LF55 já em captação). Se YAML não tem LF ativo,
+            # o bloco lf_referencia simplesmente não aparece no payload — operador
+            # precisa atualizar configs/launches.yaml.
+            from src.core.launches import resolve_active_launch_brt
+            _active = resolve_active_launch_brt()
+            if _active is not None:
+                _ln = _active.name
+                _cs_dt = datetime(_active.cap_start.year, _active.cap_start.month, _active.cap_start.day,
+                                  0, 0, 0, tzinfo=brt).astimezone(_tz.utc)
+                _ce_dt = datetime(_active.cap_end.year, _active.cap_end.month, _active.cap_end.day,
+                                  23, 59, 59, tzinfo=brt).astimezone(_tz.utc)
+                _lf_rows = [r for r in quality_rows
+                            if r[2] is not None and (
+                                r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
+                            ) >= _cs_dt and (
+                                r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
+                            ) <= _ce_dt]
+                railway_lead_quality['lf_referencia'] = _calc_quality(_lf_rows)
+                railway_lead_quality['lf_referencia_label'] = _ln
+                # Decis distribution do LF ativo — pra barra horizontal no digest cliente
+                railway_lead_quality['decil_distribution_current_launch'] = {
+                    'distribution': _decil_dist(_lf_rows),
+                    'total': len(_lf_rows),
+                    'window_label': f"{_ln} ({_active.cap_start.strftime('%d/%m')}→{_active.cap_end.strftime('%d/%m')} BRT)",
+                }
+                logger.info(f"📊 lf_referencia: {_ln} "
+                            f"({_active.cap_start}→{_active.cap_end}, n={len(_lf_rows)})")
+            else:
+                logger.info("📊 lf_referencia: sem LF ativo no launches.yaml — bloco omitido")
         except Exception as _lf_e:
             logger.warning(f"⚠️ lf_referencia falhou: {_lf_e}")
 
@@ -2789,6 +2830,13 @@ async def daily_monitoring_check_railway(
         orchestrator = MonitoringOrchestrator(model_path=model_path, db=None,
                                               expected_decil_dist=expected_decil_dist,
                                               lead_scoring_pipeline=pipelines.get('devclub'))
+        # Propaga include_today_partial pro DataQualityMonitor.
+        # Default OFF: cron das 6 AM não traz "Hoje parcial" (madrugada com sample irrelevante).
+        # Manual: ?include_today_partial=true pra ver coluna Hoje em chamadas durante o dia.
+        try:
+            orchestrator.monitors['data_quality'].include_today_partial = bool(include_today_partial)
+        except Exception:
+            pass
         result = orchestrator.run_daily_check(leads_data)
 
         # Substituir funnel_metrics e lead_quality_metrics pelos dados Railway
@@ -2847,6 +2895,49 @@ async def daily_monitoring_check_railway(
                         if _a.get('action_type') == 'offsite_conversion.fb_pixel_lead':
                             total_meta_leads_forecast += int(_a.get('value', 0) or 0)
                 logger.info(f"📊 Meta leads janela lançamento ({_launch_str}–{_today}): {total_meta_leads_forecast}")
+
+                # --- spend Meta por variante A/B (janela 24h, alinhada com leads_capi_by_variant_24h) ---
+                # Split por campaign.name: Challenger = casa com utm_pattern.utm_campaign do YAML; Champion = demais.
+                # CPL usa leads_capi_by_variant_24h (já calculado em operational_routines).
+                try:
+                    _ab_cfg_local = getattr(pipeline, '_ab_test_config', None) if pipeline else None
+                    _challenger_pat = None
+                    _challenger_name = None
+                    _champion_name = None
+                    if _ab_cfg_local and _ab_cfg_local.enabled:
+                        for _vname, _vc in _ab_cfg_local.variants.items():
+                            _pat = (_vc.utm_pattern or {}).get('utm_campaign')
+                            if _pat:
+                                _challenger_pat = _pat
+                                _challenger_name = _vname
+                            elif not _vc.utm_pattern and not _vc.url_pattern:
+                                _champion_name = _vname
+                    if _challenger_pat and _challenger_name and _champion_name:
+                        _24h_since = (datetime.now(_tz(timedelta(hours=-3))) - timedelta(hours=24)).strftime('%Y-%m-%d')
+                        _rows_24h_v = _meta.get_insights(
+                            account_id=_account, level='campaign',
+                            fields=['campaign_name', 'spend'],
+                            since_date=_24h_since, until_date=_today,
+                            filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}]
+                        )
+                        _spend_v = {_champion_name: 0.0, _challenger_name: 0.0}
+                        for _r in _rows_24h_v:
+                            _cn = (_r.get('campaign_name') or '').lower()
+                            _sp = float(_r.get('spend', 0) or 0)
+                            if _challenger_pat.lower() in _cn:
+                                _spend_v[_challenger_name] += _sp
+                            else:
+                                _spend_v[_champion_name] += _sp
+                        result.setdefault('operational_routines', {})['spend_by_variant_24h_brl'] = _spend_v
+                        _leads_v = (result.get('operational_routines', {}) or {}).get('leads_capi_by_variant_24h') or {}
+                        _cpl_v: Dict[str, Optional[float]] = {}
+                        for _vn, _sp in _spend_v.items():
+                            _n = int(_leads_v.get(_vn) or 0)
+                            _cpl_v[_vn] = round(_sp / _n, 2) if _n > 0 else None
+                        result['operational_routines']['cpl_by_variant_24h_brl'] = _cpl_v
+                        logger.info(f"📊 Meta spend 24h por variante: {_spend_v} · CPL: {_cpl_v}")
+                except Exception as _e:
+                    logger.warning(f"⚠️ spend/cpl por variante (24h): {_e}")
 
                 # --- métricas Meta por janela histórica (para survey_funnel_metrics e traffic_metrics) ---
                 _brt_now = datetime.now(_tz(timedelta(hours=-3)))
@@ -3070,36 +3161,58 @@ async def daily_monitoring_check_railway(
 @app.get("/monitoring/slack-digest")
 async def post_slack_digest(
     pipeline: PipelineOptDep,
-    channel: str,
+    channel: Optional[str] = None,
+    channel_client: Optional[str] = None,
+    channel_full: Optional[str] = None,
     hours: int = 24,
+    include_today_partial: bool = False,
 ):
     """
-    Renderiza o daily-check em blocos Slack e posta em `channel`.
+    Renderiza o daily-check em 2 views distintas e posta em canais separados.
 
-    Reusa o handler /monitoring/daily-check/railway in-process e aplica o
-    pipeline `extract_view → render_slack_blocks` do `src/monitoring/digest`.
-    Token vem do env `SLACK_BOT_TOKEN` (Secret Manager).
+    - `channel_client`: view enxuta pro cliente — A/B test + 2 tabelas de drift
+      por variante (ontem + lançamento atual) com ✅ por linha + drift geral
+      com 🟢🟡🔴 + 2 distribuições de decis.
+    - `channel_full`: view completa pro privado — severity, alertas, funil,
+      lead quality detalhado, survey funnel, revenue forecast, tráfego Meta.
+    - `channel` (legacy): se passado sozinho, usa view full no canal indicado
+      (backward compat com o uso antigo).
 
-    Args:
-        channel: ID do canal/DM ou `#nome`.
-        hours: janela de horas (default 24).
+    Reusa o handler /monitoring/daily-check/railway in-process e aplica os
+    renderers do `src/monitoring/digest`. Token vem do env `SLACK_BOT_TOKEN`
+    (Secret Manager).
     """
     import os
     import json as _json
     import urllib.request
     from src.monitoring.digest import (
-        extract_view, render_slack_blocks, PayloadSchemaDriftError,
+        extract_view, render_slack_blocks, render_slack_blocks_client,
+        PayloadSchemaDriftError,
     )
 
     token = os.environ.get('SLACK_BOT_TOKEN')
     if not token:
         raise HTTPException(status_code=500, detail="SLACK_BOT_TOKEN não configurado no ambiente")
 
+    # Resolve quais canais postar
+    targets: List[tuple] = []  # [(channel, view_kind), ...]
+    if channel_client:
+        targets.append((channel_client, 'client'))
+    if channel_full:
+        targets.append((channel_full, 'full'))
+    if not targets and channel:
+        # Legacy: 1 canal, view full
+        targets.append((channel, 'full'))
+    if not targets:
+        raise HTTPException(status_code=400,
+                            detail="Passe channel_client, channel_full ou channel (legacy)")
+
     response = await daily_monitoring_check_railway(
         pipeline=pipeline,
         hours=hours,
         start_date=None,
         end_date=None,
+        include_today_partial=include_today_partial,
     )
     payload = response.model_dump() if hasattr(response, 'model_dump') else dict(response)
 
@@ -3108,35 +3221,39 @@ async def post_slack_digest(
     except PayloadSchemaDriftError as e:
         raise HTTPException(status_code=500, detail=f"Payload schema drift: {e}")
 
-    blocks = render_slack_blocks(view)
-
-    body = {
-        'channel': channel,
-        'blocks': blocks,
-        'text': 'Daily Check — DevClub',
-    }
-    req = urllib.request.Request(
-        'https://slack.com/api/chat.postMessage',
-        data=_json.dumps(body).encode('utf-8'),
-        headers={
-            'Content-Type': 'application/json; charset=utf-8',
-            'Authorization': f'Bearer {token}',
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            resp = _json.load(r)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Falha ao chamar Slack: {e}")
-
-    if not resp.get('ok'):
-        raise HTTPException(status_code=502, detail=f"Slack rejeitou: {resp}")
+    results: List[Dict] = []
+    for ch, kind in targets:
+        blocks = render_slack_blocks_client(view) if kind == 'client' else render_slack_blocks(view)
+        body = {
+            'channel': ch,
+            'blocks': blocks,
+            'text': f'Daily Check — DevClub ({kind})',
+        }
+        req = urllib.request.Request(
+            'https://slack.com/api/chat.postMessage',
+            data=_json.dumps(body).encode('utf-8'),
+            headers={
+                'Content-Type': 'application/json; charset=utf-8',
+                'Authorization': f'Bearer {token}',
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                resp = _json.load(r)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Falha ao chamar Slack ({kind} → {ch}): {e}")
+        if not resp.get('ok'):
+            raise HTTPException(status_code=502, detail=f"Slack rejeitou ({kind} → {ch}): {resp}")
+        results.append({
+            'view': kind,
+            'channel': resp.get('channel'),
+            'ts': resp.get('ts'),
+            'blocks_count': len(blocks),
+        })
 
     return {
         'ok': True,
-        'channel': resp.get('channel'),
-        'ts': resp.get('ts'),
-        'blocks_count': len(blocks),
+        'posts': results,
     }
 
 

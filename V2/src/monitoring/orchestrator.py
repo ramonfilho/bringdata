@@ -419,6 +419,40 @@ class MonitoringOrchestrator:
                                 _by_variant[_default] += 1
                     except Exception as _e:
                         logger.warning(f"  [T3-5] falha em leads_scored_by_variant_24h: {_e}")
+
+                # leads_capi por variante (denominador do CPL Meta — alinha com fb_pixel_lead)
+                _by_variant_capi: Dict[str, int] = {}
+                if result.get('ab_test_enabled') and result.get('active_model_yaml_path'):
+                    try:
+                        from src.core.client_config import ABTestConfig as _ABTestConfig
+                        _ab_cfg2 = _ABTestConfig.from_active_model_yaml(result['active_model_yaml_path'])
+                        _capi_rows = _conn.run(
+                            'SELECT utm_source, utm_medium, utm_campaign, utm_content, utm_term, event_source_url '
+                            'FROM leads_capi '
+                            "WHERE created_at >= NOW() - INTERVAL '24 hours'"
+                        )
+                        _by_variant_capi = {n: 0 for n in _ab_cfg2.variants.keys()}
+                        _default2 = next(
+                            (n for n, v in _ab_cfg2.variants.items()
+                             if not v.utm_pattern and not v.url_pattern),
+                            None,
+                        )
+                        for _src, _med, _cmp, _cnt, _trm, _esu in _capi_rows:
+                            _lead_utms = {
+                                'utm_source': _src, 'utm_medium': _med,
+                                'utm_campaign': _cmp, 'utm_content': _cnt,
+                                'utm_term': _trm,
+                            }
+                            _matched = _ab_cfg2.match_variant(_lead_utms, event_source_url=_esu)
+                            if _matched is not None:
+                                _name = next(
+                                    n for n, v in _ab_cfg2.variants.items() if v is _matched
+                                )
+                                _by_variant_capi[_name] += 1
+                            elif _default2:
+                                _by_variant_capi[_default2] += 1
+                    except Exception as _e:
+                        logger.warning(f"  falha em leads_capi_by_variant_24h: {_e}")
                 _conn.close()
                 if _row:
                     _leads_24h, _scored_24h, _capi_24h, _last_scored = _row[0]
@@ -427,6 +461,8 @@ class MonitoringOrchestrator:
                     result['capi_sent_24h'] = int(_capi_24h or 0)
                     if _by_variant:
                         result['leads_scored_by_variant_24h'] = _by_variant
+                    if _by_variant_capi:
+                        result['leads_capi_by_variant_24h'] = _by_variant_capi
                     if _last_scored is not None:
                         if _last_scored.tzinfo is None:
                             _last_scored = _last_scored.replace(tzinfo=timezone.utc)
@@ -653,14 +689,15 @@ class MonitoringOrchestrator:
                 'ultimas_24h': calc_metrics(df_24h)
             }
 
-            # Lançamento de referência (ativo se houver; senão último terminado)
-            # Usado pra manter a qualidade do LF mais recente visível entre captações.
+            # Lançamento de referência: APENAS LF ativo no launches.yaml (sem
+            # fallback ao último encerrado). Quando não há LF ativo, o bloco
+            # lf_referencia some do payload — o operador deve atualizar o YAML.
             dqc = self.monitors.get('data_quality')
             if dqc is not None:
                 try:
-                    lf = dqc._resolve_last_or_current_launch_brt()
+                    lf = dqc._resolve_current_launch_brt()
                 except Exception as _e:
-                    logger.debug(f"_resolve_last_or_current_launch_brt falhou: {_e}")
+                    logger.debug(f"_resolve_current_launch_brt falhou: {_e}")
                     lf = None
                 if lf:
                     lf_name, cs_str, ce_str = lf

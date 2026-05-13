@@ -84,7 +84,22 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'alerts[].details.top_list[].reference_pct':                                        (R, None),  # ex: None
     'alerts[].details.top_list[].today_delta_pp':                                       (R, None),  # ex: None
     'alerts[].details.top_list[].today_pct':                                            (R, None),  # ex: None
+    'alerts[].details.top_list[].prev_day_pct':                                         (R, None),  # ex: None — D-2 full BRT day (anteontem)
+    'alerts[].details.top_list[].prev_day_delta_pp':                                    (R, None),  # ex: None
+    'alerts[].details.prev_day_n_responses':                                            (S, 'header line removido'),
     'alerts[].details.top_threshold_pp':                                                (S, 'header line removido'),
+    # audience_profile_drift_by_variant — split por Champion/Challenger (alert novo)
+    'alerts[].details.window':                                                          (S, 'usado no título da seção, não renderizado standalone'),
+    'alerts[].details.window_label':                                                    (S, 'título da seção'),
+    'alerts[].details.champion_name':                                                   (S, 'usado em label da coluna; não renderizado standalone'),
+    'alerts[].details.challenger_name':                                                 (S, 'usado em label da coluna; não renderizado standalone'),
+    'alerts[].details.champion_n':                                                      (R, None),  # ex: 640
+    'alerts[].details.challenger_n':                                                    (R, None),  # ex: 95
+    'alerts[].details.top_list[].champion_pct':                                         (R, None),  # ex: None
+    'alerts[].details.top_list[].champion_delta_pp':                                    (R, None),  # ex: None
+    'alerts[].details.top_list[].challenger_pct':                                       (R, None),  # ex: None
+    'alerts[].details.top_list[].challenger_delta_pp':                                  (R, None),  # ex: None
+    'alerts[].details.top_list[].winner':                                               (R, None),  # ex: 'champion' | 'challenger' | None
     'alerts[].details.total_expected_union':                                            (R, None),  # ex: None
     'alerts[].details.total_received_union':                                            (R, None),  # ex: None
     'alerts[].details.variant_name':                                                    (R, None),  # ex: 'champion_jan30'
@@ -198,6 +213,35 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'lead_quality_metrics.lf_referencia.d10':                                           (R, None),
     'lead_quality_metrics.lf_referencia.count':                                         (R, None),
     'lead_quality_metrics.lf_referencia_label':                                         (R, None),  # ex: 'LF54'
+    # Distribuição de decis por janela — usado nas barras horizontais do digest cliente
+    'lead_quality_metrics.decil_distribution_previous_day':                             (R, None),  # ex: dict(3)
+    'lead_quality_metrics.decil_distribution_previous_day.distribution':                (R, None),  # ex: dict(10) D01..D10 counts
+    'lead_quality_metrics.decil_distribution_previous_day.distribution.D01':            (R, None),  # ex: 81
+    'lead_quality_metrics.decil_distribution_previous_day.distribution.D02':            (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.distribution.D03':            (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.distribution.D04':            (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.distribution.D05':            (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.distribution.D06':            (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.distribution.D07':            (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.distribution.D08':            (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.distribution.D09':            (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.distribution.D10':            (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.total':                       (R, None),  # ex: 735
+    'lead_quality_metrics.decil_distribution_previous_day.window_label':                (R, None),  # ex: '12/05 BRT (24h)'
+    'lead_quality_metrics.decil_distribution_current_launch':                           (R, None),  # ex: dict(3)
+    'lead_quality_metrics.decil_distribution_current_launch.distribution':              (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.distribution.D01':          (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.distribution.D02':          (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.distribution.D03':          (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.distribution.D04':          (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.distribution.D05':          (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.distribution.D06':          (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.distribution.D07':          (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.distribution.D08':          (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.distribution.D09':          (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.distribution.D10':          (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.total':                     (R, None),  # ex: 5371
+    'lead_quality_metrics.decil_distribution_current_launch.window_label':              (R, None),  # ex: 'LF54 (29/04→06/05 BRT)'
 
     # ──────────────────────────────────────────────────────────────────────────
     # OPERATIONAL_ROUTINES
@@ -220,6 +264,15 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'operational_routines.leads_scored_by_variant_24h':                                 (R, None),  # ex: dict(2)
     'operational_routines.leads_scored_by_variant_24h.challenger_abr28':                (R, None),  # ex: 88
     'operational_routines.leads_scored_by_variant_24h.champion_jan30':                  (R, None),  # ex: 676
+    'operational_routines.leads_capi_by_variant_24h':                                   (R, None),  # ex: dict(2) — denominador do CPL Meta
+    'operational_routines.leads_capi_by_variant_24h.challenger_abr28':                  (R, None),  # ex: 120
+    'operational_routines.leads_capi_by_variant_24h.champion_jan30':                    (R, None),  # ex: 900
+    'operational_routines.spend_by_variant_24h_brl':                                    (R, None),  # ex: dict(2) — split por campaign.name
+    'operational_routines.spend_by_variant_24h_brl.challenger_abr28':                   (R, None),  # ex: 234.56
+    'operational_routines.spend_by_variant_24h_brl.champion_jan30':                     (R, None),  # ex: 1234.56
+    'operational_routines.cpl_by_variant_24h_brl':                                      (R, None),  # ex: dict(2) — spend/leads_capi
+    'operational_routines.cpl_by_variant_24h_brl.challenger_abr28':                     (R, None),  # ex: 1.95
+    'operational_routines.cpl_by_variant_24h_brl.champion_jan30':                       (R, None),  # ex: 1.37
     'operational_routines.minutes_since_last_score':                                    (S, 'debug interno; último scoring não renderizado'),
 
     # ──────────────────────────────────────────────────────────────────────────
