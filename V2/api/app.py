@@ -93,6 +93,10 @@ class DailyCheckResponse(BaseModel):
     survey_funnel_metrics: Optional[Dict[str, Any]] = None
     traffic_metrics: Optional[Dict[str, Any]] = None
     operational_routines: Optional[Dict[str, Any]] = None
+    # Resolução do LF atual (lf_name, source: 'launches_yaml'|'tuesday_heuristic',
+    # cap_start, cap_end, inferred). Permite ao digest avisar quando está usando
+    # fallback de terça (vide src/core/launches.py).
+    launch_resolution: Optional[Dict[str, Any]] = None
     # revenue_forecast inclui expected_conversion quando conversion_rate_benchmark está configurado
 
 # Inicializar a aplicação FastAPI
@@ -2428,6 +2432,7 @@ async def daily_monitoring_check_railway(
         # Nunca cai no último LF encerrado — esse fallback escondia o gap quando o YAML
         # está desatualizado (vide caso LF55 detectado em 13/05/2026).
         now_brt = now_utc.astimezone(brt)
+        launch_resolution_payload: Optional[Dict[str, Any]] = None
         if start_date and end_date:
             launch_window_start     = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=brt)
             launch_window_start_utc = window_start
@@ -2442,17 +2447,29 @@ async def daily_monitoring_check_railway(
             )
             launch_window_start_utc = launch_window_start.astimezone(_tz.utc)
             launch_window_end_utc   = now_utc
-            if _lw.lf_name:
+            if _lw.lf_name and not _lw.inferred:
                 launch_window_label = (
                     f"{_lw.lf_name} {_lw.cap_start.strftime('%d/%m/%Y')} → "
                     f"{now_brt.strftime('%d/%m/%Y')}"
                 )
+            elif _lw.lf_name and _lw.inferred:
+                launch_window_label = (
+                    f"{_lw.lf_name} (inferido) {_lw.cap_start.strftime('%d/%m/%Y')} → "
+                    f"{now_brt.strftime('%d/%m/%Y')}"
+                )
             else:
-                # Fallback de terça — sinaliza no label que o YAML precisa atualizar.
                 launch_window_label = (
                     f"{_lw.cap_start.strftime('%d/%m/%Y')} → "
                     f"{now_brt.strftime('%d/%m/%Y')} (LF não cadastrado em launches.yaml)"
                 )
+            launch_resolution_payload = {
+                'lf_name':   _lw.lf_name,
+                'source':    _lw.source,
+                'inferred':  _lw.inferred,
+                'cap_start': _lw.cap_start.isoformat(),
+                'cap_end':   _lw.cap_end.isoformat() if _lw.cap_end else None,
+                'label':     _lw.label,
+            }
 
         forecast_decil_rows = railway_conn.run(
             'SELECT decil '
@@ -2940,15 +2957,18 @@ async def daily_monitoring_check_railway(
                     logger.warning(f"⚠️ spend/cpl por variante (24h): {_e}")
 
                 # --- métricas Meta por janela histórica (para survey_funnel_metrics e traffic_metrics) ---
+                # ultimo_mes removido do fetch Meta: a chamada com filtro
+                # CONTAIN 'CAP' em janela de 30d frequentemente excede o
+                # timeout de 12s do executor abaixo, retornando None e
+                # rendendo coluna "mês" vazia no Tráfego Meta. Survey funnel
+                # e lead quality mantêm "mês" próprio via DB.
                 _brt_now = datetime.now(_tz(timedelta(hours=-3)))
                 _meta_hist_windows = {
-                    'ultimo_mes':    (_brt_now - timedelta(days=30)).strftime('%Y-%m-%d'),
                     'ultima_semana': (_brt_now - timedelta(days=7)).strftime('%Y-%m-%d'),
                     'ultimas_24h':   (_brt_now - timedelta(hours=24)).strftime('%Y-%m-%d'),
                     'periodo_query': _launch_str,
                 }
                 _meta_hist_end = {
-                    'ultimo_mes':    _today,
                     'ultima_semana': _today,
                     'ultimas_24h':   _today,
                     'periodo_query': (_brt_now if not end_date else
@@ -3147,6 +3167,7 @@ async def daily_monitoring_check_railway(
             survey_funnel_metrics=survey_funnel_metrics or None,
             traffic_metrics=traffic_metrics,
             operational_routines=result.get('operational_routines'),
+            launch_resolution=launch_resolution_payload,
         )
 
     except FileNotFoundError as e:

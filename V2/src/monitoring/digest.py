@@ -134,6 +134,8 @@ def extract_view(payload: dict, *, audit: bool = True) -> dict:
         'ab_test':           op,
         'critical_summary':  payload.get('critical_summary', ''),
         'skipped':           get_skipped_summary(payload),
+        # Resolução da janela do LF atual; consumido só pelo aviso de fallback no DM.
+        'launch_resolution': payload.get('launch_resolution') or {},
     }
 
 
@@ -235,7 +237,6 @@ def render_text(view: dict) -> str:
     lines.append('─' * 78); lines.append('')
     _render_text_funnel(view, lines)
     _render_text_lead_quality(view, lines)
-    _render_text_survey(view, lines)
     _render_text_revenue(view, lines)
     _render_text_traffic(view, lines)
     _render_text_skipped_footer(view, lines)
@@ -391,8 +392,8 @@ def _render_text_outros_inflated_consolidated(alerts: list, L: list):
     """Renderiza alertas `outros_bucket_inflated` com breakdown raw → % do volume da coluna.
 
     Cada alerta tem: column, outros_pct_of_total, outros_count, total_count,
-    breakdown=[{raw_value, count, pct_total}]. pct_total já vem como fração do
-    total da coluna, não do bucket Outros.
+    breakdown=[{raw_value, count, pct_total}], restrict_to_sources. pct_total
+    já vem como fração do total da coluna (pós-restrição se aplicável).
     """
     for a in alerts:
         col   = a.get('column', '?')
@@ -401,7 +402,9 @@ def _render_text_outros_inflated_consolidated(alerts: list, L: list):
         pct   = (a.get('outros_pct_of_total') or 0) * 100
         hours = a.get('window_hours', 24)
         bd    = a.get('breakdown') or []
-        L.append(f'Bucket "outros" inflado na UTM {col}: {outn}/{tot} leads ({pct:.1f}% do volume, janela {hours}h)')
+        rs    = a.get('restrict_to_sources') or []
+        scope = f' (entre Source ∈ {{{", ".join(rs)}}})' if rs else ''
+        L.append(f'Bucket "outros" inflado na UTM {col}{scope}: {outn}/{tot} leads ({pct:.1f}% do volume, janela {hours}h)')
         if bd:
             for it in bd[:8]:
                 raw = _short(it.get('raw_value', '') or '(vazio)', 50)
@@ -541,15 +544,14 @@ def _render_text_revenue(v: dict, L: list):
     def _row(label, c):
         return (
             f'    {label:<16} {_n(c,"vendas_total"):>7.1f}  '
-            f'R$ {_n(c,"faturamento"):>11,.0f}  '
-            f'R$ {_n(c,"faturamento_recebido"):>10,.0f}  '
-            f'R$ {_n(c,"cartao_avista_liquido"):>14,.0f}  '
-            f'R$ {_n(c,"primeira_parcela_boleto"):>14,.0f}  '
-            f'{_n(c,"vendas_guru"):>6.1f}  '
-            f'{_n(c,"vendas_tmb"):>6.1f}'
+            f'{_n(c,"vendas_guru"):>14.1f}  '
+            f'{_n(c,"vendas_tmb"):>14.1f}  '
+            f'R$ {_n(c,"faturamento_recebido"):>13,.0f}  '
+            f'R$ {_n(c,"cartao_avista_liquido"):>7,.0f}  '
+            f'R$ {_n(c,"primeira_parcela_boleto"):>11,.0f}'
         )
 
-    header = f'    {"Cenário":<16} {"Vendas":>7}  {"Faturamento":>14}  {"Recebido":>13}  {"Cartão à vista":>17}  {"1ª parc boleto":>17}  {"Guru":>6}  {"TMB":>6}'
+    header = f'    {"Cenário":<16} {"Vendas":>7}  {"Vendas cartão":>14}  {"Vendas boleto":>14}  {"Recebido à vista":>16}  {"Cartão":>10}  {"1ª parc boleto":>14}'
 
     def _write_two_methods(forecast: dict):
         L.append('  Método 1: taxa de conversão média LF43-LF53 (recalibrado 08/05)')
@@ -586,7 +588,7 @@ def _render_text_revenue(v: dict, L: list):
 def _render_text_traffic(v: dict, L: list):
     tm = v['traffic']
     L.append('📺  TRÁFEGO META')
-    L.append(f'    {"":<11} {"24h":>14} {"lanç. atual":>14} {"semana":>14} {"mês":>14}')
+    L.append(f'    {"":<11} {"24h":>14} {"lanç. atual":>14} {"semana":>14}')
     for metric, label, fmt in [
         ('spend',      'Spend',       'R$ {:>10,.0f}'),
         ('meta_leads', 'Leads',       '{:>14,}'),
@@ -597,8 +599,7 @@ def _render_text_traffic(v: dict, L: list):
         h24 = tm.get('ultimas_24h', {}).get(metric, 0) or 0
         pq  = tm.get('periodo_query', {}).get(metric, 0) or 0
         sem = tm.get('ultima_semana', {}).get(metric, 0) or 0
-        mes = tm.get('ultimo_mes', {}).get(metric, 0) or 0
-        L.append(f'    {label:<11} {fmt.format(h24):>14} {fmt.format(pq):>14} {fmt.format(sem):>14} {fmt.format(mes):>14}')
+        L.append(f'    {label:<11} {fmt.format(h24):>14} {fmt.format(pq):>14} {fmt.format(sem):>14}')
     L.append('')
 
 
@@ -671,14 +672,13 @@ def render_slack_blocks(view: dict) -> list[dict]:
     e decis viraram exclusivos do cliente (render_slack_blocks_client)."""
     blocks: list[dict] = []
     _slack_header(view, blocks)
+    _slack_launch_fallback_notice_dm(view, blocks)  # DM-only — no-op se YAML está em dia
     blocks.append({'type': 'divider'})
     _slack_alerts(view, blocks, include_audience_drift=False)
     blocks.append({'type': 'divider'})
     _slack_funnel(view, blocks)
     blocks.append({'type': 'divider'})
     _slack_lead_quality(view, blocks)
-    blocks.append({'type': 'divider'})
-    _slack_survey(view, blocks)
     blocks.append({'type': 'divider'})
     _slack_revenue(view, blocks)
     blocks.append({'type': 'divider'})
@@ -777,7 +777,9 @@ def _slack_outros_inflated_consolidated(alerts: list, B: list):
         pct   = (a.get('outros_pct_of_total') or 0) * 100
         hours = a.get('window_hours', 24)
         bd    = a.get('breakdown') or []
-        lines = [f'*Bucket "outros" inflado na UTM {col}:* `{outn}/{tot}` leads '
+        rs    = a.get('restrict_to_sources') or []
+        scope = f' _(Source ∈ {{{", ".join(rs)}}})_' if rs else ''
+        lines = [f'*Bucket "outros" inflado na UTM {col}{scope}:* `{outn}/{tot}` leads '
                  f'(`{pct:.1f}%` do volume, janela `{hours}h`)']
         if bd:
             for it in bd[:6]:
@@ -1057,16 +1059,15 @@ def _slack_revenue(v: dict, B: list):
 
     def _row(label, c):
         return (
-            f"{label:<14}  {_n(c,'vendas_total'):>5.1f}   "
-            f"R$ {_n(c,'faturamento'):>7,.0f}  "
-            f"R$ {_n(c,'faturamento_recebido'):>7,.0f}  "
-            f"R$ {_n(c,'cartao_avista_liquido'):>11,.0f}  "
-            f"R$ {_n(c,'primeira_parcela_boleto'):>9,.0f}  "
-            f"{_n(c,'vendas_guru'):>5.1f}  "
-            f"{_n(c,'vendas_tmb'):>5.1f}"
+            f"{label:<10}  {_n(c,'vendas_total'):>6.1f}  "
+            f"{_n(c,'vendas_guru'):>13.1f}  "
+            f"{_n(c,'vendas_tmb'):>13.1f}  "
+            f"R$ {_n(c,'faturamento_recebido'):>13,.0f}  "
+            f"R$ {_n(c,'cartao_avista_liquido'):>7,.0f}  "
+            f"R$ {_n(c,'primeira_parcela_boleto'):>11,.0f}"
         )
 
-    header_table = f"Cenário          Vendas   Faturam.    Recebido    Cartão à vista  1ª parc TMB   Guru   TMB"
+    header_table = f"{'Cenário':<10}  {'Vendas':>6}  {'Vendas cartão':>13}  {'Vendas boleto':>13}  {'Recebido à vista':>16}  {'Cartão':>10}  {'1ª parc boleto':>14}"
 
     # Método 1 — uma section
     m1_lines = ["```", header_table]
@@ -1136,12 +1137,12 @@ def _slack_traffic(v: dict, B: list):
     def g(p, k): return tm.get(p, {}).get(k, 0) or 0
     table = (
         f"```\n"
-        f"              24h            lanç. atual     semana          mês\n"
-        f"Spend     R$ {g('ultimas_24h','spend'):>10,.0f}    R$ {g('periodo_query','spend'):>10,.0f}    R$ {g('ultima_semana','spend'):>10,.0f}    R$ {g('ultimo_mes','spend'):>10,.0f}\n"
-        f"Leads     {g('ultimas_24h','meta_leads'):>13,}    {g('periodo_query','meta_leads'):>13,}    {g('ultima_semana','meta_leads'):>13,}    {g('ultimo_mes','meta_leads'):>13,}\n"
-        f"CPL       R$ {g('ultimas_24h','cpl'):>10,.2f}    R$ {g('periodo_query','cpl'):>10,.2f}    R$ {g('ultima_semana','cpl'):>10,.2f}    R$ {g('ultimo_mes','cpl'):>10,.2f}\n"
-        f"Clique→lead {g('ultimas_24h','ctr_lead'):>11.1f}%    {g('periodo_query','ctr_lead'):>11.1f}%    {g('ultima_semana','ctr_lead'):>11.1f}%    {g('ultimo_mes','ctr_lead'):>11.1f}%\n"
-        f"Clicks    {g('ultimas_24h','clicks'):>13,}    {g('periodo_query','clicks'):>13,}    {g('ultima_semana','clicks'):>13,}    {g('ultimo_mes','clicks'):>13,}\n"
+        f"              24h            lanç. atual     semana\n"
+        f"Spend     R$ {g('ultimas_24h','spend'):>10,.0f}    R$ {g('periodo_query','spend'):>10,.0f}    R$ {g('ultima_semana','spend'):>10,.0f}\n"
+        f"Leads     {g('ultimas_24h','meta_leads'):>13,}    {g('periodo_query','meta_leads'):>13,}    {g('ultima_semana','meta_leads'):>13,}\n"
+        f"CPL       R$ {g('ultimas_24h','cpl'):>10,.2f}    R$ {g('periodo_query','cpl'):>10,.2f}    R$ {g('ultima_semana','cpl'):>10,.2f}\n"
+        f"Clique→lead {g('ultimas_24h','ctr_lead'):>11.1f}%    {g('periodo_query','ctr_lead'):>11.1f}%    {g('ultima_semana','ctr_lead'):>11.1f}%\n"
+        f"Clicks    {g('ultimas_24h','clicks'):>13,}    {g('periodo_query','clicks'):>13,}    {g('ultima_semana','clicks'):>13,}\n"
         f"```"
     )
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': f"*📺 Tráfego Meta*\n{table}"}})
@@ -1196,3 +1197,34 @@ def _slack_actionable(v: dict, B: list):
 def _slack_skipped_footer(v: dict, B: list):
     # Footer removido a pedido — paths SKIPPED ainda visíveis via `--show-skipped`.
     return
+
+
+def _slack_launch_fallback_notice_dm(v: dict, B: list):
+    """Avisa no DM quando a janela do LF atual veio do fallback de terça BRT
+    (`launches.yaml` desatualizado). No-op caso contrário.
+
+    Renderizado SÓ no DM — vide chamada em `render_slack_blocks`. O digest
+    do cliente (`render_slack_blocks_client`) não inclui esse aviso.
+    """
+    lr = v.get('launch_resolution') or {}
+    if lr.get('source') != 'tuesday_heuristic':
+        return
+    lf_name  = lr.get('lf_name')   # pode ser None se nada foi inferido
+    inferred = bool(lr.get('inferred'))
+    label    = lr.get('label') or ''
+    cap_start = lr.get('cap_start') or '?'
+
+    if lf_name and inferred:
+        msg = (
+            f"⚠️ *Fallback de terça em uso* — janela do LF atual veio da heurística "
+            f"(`tuesday_heuristic`), não do `launches.yaml`. "
+            f"Nome inferido: *{lf_name}* (captação iniciada {cap_start}). "
+            f"Cadastre o LF em `configs/launches.yaml` para confirmar o nome."
+        )
+    else:
+        msg = (
+            f"⚠️ *Fallback de terça em uso* — janela do LF atual veio da heurística "
+            f"(`tuesday_heuristic`), não do `launches.yaml`. "
+            f"Captação iniciada {cap_start}. Cadastre o LF em `configs/launches.yaml`."
+        )
+    B.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': msg}]})

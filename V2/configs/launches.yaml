@@ -127,3 +127,9 @@ LF54:
   cap_end:   "2026-05-11"
   vendas_start: "2026-05-18"
   vendas_end:   "2026-05-24"
+
+LF55:
+  cap_start: "2026-05-12"
+  cap_end:   "2026-05-18"
+  vendas_start: "2026-05-25"
+  vendas_end:   "2026-05-31"
