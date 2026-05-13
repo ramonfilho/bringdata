@@ -1758,6 +1758,25 @@ class DataQualityMonitor:
             alerts.append({
                 'type': 'outros_bucket_inflated',
                 'severity': severity,
+                'category': 'data_quality',
+                'message': (
+                    f"Bucket 'outros' inflado em {column}: "
+                    f"{data.get('outros_count', 0)}/{data.get('total_count', 0)} "
+                    f"({pct*100:.1f}% do total) — janela {data.get('window_hours', hours)}h"
+                ),
+                'details': {
+                    'column': column,
+                    'window_hours': data.get('window_hours', hours),
+                    'total_count': data.get('total_count', 0),
+                    'outros_count': data.get('outros_count', 0),
+                    'outros_pct_of_total': pct,
+                    'min_pct_threshold': min_pct,
+                    'restrict_to_sources': data.get('restrict_to_sources'),
+                    'breakdown': data.get('breakdown', []),
+                },
+                'metric_value': pct,
+                'threshold': min_pct,
+                'timestamp': now_iso,
                 'column': column,
                 'window_hours': data.get('window_hours', hours),
                 'total_count': data.get('total_count', 0),
