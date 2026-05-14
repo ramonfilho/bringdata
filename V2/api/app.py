@@ -1872,45 +1872,6 @@ async def send_purchase_events(request: SendPurchaseEventsRequest):
     return results
 
 
-# =============================================================================
-# BIGQUERY SYNC ENDPOINTS
-# =============================================================================
-
-from api.bigquery_sync import sync_postgres_to_bigquery, get_bigquery_stats
-
-@app.post("/bigquery/sync")
-async def bigquery_sync(limit: int = 1000):
-    """
-    Sincroniza dados do PostgreSQL para BigQuery
-
-    Args:
-        limit: Número máximo de registros a sincronizar (default: 1000 últimos)
-
-    Returns:
-        Status e estatísticas do sync
-    """
-    try:
-        result = sync_postgres_to_bigquery(limit=limit)
-        return result
-    except Exception as e:
-        logger.error(f"❌ Erro no sync com BigQuery: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/bigquery/stats")
-async def bigquery_stats():
-    """
-    Estatísticas da tabela leads_capi no BigQuery
-
-    Returns:
-        Estatísticas da tabela (total de registros, fbp/fbc, última atualização)
-    """
-    try:
-        result = get_bigquery_stats()
-        return result
-    except Exception as e:
-        logger.error(f"❌ Erro ao buscar stats do BigQuery: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
-
 @app.post("/admin/migrate_capi_sent_at")
 async def migrate_capi_sent_at(db: Session = Depends(get_db)):
     """Endpoint temporário para executar migração da coluna capi_sent_at"""
@@ -3380,6 +3341,67 @@ async def post_slack_digest(
         'ok': True,
         'posts': results,
     }
+
+
+@app.get("/monitoring/utm-quality")
+async def utm_quality_endpoint(
+    hours: int = 24,
+    top_n: int = 5,
+    min_volume: int = 20,
+    channel: Optional[str] = None,
+    client_id: str = 'devclub',
+):
+    """
+    Qualidade de UTM por modelo (Champion vs Challenger).
+
+    Ranqueia UTMs (source, medium, content) por decil médio dos leads
+    scoreados em duas janelas:
+      - últimas `hours` (default 24h) — base do ranking
+      - LF ativo (cap_start → hoje BRT); fallback no LF mais recente encerrado
+
+    Atribuição por modelo reusa `ABTestConfig.match_variant` (mesma lógica de
+    produção) — sem coluna `variant` em `Lead`, atribui via UTM/URL.
+
+    Args:
+        hours: janela da coluna "agora" em horas (default 24).
+        top_n: tamanho do Top piores e Top melhores (default 5).
+        min_volume: N mínimo de leads em 24h pra entrar no ranking (default 20).
+        channel: opcional — se passado, posta os blocos no Slack.
+        client_id: cliente (carrega `configs/active_models/{id}.yaml`).
+    """
+    from src.monitoring.utm_quality import (
+        compute_utm_quality, render_slack_blocks, post_to_slack,
+    )
+
+    try:
+        result = compute_utm_quality(
+            client_id=client_id,
+            hours=hours,
+            top_n=top_n,
+            min_volume=min_volume,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"compute_utm_quality falhou: {e}")
+
+    payload = {
+        'window_24h': result.window_24h,
+        'window_lf':  result.window_lf,
+        'champion_name':  result.champion_name,
+        'challenger_name': result.challenger_name,
+        'by_level': result.by_level,
+    }
+
+    posts: List[dict] = []
+    if channel:
+        blocks = render_slack_blocks(result)
+        lf_label = result.window_lf.get('label') or '—'
+        post = post_to_slack(channel, blocks, fallback_text=f'UTM Quality {hours}h × {lf_label}')
+        post['blocks_count'] = len(blocks)
+        posts.append(post)
+        if not post.get('ok'):
+            raise HTTPException(status_code=502, detail=f"Slack: {post.get('error')}")
+
+    return {'ok': True, **payload, 'posts': posts}
 
 
 @app.get("/smoke/run-variants")
