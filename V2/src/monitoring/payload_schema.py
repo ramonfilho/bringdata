@@ -56,6 +56,7 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'alerts[].details.changes[].outros_breakdown':                                      (R, None),  # ex: list — decomposição da categoria "Outros" em valores raw com contagens
     'alerts[].details.changes[].outros_breakdown[].count':                              (R, None),  # ex: int
     'alerts[].details.changes[].outros_breakdown[].raw_value':                          (R, None),  # ex: str — valor canônico que caiu em "Outros"
+    'alerts[].details.n_silenced':                                                      (R, None),  # ex: int — quantas categorias do diff foram silenciadas (renderer lê em digest.py:392, 831)
     'alerts[].details.column':                                                          (R, None),  # ex: 'Medium'
     'alerts[].details.compared_window':                                                 (S, 'header line removido'),
     'alerts[].details.compared_window_kind':                                            (S, 'header line removido'),
