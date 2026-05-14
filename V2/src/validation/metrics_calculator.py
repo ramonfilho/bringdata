@@ -20,7 +20,43 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from api.meta_integration import MetaAdsIntegration
 from api.economic_metrics import calculate_cpl, calculate_contribution_margin
-from api.business_config import CONVERSION_RATES
+
+
+def _load_default_conversion_rates() -> Dict[str, float]:
+    """
+    Carrega `conversion_rates` do YAML do cliente DevClub.
+
+    Fonte de verdade pós-DT-17 Etapa 0: `configs/clients/devclub.yaml:business.conversion_rates`.
+    Fallback (deprecated, com warning): `api/business_config.CONVERSION_RATES` hardcoded.
+
+    Usado como default do `DecileMetricsCalculator` quando o caller não passa
+    `conversion_rates` explicitamente. Em código novo, prefira passar
+    `ClientConfig.from_yaml(...).business.conversion_rates` direto pelo construtor.
+    """
+    try:
+        from src.core.client_config import ClientConfig
+        client_yaml = Path(__file__).parent.parent.parent / 'configs' / 'clients' / 'devclub.yaml'
+        if client_yaml.exists():
+            config = ClientConfig.from_yaml(client_yaml)
+            if config.business and config.business.conversion_rates:
+                return dict(config.business.conversion_rates)
+    except Exception as e:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            f"[DT-17] Falha ao carregar conversion_rates do YAML: {e}. "
+            "Caindo no fallback hardcoded (deprecated)."
+        )
+
+    import warnings
+    warnings.warn(
+        "[DT-17] Caindo no fallback CONVERSION_RATES hardcoded em business_config.py "
+        "(deprecated). Configure conversion_rates no YAML do cliente ou passe explicitamente "
+        "ao construtor.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    from api.business_config import CONVERSION_RATES
+    return dict(CONVERSION_RATES)
 
 # Importar módulo de ajuste TMB
 from src.validation.tmb_adjuster import (
@@ -1373,9 +1409,10 @@ class DecileMetricsCalculator:
 
         Args:
             conversion_rates: taxas de conversão esperadas por decil (ClientConfig.business.conversion_rates).
-                              Se None, usa CONVERSION_RATES de business_config.py (devclub legacy).
+                              Se None, carrega do YAML do cliente DevClub via _load_default_conversion_rates()
+                              (fonte de verdade pós-DT-17 Etapa 0). Em código novo, prefira passar explícito.
         """
-        self.expected_rates = conversion_rates if conversion_rates is not None else CONVERSION_RATES
+        self.expected_rates = conversion_rates if conversion_rates is not None else _load_default_conversion_rates()
 
     def calculate_decile_performance(
         self,

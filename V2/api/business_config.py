@@ -12,7 +12,35 @@
 PRODUCT_VALUE = 1563.75
 
 # =============================================================================
-# 2. TAXAS DE CONVERSÃO CORRIGIDAS POR RECALL
+# ⚠️ DEPRECATED em 2026-05-11 (DT-17 Etapa 0)
+#
+# As constantes desta seção (CONVERSION_RATES, LEAD_VALUE_BY_DECILE_CHAMPION,
+# LEAD_VALUE_BY_DECILE_CHALLENGER e PRODUCT_VALUE acima) estão CONGELADAS e
+# NÃO devem ser lidas em runtime. A fonte de verdade em runtime é:
+#
+#   • configs/clients/{cliente}.yaml → seção `business`
+#       - business.product_value
+#       - business.conversion_rates (D01..D10)
+#   • configs/active_models/{cliente}.yaml → variante A/B
+#       - ab_test.variants[*].conversion_rates  (sobrescreve por variante)
+#
+# Estes valores permanecem aqui APENAS como:
+#   1. Referência histórica dos números calibrados em 30/jan/2026 (Champion
+#      jan30) e 28/abr/2026 (Challenger abr28). Mantidos para auditoria.
+#   2. Input do training_model.py:atualizar_business_config_com_recall durante
+#      retreino (fluxo legado a ser migrado nas fases 1-6 de DT-17).
+#
+# NÃO importar `CONVERSION_RATES` / `LEAD_VALUE_BY_DECILE_*` em código novo.
+# Use ClientConfig.from_yaml(...).business.conversion_rates.
+#
+# Histórico: o bug VAL=0 (30/abr-06/mai/2026) foi causado por divergência
+# entre estes hardcoded e o YAML. Esta etapa fecha o caminho de runtime; as
+# fases seguintes de DT-17 (treino escrevendo no MLflow + promoção copiando
+# pro YAML + deleção dos hardcoded) executam junto do próximo retreino.
+# =============================================================================
+
+# =============================================================================
+# 2. TAXAS DE CONVERSÃO CORRIGIDAS POR RECALL  (⚠️ DEPRECATED em runtime)
 # =============================================================================
 
 # CONTEXTO:
