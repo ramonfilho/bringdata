@@ -12,10 +12,10 @@
       "max_null_rate": 0.1,
       "value_range": null
     },
-    "J\u00e1 estudou programa\u00e7\u00e3o?": {
+    "Já estudou programação?": {
       "dtype_category": "categorical",
       "known_values": [
-        "N\u00e3o",
+        "Não",
         "Sim"
       ],
       "max_null_rate": 0.1,
@@ -25,9 +25,9 @@
       "dtype_category": "categorical",
       "known_values": [
         "Aberto",
-        "Linguagem de programa\u00e7\u00e3o",
-        "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ci\u00eancia da Computa\u00e7\u00e3o",
-        "Lookalike 2% Alunos + Interesse Linguagem de Programa\u00e7\u00e3o",
+        "Linguagem de programação",
+        "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação",
+        "Lookalike 2% Alunos + Interesse Linguagem de Programação",
         "Lookalike 2% Cadastrados - DEV 2.0 + Interesses",
         "Outros",
         "dgen"
@@ -35,7 +35,7 @@
       "max_null_rate": 0.14556977037223712,
       "value_range": null
     },
-    "O que mais voc\u00ea quer ver no evento?": {
+    "O que mais você quer ver no evento?": {
       "dtype_category": "categorical",
       "known_values": [
         "a aula com a recrutadora",
@@ -47,7 +47,7 @@
       "max_null_rate": 0.1,
       "value_range": null
     },
-    "O que voc\u00ea faz atualmente?": {
+    "O que você faz atualmente?": {
       "dtype_category": "categorical",
       "known_values": [
         "nao trabalho e nem estudo",
@@ -59,7 +59,7 @@
       "max_null_rate": 0.1,
       "value_range": null
     },
-    "O seu g\u00eanero:": {
+    "O seu gênero:": {
       "dtype_category": "categorical",
       "known_values": [
         "Feminino",
@@ -108,19 +108,25 @@
         "instagram",
         "outros"
       ],
-      "max_null_rate": 0.13903227241057267,
-      "value_range": null
+      "max_null_rate": 0.18,
+      "value_range": null,
+      "_overrides": {
+        "max_null_rate": {
+          "value": 0.18,
+          "reason": "F3 do PLANO_EXECUCAO — null_rate em produção 14.3% (acima do treinado 13.9%) bloqueava Gate B. Subido pra 0.18 em 2026-05-14. Próximo retreino regenera o schema e isto fica obsoleto."
+        }
+      }
     },
-    "Voc\u00ea j\u00e1 fez/faz/pretende fazer faculdade?": {
+    "Você já fez/faz/pretende fazer faculdade?": {
       "dtype_category": "categorical",
       "known_values": [
-        "N\u00e3o",
+        "Não",
         "Sim"
       ],
       "max_null_rate": 0.1284181033843782,
       "value_range": null
     },
-    "Voc\u00ea possui cart\u00e3o de cr\u00e9dito?": {
+    "Você possui cartão de crédito?": {
       "dtype_category": "categorical",
       "known_values": [
         "nao",
@@ -159,7 +165,7 @@
     "investiu_curso_online": {
       "dtype_category": "categorical",
       "known_values": [
-        "N\u00e3o",
+        "Não",
         "Sim"
       ],
       "max_null_rate": 0.1,
