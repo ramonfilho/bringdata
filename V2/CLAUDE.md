@@ -16,6 +16,7 @@ Leia este arquivo no início de toda sessão antes de qualquer tarefa.
 | `docs/ARQUITETURA_SISTEMA_COMPLETA.md` | Arquitetura, fluxos, endpoints, comandos |
 | `docs/PLANO_SAFEGUARD.md` | 📚 Catálogo técnico dos itens T1-X / T2-X / T3-X (especificação, não prioridade) |
 | `docs/PLANO_REFACTOR_MLOPS.md` | 📚 Catálogo técnico dos DT-X / R-X + histórico do refactor (especificação, não prioridade) |
+| `docs/PLANO_REMEDIACAO_LEAD_SCORE.md` | 📚 Catálogo técnico dos consumidores L1–L9 que leem `Lead.leadScore` / `Lead.decil` como verdade atemporal — fotografia do código que rodou na hora, não medição estável (especificação, não prioridade) |
 | `docs/AB_TEST.md` | 📚 Design do teste A/B (executar quando o gate for retomado) |
 | `docs/INDICE_DOCUMENTACAO.md` | Mapa de papéis e relações entre todos os docs |
 
@@ -35,6 +36,38 @@ Quando houver dúvida sobre como implementar um item específico: ir ao catálog
 | `/investigate-ab` | Verificar se o teste A/B está tecnicamente válido |
 | `/safeguard` | Auditoria completa de integridade do projeto |
 | `/docs` | Skill master de documentação — `mapear` (= antigo plan-integrator), `unificar`, `arquivar`, `indexar`, `auditar` |
+
+---
+
+## Comunicação no projeto — linguagem natural sempre primeiro
+
+**Regra obrigatória — aplica a conversas em sessão E a documentação nova.**
+
+Toda menção a um item técnico identificado por código — cenários da auditoria de quebra de produção (1.1, 1.2, 2.1, 3.1, etc.), salvaguardas (T1-X, T2-X, T3-X), dívidas técnicas (DT-X), pré-requisitos do segundo cliente (R-X), itens M1/M2/etc do roadmap, gates A/B/C/D, "Cluster N do Erro 2", etc. — precisa vir acompanhada de uma **descrição em linguagem natural** que permita entender o item sem abrir o catálogo correspondente.
+
+**Por que esta regra existe:** a documentação atual assume que o leitor lembra o nome de todas as funções do código e de cada item dos catálogos. Para um repositório com ~180k linhas e uma única pessoa atuando, isso é humanamente impossível — e o resultado é que cada conversa vira "pergunta pelo significado de cada sigla" e o tempo do operador se perde em decodificar em vez de decidir.
+
+**Formato esperado:**
+
+| Errado | Certo |
+|---|---|
+| "Vamos atacar o 1.2 e o 2.1 sequencial." | "Vamos atacar dois cenários: categorias UTM novas que não estavam na whitelist do modelo (cenário 1.2 da auditoria) e troca de modelo sem ajustar a tabela de valor por decil enviado ao Meta (cenário 2.1)." |
+| "M1 e DT-18 dependem de retreino." | "Duas dívidas dependem do próximo retreino: reativar o público 'MIX QUENTE' como categoria canônica do Medium (item M1 do PLANO_EXECUCAO), e normalizar as 4 features binárias da pesquisa — gênero, estudou programação, fez faculdade, investiu em curso (DT-18 do PLANO_REFACTOR_MLOPS)." |
+| "Gate D bloqueia se VAL=0." | "O Gate D (auditoria do YAML dentro da imagem Docker antes do canary) bloqueia o deploy se algum decil estiver com taxa de conversão zerada — protege contra o bug que mandou eventos com `value=0` pro Meta entre 30/abr e 06/mai." |
+
+**Aplicação prática:**
+
+1. Em mensagens da sessão: a primeira vez que um ID aparece **em cada resposta**, descreva. Repetições da mesma mensagem podem ser abreviadas.
+2. Em tabelas/listas: a coluna "Item" leva o nome verbal; o ID codificado vai entre parênteses ou em coluna lateral.
+3. Em documentação nova: título e introdução em linguagem natural; identificador codificado no rodapé (`*Identificador histórico: DT-X.*`).
+4. Quando recuperar contexto de outras sessões via memória ou docs: aplicar a mesma tradução antes de devolver pro usuário.
+
+**Catálogos onde os IDs vivem (para o leitor consultar quando quiser detalhe técnico):**
+- Cenários de auditoria → `docs/AUDITORIA_QUEBRA_PRODUCAO.md`
+- Salvaguardas (T-X) → `docs/PLANO_SAFEGUARD.md`
+- Dívidas técnicas (DT-X) e pré-requisitos do segundo cliente (R-X) → `docs/PLANO_REFACTOR_MLOPS.md`
+- Itens M-X de prioridade operacional → `docs/PLANO_EXECUCAO.md`
+- Erros históricos e Clusters → `docs/registro_erros_ml.md`
 
 ---
 

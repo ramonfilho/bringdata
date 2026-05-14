@@ -3,6 +3,10 @@
 **Atualizado:** 2026-05-08
 **Propósito:** evitar a "pegadinha de promoção" — substituir o `mlflow_run_id` do Champion sem migrar `encoding_overrides`, `conversion_rates` e códigos correlatos quebra produção em segundos. Este doc é o protocolo obrigatório.
 
+> **Nota sobre identificadores codificados (`T1-10`, `DT-12`, `DT-17`, `DT-18`):** este doc cita IDs curtos pra rastreabilidade. O nome verbal e contexto completo de cada um vivem nos catálogos:
+> - `T1-10` ("detecção de feature crítica zerada após encoding") — ver [`PLANO_SAFEGUARD.md`](PLANO_SAFEGUARD.md).
+> - `DT-12` ("encoding diferente por variante A/B"), `DT-17` ("eliminar duplicação business_config × YAML"), `DT-18` ("normalizar 4 features binárias raw") — ver [`PLANO_REFACTOR_MLOPS.md`](PLANO_REFACTOR_MLOPS.md).
+
 ---
 
 ## A pegadinha em uma linha

@@ -1,7 +1,8 @@
 """
 Compara o perfil de leads (pesquisa de captação) de um lançamento alvo
 contra duas referências:
-  - ref_pool: pool histórico (default Top 5 ROAS = LF40/41/44/45/47), via Sheets
+  - ref_pool: pool histórico (default Top 5 ROAS atribuível 60d = LF45/44/46/41/43,
+    ver docs/METODOLOGIA_TOP5_ROAS.md), via Sheets
   - ref_launch: lançamento mais recente já completo (default DEV20), via Railway ou Sheets
 
 Reusa `normalizar_categoria_para_comparacao` de src.monitoring.data_quality
@@ -41,7 +42,7 @@ load_dotenv(REPO_ROOT / '.env')
 
 RAILWAY_CUTOVER = pd.Timestamp('2026-02-25')
 
-DEFAULT_REF_POOL = ['LF40', 'LF41', 'LF44', 'LF45', 'LF47']
+DEFAULT_REF_POOL = ['LF45', 'LF44', 'LF46', 'LF41', 'LF43']  # Top 5 canonical (METODOLOGIA_TOP5_ROAS.md)
 DEFAULT_REF_LAUNCH = 'DEV20'
 DEFAULT_TARGET = 'LF54'
 

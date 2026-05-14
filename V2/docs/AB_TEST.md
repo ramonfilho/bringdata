@@ -5,6 +5,11 @@
 
 > Deploy do Champion v4 em produção via canary está em execução em sessão paralela. Roteamento exato do A/B (por UTM, por split de tráfego Cloud Run, ou híbrido) é definido na sessão de deploy. As seções abaixo descrevem o design canônico — adaptar à estratégia em execução.
 
+> **Nota sobre identificadores codificados (`DT-12`, `T1-X`, etc.):** este doc usa IDs curtos pra cruzar com commits. Nome verbal de cada um nos catálogos:
+> - Salvaguardas (`T1-X`) — [`PLANO_SAFEGUARD.md`](PLANO_SAFEGUARD.md)
+> - Dívida técnica (`DT-X`) — [`PLANO_REFACTOR_MLOPS.md`](PLANO_REFACTOR_MLOPS.md)
+> - **`DT-12`** especificamente: "encoding diferente por variante A/B" — mecanismo de override que permite Champion e Challenger usarem transformações diferentes pra idade/salário (resolvido em 01/abr; cenário de aposentadoria desse mecanismo está como **`DT-16`** no catálogo).
+
 ---
 
 ## O que é e por que existe

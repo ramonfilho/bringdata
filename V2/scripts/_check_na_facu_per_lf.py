@@ -24,7 +24,7 @@ col = 'Você já fez/faz/pretende fazer faculdade?'
 df['_m'] = df[col].isna() | (df[col].astype(str).str.lower().isin(['none', 'nan', '<na>', '']))
 
 # Por LF da referência
-ref = ['LF40', 'LF41', 'LF45', 'LF50', 'LF53']
+ref = ['LF45', 'LF44', 'LF46', 'LF41', 'LF43']  # Top 5 canonical — ver docs/METODOLOGIA_TOP5_ROAS.md
 print('=== Missing rate "faculdade" por LF da REFERÊNCIA ===')
 for lf in ref:
     sub = df[df['_lf'] == lf]

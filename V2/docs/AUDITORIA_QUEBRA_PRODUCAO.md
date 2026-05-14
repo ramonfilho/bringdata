@@ -100,19 +100,45 @@ Documento operacional, escrito em linguagem natural. Lista os cenários que **po
   - **T2-6 (exceções silenciosas)** — `app.py:1637` tinha `logger.error` mas faltava `exc_info=True`. Adicionado em 11/mai.
 - **0/23 ❌ FANTASMA** novo (T1-16 segue como o único fantasma conhecido, já catalogado como backlog).
 
-**Critério de fechamento:** ✅ atendido. Lista de salvaguardas com status real registrada acima; correções aplicadas. T1-16 continua sendo o único ❌ ativo e já tem dependência clara documentada (precisa do próximo retreino para capturar `proporcao_esperada_zero`).
+**Critério de fechamento:** ✅ atendido. Lista de salvaguardas com status real registrada acima; correções aplicadas. T1-16 (validador pós-encoding bloqueador) continua sendo o único item declarado-mas-ausente, e a pré-condição dele foi destravada em 11/mai (baselines calculáveis offline — ver `PLANO_SAFEGUARD.md` § "Validador pós-encoding").
 
-### Cenário 3.2 — Gates pré-deploy não exercitam todos os caminhos de produção
+### Princípio de design — roteamento via UTM como ferramenta, não como solução para bugs arquiteturais
+
+Discutido em sessão 11/mai. Roteamento (regras `utm_pattern` / `url_pattern` que mandam leads pra variantes A/B diferentes) é mecanismo válido para **comparar dois modelos** ou **isolar variante experimental**. Não é solução para contornar bug arquitetural — usar roteamento como "lead que tem normalização vai pro modelo novo, lead sem vai pro antigo" acumula complexidade exponencial: cada regra nova exige cobertura em smoke test, parity audit por variante, Gate C de equivalência de decil, e checklist de promoção.
+
+**Regra de ouro:** routing pra isolar experimento ✅, routing pra contornar bug não-fixado ❌. Bug arquitetural se resolve com **retreino do Champion** com o fix, não com regra de UTM nova. Aplicação concreta: DT-18 (4 features binárias raw) e DT-19 (Source TikTok) ficam bloqueados por retreino — não viram regra de roteamento.
+
+### Cenário 3.2 — Gates pré-deploy não exercitam todos os caminhos de produção — [📋 EM DOCUMENTAÇÃO]
 
 **O que aconteceria:** o smoke test, o parity audit ou o Gate C cobrem só o caminho default. Caminhos específicos (variantes A/B, encoding overrides, predictor override) nunca são testados pré-deploy. Bug específico desse caminho passa.
 
 **Por que isso importa:** já aconteceu (mesma origem do Cluster 5). Smoke test antigo chamava `/monitoring/daily-check/railway` sem contexto A/B — nunca exercitava o Champion com `encoding_overrides`. Parity audit antigo testava só `config.encoding` padrão. Os dois gaps foram fechados em 08/mai (smoke variantes + parity por variante), mas a classe persiste — qualquer caminho novo que entre precisa de cobertura explícita.
 
-**Como verificar:**
-- Listar todos os endpoints de scoring (`/predict/single`, `/predict/batch`, `/railway/process-pending`, `/capi/process_daily_batch`) e todos os ramos condicionais dentro de `production_pipeline.py` (A/B variant, predictor override, encoding override).
-- Para cada combinação que exista hoje em produção, confirmar que existe gate pré-deploy que a exercita.
+**Matriz de cobertura pré-deploy — estado em 11/mai/2026:**
 
-**Critério de fechamento:** matriz `endpoint × variante × override` com cobertura confirmada pra cada célula com tráfego real.
+Eixos:
+- **Endpoint** (5): `/predict/single`, `/predict/batch`, `/railway/process-pending`, `/capi/process_daily_batch`, `/webhook/lead_capture`.
+- **Variante A/B** (2): Champion `jan30` (path default, sem utm_campaign match), Challenger `abr28` (utm_campaign='PIXEL NOVO API').
+- **Override** (3): encoding override (ordinal idade/salário pro Champion), conversion_rates override (per-variant no YAML), predictor override (variante A/B usa seu próprio modelo).
+
+| Endpoint | Variante | Encoding override | Conversion override | Predictor override | Gate cobrindo |
+|---|---|---|---|---|---|
+| `/predict/batch` | Champion | ordinal (ativo) | rates Champion | predictor jan30 | Gate A (audit_encoding_ab Champion shim) + Gate B (smoke 5 leads default) + Gate C (capi-dry-run) |
+| `/predict/batch` | Challenger | OHE (default) | rates Challenger | predictor abr28 | Gate A (audit_encoding_ab Challenger) + Gate B (smoke /run-variants Challenger) + Gate C (force chlng+ prefix) |
+| `/predict/single` | Champion | ordinal | rates Champion | predictor jan30 | Coberto via /predict/batch que internamente delega |
+| `/predict/single` | Challenger | OHE | rates Challenger | predictor abr28 | Coberto via /predict/batch |
+| `/railway/process-pending` | Champion | ordinal | rates Champion | predictor jan30 | **Gap parcial**: smoke test não exercita esse endpoint diretamente, embora compartilhe `LeadScoringPipeline.run()` com /predict/batch |
+| `/railway/process-pending` | Challenger | OHE | rates Challenger | predictor abr28 | Mesmo gap parcial |
+| `/capi/process_daily_batch` | Champion | ordinal | rates Champion | predictor jan30 | Gate C (capi-dry-run mode) |
+| `/capi/process_daily_batch` | Challenger | OHE | rates Challenger | predictor abr28 | Gate C (capi-dry-run + force chlng+ prefix) |
+| `/webhook/lead_capture` | N/A (não scoreia) | — | — | — | Não scoreia, não precisa de gate de paridade |
+
+**Gaps identificados:**
+1. `/railway/process-pending` não tem smoke test direto. Compartilha o pipeline com `/predict/batch` então o risco é baixo, mas qualquer regressão específica desse endpoint (ex.: parsing do JSONB do Railway, dedup de batch) escapa.
+2. Combinações 100%-Challenger / 100%-Champion (sem split) não são exercitadas — hoje sempre vai 50/50 no Gate C. Risco operacional baixo (não é cenário planejado).
+3. Não há cobertura para o caminho "predictor_override do Challenger mas encoding default" — combinação atualmente inexistente em produção, mas seria armadilha se um Challenger novo entrar sem `encoding_overrides` definido.
+
+**Critério de fechamento:** matriz acima mantida atualizada a cada mudança de variante A/B ou endpoint novo. Gap (1) → adicionar smoke test específico do `/railway/process-pending` quando houver capacidade.
 
 ---
 
@@ -141,9 +167,9 @@ Documento operacional, escrito em linguagem natural. Lista os cenários que **po
 
 **Como verificar:**
 - Implementar de fato a validação pós-encoding feature-aware. Para cada feature com `importance ≥ 0.03`, calcular `(df[feature] == 0).mean()`. Se >X% leads têm zero E a distribuição esperada do treino tinha <X%, raise.
-- Pré-condição: capturar `proporcao_esperada_zero` por feature em `distribuicoes_esperadas.json` no próximo retreino.
+- Pré-condição (revisada em 11/mai): **destravada.** O `proporcao_esperada_zero` por coluna OHE é derivável offline dos `distribuicoes_esperadas.json` já registrados no MLflow. Fórmula: para coluna `feature_categoria`, `proporcao_esperada_zero = 1 - distribuicoes_esperadas['categorical'][feature][categoria]`. Não precisa de retreino.
 
-**Critério de fechamento:** validação implementada e testada com batch sintético contendo feature zerada.
+**Critério de fechamento:** baselines `configs/feature_zero_baselines/{run_id}.json` gerados pra Champion e Challenger via script offline, e validação pós-encoding implementada lendo desses baselines em runtime. Testar com batch sintético com feature zerada.
 
 ---
 
@@ -171,7 +197,8 @@ Cenários conhecidos que **não passam o critério de ≥2% de impacto OU não t
 
 | Cenário | Por que não atacar agora |
 |---|---|
-| Macros literais TikTok no `utm_medium` | ~1.3% volume, score levemente degradado, ação está com gestor |
+| Macros literais TikTok no `utm_medium` | ~1.3% volume, score levemente degradado, ação está com gestor (Isaque). Confirmado em 11/mai: sem ação nossa adicional. |
+| `MIX QUENTE` como categoria canônica do Medium (LF54 frio = 0%; DEV quente = 30-46%) | Decidido em 11/mai (caminho C da discussão): incluir `MIX QUENTE` como categoria canônica no próximo retreino do Champion. Coluna OHE fica zerada em LF, ativa em DEV. Zero routing. Item M1 do PLANO_EXECUCAO. |
 | Gate C de deploy com payload incompleto | Corrigido hoje (commit `4c6c472`) |
 | In-app browser produzindo cliques sem `fbclid` | Não afeta score — é cosmético na atribuição |
 | Lead com TZ na borda 23:59 BRT | Sem precedente recente, baixíssima frequência |

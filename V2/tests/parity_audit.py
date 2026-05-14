@@ -358,16 +358,172 @@ def audit_encoding_ab_variants():
     return overall_ok
 
 
+def audit_schema_against_mlflow():
+    """
+    [T1-19] Valida schema do output do encoding contra o feature_registry real
+    do MLflow para cada variante A/B ativa.
+
+    Cobre o caso onde o snapshot por-variante (T1-15) passa OK, mas o conjunto
+    de colunas geradas pelo pipeline não bate com o que o modelo da variante
+    espera consumir. Sintomas reais que isso detecta:
+      - Refactor de category_unification que muda nomes de coluna OHE
+        (ex.: 'genero_Masculino' → 'genero_masculino') quebra modelos antigos
+        que ainda têm os nomes não-normalizados no feature_registry.
+      - Treino novo que adiciona/remove features sem atualizar o feature_registry
+        do modelo legado.
+      - Encoding produz dtype object onde o modelo espera int/float.
+
+    Para cada variante ativa:
+      1. Lê o feature_registry.json do mlflow_run_id (com fallback model/ subdir).
+      2. Aplica encoding SEM alinhamento de registry (artifacts={}), pegando
+         o output "cru" — não enche colunas faltantes com 0, não reordena.
+      3. Compara contra registry['model_input_features']['ordered_list']:
+         - Colunas no registry mas ausentes do output → ERRO (modelo espera mas pipeline não produz; bug deploy-bloqueador).
+         - Colunas no output mas ausentes do registry → WARNING (modelo ignora; pode indicar drift de categorias mas não trava).
+         - Dtypes divergentes contra registry['expected_dtypes'] → ERRO (modelo espera int mas recebe object, ou similar).
+    """
+    import json
+    from V2.src.core.encoding import apply_encoding, merge_encoding
+    from V2.src.core.client_config import ClientConfig, ABTestConfig
+
+    config = ClientConfig.from_yaml(
+        os.path.join(ROOT, 'V2', 'configs', 'clients', 'devclub.yaml')
+    )
+    ab_yaml = os.path.join(ROOT, 'V2', 'configs', 'active_models', 'devclub.yaml')
+
+    if not os.path.exists(ab_yaml):
+        print("  [SKIP] active_models/devclub.yaml ausente — sem A/B configurado")
+        return None
+
+    ab = ABTestConfig.from_active_model_yaml(ab_yaml)
+    if not ab.enabled:
+        print("  [SKIP] ab_test.enabled=false — sem variantes pra auditar")
+        return None
+    if not ab.variants:
+        print("  [!] ab_test.enabled=true mas nenhum variant declarado")
+        return False
+
+    df_input = _load('snapshot_encoding_input')
+    overall_ok = True
+    print(f"  Validando schema de {len(ab.variants)} variante(s) contra MLflow...")
+
+    for variant_name, variant in ab.variants.items():
+        run_id = variant.run_id
+        # Localiza o feature_registry — tenta raiz de artifacts e model/ subdir
+        # (mesmo padrão de core/medium.py:_load_valid_categories).
+        candidates = [
+            os.path.join(ROOT, 'V2', 'mlruns', '1', run_id, 'artifacts', 'feature_registry.json'),
+            os.path.join(ROOT, 'V2', 'mlruns', '1', run_id, 'artifacts', 'model', 'feature_registry.json'),
+        ]
+        registry_path = next((p for p in candidates if os.path.exists(p)), None)
+        if not registry_path:
+            print(f"  [!] '{variant_name}' (run_id={run_id[:8]}): "
+                  f"feature_registry.json não encontrado em mlruns/1/{run_id[:8]}/artifacts/")
+            overall_ok = False
+            continue
+
+        with open(registry_path) as f:
+            registry = json.load(f)
+
+        expected_cols = registry.get('model_input_features', {}).get('ordered_list', [])
+        expected_dtypes = registry.get('expected_dtypes', {})
+        if not expected_cols:
+            print(f"  [!] '{variant_name}': registry sem 'model_input_features.ordered_list'")
+            overall_ok = False
+            continue
+
+        eff_encoding = merge_encoding(config.encoding, variant.encoding_overrides)
+
+        # Encoding com artifacts={} = output cru, sem alinhamento ao registry.
+        # É exatamente o que queremos comparar contra o registry esperado.
+        try:
+            df_actual = apply_encoding(df_input.copy(), eff_encoding, artifacts={})
+        except Exception as e:
+            print(f"  [!] '{variant_name}' QUEBROU em apply_encoding: "
+                  f"{type(e).__name__}: {str(e)[:200]}")
+            overall_ok = False
+            continue
+
+        actual_cols = set(df_actual.columns)
+        expected_set = set(expected_cols)
+
+        missing = sorted(expected_set - actual_cols)
+        extras = sorted(actual_cols - expected_set)
+
+        ok_variant = True
+
+        if missing:
+            print(f"\n  [ERRO] '{variant_name}' ({len(missing)} colunas no registry mas AUSENTES do output):")
+            for col in missing[:15]:
+                print(f"    - {col}")
+            if len(missing) > 15:
+                print(f"    ... +{len(missing) - 15} colunas")
+            ok_variant = False
+
+        if extras:
+            print(f"\n  [WARN] '{variant_name}' ({len(extras)} colunas no output mas IGNORADAS pelo modelo):")
+            for col in extras[:10]:
+                print(f"    - {col}")
+            if len(extras) > 10:
+                print(f"    ... +{len(extras) - 10} colunas")
+
+        # Dtype check — só para colunas que existem em ambos os lados.
+        dtype_mismatches = []
+        if expected_dtypes:
+            cols_em_ambos = actual_cols & expected_set
+            for col in cols_em_ambos:
+                expected = expected_dtypes.get(col)
+                actual = str(df_actual[col].dtype)
+                if expected and not _dtypes_compatible(actual, expected):
+                    dtype_mismatches.append((col, expected, actual))
+
+        if dtype_mismatches:
+            print(f"\n  [ERRO] '{variant_name}' ({len(dtype_mismatches)} colunas com dtype divergente):")
+            for col, expected, actual in dtype_mismatches[:10]:
+                print(f"    - {col}: registry esperava '{expected}', encoding produziu '{actual}'")
+            if len(dtype_mismatches) > 10:
+                print(f"    ... +{len(dtype_mismatches) - 10} colunas")
+            ok_variant = False
+
+        if ok_variant:
+            print(f"  [OK] '{variant_name}' ({run_id[:8]}): {len(expected_cols)} colunas batem com registry, dtypes válidos")
+        else:
+            overall_ok = False
+
+    return overall_ok
+
+
+def _dtypes_compatible(actual: str, expected: str) -> bool:
+    """
+    Compatibilidade frouxa de dtypes — int8/int16/int32/int64 são equivalentes
+    para fins de schema (pandas escolhe um conforme range dos dados), float32
+    vs float64 idem. Object é o caso problemático: encoding deveria ter virado
+    numérico mas ficou string.
+    """
+    a = actual.lower()
+    e = expected.lower()
+    if a == e:
+        return True
+    if 'int' in a and 'int' in e:
+        return True
+    if 'float' in a and 'float' in e:
+        return True
+    if a == 'bool' and 'int' in e:
+        return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 
 AUDITS = {
-    'utm':         audit_utm,
-    'medium':      audit_medium,
-    'fe':          audit_fe,
-    'encoding':    audit_encoding,
-    'encoding_ab': audit_encoding_ab_variants,
+    'utm':           audit_utm,
+    'medium':        audit_medium,
+    'fe':            audit_fe,
+    'encoding':      audit_encoding,
+    'encoding_ab':   audit_encoding_ab_variants,
+    'schema_mlflow': audit_schema_against_mlflow,
 }
 
 def main():

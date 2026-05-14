@@ -12,6 +12,26 @@ Referências:
 
 ---
 
+## Glossário rápido (termos do projeto que aparecem ao longo do doc)
+
+Adicionado em 10/05/2026 quando a documentação foi reorganizada pra leitura humana primeiro. Termos universais (encoding, OHE, dtype, fallback, ML jargon clássico) ficam sem explicação. Termos específicos do nosso codebase/config são explicados aqui uma vez:
+
+- **Single Source of Truth** — princípio do refactor: cada transformação de dados existe em UM lugar só (`src/core/`), e treino/produção/monitoramento todos importam dele. Antes do refactor, a mesma transformação era reimplementada 2-3 vezes em arquivos diferentes, com divergências silenciosas entre eles.
+- **`src/core/`** — diretório com as funções puras de transformação de dados. Cada função recebe um DataFrame + um `ClientConfig` e devolve o DataFrame transformado. Não tem estado, não tem hardcode de cliente.
+- **`ClientConfig`** — dataclass tipado que carrega todos os parâmetros de um cliente do YAML. Tem sub-configs (`encoding`, `feature`, `model`, `business`, `monitoring`, etc.). É o que torna `core/` parametrizável por cliente.
+- **`configs/clients/{cliente}.yaml`** — config **estática** do cliente: encoding default, mapeamentos UTM/Medium, schema da pesquisa, hyperparameters do treino, business config. Muda raramente.
+- **`configs/active_models/{cliente}.yaml`** — config **dinâmica** do experimento em produção: qual `mlflow_run_id` está ativo, variantes do A/B test, ajustes específicos por variante (encoding, conversion rates). Muda a cada retreino ou A/B novo.
+- **`mlflow_run_id`** — identificador único de cada treino no MLflow. É como cada modelo é referenciado em todo o sistema.
+- **`feature_registry`** — JSON que o `train_pipeline` salva junto com o modelo no MLflow, listando quais colunas o modelo espera receber e em que ordem. É o que o `apply_encoding` em produção tenta replicar.
+- **`--set-active`** — flag do `train_pipeline.py` que marca um modelo recém-treinado como o ativo no `configs/active_models/{cliente}.yaml`. Sem ela, o modelo é treinado e registrado no MLflow mas não vai pra produção.
+- **shim de variante (Champion shim)** — entrada no YAML de variantes A/B que existe **só pra hospedar a configuração** (encoding, conversion rates) de um modelo legado, sem fazer roteamento de tráfego próprio. Funciona como "configuração-fantasma": o modelo legado continua sendo usado pra leads que não caem em variante específica, mas a config dele fica acessível pelo mesmo mecanismo do A/B.
+- **override (de variante)** — ajuste específico de uma variante A/B em cima da regra base do cliente. Pode ser de encoding, de predictor (modelo) ou de conversion_rates. Quem decide qual override aplicar é o roteador A/B no momento do scoring.
+- **OHE (one-hot encoding)** vs **encoding ordinal** — termos universais de ML, mas no nosso contexto: idade e faixa salarial podem ser tratadas como categorias soltas (uma coluna por faixa, OHE) ou em ordem (uma coluna só, com valor 0..N na ordem `< 18 < 18-24 < 25-34 ...`). Modelos diferentes treinaram com formatos diferentes.
+- **canary** — uma revisão recém-deployada que recebe % crescente de tráfego (0% → 10% → 50% → 100%) antes de ir a 100%, pra detectar problema com exposição limitada.
+- **Identificadores DT-X / R-X / T1-X** — IDs codificados que aparecem no histórico de commits e PRs. Cada item técnico abaixo tem o ID no rodapé (`*Identificador histórico: DT-X.*`); os títulos novos descrevem em linguagem natural o que o item faz. Use os IDs só pra cruzar com commits antigos.
+
+---
+
 > ## ⚠️ AÇÃO URGENTE — PRAZO: 15/04/2026
 >
 > **Retreino com importance weighting (DevClub)**
@@ -800,7 +820,7 @@ Itens identificados na revisão de 20/03/2026 que **não bloqueiam** Fase 3b/3c 
 
 `core/encoding.py`, `core/medium.py`, `src/model/prediction.py` e `src/validation/data_loader.py` agora derivam o experiment_id em runtime via `mlflow.get_run(run_id).info.experiment_id`, com fallback para o valor do YAML apenas em caso de falha. `mlflow_experiment_id` no YAML e dataclass marcado como DEPRECATED.
 
-### DT-2 — Ausência de testes unitários em `src/core/`
+### Ausência de testes unitários em `src/core/`
 
 Toda validação atual é integration test (pipeline de treino ponta a ponta, ~10–20 minutos). Não há testes unitários isolados para `core/utm.py`, `core/medium.py`, `core/encoding.py`. Com dois clientes, qualquer mudança em `core/` requererá validação para ambos — sem testes unitários, isso é um pipeline completo por cliente.
 
@@ -809,6 +829,8 @@ Toda validação atual é integration test (pipeline de treino ponta a ponta, ~1
 **Condição para fazer:** após dados do Cliente B chegarem. Motivo: o principal valor dos testes é serem parametrizados por dois `ClientConfig` reais — escrever com um só cliente entrega metade do valor e provavelmente exige reescrita quando o segundo chegar. Não bloqueia o PR nem o deploy.
 
 **Condição para não adiar mais:** antes de qualquer mudança em `core/utm.py`, `core/medium.py` ou `core/encoding.py` com dois clientes ativos.
+
+*Identificador histórico: DT-2.*
 
 ### ~~DT-3 — `preprocessing.py` em `core/` não documenta a exceção de score columns~~ ✅ RESOLVIDO (22/03/2026)
 
@@ -837,7 +859,7 @@ Campos adicionados ao template, ao dataclass e ao `devclub.yaml`:
 - Seção `business:` completa (product_value, conversion_rates, spend_threshold, color_thresholds, min_roas_safety, cap_variation_max, confidence_sigmoid, roas_target)
 - `ingestion.tmb_pedidos_detection_columns`, `tmb_pedidos_column_mapping`, `tmb_pedidos_active_status_exclude` (#154–#156)
 
-### DT-7 — Threshold de Medium (Célula 11) calculado sobre janela errada
+### Threshold do whitelist de Medium calculado sobre a janela errada
 
 O threshold de 2.5% que define categorias válidas de UTM Medium em `core/medium.py` (modo treino) é computado sobre o dataset completo **antes** do corte temporal da Célula 13. Isso faz com que campanhas com alta frequência histórica mas que desapareceram antes do final do training set passem no critério e entrem no feature registry — causando alertas de "features faltantes" no monitoramento de lançamentos futuros onde essas campanhas não rodam.
 
@@ -854,6 +876,8 @@ Todas as três campanhas Lookalike representam >5% do dataset histórico complet
 **Fix:** calcular o threshold de frequência sobre os dados pós-cutoff (janela efetiva de treino), ou exigir presença mínima no test set para que uma categoria entre no feature registry. Arquivo a modificar: `src/core/medium.py` — função `unify_medium`, passo 5a (modo treino).
 
 **Prioridade:** baixa — não impacta predições (modelo preenche com 0); apenas gera alertas corretos no monitoramento. Endereçar antes de escalar para 3+ clientes.
+
+*Identificador histórico: DT-7.*
 
 ### DT-8 — Features fantasmas em `production_pipeline.py` ✅ RESOLVIDO
 
@@ -919,7 +943,7 @@ Evidência: `mlruns/1/a859c68b1cb94c3b93767a3131eda89a/artifacts/feature_registr
 
 **Ação (Opção A):** na Fase 3 da unificação, remover idade/salário de `ordinal_variables` do `clients/devclub.yaml`. Jan30 mantém override ordinal (passa a ser a exceção explícita ao default). Mar24 herda OHE (como foi treinado). Ver `PLANO_EXECUCAO.md` → Fase 3 → "Decisão arquitetural — Opção A".
 
-### DT-13 — Brecha de dígitos curtos em `_unify_term`
+### Brecha de dígitos curtos no fallback de UTM Term (deixa códigos numéricos passarem como categoria nova)
 
 `src/core/utm.py:118` — a condição de fallback `if not valor.isdigit() or len(valor) > threshold` foi escrita para mandar IDs longos para `'outros'` enquanto preservaria códigos numéricos curtos conhecidos. Na prática, nenhuma categoria numérica existe na whitelist DevClub (`Term: instagram / facebook / outros`), e a exceção apenas cria uma brecha: qualquer string 100% numérica com até 10 dígitos permanece como valor raw em vez de virar `'outros'`.
 
@@ -959,9 +983,11 @@ O parâmetro `config.term_long_id_threshold` pode ser marcado DEPRECATED no YAML
 
 **Referência cruzada:** `Erros_cometidos.md` item 11 (mesma lição, ocorrência anterior em UTM Source — 20/02–26/02/2026); `PLANO_EXECUCAO.md` "Gatilho de retreino por drift de públicos".
 
+*Identificador histórico: DT-13.*
+
 ---
 
-### DT-14 — Nomenclatura `clients/devclub.yaml` vs `active_models/devclub.yaml` confunde
+### Nomenclatura `clients/{cliente}.yaml` vs `active_models/{cliente}.yaml` confunde
 
 **Sintoma:** existem dois arquivos com o mesmo nome (`devclub.yaml`) em diretórios distintos: `configs/clients/devclub.yaml` e `configs/active_models/devclub.yaml`. A nomenclatura não comunica o papel de cada um, e a duplicação do nome força quem trabalha no projeto a memorizar o significado por convenção.
 
@@ -982,9 +1008,11 @@ O parâmetro `config.term_long_id_threshold` pode ser marcado DEPRECATED no YAML
 
 **Prioridade:** baixa (não quebra nada). Reabrir quando houver janela para refactor de paths.
 
+*Identificador histórico: DT-14.*
+
 ---
 
-### DT-15 — `ABTestVariantConfig` tem campos obrigatórios não-utilizáveis pelo path Champion
+### Variante A/B exige campos obrigatórios que o caminho do Champion nunca usa
 
 **Sintoma:** [`ABTestVariantConfig`](../src/core/client_config.py#L342-L352) declara `capi_event_name`, `capi_event_name_high_quality` e `conversion_rates` como obrigatórios no dataclass + parser ([client_config.py:382-388](../src/core/client_config.py#L382-L388)). Mas em produção esses campos só são consumidos quando `ab_v` (variante matcheada por `match_variant`) é truthy ([app.py:3458-3464](../api/app.py#L3458-L3464)). Pro path Champion (variante não matcheia, `ab_v=None`), event_name e conversion_rates vêm de `client_config.capi.*` em `clients/devclub.yaml`, e o pixel vem de `client_config.capi.pixel_id`.
 
@@ -1001,9 +1029,11 @@ O parâmetro `config.term_long_id_threshold` pode ser marcado DEPRECATED no YAML
 
 **Prioridade:** baixa, mas com alavancagem alta no esclarecimento. Bom candidato pra agrupar com DT-14 num único refactor de configs.
 
+*Identificador histórico: DT-15.*
+
 ---
 
-### DT-16 — Tornar `encoding_overrides` legado por convergência (estratégia preferida)
+### Aposentar o mecanismo de "encoding override" treinando próximo Champion já com OHE nativo
 
 **Contexto:** DT-12 introduziu `encoding_overrides` para resolver a divergência de encoding (ordinal vs OHE) entre Champion jan30 (treinado pré-Opção A com ordinal) e modelos novos (treinados com OHE default). DT-14 e DT-15 documentam débitos colaterais desse mecanismo: nomenclatura de configs que confunde, campos obrigatórios não-utilizáveis no shim do Champion, código duplicado em monitoring que precisa replicar a lógica de merge_encoding (resolvido em 05/05/2026 mas reforça o cheiro de design, e em 06/05/2026 transformado em loop per-variant via helper `_iter_active_variants` que itera Champion + Challenger emitindo alertas com `variant_name`).
 
@@ -1043,9 +1073,11 @@ O parâmetro `config.term_long_id_threshold` pode ser marcado DEPRECATED no YAML
 
 **Prioridade:** alta — a soma de DT-12+DT-14+DT-15+bug monitoring é mais cara que esse passo único de deprecation.
 
+*Identificador histórico: DT-16.*
+
 ---
 
-### DT-17 — Eliminar duplicação `api/business_config.py` × YAML do cliente; fluxo "treino popula → promoção copia"
+### Eliminar duplicação entre `api/business_config.py` e o YAML do cliente — treino escreve no MLflow, promoção copia pro YAML
 
 **Contexto:** o sistema tem hoje **três** lugares onde dados de negócio são definidos, com responsabilidades sobrepostas:
 
@@ -1099,19 +1131,29 @@ Ou seja: **treino ≠ deploy.** O YAML do cliente é configuração de produçã
 
 **Sinalização do usuário (06/05/2026):** "não vejo sentido em usar dados do cliente hardcoded no dataclass" — afirmação correta. Os defaults atuais (`product_value: float = 1563.75`) violam o princípio multi-cliente do refactor.
 
-**Recomendação de momento:** **NÃO é o próximo passo imediato.** A sequência de prioridades pós-Fix A:
+**Etapa 0 — atacável imediatamente (sem retreino, ~30min):**
 
-1. **Próximo deploy** aplica Fix A → comprova value correto na Meta. (0,5h, depende de promoção do canary atual `00402-hoq` → 100%.)
-2. **DT-16** (matar `encoding_overrides`) — bloqueado pelo próximo Champion mas alta prioridade quando ele sair.
-3. **DT-17 fases 1-3** (preparação preditiva sem dependência de retreino) — pode ser feito em paralelo a (2). ~1h.
-4. **Próximo retreino** dispara DT-16 + DT-17 fases 4-5 simultaneamente. Execução conjunta é eficiente — uma sessão de promoção exercita os dois fluxos novos.
-5. DT-17 fase 6 (deletar legado) — depois de N semanas estáveis.
+A duplicação fonte do bug VAL=0 é o fato de **`CONVERSION_RATES` e `LEAD_VALUE_BY_DECILE_*` estarem hardcoded em `api/business_config.py`** simultaneamente com cópias no YAML. Hoje, em runtime, a variante A/B sobrescreve com valores do YAML (`active_models/{cliente}.yaml`), mas os hardcoded permanecem como armadilha — qualquer drift entre os dois lugares passa silencioso até o Gate D pegar (e Gate D não roda em todos os fluxos).
 
-**Prioridade:** ALTA arquiteturalmente, MÉDIA em urgência (Fix A já estancou o sangramento). Faz sentido enfileirar com DT-16 no mesmo trabalho de "convergência pós-próximo Champion".
+Atacar agora:
+1. Marcar `CONVERSION_RATES`, `LEAD_VALUE_BY_DECILE_CHAMPION` e `LEAD_VALUE_BY_DECILE_CHALLENGER` em `business_config.py` como `DEPRECATED` via comentário + `warnings.warn` no import — sem deletar ainda (transição segura).
+2. Adicionar leitura desses valores **a partir do YAML do cliente** (`configs/clients/devclub.yaml:business.conversion_rates` já existe pós-Fix A).
+3. Atualizar `training_model.py:atualizar_business_config_com_recall` para escrever no YAML em vez de no `business_config.py`.
+4. Após próximo retreino estável: deletar os hardcoded.
+
+Fechamento desta etapa: **uma única fonte de verdade** (YAML) para `conversion_rates` em runtime. Gate D continua como salvaguarda. Próximas etapas (1-6 abaixo) ficam pra quando o próximo Champion sair.
+
+**Sequência completa (fases 1-6) permanece como abaixo, executável junto do próximo retreino.**
+
+**Atualização de status (2026-05-11):** etapa 0 é o próximo passo imediato (decidido com o usuário). Foi reclassificada de "NÃO é o próximo passo imediato" para "atacar agora" porque (a) Fix A mitigou mas não unificou, (b) usuário priorizou direção arquitetural bundle-imutável (Sessão 3.2 da discussão), (c) etapa 0 é independente de retreino.
+
+**Prioridade:** ALTA agora (etapa 0); fases 1-6 ficam ALTA para quando próximo Champion sair.
+
+*Identificador histórico: DT-17.*
 
 ---
 
-### DT-18 — Normalizar 4 features binárias raw (bloqueia A/B com Challenger novo)
+### Normalizar 4 features binárias raw (`genero`, `estudouProgramacao`, `faculdade`, `investiuCurso`) — bloqueia A/B com Challenger novo
 
 **Contexto:** quatro features categóricas vindas da pesquisa do front chegam ao modelo **sem normalização** (sem `.lower()`, sem `unidecode`, sem `.strip()`):
 
@@ -1159,6 +1201,59 @@ A exclusão é **deliberada** e está documentada com comentário longo em [src/
 - `V2/docs/PLANO_EXECUCAO.md` (item de pré-requisito do próximo retreino)
 
 **Prioridade:** **alta** — bloqueia A/B com Challenger novo. Risco operacional atual baixo (front estável), mas a primeira variação de casing quebra silenciosamente.
+
+*Identificador histórico: DT-18.*
+
+### Unificação de Source/Term ignora a whitelist da variante A/B em execução
+
+**Contexto (descoberto em 2026-05-11, Cenário 1.2 do `AUDITORIA_QUEBRA_PRODUCAO.md`):** a unificação de Medium em [src/core/medium.py:99-169](../src/core/medium.py#L99-L169) **já é variant-aware** — carrega a whitelist canônica de `distribuicoes_esperadas.json` do `mlflow_run_id` da variante em execução (resolvido em `production_pipeline.py:279` como `predictor_override or self.predictor`). A unificação de Source/Term em [src/core/utm.py](../src/core/utm.py), em contraste, **só usa o YAML global do cliente** (`config.source_canonical_values` e `term_mappings`). Sem variant info, sem artifacts.
+
+**Por que vira bug:** o YAML hoje aceita `tiktok` e `youtube` como Source canônico, porque a Challenger `abr28` (`5d158f0aa6e54b489498470446194a6c`) tem `Source_tiktok` e `Source_youtube` no `feature_registry`. Mas o Champion `jan30` (`d51757f5041c44b7ab1a056fce8c3c35`) só tem `Source_facebook_ads`, `Source_google_ads`, `Source_outros`. Resultado:
+
+| Lead `Source=tiktok` | Path Champion (default, sem utm_campaign matching) | Path Challenger (`utm_campaign='PIXEL NOVO API'`) |
+|---|---|---|
+| Resultado | `Source_*` todas zeradas (3 colunas = 0) | `Source_tiktok = 1` ✅ |
+| Volume últimos 30d | 1.93% (2186 leads) atinge o path Champion | poucos leads tiktok têm utm_campaign='PIXEL NOVO API' |
+
+Mesma classe do Cluster 3, 4 e 5 do Erro 2 — feature OHE silenciosamente zerada por um lead com categoria não vista pela variante.
+
+**Solução proposta:** espelhar a arquitetura de `core/medium.py` em `core/utm.py`:
+
+1. `unify_utm(df, config, artifacts=None)` — adicionar parâmetro `artifacts` opcional.
+2. `_unify_source` — antes de aplicar `config.source_canonical_values`, tentar carregar `distribuicoes_esperadas['categorical']['Source'].keys()` do `mlflow_run_id` dos `artifacts`. Mesmo padrão de `_load_valid_categories` em `core/medium.py:99-169` (com fallback fail-loud).
+3. `_unify_term` — análogo para Term.
+4. `production_pipeline.py:268` — mover chamada de `unify_utm` para depois da construção do `_artifacts` (linha 279), passar `_artifacts`.
+5. `train_pipeline.py` — chamar `unify_utm` sem `artifacts` (mantém comportamento atual de descobrir whitelist a partir dos dados do treino).
+
+**Pré-requisitos obrigatórios (não pular):**
+
+A. **Auditoria de paridade variant-aware para UTM** — estender `audit_utm` em `V2/tests/parity_audit.py` para rodar por variante, igual `audit_encoding_ab_variants` já faz. Sem isso, refactor entra sem cobertura.
+
+B. **Snapshot por variante para UTM** — criar `V2/tests/capture_utm_snapshots_ab.py` análogo ao `capture_encoding_snapshots_ab.py`. Captura input snapshot diferenciado por variante.
+
+C. **Validador pós-encoding cross-coluna** — regra "as 3-5 colunas `Source_*` de uma variante não podem estar TODAS simultaneamente zeradas para o mesmo lead". Roda no smoke test (`scripts/smoke_test_revision.py`) e em runtime via `feature_validator.py`. Detecta exatamente o cenário "categoria nova passou pela unificação sem mapear na whitelist da variante".
+
+D. **Teste unitário em `tests/test_unify_utm.py`** — input com `Source=tiktok`, executa via Champion e via Challenger, assert resultado correto em cada variante.
+
+**Gates de deploy que cobrem o refactor:**
+- Gate A (parity audit) **com cobertura variant-aware adicionada via Pré-req A**.
+- Gate B (smoke test variantes) cobre execução por variante.
+- Gate C (equivalência de decil): leads `tiktok` antes do refactor (decil X com Source zerado) vs após (decil Y com Source válido). Mudança esperada — passar `--expect-score-change` se >0 leads divergirem por causa do refactor.
+
+**Estimativa de tempo:** ~3h totais (1.5h refactor + 1.5h pré-requisitos A-D).
+
+**Impacto prático imediato:** ~1.93% dos leads do path Champion (≈70 leads/dia, ≈2100 leads/30d em volume atual) deixam de ter encoding Source zerado. Crescente se o gestor escalar TikTok.
+
+**Cross-refs:**
+- `V2/docs/AUDITORIA_QUEBRA_PRODUCAO.md` Cenário 1.2 (achado original).
+- `V2/src/core/medium.py:99-169` (referência arquitetural — já é variant-aware).
+- `V2/src/core/utm.py:52-103` (`_unify_source` — alvo do refactor).
+- `V2/src/production_pipeline.py:268, 296` (assimetria atual: medium recebe artifacts, utm não).
+- `V2/configs/clients/devclub.yaml:148-185` (YAML utm que hoje guarda whitelist da união de variantes).
+
+**Prioridade:** média — volume atual baixo (1.93%), mas precondição clara e classe de bug com precedente histórico (Clusters 3, 4, 5 do Erro 2). Refactor desbloqueia adicionar qualquer Source/Term novo via Challenger sem dependência de retreino do Champion.
+
+*Identificador histórico: DT-19.*
 
 ---
 

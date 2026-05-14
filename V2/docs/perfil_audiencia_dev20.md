@@ -1,5 +1,7 @@
 # Perfil de audiência — DEV20 (em captação)
 
+> **Nota:** análise feita com pool de referência anterior (Top 5/6 antigo). Definição canônica atual em [docs/METODOLOGIA_TOP5_ROAS.md](METODOLOGIA_TOP5_ROAS.md) (recalibrada 2026-05-14: LF45, LF44, LF46, LF41, LF43).
+
 **Atualizado:** 2026-05-04
 **Janela DEV20:** captação 2026-04-21 → 2026-05-04 (29.298 leads); vendas 11/05 → 17/05.
 

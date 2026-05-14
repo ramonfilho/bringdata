@@ -34,7 +34,10 @@ MATCHED_PARQUET = REPO_ROOT / 'outputs' / 'analysis' / 'matched_dataset_2026-05-
 RAILWAY_CACHE = REPO_ROOT / 'files' / 'validation' / 'cache' / 'railway_leads_2024-12-30_2026-05-08.parquet'
 LAUNCHES_YAML = REPO_ROOT / 'configs' / 'launches.yaml'
 
-REFERENCE_LFS = ['LF40', 'LF41', 'LF45', 'LF50', 'LF53']
+# Top 5 ROAS atribuível 60d (definido em docs/METODOLOGIA_TOP5_ROAS.md).
+# Última recalibragem: 2026-05-14.
+# Pra regerar: `python -m scripts.compute_top5_roas_attributable`
+REFERENCE_LFS = ['LF45', 'LF44', 'LF46', 'LF41', 'LF43']
 
 CATEGORICAL_FEATURES = [
     'O seu gênero:',

@@ -1,5 +1,7 @@
 # Perfil de audiência — LF54 (em captação)
 
+> **Nota:** análise feita com pool de referência anterior (Top 5/6 antigo). Definição canônica atual em [docs/METODOLOGIA_TOP5_ROAS.md](METODOLOGIA_TOP5_ROAS.md) (recalibrada 2026-05-14: LF45, LF44, LF46, LF41, LF43).
+
 **Atualizado:** 2026-05-07  
 **Janela LF54:** captação 2026-05-05 → 2026-05-11 (2,954 leads, 2/7 dias).  
 **Vendas:** 2026-05-18 → 2026-05-24.

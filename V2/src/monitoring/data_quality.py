@@ -788,6 +788,37 @@ class DataQualityMonitor:
 
         return alerts
 
+    @staticmethod
+    def _normalize_for_silence_match(s) -> str:
+        """Normaliza categoria pra comparação case+accent-insensitive contra
+        silenced_drift_changes. Delega pro mesmo normalizador canônico usado
+        em `check_distribution_drift` (`normalizar_categoria_para_comparacao`)
+        — lower + unidecode + strip pontuação + collapse whitespace. Garante
+        que o que sai da silenced list cas a com o `categoria` que vai no payload.
+        """
+        if s is None:
+            return ''
+        return normalizar_categoria_para_comparacao(str(s)) or ''
+
+    def _silenced_changes_for_column(self, column: str) -> Set[str]:
+        """Retorna set de categorias (normalizadas) marcadas como silenciadas
+        no client_config.monitoring.silenced_drift_changes para a coluna dada.
+        Cache implícito via lookup linear — a lista é pequena (<20 entradas).
+        """
+        if not (self.client_config and self.client_config.monitoring):
+            return set()
+        items = getattr(self.client_config.monitoring, 'silenced_drift_changes', None) or []
+        out: Set[str] = set()
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            if (it.get('column') or '') != column:
+                continue
+            cat_norm = self._normalize_for_silence_match(it.get('categoria', ''))
+            if cat_norm:
+                out.add(cat_norm)
+        return out
+
     def _check_distribution_drift(self, df: pd.DataFrame) -> List[Dict]:
         """
         Verifica mudanças drásticas nas proporções, POR VARIANT ativa.
@@ -837,6 +868,26 @@ class DataQualityMonitor:
                 if drift_type == 'categorical_distribution_drift':
                     column = result['column']
                     changes = result['changes']
+
+                    # Filtrar drifts conhecidos e estáveis (silenced_drift_changes
+                    # do client_config.monitoring). Cada item da lista define
+                    # (column, categoria) a silenciar — match case+accent-insensitive.
+                    # Se todas as mudanças desta (coluna, variante) caírem na lista,
+                    # o alerta inteiro é dropado silenciosamente (sem log).
+                    n_silenced = 0
+                    silenced_list = self._silenced_changes_for_column(column)
+                    if silenced_list and changes:
+                        kept = []
+                        for c in changes:
+                            cat_norm = self._normalize_for_silence_match(c.get('categoria', ''))
+                            if cat_norm in silenced_list:
+                                n_silenced += 1
+                                continue
+                            kept.append(c)
+                        changes = kept
+                    if not changes:
+                        continue  # alerta inteiro silenciado — não emite
+
                     # Enriquecer changes que são 'outros' com breakdown raw
                     has_outros = any(c.get('categoria') == 'outros' for c in changes)
                     if has_outros and column in ('Source', 'Term', 'Medium'):
@@ -854,6 +905,8 @@ class DataQualityMonitor:
                         'column': column,
                         'changes': changes,
                     }
+                    if n_silenced > 0:
+                        details['n_silenced'] = n_silenced
                     metric_value = changes[0]['diff'] if changes else 0
                     threshold_used = threshold_cat
                 else:
@@ -1462,6 +1515,49 @@ class DataQualityMonitor:
         except Exception as e:
             return None, {'reason': f'load_error: {e}', 'tried_paths': [str(path)]}
 
+    def _load_direction_map(self):
+        """Carrega configs/audience_direction_map.json. Retorna {} se ausente
+        (degradação graceful: sem direction map, drift fica sem classificação
+        bom/ruim — só marca 'unknown'). Ver docs/METODOLOGIA_TOP5_ROAS.md."""
+        candidates = [
+            Path('configs/audience_direction_map.json'),
+            Path(__file__).resolve().parents[2] / 'configs' / 'audience_direction_map.json',
+        ]
+        path = next((p for p in candidates if p.exists()), None)
+        if path is None:
+            return {}
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return json.load(f).get('direction_map', {})
+        except Exception as e:
+            logger.warning(f"[audience_direction_map] Erro ao carregar: {e}")
+            return {}
+
+    def _classify_drift_quality(self, direction: str, delta_pp: float) -> str:
+        """Combina direção da categoria (do direction_map) com sinal do Δpp
+        pra retornar quality ∈ {'bom', 'ruim', 'neutro', 'unknown'}.
+
+        Regras:
+          Δpp +  &  positive/very_positive   → bom
+          Δpp +  &  negative/very_negative   → ruim
+          Δpp −  &  negative/very_negative   → bom (faltar gente ruim = bom)
+          Δpp −  &  positive/very_positive   → ruim (faltar gente boa = ruim)
+          neutral/uncertain/insufficient     → neutro
+        """
+        if delta_pp is None or direction in (None, 'neutral', 'uncertain', 'insufficient_data'):
+            return 'neutro'
+        positive = direction in ('positive', 'very_positive')
+        negative = direction in ('negative', 'very_negative')
+        if delta_pp > 0 and positive:
+            return 'bom'
+        if delta_pp > 0 and negative:
+            return 'ruim'
+        if delta_pp < 0 and negative:
+            return 'bom'
+        if delta_pp < 0 and positive:
+            return 'ruim'
+        return 'neutro'
+
     def _normalize_audience_series(self, s: pd.Series, col: str) -> pd.Series:
         """Normaliza categoria + aplica mapeamento canônico para a coluna."""
         s = s.fillna('(nulo)').astype(str).str.strip()
@@ -1968,6 +2064,10 @@ class DataQualityMonitor:
         ref_label = ref_pool.get('label', 'reference')
         ref_n = ref_pool.get('n_leads', 0)
 
+        # Direction map (bom/ruim por categoria) — carrega 1x.
+        # Sem map, classify_drift_quality retorna 'unknown' / 'neutro'.
+        direction_map = self._load_direction_map()
+
         top_list: List[Dict] = []
         total_responses_day = 0
         total_responses_prev_day = 0
@@ -2063,6 +2163,15 @@ class DataQualityMonitor:
                 if max(trigger_deltas) < top_threshold_pp:
                     continue
 
+                # Direção da categoria + quality (bom/ruim) pra cada janela
+                # comparada. Usa direction_map (Top 5 ROAS atribuível 60d).
+                direction = (direction_map.get(col, {}).get(cat, {}) or {}).get('direction')
+                quality_day = self._classify_drift_quality(direction, delta_pp)
+                quality_launch = (
+                    self._classify_drift_quality(direction, launch_delta_pp)
+                    if launch_delta_pp is not None else None
+                )
+
                 top_list.append({
                     'feature_column': col,
                     'feature_label': label,
@@ -2071,12 +2180,15 @@ class DataQualityMonitor:
                     'reference_pct': round(ref_p * 100, 1),
                     'launch_pct': launch_pct,
                     'launch_delta_pp': launch_delta_pp,
+                    'launch_quality': quality_launch,
                     'prev_day_pct': prev_day_pct,
                     'prev_day_delta_pp': prev_day_delta_pp,
                     'day_pct': round(day_p * 100, 1),
                     'delta_pp': round(delta_pp, 1),
+                    'day_quality': quality_day,
                     'today_pct': today_pct,
                     'today_delta_pp': today_delta_pp,
+                    'direction': direction,
                 })
 
         if not top_list:
@@ -2221,6 +2333,8 @@ class DataQualityMonitor:
         if snapshot is None:
             return alerts
 
+        direction_map = self._load_direction_map()
+
         # Resolve active_model.yaml e carrega ABTestConfig
         try:
             from src.core.client_config import ABTestConfig as _ABTestConfig
@@ -2338,6 +2452,9 @@ class DataQualityMonitor:
                     winner = 'champion'
                 else:
                     winner = 'champion' if abs(ch_delta) <= abs(cl_delta) else 'challenger'
+                direction = (direction_map.get(col, {}).get(cat, {}) or {}).get('direction')
+                ch_quality = self._classify_drift_quality(direction, ch_delta) if ch_delta is not None else None
+                cl_quality = self._classify_drift_quality(direction, cl_delta) if cl_delta is not None else None
                 rows.append({
                     'feature_column': col,
                     'feature_label': entry.get('feature_label', col),
@@ -2346,9 +2463,12 @@ class DataQualityMonitor:
                     'reference_pct': ref_pct,
                     'champion_pct': round(ch_pct, 1) if ch_pct is not None else None,
                     'champion_delta_pp': ch_delta,
+                    'champion_quality': ch_quality,
                     'challenger_pct': round(cl_pct, 1) if cl_pct is not None else None,
                     'challenger_delta_pp': cl_delta,
+                    'challenger_quality': cl_quality,
                     'winner': winner,
+                    'direction': direction,
                 })
             alerts.append({
                 'type': 'audience_profile_drift_by_variant',

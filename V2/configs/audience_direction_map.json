@@ -1,0 +1,281 @@
+{
+  "client_id": "devclub",
+  "generated_at": "2026-05-14",
+  "reference_pool": {
+    "label": "Top 5 ROAS atribuível 60d",
+    "launches": [
+      "LF45",
+      "LF44",
+      "LF46",
+      "LF41",
+      "LF43"
+    ],
+    "n_leads": 35131,
+    "n_buyers": 416,
+    "baseline_buy_rate_pct": 1.1841
+  },
+  "methodology": {
+    "n_minimum": 1000,
+    "ci_confidence": "95%",
+    "thresholds": {
+      "positive": "lift >= 1.15",
+      "neutral": "0.85 <= lift < 1.15",
+      "negative": "0.5 <= lift < 0.85",
+      "very_negative": "lift < 0.5"
+    },
+    "rule_summary": "Δpp+ & positive → bom; Δpp+ & negative → ruim; Δpp− & negative → bom; Δpp− & positive → ruim",
+    "doc": "docs/METODOLOGIA_TOP5_ROAS.md"
+  },
+  "direction_map": {
+    "O seu gênero:": {
+      "Masculino": {
+        "n_leads": 28772,
+        "n_buyers": 346,
+        "p_buy_pct": 1.203,
+        "lift": 1.0156,
+        "ci_low": 0.8813,
+        "ci_high": 1.1702,
+        "direction": "uncertain"
+      },
+      "Feminino": {
+        "n_leads": 6356,
+        "n_buyers": 70,
+        "p_buy_pct": 1.101,
+        "lift": 0.9301,
+        "ci_low": 0.723,
+        "ci_high": 1.1964,
+        "direction": "uncertain"
+      }
+    },
+    "Qual a sua idade?": {
+      "25-34": {
+        "n_leads": 10858,
+        "n_buyers": 175,
+        "p_buy_pct": 1.612,
+        "lift": 1.3611,
+        "ci_low": 1.1423,
+        "ci_high": 1.6218,
+        "direction": "positive"
+      },
+      "35-44": {
+        "n_leads": 8269,
+        "n_buyers": 95,
+        "p_buy_pct": 1.149,
+        "lift": 0.9702,
+        "ci_low": 0.7774,
+        "ci_high": 1.2109,
+        "direction": "uncertain"
+      },
+      "18-24": {
+        "n_leads": 8042,
+        "n_buyers": 74,
+        "p_buy_pct": 0.92,
+        "lift": 0.7771,
+        "ci_low": 0.6076,
+        "ci_high": 0.9939,
+        "direction": "negative"
+      },
+      "45-54": {
+        "n_leads": 4211,
+        "n_buyers": 56,
+        "p_buy_pct": 1.33,
+        "lift": 1.1231,
+        "ci_low": 0.8512,
+        "ci_high": 1.4817,
+        "direction": "uncertain"
+      },
+      "<18": {
+        "n_leads": 2820,
+        "n_buyers": 11,
+        "p_buy_pct": 0.39,
+        "lift": 0.3294,
+        "ci_low": 0.1812,
+        "ci_high": 0.5987,
+        "direction": "very_negative"
+      },
+      "55+": {
+        "n_leads": 928,
+        "n_buyers": 5,
+        "p_buy_pct": 0.539,
+        "lift": 0.455,
+        "ci_low": 0.1888,
+        "ci_high": 1.0963,
+        "direction": "insufficient_data"
+      }
+    },
+    "O que você faz atualmente?": {
+      "CLT/funcionário público": {
+        "n_leads": 16010,
+        "n_buyers": 241,
+        "p_buy_pct": 1.505,
+        "lift": 1.2712,
+        "ci_low": 1.0859,
+        "ci_high": 1.4882,
+        "direction": "positive"
+      },
+      "Autônomo": {
+        "n_leads": 8646,
+        "n_buyers": 89,
+        "p_buy_pct": 1.029,
+        "lift": 0.8693,
+        "ci_low": 0.6923,
+        "ci_high": 1.0916,
+        "direction": "uncertain"
+      },
+      "Estudante": {
+        "n_leads": 6442,
+        "n_buyers": 55,
+        "p_buy_pct": 0.854,
+        "lift": 0.721,
+        "ci_low": 0.5449,
+        "ci_high": 0.9539,
+        "direction": "negative"
+      },
+      "Não trabalho/nem estudo": {
+        "n_leads": 3628,
+        "n_buyers": 27,
+        "p_buy_pct": 0.744,
+        "lift": 0.6285,
+        "ci_low": 0.4265,
+        "ci_high": 0.9262,
+        "direction": "negative"
+      },
+      "Aposentado": {
+        "n_leads": 402,
+        "n_buyers": 4,
+        "p_buy_pct": 0.995,
+        "lift": 0.8403,
+        "ci_low": 0.3154,
+        "ci_high": 2.2384,
+        "direction": "insufficient_data"
+      }
+    },
+    "Atualmente, qual a sua faixa salarial?": {
+      "Até R$2.000": {
+        "n_leads": 10053,
+        "n_buyers": 124,
+        "p_buy_pct": 1.233,
+        "lift": 1.0417,
+        "ci_low": 0.8534,
+        "ci_high": 1.2714,
+        "direction": "uncertain"
+      },
+      "Sem renda": {
+        "n_leads": 9259,
+        "n_buyers": 70,
+        "p_buy_pct": 0.756,
+        "lift": 0.6385,
+        "ci_low": 0.4962,
+        "ci_high": 0.8216,
+        "direction": "negative"
+      },
+      "R$2.001-3.000": {
+        "n_leads": 7211,
+        "n_buyers": 102,
+        "p_buy_pct": 1.415,
+        "lift": 1.1945,
+        "ci_low": 0.9634,
+        "ci_high": 1.4812,
+        "direction": "uncertain"
+      },
+      "R$3.001-5.000": {
+        "n_leads": 5510,
+        "n_buyers": 79,
+        "p_buy_pct": 1.434,
+        "lift": 1.2108,
+        "ci_low": 0.9535,
+        "ci_high": 1.5375,
+        "direction": "uncertain"
+      },
+      "Acima de R$5.000": {
+        "n_leads": 3095,
+        "n_buyers": 41,
+        "p_buy_pct": 1.325,
+        "lift": 1.1187,
+        "ci_low": 0.8134,
+        "ci_high": 1.5386,
+        "direction": "uncertain"
+      }
+    },
+    "Você possui cartão de crédito?": {
+      "Não": {
+        "n_leads": 20300,
+        "n_buyers": 164,
+        "p_buy_pct": 0.808,
+        "lift": 0.6823,
+        "ci_low": 0.5699,
+        "ci_high": 0.8167,
+        "direction": "negative"
+      },
+      "Sim": {
+        "n_leads": 14828,
+        "n_buyers": 252,
+        "p_buy_pct": 1.699,
+        "lift": 1.4352,
+        "ci_low": 1.2288,
+        "ci_high": 1.6763,
+        "direction": "positive"
+      }
+    },
+    "Já estudou programação?": {
+      "Não": {
+        "n_leads": 22557,
+        "n_buyers": 156,
+        "p_buy_pct": 0.692,
+        "lift": 0.584,
+        "ci_low": 0.4862,
+        "ci_high": 0.7015,
+        "direction": "negative"
+      },
+      "Sim": {
+        "n_leads": 12571,
+        "n_buyers": 260,
+        "p_buy_pct": 2.068,
+        "lift": 1.7466,
+        "ci_low": 1.4979,
+        "ci_high": 2.0366,
+        "direction": "positive"
+      }
+    },
+    "Tem computador/notebook?": {
+      "Sim": {
+        "n_leads": 30500,
+        "n_buyers": 400,
+        "p_buy_pct": 1.311,
+        "lift": 1.1075,
+        "ci_low": 0.9663,
+        "ci_high": 1.2694,
+        "direction": "uncertain"
+      },
+      "Não": {
+        "n_leads": 4628,
+        "n_buyers": 16,
+        "p_buy_pct": 0.346,
+        "lift": 0.292,
+        "ci_low": 0.1774,
+        "ci_high": 0.4806,
+        "direction": "very_negative"
+      }
+    },
+    "Você já fez/faz/pretende fazer faculdade?": {
+      "sim": {
+        "n_leads": 25386,
+        "n_buyers": 261,
+        "p_buy_pct": 1.028,
+        "lift": 0.8682,
+        "ci_low": 0.7444,
+        "ci_high": 1.0127,
+        "direction": "uncertain"
+      },
+      "nao": {
+        "n_leads": 6941,
+        "n_buyers": 97,
+        "p_buy_pct": 1.397,
+        "lift": 1.1802,
+        "ci_low": 0.9476,
+        "ci_high": 1.4698,
+        "direction": "uncertain"
+      }
+    }
+  }
+}

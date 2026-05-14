@@ -1,4 +1,16 @@
 """
+⚠️ ATENÇÃO — METODOLOGIA HISTÓRICA, NÃO CANONICAL
+=================================================
+Este script usa atribuição por **vendas_window + 7d grace** (qualquer venda que
+caia na janela de vendas do LF). Útil pra reconciliar com o "Gasto Total" do
+xlsx Performance Geral.
+
+A definição **canonical** do projeto é "ROAS atribuível 60d" — atribuição por
+captação_date + 60d, no script `compute_top5_roas_attributable.py`. Ver
+`docs/METODOLOGIA_TOP5_ROAS.md`. Os dois CSVs convivem por motivos diferentes.
+
+────────────────────────────────────────────────────────────────────────────────
+
 Recompõe ROAS por LF usando 'valor realizado' (dinheiro recebido) em vez de
 'valor contratado ajustado por inadimplência'.
 

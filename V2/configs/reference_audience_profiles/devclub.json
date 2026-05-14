@@ -1,47 +1,46 @@
 {
   "client_id": "devclub",
-  "generated_at": "2026-05-12",
+  "generated_at": "2026-05-14",
   "reference_pool": {
-    "label": "Top 6 ROAS atribuível 60d",
+    "label": "Top 5 ROAS atribuível 60d",
     "launches": [
-      "LF44",
       "LF45",
-      "LF41",
+      "LF44",
       "LF46",
-      "LF43",
-      "LF47"
+      "LF41",
+      "LF43"
     ],
-    "n_leads": 54420,
-    "decil_distribution_challenger": {
-      "source": "scored_abr28 (Challenger) — LF41,43,44,45,46,47",
-      "n_leads": 61790,
+    "n_leads": 42038,
+    "decil_distribution_champion": {
+      "source": "scored_jan30 (Champion) — LF45,44,46,41,43",
+      "n_leads": 49407,
       "distribution": {
-        "D01": 2037,
-        "D02": 4155,
-        "D03": 3847,
-        "D04": 4561,
-        "D05": 9352,
-        "D06": 7956,
-        "D07": 6117,
-        "D08": 6238,
-        "D09": 10212,
-        "D10": 7315
+        "D01": 1882,
+        "D02": 1307,
+        "D03": 1260,
+        "D04": 1364,
+        "D05": 2670,
+        "D06": 3168,
+        "D07": 3958,
+        "D08": 5262,
+        "D09": 11363,
+        "D10": 17173
       }
     },
-    "decil_distribution_champion": {
-      "source": "scored_jan30 (Champion) — LF41,43,44,45,46,47",
-      "n_leads": 61788,
+    "decil_distribution_challenger": {
+      "source": "scored_abr28 (Challenger) — LF45,44,46,41,43",
+      "n_leads": 49409,
       "distribution": {
-        "D01": 2300,
-        "D02": 1603,
-        "D03": 1464,
-        "D04": 1679,
-        "D05": 3249,
-        "D06": 4187,
-        "D07": 5162,
-        "D08": 6640,
-        "D09": 13077,
-        "D10": 22427
+        "D01": 1576,
+        "D02": 3529,
+        "D03": 3031,
+        "D04": 3476,
+        "D05": 8007,
+        "D06": 6515,
+        "D07": 4599,
+        "D08": 4664,
+        "D09": 8468,
+        "D10": 5544
       }
     }
   },
@@ -55,68 +54,68 @@
   "categorical_features": {
     "O seu gênero:": {
       "label": "Gênero",
-      "n_responses": 54405,
+      "n_responses": 42029,
       "proportions": {
-        "Masculino": 0.817737,
-        "Feminino": 0.182263
+        "Masculino": 0.819149,
+        "Feminino": 0.180851
       }
     },
     "Qual a sua idade?": {
       "label": "Idade",
-      "n_responses": 54405,
+      "n_responses": 42029,
       "proportions": {
-        "25-34": 0.30942,
-        "35-44": 0.233306,
-        "18-24": 0.231008,
-        "45-54": 0.119217,
-        "<18": 0.079074,
-        "55+": 0.027975
+        "25-34": 0.309049,
+        "35-44": 0.234386,
+        "18-24": 0.225511,
+        "45-54": 0.12056,
+        "<18": 0.082062,
+        "55+": 0.028433
       }
     },
     "O que você faz atualmente?": {
       "label": "Ocupação",
-      "n_responses": 54405,
+      "n_responses": 42029,
       "proportions": {
-        "CLT/funcionário público": 0.453028,
-        "Autônomo": 0.246319,
-        "Estudante": 0.185332,
-        "Não trabalho/nem estudo": 0.103024,
-        "Aposentado": 0.012297
+        "CLT/funcionário público": 0.455114,
+        "Autônomo": 0.245902,
+        "Estudante": 0.183326,
+        "Não trabalho/nem estudo": 0.102905,
+        "Aposentado": 0.012753
       }
     },
     "Atualmente, qual a sua faixa salarial?": {
       "label": "Faixa Salarial",
-      "n_responses": 54405,
+      "n_responses": 42029,
       "proportions": {
-        "Até R$2.000": 0.287639,
-        "Sem renda": 0.265637,
-        "R$2.001-3.000": 0.204632,
-        "R$3.001-5.000": 0.156015,
-        "Acima de R$5.000": 0.086077
+        "Até R$2.000": 0.287611,
+        "Sem renda": 0.26408,
+        "R$2.001-3.000": 0.205334,
+        "R$3.001-5.000": 0.157177,
+        "Acima de R$5.000": 0.085798
       }
     },
     "Você possui cartão de crédito?": {
       "label": "Tem Cartão de Crédito",
-      "n_responses": 54405,
+      "n_responses": 42029,
       "proportions": {
-        "Não": 0.577502,
-        "Sim": 0.422498
+        "Não": 0.582098,
+        "Sim": 0.417902
       }
     },
     "Já estudou programação?": {
       "label": "Já Estudou Programação",
-      "n_responses": 54405,
+      "n_responses": 42029,
       "proportions": {
-        "Não": 0.639151,
-        "Sim": 0.360849
+        "Não": 0.645316,
+        "Sim": 0.354684
       }
     },
     "Tem computador/notebook?": {
       "label": "Tem Computador",
-      "n_responses": 54404,
+      "n_responses": 42028,
       "proportions": {
-        "Sim": 0.870763,
-        "Não": 0.129237
+        "Sim": 0.86628,
+        "Não": 0.13372
       }
     }
   }

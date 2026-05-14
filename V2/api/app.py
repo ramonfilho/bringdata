@@ -2711,6 +2711,19 @@ async def daily_monitoring_check_railway(
             'ultimas_24h':   _calc_quality(_after(quality_rows, cut_24h)),
         }
 
+        # `count` = TOTAL de leads na tabela `Lead` (pesquisa preenchida), não só
+        # scoreados. Pedido do usuário: na tabela de séries temporais, mostrar o
+        # universo completo de leads que entrou na janela — score/d9/d10
+        # continuam calculados sobre o subset scoreado (única forma viável), mas
+        # n leads reflete o total. O delta (total − scoreados) sai indiretamente
+        # via Funil ("leads db" vs "Scoreados") quando precisar.
+        try:
+            for _w in ('historico', 'ultimo_mes', 'ultima_semana', 'ultimas_24h'):
+                if _w in railway_lead_quality and _w in _sfm_db:
+                    railway_lead_quality[_w]['count'] = int(_sfm_db[_w].get('db_leads', 0) or 0)
+        except Exception as _ce:
+            logger.warning(f"⚠️ lead_quality count override (4 janelas) falhou: {_ce}")
+
         # Decis distribution por janela — usado no digest do cliente (2 barras horizontais).
         # quality_rows = [(leadScore, decil, createdAt), ...].
         def _decil_dist(rows) -> Dict[str, int]:
@@ -2840,6 +2853,17 @@ async def daily_monitoring_check_railway(
                             ) <= _ce_dt]
                 railway_lead_quality['lf_referencia'] = _calc_quality(_lf_rows)
                 railway_lead_quality['lf_referencia_label'] = _ln
+                # Mesmo motivo do override das 4 janelas acima: usar TOTAL de
+                # leads no LF (via _sfm_db.periodo_query.db_leads), não só os
+                # scoreados. periodo_query e lf_referencia resolvem pro mesmo
+                # launch_window quando o YAML tem LF ativo.
+                try:
+                    if 'periodo_query' in _sfm_db:
+                        railway_lead_quality['lf_referencia']['count'] = int(
+                            _sfm_db['periodo_query'].get('db_leads', 0) or 0
+                        )
+                except Exception as _ce:
+                    logger.warning(f"⚠️ lead_quality lf_referencia count override falhou: {_ce}")
                 # Decis distribution do LF ativo — pra barra horizontal no digest cliente
                 _lf_n_c, _lf_n_ch = _split_by_variant(_lf_rows)
                 railway_lead_quality['decil_distribution_current_launch'] = {
@@ -4221,6 +4245,21 @@ async def railway_process_pending(pipeline: PipelineDep):
             f"{len(blocked_lead_ids)} bloqueados, {len(skipped_lead_ids)} ignorados por source"
         )
 
+        # Critical alerts — hook crítico. Falha aqui NÃO pode quebrar o polling.
+        # Por default opera em dry-run (CRITICAL_ALERTS_DRY_RUN=true). Vide
+        # docs/CRITICAL_ALERTS_SPEC.md.
+        try:
+            from src.monitoring.critical_alerts import (
+                run_critical_checks, record_polling_status, GcsStateStore,
+            )
+            _store = GcsStateStore()
+            record_polling_status(_store, status='ok')
+            _store.flush()
+            critical_summary = run_critical_checks(railway_conn)
+            logger.info(f"🚨 critical_alerts: {critical_summary}")
+        except Exception as _cae:
+            logger.warning(f"⚠️ critical_alerts falhou (não bloqueia polling): {_cae}")
+
         return {
             "processed":     processed,
             "skipped":       skipped,
@@ -4235,6 +4274,14 @@ async def railway_process_pending(pipeline: PipelineDep):
         raise
     except Exception as e:
         logger.error(f"❌ Erro no polling Railway: {str(e)}")
+        # Registra falha pro tracker da regra 9 antes de propagar — best-effort.
+        try:
+            from src.monitoring.critical_alerts import GcsStateStore, record_polling_status
+            _s = GcsStateStore()
+            record_polling_status(_s, status='error')
+            _s.flush()
+        except Exception as _re:
+            logger.warning(f"⚠️ critical_alerts: falha registrando 'error' no tracker: {_re}")
         raise HTTPException(status_code=500, detail=f"Erro no polling Railway: {str(e)}")
     finally:
         if railway_conn:

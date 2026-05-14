@@ -12,6 +12,13 @@ politica_merge: versão mais nova vence; auditoria foi re-tecnicada (Champion/Ch
 
 > Registro técnico consolidado: bugs com impacto real, decisões erradas, padrões que se repetiram, backtests contrafactuais (mar–mai/2026), medidas corretivas implementadas e frentes preventivas em aberto.
 
+> **Nota sobre identificadores codificados (Cluster N, V.1, V.2, T1-X, DT-X, R-X):** este doc usa identificadores curtos pra cruzar com commits, issues e os catálogos técnicos. O significado verbal de cada um vive nos catálogos correspondentes:
+> - `T1-X` / `T2-X` / `T3-X` (salvaguardas) — descrição verbal completa em [`PLANO_SAFEGUARD.md`](PLANO_SAFEGUARD.md)
+> - `DT-X` / `R-X` (dívida técnica do refactor) — descrição verbal completa em [`PLANO_REFACTOR_MLOPS.md`](PLANO_REFACTOR_MLOPS.md)
+> - `Cluster N` do Erro 2 — descrição completa logo abaixo na seção 2 deste doc
+> - `V.1` / `V.2` / `V.3` / `V.4` — frentes preventivas em aberto, descritas na seção V deste doc
+> - `AUDITORIA_QUEBRA_PRODUCAO.md` — checklist operacional de cenários a estressar (linguagem natural, sem códigos)
+
 ---
 
 ## Cinco lições fundamentais

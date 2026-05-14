@@ -110,13 +110,15 @@ Aplicando aos consumidores listados a seguir: itens que alimentam **decisões co
 
 ### MÉDIO — alertas e séries temporais ruidosos, mas não vão direto pro cliente
 
-#### L5. Rolling 30d (baseline E6) usa decis contaminados
+#### L5. Rolling 30d (baseline da detecção de drift) usa decis contaminados
 
-**O que precisa mudar:** o daily-check computa um baseline rolling 30d via `SELECT decil, COUNT(*) FROM "Lead" GROUP BY decil`. Essa distribuição é injetada no `_check_score_distribution` como "como a distribuição esperada deveria ser". A janela de 30d cobre múltiplos deploys e versões de código.
+**O que precisa mudar:** o daily-check computa um baseline rolling 30d via `SELECT decil, COUNT(*) FROM "Lead" GROUP BY decil`. Essa distribuição é injetada no `_check_score_distribution` como "qual a distribuição esperada de decis no momento". A janela de 30d cobre múltiplos deploys e versões de código diferentes, então a distribuição "esperada" é uma média de várias versões — não uma referência estável.
 
 **Por quê:** alimenta o check que detecta drift de distribuição de decis. Baseline contaminado significa: ou o alerta dispara à toa quando o sistema está saudável, ou demora a disparar quando há regressão real.
 
-**Como funcionaria:** ou re-scorear os leads dos últimos 30d com o Champion atual antes de fazer o `GROUP BY` (caro: ~150k leads), ou tornar o baseline rolling 30d disabled e usar o `model_metadata` (E5) como única referência, que é gerado uma vez e fica consistente até trocar de modelo.
+**Como funcionaria (recomendação):** **cache versionado por modelo + commit**. Uma vez por dia (no próprio daily-check), o sistema roda o pipeline atual sobre os leads dos últimos 30 dias e salva um parquet local. O `_check_score_distribution` lê esse parquet em vez de chamar o pipeline a cada execução. O cache leva uma chave composta `mlflow_run_id + commit_hash do src/core/`: quando o modelo trocar ou o código do `core/` mudar, o cache invalida automaticamente e regenera na próxima rodada. Custo: ~3 minutos/dia em 150k leads, em chunks. Em memória, o resultado é a "distribuição esperada" produzida por uma única versão do pipeline — exatamente o que o check precisa.
+
+**Alternativa mais fraca:** desabilitar o baseline rolling 30d e usar apenas o `model_metadata` (gerado uma vez no momento do treino). Mais barato, mas perde 30 dias de amostra real como referência — qualquer drift que aconteça pós-treino fica invisível.
 
 **Onde no código:**
 - `api/app.py:2700-2724` — query rolling 30d.
@@ -135,16 +137,9 @@ Aplicando aos consumidores listados a seguir: itens que alimentam **decisões co
 
 ---
 
-#### L7. Análise retrospectiva do bug de codificação no Champion (item DT-12 do refactor)
+#### L7. Análise retrospectiva do bug de codificação no Champion — CONCLUÍDO
 
-**O que precisa mudar:** `scripts/dt12_impact_analysis.py` foi escrito pra quantificar quanto faturamento foi perdido enquanto o bug em que o Champion `jan30` recebia OHE em vez de ordinal em idade e faixa salarial (identificado no projeto como DT-12) esteve ativo. O script puxa `Lead.leadScore` e re-scoreia com o codificador corrigido pra comparar. O problema é que o "antes" (`Lead.leadScore`) inclui não só o efeito desse bug específico, mas também variações de outras versões de código no meio do caminho.
-
-**Por quê:** se a quantificação do dano fica confundida com outras variações, a estimativa de impacto financeiro do bug fica fraca.
-
-**Como funcionaria:** rodar o script duas vezes — uma com o pipeline atual sem encoding overrides (simulando o bug DT-12 ativo), outra com encoding overrides aplicados (estado corrigido). A diferença entre as duas execuções é o impacto puro do bug. Não usar `Lead.leadScore` em momento algum.
-
-**Onde no código:**
-- `scripts/dt12_impact_analysis.py:52`.
+**Status:** concluído. A quantificação do dano do bug em que o Champion `jan30` recebia codificação OHE em vez de ordinal em idade e faixa salarial (identificado no projeto como DT-12) já foi feita em sessão anterior e está registrada em `docs/registro_erros_ml.md`. Não há ação remanescente neste plano.
 
 ---
 
@@ -161,29 +156,20 @@ Aplicando aos consumidores listados a seguir: itens que alimentam **decisões co
 
 ### BAIXO — display, não afeta decisões
 
-#### L9. Alerta de zero-decil em CAPI
+#### L9. Alerta de zero-decil em CAPI — FORA DE ESCOPO
 
-**O que precisa mudar:** `src/monitoring/capi_monitor.py:_check_zero_decil_events` detecta se algum decil parou de receber eventos CAPI em 24h. Lê `LeadCAPI.decil` (não `Lead.decil`, tabela paralela). Tem o mesmo padrão de fotografia do passado.
-
-**Por quê:** o alerta funciona porque ele só pergunta "todos os decis tiveram pelo menos N eventos hoje?". Se a versão de código gravou decis ligeiramente diferentes nos eventos das últimas 24h, o alerta ainda funciona — todos os decis vão ter eventos.
-
-**Como funcionaria:** sem mudança imediata. Documentar no código que o `LeadCAPI.decil` é considerado válido pra alertas de cobertura (presença/ausência) mas não pra agregações finas.
-
-**Onde no código:**
-- `src/monitoring/capi_monitor.py:162-175`.
+**Status:** fora de escopo deste plano. O check `_check_zero_decil_events` em `src/monitoring/capi_monitor.py` lê `LeadCAPI.decil` para verificar se algum decil parou de receber eventos nas últimas 24h. O alerta pergunta apenas "todos os decis tiveram pelo menos N eventos hoje?" — uma checagem de presença/ausência. Mesmo que o decil gravado seja fotografia de versão antiga de código, todos os decis vão ter eventos quando o sistema está saudável. A contaminação de versão não afeta a função deste alerta, portanto não há remediação a fazer.
 
 ---
 
 ## Ordem sugerida de execução
 
-A ordem de cima pra baixo respeita o impacto direto no cliente e a dependência entre itens. **L3 e L6 não aparecem aqui — são relatórios históricos preservados como estão (ver seção "Histórico vs futuro").**
+A ordem de cima pra baixo respeita o impacto direto no cliente e a dependência entre itens. **L3 e L6 não aparecem aqui — são relatórios históricos preservados como estão (ver seção "Histórico vs futuro"). L7 (já concluído) e L9 (fora de escopo) também não aparecem.**
 
 1. **L1** (forecast). Mais alto impacto: afeta o número de faturamento esperado que aparece no digest diário e é consumido em decisões durante o lançamento.
-2. **L2** (backtest comparativo). Crítico pra promoção de modelo. Só fica urgente quando houver Challenger novo pra avaliar.
-3. **L4** (teste de equivalência de revisão). Crítico pra confiança no deploy. Pode ser refatorado em conjunto com L2 — mesma técnica.
-4. **L5** + **L8** (rolling 30d + score distribution). Decisão de design entre re-scorear 150k leads/dia vs voltar pra E5 (model_metadata). E5 é a saída barata mas perde 30d-de-amostra-real como referência.
-5. **L7** (análise retrospectiva do bug de codificação do Champion `jan30` cego em idade e faixa salarial — DT-12 do refactor). Item one-shot, ataca quando alguém precisar do número final do dano.
-6. **L9** (zero-decil CAPI). Só documentação.
+2. **L2** (backtest comparativo). Crítico pra promoção de modelo. Será corrigido em conjunto com L4 — mesma técnica de re-score.
+3. **L4** (teste de equivalência de revisão). Crítico pra confiança no deploy.
+4. **L5** + **L8** (rolling 30d + score distribution). Cache versionado por modelo + commit do `core/`, regerado pelo daily-check.
 
 ## Princípio de aceitação
 

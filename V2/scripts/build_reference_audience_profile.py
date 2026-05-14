@@ -51,8 +51,11 @@ from scripts.perfil_audiencia import (
     SURVEY_MAP, slice_sheets, normalize_series, load_launch,
 )
 
-DEFAULT_TOP5 = ['LF40', 'LF41', 'LF44', 'LF45', 'LF47']
-DEFAULT_LABEL = 'Top 5 ROAS'
+# Top 5 canonical — ver docs/METODOLOGIA_TOP5_ROAS.md.
+# Última recalibragem: 2026-05-14.
+# Pra regerar: `python -m scripts.compute_top5_roas_attributable`
+DEFAULT_TOP5 = ['LF45', 'LF44', 'LF46', 'LF41', 'LF43']
+DEFAULT_LABEL = 'Top 5 ROAS atribuível 60d'
 
 DEFAULT_CRITICAL_FEATURES = [
     'O seu gênero:',

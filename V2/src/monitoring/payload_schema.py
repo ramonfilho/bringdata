@@ -86,6 +86,9 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'alerts[].details.top_list[].today_pct':                                            (R, None),  # ex: None
     'alerts[].details.top_list[].prev_day_pct':                                         (R, None),  # ex: None — D-2 full BRT day (anteontem)
     'alerts[].details.top_list[].prev_day_delta_pp':                                    (R, None),  # ex: None
+    'alerts[].details.top_list[].direction':                                            (R, None),  # ex: 'positive' | 'negative' | 'neutral' | 'uncertain' | 'insufficient_data' | None — vem do audience_direction_map.json (ver docs/METODOLOGIA_TOP5_ROAS.md)
+    'alerts[].details.top_list[].day_quality':                                          (R, None),  # ex: 'bom' | 'ruim' | 'neutro' — direction × sign(delta_pp)
+    'alerts[].details.top_list[].launch_quality':                                       (R, None),  # ex: 'bom' | 'ruim' | 'neutro' | None
     'alerts[].details.prev_day_n_responses':                                            (S, 'header line removido'),
     'alerts[].details.top_threshold_pp':                                                (S, 'header line removido'),
     # audience_profile_drift_by_variant — split por Champion/Challenger (alert novo)
@@ -97,8 +100,10 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'alerts[].details.challenger_n':                                                    (R, None),  # ex: 95
     'alerts[].details.top_list[].champion_pct':                                         (R, None),  # ex: None
     'alerts[].details.top_list[].champion_delta_pp':                                    (R, None),  # ex: None
+    'alerts[].details.top_list[].champion_quality':                                     (R, None),  # ex: 'bom' | 'ruim' | 'neutro' | None
     'alerts[].details.top_list[].challenger_pct':                                       (R, None),  # ex: None
     'alerts[].details.top_list[].challenger_delta_pp':                                  (R, None),  # ex: None
+    'alerts[].details.top_list[].challenger_quality':                                   (R, None),  # ex: 'bom' | 'ruim' | 'neutro' | None
     'alerts[].details.top_list[].winner':                                               (R, None),  # ex: 'champion' | 'challenger' | None
     'alerts[].details.total_expected_union':                                            (R, None),  # ex: None
     'alerts[].details.total_received_union':                                            (R, None),  # ex: None

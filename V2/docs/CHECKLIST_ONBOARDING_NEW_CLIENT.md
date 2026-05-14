@@ -1,5 +1,7 @@
 # Checklist Onboarding — Novo Cliente
 
+> **Nota sobre `DT-18`** (mencionado na seção 3 "treinar modelo"): identificador histórico da dívida técnica "normalizar 4 features binárias raw". Nome verbal e contexto completo em [`PLANO_REFACTOR_MLOPS.md`](PLANO_REFACTOR_MLOPS.md).
+
 ## 1. Criar o YAML do cliente
 
 Copiar `configs/clients/devclub.yaml` → `configs/clients/{novo_cliente}.yaml`

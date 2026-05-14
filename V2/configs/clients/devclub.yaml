@@ -456,6 +456,24 @@ monitoring:
   sheets_url: null
   backup_sheets_url: null
   drift_features_to_analyze: null
+  # Drifts conhecidos e estáveis que devem ser silenciados do daily-check.
+  # Cada item: column (UTM Source/Term/Medium), categoria (forma normalizada
+  # como aparece no payload do alerta, lowercase + sem acento), reason
+  # (documentação inline da decisão). Match é case+accent-insensitive.
+  # Reavaliar a cada retreino — drift que era esperado pode virar bug.
+  silenced_drift_changes:
+    - column: Medium
+      categoria: aberto
+      reason: "público dominante na operação atual; treino capturou em mix anterior, esperado até próximo retreino"
+    - column: Medium
+      categoria: linguagem de programacao
+      reason: "público deprecado pelo time de tráfego; saiu do mix em produção"
+    - column: Medium
+      categoria: lookalike 2 cadastrados dev 20 interesses
+      reason: "lookalike deprecado pelo time de tráfego; substituído por outras audiências"
+    - column: Term
+      categoria: facebook
+      reason: "shift natural para Instagram-heavy delivery; Term é só sub-source IG/FB, esperado até próximo retreino"
 capi:
   pixel_id: '1937807493703815'
   event_name_with_value: LeadQualified

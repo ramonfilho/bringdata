@@ -205,6 +205,12 @@ class MonitoringConfig:
     sheets_url: Optional[str] = None                        # #85
     backup_sheets_url: Optional[str] = None                 # #128
     drift_features_to_analyze: Optional[List[str]] = None   # #86
+    # Lista de drifts conhecidos e estáveis que devem ser filtrados do alerta
+    # `distribution_drift`. Cada item: {column, categoria (forma normalizada,
+    # case+accent insensitive), reason (descrição inline)}. Quando todas as
+    # mudanças de um (coluna, variante) caem na lista, o alerta inteiro é
+    # silenciado. Quando só algumas caem, sai com sufixo "(+N silenciadas)".
+    silenced_drift_changes: Optional[List[Dict[str, str]]] = None
 
 
 @dataclass

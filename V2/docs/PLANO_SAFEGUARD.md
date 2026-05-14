@@ -309,7 +309,7 @@ Emite log estruturado JSON por batch (`event=feature_validator`) com `severity` 
 
 ### Drift de perfil de audiência
 
-**O que faz:** todo dia compara o perfil agregado dos leads que entraram no dia anterior contra um snapshot de "audiência winner" — proporções do pool dos Top 5 lançamentos por ROAS histórico (LF40, LF41, LF44, LF45, LF47, n=39.771 leads). Emite alerta agregado com até dois subgrupos de features:
+**O que faz:** todo dia compara o perfil agregado dos leads que entraram no dia anterior contra um snapshot de "audiência winner" — proporções do pool dos Top 5 lançamentos por ROAS atribuível 60d, definido em `docs/METODOLOGIA_TOP5_ROAS.md` (atualizado 2026-05-14: LF45, LF44, LF46, LF41, LF43, n=42.038 leads). Emite alerta agregado com até dois subgrupos de features:
 - **`top_list`** — features com `|Δpp| ≥ 3` → severity HIGH
 - **`down_list`** — features com `2 ≤ |Δpp| < 3` → severity MEDIUM
 
