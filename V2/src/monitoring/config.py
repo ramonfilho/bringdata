@@ -57,7 +57,7 @@ THRESHOLDS = {
     # Severity: sempre HIGH se top_list não-vazia, sem alerta se vazia.
     'audience_profile_drift': {
         'enabled': True,
-        'top_threshold_pp': 3.0,    # |Δpp vs ontem| mínimo pra entrar no top_list
+        'top_threshold_pp': 2.0,    # |Δpp vs ontem| mínimo pra entrar no top_list
         'min_responses': 50,        # mínimo de respostas em ontem pra rodar o check
     }
 }

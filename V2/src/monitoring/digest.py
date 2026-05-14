@@ -615,12 +615,7 @@ def _render_text_ab(v: dict, L: list):
         label = _variant_label(name)
         scored = by_variant.get(name) or 0
         pct = (scored / total_scored_24h * 100) if total_scored_24h else 0
-        extras = []
-        if name in by_spend:
-            extras.append(f"R$ {_fmt_brl(by_spend[name])} investidos")
-        if by_cpl.get(name) is not None:
-            extras.append(f"CPL R$ {_fmt_brl(by_cpl[name])}")
-        suffix = (' · ' + ' · '.join(extras)) if extras else ''
+        suffix = f" · R$ {_fmt_brl(by_spend[name])} investidos" if name in by_spend else ''
         L.append(f"    {label} ({name}) recebeu {scored:,} de {total_scored_24h:,} eventos ({pct:.1f}%) nas últimas 24h{suffix}")
     L.append('')
 
@@ -861,18 +856,15 @@ def _slack_alert_audience(a: dict, B: list):
 
 
 def _slack_alert_audience_by_variant(a: dict, B: list):
-    """Drift por variante (Champion vs Challenger) — ✅ na variante com menor |Δpp| por linha."""
+    """Drift por A/B (Champion vs Challenger) — ✅ na variante com menor |Δpp| por linha."""
     d = a.get('details', {}) or {}
-    window_label = d.get('window_label') or 'janela'
-    champion_n = d.get('champion_n', 0) or 0
-    challenger_n = d.get('challenger_n', 0) or 0
-    ref_label = d.get('reference_pool_label') or 'referência'
+    window = d.get('window') or ''
     top = d.get('top_list', []) or []
 
-    header = (
-        f"*📉 Drift por variante — {window_label}* "
-        f"(Champion n={champion_n:,} · Challenger n={challenger_n:,} · ref: {ref_label})"
+    window_title = 'Ontem' if window == 'previous_day' else (
+        'Lançamento Atual' if window == 'current_launch' else (d.get('window_label') or 'janela')
     )
+    header = f"*📉 Drift por A/B - {window_title}*"
     rows = [header]
     col_header = f"{'Característica':<32} {'Top%':>5}  {'Champion(Δ)':>16}  {'Challenger(Δ)':>16}"
     rows.append(f"`{col_header}`")
@@ -896,10 +888,11 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
 
 
 def _slack_decis_window(v: dict, B: list, window_key: str):
-    """Distribuição de decis por janela em barra horizontal.
+    """Distribuição de decis por janela em barra horizontal, com 🟢🟡🔴 vs baseline.
 
     window_key ∈ {'previous_day', 'current_launch'}.
     Le de view['lead_quality'].decil_distribution_<window_key>.
+    Cada decil mostra |Δpp vs baseline| → 🟢 <2pp · 🟡 2–4pp · 🔴 ≥4pp.
     """
     lq = v.get('lead_quality') or {}
     key = f'decil_distribution_{window_key}'
@@ -911,15 +904,36 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     win_label = info.get('window_label', '?')
     if total == 0:
         return
-    # Converte counts → {D01: {'count', 'pct'}}
-    decil_dist = {}
-    for k in [f'D{i:02d}' for i in range(1, 11)]:
-        c = int(dist.get(k, 0) or 0)
-        decil_dist[k] = {'count': c, 'pct': (c / total * 100) if total else 0}
-    bar_lines = _render_decil_bar(decil_dist, width=20)
-    rows = [f'*📊 Distribuição de decis — {win_label}* (n={total:,})']
+
+    # Baseline (Top 6 ROAS scoreado por Challenger)
+    baseline = info.get('baseline') or {}
+    base_dist = baseline.get('distribution') or {}
+    base_total = baseline.get('total', 0) or 0
+    base_label = baseline.get('label', '')
+
+    keys = [f'D{i:02d}' for i in range(1, 11)]
+    # pct atual + pct baseline por decil
+    cur_pct = {k: ((int(dist.get(k, 0) or 0) / total) * 100) for k in keys}
+    base_pct = ({k: ((int(base_dist.get(k, 0) or 0) / base_total) * 100) for k in keys}
+                if base_total > 0 else {})
+    # Escala barra pelo maior pct atual
+    max_pct = max(cur_pct.values()) if cur_pct else 0
+    width = 20
+
+    rows = [f'*📊 Distribuição de decis — {win_label}* (n={total:,}) vs *{base_label}* (n={base_total:,})']
     rows.append('```')
-    rows.extend(bar_lines)
+    for k in keys:
+        pct = cur_pct[k]
+        n = int(dist.get(k, 0) or 0)
+        bar_len = int(round((pct / max_pct) * width)) if max_pct > 0 else 0
+        bar = '▇' * bar_len + ' ' * (width - bar_len)
+        if base_pct:
+            b = base_pct[k]
+            delta = pct - b
+            emoji = _color_emoji(delta)
+            rows.append(f'{k} {bar} {pct:>4.1f}% ({n:,})  {emoji} Ref {b:>4.1f}%  Δ{delta:+.1f}pp')
+        else:
+            rows.append(f'{k} {bar} {pct:>4.1f}% ({n:,})')
     rows.append('```')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
@@ -1160,12 +1174,7 @@ def _slack_ab(v: dict, B: list):
         label = _variant_label(name)
         scored = by.get(name) or 0
         pct = (scored / total_scored_24h * 100) if total_scored_24h else 0
-        extras = []
-        if name in by_spend:
-            extras.append(f"R$ {_fmt_brl(by_spend[name])} investidos")
-        if by_cpl.get(name) is not None:
-            extras.append(f"CPL R$ {_fmt_brl(by_cpl[name])}")
-        suffix = (' · ' + ' · '.join(extras)) if extras else ''
+        suffix = f" · R$ {_fmt_brl(by_spend[name])} investidos" if name in by_spend else ''
         lines.append(f"• *{label}* (`{name}`) recebeu {scored:,} de {total_scored_24h:,} eventos ({pct:.1f}%) nas últimas 24h{suffix}")
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': "\n".join(lines)}})
 

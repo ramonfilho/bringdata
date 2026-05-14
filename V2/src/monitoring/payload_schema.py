@@ -267,6 +267,20 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'lead_quality_metrics.decil_distribution_previous_day.distribution.D10':            (R, None),
     'lead_quality_metrics.decil_distribution_previous_day.total':                       (R, None),  # ex: 735
     'lead_quality_metrics.decil_distribution_previous_day.window_label':                (R, None),  # ex: '12/05 BRT (24h)'
+    'lead_quality_metrics.decil_distribution_previous_day.baseline':                    (R, None),  # ex: dict(3) — Top 6 ROAS scoreado por Challenger
+    'lead_quality_metrics.decil_distribution_previous_day.baseline.distribution':       (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline.distribution.D01':   (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline.distribution.D02':   (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline.distribution.D03':   (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline.distribution.D04':   (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline.distribution.D05':   (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline.distribution.D06':   (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline.distribution.D07':   (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline.distribution.D08':   (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline.distribution.D09':   (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline.distribution.D10':   (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline.total':              (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline.label':              (R, None),
     'lead_quality_metrics.decil_distribution_current_launch':                           (R, None),  # ex: dict(3)
     'lead_quality_metrics.decil_distribution_current_launch.distribution':              (R, None),
     'lead_quality_metrics.decil_distribution_current_launch.distribution.D01':          (R, None),
@@ -281,6 +295,20 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'lead_quality_metrics.decil_distribution_current_launch.distribution.D10':          (R, None),
     'lead_quality_metrics.decil_distribution_current_launch.total':                     (R, None),  # ex: 5371
     'lead_quality_metrics.decil_distribution_current_launch.window_label':              (R, None),  # ex: 'LF54 (29/04→06/05 BRT)'
+    'lead_quality_metrics.decil_distribution_current_launch.baseline':                  (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline.distribution':     (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline.distribution.D01': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline.distribution.D02': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline.distribution.D03': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline.distribution.D04': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline.distribution.D05': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline.distribution.D06': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline.distribution.D07': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline.distribution.D08': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline.distribution.D09': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline.distribution.D10': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline.total':            (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline.label':            (R, None),
 
     # ──────────────────────────────────────────────────────────────────────────
     # OPERATIONAL_ROUTINES

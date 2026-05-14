@@ -11,7 +11,23 @@
       "LF43",
       "LF47"
     ],
-    "n_leads": 54420
+    "n_leads": 54420,
+    "decil_distribution": {
+      "source": "scored_abr28 (Challenger) backtest pool — LF41,43,44,45,46,47",
+      "n_leads": 61790,
+      "distribution": {
+        "D01": 2037,
+        "D02": 4155,
+        "D03": 3847,
+        "D04": 4561,
+        "D05": 9352,
+        "D06": 7956,
+        "D07": 6117,
+        "D08": 6238,
+        "D09": 10212,
+        "D10": 7315
+      }
+    }
   },
   "is_critical": [
     "O seu gênero:",

@@ -2720,6 +2720,27 @@ async def daily_monitoring_check_railway(
                     dist[key] += 1
             return dist
 
+        # Baseline de decis (Top 6 ROAS atribuível 60d, scoreado por Challenger) —
+        # carregado uma vez pra embedar em ambas as janelas (ontem + lançamento atual).
+        # Fonte: configs/reference_audience_profiles/devclub.json :: reference_pool.decil_distribution.
+        _decil_baseline: Optional[Dict[str, Any]] = None
+        try:
+            import json as _json_decil
+            from pathlib import Path as _Path
+            _baseline_path = _Path(__file__).resolve().parents[1] / 'configs' / 'reference_audience_profiles' / 'devclub.json'
+            if _baseline_path.exists():
+                _bjson = _json_decil.loads(_baseline_path.read_text())
+                _rp = (_bjson.get('reference_pool') or {})
+                _bd = (_rp.get('decil_distribution') or {})
+                if _bd:
+                    _decil_baseline = {
+                        'distribution': _bd.get('distribution', {}),
+                        'total':        _bd.get('n_leads', 0),
+                        'label':        _rp.get('label', 'baseline'),
+                    }
+        except Exception as _be:
+            logger.warning(f"⚠️ baseline decis indisponível: {_be}")
+
         # Ontem completo BRT (00:00→23:59 BRT do dia anterior)
         _brt = _tz(timedelta(hours=-3))
         _today_brt_midnight = datetime.now(_brt).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -2736,6 +2757,7 @@ async def daily_monitoring_check_railway(
             'distribution': _decil_dist(_yest_rows),
             'total': len(_yest_rows),
             'window_label': f"{_yesterday_brt_midnight.strftime('%d/%m')} BRT (24h)",
+            'baseline': _decil_baseline,
         }
 
         # Qualidade do LF de referência — apenas LF ativo no launches.yaml,
@@ -2767,6 +2789,7 @@ async def daily_monitoring_check_railway(
                     'distribution': _decil_dist(_lf_rows),
                     'total': len(_lf_rows),
                     'window_label': f"{_ln} ({_active.cap_start.strftime('%d/%m')}→{_active.cap_end.strftime('%d/%m')} BRT)",
+                    'baseline': _decil_baseline,
                 }
                 logger.info(f"📊 lf_referencia: {_ln} "
                             f"({_active.cap_start}→{_active.cap_end}, n={len(_lf_rows)})")
