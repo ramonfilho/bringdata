@@ -187,6 +187,56 @@ def _quality_emoji(quality: str | None) -> str:
     return '⚪'
 
 
+def _load_direction_map_for_renderer() -> dict:
+    """Lê configs/audience_direction_map.json pra usar no renderer
+    (categorias + decil_direction). Sem cache; só carrega 1x por render.
+    Retorna {} se ausente — degradação graceful."""
+    import os
+    import json as _stdjson
+    candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                     'configs', 'audience_direction_map.json'),
+        'configs/audience_direction_map.json',
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            try:
+                with open(p) as f:
+                    return _stdjson.load(f)
+            except Exception:
+                pass
+    return {}
+
+
+def _classify_quality_inline(direction: str | None, delta_pp: float | None) -> str:
+    """Espelha src.monitoring.data_quality._classify_drift_quality.
+    Vive aqui pro renderer aplicar em campos não-pré-computados (ex: decis)."""
+    if delta_pp is None or direction in (None, 'neutral', 'uncertain', 'insufficient_data'):
+        return 'neutro'
+    positive = direction in ('positive', 'very_positive')
+    negative = direction in ('negative', 'very_negative')
+    if delta_pp > 0 and positive: return 'bom'
+    if delta_pp > 0 and negative: return 'ruim'
+    if delta_pp < 0 and negative: return 'bom'
+    if delta_pp < 0 and positive: return 'ruim'
+    return 'neutro'
+
+
+def _slack_drift_legend_header(B: list):
+    """Header único da seção de drift (Fix 1): legenda 🟢/🔴/⚪ + ✅."""
+    B.append({
+        'type': 'section',
+        'text': {
+            'type': 'mrkdwn',
+            'text': (
+                '*Drift de público — leitura das tabelas*\n'
+                '🟢 bom · 🔴 ruim · ⚪ neutro/incerto · ✅ variante mais alinhada à direção da categoria\n'
+                '_Direção definida pelo lift histórico no pool Top 5 ROAS atribuível 60d (ver `docs/METODOLOGIA_TOP5_ROAS.md`)._'
+            ),
+        },
+    })
+
+
 def _render_decil_bar(decil_dist: dict, width: int = 20) -> list[str]:
     """Renderiza distribuição de decis como barra horizontal ASCII.
 
@@ -719,6 +769,12 @@ def render_slack_blocks_client(view: dict) -> list[dict]:
     # Per-variant drift tables (uma por janela)
     audience_by_variant = [a for a in view.get('alerts', [])
                            if a.get('type') == 'audience_profile_drift_by_variant']
+    audience_general = [a for a in view.get('alerts', [])
+                        if a.get('type') == 'audience_profile_drift']
+    # Header único da seção de drift (Fix 1)
+    if audience_by_variant or audience_general:
+        _slack_drift_legend_header(blocks)
+
     # Ordena: previous_day primeiro, depois current_launch
     audience_by_variant.sort(
         key=lambda a: 0 if (a.get('details', {}) or {}).get('window') == 'previous_day' else 1
@@ -728,8 +784,6 @@ def render_slack_blocks_client(view: dict) -> list[dict]:
         blocks.append({'type': 'divider'})
 
     # Drift geral com cores
-    audience_general = [a for a in view.get('alerts', [])
-                        if a.get('type') == 'audience_profile_drift']
     for a in audience_general:
         _slack_alert_audience(a, blocks)
         blocks.append({'type': 'divider'})
@@ -862,8 +916,8 @@ def _slack_alert_audience(a: dict, B: list):
     has_prev   = any(it.get('prev_day_pct') is not None for it in top)
     has_today  = any(it.get('today_pct') is not None for it in top)
 
-    header_parts = [f"*Drift de público geral vs {ref_label}* (🟢 bom · 🔴 ruim · ⚪ neutro/incerto)"]
-    rows = [header_parts[0]]
+    # Legenda movida pra _slack_drift_legend_header (uma vez por seção).
+    rows = [f"*Drift de público geral vs {ref_label}*"]
     col_header = [f"{'Característica':<32} {'Ref%':>5}"]
     if has_launch: col_header.append(f"{'Lanç(Δ)':>15}")
     if has_prev:   col_header.append(f"{'Anteontem(Δ)':>15}")
@@ -906,30 +960,59 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
     window_title = 'Ontem' if window == 'previous_day' else (
         'Lançamento Atual' if window == 'current_launch' else (d.get('window_label') or 'janela')
     )
-    header = f"*📉 Drift por A/B - {window_title}* (🟢 bom · 🔴 ruim · ⚪ neutro/incerto)"
+    # Legenda movida pra _slack_drift_legend_header (uma vez por seção).
+    header = f"*📉 Drift por A/B - {window_title}*"
     rows = [header]
-    col_header = f"{'Característica':<32} {'Top%':>5}  {'Champion(Δ)':>18}  {'Challenger(Δ)':>18}"
+    col_header = f"{'Característica':<32} {'Top%':>5}  {'Champion(Δ)':>20}  {'Challenger(Δ)':>20}"
     rows.append(f"`{col_header}`")
 
-    def cell_qual(pct, delta, quality):
-        if pct is None or delta is None: return f"{'—':>18}"
-        return f"{_quality_emoji(quality)} {pct:>5.1f}%({delta:+.1f})"
+    def cell_qual(pct, delta, quality, is_winner=False):
+        if pct is None or delta is None: return f"{'—':>20}"
+        winner_mark = ' ✅' if is_winner else '   '
+        return f"{_quality_emoji(quality)} {pct:>5.1f}%({delta:+.1f}){winner_mark}"
+
+    def _pick_winner_direction(direction, ch_delta, cl_delta):
+        """Variante mais alinhada à direção da categoria.
+        - positive: maior Δpp vence (mais é melhor)
+        - negative: Δpp mais negativo vence (menos é melhor)
+        - neutral/uncertain/insufficient: sem winner
+        """
+        if direction not in ('positive', 'very_positive', 'negative', 'very_negative'):
+            return None
+        if ch_delta is None or cl_delta is None:
+            return None
+        sign = 1 if direction in ('positive', 'very_positive') else -1
+        ch_score = ch_delta * sign
+        cl_score = cl_delta * sign
+        if ch_score == cl_score: return None
+        return 'champion' if ch_score > cl_score else 'challenger'
 
     for it in top:
         label = _short(f"{it['feature_label']}: {it['category']}", 32)
         ref = it.get('reference_pct', 0)
-        ch_cell = cell_qual(it.get('champion_pct'), it.get('champion_delta_pp'), it.get('champion_quality'))
-        cl_cell = cell_qual(it.get('challenger_pct'), it.get('challenger_delta_pp'), it.get('challenger_quality'))
-        rows.append(f"`{label:<32} {ref:>4.1f}%  {ch_cell:>18}  {cl_cell:>18}`")
+        direction = it.get('direction')
+        ch_delta = it.get('champion_delta_pp')
+        cl_delta = it.get('challenger_delta_pp')
+        winner = _pick_winner_direction(direction, ch_delta, cl_delta)
+        ch_cell = cell_qual(it.get('champion_pct'), ch_delta, it.get('champion_quality'),
+                            is_winner=(winner == 'champion'))
+        cl_cell = cell_qual(it.get('challenger_pct'), cl_delta, it.get('challenger_quality'),
+                            is_winner=(winner == 'challenger'))
+        rows.append(f"`{label:<32} {ref:>4.1f}%  {ch_cell:>20}  {cl_cell:>20}`")
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
 
 def _slack_decis_window(v: dict, B: list, window_key: str):
-    """Distribuição de decis por janela em barra horizontal, com 🟢🟡🔴 vs baseline.
+    """Distribuição de decis por janela em barra horizontal, direction-aware.
 
     window_key ∈ {'previous_day', 'current_launch'}.
     Le de view['lead_quality'].decil_distribution_<window_key>.
-    Cada decil mostra |Δpp vs baseline| → 🟢 <2pp · 🟡 2–4pp · 🔴 ≥4pp.
+
+    Emoji segue direção do lift histórico do decil no pool Top 5 (Fix 3):
+    D10 lift=2.14 → positive → Δpp+ vira 🟢 (mais leads no melhor decil = bom).
+    D01-D04 lift<0.40 → very_negative → Δpp- vira 🟢 (menos leads no pior = bom).
+    D05-D09 CI cruza 1.0 → uncertain → ⚪ (estatisticamente indistinguíveis).
+    Fonte: configs/audience_direction_map.json (decil_direction).
     """
     lq = v.get('lead_quality') or {}
     key = f'decil_distribution_{window_key}'
@@ -942,7 +1025,6 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     if total == 0:
         return
 
-    # Baseline ponderado Champion/Challenger (Top 6 ROAS)
     baseline = info.get('baseline') or {}
     base_pct = baseline.get('pct') or {}
     base_label = baseline.get('label', '')
@@ -952,12 +1034,16 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     max_pct = max(cur_pct.values()) if cur_pct else 0
     width = 20
 
+    # Carrega direction por decil
+    dmap = _load_direction_map_for_renderer()
+    decil_dir = (dmap.get('decil_direction') or {})
+
     title = f'*📊 Distribuição de decis — {win_label}*'
     if base_label:
         title += f' vs *{base_label}*'
     rows = [title]
     if base_pct:
-        rows.append('_🟢 = mais próximo da baseline, não necessariamente melhor (D10 alto é bom mesmo com Δ+pp)._')
+        rows.append('_🟢 bom · 🔴 ruim · ⚪ neutro/incerto (direção pelo lift histórico do decil)._')
     rows.append('```')
     for k in keys:
         pct = cur_pct[k]
@@ -967,7 +1053,9 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
         if base_pct:
             b = float(base_pct.get(k, 0) or 0)
             delta = pct - b
-            emoji = _color_emoji(delta)
+            direction = (decil_dir.get(k, {}) or {}).get('direction')
+            quality = _classify_quality_inline(direction, delta)
+            emoji = _quality_emoji(quality)
             rows.append(f'{k} {bar} {pct:>4.1f}% ({n:,})  Ref {b:>4.1f}%  {emoji}  Δ{delta:+.1f}pp')
         else:
             rows.append(f'{k} {bar} {pct:>4.1f}% ({n:,})')

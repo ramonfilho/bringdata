@@ -277,5 +277,98 @@
         "direction": "uncertain"
       }
     }
-  }
+  },
+  "decil_direction": {
+    "D01": {
+      "n_leads": 1576,
+      "n_buyers": 1,
+      "p_buy_pct": 0.0635,
+      "lift": 0.1369,
+      "ci_low": 0.0192,
+      "ci_high": 0.9755,
+      "direction": "very_negative"
+    },
+    "D02": {
+      "n_leads": 3529,
+      "n_buyers": 2,
+      "p_buy_pct": 0.0567,
+      "lift": 0.1223,
+      "ci_low": 0.0304,
+      "ci_high": 0.4917,
+      "direction": "very_negative"
+    },
+    "D03": {
+      "n_leads": 3031,
+      "n_buyers": 5,
+      "p_buy_pct": 0.165,
+      "lift": 0.3559,
+      "ci_low": 0.1469,
+      "ci_high": 0.8626,
+      "direction": "very_negative"
+    },
+    "D04": {
+      "n_leads": 3476,
+      "n_buyers": 6,
+      "p_buy_pct": 0.1726,
+      "lift": 0.3724,
+      "ci_low": 0.1657,
+      "ci_high": 0.8371,
+      "direction": "very_negative"
+    },
+    "D05": {
+      "n_leads": 8007,
+      "n_buyers": 36,
+      "p_buy_pct": 0.4496,
+      "lift": 0.9701,
+      "ci_low": 0.6832,
+      "ci_high": 1.3774,
+      "direction": "uncertain"
+    },
+    "D06": {
+      "n_leads": 6515,
+      "n_buyers": 35,
+      "p_buy_pct": 0.5372,
+      "lift": 1.1591,
+      "ci_low": 0.8129,
+      "ci_high": 1.6527,
+      "direction": "uncertain"
+    },
+    "D07": {
+      "n_leads": 4599,
+      "n_buyers": 22,
+      "p_buy_pct": 0.4784,
+      "lift": 1.0321,
+      "ci_low": 0.6671,
+      "ci_high": 1.5969,
+      "direction": "uncertain"
+    },
+    "D08": {
+      "n_leads": 4664,
+      "n_buyers": 26,
+      "p_buy_pct": 0.5575,
+      "lift": 1.2028,
+      "ci_low": 0.8026,
+      "ci_high": 1.8024,
+      "direction": "uncertain"
+    },
+    "D09": {
+      "n_leads": 8468,
+      "n_buyers": 41,
+      "p_buy_pct": 0.4842,
+      "lift": 1.0447,
+      "ci_low": 0.7498,
+      "ci_high": 1.4554,
+      "direction": "uncertain"
+    },
+    "D10": {
+      "n_leads": 5544,
+      "n_buyers": 55,
+      "p_buy_pct": 0.9921,
+      "lift": 2.1405,
+      "ci_low": 1.5968,
+      "ci_high": 2.8692,
+      "direction": "positive"
+    }
+  },
+  "decil_direction_source": "scored_abr28 (Challenger) — pool Top 5 ROAS atribuível 60d"
 }
