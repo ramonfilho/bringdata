@@ -236,18 +236,26 @@ medium:
     Aberto: Aberto
     ABERTO: Aberto
     Aberto++AD08-1002: Outros
-    # MIX QUENTE temporariamente mapeado para Outros — feature_registry do
-    # jan30 (Champion atual) não tem Medium_MIX_QUENTE. No próximo retreino,
-    # promover MIX QUENTE a categoria canônica distinta:
+    # ========================================================================
+    # 🚧 BLOQUEADOR M1 — MIX QUENTE precisa virar categoria canônica
+    # ========================================================================
+    # Hoje mapeado para Outros porque o feature_registry do Champion atual
+    # (jan30) não tem Medium_MIX_QUENTE. Auditoria 2026-05-14 (cenário 1.2
+    # do AUDITORIA_QUEBRA_PRODUCAO) confirmou 14.87% do volume nos últimos
+    # 30 dias indo pra Outros — segundo maior volume de Medium, atrás só de
+    # `aberto`. Audiência distinta do gestor.
+    # No próximo retreino do Champion (que precisa rodar pelo pipeline atual
+    # por causa de DT-16 e DT-18):
     #   1. Auditar variações reais com:
     #      SELECT DISTINCT medium FROM "Lead" WHERE medium ILIKE '%mix%quente%'
-    #   2. Mapear TODAS as variações (case/espaços/pontuação) para o mesmo
-    #      canônico (sugestão: "MIX QUENTE").
-    #   3. Aplicar simultaneamente ao retreino — o novo feature_registry
-    #      passa a conter Medium_MIX_QUENTE.
-    # Motivação: ~7.3% do volume histórico desperdiçado em Outros (ver
-    # docs/INVESTIGACAO_BAIXO_DESEMPENHO.md). Tracking em PLANO_EXECUCAO.md
-    # → "Sequelas 05/05/2026" item M1.
+    #   2. Substituir esta linha por: `MIX QUENTE: MIX QUENTE` (mapear pra
+    #      si mesma, mantendo a unificação de casing/whitespace abaixo).
+    #   3. Mapear TODAS as variações observadas (case/espaços/pontuação) para
+    #      o canônico `MIX QUENTE`.
+    #   4. Aplicar simultaneamente ao retreino — o novo feature_registry
+    #      passa a conter `Medium_MIX_QUENTE`.
+    # Cross-refs: PLANO_EXECUCAO.md M1, AUDITORIA_QUEBRA_PRODUCAO Cenário 1.2.
+    # ========================================================================
     MIX QUENTE: Outros
     Linguagem de programação: Linguagem de programação
     dgen: dgen
@@ -266,6 +274,26 @@ medium:
     Funcionários de pequenas empresas B2B (10 a 200 funcionários): Outros
     Funcionários de grandes empresas B2B (mais de 500 funcionários) — Cópia: Outros
 category:
+  # ========================================================================
+  # 🚧 BLOQUEADOR DT-18 — 4 features binárias raw fora da normalização
+  # ========================================================================
+  # Faltam intencionalmente da lista abaixo: `genero`, `estudouProgramacao`,
+  # `faculdade`, `investiuCurso`. Razão: o Champion atual (jan30) foi treinado
+  # com os valores ORIGINAIS — pd.get_dummies() gera sufixos `_Sim`/`_Não`/
+  # `_Masculino`/`_Feminino`. Aplicar `limpar_texto` agora muda os sufixos
+  # para `_sim`/`_nao`/`_masculino`/`_feminino` (não existem no feature_registry),
+  # zerando 100% das 4 features no path do Champion.
+  # Auditoria 2026-05-14 (cenário 1.3): zero variação de casing em 30 dias
+  # (10k leads). Risco operacional ATUAL baixo, mas a primeira variação quebra
+  # silenciosamente. Fix obrigatório no próximo retreino (DT-18 do PLANO_REFACTOR
+  # MLOPS). Quando rodar o retreino, ADICIONAR à lista abaixo:
+  #   - genero
+  #   - estudouProgramacao
+  #   - faculdade
+  #   - investiuCurso
+  # Cross-refs: DT-18 (PLANO_REFACTOR_MLOPS), V.2 (registro_erros_ml), Cenário
+  # 1.3 (AUDITORIA_QUEBRA_PRODUCAO).
+  # ========================================================================
   categorical_columns:
   - interesse_programacao
   - Tem computador/notebook?

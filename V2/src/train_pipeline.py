@@ -1056,6 +1056,47 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     else:
         logger.info(f"  Pesos desabilitados (--no-weights) — todos compradores com peso 1.0")
 
+    # ========================================================================
+    # 🚧 BLOQUEADORES no próximo `--set-active` (rodar TUDO num único retreino)
+    # ========================================================================
+    # Antes de promover o próximo Champion (set_active=True), preencher os itens
+    # abaixo. NÃO rodar `--set-active` isolado pra qualquer um deles — todos
+    # entram juntos pra manter o pipeline de treino sincronizado com produção.
+    #
+    # 1. [DT-18] Normalização das 4 features binárias raw da pesquisa
+    #    (`genero`, `estudouProgramacao`, `faculdade`, `investiuCurso`):
+    #    adicionar à lista `categorical_columns` em
+    #    `configs/clients/devclub.yaml` ANTES do treino, pra que o feature_registry
+    #    do novo Champion já saia com os sufixos normalizados (`_sim`/`_nao` etc.).
+    #
+    # 2. [M1 do PLANO_EXECUCAO] MIX QUENTE como categoria canônica do Medium:
+    #    trocar `MIX QUENTE: Outros` por `MIX QUENTE: MIX QUENTE` em
+    #    `configs/clients/devclub.yaml` ANTES do treino. Auditoria 14/mai
+    #    confirmou 14.87% do volume sendo descartado.
+    #
+    # 3. [DT-16] Matar `encoding_overrides` por convergência: novo Champion já
+    #    sai com OHE nativo (sem ordinal para idade/salário), o que elimina o
+    #    shim do Champion em `configs/active_models/devclub.yaml` no momento da
+    #    promoção.
+    #
+    # 4. [DT-17 fases 4-6] Rates como artifact MLflow + cópia pelo `--set-active`:
+    #    em vez de escrever em `api/business_config.py`, registrar
+    #    `business_rates.yaml` como artifact do MLflow run; `--set-active`
+    #    baixa e copia para o YAML autoritativo.
+    #
+    # 5. [T1-12] Smoke de paridade pipeline-modelo no fim do treino: rodar ~100
+    #    leads reais pelo `apply_encoding` com o modelo recém-treinado e validar
+    #    que (a) o set de features bate com `feature_names_in_` do modelo,
+    #    (b) scores saem em [0, 1] sem NaN, (c) decis cobrem D01-D10. Abortar
+    #    `--set-active` se qualquer um falhar.
+    #
+    # 6. [T1-16 manutenção] Regenerar baseline de zero-rate pro novo run_id:
+    #    `python -m V2.scripts.generate_feature_zero_baselines`. Sem isso o
+    #    validador pós-encoding degrada pra noop com log informativo.
+    #
+    # Catálogos: PLANO_REFACTOR_MLOPS.md (DT-X), PLANO_SAFEGUARD.md (T1-X),
+    # PLANO_EXECUCAO.md (M1).
+    # ========================================================================
     resultado_registro_devclub = registrar_features_e_modelo_devclub(
         dataset_v1_devclub_encoded,
         dataset_v1_devclub,
