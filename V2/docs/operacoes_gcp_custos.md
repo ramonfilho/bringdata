@@ -381,3 +381,93 @@ Como **derrubamos min-instance em prod**, validar que o serviço continua respon
      --region=us-central1 --min-instances=1 --project=smart-ads-451319
    ```
    Effetua em ~60s. Não precisa redeployar.
+
+---
+
+## Fix do startup probe — eliminação do churn de container — 2026-05-14
+
+Descoberto durante o monitoramento pós min-instances=0: uma regressão crítica vinha aumentando os SIGABRTs desde 06/mai.
+
+| Dia | SIGABRTs/dia |
+|---|---:|
+| 06/mai (incidente conhecido) | 460 |
+| 12/mai | 644 |
+| **13/mai** | **1640** (3.5× o pico antigo) |
+| 14/mai (até 09h UTC) | 716 parcial |
+
+**Diagnóstico inicial estava errado.** Não era worker timeout em batches grandes do `/railway/process-pending` (p99=8.4s, max=10.5s — longe dos 1200s do gunicorn). Os `Uncaught signal: 6` na verdade eram **Cloud Run derrubando containers inteiros** durante o startup. Em 09:23 UTC do dia 14/mai vimos 29 `Handling signal: term` num único minuto — sinal de container churn massivo.
+
+### Causa-raiz real
+
+Startup probe do Cloud Run estava com tolerância zero:
+
+```yaml
+startupProbe:
+  failureThreshold: 1       # uma única falha derruba o container
+  periodSeconds: 240
+  timeoutSeconds: 240
+  tcpSocket: { port: 8080 }
+```
+
+Trio que causava o churn:
+
+1. **A/B test dobrou o tempo de startup.** `LeadScoringPipeline.__init__` (`production_pipeline.py:107`) agora carrega 2 modelos (champion + challenger), ~10-15s.
+2. **Probe TCP é fraco.** Verifica só se algo está escutando na porta, não se a API está pronta. Master do gunicorn faz bind cedo, antes do modelo carregar — probe inicial passa, mas requests reais que chegam antes do modelo carregar travam.
+3. **`failureThreshold: 1` derruba na primeira falha.** Em alta carga (madrugada brasileira do lançamento ativo), Cloud Run escala. Cada container passa pela janela frágil de 10-15s. Probe falha em alguns → container morre → spawna outro → cluster de SIGABRT.
+
+### Histórico do probe
+
+Revisões antigas (00100–00400) **não tinham startup probe configurado** — usavam default mais tolerante. Algum deploy entre 00400 e 00447 introduziu essa config, provavelmente junto com a ativação do A/B test, mas com tolerância inadequada pro novo tempo de startup. Não encontramos commit explícito.
+
+### Fix aplicado
+
+```bash
+gcloud run services update smart-ads-api \
+  --region=us-central1 --project=smart-ads-451319 \
+  --startup-probe=tcpSocket.port=8080,failureThreshold=3,periodSeconds=240,timeoutSeconds=240
+```
+
+Apenas `failureThreshold` mudou: **1 → 3**. Criou revisão `smart-ads-api-00326-v9x` com a **mesma imagem** que estava em prod (`sha256:a13148...`) — único delta é a tolerância do probe. Promovida pra 100% via `update-traffic`.
+
+### Validação imediata pós-promoção (14/mai ~09:33 UTC)
+
+- Cold start: 19.4s (esperado pelo carregamento dos 2 modelos).
+- Warm requests sequenciais: 240ms consistente.
+- SIGABRT nos 5min pós-promoção: **0**.
+- Container subiu limpo em 42s, probe tolerou.
+
+### Próximo passo se persistir (não aplicado hoje)
+
+Se a contagem de SIGABRT/dia não cair como esperado, aplicar fix robusto:
+
+1. **Corrigir `/health` pra retornar HTTP 503 quando `pipelines` está vazio** (`api/app.py:245-258` — hoje sempre retorna 200, então não serve como probe HTTP útil). Mudança de 2 linhas.
+2. **Trocar startup probe pra HTTP em `/health`**:
+   ```bash
+   gcloud run services update smart-ads-api --region=us-central1 \
+     --startup-probe=httpGet.path=/health,httpGet.port=8080,failureThreshold=3,periodSeconds=10,timeoutSeconds=5
+   ```
+
+Exige deploy pelos Gates por causa da mudança de código.
+
+### Plano de monitoramento — confirmar fix na madrugada 14→15/mai
+
+Janela crítica é 00h-06h BRT (03h-09h UTC) quando o lançamento gera o pico de leads. Checagens recomendadas em 15/mai ~07h BRT:
+
+```bash
+# Contagem total de SIGABRT últimas 24h — esperado: <100 (era 1640 em 13/mai)
+gcloud logging read 'resource.type=cloud_run_revision AND \
+  resource.labels.service_name=smart-ads-api AND "Uncaught signal: 6"' \
+  --project=smart-ads-451319 --freshness=24h --limit=3000 --format='value(timestamp)' | wc -l
+
+# Distribuição por hora UTC — esperado: zero ou poucos em 03h-09h
+gcloud logging read 'resource.type=cloud_run_revision AND \
+  resource.labels.service_name=smart-ads-api AND "Uncaught signal: 6"' \
+  --project=smart-ads-451319 --freshness=24h --limit=3000 --format='value(timestamp)' \
+  | awk -F'T' '{print substr($2,1,2)}' | sort | uniq -c
+```
+
+**Critério de sucesso:**
+- SIGABRT/dia cai de ~1640 → <100 (idealmente <30).
+- Nenhum cluster de 29 SIGTERMs num minuto se repete.
+
+**Se não cair:** aplicar fix robusto (corrigir `/health` + probe HTTP).
