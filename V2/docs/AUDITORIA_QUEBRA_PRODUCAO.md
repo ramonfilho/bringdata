@@ -128,18 +128,18 @@ Eixos:
 | `/predict/batch` | Challenger | OHE (default) | rates Challenger | predictor abr28 | Gate A (audit_encoding_ab Challenger) + Gate B (smoke /run-variants Challenger) + Gate C (force chlng+ prefix) |
 | `/predict/single` | Champion | ordinal | rates Champion | predictor jan30 | Coberto via /predict/batch que internamente delega |
 | `/predict/single` | Challenger | OHE | rates Challenger | predictor abr28 | Coberto via /predict/batch |
-| `/railway/process-pending` | Champion | ordinal | rates Champion | predictor jan30 | **Gap parcial**: smoke test não exercita esse endpoint diretamente, embora compartilhe `LeadScoringPipeline.run()` com /predict/batch |
-| `/railway/process-pending` | Challenger | OHE | rates Challenger | predictor abr28 | Mesmo gap parcial |
+| `/railway/process-pending` | Champion | ordinal | rates Champion | predictor jan30 | ✅ Smoke direto via `?dry_run=true` (11/mai) — `check_railway_polling_smoke()` em `scripts/smoke_test_revision.py` |
+| `/railway/process-pending` | Challenger | OHE | rates Challenger | predictor abr28 | ✅ Mesmo gate — exercita o caminho A/B real do polling em dry_run |
 | `/capi/process_daily_batch` | Champion | ordinal | rates Champion | predictor jan30 | Gate C (capi-dry-run mode) |
 | `/capi/process_daily_batch` | Challenger | OHE | rates Challenger | predictor abr28 | Gate C (capi-dry-run + force chlng+ prefix) |
 | `/webhook/lead_capture` | N/A (não scoreia) | — | — | — | Não scoreia, não precisa de gate de paridade |
 
 **Gaps identificados:**
-1. `/railway/process-pending` não tem smoke test direto. Compartilha o pipeline com `/predict/batch` então o risco é baixo, mas qualquer regressão específica desse endpoint (ex.: parsing do JSONB do Railway, dedup de batch) escapa.
+1. ~~`/railway/process-pending` não tem smoke test direto.~~ **Resolvido em 11/mai:** `check_railway_polling_smoke()` em `scripts/smoke_test_revision.py` chama o endpoint com `?dry_run=true` (lê + scoreia sem escrever no banco nem disparar CAPI). Pega bugs específicos do caminho — parse JSONB, dedup em batch, gravação.
 2. Combinações 100%-Challenger / 100%-Champion (sem split) não são exercitadas — hoje sempre vai 50/50 no Gate C. Risco operacional baixo (não é cenário planejado).
 3. Não há cobertura para o caminho "predictor_override do Challenger mas encoding default" — combinação atualmente inexistente em produção, mas seria armadilha se um Challenger novo entrar sem `encoding_overrides` definido.
 
-**Critério de fechamento:** matriz acima mantida atualizada a cada mudança de variante A/B ou endpoint novo. Gap (1) → adicionar smoke test específico do `/railway/process-pending` quando houver capacidade.
+**Critério de fechamento:** matriz acima mantida atualizada a cada mudança de variante A/B ou endpoint novo. Gap (1) ✅ fechado em 11/mai. Gaps (2) e (3) permanecem em backlog de baixa prioridade (cenários atualmente inexistentes em produção).
 
 ---
 

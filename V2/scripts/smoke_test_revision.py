@@ -153,6 +153,56 @@ def check_feature_report_gate(
     return 'block', {**payload, 'blocking_issues': blocking}
 
 
+def check_railway_polling_smoke(url: str, timeout: int = 120) -> tuple[str, dict]:
+    """
+    [Gate 3.2] Exercita o endpoint /railway/process-pending em modo dry-run.
+
+    Esse endpoint é chamado pelo Cloud Scheduler a cada 5 minutos e processa
+    leads recém-chegados no banco Railway. Compartilha boa parte do código
+    com /predict/batch (que já é coberto pelo smoke), mas tem caminho próprio
+    pra parse do JSONB pesquisa, aplicação do railway_lead_to_sheets_row em
+    batch, dedup, e gravação do score de volta no banco. Antes deste gate,
+    bugs específicos desse caminho passavam sem aviso até a revisão receber
+    tráfego real (precedente: bug do `.str` accessor com batch=1).
+
+    `?dry_run=true` faz o endpoint executar leitura + scoring + montagem do
+    payload CAPI sem escrever no banco nem disparar evento ao Meta.
+
+    Returns:
+        (decision, payload) onde decision ∈ {'pass', 'block', 'no_data', 'error'}
+    """
+    endpoint = f"{url}/railway/process-pending?dry_run=true"
+    try:
+        # POST com body vazio — endpoint não exige payload
+        req = urllib.request.Request(endpoint, method='POST', data=b'')
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        body = resp.read().decode('utf-8', errors='replace')
+        payload = json.loads(body)
+    except urllib.error.HTTPError as e:
+        body = e.read(2000).decode('utf-8', errors='replace') if hasattr(e, 'read') else str(e)
+        return 'error', {'http_status': e.code, 'body': body[:500]}
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        return 'error', {'reason': str(e)[:500]}
+
+    # Estados do endpoint:
+    #   - "Nenhum lead pendente" (processed=0): no_data (não dá pra avaliar o caminho de scoring)
+    #   - processed > 0 com dry_run=true: pass (caminho exercitado sem efeito colateral)
+    #   - skipped > 0 (erros internos no batch): block (algo quebrou no processamento)
+    if not payload.get('dry_run'):
+        return 'error', {'reason': 'endpoint não respeitou dry_run=true (sem flag no response)', 'payload': payload}
+
+    processed = payload.get('processed', 0)
+    skipped = payload.get('skipped', 0)
+
+    if processed == 0 and skipped == 0:
+        return 'no_data', payload
+
+    if skipped > 0:
+        return 'block', payload
+
+    return 'pass', payload
+
+
 def check_ab_variants_smoke(url: str, timeout: int = 120) -> tuple[str, dict]:
     """
     [T1-14 Gate] Bate /smoke/run-variants?limit=5&hours=24 e decide se a
@@ -223,6 +273,8 @@ def main() -> int:
                         help='Pula o gate do /monitoring/feature-report (T1-11).')
     parser.add_argument('--skip-ab-variants-gate', action='store_true',
                         help='Pula o gate de variantes A/B (T1-14).')
+    parser.add_argument('--skip-railway-polling-gate', action='store_true',
+                        help='Pula o gate de /railway/process-pending (Gate 3.2 — cobertura do polling).')
     args = parser.parse_args()
 
     print(f"[smoke test] Revisão: {args.revision}")
@@ -377,6 +429,40 @@ def main() -> int:
             n_variants = ab_payload.get('variants_tested', 0)
             print(f"[smoke test] ✅ A/B variants OK ({n_variants} variantes testadas, "
                   f"{ab_payload.get('leads_used')} leads)")
+
+    # [Gate 3.2] /railway/process-pending — exercita o caminho específico do
+    # polling de leads do banco (parse JSONB, railway_mapping em batch, dedup,
+    # gravação). Roda em dry_run pra não afetar produção.
+    if args.skip_railway_polling_gate:
+        print("[smoke test] ⚠️  --skip-railway-polling-gate: pulando gate de /railway/process-pending.")
+    else:
+        print("[smoke test] [Gate 3.2] Consultando /railway/process-pending?dry_run=true...")
+        rp_decision, rp_payload = check_railway_polling_smoke(url)
+
+        if rp_decision == 'block':
+            print()
+            print("╔══════════════════════════════════════════════════════════════════╗")
+            print("║  🚨 SMOKE TEST FALHOU — /railway/process-pending COM ERROS    ║")
+            print("╠══════════════════════════════════════════════════════════════════╣")
+            print(f"  processed: {rp_payload.get('processed')}")
+            print(f"  skipped:   {rp_payload.get('skipped')}  ← leads com erro de processamento")
+            print(f"  dry_run:   {rp_payload.get('dry_run')}")
+            print("╚══════════════════════════════════════════════════════════════════╝")
+            print()
+            print("Ação: não progredir tráfego. O polling do Railway falhou em algum lead")
+            print("do batch — investigar logs da revisão pra causa-raiz (parse JSONB,")
+            print("dedup .str accessor, railway_mapping, etc).")
+            return 1
+
+        if rp_decision == 'error':
+            print(f"[smoke test] ⚠️  /railway/process-pending falhou: {rp_payload}")
+            print("[smoke test] Não bloqueante (gate não conseguiu opinar) — verifique manualmente.")
+        elif rp_decision == 'no_data':
+            print("[smoke test] ⚠️  /railway/process-pending sem leads pendentes no momento.")
+            print("[smoke test] Não bloqueante — caminho não foi exercitado pela falta de input.")
+        else:  # 'pass'
+            print(f"[smoke test] ✅ /railway/process-pending OK "
+                  f"(processed={rp_payload.get('processed')} em dry_run)")
 
     print("[smoke test] ✅ Todos os gates passaram. Prossegue.")
     return 0

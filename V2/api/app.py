@@ -3958,7 +3958,7 @@ def _parse_validation_metrics(stdout: str) -> dict:
 # =============================================================================
 
 @app.post("/railway/process-pending")
-async def railway_process_pending(pipeline: PipelineDep):
+async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
     """
     Processa leads pendentes do Railway PostgreSQL (leadScore IS NULL).
 
@@ -3971,6 +3971,12 @@ async def railway_process_pending(pipeline: PipelineDep):
     4. Roda pipeline ML em batch → lead_score + decil
     5. Atualiza Railway: leadScore, decil, updatedAt
     6. Envia eventos CAPI para Meta
+
+    Args:
+        dry_run: Quando True, executa passos 1-4 (leitura + scoring) mas PULA
+                 passos 5-6 (escrita no banco + envio CAPI). Usado pelo smoke
+                 test pós-canary pra exercitar o caminho de polling sem efeito
+                 colateral em produção. Resposta inclui `dry_run: true`.
     """
 
     import pg8000.native
@@ -3999,8 +4005,26 @@ async def railway_process_pending(pipeline: PipelineDep):
             f'ORDER BY "createdAt" ASC LIMIT {_polling_limit}'
         )
 
+        def _run_critical_alerts_safely(_conn):
+            """Hook crítico: registra status do polling + roda as 6 regras.
+            Falha NÃO pode quebrar o polling. Vide docs/CRITICAL_ALERTS_SPEC.md."""
+            try:
+                from src.monitoring.critical_alerts import (
+                    run_critical_checks, record_polling_status, GcsStateStore,
+                )
+                _store = GcsStateStore()
+                record_polling_status(_store, status='ok')
+                _store.flush()
+                _ca_summary = run_critical_checks(_conn)
+                logger.info(f"🚨 critical_alerts: {_ca_summary}")
+            except Exception as _cae:
+                logger.warning(f"⚠️ critical_alerts falhou (não bloqueia polling): {_cae}")
+
         if not rows:
             logger.info("✅ Railway polling: nenhum lead pendente")
+            # Regras de critical_alerts avaliam janelas de 60min — rodam
+            # independente de haver batch atual de leads pendentes.
+            _run_critical_alerts_safely(railway_conn)
             return {"processed": 0, "skipped": 0, "message": "Nenhum lead pendente"}
 
         logger.info(f"📋 Railway polling: {len(rows)} leads pendentes encontrados")
@@ -4142,14 +4166,17 @@ async def railway_process_pending(pipeline: PipelineDep):
                 lead_score_value, decil_str = score_by_index[i]
                 decil_int = int(decil_str[1:])  # 'D05' → 5
 
-                # Atualizar Railway (pg8000 named parameters com :name)
-                railway_conn.run(
-                    'UPDATE "Lead" SET "leadScore" = :score, decil = :decil, '
-                    '"updatedAt" = NOW() WHERE id = :lead_id',
-                    score=lead_score_value,
-                    decil=decil_int,
-                    lead_id=lead['id'],
-                )
+                # Atualizar Railway (pg8000 named parameters com :name).
+                # Em dry_run, pula a escrita pra não interferir no estado
+                # de produção (smoke test pós-canary).
+                if not dry_run:
+                    railway_conn.run(
+                        'UPDATE "Lead" SET "leadScore" = :score, decil = :decil, '
+                        '"updatedAt" = NOW() WHERE id = :lead_id',
+                        score=lead_score_value,
+                        decil=decil_int,
+                        lead_id=lead['id'],
+                    )
                 processed += 1
 
                 # Preparar evento CAPI com overrides A/B se variante identificada
@@ -4198,9 +4225,10 @@ async def railway_process_pending(pipeline: PipelineDep):
                 logger.error(f"⚠️ Erro ao processar lead {lead.get('email')}: {e}")
                 skipped += 1
 
-        # 8. Enviar eventos CAPI (db=None — Railway não usa Cloud SQL)
+        # 8. Enviar eventos CAPI (db=None — Railway não usa Cloud SQL).
+        # Em dry_run, pula o envio pra não duplicar evento no Meta (smoke test).
         capi_result: Dict = {"success": 0, "total": 0, "errors": 0}
-        if capi_leads:
+        if capi_leads and not dry_run:
             logger.info(f"📤 Enviando {len(capi_leads)} eventos CAPI (Railway)...")
             capi_result = send_batch_events(capi_leads, db=None, capi_config=pipeline._client_config.capi,
                                             business_config=pipeline._client_config.business,
@@ -4209,9 +4237,13 @@ async def railway_process_pending(pipeline: PipelineDep):
                 f"✅ CAPI Railway: {capi_result.get('success', 0)}/"
                 f"{capi_result.get('total', 0)} enviados"
             )
+        elif capi_leads and dry_run:
+            logger.info(f"🧪 dry_run=true — {len(capi_leads)} eventos CAPI montados mas NÃO enviados")
+            capi_result = {"success": 0, "total": len(capi_leads), "errors": 0, "dry_run": True}
 
-        # 9. Atualizar capiSentAt + capiStatus no Railway
-        details = capi_result.get('details', [])
+        # 9. Atualizar capiSentAt + capiStatus no Railway.
+        # Em dry_run pula — `details` está vazio porque CAPI foi pulado acima.
+        details = capi_result.get('details', []) if not dry_run else []
         for i, detail in enumerate(details):
             if i >= len(capi_leads):
                 break
@@ -4226,39 +4258,37 @@ async def railway_process_pending(pipeline: PipelineDep):
             except Exception as e:
                 logger.warning(f"⚠️ Erro ao atualizar capiSentAt para {capi_leads[i].get('email')}: {e}")
 
-        # 9b. Marcar leads bloqueados (utm_blocklist) e ignorados (utm_source_allowlist)
-        for lead_id, status in [(lid, 'blocked') for lid in blocked_lead_ids] + \
-                               [(lid, 'skipped') for lid in skipped_lead_ids]:
-            try:
-                railway_conn.run(
-                    'UPDATE "Lead" SET "capiSentAt" = NOW(), "capiStatus" = :status, '
-                    '"updatedAt" = NOW() WHERE id = :lead_id',
-                    status=status,
-                    lead_id=lead_id,
-                )
-            except Exception as e:
-                logger.warning(f"⚠️ Erro ao marcar lead {status} {lead_id}: {e}")
+        # 9b. Marcar leads bloqueados (utm_blocklist) e ignorados (utm_source_allowlist).
+        # Em dry_run pula — não muda o estado de capiStatus em produção.
+        if not dry_run:
+            for lead_id, status in [(lid, 'blocked') for lid in blocked_lead_ids] + \
+                                   [(lid, 'skipped') for lid in skipped_lead_ids]:
+                try:
+                    railway_conn.run(
+                        'UPDATE "Lead" SET "capiSentAt" = NOW(), "capiStatus" = :status, '
+                        '"updatedAt" = NOW() WHERE id = :lead_id',
+                        status=status,
+                        lead_id=lead_id,
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Erro ao marcar lead {status} {lead_id}: {e}")
 
-        logger.info(
-            f"✅ Railway polling concluído: {processed} processados, "
-            f"{skipped} erros, {capi_result.get('success', 0)} CAPI enviados, "
-            f"{len(blocked_lead_ids)} bloqueados, {len(skipped_lead_ids)} ignorados por source"
-        )
-
-        # Critical alerts — hook crítico. Falha aqui NÃO pode quebrar o polling.
-        # Por default opera em dry-run (CRITICAL_ALERTS_DRY_RUN=true). Vide
-        # docs/CRITICAL_ALERTS_SPEC.md.
-        try:
-            from src.monitoring.critical_alerts import (
-                run_critical_checks, record_polling_status, GcsStateStore,
+        if dry_run:
+            logger.info(
+                f"🧪 Railway polling DRY-RUN concluído: {processed} scoreados (não escritos), "
+                f"{skipped} erros, {len(capi_leads)} CAPI montados (não enviados), "
+                f"{len(blocked_lead_ids)} seriam bloqueados, {len(skipped_lead_ids)} seriam ignorados"
             )
-            _store = GcsStateStore()
-            record_polling_status(_store, status='ok')
-            _store.flush()
-            critical_summary = run_critical_checks(railway_conn)
-            logger.info(f"🚨 critical_alerts: {critical_summary}")
-        except Exception as _cae:
-            logger.warning(f"⚠️ critical_alerts falhou (não bloqueia polling): {_cae}")
+        else:
+            logger.info(
+                f"✅ Railway polling concluído: {processed} processados, "
+                f"{skipped} erros, {capi_result.get('success', 0)} CAPI enviados, "
+                f"{len(blocked_lead_ids)} bloqueados, {len(skipped_lead_ids)} ignorados por source"
+            )
+            # Critical alerts — caminho de sucesso normal (com batch processado).
+            # Mesma chamada do early-return ("nenhum lead pendente") via helper.
+            # Pulado em dry_run pra não disparar alertas a partir de smoke test.
+            _run_critical_alerts_safely(railway_conn)
 
         return {
             "processed":     processed,
@@ -4267,6 +4297,7 @@ async def railway_process_pending(pipeline: PipelineDep):
             "capi_errors":   capi_result.get('errors', 0),
             "capi_blocked":  len(blocked_lead_ids),
             "capi_skipped":  len(skipped_lead_ids),
+            "dry_run":       dry_run,
             "timestamp":     datetime.now().isoformat(),
         }
 
