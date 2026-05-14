@@ -665,25 +665,45 @@ print(','.join(stale))
             print_warning "Arquivo $ENV_FILE ausente — Gate C precisa de RAILWAY_DB_* — pulado"
         fi
 
-        # [T3-1] Progressão de canary recomendada — não pular etapas.
+        # [T3-1 + T2-7] Progressão de canary recomendada — não pular etapas.
         # Critérios objetivos de avanço entre etapas estão em PLANO_SAFEGUARD.md "Protocolo
-        # de progressão de tráfego [T1-9]". Resumo dos comandos:
+        # de progressão de tráfego [T1-9]". Os comandos abaixo já trazem o cabeamento do
+        # progression_gate.py [T2-7] — uso recomendado: rodar o gate em modo --check ANTES
+        # de cada update-traffic; ele consulta /monitoring/feature-report e
+        # /monitoring/daily-check/railway e devolve PROMOTE/HOLD/ROLLBACK. Com --execute,
+        # roda o update-traffic depois de aprovar.
         echo
-        print_info "==================== Progressão de canary (T3-1) ===================="
-        print_info "Etapa 0 → 10% (canary inicial, observar 24h):"
+        print_info "==================== Progressão de canary (T3-1 + T2-7) ===================="
+        PROGRESSION_SCRIPT="$SCRIPT_DIR/../scripts/progression_gate.py"
+        if [ -f "$PROGRESSION_SCRIPT" ]; then
+            print_info "Pré-validação do estágio 0% → 10% via progression_gate (T2-7)..."
+            # check-only: não executa update-traffic; apenas valida que a revisão está saudável
+            # contra critérios do estágio antes do operador promover.
+            python3 "$PROGRESSION_SCRIPT" --revision "$NEW_REVISION" --from 0 --to 10 \
+                --rollback "${PREVIOUS_REVISION:-smart-ads-api-00269-jjn}" \
+                --service "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" || \
+                print_warning "[T2-7] gate retornou non-zero — leia razões acima antes de prosseguir"
+            echo
+        else
+            print_warning "[T2-7] progression_gate.py não encontrado — usando progressão totalmente manual"
+        fi
+        print_info "Etapa 0 → 10% (canary inicial, observar 1h conforme critério):"
+        print_info "  python3 $PROGRESSION_SCRIPT --revision $NEW_REVISION --from 0 --to 10 \\"
+        print_info "    --rollback ${PREVIOUS_REVISION:-PREVIOUS_REVISION} --execute"
+        print_info "  # OU manualmente:"
         print_info "  gcloud run services update-traffic $SERVICE_NAME --region=$REGION \\"
         print_info "    --to-revisions=$NEW_REVISION=10,${PREVIOUS_REVISION:-PREVIOUS_REVISION}=90"
         print_info ""
-        print_info "Etapa 10% → 50% (após 24h sem alerta HIGH novo + paridade observada):"
-        print_info "  gcloud run services update-traffic $SERVICE_NAME --region=$REGION \\"
-        print_info "    --to-revisions=$NEW_REVISION=50,${PREVIOUS_REVISION:-PREVIOUS_REVISION}=50"
+        print_info "Etapa 10% → 50% (após 24h, capi_sent≥90%, acceptance≥85%, D10 div≤10pp, feature_report ∈ {OK,INFO}):"
+        print_info "  python3 $PROGRESSION_SCRIPT --revision $NEW_REVISION --from 10 --to 50 \\"
+        print_info "    --rollback ${PREVIOUS_REVISION:-PREVIOUS_REVISION} --execute"
         print_info ""
-        print_info "Etapa 50% → 100% (após 48h sem alerta HIGH + golden snapshot estável):"
-        print_info "  gcloud run services update-traffic $SERVICE_NAME --region=$REGION \\"
-        print_info "    --to-revisions=$NEW_REVISION=100"
+        print_info "Etapa 50% → 100% (após 7 dias sem regressão operacional):"
+        print_info "  python3 $PROGRESSION_SCRIPT --revision $NEW_REVISION --from 50 --to 100 \\"
+        print_info "    --rollback ${PREVIOUS_REVISION:-PREVIOUS_REVISION} --execute"
         print_info ""
         print_info "Rollback rápido (~10s): voltar 100% para $PREVIOUS_REVISION."
-        print_info "Re-rodar smoke (Gate A) antes de qualquer avanço: python3 $SMOKE_SCRIPT $NEW_REVISION"
+        print_info "Re-rodar smoke (Gate B) antes de qualquer avanço: python3 $SMOKE_SCRIPT $NEW_REVISION"
         print_info "Descartar revisão: gcloud run revisions delete $NEW_REVISION --region=$REGION"
         print_info "====================================================================="
     fi

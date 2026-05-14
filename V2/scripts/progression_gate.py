@@ -61,7 +61,7 @@ STAGE_CRITERIA = {
     50: {
         'min_hours_observed': 24.0,
         'max_5xx_rate': 0.01,
-        'required_feature_report_status': ['OK'],   # WARNING bloqueia — mais rigoroso
+        'required_feature_report_status': ['OK', 'INFO'],  # alinhado com PLANO_SAFEGUARD § "Como tráfego cresce após o deploy" (10→50: feature_report ∈ {OK, INFO})
         'min_capi_sent_rate': 0.90,
         'min_meta_acceptance_rate': 0.85,
         'max_d10_divergence_pp': 10.0,
