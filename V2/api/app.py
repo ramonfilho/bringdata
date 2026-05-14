@@ -2793,7 +2793,7 @@ async def daily_monitoring_check_railway(
                 'n_challenger':  int(n_chal),
                 'w_champion':    round(w_c, 4),
                 'w_challenger':  round(w_ch, 4),
-                'label':         f"{_base_label} (ponderado: {int(w_c*100)}% Champion + {int(w_ch*100)}% Challenger)",
+                'label':         _base_label,
             }
 
         # Ontem completo BRT (00:00→23:59 BRT do dia anterior)
@@ -2812,7 +2812,7 @@ async def daily_monitoring_check_railway(
         railway_lead_quality['decil_distribution_previous_day'] = {
             'distribution': _decil_dist(_yest_rows),
             'total': len(_yest_rows),
-            'window_label': f"{_yesterday_brt_midnight.strftime('%d/%m')} BRT (24h)",
+            'window_label': 'Ontem',
             'baseline': _weighted_baseline(_yest_n_c, _yest_n_ch),
         }
 

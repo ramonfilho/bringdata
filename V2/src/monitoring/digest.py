@@ -865,7 +865,8 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
         'Lançamento Atual' if window == 'current_launch' else (d.get('window_label') or 'janela')
     )
     header = f"*📉 Drift por A/B - {window_title}*"
-    rows = [header]
+    disclaimer = '_✅ Atribuído ao **mais próximo** da baseline, não necessariamente ao "melhor"._'
+    rows = [header, disclaimer]
     col_header = f"{'Característica':<32} {'Top%':>5}  {'Champion(Δ)':>16}  {'Challenger(Δ)':>16}"
     rows.append(f"`{col_header}`")
 
@@ -915,7 +916,7 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     max_pct = max(cur_pct.values()) if cur_pct else 0
     width = 20
 
-    title = f'*📊 Distribuição de decis — {win_label}* (n={total:,})'
+    title = f'*📊 Distribuição de decis — {win_label}*'
     if base_label:
         title += f' vs *{base_label}*'
     rows = [title, '```']
@@ -928,7 +929,7 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
             b = float(base_pct.get(k, 0) or 0)
             delta = pct - b
             emoji = _color_emoji(delta)
-            rows.append(f'{k} {bar} {pct:>4.1f}% ({n:,})  {emoji} Ref {b:>4.1f}%  Δ{delta:+.1f}pp')
+            rows.append(f'{k} {bar} {pct:>4.1f}% ({n:,})  Ref {b:>4.1f}%  {emoji}  Δ{delta:+.1f}pp')
         else:
             rows.append(f'{k} {bar} {pct:>4.1f}% ({n:,})')
     rows.append('```')

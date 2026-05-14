@@ -2107,20 +2107,34 @@ class DataQualityMonitor:
             top_list = _kept
 
         # Ordenar: agrupa por feature_label (idade junto, ocupação junto), e dentro
-        # do grupo por |Δpp| desc. Ordem dos grupos segue o |Δ| máx do grupo.
+        # do grupo aplica ordem semântica (idade do menor pro maior, faixa salarial
+        # do menor pro maior). Features sem ordem natural ficam por |Δpp| desc.
+        # Ordem dos grupos segue o |Δ| máx do grupo.
+        _ORDINAL_CATS = {
+            'Qual a sua idade?':
+                ['<18', '18-24', '25-34', '35-44', '45-54', '55+'],
+            'Atualmente, qual a sua faixa salarial?':
+                ['Sem renda', 'Até R$2.000', 'R$2.001-3.000', 'R$3.001-5.000', 'Acima de R$5.000'],
+        }
         def _trigger_abs(it):
             d = abs(it['delta_pp'])
             l = it.get('launch_delta_pp')
             return max(d, abs(l)) if l is not None else d
         _groups: dict[str, list] = {}
         for _it in top_list:
-            _groups.setdefault(_it.get('feature_label', '?'), []).append(_it)
+            _groups.setdefault(_it.get('feature_column', '?'), []).append(_it)
         # Ordem dos grupos pelo |Δ| máx
         _group_order = sorted(_groups.keys(), key=lambda g: -max(_trigger_abs(x) for x in _groups[g]))
         top_list = []
-        for _g in _group_order:
-            _items = _groups[_g]
-            _items.sort(key=lambda x: -_trigger_abs(x))
+        for _gcol in _group_order:
+            _items = _groups[_gcol]
+            _ord = _ORDINAL_CATS.get(_gcol)
+            if _ord:
+                # Sort por ordem semântica; categorias fora da lista vão pro fim (estável)
+                _idx = {cat: i for i, cat in enumerate(_ord)}
+                _items.sort(key=lambda x: _idx.get(x.get('category'), len(_ord) + 1))
+            else:
+                _items.sort(key=lambda x: -_trigger_abs(x))
             top_list.extend(_items)
         max_abs_delta = max((_trigger_abs(it) for it in top_list), default=0.0)
 
