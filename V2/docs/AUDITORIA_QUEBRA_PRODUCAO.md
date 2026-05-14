@@ -64,19 +64,20 @@ Documento operacional, escrito em linguagem natural. Lista os cenários que **po
 - Antes de qualquer promoção de modelo, rodar `python V2/scripts/audit_active_model_yaml.py` (Gate D em `deploy_capi.sh`) — confirma que `conversion_rates` de cada variant está dentro do esperado vs `business_config.conversion_rates`.
 - Manualmente: para cada variant em `active_models/{client}.yaml`, calcular `value × product_value` pelo decil mediano e comparar com baseline conhecido.
 
-**Critério de fechamento:** Gate D do `deploy_capi.sh` rodando obrigatoriamente antes de cada promoção, sem opção de skip.
+**Status (atualizado em 11/mai/2026):** [✅ FECHADO]. Gate D já roda obrigatoriamente no `deploy_capi.sh` após o smoke test do canary (linhas 599-625). O único skip silencioso restante — "se o script Gate D não existir no caminho, pula com warning" — foi removido em 11/mai: agora script ausente = falha alta com `exit 1`. Sem caminho de fuga.
 
-### Cenário 2.2 — Deploy aponta pra `run_id` cujo artefato sumiu do GCS
+### Cenário 2.2 — Deploy aponta pra `run_id` cujo artefato sumiu — [✅ FECHADO 2026-05-11]
 
-**O que aconteceria:** alguém edita `active_models/{client}.yaml` com um `mlflow_run_id` cujo bucket GCS de artefatos foi limpo, ou nunca existiu. Cloud Run reinicia, modelo não carrega.
+**Resultado da auditoria:** o cenário original foi descrito sob a premissa de que o Cloud Run baixaria artefatos do GCS no boot. **Não é a arquitetura real.** O sistema atual baka os artefatos do MLflow direto na imagem Docker (`mlruns_build/` é copiado pra dentro do container), então o Cloud Run nunca depende do GCS em runtime — ele depende da imagem.
 
-**Por que isso importa:** já aconteceu (Erro 11 do registro). Sintoma na época: modelo "salvo em path diferente". Falha **alto** na inicialização do servidor (não silencioso) — então o impacto é "rollback necessário", não "leads scorreados errados".
+Pre-flight equivalente JÁ EXISTE em [`V2/api/deploy_capi.sh`](../api/deploy_capi.sh):
+- Linhas 272-290: confirma que `mlruns/1/{run_id}/artifacts/model/model.pkl`, `model_metadata.json` e `feature_registry.json` existem **localmente** antes de prosseguir com o build. Falha alto se faltar.
+- Linhas 390-393: bloqueia o stage do Champion se a pasta de artefatos não existir.
+- Linhas 419-423: bloqueia o stage de variantes A/B com mensagem pronta de `mlflow.artifacts.download_artifacts(run_id, dst_path)` pra puxar do GCS.
 
-**Como verificar:**
-- Antes de cada promoção, listar `gs://smart-ads-mlflow/artifacts/<run_id>/` e confirmar que `model.pkl` existe.
-- Idealmente: pre-flight check no `deploy_capi.sh` que falha se o artefato não existir.
+O cenário marginal restante seria "artefato existe localmente mas GCS foi limpo" — afeta apenas outro dev em máquina nova (não afeta produção). Não justifica check adicional.
 
-**Critério de fechamento:** pre-flight check de existência do artefato no GCS implementado no `deploy_capi.sh`.
+**Precedente histórico (Erro 11):** modelo "salvo em path diferente" foi causa relatada na época. Esse caso específico está coberto pelo check local + a recuperação via `download_artifacts` documentada inline.
 
 ---
 
@@ -177,7 +178,9 @@ Eixos:
 
 **O que esta seção cobre:** o retreino mensal pode falhar por **pré-condição operacional** (banco parado, snapshot ausente, dataset corrompido) que ninguém percebe até o momento de rodar. Custo dessa falha é alto: atrasa o retreino e o time fica reagindo em cima da hora.
 
-### Cenário 5.1 — Cloud SQL `smart-ads-db` em `activation-policy=NEVER` quando retreino disparar
+### Cenário 5.1 — Cloud SQL `smart-ads-db` em `activation-policy=NEVER` quando retreino disparar — [✅ FECHADO 2026-05-11]
+
+**Resultado da auditoria:** o pre-flight check JÁ EXISTE como `assert_mlflow_backend_running()` em [`V2/src/model/training_model.py:46-96`](../src/model/training_model.py#L46-L96), invocado em `train_pipeline.main():246` e `retraining_orchestrator.main():631`. Verifica `state` da instância via `gcloud sql instances describe`, falha alto com `RuntimeError` se diferente de `RUNNABLE` e a mensagem inclui o comando exato pra subir a instância. Complementar: `register_mlflow_cleanup_reminder()` emite lembrete no fim do processo pra desligar a instância (economia ~R$40/mês). Verificado em 11/mai com instância em `STOPPED` — guard disparou corretamente com mensagem clara.
 
 **O que aconteceria:** retreino é disparado (manual ou agendado), tenta conectar no MLflow tracking pra registrar o run, falha porque a instância está parada. Treino aborta no início, ninguém é notificado. Demora 2-3 minutos pra subir a instância depois que alguém percebe.
 

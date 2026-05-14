@@ -600,19 +600,27 @@ print(','.join(stale))
         # Pega bug "VAL=0" da família: business.conversion_rates ausente em clients/{cliente}.yaml
         # ou variants ativos com conversion_rates zerado em active_models/{cliente}.yaml.
         # Requer docker daemon disponível pra puxar a imagem e ler o YAML interno.
+        #
+        # 11/05/2026: removido skip silencioso quando o script não existe. Antes,
+        # se alguém deletasse/renomeasse o script, o gate sumia com warning.
+        # Agora script ausente == falha alta. Precedente: bug VAL=0 (30/abr-06/mai)
+        # passou por gap análogo de salvaguarda invisível.
         GATE_D_SCRIPT="$SCRIPT_DIR/../scripts/gate_d_config_audit.py"
-        if [ -f "$GATE_D_SCRIPT" ]; then
-            print_info "[Gate D] Auditando config dentro da imagem $NEW_REVISION..."
-            if python3 "$GATE_D_SCRIPT" "$NEW_REVISION" --region "$REGION" --project "$PROJECT_ID"; then
-                print_success "[Gate D] Config dentro da imagem está consistente"
-            else
-                print_error "[Gate D] FALHOU — invariantes de YAML quebradas (ver acima)"
-                print_warning "Revisão permanece em 0% de tráfego. NÃO progredir tráfego até resolver."
-                print_info "Para descartar: gcloud run revisions delete $NEW_REVISION --region=$REGION"
-                exit 1
-            fi
+        if [ ! -f "$GATE_D_SCRIPT" ]; then
+            print_error "[Gate D] script obrigatório não encontrado em $GATE_D_SCRIPT"
+            print_error "Gate D é mandatório pós-canary — sem ele, revisões com YAML quebrado podem progredir."
+            print_warning "Revisão permanece em 0% de tráfego. Restaurar o script antes de prosseguir."
+            print_info "Para descartar a revisão: gcloud run revisions delete $NEW_REVISION --region=$REGION"
+            exit 1
+        fi
+        print_info "[Gate D] Auditando config dentro da imagem $NEW_REVISION..."
+        if python3 "$GATE_D_SCRIPT" "$NEW_REVISION" --region "$REGION" --project "$PROJECT_ID"; then
+            print_success "[Gate D] Config dentro da imagem está consistente"
         else
-            print_warning "Gate D script não encontrado em $GATE_D_SCRIPT — pulado"
+            print_error "[Gate D] FALHOU — invariantes de YAML quebradas (ver acima)"
+            print_warning "Revisão permanece em 0% de tráfego. NÃO progredir tráfego até resolver."
+            print_info "Para descartar: gcloud run revisions delete $NEW_REVISION --region=$REGION"
+            exit 1
         fi
 
         # [Gate C] Equivalência de scoring entre revisões (08/05/2026).
