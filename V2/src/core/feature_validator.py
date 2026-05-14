@@ -307,6 +307,133 @@ def validate_pre_encoding(
     return result
 
 
+def load_zero_rate_baseline(run_id: str, baselines_dir: Optional[Path] = None) -> Optional[Dict[str, Dict[str, float]]]:
+    """
+    Carrega o baseline de "fração esperada de zero por coluna OHE" gerado por
+    `scripts/generate_feature_zero_baselines.py` para um modelo específico.
+
+    Returns:
+        Dict {coluna_OHE: {'expected_nonzero_rate': float, 'expected_zero_rate': float, ...}}
+        ou None se o baseline não existir (o validador deve degradar pra noop).
+    """
+    if baselines_dir is None:
+        baselines_dir = Path(__file__).parent.parent.parent / 'configs' / 'feature_zero_baselines'
+    path = baselines_dir / f"{run_id}.json"
+    if not path.exists():
+        return None
+    try:
+        with open(path) as f:
+            payload = json.load(f)
+        return payload.get('baselines', {}) or None
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"[T1-16] Falha ao ler baseline {path}: {e}")
+        return None
+
+
+def validate_post_encoding_zero_rates(
+    df: pd.DataFrame,
+    baseline: Dict[str, Dict[str, float]],
+    min_batch_size: int = 50,
+    min_expected_nonzero_rate: float = 0.15,
+    max_drop_ratio: float = 0.3,
+    emit_log: bool = True,
+    model_run_id: str = '',
+) -> ValidationResult:
+    """
+    [T1-16] Valida que as colunas OHE pós-encoding não estão massivamente
+    zeradas em comparação com a distribuição esperada do treino.
+
+    Cobre o caso onde o pipeline gera a coluna OHE mas todos (ou quase todos)
+    os leads recebem 0 — sintoma de feature pré-OHE quebrada (mudança de
+    casing do front, categoria sumindo, parsing JSONB falhando). Esse foi o
+    mecanismo do Cluster 3 (Medium_Linguagem_programacao zerada por semanas),
+    Cluster 4 e Cluster 5 do Erro 2.
+
+    Disparo (`high_zero_rate`) ocorre quando:
+      • a coluna OHE existe no baseline E
+      • `expected_nonzero_rate ≥ min_expected_nonzero_rate` (filtro de ruído:
+        categorias raras com expected 1-5% têm sample noise alto em batches
+        pequenos; ignorá-las evita falso positivo) E
+      • `observed_nonzero_rate < expected_nonzero_rate × max_drop_ratio`
+        (categoria comum caiu pra menos da metade do esperado → bug provável).
+
+    Args:
+        df: DataFrame pós-`apply_encoding` (colunas OHE alinhadas ao registry).
+        baseline: Dict carregado de `configs/feature_zero_baselines/{run_id}.json`.
+        min_batch_size: tamanho mínimo do batch pra rodar a validação. Batches
+                        menores que isso têm sample noise dominante; retorna OK
+                        sem checar. Default 50 (= batch típico do polling Railway).
+        min_expected_nonzero_rate: só checa colunas com expected ≥ esse valor.
+                                   Default 15% — abaixo disso, sample noise>signal
+                                   mesmo em batches de 50.
+        max_drop_ratio: gatilho de queda relativa. Default 0.3 = "feature caiu
+                        pra menos de 30% do esperado dispara alerta". Em batch=50
+                        com expected=20%, sample noise ~6pp; threshold em 6%
+                        (0.3*0.2) é claro o suficiente pra distinguir noise de bug.
+        emit_log: se True, emite log estruturado tipo [FV_JSON].
+        model_run_id: incluído no log estruturado pra rastreabilidade.
+
+    Returns:
+        ValidationResult com severity='ERROR' se houver coluna com queda > limite,
+        'OK' caso contrário (ou batch pequeno demais pra avaliar).
+    """
+    if len(df) < min_batch_size:
+        result = ValidationResult(severity='OK', issues=[], batch_size=len(df), features_checked=0)
+        # Sem log nesse caso — batch pequeno é esperado em smoke / single
+        return result
+
+    issues: List[ValidationIssue] = []
+    checked = 0
+
+    for col, info in baseline.items():
+        expected_nonzero = float(info.get('expected_nonzero_rate', 0.0))
+        if expected_nonzero < min_expected_nonzero_rate:
+            continue
+        if col not in df.columns:
+            continue
+        checked += 1
+        # Coluna OHE — qualquer valor != 0 conta como "ativa". Tolerância pra
+        # numéricos float: != 0 quase sempre é exato porque OHE produz int 0/1.
+        observed_nonzero = float((df[col] != 0).mean())
+        if observed_nonzero < expected_nonzero * max_drop_ratio:
+            issues.append(ValidationIssue(
+                feature=col,
+                problem='high_zero_rate',
+                details={
+                    'expected_nonzero_rate': round(expected_nonzero, 4),
+                    'observed_nonzero_rate': round(observed_nonzero, 4),
+                    'drop_ratio': round(observed_nonzero / expected_nonzero if expected_nonzero else 0.0, 3),
+                    'category': info.get('category'),
+                    'feature_pre_ohe': info.get('feature'),
+                },
+            ))
+
+    severity = 'ERROR' if issues else 'OK'
+    result = ValidationResult(severity=severity, issues=issues, batch_size=len(df), features_checked=checked)
+
+    if emit_log:
+        payload = {
+            'event': 'feature_validator_post_encoding',
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'model_run_id': model_run_id,
+            'batch_size': result.batch_size,
+            'features_checked': result.features_checked,
+            'severity': result.severity,
+            'min_expected_nonzero_rate': min_expected_nonzero_rate,
+            'max_drop_ratio': max_drop_ratio,
+            'issues': [asdict(i) for i in issues],
+        }
+        json_line = "[FV_JSON] " + json.dumps(payload, default=str, separators=(',', ':'))
+        logger.info(json_line)
+        if severity == 'ERROR':
+            preview = ', '.join(f"{i.feature}={i.details['observed_nonzero_rate']:.3f}<{i.details['expected_nonzero_rate']:.3f}" for i in issues[:3])
+            logger.error(
+                f"[T1-16] feature zerada em massa pós-encoding ({len(issues)} colunas, batch={result.batch_size}): {preview}"
+            )
+
+    return result
+
+
 def save_schema_to_json(schema: PreEncodingSchema, path: str) -> None:
     """Serializa um PreEncodingSchema para JSON (versionável no git)."""
     payload = {

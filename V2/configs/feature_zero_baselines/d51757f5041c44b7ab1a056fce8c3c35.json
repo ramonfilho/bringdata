@@ -1,0 +1,392 @@
+{
+  "generated_at": "2026-05-14",
+  "mlflow_run_id": "d51757f5041c44b7ab1a056fce8c3c35",
+  "model_label": "active_model",
+  "source": "distribuicoes_esperadas.json[categorical]",
+  "baselines": {
+    "O_seu_g_nero_Masculino": {
+      "feature": "O_seu_g_nero",
+      "category": "Masculino",
+      "expected_nonzero_rate": 0.845335,
+      "expected_zero_rate": 0.154665
+    },
+    "O_seu_g_nero_Feminino": {
+      "feature": "O_seu_g_nero",
+      "category": "Feminino",
+      "expected_nonzero_rate": 0.154665,
+      "expected_zero_rate": 0.845335
+    },
+    "Qual_a_sua_idade_25_34_anos": {
+      "feature": "Qual_a_sua_idade",
+      "category": "25 34 anos",
+      "expected_nonzero_rate": 0.327373,
+      "expected_zero_rate": 0.672627
+    },
+    "Qual_a_sua_idade_35_44_anos": {
+      "feature": "Qual_a_sua_idade",
+      "category": "35 44 anos",
+      "expected_nonzero_rate": 0.222501,
+      "expected_zero_rate": 0.777499
+    },
+    "Qual_a_sua_idade_18_24_anos": {
+      "feature": "Qual_a_sua_idade",
+      "category": "18 24 anos",
+      "expected_nonzero_rate": 0.195649,
+      "expected_zero_rate": 0.804351
+    },
+    "Qual_a_sua_idade_45_54_anos": {
+      "feature": "Qual_a_sua_idade",
+      "category": "45 54 anos",
+      "expected_nonzero_rate": 0.120009,
+      "expected_zero_rate": 0.879991
+    },
+    "Qual_a_sua_idade_menos_de_18_anos": {
+      "feature": "Qual_a_sua_idade",
+      "category": "menos de 18 anos",
+      "expected_nonzero_rate": 0.08941,
+      "expected_zero_rate": 0.91059
+    },
+    "Qual_a_sua_idade_mais_de_55_anos": {
+      "feature": "Qual_a_sua_idade",
+      "category": "mais de 55 anos",
+      "expected_nonzero_rate": 0.045058,
+      "expected_zero_rate": 0.954942
+    },
+    "O_que_voc_faz_atualmente_sou_cltfuncionario_publico": {
+      "feature": "O_que_voc_faz_atualmente",
+      "category": "sou cltfuncionario publico",
+      "expected_nonzero_rate": 0.444413,
+      "expected_zero_rate": 0.555587
+    },
+    "O_que_voc_faz_atualmente_sou_autonomo": {
+      "feature": "O_que_voc_faz_atualmente",
+      "category": "sou autonomo",
+      "expected_nonzero_rate": 0.252983,
+      "expected_zero_rate": 0.747017
+    },
+    "O_que_voc_faz_atualmente_sou_apenas_estudante": {
+      "feature": "O_que_voc_faz_atualmente",
+      "category": "sou apenas estudante",
+      "expected_nonzero_rate": 0.179824,
+      "expected_zero_rate": 0.820176
+    },
+    "O_que_voc_faz_atualmente_nao_trabalho_e_nem_estudo": {
+      "feature": "O_que_voc_faz_atualmente",
+      "category": "nao trabalho e nem estudo",
+      "expected_nonzero_rate": 0.103451,
+      "expected_zero_rate": 0.896549
+    },
+    "O_que_voc_faz_atualmente_sou_aposentado": {
+      "feature": "O_que_voc_faz_atualmente",
+      "category": "sou aposentado",
+      "expected_nonzero_rate": 0.019329,
+      "expected_zero_rate": 0.980671
+    },
+    "Atualmente_qual_a_sua_faixa_salarial_entre_r1000_a_r2000_reais_ao_mes": {
+      "feature": "Atualmente_qual_a_sua_faixa_salarial",
+      "category": "entre r1000 a r2000 reais ao mes",
+      "expected_nonzero_rate": 0.324196,
+      "expected_zero_rate": 0.675804
+    },
+    "Atualmente_qual_a_sua_faixa_salarial_nao_tenho_renda": {
+      "feature": "Atualmente_qual_a_sua_faixa_salarial",
+      "category": "nao tenho renda",
+      "expected_nonzero_rate": 0.268862,
+      "expected_zero_rate": 0.731138
+    },
+    "Atualmente_qual_a_sua_faixa_salarial_entre_r2001_a_r3000_reais_ao_mes": {
+      "feature": "Atualmente_qual_a_sua_faixa_salarial",
+      "category": "entre r2001 a r3000 reais ao mes",
+      "expected_nonzero_rate": 0.206241,
+      "expected_zero_rate": 0.793759
+    },
+    "Atualmente_qual_a_sua_faixa_salarial_entre_r3001_a_r5000_reais_ao_mes": {
+      "feature": "Atualmente_qual_a_sua_faixa_salarial",
+      "category": "entre r3001 a r5000 reais ao mes",
+      "expected_nonzero_rate": 0.135816,
+      "expected_zero_rate": 0.864184
+    },
+    "Atualmente_qual_a_sua_faixa_salarial_mais_de_r5001_reais_ao_mes": {
+      "feature": "Atualmente_qual_a_sua_faixa_salarial",
+      "category": "mais de r5001 reais ao mes",
+      "expected_nonzero_rate": 0.064884,
+      "expected_zero_rate": 0.935116
+    },
+    "Source_facebook_ads": {
+      "feature": "Source",
+      "category": "facebook-ads",
+      "expected_nonzero_rate": 0.898939,
+      "expected_zero_rate": 0.101061
+    },
+    "Source_google_ads": {
+      "feature": "Source",
+      "category": "google-ads",
+      "expected_nonzero_rate": 0.0976,
+      "expected_zero_rate": 0.9024
+    },
+    "Source_outros": {
+      "feature": "Source",
+      "category": "outros",
+      "expected_nonzero_rate": 0.003462,
+      "expected_zero_rate": 0.996538
+    },
+    "Medium_Linguagem_de_programa_o": {
+      "feature": "Medium",
+      "category": "Linguagem de programação",
+      "expected_nonzero_rate": 0.330352,
+      "expected_zero_rate": 0.669648
+    },
+    "Medium_Lookalike_2_Cadastrados_DEV_2_0_Interesses": {
+      "feature": "Medium",
+      "category": "Lookalike 2% Cadastrados - DEV 2.0 + Interesses",
+      "expected_nonzero_rate": 0.211146,
+      "expected_zero_rate": 0.788854
+    },
+    "Medium_Aberto": {
+      "feature": "Medium",
+      "category": "Aberto",
+      "expected_nonzero_rate": 0.144573,
+      "expected_zero_rate": 0.855427
+    },
+    "Medium_Lookalike_1_Cadastrados_DEV_2_0_Interesse_Ci_ncia_da_Computa_o": {
+      "feature": "Medium",
+      "category": "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação",
+      "expected_nonzero_rate": 0.128122,
+      "expected_zero_rate": 0.871878
+    },
+    "Medium_dgen": {
+      "feature": "Medium",
+      "category": "dgen",
+      "expected_nonzero_rate": 0.096571,
+      "expected_zero_rate": 0.903429
+    },
+    "Medium_Lookalike_2_Alunos_Interesse_Linguagem_de_Programa_o": {
+      "feature": "Medium",
+      "category": "Lookalike 2% Alunos + Interesse Linguagem de Programação",
+      "expected_nonzero_rate": 0.056077,
+      "expected_zero_rate": 0.943923
+    },
+    "Medium_Outros": {
+      "feature": "Medium",
+      "category": "Outros",
+      "expected_nonzero_rate": 0.033159,
+      "expected_zero_rate": 0.966841
+    },
+    "Term_instagram": {
+      "feature": "Term",
+      "category": "instagram",
+      "expected_nonzero_rate": 0.667196,
+      "expected_zero_rate": 0.332804
+    },
+    "Term_facebook": {
+      "feature": "Term",
+      "category": "facebook",
+      "expected_nonzero_rate": 0.225797,
+      "expected_zero_rate": 0.774203
+    },
+    "Term_outros": {
+      "feature": "Term",
+      "category": "outros",
+      "expected_nonzero_rate": 0.107006,
+      "expected_zero_rate": 0.892994
+    },
+    "Voc_possui_cart_o_de_cr_dito_nao": {
+      "feature": "Voc_possui_cart_o_de_cr_dito",
+      "category": "nao",
+      "expected_nonzero_rate": 0.645304,
+      "expected_zero_rate": 0.354696
+    },
+    "Voc_possui_cart_o_de_cr_dito_sim": {
+      "feature": "Voc_possui_cart_o_de_cr_dito",
+      "category": "sim",
+      "expected_nonzero_rate": 0.354696,
+      "expected_zero_rate": 0.645304
+    },
+    "O_que_mais_voc_quer_ver_no_evento_fazer_transicao_de_carreira_e_conseguir_meu_primeiro_emprego_na_area": {
+      "feature": "O_que_mais_voc_quer_ver_no_evento",
+      "category": "fazer transicao de carreira e conseguir meu primeiro emprego na area",
+      "expected_nonzero_rate": 0.375382,
+      "expected_zero_rate": 0.624618
+    },
+    "O_que_mais_voc_quer_ver_no_evento_fazer_um_projeto_na_pratica": {
+      "feature": "O_que_mais_voc_quer_ver_no_evento",
+      "category": "fazer um projeto na pratica",
+      "expected_nonzero_rate": 0.237212,
+      "expected_zero_rate": 0.762788
+    },
+    "O_que_mais_voc_quer_ver_no_evento_quero_saber_se_e_para_mim": {
+      "feature": "O_que_mais_voc_quer_ver_no_evento",
+      "category": "quero saber se e para mim",
+      "expected_nonzero_rate": 0.191122,
+      "expected_zero_rate": 0.808878
+    },
+    "O_que_mais_voc_quer_ver_no_evento_fazer_freelancer_como_programador": {
+      "feature": "O_que_mais_voc_quer_ver_no_evento",
+      "category": "fazer freelancer como programador",
+      "expected_nonzero_rate": 0.127352,
+      "expected_zero_rate": 0.872648
+    },
+    "O_que_mais_voc_quer_ver_no_evento_a_aula_com_a_recrutadora": {
+      "feature": "O_que_mais_voc_quer_ver_no_evento",
+      "category": "a aula com a recrutadora",
+      "expected_nonzero_rate": 0.068931,
+      "expected_zero_rate": 0.931069
+    },
+    "Tem_computador_notebook_sim": {
+      "feature": "Tem_computador_notebook",
+      "category": "sim",
+      "expected_nonzero_rate": 0.8082,
+      "expected_zero_rate": 0.1918
+    },
+    "Tem_computador_notebook_nao": {
+      "feature": "Tem_computador_notebook",
+      "category": "nao",
+      "expected_nonzero_rate": 0.1918,
+      "expected_zero_rate": 0.8082
+    },
+    "J_estudou_programa_o_N_o": {
+      "feature": "J_estudou_programa_o",
+      "category": "Não",
+      "expected_nonzero_rate": 0.708106,
+      "expected_zero_rate": 0.291894
+    },
+    "J_estudou_programa_o_Sim": {
+      "feature": "J_estudou_programa_o",
+      "category": "Sim",
+      "expected_nonzero_rate": 0.291894,
+      "expected_zero_rate": 0.708106
+    },
+    "Voc_j_fez_faz_pretende_fazer_faculdade_Sim": {
+      "feature": "Voc_j_fez_faz_pretende_fazer_faculdade",
+      "category": "Sim",
+      "expected_nonzero_rate": 0.715657,
+      "expected_zero_rate": 0.284343
+    },
+    "Voc_j_fez_faz_pretende_fazer_faculdade_N_o": {
+      "feature": "Voc_j_fez_faz_pretende_fazer_faculdade",
+      "category": "Não",
+      "expected_nonzero_rate": 0.284343,
+      "expected_zero_rate": 0.715657
+    },
+    "investiu_curso_online_N_o": {
+      "feature": "investiu_curso_online",
+      "category": "Não",
+      "expected_nonzero_rate": 0.601124,
+      "expected_zero_rate": 0.398876
+    },
+    "investiu_curso_online_Sim": {
+      "feature": "investiu_curso_online",
+      "category": "Sim",
+      "expected_nonzero_rate": 0.398876,
+      "expected_zero_rate": 0.601124
+    },
+    "interesse_programacao_todas_as_alternativas": {
+      "feature": "interesse_programacao",
+      "category": "todas as alternativas",
+      "expected_nonzero_rate": 0.392575,
+      "expected_zero_rate": 0.607425
+    },
+    "interesse_programacao_poder_trabalhar_de_qualquer_lugar_do_mundo": {
+      "feature": "interesse_programacao",
+      "category": "poder trabalhar de qualquer lugar do mundo",
+      "expected_nonzero_rate": 0.354153,
+      "expected_zero_rate": 0.645847
+    },
+    "interesse_programacao_a_possibilidade_de_ganhar_altos_salarios": {
+      "feature": "interesse_programacao",
+      "category": "a possibilidade de ganhar altos salarios",
+      "expected_nonzero_rate": 0.108014,
+      "expected_zero_rate": 0.891986
+    },
+    "interesse_programacao_trabalhar_para_outros_paises_e_ganhar_em_outra_moeda": {
+      "feature": "interesse_programacao",
+      "category": "trabalhar para outros paises e ganhar em outra moeda",
+      "expected_nonzero_rate": 0.075893,
+      "expected_zero_rate": 0.924107
+    },
+    "interesse_programacao_a_ideia_de_nunca_faltar_emprego_na_area": {
+      "feature": "interesse_programacao",
+      "category": "a ideia de nunca faltar emprego na area",
+      "expected_nonzero_rate": 0.069366,
+      "expected_zero_rate": 0.930634
+    },
+    "nome_tem_sobrenome_True": {
+      "feature": "nome_tem_sobrenome",
+      "category": "True",
+      "expected_nonzero_rate": 0.851418,
+      "expected_zero_rate": 0.148582
+    },
+    "nome_tem_sobrenome_False": {
+      "feature": "nome_tem_sobrenome",
+      "category": "False",
+      "expected_nonzero_rate": 0.148582,
+      "expected_zero_rate": 0.851418
+    },
+    "nome_valido_True": {
+      "feature": "nome_valido",
+      "category": "True",
+      "expected_nonzero_rate": 0.997493,
+      "expected_zero_rate": 0.002507
+    },
+    "nome_valido_False": {
+      "feature": "nome_valido",
+      "category": "False",
+      "expected_nonzero_rate": 0.002507,
+      "expected_zero_rate": 0.997493
+    },
+    "email_valido_True": {
+      "feature": "email_valido",
+      "category": "True",
+      "expected_nonzero_rate": 0.993231,
+      "expected_zero_rate": 0.006769
+    },
+    "email_valido_False": {
+      "feature": "email_valido",
+      "category": "False",
+      "expected_nonzero_rate": 0.006769,
+      "expected_zero_rate": 0.993231
+    },
+    "telefone_valido_True": {
+      "feature": "telefone_valido",
+      "category": "True",
+      "expected_nonzero_rate": 0.99724,
+      "expected_zero_rate": 0.00276
+    },
+    "telefone_valido_False": {
+      "feature": "telefone_valido",
+      "category": "False",
+      "expected_nonzero_rate": 0.00276,
+      "expected_zero_rate": 0.99724
+    },
+    "telefone_comprimento_11": {
+      "feature": "telefone_comprimento",
+      "category": "11",
+      "expected_nonzero_rate": 0.966707,
+      "expected_zero_rate": 0.033293
+    },
+    "telefone_comprimento_9": {
+      "feature": "telefone_comprimento",
+      "category": "9",
+      "expected_nonzero_rate": 0.01742,
+      "expected_zero_rate": 0.98258
+    },
+    "telefone_comprimento_10": {
+      "feature": "telefone_comprimento",
+      "category": "10",
+      "expected_nonzero_rate": 0.012941,
+      "expected_zero_rate": 0.987059
+    },
+    "telefone_comprimento_4": {
+      "feature": "telefone_comprimento",
+      "category": "4",
+      "expected_nonzero_rate": 0.00276,
+      "expected_zero_rate": 0.99724
+    },
+    "telefone_comprimento_8": {
+      "feature": "telefone_comprimento",
+      "category": "8",
+      "expected_nonzero_rate": 0.000172,
+      "expected_zero_rate": 0.999828
+    }
+  }
+}

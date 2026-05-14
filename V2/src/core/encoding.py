@@ -364,5 +364,54 @@ def apply_encoding(
         logger.warning(f"  Encoding: {len(nan_cols)} colunas com NaN → preenchidas com 0")
         df_encoded = df_encoded.fillna(0)
 
+    # -----------------------------------------------------------------------
+    # 9. [T1-16] Validador pós-encoding "feature zerada em massa"
+    # -----------------------------------------------------------------------
+    # Cobre o sintoma do Cluster 3/4/5 do Erro 2: pipeline cria coluna OHE mas
+    # ela chega zerada pra maioria (categoria sumiu, casing mudou, parsing
+    # falhou). Comparado contra baseline esperado por coluna OHE — gerado
+    # offline por scripts/generate_feature_zero_baselines.py.
+    #
+    # Default conservador (min_batch=50, expected≥10%, drop≥50%) garante zero
+    # falso positivo em smoke tests e em batches pequenos do polling Railway.
+    _mlflow_run_id = artifacts.get('mlflow_run_id') if artifacts else None
+    if _mlflow_run_id:
+        try:
+            from .feature_validator import (
+                load_zero_rate_baseline as _load_zero_baseline,
+                validate_post_encoding_zero_rates as _validate_zero_rates,
+            )
+            _baseline = _load_zero_baseline(_mlflow_run_id)
+            if _baseline:
+                _zr_result = _validate_zero_rates(
+                    df_encoded, _baseline,
+                    model_run_id=_mlflow_run_id,
+                    emit_log=True,
+                )
+                if _zr_result.severity == 'ERROR':
+                    # Falha alto: o modelo recebe sinal degradado. Bloquear o
+                    # batch é melhor do que enviar score errado pra Meta.
+                    preview = ', '.join(
+                        f"{i.feature} (obs={i.details['observed_nonzero_rate']:.3f} "
+                        f"vs exp={i.details['expected_nonzero_rate']:.3f})"
+                        for i in _zr_result.issues[:5]
+                    )
+                    raise ValueError(
+                        f"[T1-16] Encoding produziu {len(_zr_result.issues)} colunas OHE "
+                        f"massivamente zeradas (batch={_zr_result.batch_size}, mlflow_run_id={_mlflow_run_id[:8]}). "
+                        f"Exemplos: {preview}. "
+                        f"Cluster 3/4/5 do Erro 2 — investigar feature pré-OHE antes de scorear."
+                    )
+            else:
+                logger.debug(
+                    f"  [T1-16] baseline de zero-rate não encontrado pro run_id={_mlflow_run_id[:8]} "
+                    f"(gere com `python -m V2.scripts.generate_feature_zero_baselines`)"
+                )
+        except ValueError:
+            raise
+        except Exception as _e:
+            # Validador é defensivo — qualquer falha dele NÃO deve quebrar scoring.
+            logger.warning(f"  [T1-16] validador post-encoding falhou: {type(_e).__name__}: {_e}")
+
     logger.debug(f"  Encoding: {len(df_encoded.columns)} colunas finais")
     return df_encoded
