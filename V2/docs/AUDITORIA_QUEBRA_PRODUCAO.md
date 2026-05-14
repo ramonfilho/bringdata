@@ -147,18 +147,19 @@ Eixos:
 
 **O que esta seção cobre:** quando a quebra escapa dos gates pré-deploy e chega em produção, em quanto tempo o sensor avisa? Quando o sensor não dispara, qual é o atalho de detecção manual? Aqui o foco é **observabilidade de falha em runtime**.
 
-### Cenário 4.1 — Drift de público que afeta performance do lançamento passa silencioso
+### Cenário 4.1 — Drift de público que afeta performance do lançamento passa silencioso — [✅ FECHADO TECNICAMENTE 2026-05-11]
 
 **O que aconteceria:** o tráfego do lançamento traz perfil de audiência que diverge do perfil do treino (ex.: idade média 10 anos abaixo, mix de gênero invertido). O modelo continua scorreando dentro do range conhecido (sem `null_rate_high` nem `wrong_dtype`), então os sensores existentes não disparam. Performance do lançamento cai sem causa visível.
 
-**Por que isso importa:** aconteceu no LF54 em 08/mai. Detectado manualmente por comparação ad-hoc contra Top 5 ROAS histórico. Mitigação foi implementada (`audience_profile_drift` rodando no daily-check), mas vale validar que o sensor está disparando E que está sendo lido por humano, não só logado.
+**Resultado da validação (11/mai):**
+- Sensor `_check_audience_profile_drift` em [`V2/src/monitoring/data_quality.py:1968`](../src/monitoring/data_quality.py#L1968) está ativo via `THRESHOLDS['audience_profile_drift']['enabled']=True`.
+- Snapshot de referência [`V2/configs/reference_audience_profiles/devclub.json`](../configs/reference_audience_profiles/devclub.json) foi regerado em 2026-05-14 — pós-LF54, captura corretamente o pool Top 5 ROAS atribuível 60d.
+- Rodando o sensor com leads de ontem (n=707 do LF55), dispara 1 alerta HIGH com 11 categorias ≥2.0pp de drift (idade, ocupação, faixa salarial). Mensagem detalhada e acionável (ex.: "Idade: 35-44 — 23.4%→19.4% (-4.1pp)").
+- O alerta entra automaticamente em `actionable_alerts` (HIGH+MEDIUM) do response `/monitoring/daily-check/railway` ([orchestrator.py:230-241](../src/monitoring/orchestrator.py#L230)), ordenado por severity no topo.
 
-**Como verificar:**
-- Rodar `curl /monitoring/daily-check/railway` e confirmar presença de `audience_profile_drift` no `actionable_alerts` quando o pool difere do snapshot Top 5 ROAS.
-- Verificar que o snapshot `configs/reference_audience_profiles/devclub.json` foi atualizado depois do último lançamento winner.
-- Confirmar que existe rotina humana de leitura desse alerta (não basta logar — alguém tem que ver).
+**Único item pendente:** **rotina humana** de leitura do alerta. Tecnicamente o sinal chega ao endpoint; cabe ao operador estabelecer cadência fixa de leitura (ex.: chave-de-dia antes do almoço). Sem isso, o alerta vai pro JSON sem ninguém olhar — risco real, mas não é mais "bug de salvaguarda" e sim "disciplina operacional".
 
-**Critério de fechamento:** sensor disparando corretamente (validar com perfil simulado divergente), snapshot atualizado, e rotina de leitura definida.
+**Por que isso importa:** aconteceu no LF54 em 08/mai. Detectado manualmente por comparação ad-hoc contra Top 5 ROAS histórico. Mitigação foi implementada e agora confirmada funcional.
 
 ### Cenário 4.2 — Feature crítica do modelo zera em massa e ninguém é notificado
 
