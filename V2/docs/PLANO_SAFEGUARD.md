@@ -74,9 +74,10 @@ Antes de executar `FORCE_DEPLOY=true ./deploy_capi.sh --force-deploy` pra subir 
 
 **Verificações em backlog (não bloqueiam deploy normal mas devem entrar):**
 
-- Smoke de paridade pipeline-modelo no fim do treino — 🟡 backlog (próximo retreino)
-- Validação de schema contra MLflow no parity audit — 🟡 backlog (após T1-15)
+- Smoke de paridade pipeline-modelo no fim do treino — 🟡 backlog (próximo retreino). Inline-blocker plantado em [`src/train_pipeline.py`](../src/train_pipeline.py) próximo ao `--set-active` pra não esquecer no próximo retreino.
+- Validação de schema contra MLflow no parity audit — ✅ ativo. Função `audit_schema_against_mlflow` registrada em [`tests/parity_audit.py:493`](../tests/parity_audit.py#L493) e disparada pelo Gate A do `deploy_capi.sh` com `--function schema_mlflow`.
 - Validador pós-encoding ">X% leads zerados → bloqueia" — ✅ ativo desde 11/mai (commit `8b1c804`). Resolve V.1.3 do registro de erros.
+- Validador pós-deploy automático (PROMOTE/HOLD/ROLLBACK) — ✅ script entregue ([`scripts/progression_gate.py`](../scripts/progression_gate.py)). Ainda **não cabeado** no `deploy_capi.sh` — progressão 10→50→100 segue manual. Cabeamento depende de aprovação operacional.
 
 **Gates automáticos que o `deploy_capi.sh` roda:**
 1. Branch verificada — bloqueia se branch não-rollback sem `FORCE_DEPLOY=true`
@@ -134,9 +135,9 @@ Etapas que rodam **antes** de uma revisão receber tráfego, dentro do `deploy_c
 
 **Pré-condição:** rotina de download de artefato do MLflow no parity audit. Duas opções: (a) Cloud SQL `smart-ads-db` rodando durante deploy (atrita: hoje está em `activation-policy=NEVER`); (b) cachear `feature_registry.json` localmente sob `configs/active_models/registry_cache/{run_id}.json` no momento do `--set-active` — preferida.
 
-**Onde no código (proposto):** mesmo arquivo da auditoria por variante, mais um diretório novo `configs/active_models/registry_cache/`.
+**Onde no código:** [`tests/parity_audit.py:493`](../tests/parity_audit.py#L493) função `audit_schema_against_mlflow`. Disparada pelo Gate A do `deploy_capi.sh` com `--function schema_mlflow`. Usa input de produção (`_build_production_encoding_input` puxa leads reais do Railway via `railway_lead_to_sheets_row` e aplica core pipeline completo) em vez de snapshot de treino — classifica missings em CRÍTICO (coluna pré-OHE ausente) vs AMOSTRAL (categoria não presente no sample) pra zero falso positivo.
 
-**Status:** 🟡 backlog. Próximo passo natural depois da auditoria por variante.
+**Status:** ✅ ativo. Cobertura: variantes Champion shim + Challenger, comparando `set(df_actual.columns)` com `feature_registry.json` de cada `mlflow_run_id`.
 
 *Identificador histórico: T1-19.*
 
@@ -727,7 +728,7 @@ Mapeamento entre os identificadores históricos e o status atual. Use isso quand
 | T1-16 | Validador pós-encoding ">X% leads zerados" | ✅ Concluído | 2026-05-11 (commit `8b1c804`). Resolve V.1.3 do registro de erros. |
 | T1-17 | Auditoria de YAML dentro da imagem (Gate D) | ✅ Concluído | 2026-05-08 |
 | T1-18 | Equivalência de score+decil entre revisões (Gate C) | ✅ Concluído | 2026-05-08 |
-| T1-19 | Validação de schema contra MLflow | 🟡 Backlog | (próximo após T1-15) |
+| T1-19 | Validação de schema contra MLflow | ✅ Concluído | 2026-05-11 (`audit_schema_against_mlflow` em `parity_audit.py` + Gate A) |
 | T2-1 | Deduplicação no treino | ✅ Concluído | 2026-04-23 |
 | T2-2 | Log de count em cada etapa | ✅ Concluído | 2026-04-28 |
 | T2-3 | Importance weighting pra grupo controle | ✅ Concluído | 2026-04-28 |

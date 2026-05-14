@@ -24,7 +24,19 @@ Documento operacional, escrito em linguagem natural. Lista os cenários que **po
 
 **Critério de fechamento:** próximo deploy de Champion passar pelo Gate A do `deploy_capi.sh` com `--function encoding_ab` retornando OK.
 
-### Cenário 1.2 — Categoria nova de feature de alta importância escapa da whitelist canônica
+### Cenário 1.2 — Categoria nova de feature de alta importância escapa da whitelist canônica — [📊 AUDITADO 2026-05-14]
+
+**Resultado da auditoria (n=44.397 leads dos últimos 30 dias, SQL direto no Railway):**
+
+| Coluna | Categorias com ≥2% do volume | Observação |
+|---|---|---|
+| `medium` | `aberto` 38.85%, `mix quente` 14.87%, `dgen` 9.67%, variantes `aberto \| ad0XXX...` 4-6%, criativo TikTok literal (`dev-ad0150-vid-captação-v0-...`) 3.69%, `org` 3.26%, vazio 2.17% | `mix quente` é a categoria distinta confirmada — vira "Outros" hoje. Decisão já tomada (item M1 do `PLANO_EXECUCAO`: virar categoria canônica no próximo retreino). Variantes de `aberto \| ad0XXX` são granulação fina e são absorvidas pelo threshold de frequência (`medium.frequency_threshold=0.025`) — não exigem ação. |
+| `source` | `facebook-ads` 77.75%, `google-ads` 9.67%, `tiktok` 3.69%, `ig` 2.55% | `tiktok` confirma o bug ativo do path Champion descrito em DT-19 (refactor unify_utm variant-aware). `ig` é mapeado para `instagram` via `source_to_channel_mapping`. |
+| `term` | `ig` 62.24%, `fb` 14.60%, vazio 5.86%, IDs longos `23504811738--...` 2.49% + `23731741326--...` 2.23% | IDs numéricos longos (>10 dígitos) não casam com `term_outros_patterns` atuais (que pegam dígitos curtos, ver DT-13). Volume agregado 4.72% — entra na decisão de DT-19 (extensão da whitelist do Term via variante). |
+
+**Critério de fechamento:** auditoria realizada, todas as categorias ≥2% têm decisão registrada (M1 para mix quente; DT-19 para tiktok e IDs longos Term; absorção por threshold para granulação `aberto \| ad0XXX`). Sensor adicional (validador cross-coluna `Source_*` todas zeradas) plantado em [`src/core/feature_validator.py`](../src/core/feature_validator.py) `validate_post_encoding_all_zero_groups` em 14/mai — detecta automaticamente novas categorias que escapem da whitelist da variante.
+
+### Cenário 1.2 — Categoria nova de feature de alta importância escapa da whitelist canônica (descrição original)
 
 **O que aconteceria:** o gestor lança uma campanha com nova categoria de `Medium`/`Source`/`Term` (ex.: `Medium_Banco_de_Dados`). A whitelist canônica em `configs/distribuicoes_esperadas.json` não cobre, encoding zera essa coluna, e leads daquela categoria têm score degradado.
 
@@ -36,7 +48,20 @@ Documento operacional, escrito em linguagem natural. Lista os cenários que **po
 
 **Critério de fechamento:** lista de categorias fora da whitelist com ≥2% volume nos últimos 30 dias = vazia, OU cada categoria tem decisão registrada.
 
-### Cenário 1.3 — Front muda formato das 4 features binárias raw (`genero`, `estudouProgramacao`, `faculdade`, `investiuCurso`)
+### Cenário 1.3 — Front muda formato das 4 features binárias raw — [✅ AUDITADO 2026-05-14]
+
+**Resultado da auditoria (amostra n=10.000 leads dos últimos 30 dias com `Lead.pesquisa` preenchido):**
+
+| Feature | Valores distintos vistos | Strings vazias |
+|---|---|---|
+| `genero` | `'Masculino'` 76.53%, `'Feminino'` 23.43% | 0.04% (4 leads) |
+| `estudouProgramacao` | `'Não'` 64.96%, `'Sim'` 35.00% | 0.04% (4 leads) |
+| `faculdade` | `'Sim'` 76.31%, `'Não'` 22.73% | 0.96% (96 leads) |
+| `investiuCurso` | `'Não'` 57.70%, `'Sim'` 42.26% | 0.04% (4 leads) |
+
+**Critério de fechamento:** ✅ atendido. Zero variação de casing ou whitespace nos últimos 30 dias. Strings vazias agregadas <1% por feature — viram NaN→0 no encoding, comportamento esperado. Front estável; DT-18 (normalização) continua sendo a defesa estrutural mas o risco atual é baixo. Reauditar em ciclo trimestral ou ao primeiro alerta `new_categories` em `_check_category_drift`.
+
+### Cenário 1.3 — Front muda formato das 4 features binárias raw (descrição original)
 
 **O que aconteceria:** o front começa a mandar `'sim'` (minúsculo) em vez de `'Sim'`, ou `'Masculino '` (com espaço extra). Essas 4 features **não passam por normalização** no pipeline — vão direto pro `pd.get_dummies()`. Resultado: cria coluna OHE inédita (`Sim_lower`), modelo zera a feature original. Conjunto representa ~8% do peso do modelo Champion atual.
 
