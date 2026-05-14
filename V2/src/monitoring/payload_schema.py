@@ -53,6 +53,9 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'alerts[].details.changes[].diff':                                                  (S, 'computamos de producao - treino na renderização'),
     'alerts[].details.changes[].producao':                                              (R, None),  # ex: 0.7752120640904807
     'alerts[].details.changes[].treino':                                                (R, None),  # ex: 0.14457314065440197
+    'alerts[].details.changes[].outros_breakdown':                                      (R, None),  # ex: list — decomposição da categoria "Outros" em valores raw com contagens
+    'alerts[].details.changes[].outros_breakdown[].count':                              (R, None),  # ex: int
+    'alerts[].details.changes[].outros_breakdown[].raw_value':                          (R, None),  # ex: str — valor canônico que caiu em "Outros"
     'alerts[].details.column':                                                          (R, None),  # ex: 'Medium'
     'alerts[].details.compared_window':                                                 (S, 'header line removido'),
     'alerts[].details.compared_window_kind':                                            (S, 'header line removido'),
