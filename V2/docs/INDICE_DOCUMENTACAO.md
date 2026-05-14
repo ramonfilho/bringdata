@@ -1,7 +1,9 @@
 # Índice de Documentação — Bring Data V2
 
-**Atualizado:** 2026-05-08
+**Atualizado:** 2026-05-14
 **Propósito:** mapa de todos os documentos da pasta `docs/`, seus papéis, status e como se relacionam.
+
+> **Reorganização de nomenclatura (10/05/2026):** os docs operacionais (este índice, `PLANO_EXECUCAO`, `registro_erros_ml`, `AUDITORIA_QUEBRA_PRODUCAO`) foram reescritos pra usar linguagem natural primeiro. Os catálogos técnicos (`PLANO_SAFEGUARD`, `PLANO_REFACTOR_MLOPS`) ganharam título verbal por item + identificador codificado (`T1-X`, `DT-X`) movido pro rodapé. Identificadores continuam funcionais pra cruzar com commits e issues antigas, mas o nome verbal é o que aparece no fluxo de leitura.
 
 ---
 
@@ -86,6 +88,11 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Status:** ativo. Criado em 08/05/2026 após investigação do moat e cenário de retreino com `--exclude-features`.
 **Relação:** consumido por qualquer deploy que altere o `active_model.mlflow_run_id` em `configs/active_models/{cliente}.yaml`. Referencia DT-12, DT-16, DT-17 do `PLANO_REFACTOR_MLOPS.md`. Pré-requisito antes da skill `/safeguard` em deploys de modelo.
 
+### `PLANO_REMEDIACAO_LEAD_SCORE.md` 📚 Catálogo técnico
+**Papel:** catálogo "como" da remediação dos consumidores que leem `Lead.leadScore` e `Lead.decil` do Railway como verdade atemporal. Auditoria em 11/05/2026 mostrou que esses campos são fotografia da versão de código que rodou no instante em que cada lead chegou — só 23% de paridade exata com re-score atual do mesmo Champion. Causa: pipeline foi refatorado/patchado/revertido várias vezes (DT-12 do encoding de idade/salário em 02/05, refactor `src/core/`, rollback `edf23e9`, normalizações UTM/Medium). O documento descreve 9 consumidores identificados (L1–L9), princípio único de remediação (re-scorear via pipeline em vez de ler do banco), distinção entre histórico (preservar) e futuro (remediar), e ordem sugerida de execução.
+**Status:** ativo, em backlog. Status canônico vive em `PLANO_EXECUCAO.md` (subseção "Sequelas / pendências da sessão de investigação 11/05/2026"). 🟢 BACKLOG até consistência do método de ROAS ser resolvida.
+**Relação:** referenciado por `PLANO_EXECUCAO.md` em H4. Memória persistente relacionada: `~/.claude/.../memory/projeto_lead_score_versao_codigo.md`. Itens críticos: L1 (forecast diário do daily-check usa decil contaminado), L2 (backtest comparativo), L4 (teste de equivalência de revisão), L5+L8 (baseline rolling 30d do detector de drift, proposta de cache versionado por `mlflow_run_id + commit_hash`).
+
 ### `google_ads_pendencias.md` 📚 Catálogo técnico (H6)
 **Papel:** especificação dos pré-requisitos e passos de implementação para envio de eventos ao Google Ads (Enhanced Conversions for Leads). Documenta decisões fixadas (estratégia, credenciais), bloqueantes abertos (gclid não capturado), e a infra já preparada (`should_send_to_destination`, `CAPIConfig`, dispatcher).
 **Status:** ativo. Atualizado em 2026-05-01.
@@ -129,7 +136,7 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Status:** ativo (entregue a terceiros).
 
 ### `operacoes_gcp_custos.md`
-**Papel:** registro das otimizações de custo aplicadas no GCP em 2026-04-26 (~R$ 167/mês), procedimento de stop/start do Cloud SQL `smart-ads-db` para retreino, cleanup policy do Artifact Registry e bugs latentes descobertos durante a auditoria.
+**Papel:** registro das otimizações de custo aplicadas no GCP em 2026-04-26 (~R$ 167/mês), procedimento de stop/start do Cloud SQL `smart-ads-db` para retreino, cleanup policy do Artifact Registry e bugs latentes descobertos durante a auditoria. Inclui investigações de spike: 06/mai/2026 (worker timeout do gunicorn) e 14/mai/2026 (acúmulo de tags `canary-*` no Cloud Run mantendo instâncias always-on — remediado com cleanup automático no `deploy_capi.sh`).
 **Status:** ativo. Atualizar quando novas otimizações forem aplicadas ou recursos parados forem retomados.
 **Relação:** referência operacional para retomar Cloud SQL antes de retreinar; consultar antes de mudar `min-instances`/`memory`/`cpu` do `smart-ads-api`.
 
@@ -137,6 +144,11 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Papel:** mapa dos datasets BigQuery do projeto (`cloudrun_logs`, `devclub`, `billing_export`), schema de `run_googleapis_com_stdout`, queries comuns para investigar value/decil/erros por revisão.
 **Status:** ativo. Criado em 2026-05-08 após investigação do bug VAL=0 (que usou Q1 sem documentação).
 **Relação:** referência operacional para observar canary pós-deploy e investigar comportamento histórico do CAPI/scoring sem subir Cloud SQL.
+
+### `AUDITORIA_QUEBRA_PRODUCAO.md`
+**Papel:** documento operacional em linguagem natural — lista os cenários que podem efetivamente quebrar produção (degradar score em massa, zerar valor enviado ao Meta, bloquear retreino) e que valem o tempo de atacar agora. Critério de entrada: precedente histórico OU pré-condição clara pra afetar ≥2% dos leads. Estrutura em 5 seções-pergunta (features chegam certas, modelo+config consistentes, promoção não quebra, detectamos quebra, retreino vai funcionar).
+**Status:** ativo. Criado em 2026-05-10. Sucessor da seção V.3 do `registro_erros_ml.md` (que continua válida como histórico mas perde papel operacional).
+**Relação:** camada operacional de auditoria. Quando precisa de detalhe técnico, links pra `PLANO_SAFEGUARD.md`, `PLANO_REFACTOR_MLOPS.md` ou `registro_erros_ml.md`. Não duplica conteúdo, apenas referencia.
 
 ---
 

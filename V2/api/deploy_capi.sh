@@ -502,6 +502,30 @@ deploy_to_cloud_run() {
     TRAFFIC_FLAG=""
     CANARY_TAG=""
     if [ "$NO_TRAFFIC" = true ]; then
+        # Remove tags canary-* de revisões sem tráfego. Cada tag mantém min-instance=1
+        # always-on; acúmulo gerou ~R$ 60/dia extras em maio/2026. Tags em revisões
+        # com percent > 0 (prod + canary parcial) são preservadas.
+        print_info "Limpando tags canary-* obsoletas (revisões sem tráfego)..."
+        STALE_TAGS=$(gcloud run services describe $SERVICE_NAME \
+            --region=$REGION --format=json 2>/dev/null | python3 -c "
+import json, sys
+traffic = json.load(sys.stdin).get('status', {}).get('traffic', [])
+stale = [t['tag'] for t in traffic
+         if t.get('tag', '').startswith('canary-') and t.get('percent', 0) == 0]
+print(','.join(stale))
+" 2>/dev/null || echo "")
+
+        if [ -n "$STALE_TAGS" ]; then
+            STALE_COUNT=$(echo "$STALE_TAGS" | tr ',' '\n' | wc -l | tr -d ' ')
+            print_info "Removendo $STALE_COUNT tag(s) canary obsoleta(s)"
+            gcloud run services update-traffic $SERVICE_NAME \
+                --region=$REGION \
+                --remove-tags="$STALE_TAGS" \
+                --quiet || print_warning "Falha ao limpar tags antigas (não bloqueia deploy)"
+        else
+            print_info "Nenhuma tag canary obsoleta encontrada"
+        fi
+
         TRAFFIC_FLAG="--no-traffic"
         # [T1-8/T1-10] Tag garante URL direta para smoke test pós-deploy
         CANARY_TAG="canary-$(date +%s)"

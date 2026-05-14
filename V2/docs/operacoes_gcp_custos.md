@@ -217,3 +217,71 @@ Budget existente: **R$ 150 Alerta de orçamento mensal**. Thresholds:
 ```
 
 50% também está ativo — mas se o usuário não recebeu, provavelmente foi cruzado em silêncio em algum dia anterior do mês.
+
+---
+
+## Investigação de spike de custo — 2026-05-14
+
+Custo diário do projeto saltou de ~R$ 22-32/dia (baseline de abril) para R$ 90-120/dia entre 09/mai e 13/mai, com pico de R$ 120,51 em 12/mai. Em pace de gasto ~4× o baseline.
+
+### Causa-raiz identificada
+
+O serviço Cloud Run `smart-ads-api` está configurado com `min-instances=1`, `CPU=2`, `memory=2Gi`. Cada revisão que tem uma **tag de tráfego** associada (`--tag=canary-<timestamp>`) mantém **sua própria instância sempre ligada**, mesmo com 0% de tráfego — porque a tag gera URL dedicada (`https://canary-<ts>---smart-ads-api-...run.app`) que precisa estar pronta pra responder.
+
+O script de deploy (`V2/api/deploy_capi.sh`) cria essa tag em todo deploy `--no-traffic` (necessária para que o smoke test, a auditoria de YAML dentro da imagem e o teste de paridade de scoring — coletivamente os "Gates B/C/D" — consigam bater na revisão isoladamente, sem dar tráfego pra ela). Mas o script **nunca removia as tags antigas**, então cada deploy adicionava +1 instância 24×7 ao serviço.
+
+**Auditoria em 14/mai mostrou:** 33 tags `canary-*` ativas no serviço, 32 delas em revisões com 0% de tráfego. Cada tag mantendo ~R$ 4-5/dia (24h × 2 vCPU × 2 GiB always-on) — ~R$ 130/dia desperdiçados no pico.
+
+**Linha do tempo do acúmulo (estimativa por SKU "Services Min Instance CPU/Memory"):**
+
+```
+14-30/abr: ~10 revisões tagueadas    → ~R$ 22/dia (baseline)
+05/mai:    4 deploys em um dia → 9   → R$  47/dia
+06/mai:    +2                  → 11  → R$  60/dia
+08/mai:    +10 deploys → 21         → R$  52/dia
+09-13/mai: continua acumulando → 32  → R$ 105/dia (média)
+12/mai:    pico                      → R$ 120/dia
+```
+
+Não houve mudança de tráfego, de imagem ou de config de container. O salto é 100% do acúmulo de tags.
+
+### Remediação aplicada (2026-05-14)
+
+| Ação | Estado | Economia/dia |
+|---|---|---|
+| Remoção das 32 tags `canary-*` obsoletas via `gcloud run services update-traffic --remove-tags=...` | ✅ | ~R$ 70-80 |
+| Bloco de cleanup adicionado ao `V2/api/deploy_capi.sh` (linhas ~505-528 da função `deploy_to_cloud_run`) — antes de cada deploy `--no-traffic`, lista tags `canary-*` em revisões com `percent == 0` e remove. Tags em revisões com tráfego > 0 (produção + canary parcial em andamento) são preservadas | ✅ | preventivo |
+
+**Tag preservada:** `canary-1778618296` → revisão `smart-ads-api-00447-zuc` (100% de tráfego em produção em 14/mai).
+
+**Projeção pós-fix:** ~R$ 25-30/dia, volta ao baseline.
+
+### Comando para auditar tags futuramente
+
+```bash
+gcloud run services describe smart-ads-api \
+  --project=smart-ads-451319 --region=us-central1 --format=json \
+  | python3 -c "
+import json, sys
+traffic = json.load(sys.stdin).get('status', {}).get('traffic', [])
+print(f'Total entries: {len(traffic)}')
+for t in traffic:
+    tag = t.get('tag', '(no tag)')
+    rev = t.get('revisionName', '?')
+    pct = t.get('percent', 0)
+    flag = '  ←⚠️ always-on sem tráfego' if pct == 0 and tag.startswith('canary-') else ''
+    print(f'{tag:<25} {rev:<28} {pct:>3}%{flag}')
+"
+```
+
+**Sinal de alarme:** se aparecer mais de 2-3 tags `canary-*` simultâneas em revisões com `0%`, o cleanup automático do `deploy_capi.sh` falhou — investigar. Em fluxo normal, espera-se no máximo 2 tags ativas: a revisão em produção + a revisão recém-deployada em smoke test.
+
+### Pegadinha do cleanup automático
+
+O cleanup remove tags de **qualquer** revisão com 0% de tráfego, incluindo uma revisão recém-deployada **se ainda estiver em smoke test em outra sessão paralela**. Operador deve garantir, antes de rodar o `deploy_capi.sh`, que não há outra sessão executando smoke test contra uma revisão `--no-traffic` recém-criada. Se houver, esperar promoção (revisão ganha tráfego > 0) ou descarte (revisão deletada) antes do novo deploy.
+
+### Fatores secundários no mesmo período
+
+- **Créditos sumiram após 02/mai (~R$ 15/dia):** havia desconto não-rotulado aplicado só em 01-02/mai (padrão de Sustained Use Discount retroativo do mês anterior). Sem essa linha, o "custo líquido" parecia subir mais que o bruto. Não é regressão — é como o GCP fatura.
+- **Instância Cloud SQL Micro nova (~R$ 1,35/dia):** apareceu na conta de 09/mai em diante. Identificar via `gcloud sql instances list --project=smart-ads-451319` e decidir se mantém.
+- **IP reservation do `smart-ads-db` (parado, mas IP cobrado):** ~R$ 15/mês contínuo. Eliminável só com migração de MLflow tracking para SQLite + GCS — ainda na lista de pendências.

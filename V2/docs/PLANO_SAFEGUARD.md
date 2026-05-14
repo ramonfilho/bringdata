@@ -1,271 +1,358 @@
-# Plano de Integridade — Smart Ads V2 (Catálogo Técnico)
+# Catálogo de salvaguardas — Smart Ads V2
 
-**Criado:** 2026-04-16
-**Atualizado:** 2026-04-27
-**Papel:** **catálogo técnico** dos itens de safeguard. Especifica o que cada T1-X / T2-X / T3-X faz, como implementar, como testar.
+**Criado:** 2026-04-16. **Reescrito em linguagem natural:** 2026-05-10.
 
-> **Status canônico e prioridade vivem em `PLANO_EXECUCAO.md`.** Este documento descreve o "como" de cada item; o "quando" é definido lá. Quando houver conflito, o PLANO_EXECUCAO vence. Ao concluir um item, atualizar o status nas tabelas internas deste arquivo (linhas 437+) E remover o item da seção correspondente do PLANO_EXECUCAO (passa para "Concluído").
+**Papel deste documento:** catálogo das verificações que protegem o sistema de scoring contra regressões silenciosas, dados ruins e deploys quebrados. Cada item descreve **o que faz**, **por que existe** (motivação ancorada em incidente real), **como funciona** e **onde no código**.
 
-Documento que consolida: audit de infraestrutura existente, gaps identificados, especificação por item, plano de implementação técnica.
+**Status canônico e prioridade vivem em `PLANO_EXECUCAO.md`.** Este documento é o "como"; o "quando" é definido lá. Quando houver conflito, o `PLANO_EXECUCAO` vence.
+
+**Identificadores históricos** (`T1-X`, `T2-X`, `T3-X`) ficam no rodapé de cada item — preservam rastreabilidade com commits e issues antigas, mas não ocupam o título.
 
 Referências:
-- Roadmap (sequência de execução): `docs/PLANO_EXECUCAO.md`
-- Erros históricos: `docs/Erros_cometidos.md`
+- Roadmap (sequência de execução): [`PLANO_EXECUCAO.md`](PLANO_EXECUCAO.md)
+- Cenários a estressar (ataques deliberados): [`AUDITORIA_QUEBRA_PRODUCAO.md`](AUDITORIA_QUEBRA_PRODUCAO.md)
+- Erros históricos (motivação): [`registro_erros_ml.md`](registro_erros_ml.md)
 - Skills de investigação: `/investigate`, `/investigate-ab`, `/safeguard`
 
 ---
 
-## Protocolo obrigatório por item (Tier 1, 2 e 3)
+## Como cada item é tratado
 
-**Cada item é implementado, testado, commitado e deployado individualmente — nenhuma exceção.**
+Cada salvaguarda é implementada, testada, commitada e deployada **individualmente** — sem agrupar.
 
 ```
-Para cada T1-x / T2-x / T3-x:
-
 1. IMPLEMENTAR   — fazer a mudança no código
-2. TESTAR        — rodar o(s) teste(s) específicos listados em "Como testar cada item"
+2. TESTAR        — rodar o(s) teste(s) específicos do item
                    O item só avança se os testes passarem
-3. COMMITAR      — commit isolado descrevendo o item (ex: "safeguard(T1-1): encoding ordinal fail-loud")
+3. COMMITAR      — commit isolado descrevendo o item
 4. DEPLOYAR      — deploy com --no-traffic → smoke test → canary → 100%
-5. MARCAR        — atualizar status na tabela de "Status de implementação" para Concluído
+5. MARCAR        — atualizar status na tabela final deste arquivo
 ```
 
-**Por que deploy por item:** cada safeguard é uma mudança independente de comportamento em produção. Agrupar vários itens num único deploy torna impossível identificar qual mudança causou um problema. Deploy granular = rollback preciso.
+**Por que deploy por item:** cada salvaguarda é uma mudança independente de comportamento em produção. Agrupar várias num único deploy torna impossível identificar qual mudança causou um problema. Deploy granular = rollback preciso.
+
+**Glossário rápido (termos do nosso projeto que aparecem ao longo do doc):**
+
+- **canary** — uma revisão recém-deployada que recebe % crescente de tráfego (0% → 10% → 50% → 100%) antes de ir a 100%, pra detectar problema com exposição limitada.
+- **shim de variante (Champion shim)** — uma entrada no YAML de variantes A/B que existe **só pra hospedar a configuração** (encoding, conversion rates) de um modelo legado — sem fazer roteamento de tráfego próprio. Funciona como "configuração-fantasma": o modelo legado continua sendo usado pra leads que não caem em variante específica, mas a config dele fica acessível pelo mesmo mecanismo do A/B.
+- **D10%** — porcentagem de leads que receberam decil 10 (D10), o decil top do scoring. Métrica de saúde do output (deve flutuar pouco em torno do baseline histórico).
+- **drift** — mudança no formato ou na distribuição dos dados que o modelo recebe em produção, comparado ao que ele viu no treino. Se o drift é grande, o modelo continua scoreando mas o sinal degrada.
+- **`mlflow_run_id`** — identificador único de cada treino no MLflow. É como cada modelo é referenciado em todo o sistema (YAML, banco, logs).
+- **`feature_registry`** — JSON que o `train_pipeline` salva junto com o modelo no MLflow, listando quais colunas o modelo espera receber e em que ordem.
+- **`--set-active`** — flag do `train_pipeline.py` que marca um modelo recém-treinado como o ativo no `configs/active_models/{cliente}.yaml`. Sem ela, o modelo é treinado e registrado mas não vai pra produção.
+- **`configs/clients/{cliente}.yaml`** — parâmetros do cliente em si: fórmulas, valores de conversão esperados, regras de negócio.
+- **`configs/active_models/{cliente}.yaml`** — aponta qual versão de modelo está ativa pra esse cliente, com config de A/B (variantes, regras de roteamento, ajustes específicos de cada uma).
+- **`conversion_rates`** — tabela `decil → taxa de conversão esperada` que o pipeline usa pra calcular o `value` enviado ao Meta em cada evento CAPI.
+- **`utm_pattern` / `url_pattern`** — regras no YAML que dizem quais leads (por UTM ou URL) caem em qual variante A/B.
+- **override (de variante)** — ajuste específico de uma variante A/B em cima da regra base do cliente. Pode ser de encoding (variante usa transformação diferente pra alguma feature), de predictor (variante usa modelo diferente do default), ou de conversion_rates (variante usa tabela de valores diferente pro Meta). Quem decide qual override aplicar é o roteador A/B no momento do scoring de cada lead.
+- **Gate A/B/C/D** — etapas automatizadas que rodam dentro do `deploy_capi.sh` antes da nova revisão receber tráfego de verdade. Cada gate cobre uma classe diferente de regressão (paridade de transformação, smoke pós-deploy, equivalência de score, configuração interna da imagem). Cada uma é descrita na seção "Verificações de antes do deploy" mais abaixo.
+- **`funnel_metrics.capi_sent.send_rate`** — % de leads scoreados que tiveram evento CAPI enviado ao Meta.
+- **`meta_response.acceptance_rate`** — % desses eventos enviados que o Meta aceitou (sem rejeição por dedupe ou validação).
 
 ---
 
-## Checklist antes de deployar `main` (pré-unificação)
+## Antes de subir `main` em produção
 
-Antes de executar `FORCE_DEPLOY=true ./deploy_capi.sh --force-deploy` para subir a branch `main` em produção, confirmar manualmente cada item. Não é gate automatizado — é responsabilidade de processo.
+Antes de executar `FORCE_DEPLOY=true ./deploy_capi.sh --force-deploy` pra subir a branch `main`, confirmar manualmente cada item abaixo. Não é gate automatizado — é responsabilidade de processo.
 
-**Tier 1 obrigatório:**
-- [ ] T1-1 (encoding fail-loud) — Concluído
-- [ ] T1-2 (CAPI alerta decil zero) — Concluído
-- [ ] T1-3 (CAPI deduplicação) — Concluído
-- [ ] T1-4 (timezone UTC) — Concluído
-- [ ] T1-5 (D10% alerta) — Pulado ou Concluído
-- [ ] T1-6 (app.py load_dotenv) — Pulado ou Concluído
-- [ ] T1-7 (parity audit) — Concluído, audit passou
-- [ ] T1-8 (gate de parity no deploy) — Concluído
-- [ ] T1-9 (protocolo progressão de tráfego) — Concluído
-- [ ] T1-10 (feature coverage check) — Concluído
-- [ ] T1-11 (validador pré-encoding de features) — Concluído
-- [ ] T1-12 (smoke de paridade pipeline-modelo no treino) — **Backlog** (29/04/2026)
-- [ ] T1-13 (audience_profile_drift) — Concluído (08/05/2026)
-- [ ] T1-14 (smoke test exercita variantes A/B) — Concluído (08/05/2026)
-- [ ] T1-15 (parity audit por variante A/B) — Concluído (08/05/2026)
-- [ ] T1-19 (parity audit valida schema contra `feature_registry` real de cada variante via MLflow) — **Backlog (08/05/2026)** — fecha gap "smoke check ≠ alinhamento de schema"
-- [ ] T1-16 (validação pós-encoding >X% zerados) — **Backlog descoberto via V.1; nunca foi implementada apesar de declarada em 21/abr** (08/05/2026)
-- [ ] T1-17 (Gate D — auditoria de YAML dentro da imagem) — Concluído (08/05/2026)
-- [ ] T1-18 (Gate C — equivalência de score+decil entre revisões) — Concluído (08/05/2026)
+**Verificações que sempre precisam estar OK:**
 
-**Gates automáticos que o script roda:**
-1. `check_authorized_branch()` — bloqueia se branch não-rollback sem `FORCE_DEPLOY=true`
-2. `check_parity_audit()` — bloqueia se `parity_audit.py` detectar divergência treino × produção
+- Encoding tem fallback bloqueado quando falha — ✅ ativo
+- CAPI alerta quando algum decil para de enviar eventos — ✅ ativo
+- CAPI deduplica eventos antes de enviar — ✅ ativo
+- Datas usam UTC consistente em todos os componentes — ✅ ativo
+- Auditoria de paridade treino × produção passa — ✅ ativo
+- Auditoria automatizada no fluxo do deploy — ✅ ativo
+- Tráfego cresce gradual com critério objetivo — ✅ ativo
+- Cobertura de features em runtime — ✅ ativo
+- Validador pré-encoding de features — ✅ ativo
+- Drift de perfil de audiência detectado — ✅ ativo (08/mai)
+- Smoke test cobre todas as variantes A/B — ✅ ativo (08/mai)
+- Auditoria de paridade por variante A/B — ✅ ativo (08/mai)
+- Auditoria de YAML dentro da imagem deployada — ✅ ativo (08/mai)
+- Equivalência de score+decil entre revisões — ✅ ativo (08/mai)
+
+**Verificações em backlog (não bloqueiam deploy normal mas devem entrar):**
+
+- Smoke de paridade pipeline-modelo no fim do treino — 🟡 backlog (próximo retreino)
+- Validação de schema contra MLflow no parity audit — 🟡 backlog (após T1-15)
+- Validador pós-encoding ">X% leads zerados → bloqueia" — 🟡 backlog (declarado mas não implementado; achado V.1.3 do registro de erros). Pré-condição destravada em 11/mai: baselines de `proporcao_esperada_zero` calculáveis offline dos artefatos atuais, não dependem de retreino.
+
+**Gates automáticos que o `deploy_capi.sh` roda:**
+1. Branch verificada — bloqueia se branch não-rollback sem `FORCE_DEPLOY=true`
+2. Auditoria de paridade — bloqueia se houver divergência treino × produção
 
 **Gates manuais (responsabilidade humana):**
 - Checklist acima revisado com status atual no arquivo
 - `--no-traffic` usado no primeiro deploy (nova revisão recebe 0%)
-- Smoke test pós-deploy: 5 leads → score + decil + CAPI log OK
-- Progressão de tráfego conforme T1-9 (0% → 10% → 50% — parar aqui para DEV20)
+- Smoke test pós-deploy: 5 leads → score + decil + log CAPI OK
+- Progressão de tráfego conforme protocolo (0% → 10% → 50%)
 
 **Em caso de dúvida:** se qualquer item acima não puder ser confirmado, a resposta certa é **não deployar** e resolver primeiro.
 
 ---
 
-## Validador pré-encoding de features [T1-11]
+## Verificações de antes do deploy ("gates")
 
-**Problema que resolve:** o check de T1-10 roda **dentro** de `apply_encoding`, após OHE já ter convertido tudo em `_True/_False`. Isso cobre sumiço de feature mas não cobre:
+Etapas que rodam **antes** de uma revisão receber tráfego, dentro do `deploy_capi.sh`. A ideia é: se algo errado vai acontecer em produção, esses gates pegam antes.
 
-- Features pré-OHE (nome `nome_valido`, `idade` como string categórica, etc.) estarem ausentes ou com tipo errado
-- Valores fora do domínio conhecido do treino (nova categoria `"prefiro_nao_dizer"` em `idade` que o modelo nunca viu)
-- Taxa alta de nulo numa feature crítica (silenciosamente vira 0 no encoding)
-- Inconsistência entre o que `feature_engineering` produz e o que `apply_encoding` espera consumir
+### Auditoria de paridade treino × produção (Gate A)
 
-O cheiro desse tipo de falha é o mesmo do bug histórico `Medium_Linguagem_programacao` — feature zerada por semanas sem ninguém saber. T1-10 cobre o sintoma (OHE column missing); T1-11 cobre a causa-raiz (raw feature missing/malformed antes do encoding).
+**O que faz:** compara, coluna por coluna, o resultado das transformações de dados (encoding, UTM, medium, feature engineering) entre o que o pipeline de treino produz e o que o pipeline de produção produz, sobre o mesmo input. Bloqueia o deploy se diverge.
 
-### Arquitetura
+**Por que existe:** há histórico longo de bugs onde a transformação de dados rodava diferente em produção e em treino — ex.: `.lower()` aplicado num lado mas não no outro. O modelo era treinado vendo X e produção alimentava com X', score saía degradado sem que ninguém soubesse.
 
-**Peça A — `src/core/feature_validator.py` (novo):**
+**Como funciona:** roda os snapshots em `tests/fixtures/snapshot_*.pkl` por uma versão isolada da pipeline em código (sem subir Cloud Run) e compara o output esperado contra o atual.
 
-Função `validate_pre_encoding(df, model_run_id, config)` chamada em `production_pipeline.py` **entre** `feature_engineering` e `apply_encoding`. Para cada feature pré-OHE esperada pelo modelo ativo (derivada do `feature_registry.json`):
+**Onde no código:** [`V2/tests/parity_audit.py`](../tests/parity_audit.py). Funções: `audit_utm`, `audit_medium`, `audit_fe`, `audit_encoding`, `audit_encoding_ab_variants`. Chamado por `deploy_capi.sh` no Gate A.
 
-- **Existência:** a coluna está no DataFrame
-- **Tipo:** dtype bate com o esperado (bool para `nome_valido`, string categórica para `idade`, numérico para `nome_comprimento`)
-- **Não-nulo:** taxa de valores não-nulos acima de um mínimo (ex: ≥ 80%)
-- **Domínio:** para categóricas, valores observados ⊆ universo do treino; para numéricas, dentro de range plausível
+**Status:** ✅ ativo. Snapshot regenerado em 21/abr (67k linhas × 51 colunas, 0 divergências). Cobertura por variante A/B implementada em 08/mai.
 
-Emite **1 log estruturado JSON por batch**, com `event=feature_validator`, severity proporcional às issues encontradas. Retorna um objeto `ValidationResult` que `production_pipeline.py` pode consumir para decidir continuar ou abortar o batch.
+*Identificador histórico: T1-7.*
 
-**Peça B — endpoint `GET /monitoring/feature-report` (novo em `api/app.py`):**
+### Auditoria de paridade por variante A/B
 
-Consulta os logs do Cloud Run filtrando por `jsonPayload.event="feature_validator"` nas últimas N horas (default 24h, configurável por query param), agrega e retorna:
+**O que faz:** quando o teste A/B está ativo, roda o gate de paridade **uma vez por variante** (Champion shim, Challenger), aplicando a configuração específica de encoding de cada uma. Pega divergências que afetam só uma variante e seriam invisíveis num teste do caminho default.
 
-```json
-{
-  "window": {"start": "...", "end": "...", "hours": 24},
-  "revision": "smart-ads-api-00357-lar",
-  "total_batches": 288,
-  "batches_with_issues": 3,
-  "issues_by_feature": {
-    "nome_valido": {"count": 3, "type": "missing_column", "example_batches": [...]},
-    "idade": {"count": 1, "type": "new_category", "value": "prefiro_nao_dizer"}
-  },
-  "overall_status": "WARN"
-}
-```
+**Por que existe:** em 29/abr o Champion `jan30` rodou no A/B sem `encoding_overrides` correto. Idade e salário chegaram zerados em ~25% dos leads por 7 dias. A auditoria que existia antes só testava a configuração base — nunca a variante. O bug passou silencioso pelos gates.
 
-Consultável por `curl`, por integração Slack, ou por job automatizado. Substitui a necessidade de parsear logs manualmente.
+**Como funciona:** lê `configs/active_models/{cliente}.yaml`, identifica cada variante ativa (Champion e Challenger), e pra cada uma monta a configuração completa de encoding. Essa configuração tem duas camadas: a regra base do cliente e ajustes específicos da variante quando ela precisa de tratamento diferente — esses ajustes são o que o config chama de "override". Exemplo concreto: o Champion `jan30` precisa que idade e salário sejam tratados em ordem (`< 18 anos < 18-24 < 25-34 ...`) em vez de cada faixa virar uma categoria solta. O audit aplica regra base + ajuste específico em conjunto e compara coluna por coluna contra um snapshot de leads conhecido. Se qualquer variante diverge, bloqueia o deploy. Quando o snapshot por-variante não existe ainda, faz bootstrap automático (salva o output atual como baseline pra próxima execução).
 
-**Peça C — critérios de promoção formalizados (integrar em T1-9):**
+**Onde no código:** [`V2/tests/parity_audit.py`](../tests/parity_audit.py) função `audit_encoding_ab_variants`. [`V2/tests/capture_encoding_snapshots_ab.py`](../tests/capture_encoding_snapshots_ab.py) faz captura inicial dos snapshots por variante. Chamado pelo Gate A do `deploy_capi.sh` com `--function encoding_ab`.
 
-Antes, "top-5 features não zeradas" era verificação manual. Com T1-11 implementado, vira consulta objetiva ao endpoint:
+**Status:** ✅ ativo desde 08/mai. Validado: Champion `jan30` 52 colunas, Challenger `abr28` 61 colunas, outputs idênticos.
 
-- `batches_with_issues == 0` E `overall_status in [OK, INFO]` por 24h → autorizado progredir 10% → 50%
-- Qualquer `ERROR` em feature com importância ≥ 5% → bloqueia progressão
+*Identificador histórico: T1-15.*
 
-### Log format (contrato)
+### Validação de schema contra MLflow
 
-```json
-{
-  "event": "feature_validator",
-  "timestamp": "2026-04-21T15:30:00Z",
-  "model_run_id": "d51757f5041c44b7ab1a056fce8c3c35",
-  "revision": "smart-ads-api-00357-lar",
-  "batch_size": 47,
-  "features_checked": 15,
-  "issues": [
-    {"feature": "nome_valido", "problem": "missing_column", "importance": 0.023},
-    {"feature": "idade", "problem": "new_category", "value": "prefiro_nao_dizer", "importance": 0.012}
-  ],
-  "severity": "ERROR"
-}
-```
+**O que faz:** complementa a auditoria por variante validando que o conjunto de colunas que sai do encoding **bate exatamente** com o que o modelo da variante registrou no MLflow como entrada esperada (`feature_names_in_`).
 
-Filtro Cloud Run Logs Explorer:
-- Ver só erros: `jsonPayload.event="feature_validator" AND jsonPayload.severity="ERROR"`
-- Ver só uma feature: `jsonPayload.issues.feature="nome_valido"`
+**Por que existe:** a auditoria por variante (acima) garante que o encoding produz output válido (sem NaN, dtype certo, nomes válidos). Mas não garante que o número de colunas e os nomes batem com o que o modelo espera consumir. Se a variante tem registro com 87 colunas e o encoding produz 86 ou 88, o gate atual passa silencioso e o erro só aparece no momento de scorear.
 
-### Relação com outros itens
+**Como funciona (proposto):** pra cada variante, baixar o `feature_registry.json` do `mlflow_run_id` correspondente, passar como `artifacts={'feature_registry': variant_registry}` para `apply_encoding`, e comparar `set(df_actual.columns) == set(variant_registry['feature_names'])`. Falha por divergência de schema bloqueia.
 
-- **T1-10:** não substitui. Continua rodando dentro do encoding. T1-11 é a camada anterior que pega o problema mais cedo no pipeline.
-- **T2-7 (validador pós-deploy automatizado):** passa a consumir `/monitoring/feature-report` como uma de suas entradas. T1-11 é pré-requisito de T2-7 real.
-- **T1-9 (progressão de tráfego):** ganha critério objetivo para 10% → 50% via endpoint.
+**Pré-condição:** rotina de download de artefato do MLflow no parity audit. Duas opções: (a) Cloud SQL `smart-ads-db` rodando durante deploy (atrita: hoje está em `activation-policy=NEVER`); (b) cachear `feature_registry.json` localmente sob `configs/active_models/registry_cache/{run_id}.json` no momento do `--set-active` — preferida.
 
----
+**Onde no código (proposto):** mesmo arquivo da auditoria por variante, mais um diretório novo `configs/active_models/registry_cache/`.
 
-## Gate D — Auditoria de YAML dentro da imagem deployada [T1-17]
+**Status:** 🟡 backlog. Próximo passo natural depois da auditoria por variante.
 
-**Problema que resolve:** YAMLs de configuração (`clients/{cliente}.yaml`, `active_models/{cliente}.yaml`) viram parte da imagem Cloud Run via `COPY` no Dockerfile. Mudanças silenciosas (remoção de bloco, valores zerados) podem produzir runtime sem erro mas com sinal degradado.
+*Identificador histórico: T1-19.*
 
-Bugs reais que motivaram a criação:
-- **VAL=0 (30/04→06/05/2026):** `business.conversion_rates` removido em commit `d40970a` sem alerta. Runtime caía em `valor_projetado = 0.0` silencioso. 7 dias de events `LeadQualified` com `value=0`.
-- **VAL=0 v2 (08/05/2026):** `champion_jan30` e `challenger_abr28` em `active_models/devclub.yaml` tinham `conversion_rates: {D01: 0.0, ..., D10: 0.0}` por copy-paste. Comentário do YAML afirmava "NUNCA são lidos" mas eram. Bug parcial só apareceu em canary (não em prod-only).
+### Smoke test pós-canary (Gate B)
 
-Gate B (T1-10 + T1-11) cobre **encoding/features**, não **config de negócio**. Gate D fecha esse gap no nível da imagem deployada.
+**O que faz:** depois que a nova revisão sobe com 0% de tráfego, dispara uma execução do pipeline contra leads reais do Railway pela URL direta da revisão (com `--tag`). Verifica que o scoring volta com decil válido, sem CAPI 5xx, e que as features críticas não chegam zeradas. Bloqueia a progressão de tráfego se algo falhar.
 
-### Arquitetura
+**Por que existe:** o deploy podia subir uma revisão tecnicamente saudável (container vivo) mas com bug funcional (decil errado, feature zerada). Sem essa verificação, só íamos descobrir depois de promover.
 
-Script `V2/scripts/gate_d_config_audit.py`. Recebe nome de revisão Cloud Run, resolve image digest via `gcloud run revisions describe`, faz `docker pull` + `cat` de dentro do container.
+**Como funciona:** chama `/monitoring/daily-check/railway` na URL tagged da revisão canary; depois consulta `/monitoring/feature-report` pra ver se houve `severity=ERROR` em features importantes; depois chama `/smoke/run-variants` pra cobrir cada variante A/B. Se qualquer um desses passos retorna problema, aborta o deploy.
 
-**Invariantes verificadas:**
+**Onde no código:** [`V2/scripts/smoke_test_revision.py`](../scripts/smoke_test_revision.py). Integrado no `deploy_capi.sh:542`. Endpoint `/smoke/run-variants` em [`V2/api/app.py`](../api/app.py).
 
-- **D1 — `clients/{cliente}.yaml`:** `business.conversion_rates` existe, cobre `D01..D10`, todos os valores `> 0`. Pega o bug original (VAL=0).
-- **D2 — `active_models/{cliente}.yaml`:** para cada variant em `ab_test.variants` que é "ativo" (matcheia roteamento OU `run_id == active_model.mlflow_run_id`), `conversion_rates` cobre `D01..D10` e `MAX(values) > 0`. Pega VAL=0 v2.
+**Status:** ✅ ativo desde 21/abr. Cobertura por variante A/B implementada em 08/mai.
 
-Variant "ativo" = um dos:
-- `utm_pattern` não vazio (matcheia leads via UTM)
-- `url_pattern` não vazio (matcheia leads via URL)
-- `run_id == active_model.mlflow_run_id` (Champion shim — pega leads sem match)
+**Cleanup automático de tags antigas (14/mai/2026):** o `deploy_capi.sh` remove automaticamente, antes de cada deploy `--no-traffic`, todas as tags `canary-*` em revisões com 0% de tráfego. Implementado após incidente de custo (33 tags acumuladas geraram +R$ 70/dia em min-instances always-on no Cloud Run — cada tag mantém URL dedicada e respeita `min-instances=1` perpetuamente). Tags em revisões com tráfego > 0 são preservadas. Detalhes do incidente em [`operacoes_gcp_custos.md`](operacoes_gcp_custos.md) seção "Investigação de spike de custo — 2026-05-14".
+
+*Identificadores históricos: T1-10 (verificação de cobertura), T1-11 (validação pré-encoding e endpoint `/feature-report`), T1-14 (smoke por variante A/B).*
+
+### Auditoria de YAML dentro da imagem deployada (Gate D)
+
+**O que faz:** baixa a imagem Docker da revisão canary, abre os arquivos YAML que foram empacotados (`clients/{cliente}.yaml` e `active_models/{cliente}.yaml`), e verifica que valores críticos não foram acidentalmente apagados ou zerados.
+
+**Por que existe:** mudanças silenciosas em YAML produzem runtime sem erro mas com sinal degradado. Dois incidentes recentes:
+- **30/abr → 06/mai/2026:** `business.conversion_rates` removido em commit sem alerta. Runtime caía em `valor_projetado = 0.0` silencioso. 7 dias de eventos `LeadQualified` enviados ao Meta com `value=0`.
+- **08/mai/2026:** `champion_jan30` e `challenger_abr28` em `active_models/devclub.yaml` tinham `conversion_rates: {D01: 0.0, ..., D10: 0.0}` por copy-paste. Comentário do YAML afirmava "NUNCA são lidos" mas eram. Bug parcial só apareceu durante canary.
+
+O Gate B cobre encoding e features. O Gate D cobre **configuração de negócio** dentro da imagem deployada — outro vetor que B não enxerga.
+
+**Como funciona:** recebe nome da revisão Cloud Run, resolve o digest da imagem via `gcloud run revisions describe`, faz `docker pull` + `cat` dos YAMLs internos. Verifica:
+- **Bloco 1 (cliente):** `business.conversion_rates` existe, cobre `D01..D10`, todos os valores `> 0`.
+- **Bloco 2 (modelo ativo):** pra cada variante "ativa" em `ab_test.variants` (matcheia roteamento OU `run_id == active_model.mlflow_run_id`), `conversion_rates` cobre `D01..D10` e `MAX(values) > 0`.
 
 Bloqueia o deploy via `exit 1` se qualquer invariante falhar.
 
-### Integração
+**Onde no código:** [`V2/scripts/gate_d_config_audit.py`](../scripts/gate_d_config_audit.py). Roda no `deploy_capi.sh` entre Gate B e progressão de canary. Pré-requisito: docker daemon local disponível.
 
-Roda em `deploy_capi.sh` entre Gate B (smoke encoding) e progressão de canary. Pré-requisito: docker daemon local disponível.
+**Status:** ✅ ativo desde 08/mai. Substituirá DT-17 quando a duplicação `business_config.py × YAML` for fechada arquiteturalmente.
 
-```
-[Gate D] Revisão: smart-ads-api-00408-yix
-[gate D] ✓ variant 'champion_jan30' ativo: run_id == active_model.mlflow_run_id (Champion shim)
-[gate D] ✓ variant 'challenger_abr28' ativo: utm_pattern=['utm_campaign']
-[gate D] ✅ Todas as invariantes passaram (D1 + D2).
-```
+*Identificador histórico: T1-17.*
 
-### Relação com outros itens
+### Equivalência de score+decil entre revisões (Gate C)
 
-- **T1-18 (Gate C — equivalência de scoring):** complementar. Gate D cobre config; Gate C cobre runtime de scoring. Bugs onde rates não-zero mas erradas (ex: 0.5 em vez de 0.005) **não** são cobertos por D — viriam de revisão manual + Gate C `--expect-score-change`.
-- **DT-17 (eliminar duplicação `business_config.py` × YAML):** Gate D fica relevante até DT-17 fechar. Depois, autoridade fica no MLflow artifact + `--set-active`, e Gate D adapta para validar o artifact.
+**O que faz:** depois do canary subir com 0% de tráfego, pega N leads reais do Railway, manda os mesmos leads pra duas revisões (a atual em produção e a nova canary), compara o decil que cada uma atribui. Bloqueia se houver divergência.
 
----
+**Por que existe:** mudanças não-intencionais no scoring (regressão de modelo, regressão de encoding, regressão de pipeline) só apareciam depois de promovidos. Custosa de detectar e reverter. Esse gate descobre na hora se duas revisões pontuam os mesmos leads diferente.
 
-## Gate C — Equivalência de score+decil entre revisões [T1-18]
+**Como funciona:** dois modos:
+- **`capi-dry-run` (default):** usa `/capi/process_daily_batch?dry_run=true`. Executa todo o caminho de roteamento A/B + cálculo de `valor_projetado`, mas pula chamada Meta + escrita no banco. Cobre o path A/B real.
+- **`predict` (legado):** usa `/predict/batch`. Não exercita roteamento A/B. Útil pra validar pipeline de scoring isoladamente.
 
-**Problema que resolve:** mudanças não-intencionais no scoring (regressão de modelo, regressão de encoding, regressão de pipeline) só apareceriam em produção depois de promovidos. Custosa de detectar e reverter.
+**Cobertura forçada do A/B:** pegando leads aleatórios do Railway, raramente algum bate `utm_campaign='PIXEL NOVO API'` (que rotearia pro Challenger). O fetcher reescreve `utm_campaign` da metade dos leads pra forçar Challenger path, e prefixa `email` com `chlng+` pra evitar colisão de cache. Garante cobertura ≥50% Challenger.
 
-Gate C compara scoring entre uma revisão alvo (canary recém-deployado) e uma revisão referência (rolling baseline = revisão com 100% de tráfego no momento). Mesmo conjunto de leads históricos do Railway, POST nas duas URLs, diff per-lead.
+**Critério de bloqueio:** somente divergência de decil. Value/event_name divergentes são **informativos** — revisões frequentemente mudam value/event_name intencionalmente. Esse lado já é coberto pelo Gate D.
 
-**Critério de bloqueio:** somente divergência de decil. Value/event_name divergentes são **informativos** — revisões frequentemente mudam value/event_name intencionalmente (Patch B em 08/05 corrigiu value=0 → values corretos por decil). Para esse lado, Gate D já cobre regressão de `conversion_rates`.
+**Override de mudança intencional:** quando o objetivo da revisão **é** mudar scoring (novo modelo Champion, novo encoder), passar `--expect-score-change` pra aceitar divergência como esperada.
 
-### Arquitetura
+**Onde no código:** [`V2/scripts/test_revision_equivalence.py`](../scripts/test_revision_equivalence.py). Roda no `deploy_capi.sh` entre Gate D e progressão de canary. Pré-requisito: env vars `RAILWAY_DB_*` no `V2/.env`.
 
-Script `V2/scripts/test_revision_equivalence.py`.
+**Status:** ✅ ativo desde 08/mai. Payload completo (com nome, telefone, e-mail e todas as chaves de pesquisa) corrigido em 09/mai (commit `4c6c472`) — o gate antigo enviava payload pobre que poluia o validador pré-encoding.
 
-**Modo `capi-dry-run` (default):** usa `/capi/process_daily_batch?dry_run=true` que executa todo o caminho de routing A/B + cálculo de `valor_projetado` mas pula chamada Meta + DB writes. Cobre path A/B real.
-
-**Modo `predict` (legado):** usa `/predict/batch`. Não toca path A/B. Útil para validar pipeline de scoring isoladamente.
-
-### Cobertura forçada A/B
-
-Pegando leads aleatórios do Railway, raramente algum bate `utm_campaign='PIXEL NOVO API'` que rotearia para o Challenger. O fetcher reescreve `utm_campaign` da metade dos leads para forçar Challenger path, e prefixa `email` com `chlng+` pra evitar colisão de cache no `/capi/process_daily_batch`. Garante cobertura ≥50% Challenger.
-
-Resultado típico:
-
-```
-  Path coverage:       Champion=11  Challenger=10  Unknown=0
-  Decis divergentes:   0  ← critério de bloqueio
-  Values divergentes:  21 (tol=0.01)  [informativo, não bloqueia]
-  ✅ PASSOU — decil idêntico (scoring intacto).
-```
-
-### Integração
-
-Roda em `deploy_capi.sh` entre Gate D e progressão de canary. Pré-requisito: env vars `RAILWAY_DB_*` no `V2/.env`.
-
-### Override de mudança intencional
-
-Quando o objetivo da revisão **é** mudar scoring (novo modelo Champion, novo encoder), passar `--expect-score-change` pra aceitar divergência de decil como esperada.
-
-### Relação com outros itens
-
-- **T1-17 (Gate D):** complementar — ver acima.
-- **T1-7 (parity audit):** roda pré-build (treino × produção em código). Gate C roda pós-build (revisão A × revisão B em runtime). Diferentes momentos no fluxo.
-- **A/B routing em `/capi/process_daily_batch`:** Gate C precisa do A/B routing nesse endpoint pra cobrir path Challenger. Adicionado no commit `266d79d` junto com Gate C — antes só `/webhook/lead_capture` e `/railway/process-pending` faziam routing.
+*Identificador histórico: T1-18.*
 
 ---
 
-## Protocolo de progressão de tráfego [T1-9]
+## Verificações em runtime
 
-Cada deploy no Cloud Run segue a progressão abaixo. Cada etapa exige **tempo mínimo de observação E critérios objetivos cumpridos** — não avançar sem ambos.
+Etapas que rodam **dentro do pipeline de produção a cada lead** (ou a cada batch). Função: pegar o problema cedo, antes que vire degradação invisível.
+
+### Encoding com fallback bloqueado quando falha
+
+**O que faz:** quando o encoding ordinal não encontra o nome de coluna esperado, em vez de cair silenciosamente em OHE (one-hot encoding), levanta erro alto. Se isso acontecer, o operador sabe imediatamente que tem desalinhamento.
+
+**Por que existe:** o encoding ordinal vivia hardcoded em `src/features/encoding.py` com nomes literais (`'Qual a sua idade?'`). Se o nome da coluna no DataFrame não batia exatamente, o código antigo caía em OHE como fallback — produzindo features completamente diferentes do que o modelo esperava, sem alerta.
+
+**Onde no código:** [`V2/src/core/encoding.py`](../src/core/encoding.py).
+
+**Status:** ✅ ativo desde 20/abr.
+
+*Identificador histórico: T1-1.*
+
+### CAPI: alerta quando algum decil para de enviar eventos
+
+**O que faz:** verifica diariamente se todos os decis (D1-D10) estão produzindo eventos enviados ao Meta. Alerta se algum decil ficou com 0 eventos nas últimas 24h.
+
+**Por que existe:** o D9 ficou 2 meses sem nenhum evento CAPI sendo enviado, e ninguém percebeu. Sintoma silencioso que afeta a otimização de campanhas no Meta.
+
+**Onde no código:** [`V2/src/monitoring/capi_monitor.py`](../src/monitoring/capi_monitor.py).
+
+**Status:** ✅ ativo desde 20/abr.
+
+*Identificador histórico: T1-2.*
+
+### CAPI: deduplica eventos antes de enviar
+
+**O que faz:** antes de empurrar evento pro Meta, verifica se o mesmo `email` já tem `capi_sent_at` preenchido no banco. Se está, descarta o duplicado (retorna `capi_skipped: "already_sent"`). Em batch, o endpoint `/capi/check_sent` filtra a lista antes do envio. Como segunda camada, o `event_id` enviado pro Meta também serve de dedup do lado deles.
+
+**Por que existe:** envios duplicados poluem a atribuição do Meta e podem inflar `value` agregado.
+
+**Onde no código:**
+- Dedup individual em [`V2/api/app.py:865-875`](../api/app.py#L865-L875) (`existing_lead.capi_sent_at` check).
+- Dedup batch via endpoint [`V2/api/app.py:1599-1638`](../api/app.py#L1599-L1638) (`/capi/check_sent`) que consulta `get_leads_already_sent_to_capi` em [`V2/api/database.py`](../api/database.py).
+- `event_id` propagado pro Meta em [`V2/api/capi_integration.py`](../api/capi_integration.py) como segunda camada (dedup do lado Meta).
+
+**Status:** ✅ ativo desde 20/abr. Verificado em meta-auditoria de 11/mai (Cenário 3.1 do `AUDITORIA_QUEBRA_PRODUCAO.md`).
+
+*Identificador histórico: T1-3.*
+
+### Datas usam UTC consistente em todos os componentes
+
+**O que faz:** centraliza o uso de `datetime.now(timezone.utc)` em vez de `datetime.now()` (que pega o timezone local da máquina).
+
+**Por que existe:** o Cloud Run roda em UTC. São Paulo está 3h atrás. Sem padronização, leads na borda do dia (23h59 BRT vs 02h59 UTC) iam pro dia errado em diferentes componentes (treino, produção, monitoramento, validação) — quebrando o casamento entre score e venda.
+
+**Onde no código:** constante centralizada em [`V2/src/core/utils.py`](../src/core/utils.py). Substituições em `train_pipeline.py`, `production_pipeline.py`, `monitoring/orchestrator.py`, `validation/analyze_tmb_inadimplencia.py`.
+
+**Status:** ✅ ativo desde 20/abr.
+
+*Identificador histórico: T1-4.*
+
+### Detecção de feature crítica zerada após encoding
+
+**O que faz:** durante o encoding em produção, antes do passo de fill com 0, verifica se as features mais importantes do modelo (importância ≥ 1%) estão zeradas em mais de X% dos leads do batch. Se sim, emite alerta `severity=ERROR` (≥5%) ou `WARNING` (≥1%).
+
+**Por que existe:** o `Medium_Linguagem_programacao` ficou zerada por semanas sem alerta. Bug clássico de degradação silenciosa — feature de alta importância sumiu do mix de tráfego, encoding zerou a coluna, modelo continuou pontuando mas sem o sinal real.
+
+**Onde no código:** [`V2/src/core/encoding.py`](../src/core/encoding.py). Resultado consumido pelo Gate B (smoke test pós-canary).
+
+**Status:** ✅ ativo desde 21/abr.
+
+*Identificador histórico: T1-10.*
+
+### Validador pré-encoding de features
+
+**O que faz:** logo depois do feature engineering e antes do encoding, verifica que cada feature pré-OHE esperada pelo modelo ativo:
+- Existe no DataFrame
+- Tem o tipo certo (bool, string categórica, numérico — conforme schema)
+- Não está com taxa alta de nulo
+- Tem valores dentro do domínio conhecido do treino
+
+Emite log estruturado JSON por batch (`event=feature_validator`) com `severity` proporcional às issues.
+
+**Por que existe:** o detector de feature zerada (acima) cobre o sintoma (coluna OHE faltando). Esse validador cobre a **causa-raiz**: feature pré-OHE ausente, com tipo errado, ou com categoria nova que o modelo nunca viu. Cada uma dessas condições produziria silenciosamente score degradado.
+
+**Como o resultado é consumido:** o `deploy_capi.sh` consulta o endpoint `/monitoring/feature-report?hours=24` durante o smoke test. Se houver `batches_with_issues > 0` ou `overall_status=ERROR`, bloqueia a progressão de tráfego.
+
+**Onde no código:** [`V2/src/core/feature_validator.py`](../src/core/feature_validator.py) (validação). [`V2/api/app.py`](../api/app.py) endpoint `GET /monitoring/feature-report` (agregação). Schema de referência em `configs/pre_encoding_schemas/{cliente}.json`.
+
+**Status:** ✅ ativo desde 23/abr.
+
+*Identificador histórico: T1-11.*
+
+### Validador pós-encoding ">X% leads zerados → bloqueia"
+
+**O que faz (proposto):** após o passo de encoding, pra cada feature com importância ≥ 3% no registro do modelo ativo, calcula a fração de leads do batch onde aquela feature ficou zerada. Se a fração observada exceder a esperada do treino (capturada como `proporcao_esperada_zero`), levanta `ValueError` antes que o batch seja enviado pra scorear.
+
+**Por que existe:** essa salvaguarda foi declarada como entregue em 21/abr no checklist mas, na investigação V.1.3 do registro de erros (08/mai), confirmou-se que **nunca foi implementada**. O que existe hoje é log de feature **ausente do DataFrame** — não cobre o caso típico em que `pd.get_dummies()` cria a coluna mas ela chega zerada (o cenário dos Clusters 3, 4 e 5 do Erro 2). O log atual também nunca bloqueia o pipeline.
+
+**Pré-condição (revisada em 2026-05-11):** o `proporcao_esperada_zero` por coluna OHE **não precisa de retreino** — pode ser calculado offline a partir dos `distribuicoes_esperadas.json` já registrados no MLflow para Champion e Challenger. Fórmula: para cada coluna `feature_categoria` resultante do OHE, `proporcao_esperada_zero = 1 - distribuicoes_esperadas['categorical'][feature][categoria]` (a fração de leads que NÃO têm essa categoria no treino). Para colunas que vêm de features numéricas ou ordinais, a regra é diferente (proporcao_esperada_zero ≈ 0 para ordinais; calculável via `bins` para numéricas). Script ad-hoc gera um JSON por modelo e salva em `configs/feature_zero_baselines/{run_id}.json`.
+
+**Threshold precisa ser feature-aware:** features ordinais (idade, salário) podem ter "0" como categoria válida (`< 18 anos` é encodada como 0); features OHE (`Medium_*`, `genero_*`) não. Comparar contra a proporção esperada por feature, não threshold absoluto.
+
+**Onde no código (proposto):**
+- Geração offline dos baselines: novo script `V2/scripts/generate_feature_zero_baselines.py` lê `distribuicoes_esperadas.json` do `mlflow_run_id` de cada variante ativa, escreve `configs/feature_zero_baselines/{run_id}.json`.
+- Validação em runtime: novo bloco em [`V2/src/core/encoding.py`](../src/core/encoding.py) após `pd.get_dummies`, novo método em [`V2/src/core/feature_validator.py`](../src/core/feature_validator.py) que carrega o baseline da variante ativa e compara batch atual contra esperado.
+
+**Status:** 🟡 backlog mas **pré-condição destravada** — não depende mais de retreino. Implementação atacável em qualquer momento (~1h offline-gen + ~1h validador runtime).
+
+*Identificador histórico: T1-16.*
+
+### Drift de perfil de audiência
+
+**O que faz:** todo dia compara o perfil agregado dos leads que entraram no dia anterior contra um snapshot de "audiência winner" — proporções do pool dos Top 5 lançamentos por ROAS histórico (LF40, LF41, LF44, LF45, LF47, n=39.771 leads). Emite alerta agregado com até dois subgrupos de features:
+- **`top_list`** — features com `|Δpp| ≥ 3` → severity HIGH
+- **`down_list`** — features com `2 ≤ |Δpp| < 3` → severity MEDIUM
+
+**Por que existe:** o drift de público no LF54 (08/mai) ficou invisível pros sensores até alguém abrir uma análise ad-hoc. O monitoring antigo só comparava distribuições contra `distribuicoes_esperadas.json` capturado **no treino** — e treino é estimação de "como o público costumava ser", não "como o público winner se parecia". Drift contra winner é o que importa pro próximo lançamento.
+
+**Como funciona:**
+1. Snapshot estático em `configs/reference_audience_profiles/{cliente}.json` (não rolling — atualização manual ao "fechamento de lançamento")
+2. Categorias canônicas em `_AUDIENCE_UNIFICATION` no `data_quality.py`, espelhando o `UNIFICATION` em `scripts/perfil_audiencia.py`
+3. Janela comparada: último dia completo BRT (00:00 → 23:59 anterior a hoje)
+4. Min responses no dia: 50 (skip silencioso info-level se menor)
+5. Snapshot ausente: emite `audience_profile_drift_config_missing` severity MEDIUM com instrução de comando — **fail-loud, não silencioso**
+
+**Onde no código:** [`V2/src/monitoring/data_quality.py`](../src/monitoring/data_quality.py) (método `_check_audience_profile_drift`). Snapshot em [`V2/configs/reference_audience_profiles/devclub.json`](../configs/reference_audience_profiles/devclub.json). Gerador em [`V2/scripts/build_reference_audience_profile.py`](../scripts/build_reference_audience_profile.py). Hook em `DataQualityMonitor.check()`, executado pelo `orchestrator.run_daily_check`.
+
+**Status:** ✅ ativo desde 08/mai.
+
+*Identificador histórico: T1-13.*
+
+---
+
+## Como tráfego cresce após o deploy
+
+Etapas obrigatórias entre revisão criada e revisão em 100%. Cada etapa exige **tempo mínimo de observação E critérios objetivos cumpridos** — não avançar sem ambos.
 
 ### Etapas padrão
 
 | De | Para | Tempo mínimo | Critérios objetivos |
 |---|---|---|---|
-| Build | 0% (`--no-traffic`) | — | Smoke test 5 leads: score retorna, decil atribuído, CAPI log sem 5xx |
-| 0% | 10% | 1 hora | Taxa de 5xx na nova rev < 1%; top-5 features do modelo não zeradas nos smoke test leads |
-| 10% | 50% | 24 horas | `funnel_metrics.capi_sent.send_rate` ≥ 90%; `meta_response.acceptance_rate` ≥ 85%; nenhum decil com 0 eventos CAPI (alerta via T1-2); `lead_quality_metrics.ultimas_24h.d10` não diverge de `ultimo_mes` em mais de 10pp; **`/monitoring/feature-report?hours=24` retorna `batches_with_issues=0` e `overall_status ∈ {OK, INFO}` (via T1-11)** |
-| 50% | 100% | Caso a caso — ver abaixo | Caso a caso — ver abaixo |
+| Build | 0% (`--no-traffic`) | — | Smoke test 5 leads: score retorna, decil atribuído, log CAPI sem 5xx |
+| 0% | 10% | 1 hora | Taxa de 5xx na nova rev < 1%; top-5 features do modelo não zeradas no smoke |
+| 10% | 50% | 24 horas | `funnel_metrics.capi_sent.send_rate` ≥ 90%; `meta_response.acceptance_rate` ≥ 85%; nenhum decil com 0 eventos CAPI; D10% últimas 24h não diverge de últimos 30 dias em mais de 10pp; `/monitoring/feature-report?hours=24` retorna `batches_with_issues=0` e `overall_status ∈ {OK, INFO}` |
+| 50% | 100% | Caso a caso — ver abaixo | Caso a caso |
 
 ### 50% → 100% — dois cenários
 
-**(a) Unificação main → produção (caso atual, único):** aguardar o ciclo do DEV20 fechar (a partir de 17/05/2026). O critério aqui **é** ROAS, apesar da latência de ~21 dias, porque a janela de validação é única e a decisão é irreversível. Ver `AB_TEST.md` → "Estratégia de deploy — 50/50".
+**(a) Unificação main → produção (caso especial):** aguardar o ciclo do lançamento fechar. O critério aqui **é** ROAS, apesar da latência de ~21 dias, porque a janela de validação é única e a decisão é irreversível.
 
 **(b) Deploys normais (retreinos mensais, patches, fixes):** 1 semana em 50% sem regressão operacional:
 - `funnel_metrics.capi_sent.send_rate` estável (±5pp do baseline da revisão anterior)
-- Taxa de 5xx não aumentou vs revisão anterior (comparar via Cloud Run metrics)
-- Feature coverage não degradou (top-5 features do modelo não zeradas em > 5% dos leads)
+- Taxa de 5xx não aumentou vs revisão anterior
+- Cobertura de features não degradou (top-5 features não zeradas em > 5% dos leads)
 
-ROAS **não é critério** para o caminho (b) — o ciclo de 15-21 dias do DevClub paralisaria deploys normais se fosse exigido.
+ROAS **não é critério** pra deploys normais — ciclo de 15-21 dias paralisaria deploys se fosse exigido.
 
 ### O que NÃO é critério de bloqueio
 
@@ -273,300 +360,386 @@ ROAS **não é critério** para o caminho (b) — o ciclo de 15-21 dias do DevCl
 |---|---|
 | D10% absoluto alto (> 20-30%) | Constante histórica do projeto por feedback loop — não específico ao deploy |
 | Features novas/não reconhecidas | Esperado em retreinos quando dados reais mudam; gera alerta mas não regressão |
-| Alertas HIGH genéricos do orchestrator | Muitos HIGH são drift de dados externos (Meta API, Sheets) alheios ao deploy |
-| Divergência absoluta entre revisões em métricas de negócio | Se a nova revisão for melhor (ex: ROAS maior), não bloqueia — a comparação é "não regrediu" |
+| Alertas HIGH genéricos do orchestrator | Muitos HIGH são drift externo (Meta API, Sheets) alheios ao deploy |
+| Divergência absoluta em métricas de negócio | Se a nova revisão for melhor (ex: ROAS maior), não bloqueia |
 
 ### Rollback nomeado
 
 **Antes de cada etapa de progressão**, documentar por escrito:
-- **Qual revisão é o rollback?** nome exato (ex: `smart-ads-api-00269-jjn`)
+- **Qual revisão é o rollback?** nome exato (ex.: `smart-ads-api-00269-jjn`)
 - **Comando pronto para colar:**
-
-```bash
-gcloud run services update-traffic smart-ads-api --region us-central1 \
-    --to-revisions <ROLLBACK_REVISION>=100
-```
-
+  ```bash
+  gcloud run services update-traffic smart-ads-api --region us-central1 \
+      --to-revisions <ROLLBACK_REVISION>=100
+  ```
 - **Tempo de reversão esperado:** < 2 minutos (Cloud Run propagação)
-- **Onde observar o resultado do rollback:** logs do Cloud Run, monitoring endpoint, Railway
 
-### Comandos de referência
+**Onde no código:** documentação inline em [`V2/api/deploy_capi.sh`](../api/deploy_capi.sh) após o Gate B do smoke test.
 
-```bash
-# Ver split atual
-gcloud run services describe smart-ads-api --region us-central1 \
-    --project smart-ads-451319 --format="value(spec.traffic)"
-
-# Progressão gradual (exemplo 0% → 10%)
-gcloud run services update-traffic smart-ads-api --region us-central1 \
-    --project smart-ads-451319 \
-    --to-revisions NEW_REV=10,OLD_REV=90
-
-# Rollback imediato (100% para a revisão antiga)
-gcloud run services update-traffic smart-ads-api --region us-central1 \
-    --project smart-ads-451319 \
-    --to-revisions OLD_REV=100
-```
-
-### Observação sobre o feature coverage check
-
-Até T1-10 ser implementado, o check de "top-5 features não zeradas" é responsabilidade **manual** — rodar uma consulta no banco pós-deploy para verificar que as features críticas (cartão de crédito, nome_comprimento, dia_semana, tem_computador) não estão zeradas em proporção anormal dos leads recentes.
-
-Com T1-10, esse check roda automaticamente em `src/core/encoding.py` **antes** do fill com 0, emitindo alerta HIGH se > 5% dos leads têm alguma top-5 feature zerada.
+*Identificadores históricos: T1-9 (protocolo), T3-1 (documentação inline), T2-7 (validador automatizado pós-deploy via `progression_gate.py`).*
 
 ---
 
-## Ordem de execução
+## Qualidade do treino
 
-```
-1. A/B PATCH (urgente — prazo 27/04)
-   Patch no rollback worktree → deploy → 100% ML_MAR para o Challenger
-   Não depende dos safeguards. Bloqueador de negócio.
+Salvaguardas que garantem que o dataset de treino é representativo, deduplicado e bem instrumentado.
 
-2. TIER 1 — Bloqueadores de produção (antes da unificação de branches)
-   Esses bugs podem se repetir silenciosamente no merge se não forem resolvidos primeiro.
-   Implementar, testar e documentar cada um antes de tocar na unificação.
+### Smoke de paridade pipeline-modelo no fim do treino
 
-3. UNIFICAÇÃO DAS BRANCHES (edf23e9 → main)
-   Com os checks de Tier 1 prontos, a unificação pode ser verificada automaticamente.
-   A cada arquivo mergeado: rodar o parity check de encoding.
+**O que faz (proposto):** ao final do treino, antes de marcar o modelo como ativo, pega ~100 leads reais e roda eles pelo pipeline de produção usando o modelo recém-treinado. Verifica:
+- Conjunto de features esperadas pelo modelo está contido no que `apply_encoding` produz
+- Score sai sem NaN no intervalo `[0, 1]`
+- Decis atribuídos cobrem `D01–D10`
 
-4. TIER 2 — Qualidade de dados
-   Importantes, mas não bloqueiam a unificação.
+Se qualquer falhar, aborta o `--set-active`.
 
-5. TIER 3 — Observabilidade
-   Melhorias de monitoramento e deploy. Implementar após a unificação estar estável.
-```
+**Por que existe:** as proteções de runtime (validador pré-encoding, cobertura de features) protegem leads em produção. Mas o modelo é registrado no MLflow **sem nenhum check** de "esse modelo, com o pipeline atual, scoreia sem perder feature". Bug silencioso possível: registrar modelo cujo `feature_names_in_` não casa exatamente com o que `apply_encoding` produz no main code → primeiro deploy descobre o problema.
+
+**Onde no código (proposto):** [`V2/src/train_pipeline.py`](../src/train_pipeline.py) ao final, antes de `--set-active`. Reusa lógica de [`V2/scripts/smoke_test_revision.py`](../scripts/smoke_test_revision.py).
+
+**Custo:** ~30s adicionais por treino.
+
+**Status:** 🟡 backlog. Implementar quando próximo retreino for feito.
+
+*Identificador histórico: T1-12.*
+
+### Deduplicação no treino
+
+**O que faz:** antes de consolidar o dataset de treino, remove duplicados por planilha.
+
+**Onde no código:** [`V2/src/core/ingestion.py`](../src/core/ingestion.py) (3 funções: `filter_sheets`, `remove_duplicates_per_sheet`, `consolidate_datasets`). Assinatura config-driven.
+
+**Status:** ✅ ativo desde 23/abr.
+
+*Identificador histórico: T2-1.*
+
+### Log de count em cada etapa
+
+**O que faz:** em cada filtro do pipeline (treino e produção), loga count antes e depois com delta.
+
+**Onde no código:** função helper `_log_step_count` em [`V2/src/train_pipeline.py:223`](../src/train_pipeline.py#L223) (invocada em 8 pontos do pipeline de treino) e [`V2/src/production_pipeline.py:35`](../src/production_pipeline.py#L35) (invocada em 3 pontos do pipeline de produção). Formato `[step] N=X | Δ=±Y (±%)`.
+
+**Status:** ✅ ativo desde 28/abr (commit `8b46645`). Contagem real confirmada em meta-auditoria de 11/mai.
+
+*Identificador histórico: T2-2.*
+
+### Importance weighting pra grupo controle
+
+**O que faz:** treina com peso maior pros leads do grupo controle (campanhas sem ML), pra balancear o viés do feedback loop.
+
+**Onde no código:** `_compute_control_weights` em [`V2/src/train_pipeline.py`](../src/train_pipeline.py). Flags: `--control-group-weights`, `--control-alpha`, `--train-ratio`.
+
+**Status:** ✅ ativo desde 28/abr.
+
+*Identificador histórico: T2-3.*
+
+### Limite de queries de validação
+
+**O que faz:** queries de validação que retornariam exatamente o limite (10k antes, 100k/200k agora) emitem ERROR — sinal de que estavam sendo truncadas silenciosamente.
+
+**Por que existe:** lançamentos > 10k leads estavam sendo truncados sem alerta no relatório de validação.
+
+**Onde no código:** [`V2/src/validation/generate_taxa_resposta_csv.py`](../src/validation/generate_taxa_resposta_csv.py) (limite 100k) e [`V2/src/validation/capi_events_counter.py`](../src/validation/capi_events_counter.py) (limite 200k).
+
+**Status:** ✅ ativo desde 28/abr.
+
+*Identificador histórico: T2-4.*
+
+### Filtro de vendas não aprovadas
+
+**O que faz:** confirmação de que `include_canceled=False` é default em todos os loaders de venda. Só relatório de fechamento permite override pra incluir canceladas.
+
+**Onde no código:** loaders [`load_guru_sales`](../src/validation/data_loader.py#L651), [`load_tmb_sales`](../src/validation/data_loader.py#L836), [`load_hotpay_sales`](../src/validation/data_loader.py#L966) em `V2/src/validation/data_loader.py`. Override só em `validate_ml_performance.py:1388-1389` quando `report_type='fechamento'`.
+
+**Status:** ✅ confirmado em 28/abr (não exigiu mudança de código). Localização revalidada em 11/mai.
+
+*Identificador histórico: T2-5.*
+
+### Eliminar exceções silenciosas críticas
+
+**O que faz:** converte `except: pass` e `except Exception: return {}` em pontos críticos pra `logger.error` com `exc_info`. Operações que falham passam a ser visíveis.
+
+**Pontos onde estava silencioso:**
+- `monitoring/orchestrator.py:245-250` (rollback de transação) — agora `logger.error` com `exc_info=True`
+- `monitoring/orchestrator.py:315` (parse de linha gspread) — agora contador de skips com warning agregado no fim do loop
+- `app.py:1636-1638` (Railway CAPI lookup, `/capi/check_sent`) — `logger.error` + `raise HTTPException`; `exc_info=True` adicionado em 11/mai (estava ausente após refactor anterior)
+- `app.py:2263-2264` e `2596-2597` — já tinham `logger.warning`, classificados baixa severidade
+
+**Status:** ✅ ativo desde 28/abr. Migração de `exc_info=True` em `app.py:1637` completada em 11/mai (achado da meta-auditoria do Cenário 3.1 — ver `AUDITORIA_QUEBRA_PRODUCAO.md`).
+
+*Identificador histórico: T2-6.*
+
+### Validador automatizado pós-deploy
+
+**O que faz:** consome `/monitoring/feature-report` e `/monitoring/daily-check/railway`, consolida em PROMOTE / HOLD / ROLLBACK, e (com `--execute`) chama `gcloud run services update-traffic` pra avançar.
+
+**Por que existe:** elimina dependência de disciplina humana na progressão de tráfego.
+
+**Onde no código:** [`V2/scripts/progression_gate.py`](../scripts/progression_gate.py).
+
+**Status:** ✅ ativo desde 23/abr (commit `42990b8`).
+
+*Identificador histórico: T2-7.*
+
+### Alerta pra feature de alta importância com variância baixa em produção
+
+**O que faz:** dispara alerta quando uma feature com `importance ≥ 1%` no modelo ativo cai pra estado quase-constante em produção (>95% dos leads no mesmo valor, ou 100% zerada).
+
+**Por que existe:** complementaria a cobertura existente do `Medium_Linguagem_programacao` cobrindo o caso "categoria sumiu do mix de tráfego, não do encoding".
+
+**Status:** ✅ verificado em 29/abr — `check_distribution_drift` (existente) já cobre o caso operacional. Cobertura sobreposta. Único ganho marginal seria ordenar a saída por `feature_importance` pra destacar high-impact primeiro — fica como melhoria opcional de UX, não item separado.
+
+*Identificador histórico: T2-8.*
+
+### Bootstrap dos snapshots de paridade em máquina fresca / CI
+
+**O que faz (proposto):** na primeira execução do parity audit em máquina fresca (sem snapshots locais), captura automaticamente os pickles necessários a partir do dataset atual. Sem isso, o audit levanta `FileNotFoundError`.
+
+**Por que existe:** snapshots em `tests/fixtures/snapshot_*.pkl` são gitignored (37–95 MB cada). Em máquina fresca, o `parity_audit` não encontra `snapshot_encoding_input.pkl` e aborta antes de chegar nos audits. T1-15 já bootstrappa snapshots por-variante automaticamente quando faltam (commit 09/mai), mas pressupõe que o input já existe localmente.
+
+**Implementação possível:**
+- (a) download do `snapshot_encoding_input.pkl` de GCS no início do Gate A
+- (b) executar `train_pipeline --capture-parity-snapshots` automaticamente quando input está ausente
+- (c) checkar pickles em `gs://bring-data-fixtures/parity/` versionados por hash do dataset
+
+**Status:** 🟡 backlog. Sem urgência enquanto não houver CI ou segundo dev.
+
+*Identificador histórico: T2-9.*
 
 ---
 
-## Gap Matrix — Auditoria completa
+## Observabilidade
 
-### BLOCO 1 — Encoding: treino vs produção
+Salvaguardas que melhoram visibilidade de operação, sem alterar fluxo de scoring.
 
-| Item | Status | Onde está | O que fazer |
+### Canary documentado inline no script de deploy
+
+**O que faz:** após o smoke test no `deploy_capi.sh`, imprime os 3 comandos `gcloud run services update-traffic` pra 10% → 50% → 100% e referência aos critérios objetivos.
+
+**Onde no código:** [`V2/api/deploy_capi.sh`](../api/deploy_capi.sh) (após Gate B).
+
+**Status:** ✅ ativo desde 29/abr.
+
+*Identificador histórico: T3-1.*
+
+### Smoke test pós-deploy
+
+**Status:** ✅ implementado em 21/abr como Gate B (acima). Cobre o requisito original.
+
+*Identificador histórico: T3-2.*
+
+### Proteção da branch main
+
+**O que faz:** require PR + aprovação antes de merge em `main`.
+
+**Status:** 🟡 adiável. Branch protection do GitHub não disponível em repo privado de conta Free (HTTP 403 "Upgrade to GitHub Pro"). Como há um único colaborador (admin), o risco real (`push --force` ou delete acidental) é baixo. Reativar quando: plano subir pra Pro/Team, repo virar público, ou um segundo colaborador entrar.
+
+*Identificador histórico: T3-3.*
+
+### Verificação periódica do token Meta
+
+**Status:** ❌ cancelado em 23/abr. Token é System User vitalício, não expira. Premissa original errada.
+
+*Identificador histórico: T3-4.*
+
+### Relatório operacional consolidado no daily-check
+
+**O que faz:** bloco "Rotinas operacionais" no log do `run_daily_check` mostra: `run_id` ativo, status do A/B, revision/service do Cloud Run, último scoring + lag, contadores 24h (recebidos / scoreados / CAPI enviados).
+
+**Onde no código:** `_generate_operational_routines_summary()` em [`V2/src/monitoring/orchestrator.py`](../src/monitoring/orchestrator.py).
+
+**Status:** ✅ ativo desde 29/abr.
+
+*Identificador histórico: T3-5.*
+
+### Validação de modelo carregado no startup
+
+**O que faz:** no startup do servidor, verifica que `predictor.model is not None` e `predictor.feature_names` está populado após `load_model()`. Falha → `RuntimeError` no startup, API não aceita tráfego.
+
+**Por que existe:** detecta cenário "imagem Docker baked com `run_id A` mas YAML aponta pra `B`". Pega divergência entre `mlflow_run_id` no `configs/active_models/{cliente}.yaml` e `predictor.mlflow_run_id` em runtime. Mesma verificação pra variantes A/B.
+
+**Onde no código:** `validate_model_loaded` em [`V2/src/core/startup_checks.py`](../src/core/startup_checks.py) (commit `a1213f9`). Integrado em `production_pipeline.LeadScoringPipeline.__init__`.
+
+**Status:** ✅ ativo desde 29/abr.
+
+*Identificadores históricos: T3-6 (validação MODEL_PATH) e T3-7 (reconciliação run_id).*
+
+---
+
+## Auditoria de infraestrutura — gaps e ações
+
+Catálogo dos componentes do sistema, com status atual de cada peça e o que precisaria ser feito.
+
+### Encoding: treino vs produção
+
+| Componente | Status | Onde | O que fazer |
 |---|---|---|---|
-| `apply_categorical_encoding()` | ✓ Existe | `src/features/encoding.py:64-365` | — |
-| `_load_feature_registry()` | ✓ Existe | `src/core/encoding.py:37-100` | — |
-| `test_encoding_overrides.py` | ✓ Existe | `scripts/test_encoding_overrides.py:160-223` | Adaptar para cobrir paridade geral, não só A/B |
-| `parity_audit.py` (Medium) | ✓ Existe parcial | `tests/parity_audit.py:138-150` | Estender para encoding ordinal e UTM |
-| Nomes de colunas ordinal | ✗ Bug ativo | `src/features/encoding.py:45,56` | Alinhar nome literal ('Qual a sua idade?') entre yaml e DataFrame — hardcoded com fallback silencioso para OHE |
-| Snapshot encoding treino vs prod | ✗ Não existe | — | Criar: input fixo → output esperado → comparar |
-| Verificação de features 100% zero | ✗ Não existe | — | Criar: alerta se feature crítica = 0 em > 95% dos leads |
+| Encoding categórico (função `apply_categorical_encoding`) | ✅ existe | `src/features/encoding.py:64-365` | — |
+| Carregamento do registro de features | ✅ existe | `src/core/encoding.py:37-100` | — |
+| Teste de encoding por variante A/B | ✅ existe | `scripts/test_encoding_overrides.py:160-223` | Adaptar pra cobrir paridade geral, não só A/B |
+| Auditoria de paridade (Medium) | ✅ parcial | `tests/parity_audit.py:138-150` | Estender pra encoding ordinal e UTM |
+| Nomes de colunas ordinal | ✅ corrigido | `src/features/encoding.py:45,56` | (era bug ativo — `'Qual a sua idade?'` desalinhado entre yaml e DataFrame com fallback silencioso para OHE) |
+| Snapshot encoding treino vs prod | ✅ existe | `tests/fixtures/` | — |
+| Verificação de feature 100% zerada | ✅ ativo | `src/core/encoding.py` | — |
 
-**Ação prioritária (Tier 1):** estender `parity_audit.py` para comparar encoding coluna-a-coluna entre treino e produção. Rodar antes de qualquer merge de branch.
+### CAPI: integridade do sinal enviado ao Meta
 
----
-
-### BLOCO 2 — CAPI: integridade do sinal
-
-| Item | Status | Onde está | O que fazer |
+| Componente | Status | Onde | O que fazer |
 |---|---|---|---|
-| `send_event_to_capi()` | ✓ Existe | `api/capi_integration.py:263-375` | — |
-| `_check_capi_missing_rate()` | ✓ Existe | `src/monitoring/capi_monitor.py:45-129` | — |
-| `_check_capi_rejection_rate()` | ⚠ Stub incompleto | `src/monitoring/capi_monitor.py:136-149` | Implementar query de eventos rejeitados vs aceitos |
-| Verificação D1–D10 todos enviando | ✗ Não existe | — | Criar: alerta se qualquer decil = 0 eventos nas últimas 24h |
-| Deduplicação antes de enviar | ✗ Não existe | — | Criar: check de email duplicado na fila antes do envio |
-| Alerta `capiStatus` blocked/null | ✗ Não existe | — | Criar: alerta se blocked+null > 10% do volume do dia |
-| Formato chaves D01 vs D1 | ⚠ Risco | `api/capi_integration.py:356-357` | Confirmar que lookup de `conversion_rates` usa mesmo formato que yaml |
+| Envio de evento ao Meta | ✅ existe | `api/capi_integration.py:263-375` | — |
+| Verificação de taxa de eventos perdidos | ✅ existe | `src/monitoring/capi_monitor.py:45-129` | — |
+| Verificação de taxa de eventos rejeitados | ⚠️ stub | `src/monitoring/capi_monitor.py:136-149` | Implementar query de rejeitados vs aceitos |
+| Alerta de decil sem eventos | ✅ ativo | `src/monitoring/capi_monitor.py` | — |
+| Deduplicação antes do envio | ✅ ativo | `api/capi_integration.py` | — |
+| Alerta `capiStatus blocked/null` | ❌ não existe | — | Criar: alerta se blocked+null > 10% do volume diário |
+| Formato chaves D01 vs D1 | ⚠️ risco | `api/capi_integration.py:356-357` | Confirmar que lookup de `conversion_rates` usa o mesmo formato que o YAML |
 
-**Ação prioritária (Tier 1):** criar verificação automática de que todos os decis D1–D10 estão gerando eventos de sucesso. Esse bug ficou 2 meses invisível.
+### Pipeline de dados: qualidade do dataset
 
----
-
-### BLOCO 3 — Pipeline de dados: qualidade do dataset
-
-| Item | Status | Onde está | O que fazer |
+| Componente | Status | Onde | O que fazer |
 |---|---|---|---|
-| Janela de conversão simétrica | ✓ Existe | `src/data_processing/conversion_window.py:13-93` | — |
-| Ordem TMB → merge vendas | ✓ Correto em treino | `src/train_pipeline.py:400-430` | Confirmar que `production_pipeline.py` respeita mesma ordem |
-| Deduplicação no treino | ✗ Stub `NotImplementedError` | `src/core/ingestion.py` | Implementar usando `remove_duplicates_per_sheet()` de `train_pipeline.py` |
-| Cross-check dataset pós-filtro | ✗ Não existe | — | Criar: log de N leads por etapa (antes/depois de cada filtro) |
-| Log de estatísticas por etapa | ✗ Não existe | — | Criar: ingestion → col_unify → janela → match → encoding: N registros, N positivos |
+| Janela de conversão simétrica | ✅ existe | `src/data_processing/conversion_window.py:13-93` | — |
+| Ordem TMB → merge vendas | ✅ correto em treino | `src/train_pipeline.py:400-430` | Confirmar que `production_pipeline.py` respeita |
+| Deduplicação no treino | ✅ ativo | `src/core/ingestion.py` | — |
+| Cross-check dataset pós-filtro | ❌ não existe | — | Criar: log de N leads por etapa |
+| Log de estatísticas por etapa | ✅ ativo | — | — |
 
-**Ação prioritária (Tier 2):** implementar `remove_duplicates_per_sheet()` em `src/core/ingestion.py` (hoje é `NotImplementedError`).
+### Infraestrutura e configuração
 
----
-
-### BLOCO 4 — Infraestrutura e configuração
-
-| Item | Status | Onde está | O que fazer |
+| Componente | Status | Onde | O que fazer |
 |---|---|---|---|
-| `ARG MODEL_PATH` no Dockerfile | ✓ Existe | `api/Dockerfile:45-52` | — |
-| `stage_model_artifacts()` | ✓ Existe | `api/deploy_capi.sh:284-341` | — |
-| `load_dotenv()` no treino | ✓ Existe | `src/train_pipeline.py:14-17` | — |
-| `load_dotenv()` no app.py | ✗ Ausente | `api/app.py` | Verificar — Cloud Run injeta env vars, mas scripts locais precisam de `.env` |
-| ~~Verificação de Meta token freshness~~ | ✅ Não aplicável | — | Token é System User vitalício, não expira. Item cancelado. |
-| Validação MODEL_PATH vs yaml | ✗ Não existe | — | Criar: `deploy_capi.sh` valida que path no yaml existe antes do build |
-| MLflow experiment ID hardcoded | ✗ Risco não auditado | `src/` | Verificar: `grep -rn "experiment_id.*=.*[0-9]" V2/src/` |
+| `ARG MODEL_PATH` no Dockerfile | ✅ existe | `api/Dockerfile:45-52` | — |
+| Stage de artefatos do modelo | ✅ existe | `api/deploy_capi.sh:284-341` | — |
+| `load_dotenv()` no treino | ✅ existe | `src/train_pipeline.py:14-17` | — |
+| `load_dotenv()` no app.py | ⚠️ ausente | `api/app.py` | Cloud Run injeta env vars, mas guards explícitos em `capi_integration.py` cobrem; falha ruidosa, não silenciosa. Item pulado. |
+| Verificação de freshness do token Meta | ❌ não aplicável | — | Token é System User vitalício, não expira. Cancelado. |
+| Validação MODEL_PATH vs YAML | ✅ ativo | `src/core/startup_checks.py` | — |
+| MLflow experiment ID hardcoded | ⚠️ risco não auditado | `src/` | Verificar: `grep -rn "experiment_id.*=.*[0-9]" V2/src/` |
 
-**Ação prioritária (Tier 1):** verificar `app.py` — se `META_ACCESS_TOKEN` não está sendo carregado no startup, todos os envios CAPI falham silenciosamente no próximo restart do container.
+### Deploy: segurança e reversibilidade
 
----
-
-### BLOCO 5 — Deploy: segurança e reversibilidade
-
-| Item | Status | Onde está | O que fazer |
+| Componente | Status | Onde | O que fazer |
 |---|---|---|---|
-| Flag `--no-traffic` | ✓ Existe | `api/deploy_capi.sh:51` | — |
-| Whitelist de branches | ✓ Existe | `api/deploy_capi.sh:68-128` | — |
-| Referência a revisão anterior | ✓ Existe | `api/deploy_capi.sh:252-264` | — |
-| Progressão de tráfego (canary) | ⚠ Parcial | `api/deploy_capi.sh` | Documentar fluxo explícito: 0% → 10% → 50% → 100% com comandos |
-| Rollback automático | ✗ Não existe | — | Criar: health check pós-deploy + rollback automático se falhar |
-| Script de validação pós-deploy | ✗ Não existe | — | Criar: 5 leads de teste → verificar score + decil + CAPI log |
-| Proteção de branch main | ✗ Não existe | — | Configurar no GitHub: require PR + aprovação |
+| Flag `--no-traffic` | ✅ existe | `api/deploy_capi.sh:51` | — |
+| Whitelist de branches | ✅ existe | `api/deploy_capi.sh:68-128` | — |
+| Referência à revisão anterior | ✅ existe | `api/deploy_capi.sh:252-264` | — |
+| Progressão de tráfego (canary) | ✅ documentada | `api/deploy_capi.sh` | — |
+| Rollback automático | ❌ não existe | — | Criar: health check pós-deploy + rollback automático |
+| Script de validação pós-deploy | ✅ ativo | `scripts/smoke_test_revision.py` | — |
+| Proteção de branch main | 🟡 adiável | GitHub | Bloqueada por plano Free do repo |
 
-**Ação prioritária (Tier 3):** documentar o fluxo de canary explicitamente no `deploy_capi.sh` (comentário com os 3 comandos gcloud). Criar script de smoke test pós-deploy.
+### Autorização de processo: o deploy deveria acontecer?
 
----
+Adicionado em 20/abr após incidente: `main` deployada com 100% do tráfego por horas sem verificação de pré-requisitos. Audita se o deploy está autorizado pelo processo (não só tecnicamente OK).
 
-### BLOCO 10 — Autorização de processo: o deploy deveria acontecer?
-
-Adicionado em 20/04/2026 após incidente: `main` deployada e com 100% do tráfego por horas sem verificação de pré-requisitos. O safeguard audita integridade técnica; este bloco audita se o deploy está autorizado pelo processo.
-
-| Item | Status | Onde está | O que fazer |
+| Componente | Status | Onde | O que fazer |
 |---|---|---|---|
-| Branch autorizada para produção | ✗ Não verificado no safeguard | `api/deploy_capi.sh:68` | Adicionar ao safeguard: verificar se branch atual está em `AUTHORIZED_BRANCHES` |
-| Pré-requisitos Tier 1 concluídos | ✗ Não verificado | `docs/PLANO_SAFEGUARD.md` | Verificar que nenhum T1-x está "Pendente" antes de deployar `main` |
-| Parity check main vs produção | ✗ Não verificado no deploy | `tests/parity_audit.py` | Exigir `pytest parity_audit.py` passando antes de qualquer deploy de `main` |
-| Gate de progressão de tráfego | ✗ Protocolo não documentado | — | Documentar: 0% → 10% (1h mínimo) → 50% (confirmação) → 100% (confirmação + rollback nomeado) |
-| Trail de autorização de deploy | ✗ Não existe | — | Criar: cada mudança de split de tráfego deve ser registrada com motivo e autorização |
+| Branch autorizada pra produção | ✅ ativo | `api/deploy_capi.sh:68` | — |
+| Pré-requisitos checklist concluídos | ✅ verificado manualmente | este doc | — |
+| Parity check antes de deploy de main | ✅ ativo | `tests/parity_audit.py` | — |
+| Gate de progressão de tráfego | ✅ documentado | — | — |
+| Trail de autorização de deploy | ❌ não existe | — | Criar: cada mudança de split de tráfego registrada com motivo e autorização |
 
-**Ação prioritária (Tier 1 novo):** o deploy de `main` em produção causou degradação de sinal. Adicionar verificação de branch + parity check como gate obrigatório antes de qualquer deploy não-rollback.
+### Exceções silenciosas (foco do T2-6)
 
----
+Pontos onde `except: pass`, `except Exception: pass` ou `except Exception: return {}` engoliam erros sem log.
 
-### BLOCO 11 — Exceções silenciosas (T2-6)
-
-Descoberto em 2026-04-21 durante investigação do T1-9. Pontos onde `except: pass`, `except Exception: pass` ou `except Exception: return {}` engolem erros sem log — se a operação falhar, ninguém fica sabendo.
-
-| Arquivo | Linha | Padrão | Problema | Severidade |
+| Arquivo | Linha | Padrão antigo | Severidade | Status |
 |---|---|---|---|---|
-| `src/monitoring/orchestrator.py` | 219-220 | `except Exception: pass` (db.rollback) | Transação abortada não avisa — estado inconsistente no banco | MÉDIA |
-| `src/monitoring/orchestrator.py` | 315 | `except: continue` (gspread row parse) | Linhas puladas silenciosamente — funil de leads fica incompleto | MÉDIA |
-| `api/app.py` | 1638-1640 | `except Exception: return {}` (Railway CAPI lookup) | FBP/FBC indisponíveis retornam dict vazio sem log — CAPI qualidade degradada | ALTA |
-| `api/app.py` | 2263-2264 | `except Exception as _sfm_e: logger.warning` | Já tem log, OK mas warning baixo | BAIXA |
-| `api/app.py` | 2596-2597 | `except Exception: logger.warning` (revenue_forecast) | Já tem log, OK | BAIXA |
+| `src/monitoring/orchestrator.py` | 219-220 | `except Exception: pass` (db.rollback) | MÉDIA | ✅ corrigido |
+| `src/monitoring/orchestrator.py` | 315 | `except: continue` (gspread row parse) | MÉDIA | ✅ corrigido |
+| `api/app.py` | 1638-1640 | `except Exception: return {}` (Railway CAPI lookup) | ALTA | ✅ corrigido |
+| `api/app.py` | 2263-2264 | `except Exception: logger.warning` | BAIXA | ✅ já adequado |
+| `api/app.py` | 2596-2597 | `except Exception: logger.warning` (revenue_forecast) | BAIXA | ✅ já adequado |
 
-**Ação (Tier 2):** converter os 3 primeiros para `except Exception as e: logger.error(f"[falha silenciosa CORRIGIDA] ...") + raise` ou `+ return default` com log. Os 2 últimos já estão adequados (têm logger).
+### Fuso horário
 
-**Por que Tier 2 e não Tier 1:** esses pontos não são bloqueadores ativos de produção — são pontos onde se algo der errado, ficamos cegos. Não impedem a unificação das branches.
+| Componente | Status | Onde | O que fazer |
+|---|---|---|---|
+| `datetime.now(timezone.utc)` no capi_monitor | ✅ correto | `src/monitoring/capi_monitor.py:59` | — |
+| Constante central de timezone | ✅ existe | `src/core/utils.py` | — |
+| Treino, pipeline, orchestrator, validação usam UTC | ✅ ativo | múltiplos | — |
+
+### Monitoramento: alertas automáticos
+
+| Componente | Status | Onde | O que fazer |
+|---|---|---|---|
+| `MonitoringOrchestrator` | ✅ existe | `src/monitoring/orchestrator.py:88-350` | — |
+| `DataQualityMonitor` (drift) | ✅ existe | `src/monitoring/data_quality.py` | — |
+| `OperationalMonitor` | ✅ existe | `src/monitoring/operational_monitor.py` | — |
+| `CAPIQualityMonitor` | ⚠️ parcial | `src/monitoring/capi_monitor.py` | Implementar rejection_rate |
+| Envio de alerta no Slack | ✅ existe | `src/validation/slack_notifier.py` | — |
+| Thresholds no `config.py` | ✅ existe | `src/monitoring/config.py` | — |
+| Alerta D10% out-of-range | ⚠️ pulado | `src/monitoring/orchestrator.py` | Alertas só aparecem no endpoint — usuário consulta manualmente. Sem notificação proativa, item não agrega valor além do que já existe. Reavaliar junto com relatório consolidado (`T3-5`). |
+| Thresholds hardcoded | ⚠️ pendente | `src/monitoring/operational_monitor.py` | Mover pra `ClientConfig` |
+| Alerta decil com 0 eventos | ✅ ativo | `src/monitoring/capi_monitor.py` | — |
+| Relatório diário consolidado | ✅ ativo | `src/monitoring/orchestrator.py` | — |
+
+### Grupo controle e feedback loop
+
+| Componente | Status | Onde | O que fazer |
+|---|---|---|---|
+| `fair_campaign_comparison.py` | ✅ existe | `src/validation/fair_campaign_comparison.py` | — |
+| `campaign_classifier.py` | ✅ existe | `src/validation/campaign_classifier.py` | — |
+| Importance weighting no treino | ✅ ativo | `src/train_pipeline.py` | — |
+| Identificação de leads controle | ⚠️ pendente | — | Filtro por campanha sem ML no dataset de treino |
+| Log de proporção controle/tratamento | ⚠️ pendente | — | Logar % de leads controle no dataset antes do treino |
+
+### Relatório de validação
+
+| Componente | Status | Onde | O que fazer |
+|---|---|---|---|
+| `validate_ml_performance.py` | ✅ existe | `src/validation/validate_ml_performance.py:15-100` | — |
+| `CampaignMetricsCalculator` | ✅ existe | `src/validation/metrics_calculator.py` | — |
+| `validate_tmb_sales_freshness()` | ✅ existe | `src/validation/validate_ml_performance.py:105-150` | — |
+| Limite de queries de validação | ✅ ativo (100k/200k com alerta) | `src/validation/` | — |
+| Filtro de vendas não aprovadas | ✅ confirmado (default `include_canceled=False`) | `src/validation/` | — |
+| Cross-check total vs fonte primária | ❌ não existe | — | Criar: assert total_leads_relatório ≈ total_Meta_Ads ± 5% |
+| Reconciliação de run_id | ✅ ativo | `src/core/startup_checks.py` | — |
 
 ---
 
-### BLOCO 6 — Fuso horário
+## Status final por item (tabela enxuta)
 
-| Item | Status | Onde está | O que fazer |
+Mapeamento entre os identificadores históricos e o status atual. Use isso quando precisar localizar um commit antigo que cita `T1-X`.
+
+| ID histórico | Título verbal | Status | Data |
 |---|---|---|---|
-| `datetime.now(timezone.utc)` no capi_monitor | ✓ Correto | `src/monitoring/capi_monitor.py:59` | — |
-| `datetime.now()` sem timezone — treino | ✗ Risco | `src/train_pipeline.py:77` | Converter para `datetime.now(timezone.utc)` |
-| `datetime.now()` sem timezone — pipeline | ✗ Risco | `src/production_pipeline.py:55` | Converter |
-| `datetime.now()` sem timezone — orchestrator | ✗ Risco | `src/monitoring/orchestrator.py:63-64, 400` | Converter |
-| `datetime.now()` sem timezone — validação | ✗ Risco | `src/validation/analyze_tmb_inadimplencia.py` | Converter |
-| Constante central de timezone | ✗ Não existe | — | Criar: `from src.core.utils import UTC` importado por todos |
-
-**Ação prioritária (Tier 1):** criar constante central `UTC = timezone.utc` em `src/core/utils.py` e substituir todos os `datetime.now()` sem timezone. O Cloud Run roda em UTC — discrepância com São Paulo é 3h, o suficiente para perder leads nas bordas do dia.
-
----
-
-### BLOCO 7 — Monitoramento: alertas automáticos
-
-| Item | Status | Onde está | O que fazer |
-|---|---|---|---|
-| `MonitoringOrchestrator` | ✓ Existe | `src/monitoring/orchestrator.py:88-350` | — |
-| `DataQualityMonitor` (drift) | ✓ Existe | `src/monitoring/data_quality.py` | — |
-| `OperationalMonitor` | ✓ Existe | `src/monitoring/operational_monitor.py` | — |
-| `CAPIQualityMonitor` | ✓ Existe parcial | `src/monitoring/capi_monitor.py` | Implementar rejection_rate |
-| `send_slack_alert()` | ✓ Existe | `src/validation/slack_notifier.py` | — |
-| Thresholds no `config.py` | ✓ Existe | `src/monitoring/config.py` | — |
-| Alerta D10% out-of-range | ⚠ Lógica complexa | `src/monitoring/orchestrator.py` | Simplificar: alerta se D10% < 15% ou > 50% |
-| Thresholds hardcoded | ⚠ Hardcoded | `src/monitoring/operational_monitor.py` | Mover para `ClientConfig` |
-| Alerta decil com 0 eventos | ✗ Não existe | — | Criar em `CAPIQualityMonitor` |
-| Relatório diário consolidado | ✗ Não existe | — | Criar: N alertas HIGH/MEDIUM/LOW por dia |
-
-**Ação prioritária (Tier 1):** adicionar em `CAPIQualityMonitor` a verificação de que nenhum decil tem 0 eventos nas últimas 24h. Esse foi o bug do D9 que ficou 2 meses invisível.
-
----
-
-### BLOCO 8 — Grupo controle e feedback loop
-
-| Item | Status | Onde está | O que fazer |
-|---|---|---|---|
-| `fair_campaign_comparison.py` | ✓ Existe | `src/validation/fair_campaign_comparison.py` | — |
-| `campaign_classifier.py` | ✓ Existe | `src/validation/campaign_classifier.py` | — |
-| Importance weighting no treino | ✗ Não existe | `src/train_pipeline.py` | Criar: leads de grupo controle com peso 2x no treino |
-| Identificação de leads controle | ✗ Não existe | — | Criar: filtro por campanha sem ML no dataset de treino |
-| Log de proporção controle/tratamento | ✗ Não existe | — | Criar: logar % de leads controle no dataset antes do treino |
-
-**Ação prioritária (Tier 2):** mapear quais campanhas são grupo controle (sem ML) e garantir que leads dessas campanhas estão no dataset de treino com peso maior. Retreino pendente para corrigir viés acumulado.
-
----
-
-### BLOCO 9 — Relatório de validação
-
-| Item | Status | Onde está | O que fazer |
-|---|---|---|---|
-| `validate_ml_performance.py` | ✓ Existe | `src/validation/validate_ml_performance.py:15-100` | — |
-| `CampaignMetricsCalculator` | ✓ Existe | `src/validation/metrics_calculator.py` | — |
-| `validate_tmb_sales_freshness()` | ✓ Existe | `src/validation/validate_ml_performance.py:105-150` | — |
-| Limite 10.000 registros | ✗ Bug | `src/validation/generate_taxa_resposta_csv.py`, `capi_events_counter.py` | Remover limite ou alertar se query retorna exatamente 10.000 |
-| Filtro de vendas não aprovadas | ✗ Ausente explícito | `src/validation/validate_ml_performance.py` | Verificar se filtragem vem do datasource ou precisa ser adicionada |
-| Cross-check total vs fonte primária | ✗ Não existe | — | Criar: assert total_leads_relatório ≈ total_Meta_Ads ± 5% |
-| Reconciliação de run_id | ✗ Não existe | — | Criar: verificar que `leadScore` e `decil` vieram do modelo ativo no momento |
-
-**Ação prioritária (Tier 2):** remover limite de 10.000 registros ou adicionar alerta explícito. Lançamentos grandes (> 10k leads) estavam sendo truncados silenciosamente.
-
----
-
-## Resumo por Tier
-
-### Tier 1 — Bloqueadores (implementar antes da unificação de branches)
-
-| # | Item | Arquivo | Ação |
-|---|---|---|---|
-| T1-1 | Encoding ordinal: nomes de coluna | `src/features/encoding.py:45,56` | Alinhar literal do yaml com nome real no DataFrame |
-| T1-2 | CAPI: alerta decil com 0 eventos | `src/monitoring/capi_monitor.py` | Adicionar verificação de D1–D10 com eventos > 0 |
-| T1-3 | CAPI: deduplicação antes do envio | `api/capi_integration.py` | Check de email duplicado na fila |
-| T1-4 | Timezone: `datetime.now()` sem UTC | 4 arquivos | Criar constante UTC + substituir |
-| T1-5 | Monitoramento: D10% out-of-range | `src/monitoring/orchestrator.py` | Alerta se D10% < 15% ou > 50% |
-| T1-6 | `app.py` sem `load_dotenv` | `api/app.py` | Verificar se `META_ACCESS_TOKEN` carrega no Cloud Run |
-| T1-7 | Parity audit de encoding | `tests/parity_audit.py` | Estender para ordinal + UTM + snapshot |
-| T1-8 | Branch autorizada + gate de processo | `api/deploy_capi.sh`, safeguard | Verificar branch em AUTHORIZED_BRANCHES + parity audit passando antes de qualquer deploy de `main` |
-| T1-9 | Protocolo de progressão de tráfego | `docs/` | Documentar e enforçar: 0%→10%(1h)→50%(confirmação)→100%(confirmação). **Especial:** no deploy de main unificado, parar em 50/50 durante o DEV20 para não expor o cliente a 100% antes de ROAS validado. Ver `AB_TEST.md` → "Estratégia de deploy — 50/50". |
-| T1-10 | Feature coverage check (fail-loud) | `src/core/encoding.py` | Antes do fill com 0, verificar se top-N features (importância ≥ 1%) estão zeradas em mais de X% dos leads. Alerta HIGH se sim. Evita degradação silenciosa como `Medium_Linguagem_programacao`. |
-| T1-11 | Validador pré-encoding de features | `src/core/feature_validator.py` (novo) + `production_pipeline.py` + `api/app.py` | Após feature_engineering e antes do apply_encoding, validar que cada feature pré-OHE esperada pelo modelo ativo existe no DataFrame com o tipo e valores dentro do domínio conhecido. Gera log estruturado JSON por batch + endpoint `/monitoring/feature-report` que agrega últimas N horas. Critério de promoção de tráfego formalizado nessa métrica. |
-| T1-12 | Smoke de paridade pipeline-modelo no treino | `src/train_pipeline.py` (final) + opcionalmente `model/training_model.py` | **Motivação**: hoje T1-10/T1-11 protegem em runtime. Mas o modelo é registrado no MLflow sem nenhum check de "esse modelo, com o pipeline atual, scoreia sem perder feature". Bug silencioso possível: registrar modelo cujo `feature_names_in_` não casa exatamente com o que `apply_encoding` produz no main code → primeiro deploy descobre. **Implementação**: ao final do `train_pipeline` (após salvar modelo, antes de `--set-active`), rodar amostra de ~100 leads via `production_pipeline.run` com o modelo recém-treinado e verificar (a) `set(model.feature_names_in_) ⊆ set(produced_columns)`, (b) score sem NaN no intervalo [0,1], (c) decis cobrem D01–D10. Falha ⇒ aborta `--set-active` e log loud. Reusa lógica de `scripts/smoke_test_revision.py`. **Custo**: ~30s adicionais por treino. **Status**: backlog, sem prazo. Implementar em sessão futura quando próximo retreino for feito. |
-| T1-13 | `audience_profile_drift` — drift de perfil de público vs Top 5 ROAS | `src/monitoring/data_quality.py` (novo método em `DataQualityMonitor`) + `configs/reference_audience_profiles/{client_id}.json` (snapshot) + `scripts/build_reference_audience_profile.py` (gerador) + `src/monitoring/config.py` (thresholds) | **🔴 PRIORIDADE MÁXIMA — registrado em PLANO_EXECUCAO.md (sequela 08/05/2026) e como erro em `registro_erros_ml.md` § V.4.** **Motivação**: o monitoring atual só compara distribuições contra `distribuicoes_esperadas.json` capturado no TREINO; não há check contra um perfil de audiência **winner** (Top 5 ROAS histórico). Drift de público no LF54 (08/05/2026) deveria ter sido detectado automaticamente — não foi. **Especificação atualizada (08/05/2026, post-implementação)**: (1) **Snapshot estático** em `configs/reference_audience_profiles/{client_id}.json` agregando proporções do pool Top 5 ROAS = LF40, LF41, LF44, LF45, LF47 (n=39.771 leads, via Sheets). Mirroring de `configs/pre_encoding_schemas/`. NÃO é rolling — atualização manual anexa a "fechamento de lançamento". Gerador: `python -m scripts.build_reference_audience_profile`. (2) **Categorias canônicas**: `_AUDIENCE_UNIFICATION` em `data_quality.py`, mantida sincronizada com `UNIFICATION` em `scripts/perfil_audiencia.py`. (3) **Janela comparada**: ÚLTIMO DIA COMPLETO BRT (00:00→23:59 anterior a hoje), filtragem auto-contida em `_filter_to_previous_full_brt_day`. (4) **Output: 1 alerta agregado** com 2 sublistas: `top_list` (|Δpp| ≥ `top_threshold_pp`=3) e `down_list` (`down_min_pp`=2 ≤ |Δpp| < `top_threshold_pp`). Itens < `down_min_pp` ignorados. **Severity**: HIGH se top_list não-vazia; MEDIUM se só down_list; sem alerta se ambos vazios. **NÃO depende de feature crítica** — `is_critical` fica como flag informativa só. (5) **Snapshot ausente**: emite `audience_profile_drift_config_missing` severity MEDIUM com instrução de comando — **fail-loud, não silencioso**. Cobre o caso de Cliente B onboarding ou regressão de configuração. (6) **Pré-encoding e independente de modelo** — NÃO precisa `_iter_active_variants`. (7) **Min responses no dia**: 50 (skip silencioso info-level se menor). **Wire**: hook em `DataQualityMonitor.check()`, executado pelo `orchestrator.run_daily_check` que alimenta `/monitoring/daily-check/railway`. **Artefatos**: [scripts/perfil_audiencia.py](../scripts/perfil_audiencia.py), [scripts/build_reference_audience_profile.py](../scripts/build_reference_audience_profile.py), [docs/perfil_audiencia_dev20.md](perfil_audiencia_dev20.md), [docs/perfil_audiencia_lf54.md](perfil_audiencia_lf54.md), [configs/reference_audience_profiles/devclub.json](../configs/reference_audience_profiles/devclub.json). |
-| T1-14 | Smoke test pré-deploy exercita variantes A/B explicitamente | `scripts/smoke_test_revision.py` + `api/deploy_capi.sh` (Gate B) | **🔴 Descoberto 08/05/2026 via investigação V.1 do registro_erros_ml.md.** Smoke test atual chama `/monitoring/daily-check/railway` sem contexto A/B — **nunca exercita** o caminho do Champion com `encoding_overrides`. Bug do Cluster 5 do Erro 2 (29/abr–05/mai) passou por isso. **Implementação**: detectar `ab_test.enabled: true` em `configs/active_models/{client}.yaml` e, quando ativo, exercitar **cada variante explicitamente** — chamar endpoint que respeite o roteamento A/B com payloads que caem em ambas (Champion + Challenger). Comparar output (decil + score + value) com baseline esperado por variante. Bloquear o deploy se qualquer variante falhar. **Pré-condição lógica para T1-15.** |
-| T1-15 | Parity audit itera por variante A/B e aplica `encoding_overrides_merged` | `tests/parity_audit.py:182-228` | **🔴 Descoberto 08/05/2026 via investigação V.1.** Hoje `parity_audit.py:200` chama `apply_encoding(df, config.encoding, artifacts={})` com `config.encoding` **padrão** — ignora completamente `encoding_overrides` de variantes A/B. Quando o Champion no A/B precisa de override (jan30 com ordinal_variables), a auditoria passa porque testa a configuração base. Bug do Cluster 5 passou por isso. **Implementação**: quando `ab_test.enabled: true`, iterar por variante ativa em `configs/active_models/{client}.yaml`. Para cada variante: (1) aplicar `encoding_overrides_merged` (config base + overrides via `merge_encoding`); (2) carregar o `feature_registry` correto via `mlflow_run_id`; (3) comparar contra o output esperado da variante. Falha em qualquer variante bloqueia. Reusa lógica de `_iter_active_variants` já em monitoring (06/05/2026). |
-| T1-19 | Parity audit valida schema contra `feature_registry` real de cada variante (via MLflow) | `tests/parity_audit.py` (`audit_encoding_ab_variants`) + novo `configs/active_models/registry_cache/` ou hook MLflow | **🔴 Descoberto 08/05/2026 — limitação reconhecida no fechamento de T1-15.** Hoje `audit_encoding_ab_variants` chama `apply_encoding(df, eff_encoding, artifacts={})` com `artifacts={}`. Isso valida que o output não tem NaN, dtype ordinal numérico e nomes válidos — mas **não valida que o conjunto de colunas produzidas casa exatamente com o que o modelo da variante espera consumir** (`feature_names_in_`). Se a variante registra no MLflow um `feature_registry` com 87 colunas e o `apply_encoding` mesclado produz 86 ou 88, T1-15 passa silenciosa e o erro só aparece no `predict` em produção. **Implementação**: para cada variante, baixar `feature_registry.json` do `mlflow_run_id` correspondente, passar como `artifacts={'feature_registry': variant_registry}` para `apply_encoding` e comparar `set(df_actual.columns) == set(variant_registry['feature_names'])`. Falha por divergência de schema bloqueia. **Pré-condição**: rotina de download de artifact do MLflow no parity_audit (não existe hoje). Duas opções: (a) Cloud SQL `smart-ads-db` rodando durante deploy (atrita: hoje está em `activation-policy=NEVER` por custo); (b) cachear `feature_registry.json` localmente sob `configs/active_models/registry_cache/{run_id}.json` no momento do `--set-active` — preferida. **Status**: backlog. Próximo após T1-15. |
-| T1-16 | Validação pós-encoding ">X% zerados → raise" feature-aware | `src/core/encoding.py` (novo bloco após `pd.get_dummies`) + `src/core/feature_validator.py` (novo método) | **🔴 Descoberto 08/05/2026 via investigação V.1.** Salvaguarda foi declarada como entregue em 21/abr (Seção IV do registro_erros_ml.md, agora corrigida) mas **nunca foi implementada**. O que existe em `encoding.py:337-344` é log de feature **ausente do DataFrame** (não de feature zerada após encoding) e nunca bloqueia. Os bugs típicos dos Clusters 3/4/5 do Erro 2 produzem colunas que **existem no DataFrame** (`pd.get_dummies()` cria a coluna) mas chegam zeradas — log atual não pega. **Implementação**: pós-encoding, para cada feature com `importance ≥ 0.03` no `feature_registry` ativo, calcular `(df[feature] == 0).mean()`. Se >X% dos leads tiverem zero E a distribuição esperada do treino tiver <X% (de `distribuicoes_esperadas.json`), `raise ValueError` com nome da feature e variante. Threshold X precisa ser **feature-aware**: features ordinais (idade, salário) podem ter "0" como categoria válida (`< 18 anos` é 0); features OHE (Medium_*, genero_*) não. Comparar contra `proporcao_esperada_zero` por feature em vez de threshold absoluto. Pré-condição: `distribuicoes_esperadas.json` capturar essa estatística por feature no próximo retreino. |
-
-### Tier 2 — Qualidade de dados
-
-| # | Item | Arquivo | Ação |
-|---|---|---|---|
-| T2-1 | Deduplicação no treino | `src/core/ingestion.py` | Implementar (hoje é `NotImplementedError`) |
-| T2-2 | Log de N registros por etapa | `src/train_pipeline.py` | Logar antes/depois de cada filtro |
-| T2-3 | Importance weighting grupo controle | `src/train_pipeline.py` | Implementar pesos maiores para leads de controle |
-| T2-4 | Limite 10.000 em queries de validação | `src/validation/` | Remover ou alertar se hit |
-| T2-5 | Filtro vendas não aprovadas | `src/validation/validate_ml_performance.py` | Confirmar ou adicionar filtro explícito |
-| T2-6 | Eliminar exceções silenciosas críticas | múltiplos | Converter `except: pass` e `except Exception: return {}` em `logger.error` nos pontos listados abaixo |
-| T2-7 | Validador pós-deploy automatizado | novo | Script que consulta `/monitoring/daily-check` após deploy e retorna go/no-go baseado nos critérios de T1-9 (send_rate, 5xx, divergência D10%). Elimina dependência de disciplina humana na progressão de tráfego. |
-| T2-8 | Alerta de feature importance-alta com variance baixa em produção | `src/monitoring/orchestrator.py` | Para cada feature com importance ≥ 1% no modelo ativo, disparar alerta quando a variance em produção cair abaixo de um limiar (feature quase-constante: >95% de leads no mesmo valor, ou 100% zerada). Complementa T1-10 (coverage após encoding) cobrindo o caso "categoria sumiu do mix de tráfego, não do encoding". Gatilho para retreino por drift. |
-| T2-9 | Bootstrap dos snapshots de parity_audit em máquina fresca / CI | `V2/tests/parity_audit.py` + novo passo em `deploy_capi.sh` ou cache em GCS | **🟡 Descoberto 09/05/2026 — fechamento de T1-15.** Snapshots `tests/fixtures/snapshot_*.pkl` são gitignored (37–95 MB cada). Em máquina fresca o `parity_audit` levanta `FileNotFoundError` em `_load('snapshot_encoding_input')` antes de chegar nos audits. T1-15 agora bootstrappa snapshots por-variante automaticamente quando faltam (commit 09/05/2026), mas isso pressupõe que o `snapshot_encoding_input.pkl` já existe localmente. **Implementação**: (a) adicionar download do `snapshot_encoding_input.pkl` de GCS no início do `deploy_capi.sh` Gate A, ou (b) embedar o caminho de captura via `train_pipeline --capture-parity-snapshots` automaticamente quando o input está ausente, ou (c) checkar pickles em `gs://bring-data-fixtures/parity/` versionados por hash do dataset. Fica em backlog até existir CI ou segundo dev. |
-
-### Tier 3 — Observabilidade
-
-| # | Item | Arquivo | Ação |
-|---|---|---|---|
-| T3-1 | Progressão de canary documentada | `api/deploy_capi.sh` | Documentar fluxo 0% → 10% → 100% |
-| T3-2 | Script de smoke test pós-deploy | novo | 5 leads → score → decil → CAPI log |
-| T3-3 | Proteção de branch main | GitHub | Configurar require PR + aprovação |
-| ~~T3-4~~ | ~~Verificação token Meta~~ | — | **CANCELADO 2026-04-23** — token é System User vitalício, não expira. Premissa original errada. |
-| T3-5 | Relatório diário consolidado | `src/monitoring/` | N alertas HIGH/MEDIUM/LOW por dia |
-| T3-6 | Validação MODEL_PATH vs yaml | `api/deploy_capi.sh` | Build falha claro se divergência |
-| T3-7 | Reconciliação run_id no relatório | `src/validation/` | Assert que leadScore veio do modelo ativo |
+| T1-1 | Encoding com fallback bloqueado quando falha | ✅ Concluído | 2026-04-20 |
+| T1-2 | CAPI alerta quando algum decil para de enviar | ✅ Concluído | 2026-04-20 |
+| T1-3 | CAPI deduplica eventos antes de enviar | ✅ Concluído | 2026-04-20 |
+| T1-4 | Datas usam UTC consistente | ✅ Concluído | 2026-04-20 |
+| T1-5 | D10% alerta out-of-range | ⚠️ Pulado | (ver "Monitoramento: alertas automáticos") |
+| T1-6 | `app.py` com `load_dotenv` | ⚠️ Pulado | (Cloud Run injeta env vars; guards explícitos cobrem) |
+| T1-7 | Auditoria de paridade treino × produção | ✅ Concluído | 2026-04-21 |
+| T1-8 | Branch autorizada + gate de processo | ✅ Concluído | 2026-04-21 |
+| T1-9 | Protocolo de progressão de tráfego | ✅ Concluído | 2026-04-21 |
+| T1-10 | Detecção de feature crítica zerada após encoding | ✅ Concluído | 2026-04-21 |
+| T1-11 | Validador pré-encoding de features | ✅ Concluído | 2026-04-23 |
+| T1-12 | Smoke de paridade pipeline-modelo no fim do treino | 🟡 Backlog | 2026-04-29 |
+| T1-13 | Drift de perfil de audiência | ✅ Concluído | 2026-05-08 |
+| T1-14 | Smoke test cobre todas as variantes A/B | ✅ Concluído | 2026-05-08 |
+| T1-15 | Auditoria de paridade por variante A/B | ✅ Concluído | 2026-05-08 |
+| T1-16 | Validador pós-encoding ">X% leads zerados" | 🟡 Backlog | Descoberto via investigação V.1. Pré-condição destravada em 11/mai — baselines calculáveis offline. |
+| T1-17 | Auditoria de YAML dentro da imagem (Gate D) | ✅ Concluído | 2026-05-08 |
+| T1-18 | Equivalência de score+decil entre revisões (Gate C) | ✅ Concluído | 2026-05-08 |
+| T1-19 | Validação de schema contra MLflow | 🟡 Backlog | (próximo após T1-15) |
+| T2-1 | Deduplicação no treino | ✅ Concluído | 2026-04-23 |
+| T2-2 | Log de count em cada etapa | ✅ Concluído | 2026-04-28 |
+| T2-3 | Importance weighting pra grupo controle | ✅ Concluído | 2026-04-28 |
+| T2-4 | Limite de queries de validação | ✅ Concluído | 2026-04-28 |
+| T2-5 | Filtro de vendas não aprovadas | ✅ Confirmado | 2026-04-28 |
+| T2-6 | Eliminar exceções silenciosas críticas | ✅ Concluído | 2026-04-28 |
+| T2-7 | Validador automatizado pós-deploy | ✅ Concluído | 2026-04-23 |
+| T2-8 | Alerta variância baixa em feature de alta importância | ✅ Coberto por `check_distribution_drift` | 2026-04-29 |
+| T2-9 | Bootstrap de snapshots em máquina fresca / CI | 🟡 Backlog | 2026-05-09 |
+| T3-1 | Canary documentado inline no script | ✅ Concluído | 2026-04-29 |
+| T3-2 | Smoke test pós-deploy | ✅ Concluído (= Gate B) | 2026-04-21 |
+| T3-3 | Proteção de branch main | 🟡 Adiável | (Plano Free do GitHub) |
+| T3-4 | Verificação periódica do token Meta | ❌ Cancelado | 2026-04-23 |
+| T3-5 | Relatório operacional consolidado | ✅ Concluído | 2026-04-29 |
+| T3-6 | Validação MODEL_PATH vs YAML no startup | ✅ Concluído | 2026-04-29 |
+| T3-7 | Reconciliação de run_id no startup | ✅ Concluído | 2026-04-29 |
 
 ---
 
@@ -574,15 +747,15 @@ Descoberto em 2026-04-21 durante investigação do T1-9. Pontos onde `except: pa
 
 Após implementar qualquer item, o teste mínimo é:
 
-**Tier 1 (encoding/CAPI/timezone):**
+**Encoding / CAPI / timezone:**
 ```bash
 cd V2/
-python scripts/test_encoding_overrides.py --limit 200   # T1-1, T1-7
-python -m pytest tests/parity_audit.py -v               # T1-7
-python -c "from src.core.utils import UTC; print(UTC)"  # T1-4
+python scripts/test_encoding_overrides.py --limit 200
+python -m pytest tests/parity_audit.py -v
+python -c "from src.core.utils import UTC; print(UTC)"
 ```
 
-**Tier 1 (monitoramento):**
+**Monitoramento:**
 ```bash
 python -c "
 from src.monitoring.orchestrator import MonitoringOrchestrator
@@ -592,57 +765,18 @@ print(result)
 "
 ```
 
-**Tier 2 (deduplicação):**
+**Deduplicação:**
 ```bash
 python -c "
 from src.core.ingestion import remove_duplicates_per_sheet
-# Se não lança NotImplementedError, está implementado
 print('OK')
 "
 ```
 
-**Tier 3 (smoke test pós-deploy):**
+**Smoke test pós-deploy (manual):**
 ```bash
 curl -X POST https://smart-ads-api-12955519745.us-central1.run.app/predict/single \
   -H "Content-Type: application/json" \
   -d '{"email":"test@test.com","campaign":"TEST",...}'
 # Verificar: leadScore != null, decil entre 1-10, capiStatus registrado
 ```
-
----
-
-## Status de implementação
-
-| Item | Status | Responsável | Data |
-|---|---|---|---|
-| T1-1 Encoding ordinal | Concluído | | 2026-04-20 |
-| T1-2 CAPI decil 0 eventos | Concluído | | 2026-04-20 |
-| T1-3 CAPI deduplicação | Concluído | | 2026-04-20 |
-| T1-4 Timezone UTC | Concluído | | 2026-04-20 |
-| T1-5 D10% alerta | Pulado | | Alertas só aparecem no endpoint — usuário consulta manualmente. Sem notificação proativa, o item não agrega valor além do que já existe. Reavaliar junto com T3-5 (Slack). |
-| T1-6 app.py load_dotenv | Pulado | | Cloud Run injeta env vars antes do startup. capi_integration.py já tem guards explícitos (if not ACCESS_TOKEN → logger.error + return error). Falha ruidosa, não silenciosa. |
-| T1-7 Parity audit encoding | Concluído | | 2026-04-21 — snapshot regenerado com dataset mar24, audit compara 67k linhas × 51 colunas, 0 divergências |
-| T1-8 Branch autorizada + gate de processo | Concluído | | 2026-04-21 — Gate A (parity audit) automatizado no deploy_capi.sh. Checklist de Tier 1 adicionado como responsabilidade de processo. |
-| T1-9 Protocolo progressão de tráfego | Concluído | | 2026-04-21 — tabela de critérios objetivos documentada, diferencia caso unificação (ROAS via DEV20) de deploys normais (send_rate / 5xx / feature coverage). |
-| T1-10 Feature coverage check | Concluído | | 2026-04-21 — (1) check fail-loud em core/encoding.py antes do fill com 0 (ERROR ≥5%, WARNING ≥1%); (2) smoke_test_revision.py valida sobre leads reais do Railway; (3) Gate B automático no deploy_capi.sh bloqueia se encontrar ERROR; (4) deploy agora usa --tag para URL direta da revisão canary. |
-| T1-11 Validador pré-encoding de features | Concluído | | 2026-04-23 — Peça A (src/core/feature_validator.py + schema JSON + integração em production_pipeline.py, 7/7 testes passam) em commit 361fc62; Peça B (endpoint GET /monitoring/feature-report em api/app.py com agregação de logs e recomendação de ação) em commit ba43d30; Peça C (critérios de promoção formalizados) já estava integrada em T1-9 antes. |
-| T1-12 Smoke paridade pipeline-modelo no treino | **Backlog** | | 29/04/2026 — implementar em sessão futura quando próximo retreino for feito. |
-| T1-13 audience_profile_drift | Concluído | | 08/05/2026 — `_check_audience_profile_drift` em `monitoring/data_quality.py` + snapshot em `configs/reference_audience_profiles/devclub.json` (n=39.771, Top 5 ROAS) + gerador em `scripts/build_reference_audience_profile.py`. Especificação completa na linha do T1-13 acima. |
-| T1-14 Smoke test exercita variantes A/B | Concluído | | 08/05/2026 — novo endpoint `GET /smoke/run-variants` em `api/app.py` busca N leads recentes do Railway, força cada variante (Champion default + variantes do `ab_test.variants`, incluindo shims) a scorear com seu `predictor_override` + `encoding_overrides`, valida score in [0,1], decis válidos e `mlflow_run_id` casando expected. `scripts/smoke_test_revision.py` ganhou novo gate T1-14 (chamado após T1-11) que bloqueia o deploy quando qualquer variante quebra. Flag `--skip-ab-variants-gate` para escape hatch. Cobre o gap descoberto via V.1.1 (smoke antigo só chamava `/monitoring/daily-check/railway` sem contexto A/B). |
-| T1-15 Parity audit por variante A/B | Concluído | | 08/05/2026 — nova função `audit_encoding_ab_variants` em `tests/parity_audit.py` itera sobre cada variante de `configs/active_models/{client}.yaml` aplicando `merge_encoding(base, variant.encoding_overrides)` + `apply_encoding`. Smoke checks por variante: ordinais devem ter dtype numérico (não object), sem NaN, nomes de coluna válidos. `deploy_capi.sh` Gate A passou a chamar `--function encoding_ab` junto de `utm` e `encoding`. Cobre gap V.1.2: o audit antigo só testava `config.encoding` padrão e ignorava overrides — bug do Cluster 5 passou exatamente assim. Validado localmente em 08/05/2026: `[OK] champion_jan30: 52 colunas, 3 ordinais. [OK] challenger_abr28: 61 colunas, 1 ordinal.` Limitação: ainda não compara contra snapshot por-variante (precisa próximo retreino capturar). |
-| T1-16 Validação pós-encoding >X% zerados | **Backlog (descoberto via V.1)** | | 08/05/2026 — investigação V.1 descobriu que a salvaguarda foi declarada concluída em 21/abr mas **nunca foi implementada**. Pré-condição: `distribuicoes_esperadas.json` capturar `proporcao_esperada_zero` por feature no próximo retreino. |
-| T2-1 Deduplicação treino | Concluído | | 2026-04-23 — 3 funções implementadas em src/core/ingestion.py (filter_sheets, remove_duplicates_per_sheet, consolidate_datasets). Assinatura config-driven. 5 campos novos em IngestionConfig + configs/clients/devclub.yaml. data_processing/ingestion.py preservado (backward compat). T1-7 passa. |
-| T2-2 Log por etapa | Concluído | | 2026-04-28 — função helper `_log_step_count` em train_pipeline.py (6 pontos) e production_pipeline.py (2 pontos). Formato `[step] N=X | Δ=±Y (±%)`. Commit 8b46645. |
-| T2-3 Importance weighting | Concluído | | 2026-04-28 — `_compute_control_weights` em train_pipeline.py com inverso de frequência + alpha. Flags `--control-group-weights`, `--control-alpha`, `--train-ratio`. Sweep mostrou efeito interno marginal mas D9+D10 ML lift 6.88× CTRL na investigação externa. Commits c03d645 + f8dc4f7. |
-| T2-4 Limite 10k queries | Concluído | | 2026-04-28 — limites subiram de 10k para 100k (generate_taxa_resposta_csv.py) e 200k (capi_events_counter.py); ambos com detecção de truncamento (log ERROR se response == limite). Commit a578408. |
-| T2-5 Filtro vendas aprovadas | Concluído | | 2026-04-28 — confirmado já implementado: `include_canceled` (default False) em load_guru_sales (linha 684), load_tmb_sales (linha 872), load_hotpay_sales, load_guru_sales_from_api (linha 1225). validate_ml_performance.py:1387 só permite `include_canceled=True` em relatório de fechamento. Sem mudança de código. |
-| T2-6 Eliminar exceções silenciosas | Concluído | | 2026-04-28 — orchestrator.py:219 (db.rollback) → logger.error com exc_info; orchestrator.py:315 (parse de linha gspread) → contador de skips com logger.warning agregado no fim do loop. app.py:1638-1640 confirmado: já tinha logger.error desde commit anterior. Restantes (linhas 2263, 2596) já tinham logger e foram classificados BAIXA no BLOCO 11. |
-| T2-7 Validador pós-deploy automatizado | Concluído | | 2026-04-23 — scripts/progression_gate.py consome /monitoring/feature-report (T1-11) + /monitoring/daily-check/railway, consolida em PROMOTE/HOLD/ROLLBACK, executa gcloud run services update-traffic se --execute. Commit 42990b8. |
-| T2-8 Alerta feature importance-alta variance baixa | Concluído | | 2026-04-29 — verificação confirma que `check_distribution_drift` (existente em `monitoring/data_quality.py`) já detecta o caso operacional do `Medium_Linguagem_programacao` (treino 14,5% → produção 0% gera drift HIGH). Cobertura sobreposta. Único ganho marginal seria ordenar a saída do alerta por feature_importance para destacar os casos high-impact primeiro — fica como melhoria opcional de UX, não como item separado. |
-| T3-1 Canary documentado | Concluído | | 2026-04-29 — bloco de instrução inline em `deploy_capi.sh` (após Gate B do smoke test) com os 3 comandos `update-traffic` para 10% → 50% → 100% e referência aos critérios objetivos de T1-9. Substitui o print único "Para promover: ... =100" que ia direto pra 100%. |
-| T3-2 Smoke test pós-deploy | Concluído | | Já implementado em 2026-04-21 como Gate B do T1-10: `scripts/smoke_test_revision.py` integrado em `deploy_capi.sh:542-556` aborta o deploy automaticamente se features críticas estiverem ausentes. Cobre o requisito original (5 leads → score → decil → CAPI log) com leads reais do Railway. |
-| T3-3 Branch protection | Adiável | | 2026-04-29 — branch protection e rulesets do GitHub não disponíveis em repo privado de conta Free (HTTP 403 "Upgrade to GitHub Pro"). Como há um único colaborador (`ramonfilho`, admin), o risco real (`push --force` ou delete acidental) é baixo. Reativar o item quando: (a) plano subir para Pro/Team, (b) repo virar público, ou (c) um segundo colaborador entrar. |
-| T3-4 Token Meta alerta | **CANCELADO** | | 2026-04-23 — token é System User vitalício, não expira |
-| T3-5 Relatório consolidado | Concluído | | 2026-04-29 — `_generate_operational_routines_summary()` adicionado em `monitoring/orchestrator.py`. Bloco "Rotinas operacionais (T3-5)" no log do `run_daily_check` mostra: run_id ativo, status A/B test, Cloud Run revision/service, último scoring + lag, e contadores 24h (recebidos / scoreados / CAPI enviados). Saída também inclusa no dict de retorno. |
-| T3-6 MODEL_PATH validação | Concluído | | 2026-04-29 — `validate_model_loaded` em novo `src/core/startup_checks.py` (commit a1213f9). Verifica `predictor.model is not None` e `predictor.feature_names` populado após `load_model()`. Falha ⇒ `RuntimeError` no startup, API não aceita tráfego. Integrado em `production_pipeline.LeadScoringPipeline.__init__`. |
-| T3-7 Reconciliação run_id | Concluído | | 2026-04-29 — mesma função do T3-6. Lê `mlflow_run_id` direto do `configs/active_models/{client}.yaml` como fonte independente e compara com `predictor.mlflow_run_id` em runtime. Detecta cenário "imagem Docker baked com run_id A mas YAML aponta para B". Mesmo check para variantes A/B. |
