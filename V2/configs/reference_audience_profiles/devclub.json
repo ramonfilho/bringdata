@@ -12,8 +12,8 @@
       "LF47"
     ],
     "n_leads": 54420,
-    "decil_distribution": {
-      "source": "scored_abr28 (Challenger) backtest pool — LF41,43,44,45,46,47",
+    "decil_distribution_challenger": {
+      "source": "scored_abr28 (Challenger) — LF41,43,44,45,46,47",
       "n_leads": 61790,
       "distribution": {
         "D01": 2037,
@@ -26,6 +26,22 @@
         "D08": 6238,
         "D09": 10212,
         "D10": 7315
+      }
+    },
+    "decil_distribution_champion": {
+      "source": "scored_jan30 (Champion) — LF41,43,44,45,46,47",
+      "n_leads": 61788,
+      "distribution": {
+        "D01": 2300,
+        "D02": 1603,
+        "D03": 1464,
+        "D04": 1679,
+        "D05": 3249,
+        "D06": 4187,
+        "D07": 5162,
+        "D08": 6640,
+        "D09": 13077,
+        "D10": 22427
       }
     }
   },

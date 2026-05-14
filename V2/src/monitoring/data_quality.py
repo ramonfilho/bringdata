@@ -2086,12 +2086,42 @@ class DataQualityMonitor:
             )
             return alerts
 
-        # Ordenar pelo MAIOR drift entre lançamento e ontem (mesmo gatilho).
+        # Dedup binárias: pra cada feature do snapshot com exatamente 2 categorias
+        # (Sim/Não, Masculino/Feminino), se as 2 entrarem no top_list mantém só a
+        # de maior |Δpp| — Sim e Não são informação redundante (complementares).
+        _binary_features = {
+            col for col, entry in snapshot.get('categorical_features', {}).items()
+            if len((entry.get('proportions') or {})) == 2
+        }
+        if _binary_features:
+            _by_feature_col: dict[str, list] = {}
+            for _it in top_list:
+                _by_feature_col.setdefault(_it.get('feature_column'), []).append(_it)
+            _kept = []
+            for _col, _items in _by_feature_col.items():
+                if _col in _binary_features and len(_items) == 2:
+                    _items.sort(key=lambda x: -abs(x.get('delta_pp') or 0))
+                    _kept.append(_items[0])  # mantém só a de maior |Δ|
+                else:
+                    _kept.extend(_items)
+            top_list = _kept
+
+        # Ordenar: agrupa por feature_label (idade junto, ocupação junto), e dentro
+        # do grupo por |Δpp| desc. Ordem dos grupos segue o |Δ| máx do grupo.
         def _trigger_abs(it):
             d = abs(it['delta_pp'])
             l = it.get('launch_delta_pp')
             return max(d, abs(l)) if l is not None else d
-        top_list.sort(key=lambda x: -_trigger_abs(x))
+        _groups: dict[str, list] = {}
+        for _it in top_list:
+            _groups.setdefault(_it.get('feature_label', '?'), []).append(_it)
+        # Ordem dos grupos pelo |Δ| máx
+        _group_order = sorted(_groups.keys(), key=lambda g: -max(_trigger_abs(x) for x in _groups[g]))
+        top_list = []
+        for _g in _group_order:
+            _items = _groups[_g]
+            _items.sort(key=lambda x: -_trigger_abs(x))
+            top_list.extend(_items)
         max_abs_delta = max((_trigger_abs(it) for it in top_list), default=0.0)
 
         # Período comparado

@@ -2417,8 +2417,11 @@ async def daily_monitoring_check_railway(
         )
 
         # 1c. Todos os leads com score (para métricas de qualidade por período)
+        # UTMs + pageUrl extras pra split por variante A/B (baseline ponderado dos decis).
+        # _calc_quality / _after / _decil_dist usam só [0]/[1]/[2], extras são ignorados.
         quality_rows = railway_conn.run(
-            'SELECT "leadScore"::float, decil::int, "createdAt" '
+            'SELECT "leadScore"::float, decil::int, "createdAt", '
+            '       source, medium, campaign, content, term, "pageUrl" '
             'FROM "Lead" '
             'WHERE "leadScore" IS NOT NULL AND decil IS NOT NULL '
             'ORDER BY "createdAt" DESC'
@@ -2720,10 +2723,13 @@ async def daily_monitoring_check_railway(
                     dist[key] += 1
             return dist
 
-        # Baseline de decis (Top 6 ROAS atribuível 60d, scoreado por Challenger) —
-        # carregado uma vez pra embedar em ambas as janelas (ontem + lançamento atual).
-        # Fonte: configs/reference_audience_profiles/devclub.json :: reference_pool.decil_distribution.
-        _decil_baseline: Optional[Dict[str, Any]] = None
+        # Baselines de decis Top 6 ROAS (scoreados separadamente por Champion e Challenger).
+        # Em runtime, ponderamos pela proporção de leads atribuídos a cada variante na
+        # janela — Champion é mais "pessimista" (D10≈36%), Challenger mais "otimista"
+        # (D10≈12%), comparar contra um único baseline gerava falso alarme.
+        _base_champion: Optional[Dict[str, Any]] = None
+        _base_challenger: Optional[Dict[str, Any]] = None
+        _base_label = 'Top 6 ROAS atribuível 60d'
         try:
             import json as _json_decil
             from pathlib import Path as _Path
@@ -2731,15 +2737,64 @@ async def daily_monitoring_check_railway(
             if _baseline_path.exists():
                 _bjson = _json_decil.loads(_baseline_path.read_text())
                 _rp = (_bjson.get('reference_pool') or {})
-                _bd = (_rp.get('decil_distribution') or {})
-                if _bd:
-                    _decil_baseline = {
-                        'distribution': _bd.get('distribution', {}),
-                        'total':        _bd.get('n_leads', 0),
-                        'label':        _rp.get('label', 'baseline'),
-                    }
+                _bch = _rp.get('decil_distribution_champion') or {}
+                _bcl = _rp.get('decil_distribution_challenger') or {}
+                _base_label = _rp.get('label', _base_label)
+                if _bch and _bcl:
+                    _base_champion   = {'distribution': _bch.get('distribution', {}), 'total': _bch.get('n_leads', 0)}
+                    _base_challenger = {'distribution': _bcl.get('distribution', {}), 'total': _bcl.get('n_leads', 0)}
         except Exception as _be:
             logger.warning(f"⚠️ baseline decis indisponível: {_be}")
+
+        # Helper: split tuples (com UTMs) por variante A/B usando ABTestConfig do pipeline.
+        # Cada tuple = (leadScore, decil, createdAt, source, medium, campaign, content, term, pageUrl).
+        # Retorna (n_champion, n_challenger). Default = champion (utm_pattern vazio).
+        def _split_by_variant(rows: list) -> tuple:
+            _ab = getattr(pipeline, '_ab_test_config', None) if pipeline else None
+            if not _ab or not _ab.enabled or not _ab.variants:
+                return (len(rows), 0)
+            _champ_name = next((n for n, v in _ab.variants.items() if not v.utm_pattern and not v.url_pattern), None)
+            _chal_name = next((n for n in _ab.variants.keys() if n != _champ_name), None)
+            n_c, n_ch = 0, 0
+            for r in rows:
+                _utms = {'utm_source': r[3], 'utm_medium': r[4], 'utm_campaign': r[5],
+                         'utm_content': r[6], 'utm_term': r[7]}
+                _m = _ab.match_variant(_utms, event_source_url=r[8])
+                if _m is None:
+                    n_c += 1  # default → champion
+                else:
+                    _mn = next((n for n, v in _ab.variants.items() if v is _m), None)
+                    if _mn == _chal_name:
+                        n_ch += 1
+                    else:
+                        n_c += 1
+            return (n_c, n_ch)
+
+        # Helper: baseline ponderado dado n_champion + n_challenger da janela.
+        # Retorna dict {pct: {D01..D10}, n_champion, n_challenger, w_champion, w_challenger, label}.
+        def _weighted_baseline(n_champ: int, n_chal: int) -> Optional[Dict[str, Any]]:
+            if not _base_champion or not _base_challenger:
+                return None
+            n_total = n_champ + n_chal
+            if n_total == 0:
+                return None
+            w_c = n_champ / n_total
+            w_ch = n_chal / n_total
+            _ch_d = _base_champion['distribution']; _ch_t = _base_champion['total'] or 1
+            _cl_d = _base_challenger['distribution']; _cl_t = _base_challenger['total'] or 1
+            pct = {}
+            for k in [f'D{i:02d}' for i in range(1, 11)]:
+                _pc = (_ch_d.get(k, 0) / _ch_t) * 100
+                _pl = (_cl_d.get(k, 0) / _cl_t) * 100
+                pct[k] = round(w_c * _pc + w_ch * _pl, 2)
+            return {
+                'pct':           pct,
+                'n_champion':    int(n_champ),
+                'n_challenger':  int(n_chal),
+                'w_champion':    round(w_c, 4),
+                'w_challenger':  round(w_ch, 4),
+                'label':         f"{_base_label} (ponderado: {int(w_c*100)}% Champion + {int(w_ch*100)}% Challenger)",
+            }
 
         # Ontem completo BRT (00:00→23:59 BRT do dia anterior)
         _brt = _tz(timedelta(hours=-3))
@@ -2753,11 +2808,12 @@ async def daily_monitoring_check_railway(
                       ) >= _yest_start_utc and (
                           r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
                       ) < _yest_end_utc]
+        _yest_n_c, _yest_n_ch = _split_by_variant(_yest_rows)
         railway_lead_quality['decil_distribution_previous_day'] = {
             'distribution': _decil_dist(_yest_rows),
             'total': len(_yest_rows),
             'window_label': f"{_yesterday_brt_midnight.strftime('%d/%m')} BRT (24h)",
-            'baseline': _decil_baseline,
+            'baseline': _weighted_baseline(_yest_n_c, _yest_n_ch),
         }
 
         # Qualidade do LF de referência — apenas LF ativo no launches.yaml,
@@ -2785,11 +2841,12 @@ async def daily_monitoring_check_railway(
                 railway_lead_quality['lf_referencia'] = _calc_quality(_lf_rows)
                 railway_lead_quality['lf_referencia_label'] = _ln
                 # Decis distribution do LF ativo — pra barra horizontal no digest cliente
+                _lf_n_c, _lf_n_ch = _split_by_variant(_lf_rows)
                 railway_lead_quality['decil_distribution_current_launch'] = {
                     'distribution': _decil_dist(_lf_rows),
                     'total': len(_lf_rows),
                     'window_label': f"{_ln} ({_active.cap_start.strftime('%d/%m')}→{_active.cap_end.strftime('%d/%m')} BRT)",
-                    'baseline': _decil_baseline,
+                    'baseline': _weighted_baseline(_lf_n_c, _lf_n_ch),
                 }
                 logger.info(f"📊 lf_referencia: {_ln} "
                             f"({_active.cap_start}→{_active.cap_end}, n={len(_lf_rows)})")

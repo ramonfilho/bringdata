@@ -905,30 +905,27 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     if total == 0:
         return
 
-    # Baseline (Top 6 ROAS scoreado por Challenger)
+    # Baseline ponderado Champion/Challenger (Top 6 ROAS)
     baseline = info.get('baseline') or {}
-    base_dist = baseline.get('distribution') or {}
-    base_total = baseline.get('total', 0) or 0
+    base_pct = baseline.get('pct') or {}
     base_label = baseline.get('label', '')
 
     keys = [f'D{i:02d}' for i in range(1, 11)]
-    # pct atual + pct baseline por decil
     cur_pct = {k: ((int(dist.get(k, 0) or 0) / total) * 100) for k in keys}
-    base_pct = ({k: ((int(base_dist.get(k, 0) or 0) / base_total) * 100) for k in keys}
-                if base_total > 0 else {})
-    # Escala barra pelo maior pct atual
     max_pct = max(cur_pct.values()) if cur_pct else 0
     width = 20
 
-    rows = [f'*📊 Distribuição de decis — {win_label}* (n={total:,}) vs *{base_label}* (n={base_total:,})']
-    rows.append('```')
+    title = f'*📊 Distribuição de decis — {win_label}* (n={total:,})'
+    if base_label:
+        title += f' vs *{base_label}*'
+    rows = [title, '```']
     for k in keys:
         pct = cur_pct[k]
         n = int(dist.get(k, 0) or 0)
         bar_len = int(round((pct / max_pct) * width)) if max_pct > 0 else 0
         bar = '▇' * bar_len + ' ' * (width - bar_len)
         if base_pct:
-            b = base_pct[k]
+            b = float(base_pct.get(k, 0) or 0)
             delta = pct - b
             emoji = _color_emoji(delta)
             rows.append(f'{k} {bar} {pct:>4.1f}% ({n:,})  {emoji} Ref {b:>4.1f}%  Δ{delta:+.1f}pp')
