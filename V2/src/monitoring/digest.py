@@ -230,8 +230,7 @@ def _slack_drift_legend_header(B: list):
             'type': 'mrkdwn',
             'text': (
                 '*Drift de público — leitura das tabelas*\n'
-                '🟢 bom · 🔴 ruim · ⚪ neutro/incerto · ✅ variante mais alinhada à direção da categoria\n'
-                '_Direção definida pelo lift histórico no pool Top 5 ROAS atribuível 60d (ver `docs/METODOLOGIA_TOP5_ROAS.md`)._'
+                '🟢 bom · 🔴 ruim · ⚪ neutro/incerto · ✅ modelo de melhor performance'
             ),
         },
     })
@@ -1043,7 +1042,7 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
         title += f' vs *{base_label}*'
     rows = [title]
     if base_pct:
-        rows.append('_🟢 bom · 🔴 ruim · ⚪ neutro/incerto (direção pelo lift histórico do decil)._')
+        rows.append('_🟢 bom · 🔴 ruim · ⚪ neutro/incerto._')
     rows.append('```')
     for k in keys:
         pct = cur_pct[k]
