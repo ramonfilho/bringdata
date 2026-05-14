@@ -161,9 +161,20 @@ Eixos:
 
 **Por que isso importa:** aconteceu no LF54 em 08/mai. Detectado manualmente por comparação ad-hoc contra Top 5 ROAS histórico. Mitigação foi implementada e agora confirmada funcional.
 
-### Cenário 4.2 — Feature crítica do modelo zera em massa e ninguém é notificado
+### Cenário 4.2 — Feature crítica do modelo zera em massa e ninguém é notificado — [✅ FECHADO 2026-05-11]
 
-**O que aconteceria:** uma feature de alta importância (ex.: `idade`, `faixa_salarial`, ou uma das `Medium_*`) começa a chegar com valor 0 ou ausente em ≥10% dos batches. Modelo continua scoreando, mas o sinal degrada. Sem alerta automático, descoberto só dias depois quando alguém olha relatório.
+**Resultado:** validador pós-encoding bloqueador implementado (item T1-16 do `PLANO_SAFEGUARD.md`). Quando o pipeline gera uma coluna OHE mas ela chega zerada em massa (sinal de feature pré-OHE quebrada — categoria sumiu, casing mudou, parsing JSONB falhou), o `apply_encoding` levanta `ValueError` antes do scoring. Bloqueia o caminho que causou os Clusters 3, 4 e 5 do Erro 2.
+
+Componentes:
+- Gerador offline dos baselines: [`V2/scripts/generate_feature_zero_baselines.py`](../scripts/generate_feature_zero_baselines.py) lê `distribuicoes_esperadas.json` do MLflow e calcula a fração esperada de cada coluna OHE. Saída em `V2/configs/feature_zero_baselines/{run_id}.json`.
+- Validador em runtime: `validate_post_encoding_zero_rates()` em [`V2/src/core/feature_validator.py`](../src/core/feature_validator.py). Thresholds default — batch ≥50, expected ≥15%, drop ≥70% — distinguem bug claro de sample noise mesmo em batches do polling Railway.
+- Integração no encoding: [`V2/src/core/encoding.py`](../src/core/encoding.py) passo 9, chama o validador quando `artifacts['mlflow_run_id']` está setado (caminho de produção; treino e parity audit passam `artifacts={}` e pulam).
+
+Validado com input real de produção (200 leads do Railway via `railway_lead_to_sheets_row`): caso saudável passa sem disparar; caso patológico (`Source = None`) dispara corretamente com `Source_facebook_ads` esperado 89.9% / observado 0%.
+
+**Próximo retreino:** rodar `python -m V2.scripts.generate_feature_zero_baselines` após `--set-active` pra gerar o baseline do novo Champion. Sem baseline pra um `run_id`, o validador degrada pra noop com log informativo.
+
+**O que aconteceria (descrição original):** uma feature de alta importância (ex.: `idade`, `faixa_salarial`, ou uma das `Medium_*`) começa a chegar com valor 0 ou ausente em ≥10% dos batches. Modelo continua scoreando, mas o sinal degrada. Sem alerta automático, descoberto só dias depois quando alguém olha relatório.
 
 **Por que isso importa:** mesma classe do Cluster 5 e da V.1.3. Aconteceu várias vezes no histórico. Mitigação prevista (validação ">X% zerados → bloqueia") **ainda não foi implementada** (declarada mas ausente — ver Cenário 3.1).
 

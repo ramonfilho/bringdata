@@ -76,7 +76,7 @@ Antes de executar `FORCE_DEPLOY=true ./deploy_capi.sh --force-deploy` pra subir 
 
 - Smoke de paridade pipeline-modelo no fim do treino — 🟡 backlog (próximo retreino)
 - Validação de schema contra MLflow no parity audit — 🟡 backlog (após T1-15)
-- Validador pós-encoding ">X% leads zerados → bloqueia" — 🟡 backlog (declarado mas não implementado; achado V.1.3 do registro de erros). Pré-condição destravada em 11/mai: baselines de `proporcao_esperada_zero` calculáveis offline dos artefatos atuais, não dependem de retreino.
+- Validador pós-encoding ">X% leads zerados → bloqueia" — ✅ ativo desde 11/mai (commit `8b1c804`). Resolve V.1.3 do registro de erros.
 
 **Gates automáticos que o `deploy_capi.sh` roda:**
 1. Branch verificada — bloqueia se branch não-rollback sem `FORCE_DEPLOY=true`
@@ -303,7 +303,11 @@ Emite log estruturado JSON por batch (`event=feature_validator`) com `severity` 
 - Geração offline dos baselines: novo script `V2/scripts/generate_feature_zero_baselines.py` lê `distribuicoes_esperadas.json` do `mlflow_run_id` de cada variante ativa, escreve `configs/feature_zero_baselines/{run_id}.json`.
 - Validação em runtime: novo bloco em [`V2/src/core/encoding.py`](../src/core/encoding.py) após `pd.get_dummies`, novo método em [`V2/src/core/feature_validator.py`](../src/core/feature_validator.py) que carrega o baseline da variante ativa e compara batch atual contra esperado.
 
-**Status:** 🟡 backlog mas **pré-condição destravada** — não depende mais de retreino. Implementação atacável em qualquer momento (~1h offline-gen + ~1h validador runtime).
+**Status:** ✅ ativo desde 11/mai/2026. Componentes:
+- Script offline gerador dos baselines em [`V2/scripts/generate_feature_zero_baselines.py`](../scripts/generate_feature_zero_baselines.py) — lê `distribuicoes_esperadas.json` de cada modelo ativo e gera `V2/configs/feature_zero_baselines/{run_id}.json` (Champion 64 colunas, Challenger 58 colunas no estado atual).
+- Validador em runtime: `validate_post_encoding_zero_rates()` em [`V2/src/core/feature_validator.py`](../src/core/feature_validator.py). Thresholds default (batch ≥50, expected ≥15%, drop ≥70%) calibrados pra zero falso positivo em batches do polling Railway.
+- Chamada no encoding: passo 9 de [`V2/src/core/encoding.py`](../src/core/encoding.py) — só roda se `artifacts['mlflow_run_id']` está setado (caminho de produção; treino e parity audit pulam).
+- Pré-requisito operacional: após cada `--set-active` de um modelo novo, rodar `python -m V2.scripts.generate_feature_zero_baselines` pra gerar o baseline do novo `run_id`. Sem baseline o validador degrada pra noop com log informativo.
 
 *Identificador histórico: T1-16.*
 
@@ -720,7 +724,7 @@ Mapeamento entre os identificadores históricos e o status atual. Use isso quand
 | T1-13 | Drift de perfil de audiência | ✅ Concluído | 2026-05-08 |
 | T1-14 | Smoke test cobre todas as variantes A/B | ✅ Concluído | 2026-05-08 |
 | T1-15 | Auditoria de paridade por variante A/B | ✅ Concluído | 2026-05-08 |
-| T1-16 | Validador pós-encoding ">X% leads zerados" | 🟡 Backlog | Descoberto via investigação V.1. Pré-condição destravada em 11/mai — baselines calculáveis offline. |
+| T1-16 | Validador pós-encoding ">X% leads zerados" | ✅ Concluído | 2026-05-11 (commit `8b1c804`). Resolve V.1.3 do registro de erros. |
 | T1-17 | Auditoria de YAML dentro da imagem (Gate D) | ✅ Concluído | 2026-05-08 |
 | T1-18 | Equivalência de score+decil entre revisões (Gate C) | ✅ Concluído | 2026-05-08 |
 | T1-19 | Validação de schema contra MLflow | 🟡 Backlog | (próximo após T1-15) |
