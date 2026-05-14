@@ -31,6 +31,93 @@ _tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", _default_tracking)
 mlflow.set_tracking_uri(_tracking_uri)
 
 
+# ---------------------------------------------------------------------------
+# Guardrails: Cloud SQL `smart-ads-db` precisa estar RUNNABLE pra MLflow
+# ---------------------------------------------------------------------------
+# A instância fica em `activation-policy=NEVER` por padrão (economia ~R$ 40/mês —
+# ver V2/docs/operacoes_gcp_custos.md). Tem que ligar antes de treinar/ativar
+# e desligar depois. Este guard evita erro críptico do SQLAlchemy quando
+# alguém esquece de ligar.
+
+_MLFLOW_SQL_PROJECT = "smart-ads-451319"
+_MLFLOW_SQL_INSTANCE = "smart-ads-db"
+
+
+def assert_mlflow_backend_running(project_id: str = _MLFLOW_SQL_PROJECT,
+                                  instance_id: str = _MLFLOW_SQL_INSTANCE) -> None:
+    """Falha alto se Cloud SQL MLflow não está RUNNABLE.
+
+    Treino, ativação de modelo antigo (`ativar_run_existente`) e comparação
+    Champion vs Challenger dependem desta instância. Em `activation-policy=NEVER`,
+    a conexão SQLAlchemy do MLflow trava ou retorna erro críptico de timeout.
+
+    Roda nos entry points (`train_pipeline.main`, `retraining_orchestrator.main`),
+    não no nível do módulo — pra permitir imports de leitura de metadados locais
+    (ex: scripts de inspeção que usam `mlruns/` baked-in sem precisar do remoto).
+
+    Raises:
+        RuntimeError com comando de fix se instância parada/inacessível.
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['gcloud', 'sql', 'instances', 'describe', instance_id,
+             '--project', project_id, '--format=value(state)'],
+            capture_output=True, text=True, timeout=10
+        )
+    except FileNotFoundError:
+        raise RuntimeError(
+            "gcloud CLI não encontrado — instale Google Cloud SDK pra usar MLflow remoto."
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"Timeout ao consultar Cloud SQL '{instance_id}' — rede indisponível?"
+        )
+
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Erro ao consultar Cloud SQL '{instance_id}': {result.stderr.strip()}\n"
+            f"Verificar credenciais com 'gcloud auth list' e projeto com 'gcloud config get-value project'."
+        )
+
+    state = result.stdout.strip()
+    if state != 'RUNNABLE':
+        raise RuntimeError(
+            f"\n[MLflow guard] Cloud SQL '{instance_id}' está '{state}', esperado 'RUNNABLE'.\n"
+            f"Treino/ativação MLflow precisa da instância ligada.\n\n"
+            f"LIGAR (~2-3 min):\n"
+            f"  gcloud sql instances patch {instance_id} \\\n"
+            f"    --activation-policy=ALWAYS --project={project_id}\n"
+            f"  # aguardar state=RUNNABLE:\n"
+            f"  gcloud sql instances describe {instance_id} \\\n"
+            f"    --project={project_id} --format='value(state)'\n\n"
+            f"Protocolo completo em V2/docs/operacoes_gcp_custos.md."
+        )
+    logger.info(f"✓ MLflow backend (Cloud SQL '{instance_id}') está RUNNABLE")
+
+
+def register_mlflow_cleanup_reminder(project_id: str = _MLFLOW_SQL_PROJECT,
+                                     instance_id: str = _MLFLOW_SQL_INSTANCE) -> None:
+    """Registra atexit que lembra de desligar Cloud SQL após o treino.
+
+    Não automatiza o stop — outras sessões podem estar usando MLflow em paralelo.
+    Só imprime lembrete no final do processo.
+    """
+    import atexit
+
+    def _reminder():
+        logger.warning(
+            "\n" + "=" * 72 + "\n"
+            f"LEMBRETE: Cloud SQL '{instance_id}' está LIGADO (ALWAYS).\n"
+            f"Custa ~R$ 40/mês ocioso. Desligar agora se nenhuma outra sessão usa:\n"
+            f"  gcloud sql instances patch {instance_id} \\\n"
+            f"    --activation-policy=NEVER --project={project_id}\n"
+            + "=" * 72
+        )
+
+    atexit.register(_reminder)
+
+
 def atualizar_business_config_com_recall(model_metadata: dict, client_config: "ClientConfig" = None):
     """
     Atualiza api/business_config.py e configs/clients/{client_id}.yaml com taxas de conversão

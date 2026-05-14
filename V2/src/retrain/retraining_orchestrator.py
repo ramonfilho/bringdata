@@ -56,6 +56,10 @@ except ImportError:
 from src.train_pipeline import main as train_main
 from src.retrain.data_validation import RetrainingDataValidator, get_active_model_path
 from src.core.client_config import ClientConfig
+from src.model.training_model import (
+    assert_mlflow_backend_running,
+    register_mlflow_cleanup_reminder,
+)
 
 # Configurar logging
 logging.basicConfig(
@@ -623,6 +627,10 @@ class RetreinoMensal:
 
 def main():
     """Entry point do script."""
+    # Guard: Cloud SQL MLflow precisa estar RUNNABLE. Falha alto se NEVER.
+    assert_mlflow_backend_running()
+    register_mlflow_cleanup_reminder()
+
     parser = argparse.ArgumentParser(
         description='Orquestrador de Retreino Mensal - Bring Data ML'
     )

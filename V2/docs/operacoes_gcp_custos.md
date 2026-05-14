@@ -283,5 +283,101 @@ O cleanup remove tags de **qualquer** revisão com 0% de tráfego, incluindo uma
 ### Fatores secundários no mesmo período
 
 - **Créditos sumiram após 02/mai (~R$ 15/dia):** havia desconto não-rotulado aplicado só em 01-02/mai (padrão de Sustained Use Discount retroativo do mês anterior). Sem essa linha, o "custo líquido" parecia subir mais que o bruto. Não é regressão — é como o GCP fatura.
-- **Instância Cloud SQL Micro nova (~R$ 1,35/dia):** apareceu na conta de 09/mai em diante. Identificar via `gcloud sql instances list --project=smart-ads-451319` e decidir se mantém.
-- **IP reservation do `smart-ads-db` (parado, mas IP cobrado):** ~R$ 15/mês contínuo. Eliminável só com migração de MLflow tracking para SQLite + GCS — ainda na lista de pendências.
+- **Cloud SQL `smart-ads-db` reativado em 09/mai (~R$ 1,35/dia):** o que apareceu como "instância Micro nova" no billing é a própria `smart-ads-db` que foi ligada (`activation-policy=ALWAYS`) em sessão anterior — não uma instância separada. Em 14/mai foi devolvida pra `NEVER`. Detalhes da continuação abaixo.
+
+---
+
+## Eliminação de min-instances no Cloud Run — 2026-05-14
+
+Após o fix de tags `canary-*` acumuladas (ver seção acima), a conta de Cloud Run ainda tinha **~R$ 9/dia em min-instance always-on**: a revisão em produção (`min-instances=1`, 2 vCPU, 2 GiB) mantinha uma instância ligada 24h. Cliente confirmou que o serviço **não tem interface humana** — só recebe webhook do front e dispara CAPI pra Meta em janela de minutos. Cold start de 5-15s em request após idle é invisível pro sinal.
+
+### Verificações feitas antes da mudança
+
+| Hipótese a descartar | Resultado |
+|---|---|
+| Há background task / scheduler dentro do container? | **Não.** `api/app.py:199` só faz `initialize_pipelines()`, `init_database()` e `validate_capi_destinations` no startup. Sem threads persistentes. |
+| Polling do Railway depende de instância viva? | **Não.** Cloud Scheduler externo dispara `/railway/process-pending` a cada 5 min — Cloud Run sobe instância sob demanda. |
+| `encoding.py` chama MLflow em runtime e quebraria sem Cloud SQL? | **Não.** `core/encoding.py:51-72` está em `try/except` com fallback `experiment_id='1'` e lê `feature_registry.json` do filesystem local da imagem Docker. |
+| Min-instance faz algo além de evitar cold start? | **Não.** Confirmado por leitura de código. |
+
+### Ações aplicadas
+
+| Ação | Comando | Estado |
+|---|---|---|
+| Template do serviço com `min-instances=0` | `gcloud run services update smart-ads-api --min-instances=0 --region=us-central1` | ✅ aplicado em 14/mai ~07h BRT |
+| Cloud SQL `smart-ads-db` voltou pra NEVER | `gcloud sql instances patch smart-ads-db --activation-policy=NEVER --project=smart-ads-451319` | ✅ aplicado em 14/mai |
+| Tag órfã `canary-1778752864` removida (revisão `00460-vak` criada pelo `update` veio com `minScale=1`; tag a mantinha cobrando) | `gcloud run services update-traffic smart-ads-api --remove-tags=canary-1778752864 --region=us-central1` | ✅ aplicado |
+
+### Pegadinha encontrada — `--min-instances=0` cria revisão nova com annotation persistente
+
+Rodar `gcloud run services update --min-instances=0` removeu a annotation `autoscaling.knative.dev/minScale` do **template do serviço** mas a **revisão nova criada** pelo próprio comando manteve `minScale=1` na sua annotation. Como o comando também associa uma tag canary à revisão nova, a revisão órfã passa a cobrar min-instance até a tag ser removida.
+
+**Fix manual aplicado:** remover a tag da revisão órfã. **Para próxima vez:** preferir `gcloud run services update smart-ads-api --clear-min-instances` (testar) ou aplicar a remoção da annotation diretamente.
+
+### Estado em que efetivamente cai pra `min=0` em produção
+
+O template está com `minScale=unset`, mas a **revisão atualmente em 100% de tráfego** (`smart-ads-api-00447-zuc`) ainda tem `minScale=1` na annotation dela (foi criada com a config antiga). Min-instance dela só desliga quando:
+
+1. Uma nova revisão (criada via `gcloud run deploy` ou `gcloud run services update`) sobe pra 100% de tráfego, **E**
+2. A 00447-zuc perde sua tag canary (o `deploy_capi.sh` faz isso automaticamente no próximo deploy via cleanup).
+
+Próximo deploy normal já resolve. Se quiser forçar agora, basta deployar a mesma imagem com `--clear-min-instances` ou aguardar o ciclo de canary natural.
+
+### Guardrails adicionados aos scripts de treino
+
+Como `Cloud SQL smart-ads-db` agora fica em `NEVER` por padrão (economia ~R$ 40/mês), os scripts de treino e retreino podem falhar com erro críptico de SQLAlchemy se o usuário esquecer de ligar a instância antes. Adicionamos:
+
+- `src/model/training_model.py` (novas funções `assert_mlflow_backend_running()` + `register_mlflow_cleanup_reminder()`) — valida via `gcloud sql instances describe` que estado é `RUNNABLE`. Levanta erro claro com comando de fix se não.
+- `src/train_pipeline.py:main()` — chama o assert + registra atexit de lembrete pra desligar.
+- `src/retrain/retraining_orchestrator.py:main()` — idem.
+
+**Não automatiza o stop** porque sessões paralelas (múltiplos Claude Code, retreino + investigação simultâneos) podem precisar do Cloud SQL juntas — só lembra no final.
+
+### Projeção pós-mudanças completas
+
+| Item | R$/dia antes | R$/dia depois |
+|---|---:|---:|
+| Min-instance always-on (1 inst × 2 vCPU × 2 GiB) | 9 | 0 |
+| Cloud SQL `smart-ads-db` (ALWAYS) | 1,35 | 0 |
+| Cloud SQL `smart-ads-db` (NEVER — IP+storage residual) | — | 0,50 |
+| Request-based CPU (carga real) | 3 | 3 |
+| Storages, BQ, egress | 0,5 | 0,5 |
+| **Total** | **~14** | **~4-5** |
+
+**Atinge o objetivo de R$ 5-10/dia**, com sobra. Em meses com retreino (instância ligada por 1-2 dias), pico de ~R$ 6-8 por aqueles dias.
+
+### Checklist de monitoramento agressivo pós-mudança (próximas 2-3h)
+
+Como **derrubamos min-instance em prod**, validar que o serviço continua respondendo bem:
+
+1. **Latência (Cloud Run Console → Metrics)**
+   - p50 de `/predict/batch` antes vs depois — esperado: aumento mínimo (já era ~50-200ms request-based).
+   - p95 de `/predict/batch` — **esperado: spike inicial em requests após idle** (cold start 5-15s nos primeiros leads após gap de >15 min). Em janelas de alta carga (lançamento ativo), instância fica quente → spike só na madrugada.
+   - URL: `https://console.cloud.google.com/run/detail/us-central1/smart-ads-api/metrics?project=smart-ads-451319`
+
+2. **Taxa de erro (mesma página)**
+   - Esperado: zero. Cold start não causa erro, só latência.
+   - Se aparecer 5xx, ação: `gcloud run services update smart-ads-api --region=us-central1 --min-instances=1` (volta em 60s).
+
+3. **Logs Cloud Run** — buscar regressões
+   ```
+   gcloud logging read 'resource.type=cloud_run_revision AND \
+     resource.labels.service_name=smart-ads-api AND severity>=ERROR' \
+     --limit=20 --format='value(textPayload)' --freshness=2h
+   ```
+   Atenção a: `STARTUP CHECK ❌ FATAL` (algum check do `validate_capi_destinations`), `OOMKilled`, `worker timeout`.
+
+4. **CAPI enviando**
+   - Bater no endpoint de stats internas ou monitoramento Slack.
+   - Confirmar volume de eventos `LeadQualified` + `LeadQualifiedHighQuality` por hora bate com o dia anterior.
+
+5. **Métrica de instâncias ativas (Cloud Run Console)**
+   - Esperado: 0-3 instâncias ativas em pico (era sempre ≥1).
+   - Vale 0 em madrugada quando não há tráfego.
+
+6. **Rollback rápido se algo falhar**
+   ```bash
+   gcloud run services update smart-ads-api \
+     --region=us-central1 --min-instances=1 --project=smart-ads-451319
+   ```
+   Effetua em ~60s. Não precisa redeployar.

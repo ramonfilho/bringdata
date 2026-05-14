@@ -136,7 +136,12 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Status:** ativo (entregue a terceiros).
 
 ### `operacoes_gcp_custos.md`
-**Papel:** registro das otimizações de custo aplicadas no GCP em 2026-04-26 (~R$ 167/mês), procedimento de stop/start do Cloud SQL `smart-ads-db` para retreino, cleanup policy do Artifact Registry e bugs latentes descobertos durante a auditoria. Inclui investigações de spike: 06/mai/2026 (worker timeout do gunicorn) e 14/mai/2026 (acúmulo de tags `canary-*` no Cloud Run mantendo instâncias always-on — remediado com cleanup automático no `deploy_capi.sh`).
+**Papel:** registro das otimizações de custo aplicadas no GCP em 2026-04-26 (~R$ 167/mês), procedimento de stop/start do Cloud SQL `smart-ads-db` para retreino, cleanup policy do Artifact Registry e bugs latentes descobertos durante a auditoria. Inclui investigações de spike: 06/mai/2026 (worker timeout do gunicorn) e 14/mai/2026 (acúmulo de tags `canary-*` no Cloud Run mantendo instâncias always-on — remediado com cleanup automático no `deploy_capi.sh`). Em 14/mai também documentou a eliminação de min-instances no Cloud Run (de ~R$ 14/dia pra ~R$ 4-5/dia), guardrails nos scripts de treino contra esquecer de ligar/desligar Cloud SQL, e checklist de monitoramento pós-mudança.
+
+### `MIGRACAO_MLFLOW_PARA_SQLITE.md` 📚 Catálogo técnico (frente futura)
+**Papel:** especificação da migração do tracking server MLflow do Cloud SQL `smart-ads-db` (PostgreSQL ~R$ 50/mês ligado, R$ 15/mês parado) para SQLite + GCS (~R$ 0,10/mês). Documenta o mapa completo de dependências (quem precisa do Cloud SQL ligado vs quem não precisa), onde os artefatos do modelo realmente vivem em produção hoje (baked-in no Docker, independente do MLflow remoto), plano em 5 fases (~5-6 dias de trabalho), riscos e pré-condições.
+**Status:** 📚 catálogo. Não iniciado em 14/mai/2026. Status canônico vive em `PLANO_EXECUCAO.md`.
+**Relação:** referenciado por `operacoes_gcp_custos.md` na pendência "MLflow tracking → SQLite+GCS".
 **Status:** ativo. Atualizar quando novas otimizações forem aplicadas ou recursos parados forem retomados.
 **Relação:** referência operacional para retomar Cloud SQL antes de retreinar; consultar antes de mudar `min-instances`/`memory`/`cpu` do `smart-ads-api`.
 

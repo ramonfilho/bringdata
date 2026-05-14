@@ -53,7 +53,11 @@ from src.core.matching import match_leads as _match_leads
 from src.core.feature_engineering import create_features as _create_features
 from src.core.encoding import apply_encoding as _apply_encoding
 from src.validation.campaign_classifier import classify_campaign as _classify_campaign
-from src.model.training_model import registrar_features_e_modelo_devclub
+from src.model.training_model import (
+    registrar_features_e_modelo_devclub,
+    assert_mlflow_backend_running,
+    register_mlflow_cleanup_reminder,
+)
 from src.model.hyperparameter_tuning import hyperparameter_tuning
 from src.monitoring.data_quality import capture_training_categories, capture_training_distributions, calculate_missing_rate
 from src.core.validation import validate_ingestion, validate_features
@@ -238,6 +242,10 @@ def _log_step_count(step: str, df_after, df_before=None, target_col: str = 'targ
 
 
 def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, exclude_features=None, export_matched_dataset=None):
+    # Guard: Cloud SQL MLflow precisa estar RUNNABLE. Falha alto se NEVER.
+    assert_mlflow_backend_running()
+    register_mlflow_cleanup_reminder()
+
     """Executa pipeline de treino completo.
 
     Args:
