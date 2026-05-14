@@ -919,7 +919,10 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     title = f'*📊 Distribuição de decis — {win_label}*'
     if base_label:
         title += f' vs *{base_label}*'
-    rows = [title, '```']
+    rows = [title]
+    if base_pct:
+        rows.append('_🟢 = mais próximo da baseline, não necessariamente melhor (D10 alto é bom mesmo com Δ+pp)._')
+    rows.append('```')
     for k in keys:
         pct = cur_pct[k]
         n = int(dist.get(k, 0) or 0)
