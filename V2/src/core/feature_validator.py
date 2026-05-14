@@ -434,6 +434,109 @@ def validate_post_encoding_zero_rates(
     return result
 
 
+def validate_post_encoding_all_zero_groups(
+    df: pd.DataFrame,
+    baseline: Dict[str, Dict[str, float]],
+    min_batch_size: int = 50,
+    min_group_size: int = 2,
+    max_all_zero_rate: float = 0.02,
+    emit_log: bool = True,
+    model_run_id: str = '',
+) -> ValidationResult:
+    """
+    [DT-19 pré-req C] Valida que, para cada grupo de colunas OHE derivado da
+    mesma feature pré-OHE (ex.: `Source_facebook_ads`, `Source_google_ads`,
+    `Source_outros`), NÃO existe uma fração significativa de leads com TODAS
+    as colunas do grupo simultaneamente zeradas.
+
+    Diferença do T1-16: o T1-16 dispara quando UMA coluna OHE específica caiu
+    pra perto de zero em comparação com o esperado. Este checker dispara quando
+    um lead recebe zero em TODAS as colunas do grupo OHE — sintoma do bug
+    "categoria nova passou pela unificação sem cair em `_outros`". Exatamente
+    o caso do Source TikTok no path Champion (cenário 1.2 da auditoria de
+    quebra de produção): `unify_utm` não é variant-aware ainda, então um lead
+    `Source=tiktok` cruzando o Champion (que só conhece facebook_ads/google_ads/
+    outros) acaba com Source_facebook_ads=0, Source_google_ads=0, Source_outros=0.
+
+    O agrupamento usa o campo `feature` do baseline gerado por
+    `scripts/generate_feature_zero_baselines.py`. Grupos com <`min_group_size`
+    colunas (≥2 por default) são ignorados — feature binária pura não tem
+    "todas zeradas" patológico (a única coluna OHE = 0 já é o valor de "Não").
+
+    Args:
+        df: DataFrame pós-`apply_encoding` (colunas OHE).
+        baseline: dict {coluna_OHE: {'feature': str, 'category': str, ...}}.
+        min_batch_size: tamanho mínimo do batch (default 50, igual T1-16).
+        min_group_size: número mínimo de colunas OHE no grupo pra checar.
+        max_all_zero_rate: fração máxima de leads com todas as colunas do grupo
+                           zeradas. Default 2% — tolerante a leads legítimos
+                           sem aquela feature, mas pega bug arquitetural.
+
+    Returns:
+        ValidationResult com severity='ERROR' se algum grupo ultrapassa o
+        limiar, 'OK' caso contrário.
+    """
+    if len(df) < min_batch_size:
+        return ValidationResult(severity='OK', issues=[], batch_size=len(df), features_checked=0)
+
+    # Agrupar colunas OHE pelo nome da feature pré-OHE (campo 'feature' do baseline).
+    groups: Dict[str, List[str]] = {}
+    for col, info in baseline.items():
+        feat = info.get('feature')
+        if not feat or col not in df.columns:
+            continue
+        groups.setdefault(feat, []).append(col)
+
+    issues: List[ValidationIssue] = []
+    checked = 0
+    batch_size = len(df)
+
+    for feat, cols in groups.items():
+        if len(cols) < min_group_size:
+            continue
+        checked += 1
+        # Todas zeradas = soma da linha == 0 em todas as colunas do grupo.
+        # OHE produz 0/1 inteiros, então sum() == 0 sse todas == 0.
+        row_sum = df[cols].sum(axis=1)
+        all_zero_rate = float((row_sum == 0).mean())
+        if all_zero_rate > max_all_zero_rate:
+            issues.append(ValidationIssue(
+                feature=feat,
+                problem='all_zero_group',
+                details={
+                    'feature_pre_ohe': feat,
+                    'group_columns': cols,
+                    'all_zero_rate': round(all_zero_rate, 4),
+                    'threshold': max_all_zero_rate,
+                    'leads_with_group_zeroed': int((row_sum == 0).sum()),
+                },
+            ))
+
+    severity = 'ERROR' if issues else 'OK'
+    result = ValidationResult(severity=severity, issues=issues, batch_size=batch_size, features_checked=checked)
+
+    if emit_log:
+        payload = {
+            'event': 'feature_validator_all_zero_group',
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'model_run_id': model_run_id,
+            'batch_size': batch_size,
+            'groups_checked': checked,
+            'severity': severity,
+            'max_all_zero_rate': max_all_zero_rate,
+            'issues': [asdict(i) for i in issues],
+        }
+        logger.info("[FV_JSON] " + json.dumps(payload, default=str, separators=(',', ':')))
+        if severity == 'ERROR':
+            preview = ', '.join(f"{i.feature}={i.details['all_zero_rate']:.3f}" for i in issues[:3])
+            logger.error(
+                f"[DT-19 cross-col] {len(issues)} grupo(s) OHE com fração de leads "
+                f"todo-zerados acima do limiar (batch={batch_size}): {preview}"
+            )
+
+    return result
+
+
 def save_schema_to_json(schema: PreEncodingSchema, path: str) -> None:
     """Serializa um PreEncodingSchema para JSON (versionável no git)."""
     payload = {

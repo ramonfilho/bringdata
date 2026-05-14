@@ -413,5 +413,40 @@ def apply_encoding(
             # Validador é defensivo — qualquer falha dele NÃO deve quebrar scoring.
             logger.warning(f"  [T1-16] validador post-encoding falhou: {type(_e).__name__}: {_e}")
 
+    # -----------------------------------------------------------------------
+    # 9b. [DT-19 pré-req C] Validador cross-coluna "grupo OHE todo-zerado"
+    # -----------------------------------------------------------------------
+    # Detecta o sintoma do cenário 1.2 da AUDITORIA_QUEBRA_PRODUCAO: lead com
+    # categoria nova (ex.: Source=tiktok no path Champion) acaba com TODAS as
+    # colunas Source_* zeradas porque a unificação não jogou pra _outros.
+    # Sensor aditivo (não bloqueia o caminho do T1-16). Default 2% de tolerância
+    # cobre leads legítimos sem aquela feature mas pega bug arquitetural.
+    if _mlflow_run_id:
+        try:
+            from .feature_validator import (
+                validate_post_encoding_all_zero_groups as _validate_zero_groups,
+            )
+            if _baseline:
+                _zg_result = _validate_zero_groups(
+                    df_encoded, _baseline,
+                    model_run_id=_mlflow_run_id,
+                    emit_log=True,
+                )
+                if _zg_result.severity == 'ERROR':
+                    preview = ', '.join(
+                        f"{i.feature}={i.details['all_zero_rate']:.3f} ({i.details['leads_with_group_zeroed']} leads)"
+                        for i in _zg_result.issues[:5]
+                    )
+                    raise ValueError(
+                        f"[DT-19] {len(_zg_result.issues)} grupo(s) OHE com leads "
+                        f"todo-zerados acima do limiar (batch={_zg_result.batch_size}, "
+                        f"mlflow_run_id={_mlflow_run_id[:8]}). Exemplos: {preview}. "
+                        f"Cenário 1.2 da auditoria — categoria fora da whitelist da variante."
+                    )
+        except ValueError:
+            raise
+        except Exception as _e:
+            logger.warning(f"  [DT-19 cross-col] validador falhou: {type(_e).__name__}: {_e}")
+
     logger.debug(f"  Encoding: {len(df_encoded.columns)} colunas finais")
     return df_encoded
