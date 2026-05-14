@@ -358,10 +358,149 @@ def audit_encoding_ab_variants():
     return overall_ok
 
 
+def _build_production_encoding_input(client_config, n_leads: int = 200) -> 'pd.DataFrame':
+    """
+    Constrói um DataFrame de leads reais do Railway PASSANDO pelo mesmo caminho
+    que produção usa em runtime (`railway_lead_to_sheets_row`), depois aplica
+    os passos core até logo ANTES do encoding.
+
+    Por que existe (T1-19): o caminho de treino e o caminho de produção
+    produzem inputs diferentes para o encoder. Auditar contra snapshot de
+    treino gera falsos positivos para colunas que só são criadas em produção
+    pelo `railway_mapping` (ex.: `interesse_programacao` derivada da chave
+    JSONB `atracaoProfissao`). Esta função reproduz o caminho de produção
+    fielmente.
+
+    Sequência aplicada (espelho de `production_pipeline.preprocess()`):
+        1. Fetch N leads recentes do Railway (com env vars RAILWAY_DB_*)
+        2. Para cada lead: `railway_lead_to_sheets_row(lead, client_config)`
+        3. Empilha em DataFrame
+        4. `core.preprocessing.preprocess(df, ingestion, feature)`
+        5. `core.utm.unify_utm(df, utm)`
+        6. `core.medium.unify_medium(df, medium, artifacts=None)`  ← sem artifact aqui (audit é por-variante depois)
+        7. `core.category_unification.unify_categories(df, category)`
+        8. `core.feature_engineering.create_features(df, feature)`
+
+    Retorna o DataFrame pronto pra entrar em `apply_encoding`.
+
+    Levanta `RuntimeError` se env vars do Railway não estiverem disponíveis ou
+    se o fetch retornar zero leads — falha alto pra não disfarçar bug do gate
+    com input vazio.
+    """
+    import pandas as pd
+    import json as _json
+
+    # Env vars obrigatórias
+    required_env = ['RAILWAY_DB_HOST', 'RAILWAY_DB_PORT', 'RAILWAY_DB_NAME',
+                    'RAILWAY_DB_USER', 'RAILWAY_DB_PASSWORD']
+    missing_env = [k for k in required_env if not os.environ.get(k)]
+    if missing_env:
+        # Tentar carregar do V2/.env como fallback
+        env_path = os.path.join(ROOT, 'V2', '.env')
+        if os.path.exists(env_path):
+            for line in open(env_path).read().splitlines():
+                line = line.strip()
+                if not line or line.startswith('#') or '=' not in line:
+                    continue
+                k, _, v = line.partition('=')
+                os.environ.setdefault(k.strip(), v.strip().strip("'\""))
+            missing_env = [k for k in required_env if not os.environ.get(k)]
+        if missing_env:
+            raise RuntimeError(
+                f"[T1-19] Env vars Railway ausentes: {missing_env}. "
+                "Configurar V2/.env ou exportar manualmente antes de rodar schema_mlflow."
+            )
+
+    # Importar dependências
+    try:
+        import psycopg2
+    except ImportError:
+        raise RuntimeError("[T1-19] psycopg2 não disponível — instalar com `pip install psycopg2-binary`")
+
+    from V2.api.railway_mapping import railway_lead_to_sheets_row
+    from V2.src.core.preprocessing import preprocess as _preprocess
+    from V2.src.core.utm import unify_utm
+    from V2.src.core.medium import unify_medium
+    from V2.src.core.category_unification import unify_categories
+    from V2.src.core.feature_engineering import create_features
+
+    # 1. Fetch leads recentes do Railway
+    conn = psycopg2.connect(
+        host=os.environ['RAILWAY_DB_HOST'],
+        port=int(os.environ['RAILWAY_DB_PORT']),
+        user=os.environ['RAILWAY_DB_USER'],
+        password=os.environ['RAILWAY_DB_PASSWORD'],
+        dbname=os.environ['RAILWAY_DB_NAME'],
+    )
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            'SELECT id, data, "nomeCompleto", email, telefone, pesquisa, '
+            'source, medium, campaign, content, term, '
+            '"remoteIp", "userAgent", fbc, fbp, "pageUrl" '
+            'FROM "Lead" '
+            'WHERE pesquisa IS NOT NULL '
+            'ORDER BY "createdAt" DESC '
+            f'LIMIT {n_leads}'
+        )
+        col_names = [
+            'id', 'data', 'nomeCompleto', 'email', 'telefone', 'pesquisa',
+            'source', 'medium', 'campaign', 'content', 'term',
+            'remoteIp', 'userAgent', 'fbc', 'fbp', 'pageUrl',
+        ]
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        raise RuntimeError(
+            f"[T1-19] Railway retornou 0 leads (n_leads={n_leads}). "
+            "Sem input → gate não pode validar; falhando alto em vez de passar com snapshot vazio."
+        )
+
+    # 2. Aplicar railway_lead_to_sheets_row em cada lead
+    sheets_rows = []
+    for r in rows:
+        lead = dict(zip(col_names, r))
+        if isinstance(lead.get('pesquisa'), str):
+            try:
+                lead['pesquisa'] = _json.loads(lead['pesquisa'])
+            except Exception:
+                lead['pesquisa'] = {}
+        elif lead.get('pesquisa') is None:
+            lead['pesquisa'] = {}
+        try:
+            sheets_rows.append(railway_lead_to_sheets_row(lead, client_config=client_config))
+        except Exception as e:
+            # Lead malformado — pular individualmente, não derrubar o batch inteiro.
+            print(f"  [T1-19 fetch] warning: lead {lead.get('email', '?')} pulado: {e}")
+
+    df_raw = pd.DataFrame(sheets_rows)
+    print(f"  [T1-19 fetch] {len(df_raw)} leads carregados do Railway via railway_mapping")
+
+    # 3-7. Pipeline core (sequência idêntica à de production_pipeline.preprocess)
+    df = _preprocess(df_raw, client_config.ingestion, client_config.feature)
+    df = unify_utm(df, client_config.utm)
+    if 'Medium' in df.columns:
+        df = unify_medium(df, client_config.medium, artifacts=None)  # whitelist via frequência (modo treino) — audit per-variant não passa artifact aqui
+    df = unify_categories(df, client_config.category)
+    df = create_features(df, client_config.feature)
+
+    print(f"  [T1-19 fetch] DataFrame pré-encoding: {df.shape[0]} linhas × {df.shape[1]} colunas")
+    return df
+
+
 def audit_schema_against_mlflow():
     """
     [T1-19] Valida schema do output do encoding contra o feature_registry real
     do MLflow para cada variante A/B ativa.
+
+    Caminho de input: leads reais do Railway via `railway_lead_to_sheets_row`
+    (mesmo caminho que produção usa em runtime). Não usa snapshot de treino —
+    snapshot de treino e produção têm caminhos diferentes (treino não passa
+    pelo railway_mapping), o que gerava falsos positivos para colunas
+    derivadas de chaves JSONB do front (ex.: `interesse_programacao` derivada
+    de `atracaoProfissao`).
 
     Cobre o caso onde o snapshot por-variante (T1-15) passa OK, mas o conjunto
     de colunas geradas pelo pipeline não bate com o que o modelo da variante
@@ -403,7 +542,26 @@ def audit_schema_against_mlflow():
         print("  [!] ab_test.enabled=true mas nenhum variant declarado")
         return False
 
-    df_input = _load('snapshot_encoding_input')
+    # Input do encoding: leads reais do Railway pelo mesmo caminho da produção.
+    # Substituí o snapshot estático (treino) pra eliminar falso positivo
+    # documentado na sessão de investigação 11/mai (T1-19).
+    try:
+        df_input = _build_production_encoding_input(config, n_leads=200)
+    except RuntimeError as e:
+        print(f"  [!] Não foi possível construir input de produção: {e}")
+        return False
+
+    # Colunas pré-OHE no batch (antes do encoding). Usado pra distinguir
+    # missing crítico (feature inteira sumiu do pipeline) de missing amostral
+    # (categoria específica não apareceu nesses N leads — ok, alinhamento
+    # preenche com 0 em runtime). Normaliza nomes com o mesmo regex que o
+    # encoding aplica (encoding.py:296-298) pra cruzar com nomes do registry.
+    import re as _re
+    def _normalize_col(name: str) -> str:
+        s = _re.sub(r'[^A-Za-z0-9_]', '_', str(name))
+        s = _re.sub(r'_+', '_', s).strip('_')
+        return s
+    pre_ohe_cols = {_normalize_col(c) for c in df_input.columns}
     overall_ok = True
     print(f"  Validando schema de {len(ab.variants)} variante(s) contra MLflow...")
 
@@ -450,18 +608,44 @@ def audit_schema_against_mlflow():
         missing = sorted(expected_set - actual_cols)
         extras = sorted(actual_cols - expected_set)
 
+        # Classificar missing em CRÍTICO vs AMOSTRAL:
+        #   - CRÍTICO: feature pré-OHE inteira sumiu do pipeline (ex.: refactor renomeou,
+        #              ou coluna foi removida). Bug deploy-bloqueador.
+        #   - AMOSTRAL: feature pré-OHE existe no batch, mas essa categoria específica
+        #              não apareceu nesses N leads. Não é bug — alinhamento ao registry
+        #              em runtime preenche com 0 (passo 7 do apply_encoding).
+        # Heurística: pra cada coluna do registry, tentar achar o prefixo (substring
+        # antes do último valor) que existe como coluna pré-OHE no batch.
+        def _classify_missing(reg_col: str) -> str:
+            parts = reg_col.split('_')
+            for i in range(len(parts), 0, -1):
+                candidate = '_'.join(parts[:i])
+                if candidate in pre_ohe_cols:
+                    return 'amostral'
+            return 'crítico'
+
+        missing_critico = [c for c in missing if _classify_missing(c) == 'crítico']
+        missing_amostral = [c for c in missing if _classify_missing(c) == 'amostral']
+
         ok_variant = True
 
-        if missing:
-            print(f"\n  [ERRO] '{variant_name}' ({len(missing)} colunas no registry mas AUSENTES do output):")
-            for col in missing[:15]:
+        if missing_critico:
+            print(f"\n  [ERRO] '{variant_name}' ({len(missing_critico)} colunas CRÍTICAS — feature pré-OHE inteira ausente do pipeline):")
+            for col in missing_critico[:15]:
                 print(f"    - {col}")
-            if len(missing) > 15:
-                print(f"    ... +{len(missing) - 15} colunas")
+            if len(missing_critico) > 15:
+                print(f"    ... +{len(missing_critico) - 15} colunas")
             ok_variant = False
 
+        if missing_amostral:
+            print(f"\n  [INFO] '{variant_name}' ({len(missing_amostral)} colunas AMOSTRAIS — categoria não apareceu nos {len(df_input)} leads do batch; runtime preenche com 0):")
+            for col in missing_amostral[:8]:
+                print(f"    - {col}")
+            if len(missing_amostral) > 8:
+                print(f"    ... +{len(missing_amostral) - 8} colunas")
+
         if extras:
-            print(f"\n  [WARN] '{variant_name}' ({len(extras)} colunas no output mas IGNORADAS pelo modelo):")
+            print(f"\n  [WARN] '{variant_name}' ({len(extras)} colunas no output mas IGNORADAS pelo modelo — possível drift de categoria nova):")
             for col in extras[:10]:
                 print(f"    - {col}")
             if len(extras) > 10:
