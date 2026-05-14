@@ -137,12 +137,23 @@ check_authorized_branch() {
 # =============================================================================
 # Quando FORCE_DEPLOY=true (deploy de branch não-rollback como main), exige
 # que V2/tests/parity_audit.py passe antes de prosseguir. Bloqueia o deploy
-# se treino × produção divergirem coluna-a-coluna em encoding ou UTM.
+# se houver divergência em qualquer uma das 4 verificações:
+#
+#   - utm           — Source/Term unificados batem entre treino e produção
+#   - encoding      — output do encoding bate entre treino e produção
+#   - encoding_ab   — output do encoding bate POR VARIANTE A/B (Champion + Challenger)
+#   - schema_mlflow — output do encoding bate com o feature_registry do
+#                     MLflow de cada variante. Detecta features pré-OHE
+#                     ausentes do pipeline (ex.: refactor renomeou coluna)
+#                     e dtype divergente. Requer Railway acessível
+#                     (env vars RAILWAY_DB_* via V2/.env) — pega 200 leads
+#                     reais via railway_lead_to_sheets_row.
 #
 # Motivação: antes da unificação edf23e9 → main, a única prova técnica de
 # que main não regride produção é o parity audit. Subir main em produção
 # sem esse check repete o bug do Medium_Linguagem_programacao (feature
-# zerada por semanas sem aviso).
+# zerada por semanas sem aviso) e o bug do Cluster 5 (idade/salário
+# zeradas em A/B reativado).
 #
 # Escape hatch: SKIP_PARITY_AUDIT=true exige confirmação manual digitada.
 # =============================================================================
@@ -182,7 +193,8 @@ check_parity_audit() {
 
     if (cd "$PROJECT_DIR/.." && python3 V2/tests/parity_audit.py --function utm 2>&1 | tail -30 && \
         python3 V2/tests/parity_audit.py --function encoding 2>&1 | tail -30 && \
-        python3 V2/tests/parity_audit.py --function encoding_ab 2>&1 | tail -30) | tee /tmp/parity_audit_deploy.log; then
+        python3 V2/tests/parity_audit.py --function encoding_ab 2>&1 | tail -30 && \
+        python3 V2/tests/parity_audit.py --function schema_mlflow 2>&1 | tail -40) | tee /tmp/parity_audit_deploy.log; then
         if grep -q "DIVERG" /tmp/parity_audit_deploy.log; then
             echo ""
             echo "  ╔══════════════════════════════════════════════════════════════════╗"
