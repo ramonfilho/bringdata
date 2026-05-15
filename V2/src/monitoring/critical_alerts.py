@@ -65,10 +65,14 @@ class RuleResult:
 @dataclass
 class RuleState:
     """Estado persistido por regra no GCS."""
-    last_fired_at: Optional[str] = None        # ISO UTC
+    last_fired_at: Optional[str] = None        # ISO UTC — última vez que a condição esteve ON
     last_resolved_at: Optional[str] = None     # ISO UTC
     consecutive_fires: int = 0
     last_message: Optional[str] = None
+    # Piso de envio independente do ciclo fire/resolve. Garante no máx. 1 DM por
+    # regra a cada COOLDOWN_MIN, mesmo que a regra resolva e re-dispare rápido
+    # (bug do spam de 5/5min observado em 15/05/2026 na madrugada).
+    last_sent_at: Optional[str] = None         # ISO UTC
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -87,6 +91,10 @@ class GcsStateStore:
         self._states: dict[str, RuleState] = {}
         self._loaded = False
         self._dirty = False
+        # True quando a leitura do GCS FALHOU (≠ arquivo ausente). Nesse caso
+        # não sabemos o cooldown → dispatcher NÃO envia (fail-closed) pra não
+        # spammar 12×/h quando o estado está indisponível.
+        self._load_failed = False
 
     def _client(self):
         from google.cloud import storage
@@ -107,8 +115,9 @@ class GcsStateStore:
                 self._states = {}
                 logger.info(f"[critical_alerts] state ausente em gs://{self.bucket_name}/{self.path} — inicializando vazio")
         except Exception as e:
-            logger.warning(f"[critical_alerts] falha lendo state GCS — assumindo vazio: {e}")
+            logger.warning(f"[critical_alerts] falha lendo state GCS — fail-closed (não envia): {e}")
             self._states = {}
+            self._load_failed = True
         self._loaded = True
 
     def get(self, rule_name: str) -> RuleState:
@@ -159,33 +168,47 @@ class SlackDispatcher:
           'error'       — falha enviando
         """
         now = datetime.now(timezone.utc)
+
+        # Fail-closed: se a leitura do estado falhou, não sabemos o cooldown.
+        # Preferir perder 1 alerta a spammar 12×/h. (Vide GcsStateStore.load.)
+        if getattr(self.store, '_load_failed', False):
+            logger.warning(
+                f"[critical_alerts] {result.rule_name}: estado GCS indisponível — "
+                f"suprimindo envio (fail-closed)"
+            )
+            return 'state_unavailable'
+
         state = self.store.get(result.rule_name)
 
         if not result.fired:
             if state.last_fired_at:
                 last_fired = datetime.fromisoformat(state.last_fired_at)
                 if (now - last_fired) >= timedelta(minutes=RESOLVE_MIN):
+                    # Resolve zera o ciclo fire, mas PRESERVA last_sent_at — o
+                    # piso de envio não pode ser burlado por resolve→refire.
                     state = RuleState(
                         last_fired_at=None,
                         last_resolved_at=now.isoformat(),
                         consecutive_fires=0,
                         last_message=None,
+                        last_sent_at=state.last_sent_at,
                     )
                     self.store.set(result.rule_name, state)
                     logger.info(f"[critical_alerts] {result.rule_name}: resolvido")
                     return 'no_change'
             return 'no_change'
 
-        # fired=True
-        if state.last_fired_at:
-            last_fired = datetime.fromisoformat(state.last_fired_at)
-            if (now - last_fired) < timedelta(minutes=COOLDOWN_MIN):
+        # fired=True — piso de envio é last_sent_at (independe de fire/resolve).
+        if state.last_sent_at:
+            last_sent = datetime.fromisoformat(state.last_sent_at)
+            if (now - last_sent) < timedelta(minutes=COOLDOWN_MIN):
+                state.last_fired_at = state.last_fired_at or now.isoformat()
                 state.consecutive_fires += 1
                 state.last_message = result.message
                 self.store.set(result.rule_name, state)
                 logger.info(
                     f"[critical_alerts] {result.rule_name}: cooldown "
-                    f"({state.consecutive_fires}× consecutivos)"
+                    f"({state.consecutive_fires}× consecutivos desde último envio)"
                 )
                 return 'cooldown'
 
@@ -208,6 +231,11 @@ class SlackDispatcher:
             last_resolved_at=state.last_resolved_at,
             consecutive_fires=(state.consecutive_fires or 0) + 1,
             last_message=result.message,
+            # Só atualiza o piso quando de fato saiu DM (sent/dry_run contam;
+            # error não conta, pra permitir retry no próximo polling).
+            last_sent_at=(now.isoformat()
+                          if status in ('sent', 'dry_run')
+                          else state.last_sent_at),
         )
         self.store.set(result.rule_name, new_state)
         return status
@@ -246,8 +274,25 @@ def _window_start_utc() -> datetime:
     return datetime.now(timezone.utc) - timedelta(minutes=WINDOW_MIN)
 
 
+QUIET_HOURS_BRT = (0, 6)  # [00h, 06h) BRT — tráfego naturalmente ~zero
+
+
+def _in_quiet_hours_brt() -> bool:
+    """True se agora está em [00h, 06h) BRT — janela de tráfego naturalmente nulo."""
+    h = datetime.now(BRT).hour
+    return QUIET_HOURS_BRT[0] <= h < QUIET_HOURS_BRT[1]
+
+
 def rule_no_leads_arriving(conn) -> RuleResult:
-    """Regra 4: 0 leads novos em Lead nos últimos 60min."""
+    """Regra 4: 0 leads novos em Lead nos últimos 60min.
+
+    Quiet hours 00h–06h BRT: às 3–5h o tráfego é naturalmente ~zero, então
+    "0 leads em 60min" gera falso-positivo toda madrugada. Nesse intervalo a
+    regra é skipada (decisão B de 15/05/2026 após 7 DMs noturnos).
+    """
+    if _in_quiet_hours_brt():
+        return RuleResult('no_leads_arriving', fired=False,
+                          skipped_reason='quiet_hours 00h-06h BRT (tráfego naturalmente nulo)')
     cutoff = _window_start_utc()
     rows = conn.run(
         'SELECT COUNT(*) AS n, MAX("createdAt") AS last_at FROM "Lead" '
@@ -459,15 +504,26 @@ def rule_score_drift(conn, expected_decil_dist: Optional[dict]) -> RuleResult:
 # ──────────────────────────────────────────────────────────────────────────
 
 def record_polling_status(store: GcsStateStore, status: str, history_len: int = 10) -> None:
-    """Append-status no histórico do polling. Chamado por api/app.py."""
+    """Append-status no histórico do polling. Chamado por api/app.py.
+
+    Constrói um RuleState NOVO (não muta o retornado por get) — senão
+    GcsStateStore.set compara o objeto com ele mesmo, `old != state` dá False
+    e o flush nunca acontece (regra 9 ficaria cega). Bug corrigido 15/05/2026.
+    """
     assert status in ('ok', 'error'), f"status inválido: {status}"
-    state = store.get('_polling_status_tracker')
-    history = (state.last_message or '').split(',')
+    cur = store.get('_polling_status_tracker')
+    history = (cur.last_message or '').split(',')
     history = [s for s in history if s in ('ok', 'error')]
     history.append(status)
     history = history[-history_len:]
-    state.last_message = ','.join(history)
-    store.set('_polling_status_tracker', state)
+    new_state = RuleState(
+        last_fired_at=cur.last_fired_at,
+        last_resolved_at=cur.last_resolved_at,
+        consecutive_fires=cur.consecutive_fires,
+        last_message=','.join(history),
+        last_sent_at=cur.last_sent_at,
+    )
+    store.set('_polling_status_tracker', new_state)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -504,6 +560,7 @@ def run_critical_checks(
 
     summary = {'evaluated': 0, 'fired': 0, 'sent': 0, 'cooldown': 0,
                'dry_run': 0, 'error': 0, 'skipped': 0, 'no_change': 0,
+               'state_unavailable': 0,
                'mode': 'dry_run' if dry_run else 'live'}
     fired_details: list[dict] = []
 
