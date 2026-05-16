@@ -1993,23 +1993,29 @@ async def cleanup_canary_tags(dry_run: bool = False):
         dry_run: se True, retorna o que removeria sem aplicar.
     """
     import os as _os
+    import requests as _requests
     from google.auth import default as gauth_default
-    from googleapiclient.discovery import build as _gapi_build
+    from google.auth.transport.requests import Request as _GAuthRequest
 
     PROJECT = _os.getenv("GCP_PROJECT", "smart-ads-451319")
     REGION = _os.getenv("CLOUD_RUN_REGION", "us-central1")
     SERVICE = _os.getenv("SERVICE_NAME", "smart-ads-api")
 
     try:
+        # REST direto na Cloud Run Admin API v1 (Knative). Evita googleapiclient
+        # — que arrasta httplib2/pyparsing e quebra por conflito de versão na
+        # imagem. 'requests' já está instalado (HEALTHCHECK do Dockerfile usa).
         creds, _ = gauth_default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-        # API v1 (Knative) exige endpoint regional
-        run_api = _gapi_build(
-            "run", "v1", credentials=creds,
-            client_options={"api_endpoint": f"https://{REGION}-run.googleapis.com"},
-            cache_discovery=False,
+        creds.refresh(_GAuthRequest())
+        headers = {"Authorization": f"Bearer {creds.token}"}
+        base = (
+            f"https://{REGION}-run.googleapis.com/apis/serving.knative.dev/v1"
+            f"/namespaces/{PROJECT}/services/{SERVICE}"
         )
-        svc_path = f"namespaces/{PROJECT}/services/{SERVICE}"
-        svc = run_api.namespaces().services().get(name=svc_path).execute()
+
+        g = _requests.get(base, headers=headers, timeout=30)
+        g.raise_for_status()
+        svc = g.json()
 
         traffic = svc.get("spec", {}).get("traffic", [])
         keep, removed = [], []
@@ -2034,9 +2040,12 @@ async def cleanup_canary_tags(dry_run: bool = False):
             return {"status": "noop", "removed": [], "removed_count": 0}
 
         svc["spec"]["traffic"] = keep
-        run_api.namespaces().services().replaceService(
-            name=svc_path, body=svc
-        ).execute()
+        p = _requests.put(
+            base,
+            headers={**headers, "Content-Type": "application/json"},
+            json=svc, timeout=30,
+        )
+        p.raise_for_status()
         logger.info(
             f"[canary-cleanup] {len(removed)} tag(s) canary órfã(s) removida(s): "
             f"{[r['tag'] for r in removed]}"
@@ -2498,6 +2507,79 @@ async def daily_monitoring_check_railway(
             },
         }
 
+        # 1b-bis. unified_funnel — funil completo (TODAS as fontes), com quebra
+        # por origem fb (facebook-ads/ig/fb) · ggl (google-ads) · outr (resto).
+        # Camada anúncio (spend/cliques/pixel) vem do traffic_metrics (Meta
+        # Insights — não há ad-data de Google aqui). Camada pipeline conta TODAS
+        # as fontes — nada é eliminado da observação.
+        # JANELA = dia BRT anterior completo (00:00→23:59 ontem), igual o resto
+        # do digest (drift "Ontem") — NÃO rolling 24h.
+        _uf_brt = _tz(timedelta(hours=-3))
+        _uf_today_mid = datetime.now(_uf_brt).replace(hour=0, minute=0, second=0, microsecond=0)
+        _uf_e = _uf_today_mid.astimezone(_tz.utc)                       # hoje 00:00 BRT
+        _uf_s = (_uf_today_mid - timedelta(days=1)).astimezone(_tz.utc)  # ontem 00:00 BRT
+        _uf_date_brt = (_uf_today_mid - timedelta(days=1)).strftime('%d/%m')
+        _SRC_META = "LOWER(TRIM(source)) IN ('facebook-ads','fb','ig')"
+        _SRC_GGL  = "LOWER(TRIM(source)) = 'google-ads'"
+        _NEITHER  = f"NOT ({_SRC_META}) AND NOT ({_SRC_GGL})"
+        _uf_row = railway_conn.run(
+            'SELECT '
+            '  COUNT(*) AS pq_t, '
+            f' COUNT(*) FILTER (WHERE {_SRC_META}) AS pq_fb, '
+            f' COUNT(*) FILTER (WHERE {_SRC_GGL}) AS pq_g, '
+            f' COUNT(*) FILTER (WHERE {_NEITHER}) AS pq_o, '
+            '  COUNT(*) FILTER (WHERE "leadScore" IS NOT NULL) AS sc_t, '
+            f' COUNT(*) FILTER (WHERE "leadScore" IS NOT NULL AND {_SRC_META}) AS sc_fb, '
+            f' COUNT(*) FILTER (WHERE "leadScore" IS NOT NULL AND {_SRC_GGL}) AS sc_g, '
+            f' COUNT(*) FILTER (WHERE "leadScore" IS NOT NULL AND {_NEITHER}) AS sc_o, '
+            '  COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL AND "capiStatus" NOT IN (\'blocked\',\'skipped\')) AS ce_t, '
+            f' COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL AND "capiStatus" NOT IN (\'blocked\',\'skipped\') AND {_SRC_META}) AS ce_fb, '
+            f' COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL AND "capiStatus" NOT IN (\'blocked\',\'skipped\') AND {_SRC_GGL}) AS ce_g, '
+            f' COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL AND "capiStatus" NOT IN (\'blocked\',\'skipped\') AND {_NEITHER}) AS ce_o, '
+            '  COUNT(*) FILTER (WHERE "capiStatus" = \'success\') AS ac_t, '
+            f' COUNT(*) FILTER (WHERE "capiStatus" = \'success\' AND {_SRC_META}) AS ac_fb, '
+            f' COUNT(*) FILTER (WHERE "capiStatus" = \'success\' AND {_SRC_GGL}) AS ac_g, '
+            f' COUNT(*) FILTER (WHERE "capiStatus" = \'success\' AND {_NEITHER}) AS ac_o '
+            'FROM "Lead" WHERE "createdAt" >= :s AND "createdAt" < :e',
+            s=_uf_s, e=_uf_e,
+        )
+        _u = dict(zip(
+            ['pq_t', 'pq_fb', 'pq_g', 'pq_o', 'sc_t', 'sc_fb', 'sc_g', 'sc_o',
+             'ce_t', 'ce_fb', 'ce_g', 'ce_o', 'ac_t', 'ac_fb', 'ac_g', 'ac_o'],
+            _uf_row[0],
+        ))
+        _uf_capi = railway_conn.run(
+            'SELECT COUNT(*) FROM leads_capi WHERE created_at >= :s AND created_at < :e',
+            s=_uf_s, e=_uf_e,
+        )[0][0] or 0
+        _uf_ph = railway_conn.run(
+            'SELECT COUNT(*) AS n, '
+            '  COUNT(*) FILTER (WHERE telefone IS NOT NULL AND telefone <> \'\') AS p '
+            'FROM "Lead" WHERE "createdAt" >= :s AND "createdAt" < :e',
+            s=_uf_s, e=_uf_e,
+        )[0]
+        _uf_phone_pct = round((_uf_ph[1] or 0) / _uf_ph[0] * 100, 1) if (_uf_ph[0] or 0) else 0.0
+
+        def _uf_stage(p: str) -> dict:
+            return {
+                'total': _u[f'{p}_t']  or 0,
+                'fb':    _u[f'{p}_fb'] or 0,
+                'ggl':   _u[f'{p}_g']  or 0,
+                'outr':  _u[f'{p}_o']  or 0,
+            }
+
+        unified_funnel = {
+            'window': {'date_brt': _uf_date_brt, 'label': 'dia anterior'},
+            'capture': {'leads_capi': _uf_capi},
+            'pipeline': {
+                'pesquisa':     _uf_stage('pq'),
+                'scoreado':     _uf_stage('sc'),
+                'capi_enviado': _uf_stage('ce'),
+                'aceito':       _uf_stage('ac'),
+            },
+            'phone_pct': _uf_phone_pct,
+        }
+
         # 1c. Todos os leads com score (para métricas de qualidade por período)
         # UTMs + pageUrl extras pra split por variante A/B (baseline ponderado dos decis).
         # _calc_quality / _after / _decil_dist usam só [0]/[1]/[2], extras são ignorados.
@@ -2708,6 +2790,7 @@ async def daily_monitoring_check_railway(
                 'phone_percentage': (with_phone / total * 100) if total > 0 else 0,
                 'fbp_fbc_rolling': fbp_fbc_rolling,
             },
+            'unified_funnel': unified_funnel,
             'scoring': {
                 'total_scored': len(leads_data),
                 'decil_distribution': {},
@@ -3150,14 +3233,17 @@ async def daily_monitoring_check_railway(
                 # rendendo coluna "mês" vazia no Tráfego Meta. Survey funnel
                 # e lead quality mantêm "mês" próprio via DB.
                 _brt_now = datetime.now(_tz(timedelta(hours=-3)))
+                _dia_ant_str = (_brt_now - timedelta(days=1)).strftime('%Y-%m-%d')
                 _meta_hist_windows = {
                     'ultima_semana': (_brt_now - timedelta(days=7)).strftime('%Y-%m-%d'),
                     'ultimas_24h':   (_brt_now - timedelta(hours=24)).strftime('%Y-%m-%d'),
+                    'dia_anterior':  _dia_ant_str,   # dia BRT anterior completo (funil unificado)
                     'periodo_query': _launch_str,
                 }
                 _meta_hist_end = {
                     'ultima_semana': _today,
                     'ultimas_24h':   _today,
+                    'dia_anterior':  _dia_ant_str,   # since=until=ontem → dia completo
                     'periodo_query': (_brt_now if not end_date else
                                       datetime.strptime(end_date, '%Y-%m-%d').replace(
                                           tzinfo=_tz(timedelta(hours=-3))
