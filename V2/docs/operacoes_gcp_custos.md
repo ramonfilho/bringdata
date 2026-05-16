@@ -323,6 +323,30 @@ O template está com `minScale=unset`, mas a **revisão atualmente em 100% de tr
 
 Próximo deploy normal já resolve. Se quiser forçar agora, basta deployar a mesma imagem com `--clear-min-instances` ou aguardar o ciclo de canary natural.
 
+### Cleanup de tags canary independente de deploy — 2026-05-16
+
+O cleanup automático do `deploy_capi.sh` só roda **no início de um deploy**. Se o operador fica dias sem deployar, tags canary órfãs (revisão 0% tráfego + `minScale`) sangram ~R$ 4-5/dia cada sem ninguém perceber.
+
+**Solução:** endpoint `POST /admin/cleanup-canary-tags` em [`api/app.py`](../api/app.py) + Cloud Scheduler diário.
+
+- Endpoint usa a Cloud Run Admin API v1 (`run.namespaces.services`) pra ler o próprio serviço, identificar tags `canary-*` em revisões com `percent==0`, e removê-las via `replaceService`.
+- Proteções: nunca toca tag `prod`, tag não-canary, nem revisão com `percent > 0`. Suporta `?dry_run=true`.
+- Service account `smart-ads-451319@appspot.gserviceaccount.com` tem `roles/editor` — já pode chamar a Admin API, sem mudança de IAM.
+
+**Comando do Cloud Scheduler (criar após o endpoint estar deployado):**
+
+```bash
+gcloud scheduler jobs create http canary-tag-cleanup-daily \
+  --project=smart-ads-451319 --location=us-central1 \
+  --schedule="0 8 * * *" --time-zone="America/Sao_Paulo" \
+  --uri="https://smart-ads-api-gazrm25mda-uc.a.run.app/admin/cleanup-canary-tags" \
+  --http-method=POST
+```
+
+8h BRT — depois do pico de leads da madrugada, fácil de correlacionar nos logs.
+
+**Ressalva de segurança:** o serviço `smart-ads-api` tem `roles/run.invoker` pra `allUsers` (público — é assim que `railway-polling` chama sem auth). Logo `/admin/cleanup-canary-tags` é publicamente acessível, como os outros `/admin/*` já existentes. Impacto de abuso é baixo (endpoint idempotente, só remove tag órfã, não destrói dado nem altera tráfego de prod), mas é superfície de ataque. Endurecer o IAM do serviço (remover `allUsers`, usar OIDC nos schedulers) é melhoria pendente que afeta todos os endpoints — fora do escopo deste fix.
+
 ### Regressão por deploy — corrigida em 2026-05-16
 
 **O `gcloud run services update --min-instances=0` no template NÃO sobrevive a deploys.** O `deploy_capi.sh` passa `--min-instances $MIN_INSTANCES` explicitamente (linha 555), e `lib/config.sh:34` tinha o default `MIN_INSTANCES="${MIN_INSTANCES:-1}"`. Resultado: o primeiro deploy via script após 14/mai reverteu min-instances pra 1 — confirmado pelo custo de 16/mai (template voltou a `minScale=1`) vs 15/mai (R$ 5,52, ainda em min=0).

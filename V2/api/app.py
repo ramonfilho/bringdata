@@ -1974,6 +1974,80 @@ async def cleanup_duplicates(ids_to_delete: List[int], db: Session = Depends(get
         raise HTTPException(status_code=500, detail=f"Erro na deleção: {str(e)}")
 
 
+@app.post("/admin/cleanup-canary-tags")
+async def cleanup_canary_tags(dry_run: bool = False):
+    """Remove tags canary-* de revisões sem tráfego (percent==0).
+
+    Cada tag canary mantém a revisão "ready to serve", o que respeita
+    min-instances e gera custo always-on mesmo com 0% de tráfego. O
+    deploy_capi.sh já limpa no início de cada deploy, mas se ficam dias
+    sem deploy as tags órfãs sangram ~R$ 4-5/dia cada. Este endpoint é
+    disparado por Cloud Scheduler diário (canary-tag-cleanup-daily) pra
+    cobrir esse gap — independente de deploy.
+
+    Proteções: só remove entry que tem tag começando com 'canary-' E
+    percent ausente/0. Nunca toca tag 'prod', tag não-canary, nem
+    revisão com tráfego > 0.
+
+    Args:
+        dry_run: se True, retorna o que removeria sem aplicar.
+    """
+    import os as _os
+    from google.auth import default as gauth_default
+    from googleapiclient.discovery import build as _gapi_build
+
+    PROJECT = _os.getenv("GCP_PROJECT", "smart-ads-451319")
+    REGION = _os.getenv("CLOUD_RUN_REGION", "us-central1")
+    SERVICE = _os.getenv("SERVICE_NAME", "smart-ads-api")
+
+    try:
+        creds, _ = gauth_default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        # API v1 (Knative) exige endpoint regional
+        run_api = _gapi_build(
+            "run", "v1", credentials=creds,
+            client_options={"api_endpoint": f"https://{REGION}-run.googleapis.com"},
+            cache_discovery=False,
+        )
+        svc_path = f"namespaces/{PROJECT}/services/{SERVICE}"
+        svc = run_api.namespaces().services().get(name=svc_path).execute()
+
+        traffic = svc.get("spec", {}).get("traffic", [])
+        keep, removed = [], []
+        for t in traffic:
+            tag = t.get("tag", "")
+            pct = t.get("percent", 0) or 0
+            if tag.startswith("canary-") and pct == 0:
+                removed.append({"tag": tag, "revision": t.get("revisionName", "?")})
+            else:
+                keep.append(t)
+
+        if dry_run:
+            return {
+                "status": "dry_run",
+                "would_remove": removed,
+                "would_remove_count": len(removed),
+                "kept_count": len(keep),
+            }
+
+        if not removed:
+            logger.info("[canary-cleanup] nenhuma tag órfã encontrada")
+            return {"status": "noop", "removed": [], "removed_count": 0}
+
+        svc["spec"]["traffic"] = keep
+        run_api.namespaces().services().replaceService(
+            name=svc_path, body=svc
+        ).execute()
+        logger.info(
+            f"[canary-cleanup] {len(removed)} tag(s) canary órfã(s) removida(s): "
+            f"{[r['tag'] for r in removed]}"
+        )
+        return {"status": "success", "removed": removed, "removed_count": len(removed)}
+
+    except Exception as e:
+        logger.error(f"[canary-cleanup] erro: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro no cleanup de tags canary: {str(e)}")
+
+
 # =============================================================================
 # MONITORING HELPERS
 # =============================================================================
@@ -2377,6 +2451,53 @@ async def daily_monitoring_check_railway(
             end=window_end
         )
 
+        # FBP/FBC em janelas fixas 7d/3d/1d (independente do `hours` do report).
+        # Mostra tendência de preenchimento: queda de 7d→1d = degradação recente.
+        _fb_anchor = window_end
+        _fb_d1 = _fb_anchor - timedelta(days=1)
+        _fb_d3 = _fb_anchor - timedelta(days=3)
+        _fb_d7 = _fb_anchor - timedelta(days=7)
+        fbp_fbc_windows_row = railway_conn.run(
+            'SELECT '
+            "  COUNT(*) FILTER (WHERE created_at >= :d1) AS n1, "
+            "  COUNT(*) FILTER (WHERE created_at >= :d1 AND fbp IS NOT NULL AND fbp <> '') AS fbp1, "
+            "  COUNT(*) FILTER (WHERE created_at >= :d1 AND fbc IS NOT NULL AND fbc <> '') AS fbc1, "
+            "  COUNT(*) FILTER (WHERE created_at >= :d3) AS n3, "
+            "  COUNT(*) FILTER (WHERE created_at >= :d3 AND fbp IS NOT NULL AND fbp <> '') AS fbp3, "
+            "  COUNT(*) FILTER (WHERE created_at >= :d3 AND fbc IS NOT NULL AND fbc <> '') AS fbc3, "
+            "  COUNT(*) FILTER (WHERE created_at >= :d7) AS n7, "
+            "  COUNT(*) FILTER (WHERE created_at >= :d7 AND fbp IS NOT NULL AND fbp <> '') AS fbp7, "
+            "  COUNT(*) FILTER (WHERE created_at >= :d7 AND fbc IS NOT NULL AND fbc <> '') AS fbc7 "
+            'FROM leads_capi '
+            'WHERE created_at >= :d7 AND created_at <= :anchor',
+            d1=_fb_d1, d3=_fb_d3, d7=_fb_d7, anchor=_fb_anchor,
+        )
+        _fw = dict(zip(
+            ['n1', 'fbp1', 'fbc1', 'n3', 'fbp3', 'fbc3', 'n7', 'fbp7', 'fbc7'],
+            fbp_fbc_windows_row[0]
+        ))
+
+        def _fb_pct(num, den):
+            return round(num / den * 100, 1) if den else 0.0
+
+        fbp_fbc_rolling = {
+            '1d': {
+                'n': _fw['n1'] or 0,
+                'fbp_pct': _fb_pct(_fw['fbp1'] or 0, _fw['n1'] or 0),
+                'fbc_pct': _fb_pct(_fw['fbc1'] or 0, _fw['n1'] or 0),
+            },
+            '3d': {
+                'n': _fw['n3'] or 0,
+                'fbp_pct': _fb_pct(_fw['fbp3'] or 0, _fw['n3'] or 0),
+                'fbc_pct': _fb_pct(_fw['fbc3'] or 0, _fw['n3'] or 0),
+            },
+            '7d': {
+                'n': _fw['n7'] or 0,
+                'fbp_pct': _fb_pct(_fw['fbp7'] or 0, _fw['n7'] or 0),
+                'fbc_pct': _fb_pct(_fw['fbc7'] or 0, _fw['n7'] or 0),
+            },
+        }
+
         # 1c. Todos os leads com score (para métricas de qualidade por período)
         # UTMs + pageUrl extras pra split por variante A/B (baseline ponderado dos decis).
         # _calc_quality / _after / _decil_dist usam só [0]/[1]/[2], extras são ignorados.
@@ -2585,6 +2706,7 @@ async def daily_monitoring_check_railway(
                 'fbc_percentage': (with_fbc / total_meta_leads_dq * 100) if total_meta_leads_dq > 0 else 0,
                 'phone_present': with_phone,
                 'phone_percentage': (with_phone / total * 100) if total > 0 else 0,
+                'fbp_fbc_rolling': fbp_fbc_rolling,
             },
             'scoring': {
                 'total_scored': len(leads_data),
