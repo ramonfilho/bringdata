@@ -31,7 +31,11 @@ GCR_REGISTRY="${GCR_REGISTRY:-gcr.io}"
 MEMORY="${MEMORY:-2Gi}"  # Suficiente para CAPI + Monitoramento
 CPU="${CPU:-2}"
 TIMEOUT="${TIMEOUT:-600}"  # 10 minutos (original, necessário para monitoramento)
-MIN_INSTANCES="${MIN_INSTANCES:-1}"
+# min-instances=0: serviço não tem interface humana (só webhook→CAPI, janela
+# de minutos), cold start de ~15s é invisível pro sinal. Manter 1 custava
+# ~R$ 9/dia de instância always-on sem ganho. Ver docs/operacoes_gcp_custos.md
+# seção "Eliminação de min-instances no Cloud Run — 2026-05-14".
+MIN_INSTANCES="${MIN_INSTANCES:-0}"
 MAX_INSTANCES="${MAX_INSTANCES:-100}"
 CONCURRENCY="${CONCURRENCY:-80}"
 

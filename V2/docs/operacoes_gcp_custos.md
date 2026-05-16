@@ -323,6 +323,22 @@ O template está com `minScale=unset`, mas a **revisão atualmente em 100% de tr
 
 Próximo deploy normal já resolve. Se quiser forçar agora, basta deployar a mesma imagem com `--clear-min-instances` ou aguardar o ciclo de canary natural.
 
+### Regressão por deploy — corrigida em 2026-05-16
+
+**O `gcloud run services update --min-instances=0` no template NÃO sobrevive a deploys.** O `deploy_capi.sh` passa `--min-instances $MIN_INSTANCES` explicitamente (linha 555), e `lib/config.sh:34` tinha o default `MIN_INSTANCES="${MIN_INSTANCES:-1}"`. Resultado: o primeiro deploy via script após 14/mai reverteu min-instances pra 1 — confirmado pelo custo de 16/mai (template voltou a `minScale=1`) vs 15/mai (R$ 5,52, ainda em min=0).
+
+**Correção definitiva:** `lib/config.sh:34` mudou pra `MIN_INSTANCES="${MIN_INSTANCES:-0}"`. Agora todo deploy via `deploy_capi.sh` mantém min=0 por padrão e passa pelos Gates normalmente. Override pontual ainda possível com `MIN_INSTANCES=1 ./deploy_capi.sh` se necessário.
+
+**Validação de custo (billing export):**
+
+| Dia | Custo líquido | Estado |
+|---|---:|---|
+| 13/mai | R$ 135,92 | pico (tags canary + min=1 + SIGABRT) |
+| 14/mai | R$ 66,70 | dia da intervenção (meio-dia já corrigido) |
+| 15/mai | **R$ 5,52** | primeiro dia inteiro pós-fix (min=0, sem SIGABRT) |
+
+SIGABRT confirmado **zero** em 15 e 16/mai (era 1640/dia em 13/mai). O fix do startup probe `failureThreshold=3` segurou a madrugada crítica.
+
 ### Guardrails adicionados aos scripts de treino
 
 Como `Cloud SQL smart-ads-db` agora fica em `NEVER` por padrão (economia ~R$ 40/mês), os scripts de treino e retreino podem falhar com erro críptico de SQLAlchemy se o usuário esquecer de ligar a instância antes. Adicionamos:
