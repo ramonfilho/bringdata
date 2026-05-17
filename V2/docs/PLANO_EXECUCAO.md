@@ -36,6 +36,19 @@
 | **Endpoints `/monitoring/daily-check` e `/monitoring/feature-report`** | ✅ consertados 02/05 — typo no orchestrator (commit `7c69bfd`, T3-5) e subprocess `gcloud` no container Cloud Run (T1-11 Peça B), ambos em HTTP 500 desde a entrega. Commits `8718b00` (endpoints) + `f275d88` (path do drift por feature). |
 | **Sequela: Source/telefone_comprimento** | ✅ resolvido 02/05 — `_unify_source` sem fallback whitelist (deixava `tiktok` cru); `telefone_comprimento` ficava `int64` em batches só com telefones BR. Commit `f1082ff`. |
 | **Consertos estruturais (E1-E4)** | ✅ deployados 02/05 — fail-loud em `_load_valid_categories` (`fda24ce`), fix do path nos 2 leitores de drift em `data_quality.py` (`f275d88`), gate `/feature-report` no `smoke_test_revision.py` (`563a280`), integration test do `unify_medium` com artifact real (`c396b25`). |
+| **🔴 Captação migrou de tabela (`Lead` → `lead_surveys`)** | 🚧 **FRENTE ATIVA URGENTE (17/05/2026).** `Lead` com 0 entradas há 6h; CAPI scoreado por ML está **OFF para a inflow viva** (nosso código só lê `Lead`). Mitigação: schedulers `slack-digest-daily` e `railway-polling` **PAUSADOS**. Sessão paralela commitou repoint do `critical_alerts` (`52b507d`/`642ffa4`, 17/05) mas a revisão servindo (`00487-nid`, build 16/05 14:03) **não inclui** o fix → pausa **mantida** até esse fix ser promovido (ação do terminal de monitoramento). Esta frente = scoring/CAPI → `lead_surveys`, isolada. Spec/catálogo: `PROCESSO_CAPI_LEAD_SURVEYS.md`. |
+
+---
+
+## 🔴 FRENTE ATIVA URGENTE — Restaurar CAPI scoreado para a captação migrada (17/05/2026)
+
+**O que aconteceu:** a captação de produção migrou da tabela `Lead` para `lead_surveys`. Nosso pipeline de scoring/CAPI só lê `Lead` → o evento scoreado por ML (`LeadQualified`/`LeadQualifiedHighQuality` com valor por decil) parou de ser enviado para a inflow viva. Mitigação já aplicada (schedulers pausados) só silencia alarme falso; **não restaura o sinal**.
+
+**Decisão de fonte (resolvida 17/05):** implementar já, recuperando `computador`/fbp/fbc de `integration_logs` (~90%/~98%); os ~10% sem `computador` não são enviados (skip, consistente com a regra dura); fail-loud na cobertura. Pedir colunas limpas ao front segue em paralelo como melhoria de durabilidade.
+
+**Como executar:** protocolo por item (Princípio 2 e 5 abaixo) — cada item I1–I7 é implementado → testado → commitado → canary 0% → validado → promovido com OK explícito. Nenhum item começa sem autorização. Sequência e especificação técnica completa no catálogo `PROCESSO_CAPI_LEAD_SURVEYS.md` (§9). I0 — decisão + este registro — concluído.
+
+**Religar schedulers** só após o código ler `lead_surveys` E os bloqueios duros de monitoramento (B1–B4 do catálogo) prontos.
 
 ---
 

@@ -1,6 +1,6 @@
 # Índice de Documentação — Bring Data V2
 
-**Atualizado:** 2026-05-14
+**Atualizado:** 2026-05-17
 **Propósito:** mapa de todos os documentos da pasta `docs/`, seus papéis, status e como se relacionam.
 
 > **Reorganização de nomenclatura (10/05/2026):** os docs operacionais (este índice, `PLANO_EXECUCAO`, `registro_erros_ml`, `AUDITORIA_QUEBRA_PRODUCAO`) foram reescritos pra usar linguagem natural primeiro. Os catálogos técnicos (`PLANO_SAFEGUARD`, `PLANO_REFACTOR_MLOPS`) ganharam título verbal por item + identificador codificado (`T1-X`, `DT-X`) movido pro rodapé. Identificadores continuam funcionais pra cruzar com commits e issues antigas, mas o nome verbal é o que aparece no fluxo de leitura.
@@ -97,6 +97,11 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Papel:** especificação dos pré-requisitos e passos de implementação para envio de eventos ao Google Ads (Enhanced Conversions for Leads). Documenta decisões fixadas (estratégia, credenciais), bloqueantes abertos (gclid não capturado), e a infra já preparada (`should_send_to_destination`, `CAPIConfig`, dispatcher).
 **Status:** ativo. Atualizado em 2026-05-01.
 **Relação:** referenciado por `PLANO_EXECUCAO.md` em H6 → "Diversificação de canais". Tese estratégica em `swot_bringdata.md` (F8/W4/O4). Pré-condição: Cliente B estabilizado (H5).
+
+### `PROCESSO_CAPI_LEAD_SURVEYS.md`
+**Papel:** especificação completa de fazer o evento CAPI scoreado por ML (`LeadQualified` + `LeadQualifiedHighQuality`) ser disparado a partir de **duas** tabelas — `Lead` (como hoje) **e** `lead_surveys` — sem tocar no fluxo da `Lead`. Cobre a investigação (esteiras quase disjuntas: só 13 emails em comum em 7d; a esteira nova já manda eventos genéricos próprios pro Meta), cobertura de recuperação por JOIN (fbp/fbc 98%, `computador` ~90% via log vs ~100% no `Lead`), decisões fixadas do usuário (coluna `computador` pedida ao front, `leads_capi` só fallback, forward-only, monitoramento estendido junto, ledger próprio `survey_capi_sent`, isolamento do fluxo `Lead`, fail-loud, restrições duras), verificação de vocabulário das respostas (100% seguro) e pendências obrigatórias pro go-live (vocabulário de `computador` quando a coluna chegar; whitelist de UTM dos survey leads — classe de quebra histórica "Cluster 5"/"cenário 1.2").
+**Status:** 🚧 investigação concluída · desenho fechado · ⚪ **implementação BLOQUEADA** até autorização explícita do usuário **e** chegada da coluna `computador` em `lead_surveys`. Nenhum código escrito. Criado em 2026-05-17.
+**Relação:** dependência externa rastreada também em `instrucoes_dev_frontend_capi.md`. Classe de quebra histórica referenciada em `AUDITORIA_QUEBRA_PRODUCAO.md`. Toca o endpoint `/railway/process-pending` (`api/app.py`) e o mapeamento `api/railway_mapping.py`; quando ligado, exige extensão do monitoramento (`CRITICAL_ALERTS_SPEC.md` / digest). Regra fail-loud: `CLAUDE.md`.
 
 ### `arquivo/ROADMAP_MLOPS_MATURIDADE.md` 📦 ARQUIVADO
 **Status:** ✅ **ARQUIVADO em 27/04/2026.** Conteúdo absorvido pelos horizontes H1–H7 do `PLANO_EXECUCAO.md`. Consultar apenas como referência histórica.
