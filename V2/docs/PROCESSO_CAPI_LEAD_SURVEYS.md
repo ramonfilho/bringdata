@@ -47,7 +47,9 @@ Schema real: `id, clientEmail, genero, idade, ocupacao, faixaSalarial, cartaoCre
 
 Medição inicial (16/05, 728 linhas): fbp+fbc **98%** (711/728) · `computador` via `n8n_onboarding` **90%** (654/728) · telefone **90%** · ambos **89%**.
 
-**Re-medição 17/05 20:30 (1117 linhas):** fbp+fbc **97,0%** (1083/1117) · `computador` só `n8n_onboarding` **91,2%** (1019/1117) · `computador` via `n8n_onboarding` **ou** `activecampaign` (campo 144) **100,0%** (1117/1117) · fbp/fbc **e** `computador` (fontes combinadas) **97,0%**. Conclusão: com as duas fontes, `computador` deixa de ser o gargalo (≈100% nesta janela) e o limitante de envio passa a ser **fbp/fbc ≈97%** → ~3% skipados pela regra dura, não ~10%. Os 100% são desta janela com 2 fontes, não garantia estrutural — daí o pedido da coluna limpa continuar valendo por durabilidade.
+**Re-medição 17/05 20:30 (1117 linhas):** fbp+fbc **97,0%** (1083/1117) · `computador` só `n8n_onboarding` **91,3%** · `computador` só `activecampaign` (campo 144) **99,9%** (1107/1108) · `n8n_onboarding` **ou** `activecampaign` **100,0%** · fbp/fbc **e** `computador` (combinado) **97,0%**. Conclusão: com as duas fontes `computador` ≈100% (nesta janela); limitante de envio passa a ser **fbp/fbc ≈97%** → ~3% skip pela regra dura, não ~10%. Não é garantia estrutural — pedido da coluna limpa segue por durabilidade.
+
+**Validação de proveniência do campo 144 (17/05):** onde o lead tem as duas fontes (1.011 leads), `activecampaign` campo 144 = `n8n_onboarding` `tem_computador` em **1.011/1.011 (100,00%, zero divergência)**; ambos domínio `{SIM,NAO}`. Evidência empírica forte de que campo 144 **é** o `computador` (as demais perguntas SIM/NAO da pesquisa são independentes — não dariam 100% de correlação). Ressalva: validação empírica, não a config de campos do ActiveCampaign do front — confirmar com quem mantém o front fecha a certeza.
 
 ### 2.5 `computador` no `Lead` é ~100% — o 90% da esteira nova é degradação real
 
