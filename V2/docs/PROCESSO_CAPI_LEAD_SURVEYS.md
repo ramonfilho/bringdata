@@ -45,11 +45,13 @@ Schema real: `id, clientEmail, genero, idade, ocupacao, faixaSalarial, cartaoCre
 
 ### 2.4 Cobertura de recuperação por JOIN (janela 7d)
 
-fbp+fbc: **98%** (711/728) · `computador` via n8n: **90%** (654/728) · telefone: **90%** · fbp+fbc **e** computador juntos: **89%**.
+Medição inicial (16/05, 728 linhas): fbp+fbc **98%** (711/728) · `computador` via `n8n_onboarding` **90%** (654/728) · telefone **90%** · ambos **89%**.
+
+**Re-medição 17/05 20:30 (1117 linhas):** fbp+fbc **97,0%** (1083/1117) · `computador` só `n8n_onboarding` **91,2%** (1019/1117) · `computador` via `n8n_onboarding` **ou** `activecampaign` (campo 144) **100,0%** (1117/1117) · fbp/fbc **e** `computador` (fontes combinadas) **97,0%**. Conclusão: com as duas fontes, `computador` deixa de ser o gargalo (≈100% nesta janela) e o limitante de envio passa a ser **fbp/fbc ≈97%** → ~3% skipados pela regra dura, não ~10%. Os 100% são desta janela com 2 fontes, não garantia estrutural — daí o pedido da coluna limpa continuar valendo por durabilidade.
 
 ### 2.5 `computador` no `Lead` é ~100% — o 90% da esteira nova é degradação real
 
-Fill-rate de `Lead.pesquisa.computador`: 7d **100,0%** (3.812/3.812), 30d **99,95%**, 90d **99,96%**. Em 7d, leads com `computador` em branco = **0** — o modelo **nunca** rodou em produção sem essa feature. Logo, recuperar `computador` a 90% via log é degradação de ~10% contra o baseline que o modelo conhece — vetado pela regra dura do usuário ("não pode mandar evento sem ela").
+Fill-rate de `Lead.pesquisa.computador`: 7d **100,0%** (3.812/3.812), 30d **99,95%**, 90d **99,96%**. Em 7d, leads com `computador` em branco = **0** — o modelo **nunca** rodou em produção sem essa feature. Logo, recuperar `computador` a 90% via log é degradação de ~10% contra o baseline que o modelo conhece — vetado pela regra dura do usuário ("não pode mandar evento sem ela"). **Atualização 17/05:** combinando `n8n_onboarding`+`activecampaign` (campo 144), `computador` recupera ≈100% nesta janela (§2.4 re-medição) — a degradação de ~10% deixa de se aplicar na prática; mantém-se o pedido da coluna limpa por durabilidade, mas o limitante real de envio passa a ser fbp/fbc (~3% skip).
 
 O dado existe na origem (o front captura `computador` em ~100% no funil `Lead`); ele só **não é persistido na tabela `lead_surveys`**. Daí a decisão de pedir a coluna (ver §3).
 
@@ -90,7 +92,7 @@ Nenhum código foi escrito. Quando autorizado **e** com a coluna `computador` di
 
 ## 6. Bloqueador atual
 
-**Decisão resolvida (2026-05-17):** o usuário optou por **não esperar a coluna limpa**. A esteira nova é implementada **já**, recuperando `computador`/fbp/fbc de `integration_logs` (cobertura ~90%/~98% — §2.4). Os ~10% sem `computador` recuperável **não são enviados** (skip registrado no ledger, consistente com a regra dura "não enviar evento sem `computador`"), e há guarda fail-loud se a cobertura cair (§3.7/§3.8). Pedir a coluna `computador` (e idealmente fbp/fbc/telefone/nome) como campo limpo ao front **continua valendo, em paralelo**, como melhoria de durabilidade (fecha os ~10% e remove a fragilidade do parse de log) — rastrear em `instrucoes_dev_frontend_capi.md` (follow-up sugerido, não executado aqui).
+**Decisão resolvida (2026-05-17):** o usuário optou por **não esperar a coluna limpa**. A esteira nova é implementada **já**, recuperando `computador`/fbp/fbc de `integration_logs` (re-medição 17/05: `computador` ≈100% combinando `n8n_onboarding`+`activecampaign` campo 144; fbp/fbc ≈97% — §2.4). O limitante real do envio passa a ser **fbp/fbc**: os ~3% sem fbp/fbc **não são enviados** (skip registrado no ledger, consistente com a regra dura — sem fbp/fbc também não se envia), e há guarda fail-loud se a cobertura cair (§3.7/§3.8). Pedir a coluna `computador` (e idealmente fbp/fbc/telefone/nome) como campo limpo ao front **continua valendo, em paralelo**, como melhoria de durabilidade (fecha os ~10% e remove a fragilidade do parse de log) — rastrear em `instrucoes_dev_frontend_capi.md` (follow-up sugerido, não executado aqui).
 
 Motivo da mudança de postura: a captação de produção migrou para `lead_surveys` e o sinal CAPI scoreado ficou OFF para a inflow viva (ver estado operacional no topo) — esperar a coluna mantém o sinal em 0%; recuperar de log restaura ~90% agora.
 
