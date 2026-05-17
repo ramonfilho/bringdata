@@ -1,7 +1,7 @@
 # Disparar o evento scoreado também para quem responde a pesquisa pela esteira nova
 
 **Criado:** 2026-05-17
-**Status:** investigação concluída · desenho fechado · decisão de fonte **resolvida** (recuperar de `integration_logs` já — §6) · I0 concluído · **implementação por item I1–I7 (§9), cada item exige autorização explícita** · sinal CAPI scoreado **OFF para a inflow viva** desde a migração (mitigação: schedulers pausados — ver estado operacional no topo)
+**Status:** investigação concluída · desenho fechado · decisão de fonte **resolvida** (recuperar de `integration_logs` já — §6) · I0+I1 concluídos · **implementação por item I2–I7 (§9), cada item exige autorização explícita** · sinal CAPI scoreado **OFF para a inflow viva** desde a migração (mitigação: schedulers pausados — ver estado operacional no topo)
 **Papel:** especificação completa do processo de fazer o evento CAPI scoreado por ML (`LeadQualified` + `LeadQualifiedHighQuality`) ser disparado a partir de **duas** tabelas — a `Lead` (como hoje) **e** a `lead_surveys` — sem tocar no fluxo da `Lead`.
 
 > Linguagem natural primeiro (regra do `CLAUDE.md`). Identificadores de código e nomes de tabela aparecem no corpo porque o documento é técnico-operacional; o rodapé lista os artefatos.
@@ -67,7 +67,7 @@ Cada valor distinto de `lead_surveys`, após a normalização que **já roda em 
 2. **`leads_capi` só como fallback** — não será mais fonte primária (survey leads ~98% disjuntos dela).
 3. **Forward-only** — ao ligar, processar só `lead_surveys` a partir da data de go-live. **Não** re-disparar histórico.
 4. **Extensão de monitoramento entra junto** (não vira follow-up): digest e alertas críticos precisam enxergar a nova fonte, senão volume/CAPI parecem anômalos.
-5. **Tabela-ledger própria** (`survey_capi_sent`) para dedup — não escreve na tabela do front, não polui `leads_capi`.
+5. **Tabela-ledger própria** (`registros_ml`) para dedup — não escreve na tabela do front, não polui `leads_capi`.
 6. **Fluxo `Lead` intocado**; ramo `lead_surveys` roda **isolado** (try/except próprio) — falha no survey nunca derruba o `Lead`.
 7. **Fail-loud** (exigência do `CLAUDE.md`): cobertura de JOIN abaixo do limite → alerta; valor que não mapeia → falha alto; batch zerado → assert.
 8. **Restrições duras:** lead sem `computador` **ou** sem fbp/fbc → **não dispara**; desfecho `skipped` registrado no ledger.
@@ -82,7 +82,7 @@ Cada valor distinto de `lead_surveys`, após a normalização que **já roda em 
 
 Nenhum código foi escrito. Quando autorizado **e** com a coluna `computador` disponível:
 
-1. **Ledger** `survey_capi_sent` (nosso): `survey_id` (PK = `lead_surveys.id`), `clientEmail`, `eventId`, `leadScore`, `decil`, `capiStatus`, `capiSentAt`.
+1. **Ledger** `registros_ml` (nosso): `lead_id` (PK = `lead_surveys.id`), `email`, `variant`, `lead_score`, `decil`, `base_meta_event_id`/`base_status`, `hq_meta_event_id`/`hq_status` (HQ NULL se decil<9), `capi_sent_at`, `error_message`, `created_at`. **✅ implementado no I1** (renomeada de `survey_capi_sent` a pedido do usuário).
 2. **Ramo isolado** dentro de `/railway/process-pending`, **depois** do batch da `Lead`, em try/except próprio.
 3. **Seleção:** linhas de `lead_surveys` sem registro no ledger, ordem `submittedAt ASC`, mesmo batch size, **forward-only** a partir da data de go-live.
 4. **Enriquecimento por email:** UTM via `UTMTracking` (linha mais recente com `trackedAt ≤ submittedAt`); fbp/fbc/ip/user_agent via último `meta_capi`; telefone/nome via `n8n_onboarding`; `computador` da nova coluna; `leads_capi` só fallback.
@@ -105,7 +105,7 @@ Motivo da mudança de postura: a captação de produção migrou para `lead_surv
 Cada item é um ciclo completo implementa → testa → commita → deploya canary 0% → valida → promove (com OK). Nada começa sem autorização explícita por item.
 
 - **I0 — Decisão + roadmap** ✅ (2026-05-17): decisão de fonte resolvida (acima); frente registrada como ativa urgente no `PLANO_EXECUCAO.md`.
-- **I1 — Tabela-ledger** `survey_capi_sent` (migração isolada; dedup + score/decil/status/envio por survey lead).
+- **I1 — Tabela-ledger** `registros_ml` ✅ (2026-05-17): script idempotente `scripts/create_registros_ml.py`, aplicado e testado no Railway (12 colunas, PK `lead_id`, idempotência + PK-conflict + smoke OK, tabelas críticas intactas; renomeada de `survey_capi_sent` a pedido do usuário); commits `9b57c0d`+`31d1151` no branch `feat/capi-lead-surveys-scoring`. Nada lê/escreve até o I4.
 - **I2 — Adaptador de mapeamento** (`lead_surveys` + joins → dict idêntico ao do scorer): função pura, testável offline, segura pra equivalência (Gate C.1/C.2 zero divergência).
 - **I3 — JOINs de enriquecimento** (`UTMTracking` / `integration_logs`) com guardas fail-loud de cobertura.
 - **I4 — Ramo isolado** no `/railway/process-pending` (try/except próprio) + dry-run CAPI no canary 0%.
@@ -125,14 +125,14 @@ Cada item é um ciclo completo implementa → testa → commita → deploya cana
 
 ## 8. Estudo: extensão de monitoramento (2026-05-17)
 
-Estudo completo do que o monitoramento precisa para ter eficácia sobre a esteira nova. Hoje **todo** o monitoramento lê só `Lead` (e `leads_capi` por JOIN); **nenhuma** parte lê `lead_surveys`/`UTMTracking`/`integration_logs`/`survey_capi_sent`, **com uma exceção**: a regra de alerta crítico "não chega lead" (Regra 4) já lê `lead_surveys.submittedAt` desde 12/05/2026 — essa não muda.
+Estudo completo do que o monitoramento precisa para ter eficácia sobre a esteira nova. Hoje **todo** o monitoramento lê só `Lead` (e `leads_capi` por JOIN); **nenhuma** parte lê `lead_surveys`/`UTMTracking`/`integration_logs`/`registros_ml`, **com uma exceção**: a regra de alerta crítico "não chega lead" (Regra 4) já lê `lead_surveys.submittedAt` desde 12/05/2026 — essa não muda.
 
 ### 8.1 Bloqueio duro (sem isto, ligar quebra o monitoramento ou gera falso positivo constante)
 
 - **B1 — Guarda de schema do payload:** o auditor (`payload_schema.py`/`digest.py`) falha alto se o endpoint produzir qualquer chave nova não declarada, então todo breakdown/seção novo de pesquisa precisa ser pré-declarado **antes** de ligar, senão o digest inteiro quebra.
 - **B2 — Baseline do detector de desvio:** a regra de desvio de score/decil (Regra +) compara janela atual contra baseline de 30d só do `Lead`; ao ligar, a janela passa a misturar survey leads e o baseline fica defasado, disparando falso positivo até incorporar a fonte nova.
-- **B3 — Regra "CAPI com sucesso baixo" (Regra 5):** olha só `Lead.capiSentAt`; se a esteira de pesquisa falhar o envio, o alerta fica mudo (falso negativo) — precisa enxergar `survey_capi_sent`.
-- **B4 — Ledger como fonte:** nada disso funciona se `survey_capi_sent` não registrar `leadScore`/`decil`/`capiStatus`/`capiSentAt` por survey lead (já previsto em §5.1) — o monitoramento lê o ledger.
+- **B3 — Regra "CAPI com sucesso baixo" (Regra 5):** olha só `Lead.capiSentAt`; se a esteira de pesquisa falhar o envio, o alerta fica mudo (falso negativo) — precisa enxergar `registros_ml`.
+- **B4 — Ledger como fonte:** nada disso funciona se `registros_ml` não registrar `leadScore`/`decil`/`capiStatus`/`capiSentAt` por survey lead (já previsto em §5.1) — o monitoramento lê o ledger.
 
 ### 8.2 Reconciliação de números (sem isto, o relatório diário fica sem sentido, mas não quebra)
 
@@ -152,7 +152,7 @@ Estudo completo do que o monitoramento precisa para ter eficácia sobre a esteir
 
 - Regra 4 ("não chega lead") já lê `lead_surveys`. Regra "polling com erro 500" independe de qual esteira roda dentro do endpoint.
 
-> Nota de fidelidade: o desenho usa **um único ledger** `survey_capi_sent` (§5.1) — score, status e envio vivem nele; o monitoramento lê dele e de `lead_surveys`. Não há tabelas auxiliares adicionais.
+> Nota de fidelidade: o desenho usa **um único ledger** `registros_ml` (§5.1) — score, status e envio vivem nele; o monitoramento lê dele e de `lead_surveys`. Não há tabelas auxiliares adicionais.
 
 **Correção (2026-05-17):** a primeira versão deste estudo atribuía as métricas de período/decil e os detectores de deriva ao Google Sheets — **erro**. A fonte viva do digest é o Railway (`Lead`/`leads_capi` via pg8000); o código `gspread` remanescente é legado inerte. A conclusão de cada ponto (cegueira à coorte de pesquisa) se mantém, porque o que esses componentes leem é `Lead`, não `lead_surveys`.
 
