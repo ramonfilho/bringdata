@@ -313,13 +313,7 @@ def rule_no_leads_arriving(conn) -> RuleResult:
 
 
 def rule_capi_success_low(conn) -> RuleResult:
-    """Regra 5: ≥10 enviados em 60min mas success rate < 95%.
-
-    ⚠️ PENDENTE DE REPOINT (17/05/2026): lê `Lead.capiStatus/capiSentAt`, que
-    deixou de receber dados na migração pra lead_surveys. O destino dos campos
-    de scoring/CAPI no novo fluxo está sendo definido em outro terminal. Até lá
-    a regra se auto-skipa por amostra insuficiente (sent<10) — não gera ruído.
-    """
+    """Regra 5: ≥10 enviados em 60min mas success rate < 95%."""
     cutoff = _window_start_utc()
     rows = conn.run(
         'SELECT '
@@ -347,12 +341,9 @@ def rule_capi_success_low(conn) -> RuleResult:
 def rule_variant_no_capi(conn) -> RuleResult:
     """Regra 1 (versão MVP global): ≥10 leads scored em 60min mas 0 CAPI enviado.
 
-    ⚠️ PENDENTE DE REPOINT (17/05/2026): lê `Lead.leadScore/capiSentAt`, faminto
-    pós-migração lead_surveys. Destino dos campos de scoring no novo fluxo em
-    definição (outro terminal). Auto-skipa por amostra insuficiente até lá.
-
-    Versão por-variant (Champion vs Challenger) pendente — sem coluna `variant`
-    pra atribuição direta. MVP usa total agregado ("pipeline CAPI parado").
+    Versão por-variant (Champion vs Challenger) pendente — não há coluna `variant`
+    em Lead pra atribuição direta. MVP usa total agregado, que pega o caso
+    "pipeline CAPI completamente parado".
     """
     cutoff = _window_start_utc()
     rows = conn.run(
@@ -377,20 +368,15 @@ def rule_variant_no_capi(conn) -> RuleResult:
 
 
 def rule_fbp_fbc_low(conn) -> RuleResult:
-    """Regra 6: fbp<95% OU fbc<80% em 60min (N≥50).
-
-    Fonte: `leads_capi` direto (fbp/fbc/created_at vivem lá e continuam fluindo
-    — ~3.3k/7d, fill ~99%/94%). Antes fazia JOIN Lead × leads_capi por email,
-    mas `Lead` ficou faminto pós-migração 12/05; query agora é só leads_capi.
-    `leads_capi.created_at` é snake_case e timezone-aware (UTC).
-    """
+    """Regra 6: fbp<95% OU fbc<80% em 60min (N≥50). JOIN Lead × leads_capi por email."""
     cutoff = _window_start_utc()
     rows = conn.run(
         'SELECT '
-        '  COUNT(*) AS n, '
-        '  COUNT(*) FILTER (WHERE fbp IS NOT NULL AND fbp <> \'\') AS with_fbp, '
-        '  COUNT(*) FILTER (WHERE fbc IS NOT NULL AND fbc <> \'\') AS with_fbc '
-        'FROM leads_capi WHERE created_at >= :cutoff',
+        '  COUNT(DISTINCT l.email) AS n, '
+        '  COUNT(DISTINCT CASE WHEN lc.fbp IS NOT NULL AND lc.fbp <> \'\' THEN l.email END) AS with_fbp, '
+        '  COUNT(DISTINCT CASE WHEN lc.fbc IS NOT NULL AND lc.fbc <> \'\' THEN l.email END) AS with_fbc '
+        'FROM "Lead" l LEFT JOIN leads_capi lc ON LOWER(l.email) = LOWER(lc.email) '
+        'WHERE l."createdAt" >= :cutoff',
         cutoff=cutoff,
     )
     n, with_fbp, with_fbc = (rows[0][0] or 0, rows[0][1] or 0, rows[0][2] or 0)
@@ -438,10 +424,6 @@ def rule_score_drift(conn, expected_decil_dist: Optional[dict]) -> RuleResult:
     """
     Regra +: drift de score em 60min vs baseline rolling 30d (expected_decil_dist).
     Dispara se (A) score médio > 1σ off OU (B) KS p<0.01 ou ΔD10 ≥ 5pp.
-
-    ⚠️ PENDENTE DE REPOINT (17/05/2026): lê `Lead.leadScore/decil`, faminto
-    pós-migração lead_surveys. Destino dos campos de scoring no novo fluxo em
-    definição (outro terminal). Auto-skipa por amostra insuficiente até lá.
     """
     import statistics
     cutoff = _window_start_utc()
