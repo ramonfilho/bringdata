@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Migração I1 — tabela-ledger `survey_capi_sent` (idempotente).
+"""Migração I1 — tabela-ledger `registros_ml` (idempotente).
 
 Tabela NOSSA (não Prisma) — fonte única de verdade dos eventos CAPI scoreados
 por ML disparados a partir de `lead_surveys`:
@@ -13,14 +13,17 @@ por ML disparados a partir de `lead_surveys`:
 
 Idempotente: usa CREATE TABLE/INDEX IF NOT EXISTS — rodar N vezes = mesmo estado.
 Não-destrutivo: não toca nenhuma tabela existente.
-Rollback: DROP TABLE survey_capi_sent;
+Rollback: DROP TABLE registros_ml;
+
+Histórico: criada como `survey_capi_sent` no I1 e renomeada para `registros_ml`
+a pedido do usuário antes de qualquer consumidor (nada lê/escreve até o I4).
 
 Credenciais: lê RAILWAY_DB_* do ambiente; se ausentes, carrega de um .env
 apontado por RAILWAY_ENV_FILE, ou de scripts/../.env. Sem hardcode de path.
 
 Uso:
-  RAILWAY_ENV_FILE=/abs/V2/.env python scripts/create_survey_capi_sent.py
-  python scripts/create_survey_capi_sent.py --verify-only
+  RAILWAY_ENV_FILE=/abs/V2/.env python scripts/create_registros_ml.py
+  python scripts/create_registros_ml.py --verify-only
 """
 import argparse
 import os
@@ -50,7 +53,7 @@ def _load_env() -> None:
 
 
 DDL_TABLE = """
-CREATE TABLE IF NOT EXISTS survey_capi_sent (
+CREATE TABLE IF NOT EXISTS registros_ml (
     lead_id            TEXT PRIMARY KEY,           -- = lead_surveys.id (dedup)
     email              TEXT,
     variant            TEXT,                       -- champion | challenger (deriva nome do evento)
@@ -67,13 +70,13 @@ CREATE TABLE IF NOT EXISTS survey_capi_sent (
 """
 
 DDL_INDEX = (
-    "CREATE INDEX IF NOT EXISTS idx_survey_capi_sent_created_at "
-    "ON survey_capi_sent (created_at);"
+    "CREATE INDEX IF NOT EXISTS idx_registros_ml_created_at "
+    "ON registros_ml (created_at);"
 )
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Cria/verifica a tabela survey_capi_sent.")
+    ap = argparse.ArgumentParser(description="Cria/verifica a tabela registros_ml.")
     ap.add_argument(
         "--verify-only",
         action="store_true",
@@ -109,13 +112,13 @@ def main() -> None:
         cols = conn.run(
             """SELECT column_name, data_type, is_nullable, column_default
                FROM information_schema.columns
-               WHERE table_schema='public' AND table_name='survey_capi_sent'
+               WHERE table_schema='public' AND table_name='registros_ml'
                ORDER BY ordinal_position"""
         )
         if not cols:
-            sys.exit("[FALHA] tabela survey_capi_sent NÃO existe após o DDL.")
+            sys.exit("[FALHA] tabela registros_ml NÃO existe após o DDL.")
 
-        print(f"\nsurvey_capi_sent — {len(cols)} colunas:")
+        print(f"\nregistros_ml — {len(cols)} colunas:")
         for cn, dt, nul, dflt in cols:
             print(f"  {cn:20s} {dt:18s} null={nul:3s} default={dflt}")
 
@@ -123,14 +126,14 @@ def main() -> None:
             """SELECT a.attname FROM pg_index i
                JOIN pg_attribute a
                  ON a.attrelid=i.indrelid AND a.attnum = ANY(i.indkey)
-               WHERE i.indrelid='survey_capi_sent'::regclass AND i.indisprimary"""
+               WHERE i.indrelid='registros_ml'::regclass AND i.indisprimary"""
         )
         idx = conn.run(
             """SELECT indexname FROM pg_indexes
-               WHERE schemaname='public' AND tablename='survey_capi_sent'
+               WHERE schemaname='public' AND tablename='registros_ml'
                ORDER BY indexname"""
         )
-        n = conn.run("SELECT count(*) FROM survey_capi_sent")[0][0]
+        n = conn.run("SELECT count(*) FROM registros_ml")[0][0]
         print(f"  PK: {[r[0] for r in pk]}")
         print(f"  índices: {[r[0] for r in idx]}")
         print(f"  linhas: {n}")
