@@ -524,6 +524,67 @@ def record_polling_status(store: GcsStateStore, status: str, history_len: int = 
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# Alerta dedicado (push) — feature quebrada no encoding bloqueou o batch
+# ──────────────────────────────────────────────────────────────────────────
+
+def alert_feature_encoding_blocked(
+    feature_names: list[str],
+    n_leads: int,
+    model_run_id: str = '',
+    store: Optional[GcsStateStore] = None,
+    dry_run: Optional[bool] = None,
+) -> str:
+    """Alerta fail-loud: o validador pós-encoding bloqueou um batch em produção.
+
+    Diferente das regras de `run_critical_checks` (que pollam o banco/estado),
+    este é um alerta de evento — chamado direto pelo handler do polling Railway
+    no instante em que o validador estoura, porque os leads NÃO foram scoreados
+    e NÃO foram enviados ao Meta. Sem este aviso o estrago é silencioso: antes
+    desta correção a exceção derrubava o ciclo inteiro e o hook de alertas nem
+    rodava (vide registro_erros_ml.md § V.5 e PLANO_SAFEGUARD "Validador
+    pós-encoding").
+
+    Self-contained: cria/usa um `GcsStateStore`, dispara via `SlackDispatcher`
+    (respeita cooldown como qualquer regra) e dá flush. Retorna o status do
+    dispatcher ('sent' | 'dry_run' | 'cooldown' | 'error' | ...).
+    """
+    if dry_run is None:
+        dry_run = os.environ.get('CRITICAL_ALERTS_DRY_RUN', 'true').lower() == 'true'
+    own_store = store is None
+    if store is None:
+        store = GcsStateStore()
+
+    feats = ', '.join(feature_names[:5]) if feature_names else '(não especificada)'
+    if feature_names and len(feature_names) > 5:
+        feats += f" (+{len(feature_names) - 5})"
+    rid = f" · modelo {model_run_id[:8]}" if model_run_id else ''
+    message = (
+        f"Feature(s) quebrada(s) no encoding: *{feats}*{rid}.\n"
+        f"*{n_leads} lead(s) NÃO foram scoreados nem enviados ao Meta* neste ciclo.\n"
+        f"Os leads ficaram segurados (capiStatus=blocked_feature) pra não entrar "
+        f"em loop de re-tentativa a cada 5min. Investigar a feature pré-OHE "
+        f"(parsing/casing/categoria sumindo) antes de liberar."
+    )
+    result = RuleResult(
+        rule_name='feature_encoding_blocked',
+        fired=True,
+        severity='HIGH',
+        message=message,
+        details={'features': feature_names, 'n_leads': n_leads,
+                 'model_run_id': model_run_id},
+    )
+    dispatcher = SlackDispatcher(store, dry_run=dry_run)
+    status = dispatcher.maybe_send(result)
+    if own_store:
+        store.flush()
+    logger.info(
+        f"[critical_alerts] feature_encoding_blocked: dispatch={status} "
+        f"n_leads={n_leads} feats={feats}"
+    )
+    return status
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # Entry point
 # ──────────────────────────────────────────────────────────────────────────
 

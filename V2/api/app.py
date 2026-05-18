@@ -4232,6 +4232,10 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
             'source, medium, campaign, content, term, '
             '"remoteIp", "userAgent", fbc, fbp, "pageUrl" '
             f'FROM "Lead" WHERE "leadScore" IS NULL '
+            # [Estancar o estrago] não re-selecionar leads que o validador
+            # pós-encoding já segurou — sem isto o polling re-pega os mesmos
+            # a cada 5min num loop infinito (registro_erros_ml.md § V.5).
+            f'AND ("capiStatus" IS NULL OR "capiStatus" <> \'blocked_feature\') '
             f'ORDER BY "createdAt" ASC LIMIT {_polling_limit}'
         )
 
@@ -4335,6 +4339,12 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
 
         # Rodar pipeline por grupo, coletar score+decil por índice
         score_by_index = {}   # i → (lead_score, decil_str)
+        # [Estancar o estrago] grupos que o validador pós-encoding bloquear
+        # ficam aqui pra status terminal + alerta fail-loud (em vez de derrubar
+        # o ciclo inteiro com HTTP 500 e re-tentar os mesmos leads pra sempre).
+        feature_blocked_lead_ids: list = []
+        feature_blocked_feature_names: set = set()
+        feature_blocked_run_id = ''
         for vname, indices in variant_groups.items():
             predictor_ov = pipeline.get_variant_predictor(vname) if vname else pipeline.predictor
             # DT-12: encoding_overrides por variante (ex: jan30 usa ordinal para idade/salário).
@@ -4360,6 +4370,33 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
                 group_label = vname or 'default'
                 logger.info(f"   Executando pipeline para {len(group_sheets)} leads [{group_label}]...")
                 group_result = pipeline.run(temp_file, with_predictions=True, predictor_override=predictor_ov, encoding_overrides=enc_overrides)
+            except ValueError as _enc_err:
+                # [Estancar o estrago] O validador pós-encoding ("feature zerada
+                # em massa", T1-16 / grupo OHE todo-zerado, DT-19) levanta
+                # ValueError com prefixo conhecido. ANTES: propagava, derrubava
+                # o ciclo inteiro (HTTP 500), os leads ficavam leadScore IS NULL
+                # e o polling re-selecionava os mesmos a cada 5min — loop
+                # infinito, nunca iam pro Meta, e o hook de alertas nem rodava.
+                # AGORA: segura só os leads deste grupo (status terminal lá
+                # embaixo) e segue com os outros grupos. ValueError de outra
+                # origem continua propagando (comportamento inalterado).
+                _msg = str(_enc_err)
+                if not (_msg.startswith('[T1-16]') or _msg.startswith('[DT-19]')):
+                    raise
+                import re as _re
+                _feats = _re.findall(r'([A-Za-z0-9_]+) \(obs=', _msg) or \
+                         _re.findall(r'([A-Za-z0-9_]+)=[0-9.]+ \(', _msg)
+                feature_blocked_feature_names.update(_feats)
+                if not feature_blocked_run_id:
+                    feature_blocked_run_id = getattr(predictor_ov, 'mlflow_run_id', '') or ''
+                _grp_ids = [valid_leads[k]['id'] for k in indices]
+                feature_blocked_lead_ids.extend(_grp_ids)
+                logger.error(
+                    f"🛑 [feature_blocked] grupo [{vname or 'default'}] bloqueado "
+                    f"pelo validador pós-encoding: {len(_grp_ids)} leads NÃO "
+                    f"scoreados, segurados pra não entrar em loop. {_msg}"
+                )
+                continue
             finally:
                 if temp_file and os.path.exists(temp_file):
                     os.remove(temp_file)
@@ -4377,7 +4414,11 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
                 except Exception as e:
                     logger.warning(f"⚠️ Erro ao extrair score para índice {orig_i}: {e}")
 
-        if not score_by_index:
+        if not score_by_index and not feature_blocked_lead_ids:
+            # Vazio genuíno (pipeline retornou nada e não foi bloqueio de
+            # feature) → 500 como antes. Se TUDO foi bloqueado pelo validador,
+            # NÃO dá 500: segue o fluxo normal (leads são segurados + alerta
+            # fail-loud + hook de alertas roda no caminho de sucesso).
             raise HTTPException(status_code=500, detail="Pipeline retornou resultado vazio para todos os grupos")
 
         # 7. Atualizar Railway + preparar payload CAPI
@@ -4503,21 +4544,59 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
                 except Exception as e:
                     logger.warning(f"⚠️ Erro ao marcar lead {status} {lead_id}: {e}")
 
+        # 9c. [Estancar o estrago] Leads cujo grupo o validador pós-encoding
+        # bloqueou: status terminal 'blocked_feature' (a busca de pendentes não
+        # os re-seleciona → mata o loop infinito) + alerta fail-loud dedicado.
+        # Decisão de produto registrada no desenho: "segurar o lead" — leadScore
+        # continua nulo, não scoreamos degradado. Em dry_run (smoke test) não
+        # muta estado nem dispara alerta.
+        if feature_blocked_lead_ids and not dry_run:
+            for _bid in feature_blocked_lead_ids:
+                try:
+                    railway_conn.run(
+                        'UPDATE "Lead" SET "capiStatus" = :status, '
+                        '"updatedAt" = NOW() WHERE id = :lead_id',
+                        status='blocked_feature',
+                        lead_id=_bid,
+                    )
+                except Exception as e:
+                    logger.warning(f"⚠️ Erro ao marcar lead blocked_feature {_bid}: {e}")
+            try:
+                from src.monitoring.critical_alerts import alert_feature_encoding_blocked
+                _disp = alert_feature_encoding_blocked(
+                    feature_names=sorted(feature_blocked_feature_names),
+                    n_leads=len(feature_blocked_lead_ids),
+                    model_run_id=feature_blocked_run_id,
+                )
+                logger.info(f"🚨 feature_encoding_blocked alerta: dispatch={_disp}")
+            except Exception as _ae:
+                logger.warning(f"⚠️ alerta feature_encoding_blocked falhou (não bloqueia polling): {_ae}")
+        elif feature_blocked_lead_ids and dry_run:
+            logger.info(
+                f"🧪 dry_run=true — {len(feature_blocked_lead_ids)} leads seriam "
+                f"marcados blocked_feature e o alerta NÃO seria disparado"
+            )
+
         if dry_run:
             logger.info(
                 f"🧪 Railway polling DRY-RUN concluído: {processed} scoreados (não escritos), "
                 f"{skipped} erros, {len(capi_leads)} CAPI montados (não enviados), "
-                f"{len(blocked_lead_ids)} seriam bloqueados, {len(skipped_lead_ids)} seriam ignorados"
+                f"{len(blocked_lead_ids)} seriam bloqueados, {len(skipped_lead_ids)} seriam ignorados, "
+                f"{len(feature_blocked_lead_ids)} seriam segurados por feature quebrada"
             )
         else:
             logger.info(
                 f"✅ Railway polling concluído: {processed} processados, "
                 f"{skipped} erros, {capi_result.get('success', 0)} CAPI enviados, "
-                f"{len(blocked_lead_ids)} bloqueados, {len(skipped_lead_ids)} ignorados por source"
+                f"{len(blocked_lead_ids)} bloqueados, {len(skipped_lead_ids)} ignorados por source, "
+                f"{len(feature_blocked_lead_ids)} segurados por feature quebrada"
             )
             # Critical alerts — caminho de sucesso normal (com batch processado).
             # Mesma chamada do early-return ("nenhum lead pendente") via helper.
             # Pulado em dry_run pra não disparar alertas a partir de smoke test.
+            # Roda mesmo quando todos os grupos foram segurados por feature
+            # quebrada (não damos mais 500 nesse caso → o hook deixa de ser
+            # pulado, que era parte do dano silencioso).
             _run_critical_alerts_safely(railway_conn)
 
         return {
@@ -4527,6 +4606,7 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
             "capi_errors":   capi_result.get('errors', 0),
             "capi_blocked":  len(blocked_lead_ids),
             "capi_skipped":  len(skipped_lead_ids),
+            "feature_blocked": len(feature_blocked_lead_ids),
             "dry_run":       dry_run,
             "timestamp":     datetime.now().isoformat(),
         }
