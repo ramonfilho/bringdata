@@ -4250,11 +4250,25 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
             except Exception as _cae:
                 logger.warning(f"⚠️ critical_alerts falhou (não bloqueia polling): {_cae}")
 
+        def _run_survey_branch_safely(_conn):
+            """I4: ramo isolado lead_surveys → CAPI scoreado. NUNCA propaga
+            (não pode derrubar o polling do Lead). Off por SURVEY_CAPI_ENABLED
+            (deploy ≠ ligar). Vide docs/PROCESSO_CAPI_LEAD_SURVEYS.md §9."""
+            try:
+                from api.survey_branch import is_enabled, process_pending_surveys
+                if not is_enabled():
+                    return
+                _sb = process_pending_surveys(_conn, pipeline, dry_run=dry_run)
+                logger.info(f"🧩 survey_branch: {_sb}")
+            except Exception as _sbe:
+                logger.error(f"❌ survey_branch falhou (não bloqueia polling): {_sbe}")
+
         if not rows:
             logger.info("✅ Railway polling: nenhum lead pendente")
             # Regras de critical_alerts avaliam janelas de 60min — rodam
             # independente de haver batch atual de leads pendentes.
             _run_critical_alerts_safely(railway_conn)
+            _run_survey_branch_safely(railway_conn)
             return {"processed": 0, "skipped": 0, "message": "Nenhum lead pendente"}
 
         logger.info(f"📋 Railway polling: {len(rows)} leads pendentes encontrados")
@@ -4519,6 +4533,10 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
             # Mesma chamada do early-return ("nenhum lead pendente") via helper.
             # Pulado em dry_run pra não disparar alertas a partir de smoke test.
             _run_critical_alerts_safely(railway_conn)
+
+        # I4: ramo isolado lead_surveys (roda também no caminho com batch Lead;
+        # no-op se SURVEY_CAPI_ENABLED!=true; nunca propaga).
+        _run_survey_branch_safely(railway_conn)
 
         return {
             "processed":     processed,
