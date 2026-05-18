@@ -1,7 +1,7 @@
 # Disparar o evento scoreado também para quem responde a pesquisa pela esteira nova
 
 **Criado:** 2026-05-17
-**Status:** investigação concluída · desenho fechado · decisão de fonte **resolvida** (recuperar de `integration_logs` já — §6) · I0+I1 concluídos · **implementação por item I2–I7 (§9), cada item exige autorização explícita** · sinal CAPI scoreado **OFF para a inflow viva** desde a migração (mitigação: schedulers pausados — ver estado operacional no topo)
+**Status:** investigação concluída · desenho fechado · decisão de fonte **resolvida** (recuperar de `integration_logs` já — §6) · I0+I1+I2 concluídos · **implementação por item I3–I7 (§9), cada item exige autorização explícita** · sinal CAPI scoreado **OFF para a inflow viva** desde a migração (mitigação: schedulers pausados — ver estado operacional no topo)
 **Papel:** especificação completa do processo de fazer o evento CAPI scoreado por ML (`LeadQualified` + `LeadQualifiedHighQuality`) ser disparado a partir de **duas** tabelas — a `Lead` (como hoje) **e** a `lead_surveys` — sem tocar no fluxo da `Lead`.
 
 > Linguagem natural primeiro (regra do `CLAUDE.md`). Identificadores de código e nomes de tabela aparecem no corpo porque o documento é técnico-operacional; o rodapé lista os artefatos.
@@ -106,7 +106,7 @@ Cada item é um ciclo completo implementa → testa → commita → deploya cana
 
 - **I0 — Decisão + roadmap** ✅ (2026-05-17): decisão de fonte resolvida (acima); frente registrada como ativa urgente no `PLANO_EXECUCAO.md`.
 - **I1 — Tabela-ledger** `registros_ml` ✅ (2026-05-17): script idempotente `scripts/create_registros_ml.py`, aplicado e testado no Railway (12 colunas, PK `lead_id`, idempotência + PK-conflict + smoke OK, tabelas críticas intactas; renomeada de `survey_capi_sent` a pedido do usuário); commits `9b57c0d`+`31d1151` no branch `feat/capi-lead-surveys-scoring`. Nada lê/escreve até o I4.
-- **I2 — Adaptador de mapeamento** (`lead_surveys` + joins → dict idêntico ao do scorer): função pura, testável offline, segura pra equivalência (Gate C.1/C.2 zero divergência).
+- **I2 — Adaptador de mapeamento** `api/survey_mapping.py` ✅ (2026-05-18): função pura que monta dict formato-`Lead` (survey+utm+enrich) e delega à canônica `railway_lead_to_sheets_row` — zero normalização reimplementada, equivalência por construção. `tests/test_survey_mapping.py` 5/5 (equivalência Lead-direto vs survey, vocabulário canônico, computador do enrich, UTM ausente). Não importado por nada do fluxo `Lead`. Commit `2a802db` no branch `feat/capi-lead-surveys-scoring`. Sem Cloud Run.
 - **I3 — JOINs de enriquecimento** (`UTMTracking` / `integration_logs`) com guardas fail-loud de cobertura.
 - **I4 — Ramo isolado** no `/railway/process-pending` (try/except próprio) + dry-run CAPI no canary 0%.
 - **I5 — Bloqueios duros de monitoramento** (B1–B4 da §8) — antes de religar o digest.
