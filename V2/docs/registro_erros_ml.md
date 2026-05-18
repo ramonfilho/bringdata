@@ -364,6 +364,45 @@ Documento principal para provar valor do sistema. Acumulou erros de cálculo dur
 
 ---
 
+### 18. Leads de campanha chegando sem `source` em produção (bug de tracking, descoberto 18/05/2026)
+
+Distinto do Erro 15 (origens não mapeadas / Term reincidência DT-13): ali o problema é categoria **presente mas fora da whitelist**; aqui o `source` chega **vazio** em leads que **vieram de campanha** (têm `medium`/`term`/`campaign` preenchidos). É perda de atribuição na captura, não na unificação.
+
+**Evidência (tabela `Lead` do Railway, descoberto durante a investigação V.6):**
+
+- Base normal de `source` vazio: **0,2–0,6%/dia** (19/04 a 06/05/2026) — orgânico/direto legítimo, ínfimo.
+- **Pico agudo: 21/04 = 8,6% (139 leads), 22/04 = 20,5% (330 leads).** Dois dias de regressão de captura, depois normalizou.
+- **Subida recente: 14/05 = 4,4%, 16/05 = 8,0%** (volume baixo entre lançamentos — % mais ruidosa, mas acima da base).
+- Nos últimos 7 dias: dos 64 leads com `source` vazio, **30 (47%) tinham `medium`/`term`/`campaign` presentes** — vieram de campanha real e perderam só o `source`. Os outros 34 são orgânico puro (todas as UTMs vazias).
+
+**Impacto:** (a) o modelo scoreia esses leads com Source/Medium/Term todos zerados — sinal de origem perdido; (b) a atribuição de anúncio do lead se perde; (c) dispara a checagem de conservação pós-encoding (ver V.6) porque o grupo one-hot fica todo zerado.
+
+**Causa: não confirmada.** Hipótese a investigar: correlação temporal entre a subida recente e a migração do formulário para a tabela `lead_surveys` (~12/05/2026) — mudança de front-end que pode ter afetado a captura de UTM. **Não tratar como causa estabelecida até verificar.**
+
+**Estado:** registrado, **não corrigido**. Pré-requisito para fechar: identificar onde o `source` se perde (front-end, webhook de captura, ou gravação no `Lead`) e se os picos de 21-22/04 têm a mesma causa da subida de 14-16/05. Relação com o validador pós-encoding e desdobramento completo: `§ V.6`.
+
+---
+
+### 19. Gerador offline de baseline da salvaguarda não replica `column_name_corrections` — ponto cego de **monitoramento** (NÃO afeta o scoring de produção) (descoberto 18/05/2026)
+
+> **Correção de severidade (18/05/2026):** a primeira redação deste item afirmava que "o validador está cego para `Medium_Linguagem_programacao`, a feature do Cluster 3", o que dava a entender que **produção/modelo** estava degradado. **Isso estava errado e foi corrigido após verificação no código** (a pedido do operador, que alertou para o risco de cravar um bug de produção inexistente). O modelo recebe a coluna correta em produção; o defeito é só no artefato **offline** que a salvaguarda lê. Detalhe abaixo.
+
+A salvaguarda pós-encoding (validador "feature zerada em massa" / conservação de grupo one-hot, item T1-16 / DT-19 do PLANO_SAFEGUARD) compara o batch contra um baseline de proporções esperadas por coluna. Esse baseline **não roda em produção** — é gerado **offline** por `scripts/generate_feature_zero_baselines.py`; o que produção consome em runtime é o **JSON commitado** (`configs/feature_zero_baselines/{run_id}.json`). O gerador lê os nomes de categoria **crus** do `distribuicoes_esperadas.json` e aplica **só o regex final** do encoding (`[^A-Za-z0-9_]→_`, ver `_normalize_col`). O docstring do script afirma "aplica o mesmo regex de normalização do encoding" — mas **o encoding real faz mais que o regex**: além da unificação de Medium (`core/medium.py`), aplica no passo 6 as `column_name_corrections` (`configs/clients/devclub.yaml:486`).
+
+**O caminho do modelo está correto — e isso já tinha sido consertado antes:**
+
+`devclub.yaml:486` mapeia explicitamente `Medium_Linguagem_de_programa_o → Medium_Linguagem_programacao` (e `Medium_Lookalike_2_Cadastrados_DEV_2_0_Interesses → Medium_Lookalike_2pct_Cadastrados`). O comentário no próprio YAML documenta que o problema do `ç` removido de "Linguagem de programação" **foi achado e tratado numa sessão anterior** — é a 5ª feature mais importante (5,31%), e a correção garante que o **encoding de produção produz `Medium_Linguagem_programacao`**, batendo com o `feature_registry`. **Treino==produção vale aqui. O scoring de produção NÃO está degradado por isto.** A ausência dessa coluna nos lotes recentes (visto no log `[T1-10]`) é **legítima**: `medium` contendo "linguagem" = 0 nos últimos 7 dias / 1 em 30 dias / 2710 em 90 dias — esse público sumiu do tráfego recente (mudança de mix), não é bug.
+
+**O defeito real (escopo: só a salvaguarda):** o gerador offline aplica só o regex, **não** as `column_name_corrections`. Então o JSON de baseline tem `Medium_Linguagem_de_programa_o` enquanto o encoding de produção gera `Medium_Linguagem_programacao`. Em runtime o validador faz `if col not in df.columns: continue` → as colunas Medium renomeadas **caem fora da checagem**. O "grupo Medium" que o 9b acaba checando vira `Medium_Aberto` + extras (`Medium_Outros`, `Medium_dgen`) — e `Medium_Outros`/`Medium_dgen` **o modelo nem consome** (verificado: o predictor faz `X = X[self.feature_names]` com as 52 colunas do `feature_registry`, `src/model/prediction.py:240`; extras do `get_dummies` não vão pro modelo).
+
+**Consequência (severidade real):** é **lacuna de cobertura do monitoramento** — a salvaguarda não consegue checar conservação das colunas Medium que o modelo de fato usa. **Não** é bug de scoring de produção. Dois riscos: (a) ponto cego — se um dia o Medium quebrar de verdade no encoding, esta salvaguarda não pega; (b) **risco de leitura errada** — tratar isto como bug de produção e "consertar" o encoding quebraria o caminho que hoje está correto (`column_name_corrections`). Source e Term se alinham por coincidência (nomes sobrevivem idênticos aos dois caminhos); o defeito do gerador é geral para qualquer feature que a unificação/correção reescreva.
+
+**Causa-raiz:** o gerador reconstrói nomes de coluna a partir das strings cruas do `distribuicoes_esperadas.json` + regex, em vez de derivá-los da fonte canônica do que o modelo consome (`model_input_features.ordered_list` do `feature_registry.json`) ou de rodar a cadeia de transformação completa (unificação + `column_name_corrections` + regex).
+
+**Estado:** registrado, **não corrigido** (lacuna de monitoramento, não bug de produção). Distinto da V.6 (UTM vazia derruba o gate) e do Erro 18 (tracking perdendo `source`). Correção candidata: o gerador de baseline deve ancorar os nomes no `feature_registry.json` do run, ou rodar a cadeia completa de encoding. A reimplementação da correção do validador (ver V.6) **deve considerar este item** — mas **sem tocar no encoding/`column_name_corrections` de produção, que está correto**. Desdobramento e números reais: `§ V.6`.
+
+---
+
 ## III. Backtests de dano (mar–mai/2026)
 
 Esta seção consolida os backtests contrafactuais executados em mai/2026 para quantificar dano dos bugs de encoding e features faltantes.
@@ -575,5 +614,37 @@ Mesma população, mesmo filtro (`pesquisa IS NOT NULL AND "leadScore" IS NOT NU
 2. **Processo:** a hipótese inicial ("divergência treino↔produção, sinal degradado há meses") era plausível, internamente coerente e chegou a ser documentada — e estava **errada**. Só caiu quando cada elo foi testado com dado real (leads reais pelo pipeline real, série temporal do dado bruto, feature_registry dos dois modelos, amostra aleatória vs recente). Inferência encadeada sem verificação propaga erro com aparência de rigor.
 
 **Desenho de correção:** os três defeitos do validador identificados nesta investigação (mede a coisa errada, roda no lugar errado, dano silencioso ao disparar) e a proposta de correção em conjunto (D1/D2/D3) estão em `PLANO_SAFEGUARD.md` § "Validador pós-encoding" → "Revisão proposta (18/05/2026)". Esta seção V.5 guarda o **achado**; o desenho técnico vive no catálogo do T1-16.
+
+> **Atualização 18/05/2026:** ao implementar a correção e testá-la nos dados reais de produção, descobrimos que a mitigação da V.5 **não era suficiente** e que uma suposição minha estava errada. O desdobramento completo está na **V.6** abaixo. Leia a V.6 antes de agir sobre o desenho do PLANO_SAFEGUARD.
+
+---
+
+### V.6 — Teste empírico 18/05 nos dados reais refuta a suficiência da V.6 e expõe um bug de tracking (UTM vazia/quebrada em produção)
+
+**Contexto:** depois de implementar as duas primeiras correções do validador pós-encoding — (1) estancar o dano operacional quando ele dispara em produção, commitada em `e72c496`; (2) deixar de bloquear pela comparação com a distribuição do treino e passar a bloquear só pela **conservação** (todo lead com valor válido tem que ativar exatamente uma coluna do grupo one-hot daquela feature) — o operador pediu a verificação que faltava: *rodar os leads reais recentes pelo pipeline já corrigido e ver se os lotes atuais passariam*. Produção estava pausada (último lead 17/05), então usamos os dados reais disponíveis (Railway, tabela `Lead`, 7 dias).
+
+**Achado 1 — a correção (2) não desbloqueia produção.** Com leads reais recentes, a checagem de conservação **continua bloqueando**:
+
+| Amostra (leads reais, 7 dias, mesmo filtro do polling) | Fração com grupo Source/Medium/Term TODO zerado | Veredito |
+|---|---:|---|
+| Aleatória 300 (representa a população) | 2,33% (limiar do gate = 2%) | bloqueia |
+| 800 mais recentes | 4,4% | bloqueia |
+| 50 mais recentes (o recorte enviesado da V.5) | 10% | bloqueia |
+
+Já o sensor de comparação-com-treino, com a amostra representativa, deu **OK** — confirmando de vez que o falso positivo da V.5 era 100% efeito do recorte enviesado "50 mais recentes".
+
+**Achado 2 — uma suposição minha estava errada (registrado explicitamente).** Ao desenhar a correção (2), argumentei que passar o valor *bruto* (pré-one-hot) para dentro da checagem seria "código morto", porque os baselines de treino mostravam que 100% dos leads ativavam exatamente uma coluna em todo grupo (soma das proporções esperadas = 1,000). **O dado real de produção refutou isso.** O treino do champion (modelo jan30) simplesmente **não tinha** o segmento que produção tem hoje. A qualificação que o próprio desenho pedia — *"bug real = campo bruto presente e mapeável, mas o lead não ativa nenhuma coluna"* — **não era opcional; era necessária, e eu a cortei do escopo com base numa suposição que o dado derrubou.** É o mesmo padrão da lição de processo da V.5 (inferência encadeada sem verificação propaga erro com aparência de rigor) — desta vez do meu lado.
+
+**Causa mecânica (linha por linha, treino e produção idênticos):** a unificação de UTM (`core/utm.py`) faz, no início, `df['Source'] = df['Source'].replace('', None)` (UTM vazia vira nulo) e, no fallback que joga origem desconhecida para `'outros'`, tem a guarda `df['Source'].notna()` — ou seja, **nulo é deliberadamente deixado de fora; vazio/nulo nunca vira `'outros'`**. Some isso ao one-hot: lead com UTM nula não ativa nenhuma coluna do grupo → grupo todo zerado. Treino e produção rodam o **mesmo** `unify_utm` (`from src.core.utm import unify_utm` nos dois) — não há divergência de código. O treino do jan30 tinha Source = `{facebook-ads 89,9%, google-ads 9,8%, outros 0,35%}`, somando 1,000, **sem bucket de vazio/nulo**: o modelo champion **nunca aprendeu um segmento orgânico/sem-UTM**. Produção tem ~3-4% desses hoje → out-of-distribution, além do problema do validador.
+
+**Achado 3 — metade desses leads é bug de tracking real, não orgânico (a intuição do operador estava certa).** Quebrando os leads de `source` vazio dos últimos 7 dias: 64 no total → **34 com todas as UTMs vazias** (orgânico/direto legítimo, sem campanha) e **30 com `source` vazio mas `medium`/`term`/`campaign` presentes** — ou seja, leads que **vieram de campanha mas perderam só o `source`**. Isso é bug de captura/tracking, não orgânico. Série diária da % de `source` vazia (30 dias): base normal 0,2–0,6% (19/04 a 06/05), **pico agudo 21/04 = 8,6% e 22/04 = 20,5%** (regressão de captura de 2 dias), e **subida recente 14/05 = 4,4%, 16/05 = 8,0%** (volume baixo entre lançamentos, mais ruidoso). A subida recente começa perto da migração do formulário para `lead_surveys` (~12/05) — **correlação a investigar, não confirmada**. Este bug de tracking tem entrada de erro própria — ver **Erro 18** (`§ II`).
+
+**Achado 4 — o baseline OFFLINE da salvaguarda não corresponde às colunas Medium do modelo (ponto cego de monitoramento, NÃO bug de produção).** Investigando os três artefatos do mesmo modelo jan30: o `distribuicoes_esperadas.json` tem 7 categorias de Medium; o `feature_registry.json` (o que o modelo consome) tem 3 colunas Medium (`Medium_Linguagem_programacao`, `Medium_Aberto`, `Medium_Lookalike_2pct_Cadastrados`); e o gerador offline de baseline produziu `Medium_Linguagem_de_programa_o` (só regex no nome cru). **Importante — verificado no código a pedido do operador:** o encoding de produção aplica `column_name_corrections` (`devclub.yaml:486`) que mapeia `Medium_Linguagem_de_programa_o → Medium_Linguagem_programacao` — ou seja, **o modelo recebe a coluna certa; treino==produção vale; o scoring NÃO está degradado por isto** (o problema do `ç` já tinha sido tratado em sessão anterior). O defeito é só no artefato que a **salvaguarda** lê: como o gerador não aplica as correções, o baseline aponta para nomes que não existem no dataframe encodado, e o 9b acaba checando `Medium_Aberto` + extras (`Medium_Outros`, `Medium_dgen`) que o modelo nem consome (predictor restringe às 52 do registry, `prediction.py:240`). É **lacuna de cobertura do monitoramento** para Medium, não cegueira do modelo. Quantificação do que trava o gate (vazio ~3,4%, 100% disso vazio — 0% placeholder/ID) vs o que degrada sem travar (term = ID numérico cru ~19%, placeholders `{{...}}` ~0,7%, colapsam em `outros` e **são enviados ao Meta normalmente** — Term não entra na decisão de envio). Detalhe e correção de severidade: **Erro 19** (`§ II`).
+
+**Implicação para o desenho da correção (2):** a checagem de conservação **não pode simplesmente ignorar "bruto ausente"** — porque ~metade dos casos é campanha real perdendo `source`, que merece **alerta** (sinal degradado + atribuição de anúncio perdida), não silêncio. Precisa distinguir: **UTM totalmente vazia (orgânico, legítimo → não bloqueia)** de **`source` sumido mas campanha presente (quebrado → bloqueia/alerta)**. O desenho técnico no `PLANO_SAFEGUARD.md` § "Validador pós-encoding" está marcado como **desatualizado** (callout apontando para esta V.6); a reescrita completa do desenho fica para depois da reimplementação testada nos dados reais (decisão do operador, 18/05/2026).
+
+**Estado em 18/05/2026:** correção (1) commitada (`e72c496`), sem deploy. Correção (2) **a reimplementar** com a qualificação acima. Deploy segue bloqueado até a correção (2) ficar de pé. Produção pausada — sem dano ativo.
+
+**Lição:** o baseline de treino **não** é prova de que produção não tem um segmento. O treino pode simplesmente não ter tido aquele segmento (aqui: orgânico/sem-UTM ≈ 0% no treino, ~3-4% em produção). Descartar uma qualificação do desenho com base em "o baseline mostra X" exige antes confirmar X **no dado real de produção** — não no dado de treino.
 
 ---

@@ -312,6 +312,8 @@ Emite log estruturado JSON por batch (`event=feature_validator`) com `severity` 
 
 **Revisão proposta (18/05/2026) — três defeitos e desenho de correção**
 
+> ⚠️ **DESATUALIZADO em 18/05/2026 — não implementar a partir desta descrição.** Ao implementar e testar nos dados reais de produção, a parte D1 deste desenho (medir conservação em vez de conformidade com o treino) mostrou-se **incompleta**: ela precisa distinguir lead **sem nenhuma UTM** (orgânico legítimo → não bloqueia) de lead de **campanha que perdeu só o `source`** (bug de tracking → bloqueia/alerta), e a suposição de que o valor bruto pré-encoding era dispensável foi **refutada pelo dado real**. O achado empírico completo e a causa estão em `registro_erros_ml.md` § V.6 (e o bug de tracking associado no Erro 18). A reescrita completa deste desenho fica para **depois** da reimplementação testada nos dados reais (decisão do operador, 18/05/2026). Até lá, **a V.6 é a fonte canônica** do que a correção precisa fazer; o texto D1/D2/D3 abaixo permanece para registro histórico.
+
 A investigação 17–18/05/2026 (achado completo no `registro_erros_ml.md` § V.5) mostrou que o validador, como está, tem três defeitos que se reforçam: ele mede a coisa errada, roda no lugar errado, e causa dano silencioso quando dispara. Resumo dos defeitos:
 
 1. **Mede a coisa errada.** O critério atual compara a taxa de ativação da coluna pós-encoding contra a distribuição capturada **no treino** (`observed_nonzero_rate < expected_do_treino × 0,3`). Esse sinal é idêntico para duas causas opostas: feature quebrada por bug (parsing/casing) **e** mix de tráfego que mudou legitimamente (campanha trocou de Facebook para Google). O validador não distingue as duas — trata mudança de negócio como bug.
