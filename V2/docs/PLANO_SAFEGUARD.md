@@ -310,6 +310,24 @@ Emite log estruturado JSON por batch (`event=feature_validator`) com `severity` 
 - Chamada no encoding: passo 9 de [`V2/src/core/encoding.py`](../src/core/encoding.py) — só roda se `artifacts['mlflow_run_id']` está setado (caminho de produção; treino e parity audit pulam).
 - Pré-requisito operacional: após cada `--set-active` de um modelo novo, rodar `python -m V2.scripts.generate_feature_zero_baselines` pra gerar o baseline do novo `run_id`. Sem baseline o validador degrada pra noop com log informativo.
 
+**Revisão proposta (18/05/2026) — três defeitos e desenho de correção**
+
+A investigação 17–18/05/2026 (achado completo no `registro_erros_ml.md` § V.5) mostrou que o validador, como está, tem três defeitos que se reforçam: ele mede a coisa errada, roda no lugar errado, e causa dano silencioso quando dispara. Resumo dos defeitos:
+
+1. **Mede a coisa errada.** O critério atual compara a taxa de ativação da coluna pós-encoding contra a distribuição capturada **no treino** (`observed_nonzero_rate < expected_do_treino × 0,3`). Esse sinal é idêntico para duas causas opostas: feature quebrada por bug (parsing/casing) **e** mix de tráfego que mudou legitimamente (campanha trocou de Facebook para Google). O validador não distingue as duas — trata mudança de negócio como bug.
+2. **Roda no lugar errado.** O validador é proteção de runtime de produção, mas está embutido no caminho de scoring que o teste de equivalência de deploy (Gate C) usa. Resultado: ele aborta o Gate C antes de ele comparar decis entre as revisões — uma salvaguarda de runtime contaminando um teste de equivalência. Composição atípica afeta as duas revisões igualmente; não é regressão entre versões.
+3. **Dano silencioso quando dispara em produção.** Em `/railway/process-pending` não há `except` em volta do `pipeline.run()`: o `ValueError` aborta o batch inteiro, os leads ficam com `leadScore IS NULL`, o polling re-seleciona os mesmos a cada 5 min (loop infinito, nunca vão pro Meta), e o hook de alertas críticos daquele ciclo nem roda porque a exceção propaga antes dele. Vira HTTP 500 que o Cloud Scheduler engole.
+
+Desenho de correção (tratado como sistema, não três remendos isolados):
+
+- **D1 — o que medir:** trocar "pós-OHE vs distribuição do treino" por "pré-OHE vs pós-OHE no mesmo batch" (testar **conservação**, não conformidade com o treino). Bug real = campo bruto presente e mapeável, mas o lead não ativa **nenhuma** coluna do grupo OHE correspondente. Shift legítimo = o bruto mudou de proporção, mas todo lead com valor válido continua ativando exatamente uma coluna do grupo → não dispara. Independe de qual categoria e da distribuição de treino.
+- **D2 — onde rodar:** desacoplar do Gate C. No Gate C, o scoring roda com o validador em modo observa-mas-não-bloqueia (o Gate C compara decil entre revisões mesmo com composição atípica). Em produção (polling), o validador continua ativo, com o comportamento de D3.
+- **D3 — o que fazer ao disparar em produção:** (1) fail-loud explícito — alerta crítico dedicado ("feature X quebrada no encoding; N leads não scoreados / não enviados ao Meta"); (2) garantir que o alerta roda mesmo com falha de scoring (mover o hook de alertas críticos para um `finally` ou rodá-lo antes do scoring sempre); (3) não prender leads em loop — marcar os leads do batch com status terminal para não serem re-selecionados a cada 5 min. A escolha "scorear degradado vs segurar o lead" é decisão de produto, mas o loop silencioso tem de acabar.
+
+Sequência de implementação proposta: **D3 primeiro** (estanca o dano operacional, maior risco), **D1 depois** (corrige o critério na raiz e elimina o falso positivo), **D2 por último** (separação de responsabilidades — D1 já torna o Gate C raramente disparável, mas o desacoplamento ainda vale).
+
+**Status desta revisão:** desenho/proposta. **Não implementado.** Decisão de execução e priorização pendente com o operador (registrado em 18/05/2026). Não recebe identificador novo — é evolução do próprio T1-16. Referências de código: validador em [`V2/src/core/feature_validator.py`](../src/core/feature_validator.py) (`validate_post_encoding_zero_rates`), chamada no passo 9 de [`V2/src/core/encoding.py`](../src/core/encoding.py), handler de produção em [`V2/api/app.py`](../api/app.py) (`/railway/process-pending`), amostragem do Gate C em [`V2/scripts/test_revision_equivalence.py`](../scripts/test_revision_equivalence.py) (`fetch_leads_predict_mode`).
+
 *Identificador histórico: T1-16.*
 
 ### Drift de perfil de audiência

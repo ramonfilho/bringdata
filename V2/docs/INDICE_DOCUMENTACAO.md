@@ -95,8 +95,8 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 
 ### `google_ads_pendencias.md` 📚 Catálogo técnico (H6)
 **Papel:** especificação dos pré-requisitos e passos de implementação para envio de eventos ao Google Ads (Enhanced Conversions for Leads). Documenta decisões fixadas (estratégia, credenciais), bloqueantes abertos (gclid não capturado), e a infra já preparada (`should_send_to_destination`, `CAPIConfig`, dispatcher).
-**Status:** ativo. Atualizado em 2026-05-01.
-**Relação:** referenciado por `PLANO_EXECUCAO.md` em H6 → "Diversificação de canais". Tese estratégica em `swot_bringdata.md` (F8/W4/O4). Pré-condição: Cliente B estabilizado (H5).
+**Status:** ativo. Atualizado em 2026-05-18 (virada de transporte: legacy `UploadClickConversions` → Data Manager API).
+**Relação:** referenciado por `PLANO_EXECUCAO.md` em H6 → "Diversificação de canais". Tese estratégica em `swot_bringdata.md` (F8/W4/O4). Escopo: só DevClub.
 
 ### `PROCESSO_CAPI_LEAD_SURVEYS.md`
 **Papel:** especificação completa de fazer o evento CAPI scoreado por ML (`LeadQualified` + `LeadQualifiedHighQuality`) ser disparado a partir de **duas** tabelas — `Lead` (como hoje) **e** `lead_surveys` — sem tocar no fluxo da `Lead`. Cobre a investigação (esteiras quase disjuntas: só 13 emails em comum em 7d; a esteira nova já manda eventos genéricos próprios pro Meta), cobertura de recuperação por JOIN (fbp/fbc 98%, `computador` ~90% via log vs ~100% no `Lead`), decisões fixadas do usuário (coluna `computador` pedida ao front, `leads_capi` só fallback, forward-only, monitoramento estendido junto, ledger próprio `registros_ml`, isolamento do fluxo `Lead`, fail-loud, restrições duras), verificação de vocabulário das respostas (100% seguro) e pendências obrigatórias pro go-live (vocabulário de `computador` quando a coluna chegar; whitelist de UTM dos survey leads — classe de quebra histórica "Cluster 5"/"cenário 1.2").

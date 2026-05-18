@@ -1,0 +1,7 @@
+# Dependências SÓ para o setup one-time das conversion actions do Google Ads.
+# NÃO entra no runtime de produção (api/requirements.txt) — o envio de evento
+# em produção usa a Data Manager API com service account, sem google-ads.
+#
+#   pip install -r V2/scripts/requirements_google_ads_setup.txt
+google-ads>=27.0.0
+google-auth-oauthlib>=1.2.0

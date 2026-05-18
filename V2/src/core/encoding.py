@@ -365,15 +365,21 @@ def apply_encoding(
         df_encoded = df_encoded.fillna(0)
 
     # -----------------------------------------------------------------------
-    # 9. [T1-16] Validador pós-encoding "feature zerada em massa"
+    # 9. [T1-16] Sensor pós-encoding "feature caiu vs distribuição do treino"
+    #    — OBSERVA, NÃO BLOQUEIA (rebaixado em 2026-05-18, ver § abaixo).
     # -----------------------------------------------------------------------
-    # Cobre o sintoma do Cluster 3/4/5 do Erro 2: pipeline cria coluna OHE mas
-    # ela chega zerada pra maioria (categoria sumiu, casing mudou, parsing
-    # falhou). Comparado contra baseline esperado por coluna OHE — gerado
-    # offline por scripts/generate_feature_zero_baselines.py.
+    # Mede o quanto a taxa de ativação de cada coluna OHE caiu em relação à
+    # distribuição capturada NO TREINO. Esse critério confunde duas causas
+    # opostas: feature quebrada por bug E mix de tráfego que mudou de verdade
+    # (campanha trocou de Facebook pra Google). Por isso ele NÃO bloqueia mais
+    # o batch — só emite o log estruturado [FV_JSON] como sensor observável.
     #
-    # Default conservador (min_batch=50, expected≥10%, drop≥50%) garante zero
-    # falso positivo em smoke tests e em batches pequenos do polling Railway.
+    # Quem bloqueia agora é o passo 9b (grupo OHE todo-zerado): esse SIM é o
+    # teste de conservação pré-OHE↔pós-OHE — independe da distribuição de
+    # treino e só dispara quando um lead com valor válido não ativa NENHUMA
+    # coluna do grupo (parsing/casing/categoria sumindo = Cluster 3/4/5).
+    # Causa-raiz do falso positivo e desenho da correção: registro_erros_ml.md
+    # § V.5 e PLANO_SAFEGUARD "Validador pós-encoding" (revisão 18/05/2026).
     _mlflow_run_id = artifacts.get('mlflow_run_id') if artifacts else None
     if _mlflow_run_id:
         try:
@@ -389,29 +395,30 @@ def apply_encoding(
                     emit_log=True,
                 )
                 if _zr_result.severity == 'ERROR':
-                    # Falha alto: o modelo recebe sinal degradado. Bloquear o
-                    # batch é melhor do que enviar score errado pra Meta.
+                    # Observa-mas-não-bloqueia: pode ser bug OU shift legítimo
+                    # de mix de tráfego. O log [FV_JSON] (emit_log=True acima)
+                    # mantém o sinal pra investigação; o bloqueio fica a cargo
+                    # do teste de conservação no passo 9b.
                     preview = ', '.join(
                         f"{i.feature} (obs={i.details['observed_nonzero_rate']:.3f} "
                         f"vs exp={i.details['expected_nonzero_rate']:.3f})"
                         for i in _zr_result.issues[:5]
                     )
-                    raise ValueError(
-                        f"[T1-16] Encoding produziu {len(_zr_result.issues)} colunas OHE "
-                        f"massivamente zeradas (batch={_zr_result.batch_size}, mlflow_run_id={_mlflow_run_id[:8]}). "
-                        f"Exemplos: {preview}. "
-                        f"Cluster 3/4/5 do Erro 2 — investigar feature pré-OHE antes de scorear."
+                    logger.warning(
+                        f"  [T1-16] (observa, NÃO bloqueia) {len(_zr_result.issues)} colunas OHE "
+                        f"caíram vs distribuição do treino (batch={_zr_result.batch_size}, "
+                        f"mlflow_run_id={_mlflow_run_id[:8]}). Exemplos: {preview}. "
+                        f"Conformidade com o treino ≠ bug (mix de tráfego pode ter mudado) "
+                        f"— ver registro_erros_ml.md § V.5. Bloqueio fica no passo 9b (conservação)."
                     )
             else:
                 logger.debug(
                     f"  [T1-16] baseline de zero-rate não encontrado pro run_id={_mlflow_run_id[:8]} "
                     f"(gere com `python -m V2.scripts.generate_feature_zero_baselines`)"
                 )
-        except ValueError:
-            raise
         except Exception as _e:
-            # Validador é defensivo — qualquer falha dele NÃO deve quebrar scoring.
-            logger.warning(f"  [T1-16] validador post-encoding falhou: {type(_e).__name__}: {_e}")
+            # Sensor é defensivo — qualquer falha dele NÃO deve quebrar scoring.
+            logger.warning(f"  [T1-16] sensor post-encoding falhou: {type(_e).__name__}: {_e}")
 
     # -----------------------------------------------------------------------
     # 9b. [DT-19 pré-req C] Validador cross-coluna "grupo OHE todo-zerado"

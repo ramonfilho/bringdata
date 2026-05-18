@@ -319,6 +319,60 @@ def _variant_label(name: str) -> str:
     return _VARIANT_LABEL.get(name, name)
 
 
+# ──────────────────────────────────────────────────────────────────────────
+# Humanização SÓ-DISPLAY de nome de feature/coluna e valor de categoria.
+#
+# CONTRATO DE CONFIABILIDADE:
+#   - Funções puras, idempotentes, aplicadas APENAS dentro de f-string de
+#     render. NUNCA usar como chave de lookup/agrupamento/comparação/dedup.
+#   - Caso conhecido → reverte com certeza (mapa curado).
+#   - Caso desconhecido → volta EXATAMENTE como veio (não chuta), pra não
+#     mascarar um valor que pode ser um bug real de normalização.
+# ──────────────────────────────────────────────────────────────────────────
+
+_FEATURE_DISPLAY = {
+    'Source':               'UTM Source',
+    'Medium':               'UTM Medium',
+    'Term':                 'UTM Term',
+    'Campaign':             'UTM Campaign',
+    'Content':              'UTM Content',
+    'telefone_comprimento': 'Comprimento do telefone',
+    'nome_comprimento':     'Comprimento do nome',
+    'email_comprimento':    'Comprimento do e-mail',
+}
+
+
+def _humanize_feature(name: Any) -> str:
+    """Display-only. Mapa curado; fallback = underscore→espaço só se houver
+    '_'. Sem '_' e fora do mapa → volta cru (não chuta)."""
+    s = str(name)
+    if s in _FEATURE_DISPLAY:
+        return _FEATURE_DISPLAY[s]
+    if '_' in s:
+        t = s.replace('_', ' ').strip()
+        return (t[:1].upper() + t[1:]) if t else s
+    return s
+
+
+_CATEGORY_DISPLAY = {
+    'facebookads': 'Facebook Ads',
+    'googleads':   'Google Ads',
+    'instagram':   'Instagram',
+    'tiktok':      'TikTok',
+    'youtube':     'YouTube',
+    'organico':    'Orgânico',
+    'outros':      'Outros',
+    'mixquente':   'Mix Quente',
+    'aberto':      'Aberto',
+}
+
+
+def _humanize_category(value: Any) -> str:
+    """Display-only. Mapa curado de formas canônicas conhecidas. Fora do
+    mapa → volta exatamente como veio (não chuta)."""
+    return _CATEGORY_DISPLAY.get(str(value), str(value))
+
+
 def _render_text_header(v: dict, L: list):
     # Data curta extraída do timestamp pra dar contexto, sem rev/service/etc.
     ts = (v['meta'].get('timestamp') or '')[:10]   # YYYY-MM-DD
@@ -403,7 +457,7 @@ def _render_text_audience_drift(a: dict, L: list):
     L.append('    ' + '─' * (36 + 6 + 14*n_delta_cols + 2*(len(headers)-1)))
 
     for it in top:
-        label = _short(f"{it['feature_label']}: {it['category']}", 36)
+        label = _short(f"{it['feature_label']}: {_humanize_category(it['category'])}", 36)
         ref = _fmt_pct(it.get('reference_pct'))
         cells = [f'{label:<36}', f'{ref:>6}']
         if has_launch:
@@ -432,7 +486,7 @@ def _render_text_distribution_drifts_consolidated(alerts: list, L: list):
         by_col.setdefault(col, []).append(a)
 
     for col, group in by_col.items():
-        L.append(f'Mudança na UTM {col}:')
+        L.append(f'Mudança na UTM {_humanize_feature(col)}:')
         for a in group:
             d = a.get('details', {}) or {}
             variant = _variant_label(d.get('variant_name', '?'))
@@ -445,7 +499,7 @@ def _render_text_distribution_drifts_consolidated(alerts: list, L: list):
                 treino = (c.get('treino') or 0) * 100
                 prod   = (c.get('producao') or 0) * 100
                 diff   = prod - treino
-                cat    = c.get('categoria', '?')
+                cat    = _humanize_category(c.get('categoria', '?'))
                 L.append(f"      {cat:<53} {treino:>6.1f}% → {prod:>6.1f}%  ({diff:+.1f}pp)")
                 bd = c.get('outros_breakdown') or []
                 if bd:
@@ -500,9 +554,9 @@ def _render_text_category_drifts_consolidated(alerts: list, L: list):
         L.append(f'  {variant}:')
         for d in items:
             col = d.get('column', '?')
-            new_cats = ', '.join(d.get('new_categories', []) or [])
+            new_cats = ', '.join(_humanize_category(c) for c in (d.get('new_categories', []) or []))
             n = d.get('affected_count', 0); pct = d.get('percentage', 0)
-            L.append(f"    {col}: {new_cats}  ·  {n} leads ({pct:.1f}%)")
+            L.append(f"    {_humanize_feature(col)}: {new_cats}  ·  {n} leads ({pct:.1f}%)")
     L.append('')
 
 
@@ -746,13 +800,11 @@ def render_slack_blocks(view: dict) -> list[dict]:
     blocks.append({'type': 'divider'})
     _slack_alerts(view, blocks, include_audience_drift=False)
     blocks.append({'type': 'divider'})
-    _slack_funnel(view, blocks)
+    _slack_unified_funnel(view, blocks)   # substitui _slack_funnel + _slack_traffic
     blocks.append({'type': 'divider'})
     _slack_lead_quality(view, blocks)
     blocks.append({'type': 'divider'})
     _slack_revenue(view, blocks)
-    blocks.append({'type': 'divider'})
-    _slack_traffic(view, blocks)
     _slack_skipped_footer(view, blocks)
     return blocks
 
@@ -875,7 +927,7 @@ def _slack_distribution_drifts_consolidated(alerts: list, B: list):
         by_col.setdefault(col, []).append(a)
 
     for col, group in by_col.items():
-        lines = [f"*Mudança na UTM {col}:*"]
+        lines = [f"*Mudança na UTM {_humanize_feature(col)}:*"]
         for a in group:
             d = a.get('details', {}) or {}
             variant = _variant_label(d.get('variant_name', '?'))
@@ -885,7 +937,7 @@ def _slack_distribution_drifts_consolidated(alerts: list, B: list):
             sil_suffix = f', +{n_sil} silenciada{"s" if n_sil != 1 else ""}' if n_sil > 0 else ''
             lines.append(f"  • *{variant}* ({n} mudança{'s' if n != 1 else ''}{sil_suffix}):")
             for c in changes:
-                cat = _short(c.get('categoria', '?'), 38)
+                cat = _short(_humanize_category(c.get('categoria', '?')), 38)
                 tp = (c.get('treino') or 0) * 100
                 pp = (c.get('producao') or 0) * 100
                 diff = pp - tp
@@ -929,7 +981,7 @@ def _slack_alert_audience(a: dict, B: list):
         return f"{_quality_emoji(quality)} {pct:>5.1f}%({delta:+.1f})"
 
     for it in top:
-        label = _short(f"{it['feature_label']}: {it['category']}", 32)
+        label = _short(f"{it['feature_label']}: {_humanize_category(it['category'])}", 32)
         ref = it.get('reference_pct', 0)
         parts = [f"{label:<32} {ref:>4.1f}%"]
         if has_launch:
@@ -987,7 +1039,7 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
         return 'champion' if ch_score > cl_score else 'challenger'
 
     for it in top:
-        label = _short(f"{it['feature_label']}: {it['category']}", 32)
+        label = _short(f"{it['feature_label']}: {_humanize_category(it['category'])}", 32)
         ref = it.get('reference_pct', 0)
         direction = it.get('direction')
         ch_delta = it.get('champion_delta_pp')
@@ -1075,9 +1127,9 @@ def _slack_category_drifts_consolidated(alerts: list, B: list):
         lines.append(f"  *{variant}*:")
         for d in items:
             col = d.get('column', '?')
-            new = ', '.join(d.get('new_categories', []) or [])
+            new = ', '.join(_humanize_category(c) for c in (d.get('new_categories', []) or []))
             n = d.get('affected_count', 0); pct = d.get('percentage', 0)
-            lines.append(f"    `{col}`: {new}  ·  {n} leads ({pct:.1f}%)")
+            lines.append(f"    `{_humanize_feature(col)}`: {new}  ·  {n} leads ({pct:.1f}%)")
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(lines)}})
 
 
@@ -1099,6 +1151,63 @@ def _slack_alert_other(a: dict, B: list):
         'text': f"{e} *{a.get('type','?').upper()}* `{sev}` · category=`{a.get('category','?')}`{extra_tag}\n   {a.get('message','?')[:300]}"}})
 
 
+def _slack_unified_funnel(v: dict, B: list):
+    """Funil completo numa história só: anúncio (Meta Insights) → captura →
+    pipeline (TODAS as fontes, quebra fb/ggl/outr) → tracking FBP/FBC.
+
+    Substitui _slack_funnel + _slack_traffic. Nada é eliminado: a camada
+    pipeline conta todas as origens; Google aparece em `ggl` (não tem ad-data
+    porque não passa pelo pixel/leads_capi — gap de captura do front)."""
+    fm   = v['funnel']
+    uf   = fm.get('unified_funnel', {}) or {}
+    ufw  = uf.get('window', {}) or {}
+    dq   = fm.get('data_quality', {}) or {}
+    tr   = (v.get('traffic') or {}).get('dia_anterior', {}) or {}
+    roll = dq.get('fbp_fbc_rolling', {}) or {}
+    r7, r3, r1 = (roll.get('7d') or {}), (roll.get('3d') or {}), (roll.get('1d') or {})
+
+    cap = uf.get('capture', {}) or {}
+    pp  = uf.get('pipeline', {}) or {}
+    def stg(k): return pp.get(k, {}) or {}
+    def brk(s):
+        return f"fb {_n(s,'fb'):.0f} · ggl {_n(s,'ggl'):.0f} · outr {_n(s,'outr'):.0f}"
+
+    cpls = f"{_n(tr,'cpl'):.2f}".replace('.', ',')
+    _capi_n = _n(cap, 'leads_capi')
+    _cpl_capi = (_n(tr, 'spend') / _capi_n) if _capi_n else 0.0
+    cpl_capi_s = f"{_cpl_capi:.2f}".replace('.', ',')
+    lines = [
+        "── Anúncio (Meta Insights) ──",
+        f"Spend          R$ {_n(tr,'spend'):>10,.0f}",
+        f"Cliques        {_n(tr,'clicks'):>13,.0f}",
+        f"Leads pixel    {_n(tr,'meta_leads'):>13,.0f}   CTR→lead {_n(tr,'ctr_lead'):.1f}% · CPL R$ {cpls}",
+        f"leads_capi     {_capi_n:>13,.0f}   CPL real R$ {cpl_capi_s}",
+        "── Pipeline (todas as fontes) ──",
+        f"Pesquisa       {_n(stg('pesquisa'),'total'):>13,.0f}   {brk(stg('pesquisa'))}",
+        f"Scoreado       {_n(stg('scoreado'),'total'):>13,.0f}   {brk(stg('scoreado'))}",
+        f"CAPI enviado   {_n(stg('capi_enviado'),'total'):>13,.0f}",
+        f"Aceito Meta    {_n(stg('aceito'),'total'):>13,.0f}",
+    ]
+    B.append({'type': 'section', 'text': {'type': 'mrkdwn',
+        'text': (f"*🎬 Funil completo*  ·  _{ufw.get('label','dia anterior')} ({ufw.get('date_brt','?')}) BRT_\n"
+                 f"```\n" + "\n".join(lines) + "\n```")}})
+
+    trk = [
+        "        7d      3d      1d",
+        f"FBP   {_n(r7,'fbp_pct'):>6.1f}% {_n(r3,'fbp_pct'):>6.1f}% {_n(r1,'fbp_pct'):>6.1f}%",
+        f"FBC   {_n(r7,'fbc_pct'):>6.1f}% {_n(r3,'fbc_pct'):>6.1f}% {_n(r1,'fbc_pct'):>6.1f}%",
+        f"Phone {_n(uf,'phone_pct'):>6.1f}%   (sobre leads no banco)",
+    ]
+    B.append({'type': 'section', 'text': {'type': 'mrkdwn',
+        'text': (f"*🎯 Tracking FBP/FBC*  ·  _% sobre leads capturados (leads_capi)_\n"
+                 f"```\n" + "\n".join(trk) + "\n```")}})
+    B.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': (
+        "_Anúncio = Meta Insights (Google Ads não tem ad-data aqui · não passa pelo pixel/leads_capi). "
+        "Pipeline = todas as fontes · fb = facebook-ads/ig/fb · ggl = google-ads · outr = resto. "
+        f"leads_capi na janela: 7d={_n(r7,'n'):.0f} · 3d={_n(r3,'n'):.0f} · 1d={_n(r1,'n'):.0f}_"
+    )}]})
+
+
 def _slack_funnel(v: dict, B: list):
     fm = v['funnel']
     cap = fm.get('capture', {}) or {}
@@ -1109,18 +1218,35 @@ def _slack_funnel(v: dict, B: list):
     win = fm.get('window', {}) or {}
     conv= fm.get('conversion', {}) or {}
 
+    roll = dq.get('fbp_fbc_rolling', {}) or {}
+    r7 = roll.get('7d', {}) or {}
+    r3 = roll.get('3d', {}) or {}
+    r1 = roll.get('1d', {}) or {}
+
     rows = [
         f"leads db (pesquisa)    {_n(cap,'total_database'):>7,}",
         f"Scoreados              {_n(sc,'total_scored'):>7,}",
         f"CAPI enviados          {_n(capi,'leads_sent'):>7,}   ({_n(capi,'send_rate'):.1f}%)  ·  {_n(capi,'estimated_events'):.0f} eventos",
         f"Aceitos Meta           {_n(meta,'success_count'):>7,}   (success 100%  ·  partial {_n(meta,'partial_count'):.0f}  ·  error {_n(meta,'error_count'):.0f})",
-        f"FBP / FBC / Phone      {_n(dq,'fbp_percentage'):>5.1f}% / {_n(dq,'fbc_percentage'):.1f}% / {_n(dq,'phone_percentage'):.1f}%",
+        f"Phone preenchido       {_n(dq,'phone_percentage'):>6.1f}%   (% sobre leads no banco)",
     ]
     B.append({'type': 'section', 'text': {'type': 'mrkdwn',
-        'text': (f"*📊 Funil das últimas 72h*  ·  _{win.get('start_brt','?')} → {win.get('end_brt','?')} BRT_\n"
+        'text': (f"*📊 Funil*  ·  _{win.get('start_brt','?')} → {win.get('end_brt','?')} BRT_\n"
                  f"```\n" + "\n".join(rows) + "\n```")}})
+
+    track = [
+        f"{'':<6}{'7d':>9}{'3d':>9}{'1d':>9}",
+        f"{'FBP':<6}{_n(r7,'fbp_pct'):>8.1f}%{_n(r3,'fbp_pct'):>8.1f}%{_n(r1,'fbp_pct'):>8.1f}%",
+        f"{'FBC':<6}{_n(r7,'fbc_pct'):>8.1f}%{_n(r3,'fbc_pct'):>8.1f}%{_n(r1,'fbc_pct'):>8.1f}%",
+    ]
+    B.append({'type': 'section', 'text': {'type': 'mrkdwn',
+        'text': (f"*🎯 Tracking FBP/FBC*  ·  _% sobre leads Meta_\n"
+                 f"```\n" + "\n".join(track) + "\n```")}})
     B.append({'type': 'context', 'elements': [
-        {'type': 'mrkdwn', 'text': '_FBP/FBC % sobre leads Meta · Phone % sobre leads no banco_'}
+        {'type': 'mrkdwn', 'text': (
+            f"_leads Meta na janela: 7d={_n(r7,'n'):.0f} · 3d={_n(r3,'n'):.0f} · 1d={_n(r1,'n'):.0f} · "
+            "cada coluna = mesma métrica, janelas fixas terminando agora_"
+        )}
     ]})
 
 

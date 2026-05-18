@@ -540,3 +540,40 @@ Lista aberta de cenários a estressar. Cada item: descrição + verificação pr
 **Lição estrutural:** monitoring de drift contra "snapshot do treino" é necessário mas não suficiente. Treino antigo + drift de público = baseline cego. Faltava monitoring contra um pool histórico de **performance** (não apenas estatístico).
 
 ---
+
+### V.5 — Gate C / validador pós-encoding dá falso positivo por amostrar "os 50 leads mais recentes" (investigado 17–18/05/2026)
+
+**Resumo:** o deploy estava travado porque o teste de paridade de scoring (o "Gate C") bloqueava com HTTP 500. A investigação rigorosa **derrubou** a hipótese inicial (que era divergência treino↔produção / sinal degradado pro Meta) e estabeleceu, com dado, a causa real: **o validador pós-encoding (T1-16) amostra os 50 leads mais recentes (`ORDER BY "createdAt" DESC LIMIT 50`), uma janela curta refém da flutuação de curto prazo do mix de tráfego.** No momento do teste essa janela estava 64% `google-ads` / 26% `facebook-ads`, enquanto a população real dos últimos 7 dias é ~76% `facebook-ads`. O validador comparou a amostra enviesada contra a expectativa do treino (~90% facebook) e disparou. **Não há bug de encoding, não há divergência treino↔produção, e não há sinal degradado indo pro Meta.**
+
+**O que NÃO é (hipóteses testadas e refutadas com dado):**
+
+| Hipótese inicial | Como foi refutada |
+|---|---|
+| Bug de encoding (`facebook-ads` não vira `Source_facebook_ads`) | 30 leads reais com `source=facebook-ads` pelo pipeline completo → `Source_facebook_ads` = **30/30**. A sanitização de nome (`core/encoding.py:296`, `[^A-Za-z0-9_]→_`) é compartilhada treino↔produção |
+| Divergência treino↔produção (convenção hífen vs underscore) | `train_pipeline.py:708` e `production_pipeline.py:268` chamam o **mesmo** `unify_utm(df, client_config.utm)`. Mesmo `core/`. Nomes do registry batem com o output |
+| Modelo defasado (champion de jan velho) | Challenger de 28/abr tem o **mesmo** feature_registry. Trocar não mudaria nada — porque não havia nada errado |
+| Dado de entrada mudou após o treino | `source` bruto = `facebook-ads` estável desde fev/2026 (88% fev, 92% mar, 84% abr, 76% mai). Nunca foi `facebook_ads` |
+| Sinal degradado indo pro Meta há meses | **Refutado.** O encoding funciona; produção scoreia com a feature correta |
+
+**Prova definitiva da causa real:**
+
+| Amostra de 50 leads (mesmo `WHERE` do Gate C) | % `facebook-ads` bruto | Validador T1-16 |
+|---|---:|---|
+| `ORDER BY "createdAt" DESC` (como o Gate C faz hoje) | 26% (32/50 eram `google-ads`) | ❌ **dispara** (`obs=0.26 vs exp=0.90`) |
+| `ORDER BY RANDOM()` (amostra representativa dos 7d) | representativo (~76%) | ✅ **passa limpo** |
+
+Mesma população, mesmo filtro (`pesquisa IS NOT NULL AND "leadScore" IS NOT NULL`, 7 dias). A única diferença é o método de amostragem. O `obs=0.26` do erro bate **exatamente** com os 13/50 `facebook-ads` que estavam nos 50 mais recentes naquele instante.
+
+**Por que conta como erro:** uma salvaguarda crítica (bloqueia deploy) usa uma amostra **não-representativa** por construção. "50 mais recentes" reflete só as últimas horas — sensível a qualquer rajada de campanha (no caso, um pico recente de `google-ads`). Resultado: falso positivo que **trava o pipeline de deploy inteiro** sem nenhum problema real no modelo ou no pipeline. O risco aqui não é sinal degradado — é o oposto: a salvaguarda parando deploys legítimos por ruído de amostragem.
+
+**Mitigação proposta:** corrigir o método de amostragem do validador T1-16 / Gate C — trocar "50 mais recentes" por amostra **aleatória ou estratificada** sobre janela representativa (ex: 7 dias). Manter o validador (ele pega degradação real de feature); o defeito é só a amostragem. Sem identificador novo — é correção do T1-16 existente. Localização: a query de amostragem do Gate C em [`scripts/test_revision_equivalence.py`](../scripts/test_revision_equivalence.py) (`fetch_leads_predict_mode`, `ORDER BY "createdAt" DESC`) e o caminho equivalente do polling/`/predict/batch`.
+
+**Consequência colateral:** o endpoint `/admin/cleanup-canary-tags` (limpeza de tag canary independente de deploy) ficou bloqueado em 0% de tráfego porque toda revisão precisa passar no Gate C, e o Gate C travava nesse falso positivo. Prioridade baixa — o custo de tag órfã já está coberto pelo cleanup embutido no `deploy_capi.sh`. Corrigir a amostragem destrava ambos.
+
+**Lição estrutural (dupla):**
+1. Salvaguarda que decide bloquear deploy precisa amostrar de forma **representativa**. "N mais recentes" é amostra enviesada por definição — vira refém de flutuação de curto prazo e gera falso positivo que para o pipeline.
+2. **Processo:** a hipótese inicial ("divergência treino↔produção, sinal degradado há meses") era plausível, internamente coerente e chegou a ser documentada — e estava **errada**. Só caiu quando cada elo foi testado com dado real (leads reais pelo pipeline real, série temporal do dado bruto, feature_registry dos dois modelos, amostra aleatória vs recente). Inferência encadeada sem verificação propaga erro com aparência de rigor.
+
+**Desenho de correção:** os três defeitos do validador identificados nesta investigação (mede a coisa errada, roda no lugar errado, dano silencioso ao disparar) e a proposta de correção em conjunto (D1/D2/D3) estão em `PLANO_SAFEGUARD.md` § "Validador pós-encoding" → "Revisão proposta (18/05/2026)". Esta seção V.5 guarda o **achado**; o desenho técnico vive no catálogo do T1-16.
+
+---

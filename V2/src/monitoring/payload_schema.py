@@ -203,6 +203,47 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'funnel_metrics.data_quality.phone_percentage':                                     (R, None),  # ex: 100.0
     'funnel_metrics.data_quality.phone_present':                                        (S, 'rendero só percentage'),
     'funnel_metrics.data_quality.total_leads':                                          (S, 'rendero só percentage'),
+    'funnel_metrics.data_quality.fbp_fbc_rolling':                                      (R, None),  # dict(3): janelas 1d/3d/7d
+    'funnel_metrics.data_quality.fbp_fbc_rolling.1d':                                   (R, None),  # dict(3)
+    'funnel_metrics.data_quality.fbp_fbc_rolling.1d.n':                                 (R, None),  # leads Meta na janela 1d
+    'funnel_metrics.data_quality.fbp_fbc_rolling.1d.fbp_pct':                           (R, None),  # ex: 97.2
+    'funnel_metrics.data_quality.fbp_fbc_rolling.1d.fbc_pct':                           (R, None),  # ex: 77.1
+    'funnel_metrics.data_quality.fbp_fbc_rolling.3d':                                   (R, None),  # dict(3)
+    'funnel_metrics.data_quality.fbp_fbc_rolling.3d.n':                                 (R, None),
+    'funnel_metrics.data_quality.fbp_fbc_rolling.3d.fbp_pct':                           (R, None),
+    'funnel_metrics.data_quality.fbp_fbc_rolling.3d.fbc_pct':                           (R, None),
+    'funnel_metrics.data_quality.fbp_fbc_rolling.7d':                                   (R, None),  # dict(3)
+    'funnel_metrics.data_quality.fbp_fbc_rolling.7d.n':                                 (R, None),
+    'funnel_metrics.data_quality.fbp_fbc_rolling.7d.fbp_pct':                           (R, None),
+    'funnel_metrics.data_quality.fbp_fbc_rolling.7d.fbc_pct':                           (R, None),
+    'funnel_metrics.unified_funnel':                                                    (R, None),  # funil completo todas as fontes
+    'funnel_metrics.unified_funnel.window':                                             (R, None),  # dict(2)
+    'funnel_metrics.unified_funnel.window.date_brt':                                     (R, None),  # ex: '15/05'
+    'funnel_metrics.unified_funnel.window.label':                                        (R, None),  # 'dia anterior'
+    'funnel_metrics.unified_funnel.phone_pct':                                           (R, None),  # % com telefone (dia anterior)
+    'funnel_metrics.unified_funnel.capture':                                            (R, None),  # dict(1)
+    'funnel_metrics.unified_funnel.capture.leads_capi':                                 (R, None),  # leads_capi na janela (todas as fontes)
+    'funnel_metrics.unified_funnel.pipeline':                                           (R, None),  # dict(4) etapas
+    'funnel_metrics.unified_funnel.pipeline.pesquisa':                                  (R, None),  # dict(4): total/fb/ggl/outr
+    'funnel_metrics.unified_funnel.pipeline.pesquisa.total':                            (R, None),
+    'funnel_metrics.unified_funnel.pipeline.pesquisa.fb':                               (R, None),  # facebook-ads/ig/fb
+    'funnel_metrics.unified_funnel.pipeline.pesquisa.ggl':                              (R, None),  # google-ads
+    'funnel_metrics.unified_funnel.pipeline.pesquisa.outr':                             (R, None),  # demais fontes
+    'funnel_metrics.unified_funnel.pipeline.scoreado':                                  (R, None),
+    'funnel_metrics.unified_funnel.pipeline.scoreado.total':                            (R, None),
+    'funnel_metrics.unified_funnel.pipeline.scoreado.fb':                               (R, None),
+    'funnel_metrics.unified_funnel.pipeline.scoreado.ggl':                              (R, None),
+    'funnel_metrics.unified_funnel.pipeline.scoreado.outr':                             (R, None),
+    'funnel_metrics.unified_funnel.pipeline.capi_enviado':                              (R, None),
+    'funnel_metrics.unified_funnel.pipeline.capi_enviado.total':                        (R, None),
+    'funnel_metrics.unified_funnel.pipeline.capi_enviado.fb':                           (R, None),
+    'funnel_metrics.unified_funnel.pipeline.capi_enviado.ggl':                          (R, None),
+    'funnel_metrics.unified_funnel.pipeline.capi_enviado.outr':                         (R, None),
+    'funnel_metrics.unified_funnel.pipeline.aceito':                                    (R, None),
+    'funnel_metrics.unified_funnel.pipeline.aceito.total':                              (R, None),
+    'funnel_metrics.unified_funnel.pipeline.aceito.fb':                                 (R, None),
+    'funnel_metrics.unified_funnel.pipeline.aceito.ggl':                                (R, None),
+    'funnel_metrics.unified_funnel.pipeline.aceito.outr':                               (R, None),
     'funnel_metrics.meta_response':                                                     (R, None),  # ex: dict(7)
     'funnel_metrics.meta_response.acceptance_rate':                                     (R, None),  # ex: 100.0
     'funnel_metrics.meta_response.error_count':                                         (R, None),  # ex: 0
@@ -609,6 +650,12 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'traffic_metrics.ultima_semana.ctr_lead':                                           (R, None),  # ex: 20.8
     'traffic_metrics.ultima_semana.meta_leads':                                         (R, None),  # ex: 5536
     'traffic_metrics.ultima_semana.spend':                                              (R, None),  # ex: 40471.02
+    'traffic_metrics.dia_anterior':                                                     (R, None),  # dia BRT anterior (funil unificado)
+    'traffic_metrics.dia_anterior.clicks':                                              (R, None),
+    'traffic_metrics.dia_anterior.cpl':                                                 (R, None),
+    'traffic_metrics.dia_anterior.ctr_lead':                                            (R, None),
+    'traffic_metrics.dia_anterior.meta_leads':                                          (R, None),
+    'traffic_metrics.dia_anterior.spend':                                               (R, None),
     'traffic_metrics.ultimas_24h':                                                      (R, None),  # ex: dict(5)
     'traffic_metrics.ultimas_24h.clicks':                                               (R, None),  # ex: 4051
     'traffic_metrics.ultimas_24h.cpl':                                                  (R, None),  # ex: 6.79

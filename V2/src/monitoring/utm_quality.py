@@ -192,6 +192,7 @@ class UtmQualityResult:
     champion_name: str
     challenger_name: str
     by_level: dict   # {'source'|'medium'|'content': {worst, best, totals}}
+    min_volume: int = 20  # N mínimo de leads em 24h pra um UTM aparecer
 
 
 def compute_utm_quality(
@@ -266,13 +267,29 @@ def compute_utm_quality(
         qualifying = [e for e in entries
                       if e['n_24h'] >= min_volume
                       and e['avg_decil_24h_combined'] is not None]
-        qualifying.sort(key=lambda e: e['avg_decil_24h_combined'])
+        qualifying.sort(key=lambda e: e['avg_decil_24h_combined'])  # pior → melhor
+
+        # Split só faz sentido quando há UTMs suficientes pra "piores" e
+        # "melhores" serem conjuntos disjuntos. Com poucas (≤ 2×top_n) o
+        # split sobrepõe — então expõe uma lista única ranqueada.
+        n_qual = len(qualifying)
+        if n_qual <= 2 * top_n:
+            split_mode = 'single'
+            ranked = qualifying            # pior → melhor, sem corte
+            worst, best = [], []
+        else:
+            split_mode = 'extremes'
+            ranked = qualifying
+            worst = qualifying[:top_n]
+            best = list(reversed(qualifying[-top_n:]))
 
         by_level[level] = {
-            'worst': qualifying[:top_n],
-            'best':  list(reversed(qualifying[-top_n:])),
+            'split_mode': split_mode,
+            'ranked': ranked,
+            'worst': worst,
+            'best':  best,
             'total_distinct_utms': len(entries),
-            'qualifying_min_volume': len(qualifying),
+            'qualifying_min_volume': n_qual,
         }
 
     return UtmQualityResult(
@@ -292,107 +309,145 @@ def compute_utm_quality(
         champion_name=champion_name,
         challenger_name=challenger_name,
         by_level=by_level,
+        min_volume=min_volume,
     )
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Slack renderer
+# Slack renderer — só Content, mini-tabela alinhada
 # ──────────────────────────────────────────────────────────────────────────
 
-_LEVEL_LABELS = {
-    'source':  '📡 Source',
-    'medium':  '🧭 Medium',
-    'content': '🎯 Content',
-}
+def _combine(ch: Optional[dict], cl: Optional[dict], key: str) -> Optional[float]:
+    """Média ponderada por n de `key` entre Champion e Challenger."""
+    ch = ch or {}
+    cl = cl or {}
+    n_ch = ch.get('n', 0) or 0
+    n_cl = cl.get('n', 0) or 0
+    n = n_ch + n_cl
+    if n == 0:
+        return None
+    return ((ch.get(key) or 0) * n_ch + (cl.get(key) or 0) * n_cl) / n
 
 
-def _fmt_metric(v: Optional[dict]) -> str:
-    """`7.2 (38%)`  ou  `–` se sem dados."""
-    if not v or not v.get('n'):
-        return '–'
-    d = v.get('avg_decil')
-    p = v.get('pct_d8_d10')
-    d_s = f'{d:.1f}' if d is not None else '–'
-    p_s = f'{p:.0f}%' if p is not None else '–'
-    return f'{d_s} ({p_s})'
+def _challenger_note(entry: dict) -> Optional[str]:
+    """Linha de Challenger só quando tem ≥10 leads em 24h (em Content ~nunca)."""
+    cl = entry.get('challenger_24h') or {}
+    if (cl.get('n') or 0) < 10:
+        return None
+    d = cl.get('avg_decil')
+    p = cl.get('pct_d8_d10')
+    d_s = f"{d:.1f}" if d is not None else "–"
+    p_s = f"{p:.0f}%" if p is not None else "–"
+    return f"_Challenger: decil {d_s} · {p_s} no topo · {cl.get('n')} leads_"
 
 
-def _fmt_row(entry: dict, ch_name: str, cl_name: str) -> str:
-    utm = entry['utm']
-    n_24 = entry['n_24h']
-    n_lf = entry['n_lf']
-    ch24 = _fmt_metric(entry.get('champion_24h'))
-    cl24 = _fmt_metric(entry.get('challenger_24h'))
-    chlf = _fmt_metric(entry.get('champion_lf'))
-    cllf = _fmt_metric(entry.get('challenger_lf'))
-    return (
-        f"• `{utm}` — n=24h:{n_24} LF:{n_lf}\n"
-        f"   ↳ 24h  Ch {ch24}  ·  Cl {cl24}\n"
-        f"   ↳ LF   Ch {chlf}  ·  Cl {cllf}"
+def _mini_table_block(entry: dict, lf_label: str, marker: str) -> dict:
+    """Section mrkdwn: nome + mini-tabela monoespaçada (24h vs LF)."""
+    d24 = _combine(entry.get('champion_24h'), entry.get('challenger_24h'), 'avg_decil')
+    p24 = _combine(entry.get('champion_24h'), entry.get('challenger_24h'), 'pct_d8_d10')
+    dlf = _combine(entry.get('champion_lf'), entry.get('challenger_lf'), 'avg_decil')
+    plf = _combine(entry.get('champion_lf'), entry.get('challenger_lf'), 'pct_d8_d10')
+
+    def fd(v): return f"{v:.1f}" if v is not None else "–"
+    def fp(v): return f"{v:.0f}%" if v is not None else "–"
+
+    table = (
+        "```\n"
+        "         decil   topo    leads\n"
+        f"24h      {fd(d24):<7} {fp(p24):<7} {entry['n_24h']}\n"
+        f"{lf_label:<8} {fd(dlf):<7} {fp(plf):<7} {entry['n_lf']}\n"
+        "```"
     )
+    text = f"{marker} *{entry['utm']}*\n{table}"
+    note = _challenger_note(entry)
+    if note:
+        text += f"\n{note}"
+    return {'type': 'section', 'text': {'type': 'mrkdwn', 'text': text}}
 
 
 def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
-    """Blocks API mrkdwn. Cada level vira section header + 1 section com piores + 1 com melhores."""
+    """
+    Só Content. Mini-tabela alinhada (24h vs LF) por creative.
+
+    - split_mode='single': lista única ranqueada pior → melhor (poucas UTMs)
+    - split_mode='extremes': 🔴 Piores + 🟢 Melhores (muitas UTMs, disjuntas)
+    """
     blocks: List[dict] = []
 
-    lf_label = r.window_lf.get('label') or '—'
+    lf_label = r.window_lf.get('label') or 'LF'
     lf_state = 'em captação' if r.window_lf.get('is_active') else 'encerrado'
     hours = r.window_24h.get('hours', 24)
     n24 = r.window_24h.get('n_total', 0)
     nlf = r.window_lf.get('n_total', 0)
 
+    data = r.by_level.get('content', {})
+    qual = data.get('qualifying_min_volume', 0)
+    total = data.get('total_distinct_utms', 0)
+    split_mode = data.get('split_mode', 'single')
+    min_vol = r.min_volume
+
     blocks.append({
         'type': 'header',
-        'text': {'type': 'plain_text', 'text': f'Qualidade de UTM — últimas {hours}h × {lf_label}'},
+        'text': {'type': 'plain_text',
+                 'text': f'Qualidade de Content — últimas {hours}h × {lf_label}'},
     })
     blocks.append({
         'type': 'context',
         'elements': [{
             'type': 'mrkdwn',
             'text': (
-                f"Janela 24h: *{n24}* leads scoreados · "
-                f"LF *{lf_label}* ({lf_state}): *{nlf}* leads · "
-                f"métrica: decil médio (% D8-D10) · ranking por decil 24h"
+                f"*{n24}* leads scoreados nas {hours}h · "
+                f"*{nlf}* no {lf_label} ({lf_state}) · "
+                f"*{qual}* de {total} creatives com *N ≥ {min_vol}* leads nas {hours}h"
             ),
         }],
     })
+    blocks.append({
+        'type': 'context',
+        'elements': [{
+            'type': 'mrkdwn',
+            'text': (
+                f"Classificação pelo *decil médio das últimas {hours}h*. "
+                f"{lf_label} é só referência (tendência) — não entra no ranking. "
+                f"_decil = média 1–10 · topo = % em D8–D10 · N mín = {min_vol} leads/{hours}h_"
+            ),
+        }],
+    })
+    blocks.append({'type': 'divider'})
 
-    for level in ('source', 'medium', 'content'):
-        data = r.by_level.get(level, {})
+    if qual == 0:
+        blocks.append({
+            'type': 'context',
+            'elements': [{'type': 'mrkdwn',
+                          'text': '_nenhum creative com volume mínimo na janela 24h._'}],
+        })
+        return blocks
+
+    if split_mode == 'single':
+        ranked = data.get('ranked') or []
+        blocks.append({
+            'type': 'section',
+            'text': {'type': 'mrkdwn', 'text': '*Ranking — pior → melhor*'},
+        })
+        for i, e in enumerate(ranked):
+            marker = '🔴' if i == 0 else ('🟢' if i == len(ranked) - 1 else '⚪')
+            blocks.append(_mini_table_block(e, lf_label, marker))
+    else:
         worst = data.get('worst') or []
-        best  = data.get('best')  or []
-        qual  = data.get('qualifying_min_volume', 0)
-        total = data.get('total_distinct_utms', 0)
-
+        best = data.get('best') or []
+        blocks.append({
+            'type': 'section',
+            'text': {'type': 'mrkdwn', 'text': '🔴 *Piores*'},
+        })
+        for e in worst:
+            blocks.append(_mini_table_block(e, lf_label, '🔴'))
         blocks.append({'type': 'divider'})
         blocks.append({
             'type': 'section',
-            'text': {
-                'type': 'mrkdwn',
-                'text': f"*{_LEVEL_LABELS[level]}*  ({qual}/{total} UTMs com volume≥min)",
-            },
+            'text': {'type': 'mrkdwn', 'text': '🟢 *Melhores*'},
         })
-
-        if not worst and not best:
-            blocks.append({
-                'type': 'context',
-                'elements': [{'type': 'mrkdwn',
-                              'text': '_sem UTM com volume mínimo na janela 24h._'}],
-            })
-            continue
-
-        if worst:
-            worst_text = '🔴 *Piores*\n' + '\n'.join(
-                _fmt_row(e, r.champion_name, r.challenger_name) for e in worst
-            )
-            blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': worst_text}})
-
-        if best:
-            best_text = '🟢 *Melhores*\n' + '\n'.join(
-                _fmt_row(e, r.champion_name, r.challenger_name) for e in best
-            )
-            blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': best_text}})
+        for e in best:
+            blocks.append(_mini_table_block(e, lf_label, '🟢'))
 
     return blocks
 
