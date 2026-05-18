@@ -1192,6 +1192,14 @@ A exclusão é **deliberada** e está documentada com comentário longo em [src/
 
 **A/B com Challenger é condicional:** se um A/B for ligado com Champion legado (jan30, sem fix) + Challenger novo (com fix), o caminho do Challenger funciona mas o do Champion roda exposto à variação de casing. O A/B fica enviesado pelos leads que caem no Champion. **Retreinar o Champion é pré-condição para qualquer A/B em que o Challenger use código com normalização.**
 
+**Mecânica de transição segura — decidida 2026-05-18 (bundle imutável):** a normalização das 4 features roda em `core/category_unification.py`, que é **global** — afeta o DataFrame de todos os leads, não é per-variante como `encoding_overrides`. Consequência: **impossível** isolar o formato por variante sem criar um shim frágil (contradiz a regra de ouro "routing não conserta bug arquitetural" do `AUDITORIA_QUEBRA_PRODUCAO.md`). Portanto:
+
+- ❌ **Proibido:** A/B com um modelo no formato antigo (`jan30`, sufixos `_Sim`/`_Não`) contra um no formato novo (`_sim`/`_nao`). O lado antigo zera 100% das 4 features.
+- ✅ **Caminho correto:** os DOIS modelos do A/B (próximo Champion **e** próximo Challenger) treinados juntos já na arquitetura normalizada. No momento da promoção: retreina o campeão com dados/hiperparâmetros novos, mede o deslocamento de performance, regride se grande, promove se pequeno — e o Challenger já entra normalizado. Isso É o Sprint 2 do `retraining_orchestrator` (quality gate automático + promoção condicional).
+- ✅ **Alternativa aceitável:** canary direto 0→100% no novo Champion normalizado, sem A/B contra `jan30` (perde a comparação lado a lado mas é consistente).
+
+**Enforcement:** `retraining_decisions.features_binarias_dt18` no `configs/clients/devclub.yaml` está `PENDENTE`; `_assert_retraining_decisions_resolved()` em `train_pipeline.py` aborta `--set-active` até valer `aplicado_treino_e_producao` (4 colunas em `category.categorical_columns` + próximo Challenger treinado normalizado).
+
 **Mitigação de risco enquanto o fix não entra:** vetor 3 da V.2 implementado em 08/05/2026 — `actionable_alerts` no `/monitoring/daily-check` destaca HIGH+MEDIUM. Se o front mandar valor inesperado, `check_category_drift` dispara `new_categories` e aparece no topo do response. Isso não é fail-safe (continua silencioso pra produção até o próximo daily-check), mas dá detecção em até 24h.
 
 **Cross-refs:**

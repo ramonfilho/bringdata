@@ -238,7 +238,7 @@ Cenários conhecidos que **não passam o critério de ≥2% de impacto OU não t
 | Cenário | Por que não atacar agora |
 |---|---|
 | Macros literais TikTok no `utm_medium` | ~1.3% volume, score levemente degradado, ação está com gestor (Isaque). Confirmado em 11/mai: sem ação nossa adicional. |
-| `MIX QUENTE` como categoria canônica do Medium (LF54 frio = 0%; DEV quente = 30-46%) | Decidido em 11/mai (caminho C da discussão): incluir `MIX QUENTE` como categoria canônica no próximo retreino do Champion. Coluna OHE fica zerada em LF, ativa em DEV. Zero routing. Item M1 do PLANO_EXECUCAO. |
+| `MIX QUENTE` como categoria canônica do Medium (LF54 frio = 0%; DEV quente = 30-46%) | **Decisão REABERTA em 18/mai.** A premissa de 11/mai ("coluna OHE zerada em LF é neutra, zero routing") está errada: se o RF aprende um split condicionado em `Medium_MIX_QUENTE` (público presente só em DEV), em LF todos os leads caem no mesmo galho → distorce a distribuição de decis em LF. Decisão pendente entre 3 opções (modelo separado DEV/LF, excluir, ou incluir-e-auditar). Hard-enforced: `retraining_decisions.mix_quente` no `devclub.yaml` bloqueia `--set-active` enquanto `PENDENTE`. Item M1 do PLANO_EXECUCAO. |
 | Gate C de deploy com payload incompleto | Corrigido hoje (commit `4c6c472`) |
 | In-app browser produzindo cliques sem `fbclid` | Não afeta score — é cosmético na atribuição |
 | Lead com TZ na borda 23:59 BRT | Sem precedente recente, baixíssima frequência |

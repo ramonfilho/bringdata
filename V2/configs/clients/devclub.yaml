@@ -1,4 +1,47 @@
 client_id: devclub
+
+# ============================================================================
+# 🚧 DECISÕES DE RETREINO — bloqueiam --set-active enquanto = PENDENTE
+# ============================================================================
+# O train_pipeline.py aborta a promoção (set_active=True) se qualquer chave
+# abaixo estiver "PENDENTE". Isso torna IMPOSSÍVEL promover um Champion novo
+# sem decidir conscientemente cada item. Trocar o valor por uma das opções
+# documentadas libera a promoção.
+#
+# Guard: _assert_retraining_decisions_resolved() em src/train_pipeline.py.
+retraining_decisions:
+
+  # ----- MIX QUENTE como categoria do Medium -----
+  # Público presente sempre em lançamento DEV, ausente em LF. Auditoria
+  # 2026-05-14: 14,87% do volume vira "Outros" hoje. Risco: se o modelo
+  # aprender split condicionado nessa coluna (só ativa em DEV), em LF todos
+  # os leads caem no mesmo galho da árvore → distorce a distribuição de
+  # decis em LF. Coluna OHE zerada NÃO é neutra.
+  # Opções válidas (escolher 1, substituindo "PENDENTE"):
+  #   "modelo_por_tipo_lancamento"  → opção A: modelo DEV (com MIX QUENTE)
+  #        separado do modelo LF (sem). Mais preciso, custo de 2 modelos.
+  #   "incluir_e_auditar_decis_lf"  → opção C: inclui como categoria
+  #        canônica MAS exige auditar pós-treino se a presença/ausência
+  #        distorce a distribuição de decis em LF (deixa o dado decidir).
+  #   "excluir"                     → opção B: não inclui; aceita ~15% do
+  #        volume DEV em "Outros". Mais simples, sem viés.
+  mix_quente: PENDENTE
+
+  # ----- Normalização das 4 features binárias raw da pesquisa -----
+  # genero / estudouProgramacao / faculdade / investiuCurso chegam sem
+  # .strip().lower() (DT-18). Adicionar à lista category.categorical_columns
+  # ANTES do treino pra o feature_registry do novo Champion já sair com
+  # sufixos normalizados. Mecânica de transição segura (sem quebrar
+  # produção): NUNCA rodar A/B entre modelo no formato antigo (jan30,
+  # sufixos crus) e modelo no formato novo. Os dois lados do A/B têm que
+  # estar na mesma arquitetura — ou seja, promover só quando o próximo
+  # Challenger também já estiver treinado normalizado (bundle imutável).
+  # Opções válidas:
+  #   "aplicado_treino_e_producao"  → as 4 colunas estão em
+  #        category.categorical_columns E o próximo Challenger já está
+  #        treinado na arquitetura normalizada (sem A/B formato-misto).
+  features_binarias_dt18: PENDENTE
+
 infra:
   gcp_project_id: null
   cloud_run_url: null
@@ -237,24 +280,29 @@ medium:
     ABERTO: Aberto
     Aberto++AD08-1002: Outros
     # ========================================================================
-    # 🚧 BLOQUEADOR M1 — MIX QUENTE precisa virar categoria canônica
+    # 🚧 BLOQUEADOR M1 — MIX QUENTE: decisão DEV-vs-LF (NÃO decidido)
     # ========================================================================
-    # Hoje mapeado para Outros porque o feature_registry do Champion atual
-    # (jan30) não tem Medium_MIX_QUENTE. Auditoria 2026-05-14 (cenário 1.2
-    # do AUDITORIA_QUEBRA_PRODUCAO) confirmou 14.87% do volume nos últimos
-    # 30 dias indo pra Outros — segundo maior volume de Medium, atrás só de
-    # `aberto`. Audiência distinta do gestor.
-    # No próximo retreino do Champion (que precisa rodar pelo pipeline atual
-    # por causa de DT-16 e DT-18):
-    #   1. Auditar variações reais com:
-    #      SELECT DISTINCT medium FROM "Lead" WHERE medium ILIKE '%mix%quente%'
-    #   2. Substituir esta linha por: `MIX QUENTE: MIX QUENTE` (mapear pra
-    #      si mesma, mantendo a unificação de casing/whitespace abaixo).
-    #   3. Mapear TODAS as variações observadas (case/espaços/pontuação) para
-    #      o canônico `MIX QUENTE`.
-    #   4. Aplicar simultaneamente ao retreino — o novo feature_registry
-    #      passa a conter `Medium_MIX_QUENTE`.
-    # Cross-refs: PLANO_EXECUCAO.md M1, AUDITORIA_QUEBRA_PRODUCAO Cenário 1.2.
+    # Hoje mapeado para Outros. Auditoria 2026-05-14: 14,87% do volume vira
+    # Outros — segundo maior Medium, atrás só de `aberto`. Audiência distinta
+    # do gestor, presente SÓ em lançamento DEV, ausente em LF.
+    #
+    # ⚠️ A decisão "incluir como categoria canônica" foi REABERTA em 18/mai:
+    # se o RF aprender um split em Medium_MIX_QUENTE (só ativo em DEV), em LF
+    # todos os leads caem no mesmo galho da árvore → distorce decis em LF.
+    # Coluna OHE zerada NÃO é neutra. NÃO basta trocar esta linha — a decisão
+    # entre as 3 opções vive em `retraining_decisions.mix_quente` no topo
+    # deste YAML, e o guard _assert_retraining_decisions_resolved() em
+    # train_pipeline.py ABORTA --set-active enquanto estiver PENDENTE.
+    #
+    # Ao resolver (no próximo retreino, pelo pipeline atual por DT-16/DT-18):
+    #   - opção "excluir": deixa esta linha como está (MIX QUENTE: Outros).
+    #   - opção "incluir_e_auditar_decis_lf" ou "modelo_por_tipo_lancamento":
+    #       1. auditar variações: SELECT DISTINCT medium FROM "Lead"
+    #          WHERE medium ILIKE '%mix%quente%'
+    #       2. trocar por `MIX QUENTE: MIX QUENTE` + mapear todas as variações
+    #          (case/espaço/pontuação) pro mesmo canônico.
+    # Cross-refs: PLANO_EXECUCAO.md M1, AUDITORIA_QUEBRA_PRODUCAO Cenário 1.2,
+    # bloco retraining_decisions no topo deste arquivo.
     # ========================================================================
     MIX QUENTE: Outros
     Linguagem de programação: Linguagem de programação

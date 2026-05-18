@@ -241,6 +241,61 @@ def _log_step_count(step: str, df_after, df_before=None, target_col: str = 'targ
     logger.info("  " + " | ".join(parts))
 
 
+def _assert_retraining_decisions_resolved(config_path: str, set_active: bool) -> None:
+    """
+    Bloqueia a promoção (--set-active) enquanto houver decisão de retreino
+    marcada PENDENTE no bloco `retraining_decisions` do YAML do cliente.
+
+    Existe pra tornar IMPOSSÍVEL promover um Champion novo sem decidir
+    conscientemente dois itens que, se passarem batido, quebram produção ou
+    enviesam o modelo:
+
+      - mix_quente: público presente só em lançamento DEV. Incluir como
+        categoria sem decidir DEV-vs-LF distorce a distribuição de decis em
+        LF (coluna OHE zerada não é neutra — o RF aprende splits nela).
+      - features_binarias_dt18: as 4 features binárias raw sem normalização.
+        Promover formato novo enquanto o Champion legado (jan30) espera
+        sufixos crus zera 100% dessas features no path Champion.
+
+    Lê o YAML cru (não via ClientConfig) — chave top-level desconhecida é
+    ignorada pelo from_yaml, então não afeta a dataclass nem multi-cliente.
+    Só dispara quando set_active=True; treino exploratório (sem promoção)
+    roda livre.
+    """
+    if not set_active:
+        return
+
+    import yaml as _yaml
+    try:
+        with open(config_path, 'r', encoding='utf-8') as _f:
+            _data = _yaml.safe_load(_f) or {}
+    except OSError as _e:
+        raise RuntimeError(
+            f"[set-active gate] não consegui ler {config_path} para checar "
+            f"retraining_decisions: {_e}"
+        )
+
+    decisions = _data.get('retraining_decisions') or {}
+    pendentes = [k for k, v in decisions.items() if str(v).strip().upper() == 'PENDENTE']
+    # Ausência do bloco inteiro também é bloqueio — decisão não foi registrada.
+    if not decisions:
+        pendentes = ['(bloco retraining_decisions ausente do YAML)']
+
+    if pendentes:
+        raise ValueError(
+            "[set-active gate] Promoção bloqueada — decisões de retreino não "
+            f"resolvidas em {config_path}:\n"
+            + "\n".join(f"  - {p}" for p in pendentes)
+            + "\n\nResolva cada chave no bloco `retraining_decisions` do YAML "
+            "(opções documentadas inline) antes de rodar com --set-active.\n"
+            "Contexto: MIX QUENTE distorce decis em LF se incluído sem decidir "
+            "DEV-vs-LF; as 4 features binárias quebram o path Champion se o "
+            "formato novo entrar em A/B contra modelo legado.\n"
+            "Catálogos: PLANO_EXECUCAO.md (M1), PLANO_REFACTOR_MLOPS.md (DT-18)."
+        )
+    logger.info(f"  [set-active gate] retraining_decisions OK: {decisions}")
+
+
 def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, exclude_features=None, export_matched_dataset=None):
     # Guard: Cloud SQL MLflow precisa estar RUNNABLE. Falha alto se NEVER.
     assert_mlflow_backend_running()
@@ -1059,20 +1114,22 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     # ========================================================================
     # 🚧 BLOQUEADORES no próximo `--set-active` (rodar TUDO num único retreino)
     # ========================================================================
-    # Antes de promover o próximo Champion (set_active=True), preencher os itens
-    # abaixo. NÃO rodar `--set-active` isolado pra qualquer um deles — todos
-    # entram juntos pra manter o pipeline de treino sincronizado com produção.
+    # Os itens 1 e 2 abaixo são HARD-ENFORCED: o guard
+    # _assert_retraining_decisions_resolved() aborta a promoção se a decisão
+    # não estiver registrada no bloco `retraining_decisions` do devclub.yaml.
+    # Os itens 3-6 são checklist (não auto-bloqueiam, mas entram no mesmo
+    # retreino — todos juntos pra manter treino sincronizado com produção).
     #
-    # 1. [DT-18] Normalização das 4 features binárias raw da pesquisa
+    # 1. [M1] MIX QUENTE como categoria do Medium — decisão DEV-vs-LF:
+    #    público só existe em DEV; incluir sem decidir distorce decis em LF.
+    #    Resolver `retraining_decisions.mix_quente` no YAML (guard bloqueia).
+    #
+    # 2. [DT-18] Normalização das 4 features binárias raw da pesquisa
     #    (`genero`, `estudouProgramacao`, `faculdade`, `investiuCurso`):
-    #    adicionar à lista `categorical_columns` em
-    #    `configs/clients/devclub.yaml` ANTES do treino, pra que o feature_registry
-    #    do novo Champion já saia com os sufixos normalizados (`_sim`/`_nao` etc.).
-    #
-    # 2. [M1 do PLANO_EXECUCAO] MIX QUENTE como categoria canônica do Medium:
-    #    trocar `MIX QUENTE: Outros` por `MIX QUENTE: MIX QUENTE` em
-    #    `configs/clients/devclub.yaml` ANTES do treino. Auditoria 14/mai
-    #    confirmou 14.87% do volume sendo descartado.
+    #    adicionar à lista `category.categorical_columns` ANTES do treino +
+    #    garantir que o próximo Challenger também já está treinado nessa
+    #    arquitetura (NUNCA A/B formato-misto). Resolver
+    #    `retraining_decisions.features_binarias_dt18` (guard bloqueia).
     #
     # 3. [DT-16] Matar `encoding_overrides` por convergência: novo Champion já
     #    sai com OHE nativo (sem ordinal para idade/salário), o que elimina o
@@ -1097,6 +1154,8 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     # Catálogos: PLANO_REFACTOR_MLOPS.md (DT-X), PLANO_SAFEGUARD.md (T1-X),
     # PLANO_EXECUCAO.md (M1).
     # ========================================================================
+    _assert_retraining_decisions_resolved(os.path.abspath(_config_path), set_active)
+
     resultado_registro_devclub = registrar_features_e_modelo_devclub(
         dataset_v1_devclub_encoded,
         dataset_v1_devclub,
