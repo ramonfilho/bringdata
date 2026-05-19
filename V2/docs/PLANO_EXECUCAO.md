@@ -46,7 +46,9 @@
 
 **Decisão de fonte (resolvida 17/05):** implementar já, recuperando `computador`/fbp/fbc de `integration_logs` (~90%/~98%); os ~10% sem `computador` não são enviados (skip, consistente com a regra dura); fail-loud na cobertura. Pedir colunas limpas ao front segue em paralelo como melhoria de durabilidade.
 
-**Como executar:** protocolo por item (Princípio 2 e 5 abaixo) — cada item I1–I7 é implementado → testado → commitado → canary 0% → validado → promovido com OK explícito. Nenhum item começa sem autorização. Sequência e especificação técnica completa no catálogo `PROCESSO_CAPI_LEAD_SURVEYS.md` (§9). I0 — decisão + este registro — concluído.
+**Como executar:** protocolo por item (Princípio 2 e 5 abaixo) — cada item I1–I7 é implementado → testado → commitado → canary 0% → validado → promovido com OK explícito. Nenhum item começa sem autorização. Sequência e especificação técnica completa no catálogo `PROCESSO_CAPI_LEAD_SURVEYS.md` (§9).
+
+**⏸️ Estado em 2026-05-19 (PAUSADO a pedido do usuário):** **I0–I4 (código) concluídos e commitados** no branch `feat/capi-lead-surveys-scoring` (`9b57c0d`/`31d1151`/`2a802db`/`160562c`/`d2587f0`). **Nada deployado, nada ligado** (`SURVEY_CAPI_ENABLED` off, sem canary, `Lead` byte-idêntico, schedulers pausados). Retomada: validação canary fecha o I4 → I5 (monitoramento + alarme rolling sobre `registros_ml`) → I6 (whitelist UTM, classe "Cluster 5") → I7 (ligar+promover+religar). Detalhe e dependências no catálogo. Nota de prazo: estrutura nova do dono prevista p/ "semana que vem" (17/05) — pesar go-live interino vs. mirar a estrutura nova.
 
 **Religar schedulers** só após o código ler `lead_surveys` E os bloqueios duros de monitoramento (B1–B4 do catálogo) prontos.
 
