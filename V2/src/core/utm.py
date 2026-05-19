@@ -85,15 +85,23 @@ def _unify_source(df: pd.DataFrame, config: UTMConfig) -> pd.DataFrame:
     # 4. Fallback whitelist — qualquer Source fora dos canônicos vira 'outros'.
     # Sem isso, valores novos (ex: 'tiktok') passam crus e o encoding zera
     # todas as colunas Source_*. Espelha proteção análoga em _unify_term.
+    # Incondicional por design: sem whitelist canônica não há como conter
+    # valores novos → falha alto em vez de degradar calado (fail-loud).
     canonical = config.source_canonical_values
-    if canonical:
-        canonical_set = {str(c).lower() for c in canonical}
-        mask_outside = df['Source'].notna() & ~df['Source'].isin(canonical_set)
-        if mask_outside.any():
-            unknown = df.loc[mask_outside, 'Source'].unique().tolist()
-            logger.debug(f"  Source fora da whitelist → 'outros' "
-                         f"({mask_outside.sum()} leads, valores: {unknown[:10]})")
-            df.loc[mask_outside, 'Source'] = 'outros'
+    if not canonical:
+        raise ValueError(
+            "[FALHA SILENCIOSA] config.source_canonical_values vazio/ausente: "
+            "sem whitelist canônica, um Source novo passa cru e o encoding zera "
+            "as colunas Source_* sem erro (degradação silenciosa de sinal). "
+            "Defina source_canonical_values em configs/clients/<cliente>.yaml."
+        )
+    canonical_set = {str(c).lower() for c in canonical}
+    mask_outside = df['Source'].notna() & ~df['Source'].isin(canonical_set)
+    if mask_outside.any():
+        unknown = df.loc[mask_outside, 'Source'].unique().tolist()
+        logger.debug(f"  Source fora da whitelist → 'outros' "
+                     f"({mask_outside.sum()} leads, valores: {unknown[:10]})")
+        df.loc[mask_outside, 'Source'] = 'outros'
 
     source_depois = df['Source'].nunique()
     logger.info(f"  Source: {source_antes} → {source_depois} valores únicos")
