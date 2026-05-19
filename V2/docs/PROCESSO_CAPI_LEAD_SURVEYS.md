@@ -1,170 +1,143 @@
-# Disparar o evento scoreado também para quem responde a pesquisa pela esteira nova
+# Disparar o evento scoreado por ML também para quem responde a pesquisa pela esteira nova
 
-**Criado:** 2026-05-17
-**Status:** investigação concluída · desenho fechado · decisão de fonte **resolvida** (§6) · **I0–I4 (código) concluídos e commitados** no branch `feat/capi-lead-surveys-scoring` · ⏸️ **PAUSADO em 2026-05-19 a pedido do usuário, ANTES do deploy canary do I4** · **nada em produção** (`SURVEY_CAPI_ENABLED` off, sem revisão canary, schedulers pausados) · falta: validação canary (fecha I4) + I5–I7
-**Papel:** especificação completa do processo de fazer o evento CAPI scoreado por ML (`LeadQualified` + `LeadQualifiedHighQuality`) ser disparado a partir de **duas** tabelas — a `Lead` (como hoje) **e** a `lead_surveys` — sem tocar no fluxo da `Lead`.
+**Criado:** 2026-05-17 · **Atualizado:** 2026-05-19 · **Papel:** especificação e diário desta frente — fazer o evento CAPI scoreado por ML (`LeadQualified`/`LeadQualifiedHighQuality`, com valor por decil) ser disparado também a partir da tabela `lead_surveys`, sem tocar no fluxo `Lead`.
 
-> Linguagem natural primeiro (regra do `CLAUDE.md`). Identificadores de código e nomes de tabela aparecem no corpo porque o documento é técnico-operacional; o rodapé lista os artefatos.
-
-> **⏸️ PAUSA — 2026-05-19:** trabalho **pausado a pedido do usuário antes do deploy canary do I4**. Onde paramos, exatamente:
-> - **Código I0–I4 concluído e commitado** no worktree/branch `feat/capi-lead-surveys-scoring` (commits `9b57c0d`/`31d1151` I1, `2a802db` I2, `160562c` I3, `d2587f0` I4). Worktree limpo.
-> - **Nada deployado, nada ligado:** sem revisão canary; `SURVEY_CAPI_ENABLED` off (default); fluxo `Lead` byte-idêntico; schedulers `slack-digest-daily`+`railway-polling` seguem **PAUSADOS**. Produção 100% na revisão atual, intocada.
-> - **Próximo passo quando retomar:** rodar `deploy_capi.sh` (gates B/D/C.1/C.2 + canary `NO_TRAFFIC` 0%) e validar o ramo em dry-run na URL da canary → fecha o I4. Depois I5 (monitoramento + alarme rolling sobre `registros_ml`), I6 (whitelist UTM dos survey leads — classe "Cluster 5"), I7 (ligar+promover+religar schedulers, com dependências do §9).
-> - **Contexto de prazo:** a estrutura nova do dono ("banco novo, tudo do zero") estava prevista pra "semana que vem" (declarado 17/05) — pesar valor do go-live interino vs. mirar direto a estrutura nova ao retomar.
-> - Sessão paralela commitou no `main` `51951ee` (investigação "gate trava por UTM vazia/quebrada") — intersecta o I6; revisar ao retomar.
->
-> **⚠️ ESTADO OPERACIONAL — 2026-05-17:** a captação de produção **migrou para `lead_surveys`** — `Lead` ficou com **0 entradas nas últimas 6h** (51 em 24h, última às 00:35 UTC). Como o monitoramento ainda lê `Lead`, ele produzia (a) digest das 6h vazio/errado pro canal do cliente `#team-dados` e (b) critical_alerts errado a cada 5min no privado. **Mitigação aplicada:** os dois Cloud Scheduler jobs foram **PAUSADOS** — `slack-digest-daily` (`0 6 * * *`) e `railway-polling` (`*/5`). Reverter com `gcloud scheduler jobs resume <job> --project=smart-ads-451319 --location=us-central1`.
-
-> **Reconciliação com sessão paralela (17/05, ~12h BRT):** outro terminal já commitou na `main` o repoint do `critical_alerts` para `lead_surveys` (`52b507d` + `642ffa4`, 17/05 ~10:45–10:50 BRT) — alarme `no_leads_arriving` correto, demais regras auto-skip por amostra. **PORÉM** a revisão Cloud Run servindo 100% (`smart-ads-api-00487-nid`) foi buildada em **16/05 14:03 BRT**, ~20h antes desses commits → **o fix está commitado mas NÃO deployado**. Consequência: **manter os dois schedulers pausados**; religar `railway-polling` agora reintroduz o ruído falso (revisão viva roda o `critical_alerts` antigo com `CRITICAL_ALERTS_DRY_RUN=false`). A pausa só pode ser levantada com segurança após uma revisão contendo `642ffa4` ser promovida — **ação pertencente ao terminal de monitoramento**, não a esta frente. Divisão: monitoramento/`critical_alerts` = outro terminal; **scoring/CAPI → `lead_surveys` = esta frente**, isolada em worktree próprio. **Consequência:** enquanto `railway-polling` está pausado, nenhum lead novo é scoreado/enviado por CAPI por nenhuma esteira — mas o sinal scoreado para a inflow nova **já estava efetivamente desligado desde a migração** (nosso código nunca leu `lead_surveys`); a pausa só silencia o alarme falso, não muda a realidade do CAPI. Despausar só faz sentido depois que o código ler `lead_surveys` (a implementação bloqueada em §6) **ou** se a inflow voltar para `Lead`.
+> Linguagem natural primeiro (regra do `CLAUDE.md`). Nomes de tabela/código aparecem no corpo porque o doc é técnico-operacional; o rodapé lista os artefatos. Datas absolutas. Documento consolidado em 2026-05-19 via skill `/docs` — versões anteriores ficam no histórico git (`PROCESSO_CAPI_LEAD_SURVEYS.md` no `main`).
 
 ---
 
-## 1. Objetivo
+## ⏸️ ESTADO ATUAL — 2026-05-19 (PAUSADO a pedido do usuário)
 
-Hoje o job que scoreia leads e dispara o evento de qualidade pro Meta lê de **uma** tabela (`Lead`). Existe uma segunda esteira de captação que grava respostas de pesquisa numa tabela diferente (`lead_surveys`) — e esses leads **nunca recebem o nosso evento scoreado**. O objetivo é: o mesmo job passar a scorear e disparar o evento também para os leads da `lead_surveys`, mantendo o fluxo da `Lead` exatamente como está.
+**Onde estamos:** código dos itens **I0–I4 concluído, testado offline e commitado** no branch/worktree isolado `feat/capi-lead-surveys-scoring`. Trabalho **pausado pelo usuário antes do deploy canary do I4**.
 
-## 2. O que a investigação encontrou (2026-05-16/17)
+**Produção: intocada.** Não há revisão canary; `SURVEY_CAPI_ENABLED` está off (default); o fluxo `Lead` é byte-idêntico ao de antes; os schedulers `slack-digest-daily` e `railway-polling` seguem **PAUSADOS**. Nenhum evento foi ao Meta por esta frente.
 
-### 2.1 São duas esteiras quase disjuntas
+**O que falta para ligar (na ordem):**
+1. Fechar o I4 — rodar `deploy_capi.sh` (gates B/D/C.1/C.2 + revisão canary com 0% de tráfego) e validar o ramo em **dry-run** na URL da canary.
+2. **I5** — extensão de monitoramento (bloqueios duros B1–B4 do §7) + o alarme rolling sobre o ledger `registros_ml`.
+3. **I6** — verificar a whitelist/encoding de UTM dos survey leads (a classe de quebra histórica "Cluster 5" — categoria de UTM nova fora da whitelist degradando o sinal calado).
+4. **I7** — ligar (`SURVEY_CAPI_ENABLED=true`), promover tráfego, religar schedulers (com as dependências do §5/I7).
 
-- `Lead` é o funil antigo (gravado pelo front via Prisma quando o lead completa a pesquisa). `lead_surveys` é um sistema separado, mais novo (ativo desde 12/05/2026).
-- Sobreposição (janela de 7 dias): **720** emails distintos em `lead_surveys` vs **3.765** em `Lead`; **só 13** em comum. Por linha: das 725 linhas de `lead_surveys`, **15** têm linha correspondente em `Lead` (e todas as 15 já tinham CAPI disparado pelo fluxo normal).
-- **Conclusão:** ~98% dos leads de pesquisa não existem na `Lead`. Não há de onde "fazer lookup". É população nova, invisível ao nosso scoring/CAPI hoje.
+**Nota de prazo:** o dono da empresa anunciou (17/05) que vai reconstruir tudo do zero — banco e estrutura novos — previsto para "semana que vem". O valor desta frente é interino (~poucos dias de sinal scoreado até a virada). Ao retomar, pesar go-live interino vs. mirar direto a estrutura nova.
 
-### 2.2 A esteira nova já dispara eventos próprios pro Meta (genéricos)
+**Reconciliação com sessões paralelas (o usuário roda vários terminais):**
+- O **monitoramento/`critical_alerts`** pertence a **outro terminal**, não a esta frente. Esse terminal já commitou no `main` o repoint do `critical_alerts` para `lead_surveys` (commits `52b507d`+`642ffa4`, 17/05) — mas a revisão Cloud Run servindo 100% (`smart-ads-api-00487-nid`, build 16/05 14:03 BRT) **não inclui** esse fix. Por isso os schedulers **continuam pausados**: religar `railway-polling` agora reintroduz o ruído falso do `critical_alerts` antigo. Levantar a pausa só é seguro depois que uma revisão contendo `642ffa4` for promovida — **ação do terminal de monitoramento**.
+- Esta frente = **scoring/CAPI → `lead_surveys`**, isolada no worktree próprio.
+- O terminal de monitoramento também investiga "gate trava por UTM vazia/quebrada" (commit `51951ee` no `main`, 18/05) — **intersecta o I6**; revisar em conjunto ao retomar.
 
-`integration_logs` (mesmo banco Railway) mostra, em 7 dias: `meta_capi/Lead` 1.039 sucessos, `meta_capi/CompleteRegistration` 726, `activecampaign/subscribe` 1.177, `n8n_onboarding/onboarding` 925. Ou seja: o Meta **já recebe eventos bem casados** desses leads — mas **genéricos** (`Lead`, `CompleteRegistration`), **nunca** o nosso `LeadQualified`/`LeadQualifiedHighQuality` com valor por decil. O gap é o sinal de qualidade scoreado, não a existência de evento.
+---
 
-> Nomes de evento distintos (nosso `LeadQualified`/`HighQuality` vs o `Lead`/`CompleteRegistration` deles) ⇒ o Meta **não** dedupica automaticamente; é uma decisão consciente adicionar o nosso sinal por cima, não uma duplicata literal.
+## 1. O quê e por quê
 
-### 2.3 O que falta na `lead_surveys` para scorear/disparar
+**O quê:** o job que scoreia leads e dispara o evento de qualidade ao Meta lê de **uma** tabela (`Lead`). Esta frente faz o **mesmo** job ler **também** da `lead_surveys` (a esteira nova de captação), mantendo o fluxo `Lead` exatamente como está.
 
-Schema real: `id, clientEmail, genero, idade, ocupacao, faixaSalarial, cartaoCredito, estudouProgramacao, faculdade, investiuCurso, atracaoProfissao, interesseEvento, eventId, ip, submittedAt`.
+**Por quê (o que forçou a frente):** a captação de produção **migrou** da `Lead` para a `lead_surveys` por volta de 12/05/2026. Medições de 17–18/05: a `Lead` ficou com **0 entradas** desde 17/05 00:35 BRT e a `leads_capi` desde 17/05 18:29 BRT — ambas mortas. As únicas tabelas vivas recebendo dado são `lead_surveys` (~380/dia), `UTMTracking`, `integration_logs`, `Client`. Como nosso pipeline só lê `Lead`, **o sinal CAPI scoreado por ML está OFF para toda a captação viva** desde a migração. Esta frente restaura esse sinal.
 
-| O scorer/CAPI usa | Em `Lead` | Em `lead_surveys` | Onde recuperar |
-|---|---|---|---|
-| Respostas de pesquisa (10 campos) | ✓ | ✓ | — |
-| `computador` (feature **principal** do modelo) | ✓ ~100% | ✗ não existe | hoje só no log `n8n_onboarding` (`tem_computador`), ~90% |
-| UTM (source/medium/campaign/content/term + url) — modelo + roteamento A/B + allowlist | ✓ | ✗ | `UTMTracking` por email (98% match, ~1,2 linha/email) |
-| fbp / fbc / ip / user_agent (match quality Meta) | ✓ | só `ip` | payload `meta_capi` em `integration_logs`, ~98% |
-| telefone / nome (match quality Meta) | ✓ | ✗ | payload `n8n_onboarding`, ~90% |
-| dedup (`capiSentAt`) | ✓ coluna | ✗ | precisa de store próprio (ver §5) |
+> O sinal scoreado já estava efetivamente desligado **desde a migração** — a pausa dos schedulers só silencia alarme falso de monitoramento; não foi ela que desligou o CAPI.
 
-### 2.4 Cobertura de recuperação por JOIN (janela 7d)
+## 2. O que a investigação encontrou (16–18/05)
 
-Medição inicial (16/05, 728 linhas): fbp+fbc **98%** (711/728) · `computador` via `n8n_onboarding` **90%** (654/728) · telefone **90%** · ambos **89%**.
+**Duas esteiras quase disjuntas.** `Lead` (funil antigo, front via Prisma) vs `lead_surveys` (sistema novo desde 12/05). Em 7 dias só ~2% de sobreposição de email (13 de ~720). É população nova, invisível ao nosso scoring/CAPI — não dá para "fazer lookup" na `Lead`.
 
-**Re-medição 17/05 20:30 (1117 linhas):** fbp+fbc **97,0%** (1083/1117) · `computador` só `n8n_onboarding` **91,3%** · `computador` só `activecampaign` (campo 144) **99,9%** (1107/1108) · `n8n_onboarding` **ou** `activecampaign` **100,0%** · fbp/fbc **e** `computador` (combinado) **97,0%**. Conclusão: com as duas fontes `computador` ≈100% (nesta janela); limitante de envio passa a ser **fbp/fbc ≈97%** → ~3% skip pela regra dura, não ~10%. Não é garantia estrutural — pedido da coluna limpa segue por durabilidade.
+**A esteira nova já manda evento próprio pro Meta, mas genérico.** O `integration_logs` mostra a stack do front (n8n) enviando `meta_capi/Lead` e `meta_capi/CompleteRegistration` (~1.765/7d) — bem casados (email/telefone/fbp/fbc). O que **nunca** vai para esses leads é o **nosso** evento scoreado (`LeadQualified` com valor por decil). O gap é o sinal de qualidade, não a existência de evento. Nomes de evento distintos ⇒ o Meta não deduplica automaticamente; somar o nosso é decisão consciente, não duplicata.
 
-**Validação de proveniência do campo 144 (17/05):** onde o lead tem as duas fontes (1.011 leads), `activecampaign` campo 144 = `n8n_onboarding` `tem_computador` em **1.011/1.011 (100,00%, zero divergência)**; ambos domínio `{SIM,NAO}`. Evidência empírica forte de que campo 144 **é** o `computador` (as demais perguntas SIM/NAO da pesquisa são independentes — não dariam 100% de correlação). Ressalva: validação empírica, não a config de campos do ActiveCampaign do front — confirmar com quem mantém o front fecha a certeza.
+**A `lead_surveys` não tem tudo que o scorer/CAPI precisam — mas dá para recuperar.** Schema: `id, clientEmail, genero, idade, ocupacao, faixaSalarial, cartaoCredito, estudouProgramacao, faculdade, investiuCurso, atracaoProfissao, interesseEvento, eventId, ip, submittedAt`. Falta: `computador` (feature principal do modelo), UTM, fbp/fbc, telefone, nome. Recuperação por email/eventId em tabelas do mesmo Railway:
 
-### 2.5 `computador` no `Lead` é ~100% — o 90% da esteira nova é degradação real
+| Campo | Fonte de recuperação | Cobertura final medida |
+|---|---|---|
+| Respostas de pesquisa (10 campos) | colunas da própria `lead_surveys` | 100% |
+| `computador` | `integration_logs`: `n8n_onboarding.tem_computador` **ou** `activecampaign` campo 144 | **≈100%** combinado |
+| UTM (source/medium/campaign/content/term + url) | `UTMTracking` por email (linha mais recente ≤ `submittedAt`) | ~98% |
+| fbp/fbc/ip/user_agent | `integration_logs` `meta_capi`: JOIN preciso por `eventId` (1:1) com fallback email | ~98% (e **100% entre os Meta-elegíveis**) |
+| telefone/nome | `integration_logs` `n8n_onboarding` por email | ~90% |
 
-Fill-rate de `Lead.pesquisa.computador`: 7d **100,0%** (3.812/3.812), 30d **99,95%**, 90d **99,96%**. Em 7d, leads com `computador` em branco = **0** — o modelo **nunca** rodou em produção sem essa feature. Logo, recuperar `computador` a 90% via log é degradação de ~10% contra o baseline que o modelo conhece — vetado pela regra dura do usuário ("não pode mandar evento sem ela"). **Atualização 17/05:** combinando `n8n_onboarding`+`activecampaign` (campo 144), `computador` recupera ≈100% nesta janela (§2.4 re-medição) — a degradação de ~10% deixa de se aplicar na prática; mantém-se o pedido da coluna limpa por durabilidade, mas o limitante real de envio passa a ser fbp/fbc (~3% skip).
+**Pontos validados (read-only contra o Railway):**
+- **`computador`**: o campo 144 do `activecampaign` **é** o `computador` — onde há as duas fontes (1.011 leads), bate com `n8n_onboarding.tem_computador` em **1.011/1.011, zero divergência**, domínio `{SIM,NAO}`. Combinando as duas fontes, cobertura ≈100%.
+- **fbp/fbc**: medido só entre **Meta-elegíveis** (`source` ∈ facebook-ads/fb/ig) dá **100%** (242/242 numa amostra de 300). O "buraco" aparente é google-ads (não tem `fbc` por natureza) — mas google-ads **já é bloqueado pela allowlist** no envio ao Meta, então não é perda de sinal.
+- **Vocabulário das respostas: 100% seguro.** Cada valor de `lead_surveys`, após a normalização que já roda em produção (`_normalizar` + mapas em `api/railway_mapping.py`), cai só em categorias que o funil `Lead` já produz. Zero categoria nova.
+- **`computador` no `Lead` é ~100%** (3.812/3.812 em 7d) — o modelo nunca rodou sem essa feature; por isso a regra dura de não enviar sem ela. Com a recuperação combinada ≈100%, o limitante real de envio passa a ser fbp/fbc (~poucos % de skip), não `computador`.
 
-O dado existe na origem (o front captura `computador` em ~100% no funil `Lead`); ele só **não é persistido na tabela `lead_surveys`**. Daí a decisão de pedir a coluna (ver §3).
+## 3. Decisões (datas absolutas)
 
-### 2.6 Verificação de vocabulário das respostas — **100% seguro**
+| # | Decisão | Quando |
+|---|---|---|
+| 1 | **Implementar já**, recuperando `computador`/fbp/fbc de `integration_logs` (≈100%/~98%) — **não esperar** uma coluna limpa. Pedir colunas limpas (`computador`/fbp/fbc/telefone/nome) ao front segue **em paralelo**, como durabilidade (remove a fragilidade do parse de log), não como bloqueio. | 17/05 |
+| 2 | **`leads_capi` só como fallback** (e hoje está morta de qualquer forma). | 17/05 |
+| 3 | **Recuperação de 24h + forward**: ao ligar, processar `lead_surveys` com `submittedAt` nas últimas 24h e dali pra frente (cutoff = enable − 24h); dedup pelo ledger; **não** re-disparar nada mais antigo que 24h (conversão velha suja a otimização; até ~24h o Meta aceita p/ atribuição). | 18/05 (revisou "forward-only puro") |
+| 4 | **Extensão de monitoramento entra junto** (não vira follow-up). | 17/05 |
+| 5 | **Ledger próprio `registros_ml`** para dedup/registro — não escreve na tabela do front, não polui `leads_capi`. | 17/05 |
+| 6 | **Fluxo `Lead` intocado**; ramo `lead_surveys` roda **isolado** (try/except próprio), nunca derruba o `Lead`. | 17/05 |
+| 7 | **Fail-loud**: cobertura caindo → alerta; categoria desconhecida → falha alto; batch zerado → assert. | 17/05 |
+| 8 | **Restrições duras**: lead sem `computador` **ou** sem fbp/fbc → **não dispara**, registra skip no ledger. | 17/05 |
 
-Cada valor distinto de `lead_surveys`, após a normalização que **já roda em produção** (`_normalizar` + mapas semânticos em `api/railway_mapping.py`), cai **somente** em categorias que o funil `Lead` já produz. Zero categoria nova. Os mapas (`MAPA_IDADE`, `MAPA_OCUPACAO`, `MAPA_FAIXA_SALARIAL`, `MAPA_INTERESSE_EVENTO`, `MAPA_ATRACAO_PROFISSAO`) já contêm exatamente as frases que `lead_surveys` usa. Campos sem mapa (`cartaoCredito`, `genero`, `estudouProgramacao`, `faculdade`, `investiuCurso`) produzem `sim/nao`/`Masculino/Feminino`/`Sim/Não`, idênticos ao `Lead`. Únicas exceções: 2 linhas com resposta vazia (1 `idade`, 1 `investiuCurso`) → NULL, não sistêmico.
+## 4. Como foi feito — protocolo por item
 
-## 3. Decisões do usuário (2026-05-17)
+Cada item é um ciclo fechado: implementa → testa → commita → (deploy canary 0% → valida → promove, com OK explícito). Nada começa sem autorização por item. Tudo no worktree isolado `feat/capi-lead-surveys-scoring` (criado de `main@642ffa4`, que já contém o fix de `critical_alerts` da sessão paralela).
 
-1. **Coluna `computador` solicitada ao front** para ser persistida em `lead_surveys` (não é coleta nova — o front comprovadamente já captura em ~100%; é só gravar na tabela).
-2. **`leads_capi` só como fallback** — não será mais fonte primária (survey leads ~98% disjuntos dela).
-3. **Recuperação de 24h + forward** _(revisado pelo usuário 18/05; era "forward-only puro")_ — ao ligar, processar `lead_surveys` com `submittedAt` nas **últimas 24h** e dali pra frente (cutoff = instante do enable − 24h). Dedup do ledger evita duplicar. **Não** re-disparar nada mais antigo que 24h (conversão velha suja a otimização do Meta; até ~24h o Meta aceita p/ atribuição).
-4. **Extensão de monitoramento entra junto** (não vira follow-up): digest e alertas críticos precisam enxergar a nova fonte, senão volume/CAPI parecem anômalos.
-5. **Tabela-ledger própria** (`registros_ml`) para dedup — não escreve na tabela do front, não polui `leads_capi`.
-6. **Fluxo `Lead` intocado**; ramo `lead_surveys` roda **isolado** (try/except próprio) — falha no survey nunca derruba o `Lead`.
-7. **Fail-loud** (exigência do `CLAUDE.md`): cobertura de JOIN abaixo do limite → alerta; valor que não mapeia → falha alto; batch zerado → assert.
-8. **Restrições duras:** lead sem `computador` **ou** sem fbp/fbc → **não dispara**; desfecho `skipped` registrado no ledger.
+| Item | O que é | Status |
+|---|---|---|
+| **I0** | Decisão de fonte + registro da frente no roadmap (`PLANO_EXECUCAO.md`) | ✅ 17/05 |
+| **I1** | Tabela-ledger `registros_ml` — script idempotente `scripts/create_registros_ml.py`; aplicado/testado no Railway (12 colunas, PK `lead_id`, idempotência + PK-conflict + smoke OK; renomeada de `survey_capi_sent` a pedido do usuário) | ✅ commits `9b57c0d`+`31d1151` |
+| **I2** | Adaptador `api/survey_mapping.py` — função **pura** que monta dict formato-`Lead` e delega à canônica `railway_lead_to_sheets_row` (zero normalização reimplementada; equivalência por construção). `tests/test_survey_mapping.py` 5/5 | ✅ commit `2a802db` |
+| **I3** | Enriquecimento `api/survey_enrichment.py` — lote **read-only**; por lead `utm`+`enrich`+flag `meta_eligible`; fbp/fbc por `eventId` preciso com fallback email; `computador` n8n→ac144. Cobertura fbp/fbc medida só entre Meta-elegíveis. `tests/test_survey_enrichment.py` 7/7; integração read-only 300 leads (242/242 enviáveis). Alarme sistêmico **migrado para o I5** (rolling sobre o ledger; lotes do polling são pequenos, guard per-batch cegaria) | ✅ commit `160562c` |
+| **I4** | Ramo isolado `api/survey_branch.py` + hook mínimo no `api/app.py` (`+18` linhas; helper `_run_survey_branch_safely` gated por `SURVEY_CAPI_ENABLED`, chamado nos 2 returns, nunca propaga, `Lead` byte-idêntico). Lê 24h+forward, dedup ledger, classifica (allowlist/missing_data/send), mapa I2, **mesmo** `pipeline.run`/A-B/`send_batch_events` do `Lead`, `event_id` namespaced `survey_<id>`, grava no `registros_ml`. `dry_run` não chama Meta nem grava ledger. `tests/test_survey_branch.py` 7/7 + regressão I2/I3 | 🟡 **código ✅ commit `d2587f0`**; **validação canary PENDENTE** (pausado 19/05) |
+| **I5** | Extensão de monitoramento — bloqueios duros B1–B4 (§7) **antes de religar o digest** + o **fail-loud sistêmico rolling** sobre `registros_ml` (janela no tempo; entre Meta-elegíveis, se `skipped_missing_data` acima do limiar e volume da janela ≥ N → alarme; imune a tamanho de lote) | ⏳ pendente |
+| **I6** | Verificações pré-go-live: vocabulário de `computador`; **whitelist/encoding de UTM dos survey leads** (classe de quebra "Cluster 5" — categoria UTM nova fora da whitelist degradando sinal calado). Intersecta investigação paralela `51951ee` | ⏳ pendente |
+| **I7** | Ligar (`SURVEY_CAPI_ENABLED=true`) + promover tráfego + religar schedulers. Religar `railway-polling` depende do fix de `critical_alerts` paralelo ser deployado; religar `slack-digest-daily` depende do I5 | ⏳ pendente |
 
-## 4. Pendências obrigatórias antes do go-live
+## 5. Desenho técnico (implementado em I1–I4)
 
-1. **Vocabulário de `computador`** — repetir a verificação da §2.6 sobre a nova coluna quando ela chegar (no `Lead` é `SIM/NAO/Não`).
-2. **Whitelist/encoding de UTM dos survey leads** (source/medium/campaign/content/term) — vêm do `UTMTracking`, codificados pela whitelist de UTM do modelo, **não** pelos mapas de pesquisa. Esta é a classe de quebra histórica do projeto (categoria de UTM nova fora da whitelist degradando o sinal calado — registrada como "Cluster 5" / "cenário 1.2" na auditoria de quebra de produção). Verificação separada e ainda pendente.
-3. **Recomendado:** pedir ao front, na mesma leva da coluna `computador`, também `fbp`/`fbc`/`telefone`/`nome` como colunas limpas. Hoje vêm de parse de JSON de log (98%/90%) com a mesma fragilidade que motivou a decisão sobre `computador`; sem isso, ~2% continuam descartados e o parse pode quebrar calado se o front mudar o formato do payload.
+1. **Ledger `registros_ml`** (nosso): `lead_id` PK (= `lead_surveys.id`), `email`, `variant`, `lead_score`, `decil`, `base_meta_event_id`/`base_status`, `hq_meta_event_id`/`hq_status` (HQ NULL se decil<9), `capi_sent_at`, `error_message`, `created_at`. Dedup por `lead_id`; fonte de leitura do monitoramento.
+2. **Ramo isolado** dentro de `/railway/process-pending`, depois do batch do `Lead`, em try/except próprio que nunca propaga. Gated por `SURVEY_CAPI_ENABLED` (default off) — **deploy ≠ ligar**. Roda nos dois pontos de return do endpoint (hoje, com `Lead` morto, o endpoint cai no early-return "nenhum lead pendente").
+3. **Seleção:** `lead_surveys` sem registro no ledger, `submittedAt >= NOW() - 24h`, ordem `submittedAt ASC`, batch próprio `SURVEY_CAPI_BATCH=25` (independente do batch do `Lead`).
+4. **Enriquecimento (I3):** UTM via `UTMTracking`; fbp/fbc/ip/ua via `meta_capi` (eventId preciso → fallback email); `computador` n8n→ac144; telefone/nome via `n8n_onboarding`.
+5. **Classificação por lead:** não Meta-elegível (google-ads/sem-utm) → `skipped_allowlist`; Meta-elegível sem `computador`/fbp/fbc → `skipped_missing_data`; senão → scoreia e envia.
+6. **Scoring/CAPI por reuso total:** mapa I2 → **mesmo** `pipeline.run()` + **mesmo** roteamento A/B (`get_ab_variant`/`match_variant`) + **mesmo** `send_batch_events` do `Lead` (nada de scoring/CAPI reimplementado → Gate C.1/C.2 trivial). `event_id` determinístico `survey_<id>` → `send_batch_events` prefixa `qualified_`/`hq_` → `qualified_survey_<id>`/`hq_survey_<id>` (dedup Meta independente do `Lead` e do `survey_…` da própria Pipeline B). Variante/pixel pela mesma regra: Champion → `LeadQualified` (+`LeadQualifiedHighQuality` se decil 9–10), pixel original; Challenger → `HQLB_LQ` (+`HQLB` se 9–10), pixel `1513…`.
+7. **Registro:** todo desfecho (sent/skipped) gravado em `registros_ml` → o polling de 5min não reprocessa.
+8. **Validação (fecha o I4, pendente):** gates B/D/C.1/C.2 + canary `NO_TRAFFIC` (0% tráfego) + dry-run na URL da canary conferindo decis, payloads (PII hash, fbp/fbc, nomes de evento por variante, `event_id` namespaced), categorias de skip, e que o ledger gravaria certo. Zero evento real, zero tráfego.
 
-## 5. Desenho da implementação (aguardando autorização)
+## 6. Pendências obrigatórias antes do go-live
 
-Nenhum código foi escrito. Quando autorizado **e** com a coluna `computador` disponível:
+1. **Whitelist/encoding de UTM dos survey leads** — UTM vem do `UTMTracking` e é codificada pela whitelist de UTM do modelo (não pelos mapas de pesquisa, que já estão 100% seguros). Categoria de UTM nova fora da whitelist degrada o sinal calado — é a classe de quebra histórica do projeto. Verificar em dry-run no canary antes de ligar. (Intersecta `51951ee` da sessão paralela.)
+2. **Vocabulário de `computador`** — se/quando a coluna limpa chegar do front, repetir a verificação de vocabulário sobre ela.
+3. **Recomendado (durabilidade):** pedir ao front `computador`/fbp/fbc/telefone/nome como colunas limpas em `lead_surveys`. Hoje vêm de parse de JSON de log; se o front mudar o formato, o parse quebra — mitigado pelo fail-loud, mas a coluna limpa elimina a fragilidade. Rastrear em `docs/instrucoes_dev_frontend_capi.md`.
 
-1. **Ledger** `registros_ml` (nosso): `lead_id` (PK = `lead_surveys.id`), `email`, `variant`, `lead_score`, `decil`, `base_meta_event_id`/`base_status`, `hq_meta_event_id`/`hq_status` (HQ NULL se decil<9), `capi_sent_at`, `error_message`, `created_at`. **✅ implementado no I1** (renomeada de `survey_capi_sent` a pedido do usuário).
-2. **Ramo isolado** dentro de `/railway/process-pending`, **depois** do batch da `Lead`, em try/except próprio.
-3. **Seleção:** `lead_surveys` sem registro no ledger, `submittedAt >= NOW() - 24h`, ordem `submittedAt ASC`, batch próprio `SURVEY_CAPI_BATCH=25`.
-4. **Enriquecimento por email:** UTM via `UTMTracking` (linha mais recente com `trackedAt ≤ submittedAt`); fbp/fbc/ip/user_agent via último `meta_capi`; telefone/nome via `n8n_onboarding`; `computador` da nova coluna; `leads_capi` só fallback.
-5. **Mapeamento → formato idêntico** ao de `railway_lead_to_sheets_row()` → mesmo `pipeline.run()` → mesmo roteamento A/B (`match_variant`, com UTM+url disponíveis) → mesmo `send_batch_events()`. Allowlist de `utm_source` mantida. `event_id` próprio e namespaced (ex.: `qualified_survey_<id>`), nomes de evento nossos — sem reusar o `eventId` deles.
-6. **Restrições duras + fail-loud** conforme §3.7/§3.8.
-7. **Registrar todo desfecho** (sent/skipped/blocked) no ledger → o polling de 5min não reprocessa.
-8. **Extensão de monitoramento** (§3.4).
-9. **Validação:** verificações da §4, depois mapeamento→scorer num sample em **dry-run de CAPI** conferindo payloads (PII com hash, fbp/fbc presentes, nomes de evento, decis sãos) antes de qualquer evento real.
+## 7. Estudo: extensão de monitoramento (I5)
 
-## 6. Bloqueador atual
+Hoje **todo** o monitoramento lê só `Lead` (e `leads_capi` por JOIN); nenhuma parte lê `lead_surveys`/`UTMTracking`/`integration_logs`/`registros_ml` — **exceção**: a regra crítica "não chega lead" (Regra 4) já lê `lead_surveys.submittedAt` desde 12/05, e não muda. A fonte viva do digest é o **Railway** (`Lead`/`leads_capi` via pg8000) — código `gspread` remanescente é legado inerte.
 
-**Decisão resolvida (2026-05-17):** o usuário optou por **não esperar a coluna limpa**. A esteira nova é implementada **já**, recuperando `computador`/fbp/fbc de `integration_logs` (re-medição 17/05: `computador` ≈100% combinando `n8n_onboarding`+`activecampaign` campo 144; fbp/fbc ≈97% — §2.4). O limitante real do envio passa a ser **fbp/fbc**: os ~3% sem fbp/fbc **não são enviados** (skip registrado no ledger, consistente com a regra dura — sem fbp/fbc também não se envia), e há guarda fail-loud se a cobertura cair (§3.7/§3.8). Pedir a coluna `computador` (e idealmente fbp/fbc/telefone/nome) como campo limpo ao front **continua valendo, em paralelo**, como melhoria de durabilidade (fecha os ~10% e remove a fragilidade do parse de log) — rastrear em `instrucoes_dev_frontend_capi.md` (follow-up sugerido, não executado aqui).
+**Bloqueio duro (sem isto, ligar quebra o monitoramento ou gera falso positivo constante):**
+- **B1 — Schema do payload:** o auditor (`payload_schema.py`/`digest.py`) falha alto em qualquer chave nova não declarada → toda seção/breakdown de pesquisa precisa ser pré-declarado antes de ligar.
+- **B2 — Baseline do detector de desvio:** a regra de desvio de score/decil compara contra baseline de 30d só do `Lead`; ao ligar, a janela mistura survey leads e o baseline fica defasado → falso positivo até incorporar a fonte.
+- **B3 — Regra "CAPI com sucesso baixo":** olha só `Lead.capiSentAt`; precisa enxergar `registros_ml`, senão falha de envio da esteira nova fica muda.
+- **B4 — Ledger como fonte:** o `registros_ml` precisa registrar score/decil/status/envio por lead — é dele que o monitoramento lê.
 
-Motivo da mudança de postura: a captação de produção migrou para `lead_surveys` e o sinal CAPI scoreado ficou OFF para a inflow viva (ver estado operacional no topo) — esperar a coluna mantém o sinal em 0%; recuperar de log restaura ~90% agora.
+**Reconciliação de números (sem isto, o relatório fica sem sentido, mas não quebra):** funil unificado, contadores 24h e qualidade/decil por período leem só `Lead` → sem breakdown por fonte os ratios quebram e a qualidade aparenta degradar conforme o ledger cresce.
 
-**Único bloqueio remanescente:** a implementação segue o **protocolo por item** (cada item implementado → testado → commitado → deployado em canary 0% → validado → promovido com OK explícito), conforme `PLANO_EXECUCAO.md` e `PLANO_SAFEGUARD.md`. Cada item I1–I7 (§9) exige autorização explícita do usuário antes de tocar código.
+**Cobertura de detecção (sem isto, problema na esteira nova passa despercebido):** alerta novo de saúde da esteira (ingest parou / scoreado preso sem CAPI); o **fail-loud rolling** sobre `registros_ml` (migrado do I3); regras "scoreado sem CAPI"/"FBP-FBC baixo" e detectores de deriva/ranking de UTM hoje cegos à coorte de pesquisa.
 
-## 9. Sequência de implementação (protocolo por item)
+Escopo acordado (17/05): todos esses pontos entram; a profundidade de cada um é decidida 1 a 1 na implementação do I5.
 
-Cada item é um ciclo completo implementa → testa → commita → deploya canary 0% → valida → promove (com OK). Nada começa sem autorização explícita por item.
-
-- **I0 — Decisão + roadmap** ✅ (2026-05-17): decisão de fonte resolvida (acima); frente registrada como ativa urgente no `PLANO_EXECUCAO.md`.
-- **I1 — Tabela-ledger** `registros_ml` ✅ (2026-05-17): script idempotente `scripts/create_registros_ml.py`, aplicado e testado no Railway (12 colunas, PK `lead_id`, idempotência + PK-conflict + smoke OK, tabelas críticas intactas; renomeada de `survey_capi_sent` a pedido do usuário); commits `9b57c0d`+`31d1151` no branch `feat/capi-lead-surveys-scoring`. Nada lê/escreve até o I4.
-- **I2 — Adaptador de mapeamento** `api/survey_mapping.py` ✅ (2026-05-18): função pura que monta dict formato-`Lead` (survey+utm+enrich) e delega à canônica `railway_lead_to_sheets_row` — zero normalização reimplementada, equivalência por construção. `tests/test_survey_mapping.py` 5/5 (equivalência Lead-direto vs survey, vocabulário canônico, computador do enrich, UTM ausente). Não importado por nada do fluxo `Lead`. Commit `2a802db` no branch `feat/capi-lead-surveys-scoring`. Sem Cloud Run.
-- **I3 — JOINs de enriquecimento** `api/survey_enrichment.py` ✅ (2026-05-18): lote read-only; por lead `utm` (UTMTracking, recência ≤ submittedAt), `enrich` (fbp/fbc/ip/ua por `eventId` preciso 1:1 com fallback email; computador n8n→ac144; telefone/nome n8n) e flag `meta_eligible`. Cobertura fbp+fbc medida **só entre Meta-elegíveis** (google-ads não tem fbc e é allowlist-blocked — medir global daria alarme crônico falso). **Alarme migrou pro I5** (rolling sobre o ledger; lotes do polling são pequenos, guard per-batch cegaria). `tests/test_survey_enrichment.py` 7/7; integração read-only 300 leads: utm 96% / computador 100% / fbp+fbc(meta) 100% / enviáveis 242/242. Commit `160562c`. Não importado pelo fluxo `Lead`; sem Cloud Run.
-- **I4 — Ramo isolado** no `/railway/process-pending` — **código ✅ (2026-05-19, commit `d2587f0`)**: `api/survey_branch.py` (lê 24h+forward, dedup ledger, classify allowlist/missing_data/send, mapa I2, MESMO pipeline.run/A-B/send_batch_events, event_id `survey_<id>`, grava `registros_ml`); hook `+18` linhas em `app.py` (helper `_run_survey_branch_safely` gated por `SURVEY_CAPI_ENABLED`, chamado nos 2 returns, nunca propaga, `Lead` byte-idêntico); `tests/test_survey_branch.py` 7/7 + regressão I2 5/5 / I3 7/7. **Validação canary (gates B/D/C.1/C.2 + `NO_TRAFFIC` 0% + dry-run) PENDENTE — pausado pelo usuário 19/05.**
-- **I5 — Bloqueios duros de monitoramento** (B1–B4 da §8) — antes de religar o digest. **Inclui o fail-loud sistêmico da esteira (migrado do I3):** regra rolling no tempo sobre o ledger `registros_ml` — janela (ex.: últimas 6h), entre Meta-elegíveis, se `skipped_missing_data` > limiar (cobertura < ~90%) E volume da janela ≥ N → alarme. Imune a tamanho de lote.
-- **I6 — Verificações pré-go-live** (vocabulário de `computador`, whitelist de UTM — §4).
-- **I7 — Promoção + religar schedulers + reconciliação de monitoramento** (R/C da §8, decididos 1 a 1).
-
-## 7. Riscos
+## 8. Riscos e mitigações
 
 | Risco | Mitigação |
 |---|---|
-| Parse de payload de log quebra calado se o front mudar formato | Pedir colunas limpas (§4.3) + fail-loud na cobertura (§3.7) |
-| UTM nova fora da whitelist degrada sinal calado (quebra histórica) | Verificação obrigatória §4.2 antes do go-live |
-| Re-disparo de histórico com conversões velhas pro Meta | Forward-only (§3.3) + ledger (§5.1/§5.7) |
-| Falha no ramo survey derruba o fluxo `Lead` | Isolamento try/except (§3.6) |
-| Percepção de "double count" no Meta | Nomes de evento distintos; decisão consciente (§2.2) |
+| Parse de payload de log quebra calado se o front mudar formato | Fail-loud de cobertura (I3/I5) + pedir colunas limpas (§6.3) |
+| UTM nova fora da whitelist degrada sinal calado (quebra histórica "Cluster 5") | Verificação obrigatória I6 antes do go-live |
+| Re-disparo de conversões velhas pro Meta | Janela de recuperação de 24h + dedup pelo ledger (§3.3) |
+| Falha no ramo survey derruba o fluxo `Lead` | Isolamento try/except + `SURVEY_CAPI_ENABLED` off por default |
+| Percepção de "double count" no Meta | Nomes de evento distintos do `Lead` e da Pipeline B; decisão consciente |
+| Religar `railway-polling` reintroduz ruído do `critical_alerts` antigo | Pausa mantida até o fix paralelo (`642ffa4`) ser promovido — ação do terminal de monitoramento |
+| Trabalho descartado pela estrutura nova do dono | Decisão consciente do usuário (valor interino); reavaliar ao retomar |
 
-## 8. Estudo: extensão de monitoramento (2026-05-17)
+## 9. Histórico de medições (rastreabilidade)
 
-Estudo completo do que o monitoramento precisa para ter eficácia sobre a esteira nova. Hoje **todo** o monitoramento lê só `Lead` (e `leads_capi` por JOIN); **nenhuma** parte lê `lead_surveys`/`UTMTracking`/`integration_logs`/`registros_ml`, **com uma exceção**: a regra de alerta crítico "não chega lead" (Regra 4) já lê `lead_surveys.submittedAt` desde 12/05/2026 — essa não muda.
-
-### 8.1 Bloqueio duro (sem isto, ligar quebra o monitoramento ou gera falso positivo constante)
-
-- **B1 — Guarda de schema do payload:** o auditor (`payload_schema.py`/`digest.py`) falha alto se o endpoint produzir qualquer chave nova não declarada, então todo breakdown/seção novo de pesquisa precisa ser pré-declarado **antes** de ligar, senão o digest inteiro quebra.
-- **B2 — Baseline do detector de desvio:** a regra de desvio de score/decil (Regra +) compara janela atual contra baseline de 30d só do `Lead`; ao ligar, a janela passa a misturar survey leads e o baseline fica defasado, disparando falso positivo até incorporar a fonte nova.
-- **B3 — Regra "CAPI com sucesso baixo" (Regra 5):** olha só `Lead.capiSentAt`; se a esteira de pesquisa falhar o envio, o alerta fica mudo (falso negativo) — precisa enxergar `registros_ml`.
-- **B4 — Ledger como fonte:** nada disso funciona se `registros_ml` não registrar `leadScore`/`decil`/`capiStatus`/`capiSentAt` por survey lead (já previsto em §5.1) — o monitoramento lê o ledger.
-
-### 8.2 Reconciliação de números (sem isto, o relatório diário fica sem sentido, mas não quebra)
-
-- **R1 — Funil unificado:** "Pesquisa/Scoreado/CAPI enviado/Aceito" só conta `Lead`/`leads_capi`; sem uma linha/breakdown por fonte incluindo a esteira de pesquisa, os ratios (clique/lead, taxa de envio, taxa de aceite) quebram silenciosamente.
-- **R2 — Contadores operacionais 24h:** leads recebidos/scoreados/CAPI enviado leem só `Lead`; sem somar a fonte de pesquisa, parece que o volume caiu.
-- **R3 — Qualidade por período e distribuição de decil:** vêm só do `Lead` (Railway, via pg8000 — **não** Sheets); a coorte de pesquisa fica invisível e a qualidade aparenta degradar conforme o ledger cresce.
-
-### 8.3 Cobertura de detecção (sem isto, problemas na esteira nova passam despercebidos)
-
-- **C1 — Regra nova de saúde da esteira de pesquisa:** falta alerta para "ingest de `lead_surveys` parou" e "survey lead scoreado mas preso sem CAPI no ledger" — a Regra 4 só cobre "chegou lead", não "parou de ser enviado".
-- **C2 — Fail-loud da esteira nova:** cobertura de JOIN (UTM/fbp/fbc) caindo e categoria/UTM desconhecida precisam de alerta próprio (já decidido em §3.7/§4.2; aqui entra como item de monitoramento).
-- **C3 — Regras "scoreado sem CAPI" (Regra 1) e "FBP/FBC baixo" (Regra 6):** olham só `Lead`; sem incluir os survey leads, ou disparam falso ou ficam cegas pra cobertura de match da fonte nova.
-- **C4 — Detectores de deriva de dados:** categoria nova / deriva de distribuição / taxa de não-resposta operam sobre a janela de produção da esteira `Lead` (Railway); a coorte de pesquisa (respostas + UTM via `UTMTracking`) fica fora — e detectar UTM nova fora da whitelist é a classe de quebra histórica (§4.2). _(Há código legado `gspread` em `data_drift_detection.py`/`orchestrator.py` "aba 2", inerte sem `GOOGLE_SHEETS_URL`; os números vivos vêm do Railway.)_
-- **C5 — Ranking de qualidade de UTM (criativos):** lê só `Lead`+`leads_capi`; sem unir a fonte de pesquisa, o ranking de criativos ignora essa parte do tráfego.
-
-### 8.4 Não muda
-
-- Regra 4 ("não chega lead") já lê `lead_surveys`. Regra "polling com erro 500" independe de qual esteira roda dentro do endpoint.
-
-> Nota de fidelidade: o desenho usa **um único ledger** `registros_ml` (§5.1) — score, status e envio vivem nele; o monitoramento lê dele e de `lead_surveys`. Não há tabelas auxiliares adicionais.
-
-**Correção (2026-05-17):** a primeira versão deste estudo atribuía as métricas de período/decil e os detectores de deriva ao Google Sheets — **erro**. A fonte viva do digest é o Railway (`Lead`/`leads_capi` via pg8000); o código `gspread` remanescente é legado inerte. A conclusão de cada ponto (cegueira à coorte de pesquisa) se mantém, porque o que esses componentes leem é `Lead`, não `lead_surveys`.
-
-**Escopo acordado (2026-05-17):** os pontos **B1–B4, R1–R3, C1–C5 entram no escopo** do trabalho. A decisão de incluir cada um, e em que profundidade, é tomada **1 a 1 na fase de implementação** — que segue bloqueada por autorização explícita + chegada da coluna `computador` (§6).
+- **16/05** (728 linhas): fbp+fbc 98% · `computador` via `n8n_onboarding` 90%.
+- **17/05 20:30** (1.117 linhas): fbp+fbc 97% · `computador` n8n-só 91,3% · `computador` n8n **ou** activecampaign(144) **100%**.
+- **17/05** validação proveniência campo 144 == `tem_computador`: **1.011/1.011, zero divergência**.
+- **18/05** (300 leads, com escopo Meta-elegível): utm 96% · `computador` 100% · fbp+fbc entre Meta-elegíveis **100%** · enviáveis **242/242**.
+- **18/05** auditoria de tabelas: `Lead` morta desde 17/05 00:35; `leads_capi` morta desde 17/05 18:29; vivas: `lead_surveys`/`UTMTracking`/`integration_logs`/`Client`.
 
 ---
 
-*Identificadores e artefatos:* tabelas Railway `Lead`, `lead_surveys`, `UTMTracking`, `integration_logs`, `leads_capi`; endpoint `/railway/process-pending` em `api/app.py`; mapeamento `api/railway_mapping.py`; scripts read-only de investigação em `scripts/_inspect_pipeline_b*.py`, `scripts/_inspect_computador_fill.py`, `scripts/_verify_survey_vocab.py`. Classe de quebra histórica referenciada: "Cluster 5" / "cenário 1.2" em `docs/AUDITORIA_QUEBRA_PRODUCAO.md`. Regra fail-loud: `CLAUDE.md`. Instruções ao front: `docs/instrucoes_dev_frontend_capi.md`.
+*Artefatos:* branch `feat/capi-lead-surveys-scoring` — `scripts/create_registros_ml.py` (I1), `api/survey_mapping.py` (I2), `api/survey_enrichment.py` (I3), `api/survey_branch.py` + hook em `api/app.py` (I4), testes em `tests/test_survey_*.py`. Commits: I1 `9b57c0d`/`31d1151`, I2 `2a802db`, I3 `160562c`, I4 `d2587f0`. Tabelas Railway: `lead_surveys`, `UTMTracking`, `integration_logs`, `registros_ml`, `Lead`, `leads_capi`. Reuso canônico: `api/railway_mapping.py`, `pipeline.run`, `send_batch_events`. Classe de quebra histórica: "Cluster 5" / "cenário 1.2" em `docs/AUDITORIA_QUEBRA_PRODUCAO.md`. Roadmap: `docs/PLANO_EXECUCAO.md` ("Frente ativa urgente"). Front: `docs/instrucoes_dev_frontend_capi.md`. Reconciliação com monitoramento (outro terminal): commits `52b507d`/`642ffa4`/`51951ee` no `main`.
