@@ -438,17 +438,35 @@ def apply_encoding(
                     df_encoded, _baseline,
                     model_run_id=_mlflow_run_id,
                     emit_log=True,
+                    # [Correção 2] df aqui é o pré-OHE (pós-unify, ainda com
+                    # 'Source'/'Medium'/'Term'): habilita a qualificação
+                    # "bruto presente" — UTM vazia não conta como violação.
+                    df_pre_ohe=df,
                 )
                 if _zg_result.severity == 'ERROR':
                     preview = ', '.join(
                         f"{i.feature}={i.details['all_zero_rate']:.3f} ({i.details['leads_with_group_zeroed']} leads)"
                         for i in _zg_result.issues[:5]
                     )
-                    raise ValueError(
+                    _msg = (
                         f"[DT-19] {len(_zg_result.issues)} grupo(s) OHE com leads "
                         f"todo-zerados acima do limiar (batch={_zg_result.batch_size}, "
                         f"mlflow_run_id={_mlflow_run_id[:8]}). Exemplos: {preview}. "
                         f"Cenário 1.2 da auditoria — categoria fora da whitelist da variante."
+                    )
+                    # [Correção 3 — 2026-05-19] Proteção de RUNTIME de produção,
+                    # não critério de equivalência de deploy. No caminho de
+                    # equivalência (/predict/batch, /capi/process_daily_batch
+                    # ?dry_run=true) roda observa-mas-não-bloqueia: composição
+                    # atípica afeta as duas revisões igualmente, não é regressão
+                    # entre versões. Em produção (polling) o flag fica True
+                    # (default) e continua bloqueando.
+                    _enforce = artifacts.get('post_encoding_enforce', True) if artifacts else True
+                    if _enforce:
+                        raise ValueError(_msg)
+                    logger.warning(
+                        f"  [DT-19] (observa, NÃO bloqueia — caminho de "
+                        f"equivalência/predict) {_msg}"
                     )
         except ValueError:
             raise

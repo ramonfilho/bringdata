@@ -442,6 +442,7 @@ def validate_post_encoding_all_zero_groups(
     max_all_zero_rate: float = 0.02,
     emit_log: bool = True,
     model_run_id: str = '',
+    df_pre_ohe: Optional[pd.DataFrame] = None,
 ) -> ValidationResult:
     """
     [DT-19 pré-req C] Valida que, para cada grupo de colunas OHE derivado da
@@ -463,6 +464,17 @@ def validate_post_encoding_all_zero_groups(
     colunas (≥2 por default) são ignorados — feature binária pura não tem
     "todas zeradas" patológico (a única coluna OHE = 0 já é o valor de "Não").
 
+    Qualificação "bruto presente" (Correção 2 — 2026-05-19): quando `df_pre_ohe`
+    é fornecido, só conta como violação de conservação o lead cujo valor BRUTO
+    pré-OHE daquele grupo CHEGOU PREENCHIDO. Lead que chegou sem o valor (ex.:
+    UTM vazia/ausente — `unify_utm` transforma vazio em nulo de propósito via a
+    guarda `.notna()`) tem o grupo zerado como saída ESPERADA, não como bug de
+    encoding. Sem `df_pre_ohe` (ou para grupos cujo nome pré-OHE não bate com
+    uma coluna de `df_pre_ohe`) o comportamento é o histórico (conta todo
+    lead com o grupo zerado). Causa-raiz e dado real: registro_erros_ml.md
+    § V.6; o bug que se quer pegar = bruto presente mas nenhuma coluna acendeu
+    (Cluster 3 / cenário 1.2).
+
     Args:
         df: DataFrame pós-`apply_encoding` (colunas OHE).
         baseline: dict {coluna_OHE: {'feature': str, 'category': str, ...}}.
@@ -471,6 +483,8 @@ def validate_post_encoding_all_zero_groups(
         max_all_zero_rate: fração máxima de leads com todas as colunas do grupo
                            zeradas. Default 2% — tolerante a leads legítimos
                            sem aquela feature, mas pega bug arquitetural.
+        df_pre_ohe: DataFrame pré-`get_dummies` (pós-unify), mesma ordem de
+                    linhas de `df`. Habilita a qualificação "bruto presente".
 
     Returns:
         ValidationResult com severity='ERROR' se algum grupo ultrapassa o
@@ -497,8 +511,25 @@ def validate_post_encoding_all_zero_groups(
         checked += 1
         # Todas zeradas = soma da linha == 0 em todas as colunas do grupo.
         # OHE produz 0/1 inteiros, então sum() == 0 sse todas == 0.
-        row_sum = df[cols].sum(axis=1)
-        all_zero_rate = float((row_sum == 0).mean())
+        all_zero = (df[cols].sum(axis=1) == 0)
+
+        # [Correção 2 — 2026-05-19] Qualificação "bruto presente": só conta
+        # como violação o lead cujo valor bruto pré-OHE daquele grupo chegou
+        # PREENCHIDO. UTM vazia/ausente → grupo zerado é esperado, não bug.
+        # Sem df_pre_ohe ou grupo sem coluna bruta correspondente → histórico.
+        raw_qualified = False
+        if df_pre_ohe is not None and feat in df_pre_ohe.columns:
+            raw = df_pre_ohe[feat].reindex(df.index)
+            raw_present = raw.notna() & (raw.astype(str).str.strip() != '')
+            violating = (all_zero & raw_present)
+            raw_qualified = True
+        else:
+            violating = all_zero
+
+        n_all_zero = int(all_zero.sum())
+        n_violating = int(violating.sum())
+        # Taxa que o gating usa = fração QUALIFICADA (bruto presente + zerado).
+        all_zero_rate = float(violating.mean())
         if all_zero_rate > max_all_zero_rate:
             issues.append(ValidationIssue(
                 feature=feat,
@@ -508,7 +539,9 @@ def validate_post_encoding_all_zero_groups(
                     'group_columns': cols,
                     'all_zero_rate': round(all_zero_rate, 4),
                     'threshold': max_all_zero_rate,
-                    'leads_with_group_zeroed': int((row_sum == 0).sum()),
+                    'leads_with_group_zeroed': n_all_zero,
+                    'leads_raw_present_but_zeroed': n_violating,
+                    'raw_presence_qualified': raw_qualified,
                 },
             ))
 

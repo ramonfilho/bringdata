@@ -230,7 +230,7 @@ class LeadScoringPipeline:
             logger.error(f" Erro ao verificar category drift: {e}")
             return []
 
-    def preprocess(self, encoding_overrides=None, predictor_override=None) -> pd.DataFrame:
+    def preprocess(self, encoding_overrides=None, predictor_override=None, enforce_post_encoding: bool = True) -> pd.DataFrame:
         """
         Aplica pré-processamento aos dados.
 
@@ -284,6 +284,9 @@ class LeadScoringPipeline:
             _artifacts['mlflow_run_id'] = mlflow_run_id
         elif model_path:
             _artifacts['model_path'] = model_path
+        # [Correção 3] Default True = produção bloqueia (proteção de runtime).
+        # Caminho de equivalência de deploy passa False (observa, não bloqueia).
+        _artifacts['post_encoding_enforce'] = enforce_post_encoding
 
         # 5. Unificar categorias Medium (usando componente importado)
         # Guard de coluna espelha o do train_pipeline.py — se a coluna Medium não vier
@@ -447,7 +450,7 @@ class LeadScoringPipeline:
 
         return result
 
-    def run(self, filepath: str, with_predictions: bool = False, predictor_override: "LeadScoringPredictor" = None, encoding_overrides=None) -> pd.DataFrame:
+    def run(self, filepath: str, with_predictions: bool = False, predictor_override: "LeadScoringPredictor" = None, encoding_overrides=None, enforce_post_encoding: bool = True) -> pd.DataFrame:
         """
         Executa o pipeline completo.
 
@@ -477,7 +480,7 @@ class LeadScoringPipeline:
         self.load_data(filepath)
 
         # Pré-processar (passa predictor_override para usar o feature registry correto — DT-12)
-        self.preprocess(encoding_overrides=encoding_overrides, predictor_override=predictor_override)
+        self.preprocess(encoding_overrides=encoding_overrides, predictor_override=predictor_override, enforce_post_encoding=enforce_post_encoding)
 
         # Fazer predições se solicitado
         if with_predictions:

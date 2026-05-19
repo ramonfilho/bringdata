@@ -396,6 +396,39 @@ def rule_fbp_fbc_low(conn) -> RuleResult:
                       details={'n': n, 'fbp_pct': round(fbp_pct, 1), 'fbc_pct': round(fbc_pct, 1)})
 
 
+def rule_utm_source_missing(conn) -> RuleResult:
+    """Regra +: % de leads chegando SEM `source` no Lead em 60min acima do
+    limiar (N≥50). Pega regressão de captura/tracking — leads de campanha
+    perdendo a origem (não vão pro Meta e o modelo scoreia cego de origem).
+    O pico de 21-22/04/2026 (até 20%) passou sem nenhum alarme; orgânico
+    legítimo é ~1,5% e a base normal <1%, então o limiar HIGH de 5% separa
+    regressão de orgânico normal sem spammar entre lançamentos. Contexto:
+    registro_erros_ml.md Erro 18 (tracking perdendo source) e § V.6."""
+    cutoff = _window_start_utc()
+    rows = conn.run(
+        'SELECT COUNT(*) AS n, '
+        "COUNT(*) FILTER (WHERE source IS NULL OR TRIM(source) = '') AS sem_source "
+        'FROM "Lead" WHERE "createdAt" >= :cutoff AND pesquisa IS NOT NULL',
+        cutoff=cutoff,
+    )
+    n, sem = (rows[0][0] or 0, rows[0][1] or 0)
+    if n < 50:
+        return RuleResult('utm_source_missing', fired=False,
+                          skipped_reason=f'amostra insuficiente (n={n})')
+    pct = (sem / n) * 100
+    if pct < 5.0:
+        return RuleResult('utm_source_missing', fired=False)
+    msg = (
+        f"{pct:.1f}% dos leads chegaram SEM `source` em {WINDOW_MIN}min "
+        f"(limite HIGH 5%, N={n}, {int(sem)} sem source). Possível regressão "
+        f"de captura/tracking: leads de campanha perdendo a origem — não vão "
+        f"pro Meta (allowlist barra) e o modelo scoreia cego de origem. "
+        f"Investigar front-end / webhook de captura."
+    )
+    return RuleResult('utm_source_missing', fired=True, severity='HIGH', message=msg,
+                      details={'n': n, 'sem_source': int(sem), 'pct': round(pct, 1)})
+
+
 def rule_polling_500(store: GcsStateStore) -> RuleResult:
     """
     Regra 9: /railway/process-pending falhou em ≥2 pollings consecutivos.
@@ -612,6 +645,7 @@ def run_critical_checks(
         lambda: rule_capi_success_low(railway_conn),
         lambda: rule_variant_no_capi(railway_conn),
         lambda: rule_fbp_fbc_low(railway_conn),
+        lambda: rule_utm_source_missing(railway_conn),
         lambda: rule_polling_500(store),
         lambda: rule_score_drift(railway_conn, expected_decil_dist),
     ]

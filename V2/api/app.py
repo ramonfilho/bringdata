@@ -346,7 +346,11 @@ async def predict_batch_json(request: BatchPredictionRequest, pipeline: Pipeline
 
         # Executar pipeline
         logger.info("🔄 Executando pipeline...")
-        result_df = pipeline.run(temp_file, with_predictions=True)
+        # [Correção 3] /predict/batch é caminho de scoring / equivalência de
+        # deploy (NÃO envia ao Meta) → o validador de conservação observa mas
+        # não bloqueia a comparação entre revisões. Produção (polling) usa o
+        # default True e continua bloqueando.
+        result_df = pipeline.run(temp_file, with_predictions=True, enforce_post_encoding=False)
 
         if result_df is None or len(result_df) == 0:
             raise HTTPException(status_code=500, detail="Pipeline retornou resultado vazio")
@@ -434,7 +438,9 @@ async def predict_batch_csv(pipeline: PipelineDep, file: UploadFile = File(...))
             temp_file = tmp.name
 
         # Executar pipeline
-        result_df = pipeline.run(temp_file, with_predictions=True)
+        # [Correção 3] /predict/batch (CSV) — caminho de equivalência, não
+        # envia ao Meta: validador observa, não bloqueia. Produção = default.
+        result_df = pipeline.run(temp_file, with_predictions=True, enforce_post_encoding=False)
 
         if result_df is None:
             raise HTTPException(status_code=500, detail="Pipeline retornou resultado vazio")
