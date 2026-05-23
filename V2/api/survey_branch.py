@@ -1,4 +1,18 @@
-"""I4 — Ramo isolado `lead_surveys` → CAPI scoreado.
+"""[DEPRECATED 2026-05-23 — substituído por api/pubsub_branch.py]
+
+Arquitetura antiga (I4 da frente capi-lead-surveys, paused 2026-05-19):
+lia a `lead_surveys` no Railway, dependia de `api/survey_enrichment.py`
+(parse de `integration_logs`). Foi substituída pela arquitetura Pub/Sub
+quando o sistema novo do dono passou a publicar todos os campos no payload
+(hasComputer/fbp/fbc/firstName/lastName/phone/userAgent/ip), eliminando a
+necessidade de leitura Railway + parse de log.
+
+Não é importado por nada no caminho Pub/Sub. Mantido temporariamente para
+referência histórica do design (commits I1–I4 da frente capi-lead-surveys).
+
+— histórico original abaixo —
+
+I4 — Ramo isolado `lead_surveys` → CAPI scoreado.
 
 Roda DENTRO de `/railway/process-pending`, depois do fluxo `Lead` (intocado),
 chamado por um helper em `app.py` envolto em try/except que NUNCA propaga.

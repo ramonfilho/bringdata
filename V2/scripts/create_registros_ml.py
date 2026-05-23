@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Migração I1 — tabela-ledger `registros_ml` (idempotente).
+"""Migração — tabela-ledger `registros_ml` (idempotente).
 
 Tabela NOSSA (não Prisma) — fonte única de verdade dos eventos CAPI scoreados
-por ML disparados a partir de `lead_surveys`:
+por ML disparados a partir das mensagens Pub/Sub do sistema novo:
 
-  - Dedup/idempotência: 1 linha por survey lead (PK `lead_id` = lead_surveys.id);
-    o polling não reprocessa lead que já tem linha.
+  - Dedup/idempotência: 1 linha por lead (PK `event_id` = UUID v7 do payload
+    Pub/Sub, estável entre reenvios). O consumer não reprocessa lead que já
+    tem linha.
   - Registro dos até 2 eventos por lead: base (LeadQualified / HQLB_LQ) e
     high-quality (LeadQualifiedHighQuality / HQLB, só D9-D10). O nome do evento
     é derivável de `variant`, por isso não é gravado (sem redundância).
@@ -13,10 +14,17 @@ por ML disparados a partir de `lead_surveys`:
 
 Idempotente: usa CREATE TABLE/INDEX IF NOT EXISTS — rodar N vezes = mesmo estado.
 Não-destrutivo: não toca nenhuma tabela existente.
+Migração de instâncias anteriores: se a tabela já existir com a coluna `lead_id`
+(esquema antigo da arquitetura Railway, antes da virada pra Pub/Sub), o script
+renomeia `lead_id` → `event_id` (ALTER TABLE RENAME). A semântica é equivalente:
+ambas TEXT, ambas PK, ambas "id estável do lead".
 Rollback: DROP TABLE registros_ml;
 
-Histórico: criada como `survey_capi_sent` no I1 e renomeada para `registros_ml`
-a pedido do usuário antes de qualquer consumidor (nada lê/escreve até o I4).
+Histórico:
+  - Criada como `survey_capi_sent` no I1 (ledger da arquitetura Railway).
+  - Renomeada para `registros_ml` a pedido do usuário (commit 31d1151).
+  - Coluna PK renomeada `lead_id` → `event_id` na virada pra Pub/Sub
+    (arquitetura nova, descarta leitura Railway + parsing de log).
 
 Credenciais: lê RAILWAY_DB_* do ambiente; se ausentes, carrega de um .env
 apontado por RAILWAY_ENV_FILE, ou de scripts/../.env. Sem hardcode de path.
@@ -54,14 +62,14 @@ def _load_env() -> None:
 
 DDL_TABLE = """
 CREATE TABLE IF NOT EXISTS registros_ml (
-    lead_id            TEXT PRIMARY KEY,           -- = lead_surveys.id (dedup)
+    event_id           TEXT PRIMARY KEY,           -- UUID v7 do payload Pub/Sub (estável p/ dedup)
     email              TEXT,
     variant            TEXT,                       -- champion | challenger (deriva nome do evento)
     lead_score         DOUBLE PRECISION,
     decil              INTEGER,                    -- 1..10
-    base_meta_event_id TEXT,                       -- event_id do evento base
+    base_meta_event_id TEXT,                       -- event_id enviado ao Meta no evento base
     base_status        TEXT,                       -- success|error|blocked|skipped_*
-    hq_meta_event_id   TEXT,                       -- event_id do high-quality (NULL se decil<9)
+    hq_meta_event_id   TEXT,                       -- event_id enviado ao Meta no high-quality (NULL se decil<9)
     hq_status          TEXT,                       -- NULL se não aplicável
     capi_sent_at       TIMESTAMP,                  -- quando saiu (NULL se skip/blocked)
     error_message      TEXT,
@@ -72,6 +80,13 @@ CREATE TABLE IF NOT EXISTS registros_ml (
 DDL_INDEX = (
     "CREATE INDEX IF NOT EXISTS idx_registros_ml_created_at "
     "ON registros_ml (created_at);"
+)
+
+# Migração in-place: instâncias criadas antes da virada pra Pub/Sub têm a PK
+# chamada `lead_id`. Renomeia pra `event_id` se for o caso. Equivalência total:
+# ambas TEXT, ambas PK, ambas "id estável do lead p/ dedup".
+SQL_RENAME_LEAD_ID = (
+    "ALTER TABLE registros_ml RENAME COLUMN lead_id TO event_id;"
 )
 
 
@@ -105,6 +120,23 @@ def main() -> None:
     )
     try:
         if not args.verify_only:
+            # Se a tabela já existir com a coluna antiga `lead_id`, renomeia
+            # ANTES do CREATE — assim o CREATE IF NOT EXISTS encontra o estado
+            # esperado (PK chamada event_id) e vira no-op idempotente.
+            existing_cols = conn.run(
+                """SELECT column_name FROM information_schema.columns
+                   WHERE table_schema='public' AND table_name='registros_ml'"""
+            )
+            existing_names = {r[0] for r in existing_cols}
+            if "lead_id" in existing_names and "event_id" not in existing_names:
+                conn.run(SQL_RENAME_LEAD_ID)
+                print("[OK] coluna lead_id renomeada para event_id (migração Pub/Sub).")
+            elif "lead_id" in existing_names and "event_id" in existing_names:
+                sys.exit(
+                    "[FALHA] estado ambíguo: tabela tem AMBAS as colunas lead_id e event_id. "
+                    "Investigar manualmente antes de prosseguir."
+                )
+
             conn.run(DDL_TABLE)
             conn.run(DDL_INDEX)
             print("[OK] CREATE TABLE/INDEX IF NOT EXISTS aplicado (idempotente).")

@@ -1,4 +1,17 @@
-"""I3 — Enriquecimento em lote dos survey leads (read-only).
+"""[DEPRECATED 2026-05-23 — não usado pelo caminho Pub/Sub]
+
+Arquitetura antiga (I3 da frente capi-lead-surveys, paused 2026-05-19):
+enriquecia survey leads por parse de `integration_logs` no Railway, recuperando
+computador/fbp/fbc/telefone/nome/ip/user_agent. Foi tornado obsoleto quando o
+sistema novo do dono passou a publicar TODOS esses campos diretamente no
+payload Pub/Sub — eliminando o JOIN frágil + parse de JSON de log.
+
+Não é importado por nada no caminho Pub/Sub. Mantido temporariamente para
+referência histórica do design (commits I3 da frente capi-lead-surveys).
+
+— histórico original abaixo —
+
+I3 — Enriquecimento em lote dos survey leads (read-only).
 
 Dado um lote de linhas da `lead_surveys`, recupera por lead:
   - `utm`    : {source, medium, campaign, content, term, url}  ← `UTMTracking`

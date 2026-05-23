@@ -184,6 +184,139 @@ MAPA_ATRACAO_PROFISSAO: Dict[str, str] = {
 
 
 # ---------------------------------------------------------------------------
+# Tradução de slugs do sistema novo (Pub/Sub) → strings PT longas
+# ---------------------------------------------------------------------------
+#
+# O payload Pub/Sub do sistema novo (REQUISITOS_SISTEMA_NOVO.md Anexo A) envia
+# todos os 10 campos da pesquisa em forma de slug ou lowercase:
+#   - 5 campos com slug nada-trivial (`<18`, `clt`, `1000-2000`,
+#     `trabalhar_exterior`, `transicao_carreira`) — sem tradução virariam
+#     `outros` calado no encoding (Cluster 5).
+#   - 5 campos com lowercase de cortesia (`feminino`, `sim`, `nao`) que o
+#     encoder até resolveria sozinho via _limpar_texto — mas traduzimos pra
+#     forma canônica PT-Long aqui também pra que o dict pós-tradução seja
+#     bit-idêntico ao do caminho legado (lead_surveys com strings PT-long).
+#     Isso elimina uma camada onde "o encoder faz a mágica" e simplifica o
+#     debug ("o que entra no scorer" vira inspeção direta).
+#
+# Idempotência: se o valor já vier na forma PT-Long (caminho legado/teste),
+# passa direto. Fail-loud se vier algo fora das duas formas — evita o silêncio
+# que causou as quebras históricas.
+
+SLUG_IDADE: Dict[str, str] = {
+    "<18":   "Menos de 18 anos",
+    "18-24": "18 - 24 anos",
+    "25-34": "25 - 34 anos",
+    "35-44": "35 - 44 anos",
+    "45-54": "45 - 54 anos",
+    "55+":   "Mais de 55 anos",
+}
+_PT_IDADE = set(SLUG_IDADE.values())
+
+SLUG_OCUPACAO: Dict[str, str] = {
+    "clt":        "Sou CLT/Funcionário Público",
+    "autonomo":   "Sou autonomo",
+    "desocupado": "Não trabalho e nem estudo",
+    "estudante":  "Sou apenas estudante",
+    "aposentado": "Sou aposentado",
+}
+_PT_OCUPACAO = set(SLUG_OCUPACAO.values())
+
+SLUG_FAIXA_SALARIAL: Dict[str, str] = {
+    "0":         "Não tenho renda",
+    "1000-2000": "Entre R$1.000 a R$2.000 reais ao mês",
+    "2001-3000": "Entre R$2.001 a R$3.000 reais ao mês",
+    "3001-5000": "Entre R$3.001 a R$5.000 reais ao mês",
+    "5001+":     "Mais de R$5.001 reais ao mês",
+}
+_PT_FAIXA_SALARIAL = set(SLUG_FAIXA_SALARIAL.values())
+
+SLUG_ATRACAO_PROFISSAO: Dict[str, str] = {
+    "home_office":        "Poder trabalhar de qualquer lugar do mundo",
+    "todas":              "Todas as alternativas",
+    "altos_salarios":     "A possibilidade de ganhar altos salários",
+    "trabalhar_exterior": "Trabalhar para outros países e ganhar em outra moeda",
+    "estabilidade":       "A ideia de nunca faltar emprego na área",
+}
+_PT_ATRACAO_PROFISSAO = set(SLUG_ATRACAO_PROFISSAO.values())
+
+SLUG_INTERESSE_EVENTO: Dict[str, str] = {
+    "transicao_carreira": "Fazer transição de carreira e conseguir meu primeiro emprego na área",
+    "projeto_pratica":    "Fazer um projeto na prática",
+    "descobrir":          "Quero saber se é para mim",
+    "freelancer":         "Fazer freelancer como programador",
+    "aula_recrutadora":   "A aula com a recrutadora",
+}
+_PT_INTERESSE_EVENTO = set(SLUG_INTERESSE_EVENTO.values())
+
+# Lowercase de cortesia → forma canônica PT-Long (5 campos)
+SLUG_GENERO: Dict[str, str] = {
+    "feminino":  "Feminino",
+    "masculino": "Masculino",
+}
+_PT_GENERO = set(SLUG_GENERO.values())
+
+SLUG_SIM_NAO: Dict[str, str] = {
+    "sim": "Sim",
+    "nao": "Não",
+}
+_PT_SIM_NAO = set(SLUG_SIM_NAO.values())
+
+
+def _resolver_slug(
+    field: str,
+    value: Any,
+    slug_map: Dict[str, str],
+    pt_set: set,
+) -> Any:
+    """Slug → PT (lookup) | PT → PT (idempotência) | None/'' → passa | else → raise."""
+    if value is None or value == "":
+        return value
+    if value in slug_map:
+        return slug_map[value]
+    if value in pt_set:
+        return value
+    raise ValueError(
+        f"[traduzir_survey_slugs] '{field}'={value!r} fora do vocabulário. "
+        f"Slugs aceitos: {sorted(slug_map.keys())}. "
+        f"Formas PT aceitas: {sorted(pt_set)}."
+    )
+
+
+def traduzir_survey_slugs(survey: Dict) -> Dict:
+    """Traduz os 10 campos da pesquisa do sistema novo para as strings PT-Long
+    canônicas que os MAPA_* esperam.
+
+    Pura, idempotente (PT-Long passa direto), fail-loud em slug desconhecido.
+    Aceita `survey=None` ou `{}` sem quebrar (devolve idem).
+    """
+    if not survey:
+        return survey
+    out = dict(survey)
+    # 5 campos com slug nada-trivial
+    out["idade"] = _resolver_slug(
+        "idade", survey.get("idade"), SLUG_IDADE, _PT_IDADE)
+    out["ocupacao"] = _resolver_slug(
+        "ocupacao", survey.get("ocupacao"), SLUG_OCUPACAO, _PT_OCUPACAO)
+    out["faixaSalarial"] = _resolver_slug(
+        "faixaSalarial", survey.get("faixaSalarial"),
+        SLUG_FAIXA_SALARIAL, _PT_FAIXA_SALARIAL)
+    out["atracaoProfissao"] = _resolver_slug(
+        "atracaoProfissao", survey.get("atracaoProfissao"),
+        SLUG_ATRACAO_PROFISSAO, _PT_ATRACAO_PROFISSAO)
+    out["interesseEvento"] = _resolver_slug(
+        "interesseEvento", survey.get("interesseEvento"),
+        SLUG_INTERESSE_EVENTO, _PT_INTERESSE_EVENTO)
+    # 5 campos com lowercase de cortesia → forma canônica PT-Long
+    out["genero"] = _resolver_slug(
+        "genero", survey.get("genero"), SLUG_GENERO, _PT_GENERO)
+    for f in ("cartaoCredito", "estudouProgramacao",
+              "faculdade", "investiuCurso"):
+        out[f] = _resolver_slug(f, survey.get(f), SLUG_SIM_NAO, _PT_SIM_NAO)
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Função principal de conversão
 # ---------------------------------------------------------------------------
 

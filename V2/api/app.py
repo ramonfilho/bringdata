@@ -4570,6 +4570,78 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
                 pass
 
 
+@app.post("/pubsub/process-pending")
+async def pubsub_process_pending(pipeline: PipelineDep, dry_run: bool = False):
+    """Consumer Pub/Sub do sistema novo (lead-capture-ingest-sub) → CAPI scoreado.
+
+    Chamado pelo Cloud Scheduler em cadência fixa.
+
+    Fluxo (delega tudo a api.pubsub_branch.process_pending_pubsub):
+      1. Pull batch da sub Pub/Sub.
+      2. Por mensagem: parse → traduz slugs → classifica → scoreia (pipeline.run)
+                       → CAPI (send_batch_events) → ledger registros_ml → ack.
+
+    Off por padrão via env `PUBSUB_CAPI_ENABLED`. Deploy ≠ ligar: enquanto o
+    env não estiver `true`, o endpoint volta no-op (sem pull, sem ack).
+    Arquitetura nova — substitui o ramo I3/I4 (api/survey_branch.py e
+    api/survey_enrichment.py, marcados DEPRECATED 2026-05-23).
+
+    Args:
+        dry_run: Se True, processa e loga (pull → score → monta CAPI) mas NÃO
+                 envia Meta, NÃO grava ledger e NÃO acka mensagens. Permite
+                 smoke contra o backlog real do canary sem efeito colateral.
+    """
+    import pg8000.native
+    from api.pubsub_branch import is_enabled, process_pending_pubsub
+
+    if not is_enabled():
+        return {
+            "enabled": False,
+            "message": "PUBSUB_CAPI_ENABLED=false; no-op",
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    # Import lazy: só puxa o SDK do Pub/Sub quando o env tá ligado.
+    from google.cloud import pubsub_v1
+
+    railway_conn = None
+    subscriber = None
+    try:
+        railway_conn = pg8000.native.Connection(
+            host=os.environ['RAILWAY_DB_HOST'],
+            port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+            database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+            user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+            password=os.environ['RAILWAY_DB_PASSWORD'],
+            timeout=30,
+        )
+        subscriber = pubsub_v1.SubscriberClient()
+        summary = process_pending_pubsub(
+            subscriber, railway_conn, pipeline, dry_run=dry_run,
+        )
+        return {**summary, "timestamp": datetime.now().isoformat()}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erro no Pub/Sub processing: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro no Pub/Sub processing: {e}",
+        )
+    finally:
+        if subscriber is not None:
+            try:
+                subscriber.close()
+            except Exception:
+                pass
+        if railway_conn is not None:
+            try:
+                railway_conn.close()
+            except Exception:
+                pass
+
+
 if __name__ == "__main__":
     import uvicorn
 
