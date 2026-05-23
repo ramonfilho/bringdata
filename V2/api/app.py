@@ -4260,11 +4260,25 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
             except Exception as _cae:
                 logger.warning(f"⚠️ critical_alerts falhou (não bloqueia polling): {_cae}")
 
+        def _run_survey_branch_safely(_conn):
+            """I4: ramo isolado lead_surveys → CAPI scoreado. NUNCA propaga
+            (não pode derrubar o polling do Lead). Off por SURVEY_CAPI_ENABLED
+            (deploy ≠ ligar). Vide docs/PROCESSO_CAPI_LEAD_SURVEYS.md §9."""
+            try:
+                from api.survey_branch import is_enabled, process_pending_surveys
+                if not is_enabled():
+                    return
+                _sb = process_pending_surveys(_conn, pipeline, dry_run=dry_run)
+                logger.info(f"🧩 survey_branch: {_sb}")
+            except Exception as _sbe:
+                logger.error(f"❌ survey_branch falhou (não bloqueia polling): {_sbe}")
+
         if not rows:
             logger.info("✅ Railway polling: nenhum lead pendente")
             # Regras de critical_alerts avaliam janelas de 60min — rodam
             # independente de haver batch atual de leads pendentes.
             _run_critical_alerts_safely(railway_conn)
+            _run_survey_branch_safely(railway_conn)
             return {"processed": 0, "skipped": 0, "message": "Nenhum lead pendente"}
 
         logger.info(f"📋 Railway polling: {len(rows)} leads pendentes encontrados")
@@ -4605,6 +4619,10 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
             # pulado, que era parte do dano silencioso).
             _run_critical_alerts_safely(railway_conn)
 
+        # I4: ramo isolado lead_surveys (roda também no caminho com batch Lead;
+        # no-op se SURVEY_CAPI_ENABLED!=true; nunca propaga).
+        _run_survey_branch_safely(railway_conn)
+
         return {
             "processed":     processed,
             "skipped":       skipped,
@@ -4632,6 +4650,78 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
         raise HTTPException(status_code=500, detail=f"Erro no polling Railway: {str(e)}")
     finally:
         if railway_conn:
+            try:
+                railway_conn.close()
+            except Exception:
+                pass
+
+
+@app.post("/pubsub/process-pending")
+async def pubsub_process_pending(pipeline: PipelineDep, dry_run: bool = False):
+    """Consumer Pub/Sub do sistema novo (lead-capture-ingest-sub) → CAPI scoreado.
+
+    Chamado pelo Cloud Scheduler em cadência fixa.
+
+    Fluxo (delega tudo a api.pubsub_branch.process_pending_pubsub):
+      1. Pull batch da sub Pub/Sub.
+      2. Por mensagem: parse → traduz slugs → classifica → scoreia (pipeline.run)
+                       → CAPI (send_batch_events) → ledger registros_ml → ack.
+
+    Off por padrão via env `PUBSUB_CAPI_ENABLED`. Deploy ≠ ligar: enquanto o
+    env não estiver `true`, o endpoint volta no-op (sem pull, sem ack).
+    Arquitetura nova — substitui o ramo I3/I4 (api/survey_branch.py e
+    api/survey_enrichment.py, marcados DEPRECATED 2026-05-23).
+
+    Args:
+        dry_run: Se True, processa e loga (pull → score → monta CAPI) mas NÃO
+                 envia Meta, NÃO grava ledger e NÃO acka mensagens. Permite
+                 smoke contra o backlog real do canary sem efeito colateral.
+    """
+    import pg8000.native
+    from api.pubsub_branch import is_enabled, process_pending_pubsub
+
+    if not is_enabled():
+        return {
+            "enabled": False,
+            "message": "PUBSUB_CAPI_ENABLED=false; no-op",
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    # Import lazy: só puxa o SDK do Pub/Sub quando o env tá ligado.
+    from google.cloud import pubsub_v1
+
+    railway_conn = None
+    subscriber = None
+    try:
+        railway_conn = pg8000.native.Connection(
+            host=os.environ['RAILWAY_DB_HOST'],
+            port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+            database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+            user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+            password=os.environ['RAILWAY_DB_PASSWORD'],
+            timeout=30,
+        )
+        subscriber = pubsub_v1.SubscriberClient()
+        summary = process_pending_pubsub(
+            subscriber, railway_conn, pipeline, dry_run=dry_run,
+        )
+        return {**summary, "timestamp": datetime.now().isoformat()}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Erro no Pub/Sub processing: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro no Pub/Sub processing: {e}",
+        )
+    finally:
+        if subscriber is not None:
+            try:
+                subscriber.close()
+            except Exception:
+                pass
+        if railway_conn is not None:
             try:
                 railway_conn.close()
             except Exception:
