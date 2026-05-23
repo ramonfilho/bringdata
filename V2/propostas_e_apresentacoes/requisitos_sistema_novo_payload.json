@@ -1,0 +1,81 @@
+{
+  "eventId": "<UUID v4 ou v7, estável e único por lead>",
+  "submittedAt": "<ISO-8601 UTC, ex.: 2026-05-22T18:21:09.524Z>",
+  "email": "<string, trim + lowercase>",
+  "firstName": "<string>",
+  "lastName": "<string, '' aceitável>",
+  "phone": "<string em E.164, ex.: +5567992956396>",
+  "hasComputer": ["SIM", "NAO"],
+  "fbp": "<fb.<sub>.<ts>.<id> ou null>",
+  "fbc": "<fb.<sub>.<ts>.<id> ou null — nunca string vazia>",
+  "userAgent": "<navigator.userAgent cru>",
+  "ip4": "<IP da requisição no backend>",
+  "survey": {
+    "genero": ["Masculino", "Feminino"],
+    "idade": [
+      "Menos de 18 anos",
+      "18 - 24 anos",
+      "25 - 34 anos",
+      "35 - 44 anos",
+      "45 - 54 anos",
+      "Mais de 55 anos"
+    ],
+    "ocupacao": [
+      "Sou CLT/Funcionário Público",
+      "Sou autonomo",
+      "Não trabalho e nem estudo",
+      "Sou apenas estudante",
+      "Sou aposentado"
+    ],
+    "faixaSalarial": [
+      "Não tenho renda",
+      "Entre R$1.000 a R$2.000 reais ao mês",
+      "Entre R$2.001 a R$3.000 reais ao mês",
+      "Entre R$3.001 a R$5.000 reais ao mês",
+      "Mais de R$5.001 reais ao mês"
+    ],
+    "cartaoCredito": ["Sim", "Não"],
+    "estudouProgramacao": ["Sim", "Não"],
+    "faculdade": ["Sim", "Não"],
+    "investiuCurso": ["Sim", "Não"],
+    "atracaoProfissao": [
+      "Poder trabalhar de qualquer lugar do mundo",
+      "Todas as alternativas",
+      "A possibilidade de ganhar altos salários",
+      "Trabalhar para outros países e ganhar em outra moeda",
+      "A ideia de nunca faltar emprego na área"
+    ],
+    "interesseEvento": [
+      "Fazer transição de carreira e conseguir meu primeiro emprego na área",
+      "Fazer um projeto na prática",
+      "Quero saber se é para mim",
+      "Fazer freelancer como programador",
+      "A aula com a recrutadora"
+    ]
+  },
+  "utm": {
+    "source": ["facebook-ads", "google-ads", "tiktok", "youtube", "outros"],
+    "_sinonimos_source": "Também aceitos (mapeados do nosso lado): fb→facebook-ads, ig→facebook-ads, facebook→facebook-ads, google→google-ads, youtube-bio→youtube",
+    "medium": [
+      "Aberto",
+      "Linguagem de programação",
+      "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação",
+      "Lookalike 2% Cadastrados - DEV 2.0 + Interesses",
+      "Lookalike 2% Alunos + Interesse Linguagem de Programação",
+      "dgen",
+      "Outros"
+    ],
+    "_medium_exemplos_producao_com_sufixo": [
+      "ABERTO",
+      "ABERTO | AD0027-V1-REACT",
+      "ABERTO |  AD0152 JAN 2026",
+      "ABERTO | AD0141-V2-REACT + HEADLINE",
+      "ABERTO | AD0150-V3-REACT+HEADLINE"
+    ],
+    "campaign": "<string livre>",
+    "content": "<string livre — usado pelo Meta como nome do criativo>",
+    "term": ["facebook", "instagram", "outros"],
+    "_sinonimos_term": "Também aceitos (mapeados do nosso lado): fb→facebook, ig→instagram.",
+    "url": "<URL completa da página de captação>"
+  }
+}

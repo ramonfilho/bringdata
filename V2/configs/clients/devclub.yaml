@@ -205,6 +205,15 @@ utm:
     # Term continua diferenciando IG/FB via term_mappings logo abaixo.
     fb: facebook-ads
     ig: facebook-ads
+    # Adicionado 2026-05-22: o sistema novo (Pub/Sub) pré-normaliza utm_source
+    # para 'facebook' e 'google' (em vez de 'facebook-ads'/'google-ads' que
+    # vêm crus do querystring do anúncio). Mapeamento aqui restaura o canônico
+    # antes do encoding, mantendo continuidade com o histórico de treino.
+    # Para a allowlist de envio Meta CAPI, ver utm_source_allowlist mais abaixo
+    # — allowlist é checada contra o source RAW, não o unificado
+    # (capi_integration.py:924), então 'facebook' tb foi adicionado lá.
+    facebook: facebook-ads
+    google: google-ads
   # Whitelist final de Source (pós source_to_channel_mapping). Source fora
   # desta lista vira 'outros' — espelha o fallback que _unify_term já tem.
   # tiktok adicionado em 2026-05-05 — o gestor passou a rodar campanhas TikTok
@@ -567,6 +576,7 @@ capi:
   - "instagram"
   - "ig"               # forma curta — Instagram (16 leads/24h estavam sendo bloqueados por engano)
   - "fb"               # forma curta — Facebook
+  - "facebook"         # sistema novo (Pub/Sub) pré-normaliza p/ 'facebook' — 2026-05-22
 api:
   cors_origins:
   - https://lp.devclub.com.br
