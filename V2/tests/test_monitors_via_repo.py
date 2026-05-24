@@ -222,6 +222,46 @@ def test_capi_zero_decil_d9_invisivel_dispara():
 
 
 # ──────────────────────────────────────────────────────────────────────────
+# DataQualityMonitor — helper _records_to_pesquisa_df (Sub-etapa 5.3)
+# ──────────────────────────────────────────────────────────────────────────
+
+def test_pick_survey_value_pt_long_e_slug():
+    from src.monitoring.data_quality import _pick_survey_value
+    # PT-Long (ledger novo)
+    assert _pick_survey_value({'O seu gênero:': 'Feminino'}, 'O seu gênero:', 'genero') == 'Feminino'
+    # Slug (legado)
+    assert _pick_survey_value({'genero': 'Masculino'}, 'O seu gênero:', 'genero') == 'Masculino'
+    # Ausente
+    assert _pick_survey_value({}, 'O seu gênero:', 'genero') is None
+    # Vazio é tratado como ausente
+    assert _pick_survey_value({'genero': ''}, 'genero') is None
+
+
+def test_records_to_pesquisa_df_cobre_ambos_vocabularios():
+    from src.monitoring.data_quality import DataQualityMonitor
+    from datetime import datetime, timezone
+
+    rec_pt = LeadRecord(
+        event_id='e1', email='a@x', criado_em=datetime.now(timezone.utc),
+        status_envio='success', utm_source='facebook-ads', utm_medium='Aberto',
+        survey_responses={'O seu gênero:': 'Feminino', 'Qual a sua idade?': '25 - 34 anos'},
+    )
+    rec_slug = LeadRecord(
+        event_id='e2', email='b@x', criado_em=datetime.now(timezone.utc),
+        status_envio='success', utm_source='ig',
+        survey_responses={'genero': 'Masculino', 'idade': '18 - 24 anos'},
+    )
+
+    m = DataQualityMonitor(model_path='', repo=None)
+    df = m._records_to_pesquisa_df([rec_pt, rec_slug])
+
+    assert df.shape == (2, 14), f"esperava 2 linhas x 14 colunas, peguei {df.shape}"
+    assert list(df['O seu gênero:']) == ['Feminino', 'Masculino']
+    assert list(df['Qual a sua idade?']) == ['25 - 34 anos', '18 - 24 anos']
+    assert list(df['source']) == ['facebook-ads', 'ig']
+
+
+# ──────────────────────────────────────────────────────────────────────────
 # Runner
 # ──────────────────────────────────────────────────────────────────────────
 

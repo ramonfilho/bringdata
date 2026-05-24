@@ -138,7 +138,8 @@ class MonitoringOrchestrator:
         self.monitors = {
             'data_quality': DataQualityMonitor(model_path, client_config=self._client_config, db=db,
                                                expected_decil_dist=expected_decil_dist,
-                                               lead_scoring_pipeline=lead_scoring_pipeline),
+                                               lead_scoring_pipeline=lead_scoring_pipeline,
+                                               repo=self._repo),
             'operational': OperationalMonitor(self._repo, client_config=self._client_config),
             'capi_quality': CAPIQualityMonitor(self._repo, client_config=self._client_config)
         }

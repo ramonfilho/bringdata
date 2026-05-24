@@ -21,6 +21,25 @@ import re
 logger = logging.getLogger(__name__)
 
 
+def _pick_survey_value(survey: Dict[str, str], *keys: str) -> Optional[str]:
+    """Pega o primeiro valor não-vazio em `survey` entre as chaves dadas.
+
+    Existe pra cobrir os 2 vocabulários do `LeadRecord.survey_responses`:
+      - PT-Long (ledger novo via consumer Pub/Sub): "O seu gênero:", ...
+      - slug (adapter legado lendo `Lead.pesquisa`): "genero", "idade", ...
+
+    Devolve None se nenhuma chave resolver pra valor útil. Mantém o contrato
+    do DataFrame canônico (coluna pode ser NULL).
+    """
+    if not survey:
+        return None
+    for k in keys:
+        v = survey.get(k)
+        if v is not None and v != '':
+            return v
+    return None
+
+
 def normalizar_categoria_para_comparacao(texto):
     """
     Normaliza categoria para comparação no drift detection.
@@ -582,26 +601,33 @@ class DataQualityMonitor:
     """
 
     def __init__(self, model_path: str, client_config=None, db=None, expected_decil_dist=None,
-                 lead_scoring_pipeline=None):
+                 lead_scoring_pipeline=None, repo=None):
         """
         Args:
             model_path:    Caminho para pasta do modelo ativo
             client_config: ClientConfig opcional — usado para encoding via core/,
                            carregamento do modelo correto por client_id, e
                            overrides de thresholds/missing_rate_ignore_columns
-            db:            SQLAlchemy session opcional (legacy Cloud SQL). Mantido pra outras queries.
-                           NÃO é usado para rolling 30d porque a tabela Lead vive no Railway.
-            expected_decil_dist: Dict {'D1':0.10,'D2':0.10,...,'D10':0.30} pré-computado pelo
-                           caller (Railway) para servir como baseline E6 (rolling 30d). Quando None,
-                           _check_score_distribution cai em E5 (model_metadata) ou hardcoded uniform.
-            lead_scoring_pipeline: LeadScoringPipeline opcional já inicializado (de api/app.py).
-                           Usado por _check_audience_quality_signal para re-scorear leads do LF
-                           atual com chain de produção. Quando None, esse check é skipado.
+            db:            SQLAlchemy session opcional (legacy Cloud SQL). Mantido pra
+                           outras queries. NÃO é usado para rolling 30d porque a tabela
+                           Lead vive no Railway.
+            expected_decil_dist: Dict {'D1':0.10,...,'D10':0.30} pré-computado pelo
+                           caller (Railway) para servir como baseline rolling 30d. Quando
+                           None, _check_score_distribution cai em fallback.
+            lead_scoring_pipeline: LeadScoringPipeline opcional já inicializado (de
+                           api/app.py). Usado por _check_audience_quality_signal para
+                           re-scorear leads do LF atual com chain de produção.
+            repo:          `LeadRepository` (injetado pelo orchestrator). Fonte canônica
+                           dos leads pros 7 helpers `_query_railway_*`. Quando None,
+                           esses helpers retornam DataFrames vazios silenciosamente.
+                           Migrado em 2026-05-24 (Sub-etapa 5.3 do refator do
+                           monitoramento).
         """
         from .config import THRESHOLDS, MISSING_RATE_IGNORE_COLUMNS
         self.model_path = model_path
         self.client_config = client_config
         self.db = db
+        self.repo = repo
         self.expected_decil_dist = expected_decil_dist
         self.lead_scoring_pipeline = lead_scoring_pipeline
         monitoring = client_config.monitoring if client_config else None
@@ -1597,33 +1623,52 @@ class DataQualityMonitor:
 
     def _query_railway_pesquisa_window(self, start_utc, end_utc) -> pd.DataFrame:
         """
-        Query Railway pra leads numa janela arbitrária [start_utc, end_utc).
-        Retorna df com colunas pesquisa (formato Sheets), ou df vazio em erro.
+        Devolve leads numa janela arbitrária [start_utc, end_utc) no formato
+        DataFrame canônico (mesmas colunas de `_railway_pesquisa_columns()`).
 
-        Railway via proxy: pg8000 sem ssl_context (cert auto-assinado).
+        Migrado em 2026-05-24 para usar `self.repo` em vez de abrir conexão
+        Railway própria. Quando `self.repo` é None ou o range é inválido,
+        retorna DataFrame vazio silenciosamente.
+
+        Origem das respostas:
+          - Ledger novo (`registros_ml.survey_responses`): chaves em PT-Long.
+          - Adaptador legado (`Lead.pesquisa`): chaves em slug.
+          `_records_to_pesquisa_df` cobre os dois formatos via fallback de chave.
         """
-        import os
-        required_env = ['RAILWAY_DB_HOST', 'RAILWAY_DB_PORT', 'RAILWAY_DB_USER',
-                        'RAILWAY_DB_PASSWORD', 'RAILWAY_DB_NAME']
-        missing = [k for k in required_env if not os.environ.get(k)]
-        if missing:
-            logger.warning(f"[audience_profile_drift] Env vars Railway ausentes: {missing}.")
-            return pd.DataFrame()
+        if self.repo is None:
+            return pd.DataFrame(columns=self._railway_pesquisa_columns())
         try:
-            import pg8000.native
-            conn = pg8000.native.Connection(
-                host=os.environ['RAILWAY_DB_HOST'],
-                port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
-                user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
-                password=os.environ['RAILWAY_DB_PASSWORD'],
-                database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
-                timeout=15,
-            )
-            rows = conn.run(self._railway_pesquisa_columns_select(), s=start_utc, e=end_utc)
-            conn.close()
+            records = self.repo.leads_in_range(start_utc, end_utc)
         except Exception as e:
-            logger.error(f"[audience_profile_drift] Erro ao consultar Railway: {e}")
-            return pd.DataFrame()
+            logger.error(f"[audience_profile_drift] Erro ao consultar repo: {e}")
+            return pd.DataFrame(columns=self._railway_pesquisa_columns())
+        return self._records_to_pesquisa_df(records)
+
+    def _records_to_pesquisa_df(self, records) -> pd.DataFrame:
+        """Converte `List[LeadRecord]` no DataFrame canônico de pesquisa.
+
+        Cobre chaves PT-Long (ledger novo) e slug (adaptador legado) via
+        `_pick_survey_value`. Valores ausentes viram `None`.
+        """
+        rows = []
+        for r in records:
+            s = r.survey_responses or {}
+            rows.append({
+                'data': r.criado_em,
+                'O seu gênero:':                       _pick_survey_value(s, 'O seu gênero:', 'genero'),
+                'Qual a sua idade?':                   _pick_survey_value(s, 'Qual a sua idade?', 'idade'),
+                'O que você faz atualmente?':          _pick_survey_value(s, 'O que você faz atualmente?', 'ocupacao'),
+                'Atualmente, qual a sua faixa salarial?': _pick_survey_value(s, 'Atualmente, qual a sua faixa salarial?', 'faixaSalarial'),
+                'Você possui cartão de crédito?':      _pick_survey_value(s, 'Você possui cartão de crédito?', 'cartaoCredito'),
+                'Já estudou programação?':             _pick_survey_value(s, 'Já estudou programação?', 'estudouProgramacao'),
+                'Tem computador/notebook?':            _pick_survey_value(s, 'Tem computador/notebook?', 'computador'),
+                'source':   r.utm_source,
+                'medium':   r.utm_medium,
+                'campaign': r.utm_campaign,
+                'content':  r.utm_content,
+                'term':     r.utm_term,
+                'pageUrl':  r.utm_url,
+            })
         return pd.DataFrame(rows, columns=self._railway_pesquisa_columns())
 
     def _query_railway_previous_full_brt_day(self) -> pd.DataFrame:
@@ -1709,38 +1754,28 @@ class DataQualityMonitor:
         if not (self.client_config and (self.client_config.utm or self.client_config.medium)):
             return {}
 
-        required_env = ['RAILWAY_DB_HOST', 'RAILWAY_DB_PORT', 'RAILWAY_DB_USER',
-                        'RAILWAY_DB_PASSWORD', 'RAILWAY_DB_NAME']
-        if any(not os.environ.get(k) for k in required_env):
+        if self.repo is None:
             return {}
 
         end_utc = datetime.now(timezone.utc)
         start_utc = end_utc - timedelta(hours=hours)
 
+        # Migrado em 2026-05-24: usa `self.repo` em vez de abrir conn própria.
+        # Fonte hoje: ledger novo (`registros_ml`) via RegistrosMLAdapter.
         try:
-            import pg8000.native
-            conn = pg8000.native.Connection(
-                host=os.environ['RAILWAY_DB_HOST'],
-                port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
-                user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
-                password=os.environ['RAILWAY_DB_PASSWORD'],
-                database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
-                timeout=15,
-            )
-            rows = conn.run(
-                f'SELECT source, term, medium FROM "Lead" '
-                f'WHERE "createdAt" >= :s AND "createdAt" < :e',
-                s=start_utc, e=end_utc,
-            )
-            conn.close()
+            records = self.repo.leads_in_range(start_utc, end_utc)
         except Exception as e:
-            logger.error(f"[outros_breakdown] {column} erro Railway: {e}")
+            logger.error(f"[outros_breakdown] {column} erro repo: {e}")
             return {}
 
-        if not rows:
+        if not records:
             return {}
 
-        df_raw = pd.DataFrame(rows, columns=['Source', 'Term', 'Medium'])
+        df_raw = pd.DataFrame(
+            [{'Source': r.utm_source, 'Term': r.utm_term, 'Medium': r.utm_medium}
+             for r in records],
+            columns=['Source', 'Term', 'Medium'],
+        )
         df_unified = df_raw.copy()
 
         # Aplicar unify canônico — mesma rotina do orchestrator/produção
