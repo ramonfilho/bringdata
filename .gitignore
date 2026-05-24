@@ -44,8 +44,11 @@ build/
 # Notebooks
 .ipynb_checkpoints
 
-# Dados
+# Dados (datasets brutos em V2/data/)
 data/
+# Exceção: V2/src/data/ é módulo Python (camada de acesso a leads), não dados
+!V2/src/data/
+!V2/src/data/**
 
 # Mac OS
 .DS_Store
