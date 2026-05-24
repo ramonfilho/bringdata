@@ -46,9 +46,11 @@ build/
 
 # Dados (datasets brutos em V2/data/)
 data/
-# Exceção: V2/src/data/ é módulo Python (camada de acesso a leads), não dados
+# Exceção: V2/src/data/ é módulo Python (camada de acesso a leads), não dados.
+# Caches do interpretador continuam ignorados pela regra **pycache**/ acima.
 !V2/src/data/
 !V2/src/data/**
+V2/src/data/**/__pycache__/
 
 # Mac OS
 .DS_Store
