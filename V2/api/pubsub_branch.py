@@ -223,12 +223,21 @@ def process_pending_pubsub(
     allowlist = set(pipeline._client_config.capi.utm_source_allowlist or [])
     sub_path = subscription_path()
 
-    # 1. Pull
-    response = subscriber.pull(
-        request={"subscription": sub_path, "max_messages": int(batch)},
-        timeout=10.0,
-    )
-    received = list(response.received_messages)
+    # 1. Pull. Em fila vazia, o servidor do Pub/Sub bloqueia até o deadline
+    # do RPC e então levanta DeadlineExceeded em vez de devolver lista vazia
+    # (comportamento documentado quando `return_immediately` não está setado).
+    # Aqui tratamos isso como "0 mensagens" — comportamento esperado da poll.
+    from google.api_core import exceptions as _gax_exc
+
+    try:
+        response = subscriber.pull(
+            request={"subscription": sub_path, "max_messages": int(batch)},
+            timeout=10.0,
+        )
+        received = list(response.received_messages)
+    except _gax_exc.DeadlineExceeded:
+        received = []
+
     if not received:
         return {"processed": 0, "sent": 0, "skipped_allowlist": 0,
                 "skipped_missing_data": 0, "errors": 0, "dry_run": dry_run}
