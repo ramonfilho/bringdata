@@ -31,7 +31,8 @@ Quando houver dúvida sobre como implementar um item específico: ir ao catálog
 | Skill | Quando usar |
 |---|---|
 | `/ctx` | Contexto operacional do projeto — onboarding e desenvolvimento |
-| `/mlops-architect` | Contexto arquitetural profundo + checklists de segurança |
+| `/mlops-architect` | Contexto arquitetural profundo + checklists de segurança (sinal ML) |
+| `/sw-architect` | Arquitetura de software — invocar antes de qualquer mudança em camada cruzada, acesso a dados, ou criação de componente novo |
 | `/investigate` | Investigar por que um lançamento foi ruim |
 | `/investigate-ab` | Verificar se o teste A/B está tecnicamente válido |
 | `/safeguard` | Auditoria completa de integridade do projeto |
@@ -68,6 +69,20 @@ Toda menção a um item técnico identificado por código — cenários da audit
 - Dívidas técnicas (DT-X) e pré-requisitos do segundo cliente (R-X) → `docs/PLANO_REFACTOR_MLOPS.md`
 - Itens M-X de prioridade operacional → `docs/PLANO_EXECUCAO.md`
 - Erros históricos e Clusters → `docs/registro_erros_ml.md`
+
+---
+
+## Antes de mudança arquitetural — consultar `/sw-architect`
+
+**Regra obrigatória — aplica antes de planejar, não depois.**
+
+Toda mudança que adicione leitura/escrita de dados, toque camada que múltiplos lugares consomem (monitoramento, scoring, captura, envio de evento, retreino), ou crie componente novo: invocar `/sw-architect` **antes** de codar. A skill cobra "a abstração existe? deveria existir? estou espalhando acoplamento direto na fonte?".
+
+**Por que esta regra existe:** trocar a fonte de dados do monitoramento virou um refator de várias etapas porque cada monitor consultava o banco direto, sem camada intermediária. O custo de não ter pensado arquitetura no momento certo (quando o ledger novo foi criado em 23/05/2026) virou semanas de trabalho depois. A skill obriga a parar e perguntar antes de espalhar mais N pontos de acoplamento.
+
+**Quando NÃO invocar:** fix de bug pontual, refator de nomes contido, atualização de doc, mudança num único arquivo que não muda interface pública.
+
+A regra é gêmea da `/mlops-architect`: aquela cobra a integridade do sinal ML; esta cobra a manutenibilidade do código que sustenta tudo.
 
 ---
 
