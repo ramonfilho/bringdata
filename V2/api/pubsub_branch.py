@@ -143,8 +143,16 @@ def ledger_row(
     hq_status: Optional[str] = None,
     capi_sent_at_now: bool = False,
     error_message: Optional[str] = None,
+    utm: Optional[Dict] = None,
 ) -> Dict:
-    """Pura. Monta dict do INSERT em `registros_ml`. PK = `event_id`."""
+    """Pura. Monta dict do INSERT em `registros_ml`. PK = `event_id`.
+
+    `utm` (opcional): dict no formato do payload (`{source, medium, campaign,
+    content, term, url}`). Cada campo vira coluna `utm_*` no ledger. Permite
+    que o monitoramento leia tudo do `registros_ml` (single-table) em vez de
+    fazer JOIN com `lead_surveys × UTMTracking`.
+    """
+    utm = utm or {}
     return {
         "event_id": event_id,
         "email": email,
@@ -157,6 +165,12 @@ def ledger_row(
         "hq_status": hq_status,
         "capi_sent_at_now": capi_sent_at_now,
         "error_message": error_message,
+        "utm_source":   utm.get("source"),
+        "utm_medium":   utm.get("medium"),
+        "utm_campaign": utm.get("campaign"),
+        "utm_content":  utm.get("content"),
+        "utm_term":     utm.get("term"),
+        "utm_url":      utm.get("url"),
     }
 
 
@@ -164,11 +178,14 @@ def _insert_ledger(conn, r: Dict) -> None:
     conn.run(
         'INSERT INTO registros_ml '
         '(event_id, email, variant, lead_score, decil, base_meta_event_id, '
-        ' base_status, hq_meta_event_id, hq_status, capi_sent_at, error_message) '
+        ' base_status, hq_meta_event_id, hq_status, capi_sent_at, error_message, '
+        ' utm_source, utm_medium, utm_campaign, utm_content, utm_term, utm_url) '
         'VALUES (:event_id, :email, :variant, :lead_score, :decil, '
         ' :base_meta_event_id, :base_status, :hq_meta_event_id, :hq_status, '
         + ('NOW()' if r.pop("capi_sent_at_now", False) else 'NULL')
-        + ', :error_message) ON CONFLICT (event_id) DO NOTHING',
+        + ', :error_message, :utm_source, :utm_medium, :utm_campaign, '
+        ' :utm_content, :utm_term, :utm_url) '
+        'ON CONFLICT (event_id) DO NOTHING',
         **r,
     )
 
@@ -244,6 +261,9 @@ def process_pending_pubsub(
 
     for ack_id, payload in parsed:
         event_id = payload["eventId"]
+        # Pré-computa utm pra que TODOS os pending_ledger gravem utm_*
+        # (inclusive os de erro de slug, que falham antes do classify).
+        utm = payload_to_utm(payload)
         # Tradução slug→PT pode levantar (fail-loud em slug desconhecido)
         try:
             survey_dict = payload_to_survey_dict(payload)
@@ -254,11 +274,10 @@ def process_pending_pubsub(
             )
             pending_ledger.append(ledger_row(
                 event_id, payload.get("email"), None, None, None, "error",
-                error_message=str(e)[:500]))
+                error_message=str(e)[:500], utm=utm))
             handled_ack_ids.append(ack_id)
             continue
 
-        utm = payload_to_utm(payload)
         enrich = payload_to_enrich(payload)
         meta_elig = is_meta_eligible(utm.get("source"), allowlist)
         verdict = classify(meta_elig, enrich)
@@ -267,13 +286,13 @@ def process_pending_pubsub(
             n_allow += 1
             pending_ledger.append(ledger_row(
                 event_id, payload.get("email"), None, None, None,
-                "skipped_allowlist"))
+                "skipped_allowlist", utm=utm))
             handled_ack_ids.append(ack_id)
         elif verdict == "skipped_missing_data":
             n_missing += 1
             pending_ledger.append(ledger_row(
                 event_id, payload.get("email"), None, None, None,
-                "skipped_missing_data"))
+                "skipped_missing_data", utm=utm))
             handled_ack_ids.append(ack_id)
         else:
             to_score.append((ack_id, payload, survey_dict, utm, enrich))
@@ -349,15 +368,15 @@ def process_pending_pubsub(
 
     # 5. Montar CAPI + ledger dos enviáveis
     capi_leads: List[Dict] = []
-    # (event_id, decil_str, decil_int, vname, ack_id, payload)
-    capi_meta: List[Tuple[str, str, Optional[int], Optional[str], str, Dict]] = []
+    # (event_id, decil_str, decil_int, vname, ack_id, payload, utm)
+    capi_meta: List[Tuple[str, str, Optional[int], Optional[str], str, Dict, Dict]] = []
     for ack_id, payload, _, utm, enrich in to_score:
         eid = payload["eventId"]
         if eid not in scored:
             n_err += 1
             pending_ledger.append(ledger_row(
                 eid, payload.get("email"), None, None, None, "error",
-                error_message="sem score"))
+                error_message="sem score", utm=utm))
             handled_ack_ids.append(ack_id)
             continue
         sc, dc, ab_v, vn = scored[eid]
@@ -387,7 +406,7 @@ def process_pending_pubsub(
             cl["ab_pixel_id"]          = ab_v.pixel_id_override
         capi_leads.append(cl)
         capi_meta.append(
-            (eid, dc, int(dc[1:]) if dc else None, vn, ack_id, payload)
+            (eid, dc, int(dc[1:]) if dc else None, vn, ack_id, payload, utm)
         )
 
     sent = 0
@@ -400,7 +419,7 @@ def process_pending_pubsub(
         )
         details = res.get("details", [])
         sent = res.get("success", 0)
-        for i, (eid, dc, di, vn, ack_id, payload) in enumerate(capi_meta):
+        for i, (eid, dc, di, vn, ack_id, payload, utm) in enumerate(capi_meta):
             ok = i < len(details) and details[i].get("status") == "success"
             st = "success" if ok else "error"
             hq = ("success" if (ok and di and di >= 9)
@@ -415,6 +434,7 @@ def process_pending_pubsub(
                 error_message=(None if ok else
                                (details[i].get("error")
                                 if i < len(details) else "sem retorno")),
+                utm=utm,
             ))
             handled_ack_ids.append(ack_id)
     elif capi_leads and dry_run:

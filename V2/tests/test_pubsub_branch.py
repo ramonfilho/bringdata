@@ -188,6 +188,11 @@ def test_ledger_row_shape():
     assert r["base_meta_event_id"] == "qualified_evt1"
     assert r["capi_sent_at_now"]   is True
     assert "lead_id" not in r, "ledger_row não deve mais usar lead_id (PK é event_id)"
+    # P17 — colunas utm_* presentes; None quando utm não foi passado.
+    for k in ("utm_source", "utm_medium", "utm_campaign",
+              "utm_content", "utm_term", "utm_url"):
+        assert k in r, f"{k!r} esperada em ledger_row"
+        assert r[k] is None, f"{k!r} sem utm passado deveria ser None, veio {r[k]!r}"
 
 
 def test_ledger_row_skipped_não_seta_capi_sent_at():
@@ -198,6 +203,44 @@ def test_ledger_row_skipped_não_seta_capi_sent_at():
     assert r["capi_sent_at_now"]  is False
     assert r["base_meta_event_id"] is None
     assert r["hq_meta_event_id"]   is None
+
+
+def test_ledger_row_grava_utm_quando_passado():
+    """P17: com utm passado, todas as 6 colunas utm_* são populadas."""
+    utm = {
+        "source":   "facebook-ads",
+        "medium":   "Aberto",
+        "campaign": "DEVLF | CAP",
+        "content":  "AD0027",
+        "term":     "fb",
+        "url":      "https://lp.x/?utm_source=facebook-ads",
+    }
+    r = ledger_row(
+        event_id="evt3", email="x@y", variant="champion",
+        lead_score=0.5, decil=8, base_status="success",
+        utm=utm,
+    )
+    assert r["utm_source"]   == "facebook-ads"
+    assert r["utm_medium"]   == "Aberto"
+    assert r["utm_campaign"] == "DEVLF | CAP"
+    assert r["utm_content"]  == "AD0027"
+    assert r["utm_term"]     == "fb"
+    assert r["utm_url"]      == "https://lp.x/?utm_source=facebook-ads"
+
+
+def test_ledger_row_utm_parcial_grava_o_que_existe():
+    """P17: utm com campos faltando — o que vier vai pra coluna, resto fica None."""
+    r = ledger_row(
+        event_id="evt4", email="x@y", variant=None,
+        lead_score=None, decil=None, base_status="skipped_allowlist",
+        utm={"source": "organic"},
+    )
+    assert r["utm_source"]   == "organic"
+    assert r["utm_medium"]   is None
+    assert r["utm_campaign"] is None
+    assert r["utm_content"]  is None
+    assert r["utm_term"]     is None
+    assert r["utm_url"]      is None
 
 
 def _run():
@@ -216,6 +259,8 @@ def _run():
         test_classify_3_verdicts,
         test_ledger_row_shape,
         test_ledger_row_skipped_não_seta_capi_sent_at,
+        test_ledger_row_grava_utm_quando_passado,
+        test_ledger_row_utm_parcial_grava_o_que_existe,
     ]
     fails = 0
     for t in tests:

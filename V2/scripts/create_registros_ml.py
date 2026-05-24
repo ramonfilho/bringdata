@@ -25,6 +25,10 @@ Histórico:
   - Renomeada para `registros_ml` a pedido do usuário (commit 31d1151).
   - Coluna PK renomeada `lead_id` → `event_id` na virada pra Pub/Sub
     (arquitetura nova, descarta leitura Railway + parsing de log).
+  - 2026-05-24: adicionadas 6 colunas UTM (`utm_source`, `utm_medium`,
+    `utm_campaign`, `utm_content`, `utm_term`, `utm_url`) via ALTER TABLE
+    IF NOT EXISTS. Single-table substitui JOIN com lead_surveys×UTMTracking
+    pro monitoramento. Decisão P12 do PROCESSO_CAPI_LEAD_SURVEYS.
 
 Credenciais: lê RAILWAY_DB_* do ambiente; se ausentes, carrega de um .env
 apontado por RAILWAY_ENV_FILE, ou de scripts/../.env. Sem hardcode de path.
@@ -89,6 +93,20 @@ SQL_RENAME_LEAD_ID = (
     "ALTER TABLE registros_ml RENAME COLUMN lead_id TO event_id;"
 )
 
+# Migração 2026-05-24: 6 colunas UTM. Permite que o monitoramento (utm quality,
+# source missing, ranking de UTM por decil etc) leia tudo de `registros_ml` em
+# vez de fazer JOIN com `lead_surveys × UTMTracking`. ALTER ADD COLUMN IF NOT
+# EXISTS é idempotente desde PostgreSQL 9.6.
+SQL_ADD_UTM_COLUMNS = (
+    "ALTER TABLE registros_ml "
+    "ADD COLUMN IF NOT EXISTS utm_source   TEXT,"
+    "ADD COLUMN IF NOT EXISTS utm_medium   TEXT,"
+    "ADD COLUMN IF NOT EXISTS utm_campaign TEXT,"
+    "ADD COLUMN IF NOT EXISTS utm_content  TEXT,"
+    "ADD COLUMN IF NOT EXISTS utm_term     TEXT,"
+    "ADD COLUMN IF NOT EXISTS utm_url      TEXT;"
+)
+
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Cria/verifica a tabela registros_ml.")
@@ -139,7 +157,8 @@ def main() -> None:
 
             conn.run(DDL_TABLE)
             conn.run(DDL_INDEX)
-            print("[OK] CREATE TABLE/INDEX IF NOT EXISTS aplicado (idempotente).")
+            conn.run(SQL_ADD_UTM_COLUMNS)
+            print("[OK] CREATE TABLE/INDEX + ADD COLUMN UTM aplicados (idempotente).")
 
         cols = conn.run(
             """SELECT column_name, data_type, is_nullable, column_default
