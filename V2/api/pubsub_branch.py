@@ -145,6 +145,8 @@ def ledger_row(
     error_message: Optional[str] = None,
     utm: Optional[Dict] = None,
     survey: Optional[Dict] = None,
+    enrich: Optional[Dict] = None,
+    has_computer: Optional[bool] = None,
 ) -> Dict:
     """Pura. Monta dict do INSERT em `registros_ml`. PK = `event_id`.
 
@@ -155,8 +157,24 @@ def ledger_row(
     canônico vindo de `payload_to_survey_dict`, ou slug raw em casos de
     falha de tradução). Vai pra coluna `survey_responses` (JSONB). Habilita
     monitoramento de drift de categorias sem JOIN com `lead_surveys`.
+
+    `enrich` (opcional): dict do `payload_to_enrich(payload)` com identidade,
+    Meta tracking e sessão. Cada chave vira coluna no ledger:
+      - `nome` → split em `first_name` + `last_name`
+      - `telefone` → `phone`
+      - `fbp`, `fbc`, `user_agent`, `ip` → colunas homônimas
+
+    `has_computer` (opcional): valor de `payload['hasComputer']` — feature
+    crítica do modelo, vem top-level no payload (não dentro de `survey`).
     """
     utm = utm or {}
+    enrich = enrich or {}
+    # Split do nome em primeiro/restante. Não confio no espaço único — usa
+    # split max 1 pra cobrir "Maria das Dores".
+    full_name = (enrich.get("nome") or "").strip()
+    name_parts = full_name.split(" ", 1) if full_name else []
+    first_name = name_parts[0] if name_parts else None
+    last_name = name_parts[1] if len(name_parts) > 1 else None
     return {
         "event_id": event_id,
         "email": email,
@@ -176,6 +194,14 @@ def ledger_row(
         "utm_term":     utm.get("term"),
         "utm_url":      utm.get("url"),
         "survey_responses": survey,
+        "first_name": first_name,
+        "last_name":  last_name,
+        "phone":      enrich.get("telefone"),
+        "fbp":        enrich.get("fbp"),
+        "fbc":        enrich.get("fbc"),
+        "user_agent": enrich.get("user_agent"),
+        "ip":         enrich.get("ip"),
+        "has_computer": has_computer,
     }
 
 
@@ -190,13 +216,16 @@ def _insert_ledger(conn, r: Dict) -> None:
         '(event_id, email, variant, lead_score, decil, base_meta_event_id, '
         ' base_status, hq_meta_event_id, hq_status, capi_sent_at, error_message, '
         ' utm_source, utm_medium, utm_campaign, utm_content, utm_term, utm_url, '
-        ' survey_responses) '
+        ' survey_responses, '
+        ' first_name, last_name, phone, fbp, fbc, user_agent, ip, has_computer) '
         'VALUES (:event_id, :email, :variant, :lead_score, :decil, '
         ' :base_meta_event_id, :base_status, :hq_meta_event_id, :hq_status, '
         + ('NOW()' if r.pop("capi_sent_at_now", False) else 'NULL')
         + ', :error_message, :utm_source, :utm_medium, :utm_campaign, '
         ' :utm_content, :utm_term, :utm_url, '
-        ' CAST(:survey_responses AS JSONB)) '
+        ' CAST(:survey_responses AS JSONB), '
+        ' :first_name, :last_name, :phone, :fbp, :fbc, :user_agent, :ip, '
+        ' :has_computer) '
         'ON CONFLICT (event_id) DO NOTHING',
         survey_responses=survey_json,
         **r,
@@ -283,9 +312,12 @@ def process_pending_pubsub(
 
     for ack_id, payload in parsed:
         event_id = payload["eventId"]
-        # Pré-computa utm pra que TODOS os pending_ledger gravem utm_*
-        # (inclusive os de erro de slug, que falham antes do classify).
+        # Pré-computa utm e enrich pra que TODOS os pending_ledger gravem
+        # tudo que o payload trouxer (inclusive os de erro de slug, que
+        # falham antes do classify).
         utm = payload_to_utm(payload)
+        enrich = payload_to_enrich(payload)
+        has_computer = payload.get("hasComputer")
         # Tradução slug→PT pode levantar (fail-loud em slug desconhecido)
         try:
             survey_dict = payload_to_survey_dict(payload)
@@ -299,11 +331,11 @@ def process_pending_pubsub(
             pending_ledger.append(ledger_row(
                 event_id, payload.get("email"), None, None, None, "error",
                 error_message=str(e)[:500], utm=utm,
-                survey=payload.get("survey")))
+                survey=payload.get("survey"),
+                enrich=enrich, has_computer=has_computer))
             handled_ack_ids.append(ack_id)
             continue
 
-        enrich = payload_to_enrich(payload)
         meta_elig = is_meta_eligible(utm.get("source"), allowlist)
         verdict = classify(meta_elig, enrich)
 
@@ -311,13 +343,15 @@ def process_pending_pubsub(
             n_allow += 1
             pending_ledger.append(ledger_row(
                 event_id, payload.get("email"), None, None, None,
-                "skipped_allowlist", utm=utm, survey=survey_dict))
+                "skipped_allowlist", utm=utm, survey=survey_dict,
+                enrich=enrich, has_computer=has_computer))
             handled_ack_ids.append(ack_id)
         elif verdict == "skipped_missing_data":
             n_missing += 1
             pending_ledger.append(ledger_row(
                 event_id, payload.get("email"), None, None, None,
-                "skipped_missing_data", utm=utm, survey=survey_dict))
+                "skipped_missing_data", utm=utm, survey=survey_dict,
+                enrich=enrich, has_computer=has_computer))
             handled_ack_ids.append(ack_id)
         else:
             to_score.append((ack_id, payload, survey_dict, utm, enrich))
@@ -393,15 +427,16 @@ def process_pending_pubsub(
 
     # 5. Montar CAPI + ledger dos enviáveis
     capi_leads: List[Dict] = []
-    # (event_id, decil_str, decil_int, vname, ack_id, payload, utm, survey_dict)
-    capi_meta: List[Tuple[str, str, Optional[int], Optional[str], str, Dict, Dict, Dict]] = []
+    # (event_id, decil_str, decil_int, vname, ack_id, payload, utm, survey_dict, enrich)
+    capi_meta: List[Tuple[str, str, Optional[int], Optional[str], str, Dict, Dict, Dict, Dict]] = []
     for ack_id, payload, survey_dict, utm, enrich in to_score:
         eid = payload["eventId"]
         if eid not in scored:
             n_err += 1
             pending_ledger.append(ledger_row(
                 eid, payload.get("email"), None, None, None, "error",
-                error_message="sem score", utm=utm, survey=survey_dict))
+                error_message="sem score", utm=utm, survey=survey_dict,
+                enrich=enrich, has_computer=payload.get("hasComputer")))
             handled_ack_ids.append(ack_id)
             continue
         sc, dc, ab_v, vn = scored[eid]
@@ -431,7 +466,7 @@ def process_pending_pubsub(
             cl["ab_pixel_id"]          = ab_v.pixel_id_override
         capi_leads.append(cl)
         capi_meta.append(
-            (eid, dc, int(dc[1:]) if dc else None, vn, ack_id, payload, utm, survey_dict)
+            (eid, dc, int(dc[1:]) if dc else None, vn, ack_id, payload, utm, survey_dict, enrich)
         )
 
     sent = 0
@@ -444,7 +479,7 @@ def process_pending_pubsub(
         )
         details = res.get("details", [])
         sent = res.get("success", 0)
-        for i, (eid, dc, di, vn, ack_id, payload, utm, survey_dict) in enumerate(capi_meta):
+        for i, (eid, dc, di, vn, ack_id, payload, utm, survey_dict, enrich) in enumerate(capi_meta):
             ok = i < len(details) and details[i].get("status") == "success"
             st = "success" if ok else "error"
             hq = ("success" if (ok and di and di >= 9)
@@ -460,6 +495,7 @@ def process_pending_pubsub(
                                (details[i].get("error")
                                 if i < len(details) else "sem retorno")),
                 utm=utm, survey=survey_dict,
+                enrich=enrich, has_computer=payload.get("hasComputer"),
             ))
             handled_ack_ids.append(ack_id)
     elif capi_leads and dry_run:

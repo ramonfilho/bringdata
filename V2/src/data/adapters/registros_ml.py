@@ -43,6 +43,9 @@ class RegistrosMLAdapter:
         'utm_content', 'utm_term', 'utm_url',
         'capi_sent_at', 'error_message',
         'survey_responses',
+        'first_name', 'last_name', 'phone',
+        'fbp', 'fbc',
+        'user_agent', 'ip', 'has_computer',
     )
 
     def __init__(self, railway_conn):
@@ -95,7 +98,10 @@ class RegistrosMLAdapter:
          utm_source, utm_medium, utm_campaign,
          utm_content, utm_term, utm_url,
          capi_sent_at, error_message,
-         survey_responses_raw) = row
+         survey_responses_raw,
+         first_name, last_name, phone,
+         fbp, fbc,
+         user_agent, ip, has_computer) = row
         return LeadRecord(
             event_id=event_id,
             email=email,
@@ -113,6 +119,14 @@ class RegistrosMLAdapter:
             capi_enviado_em=capi_sent_at,
             erro=error_message,
             survey_responses=_parse_survey(survey_responses_raw),
+            first_name=first_name,
+            last_name=last_name,
+            phone=phone,
+            fbp=fbp,
+            fbc=fbc,
+            user_agent=user_agent,
+            ip=ip,
+            has_computer=has_computer,
         )
 
 

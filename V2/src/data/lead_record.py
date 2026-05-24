@@ -60,3 +60,24 @@ class LeadRecord:
     # específicos da pesquisa devem normalizar antes de comparar.
     # `None` = adaptador não traz pesquisa (ou lead sem pesquisa registrada).
     survey_responses: Optional[Dict[str, str]] = None
+
+    # Identidade pessoal — vem do payload Pub/Sub. Útil pra validação cruzada
+    # com Guru/Meta no relatório semanal e pra futuras features de identidade.
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+
+    # Meta tracking — `fbp` (browser ID) e `fbc` (click ID). Essenciais pro
+    # CAPI deduplicar com o pixel e atribuir corretamente. Reaproveitar pra
+    # retreino: a presença/ausência se correlaciona com qualidade do lead.
+    fbp: Optional[str] = None
+    fbc: Optional[str] = None
+
+    # Sessão do navegador — base pra features futuras de qualidade de tráfego
+    # (bot detection, geo, etc.). Persistido cru, sem parsing.
+    user_agent: Optional[str] = None
+    ip: Optional[str] = None
+
+    # Feature crítica do modelo. Vem top-level no payload do dono (não dentro
+    # de `survey`) porque é capturada antes da pesquisa no funil dele.
+    has_computer: Optional[bool] = None
