@@ -7,9 +7,9 @@ Nomes em português pra não vazar vocabulário físico das tabelas (camelCase d
 schema antigo, snake_case do ledger novo, etc.) pra dentro da lógica de
 negócio.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import Dict, Optional
 
 
 # Valores válidos de `status_envio`. Adaptadores traduzem o vocabulário da
@@ -53,3 +53,10 @@ class LeadRecord:
     # Envio CAPI ao Meta
     capi_enviado_em: Optional[datetime] = None
     erro: Optional[str] = None
+
+    # Respostas da pesquisa que o lead preencheu — chaves são as próprias
+    # perguntas (em PT-Long, canônicas do modelo) ou as chaves slug do payload
+    # Pub/Sub, dependendo do adaptador. Consumidores que dependem de campos
+    # específicos da pesquisa devem normalizar antes de comparar.
+    # `None` = adaptador não traz pesquisa (ou lead sem pesquisa registrada).
+    survey_responses: Optional[Dict[str, str]] = None

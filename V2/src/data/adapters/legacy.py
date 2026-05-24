@@ -15,9 +15,10 @@ Decisão histórica registrada em
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Dict, Optional
 
 from ..lead_record import LeadRecord
 from ..lead_repository import _validate_range, _validate_window
@@ -43,7 +44,7 @@ class LegacyAdapter:
 
     _COLUMNS = (
         'id', 'email', '"createdAt"', '"leadScore"', 'decil', 'source',
-        '"capiSentAt"', '"capiStatus"',
+        '"capiSentAt"', '"capiStatus"', 'pesquisa',
     )
 
     def __init__(self, railway_conn):
@@ -88,7 +89,7 @@ class LegacyAdapter:
     @staticmethod
     def _row_to_record(row: Any) -> LeadRecord:
         (lead_id, email, created_at, lead_score, decil, source,
-         capi_sent_at, capi_status) = row
+         capi_sent_at, capi_status, pesquisa_raw) = row
 
         if capi_status in _CAPI_STATUS_MAP:
             status_envio = _CAPI_STATUS_MAP[capi_status]
@@ -119,4 +120,29 @@ class LegacyAdapter:
             variant=None,  # Lead não tinha coluna de variante
             utm_source=source,
             capi_enviado_em=capi_sent_at,
+            survey_responses=_parse_pesquisa(pesquisa_raw),
         )
+
+
+# ─ helpers ────────────────────────────────────────────────────────────────
+
+def _parse_pesquisa(raw: Any) -> Optional[Dict[str, str]]:
+    """Normaliza o jsonb `Lead.pesquisa` em dict[str, str] ou None.
+
+    pg8000 às vezes devolve jsonb como string (precisa `json.loads`), às vezes
+    como dict já parseado. Cobre ambos. Valores não-string viram string pra
+    contrato consistente.
+    """
+    if raw is None or raw == '':
+        return None
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            logger.debug("[legacy_adapter] pesquisa não-JSON ignorada: %r", raw[:60])
+            return None
+    else:
+        parsed = raw
+    if not isinstance(parsed, dict):
+        return None
+    return {str(k): str(v) for k, v in parsed.items() if v is not None}
