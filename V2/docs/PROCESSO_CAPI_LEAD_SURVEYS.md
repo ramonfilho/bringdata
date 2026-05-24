@@ -1,12 +1,13 @@
 # Disparar o evento scoreado por ML também para quem responde a pesquisa pela esteira nova
 
-**Criado:** 2026-05-17 · **Atualizado:** 2026-05-24 · **Papel:** especificação e diário desta frente — fazer o evento CAPI scoreado por ML (`LeadQualified`/`LeadQualifiedHighQuality`, com valor por decil) ser disparado também a partir das mensagens publicadas pelo sistema novo do dono no Pub/Sub do GCP.
+**Criado:** 2026-05-17 · **Atualizado:** 2026-05-24 (pós P17 deployed) · **Papel:** especificação e diário desta frente — fazer o evento CAPI scoreado por ML (`LeadQualified`/`LeadQualifiedHighQuality`, com valor por decil) ser disparado também a partir das mensagens publicadas pelo sistema novo do dono no Pub/Sub do GCP.
 
 > Linguagem natural primeiro (regra do `CLAUDE.md`). Nomes de tabela/código aparecem no corpo porque o doc é técnico-operacional; o rodapé lista os artefatos. Datas absolutas.
 >
 > **Histórico de consolidação via /docs:**
 > - 2026-05-19 — consolidação após I0–I4 da arquitetura SQL/Railway concluídos e pausados.
-> - 2026-05-24 — consolidação após virada de arquitetura: a abordagem SQL foi descartada e substituída pelo consumer Pub/Sub. Frente em produção.
+> - 2026-05-24 (manhã) — consolidação após virada de arquitetura: a abordagem SQL foi descartada e substituída pelo consumer Pub/Sub. Frente em produção.
+> - 2026-05-24 (tarde) — registro de P17 deployed + 3 bônus emergentes do deploy (DeadlineExceeded fix, env propagada no build, Gate C script adaptado pra arquitetura nova).
 
 ---
 
@@ -27,7 +28,7 @@
   - Pub/Sub: projeto `smart-ads-451319`, tópico `lead-capture-ingest`, assinatura `lead-capture-ingest-sub` (retenção 31 dias, `--expiration-period=never`).
   - Service account publisher: `lead-capture-publisher@smart-ads-451319.iam.gserviceaccount.com` (entregue ao dono via chave JSON local; só pode publicar nesse tópico).
   - IAM consumer: Cloud Run SA (`smart-ads-451319@appspot.gserviceaccount.com`) tem `roles/pubsub.subscriber` na assinatura.
-  - Cloud Run: revisão `smart-ads-api-00341-ml6` a 100% de tráfego, com `PUBSUB_CAPI_ENABLED=true`.
+  - Cloud Run: revisão `smart-ads-api-00503-mip` a 100% de tráfego (promovida em 2026-05-24 após P17), com `PUBSUB_CAPI_ENABLED=true`. Tag `prod` apontando pra essa revisão. Revisões anteriores (`00341-ml6`, `00494-xoj`, `00501-xom`) ficaram a 0% como histórico recuperável.
   - Cloud Scheduler: job `pubsub-process-pending`, `*/5 * * * *` America/Sao_Paulo, ENABLED.
 
 ### Gates passados (deploy de 2026-05-23)
@@ -162,7 +163,10 @@ Cada item foi um ciclo fechado: implementa → testa → commita → (deploy can
 | **P14** | `PUBSUB_CAPI_ENABLED=true` em prod (revisão `00341-ml6` a 100%) | ✅ 2026-05-23 19:45 BRT |
 | **P15** | Smoke real do primeiro ciclo: 25 mensagens processadas, 0 enviadas ao Meta | ✅ 2026-05-23 |
 | **P16** | Purga do backlog do load test antigo (744 msgs) via `seek --time=now` | ✅ 2026-05-24 |
-| **P17** | Colunas UTM no `registros_ml` (DDL + consumer) | ⏳ próximo |
+| **P17** | Colunas UTM no `registros_ml` (DDL + consumer) | ✅ 2026-05-24 commit `fe201bf` (DDL+consumer+testes 16/16) — deploy `00503-mip` |
+| **P17.1** | Fix DeadlineExceeded no pull do Pub/Sub em fila vazia (consumer não pode responder 500 quando queue está vazia) | ✅ 2026-05-24 commit `0a8091e` — descoberto no smoke do canary P17 |
+| **P17.2** | `PUBSUB_CAPI_ENABLED=true` propagado pelo `build_env_vars` (não precisa mais setar manual a cada redeploy) | ✅ 2026-05-24 commit `4768843` |
+| **P17.3** | Gate C.1/C.2 script (`scripts/test_revision_equivalence.py`) adaptado pra ler de `lead_surveys`+`Client`+`UTMTracking`+`registros_ml` em vez de `Lead`+`leads_capi` mortas | ✅ 2026-05-24 commit `56f61c4` — validado manual com 30 leads no predict-mode e 3 leads no capi-dry-run mode, 0 divergências |
 | **P18** | Refatorar monitoramento (§7) | ⏳ próximo |
 
 ## 5. Desenho técnico (Pub/Sub, implementado em P1–P16)
