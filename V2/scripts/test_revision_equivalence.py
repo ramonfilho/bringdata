@@ -139,25 +139,51 @@ def _connect_railway() -> pg8000.native.Connection:
 
 
 def fetch_leads_predict_mode(n: int) -> list[dict[str, Any]]:
-    """Pega N leads para o endpoint /predict/batch (sem score)."""
+    """Pega N leads para o endpoint /predict/batch (sem score).
+
+    Lê de `lead_surveys` (tabela viva do sistema novo) + LEFT JOIN UTMTracking
+    pra UTM. Substitui a leitura da tabela `Lead` (morta desde 17/05/2026).
+    Os 10 campos de pesquisa estão como colunas diretas no lead_surveys (não
+    como JSONB), então mapeamos cada coluna pra a chave Sheets correspondente
+    via PESQUISA_KEYS. `computador` não existe no lead_surveys — vem do
+    `Client.hasComputer` por LEFT JOIN.
+    """
     conn = _connect_railway()
-    cols = ', '.join(f'pesquisa->>\'{k}\' AS "{q}"' for q, k in PESQUISA_KEYS.items())
+    # mapeia coluna lead_surveys → chave Sheets esperada pelo /predict/batch
+    survey_cols = ', '.join(
+        f's."{ls_col}" AS "{sheets_key}"'
+        for sheets_key, ls_col in PESQUISA_KEYS.items()
+        if ls_col != 'computador'  # computador não vive em lead_surveys
+    )
     sql = f"""
-        SELECT email, data,
-               "nomeCompleto" AS "Nome Completo", telefone AS "Telefone",
-               source AS "Source", medium AS "Medium", term AS "Term",
-               {cols}
-        FROM "Lead"
-        WHERE pesquisa IS NOT NULL
-          AND "leadScore" IS NOT NULL
-          AND "createdAt" >= NOW() - INTERVAL '7 days'
-        ORDER BY "createdAt" DESC
+        SELECT s."clientEmail" AS email,
+               s."submittedAt"  AS data,
+               c."firstName" || ' ' || COALESCE(c."lastName", '') AS "Nome Completo",
+               c.phone          AS "Telefone",
+               u.source         AS "Source",
+               u.medium         AS "Medium",
+               u.term           AS "Term",
+               c."hasComputer"  AS "Tem computador/notebook?",
+               {survey_cols}
+        FROM lead_surveys s
+        LEFT JOIN LATERAL (
+            SELECT source, medium, term
+            FROM "UTMTracking"
+            WHERE LOWER("clientEmail") = LOWER(s."clientEmail")
+              AND "trackedAt" <= s."submittedAt"
+            ORDER BY "trackedAt" DESC
+            LIMIT 1
+        ) u ON true
+        LEFT JOIN "Client" c ON LOWER(c.email) = LOWER(s."clientEmail")
+        WHERE s."submittedAt" >= NOW() - INTERVAL '7 days'
+        ORDER BY s."submittedAt" DESC
         LIMIT :n
     """
     rows = conn.run(sql, n=n)
     conn.close()
     keys = ['email', 'Data', 'Nome Completo', 'Telefone',
-            'Source', 'Medium', 'Term'] + list(PESQUISA_KEYS.keys())
+            'Source', 'Medium', 'Term', 'Tem computador/notebook?']
+    keys += [k for k in PESQUISA_KEYS.keys() if k != 'Tem computador/notebook?']
     leads = []
     for r in rows:
         d = dict(zip(keys, r))
@@ -181,36 +207,43 @@ def fetch_leads_capi_mode(n: int) -> list[dict[str, Any]]:
     """
     Pega N leads para /capi/process_daily_batch?dry_run=true.
 
-    JOIN Lead × leads_capi pra montar payload com utm_*, FBP/FBC, lead_score
-    já populado. Para garantir cobertura dos DOIS paths do A/B test (Champion
-    via shim + Challenger), metade dos leads tem utm_campaign reescrito pra
-    forçar matching no challenger_abr28. A outra metade fica com utm_campaign
-    do banco — quase sempre vai pelo Champion shim.
+    Lê do nosso ledger `registros_ml` (tabela viva, populada pelo consumer
+    Pub/Sub) + LEFT JOIN UTMTracking pra preencher utm_* nas linhas
+    pré-P17 que estão com utm NULL. Substitui o JOIN Lead × leads_capi
+    (ambas mortas desde 17/05/2026).
 
-    Sem essa injeção sintética, o teste depende da data real ter leads com
-    `utm_campaign='PIXEL NOVO API'`, o que é raro e dá falsa confiança.
+    Para garantir cobertura dos DOIS paths do A/B test (Champion via shim +
+    Challenger), metade dos leads tem utm_campaign reescrito pra forçar
+    matching no challenger_abr28. A outra metade fica com utm_campaign do
+    banco — quase sempre vai pelo Champion shim.
     """
     conn = _connect_railway()
     sql = """
         SELECT
-            l.email,
-            l."leadScore" AS lead_score,
-            l.data,
-            l.source AS "Source",
-            l.medium AS "Medium",
-            l.term   AS "Term",
-            COALESCE(lc.utm_source,   l.source) AS utm_source,
-            COALESCE(lc.utm_medium,   l.medium) AS utm_medium,
-            COALESCE(lc.utm_term,     l.term)   AS utm_term,
-            lc.utm_campaign,
-            lc.utm_content,
-            lc.event_source_url
-        FROM "Lead" l
-        LEFT JOIN leads_capi lc ON LOWER(lc.email) = LOWER(l.email)
-        WHERE l.pesquisa IS NOT NULL
-          AND l."leadScore" IS NOT NULL
-          AND l."createdAt" >= NOW() - INTERVAL '7 days'
-        ORDER BY l."createdAt" DESC
+            r.email,
+            r.lead_score,
+            r.created_at AS data,
+            COALESCE(r.utm_source,   u.source) AS "Source",
+            COALESCE(r.utm_medium,   u.medium) AS "Medium",
+            COALESCE(r.utm_term,     u.term)   AS "Term",
+            COALESCE(r.utm_source,   u.source) AS utm_source,
+            COALESCE(r.utm_medium,   u.medium) AS utm_medium,
+            COALESCE(r.utm_term,     u.term)   AS utm_term,
+            COALESCE(r.utm_campaign, u.campaign) AS utm_campaign,
+            COALESCE(r.utm_content,  u.content)  AS utm_content,
+            COALESCE(r.utm_url,      u.url)      AS event_source_url
+        FROM registros_ml r
+        LEFT JOIN LATERAL (
+            SELECT source, medium, term, campaign, content, url
+            FROM "UTMTracking"
+            WHERE LOWER("clientEmail") = LOWER(r.email)
+              AND "trackedAt" <= r.created_at
+            ORDER BY "trackedAt" DESC
+            LIMIT 1
+        ) u ON true
+        WHERE r.lead_score IS NOT NULL
+          AND r.created_at >= NOW() - INTERVAL '7 days'
+        ORDER BY r.created_at DESC
         LIMIT :n
     """
     rows = conn.run(sql, n=n)
