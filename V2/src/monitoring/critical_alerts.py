@@ -16,12 +16,17 @@ Princípios:
   - Dry-run controlado por CRITICAL_ALERTS_DRY_RUN=true (default seguro).
 
 Regras:
-  1. variant_no_capi      — leads scored ≥ N mas 0 CAPI enviado em 60min
-  4. no_leads_arriving    — 0 leads inseridos em Lead em 60min
-  5. capi_success_low     — capi_success_rate < 95% em 60min (N≥10 enviados)
-  6. fbp_fbc_low          — fbp<95% ou fbc<80% em 60min (N≥50)
-  9. polling_500          — /railway/process-pending falhou em ≥2 pollings seguidos
-  +  score_drift          — score médio 1σ off (A) OU KS p<0.01 / ΔD10≥5pp (B)
+  1. variant_no_capi              — leads scored ≥ N mas 0 CAPI enviado em 60min
+  4. no_leads_arriving            — 0 leads inseridos em Lead em 60min
+  5. capi_success_low             — capi_success_rate < 95% em 60min (N≥10 enviados)
+  9. polling_500                  — /railway/process-pending falhou em ≥2 pollings seguidos
+  +  score_drift                  — score médio 1σ off (A) OU KS p<0.01 / ΔD10≥5pp (B)
+  +  pubsub_consumer_stalled      — PUBSUB_CAPI_ENABLED=true e zero linhas novas em
+                                    registros_ml em 60min (consumer parado)
+  +  pubsub_error_rate_high       — base_status='error' / total > 10% em 24h (N≥20)
+  +  pubsub_skipped_missing_data  — skipped_missing_data / Meta-elegíveis > 30% em
+                                    24h (N≥20) — substitui o fbp_fbc_low antigo
+                                    (que lia Lead × leads_capi, ambas mortas)
 """
 from __future__ import annotations
 
@@ -367,33 +372,125 @@ def rule_variant_no_capi(conn) -> RuleResult:
                       details={'scored': scored, 'sent': sent})
 
 
-def rule_fbp_fbc_low(conn) -> RuleResult:
-    """Regra 6: fbp<95% OU fbc<80% em 60min (N≥50). JOIN Lead × leads_capi por email."""
-    cutoff = _window_start_utc()
+def rule_pubsub_consumer_stalled(conn) -> RuleResult:
+    """R1: Consumer Pub/Sub parado.
+
+    Dispara se `PUBSUB_CAPI_ENABLED=true` e zero linhas novas em `registros_ml`
+    nos últimos 60min. Pulada (skipped) se a flag está desligada (consumer não
+    deveria processar) ou se o ledger está completamente vazio — provavelmente
+    primeira hora pós-deploy, vai populando.
+
+    `registros_ml.created_at` é `TIMESTAMP` sem tz, gravado em UTC pelo default
+    `now()` do PostgreSQL → cutoff UTC naive (mesma convenção do
+    `rule_no_leads_arriving` lendo `lead_surveys.submittedAt`).
+    """
+    if os.environ.get('PUBSUB_CAPI_ENABLED', 'false').lower() != 'true':
+        return RuleResult('pubsub_consumer_stalled', fired=False,
+                          skipped_reason='PUBSUB_CAPI_ENABLED desligado')
+    cutoff = _window_start_utc_naive()
     rows = conn.run(
         'SELECT '
-        '  COUNT(DISTINCT l.email) AS n, '
-        '  COUNT(DISTINCT CASE WHEN lc.fbp IS NOT NULL AND lc.fbp <> \'\' THEN l.email END) AS with_fbp, '
-        '  COUNT(DISTINCT CASE WHEN lc.fbc IS NOT NULL AND lc.fbc <> \'\' THEN l.email END) AS with_fbc '
-        'FROM "Lead" l LEFT JOIN leads_capi lc ON LOWER(l.email) = LOWER(lc.email) '
-        'WHERE l."createdAt" >= :cutoff',
+        '  COUNT(*) FILTER (WHERE created_at >= :cutoff) AS recent, '
+        '  COUNT(*) AS total, '
+        '  MAX(created_at) AS last_at '
+        'FROM registros_ml',
         cutoff=cutoff,
     )
-    n, with_fbp, with_fbc = (rows[0][0] or 0, rows[0][1] or 0, rows[0][2] or 0)
-    if n < 50:
-        return RuleResult('fbp_fbc_low', fired=False,
-                          skipped_reason=f'amostra insuficiente (n={n})')
-    fbp_pct = (with_fbp / n) * 100
-    fbc_pct = (with_fbc / n) * 100
-    if fbp_pct >= 95 and fbc_pct >= 80:
-        return RuleResult('fbp_fbc_low', fired=False)
-    severity = 'HIGH'
+    recent, total, last_at = (rows[0][0] or 0, rows[0][1] or 0, rows[0][2])
+    if total == 0:
+        return RuleResult('pubsub_consumer_stalled', fired=False,
+                          skipped_reason='ledger vazio (consumer nunca rodou)')
+    if recent > 0:
+        return RuleResult('pubsub_consumer_stalled', fired=False)
+    last_iso = last_at.isoformat() if last_at else 'desconhecido'
     msg = (
-        f"FBP={fbp_pct:.1f}%  FBC={fbc_pct:.1f}%  em {WINDOW_MIN}min (limite HIGH 95/80). "
-        f"N={n}."
+        f"Consumer Pub/Sub parado: zero linhas novas em `registros_ml` em "
+        f"{WINDOW_MIN}min. Última gravação: {last_iso}. Verificar "
+        f"/pubsub/process-pending, IAM da subscription e Cloud Scheduler."
     )
-    return RuleResult('fbp_fbc_low', fired=True, severity=severity, message=msg,
-                      details={'n': n, 'fbp_pct': round(fbp_pct, 1), 'fbc_pct': round(fbc_pct, 1)})
+    return RuleResult(
+        'pubsub_consumer_stalled', fired=True, severity='HIGH', message=msg,
+        details={'recent_60min': recent, 'total': total,
+                 'last_at': last_iso if last_at else None},
+    )
+
+
+def rule_pubsub_error_rate_high(conn) -> RuleResult:
+    """R2: Taxa de erro do consumer Pub/Sub.
+
+    Dispara se `count(base_status='error') / count(*) > 10%` nas últimas 24h.
+    N≥20 pra evitar falso positivo com pouca amostra. Janela é 24h
+    (não 60min) — erros podem ser bursty; janela larga capta tendência.
+
+    Investigação: `SELECT error_message, COUNT(*) FROM registros_ml WHERE
+    base_status='error' AND created_at >= NOW() - INTERVAL '24 hours' GROUP BY
+    1 ORDER BY 2 DESC LIMIT 10;`
+    """
+    cutoff = datetime.utcnow() - timedelta(hours=24)
+    rows = conn.run(
+        'SELECT '
+        '  COUNT(*) AS n, '
+        "  COUNT(*) FILTER (WHERE base_status = 'error') AS err "
+        'FROM registros_ml WHERE created_at >= :cutoff',
+        cutoff=cutoff,
+    )
+    n, err = (rows[0][0] or 0, rows[0][1] or 0)
+    if n < 20:
+        return RuleResult('pubsub_error_rate_high', fired=False,
+                          skipped_reason=f'amostra insuficiente (n={n})')
+    rate = (err / n) * 100
+    if rate < 10:
+        return RuleResult('pubsub_error_rate_high', fired=False)
+    msg = (
+        f"Taxa de erro do consumer Pub/Sub = {rate:.1f}% em 24h "
+        f"(limite 10%). N={n}, errors={int(err)}. "
+        f"Investigar `registros_ml.error_message` para padrões."
+    )
+    return RuleResult(
+        'pubsub_error_rate_high', fired=True, severity='HIGH', message=msg,
+        details={'n': n, 'err': int(err), 'rate_pct': round(rate, 1)},
+    )
+
+
+def rule_pubsub_skipped_missing_data_high(conn) -> RuleResult:
+    """R3: Skipped por missing data alto entre Meta-elegíveis.
+
+    Dispara se `count(skipped_missing_data) / count(Meta-elegíveis) > 30%` em
+    24h. "Meta-elegível" = qualquer status EXCETO `skipped_allowlist` (que é
+    a categoria de leads que nem deveriam ir pro Meta por allowlist de utm).
+
+    Substitui `rule_fbp_fbc_low` da arquitetura SQL/Railway antiga — que
+    cruzava `Lead × leads_capi` (ambas mortas desde 17/05/2026) e media o
+    mesmo sinal: leads Meta-elegíveis perdendo `fbp`/`fbc`/`computador`.
+    Agora a classificação acontece dentro do consumer Pub/Sub
+    ([api/pubsub_branch.py:classify]) e marca o lead direto no ledger.
+    """
+    cutoff = datetime.utcnow() - timedelta(hours=24)
+    rows = conn.run(
+        'SELECT '
+        "  COUNT(*) FILTER (WHERE base_status <> 'skipped_allowlist') AS eligible, "
+        "  COUNT(*) FILTER (WHERE base_status = 'skipped_missing_data') AS missing "
+        'FROM registros_ml WHERE created_at >= :cutoff',
+        cutoff=cutoff,
+    )
+    eligible, missing = (rows[0][0] or 0, rows[0][1] or 0)
+    if eligible < 20:
+        return RuleResult('pubsub_skipped_missing_data_high', fired=False,
+                          skipped_reason=f'amostra insuficiente (eligible={eligible})')
+    pct = (missing / eligible) * 100
+    if pct < 30:
+        return RuleResult('pubsub_skipped_missing_data_high', fired=False)
+    msg = (
+        f"{pct:.1f}% dos leads Meta-elegíveis foram pulados por missing data "
+        f"em 24h (limite 30%). N_elegíveis={eligible}, missing={int(missing)}. "
+        f"Provável regressão na captura de `computador`, `fbp` ou `fbc` no "
+        f"sistema novo — investigar payload Pub/Sub recente."
+    )
+    return RuleResult(
+        'pubsub_skipped_missing_data_high', fired=True, severity='HIGH', message=msg,
+        details={'eligible': eligible, 'missing': int(missing),
+                 'pct': round(pct, 1)},
+    )
 
 
 def rule_utm_source_missing(conn) -> RuleResult:
@@ -627,7 +724,7 @@ def run_critical_checks(
     dry_run: Optional[bool] = None,
 ) -> dict:
     """
-    Avalia as 6 regras + dispara DM se necessário. Retorna sumário.
+    Avalia as 9 regras + dispara DM se necessário. Retorna sumário.
 
     Args:
         railway_conn: conexão pg8000.native já aberta para a tabela Lead.
@@ -644,10 +741,12 @@ def run_critical_checks(
         lambda: rule_no_leads_arriving(railway_conn),
         lambda: rule_capi_success_low(railway_conn),
         lambda: rule_variant_no_capi(railway_conn),
-        lambda: rule_fbp_fbc_low(railway_conn),
         lambda: rule_utm_source_missing(railway_conn),
         lambda: rule_polling_500(store),
         lambda: rule_score_drift(railway_conn, expected_decil_dist),
+        lambda: rule_pubsub_consumer_stalled(railway_conn),
+        lambda: rule_pubsub_error_rate_high(railway_conn),
+        lambda: rule_pubsub_skipped_missing_data_high(railway_conn),
     ]
 
     summary = {'evaluated': 0, 'fired': 0, 'sent': 0, 'cooldown': 0,
