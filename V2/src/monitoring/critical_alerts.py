@@ -345,33 +345,52 @@ def rule_capi_success_low(repo) -> RuleResult:
                       details={'sent': sent, 'ok': ok, 'err': err, 'rate_pct': round(rate, 1)})
 
 
-def rule_variant_no_capi(conn) -> RuleResult:
-    """Regra 1 (versão MVP global): ≥10 leads scored em 60min mas 0 CAPI enviado.
+def rule_variant_no_capi(repo) -> RuleResult:
+    """Regra 1: variante do A/B com pipeline CAPI quebrado.
 
-    Versão por-variant (Champion vs Challenger) pendente — não há coluna `variant`
-    em Lead pra atribuição direta. MVP usa total agregado, que pega o caso
-    "pipeline CAPI completamente parado".
+    Para cada variante {champion, challenger}: se ≥10 leads passaram pelo
+    pipeline (status_envio in {success, error}) mas 0 chegaram a `success`,
+    dispara — sinal de que **todas** as chamadas CAPI dessa variante falharam.
+
+    Migrada para `LeadRepository` em 2026-05-24 (Etapa 3 do refator do
+    monitoramento). A versão antiga era agregada porque a tabela `Lead` não
+    tinha coluna `variant`; o ledger novo (`registros_ml`) tem, então agora
+    detecta quebra isolada de uma das variantes.
     """
-    cutoff = _window_start_utc()
-    rows = conn.run(
-        'SELECT '
-        '  COUNT(*) FILTER (WHERE "leadScore" IS NOT NULL) AS scored, '
-        '  COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL AND "capiStatus" NOT IN (\'blocked\',\'skipped\')) AS sent '
-        'FROM "Lead" WHERE "createdAt" >= :cutoff',
-        cutoff=cutoff,
-    )
-    scored, sent = (rows[0][0] or 0, rows[0][1] or 0)
-    if scored < 10:
-        return RuleResult('variant_no_capi', fired=False,
-                          skipped_reason=f'amostra insuficiente (scored={scored})')
-    if sent > 0:
+    leads = repo.recent_leads(window_minutes=WINDOW_MIN)
+    # "Passou pelo pipeline" = não foi pulado por allowlist nem missing data.
+    # status_envio in (success, error) significa que houve chamada CAPI.
+    scoreados = [l for l in leads if l.status_envio in ('success', 'error')]
+
+    fired_variants: list[tuple[str, int, int]] = []  # (variant, scored, err)
+    for v in ('champion', 'challenger'):
+        v_scored = [l for l in scoreados if l.variant == v]
+        v_ok = sum(1 for l in v_scored if l.status_envio == 'success')
+        if len(v_scored) >= 10 and v_ok == 0:
+            v_err = sum(1 for l in v_scored if l.status_envio == 'error')
+            fired_variants.append((v, len(v_scored), v_err))
+
+    if not fired_variants:
+        if len(scoreados) < 10:
+            return RuleResult('variant_no_capi', fired=False,
+                              skipped_reason=f'amostra insuficiente (scored={len(scoreados)})')
         return RuleResult('variant_no_capi', fired=False)
+
+    partes = [f"{v}: {n} scoreados, {e} erros, 0 sucessos"
+              for v, n, e in fired_variants]
     msg = (
-        f"{scored} leads scoreados em {WINDOW_MIN}min, mas 0 eventos CAPI enviados. "
-        f"Possível quebra no envio."
+        f"{len(fired_variants)} variante(s) do A/B com 100% de falha CAPI em "
+        f"{WINDOW_MIN}min — " + "; ".join(partes) + ". Possível quebra no envio."
     )
-    return RuleResult('variant_no_capi', fired=True, message=msg,
-                      details={'scored': scored, 'sent': sent})
+    return RuleResult(
+        'variant_no_capi', fired=True, message=msg,
+        details={
+            'variantes_afetadas': [v for v, _, _ in fired_variants],
+            'detalhes_por_variante': {
+                v: {'scoreados': n, 'erros': e} for v, n, e in fired_variants
+            },
+        },
+    )
 
 
 def rule_pubsub_consumer_stalled(conn) -> RuleResult:
@@ -495,22 +514,25 @@ def rule_pubsub_skipped_missing_data_high(conn) -> RuleResult:
     )
 
 
-def rule_utm_source_missing(conn) -> RuleResult:
-    """Regra +: % de leads chegando SEM `source` no Lead em 60min acima do
-    limiar (N≥50). Pega regressão de captura/tracking — leads de campanha
-    perdendo a origem (não vão pro Meta e o modelo scoreia cego de origem).
-    O pico de 21-22/04/2026 (até 20%) passou sem nenhum alarme; orgânico
-    legítimo é ~1,5% e a base normal <1%, então o limiar HIGH de 5% separa
-    regressão de orgânico normal sem spammar entre lançamentos. Contexto:
-    registro_erros_ml.md Erro 18 (tracking perdendo source) e § V.6."""
-    cutoff = _window_start_utc()
-    rows = conn.run(
-        'SELECT COUNT(*) AS n, '
-        "COUNT(*) FILTER (WHERE source IS NULL OR TRIM(source) = '') AS sem_source "
-        'FROM "Lead" WHERE "createdAt" >= :cutoff AND pesquisa IS NOT NULL',
-        cutoff=cutoff,
-    )
-    n, sem = (rows[0][0] or 0, rows[0][1] or 0)
+def rule_utm_source_missing(repo) -> RuleResult:
+    """Regra +: % de leads chegando SEM `utm_source` em 60min acima do limiar.
+
+    Pega regressão de captura/tracking — leads de campanha perdendo a origem
+    (não vão pro Meta porque a allowlist barra, e o modelo scoreia cego de
+    origem). O pico de 21-22/04/2026 (até 20%) passou sem nenhum alarme;
+    orgânico legítimo é ~1,5% e a base normal <1%, então o limiar HIGH de 5%
+    separa regressão de orgânico normal sem spammar entre lançamentos.
+
+    Contexto histórico: `registro_erros_ml.md` Erro 18 (tracking perdendo
+    source) e § V.6.
+
+    Migrada para `LeadRepository` em 2026-05-24 (Etapa 3 do refator do
+    monitoramento). Fonte hoje: ledger novo `registros_ml.utm_source`.
+    """
+    leads = repo.recent_leads(window_minutes=WINDOW_MIN)
+    n = len(leads)
+    sem = sum(1 for l in leads
+              if l.utm_source is None or (l.utm_source or '').strip() == '')
     if n < 50:
         return RuleResult('utm_source_missing', fired=False,
                           skipped_reason=f'amostra insuficiente (n={n})')
@@ -518,14 +540,14 @@ def rule_utm_source_missing(conn) -> RuleResult:
     if pct < 5.0:
         return RuleResult('utm_source_missing', fired=False)
     msg = (
-        f"{pct:.1f}% dos leads chegaram SEM `source` em {WINDOW_MIN}min "
-        f"(limite HIGH 5%, N={n}, {int(sem)} sem source). Possível regressão "
-        f"de captura/tracking: leads de campanha perdendo a origem — não vão "
+        f"{pct:.1f}% dos leads chegaram SEM `utm_source` em {WINDOW_MIN}min "
+        f"(limite HIGH 5%, N={n}, {sem} sem source). Possível regressão de "
+        f"captura/tracking: leads de campanha perdendo a origem — não vão "
         f"pro Meta (allowlist barra) e o modelo scoreia cego de origem. "
         f"Investigar front-end / webhook de captura."
     )
     return RuleResult('utm_source_missing', fired=True, severity='HIGH', message=msg,
-                      details={'n': n, 'sem_source': int(sem), 'pct': round(pct, 1)})
+                      details={'n': n, 'sem_source': sem, 'pct': round(pct, 1)})
 
 
 def rule_polling_500(store: GcsStateStore) -> RuleResult:
@@ -552,20 +574,26 @@ def rule_polling_500(store: GcsStateStore) -> RuleResult:
                       details={'recent_history': ','.join(history[-10:])})
 
 
-def rule_score_drift(conn, expected_decil_dist: Optional[dict]) -> RuleResult:
-    """
-    Regra +: drift de score em 60min vs baseline rolling 30d (expected_decil_dist).
-    Dispara se (A) score médio > 1σ off OU (B) KS p<0.01 ou ΔD10 ≥ 5pp.
+def rule_score_drift(repo, baseline_repo, expected_decil_dist: Optional[dict]) -> RuleResult:
+    """Regra +: drift de score em 60min vs baseline rolling 30d.
+
+    Dispara se (A) score médio da janela > 1σ off do baseline OU (B) ΔD10 ≥ 5pp
+    vs `expected_decil_dist`.
+
+    Migrada para `LeadRepository` em 2026-05-24 (Etapa 3 do refator do
+    monitoramento). Fonte dividida durante a transição:
+      - janela curta (60min) → `repo` (ledger novo `registros_ml`, populado
+        pelo consumer Pub/Sub desde 2026-05-23).
+      - baseline 30d → `baseline_repo` (tabela `Lead` antiga; parou em
+        17/05/2026 mas histórico ainda serve por enquanto).
+    Quando o ledger novo acumular 30 dias (≈22/06/2026), `baseline_repo`
+    pode passar a ser também o `registros_ml` — decisão registrada em
+    `projeto_baseline_drift_split_railway_ledger.md`.
     """
     import statistics
-    cutoff = _window_start_utc()
-    rows = conn.run(
-        'SELECT "leadScore"::float, decil::int FROM "Lead" '
-        'WHERE "createdAt" >= :cutoff AND "leadScore" IS NOT NULL',
-        cutoff=cutoff,
-    )
-    scores = [r[0] for r in rows if r[0] is not None]
-    decis  = [r[1] for r in rows if r[1] is not None]
+    leads_window = repo.recent_leads(window_minutes=WINDOW_MIN)
+    scores = [l.score for l in leads_window if l.score is not None]
+    decis  = [l.decil for l in leads_window if l.decil is not None]
     n_score = len(scores)
     n_decil = len(decis)
 
@@ -573,19 +601,21 @@ def rule_score_drift(conn, expected_decil_dist: Optional[dict]) -> RuleResult:
         return RuleResult('score_drift', fired=False,
                           skipped_reason=f'amostra de scores insuficiente (n={n_score})')
 
-    # Baseline rolling 30d: queremos média e σ de leadScore.
-    base_rows = conn.run(
-        'SELECT AVG("leadScore"::float), STDDEV_POP("leadScore"::float), COUNT(*) '
-        'FROM "Lead" '
-        'WHERE "createdAt" >= NOW() - INTERVAL \'31 days\' '
-        '  AND "createdAt" <  NOW() - INTERVAL \'1 day\' '
-        '  AND "leadScore" IS NOT NULL'
-    )
-    base_mean, base_sd, base_n = base_rows[0]
-    if not base_mean or not base_sd or (base_n or 0) < 1000:
+    # Baseline rolling 30d: ignora as últimas 24h pra evitar contaminar a
+    # referência com o presente em movimento.
+    now = datetime.utcnow()
+    base_start = now - timedelta(days=31)
+    base_end   = now - timedelta(days=1)
+    base_leads = baseline_repo.leads_in_range(base_start, base_end)
+    base_scores = [l.score for l in base_leads if l.score is not None]
+    if len(base_scores) < 1000:
         return RuleResult('score_drift', fired=False,
                           skipped_reason='baseline rolling 30d insuficiente')
-    base_mean = float(base_mean); base_sd = float(base_sd)
+    base_mean = statistics.fmean(base_scores)
+    base_sd = statistics.pstdev(base_scores)
+    if base_sd == 0:
+        return RuleResult('score_drift', fired=False,
+                          skipped_reason='baseline com desvio padrão zero')
 
     window_mean = statistics.fmean(scores)
     z = (window_mean - base_mean) / base_sd if base_sd > 0 else 0.0
@@ -739,20 +769,21 @@ def run_critical_checks(
     store = GcsStateStore()
     dispatcher = SlackDispatcher(store, dry_run=dry_run)
 
-    # Ponto único de composição do repositório de leads — quem entra em
-    # produção (esta função) decide a fonte; cada regra migrada recebe o
-    # repositório por injeção. Coexiste com `railway_conn` até as outras
-    # regras migrarem (Etapa 3 do refator do monitoramento).
+    # Ponto único de composição dos repositórios de leads — quem entra em
+    # produção (esta função) decide as fontes; cada regra migrada recebe o
+    # repositório por injeção. `railway_conn` segue passado às regras não
+    # migradas (coexistência durante o refator).
     from src.data import compose_repository
     repo = compose_repository('registros_ml', railway_conn=railway_conn)
+    baseline_repo = compose_repository('legacy', railway_conn=railway_conn)
 
     rules: list[Callable[[], RuleResult]] = [
         lambda: rule_no_leads_arriving(railway_conn),
         lambda: rule_capi_success_low(repo),
-        lambda: rule_variant_no_capi(railway_conn),
-        lambda: rule_utm_source_missing(railway_conn),
+        lambda: rule_variant_no_capi(repo),
+        lambda: rule_utm_source_missing(repo),
         lambda: rule_polling_500(store),
-        lambda: rule_score_drift(railway_conn, expected_decil_dist),
+        lambda: rule_score_drift(repo, baseline_repo, expected_decil_dist),
         lambda: rule_pubsub_consumer_stalled(railway_conn),
         lambda: rule_pubsub_error_rate_high(railway_conn),
         lambda: rule_pubsub_skipped_missing_data_high(railway_conn),

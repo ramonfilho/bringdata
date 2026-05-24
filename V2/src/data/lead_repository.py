@@ -65,10 +65,16 @@ def compose_repository(source: str = 'registros_ml', **conn_kwargs) -> LeadRepos
     não chama — recebe o repositório pronto.
 
     Args:
-        source: identificador da fonte. Hoje vale 'registros_ml' (ledger novo
-                populado pelo consumer Pub/Sub desde 2026-05-23).
-        conn_kwargs: kwargs específicos do adaptador escolhido (ex.:
-                     `railway_conn=conn_pg8000` para o adaptador do ledger).
+        source: identificador da fonte. Valores aceitos:
+            - 'registros_ml' (default): ledger novo populado pelo consumer
+              Pub/Sub desde 2026-05-23. Fonte canônica do monitoramento
+              corrente.
+            - 'legacy': tabela `Lead` antiga (parou de receber leads em
+              17/05/2026, mas histórico ainda serve pro baseline rolling 30d
+              da regra de desvio de score). Some quando o ledger novo
+              acumular 30 dias (≈22/06/2026).
+        conn_kwargs: kwargs específicos do adaptador (ex.:
+                     `railway_conn=conn_pg8000`).
 
     Raises:
         ValueError: se a fonte não for reconhecida.
@@ -76,6 +82,9 @@ def compose_repository(source: str = 'registros_ml', **conn_kwargs) -> LeadRepos
     if source == 'registros_ml':
         from .adapters.registros_ml import RegistrosMLAdapter
         return RegistrosMLAdapter(**conn_kwargs)
+    if source == 'legacy':
+        from .adapters.legacy import LegacyAdapter
+        return LegacyAdapter(**conn_kwargs)
     raise ValueError(
-        f"fonte desconhecida: {source!r}. Valores aceitos: 'registros_ml'."
+        f"fonte desconhecida: {source!r}. Valores aceitos: 'registros_ml', 'legacy'."
     )
