@@ -3587,9 +3587,24 @@ async def utm_quality_endpoint(
     from src.monitoring.utm_quality import (
         compute_utm_quality, render_slack_blocks, post_to_slack,
     )
+    from src.data import compose_repository
+    import pg8000.native
 
+    # Composição local: abre conn pg8000, monta repo do ledger novo, passa pro
+    # consumidor. Mesmo padrão do daily-check/railway (ponto único de
+    # composição na borda do endpoint).
+    railway_conn = pg8000.native.Connection(
+        host=os.environ['RAILWAY_DB_HOST'],
+        port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+        database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+        user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+        password=os.environ['RAILWAY_DB_PASSWORD'],
+        timeout=30,
+    )
+    repo = compose_repository('registros_ml', railway_conn=railway_conn)
     try:
         result = compute_utm_quality(
+            repo,
             client_id=client_id,
             hours=hours,
             top_n=top_n,
@@ -3597,6 +3612,11 @@ async def utm_quality_endpoint(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"compute_utm_quality falhou: {e}")
+    finally:
+        try:
+            railway_conn.close()
+        except Exception:
+            pass
 
     payload = {
         'window_24h': result.window_24h,

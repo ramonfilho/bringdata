@@ -30,57 +30,35 @@ BRT = timezone(timedelta(hours=-3))
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Connection + query
-# ──────────────────────────────────────────────────────────────────────────
-
-def _railway_conn():
-    import pg8000.native
-    return pg8000.native.Connection(
-        host=os.environ['RAILWAY_DB_HOST'],
-        port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
-        user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
-        password=os.environ['RAILWAY_DB_PASSWORD'],
-        database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
-        timeout=30,
-    )
-
-
-_SCORED_WITH_UTMS_SQL = '''
-SELECT
-  l."leadScore"::float                                            AS score,
-  l.decil::int                                                    AS decil,
-  LOWER(COALESCE(NULLIF(TRIM(lc.utm_source),  ''), 'sem_utm'))    AS source,
-  LOWER(COALESCE(NULLIF(TRIM(lc.utm_medium),  ''), 'sem_utm'))    AS medium,
-  LOWER(COALESCE(NULLIF(TRIM(lc.utm_content), ''), 'sem_utm'))    AS content,
-  COALESCE(lc.utm_campaign, '')                                   AS campaign,
-  COALESCE(l."pageUrl", '')                                       AS page_url
-FROM "Lead" l
-LEFT JOIN leads_capi lc ON LOWER(l.email) = LOWER(lc.email)
-WHERE l."createdAt" >= :start_utc AND l."createdAt" < :end_utc
-  AND l."leadScore" IS NOT NULL
-  AND l.decil IS NOT NULL
-'''
-
-
-def _fetch_scored(start_utc: datetime, end_utc: datetime, conn) -> list:
-    return conn.run(_SCORED_WITH_UTMS_SQL, start_utc=start_utc, end_utc=end_utc)
-
-
-# ──────────────────────────────────────────────────────────────────────────
 # Variant attribution (reusa ABTestConfig.match_variant)
 # ──────────────────────────────────────────────────────────────────────────
 
-def _classify_variant(ab_cfg, source, medium, content, campaign, page_url,
-                      champion_name, challenger_name) -> str:
-    """Sem match → champion (default fallback, mesmo critério de produção)."""
+def _classify_variant_from_record(record, ab_cfg,
+                                   champion_name: str, challenger_name: str) -> str:
+    """Atribui variante de um `LeadRecord`.
+
+    Prefere `record.variant` quando preenchido (ledger novo registra a variante
+    direto). Cai no match histórico via UTMs+URL apenas quando o ledger não
+    carrega (adaptador legado, leads pré-Pub/Sub).
+
+    Migrado em 2026-05-24 (Etapa 6 do refator). Antes era tupla de strings;
+    agora consome `LeadRecord` por injeção de dependência.
+    """
+    if record.variant in (champion_name, challenger_name):
+        return record.variant
+
+    # Fallback: match histórico via UTMs (mesmo critério de produção).
+    src = (record.utm_source or '').strip().lower()
+    med = (record.utm_medium or '').strip().lower()
+    cnt = (record.utm_content or '').strip().lower()
     utms = {
-        'utm_source':   source if source != 'sem_utm' else '',
-        'utm_medium':   medium if medium != 'sem_utm' else '',
-        'utm_campaign': campaign,
-        'utm_content':  content if content != 'sem_utm' else '',
-        'utm_term':     '',
+        'utm_source':   src if src else '',
+        'utm_medium':   med if med else '',
+        'utm_campaign': record.utm_campaign or '',
+        'utm_content':  cnt if cnt else '',
+        'utm_term':     record.utm_term or '',
     }
-    matched = ab_cfg.match_variant(utms, event_source_url=page_url)
+    matched = ab_cfg.match_variant(utms, event_source_url=record.utm_url or '')
     if matched is None:
         return champion_name
     name = next((n for n, v in ab_cfg.variants.items() if v is matched), None)
@@ -91,25 +69,37 @@ def _classify_variant(ab_cfg, source, medium, content, campaign, page_url,
 # Aggregation
 # ──────────────────────────────────────────────────────────────────────────
 
-_LEVEL_IDX = {'source': 2, 'medium': 3, 'content': 4}  # índice na row
+def _utm_key(record, level_col: str) -> str:
+    """Pega o valor do UTM no nível pedido. Normaliza vazios pra 'sem_utm'."""
+    raw = {
+        'source':  record.utm_source,
+        'medium':  record.utm_medium,
+        'content': record.utm_content,
+    }[level_col]
+    val = (raw or '').strip().lower()
+    return val if val else 'sem_utm'
 
 
-def _aggregate(rows, level_col: str, ab_cfg,
+def _aggregate(records, level_col: str, ab_cfg,
                champion_name: str, challenger_name: str) -> Dict[str, Dict[str, dict]]:
-    idx = _LEVEL_IDX[level_col]
+    """Agrega por (UTM × variante). Consome `List[LeadRecord]`.
+
+    Ignora records sem score ou decil — corresponde ao filtro
+    `leadScore IS NOT NULL AND decil IS NOT NULL` da query SQL antiga.
+    """
     buckets: Dict[str, Dict[str, dict]] = {}
-    for row in rows:
-        score, decil, source, medium, content, campaign, page_url = row
-        key = row[idx]
-        variant = _classify_variant(
-            ab_cfg, source, medium, content, campaign, page_url,
-            champion_name, challenger_name,
+    for r in records:
+        if r.score is None or r.decil is None:
+            continue
+        key = _utm_key(r, level_col)
+        variant = _classify_variant_from_record(
+            r, ab_cfg, champion_name, challenger_name,
         )
         b = buckets.setdefault(key, {})
         v = b.setdefault(variant, {'n': 0, 'sum_decil': 0, 'n_d8d10': 0})
         v['n'] += 1
-        v['sum_decil'] += decil
-        if decil >= 8:
+        v['sum_decil'] += r.decil
+        if r.decil >= 8:
             v['n_d8d10'] += 1
 
     out: Dict[str, Dict[str, dict]] = {}
@@ -196,6 +186,7 @@ class UtmQualityResult:
 
 
 def compute_utm_quality(
+    repo,
     client_id: str = 'devclub',
     hours: int = 24,
     top_n: int = 5,
@@ -203,10 +194,16 @@ def compute_utm_quality(
 ) -> UtmQualityResult:
     """
     Args:
-        client_id: id do cliente (carrega `configs/active_models/{id}.yaml`).
-        hours: janela em horas para a coluna "agora" (default 24).
-        top_n: tamanho do Top piores e Top melhores por nível.
+        repo:       `LeadRepository` injetado pelo caller (endpoint /monitoring/utm-quality
+                    em app.py compõe via compose_repository).
+        client_id:  id do cliente (carrega `configs/active_models/{id}.yaml`).
+        hours:      janela em horas para a coluna "agora" (default 24).
+        top_n:      tamanho do Top piores e Top melhores por nível.
         min_volume: N mínimo de leads (24h) para entrar no ranking.
+
+    Migrado em 2026-05-24 (Etapa 6 do refator do monitoramento). Antes abria
+    conexão Railway própria e fazia JOIN entre `Lead × leads_capi` (ambas
+    mortas desde 17/05). Agora consome `LeadRecord`s via repositório.
     """
     from src.core.client_config import ABTestConfig
 
@@ -229,17 +226,13 @@ def compute_utm_quality(
     start_24h = now_utc - timedelta(hours=hours)
     lf_label, lf_start, lf_end, lf_is_active = _resolve_lf_window()
 
-    conn = _railway_conn()
-    try:
-        rows_24h = _fetch_scored(start_24h, now_utc, conn)
-        rows_lf = _fetch_scored(lf_start, lf_end, conn) if lf_start else []
-    finally:
-        conn.close()
+    records_24h = repo.leads_in_range(start_24h, now_utc)
+    records_lf = repo.leads_in_range(lf_start, lf_end) if lf_start else []
 
     by_level: Dict[str, dict] = {}
     for level in ('source', 'medium', 'content'):
-        agg_24h = _aggregate(rows_24h, level, ab_cfg, champion_name, challenger_name)
-        agg_lf  = _aggregate(rows_lf,  level, ab_cfg, champion_name, challenger_name)
+        agg_24h = _aggregate(records_24h, level, ab_cfg, champion_name, challenger_name)
+        agg_lf  = _aggregate(records_lf,  level, ab_cfg, champion_name, challenger_name)
 
         all_utms = set(agg_24h.keys()) | set(agg_lf.keys())
         entries: List[dict] = []
@@ -297,14 +290,14 @@ def compute_utm_quality(
             'start': start_24h.isoformat(),
             'end': now_utc.isoformat(),
             'hours': hours,
-            'n_total': len(rows_24h),
+            'n_total': len(records_24h),
         },
         window_lf={
             'label': lf_label,
             'start': lf_start.isoformat() if lf_start else None,
             'end':   lf_end.isoformat()   if lf_end   else None,
             'is_active': lf_is_active,
-            'n_total': len(rows_lf),
+            'n_total': len(records_lf),
         },
         champion_name=champion_name,
         challenger_name=challenger_name,
