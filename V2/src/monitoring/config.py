@@ -41,7 +41,10 @@ THRESHOLDS = {
         'missing_rate': 0.50,            # 50% de missing em fbp/fbc
         'rejection_rate': 0.10,          # 10% de taxa de rejeição pela Meta
         'zero_decil_lookback_hours': 24, # [T1-2] janela de verificação de decis zerados
-        'zero_decil_min_leads': 20,      # [T1-2] mínimo de eventos para ativar o check
+        'zero_decil_min_leads': 100,     # [T1-2] mínimo de eventos para ativar o check
+                                         # (subido de 20→100 em 2026-05-24 — campanhas
+                                         # do gestor sobem em 25/05; antes disso o
+                                         # volume não justifica disparar HIGH)
     },
 
     # [T1-13] Audience profile drift: compara último dia completo de captação

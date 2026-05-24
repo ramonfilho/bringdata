@@ -1,159 +1,141 @@
-"""
-Monitor operacional - verifica problemas de infraestrutura/operação.
+"""Monitor operacional — verifica problemas de infraestrutura/operação.
 
 Verifica:
-- Mais de 6h sem receber leads
-- Mais de 6h sem enviar eventos CAPI
-"""
+- Mais de N horas sem receber leads (`_check_no_leads`)
+- Mais de N horas sem enviar evento CAPI (`_check_no_capi`)
 
+Migrado para `LeadRepository` em 2026-05-24 (Etapa 4 do refator do
+monitoramento). Antes lia direto da tabela morta `leads_capi` via ORM;
+agora recebe um repositório por injeção e calcula as métricas em cima de
+`LeadRecord`s.
+"""
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict
-from sqlalchemy.orm import Session
-from sqlalchemy import func
 
 
 class OperationalMonitor:
-    """
-    Monitor operacional que verifica saúde do sistema.
-    Usa PostgreSQL para verificar timestamps.
-    """
+    """Verifica saúde operacional do sistema lendo via `LeadRepository`."""
 
-    def __init__(self, db: Session, client_config=None):
+    # Janela ampla pra encontrar o último lead/CAPI mesmo se silêncio prolongado.
+    # Daily-check não é hot path — custo de trazer 1 semana de leads é aceitável.
+    _LOOKBACK_MINUTES = 7 * 24 * 60
+
+    def __init__(self, repo, client_config=None):
         """
         Args:
-            db:            Sessão SQLAlchemy do PostgreSQL
-            client_config: ClientConfig opcional — thresholds de monitoring.thresholds
+            repo:          `LeadRepository` (injetado pelo orchestrator).
+            client_config: ClientConfig opcional — thresholds de monitoring.thresholds.
         """
         from .config import THRESHOLDS
-        self.db = db
+        self.repo = repo
         monitoring = client_config.monitoring if client_config else None
         self._thresholds = (
             monitoring.thresholds if monitoring and monitoring.thresholds else THRESHOLDS
         )
 
     def check(self) -> List[Dict]:
-        """
-        Executa todos os checks operacionais.
-
-        Returns:
-            Lista de alertas no formato dict
-        """
-        if self.db is None:
+        """Executa todos os checks operacionais."""
+        if self.repo is None:
             return []
 
         alerts = []
-
         if self._thresholds['operational']['enabled']:
             alerts.extend(self._check_no_leads())
             alerts.extend(self._check_no_capi())
-
         return alerts
+
+    # ─ checks ─────────────────────────────────────────────────────────────
 
     def _check_no_leads(self) -> List[Dict]:
-        """Verifica se não recebeu leads nas últimas N horas"""
-        # Import aqui para evitar circular import
-        from api.database import LeadCAPI
-
-        alerts = []
-
+        """Sem leads novos nas últimas N horas (threshold por config)."""
         threshold_hours = self._thresholds['operational']['no_leads_hours']
-        threshold_time = datetime.now(timezone.utc) - timedelta(hours=threshold_hours)
-
         try:
-            # Buscar lead mais recente
-            last_lead = self.db.query(LeadCAPI).order_by(
-                LeadCAPI.created_at.desc()
-            ).first()
-
-            if not last_lead:
-                return alerts
-
-            # Converter timestamp do banco para timezone-aware UTC
-            last_lead_time = last_lead.created_at.replace(tzinfo=timezone.utc) if last_lead.created_at.tzinfo is None else last_lead.created_at
-
-            time_since_last = datetime.now(timezone.utc) - last_lead_time
-            hours_since = time_since_last.total_seconds() / 3600
-
-            if last_lead_time < threshold_time:
-                # Determinar severidade
-                if hours_since >= 12:
-                    severity = 'HIGH'
-                elif hours_since >= 8:
-                    severity = 'MEDIUM'
-                else:
-                    severity = 'LOW'
-
-                alerts.append({
-                    'type': 'no_leads_received',
-                    'severity': severity,
-                    'category': 'operational',
-                    'message': f" Nenhum lead recebido nas últimas {hours_since:.1f} horas (último: {last_lead_time.isoformat()})",
-                    'details': {
-                        'last_lead_at': last_lead_time.isoformat(),
-                        'hours_since': hours_since,
-                        'last_lead_email': last_lead.email
-                    },
-                    'timestamp': datetime.now(timezone.utc).isoformat(),
-                    'metric_value': hours_since,
-                    'threshold': float(threshold_hours)
-                })
-
+            leads = self.repo.recent_leads(window_minutes=self._LOOKBACK_MINUTES)
         except Exception:
-            pass
+            return []
 
-        return alerts
+        if not leads:
+            return []
+
+        last_lead = max(leads, key=lambda l: l.criado_em)
+        last_t = _as_utc(last_lead.criado_em)
+        now = datetime.now(timezone.utc)
+        hours_since = (now - last_t).total_seconds() / 3600
+
+        if hours_since < threshold_hours:
+            return []
+
+        severity = _severity_by_hours(hours_since)
+        return [{
+            'type': 'no_leads_received',
+            'severity': severity,
+            'category': 'operational',
+            'message': (
+                f"Nenhum lead recebido nas últimas {hours_since:.1f} horas "
+                f"(último: {last_t.isoformat()})"
+            ),
+            'details': {
+                'last_lead_at': last_t.isoformat(),
+                'hours_since': hours_since,
+                'last_lead_email': last_lead.email,
+            },
+            'timestamp': now.isoformat(),
+            'metric_value': hours_since,
+            'threshold': float(threshold_hours),
+        }]
 
     def _check_no_capi(self) -> List[Dict]:
-        """Verifica se não enviou CAPI nas últimas N horas"""
-        from api.database import LeadCAPI
-
-        alerts = []
-
+        """Sem envios CAPI bem-sucedidos nas últimas N horas."""
         threshold_hours = self._thresholds['operational']['no_capi_hours']
-        threshold_time = datetime.now(timezone.utc) - timedelta(hours=threshold_hours)
-
         try:
-            # Buscar último envio CAPI
-            last_capi = self.db.query(LeadCAPI).filter(
-                LeadCAPI.capi_sent_at.isnot(None)
-            ).order_by(
-                LeadCAPI.capi_sent_at.desc()
-            ).first()
-
-            if not last_capi:
-                return alerts
-
-            # Converter timestamp do banco para timezone-aware UTC
-            last_capi_time = last_capi.capi_sent_at.replace(tzinfo=timezone.utc) if last_capi.capi_sent_at.tzinfo is None else last_capi.capi_sent_at
-
-            time_since_last = datetime.now(timezone.utc) - last_capi_time
-            hours_since = time_since_last.total_seconds() / 3600
-
-            if last_capi_time < threshold_time:
-                # Determinar severidade
-                if hours_since >= 12:
-                    severity = 'HIGH'
-                elif hours_since >= 8:
-                    severity = 'MEDIUM'
-                else:
-                    severity = 'LOW'
-
-                alerts.append({
-                    'type': 'no_capi_sent',
-                    'severity': severity,
-                    'category': 'operational',
-                    'message': f" Nenhum evento CAPI enviado nas últimas {hours_since:.1f} horas (último: {last_capi_time.isoformat()})",
-                    'details': {
-                        'last_capi_at': last_capi_time.isoformat(),
-                        'hours_since': hours_since,
-                        'last_lead_email': last_capi.email
-                    },
-                    'timestamp': datetime.now(timezone.utc).isoformat(),
-                    'metric_value': hours_since,
-                    'threshold': float(threshold_hours)
-                })
-
+            leads = self.repo.recent_leads(window_minutes=self._LOOKBACK_MINUTES)
         except Exception:
-            pass
+            return []
 
-        return alerts
+        sent = [l for l in leads if l.capi_enviado_em is not None]
+        if not sent:
+            return []
+
+        last_capi = max(sent, key=lambda l: l.capi_enviado_em)
+        last_t = _as_utc(last_capi.capi_enviado_em)
+        now = datetime.now(timezone.utc)
+        hours_since = (now - last_t).total_seconds() / 3600
+
+        if hours_since < threshold_hours:
+            return []
+
+        severity = _severity_by_hours(hours_since)
+        return [{
+            'type': 'no_capi_sent',
+            'severity': severity,
+            'category': 'operational',
+            'message': (
+                f"Nenhum evento CAPI enviado nas últimas {hours_since:.1f} horas "
+                f"(último: {last_t.isoformat()})"
+            ),
+            'details': {
+                'last_capi_at': last_t.isoformat(),
+                'hours_since': hours_since,
+                'last_lead_email': last_capi.email,
+            },
+            'timestamp': now.isoformat(),
+            'metric_value': hours_since,
+            'threshold': float(threshold_hours),
+        }]
+
+
+# ─ helpers ────────────────────────────────────────────────────────────────
+
+def _as_utc(dt: datetime) -> datetime:
+    """Normaliza datetime pra timezone-aware UTC."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _severity_by_hours(hours: float) -> str:
+    if hours >= 12:
+        return 'HIGH'
+    if hours >= 8:
+        return 'MEDIUM'
+    return 'LOW'

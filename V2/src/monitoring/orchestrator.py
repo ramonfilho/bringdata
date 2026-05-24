@@ -92,20 +92,26 @@ class MonitoringOrchestrator:
 
     def __init__(self, model_path: str, db: Session, client_config: Optional[ClientConfig] = None,
                  expected_decil_dist: Optional[Dict[str, float]] = None,
-                 lead_scoring_pipeline=None):
+                 lead_scoring_pipeline=None,
+                 railway_conn=None):
         """
         Args:
             model_path:    Caminho para pasta do modelo ativo
-            db:            Sessão SQLAlchemy do PostgreSQL
+            db:            Sessão SQLAlchemy do PostgreSQL — usada apenas pelo
+                           DataQualityMonitor (não migrado ainda).
             client_config: Configuração do cliente; se None, carrega devclub.yaml
-            expected_decil_dist: Distribuição esperada de decis pré-computada (E6).
-                                 Caller (app.py:daily-check/railway) computa rolling 30d
-                                 via Railway e passa aqui — `db` legacy não tem a tabela Lead.
-                                 Quando None, DataQualityMonitor cai em E5/hardcoded.
-            lead_scoring_pipeline: LeadScoringPipeline opcional já inicializado (api/app.py).
-                                 Usado por DataQualityMonitor._check_audience_quality_signal
-                                 para re-scorear leads do LF atual com chain de produção.
-                                 Quando None, esse check é skipado silenciosamente.
+            expected_decil_dist: Distribuição esperada de decis pré-computada.
+                                 Caller (app.py:daily-check/railway) computa
+                                 rolling 30d via Railway e passa aqui. Quando None,
+                                 DataQualityMonitor cai em fallback hardcoded.
+            lead_scoring_pipeline: LeadScoringPipeline opcional já inicializado.
+                                 Usado por DataQualityMonitor para re-scorear
+                                 leads com chain de produção. Quando None, esse
+                                 check é skipado silenciosamente.
+            railway_conn:  Conexão pg8000.native pro Railway. Quando presente, o
+                           orchestrator compõe o LeadRepository e injeta nos
+                           monitors migrados (operational, capi_quality). Quando
+                           None, esses retornam alertas vazios.
         """
         self.model_path = model_path
         self.db = db
@@ -118,13 +124,23 @@ class MonitoringOrchestrator:
         else:
             self._filter_by_client = False
 
+        # Compor o LeadRepository uma vez (ponto único de composição nesta
+        # camada). Monitores migrados (operational, capi_quality) recebem por
+        # injeção; monitor não migrado (data_quality) continua usando `db`
+        # direto até a Etapa 5 do refator do monitoramento.
+        if railway_conn is not None:
+            from data import compose_repository
+            self._repo = compose_repository('registros_ml', railway_conn=railway_conn)
+        else:
+            self._repo = None
+
         # Inicializar monitors
         self.monitors = {
             'data_quality': DataQualityMonitor(model_path, client_config=self._client_config, db=db,
                                                expected_decil_dist=expected_decil_dist,
                                                lead_scoring_pipeline=lead_scoring_pipeline),
-            'operational': OperationalMonitor(db, client_config=self._client_config),
-            'capi_quality': CAPIQualityMonitor(db, client_config=self._client_config)
+            'operational': OperationalMonitor(self._repo, client_config=self._client_config),
+            'capi_quality': CAPIQualityMonitor(self._repo, client_config=self._client_config)
         }
 
     def run_daily_check(self, leads_data: List[Dict]) -> Dict:

@@ -3122,7 +3122,8 @@ async def daily_monitoring_check_railway(
 
         orchestrator = MonitoringOrchestrator(model_path=model_path, db=None,
                                               expected_decil_dist=expected_decil_dist,
-                                              lead_scoring_pipeline=pipelines.get('devclub'))
+                                              lead_scoring_pipeline=pipelines.get('devclub'),
+                                              railway_conn=railway_conn)
         # Propaga include_today_partial pro DataQualityMonitor.
         # Default OFF: cron das 6 AM não traz "Hoje parcial" (madrugada com sample irrelevante).
         # Manual: ?include_today_partial=true pra ver coluna Hoje em chamadas durante o dia.
