@@ -317,22 +317,24 @@ def rule_no_leads_arriving(conn) -> RuleResult:
                       details={'last_lead_at': last_global.isoformat() if last_global else None})
 
 
-def rule_capi_success_low(conn) -> RuleResult:
-    """Regra 5: ≥10 enviados em 60min mas success rate < 95%."""
-    cutoff = _window_start_utc()
-    rows = conn.run(
-        'SELECT '
-        '  COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL AND "capiStatus" NOT IN (\'blocked\',\'skipped\')) AS sent, '
-        '  COUNT(*) FILTER (WHERE "capiStatus" = \'success\') AS ok, '
-        '  COUNT(*) FILTER (WHERE "capiStatus" = \'error\') AS err '
-        'FROM "Lead" WHERE "createdAt" >= :cutoff',
-        cutoff=cutoff,
-    )
-    sent, ok, err = (rows[0][0] or 0, rows[0][1] or 0, rows[0][2] or 0)
+def rule_capi_success_low(repo) -> RuleResult:
+    """Regra 5: ≥10 enviados em 60min mas success rate < 95%.
+
+    "Enviado" = lead que passou pelo envio CAPI ao Meta (status `success` ou
+    `error`). Status `skipped_*` não contam — são leads que nem tentaram
+    enviar (allowlist barrou ou faltou fbp/fbc/computador).
+
+    Migrada para o `LeadRepository` em 2026-05-24 (Etapa 2 do refator do
+    monitoramento). Fonte hoje: ledger novo `registros_ml`.
+    """
+    leads = repo.recent_leads(window_minutes=WINDOW_MIN)
+    ok  = sum(1 for r in leads if r.status_envio == 'success')
+    err = sum(1 for r in leads if r.status_envio == 'error')
+    sent = ok + err
     if sent < 10:
         return RuleResult('capi_success_low', fired=False,
                           skipped_reason=f'amostra insuficiente (sent={sent})')
-    rate = (ok / sent) * 100 if sent else 0
+    rate = (ok / sent) * 100
     if rate >= 95:
         return RuleResult('capi_success_low', fired=False)
     msg = (
@@ -737,9 +739,16 @@ def run_critical_checks(
     store = GcsStateStore()
     dispatcher = SlackDispatcher(store, dry_run=dry_run)
 
+    # Ponto único de composição do repositório de leads — quem entra em
+    # produção (esta função) decide a fonte; cada regra migrada recebe o
+    # repositório por injeção. Coexiste com `railway_conn` até as outras
+    # regras migrarem (Etapa 3 do refator do monitoramento).
+    from src.data import compose_repository
+    repo = compose_repository('registros_ml', railway_conn=railway_conn)
+
     rules: list[Callable[[], RuleResult]] = [
         lambda: rule_no_leads_arriving(railway_conn),
-        lambda: rule_capi_success_low(railway_conn),
+        lambda: rule_capi_success_low(repo),
         lambda: rule_variant_no_capi(railway_conn),
         lambda: rule_utm_source_missing(railway_conn),
         lambda: rule_polling_500(store),
