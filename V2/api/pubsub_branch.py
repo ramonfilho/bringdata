@@ -144,13 +144,17 @@ def ledger_row(
     capi_sent_at_now: bool = False,
     error_message: Optional[str] = None,
     utm: Optional[Dict] = None,
+    survey: Optional[Dict] = None,
 ) -> Dict:
     """Pura. Monta dict do INSERT em `registros_ml`. PK = `event_id`.
 
     `utm` (opcional): dict no formato do payload (`{source, medium, campaign,
-    content, term, url}`). Cada campo vira coluna `utm_*` no ledger. Permite
-    que o monitoramento leia tudo do `registros_ml` (single-table) em vez de
-    fazer JOIN com `lead_surveys × UTMTracking`.
+    content, term, url}`). Cada campo vira coluna `utm_*` no ledger.
+
+    `survey` (opcional): dict com as respostas do lead (formato PT-Long
+    canônico vindo de `payload_to_survey_dict`, ou slug raw em casos de
+    falha de tradução). Vai pra coluna `survey_responses` (JSONB). Habilita
+    monitoramento de drift de categorias sem JOIN com `lead_surveys`.
     """
     utm = utm or {}
     return {
@@ -171,21 +175,30 @@ def ledger_row(
         "utm_content":  utm.get("content"),
         "utm_term":     utm.get("term"),
         "utm_url":      utm.get("url"),
+        "survey_responses": survey,
     }
 
 
 def _insert_ledger(conn, r: Dict) -> None:
+    import json as _json
+    # JSONB precisa de string serializada — pg8000 não converte dict
+    # diretamente. None vira NULL no SQL.
+    survey_raw = r.pop("survey_responses", None)
+    survey_json = _json.dumps(survey_raw) if survey_raw is not None else None
     conn.run(
         'INSERT INTO registros_ml '
         '(event_id, email, variant, lead_score, decil, base_meta_event_id, '
         ' base_status, hq_meta_event_id, hq_status, capi_sent_at, error_message, '
-        ' utm_source, utm_medium, utm_campaign, utm_content, utm_term, utm_url) '
+        ' utm_source, utm_medium, utm_campaign, utm_content, utm_term, utm_url, '
+        ' survey_responses) '
         'VALUES (:event_id, :email, :variant, :lead_score, :decil, '
         ' :base_meta_event_id, :base_status, :hq_meta_event_id, :hq_status, '
         + ('NOW()' if r.pop("capi_sent_at_now", False) else 'NULL')
         + ', :error_message, :utm_source, :utm_medium, :utm_campaign, '
-        ' :utm_content, :utm_term, :utm_url) '
+        ' :utm_content, :utm_term, :utm_url, '
+        ' CAST(:survey_responses AS JSONB)) '
         'ON CONFLICT (event_id) DO NOTHING',
+        survey_responses=survey_json,
         **r,
     )
 
@@ -281,9 +294,12 @@ def process_pending_pubsub(
             logger.error(
                 f"[pubsub_branch] slug desconhecido em event_id={event_id}: {e}"
             )
+            # Sem survey_dict (falhou na tradução). Grava o raw slug do payload
+            # pra preservar o que veio (consumidores filtram se precisar).
             pending_ledger.append(ledger_row(
                 event_id, payload.get("email"), None, None, None, "error",
-                error_message=str(e)[:500], utm=utm))
+                error_message=str(e)[:500], utm=utm,
+                survey=payload.get("survey")))
             handled_ack_ids.append(ack_id)
             continue
 
@@ -295,13 +311,13 @@ def process_pending_pubsub(
             n_allow += 1
             pending_ledger.append(ledger_row(
                 event_id, payload.get("email"), None, None, None,
-                "skipped_allowlist", utm=utm))
+                "skipped_allowlist", utm=utm, survey=survey_dict))
             handled_ack_ids.append(ack_id)
         elif verdict == "skipped_missing_data":
             n_missing += 1
             pending_ledger.append(ledger_row(
                 event_id, payload.get("email"), None, None, None,
-                "skipped_missing_data", utm=utm))
+                "skipped_missing_data", utm=utm, survey=survey_dict))
             handled_ack_ids.append(ack_id)
         else:
             to_score.append((ack_id, payload, survey_dict, utm, enrich))
@@ -377,15 +393,15 @@ def process_pending_pubsub(
 
     # 5. Montar CAPI + ledger dos enviáveis
     capi_leads: List[Dict] = []
-    # (event_id, decil_str, decil_int, vname, ack_id, payload, utm)
-    capi_meta: List[Tuple[str, str, Optional[int], Optional[str], str, Dict, Dict]] = []
-    for ack_id, payload, _, utm, enrich in to_score:
+    # (event_id, decil_str, decil_int, vname, ack_id, payload, utm, survey_dict)
+    capi_meta: List[Tuple[str, str, Optional[int], Optional[str], str, Dict, Dict, Dict]] = []
+    for ack_id, payload, survey_dict, utm, enrich in to_score:
         eid = payload["eventId"]
         if eid not in scored:
             n_err += 1
             pending_ledger.append(ledger_row(
                 eid, payload.get("email"), None, None, None, "error",
-                error_message="sem score", utm=utm))
+                error_message="sem score", utm=utm, survey=survey_dict))
             handled_ack_ids.append(ack_id)
             continue
         sc, dc, ab_v, vn = scored[eid]
@@ -415,7 +431,7 @@ def process_pending_pubsub(
             cl["ab_pixel_id"]          = ab_v.pixel_id_override
         capi_leads.append(cl)
         capi_meta.append(
-            (eid, dc, int(dc[1:]) if dc else None, vn, ack_id, payload, utm)
+            (eid, dc, int(dc[1:]) if dc else None, vn, ack_id, payload, utm, survey_dict)
         )
 
     sent = 0
@@ -428,7 +444,7 @@ def process_pending_pubsub(
         )
         details = res.get("details", [])
         sent = res.get("success", 0)
-        for i, (eid, dc, di, vn, ack_id, payload, utm) in enumerate(capi_meta):
+        for i, (eid, dc, di, vn, ack_id, payload, utm, survey_dict) in enumerate(capi_meta):
             ok = i < len(details) and details[i].get("status") == "success"
             st = "success" if ok else "error"
             hq = ("success" if (ok and di and di >= 9)
@@ -443,7 +459,7 @@ def process_pending_pubsub(
                 error_message=(None if ok else
                                (details[i].get("error")
                                 if i < len(details) else "sem retorno")),
-                utm=utm,
+                utm=utm, survey=survey_dict,
             ))
             handled_ack_ids.append(ack_id)
     elif capi_leads and dry_run:

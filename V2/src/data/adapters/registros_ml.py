@@ -10,9 +10,10 @@ formato interno `LeadRecord` (campos em português, contrato estável).
 """
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Dict, Optional
 
 from ..lead_record import LeadRecord
 from ..lead_repository import _validate_range, _validate_window
@@ -41,6 +42,7 @@ class RegistrosMLAdapter:
         'utm_source', 'utm_medium', 'utm_campaign',
         'utm_content', 'utm_term', 'utm_url',
         'capi_sent_at', 'error_message',
+        'survey_responses',
     )
 
     def __init__(self, railway_conn):
@@ -92,7 +94,8 @@ class RegistrosMLAdapter:
          decil, lead_score, variant,
          utm_source, utm_medium, utm_campaign,
          utm_content, utm_term, utm_url,
-         capi_sent_at, error_message) = row
+         capi_sent_at, error_message,
+         survey_responses_raw) = row
         return LeadRecord(
             event_id=event_id,
             email=email,
@@ -109,4 +112,28 @@ class RegistrosMLAdapter:
             utm_url=utm_url,
             capi_enviado_em=capi_sent_at,
             erro=error_message,
+            survey_responses=_parse_survey(survey_responses_raw),
         )
+
+
+# ─ helpers ────────────────────────────────────────────────────────────────
+
+def _parse_survey(raw: Any) -> Optional[Dict[str, str]]:
+    """Normaliza JSONB `survey_responses` em dict[str, str] ou None.
+
+    pg8000 devolve JSONB às vezes como dict (parseado), às vezes como string.
+    Cobre ambos. Valores não-string viram string pra contrato consistente
+    com o adaptador legado.
+    """
+    if raw is None or raw == '':
+        return None
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+    else:
+        parsed = raw
+    if not isinstance(parsed, dict):
+        return None
+    return {str(k): str(v) for k, v in parsed.items() if v is not None}
