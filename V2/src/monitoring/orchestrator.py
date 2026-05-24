@@ -509,6 +509,14 @@ class MonitoringOrchestrator:
             logger.info(f"  Leads (24h)  recebidos: {result.get('leads_received_24h', 0):>6,}")
             logger.info(f"  Leads (24h)  scoreados: {result.get('leads_scored_24h', 0):>6,}")
             logger.info(f"  Eventos CAPI (24h):     {result.get('capi_sent_24h', 0):>6,}")
+
+        # Sumário do consumer Pub/Sub (Etapa 7 do refator do monitoramento).
+        # Lê do mesmo repo já injetado nos monitores filhos. Quando repo é
+        # None (endpoint /monitoring/daily-check legado sem railway_conn),
+        # devolve esqueleto zerado — comportamento backwards-compatible.
+        from .pubsub_summary import compute_pubsub_summary
+        result['pubsub_24h_summary'] = compute_pubsub_summary(self._repo)
+
         logger.info("=" * 60)
         return result
 

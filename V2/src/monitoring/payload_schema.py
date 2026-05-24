@@ -668,4 +668,31 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'traffic_metrics.ultimo_mes.ctr_lead':                                              (R, None),  # ex: 24.6
     'traffic_metrics.ultimo_mes.meta_leads':                                            (R, None),  # ex: 58805
     'traffic_metrics.ultimo_mes.spend':                                                 (R, None),  # ex: 321316.24
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # PUBSUB_24H_SUMMARY  (Etapa 7 do refator do monitoramento — 2026-05-24)
+    # Lê do ledger novo (`registros_ml`); todas as chaves canônicas estão
+    # sempre presentes (zeradas se sem dados na janela).
+    # ──────────────────────────────────────────────────────────────────────────
+    'pubsub_24h_summary':                                                               (R, None),  # ex: dict(4)
+    'pubsub_24h_summary.total':                                                         (R, None),  # ex: 527
+    'pubsub_24h_summary.by_status':                                                     (R, None),  # ex: dict(4)
+    'pubsub_24h_summary.by_status.success':                                             (R, None),
+    'pubsub_24h_summary.by_status.error':                                               (R, None),
+    'pubsub_24h_summary.by_status.skipped_allowlist':                                   (R, None),
+    'pubsub_24h_summary.by_status.skipped_missing_data':                                (R, None),
+    'pubsub_24h_summary.decil_distribution':                                            (R, None),  # ex: dict(10)
+    'pubsub_24h_summary.decil_distribution.D01':                                        (R, None),
+    'pubsub_24h_summary.decil_distribution.D02':                                        (R, None),
+    'pubsub_24h_summary.decil_distribution.D03':                                        (R, None),
+    'pubsub_24h_summary.decil_distribution.D04':                                        (R, None),
+    'pubsub_24h_summary.decil_distribution.D05':                                        (R, None),
+    'pubsub_24h_summary.decil_distribution.D06':                                        (R, None),
+    'pubsub_24h_summary.decil_distribution.D07':                                        (R, None),
+    'pubsub_24h_summary.decil_distribution.D08':                                        (R, None),
+    'pubsub_24h_summary.decil_distribution.D09':                                        (R, None),
+    'pubsub_24h_summary.decil_distribution.D10':                                        (R, None),
+    'pubsub_24h_summary.top_errors':                                                    (R, None),  # ex: list até 5
+    'pubsub_24h_summary.top_errors[].message':                                          (R, None),
+    'pubsub_24h_summary.top_errors[].count':                                            (R, None),
 }
