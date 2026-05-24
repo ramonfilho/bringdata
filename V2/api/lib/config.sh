@@ -134,6 +134,11 @@ build_env_vars() {
     ENV_VARS="$ENV_VARS,RAILWAY_DB_USER=$RAILWAY_DB_USER"
     ENV_VARS="$ENV_VARS,RAILWAY_DB_PASSWORD=$RAILWAY_DB_PASSWORD"
 
+    # Consumer Pub/Sub do sistema novo (PROCESSO_CAPI_LEAD_SURVEYS §5).
+    # Sem essa flag a revisão deployada vira no-op no /pubsub/process-pending.
+    # Default propagated entre deploys; mude pra "false" aqui em emergência.
+    ENV_VARS="$ENV_VARS,PUBSUB_CAPI_ENABLED=true"
+
     # Preserva META_ACCESS_TOKEN existente
     local CURRENT_META_TOKEN=$(gcloud run services describe "$SERVICE_NAME" \
         --region="$REGION" \
