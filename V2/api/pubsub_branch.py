@@ -253,16 +253,35 @@ def process_pending_pubsub(
         return {"processed": 0, "sent": 0, "skipped_allowlist": 0,
                 "skipped_missing_data": 0, "errors": 0, "dry_run": dry_run}
 
-    # 2. Parse — payload inválido vira erro mas é ackado (não vai melhorar reciclando)
+    # 2. Parse — payload inválido vira erro mas é ackado (não vai melhorar reciclando).
+    # Dedup in-batch: se o mesmo eventId aparecer 2x no mesmo pull (publisher
+    # re-publicou ou Pub/Sub re-entregou dentro do ackDeadline), ackamos a 2ª
+    # sem reprocessar. Sem isso o consumer dispara CAPI 2x com o mesmo event_id
+    # — a Meta dedupa nas conversões, mas o "Eventos recebidos" do Events
+    # Manager infla (foi como o gestor de tráfego notou a divergência).
     parsed: List[Tuple[str, Dict]] = []   # (ack_id, payload)
     error_ack_ids: List[str] = []
+    duplicate_ack_ids: List[str] = []
+    seen_event_ids: set = set()
     n_err = 0
+    n_dup_in_batch = 0
     for m in received:
         ack_id = m.ack_id
         try:
             payload = parse_pubsub_payload(m.message.data)
-            if not payload.get("eventId"):
+            eid = payload.get("eventId")
+            if not eid:
                 raise ValueError("payload sem eventId")
+            if eid in seen_event_ids:
+                n_dup_in_batch += 1
+                duplicate_ack_ids.append(ack_id)
+                logger.warning(
+                    f"[pubsub_branch] dup in-batch event_id={eid} "
+                    f"(msg_id={getattr(m.message, 'message_id', '?')}) — "
+                    f"ackando sem reprocessar"
+                )
+                continue
+            seen_event_ids.add(eid)
             parsed.append((ack_id, payload))
         except Exception as e:
             n_err += 1
@@ -483,7 +502,7 @@ def process_pending_pubsub(
                     f"[pubsub_branch] erro ledger {r.get('event_id')}: {e}"
                 )
 
-        ack_ids = list(set(handled_ack_ids + error_ack_ids))
+        ack_ids = list(set(handled_ack_ids + error_ack_ids + duplicate_ack_ids))
         if ack_ids:
             try:
                 subscriber.acknowledge(
@@ -499,6 +518,7 @@ def process_pending_pubsub(
         "sent": sent,
         "skipped_allowlist": n_allow,
         "skipped_missing_data": n_missing,
+        "dup_in_batch": n_dup_in_batch,
         "errors": n_err,
         "dry_run": dry_run,
     }

@@ -243,6 +243,85 @@ def test_ledger_row_utm_parcial_grava_o_que_existe():
     assert r["utm_url"]      is None
 
 
+class _FakeMessage:
+    def __init__(self, data: bytes, message_id: str):
+        self.data = data
+        self.message_id = message_id
+
+
+class _FakeReceived:
+    def __init__(self, ack_id: str, message: _FakeMessage):
+        self.ack_id = ack_id
+        self.message = message
+
+
+class _FakeResponse:
+    def __init__(self, received):
+        self.received_messages = received
+
+
+class _FakeSubscriber:
+    """Mock mínimo do SubscriberClient — só registra pulls e acks."""
+    def __init__(self, received):
+        self._received = received
+        self.acked: list = []
+
+    def pull(self, request, timeout):  # noqa: ARG002
+        return _FakeResponse(self._received)
+
+    def acknowledge(self, request):
+        self.acked.extend(request["ack_ids"])
+
+
+class _FakeConn:
+    def __init__(self):
+        self.inserts: list = []
+
+    def run(self, sql, **params):
+        self.inserts.append({"sql": sql, "params": params})
+        return []
+
+
+class _FakePipeline:
+    """Pipeline mockado — não precisa rodar porque o payload vai cair em
+    'skipped_allowlist' (utm.source='org' não está na allowlist)."""
+    class _Cfg:
+        class _Capi:
+            utm_source_allowlist = ["facebook-ads"]
+        capi = _Capi()
+        client_id = "devclub"
+    _client_config = _Cfg()
+
+
+def test_dedup_in_batch_dispara_capi_uma_vez():
+    """Duas mensagens com mesmo eventId no mesmo pull → 1 processada, 1 ackada
+    como dup. Cobre o caso visto em produção 2026-05-25 11:35 (marcelo enviado
+    2x no mesmo batch porque o publisher republicou)."""
+    from api.pubsub_branch import process_pending_pubsub
+
+    raw = json.dumps(PAYLOAD_REAL).encode("utf-8")
+    received = [
+        _FakeReceived("ack-1", _FakeMessage(raw, "msg-1")),
+        _FakeReceived("ack-2", _FakeMessage(raw, "msg-2")),  # mesma mensagem
+    ]
+    sub = _FakeSubscriber(received)
+    conn = _FakeConn()
+    summary = process_pending_pubsub(sub, conn, _FakePipeline(), dry_run=False)
+
+    # Os 2 ack_ids vão pra fila de ack — não queremos a 2ª mensagem voltando
+    assert set(sub.acked) == {"ack-1", "ack-2"}, sub.acked
+    # Só 1 do par chega a ser "processado" (o outro vira dup_in_batch)
+    assert summary["processed"] == 1, summary
+    assert summary["dup_in_batch"] == 1, summary
+    # source=org não está na allowlist → o que sobrou cai em skipped_allowlist,
+    # confirmando que o caminho de classificação rodou só pra 1 evento.
+    assert summary["skipped_allowlist"] == 1, summary
+    assert summary["sent"] == 0, summary
+    # Ledger insere apenas 1 linha (skipped_allowlist) — a dup nem chega ao
+    # INSERT, então o ON CONFLICT do ledger nem é exercitado nesse caso.
+    assert len(conn.inserts) == 1, [i["params"].get("event_id") for i in conn.inserts]
+
+
 def _run():
     tests = [
         test_parse_aceita_bytes_e_str,
@@ -261,6 +340,7 @@ def _run():
         test_ledger_row_skipped_não_seta_capi_sent_at,
         test_ledger_row_grava_utm_quando_passado,
         test_ledger_row_utm_parcial_grava_o_que_existe,
+        test_dedup_in_batch_dispara_capi_uma_vez,
     ]
     fails = 0
     for t in tests:
