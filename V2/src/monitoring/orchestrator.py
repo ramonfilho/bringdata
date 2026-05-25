@@ -285,6 +285,15 @@ class MonitoringOrchestrator:
         # T3-5: rotinas operacionais consolidadas no mesmo log
         operational_routines = self._generate_operational_routines_summary()
 
+        # Sumários top-level que o digest do Slack espera (TRAINING_DRIFT_24H +
+        # PUBSUB_24H). Ficam separados de `operational_routines` porque o digest
+        # acessa direto via payload['pubsub_24h_summary'] e similar — nested
+        # dentro de operational_routines vira invisível pro render.
+        from .pubsub_summary import compute_pubsub_summary
+        from .training_drift_summary import compute_training_drift_summary
+        pubsub_24h_summary = compute_pubsub_summary(self._repo)
+        training_drift_24h_summary = compute_training_drift_summary()
+
         # Mensagem de conclusão
         logger.info(f"\n Monitoramento concluído!")
         logger.info(f" Log completo salvo em: {log_path}\n")
@@ -299,6 +308,8 @@ class MonitoringOrchestrator:
             'lead_quality_metrics': lead_quality_metrics,
             'critical_summary': critical_summary,
             'operational_routines': operational_routines,
+            'pubsub_24h_summary': pubsub_24h_summary,
+            'training_drift_24h_summary': training_drift_24h_summary,
         }
 
     def _generate_operational_routines_summary(self) -> Dict:
@@ -509,19 +520,6 @@ class MonitoringOrchestrator:
             logger.info(f"  Leads (24h)  recebidos: {result.get('leads_received_24h', 0):>6,}")
             logger.info(f"  Leads (24h)  scoreados: {result.get('leads_scored_24h', 0):>6,}")
             logger.info(f"  Eventos CAPI (24h):     {result.get('capi_sent_24h', 0):>6,}")
-
-        # Sumário do consumer Pub/Sub (Etapa 7 do refator do monitoramento).
-        # Lê do mesmo repo já injetado nos monitores filhos. Quando repo é
-        # None (endpoint /monitoring/daily-check legado sem railway_conn),
-        # devolve esqueleto zerado — comportamento backwards-compatible.
-        from .pubsub_summary import compute_pubsub_summary
-        result['pubsub_24h_summary'] = compute_pubsub_summary(self._repo)
-
-        # Sumário de paridade treino × produção (T1-16). Lê logs do Cloud
-        # Logging — funciona em produção (Cloud Run) e local (com ADC).
-        # Falha silenciosa se credenciais não disponíveis (devolve esqueleto).
-        from .training_drift_summary import compute_training_drift_summary
-        result['training_drift_24h_summary'] = compute_training_drift_summary()
 
         logger.info("=" * 60)
         return result
