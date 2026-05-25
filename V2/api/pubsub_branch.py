@@ -34,6 +34,11 @@ from typing import Dict, Iterable, List, Optional, Tuple
 
 from api.railway_mapping import traduzir_survey_slugs
 from api.survey_mapping import survey_lead_to_sheets_row
+from src.core.payload_normalization import (
+    payload_to_enrich,
+    payload_to_survey_dict,
+    payload_to_utm,
+)
 
 # pandas, send_batch_events e atribuir_decil_por_threshold são importados
 # lazy dentro de process_pending_pubsub — evita puxar o SDK do Facebook
@@ -66,45 +71,9 @@ def parse_pubsub_payload(raw_data) -> Dict:
     return json.loads(raw_data)
 
 
-def payload_to_survey_dict(payload: Dict) -> Dict:
-    """Mapeia payload Pub/Sub → dict no shape `lead_surveys row` que o I2 espera.
-
-    Aplica `traduzir_survey_slugs` no objeto `survey` antes de retornar.
-    Pode levantar `ValueError` se o payload trouxer slug fora do vocabulário.
-    """
-    survey_in = payload.get("survey") or {}
-    survey_traduzido = traduzir_survey_slugs(survey_in)
-    return {
-        "id":          payload.get("eventId"),
-        "submittedAt": payload.get("submittedAt"),
-        "clientEmail": payload.get("email"),
-        "ip":          payload.get("ip4"),
-        **survey_traduzido,
-    }
-
-
-def payload_to_enrich(payload: Dict) -> Dict:
-    """Payload Pub/Sub já carrega hasComputer/fbp/fbc/etc direto.
-
-    Nenhum JOIN, nenhum parse de log — só renomeia campos pra forma `enrich`
-    que `survey_lead_to_sheets_row` espera (compat com I2).
-    """
-    fn = (payload.get("firstName") or "").strip()
-    ln = (payload.get("lastName") or "").strip()
-    nome = f"{fn} {ln}".strip() or None
-    return {
-        "computador": payload.get("hasComputer"),
-        "telefone":   payload.get("phone"),
-        "nome":       nome,
-        "fbp":        payload.get("fbp"),
-        "fbc":        payload.get("fbc"),
-        "ip":         payload.get("ip4"),
-        "user_agent": payload.get("userAgent"),
-    }
-
-
-def payload_to_utm(payload: Dict) -> Dict:
-    return dict(payload.get("utm") or {})
+# payload_to_survey_dict, payload_to_enrich, payload_to_utm vivem em
+# src/core/payload_normalization.py (camada de tradução slug → PT-Long).
+# Re-exportados no topo deste módulo pra não quebrar imports antigos.
 
 
 def is_meta_eligible(utm_source: Optional[str], allowlist: Iterable[str]) -> bool:
