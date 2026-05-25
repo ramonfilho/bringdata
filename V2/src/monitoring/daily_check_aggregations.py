@@ -81,6 +81,45 @@ def _fb_pct(num: int, den: int) -> float:
     return round(num / den * 100, 1) if den else 0.0
 
 
+def compute_survey_funnel_db(
+    records: List[LeadRecord],
+    *,
+    windows: Dict[str, datetime],
+    anchor: datetime,
+) -> Dict[str, Dict[str, Any]]:
+    """Agregação `_sfm_db` (survey_funnel_metrics DB side) em cima de records.
+
+    Substitui as 4 queries SQL antigas (uma por janela na Lead morta) por
+    filtragem in-memory sobre `list[LeadRecord]`. Cada janela tem:
+      - `db_leads`: total de leads no intervalo (cut → anchor)
+      - `capi_sent`: leads que tentaram CAPI (status_envio in success/error)
+      - `capi_rate`: db_leads / capi_sent (em %)
+
+    Args:
+        records: leads do range coberto (ex: últimos 90d via repo).
+        windows: dict {label: cut_datetime}. Cada label vira chave do retorno.
+        anchor: limite superior (= window_end).
+    """
+    # Normaliza tz pra evitar offset-naive vs offset-aware na comparação.
+    anchor_naive = anchor.replace(tzinfo=None) if anchor.tzinfo else anchor
+    out: Dict[str, Dict[str, Any]] = {}
+    for label, cut in windows.items():
+        cut_naive = cut.replace(tzinfo=None) if cut.tzinfo else cut
+        bucket = [
+            r for r in records
+            if r.criado_em
+            and cut_naive <= r.criado_em.replace(tzinfo=None) <= anchor_naive
+        ]
+        db_leads = len(bucket)
+        capi_sent = sum(1 for r in bucket if r.status_envio in _STATUS_TENTOU_CAPI)
+        out[label] = {
+            'db_leads':  db_leads,
+            'capi_sent': capi_sent,
+            'capi_rate': round(capi_sent / db_leads * 100, 1) if db_leads > 0 else 0,
+        }
+    return out
+
+
 def records_to_quality_rows(records: List[LeadRecord]) -> list:
     """Converte `list[LeadRecord]` em `list[tuple]` com mesmo schema da
     antiga query `quality_rows` na Lead morta:

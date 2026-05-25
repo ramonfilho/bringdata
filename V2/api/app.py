@@ -2623,52 +2623,29 @@ async def daily_monitoring_check_railway(
                 key = f"D{int(decil_val):02d}"
                 forecast_decil_dist[key] = forecast_decil_dist.get(key, 0) + 1
 
-        # 1e. Survey funnel metrics por janela histórica (DB side)
+        # 1e. Survey funnel metrics por janela histórica — Fatia D do refator.
+        # Agregação pura em cima de `_records_90d` (já carregado pra Fatia D
+        # quality_rows). Substitui 5 queries SQL na Lead morta. "historico"
+        # cobre os 90d que o repository expõe (= todo o ledger novo hoje;
+        # cresce naturalmente).
+        from src.monitoring.daily_check_aggregations import compute_survey_funnel_db
         _sfm_db: Dict[str, Dict] = {}
         try:
-            _sfm_windows = {
-                'historico':     datetime(2020, 1, 1, tzinfo=_tz.utc),
+            _sfm_windows_cut = {
+                'historico':     _quality_window_start,            # 90d atrás
                 'ultimo_mes':    now_utc - timedelta(days=30),
                 'ultima_semana': now_utc - timedelta(days=7),
                 'ultimas_24h':   now_utc - timedelta(hours=24),
             }
-            for _lbl, _cut in _sfm_windows.items():
-                _sfm_r = railway_conn.run(
-                    'SELECT '
-                    '  COUNT(*) AS db_leads, '
-                    '  COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL '
-                    '    AND "capiStatus" NOT IN (\'blocked\', \'skipped\')) AS capi_sent '
-                    'FROM "Lead" '
-                    'WHERE "createdAt" >= :start AND "createdAt" <= :end',
-                    start=_cut, end=now_utc
-                )
-                _r = _sfm_r[0] if _sfm_r else (0, 0)
-                _db_l, _capi_s = (_r[0] or 0), (_r[1] or 0)
-                _sfm_db[_lbl] = {
-                    'db_leads': _db_l,
-                    'capi_sent': _capi_s,
-                    'capi_rate': round(_capi_s / _db_l * 100, 1) if _db_l > 0 else 0,
-                }
-            # periodo_query = janela do lançamento atual (cap_start → now).
-            # Antes usava window_start/window_end (72h da query de monitoramento),
-            # o que dessincronizava com meta_leads (que é desde launch_start) e
-            # inflava artificialmente o %resp = db_leads/meta_leads.
-            _sfm_pq = railway_conn.run(
-                'SELECT '
-                '  COUNT(*) AS db_leads, '
-                '  COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL '
-                '    AND "capiStatus" NOT IN (\'blocked\', \'skipped\')) AS capi_sent '
-                'FROM "Lead" '
-                'WHERE "createdAt" >= :start AND "createdAt" <= :end',
-                start=launch_window_start_utc, end=launch_window_end_utc
+            _sfm_db = compute_survey_funnel_db(
+                _records_90d, windows=_sfm_windows_cut, anchor=now_utc,
             )
-            _r_pq = _sfm_pq[0] if _sfm_pq else (0, 0)
-            _db_pq, _capi_pq = (_r_pq[0] or 0), (_r_pq[1] or 0)
-            _sfm_db['periodo_query'] = {
-                'db_leads': _db_pq,
-                'capi_sent': _capi_pq,
-                'capi_rate': round(_capi_pq / _db_pq * 100, 1) if _db_pq > 0 else 0,
-            }
+            # `periodo_query` = janela do lançamento atual (cap_start → now).
+            _sfm_db['periodo_query'] = compute_survey_funnel_db(
+                _records_90d,
+                windows={'periodo_query': launch_window_start_utc},
+                anchor=launch_window_end_utc,
+            )['periodo_query']
         except Exception as _sfm_e:
             logger.warning(f"⚠️ survey_funnel DB queries: {_sfm_e}")
 
