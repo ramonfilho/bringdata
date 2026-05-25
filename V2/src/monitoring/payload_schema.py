@@ -48,6 +48,9 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'alerts[].category':                                                                (S, 'redundante com tipo do alert'),
     'alerts[].details':                                                                 (R, None),  # ex: dict(4)
     'alerts[].details.affected_count':                                                  (R, None),  # ex: None
+    'alerts[].details.missing_count':                                                   (R, None),  # ex: 234 — n de leads c/ campo nulo no missing_rate_high
+    'alerts[].details.missing_rate':                                                    (R, None),  # ex: 0.85 — proporção 0–1
+    'alerts[].details.total_rows':                                                      (R, None),  # ex: 276 — total avaliado no missing_rate_high
     'alerts[].details.changes':                                                         (R, None),  # ex: list(3)
     'alerts[].details.changes[].categoria':                                             (R, None),  # ex: 'aberto'
     'alerts[].details.changes[].diff':                                                  (S, 'computamos de producao - treino na renderização'),

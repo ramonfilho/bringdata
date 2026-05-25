@@ -3167,10 +3167,23 @@ async def daily_monitoring_check_railway(
                 except Exception:
                     pass
 
+        # A railway_conn original foi fechada em 2715 (depois das 13 queries
+        # iniciais). O orchestrator precisa de conn viva pra compor o
+        # LeadRepository — antes era bug latente (orchestrator não usava o
+        # repo de fato); ficou visível após a Fatia A do refator que faz o
+        # consumo real. Abre uma conn dedicada com vida ligada ao orchestrator.
+        orchestrator_conn = pg8000.native.Connection(
+            host=os.environ['RAILWAY_DB_HOST'],
+            port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+            database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+            user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+            password=os.environ['RAILWAY_DB_PASSWORD'],
+            timeout=30,
+        )
         orchestrator = MonitoringOrchestrator(model_path=model_path, db=None,
                                               expected_decil_dist=expected_decil_dist,
                                               lead_scoring_pipeline=pipelines.get('devclub'),
-                                              railway_conn=railway_conn)
+                                              railway_conn=orchestrator_conn)
         # Propaga include_today_partial pro DataQualityMonitor.
         # Default OFF: cron das 6 AM não traz "Hoje parcial" (madrugada com sample irrelevante).
         # Manual: ?include_today_partial=true pra ver coluna Hoje em chamadas durante o dia.
@@ -3178,7 +3191,11 @@ async def daily_monitoring_check_railway(
             orchestrator.monitors['data_quality'].include_today_partial = bool(include_today_partial)
         except Exception:
             pass
-        result = orchestrator.run_daily_check(leads_data)
+        try:
+            result = orchestrator.run_daily_check(leads_data)
+        finally:
+            try: orchestrator_conn.close()
+            except Exception: pass
 
         # Substituir funnel_metrics e lead_quality_metrics pelos dados Railway
         result['funnel_metrics'] = railway_funnel_metrics
