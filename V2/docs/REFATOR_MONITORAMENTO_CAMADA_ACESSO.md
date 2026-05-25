@@ -1,6 +1,6 @@
 # Refator do monitoramento — camada de acesso a leads
 
-**Criado:** 2026-05-24 · **Status:** Etapa 1 concluída e commitada, Etapa 2 editada/testada (commit incerto), Etapas 3–7 pendentes.
+**Criado:** 2026-05-24 · **Atualizado:** 2026-05-24 — refator concluído (Etapas 1–7 fechadas). 2 follow-ups conhecidos no rodapé.
 
 > Doc de continuidade — escrito durante a sessão pra que, se o terminal do Claude travar, outra sessão consegue retomar sem perder contexto.
 
@@ -97,10 +97,35 @@ Maior em volume de código, mesma mecânica de troca de fonte. Detecta drift de 
 - `/validation/weekly` (relatório semanal em Excel + Slack) — parte que lê tabelas mortas vira `repo`; parte que lê Guru/Meta não muda.
 - `V2/src/monitoring/payload_schema.py` — estender com campos novos.
 
-### Etapa 7 — PENDENTE
-**Seção nova "📨 Pub/Sub 24h" no resumo diário do Slack + avaliar remoção do adaptador legado.**
+### Etapa 5.4 — CONCLUÍDA
+**Schema completo do ledger + consumer atualizado.**
 
-Bloco no digest mostrando, das últimas 24h: contagem por status, distribuição de decil, top erros. Lê do `repo`. Avaliar remover adaptador legado quando zero consumidores estiverem usando.
+- Commit: `2bd2a09`. Deploy: `smart-ads-api-00508-riy` a 100% de tráfego desde 2026-05-24 ~20:40 BRT.
+- DDL adicionou 8 colunas no `registros_ml`: `first_name`, `last_name`, `phone`, `fbp`, `fbc`, `user_agent`, `ip`, `has_computer`.
+- Consumer Pub/Sub passa a gravar todos os campos do payload (identidade, Meta tracking, sessão, hasComputer).
+- `LeadRecord` ganhou 8 campos opcionais; `RegistrosMLAdapter` seleciona e popula.
+- Critério: smoke end-to-end (insert + select + delete via ledger_row) bateu com payload simulado completo. Todos testes verdes.
+
+### Etapa 6 — PARCIALMENTE CONCLUÍDA
+**Migrar endpoints + validador.**
+
+- **6.1 — `utm_quality.py`** ✅ commit `7ca7b91`. `compute_utm_quality` recebe `repo` por injeção; `_aggregate` consome `LeadRecord`s; classificação de variante usa `record.variant` direto quando ledger novo, cai em fallback histórico via UTMs senão. Endpoint compõe a conn. 6/6 testes novos.
+- **6.2 — `payload_schema.py`**: sem mudança necessária neste momento. As migrações anteriores não alteraram o shape do JSON do daily-check. Reabrir quando a seção Pub/Sub 24h (Etapa 7) introduzir chaves novas no response.
+- **6.3 — `/validation/weekly` parcial**: marcado como follow-up. O script `src/validation/validate_ml_performance.py` (2723 linhas) lê de `Lead`+`leads_capi` mortas pra dados ≥ 18/02/2026. Relatórios cobrindo períodos pós-17/05 vão vir incompletos — migrar antes do primeiro relatório que inclua dados do sistema Pub/Sub (estimado ~02/06/2026).
+
+### Etapa 7 — CONCLUÍDA
+**Seção nova "📨 Pub/Sub 24h" no resumo diário do Slack.**
+
+- **7.1** ✅ commit `5e1449f`. `compute_pubsub_summary(repo)` em `src/monitoring/pubsub_summary.py` devolve `total`, `by_status` (4 canônicas), `decil_distribution` (D01–D10) e `top_errors` (limite 5). 7/7 testes verdes.
+- **7.2** ✅ commit `b86fb0a`. `MonitoringOrchestrator.run_daily_check` chama o sumário e expõe sob `pubsub_24h_summary` no response. `payload_schema.py` estendido com 21 paths novos.
+- **7.3** ✅ commit `5e78462`. `render_slack_blocks` (DM only) ganhou `_slack_pubsub_24h`: header + linha de total/status + decis com volume + top erros truncados em 200 chars. Silencia sozinho quando total=0 sem erros.
+
+---
+
+## Follow-ups conhecidos
+
+1. **Adaptador legado — avaliar remoção quando o ledger novo acumular 30 dias (≈22/06/2026).** A regra de desvio de score migra o baseline 30d pra `registros_ml` nesse momento; daí o adaptador legado fica sem consumidor e pode ser deletado.
+2. **Migrar `src/validation/validate_ml_performance.py` (2723 linhas) antes de ~02/06/2026.** É o script do relatório semanal. Lê de `Lead`/`leads_capi` mortas pra dados ≥ 18/02/2026 — relatórios cobrindo períodos pós-17/05 vão vir incompletos. Janela de 1 semana antes do primeiro relatório que inclua dados do sistema Pub/Sub.
 
 ---
 
