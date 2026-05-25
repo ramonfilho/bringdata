@@ -1661,7 +1661,11 @@ class DataQualityMonitor:
                 'Atualmente, qual a sua faixa salarial?': _pick_survey_value(s, 'Atualmente, qual a sua faixa salarial?', 'faixaSalarial'),
                 'Você possui cartão de crédito?':      _pick_survey_value(s, 'Você possui cartão de crédito?', 'cartaoCredito'),
                 'Já estudou programação?':             _pick_survey_value(s, 'Já estudou programação?', 'estudouProgramacao'),
-                'Tem computador/notebook?':            _pick_survey_value(s, 'Tem computador/notebook?', 'computador'),
+                # `has_computer` vive em coluna top-level no ledger novo (não
+                # dentro de `survey_responses`, que é o vocabulário do Pub/Sub).
+                # Fallback pra survey cobre o adaptador legado, que ainda tem
+                # `computador` dentro de pesquisa.
+                'Tem computador/notebook?':            (r.has_computer if r.has_computer else _pick_survey_value(s, 'Tem computador/notebook?', 'computador')),
                 'source':   r.utm_source,
                 'medium':   r.utm_medium,
                 'campaign': r.utm_campaign,
