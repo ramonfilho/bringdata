@@ -19,30 +19,27 @@ NÃO acka mensagens — permite re-rodar contra o mesmo backlog em canary.
 
 Off por padrão via env `PUBSUB_CAPI_ENABLED`. Deploy ≠ ligar.
 
-Reuso total: `pipeline.run`, `pipeline.get_ab_variant`,
-`pipeline.get_variant_predictor`, `atribuir_decil_por_threshold`,
-`send_batch_events`. Nenhuma transformação reimplementada — paridade
-byte-a-byte com o fluxo Lead (Gate C.1/C.2 trivial).
+Reuso total: `score_lead_from_payload` (casa do scoring em src/scoring/),
+`pipeline.get_ab_variant`, `send_batch_events`. Nenhuma transformação
+reimplementada — paridade byte-a-byte com o consumer antigo, validada
+pelo scripts/validar_paridade_scoring.py.
 """
 import json
 import logging
 import os
-import tempfile
 import time
-from collections import defaultdict
 from typing import Dict, Iterable, List, Optional, Tuple
 
-from api.railway_mapping import traduzir_survey_slugs
-from api.survey_mapping import survey_lead_to_sheets_row
 from src.core.payload_normalization import (
     payload_to_enrich,
     payload_to_survey_dict,
     payload_to_utm,
 )
+from src.scoring.service import score_lead_from_payload
 
-# pandas, send_batch_events e atribuir_decil_por_threshold são importados
-# lazy dentro de process_pending_pubsub — evita puxar o SDK do Facebook
-# (init no import de capi_integration) só pra testar as funções puras.
+# send_batch_events é importado lazy dentro de process_pending_pubsub —
+# evita puxar o SDK do Facebook (init no import de capi_integration) só
+# pra testar as funções puras.
 
 logger = logging.getLogger(__name__)
 
@@ -227,9 +224,7 @@ def process_pending_pubsub(
     para não reciclar — payload inválido/slug desconhecido não vai melhorar
     sendo reentregue.
     """
-    import pandas as pd
     from api.capi_integration import send_batch_events
-    from src.model.decil_thresholds import atribuir_decil_por_threshold
 
     allowlist = set(pipeline._client_config.capi.utm_source_allowlist or [])
     sub_path = subscription_path()
@@ -344,74 +339,30 @@ def process_pending_pubsub(
         else:
             to_score.append((ack_id, payload, survey_dict, utm, enrich))
 
-    # 4. Scoring por variante (mesmo padrão de survey_branch — reuso total)
+    # 4. Scoring — uma chamada da casa do scoring (src/scoring/service.py)
+    # por lead. A casa faz payload→sheets_row→preprocess→predict em memória,
+    # sem CSV temporário, e devolve score+decil+variant. O ab_variant_config
+    # (objeto da variante A/B, usado abaixo pra montar CAPI) é resolvido
+    # de novo aqui — chamada barata, evita inflar o DTO.
     scored: Dict[str, Tuple[float, str, object, Optional[str]]] = {}
-    if to_score:
-        sheets, idmap, ab_per, vname_per = [], [], [], []
-        for _, payload, survey_dict, utm, enrich in to_score:
-            sr = survey_lead_to_sheets_row(
-                survey_dict, utm, enrich, client_config=pipeline._client_config)
-            ab_v = pipeline.get_ab_variant(
-                {"utm_campaign": utm.get("campaign"),
-                 "utm_content":  utm.get("content"),
-                 "utm_source":   utm.get("source"),
-                 "utm_medium":   utm.get("medium"),
-                 "utm_term":     utm.get("term")},
-                event_source_url=utm.get("url"),
-            )
-            sheets.append(sr)
-            idmap.append(payload["eventId"])
-            ab_per.append(ab_v)
-            vname_per.append(_variant_name(pipeline, ab_v))
-
-        groups = defaultdict(list)
-        for i, vn in enumerate(vname_per):
-            groups[vn].append(i)
-        for vn, idxs in groups.items():
-            predictor_ov = (pipeline.get_variant_predictor(vn) if vn
-                            else pipeline.predictor)
-            if vn:
-                vcfg = pipeline._ab_test_config.variants.get(vn)
-            else:
-                crid = getattr(pipeline.predictor, "mlflow_run_id", None)
-                vcfg = next(
-                    (v for v in pipeline._ab_test_config.variants.values()
-                     if v.run_id == crid), None
-                ) if crid else None
-            enc_ov = vcfg.encoding_overrides if vcfg else None
-            gdf = pd.DataFrame([sheets[i] for i in idxs])
-            tmp = None
-            res = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".csv", delete=False
-                ) as f:
-                    gdf.to_csv(f, index=False)
-                    tmp = f.name
-                res = pipeline.run(
-                    tmp, with_predictions=True,
-                    predictor_override=predictor_ov,
-                    encoding_overrides=enc_ov,
-                )
-            finally:
-                if tmp and os.path.exists(tmp):
-                    os.remove(tmp)
-            if res is None or len(res) == 0:
-                logger.warning(f"[pubsub_branch] pipeline vazio p/ grupo {vn}")
-                continue
-            thr = predictor_ov.metadata.get(
-                "decil_thresholds", {}).get("thresholds", {})
-            for j, oi in enumerate(idxs):
-                try:
-                    sc = float(res["lead_score"].iloc[j])
-                    dc = (atribuir_decil_por_threshold(sc, thr)
-                          if thr else "D05")
-                    scored[idmap[oi]] = (sc, dc, ab_per[oi], vname_per[oi])
-                except Exception as e:
-                    n_err += 1
-                    logger.warning(
-                        f"[pubsub_branch] erro score {idmap[oi]}: {e}"
-                    )
+    for _, payload, survey_dict, utm, enrich in to_score:
+        eid = payload["eventId"]
+        try:
+            exp = score_lead_from_payload(payload, pipeline)
+        except Exception as e:
+            n_err += 1
+            logger.warning(f"[pubsub_branch] erro score {eid}: {e}")
+            continue
+        ab_v = pipeline.get_ab_variant(
+            {"utm_campaign": utm.get("campaign"),
+             "utm_content":  utm.get("content"),
+             "utm_source":   utm.get("source"),
+             "utm_medium":   utm.get("medium"),
+             "utm_term":     utm.get("term")},
+            event_source_url=utm.get("url"),
+        )
+        dc = f"D{exp.decil:02d}"
+        scored[eid] = (exp.lead_score, dc, ab_v, exp.variant)
 
     # 5. Montar CAPI + ledger dos enviáveis
     capi_leads: List[Dict] = []
