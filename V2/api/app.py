@@ -2544,13 +2544,21 @@ async def daily_monitoring_check_railway(
         # 1c. Todos os leads com score (para métricas de qualidade por período)
         # UTMs + pageUrl extras pra split por variante A/B (baseline ponderado dos decis).
         # _calc_quality / _after / _decil_dist usam só [0]/[1]/[2], extras são ignorados.
-        quality_rows = railway_conn.run(
-            'SELECT "leadScore"::float, decil::int, "createdAt", '
-            '       source, medium, campaign, content, term, "pageUrl" '
-            'FROM "Lead" '
-            'WHERE "leadScore" IS NOT NULL AND decil IS NOT NULL '
-            'ORDER BY "createdAt" DESC'
+        # Fatia D do refator: quality_rows agora vem via LeadRepository
+        # (ledger novo) em vez da Lead morta. Histórico máximo = 90 dias
+        # (limite do repository); volume atual ~270/dia → ~24k em 90d, bem
+        # abaixo do limit. Quando o ledger crescer, as janelas histórico/mês
+        # crescem junto naturalmente.
+        from src.monitoring.daily_check_aggregations import records_to_quality_rows
+        _quality_window_start = now_utc - timedelta(days=90)
+        _records_90d = _repo_leads.leads_in_range(
+            _quality_window_start, now_utc, limit=50_000,
         )
+        _records_90d_scored = [r for r in _records_90d if r.score is not None and r.decil is not None]
+        # Mesmo schema da query antiga: (leadScore, decil, createdAt, source,
+        # medium, campaign, content, term, pageUrl). Consumidores downstream
+        # (decil_dist, _after, _calc_quality) continuam funcionando intactos.
+        quality_rows = records_to_quality_rows(_records_90d_scored)
 
         # 1d. Leads do lançamento atual — exclusivo para revenue_forecast.
         # Se start_date/end_date foram passados, usa essa janela.

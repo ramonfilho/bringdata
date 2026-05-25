@@ -81,6 +81,32 @@ def _fb_pct(num: int, den: int) -> float:
     return round(num / den * 100, 1) if den else 0.0
 
 
+def records_to_quality_rows(records: List[LeadRecord]) -> list:
+    """Converte `list[LeadRecord]` em `list[tuple]` com mesmo schema da
+    antiga query `quality_rows` na Lead morta:
+        (leadScore, decil, createdAt, source, medium, campaign, content, term, pageUrl)
+
+    Permite que o código downstream do daily-check (séries temporais, decil
+    distribution, expected_conversion) continue funcionando intacto enquanto
+    a fonte mudou. Removível em Fatia E quando esses consumidores também
+    forem migrados pra operar direto em LeadRecord.
+    """
+    return [
+        (
+            float(r.score) if r.score is not None else None,
+            r.decil,
+            r.criado_em,
+            r.utm_source,
+            r.utm_medium,
+            r.utm_campaign,
+            r.utm_content,
+            r.utm_term,
+            r.utm_url,
+        )
+        for r in records
+    ]
+
+
 def compute_fbp_fbc_rolling(
     records_7d: List[LeadRecord],
     *,
