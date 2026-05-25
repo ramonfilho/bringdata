@@ -136,6 +136,8 @@ def extract_view(payload: dict, *, audit: bool = True) -> dict:
         'skipped':           get_skipped_summary(payload),
         # Resolução da janela do LF atual; consumido só pelo aviso de fallback no DM.
         'launch_resolution': payload.get('launch_resolution') or {},
+        # Sumário do consumer Pub/Sub (24h) — Etapa 7 do refator do monitoramento.
+        'pubsub_24h':        payload.get('pubsub_24h_summary', {}) or {},
     }
 
 
@@ -804,9 +806,67 @@ def render_slack_blocks(view: dict) -> list[dict]:
     blocks.append({'type': 'divider'})
     _slack_lead_quality(view, blocks)
     blocks.append({'type': 'divider'})
+    _slack_pubsub_24h(view, blocks)  # Etapa 7 do refator do monitoramento
+    blocks.append({'type': 'divider'})
     _slack_revenue(view, blocks)
     _slack_skipped_footer(view, blocks)
     return blocks
+
+
+def _slack_pubsub_24h(v: dict, B: list):
+    """Bloco "📨 Pub/Sub 24h" — saúde do consumer do ledger novo.
+
+    Mostra:
+      - Total + quebra por status (sucesso/erro/pulados).
+      - Distribuição por decil dos sucessos (compacto, só decis com volume).
+      - Top mensagens de erro.
+
+    Skipado silenciosamente se a fonte não trouxe dados (total=0 e sem erros).
+    """
+    ps = v.get('pubsub_24h') or {}
+    total = ps.get('total', 0) or 0
+    by_status = ps.get('by_status') or {}
+    decis = ps.get('decil_distribution') or {}
+    top_errs = ps.get('top_errors') or []
+
+    if total == 0 and not top_errs:
+        return  # nada útil pra mostrar
+
+    B.append({'type': 'header',
+              'text': {'type': 'plain_text', 'text': '📨 Pub/Sub 24h', 'emoji': True}})
+
+    ok   = by_status.get('success', 0) or 0
+    err  = by_status.get('error', 0) or 0
+    sall = by_status.get('skipped_allowlist', 0) or 0
+    smd  = by_status.get('skipped_missing_data', 0) or 0
+    status_line = (
+        f"*{total}* leads · ✅ {ok} sucesso · ❌ {err} erro · "
+        f"⏭️ {sall} fora da allowlist · 🚫 {smd} faltou fbp/fbc/computador"
+    )
+    B.append({'type': 'section',
+              'text': {'type': 'mrkdwn', 'text': status_line}})
+
+    # Distribuição por decil dos sucessos — só decis com volume, em ordem D10→D01
+    com_volume = [(d, decis.get(d, 0)) for d in
+                  ('D10','D09','D08','D07','D06','D05','D04','D03','D02','D01')
+                  if (decis.get(d, 0) or 0) > 0]
+    if com_volume:
+        decil_line = '*Decis dos sucessos:* ' + ' · '.join(
+            f'{d}: {n}' for d, n in com_volume
+        )
+        B.append({'type': 'section',
+                  'text': {'type': 'mrkdwn', 'text': decil_line}})
+
+    # Top erros — limita a mensagem em 200 chars pra não estourar bloco Slack
+    if top_errs:
+        lines = ['*Top erros:*']
+        for e in top_errs:
+            msg = (e.get('message') or '').strip()
+            if len(msg) > 200:
+                msg = msg[:197] + '...'
+            lines.append(f"• `{e.get('count', 0)}×` {msg}")
+        B.append({'type': 'section',
+                  'text': {'type': 'mrkdwn', 'text': '\n'.join(lines)}})
 
 
 def render_slack_blocks_client(view: dict) -> list[dict]:
