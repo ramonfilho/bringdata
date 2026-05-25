@@ -2723,13 +2723,40 @@ async def daily_monitoring_check_railway(
         # ------------------------------------------------------------------
         if not scored_rows:
             logger.info(f"⚠️ Railway: nenhum lead com score no período {window_label}")
+            # Mesmo sem leads na Lead antiga (morta desde 2026-05-17), os
+            # sumários novos (ledger novo e logs T1-16) têm vida própria.
+            # Composição local: abre conn pg8000 → repo registros_ml → calcula.
+            _ps_early, _td_early = None, None
+            try:
+                from src.data import compose_repository
+                from src.monitoring.pubsub_summary import compute_pubsub_summary
+                from src.monitoring.training_drift_summary import compute_training_drift_summary
+                _early_conn = pg8000.native.Connection(
+                    host=os.environ['RAILWAY_DB_HOST'],
+                    port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+                    database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+                    user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+                    password=os.environ['RAILWAY_DB_PASSWORD'],
+                    timeout=30,
+                )
+                try:
+                    _early_repo = compose_repository('registros_ml', railway_conn=_early_conn)
+                    _ps_early = compute_pubsub_summary(_early_repo)
+                finally:
+                    try: _early_conn.close()
+                    except Exception: pass
+                _td_early = compute_training_drift_summary()
+            except Exception as _e:
+                logger.warning(f"⚠️ early-return: falha calculando sumários top-level: {_e}")
             return DailyCheckResponse(
                 total_alerts=0,
                 alerts_by_severity={"HIGH": 0, "MEDIUM": 0, "LOW": 0},
                 alerts_by_category={},
                 alerts=[],
                 critical_summary=f"Nenhum lead Railway no período {window_label}.",
-                timestamp=datetime.now().isoformat()
+                timestamp=datetime.now().isoformat(),
+                pubsub_24h_summary=_ps_early,
+                training_drift_24h_summary=_td_early,
             )
 
         logger.info(f"🔍 Railway monitoring: {len(scored_rows)} leads com score — {window_label}")
