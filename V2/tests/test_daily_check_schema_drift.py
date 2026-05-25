@@ -93,10 +93,75 @@ def test_pydantic_nao_tem_chave_extra_alem_do_schema():
         )
 
 
+def _construcoes_daily_check_response_via_ast() -> list[set[str]]:
+    """Via análise estática (AST), encontra todas as chamadas
+    `DailyCheckResponse(...)` em api/app.py e devolve o set de kwargs de cada.
+
+    Cada chamada é UMA fonte de drift potencial: campos opcionais do Pydantic
+    que não são passados ficam silenciosamente None. Foi o terceiro bug
+    descoberto em 2026-05-25 (depois do schema fix): o endpoint constrói
+    DailyCheckResponse campo-a-campo, sem **result, então adicionar campo no
+    model não basta — precisa passar na construção também.
+    """
+    import ast
+    app_path = os.path.join(os.path.dirname(__file__), '..', 'api', 'app.py')
+    with open(app_path) as f:
+        tree = ast.parse(f.read())
+    construcoes: list[set[str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        # `DailyCheckResponse(...)` aparece como Name (após import direto)
+        if isinstance(func, ast.Name) and func.id == 'DailyCheckResponse':
+            kwargs = {kw.arg for kw in node.keywords if kw.arg}
+            construcoes.append(kwargs)
+    return construcoes
+
+
+# Campos opcionais do Pydantic que, se não passados na construção, viram None
+# silenciosamente. Adicionamos aqui APENAS os campos cuja ausência foi origem
+# de bug — pra não inflar o teste com falsos positivos (campos como
+# `revenue_forecast` legitimamente pode ser None em alguns caminhos).
+_CAMPOS_OBRIGATORIOS_NAS_CONSTRUCOES_RICAS = {
+    'pubsub_24h_summary',
+    'training_drift_24h_summary',
+}
+
+
+def test_construcoes_passam_campos_obrigatorios():
+    """Toda construção `DailyCheckResponse(...)` que passa funnel_metrics
+    (= "construção rica", caminho de daily-check com dados reais) precisa
+    também passar os campos listados em _CAMPOS_OBRIGATORIOS_NAS_CONSTRUCOES_RICAS.
+
+    Construções "minimalistas" (early return sem dados — só passa total_alerts,
+    alerts_by_*) são exceção: legítimo não ter esses campos.
+    """
+    construcoes = _construcoes_daily_check_response_via_ast()
+    if not construcoes:
+        raise AssertionError("nenhuma construção DailyCheckResponse(...) encontrada via AST")
+    faltam = []
+    for kwargs in construcoes:
+        if 'funnel_metrics' not in kwargs:
+            continue  # construção minimalista, OK
+        missing = _CAMPOS_OBRIGATORIOS_NAS_CONSTRUCOES_RICAS - kwargs
+        if missing:
+            faltam.append(sorted(missing))
+    if faltam:
+        raise AssertionError(
+            f"{len(faltam)} construção(ões) rica(s) de DailyCheckResponse "
+            f"NÃO passam campos obrigatórios: {faltam}.\n"
+            f"Adicione `pubsub_24h_summary=result.get('pubsub_24h_summary')` "
+            f"e similares na construção. Sem isso, Pydantic preenche com None "
+            f"silenciosamente e o digest do Slack pula o bloco."
+        )
+
+
 if __name__ == "__main__":
     tests = [
         test_payload_schema_todas_top_level_keys_no_pydantic,
         test_pydantic_nao_tem_chave_extra_alem_do_schema,
+        test_construcoes_passam_campos_obrigatorios,
     ]
     n_pass = n_fail = 0
     for t in tests:

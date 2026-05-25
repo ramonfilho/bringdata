@@ -3455,6 +3455,8 @@ async def daily_monitoring_check_railway(
             traffic_metrics=traffic_metrics,
             operational_routines=result.get('operational_routines'),
             launch_resolution=launch_resolution_payload,
+            pubsub_24h_summary=result.get('pubsub_24h_summary'),
+            training_drift_24h_summary=result.get('training_drift_24h_summary'),
         )
 
     except FileNotFoundError as e:
@@ -3916,6 +3918,8 @@ async def daily_monitoring_check(
             funnel_metrics=result.get('funnel_metrics'),
             lead_quality_metrics=result.get('lead_quality_metrics'),
             operational_routines=result.get('operational_routines'),
+            pubsub_24h_summary=result.get('pubsub_24h_summary'),
+            training_drift_24h_summary=result.get('training_drift_24h_summary'),
         )
 
     except FileNotFoundError as e:
