@@ -2475,71 +2475,18 @@ async def daily_monitoring_check_railway(
         # as fontes — nada é eliminado da observação.
         # JANELA = dia BRT anterior completo (00:00→23:59 ontem), igual o resto
         # do digest (drift "Ontem") — NÃO rolling 24h.
+        # Fatia E do refator: 13 queries SQL inline na Lead morta substituídas
+        # por agregação pura sobre LeadRecord vindo do LeadRepository.
+        from src.monitoring.daily_check_aggregations import compute_unified_funnel
         _uf_brt = _tz(timedelta(hours=-3))
         _uf_today_mid = datetime.now(_uf_brt).replace(hour=0, minute=0, second=0, microsecond=0)
         _uf_e = _uf_today_mid.astimezone(_tz.utc)                       # hoje 00:00 BRT
         _uf_s = (_uf_today_mid - timedelta(days=1)).astimezone(_tz.utc)  # ontem 00:00 BRT
         _uf_date_brt = (_uf_today_mid - timedelta(days=1)).strftime('%d/%m')
-        _SRC_META = "LOWER(TRIM(source)) IN ('facebook-ads','fb','ig')"
-        _SRC_GGL  = "LOWER(TRIM(source)) = 'google-ads'"
-        _NEITHER  = f"NOT ({_SRC_META}) AND NOT ({_SRC_GGL})"
-        _uf_row = railway_conn.run(
-            'SELECT '
-            '  COUNT(*) AS pq_t, '
-            f' COUNT(*) FILTER (WHERE {_SRC_META}) AS pq_fb, '
-            f' COUNT(*) FILTER (WHERE {_SRC_GGL}) AS pq_g, '
-            f' COUNT(*) FILTER (WHERE {_NEITHER}) AS pq_o, '
-            '  COUNT(*) FILTER (WHERE "leadScore" IS NOT NULL) AS sc_t, '
-            f' COUNT(*) FILTER (WHERE "leadScore" IS NOT NULL AND {_SRC_META}) AS sc_fb, '
-            f' COUNT(*) FILTER (WHERE "leadScore" IS NOT NULL AND {_SRC_GGL}) AS sc_g, '
-            f' COUNT(*) FILTER (WHERE "leadScore" IS NOT NULL AND {_NEITHER}) AS sc_o, '
-            '  COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL AND "capiStatus" NOT IN (\'blocked\',\'skipped\')) AS ce_t, '
-            f' COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL AND "capiStatus" NOT IN (\'blocked\',\'skipped\') AND {_SRC_META}) AS ce_fb, '
-            f' COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL AND "capiStatus" NOT IN (\'blocked\',\'skipped\') AND {_SRC_GGL}) AS ce_g, '
-            f' COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL AND "capiStatus" NOT IN (\'blocked\',\'skipped\') AND {_NEITHER}) AS ce_o, '
-            '  COUNT(*) FILTER (WHERE "capiStatus" = \'success\') AS ac_t, '
-            f' COUNT(*) FILTER (WHERE "capiStatus" = \'success\' AND {_SRC_META}) AS ac_fb, '
-            f' COUNT(*) FILTER (WHERE "capiStatus" = \'success\' AND {_SRC_GGL}) AS ac_g, '
-            f' COUNT(*) FILTER (WHERE "capiStatus" = \'success\' AND {_NEITHER}) AS ac_o '
-            'FROM "Lead" WHERE "createdAt" >= :s AND "createdAt" < :e',
-            s=_uf_s, e=_uf_e,
+        _uf_records = _repo_leads.leads_in_range(_uf_s, _uf_e)
+        unified_funnel = compute_unified_funnel(
+            _uf_records, date_brt_label=_uf_date_brt,
         )
-        _u = dict(zip(
-            ['pq_t', 'pq_fb', 'pq_g', 'pq_o', 'sc_t', 'sc_fb', 'sc_g', 'sc_o',
-             'ce_t', 'ce_fb', 'ce_g', 'ce_o', 'ac_t', 'ac_fb', 'ac_g', 'ac_o'],
-            _uf_row[0],
-        ))
-        _uf_capi = railway_conn.run(
-            'SELECT COUNT(*) FROM leads_capi WHERE created_at >= :s AND created_at < :e',
-            s=_uf_s, e=_uf_e,
-        )[0][0] or 0
-        _uf_ph = railway_conn.run(
-            'SELECT COUNT(*) AS n, '
-            '  COUNT(*) FILTER (WHERE telefone IS NOT NULL AND telefone <> \'\') AS p '
-            'FROM "Lead" WHERE "createdAt" >= :s AND "createdAt" < :e',
-            s=_uf_s, e=_uf_e,
-        )[0]
-        _uf_phone_pct = round((_uf_ph[1] or 0) / _uf_ph[0] * 100, 1) if (_uf_ph[0] or 0) else 0.0
-
-        def _uf_stage(p: str) -> dict:
-            return {
-                'total': _u[f'{p}_t']  or 0,
-                'fb':    _u[f'{p}_fb'] or 0,
-                'ggl':   _u[f'{p}_g']  or 0,
-                'outr':  _u[f'{p}_o']  or 0,
-            }
-
-        unified_funnel = {
-            'window': {'date_brt': _uf_date_brt, 'label': 'dia anterior'},
-            'capture': {'leads_capi': _uf_capi},
-            'pipeline': {
-                'pesquisa':     _uf_stage('pq'),
-                'scoreado':     _uf_stage('sc'),
-                'capi_enviado': _uf_stage('ce'),
-                'aceito':       _uf_stage('ac'),
-            },
-            'phone_pct': _uf_phone_pct,
-        }
 
         # 1c. Todos os leads com score (para métricas de qualidade por período)
         # UTMs + pageUrl extras pra split por variante A/B (baseline ponderado dos decis).
@@ -2988,50 +2935,45 @@ async def daily_monitoring_check_railway(
         # Qualidade do LF de referência — apenas LF ativo no launches.yaml,
         # sem fallback ao encerrado (vide commit que adicionou src/core/launches.py).
         try:
-            # lf_referencia = qualidade do LF ativo no launches.yaml.
-            # Sem fallback ao último encerrado (bug detectado em 13/05/2026: rotulava
-            # LF54 como atual com LF55 já em captação). Se YAML não tem LF ativo,
-            # o bloco lf_referencia simplesmente não aparece no payload — operador
-            # precisa atualizar configs/launches.yaml.
-            from src.core.launches import resolve_active_launch_brt
-            _active = resolve_active_launch_brt()
-            if _active is not None:
-                _ln = _active.name
-                _cs_dt = datetime(_active.cap_start.year, _active.cap_start.month, _active.cap_start.day,
-                                  0, 0, 0, tzinfo=brt).astimezone(_tz.utc)
-                _ce_dt = datetime(_active.cap_end.year, _active.cap_end.month, _active.cap_end.day,
-                                  23, 59, 59, tzinfo=brt).astimezone(_tz.utc)
-                _lf_rows = [r for r in quality_rows
-                            if r[2] is not None and (
-                                r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
-                            ) >= _cs_dt and (
-                                r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
-                            ) <= _ce_dt]
-                railway_lead_quality['lf_referencia'] = _calc_quality(_lf_rows)
-                railway_lead_quality['lf_referencia_label'] = _ln
-                # Mesmo motivo do override das 4 janelas acima: usar TOTAL de
-                # leads no LF (via _sfm_db.periodo_query.db_leads), não só os
-                # scoreados. periodo_query e lf_referencia resolvem pro mesmo
-                # launch_window quando o YAML tem LF ativo.
-                try:
-                    if 'periodo_query' in _sfm_db:
-                        railway_lead_quality['lf_referencia']['count'] = int(
-                            _sfm_db['periodo_query'].get('db_leads', 0) or 0
-                        )
-                except Exception as _ce:
-                    logger.warning(f"⚠️ lead_quality lf_referencia count override falhou: {_ce}")
-                # Decis distribution do LF ativo — pra barra horizontal no digest cliente
-                _lf_n_c, _lf_n_ch = _split_by_variant(_lf_rows)
-                railway_lead_quality['decil_distribution_current_launch'] = {
-                    'distribution': _decil_dist(_lf_rows),
-                    'total': len(_lf_rows),
-                    'window_label': f"{_ln} ({_active.cap_start.strftime('%d/%m')}→{_active.cap_end.strftime('%d/%m')} BRT)",
-                    'baseline': _weighted_baseline(_lf_n_c, _lf_n_ch),
-                }
-                logger.info(f"📊 lf_referencia: {_ln} "
-                            f"({_active.cap_start}→{_active.cap_end}, n={len(_lf_rows)})")
-            else:
-                logger.info("📊 lf_referencia: sem LF ativo no launches.yaml — bloco omitido")
+            # lf_referencia = qualidade do LF atual. Usa `resolve_launch_window_brt`
+            # (não `resolve_active_launch_brt`): se o LF atual não está cadastrado
+            # no `launches.yaml`, cai no fallback heurístico (toda terça começa um
+            # LF) e popula com nome inferido — assim a tabela de Drift de Decis no
+            # DM aparece mesmo com YAML defasado. O aviso no topo da DM
+            # (`_slack_launch_fallback_notice_dm`) lembra de cadastrar.
+            from src.core.launches import resolve_launch_window_brt
+            _lw = resolve_launch_window_brt()
+            _today_brt = datetime.now(brt).date()
+            _cap_end_eff = _lw.cap_end or _today_brt
+            _ln = _lw.lf_name or 'LF atual (inferido)'
+            _cs_dt = datetime(_lw.cap_start.year, _lw.cap_start.month, _lw.cap_start.day,
+                              0, 0, 0, tzinfo=brt).astimezone(_tz.utc)
+            _ce_dt = datetime(_cap_end_eff.year, _cap_end_eff.month, _cap_end_eff.day,
+                              23, 59, 59, tzinfo=brt).astimezone(_tz.utc)
+            _lf_rows = [r for r in quality_rows
+                        if r[2] is not None and (
+                            r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
+                        ) >= _cs_dt and (
+                            r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
+                        ) <= _ce_dt]
+            railway_lead_quality['lf_referencia'] = _calc_quality(_lf_rows)
+            railway_lead_quality['lf_referencia_label'] = _ln
+            try:
+                if 'periodo_query' in _sfm_db:
+                    railway_lead_quality['lf_referencia']['count'] = int(
+                        _sfm_db['periodo_query'].get('db_leads', 0) or 0
+                    )
+            except Exception as _ce:
+                logger.warning(f"⚠️ lead_quality lf_referencia count override falhou: {_ce}")
+            _lf_n_c, _lf_n_ch = _split_by_variant(_lf_rows)
+            railway_lead_quality['decil_distribution_current_launch'] = {
+                'distribution': _decil_dist(_lf_rows),
+                'total': len(_lf_rows),
+                'window_label': f"{_ln} ({_lw.cap_start.strftime('%d/%m')}→{_cap_end_eff.strftime('%d/%m')} BRT)",
+                'baseline': _weighted_baseline(_lf_n_c, _lf_n_ch),
+            }
+            logger.info(f"📊 lf_referencia: {_ln} "
+                        f"({_lw.cap_start}→{_cap_end_eff}, source={_lw.source}, n={len(_lf_rows)})")
         except Exception as _lf_e:
             logger.warning(f"⚠️ lf_referencia falhou: {_lf_e}")
 

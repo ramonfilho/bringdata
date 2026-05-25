@@ -26,6 +26,89 @@ from ..data.lead_record import LeadRecord
 
 _STATUS_TENTOU_CAPI = ('success', 'error')
 
+_SRC_META = frozenset({'facebook-ads', 'fb', 'ig'})
+_SRC_GGL  = frozenset({'google-ads'})
+
+
+def _classify_source(utm_source: str | None) -> str:
+    """Bucket de origem pra split fb/ggl/outr no unified_funnel.
+
+    fb  = facebook-ads / fb / ig
+    ggl = google-ads
+    outr = qualquer outra coisa (orgânico, tiktok, sem utm, etc.)
+    """
+    s = (utm_source or '').strip().lower()
+    if s in _SRC_META: return 'fb'
+    if s in _SRC_GGL:  return 'ggl'
+    return 'outr'
+
+
+def compute_unified_funnel(
+    records: List[LeadRecord],
+    *,
+    date_brt_label: str,
+) -> Dict[str, Any]:
+    """Funil completo (todas as fontes) com split fb/ggl/outr em cada estágio.
+
+    Substitui o bloco SQL inline de 13+ queries em app.py que lia da Lead
+    morta (`createdAt`, `leadScore`, `capiSentAt`, `capiStatus`). Agora opera
+    sobre `list[LeadRecord]` vindo do `_repo.leads_in_range(ontem, hoje)`.
+
+    Estágios:
+      - capture.leads_capi = leads "Meta-elegíveis" (status_envio != 'skipped_allowlist').
+        Equivale ao count antigo `FROM leads_capi WHERE created_at IN [s,e]` —
+        a tabela `leads_capi` parou de receber em 17/05, então o ledger novo
+        é a fonte. Definição: "passou pelo CAPI" = não foi pulado por allowlist.
+      - pipeline.pesquisa     = total de leads no range.
+      - pipeline.scoreado     = score IS NOT NULL.
+      - pipeline.capi_enviado = status_envio in {'success','error'} (tentou).
+      - pipeline.aceito       = status_envio == 'success'.
+
+    phone_pct = % de leads no range que têm phone preenchido (proxy de
+    qualidade da captação — mesma definição que existia antes).
+
+    Args:
+        records: leads do dia anterior BRT (00:00→23:59).
+        date_brt_label: ex '24/05' — vai pro window.date_brt.
+
+    Returns:
+        dict no mesmo schema do `unified_funnel` antigo.
+    """
+    stages = {'pesquisa':     {'total': 0, 'fb': 0, 'ggl': 0, 'outr': 0},
+              'scoreado':     {'total': 0, 'fb': 0, 'ggl': 0, 'outr': 0},
+              'capi_enviado': {'total': 0, 'fb': 0, 'ggl': 0, 'outr': 0},
+              'aceito':       {'total': 0, 'fb': 0, 'ggl': 0, 'outr': 0}}
+    leads_capi = 0
+    phone_ok = 0
+    total = len(records)
+
+    for r in records:
+        b = _classify_source(r.utm_source)
+        stages['pesquisa']['total'] += 1
+        stages['pesquisa'][b] += 1
+        if r.score is not None:
+            stages['scoreado']['total'] += 1
+            stages['scoreado'][b] += 1
+        if r.status_envio in _STATUS_TENTOU_CAPI:
+            stages['capi_enviado']['total'] += 1
+            stages['capi_enviado'][b] += 1
+        if r.status_envio == 'success':
+            stages['aceito']['total'] += 1
+            stages['aceito'][b] += 1
+        if r.status_envio != 'skipped_allowlist':
+            leads_capi += 1
+        if r.phone:
+            phone_ok += 1
+
+    phone_pct = round(phone_ok / total * 100, 1) if total else 0.0
+
+    return {
+        'window':   {'date_brt': date_brt_label, 'label': 'dia anterior'},
+        'capture':  {'leads_capi': leads_capi},
+        'pipeline': stages,
+        'phone_pct': phone_pct,
+    }
+
 
 def compute_stats_window(records: List[LeadRecord]) -> Dict[str, int]:
     """Agregação total/scored/capi_sent/success/error/with_phone numa janela.
