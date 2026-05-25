@@ -489,7 +489,7 @@ def _render_text_distribution_drifts_consolidated(alerts: list, L: list):
         by_col.setdefault(col, []).append(a)
 
     for col, group in by_col.items():
-        L.append(f'Mudança na UTM {_humanize_feature(col)}:')
+        L.append(f'Drift de proporções — {_humanize_feature(col)}:')
         for a in group:
             d = a.get('details', {}) or {}
             variant = _variant_label(d.get('variant_name', '?'))
@@ -777,7 +777,7 @@ def _render_text_actionable(v: dict, L: list):
                 variant = _variant_label(m.group(1).strip())
                 col = m.group(2).strip()
                 n = m.group(3)
-                L.append(f"    {n} mudanças nas proporções da UTM {col} para o modelo {variant}")
+                L.append(f"    {n} mudanças nas proporções de {col} para o modelo {variant}")
                 continue
         # Fallback genérico
         L.append(f"    [{a.get('type','?')}] {_short(msg.replace(chr(10),' '), 140)}")
@@ -794,14 +794,19 @@ def _render_text_skipped_footer(v: dict, L: list):
 # ──────────────────────────────────────────────────────────────────────────
 
 def render_slack_blocks(view: dict) -> list[dict]:
-    """View 'DM' — tudo que não vai pro cliente (severity, alertas, funil, lead
-    quality completo, survey, revenue, tráfego). A/B test e drifts de público
-    e decis viraram exclusivos do cliente (render_slack_blocks_client)."""
+    """View 'DM' — visão completa do operador. Inclui alertas, funil,
+    lead quality, drift de público (geral e por A/B), drift de score
+    (decis) e distribuições de decis por janela.
+
+    Antes (commits até 25/05/2026), drift de público e decis ficavam só
+    na view do cliente. Trouxemos pro DM porque a view do cliente está
+    desligada — sem isso, o operador perdia visibilidade dessas tabelas.
+    """
     blocks: list[dict] = []
     _slack_header(view, blocks)
     _slack_launch_fallback_notice_dm(view, blocks)  # DM-only — no-op se YAML está em dia
     blocks.append({'type': 'divider'})
-    _slack_alerts(view, blocks, include_audience_drift=False)
+    _slack_alerts(view, blocks, include_audience_drift=True)
     blocks.append({'type': 'divider'})
     _slack_unified_funnel(view, blocks)   # substitui _slack_funnel + _slack_traffic
     blocks.append({'type': 'divider'})
@@ -809,11 +814,89 @@ def render_slack_blocks(view: dict) -> list[dict]:
     blocks.append({'type': 'divider'})
     _slack_pubsub_24h(view, blocks)  # Etapa 7 do refator do monitoramento
     blocks.append({'type': 'divider'})
-    _slack_training_drift_24h(view, blocks)  # Paridade treino × produção (T1-16)
+    _slack_training_drift_24h(view, blocks)  # Features OHE zeradas em batch (T1-16)
+    blocks.append({'type': 'divider'})
+    _slack_audience_drift_by_variant_dm(view, blocks)  # Drift público por A/B
+    _slack_score_distribution_change_dm(view, blocks)  # Drift de Score (decis)
+    _slack_decis_window(view, blocks, 'previous_day')
+    _slack_decis_window(view, blocks, 'current_launch')
     blocks.append({'type': 'divider'})
     _slack_revenue(view, blocks)
     _slack_skipped_footer(view, blocks)
     return blocks
+
+
+def _slack_audience_drift_by_variant_dm(v: dict, B: list):
+    """Tabelas de drift de público por A/B (Champion × Challenger) no DM.
+
+    Renderiza o mesmo conteúdo que `render_slack_blocks_client` mostra
+    (`audience_profile_drift_by_variant`), com ordenação previous_day antes
+    de current_launch. Skipa silenciosamente se não houver alertas.
+    """
+    alerts = v.get('alerts') or []
+    by_variant = [a for a in alerts if a.get('type') == 'audience_profile_drift_by_variant']
+    if not by_variant:
+        return
+
+    _slack_drift_legend_header(B)
+    by_variant.sort(
+        key=lambda a: 0 if (a.get('details', {}) or {}).get('window') == 'previous_day' else 1
+    )
+    for a in by_variant:
+        _slack_alert_audience_by_variant(a, B)
+        B.append({'type': 'divider'})
+
+
+def _slack_score_distribution_change_dm(v: dict, B: list):
+    """Bloco "📊 Drift de Score — distribuição de decis" no DM.
+
+    Renderiza alertas `score_distribution_change` emitidos por
+    `_check_score_distribution` (data_quality.py). Mostra os decis que
+    desviaram da baseline (rolling 30d em produção ou metadata do treino)
+    e a fonte da baseline.
+
+    Antes desse renderer dedicado, o alerta caía em `_slack_alert_other`
+    e saía como linha solta sem contexto.
+    """
+    alerts = v.get('alerts') or []
+    drift_alerts = [a for a in alerts if a.get('type') == 'score_distribution_change']
+    if not drift_alerts:
+        return
+
+    B.append({'type': 'header',
+              'text': {'type': 'plain_text',
+                       'text': '📊 Drift de Score — distribuição de decis',
+                       'emoji': True}})
+
+    for a in drift_alerts:
+        d = a.get('details', {}) or {}
+        sev = a.get('severity', '?')
+        e = _sev_emoji(sev)
+        total = d.get('total_leads', 0)
+        baseline = d.get('baseline_source', '?')
+        changes = d.get('changes') or []
+        header_line = (
+            f"{e} *{sev}* · `{total}` leads na janela · baseline `{baseline}`"
+        )
+        B.append({'type': 'section',
+                  'text': {'type': 'mrkdwn', 'text': header_line}})
+
+        if changes:
+            lines = ['*Decis que mudaram (top 5 por |Δ|):*']
+            for c in changes[:5]:
+                decil = c.get('decil', '?')
+                esp = (c.get('esperado') or 0) * 100
+                atu = (c.get('atual') or 0) * 100
+                diff = atu - esp
+                arrow = '🔺' if diff > 0 else '🔻'
+                lines.append(
+                    f"• `{decil}` — esperado *{esp:.1f}%* → atual *{atu:.1f}%* "
+                    f"{arrow} `{diff:+.1f}pp`"
+                )
+            B.append({'type': 'section',
+                      'text': {'type': 'mrkdwn', 'text': '\n'.join(lines)}})
+
+    B.append({'type': 'divider'})
 
 
 def _slack_pubsub_24h(v: dict, B: list):
@@ -873,12 +956,19 @@ def _slack_pubsub_24h(v: dict, B: list):
 
 
 def _slack_training_drift_24h(v: dict, B: list):
-    """Bloco "🎯 Paridade treino × produção" — features que o modelo está
-    vendo em produção com taxa diferente do que viu no treino (T1-16).
+    """Bloco "🎯 Features zeradas em batch" — colunas OHE pós-encoding que
+    foram zeradas em massa em algum batch de scoring nas últimas 24h
+    (`validate_post_encoding_zero_rates` / T1-16 do feature_validator).
+
+    Sinaliza problema de encoding silencioso (categoria sumiu, parsing JSONB
+    falhou, casing mudou no front). Complementa o "Drift de proporções 24h":
+    aquele é categoria-level agregado do dia; este é OHE-level por batch.
 
     Mostra:
-      - Quantos batches dispararam warning T1-16 na janela.
-      - Top 5 features com maior drift (com obs vs exp e delta em pp).
+      - Quantos batches dispararam (= quantos lotes do Pub/Sub vieram com
+        coluna OHE caída pra <30% do esperado de treino).
+      - Top 5 colunas OHE mais afetadas (obs vs treino, delta pp, em quantos
+        batches apareceram).
 
     Skipado se não há warnings na janela (estado limpo).
     """
@@ -887,11 +977,11 @@ def _slack_training_drift_24h(v: dict, B: list):
     top = td.get('top_features') or []
 
     if batches == 0 and not td.get('erro'):
-        return  # estado limpo — modelo recebendo dados consistentes com treino
+        return  # estado limpo — encoding consistente com treino
 
     B.append({'type': 'header',
               'text': {'type': 'plain_text',
-                       'text': '🎯 Paridade treino × produção (24h)',
+                       'text': '🎯 Features zeradas em batch (24h)',
                        'emoji': True}})
 
     if td.get('erro'):
@@ -902,14 +992,17 @@ def _slack_training_drift_24h(v: dict, B: list):
 
     hours = td.get('window_hours', 24)
     header_line = (
-        f"*{batches}* batches dispararam warning T1-16 nas últimas {hours}h "
-        f"({td.get('total_observacoes', 0)} features afetadas no total)"
+        f"*{batches}* batches do Pub/Sub vieram com alguma coluna OHE zerada "
+        f"em massa nas últimas {hours}h "
+        f"({td.get('total_observacoes', 0)} ocorrências no total). "
+        f"_Diferente do drift de proporções (agregado do dia): aqui é por batch "
+        f"individual, no nível da coluna OHE pós-encoding._"
     )
     B.append({'type': 'section',
               'text': {'type': 'mrkdwn', 'text': header_line}})
 
     if top:
-        lines = ['*Top features com drift (obs vs treino):*']
+        lines = ['*Top colunas OHE zeradas (obs vs treino):*']
         for f in top:
             delta = f.get('delta_pp', 0)
             arrow = '🔻' if delta < 0 else '🔺'
@@ -988,6 +1081,9 @@ def _slack_alerts(v: dict, B: list, include_audience_drift: bool = True):
         # audience_quality_signal tem seção própria (lead_quality / audience);
         # LOW dentro do padrão não vai pra Mudanças significativas.
         'audience_quality_signal',
+        # score_distribution_change tem renderer dedicado
+        # `_slack_score_distribution_change_dm` na render_slack_blocks (DM).
+        'score_distribution_change',
     )]
 
     B.append({'type': 'header', 'text': {'type': 'plain_text', 'text': '🚨 Mudanças significativas', 'emoji': True}})
@@ -1045,7 +1141,7 @@ def _slack_distribution_drifts_consolidated(alerts: list, B: list):
         by_col.setdefault(col, []).append(a)
 
     for col, group in by_col.items():
-        lines = [f"*Mudança na UTM {_humanize_feature(col)}:*"]
+        lines = [f"*Drift de proporções — {_humanize_feature(col)}:*"]
         for a in group:
             d = a.get('details', {}) or {}
             variant = _variant_label(d.get('variant_name', '?'))
@@ -1594,15 +1690,17 @@ def _slack_launch_fallback_notice_dm(v: dict, B: list):
 
     if lf_name and inferred:
         msg = (
-            f"⚠️ *Fallback de terça em uso* — janela do LF atual veio da heurística "
-            f"(`tuesday_heuristic`), não do `launches.yaml`. "
-            f"Nome inferido: *{lf_name}* (captação iniciada {cap_start}). "
-            f"Cadastre o LF em `configs/launches.yaml` para confirmar o nome."
+            f"⚠️ *Lançamento atual sem cadastro* — o sistema não encontrou o LF atual "
+            f"no arquivo de lançamentos (`configs/launches.yaml`) e está usando "
+            f"inferência (toda terça começa um LF; captação detectada em {cap_start}). "
+            f"Nome provável: *{lf_name}*. As tabelas e séries usam essa janela inferida "
+            f"até o LF ser cadastrado."
         )
     else:
         msg = (
-            f"⚠️ *Fallback de terça em uso* — janela do LF atual veio da heurística "
-            f"(`tuesday_heuristic`), não do `launches.yaml`. "
-            f"Captação iniciada {cap_start}. Cadastre o LF em `configs/launches.yaml`."
+            f"⚠️ *Lançamento atual sem cadastro* — o sistema não encontrou o LF atual "
+            f"no arquivo de lançamentos (`configs/launches.yaml`); janela inferida "
+            f"a partir de {cap_start}. Tabelas e séries usam essa janela até o LF "
+            f"ser cadastrado."
         )
     B.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': msg}]})
