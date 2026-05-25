@@ -138,6 +138,7 @@ def extract_view(payload: dict, *, audit: bool = True) -> dict:
         'launch_resolution': payload.get('launch_resolution') or {},
         # Sumário do consumer Pub/Sub (24h) — Etapa 7 do refator do monitoramento.
         'pubsub_24h':        payload.get('pubsub_24h_summary', {}) or {},
+        'training_drift_24h': payload.get('training_drift_24h_summary', {}) or {},
     }
 
 
@@ -808,6 +809,8 @@ def render_slack_blocks(view: dict) -> list[dict]:
     blocks.append({'type': 'divider'})
     _slack_pubsub_24h(view, blocks)  # Etapa 7 do refator do monitoramento
     blocks.append({'type': 'divider'})
+    _slack_training_drift_24h(view, blocks)  # Paridade treino × produção (T1-16)
+    blocks.append({'type': 'divider'})
     _slack_revenue(view, blocks)
     _slack_skipped_footer(view, blocks)
     return blocks
@@ -867,6 +870,61 @@ def _slack_pubsub_24h(v: dict, B: list):
             lines.append(f"• `{e.get('count', 0)}×` {msg}")
         B.append({'type': 'section',
                   'text': {'type': 'mrkdwn', 'text': '\n'.join(lines)}})
+
+
+def _slack_training_drift_24h(v: dict, B: list):
+    """Bloco "🎯 Paridade treino × produção" — features que o modelo está
+    vendo em produção com taxa diferente do que viu no treino (T1-16).
+
+    Mostra:
+      - Quantos batches dispararam warning T1-16 na janela.
+      - Top 5 features com maior drift (com obs vs exp e delta em pp).
+
+    Skipado se não há warnings na janela (estado limpo).
+    """
+    td = v.get('training_drift_24h') or {}
+    batches = td.get('batches_com_drift', 0) or 0
+    top = td.get('top_features') or []
+
+    if batches == 0 and not td.get('erro'):
+        return  # estado limpo — modelo recebendo dados consistentes com treino
+
+    B.append({'type': 'header',
+              'text': {'type': 'plain_text',
+                       'text': '🎯 Paridade treino × produção (24h)',
+                       'emoji': True}})
+
+    if td.get('erro'):
+        B.append({'type': 'section',
+                  'text': {'type': 'mrkdwn',
+                           'text': f"⚠️ erro ao consultar logs: `{td['erro']}`"}})
+        return
+
+    hours = td.get('window_hours', 24)
+    header_line = (
+        f"*{batches}* batches dispararam warning T1-16 nas últimas {hours}h "
+        f"({td.get('total_observacoes', 0)} features afetadas no total)"
+    )
+    B.append({'type': 'section',
+              'text': {'type': 'mrkdwn', 'text': header_line}})
+
+    if top:
+        lines = ['*Top features com drift (obs vs treino):*']
+        for f in top:
+            delta = f.get('delta_pp', 0)
+            arrow = '🔻' if delta < 0 else '🔺'
+            lines.append(
+                f"• `{f.get('feature','?')}` — obs *{100*f.get('obs_media',0):.1f}%* "
+                f"vs treino *{100*f.get('exp',0):.1f}%* {arrow} {abs(delta):.1f}pp  "
+                f"(em {f.get('count', 0)} batches)"
+            )
+        B.append({'type': 'section',
+                  'text': {'type': 'mrkdwn', 'text': '\n'.join(lines)}})
+
+    obs = td.get('observacao')
+    if obs:
+        B.append({'type': 'context',
+                  'elements': [{'type': 'mrkdwn', 'text': f"_{obs}_"}]})
 
 
 def render_slack_blocks_client(view: dict) -> list[dict]:

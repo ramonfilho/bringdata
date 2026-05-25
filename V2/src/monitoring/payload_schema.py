@@ -695,4 +695,22 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'pubsub_24h_summary.top_errors':                                                    (R, None),  # ex: list até 5
     'pubsub_24h_summary.top_errors[].message':                                          (R, None),
     'pubsub_24h_summary.top_errors[].count':                                            (R, None),
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # TRAINING_DRIFT_24H_SUMMARY  (Paridade treino × produção via T1-16 — 2026-05-25)
+    # Lê logs `[T1-16] (observa, ...)` do Cloud Run via google-cloud-logging;
+    # agrega quantos batches dispararam e as top features afetadas.
+    # ──────────────────────────────────────────────────────────────────────────
+    'training_drift_24h_summary':                                                       (R, None),
+    'training_drift_24h_summary.window_hours':                                          (R, None),
+    'training_drift_24h_summary.batches_com_drift':                                     (R, None),
+    'training_drift_24h_summary.total_observacoes':                                     (R, None),
+    'training_drift_24h_summary.observacao':                                            (R, None),
+    'training_drift_24h_summary.top_features':                                          (R, None),  # ex: list até 5
+    'training_drift_24h_summary.top_features[].feature':                                (R, None),
+    'training_drift_24h_summary.top_features[].obs_media':                              (R, None),
+    'training_drift_24h_summary.top_features[].exp':                                    (R, None),
+    'training_drift_24h_summary.top_features[].delta_pp':                               (R, None),
+    'training_drift_24h_summary.top_features[].count':                                  (R, None),
+    'training_drift_24h_summary.erro':                                                  (R, None),
 }

@@ -517,6 +517,12 @@ class MonitoringOrchestrator:
         from .pubsub_summary import compute_pubsub_summary
         result['pubsub_24h_summary'] = compute_pubsub_summary(self._repo)
 
+        # Sumário de paridade treino × produção (T1-16). Lê logs do Cloud
+        # Logging — funciona em produção (Cloud Run) e local (com ADC).
+        # Falha silenciosa se credenciais não disponíveis (devolve esqueleto).
+        from .training_drift_summary import compute_training_drift_summary
+        result['training_drift_24h_summary'] = compute_training_drift_summary()
+
         logger.info("=" * 60)
         return result
 
