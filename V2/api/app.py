@@ -2429,19 +2429,15 @@ async def daily_monitoring_check_railway(
             timeout=30,
         )
 
-        # 1a. Leads com score na janela (para alertas de drift ML)
-        scored_rows = railway_conn.run(
-            'SELECT id, data, "nomeCompleto", email, telefone, pesquisa, '
-            'source, medium, campaign, content, term, '
-            '"remoteIp", "userAgent", fbc, fbp, "pageUrl", '
-            '"leadScore", decil '
-            'FROM "Lead" '
-            'WHERE "leadScore" IS NOT NULL '
-            'AND "createdAt" >= :start AND "createdAt" <= :end '
-            'ORDER BY "createdAt" DESC',
-            start=window_start,
-            end=window_end
-        )
+        # 1a. Leads com score na janela — via LeadRepository (ledger novo
+        # `registros_ml`). Substitui SQL inline na Lead antiga (morta desde
+        # 2026-05-17). Fatia A do refator daily-check pra fonte unificada.
+        from src.data import compose_repository
+        _repo_leads = compose_repository('registros_ml', railway_conn=railway_conn)
+        _records = _repo_leads.leads_in_range(window_start, window_end)
+        # Filtra: só leads efetivamente scoreados (equivalente ao
+        # `WHERE leadScore IS NOT NULL` da query antiga).
+        scored_rows = [r for r in _records if r.score is not None]
 
         # 1b. Stats agregados da janela (total, CAPI, phone)
         stats_row = railway_conn.run(
@@ -2761,32 +2757,49 @@ async def daily_monitoring_check_railway(
 
         logger.info(f"🔍 Railway monitoring: {len(scored_rows)} leads com score — {window_label}")
 
-        col_names = [
-            'id', 'data', 'nomeCompleto', 'email', 'telefone', 'pesquisa',
-            'source', 'medium', 'campaign', 'content', 'term',
-            'remoteIp', 'userAgent', 'fbc', 'fbp', 'pageUrl',
-            'leadScore', 'decil',
-        ]
-
+        # `scored_rows` agora é `list[LeadRecord]` (do registros_ml via
+        # LeadRepository), não mais tupla SQL crua da Lead antiga.
+        # Conversão pra `leads_data` (formato que o orchestrator espera)
+        # passa pela tradução slug→PT-Long que o railway_lead_to_sheets_row
+        # exige (mesma tradução que pubsub_branch faz em produção).
+        from api.railway_mapping import traduzir_survey_slugs
         leads_data = []
-        for row in scored_rows:
-            lead = dict(zip(col_names, row))
-
-            if isinstance(lead.get('pesquisa'), str):
-                try:
-                    lead['pesquisa'] = _json.loads(lead['pesquisa'])
-                except Exception:
-                    lead['pesquisa'] = {}
-            elif lead.get('pesquisa') is None:
-                lead['pesquisa'] = {}
-
+        for record in scored_rows:
             try:
-                sheets_row = railway_lead_to_sheets_row(lead, client_config=pipeline._client_config if pipeline else None)
-                sheets_row['lead_score'] = float(lead['leadScore']) if lead.get('leadScore') else None
-                sheets_row['decil']      = f"D{int(lead['decil']):02d}" if lead.get('decil') else None
+                survey_pt = traduzir_survey_slugs(record.survey_responses or {})
+            except ValueError as e:
+                logger.warning(f"⚠️ skip lead {record.event_id[:8]}…: slug inválido ({e})")
+                continue
+            nome_full = f"{(record.first_name or '').strip()} {(record.last_name or '').strip()}".strip() or None
+            lead = {
+                'id':            record.event_id,
+                'data':          record.criado_em,
+                'nomeCompleto':  nome_full,
+                'email':         record.email,
+                'telefone':      record.phone,
+                'pesquisa':      survey_pt,
+                'source':        record.utm_source,
+                'medium':        record.utm_medium,
+                'campaign':      record.utm_campaign,
+                'content':       record.utm_content,
+                'term':          record.utm_term,
+                'remoteIp':      record.ip,
+                'userAgent':     record.user_agent,
+                'fbc':           record.fbc,
+                'fbp':           record.fbp,
+                'pageUrl':       record.utm_url,
+                'leadScore':     record.score,
+                'decil':         record.decil,
+            }
+            try:
+                sheets_row = railway_lead_to_sheets_row(
+                    lead, client_config=pipeline._client_config if pipeline else None
+                )
+                sheets_row['lead_score'] = float(record.score) if record.score is not None else None
+                sheets_row['decil']      = f"D{record.decil:02d}" if record.decil is not None else None
                 leads_data.append(sheets_row)
             except Exception as e:
-                logger.warning(f"⚠️ Erro ao mapear lead {lead.get('email')}: {e}")
+                logger.warning(f"⚠️ Erro ao mapear lead {record.email}: {e}")
 
         logger.info(f"✅ {len(leads_data)} leads convertidos")
 
