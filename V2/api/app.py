@@ -2654,6 +2654,13 @@ async def daily_monitoring_check_railway(
             except ValueError as e:
                 logger.warning(f"⚠️ skip lead {record.event_id[:8]}…: slug inválido ({e})")
                 continue
+            # `has_computer` vive top-level no ledger novo (não em survey_responses)
+            # mas o railway_lead_to_sheets_row espera `pesquisa.computador` pra
+            # popular a coluna 'Tem computador/notebook?'. Sem essa injeção, a
+            # coluna chega 100% NULL no df do orchestrator e dispara
+            # missing_rate_high HIGH falso-positivo todo daily-check.
+            if record.has_computer and 'computador' not in survey_pt:
+                survey_pt = {**survey_pt, 'computador': record.has_computer}
             nome_full = f"{(record.first_name or '').strip()} {(record.last_name or '').strip()}".strip() or None
             lead = {
                 'id':            record.event_id,
