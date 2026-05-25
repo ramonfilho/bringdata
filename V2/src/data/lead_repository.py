@@ -9,7 +9,7 @@ precisam da mesma coisa. Atalho específico de um consumidor deve viver no
 consumidor, agregando em cima do raw que a interface já oferece.
 """
 from datetime import datetime, timedelta
-from typing import Protocol, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable
 
 from .lead_record import LeadRecord
 
@@ -33,6 +33,14 @@ class LeadRepository(Protocol):
         self, start: datetime, end: datetime, limit: int = DEFAULT_LIMIT,
     ) -> list[LeadRecord]:
         """Leads no intervalo [start, end). Range máximo: 90 dias."""
+        ...
+
+    def get_by_event_id(self, event_id: str) -> Optional[LeadRecord]:
+        """Um lead pelo event_id. Devolve None se não existir.
+
+        Caso de uso: auditoria de um lead específico (endpoint /predict/explain,
+        debug, backtest com matching por características).
+        """
         ...
 
 

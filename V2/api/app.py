@@ -4749,6 +4749,89 @@ async def pubsub_process_pending(pipeline: PipelineDep, dry_run: bool = False):
                 pass
 
 
+# =============================================================================
+# Endpoint de auditoria: re-scoreia 1 lead e expõe os intermediários
+# =============================================================================
+
+class ExplainRequest(BaseModel):
+    event_id: str = Field(..., description="event_id do lead em registros_ml (UUID v7) ou 'legacy-{id}' pra Lead antiga")
+    source: str = Field('registros_ml', description="Fonte do lead: 'registros_ml' (default) ou 'legacy'")
+
+
+@app.post("/predict/explain")
+async def predict_explain(request: ExplainRequest, pipeline: PipelineDep):
+    """Re-scoreia 1 lead já persistido e devolve todo o caminho de scoring.
+
+    Útil pra auditoria de integridade do pipeline lead→score:
+      - paridade: o `lead_score` recalculado deve bater com o `lead_score`
+        persistido (mesma versão de código + mesmo payload → mesmo resultado).
+      - inspeção: o vetor encodado (52 colunas) revela features canônicas
+        zeradas quando o payload tinha o dado correspondente (cenário
+        clássico de divergência de nomenclatura).
+
+    Não envia CAPI, não persiste nada, não muta estado.
+    """
+    import pg8000.native
+
+    from src.data import compose_repository
+    from src.scoring.service import payload_from_record, score_lead_from_payload
+
+    railway_conn = None
+    try:
+        railway_conn = pg8000.native.Connection(
+            host=os.environ['RAILWAY_DB_HOST'],
+            port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+            database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+            user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+            password=os.environ['RAILWAY_DB_PASSWORD'],
+            timeout=30,
+        )
+        repo = compose_repository(request.source, railway_conn=railway_conn)
+        record = repo.get_by_event_id(request.event_id)
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"event_id '{request.event_id}' não encontrado em {request.source!r}",
+            )
+
+        payload = payload_from_record(record)
+
+        try:
+            explanation = score_lead_from_payload(payload, pipeline)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=f"slug inválido no payload: {e}")
+
+        return {
+            "event_id": record.event_id,
+            "source": request.source,
+            "payload_reconstruido": payload,
+            "payload_normalizado": explanation.payload_normalizado,
+            "dataframe_row": explanation.dataframe_row,
+            "encoded_features": explanation.encoded_features,
+            "prediction_recalculada": {
+                "lead_score": explanation.lead_score,
+                "decil": explanation.decil,
+                "variant": explanation.variant,
+            },
+            "prediction_persistida": {
+                "lead_score": record.score,
+                "decil": record.decil,
+                "variant": record.variant,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("[/predict/explain] falhou")
+        raise HTTPException(status_code=500, detail=f"explain falhou: {type(e).__name__}: {e}")
+    finally:
+        if railway_conn is not None:
+            try:
+                railway_conn.close()
+            except Exception:
+                pass
+
+
 if __name__ == "__main__":
     import uvicorn
 

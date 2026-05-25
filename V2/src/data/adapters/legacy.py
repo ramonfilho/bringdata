@@ -70,6 +70,21 @@ class LegacyAdapter:
             limit_value=limit, start=start, end=end, lim=limit,
         )
 
+    def get_by_event_id(self, event_id: str) -> Optional[LeadRecord]:
+        # Convenção do adaptador: event_id da Lead antiga é `legacy-{id}`.
+        # Despack pra consultar a tabela pelo id numérico real.
+        if not event_id.startswith('legacy-'):
+            return None
+        try:
+            lead_id = int(event_id[len('legacy-'):])
+        except ValueError:
+            return None
+        records = self._fetch(
+            'WHERE id = :lid LIMIT 1',
+            limit_value=2, lid=lead_id,
+        )
+        return records[0] if records else None
+
     # ─ interno ────────────────────────────────────────────────────────────
 
     def _fetch(self, where_clause: str, *, limit_value: int, **params) -> list[LeadRecord]:

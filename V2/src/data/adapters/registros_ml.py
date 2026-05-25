@@ -75,6 +75,13 @@ class RegistrosMLAdapter:
             limit_value=limit, start=start, end=end, lim=limit,
         )
 
+    def get_by_event_id(self, event_id: str) -> Optional[LeadRecord]:
+        records = self._fetch(
+            'WHERE event_id = :eid LIMIT 1',
+            limit_value=2, eid=event_id,
+        )
+        return records[0] if records else None
+
     # ─ interno ────────────────────────────────────────────────────────────
 
     def _fetch(self, where_clause: str, *, limit_value: int, **params) -> list[LeadRecord]:

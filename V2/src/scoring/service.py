@@ -32,6 +32,7 @@ from src.core.payload_normalization import (
     payload_to_survey_dict,
     payload_to_utm,
 )
+from src.data.lead_record import LeadRecord
 from src.model.decil_thresholds import atribuir_decil_por_threshold
 from src.production_pipeline import LeadScoringPipeline
 
@@ -164,3 +165,40 @@ def _to_python_scalar(v):
         except (ValueError, AttributeError):
             pass
     return v
+
+
+def payload_from_record(record: LeadRecord) -> Dict[str, Any]:
+    """Reconstrói o payload Pub/Sub a partir de um `LeadRecord` persistido.
+
+    Inversa de `score_lead_from_payload` — pega o lead já guardado (no ledger
+    ou na tabela Lead antiga) e devolve o dict que o consumer Pub/Sub teria
+    recebido. `survey_responses` é mantido como veio no banco (slugs originais
+    do front no ledger novo, ou pesquisa em PT-Long na Lead antiga).
+
+    Usos: endpoint /predict/explain (auditoria) e script de backtest
+    (re-scoring de lead histórico com modelo atual).
+    """
+    fn = (record.first_name or "").strip()
+    ln = (record.last_name or "").strip()
+    return {
+        "eventId":      record.event_id,
+        "submittedAt":  record.criado_em.isoformat() if record.criado_em else None,
+        "email":        record.email,
+        "firstName":    fn or None,
+        "lastName":     ln or None,
+        "phone":        record.phone,
+        "hasComputer":  record.has_computer,
+        "fbp":          record.fbp,
+        "fbc":          record.fbc,
+        "userAgent":    record.user_agent,
+        "ip4":          record.ip,
+        "survey":       dict(record.survey_responses) if record.survey_responses else {},
+        "utm": {
+            "source":   record.utm_source,
+            "medium":   record.utm_medium,
+            "campaign": record.utm_campaign,
+            "content":  record.utm_content,
+            "term":     record.utm_term,
+            "url":      record.utm_url,
+        },
+    }
