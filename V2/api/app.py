@@ -2554,21 +2554,19 @@ async def daily_monitoring_check_railway(
                 'label':     _lw.label,
             }
 
-        forecast_decil_rows = railway_conn.run(
-            'SELECT decil '
-            'FROM "Lead" '
-            'WHERE "leadScore" IS NOT NULL AND decil IS NOT NULL '
-            'AND "createdAt" >= :start AND "createdAt" <= :end',
-            start=launch_window_start_utc,
-            end=launch_window_end_utc,
-        )
-
-        # Distribuição de decis na janela do lançamento — usada pelo expected_conversion
+        # Distribuição de decis na janela do lançamento — usada pelo
+        # expected_conversion e pelos cenários ML-aware (Método 2 do bloco
+        # 'Previsão de Faturamento' no Slack). Fatia E do refator: substitui
+        # query SQL na Lead morta por filtro in-memory sobre _records_90d
+        # (que já cobre a janela do LF ativo, sempre <90d de captação).
         forecast_decil_dist: Dict[str, int] = {}
-        for (decil_val,) in forecast_decil_rows:
-            if decil_val is not None:
-                key = f"D{int(decil_val):02d}"
-                forecast_decil_dist[key] = forecast_decil_dist.get(key, 0) + 1
+        for _rec in _records_90d:
+            if _rec.criado_em is None or _rec.decil is None or _rec.score is None:
+                continue
+            _c = _rec.criado_em.replace(tzinfo=_tz.utc) if _rec.criado_em.tzinfo is None else _rec.criado_em
+            if launch_window_start_utc <= _c <= launch_window_end_utc:
+                _key = f"D{int(_rec.decil):02d}"
+                forecast_decil_dist[_key] = forecast_decil_dist.get(_key, 0) + 1
 
         # 1e. Survey funnel metrics por janela histórica — Fatia D do refator.
         # Agregação pura em cima de `_records_90d` (já carregado pra Fatia D
