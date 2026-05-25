@@ -51,6 +51,11 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'alerts[].details.missing_count':                                                   (R, None),  # ex: 234 — n de leads c/ campo nulo no missing_rate_high
     'alerts[].details.missing_rate':                                                    (R, None),  # ex: 0.85 — proporção 0–1
     'alerts[].details.total_rows':                                                      (R, None),  # ex: 276 — total avaliado no missing_rate_high
+    'alerts[].details.total_leads':                                                     (R, None),  # ex: 325 — total na janela de score_distribution_change
+    'alerts[].details.baseline_source':                                                 (R, None),  # ex: 'rolling_30d' — origem do baseline (rolling x treino)
+    'alerts[].details.changes[].decil':                                                 (R, None),  # ex: 'D10' — decil afetado em score_distribution_change
+    'alerts[].details.changes[].atual':                                                 (R, None),  # ex: 0.246 — pct atual no decil
+    'alerts[].details.changes[].esperado':                                              (R, None),  # ex: 0.349 — pct esperado no baseline
     'alerts[].details.changes':                                                         (R, None),  # ex: list(3)
     'alerts[].details.changes[].categoria':                                             (R, None),  # ex: 'aberto'
     'alerts[].details.changes[].diff':                                                  (S, 'computamos de producao - treino na renderização'),
