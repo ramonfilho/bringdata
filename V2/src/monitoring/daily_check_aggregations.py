@@ -102,13 +102,21 @@ def compute_fbp_fbc_rolling(
         {n, fbp_pct, fbc_pct}.
     """
     from datetime import timedelta
-    d1 = anchor - timedelta(days=1)
-    d3 = anchor - timedelta(days=3)
+    # `r.criado_em` vem do pg8000 como datetime offset-naive (UTC implícito);
+    # `anchor` pode ser aware. Normaliza removendo tz da anchor pra que a
+    # comparação `>=` funcione sem `offset-naive vs offset-aware`.
+    anchor_naive = anchor.replace(tzinfo=None) if anchor.tzinfo else anchor
+    d1 = anchor_naive - timedelta(days=1)
+    d3 = anchor_naive - timedelta(days=3)
+    d7 = anchor_naive - timedelta(days=7)
     # Considera "Meta-eligible" = passou pelo CAPI (não skipped_allowlist).
     meta_7d = [r for r in records_7d if r.status_envio != 'skipped_allowlist']
 
     def _bucket(lim: datetime) -> Dict[str, float]:
-        bucket = [r for r in meta_7d if r.criado_em and r.criado_em >= lim]
+        bucket = [
+            r for r in meta_7d
+            if r.criado_em and r.criado_em.replace(tzinfo=None) >= lim
+        ]
         n = len(bucket)
         return {
             'n':       n,
@@ -116,8 +124,4 @@ def compute_fbp_fbc_rolling(
             'fbc_pct': _fb_pct(sum(1 for r in bucket if r.fbc), n),
         }
 
-    return {
-        '1d': _bucket(d1),
-        '3d': _bucket(d3),
-        '7d': _bucket(anchor - timedelta(days=7)),
-    }
+    return {'1d': _bucket(d1), '3d': _bucket(d3), '7d': _bucket(d7)}
