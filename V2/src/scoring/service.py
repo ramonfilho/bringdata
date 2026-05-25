@@ -116,8 +116,21 @@ def score_lead_from_payload(
         vcfg = pipeline._ab_test_config.variants.get(variant_name)
         encoding_overrides = vcfg.encoding_overrides if vcfg else None
     else:
+        # Lead fora do A/B → usa predictor base. Mas se o predictor base tem o
+        # mesmo run_id de alguma variante do YAML, herda o encoding_overrides
+        # dessa variante. Espelha o consumer Pub/Sub em api/pubsub_branch.py:388-393
+        # — sem isso, leads default escoram com encoding diferente do treino e
+        # features críticas ficam zeradas no alinhamento com o feature_registry.
+        # Dívida arquitetural: encoding_overrides deveria viver no predictor/modelo,
+        # não na variante A/B. Resolver no próximo retreino ou refactor do A/B.
         predictor = pipeline.predictor
-        encoding_overrides = None
+        base_run_id = getattr(predictor, 'mlflow_run_id', None)
+        vcfg = next(
+            (v for v in pipeline._ab_test_config.variants.values()
+             if v.run_id == base_run_id),
+            None,
+        ) if base_run_id else None
+        encoding_overrides = vcfg.encoding_overrides if vcfg else None
 
     # 4. Rodar preprocess + predict em memória, com lock contra concorrência.
     df_in = pd.DataFrame([dataframe_row])
