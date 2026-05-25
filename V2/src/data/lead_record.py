@@ -79,5 +79,8 @@ class LeadRecord:
     ip: Optional[str] = None
 
     # Feature crítica do modelo. Vem top-level no payload do dono (não dentro
-    # de `survey`) porque é capturada antes da pesquisa no funil dele.
-    has_computer: Optional[bool] = None
+    # de `survey`) porque é capturada antes da pesquisa no funil dele. Tipo
+    # TEXT (não BOOLEAN) porque o payload real manda "SIM"/"NAO" em
+    # português — decisão revisada em 2026-05-25 após bug em produção
+    # (BOOLEAN derrubava o INSERT inteiro com "invalid input syntax").
+    has_computer: Optional[str] = None
