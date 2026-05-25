@@ -2439,82 +2439,34 @@ async def daily_monitoring_check_railway(
         # `WHERE leadScore IS NOT NULL` da query antiga).
         scored_rows = [r for r in _records if r.score is not None]
 
-        # 1b. Stats agregados da janela (total, CAPI, phone)
-        stats_row = railway_conn.run(
-            'SELECT '
-            '  COUNT(*) AS total, '
-            '  COUNT(*) FILTER (WHERE "leadScore" IS NOT NULL) AS scored, '
-            '  COUNT(*) FILTER (WHERE "capiSentAt" IS NOT NULL AND "capiStatus" NOT IN (\'blocked\', \'skipped\')) AS capi_sent, '
-            '  COUNT(*) FILTER (WHERE "capiStatus" = \'success\') AS capi_success, '
-            '  COUNT(*) FILTER (WHERE "capiStatus" = \'error\') AS capi_error, '
-            '  COUNT(*) FILTER (WHERE telefone IS NOT NULL AND telefone <> \'\') AS with_phone '
-            'FROM "Lead" '
-            'WHERE "createdAt" >= :start AND "createdAt" <= :end',
-            start=window_start,
-            end=window_end
+        # 1b. Stats agregados da janela (total, CAPI, phone) — Fatia B do refator.
+        # Agregação pura em cima de `_records` (já lidos pelo LeadRepository).
+        # Substitui SQL inline na Lead morta.
+        from src.monitoring.daily_check_aggregations import (
+            compute_stats_window,
+            compute_fbp_fbc_meta_population,
+            compute_fbp_fbc_rolling,
         )
+        stats_dict = compute_stats_window(_records)
+        # `stats_row` mantido como tupla pra compat com o resto do código que
+        # ainda lê via `stats_row[0]` mais abaixo (será limpo em Fatia E).
+        stats_row = [(
+            stats_dict['total'], stats_dict['scored'], stats_dict['capi_sent'],
+            stats_dict['capi_success'], stats_dict['capi_error'], stats_dict['with_phone'],
+        )]
 
-        # FBP/FBC: contagem sobre leads_capi (origem Meta) na janela.
-        # Antes o denominador era Lead.total, que inclui leads não-Meta — inflava
-        # artificialmente a "incompletude" de FBP/FBC. Agora numerador e
-        # denominador vivem na mesma população (leads Meta).
-        capi_fbp_row = railway_conn.run(
-            'SELECT '
-            '  COUNT(*) FILTER (WHERE fbp IS NOT NULL AND fbp <> \'\') AS with_fbp, '
-            '  COUNT(*) FILTER (WHERE fbc IS NOT NULL AND fbc <> \'\') AS with_fbc, '
-            '  COUNT(*) AS total_meta_leads '
-            'FROM leads_capi '
-            'WHERE created_at >= :start AND created_at <= :end',
-            start=window_start,
-            end=window_end
-        )
+        # FBP/FBC sobre população Meta-elegível na janela do report — Fatia B.
+        # No ledger novo, "leads_capi" vira "leads que passaram pelo CAPI"
+        # (status_envio != 'skipped_allowlist').
+        fbp_pop = compute_fbp_fbc_meta_population(_records)
+        capi_fbp_row = [(fbp_pop['with_fbp'], fbp_pop['with_fbc'], fbp_pop['total_meta_leads'])]
 
-        # FBP/FBC em janelas fixas 7d/3d/1d (independente do `hours` do report).
-        # Mostra tendência de preenchimento: queda de 7d→1d = degradação recente.
+        # FBP/FBC em janelas rolling 7d/3d/1d — Fatia C. Independente do `hours`
+        # do report. Lê 7d do registros_ml via repo (não a janela do report).
         _fb_anchor = window_end
-        _fb_d1 = _fb_anchor - timedelta(days=1)
-        _fb_d3 = _fb_anchor - timedelta(days=3)
         _fb_d7 = _fb_anchor - timedelta(days=7)
-        fbp_fbc_windows_row = railway_conn.run(
-            'SELECT '
-            "  COUNT(*) FILTER (WHERE created_at >= :d1) AS n1, "
-            "  COUNT(*) FILTER (WHERE created_at >= :d1 AND fbp IS NOT NULL AND fbp <> '') AS fbp1, "
-            "  COUNT(*) FILTER (WHERE created_at >= :d1 AND fbc IS NOT NULL AND fbc <> '') AS fbc1, "
-            "  COUNT(*) FILTER (WHERE created_at >= :d3) AS n3, "
-            "  COUNT(*) FILTER (WHERE created_at >= :d3 AND fbp IS NOT NULL AND fbp <> '') AS fbp3, "
-            "  COUNT(*) FILTER (WHERE created_at >= :d3 AND fbc IS NOT NULL AND fbc <> '') AS fbc3, "
-            "  COUNT(*) FILTER (WHERE created_at >= :d7) AS n7, "
-            "  COUNT(*) FILTER (WHERE created_at >= :d7 AND fbp IS NOT NULL AND fbp <> '') AS fbp7, "
-            "  COUNT(*) FILTER (WHERE created_at >= :d7 AND fbc IS NOT NULL AND fbc <> '') AS fbc7 "
-            'FROM leads_capi '
-            'WHERE created_at >= :d7 AND created_at <= :anchor',
-            d1=_fb_d1, d3=_fb_d3, d7=_fb_d7, anchor=_fb_anchor,
-        )
-        _fw = dict(zip(
-            ['n1', 'fbp1', 'fbc1', 'n3', 'fbp3', 'fbc3', 'n7', 'fbp7', 'fbc7'],
-            fbp_fbc_windows_row[0]
-        ))
-
-        def _fb_pct(num, den):
-            return round(num / den * 100, 1) if den else 0.0
-
-        fbp_fbc_rolling = {
-            '1d': {
-                'n': _fw['n1'] or 0,
-                'fbp_pct': _fb_pct(_fw['fbp1'] or 0, _fw['n1'] or 0),
-                'fbc_pct': _fb_pct(_fw['fbc1'] or 0, _fw['n1'] or 0),
-            },
-            '3d': {
-                'n': _fw['n3'] or 0,
-                'fbp_pct': _fb_pct(_fw['fbp3'] or 0, _fw['n3'] or 0),
-                'fbc_pct': _fb_pct(_fw['fbc3'] or 0, _fw['n3'] or 0),
-            },
-            '7d': {
-                'n': _fw['n7'] or 0,
-                'fbp_pct': _fb_pct(_fw['fbp7'] or 0, _fw['n7'] or 0),
-                'fbc_pct': _fb_pct(_fw['fbc7'] or 0, _fw['n7'] or 0),
-            },
-        }
+        _records_7d = _repo_leads.leads_in_range(_fb_d7, _fb_anchor)
+        fbp_fbc_rolling = compute_fbp_fbc_rolling(_records_7d, anchor=_fb_anchor)
 
         # 1b-bis. unified_funnel — funil completo (TODAS as fontes), com quebra
         # por origem fb (facebook-ads/ig/fb) · ggl (google-ads) · outr (resto).
