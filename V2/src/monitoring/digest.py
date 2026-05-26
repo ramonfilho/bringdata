@@ -805,6 +805,7 @@ def render_slack_blocks(view: dict) -> list[dict]:
     blocks: list[dict] = []
     _slack_header(view, blocks)
     _slack_launch_fallback_notice_dm(view, blocks)  # DM-only — no-op se YAML está em dia
+    _slack_ab(view, blocks)  # status do A/B (ATIVO/DESATIVADO + variants)
     blocks.append({'type': 'divider'})
     _slack_alerts(view, blocks, include_audience_drift=True)
     blocks.append({'type': 'divider'})
@@ -831,8 +832,11 @@ def _slack_audience_drift_by_variant_dm(v: dict, B: list):
 
     Renderiza o mesmo conteúdo que `render_slack_blocks_client` mostra
     (`audience_profile_drift_by_variant`), com ordenação previous_day antes
-    de current_launch. Skipa silenciosamente se não houver alertas.
+    de current_launch. Skipa silenciosamente se A/B está desativado ou se
+    não houver alertas.
     """
+    if not _ab_test_active(v):
+        return  # A/B desativado → tabelas por A/B não fazem sentido
     alerts = v.get('alerts') or []
     by_variant = [a for a in alerts if a.get('type') == 'audience_profile_drift_by_variant']
     if not by_variant:
@@ -1028,9 +1032,10 @@ def render_slack_blocks_client(view: dict) -> list[dict]:
     _slack_ab(view, blocks)
     blocks.append({'type': 'divider'})
 
-    # Per-variant drift tables (uma por janela)
+    # Per-variant drift tables (uma por janela) — só faz sentido com A/B ativo
+    ab_on = _ab_test_active(view)
     audience_by_variant = [a for a in view.get('alerts', [])
-                           if a.get('type') == 'audience_profile_drift_by_variant']
+                           if a.get('type') == 'audience_profile_drift_by_variant'] if ab_on else []
     audience_general = [a for a in view.get('alerts', [])
                         if a.get('type') == 'audience_profile_drift']
     # Header único da seção de drift (Fix 1)
@@ -1629,11 +1634,16 @@ def _slack_traffic(v: dict, B: list):
 
 def _slack_ab(v: dict, B: list):
     op = v['ab_test']
+    enabled = bool(op.get('ab_test_enabled', False))
+    if not enabled:
+        B.append({'type': 'section', 'text': {'type': 'mrkdwn',
+            'text': '*🤖 A/B Test* — DESATIVADO'}})
+        return
     by = op.get('leads_scored_by_variant_24h') or {}
     by_spend = op.get('spend_by_variant_24h_brl') or {}
     by_cpl = op.get('cpl_by_variant_24h_brl') or {}
     total_scored_24h = sum((n or 0) for n in by.values())
-    lines = ['*🤖 A/B Test* — LIGADO']
+    lines = ['*🤖 A/B Test* — ATIVO']
     for vv in op.get('ab_variants', []) or []:
         name = vv.get('name','?')
         label = _variant_label(name)
@@ -1642,6 +1652,11 @@ def _slack_ab(v: dict, B: list):
         suffix = f" · R$ {_fmt_brl(by_spend[name])} investidos" if name in by_spend else ''
         lines.append(f"• *{label}* (`{name}`) recebeu {scored:,} de {total_scored_24h:,} eventos ({pct:.1f}%) nas últimas 24h{suffix}")
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': "\n".join(lines)}})
+
+
+def _ab_test_active(v: dict) -> bool:
+    """Helper: True se o teste A/B está marcado como ativo no payload."""
+    return bool((v.get('ab_test') or {}).get('ab_test_enabled', False))
 
 
 def _slack_actionable(v: dict, B: list):
