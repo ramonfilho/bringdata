@@ -2238,8 +2238,41 @@ class DataQualityMonitor:
             return alerts
 
         # Dedup binárias: pra cada feature do snapshot com exatamente 2 categorias
-        # (Sim/Não, Masculino/Feminino), se as 2 entrarem no top_list mantém só a
-        # de maior |Δpp| — Sim e Não são informação redundante (complementares).
+        # (Sim/Não, Masculino/Feminino), Sim e Não são informação redundante
+        # (somam 100% — uma é o complemento da outra).
+        #
+        # Critério de escolha (cientificamente correto): manter a categoria com
+        # direction MAIS INFORMATIVA — ou seja, aquela cujo lift histórico está
+        # mais distante de 1.0 (sinal estatístico real). A categoria complementar
+        # tipicamente tem lift próximo de 1.0 (= "comportamento médio" da base) e
+        # direction `uncertain`, o que faria a cor virar ⚪ apesar do impacto real
+        # ser claro pela contraparte.
+        #
+        # Exemplo: 'Tem computador/notebook?' — "Não" tem lift=0.29 (very_negative),
+        # "Sim" tem lift=1.11 (uncertain, CI cruza 1.0). Quando "Não" sobe 11pp =
+        # "Sim" desce 11pp (mesmo evento), o critério antigo (maior |Δpp| com
+        # tie-break arbitrário) podia mostrar qualquer um. Agora prefere "Não" →
+        # cor reflete o sinal real (subiu população de baixo lift = ruim).
+        #
+        # Ordenação por (direction_rank desc, |lift-1.0| desc):
+        #   3 = very_negative / very_positive (sinal forte)
+        #   2 = negative / positive (sinal moderado)
+        #   1 = uncertain (CI cruza 1.0)
+        #   0 = insufficient_data / None
+        _DIR_RANK = {
+            'very_negative': 3, 'very_positive': 3,
+            'negative': 2, 'positive': 2,
+            'uncertain': 1, 'insufficient_data': 0,
+        }
+        def _informativeness_key(it):
+            col_ = it.get('feature_column')
+            cat_ = it.get('category')
+            entry = (direction_map.get(col_, {}) or {}).get(cat_, {}) or {}
+            d_rank = _DIR_RANK.get(entry.get('direction'), -1)
+            lift = entry.get('lift')
+            lift_dist = abs(float(lift) - 1.0) if lift is not None else -1.0
+            return (-d_rank, -lift_dist, -abs(it.get('delta_pp') or 0))
+
         _binary_features = {
             col for col, entry in snapshot.get('categorical_features', {}).items()
             if len((entry.get('proportions') or {})) == 2
@@ -2251,8 +2284,8 @@ class DataQualityMonitor:
             _kept = []
             for _col, _items in _by_feature_col.items():
                 if _col in _binary_features and len(_items) == 2:
-                    _items.sort(key=lambda x: -abs(x.get('delta_pp') or 0))
-                    _kept.append(_items[0])  # mantém só a de maior |Δ|
+                    _items.sort(key=_informativeness_key)
+                    _kept.append(_items[0])
                 else:
                     _kept.extend(_items)
             top_list = _kept
