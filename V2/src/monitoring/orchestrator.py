@@ -401,13 +401,17 @@ class MonitoringOrchestrator:
                     timeout=15,
                 )
                 _now = datetime.now(timezone.utc)
+                # Fonte do daily-check 24h: registros_ml (ledger novo, populado
+                # pelo consumer Pub/Sub desde 23/05/2026). Antes lia da Lead morta
+                # (parou em 17/05) — resultado: sempre 0 leads e bloco A/B mostrando
+                # Champion/Challenger com 0 eventos mesmo sob tráfego pesado.
                 _row = _conn.run(
                     'SELECT '
-                    '  COUNT(*) FILTER (WHERE "createdAt" >= NOW() - INTERVAL \'24 hours\'),'
-                    '  COUNT(*) FILTER (WHERE "leadScore" IS NOT NULL AND "updatedAt" >= NOW() - INTERVAL \'24 hours\'),'
-                    '  COUNT(*) FILTER (WHERE "capiSentAt" >= NOW() - INTERVAL \'24 hours\'),'
-                    '  MAX("updatedAt") FILTER (WHERE "leadScore" IS NOT NULL) '
-                    'FROM "Lead"'
+                    '  COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL \'24 hours\'),'
+                    '  COUNT(*) FILTER (WHERE lead_score IS NOT NULL AND created_at >= NOW() - INTERVAL \'24 hours\'),'
+                    '  COUNT(*) FILTER (WHERE capi_sent_at >= NOW() - INTERVAL \'24 hours\'),'
+                    '  MAX(created_at) FILTER (WHERE lead_score IS NOT NULL) '
+                    'FROM registros_ml'
                 )
                 # Per-variant scoring: aplica a MESMA função de roteamento que
                 # production_pipeline usa (ABTestConfig.match_variant). Lead.source/
@@ -419,11 +423,15 @@ class MonitoringOrchestrator:
                     try:
                         from src.core.client_config import ABTestConfig as _ABTestConfig
                         _ab_cfg = _ABTestConfig.from_active_model_yaml(result['active_model_yaml_path'])
+                        # Lê do ledger novo (registros_ml) em vez da Lead morta.
+                        # Campos: source→utm_source, ..., pageUrl→utm_url.
+                        # updatedAt→created_at (no ledger não há updatedAt; created_at
+                        # é o instante do insert, ≈ instante do scoring).
                         _utm_rows = _conn.run(
-                            'SELECT source, medium, campaign, content, term, "pageUrl" '
-                            'FROM "Lead" '
-                            'WHERE "leadScore" IS NOT NULL '
-                            "  AND \"updatedAt\" >= NOW() - INTERVAL '24 hours'"
+                            'SELECT utm_source, utm_medium, utm_campaign, utm_content, utm_term, utm_url '
+                            'FROM registros_ml '
+                            'WHERE lead_score IS NOT NULL '
+                            "  AND created_at >= NOW() - INTERVAL '24 hours'"
                         )
                         _by_variant = {n: 0 for n in _ab_cfg.variants.keys()}
                         _default = next(
@@ -454,10 +462,15 @@ class MonitoringOrchestrator:
                     try:
                         from src.core.client_config import ABTestConfig as _ABTestConfig
                         _ab_cfg2 = _ABTestConfig.from_active_model_yaml(result['active_model_yaml_path'])
+                        # Lê do ledger novo. Antes lia de leads_capi (também
+                        # parou em 17/05). Filtra "passou pelo CAPI" = não foi
+                        # pulado por allowlist (= leads Meta-elegíveis).
+                        # event_source_url → utm_url (mesmo campo no ledger).
                         _capi_rows = _conn.run(
-                            'SELECT utm_source, utm_medium, utm_campaign, utm_content, utm_term, event_source_url '
-                            'FROM leads_capi '
-                            "WHERE created_at >= NOW() - INTERVAL '24 hours'"
+                            'SELECT utm_source, utm_medium, utm_campaign, utm_content, utm_term, utm_url '
+                            'FROM registros_ml '
+                            "WHERE created_at >= NOW() - INTERVAL '24 hours' "
+                            "  AND base_status != 'skipped_allowlist'"
                         )
                         _by_variant_capi = {n: 0 for n in _ab_cfg2.variants.keys()}
                         _default2 = next(

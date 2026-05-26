@@ -3337,34 +3337,24 @@ async def daily_monitoring_check_railway(
                         except Exception as _me:
                             logger.warning(f"⚠️ Meta leads LF {lf_ref_name}: {_me}")
 
-                    # Distribuição de decis do LF anterior via Railway
+                    # Distribuição de decis do LF anterior — filtro in-memory
+                    # sobre _records_90d (já carregado pelo LeadRepository). Antes
+                    # lia da Lead morta via query SQL; agora cobre desde quando o
+                    # ledger novo começou (23/05). Pra LFs com cap_end anterior a
+                    # 23/05, o resultado pode ser incompleto até o ledger acumular
+                    # histórico — anotado no follow-up de remoção do adaptador
+                    # legado (~22/06).
                     _lf_decil_dist: Dict[str, int] = {}
-                    _lf_conn = None
                     try:
-                        _lf_conn = pg8000.native.Connection(
-                            host=os.environ['RAILWAY_DB_HOST'],
-                            port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
-                            database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
-                            user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
-                            password=os.environ['RAILWAY_DB_PASSWORD'],
-                            timeout=30,
-                        )
-                        _lf_decil_rows = _lf_conn.run(
-                            'SELECT decil FROM "Lead" '
-                            'WHERE "leadScore" IS NOT NULL AND decil IS NOT NULL '
-                            'AND "createdAt" >= :start AND "createdAt" <= :end',
-                            start=_cs_dt, end=_ce_dt,
-                        )
-                        for (decil_val,) in _lf_decil_rows:
-                            if decil_val is not None:
-                                key = f"D{int(decil_val):02d}"
-                                _lf_decil_dist[key] = _lf_decil_dist.get(key, 0) + 1
+                        for _rec in _records_90d:
+                            if _rec.criado_em is None or _rec.decil is None or _rec.score is None:
+                                continue
+                            _c = _rec.criado_em.replace(tzinfo=_tz.utc) if _rec.criado_em.tzinfo is None else _rec.criado_em
+                            if _cs_dt <= _c <= _ce_dt:
+                                _key = f"D{int(_rec.decil):02d}"
+                                _lf_decil_dist[_key] = _lf_decil_dist.get(_key, 0) + 1
                     except Exception as _de:
                         logger.warning(f"⚠️ decis LF {lf_ref_name}: {_de}")
-                    finally:
-                        if _lf_conn is not None:
-                            try: _lf_conn.close()
-                            except Exception: pass
 
                     # Forecast aplicando a mesma metodologia ao volume LF anterior
                     if _lf_total_meta > 0:
