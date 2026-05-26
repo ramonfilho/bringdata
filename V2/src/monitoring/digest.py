@@ -621,9 +621,9 @@ def _render_text_lead_quality(v: dict, L: list):
 
     if has_lf:
         col_lf = f'{lf_label:>10}'
-        L.append(f'    {"":<10}  {"24h":>10}  {col_lf}  {"semana":>10}  {"mês":>10}  {"hist":>10}')
+        L.append(f'    {"":<10}  {"Ontem":>10}  {col_lf}  {"semana":>10}  {"mês":>10}  {"hist":>10}')
     else:
-        L.append(f'    {"":<10}  {"24h":>10}  {"semana":>10}  {"mês":>10}  {"hist":>10}')
+        L.append(f'    {"":<10}  {"Ontem":>10}  {"semana":>10}  {"mês":>10}  {"hist":>10}')
 
     for metric, label, fmt in [
         ('score', 'score',   '{:>9.4f} '),
@@ -1489,7 +1489,7 @@ def _slack_lead_quality(v: dict, B: list):
     def g(period, key): return lq.get(period, {}).get(key, 0)
 
     if has_lf:
-        header = f"               24h        {lf_label:>8}     semana       mês          histórico"
+        header = f"             Ontem        {lf_label:>8}     semana       mês          histórico"
         rows = [
             f"score      {g('ultimas_24h','score'):>8.4f}    {g('lf_referencia','score'):>8.4f}    {g('ultima_semana','score'):>8.4f}    {g('ultimo_mes','score'):>8.4f}    {g('historico','score'):>8.4f}",
             f"D9%        {g('ultimas_24h','d9'):>7.2f}%    {g('lf_referencia','d9'):>7.2f}%    {g('ultima_semana','d9'):>7.2f}%    {g('ultimo_mes','d9'):>7.2f}%    {g('historico','d9'):>7.2f}%",
@@ -1497,7 +1497,7 @@ def _slack_lead_quality(v: dict, B: list):
             f"n leads    {g('ultimas_24h','count'):>8,}    {g('lf_referencia','count'):>8,}    {g('ultima_semana','count'):>8,}    {g('ultimo_mes','count'):>8,}    {g('historico','count'):>8,}",
         ]
     else:
-        header = "               24h        semana       mês          histórico"
+        header = "             Ontem        semana       mês          histórico"
         rows = [
             f"score      {g('ultimas_24h','score'):>8.4f}    {g('ultima_semana','score'):>8.4f}    {g('ultimo_mes','score'):>8.4f}    {g('historico','score'):>8.4f}",
             f"D9%        {g('ultimas_24h','d9'):>7.2f}%    {g('ultima_semana','d9'):>7.2f}%    {g('ultimo_mes','d9'):>7.2f}%    {g('historico','d9'):>7.2f}%",

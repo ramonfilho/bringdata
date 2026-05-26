@@ -2575,16 +2575,30 @@ async def daily_monitoring_check_railway(
         # cresce naturalmente).
         from src.monitoring.daily_check_aggregations import compute_survey_funnel_db
         _sfm_db: Dict[str, Dict] = {}
+        # "Ontem BRT completo" — 00:00→23:59 BRT do dia anterior. Substitui
+        # a janela "rolling 24h" antiga (que divergia da Distribuição de
+        # Decis 'Ontem' por ter cortes em horas diferentes).
+        _brt_q = _tz(timedelta(hours=-3))
+        _today_brt_mid_q = datetime.now(_brt_q).replace(hour=0, minute=0, second=0, microsecond=0)
+        _dia_ant_start_utc = (_today_brt_mid_q - timedelta(days=1)).astimezone(_tz.utc)
+        _dia_ant_end_utc   = _today_brt_mid_q.astimezone(_tz.utc)
         try:
             _sfm_windows_cut = {
                 'historico':     _quality_window_start,            # 90d atrás
                 'ultimo_mes':    now_utc - timedelta(days=30),
                 'ultima_semana': now_utc - timedelta(days=7),
-                'ultimas_24h':   now_utc - timedelta(hours=24),
             }
             _sfm_db = compute_survey_funnel_db(
                 _records_90d, windows=_sfm_windows_cut, anchor=now_utc,
             )
+            # 'ultimas_24h' agora reflete "Ontem BRT completo" — chave mantida
+            # pra compat com PAYLOAD_SCHEMA/Pydantic/digest. Anchor ≠ now, então
+            # roda em chamada separada de compute_survey_funnel_db.
+            _sfm_db['ultimas_24h'] = compute_survey_funnel_db(
+                _records_90d,
+                windows={'ultimas_24h': _dia_ant_start_utc},
+                anchor=_dia_ant_end_utc,
+            )['ultimas_24h']
             # `periodo_query` = janela do lançamento atual (cap_start → now).
             _sfm_db['periodo_query'] = compute_survey_funnel_db(
                 _records_90d,
@@ -2794,7 +2808,6 @@ async def daily_monitoring_check_railway(
 
         # Cortes em UTC — Railway armazena createdAt em UTC
         now_utc_q = datetime.now(_tz.utc)
-        cut_24h   = now_utc_q - timedelta(hours=24)
         cut_week  = now_utc_q - timedelta(days=7)
         cut_month = now_utc_q - timedelta(days=30)
 
@@ -2812,11 +2825,28 @@ async def daily_monitoring_check_railway(
                     result_q.append(r)
             return result_q
 
+        def _between(rows_q, start, end):
+            # quality_rows: (leadScore, decil, createdAt) — [start, end)
+            result_q = []
+            for r in rows_q:
+                created = r[2]
+                if created is None:
+                    continue
+                if hasattr(created, 'tzinfo') and created.tzinfo is None:
+                    created = created.replace(tzinfo=_tz.utc)
+                if start <= created < end:
+                    result_q.append(r)
+            return result_q
+
+        # 'ultimas_24h' agora reflete "Ontem BRT completo" (00:00→23:59 BRT
+        # do dia anterior). Mantém a chave do payload pra compat com PAYLOAD_SCHEMA;
+        # o digest mostra o label "Ontem" no header. Substitui rolling 24h que
+        # divergia da Distribuição de Decis 'Ontem'.
         railway_lead_quality = {
             'historico':     _calc_quality(quality_rows),
             'ultimo_mes':    _calc_quality(_after(quality_rows, cut_month)),
             'ultima_semana': _calc_quality(_after(quality_rows, cut_week)),
-            'ultimas_24h':   _calc_quality(_after(quality_rows, cut_24h)),
+            'ultimas_24h':   _calc_quality(_between(quality_rows, _dia_ant_start_utc, _dia_ant_end_utc)),
         }
 
         # `count` = TOTAL de leads na tabela `Lead` (pesquisa preenchida), não só
