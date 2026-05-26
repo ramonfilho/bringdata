@@ -794,33 +794,47 @@ def _render_text_skipped_footer(v: dict, L: list):
 # ──────────────────────────────────────────────────────────────────────────
 
 def render_slack_blocks(view: dict) -> list[dict]:
-    """View 'DM' — visão completa do operador. Inclui alertas, funil,
-    lead quality, drift de público (geral e por A/B), drift de score
-    (decis) e distribuições de decis por janela.
+    """View 'DM' — visão completa do operador.
 
-    Antes (commits até 25/05/2026), drift de público e decis ficavam só
-    na view do cliente. Trouxemos pro DM porque a view do cliente está
-    desligada — sem isso, o operador perdia visibilidade dessas tabelas.
+    Estrutura espelha a view cliente nos primeiros blocos (A/B Test,
+    Drift por A/B, Drift Geral, Distribuição de Decis), depois acrescenta
+    os blocos exclusivos do operador (alertas detalhados, funil completo,
+    tracking, qualidade dos leads, Pub/Sub 24h, features zeradas em batch,
+    previsão de faturamento).
+
+    Por que essa ordem: o usuário pediu que as tabelas em comum apareçam
+    no topo do DM, juntas com o status do A/B, exatamente como no cliente.
+    Os blocos só-DM ficam abaixo, agrupados por tema.
     """
     blocks: list[dict] = []
+    # === Topo: espelha a view cliente ===
     _slack_header(view, blocks)
-    _slack_launch_fallback_notice_dm(view, blocks)  # DM-only — no-op se YAML está em dia
-    _slack_ab(view, blocks)  # status do A/B (ATIVO/DESATIVADO + variants)
+    _slack_launch_fallback_notice_dm(view, blocks)  # DM-only — no-op se YAML em dia
+    _slack_ab(view, blocks)
     blocks.append({'type': 'divider'})
-    _slack_alerts(view, blocks, include_audience_drift=True)
+    _slack_audience_drift_by_variant_dm(view, blocks)  # Drift por A/B (Ontem + Lançamento)
+    _slack_score_distribution_change_dm(view, blocks)  # Drift de Score (decis)
+    # Drift Geral (`audience_profile_drift`) é renderizado dentro de
+    # _slack_alerts via `include_audience_drift=True`. Pra preservar a ordem
+    # (Drift Geral logo após Drift por A/B), chama aqui só esse subset.
+    _alerts = view.get('alerts') or []
+    _aud_general = [a for a in _alerts if a.get('type') == 'audience_profile_drift']
+    for a in _aud_general:
+        _slack_alert_audience(a, blocks)
+        blocks.append({'type': 'divider'})
+    _slack_decis_window(view, blocks, 'previous_day')
+    _slack_decis_window(view, blocks, 'current_launch')
     blocks.append({'type': 'divider'})
-    _slack_unified_funnel(view, blocks)   # substitui _slack_funnel + _slack_traffic
+    # === Blocos exclusivos do operador (não vão pro cliente) ===
+    _slack_alerts(view, blocks, include_audience_drift=False)
+    blocks.append({'type': 'divider'})
+    _slack_unified_funnel(view, blocks)
     blocks.append({'type': 'divider'})
     _slack_lead_quality(view, blocks)
     blocks.append({'type': 'divider'})
-    _slack_pubsub_24h(view, blocks)  # Etapa 7 do refator do monitoramento
+    _slack_pubsub_24h(view, blocks)
     blocks.append({'type': 'divider'})
     _slack_training_drift_24h(view, blocks)  # Features OHE zeradas em batch (T1-16)
-    blocks.append({'type': 'divider'})
-    _slack_audience_drift_by_variant_dm(view, blocks)  # Drift público por A/B
-    _slack_score_distribution_change_dm(view, blocks)  # Drift de Score (decis)
-    _slack_decis_window(view, blocks, 'previous_day')
-    _slack_decis_window(view, blocks, 'current_launch')
     blocks.append({'type': 'divider'})
     _slack_revenue(view, blocks)
     _slack_skipped_footer(view, blocks)
