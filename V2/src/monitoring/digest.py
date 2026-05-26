@@ -1657,7 +1657,14 @@ def _slack_ab(v: dict, B: list):
     by_spend = op.get('spend_by_variant_24h_brl') or {}
     by_cpl = op.get('cpl_by_variant_24h_brl') or {}
     total_scored_24h = sum((n or 0) for n in by.values())
-    lines = ['*🤖 A/B Test* — ATIVO']
+    # "Ativo" no back-end ≠ "rodando na prática". Se alguma variant tem
+    # spend=0 ou 0 leads escoreados, sinaliza que o teste não está efetivamente
+    # comparando — tabelas Drift por A/B são suprimidas (vide _ab_test_active).
+    active_in_practice = _ab_test_active(v)
+    header = '*🤖 A/B Test* — ATIVO' if active_in_practice else (
+        '*🤖 A/B Test* — ATIVO no back-end, *sem tráfego efetivo em ambas as variants*'
+    )
+    lines = [header]
     for vv in op.get('ab_variants', []) or []:
         name = vv.get('name','?')
         label = _variant_label(name)
@@ -1669,8 +1676,35 @@ def _slack_ab(v: dict, B: list):
 
 
 def _ab_test_active(v: dict) -> bool:
-    """Helper: True se o teste A/B está marcado como ativo no payload."""
-    return bool((v.get('ab_test') or {}).get('ab_test_enabled', False))
+    """True se o A/B Test está **efetivamente** rodando — não basta a flag
+    `ab_test_enabled` (= configurado no back-end). Exige também:
+      - Cada variant declarada em `ab_variants` ter spend > 0 nas últimas 24h.
+      - Cada variant ter pelo menos 1 lead escoreado nas últimas 24h.
+
+    Sem isso, ainda que o back-end aceite o roteamento, as tabelas comparativas
+    Champion × Challenger ficariam com uma coluna vazia (—) — informação
+    enganosa de que existe comparação quando na prática não há.
+
+    Usada por _slack_audience_drift_by_variant_dm, render_slack_blocks_client
+    e _slack_ab pra decidir suprimir tabelas e/ou ajustar o header do bloco.
+    """
+    op = v.get('ab_test') or {}
+    if not op.get('ab_test_enabled', False):
+        return False
+    variants = op.get('ab_variants') or []
+    if not variants:
+        return False
+    by_spend = op.get('spend_by_variant_24h_brl') or {}
+    by_scored = op.get('leads_scored_by_variant_24h') or {}
+    for vv in variants:
+        name = vv.get('name')
+        if not name:
+            return False
+        if (by_spend.get(name) or 0) <= 0:
+            return False
+        if (by_scored.get(name) or 0) <= 0:
+            return False
+    return True
 
 
 def _slack_actionable(v: dict, B: list):
