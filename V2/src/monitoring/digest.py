@@ -1661,9 +1661,22 @@ def _slack_ab(v: dict, B: list):
     # spend=0 ou 0 leads escoreados, sinaliza que o teste não está efetivamente
     # comparando — tabelas Drift por A/B são suprimidas (vide _ab_test_active).
     active_in_practice = _ab_test_active(v)
-    header = '*🤖 A/B Test* — ATIVO' if active_in_practice else (
-        '*🤖 A/B Test* — ATIVO no back-end, *sem tráfego efetivo em ambas as variants*'
-    )
+    if active_in_practice:
+        header = '*🤖 A/B Test* — ATIVO'
+    else:
+        # Identifica quais variants estão sem tráfego — exibe nominalmente
+        # pra o operador saber o estado real (ex.: 'sem tráfego no Challenger').
+        sem_trafego = [
+            _variant_label(vv.get('name', '?'))
+            for vv in (op.get('ab_variants') or [])
+            if (by_spend.get(vv.get('name')) or 0) <= 0
+            or (by.get(vv.get('name')) or 0) <= 0
+        ]
+        if sem_trafego:
+            quem = ', '.join(sem_trafego)
+            header = f'*🤖 A/B Test* — ATIVO no back-end, *sem tráfego no {quem}*'
+        else:
+            header = '*🤖 A/B Test* — ATIVO no back-end, *sem tráfego efetivo*'
     lines = [header]
     for vv in op.get('ab_variants', []) or []:
         name = vv.get('name','?')
