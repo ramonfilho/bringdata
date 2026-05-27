@@ -400,6 +400,7 @@ def _render_text_alerts(v: dict, L: list):
         # seção própria (lead_quality / audience). LOW + dentro do padrão não
         # deve poluir o topo.
         'audience_quality_signal', 'audience_profile_drift_by_variant',
+        'audience_profile_drift_by_source',
     )]
 
     sep = lambda: (L.append('· · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · · ·'), L.append(''))
@@ -813,6 +814,7 @@ def render_slack_blocks(view: dict) -> list[dict]:
     _slack_ab(view, blocks)
     blocks.append({'type': 'divider'})
     _slack_audience_drift_by_variant_dm(view, blocks)  # Drift por A/B (Ontem + Lançamento)
+    _slack_audience_drift_by_source_dm(view, blocks)   # Drift por Fonte Meta/Google
     _slack_score_distribution_change_dm(view, blocks)  # Drift de Score (decis)
     # Drift Geral (`audience_profile_drift`) é renderizado dentro de
     # _slack_alerts via `include_audience_drift=True`. Pra preservar a ordem
@@ -1050,18 +1052,27 @@ def render_slack_blocks_client(view: dict) -> list[dict]:
     ab_on = _ab_test_active(view)
     audience_by_variant = [a for a in view.get('alerts', [])
                            if a.get('type') == 'audience_profile_drift_by_variant'] if ab_on else []
+    audience_by_source = [a for a in view.get('alerts', [])
+                          if a.get('type') == 'audience_profile_drift_by_source']
     audience_general = [a for a in view.get('alerts', [])
                         if a.get('type') == 'audience_profile_drift']
     # Header único da seção de drift (Fix 1)
-    if audience_by_variant or audience_general:
+    if audience_by_variant or audience_by_source or audience_general:
         _slack_drift_legend_header(blocks)
 
     # Ordena: previous_day primeiro, depois current_launch
     audience_by_variant.sort(
         key=lambda a: 0 if (a.get('details', {}) or {}).get('window') == 'previous_day' else 1
     )
+    audience_by_source.sort(
+        key=lambda a: 0 if (a.get('details', {}) or {}).get('window') == 'previous_day' else 1
+    )
     for a in audience_by_variant:
         _slack_alert_audience_by_variant(a, blocks)
+        blocks.append({'type': 'divider'})
+
+    for a in audience_by_source:
+        _slack_alert_audience_by_source(a, blocks)
         blocks.append({'type': 'divider'})
 
     # Drift geral com cores
@@ -1096,6 +1107,7 @@ def _slack_alerts(v: dict, B: list, include_audience_drift: bool = True):
     others              = [a for a in alerts if a.get('type') not in (
         'distribution_drift', 'category_drift', 'audience_profile_drift',
         'audience_profile_drift_by_variant',
+        'audience_profile_drift_by_source',
         'outros_bucket_inflated', 'extra_unexpected_features',
         # audience_quality_signal tem seção própria (lead_quality / audience);
         # LOW dentro do padrão não vai pra Mudanças significativas.
@@ -1284,6 +1296,68 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
                             is_winner=(winner == 'challenger'))
         rows.append(f"`{label:<32} {ref:>4.1f}%  {ch_cell:>20}  {cl_cell:>20}`")
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
+
+
+def _slack_alert_audience_by_source(a: dict, B: list):
+    """Drift por fonte de tráfego (Meta vs Google) com 🟢 bom · 🔴 ruim · ⚪ neutro.
+
+    Mesmo display do `_slack_alert_audience_by_variant`, trocando Champion/
+    Challenger por Meta/Google. Não depende de ABTestConfig (split é pelo
+    `utm_source` direto). Renderiza header com n_meta/n_google e tabela com
+    Top% (referência) + Meta(Δ) + Google(Δ).
+    """
+    d = a.get('details', {}) or {}
+    window = d.get('window') or ''
+    top = d.get('top_list', []) or []
+    n_meta = d.get('meta_n', 0) or 0
+    n_ggl  = d.get('google_n', 0) or 0
+
+    window_title = 'Ontem' if window == 'previous_day' else (
+        'Lançamento Atual' if window == 'current_launch' else (d.get('window_label') or 'janela')
+    )
+    header = (f"*📉 Drift por Fonte - {window_title}*  "
+              f"·  Meta `n={n_meta:,}`  ·  Google `n={n_ggl:,}`")
+    rows = [header]
+    col_header = f"{'Característica':<32} {'Top%':>5}  {'Meta(Δ)':>20}  {'Google(Δ)':>20}"
+    rows.append(f"`{col_header}`")
+
+    def cell_qual(pct, delta, quality):
+        if pct is None or delta is None: return f"{'—':>20}"
+        return f"{_quality_emoji(quality)} {pct:>5.1f}%({delta:+.1f})    "
+
+    for it in top:
+        label = _short(f"{it['feature_label']}: {_humanize_category(it['category'])}", 32)
+        ref = it.get('reference_pct', 0)
+        meta_cell = cell_qual(it.get('meta_pct'), it.get('meta_delta_pp'),
+                              it.get('meta_quality'))
+        ggl_cell  = cell_qual(it.get('google_pct'), it.get('google_delta_pp'),
+                              it.get('google_quality'))
+        rows.append(f"`{label:<32} {ref:>4.1f}%  {meta_cell:>20}  {ggl_cell:>20}`")
+    B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
+
+
+def _slack_audience_drift_by_source_dm(v: dict, B: list):
+    """Tabelas de drift de público por fonte (Meta × Google) no DM.
+
+    Mesmo conteúdo que `render_slack_blocks_client` mostra
+    (`audience_profile_drift_by_source`). Skipa silenciosamente se não houver
+    alertas (ex.: top_list vazio ou snapshot ausente).
+
+    Diferente de `_slack_audience_drift_by_variant_dm`, NÃO gate em
+    `_ab_test_active` — drift por fonte é independente do A/B.
+    """
+    alerts = v.get('alerts') or []
+    by_source = [a for a in alerts if a.get('type') == 'audience_profile_drift_by_source']
+    if not by_source:
+        return
+
+    _slack_drift_legend_header(B)
+    by_source.sort(
+        key=lambda a: 0 if (a.get('details', {}) or {}).get('window') == 'previous_day' else 1
+    )
+    for a in by_source:
+        _slack_alert_audience_by_source(a, B)
+        B.append({'type': 'divider'})
 
 
 def _slack_decis_window(v: dict, B: list, window_key: str):

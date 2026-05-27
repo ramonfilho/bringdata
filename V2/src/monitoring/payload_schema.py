@@ -117,6 +117,15 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'alerts[].details.top_list[].challenger_delta_pp':                                  (R, None),  # ex: None
     'alerts[].details.top_list[].challenger_quality':                                   (R, None),  # ex: 'bom' | 'ruim' | 'neutro' | None
     'alerts[].details.top_list[].winner':                                               (R, None),  # ex: 'champion' | 'challenger' | None
+    # audience_profile_drift_by_source — split por fonte (Meta / Google)
+    'alerts[].details.meta_n':                                                          (R, None),  # ex: 1095
+    'alerts[].details.google_n':                                                        (R, None),  # ex: 71
+    'alerts[].details.top_list[].meta_pct':                                             (R, None),  # ex: None
+    'alerts[].details.top_list[].meta_delta_pp':                                        (R, None),  # ex: None
+    'alerts[].details.top_list[].meta_quality':                                         (R, None),  # ex: 'bom' | 'ruim' | 'neutro' | None
+    'alerts[].details.top_list[].google_pct':                                           (R, None),  # ex: None
+    'alerts[].details.top_list[].google_delta_pp':                                      (R, None),  # ex: None
+    'alerts[].details.top_list[].google_quality':                                       (R, None),  # ex: 'bom' | 'ruim' | 'neutro' | None
     'alerts[].details.total_expected_union':                                            (R, None),  # ex: None
     'alerts[].details.total_received_union':                                            (R, None),  # ex: None
     'alerts[].details.variant_name':                                                    (R, None),  # ex: 'champion_jan30'

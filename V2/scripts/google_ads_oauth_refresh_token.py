@@ -23,8 +23,13 @@ valor em V2/.env como GOOGLE_ADS_REFRESH_TOKEN.
 
 import os
 import sys
+from pathlib import Path
 
+from dotenv import load_dotenv
 from google_auth_oauthlib.flow import InstalledAppFlow
+
+ROOT = Path(__file__).parent.parent
+load_dotenv(ROOT / ".env")
 
 # Escopo único da Google Ads API.
 SCOPES = ["https://www.googleapis.com/auth/adwords"]

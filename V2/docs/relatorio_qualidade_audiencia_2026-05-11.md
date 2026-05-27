@@ -107,7 +107,7 @@ Antes de adotar o score do RF como sinal, validamos sua capacidade preditiva em 
 | Modelo | Run ID | Treino até | Roteamento |
 |---|---|---|---|
 | **Champion jan30** | `d51757f5...` | 04/11/2025 | Default (sem UTM HQLB) |
-| **Challenger abr28** | `5d158f0a...` | 08/04/2026 | utm_campaign "PIXEL NOVO API" ou URL `ml-parabens-psq-devf` |
+| **Challenger abr28** | `5d158f0a...` | 08/04/2026 | utm_campaign "utm_pixel" ou URL `ml-parabens-psq-devf` |
 
 **LFs out-of-sample escolhidos:** LF52 (cap 07-12/04, n=9.391 leads) e LF53 first peak (cap 13-20/04, n=10.054). LF52 é OOS para o Champion (treino até 04/11) e parcial OOS para o Challenger (3 dias dentro do treino). LF53fp é 100% OOS para ambos.
 

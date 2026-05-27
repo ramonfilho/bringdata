@@ -53,6 +53,23 @@ def is_enabled() -> bool:
     return os.environ.get("PUBSUB_CAPI_ENABLED", "false").strip().lower() == "true"
 
 
+def score_all_leads() -> bool:
+    """Desacoplamento scoring × Meta CAPI.
+
+    `true` (default): todo lead com `has_computer` é scoreado, independente
+    de utm_source. Decisão de envio Meta CAPI (allowlist + fbp/fbc) acontece
+    DEPOIS do scoring. Habilita decis Google no ledger.
+
+    `false`: comportamento antigo — só Meta-eligible com fbp/fbc scoreia.
+
+    Interruptor de comportamento via env. Flip em ~2min via
+    `gcloud run services update --update-env-vars SCORE_ALL_LEADS=false`,
+    sem precisar de novo build. Critério de remoção da flag: 7-14 dias
+    sem incident + decis Google estabilizados no relatório.
+    """
+    return os.environ.get("SCORE_ALL_LEADS", "true").strip().lower() == "true"
+
+
 def subscription_path() -> str:
     return f"projects/{PUBSUB_PROJECT_ID}/subscriptions/{PUBSUB_SUBSCRIPTION_ID}"
 
@@ -227,6 +244,7 @@ def process_pending_pubsub(
     from api.capi_integration import send_batch_events
 
     allowlist = set(pipeline._client_config.capi.utm_source_allowlist or [])
+    score_all = score_all_leads()
     sub_path = subscription_path()
 
     # 1. Pull. Em fila vazia, o servidor do Pub/Sub bloqueia até o deadline
@@ -287,9 +305,22 @@ def process_pending_pubsub(
             error_ack_ids.append(ack_id)
 
     # 3. Classify + montar inputs do scoring
+    #
+    # Desacoplamento scoring × Meta CAPI:
+    #   Quando `score_all=True` (default):
+    #     - Gate técnico: precisa de `has_computer` (feature do modelo). fbp/fbc
+    #       NÃO entram aqui — são tracking Meta, só relevantes pro dispatch.
+    #     - Sem `has_computer` → status='skipped_missing_data', não scoreia.
+    #     - Com `has_computer` → entra na fila de scoring (independente de
+    #       utm_source). Decisão de destino (Meta CAPI / não-Meta) acontece
+    #       no passo 5 abaixo, após o scoring.
+    #
+    #   Quando `score_all=False` (legacy):
+    #     - classify() original — só Meta-eligible com fbp+fbc+computador
+    #       scoreia. Mantido pra rollback rápido via env.
     pending_ledger: List[Dict] = []
-    # (ack_id, payload, survey_dict, utm, enrich)
-    to_score: List[Tuple[str, Dict, Dict, Dict, Dict]] = []
+    # (ack_id, payload, survey_dict, utm, enrich, meta_elig)
+    to_score: List[Tuple[str, Dict, Dict, Dict, Dict, bool]] = []
     handled_ack_ids: List[str] = []
     n_allow = n_missing = 0
 
@@ -320,24 +351,39 @@ def process_pending_pubsub(
             continue
 
         meta_elig = is_meta_eligible(utm.get("source"), allowlist)
-        verdict = classify(meta_elig, enrich)
 
-        if verdict == "skipped_allowlist":
-            n_allow += 1
-            pending_ledger.append(ledger_row(
-                event_id, payload.get("email"), None, None, None,
-                "skipped_allowlist", utm=utm, survey=survey_dict,
-                enrich=enrich, has_computer=has_computer))
-            handled_ack_ids.append(ack_id)
-        elif verdict == "skipped_missing_data":
-            n_missing += 1
-            pending_ledger.append(ledger_row(
-                event_id, payload.get("email"), None, None, None,
-                "skipped_missing_data", utm=utm, survey=survey_dict,
-                enrich=enrich, has_computer=has_computer))
-            handled_ack_ids.append(ack_id)
+        if score_all:
+            # Gate técnico — só has_computer (feature do modelo). fbp/fbc
+            # decidem no dispatch.
+            if not enrich.get("computador"):
+                n_missing += 1
+                pending_ledger.append(ledger_row(
+                    event_id, payload.get("email"), None, None, None,
+                    "skipped_missing_data", utm=utm, survey=survey_dict,
+                    enrich=enrich, has_computer=has_computer))
+                handled_ack_ids.append(ack_id)
+                continue
+            # Entra na fila de scoring; meta_elig decide destino depois.
+            to_score.append((ack_id, payload, survey_dict, utm, enrich, meta_elig))
         else:
-            to_score.append((ack_id, payload, survey_dict, utm, enrich))
+            # Comportamento legacy — classify checa tudo de uma vez.
+            verdict = classify(meta_elig, enrich)
+            if verdict == "skipped_allowlist":
+                n_allow += 1
+                pending_ledger.append(ledger_row(
+                    event_id, payload.get("email"), None, None, None,
+                    "skipped_allowlist", utm=utm, survey=survey_dict,
+                    enrich=enrich, has_computer=has_computer))
+                handled_ack_ids.append(ack_id)
+            elif verdict == "skipped_missing_data":
+                n_missing += 1
+                pending_ledger.append(ledger_row(
+                    event_id, payload.get("email"), None, None, None,
+                    "skipped_missing_data", utm=utm, survey=survey_dict,
+                    enrich=enrich, has_computer=has_computer))
+                handled_ack_ids.append(ack_id)
+            else:
+                to_score.append((ack_id, payload, survey_dict, utm, enrich, meta_elig))
 
     # 4. Scoring — uma chamada da casa do scoring (src/scoring/service.py)
     # por lead. A casa faz payload→sheets_row→preprocess→predict em memória,
@@ -345,7 +391,7 @@ def process_pending_pubsub(
     # (objeto da variante A/B, usado abaixo pra montar CAPI) é resolvido
     # de novo aqui — chamada barata, evita inflar o DTO.
     scored: Dict[str, Tuple[float, str, object, Optional[str]]] = {}
-    for _, payload, survey_dict, utm, enrich in to_score:
+    for _, payload, survey_dict, utm, enrich, _meta_elig in to_score:
         eid = payload["eventId"]
         try:
             exp = score_lead_from_payload(payload, pipeline)
@@ -365,10 +411,20 @@ def process_pending_pubsub(
         scored[eid] = (exp.lead_score, dc, ab_v, exp.variant)
 
     # 5. Montar CAPI + ledger dos enviáveis
+    #
+    # Quando score_all=True, esta etapa também trata leads scoreados que NÃO
+    # vão pro Meta:
+    #   - não-Meta (Google etc.) → status='skipped_allowlist' (scoreado, decil
+    #     preenchido, mas sem CAPI Meta).
+    #   - Meta-eligible sem fbp/fbc → status='skipped_missing_data' (scoreado
+    #     mas sem tracking Meta).
+    # Quando score_all=False, todo lead em to_score é Meta-eligible com tracking
+    # OK (classify garantiu), então esses dois caminhos novos não são exercitados.
     capi_leads: List[Dict] = []
     # (event_id, decil_str, decil_int, vname, ack_id, payload, utm, survey_dict, enrich)
     capi_meta: List[Tuple[str, str, Optional[int], Optional[str], str, Dict, Dict, Dict, Dict]] = []
-    for ack_id, payload, survey_dict, utm, enrich in to_score:
+    n_scored_no_meta = 0
+    for ack_id, payload, survey_dict, utm, enrich, meta_elig in to_score:
         eid = payload["eventId"]
         if eid not in scored:
             n_err += 1
@@ -379,6 +435,29 @@ def process_pending_pubsub(
             handled_ack_ids.append(ack_id)
             continue
         sc, dc, ab_v, vn = scored[eid]
+        _di_int = int(dc[1:]) if dc else None
+
+        # Gates de dispatch (só ativos quando score_all=True — caso contrário,
+        # classify já filtrou antes do scoring):
+        if score_all and not meta_elig:
+            # Google/outros — scoreado, NÃO vai pro Meta CAPI.
+            n_allow += 1
+            n_scored_no_meta += 1
+            pending_ledger.append(ledger_row(
+                eid, payload.get("email"), vn, sc, _di_int,
+                "skipped_allowlist", utm=utm, survey=survey_dict,
+                enrich=enrich, has_computer=payload.get("hasComputer")))
+            handled_ack_ids.append(ack_id)
+            continue
+        if score_all and not (enrich.get("fbp") and enrich.get("fbc")):
+            # Meta-eligible MAS sem tracking Meta — scoreado, não enviado.
+            n_missing += 1
+            pending_ledger.append(ledger_row(
+                eid, payload.get("email"), vn, sc, _di_int,
+                "skipped_missing_data", utm=utm, survey=survey_dict,
+                enrich=enrich, has_computer=payload.get("hasComputer")))
+            handled_ack_ids.append(ack_id)
+            continue
         nome = (enrich.get("nome") or "").strip()
         parts = nome.split(" ", 1)
         cl = {
@@ -467,11 +546,13 @@ def process_pending_pubsub(
     summary = {
         "processed": len(parsed),
         "sent": sent,
+        "scored_no_meta": n_scored_no_meta,
         "skipped_allowlist": n_allow,
         "skipped_missing_data": n_missing,
         "dup_in_batch": n_dup_in_batch,
         "errors": n_err,
         "dry_run": dry_run,
+        "score_all": score_all,
     }
     logger.info(f"📨 [pubsub_branch] {summary}")
     return summary

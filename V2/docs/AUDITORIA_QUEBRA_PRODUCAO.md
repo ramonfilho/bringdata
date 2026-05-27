@@ -144,7 +144,7 @@ Discutido em sessão 11/mai. Roteamento (regras `utm_pattern` / `url_pattern` qu
 
 Eixos:
 - **Endpoint** (5): `/predict/single`, `/predict/batch`, `/railway/process-pending`, `/capi/process_daily_batch`, `/webhook/lead_capture`.
-- **Variante A/B** (2): Champion `jan30` (path default, sem utm_campaign match), Challenger `abr28` (utm_campaign='PIXEL NOVO API').
+- **Variante A/B** (2): Champion `jan30` (path default, sem utm_campaign match), Challenger `abr28` (utm_campaign='utm_pixel').
 - **Override** (3): encoding override (ordinal idade/salário pro Champion), conversion_rates override (per-variant no YAML), predictor override (variante A/B usa seu próprio modelo).
 
 | Endpoint | Variante | Encoding override | Conversion override | Predictor override | Gate cobrindo |

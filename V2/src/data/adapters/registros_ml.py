@@ -24,6 +24,21 @@ logger = logging.getLogger(__name__)
 # Tradução `registros_ml.base_status` → `LeadRecord.status_envio`.
 # Hoje 1:1 (vocabulário do ledger novo já casa com o interno). Tabela existe
 # pra forçar revisão consciente se a fonte introduzir status novo.
+#
+# Vocabulário do ciclo de vida Meta CAPI:
+#   success              → Meta CAPI aceitou
+#   error                → Meta CAPI rejeitou
+#   skipped_missing_data → ou survey incompleto (não scoreou) ou Meta-eligível
+#                          sem fbp/fbc (scoreou mas não enviou Meta por falta
+#                          de tracking)
+#   skipped_allowlist    → utm_source não-Meta (Google etc.). Sob
+#                          SCORE_ALL_LEADS=true, o lead É scoreado mas NÃO
+#                          enviado a Meta. Sob false, nem scoreia.
+#
+# IMPORTANTE: NÃO usar este enum pra outros destinos (Google CAPI etc.).
+# Cada destino futuro tem sua própria coluna de status (ex.: google_capi_status).
+# Misturar destinos no mesmo enum colapsa eixos ortogonais (foi exatamente o
+# problema que motivou o desacoplamento scoring × CAPI Meta em 2026-05-27).
 _STATUS_MAP = {
     'success':              'success',
     'error':                'error',

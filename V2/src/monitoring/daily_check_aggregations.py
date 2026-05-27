@@ -10,8 +10,13 @@ o mesmo `_repo.leads_in_range(start, end)` que já é usado pra `scored_rows`.
 
 Decisões de modelagem:
   - `meta_eligible` (denominador de FBP/FBC) = leads que passaram pelo CAPI
-    = `status_envio != 'skipped_allowlist'`. Allowlist mata o lead antes do
-    Meta — então não conta como "população Meta".
+    = `status_envio != 'skipped_allowlist'`. Allowlist marca o lead como
+    não-Meta — então não conta como "população Meta".
+    NOTA (2026-05-27, desacoplamento scoring × Meta CAPI): após a flag
+    SCORE_ALL_LEADS=true, `skipped_allowlist` significa "scoreado mas NÃO
+    enviado ao Meta" (utm_source não-Meta, ex.: Google). A semântica do
+    filtro continua correta — não-Meta segue sendo não-Meta — mas o lead
+    agora tem `score`/`decil` preenchidos.
   - `capi_sent` = `status_envio in {'success', 'error'}`. Tentou enviar
     (sucesso ou erro), espelhando a definição da query antiga
     (`capiSentAt IS NOT NULL AND capiStatus NOT IN ('blocked', 'skipped')`).

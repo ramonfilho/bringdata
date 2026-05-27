@@ -296,7 +296,16 @@ class _FakePipeline:
 def test_dedup_in_batch_dispara_capi_uma_vez():
     """Duas mensagens com mesmo eventId no mesmo pull → 1 processada, 1 ackada
     como dup. Cobre o caso visto em produção 2026-05-25 11:35 (marcelo enviado
-    2x no mesmo batch porque o publisher republicou)."""
+    2x no mesmo batch porque o publisher republicou).
+
+    Pinned em SCORE_ALL_LEADS=false: testa o caminho legacy (classify decide
+    tudo antes do scoring). O fake pipeline não implementa scoring; sob
+    SCORE_ALL_LEADS=true o lead source=org cairia em to_score e dispararia
+    erro de scoring. Pra testar o novo caminho com scoring, ver
+    test_score_all_leads_* (a serem adicionados quando o flag default
+    SCORE_ALL_LEADS=true entrar no caminho coberto por testes integrados).
+    """
+    import os
     from api.pubsub_branch import process_pending_pubsub
 
     raw = json.dumps(PAYLOAD_REAL).encode("utf-8")
@@ -306,7 +315,15 @@ def test_dedup_in_batch_dispara_capi_uma_vez():
     ]
     sub = _FakeSubscriber(received)
     conn = _FakeConn()
-    summary = process_pending_pubsub(sub, conn, _FakePipeline(), dry_run=False)
+    _prev = os.environ.get("SCORE_ALL_LEADS")
+    os.environ["SCORE_ALL_LEADS"] = "false"
+    try:
+        summary = process_pending_pubsub(sub, conn, _FakePipeline(), dry_run=False)
+    finally:
+        if _prev is None:
+            os.environ.pop("SCORE_ALL_LEADS", None)
+        else:
+            os.environ["SCORE_ALL_LEADS"] = _prev
 
     # Os 2 ack_ids vão pra fila de ack — não queremos a 2ª mensagem voltando
     assert set(sub.acked) == {"ack-1", "ack-2"}, sub.acked
