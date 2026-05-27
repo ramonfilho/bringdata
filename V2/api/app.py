@@ -3566,7 +3566,10 @@ async def post_slack_digest(
 
 
 @app.get("/monitoring/audience-drift")
-async def audience_drift_endpoint(client_id: str = 'devclub'):
+async def audience_drift_endpoint(
+    client_id: str = 'devclub',
+    date: Optional[str] = None,
+):
     """
     Drift de público por característica vs Top 5 ROAS — versão completa.
 
@@ -3574,18 +3577,34 @@ async def audience_drift_endpoint(client_id: str = 'devclub'):
     cômputo do digest do Slack — só sem os filtros aplicados. Pra consumo
     via dashboard cliente.
 
+    Args:
+        client_id: cliente (default `devclub`).
+        date: opcional, formato `YYYY-MM-DD`. Quando informado, é o "hoje" da
+              simulação — `day_*` vira o dia anterior a ele, `prev_day_*` vira
+              D-2, e `launch_*` resolve o LF ativo naquela data. Sem o param,
+              tudo é relativo ao dia atual (comportamento default do digest).
+
     Sem auth — mesmo padrão dos demais `/monitoring/*` endpoints. URL é
     pública na internet; dado é demográfico agregado (sem PII).
     """
     from src.data import compose_repository
     from src.monitoring.data_quality import DataQualityMonitor
     from src.core.client_config import ClientConfig
+    from datetime import date as _date
     import pg8000.native
     import pandas as _pd
 
+    anchor_date = None
+    if date:
+        try:
+            anchor_date = _date.fromisoformat(date)
+        except ValueError:
+            raise HTTPException(status_code=400,
+                                detail=f"date inválido: '{date}'. Use YYYY-MM-DD.")
+
     cfg_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        'configs', 'active_models', f'{client_id}.yaml',
+        'configs', 'clients', f'{client_id}.yaml',
     )
     client_config = ClientConfig.from_yaml(cfg_path)
 
@@ -3602,7 +3621,9 @@ async def audience_drift_endpoint(client_id: str = 'devclub'):
         monitor = DataQualityMonitor(
             model_path='', client_config=client_config, db=None, repo=repo,
         )
-        alerts = monitor._check_audience_profile_drift(_pd.DataFrame(), raw=True)
+        alerts = monitor._check_audience_profile_drift(
+            _pd.DataFrame(), raw=True, anchor_date=anchor_date,
+        )
     finally:
         railway_conn.close()
 

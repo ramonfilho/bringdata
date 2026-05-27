@@ -710,6 +710,7 @@ class DataQualityMonitor:
                     _tl = (_a.get('details') or {}).get('top_list') or []
                     if _tl:
                         alerts.extend(self._check_audience_drift_by_variant(_tl))
+                        alerts.extend(self._check_audience_drift_by_source(_tl))
 
         # 9. Audience quality signal — re-scoreia leads do LF atual com Challenger
         #    via mesma chain de produção (LeadScoringPipeline.run) e compara
@@ -1675,27 +1676,32 @@ class DataQualityMonitor:
             })
         return pd.DataFrame(rows, columns=self._railway_pesquisa_columns())
 
-    def _query_railway_previous_full_brt_day(self) -> pd.DataFrame:
+    def _query_railway_previous_full_brt_day(self, anchor_date=None) -> pd.DataFrame:
         """
         Janela: 00:00→23:59 BRT do dia anterior. Usa _query_railway_pesquisa_window.
+
+        `anchor_date` permite simular outro "hoje" — útil pra dashboards que
+        consultam o estado histórico do drift. Quando None, usa hoje BRT.
         """
         from datetime import datetime, timedelta, timezone
         brt = timezone(timedelta(hours=-3))
-        now_brt = datetime.now(brt)
-        yesterday_brt = (now_brt - timedelta(days=1)).date()
+        today_brt = anchor_date if anchor_date is not None else datetime.now(brt).date()
+        yesterday_brt = today_brt - timedelta(days=1)
         start_utc = datetime(yesterday_brt.year, yesterday_brt.month, yesterday_brt.day,
                              3, 0, 0, tzinfo=timezone.utc)
         end_utc = start_utc + timedelta(days=1)
         return self._query_railway_pesquisa_window(start_utc, end_utc)
 
-    def _query_railway_two_full_brt_days_ago(self) -> pd.DataFrame:
+    def _query_railway_two_full_brt_days_ago(self, anchor_date=None) -> pd.DataFrame:
         """
         Janela: 00:00→23:59 BRT de anteontem (D-2). Usa _query_railway_pesquisa_window.
+
+        `anchor_date` permite simular outro "hoje" — D-2 fica relativo a ele.
         """
         from datetime import datetime, timedelta, timezone
         brt = timezone(timedelta(hours=-3))
-        now_brt = datetime.now(brt)
-        prev_brt = (now_brt - timedelta(days=2)).date()
+        today_brt = anchor_date if anchor_date is not None else datetime.now(brt).date()
+        prev_brt = today_brt - timedelta(days=2)
         start_utc = datetime(prev_brt.year, prev_brt.month, prev_brt.day,
                              3, 0, 0, tzinfo=timezone.utc)
         end_utc = start_utc + timedelta(days=1)
@@ -1956,7 +1962,7 @@ class DataQualityMonitor:
             return None
         return (active.name, active.cap_start.isoformat(), active.cap_end.isoformat())
 
-    def _query_railway_current_launch_brt(self) -> tuple[pd.DataFrame, Dict]:
+    def _query_railway_current_launch_brt(self, anchor_date=None) -> tuple[pd.DataFrame, Dict]:
         """
         Janela do "lançamento atual" via `src.core.launches.resolve_launch_window_brt`:
 
@@ -1970,6 +1976,9 @@ class DataQualityMonitor:
         escondia gap no `launches.yaml` (bug detectado em 13/05/2026: LF54
         aparecia rotulado como atual porque LF55 não estava cadastrado).
 
+        `anchor_date` permite resolver o LF ativo em outro dia (útil pra
+        dashboards mostrarem o estado do drift num dia passado).
+
         Retorna (df, info dict com lf_name/label/cap_start/cap_end/source/error).
         """
         from datetime import datetime, timedelta, timezone
@@ -1981,7 +1990,7 @@ class DataQualityMonitor:
             'source': None, 'error': None,
         }
 
-        window = resolve_launch_window_brt()
+        window = resolve_launch_window_brt(today=anchor_date)
         info['lf_name'] = window.lf_name
         info['cap_start'] = window.cap_start.isoformat()
         info['cap_end'] = window.cap_end.isoformat() if window.cap_end else None
@@ -1992,10 +2001,14 @@ class DataQualityMonitor:
         start_utc = datetime(window.cap_start.year, window.cap_start.month, window.cap_start.day,
                              0, 0, 0, tzinfo=BRT).astimezone(timezone.utc)
 
-        today_brt = datetime.now(BRT).date()
+        today_brt = anchor_date if anchor_date is not None else datetime.now(BRT).date()
         if window.cap_end is not None and window.cap_end < today_brt:
             # cap_end 23:59:59 BRT → UTC
             end_utc = datetime(window.cap_end.year, window.cap_end.month, window.cap_end.day,
+                               23, 59, 59, tzinfo=BRT).astimezone(timezone.utc)
+        elif anchor_date is not None:
+            # anchor histórico em captação ainda corrente — fim do anchor BRT
+            end_utc = datetime(anchor_date.year, anchor_date.month, anchor_date.day,
                                23, 59, 59, tzinfo=BRT).astimezone(timezone.utc)
         else:
             # captação em curso (ou fallback de terça): janela até agora
@@ -2004,7 +2017,8 @@ class DataQualityMonitor:
         df = self._query_railway_pesquisa_window(start_utc, end_utc)
         return df, info
 
-    def _check_audience_profile_drift(self, df: pd.DataFrame) -> List[Dict]:
+    def _check_audience_profile_drift(self, df: pd.DataFrame, *, raw: bool = False,
+                                       anchor_date=None) -> List[Dict]:
         """
         [T1-13] Compara o último dia completo BRT contra o snapshot de
         referência (Top 5 ROAS) carregado de
@@ -2068,7 +2082,7 @@ class DataQualityMonitor:
         # NOTE: o df que chega via check() já passou por feature_engineering,
         # que remove a coluna 'Data' (columns_to_drop_after_fe). Por isso o
         # check consulta o Railway diretamente — independe do df transformado.
-        df_day = self._query_railway_previous_full_brt_day()
+        df_day = self._query_railway_previous_full_brt_day(anchor_date=anchor_date)
         n_day = len(df_day)
         if n_day < min_responses:
             logger.info(
@@ -2079,13 +2093,15 @@ class DataQualityMonitor:
 
         # Anteontem completo (D-2 00:00→23:59 BRT) — coluna adicional pra cada categoria.
         # Sempre puxa: dois dias completos lado a lado dão tendência sem oscilação de sample size.
-        df_prev_day = self._query_railway_two_full_brt_days_ago()
+        df_prev_day = self._query_railway_two_full_brt_days_ago(anchor_date=anchor_date)
         n_prev_day = len(df_prev_day)
 
         # Hoje parcial (00:00 BRT → agora) — opt-in via self.include_today_partial.
         # Default OFF: o cron das 6 AM caía com sample insignificante (~6h madrugada);
         # chamadas manuais (ex: às 14h) podem ligar com ?include_today_partial=true.
-        if self.include_today_partial:
+        # Quando `anchor_date` está setado, today_partial NÃO é computado — não
+        # faz sentido "hoje parcial" pra uma data histórica.
+        if self.include_today_partial and anchor_date is None:
             df_today, today_window_label = self._query_railway_today_partial_brt()
             n_today = len(df_today)
         else:
@@ -2095,7 +2111,7 @@ class DataQualityMonitor:
 
         # Lançamento atual (cap_start → agora). Pode estar vazio se não houver
         # lançamento ativo no launches.yaml (info['error'] == 'no_active_launch').
-        df_launch, launch_info = self._query_railway_current_launch_brt()
+        df_launch, launch_info = self._query_railway_current_launch_brt(anchor_date=anchor_date)
         n_launch = len(df_launch)
 
         critical = set(snapshot.get('is_critical', []))
@@ -2196,11 +2212,14 @@ class DataQualityMonitor:
 
                 # Gatilho: max(|day_Δ|, |launch_Δ|) >= top_threshold_pp.
                 # Anteontem/Hoje ficam de fora pra evitar duplicidade de trigger.
-                trigger_deltas = [abs(delta_pp)]
-                if launch_delta_pp is not None:
-                    trigger_deltas.append(abs(launch_delta_pp))
-                if max(trigger_deltas) < top_threshold_pp:
-                    continue
+                # Modo `raw=True` (endpoint dashboard) ignora o filtro e devolve
+                # todas as categorias — quem consome decide o corte.
+                if not raw:
+                    trigger_deltas = [abs(delta_pp)]
+                    if launch_delta_pp is not None:
+                        trigger_deltas.append(abs(launch_delta_pp))
+                    if max(trigger_deltas) < top_threshold_pp:
+                        continue
 
                 # Direção da categoria + quality (bom/ruim) pra cada janela
                 # comparada. Usa direction_map (Top 5 ROAS atribuível 60d).
@@ -2277,7 +2296,9 @@ class DataQualityMonitor:
             col for col, entry in snapshot.get('categorical_features', {}).items()
             if len((entry.get('proportions') or {})) == 2
         }
-        if _binary_features:
+        # Modo `raw=True` mantém Sim e Não juntos — dashboard quer ver as duas
+        # categorias mesmo sendo complementares.
+        if _binary_features and not raw:
             _by_feature_col: dict[str, list] = {}
             for _it in top_list:
                 _by_feature_col.setdefault(_it.get('feature_column'), []).append(_it)
@@ -2325,7 +2346,8 @@ class DataQualityMonitor:
         # Período comparado
         from datetime import timedelta as _td, timezone as _tz
         brt = _tz(_td(hours=-3))
-        compared_day_brt = (datetime.now(brt) - _td(days=1)).date().isoformat()
+        _today_brt = anchor_date if anchor_date is not None else datetime.now(brt).date()
+        compared_day_brt = (_today_brt - _td(days=1)).isoformat()
         compared_window_label = f"{compared_day_brt} BRT (último dia completo)"
 
         def _fmt(items, n=5):
@@ -2555,6 +2577,123 @@ class DataQualityMonitor:
                     'challenger_name': challenger_name,
                     'champion_n': n_champion,
                     'challenger_n': n_challenger,
+                    'top_list': rows,
+                },
+                'timestamp': now_iso,
+                'metric_value': 0.0,
+                'threshold': 0.0,
+            })
+
+        return alerts
+
+    def _check_audience_drift_by_source(self, top_list: List[Dict]) -> List[Dict]:
+        """Drift de público segmentado por fonte de tráfego (Meta vs Google).
+
+        Mesma forma de `_check_audience_drift_by_variant` mas o split é por
+        `utm_source` em vez de variante A/B. Reusa `top_list` (top features do
+        baseline ROAS) e o snapshot de referência. Duas alertas por chamada
+        (uma por janela: ontem + lançamento atual). Cada alerta carrega
+        `meta_pct/meta_delta_pp/meta_quality` e `google_pct/google_delta_pp/
+        google_quality` por feature.
+
+        Classificação de fonte segue o mesmo bucketing do unified_funnel
+        (`daily_check_aggregations._classify_source`): Meta = facebook-ads/fb/ig,
+        Google = google-ads. Outras fontes (orgânico, tiktok, sem_utm) ficam
+        de fora — drift "geral" continua atendendo elas.
+
+        Skip silencioso (devolve []) se top_list vazio ou snapshot ausente.
+        Diferente do by_variant, **não depende de ABTestConfig** — corta direto
+        no campo utm_source que está em todo lead.
+        """
+        from datetime import datetime, timezone
+        alerts: List[Dict] = []
+        if not top_list:
+            return alerts
+
+        snapshot, _ = self._load_reference_audience_profile()
+        if snapshot is None:
+            return alerts
+
+        direction_map = self._load_direction_map()
+
+        _SRC_META = {'facebook-ads', 'fb', 'ig'}
+        _SRC_GGL  = {'google-ads'}
+
+        def _split_df_by_source(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+            """Divide df em {'meta': df_meta, 'google': df_google} por utm_source."""
+            if df is None or len(df) == 0:
+                return {'meta': pd.DataFrame(), 'google': pd.DataFrame()}
+            if 'source' not in df.columns:
+                df['source'] = ''
+            s_norm = df['source'].astype(str).str.strip().str.lower()
+            return {
+                'meta':   df[s_norm.isin(_SRC_META)],
+                'google': df[s_norm.isin(_SRC_GGL)],
+            }
+
+        def _category_pct(df: pd.DataFrame, col: str, cat: str) -> Optional[float]:
+            if df is None or len(df) == 0 or col not in df.columns:
+                return None
+            s = self._normalize_audience_series(df[col], col)
+            s = s[s != '(nulo)']
+            if len(s) == 0:
+                return None
+            return float((s == cat).sum()) / len(s) * 100.0
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        df_day = self._query_railway_previous_full_brt_day()
+        df_launch, launch_info = self._query_railway_current_launch_brt()
+
+        for window_key, window_df, window_label in [
+            ('previous_day', df_day, 'Ontem (dia BRT anterior)'),
+            ('current_launch', df_launch, launch_info.get('label') or 'Lançamento atual'),
+        ]:
+            split = _split_df_by_source(window_df)
+            df_meta = split['meta']
+            df_ggl  = split['google']
+            n_meta = int(len(df_meta))
+            n_ggl  = int(len(df_ggl))
+
+            rows = []
+            for entry in top_list:
+                col = entry.get('feature_column')
+                cat = entry.get('category')
+                ref_pct = entry.get('reference_pct')
+                if col is None or cat is None or ref_pct is None:
+                    continue
+                meta_pct = _category_pct(df_meta, col, cat)
+                ggl_pct  = _category_pct(df_ggl,  col, cat)
+                meta_delta = round(meta_pct - ref_pct, 1) if meta_pct is not None else None
+                ggl_delta  = round(ggl_pct  - ref_pct, 1) if ggl_pct  is not None else None
+                direction = (direction_map.get(col, {}).get(cat, {}) or {}).get('direction')
+                meta_quality = self._classify_drift_quality(direction, meta_delta) if meta_delta is not None else None
+                ggl_quality  = self._classify_drift_quality(direction, ggl_delta)  if ggl_delta  is not None else None
+                rows.append({
+                    'feature_column': col,
+                    'feature_label': entry.get('feature_label', col),
+                    'category': cat,
+                    'is_critical': entry.get('is_critical', False),
+                    'reference_pct': ref_pct,
+                    'meta_pct': round(meta_pct, 1) if meta_pct is not None else None,
+                    'meta_delta_pp': meta_delta,
+                    'meta_quality': meta_quality,
+                    'google_pct': round(ggl_pct, 1) if ggl_pct is not None else None,
+                    'google_delta_pp': ggl_delta,
+                    'google_quality': ggl_quality,
+                    'direction': direction,
+                })
+            alerts.append({
+                'type': 'audience_profile_drift_by_source',
+                'severity': 'LOW',
+                'category': 'data_quality',
+                'message': f'Drift de público por fonte — {window_label}',
+                'details': {
+                    'window': window_key,
+                    'window_label': window_label,
+                    'reference_pool_label': snapshot.get('reference_pool', {}).get('label', 'reference'),
+                    'meta_n': n_meta,
+                    'google_n': n_ggl,
                     'top_list': rows,
                 },
                 'timestamp': now_iso,
