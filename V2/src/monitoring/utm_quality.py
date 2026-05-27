@@ -8,7 +8,7 @@ Para cada UTM em cada nível, agrega leads scoreados em duas janelas:
 Métricas por (UTM × modelo × janela):
 - n  (volume)
 - avg_decil
-- pct_d8_d10
+- pct_d9_d10
 
 Ranking unificado por avg_decil combinado (ponderado por n) na janela 24h;
 filtragem por `min_volume` na janela 24h. Split por modelo visível em cada
@@ -96,11 +96,11 @@ def _aggregate(records, level_col: str, ab_cfg,
             r, ab_cfg, champion_name, challenger_name,
         )
         b = buckets.setdefault(key, {})
-        v = b.setdefault(variant, {'n': 0, 'sum_decil': 0, 'n_d8d10': 0})
+        v = b.setdefault(variant, {'n': 0, 'sum_decil': 0, 'n_d9_d10': 0})
         v['n'] += 1
         v['sum_decil'] += r.decil
-        if r.decil >= 8:
-            v['n_d8d10'] += 1
+        if r.decil >= 9:
+            v['n_d9_d10'] += 1
 
     out: Dict[str, Dict[str, dict]] = {}
     for utm_val, variants in buckets.items():
@@ -109,7 +109,7 @@ def _aggregate(records, level_col: str, ab_cfg,
             out[utm_val][var_name] = {
                 'n': v['n'],
                 'avg_decil':  v['sum_decil'] / v['n'] if v['n'] else None,
-                'pct_d8_d10': (v['n_d8d10'] / v['n'] * 100) if v['n'] else None,
+                'pct_d9_d10': (v['n_d9_d10'] / v['n'] * 100) if v['n'] else None,
             }
     return out
 
@@ -328,27 +328,27 @@ def _challenger_note(entry: dict) -> Optional[str]:
     if (cl.get('n') or 0) < 10:
         return None
     d = cl.get('avg_decil')
-    p = cl.get('pct_d8_d10')
+    p = cl.get('pct_d9_d10')
     d_s = f"{d:.1f}" if d is not None else "–"
     p_s = f"{p:.0f}%" if p is not None else "–"
-    return f"_Challenger: decil {d_s} · {p_s} no topo · {cl.get('n')} leads_"
+    return f"_Challenger: decil {d_s} · {p_s} em D9–D10 · {cl.get('n')} leads_"
 
 
 def _mini_table_block(entry: dict, lf_label: str, marker: str) -> dict:
     """Section mrkdwn: nome + mini-tabela monoespaçada (24h vs LF)."""
     d24 = _combine(entry.get('champion_24h'), entry.get('challenger_24h'), 'avg_decil')
-    p24 = _combine(entry.get('champion_24h'), entry.get('challenger_24h'), 'pct_d8_d10')
+    p24 = _combine(entry.get('champion_24h'), entry.get('challenger_24h'), 'pct_d9_d10')
     dlf = _combine(entry.get('champion_lf'), entry.get('challenger_lf'), 'avg_decil')
-    plf = _combine(entry.get('champion_lf'), entry.get('challenger_lf'), 'pct_d8_d10')
+    plf = _combine(entry.get('champion_lf'), entry.get('challenger_lf'), 'pct_d9_d10')
 
     def fd(v): return f"{v:.1f}" if v is not None else "–"
     def fp(v): return f"{v:.0f}%" if v is not None else "–"
 
     table = (
         "```\n"
-        "         decil   topo    leads\n"
-        f"24h      {fd(d24):<7} {fp(p24):<7} {entry['n_24h']}\n"
-        f"{lf_label:<8} {fd(dlf):<7} {fp(plf):<7} {entry['n_lf']}\n"
+        "             média de decil   %D9, D10   leads\n"
+        f"24h          {fd(d24):<16} {fp(p24):<10} {entry['n_24h']}\n"
+        f"Lançamento   {fd(dlf):<16} {fp(plf):<10} {entry['n_lf']}\n"
         "```"
     )
     text = f"{marker} *{entry['utm']}*\n{table}"
@@ -401,8 +401,8 @@ def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
             'type': 'mrkdwn',
             'text': (
                 f"Classificação pelo *decil médio das últimas {hours}h*. "
-                f"{lf_label} é só referência (tendência) — não entra no ranking. "
-                f"_decil = média 1–10 · topo = % em D8–D10 · N mín = {min_vol} leads/{hours}h_"
+                f'A linha "Lançamento" não afeta o ranking, é apenas '
+                f'informação de tendência.'
             ),
         }],
     })
