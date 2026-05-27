@@ -1685,6 +1685,24 @@ def _slack_ab(v: dict, B: list):
         pct = (scored / total_scored_24h * 100) if total_scored_24h else 0
         suffix = f" · R$ {_fmt_brl(by_spend[name])} investidos" if name in by_spend else ''
         lines.append(f"• *{label}* (`{name}`) recebeu {scored:,} de {total_scored_24h:,} eventos ({pct:.1f}%) nas últimas 24h{suffix}")
+    # Split do spend Meta por evento de otimização (ML vs Lead padrão).
+    # Ortogonal ao split por variant acima — esse mostra QUANTO do investimento
+    # está sob otimização do modelo ML (adsets com optimization_goal em
+    # LeadQualified/LeadQualifiedHighQuality/HQLB/HQLB_LQ) vs evento Lead padrão
+    # (OFFSITE_CONVERSIONS). Sem essa linha, lendo só "Champion R$ X investidos"
+    # dá impressão de que tudo está em ML; na prática só uma fatia está.
+    ml = op.get('spend_ml_24h_brl')
+    nonml = op.get('spend_nonml_24h_brl')
+    if ml is not None and nonml is not None:
+        total_meta = (ml or 0) + (nonml or 0)
+        if total_meta > 0:
+            pct_ml = ml / total_meta * 100
+            pct_nonml = nonml / total_meta * 100
+            lines.append(
+                f"• Otimização Meta 24h: "
+                f"*R$ {_fmt_brl(ml)}* ({pct_ml:.0f}%) em adsets otimizando pelo *evento ML* · "
+                f"*R$ {_fmt_brl(nonml)}* ({pct_nonml:.0f}%) pelo *evento Lead padrão*"
+            )
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': "\n".join(lines)}})
 
 

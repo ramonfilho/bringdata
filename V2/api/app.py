@@ -3211,6 +3211,40 @@ async def daily_monitoring_check_railway(
                 except Exception as _e:
                     logger.warning(f"⚠️ spend/cpl por variante (24h): {_e}")
 
+                # --- spend Meta 24h split por optimization_goal (ML vs Lead padrão) ---
+                # O spend por variant acima divide tráfego por utm_pattern (qual modelo
+                # escora os leads). Esse split aqui é ortogonal: divide o spend pelo
+                # *evento que o gestor de tráfego escolheu pra otimização do adset*.
+                # Adsets otimizando por LeadQualified/HighQuality (Champion) ou HQLB/HQLB_LQ
+                # (Challenger) = "otimização ML". Demais (OFFSITE_CONVERSIONS = Lead) = padrão.
+                # Hoje (27/05) ~8% do spend está em adsets otimizando ML — saber isso evita
+                # a leitura errada de que "todo o investimento está no ML" só porque o
+                # Champion recebe 100% dos leads escoreados.
+                try:
+                    _24h_since2 = (datetime.now(_tz(timedelta(hours=-3))) - timedelta(hours=24)).strftime('%Y-%m-%d')
+                    _hierarchy = _meta.get_costs_hierarchy(
+                        account_id=_account, since_date=_24h_since2, until_date=_today,
+                    )
+                    _ML_EVENTS = {'LeadQualified', 'LeadQualifiedHighQuality', 'HQLB', 'HQLB_LQ'}
+                    _spend_ml = 0.0
+                    _spend_nonml = 0.0
+                    for _c in _hierarchy.get('campaigns', {}).values():
+                        for _a in (_c.get('adsets') or {}).values():
+                            _og = _a.get('optimization_goal')
+                            _sp = float(_a.get('spend') or 0)
+                            if _og in _ML_EVENTS:
+                                _spend_ml += _sp
+                            else:
+                                _spend_nonml += _sp
+                    result.setdefault('operational_routines', {})['spend_ml_24h_brl'] = round(_spend_ml, 2)
+                    result['operational_routines']['spend_nonml_24h_brl'] = round(_spend_nonml, 2)
+                    logger.info(
+                        f"📊 Meta spend 24h por evento de otimização: "
+                        f"ML R$ {_spend_ml:.2f} · Lead padrão R$ {_spend_nonml:.2f}"
+                    )
+                except Exception as _e:
+                    logger.warning(f"⚠️ spend ML vs Lead padrão (24h): {_e}")
+
                 # --- métricas Meta por janela histórica (para survey_funnel_metrics e traffic_metrics) ---
                 # ultimo_mes removido do fetch Meta: a chamada com filtro
                 # CONTAIN 'CAP' em janela de 30d frequentemente excede o

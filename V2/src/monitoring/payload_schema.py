@@ -404,6 +404,8 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'operational_routines.cpl_by_variant_24h_brl':                                      (R, None),  # ex: dict(2) — spend/leads_capi
     'operational_routines.cpl_by_variant_24h_brl.challenger_abr28':                     (R, None),  # ex: 1.95
     'operational_routines.cpl_by_variant_24h_brl.champion_jan30':                       (R, None),  # ex: 1.37
+    'operational_routines.spend_ml_24h_brl':                                            (R, None),  # ex: 630.92 — adsets otimizando evento ML (Champion+Challenger)
+    'operational_routines.spend_nonml_24h_brl':                                         (R, None),  # ex: 7291.33 — adsets otimizando evento Lead padrão
     'operational_routines.minutes_since_last_score':                                    (S, 'debug interno; último scoring não renderizado'),
 
     # ──────────────────────────────────────────────────────────────────────────
