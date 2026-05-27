@@ -3212,34 +3212,37 @@ async def daily_monitoring_check_railway(
                     logger.warning(f"⚠️ spend/cpl por variante (24h): {_e}")
 
                 # --- spend Meta 24h split por optimization_goal (ML vs Lead padrão) ---
-                # O spend por variant acima divide tráfego por utm_pattern (qual modelo
-                # escora os leads). Esse split aqui é ortogonal: divide o spend pelo
-                # *evento que o gestor de tráfego escolheu pra otimização do adset*.
-                # Adsets otimizando por LeadQualified/HighQuality (Champion) ou HQLB/HQLB_LQ
-                # (Challenger) = "otimização ML". Demais (OFFSITE_CONVERSIONS = Lead) = padrão.
-                # Hoje (27/05) ~8% do spend está em adsets otimizando ML — saber isso evita
-                # a leitura errada de que "todo o investimento está no ML" só porque o
-                # Champion recebe 100% dos leads escoreados.
+                # Filtro `campaign.name CONTAIN 'CAP'` — MESMO escopo do
+                # `spend_by_variant_24h_brl` acima (só campanhas de captação,
+                # excluindo vendas/retargeting/brand). Garante coerência:
+                # total ML + total Lead padrão = Champion spend + Challenger spend.
+                # Sem esse filtro, a soma da linha de otimização ficava maior
+                # que a soma das variants e confundia o operador.
                 try:
                     _24h_since2 = (datetime.now(_tz(timedelta(hours=-3))) - timedelta(hours=24)).strftime('%Y-%m-%d')
-                    _hierarchy = _meta.get_costs_hierarchy(
-                        account_id=_account, since_date=_24h_since2, until_date=_today,
+                    _adsets_cap = _meta.get_insights(
+                        account_id=_account, level='adset',
+                        fields=['adset_id', 'spend'],
+                        since_date=_24h_since2, until_date=_today,
+                        filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}],
                     )
                     _ML_EVENTS = {'LeadQualified', 'LeadQualifiedHighQuality', 'HQLB', 'HQLB_LQ'}
                     _spend_ml = 0.0
                     _spend_nonml = 0.0
-                    for _c in _hierarchy.get('campaigns', {}).values():
-                        for _a in (_c.get('adsets') or {}).values():
-                            _og = _a.get('optimization_goal')
-                            _sp = float(_a.get('spend') or 0)
-                            if _og in _ML_EVENTS:
-                                _spend_ml += _sp
-                            else:
-                                _spend_nonml += _sp
+                    for _row in _adsets_cap:
+                        _aid = _row.get('adset_id')
+                        _sp = float(_row.get('spend') or 0)
+                        if not _aid or _sp <= 0:
+                            continue
+                        _og = _meta.get_adset_optimization_goal(_aid)
+                        if _og in _ML_EVENTS:
+                            _spend_ml += _sp
+                        else:
+                            _spend_nonml += _sp
                     result.setdefault('operational_routines', {})['spend_ml_24h_brl'] = round(_spend_ml, 2)
                     result['operational_routines']['spend_nonml_24h_brl'] = round(_spend_nonml, 2)
                     logger.info(
-                        f"📊 Meta spend 24h por evento de otimização: "
+                        f"📊 Meta spend 24h por evento de otimização (captação only): "
                         f"ML R$ {_spend_ml:.2f} · Lead padrão R$ {_spend_nonml:.2f}"
                     )
                 except Exception as _e:
@@ -3560,6 +3563,53 @@ async def post_slack_digest(
         'ok': True,
         'posts': results,
     }
+
+
+@app.get("/monitoring/audience-drift")
+async def audience_drift_endpoint(client_id: str = 'devclub'):
+    """
+    Drift de público por característica vs Top 5 ROAS — versão completa.
+
+    Devolve TODAS as categorias (sem cut de 2pp, sem dedup binárias). Mesmo
+    cômputo do digest do Slack — só sem os filtros aplicados. Pra consumo
+    via dashboard cliente.
+
+    Sem auth — mesmo padrão dos demais `/monitoring/*` endpoints. URL é
+    pública na internet; dado é demográfico agregado (sem PII).
+    """
+    from src.data import compose_repository
+    from src.monitoring.data_quality import DataQualityMonitor
+    from src.core.client_config import ClientConfig
+    import pg8000.native
+    import pandas as _pd
+
+    cfg_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'configs', 'active_models', f'{client_id}.yaml',
+    )
+    client_config = ClientConfig.from_yaml(cfg_path)
+
+    railway_conn = pg8000.native.Connection(
+        host=os.environ['RAILWAY_DB_HOST'],
+        port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+        database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+        user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+        password=os.environ['RAILWAY_DB_PASSWORD'],
+        timeout=30,
+    )
+    try:
+        repo = compose_repository('registros_ml', railway_conn=railway_conn)
+        monitor = DataQualityMonitor(
+            model_path='', client_config=client_config, db=None, repo=repo,
+        )
+        alerts = monitor._check_audience_profile_drift(_pd.DataFrame(), raw=True)
+    finally:
+        railway_conn.close()
+
+    drift = next((a for a in alerts if a.get('type') == 'audience_profile_drift'), None)
+    if drift is None:
+        return {'top_list': [], 'details': {}}
+    return drift.get('details', {})
 
 
 @app.get("/monitoring/utm-quality")
