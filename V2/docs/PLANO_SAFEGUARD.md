@@ -189,7 +189,7 @@ Bloqueia o deploy via `exit 1` se qualquer invariante falhar.
 - **`capi-dry-run` (default):** usa `/capi/process_daily_batch?dry_run=true`. Executa todo o caminho de roteamento A/B + cálculo de `valor_projetado`, mas pula chamada Meta + escrita no banco. Cobre o path A/B real.
 - **`predict` (legado):** usa `/predict/batch`. Não exercita roteamento A/B. Útil pra validar pipeline de scoring isoladamente.
 
-**Cobertura forçada do A/B:** pegando leads aleatórios do Railway, raramente algum bate `utm_campaign='PIXEL NOVO API'` (que rotearia pro Challenger). O fetcher reescreve `utm_campaign` da metade dos leads pra forçar Challenger path, e prefixa `email` com `chlng+` pra evitar colisão de cache. Garante cobertura ≥50% Challenger.
+**Cobertura forçada do A/B:** pegando leads aleatórios do Railway, raramente algum bate `utm_campaign` contendo `LEADHQLB` (que rotearia pro Challenger). O fetcher reescreve `utm_campaign` da metade dos leads pra forçar Challenger path, e prefixa `email` com `chlng+` pra evitar colisão de cache. Garante cobertura ≥50% Challenger. O valor literal vive em `CHALLENGER_UTM_CAMPAIGN` em `scripts/test_revision_equivalence.py` — manter sincronizado com `challenger_abr28.utm_pattern.utm_campaign` em `configs/active_models/devclub.yaml`.
 
 **Critério de bloqueio:** somente divergência de decil. Value/event_name divergentes são **informativos** — revisões frequentemente mudam value/event_name intencionalmente. Esse lado já é coberto pelo Gate D.
 

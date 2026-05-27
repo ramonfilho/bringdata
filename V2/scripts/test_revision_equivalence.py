@@ -200,7 +200,7 @@ def fetch_leads_predict_mode(n: int) -> list[dict[str, Any]]:
     return leads
 
 
-CHALLENGER_UTM_CAMPAIGN = "PIXEL NOVO API"  # match challenger_abr28.utm_pattern em active_models/devclub.yaml
+CHALLENGER_UTM_CAMPAIGN = "LEADHQLB"  # match challenger_abr28.utm_pattern em active_models/devclub.yaml
 
 
 def fetch_leads_capi_mode(n: int) -> list[dict[str, Any]]:

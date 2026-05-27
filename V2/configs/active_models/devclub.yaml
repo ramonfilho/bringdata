@@ -16,14 +16,21 @@ active_model:
 # 2. Ative um run existente: python -m src.train_pipeline --activate-run <run_id>
 
 # =============================================================================
-# A/B test reativado (29/04/2026) — Challenger abr28 via UTM term HQLB
+# A/B test reativado (29/04/2026) — Challenger abr28 via tag LEADHQLB no campaign
 # =============================================================================
 # Champion (default, sem match): jan30 (active_model acima)
 # Challenger: abr28 — T2-3 alpha=1, importance weighting CONTROLE/ML/NEUTRO
 #
-# Roteamento:
-#   - utm_term contendo "HQLB" (case-insensitive) → Challenger abr28
-#   - qualquer outro UTM → default (jan30)
+# Roteamento (substring case-insensitive, ver src/core/client_config.py:match_variant):
+#   - utm_campaign contendo "LEADHQLB" → Challenger abr28
+#     ex: "DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1 | 2026-05-26 | LEADHQLB|..."
+#   - OU URL contendo "ml-parabens-psq-devf" → Challenger abr28 (redundância pós-form)
+#   - qualquer outro UTM/URL → default (jan30)
+#
+# Histórico do pattern:
+#   29/04/2026 → 27/05/2026:  utm_campaign contendo "PIXEL NOVO API"
+#   27/05/2026 → 27/05/2026:  utm_campaign contendo "utm_pixel"  (transitório)
+#   27/05/2026 → presente:    utm_campaign contendo "LEADHQLB"
 #
 # Eventos Meta:
 #   - Default arm (jan30): LeadQualified (com valor) + LeadQualifiedHighQuality (D9-D10)
@@ -94,7 +101,7 @@ ab_test:
     challenger_abr28:
       run_id: 5d158f0aa6e54b489498470446194a6c
       utm_pattern:
-        utm_campaign: "PIXEL NOVO API"           # identificador do gestor para Campanha B
+        utm_campaign: "LEADHQLB"                 # match substring case-insensitive → bate em "DEVLF | ... | LEADHQLB|..."
       url_pattern: "ml-parabens-psq-devf"        # OR com utm_pattern — redundância (URL exclusiva pós-form Challenger)
       pixel_id_override: "1513132406527995"      # CAPI Challenger envia pro pixel novo (onde HQLB está cadastrado)
       capi_event_name: HQLB_LQ

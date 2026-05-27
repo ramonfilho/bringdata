@@ -1218,10 +1218,10 @@ A exclusão é **deliberada** e está documentada com comentário longo em [src/
 
 **Por que vira bug:** o YAML hoje aceita `tiktok` e `youtube` como Source canônico, porque a Challenger `abr28` (`5d158f0aa6e54b489498470446194a6c`) tem `Source_tiktok` e `Source_youtube` no `feature_registry`. Mas o Champion `jan30` (`d51757f5041c44b7ab1a056fce8c3c35`) só tem `Source_facebook_ads`, `Source_google_ads`, `Source_outros`. Resultado:
 
-| Lead `Source=tiktok` | Path Champion (default, sem utm_campaign matching) | Path Challenger (`utm_campaign='PIXEL NOVO API'`) |
+| Lead `Source=tiktok` | Path Champion (default, sem utm_campaign matching) | Path Challenger (`utm_campaign` contendo `LEADHQLB`) |
 |---|---|---|
 | Resultado | `Source_*` todas zeradas (3 colunas = 0) | `Source_tiktok = 1` ✅ |
-| Volume últimos 30d | 1.93% (2186 leads) atinge o path Champion | poucos leads tiktok têm utm_campaign='PIXEL NOVO API' |
+| Volume últimos 30d | 1.93% (2186 leads) atinge o path Champion | poucos leads tiktok têm `LEADHQLB` no utm_campaign |
 
 Mesma classe do Cluster 3, 4 e 5 do Erro 2 — feature OHE silenciosamente zerada por um lead com categoria não vista pela variante.
 
