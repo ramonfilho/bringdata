@@ -1683,14 +1683,15 @@ def _slack_ab(v: dict, B: list):
         label = _variant_label(name)
         scored = by.get(name) or 0
         pct = (scored / total_scored_24h * 100) if total_scored_24h else 0
-        suffix = f" · R$ {_fmt_brl(by_spend[name])} investidos" if name in by_spend else ''
-        lines.append(f"• *{label}* (`{name}`) recebeu {scored:,} de {total_scored_24h:,} eventos ({pct:.1f}%) nas últimas 24h{suffix}")
-    # Split do spend Meta por evento de otimização (ML vs Lead padrão).
-    # Ortogonal ao split por variant acima — esse mostra QUANTO do investimento
-    # está sob otimização do modelo ML (adsets com optimization_goal em
-    # LeadQualified/LeadQualifiedHighQuality/HQLB/HQLB_LQ) vs evento Lead padrão
-    # (OFFSITE_CONVERSIONS). Sem essa linha, lendo só "Champion R$ X investidos"
-    # dá impressão de que tudo está em ML; na prática só uma fatia está.
+        # Sem "R$ X investidos" na linha de variant: o spend total da campanha
+        # ≠ spend sob otimização do modelo (a maior parte hoje está em adsets
+        # otimizando evento Lead padrão, não ML). O bloco abaixo separa.
+        lines.append(f"• *{label}* (`{name}`) scoreou {scored:,} de {total_scored_24h:,} eventos ({pct:.1f}%) nas últimas 24h")
+    # Investimento Meta em captação separado, com split por evento de
+    # otimização (ML vs Lead padrão). Evita a leitura errada de que o spend
+    # do Champion = spend sob ML — na prática só uma fatia (~8% hoje) está
+    # em adsets otimizando pelos eventos custom do modelo
+    # (LeadQualified/LeadQualifiedHighQuality/HQLB/HQLB_LQ).
     ml = op.get('spend_ml_24h_brl')
     nonml = op.get('spend_nonml_24h_brl')
     if ml is not None and nonml is not None:
@@ -1698,10 +1699,16 @@ def _slack_ab(v: dict, B: list):
         if total_meta > 0:
             pct_ml = ml / total_meta * 100
             pct_nonml = nonml / total_meta * 100
+            lines.append('')
             lines.append(
-                f"• Otimização Meta 24h: "
-                f"*R$ {_fmt_brl(ml)}* ({pct_ml:.0f}%) em adsets otimizando pelo *evento ML* · "
-                f"*R$ {_fmt_brl(nonml)}* ({pct_nonml:.0f}%) pelo *evento Lead padrão*"
+                f"*Investimento Meta em captação (últimas 24h):* "
+                f"R$ {_fmt_brl(total_meta)}"
+            )
+            lines.append(
+                f"  • R$ {_fmt_brl(ml)} ({pct_ml:.0f}%) em adsets otimizando pelo *evento ML*"
+            )
+            lines.append(
+                f"  • R$ {_fmt_brl(nonml)} ({pct_nonml:.0f}%) em adsets otimizando pelo *evento Lead padrão*"
             )
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': "\n".join(lines)}})
 
