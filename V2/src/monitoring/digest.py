@@ -1360,22 +1360,25 @@ def _slack_audience_drift_by_source_dm(v: dict, B: list):
 
 
 def _slack_decis_window(v: dict, B: list, window_key: str):
-    """Distribuição de decis por janela em barra horizontal, direction-aware.
+    """KPI panel da distribuição de decis por janela.
 
-    window_key ∈ {'previous_day', 'current_launch'}.
-    Le de view['lead_quality'].decil_distribution_<window_key>.
+    Substitui a tabela tradicional de 10 linhas × N colunas por um sumário
+    compacto: 1 linha por bucket com `n`, `%D9-D10`, `Δpp vs Ref` (com emoji)
+    e `avg decil`. Decisão de design (2026-05-28) baseada em data-viz
+    research: 80+ células de detalhe diluíam o sinal; %D9-D10 é a métrica
+    que move decisão de tráfego.
 
-    Emoji segue direção do lift histórico do decil no pool Top 5 (Fix 3):
-    D10 lift=2.14 → positive → Δpp+ vira 🟢 (mais leads no melhor decil = bom).
-    D01-D04 lift<0.40 → very_negative → Δpp- vira 🟢 (menos leads no pior = bom).
-    D05-D09 CI cruza 1.0 → uncertain → ⚪ (estatisticamente indistinguíveis).
-    Fonte: configs/audience_direction_map.json (decil_direction).
+    Dois grupos no painel:
+      - Por fonte: Total, Meta, Google
+      - Por optimization_goal Meta: Lead, Champion, Challenger
+        (excludentes — soma ≈ Total)
 
-    Side-by-side por fonte: se `info['by_source']` estiver populado (Meta /
-    Google), adiciona 2 colunas à direita da Δpp do Total — Meta% (emoji) e
-    Google% (emoji) — comparadas contra a mesma baseline ponderada. Skipa as
-    colunas quando a fonte tem total=0 (ex.: Google antes do desacoplamento
-    scoring × Meta CAPI em 2026-05-27).
+    Quem precisa da forma da curva por decil acessa via endpoint daily-check
+    direto. Aqui o canal de cliente recebe só o sinal que dispara ação.
+
+    Direction-aware: %D9-D10 alto = bom (D10 direction=positive). Δpp > +2 =
+    🟢, Δpp < -2 = 🔴, |Δpp| ≤ 2 = ⚪. Mesma escala pro avg decil em torno do
+    ref calculado a partir da baseline ponderada.
     """
     lq = v.get('lead_quality') or {}
     key = f'decil_distribution_{window_key}'
@@ -1392,116 +1395,105 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     base_pct = baseline.get('pct') or {}
     base_label = baseline.get('label', '')
 
+    keys = [f'D{i:02d}' for i in range(1, 11)]
+
+    def _kpis(distribution: dict, n: int) -> dict | None:
+        """Computa n, %D9-D10, avg_decil pra um bucket. None se vazio."""
+        if n <= 0:
+            return None
+        n_d9_d10 = int(distribution.get('D09', 0) or 0) + int(distribution.get('D10', 0) or 0)
+        pct_d9_d10 = n_d9_d10 / n * 100
+        avg_decil = sum(
+            int(k[1:]) * int(distribution.get(k, 0) or 0) for k in keys
+        ) / n
+        return {'n': n, 'pct_d9_d10': pct_d9_d10, 'avg_decil': avg_decil}
+
+    # Referência (baseline ponderada) — D9+D10 e avg
+    ref_pct_d9_d10 = None
+    ref_avg = None
+    if base_pct:
+        ref_pct_d9_d10 = float(base_pct.get('D09', 0) or 0) + float(base_pct.get('D10', 0) or 0)
+        ref_avg = sum(int(k[1:]) * float(base_pct.get(k, 0) or 0) for k in keys) / 100.0
+
+    def _emoji_d9d10(delta_pp: float | None) -> str:
+        """Δpp em %D9-D10: positivo = bom (D10 direction=positive). |Δ|≤2 = neutro."""
+        if delta_pp is None:
+            return '⚪'
+        if delta_pp > 2: return '🟢'
+        if delta_pp < -2: return '🔴'
+        return '⚪'
+
+    def _emoji_avg(delta_avg: float | None) -> str:
+        """Δ no avg decil: mais alto = bom. Limiar 0.3 (≈ 3pp num decil)."""
+        if delta_avg is None:
+            return '⚪'
+        if delta_avg > 0.3: return '🟢'
+        if delta_avg < -0.3: return '🔴'
+        return '⚪'
+
+    # Buckets por fonte
     by_src = info.get('by_source') or {}
     meta_info = by_src.get('meta') or {}
     ggl_info  = by_src.get('google') or {}
-    meta_dist = meta_info.get('distribution') or {}
-    ggl_dist  = ggl_info.get('distribution') or {}
     n_meta = int(meta_info.get('total', 0) or 0)
     n_ggl  = int(ggl_info.get('total', 0) or 0)
-    show_meta = n_meta > 0
-    show_ggl  = n_ggl > 0
 
-    # Split por optimization_goal da campanha (Lead/Champion/Challenger) —
-    # mesmos buckets das tabelas Drift por A/B. Coluna vazia de separação
-    # antes dessas 3 colunas pra distinguir das colunas Meta/Google.
+    # Buckets por optimization_goal
     by_og = info.get('by_optgoal') or {}
     og_lead_info = by_og.get('lead') or {}
     og_chmp_info = by_og.get('champion') or {}
     og_chal_info = by_og.get('challenger') or {}
-    og_lead_dist = og_lead_info.get('distribution') or {}
-    og_chmp_dist = og_chmp_info.get('distribution') or {}
-    og_chal_dist = og_chal_info.get('distribution') or {}
     n_og_lead = int(og_lead_info.get('total', 0) or 0)
     n_og_chmp = int(og_chmp_info.get('total', 0) or 0)
     n_og_chal = int(og_chal_info.get('total', 0) or 0)
     show_og = (n_og_lead + n_og_chmp + n_og_chal) > 0
 
-    keys = [f'D{i:02d}' for i in range(1, 11)]
-    cur_pct = {k: ((int(dist.get(k, 0) or 0) / total) * 100) for k in keys}
-    max_pct = max(cur_pct.values()) if cur_pct else 0
-    width = 20
-
-    # Carrega direction por decil
-    dmap = _load_direction_map_for_renderer()
-    decil_dir = (dmap.get('decil_direction') or {})
-
-    title = f'*📊 Distribuição de decis — {win_label}*'
+    title = f'*📊 Decis — {win_label}*'
     if base_label:
         title += f' vs *{base_label}*'
     rows = [title]
-    legend_parts = []
-    if base_pct:
-        legend_parts.append('🟢 bom · 🔴 ruim · ⚪ neutro/incerto')
-    if show_meta:
-        legend_parts.append(f'*Meta* n={n_meta:,}')
-    if show_ggl:
-        legend_parts.append(f'*Google* n={n_ggl:,}')
-    if show_og:
-        legend_parts.append(
-            f'*Lead* n={n_og_lead:,} · *Champion* n={n_og_chmp:,} · '
-            f'*Challenger* n={n_og_chal:,}'
-        )
-    if legend_parts:
-        rows.append('_' + '  ·  '.join(legend_parts) + '_')
+    legend_parts = ['🟢 bom · 🔴 ruim · ⚪ neutro/incerto']
+    if ref_pct_d9_d10 is not None:
+        legend_parts.append(f'Ref %D9-D10 = {ref_pct_d9_d10:.1f}%')
+    if ref_avg is not None:
+        legend_parts.append(f'Ref avg = {ref_avg:.1f}')
+    rows.append('_' + ' · '.join(legend_parts) + '_')
     rows.append('```')
+    rows.append(
+        f'{"Bucket":<14}  {"n":>5}   {"%D9-D10":>7}  {"Δpp":>7}      {"Avg":>4}'
+    )
 
-    for k in keys:
-        pct = cur_pct[k]
-        n = int(dist.get(k, 0) or 0)
-        bar_len = int(round((pct / max_pct) * width)) if max_pct > 0 else 0
-        bar = '▇' * bar_len + ' ' * (width - bar_len)
-        direction = (decil_dir.get(k, {}) or {}).get('direction')
-        b = float(base_pct.get(k, 0) or 0) if base_pct else None
-
-        # Total column — larguras fixas pra todas as linhas alinharem
-        if base_pct:
-            delta = pct - b
-            quality = _classify_quality_inline(direction, delta)
-            emoji = _quality_emoji(quality)
-            line = (f'{k} {bar} {pct:>5.1f}% ({n:>4,})  '
-                    f'Ref {b:>4.1f}%  {emoji}  Δ{delta:>+5.1f}pp')
+    def _row(label: str, kpis: dict | None) -> str:
+        if kpis is None:
+            return f'{label:<14}  {"—":>5}   {"—":>7}  {"—":>7}      {"—":>4}'
+        pct = kpis['pct_d9_d10']
+        avg = kpis['avg_decil']
+        if ref_pct_d9_d10 is not None:
+            d_pct = pct - ref_pct_d9_d10
+            e_pct = _emoji_d9d10(d_pct)
+            delta_str = f'{e_pct} {d_pct:>+5.1f}'
         else:
-            line = f'{k} {bar} {pct:>5.1f}% ({n:>4,})'
+            delta_str = ''
+        if ref_avg is not None:
+            d_avg = avg - ref_avg
+            e_avg = _emoji_avg(d_avg)
+            avg_str = f'{avg:>4.1f} {e_avg}'
+        else:
+            avg_str = f'{avg:>4.1f}'
+        return f'{label:<14}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}      {avg_str}'
 
-        # Colunas extras Meta / Google — largura fixa, sem emoji repetido vs total
-        if show_meta:
-            n_m = int(meta_dist.get(k, 0) or 0)
-            pct_m = (n_m / n_meta) * 100 if n_meta else 0.0
-            if base_pct:
-                e_m = _quality_emoji(_classify_quality_inline(direction, pct_m - b))
-                line += f'   M {e_m} {pct_m:>5.1f}%'
-            else:
-                line += f'   M {pct_m:>5.1f}%'
-        if show_ggl:
-            n_g = int(ggl_dist.get(k, 0) or 0)
-            pct_g = (n_g / n_ggl) * 100 if n_ggl else 0.0
-            if base_pct:
-                e_g = _quality_emoji(_classify_quality_inline(direction, pct_g - b))
-                line += f'  G {e_g} {pct_g:>5.1f}%'
-            else:
-                line += f'  G {pct_g:>5.1f}%'
+    # Bloco por fonte
+    rows.append(_row('Total',  _kpis(dist, total)))
+    rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta)))
+    rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl)))
 
-        # Coluna vazia de separação + Lead / Champion / Challenger (optimization_goal)
-        if show_og:
-            line += '     '  # separador visual
-            for label, n_b, dist_b in [
-                ('L',  n_og_lead, og_lead_dist),
-                ('C',  n_og_chmp, og_chmp_dist),
-                ('Ch', n_og_chal, og_chal_dist),
-            ]:
-                n_x = int(dist_b.get(k, 0) or 0)
-                pct_x = (n_x / n_b) * 100 if n_b else 0.0
-                if base_pct and n_b > 0:
-                    e_x = _quality_emoji(_classify_quality_inline(direction, pct_x - b))
-                    line += f'  {label} {e_x} {pct_x:>5.1f}%'
-                elif n_b > 0:
-                    line += f'  {label} {pct_x:>5.1f}%'
-                else:
-                    # Bucket sem leads na janela — mostra travessão
-                    line += f'  {label} {"—":>7}'
+    # Bloco por optimization_goal — separado visualmente
+    if show_og:
+        rows.append('─' * 50)
+        rows.append(_row('Lead',       _kpis(og_lead_info.get('distribution') or {}, n_og_lead)))
+        rows.append(_row('Champion',   _kpis(og_chmp_info.get('distribution') or {}, n_og_chmp)))
+        rows.append(_row('Challenger', _kpis(og_chal_info.get('distribution') or {}, n_og_chal)))
 
-        rows.append(line)
     rows.append('```')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 

@@ -114,47 +114,97 @@ def classify_campaign_buckets(utm_campaigns: Iterable) -> dict[str, str]:
         logger.warning("[campaign_classifier] MetaAdsIntegration falhou: %s", e)
         return result
 
+    # Meta Graph Batch API — empacota até 50 requests num único HTTP call.
+    # Para 15 cids/dia tipo do projeto, vira 1 request em vez de 15. Reduz
+    # drasticamente pressão de rate limit (origem dos 400 Client Error de
+    # 2026-05-28 10:10 BRT) e bate Meta em paralelo no lado do servidor.
+    # Docs: https://developers.facebook.com/docs/graph-api/making-multiple-requests
+    import json as _json
     import requests
 
+    BATCH_LIMIT = 50  # hard limit Meta Graph API
+    adsets_by_cid: dict[str, list] = {}
     n_errors = 0
-    for cid in to_fetch:
-        try:
-            url = f"{meta.base_url}/{cid}/adsets"
-            params = {
-                "access_token": token,
-                "fields": "optimization_goal,promoted_object",
-                "limit": 100,
+    to_fetch_list = sorted(to_fetch)
+    for batch_start in range(0, len(to_fetch_list), BATCH_LIMIT):
+        chunk = to_fetch_list[batch_start:batch_start + BATCH_LIMIT]
+        batch = [
+            {
+                "method": "GET",
+                "relative_url": (
+                    f"{cid}/adsets?fields=optimization_goal,promoted_object&limit=100"
+                ),
             }
-            r = requests.get(url, params=params, timeout=5)
+            for cid in chunk
+        ]
+        try:
+            r = requests.post(
+                "https://graph.facebook.com/",
+                data={"access_token": token, "batch": _json.dumps(batch)},
+                timeout=30,
+            )
             r.raise_for_status()
-            adsets = r.json().get("data", [])
-            if not adsets:
-                _BUCKET_CACHE[cid] = (now_ts, "Lead")
-                result[cid] = "Lead"
-                continue
-            has_challenger = has_champion = False
-            for a in adsets:
-                promoted = a.get("promoted_object") or {}
-                goal = promoted.get("custom_event_str") or a.get("optimization_goal")
-                if goal in _CHALLENGER_GOALS:
-                    has_challenger = True
-                elif goal in _CHAMPION_GOALS:
-                    has_champion = True
-            if has_challenger:
-                bucket = "Challenger"
-            elif has_champion:
-                bucket = "Champion"
-            else:
-                bucket = "Lead"
-            _BUCKET_CACHE[cid] = (now_ts, bucket)
-            result[cid] = bucket
+            responses = r.json()
         except Exception as e:
-            n_errors += 1
-            logger.warning("[campaign_classifier] campaign %s falhou: %s", cid, e)
+            n_errors += len(chunk)
+            logger.warning(
+                "[campaign_classifier] batch falhou (%d cids): %s", len(chunk), e
+            )
             continue
+        for cid, resp in zip(chunk, responses):
+            if not resp:
+                n_errors += 1
+                continue
+            try:
+                code = int(resp.get("code") or 0)
+            except (TypeError, ValueError):
+                code = 0
+            if code != 200:
+                n_errors += 1
+                logger.warning(
+                    "[campaign_classifier] campaign %s falhou (code=%s): %s",
+                    cid, code, (resp.get("body") or "")[:200],
+                )
+                continue
+            try:
+                body = _json.loads(resp["body"])
+            except Exception as e:
+                n_errors += 1
+                logger.warning(
+                    "[campaign_classifier] campaign %s parse falhou: %s", cid, e
+                )
+                continue
+            adsets_by_cid[cid] = body.get("data", []) or []
+
+    # Classifica a partir dos adsets recebidos
+    for cid in to_fetch:
+        adsets = adsets_by_cid.get(cid)
+        if adsets is None:
+            # request falhou — não cacheia, próxima chamada tenta de novo
+            continue
+        if not adsets:
+            _BUCKET_CACHE[cid] = (now_ts, "Lead")
+            result[cid] = "Lead"
+            continue
+        has_challenger = has_champion = False
+        for a in adsets:
+            promoted = a.get("promoted_object") or {}
+            goal = promoted.get("custom_event_str") or a.get("optimization_goal")
+            if goal in _CHALLENGER_GOALS:
+                has_challenger = True
+            elif goal in _CHAMPION_GOALS:
+                has_champion = True
+        if has_challenger:
+            bucket = "Challenger"
+        elif has_champion:
+            bucket = "Champion"
+        else:
+            bucket = "Lead"
+        _BUCKET_CACHE[cid] = (now_ts, bucket)
+        result[cid] = bucket
 
     logger.info(
-        "[campaign_classifier] buckets: %s (fetched=%d, cache_hit=%d, errors=%d)",
+        "[campaign_classifier] buckets: %s (fetched=%d via batch, cache_hit=%d, errors=%d)",
         dict(Counter(result.values())),
         len(to_fetch),
         len(cids) - len(to_fetch),

@@ -2453,10 +2453,18 @@ class DataQualityMonitor:
             """Divide df em {'Lead': df_l, 'Champion': df_ch, 'Challenger': df_cl}
             via classification {cid: bucket}. Leads sem cid extraível ou cid
             não classificado → bucket 'Lead' (catch-all).
+
+            Quando `classification` é vazio (Meta API falhou totalmente),
+            retorna todos os 3 buckets vazios — alerta correspondente não vai
+            ter dado e o renderer vai mostrar "—" em vez de pretender que
+            "tudo é Lead" (falso quando a fonte do problema é Meta indisponível).
             """
             import re as _re
             empty = pd.DataFrame()
             if df is None or len(df) == 0:
+                return {'Lead': empty, 'Champion': empty, 'Challenger': empty}
+            # Classificação Meta API falhou totalmente — não distorcer
+            if not classification:
                 return {'Lead': empty, 'Champion': empty, 'Challenger': empty}
             if 'campaign' not in df.columns:
                 return {'Lead': df, 'Champion': empty, 'Challenger': empty}

@@ -2921,6 +2921,15 @@ async def daily_monitoring_check_railway(
             buckets = ('Lead', 'Champion', 'Challenger')
             dists = {b: {f'D{i:02d}': 0 for i in range(1, 11)} for b in buckets}
             totals = {b: 0 for b in buckets}
+            # Se classificação Meta API falhou completamente (dict vazio),
+            # NÃO popular buckets — renderer skipa as colunas. Evita falso
+            # "tudo virou Lead" que distorce o relatório (caso 2026-05-28 10:10).
+            if not _bucket_classification:
+                return {
+                    'lead':       {'distribution': dists['Lead'],       'total': 0},
+                    'champion':   {'distribution': dists['Champion'],   'total': 0},
+                    'challenger': {'distribution': dists['Challenger'], 'total': 0},
+                }
             for r in rows:
                 d = r[1]
                 if d is None: continue
