@@ -2912,10 +2912,19 @@ async def daily_monitoring_check_railway(
             classify_campaign_buckets as _classify_buckets,
             extract_campaign_id as _extract_cid,
         )
+        # Adapter Meta criado uma vez aqui e injetado no classifier.
+        _meta_for_buckets = None
+        try:
+            _token_buckets = os.getenv('META_ACCESS_TOKEN')
+            if _token_buckets:
+                from api.meta_integration import MetaAdsIntegration as _MI_buckets
+                _meta_for_buckets = _MI_buckets(access_token=_token_buckets)
+        except Exception:
+            _meta_for_buckets = None
         # Classifica todas as campanhas de quality_rows uma vez. quality_rows
         # cobre 90 dias; o cache TTL 30min absorve dailys consecutivos.
         _all_camps = [r[5] for r in quality_rows if len(r) > 5 and r[5]]
-        _bucket_classification = _classify_buckets(_all_camps)
+        _bucket_classification = _classify_buckets(_all_camps, meta=_meta_for_buckets)
 
         def _decil_dist_by_optgoal(rows) -> Dict[str, Dict]:
             buckets = ('Lead', 'Champion', 'Challenger')
@@ -3303,14 +3312,19 @@ async def daily_monitoring_check_railway(
                         filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}],
                     )
                     _ML_EVENTS = {'LeadQualified', 'LeadQualifiedHighQuality', 'HQLB', 'HQLB_LQ'}
+                    # Pré-filtra adsets com spend > 0 e coleta IDs únicos pro batch.
+                    _adsets_with_spend = [
+                        (_row.get('adset_id'), float(_row.get('spend') or 0))
+                        for _row in _adsets_cap
+                        if _row.get('adset_id') and float(_row.get('spend') or 0) > 0
+                    ]
+                    _unique_aids = sorted({_aid for _aid, _ in _adsets_with_spend})
+                    # 1 HTTP call por chunk de 50 em vez de 1 por adset.
+                    _optgoals = _meta.batch_get_adset_optimization_goals(_unique_aids)
                     _spend_ml = 0.0
                     _spend_nonml = 0.0
-                    for _row in _adsets_cap:
-                        _aid = _row.get('adset_id')
-                        _sp = float(_row.get('spend') or 0)
-                        if not _aid or _sp <= 0:
-                            continue
-                        _og = _meta.get_adset_optimization_goal(_aid)
+                    for _aid, _sp in _adsets_with_spend:
+                        _og = _optgoals.get(_aid)
                         if _og in _ML_EVENTS:
                             _spend_ml += _sp
                         else:
@@ -3319,7 +3333,8 @@ async def daily_monitoring_check_railway(
                     result['operational_routines']['spend_nonml_24h_brl'] = round(_spend_nonml, 2)
                     logger.info(
                         f"📊 Meta spend 24h por evento de otimização (captação only): "
-                        f"ML R$ {_spend_ml:.2f} · Lead padrão R$ {_spend_nonml:.2f}"
+                        f"ML R$ {_spend_ml:.2f} · Lead padrão R$ {_spend_nonml:.2f} "
+                        f"(batch: {len(_unique_aids)} adsets)"
                     )
                 except Exception as _e:
                     logger.warning(f"⚠️ spend ML vs Lead padrão (24h): {_e}")

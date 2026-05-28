@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class MetaAdsIntegration:
     """Cliente para integração com Meta Ads API"""
 
-    def __init__(self, access_token: str, api_version: str = "v18.0"):
+    def __init__(self, access_token: str, api_version: str = "v24.0"):
         self.access_token = access_token
         self.api_version = api_version
         self.base_url = f"https://graph.facebook.com/{api_version}"
@@ -206,6 +206,179 @@ class MetaAdsIntegration:
         except requests.exceptions.RequestException as e:
             logger.warning(f"⚠️  Erro ao buscar dados do adset {adset_id}: {e}")
             return None
+
+    def batch_get_adset_optimization_goals(
+        self,
+        adset_ids: List[str],
+    ) -> Dict[str, Optional[str]]:
+        """Versão em batch de `get_adset_optimization_goal` para N adsets.
+
+        Reduz N GETs sequenciais a ⌈N/50⌉ HTTP calls. Mantém mesma semântica:
+        prioriza `promoted_object.custom_event_str` sobre `optimization_goal`.
+
+        Returns:
+            Dict {adset_id: optimization_goal | None}. `None` indica que o
+            request falhou ou que o adset não tem nem custom_event nem
+            optimization_goal. Caller decide como tratar.
+        """
+        import json as _json
+
+        BATCH_LIMIT = 50
+        result: Dict[str, Optional[str]] = {}
+        ids = list(adset_ids)
+
+        for batch_start in range(0, len(ids), BATCH_LIMIT):
+            chunk = ids[batch_start:batch_start + BATCH_LIMIT]
+            batch = [
+                {
+                    "method": "GET",
+                    "relative_url": (
+                        f"{self.api_version}/{aid}"
+                        f"?fields=optimization_goal,promoted_object"
+                    ),
+                }
+                for aid in chunk
+            ]
+            try:
+                r = requests.post(
+                    "https://graph.facebook.com/",
+                    data={
+                        "access_token": self.access_token,
+                        "batch": _json.dumps(batch),
+                    },
+                    timeout=30,
+                )
+                r.raise_for_status()
+                responses = r.json()
+            except Exception as e:
+                logger.warning(
+                    "[batch_get_adset_optimization_goals] batch falhou (%d adsets): %s",
+                    len(chunk), e,
+                )
+                for aid in chunk:
+                    result[aid] = None
+                continue
+
+            for aid, resp in zip(chunk, responses):
+                if not resp:
+                    result[aid] = None
+                    continue
+                try:
+                    code = int(resp.get("code") or 0)
+                except (TypeError, ValueError):
+                    code = 0
+                if code != 200:
+                    logger.warning(
+                        "[batch_get_adset_optimization_goals] adset %s falhou (code=%s): %s",
+                        aid, code, (resp.get("body") or "")[:200],
+                    )
+                    result[aid] = None
+                    continue
+                try:
+                    body = _json.loads(resp["body"])
+                except Exception as e:
+                    logger.warning(
+                        "[batch_get_adset_optimization_goals] adset %s parse falhou: %s",
+                        aid, e,
+                    )
+                    result[aid] = None
+                    continue
+                promoted = body.get("promoted_object") or {}
+                result[aid] = promoted.get("custom_event_str") or body.get("optimization_goal")
+
+        return result
+
+    def batch_get_adsets(
+        self,
+        campaign_ids: List[str],
+        fields: Optional[List[str]] = None,
+        limit_per_campaign: int = 100,
+    ) -> Dict[str, Optional[List[Dict]]]:
+        """Busca adsets de várias campanhas via Graph Batch API.
+
+        Reduz N requests sequenciais a 1 HTTP call (chunks de 50, limite Meta).
+        Encapsula versão da API, parsing por cid e tolerância a erro por cid.
+
+        Args:
+            campaign_ids: lista de campaign_ids (15-18 dígitos).
+            fields: campos do adset a retornar. Default: optimization_goal + promoted_object.
+            limit_per_campaign: paginação Meta por campanha (default 100).
+
+        Returns:
+            Dict {cid: [adsets] | None}. `None` indica que o request falhou
+            para aquele cid (parse error, code != 200, response vazio). Lista
+            vazia indica campanha sem adsets. Caller decide como tratar `None`
+            (não cachear, omitir do resultado, etc.).
+
+        Docs: https://developers.facebook.com/docs/graph-api/making-multiple-requests
+        """
+        import json as _json
+
+        if fields is None:
+            fields = ['optimization_goal', 'promoted_object']
+        fields_str = ','.join(fields)
+
+        BATCH_LIMIT = 50  # hard limit Meta Graph API
+        result: Dict[str, Optional[List[Dict]]] = {}
+        cids = list(campaign_ids)
+
+        for batch_start in range(0, len(cids), BATCH_LIMIT):
+            chunk = cids[batch_start:batch_start + BATCH_LIMIT]
+            batch = [
+                {
+                    "method": "GET",
+                    "relative_url": (
+                        f"{self.api_version}/{cid}/adsets"
+                        f"?fields={fields_str}&limit={limit_per_campaign}"
+                    ),
+                }
+                for cid in chunk
+            ]
+            try:
+                r = requests.post(
+                    "https://graph.facebook.com/",
+                    data={
+                        "access_token": self.access_token,
+                        "batch": _json.dumps(batch),
+                    },
+                    timeout=30,
+                )
+                r.raise_for_status()
+                responses = r.json()
+            except Exception as e:
+                logger.warning(
+                    "[batch_get_adsets] batch falhou (%d cids): %s", len(chunk), e
+                )
+                for cid in chunk:
+                    result[cid] = None
+                continue
+
+            for cid, resp in zip(chunk, responses):
+                if not resp:
+                    result[cid] = None
+                    continue
+                try:
+                    code = int(resp.get("code") or 0)
+                except (TypeError, ValueError):
+                    code = 0
+                if code != 200:
+                    logger.warning(
+                        "[batch_get_adsets] campaign %s falhou (code=%s): %s",
+                        cid, code, (resp.get("body") or "")[:200],
+                    )
+                    result[cid] = None
+                    continue
+                try:
+                    body = _json.loads(resp["body"])
+                except Exception as e:
+                    logger.warning(
+                        "[batch_get_adsets] campaign %s parse falhou: %s", cid, e
+                    )
+                    result[cid] = None
+                    continue
+                result[cid] = body.get("data", []) or []
+
+        return result
 
     def get_adset_budget_info(self, adset_id: str) -> Dict:
         """

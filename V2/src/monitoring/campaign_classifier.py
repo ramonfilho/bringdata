@@ -12,6 +12,9 @@ Buckets (precedência em campanhas mistas: Challenger > Champion > Lead):
   - Challenger → adsets otimizam pra HQLB ou HQLB_LQ
   - Champion   → adsets otimizam pra LeadQualified ou LeadQualifiedHighQuality
   - Lead       → resto (Lead padrão Meta, sem evento ML)
+
+Arquitetura: I/O Meta API mora no adapter `MetaAdsIntegration.batch_get_adsets`.
+Aqui só vive a regra de negócio "dado um conjunto de adsets, qual bucket?".
 """
 from __future__ import annotations
 
@@ -20,7 +23,10 @@ import os
 import re
 import time
 from collections import Counter
-from typing import Iterable, Optional
+from typing import Iterable, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from api.meta_integration import MetaAdsIntegration
 
 logger = logging.getLogger(__name__)
 
@@ -52,12 +58,37 @@ def extract_campaign_id(utm_campaign) -> Optional[str]:
     return m.group(1) if m else None
 
 
-def classify_campaign_buckets(utm_campaigns: Iterable) -> dict[str, str]:
+def _bucket_from_adsets(adsets: list) -> str:
+    """Aplica precedência Challenger > Champion > Lead nos adsets de uma campanha."""
+    has_challenger = has_champion = False
+    for a in adsets:
+        promoted = a.get("promoted_object") or {}
+        goal = promoted.get("custom_event_str") or a.get("optimization_goal")
+        if goal in _CHALLENGER_GOALS:
+            has_challenger = True
+        elif goal in _CHAMPION_GOALS:
+            has_champion = True
+    if has_challenger:
+        return "Challenger"
+    if has_champion:
+        return "Champion"
+    return "Lead"
+
+
+def classify_campaign_buckets(
+    utm_campaigns: Iterable,
+    *,
+    meta: Optional["MetaAdsIntegration"] = None,
+) -> dict[str, str]:
     """Pra cada campaign_id único em `utm_campaigns`, devolve seu bucket.
 
     Args:
         utm_campaigns: iterable de strings utm_campaign (pode conter None/NaN).
             Cada string vai passar por `extract_campaign_id` pra resolver o cid.
+        meta: adapter `MetaAdsIntegration` injetado. Se None, instancia um
+            default a partir de `META_ACCESS_TOKEN` (backwards-compat com
+            callers antigos). Composição única no caller (endpoint/scheduler)
+            é a forma preferida.
 
     Returns:
         Dict {campaign_id: 'Lead'|'Champion'|'Challenger'}. Cids não consultáveis
@@ -69,7 +100,7 @@ def classify_campaign_buckets(utm_campaigns: Iterable) -> dict[str, str]:
     free. Reduz drasticamente pressão Meta API.
 
     Tolerante a falhas:
-      - META_ACCESS_TOKEN ausente → dict só com cache acumulado (parcial)
+      - meta None + META_ACCESS_TOKEN ausente → dict só com cache acumulado
       - Meta API timeout/error por cid → log WARNING, cid omitido
     """
     cids: set[str] = set()
@@ -97,111 +128,33 @@ def classify_campaign_buckets(utm_campaigns: Iterable) -> dict[str, str]:
         )
         return result
 
-    token = os.environ.get("META_ACCESS_TOKEN")
-    if not token:
-        logger.warning(
-            "[campaign_classifier] META_ACCESS_TOKEN ausente — retornando só "
-            "cache parcial (%d/%d cids), restantes viram 'Lead' no caller",
-            len(result), len(cids),
-        )
-        return result
-
-    try:
-        from api.meta_integration import MetaAdsIntegration
-
-        meta = MetaAdsIntegration(access_token=token)
-    except Exception as e:
-        logger.warning("[campaign_classifier] MetaAdsIntegration falhou: %s", e)
-        return result
-
-    # Meta Graph Batch API — empacota até 50 requests num único HTTP call.
-    # Para 15 cids/dia tipo do projeto, vira 1 request em vez de 15. Reduz
-    # drasticamente pressão de rate limit (origem dos 400 Client Error de
-    # 2026-05-28 10:10 BRT) e bate Meta em paralelo no lado do servidor.
-    # Docs: https://developers.facebook.com/docs/graph-api/making-multiple-requests
-    import json as _json
-    import requests
-
-    BATCH_LIMIT = 50  # hard limit Meta Graph API
-    adsets_by_cid: dict[str, list] = {}
-    n_errors = 0
-    to_fetch_list = sorted(to_fetch)
-    for batch_start in range(0, len(to_fetch_list), BATCH_LIMIT):
-        chunk = to_fetch_list[batch_start:batch_start + BATCH_LIMIT]
-        # v24.0 explícito — v18.0 (default do MetaAdsIntegration) começou a
-        # retornar OAuthException 2635 "deprecated version" em 2026-05-28.
-        batch = [
-            {
-                "method": "GET",
-                "relative_url": (
-                    f"v24.0/{cid}/adsets?fields=optimization_goal,promoted_object&limit=100"
-                ),
-            }
-            for cid in chunk
-        ]
-        try:
-            r = requests.post(
-                "https://graph.facebook.com/",
-                data={"access_token": token, "batch": _json.dumps(batch)},
-                timeout=30,
-            )
-            r.raise_for_status()
-            responses = r.json()
-        except Exception as e:
-            n_errors += len(chunk)
+    if meta is None:
+        token = os.environ.get("META_ACCESS_TOKEN")
+        if not token:
             logger.warning(
-                "[campaign_classifier] batch falhou (%d cids): %s", len(chunk), e
+                "[campaign_classifier] META_ACCESS_TOKEN ausente e meta não "
+                "injetado — retornando só cache parcial (%d/%d cids), restantes "
+                "viram 'Lead' no caller",
+                len(result), len(cids),
             )
-            continue
-        for cid, resp in zip(chunk, responses):
-            if not resp:
-                n_errors += 1
-                continue
-            try:
-                code = int(resp.get("code") or 0)
-            except (TypeError, ValueError):
-                code = 0
-            if code != 200:
-                n_errors += 1
-                logger.warning(
-                    "[campaign_classifier] campaign %s falhou (code=%s): %s",
-                    cid, code, (resp.get("body") or "")[:200],
-                )
-                continue
-            try:
-                body = _json.loads(resp["body"])
-            except Exception as e:
-                n_errors += 1
-                logger.warning(
-                    "[campaign_classifier] campaign %s parse falhou: %s", cid, e
-                )
-                continue
-            adsets_by_cid[cid] = body.get("data", []) or []
+            return result
+        try:
+            from api.meta_integration import MetaAdsIntegration
 
-    # Classifica a partir dos adsets recebidos
+            meta = MetaAdsIntegration(access_token=token)
+        except Exception as e:
+            logger.warning("[campaign_classifier] MetaAdsIntegration falhou: %s", e)
+            return result
+
+    adsets_by_cid = meta.batch_get_adsets(sorted(to_fetch))
+    n_errors = sum(1 for v in adsets_by_cid.values() if v is None)
+
     for cid in to_fetch:
         adsets = adsets_by_cid.get(cid)
         if adsets is None:
             # request falhou — não cacheia, próxima chamada tenta de novo
             continue
-        if not adsets:
-            _BUCKET_CACHE[cid] = (now_ts, "Lead")
-            result[cid] = "Lead"
-            continue
-        has_challenger = has_champion = False
-        for a in adsets:
-            promoted = a.get("promoted_object") or {}
-            goal = promoted.get("custom_event_str") or a.get("optimization_goal")
-            if goal in _CHALLENGER_GOALS:
-                has_challenger = True
-            elif goal in _CHAMPION_GOALS:
-                has_champion = True
-        if has_challenger:
-            bucket = "Challenger"
-        elif has_champion:
-            bucket = "Champion"
-        else:
-            bucket = "Lead"
+        bucket = _bucket_from_adsets(adsets) if adsets else "Lead"
         _BUCKET_CACHE[cid] = (now_ts, bucket)
         result[cid] = bucket
 

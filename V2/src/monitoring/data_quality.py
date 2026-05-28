@@ -2407,12 +2407,23 @@ class DataQualityMonitor:
         `src/monitoring/campaign_classifier`. Mantido por compat com chamadas
         existentes em `_check_audience_drift_by_variant`.
 
+        Cria o adapter Meta uma vez aqui (composição) e injeta no classifier.
         Cache de classificação por campaign_id vive no módulo (não nesta
         instância) pra ser compartilhado com `app.py` (decile distribution
         by_optgoal usa a mesma classificação).
         """
+        import os as _os
         from src.monitoring.campaign_classifier import classify_campaign_buckets
-        return classify_campaign_buckets(utm_campaign_series)
+
+        _token = _os.environ.get("META_ACCESS_TOKEN")
+        if not _token:
+            return classify_campaign_buckets(utm_campaign_series)
+        try:
+            from api.meta_integration import MetaAdsIntegration
+            _meta = MetaAdsIntegration(access_token=_token)
+        except Exception:
+            return classify_campaign_buckets(utm_campaign_series)
+        return classify_campaign_buckets(utm_campaign_series, meta=_meta)
 
     def _check_audience_drift_by_variant(self, top_list: List[Dict]) -> List[Dict]:
         """
