@@ -128,11 +128,13 @@ def classify_campaign_buckets(utm_campaigns: Iterable) -> dict[str, str]:
     to_fetch_list = sorted(to_fetch)
     for batch_start in range(0, len(to_fetch_list), BATCH_LIMIT):
         chunk = to_fetch_list[batch_start:batch_start + BATCH_LIMIT]
+        # v24.0 explícito — v18.0 (default do MetaAdsIntegration) começou a
+        # retornar OAuthException 2635 "deprecated version" em 2026-05-28.
         batch = [
             {
                 "method": "GET",
                 "relative_url": (
-                    f"{cid}/adsets?fields=optimization_goal,promoted_object&limit=100"
+                    f"v24.0/{cid}/adsets?fields=optimization_goal,promoted_object&limit=100"
                 ),
             }
             for cid in chunk
