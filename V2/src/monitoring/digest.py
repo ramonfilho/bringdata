@@ -1402,6 +1402,21 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     show_meta = n_meta > 0
     show_ggl  = n_ggl > 0
 
+    # Split por optimization_goal da campanha (Lead/Champion/Challenger) —
+    # mesmos buckets das tabelas Drift por A/B. Coluna vazia de separação
+    # antes dessas 3 colunas pra distinguir das colunas Meta/Google.
+    by_og = info.get('by_optgoal') or {}
+    og_lead_info = by_og.get('lead') or {}
+    og_chmp_info = by_og.get('champion') or {}
+    og_chal_info = by_og.get('challenger') or {}
+    og_lead_dist = og_lead_info.get('distribution') or {}
+    og_chmp_dist = og_chmp_info.get('distribution') or {}
+    og_chal_dist = og_chal_info.get('distribution') or {}
+    n_og_lead = int(og_lead_info.get('total', 0) or 0)
+    n_og_chmp = int(og_chmp_info.get('total', 0) or 0)
+    n_og_chal = int(og_chal_info.get('total', 0) or 0)
+    show_og = (n_og_lead + n_og_chmp + n_og_chal) > 0
+
     keys = [f'D{i:02d}' for i in range(1, 11)]
     cur_pct = {k: ((int(dist.get(k, 0) or 0) / total) * 100) for k in keys}
     max_pct = max(cur_pct.values()) if cur_pct else 0
@@ -1422,6 +1437,11 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
         legend_parts.append(f'*Meta* n={n_meta:,}')
     if show_ggl:
         legend_parts.append(f'*Google* n={n_ggl:,}')
+    if show_og:
+        legend_parts.append(
+            f'*Lead* n={n_og_lead:,} · *Champion* n={n_og_chmp:,} · '
+            f'*Challenger* n={n_og_chal:,}'
+        )
     if legend_parts:
         rows.append('_' + '  ·  '.join(legend_parts) + '_')
     rows.append('```')
@@ -1461,6 +1481,25 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
                 line += f'  G {e_g} {pct_g:>5.1f}%'
             else:
                 line += f'  G {pct_g:>5.1f}%'
+
+        # Coluna vazia de separação + Lead / Champion / Challenger (optimization_goal)
+        if show_og:
+            line += '     '  # separador visual
+            for label, n_b, dist_b in [
+                ('L',  n_og_lead, og_lead_dist),
+                ('C',  n_og_chmp, og_chmp_dist),
+                ('Ch', n_og_chal, og_chal_dist),
+            ]:
+                n_x = int(dist_b.get(k, 0) or 0)
+                pct_x = (n_x / n_b) * 100 if n_b else 0.0
+                if base_pct and n_b > 0:
+                    e_x = _quality_emoji(_classify_quality_inline(direction, pct_x - b))
+                    line += f'  {label} {e_x} {pct_x:>5.1f}%'
+                elif n_b > 0:
+                    line += f'  {label} {pct_x:>5.1f}%'
+                else:
+                    # Bucket sem leads na janela — mostra travessão
+                    line += f'  {label} {"—":>7}'
 
         rows.append(line)
     rows.append('```')

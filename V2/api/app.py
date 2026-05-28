@@ -2902,6 +2902,41 @@ async def daily_monitoring_check_railway(
                 'google': {'distribution': dist_ggl,  'total': n_ggl},
             }
 
+        # Split por optimization_goal da campanha (Lead/Champion/Challenger) —
+        # mesmos buckets das tabelas Drift por A/B. Usa cache compartilhado de
+        # src/monitoring/campaign_classifier. Quality_rows tem utm_campaign no
+        # índice [5] (vide records_to_quality_rows). Leads sem campaign_id
+        # extraível (Google, orgânico) caem no bucket 'Lead' como catch-all
+        # (definição do usuário: "se não tem evento ML, cai em Lead").
+        from src.monitoring.campaign_classifier import (
+            classify_campaign_buckets as _classify_buckets,
+            extract_campaign_id as _extract_cid,
+        )
+        # Classifica todas as campanhas de quality_rows uma vez. quality_rows
+        # cobre 90 dias; o cache TTL 30min absorve dailys consecutivos.
+        _all_camps = [r[5] for r in quality_rows if len(r) > 5 and r[5]]
+        _bucket_classification = _classify_buckets(_all_camps)
+
+        def _decil_dist_by_optgoal(rows) -> Dict[str, Dict]:
+            buckets = ('Lead', 'Champion', 'Challenger')
+            dists = {b: {f'D{i:02d}': 0 for i in range(1, 11)} for b in buckets}
+            totals = {b: 0 for b in buckets}
+            for r in rows:
+                d = r[1]
+                if d is None: continue
+                camp = r[5] if len(r) > 5 else None
+                cid = _extract_cid(camp)
+                bucket = _bucket_classification.get(cid, 'Lead') if cid else 'Lead'
+                key = f'D{int(d):02d}'
+                if key in dists[bucket]:
+                    dists[bucket][key] += 1
+                    totals[bucket] += 1
+            return {
+                'lead':       {'distribution': dists['Lead'],       'total': totals['Lead']},
+                'champion':   {'distribution': dists['Champion'],   'total': totals['Champion']},
+                'challenger': {'distribution': dists['Challenger'], 'total': totals['Challenger']},
+            }
+
         # Baselines de decis Top 6 ROAS (scoreados separadamente por Champion e Challenger).
         # Em runtime, ponderamos pela proporção de leads atribuídos a cada variante na
         # janela — Champion é mais "pessimista" (D10≈36%), Challenger mais "otimista"
@@ -2993,7 +3028,8 @@ async def daily_monitoring_check_railway(
             'total': len(_yest_rows),
             'window_label': 'Ontem',
             'baseline': _weighted_baseline(_yest_n_c, _yest_n_ch),
-            'by_source': _decil_dist_by_source(_yest_rows),
+            'by_source':  _decil_dist_by_source(_yest_rows),
+            'by_optgoal': _decil_dist_by_optgoal(_yest_rows),
         }
 
         # Qualidade do LF de referência — apenas LF ativo no launches.yaml,
@@ -3035,7 +3071,8 @@ async def daily_monitoring_check_railway(
                 'total': len(_lf_rows),
                 'window_label': f"{_ln} ({_lw.cap_start.strftime('%d/%m')}→{_cap_end_eff.strftime('%d/%m')} BRT)",
                 'baseline': _weighted_baseline(_lf_n_c, _lf_n_ch),
-                'by_source': _decil_dist_by_source(_lf_rows),
+                'by_source':  _decil_dist_by_source(_lf_rows),
+                'by_optgoal': _decil_dist_by_optgoal(_lf_rows),
             }
             logger.info(f"📊 lf_referencia: {_ln} "
                         f"({_lw.cap_start}→{_cap_end_eff}, source={_lw.source}, n={len(_lf_rows)})")

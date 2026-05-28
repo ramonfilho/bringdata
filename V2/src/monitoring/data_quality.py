@@ -2402,136 +2402,17 @@ class DataQualityMonitor:
 
         return alerts
 
-    # Cache de classificação por campaign_id (3 buckets), compartilhado entre
-    # invocações da mesma instância do worker Cloud Run. Decisão Meta API é
-    # estável em escala de horas. {cid: (timestamp, bucket)} onde bucket é
-    # uma string em {'Lead', 'Champion', 'Challenger'}.
-    _BUCKET_CACHE: dict = {}
-    _BUCKET_CACHE_TTL_SECONDS = 1800  # 30 min
-
     def _classify_campaign_buckets(self, utm_campaign_series) -> dict:
-        """Pra cada campaign_id único no utm_campaign, consulta Meta API e
-        classifica em 1 de 3 buckets:
+        """Wrapper local que delega ao módulo compartilhado
+        `src/monitoring/campaign_classifier`. Mantido por compat com chamadas
+        existentes em `_check_audience_drift_by_variant`.
 
-          - 'Challenger' → adsets otimizam pra HQLB ou HQLB_LQ
-          - 'Champion'   → adsets otimizam pra LeadQualified ou LeadQualifiedHighQuality
-          - 'Lead'       → resto (Lead padrão Meta, sem evento ML)
-
-        Regra de precedência (se a campanha tem adsets misturados):
-            Challenger > Champion > Lead. Na prática, o audit mostrou que
-            campanhas dentro dessa conta não misturam goals (todos adsets de
-            uma campanha compartilham optimization_goal), então a precedência
-            raramente importa.
-
-        Devolve `{campaign_id: bucket}`. Cids não consultáveis (Meta error)
-        ficam fora do dict — quem chama trata como bucket 'Lead' por default
-        (catch-all do user: "se não tem evento ML, cai em Lead").
-
-        Cache TTL 30min compartilhado no nível da classe.
-        Tolerante a falhas: token ausente → dict vazio (todos viram Lead).
+        Cache de classificação por campaign_id vive no módulo (não nesta
+        instância) pra ser compartilhado com `app.py` (decile distribution
+        by_optgoal usa a mesma classificação).
         """
-        import os
-        import re
-        import time
-        try:
-            import pandas as _pd
-        except Exception:
-            return {}
-
-        _CID_RE = re.compile(r"(\d{15,18})\s*$")
-        cids: set = set()
-        for s in utm_campaign_series:
-            if s is None:
-                continue
-            try:
-                if _pd.isna(s):
-                    continue
-            except Exception:
-                pass
-            m = _CID_RE.search(str(s).strip())
-            if m:
-                cids.add(m.group(1))
-        if not cids:
-            return {}
-
-        now_ts = time.time()
-        cache = type(self)._BUCKET_CACHE
-        ttl = type(self)._BUCKET_CACHE_TTL_SECONDS
-        result: dict = {}
-        to_fetch: set = set()
-        for cid in cids:
-            entry = cache.get(cid)
-            if entry and (now_ts - entry[0]) < ttl:
-                result[cid] = entry[1]
-            else:
-                to_fetch.add(cid)
-
-        if not to_fetch:
-            from collections import Counter
-            logger.info(
-                f"[audience_drift] buckets (cache hit total): "
-                f"{dict(Counter(result.values()))} de {len(cids)} campanhas"
-            )
-            return result
-
-        token = os.environ.get('META_ACCESS_TOKEN')
-        if not token:
-            logger.warning("[audience_drift] META_ACCESS_TOKEN ausente — split por A/B vai cair tudo em Lead")
-            return result
-
-        try:
-            from api.meta_integration import MetaAdsIntegration
-            meta = MetaAdsIntegration(access_token=token)
-        except Exception as _e:
-            logger.warning(f"[audience_drift] MetaAdsIntegration falhou: {_e}")
-            return result
-
-        _CHAMPION_GOALS  = frozenset({'LeadQualified', 'LeadQualifiedHighQuality'})
-        _CHALLENGER_GOALS = frozenset({'HQLB', 'HQLB_LQ'})
-        n_errors = 0
-        for cid in to_fetch:
-            try:
-                import requests
-                url = f"{meta.base_url}/{cid}/adsets"
-                params = {
-                    'access_token': token,
-                    'fields': 'optimization_goal,promoted_object',
-                    'limit': 100,
-                }
-                r = requests.get(url, params=params, timeout=5)
-                r.raise_for_status()
-                adsets = r.json().get('data', [])
-                if not adsets:
-                    cache[cid] = (now_ts, 'Lead')
-                    result[cid] = 'Lead'
-                    continue
-                has_challenger = has_champion = False
-                for a in adsets:
-                    promoted = a.get('promoted_object') or {}
-                    goal = promoted.get('custom_event_str') or a.get('optimization_goal')
-                    if goal in _CHALLENGER_GOALS:
-                        has_challenger = True
-                    elif goal in _CHAMPION_GOALS:
-                        has_champion = True
-                if has_challenger:
-                    bucket = 'Challenger'
-                elif has_champion:
-                    bucket = 'Champion'
-                else:
-                    bucket = 'Lead'
-                cache[cid] = (now_ts, bucket)
-                result[cid] = bucket
-            except Exception as _e:
-                n_errors += 1
-                logger.warning(f"[audience_drift] campaign {cid} falhou: {_e}")
-                continue
-
-        from collections import Counter
-        logger.info(
-            f"[audience_drift] buckets: {dict(Counter(result.values()))} "
-            f"(fetched={len(to_fetch)}, cache_hit={len(cids)-len(to_fetch)}, errors={n_errors})"
-        )
-        return result
+        from src.monitoring.campaign_classifier import classify_campaign_buckets
+        return classify_campaign_buckets(utm_campaign_series)
 
     def _check_audience_drift_by_variant(self, top_list: List[Dict]) -> List[Dict]:
         """
