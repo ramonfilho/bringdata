@@ -2863,7 +2863,7 @@ async def daily_monitoring_check_railway(
             logger.warning(f"⚠️ lead_quality count override (4 janelas) falhou: {_ce}")
 
         # Decis distribution por janela — usado no digest do cliente (2 barras horizontais).
-        # quality_rows = [(leadScore, decil, createdAt), ...].
+        # quality_rows = [(leadScore, decil, createdAt, source, ...), ...].
         def _decil_dist(rows) -> Dict[str, int]:
             dist = {f'D{i:02d}': 0 for i in range(1, 11)}
             for r in rows:
@@ -2873,6 +2873,34 @@ async def daily_monitoring_check_railway(
                 if key in dist:
                     dist[key] += 1
             return dist
+
+        # Split por fonte (Meta vs Google) — mesmo bucketing do unified_funnel
+        # em src/monitoring/daily_check_aggregations._classify_source. Reusado
+        # pra renderizar colunas Meta / Google ao lado da barra Total nas
+        # tabelas de decis. Outras fontes (orgânico, tiktok, sem_utm) ficam
+        # implícitas na barra Total — não têm volume hoje pra justificar coluna.
+        _SRC_META_DECIL = frozenset({'facebook-ads', 'fb', 'ig'})
+        _SRC_GGL_DECIL  = frozenset({'google-ads'})
+        def _decil_dist_by_source(rows) -> Dict[str, Dict]:
+            dist_meta = {f'D{i:02d}': 0 for i in range(1, 11)}
+            dist_ggl  = {f'D{i:02d}': 0 for i in range(1, 11)}
+            n_meta = n_ggl = 0
+            for r in rows:
+                d = r[1]; src = (r[3] or '').strip().lower() if len(r) > 3 else ''
+                if d is None: continue
+                key = f'D{int(d):02d}'
+                if src in _SRC_META_DECIL:
+                    if key in dist_meta:
+                        dist_meta[key] += 1
+                        n_meta += 1
+                elif src in _SRC_GGL_DECIL:
+                    if key in dist_ggl:
+                        dist_ggl[key] += 1
+                        n_ggl += 1
+            return {
+                'meta':   {'distribution': dist_meta, 'total': n_meta},
+                'google': {'distribution': dist_ggl,  'total': n_ggl},
+            }
 
         # Baselines de decis Top 6 ROAS (scoreados separadamente por Champion e Challenger).
         # Em runtime, ponderamos pela proporção de leads atribuídos a cada variante na
@@ -2965,6 +2993,7 @@ async def daily_monitoring_check_railway(
             'total': len(_yest_rows),
             'window_label': 'Ontem',
             'baseline': _weighted_baseline(_yest_n_c, _yest_n_ch),
+            'by_source': _decil_dist_by_source(_yest_rows),
         }
 
         # Qualidade do LF de referência — apenas LF ativo no launches.yaml,
@@ -3006,6 +3035,7 @@ async def daily_monitoring_check_railway(
                 'total': len(_lf_rows),
                 'window_label': f"{_ln} ({_lw.cap_start.strftime('%d/%m')}→{_cap_end_eff.strftime('%d/%m')} BRT)",
                 'baseline': _weighted_baseline(_lf_n_c, _lf_n_ch),
+                'by_source': _decil_dist_by_source(_lf_rows),
             }
             logger.info(f"📊 lf_referencia: {_ln} "
                         f"({_lw.cap_start}→{_cap_end_eff}, source={_lw.source}, n={len(_lf_rows)})")

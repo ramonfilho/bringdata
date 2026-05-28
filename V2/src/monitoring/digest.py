@@ -795,39 +795,20 @@ def _render_text_skipped_footer(v: dict, L: list):
 # ──────────────────────────────────────────────────────────────────────────
 
 def render_slack_blocks(view: dict) -> list[dict]:
-    """View 'DM' — visão completa do operador.
+    """View 'DM' — só conteúdo exclusivo do operador.
 
-    Estrutura espelha a view cliente nos primeiros blocos (A/B Test,
-    Drift por A/B, Drift Geral, Distribuição de Decis), depois acrescenta
-    os blocos exclusivos do operador (alertas detalhados, funil completo,
-    tracking, qualidade dos leads, Pub/Sub 24h, features zeradas em batch,
-    previsão de faturamento).
-
-    Por que essa ordem: o usuário pediu que as tabelas em comum apareçam
-    no topo do DM, juntas com o status do A/B, exatamente como no cliente.
-    Os blocos só-DM ficam abaixo, agrupados por tema.
+    Não duplica nada do que já vai pro canal do cliente (A/B, drift por A/B,
+    drift por fonte, drift geral, decis ontem/lançamento). Mantém apenas o
+    header (âncora de data) e os blocos só-DM: aviso de fallback de
+    lançamento, drift de score (decis vs baseline), alertas detalhados,
+    funil completo, qualidade dos leads, Pub/Sub 24h, features OHE zeradas
+    em batch, previsão de faturamento.
     """
     blocks: list[dict] = []
-    # === Topo: espelha a view cliente ===
     _slack_header(view, blocks)
     _slack_launch_fallback_notice_dm(view, blocks)  # DM-only — no-op se YAML em dia
-    _slack_ab(view, blocks)
-    blocks.append({'type': 'divider'})
-    _slack_audience_drift_by_variant_dm(view, blocks)  # Drift por A/B (Ontem + Lançamento)
-    _slack_audience_drift_by_source_dm(view, blocks)   # Drift por Fonte Meta/Google
     _slack_score_distribution_change_dm(view, blocks)  # Drift de Score (decis)
-    # Drift Geral (`audience_profile_drift`) é renderizado dentro de
-    # _slack_alerts via `include_audience_drift=True`. Pra preservar a ordem
-    # (Drift Geral logo após Drift por A/B), chama aqui só esse subset.
-    _alerts = view.get('alerts') or []
-    _aud_general = [a for a in _alerts if a.get('type') == 'audience_profile_drift']
-    for a in _aud_general:
-        _slack_alert_audience(a, blocks)
-        blocks.append({'type': 'divider'})
-    _slack_decis_window(view, blocks, 'previous_day')
-    _slack_decis_window(view, blocks, 'current_launch')
     blocks.append({'type': 'divider'})
-    # === Blocos exclusivos do operador (não vão pro cliente) ===
     _slack_alerts(view, blocks, include_audience_drift=False)
     blocks.append({'type': 'divider'})
     _slack_unified_funnel(view, blocks)
@@ -1371,6 +1352,12 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     D01-D04 lift<0.40 → very_negative → Δpp- vira 🟢 (menos leads no pior = bom).
     D05-D09 CI cruza 1.0 → uncertain → ⚪ (estatisticamente indistinguíveis).
     Fonte: configs/audience_direction_map.json (decil_direction).
+
+    Side-by-side por fonte: se `info['by_source']` estiver populado (Meta /
+    Google), adiciona 2 colunas à direita da Δpp do Total — Meta% (emoji) e
+    Google% (emoji) — comparadas contra a mesma baseline ponderada. Skipa as
+    colunas quando a fonte tem total=0 (ex.: Google antes do desacoplamento
+    scoring × Meta CAPI em 2026-05-27).
     """
     lq = v.get('lead_quality') or {}
     key = f'decil_distribution_{window_key}'
@@ -1387,6 +1374,16 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     base_pct = baseline.get('pct') or {}
     base_label = baseline.get('label', '')
 
+    by_src = info.get('by_source') or {}
+    meta_info = by_src.get('meta') or {}
+    ggl_info  = by_src.get('google') or {}
+    meta_dist = meta_info.get('distribution') or {}
+    ggl_dist  = ggl_info.get('distribution') or {}
+    n_meta = int(meta_info.get('total', 0) or 0)
+    n_ggl  = int(ggl_info.get('total', 0) or 0)
+    show_meta = n_meta > 0
+    show_ggl  = n_ggl > 0
+
     keys = [f'D{i:02d}' for i in range(1, 11)]
     cur_pct = {k: ((int(dist.get(k, 0) or 0) / total) * 100) for k in keys}
     max_pct = max(cur_pct.values()) if cur_pct else 0
@@ -1400,23 +1397,54 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     if base_label:
         title += f' vs *{base_label}*'
     rows = [title]
+    legend_parts = []
     if base_pct:
-        rows.append('_🟢 bom · 🔴 ruim · ⚪ neutro/incerto._')
+        legend_parts.append('🟢 bom · 🔴 ruim · ⚪ neutro/incerto')
+    if show_meta:
+        legend_parts.append(f'*Meta* n={n_meta:,}')
+    if show_ggl:
+        legend_parts.append(f'*Google* n={n_ggl:,}')
+    if legend_parts:
+        rows.append('_' + '  ·  '.join(legend_parts) + '_')
     rows.append('```')
+
     for k in keys:
         pct = cur_pct[k]
         n = int(dist.get(k, 0) or 0)
         bar_len = int(round((pct / max_pct) * width)) if max_pct > 0 else 0
         bar = '▇' * bar_len + ' ' * (width - bar_len)
+        direction = (decil_dir.get(k, {}) or {}).get('direction')
+        b = float(base_pct.get(k, 0) or 0) if base_pct else None
+
+        # Total column — larguras fixas pra todas as linhas alinharem
         if base_pct:
-            b = float(base_pct.get(k, 0) or 0)
             delta = pct - b
-            direction = (decil_dir.get(k, {}) or {}).get('direction')
             quality = _classify_quality_inline(direction, delta)
             emoji = _quality_emoji(quality)
-            rows.append(f'{k} {bar} {pct:>4.1f}% ({n:,})  Ref {b:>4.1f}%  {emoji}  Δ{delta:+.1f}pp')
+            line = (f'{k} {bar} {pct:>5.1f}% ({n:>4,})  '
+                    f'Ref {b:>4.1f}%  {emoji}  Δ{delta:>+5.1f}pp')
         else:
-            rows.append(f'{k} {bar} {pct:>4.1f}% ({n:,})')
+            line = f'{k} {bar} {pct:>5.1f}% ({n:>4,})'
+
+        # Colunas extras Meta / Google — largura fixa, sem emoji repetido vs total
+        if show_meta:
+            n_m = int(meta_dist.get(k, 0) or 0)
+            pct_m = (n_m / n_meta) * 100 if n_meta else 0.0
+            if base_pct:
+                e_m = _quality_emoji(_classify_quality_inline(direction, pct_m - b))
+                line += f'   M {e_m} {pct_m:>5.1f}%'
+            else:
+                line += f'   M {pct_m:>5.1f}%'
+        if show_ggl:
+            n_g = int(ggl_dist.get(k, 0) or 0)
+            pct_g = (n_g / n_ggl) * 100 if n_ggl else 0.0
+            if base_pct:
+                e_g = _quality_emoji(_classify_quality_inline(direction, pct_g - b))
+                line += f'  G {e_g} {pct_g:>5.1f}%'
+            else:
+                line += f'  G {pct_g:>5.1f}%'
+
+        rows.append(line)
     rows.append('```')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
