@@ -116,6 +116,11 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'alerts[].details.top_list[].challenger_pct':                                       (R, None),  # ex: None
     'alerts[].details.top_list[].challenger_delta_pp':                                  (R, None),  # ex: None
     'alerts[].details.top_list[].challenger_quality':                                   (R, None),  # ex: 'bom' | 'ruim' | 'neutro' | None
+    # Coluna Lead — dimensão ortogonal ao A/B model split (campaign optimization_goal = Lead padrão)
+    'alerts[].details.lead_n':                                                          (R, None),  # ex: 487
+    'alerts[].details.top_list[].lead_pct':                                             (R, None),
+    'alerts[].details.top_list[].lead_delta_pp':                                        (R, None),
+    'alerts[].details.top_list[].lead_quality':                                         (R, None),
     'alerts[].details.top_list[].winner':                                               (R, None),  # ex: 'champion' | 'challenger' | None
     # audience_profile_drift_by_source — split por fonte (Meta / Google)
     'alerts[].details.meta_n':                                                          (R, None),  # ex: 1095

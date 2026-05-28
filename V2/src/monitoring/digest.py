@@ -825,15 +825,17 @@ def render_slack_blocks(view: dict) -> list[dict]:
 
 
 def _slack_audience_drift_by_variant_dm(v: dict, B: list):
-    """Tabelas de drift de público por A/B (Champion × Challenger) no DM.
+    """Tabelas de drift de público por A/B (Lead × Champion × Challenger) no DM.
 
     Renderiza o mesmo conteúdo que `render_slack_blocks_client` mostra
     (`audience_profile_drift_by_variant`), com ordenação previous_day antes
-    de current_launch. Skipa silenciosamente se A/B está desativado ou se
-    não houver alertas.
+    de current_launch. Skipa silenciosamente se não houver alertas.
+
+    Desde 2026-05-28 o split é por *optimization_goal da campanha Meta* (3
+    buckets excludentes: Lead/Champion/Challenger), NÃO por model routing.
+    Por isso a tabela faz sentido independente de A/B test estar "ativo" —
+    o gate `_ab_test_active` foi removido.
     """
-    if not _ab_test_active(v):
-        return  # A/B desativado → tabelas por A/B não fazem sentido
     alerts = v.get('alerts') or []
     by_variant = [a for a in alerts if a.get('type') == 'audience_profile_drift_by_variant']
     if not by_variant:
@@ -1029,10 +1031,11 @@ def render_slack_blocks_client(view: dict) -> list[dict]:
     _slack_ab(view, blocks)
     blocks.append({'type': 'divider'})
 
-    # Per-variant drift tables (uma por janela) — só faz sentido com A/B ativo
-    ab_on = _ab_test_active(view)
+    # Per-variant drift tables (uma por janela). Desde 2026-05-28 split é por
+    # optimization_goal da campanha (3 buckets Lead/Champion/Challenger), não
+    # por A/B model routing — sempre faz sentido renderizar.
     audience_by_variant = [a for a in view.get('alerts', [])
-                           if a.get('type') == 'audience_profile_drift_by_variant'] if ab_on else []
+                           if a.get('type') == 'audience_profile_drift_by_variant']
     audience_by_source = [a for a in view.get('alerts', [])
                           if a.get('type') == 'audience_profile_drift_by_source']
     audience_general = [a for a in view.get('alerts', [])
@@ -1234,19 +1237,30 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
     window = d.get('window') or ''
     top = d.get('top_list', []) or []
 
+    n_lead = d.get('lead_n', 0) or 0
     window_title = 'Ontem' if window == 'previous_day' else (
         'Lançamento Atual' if window == 'current_launch' else (d.get('window_label') or 'janela')
     )
     # Legenda movida pra _slack_drift_legend_header (uma vez por seção).
     header = f"*📉 Drift por A/B - {window_title}*"
+    if n_lead > 0:
+        header += f"  ·  _Lead (Meta n={n_lead:,})_"
     rows = [header]
-    col_header = f"{'Característica':<32} {'Top%':>5}  {'Champion(Δ)':>20}  {'Challenger(Δ)':>20}"
+    col_header = (
+        f"{'Característica':<32} {'Top%':>5}  "
+        f"{'Lead(Δ)':>16}  {'Champion(Δ)':>20}  {'Challenger(Δ)':>20}"
+    )
     rows.append(f"`{col_header}`")
 
     def cell_qual(pct, delta, quality, is_winner=False):
         if pct is None or delta is None: return f"{'—':>20}"
         winner_mark = ' ✅' if is_winner else '   '
         return f"{_quality_emoji(quality)} {pct:>5.1f}%({delta:+.1f}){winner_mark}"
+
+    def cell_lead(pct, delta, quality):
+        # Coluna Lead: sem winner mark (não compete com Champion/Challenger)
+        if pct is None or delta is None: return f"{'—':>16}"
+        return f"{_quality_emoji(quality)} {pct:>5.1f}%({delta:+.1f})"
 
     def _pick_winner_direction(direction, ch_delta, cl_delta):
         """Variante mais alinhada à direção da categoria.
@@ -1275,7 +1289,11 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
                             is_winner=(winner == 'champion'))
         cl_cell = cell_qual(it.get('challenger_pct'), cl_delta, it.get('challenger_quality'),
                             is_winner=(winner == 'challenger'))
-        rows.append(f"`{label:<32} {ref:>4.1f}%  {ch_cell:>20}  {cl_cell:>20}`")
+        lead_cell = cell_lead(it.get('lead_pct'), it.get('lead_delta_pp'), it.get('lead_quality'))
+        rows.append(
+            f"`{label:<32} {ref:>4.1f}%  "
+            f"{lead_cell:>16}  {ch_cell:>20}  {cl_cell:>20}`"
+        )
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
 

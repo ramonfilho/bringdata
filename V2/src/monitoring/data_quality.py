@@ -2402,21 +2402,159 @@ class DataQualityMonitor:
 
         return alerts
 
+    # Cache de classificação por campaign_id (3 buckets), compartilhado entre
+    # invocações da mesma instância do worker Cloud Run. Decisão Meta API é
+    # estável em escala de horas. {cid: (timestamp, bucket)} onde bucket é
+    # uma string em {'Lead', 'Champion', 'Challenger'}.
+    _BUCKET_CACHE: dict = {}
+    _BUCKET_CACHE_TTL_SECONDS = 1800  # 30 min
+
+    def _classify_campaign_buckets(self, utm_campaign_series) -> dict:
+        """Pra cada campaign_id único no utm_campaign, consulta Meta API e
+        classifica em 1 de 3 buckets:
+
+          - 'Challenger' → adsets otimizam pra HQLB ou HQLB_LQ
+          - 'Champion'   → adsets otimizam pra LeadQualified ou LeadQualifiedHighQuality
+          - 'Lead'       → resto (Lead padrão Meta, sem evento ML)
+
+        Regra de precedência (se a campanha tem adsets misturados):
+            Challenger > Champion > Lead. Na prática, o audit mostrou que
+            campanhas dentro dessa conta não misturam goals (todos adsets de
+            uma campanha compartilham optimization_goal), então a precedência
+            raramente importa.
+
+        Devolve `{campaign_id: bucket}`. Cids não consultáveis (Meta error)
+        ficam fora do dict — quem chama trata como bucket 'Lead' por default
+        (catch-all do user: "se não tem evento ML, cai em Lead").
+
+        Cache TTL 30min compartilhado no nível da classe.
+        Tolerante a falhas: token ausente → dict vazio (todos viram Lead).
+        """
+        import os
+        import re
+        import time
+        try:
+            import pandas as _pd
+        except Exception:
+            return {}
+
+        _CID_RE = re.compile(r"(\d{15,18})\s*$")
+        cids: set = set()
+        for s in utm_campaign_series:
+            if s is None:
+                continue
+            try:
+                if _pd.isna(s):
+                    continue
+            except Exception:
+                pass
+            m = _CID_RE.search(str(s).strip())
+            if m:
+                cids.add(m.group(1))
+        if not cids:
+            return {}
+
+        now_ts = time.time()
+        cache = type(self)._BUCKET_CACHE
+        ttl = type(self)._BUCKET_CACHE_TTL_SECONDS
+        result: dict = {}
+        to_fetch: set = set()
+        for cid in cids:
+            entry = cache.get(cid)
+            if entry and (now_ts - entry[0]) < ttl:
+                result[cid] = entry[1]
+            else:
+                to_fetch.add(cid)
+
+        if not to_fetch:
+            from collections import Counter
+            logger.info(
+                f"[audience_drift] buckets (cache hit total): "
+                f"{dict(Counter(result.values()))} de {len(cids)} campanhas"
+            )
+            return result
+
+        token = os.environ.get('META_ACCESS_TOKEN')
+        if not token:
+            logger.warning("[audience_drift] META_ACCESS_TOKEN ausente — split por A/B vai cair tudo em Lead")
+            return result
+
+        try:
+            from api.meta_integration import MetaAdsIntegration
+            meta = MetaAdsIntegration(access_token=token)
+        except Exception as _e:
+            logger.warning(f"[audience_drift] MetaAdsIntegration falhou: {_e}")
+            return result
+
+        _CHAMPION_GOALS  = frozenset({'LeadQualified', 'LeadQualifiedHighQuality'})
+        _CHALLENGER_GOALS = frozenset({'HQLB', 'HQLB_LQ'})
+        n_errors = 0
+        for cid in to_fetch:
+            try:
+                import requests
+                url = f"{meta.base_url}/{cid}/adsets"
+                params = {
+                    'access_token': token,
+                    'fields': 'optimization_goal,promoted_object',
+                    'limit': 100,
+                }
+                r = requests.get(url, params=params, timeout=5)
+                r.raise_for_status()
+                adsets = r.json().get('data', [])
+                if not adsets:
+                    cache[cid] = (now_ts, 'Lead')
+                    result[cid] = 'Lead'
+                    continue
+                has_challenger = has_champion = False
+                for a in adsets:
+                    promoted = a.get('promoted_object') or {}
+                    goal = promoted.get('custom_event_str') or a.get('optimization_goal')
+                    if goal in _CHALLENGER_GOALS:
+                        has_challenger = True
+                    elif goal in _CHAMPION_GOALS:
+                        has_champion = True
+                if has_challenger:
+                    bucket = 'Challenger'
+                elif has_champion:
+                    bucket = 'Champion'
+                else:
+                    bucket = 'Lead'
+                cache[cid] = (now_ts, bucket)
+                result[cid] = bucket
+            except Exception as _e:
+                n_errors += 1
+                logger.warning(f"[audience_drift] campaign {cid} falhou: {_e}")
+                continue
+
+        from collections import Counter
+        logger.info(
+            f"[audience_drift] buckets: {dict(Counter(result.values()))} "
+            f"(fetched={len(to_fetch)}, cache_hit={len(cids)-len(to_fetch)}, errors={n_errors})"
+        )
+        return result
+
     def _check_audience_drift_by_variant(self, top_list: List[Dict]) -> List[Dict]:
         """
-        Drift de público segmentado por variante A/B (Champion vs Challenger).
+        Drift de público segmentado em 3 buckets pelo *optimization_goal* das
+        campanhas Meta (NÃO pelo model routing do nosso código). Os 3 buckets
+        são mutuamente exclusivos — cada lead cai em UM só:
 
-        Produz 2 alertas (uma por janela: ontem + lançamento atual). Cada alerta
-        traz um top_list com `champion_pct/champion_delta_pp` e
-        `challenger_pct/challenger_delta_pp` calculados separadamente em cada
-        subset, mais um `winner` ('champion'|'challenger'|None) por linha
-        baseado no menor |Δpp|. As features/categorias mostradas são as MESMAS
-        do top_list passado como input (mantém coerência visual com o drift geral).
+          - Lead       → campanhas SEM evento ML (Lead padrão Meta)
+          - Champion   → campanhas com optimization_goal = LeadQualified ou
+                         LeadQualifiedHighQuality
+          - Challenger → campanhas com optimization_goal = HQLB ou HQLB_LQ
 
-        Skip silencioso (devolve []) se:
-          - ABTestConfig não está habilitado ou yaml ausente
-          - top_list vazio
-          - snapshot do baseline ausente
+        Soma Lead + Champion + Challenger ≈ total de leads na janela
+        (excluindo leads sem campaign_id no utm — Google/orgânico, que
+        viram bucket "Lead" como catch-all per definição do usuário).
+
+        Substitui split anterior por `ABTestConfig.match_variant` (model
+        routing) — ver discussão 2026-05-28 sobre por que o split por modelo
+        misturava Lead-padrão e ML-Champion na mesma coluna Champion.
+
+        Produz 2 alertas (1 por janela: ontem + lançamento atual). Cada alerta
+        carrega `lead_pct/champion_pct/challenger_pct` + deltas + qualities
+        por linha do top_list. `lead_n/champion_n/challenger_n` no header.
         """
         from datetime import datetime, timezone
         alerts: List[Dict] = []
@@ -2428,77 +2566,40 @@ class DataQualityMonitor:
             return alerts
 
         direction_map = self._load_direction_map()
-
-        # Resolve active_model.yaml e carrega ABTestConfig
-        try:
-            from src.core.client_config import ABTestConfig as _ABTestConfig
-        except Exception as _e:
-            logger.warning(f"[audience_drift_by_variant] sem ABTestConfig: {_e}")
-            return alerts
-        # Caminho do active_model.yaml — segue mesma resolução do orchestrator
-        active_yaml_path = None
-        if self.client_config:
-            client_id = getattr(self.client_config, 'client_id', 'devclub')
-            candidate = Path(__file__).resolve().parents[2] / 'configs' / 'active_models' / f'{client_id}.yaml'
-            if candidate.exists():
-                active_yaml_path = str(candidate)
-        if not active_yaml_path:
-            return alerts
-        try:
-            ab_cfg = _ABTestConfig.from_active_model_yaml(active_yaml_path)
-        except Exception as _e:
-            logger.warning(f"[audience_drift_by_variant] erro lendo {active_yaml_path}: {_e}")
-            return alerts
-        if not ab_cfg.enabled or not ab_cfg.variants:
-            return alerts
-
-        # Identifica champion (utm/url vazios = fallback default) e challenger
-        champion_name = next(
-            (n for n, v in ab_cfg.variants.items() if not v.utm_pattern and not v.url_pattern),
-            None,
-        )
-        challenger_name = next(
-            (n for n in ab_cfg.variants.keys() if n != champion_name),
-            None,
-        )
-        if not champion_name or not challenger_name:
-            return alerts
-
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        def _split_df_by_variant(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
-            """Divide df em {champion_name: df_ch, challenger_name: df_cl} via match_variant."""
+        def _split_df_by_optgoal(df: pd.DataFrame, classification: dict) -> Dict[str, pd.DataFrame]:
+            """Divide df em {'Lead': df_l, 'Champion': df_ch, 'Challenger': df_cl}
+            via classification {cid: bucket}. Leads sem cid extraível ou cid
+            não classificado → bucket 'Lead' (catch-all).
+            """
+            import re as _re
+            empty = pd.DataFrame()
             if df is None or len(df) == 0:
-                return {champion_name: pd.DataFrame(), challenger_name: pd.DataFrame()}
-            # Preenche NaN com '' para match_variant lidar com missing UTMs sem crash
-            for c in ['source', 'medium', 'campaign', 'content', 'term', 'pageUrl']:
-                if c not in df.columns:
-                    df[c] = ''
-            ch_idx, cl_idx = [], []
+                return {'Lead': empty, 'Champion': empty, 'Challenger': empty}
+            if 'campaign' not in df.columns:
+                return {'Lead': df, 'Champion': empty, 'Challenger': empty}
+            _CID_RE = _re.compile(r"(\d{15,18})\s*$")
+            buckets = {'Lead': [], 'Champion': [], 'Challenger': []}
             for i, row in df.iterrows():
-                utms = {
-                    'utm_source':   row.get('source'),
-                    'utm_medium':   row.get('medium'),
-                    'utm_campaign': row.get('campaign'),
-                    'utm_content':  row.get('content'),
-                    'utm_term':     row.get('term'),
-                }
-                matched = ab_cfg.match_variant(utms, event_source_url=row.get('pageUrl'))
-                if matched is None:
-                    # Default = champion (utm_pattern vazio é o fallback)
-                    ch_idx.append(i)
-                else:
-                    matched_name = next(
-                        (n for n, v in ab_cfg.variants.items() if v is matched),
-                        None,
-                    )
-                    if matched_name == champion_name:
-                        ch_idx.append(i)
-                    else:
-                        cl_idx.append(i)
+                c = row.get('campaign')
+                cid = None
+                if c is not None:
+                    try:
+                        if not pd.isna(c):
+                            m = _CID_RE.search(str(c).strip())
+                            if m:
+                                cid = m.group(1)
+                    except Exception:
+                        m = _CID_RE.search(str(c).strip())
+                        if m:
+                            cid = m.group(1)
+                bucket = classification.get(cid, 'Lead') if cid else 'Lead'
+                buckets[bucket].append(i)
             return {
-                champion_name:   df.loc[ch_idx],
-                challenger_name: df.loc[cl_idx],
+                'Lead':       df.loc[buckets['Lead']],
+                'Champion':   df.loc[buckets['Champion']],
+                'Challenger': df.loc[buckets['Challenger']],
             }
 
         def _category_pct(df: pd.DataFrame, col: str, cat: str) -> Optional[float]:
@@ -2516,13 +2617,25 @@ class DataQualityMonitor:
         # Janela 2: lançamento atual
         df_launch, launch_info = self._query_railway_current_launch_brt()
 
+        # Classifica todas as campanhas únicas (ambas janelas) em 3 buckets
+        # uma única vez. Reusa cache de classe (TTL 30min) entre invocações.
+        _campaign_series_combined = pd.concat([
+            (df_day['campaign'] if df_day is not None and 'campaign' in df_day.columns
+             else pd.Series([], dtype=str)),
+            (df_launch['campaign'] if df_launch is not None and 'campaign' in df_launch.columns
+             else pd.Series([], dtype=str)),
+        ], ignore_index=True)
+        classification = self._classify_campaign_buckets(_campaign_series_combined)
+
         for window_key, window_df, window_label in [
             ('previous_day', df_day, 'Ontem (dia BRT anterior)'),
             ('current_launch', df_launch, launch_info.get('label') or 'Lançamento atual'),
         ]:
-            split = _split_df_by_variant(window_df)
-            df_ch = split[champion_name]
-            df_cl = split[challenger_name]
+            split = _split_df_by_optgoal(window_df, classification)
+            df_lead = split['Lead']
+            df_ch = split['Champion']
+            df_cl = split['Challenger']
+            n_lead = int(len(df_lead))
             n_champion = int(len(df_ch))
             n_challenger = int(len(df_cl))
 
@@ -2533,11 +2646,15 @@ class DataQualityMonitor:
                 ref_pct = entry.get('reference_pct')
                 if col is None or cat is None or ref_pct is None:
                     continue
-                ch_pct = _category_pct(df_ch, col, cat)
-                cl_pct = _category_pct(df_cl, col, cat)
-                ch_delta = round(ch_pct - ref_pct, 1) if ch_pct is not None else None
-                cl_delta = round(cl_pct - ref_pct, 1) if cl_pct is not None else None
-                # Winner por linha: menor |Δpp|
+                # 3 colunas excludentes
+                lead_pct = _category_pct(df_lead, col, cat)
+                ch_pct   = _category_pct(df_ch,   col, cat)
+                cl_pct   = _category_pct(df_cl,   col, cat)
+                lead_delta = round(lead_pct - ref_pct, 1) if lead_pct is not None else None
+                ch_delta   = round(ch_pct   - ref_pct, 1) if ch_pct   is not None else None
+                cl_delta   = round(cl_pct   - ref_pct, 1) if cl_pct   is not None else None
+                # Winner Champion vs Challenger (não inclui Lead — ele é a referência
+                # "controle sem ML", os outros 2 é que disputam qual ML é melhor)
                 if ch_delta is None and cl_delta is None:
                     winner = None
                 elif ch_delta is None:
@@ -2547,14 +2664,18 @@ class DataQualityMonitor:
                 else:
                     winner = 'champion' if abs(ch_delta) <= abs(cl_delta) else 'challenger'
                 direction = (direction_map.get(col, {}).get(cat, {}) or {}).get('direction')
-                ch_quality = self._classify_drift_quality(direction, ch_delta) if ch_delta is not None else None
-                cl_quality = self._classify_drift_quality(direction, cl_delta) if cl_delta is not None else None
+                lead_quality = self._classify_drift_quality(direction, lead_delta) if lead_delta is not None else None
+                ch_quality   = self._classify_drift_quality(direction, ch_delta)   if ch_delta   is not None else None
+                cl_quality   = self._classify_drift_quality(direction, cl_delta)   if cl_delta   is not None else None
                 rows.append({
                     'feature_column': col,
                     'feature_label': entry.get('feature_label', col),
                     'category': cat,
                     'is_critical': entry.get('is_critical', False),
                     'reference_pct': ref_pct,
+                    'lead_pct': round(lead_pct, 1) if lead_pct is not None else None,
+                    'lead_delta_pp': lead_delta,
+                    'lead_quality': lead_quality,
                     'champion_pct': round(ch_pct, 1) if ch_pct is not None else None,
                     'champion_delta_pp': ch_delta,
                     'champion_quality': ch_quality,
@@ -2568,13 +2689,12 @@ class DataQualityMonitor:
                 'type': 'audience_profile_drift_by_variant',
                 'severity': 'LOW',
                 'category': 'data_quality',
-                'message': f'Drift de público por variante — {window_label}',
+                'message': f'Drift de público por campanha — {window_label}',
                 'details': {
                     'window': window_key,
                     'window_label': window_label,
                     'reference_pool_label': snapshot.get('reference_pool', {}).get('label', 'reference'),
-                    'champion_name': champion_name,
-                    'challenger_name': challenger_name,
+                    'lead_n': n_lead,
                     'champion_n': n_champion,
                     'challenger_n': n_challenger,
                     'top_list': rows,
