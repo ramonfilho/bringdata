@@ -3028,6 +3028,25 @@ async def daily_monitoring_check_railway(
                 'label':         _base_label,
             }
 
+        # Helper: baseline puro (sem ponderação) — usado pelo digest pra
+        # comparar buckets isolados contra a régua correta.
+        # Champion bucket (e Lead/Google scoreados pelo Champion model) usa
+        # _base_champion. Challenger bucket usa _base_challenger.
+        # Bug histórico (2026-05-28): _slack_decis_window comparava todos os
+        # buckets contra a baseline ponderada, fazendo o bucket Challenger
+        # (~28% D9-D10 na régua dele) parecer -31pp ruim contra Champion
+        # baseline (57.8%). Fix: passar as 2 baselines separadas no payload.
+        def _pure_baseline(b: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+            if not b:
+                return None
+            d = b.get('distribution') or {}
+            t = b.get('total') or 1
+            pct = {f'D{i:02d}': round((d.get(f'D{i:02d}', 0) / t) * 100, 2) for i in range(1, 11)}
+            return {'pct': pct, 'n_leads': int(b.get('total') or 0), 'label': _base_label}
+
+        _baseline_champion_payload   = _pure_baseline(_base_champion)
+        _baseline_challenger_payload = _pure_baseline(_base_challenger)
+
         # Ontem completo BRT (00:00→23:59 BRT do dia anterior)
         _brt = _tz(timedelta(hours=-3))
         _today_brt_midnight = datetime.now(_brt).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -3046,6 +3065,8 @@ async def daily_monitoring_check_railway(
             'total': len(_yest_rows),
             'window_label': 'Ontem',
             'baseline': _weighted_baseline(_yest_n_c, _yest_n_ch),
+            'baseline_champion':   _baseline_champion_payload,
+            'baseline_challenger': _baseline_challenger_payload,
             'by_source':  _decil_dist_by_source(_yest_rows),
             'by_optgoal': _decil_dist_by_optgoal(_yest_rows),
         }
@@ -3089,6 +3110,8 @@ async def daily_monitoring_check_railway(
                 'total': len(_lf_rows),
                 'window_label': f"{_ln} ({_lw.cap_start.strftime('%d/%m')}→{_cap_end_eff.strftime('%d/%m')} BRT)",
                 'baseline': _weighted_baseline(_lf_n_c, _lf_n_ch),
+                'baseline_champion':   _baseline_champion_payload,
+                'baseline_challenger': _baseline_challenger_payload,
                 'by_source':  _decil_dist_by_source(_lf_rows),
                 'by_optgoal': _decil_dist_by_optgoal(_lf_rows),
             }

@@ -1395,6 +1395,14 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     base_pct = baseline.get('pct') or {}
     base_label = baseline.get('label', '')
 
+    # Baselines puras por variante — usadas pra comparar buckets isolados
+    # contra a régua correta. Bug corrigido 2026-05-29: antes todos os
+    # buckets (Lead/Champion/Challenger) eram comparados contra a baseline
+    # ponderada (~57% D9-D10 dominada pelo Champion model). O bucket
+    # Challenger (~28% D9-D10 na régua dele) aparecia falsamente como -31pp.
+    baseline_champion   = info.get('baseline_champion') or {}
+    baseline_challenger = info.get('baseline_challenger') or {}
+
     keys = [f'D{i:02d}' for i in range(1, 11)]
 
     def _kpis(distribution: dict, n: int) -> dict | None:
@@ -1408,12 +1416,19 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
         ) / n
         return {'n': n, 'pct_d9_d10': pct_d9_d10, 'avg_decil': avg_decil}
 
-    # Referência (baseline ponderada) — D9+D10 e avg
-    ref_pct_d9_d10 = None
-    ref_avg = None
-    if base_pct:
-        ref_pct_d9_d10 = float(base_pct.get('D09', 0) or 0) + float(base_pct.get('D10', 0) or 0)
-        ref_avg = sum(int(k[1:]) * float(base_pct.get(k, 0) or 0) for k in keys) / 100.0
+    def _ref_from_pct(pct: dict) -> dict | None:
+        """{D01..D10: pct} → {'pct_d9_d10': X, 'avg': Y} ou None se vazio."""
+        if not pct:
+            return None
+        return {
+            'pct_d9_d10': float(pct.get('D09', 0) or 0) + float(pct.get('D10', 0) or 0),
+            'avg':        sum(int(k[1:]) * float(pct.get(k, 0) or 0) for k in keys) / 100.0,
+        }
+
+    # Referências disponíveis pra cada tipo de bucket.
+    ref_weighted   = _ref_from_pct(base_pct)
+    ref_champion   = _ref_from_pct(baseline_champion.get('pct') or {})
+    ref_challenger = _ref_from_pct(baseline_challenger.get('pct') or {})
 
     def _emoji_d9d10(delta_pp: float | None) -> str:
         """Δpp em %D9-D10: positivo = bom (D10 direction=positive). |Δ|≤2 = neutro."""
@@ -1453,46 +1468,53 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
         title += f' vs *{base_label}*'
     rows = [title]
     legend_parts = ['🟢 bom · 🔴 ruim · ⚪ neutro/incerto']
-    if ref_pct_d9_d10 is not None:
-        legend_parts.append(f'Ref %D9-D10 = {ref_pct_d9_d10:.1f}%')
-    if ref_avg is not None:
-        legend_parts.append(f'Ref avg = {ref_avg:.1f}')
+    # Header mostra ambas as réguas explicitamente — cada bucket é comparado
+    # contra a sua. Champion é régua de Lead/Champion/Google/Total/Meta;
+    # Challenger é régua só do bucket Challenger.
+    if ref_champion is not None:
+        legend_parts.append(f'Ref Champion %D9-D10={ref_champion["pct_d9_d10"]:.1f}% (avg {ref_champion["avg"]:.1f})')
+    if ref_challenger is not None:
+        legend_parts.append(f'Ref Challenger %D9-D10={ref_challenger["pct_d9_d10"]:.1f}% (avg {ref_challenger["avg"]:.1f})')
     rows.append('_' + ' · '.join(legend_parts) + '_')
     rows.append('```')
     rows.append(
         f'{"Bucket":<14}  {"n":>5}   {"%D9-D10":>7}  {"Δpp":>7}      {"Avg":>4}'
     )
 
-    def _row(label: str, kpis: dict | None) -> str:
+    def _row(label: str, kpis: dict | None, ref: dict | None) -> str:
         if kpis is None:
             return f'{label:<14}  {"—":>5}   {"—":>7}  {"—":>7}      {"—":>4}'
         pct = kpis['pct_d9_d10']
         avg = kpis['avg_decil']
-        if ref_pct_d9_d10 is not None:
-            d_pct = pct - ref_pct_d9_d10
+        if ref is not None:
+            d_pct = pct - ref['pct_d9_d10']
             e_pct = _emoji_d9d10(d_pct)
             delta_str = f'{e_pct} {d_pct:>+5.1f}'
-        else:
-            delta_str = ''
-        if ref_avg is not None:
-            d_avg = avg - ref_avg
+            d_avg = avg - ref['avg']
             e_avg = _emoji_avg(d_avg)
             avg_str = f'{avg:>4.1f} {e_avg}'
         else:
+            delta_str = ''
             avg_str = f'{avg:>4.1f}'
         return f'{label:<14}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}      {avg_str}'
 
     # Bloco por fonte
-    rows.append(_row('Total',  _kpis(dist, total)))
-    rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta)))
-    rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl)))
+    #   Total: mix Champion+Challenger → ref ponderado
+    #   Meta: mesma coisa, mix dos 3 buckets → ref ponderado
+    #   Google: 100% Lead bucket (scoreado pelo Champion model) → ref Champion
+    rows.append(_row('Total',  _kpis(dist, total),                                              ref_weighted))
+    rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta),              ref_weighted))
+    rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl),                ref_champion))
 
     # Bloco por optimization_goal — separado visualmente
+    #   Lead bucket: variant=NULL (Champion model default) → ref Champion
+    #   Champion bucket: ref Champion
+    #   Challenger bucket: ref Challenger (era o bug)
     if show_og:
         rows.append('─' * 50)
-        rows.append(_row('Lead',       _kpis(og_lead_info.get('distribution') or {}, n_og_lead)))
-        rows.append(_row('Champion',   _kpis(og_chmp_info.get('distribution') or {}, n_og_chmp)))
-        rows.append(_row('Challenger', _kpis(og_chal_info.get('distribution') or {}, n_og_chal)))
+        rows.append(_row('Lead',       _kpis(og_lead_info.get('distribution') or {}, n_og_lead), ref_champion))
+        rows.append(_row('Champion',   _kpis(og_chmp_info.get('distribution') or {}, n_og_chmp), ref_champion))
+        rows.append(_row('Challenger', _kpis(og_chal_info.get('distribution') or {}, n_og_chal), ref_challenger))
 
     rows.append('```')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})

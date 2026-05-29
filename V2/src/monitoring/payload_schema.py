@@ -356,6 +356,18 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'lead_quality_metrics.decil_distribution_previous_day.baseline.w_champion':         (S, 'derivado dos counts, não renderizado standalone'),
     'lead_quality_metrics.decil_distribution_previous_day.baseline.w_challenger':       (S, 'derivado dos counts, não renderizado standalone'),
     'lead_quality_metrics.decil_distribution_previous_day.baseline.label':              (R, None),
+    # Baselines puras por variante — usadas pelo KPI panel pra comparar cada bucket
+    # contra a régua dele (Lead/Champion/Google contra Champion; Challenger contra Challenger).
+    # Bug corrigido 2026-05-29: antes só existia baseline ponderada, fazendo Challenger
+    # bucket aparecer -31pp ruim mesmo estando dentro da própria régua.
+    'lead_quality_metrics.decil_distribution_previous_day.baseline_champion':           (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline_champion.pct':       (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline_champion.n_leads':   (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline_champion.label':     (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline_challenger':         (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline_challenger.pct':     (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline_challenger.n_leads': (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.baseline_challenger.label':   (R, None),
     # by_source — split por fonte (Meta vs Google) renderizado side-by-side ao lado do Total
     'lead_quality_metrics.decil_distribution_previous_day.by_source':                   (R, None),
     'lead_quality_metrics.decil_distribution_previous_day.by_source.meta':              (R, None),
@@ -456,6 +468,15 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'lead_quality_metrics.decil_distribution_current_launch.baseline.w_champion':       (S, 'derivado dos counts, não renderizado standalone'),
     'lead_quality_metrics.decil_distribution_current_launch.baseline.w_challenger':     (S, 'derivado dos counts, não renderizado standalone'),
     'lead_quality_metrics.decil_distribution_current_launch.baseline.label':            (R, None),
+    # Baselines puras por variante — ver comentário equivalente em decil_distribution_previous_day.
+    'lead_quality_metrics.decil_distribution_current_launch.baseline_champion':           (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline_champion.pct':       (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline_champion.n_leads':   (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline_champion.label':     (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline_challenger':         (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline_challenger.pct':     (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline_challenger.n_leads': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.baseline_challenger.label':   (R, None),
     # by_source — split por fonte (Meta vs Google) renderizado side-by-side ao lado do Total
     'lead_quality_metrics.decil_distribution_current_launch.by_source':                 (R, None),
     'lead_quality_metrics.decil_distribution_current_launch.by_source.meta':            (R, None),
