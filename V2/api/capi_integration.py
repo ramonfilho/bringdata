@@ -475,6 +475,7 @@ def send_lead_qualified_high_quality(
     client_id: str = 'devclub',
     event_name_override: Optional[str] = None,
     pixel_id_override: Optional[str] = None,
+    high_quality_decils_override: Optional[List[str]] = None,
     dry_run: bool = False,
 ) -> Dict:
     """
@@ -510,7 +511,8 @@ def send_lead_qualified_high_quality(
     # Resolver valores do CAPIConfig (com fallbacks para compatibilidade)
     pixel_id = pixel_id_override or (capi_config.pixel_id if capi_config and capi_config.pixel_id else os.getenv('META_PIXEL_ID'))
     event_name_hq = event_name_override or (capi_config.event_name_high_quality if capi_config and capi_config.event_name_high_quality else 'LeadQualifiedHighQuality')
-    high_quality_decils = (capi_config.high_quality_decils if capi_config and capi_config.high_quality_decils else ['D09', 'D10'])
+    # Faixa de decis que dispara HQ: prioriza override da variante A/B, depois config global do cliente, depois fallback default.
+    high_quality_decils = high_quality_decils_override or (capi_config.high_quality_decils if capi_config and capi_config.high_quality_decils else ['D09', 'D10'])
     currency = (capi_config.currency if capi_config and capi_config.currency else 'BRL')
     country_code = (capi_config.country_code if capi_config and capi_config.country_code else 'br')
 
@@ -695,6 +697,7 @@ def send_both_lead_events(
     event_name_hq_override: Optional[str] = None,
     conversion_rates_override: Optional[Dict[str, float]] = None,
     pixel_id_override: Optional[str] = None,
+    high_quality_decils_override: Optional[List[str]] = None,
     dry_run: bool = False,
 ) -> Dict:
     """
@@ -772,6 +775,7 @@ def send_both_lead_events(
         client_id=client_id,
         event_name_override=event_name_hq_override,
         pixel_id_override=pixel_id_override,
+        high_quality_decils_override=high_quality_decils_override,
         dry_run=dry_run,
     )
 
@@ -1004,6 +1008,7 @@ def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConf
             event_name_hq_override=lead.get('ab_event_name_hq'),
             conversion_rates_override=lead.get('ab_conversion_rates'),
             pixel_id_override=lead.get('ab_pixel_id'),
+            high_quality_decils_override=lead.get('ab_high_quality_decils'),
             dry_run=dry_run,
             # test_event_code=None (padrão) -> vai para PRODUÇÃO
         )

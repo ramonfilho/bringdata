@@ -356,6 +356,9 @@ class ABTestVariantConfig:
     encoding_overrides: Optional["EncodingConfig"] = None  # DT-12 — encoding específico do modelo
     url_pattern: Optional[str] = None    # Substring (case-insensitive) match em event_source_url; OR com utm_pattern
     pixel_id_override: Optional[str] = None  # Override do pixel_id default — para variante enviar CAPI a outro pixel
+    capi_high_quality_decils: Optional[List[str]] = None  # Override por variante da faixa de decis que dispara HQ event.
+                                                          # None → cai no global capi_config.high_quality_decils (default D09+D10).
+                                                          # Ex.: ['D08','D09','D10'] estende HQLB sem afetar Champion.
 
 
 @dataclass
@@ -385,6 +388,14 @@ class ABTestConfig:
                 features_to_drop_after_encoding=enc_raw.get("features_to_drop_after_encoding"),
                 column_name_corrections=enc_raw.get("column_name_corrections"),
             ) if enc_raw else None
+            hq_decils_raw = vdata.get("capi_high_quality_decils")
+            if hq_decils_raw is not None:
+                _valid = {f"D{i:02d}" for i in range(1, 11)}
+                if not isinstance(hq_decils_raw, list) or not hq_decils_raw or not all(d in _valid for d in hq_decils_raw):
+                    raise ValueError(
+                        f"variante '{name}': capi_high_quality_decils deve ser lista não-vazia "
+                        f"de strings em D01..D10. Recebido: {hq_decils_raw!r}"
+                    )
             variants[name] = ABTestVariantConfig(
                 run_id=vdata["run_id"],
                 utm_pattern=vdata.get("utm_pattern") or {},
@@ -394,6 +405,7 @@ class ABTestConfig:
                 encoding_overrides=encoding_overrides,
                 url_pattern=vdata.get("url_pattern"),
                 pixel_id_override=vdata.get("pixel_id_override"),
+                capi_high_quality_decils=hq_decils_raw,
             )
         return cls(enabled=True, variants=variants)
 

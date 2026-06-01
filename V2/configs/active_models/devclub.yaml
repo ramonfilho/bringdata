@@ -106,6 +106,8 @@ ab_test:
       pixel_id_override: "1513132406527995"      # CAPI Challenger envia pro pixel novo (onde HQLB está cadastrado)
       capi_event_name: HQLB_LQ
       capi_event_name_high_quality: HQLB
+      capi_high_quality_decils: ['D08', 'D09', 'D10']   # Estende HQLB pra incluir D8 (lift 1.32 ≈ D9 lift 1.27 no Challenger; D7 fica fora — lift 1.06 ≈ baseline).
+                                                        # Champion mantém global D09+D10 (não declara este campo). Rollback: deletar linha → cai pro fallback global.
       conversion_rates:                          # back-calculado de LEAD_VALUE_BY_DECILE_CHALLENGER ÷ 1563.75 (Patch B 08/05/2026)
         D01: 0.000454   # 0.71 / 1563.75
         D02: 0.001816   # 2.84 / 1563.75
