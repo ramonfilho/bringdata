@@ -141,42 +141,47 @@ def _connect_railway() -> pg8000.native.Connection:
 def fetch_leads_predict_mode(n: int) -> list[dict[str, Any]]:
     """Pega N leads para o endpoint /predict/batch (sem score).
 
-    Lê de `lead_surveys` (tabela viva do sistema novo) + LEFT JOIN UTMTracking
-    pra UTM. Substitui a leitura da tabela `Lead` (morta desde 17/05/2026).
-    Os 10 campos de pesquisa estão como colunas diretas no lead_surveys (não
-    como JSONB), então mapeamos cada coluna pra a chave Sheets correspondente
-    via PESQUISA_KEYS. `computador` não existe no lead_surveys — vem do
-    `Client.hasComputer` por LEFT JOIN.
+    Lê de `registros_ml` (ledger novo, populado pelo consumer Pub/Sub desde
+    23/05/2026) + LEFT JOIN UTMTracking pra preencher utm_* nas linhas
+    pré-P17. Substitui a leitura de `lead_surveys` (parou em 21/05/2026
+    quando o front migrou pra escrever direto no payload do Pub/Sub) e
+    `Lead`/`leads_capi` (mortas desde 17/05/2026).
+
+    Os campos de pesquisa estão em `registros_ml.survey_responses` (JSONB)
+    com as MESMAS keys do `lead_surveys` (genero, idade, ocupacao, etc.) —
+    extrai via `->>'<key>'`. PESQUISA_KEYS mapeia chave Sheets → key do
+    JSONB. `has_computer` está top-level em `registros_ml` (não no JSONB).
     """
     conn = _connect_railway()
-    # mapeia coluna lead_surveys → chave Sheets esperada pelo /predict/batch
+    # mapeia chave JSONB → coluna no resultado com nome da chave Sheets
     survey_cols = ', '.join(
-        f's."{ls_col}" AS "{sheets_key}"'
+        f"r.survey_responses->>'{ls_col}' AS \"{sheets_key}\""
         for sheets_key, ls_col in PESQUISA_KEYS.items()
-        if ls_col != 'computador'  # computador não vive em lead_surveys
+        if ls_col != 'computador'  # computador vem de has_computer top-level
     )
     sql = f"""
-        SELECT s."clientEmail" AS email,
-               s."submittedAt"  AS data,
-               c."firstName" || ' ' || COALESCE(c."lastName", '') AS "Nome Completo",
-               c.phone          AS "Telefone",
-               u.source         AS "Source",
-               u.medium         AS "Medium",
-               u.term           AS "Term",
-               c."hasComputer"  AS "Tem computador/notebook?",
+        SELECT r.email AS email,
+               r.created_at AS data,
+               TRIM(COALESCE(r.first_name, '') || ' ' || COALESCE(r.last_name, '')) AS "Nome Completo",
+               r.phone          AS "Telefone",
+               COALESCE(r.utm_source, u.source) AS "Source",
+               COALESCE(r.utm_medium, u.medium) AS "Medium",
+               COALESCE(r.utm_term,   u.term)   AS "Term",
+               r.has_computer  AS "Tem computador/notebook?",
                {survey_cols}
-        FROM lead_surveys s
+        FROM registros_ml r
         LEFT JOIN LATERAL (
             SELECT source, medium, term
             FROM "UTMTracking"
-            WHERE LOWER("clientEmail") = LOWER(s."clientEmail")
-              AND "trackedAt" <= s."submittedAt"
+            WHERE LOWER("clientEmail") = LOWER(r.email)
+              AND "trackedAt" <= r.created_at
             ORDER BY "trackedAt" DESC
             LIMIT 1
         ) u ON true
-        LEFT JOIN "Client" c ON LOWER(c.email) = LOWER(s."clientEmail")
-        WHERE s."submittedAt" >= NOW() - INTERVAL '7 days'
-        ORDER BY s."submittedAt" DESC
+        WHERE r.created_at >= NOW() - INTERVAL '7 days'
+          AND r.survey_responses IS NOT NULL
+          AND r.email IS NOT NULL
+        ORDER BY r.created_at DESC
         LIMIT :n
     """
     rows = conn.run(sql, n=n)
