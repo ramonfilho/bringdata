@@ -501,14 +501,20 @@ def process_pending_pubsub(
         for i, (eid, dc, di, vn, ack_id, payload, utm, survey_dict, enrich) in enumerate(capi_meta):
             ok = i < len(details) and details[i].get("status") == "success"
             st = "success" if ok else "error"
-            hq = ("success" if (ok and di and di >= 9)
-                  else (None if not (di and di >= 9) else "error"))
+            # hq_status vem do resultado real do envio HQ — antes era hardcoded di>=9,
+            # mas agora a faixa de decis HQ é por variante (Challenger inclui D8).
+            # 'skipped' do send_lead_qualified_high_quality vira NULL no ledger
+            # (decil fora da faixa HQ da variante → HQ não aplicável).
+            hq_res = details[i].get("evento_high_quality") if i < len(details) else None
+            hq_st = hq_res.get("status") if hq_res else None
+            hq_ok = hq_st == "success"
+            hq = "success" if hq_ok else ("error" if hq_st == "error" else None)
             pending_ledger.append(ledger_row(
                 eid, payload.get("email"), vn,
                 capi_leads[i]["lead_score"], di, st,
                 base_meta_event_id=f"qualified_{capi_leads[i]['event_id']}",
                 hq_meta_event_id=(f"hq_{capi_leads[i]['event_id']}"
-                                  if di and di >= 9 else None),
+                                  if hq_ok or hq_st == "error" else None),
                 hq_status=hq, capi_sent_at_now=ok,
                 error_message=(None if ok else
                                (details[i].get("error")

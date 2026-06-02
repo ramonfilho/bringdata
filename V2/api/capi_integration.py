@@ -431,7 +431,7 @@ def send_lead_qualified_with_value(
             except Exception as db_err:
                 logger.warning(f"⚠️  Erro ao salvar CAPI response no banco para {email}: {db_err}")
 
-        logger.info(f"✅ LeadQualified enviado: {email} (decil: {decil}, valor proj: R$ {valor_projetado:.2f}, status: {parsed_response['status']})")
+        logger.info(f"✅ {event_name} enviado: {email} (decil: {decil}, valor proj: R$ {valor_projetado:.2f}, status: {parsed_response['status']})")
 
         return {
             "status": parsed_response['status'],
@@ -650,7 +650,7 @@ def send_lead_qualified_high_quality(
             except Exception as db_err:
                 logger.warning(f"⚠️  Erro ao salvar CAPI response no banco para {email}: {db_err}")
 
-        logger.info(f"✅ LeadQualifiedHighQuality enviado: {email} (decil: {decil}, status: {parsed_response['status']})")
+        logger.info(f"✅ {event_name_hq} enviado: {email} (decil: {decil}, status: {parsed_response['status']})")
 
         return {
             "status": parsed_response['status'],
