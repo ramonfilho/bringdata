@@ -1511,22 +1511,26 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
             avg_str = f'{avg:>4.1f}'
         return f'{label:<14}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}      {avg_str}'
 
-    # Bloco por fonte
-    #   Total/Meta: mix Champion+Challenger → ref Ponderada (peso A/B × ref)
-    #   Google: 100% scoreado pelo Champion model → ref Champion
+    # Bloco por fonte (Slack block 1)
     rows.append(_row('Total',  _kpis(dist, total),                                              ref_weighted,   'Ponderada'))
     rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta),              ref_weighted,   'Ponderada'))
     rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl),                ref_champion,   'Champion'))
-
-    # Bloco por optimization_goal — separado visualmente
-    if show_og:
-        rows.append('─' * 60)
-        rows.append(_row('Lead',       _kpis(og_lead_info.get('distribution') or {}, n_og_lead), ref_champion,   'Champion'))
-        rows.append(_row('Champion',   _kpis(og_chmp_info.get('distribution') or {}, n_og_chmp), ref_champion,   'Champion'))
-        rows.append(_row('Challenger', _kpis(og_chal_info.get('distribution') or {}, n_og_chal), ref_challenger, 'Challenger'))
-
     rows.append('```')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
+
+    # Bloco por optimization_goal (Slack block 2 separado — evita truncamento
+    # silencioso do Slack quando o bloco section fica grande/com caracteres
+    # especiais como `─`). Cada quadro renderiza num bloco próprio.
+    if show_og:
+        og_rows = ['```']
+        og_rows.append(
+            f'{"Bucket":<14}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
+        )
+        og_rows.append(_row('Lead',       _kpis(og_lead_info.get('distribution') or {}, n_og_lead), ref_champion,   'Champion'))
+        og_rows.append(_row('Champion',   _kpis(og_chmp_info.get('distribution') or {}, n_og_chmp), ref_champion,   'Champion'))
+        og_rows.append(_row('Challenger', _kpis(og_chal_info.get('distribution') or {}, n_og_chal), ref_challenger, 'Challenger'))
+        og_rows.append('```')
+        B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(og_rows)}})
 
 
 def _slack_category_drifts_consolidated(alerts: list, B: list):
