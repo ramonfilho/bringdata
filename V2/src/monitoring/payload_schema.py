@@ -626,7 +626,7 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     # ──────────────────────────────────────────────────────────────────────────
     'launch_resolution':                                                                (R, None),  # ex: dict(6)
     'launch_resolution.lf_name':                                                        (S, 'rendererizado embutido no label / aviso fallback'),
-    'launch_resolution.source':                                                         (R, None),  # ex: 'launches_yaml' | 'tuesday_heuristic' — DM avisa quando vier do fallback
+    'launch_resolution.source':                                                         (R, None),  # ex: 'launches_yaml' | 'monday_heuristic' — DM avisa quando vier do fallback
     'launch_resolution.inferred':                                                       (S, 'sinalizado visualmente no label/aviso, sem campo dedicado'),
     'launch_resolution.cap_start':                                                      (S, 'já presente no label'),
     'launch_resolution.cap_end':                                                        (S, 'já presente no label; None quando fallback'),

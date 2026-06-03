@@ -1955,7 +1955,7 @@ def _slack_launch_fallback_notice_dm(v: dict, B: list):
     do cliente (`render_slack_blocks_client`) não inclui esse aviso.
     """
     lr = v.get('launch_resolution') or {}
-    if lr.get('source') != 'tuesday_heuristic':
+    if lr.get('source') != 'monday_heuristic':
         return
     lf_name  = lr.get('lf_name')   # pode ser None se nada foi inferido
     inferred = bool(lr.get('inferred'))
@@ -1966,7 +1966,7 @@ def _slack_launch_fallback_notice_dm(v: dict, B: list):
         msg = (
             f"⚠️ *Lançamento atual sem cadastro* — o sistema não encontrou o LF atual "
             f"no arquivo de lançamentos (`configs/launches.yaml`) e está usando "
-            f"inferência (toda terça começa um LF; captação detectada em {cap_start}). "
+            f"inferência (toda segunda começa um LF; captação detectada em {cap_start}). "
             f"Nome provável: *{lf_name}*. As tabelas e séries usam essa janela inferida "
             f"até o LF ser cadastrado."
         )

@@ -1,12 +1,12 @@
 """
 Resolução canônica do "lançamento atual" BRT.
 
-Substitui as heurísticas dispersas em api/app.py (última terça BRT) e em
+Substitui as heurísticas dispersas em api/app.py (última segunda BRT) e em
 src/monitoring/data_quality.py (`_resolve_*_launch_brt`). Regra única:
 
   1. LF do `configs/launches.yaml` cuja janela `cap_start ≤ hoje_BRT ≤ cap_end`.
-  2. Fallback explícito: heurística "desde a última terça BRT até agora", com
-     `source='tuesday_heuristic'`, sem nome de LF e com warning no log.
+  2. Fallback explícito: heurística "desde a última segunda BRT até agora", com
+     `source='monday_heuristic'`, sem nome de LF e com warning no log.
   3. NUNCA cai no último LF encerrado — esse fallback escondia o gap quando o
      YAML está desatualizado (vide bug detectado em 13/05/2026: LF54 aparecia
      como "atual" porque LF55 não estava cadastrado).
@@ -50,8 +50,8 @@ class ActiveLaunch:
 class LaunchWindow:
     """Janela canônica do lançamento atual pra qualquer relatório."""
     cap_start: date
-    cap_end: Optional[date]            # None quando source=tuesday_heuristic
-    source: str                        # 'launches_yaml' | 'tuesday_heuristic'
+    cap_end: Optional[date]            # None quando source=monday_heuristic
+    source: str                        # 'launches_yaml' | 'monday_heuristic'
     lf_name: Optional[str] = None      # nome confirmado do YAML, ou inferido (LFnn+1) no fallback
     inferred: bool = False             # True quando lf_name foi inferido pelo fallback
     label: str = ''                    # texto pronto pra exibição
@@ -108,10 +108,10 @@ def resolve_active_launch_brt(today: Optional[date] = None,
     return None
 
 
-def _last_tuesday(today: date) -> date:
-    """Última terça-feira BRT (inclusivo). Python weekday: terça=1."""
-    days_since_tuesday = (today.weekday() - 1) % 7
-    return today - timedelta(days=days_since_tuesday)
+def _last_monday(today: date) -> date:
+    """Última segunda-feira BRT (inclusivo). Python weekday: segunda=0."""
+    days_since_monday = today.weekday()
+    return today - timedelta(days=days_since_monday)
 
 
 def _infer_next_lf_name(launches: dict) -> Optional[str]:
@@ -136,10 +136,10 @@ def resolve_launch_window_brt(today: Optional[date] = None,
     """
     Janela canônica do lançamento atual:
       1) Se há LF ativo no YAML (`cap_start ≤ today ≤ cap_end`) → usa.
-      2) Senão → "desde a última terça BRT até hoje", com warning.
+      2) Senão → "desde a última segunda BRT até hoje", com warning.
 
     Garante que `cap_start` sempre existe (sempre tem janela). Quando vier do
-    fallback de terça, `lf_name=None` e `cap_end=None`.
+    fallback de segunda, `lf_name=None` e `cap_end=None`.
     """
     today = today or _today_brt()
     launches = launches if launches is not None else load_launches()
@@ -160,11 +160,11 @@ def resolve_launch_window_brt(today: Optional[date] = None,
     # Fallback explícito. Tenta inferir o nome (LF + maior nn cadastrado + 1)
     # pra dar nome ao lançamento em logs/exports, mas marca inferred=True
     # pra que o digest/Slack consiga sinalizar visualmente.
-    cs = _last_tuesday(today)
+    cs = _last_monday(today)
     inferred_name = _infer_next_lf_name(launches)
     logger.warning(
         f"[launches] sem LF ativo em {today.isoformat()} no launches.yaml — "
-        f"usando fallback 'última terça BRT' ({cs.isoformat()})"
+        f"usando fallback 'última segunda BRT' ({cs.isoformat()})"
         + (f"; nome inferido: {inferred_name}" if inferred_name else '')
         + ". Cadastre o LF atual em configs/launches.yaml para rotular corretamente."
     )
@@ -181,7 +181,7 @@ def resolve_launch_window_brt(today: Optional[date] = None,
     return LaunchWindow(
         cap_start=cs,
         cap_end=None,
-        source='tuesday_heuristic',
+        source='monday_heuristic',
         lf_name=inferred_name,
         inferred=bool(inferred_name),
         label=label,

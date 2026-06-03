@@ -93,9 +93,9 @@ class DailyCheckResponse(BaseModel):
     survey_funnel_metrics: Optional[Dict[str, Any]] = None
     traffic_metrics: Optional[Dict[str, Any]] = None
     operational_routines: Optional[Dict[str, Any]] = None
-    # Resolução do LF atual (lf_name, source: 'launches_yaml'|'tuesday_heuristic',
+    # Resolução do LF atual (lf_name, source: 'launches_yaml'|'monday_heuristic',
     # cap_start, cap_end, inferred). Permite ao digest avisar quando está usando
-    # fallback de terça (vide src/core/launches.py).
+    # fallback de segunda (vide src/core/launches.py).
     launch_resolution: Optional[Dict[str, Any]] = None
     # revenue_forecast inclui expected_conversion quando conversion_rate_benchmark está configurado
 
@@ -2513,7 +2513,7 @@ async def daily_monitoring_check_railway(
         # Se start_date/end_date foram passados, usa essa janela.
         # Senão, src.core.launches.resolve_launch_window_brt() resolve:
         #   1) LF do launches.yaml com cap_start ≤ hoje ≤ cap_end, OU
-        #   2) Fallback: desde a última terça BRT (com warning no log).
+        #   2) Fallback: desde a última segunda BRT (com warning no log).
         # Nunca cai no último LF encerrado — esse fallback escondia o gap quando o YAML
         # está desatualizado (vide caso LF55 detectado em 13/05/2026).
         now_brt = now_utc.astimezone(brt)
@@ -3078,7 +3078,7 @@ async def daily_monitoring_check_railway(
         try:
             # lf_referencia = qualidade do LF atual. Usa `resolve_launch_window_brt`
             # (não `resolve_active_launch_brt`): se o LF atual não está cadastrado
-            # no `launches.yaml`, cai no fallback heurístico (toda terça começa um
+            # no `launches.yaml`, cai no fallback heurístico (toda segunda começa um
             # LF) e popula com nome inferido — assim a tabela de Drift de Decis no
             # DM aparece mesmo com YAML defasado. O aviso no topo da DM
             # (`_slack_launch_fallback_notice_dm`) lembra de cadastrar.

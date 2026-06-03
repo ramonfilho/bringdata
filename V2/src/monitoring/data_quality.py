@@ -1969,7 +1969,7 @@ class DataQualityMonitor:
           1. LF do YAML com `cap_start ≤ hoje ≤ cap_end` → janela cap_start → now
              (se em captação) ou cap_start → cap_end (se já encerrado mas o LF
              ainda é o ativo no YAML, caso improvável).
-          2. Fallback explícito: heurística "desde a última terça BRT" → terça → now,
+          2. Fallback explícito: heurística "desde a última segunda BRT" → segunda → now,
              com label sinalizando que o YAML está desatualizado.
 
         Por design **não cai mais** no último LF encerrado — esse fallback
