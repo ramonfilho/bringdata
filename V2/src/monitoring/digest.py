@@ -1476,44 +1476,46 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     if base_label:
         title += f' vs *{base_label}*'
     rows = [title]
-    # Apenas 2 réguas — todas as linhas exceto Challenger usam Champion (~95%
-    # dos leads são scoreados pelo Champion, e a antiga "Ponderada" só diferia
-    # em ~5pp pra acabar de explicar a média ponderada). Decisão de simplifica-
-    # ção 2026-06-03: Total e Meta passam a comparar contra Champion direto.
+    # 3 réguas declaradas. Total/Meta usam Ponderada (peso A/B × ref). Lead/
+    # Champion/Google usam Champion. Challenger usa Challenger. Cada linha
+    # mostra inline qual régua usa pra evitar ambiguidade.
     rows.append('_🟢 bom · 🔴 ruim · ⚪ neutro/incerto_')
     ref_parts = []
     if ref_champion is not None:
-        ref_parts.append(f'Champion={ref_champion["pct_d9_d10"]:.1f}%')
+        ref_parts.append(f'Champion={ref_champion["pct_d9_d10"]:.1f}%/{ref_champion["avg"]:.1f}')
     if ref_challenger is not None:
-        ref_parts.append(f'Challenger={ref_challenger["pct_d9_d10"]:.1f}%')
+        ref_parts.append(f'Challenger={ref_challenger["pct_d9_d10"]:.1f}%/{ref_challenger["avg"]:.1f}')
+    if ref_weighted is not None:
+        ref_parts.append(f'Ponderada={ref_weighted["pct_d9_d10"]:.1f}%/{ref_weighted["avg"]:.1f}')
     if ref_parts:
-        rows.append('_Refs %D9-D10: ' + ' · '.join(ref_parts)
-                    + ' — todas as linhas usam Champion, só a linha Challenger usa Challenger_')
+        rows.append('_Refs %D9-D10/avg: ' + ' · '.join(ref_parts) + '_')
     rows.append('```')
     rows.append(
-        f'{"Bucket":<14}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}'
+        f'{"Bucket":<14}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
     )
 
     def _row(label: str, kpis: dict | None, ref: dict | None, ref_name: str = '') -> str:
         if kpis is None:
-            return f'{label:<14}  {"—":>5}   {"—":>7}  {"—":>20}'
+            return f'{label:<14}  {"—":>5}   {"—":>7}  {"—":>20}      {"—":>4}'
         pct = kpis['pct_d9_d10']
+        avg = kpis['avg_decil']
         if ref is not None:
             d_pct = pct - ref['pct_d9_d10']
             e_pct = _emoji_d9d10(d_pct)
             delta_str = f'{e_pct} {d_pct:>+5.1f} ({ref_name} {ref["pct_d9_d10"]:.1f}%)'
+            d_avg = avg - ref['avg']
+            e_avg = _emoji_avg(d_avg)
+            avg_str = f'{avg:>4.1f} {e_avg}'
         else:
             delta_str = ''
-        return f'{label:<14}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}'
+            avg_str = f'{avg:>4.1f}'
+        return f'{label:<14}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}      {avg_str}'
 
-    # Bloco por fonte — Opção A 2026-06-03: Total e Meta usam Champion direto
-    # (não mais Ponderada). ~95% dos leads são Champion, a diferença Ponderada
-    # vs Champion ficava em ~5pp e a fórmula da Ponderada (peso A/B routing ×
-    # ref) era difícil de explicar pra colaboradores. Com Champion direto, a
-    # leitura fica "todas as linhas comparadas contra a régua Champion exceto a
-    # linha Challenger".
-    rows.append(_row('Total',  _kpis(dist, total),                                              ref_champion,   'Champion'))
-    rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta),              ref_champion,   'Champion'))
+    # Bloco por fonte
+    #   Total/Meta: mix Champion+Challenger → ref Ponderada (peso A/B × ref)
+    #   Google: 100% scoreado pelo Champion model → ref Champion
+    rows.append(_row('Total',  _kpis(dist, total),                                              ref_weighted,   'Ponderada'))
+    rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta),              ref_weighted,   'Ponderada'))
     rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl),                ref_champion,   'Champion'))
 
     # Bloco por optimization_goal — separado visualmente
