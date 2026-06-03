@@ -147,3 +147,9 @@ LF57:
   cap_end:   "2026-05-31"
   vendas_start: "2026-06-08"
   vendas_end:   "2026-06-14"
+
+LF58:
+  cap_start: "2026-06-01"
+  cap_end:   "2026-06-07"
+  vendas_start: "2026-06-15"
+  vendas_end:   "2026-06-21"
