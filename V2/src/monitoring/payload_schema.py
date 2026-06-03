@@ -125,6 +125,9 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     # audience_profile_drift_by_source — split por fonte (Meta / Google)
     'alerts[].details.meta_n':                                                          (R, None),  # ex: 1095
     'alerts[].details.google_n':                                                        (R, None),  # ex: 71
+    # outros_n — exposto pelo alerta by_variant (header) pra leads sem Meta nem Google
+    # (orgânico, tiktok pré-allowlist, sem source, etc.). Não entra nas colunas Δ.
+    'alerts[].details.outros_n':                                                        (R, None),  # ex: 13
     'alerts[].details.top_list[].meta_pct':                                             (R, None),  # ex: None
     'alerts[].details.top_list[].meta_delta_pp':                                        (R, None),  # ex: None
     'alerts[].details.top_list[].meta_quality':                                         (R, None),  # ex: 'bom' | 'ruim' | 'neutro' | None

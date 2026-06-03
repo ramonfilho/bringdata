@@ -1238,13 +1238,22 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
     top = d.get('top_list', []) or []
 
     n_lead = d.get('lead_n', 0) or 0
+    n_champion = d.get('champion_n', 0) or 0
+    n_challenger = d.get('challenger_n', 0) or 0
+    n_google = d.get('google_n', 0) or 0
+    n_outros = d.get('outros_n', 0) or 0
     window_title = 'Ontem' if window == 'previous_day' else (
         'Lançamento Atual' if window == 'current_launch' else (d.get('window_label') or 'janela')
     )
     # Legenda movida pra _slack_drift_legend_header (uma vez por seção).
     header = f"*📉 Drift por A/B - {window_title}*"
-    if n_lead > 0:
-        header += f"  ·  _Lead (Meta n={n_lead:,})_"
+    # Header com 5 contadores: 3 que entram nas colunas Δ (Lead/Champion/Challenger,
+    # leads Meta classificados por optimization_goal) + 2 que ficam fora da tabela
+    # mas aparecem aqui pra deixar claro o universo total (Google e Outros).
+    if (n_lead + n_champion + n_challenger + n_google + n_outros) > 0:
+        in_table = f"Lead={n_lead:,} · Champion={n_champion:,} · Challenger={n_challenger:,}"
+        out_table = f"Google={n_google:,} · Outros={n_outros:,}"
+        header += f"\n_n Meta na tabela: {in_table}  ·  fora da tabela: {out_table}_"
     rows = [header]
     col_header = (
         f"{'Característica':<32} {'Top%':>5}  "
@@ -1467,29 +1476,38 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     if base_label:
         title += f' vs *{base_label}*'
     rows = [title]
-    legend_parts = ['🟢 bom · 🔴 ruim · ⚪ neutro/incerto']
-    # Header mostra ambas as réguas explicitamente — cada bucket é comparado
-    # contra a sua. Champion é régua de Lead/Champion/Google/Total/Meta;
-    # Challenger é régua só do bucket Challenger.
+    # Header mostra as 3 réguas explicitamente. Cada bucket usa uma delas:
+    #   Champion (D8 + ML otimização HQ) → ref Champion
+    #   Challenger (HQLB)                → ref Challenger
+    #   Ponderada (mix por janela)       → ref Ponderada (usada por Total e Meta,
+    #                                       que misturam Champion + Challenger)
+    rows.append('_🟢 bom · 🔴 ruim · ⚪ neutro/incerto_')
+    ref_parts = []
     if ref_champion is not None:
-        legend_parts.append(f'Ref Champion %D9-D10={ref_champion["pct_d9_d10"]:.1f}% (avg {ref_champion["avg"]:.1f})')
+        ref_parts.append(f'Champion={ref_champion["pct_d9_d10"]:.1f}%/{ref_champion["avg"]:.1f}')
     if ref_challenger is not None:
-        legend_parts.append(f'Ref Challenger %D9-D10={ref_challenger["pct_d9_d10"]:.1f}% (avg {ref_challenger["avg"]:.1f})')
-    rows.append('_' + ' · '.join(legend_parts) + '_')
+        ref_parts.append(f'Challenger={ref_challenger["pct_d9_d10"]:.1f}%/{ref_challenger["avg"]:.1f}')
+    if ref_weighted is not None:
+        ref_parts.append(f'Ponderada={ref_weighted["pct_d9_d10"]:.1f}%/{ref_weighted["avg"]:.1f}')
+    if ref_parts:
+        rows.append('_Refs %D9-D10/avg: ' + ' · '.join(ref_parts) + '_')
     rows.append('```')
     rows.append(
-        f'{"Bucket":<14}  {"n":>5}   {"%D9-D10":>7}  {"Δpp":>7}      {"Avg":>4}'
+        f'{"Bucket":<14}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>17}      {"Avg":>4}'
     )
 
-    def _row(label: str, kpis: dict | None, ref: dict | None) -> str:
+    def _row(label: str, kpis: dict | None, ref: dict | None, ref_name: str = '') -> str:
         if kpis is None:
-            return f'{label:<14}  {"—":>5}   {"—":>7}  {"—":>7}      {"—":>4}'
+            return f'{label:<14}  {"—":>5}   {"—":>7}  {"—":>17}      {"—":>4}'
         pct = kpis['pct_d9_d10']
         avg = kpis['avg_decil']
         if ref is not None:
             d_pct = pct - ref['pct_d9_d10']
             e_pct = _emoji_d9d10(d_pct)
-            delta_str = f'{e_pct} {d_pct:>+5.1f}'
+            # Inclui o nome da régua e o valor dela na própria coluna pra deixar
+            # claro contra o quê estamos comparando essa linha (ex: 'vs Ponderada
+            # 52.6%' vs 'vs Champion 57.8%').
+            delta_str = f'{e_pct} {d_pct:>+5.1f} ({ref_name} {ref["pct_d9_d10"]:.1f}%)'
             d_avg = avg - ref['avg']
             e_avg = _emoji_avg(d_avg)
             avg_str = f'{avg:>4.1f} {e_avg}'
@@ -1502,19 +1520,19 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     #   Total: mix Champion+Challenger → ref ponderado
     #   Meta: mesma coisa, mix dos 3 buckets → ref ponderado
     #   Google: 100% Lead bucket (scoreado pelo Champion model) → ref Champion
-    rows.append(_row('Total',  _kpis(dist, total),                                              ref_weighted))
-    rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta),              ref_weighted))
-    rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl),                ref_champion))
+    rows.append(_row('Total',  _kpis(dist, total),                                              ref_weighted,   'Ponderada'))
+    rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta),              ref_weighted,   'Ponderada'))
+    rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl),                ref_champion,   'Champion'))
 
     # Bloco por optimization_goal — separado visualmente
     #   Lead bucket: variant=NULL (Champion model default) → ref Champion
     #   Champion bucket: ref Champion
-    #   Challenger bucket: ref Challenger (era o bug)
+    #   Challenger bucket: ref Challenger
     if show_og:
-        rows.append('─' * 50)
-        rows.append(_row('Lead',       _kpis(og_lead_info.get('distribution') or {}, n_og_lead), ref_champion))
-        rows.append(_row('Champion',   _kpis(og_chmp_info.get('distribution') or {}, n_og_chmp), ref_champion))
-        rows.append(_row('Challenger', _kpis(og_chal_info.get('distribution') or {}, n_og_chal), ref_challenger))
+        rows.append('─' * 60)
+        rows.append(_row('Lead',       _kpis(og_lead_info.get('distribution') or {}, n_og_lead), ref_champion,   'Champion'))
+        rows.append(_row('Champion',   _kpis(og_chmp_info.get('distribution') or {}, n_og_chmp), ref_champion,   'Champion'))
+        rows.append(_row('Challenger', _kpis(og_chal_info.get('distribution') or {}, n_og_chal), ref_challenger, 'Challenger'))
 
     rows.append('```')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})

@@ -2460,28 +2460,85 @@ class DataQualityMonitor:
         direction_map = self._load_direction_map()
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        def _split_df_by_optgoal(df: pd.DataFrame, classification: dict) -> Dict[str, pd.DataFrame]:
-            """Divide df em {'Lead': df_l, 'Champion': df_ch, 'Challenger': df_cl}
-            via classification {cid: bucket}. Leads sem cid extraível ou cid
-            não classificado → bucket 'Lead' (catch-all).
+        # Allowlist Meta — fonte da verdade do client_config.capi.utm_source_allowlist.
+        # Fallback com formas comuns caso config esteja ausente.
+        _capi_cfg = getattr(self.client_config, 'capi', None) if self.client_config else None
+        _allow_raw = getattr(_capi_cfg, 'utm_source_allowlist', None) or []
+        _META_SOURCES = {str(x).lower().strip() for x in _allow_raw} or {
+            'facebook-ads', 'instagram', 'ig', 'fb', 'facebook'
+        }
 
-            Quando `classification` é vazio (Meta API falhou totalmente),
-            retorna todos os 3 buckets vazios — alerta correspondente não vai
-            ter dado e o renderer vai mostrar "—" em vez de pretender que
-            "tudo é Lead" (falso quando a fonte do problema é Meta indisponível).
+        def _source_kind(source) -> str:
+            """Classifica utm_source em Meta / Google / Outros.
+              - Meta:   source ∈ allowlist do CAPI (devclub: facebook-ads/instagram/ig/fb/facebook)
+              - Google: contém 'google' ou 'gads'
+              - Outros: resto (orgânico, sem source, tiktok, etc.)
+            """
+            if source is None:
+                return 'Outros'
+            try:
+                if pd.isna(source):
+                    return 'Outros'
+            except Exception:
+                pass
+            s = str(source).strip().lower()
+            if not s:
+                return 'Outros'
+            if s in _META_SOURCES:
+                return 'Meta'
+            if 'google' in s or 'gads' in s:
+                return 'Google'
+            return 'Outros'
+
+        def _split_df_by_optgoal(df: pd.DataFrame, classification: dict) -> Dict[str, pd.DataFrame]:
+            """Divide df em buckets pra a tabela "Drift por A/B":
+
+              - 'Lead'       → leads Meta com cid de campanha Lead padrão (sem evento ML)
+              - 'Champion'   → leads Meta com cid de campanha optimization_goal LQ/LQHQ
+              - 'Challenger' → leads Meta com cid de campanha optimization_goal HQLB/HQLB_LQ
+              - 'Google'     → leads Google (não entram nas colunas; só contagem no header)
+              - 'Outros'     → resto (orgânico, sem source, etc.; só contagem no header)
+
+            Mudança 2026-06-03: antes 'Lead' era catch-all (incluía Google + sem-source),
+            o que misturava perfis muito diferentes na coluna "Lead(Δ)". Agora 'Lead'
+            é estrito: só campanha Meta sem evento ML. Google e Outros saem da
+            comparação A/B mas seguem expostos no header pra transparência total.
+
+            Quando `classification` é vazio (Meta API falhou), os 3 buckets Meta
+            ficam vazios — renderer mostra "—" em vez de inventar atribuição.
+            Google/Outros ainda são contados (independentes da classificação Meta).
             """
             import re as _re
             empty = pd.DataFrame()
+            base = {'Lead': empty, 'Champion': empty, 'Challenger': empty, 'Google': empty, 'Outros': empty}
             if df is None or len(df) == 0:
-                return {'Lead': empty, 'Champion': empty, 'Challenger': empty}
-            # Classificação Meta API falhou totalmente — não distorcer
-            if not classification:
-                return {'Lead': empty, 'Champion': empty, 'Challenger': empty}
-            if 'campaign' not in df.columns:
-                return {'Lead': df, 'Champion': empty, 'Challenger': empty}
+                return base
+            # Classifica source por linha primeiro — não depende da Meta API.
+            src_col = 'source' if 'source' in df.columns else None
+            idx_google: List = []
+            idx_outros: List = []
+            idx_meta:   List = []
+            for i, row in df.iterrows():
+                kind = _source_kind(row.get(src_col)) if src_col else 'Outros'
+                if kind == 'Meta':
+                    idx_meta.append(i)
+                elif kind == 'Google':
+                    idx_google.append(i)
+                else:
+                    idx_outros.append(i)
+            base['Google'] = df.loc[idx_google] if idx_google else empty
+            base['Outros'] = df.loc[idx_outros] if idx_outros else empty
+            df_meta = df.loc[idx_meta] if idx_meta else empty
+
+            # Split Meta-only por bucket optgoal. Sem classificação ou sem
+            # coluna campaign, joga tudo no Lead estrito (último-recurso pro
+            # caso degenerado — mantém estritudez: só Meta entra no Lead).
+            if not classification or 'campaign' not in df.columns or len(df_meta) == 0:
+                base['Lead'] = df_meta
+                return base
             _CID_RE = _re.compile(r"(\d{15,18})\s*$")
             buckets = {'Lead': [], 'Champion': [], 'Challenger': []}
-            for i, row in df.iterrows():
+            for i, row in df_meta.iterrows():
                 c = row.get('campaign')
                 cid = None
                 if c is not None:
@@ -2496,11 +2553,10 @@ class DataQualityMonitor:
                             cid = m.group(1)
                 bucket = classification.get(cid, 'Lead') if cid else 'Lead'
                 buckets[bucket].append(i)
-            return {
-                'Lead':       df.loc[buckets['Lead']],
-                'Champion':   df.loc[buckets['Champion']],
-                'Challenger': df.loc[buckets['Challenger']],
-            }
+            base['Lead']       = df_meta.loc[buckets['Lead']]       if buckets['Lead']       else empty
+            base['Champion']   = df_meta.loc[buckets['Champion']]   if buckets['Champion']   else empty
+            base['Challenger'] = df_meta.loc[buckets['Challenger']] if buckets['Challenger'] else empty
+            return base
 
         def _category_pct(df: pd.DataFrame, col: str, cat: str) -> Optional[float]:
             """% de leads em (col, cat) dentro do df (excluindo nulos). None se sample vazio."""
@@ -2538,6 +2594,9 @@ class DataQualityMonitor:
             n_lead = int(len(df_lead))
             n_champion = int(len(df_ch))
             n_challenger = int(len(df_cl))
+            # Contadores extras pra header — não entram nas colunas Δ.
+            n_google = int(len(split.get('Google', pd.DataFrame())))
+            n_outros = int(len(split.get('Outros', pd.DataFrame())))
 
             rows = []
             for entry in top_list:
@@ -2597,6 +2656,8 @@ class DataQualityMonitor:
                     'lead_n': n_lead,
                     'champion_n': n_champion,
                     'challenger_n': n_challenger,
+                    'google_n': n_google,
+                    'outros_n': n_outros,
                     'top_list': rows,
                 },
                 'timestamp': now_iso,
