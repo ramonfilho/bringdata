@@ -2943,12 +2943,22 @@ async def daily_monitoring_check_railway(
             buckets = ('Lead', 'Champion', 'Challenger')
             dists = {b: {f'D{i:02d}': 0 for i in range(1, 11)} for b in buckets}
             totals = {b: 0 for b in buckets}
-            # Se classificação Meta API falhou completamente (dict vazio),
-            # NÃO popular buckets — renderer skipa as colunas. Evita falso
-            # "tudo virou Lead" que distorce o relatório (caso 2026-05-28 10:10).
+            # Fallback quando classifier Meta API falhou (dict vazio): TODO
+            # MUNDO vai pro Lead catch-all (Meta + Google + Outros, sem filtro
+            # de source). Sem essa linha de defesa, o renderer escondia as 3
+            # linhas Lead/Champion/Challenger do KPI Decis quando o classifier
+            # falhava — caso 2026-06-03 09:35 BRT que produziu relatório
+            # praticamente vazio no #team-dados (rate limit Meta de ~5min).
             if not _bucket_classification:
+                for r in rows:
+                    d = r[1]
+                    if d is None: continue
+                    key = f'D{int(d):02d}'
+                    if key in dists['Lead']:
+                        dists['Lead'][key] += 1
+                        totals['Lead'] += 1
                 return {
-                    'lead':       {'distribution': dists['Lead'],       'total': 0},
+                    'lead':       {'distribution': dists['Lead'],       'total': totals['Lead']},
                     'champion':   {'distribution': dists['Champion'],   'total': 0},
                     'challenger': {'distribution': dists['Challenger'], 'total': 0},
                 }

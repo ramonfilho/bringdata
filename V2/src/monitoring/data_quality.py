@@ -2530,10 +2530,17 @@ class DataQualityMonitor:
             base['Outros'] = df.loc[idx_outros] if idx_outros else empty
             df_meta = df.loc[idx_meta] if idx_meta else empty
 
-            # Split Meta-only por bucket optgoal. Sem classificação ou sem
-            # coluna campaign, joga tudo no Lead estrito (último-recurso pro
-            # caso degenerado — mantém estritudez: só Meta entra no Lead).
-            if not classification or 'campaign' not in df.columns or len(df_meta) == 0:
+            # Split Meta-only por bucket optgoal. Fallback quando classifier
+            # vazio (Meta API com rate limit): joga TUDO no Lead catch-all
+            # (Meta + Google + Outros), preservando renderização. Sem isso
+            # Champion/Challenger ficam com "—" em todas as linhas e o
+            # relatório parece vazio — caso 2026-06-03 09:35 BRT no team-dados.
+            if not classification or 'campaign' not in df.columns:
+                base['Lead'] = df  # tudo, não só Meta
+                base['Google'] = empty
+                base['Outros'] = empty
+                return base
+            if len(df_meta) == 0:
                 base['Lead'] = df_meta
                 return base
             _CID_RE = _re.compile(r"(\d{15,18})\s*$")
