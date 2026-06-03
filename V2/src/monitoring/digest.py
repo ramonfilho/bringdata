@@ -1476,58 +1476,47 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     if base_label:
         title += f' vs *{base_label}*'
     rows = [title]
-    # Header mostra as 3 réguas explicitamente. Cada bucket usa uma delas:
-    #   Champion (D8 + ML otimização HQ) → ref Champion
-    #   Challenger (HQLB)                → ref Challenger
-    #   Ponderada (mix por janela)       → ref Ponderada (usada por Total e Meta,
-    #                                       que misturam Champion + Challenger)
+    # Apenas 2 réguas — todas as linhas exceto Challenger usam Champion (~95%
+    # dos leads são scoreados pelo Champion, e a antiga "Ponderada" só diferia
+    # em ~5pp pra acabar de explicar a média ponderada). Decisão de simplifica-
+    # ção 2026-06-03: Total e Meta passam a comparar contra Champion direto.
     rows.append('_🟢 bom · 🔴 ruim · ⚪ neutro/incerto_')
     ref_parts = []
     if ref_champion is not None:
-        ref_parts.append(f'Champion={ref_champion["pct_d9_d10"]:.1f}%/{ref_champion["avg"]:.1f}')
+        ref_parts.append(f'Champion={ref_champion["pct_d9_d10"]:.1f}%')
     if ref_challenger is not None:
-        ref_parts.append(f'Challenger={ref_challenger["pct_d9_d10"]:.1f}%/{ref_challenger["avg"]:.1f}')
-    if ref_weighted is not None:
-        ref_parts.append(f'Ponderada={ref_weighted["pct_d9_d10"]:.1f}%/{ref_weighted["avg"]:.1f}')
+        ref_parts.append(f'Challenger={ref_challenger["pct_d9_d10"]:.1f}%')
     if ref_parts:
-        rows.append('_Refs %D9-D10/avg: ' + ' · '.join(ref_parts) + '_')
+        rows.append('_Refs %D9-D10: ' + ' · '.join(ref_parts)
+                    + ' — todas as linhas usam Champion, só a linha Challenger usa Challenger_')
     rows.append('```')
     rows.append(
-        f'{"Bucket":<14}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>17}      {"Avg":>4}'
+        f'{"Bucket":<14}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}'
     )
 
     def _row(label: str, kpis: dict | None, ref: dict | None, ref_name: str = '') -> str:
         if kpis is None:
-            return f'{label:<14}  {"—":>5}   {"—":>7}  {"—":>17}      {"—":>4}'
+            return f'{label:<14}  {"—":>5}   {"—":>7}  {"—":>20}'
         pct = kpis['pct_d9_d10']
-        avg = kpis['avg_decil']
         if ref is not None:
             d_pct = pct - ref['pct_d9_d10']
             e_pct = _emoji_d9d10(d_pct)
-            # Inclui o nome da régua e o valor dela na própria coluna pra deixar
-            # claro contra o quê estamos comparando essa linha (ex: 'vs Ponderada
-            # 52.6%' vs 'vs Champion 57.8%').
             delta_str = f'{e_pct} {d_pct:>+5.1f} ({ref_name} {ref["pct_d9_d10"]:.1f}%)'
-            d_avg = avg - ref['avg']
-            e_avg = _emoji_avg(d_avg)
-            avg_str = f'{avg:>4.1f} {e_avg}'
         else:
             delta_str = ''
-            avg_str = f'{avg:>4.1f}'
-        return f'{label:<14}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}      {avg_str}'
+        return f'{label:<14}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}'
 
-    # Bloco por fonte
-    #   Total: mix Champion+Challenger → ref ponderado
-    #   Meta: mesma coisa, mix dos 3 buckets → ref ponderado
-    #   Google: 100% Lead bucket (scoreado pelo Champion model) → ref Champion
-    rows.append(_row('Total',  _kpis(dist, total),                                              ref_weighted,   'Ponderada'))
-    rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta),              ref_weighted,   'Ponderada'))
+    # Bloco por fonte — Opção A 2026-06-03: Total e Meta usam Champion direto
+    # (não mais Ponderada). ~95% dos leads são Champion, a diferença Ponderada
+    # vs Champion ficava em ~5pp e a fórmula da Ponderada (peso A/B routing ×
+    # ref) era difícil de explicar pra colaboradores. Com Champion direto, a
+    # leitura fica "todas as linhas comparadas contra a régua Champion exceto a
+    # linha Challenger".
+    rows.append(_row('Total',  _kpis(dist, total),                                              ref_champion,   'Champion'))
+    rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta),              ref_champion,   'Champion'))
     rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl),                ref_champion,   'Champion'))
 
     # Bloco por optimization_goal — separado visualmente
-    #   Lead bucket: variant=NULL (Champion model default) → ref Champion
-    #   Champion bucket: ref Champion
-    #   Challenger bucket: ref Challenger
     if show_og:
         rows.append('─' * 60)
         rows.append(_row('Lead',       _kpis(og_lead_info.get('distribution') or {}, n_og_lead), ref_champion,   'Champion'))

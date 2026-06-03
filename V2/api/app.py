@@ -2906,10 +2906,15 @@ async def daily_monitoring_check_railway(
 
         # Split por optimization_goal da campanha (Lead/Champion/Challenger) —
         # mesmos buckets das tabelas Drift por A/B. Usa cache compartilhado de
-        # src/monitoring/campaign_classifier. Quality_rows tem utm_campaign no
-        # índice [5] (vide records_to_quality_rows). Leads sem campaign_id
-        # extraível (Google, orgânico) caem no bucket 'Lead' como catch-all
-        # (definição do usuário: "se não tem evento ML, cai em Lead").
+        # src/monitoring/campaign_classifier. Quality_rows tem source no índice
+        # [3] e utm_campaign no [5] (vide records_to_quality_rows).
+        #
+        # IMPORTANTE: bucket Lead é ESTRITO Meta — só leads com source ∈
+        # allowlist da CAPI (capi.utm_source_allowlist). Google, orgânico e
+        # outros NÃO entram em nenhum dos 3 buckets — ficam apenas nas linhas
+        # de fonte (Total/Meta/Google) do KPI panel. Mudança 2026-06-03 pra
+        # alinhar com data_quality._split_df_by_optgoal e evitar que Google
+        # dilua a coluna Lead com perfil de qualidade diferente.
         from src.monitoring.campaign_classifier import (
             classify_campaign_buckets as _classify_buckets,
             extract_campaign_id as _extract_cid,
@@ -2928,6 +2933,12 @@ async def daily_monitoring_check_railway(
         _all_camps = [r[5] for r in quality_rows if len(r) > 5 and r[5]]
         _bucket_classification = _classify_buckets(_all_camps, meta=_meta_for_buckets)
 
+        # Allowlist Meta — mesma fonte que o gate de envio CAPI.
+        _allow_capi = (pipeline._client_config.capi.utm_source_allowlist
+                       if pipeline and pipeline._client_config and pipeline._client_config.capi
+                       else None) or []
+        _META_SOURCES_OG = {str(x).lower().strip() for x in _allow_capi}
+
         def _decil_dist_by_optgoal(rows) -> Dict[str, Dict]:
             buckets = ('Lead', 'Champion', 'Challenger')
             dists = {b: {f'D{i:02d}': 0 for i in range(1, 11)} for b in buckets}
@@ -2944,6 +2955,10 @@ async def daily_monitoring_check_railway(
             for r in rows:
                 d = r[1]
                 if d is None: continue
+                # Filtro source — só Meta entra nos 3 buckets.
+                src = (str(r[3]).strip().lower() if len(r) > 3 and r[3] else '')
+                if src not in _META_SOURCES_OG:
+                    continue
                 camp = r[5] if len(r) > 5 else None
                 cid = _extract_cid(camp)
                 bucket = _bucket_classification.get(cid, 'Lead') if cid else 'Lead'
