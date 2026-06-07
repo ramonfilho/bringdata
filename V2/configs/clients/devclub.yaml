@@ -567,6 +567,19 @@ capi:
   high_quality_decils:
   - D09
   - D10
+  # Fan-out adicional pro pixel "Pixel de Bm - Rodolfo Mori" (241752320666130).
+  # Esse pixel foi o original do CAPI até o commit 7c785f9 e ainda recebe
+  # PageView/Lead via browser na LP. Reativando ML aqui pra permitir que o
+  # gestor de tráfego crie campanhas no pixel 241 otimizando por LQHQ (path
+  # Champion) ou HQLB (path Challenger) — mesmas UTMs das campanhas atuais.
+  # Aplica como fallback global; é sobrescrito por variante se a A/B declarar
+  # capi_extra_hq_destinations em active_models/devclub.yaml.
+  extra_hq_destinations:
+  - pixel_id: '241752320666130'
+    event_name: LeadQualifiedHighQuality
+    decils:
+    - D09
+    - D10
   country_code: br
   currency: BRL
   utm_blocklist:

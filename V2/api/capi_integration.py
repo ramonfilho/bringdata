@@ -698,6 +698,7 @@ def send_both_lead_events(
     conversion_rates_override: Optional[Dict[str, float]] = None,
     pixel_id_override: Optional[str] = None,
     high_quality_decils_override: Optional[List[str]] = None,
+    extra_hq_destinations_override: Optional[List] = None,
     dry_run: bool = False,
 ) -> Dict:
     """
@@ -779,12 +780,57 @@ def send_both_lead_events(
         dry_run=dry_run,
     )
 
+    # Evento HQ — destinações ADICIONAIS (fan-out por pixel). Prioridade:
+    # override por variante > capi_config.extra_hq_destinations > nenhum.
+    # Cada destinação é independente: falha em uma não derruba primary nem
+    # as outras. Meta dedup é por (pixel, event_name, event_id), então
+    # mesmo event_id em pixels diferentes vira N eventos distintos pra ela.
+    extras = extra_hq_destinations_override or (
+        capi_config.extra_hq_destinations if capi_config and capi_config.extra_hq_destinations else []
+    )
+    extra_results = []
+    for i, dest in enumerate(extras or []):
+        try:
+            r = send_lead_qualified_high_quality(
+                email=email,
+                phone=phone,
+                first_name=first_name,
+                last_name=last_name,
+                lead_score=lead_score,
+                decil=decil,
+                event_id=event_id,
+                fbp=fbp,
+                fbc=fbc,
+                user_agent=user_agent,
+                client_ip=client_ip,
+                event_source_url=event_source_url,
+                event_timestamp=event_timestamp,
+                test_event_code=test_event_code,
+                survey_data=survey_data,
+                db=db,
+                capi_config=capi_config,
+                client_id=client_id,
+                event_name_override=dest.event_name,
+                pixel_id_override=dest.pixel_id,
+                high_quality_decils_override=list(dest.decils),
+                dry_run=dry_run,
+            )
+            extra_results.append(r)
+        except Exception as e:
+            logger.warning(
+                f"⚠️  Extra HQ destination [{i}] falhou (pixel={getattr(dest, 'pixel_id', '?')} "
+                f"event={getattr(dest, 'event_name', '?')}): {e}"
+            )
+            extra_results.append({"status": "error", "error": str(e),
+                                  "pixel_id": getattr(dest, 'pixel_id', None)})
+
     return {
         "status": "success",
         "email": email,
         "decil": decil,
         "evento_com_valor": result_with_value,
-        "evento_high_quality": result_high_quality
+        "evento_high_quality": result_high_quality,
+        "evento_high_quality_extras": extra_results,
     }
 
 def send_purchase_event(
@@ -1009,6 +1055,7 @@ def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConf
             conversion_rates_override=lead.get('ab_conversion_rates'),
             pixel_id_override=lead.get('ab_pixel_id'),
             high_quality_decils_override=lead.get('ab_high_quality_decils'),
+            extra_hq_destinations_override=lead.get('ab_extra_hq_destinations'),
             dry_run=dry_run,
             # test_event_code=None (padrão) -> vai para PRODUÇÃO
         )
