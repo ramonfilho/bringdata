@@ -284,7 +284,6 @@ def process_pending_surveys(
             cl["ab_conversion_rates"] = ab_v.conversion_rates
             cl["ab_pixel_id"] = ab_v.pixel_id_override
             cl["ab_high_quality_decils"] = ab_v.capi_high_quality_decils
-            cl["ab_extra_hq_destinations"] = ab_v.capi_extra_hq_destinations
         capi_leads.append(cl)
         capi_meta.append((s, dc, int(dc[1:]) if dc else None, vn))
 

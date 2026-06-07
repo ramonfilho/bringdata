@@ -26,23 +26,6 @@ def _make(cls, data: dict):
     return cls(**{k: v for k, v in data.items() if k in known})
 
 
-def _load_capi_config(data: dict) -> "CAPIConfig":
-    """Parser de CAPIConfig com tratamento especial pra extra_hq_destinations.
-
-    O YAML traz uma lista de dicts; _parse_extra_hq_destinations valida e
-    converte pra lista de ExtraHQDestination. Demais campos seguem _make.
-    """
-    if not data:
-        return CAPIConfig()
-    known = {f.name for f in dataclasses.fields(CAPIConfig)}
-    kwargs = {k: v for k, v in data.items() if k in known}
-    extra_raw = kwargs.pop("extra_hq_destinations", None)
-    if extra_raw is not None:
-        kwargs["extra_hq_destinations"] = _parse_extra_hq_destinations(
-            extra_raw, context="capi.extra_hq_destinations")
-    return CAPIConfig(**kwargs)
-
-
 # ---------------------------------------------------------------------------
 # Sub-configs — Grupo A: Pipelines ML core (Fases 1–2)
 # ---------------------------------------------------------------------------
@@ -231,57 +214,6 @@ class MonitoringConfig:
 
 
 @dataclass
-class ExtraHQDestination:
-    """Destinação CAPI adicional pro evento HQ: pixel + nome + faixa de decis.
-
-    Permite que o mesmo lead HQ seja enviado pra N pixels além do primário,
-    cada um com seu próprio nome de evento e faixa de decis. Resolvido por
-    variante A/B (override) ou por config global do client (fallback).
-    """
-    pixel_id: str
-    event_name: str
-    decils: List[str]   # ex: ['D09','D10']
-
-
-def _parse_extra_hq_destinations(raw, *, context: str) -> List[ExtraHQDestination]:
-    """Parser + validação de lista de ExtraHQDestination vinda do YAML.
-
-    Falha alto no boot pra qualquer misconfig (typo, decil inválido, lista vazia
-    em entrada não vazia). Capa em 5 destinações pra evitar fan-out absurdo
-    por acidente. `context` aparece na mensagem de erro pra facilitar debug.
-    """
-    if not isinstance(raw, list) or len(raw) == 0:
-        raise ValueError(
-            f"{context}: capi_extra_hq_destinations deve ser lista não-vazia. "
-            f"Recebido: {raw!r}"
-        )
-    if len(raw) > 5:
-        raise ValueError(
-            f"{context}: capi_extra_hq_destinations excedeu cap de 5 destinações "
-            f"({len(raw)} recebidas). Revisar config — fan-out grande indica misconfig."
-        )
-    valid_decils = {f"D{i:02d}" for i in range(1, 11)}
-    out = []
-    for i, item in enumerate(raw):
-        if not isinstance(item, dict):
-            raise ValueError(f"{context}: destinação [{i}] deve ser dict. Recebido: {item!r}")
-        pixel_id = item.get("pixel_id")
-        event_name = item.get("event_name")
-        decils = item.get("decils")
-        if not isinstance(pixel_id, str) or not pixel_id.strip():
-            raise ValueError(f"{context} destinação [{i}]: pixel_id deve ser string não-vazia. Recebido: {pixel_id!r}")
-        if not isinstance(event_name, str) or not event_name.strip():
-            raise ValueError(f"{context} destinação [{i}]: event_name deve ser string não-vazia. Recebido: {event_name!r}")
-        if not isinstance(decils, list) or len(decils) == 0 or not all(d in valid_decils for d in decils):
-            raise ValueError(
-                f"{context} destinação [{i}]: decils deve ser lista não-vazia "
-                f"de strings em D01..D10. Recebido: {decils!r}"
-            )
-        out.append(ExtraHQDestination(pixel_id=pixel_id, event_name=event_name, decils=list(decils)))
-    return out
-
-
-@dataclass
 class CAPIConfig:
     """Integração Meta CAPI. (#103–#106, #140)"""
     pixel_id: Optional[str] = None                          # #103
@@ -293,7 +225,6 @@ class CAPIConfig:
     currency: Optional[str] = None                          # #106
     utm_blocklist: Optional[List[str]] = None               # substrings em utm_campaign que bloqueiam envio CAPI
     utm_source_allowlist: Optional[List[str]] = None        # utm_source permitidos para envio CAPI (DT-CAPI-01)
-    extra_hq_destinations: Optional[List[ExtraHQDestination]] = None  # destinações HQ adicionais (fan-out por pixel)
     # decil_to_value removido (DT-5): calculado em runtime como business.product_value × business.conversion_rates[decil]
 
 
@@ -428,9 +359,6 @@ class ABTestVariantConfig:
     capi_high_quality_decils: Optional[List[str]] = None  # Override por variante da faixa de decis que dispara HQ event.
                                                           # None → cai no global capi_config.high_quality_decils (default D09+D10).
                                                           # Ex.: ['D08','D09','D10'] estende HQLB sem afetar Champion.
-    capi_extra_hq_destinations: Optional[List[ExtraHQDestination]] = None  # Destinações HQ adicionais por variante.
-                                                                           # None → cai no global capi_config.extra_hq_destinations.
-                                                                           # Permite fan-out do HQ pra N pixels além do primário.
 
 
 @dataclass
@@ -468,9 +396,6 @@ class ABTestConfig:
                         f"variante '{name}': capi_high_quality_decils deve ser lista não-vazia "
                         f"de strings em D01..D10. Recebido: {hq_decils_raw!r}"
                     )
-            extra_raw = vdata.get("capi_extra_hq_destinations")
-            extra_destinations = _parse_extra_hq_destinations(
-                extra_raw, context=f"variante '{name}'") if extra_raw else None
             variants[name] = ABTestVariantConfig(
                 run_id=vdata["run_id"],
                 utm_pattern=vdata.get("utm_pattern") or {},
@@ -481,7 +406,6 @@ class ABTestConfig:
                 url_pattern=vdata.get("url_pattern"),
                 pixel_id_override=vdata.get("pixel_id_override"),
                 capi_high_quality_decils=hq_decils_raw,
-                capi_extra_hq_destinations=extra_destinations,
             )
         return cls(enabled=True, variants=variants)
 
@@ -557,7 +481,7 @@ class ClientConfig:
             encoding=_make(EncodingConfig, data.get("encoding", {})),
             model=_make(ModelConfig, data.get("model", {})),
             monitoring=_make(MonitoringConfig, data.get("monitoring", {})),
-            capi=_load_capi_config(data.get("capi", {})),
+            capi=_make(CAPIConfig, data.get("capi", {})),
             api=_make(APIConfig, data.get("api", {})),
             retrain=_make(RetainConfig, data.get("retrain", {})),
             business=_make(BusinessConfig, data.get("business", {})),

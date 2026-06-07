@@ -108,10 +108,6 @@ ab_test:
       capi_event_name_high_quality: HQLB
       capi_high_quality_decils: ['D08', 'D09', 'D10']   # Estende HQLB pra incluir D8 (lift 1.32 ≈ D9 lift 1.27 no Challenger; D7 fica fora — lift 1.06 ≈ baseline).
                                                         # Champion mantém global D09+D10 (não declara este campo). Rollback: deletar linha → cai pro fallback global.
-      capi_extra_hq_destinations:                        # Fan-out HQ pro pixel "Pixel de Bm - Rodolfo Mori" (241752320666130, pixel original CAPI).
-        - pixel_id: '241752320666130'                    # Permite criar campanhas otimizando HQLB no pixel antigo, reusando UTMs LEADHQLB atuais.
-          event_name: HQLB                               # Mesmo nome do evento primário; Meta dedup é por (pixel, event_name, event_id), então N pixels = N eventos.
-          decils: ['D08', 'D09', 'D10']                  # Mesma faixa do primário Challenger. Rollback: deletar bloco → cai pro fallback global (LQHQ D9+D10).
       conversion_rates:                          # back-calculado de LEAD_VALUE_BY_DECILE_CHALLENGER ÷ 1563.75 (Patch B 08/05/2026)
         D01: 0.000454   # 0.71 / 1563.75
         D02: 0.001816   # 2.84 / 1563.75
