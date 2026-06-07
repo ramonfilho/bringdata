@@ -35,6 +35,10 @@ class LeadScoringPredictor:
         self.mlflow_run_id = mlflow_run_id
         self.model_path = None
         self.model_name = model_name
+        # Calibrador (DT-20). Carregado em load_model. Fallback NoneCalibrator
+        # quando o run MLflow não tem o artifact — preserva comportamento pré-DT-20
+        # de modelos antigos (jan30, abr28) sem alterar nada matematicamente.
+        self.calibrator = None
 
         # Prioridade: 1) mlflow_run_id, 2) model_path/model_name fornecidos, 3) config active_model, 4) fallback padrão
         if mlflow_run_id:
@@ -137,6 +141,11 @@ class LeadScoringPredictor:
             self.metadata['decil_thresholds']['thresholds'] = thresholds_normalizados
             logger.info(f"Thresholds normalizados: {list(thresholds_normalizados.keys())}")
 
+        # Carregar calibrador (DT-20). Modo legacy procura calibrator.pkl ao lado
+        # dos outros arquivos do modelo. Fallback NoneCalibrator se ausente.
+        calibrator_file = self.model_path / f"calibrator_{self.model_name}.pkl"
+        self._load_calibrator(calibrator_file)
+
     def _load_from_mlflow(self):
         """Carrega modelo e artifacts diretamente do MLflow."""
         # Carregar direto dos artifacts (não depende de meta.yaml ou API)
@@ -199,6 +208,66 @@ class LeadScoringPredictor:
 
         logger.info(f"Modelo carregado: {self.model_name}")
         logger.info(f"Features esperadas: {len(self.feature_names)}")
+
+        # Carregar calibrador (DT-20). Modo MLflow procura calibrator.pkl no diretório
+        # de artifacts do run. Fallback NoneCalibrator se ausente — preserva
+        # comportamento pré-DT-20 dos modelos antigos sem calibrator (jan30, abr28).
+        calibrator_path = mlruns_path / "calibrator.pkl"
+        self._load_calibrator(calibrator_path)
+
+    def _load_calibrator(self, path: Path) -> None:
+        """
+        Carrega calibrator.pkl do disco; instancia NoneCalibrator se ausente.
+
+        NoneCalibrator não é fallback — é estratégia legítima que representa
+        "este modelo não foi calibrado". A interface comum permite o resto do
+        código tratar calibrador como peça única sem `if has_calibrator`.
+        """
+        from src.model.calibration import NoneCalibrator, load_calibrator
+        try:
+            if path.exists():
+                self.calibrator = load_calibrator(path)
+                logger.info(f"Calibrador carregado: {self.calibrator.method}")
+            else:
+                self.calibrator = NoneCalibrator()
+                logger.info("Calibrador ausente no artifact — usando NoneCalibrator (identidade)")
+        except Exception as e:
+            logger.warning(
+                f"Falha ao carregar calibrador de {path}: {e}. "
+                "Caindo em NoneCalibrator (identidade) — comportamento bit-idêntico ao pré-DT-20."
+            )
+            self.calibrator = NoneCalibrator()
+
+    def predict_proba_raw(self, df: pd.DataFrame) -> np.ndarray:
+        """
+        Devolve o score bruto do RF para `df` — usado para debug e para o script
+        de calibração pós-hoc (`calibrate_existing_run.py`).
+
+        Args:
+            df: DataFrame processado pelo pipeline (mesmas features que `predict`).
+
+        Returns:
+            array 1D com `model.predict_proba(X)[:, 1]`, sem aplicar calibração.
+        """
+        if self.model is None:
+            self.load_model()
+        X = self.prepare_features(df)
+        return self.model.predict_proba(X)[:, 1]
+
+    def predict_proba(self, df: pd.DataFrame) -> np.ndarray:
+        """
+        Score calibrado para `df`. Equivalente a `calibrator.transform(predict_proba_raw)`.
+
+        Modelos sem calibrator no artifact carregam NoneCalibrator → resultado
+        bit-idêntico ao `predict_proba_raw`.
+        """
+        raw = self.predict_proba_raw(df)
+        if self.calibrator is None:
+            # Pode acontecer se `load_model` ainda não rodou — `predict_proba_raw`
+            # garante que rodou, então aqui é redundância defensiva.
+            from src.model.calibration import NoneCalibrator
+            self.calibrator = NoneCalibrator()
+        return self.calibrator.transform(raw)
 
     def prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -272,11 +341,16 @@ class LeadScoringPredictor:
         # Fazer predições
         logger.info("Realizando predições...")
 
-        # Probabilidades para cada classe
+        # Probabilidades para cada classe — score bruto do RF, antes da calibração.
         probabilities = self.model.predict_proba(X)
 
-        # Score é a probabilidade da classe positiva (1)
-        scores = probabilities[:, 1]
+        # Score é a probabilidade da classe positiva (1), depois calibrada.
+        # NoneCalibrator (modelos pré-DT-20) preserva identidade matemática.
+        raw_scores = probabilities[:, 1]
+        from src.model.calibration import NoneCalibrator
+        if self.calibrator is None:
+            self.calibrator = NoneCalibrator()
+        scores = self.calibrator.transform(raw_scores)
 
         # SEMPRE usar DataFrame processado (sem duplicatas)
         # O original pode ter mais linhas se houve remoção de duplicatas no pipeline
@@ -351,10 +425,14 @@ class LeadScoringPredictor:
         # Preparar features
         X = self.prepare_features(df)
 
-        # Fazer predição
-        probability = self.model.predict_proba(X)[0, 1]
-
-        return probability
+        # Fazer predição — score bruto, depois calibrado. NoneCalibrator preserva
+        # identidade matemática para modelos pré-DT-20.
+        raw_probability = self.model.predict_proba(X)[0, 1]
+        from src.model.calibration import NoneCalibrator
+        if self.calibrator is None:
+            self.calibrator = NoneCalibrator()
+        calibrated = self.calibrator.transform(np.array([raw_probability]))
+        return float(calibrated[0])
 
     def get_feature_importances(self, top_n: int = 20):
         """
