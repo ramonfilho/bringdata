@@ -1,7 +1,7 @@
 ---
 title: Análise de calibração de probabilidades — Champion jan30 e Challenger abr28
 data: 2026-05-08
-autor: sessão Claude (capi/value=0 + design DT-19)
+autor: sessão Claude (capi/value=0 + design DT-20)
 escopo: medição empírica do quão miscalibrados estão os modelos atualmente em produção; subsídio à decisão de tratar calibração como caminho crítico antes da fórmula `leadScore × ticket / CPL` por lead entrar em produção.
 artefatos_consultados:
   - V2/mlruns/1/d51757f5041c44b7ab1a056fce8c3c35/artifacts/model_metadata.json
@@ -235,7 +235,7 @@ Em ordem natural, sem priorização nesta análise:
 
 1. **Validar out-of-sample** — pegar leads do Railway dos últimos 30-60 dias, com label real, rodar `predict_proba` do Champion + aplicar a isotônica fitada com dados antigos, medir ECE residual.
 2. **Repetir a análise com bins de 20** — ver se há não-monotonia intra-decil que justifica granularidade maior na função de calibração final.
-3. **Decisão arquitetural sobre DT-19** — registrar como dívida prioritária com escopo expandido ("calibração como pré-requisito da fórmula nova"), com referência cruzada a esta análise.
+3. **Decisão arquitetural sobre DT-20** — registrar como dívida prioritária com escopo expandido ("calibração como pré-requisito da fórmula nova"), com referência cruzada a esta análise.
 4. **Plano de adoção dos modelos atuais** — script que reabre run no MLflow, ajusta calibrador, salva como artifact em run filho, atualiza `active_models/devclub.yaml`. Detalhes técnicos na proposta arquitetural feita junto com a skill `/sw-architect`.
 5. **Adicionar calibração ao próximo treino** — bloco `scoring.calibration` em `clients/devclub.yaml`, com subsplit temporal interno no train set conforme detalhado na sessão de design.
 
@@ -274,4 +274,4 @@ d51757f5  ECE pré=26.32pp  pós=0.01pp
 
 ---
 
-*Identificadores históricos: análise feita no contexto do design de DT-19 — Calibração de probabilidades de scoring; modelos referenciados em `configs/active_models/devclub.yaml`.*
+*Identificadores históricos: análise feita no contexto do design de DT-20 — Calibração de probabilidades de scoring; modelos referenciados em `configs/active_models/devclub.yaml`.*

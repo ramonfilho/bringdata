@@ -74,6 +74,7 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 - DT-15 (`ABTestVariantConfig` campos não-utilizáveis) → registrado em 05/05/2026, candidato a agrupar com DT-14
 - DT-16 (matar `encoding_overrides` por convergência) → registrado em 05/05/2026, prioridade alta — bloqueado por treino do próximo Champion
 - DT-17 (eliminar duplicação `api/business_config.py` × YAML — fluxo treino→MLflow artifact→`--set-active`→YAML) → registrado em 06/05/2026, prioridade alta arquiteturalmente, fases 1-3 sem dependência de retreino
+- DT-20 (calibração de probabilidades de scoring — bloqueante do bloco F da estratégia ROAS V1) → registrado em 08/05/2026, prioridade alta arquiteturalmente e operacionalmente. 5 fases em 3 PRs; caminho mínimo alternativo (fases 2+3) desbloqueia o bloco F com menor esforço. Diagnóstico empírico em `analise_calibracao_jan30_abr28.md`.
 - Fase 3b, Fase 4 (EDA), Fase 5 (NLP) → bloqueadas/agendadas em H4-H5 do PLANO_EXECUCAO
 - Pré-requisitos R1, R2, R3 + DT-2, DT-7, DT-11, DT-13 → agendados no PLANO_EXECUCAO
 **Relação:** consultado por `PLANO_EXECUCAO.md` para detalhes técnicos de cada DT/R. Histórico do deploy em `arquivo/CHECKLIST_DEPLOY_REFACTOR.md`.
@@ -216,7 +217,7 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 ### `analise_calibracao_jan30_abr28.md`
 **Papel:** medição empírica de quão miscalibrados estão os scores brutos do Random Forest dos dois modelos em produção. Computa Expected Calibration Error (ECE) por decil a partir dos `model_metadata.json` dos runs `d51757f5...` (Champion `jan30`, 33k leads no test set) e `5d158f0a...` (Challenger `abr28`, 40k leads). Ajusta calibração isotônica in-sample e projeta razões de inflação que a fórmula `leadScore × ticket / CPL` sofreria sem calibração (D10 do Champion: 33×; D10 do Challenger: 27×). Declara 6 limitações honestamente, incluindo a ausência de validação out-of-sample como cota superior do ganho.
 **Status:** ativo. Criado em 08/05/2026 como subsídio empírico à decisão de tratar calibração como caminho crítico.
-**Relação:** motiva a criação de **DT-19** em `PLANO_REFACTOR_MLOPS.md` (calibração de probabilidades de scoring) e expõe a direção real do viés do `class_weight='balanced'` (superestima, não subestima). Validação out-of-sample com leads recentes do Railway é próximo passo declarado.
+**Relação:** motiva a criação de **DT-20** em `PLANO_REFACTOR_MLOPS.md` (calibração de probabilidades de scoring) e expõe a direção real do viés do `class_weight='balanced'` (superestima, não subestima). Validação out-of-sample com leads recentes do Railway é próximo passo declarado.
 
 ### `INVESTIGACAO_BAIXO_DESEMPENHO.md`
 **Papel:** investigação completa da queda do D10 de ~42% (P1) para ~30% (P3). Documenta hipóteses testadas, causas confirmadas (mudança LQHQ→LQ em 10/03, crash P2 por TMB All + encoding quebrado), análise do gap residual e rollback executado em 13/04/2026.

@@ -224,7 +224,7 @@ A medição feita usou apenas o test set do treino original. Mostra que a calibr
 
 **Critério de decisão do bloco F:**
 
-- ECE residual out-of-sample ≤ 5 pp em ambos os modelos → calibração generalizou. Pode prosseguir com bloco F após implementação técnica do calibrador no pipeline (DT-19).
+- ECE residual out-of-sample ≤ 5 pp em ambos os modelos → calibração generalizou. Pode prosseguir com bloco F após implementação técnica do calibrador no pipeline (DT-20).
 - ECE residual > 5 pp e ≤ 10 pp → calibração ajuda mas há drift adicional. Avaliar se o ganho ainda vale; eventual decisão de recalibrar periodicamente (a cada N lançamentos) entra no escopo do bloco F.
 - ECE residual > 10 pp → drift de público pós-treino é dominante. Calibração ajustada uma vez não basta; bloco F precisa de mecanismo de recalibração contínua antes de ligar.
 
@@ -232,7 +232,7 @@ Em todos os cenários acima a Spearman ρ tende a ser ≈ 1.0 e a interseção d
 
 #### Coordenação
 
-A implementação técnica do calibrador no pipeline (interface `Calibrator`, integração com `LeadScoringPredictor`, script de calibração pós-hoc, bloco `scoring.calibration` no YAML do cliente) está catalogada como **DT-19** em `PLANO_REFACTOR_MLOPS.md`. A validação out-of-sample descrita acima é pré-requisito para promover qualquer calibrador a produção e bloqueante do bloco F.
+A implementação técnica do calibrador no pipeline (interface `Calibrator`, integração com `LeadScoringPredictor`, script de calibração pós-hoc, bloco `scoring.calibration` no YAML do cliente) está catalogada como **DT-20** em `PLANO_REFACTOR_MLOPS.md`. A validação out-of-sample descrita acima é pré-requisito para promover qualquer calibrador a produção e bloqueante do bloco F.
 
 ---
 

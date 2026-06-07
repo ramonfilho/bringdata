@@ -1265,6 +1265,137 @@ D. **Teste unitário em `tests/test_unify_utm.py`** — input com `Source=tiktok
 
 ---
 
+### Calibração de probabilidades de scoring — leadScore do RF não é probabilidade real
+
+**Contexto (registrado em 2026-05-08):** o `predict_proba` do Random Forest treinado com `class_weight='balanced'` produz scores brutos que **não são** probabilidades calibradas. A combinação RF + reweighting da classe minoritária produz uma compressão sistemática dos scores na direção da superestimação — o modelo afirma 58% de chance no decil D10 quando a probabilidade real observada é 1.75%.
+
+Análise empírica completa em [`analise_calibracao_jan30_abr28.md`](analise_calibracao_jan30_abr28.md). Resumo:
+
+| Modelo | ECE pré-calibração | ECE nos decis críticos D8-D10 | Razão de inflação no D10 |
+|---|---|---|---|
+| Champion `jan30` | 26.32 pp | 43.43 pp | 33× |
+| Challenger `abr28` | 39.58 pp | 53.87 pp | 27× |
+
+Faixa de referência da literatura: ECE < 5 pp é "bem calibrado"; > 10 pp é "severamente miscalibrado". Os dois modelos em produção estão entre cinco e oito vezes acima do limite "severamente miscalibrado".
+
+**Por que vira bug arquitetural agora:** o sistema atual usa decil + tabela `conversion_rate` no YAML, o que protege parcialmente da miscalibração (o valor enviado pra Meta vem da tabela, não do score bruto). A frente paralela [EVENTOS_E_DECIS_PLANO.md](EVENTOS_E_DECIS_PLANO.md) propõe substituir a tabela pela fórmula `value = leadScore × ticket / CPL_adset` no nível do lead. Sem calibração, essa fórmula amplifica a distorção em 27-33× nos decis críticos — Meta otimizaria pra um sinal econômico fantasma e a comparação Champion vs Challenger no A/B test seria dominada pela diferença de miscalibração, não pelo mérito.
+
+**Estado de partida (em 2026-05-08):**
+- Nenhum dos dois modelos em produção tem calibrator. Verificado por inspeção de `V2/mlruns/1/{d51757f5...,5d158f0a...}/artifacts/` — só `model.pkl`, `feature_registry.json`, `model_metadata.json` (e mais 2 artifacts no Challenger, mas nenhum de calibração).
+- `LeadScoringPredictor` em [src/model/prediction.py](../src/model/prediction.py) não tem código de calibração — carrega o RF e devolve `predict_proba` bruto direto.
+
+#### Decisões de design tomadas
+
+Padrão de projeto: **Estratégia** (Strategy pattern). Calibração tem N variantes (none, sigmoid, isotonic) e quem decide é o config do cliente. Todas implementam a mesma interface, todas são instâncias legítimas. Sem `if has_calibrator else fallback` espalhado.
+
+| Decisão | Valor escolhido | Justificativa |
+|---|---|---|
+| Método default | **Isotonic regression** | Não-paramétrico, segue qualquer forma desde que monotônica. Sigmoid (Platt) força curva em S que RF + balanced não tem. Volume de ~50k leads por treino está uma ordem de grandeza acima do mínimo confortável da isotônica. |
+| Onde a calibração mora | Artifact MLflow, junto do modelo | Calibrador depende dos dados de treino (não só do config). Evita mismatch de versão (calibrator de um run aplicado em modelo de outro). |
+| Quem decide o método | YAML do cliente, `scoring.calibration.method` | Hardcoded no train_pipeline criaria duplicação para Cliente B futuro. YAML mantém fonte única por cliente. |
+| Como dividir dados para o calibrador | **Subsplit temporal interno** dentro do train set 70%: 56% treino RF + 14% calibrador + 30% teste intocado | Respeita ordem temporal (RF aprende com dados antigos, calibrador com intermediários, teste com recentes). Sem leakage. K-fold cross-validation foi avaliado e descartado por risco de leakage entre lançamentos com sazonalidade (Top 5 ROAS já mostrou drift de público forte). |
+| Interface do `LeadScoringPredictor` | `predict_proba` passa a retornar score calibrado por default; `predict_proba_raw` separado para debug | Contrato útil é "score calibrado". Forçar consumidores a chamar `calibrator.transform()` viola direção de dependências. |
+| Compatibilidade com modelos antigos | `NoneCalibrator` carregado quando artifact ausente | NoneCalibrator não é fallback — é uma estratégia legítima ("este modelo não foi calibrado"). |
+| Modelos atuais (jan30 + abr28) | Calibração pós-hoc via script standalone, salva como artifact em **run filho MLflow** linkado ao parent | Preserva auditoria. Run original com seus números (AUC, monotonia, thresholds em escala bruta) fica intacto como referência. Run filho é "versão calibrada" linkada ao pai. Reabrir o run original e modificar muda histórico. |
+| Catalogação de risco | Dívida técnica arquitetural (DT-20), não safeguard (T-X) | Não é um bug pontual com salvaguarda automatizada; é uma abstração ausente no scoring. |
+
+#### Sequência de execução em 5 fases (3 PRs)
+
+**Fase 1 — Abstração** (PR 1, zero efeito em produção)
+1. Criar [`src/model/calibration.py`](../src/model/calibration.py) com:
+   - Interface `Calibrator` (abstrata): `fit(y_true, y_prob)`, `transform(y_prob) → y_prob_calibrated`, `save(path)`, `load(path)`
+   - 3 implementações: `NoneCalibrator`, `SigmoidCalibrator`, `IsotonicCalibrator`
+   - Factory `make_calibrator(method: str) → Calibrator`
+2. Modificar `LeadScoringPredictor.load_model`: tenta carregar `calibrator.pkl` do run; se ausente, instancia `NoneCalibrator`
+3. Renomear `LeadScoringPredictor.predict_proba` interno → `_predict_proba_raw`; `predict_proba` passa a fazer `self.calibrator.transform(self._predict_proba_raw(X))`
+4. Expor `predict_proba_raw` como método público para debug
+5. Validação: rodar batch com modelo atual (`jan30`) em ambiente local — score deve ser bit-idêntico ao anterior (NoneCalibrator é identidade matemática)
+
+**Fase 2 — Calibração pós-hoc dos modelos atuais** (PR 2)
+1. Criar script `V2/scripts/calibrate_existing_run.py` que recebe `run_id` + método (`sigmoid`/`isotonic`):
+   - Carrega modelo + metadata do MLflow
+   - Reconstrói **o mesmo dataset de teste** que o treino original usou (período pós cut-date, com matching e labels reais)
+   - Roda `predict_proba` → score bruto
+   - Ajusta `IsotonicRegression` contra labels reais
+   - Cria run MLflow filho (referência ao run original como parent) com 3 artifacts:
+     - `calibrator.pkl`
+     - `decil_thresholds_calibrated.json` (recomputado sobre score calibrado)
+     - cópia do `feature_registry.json`
+2. Rodar para Champion `jan30` → produz run filho `d51757f5-calibrated-isotonic`
+3. Rodar para Challenger `abr28` → produz run filho `5d158f0a-calibrated-isotonic`
+4. Atualizar `configs/active_models/devclub.yaml` apontando pros runs filhos
+
+**Fase 3 — Validação out-of-sample** (bloqueante do bloco F em [EVENTOS_E_DECIS_PLANO.md](EVENTOS_E_DECIS_PLANO.md))
+1. Pegar leads dos últimos 30-60 dias do Railway com label real de conversão (matching com vendas Guru/Asaas)
+2. Aplicar `predict_proba` + calibrator dos runs filhos
+3. Medir ECE residual em bins de 10 ou 20
+4. Decisão de promoção:
+   - ECE residual ≤ 5 pp → calibração generalizou; libera bloco F
+   - ECE entre 5-10 pp → calibração ajuda mas há drift; avaliar custo de recalibração periódica (a cada N lançamentos)
+   - ECE > 10 pp → drift dominante; bloco F precisa de mecanismo de recalibração contínua antes de ligar
+
+**Fase 4 — Deploy via canary com Gates B/D/C** (já automatizados em `deploy_capi.sh`)
+- Gate D estendido: adicionar invariante D3 — se YAML do cliente declara `scoring.calibration.method != none`, o calibrator deve estar presente como artifact no run apontado por `active_model.mlflow_run_id`
+- Gate C rodado com `--expect-score-change` (thresholds recomputados em escala calibrada vão mudar decis em produção; isso é o objetivo, não regressão)
+
+**Fase 5 — Próximos treinos já calibrando automaticamente** (PR 3, vai junto com próximo retreino do Champion)
+1. Adicionar `CalibrationConfig` em [`src/core/client_config.py`](../src/core/client_config.py) dentro de `ScoringConfig` (ou estrutura nova)
+2. Modificar [`src/model/training_model.py`](../src/model/training_model.py) na sequência canônica de salvar artifacts:
+   - **Antes** de `calcular_thresholds_decis`: fittar calibrador no holdout temporal interno (14% mais recentes do train set)
+   - Recomputar `y_prob_val` → `calibrator.transform(y_prob_val)`
+   - Calcular thresholds sobre os scores calibrados (não sobre os brutos)
+   - Logar `calibrator.pkl` + `metadata.calibration` como artifacts MLflow
+3. Acrescentar bloco em `configs/clients/devclub.yaml`:
+   ```yaml
+   scoring:
+     calibration:
+       method: isotonic
+       holdout_fraction: 0.2  # fração do train set destinada ao calibrador
+   ```
+
+#### Caminho mínimo alternativo para desbloquear apenas o bloco F
+
+Se a meta for **apenas** liberar o bloco F (e não ter calibração funcionando no caminho do CAPI atual), o caminho mais curto é **Fases 2 + 3** sem Fase 1:
+- Script de calibração pós-hoc roda standalone, gera calibrator + thresholds calibrados como artifacts independentes
+- Validação out-of-sample roda direto contra esses artifacts (carrega `calibrator.pkl` na mão), sem precisar do `LeadScoringPredictor` saber lidar com calibrator
+- Decisão go/no-go do bloco F sai daí
+
+Fase 1 (abstração no Predictor) só vira necessária quando o calibrator entrar no runtime de produção do scoring atual — e a partir do momento que isso acontecer, Fase 5 também é necessária para que próximos retreinos não percam a calibração.
+
+#### Riscos de acoplamento a evitar
+
+| Tentação | Bloqueio |
+|---|---|
+| Consumidor pergunta "tem calibrator?" antes de chamar predict | `NoneCalibrator` garante que método existe sempre — pergunta é ilegal pela interface |
+| Train_pipeline crescer em 200 linhas de calibração inline | Lógica vive em [`src/model/calibration.py`](../src/model/calibration.py) (interface + 3 implementações + factory + load/save); train_pipeline tem uma chamada |
+| Doc esquecer de mencionar que score agora é calibrado | Docstring de `predict_proba` deixa explícito + atualizar [`ARQUITETURA_SISTEMA_COMPLETA.md`](ARQUITETURA_SISTEMA_COMPLETA.md) na seção "PIPELINE DE PRODUÇÃO" |
+| Cliente B futuro nascer sem calibração | Template default no `configs/clients/template.yaml` com `method: isotonic` |
+| Aplicar calibrator de um run em modelo de outro | Calibrator vive como artifact dentro do mesmo run do modelo. Run filho mantém pai linkado para auditoria. |
+
+#### Critério de rollback por fase
+
+- **Fase 1:** rollback é redeploy de revisão anterior. Predictor com NoneCalibrator é equivalente ao predictor atual.
+- **Fase 2:** se a calibração pós-hoc do Champion/Challenger não convergir, runs filhos não são criados; `active_models/devclub.yaml` continua apontando pros runs originais. Sem efeito em produção.
+- **Fase 3:** análise; não toca produção.
+- **Fase 4:** canary tem rollback de ~10 segundos via `gcloud run services update-traffic` (já estabelecido).
+- **Fase 5:** se calibração do retreino não convergir, treino falha e modelo não é set-active. Sem efeito em produção.
+
+Tempo total de rollback no pior caso: 10 minutos (redeploy de imagem anterior).
+
+#### Cross-refs
+
+- [`analise_calibracao_jan30_abr28.md`](analise_calibracao_jan30_abr28.md) — diagnóstico empírico que motivou registrar DT-20
+- [`EVENTOS_E_DECIS_PLANO.md`](EVENTOS_E_DECIS_PLANO.md) "Pendência crítica antes do bloco F" — bloqueante out-of-sample
+- [`PLANO_EXECUCAO.md`](PLANO_EXECUCAO.md) sequela 2026-06-07 — bloqueante novo do bloco F registrado
+- DT-17 (eliminar duplicação `business_config.py` × YAML) — relacionado: calibração + DT-17 juntos eliminam a tabela `conversion_rate` no YAML como fonte separada
+- DT-18 (4 features binárias raw) e DT-16 (matar `encoding_overrides`) — também bloqueadas por retreino do próximo Champion; a Fase 5 de DT-20 pode entrar no mesmo retreino
+
+**Prioridade:** alta arquiteturalmente, alta em urgência operacional. Bloqueia o bloco F, que destrava ganho líquido anual projetado entre R$ 86 mil (top 10%) e R$ 298 mil (top 50%) conforme análise paralela registrada em `PLANO_EXECUCAO.md` sequela 2026-06-07.
+
+*Identificador histórico: DT-20.*
+
+---
+
 ## 12. Caminho para Nível 2 e além
 
 Ver **`docs/ROADMAP_MLOPS_MATURIDADE.md`** para o guia completo.
