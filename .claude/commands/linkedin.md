@@ -12,8 +12,8 @@ Use esta skill para **compor ou revisar** posts no LinkedIn que usem o projeto B
 
 O fluxo esperado é **3 posts por semana**, entregues sob demanda: o usuário dispara `/linkedin`, copia o texto, cola no LinkedIn. Sem API, sem scheduler.
 
-**Estado persistente:** `V2/comercial/linkedin_posts/queue.yaml`
-**Arquivo de posts publicados:** `V2/comercial/linkedin_posts/archive/<AAAA-MM-DD>-<slug>.md`
+**Estado persistente:** `~/Desktop/empregabilidade/linkedin/posts/queue.yaml`
+**Arquivo de posts publicados:** `~/Desktop/empregabilidade/linkedin/posts/archive/<AAAA-MM-DD>-<slug>.md`
 
 ### Modos de invocação
 
@@ -196,6 +196,16 @@ Fecho: próximo marco
 
 ## INVARIANTES
 
+### Idioma — todo post em inglês
+
+Todo post é redigido **em inglês**, sem exceção. Hooks, miolo, lista de correção estrutural, lição final, hashtags — tudo em inglês. O portfolio doc, queue.yaml e a conversa em sessão continuam em português; a tradução para inglês acontece no momento de compor o post.
+
+**Por quê:** o público-alvo do LinkedIn de Ramon inclui prospects e recrutadores nos EUA. Posts em português reduzem alcance e sinalizam mercado regional. Inglês como default amplia audiência e mantém consistência com a estratégia de captação internacional.
+
+**Como aplicar:** ao compor, traduzir o ângulo do queue (em PT) para o post em EN. Manter números, nomes próprios e termos técnicos consagrados (MLOps, AUC, A/B test) sem tradução. Evitar tradução literal de expressões idiomáticas — preferir equivalente natural em inglês americano.
+
+Quando o usuário pedir variante em PT explicitamente (`/linkedin <args> --pt` ou pedido textual), entregar PT como variante adicional, nunca como padrão.
+
 ### Números só saem do portfolio doc ou /comercial
 
 Se o post precisa de um número, ele **precisa estar em** `V2/docs/portfolio_linkedin.md` §10 ou em `/comercial`. Se não estiver, parar e perguntar a Ramon — nunca inventar. Se não for possível obter, **reformular o post para não precisar do número**.
@@ -262,7 +272,7 @@ Se o post precisa de um número, ele **precisa estar em** `V2/docs/portfolio_lin
    ```
 3. **Nunca postar por conta própria.** Usuário copia e cola manualmente no LinkedIn. O ritual manual é intencional.
 4. **Após o usuário confirmar que postou** ("postei", "foi", "publicado", "mandado"):
-   - Arquivar o texto em `V2/comercial/linkedin_posts/archive/<AAAA-MM-DD>-<slug>.md` com front-matter:
+   - Arquivar o texto em `~/Desktop/empregabilidade/linkedin/posts/archive/<AAAA-MM-DD>-<slug>.md` com front-matter:
      ```markdown
      ---
      id: w-medium-zerada
@@ -274,7 +284,7 @@ Se o post precisa de um número, ele **precisa estar em** `V2/docs/portfolio_lin
      link:
      ---
      ```
-   - Atualizar `V2/comercial/linkedin_posts/queue.yaml`:
+   - Atualizar `~/Desktop/empregabilidade/linkedin/posts/queue.yaml`:
      - Mover a entrada do array `pending` para `posted`, preservando o `id`.
      - `meta.last_post_date = <data>`; append em `meta.recent_tones` / `meta.recent_themes` (manter últimos 5 de cada, descartar mais antigos).
    - **No modo ad-hoc** (sem item da fila), não atualizar `queue.yaml` — só arquivar o `.md` em `archive/` com `id: adhoc-<slug>`.
@@ -284,6 +294,7 @@ Se o post precisa de um número, ele **precisa estar em** `V2/docs/portfolio_lin
 ## CHECKLIST ANTES DE ENTREGAR
 
 - [ ] Parâmetros (tema / ângulo / tom / comprimento / CTA / público) confirmados.
+- [ ] Post está em inglês — incluindo hashtags.
 - [ ] Todo número do post está em `portfolio_linkedin.md` §10 ou `/comercial`.
 - [ ] Primeira linha funciona como hook sem contexto adicional — lida sozinha, faz alguém querer ver mais.
 - [ ] Nenhuma promessa de resultado futuro.
