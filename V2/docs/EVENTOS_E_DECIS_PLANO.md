@@ -115,10 +115,12 @@ Camada de dados nova que vai alimentar a fórmula da recalibração. Isolada do 
 - Schema: duas tabelas novas no **Railway** (mesma instância de `registros_ml`, `lead_surveys`, `UTMTracking` — banco operacional que o scoring container já conecta). **Não** Cloud SQL `smart-ads-db`, que hospeda só MLflow tracking e fica parado entre treinos; obrigá-lo a ficar 24/7 ligado pra servir CPL custaria ~R$ 35/mês a mais sem ganho operacional.
   - `cpl_adset` — chave `(client_id, adset_id)`, colunas `cpl_30d`, `n_leads_30d`, `spend_30d`, `campaign_id`, `window_start`, `window_end`, `updated_at`.
   - `ad_to_adset_map` — chave `(client_id, campaign_id, ad_name)`, coluna `adset_id`, `updated_at`. Resolve a ambiguidade de nome de anúncio reaproveitado em campanhas distintas.
-- Repositório `CplRepository` em [src/data/cost_attribution/](../src/data/cost_attribution/) — interface mais implementação Cloud SQL mais implementação em memória (carregada no startup do container, lookup de microssegundos no hot path).
+
+  **Nota — por que `utm_medium` não substitui a `ad_to_adset_map`:** verificação contra o snapshot 120d em 2026-06-07 mostrou que `utm_medium` tem cobertura ótima (98,6%) mas é **categoria de público** no DevClub (`ABERTO`, `MIX QUENTE`, `dgen`, `Linguagem de programação`), não identificador de adset — 61% do volume vive num bucket `ABERTO` espalhado por **74 adsets reais distintos**, indistinguíveis por medium. A `ad_to_adset_map` é justamente o que abre esses 74 em CPLs próprios, via casamento `(campaign_id, ad_name) → adset_id`.
+- Repositório `CplRepository` em [src/data/cost_attribution/](../src/data/cost_attribution/) — interface mais adapter Railway mais adapter em memória (carregado no startup do container, lookup de microssegundos no hot path).
 - Resolver `AdResolver` — adaptador `(campaign_id, ad_name) → adset_id` consumindo `ad_to_adset_map`.
 - Job de refresh — entry point standalone que puxa Meta Insights API agregando spend e leads dos últimos 30 dias por adset, calcula `cpl_30d`, faz upsert nas duas tabelas. Idempotente.
-- Infra do refresh — Cloud Run Job + Cloud Scheduler, 1×/dia às 04:00 BRT (depois do fechamento operacional do dia anterior). Reusa o padrão já usado pelo `campaign_classifier` em [src/monitoring/](../src/monitoring/).
+- Infra do refresh — **Cloud Scheduler → endpoint HTTP no `smart-ads-api`** (mesmo padrão do polling Railway e do monitoramento diário), 1×/dia às 04:00 BRT. Custo praticamente zero, reusa container já rodando, sem Cloud Run Job dedicado.
 
 **Critério de avanço:** job rodando há pelo menos uma semana, tabelas com >800 adsets atualizados em <48h, sem falhas consecutivas; CPL p50 em DevClub na faixa de R$ 4-6 (validação contra histórico do gestor).
 
