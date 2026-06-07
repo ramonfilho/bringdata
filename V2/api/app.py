@@ -2072,6 +2072,69 @@ async def cleanup_canary_tags(dry_run: bool = False):
         raise HTTPException(status_code=500, detail=f"Erro no cleanup de tags canary: {str(e)}")
 
 
+@app.post("/admin/refresh-cpl")
+async def refresh_cpl(
+    client_id: str = "devclub",
+    window_days: int = 30,
+    dry_run: bool = False,
+):
+    """Refresh do lookup de custo por adset (Bloco B/4 do EVENTOS_E_DECIS_PLANO).
+
+    Puxa Meta Insights API da janela móvel dos últimos `window_days` dias
+    (default 30, excluindo dia corrente) e UPSERTa nas tabelas Railway
+    `cpl_adset` e `ad_to_adset_map`. Idempotente — rodar 2× no mesmo dia
+    produz o mesmo estado final.
+
+    Disparado por Cloud Scheduler 1×/dia às 04:00 BRT (job
+    `cpl-refresh-daily` configurado em GCP). Custo praticamente zero —
+    reusa o container já rodando, sem Cloud Run Job dedicado.
+
+    Args:
+        client_id: identificador do cliente. Default 'devclub'.
+        window_days: tamanho da janela móvel (default 30).
+        dry_run: se True, calcula sem escrever no Railway. Útil pra debug.
+    """
+    import pg8000.native as _pg8000
+    from src.data.cost_attribution.refresh import refresh_cpl_for_client
+    from src.validation.meta_api_client import MetaAPIClient
+
+    railway_conn = None
+    try:
+        railway_conn = _pg8000.Connection(
+            host=os.environ['RAILWAY_DB_HOST'],
+            port=int(os.environ['RAILWAY_DB_PORT']),
+            user=os.environ['RAILWAY_DB_USER'],
+            password=os.environ['RAILWAY_DB_PASSWORD'],
+            database=os.environ['RAILWAY_DB_NAME'],
+        )
+        meta = MetaAPIClient()
+        stats = refresh_cpl_for_client(
+            client_id=client_id,
+            railway_conn=railway_conn,
+            meta_client=meta,
+            window_days=window_days,
+            dry_run=dry_run,
+        )
+        return {
+            "status": "dry_run" if dry_run else "success",
+            "client_id": stats.client_id,
+            "window_start": stats.window_start.isoformat(),
+            "window_end": stats.window_end.isoformat(),
+            "n_adsets_upserted": stats.n_adsets_upserted,
+            "n_mappings_upserted": stats.n_mappings_upserted,
+            "total_spend": round(stats.total_spend, 2),
+            "total_leads": stats.total_leads,
+            "cpl_global": round(stats.cpl_global, 4) if stats.cpl_global else None,
+            "duration_seconds": round(stats.duration_seconds, 1),
+        }
+    except Exception as e:
+        logger.error(f"[refresh-cpl] erro: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro no refresh CPL: {str(e)}")
+    finally:
+        if railway_conn:
+            railway_conn.close()
+
+
 # =============================================================================
 # MONITORING HELPERS
 # =============================================================================
