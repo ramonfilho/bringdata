@@ -26,6 +26,75 @@ def _make(cls, data: dict):
     return cls(**{k: v for k, v in data.items() if k in known})
 
 
+_VALID_DECILS = {f"D{i:02d}" for i in range(1, 11)}
+_MAX_EXTRA_HQ_DESTINATIONS = 5
+
+
+def _parse_extra_hq_destinations(raw: Any) -> Optional[List["ExtraHQDestination"]]:
+    """Parse fail-loud da lista capi.extra_hq_destinations do YAML.
+
+    None/ausente → None (sem fan-out). Lista vazia → None (idem).
+    Qualquer entrada inválida levanta ValueError com mensagem acionável.
+    """
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise ValueError(
+            f"capi.extra_hq_destinations deve ser lista, recebido {type(raw).__name__}"
+        )
+    if not raw:
+        return None
+    if len(raw) > _MAX_EXTRA_HQ_DESTINATIONS:
+        raise ValueError(
+            f"capi.extra_hq_destinations com {len(raw)} entradas excede o máximo "
+            f"de {_MAX_EXTRA_HQ_DESTINATIONS} (salvaguarda contra runaway)"
+        )
+    out: List["ExtraHQDestination"] = []
+    for i, entry in enumerate(raw):
+        if not isinstance(entry, dict):
+            raise ValueError(
+                f"capi.extra_hq_destinations[{i}] deve ser dict, recebido {type(entry).__name__}"
+            )
+        event_name = entry.get("event_name")
+        pixel_id = entry.get("pixel_id")
+        decils = entry.get("decils")
+        if not event_name or not isinstance(event_name, str):
+            raise ValueError(
+                f"capi.extra_hq_destinations[{i}].event_name obrigatório (string não vazia)"
+            )
+        if not pixel_id or not isinstance(pixel_id, str):
+            raise ValueError(
+                f"capi.extra_hq_destinations[{i}].pixel_id obrigatório (string não vazia)"
+            )
+        if not isinstance(decils, list) or not decils:
+            raise ValueError(
+                f"capi.extra_hq_destinations[{i}].decils obrigatório (lista não vazia)"
+            )
+        bad = [d for d in decils if d not in _VALID_DECILS]
+        if bad:
+            raise ValueError(
+                f"capi.extra_hq_destinations[{i}].decils contém valores inválidos: {bad} "
+                f"(esperado subconjunto de D01..D10)"
+            )
+        out.append(ExtraHQDestination(
+            event_name=event_name,
+            pixel_id=pixel_id,
+            decils=list(decils),
+        ))
+    return out
+
+
+def _load_capi_config(data: dict) -> "CAPIConfig":
+    """Carrega CAPIConfig com parse custom de extra_hq_destinations."""
+    if not data:
+        return CAPIConfig()
+    known = {f.name for f in dataclasses.fields(CAPIConfig)}
+    filtered = {k: v for k, v in data.items() if k in known and k != "extra_hq_destinations"}
+    cfg = CAPIConfig(**filtered)
+    cfg.extra_hq_destinations = _parse_extra_hq_destinations(data.get("extra_hq_destinations"))
+    return cfg
+
+
 # ---------------------------------------------------------------------------
 # Sub-configs — Grupo A: Pipelines ML core (Fases 1–2)
 # ---------------------------------------------------------------------------
@@ -214,6 +283,25 @@ class MonitoringConfig:
 
 
 @dataclass
+class ExtraHQDestination:
+    """Destinação adicional do evento HQ (fan-out por cliente).
+
+    Quando o evento HQ primário sair pela variante, o laço de fan-out em
+    capi_integration.send_both_lead_events dispara uma cópia para cada
+    destinação cujo `event_name` casa com o nome do evento HQ primário que
+    acabou de sair. A cópia usa o pixel e a faixa de decis declarados aqui.
+
+    Regra de match: case-sensitive em event_name. A regra do cliente é
+    global — não depende de qual variante A/B o lead caiu. Para o pixel
+    241752320666130 (BM antigo do DevClub), declarar uma entrada por nome
+    de evento que se quer espelhar.
+    """
+    event_name: str
+    pixel_id: str
+    decils: List[str]
+
+
+@dataclass
 class CAPIConfig:
     """Integração Meta CAPI. (#103–#106, #140)"""
     pixel_id: Optional[str] = None                          # #103
@@ -225,6 +313,11 @@ class CAPIConfig:
     currency: Optional[str] = None                          # #106
     utm_blocklist: Optional[List[str]] = None               # substrings em utm_campaign que bloqueiam envio CAPI
     utm_source_allowlist: Optional[List[str]] = None        # utm_source permitidos para envio CAPI (DT-CAPI-01)
+    # Fan-out de eventos HQ — duplica o disparo HQ primário em pixels
+    # adicionais declarados pelo cliente. Nível CLIENTE (não variante A/B):
+    # vale para qualquer variante cujo HQ primário tenha o mesmo event_name
+    # da entrada. Default None = comportamento legado (sem fan-out).
+    extra_hq_destinations: Optional[List[ExtraHQDestination]] = None
     # decil_to_value removido (DT-5): calculado em runtime como business.product_value × business.conversion_rates[decil]
 
 
@@ -481,7 +574,7 @@ class ClientConfig:
             encoding=_make(EncodingConfig, data.get("encoding", {})),
             model=_make(ModelConfig, data.get("model", {})),
             monitoring=_make(MonitoringConfig, data.get("monitoring", {})),
-            capi=_make(CAPIConfig, data.get("capi", {})),
+            capi=_load_capi_config(data.get("capi", {})),
             api=_make(APIConfig, data.get("api", {})),
             retrain=_make(RetainConfig, data.get("retrain", {})),
             business=_make(BusinessConfig, data.get("business", {})),

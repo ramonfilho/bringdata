@@ -779,12 +779,60 @@ def send_both_lead_events(
         dry_run=dry_run,
     )
 
+    # Fan-out HQ: duplica o disparo primário em pixels adicionais declarados
+    # no client_config.capi.extra_hq_destinations. Match case-sensitive pelo
+    # nome de evento HQ que efetivamente saiu acima. Cada destinação tem sua
+    # própria faixa de decis (filtragem é da send_lead_qualified_high_quality).
+    # Falhas isoladas não derrubam o primário nem as outras cópias.
+    extra_results: List[Dict] = []
+    extras = capi_config.extra_hq_destinations if (capi_config and capi_config.extra_hq_destinations) else []
+    if extras:
+        primary_hq_event_name = event_name_hq_override or (
+            capi_config.event_name_high_quality if capi_config and capi_config.event_name_high_quality
+            else 'LeadQualifiedHighQuality'
+        )
+        for i, dest in enumerate(extras):
+            if dest.event_name != primary_hq_event_name:
+                continue
+            try:
+                r = send_lead_qualified_high_quality(
+                    email=email,
+                    phone=phone,
+                    first_name=first_name,
+                    last_name=last_name,
+                    lead_score=lead_score,
+                    decil=decil,
+                    event_id=event_id,
+                    fbp=fbp,
+                    fbc=fbc,
+                    user_agent=user_agent,
+                    client_ip=client_ip,
+                    event_source_url=event_source_url,
+                    event_timestamp=event_timestamp,
+                    test_event_code=test_event_code,
+                    survey_data=survey_data,
+                    db=db,
+                    capi_config=capi_config,
+                    client_id=client_id,
+                    event_name_override=dest.event_name,
+                    pixel_id_override=dest.pixel_id,
+                    high_quality_decils_override=list(dest.decils),
+                    dry_run=dry_run,
+                )
+                extra_results.append(r)
+            except Exception as e:
+                logger.warning(
+                    f"⚠️  Fan-out HQ [{i}] '{dest.event_name}' → pixel {dest.pixel_id} "
+                    f"falhou para {email}: {e}"
+                )
+
     return {
         "status": "success",
         "email": email,
         "decil": decil,
         "evento_com_valor": result_with_value,
-        "evento_high_quality": result_high_quality
+        "evento_high_quality": result_high_quality,
+        "extra_hq_results": extra_results,
     }
 
 def send_purchase_event(

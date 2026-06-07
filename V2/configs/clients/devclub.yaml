@@ -577,6 +577,19 @@ capi:
   - "ig"               # forma curta — Instagram (16 leads/24h estavam sendo bloqueados por engano)
   - "fb"               # forma curta — Facebook
   - "facebook"         # sistema novo (Pub/Sub) pré-normaliza p/ 'facebook' — 2026-05-22
+  # Fan-out de eventos HQ para o pixel antigo do BM Rodolfo Mori (241752320666130).
+  # Cada entrada espelha o disparo HQ primário (match case-sensitive em event_name):
+  #   - Champion dispara LeadQualifiedHighQuality no pixel 1937… → cópia no 6130 (D9+D10).
+  #   - Challenger dispara HQLB no pixel 1513… → cópia no 6130 (D8+D9+D10).
+  # Não toca a faixa do evento primário (declarada na variante A/B). Rollback = deletar
+  # estas entradas (vira None e o laço de fan-out fica inerte).
+  extra_hq_destinations:
+    - event_name: LeadQualifiedHighQuality
+      pixel_id: "241752320666130"
+      decils: ["D09", "D10"]
+    - event_name: HQLB
+      pixel_id: "241752320666130"
+      decils: ["D08", "D09", "D10"]
 api:
   cors_origins:
   - https://lp.devclub.com.br

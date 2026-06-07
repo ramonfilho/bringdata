@@ -11,6 +11,7 @@ from .client_config import (
     ModelConfig,
     MonitoringConfig,
     CAPIConfig,
+    ExtraHQDestination,
     APIConfig,
     RetainConfig,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "ModelConfig",
     "MonitoringConfig",
     "CAPIConfig",
+    "ExtraHQDestination",
     "APIConfig",
     "RetainConfig",
 ]
