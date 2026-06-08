@@ -704,6 +704,14 @@ def send_both_lead_events(
     conversion_rates_override: Optional[Dict[str, float]] = None,
     pixel_id_override: Optional[str] = None,
     high_quality_decils_override: Optional[List[str]] = None,
+    # Bloco F do EVENTOS_E_DECIS_PLANO — params opcionais pra montar 2ª atribuição RoasV1.
+    # Caller (app.py via send_batch_events) preenche quando a variante tem `roas_v1.enabled=True`
+    # E o lead foi scoreado pela versão calibrada do modelo + cpl_lookup disponível.
+    # Quando QUALQUER um destes está None ou variant_config.roas_v1 está desligada,
+    # comportamento idêntico ao anterior — só Propensão sai (paridade preservada).
+    ab_variant_config = None,  # ABTestVariantConfig — type hint omitido pra evitar import circular
+    lead_score_calibrated: Optional[float] = None,
+    cost_context = None,       # LeadCostContext — type hint omitido pra evitar import circular
     dry_run: bool = False,
 ) -> Dict:
     """
@@ -772,8 +780,37 @@ def send_both_lead_events(
         is_hq_eligible=decil in resolved_hq_decils,
     )
 
+    assignments: List[DecileAssignment] = [propensity_assignment]
+
+    # Bloco F: monta 2ª atribuição (RoasV1) se TODOS os ingredientes estão
+    # disponíveis E a variante está com `roas_v1.enabled=true`. Qualquer
+    # ausência → cai fora, comportamento idêntico ao adapter de 1 atribuição.
+    if (
+        ab_variant_config is not None
+        and getattr(ab_variant_config, "roas_v1", None) is not None
+        and ab_variant_config.roas_v1.enabled
+        and lead_score_calibrated is not None
+        and cost_context is not None
+    ):
+        from src.model.decile_strategy import RoasV1DecileStrategy
+        roas_strategy = RoasV1DecileStrategy(
+            ticket=ab_variant_config.roas_v1.ticket_avista,
+            event_name_suffix=ab_variant_config.roas_v1.event_name_suffix,
+        )
+        roas_assignment = roas_strategy.assign(
+            score=lead_score_calibrated,
+            variant_config=ab_variant_config,
+            thresholds=ab_variant_config.roas_v1.thresholds,
+            cost_context=cost_context,
+        )
+        # Só inclui se a fórmula efetivamente rodou (cpl_source != 'missing').
+        # cpl_source=='missing' significa lead sem campaign_id resolvível no
+        # UTM → emitir evento ROAS_V1 com decil arbitrário polui o sinal.
+        if roas_assignment.cpl_source != "missing":
+            assignments.append(roas_assignment)
+
     all_result = send_all_lead_events(
-        assignments=[propensity_assignment],
+        assignments=assignments,
         email=email,
         phone=phone,
         first_name=first_name,

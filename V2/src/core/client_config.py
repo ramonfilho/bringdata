@@ -439,6 +439,28 @@ class ValidationConfig:
 # ---------------------------------------------------------------------------
 
 @dataclass
+class RoasV1Config:
+    """Configuração da estratégia ROAS V1 dentro de uma variante.
+
+    Quando `enabled=true`, o scoring container monta uma 2ª atribuição
+    (além da propensão) usando `RoasV1DecileStrategy`, que aplica
+    `(prob_calibrada × ticket_avista) ÷ CPL_adset` e atribui decil via
+    `thresholds`. Eventos saem com sufixo `event_name_suffix`.
+
+    `thresholds` é dict no mesmo schema da propensão (D01-D10 com
+    threshold_min/max), porém escala "retorno esperado".
+
+    `ticket_avista` é o valor recebido por venda à vista (cartão líquido
+    + 1ª parcela do boleto) — mesma fórmula do `_generate_revenue_forecast`
+    do monitoring.
+    """
+    enabled: bool = False
+    event_name_suffix: str = "_ROAS_V1"
+    ticket_avista: Optional[float] = None  # obrigatório quando enabled=True
+    thresholds: Optional[Dict[str, Dict[str, float]]] = None  # idem
+
+
+@dataclass
 class ABTestVariantConfig:
     """Configuração de uma variante do teste A/B (champion ou challenger)."""
     run_id: str
@@ -452,6 +474,11 @@ class ABTestVariantConfig:
     capi_high_quality_decils: Optional[List[str]] = None  # Override por variante da faixa de decis que dispara HQ event.
                                                           # None → cai no global capi_config.high_quality_decils (default D09+D10).
                                                           # Ex.: ['D08','D09','D10'] estende HQLB sem afetar Champion.
+    calibrated_run_id: Optional[str] = None  # Bloco F — run MLflow do modelo CALIBRADO (sufixo -calibrated-isotonic).
+                                             # None → usa run_id original (NoneCalibrator = identidade); RoasV1 não roda.
+                                             # Quando setado, scoring carrega este run pra obter prob_calib via predict_proba.
+    roas_v1: Optional[RoasV1Config] = None   # Bloco F — config da estratégia ROAS V1 desta variante.
+                                             # None ou enabled=False → só propensão (comportamento atual).
 
 
 @dataclass
@@ -489,6 +516,31 @@ class ABTestConfig:
                         f"variante '{name}': capi_high_quality_decils deve ser lista não-vazia "
                         f"de strings em D01..D10. Recebido: {hq_decils_raw!r}"
                     )
+            # ROAS V1 (Bloco F) — opcional, default ausente
+            roas_v1_raw = vdata.get("roas_v1")
+            roas_v1: Optional[RoasV1Config] = None
+            if roas_v1_raw is not None:
+                if not isinstance(roas_v1_raw, dict):
+                    raise ValueError(
+                        f"variante '{name}': roas_v1 deve ser dict, recebido {type(roas_v1_raw).__name__}"
+                    )
+                enabled = bool(roas_v1_raw.get("enabled", False))
+                if enabled:
+                    if "ticket_avista" not in roas_v1_raw or not isinstance(roas_v1_raw["ticket_avista"], (int, float)):
+                        raise ValueError(
+                            f"variante '{name}': roas_v1.ticket_avista obrigatório (numérico) quando enabled=true"
+                        )
+                    if not isinstance(roas_v1_raw.get("thresholds"), dict) or not roas_v1_raw["thresholds"]:
+                        raise ValueError(
+                            f"variante '{name}': roas_v1.thresholds obrigatório (dict D01..D10) quando enabled=true"
+                        )
+                roas_v1 = RoasV1Config(
+                    enabled=enabled,
+                    event_name_suffix=str(roas_v1_raw.get("event_name_suffix", "_ROAS_V1")),
+                    ticket_avista=roas_v1_raw.get("ticket_avista"),
+                    thresholds=roas_v1_raw.get("thresholds"),
+                )
+
             variants[name] = ABTestVariantConfig(
                 run_id=vdata["run_id"],
                 utm_pattern=vdata.get("utm_pattern") or {},
@@ -499,6 +551,8 @@ class ABTestConfig:
                 url_pattern=vdata.get("url_pattern"),
                 pixel_id_override=vdata.get("pixel_id_override"),
                 capi_high_quality_decils=hq_decils_raw,
+                calibrated_run_id=vdata.get("calibrated_run_id"),
+                roas_v1=roas_v1,
             )
         return cls(enabled=True, variants=variants)
 
