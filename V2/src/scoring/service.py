@@ -59,6 +59,10 @@ class ScoringExplanation:
     lead_score: float
     decil: int                    # 1..10
     variant: Optional[str]        # 'champion' | 'challenger' | None (fora do A/B)
+    # Bloco F do EVENTOS_E_DECIS_PLANO — score calibrado pra fórmula ROAS V1.
+    # None quando a variante (ou o predictor base) não declarou `calibrated_run_id`
+    # no YAML → caminho ROAS V1 desligado por construção pra esse lead.
+    lead_score_calibrated: Optional[float] = None
 
 
 # `LeadScoringPipeline` tem estado mutável (`self.data`, `self.original_data`)
@@ -151,6 +155,20 @@ def score_lead_from_payload(
         )
         result = pipeline.predict(predictor_override=predictor)
 
+        # Bloco F — score calibrado pra fórmula ROAS V1.
+        # Reusa o `encoded_df` (52 features alinhadas) pra evitar repreprocess.
+        # Modelos calibrados são bit-idênticos aos parents (mesmo SHA256 do
+        # model.pkl), apenas com `calibrator.pkl` adicional → mesmo feature_registry,
+        # `predict_proba(encoded_df)` funciona direto.
+        # Predictor calibrado existe SÓ quando a variante (ou predictor base mapeado
+        # pra variante) declarou `calibrated_run_id` no YAML.
+        lead_score_calibrated: Optional[float] = None
+        calibrated_predictor = pipeline.get_variant_calibrated_predictor(variant_name) if variant_name else None
+        if calibrated_predictor is not None:
+            calib_proba = calibrated_predictor.predict_proba(encoded_df)
+            if calib_proba is not None and len(calib_proba) > 0:
+                lead_score_calibrated = float(calib_proba[0])
+
     # 5. Extrair score e decil.
     if result is None or len(result) == 0:
         raise RuntimeError("pipeline retornou resultado vazio")
@@ -167,6 +185,7 @@ def score_lead_from_payload(
         lead_score=lead_score,
         decil=decil,
         variant=variant_name,
+        lead_score_calibrated=lead_score_calibrated,
     )
 
 

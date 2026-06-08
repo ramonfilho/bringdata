@@ -408,7 +408,10 @@ def process_pending_pubsub(
             event_source_url=utm.get("url"),
         )
         dc = f"D{exp.decil:02d}"
-        scored[eid] = (exp.lead_score, dc, ab_v, exp.variant)
+        # Bloco F do EVENTOS_E_DECIS_PLANO — também guarda lead_score_calibrated
+        # (None quando variante não declarou calibrated_run_id). Caminho de
+        # propensão (lead_score raw + decil) intocado.
+        scored[eid] = (exp.lead_score, dc, ab_v, exp.variant, exp.lead_score_calibrated)
 
     # 5. Montar CAPI + ledger dos enviáveis
     #
@@ -434,7 +437,7 @@ def process_pending_pubsub(
                 enrich=enrich, has_computer=payload.get("hasComputer")))
             handled_ack_ids.append(ack_id)
             continue
-        sc, dc, ab_v, vn = scored[eid]
+        sc, dc, ab_v, vn, sc_cal = scored[eid]
         _di_int = int(dc[1:]) if dc else None
 
         # Gates de dispatch (só ativos quando score_all=True — caso contrário,
@@ -483,6 +486,21 @@ def process_pending_pubsub(
             cl["ab_conversion_rates"]  = ab_v.conversion_rates
             cl["ab_pixel_id"]          = ab_v.pixel_id_override
             cl["ab_high_quality_decils"] = ab_v.capi_high_quality_decils
+            # Bloco F do EVENTOS_E_DECIS_PLANO — popula ingredientes da
+            # RoasV1DecileStrategy quando TODOS estão presentes:
+            #   (a) variante declarou roas_v1 e está enabled
+            #   (b) score calibrado existe (variant tem calibrated_run_id)
+            #   (c) cpl_lookup global foi inicializado no startup do app.py
+            # send_both_lead_events só monta 2ª atribuição quando os 3 chegam.
+            if ab_v.roas_v1 and ab_v.roas_v1.enabled and sc_cal is not None:
+                from api.app import get_cpl_lookup  # global do startup
+                cpl_lookup = get_cpl_lookup()
+                if cpl_lookup is not None:
+                    cl["ab_variant_config"]         = ab_v
+                    cl["ab_lead_score_calibrated"]  = sc_cal
+                    cl["ab_cost_context"]           = cpl_lookup.cost_context_for(
+                        utm.get("campaign"), utm.get("content"),
+                    )
         capi_leads.append(cl)
         capi_meta.append(
             (eid, dc, int(dc[1:]) if dc else None, vn, ack_id, payload, utm, survey_dict, enrich)

@@ -153,6 +153,61 @@ app.add_middleware(
 # A2: dicionário de pipelines indexado por client_id
 pipelines: Dict[str, LeadScoringPipeline] = {}
 
+# Bloco F do EVENTOS_E_DECIS_PLANO — lookup de CPL por adset (snapshot Railway
+# carregado em memória no startup). 1 por cliente. Consumido pelo pubsub_branch
+# pra resolver `cost_context` por lead antes de chamar `send_batch_events`.
+# None quando o snapshot falha ou cliente não tem dados — caminho ROAS V1
+# fica desligado por construção até refresh seguinte popular.
+cpl_lookups: Dict[str, "CplLookup"] = {}  # type: ignore  # forward ref evita import-time
+TYPE_CHECKING_CPL = False
+if TYPE_CHECKING_CPL:
+    from src.data.cost_attribution.cpl_lookup import CplLookup  # noqa: F401
+
+
+def get_cpl_lookup(client_id: str = 'devclub'):
+    """Devolve o `CplLookup` global do cliente. None se não inicializado.
+
+    Consumido por `api/pubsub_branch.py` pra resolver `cost_context` por lead
+    quando a variante tem ROAS V1 ativa. Retorno None desabilita ROAS V1 pra
+    aquele lead — proteção em camada extra além da flag yaml.
+    """
+    return cpl_lookups.get(client_id)
+
+
+def initialize_cpl_lookups() -> None:
+    """Carrega 1 snapshot de CPL por cliente no startup do FastAPI.
+
+    Falha (ex.: tabelas vazias ou Railway off) não bloqueia o app — só deixa
+    `cpl_lookups[client_id]` ausente. ROAS V1 fica desligado pra esse cliente
+    até o próximo restart pós refresh job rodar.
+    """
+    global cpl_lookups
+    try:
+        import pg8000.native as _pg8000
+        from src.data.cost_attribution.cpl_lookup import CplLookup
+    except ImportError as e:
+        logger.warning(f"[startup_cpl] imports falharam: {e} — ROAS V1 desligado")
+        return
+    for client_id in pipelines.keys():
+        try:
+            conn = _pg8000.Connection(
+                host=os.environ['RAILWAY_DB_HOST'],
+                port=int(os.environ['RAILWAY_DB_PORT']),
+                user=os.environ['RAILWAY_DB_USER'],
+                password=os.environ['RAILWAY_DB_PASSWORD'],
+                database=os.environ['RAILWAY_DB_NAME'],
+            )
+            try:
+                cpl_lookups[client_id] = CplLookup.from_railway(conn, client_id)
+                logger.info(f"[startup_cpl] CplLookup carregado pro '{client_id}'")
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.warning(
+                f"[startup_cpl] falha ao carregar CplLookup pro '{client_id}': {e} "
+                f"— ROAS V1 desligado pra esse cliente até próximo restart"
+            )
+
 
 def initialize_pipelines() -> bool:
     """Inicializa pipelines para todos os clientes em configs/clients/*.yaml"""
@@ -211,6 +266,10 @@ async def startup_event():
         logger.error("❌ Falha ao inicializar pipelines!")
     else:
         logger.info(f"✅ API V2 pronta — pipelines ativos: {list(pipelines.keys())}")
+        # Bloco F do EVENTOS_E_DECIS_PLANO — snapshot do CPL lookup por cliente.
+        # Não bloqueia startup se falhar (ROAS V1 só liga quando flag yaml +
+        # variante calibrada + cpl_lookup todos presentes).
+        initialize_cpl_lookups()
 
     # Inicializar database
     if init_database():

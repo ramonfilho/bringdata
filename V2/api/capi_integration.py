@@ -1233,6 +1233,13 @@ def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConf
             conversion_rates_override=lead.get('ab_conversion_rates'),
             pixel_id_override=lead.get('ab_pixel_id'),
             high_quality_decils_override=lead.get('ab_high_quality_decils'),
+            # Bloco F do EVENTOS_E_DECIS_PLANO — ingredientes da RoasV1.
+            # send_both_lead_events só monta 2ª atribuição quando os 3 chegam
+            # E variante tem roas_v1.enabled=true. Qualquer ausência → caminho
+            # idêntico ao atual (1 atribuição Propensão).
+            ab_variant_config=lead.get('ab_variant_config'),
+            lead_score_calibrated=lead.get('ab_lead_score_calibrated'),
+            cost_context=lead.get('ab_cost_context'),
             dry_run=dry_run,
             # test_event_code=None (padrão) -> vai para PRODUÇÃO
         )
