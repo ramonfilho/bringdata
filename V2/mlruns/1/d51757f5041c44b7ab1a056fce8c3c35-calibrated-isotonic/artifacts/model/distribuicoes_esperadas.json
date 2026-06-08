@@ -1,0 +1,128 @@
+{
+  "categorical": {
+    "O seu gênero:": {
+      "Masculino": 0.8453348784153253,
+      "Feminino": 0.15466512158467471
+    },
+    "Qual a sua idade?": {
+      "25 34 anos": 0.3273733002589219,
+      "35 44 anos": 0.22250086005540567,
+      "18 24 anos": 0.1956490249687664,
+      "45 54 anos": 0.12000941534338844,
+      "menos de 18 anos": 0.08940954933096742,
+      "mais de 55 anos": 0.04505785004255011
+    },
+    "O que você faz atualmente?": {
+      "sou cltfuncionario publico": 0.444413261149034,
+      "sou autonomo": 0.2529830342754712,
+      "sou apenas estudante": 0.1798240055043546,
+      "nao trabalho e nem estudo": 0.1034510854804541,
+      "sou aposentado": 0.019328613590686054
+    },
+    "Atualmente, qual a sua faixa salarial?": {
+      "entre r1000 a r2000 reais ao mes": 0.32419562186532436,
+      "nao tenho renda": 0.2688623730286625,
+      "entre r2001 a r3000 reais ao mes": 0.2062412862807583,
+      "entre r3001 a r5000 reais ao mes": 0.1358163283782071,
+      "mais de r5001 reais ao mes": 0.06488439044704775
+    },
+    "Source": {
+      "facebook-ads": 0.8989385995359799,
+      "google-ads": 0.097599517711321,
+      "outros": 0.0034618827526991724
+    },
+    "Medium": {
+      "Linguagem de programação": 0.3303524124449641,
+      "Lookalike 2% Cadastrados - DEV 2.0 + Interesses": 0.21114602554031095,
+      "Aberto": 0.14457314065440197,
+      "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação": 0.12812174580265634,
+      "dgen": 0.09657087527632131,
+      "Lookalike 2% Alunos + Interesse Linguagem de Programação": 0.056077242084878604,
+      "Outros": 0.03315855819646674
+    },
+    "Term": {
+      "instagram": 0.6671964921896409,
+      "facebook": 0.22579702201516397,
+      "outros": 0.10700648579519503
+    },
+    "Você possui cartão de crédito?": {
+      "nao": 0.6453040974850169,
+      "sim": 0.35469590251498306
+    },
+    "O que mais você quer ver no evento?": {
+      "fazer transicao de carreira e conseguir meu primeiro emprego na area": 0.37538249832515524,
+      "fazer um projeto na pratica": 0.23721233409983886,
+      "quero saber se e para mim": 0.19112241757047926,
+      "fazer freelancer como programador": 0.12735157254341017,
+      "a aula com a recrutadora": 0.06893117746111645
+    },
+    "Tem computador/notebook?": {
+      "sim": 0.8082004502115523,
+      "nao": 0.1917995497884477
+    },
+    "Já estudou programação?": {
+      "Não": 0.7081062485288526,
+      "Sim": 0.2918937514711474
+    },
+    "Você já fez/faz/pretende fazer faculdade?": {
+      "Sim": 0.7156566296691955,
+      "Não": 0.2843433703308045
+    },
+    "investiu_curso_online": {
+      "Não": 0.6011244092777345,
+      "Sim": 0.39887559072226547
+    },
+    "interesse_programacao": {
+      "todas as alternativas": 0.39257455322384976,
+      "poder trabalhar de qualquer lugar do mundo": 0.3541527096271886,
+      "a possibilidade de ganhar altos salarios": 0.10801390573792753,
+      "trabalhar para outros paises e ganhar em outra moeda": 0.07589309963968205,
+      "a ideia de nunca faltar emprego na area": 0.06936573177135201
+    },
+    "nome_tem_sobrenome": {
+      "True": 0.8514184878512284,
+      "False": 0.14858151214877155
+    },
+    "nome_valido": {
+      "True": 0.9974933260938419,
+      "False": 0.002506673906158092
+    },
+    "email_valido": {
+      "True": 0.9932310755169449,
+      "False": 0.0067689244830550655
+    },
+    "telefone_valido": {
+      "True": 0.9972399438939414,
+      "False": 0.0027600561060585494
+    },
+    "telefone_comprimento": {
+      "11": 0.9667073888059364,
+      "9": 0.017420026243156417,
+      "10": 0.012940590923487625,
+      "4": 0.0027600561060585494,
+      "8": 0.00017193792136102439
+    }
+  },
+  "numerical": {
+    "dia_semana": {
+      "mean": 2.8685308357087913,
+      "median": 3.0,
+      "std": 1.9995113063564411,
+      "min": 0.0,
+      "max": 6.0,
+      "q25": 1.0,
+      "q75": 5.0,
+      "missing_rate": 0.0
+    },
+    "nome_comprimento": {
+      "mean": 18.145359938464324,
+      "median": 17.0,
+      "std": 8.238613743758632,
+      "min": 1.0,
+      "max": 106.0,
+      "q25": 12.0,
+      "q75": 24.0,
+      "missing_rate": 0.0
+    }
+  }
+}

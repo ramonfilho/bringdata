@@ -1,0 +1,263 @@
+{
+  "model_info": {
+    "model_name": "v1_devclub_rf_temporal_leads_single",
+    "model_type": "RandomForestClassifier",
+    "split_type": "temporal_leads",
+    "library": "scikit-learn",
+    "library_version": "1.6.1",
+    "trained_at": "2026-04-28T15:33:50.538339",
+    "training_duration_info": "Trained with temporal_leads split"
+  },
+  "cli_args": {
+    "initial_matching": "email_telefone",
+    "save_files": false,
+    "save_test_predictions": false,
+    "tune_hyperparams": false,
+    "grid_size": "small",
+    "split_method": "temporal_leads",
+    "tmb_risk_filter": "all",
+    "set_active": false,
+    "medium_strategy": "binary_top3",
+    "verbosity": "normal",
+    "no_api_data": false,
+    "no_sheets_api": false,
+    "no_weights": false,
+    "control_group_weights": true,
+    "train_ratio": 0.8,
+    "save_encoded": false,
+    "api_start_date": null,
+    "api_end_date": null,
+    "capture_parity_snapshots": false,
+    "use_cached_data": true,
+    "hyperparams": null,
+    "max_date": null,
+    "activate_run": null
+  },
+  "hyperparameters": {
+    "n_estimators": 300,
+    "max_depth": 8,
+    "min_samples_split": 2,
+    "min_samples_leaf": 1,
+    "max_features": "sqrt",
+    "class_weight": "balanced",
+    "random_state": 42,
+    "n_jobs": -1
+  },
+  "training_data": {
+    "dataset_name": "dataset_devclub_rf_temporal_leads",
+    "total_records": 201547,
+    "training_records": 161237,
+    "test_records": 40310,
+    "features_count": 60,
+    "target_distribution": {
+      "training_positive_rate": 0.015554742397836725,
+      "test_positive_rate": 0.005829818903497892,
+      "training_positive_count": 2508,
+      "test_positive_count": 235
+    },
+    "temporal_split": {
+      "period_start": "2025-02-08",
+      "period_end": "2026-04-08",
+      "cut_date": "2026-03-15",
+      "training_days": 400,
+      "total_days": 424
+    }
+  },
+  "recall_metrics": {
+    "vendas_devclub_total": null,
+    "vendas_matched": null,
+    "recall": null,
+    "fator_correcao": null,
+    "description": "Recall = vendas_matched / vendas_devclub_total. Used to auto-correct conversion rates in business_config.py"
+  },
+  "performance_metrics": {
+    "auc": 0.753092525981869,
+    "top3_decil_concentration": 64.68,
+    "top5_decil_concentration": 85.53,
+    "lift_maximum": 3.88,
+    "monotonia_percentage": 77.77777777777779,
+    "baseline_conversion_rate": 0.005829818903497892
+  },
+  "decil_analysis": {
+    "decil_1": {
+      "total_leads": 4031,
+      "conversions": 0,
+      "conversion_rate": 0.0,
+      "pct_total_conversions": 0.0,
+      "lift": 0.0
+    },
+    "decil_2": {
+      "total_leads": 4031,
+      "conversions": 8,
+      "conversion_rate": 0.002,
+      "pct_total_conversions": 3.4,
+      "lift": 0.34
+    },
+    "decil_3": {
+      "total_leads": 4031,
+      "conversions": 8,
+      "conversion_rate": 0.002,
+      "pct_total_conversions": 3.4,
+      "lift": 0.34
+    },
+    "decil_4": {
+      "total_leads": 4031,
+      "conversions": 11,
+      "conversion_rate": 0.0027,
+      "pct_total_conversions": 4.68,
+      "lift": 0.46
+    },
+    "decil_5": {
+      "total_leads": 4031,
+      "conversions": 7,
+      "conversion_rate": 0.0017,
+      "pct_total_conversions": 2.98,
+      "lift": 0.29
+    },
+    "decil_6": {
+      "total_leads": 4031,
+      "conversions": 24,
+      "conversion_rate": 0.006,
+      "pct_total_conversions": 10.21,
+      "lift": 1.03
+    },
+    "decil_7": {
+      "total_leads": 4031,
+      "conversions": 25,
+      "conversion_rate": 0.0062,
+      "pct_total_conversions": 10.64,
+      "lift": 1.06
+    },
+    "decil_8": {
+      "total_leads": 4031,
+      "conversions": 31,
+      "conversion_rate": 0.0077,
+      "pct_total_conversions": 13.19,
+      "lift": 1.32
+    },
+    "decil_9": {
+      "total_leads": 4031,
+      "conversions": 30,
+      "conversion_rate": 0.0074,
+      "pct_total_conversions": 12.77,
+      "lift": 1.27
+    },
+    "decil_10": {
+      "total_leads": 4031,
+      "conversions": 91,
+      "conversion_rate": 0.0226,
+      "pct_total_conversions": 38.72,
+      "lift": 3.88
+    }
+  },
+  "decil_thresholds": {
+    "method": "percentile_on_calibrated_scores",
+    "calculated_at": "2026-06-07",
+    "validation_metrics": {
+      "max_diferenca_absoluta": 0,
+      "media_diferenca_absoluta": 0.0,
+      "max_diferenca_percentual": 0.0
+    },
+    "thresholds": {
+      "D1": {
+        "threshold_min": 0.0,
+        "threshold_max": 0.0,
+        "count": 0,
+        "mean_probability": 0.0,
+        "std_probability": 0.0
+      },
+      "D2": {
+        "threshold_min": 0.0,
+        "threshold_max": 0.0016848452602642547,
+        "count": 7941,
+        "mean_probability": 0.0005037148973680896,
+        "std_probability": 0.0006324729086129601
+      },
+      "D3": {
+        "threshold_min": 0.0016848452602642547,
+        "threshold_max": 0.0016848452602642547,
+        "count": 0,
+        "mean_probability": 0.0,
+        "std_probability": 0.0
+      },
+      "D4": {
+        "threshold_min": 0.0016848452602642547,
+        "threshold_max": 0.0016848452602642547,
+        "count": 0,
+        "mean_probability": 0.0,
+        "std_probability": 0.0
+      },
+      "D5": {
+        "threshold_min": 0.0016848452602642547,
+        "threshold_max": 0.0044106836559666745,
+        "count": 11798,
+        "mean_probability": 0.0017799627055433127,
+        "std_probability": 0.00044252530063407664
+      },
+      "D6": {
+        "threshold_min": 0.0044106836559666745,
+        "threshold_max": 0.005827128520556815,
+        "count": 4081,
+        "mean_probability": 0.0044106836559666745,
+        "std_probability": 0.0
+      },
+      "D7": {
+        "threshold_min": 0.005827128520556815,
+        "threshold_max": 0.0067147475752300425,
+        "count": 3089,
+        "mean_probability": 0.005827128520556815,
+        "std_probability": 0.0
+      },
+      "D8": {
+        "threshold_min": 0.0067147475752300425,
+        "threshold_max": 0.0067147475752300425,
+        "count": 0,
+        "mean_probability": 0.0,
+        "std_probability": 0.0
+      },
+      "D9": {
+        "threshold_min": 0.0067147475752300425,
+        "threshold_max": 0.012345679012345678,
+        "count": 9748,
+        "mean_probability": 0.0071809601969634795,
+        "std_probability": 0.0010122238080370796
+      },
+      "D10": {
+        "threshold_min": 0.012345679012345678,
+        "threshold_max": 0.5,
+        "count": 4201,
+        "mean_probability": 0.022851701975720066,
+        "std_probability": 0.016948205135369248
+      }
+    },
+    "usage_notes": "Thresholds em escala calibrada (DT-20 Fase 2)."
+  },
+  "production_notes": {
+    "use_case": "Lead scoring for DevClub products with budget allocation optimization",
+    "prediction_interpretation": "Higher probability = higher priority for budget allocation",
+    "calibration_status": "Not calibrated - use for ranking only",
+    "recommended_deployment": "Batch scoring with validation on future launches",
+    "monitoring_requirements": "Track performance degradation and feature drift",
+    "model_limitations": "Monotonia at 77.8% - investigate if < 80%"
+  },
+  "data_quality_baseline": {
+    "description": "Missing rates das colunas cr\u00edticas usadas no modelo - baseline para monitoramento",
+    "captured_at": "2026-04-28T15:33:50.542384",
+    "total_records": 201547,
+    "missing_rates": {
+      "investiu_curso_online": 0.43810494966171376,
+      "interesse_programacao": 0.43810494966171376
+    },
+    "usage": "Compare com novos treinos para detectar mudan\u00e7as em qualidade de dados"
+  },
+  "calibration": {
+    "method": "isotonic",
+    "fitted_at": "2026-06-07",
+    "parent_run_id": "5d158f0aa6e54b489498470446194a6c",
+    "fit_source": "matched_dataset_2026-05-09.parquet (99.9% cobertura do test set)",
+    "n_calibration_leads": 40858,
+    "n_calibration_positives": 227,
+    "ece_pre_pp": 39.544006415708985,
+    "ece_post_in_sample_pp": 0.0
+  }
+}

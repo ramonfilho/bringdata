@@ -1,0 +1,245 @@
+{
+  "model_info": {
+    "model_name": "v1_devclub_rf_temporal_leads_single",
+    "model_type": "RandomForestClassifier",
+    "split_type": "temporal_leads",
+    "library": "scikit-learn",
+    "library_version": "1.6.1",
+    "trained_at": "2026-01-30T09:02:24.891076",
+    "training_duration_info": "Trained with temporal_leads split"
+  },
+  "hyperparameters": {
+    "n_estimators": 300,
+    "max_depth": 8,
+    "min_samples_split": 2,
+    "min_samples_leaf": 1,
+    "max_features": "sqrt",
+    "class_weight": "balanced",
+    "random_state": 42,
+    "n_jobs": -1
+  },
+  "training_data": {
+    "dataset_name": "dataset_devclub_rf_temporal_leads",
+    "total_records": 110505,
+    "training_records": 77353,
+    "test_records": 33152,
+    "features_count": 52,
+    "target_distribution": {
+      "training_positive_rate": 0.006670717360671209,
+      "test_positive_rate": 0.006605936293436293,
+      "training_positive_count": 516,
+      "test_positive_count": 219
+    },
+    "temporal_split": {
+      "period_start": "2025-03-01",
+      "period_end": "2025-11-04",
+      "cut_date": "2025-09-24",
+      "training_days": 207,
+      "total_days": 248
+    }
+  },
+  "recall_metrics": {
+    "vendas_devclub_total": null,
+    "vendas_matched": null,
+    "recall": null,
+    "fator_correcao": null,
+    "description": "Recall = vendas_matched / vendas_devclub_total. Used to auto-correct conversion rates in business_config.py"
+  },
+  "performance_metrics": {
+    "auc": 0.7311170167409214,
+    "top3_decil_concentration": 62.09,
+    "top5_decil_concentration": 83.1,
+    "lift_maximum": 2.65,
+    "monotonia_percentage": 88.88888888888889,
+    "baseline_conversion_rate": 0.006605936293436293
+  },
+  "decil_analysis": {
+    "decil_1": {
+      "total_leads": 3316,
+      "conversions": 3,
+      "conversion_rate": 0.0009,
+      "pct_total_conversions": 1.37,
+      "lift": 0.14
+    },
+    "decil_2": {
+      "total_leads": 3316,
+      "conversions": 4,
+      "conversion_rate": 0.0012,
+      "pct_total_conversions": 1.83,
+      "lift": 0.18
+    },
+    "decil_3": {
+      "total_leads": 3314,
+      "conversions": 5,
+      "conversion_rate": 0.0015,
+      "pct_total_conversions": 2.28,
+      "lift": 0.23
+    },
+    "decil_4": {
+      "total_leads": 3315,
+      "conversions": 10,
+      "conversion_rate": 0.003,
+      "pct_total_conversions": 4.57,
+      "lift": 0.45
+    },
+    "decil_5": {
+      "total_leads": 3315,
+      "conversions": 15,
+      "conversion_rate": 0.0045,
+      "pct_total_conversions": 6.85,
+      "lift": 0.68
+    },
+    "decil_6": {
+      "total_leads": 3316,
+      "conversions": 18,
+      "conversion_rate": 0.0054,
+      "pct_total_conversions": 8.22,
+      "lift": 0.82
+    },
+    "decil_7": {
+      "total_leads": 3316,
+      "conversions": 28,
+      "conversion_rate": 0.0084,
+      "pct_total_conversions": 12.79,
+      "lift": 1.27
+    },
+    "decil_8": {
+      "total_leads": 3315,
+      "conversions": 26,
+      "conversion_rate": 0.0078,
+      "pct_total_conversions": 11.87,
+      "lift": 1.18
+    },
+    "decil_9": {
+      "total_leads": 3313,
+      "conversions": 52,
+      "conversion_rate": 0.0157,
+      "pct_total_conversions": 23.74,
+      "lift": 2.38
+    },
+    "decil_10": {
+      "total_leads": 3316,
+      "conversions": 58,
+      "conversion_rate": 0.0175,
+      "pct_total_conversions": 26.48,
+      "lift": 2.65
+    }
+  },
+  "decil_thresholds": {
+    "method": "exact_from_test_set",
+    "calculated_at": "2026-01-30T09:02:24.892417",
+    "validation_metrics": {
+      "max_diferenca_absoluta": 0,
+      "media_diferenca_absoluta": 0.0,
+      "max_diferenca_percentual": 0.0
+    },
+    "thresholds": {
+      "D1": {
+        "threshold_min": 0.024176986712579365,
+        "threshold_max": 0.11398720161217021,
+        "count": 3316,
+        "mean_probability": 0.08191517951587308,
+        "std_probability": 0.02354102491647927
+      },
+      "D2": {
+        "threshold_min": 0.11399428066999029,
+        "threshold_max": 0.14609343508117448,
+        "count": 3316,
+        "mean_probability": 0.1309727220586476,
+        "std_probability": 0.009184534939926499
+      },
+      "D3": {
+        "threshold_min": 0.14610753227653503,
+        "threshold_max": 0.17437325141827106,
+        "count": 3314,
+        "mean_probability": 0.15985093270651185,
+        "std_probability": 0.00803419724376668
+      },
+      "D4": {
+        "threshold_min": 0.1743859897244552,
+        "threshold_max": 0.2056106561482155,
+        "count": 3315,
+        "mean_probability": 0.18971762625526975,
+        "std_probability": 0.008959405221718198
+      },
+      "D5": {
+        "threshold_min": 0.20561408188986305,
+        "threshold_max": 0.24041995810325906,
+        "count": 3315,
+        "mean_probability": 0.22226069125825432,
+        "std_probability": 0.009906656423960226
+      },
+      "D6": {
+        "threshold_min": 0.2404561827963859,
+        "threshold_max": 0.28451800228413116,
+        "count": 3316,
+        "mean_probability": 0.2620447896476018,
+        "std_probability": 0.012818550871999464
+      },
+      "D7": {
+        "threshold_min": 0.284538085788296,
+        "threshold_max": 0.3305766221697965,
+        "count": 3316,
+        "mean_probability": 0.30749877454280294,
+        "std_probability": 0.01328413195817263
+      },
+      "D8": {
+        "threshold_min": 0.33060225871489846,
+        "threshold_max": 0.3786730268632587,
+        "count": 3315,
+        "mean_probability": 0.3545196561361987,
+        "std_probability": 0.013784141133271864
+      },
+      "D9": {
+        "threshold_min": 0.37869542121248717,
+        "threshold_max": 0.46062907472915515,
+        "count": 3313,
+        "mean_probability": 0.41131703152702465,
+        "std_probability": 0.022183017247116545
+      },
+      "D10": {
+        "threshold_min": 0.46071890271303734,
+        "threshold_max": 0.7999222682358855,
+        "count": 3316,
+        "mean_probability": 0.5780386189962908,
+        "std_probability": 0.06948992837939477
+      }
+    },
+    "usage_notes": {
+      "description": "Use these thresholds for consistent decil assignment in production",
+      "benefits": [
+        "Consistent scoring across different batch sizes",
+        "Enables high-frequency CAPI batching (every 2-3 hours)",
+        "Prevents value instability in Meta algorithm"
+      ],
+      "implementation": "Use atribuir_decil_por_threshold(score, thresholds) from src.model.decil_thresholds"
+    }
+  },
+  "production_notes": {
+    "use_case": "Lead scoring for DevClub products with budget allocation optimization",
+    "prediction_interpretation": "Higher probability = higher priority for budget allocation",
+    "calibration_status": "Not calibrated - use for ranking only",
+    "recommended_deployment": "Batch scoring with validation on future launches",
+    "monitoring_requirements": "Track performance degradation and feature drift",
+    "model_limitations": "Monotonia at 88.9% - investigate if < 80%"
+  },
+  "data_quality_baseline": {
+    "description": "Missing rates das colunas críticas usadas no modelo - baseline para monitoramento",
+    "captured_at": "2026-01-30T09:02:24.892431",
+    "total_records": 110505,
+    "missing_rates": {
+      "O seu gênero:": 0.00034980958478262307,
+      "Qual a sua idade?": 0.00034980958478262307,
+      "O que você faz atualmente?": 0.00034980958478262307,
+      "Atualmente, qual a sua faixa salarial?": 0.00034980958478262307,
+      "Você possui cartão de crédito?": 0.0456072496386401,
+      "O que mais você quer ver no evento?": 0.0456072496386401,
+      "Já estudou programação?": 0.17825108407970378,
+      "Você já fez/faz/pretende fazer faculdade?": 0.17825108407970378,
+      "investiu_curso_online": 0.00034980958478262307,
+      "interesse_programacao": 0.00034980958478262307,
+      "Tem computador/notebook?": 0.37741814125707046
+    },
+    "usage": "Compare com novos treinos para detectar mudanças em qualidade de dados"
+  }
+}

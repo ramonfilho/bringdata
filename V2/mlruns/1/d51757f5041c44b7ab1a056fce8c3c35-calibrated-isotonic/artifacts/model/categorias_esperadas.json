@@ -1,0 +1,104 @@
+{
+  "O seu gênero:": [
+    "Feminino",
+    "Masculino"
+  ],
+  "Qual a sua idade?": [
+    "18 24 anos",
+    "25 34 anos",
+    "35 44 anos",
+    "45 54 anos",
+    "mais de 55 anos",
+    "menos de 18 anos"
+  ],
+  "O que você faz atualmente?": [
+    "nao trabalho e nem estudo",
+    "sou apenas estudante",
+    "sou aposentado",
+    "sou autonomo",
+    "sou cltfuncionario publico"
+  ],
+  "Atualmente, qual a sua faixa salarial?": [
+    "entre r1000 a r2000 reais ao mes",
+    "entre r2001 a r3000 reais ao mes",
+    "entre r3001 a r5000 reais ao mes",
+    "mais de r5001 reais ao mes",
+    "nao tenho renda"
+  ],
+  "Source": [
+    "facebook-ads",
+    "google-ads",
+    "outros"
+  ],
+  "Medium": [
+    "Aberto",
+    "Linguagem de programação",
+    "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ciência da Computação",
+    "Lookalike 2% Alunos + Interesse Linguagem de Programação",
+    "Lookalike 2% Cadastrados - DEV 2.0 + Interesses",
+    "Outros",
+    "dgen"
+  ],
+  "Term": [
+    "facebook",
+    "instagram",
+    "outros"
+  ],
+  "Você possui cartão de crédito?": [
+    "nao",
+    "sim"
+  ],
+  "O que mais você quer ver no evento?": [
+    "a aula com a recrutadora",
+    "fazer freelancer como programador",
+    "fazer transicao de carreira e conseguir meu primeiro emprego na area",
+    "fazer um projeto na pratica",
+    "quero saber se e para mim"
+  ],
+  "Tem computador/notebook?": [
+    "nao",
+    "sim"
+  ],
+  "Já estudou programação?": [
+    "Não",
+    "Sim"
+  ],
+  "Você já fez/faz/pretende fazer faculdade?": [
+    "Não",
+    "Sim"
+  ],
+  "investiu_curso_online": [
+    "Não",
+    "Sim"
+  ],
+  "interesse_programacao": [
+    "a ideia de nunca faltar emprego na area",
+    "a possibilidade de ganhar altos salarios",
+    "poder trabalhar de qualquer lugar do mundo",
+    "todas as alternativas",
+    "trabalhar para outros paises e ganhar em outra moeda"
+  ],
+  "nome_tem_sobrenome": [
+    "False",
+    "True"
+  ],
+  "nome_valido": [
+    "False",
+    "True"
+  ],
+  "email_valido": [
+    "False",
+    "True"
+  ],
+  "telefone_valido": [
+    "False",
+    "True"
+  ],
+  "telefone_comprimento": [
+    "10",
+    "11",
+    "4",
+    "8",
+    "9"
+  ]
+}

@@ -1,0 +1,118 @@
+{
+  "categorical": {
+    "O seu g\u00eanero:": {
+      "Masculino": 0.8116379374525384,
+      "Feminino": 0.18836206254746152
+    },
+    "Qual a sua idade?": {
+      "25 34 anos": 0.3190605472530636,
+      "35 44 anos": 0.22402831064279652,
+      "18 24 anos": 0.22314484387951103,
+      "45 54 anos": 0.11297455317923952,
+      "menos de 18 anos": 0.08815310776805522,
+      "mais de 55 anos": 0.03263863727733411
+    },
+    "O que voc\u00ea faz atualmente?": {
+      "sou cltfuncionario publico": 0.4286402056790038,
+      "sou autonomo": 0.25201633917182437,
+      "sou apenas estudante": 0.18323001404612888,
+      "nao trabalho e nem estudo": 0.11188262796619003,
+      "sou aposentado": 0.014016349098417204,
+      "trabalho em outra area e quero fazer transicao para tecnologia": 0.008705621925858277,
+      "estou no ensino medio ou acabei de sair e quero entrar na programacao": 0.0015088421125774895
+    },
+    "Atualmente, qual a sua faixa salarial?": {
+      "entre r1000 a r2000 reais ao mes": 0.3089503124395098,
+      "nao tenho renda": 0.27985546880816364,
+      "entre r2001 a r3000 reais ao mes": 0.20103335831525868,
+      "entre r3001 a r5000 reais ao mes": 0.13787541133319106,
+      "mais de r5001 reais ao mes": 0.07228544910387683
+    },
+    "Source": {
+      "facebook-ads": 0.9156180458228471,
+      "google-ads": 0.07455129074551291,
+      "outros": 0.005771810057718101,
+      "youtube": 0.0033003300330033004,
+      "tiktok": 0.0007585233409185667
+    },
+    "Medium": {
+      "Aberto": 0.49894350393601516,
+      "Linguagem de programa\u00e7\u00e3o": 0.16078407641063658,
+      "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ci\u00eancia da Computa\u00e7\u00e3o": 0.09329440183159604,
+      "Lookalike 2% Cadastrados - DEV 2.0 + Interesses": 0.08726304482669935,
+      "Outros": 0.08532655562111378,
+      "dgen": 0.07438841737393909
+    },
+    "Term": {
+      "instagram": 0.7272122857473846,
+      "facebook": 0.1753861961629705,
+      "outros": 0.09740151808964485
+    },
+    "Voc\u00ea possui cart\u00e3o de cr\u00e9dito?": {
+      "nao": 0.6278272177249242,
+      "sim": 0.37217278227507583
+    },
+    "O que mais voc\u00ea quer ver no evento?": {
+      "fazer transicao de carreira e conseguir meu primeiro emprego na area": 0.3866556812372505,
+      "fazer um projeto na pratica": 0.2265347753363874,
+      "quero saber se e para mim": 0.18882364911479607,
+      "fazer freelancer como programador": 0.13063396185210369,
+      "a aula com a recrutadora": 0.06735193245946228
+    },
+    "Tem computador/notebook?": {
+      "sim": 0.8092602212946873,
+      "nao": 0.1907397787053126
+    },
+    "J\u00e1 estudou programa\u00e7\u00e3o?": {
+      "N\u00e3o": 0.6912441465151875,
+      "Sim": 0.3087558534848125
+    },
+    "Voc\u00ea j\u00e1 fez/faz/pretende fazer faculdade?": {
+      "Sim": 0.7417664325562096,
+      "N\u00e3o": 0.25823356744379045
+    },
+    "nome_tem_sobrenome": {
+      "True": 0.828298114087533,
+      "False": 0.17170188591246707
+    },
+    "telefone_comprimento": {
+      "11": 0.9543133859596025,
+      "9": 0.031034944702724426,
+      "outros": 0.014651669337673099
+    },
+    "nome_valido": {
+      "True": 0.997940926930195,
+      "False": 0.002059073069805058
+    },
+    "email_valido": {
+      "True": 0.9945819089343925,
+      "False": 0.005418091065607525
+    },
+    "telefone_valido": {
+      "True": 0.9972611847360665,
+      "False": 0.0027388152639334744
+    }
+  },
+  "numerical": {
+    "dia_semana": {
+      "mean": 2.922489543381941,
+      "median": 3.0,
+      "std": 2.039507786692895,
+      "min": 0.0,
+      "max": 6.0,
+      "q25": 1.0,
+      "q75": 5.0,
+      "missing_rate": 0.0
+    },
+    "nome_comprimento": {
+      "mean": 17.023031848650685,
+      "median": 15.0,
+      "std": 8.09204828234615,
+      "min": 0.0,
+      "max": 112.0,
+      "q25": 12.0,
+      "q75": 23.0,
+      "missing_rate": 0.0
+    }
+  }
+}

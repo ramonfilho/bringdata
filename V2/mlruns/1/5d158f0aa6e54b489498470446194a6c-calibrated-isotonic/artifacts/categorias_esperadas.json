@@ -1,0 +1,94 @@
+{
+  "O seu g\u00eanero:": [
+    "Feminino",
+    "Masculino"
+  ],
+  "Qual a sua idade?": [
+    "18 24 anos",
+    "25 34 anos",
+    "35 44 anos",
+    "45 54 anos",
+    "mais de 55 anos",
+    "menos de 18 anos"
+  ],
+  "O que voc\u00ea faz atualmente?": [
+    "estou no ensino medio ou acabei de sair e quero entrar na programacao",
+    "nao trabalho e nem estudo",
+    "sou apenas estudante",
+    "sou aposentado",
+    "sou autonomo",
+    "sou cltfuncionario publico",
+    "trabalho em outra area e quero fazer transicao para tecnologia"
+  ],
+  "Atualmente, qual a sua faixa salarial?": [
+    "entre r1000 a r2000 reais ao mes",
+    "entre r2001 a r3000 reais ao mes",
+    "entre r3001 a r5000 reais ao mes",
+    "mais de r5001 reais ao mes",
+    "nao tenho renda"
+  ],
+  "Source": [
+    "facebook-ads",
+    "google-ads",
+    "outros",
+    "tiktok",
+    "youtube"
+  ],
+  "Medium": [
+    "Aberto",
+    "Linguagem de programa\u00e7\u00e3o",
+    "Lookalike 1% Cadastrados - DEV 2.0 + Interesse Ci\u00eancia da Computa\u00e7\u00e3o",
+    "Lookalike 2% Cadastrados - DEV 2.0 + Interesses",
+    "Outros",
+    "dgen"
+  ],
+  "Term": [
+    "facebook",
+    "instagram",
+    "outros"
+  ],
+  "Voc\u00ea possui cart\u00e3o de cr\u00e9dito?": [
+    "nao",
+    "sim"
+  ],
+  "O que mais voc\u00ea quer ver no evento?": [
+    "a aula com a recrutadora",
+    "fazer freelancer como programador",
+    "fazer transicao de carreira e conseguir meu primeiro emprego na area",
+    "fazer um projeto na pratica",
+    "quero saber se e para mim"
+  ],
+  "Tem computador/notebook?": [
+    "nao",
+    "sim"
+  ],
+  "J\u00e1 estudou programa\u00e7\u00e3o?": [
+    "N\u00e3o",
+    "Sim"
+  ],
+  "Voc\u00ea j\u00e1 fez/faz/pretende fazer faculdade?": [
+    "N\u00e3o",
+    "Sim"
+  ],
+  "nome_tem_sobrenome": [
+    "False",
+    "True"
+  ],
+  "telefone_comprimento": [
+    "11",
+    "9",
+    "outros"
+  ],
+  "nome_valido": [
+    "False",
+    "True"
+  ],
+  "email_valido": [
+    "False",
+    "True"
+  ],
+  "telefone_valido": [
+    "False",
+    "True"
+  ]
+}
