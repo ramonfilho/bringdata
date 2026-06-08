@@ -7,7 +7,13 @@ import os
 import time
 import hashlib
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Evita circular import — DecileAssignment é só referência de tipo na
+    # assinatura de send_all_lead_events; instâncias são construídas pelo
+    # adapter abaixo no runtime via import lazy.
+    from src.model.decile_strategy import DecileAssignment
 from facebook_business.api import FacebookAdsApi
 from facebook_business.adobjects.serverside.event import Event
 from facebook_business.adobjects.serverside.event_request import EventRequest
@@ -722,18 +728,57 @@ def send_both_lead_events(
     """
     logger.info(f"📤 Enviando AMBOS eventos para teste A/B: {email} ({decil})")
 
-    # Evento 1: COM VALOR (D1-D10)
-    # NOTA: reativado em 2026-05-06 — confirmação de que campanhas Meta ativas em
-    # produção usam o evento `LeadQualified` para otimização baseada em value.
-    # Mitigação do worker timeout que motivou a desativação anterior: blocos DEBUG
-    # foram removidos (~50-100ms/lead), reduzindo o tempo total de processing.
-    result_with_value = send_lead_qualified_with_value(
+    # ─────────────────────────────────────────────────────────────────────
+    # Bloco D do EVENTOS_E_DECIS_PLANO: esta função vira adapter de 1
+    # atribuição (Propensão). Resolve os overrides explícitos contra os
+    # defaults do CAPIConfig/BusinessConfig — mesma cascata que as
+    # sub-funções já fazem hoje — pra montar 1 DecileAssignment e delegar
+    # pra `send_all_lead_events`. O laço de fan-out roda dentro dela,
+    # idêntico ao anterior. Contrato externo preservado (mesmo retorno).
+    # ─────────────────────────────────────────────────────────────────────
+    from src.model.decile_strategy import DecileAssignment, DEFAULT_HQ_DECILS
+
+    # Resolução dos defaults — mesma cascata override > capi_config > hardcoded
+    # que as sub-funções aplicam internamente (linhas 301, 348, 513, 515).
+    resolved_event_name_base = (
+        event_name_override
+        or (capi_config.event_name_with_value if capi_config and capi_config.event_name_with_value else None)
+        or 'LeadQualified'
+    )
+    resolved_event_name_hq = (
+        event_name_hq_override
+        or (capi_config.event_name_high_quality if capi_config and capi_config.event_name_high_quality else None)
+        or 'LeadQualifiedHighQuality'
+    )
+    resolved_hq_decils = (
+        high_quality_decils_override
+        or (capi_config.high_quality_decils if capi_config and capi_config.high_quality_decils else None)
+        or DEFAULT_HQ_DECILS
+    )
+    resolved_conversion_rates = (
+        conversion_rates_override
+        or (business_config.conversion_rates if business_config and business_config.conversion_rates else None)
+        or {}
+    )
+
+    propensity_assignment = DecileAssignment(
+        decile=decil,
+        strategy_id="propensity",
+        event_name_base=resolved_event_name_base,
+        event_name_hq=resolved_event_name_hq,
+        pixel_id=pixel_id_override,  # None aceito; sub-funções aplicam fallback ao pixel default
+        hq_decils=list(resolved_hq_decils),
+        conversion_rates=resolved_conversion_rates,
+        is_hq_eligible=decil in resolved_hq_decils,
+    )
+
+    all_result = send_all_lead_events(
+        assignments=[propensity_assignment],
         email=email,
         phone=phone,
         first_name=first_name,
         last_name=last_name,
         lead_score=lead_score,
-        decil=decil,
         event_id=event_id,
         fbp=fbp,
         fbc=fbc,
@@ -747,93 +792,187 @@ def send_both_lead_events(
         capi_config=capi_config,
         business_config=business_config,
         client_id=client_id,
-        event_name_override=event_name_override,
-        conversion_rates_override=conversion_rates_override,
-        pixel_id_override=pixel_id_override,
         dry_run=dry_run,
     )
 
-    # Evento 2: HighQuality SEM VALOR (D9-D10 only — função filtra internamente)
-    result_high_quality = send_lead_qualified_high_quality(
-        email=email,
-        phone=phone,
-        first_name=first_name,
-        last_name=last_name,
-        lead_score=lead_score,
-        decil=decil,
-        event_id=event_id,
-        fbp=fbp,
-        fbc=fbc,
-        user_agent=user_agent,
-        client_ip=client_ip,
-        event_source_url=event_source_url,
-        event_timestamp=event_timestamp,
-        test_event_code=test_event_code,
-        survey_data=survey_data,
-        db=db,
-        capi_config=capi_config,
-        client_id=client_id,
-        event_name_override=event_name_hq_override,
-        pixel_id_override=pixel_id_override,
-        high_quality_decils_override=high_quality_decils_override,
-        dry_run=dry_run,
-    )
-
-    # Fan-out HQ: duplica o disparo primário em pixels adicionais declarados
-    # no client_config.capi.extra_hq_destinations. Match case-sensitive pelo
-    # nome de evento HQ que efetivamente saiu acima. Cada destinação tem sua
-    # própria faixa de decis (filtragem é da send_lead_qualified_high_quality).
-    # Falhas isoladas não derrubam o primário nem as outras cópias.
-    extra_results: List[Dict] = []
-    extras = capi_config.extra_hq_destinations if (capi_config and capi_config.extra_hq_destinations) else []
-    if extras:
-        primary_hq_event_name = event_name_hq_override or (
-            capi_config.event_name_high_quality if capi_config and capi_config.event_name_high_quality
-            else 'LeadQualifiedHighQuality'
-        )
-        for i, dest in enumerate(extras):
-            if dest.event_name != primary_hq_event_name:
-                continue
-            try:
-                r = send_lead_qualified_high_quality(
-                    email=email,
-                    phone=phone,
-                    first_name=first_name,
-                    last_name=last_name,
-                    lead_score=lead_score,
-                    decil=decil,
-                    event_id=event_id,
-                    fbp=fbp,
-                    fbc=fbc,
-                    user_agent=user_agent,
-                    client_ip=client_ip,
-                    event_source_url=event_source_url,
-                    event_timestamp=event_timestamp,
-                    test_event_code=test_event_code,
-                    survey_data=survey_data,
-                    db=db,
-                    capi_config=capi_config,
-                    client_id=client_id,
-                    event_name_override=dest.event_name,
-                    pixel_id_override=dest.pixel_id,
-                    high_quality_decils_override=list(dest.decils),
-                    dry_run=dry_run,
-                )
-                extra_results.append(r)
-            except Exception as e:
-                logger.warning(
-                    f"⚠️  Fan-out HQ [{i}] '{dest.event_name}' → pixel {dest.pixel_id} "
-                    f"falhou para {email}: {e}"
-                )
-
+    # Recompõe contrato original `{evento_com_valor, evento_high_quality,
+    # extra_hq_results}` a partir da 1ª (e única) atribuição — preserva
+    # callers que leem esses campos diretamente.
+    first = all_result["events"][0]
     return {
         "status": "success",
         "email": email,
         "decil": decil,
-        "evento_com_valor": result_with_value,
-        "evento_high_quality": result_high_quality,
-        "extra_hq_results": extra_results,
+        "evento_com_valor": first["evento_com_valor"],
+        "evento_high_quality": first["evento_high_quality"],
+        "extra_hq_results": first["extra_hq_results"],
     }
+
+
+# =============================================================================
+# Bloco D do EVENTOS_E_DECIS_PLANO — send_all_lead_events
+# =============================================================================
+#
+# Iterador de N atribuições de decil (uma por estratégia habilitada).
+# Hoje quem chama `send_batch_events` continua passando por
+# `send_both_lead_events`, que monta 1 atribuição da Propensão e delega
+# pra `send_all_lead_events` — comportamento externo idêntico ao anterior
+# (paridade 100%, validada no smoke offline antes do deploy).
+#
+# Quando o Bloco F entrar e ligar RoasV1, o `send_both_lead_events` passa
+# a montar 2 atribuições (Propensão + RoasV1) e chamar `send_all_lead_events`
+# com ambas — o laço de fan-out, IDÊNTICO ao atual, roda uma vez por
+# atribuição lendo o `capi.extra_hq_destinations` por nome do evento HQ
+# de cada uma. Eventos novos (sufixo _ROAS_V1) coexistem com os antigos
+# sem sobreposição.
+
+def send_all_lead_events(
+    assignments: List["DecileAssignment"],
+    email: str,
+    phone: Optional[str],
+    first_name: Optional[str],
+    last_name: Optional[str],
+    lead_score: float,
+    event_id: str,
+    fbp: Optional[str],
+    fbc: Optional[str],
+    user_agent: Optional[str],
+    client_ip: Optional[str],
+    event_source_url: Optional[str],
+    event_timestamp: int,
+    test_event_code: Optional[str] = None,
+    survey_data: Optional[Dict] = None,
+    db = None,
+    capi_config: Optional[CAPIConfig] = None,
+    business_config: Optional[BusinessConfig] = None,
+    client_id: str = 'devclub',
+    dry_run: bool = False,
+) -> Dict:
+    """Itera sobre N atribuições de decil e dispara o trio (base + HQ + fan-out) por uma.
+
+    Cada `DecileAssignment` carrega seu próprio decile + event_name_base
+    + event_name_hq + pixel_id + hq_decils + conversion_rates, então o
+    mesmo lead pode emitir múltiplos pares de eventos (um por estratégia
+    habilitada). O laço de fan-out atual roda em cima sem alteração,
+    matchando por `event_name_hq` da atribuição.
+
+    Retorna dict com lista `events` (uma entrada por atribuição,
+    contendo `evento_com_valor`, `evento_high_quality`, `extra_hq_results`
+    + identificação por `strategy_id` e `event_name_hq`).
+    """
+    per_assignment_results: List[Dict] = []
+    for assignment in assignments:
+        decil = assignment.decile
+
+        # Evento base (com value derivado de conversion_rates do assignment)
+        result_with_value = send_lead_qualified_with_value(
+            email=email,
+            phone=phone,
+            first_name=first_name,
+            last_name=last_name,
+            lead_score=lead_score,
+            decil=decil,
+            event_id=event_id,
+            fbp=fbp,
+            fbc=fbc,
+            user_agent=user_agent,
+            client_ip=client_ip,
+            event_source_url=event_source_url,
+            event_timestamp=event_timestamp,
+            test_event_code=test_event_code,
+            survey_data=survey_data,
+            db=db,
+            capi_config=capi_config,
+            business_config=business_config,
+            client_id=client_id,
+            event_name_override=assignment.event_name_base,
+            conversion_rates_override=dict(assignment.conversion_rates),
+            pixel_id_override=assignment.pixel_id,
+            dry_run=dry_run,
+        )
+
+        # Evento HighQuality (filtrado por hq_decils do assignment)
+        result_high_quality = send_lead_qualified_high_quality(
+            email=email,
+            phone=phone,
+            first_name=first_name,
+            last_name=last_name,
+            lead_score=lead_score,
+            decil=decil,
+            event_id=event_id,
+            fbp=fbp,
+            fbc=fbc,
+            user_agent=user_agent,
+            client_ip=client_ip,
+            event_source_url=event_source_url,
+            event_timestamp=event_timestamp,
+            test_event_code=test_event_code,
+            survey_data=survey_data,
+            db=db,
+            capi_config=capi_config,
+            client_id=client_id,
+            event_name_override=assignment.event_name_hq,
+            pixel_id_override=assignment.pixel_id,
+            high_quality_decils_override=list(assignment.hq_decils),
+            dry_run=dry_run,
+        )
+
+        # Fan-out HQ — laço idêntico ao anterior, match case-sensitive
+        # pelo `event_name_hq` desta atribuição (não pelo HQ global).
+        extra_results: List[Dict] = []
+        extras = capi_config.extra_hq_destinations if (capi_config and capi_config.extra_hq_destinations) else []
+        primary_hq_event_name = assignment.event_name_hq
+        if extras:
+            for i, dest in enumerate(extras):
+                if dest.event_name != primary_hq_event_name:
+                    continue
+                try:
+                    r = send_lead_qualified_high_quality(
+                        email=email,
+                        phone=phone,
+                        first_name=first_name,
+                        last_name=last_name,
+                        lead_score=lead_score,
+                        decil=decil,
+                        event_id=event_id,
+                        fbp=fbp,
+                        fbc=fbc,
+                        user_agent=user_agent,
+                        client_ip=client_ip,
+                        event_source_url=event_source_url,
+                        event_timestamp=event_timestamp,
+                        test_event_code=test_event_code,
+                        survey_data=survey_data,
+                        db=db,
+                        capi_config=capi_config,
+                        client_id=client_id,
+                        event_name_override=dest.event_name,
+                        pixel_id_override=dest.pixel_id,
+                        high_quality_decils_override=list(dest.decils),
+                        dry_run=dry_run,
+                    )
+                    extra_results.append(r)
+                except Exception as e:
+                    logger.warning(
+                        f"⚠️  Fan-out HQ [{i}] '{dest.event_name}' → pixel {dest.pixel_id} "
+                        f"falhou para {email}: {e}"
+                    )
+
+        per_assignment_results.append({
+            "strategy_id": assignment.strategy_id,
+            "event_name_hq": assignment.event_name_hq,
+            "evento_com_valor": result_with_value,
+            "evento_high_quality": result_high_quality,
+            "extra_hq_results": extra_results,
+        })
+
+    return {
+        "status": "success",
+        "email": email,
+        "decil": assignments[0].decile if assignments else None,
+        "events": per_assignment_results,
+    }
+
 
 def send_purchase_event(
     email: str,
