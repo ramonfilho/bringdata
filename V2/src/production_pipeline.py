@@ -149,6 +149,13 @@ class LeadScoringPipeline:
 
         # Se A/B test habilitado, carregar predictor por variante
         self._variant_predictors: Dict[str, LeadScoringPredictor] = {}
+        # Bloco F do EVENTOS_E_DECIS_PLANO — predictors CALIBRADOS por variante,
+        # carregados em paralelo aos raw quando `variant.calibrated_run_id` está
+        # setado no YAML. Usados SOMENTE pra prob_calib na fórmula
+        # (prob_calib × ticket) ÷ cpl da RoasV1DecileStrategy. Caminho de
+        # propensão (lead_score em registros_ml, decis, value pra Meta no
+        # LeadQualified) continua usando o RAW — paridade preservada.
+        self._variant_calibrated_predictors: Dict[str, LeadScoringPredictor] = {}
         if self._ab_test_config.enabled:
             for variant_name, variant in self._ab_test_config.variants.items():
                 vpredictor = LeadScoringPredictor(mlflow_run_id=variant.run_id)
@@ -156,6 +163,20 @@ class LeadScoringPipeline:
                 _validate_model_loaded(vpredictor, variant.run_id, client_id=f"{client_id}/{variant_name}")
                 self._variant_predictors[variant_name] = vpredictor
                 logger.info(f"A/B test: variante '{variant_name}' carregada (run_id={variant.run_id})")
+
+                # Calibrado opcional — só carrega se YAML declarar
+                if variant.calibrated_run_id:
+                    cpredictor = LeadScoringPredictor(mlflow_run_id=variant.calibrated_run_id)
+                    cpredictor.load_model()
+                    _validate_model_loaded(
+                        cpredictor, variant.calibrated_run_id,
+                        client_id=f"{client_id}/{variant_name}/calibrated",
+                    )
+                    self._variant_calibrated_predictors[variant_name] = cpredictor
+                    logger.info(
+                        f"A/B test: variante '{variant_name}' calibrada carregada "
+                        f"(calibrated_run_id={variant.calibrated_run_id})"
+                    )
 
     def get_ab_variant(
         self,
@@ -180,6 +201,15 @@ class LeadScoringPipeline:
         if variant_name not in self._variant_predictors:
             raise KeyError(f"Variante '{variant_name}' não encontrada. Variantes disponíveis: {list(self._variant_predictors)}")
         return self._variant_predictors[variant_name]
+
+    def get_variant_calibrated_predictor(self, variant_name: str) -> Optional[LeadScoringPredictor]:
+        """Retorna o predictor CALIBRADO da variante, ou None se a variante não
+        declarou `calibrated_run_id` no YAML. Bloco F do EVENTOS_E_DECIS_PLANO.
+
+        Quando None: caminho ROAS V1 não roda pra essa variante (mesmo se a
+        flag `roas_v1.enabled` estiver true) — comportamento idêntico ao atual.
+        """
+        return self._variant_calibrated_predictors.get(variant_name)
 
     def load_data(self, filepath: str) -> pd.DataFrame:
         """
