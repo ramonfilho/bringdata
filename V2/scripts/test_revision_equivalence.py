@@ -128,13 +128,17 @@ def get_prod_revision(region: str, project: str, service: str = 'smart-ads-api')
 # ============================================================================
 
 def _connect_railway() -> pg8000.native.Connection:
+    # Sem ssl_context: conecta igual à produção (api/database.py monta um
+    # postgresql:// sem sslmode → sem verificação de cert). O ssl_context=True
+    # anterior forçava verificação estrita e quebrava em máquina com proxy TLS
+    # (cert auto-assinado na cadeia) — único ponto do projeto mais estrito que a
+    # própria produção que o gate valida.
     return pg8000.native.Connection(
         host=os.environ['RAILWAY_DB_HOST'],
         port=int(os.environ['RAILWAY_DB_PORT']),
         user=os.environ['RAILWAY_DB_USER'],
         password=os.environ['RAILWAY_DB_PASSWORD'],
         database=os.environ['RAILWAY_DB_NAME'],
-        ssl_context=True,
     )
 
 
