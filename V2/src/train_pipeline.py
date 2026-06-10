@@ -296,7 +296,7 @@ def _assert_retraining_decisions_resolved(config_path: str, set_active: bool) ->
     logger.info(f"  [set-active gate] retraining_decisions OK: {decisions}")
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, exclude_features=None, export_matched_dataset=None):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, exclude_features=None, export_matched_dataset=None):
     # Guard: Cloud SQL MLflow precisa estar RUNNABLE. Falha alto se NEVER.
     assert_mlflow_backend_running()
     register_mlflow_cleanup_reminder()
@@ -630,6 +630,21 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
             antes = len(df_vendas)
             df_vendas = df_vendas[df_vendas['data'] <= max_date_ts].copy()
             logger.info(f"  --max-date {max_date}: vendas {antes:,} → {len(df_vendas):,} registros")
+        logger.info("")
+
+    # Filtro de data mínima — espelho do --max-date, para treinar com janela inicial restrita
+    if min_date:
+        min_date_ts = pd.Timestamp(min_date)
+        if 'Data' in df_pesquisa.columns:
+            df_pesquisa['Data'] = pd.to_datetime(df_pesquisa['Data'], errors='coerce', dayfirst=True)
+            antes = len(df_pesquisa)
+            df_pesquisa = df_pesquisa[df_pesquisa['Data'] >= min_date_ts].copy()
+            logger.info(f"  --min-date {min_date}: pesquisa {antes:,} → {len(df_pesquisa):,} registros")
+        if 'data' in df_vendas.columns:
+            df_vendas['data'] = pd.to_datetime(df_vendas['data'], errors='coerce', dayfirst=True)
+            antes = len(df_vendas)
+            df_vendas = df_vendas[df_vendas['data'] >= min_date_ts].copy()
+            logger.info(f"  --min-date {min_date}: vendas {antes:,} → {len(df_vendas):,} registros")
         logger.info("")
 
     logger.info("=" * 80)
@@ -1415,6 +1430,12 @@ if __name__ == "__main__":
         help='Data máxima dos leads (YYYY-MM-DD). Filtra pesquisa e vendas até essa data — usado para reproduzir runs anteriores com o mesmo corte temporal.'
     )
     parser.add_argument(
+        '--min-date',
+        type=str,
+        default=None,
+        help='Data mínima dos leads (YYYY-MM-DD). Filtra pesquisa e vendas a partir dessa data — espelho de --max-date, para treinar com janela inicial restrita (ex: ablação de janela de dados).'
+    )
+    parser.add_argument(
         '--activate-run',
         type=str,
         default=None,
@@ -1473,6 +1494,7 @@ if __name__ == "__main__":
         use_cached_data=args.use_cached_data,
         fixed_hyperparams=json.loads(args.hyperparams) if args.hyperparams else None,
         max_date=args.max_date,
+        min_date=args.min_date,
         use_control_weights=args.control_group_weights,
         train_ratio=args.train_ratio,
         control_alpha=args.control_alpha,

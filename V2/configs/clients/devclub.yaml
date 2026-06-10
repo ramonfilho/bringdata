@@ -67,6 +67,7 @@ ingestion:
     Telefone do Cliente: Telefone
     Nome do Produto: nome produto
     Ticket do pedido: Ticket (R$)
+    Data Efetivado: data
   tmb_pedidos_active_status_exclude: Cancelado
   bare_campaign_names:
   - DEVLF

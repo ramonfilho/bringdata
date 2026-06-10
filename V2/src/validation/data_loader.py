@@ -1384,6 +1384,113 @@ class SalesDataLoader:
 
         return df
 
+    def load_ml_ledger(self, start_date: str, end_date: str,
+                       variant_filter: str = None,
+                       only_with_score: bool = True,
+                       only_with_survey: bool = True) -> pd.DataFrame:
+        """
+        Carrega leads do ledger ML (`registros_ml`) — fonte canônica pós-17/05/2026.
+
+        `registros_ml` é populado pelo consumer Pub/Sub em produção e já contém
+        `lead_score`, `decil`, `variant` (rotacionado A/B) e `survey_responses`
+        (jsonb). Pra validação out-of-sample do calibrador (DT-20 Fase 3),
+        isso elimina a necessidade de re-scorear via pipeline — os scores são
+        exatamente os que produção emitiu na hora do evento.
+
+        Args:
+            start_date: YYYY-MM-DD (>= created_at)
+            end_date:   YYYY-MM-DD (inclusive — internamente filtra < end+1d)
+            variant_filter: 'champion_jan30' / 'challenger_abr28' / None.
+                            Se None, retorna leads cuja `variant IS NULL`
+                            (Champion default — sem A/B match). Se string,
+                            filtra `variant = :variant_filter`.
+            only_with_score: descarta linhas com `lead_score IS NULL`.
+            only_with_survey: descarta linhas com `survey_responses IS NULL`.
+
+        Returns:
+            DataFrame com colunas:
+                event_id, email, telefone (de `phone`), variant, lead_score,
+                decil, created_at, survey_responses (jsonb), utm_campaign,
+                first_name, last_name, fbp, fbc.
+            Renomeia `phone` → `telefone` e `created_at` → `data_captura`
+            pra ser compatível com `match_leads_to_sales`.
+            Vazio se env vars RAILWAY_DB_* ausentes.
+        """
+        import pg8000.native
+
+        try:
+            _pw = os.environ['RAILWAY_DB_PASSWORD']
+        except KeyError:
+            logger.error(" RAILWAY_DB_PASSWORD não encontrado no ambiente — configure V2/.env")
+            return pd.DataFrame()
+
+        end_excl = (pd.to_datetime(end_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+        variant_clause = (
+            "AND variant = :variant_filter" if variant_filter
+            else "AND variant IS NULL"
+        )
+        score_clause = "AND lead_score IS NOT NULL" if only_with_score else ""
+        survey_clause = "AND survey_responses IS NOT NULL" if only_with_survey else ""
+
+        logger.info(
+            f" Carregando ledger ML ({start_date} → {end_date}, "
+            f"variant={'NULL' if variant_filter is None else variant_filter})"
+        )
+
+        try:
+            conn = pg8000.native.Connection(
+                host=os.environ.get('RAILWAY_DB_HOST', 'shortline.proxy.rlwy.net'),
+                port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+                database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+                user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+                password=_pw,
+            )
+            params = {
+                'start_date': start_date,
+                'end_excl': end_excl,
+            }
+            if variant_filter:
+                params['variant_filter'] = variant_filter
+
+            rows = conn.run(
+                f"""
+                SELECT event_id, email, phone, variant, lead_score, decil,
+                       created_at, survey_responses, utm_campaign,
+                       utm_source, utm_medium, utm_content, utm_term,
+                       first_name, last_name, fbp, fbc, base_status
+                FROM registros_ml
+                WHERE created_at >= :start_date
+                  AND created_at <  :end_excl
+                  AND email IS NOT NULL
+                  {variant_clause}
+                  {score_clause}
+                  {survey_clause}
+                ORDER BY created_at
+                """,
+                **params,
+            )
+            conn.close()
+        except Exception as e:
+            logger.error(f"    Erro ao conectar/consultar Railway (registros_ml): {e}")
+            return pd.DataFrame()
+
+        if not rows:
+            logger.warning("    Nenhum lead do ledger ML encontrado no período")
+            return pd.DataFrame()
+
+        cols = ['event_id', 'email', 'phone', 'variant', 'lead_score', 'decil',
+                'created_at', 'survey_responses', 'utm_campaign',
+                'utm_source', 'utm_medium', 'utm_content', 'utm_term',
+                'first_name', 'last_name', 'fbp', 'fbc', 'base_status']
+        df = pd.DataFrame(rows, columns=cols)
+        # Renomeia pra bater com schema esperado por match_leads_to_sales
+        df = df.rename(columns={'phone': 'telefone', 'created_at': 'data_captura'})
+        df['data_captura'] = pd.to_datetime(df['data_captura'])
+
+        logger.info(f"    {len(df):,} eventos do ledger ML carregados "
+                    f"({df['email'].nunique():,} emails únicos)")
+        return df
+
     def load_asaas_sales(self, start_date: str, end_date: str,
                          product_value: float = None,
                          customer_created_from: str = None,
@@ -1433,9 +1540,30 @@ class SalesDataLoader:
 
         return df
 
+    def load_boletex_sales_from_api(self, start_date: str, end_date: str) -> pd.DataFrame:
+        """Carrega vendas Boletex via API com cache parquet (mesmo padrão Hotmart/Asaas)."""
+        cache_file = self._cache_path('boletex', start_date, end_date)
+        if _cache_is_fresh(cache_file, end_date):
+            logger.info(f"    Cache HIT Boletex: {cache_file.name}")
+            return pd.read_parquet(cache_file)
+
+        from src.validation.boletex_sales_extractor import fetch_boletex_sales_from_api
+        logger.info(f" Buscando vendas Boletex via API ({start_date} → {end_date})")
+        df = fetch_boletex_sales_from_api(start_date, end_date)
+        if df.empty:
+            return pd.DataFrame()
+
+        # Cache
+        try:
+            df.to_parquet(cache_file, index=False)
+            logger.info(f"    Cache SAVED Boletex: {cache_file.name}")
+        except Exception as e:
+            logger.warning(f"    Aviso: cache Boletex não salvo: {e}")
+        return df
+
     def combine_sales(self, guru_df: pd.DataFrame = None, tmb_df: pd.DataFrame = None,
                      hotpay_df: pd.DataFrame = None, hotmart_df: pd.DataFrame = None,
-                     asaas_df: pd.DataFrame = None,
+                     asaas_df: pd.DataFrame = None, boletex_df: pd.DataFrame = None,
                      guru_paths: List[str] = None, tmb_paths: List[str] = None,
                      hotpay_paths: List[str] = None,
                      hotmart_api_start: str = None, hotmart_api_end: str = None,
@@ -1443,6 +1571,7 @@ class SalesDataLoader:
                      asaas_product_value: float = None,
                      asaas_customer_created_from: str = None,
                      asaas_customer_created_until: str = None,
+                     boletex_api_start: str = None, boletex_api_end: str = None,
                      report_type: str = 'fechamento', include_canceled: bool = False,
                      product_exclude_substrings: List[str] = None) -> pd.DataFrame:
         """
@@ -1490,6 +1619,8 @@ class SalesDataLoader:
                 customer_created_from=asaas_customer_created_from,
                 customer_created_until=asaas_customer_created_until,
             )
+        if boletex_df is None and boletex_api_start and boletex_api_end:
+            boletex_df = self.load_boletex_sales_from_api(boletex_api_start, boletex_api_end)
 
         # Combinar DataFrames
         dfs = []
@@ -1503,6 +1634,8 @@ class SalesDataLoader:
             dfs.append(hotmart_df)
         if asaas_df is not None and len(asaas_df) > 0:
             dfs.append(asaas_df)
+        if boletex_df is not None and len(boletex_df) > 0:
+            dfs.append(boletex_df)
 
         if not dfs:
             logger.warning(" Nenhuma venda para combinar")
@@ -1549,6 +1682,7 @@ class SalesDataLoader:
         logger.info(f"      HotPay: {len(combined[combined['origem'] == 'hotpay'])}")
         logger.info(f"      Hotmart: {len(combined[combined['origem'] == 'hotmart'])}")
         logger.info(f"      Asaas: {len(combined[combined['origem'] == 'asaas'])}")
+        logger.info(f"      Boletex: {len(combined[combined['origem'] == 'boletex'])}")
 
         # Filtro de produto (blacklist por substring, case-insensitive) — exclui upsells
         # como "Mentoria para Devs" que são produtos distintos do principal.
@@ -1602,6 +1736,14 @@ class SalesDataLoader:
                 pv = row.get('_asaas_payment_value', None)
                 try:
                     return float(pv) if pv is not None else 0.0
+                except (TypeError, ValueError):
+                    return 0.0
+            if origem == 'boletex':
+                # Boletex entrega `totals.received` direto na resposta da API — é o que
+                # efetivamente caiu até agora. Mesma lógica do Asaas: nada de fator.
+                rv = row.get('_boletex_received_value', None)
+                try:
+                    return float(rv) if rv is not None else 0.0
                 except (TypeError, ValueError):
                     return 0.0
             return v

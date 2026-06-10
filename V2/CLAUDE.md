@@ -136,10 +136,14 @@ Já houve quebra em produção por divergência de normalização (UTM com `.low
 | Medium unification | `core/medium.py` — elimina os 3 arquivos atuais |
 | Matching | `core/matching.py` — consolida os 6 arquivos de `src/matching/` |
 | Janela de conversão | Simétrica — remove TODOS os leads após `date_limite`, não só `target=1` |
-| `fbp`/`fbc` | **Sempre `leads_capi.fbp`/`leads_capi.fbc`**. NUNCA `Lead.fbp`/`Lead.fbc` (colunas vestígio, sempre vazias). Para cruzar com `pageUrl`, JOIN `leads_capi × Lead ON LOWER(email)`. |
-| `pesquisa` (respostas) | **Sempre `Lead.pesquisa` (jsonb)**. NUNCA as colunas `leads_capi.pretende_faculdade`/`genero`/`idade`/etc. (vestígio, 100% NULL desde 30/04/2026). |
-| `pageUrl` | Existe **só em `Lead`**. Não há equivalente em `leads_capi` (`event_source_url` existe mas é frequentemente null). |
-| `leadScore`/`decil` | **Sempre `Lead.leadScore`/`Lead.decil`** (escritos pelo Cloud Run em produção desde 30/04/2026). `leads_capi.lead_score`/`leads_capi.decil` pararam de receber dados em 30/04. |
+
+> **⚠️ Schema do banco mudou (11–17/05/2026).** As tabelas `Lead`/`leads_capi` **morreram em ~17/05** (somente histórico). Para dados a partir de 17/05/2026 a fonte é o ledger **`registros_ml`** + as tabelas novas `Client`/`UTMTracking`/`Activity`. As linhas abaixo mostram a fonte **atual** e, entre parênteses, a fonte **histórica** (<17/05). Detalhe completo em `docs/ARQUITETURA_SISTEMA_COMPLETA.md` § BANCO DE DADOS e `docs/PROCESSO_CAPI_LEAD_SURVEYS.md`.
+
+| `fbp`/`fbc` | **Atual: `registros_ml.fbp`/`fbc`** (ou `Client.fbp`/`fbc`). Histórico (<17/05): `leads_capi`. NUNCA `Lead.fbp`/`Lead.fbc` (sempre vazios). |
+| `pesquisa` (respostas) | **Atual: `registros_ml.survey_responses` (jsonb)**. Histórico: `Lead.pesquisa` (jsonb). As colunas tabulares de `leads_capi` são 100% NULL — vestígio. |
+| `pageUrl` | Atual: `UTMTracking.url`. Histórico: existe **só em `Lead`** (`leads_capi.event_source_url` quase sempre null). |
+| `leadScore`/`decil` | **Atual: `registros_ml.decil`/`lead_score`** (ledger do consumer Pub/Sub). Histórico 30/04–17/05: `Lead.leadScore`/`Lead.decil`. Antes de 30/04: `leads_capi`. |
+| `utm_campaign` | Atual: `registros_ml.utm_campaign` (campanha CAP real) e `UTMTracking.campaign`. Histórico: `leads_capi.utm_*` / `Lead.campaign`. |
 
 ---
 
@@ -240,10 +244,13 @@ gcloud sql instances patch smart-ads-db --activation-policy=NEVER --project=smar
   - Serviço ativo: `smart-ads-api` (`bring-data-api` foi deletado em 26/04/2026 — sem tráfego)
 - **Banco operacional:** Railway PostgreSQL (env vars `RAILWAY_DB_*`) — Cloud SQL `bring-data-db` foi descomissionado em 25/02/2026
 - **Cloud SQL (MLflow tracking):** `smart-ads-451319:us-central1:smart-ads-db` — **parado desde 26/04/2026** (`activation-policy=NEVER`); subir manualmente antes de retreinar (ver `docs/operacoes_gcp_custos.md`)
-- **Banco operacional Railway tem 2 tabelas com nomes parecidos mas papéis distintos:**
-  - **`Lead`** — populada **só pelo front (Prisma)** quando o lead completa a pesquisa. Tem `pesquisa` (jsonb), `pageUrl`, `leadScore`, `decil`. **Colunas `fbp`/`fbc` existem mas estão sempre vazias** — vestígio do schema antigo, ignorar.
-  - **`leads_capi`** — populada pelo `/webhook/lead_capture` quando o lead chega na LP de pesquisa. Tem `fbp`/`fbc` reais (~99% / 90% fill rate desde 26/02/2026), além de `utm_*`. **Colunas de pesquisa (`pretende_faculdade`, `genero`, `idade`, etc.) existem mas estão 100% NULL desde 30/04/2026** — vestígio do pipeline antigo, ignorar.
-  - **As tabelas NÃO se espelham.** Cada uma tem seu conjunto único de campos populados. Detalhes e regras de consulta em `docs/ARQUITETURA_SISTEMA_COMPLETA.md` § "BANCO DE DADOS — armadilhas de schema".
+- **Banco operacional Railway — schema mudou em 11–17/05/2026.** As tabelas vivas hoje são do sistema novo do dono + nosso ledger:
+  - **`registros_ml`** ⭐ — nosso ledger ML (consumer Pub/Sub, live desde 23/05). Fonte de `decil`, `lead_score`, `variant` (A/B), `utm_campaign`, `survey_responses`, `fbp`/`fbc`. **Fonte de leitura do monitoramento novo.**
+  - **`Client`** — cadastro do lead (front novo). Tem `campaignKey`, `isBuyer`, `firstSeenAt`, `fbp`/`fbc`, `hasComputer`.
+  - **`UTMTracking`** — UTM por lead (`campaign`/`source`/`medium`/`url`), 1:N por `clientEmail`.
+  - **`Activity`** — log de eventos do lead (entrou no grupo, lista VIP).
+  - **Mortas (somente histórico, pararam ~17/05):** `Lead`, `leads_capi`, `LeadsClient` e a transitória `lead_surveys` (morreu 21/05). NÃO consultar para dados recentes — retornam vazio e induzem falso "ingestão parada".
+  - Detalhes e regras de consulta em `docs/ARQUITETURA_SISTEMA_COMPLETA.md` § "BANCO DE DADOS — armadilhas de schema" e `docs/PROCESSO_CAPI_LEAD_SURVEYS.md`.
 - **Scheduler:** Cloud Scheduler → Cloud Run (monitoramento diário e polling Railway a cada 5min). Retreino é manual.
 - **Notificações:** Slack
 

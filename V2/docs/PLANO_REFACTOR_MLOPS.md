@@ -1396,6 +1396,40 @@ Tempo total de rollback no pior caso: 10 minutos (redeploy de imagem anterior).
 
 ---
 
+### Comparar revisões no tráfego real antes de promover ("shadow deploy")
+
+Hoje a equivalência entre revisões é checada de forma **estática**, numa **amostra** de leads, **antes** de promover (o teste de equivalência de score+decil entre revisões — Gate C no catálogo de salvaguardas). Falta a versão **runtime**: subir a revisão candidata recebendo o **tráfego real** em modo somente-log — ela pontua os mesmos leads que produção, registra score/decil/erros, mas **não envia evento ao Meta nem escreve no banco** — dar o diff contra produção no tráfego inteiro, e só seguir pro canário depois de diff limpo.
+
+É uma camada **a mais, antes** do canário, **não** um substituto dos gates de promoção. A sombra responde "o pipeline novo se comporta de forma sã no tráfego real?"; os gates (paridade treino × produção, higiene de dataset, D10% abaixo de 25%, validação out-of-sample) continuam respondendo "o sinal está correto?" no momento de promover. Sequência: sombra → diff limpo → canário (`--no-traffic` → smoke → 5% → 10% → 100%), gates de todo jeito.
+
+A especificação completa (o que faz / por que / como / onde no código) vive no catálogo de salvaguardas — ver a salvaguarda "Revisão candidata em sombra" (T2-11) em [`PLANO_SAFEGUARD.md`](PLANO_SAFEGUARD.md). Registrado em 2026-06-09 ao desenhar a feature "entrou no grupo de WhatsApp"; **não implementado**; fora do escopo atual.
+
+*Identificador histórico: DT-21.*
+
+---
+
+### Boleto subcontado no treino — rename de pedidos TMB hardcoded e sem data; unificar vendas em `core/` (SSoT)
+
+**O que é:** o pipeline de treino passou a contar só ~metade das conversões reais (boleto perdido, dataset cartão-dominado). Investigado e confirmado em 2026-06-10.
+
+**Root cause (em código):** o rename das colunas do arquivo de pedidos TMB é **hardcoded** em [`src/data_processing/ingestion.py:169-175`](../src/data_processing/ingestion.py#L169-L175) e **não mapeia nenhuma coluna de data** para a coluna canônica `data`. Resultado: os pedidos de boleto ficam com `data=NaT` e são cortados pelo filtro `--max-date` ([`train_pipeline.py`](../src/train_pipeline.py) ~621), sobrando ~185 de ~7.000. O campo `tmb_pedidos_column_mapping` em `configs/clients/devclub.yaml` existe mas é **config morta** — nenhum código a lê (por isso editar o yaml não corrige).
+
+**Impacto medido:** conversões do treino caíram de ~2.743 (1,36%, Challenger 28/04) e 2.813 (1,32%, 08/05) para ~625 (0,62%) em **todo treino de 28/05 em diante**. **Produção NÃO foi afetada** — Champion (jan30) e Challenger (abr28) são pré-quebra; nenhum modelo de 28/05+ foi promovido (conferido em `active_models/devclub.yaml`). Descartar análises feitas sobre os runs de 28/05.
+
+**Divergência (causa estrutural):** existem **três** tratamentos de TMB — `data_processing/ingestion.py` (hardcoded, sem data, sem agrupar parcela→pedido), `core/ingestion.py:_tmb_dual_source_split`, e `validation/data_loader.py:load_tmb_sales` (o **correto**: agrupa parcela→pedido com `groupby('Pedido').first()`, data = `Data Efetivado.fillna(Criado Em)`). Anti-padrão "mesmo conceito em N lugares" — a dor histórica nº1 do projeto.
+
+**Fix (decisão /sw-architect + /mlops-architect):** SSoT — extrair a normalização TMB correta para um componente `core/tmb.py`, consumido por **treino e validação**; matar o hardcode e a config morta. **Incluir filtro de inadimplência:** contar só boleto efetivo/pago (Status Pedido "Em Dia"/"Quitado"), excluir Negativado/Protestado/Em Atraso/Cancelado — senão a conversão infla com calote (o `pedidos_09052026` tem ~3.400 inadimplentes de 7.243). Confirmar qual status o Challenger usou e espelhar.
+
+**Prioridade:** **não-urgente.** Produção roda modelos pré-quebra; o fix protege **retreinos futuros**. Embarcar no próximo retreino planejado (junto de M1 / DT-18 / feature "entrou no grupo" do SendFlow), com parity audit + gate padrão + check de sanidade (positive_rate de volta a ~1,3%).
+
+**Nota operacional (migração de máquina):** a leitura do Google Sheets quebrou no Mac novo (ADC sem escopo de Sheets → "app blocked"); **corrigida** criando chave de service account (`~/.config/gcloud/smart-ads-sheets-sa.json`, SA `smart-ads-451319@appspot`) + `GOOGLE_APPLICATION_CREDENTIALS` no `.env`. Registrar: `.env` + essa chave SA são arquivos que faltam na migração (Fase 4 do LEIA-ME). E `backup_sheets_url` no yaml é campo de **monitoramento** — não é a fonte do treino (treino lê Sheets via `read_all_training_sources`).
+
+**Cross-ref:** salvaguarda fail-loud **T2-10** em [`PLANO_SAFEGUARD.md`](PLANO_SAFEGUARD.md).
+
+*Identificador histórico: DT-22.*
+
+---
+
 ## 12. Caminho para Nível 2 e além
 
 Ver **`docs/ROADMAP_MLOPS_MATURIDADE.md`** para o guia completo.

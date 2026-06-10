@@ -201,6 +201,26 @@ Bloqueia o deploy via `exit 1` se qualquer invariante falhar.
 
 *Identificador histórico: T1-18.*
 
+### Revisão candidata em sombra: roda no tráfego real só logando, antes do canário
+
+**O que faz:** sobe a revisão candidata recebendo uma cópia do tráfego real de produção, mas em modo **somente-log**: ela pontua os mesmos leads que a revisão em produção, registra score/decil/erros, e **não envia evento ao Meta (CAPI) nem escreve no banco**. Um diff compara, lead a lead, o que a candidata produziu contra o que a produção produziu — no tráfego inteiro, não numa amostra. Só depois de um diff limpo a candidata entra na progressão de canário.
+
+**Por que existe:** a comparação entre revisões que já existe (o Gate C — "Equivalência de score+decil entre revisões", acima) roda **antes** de promover, sobre N leads **amostrados** do Railway, via dry-run. Cobre regressão de scoring, mas é uma foto estática de uma amostra. Comportamentos que só aparecem no tráfego real e no volume real — categoria de UTM rara, payload malformado, timeout intermitente de uma dependência, cauda da distribuição de decil — passam despercebidos até o canário já estar recebendo tráfego de verdade. A sombra fecha essa lacuna: observa a candidata no tráfego real **sem nenhum risco**, porque ela não produz efeito (sem CAPI, sem escrita no banco).
+
+**Como funciona (desenho proposto):**
+1. A revisão candidata sobe sem tráfego de saída, mas recebe espelho do tráfego de entrada (ou um modo log-only no caminho de scoring que processa o mesmo lead em paralelo).
+2. Para cada lead, registra score, decil e erros das duas revisões; nada é enviado ao Meta nem persistido como evento.
+3. Um diff acumula a divergência de decil por lead ao longo de uma janela de observação (não uma amostra pontual).
+4. Critério de "diff limpo" objetivo (ex.: divergência de decil abaixo de um limite, nenhum erro novo na candidata). Só então a candidata segue pro canário.
+
+**Relação com o Gate C e com os gates de promoção:** a sombra **não substitui** os gates — é uma camada **a mais, antes** deles. A sombra responde *"o pipeline novo se comporta de forma sã no tráfego real?"*. Os gates respondem *"o sinal está correto?"* — auditoria de paridade treino × produção (Gate A), equivalência entre revisões em amostra (Gate C), auditoria do YAML na imagem (Gate D), higiene de dataset e validação out-of-sample no retreino — e continuam valendo no momento de promover. Sequência completa: **sombra → diff limpo → canário** (`--no-traffic` → smoke test → 5% → 10% → 100%), com os gates aplicando de todo jeito. Quando implementada, a sombra é uma etapa anterior ao "Build → 0%" da tabela em "Como tráfego cresce após o deploy".
+
+**Onde no código (proposto):** não implementado. Pontos prováveis: revisão Cloud Run sem tráfego de saída recebendo espelho do tráfego, ou um modo somente-log no caminho de scoring compartilhado ([`V2/src/scoring/service.py`](../src/scoring/service.py)) acionado por flag; o diff reusando a lógica de comparação de decil de [`V2/scripts/test_revision_equivalence.py`](../scripts/test_revision_equivalence.py), porém sobre tráfego real em vez de amostra; orquestração em [`V2/api/deploy_capi.sh`](../api/deploy_capi.sh) como etapa anterior ao canário.
+
+**Status:** proposta, **não implementada**. Registrada em 2026-06-09 ao desenhar a feature "entrou no grupo de WhatsApp" (a feature em si **não depende** desta salvaguarda — é um mecanismo geral de segurança de deploy que surgiu na conversa). Fora do escopo de implementação atual. O *quando* (prioridade) é decisão do `PLANO_EXECUCAO.md`, não deste catálogo.
+
+*Identificador histórico: T2-11.* (renumerado de T2-9 em 2026-06-10 — colisão com "Bootstrap dos snapshots de paridade".)
+
 ---
 
 ## Verificações em runtime
@@ -530,6 +550,25 @@ Se qualquer falhar, aborta o `--set-active`.
 **Status:** 🟡 backlog. Sem urgência enquanto não houver CI ou segundo dev.
 
 *Identificador histórico: T2-9.*
+
+---
+
+### Fail-loud quando uma fonte de venda some (boleto/cartão)
+
+**O que faz (proposto):** ao montar o dataset de treino, valida que nenhuma fonte de venda colapsou silenciosamente — em três camadas: assert de `data` não-nula nas vendas, taxa de conversão por fonte, e banda da `positive_rate` global.
+
+**Por que existe:** o boleto sumiu do treino por ~3 semanas (coluna de data não-mapeada → `data=NaT` → cortada pelo filtro de data; ver DT-22 no `PLANO_REFACTOR_MLOPS`) **sem nenhum alerta** — só apareceu em investigação manual. É a mesma classe do `Medium_Linguagem_programacao` zerado por semanas e do D9 com 0 eventos CAPI por 2 meses: sinal degradado em silêncio. As conversões caíram de ~1,3% para 0,62% e nenhum sensor disparou.
+
+**Como funciona (desenho proposto):**
+- (a) **Assert de `data` não-nula** no loader TMB (`core/tmb.py`, Fase 1 do DT-22): se mais de X% das vendas vierem com `data=NaT`, falha alto. Pega exatamente este bug (pedidos de boleto todos NaT).
+- (b) **Taxa de conversão por fonte** (Guru/cartão vs TMB/boleto vs Hotmart) ao montar o dataset: alerta/bloqueia se o boleto cair mais de X% vs baseline, ou se TMB ≈ 0 quando o esperado é não-zero.
+- (c) **Banda da `positive_rate` global** do treino (~[0,9%, 2%]): o 0,62% da quebra teria disparado.
+
+**Onde no código (proposto):** assert (a) no `core/tmb.py`; checks (b)/(c) no `train_pipeline` pós-matching. Config-driven, **default off para o Cliente B** (TMB é fonte só do DevClub).
+
+**Status:** proposta, **não implementada**. Registrada em 2026-06-10 durante a investigação do boleto (DT-22).
+
+*Identificador histórico: T2-10.*
 
 ---
 

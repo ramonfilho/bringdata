@@ -85,3 +85,4 @@ V2/comercial/.last_push_count.json
 
 # Runtime lock files
 .claude/scheduled_tasks.lock
+env_bringdata.txt

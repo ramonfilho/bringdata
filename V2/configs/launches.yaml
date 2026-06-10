@@ -135,10 +135,10 @@ LF55:
   vendas_end:   "2026-05-31"
 
 LF56:
-  cap_start: "2026-05-19"
-  cap_end:   "2026-05-25"
-  vendas_start: "2026-06-01"
-  vendas_end:   "2026-06-07"
+  cap_start: "2026-05-25"
+  cap_end:   "2026-05-31"
+  vendas_start: "2026-06-08"
+  vendas_end:   "2026-06-14"
 
 # LF57 — captação atípica iniciou segunda 25/05 (não a terça padrão).
 # Confirmar datas de vendas com o time quando definidas.

@@ -1,7 +1,9 @@
 # SMART ADS V2 — ARQUITETURA DO SISTEMA
 
 > **DOCUMENTO CRÍTICO**: Leia no início de TODA sessão de desenvolvimento.
-> Última atualização: 2026-04-28
+> Última atualização: 2026-06-08 (seção BANCO DE DADOS — migração de schema 11–17/05). Estado de A/B/modelo abaixo é de 2026-04-28.
+>
+> **⚠️ Schema do banco mudou (11–17/05/2026):** a captação migrou do par `Lead`/`leads_capi` para o schema novo (`Client`/`UTMTracking`/`Activity`) + o ledger `registros_ml`. As tabelas antigas estão **mortas** (somente histórico). Ver seção [BANCO DE DADOS](#banco-de-dados) e `PROCESSO_CAPI_LEAD_SURVEYS.md`.
 >
 > **Estado atual da produção (28/04/2026):**
 > - **Tráfego:** 100% no rollback `smart-ads-api-00269-jjn` (commit `edf23e9` de 05/03/2026, sem A/B routing).
@@ -325,26 +327,41 @@ Host: shortline.proxy.rlwy.net:11594
 DB: railway | User: postgres
 ```
 
-**Duas tabelas com papéis distintos (NÃO são espelho uma da outra):**
+**⚠️ Migração de schema (11–17/05/2026).** A captação de produção migrou do par `Lead`/`leads_capi` para o schema novo do sistema do dono (migrações Prisma `extend_client_with_capture_fields` em 11/05 e `add_vip_list_joined_activity` em 14/05). As tabelas antigas **pararam de receber dados em ~17/05/2026** e hoje são **somente histórico** (read-only). Fonte autoritativa da virada: `PROCESSO_CAPI_LEAD_SURVEYS.md`.
 
-| Tabela | Quem popula | Campos populados (use ESTES) | Campos vestígio (NÃO use) |
+**Tabelas VIVAS (use ESTAS para qualquer dado a partir de 17/05/2026):**
+
+| Tabela | Quem popula | Para que serve | Campos-chave |
 |---|---|---|---|
-| **`Lead`** (Prisma, do front) | Front escreve via Prisma quando o lead completa a pesquisa | `pesquisa` (jsonb com todas as respostas), `pageUrl`, `leadScore`, `decil`, `nomeCompleto`, `email`, `telefone`, `source`/`medium`/`term`/`campaign`/`content`, `createdAt`, `capiSentAt`, `capiStatus` | `fbp`, `fbc` (sempre vazios — vestígio) |
-| **`leads_capi`** (legado / webhook) | Cloud Run escreve via `/webhook/lead_capture` quando o lead chega na LP de pesquisa | `fbp`, `fbc` (~99% / 90% desde 26/02/2026), `utm_source`, `utm_medium`, `utm_term`, `utm_campaign`, `utm_content`, `email`, `name`, `phone`, `client_ip`, `event_id`, `created_at` | `pretende_faculdade`, `genero`, `idade`, `ocupacao`, `faixa_salarial`, `cartao_credito`, `estudou_programacao`, `investiu_curso_online`, `interesse_programacao`, `interesse_evento` (todas 100% NULL desde 30/04/2026 — vestígio); `lead_score`, `decil`, `scored_at`, `capi_sent_at` (zerados desde 30/04 — pipeline mudou para escrever em `Lead`) |
+| **`registros_ml`** ⭐ | Nosso consumer Pub/Sub (live desde 23/05/2026 19:45 BRT) | **Ledger ML — fonte de decis, scoring e A/B; fonte de leitura do monitoramento novo** | `event_id`, `email`, `decil`, `lead_score`, `variant` (A/B), `utm_campaign` (campanha CAP real), `survey_responses` (jsonb), `decile_propensity`, `decile_roas_v1`, `fbp`, `fbc`, `has_computer`, `cpl_source`, `events_fired`, `created_at` |
+| **`Client`** | Front do sistema novo (Prisma) | Cadastro do lead | `email`, `campaignKey`, `isBuyer`, `firstSeenAt`, `lastActivityAt`, `fbp`, `fbc`, `hasComputer`, `pageSource`, `pixelId` |
+| **`UTMTracking`** | Front do sistema novo | UTM por lead (1:N por `clientEmail`) | `clientEmail`, `source`, `medium`, `campaign`, `content`, `term`, `url`, `trackedAt` |
+| **`Activity`** | Front do sistema novo | Log de eventos do lead | `clientEmail`, `type` (entrou no grupo, lista VIP), `metadata` (jsonb), `createdAt` |
+| **`lead_surveys`** | Transitória (12–21/05) | Intake da pesquisa durante a virada — **também parou em 21/05**, só histórico | `genero`, `idade`, `ocupacao`, ..., `eventId`, `submittedAt` |
+
+**Tabelas MORTAS (somente histórico — última escrita ~17/05/2026):**
+
+| Tabela | Papel histórico | Campos úteis no histórico |
+|---|---|---|
+| **`Lead`** | Pesquisa + scoring do front antigo | `pesquisa` (jsonb), `pageUrl`, `leadScore`, `decil`, `source`/`medium`/`campaign`/`content` |
+| **`leads_capi`** | `fbp`/`fbc` + UTMs via `/webhook/lead_capture` | `fbp`, `fbc`, `utm_*`, `email`, `event_id`, `created_at` |
+| **`LeadsClient`** | Cadastro de lead (schema intermediário) | `utm` (jsonb), `isBuyer`, `firstSeenAt` |
 
 ### Armadilhas de schema (impossível errar se ler isto)
 
-1. **Para `fbp` e `fbc` — sempre `leads_capi`.** Consulta a `Lead.fbp`/`Lead.fbc` retorna 0% e induz a conclusão errada de que o cookie não está sendo capturado. Ele está — mas só `leads_capi` tem.
+**Regra mestra pós-migração:** para qualquer dado **a partir de 17/05/2026** (decil, scoring, pesquisa, UTM, fbp/fbc), a fonte é o ledger **`registros_ml`** + as tabelas do sistema novo (`Client`/`UTMTracking`/`Activity`). As regras 1–5 abaixo valem **só para dados históricos anteriores a 17/05/2026**.
 
-2. **Para respostas da pesquisa — sempre `Lead.pesquisa` (jsonb).** As colunas tabulares com nomes parecidos em `leads_capi` (`pretende_faculdade`, `genero`, `idade`, etc.) **são 100% NULL** desde 30/04/2026. Consultar elas vai dar "campo não preenchido" — mistura de leitura vai parecer regressão da ingestão e não é.
+1. **`fbp`/`fbc`** — pós-17/05: `registros_ml.fbp`/`fbc` (ou `Client.fbp`/`fbc`). Histórico (<17/05): `leads_capi`. NUNCA `Lead.fbp`/`Lead.fbc` (sempre vazios).
 
-3. **Para `pageUrl` — só `Lead`.** `leads_capi` não tem `pageUrl`. Há `event_source_url`, mas frequentemente vem null.
+2. **Respostas da pesquisa** — pós-17/05: `registros_ml.survey_responses` (jsonb). Histórico: `Lead.pesquisa` (jsonb). As colunas tabulares de `leads_capi` (`genero`, `idade`, etc.) são 100% NULL desde 30/04/2026 — vestígio.
 
-4. **Para `leadScore` e `decil` — sempre `Lead`.** Antes de 30/04/2026 era em `leads_capi` (`lead_score`/`decil`). Após o deploy main 100%, o Cloud Run passou a escrever em `Lead`. `leads_capi.lead_score` está zerado para registros recentes.
+3. **`pageUrl`** — só existe na `Lead` (histórico). No schema novo, a URL com UTMs vive em `UTMTracking.url`.
 
-5. **Para cruzar campos das duas tabelas** (ex: `fbp` por `pageUrl`): `JOIN leads_capi lc ON LOWER(l.email) = LOWER(lc.email)`. Não há FK formal — a chave de junção é o email normalizado.
+4. **`leadScore`/`decil`** — pós-17/05: `registros_ml.decil`/`lead_score`. Histórico 30/04–17/05: `Lead`. Antes de 30/04: `leads_capi`.
 
-> Railway é um banco externo — não há acesso para alterar schema. `database.py` detecta em runtime se colunas opcionais (ex: `client_id`) existem via `has_client_id_column()`. As colunas vestígio listadas acima continuarão existindo no schema, mas não devem ser consultadas para fins analíticos.
+5. **Cruzar tabelas do sistema novo** — a chave de junção é o email: `registros_ml.email` = `Client.email` = `UTMTracking.clientEmail` = `Activity.clientEmail`. (No histórico, `JOIN leads_capi ON LOWER(Lead.email)=LOWER(leads_capi.email)`.)
+
+> Railway é um banco externo — não há acesso para alterar schema. As tabelas mortas continuam existindo com dados históricos, mas **não devem ser consultadas para dados recentes** (retornam vazio/desatualizado e induzem a falso diagnóstico de "ingestão parada").
 
 **Cloud SQL (MLflow tracking):**
 
