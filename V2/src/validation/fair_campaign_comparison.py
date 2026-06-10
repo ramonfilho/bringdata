@@ -89,39 +89,52 @@ def create_refined_campaign_map(
         campaign_name_map = {}
 
     # Classificar campanhas ML
-    # REGRA: Se o nome contém "MACHINE LEARNING"  sempre "Champion"
-    # Caso contrário, verificar optimization_goal (LeadQualified/LQHQ)
+    # Champion ML  = LEADQUALIFIED (tag UTM) ou MACHINE LEARNING (legado) ou opt_goal LeadQualified
+    # Challenger ML = LEADHQLB/HQLB (tag UTM do A/B abr28 — novo braço ML)
+    # Otimização ML = outras campanhas ML sem CAPI custom
     for cid in ml_campaign_ids:
         cid_clean = str(cid)[:15]
         opt_goal = opt_goal_map.get(cid_clean, '')
         campaign_name = campaign_name_map.get(cid_clean, '')
+        name_lower = campaign_name.lower()
 
-        # PRIORIDADE 1: Verificar se nome contém "MACHINE LEARNING"
-        if 'machine learning' in campaign_name.lower():
-            refined_map[cid_clean] = 'Champion'
-            logger.info(f"    Campanha classificada como Eventos ML (nome contém MACHINE LEARNING): {cid_clean}")
+        # PRIORIDADE 1: Challenger ML — LEADHQLB no nome ou HQLB no opt_goal
+        if 'leadhqlb' in name_lower or 'hqlb' in name_lower or 'HQLB' in opt_goal:
+            refined_map[cid_clean] = 'Challenger'
+            logger.info(f"    Champion classificada como Challenger ML (LEADHQLB): {cid_clean}")
             continue
 
-        # PRIORIDADE 2: Verificar se usa eventos customizados CAPI
-        uses_custom_events = any(custom in opt_goal for custom in ['LeadQualified', 'LeadQualifiedHighQuality'])
+        # PRIORIDADE 2: Champion ML — MACHINE LEARNING (legado)
+        if 'machine learning' in name_lower:
+            refined_map[cid_clean] = 'Champion'
+            logger.info(f"    Campanha classificada como Champion ML (nome contém MACHINE LEARNING): {cid_clean}")
+            continue
 
+        # PRIORIDADE 3: Champion ML — LEADQUALIFIED no nome
+        if 'leadqualified' in name_lower:
+            refined_map[cid_clean] = 'Champion'
+            continue
+
+        # PRIORIDADE 4: opt_goal LeadQualified custom event
+        uses_custom_events = any(custom in opt_goal for custom in ['LeadQualified', 'LeadQualifiedHighQuality'])
         if uses_custom_events:
             refined_map[cid_clean] = 'Champion'
         else:
             refined_map[cid_clean] = 'Otimização ML'
 
-    # Classificar campanhas Controle
+    # Classificar campanhas Controle puro (DEVLF sem sufixo ML)
     logger.info(f"    DEBUG - Classificando {len(control_campaign_ids)} campanhas Controle:")
     for cid in control_campaign_ids:
         cid_clean = str(cid)[:15]
-        refined_map[cid_clean] = 'Challenger'  # USAR 15 DÍGITOS como chave
+        refined_map[cid_clean] = 'Controle'
         logger.info(f"       {cid_clean}  Controle")
 
     logger.info(f"    Mapeamento refinado criado:")
     eventos_ml = sum(1 for v in refined_map.values() if v == 'Champion')
+    challenger_ml = sum(1 for v in refined_map.values() if v == 'Challenger')
     otimiz_ml = sum(1 for v in refined_map.values() if v == 'Otimização ML')
-    controle = sum(1 for v in refined_map.values() if v == 'Challenger')
-    logger.info(f"      Eventos ML: {eventos_ml}, Otimização ML: {otimiz_ml}, Controle: {controle}")
+    controle = sum(1 for v in refined_map.values() if v == 'Controle')
+    logger.info(f"      Champion ML: {eventos_ml}, Challenger ML: {challenger_ml}, Otimização ML: {otimiz_ml}, Controle: {controle}")
 
     return refined_map
 

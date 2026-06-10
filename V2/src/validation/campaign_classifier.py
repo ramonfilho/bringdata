@@ -152,7 +152,12 @@ def classify_campaign(campaign_name: str) -> str:
         return 'EXCLUIR'
 
     # 2. Classificar COM_ML vs SEM_ML
-    if 'machine learning' in campaign_lower or '| ml |' in campaign_lower:
+    # Markers ML: 'machine learning' (legado), '| ml |' (legado), 'leadqualified' (Champion atual),
+    # 'leadhqlb'/'hqlb' (Challenger A/B abr28). LEADQUALIFIED e LEADHQLB foram introduzidos
+    # como tags de UTM em 2026-04/05 — sem isso aqui, Champion e Challenger ML caem em SEM_ML
+    # e ficam misturados com Controle puro (DEVLF sem sufixo).
+    ml_markers = ('machine learning', '| ml |', 'leadqualified', 'leadhqlb', 'hqlb')
+    if any(m in campaign_lower for m in ml_markers):
         return 'COM_ML'
     else:
         return 'SEM_ML'
@@ -198,22 +203,24 @@ def add_ml_classification(df: pd.DataFrame, campaign_col: str = 'campaign') -> p
     for ml_type, count in type_counts.items():
         logger.info(f"     {ml_type}: {count} leads")
 
-    # Filtrar apenas campanhas de captação (COM_ML ou SEM_ML)
-    before_count = len(df)
-    df_filtered = df[df['ml_type'] != 'EXCLUIR'].copy()
+    # NÃO DROPAR leads EXCLUIR — só MARCAR.
+    # Antes: dropávamos leads cuja `utm_campaign` não tem o padrão "DEVLF | CAP | FRIO".
+    # Resultado: leads de Google Ads ('devlf') e encurtador ('encurtadoraprendacomigo') eram
+    # eliminados — incluindo compradores reais (kerlyson, kyllane, leandro, marcos, rudimar,
+    # silva, thiago no LF56). O drop existe pra excluir respostas que não vieram de campanhas
+    # de captação Meta, mas o matching de vendas precisa de TODOS os leads.
+    # Marcamos como 'EXTERNO' pra distinguir de SEM_ML legítimo (campanhas Meta sem ML).
+    df.loc[df['ml_type'] == 'EXCLUIR', 'ml_type'] = 'EXTERNO'
+    df_filtered = df.copy()
     after_count = len(df_filtered)
-
-    excluded_count = before_count - after_count
+    excluded_count = int((df_filtered['ml_type'] == 'EXTERNO').sum())
     if excluded_count > 0:
-        logger.info(f"    {excluded_count} respostas de campanhas não-captação foram excluídas")
-
-        # Verificar se respostas excluídas têm conversões
-        excluded_df = df[df['ml_type'] == 'EXCLUIR']
+        logger.info(f"    {excluded_count} respostas marcadas como EXTERNO (Google Ads/orgânicos/etc.) — preservadas pro matching")
+        excluded_df = df_filtered[df_filtered['ml_type'] == 'EXTERNO']
         if 'converted' in excluded_df.columns:
             excluded_conversions = excluded_df['converted'].sum()
             if excluded_conversions > 0:
-                logger.warning(f"    ATENÇÃO: {excluded_conversions} CONVERSÕES PERDIDAS nas respostas excluídas!")
-                logger.warning(f"            Isso pode estar reduzindo artificialmente suas métricas de conversão")
+                logger.info(f"    {excluded_conversions} conversões em campanhas EXTERNO (não-Meta) — preservadas")
 
         # Mostrar campanhas excluídas
         excluded_campaigns = excluded_df[campaign_col].unique()

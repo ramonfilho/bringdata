@@ -8,10 +8,12 @@ meta_access_token: "EAAV..."  # TODO: Substituir pelo token real
 # Deixe vazio para usar o .env. Preencha aqui apenas para override.
 asaas_api_key: ""
 
-# Account IDs Meta Ads (usar ambos na validação)
+# Account IDs Meta Ads
+# Removida 'act_786790755803474' (Gestor de IA) pois ela inflava o gasto Meta sem corresponder
+# ao funil DevClub do LF (o xlsx manual do LF56 usa só act_188005769808959). Reinclua se confirmar
+# que aquela conta entrega leads/vendas do mesmo cliente.
 meta_account_ids:
-  - act_188005769808959  # Ads - Rodolfo Mori
-  - act_786790755803474  # Ads - Gestor de IA
+  - act_188005769808959  # Ads - Rodolfo Mori (DevClub)
 
 # Configurações globais
 product_value: 2000.00     # Valor esperado de conversão para ROAS (ticket médio ponderado)

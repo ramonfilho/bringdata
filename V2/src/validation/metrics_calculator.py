@@ -317,6 +317,10 @@ class CampaignMetricsCalculator:
         Returns:
             Número de leads (int)
         """
+
+        # Defensivo: leads VIP / orgânicos / sem campanha podem vir com campaign_name=NaN
+        if not isinstance(campaign_name, str) or not campaign_name:
+            return 0
         if not campaign_events:
             return 0
 
@@ -340,6 +344,10 @@ class CampaignMetricsCalculator:
         Returns:
             Contagem do evento (int)
         """
+
+        # Defensivo: leads VIP / orgânicos / sem campanha podem vir com campaign_name=NaN
+        if not isinstance(campaign_name, str) or not campaign_name:
+            return 0
         if not campaign_events:
             return 0
 
@@ -454,7 +462,8 @@ class CampaignMetricsCalculator:
 
         for camp_id, variations in campaigns_by_id.items():
             # Escolher nome mais longo (mais completo)
-            best_name = max(variations, key=lambda x: len(x[0]))[0]
+            # Defensivo: alguns full_name vêm como NaN (float) — tratar como string vazia.
+            best_name = max(variations, key=lambda x: len(x[0]) if isinstance(x[0], str) else 0)[0]
             campaign_id_to_best_name[camp_id] = best_name
 
             # Também mapear o nome base (sem ID) para o melhor nome COM ID
@@ -495,12 +504,18 @@ class CampaignMetricsCalculator:
         if consolidations:
             logger.info(f"    {len(consolidations)} IDs com múltiplas variações serão consolidadas:")
             for key, variations in consolidations[:5]:  # Mostrar 5 primeiros
-                best_name = campaign_id_to_best_name[key]
-                # Truncar ID para exibição
-                display_key = key[:15] + "..." if len(key) > 15 else key
+                # Defensivo: key/best_name podem vir como NaN (float). Coerce pra str
+                # com placeholder pra não quebrar o log.
+                key_str = key if isinstance(key, str) else '(sem id)'
+                best_name = campaign_id_to_best_name.get(key) or ''
+                if not isinstance(best_name, str):
+                    best_name = '(sem nome)'
+                display_key = key_str[:15] + "..." if len(key_str) > 15 else key_str
                 logger.info(f"       ID {display_key}:")
                 logger.info(f"         Nome escolhido: {best_name[:70]}")
-                for full_name in variations:
+                for full_name, _base_name in variations:
+                    if not isinstance(full_name, str):
+                        continue
                     count = len(matched_df[matched_df['campaign'] == full_name])
                     logger.info(f"         - {count:3d} respostas: {full_name[:70]}")
 
@@ -773,6 +788,35 @@ class CampaignMetricsCalculator:
             # Não precisa converter, apenas garantir que "-" vire ""
             campaign_stats['optimization_goal'] = campaign_stats['optimization_goal'].replace('-', '')
 
+            # === DEDUP SPEND POR CAMPAIGN_ID — PROPORCIONAL A LEADS ===
+            # Múltiplos campaign_name distintos no matched_df podem mapear pro MESMO campaign_id
+            # do cache (porque UTMs/nomes foram atualizados durante o lançamento). Sem dedup, o
+            # mesmo spend cai em N linhas e o sum() infla N× o gasto total.
+            # Fix: distribuir o spend ENTRE as N linhas proporcionalmente aos leads de cada uma.
+            # Assim, sum(spend) = total real do cache, e cada linha mantém um spend coerente
+            # com sua parcela de leads (preservando agregações por comparison_group/adset).
+            campaign_stats['_dedup_id_15'] = campaign_stats['campaign'].apply(
+                lambda c: (self._extract_campaign_id(c) or '')[:15] if isinstance(c, str) else ''
+            )
+            _has_id = campaign_stats['_dedup_id_15'].ne('')
+            if _has_id.any():
+                _grp = campaign_stats[_has_id].groupby('_dedup_id_15')
+                # contagem de linhas por campaign_id e total de leads por campaign_id
+                _rows_per_id = _grp['campaign'].transform('count')
+                _leads_per_id = _grp['leads'].transform('sum')
+                # share proporcional aos leads; se leads=0 em todas as linhas, divide igualmente
+                _row_leads = campaign_stats.loc[_has_id, 'leads'].astype(float)
+                _share = _row_leads.divide(_leads_per_id).where(_leads_per_id > 0, 1.0 / _rows_per_id)
+                # cada linha guarda apenas a sua parcela do spend total do campaign_id
+                _new_spend = campaign_stats.loc[_has_id, 'spend'] * _share
+                _orig_total = float(campaign_stats.loc[_has_id, 'spend'].sum())
+                _new_total = float(_new_spend.sum())
+                campaign_stats.loc[_has_id, 'spend'] = _new_spend
+                _delta = _orig_total - _new_total
+                if abs(_delta) > 0.01:
+                    logger.info(f"    Dedup spend (proporcional a leads): removido R$ {_delta:,.2f} de duplicação por campaign_id")
+            campaign_stats = campaign_stats.drop(columns=['_dedup_id_15'])
+
             total_spend = campaign_stats['spend'].sum()
             logger.info(f"    Custos obtidos: R$ {total_spend:,.2f}")
         else:
@@ -962,6 +1006,10 @@ class CampaignMetricsCalculator:
         if not campaigns:
             return 0.0
 
+        # Defensivo: leads VIP / orgânicos podem vir com campaign_name=NaN
+        if not isinstance(campaign_name, str) or not campaign_name:
+            return 0.0
+
         # MÉTODO 1: Tentar match por Campaign ID (mais preciso)
         campaign_id = self._extract_campaign_id(campaign_name)
 
@@ -1016,6 +1064,10 @@ class CampaignMetricsCalculator:
         Returns:
             Valor do orçamento (float) - prioriza daily_budget, senão lifetime_budget
         """
+
+        # Defensivo: leads VIP / orgânicos / sem campanha podem vir com campaign_name=NaN
+        if not isinstance(campaign_name, str) or not campaign_name:
+            return 0.0
         if not costs_hierarchy:
             return 0.0
 
@@ -1082,6 +1134,10 @@ class CampaignMetricsCalculator:
         Returns:
             Número de criativos (int)
         """
+
+        # Defensivo: leads VIP / orgânicos / sem campanha podem vir com campaign_name=NaN
+        if not isinstance(campaign_name, str) or not campaign_name:
+            return 0
         if not costs_hierarchy:
             return 0
 
@@ -1139,6 +1195,10 @@ class CampaignMetricsCalculator:
 
         campaigns = costs_hierarchy.get('campaigns', {})
         if not campaigns:
+            return "-"
+
+        # Defensivo: leads VIP / orgânicos / sem campanha podem vir com campaign_name=NaN
+        if not isinstance(campaign_name, str) or not campaign_name:
             return "-"
 
         # MÉTODO 1: Tentar match por Campaign ID (mais preciso)
@@ -1217,6 +1277,10 @@ class CampaignMetricsCalculator:
         Returns:
             Account ID (string) ou vazio se não encontrar
         """
+
+        # Defensivo: leads VIP / orgânicos / sem campanha podem vir com campaign_name=NaN
+        if not isinstance(campaign_name, str) or not campaign_name:
+            return ""
         if not costs_hierarchy:
             return ""
 
@@ -1267,6 +1331,10 @@ class CampaignMetricsCalculator:
         Returns:
             Nome atual da campanha na Meta, ou nome original se não encontrar
         """
+
+        # Defensivo: leads VIP / orgânicos / sem campanha podem vir com campaign_name=NaN
+        if not isinstance(campaign_name, str) or not campaign_name:
+            return campaign_name
         if not costs_hierarchy:
             return campaign_name
 
@@ -1324,6 +1392,10 @@ class CampaignMetricsCalculator:
         Returns:
             Número de leads (int)
         """
+
+        # Defensivo: leads VIP / orgânicos / sem campanha podem vir com campaign_name=NaN
+        if not isinstance(campaign_name, str) or not campaign_name:
+            return 0
         if not costs_hierarchy:
             return 0
 
@@ -1372,6 +1444,10 @@ class CampaignMetricsCalculator:
 
         campaigns = costs_hierarchy.get('campaigns', {})
         if not campaigns:
+            return 0
+
+        # Defensivo: leads VIP / orgânicos / sem campanha podem vir com campaign_name=NaN
+        if not isinstance(campaign_name, str) or not campaign_name:
             return 0
 
         # MÉTODO 1: Tentar match por Campaign ID (mais preciso)

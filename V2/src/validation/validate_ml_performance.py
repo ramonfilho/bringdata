@@ -1013,13 +1013,15 @@ def main():
             survey_df = survey_df_all
         logger.info(f"    {len(survey_df_all)} leads totais nas planilhas → {len(survey_df)} no período (janela 60d)")
 
+        # Fonte 1 (Google Sheets) é opcional — Railway/ledger rodam mesmo quando vazia
         if survey_df.empty or 'email' not in survey_df.columns:
-            logger.warning("    Nenhum lead carregado do Google Sheets para o período.")
-            leads_df = pd.DataFrame()
-            lead_source_stats = {'survey_leads': 0, 'capi_leads_extras': 0, 'capi_leads_total': 0}
+            logger.warning("    Nenhum lead carregado do Google Sheets — seguindo só com Railway/ledger.")
+            survey_df = pd.DataFrame(columns=['email', 'data_captura'])
+            survey_emails = set()
         else:
             survey_emails = set(survey_df['email'].unique())
             logger.info(f"    {len(survey_emails)} emails únicos na pesquisa")
+        if True:  # bloco a seguir preserva indentação original; Railway/ledger sempre rodam
 
             # Buscar leads CAPI extras (Cloud SQL backup + Railway PostgreSQL)
             import re
@@ -1030,6 +1032,12 @@ def main():
 
             start_str = start_date if isinstance(start_date, str) else start_date.strftime('%Y-%m-%d')
             end_str   = end_date   if isinstance(end_date,   str) else end_date.strftime('%Y-%m-%d')
+            # Janela de leads vai ATÉ vendas_end pra capturar compradores que se cadastraram
+            # durante a semana de vendas (Client/VIP novo) — não só durante a captação oficial.
+            # Mantém cap_start - 60d no início (já tratado abaixo via `_lead_start_ext`).
+            _leads_end_str = (args.sales_end_date
+                              if hasattr(args, 'sales_end_date') and args.sales_end_date
+                              else end_str)
 
             # Cache CAPI (Cloud SQL + Railway combinados)
             _capi_cache_dir = Path(__file__).parent.parent.parent / 'files' / 'validation' / 'cache'
@@ -1100,11 +1108,22 @@ def main():
             elif start_str < RAILWAY_CUTOVER and not CLOUDSQL_BACKUP.exists():
                 logger.warning(f"    Backup Cloud SQL não encontrado em {CLOUDSQL_BACKUP}")
 
-            # --- Fonte 2: Railway (para datas >= 18/02/2026) ---
-            if end_str >= RAILWAY_CUTOVER:
-                railway_start = max(start_str, RAILWAY_CUTOVER)
-                end_excl = (pd.to_datetime(end_str) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
-                logger.info(f"    Buscando leads no Railway ({railway_start} a {end_str})...")
+            # --- Fonte 2: Railway tabela `Lead` (histórico pré-17/05/2026) ---
+            # Lead parou de receber em ~17/05/2026 (migração de schema). Mesma janela 60d
+            # do Sheets/ledger pra cobrir compradores de LFs anteriores. Se a janela do
+            # pipeline (start - 60d) começa DEPOIS da morte da Lead, skipar — Lead não tem
+            # nada útil nessa janela e pull do Railway é caro (~76k linhas).
+            LEAD_DEATH_DATE = '2026-05-17'
+            _lead_start_ext = (pd.to_datetime(start_str) - pd.Timedelta(days=60)).strftime('%Y-%m-%d')
+            if _leads_end_str >= RAILWAY_CUTOVER and _lead_start_ext < LEAD_DEATH_DATE:
+                railway_start = max(_lead_start_ext, RAILWAY_CUTOVER)
+                # End da Lead = min(janela_pipeline, lead_death) — não puxa dados pós-morte
+                _lead_end_str = min(_leads_end_str, LEAD_DEATH_DATE)
+                end_excl = (pd.to_datetime(_lead_end_str) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                logger.info(f"    Buscando leads no Railway/Lead ({railway_start} a {_lead_end_str})...")
+            elif _leads_end_str >= RAILWAY_CUTOVER and _lead_start_ext >= LEAD_DEATH_DATE:
+                logger.info(f"    Skip Lead antiga: janela {_lead_start_ext}+ é toda pós-morte ({LEAD_DEATH_DATE})")
+            if _leads_end_str >= RAILWAY_CUTOVER and _lead_start_ext < LEAD_DEATH_DATE:
                 try:
                     import pg8000.native
                     railway_conn = pg8000.native.Connection(
@@ -1171,6 +1190,169 @@ def main():
                 except Exception as e:
                     logger.warning(f"    Erro ao conectar com Railway: {e}")
 
+            # --- Fonte 3: Railway `registros_ml` (ledger ML — fonte canônica pós-17/05/2026) ---
+            # A tabela "Lead" parou de receber em ~17/05; o ledger é populado pelo consumer
+            # Pub/Sub e é onde leads do sistema novo vivem. Sem isso o pipeline retorna 0
+            # leads pra qualquer LF a partir de 17/05.
+            if _leads_end_str >= '2026-05-17':
+                # Janela estendida 60d antes do cap_start pra capturar compradores
+                # que vieram de LFs anteriores (mesma lógica de _s_extended do Sheets).
+                # Limite inferior é 2026-05-17 — antes disso o ledger ainda não existia.
+                _ledger_start_ext = (pd.to_datetime(start_str) - pd.Timedelta(days=60)).strftime('%Y-%m-%d')
+                ledger_start = max(_ledger_start_ext, '2026-05-17')
+                logger.info(f"    Buscando leads no Railway/registros_ml ({ledger_start} a {_leads_end_str})...")
+                _ledger_loader = SalesDataLoader()
+                ledger_dfs = []
+                for vf in (None, 'champion_jan30', 'challenger_abr28'):
+                    df_v = _ledger_loader.load_ml_ledger(
+                        ledger_start, _leads_end_str,
+                        variant_filter=vf,
+                        only_with_score=False,
+                        only_with_survey=False,
+                    )
+                    if not df_v.empty:
+                        ledger_dfs.append(df_v)
+                if ledger_dfs:
+                    ledger_df = pd.concat(ledger_dfs, ignore_index=True)
+                    def _strip(v): return v.strip() if isinstance(v, str) else ''
+                    def _get(r, k): return r[k] if (k in r and pd.notna(r[k])) else None
+                    ledger_leads = [
+                        {
+                            'email':        r['email'],
+                            'name':         (f"{_strip(_get(r,'first_name'))} {_strip(_get(r,'last_name'))}".strip() or None),
+                            'phone':        _get(r, 'telefone'),
+                            'utm_campaign': _get(r, 'utm_campaign'),
+                            'utm_medium':   _get(r, 'utm_medium'),
+                            'utm_source':   _get(r, 'utm_source'),
+                            'utm_content':  _get(r, 'utm_content'),
+                            'utm_term':     _get(r, 'utm_term'),
+                            'lead_score':   float(r['lead_score']) if pd.notna(_get(r, 'lead_score')) else None,
+                            'decil':        f"D{int(r['decil']):02d}" if pd.notna(_get(r, 'decil')) else None,
+                            'fbc':          _get(r, 'fbc'),
+                            'fbp':          _get(r, 'fbp'),
+                            'created_at':   r['data_captura'],
+                            'variant':      _get(r, 'variant'),
+                            'base_status':  _get(r, 'base_status'),
+                        }
+                        for _, r in ledger_df.iterrows()
+                    ]
+                    logger.info(f"    Ledger: {len(ledger_leads)} leads encontrados")
+                    capi_leads_data.extend(ledger_leads)
+                else:
+                    logger.info(f"    Ledger: 0 leads no período")
+
+            # --- Fonte 4: Railway `Client` + `UTMTracking` (front novo, superset do ledger) ---
+            # `registros_ml` só recebe leads que disparam evento Pub/Sub (Meta-elegíveis,
+            # com fbp/fbc, etc.). `Client` recebe TODO lead que toca o sistema — inclusive
+            # quem chega via Google Ads/orgânico ou nunca preencheu a pesquisa.
+            # JOIN com `UTMTracking` traz os UTMs (última atribuição por email).
+            # Filtra fora leads que já estão no ledger pra evitar duplicação.
+            if _leads_end_str >= '2026-05-17':
+                _client_start = (pd.to_datetime(start_str) - pd.Timedelta(days=60)).strftime('%Y-%m-%d')
+                _client_start = max(_client_start, '2026-05-17')
+                logger.info(f"    Buscando leads em Client+UTMTracking ({_client_start} → {_leads_end_str})...")
+                try:
+                    import pg8000.native as _pg
+                    _conn = _pg.Connection(
+                        host=os.environ.get('RAILWAY_DB_HOST', 'shortline.proxy.rlwy.net'),
+                        port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+                        database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+                        user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+                        password=os.environ['RAILWAY_DB_PASSWORD'],
+                    )
+                    _end_excl = (pd.to_datetime(_leads_end_str) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+                    _client_rows = _conn.run(
+                        '''
+                        SELECT c.email, c."firstName", c."lastName", c.phone,
+                               c.fbp, c.fbc, c."firstSeenAt",
+                               u.source, u.medium, u.campaign, u.content, u.term
+                        FROM "Client" c
+                        LEFT JOIN LATERAL (
+                            SELECT source, medium, campaign, content, term
+                            FROM "UTMTracking"
+                            WHERE LOWER("clientEmail") = LOWER(c.email)
+                            ORDER BY "trackedAt" DESC
+                            LIMIT 1
+                        ) u ON true
+                        WHERE c."firstSeenAt" >= :s AND c."firstSeenAt" < :e
+                          AND c.email IS NOT NULL AND c.email != ''
+                          AND LOWER(c.email) NOT IN (
+                              SELECT LOWER(email) FROM registros_ml
+                              WHERE created_at >= :s AND created_at < :e AND email IS NOT NULL
+                          )
+                        ''',
+                        s=_client_start, e=_end_excl,
+                    )
+                    _conn.close()
+                    def _ss(v): return v.strip() if isinstance(v, str) else ''
+                    client_leads = [
+                        {
+                            'email':        r[0],
+                            'name':         (f"{_ss(r[1])} {_ss(r[2])}".strip() or None),
+                            'phone':        r[3],
+                            'utm_campaign': r[9],
+                            'utm_medium':   r[8],
+                            'utm_source':   r[7],
+                            'utm_content':  r[10],
+                            'utm_term':     r[11],
+                            'lead_score':   None,
+                            'decil':        None,
+                            'fbc':          r[5],
+                            'fbp':          r[4],
+                            'created_at':   r[6],
+                            'variant':      None,
+                            'base_status':  None,
+                        }
+                        for r in _client_rows
+                    ]
+                    logger.info(f"    Client+UTMTracking: {len(client_leads)} leads complementares (não estão no ledger)")
+                    capi_leads_data.extend(client_leads)
+                except Exception as _ce:
+                    logger.warning(f"    Aviso: erro Client+UTMTracking: {_ce}")
+
+            # --- Fonte 5: VIP xlsx local (lead magnet, fora do funil padrão) ---
+            # Esses leads vêm de captação separada (formulário VIP), não passam pelo
+            # Pub/Sub e geralmente não têm UTM Meta. Marcamos com `lead_source='vip'`
+            # pra preservar do filtro `campaign_id_meta` mais à frente.
+            import glob as _glob
+            _vip_files = sorted(_glob.glob('data/devclub/vip_*.xlsx'))
+            if _vip_files:
+                _vip_xlsx = _vip_files[-1]
+                try:
+                    _vip_df = pd.read_excel(_vip_xlsx)
+                    _email_col = next((c for c in _vip_df.columns if 'mail' in str(c).lower()), None)
+                    _nome_col = next((c for c in _vip_df.columns if 'nome' in str(c).lower()), None)
+                    _tel_col = next((c for c in _vip_df.columns if 'tel' in str(c).lower() or 'phone' in str(c).lower()), None)
+                    _data_col = next((c for c in _vip_df.columns if 'data' in str(c).lower() or 'date' in str(c).lower()), None)
+                    _utm_col = next((c for c in _vip_df.columns if 'utm' in str(c).lower()), None)
+                    vip_leads = []
+                    for _, r in _vip_df.iterrows():
+                        em = r.get(_email_col) if _email_col else None
+                        if pd.isna(em) or not em:
+                            continue
+                        vip_leads.append({
+                            'email':        str(em).lower().strip(),
+                            'name':         str(r.get(_nome_col, '')).strip() or None if _nome_col else None,
+                            'phone':        str(r.get(_tel_col)) if _tel_col and pd.notna(r.get(_tel_col)) else None,
+                            'utm_campaign': str(r.get(_utm_col)) if _utm_col and pd.notna(r.get(_utm_col)) else None,
+                            'utm_medium':   None,
+                            'utm_source':   'vip',  # marcador pra origem
+                            'utm_content':  None,
+                            'utm_term':     None,
+                            'lead_score':   None,
+                            'decil':        None,
+                            'fbc':          None,
+                            'fbp':          None,
+                            'created_at':   pd.to_datetime(r.get(_data_col), errors='coerce') if _data_col else pd.NaT,
+                            'variant':      None,
+                            'base_status':  None,
+                            'lead_source':  'vip',  # PRESERVA do filtro campaign_id_meta
+                        })
+                    logger.info(f"    VIP ({Path(_vip_xlsx).name}): {len(vip_leads)} leads")
+                    capi_leads_data.extend(vip_leads)
+                except Exception as _ve:
+                    logger.warning(f"    Aviso: erro VIP: {_ve}")
+
             if _capi_from_cache:
                 logger.info(f"    Cache HIT CAPI: {len(capi_norm)} leads (do cache)")
             elif capi_leads_data:
@@ -1192,6 +1374,14 @@ def main():
                 capi_norm['content'] = capi_df.get('utm_content', np.nan)
                 capi_norm['lead_score'] = capi_df.get('lead_score', np.nan)
                 capi_norm['decile'] = capi_df.get('decil', None)
+                # Bloco F — split Champion vs Challenger só faz sentido pra leads
+                # do ledger novo (registros_ml). Leads da tabela Lead antiga não
+                # têm essas colunas → ficam None e caem em "fora do A/B".
+                capi_norm['variant'] = capi_df.get('variant', None)
+                capi_norm['base_status'] = capi_df.get('base_status', None)
+                # `lead_source` marca origem alternativa (VIP, etc.) — usado pra
+                # preservar do filtro `campaign_id_meta` abaixo.
+                capi_norm['lead_source'] = capi_df.get('lead_source', None)
                 capi_norm['source_type'] = 'capi'
                 capi_norm = capi_norm[capi_norm['email'].notna()].copy()
 
@@ -1201,12 +1391,16 @@ def main():
                     match = re.search(r'\|\s*(\d{10,})\s*$', str(utm_campaign))
                     return match.group(1)[:15] if match else None  # primeiros 15, igual ao campaigns_df
 
-                total_antes = len(capi_norm)
                 capi_norm['campaign_id_meta'] = capi_norm['campaign'].apply(extract_campaign_id_meta)
-                capi_norm = capi_norm[capi_norm['campaign_id_meta'].notna()].copy()
-                removidos = total_antes - len(capi_norm)
-                if removidos > 0:
-                    logger.info(f"    Filtrado: {removidos} sem campaign_id Meta ({len(capi_norm)} restaram)")
+                # NÃO DROPAR aqui: o `campaign_id_meta` serve pra **classificação Meta**
+                # (cruzamento com Meta API por campaign_id). Pro **matching com vendas**, leads
+                # de Google Ads / orgânicos / VIP (com utm_campaign='devlf', 'encurtadoraprendacomigo'
+                # etc.) também devem entrar no pool — caso contrário ~7 compradores do LF56 que
+                # vieram via canais não-Meta ficavam de fora silenciosamente. Quem precisa só do
+                # subset Meta faz `df[df['campaign_id_meta'].notna()]` no consumidor.
+                n_sem_meta = int(capi_norm['campaign_id_meta'].isna().sum())
+                if n_sem_meta:
+                    logger.info(f"    {n_sem_meta} leads sem campaign_id Meta (preservados — classificação Meta vai ignorar)")
 
                 # Salvar CAPI no cache
                 if use_cache:
@@ -1498,6 +1692,8 @@ def main():
         asaas_api_end=asaas_end,
         asaas_product_value=config.get('ticket_contracted'),  # None = usar valor real da API Asaas
         asaas_customer_created_from=start_date,  # cap_start — conta para mais, evita perder compradores reais
+        boletex_api_start=asaas_start,  # mesma janela de vendas
+        boletex_api_end=asaas_end,
         report_type=args.report_type,
         include_canceled=include_canceled,
         product_exclude_substrings=product_exclude,
@@ -1507,7 +1703,7 @@ def main():
         logger.error(" Nenhuma venda carregada. Verifique os arquivos de vendas.")
         sys.exit(1)
 
-    logger.info(f"    {len(sales_df)} vendas carregadas (Guru + TMB + HotPay + Hotmart + Asaas)")
+    logger.info(f"    {len(sales_df)} vendas carregadas (Guru + TMB + HotPay + Hotmart + Asaas + Boletex)")
     print(flush=True)
 
     # 4. Filtrar por período
@@ -1536,7 +1732,13 @@ def main():
     sales_guru_before = len(sales_df[sales_df['origem'] == 'guru']) if 'origem' in sales_df.columns else 0
     sales_tmb_before = len(sales_df[sales_df['origem'] == 'tmb']) if 'origem' in sales_df.columns else 0
 
-    leads_df = filter_by_period(leads_df, start_date, end_date, 'data_captura')
+    # Janela de leads: 60d antes do cap_start até vendas_end — pra incluir compradores
+    # que se cadastraram em LFs anteriores OU durante a semana de vendas do próprio LF
+    # (lista VIP, lead magnet, captação tardia, etc.). Sem essa extensão, perdíamos ~8
+    # compradores reais por turno (8 de 44 no LF56).
+    _leads_filter_start = (pd.to_datetime(start_date) - pd.Timedelta(days=60))
+    _leads_filter_end = pd.to_datetime(sales_end) if sales_end else end_date
+    leads_df = filter_by_period(leads_df, _leads_filter_start, _leads_filter_end, 'data_captura')
     sales_df = filter_by_period(sales_df, sales_start, sales_end, 'sale_date')
 
     # Mostrar estatísticas detalhadas após filtro de vendas
@@ -1741,10 +1943,13 @@ def main():
                         return grupo
 
                 # Fallback para ml_type
+                # SEM_ML = Controle puro (DEVLF sem sufixo ML)
+                # COM_ML = ML genérico (preferimos identificar Champion ML vs Challenger ML via map acima;
+                # fallback aqui ocorre quando não conseguimos o campaign_id pra olhar no map)
                 if row.get('ml_type') == 'SEM_ML':
-                    return 'Challenger'
+                    return 'Controle'
                 elif row.get('ml_type') == 'COM_ML':
-                    return 'Champion'  # Apenas se não conseguimos o ID
+                    return 'Champion'  # Default — sem ID não dá pra distinguir Champion vs Challenger ML
                 else:
                     return 'Outro'
 
@@ -1756,10 +1961,11 @@ def main():
                 logger.info(f"      {group}: {count} leads")
         else:
             # Fallback: usar mapeamento simples
+            # SEM_ML = Controle puro; COM_ML = ML genérico (sem distinção Champion vs Challenger por falta de map)
             logger.warning("    Não foi possível criar mapeamento refinado, usando simples")
             leads_df['comparison_group'] = leads_df['ml_type'].map({
                 'COM_ML': 'Champion',
-                'SEM_ML': 'Challenger'
+                'SEM_ML': 'Controle'
             }).fillna('Outro')
     else:
         logger.warning("    Coluna ml_type não encontrada, pulando criação de grupos")
@@ -1836,7 +2042,10 @@ def main():
 
         for sale_email in list(unmatched_sales_emails)[:20]:  # Limitar a 20 para não poluir
             # Buscar primeiro no dataset do período
-            lead_match = period_leads_df[period_leads_df['email'].str.lower().str.strip() == sale_email]
+            if period_leads_df.empty or 'email' not in period_leads_df.columns:
+                lead_match = period_leads_df  # vazio — vai cair em "not found"
+            else:
+                lead_match = period_leads_df[period_leads_df['email'].str.lower().str.strip() == sale_email]
 
             if len(lead_match) > 0:
                 # Encontrado NO PERÍODO
@@ -1872,7 +2081,10 @@ def main():
                 print(f"{email_display:<35} {data_str:<20} {grupo:<15} {campaign}")
             else:
                 # Não encontrado no período - buscar no histórico
-                historical_match = historical_leads_df[historical_leads_df['email'].str.lower().str.strip() == sale_email]
+                if historical_leads_df.empty or 'email' not in historical_leads_df.columns:
+                    historical_match = historical_leads_df
+                else:
+                    historical_match = historical_leads_df[historical_leads_df['email'].str.lower().str.strip() == sale_email]
 
                 if len(historical_match) > 0:
                     # Encontrado no HISTÓRICO (período anterior)
@@ -1909,10 +2121,14 @@ def main():
     print(" FILTRANDO CONVERSÕES POR PERÍODO DE CAPTURA...", flush=True)
     print(flush=True)
     from src.validation.matching import filter_conversions_by_capture_period
+    # Janela igual ao filter_by_period de leads acima: 60d antes do cap_start até sales_end,
+    # pra preservar compradores capturados em LFs anteriores ou durante a semana de vendas.
+    _conv_filter_start = (pd.to_datetime(start_date) - pd.Timedelta(days=60))
+    _conv_filter_end = pd.to_datetime(sales_end) if sales_end else end_date
     matched_df = filter_conversions_by_capture_period(
         matched_df,
-        period_start=start_date,
-        period_end=end_date
+        period_start=_conv_filter_start,
+        period_end=_conv_filter_end,
     )
 
     # 6.2. Remover duplicatas artificiais
@@ -1928,6 +2144,61 @@ def main():
     logger.info(f"    Match por email: {matching_stats['matched_by_email']}")
     logger.info(f"    Match por telefone: {matching_stats['matched_by_phone']}")
     print(flush=True)
+
+    # Split A/B Champion vs Challenger — só aplica em leads vindos do `registros_ml`
+    # (têm `variant` + `base_status`). Leads pré-17/05 (tabela Lead antiga) ficam
+    # em 'fora_do_ab' por construção. Critério acordado:
+    #   champion   = variant IS NULL AND base_status='success' AND lead_score NOT NULL
+    #   challenger = variant='challenger_abr28' AND base_status='success' AND lead_score NOT NULL
+    if 'variant' in matched_df.columns or 'base_status' in matched_df.columns:
+        def _ab_model(r):
+            ls = r.get('lead_score')
+            if pd.isna(ls): return 'fora_do_ab'
+            bs = r.get('base_status')
+            if bs != 'success': return 'fora_do_ab'
+            v = r.get('variant')
+            if v == 'challenger_abr28': return 'challenger'
+            if pd.isna(v) or v is None: return 'champion'
+            return 'fora_do_ab'
+
+        matched_df['ab_model'] = matched_df.apply(_ab_model, axis=1)
+        ab_counts = matched_df['ab_model'].value_counts().to_dict()
+        print(" SPLIT A/B — Champion vs Challenger (origem: registros_ml.variant)", flush=True)
+        print(f"   Distribuição: {ab_counts}", flush=True)
+        print(flush=True)
+
+        for modelo in ['champion', 'challenger']:
+            sub = matched_df[matched_df['ab_model'] == modelo]
+            if sub.empty:
+                print(f"   {modelo}: 0 leads — pulado", flush=True)
+                continue
+            conv = sub[sub['converted'] == True]
+            rev_col = 'sale_value_realizado' if 'sale_value_realizado' in conv.columns else 'sale_value'
+            rev = conv[rev_col].sum() if not conv.empty else 0
+            print(f"   {modelo:10}: {len(sub):>6,} leads | {len(conv):>3} vendas | "
+                  f"taxa {len(conv)/len(sub)*100:>5.2f}% | receita R${rev:>9,.0f}", flush=True)
+            if 'decile' in sub.columns and not sub['decile'].dropna().empty:
+                for d in ['D10', 'D09', 'D08']:
+                    sd = sub[sub['decile'] == d]
+                    if sd.empty: continue
+                    sd_conv = sd[sd['converted'] == True]
+                    sd_rev = sd_conv[rev_col].sum() if not sd_conv.empty else 0
+                    print(f"     {d}: {len(sd):>5,} leads | {len(sd_conv):>3} vendas | "
+                          f"taxa {len(sd_conv)/max(len(sd),1)*100:>5.2f}% | receita R${sd_rev:>8,.0f}", flush=True)
+
+        # Persistir os 2 sub-dataframes pra inspeção/análise futura (ROAS por decil etc.)
+        try:
+            from pathlib import Path as _P
+            _split_dir = _P(output_dir)
+            _split_dir.mkdir(parents=True, exist_ok=True)
+            for modelo in ['champion', 'challenger', 'fora_do_ab']:
+                _sub = matched_df[matched_df['ab_model'] == modelo]
+                if not _sub.empty:
+                    _sub.to_parquet(_split_dir / f"matched_{modelo}.parquet", index=False)
+            print(f"   Parquets salvos em {output_dir}/matched_{{champion,challenger,fora_do_ab}}.parquet", flush=True)
+        except Exception as _e:
+            logger.warning(f"   Aviso: não foi possível salvar parquets do split A/B: {_e}")
+        print(flush=True)
 
     # 7. Reutilizar custos dos relatórios Meta já carregados
     print(" REUTILIZANDO CUSTOS DOS RELATÓRIOS META...", flush=True)
@@ -2032,6 +2303,70 @@ def main():
         # Cleanup: remover coluna temporária
         campaign_metrics = campaign_metrics.drop(columns=['campaign_id_15'])
 
+        # === OVERRIDE LEADS COM EMAILS ÚNICOS DA TABELA UTMTracking (Railway) ===
+        # O Meta reporta o campo "leads_standard" contando TODOS os eventos do pixel
+        # (`Lead` + `LeadQualified` + `LeadHighQuality` etc), então uma única pessoa
+        # que preencheu a pesquisa aparece como 2 ou 3 "leads" na contagem do Meta.
+        # Resultado prático: CPL e Taxa de Conversão saem ~metade do valor real.
+        # Fonte certa = UTMTracking (1 linha = 1 (email, UTM) único), que tem 97,6%
+        # de cobertura dos leads da pesquisa no LF56.
+        # Aqui rescalamos `leads` proporcionalmente por comparison_group para que o
+        # total por grupo bata com o emails únicos no Railway, preservando o peso
+        # relativo de cada campanha dentro do grupo.
+        try:
+            import ssl as _ssl
+            import pg8000.native as _pg
+            from collections import defaultdict
+            _ssl_ctx = _ssl.create_default_context()
+            _ssl_ctx.check_hostname = False
+            _ssl_ctx.verify_mode = _ssl.CERT_NONE
+            _conn = _pg.Connection(
+                host=os.environ['RAILWAY_DB_HOST'], port=int(os.environ['RAILWAY_DB_PORT']),
+                user=os.environ['RAILWAY_DB_USER'], password=os.environ['RAILWAY_DB_PASSWORD'],
+                database=os.environ['RAILWAY_DB_NAME'], ssl_context=_ssl_ctx,
+            )
+            _rows = _conn.run(
+                """SELECT LOWER("clientEmail") AS email, campaign
+                   FROM "UTMTracking"
+                   WHERE "trackedAt"::date BETWEEN :s AND :e""",
+                s=start_date, e=end_date,
+            )
+            _conn.close()
+            _utm_df = pd.DataFrame(_rows, columns=['email', 'utm_campaign']).drop_duplicates('email')
+
+            # Classifica cada email pela mesma lógica de comparison_group
+            def _classify_utm(name):
+                if not isinstance(name, str):
+                    return 'Outro'
+                up = name.upper()
+                if 'LEADHQLB' in up or 'HQLB' in up:
+                    return 'Challenger'
+                if 'LEADQUALIFIED' in up or 'MACHINE LEARNING' in up or '| ML |' in up:
+                    return 'Champion'
+                if 'DEVLF' in up and 'PG1' in up:
+                    return 'Controle'
+                return 'Outro'
+            _utm_df['_group'] = _utm_df['utm_campaign'].apply(_classify_utm)
+            _target_per_group = _utm_df['_group'].value_counts().to_dict()
+            logger.info(f"    Leads únicos (UTMTracking) por grupo: {_target_per_group}")
+
+            # Rescala leads por grupo no campaign_metrics
+            for _grp, _target in _target_per_group.items():
+                _mask = campaign_metrics['comparison_group'] == _grp
+                _current_sum = float(campaign_metrics.loc[_mask, 'leads'].sum())
+                if _current_sum > 0 and _target > 0:
+                    _scale = _target / _current_sum
+                    campaign_metrics.loc[_mask, 'leads'] = (
+                        campaign_metrics.loc[_mask, 'leads'].astype(float) * _scale
+                    )
+                    logger.info(
+                        f"      {_grp}: {int(_current_sum)} leads Meta → {_target} emails únicos "
+                        f"(scale ×{_scale:.3f})"
+                    )
+        except Exception as _e:
+            logger.warning(f"    Não foi possível sobrescrever leads via UTMTracking: {_e}")
+            logger.warning(f"    CPL e Taxa de Conversão vão usar leads do Meta (inflado ~2×)")
+
         # Log de sucesso/falha
         mapped_count = campaign_metrics['comparison_group'].notna().sum()
         total_count = len(campaign_metrics)
@@ -2041,7 +2376,8 @@ def main():
             unmapped = campaign_metrics[campaign_metrics['comparison_group'].isna()]['campaign'].tolist()
             logger.warning(f"    {total_count - mapped_count} campanhas SEM comparison_group:")
             for camp in unmapped[:5]:  # Mostrar até 5
-                logger.warning(f"       {camp[:70]}")
+                camp_str = camp if isinstance(camp, str) else '(sem nome)'
+                logger.warning(f"       {camp_str[:70]}")
     elif len(campaign_metrics) == 0:
         logger.warning("    Nenhuma métrica de campanha disponível - DataFrame vazio")
 

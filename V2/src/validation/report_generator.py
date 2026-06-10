@@ -154,9 +154,9 @@ class ValidationReportGenerator:
                     'comparison_group'
                 ] = 'Challenger'
 
-            # Filtrar apenas "Champion" e "Challenger" para consistência com adsets
+            # Filtrar Champion / Challenger / Controle (3 grupos para a tabela de comparação)
             campaign_filtered = campaign_for_filtering[
-                campaign_for_filtering['comparison_group'].isin(['Champion', 'Challenger'])
+                campaign_for_filtering['comparison_group'].isin(['Champion', 'Challenger', 'Controle'])
             ].copy()
 
             # Agregar por comparison_group
@@ -897,8 +897,8 @@ class ValidationReportGenerator:
         # Escrever dados
         for row_num, (idx, row) in enumerate(all_sales_df.iterrows(), start=3):
             worksheet.write(row_num, 0, row['trackeado'], formats['text'])
-            worksheet.write(row_num, 1, row['email'] if row['email'] else '', formats['text'])
-            worksheet.write(row_num, 2, row['telefone'] if row['telefone'] else '', formats['text'])
+            worksheet.write(row_num, 1, str(row['email']) if pd.notna(row['email']) and row['email'] else '', formats['text'])
+            worksheet.write(row_num, 2, str(row['telefone']) if pd.notna(row['telefone']) and row['telefone'] else '', formats['text'])
             worksheet.write(row_num, 3, str(row['fbp']) if pd.notna(row['fbp']) and row['fbp'] else '', formats['text'])
             worksheet.write(row_num, 4, str(row['fbc']) if pd.notna(row['fbc']) and row['fbc'] else '', formats['text'])
             worksheet.write(row_num, 5, row['campaign_id'] if row['campaign_id'] else '', formats['text'])
@@ -1626,9 +1626,9 @@ class ValidationReportGenerator:
             worksheet.write(start_row, 0, 'Coluna de grupo não encontrada', formats['text'])
             return start_row + 1
 
-        df_filtered = df[df[group_col].isin(['Champion', 'Challenger'])].copy()
+        df_filtered = df[df[group_col].isin(['Champion', 'Challenger', 'Controle'])].copy()
         if df_filtered.empty:
-            worksheet.write(start_row, 0, 'Nenhum dado de Eventos ML ou Controle encontrado', formats['text'])
+            worksheet.write(start_row, 0, 'Nenhum dado de Champion / Challenger / Controle encontrado', formats['text'])
             return start_row + 1
 
         # === PREPARAR AGREGAÇÃO ===
@@ -1682,6 +1682,7 @@ class ValidationReportGenerator:
 
         ml_data = aggregated[aggregated[group_col] == 'Champion']
         ctrl_data = aggregated[aggregated[group_col] == 'Challenger']
+        controle_data = aggregated[aggregated[group_col] == 'Controle']
 
         if ml_data.empty:
             worksheet.write(start_row, 0, 'Dados incompletos (falta ML)', formats['text'])
@@ -1689,13 +1690,21 @@ class ValidationReportGenerator:
 
         ml_row = ml_data.iloc[0]
         ctrl_row = ctrl_data.iloc[0] if not ctrl_data.empty else None
+        controle_row = controle_data.iloc[0] if not controle_data.empty else None
         no_control = ctrl_row is None or (ctrl_row['Valor gasto'] == 0 and ctrl_row['Leads'] == 0)
+        no_controle = controle_row is None or (controle_row['Valor gasto'] == 0 and controle_row['Leads'] == 0)
 
         def cv(key, default=0):
-            """Valor do Controle com fallback."""
+            """Valor do Challenger ML (LEADHQLB) com fallback."""
             if no_control or ctrl_row is None:
                 return default
             return ctrl_row.get(key, default) if hasattr(ctrl_row, 'get') else ctrl_row[key]
+
+        def cnt(key, default=0):
+            """Valor do Controle puro (DEVLF sem sufixo ML) com fallback."""
+            if no_controle or controle_row is None:
+                return default
+            return controle_row.get(key, default) if hasattr(controle_row, 'get') else controle_row[key]
 
         def ml(key, default=0):
             """Valor do ML com fallback."""
@@ -1707,13 +1716,13 @@ class ValidationReportGenerator:
             """Diferença relativa (decimal). None se ctrl_v = 0."""
             return None if ctrl_v == 0 else (ml_v - ctrl_v) / ctrl_v
 
-        # === TOTAIS COMBINADOS ===
-        tot_leads   = ml('Leads')   + cv('Leads', 0)
-        tot_spend   = ml('Valor gasto') + cv('Valor gasto', 0)
+        # === TOTAIS COMBINADOS (Champion + Challenger + Controle) ===
+        tot_leads   = ml('Leads')   + cv('Leads', 0) + cnt('Leads', 0)
+        tot_spend   = ml('Valor gasto') + cv('Valor gasto', 0) + cnt('Valor gasto', 0)
 
         # Usar totais reais (todas as fontes) quando disponíveis
-        tot_vendas  = total_sales_real if total_sales_real is not None else ml('Vendas') + cv('Vendas', 0)
-        tot_receita = total_revenue_real if total_revenue_real is not None else ml('Receita Total') + cv('Receita Total', 0)
+        tot_vendas  = total_sales_real if total_sales_real is not None else ml('Vendas') + cv('Vendas', 0) + cnt('Vendas', 0)
+        tot_receita = total_revenue_real if total_revenue_real is not None else ml('Receita Total') + cv('Receita Total', 0) + cnt('Receita Total', 0)
 
         # Margem calculada a partir da receita real (consistente com ROAS e Receita exibidos)
         tot_margem  = tot_receita - tot_spend
@@ -1728,6 +1737,8 @@ class ValidationReportGenerator:
         ml_cpa    = ml('Valor gasto') / ml('Vendas') if ml('Vendas') > 0 else 0
         ctrl_ticket = cv('Receita Total', 0) / cv('Vendas', 1) if cv('Vendas', 0) > 0 else 0
         ctrl_cpa    = cv('Valor gasto', 0) / cv('Vendas', 1) if (not no_control and cv('Vendas', 0) > 0) else 0
+        cnt_ticket  = cnt('Receita Total', 0) / cnt('Vendas', 1) if cnt('Vendas', 0) > 0 else 0
+        cnt_cpa     = cnt('Valor gasto', 0) / cnt('Vendas', 1) if (not no_controle and cnt('Vendas', 0) > 0) else 0
 
         row = start_row
 
@@ -1770,54 +1781,61 @@ class ValidationReportGenerator:
         row += 2
 
         # ═══════════════════════════════════════════════════════════════
-        # SEÇÃO 2 — COMPARAÇÃO ML vs CONTROLE
+        # SEÇÃO 2 — COMPARAÇÃO Champion ML vs Challenger ML vs Controle
         # ═══════════════════════════════════════════════════════════════
-        NC_COMP = 4  # colunas: Métrica | ML | Controle | Δ%
+        # 5 colunas: Métrica | Champion ML | Challenger ML | Controle | Δ Champ vs Chal
+        NC_COMP = 5
 
         worksheet.merge_range(row, 0, row, NC_COMP - 1,
-                              'COMPARAÇÃO ML vs CONTROLE',
+                              'COMPARAÇÃO Champion ML vs Challenger ML vs Controle',
                               formats['section_header'])
         row += 1
 
         # Cabeçalho
         worksheet.write(row, 0, 'Métrica', formats['header'])
-        worksheet.write(row, 1, 'Champion', formats['header_green'])
-        worksheet.write(row, 2, 'Challenger' if not no_control else '—', formats['header_red'] if not no_control else formats['header'])
-        worksheet.write(row, 3, 'Δ ML vs Challenger', formats['header'])
+        worksheet.write(row, 1, 'Champion ML', formats['header_green'])
+        worksheet.write(row, 2, 'Challenger ML' if not no_control else '—', formats['header_red'] if not no_control else formats['header'])
+        worksheet.write(row, 3, 'Controle' if not no_controle else '—', formats['header'])
+        worksheet.write(row, 4, 'Δ Champion vs Challenger', formats['header'])
         row += 1
 
-        # Colunas: métrica | ml_val | ctrl_val | fmt | higher_better | show_delta
-        # show_delta=False para métricas de volume absoluto (comparação inválida quando budgets são desiguais)
+        # Colunas: métrica | ml_val | ctrl_val | cnt_val | fmt | higher_better | show_delta
         comp_rows = [
-            ('Gasto',             ml('Valor gasto'),             cv('Valor gasto'),             'currency', False, False),
-            ('Leads',             ml('Leads'),                    cv('Leads'),                   'number',   True,  False),
-            ('CPL',               ml('CPL'),                     cv('CPL'),                     'currency', False, True),
-            ('Conversões',        ml('Vendas'),                  cv('Vendas'),                  'number',   True,  False),
-            ('Taxa de Conversão', ml('Taxa de conversão') / 100, cv('Taxa de conversão') / 100, 'percent',  True,  True),
-            ('Receita',           ml('Receita Total'),            cv('Receita Total'),            'currency', True,  False),
-            ('ROAS',              ml('ROAS'),                    cv('ROAS'),                    'decimal',  True,  True),
-            ('CPA',               ml_cpa,                        ctrl_cpa,                      'currency', False, True),
-            ('Margem',            ml('Margem de contribuição'),  cv('Margem de contribuição'),  'currency', True,  False),
-            ('Ticket Médio',      ml_ticket,                     ctrl_ticket,                   'currency', True,  True),
+            ('Gasto',             ml('Valor gasto'),             cv('Valor gasto'),             cnt('Valor gasto'),            'currency', False, False),
+            ('Leads',             ml('Leads'),                    cv('Leads'),                   cnt('Leads'),                  'number',   True,  False),
+            ('CPL',               ml('CPL'),                     cv('CPL'),                     cnt('CPL'),                    'currency', False, True),
+            ('Conversões',        ml('Vendas'),                  cv('Vendas'),                  cnt('Vendas'),                 'number',   True,  False),
+            ('Taxa de Conversão', ml('Taxa de conversão') / 100, cv('Taxa de conversão') / 100, cnt('Taxa de conversão') / 100,'percent',  True,  True),
+            ('Receita',           ml('Receita Total'),            cv('Receita Total'),            cnt('Receita Total'),          'currency', True,  False),
+            ('ROAS',              ml('ROAS'),                    cv('ROAS'),                    cnt('ROAS'),                   'decimal',  True,  True),
+            ('CPA',               ml_cpa,                        ctrl_cpa,                      cnt_cpa,                       'currency', False, True),
+            ('Margem',            ml('Margem de contribuição'),  cv('Margem de contribuição'),  cnt('Margem de contribuição'), 'currency', True,  False),
+            ('Ticket Médio',      ml_ticket,                     ctrl_ticket,                   cnt_ticket,                    'currency', True,  True),
         ]
 
-        for metric_name, ml_val, ctrl_v, fmt, higher_better, show_delta in comp_rows:
+        for metric_name, ml_val, ctrl_v, cnt_v, fmt, higher_better, show_delta in comp_rows:
             worksheet.write(row, 0, metric_name, formats['text'])
             worksheet.write(row, 1, ml_val, formats[fmt])
+            # Challenger ML
             if no_control:
                 worksheet.write(row, 2, '—', formats['text'])
-                worksheet.write(row, 3, '—', formats['text'])
             else:
                 worksheet.write(row, 2, ctrl_v, formats[fmt])
-                if not show_delta:
-                    worksheet.write(row, 3, '—', formats['text'])
+            # Controle puro
+            if no_controle:
+                worksheet.write(row, 3, '—', formats['text'])
+            else:
+                worksheet.write(row, 3, cnt_v, formats[fmt])
+            # Δ Champion ML vs Challenger ML
+            if no_control or not show_delta:
+                worksheet.write(row, 4, '—', formats['text'])
+            else:
+                d = diff(ml_val, ctrl_v)
+                if d is None or d == 0:
+                    worksheet.write(row, 4, '—', formats['text'])
                 else:
-                    d = diff(ml_val, ctrl_v)
-                    if d is None or d == 0:
-                        worksheet.write(row, 3, '—', formats['text'])
-                    else:
-                        is_good = (d > 0 and higher_better) or (d < 0 and not higher_better)
-                        worksheet.write(row, 3, d, formats['positive_pct'] if is_good else formats['negative_pct'])
+                    is_good = (d > 0 and higher_better) or (d < 0 and not higher_better)
+                    worksheet.write(row, 4, d, formats['positive_pct'] if is_good else formats['negative_pct'])
             row += 1
 
         row += 1
