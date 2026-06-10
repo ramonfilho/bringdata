@@ -62,6 +62,29 @@ def normalizar_telefone_robusto(telefone, country_code: int = 55,
     return None
 
 
+def telefone_chave_grupo(telefone, country_code: int = 55) -> str:
+    """
+    Chave canônica DDD + últimos 8 dígitos, para casar lead × entrada no grupo (SendFlow).
+
+    Resolve a divergência do 9º dígito do celular (uns números têm, outros não), que
+    impede o match por igualdade exata. Deriva de `normalizar_telefone_robusto` e dropa
+    o 9º dígito quando presente. Retorna 10 dígitos (DDD+8) ou None.
+
+    NÃO substitui `normalizar_telefone_robusto` (transform de produção sob parity audit) —
+    é uma chave de JUNÇÃO derivada, usada pelo receiver do Sendhook e pelo lookup de scoring
+    da feature "entrou no grupo". Mantém treino/produção idênticos por ser fonte única.
+
+    Limitação conhecida: dropar o 9º dígito é levemente lossy (colisão rara fixo×celular no
+    mesmo DDD com mesmos 8 finais) — aceitável para feature binária.
+    """
+    n = normalizar_telefone_robusto(telefone, country_code)
+    if not n:
+        return None
+    if len(n) == 11:          # celular DDD(2)+9+8 → remove o 9º dígito
+        n = n[:2] + n[3:]
+    return n if len(n) == 10 else None
+
+
 def normalizar_email(email) -> str:
     """Normaliza email: strip + lowercase. Retorna None se inválido."""
     if pd.isna(email):
