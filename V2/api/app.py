@@ -1142,6 +1142,30 @@ async def webhook_update_survey(
         logger.error(f"❌ Erro ao atualizar lead com pesquisa: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro ao atualizar lead: {str(e)}")
 
+
+@app.post("/webhook/sendflow_group_join")
+async def webhook_sendflow_group_join(request: Request):
+    """
+    Recebe o Sendhook do SendFlow (membro adicionado ao grupo de WhatsApp) e grava a
+    entrada em whatsapp_group_joins (feature "entrou no grupo"). Valida o header `sendtok`.
+    Lógica de tradução/persistência em api/sendflow_receiver (anti-corrupção + idempotente).
+    """
+    import os
+    expected = os.environ.get('SENDFLOW_SENDTOK')
+    token = request.headers.get('sendtok')
+    if not expected or token != expected:
+        raise HTTPException(status_code=401, detail="sendtok inválido ou não configurado")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="payload inválido (JSON esperado)")
+    from api.sendflow_receiver import parse_sendhook, store_group_joins
+    rows = parse_sendhook(body)
+    inserted = store_group_joins(rows)
+    logger.info(f"[sendhook] evento={body.get('event')} | entradas={len(rows)} | inseridas={inserted}")
+    return {"status": "ok", "received": len(rows), "inserted": inserted}
+
+
 @app.get("/webhook/lead_capture/stats")
 async def lead_capture_stats(
     start_date: Optional[str] = None,
