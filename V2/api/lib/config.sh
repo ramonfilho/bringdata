@@ -134,6 +134,10 @@ build_env_vars() {
     ENV_VARS="$ENV_VARS,RAILWAY_DB_USER=$RAILWAY_DB_USER"
     ENV_VARS="$ENV_VARS,RAILWAY_DB_PASSWORD=$RAILWAY_DB_PASSWORD"
 
+    # Receiver do Sendhook do SendFlow (feature "entrou no grupo"): o endpoint
+    # /webhook/sendflow_group_join valida este header. Só inclui se estiver no ambiente.
+    [ -n "${SENDFLOW_SENDTOK:-}" ] && ENV_VARS="$ENV_VARS,SENDFLOW_SENDTOK=$SENDFLOW_SENDTOK"
+
     # Consumer Pub/Sub do sistema novo (PROCESSO_CAPI_LEAD_SURVEYS §5).
     # Sem essa flag a revisão deployada vira no-op no /pubsub/process-pending.
     # Default propagated entre deploys; mude pra "false" aqui em emergência.
