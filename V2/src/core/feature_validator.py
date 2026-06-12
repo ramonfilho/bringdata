@@ -185,6 +185,14 @@ def build_schema_from_snapshot(
 # Validação em runtime
 # ---------------------------------------------------------------------------
 
+# Mínimo de linhas pra os checks estatísticos (null_rate, dtype inferido) serem
+# confiáveis. Abaixo disso — caminho de scoring lead-a-lead (Pub/Sub, batch 1–2)
+# — só os checks estruturais (missing_column) e de domínio/range valem; os
+# estatísticos viram artefato (1 lead sem campo comum = null_rate 100%; coluna
+# toda-nula = float64 lido como 'numeric').
+MIN_BATCH_FOR_RATE_CHECK = 10
+
+
 def validate_pre_encoding(
     df: pd.DataFrame,
     schema: PreEncodingSchema,
@@ -213,6 +221,10 @@ def validate_pre_encoding(
     """
     issues: List[ValidationIssue] = []
 
+    # Em batch minúsculo os checks estatísticos não são confiáveis (ver
+    # MIN_BATCH_FOR_RATE_CHECK). Estrutura e domínio continuam valendo.
+    rate_checks_reliable = len(df) >= MIN_BATCH_FOR_RATE_CHECK
+
     for col_name, col_schema in schema.columns.items():
         # (1) Existência
         if col_name not in df.columns:
@@ -225,9 +237,12 @@ def validate_pre_encoding(
 
         series = df[col_name]
 
-        # (2) Dtype — compatibilidade ampla
+        # (2) Dtype — compatibilidade ampla.
+        # Pula quando a coluna está toda nula: o dtype de uma coluna 100% NaN é
+        # float64 por construção do pandas e seria lido como 'numeric' (falso
+        # wrong_dtype). O caso all-null já é coberto pelo check de null_rate.
         observed_dtype = _infer_dtype_category(series)
-        if observed_dtype != col_schema.dtype_category:
+        if not series.dropna().empty and observed_dtype != col_schema.dtype_category:
             # Tolerância: numeric aceita bool (bool → 0/1 no encoding), e vice-versa limitadamente
             compatible = (
                 (observed_dtype == 'bool' and col_schema.dtype_category == 'numeric') or
@@ -243,9 +258,9 @@ def validate_pre_encoding(
                     },
                 ))
 
-        # (3) Taxa de null
+        # (3) Taxa de null — só confiável com amostra suficiente.
         null_rate = float(series.isna().mean())
-        if null_rate > col_schema.max_null_rate:
+        if rate_checks_reliable and null_rate > col_schema.max_null_rate:
             issues.append(ValidationIssue(
                 feature=col_name,
                 problem='null_rate_high',
