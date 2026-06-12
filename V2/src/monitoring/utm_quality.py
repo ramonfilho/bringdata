@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
@@ -229,6 +230,21 @@ def compute_utm_quality(
     records_24h = repo.leads_in_range(start_24h, now_utc)
     records_lf = repo.leads_in_range(lf_start, lf_end) if lf_start else []
 
+    # Hint de origem por content — pra rotular criativos sem nome (utm_content
+    # numérico cru, ex: ID de anúncio do Google Ads/Demand Gen ou Meta não
+    # nomeado). Guarda a origem dominante de cada content nas últimas 24h.
+    _content_src: Dict[str, Dict[str, int]] = {}
+    for rec in records_24h:
+        if rec.score is None or rec.decil is None:
+            continue
+        ck = _utm_key(rec, 'content')
+        sv = (rec.utm_source or '').strip().lower() or 'sem_source'
+        _content_src.setdefault(ck, {})
+        _content_src[ck][sv] = _content_src[ck].get(sv, 0) + 1
+    content_source_hint: Dict[str, str] = {
+        ck: max(counts, key=counts.get) for ck, counts in _content_src.items()
+    }
+
     by_level: Dict[str, dict] = {}
     for level in ('source', 'medium', 'content'):
         agg_24h = _aggregate(records_24h, level, ab_cfg, champion_name, challenger_name)
@@ -255,6 +271,7 @@ def compute_utm_quality(
                 'challenger_24h': cl_24h,
                 'champion_lf': ch_lf,
                 'challenger_lf': cl_lf,
+                'source_hint': content_source_hint.get(utm) if level == 'content' else None,
             })
 
         qualifying = [e for e in entries
@@ -334,6 +351,25 @@ def _challenger_note(entry: dict) -> Optional[str]:
     return f"_Challenger: decil {d_s} · {p_s} em D9–D10 · {cl.get('n')} leads_"
 
 
+_BARE_ID_RE = re.compile(r'^\d{8,}$')
+
+
+def _display_creative(entry: dict) -> str:
+    """Nome exibido do criativo no ranking.
+
+    Quando o `utm_content` é um ID numérico cru — criativo que o gestor não
+    nomeou (comum no Google Ads/Demand Gen, às vezes no Meta) — troca o número
+    solto por um rótulo legível com a origem dominante. Source-aware: não assume
+    Google, mostra a plataforma real (`google-ads`, `fb`, etc.).
+    """
+    v = (entry.get('utm') or '').strip()
+    if _BARE_ID_RE.match(v):
+        src = (entry.get('source_hint') or '').strip()
+        prefix = f"{src} · " if src and src != 'sem_source' else ''
+        return f"{prefix}criativo sem nome (ID {v})"
+    return entry.get('utm', '')
+
+
 def _mini_table_block(entry: dict, lf_label: str, marker: str) -> dict:
     """Section mrkdwn: nome + mini-tabela monoespaçada (24h vs LF)."""
     d24 = _combine(entry.get('champion_24h'), entry.get('challenger_24h'), 'avg_decil')
@@ -351,7 +387,7 @@ def _mini_table_block(entry: dict, lf_label: str, marker: str) -> dict:
         f"Lançamento   {fd(dlf):<16} {fp(plf):<10} {entry['n_lf']}\n"
         "```"
     )
-    text = f"{marker} *{entry['utm']}*\n{table}"
+    text = f"{marker} *{_display_creative(entry)}*\n{table}"
     note = _challenger_note(entry)
     if note:
         text += f"\n{note}"

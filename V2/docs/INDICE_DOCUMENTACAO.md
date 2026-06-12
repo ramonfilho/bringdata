@@ -219,6 +219,11 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Status:** ativo. Criado em 08/05/2026 como subsídio empírico à decisão de tratar calibração como caminho crítico.
 **Relação:** motiva a criação de **DT-20** em `PLANO_REFACTOR_MLOPS.md` (calibração de probabilidades de scoring) e expõe a direção real do viés do `class_weight='balanced'` (superestima, não subestima). Validação out-of-sample com leads recentes do Railway é próximo passo declarado.
 
+### `analise_lift_entrada_grupo_whatsapp.md`
+**Papel:** mede se entrar no grupo de WhatsApp do lançamento prevê compra, sem artefato de match. "Entrou" casado por **telefone** (única chave do SendFlow, DDD+8); "comprou" por **e-mail** (chave neutra) — desenho que descarta a hipótese de o lift ser só maior casabilidade de telefone. Base = **todos os leads** (tabela `Lead`), não a pesquisa. Lift agregado **2,52x** (entrou 0,70% vs não 0,28%; ~110k leads, LF48–55+DEV20). Verificação: conversão é 100% casada por e-mail → chaves disjuntas.
+**Status:** snapshot — criado em 2026-06-10. Reproduzível (leads via `load_match_spend_for_lf`; grupo via CSVs `data/devclub/SendFlow*.csv`).
+**Relação:** subsídio empírico da feature "entrou no grupo de WhatsApp" (coleta live em produção via Sendhook). O confounder de **seleção/causalidade** (quem entra já tende a comprar) fica em aberto — só um grupo de controle resolve; o artefato de **match** está descartado.
+
 ### `INVESTIGACAO_BAIXO_DESEMPENHO.md`
 **Papel:** investigação completa da queda do D10 de ~42% (P1) para ~30% (P3). Documenta hipóteses testadas, causas confirmadas (mudança LQHQ→LQ em 10/03, crash P2 por TMB All + encoding quebrado), análise do gap residual e rollback executado em 13/04/2026.
 **Status:** ativo. Última atualização: 2026-04-13. Investigação encerrada — todas as hipóteses testadas, nenhuma pendente de verificação.
