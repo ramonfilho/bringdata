@@ -292,6 +292,18 @@ def _n(d: dict, key: str, default: float = 0) -> float:
     return v if v is not None else default
 
 
+def _scored_n(rf: dict):
+    """Nº de respostas scoreadas (base do Método 2/ML) — total_db do expected_conversion.
+    O flat-rate usa leads Meta; o ML usa respostas de pesquisa (todas as fontes)."""
+    return ((rf.get('expected_conversion') or {}).get('distribuicao_leads') or {}).get('total_db')
+
+
+def _bases_md(leads_meta: float, scored) -> str:
+    """Rótulo das duas bases do forecast: leads Meta (flat-rate) + respostas scoreadas (ML)."""
+    s = f'  ·  {scored:,} respostas scoreadas (ML)' if scored else ''
+    return f'{leads_meta:,.0f} leads Meta (flat-rate){s}'
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # render_text — terminal / arquivo
 # ──────────────────────────────────────────────────────────────────────────
@@ -669,7 +681,7 @@ def _render_text_revenue(v: dict, L: list):
     if not rf: return
     inputs = rf.get('inputs', {}) or {}
     L.append('💰  PREVISÃO DE FATURAMENTO')
-    L.append(f'    Lançamento atual ({inputs.get("launch_window_start_brt","?")}): {_n(inputs,"total_leads_meta"):,} leads Meta  ·  ticket R$ {_n(inputs,"ticket_contracted"):,.0f}')
+    L.append(f'    Lançamento atual ({inputs.get("launch_window_start_brt","?")}): {_bases_md(_n(inputs,"total_leads_meta"), _scored_n(rf))}  ·  ticket R$ {_n(inputs,"ticket_contracted"):,.0f}')
     L.append('')
 
     def _row(label, c):
@@ -705,7 +717,7 @@ def _render_text_revenue(v: dict, L: list):
     if lf_ant:
         lf_inputs = lf_ant.get('inputs', {}) or {}
         lf_name = lf_inputs.get('lf_name', '?')
-        L.append(f'  Lançamento anterior ({lf_name} · {lf_inputs.get("launch_window_start_brt","?")}): {_n(lf_inputs,"total_leads_meta"):,} leads Meta')
+        L.append(f'  Lançamento anterior ({lf_name} · {lf_inputs.get("launch_window_start_brt","?")}): {_bases_md(_n(lf_inputs,"total_leads_meta"), _scored_n(lf_ant))}')
         L.append('')
         _write_two_methods(lf_ant)
 
@@ -1767,7 +1779,7 @@ def _slack_revenue(v: dict, B: list):
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': (
         f"*💰 Previsão de Faturamento*\n"
         f"*Lançamento atual*  ·  _{inputs.get('launch_window_start_brt','?')}_  ·  "
-        f"{_n(inputs,'total_leads_meta'):,} leads Meta  ·  ticket R$ {_n(inputs,'ticket_contracted'):,.0f}\n"
+        f"{_bases_md(_n(inputs,'total_leads_meta'), _scored_n(rf))}  ·  ticket R$ {_n(inputs,'ticket_contracted'):,.0f}\n"
         f"_*Método 1:* taxa de conversão média LF43-LF53 (recalibrado 08/05)_\n"
         + "\n".join(m1_lines)
     )}})
@@ -1804,7 +1816,7 @@ def _slack_revenue(v: dict, B: list):
 
         B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': (
             f"*Lançamento anterior — {lf_name}*  ·  _{lf_inputs.get('launch_window_start_brt','?')}_  ·  "
-            f"{_n(lf_inputs,'total_leads_meta'):,} leads Meta\n"
+            f"{_bases_md(_n(lf_inputs,'total_leads_meta'), _scored_n(lf_ant))}\n"
             f"_*Método 1:* taxa de conversão média LF43-LF53_\n"
             + "\n".join(m1_ant)
         )}})
