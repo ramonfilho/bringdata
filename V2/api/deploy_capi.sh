@@ -808,7 +808,7 @@ run_post_deploy_tests() {
         "O que você faz atualmente?": "Sou CLT/Funcionário Público",
         "O que mais você quer ver no evento?": "Fazer transição de carreira e conseguir meu primeiro emprego na área",
         "Tem computador/notebook?": "Sim",
-        "Você já fez, faz, pretende fazer faculdade?": "Sim",
+        "Você já fez/faz/pretende fazer faculdade?": "Sim",
         "investiu_curso_online": "Não",
         "interesse_programacao": "Todas as alternativas"
       },
