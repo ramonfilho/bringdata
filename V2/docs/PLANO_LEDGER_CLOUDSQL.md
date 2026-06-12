@@ -1,0 +1,170 @@
+# PLANO — Ledger `registros_ml` sai do Railway do cliente para o Cloud SQL nosso
+
+**Criado:** 2026-06-12 · **Status:** NÃO INICIADO · **Dono:** Ramon
+**Documento de execução** — cada etapa tem checklist; marcar à medida que executa. Se a sessão cair, retomar pela seção "Como retomar".
+
+---
+
+## 1. Por quê (motivação)
+
+O ledger `registros_ml` — nossa tabela com `lead_score`, `decil`, `variant` **e** `survey_responses`/`has_computer`/UTMs na mesma linha — vive hoje **dentro do Postgres Railway do cliente**. Qualquer admin daquele banco tem um dataset rotulado completo (features + alvo) crescendo a cada 5 minutos: material suficiente para clonar o modelo por regressão. O mesmo vale para o estoque histórico (`Lead.leadScore`/`decil` + `pesquisa` lado a lado, e as colunas `lead_score`/`decil` da planilha "[LF] Pesquisa").
+
+**Objetivo:** nenhum score/decil/variant persiste na infra do cliente. Atribuição de score e envio CAPI não mudam de lugar (continuam no consumer Pub/Sub); muda só **onde o resultado é gravado**.
+
+**Fica de fora por design:** o Meta continua recebendo valor por decil no evento — isso é o produto, e é canal muito mais difícil de reconstituir lead a lead.
+
+## 2. Decisões registradas (12/06/2026)
+
+| Decisão | Detalhe |
+|---|---|
+| Destino = **GCP Cloud SQL** `smart-ads-db` | smart-ads-451319, us-central1 (mesma região do Cloud Run), db-f1-micro, Postgres 15, IP público 104.197.138.129. Instância **fica ALWAYS permanentemente** (custo ~US$10-15/mês assumido; era a instância do MLflow que estava parada por economia). |
+| Database novo `ledger`, separado do `mlflow` | Mesma instância, databases distintos, user dedicado de privilégio mínimo. |
+| Migração por **estrangulamento com dual-write** | Cloud SQL primário, Railway espelho, paridade por ~7 dias, depois corta. Rollback = trocar env var. |
+| Limpeza do estoque histórico **ao final**, com dump prévio | Inclui planilha (colunas + trigger Apps Script). |
+| LF57/LF58 fora dos relatórios de score até fecharem datas | Já refletido em `scripts/gerar_scores_2026.py` (`FORA_DO_RELATORIO`). |
+
+## 3. Mapa do estado atual (levantado em 12/06/2026)
+
+### 3.1 Escrita (quem grava score na infra do cliente)
+
+| Escritor | Onde | Status |
+|---|---|---|
+| Consumer Pub/Sub — `_insert_ledger()` | `api/pubsub_branch.py:191-215` — INSERT de 26 colunas, `ON CONFLICT (event_id) DO NOTHING`; gravação na etapa 6 de `process_pending_pubsub` (`:551-558`), **falha de INSERT é engolida com warning** | VIVO (Cloud Scheduler 5/5min → `/pubsub/process-pending`, `api/app.py:5045`) |
+| Conexão do consumer | `api/app.py:5082-5089` — pg8000, env `RAILWAY_DB_*`, sem ssl_context | VIVO |
+| Env vars no deploy | `api/deploy_capi.sh:548-561` + `api/lib/config.sh:124-156` (`build_env_vars`); **defaults hardcoded com a senha do Railway em texto plano em `config.sh:69`** | VIVO |
+| `scripts/backfill_google_scoring.py:118-128` | UPDATE manual de lead_score/decil/variant | Manual |
+| `api/survey_branch.py:120` | INSERT no schema antigo | DEPRECATED, off por env |
+
+DDL existente: `scripts/create_registros_ml.py` (12 colunas base + 6 UTM + índice `created_at`) e `scripts/add_observability_columns_registros_ml.py` (5 colunas). **Gap:** as 9 colunas de enriquecimento que o INSERT usa (`survey_responses`, `first_name`, `last_name`, `phone`, `fbp`, `fbc`, `user_agent`, `ip`, `has_computer`) não têm migração no repo — foram criadas direto no banco.
+
+### 3.2 Leitura (quem consome o ledger)
+
+A maioria já passa pela camada de acesso `src/data/` (`LeadRepository` + `RegistrosMLAdapter` + `LegacyAdapter`, compostos via `compose_repository()` — refator do monitoramento, Etapas 1-7 fechadas). **Quatro famílias ainda fazem SQL direto / conexão própria** e precisam de tratamento individual no repoint:
+
+| # | Leitor fora da camada | Onde | Acionamento |
+|---|---|---|---|
+| a | 3 regras Pub/Sub dos alertas críticos (consumer parado, taxa de erro, skipped alto) | `src/monitoring/critical_alerts.py:396-514` — SQL direto na conn injetada | 5/5min via `/railway/process-pending` |
+| b | Bloco de contagens do daily-check (T3-5) | `src/monitoring/orchestrator.py:392-474` — conn própria + 3 queries inline | 1×/dia |
+| c | `load_ml_ledger` (validação) + anti-join da Fonte 4 | `src/validation/data_loader.py:1387-1492`; `validate_ml_performance.py:1256-1280` — conns próprias, **defaults hardcoded do Railway** | manual + `/validation/weekly` |
+| d | Scripts ad-hoc | `gerar_scores_2026.py`, `analise_decis_por_optimization_goal.py`, `auditar_*`, `validar_paridade_scoring.py`, `test_revision_equivalence.py` (**Gate C — roda em todo deploy**, `deploy_capi.sh:633-638`) | manual/deploy |
+
+### 3.3 Baselines que leem a tabela morta `Lead` (afetados pela limpeza E pelo calendário)
+
+- **Regra de desvio de score** — janela 60min lê o ledger via repo; baseline 30d lê `Lead` via `LegacyAdapter` (`critical_alerts.py:778`, `src/data/adapters/legacy.py:93`). ⚠️ **Janela cega já contratada:** `Lead` parou 17/05 → a janela `[hoje-31d, hoje-1d]` seca ~17-18/06; o ledger só completa 30 dias ~22/06. Entre **~18/06 e ~22/06** a regra skipa em silêncio.
+- **Segundo baseline escondido:** `api/app.py:3330-3336` (bloco E6 do daily-check) computa `expected_decil_dist` com `SELECT decil FROM "Lead" ... 31 days` para o `_check_score_distribution` — seca nas mesmas datas.
+- Relatórios históricos (`ml_evolution_report.py:351`, decisão "não remediar" do catálogo de consumidores de score) leem `Lead.decil` — ver conflito na Etapa 5.
+
+### 3.4 Estoque a limpar na infra do cliente (inventário live 12/06)
+
+| Onde | O quê | Volume |
+|---|---|---|
+| Railway `Lead` | `leadScore`, `decil` | 142.940 linhas preenchidas |
+| Railway `leads_capi` | `lead_score`, `decil`, `scored_at` | só 21 preenchidas |
+| Railway `registros_ml` | tabela inteira (inclui `variant`, `decile_propensity`, `decile_roas_v1`) | ~19k linhas, crescendo |
+| Planilha "[LF] Pesquisa" (`1VYti8jX...`) | colunas `lead_score`/`decil` + Apps Script: trigger `executarPolling5Min` (5/5min), funções `buscarLeadsPendentes`/`processarLeads`/`reprocessarLeadsSemScore` (`api/apps-script-code.js`) | histórico até 17/05; polling roda no vazio |
+
+---
+
+## 4. Etapas
+
+### Etapa 0 — Preparo (não toca produção)
+
+- [ ] Criar database `ledger` na `smart-ads-db` + user `ledger_app` (privilégio mínimo: só esse database)
+- [ ] Escrever **DDL consolidado** em `scripts/create_ledger_cloudsql.py`: as 12 base + 6 UTM + 5 observabilidade + **as 9 de enriquecimento sem migração** (fechar o gap) + índices `created_at`, `lower(email)`
+- [ ] Decidir conectividade Cloud Run → Cloud SQL: connector nativo (`--add-cloudsql-instances` + unix socket — o binding foi removido como vestigial na rev. 00276, precisa voltar) **ou** IP público com authorized network. Default recomendado: connector.
+- [ ] Novas env vars `LEDGER_DB_*` em `api/lib/config.sh` (`build_env_vars`) — **senha via Secret Manager ou env exportada, NÃO repetir o padrão da senha em texto plano de `config.sh:69`**
+- [ ] Smoke local: INSERT + SELECT no database novo com o user novo
+
+**Rollback:** n/a (nada em produção foi tocado).
+
+### Etapa 1 — Dual-write no consumer
+
+- [ ] `api/pubsub_branch.py`: `_insert_ledger` ganha destino primário (Cloud SQL) + espelho (Railway), controlado por `LEDGER_DUAL_WRITE=true`
+- [ ] **Fail-loud no primário**: hoje falha de INSERT é engolida com warning (`pubsub_branch.py:553-558`); no Cloud SQL a falha deve contar como erro do batch (não ackar a mensagem). Espelho Railway pode continuar tolerante.
+- [ ] `api/app.py:5082-5089`: abrir as duas conexões no endpoint, fechar ambas no finally
+- [ ] Deploy canary (fluxo normal do `deploy_capi.sh`, Gate C incluso)
+- [ ] Checagem de paridade diária por ~7 dias: count + amostra por dia nos dois bancos (script pequeno, pode ser célula manual)
+
+**Rollback:** `LEDGER_DUAL_WRITE=false` + env vars antigas → comportamento atual em minutos.
+
+### Etapa 2 — Backfill
+
+- [ ] Copiar as ~19k linhas do `registros_ml` Railway → Cloud SQL (one-shot; `COPY`/insert batch; conferir count e min/max `created_at`)
+- [ ] **(Sinergia scores 2026)** Carregar `outputs/validation/scores_2026/scores_2026_por_lead.csv` (+ LF57/LF58, que já estão scorados e só foram filtrados do relatório) numa tabela `scores_historicos` do database `ledger`, **com chave de versão** (`mlflow_run_id` champion/challenger + commit do `core/`) — ver §5
+
+**Rollback:** DROP das tabelas novas; nada upstream depende delas ainda.
+
+### Etapa 3 — Repoint dos leitores (um por commit)
+
+Ordem do menor risco pro maior:
+
+- [ ] 3.1 Camada `src/data/`: `compose_repository('registros_ml')` passa a conectar no Cloud SQL (a decisão de fonte é por env — ponto único de composição). Cobre: alertas críticos via repo, capi_monitor, operational_monitor, data_quality, pubsub_summary, endpoints de diagnóstico.
+- [ ] 3.2 As 3 regras Pub/Sub com SQL direto (`critical_alerts.py:396-514`): recebem conn do Cloud SQL (ou migram pro repo, melhor)
+- [ ] 3.3 Bloco T3-5 do orchestrator (`orchestrator.py:392-474`): conn própria → Cloud SQL
+- [ ] 3.4 `data_loader.load_ml_ledger` + anti-join de `validate_ml_performance.py:1256-1280`: trocar para `LEDGER_DB_*`; **varrer defaults hardcoded `shortline.proxy.rlwy.net` nesses arquivos**
+- [ ] 3.5 Gate C (`test_revision_equivalence.py:176,244`) + carregamento de env no `deploy_capi.sh:638`
+- [ ] 3.6 Scripts ad-hoc (lista em §3.2-d) — podem migrar em lote
+- [ ] 3.7 Baselines: trocar `compose_repository('legacy')` (`critical_alerts.py:778`) e o E6 (`app.py:3330-3336`) para a fonte nova — ver §5 (baseline interino com scores 2026 cobre a janela cega)
+
+**Rollback:** cada commit é pequeno e reversível individualmente; env vars decidem a fonte.
+
+### Etapa 4 — Cortar o espelho Railway
+
+- [ ] `LEDGER_DUAL_WRITE=false` (consumer grava SÓ no Cloud SQL)
+- [ ] Critério: ≥7 dias de paridade limpa + monitoramento verde + `/validation/weekly` rodou ok na fonte nova
+
+**Rollback:** religar o dual-write (os dados do período sem espelho podem ser re-copiados do Cloud SQL pro Railway se precisar voltar — improvável).
+
+### Etapa 5 — Limpeza do estoque histórico na infra do cliente
+
+**Pré-condições:** Etapas 3-4 estáveis; baseline do drift já apontado pra fonte nova (3.7); **decisão do conflito histórico abaixo tomada.**
+
+⚠️ **Conflito a decidir antes de executar:** os relatórios históricos (`ml_evolution_report.py` lê `Lead.decil`; catálogo de consumidores de score decidiu "preservar histórico operacional") **quebram** quando `Lead.leadScore`/`decil` forem anulados. Mitigação proposta: o dump da pré-limpeza vira tabela `lead_legado` no nosso database `ledger` (ou parquet no GCS) e os relatórios históricos apontam pra lá. Decidir: migrar esses leitores antes, ou aceitar que relatórios históricos pré-17/05 passam a depender do dump.
+
+- [ ] Dump completo pro nosso lado: `Lead` (id, email, createdAt, leadScore, decil, capiSentAt), `leads_capi` (colunas de score), `registros_ml` inteira → GCS nosso + (opcional) tabela `lead_legado` no Cloud SQL
+- [ ] `UPDATE "Lead" SET "leadScore"=NULL, decil=NULL` (142.940 linhas)
+- [ ] `UPDATE leads_capi SET lead_score=NULL, decil=NULL, scored_at=NULL` (21 linhas)
+- [ ] `DROP TABLE registros_ml` no Railway
+- [ ] Planilha "[LF] Pesquisa": deletar trigger `executarPolling5Min` (e avaliar `executarMonitoramentoDiario`), apagar/limpar as colunas `lead_score` e `decil` (backup CSV antes)
+- [ ] Nosso código tolera a planilha sem score (`data_loader.py:487-517` condiciona; `validate_ml_performance.py:1513-1514` põe NaN) — smoke do relatório de validação depois
+
+**Rollback:** restore do dump (GCS) de volta pro Railway. Janela de arrependimento: manter o dump para sempre; não há pressa em apagar nada do nosso lado.
+
+---
+
+## 5. Sinergia — o que fazer com os 180k scores re-scorados de 2026
+
+Dataset: `outputs/validation/scores_2026/scores_2026_por_lead.csv` (179.849 leads, DEV19→LF56; LF57/58 scorados e filtráveis de volta), Champion jan30 + Challenger abr28 sob código atual, paridade exata com produção validada no LF57. Oportunidades por ordem de valor/urgência:
+
+| # | Uso | Esforço | Quando |
+|---|---|---|---|
+| 1 | **Baseline interino da regra de desvio de score + E6** — cobre a janela cega ~18-22/06 e substitui o baseline da `Lead` morta. Formato: JSON estático por variante (precedente: `configs/reference_audience_profiles/devclub.json`, carregado em `app.py:3141`) ou tabela `scores_historicos` no Cloud SQL lida por um adapter. Cuidados: decil "D09"→int, baseline por variante, divergência re-score↔online ~6% pode pedir recalibração do threshold de 1σ. | baixo-médio | **urgente — antes de 18/06**, independe do resto do plano |
+| 2 | **Baseline "produção" do backtest comparativo** — `_attach_production_decil` (`backtest_data.py:415-464`) lê a `Lead` morta e volta vazio pra LF54+; merge por email com o dataset entrega decil dos dois modelos re-scorados pros 16 LFs. | baixo | junto da Etapa 2 |
+| 3 | **Gate offline Champion vs Challenger** (A/B em standby) — os dois scores nos mesmos leads eliminam a assimetria "challenger re-scorado vs champion fotografado" da rodada anterior. Falta: telefone (re-join com fontes de leads pro matching), vendas matched, spend, janela de conversão fechada (LF56 só ~11/07), e recorte out-of-sample honesto (≈LF54+ para ambos). | médio | depois da migração |
+| 4 | **Recalcular tabelas de valor por decil** (decile_value) — dataset dá o denominador num pool 2× maior e sem mistura de versões de código; falta reconstruir o pipeline de valor (buyers matched + shrinkage + isotônica — o script original era ad-hoc em /tmp e se perdeu). ⚠️ Mexe no `value` enviado ao Meta → fluxo da dívida de valor por decil (DT-17) + Gate D, nunca sem aprovação. | médio-alto | frente separada |
+| 5 | **Não usar para:** forecast do lançamento corrente (precisa de re-score vivo, não fotografia — reusar os *loaders* do gerador, não o CSV) e relatórios históricos L3/L6 (decisão registrada: preservar números operacionais da época; contrafactual só como coluna adicional rotulada). | — | — |
+
+O item 1 do plano de remediação de score (cache versionado regenerado no daily-check, item L5 do catálogo) descreve exatamente isso — o CSV é a primeira geração manual desse cache; a tabela `scores_historicos` com chave de versão é o caminho de oficializar.
+
+## 6. Riscos e pontos de atenção
+
+1. **Janela cega do baseline 18-22/06** — tratável já pelo item 1 da §5, antes mesmo da Etapa 0.
+2. **Senha do Railway em texto plano** em `api/lib/config.sh:69` — não repetir o padrão com o Cloud SQL; aproveitar a Etapa 0 para Secret Manager (a senha antiga sai de cena com a Etapa 4-5 de qualquer forma).
+3. **Falha de INSERT engolida** no consumer — vira fail-loud no destino primário (Etapa 1).
+4. **Semânticas de variant divergentes**: `load_ml_ledger(variant_filter=None)` filtra `variant IS NULL`; o `RegistrosMLAdapter` traz tudo. Ao repointar baselines, decidir o filtro explicitamente.
+5. **Múltiplos terminais** — `critical_alerts.py`/`app.py` estão sob o refator da camada de acesso; coordenar commits (escopo restrito, um leitor por commit).
+6. **`rule_no_leads_arriving` lê `lead_surveys` morta** (`critical_alerts.py:300-309`) — achado correlato, escopo separado; registrar e não emendar aqui.
+7. **Latência/limites do db-f1-micro** (shared core, ~25 conexões úteis): consumer + monitoramento + MLflow no mesmo micro. Observar na Etapa 1; subir tier é mudança de 1 flag.
+
+## 7. Registro de execução
+
+| Data | Etapa | O que foi feito | Commit |
+|---|---|---|---|
+| — | — | — | — |
+
+## 8. Como retomar numa sessão nova
+
+1. Ler este doc inteiro (5 min).
+2. Conferir o registro de execução (§7) e o estado live: `gcloud sql databases list --instance=smart-ads-db --project=smart-ads-451319`, env vars do serviço `smart-ads-api` (`gcloud run services describe`), e `git log --oneline -10`.
+3. A regra do projeto exige `/sw-architect` antes de mexer na camada de acesso a dados — o desenho já foi feito (12/06, esta sessão); mudanças de rota em relação a este doc passam por ele de novo.
+4. Próxima ação = primeira checkbox vazia da menor etapa incompleta. Exceção: o item urgente da §5 (#1, baseline interino) pode ser feito a qualquer momento, antes de tudo.
