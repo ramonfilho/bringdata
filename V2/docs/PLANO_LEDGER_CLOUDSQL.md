@@ -87,8 +87,8 @@ Implementação final usou **uma env var de 3 estados** em vez do boolean planej
 - [x] `api/app.py` (endpoint `/pubsub/process-pending`): conexão Cloud SQL aberta quando `LEDGER_TARGET≠railway`; falha na conexão → 500 (Scheduler re-tenta, fila segura as mensagens)
 - [x] Deploy: `config.sh` injeta `LEDGER_TARGET` + `LEDGER_DB_*` com senha do **Secret Manager** no momento do deploy (sentinela aborta o deploy se o secret não vier); `deploy_capi.sh` checa a sentinela
 - [x] Testes: 7 novos em `tests/test_pubsub_branch.py` (24/24 verdes; vizinhos `test_critical_alerts_pubsub` 10/10 e `test_pubsub_summary` 7/7 ok)
-- [ ] **Deploy canary** com `LEDGER_TARGET=dual` exportado (fluxo normal do `deploy_capi.sh`, Gate C incluso) — embarca junto o fix do baseline (`5f3994e`)
-- [ ] Checagem de paridade diária por ~7 dias: count + amostra por dia nos dois bancos
+- [x] **Deploy canary** 12/06 ~18h: revisão `smart-ads-api-00701-tud`, gates B/D/C.1/C.2 todos verdes, 10% → verificação live (7 leads reais gravados nos DOIS bancos, 0 erros) → 100%. Embarcou junto o fix do baseline (`5f3994e`). Rollback: `--to-revisions smart-ads-api-00699-bom=100`
+- [ ] Checagem de paridade diária por ~7 dias: count + amostra por dia nos dois bancos (início 13/06; cortar pra Etapa 4 ~19-20/06 se limpa)
 
 **Rollback:** `LEDGER_TARGET=railway` via `gcloud run services update` → comportamento atual em ~2min, sem rebuild.
 
@@ -186,7 +186,8 @@ O item 1 do plano de remediação de score (cache versionado regenerado no daily
 |---|---|---|---|
 | 12/06 | pré | Fix do baseline do desvio de score (fallback pro ledger; cobre janela cega 18-22/06) — **pendente deploy** | `5f3994e` |
 | 12/06 | 0 | Database `ledger` + user `ledger_app` (Secret Manager) + DDL 32 colunas + smoke ok | `4f30266` |
-| 12/06 | 1 | Dual-write implementado (`LEDGER_TARGET` 3 estados, fail-loud + ack seletivo, 24/24 testes) — **deploy pendente** | (este) |
+| 12/06 | 1 | Dual-write implementado (`LEDGER_TARGET` 3 estados, fail-loud + ack seletivo, 24/24 testes) | `337609c` |
+| 12/06 | 1 | **Deploy em produção**: rev `00701-tud` @100%, gates verdes, dual-write verificado live (7/7 linhas nos 2 bancos). Fix do baseline embarcado. Falta: paridade diária ~7d | — |
 
 ## 8. Como retomar numa sessão nova
 
