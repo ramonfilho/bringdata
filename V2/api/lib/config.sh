@@ -143,6 +143,27 @@ build_env_vars() {
     # Default propagated entre deploys; mude pra "false" aqui em emergência.
     ENV_VARS="$ENV_VARS,PUBSUB_CAPI_ENABLED=true"
 
+    # Ledger no Cloud SQL nosso (PLANO_LEDGER_CLOUDSQL.md Etapa 1).
+    # LEDGER_TARGET: railway (atual) | dual (migração) | cloudsql (final).
+    # Senha NUNCA em texto plano aqui — vem do Secret Manager no momento do
+    # deploy (env exportada tem precedência). Falha em obter a senha emite
+    # sentinela que o caller (deploy_capi.sh) aborta — exit aqui morreria só
+    # no subshell do $(build_env_vars).
+    LEDGER_TARGET="${LEDGER_TARGET:-railway}"
+    ENV_VARS="$ENV_VARS,LEDGER_TARGET=$LEDGER_TARGET"
+    if [ "$LEDGER_TARGET" != "railway" ]; then
+        LEDGER_DB_PASSWORD="${LEDGER_DB_PASSWORD:-$(gcloud secrets versions access latest --secret=ledger-db-password --project="$PROJECT_ID" 2>/dev/null)}"
+        if [ -z "$LEDGER_DB_PASSWORD" ]; then
+            echo "ERROR_LEDGER_SECRET_UNAVAILABLE"
+            return 1
+        fi
+        ENV_VARS="$ENV_VARS,LEDGER_DB_HOST=${LEDGER_DB_HOST:-104.197.138.129}"
+        ENV_VARS="$ENV_VARS,LEDGER_DB_PORT=${LEDGER_DB_PORT:-5432}"
+        ENV_VARS="$ENV_VARS,LEDGER_DB_NAME=${LEDGER_DB_NAME:-ledger}"
+        ENV_VARS="$ENV_VARS,LEDGER_DB_USER=${LEDGER_DB_USER:-ledger_app}"
+        ENV_VARS="$ENV_VARS,LEDGER_DB_PASSWORD=$LEDGER_DB_PASSWORD"
+    fi
+
     # Preserva META_ACCESS_TOKEN existente
     local CURRENT_META_TOKEN=$(gcloud run services describe "$SERVICE_NAME" \
         --region="$REGION" \

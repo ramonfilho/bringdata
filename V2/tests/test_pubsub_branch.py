@@ -339,6 +339,136 @@ def test_dedup_in_batch_dispara_capi_uma_vez():
     assert len(conn.inserts) == 1, [i["params"].get("event_id") for i in conn.inserts]
 
 
+# ---------------------------------------------------------------------------
+# Dual-write do ledger (PLANO_LEDGER_CLOUDSQL.md Etapa 1)
+# ---------------------------------------------------------------------------
+
+class _FailConn:
+    """Conexão que falha todo INSERT — simula Cloud SQL/Railway fora do ar."""
+    def __init__(self):
+        self.attempts = 0
+
+    def run(self, sql, **params):
+        self.attempts += 1
+        raise RuntimeError("conexão simulada fora do ar")
+
+
+class _EnvGuard:
+    def __init__(self, **kv):
+        self._kv = kv
+        self._prev = {}
+
+    def __enter__(self):
+        import os
+        for k, v in self._kv.items():
+            self._prev[k] = os.environ.get(k)
+            os.environ[k] = v
+
+    def __exit__(self, *a):
+        import os
+        for k, prev in self._prev.items():
+            if prev is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = prev
+
+
+def _processa_um_lead(target: str, railway_conn, ledger_conn):
+    """1 mensagem real (source=org → skipped_allowlist no caminho legacy)."""
+    from api.pubsub_branch import process_pending_pubsub
+    raw = json.dumps(PAYLOAD_REAL).encode("utf-8")
+    sub = _FakeSubscriber([_FakeReceived("ack-1", _FakeMessage(raw, "msg-1"))])
+    with _EnvGuard(SCORE_ALL_LEADS="false", LEDGER_TARGET=target):
+        summary = process_pending_pubsub(
+            sub, railway_conn, _FakePipeline(), dry_run=False,
+            ledger_conn=ledger_conn,
+        )
+    return sub, summary
+
+
+def test_ledger_target_parsing():
+    from api.pubsub_branch import ledger_target
+    with _EnvGuard(LEDGER_TARGET="dual"):
+        assert ledger_target() == "dual"
+    with _EnvGuard(LEDGER_TARGET="CLOUDSQL "):
+        assert ledger_target() == "cloudsql"
+    with _EnvGuard(LEDGER_TARGET="banana"):
+        assert ledger_target() == "railway"
+
+
+def test_dual_write_grava_nos_dois_e_acka():
+    railway, ledger = _FakeConn(), _FakeConn()
+    sub, summary = _processa_um_lead("dual", railway, ledger)
+    assert len(ledger.inserts) == 1, ledger.inserts
+    assert len(railway.inserts) == 1, railway.inserts
+    assert sub.acked == ["ack-1"], sub.acked
+    assert summary["ledger_target"] == "dual", summary
+    assert summary["ledger_errors"] == 0, summary
+
+
+def test_cloudsql_primario_falha_nao_acka():
+    """Falha no primário (Cloud SQL) → mensagem fica SEM ack pra reentrega;
+    espelho Railway ainda grava (não perde a linha na fonte antiga)."""
+    railway, ledger = _FakeConn(), _FailConn()
+    sub, summary = _processa_um_lead("dual", railway, ledger)
+    assert sub.acked == [], sub.acked
+    assert summary["ledger_errors"] == 1, summary
+    assert summary["unacked_for_retry"] == 1, summary
+    assert len(railway.inserts) == 1, railway.inserts
+
+
+def test_espelho_railway_falha_nao_bloqueia_ack():
+    """Espelho tolerante: Railway fora não impede ack nem conta erro do primário."""
+    railway, ledger = _FailConn(), _FakeConn()
+    sub, summary = _processa_um_lead("dual", railway, ledger)
+    assert sub.acked == ["ack-1"], sub.acked
+    assert summary["ledger_errors"] == 0, summary
+    assert len(ledger.inserts) == 1, ledger.inserts
+
+
+def test_cloudsql_only_nao_escreve_railway():
+    railway, ledger = _FakeConn(), _FakeConn()
+    sub, summary = _processa_um_lead("cloudsql", railway, ledger)
+    assert len(ledger.inserts) == 1, ledger.inserts
+    assert len(railway.inserts) == 0, railway.inserts
+    assert sub.acked == ["ack-1"], sub.acked
+
+
+def test_target_dual_sem_ledger_conn_degrada_railway():
+    """Config pede dual mas a conexão Cloud SQL não veio → grava no Railway
+    (melhor do que perder linha) e reporta o target efetivo."""
+    railway = _FakeConn()
+    sub, summary = _processa_um_lead("dual", railway, None)
+    assert len(railway.inserts) == 1, railway.inserts
+    assert sub.acked == ["ack-1"], sub.acked
+    assert summary["ledger_target"] == "railway", summary
+
+
+def test_insert_ledger_nao_mutila_dict():
+    """O dual-write insere a MESMA linha 2x — _insert_ledger não pode
+    consumir (pop) campos do dict do caller."""
+    from api.pubsub_branch import _insert_ledger
+    row = {
+        "event_id": "e1", "email": "a@b.c", "variant": None,
+        "lead_score": 0.5, "decil": 5, "base_meta_event_id": None,
+        "base_status": "success", "hq_meta_event_id": None, "hq_status": None,
+        "error_message": None, "utm_source": None, "utm_medium": None,
+        "utm_campaign": None, "utm_content": None, "utm_term": None,
+        "utm_url": None, "survey_responses": {"idade": "x"},
+        "first_name": None, "last_name": None, "phone": None, "fbp": None,
+        "fbc": None, "user_agent": None, "ip": None, "has_computer": "SIM",
+        "capi_sent_at_now": True,
+    }
+    c1, c2 = _FakeConn(), _FakeConn()
+    _insert_ledger(c1, row)
+    _insert_ledger(c2, row)
+    assert row["survey_responses"] == {"idade": "x"}, "dict do caller foi mutilado"
+    assert row["capi_sent_at_now"] is True
+    for c in (c1, c2):
+        assert "NOW()" in c.inserts[0]["sql"], "capi_sent_at_now ignorado"
+        assert c.inserts[0]["params"]["survey_responses"] is not None
+
+
 def _run():
     tests = [
         test_parse_aceita_bytes_e_str,
@@ -358,6 +488,13 @@ def _run():
         test_ledger_row_grava_utm_quando_passado,
         test_ledger_row_utm_parcial_grava_o_que_existe,
         test_dedup_in_batch_dispara_capi_uma_vez,
+        test_ledger_target_parsing,
+        test_dual_write_grava_nos_dois_e_acka,
+        test_cloudsql_primario_falha_nao_acka,
+        test_espelho_railway_falha_nao_bloqueia_ack,
+        test_cloudsql_only_nao_escreve_railway,
+        test_target_dual_sem_ledger_conn_degrada_railway,
+        test_insert_ledger_nao_mutila_dict,
     ]
     fails = 0
     for t in tests:

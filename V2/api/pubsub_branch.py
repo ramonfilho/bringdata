@@ -74,6 +74,22 @@ def subscription_path() -> str:
     return f"projects/{PUBSUB_PROJECT_ID}/subscriptions/{PUBSUB_SUBSCRIPTION_ID}"
 
 
+def ledger_target() -> str:
+    """Destino do ledger registros_ml (PLANO_LEDGER_CLOUDSQL.md, Etapas 1-4).
+
+    'railway' (default): comportamento atual — grava só no Railway do cliente.
+    'dual':    Cloud SQL nosso é o primário (falha → mensagem NÃO é ackada,
+               Pub/Sub reentrega; ON CONFLICT dedupa a regravação) + espelho
+               tolerante no Railway. Estágio de migração.
+    'cloudsql': só Cloud SQL (Etapa 4 — Railway fora).
+
+    Flip via `gcloud run services update --update-env-vars LEDGER_TARGET=...`
+    sem novo build. Valor inválido cai no default (não derruba o consumer).
+    """
+    t = os.environ.get("LEDGER_TARGET", "railway").strip().lower()
+    return t if t in ("railway", "dual", "cloudsql") else "railway"
+
+
 # ---------------------------------------------------------------------------
 # Funções puras (testáveis sem Pub/Sub nem DB)
 # ---------------------------------------------------------------------------
@@ -190,6 +206,9 @@ def ledger_row(
 
 def _insert_ledger(conn, r: Dict) -> None:
     import json as _json
+    # Cópia: o dual-write insere a MESMA linha em 2 bancos — os pops abaixo
+    # não podem mutilar o dict do caller entre o 1º e o 2º INSERT.
+    r = dict(r)
     # JSONB precisa de string serializada — pg8000 não converte dict
     # diretamente. None vira NULL no SQL.
     survey_raw = r.pop("survey_responses", None)
@@ -235,11 +254,20 @@ def process_pending_pubsub(
     *,
     dry_run: bool = False,
     batch: int = DEFAULT_BATCH,
+    ledger_conn=None,
 ) -> Dict:
     """Pull → parse → score → CAPI → ledger → ack. Não levanta pra fora;
     erros por mensagem são contidos, logados e (no caminho real) ackados
     para não reciclar — payload inválido/slug desconhecido não vai melhorar
     sendo reentregue.
+
+    Destino do ledger (PLANO_LEDGER_CLOUDSQL.md): `ledger_target()` decide.
+    Com `ledger_conn` (Cloud SQL nosso) em modo 'dual'/'cloudsql', o Cloud SQL
+    é o PRIMÁRIO fail-loud: INSERT que falhar deixa a mensagem sem ack →
+    Pub/Sub reentrega e o ON CONFLICT dedupa a regravação. (O CAPI já foi
+    enviado antes da persistência — reentrega pode re-disparar o evento, mas
+    a Meta dedupa por event_id; mesmo trade-off at-least-once que já existia
+    no ack em lote.) O Railway vira espelho tolerante (warning) até a Etapa 4.
     """
     from api.capi_integration import send_batch_events
 
@@ -318,7 +346,9 @@ def process_pending_pubsub(
     #   Quando `score_all=False` (legacy):
     #     - classify() original — só Meta-eligible com fbp+fbc+computador
     #       scoreia. Mantido pra rollback rápido via env.
-    pending_ledger: List[Dict] = []
+    # (linha do ledger, ack_id da mensagem que a originou) — o pareamento
+    # permite NÃO ackar a mensagem cujo INSERT primário falhou (dual/cloudsql).
+    pending_ledger: List[Tuple[Dict, Optional[str]]] = []
     # (ack_id, payload, survey_dict, utm, enrich, meta_elig)
     to_score: List[Tuple[str, Dict, Dict, Dict, Dict, bool]] = []
     handled_ack_ids: List[str] = []
@@ -342,11 +372,11 @@ def process_pending_pubsub(
             )
             # Sem survey_dict (falhou na tradução). Grava o raw slug do payload
             # pra preservar o que veio (consumidores filtram se precisar).
-            pending_ledger.append(ledger_row(
+            pending_ledger.append((ledger_row(
                 event_id, payload.get("email"), None, None, None, "error",
                 error_message=str(e)[:500], utm=utm,
                 survey=payload.get("survey"),
-                enrich=enrich, has_computer=has_computer))
+                enrich=enrich, has_computer=has_computer), ack_id))
             handled_ack_ids.append(ack_id)
             continue
 
@@ -357,10 +387,10 @@ def process_pending_pubsub(
             # decidem no dispatch.
             if not enrich.get("computador"):
                 n_missing += 1
-                pending_ledger.append(ledger_row(
+                pending_ledger.append((ledger_row(
                     event_id, payload.get("email"), None, None, None,
                     "skipped_missing_data", utm=utm, survey=survey_dict,
-                    enrich=enrich, has_computer=has_computer))
+                    enrich=enrich, has_computer=has_computer), ack_id))
                 handled_ack_ids.append(ack_id)
                 continue
             # Entra na fila de scoring; meta_elig decide destino depois.
@@ -370,17 +400,17 @@ def process_pending_pubsub(
             verdict = classify(meta_elig, enrich)
             if verdict == "skipped_allowlist":
                 n_allow += 1
-                pending_ledger.append(ledger_row(
+                pending_ledger.append((ledger_row(
                     event_id, payload.get("email"), None, None, None,
                     "skipped_allowlist", utm=utm, survey=survey_dict,
-                    enrich=enrich, has_computer=has_computer))
+                    enrich=enrich, has_computer=has_computer), ack_id))
                 handled_ack_ids.append(ack_id)
             elif verdict == "skipped_missing_data":
                 n_missing += 1
-                pending_ledger.append(ledger_row(
+                pending_ledger.append((ledger_row(
                     event_id, payload.get("email"), None, None, None,
                     "skipped_missing_data", utm=utm, survey=survey_dict,
-                    enrich=enrich, has_computer=has_computer))
+                    enrich=enrich, has_computer=has_computer), ack_id))
                 handled_ack_ids.append(ack_id)
             else:
                 to_score.append((ack_id, payload, survey_dict, utm, enrich, meta_elig))
@@ -431,10 +461,10 @@ def process_pending_pubsub(
         eid = payload["eventId"]
         if eid not in scored:
             n_err += 1
-            pending_ledger.append(ledger_row(
+            pending_ledger.append((ledger_row(
                 eid, payload.get("email"), None, None, None, "error",
                 error_message="sem score", utm=utm, survey=survey_dict,
-                enrich=enrich, has_computer=payload.get("hasComputer")))
+                enrich=enrich, has_computer=payload.get("hasComputer")), ack_id))
             handled_ack_ids.append(ack_id)
             continue
         sc, dc, ab_v, vn, sc_cal = scored[eid]
@@ -446,19 +476,19 @@ def process_pending_pubsub(
             # Google/outros — scoreado, NÃO vai pro Meta CAPI.
             n_allow += 1
             n_scored_no_meta += 1
-            pending_ledger.append(ledger_row(
+            pending_ledger.append((ledger_row(
                 eid, payload.get("email"), vn, sc, _di_int,
                 "skipped_allowlist", utm=utm, survey=survey_dict,
-                enrich=enrich, has_computer=payload.get("hasComputer")))
+                enrich=enrich, has_computer=payload.get("hasComputer")), ack_id))
             handled_ack_ids.append(ack_id)
             continue
         if score_all and not (enrich.get("fbp") and enrich.get("fbc")):
             # Meta-eligible MAS sem tracking Meta — scoreado, não enviado.
             n_missing += 1
-            pending_ledger.append(ledger_row(
+            pending_ledger.append((ledger_row(
                 eid, payload.get("email"), vn, sc, _di_int,
                 "skipped_missing_data", utm=utm, survey=survey_dict,
-                enrich=enrich, has_computer=payload.get("hasComputer")))
+                enrich=enrich, has_computer=payload.get("hasComputer")), ack_id))
             handled_ack_ids.append(ack_id)
             continue
         nome = (enrich.get("nome") or "").strip()
@@ -527,7 +557,7 @@ def process_pending_pubsub(
             hq_st = hq_res.get("status") if hq_res else None
             hq_ok = hq_st == "success"
             hq = "success" if hq_ok else ("error" if hq_st == "error" else None)
-            pending_ledger.append(ledger_row(
+            pending_ledger.append((ledger_row(
                 eid, payload.get("email"), vn,
                 capi_leads[i]["lead_score"], di, st,
                 base_meta_event_id=f"qualified_{capi_leads[i]['event_id']}",
@@ -539,7 +569,7 @@ def process_pending_pubsub(
                                 if i < len(details) else "sem retorno")),
                 utm=utm, survey=survey_dict,
                 enrich=enrich, has_computer=payload.get("hasComputer"),
-            ))
+            ), ack_id))
             handled_ack_ids.append(ack_id)
     elif capi_leads and dry_run:
         logger.info(
@@ -548,16 +578,49 @@ def process_pending_pubsub(
         )
 
     # 6. Persistir ledger + Ack (dry_run não grava nem acka)
-    if not dry_run:
-        for r in pending_ledger:
-            try:
-                _insert_ledger(conn, r)
-            except Exception as e:
-                logger.warning(
-                    f"[pubsub_branch] erro ledger {r.get('event_id')}: {e}"
-                )
+    #
+    # Destino por ledger_target() (PLANO_LEDGER_CLOUDSQL.md):
+    #   railway  → comportamento original: Railway tolerante (warning).
+    #   dual     → Cloud SQL PRIMÁRIO fail-loud (falha = mensagem sem ack,
+    #              Pub/Sub reentrega; ON CONFLICT dedupa) + espelho Railway
+    #              tolerante.
+    #   cloudsql → só Cloud SQL, fail-loud.
+    # Sem ledger_conn, qualquer modo degrada pra 'railway' com erro no log —
+    # melhor gravar na fonte antiga do que perder linha de ledger.
+    n_ledger_err = 0
+    target = ledger_target()
+    if target in ("dual", "cloudsql") and ledger_conn is None:
+        logger.error(
+            f"[pubsub_branch] LEDGER_TARGET={target} mas ledger_conn ausente — "
+            f"degradando pra railway neste batch"
+        )
+        target = "railway"
 
-        ack_ids = list(set(handled_ack_ids + error_ack_ids + duplicate_ack_ids))
+    failed_acks: set = set()
+    if not dry_run:
+        for r, r_ack in pending_ledger:
+            if target in ("dual", "cloudsql"):
+                try:
+                    _insert_ledger(ledger_conn, r)
+                except Exception as e:
+                    n_ledger_err += 1
+                    if r_ack:
+                        failed_acks.add(r_ack)
+                    logger.error(
+                        f"[pubsub_branch] ledger Cloud SQL FALHOU "
+                        f"{r.get('event_id')}: {e} — mensagem NÃO ackada"
+                    )
+            if target in ("railway", "dual"):
+                try:
+                    _insert_ledger(conn, r)
+                except Exception as e:
+                    logger.warning(
+                        f"[pubsub_branch] erro ledger railway {r.get('event_id')}: {e}"
+                    )
+
+        ack_ids = list(
+            set(handled_ack_ids + error_ack_ids + duplicate_ack_ids) - failed_acks
+        )
         if ack_ids:
             try:
                 subscriber.acknowledge(
@@ -578,6 +641,9 @@ def process_pending_pubsub(
         "errors": n_err,
         "dry_run": dry_run,
         "score_all": score_all,
+        "ledger_target": target,
+        "ledger_errors": n_ledger_err,
+        "unacked_for_retry": len(failed_acks),
     }
     logger.info(f"📨 [pubsub_branch] {summary}")
     return summary

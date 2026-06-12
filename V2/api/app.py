@@ -3447,19 +3447,25 @@ async def daily_monitoring_check_railway(
                 # --- total de leads Meta desde o início da janela de lançamento ---
                 # Usado pelo revenue_forecast (flat-rate) como denominador real da população.
                 # Inclui leads que não responderam à pesquisa e não chegam ao DB.
+                # Janela fechada: quando start_date/end_date são passados (chamada
+                # individual de um LF já encerrado), o fim é end_date — espelha o que
+                # o caminho do YAML (lf_anterior) já faz com cap_end. Sem isso, a
+                # query iria de start_date até hoje e inflaria o denominador com os
+                # LFs seguintes. No fluxo padrão (LF ativo) segue indo até hoje.
+                _launch_until = end_date if (start_date and end_date) else _today
                 _rows_launch = _meta.get_insights(
                     account_id=_account,
                     level='campaign',
                     fields=['campaign_name', 'actions'],
                     since_date=_launch_str,
-                    until_date=_today,
+                    until_date=_launch_until,
                     filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}]
                 )
                 for _r in _rows_launch:
                     for _a in (_r.get('actions') or []):
                         if _a.get('action_type') == 'offsite_conversion.fb_pixel_lead':
                             total_meta_leads_forecast += int(_a.get('value', 0) or 0)
-                logger.info(f"📊 Meta leads janela lançamento ({_launch_str}–{_today}): {total_meta_leads_forecast}")
+                logger.info(f"📊 Meta leads janela lançamento ({_launch_str}–{_launch_until}): {total_meta_leads_forecast}")
 
                 # --- spend Meta por variante A/B (janela 24h, alinhada com leads_capi_by_variant_24h) ---
                 # Split por campaign.name: Challenger = casa com utm_pattern.utm_campaign do YAML; Champion = demais.
@@ -3609,6 +3615,98 @@ async def daily_monitoring_check_railway(
                     except Exception as _we:
                         logger.warning(f"⚠️ Meta window {_wlbl}: {_we}")
                         meta_window_data[_wlbl] = None
+
+                # --- CPL real + conversão de LP por variante (dia anterior) ---
+                # 3 buckets Lead/Champion/Challenger pelo optimization_goal da
+                # campanha (campaign_classifier, fonte única do split, mesma das
+                # tabelas Drift por A/B e da distribuição de decis).
+                #   Numerador (leads reais) = tabela Client (TODOS os leads
+                #     captados, não respostas de pesquisa), só source Meta.
+                #   Denominador custo/conv = spend + landing_page_views da Meta
+                #     Insights por campanha.
+                # Falha silenciosa: só anexa se conseguir os dois lados.
+                try:
+                    from src.monitoring.campaign_classifier import classify_campaign_buckets as _cls_buckets
+                    from src.monitoring.daily_check_aggregations import compute_variant_cpl_conv as _variant_cpl
+                    # 1) Lado Meta: spend + landing_page_views por campanha (dia anterior).
+                    _pv_meta_raw = _meta.get_insights(
+                        account_id=_account, level='campaign',
+                        fields=['campaign_id', 'campaign_name', 'spend', 'actions'],
+                        since_date=_dia_ant_str, until_date=_dia_ant_str,
+                        filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}],
+                    )
+                    _pv_meta_rows = []
+                    for _mr in _pv_meta_raw:
+                        _lpv = 0
+                        for _a in (_mr.get('actions') or []):
+                            if _a.get('action_type') == 'landing_page_view':
+                                _lpv = int(float(_a.get('value', 0) or 0))
+                                break
+                        _pv_meta_rows.append({
+                            'campaign_id': _mr.get('campaign_id'),
+                            'campaign_name': _mr.get('campaign_name'),
+                            'spend': float(_mr.get('spend', 0) or 0),
+                            'lpv': _lpv,
+                        })
+                    # 2) Lado Client: leads reais (dia anterior BRT), 1 touch Meta+cid por email.
+                    _pv_conn = pg8000.native.Connection(
+                        host=os.environ['RAILWAY_DB_HOST'],
+                        port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+                        database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+                        user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+                        password=os.environ['RAILWAY_DB_PASSWORD'],
+                        timeout=30,
+                    )
+                    try:
+                        _pv_rows = _pv_conn.run(
+                            'SELECT LOWER(TRIM(c.email)) AS email, u.campaign, u.source, u."trackedAt" '
+                            'FROM "Client" c '
+                            'JOIN "UTMTracking" u ON LOWER(TRIM(u."clientEmail")) = LOWER(TRIM(c.email)) '
+                            'WHERE (c."firstSeenAt" - INTERVAL \'3 hours\')::date = :d',
+                            d=_dia_ant_str,
+                        )
+                    finally:
+                        try: _pv_conn.close()
+                        except Exception: pass
+                    # Allowlist Meta — mesma fonte do gate de envio CAPI.
+                    _pv_allow = (pipeline._client_config.capi.utm_source_allowlist
+                                 if pipeline and pipeline._client_config and pipeline._client_config.capi
+                                 else None) or []
+                    _pv_meta_sources = frozenset(str(x).lower().strip() for x in _pv_allow)
+                    # Dedup por email: touch mais recente com source Meta + campanha c/ cid.
+                    from src.monitoring.campaign_classifier import extract_campaign_id as _pv_extract_cid
+                    _pv_by_email: Dict[str, tuple] = {}
+                    for _em, _cmp, _src, _tat in _pv_rows:
+                        _s = (str(_src).strip().lower() if _src else '')
+                        if _s not in _pv_meta_sources:
+                            continue
+                        if not _pv_extract_cid(_cmp):
+                            continue
+                        _prev = _pv_by_email.get(_em)
+                        if _prev is None or (_tat is not None and _prev[2] is not None and _tat >= _prev[2]):
+                            _pv_by_email[_em] = (_cmp, _src, _tat)
+                    _pv_client_leads = [(v[0], v[1]) for v in _pv_by_email.values()]
+                    # 3) Classifica todas as campanhas (Meta + Client) uma vez.
+                    _pv_ids = [m['campaign_name'] for m in _pv_meta_rows if m.get('campaign_name')]
+                    _pv_ids += [c for c, _ in _pv_client_leads if c]
+                    _pv_cid_bucket = _cls_buckets(_pv_ids, meta=_meta)
+                    # 4) Agrega e anexa ao dia_anterior do traffic_metrics.
+                    _pv_result = _variant_cpl(
+                        meta_rows=_pv_meta_rows,
+                        client_leads=_pv_client_leads,
+                        cid_to_bucket=_pv_cid_bucket,
+                        meta_sources=_pv_meta_sources,
+                    )
+                    if isinstance(meta_window_data.get('dia_anterior'), dict):
+                        meta_window_data['dia_anterior']['por_variante'] = _pv_result
+                        logger.info(
+                            "📊 Por variante (dia anterior): " + " · ".join(
+                                f"{_b}: {_d['leads']} leads, CPL {_d['cpl']}, LP {_d['conv_lp']}%"
+                                for _b, _d in _pv_result.items()
+                            )
+                        )
+                except Exception as _pve:
+                    logger.warning(f"⚠️ CPL/conv por variante (dia anterior): {_pve}")
 
         except Exception as _e:
             logger.warning(f"⚠️ Meta Ads metrics indisponível: {_e}")
@@ -5076,7 +5174,7 @@ async def pubsub_process_pending(pipeline: PipelineDep, dry_run: bool = False):
                  smoke contra o backlog real do canary sem efeito colateral.
     """
     import pg8000.native
-    from api.pubsub_branch import is_enabled, process_pending_pubsub
+    from api.pubsub_branch import is_enabled, ledger_target, process_pending_pubsub
 
     if not is_enabled():
         return {
@@ -5089,6 +5187,7 @@ async def pubsub_process_pending(pipeline: PipelineDep, dry_run: bool = False):
     from google.cloud import pubsub_v1
 
     railway_conn = None
+    ledger_conn = None
     subscriber = None
     try:
         railway_conn = pg8000.native.Connection(
@@ -5099,9 +5198,27 @@ async def pubsub_process_pending(pipeline: PipelineDep, dry_run: bool = False):
             password=os.environ['RAILWAY_DB_PASSWORD'],
             timeout=30,
         )
+        if ledger_target() in ('dual', 'cloudsql'):
+            # Cloud SQL nosso (PLANO_LEDGER_CLOUDSQL.md Etapa 1). Falha aqui
+            # derruba a request (500) — Scheduler tenta de novo em 5min e as
+            # mensagens ficam na fila; melhor do que processar sem o primário.
+            import ssl as _ssl
+            _lctx = _ssl.create_default_context()
+            _lctx.check_hostname = False
+            _lctx.verify_mode = _ssl.CERT_NONE
+            ledger_conn = pg8000.native.Connection(
+                host=os.environ['LEDGER_DB_HOST'],
+                port=int(os.environ.get('LEDGER_DB_PORT', '5432')),
+                database=os.environ.get('LEDGER_DB_NAME', 'ledger'),
+                user=os.environ.get('LEDGER_DB_USER', 'ledger_app'),
+                password=os.environ['LEDGER_DB_PASSWORD'],
+                ssl_context=_lctx,
+                timeout=30,
+            )
         subscriber = pubsub_v1.SubscriberClient()
         summary = process_pending_pubsub(
             subscriber, railway_conn, pipeline, dry_run=dry_run,
+            ledger_conn=ledger_conn,
         )
         return {**summary, "timestamp": datetime.now().isoformat()}
 
@@ -5119,11 +5236,12 @@ async def pubsub_process_pending(pipeline: PipelineDep, dry_run: bool = False):
                 subscriber.close()
             except Exception:
                 pass
-        if railway_conn is not None:
-            try:
-                railway_conn.close()
-            except Exception:
-                pass
+        for _c in (railway_conn, ledger_conn):
+            if _c is not None:
+                try:
+                    _c.close()
+                except Exception:
+                    pass
 
 
 # =============================================================================

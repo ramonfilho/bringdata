@@ -509,6 +509,10 @@ deploy_to_cloud_run() {
     # Sem essas variáveis, a API usa SQLite e PERDE TODOS OS DADOS a cada deploy
     print_info "Configurando variáveis de ambiente..."
     ENV_VARS=$(build_env_vars)
+    if [[ "$ENV_VARS" == *"ERROR_LEDGER_SECRET_UNAVAILABLE"* ]]; then
+        print_error "LEDGER_TARGET≠railway mas a senha do ledger não veio (Secret Manager ledger-db-password). Abortando deploy."
+        exit 1
+    fi
     print_success "Variáveis de ambiente configuradas (via lib/config.sh)"
 
     TRAFFIC_FLAG=""

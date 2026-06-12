@@ -78,15 +78,19 @@ A maioria já passa pela camada de acesso `src/data/` (`LeadRepository` + `Regis
 
 **Rollback:** n/a (nada em produção foi tocado).
 
-### Etapa 1 — Dual-write no consumer
+### Etapa 1 — Dual-write no consumer (código pronto 12/06 — falta deploy)
 
-- [ ] `api/pubsub_branch.py`: `_insert_ledger` ganha destino primário (Cloud SQL) + espelho (Railway), controlado por `LEDGER_DUAL_WRITE=true`
-- [ ] **Fail-loud no primário**: hoje falha de INSERT é engolida com warning (`pubsub_branch.py:553-558`); no Cloud SQL a falha deve contar como erro do batch (não ackar a mensagem). Espelho Railway pode continuar tolerante.
-- [ ] `api/app.py:5082-5089`: abrir as duas conexões no endpoint, fechar ambas no finally
-- [ ] Deploy canary (fluxo normal do `deploy_capi.sh`, Gate C incluso)
-- [ ] Checagem de paridade diária por ~7 dias: count + amostra por dia nos dois bancos (script pequeno, pode ser célula manual)
+Implementação final usou **uma env var de 3 estados** em vez do boolean planejado: `LEDGER_TARGET = railway (default) | dual | cloudsql` — mesma flag serve as Etapas 1 e 4, flip sem rebuild via `gcloud run services update`.
 
-**Rollback:** `LEDGER_DUAL_WRITE=false` + env vars antigas → comportamento atual em minutos.
+- [x] `api/pubsub_branch.py`: `ledger_target()` + `_insert_ledger` não-destrutivo (dual-write insere a mesma linha 2×) + etapa de persistência com primário/espelho
+- [x] **Fail-loud no primário**: INSERT que falha no Cloud SQL deixa a mensagem **sem ack** (pareamento linha↔ack_id novo no `pending_ledger`) → Pub/Sub reentrega, `ON CONFLICT` dedupa. Espelho Railway segue tolerante (warning). Sem `ledger_conn`, degrada pra railway com erro no log (não perde linha).
+- [x] `api/app.py` (endpoint `/pubsub/process-pending`): conexão Cloud SQL aberta quando `LEDGER_TARGET≠railway`; falha na conexão → 500 (Scheduler re-tenta, fila segura as mensagens)
+- [x] Deploy: `config.sh` injeta `LEDGER_TARGET` + `LEDGER_DB_*` com senha do **Secret Manager** no momento do deploy (sentinela aborta o deploy se o secret não vier); `deploy_capi.sh` checa a sentinela
+- [x] Testes: 7 novos em `tests/test_pubsub_branch.py` (24/24 verdes; vizinhos `test_critical_alerts_pubsub` 10/10 e `test_pubsub_summary` 7/7 ok)
+- [ ] **Deploy canary** com `LEDGER_TARGET=dual` exportado (fluxo normal do `deploy_capi.sh`, Gate C incluso) — embarca junto o fix do baseline (`5f3994e`)
+- [ ] Checagem de paridade diária por ~7 dias: count + amostra por dia nos dois bancos
+
+**Rollback:** `LEDGER_TARGET=railway` via `gcloud run services update` → comportamento atual em ~2min, sem rebuild.
 
 ### Etapa 2 — Backfill + consolidação do dataset histórico completo
 
@@ -181,7 +185,8 @@ O item 1 do plano de remediação de score (cache versionado regenerado no daily
 | Data | Etapa | O que foi feito | Commit |
 |---|---|---|---|
 | 12/06 | pré | Fix do baseline do desvio de score (fallback pro ledger; cobre janela cega 18-22/06) — **pendente deploy** | `5f3994e` |
-| 12/06 | 0 | Database `ledger` + user `ledger_app` (Secret Manager) + DDL 32 colunas + smoke ok | (este) |
+| 12/06 | 0 | Database `ledger` + user `ledger_app` (Secret Manager) + DDL 32 colunas + smoke ok | `4f30266` |
+| 12/06 | 1 | Dual-write implementado (`LEDGER_TARGET` 3 estados, fail-loud + ack seletivo, 24/24 testes) — **deploy pendente** | (este) |
 
 ## 8. Como retomar numa sessão nova
 
