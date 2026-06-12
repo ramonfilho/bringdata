@@ -68,13 +68,13 @@ A maioria já passa pela camada de acesso `src/data/` (`LeadRepository` + `Regis
 
 ## 4. Etapas
 
-### Etapa 0 — Preparo (não toca produção)
+### Etapa 0 — Preparo (não toca produção) ✅ CONCLUÍDA 12/06/2026
 
-- [ ] Criar database `ledger` na `smart-ads-db` + user `ledger_app` (privilégio mínimo: só esse database)
-- [ ] Escrever **DDL consolidado** em `scripts/create_ledger_cloudsql.py`: as 12 base + 6 UTM + 5 observabilidade + **as 9 de enriquecimento sem migração** (fechar o gap) + índices `created_at`, `lower(email)`
-- [ ] Decidir conectividade Cloud Run → Cloud SQL: connector nativo (`--add-cloudsql-instances` + unix socket — o binding foi removido como vestigial na rev. 00276, precisa voltar) **ou** IP público com authorized network. Default recomendado: connector.
-- [ ] Novas env vars `LEDGER_DB_*` em `api/lib/config.sh` (`build_env_vars`) — **senha via Secret Manager ou env exportada, NÃO repetir o padrão da senha em texto plano de `config.sh:69`**
-- [ ] Smoke local: INSERT + SELECT no database novo com o user novo
+- [x] Database `ledger` criado na `smart-ads-db`; user `ledger_app` com privilégio mínimo (CONNECT só no `ledger`, USAGE+CREATE no schema; `mlflow` revogado de PUBLIC — testado que `ledger_app` não conecta nele)
+- [x] **DDL consolidado** em `scripts/create_ledger_cloudsql.py`: espelho do schema live (32 colunas — 12 base + 6 UTM + 9 enriquecimento sem migração + 5 observabilidade) + índices `created_at` e `lower(email)`; idempotente, com `--verify`
+- [x] Conectividade decidida: **IP público por ora** (a instância já estava aberta em `0.0.0.0/0` desde a era MLflow — ver risco §6.8); endurecimento (connector + fechar a rede) registrado pra Etapa 4-5
+- [x] Senha do `ledger_app` no **Secret Manager** (`ledger-db-password`, projeto smart-ads-451319) + `LEDGER_DB_*` no `V2/.env` local. A injeção no `config.sh`/deploy fica pra Etapa 1 (quando o consumer passar a usar)
+- [x] Smoke como `ledger_app`: INSERT (com JSONB) + SELECT + DELETE ok
 
 **Rollback:** n/a (nada em produção foi tocado).
 
@@ -174,12 +174,14 @@ O item 1 do plano de remediação de score (cache versionado regenerado no daily
 5. **Múltiplos terminais** — `critical_alerts.py`/`app.py` estão sob o refator da camada de acesso; coordenar commits (escopo restrito, um leitor por commit).
 6. **`rule_no_leads_arriving` lê `lead_surveys` morta** (`critical_alerts.py:300-309`) — achado correlato, escopo separado; registrar e não emendar aqui.
 7. **Latência/limites do db-f1-micro** (shared core, ~25 conexões úteis): consumer + monitoramento + MLflow no mesmo micro. Observar na Etapa 1; subir tier é mudança de 1 flag.
+8. **Instância aberta em `0.0.0.0/0`** (herança da era MLflow; só senha protege). Aceito temporariamente pra não bloquear a migração; endurecer na Etapa 4-5: Cloud SQL connector no Cloud Run + remover a authorized network aberta + (opcional) trocar a senha do `postgres`, que está hardcoded em `src/model/training_model.py:28`.
 
 ## 7. Registro de execução
 
 | Data | Etapa | O que foi feito | Commit |
 |---|---|---|---|
-| — | — | — | — |
+| 12/06 | pré | Fix do baseline do desvio de score (fallback pro ledger; cobre janela cega 18-22/06) — **pendente deploy** | `5f3994e` |
+| 12/06 | 0 | Database `ledger` + user `ledger_app` (Secret Manager) + DDL 32 colunas + smoke ok | (este) |
 
 ## 8. Como retomar numa sessão nova
 
