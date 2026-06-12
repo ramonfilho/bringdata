@@ -675,14 +675,11 @@ def _render_text_revenue(v: dict, L: list):
     def _row(label, c):
         return (
             f'    {label:<16} {_n(c,"vendas_total"):>7.1f}  '
-            f'{_n(c,"vendas_guru"):>14.1f}  '
-            f'{_n(c,"vendas_tmb"):>14.1f}  '
-            f'R$ {_n(c,"faturamento_recebido"):>13,.0f}  '
-            f'R$ {_n(c,"cartao_avista_liquido"):>7,.0f}  '
-            f'R$ {_n(c,"primeira_parcela_boleto"):>11,.0f}'
+            f'R$ {_n(c,"faturamento"):>14,.0f}  '
+            f'R$ {_n(c,"faturamento_recebido"):>16,.0f}'
         )
 
-    header = f'    {"Cenário":<16} {"Vendas":>7}  {"Vendas cartão":>14}  {"Vendas boleto":>14}  {"Recebido à vista":>16}  {"Cartão":>10}  {"1ª parc boleto":>14}'
+    header = f'    {"Cenário":<16} {"Vendas":>7}  {"Fat. contratado":>17}  {"Recebido 1ª janela":>19}'
 
     def _write_two_methods(forecast: dict):
         L.append('  Método 1: taxa de conversão média LF43-LF53 (recalibrado 08/05)')
@@ -1585,23 +1582,32 @@ def _slack_unified_funnel(v: dict, B: list):
     roll = dq.get('fbp_fbc_rolling', {}) or {}
     r7, r3, r1 = (roll.get('7d') or {}), (roll.get('3d') or {}), (roll.get('1d') or {})
 
-    cap = uf.get('capture', {}) or {}
     pp  = uf.get('pipeline', {}) or {}
     def stg(k): return pp.get(k, {}) or {}
     def brk(s):
         return f"fb {_n(s,'fb'):.0f} · ggl {_n(s,'ggl'):.0f} · outr {_n(s,'outr'):.0f}"
 
-    cpls = f"{_n(tr,'cpl'):.2f}".replace('.', ',')
-    _capi_n = _n(cap, 'leads_capi')
-    _cpl_capi = (_n(tr, 'spend') / _capi_n) if _capi_n else 0.0
-    cpl_capi_s = f"{_cpl_capi:.2f}".replace('.', ',')
     lines = [
         "── Anúncio (Meta Insights) ──",
         f"Spend          R$ {_n(tr,'spend'):>10,.0f}",
         f"Cliques        {_n(tr,'clicks'):>13,.0f}",
-        f"Leads pixel    {_n(tr,'meta_leads'):>13,.0f}   CTR→lead {_n(tr,'ctr_lead'):.1f}% · CPL R$ {cpls}",
-        f"leads_capi     {_capi_n:>13,.0f}   CPL real R$ {cpl_capi_s}",
-        "── Pipeline (todas as fontes) ──",
+    ]
+    # Por variante (Lead/Champion/Challenger) — CPL real (spend Meta ÷ leads reais
+    # da Client) e conversão de LP (leads reais ÷ landing_page_views). Leads reais =
+    # TODOS os leads captados (tabela Client, não respostas de pesquisa), restritos a
+    # source Meta (allowlist CAPI). Só renderiza se a coleta no app.py preencheu.
+    _pv = tr.get('por_variante') or {}
+    if _pv:
+        lines.append("── Por variante (leads reais Meta) ──")
+        for _vk in ('Lead', 'Champion', 'Challenger'):
+            _vd = _pv.get(_vk) or {}
+            _vn = _n(_vd, 'leads')
+            _cpl = _vd.get('cpl')
+            _conv = _vd.get('conv_lp')
+            _cpl_s = (f"R$ {_cpl:.2f}".replace('.', ',')) if _cpl is not None else "R$ —"
+            _conv_s = (f"{_conv:.1f}%".replace('.', ',')) if _conv is not None else "—"
+            lines.append(f"{_vk:<11}{_vn:>10,.0f}   CPL {_cpl_s} · LP {_conv_s}")
+    lines += [
         f"Pesquisa       {_n(stg('pesquisa'),'total'):>13,.0f}   {brk(stg('pesquisa'))}",
         f"Scoreado       {_n(stg('scoreado'),'total'):>13,.0f}   {brk(stg('scoreado'))}",
         f"CAPI enviado   {_n(stg('capi_enviado'),'total'):>13,.0f}",
@@ -1743,14 +1749,11 @@ def _slack_revenue(v: dict, B: list):
     def _row(label, c):
         return (
             f"{label:<10}  {_n(c,'vendas_total'):>6.1f}  "
-            f"{_n(c,'vendas_guru'):>13.1f}  "
-            f"{_n(c,'vendas_tmb'):>13.1f}  "
-            f"R$ {_n(c,'faturamento_recebido'):>13,.0f}  "
-            f"R$ {_n(c,'cartao_avista_liquido'):>7,.0f}  "
-            f"R$ {_n(c,'primeira_parcela_boleto'):>11,.0f}"
+            f"R$ {_n(c,'faturamento'):>13,.0f}  "
+            f"R$ {_n(c,'faturamento_recebido'):>15,.0f}"
         )
 
-    header_table = f"{'Cenário':<10}  {'Vendas':>6}  {'Vendas cartão':>13}  {'Vendas boleto':>13}  {'Recebido à vista':>16}  {'Cartão':>10}  {'1ª parc boleto':>14}"
+    header_table = f"{'Cenário':<10}  {'Vendas':>6}  {'Fat. contratado':>16}  {'Recebido 1ª janela':>18}"
 
     # Método 1 — uma section
     m1_lines = ["```", header_table]

@@ -163,6 +163,43 @@ def classify_campaign(campaign_name: str) -> str:
         return 'SEM_ML'
 
 
+def classify_variant(campaign_name: str) -> str:
+    """Classifica campanha em 'Lead', 'Champion', 'Challenger' ou 'EXTERNO'.
+
+    Mesmo critério de NOME do relatório de validação do LF (`classify_campaign`),
+    refinado em 3 buckets em vez de COM_ML/SEM_ML:
+
+    1. Não é captação (`DEVLF | CAP | FRIO`) → 'EXTERNO' (Google/orgânico/etc.).
+    2. Contém 'leadhqlb' ou 'hqlb' → 'Challenger' (A/B abr28).
+    3. Contém 'leadqualified' / 'machine learning' / '| ml |' → 'Champion'.
+    4. Captação sem marker ML → 'Lead' (Lead padrão Meta, sem evento ML).
+
+    Precedência Challenger > Champion > Lead (igual ao split por A/B). É o critério
+    canônico pra quebra por variante do monitoramento (CPL real / conversão de LP),
+    deliberadamente o do arquivo de validação — não o `optimization_goal` do adset.
+
+    Examples:
+        >>> classify_variant("DEVLF | CAP | FRIO | ... | LEADHQLB|123")
+        'Challenger'
+        >>> classify_variant("DEVLF | CAP | FRIO | ... | LEADQUALIFIED|123")
+        'Champion'
+        >>> classify_variant("DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1")
+        'Lead'
+        >>> classify_variant("devlf")
+        'EXTERNO'
+    """
+    if not campaign_name or pd.isna(campaign_name):
+        return 'EXTERNO'
+    if not is_captacao_campaign(campaign_name):
+        return 'EXTERNO'
+    campaign_lower = str(campaign_name).lower()
+    if 'leadhqlb' in campaign_lower or 'hqlb' in campaign_lower:
+        return 'Challenger'
+    if 'leadqualified' in campaign_lower or 'machine learning' in campaign_lower or '| ml |' in campaign_lower:
+        return 'Champion'
+    return 'Lead'
+
+
 def add_ml_classification(df: pd.DataFrame, campaign_col: str = 'campaign') -> pd.DataFrame:
     """
     Adiciona coluna 'ml_type' ao DataFrame e filtra campanhas excluídas.

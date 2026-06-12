@@ -882,6 +882,26 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'traffic_metrics.dia_anterior.ctr_lead':                                            (R, None),
     'traffic_metrics.dia_anterior.meta_leads':                                          (R, None),
     'traffic_metrics.dia_anterior.spend':                                               (R, None),
+    # Por variante (Lead/Champion/Challenger) — CPL real + conv LP no funil.
+    'traffic_metrics.dia_anterior.por_variante':                                        (R, None),  # dict(3) buckets
+    'traffic_metrics.dia_anterior.por_variante.Lead':                                   (R, None),
+    'traffic_metrics.dia_anterior.por_variante.Lead.leads':                             (R, None),  # leads reais Client (source Meta)
+    'traffic_metrics.dia_anterior.por_variante.Lead.cpl':                               (R, None),  # spend ÷ leads
+    'traffic_metrics.dia_anterior.por_variante.Lead.conv_lp':                           (R, None),  # leads ÷ landing_page_views
+    'traffic_metrics.dia_anterior.por_variante.Lead.spend':                             (S, 'insumo do CPL; não renderizado direto'),
+    'traffic_metrics.dia_anterior.por_variante.Lead.lpv':                               (S, 'insumo da conv LP; não renderizado direto'),
+    'traffic_metrics.dia_anterior.por_variante.Champion':                               (R, None),
+    'traffic_metrics.dia_anterior.por_variante.Champion.leads':                         (R, None),
+    'traffic_metrics.dia_anterior.por_variante.Champion.cpl':                           (R, None),
+    'traffic_metrics.dia_anterior.por_variante.Champion.conv_lp':                       (R, None),
+    'traffic_metrics.dia_anterior.por_variante.Champion.spend':                         (S, 'insumo do CPL; não renderizado direto'),
+    'traffic_metrics.dia_anterior.por_variante.Champion.lpv':                           (S, 'insumo da conv LP; não renderizado direto'),
+    'traffic_metrics.dia_anterior.por_variante.Challenger':                             (R, None),
+    'traffic_metrics.dia_anterior.por_variante.Challenger.leads':                       (R, None),
+    'traffic_metrics.dia_anterior.por_variante.Challenger.cpl':                         (R, None),
+    'traffic_metrics.dia_anterior.por_variante.Challenger.conv_lp':                     (R, None),
+    'traffic_metrics.dia_anterior.por_variante.Challenger.spend':                       (S, 'insumo do CPL; não renderizado direto'),
+    'traffic_metrics.dia_anterior.por_variante.Challenger.lpv':                         (S, 'insumo da conv LP; não renderizado direto'),
     'traffic_metrics.ultimas_24h':                                                      (R, None),  # ex: dict(5)
     'traffic_metrics.ultimas_24h.clicks':                                               (R, None),  # ex: 4051
     'traffic_metrics.ultimas_24h.cpl':                                                  (R, None),  # ex: 6.79

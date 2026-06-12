@@ -115,6 +115,67 @@ def compute_unified_funnel(
     }
 
 
+_VARIANT_BUCKETS = ('Lead', 'Champion', 'Challenger')
+
+
+def compute_variant_cpl_conv(
+    *,
+    meta_rows: List[Dict[str, Any]],
+    client_campaigns: List,
+    classify_fn,
+) -> Dict[str, Dict[str, Any]]:
+    """CPL real e conversão de LP por variante (Lead/Champion/Challenger).
+
+    Pura: sem I/O. O caller (`api/app.py`) faz os dois pulls e passa pronto.
+
+    Split por NOME da campanha via `classify_fn` (= `validation.campaign_classifier
+    .classify_variant`, o critério do arquivo de validação do LF). `classify_fn`
+    devolve 'Lead'|'Champion'|'Challenger'|'EXTERNO'; tudo que não é um dos 3
+    buckets (EXTERNO = Google/orgânico/não-captação) fica de fora dos dois lados.
+
+    Denominador de custo / conversão (lado Meta):
+      - `meta_rows`: list de dict por campanha Meta CAP — chaves `campaign_name`,
+        `spend` (BRL), `lpv` (landing_page_views).
+
+    Numerador de leads (lado Client = TODOS os leads captados, não respostas de
+    pesquisa):
+      - `client_campaigns`: list de `utm_campaign` (string), 1 por lead já
+        deduplicado no caller.
+
+    Returns:
+        {bucket: {leads, spend, lpv, cpl, conv_lp}} pros 3 buckets. `cpl` =
+        spend/leads (None se leads=0). `conv_lp` = leads/lpv*100 (None se lpv=0).
+    """
+    agg = {b: {'leads': 0, 'spend': 0.0, 'lpv': 0} for b in _VARIANT_BUCKETS}
+
+    # Lado Meta: spend + landing_page_views por bucket.
+    for r in meta_rows:
+        bucket = classify_fn(r.get('campaign_name'))
+        if bucket in agg:
+            agg[bucket]['spend'] += float(r.get('spend') or 0)
+            agg[bucket]['lpv'] += int(r.get('lpv') or 0)
+
+    # Lado Client: leads reais por bucket.
+    for camp in client_campaigns:
+        bucket = classify_fn(camp)
+        if bucket in agg:
+            agg[bucket]['leads'] += 1
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for b in _VARIANT_BUCKETS:
+        leads = agg[b]['leads']
+        spend = agg[b]['spend']
+        lpv = agg[b]['lpv']
+        out[b] = {
+            'leads': leads,
+            'spend': round(spend, 2),
+            'lpv': lpv,
+            'cpl': round(spend / leads, 2) if leads > 0 else None,
+            'conv_lp': round(leads / lpv * 100, 1) if lpv > 0 else None,
+        }
+    return out
+
+
 def compute_stats_window(records: List[LeadRecord]) -> Dict[str, int]:
     """Agregação total/scored/capi_sent/success/error/with_phone numa janela.
 

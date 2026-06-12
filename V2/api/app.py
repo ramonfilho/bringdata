@@ -3617,21 +3617,23 @@ async def daily_monitoring_check_railway(
                         meta_window_data[_wlbl] = None
 
                 # --- CPL real + conversão de LP por variante (dia anterior) ---
-                # 3 buckets Lead/Champion/Challenger pelo optimization_goal da
-                # campanha (campaign_classifier, fonte única do split, mesma das
-                # tabelas Drift por A/B e da distribuição de decis).
+                # 3 buckets Lead/Champion/Challenger pelo NOME da campanha
+                # (validation.campaign_classifier.classify_variant — o critério do
+                # arquivo de validação do LF, deliberadamente NÃO o optimization_goal
+                # do adset). EXTERNO (Google/orgânico/não-captação) fica de fora.
                 #   Numerador (leads reais) = tabela Client (TODOS os leads
-                #     captados, não respostas de pesquisa), só source Meta.
+                #     captados, não respostas de pesquisa).
                 #   Denominador custo/conv = spend + landing_page_views da Meta
                 #     Insights por campanha.
                 # Falha silenciosa: só anexa se conseguir os dois lados.
                 try:
-                    from src.monitoring.campaign_classifier import classify_campaign_buckets as _cls_buckets
+                    from src.validation.campaign_classifier import classify_variant as _classify_variant
                     from src.monitoring.daily_check_aggregations import compute_variant_cpl_conv as _variant_cpl
+                    _PV_BUCKETS = ('Lead', 'Champion', 'Challenger')
                     # 1) Lado Meta: spend + landing_page_views por campanha (dia anterior).
                     _pv_meta_raw = _meta.get_insights(
                         account_id=_account, level='campaign',
-                        fields=['campaign_id', 'campaign_name', 'spend', 'actions'],
+                        fields=['campaign_name', 'spend', 'actions'],
                         since_date=_dia_ant_str, until_date=_dia_ant_str,
                         filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}],
                     )
@@ -3643,12 +3645,11 @@ async def daily_monitoring_check_railway(
                                 _lpv = int(float(_a.get('value', 0) or 0))
                                 break
                         _pv_meta_rows.append({
-                            'campaign_id': _mr.get('campaign_id'),
                             'campaign_name': _mr.get('campaign_name'),
                             'spend': float(_mr.get('spend', 0) or 0),
                             'lpv': _lpv,
                         })
-                    # 2) Lado Client: leads reais (dia anterior BRT), 1 touch Meta+cid por email.
+                    # 2) Lado Client: leads reais (dia anterior BRT), 1 touch por email.
                     _pv_conn = pg8000.native.Connection(
                         host=os.environ['RAILWAY_DB_HOST'],
                         port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
@@ -3659,7 +3660,7 @@ async def daily_monitoring_check_railway(
                     )
                     try:
                         _pv_rows = _pv_conn.run(
-                            'SELECT LOWER(TRIM(c.email)) AS email, u.campaign, u.source, u."trackedAt" '
+                            'SELECT LOWER(TRIM(c.email)) AS email, u.campaign, u."trackedAt" '
                             'FROM "Client" c '
                             'JOIN "UTMTracking" u ON LOWER(TRIM(u."clientEmail")) = LOWER(TRIM(c.email)) '
                             'WHERE (c."firstSeenAt" - INTERVAL \'3 hours\')::date = :d',
@@ -3668,34 +3669,20 @@ async def daily_monitoring_check_railway(
                     finally:
                         try: _pv_conn.close()
                         except Exception: pass
-                    # Allowlist Meta — mesma fonte do gate de envio CAPI.
-                    _pv_allow = (pipeline._client_config.capi.utm_source_allowlist
-                                 if pipeline and pipeline._client_config and pipeline._client_config.capi
-                                 else None) or []
-                    _pv_meta_sources = frozenset(str(x).lower().strip() for x in _pv_allow)
-                    # Dedup por email: touch mais recente com source Meta + campanha c/ cid.
-                    from src.monitoring.campaign_classifier import extract_campaign_id as _pv_extract_cid
+                    # Dedup por email: touch de captação (1 dos 3 buckets) mais recente.
                     _pv_by_email: Dict[str, tuple] = {}
-                    for _em, _cmp, _src, _tat in _pv_rows:
-                        _s = (str(_src).strip().lower() if _src else '')
-                        if _s not in _pv_meta_sources:
-                            continue
-                        if not _pv_extract_cid(_cmp):
+                    for _em, _cmp, _tat in _pv_rows:
+                        if _classify_variant(_cmp) not in _PV_BUCKETS:
                             continue
                         _prev = _pv_by_email.get(_em)
-                        if _prev is None or (_tat is not None and _prev[2] is not None and _tat >= _prev[2]):
-                            _pv_by_email[_em] = (_cmp, _src, _tat)
-                    _pv_client_leads = [(v[0], v[1]) for v in _pv_by_email.values()]
-                    # 3) Classifica todas as campanhas (Meta + Client) uma vez.
-                    _pv_ids = [m['campaign_name'] for m in _pv_meta_rows if m.get('campaign_name')]
-                    _pv_ids += [c for c, _ in _pv_client_leads if c]
-                    _pv_cid_bucket = _cls_buckets(_pv_ids, meta=_meta)
-                    # 4) Agrega e anexa ao dia_anterior do traffic_metrics.
+                        if _prev is None or (_tat is not None and (_prev[1] is None or _tat >= _prev[1])):
+                            _pv_by_email[_em] = (_cmp, _tat)
+                    _pv_client_campaigns = [v[0] for v in _pv_by_email.values()]
+                    # 3) Agrega (split por nome via classify_variant) e anexa ao dia_anterior.
                     _pv_result = _variant_cpl(
                         meta_rows=_pv_meta_rows,
-                        client_leads=_pv_client_leads,
-                        cid_to_bucket=_pv_cid_bucket,
-                        meta_sources=_pv_meta_sources,
+                        client_campaigns=_pv_client_campaigns,
+                        classify_fn=_classify_variant,
                     )
                     if isinstance(meta_window_data.get('dia_anterior'), dict):
                         meta_window_data['dia_anterior']['por_variante'] = _pv_result
