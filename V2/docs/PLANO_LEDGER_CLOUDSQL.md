@@ -94,7 +94,14 @@ A maioria já passa pela camada de acesso `src/data/` (`LeadRepository` + `Regis
 - [ ] Copiar as ~19k linhas do `registros_ml` Railway → Cloud SQL (one-shot; `COPY`/insert batch; conferir count e min/max `created_at`)
 
 **2b — Acervo completo de leads (decisão 12/06 — dataset único consolidado):**
-Hoje os leads estão espalhados: planilhas centrais "[LF] Pesquisa" Produção+Backup (desde LF11, ~abr/2025 — inclui os não-scorados que só serviram pro treino), Railway `Lead` (fev→17/mai/2026), `lead_surveys`+`Client`+`UTMTracking` (era da migração, 12-21/05), `registros_ml` (23/05+), parquets locais de backtest, planilhas "[LFxx] Leads" (computador pós-migração). Consolidar em DUAS tabelas no database `ledger`:
+O acervo vai de **dez/2024 (LF01, leads a partir de 30/12/2024) até hoje**, espalhado em (verificado em 12/06):
+- `data/devclub/*.xlsx` locais — arquivos originais de treino: `[LF01]`-`[LF08] Pesquisa`, `LF10`-`LF34 Lead Score` e variantes (dez/2024 → out/2025)
+- Planilha central Backup (set/2025 → fev/2026, 66,8k) e Produção (dez/2025 → mai/2026, 105k) — incluem não-scorados que só serviram pro treino
+- `data/backups/cloud-sql-final-export-20260225.sql` — dump do Cloud SQL pré-Railway (cross-check da era fev/2026)
+- Railway `Lead` (fev → 17/mai/2026, 143k) · `lead_surveys`+`Client`+`UTMTracking` (12-21/05) · `registros_ml` (23/05+)
+- Parquets locais de backtest · planilhas "[LFxx] Leads" (computador pós-migração)
+
+Consolidar em DUAS tabelas no database `ledger`:
 
 - [ ] `leads_historico` — 1 linha por lead: identidade (email/telefone/nome), `captured_at`, UTMs, TODAS as respostas da pesquisa (schema canônico PT), `tem_computador`, e colunas de proveniência (`fonte`, `lf`, `score_producao`/`decil_producao` da época quando existirem)
 - [ ] `scores_historicos` — re-scores versionados: começa com os 192k de 2026 (`scores_2026_por_lead.csv` + LF57/LF58, que já estão scorados e só foram filtrados do relatório), **com chave de versão** (`mlflow_run_id` champion/challenger + commit do `core/`) — ver §5
