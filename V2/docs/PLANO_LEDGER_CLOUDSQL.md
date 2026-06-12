@@ -22,6 +22,7 @@ O ledger `registros_ml` — nossa tabela com `lead_score`, `decil`, `variant` **
 | Migração por **estrangulamento com dual-write** | Cloud SQL primário, Railway espelho, paridade por ~7 dias, depois corta. Rollback = trocar env var. |
 | Limpeza do estoque histórico **ao final**, com dump prévio | Inclui planilha (colunas + trigger Apps Script). |
 | LF57/LF58 fora dos relatórios de score até fecharem datas | Já refletido em `scripts/gerar_scores_2026.py` (`FORA_DO_RELATORIO`). |
+| **Dataset único consolidado no Cloud SQL** (decisão 12/06) | TODOS os leads do cliente — scorados desde que o sistema entrou em produção E os não-scorados usados só no treino — saem da mistura Google Sheets + Railway + arquivos locais e viram tabelas no database `ledger`. Custo de storage desprezível (<1 GB; disco de 10 GB já pago). |
 
 ## 3. Mapa do estado atual (levantado em 12/06/2026)
 
@@ -87,10 +88,21 @@ A maioria já passa pela camada de acesso `src/data/` (`LeadRepository` + `Regis
 
 **Rollback:** `LEDGER_DUAL_WRITE=false` + env vars antigas → comportamento atual em minutos.
 
-### Etapa 2 — Backfill
+### Etapa 2 — Backfill + consolidação do dataset histórico completo
 
+**2a — Ledger vivo:**
 - [ ] Copiar as ~19k linhas do `registros_ml` Railway → Cloud SQL (one-shot; `COPY`/insert batch; conferir count e min/max `created_at`)
-- [ ] **(Sinergia scores 2026)** Carregar `outputs/validation/scores_2026/scores_2026_por_lead.csv` (+ LF57/LF58, que já estão scorados e só foram filtrados do relatório) numa tabela `scores_historicos` do database `ledger`, **com chave de versão** (`mlflow_run_id` champion/challenger + commit do `core/`) — ver §5
+
+**2b — Acervo completo de leads (decisão 12/06 — dataset único consolidado):**
+Hoje os leads estão espalhados: planilhas centrais "[LF] Pesquisa" Produção+Backup (desde LF11, ~abr/2025 — inclui os não-scorados que só serviram pro treino), Railway `Lead` (fev→17/mai/2026), `lead_surveys`+`Client`+`UTMTracking` (era da migração, 12-21/05), `registros_ml` (23/05+), parquets locais de backtest, planilhas "[LFxx] Leads" (computador pós-migração). Consolidar em DUAS tabelas no database `ledger`:
+
+- [ ] `leads_historico` — 1 linha por lead: identidade (email/telefone/nome), `captured_at`, UTMs, TODAS as respostas da pesquisa (schema canônico PT), `tem_computador`, e colunas de proveniência (`fonte`, `lf`, `score_producao`/`decil_producao` da época quando existirem)
+- [ ] `scores_historicos` — re-scores versionados: começa com os 192k de 2026 (`scores_2026_por_lead.csv` + LF57/LF58, que já estão scorados e só foram filtrados do relatório), **com chave de versão** (`mlflow_run_id` champion/challenger + commit do `core/`) — ver §5
+- [ ] Loaders por fonte: **reusar os de `scripts/gerar_scores_2026.py`** (planilha central com dedup captura/pesquisa, cache Lead, híbrido lead_surveys, ledger com `has_computer`) — já resolveram era por era
+- [ ] Dedup por email×LF com proveniência preservada; conferência de counts por fonte vs origem
+- [ ] Conferir cobertura: leads de treino (pré-produção, sem score) presentes; sem janelas órfãs entre eras
+
+**Ganhos colaterais:** (1) o conflito da Etapa 5 com relatórios históricos morre — eles apontam pra cá; (2) materializa o backlog "SQLite local para análises ad-hoc" direto no Cloud SQL; (3) datasets de retreino passam a sair de uma fonte só.
 
 **Rollback:** DROP das tabelas novas; nada upstream depende delas ainda.
 
@@ -119,7 +131,7 @@ Ordem do menor risco pro maior:
 
 **Pré-condições:** Etapas 3-4 estáveis; baseline do drift já apontado pra fonte nova (3.7); **decisão do conflito histórico abaixo tomada.**
 
-⚠️ **Conflito a decidir antes de executar:** os relatórios históricos (`ml_evolution_report.py` lê `Lead.decil`; catálogo de consumidores de score decidiu "preservar histórico operacional") **quebram** quando `Lead.leadScore`/`decil` forem anulados. Mitigação proposta: o dump da pré-limpeza vira tabela `lead_legado` no nosso database `ledger` (ou parquet no GCS) e os relatórios históricos apontam pra lá. Decidir: migrar esses leitores antes, ou aceitar que relatórios históricos pré-17/05 passam a depender do dump.
+⚠️ **Conflito (resolvido pela Etapa 2b):** os relatórios históricos (`ml_evolution_report.py` lê `Lead.decil`; catálogo de consumidores de score decidiu "preservar histórico operacional") quebrariam quando `Lead.leadScore`/`decil` fossem anulados. Com a consolidação da Etapa 2b, `leads_historico` preserva o score de produção da época (`score_producao`/`decil_producao`) — basta repointar esses relatórios pra lá ANTES de anular as colunas no Railway. Adicionar checkbox: repoint de `ml_evolution_report.py`/`extract_evolution_metrics.py` pro Cloud SQL.
 
 - [ ] Dump completo pro nosso lado: `Lead` (id, email, createdAt, leadScore, decil, capiSentAt), `leads_capi` (colunas de score), `registros_ml` inteira → GCS nosso + (opcional) tabela `lead_legado` no Cloud SQL
 - [ ] `UPDATE "Lead" SET "leadScore"=NULL, decil=NULL` (142.940 linhas)
