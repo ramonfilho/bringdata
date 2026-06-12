@@ -135,10 +135,11 @@ LF55:
   vendas_end:   "2026-05-31"
 
 # LF56 — captação atípica: começou segunda 25/05 (não a terça padrão).
-# Datas conferidas com a planilha PC FORMULÁRIOS (fonte de verdade do gestor) em 12/06.
+# cap_end = 31/05: a captação flui sem queda até 31/05 (~813 leads no dia) e o
+# LF57 só começa em 01/06 — 30/05 deixava o domingo 31/05 órfão (curva diária 12/06).
 LF56:
   cap_start: "2026-05-25"
-  cap_end:   "2026-05-30"
+  cap_end:   "2026-05-31"
   vendas_start: "2026-06-08"
   vendas_end:   "2026-06-14"
 
