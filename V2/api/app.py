@@ -3335,6 +3335,18 @@ async def daily_monitoring_check_railway(
                 'GROUP BY decil'
             )
             _total_30d = sum(int(r[1]) for r in _r30) if _r30 else 0
+            if _total_30d < 1000:
+                # Tabela "Lead" morta (17/05) esvazia a janela de 31d em ~18/06.
+                # Fallback: ledger registros_ml usa o que tiver desde 23/05
+                # (PLANO_LEDGER_CLOUDSQL.md §3.3).
+                _r30 = _e6_conn.run(
+                    'SELECT decil, COUNT(*) FROM registros_ml '
+                    "WHERE created_at >= NOW() - INTERVAL '31 days' "
+                    "  AND created_at <  NOW() - INTERVAL '1 day' "
+                    '  AND decil IS NOT NULL '
+                    'GROUP BY decil'
+                )
+                _total_30d = sum(int(r[1]) for r in _r30) if _r30 else 0
             if _total_30d >= 1000:
                 # Normaliza decil pro formato D1..D10 (sem leading zero) — formato usado
                 # internamente em _check_score_distribution após decil_normalized regex.

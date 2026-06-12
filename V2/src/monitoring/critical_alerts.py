@@ -584,11 +584,12 @@ def rule_score_drift(repo, baseline_repo, expected_decil_dist: Optional[dict]) -
     monitoramento). Fonte dividida durante a transição:
       - janela curta (60min) → `repo` (ledger novo `registros_ml`, populado
         pelo consumer Pub/Sub desde 2026-05-23).
-      - baseline 30d → `baseline_repo` (tabela `Lead` antiga; parou em
-        17/05/2026 mas histórico ainda serve por enquanto).
-    Quando o ledger novo acumular 30 dias (≈22/06/2026), `baseline_repo`
-    pode passar a ser também o `registros_ml` — decisão registrada em
-    `projeto_baseline_drift_split_railway_ledger.md`.
+      - baseline 30d → `baseline_repo` (tabela `Lead` antiga, morta em
+        17/05/2026) com FALLBACK pro próprio `repo` (ledger) quando o legado
+        não tiver amostra — sem o fallback a regra ficaria cega entre ~18/06
+        (janela de 31d esvazia a `Lead`) e ~22/06 (ledger completa 30d).
+        Pós-22/06 o fallback vira o caminho permanente e `baseline_repo`
+        pode ser removido (PLANO_LEDGER_CLOUDSQL.md §3.3 e §5).
     """
     import statistics
     leads_window = repo.recent_leads(window_minutes=WINDOW_MIN)
@@ -608,9 +609,17 @@ def rule_score_drift(repo, baseline_repo, expected_decil_dist: Optional[dict]) -
     base_end   = now - timedelta(days=1)
     base_leads = baseline_repo.leads_in_range(base_start, base_end)
     base_scores = [l.score for l in base_leads if l.score is not None]
+    baseline_source = 'legacy'
+    if len(base_scores) < 1000:
+        # Tabela "Lead" morta (17/05) esvazia a janela de 31d em ~18/06.
+        # Fallback: o ledger usa o que tiver desde 23/05 — mesma fonte da
+        # janela curta, então a comparação segue maçã-com-maçã.
+        base_leads = repo.leads_in_range(base_start, base_end)
+        base_scores = [l.score for l in base_leads if l.score is not None]
+        baseline_source = 'registros_ml'
     if len(base_scores) < 1000:
         return RuleResult('score_drift', fired=False,
-                          skipped_reason='baseline rolling 30d insuficiente')
+                          skipped_reason='baseline rolling 30d insuficiente (legacy e ledger)')
     base_mean = statistics.fmean(base_scores)
     base_sd = statistics.pstdev(base_scores)
     if base_sd == 0:
@@ -654,6 +663,7 @@ def rule_score_drift(repo, baseline_repo, expected_decil_dist: Optional[dict]) -
             'base_sd': round(base_sd, 4), 'z': round(z, 2),
             'd10_pct_window': d10_pct_window, 'd10_pct_base': d10_pct_base,
             'fired_a_mean': fired_a, 'fired_b_decil': fired_b,
+            'baseline_source': baseline_source,
         },
     )
 
