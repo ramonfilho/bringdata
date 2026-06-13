@@ -2229,6 +2229,14 @@ class DataQualityMonitor:
                     self._classify_drift_quality(direction, launch_delta_pp)
                     if launch_delta_pp is not None else None
                 )
+                quality_prev_day = (
+                    self._classify_drift_quality(direction, prev_day_delta_pp)
+                    if prev_day_delta_pp is not None else None
+                )
+                quality_today = (
+                    self._classify_drift_quality(direction, today_delta_pp)
+                    if today_delta_pp is not None else None
+                )
 
                 top_list.append({
                     'feature_column': col,
@@ -2241,11 +2249,13 @@ class DataQualityMonitor:
                     'launch_quality': quality_launch,
                     'prev_day_pct': prev_day_pct,
                     'prev_day_delta_pp': prev_day_delta_pp,
+                    'prev_day_quality': quality_prev_day,
                     'day_pct': round(day_p * 100, 1),
                     'delta_pp': round(delta_pp, 1),
                     'day_quality': quality_day,
                     'today_pct': today_pct,
                     'today_delta_pp': today_delta_pp,
+                    'today_quality': quality_today,
                     'direction': direction,
                 })
 

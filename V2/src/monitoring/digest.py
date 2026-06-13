@@ -1225,13 +1225,14 @@ def _slack_alert_audience(a: dict, B: list):
         if has_launch:
             parts.append(f"{cell_qual(it.get('launch_pct'), it.get('launch_delta_pp'), it.get('launch_quality')):>15}")
         if has_prev:
-            # Anteontem reusa direction (mesma categoria) → quality do prev_day pelo sinal do delta_pp
-            # Como não computamos quality específico de anteontem, usa direction × sign(prev_day_delta_pp)
-            # Fallback simples: usa day_quality como aproximação. (TODO: enriquecer no data_quality.py)
-            parts.append(f"{cell_qual(it.get('prev_day_pct'), it.get('prev_day_delta_pp'), it.get('day_quality')):>15}")
+            # Cor do Anteontem vem da quality própria dele (direction × sign(prev_day_delta_pp)),
+            # calculada no data_quality.py. Fallback inline cobre payload antigo sem o campo.
+            prev_q = it.get('prev_day_quality') or _classify_quality_inline(it.get('direction'), it.get('prev_day_delta_pp'))
+            parts.append(f"{cell_qual(it.get('prev_day_pct'), it.get('prev_day_delta_pp'), prev_q):>15}")
         parts.append(f"{cell_qual(it.get('day_pct'), it.get('delta_pp'), it.get('day_quality')):>15}")
         if has_today:
-            parts.append(f"{cell_qual(it.get('today_pct'), it.get('today_delta_pp'), it.get('day_quality')):>15}")
+            today_q = it.get('today_quality') or _classify_quality_inline(it.get('direction'), it.get('today_delta_pp'))
+            parts.append(f"{cell_qual(it.get('today_pct'), it.get('today_delta_pp'), today_q):>15}")
         rows.append(f"`{'  '.join(parts)}`")
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
