@@ -407,6 +407,13 @@ class BusinessConfig:
     # forecast: buyers = total_leads_meta × (conv_rastr_mediana / tracking_rate)
     conv_rastr_mediana: float = 0.0065                      # mediana histórica LF42–LF47
 
+    # Taxa de conversão REAL sobre TODAS as fontes (vendas_reais ÷ total de leads
+    # all-source, não só Meta). Quando setada, o flat-rate usa ela direto como
+    # taxa_real (denominador = total de leads do Client) — corrige a subestimativa
+    # de contar só leads-Meta-pixel. None → cai no conv_rastr_mediana/tracking_rate
+    # (basis Meta-pixel histórico). Calibrada na PC FORMULÁRIOS (% total/leads).
+    conv_real_allsource: Optional[float] = None
+
 
 
 @dataclass

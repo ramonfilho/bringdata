@@ -780,6 +780,10 @@ business:
   # Janela anterior LF42–LF47 ficou estagnada e ignorava degradação de conv geral observada em LF48–LF53.
   conv_rastr_mediana: 0.005376       # mediana LF43–LF53: vendas_matched/total_leads_meta (range 0.31–0.74%, CV 24%)
   tracking_rate: 0.5207              # mediana LF43–LF53: vendas_matched/vendas_reais (range 32–75%)
+  conv_real_allsource: 0.01108       # taxa REAL all-source (vendas ÷ TODOS os leads, não só Meta).
+                                     # Mediana de "% total/leads" da PC FORMULÁRIOS LF43–47 (1.08–1.15%, sem LF48 outlier).
+                                     # Flat-rate usa ESTA como taxa_real, com denominador = leads do Client (todas as fontes).
+                                     # Substitui Meta-pixel × conv_rastr/tracking, que subestimava ~15%.
   scenario_pessimistic_factor: 0.95  # piso conv. rate — alargado de 0.97 → 0.95 pra refletir CV real 24%
   scenario_optimistic_factor: 1.05   # teto conv. rate — alargado de 1.03 → 1.05 pra refletir CV real 24%
   conversion_rate_benchmark:              # taxas observadas em produção — DEV19–LF48 (7 lançamentos)

@@ -298,10 +298,10 @@ def _scored_n(rf: dict):
     return ((rf.get('expected_conversion') or {}).get('distribuicao_leads') or {}).get('total_db')
 
 
-def _bases_md(leads_meta: float, scored) -> str:
-    """Rótulo das duas bases do forecast: leads Meta (flat-rate) + respostas scoreadas (ML)."""
+def _bases_md(leads_total: float, scored) -> str:
+    """Rótulo das duas bases do forecast: leads totais all-source (flat-rate) + respostas scoreadas (ML)."""
     s = f'  ·  {scored:,} respostas scoreadas (ML)' if scored else ''
-    return f'{leads_meta:,.0f} leads Meta (flat-rate){s}'
+    return f'{leads_total:,.0f} leads — todas as fontes (flat-rate){s}'
 
 
 # ──────────────────────────────────────────────────────────────────────────

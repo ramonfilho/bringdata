@@ -1030,15 +1030,22 @@ class MonitoringOrchestrator:
         parcela_tmb     = ticket / n_parcelas
         conv_rastr      = biz.conv_rastr_mediana   # mediana histórica LF42–LF47
         tracking_rate   = biz.tracking_rate         # mediana histórica LF42–LF47
+        conv_real_allsrc = getattr(biz, 'conv_real_allsource', None)
 
         if ticket <= 0 or total_meta_leads <= 0 or tracking_rate <= 0:
             return {}
 
-        # taxa_real = vendas_reais / total_leads_meta
-        # = (conv_rastr / tracking_rate)
-        # onde conv_rastr = vendas_matched/total_leads_meta
-        #       tracking_rate = vendas_matched/vendas_reais
-        taxa_real = conv_rastr / tracking_rate
+        # taxa_real = vendas_reais / total_de_leads.
+        # Preferimos a taxa REAL all-source direta (vendas ÷ TODOS os leads,
+        # calibrada na PC FORMULÁRIOS) — nesse modo, total_meta_leads é a contagem
+        # all-source do Client (todas as fontes), corrigindo a subestimativa de
+        # contar só leads-Meta-pixel. Fallback (basis Meta-pixel histórico):
+        #   taxa_real = conv_rastr / tracking_rate
+        #   conv_rastr = vendas_matched/leads_meta · tracking = vendas_matched/vendas_reais
+        if conv_real_allsrc:
+            taxa_real = conv_real_allsrc
+        else:
+            taxa_real = conv_rastr / tracking_rate
 
         def _calc(factor: float) -> Dict:
             buyers = total_meta_leads * taxa_real * factor
@@ -1186,8 +1193,11 @@ class MonitoringOrchestrator:
                 'taxa_real_implicita':  round(taxa_real * 100, 3),
                 'ticket_contracted':    ticket,
                 'pct_cartao_historico': pct_cartao,
-                'metodologia':          'flat-rate LF43-LF53 (recalibrado 08/05)',
-                'fonte_flat_rate':      'mediana histórica vendas_matched/total_leads_meta (LF43-LF53)',
+                'base_leads':           'todas as fontes (Client)' if conv_real_allsrc else 'Meta pixel',
+                'metodologia':          ('flat-rate all-source: taxa real (PC FORMULÁRIOS) × leads Client'
+                                         if conv_real_allsrc else 'flat-rate LF43-LF53 (recalibrado 08/05)'),
+                'fonte_flat_rate':      ('mediana % total/leads PC FORMULÁRIOS LF43-47 (todas as fontes)'
+                                         if conv_real_allsrc else 'mediana histórica vendas_matched/total_leads_meta (LF43-LF53)'),
             },
         }
         if cenario_ml_aware:
