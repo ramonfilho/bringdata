@@ -144,12 +144,17 @@ build_env_vars() {
     ENV_VARS="$ENV_VARS,PUBSUB_CAPI_ENABLED=true"
 
     # Ledger no Cloud SQL nosso (PLANO_LEDGER_CLOUDSQL.md Etapa 1).
-    # LEDGER_TARGET: railway (atual) | dual (migração) | cloudsql (final).
+    # LEDGER_TARGET: railway | dual (migração — DEFAULT) | cloudsql (final).
+    # DEFAULT=dual durante a migração: sem isso, qualquer deploy concorrente de
+    # outro terminal que não exporte a env reverte o consumer pra gravar SÓ no
+    # Railway, e o Cloud SQL para de receber leads em silêncio (aconteceu
+    # 13/06 ~18h UTC — 40 leads ficaram só no Railway). Mudar pra 'cloudsql' na
+    # Etapa 4; pra 'railway' só em rollback consciente.
     # Senha NUNCA em texto plano aqui — vem do Secret Manager no momento do
     # deploy (env exportada tem precedência). Falha em obter a senha emite
     # sentinela que o caller (deploy_capi.sh) aborta — exit aqui morreria só
     # no subshell do $(build_env_vars).
-    LEDGER_TARGET="${LEDGER_TARGET:-railway}"
+    LEDGER_TARGET="${LEDGER_TARGET:-dual}"
     ENV_VARS="$ENV_VARS,LEDGER_TARGET=$LEDGER_TARGET"
     if [ "$LEDGER_TARGET" != "railway" ]; then
         LEDGER_DB_PASSWORD="${LEDGER_DB_PASSWORD:-$(gcloud secrets versions access latest --secret=ledger-db-password --project="$PROJECT_ID" 2>/dev/null)}"
