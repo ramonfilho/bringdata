@@ -340,13 +340,20 @@ def load_railway() -> pd.DataFrame:
     """Carrega todos os registros do Railway e normaliza decil para 'D10' format."""
     try:
         import pg8000.native
+        import ssl as _ssl
+        # Railway usa cert self-signed — conectar sem verificação, igual produção
+        # (mesmo padrão do gate-c). ssl_context=True falhava com CERTIFICATE_VERIFY_FAILED
+        # e derrubava silenciosamente pro Sheets, fonte aposentada desde fev/2026.
+        _ctx = _ssl.create_default_context()
+        _ctx.check_hostname = False
+        _ctx.verify_mode = _ssl.CERT_NONE
         conn = pg8000.native.Connection(
             host=os.environ.get('RAILWAY_DB_HOST', 'shortline.proxy.rlwy.net'),
             port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
             database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
             user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
             password=os.environ['RAILWAY_DB_PASSWORD'],
-            ssl_context=True,
+            ssl_context=_ctx,
         )
         rows = conn.run('SELECT email, "createdAt", "capiSentAt", decil, "leadScore" FROM "Lead"')
         conn.close()
