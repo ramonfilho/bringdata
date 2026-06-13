@@ -1416,13 +1416,7 @@ class SalesDataLoader:
             pra ser compatível com `match_leads_to_sales`.
             Vazio se env vars RAILWAY_DB_* ausentes.
         """
-        import pg8000.native
-
-        try:
-            _pw = os.environ['RAILWAY_DB_PASSWORD']
-        except KeyError:
-            logger.error(" RAILWAY_DB_PASSWORD não encontrado no ambiente — configure V2/.env")
-            return pd.DataFrame()
+        from src.data.ledger_connection import open_ledger_read_connection
 
         end_excl = (pd.to_datetime(end_date) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
         variant_clause = (
@@ -1438,13 +1432,9 @@ class SalesDataLoader:
         )
 
         try:
-            conn = pg8000.native.Connection(
-                host=os.environ.get('RAILWAY_DB_HOST', 'shortline.proxy.rlwy.net'),
-                port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
-                database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
-                user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
-                password=_pw,
-            )
+            # Fonte (Railway/Cloud SQL) decidida por LEDGER_READ_SOURCE
+            # (PLANO_LEDGER_CLOUDSQL.md Etapa 3). registros_ml é idêntico nos dois.
+            conn = open_ledger_read_connection()
             params = {
                 'start_date': start_date,
                 'end_excl': end_excl,
