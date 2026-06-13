@@ -2708,6 +2708,7 @@ async def daily_monitoring_check_railway(
         # query SQL na Lead morta por filtro in-memory sobre _records_90d
         # (que já cobre a janela do LF ativo, sempre <90d de captação).
         forecast_decil_dist: Dict[str, int] = {}
+        forecast_decil_dist_by_variant: Dict[str, Dict[str, int]] = {}
         for _rec in _records_90d:
             if _rec.criado_em is None or _rec.decil is None or _rec.score is None:
                 continue
@@ -2715,6 +2716,42 @@ async def daily_monitoring_check_railway(
             if launch_window_start_utc <= _c <= launch_window_end_utc:
                 _key = f"D{int(_rec.decil):02d}"
                 forecast_decil_dist[_key] = forecast_decil_dist.get(_key, 0) + 1
+                # Split por variante do A/B (registros_ml.variant gravado no
+                # scoring; null/'' = Champion). Base do ML-aware por variante.
+                _vk = _rec.variant or ''
+                forecast_decil_dist_by_variant.setdefault(_vk, {})
+                forecast_decil_dist_by_variant[_vk][_key] = forecast_decil_dist_by_variant[_vk].get(_key, 0) + 1
+
+        # Segmentos por variante pro ML-aware: cada variante com a própria tabela
+        # de taxa (Champion = global do business; Challenger = própria, se houver
+        # via ABTestVariantConfig.conversion_rate_benchmark). Só ativa com A/B
+        # ligado E mais de uma variante presente; senão None → pooled (idêntico).
+        ml_aware_segments = None
+        try:
+            _abc = getattr(pipeline, '_ab_test_config', None) if pipeline else None
+            if _abc and getattr(_abc, 'enabled', False) and len(forecast_decil_dist_by_variant) > 1:
+                # Champion = arm default (sem utm_pattern e sem url_pattern) — mesma
+                # identificação usada em leads_scored_by_variant_24h.
+                _champ_name = next((n for n, v in _abc.variants.items()
+                                    if not v.utm_pattern and not v.url_pattern), None)
+                _segs = [
+                    {
+                        'variant': (_vk or _champ_name or 'champion'),
+                        'decil_distribution': _vdist,
+                        'benchmark': getattr(_abc.variants.get(_vk or _champ_name),
+                                             'conversion_rate_benchmark', None),
+                    }
+                    for _vk, _vdist in forecast_decil_dist_by_variant.items()
+                ]
+                # Fail-loud: a soma por variante tem que bater com o pooled.
+                _sv = sum(sum(d.values()) for d in forecast_decil_dist_by_variant.values())
+                _sp = sum(forecast_decil_dist.values())
+                if _sv != _sp:
+                    logger.warning(f"⚠️ forecast split por variante: soma {_sv} != pooled {_sp} — caindo no pooled")
+                else:
+                    ml_aware_segments = _segs
+        except Exception as _seg_e:
+            logger.warning(f"⚠️ forecast ml_aware_segments indisponível: {_seg_e}")
 
         # 1e. Survey funnel metrics por janela histórica — Fatia D do refator.
         # Agregação pura em cima de `_records_90d` (já carregado pra Fatia D
@@ -3715,6 +3752,7 @@ async def daily_monitoring_check_railway(
                 funnel_metrics=railway_funnel_metrics,
                 lead_quality_metrics=railway_lead_quality,
                 decil_distribution=forecast_decil_dist or None,
+                ml_aware_segments=ml_aware_segments,
             ) or None
 
             if revenue_forecast:
