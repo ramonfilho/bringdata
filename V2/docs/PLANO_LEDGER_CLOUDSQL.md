@@ -94,8 +94,8 @@ Implementação final usou **uma env var de 3 estados** em vez do boolean planej
 
 ### Etapa 2 — Backfill + consolidação do dataset histórico completo
 
-**2a — Ledger vivo:**
-- [ ] Copiar as ~19k linhas do `registros_ml` Railway → Cloud SQL (one-shot; `COPY`/insert batch; conferir count e min/max `created_at`)
+**2a — Ledger vivo:** ✅ 13/06
+- [x] `scripts/backfill_ledger_railway_to_cloudsql.py` (idempotente, `ON CONFLICT`, insert multi-row): 20.302 linhas → Cloud SQL, **0 event_ids ausentes**, spot-check 5/5 idêntico e contagens de não-nulos batendo (score/decil/survey/computador/variante)
 
 **2b — Acervo completo de leads (decisão 12/06 — dataset único consolidado):**
 O acervo vai de **dez/2024 (LF01, leads a partir de 30/12/2024) até hoje**, espalhado em (verificado em 12/06):
