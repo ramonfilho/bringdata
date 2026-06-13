@@ -108,7 +108,7 @@ O acervo vai de **dez/2024 (LF01, leads a partir de 30/12/2024) até hoje**, esp
 Consolidar em DUAS tabelas no database `ledger`:
 
 - [ ] `leads_historico` — 1 linha por lead: identidade (email/telefone/nome), `captured_at`, UTMs, TODAS as respostas da pesquisa (schema canônico PT), `tem_computador`, e colunas de proveniência (`fonte`, `lf`, `score_producao`/`decil_producao` da época quando existirem)
-- [ ] `scores_historicos` — re-scores versionados: começa com os 192k de 2026 (`scores_2026_por_lead.csv` + LF57/LF58, que já estão scorados e só foram filtrados do relatório), **com chave de versão** (`mlflow_run_id` champion/challenger + commit do `core/`) — ver §5
+- [x] `scores_historicos` ✅ 13/06 — `scripts/load_scores_historicos_cloudsql.py`: 179.849 linhas (16 LFs DEV19→LF56) com chave de versão (`champion_run_id` d51757f5, `challenger_run_id` 5d158f0a, `core_commit` 3227eed, `generated_at`); UNIQUE por email+lf+run_ids → re-score com modelo novo coexiste, nada sobrescrito. **Pendente:** incluir LF57/LF58 (scorados, fora do relatório por data de vendas) quando fecharem
 - [ ] Loaders por fonte: **reusar os de `scripts/gerar_scores_2026.py`** (planilha central com dedup captura/pesquisa, cache Lead, híbrido lead_surveys, ledger com `has_computer`) — já resolveram era por era
 - [ ] Dedup por email×LF com proveniência preservada; conferência de counts por fonte vs origem
 - [ ] Conferir cobertura: leads de treino (pré-produção, sem score) presentes; sem janelas órfãs entre eras
