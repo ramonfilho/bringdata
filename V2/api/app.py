@@ -2722,6 +2722,22 @@ async def daily_monitoring_check_railway(
                 forecast_decil_dist_by_variant.setdefault(_vk, {})
                 forecast_decil_dist_by_variant[_vk][_key] = forecast_decil_dist_by_variant[_vk].get(_key, 0) + 1
 
+        # Total de leads ALL-SOURCE na janela (tabela Client = todas as fontes:
+        # Meta + Google + orgânico) — denominador do flat-rate quando
+        # business.conv_real_allsource está setado. Corrige a subestimativa de
+        # contar só fb_pixel_lead da Meta (~15% a menos). Falha → 0, e o call
+        # abaixo cai no denominador Meta como fallback.
+        total_leads_allsource_forecast = 0
+        try:
+            _cl = railway_conn.run(
+                'SELECT COUNT(*) FROM "Client" WHERE "firstSeenAt" >= :a AND "firstSeenAt" < :b',
+                a=launch_window_start_utc, b=launch_window_end_utc,
+            )
+            total_leads_allsource_forecast = int(_cl[0][0]) if _cl else 0
+            logger.info(f"📊 Leads all-source (Client) na janela: {total_leads_allsource_forecast}")
+        except Exception as _cle:
+            logger.warning(f"⚠️ contagem Client all-source indisponível: {_cle}")
+
         # Segmentos por variante pro ML-aware: cada variante com a própria tabela
         # de taxa (Champion = global do business; Challenger = própria, se houver
         # via ABTestVariantConfig.conversion_rate_benchmark). Só ativa com A/B
@@ -3748,7 +3764,9 @@ async def daily_monitoring_check_railway(
         revenue_forecast = None
         try:
             revenue_forecast = orchestrator._generate_revenue_forecast(
-                total_meta_leads=total_meta_leads_forecast,
+                # denominador do flat-rate: leads all-source (Client, todas as fontes);
+                # fallback pro Meta-pixel se a contagem Client falhar.
+                total_meta_leads=(total_leads_allsource_forecast or total_meta_leads_forecast),
                 funnel_metrics=railway_funnel_metrics,
                 lead_quality_metrics=railway_lead_quality,
                 decil_distribution=forecast_decil_dist or None,
