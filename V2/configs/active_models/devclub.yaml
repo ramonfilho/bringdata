@@ -119,3 +119,14 @@ ab_test:
         D08: 0.007635   # 11.94 / 1563.75
         D09: 0.007635   # 11.94 / 1563.75
         D10: 0.013231   # 20.69 / 1563.75
+      # Taxa histórica de conversão por faixa de decil DO CHALLENGER, pro ML-aware do
+      # revenue_forecast (matched/leads_DB; ÷tracking_rate em runtime). Champion usa a
+      # business.conversion_rate_benchmark global. Derivada como Champion × lift por faixa,
+      # onde o lift = razão challenger/champion medida lead-a-lead no backtest (re-bin dos
+      # parquets scored_jan30 vs scored_abr28 com os thresholds de produção, LF43-48):
+      # D1-5=1.41x · D6-9=0.99x · D10=1.34x. Rollback: deletar este bloco → cai no business.
+      conversion_rate_benchmark:
+        periodo_referencia: "Champion × lift (re-bin parquet jan30 vs abr28, LF43-48)"
+        D1_D5: 0.0041    # 0.0029 (Champion) × 1.41
+        D6_D9: 0.0069    # 0.0070 (Champion) × 0.99
+        D10:   0.0143    # 0.0107 (Champion) × 1.34
