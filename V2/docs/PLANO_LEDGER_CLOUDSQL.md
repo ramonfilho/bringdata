@@ -119,8 +119,11 @@ Consolidar em DUAS tabelas no database `ledger`:
 
 ### Etapa 3 — Repoint dos leitores (um por commit)
 
+**Helper único** `src/data/ledger_connection.py::open_ledger_read_connection()` (criado 13/06): escolhe Railway vs Cloud SQL por env `LEDGER_READ_SOURCE` (default `railway`). Como `registros_ml` é idêntico nos dois bancos, repoint = cada leitor abrir a conexão por esse helper; virar a env reaponta todos de uma vez, reverter é trocar a env de volta (sem deploy).
+
 Ordem do menor risco pro maior:
 
+- [x] 3.0 Helper `open_ledger_read_connection()` + `load_ml_ledger` migrado (1º leitor, validação manual/semanal, baixo risco). Testado: lê igual das duas fontes.
 - [ ] 3.1 Camada `src/data/`: `compose_repository('registros_ml')` passa a conectar no Cloud SQL (a decisão de fonte é por env — ponto único de composição). Cobre: alertas críticos via repo, capi_monitor, operational_monitor, data_quality, pubsub_summary, endpoints de diagnóstico.
 - [ ] 3.2 As 3 regras Pub/Sub com SQL direto (`critical_alerts.py:396-514`): recebem conn do Cloud SQL (ou migram pro repo, melhor)
 - [ ] 3.3 Bloco T3-5 do orchestrator (`orchestrator.py:392-474`): conn própria → Cloud SQL
@@ -188,6 +191,10 @@ O item 1 do plano de remediação de score (cache versionado regenerado no daily
 | 12/06 | 0 | Database `ledger` + user `ledger_app` (Secret Manager) + DDL 32 colunas + smoke ok | `4f30266` |
 | 12/06 | 1 | Dual-write implementado (`LEDGER_TARGET` 3 estados, fail-loud + ack seletivo, 24/24 testes) | `337609c` |
 | 12/06 | 1 | **Deploy em produção**: rev `00701-tud` @100%, gates verdes, dual-write verificado live (7/7 linhas nos 2 bancos). Fix do baseline embarcado. Falta: paridade diária ~7d | — |
+| 13/06 | 2a | Backfill: 20.343 linhas no Cloud SQL, 0 ausentes | `40a4bd0` |
+| 13/06 | 2b | `scores_historicos`: 179.849 re-scores versionados | `fe5eceb` |
+| 13/06 | 1-fix | **Incident**: deploy concorrente (rev `00710-caf`, outro terminal) reverteu pra `LEDGER_TARGET=railway` ~18h UTC → 40 leads só no Railway por ~2h. Corrigido: tráfego → rev dual `00418-zp4`, `config.sh` default=dual, 41 leads recuperados (0 ausentes) | `39f9874` |
+| 13/06 | 3.0 | Helper `open_ledger_read_connection()` + `load_ml_ledger` migrado | (este) |
 
 ## 8. Como retomar numa sessão nova
 
