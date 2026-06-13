@@ -999,6 +999,7 @@ class MonitoringOrchestrator:
         funnel_metrics: Dict,
         lead_quality_metrics: Dict,
         decil_distribution: Dict = None,
+        ml_aware_segments: Optional[List[Dict]] = None,
     ) -> Dict:
         """
         Gera previsão de faturamento — metodologia flat-rate (espelho do backtest).
@@ -1012,6 +1013,12 @@ class MonitoringOrchestrator:
         conv_rastr_mediana: mediana histórica de vendas_matched/total_leads_meta.
         tracking_rate: mediana histórica de vendas_matched/vendas_reais.
         taxa_real = conv_rastr_mediana / tracking_rate = vendas_reais/total_leads_meta.
+
+        ml_aware_segments: lista opcional de segmentos por variante do A/B — cada
+            item {'variant', 'decil_distribution', 'benchmark'}. Presente → o
+            cenário ML-aware soma os compradores por variante (Champion usa a
+            tabela global do business; Challenger usa a própria, se houver).
+            Ausente → 1 segmento pooled = comportamento histórico idêntico.
         """
         biz             = self._client_config.business
         ticket          = biz.ticket_contracted
@@ -1061,67 +1068,78 @@ class MonitoringOrchestrator:
         otimista   = _calc(biz.scenario_optimistic_factor)
 
         # ------------------------------------------------------------------
-        # expected_conversion — bottom-up por faixa de decil (diagnóstico)
-        # Usa leads DB do lançamento × taxas históricas por faixa (DEV19–LF48).
-        # Denominador diferente do flat-rate (DB leads, não Meta leads) —
-        # não comparar diretamente com cenario_base.
+        # expected_conversion — bottom-up por faixa de decil (diagnóstico) e
+        # base do cenário ML-aware. Suporta split por variante do A/B: cada
+        # segmento traz sua distribuição de decis e sua tabela de taxa
+        # (Champion vs Challenger). Sem split → 1 segmento (pooled × tabela
+        # global do business) = comportamento histórico idêntico.
+        # As taxas do yaml são vendas_matched/leads_DB; ÷tracking_rate converte
+        # pra vendas_reais/leads_DB (mesma base de "vendas reais" do flat-rate).
         # ------------------------------------------------------------------
+        bench_default = biz.conversion_rate_benchmark or {}
+        _BANDS = (('D1_D5', range(1, 6)), ('D6_D9', range(6, 10)), ('D10', range(10, 11)))
+
+        def _band_buyers(dist, benchmark):
+            """{band: (leads, buyers)} pra UMA distribuição × tabela de taxa, ou None."""
+            if not dist or not benchmark:
+                return None
+            out = {}
+            for band, rng in _BANDS:
+                leads = sum(dist.get(f'D{i:02d}', 0) for i in rng)
+                out[band] = (leads, leads * benchmark.get(band, 0.0) / tracking_rate)
+            return out
+
+        if ml_aware_segments:
+            _segments = [(s.get('decil_distribution'), s.get('benchmark') or bench_default)
+                         for s in ml_aware_segments]
+            _fonte = 'por variante (Champion + Challenger)'
+        else:
+            _segments = [(decil_distribution, bench_default)]
+            _fonte = bench_default.get('periodo_referencia', 'DEV19–LF48')
+
+        acc = {b: [0, 0.0] for b, _ in _BANDS}
+        any_seg = False
+        for _dist, _bench in _segments:
+            bb = _band_buyers(_dist, _bench)
+            if bb is None:
+                continue
+            any_seg = True
+            for b, (l, bu) in bb.items():
+                acc[b][0] += l
+                acc[b][1] += bu
+
         expected_conversion = None
-        bench = biz.conversion_rate_benchmark or {}
-        if bench and decil_distribution:
-            rate_d1_d5 = bench.get('D1_D5', 0.0)
-            rate_d6_d9 = bench.get('D6_D9', 0.0)
-            rate_d10   = bench.get('D10',   0.0)
-
-            leads_d1_d5 = sum(decil_distribution.get(f'D{i:02d}', 0) for i in range(1, 6))
-            leads_d6_d9 = sum(decil_distribution.get(f'D{i:02d}', 0) for i in range(6, 10))
-            leads_d10   = decil_distribution.get('D10', 0)
-            total_db    = leads_d1_d5 + leads_d6_d9 + leads_d10
-
-            if total_db > 0 and tracking_rate > 0:
-                # Os rates do yaml são vendas_matched/leads_DB.
-                # Dividir por tracking_rate converte para vendas_reais/leads_DB —
-                # mesma base de "vendas reais" do flat-rate.
-                rate_d1_d5_corr = rate_d1_d5 / tracking_rate
-                rate_d6_d9_corr = rate_d6_d9 / tracking_rate
-                rate_d10_corr   = rate_d10   / tracking_rate
-
-                buyers_d1_d5 = leads_d1_d5 * rate_d1_d5_corr
-                buyers_d6_d9 = leads_d6_d9 * rate_d6_d9_corr
-                buyers_d10   = leads_d10   * rate_d10_corr
-                total_buyers = buyers_d1_d5 + buyers_d6_d9 + buyers_d10
-
-                # taxa_implicita_meta = total_buyers / total_meta_leads
-                # → mesmo denominador do flat-rate, comparação direta com taxa_real_implicita
-                taxa_impl_meta = (total_buyers / total_meta_leads * 100) if total_meta_leads > 0 else None
-                response_rate  = round(total_db / total_meta_leads * 100, 1) if total_meta_leads > 0 else None
-
-                expected_conversion = {
-                    'fonte': bench.get('periodo_referencia', 'DEV19–LF48'),
-                    'distribuicao_leads': {
-                        'D1_D5': {'leads': leads_d1_d5, 'pct': round(leads_d1_d5 / total_db * 100, 1)},
-                        'D6_D9': {'leads': leads_d6_d9, 'pct': round(leads_d6_d9 / total_db * 100, 1)},
-                        'D10':   {'leads': leads_d10,   'pct': round(leads_d10   / total_db * 100, 1)},
-                        'total_db': total_db,
-                        'response_rate_pct': response_rate,
-                    },
-                    'compradores_esperados': {
-                        'D1_D5': round(buyers_d1_d5, 1),
-                        'D6_D9': round(buyers_d6_d9, 1),
-                        'D10':   round(buyers_d10,   1),
-                        'total': round(total_buyers,  1),
-                        'taxa_media_corrigida': round(total_buyers / total_db * 100, 3),
-                    },
-                    # Taxas já corrigidas pelo tracking_rate (vendas_reais/leads_DB)
-                    'taxas_corrigidas': {
-                        'D1_D5': round(rate_d1_d5_corr * 100, 3),
-                        'D6_D9': round(rate_d6_d9_corr * 100, 3),
-                        'D10':   round(rate_d10_corr   * 100, 3),
-                        'tracking_rate_aplicado': round(tracking_rate * 100, 1),
-                    },
-                    # Mesma base do flat-rate → comparação direta com taxa_real_implicita
-                    'taxa_implicita_por_meta_lead': round(taxa_impl_meta, 3) if taxa_impl_meta else None,
-                }
+        total_db = sum(acc[b][0] for b, _ in _BANDS)
+        if any_seg and total_db > 0 and tracking_rate > 0:
+            total_buyers   = sum(acc[b][1] for b, _ in _BANDS)
+            taxa_impl_meta = (total_buyers / total_meta_leads * 100) if total_meta_leads > 0 else None
+            response_rate  = round(total_db / total_meta_leads * 100, 1) if total_meta_leads > 0 else None
+            expected_conversion = {
+                'fonte': _fonte,
+                'distribuicao_leads': {
+                    **{b: {'leads': acc[b][0], 'pct': round(acc[b][0] / total_db * 100, 1)} for b, _ in _BANDS},
+                    'total_db': total_db,
+                    'response_rate_pct': response_rate,
+                },
+                'compradores_esperados': {
+                    **{b: round(acc[b][1], 1) for b, _ in _BANDS},
+                    'total': round(total_buyers, 1),
+                    'taxa_media_corrigida': round(total_buyers / total_db * 100, 3),
+                },
+                'taxas_corrigidas': {
+                    # taxa efetiva por faixa (blended entre variantes quando há split)
+                    **{b: round((acc[b][1] / acc[b][0] * 100) if acc[b][0] else 0.0, 3) for b, _ in _BANDS},
+                    'tracking_rate_aplicado': round(tracking_rate * 100, 1),
+                },
+                'taxa_implicita_por_meta_lead': round(taxa_impl_meta, 3) if taxa_impl_meta else None,
+            }
+            if ml_aware_segments:
+                expected_conversion['por_variante'] = [
+                    {'variant': s.get('variant'),
+                     'leads': int(sum((s.get('decil_distribution') or {}).values())),
+                     'benchmark_proprio': bool(s.get('benchmark'))}
+                    for s in ml_aware_segments
+                ]
 
         # ------------------------------------------------------------------
         # Cenário ML-aware: bottom-up por decil promovido a cenário próprio.

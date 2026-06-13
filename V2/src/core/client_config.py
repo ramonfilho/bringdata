@@ -479,6 +479,10 @@ class ABTestVariantConfig:
                                              # Quando setado, scoring carrega este run pra obter prob_calib via predict_proba.
     roas_v1: Optional[RoasV1Config] = None   # Bloco F — config da estratégia ROAS V1 desta variante.
                                              # None ou enabled=False → só propensão (comportamento atual).
+    conversion_rate_benchmark: Optional[Dict[str, Any]] = None  # Taxa histórica de conversão por faixa
+                                             # de decil (D1_D5/D6_D9/D10) DESTA variante, pro revenue_forecast
+                                             # ML-aware. None → usa business.conversion_rate_benchmark
+                                             # (default/Champion). Estrutura: {periodo_referencia, D1_D5, D6_D9, D10}.
 
 
 @dataclass
@@ -553,6 +557,7 @@ class ABTestConfig:
                 capi_high_quality_decils=hq_decils_raw,
                 calibrated_run_id=vdata.get("calibrated_run_id"),
                 roas_v1=roas_v1,
+                conversion_rate_benchmark=vdata.get("conversion_rate_benchmark"),
             )
         return cls(enabled=True, variants=variants)
 
