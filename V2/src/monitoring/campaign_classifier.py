@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 # {campaign_id: (timestamp, bucket)}; bucket é 'Lead' | 'Champion' | 'Challenger'.
 _BUCKET_CACHE: dict[str, tuple[float, str]] = {}
 _BUCKET_CACHE_TTL_SECONDS = 1800  # 30 min
+_MAX_FETCH_RETRIES = 2  # retries com backoff p/ falha transitória da Meta API (429/timeout)
 
 _CID_RE = re.compile(r"(\d{15,18})\s*$")
 _CHAMPION_GOALS = frozenset({"LeadQualified", "LeadQualifiedHighQuality"})
@@ -147,17 +148,48 @@ def classify_campaign_buckets(
             return result
 
     adsets_by_cid = meta.batch_get_adsets(sorted(to_fetch))
-    n_errors = sum(1 for v in adsets_by_cid.values() if v is None)
+
+    # Retry transitório: um 429/timeout faz batch_get_adsets devolver None pro
+    # chunk inteiro. Sem retry, as campanhas desse chunk somem do dict e o
+    # caller as joga em 'Lead' (`classification.get(cid, 'Lead')`) — foi assim
+    # que o Champion zerou e o relatório saiu "vazio" em 2026-06-13. Retry com
+    # backoff resolve a falha transitória antes de desistir.
+    failed = [cid for cid in to_fetch if adsets_by_cid.get(cid) is None]
+    for attempt in range(1, _MAX_FETCH_RETRIES + 1):
+        if not failed:
+            break
+        time.sleep(min(2 ** attempt, 5))  # backoff 2s, 4s
+        logger.warning(
+            "[campaign_classifier] retry %d/%d para %d cid(s) sem classificação",
+            attempt, _MAX_FETCH_RETRIES, len(failed),
+        )
+        retry_res = meta.batch_get_adsets(sorted(failed))
+        for cid, adsets in retry_res.items():
+            if adsets is not None:
+                adsets_by_cid[cid] = adsets
+        failed = [cid for cid in failed if adsets_by_cid.get(cid) is None]
 
     for cid in to_fetch:
         adsets = adsets_by_cid.get(cid)
         if adsets is None:
-            # request falhou — não cacheia, próxima chamada tenta de novo
+            # ainda falhou após retries — não cacheia (tenta de novo na próxima
+            # chamada) e fica fora do dict.
             continue
         bucket = _bucket_from_adsets(adsets) if adsets else "Lead"
         _BUCKET_CACHE[cid] = (now_ts, bucket)
         result[cid] = bucket
 
+    n_errors = len(failed)
+    if n_errors:
+        # Fail-loud: cids sem classificação viram 'Lead' silenciosamente no
+        # caller, subestimando Champion/Challenger. Logar ERROR pra o degrade
+        # ser visível no monitoramento em vez de passar batido.
+        logger.error(
+            "[campaign_classifier] %d/%d campanha(s) sem classificação após %d "
+            "retries — caller as tratará como 'Lead' (Champion/Challenger podem "
+            "sair subestimados). cids=%s",
+            n_errors, len(cids), _MAX_FETCH_RETRIES, sorted(failed)[:10],
+        )
     logger.info(
         "[campaign_classifier] buckets: %s (fetched=%d via batch, cache_hit=%d, errors=%d)",
         dict(Counter(result.values())),
