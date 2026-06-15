@@ -125,7 +125,8 @@ Ordem do menor risco pro maior:
 
 - [x] 3.0 Helper `open_ledger_read_connection()` + `load_ml_ledger` migrado (1º leitor, validação manual/semanal, baixo risco). Testado: lê igual das duas fontes.
 - [x] 3.1 `run_critical_checks` (alertas críticos, 5min): abre `ledger_conn` via helper e usa nos leitores do ledger (`repo` + 3 regras Pub/Sub); `railway_conn` segue no `baseline_repo` (Lead) e `rule_no_leads_arriving` (lead_surveys). Testado nas 2 fontes (9/9 regras, 0 erro, idêntico); 10/10 testes. **Cobre também o item 3.2** (as 3 regras Pub/Sub agora usam `ledger_conn`).
-- [ ] 3.1b Demais pontos de composição da camada: orchestrator.py:131-133 (capi_monitor, operational_monitor, data_quality, pubsub_summary) + app.py daily-check (repo + leads_in_range) + endpoints de diagnóstico (audience-drift, utm-quality, predict/explain)
+- [x] 3.1b Orchestrator (daily-check): bloco de contadores 24h (T3-5) e a conn que compõe o repo (`app.py` daily-check railway) abrem via helper. Testado nas 2 fontes (contadores idênticos 906/906/723). Cobre capi_monitor/operational/data_quality/pubsub_summary (recebem o repo do orchestrator por injeção).
+- [ ] 3.1c Endpoints de diagnóstico (manuais, raros): `/monitoring/audience-drift`, `/monitoring/utm-quality`, `/predict/explain`, e a subquery anti-join de `validate_ml_performance.py` — migrar junto da virada da env
 - [ ] 3.3 Bloco T3-5 do orchestrator (`orchestrator.py:392-474`): conn própria → Cloud SQL
 - [ ] 3.4 `data_loader.load_ml_ledger` + anti-join de `validate_ml_performance.py:1256-1280`: trocar para `LEDGER_DB_*`; **varrer defaults hardcoded `shortline.proxy.rlwy.net` nesses arquivos**
 - [ ] 3.5 Gate C (`test_revision_equivalence.py:176,244`) + carregamento de env no `deploy_capi.sh:638`
