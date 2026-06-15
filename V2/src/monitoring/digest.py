@@ -834,16 +834,16 @@ def render_slack_blocks(view: dict) -> list[dict]:
 
 
 def _slack_audience_drift_by_variant_dm(v: dict, B: list):
-    """Tabelas de drift de público por A/B (Champion × Challenger) no DM.
+    """Tabelas de drift de público por A/B (Lead × Champion × Challenger) no DM.
 
     Renderiza o mesmo conteúdo que `render_slack_blocks_client` mostra
     (`audience_profile_drift_by_variant`), com ordenação previous_day antes
     de current_launch. Skipa silenciosamente se não houver alertas.
 
-    Desde 2026-06-15 o split é por *variant do ledger* (registros_ml.variant:
-    Champion vs Challenger por modelo), NÃO mais pelo optimization_goal da
-    campanha via Meta API — que rate-limitava e zerava o split. O antigo bucket
-    "Lead" (optgoal de campanha) não existe no recorte por modelo.
+    Desde 2026-06-15 o split lê a *tag de optimization_goal no nome da campanha*
+    (utm_campaign: LEADQUALIFIED=Champion, LEADHQLB=Challenger, sem tag=Lead),
+    localmente via campaign_classifier.bucket_from_utm — NÃO mais via Meta API
+    (que rate-limitava e zerava o split). Mesma semântica 3-way, fonte confiável.
     """
     alerts = v.get('alerts') or []
     by_variant = [a for a in alerts if a.get('type') == 'audience_profile_drift_by_variant']
@@ -1257,18 +1257,18 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
     )
     # Legenda movida pra _slack_drift_legend_header (uma vez por seção).
     header = f"*📉 Drift por A/B - {window_title}*"
-    # Header: 2 contadores que entram nas colunas Δ (Champion/Challenger, leads
-    # Meta separados pelo variant do ledger) + 2 que ficam fora da tabela mas
-    # aparecem pra deixar claro o universo total (Google e Outros). O antigo
-    # bucket "Lead" (optgoal de campanha) não existe no recorte por modelo.
-    if (n_champion + n_challenger + n_google + n_outros) > 0:
-        in_table = f"Champion={n_champion:,} · Challenger={n_challenger:,}"
+    # Header: 3 contadores que entram nas colunas Δ (Lead/Champion/Challenger,
+    # leads Meta separados pela tag de optimization_goal no nome da campanha,
+    # lida localmente sem Meta API) + 2 que ficam fora da tabela mas aparecem pra
+    # deixar claro o universo total (Google e Outros).
+    if (n_lead + n_champion + n_challenger + n_google + n_outros) > 0:
+        in_table = f"Lead={n_lead:,} · Champion={n_champion:,} · Challenger={n_challenger:,}"
         out_table = f"Google={n_google:,} · Outros={n_outros:,}"
         header += f"\n_n Meta na tabela: {in_table}  ·  fora da tabela: {out_table}_"
     rows = [header]
     col_header = (
         f"{'Característica':<32} {'Top%':>5}  "
-        f"{'Champion(Δ)':>20}  {'Challenger(Δ)':>20}"
+        f"{'Lead(Δ)':>16}  {'Champion(Δ)':>20}  {'Challenger(Δ)':>20}"
     )
     rows.append(f"`{col_header}`")
 
@@ -1309,9 +1309,10 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
                             is_winner=(winner == 'champion'))
         cl_cell = cell_qual(it.get('challenger_pct'), cl_delta, it.get('challenger_quality'),
                             is_winner=(winner == 'challenger'))
+        lead_cell = cell_lead(it.get('lead_pct'), it.get('lead_delta_pp'), it.get('lead_quality'))
         rows.append(
             f"`{label:<32} {ref:>4.1f}%  "
-            f"{ch_cell:>20}  {cl_cell:>20}`"
+            f"{lead_cell:>16}  {ch_cell:>20}  {cl_cell:>20}`"
         )
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
@@ -1528,16 +1529,17 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     rows.append('```')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
-    # Bloco por VARIANTE do A/B (Champion vs Challenger pelo variant do ledger,
-    # NÃO mais por optimization_goal da campanha via Meta API). Slack block 2
-    # separado — evita truncamento silencioso quando o bloco fica grande. O
-    # antigo bucket "Lead" (otimização de campanha) não existe mais no recorte
-    # por modelo; leads do Champion entram em Champion.
+    # Bloco por optimization_goal (Lead/Champion/Challenger) — a tag vem do NOME
+    # da campanha (utm_campaign), lida localmente (campaign_classifier.bucket_from_utm),
+    # SEM Meta API. Slack block 2 separado — evita truncamento silencioso quando o
+    # bloco fica grande. Lead = campanhas de otimização padrão (sem evento ML);
+    # Champion = LEADQUALIFIED; Challenger = LEADHQLB.
     if show_og:
         og_rows = ['```']
         og_rows.append(
             f'{"Bucket":<14}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
         )
+        og_rows.append(_row('Lead',       _kpis(og_lead_info.get('distribution') or {}, n_og_lead), ref_champion,   'Champion'))
         og_rows.append(_row('Champion',   _kpis(og_chmp_info.get('distribution') or {}, n_og_chmp), ref_champion,   'Champion'))
         og_rows.append(_row('Challenger', _kpis(og_chal_info.get('distribution') or {}, n_og_chal), ref_challenger, 'Challenger'))
         og_rows.append('```')

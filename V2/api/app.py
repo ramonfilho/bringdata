@@ -3125,14 +3125,15 @@ async def daily_monitoring_check_railway(
                 'google': {'distribution': dist_ggl,  'total': n_ggl},
             }
 
-        # Split Champion/Challenger por VARIANTE do ledger (registros_ml.variant) —
-        # NÃO mais pelo optimization_goal da campanha via Meta API. O variant é a
-        # verdade registrada de qual modelo scoreou cada lead; não depende de API
-        # externa, então o split nunca vem vazio por rate-limit (bug recorrente
-        # 06/2026). /sw-architect aprovou substituir a fonte. O antigo bucket
-        # "Lead" (otimização de campanha) deixa de existir: leads scoreados pelo
-        # Champion (variant None) entram em champion. Mantém filtro Meta-source
-        # (allowlist CAPI) p/ paridade com a versão anterior.
+        # Split Lead/Champion/Challenger pela TAG de optimization_goal no NOME da
+        # campanha (utm_campaign), via campaign_classifier.bucket_from_utm — SEM
+        # Meta API. O objetivo já vem escrito no nome (LEADQUALIFIED=Champion,
+        # LEADHQLB=Challenger, sem tag=Lead). Substitui tanto a consulta à Meta API
+        # (que rate-limitava e zerava o split) quanto a tentativa por `variant` (que
+        # só dava 2-way e diluía o Lead dentro do Champion). A Meta API fica só pro
+        # funil/insights (spend/CPL). Mantém filtro Meta-source (allowlist CAPI) —
+        # Google/orgânico ficam só nas linhas de fonte (Total/Meta/Google).
+        from src.monitoring.campaign_classifier import bucket_from_utm as _bucket_from_utm
         _allow_capi = (pipeline._client_config.capi.utm_source_allowlist
                        if pipeline and pipeline._client_config and pipeline._client_config.capi
                        else None) or []
@@ -3151,37 +3152,33 @@ async def daily_monitoring_check_railway(
             return out
 
         def _decil_dist_by_variant(records) -> Dict[str, Dict]:
-            dists = {b: {f'D{i:02d}': 0 for i in range(1, 11)} for b in ('champion', 'challenger')}
-            totals = {'champion': 0, 'challenger': 0}
-            n_variant_set = 0
+            buckets = ('Lead', 'Champion', 'Challenger')
+            dists = {b: {f'D{i:02d}': 0 for i in range(1, 11)} for b in buckets}
+            totals = {b: 0 for b in buckets}
             for rec in records:
                 if rec.decil is None:
                     continue
                 src = (rec.utm_source or '').strip().lower()
                 if src not in _META_SOURCES_OG:
                     continue
-                v = (rec.variant or '').strip().lower()
-                if v:
-                    n_variant_set += 1
-                bucket = 'challenger' if 'challenger' in v else 'champion'
+                bucket = _bucket_from_utm(rec.utm_campaign)
                 key = f'D{int(rec.decil):02d}'
                 if key in dists[bucket]:
                     dists[bucket][key] += 1
                     totals[bucket] += 1
-            # Fail-loud: leads Meta presentes mas variant todo-nulo → A/B inativo
-            # ou variant não gravado. Loga alto em vez de mostrar Challenger=0 em
-            # silêncio (o exato bug que esta troca conserta).
-            if (totals['champion'] + totals['challenger']) > 0 and n_variant_set == 0:
+            # Fail-loud: leads Meta presentes mas nenhuma tag ML (Champion+Challenger=0)
+            # → convenção de nome de campanha pode ter mudado. Loga em vez de mostrar
+            # tudo em Lead silenciosamente.
+            if totals['Lead'] > 0 and (totals['Champion'] + totals['Challenger']) == 0:
                 logger.warning(
-                    "[decis by_variant] %d leads Meta na janela mas variant todo-nulo "
-                    "— A/B inativo ou variant não gravado no ledger",
-                    totals['champion'] + totals['challenger'],
+                    "[decis by_variant] %d leads Meta mas 0 com tag LEADQUALIFIED/LEADHQLB "
+                    "— convenção de nome de campanha mudou? Tudo caiu em Lead.",
+                    totals['Lead'],
                 )
-            # Chave 'lead' mantida (total 0) p/ compat de schema; bucket não renderizado.
             return {
-                'lead':       {'distribution': {f'D{i:02d}': 0 for i in range(1, 11)}, 'total': 0},
-                'champion':   {'distribution': dists['champion'],   'total': totals['champion']},
-                'challenger': {'distribution': dists['challenger'], 'total': totals['challenger']},
+                'lead':       {'distribution': dists['Lead'],       'total': totals['Lead']},
+                'champion':   {'distribution': dists['Champion'],   'total': totals['Champion']},
+                'challenger': {'distribution': dists['Challenger'], 'total': totals['Challenger']},
             }
 
         # Baselines de decis Top 6 ROAS (scoreados separadamente por Champion e Challenger).
