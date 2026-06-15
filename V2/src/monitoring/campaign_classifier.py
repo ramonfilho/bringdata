@@ -76,6 +76,34 @@ def _bucket_from_adsets(adsets: list) -> str:
     return "Lead"
 
 
+# Tags textuais que o objetivo de otimização deixa NO NOME da campanha
+# (utm_campaign) — espelham _CHAMPION_GOALS/_CHALLENGER_GOALS. O gestor tagueia
+# o nome: "DEVLF | ... | 2026-06-04 | LEADQUALIFIED|<id>" (Champion),
+# "... | LEADHQLB|<id>" (Challenger), sem tag = Lead/otimização padrão.
+_CHALLENGER_NAME_TAGS = frozenset({"HQLB"})            # cobre LEADHQLB, HQLB, HQLB_LQ
+_CHAMPION_NAME_TAGS   = frozenset({"LEADQUALIFIED"})   # cobre LeadQualified(HighQuality)
+
+
+def bucket_from_utm(utm_campaign) -> str:
+    """Bucket A/B (Lead/Champion/Challenger) pela TAG no nome da campanha — SEM Meta API.
+
+    O objetivo de otimização já vem escrito no `utm_campaign` (o gestor tagueia
+    o nome). Espelha `_bucket_from_adsets` (que lê o mesmo objetivo via Graph
+    API), mas lendo a tag local do ledger → não rate-limita, nunca vem vazio.
+    Precedência Challenger > Champion > Lead (igual ao adset-based).
+
+    Esta é a fonte do split Champion/Challenger das tabelas de decis e drift
+    por A/B. A Meta API fica reservada só pro funil/insights (spend/CPL), que
+    não tem outra fonte.
+    """
+    c = (str(utm_campaign) if utm_campaign is not None else "").upper()
+    if any(t in c for t in _CHALLENGER_NAME_TAGS):
+        return "Challenger"
+    if any(t in c for t in _CHAMPION_NAME_TAGS):
+        return "Champion"
+    return "Lead"
+
+
 def classify_campaign_buckets(
     utm_campaigns: Iterable,
     *,

@@ -2510,20 +2510,20 @@ class DataQualityMonitor:
             return 'Outros'
 
         def _split_df_by_variant(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
-            """Divide df em buckets pra a tabela "Drift por A/B", por VARIANTE do
-            ledger (registros_ml.variant) — NÃO mais por optimization_goal da
-            campanha via Meta API (que rate-limitava e zerava o split em silêncio).
+            """Divide df em buckets pra a tabela "Drift por A/B", pela TAG de
+            optimization_goal no NOME da campanha (utm_campaign) — NÃO mais via
+            Meta API (que rate-limitava e zerava o split em silêncio).
 
-              - 'Champion'   → leads Meta com variant null/champion (modelo Champion)
-              - 'Challenger' → leads Meta com variant ~ 'challenger' (modelo Challenger)
-              - 'Lead'       → vazio (era conceito de campanha, não de modelo)
+              - 'Champion'   → leads Meta com tag LEADQUALIFIED no utm_campaign
+              - 'Challenger' → leads Meta com tag LEADHQLB/HQLB no utm_campaign
+              - 'Lead'       → leads Meta sem tag ML (otimização padrão)
               - 'Google'     → leads Google (não entram nas colunas; só contagem no header)
               - 'Outros'     → resto (orgânico, sem source, etc.; só contagem no header)
 
-            /sw-architect aprovou trocar a fonte do split (optgoal Meta API →
-            variant do ledger): o variant é a verdade registrada de qual modelo
-            scoreou o lead, não depende de API externa, então o split nunca vem
-            vazio por rate-limit. Substituição total (não fallback).
+            O objetivo de otimização já vem escrito no nome da campanha, então a
+            gente lê a tag local (campaign_classifier.bucket_from_utm) em vez de
+            perguntar pra Meta. Mesma semântica 3-way de antes, fonte confiável →
+            nunca vem vazio por rate-limit. A Meta API fica só pro funil/insights.
             """
             import re as _re
             empty = pd.DataFrame()
@@ -2547,29 +2547,26 @@ class DataQualityMonitor:
             base['Outros'] = df.loc[idx_outros] if idx_outros else empty
             df_meta = df.loc[idx_meta] if idx_meta else empty
 
-            # Split Meta-only por VARIANTE do ledger (registros_ml.variant), não
-            # mais por optgoal via Meta API. Champion = variant null/champion;
-            # Challenger = variant ~ 'challenger'. Bucket 'Lead' fica vazio (não
-            # existe no recorte por modelo). Sem dependência externa → nunca vem
-            # vazio por rate-limit (bug recorrente que isso conserta).
-            if len(df_meta) == 0 or 'variant' not in df_meta.columns:
+            # Split Meta-only em Lead/Champion/Challenger pela TAG de
+            # optimization_goal no NOME da campanha (campaign_classifier.bucket_from_utm),
+            # SEM Meta API. LEADQUALIFIED=Champion, LEADHQLB=Challenger, sem tag=Lead.
+            # Substitui a classificação via Graph API (que rate-limitava e zerava o
+            # split). Mesma semântica 3-way de antes, fonte local → nunca vem vazio.
+            from src.monitoring.campaign_classifier import bucket_from_utm as _bucket_from_utm
+            if len(df_meta) == 0 or 'campaign' not in df_meta.columns:
+                base['Lead'] = df_meta
                 return base
-            buckets = {'Champion': [], 'Challenger': []}
-            n_variant_set = 0
+            buckets = {'Lead': [], 'Champion': [], 'Challenger': []}
             for i, row in df_meta.iterrows():
-                v = row.get('variant')
-                v = str(v).strip().lower() if (v is not None and not pd.isna(v)) else ''
-                if v:
-                    n_variant_set += 1
-                buckets['Challenger' if 'challenger' in v else 'Champion'].append(i)
+                buckets[_bucket_from_utm(row.get('campaign'))].append(i)
+            base['Lead']       = df_meta.loc[buckets['Lead']]       if buckets['Lead']       else empty
             base['Champion']   = df_meta.loc[buckets['Champion']]   if buckets['Champion']   else empty
             base['Challenger'] = df_meta.loc[buckets['Challenger']] if buckets['Challenger'] else empty
-            # Fail-loud: leads Meta presentes mas variant todo-nulo → A/B inativo
-            # ou variant não gravado; loga alto em vez de mostrar Challenger=0 mudo.
-            if len(df_meta) > 0 and n_variant_set == 0:
+            # Fail-loud: leads Meta mas nenhuma tag ML → convenção de nome mudou.
+            if len(df_meta) > 0 and not buckets['Champion'] and not buckets['Challenger']:
                 logger.warning(
-                    "[drift by_variant] %d leads Meta na janela mas variant todo-nulo "
-                    "— A/B inativo ou variant não gravado no ledger", len(df_meta),
+                    "[drift by_variant] %d leads Meta mas 0 com tag LEADQUALIFIED/LEADHQLB "
+                    "— convenção de nome de campanha mudou? Tudo caiu em Lead.", len(df_meta),
                 )
             return base
 
