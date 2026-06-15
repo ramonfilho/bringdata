@@ -322,6 +322,35 @@ class CAPIConfig:
     # decil_to_value removido (DT-5): calculado em runtime como business.product_value × business.conversion_rates[decil]
 
 
+@dataclass
+class GoogleAdsConfig:
+    """Integração Google Ads — envio de conversão de lead via Data Manager API.
+
+    Espelha o papel do CAPIConfig (Meta), mas é dataclass SEPARADA por design:
+    é outra API (Google Data Manager, datamanager.googleapis.com) e outro fluxo
+    de auth (service account, sem developer token em runtime). Bloco `google_ads:`
+    paralelo ao `capi:` no YAML do cliente.
+
+    Mecanismo: Enhanced Conversions for Leads — casa a conversão por email/telefone
+    hasheados (SHA-256), que o ledger já tem. `gclid` é OPCIONAL (melhora match,
+    não é pré-requisito) — quando o front começar a populá-lo, entra junto.
+
+    Default `enabled=False` + `source_allowlist` vazio = INERTE: nada é enviado
+    ao Google até o cliente ligar explicitamente. Rollback = enabled:false.
+    """
+    enabled: bool = False                                       # master switch — dark por padrão
+    customer_id: Optional[str] = None                          # conta Google Ads (operatingAccount), só dígitos
+    login_customer_id: Optional[str] = None                    # MCC/loginAccount, opcional
+    conversion_action_id_with_value: Optional[str] = None      # productDestinationId do evento value-weighted (= LeadQualified)
+    conversion_action_id_high_quality: Optional[str] = None    # productDestinationId do evento HQ (só decis altos)
+    event_name_with_value: Optional[str] = None                # rótulo do evento value-weighted
+    event_name_high_quality: Optional[str] = None              # rótulo do evento HQ
+    high_quality_decils: Optional[List[str]] = None            # decis que disparam o evento HQ (paralelo ao capi.high_quality_decils)
+    source_allowlist: Optional[List[str]] = None               # utm_source RAW que vão pro Google (ex: ["google-ads"]); vazio/None = nada enviado
+    currency: Optional[str] = None                             # moeda do value (ex: BRL)
+    sa_secret: Optional[str] = None                            # referência ao Secret da service account (NOME, não o valor)
+
+
 # ---------------------------------------------------------------------------
 # Sub-configs — Grupo B: API operacional (Fase 2)
 # ---------------------------------------------------------------------------
@@ -620,6 +649,7 @@ class ClientConfig:
     model: ModelConfig = field(default_factory=ModelConfig)
     monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
     capi: CAPIConfig = field(default_factory=CAPIConfig)
+    google_ads: GoogleAdsConfig = field(default_factory=GoogleAdsConfig)
     api: APIConfig = field(default_factory=APIConfig)
     retrain: RetainConfig = field(default_factory=RetainConfig)
     business: BusinessConfig = field(default_factory=BusinessConfig)
@@ -642,6 +672,7 @@ class ClientConfig:
             model=_make(ModelConfig, data.get("model", {})),
             monitoring=_make(MonitoringConfig, data.get("monitoring", {})),
             capi=_load_capi_config(data.get("capi", {})),
+            google_ads=_make(GoogleAdsConfig, data.get("google_ads", {})),
             api=_make(APIConfig, data.get("api", {})),
             retrain=_make(RetainConfig, data.get("retrain", {})),
             business=_make(BusinessConfig, data.get("business", {})),

@@ -592,6 +592,26 @@ capi:
     - event_name: HQLB
       pixel_id: "241752320666130"
       decils: ["D08", "D09", "D10"]
+
+# Google Ads — envio de conversão via Data Manager API (Enhanced Conversions for Leads).
+# DESLIGADO: enabled=false + source_allowlist vazio = nada é enviado ao Google.
+# Para ligar: preencher os IDs (saída de scripts/create_google_ads_conversion_actions.py),
+# popular source_allowlist, e enabled:true. Casa por email/telefone hasheado (já no ledger);
+# gclid é opcional (entra quando o front popular). Rollback = enabled:false.
+google_ads:
+  enabled: false
+  customer_id: '6266441811'              # conta DevClub (só dígitos)
+  login_customer_id: null                # MCC, se via gerenciador
+  conversion_action_id_with_value: '7649573174'   # LeadQualified (criada 14/06 via create_google_ads_conversion_actions.py)
+  conversion_action_id_high_quality: '7649572493'  # LeadQualifiedHighQuality
+  event_name_with_value: LeadQualified
+  event_name_high_quality: LeadQualifiedHighQuality
+  high_quality_decils:
+  - D09
+  - D10
+  source_allowlist: []                   # vazio = nada enviado; pra ligar: ["google-ads"]
+  currency: BRL
+  sa_secret: null                        # nome do Secret da service account (datamanager scope) — não o valor
 api:
   cors_origins:
   - https://lp.devclub.com.br

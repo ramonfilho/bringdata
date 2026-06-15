@@ -136,7 +136,7 @@ def create_conversion_action(client, customer_id: str, name: str, dry_run: bool)
     # Meta). always_use_default_value=False faz o valor enviado prevalecer;
     # default_value é só fallback se algum evento vier sem valor.
     ca.value_settings.default_value = 1.0
-    ca.value_settings.currency_code = "BRL"
+    ca.value_settings.default_currency_code = "BRL"
     ca.value_settings.always_use_default_value = False
 
     request = client.get_type("MutateConversionActionsRequest")
