@@ -1624,7 +1624,7 @@ class DataQualityMonitor:
             'data', 'O seu gênero:', 'Qual a sua idade?', 'O que você faz atualmente?',
             'Atualmente, qual a sua faixa salarial?', 'Você possui cartão de crédito?',
             'Já estudou programação?', 'Tem computador/notebook?',
-            'source', 'medium', 'campaign', 'content', 'term', 'pageUrl',
+            'source', 'medium', 'campaign', 'content', 'term', 'pageUrl', 'variant',
         ]
 
     def _query_railway_pesquisa_window(self, start_utc, end_utc) -> pd.DataFrame:
@@ -1678,6 +1678,10 @@ class DataQualityMonitor:
                 'content':  r.utm_content,
                 'term':     r.utm_term,
                 'pageUrl':  r.utm_url,
+                # variant do ledger (registros_ml.variant) — fonte do split A/B
+                # Champion/Challenger, substituindo a inferência por optgoal via
+                # Meta API (que rate-limitava e zerava o split). Ver _check_audience_drift_by_variant.
+                'variant':  r.variant,
             })
         return pd.DataFrame(rows, columns=self._railway_pesquisa_columns())
 
@@ -2505,23 +2509,21 @@ class DataQualityMonitor:
                 return 'Google'
             return 'Outros'
 
-        def _split_df_by_optgoal(df: pd.DataFrame, classification: dict) -> Dict[str, pd.DataFrame]:
-            """Divide df em buckets pra a tabela "Drift por A/B":
+        def _split_df_by_variant(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
+            """Divide df em buckets pra a tabela "Drift por A/B", por VARIANTE do
+            ledger (registros_ml.variant) — NÃO mais por optimization_goal da
+            campanha via Meta API (que rate-limitava e zerava o split em silêncio).
 
-              - 'Lead'       → leads Meta com cid de campanha Lead padrão (sem evento ML)
-              - 'Champion'   → leads Meta com cid de campanha optimization_goal LQ/LQHQ
-              - 'Challenger' → leads Meta com cid de campanha optimization_goal HQLB/HQLB_LQ
+              - 'Champion'   → leads Meta com variant null/champion (modelo Champion)
+              - 'Challenger' → leads Meta com variant ~ 'challenger' (modelo Challenger)
+              - 'Lead'       → vazio (era conceito de campanha, não de modelo)
               - 'Google'     → leads Google (não entram nas colunas; só contagem no header)
               - 'Outros'     → resto (orgânico, sem source, etc.; só contagem no header)
 
-            Mudança 2026-06-03: antes 'Lead' era catch-all (incluía Google + sem-source),
-            o que misturava perfis muito diferentes na coluna "Lead(Δ)". Agora 'Lead'
-            é estrito: só campanha Meta sem evento ML. Google e Outros saem da
-            comparação A/B mas seguem expostos no header pra transparência total.
-
-            Quando `classification` é vazio (Meta API falhou), os 3 buckets Meta
-            ficam vazios — renderer mostra "—" em vez de inventar atribuição.
-            Google/Outros ainda são contados (independentes da classificação Meta).
+            /sw-architect aprovou trocar a fonte do split (optgoal Meta API →
+            variant do ledger): o variant é a verdade registrada de qual modelo
+            scoreou o lead, não depende de API externa, então o split nunca vem
+            vazio por rate-limit. Substituição total (não fallback).
             """
             import re as _re
             empty = pd.DataFrame()
@@ -2545,39 +2547,30 @@ class DataQualityMonitor:
             base['Outros'] = df.loc[idx_outros] if idx_outros else empty
             df_meta = df.loc[idx_meta] if idx_meta else empty
 
-            # Split Meta-only por bucket optgoal. Fallback quando classifier
-            # vazio (Meta API com rate limit): joga TUDO no Lead catch-all
-            # (Meta + Google + Outros), preservando renderização. Sem isso
-            # Champion/Challenger ficam com "—" em todas as linhas e o
-            # relatório parece vazio — caso 2026-06-03 09:35 BRT no team-dados.
-            if not classification or 'campaign' not in df.columns:
-                base['Lead'] = df  # tudo, não só Meta
-                base['Google'] = empty
-                base['Outros'] = empty
+            # Split Meta-only por VARIANTE do ledger (registros_ml.variant), não
+            # mais por optgoal via Meta API. Champion = variant null/champion;
+            # Challenger = variant ~ 'challenger'. Bucket 'Lead' fica vazio (não
+            # existe no recorte por modelo). Sem dependência externa → nunca vem
+            # vazio por rate-limit (bug recorrente que isso conserta).
+            if len(df_meta) == 0 or 'variant' not in df_meta.columns:
                 return base
-            if len(df_meta) == 0:
-                base['Lead'] = df_meta
-                return base
-            _CID_RE = _re.compile(r"(\d{15,18})\s*$")
-            buckets = {'Lead': [], 'Champion': [], 'Challenger': []}
+            buckets = {'Champion': [], 'Challenger': []}
+            n_variant_set = 0
             for i, row in df_meta.iterrows():
-                c = row.get('campaign')
-                cid = None
-                if c is not None:
-                    try:
-                        if not pd.isna(c):
-                            m = _CID_RE.search(str(c).strip())
-                            if m:
-                                cid = m.group(1)
-                    except Exception:
-                        m = _CID_RE.search(str(c).strip())
-                        if m:
-                            cid = m.group(1)
-                bucket = classification.get(cid, 'Lead') if cid else 'Lead'
-                buckets[bucket].append(i)
-            base['Lead']       = df_meta.loc[buckets['Lead']]       if buckets['Lead']       else empty
+                v = row.get('variant')
+                v = str(v).strip().lower() if (v is not None and not pd.isna(v)) else ''
+                if v:
+                    n_variant_set += 1
+                buckets['Challenger' if 'challenger' in v else 'Champion'].append(i)
             base['Champion']   = df_meta.loc[buckets['Champion']]   if buckets['Champion']   else empty
             base['Challenger'] = df_meta.loc[buckets['Challenger']] if buckets['Challenger'] else empty
+            # Fail-loud: leads Meta presentes mas variant todo-nulo → A/B inativo
+            # ou variant não gravado; loga alto em vez de mostrar Challenger=0 mudo.
+            if len(df_meta) > 0 and n_variant_set == 0:
+                logger.warning(
+                    "[drift by_variant] %d leads Meta na janela mas variant todo-nulo "
+                    "— A/B inativo ou variant não gravado no ledger", len(df_meta),
+                )
             return base
 
         def _category_pct(df: pd.DataFrame, col: str, cat: str) -> Optional[float]:
@@ -2595,21 +2588,13 @@ class DataQualityMonitor:
         # Janela 2: lançamento atual
         df_launch, launch_info = self._query_railway_current_launch_brt(anchor_date=anchor_date)
 
-        # Classifica todas as campanhas únicas (ambas janelas) em 3 buckets
-        # uma única vez. Reusa cache de classe (TTL 30min) entre invocações.
-        _campaign_series_combined = pd.concat([
-            (df_day['campaign'] if df_day is not None and 'campaign' in df_day.columns
-             else pd.Series([], dtype=str)),
-            (df_launch['campaign'] if df_launch is not None and 'campaign' in df_launch.columns
-             else pd.Series([], dtype=str)),
-        ], ignore_index=True)
-        classification = self._classify_campaign_buckets(_campaign_series_combined)
-
+        # Split por variante vem do campo `variant` do ledger (em cada df) — não
+        # precisa mais classificar campanhas via Meta API.
         for window_key, window_df, window_label in [
             ('previous_day', df_day, 'Ontem (dia BRT anterior)'),
             ('current_launch', df_launch, launch_info.get('label') or 'Lançamento atual'),
         ]:
-            split = _split_df_by_optgoal(window_df, classification)
+            split = _split_df_by_variant(window_df)
             df_lead = split['Lead']
             df_ch = split['Champion']
             df_cl = split['Challenger']
