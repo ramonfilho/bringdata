@@ -3345,6 +3345,24 @@ async def daily_monitoring_check_railway(
                 'by_source':  _decil_dist_by_source(_lf_rows),
                 'by_optgoal': _decil_dist_by_variant(_rec_between(_records_90d_scored, _cs_dt, _ce_dt, True)),
             }
+            # Refresh incremental ONLINE da scores_historicos (passo 3): SÓ na run
+            # AO VIVO (anchor_date is None — relatório histórico não re-scoreia o
+            # passado; isso é trabalho do backfill). Re-scoreia pelos 2 modelos só
+            # os leads NOVOS do LF atual e faz upsert idempotente, ANTES de ler o
+            # score geral, pra a nota refletir os leads mais recentes. Totalmente
+            # guardado: qualquer falha aqui só pula o refresh, não derruba o relatório.
+            if _anchor is None and pipeline is not None and _lw.lf_name:
+                try:
+                    from api.scores_refresh import refresh_launch_scores
+                    _rf = refresh_launch_scores(
+                        lf_name=_lw.lf_name,
+                        cap_start=_lw.cap_start.isoformat(),
+                        cap_end=_cap_end_eff.isoformat(),
+                        pipeline=pipeline,
+                    )
+                    logger.info(f"🔄 scores_historicos refresh: {_rf}")
+                except Exception as _rfe:
+                    logger.warning(f"⚠️ scores_historicos refresh falhou (segue sem): {_rfe}")
             # Score geral do lançamento — decil médio da população pela régua do
             # Challenger, lido da scores_historicos (Cloud SQL). Leitura pura,
             # guardada: se falhar, só não mostra a nota (não derruba o relatório).
