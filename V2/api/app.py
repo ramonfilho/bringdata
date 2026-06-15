@@ -3429,17 +3429,11 @@ async def daily_monitoring_check_railway(
 
         # A railway_conn original foi fechada em 2715 (depois das 13 queries
         # iniciais). O orchestrator precisa de conn viva pra compor o
-        # LeadRepository — antes era bug latente (orchestrator não usava o
-        # repo de fato); ficou visível após a Fatia A do refator que faz o
-        # consumo real. Abre uma conn dedicada com vida ligada ao orchestrator.
-        orchestrator_conn = pg8000.native.Connection(
-            host=os.environ['RAILWAY_DB_HOST'],
-            port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
-            database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
-            user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
-            password=os.environ['RAILWAY_DB_PASSWORD'],
-            timeout=30,
-        )
+        # LeadRepository (registros_ml). Fonte por LEDGER_READ_SOURCE
+        # (Railway/Cloud SQL) — PLANO_LEDGER_CLOUDSQL.md Etapa 3. Vida ligada
+        # ao orchestrator (fechada no finally abaixo).
+        from src.data.ledger_connection import open_ledger_read_connection
+        orchestrator_conn = open_ledger_read_connection()
         orchestrator = MonitoringOrchestrator(model_path=model_path, db=None,
                                               expected_decil_dist=expected_decil_dist,
                                               lead_scoring_pipeline=pipelines.get('devclub'),

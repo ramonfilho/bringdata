@@ -392,17 +392,12 @@ class MonitoringOrchestrator:
         # Antes usava self.db.query(LeadCAPI) que é Cloud SQL legado e parou de receber
         # scoring em 30/04. Agora abrimos uma conexão Railway temporária pra pegar dados reais.
         try:
-            import pg8000.native as _pg
-            _railway_host = _os.environ.get('RAILWAY_DB_HOST')
-            if _railway_host:
-                _conn = _pg.Connection(
-                    host=_railway_host,
-                    port=int(_os.environ.get('RAILWAY_DB_PORT', '11594')),
-                    database=_os.environ.get('RAILWAY_DB_NAME', 'railway'),
-                    user=_os.environ.get('RAILWAY_DB_USER', 'postgres'),
-                    password=_os.environ['RAILWAY_DB_PASSWORD'],
-                    timeout=15,
-                )
+            # Fonte do ledger por LEDGER_READ_SOURCE (Railway/Cloud SQL) —
+            # PLANO_LEDGER_CLOUDSQL.md Etapa 3. Todas as queries deste bloco são
+            # em registros_ml, idêntico nos dois bancos.
+            from src.data.ledger_connection import open_ledger_read_connection
+            _conn = open_ledger_read_connection()
+            if _conn is not None:
                 _now = datetime.now(timezone.utc)
                 # Fonte do daily-check 24h: registros_ml (ledger novo, populado
                 # pelo consumer Pub/Sub desde 23/05/2026). Antes lia da Lead morta
@@ -513,9 +508,9 @@ class MonitoringOrchestrator:
                         result['last_scored_at'] = _last_scored.isoformat()
                         result['minutes_since_last_score'] = round((_now - _last_scored).total_seconds() / 60, 1)
             else:
-                logger.warning("  [T3-5] RAILWAY_DB_HOST não setada — contadores 24h não disponíveis")
+                logger.warning("  [T3-5] conexão de leitura do ledger indisponível — contadores 24h não disponíveis")
         except Exception as _e:
-            logger.warning(f"  [T3-5] falha ao coletar contadores 24h via Railway: {_e}")
+            logger.warning(f"  [T3-5] falha ao coletar contadores 24h do ledger: {_e}")
 
         # Log estruturado consolidado
         logger.info("")
