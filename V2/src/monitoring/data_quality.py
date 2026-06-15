@@ -641,12 +641,17 @@ class DataQualityMonitor:
             else MISSING_RATE_IGNORE_COLUMNS
         )
 
-    def check(self, df: pd.DataFrame) -> List[Dict]:
+    def check(self, df: pd.DataFrame, anchor_date=None) -> List[Dict]:
         """
         Executa todos os checks de qualidade de dados.
 
         Args:
             df: DataFrame com dados das últimas 24h do Sheets
+            anchor_date: opcional `datetime.date` — quando informado, ancora a
+                resolução de "hoje" das janelas de drift (ontem/lançamento) nesse
+                dia, permitindo renderizar o relatório de um lançamento passado.
+                None (default) = comportamento atual (hoje real). O cron das
+                06:00 nunca passa esse param.
 
         Returns:
             Lista de alertas no formato dict (compatível com Alert.from_dict)
@@ -700,7 +705,7 @@ class DataQualityMonitor:
         #    canônica (gênero, idade, ocupação, faixa salarial, cartão,
         #    programação, computador). Pré-encoding e independente de modelo.
         if self._thresholds.get('audience_profile_drift', {}).get('enabled', False):
-            _audience_alerts = self._check_audience_profile_drift(df)
+            _audience_alerts = self._check_audience_profile_drift(df, anchor_date=anchor_date)
             alerts.extend(_audience_alerts)
             # 8b. Drift de público por variante A/B (Champion vs Challenger vs Top6),
             #     uma tabela por janela (ontem + lançamento atual). Reusa o top_list
@@ -709,8 +714,8 @@ class DataQualityMonitor:
                 if _a.get('type') == 'audience_profile_drift':
                     _tl = (_a.get('details') or {}).get('top_list') or []
                     if _tl:
-                        alerts.extend(self._check_audience_drift_by_variant(_tl))
-                        alerts.extend(self._check_audience_drift_by_source(_tl))
+                        alerts.extend(self._check_audience_drift_by_variant(_tl, anchor_date=anchor_date))
+                        alerts.extend(self._check_audience_drift_by_source(_tl, anchor_date=anchor_date))
 
         # 9. Audience quality signal — re-scoreia leads do LF atual com Challenger
         #    via mesma chain de produção (LeadScoringPipeline.run) e compara
@@ -2435,7 +2440,7 @@ class DataQualityMonitor:
             return classify_campaign_buckets(utm_campaign_series)
         return classify_campaign_buckets(utm_campaign_series, meta=_meta)
 
-    def _check_audience_drift_by_variant(self, top_list: List[Dict]) -> List[Dict]:
+    def _check_audience_drift_by_variant(self, top_list: List[Dict], anchor_date=None) -> List[Dict]:
         """
         Drift de público segmentado em 3 buckets pelo *optimization_goal* das
         campanhas Meta (NÃO pelo model routing do nosso código). Os 3 buckets
@@ -2586,9 +2591,9 @@ class DataQualityMonitor:
             return float((s == cat).sum()) / len(s) * 100.0
 
         # Janela 1: ontem (full BRT day anterior)
-        df_day = self._query_railway_previous_full_brt_day()
+        df_day = self._query_railway_previous_full_brt_day(anchor_date=anchor_date)
         # Janela 2: lançamento atual
-        df_launch, launch_info = self._query_railway_current_launch_brt()
+        df_launch, launch_info = self._query_railway_current_launch_brt(anchor_date=anchor_date)
 
         # Classifica todas as campanhas únicas (ambas janelas) em 3 buckets
         # uma única vez. Reusa cache de classe (TTL 30min) entre invocações.
@@ -2684,7 +2689,7 @@ class DataQualityMonitor:
 
         return alerts
 
-    def _check_audience_drift_by_source(self, top_list: List[Dict]) -> List[Dict]:
+    def _check_audience_drift_by_source(self, top_list: List[Dict], anchor_date=None) -> List[Dict]:
         """Drift de público segmentado por fonte de tráfego (Meta vs Google).
 
         Mesma forma de `_check_audience_drift_by_variant` mas o split é por
@@ -2740,8 +2745,8 @@ class DataQualityMonitor:
 
         now_iso = datetime.now(timezone.utc).isoformat()
 
-        df_day = self._query_railway_previous_full_brt_day()
-        df_launch, launch_info = self._query_railway_current_launch_brt()
+        df_day = self._query_railway_previous_full_brt_day(anchor_date=anchor_date)
+        df_launch, launch_info = self._query_railway_current_launch_brt(anchor_date=anchor_date)
 
         for window_key, window_df, window_label in [
             ('previous_day', df_day, 'Ontem (dia BRT anterior)'),
