@@ -41,6 +41,106 @@ def _cloudsql_conn():
     )
 
 
+# ---------------------------------------------------------------------------
+# Lado de ESCRITA — contrato da tabela + upsert idempotente.
+# Fonte única do schema de `scores_historicos` num dir que VAI pra imagem (o
+# Dockerfile copia src/, não scripts/), pra que o refresh online (api/) possa
+# gravar. Os scripts CLI de backfill mantêm cópia própria por rodarem só local;
+# consolidá-los pra importar daqui é follow-up (não fazer de passagem).
+# ---------------------------------------------------------------------------
+
+SCORES_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS scores_historicos (
+    id                 BIGSERIAL PRIMARY KEY,
+    email              TEXT NOT NULL,
+    lf                 TEXT NOT NULL,
+    mes_lancamento     TEXT,
+    vendas_inicio      DATE,
+    vendas_estimada    BOOLEAN,
+    data_captura       TIMESTAMP,
+    semana_captacao    TEXT,
+    score_champion     DOUBLE PRECISION,
+    decil_champion     TEXT,
+    score_challenger   DOUBLE PRECISION,
+    decil_challenger   TEXT,
+    champion_run_id    TEXT NOT NULL,
+    challenger_run_id  TEXT NOT NULL,
+    core_commit        TEXT,
+    generated_at       TIMESTAMP,
+    UNIQUE (email, lf, champion_run_id, challenger_run_id)
+)
+"""
+SCORES_TABLE_IDX = (
+    "CREATE INDEX IF NOT EXISTS idx_scores_hist_lf ON scores_historicos (lf)"
+)
+
+INSERT_COLS = [
+    "email", "lf", "mes_lancamento", "vendas_inicio", "vendas_estimada",
+    "data_captura", "semana_captacao", "score_champion", "decil_champion",
+    "score_challenger", "decil_challenger", "champion_run_id",
+    "challenger_run_id", "core_commit", "generated_at",
+]
+
+
+def _multi_insert_sql(n: int) -> str:
+    tuples = [
+        "(" + ", ".join(f":{c}_{i}" for c in INSERT_COLS) + ")"
+        for i in range(n)
+    ]
+    return (
+        f"INSERT INTO scores_historicos ({', '.join(INSERT_COLS)}) "
+        f"VALUES {', '.join(tuples)} "
+        f"ON CONFLICT (email, lf, champion_run_id, challenger_run_id) DO NOTHING"
+    )
+
+
+def existing_score_emails(conn, lf_name, champion_run_id, challenger_run_id) -> set:
+    """Emails já gravados pro (lf, par de run_ids) — base do delta incremental
+    (o refresh só re-scoreia quem falta). Levanta em erro de leitura: o chamador
+    decide abortar (melhor pular o refresh do que re-scorear o lançamento todo)."""
+    rows = conn.run(
+        "SELECT email FROM scores_historicos "
+        "WHERE lf = :lf AND champion_run_id = :cr AND challenger_run_id = :chr",
+        lf=lf_name, cr=champion_run_id, chr=challenger_run_id,
+    )
+    return {row[0] for row in rows}
+
+
+def upsert_scores(conn, rows, *, batch: int = 500, ensure_table: bool = True) -> int:
+    """Insere linhas em `scores_historicos` (idempotente: ON CONFLICT DO NOTHING).
+
+    Args:
+        conn: conexão pg8000 no Cloud SQL ledger (injetada).
+        rows: iterável de dicts; chaves de INSERT_COLS são lidas via .get (ausente
+            → None). Valores com .isoformat (datetime/date/Timestamp) viram ISO.
+        batch: tamanho do lote por INSERT multi-VALUES.
+        ensure_table: roda CREATE TABLE/INDEX IF NOT EXISTS antes (idempotente).
+
+    Returns:
+        nº de linhas ENVIADAS (conflitos são ignorados em silêncio pelo ON
+        CONFLICT, então não reflete necessariamente o nº inserido). 0 se vazio.
+    """
+    recs = list(rows)
+    if not recs:
+        return 0
+    if ensure_table:
+        conn.run(SCORES_TABLE_DDL)
+        conn.run(SCORES_TABLE_IDX)
+    enviadas = 0
+    for i in range(0, len(recs), batch):
+        chunk = recs[i:i + batch]
+        params = {}
+        for j, rec in enumerate(chunk):
+            for col in INSERT_COLS:
+                v = rec.get(col)
+                if hasattr(v, "isoformat"):
+                    v = v.isoformat()
+                params[f"{col}_{j}"] = v
+        conn.run(_multi_insert_sql(len(chunk)), **params)
+        enviadas += len(chunk)
+    return enviadas
+
+
 def launch_score_geral(lf_name: Optional[str], *, conn=None) -> Optional[Dict[str, Any]]:
     """Score geral do lançamento = decil médio da população pela régua do
     Challenger, lido da `scores_historicos`.
