@@ -171,21 +171,20 @@ def build_event(
     event_timestamp_iso: str,
     transaction_id: str,
     gclid: Optional[str] = None,
+    event_source: str = "WEB",
 ) -> Dict:
     """Monta um Event do events:ingest.
 
-    ⚠️ FORMA SUJEITA A CONFIRMAÇÃO via validateOnly antes do canary — os nomes de
-    campo abaixo seguem a doc da Data Manager API, mas só a chamada validate_only
-    garante que casam com a versão atual da API. Centralizado aqui de propósito:
-    se algum nome divergir, conserta-se num lugar só.
+    Nomes de campo confirmados via validateOnly contra a API real (2026-06-14):
+    valor e moeda são top-level `conversionValue` (number) + `currency` (string)
+    — NÃO um objeto `conversion` aninhado.
     """
     event: Dict = {
-        "transactionId": transaction_id,        # dedupe
-        "eventTimestamp": event_timestamp_iso,  # RFC3339
-        "conversion": {
-            "value": value,
-            "currencyCode": currency,
-        },
+        "transactionId": transaction_id,         # dedupe
+        "eventTimestamp": event_timestamp_iso,   # RFC3339
+        "conversionValue": value,                # top-level (number)
+        "currency": currency,                    # top-level (string)
+        "eventSource": event_source,             # obrigatório — lead de formulário web = WEB
     }
     user_ids = hash_user_identifiers(email, phone)
     if user_ids:
@@ -205,18 +204,20 @@ def build_ingest_request(
     login_customer_id: Optional[str] = None,
     validate_only: bool = False,
 ) -> Dict:
-    """Corpo do POST events:ingest. `productDestinationId` = a conversion action.
-    `operatingAccount` = a conta Google Ads (DevClub). ⚠️ Confirmar nomes via
-    validate_only (ver build_event)."""
-    operating = {"product": "GOOGLE_ADS", "accountId": customer_id}
+    """Corpo do POST events:ingest. `productDestinationId` = a conversion action;
+    `operatingAccount` = conta onde a conversão cai (DevClub); `loginAccount` =
+    conta usada pra autenticar a chamada (MCC) — CAMPO IRMÃO de operatingAccount,
+    não dentro dele. Nomes confirmados via validateOnly (2026-06-14)."""
+    destination = {
+        "operatingAccount": {"product": "GOOGLE_ADS", "accountId": customer_id},
+        "productDestinationId": conversion_action_id,
+    }
     if login_customer_id:
-        operating["loginAccountId"] = login_customer_id
+        destination["loginAccount"] = {"product": "GOOGLE_ADS", "accountId": login_customer_id}
     return {
-        "destinations": [{
-            "operatingAccount": operating,
-            "productDestinationId": conversion_action_id,
-        }],
+        "destinations": [destination],
         "events": events,
+        "encoding": "HEX",        # obrigatório — como os user identifiers estão hasheados (SHA-256 hex)
         "validateOnly": validate_only,
     }
 
