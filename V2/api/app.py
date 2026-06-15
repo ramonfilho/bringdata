@@ -3125,82 +3125,63 @@ async def daily_monitoring_check_railway(
                 'google': {'distribution': dist_ggl,  'total': n_ggl},
             }
 
-        # Split por optimization_goal da campanha (Lead/Champion/Challenger) —
-        # mesmos buckets das tabelas Drift por A/B. Usa cache compartilhado de
-        # src/monitoring/campaign_classifier. Quality_rows tem source no índice
-        # [3] e utm_campaign no [5] (vide records_to_quality_rows).
-        #
-        # IMPORTANTE: bucket Lead é ESTRITO Meta — só leads com source ∈
-        # allowlist da CAPI (capi.utm_source_allowlist). Google, orgânico e
-        # outros NÃO entram em nenhum dos 3 buckets — ficam apenas nas linhas
-        # de fonte (Total/Meta/Google) do KPI panel. Mudança 2026-06-03 pra
-        # alinhar com data_quality._split_df_by_optgoal e evitar que Google
-        # dilua a coluna Lead com perfil de qualidade diferente.
-        from src.monitoring.campaign_classifier import (
-            classify_campaign_buckets as _classify_buckets,
-            extract_campaign_id as _extract_cid,
-        )
-        # Adapter Meta criado uma vez aqui e injetado no classifier.
-        _meta_for_buckets = None
-        try:
-            _token_buckets = os.getenv('META_ACCESS_TOKEN')
-            if _token_buckets:
-                from api.meta_integration import MetaAdsIntegration as _MI_buckets
-                _meta_for_buckets = _MI_buckets(access_token=_token_buckets)
-        except Exception:
-            _meta_for_buckets = None
-        # Classifica todas as campanhas de quality_rows uma vez. quality_rows
-        # cobre 90 dias; o cache TTL 30min absorve dailys consecutivos.
-        _all_camps = [r[5] for r in quality_rows if len(r) > 5 and r[5]]
-        _bucket_classification = _classify_buckets(_all_camps, meta=_meta_for_buckets)
-
-        # Allowlist Meta — mesma fonte que o gate de envio CAPI.
+        # Split Champion/Challenger por VARIANTE do ledger (registros_ml.variant) —
+        # NÃO mais pelo optimization_goal da campanha via Meta API. O variant é a
+        # verdade registrada de qual modelo scoreou cada lead; não depende de API
+        # externa, então o split nunca vem vazio por rate-limit (bug recorrente
+        # 06/2026). /sw-architect aprovou substituir a fonte. O antigo bucket
+        # "Lead" (otimização de campanha) deixa de existir: leads scoreados pelo
+        # Champion (variant None) entram em champion. Mantém filtro Meta-source
+        # (allowlist CAPI) p/ paridade com a versão anterior.
         _allow_capi = (pipeline._client_config.capi.utm_source_allowlist
                        if pipeline and pipeline._client_config and pipeline._client_config.capi
                        else None) or []
         _META_SOURCES_OG = {str(x).lower().strip() for x in _allow_capi}
 
-        def _decil_dist_by_optgoal(rows) -> Dict[str, Dict]:
-            buckets = ('Lead', 'Champion', 'Challenger')
-            dists = {b: {f'D{i:02d}': 0 for i in range(1, 11)} for b in buckets}
-            totals = {b: 0 for b in buckets}
-            # Fallback quando classifier Meta API falhou (dict vazio): TODO
-            # MUNDO vai pro Lead catch-all (Meta + Google + Outros, sem filtro
-            # de source). Sem essa linha de defesa, o renderer escondia as 3
-            # linhas Lead/Champion/Challenger do KPI Decis quando o classifier
-            # falhava — caso 2026-06-03 09:35 BRT que produziu relatório
-            # praticamente vazio no #team-dados (rate limit Meta de ~5min).
-            if not _bucket_classification:
-                for r in rows:
-                    d = r[1]
-                    if d is None: continue
-                    key = f'D{int(d):02d}'
-                    if key in dists['Lead']:
-                        dists['Lead'][key] += 1
-                        totals['Lead'] += 1
-                return {
-                    'lead':       {'distribution': dists['Lead'],       'total': totals['Lead']},
-                    'champion':   {'distribution': dists['Champion'],   'total': 0},
-                    'challenger': {'distribution': dists['Challenger'], 'total': 0},
-                }
-            for r in rows:
-                d = r[1]
-                if d is None: continue
-                # Filtro source — só Meta entra nos 3 buckets.
-                src = (str(r[3]).strip().lower() if len(r) > 3 and r[3] else '')
+        def _rec_between(recs, a_utc, b_utc, incl_b):
+            out = []
+            for rec in recs:
+                c = rec.criado_em
+                if c is None:
+                    continue
+                if c.tzinfo is None:
+                    c = c.replace(tzinfo=_tz.utc)
+                if c >= a_utc and (c <= b_utc if incl_b else c < b_utc):
+                    out.append(rec)
+            return out
+
+        def _decil_dist_by_variant(records) -> Dict[str, Dict]:
+            dists = {b: {f'D{i:02d}': 0 for i in range(1, 11)} for b in ('champion', 'challenger')}
+            totals = {'champion': 0, 'challenger': 0}
+            n_variant_set = 0
+            for rec in records:
+                if rec.decil is None:
+                    continue
+                src = (rec.utm_source or '').strip().lower()
                 if src not in _META_SOURCES_OG:
                     continue
-                camp = r[5] if len(r) > 5 else None
-                cid = _extract_cid(camp)
-                bucket = _bucket_classification.get(cid, 'Lead') if cid else 'Lead'
-                key = f'D{int(d):02d}'
+                v = (rec.variant or '').strip().lower()
+                if v:
+                    n_variant_set += 1
+                bucket = 'challenger' if 'challenger' in v else 'champion'
+                key = f'D{int(rec.decil):02d}'
                 if key in dists[bucket]:
                     dists[bucket][key] += 1
                     totals[bucket] += 1
+            # Fail-loud: leads Meta presentes mas variant todo-nulo → A/B inativo
+            # ou variant não gravado. Loga alto em vez de mostrar Challenger=0 em
+            # silêncio (o exato bug que esta troca conserta).
+            if (totals['champion'] + totals['challenger']) > 0 and n_variant_set == 0:
+                logger.warning(
+                    "[decis by_variant] %d leads Meta na janela mas variant todo-nulo "
+                    "— A/B inativo ou variant não gravado no ledger",
+                    totals['champion'] + totals['challenger'],
+                )
+            # Chave 'lead' mantida (total 0) p/ compat de schema; bucket não renderizado.
             return {
-                'lead':       {'distribution': dists['Lead'],       'total': totals['Lead']},
-                'champion':   {'distribution': dists['Champion'],   'total': totals['Champion']},
-                'challenger': {'distribution': dists['Challenger'], 'total': totals['Challenger']},
+                'lead':       {'distribution': {f'D{i:02d}': 0 for i in range(1, 11)}, 'total': 0},
+                'champion':   {'distribution': dists['champion'],   'total': totals['champion']},
+                'challenger': {'distribution': dists['challenger'], 'total': totals['challenger']},
             }
 
         # Baselines de decis Top 6 ROAS (scoreados separadamente por Champion e Challenger).
@@ -3316,7 +3297,7 @@ async def daily_monitoring_check_railway(
             'baseline_champion':   _baseline_champion_payload,
             'baseline_challenger': _baseline_challenger_payload,
             'by_source':  _decil_dist_by_source(_yest_rows),
-            'by_optgoal': _decil_dist_by_optgoal(_yest_rows),
+            'by_optgoal': _decil_dist_by_variant(_rec_between(_records_90d_scored, _yest_start_utc, _yest_end_utc, False)),
         }
 
         # Qualidade do LF de referência — apenas LF ativo no launches.yaml,
@@ -3361,7 +3342,7 @@ async def daily_monitoring_check_railway(
                 'baseline_champion':   _baseline_champion_payload,
                 'baseline_challenger': _baseline_challenger_payload,
                 'by_source':  _decil_dist_by_source(_lf_rows),
-                'by_optgoal': _decil_dist_by_optgoal(_lf_rows),
+                'by_optgoal': _decil_dist_by_variant(_rec_between(_records_90d_scored, _cs_dt, _ce_dt, True)),
             }
             logger.info(f"📊 lf_referencia: {_ln} "
                         f"({_lw.cap_start}→{_cap_end_eff}, source={_lw.source}, n={len(_lf_rows)})")
