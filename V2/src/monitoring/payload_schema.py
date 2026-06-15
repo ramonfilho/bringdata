@@ -476,6 +476,13 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'lead_quality_metrics.decil_distribution_current_launch.distribution.D10':          (R, None),
     'lead_quality_metrics.decil_distribution_current_launch.total':                     (R, None),  # ex: 5371
     'lead_quality_metrics.decil_distribution_current_launch.window_label':              (R, None),  # ex: 'LF54 (29/04→06/05 BRT)'
+    # score_geral — nota única da população (decil médio Challenger, scores_historicos)
+    'lead_quality_metrics.decil_distribution_current_launch.score_geral':               (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.score_geral.decil_medio':   (R, None),  # ex: 5.84
+    'lead_quality_metrics.decil_distribution_current_launch.score_geral.pct_d9_d10':    (R, None),  # ex: 22.5
+    'lead_quality_metrics.decil_distribution_current_launch.score_geral.n':             (R, None),  # ex: 8205
+    'lead_quality_metrics.decil_distribution_current_launch.score_geral.modelo':        (R, None),  # ex: 'Challenger'
+    'lead_quality_metrics.decil_distribution_current_launch.score_geral.populacao':     (R, None),  # ex: 'todas as fontes'
     'lead_quality_metrics.decil_distribution_current_launch.baseline':                  (R, None),
     'lead_quality_metrics.decil_distribution_current_launch.baseline.pct':              (R, None),
     'lead_quality_metrics.decil_distribution_current_launch.baseline.pct.D01':          (R, None),

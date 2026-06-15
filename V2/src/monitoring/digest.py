@@ -1487,6 +1487,16 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     if base_label:
         title += f' vs *{base_label}*'
     rows = [title]
+    # Score geral do lançamento — nota única da população (decil médio pela régua
+    # do Challenger, scores_historicos). Só aparece na janela que tem o campo
+    # (current_launch). É a população INTEIRA (todas as fontes), não só Meta.
+    _sg = info.get('score_geral') or {}
+    if _sg.get('decil_medio') is not None:
+        rows.append(
+            f"🎯 *Score geral ({_sg.get('modelo', 'Challenger')}): "
+            f"{_sg['decil_medio']:.1f}/10*  ·  {_sg.get('pct_d9_d10', 0):.0f}% em D9-D10"
+            f"  ·  n={_sg.get('n', 0):,} ({_sg.get('populacao', 'todas as fontes')})"
+        )
     # 3 réguas declaradas. Total/Meta usam Ponderada (peso A/B × ref). Lead/
     # Champion/Google usam Champion. Challenger usa Challenger. Cada linha
     # mostra inline qual régua usa pra evitar ambiguidade.
