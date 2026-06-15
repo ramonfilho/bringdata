@@ -86,6 +86,29 @@ A regra é gêmea da `/mlops-architect`: aquela cobra a integridade do sinal ML;
 
 ---
 
+## Worktree por frente — produção só sai da `main`
+
+**Regra obrigatória — aplica antes de escrever a primeira linha de uma feature ou mudança de código.**
+
+Toda frente de trabalho (feature nova, refator, migração, mudança de código que vá além de um fix trivial de 1 arquivo) começa numa **worktree + branch própria** — nunca direto na `main` / no working tree principal. E **produção só é promovida a partir da `main`**, depois de PR e merge. Nenhuma frente promove tráfego de produção sozinha.
+
+**Fluxo:**
+
+1. **Abrir worktree por frente:** `git worktree add ~/bring_data.worktrees/<nome> -b feat/<nome>`. Cada frente tem working tree próprio — o trabalho não-commitado de uma não vaza pra outra.
+2. **Avançar isolado:** commits na branch da frente, no seu ritmo.
+3. **Testar em canary SEM tráfego:** `deploy_capi.sh` sai `--no-traffic` (tag canary). Validar na URL da tag. **Nunca** `update-traffic ... =100` de uma revisão que não veio da `main`.
+4. **Juntar via PR → `main`:** resolver conflitos no merge, com as frentes lado a lado.
+5. **Só então deployar produção** a partir da `main` consolidada e promover o tráfego.
+6. **Limpar:** `git worktree remove <path>` ao terminar (apaga pasta + referência); `git worktree prune` varre órfãs. Worktrees ficam em `~/bring_data.worktrees/`, fora do Desktop.
+
+**Por que esta regra existe:** em 13/06/2026 dois terminais trabalhavam na **mesma `main`, no mesmo working tree**, e ambos deployavam direto pra produção. Resultado: um deploy reverteu a env do outro (o consumer voltou a gravar só no Railway e o Cloud SQL ficou ~2h sem receber — **40 leads perdidos** até o backfill), a produção ficou com **pedaços de duas frentes misturados**, e o working tree sujo de uma frente "vazava" pro deploy da outra. Worktree por frente + produção só da `main` teria evitado os três.
+
+**Ressalva — infra do Cloud Run é compartilhada.** Worktree isola o **código**, mas as env vars e o roteamento de tráfego do serviço são **um só**. Por isso comportamento crítico de migração mora em **default no `config.sh`**, não em env exportada que alguém precisa lembrar (ex.: `LEDGER_TARGET=dual` é default — qualquer deploy de qualquer frente mantém a gravação dupla).
+
+**Quando NÃO precisa de worktree:** conversa/análise sem mudança de código, leitura de docs, ou fix trivial contido num arquivo que não vai a deploy imediato. Na dúvida, abra a worktree — é barato.
+
+---
+
 ## Contexto de negócio
 
 - **Cliente atual:** DevClub (curso de programação)
