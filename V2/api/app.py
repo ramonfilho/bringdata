@@ -3341,6 +3341,16 @@ async def daily_monitoring_check_railway(
                 'by_source':  _decil_dist_by_source(_lf_rows),
                 'by_optgoal': _decil_dist_by_variant(_rec_between(_records_90d_scored, _cs_dt, _ce_dt, True)),
             }
+            # Score geral do lançamento — decil médio da população pela régua do
+            # Challenger, lido da scores_historicos (Cloud SQL). Leitura pura,
+            # guardada: se falhar, só não mostra a nota (não derruba o relatório).
+            try:
+                from src.data.scores_historicos import launch_score_geral
+                _sg = launch_score_geral(_lw.lf_name)
+                if _sg:
+                    railway_lead_quality['decil_distribution_current_launch']['score_geral'] = _sg
+            except Exception as _sge:
+                logger.warning(f"⚠️ score_geral falhou: {_sge}")
             logger.info(f"📊 lf_referencia: {_ln} "
                         f"({_lw.cap_start}→{_cap_end_eff}, source={_lw.source}, n={len(_lf_rows)})")
         except Exception as _lf_e:
