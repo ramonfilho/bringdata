@@ -1528,15 +1528,16 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     rows.append('```')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
-    # Bloco por optimization_goal (Slack block 2 separado — evita truncamento
-    # silencioso do Slack quando o bloco section fica grande/com caracteres
-    # especiais como `─`). Cada quadro renderiza num bloco próprio.
+    # Bloco por VARIANTE do A/B (Champion vs Challenger pelo variant do ledger,
+    # NÃO mais por optimization_goal da campanha via Meta API). Slack block 2
+    # separado — evita truncamento silencioso quando o bloco fica grande. O
+    # antigo bucket "Lead" (otimização de campanha) não existe mais no recorte
+    # por modelo; leads do Champion entram em Champion.
     if show_og:
         og_rows = ['```']
         og_rows.append(
             f'{"Bucket":<14}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
         )
-        og_rows.append(_row('Lead',       _kpis(og_lead_info.get('distribution') or {}, n_og_lead), ref_champion,   'Champion'))
         og_rows.append(_row('Champion',   _kpis(og_chmp_info.get('distribution') or {}, n_og_chmp), ref_champion,   'Champion'))
         og_rows.append(_row('Challenger', _kpis(og_chal_info.get('distribution') or {}, n_og_chal), ref_challenger, 'Challenger'))
         og_rows.append('```')
