@@ -124,8 +124,8 @@ Consolidar em DUAS tabelas no database `ledger`:
 Ordem do menor risco pro maior:
 
 - [x] 3.0 Helper `open_ledger_read_connection()` + `load_ml_ledger` migrado (1º leitor, validação manual/semanal, baixo risco). Testado: lê igual das duas fontes.
-- [ ] 3.1 Camada `src/data/`: `compose_repository('registros_ml')` passa a conectar no Cloud SQL (a decisão de fonte é por env — ponto único de composição). Cobre: alertas críticos via repo, capi_monitor, operational_monitor, data_quality, pubsub_summary, endpoints de diagnóstico.
-- [ ] 3.2 As 3 regras Pub/Sub com SQL direto (`critical_alerts.py:396-514`): recebem conn do Cloud SQL (ou migram pro repo, melhor)
+- [x] 3.1 `run_critical_checks` (alertas críticos, 5min): abre `ledger_conn` via helper e usa nos leitores do ledger (`repo` + 3 regras Pub/Sub); `railway_conn` segue no `baseline_repo` (Lead) e `rule_no_leads_arriving` (lead_surveys). Testado nas 2 fontes (9/9 regras, 0 erro, idêntico); 10/10 testes. **Cobre também o item 3.2** (as 3 regras Pub/Sub agora usam `ledger_conn`).
+- [ ] 3.1b Demais pontos de composição da camada: orchestrator.py:131-133 (capi_monitor, operational_monitor, data_quality, pubsub_summary) + app.py daily-check (repo + leads_in_range) + endpoints de diagnóstico (audience-drift, utm-quality, predict/explain)
 - [ ] 3.3 Bloco T3-5 do orchestrator (`orchestrator.py:392-474`): conn própria → Cloud SQL
 - [ ] 3.4 `data_loader.load_ml_ledger` + anti-join de `validate_ml_performance.py:1256-1280`: trocar para `LEDGER_DB_*`; **varrer defaults hardcoded `shortline.proxy.rlwy.net` nesses arquivos**
 - [ ] 3.5 Gate C (`test_revision_equivalence.py:176,244`) + carregamento de env no `deploy_capi.sh:638`

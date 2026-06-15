@@ -781,47 +781,62 @@ def run_critical_checks(
 
     # Ponto único de composição dos repositórios de leads — quem entra em
     # produção (esta função) decide as fontes; cada regra migrada recebe o
-    # repositório por injeção. `railway_conn` segue passado às regras não
-    # migradas (coexistência durante o refator).
+    # repositório por injeção.
+    #
+    # Fonte do LEDGER (registros_ml) via `open_ledger_read_connection()`:
+    # Railway ou Cloud SQL conforme LEDGER_READ_SOURCE (PLANO_LEDGER_CLOUDSQL.md
+    # Etapa 3). registros_ml é idêntico nos dois bancos. `railway_conn` segue
+    # servindo o que SÓ existe no Railway: baseline `Lead` (legacy) e a
+    # `lead_surveys` da regra rule_no_leads_arriving.
     from src.data import compose_repository
-    repo = compose_repository('registros_ml', railway_conn=railway_conn)
-    baseline_repo = compose_repository('legacy', railway_conn=railway_conn)
+    from src.data.ledger_connection import open_ledger_read_connection
 
-    rules: list[Callable[[], RuleResult]] = [
-        lambda: rule_no_leads_arriving(railway_conn),
-        lambda: rule_capi_success_low(repo),
-        lambda: rule_variant_no_capi(repo),
-        lambda: rule_utm_source_missing(repo),
-        lambda: rule_polling_500(store),
-        lambda: rule_score_drift(repo, baseline_repo, expected_decil_dist),
-        lambda: rule_pubsub_consumer_stalled(railway_conn),
-        lambda: rule_pubsub_error_rate_high(railway_conn),
-        lambda: rule_pubsub_skipped_missing_data_high(railway_conn),
-    ]
-
+    ledger_conn = open_ledger_read_connection()
     summary = {'evaluated': 0, 'fired': 0, 'sent': 0, 'cooldown': 0,
                'dry_run': 0, 'error': 0, 'skipped': 0, 'no_change': 0,
                'state_unavailable': 0,
                'mode': 'dry_run' if dry_run else 'live'}
     fired_details: list[dict] = []
+    try:
+        repo = compose_repository('registros_ml', railway_conn=ledger_conn)
+        baseline_repo = compose_repository('legacy', railway_conn=railway_conn)
 
-    for r in rules:
+        rules: list[Callable[[], RuleResult]] = [
+            lambda: rule_no_leads_arriving(railway_conn),
+            lambda: rule_capi_success_low(repo),
+            lambda: rule_variant_no_capi(repo),
+            lambda: rule_utm_source_missing(repo),
+            lambda: rule_polling_500(store),
+            lambda: rule_score_drift(repo, baseline_repo, expected_decil_dist),
+            lambda: rule_pubsub_consumer_stalled(ledger_conn),
+            lambda: rule_pubsub_error_rate_high(ledger_conn),
+            lambda: rule_pubsub_skipped_missing_data_high(ledger_conn),
+        ]
+
+        for r in rules:
+            try:
+                result = r()
+            except Exception as e:
+                logger.error(f"[critical_alerts] regra falhou ao avaliar: {e}", exc_info=True)
+                summary['error'] += 1
+                continue
+            summary['evaluated'] += 1
+            status = dispatcher.maybe_send(result)
+            summary[status] = summary.get(status, 0) + 1
+            if result.fired:
+                summary['fired'] += 1
+                fired_details.append({
+                    'rule': result.rule_name, 'severity': result.severity,
+                    'message': result.message, 'details': result.details,
+                    'dispatch_status': status,
+                })
+    finally:
+        # ledger_conn é sempre uma conexão própria (mesmo quando aponta pro
+        # Railway) — fechar pra não vazar conexão a cada ciclo de 5min.
         try:
-            result = r()
-        except Exception as e:
-            logger.error(f"[critical_alerts] regra falhou ao avaliar: {e}", exc_info=True)
-            summary['error'] += 1
-            continue
-        summary['evaluated'] += 1
-        status = dispatcher.maybe_send(result)
-        summary[status] = summary.get(status, 0) + 1
-        if result.fired:
-            summary['fired'] += 1
-            fired_details.append({
-                'rule': result.rule_name, 'severity': result.severity,
-                'message': result.message, 'details': result.details,
-                'dispatch_status': status,
-            })
+            ledger_conn.close()
+        except Exception:
+            pass
 
     store.flush()
     summary['fired_rules'] = fired_details
