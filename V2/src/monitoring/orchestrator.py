@@ -144,12 +144,15 @@ class MonitoringOrchestrator:
             'capi_quality': CAPIQualityMonitor(self._repo, client_config=self._client_config)
         }
 
-    def run_daily_check(self, leads_data: List[Dict]) -> Dict:
+    def run_daily_check(self, leads_data: List[Dict], anchor_date=None) -> Dict:
         """
         Executa check diário completo.
 
         Args:
             leads_data: Lista de dicts com dados do Sheets (últimas 24h)
+            anchor_date: opcional `datetime.date` — ancora a resolução de "hoje"
+                das janelas de drift (ontem/lançamento) nesse dia, pra renderizar
+                relatório de lançamento passado. None = hoje real (cron 06:00).
 
         Returns:
             {
@@ -226,7 +229,7 @@ class MonitoringOrchestrator:
             saldo_fe = colunas_depois_fe - colunas_antes_fe
             logger.info(f" Features derivadas criadas: {saldo_fe:+d} colunas (total: {colunas_depois_fe})")
 
-            all_alerts_dict.extend(self.monitors['data_quality'].check(df))
+            all_alerts_dict.extend(self.monitors['data_quality'].check(df, anchor_date=anchor_date))
 
         # 2. Operational (usa PostgreSQL)
         all_alerts_dict.extend(self.monitors['operational'].check())

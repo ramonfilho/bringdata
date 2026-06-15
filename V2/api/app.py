@@ -2507,6 +2507,7 @@ async def daily_monitoring_check_railway(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     include_today_partial: bool = False,
+    anchor_date: Optional[str] = None,
 ):
     """
     Executa check diário de monitoramento 100% com dados do Railway PostgreSQL.
@@ -2540,6 +2541,27 @@ async def daily_monitoring_check_railway(
         # ------------------------------------------------------------------
         brt = _tz(timedelta(hours=-3))
         now_utc = datetime.now(_tz.utc)
+
+        # Âncora opcional: renderiza o relatório de um lançamento PASSADO ancorando
+        # "hoje" na data informada. Deriva start/end da janela cap do LF resolvido
+        # (reusa a maquinaria de start_date/end_date abaixo) e propaga `_anchor`
+        # pras seções de "lançamento atual" (decis + drift). None = hoje real
+        # (o cron das 06:00 nunca passa esse param → comportamento intacto).
+        _anchor = None
+        if anchor_date:
+            from datetime import date as _date_cls
+            try:
+                _anchor = _date_cls.fromisoformat(anchor_date)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"anchor_date inválido: '{anchor_date}'. Use YYYY-MM-DD.",
+                )
+            if not (start_date and end_date):
+                from src.core.launches import resolve_launch_window_brt as _rlw_anchor
+                _alw = _rlw_anchor(today=_anchor)
+                start_date = _alw.cap_start.isoformat()
+                end_date   = (_alw.cap_end or _anchor).isoformat()
 
         if start_date and end_date:
             try:
@@ -3307,8 +3329,8 @@ async def daily_monitoring_check_railway(
             # DM aparece mesmo com YAML defasado. O aviso no topo da DM
             # (`_slack_launch_fallback_notice_dm`) lembra de cadastrar.
             from src.core.launches import resolve_launch_window_brt
-            _lw = resolve_launch_window_brt()
-            _today_brt = datetime.now(brt).date()
+            _lw = resolve_launch_window_brt(today=_anchor)
+            _today_brt = _anchor or datetime.now(brt).date()
             _cap_end_eff = _lw.cap_end or _today_brt
             _ln = _lw.lf_name or 'LF atual (inferido)'
             _cs_dt = datetime(_lw.cap_start.year, _lw.cap_start.month, _lw.cap_start.day,
@@ -3452,7 +3474,7 @@ async def daily_monitoring_check_railway(
         except Exception:
             pass
         try:
-            result = orchestrator.run_daily_check(leads_data)
+            result = orchestrator.run_daily_check(leads_data, anchor_date=_anchor)
         finally:
             try: orchestrator_conn.close()
             except Exception: pass
@@ -3914,6 +3936,7 @@ async def post_slack_digest(
     channel_full: Optional[str] = None,
     hours: int = 24,
     include_today_partial: bool = False,
+    date: Optional[str] = None,
 ):
     """
     Renderiza o daily-check em 2 views distintas e posta em canais separados.
@@ -3961,6 +3984,7 @@ async def post_slack_digest(
         start_date=None,
         end_date=None,
         include_today_partial=include_today_partial,
+        anchor_date=date,
     )
     payload = response.model_dump() if hasattr(response, 'model_dump') else dict(response)
 
