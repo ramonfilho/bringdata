@@ -1253,6 +1253,24 @@ def main():
                 logger.info(f"    Buscando leads em Client+UTMTracking ({_client_start} → {_leads_end_str})...")
                 try:
                     import pg8000.native as _pg
+                    from src.data.ledger_connection import open_ledger_read_connection
+                    _end_excl = (pd.to_datetime(_leads_end_str) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
+
+                    # Anti-join cross-banco: `Client`/`UTMTracking` só existem no Railway,
+                    # mas o set de e-mails do ledger vem da fonte escolhida por
+                    # LEDGER_READ_SOURCE (railway|cloudsql) — assim sobrevive ao DROP do
+                    # `registros_ml` no Railway (Etapa 5). Filtro em Python, não em SQL.
+                    _ledger_conn = open_ledger_read_connection()
+                    try:
+                        _ledger_email_rows = _ledger_conn.run(
+                            '''SELECT LOWER(email) FROM registros_ml
+                               WHERE created_at >= :s AND created_at < :e AND email IS NOT NULL''',
+                            s=_client_start, e=_end_excl,
+                        )
+                    finally:
+                        _ledger_conn.close()
+                    _ledger_emails = {r[0] for r in _ledger_email_rows if r[0]}
+
                     _conn = _pg.Connection(
                         host=os.environ.get('RAILWAY_DB_HOST', 'shortline.proxy.rlwy.net'),
                         port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
@@ -1260,7 +1278,6 @@ def main():
                         user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
                         password=os.environ['RAILWAY_DB_PASSWORD'],
                     )
-                    _end_excl = (pd.to_datetime(_leads_end_str) + pd.Timedelta(days=1)).strftime('%Y-%m-%d')
                     _client_rows = _conn.run(
                         '''
                         SELECT c.email, c."firstName", c."lastName", c.phone,
@@ -1276,14 +1293,15 @@ def main():
                         ) u ON true
                         WHERE c."firstSeenAt" >= :s AND c."firstSeenAt" < :e
                           AND c.email IS NOT NULL AND c.email != ''
-                          AND LOWER(c.email) NOT IN (
-                              SELECT LOWER(email) FROM registros_ml
-                              WHERE created_at >= :s AND created_at < :e AND email IS NOT NULL
-                          )
                         ''',
                         s=_client_start, e=_end_excl,
                     )
                     _conn.close()
+                    # Anti-join em Python: descarta quem já está no ledger.
+                    _client_rows = [
+                        r for r in _client_rows
+                        if (r[0] or '').strip().lower() not in _ledger_emails
+                    ]
                     def _ss(v): return v.strip() if isinstance(v, str) else ''
                     client_leads = [
                         {

@@ -2602,8 +2602,13 @@ async def daily_monitoring_check_railway(
         # 1a. Leads com score na janela — via LeadRepository (ledger novo
         # `registros_ml`). Substitui SQL inline na Lead antiga (morta desde
         # 2026-05-17). Fatia A do refator daily-check pra fonte unificada.
+        # O ledger é lido pela fonte escolhida por LEDGER_READ_SOURCE
+        # (railway|cloudsql) — conn dedicada, separada da `railway_conn` que
+        # serve só tabelas Railway-only (Client). PLANO_LEDGER_CLOUDSQL Etapa 3.
         from src.data import compose_repository
-        _repo_leads = compose_repository('registros_ml', railway_conn=railway_conn)
+        from src.data.ledger_connection import open_ledger_read_connection
+        ledger_conn = open_ledger_read_connection()
+        _repo_leads = compose_repository('registros_ml', railway_conn=ledger_conn)
         _records = _repo_leads.leads_in_range(window_start, window_end)
         # Filtra: só leads efetivamente scoreados (equivalente ao
         # `WHERE leadScore IS NOT NULL` da query antiga).
@@ -2832,6 +2837,10 @@ async def daily_monitoring_check_railway(
             logger.warning(f"⚠️ survey_funnel DB queries: {_sfm_e}")
 
         railway_conn.close()
+        try:
+            ledger_conn.close()
+        except Exception:
+            pass
 
         # ------------------------------------------------------------------
         # 2. Processar scored_rows → leads_data (para o orquestrador)
@@ -2844,16 +2853,11 @@ async def daily_monitoring_check_railway(
             _ps_early, _td_early = None, None
             try:
                 from src.data import compose_repository
+                from src.data.ledger_connection import open_ledger_read_connection
                 from src.monitoring.pubsub_summary import compute_pubsub_summary
                 from src.monitoring.training_drift_summary import compute_training_drift_summary
-                _early_conn = pg8000.native.Connection(
-                    host=os.environ['RAILWAY_DB_HOST'],
-                    port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
-                    database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
-                    user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
-                    password=os.environ['RAILWAY_DB_PASSWORD'],
-                    timeout=30,
-                )
+                # Ledger pela fonte de LEDGER_READ_SOURCE (railway|cloudsql).
+                _early_conn = open_ledger_read_connection()
                 try:
                     _early_repo = compose_repository('registros_ml', railway_conn=_early_conn)
                     _ps_early = compute_pubsub_summary(_early_repo)
@@ -3401,14 +3405,21 @@ async def daily_monitoring_check_railway(
             if _total_30d < 1000:
                 # Tabela "Lead" morta (17/05) esvazia a janela de 31d em ~18/06.
                 # Fallback: ledger registros_ml usa o que tiver desde 23/05
-                # (PLANO_LEDGER_CLOUDSQL.md §3.3).
-                _r30 = _e6_conn.run(
-                    'SELECT decil, COUNT(*) FROM registros_ml '
-                    "WHERE created_at >= NOW() - INTERVAL '31 days' "
-                    "  AND created_at <  NOW() - INTERVAL '1 day' "
-                    '  AND decil IS NOT NULL '
-                    'GROUP BY decil'
-                )
+                # (PLANO_LEDGER_CLOUDSQL.md §3.3). Lê pela fonte escolhida por
+                # LEDGER_READ_SOURCE (railway|cloudsql) — não pela conn do Railway,
+                # que perde a tabela no DROP da Etapa 5.
+                from src.data.ledger_connection import open_ledger_read_connection
+                _e6_ledger_conn = open_ledger_read_connection()
+                try:
+                    _r30 = _e6_ledger_conn.run(
+                        'SELECT decil, COUNT(*) FROM registros_ml '
+                        "WHERE created_at >= NOW() - INTERVAL '31 days' "
+                        "  AND created_at <  NOW() - INTERVAL '1 day' "
+                        '  AND decil IS NOT NULL '
+                        'GROUP BY decil'
+                    )
+                finally:
+                    _e6_ledger_conn.close()
                 _total_30d = sum(int(r[1]) for r in _r30) if _r30 else 0
             if _total_30d >= 1000:
                 # Normaliza decil pro formato D1..D10 (sem leading zero) — formato usado
@@ -4034,10 +4045,10 @@ async def audience_drift_endpoint(
     pública na internet; dado é demográfico agregado (sem PII).
     """
     from src.data import compose_repository
+    from src.data.ledger_connection import open_ledger_read_connection
     from src.monitoring.data_quality import DataQualityMonitor
     from src.core.client_config import ClientConfig
     from datetime import date as _date
-    import pg8000.native
     import pandas as _pd
 
     anchor_date = None
@@ -4054,16 +4065,10 @@ async def audience_drift_endpoint(
     )
     client_config = ClientConfig.from_yaml(cfg_path)
 
-    railway_conn = pg8000.native.Connection(
-        host=os.environ['RAILWAY_DB_HOST'],
-        port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
-        database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
-        user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
-        password=os.environ['RAILWAY_DB_PASSWORD'],
-        timeout=30,
-    )
+    # Leitura do ledger via fonte escolhida por LEDGER_READ_SOURCE (railway|cloudsql).
+    ledger_conn = open_ledger_read_connection()
     try:
-        repo = compose_repository('registros_ml', railway_conn=railway_conn)
+        repo = compose_repository('registros_ml', railway_conn=ledger_conn)
         monitor = DataQualityMonitor(
             model_path='', client_config=client_config, db=None, repo=repo,
         )
@@ -4071,7 +4076,7 @@ async def audience_drift_endpoint(
             _pd.DataFrame(), raw=True, anchor_date=anchor_date,
         )
     finally:
-        railway_conn.close()
+        ledger_conn.close()
 
     drift = next((a for a in alerts if a.get('type') == 'audience_profile_drift'), None)
     if drift is None:
@@ -4109,20 +4114,13 @@ async def utm_quality_endpoint(
         compute_utm_quality, render_slack_blocks, post_to_slack,
     )
     from src.data import compose_repository
-    import pg8000.native
+    from src.data.ledger_connection import open_ledger_read_connection
 
-    # Composição local: abre conn pg8000, monta repo do ledger novo, passa pro
-    # consumidor. Mesmo padrão do daily-check/railway (ponto único de
-    # composição na borda do endpoint).
-    railway_conn = pg8000.native.Connection(
-        host=os.environ['RAILWAY_DB_HOST'],
-        port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
-        database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
-        user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
-        password=os.environ['RAILWAY_DB_PASSWORD'],
-        timeout=30,
-    )
-    repo = compose_repository('registros_ml', railway_conn=railway_conn)
+    # Composição local: abre a conn do ledger na fonte escolhida por
+    # LEDGER_READ_SOURCE (railway|cloudsql), monta o repo, passa pro consumidor.
+    # Mesmo padrão do daily-check/railway (ponto único de composição na borda).
+    ledger_conn = open_ledger_read_connection()
+    repo = compose_repository('registros_ml', railway_conn=ledger_conn)
     try:
         result = compute_utm_quality(
             repo,
@@ -4135,7 +4133,7 @@ async def utm_quality_endpoint(
         raise HTTPException(status_code=500, detail=f"compute_utm_quality falhou: {e}")
     finally:
         try:
-            railway_conn.close()
+            ledger_conn.close()
         except Exception:
             pass
 
@@ -5318,18 +5316,24 @@ async def predict_explain(request: ExplainRequest, pipeline: PipelineDep):
     import pg8000.native
 
     from src.data import compose_repository
+    from src.data.ledger_connection import open_ledger_read_connection
     from src.scoring.service import payload_from_record, score_lead_from_payload
 
     railway_conn = None
     try:
-        railway_conn = pg8000.native.Connection(
-            host=os.environ['RAILWAY_DB_HOST'],
-            port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
-            database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
-            user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
-            password=os.environ['RAILWAY_DB_PASSWORD'],
-            timeout=30,
-        )
+        if request.source == 'registros_ml':
+            # Ledger: respeita LEDGER_READ_SOURCE (railway|cloudsql).
+            railway_conn = open_ledger_read_connection()
+        else:
+            # 'legacy' lê a tabela `Lead`, que só existe no Railway do cliente.
+            railway_conn = pg8000.native.Connection(
+                host=os.environ['RAILWAY_DB_HOST'],
+                port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+                database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+                user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+                password=os.environ['RAILWAY_DB_PASSWORD'],
+                timeout=30,
+            )
         repo = compose_repository(request.source, railway_conn=railway_conn)
         record = repo.get_by_event_id(request.event_id)
         if record is None:
