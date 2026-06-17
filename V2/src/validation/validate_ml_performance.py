@@ -286,7 +286,7 @@ Exemplos de uso:
         type=str,
         nargs='+',
         default=None,
-        help='Substrings (case-insensitive) no nome do produto a excluir (Guru/Hotmart). Default: ["Mentoria"]. Tudo o mais passa.'
+        help='Substrings (case-insensitive) no nome do produto a excluir (Guru/Hotmart). Default: ["Mentoria"]. Use "NENHUM" para incluir tudo (upsell incluído). Tudo o mais passa.'
     )
 
     # Tipo de relatório
@@ -1698,7 +1698,15 @@ def main():
     # DevClub FullStack Pro - OFICIAL, COMBOs etc.) passam todas — só dropamos o que é upsell
     # confirmadamente separado. Aplicado em canais com `product_name` (Guru/Hotmart);
     # Asaas/TMB passam direto (gateways de parcelamento sem nome).
-    product_exclude = getattr(args, 'product_exclude', None) or ['Mentoria']
+    # Sentinel p/ INCLUIR tudo (upsell/2º produto): --product-exclude NENHUM → lista vazia.
+    # (lista vazia desliga o filtro em combine_sales; sem sentinel, [] cairia no default.)
+    _pe = getattr(args, 'product_exclude', None)
+    if _pe is not None and len(_pe) == 1 and str(_pe[0]).strip().upper() in ('NENHUM', 'NONE', 'TODOS'):
+        product_exclude = []        # inclui todos os produtos (upsell incluído)
+    elif _pe:
+        product_exclude = _pe
+    else:
+        product_exclude = ['Mentoria']
 
     sales_df = sales_loader.combine_sales(
         guru_df=guru_df,
