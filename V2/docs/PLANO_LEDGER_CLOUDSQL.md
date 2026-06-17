@@ -121,24 +121,28 @@ Consolidar em DUAS tabelas no database `ledger`:
 
 **Helper único** `src/data/ledger_connection.py::open_ledger_read_connection()` (criado 13/06): escolhe Railway vs Cloud SQL por env `LEDGER_READ_SOURCE` (default `railway`). Como `registros_ml` é idêntico nos dois bancos, repoint = cada leitor abrir a conexão por esse helper; virar a env reaponta todos de uma vez, reverter é trocar a env de volta (sem deploy).
 
+> ✅ **VIRADA FEITA E NO AR — 16/06/2026.** `LEDGER_READ_SOURCE=cloudsql` em produção (rev `00427-k59`, 100% tráfego, mesma imagem do daily-check `ae016041`). **Toda a leitura do monitoramento vem do Cloud SQL agora.** `LEDGER_TARGET=dual` mantido (ainda grava nos dois). Validado em 2 frentes: paridade banco-a-banco (acervo idêntico `event_id`: **23.636 = 23.636, 0 só num lado**) + comparação das 2 views (privada e cliente) lendo Railway vs Cloud SQL — decis, drift por A/B e drift por fonte idênticos; única diferença sub-0,1pp na coluna "Anteontem" do drift geral (1 lead de borda, `created_at` 0,3s diferente entre bancos pelo dual-write — some na Etapa 4). **Reverter:** `gcloud run services update-traffic smart-ads-api --to-revisions smart-ads-api-00734-maz=100` (volta pro Railway, sem rebuild).
+
 Ordem do menor risco pro maior:
 
 - [x] 3.0 Helper `open_ledger_read_connection()` + `load_ml_ledger` migrado (1º leitor, validação manual/semanal, baixo risco). Testado: lê igual das duas fontes.
 - [x] 3.1 `run_critical_checks` (alertas críticos, 5min): abre `ledger_conn` via helper e usa nos leitores do ledger (`repo` + 3 regras Pub/Sub); `railway_conn` segue no `baseline_repo` (Lead) e `rule_no_leads_arriving` (lead_surveys). Testado nas 2 fontes (9/9 regras, 0 erro, idêntico); 10/10 testes. **Cobre também o item 3.2** (as 3 regras Pub/Sub agora usam `ledger_conn`).
 - [x] 3.1b Orchestrator (daily-check): bloco de contadores 24h (T3-5) e a conn que compõe o repo (`app.py` daily-check railway) abrem via helper. Testado nas 2 fontes (contadores idênticos 906/906/723). Cobre capi_monitor/operational/data_quality/pubsub_summary (recebem o repo do orchestrator por injeção).
-- [ ] 3.1c Endpoints de diagnóstico (manuais, raros): `/monitoring/audience-drift`, `/monitoring/utm-quality`, `/predict/explain`, e a subquery anti-join de `validate_ml_performance.py` — migrar junto da virada da env
-- [ ] 3.3 Bloco T3-5 do orchestrator (`orchestrator.py:392-474`): conn própria → Cloud SQL
-- [ ] 3.4 `data_loader.load_ml_ledger` + anti-join de `validate_ml_performance.py:1256-1280`: trocar para `LEDGER_DB_*`; **varrer defaults hardcoded `shortline.proxy.rlwy.net` nesses arquivos**
-- [ ] 3.5 Gate C (`test_revision_equivalence.py:176,244`) + carregamento de env no `deploy_capi.sh:638`
+- [x] 3.1c Endpoints de diagnóstico: `/monitoring/audience-drift`, `/monitoring/utm-quality`, `/predict/explain` (só `source=registros_ml`; `legacy` fica Railway), e a anti-join de `validate_ml_performance.py` (set de e-mails do ledger via helper, filtro em Python). **Cobriu também gaps no daily-check que faltavam:** reader principal `_repo_leads`, early-return `_early_conn`, e fallback E6 — todos via helper. PR #3 mergeado na `main`. Commit `ba41d8c`.
+- [x] 3.3 Bloco T3-5 do orchestrator: já abre via helper (`orchestrator.py:399`) desde 3.1b — coberto.
+- [x] 3.4 `data_loader.load_ml_ledger` (feito no 3.0) + anti-join de `validate_ml_performance.py` (feito no 3.1c). Defaults `shortline.proxy.rlwy.net` ficam só no ramo `railway` do helper (centralizado).
+- [ ] 3.5 Gate C (`test_revision_equivalence.py:176,244`) + carregamento de env no `deploy_capi.sh:638` — pendente (não bloqueia a virada; afeta deploy/equivalência)
 - [ ] 3.6 Scripts ad-hoc (lista em §3.2-d) — podem migrar em lote
-- [ ] 3.7 Baselines: trocar `compose_repository('legacy')` (`critical_alerts.py:778`) e o E6 (`app.py:3330-3336`) para a fonte nova — ver §5 (baseline interino com scores 2026 cobre a janela cega)
+- [~] 3.7 Baselines: o E6 (`app.py`) foi migrado pro helper no 3.1c. O `compose_repository('legacy')` (`critical_alerts.py`, baseline 30d) **fica de propósito na `Lead`** até o ledger acumular 30d (~22/06); depois aponta pra fonte nova.
 
 **Rollback:** cada commit é pequeno e reversível individualmente; env vars decidem a fonte.
 
 ### Etapa 4 — Cortar o espelho Railway
 
-- [ ] `LEDGER_DUAL_WRITE=false` (consumer grava SÓ no Cloud SQL)
+- [ ] `LEDGER_TARGET=cloudsql` (consumer grava SÓ no Cloud SQL — flip via `gcloud run services update`, sem rebuild)
 - [ ] Critério: ≥7 dias de paridade limpa + monitoramento verde + `/validation/weekly` rodou ok na fonte nova
+  - **Reconciliação de acervo já confirmada (16/06):** `event_id` 23.636=23.636 nos dois bancos, 0 só num lado. Leitura no Cloud SQL no ar e estável desde 16/06 — o relógio dos 7 dias conta a partir daqui.
+  - Antes de cortar, **re-rodar o anti-join `event_id` por garantia** (deve continuar 0 só-no-Railway); o Cloud SQL é primário/mais completo, o risco real é só lead que exista no Railway e não no Cloud SQL.
 
 **Rollback:** religar o dual-write (os dados do período sem espelho podem ser re-copiados do Cloud SQL pro Railway se precisar voltar — improvável).
 
@@ -183,6 +187,8 @@ O item 1 do plano de remediação de score (cache versionado regenerado no daily
 6. **`rule_no_leads_arriving` lê `lead_surveys` morta** (`critical_alerts.py:300-309`) — achado correlato, escopo separado; registrar e não emendar aqui.
 7. **Latência/limites do db-f1-micro** (shared core, ~25 conexões úteis): consumer + monitoramento + MLflow no mesmo micro. Observar na Etapa 1; subir tier é mudança de 1 flag.
 8. **Instância aberta em `0.0.0.0/0`** (herança da era MLflow; só senha protege). Aceito temporariamente pra não bloquear a migração; endurecer na Etapa 4-5: Cloud SQL connector no Cloud Run + remover a authorized network aberta + (opcional) trocar a senha do `postgres`, que está hardcoded em `src/model/training_model.py:28`.
+9. **`created_at` difere ~0,3s entre os bancos** pro mesmo lead (o dual-write insere em cada banco com seu próprio `now()`). Inofensivo — mesmo `event_id`, mesma data; só leads exatamente na borda da meia-noite BRT podem cair em dias diferentes, mexendo contagens por dia em sub-0,1pp (visto na coluna "Anteontem" do drift geral na validação da virada). **Some na Etapa 4** (um escritor só → um `created_at` só). Não reconciliar.
+10. **Daily-check perto do teto de memória (2 GB) do Cloud Run** — observado um OOM (2093 MiB usados → 503) quando 2+ chamadas pesadas de daily-check/slack-digest rodam **concorrentes** (artefato de teste; em produção roda 1×/06:00 via cron). Pré-existente, **não** ligado à virada (ler de Cloud SQL ou Railway tem o mesmo perfil de memória). Achado correlato — se virar recorrente, subir a memória da revisão. Escopo separado.
 
 ## 7. Registro de execução
 
@@ -195,7 +201,11 @@ O item 1 do plano de remediação de score (cache versionado regenerado no daily
 | 13/06 | 2a | Backfill: 20.343 linhas no Cloud SQL, 0 ausentes | `40a4bd0` |
 | 13/06 | 2b | `scores_historicos`: 179.849 re-scores versionados | `fe5eceb` |
 | 13/06 | 1-fix | **Incident**: deploy concorrente (rev `00710-caf`, outro terminal) reverteu pra `LEDGER_TARGET=railway` ~18h UTC → 40 leads só no Railway por ~2h. Corrigido: tráfego → rev dual `00418-zp4`, `config.sh` default=dual, 41 leads recuperados (0 ausentes) | `39f9874` |
-| 13/06 | 3.0 | Helper `open_ledger_read_connection()` + `load_ml_ledger` migrado | (este) |
+| 13/06 | 3.0 | Helper `open_ledger_read_connection()` + `load_ml_ledger` migrado | `a3972ac` |
+| 13/06 | 3.1 | Alertas críticos leem o ledger via helper | `a308756` |
+| 13/06 | 3.1b | Orchestrator (daily-check) lê o ledger via helper | `726814c` |
+| 16/06 | 3.1c | Readers restantes via helper (4 endpoints + reader principal do daily-check + early-return + fallback E6). PR #3 → `main` | `ba41d8c` |
+| 16/06 | 3→virada | **Leitura virada pro Cloud SQL em produção.** `LEDGER_READ_SOURCE=cloudsql`, rev `00427-k59` @100% (mesma imagem `ae016041`). Detalhe: `--update-env-vars` sozinho não pegou (tráfego pinado em tag de canary) → precisou `update-traffic --to-revisions`. Validado: acervo `event_id` 23.636=23.636 (0 só num lado); views privada+cliente idênticas (só sub-0,1pp no "Anteontem" do drift geral, 1 lead de borda) | — |
 
 ## 8. Como retomar numa sessão nova
 
