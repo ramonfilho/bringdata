@@ -67,6 +67,15 @@ _AMBIGUOUS_ERAS: Tuple[_AmbiguousEra, ...] = (
 )
 
 
+def _clean_str(v) -> Optional[str]:
+    """Normaliza p/ str não-vazia ou None. Trata NaN (float) e None como ausente —
+    crítico: colunas pandas trazem NaN (float, truthy) p/ campos faltantes."""
+    if v is None or isinstance(v, float):   # float cobre NaN (np.float64 inclusive)
+        return None
+    s = str(v).strip()
+    return s or None
+
+
 def _coerce_date(value) -> Optional[date]:
     """Normaliza date/datetime/str(YYYY-MM-DD...) -> date. None se não der."""
     if value is None:
@@ -122,9 +131,10 @@ def resolve_arm(
     Returns:
         CHAMPION | CHALLENGER | CONTROLE | EXTERNO | INDETERMINADO
     """
-    # 1. Verdade de produção: variant do ledger
-    if variant:
-        v = str(variant).strip().lower()
+    # 1. Verdade de produção: variant do ledger (NaN/None/'' = ausente)
+    v = _clean_str(variant)
+    if v:
+        v = v.lower()
         for key, arm in _VARIANT_TO_ARM.items():
             if key in v:
                 return arm
@@ -132,10 +142,10 @@ def resolve_arm(
         return INDETERMINADO
 
     # 2. Reconstrução por nome/utm + época
-    text = (utm_campaign or campaign_name or "")
-    t = str(text).strip().lower()
-    if not t:
+    text = _clean_str(utm_campaign) or _clean_str(campaign_name)
+    if not text:
         return EXTERNO
+    t = text.lower()
     if not _is_captacao(t):
         return EXTERNO  # Google/orgânico/sem campanha/outro lançamento
 

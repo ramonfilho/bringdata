@@ -69,6 +69,17 @@ CASES = [
     ("vazio = externo", dict(campaign_name="", captured_at="2026-06-01"), EXTERNO),
     ("None = externo", dict(campaign_name=None, utm_campaign=None), EXTERNO),
 
+    # 6b. NaN (float) em variant/campaign = ausente (regressão: NaN é truthy em Python)
+    ("variant NaN não engole — cai no nome (champion)", dict(
+        variant=float("nan"),
+        campaign_name="DEVLF | CAP | FRIO | FASE 04 | ADV | MACHINE LEARNING | PG2 | 2026-05-08|1",
+        captured_at="2026-05-08"), CHAMPION),
+    ("variant NaN + LEAD puro = controle", dict(
+        variant=float("nan"),
+        campaign_name="DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1 | 2026-05-25|1",
+        captured_at="2026-05-25"), CONTROLE),
+    ("campaign NaN = externo", dict(campaign_name=float("nan")), EXTERNO),
+
     # 7. utm_campaign tem prioridade sobre campaign_name (mesma tag, fontes diferentes)
     ("utm_campaign usado quando presente", dict(
         utm_campaign="DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1 | 2026-05-26 | LEADHQLB|1",
