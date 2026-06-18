@@ -4102,105 +4102,88 @@ async def audience_drift_endpoint(
     return drift.get('details', {})
 
 
-@app.get("/monitoring/utm-quality")
-async def utm_quality_endpoint(
-    hours: int = 24,
-    top_n: int = 5,
-    min_volume: int = 20,
-    channel: Optional[str] = None,
-    client_id: str = 'devclub',
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    days_ago: Optional[int] = None,
-):
-    """
-    Qualidade de UTM por modelo (Champion vs Challenger).
+# Canal do grupo de tráfego pro relatório diário de criativo. Override por env
+# opcional; fallback no grupo DevClub. NÃO é param público — só o endpoint
+# /monitoring/utm-quality/daily-trafego (chamado pelo scheduler) posta, e só
+# nesse canal. Assim quem chama o endpoint de leitura não consegue postar nada.
+UTM_QUALITY_TRAFEGO_CHANNEL = os.getenv('UTM_QUALITY_TRAFEGO_CHANNEL', 'C09VD6J8A72')
 
-    Ranqueia UTMs (source, medium, content) por decil médio dos leads
-    scoreados em duas janelas:
-      - janela primária — base do ranking. Default: últimas `hours` (24h).
-        Com `start_date`/`end_date`, vira [start 00:00, end 23:59] BRT (até 90d),
-        permitindo rever qualquer dia/intervalo passado, não só o de hoje.
-        Com `days_ago=N`, vira o dia-calendário de N dias atrás (BRT) — atalho
-        relativo pro scheduler (URL estática): `days_ago=1` = ontem completo.
-      - LF — coluna de contexto/tendência (não afeta ranking), recortada até o
-        fim da janela primária (point-in-time).
 
-    Atribuição por modelo reusa `ABTestConfig.match_variant` (mesma lógica de
-    produção) — sem coluna `variant` em `Lead`, atribui via UTM/URL. Os decis já
-    estão pré-computados no ledger; o endpoint só lê e agrega (nenhum scoring).
+def _utm_quality_day_range_brt(start_date: str, end_date: str):
+    """Valida start_date/end_date (YYYY-MM-DD, dia-calendário BRT, ≤90d) e devolve
+    (start_utc, end_utc). Levanta HTTPException 400 em erro."""
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    _BRT = _tz(_td(hours=-3))
+    try:
+        _s = _dt.strptime(start_date, '%Y-%m-%d').replace(hour=0, minute=0, second=0, tzinfo=_BRT)
+        _e = _dt.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=_BRT)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Formato inválido. Use YYYY-MM-DD.")
+    if _e < _s:
+        raise HTTPException(status_code=400, detail="end_date não pode ser anterior a start_date.")
+    if (_e.date() - _s.date()).days > 90:
+        raise HTTPException(status_code=400, detail="Janela máxima de 90 dias.")
+    return _s.astimezone(_tz.utc), _e.astimezone(_tz.utc)
 
-    Args:
-        hours: janela primária em horas (default 24). Ignorado se start/end_date
-            ou days_ago.
-        top_n: tamanho do Top piores e Top melhores (default 5).
-        min_volume: N mínimo de leads na janela pra entrar no ranking (default 20).
-        channel: opcional — se passado, posta os blocos no Slack.
-        client_id: cliente (carrega `configs/active_models/{id}.yaml`).
-        start_date/end_date: YYYY-MM-DD BRT. Passar os dois juntos. start==end =
-            um dia só. Janela máxima de 90 dias.
-        days_ago: N (1-90) — dia-calendário de N dias atrás (BRT). 1=ontem. Atalho
-            relativo pra schedulers; mutuamente exclusivo com start_date/end_date.
-    """
-    from src.monitoring.utm_quality import (
-        compute_utm_quality, render_slack_blocks, post_to_slack,
-    )
+
+def _utm_quality_compute(start_utc, end_utc, *, min_volume: int, top_n: int, client_id: str):
+    """Ponto único de composição: abre o ledger na fonte de LEITURA configurada
+    (LEDGER_READ_SOURCE), computa o ranking de UTM da janela e fecha a conn."""
+    from src.monitoring.utm_quality import compute_utm_quality
     from src.data import compose_repository
     from src.data.ledger_connection import open_ledger_read_connection
-    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-
-    # Janela custom opcional (start_date/end_date OU days_ago, em BRT). Converte p/ UTC.
-    _BRT = _tz(_td(hours=-3))
-    start_utc = end_utc = None
-    if (start_date or end_date) and days_ago is not None:
-        raise HTTPException(status_code=400, detail="Use start_date/end_date OU days_ago, não os dois.")
-    if start_date or end_date:
-        if not (start_date and end_date):
-            raise HTTPException(status_code=400, detail="Passe start_date E end_date juntos (YYYY-MM-DD).")
-        try:
-            _s = _dt.strptime(start_date, '%Y-%m-%d').replace(hour=0, minute=0, second=0, tzinfo=_BRT)
-            _e = _dt.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=_BRT)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Formato inválido. Use YYYY-MM-DD.")
-        if _e < _s:
-            raise HTTPException(status_code=400, detail="end_date não pode ser anterior a start_date.")
-        if (_e.date() - _s.date()).days > 90:
-            raise HTTPException(status_code=400, detail="Janela máxima de 90 dias.")
-        start_utc = _s.astimezone(_tz.utc)
-        end_utc = _e.astimezone(_tz.utc)
-    elif days_ago is not None:
-        if not (1 <= days_ago <= 90):
-            raise HTTPException(status_code=400, detail="days_ago deve estar entre 1 e 90.")
-        _target = (_dt.now(_BRT) - _td(days=days_ago)).date()
-        _s = _dt(_target.year, _target.month, _target.day, 0, 0, 0, tzinfo=_BRT)
-        _e = _dt(_target.year, _target.month, _target.day, 23, 59, 59, tzinfo=_BRT)
-        start_utc = _s.astimezone(_tz.utc)
-        end_utc = _e.astimezone(_tz.utc)
-
-    # Composição local: abre a conn do ledger na fonte escolhida por
-    # LEDGER_READ_SOURCE (railway|cloudsql), monta o repo, passa pro consumidor.
-    # Mesmo padrão do daily-check/railway (ponto único de composição na borda).
     ledger_conn = open_ledger_read_connection()
     repo = compose_repository('registros_ml', railway_conn=ledger_conn)
     try:
-        result = compute_utm_quality(
-            repo,
-            client_id=client_id,
-            hours=hours,
-            top_n=top_n,
-            min_volume=min_volume,
-            start_utc=start_utc,
-            end_utc=end_utc,
+        return compute_utm_quality(
+            repo, client_id=client_id, top_n=top_n,
+            min_volume=min_volume, start_utc=start_utc, end_utc=end_utc,
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"compute_utm_quality falhou: {e}")
     finally:
         try:
             ledger_conn.close()
         except Exception:
             pass
 
-    payload = {
+
+@app.get("/monitoring/utm-quality")
+async def utm_quality_endpoint(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    min_volume: int = 20,
+    top_n: int = 5,
+    client_id: str = 'devclub',
+):
+    """
+    Qualidade de Content (criativo) por modelo — SÓ LEITURA, dia(s) fixo(s).
+
+    Ranqueia criativos (`utm_content`) por decil médio dos leads scoreados numa
+    janela de dia(s)-calendário BRT `[start 00:00, end 23:59]` (até 90 dias).
+    `start_date` e `end_date` são obrigatórios — `start==end` = um dia. A coluna
+    LF é contexto/tendência point-in-time (não afeta o ranking). Os decis já estão
+    pré-computados no ledger; o endpoint só lê e agrega (nenhum scoring).
+
+    Devolve JSON. **Não posta no Slack** — o relatório diário pro grupo de tráfego
+    é o endpoint dedicado `/monitoring/utm-quality/daily-trafego` (canal fixo no
+    servidor). Atribuição por modelo reusa `ABTestConfig.match_variant`.
+
+    Args:
+        start_date/end_date: YYYY-MM-DD BRT, obrigatórios. start==end = 1 dia. ≤90d.
+        min_volume: N mínimo de leads pra um criativo entrar no ranking (default 20).
+        top_n: tamanho do Top piores e Top melhores (default 5).
+        client_id: cliente (carrega `configs/active_models/{id}.yaml`).
+    """
+    if not (start_date and end_date):
+        raise HTTPException(status_code=400, detail="start_date e end_date são obrigatórios (YYYY-MM-DD).")
+    start_utc, end_utc = _utm_quality_day_range_brt(start_date, end_date)
+    try:
+        result = _utm_quality_compute(start_utc, end_utc, min_volume=min_volume, top_n=top_n, client_id=client_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"compute_utm_quality falhou: {e}")
+    return {
+        'ok': True,
         'window_24h': result.window_24h,
         'window_lf':  result.window_lf,
         'champion_name':  result.champion_name,
@@ -4208,18 +4191,37 @@ async def utm_quality_endpoint(
         'by_level': result.by_level,
     }
 
-    posts: List[dict] = []
-    if channel:
-        blocks = render_slack_blocks(result)
-        lf_label = result.window_lf.get('label') or '—'
-        _win_label = result.window_24h.get('title_label') or f'{hours}h'
-        post = post_to_slack(channel, blocks, fallback_text=f'UTM Quality {_win_label} × {lf_label}')
-        post['blocks_count'] = len(blocks)
-        posts.append(post)
-        if not post.get('ok'):
-            raise HTTPException(status_code=502, detail=f"Slack: {post.get('error')}")
 
-    return {'ok': True, **payload, 'posts': posts}
+@app.get("/monitoring/utm-quality/daily-trafego")
+async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5, client_id: str = 'devclub'):
+    """
+    Relatório diário de criativo do **dia anterior** (dia-calendário BRT), postado
+    no grupo de tráfego. Chamado pelo Cloud Scheduler às 06:00.
+
+    O canal é fixo no servidor (`UTM_QUALITY_TRAFEGO_CHANNEL`) — não é param
+    público, então quem chama não escolhe onde posta (só este endpoint posta, e
+    só nesse canal). Reproduzível 1:1 por
+    `/monitoring/utm-quality?start_date=ONTEM&end_date=ONTEM`.
+    """
+    from src.monitoring.utm_quality import render_slack_blocks, post_to_slack
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    _BRT = _tz(_td(hours=-3))
+    _ontem = (_dt.now(_BRT) - _td(days=1)).date()
+    _s = _dt(_ontem.year, _ontem.month, _ontem.day, 0, 0, 0, tzinfo=_BRT)
+    _e = _dt(_ontem.year, _ontem.month, _ontem.day, 23, 59, 59, tzinfo=_BRT)
+    start_utc, end_utc = _s.astimezone(_tz.utc), _e.astimezone(_tz.utc)
+    try:
+        result = _utm_quality_compute(start_utc, end_utc, min_volume=min_volume, top_n=top_n, client_id=client_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"compute_utm_quality falhou: {e}")
+    blocks = render_slack_blocks(result)
+    lf_label = result.window_lf.get('label') or '—'
+    win_label = result.window_24h.get('title_label') or 'ontem'
+    post = post_to_slack(UTM_QUALITY_TRAFEGO_CHANNEL, blocks, fallback_text=f'UTM Quality {win_label} × {lf_label}')
+    post['blocks_count'] = len(blocks)
+    if not post.get('ok'):
+        raise HTTPException(status_code=502, detail=f"Slack: {post.get('error')}")
+    return {'ok': True, 'channel': UTM_QUALITY_TRAFEGO_CHANNEL, 'window': win_label, 'post': post}
 
 
 @app.get("/smoke/run-variants")
