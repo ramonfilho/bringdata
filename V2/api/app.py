@@ -4109,30 +4109,57 @@ async def utm_quality_endpoint(
     min_volume: int = 20,
     channel: Optional[str] = None,
     client_id: str = 'devclub',
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ):
     """
     Qualidade de UTM por modelo (Champion vs Challenger).
 
     Ranqueia UTMs (source, medium, content) por decil médio dos leads
     scoreados em duas janelas:
-      - últimas `hours` (default 24h) — base do ranking
-      - LF ativo (cap_start → hoje BRT); fallback no LF mais recente encerrado
+      - janela primária — base do ranking. Default: últimas `hours` (24h).
+        Com `start_date`/`end_date`, vira [start 00:00, end 23:59] BRT (até 90d),
+        permitindo rever qualquer dia/intervalo passado, não só o de hoje.
+      - LF — coluna de contexto/tendência (não afeta ranking), recortada até o
+        fim da janela primária (point-in-time).
 
     Atribuição por modelo reusa `ABTestConfig.match_variant` (mesma lógica de
-    produção) — sem coluna `variant` em `Lead`, atribui via UTM/URL.
+    produção) — sem coluna `variant` em `Lead`, atribui via UTM/URL. Os decis já
+    estão pré-computados no ledger; o endpoint só lê e agrega (nenhum scoring).
 
     Args:
-        hours: janela da coluna "agora" em horas (default 24).
+        hours: janela primária em horas (default 24). Ignorado se start/end_date.
         top_n: tamanho do Top piores e Top melhores (default 5).
-        min_volume: N mínimo de leads em 24h pra entrar no ranking (default 20).
+        min_volume: N mínimo de leads na janela pra entrar no ranking (default 20).
         channel: opcional — se passado, posta os blocos no Slack.
         client_id: cliente (carrega `configs/active_models/{id}.yaml`).
+        start_date/end_date: YYYY-MM-DD BRT. Passar os dois juntos. start==end =
+            um dia só. Janela máxima de 90 dias.
     """
     from src.monitoring.utm_quality import (
         compute_utm_quality, render_slack_blocks, post_to_slack,
     )
     from src.data import compose_repository
     from src.data.ledger_connection import open_ledger_read_connection
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+
+    # Janela custom opcional (start_date/end_date em BRT). Valida e converte p/ UTC.
+    start_utc = end_utc = None
+    if start_date or end_date:
+        if not (start_date and end_date):
+            raise HTTPException(status_code=400, detail="Passe start_date E end_date juntos (YYYY-MM-DD).")
+        _BRT = _tz(_td(hours=-3))
+        try:
+            _s = _dt.strptime(start_date, '%Y-%m-%d').replace(hour=0, minute=0, second=0, tzinfo=_BRT)
+            _e = _dt.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=_BRT)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Formato inválido. Use YYYY-MM-DD.")
+        if _e < _s:
+            raise HTTPException(status_code=400, detail="end_date não pode ser anterior a start_date.")
+        if (_e.date() - _s.date()).days > 90:
+            raise HTTPException(status_code=400, detail="Janela máxima de 90 dias.")
+        start_utc = _s.astimezone(_tz.utc)
+        end_utc = _e.astimezone(_tz.utc)
 
     # Composição local: abre a conn do ledger na fonte escolhida por
     # LEDGER_READ_SOURCE (railway|cloudsql), monta o repo, passa pro consumidor.
@@ -4146,6 +4173,8 @@ async def utm_quality_endpoint(
             hours=hours,
             top_n=top_n,
             min_volume=min_volume,
+            start_utc=start_utc,
+            end_utc=end_utc,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"compute_utm_quality falhou: {e}")
@@ -4167,7 +4196,8 @@ async def utm_quality_endpoint(
     if channel:
         blocks = render_slack_blocks(result)
         lf_label = result.window_lf.get('label') or '—'
-        post = post_to_slack(channel, blocks, fallback_text=f'UTM Quality {hours}h × {lf_label}')
+        _win_label = result.window_24h.get('title_label') or f'{hours}h'
+        post = post_to_slack(channel, blocks, fallback_text=f'UTM Quality {_win_label} × {lf_label}')
         post['blocks_count'] = len(blocks)
         posts.append(post)
         if not post.get('ok'):

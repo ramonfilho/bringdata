@@ -130,28 +130,34 @@ def _combined_avg_decil(ch: dict, cl: dict) -> Optional[float]:
 # LF window resolution
 # ──────────────────────────────────────────────────────────────────────────
 
-def _resolve_lf_window() -> Tuple[Optional[str], Optional[datetime], Optional[datetime], bool]:
+def _resolve_lf_window(anchor_utc: Optional[datetime] = None) -> Tuple[Optional[str], Optional[datetime], Optional[datetime], bool]:
     """
-    Retorna (lf_label, start_utc, end_utc, is_active).
+    Retorna (lf_label, start_utc, end_utc, is_active), resolvido relativo a
+    `anchor_utc` (default = agora).
 
-    - LF ativo (cap_start ≤ hoje ≤ cap_end): janela = [cap_start 00:00 BRT, min(cap_end 23:59 BRT, now)].
-    - Senão: fallback no LF mais recente encerrado (ce < hoje BRT).
+    Permite snapshot point-in-time: ao olhar um dia passado, o LF e seu
+    acumulado são recortados até aquele dia (`end = min(cap_end, âncora)` e a
+    detecção ativo/encerrado usa a data da âncora), sem vazar dados futuros.
+
+    - LF ativo na âncora (cap_start ≤ data_âncora ≤ cap_end): janela =
+      [cap_start 00:00 BRT, min(cap_end 23:59 BRT, âncora)].
+    - Senão: fallback no LF mais recente encerrado (ce < data_âncora BRT).
     - Sem nenhum: (None, None, None, False).
     """
     from src.core.launches import resolve_active_launch_brt, load_launches
 
-    now_utc = datetime.now(timezone.utc)
-    active = resolve_active_launch_brt()
+    ref_utc = anchor_utc or datetime.now(timezone.utc)
+    ref_date = ref_utc.astimezone(BRT).date()
+    active = resolve_active_launch_brt(today=ref_date)
     if active is not None:
         start = datetime(active.cap_start.year, active.cap_start.month, active.cap_start.day,
                          0, 0, 0, tzinfo=BRT).astimezone(timezone.utc)
         end_brt = datetime(active.cap_end.year, active.cap_end.month, active.cap_end.day,
                            23, 59, 59, tzinfo=BRT)
-        end = min(end_brt.astimezone(timezone.utc), now_utc)
+        end = min(end_brt.astimezone(timezone.utc), ref_utc)
         return (active.name, start, end, True)
 
     launches = load_launches()
-    today_brt = datetime.now(BRT).date()
     candidates = []
     for name, cfg in launches.items():
         try:
@@ -159,7 +165,7 @@ def _resolve_lf_window() -> Tuple[Optional[str], Optional[datetime], Optional[da
             ce = datetime.strptime(cfg.get('cap_end', ''), '%Y-%m-%d').date()
         except (ValueError, TypeError):
             continue
-        if ce < today_brt:
+        if ce < ref_date:
             candidates.append((ce, name, cs, ce))
     if not candidates:
         return (None, None, None, False)
@@ -192,15 +198,25 @@ def compute_utm_quality(
     hours: int = 24,
     top_n: int = 5,
     min_volume: int = 20,
+    start_utc: Optional[datetime] = None,
+    end_utc: Optional[datetime] = None,
 ) -> UtmQualityResult:
     """
     Args:
         repo:       `LeadRepository` injetado pelo caller (endpoint /monitoring/utm-quality
                     em app.py compõe via compose_repository).
         client_id:  id do cliente (carrega `configs/active_models/{id}.yaml`).
-        hours:      janela em horas para a coluna "agora" (default 24).
+        hours:      janela em horas para a coluna "agora" (default 24). Ignorado
+                    se start_utc/end_utc forem passados.
         top_n:      tamanho do Top piores e Top melhores por nível.
-        min_volume: N mínimo de leads (24h) para entrar no ranking.
+        min_volume: N mínimo de leads (na janela) para entrar no ranking.
+        start_utc:  início da janela primária (substitui o rolling de `hours`).
+        end_utc:    fim da janela primária. Passar os dois juntos. Permite olhar
+                    um dia/intervalo específico (até 90d, validado no endpoint) —
+                    o ranking usa essa janela e o LF é recortado até `end_utc`.
+
+    Os decis já estão pré-computados no ledger (`registros_ml`); aqui só lemos os
+    leads da janela e agregamos por UTM — nenhum scoring de modelo roda.
 
     Migrado em 2026-05-24 (Etapa 6 do refator do monitoramento). Antes abria
     conexão Railway própria e fazia JOIN entre `Lead × leads_capi` (ambas
@@ -224,10 +240,24 @@ def compute_utm_quality(
     )
 
     now_utc = datetime.now(timezone.utc)
-    start_24h = now_utc - timedelta(hours=hours)
-    lf_label, lf_start, lf_end, lf_is_active = _resolve_lf_window()
+    custom = start_utc is not None and end_utc is not None
+    if custom:
+        win_start, win_end, anchor = start_utc, end_utc, end_utc
+        _s_brt, _e_brt = start_utc.astimezone(BRT), end_utc.astimezone(BRT)
+        if _s_brt.date() == _e_brt.date():
+            title_label = _s_brt.strftime('%d/%m')
+            row_label = _s_brt.strftime('%d/%m')
+        else:
+            title_label = f"{_s_brt.strftime('%d/%m')} a {_e_brt.strftime('%d/%m')}"
+            row_label = f"{_s_brt.strftime('%d/%m')}–{_e_brt.strftime('%d/%m')}"
+    else:
+        win_start, win_end, anchor = now_utc - timedelta(hours=hours), now_utc, now_utc
+        title_label = f"últimas {hours}h"
+        row_label = f"{hours}h"
 
-    records_24h = repo.leads_in_range(start_24h, now_utc)
+    lf_label, lf_start, lf_end, lf_is_active = _resolve_lf_window(anchor)
+
+    records_24h = repo.leads_in_range(win_start, win_end)
     records_lf = repo.leads_in_range(lf_start, lf_end) if lf_start else []
 
     # Hint de origem por content — pra rotular criativos sem nome (utm_content
@@ -304,9 +334,12 @@ def compute_utm_quality(
 
     return UtmQualityResult(
         window_24h={
-            'start': start_24h.isoformat(),
-            'end': now_utc.isoformat(),
+            'start': win_start.isoformat(),
+            'end': win_end.isoformat(),
             'hours': hours,
+            'custom': custom,
+            'title_label': title_label,
+            'row_label': row_label,
             'n_total': len(records_24h),
         },
         window_lf={
@@ -370,8 +403,12 @@ def _display_creative(entry: dict) -> str:
     return entry.get('utm', '')
 
 
-def _mini_table_block(entry: dict, lf_label: str, marker: str) -> dict:
-    """Section mrkdwn: nome + mini-tabela monoespaçada (24h vs LF)."""
+def _mini_table_block(entry: dict, lf_label: str, marker: str, win_row_label: str = '24h') -> dict:
+    """Section mrkdwn: nome + mini-tabela monoespaçada (janela primária vs LF).
+
+    `win_row_label` rotula a 1ª linha — '24h' no modo rolling, ou a data/intervalo
+    no modo custom (ex: '12/06', '12/06–13/06').
+    """
     d24 = _combine(entry.get('champion_24h'), entry.get('challenger_24h'), 'avg_decil')
     p24 = _combine(entry.get('champion_24h'), entry.get('challenger_24h'), 'pct_d9_d10')
     dlf = _combine(entry.get('champion_lf'), entry.get('challenger_lf'), 'avg_decil')
@@ -382,9 +419,9 @@ def _mini_table_block(entry: dict, lf_label: str, marker: str) -> dict:
 
     table = (
         "```\n"
-        "             média de decil   %D9, D10   leads\n"
-        f"24h          {fd(d24):<16} {fp(p24):<10} {entry['n_24h']}\n"
-        f"Lançamento   {fd(dlf):<16} {fp(plf):<10} {entry['n_lf']}\n"
+        f"{'':<13}média de decil   %D9, D10   leads\n"
+        f"{win_row_label[:13]:<13}{fd(d24):<16} {fp(p24):<10} {entry['n_24h']}\n"
+        f"{'Lançamento':<13}{fd(dlf):<16} {fp(plf):<10} {entry['n_lf']}\n"
         "```"
     )
     text = f"{marker} *{_display_creative(entry)}*\n{table}"
@@ -408,6 +445,17 @@ def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
     hours = r.window_24h.get('hours', 24)
     n24 = r.window_24h.get('n_total', 0)
     nlf = r.window_lf.get('n_total', 0)
+    custom = r.window_24h.get('custom', False)
+    title_label = r.window_24h.get('title_label') or f"últimas {hours}h"
+    row_label = r.window_24h.get('row_label') or f"{hours}h"
+
+    # Frases da janela primária — naturais nos dois modos.
+    if custom:
+        phrase_em = f"em {title_label}"          # "scoreados em 12/06"
+        phrase_de = f"de {title_label}"          # "decil médio de 12/06"
+    else:
+        phrase_em = f"nas {hours}h"
+        phrase_de = f"das últimas {hours}h"
 
     data = r.by_level.get('content', {})
     qual = data.get('qualifying_min_volume', 0)
@@ -418,16 +466,16 @@ def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
     blocks.append({
         'type': 'header',
         'text': {'type': 'plain_text',
-                 'text': f'Qualidade de Content — últimas {hours}h × {lf_label}'},
+                 'text': f'Qualidade de Content — {title_label} × {lf_label}'},
     })
     blocks.append({
         'type': 'context',
         'elements': [{
             'type': 'mrkdwn',
             'text': (
-                f"*{n24}* leads scoreados nas {hours}h · "
+                f"*{n24}* leads scoreados {phrase_em} · "
                 f"*{nlf}* no {lf_label} ({lf_state}) · "
-                f"*{qual}* de {total} creatives com *N ≥ {min_vol}* leads nas {hours}h"
+                f"*{qual}* de {total} creatives com *N ≥ {min_vol}* leads {phrase_em}"
             ),
         }],
     })
@@ -436,7 +484,7 @@ def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
         'elements': [{
             'type': 'mrkdwn',
             'text': (
-                f"Classificação pelo *decil médio das últimas {hours}h*. "
+                f"Classificação pelo *decil médio {phrase_de}*. "
                 f'A linha "Lançamento" não afeta o ranking, é apenas '
                 f'informação de tendência.'
             ),
@@ -448,7 +496,7 @@ def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
         blocks.append({
             'type': 'context',
             'elements': [{'type': 'mrkdwn',
-                          'text': '_nenhum creative com volume mínimo na janela 24h._'}],
+                          'text': f'_nenhum creative com volume mínimo na janela ({title_label})._'}],
         })
         return blocks
 
@@ -460,7 +508,7 @@ def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
         })
         for i, e in enumerate(ranked):
             marker = '🔴' if i == 0 else ('🟢' if i == len(ranked) - 1 else '⚪')
-            blocks.append(_mini_table_block(e, lf_label, marker))
+            blocks.append(_mini_table_block(e, lf_label, marker, row_label))
     else:
         worst = data.get('worst') or []
         best = data.get('best') or []
@@ -469,14 +517,14 @@ def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
             'text': {'type': 'mrkdwn', 'text': '🔴 *Piores*'},
         })
         for e in worst:
-            blocks.append(_mini_table_block(e, lf_label, '🔴'))
+            blocks.append(_mini_table_block(e, lf_label, '🔴', row_label))
         blocks.append({'type': 'divider'})
         blocks.append({
             'type': 'section',
             'text': {'type': 'mrkdwn', 'text': '🟢 *Melhores*'},
         })
         for e in best:
-            blocks.append(_mini_table_block(e, lf_label, '🟢'))
+            blocks.append(_mini_table_block(e, lf_label, '🟢', row_label))
 
     return blocks
 
