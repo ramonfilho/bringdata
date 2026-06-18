@@ -1262,6 +1262,7 @@ def main():
                     # `registros_ml` no Railway (Etapa 5). Filtro em Python, não em SQL.
                     _ledger_conn = open_ledger_read_connection()
                     try:
+                        _ledger_conn.run("SET statement_timeout = '90s'")  # falha-rápido em vez de pendurar
                         _ledger_email_rows = _ledger_conn.run(
                             '''SELECT LOWER(email) FROM registros_ml
                                WHERE created_at >= :s AND created_at < :e AND email IS NOT NULL''',
@@ -1277,7 +1278,9 @@ def main():
                         database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
                         user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
                         password=os.environ['RAILWAY_DB_PASSWORD'],
+                        timeout=30,
                     )
+                    _conn.run("SET statement_timeout = '90s'")  # LATERAL UTMTracking é pesada; falha-rápido em vez de pendurar
                     _client_rows = _conn.run(
                         '''
                         SELECT c.email, c."firstName", c."lastName", c.phone,
