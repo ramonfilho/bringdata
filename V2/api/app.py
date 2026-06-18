@@ -4111,6 +4111,7 @@ async def utm_quality_endpoint(
     client_id: str = 'devclub',
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    days_ago: Optional[int] = None,
 ):
     """
     Qualidade de UTM por modelo (Champion vs Challenger).
@@ -4120,6 +4121,8 @@ async def utm_quality_endpoint(
       - janela primária — base do ranking. Default: últimas `hours` (24h).
         Com `start_date`/`end_date`, vira [start 00:00, end 23:59] BRT (até 90d),
         permitindo rever qualquer dia/intervalo passado, não só o de hoje.
+        Com `days_ago=N`, vira o dia-calendário de N dias atrás (BRT) — atalho
+        relativo pro scheduler (URL estática): `days_ago=1` = ontem completo.
       - LF — coluna de contexto/tendência (não afeta ranking), recortada até o
         fim da janela primária (point-in-time).
 
@@ -4128,13 +4131,16 @@ async def utm_quality_endpoint(
     estão pré-computados no ledger; o endpoint só lê e agrega (nenhum scoring).
 
     Args:
-        hours: janela primária em horas (default 24). Ignorado se start/end_date.
+        hours: janela primária em horas (default 24). Ignorado se start/end_date
+            ou days_ago.
         top_n: tamanho do Top piores e Top melhores (default 5).
         min_volume: N mínimo de leads na janela pra entrar no ranking (default 20).
         channel: opcional — se passado, posta os blocos no Slack.
         client_id: cliente (carrega `configs/active_models/{id}.yaml`).
         start_date/end_date: YYYY-MM-DD BRT. Passar os dois juntos. start==end =
             um dia só. Janela máxima de 90 dias.
+        days_ago: N (1-90) — dia-calendário de N dias atrás (BRT). 1=ontem. Atalho
+            relativo pra schedulers; mutuamente exclusivo com start_date/end_date.
     """
     from src.monitoring.utm_quality import (
         compute_utm_quality, render_slack_blocks, post_to_slack,
@@ -4143,12 +4149,14 @@ async def utm_quality_endpoint(
     from src.data.ledger_connection import open_ledger_read_connection
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
 
-    # Janela custom opcional (start_date/end_date em BRT). Valida e converte p/ UTC.
+    # Janela custom opcional (start_date/end_date OU days_ago, em BRT). Converte p/ UTC.
+    _BRT = _tz(_td(hours=-3))
     start_utc = end_utc = None
+    if (start_date or end_date) and days_ago is not None:
+        raise HTTPException(status_code=400, detail="Use start_date/end_date OU days_ago, não os dois.")
     if start_date or end_date:
         if not (start_date and end_date):
             raise HTTPException(status_code=400, detail="Passe start_date E end_date juntos (YYYY-MM-DD).")
-        _BRT = _tz(_td(hours=-3))
         try:
             _s = _dt.strptime(start_date, '%Y-%m-%d').replace(hour=0, minute=0, second=0, tzinfo=_BRT)
             _e = _dt.strptime(end_date, '%Y-%m-%d').replace(hour=23, minute=59, second=59, tzinfo=_BRT)
@@ -4158,6 +4166,14 @@ async def utm_quality_endpoint(
             raise HTTPException(status_code=400, detail="end_date não pode ser anterior a start_date.")
         if (_e.date() - _s.date()).days > 90:
             raise HTTPException(status_code=400, detail="Janela máxima de 90 dias.")
+        start_utc = _s.astimezone(_tz.utc)
+        end_utc = _e.astimezone(_tz.utc)
+    elif days_ago is not None:
+        if not (1 <= days_ago <= 90):
+            raise HTTPException(status_code=400, detail="days_ago deve estar entre 1 e 90.")
+        _target = (_dt.now(_BRT) - _td(days=days_ago)).date()
+        _s = _dt(_target.year, _target.month, _target.day, 0, 0, 0, tzinfo=_BRT)
+        _e = _dt(_target.year, _target.month, _target.day, 23, 59, 59, tzinfo=_BRT)
         start_utc = _s.astimezone(_tz.utc)
         end_utc = _e.astimezone(_tz.utc)
 
