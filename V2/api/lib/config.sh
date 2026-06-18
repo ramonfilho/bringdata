@@ -169,11 +169,15 @@ build_env_vars() {
         ENV_VARS="$ENV_VARS,LEDGER_DB_PASSWORD=$LEDGER_DB_PASSWORD"
     fi
 
-    # Fonte de LEITURA do ledger (PLANO_LEDGER_CLOUDSQL.md Etapa 3):
-    # railway (default) | cloudsql. Os leitores (monitoramento, validação)
-    # abrem a conexão por open_ledger_read_connection() conforme esta env.
-    # Default railway até a Etapa 3 fechar; exportar cloudsql pra testar/virar.
-    ENV_VARS="$ENV_VARS,LEDGER_READ_SOURCE=${LEDGER_READ_SOURCE:-railway}"
+    # Fonte de LEITURA do ledger (PLANO_LEDGER_CLOUDSQL.md Etapa 3 — ENCERRADA):
+    # railway | cloudsql (DEFAULT). Os leitores (monitoramento, validação) abrem
+    # a conexão por open_ledger_read_connection() conforme esta env.
+    # A virada da leitura pro Cloud SQL foi pro ar em 16/06 e é o estado fixo
+    # final. DEFAULT=cloudsql pelo mesmo motivo do LEDGER_TARGET acima: sem isso,
+    # qualquer deploy concorrente que não exporte a env reverte a leitura pro
+    # Railway em silêncio (frágil por design enquanto era override por-revisão).
+    # Voltar pra 'railway' só em rollback consciente.
+    ENV_VARS="$ENV_VARS,LEDGER_READ_SOURCE=${LEDGER_READ_SOURCE:-cloudsql}"
 
     # Preserva META_ACCESS_TOKEN existente
     local CURRENT_META_TOKEN=$(gcloud run services describe "$SERVICE_NAME" \
