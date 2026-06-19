@@ -141,6 +141,92 @@ def make_footer(label):
     return _footer
 
 
+import re as _re
+
+
+def _md_inline(text):
+    """Markdown inline -> mini-HTML do reportlab (negrito, itálico, código, link)."""
+    text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+    text = _re.sub(r'`([^`]+)`', r'<font face="Courier" size="8.5">\1</font>', text)
+    text = _re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+    text = _re.sub(r'(?<!\*)\*([^*]+?)\*(?!\*)', r'<i>\1</i>', text)
+    text = _re.sub(r'\[(.+?)\]\((.+?)\)', r'\1', text)
+    return text
+
+
+def parse_markdown(text, st=None):
+    """Renderiza markdown -> lista de flowables, usando os estilos/helpers daqui.
+
+    Suporta: #/##/### títulos, tabelas | |, callouts `> `, listas `-`/`*`/`N.`,
+    blocos ``` ``` , régua `---`, e inline (negrito/itálico/código/link).
+    Fonte única reutilizável — geradores de PDF só escrevem o .md.
+    """
+    st = st or styles()
+
+    def _row(line):
+        return [c.strip() for c in line.strip().strip('|').split('|')]
+
+    story, para, table, callout_lines = [], [], [], []
+
+    def flush_para():
+        if para:
+            story.append(Paragraph(_md_inline(' '.join(para)), st['body']))
+            para.clear()
+
+    def flush_callout():
+        if callout_lines:
+            story.extend(callout(_md_inline(' '.join(callout_lines)), st))
+            callout_lines.clear()
+
+    def flush_table():
+        if table:
+            header = [Paragraph(_md_inline(c), st['th']) for c in _row(table[0])]
+            rows = [[Paragraph(_md_inline(c), st['td']) for c in _row(r)] for r in table[2:]]
+            story.append(make_table(header, rows, col_widths(len(header))))
+            story.append(Spacer(1, 6))
+            table.clear()
+
+    code_buf = None
+    for raw in text.split('\n'):
+        ln = raw.rstrip()
+        s = ln.strip()
+        if s.startswith('```'):
+            if code_buf is None:
+                flush_para(); flush_callout(); flush_table(); code_buf = []
+            else:
+                story.extend(code_block('\n'.join(code_buf), st)); code_buf = None
+            continue
+        if code_buf is not None:
+            code_buf.append(raw); continue
+        if '|' in ln and s.startswith('|'):
+            flush_para(); flush_callout(); table.append(ln); continue
+        flush_table()
+        if s.startswith('> '):
+            flush_para(); callout_lines.append(s[2:]); continue
+        flush_callout()
+        if not s:
+            flush_para()
+        elif s == '---':
+            flush_para(); story.append(rule())
+        elif s.startswith('# '):
+            flush_para(); story.append(Paragraph(_md_inline(s[2:].strip()), st['h1'])); story.append(rule())
+        elif s.startswith('## '):
+            flush_para(); story.append(Paragraph(_md_inline(s[3:]), st['h2']))
+        elif s.startswith('### ') or s.startswith('#### '):
+            flush_para(); story.append(Paragraph(_md_inline(s.lstrip('#').strip()), st['h3']))
+        elif _re.match(r'^[-*] ', s):
+            flush_para(); story.append(Paragraph(_md_inline(s[2:]), st['li'], bulletText='•'))
+        elif _re.match(r'^\d+\. ', s):
+            flush_para(); num = s.split('.', 1)[0]
+            story.append(Paragraph(_md_inline(s[len(num) + 2:]), st['li'], bulletText=f'{num}.'))
+        else:
+            para.append(s)
+    if code_buf is not None:
+        story.extend(code_block('\n'.join(code_buf), st))
+    flush_para(); flush_callout(); flush_table()
+    return story
+
+
 def build_pdf(output_path, story, *, title, footer_label):
     """Constrói o PDF com margens/rodapé padrão. NÃO injeta PageBreak."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
