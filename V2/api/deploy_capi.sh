@@ -222,6 +222,58 @@ check_parity_audit() {
 # VALIDAÇÕES PRÉ-DEPLOY
 # =============================================================================
 
+# =============================================================================
+# GATE DE PROCEDÊNCIA — só sobe pra produção o que já está em origin/main
+# =============================================================================
+# Causa-raiz da divergência prod≠main (jun/2026): o build empacota a ÁRVORE DE
+# TRABALHO local, não um commit; e a trava de branch antiga liberava qualquer
+# detached HEAD. Resultado: dava pra promover a 100% código nunca mergeado.
+# Trocar o NOME da branch não resolvia — o mecanismo ignora a branch e lê o disco.
+#
+#   1. check_clean_tree       — árvore limpa: a revisão sempre mapeia 1:1 a um commit.
+#   2. check_merged_into_main — HEAD está em origin/main? Se não, bloqueia (override
+#                               ALLOW_UNMERGED=true só p/ canary --no-traffic).
+#   3. carimbo (no deploy)    — labels git-sha + git-merged em toda revisão; prod
+#                               passa a DIZER o que roda (fim da arqueologia via openapi).
+# =============================================================================
+GIT_SHA=""
+HEAD_MERGED="unknown"
+
+check_clean_tree() {
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+        if [ "$DEPLOY_DIRTY" = "true" ]; then
+            print_warning "Árvore suja, mas DEPLOY_DIRTY=true — a revisão NÃO mapeia 1:1 um commit."
+        else
+            print_error "Árvore de trabalho suja — deploy bloqueado."
+            echo "      Commit/stash antes, ou (não recomendado) DEPLOY_DIRTY=true."
+            git status --short | head
+            exit 1
+        fi
+    else
+        print_success "Árvore de trabalho limpa."
+    fi
+}
+
+check_merged_into_main() {
+    GIT_SHA=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+    git fetch origin main --quiet 2>/dev/null \
+        || print_warning "git fetch falhou — checando contra origin/main local (pode estar desatualizado)."
+    if git merge-base --is-ancestor HEAD origin/main 2>/dev/null; then
+        HEAD_MERGED="true"
+        print_success "Procedência OK: HEAD ($GIT_SHA) está em origin/main."
+    else
+        HEAD_MERGED="false"
+        print_warning "HEAD ($GIT_SHA) NÃO está em origin/main — código não mergeado."
+        if [ "$ALLOW_UNMERGED" = "true" ]; then
+            print_warning "ALLOW_UNMERGED=true — liberado SÓ como canary. NÃO promova a 100% (use só a URL da tag)."
+        else
+            print_error "Deploy bloqueado: produção só sai de origin/main."
+            echo "      Abra PR e mergeie, OU rode ALLOW_UNMERGED=true p/ canary --no-traffic (nunca 100%)."
+            exit 1
+        fi
+    fi
+}
+
 validate_prerequisites() {
     print_header "1. VALIDAÇÕES PRÉ-DEPLOY"
 
@@ -229,7 +281,11 @@ validate_prerequisites() {
     print_info "Verificando branch autorizada para deploy..."
     check_authorized_branch
 
-    # 1.0b [T1-8] Parity audit treino × produção (só em FORCE_DEPLOY=true)
+    # 1.0b [jun/2026] Procedência: árvore limpa + HEAD em origin/main
+    check_clean_tree
+    check_merged_into_main
+
+    # 1.0c [T1-8] Parity audit treino × produção (só em FORCE_DEPLOY=true)
     check_parity_audit
 
     # 1.1 Docker (específico do deploy)
@@ -548,6 +604,10 @@ print(','.join(stale))
         TRAFFIC_FLAG="$TRAFFIC_FLAG --tag=$CANARY_TAG"
         print_warning "Modo --no-traffic: nova revisão NÃO receberá tráfego (tag: $CANARY_TAG)"
     fi
+
+    # Carimbo de procedência: env é visível POR REVISÃO (gcloud run revisions
+    # describe). Toda revisão passa a dizer de qual commit veio e se era mergeado.
+    ENV_VARS="$ENV_VARS,DEPLOY_GIT_SHA=$GIT_SHA,DEPLOY_GIT_MERGED=$HEAD_MERGED"
 
     gcloud run deploy $SERVICE_NAME \
         --image "$IMAGE_TO_DEPLOY" \
