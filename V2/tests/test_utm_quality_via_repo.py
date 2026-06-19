@@ -67,42 +67,42 @@ def test_classify_cai_em_fallback_quando_variant_none():
 
 def test_aggregate_conta_por_utm_e_variante():
     leads = [
-        _lead(decil=10, variant='champion',   src='facebook-ads', idx=1),
-        _lead(decil=8,  variant='champion',   src='facebook-ads', idx=2),
-        _lead(decil=3,  variant='challenger', src='facebook-ads', idx=3),
-        _lead(decil=5,  variant='champion',   src='instagram',    idx=4),
+        _lead(decil=10, variant='champion',   cnt='ad-1', idx=1),
+        _lead(decil=8,  variant='champion',   cnt='ad-1', idx=2),
+        _lead(decil=3,  variant='challenger', cnt='ad-1', idx=3),
+        _lead(decil=5,  variant='champion',   cnt='ad-2', idx=4),
     ]
     ab = _fake_ab_cfg('champion', 'challenger')
-    out = _aggregate(leads, 'source', ab, 'champion', 'challenger')
+    out = _aggregate(leads, 'ad', ab, 'champion', 'challenger')
 
-    assert out['facebook-ads']['champion']['n'] == 2
-    assert out['facebook-ads']['champion']['avg_decil'] == 9.0
-    assert out['facebook-ads']['champion']['pct_d8_d10'] == 100.0
-    assert out['facebook-ads']['challenger']['n'] == 1
-    assert out['facebook-ads']['challenger']['avg_decil'] == 3.0
-    assert out['instagram']['champion']['n'] == 1
+    assert out['ad-1']['champion']['n'] == 2
+    assert out['ad-1']['champion']['avg_decil'] == 9.0
+    assert out['ad-1']['champion']['pct_d9_d10'] == 50.0   # decil 10 conta (≥9), decil 8 não
+    assert out['ad-1']['challenger']['n'] == 1
+    assert out['ad-1']['challenger']['avg_decil'] == 3.0
+    assert out['ad-2']['champion']['n'] == 1
 
 
 def test_aggregate_ignora_records_sem_score_ou_decil():
     leads = [
         _lead(decil=10, score=0.9, variant='champion', idx=1),
         LeadRecord(event_id='e2', email='x', criado_em=datetime.now(timezone.utc),
-                   status_envio='skipped_allowlist', utm_source='facebook-ads',
+                   status_envio='skipped_allowlist', utm_content='ad-1',
                    score=None, decil=None, variant=None),  # sem score/decil
     ]
     ab = _fake_ab_cfg('champion', 'challenger')
-    out = _aggregate(leads, 'source', ab, 'champion', 'challenger')
-    assert out['facebook-ads']['champion']['n'] == 1
+    out = _aggregate(leads, 'ad', ab, 'champion', 'challenger')
+    assert out['ad-1']['champion']['n'] == 1
 
 
 def test_aggregate_normaliza_utm_vazio_pra_sem_utm():
     leads = [
-        _lead(decil=5, variant='champion', src=None, idx=1),
-        _lead(decil=5, variant='champion', src='', idx=2),
-        _lead(decil=5, variant='champion', src='   ', idx=3),
+        _lead(decil=5, variant='champion', cnt=None, idx=1),
+        _lead(decil=5, variant='champion', cnt='', idx=2),
+        _lead(decil=5, variant='champion', cnt='   ', idx=3),
     ]
     ab = _fake_ab_cfg('champion', 'challenger')
-    out = _aggregate(leads, 'source', ab, 'champion', 'challenger')
+    out = _aggregate(leads, 'ad', ab, 'champion', 'challenger')
     assert 'sem_utm' in out
     assert out['sem_utm']['champion']['n'] == 3
 

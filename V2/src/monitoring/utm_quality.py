@@ -187,36 +187,33 @@ def _resolve_lf_window(anchor_utc: Optional[datetime] = None) -> Tuple[Optional[
 
 @dataclass
 class UtmQualityResult:
-    window_24h: dict
-    window_lf: dict
+    window: dict     # janela pedida: {start, end, label, n_total}
+    window_lf: dict  # contexto do lançamento (LF): {label, start, end, is_active, n_total}
     champion_name: str
     challenger_name: str
-    by_level: dict   # {'ad': {worst, best, totals}} — só o nível ad (utm_content)
-    min_volume: int = 20  # N mínimo de leads em 24h pra um UTM aparecer
+    ranking: dict    # {split_mode, ranked, worst, best, total_distinct_creatives, qualifying}
+    min_volume: int = 20  # N mínimo de leads na janela pra um criativo aparecer
 
 
 def compute_utm_quality(
     repo,
+    *,
+    start_utc: datetime,
+    end_utc: datetime,
     client_id: str = 'devclub',
-    hours: int = 24,
     top_n: int = 5,
     min_volume: int = 20,
-    start_utc: Optional[datetime] = None,
-    end_utc: Optional[datetime] = None,
 ) -> UtmQualityResult:
     """
     Args:
         repo:       `LeadRepository` injetado pelo caller (endpoint /monitoring/utm-quality
                     em app.py compõe via compose_repository).
+        start_utc:  início da janela (obrigatório). end_utc: fim. Um dia/intervalo
+                    específico (até 90d, validado no endpoint) — o ranking usa essa
+                    janela e o LF é recortado até `end_utc`.
         client_id:  id do cliente (carrega `configs/active_models/{id}.yaml`).
-        hours:      janela em horas para a coluna "agora" (default 24). Ignorado
-                    se start_utc/end_utc forem passados.
-        top_n:      tamanho do Top piores e Top melhores por nível.
+        top_n:      tamanho do Top piores e Top melhores.
         min_volume: N mínimo de leads (na janela) para entrar no ranking.
-        start_utc:  início da janela primária (substitui o rolling de `hours`).
-        end_utc:    fim da janela primária. Passar os dois juntos. Permite olhar
-                    um dia/intervalo específico (até 90d, validado no endpoint) —
-                    o ranking usa essa janela e o LF é recortado até `end_utc`.
 
     Os decis já estão pré-computados no ledger (`registros_ml`); aqui só lemos os
     leads da janela e agregamos por UTM — nenhum scoring de modelo roda.
@@ -242,32 +239,23 @@ def compute_utm_quality(
         variant_names[1] if len(variant_names) > 1 else 'challenger',
     )
 
-    now_utc = datetime.now(timezone.utc)
-    custom = start_utc is not None and end_utc is not None
-    if custom:
-        win_start, win_end, anchor = start_utc, end_utc, end_utc
-        _s_brt, _e_brt = start_utc.astimezone(BRT), end_utc.astimezone(BRT)
-        if _s_brt.date() == _e_brt.date():
-            title_label = _s_brt.strftime('%d/%m')
-            row_label = _s_brt.strftime('%d/%m')
-        else:
-            title_label = f"{_s_brt.strftime('%d/%m')} a {_e_brt.strftime('%d/%m')}"
-            row_label = f"{_s_brt.strftime('%d/%m')}–{_e_brt.strftime('%d/%m')}"
+    win_start, win_end, anchor = start_utc, end_utc, end_utc
+    _s_brt, _e_brt = start_utc.astimezone(BRT), end_utc.astimezone(BRT)
+    if _s_brt.date() == _e_brt.date():
+        win_label = _s_brt.strftime('%d/%m')
     else:
-        win_start, win_end, anchor = now_utc - timedelta(hours=hours), now_utc, now_utc
-        title_label = f"últimas {hours}h"
-        row_label = f"{hours}h"
+        win_label = f"{_s_brt.strftime('%d/%m')} a {_e_brt.strftime('%d/%m')}"
 
     lf_label, lf_start, lf_end, lf_is_active = _resolve_lf_window(anchor)
 
-    records_24h = repo.leads_in_range(win_start, win_end)
+    records_win = repo.leads_in_range(win_start, win_end)
     records_lf = repo.leads_in_range(lf_start, lf_end) if lf_start else []
 
     # Hint de origem por content — pra rotular criativos sem nome (utm_content
     # numérico cru, ex: ID de anúncio do Google Ads/Demand Gen ou Meta não
     # nomeado). Guarda a origem dominante de cada content nas últimas 24h.
     _content_src: Dict[str, Dict[str, int]] = {}
-    for rec in records_24h:
+    for rec in records_win:
         if rec.score is None or rec.decil is None:
             continue
         ck = _utm_key(rec, 'ad')
@@ -278,72 +266,67 @@ def compute_utm_quality(
         ck: max(counts, key=counts.get) for ck, counts in _content_src.items()
     }
 
-    by_level: Dict[str, dict] = {}
-    for level in ('ad',):
-        agg_24h = _aggregate(records_24h, level, ab_cfg, champion_name, challenger_name)
-        agg_lf  = _aggregate(records_lf,  level, ab_cfg, champion_name, challenger_name)
+    agg_win = _aggregate(records_win, 'ad', ab_cfg, champion_name, challenger_name)
+    agg_lf  = _aggregate(records_lf,  'ad', ab_cfg, champion_name, challenger_name)
 
-        all_utms = set(agg_24h.keys()) | set(agg_lf.keys())
-        entries: List[dict] = []
-        for utm in all_utms:
-            ch_24h = agg_24h.get(utm, {}).get(champion_name)
-            cl_24h = agg_24h.get(utm, {}).get(challenger_name)
-            ch_lf  = agg_lf.get(utm, {}).get(champion_name)
-            cl_lf  = agg_lf.get(utm, {}).get(challenger_name)
+    all_creatives = set(agg_win.keys()) | set(agg_lf.keys())
+    entries: List[dict] = []
+    for utm in all_creatives:
+        ch_win = agg_win.get(utm, {}).get(champion_name)
+        cl_win = agg_win.get(utm, {}).get(challenger_name)
+        ch_lf  = agg_lf.get(utm, {}).get(champion_name)
+        cl_lf  = agg_lf.get(utm, {}).get(challenger_name)
 
-            n_24h = ((ch_24h or {}).get('n') or 0) + ((cl_24h or {}).get('n') or 0)
-            n_lf  = ((ch_lf  or {}).get('n') or 0) + ((cl_lf  or {}).get('n') or 0)
-            avg_24h_combined = _combined_avg_decil(ch_24h or {}, cl_24h or {})
+        n_win = ((ch_win or {}).get('n') or 0) + ((cl_win or {}).get('n') or 0)
+        n_lf  = ((ch_lf  or {}).get('n') or 0) + ((cl_lf  or {}).get('n') or 0)
+        avg_combined = _combined_avg_decil(ch_win or {}, cl_win or {})
 
-            entries.append({
-                'utm': utm,
-                'n_24h': n_24h,
-                'n_lf': n_lf,
-                'avg_decil_24h_combined': avg_24h_combined,
-                'champion_24h': ch_24h,
-                'challenger_24h': cl_24h,
-                'champion_lf': ch_lf,
-                'challenger_lf': cl_lf,
-                'source_hint': content_source_hint.get(utm) if level == 'ad' else None,
-            })
+        entries.append({
+            'utm': utm,
+            'n': n_win,
+            'n_lf': n_lf,
+            'avg_decil_combined': avg_combined,
+            'champion': ch_win,
+            'challenger': cl_win,
+            'champion_lf': ch_lf,
+            'challenger_lf': cl_lf,
+            'source_hint': content_source_hint.get(utm),
+        })
 
-        qualifying = [e for e in entries
-                      if e['n_24h'] >= min_volume
-                      and e['avg_decil_24h_combined'] is not None]
-        qualifying.sort(key=lambda e: e['avg_decil_24h_combined'])  # pior → melhor
+    qualifying = [e for e in entries
+                  if e['n'] >= min_volume
+                  and e['avg_decil_combined'] is not None]
+    qualifying.sort(key=lambda e: e['avg_decil_combined'])  # pior → melhor
 
-        # Split só faz sentido quando há UTMs suficientes pra "piores" e
-        # "melhores" serem conjuntos disjuntos. Com poucas (≤ 2×top_n) o
-        # split sobrepõe — então expõe uma lista única ranqueada.
-        n_qual = len(qualifying)
-        if n_qual <= 2 * top_n:
-            split_mode = 'single'
-            ranked = qualifying            # pior → melhor, sem corte
-            worst, best = [], []
-        else:
-            split_mode = 'extremes'
-            ranked = qualifying
-            worst = qualifying[:top_n]
-            best = list(reversed(qualifying[-top_n:]))
+    # Split só faz sentido quando há criativos suficientes pra "piores" e
+    # "melhores" serem conjuntos disjuntos. Com poucos (≤ 2×top_n) o split
+    # sobrepõe — então expõe uma lista única ranqueada.
+    n_qual = len(qualifying)
+    if n_qual <= 2 * top_n:
+        split_mode = 'single'
+        ranked = qualifying            # pior → melhor, sem corte
+        worst, best = [], []
+    else:
+        split_mode = 'extremes'
+        ranked = qualifying
+        worst = qualifying[:top_n]
+        best = list(reversed(qualifying[-top_n:]))
 
-        by_level[level] = {
-            'split_mode': split_mode,
-            'ranked': ranked,
-            'worst': worst,
-            'best':  best,
-            'total_distinct_utms': len(entries),
-            'qualifying_min_volume': n_qual,
-        }
+    ranking = {
+        'split_mode': split_mode,
+        'ranked': ranked,
+        'worst': worst,
+        'best':  best,
+        'total_distinct_creatives': len(entries),
+        'qualifying': n_qual,
+    }
 
     return UtmQualityResult(
-        window_24h={
+        window={
             'start': win_start.isoformat(),
             'end': win_end.isoformat(),
-            'hours': hours,
-            'custom': custom,
-            'title_label': title_label,
-            'row_label': row_label,
-            'n_total': len(records_24h),
+            'label': win_label,
+            'n_total': len(records_win),
         },
         window_lf={
             'label': lf_label,
@@ -354,13 +337,13 @@ def compute_utm_quality(
         },
         champion_name=champion_name,
         challenger_name=challenger_name,
-        by_level=by_level,
+        ranking=ranking,
         min_volume=min_volume,
     )
 
 
 # ──────────────────────────────────────────────────────────────────────────
-# Slack renderer — só Content, mini-tabela alinhada
+# Slack renderer — só criativo (ad), mini-tabela alinhada
 # ──────────────────────────────────────────────────────────────────────────
 
 def _combine(ch: Optional[dict], cl: Optional[dict], key: str) -> Optional[float]:
@@ -376,8 +359,8 @@ def _combine(ch: Optional[dict], cl: Optional[dict], key: str) -> Optional[float
 
 
 def _challenger_note(entry: dict) -> Optional[str]:
-    """Linha de Challenger só quando tem ≥10 leads em 24h (em Content ~nunca)."""
-    cl = entry.get('challenger_24h') or {}
+    """Linha de Challenger só quando tem ≥10 leads na janela (em criativo ~nunca)."""
+    cl = entry.get('challenger') or {}
     if (cl.get('n') or 0) < 10:
         return None
     d = cl.get('avg_decil')
@@ -406,14 +389,13 @@ def _display_creative(entry: dict) -> str:
     return entry.get('utm', '')
 
 
-def _mini_table_block(entry: dict, lf_label: str, marker: str, win_row_label: str = '24h') -> dict:
-    """Section mrkdwn: nome + mini-tabela monoespaçada (janela primária vs LF).
+def _mini_table_block(entry: dict, lf_label: str, marker: str, win_row_label: str = 'janela') -> dict:
+    """Section mrkdwn: nome + mini-tabela monoespaçada (janela vs LF).
 
-    `win_row_label` rotula a 1ª linha — '24h' no modo rolling, ou a data/intervalo
-    no modo custom (ex: '12/06', '12/06–13/06').
+    `win_row_label` rotula a 1ª linha com a data/intervalo (ex: '12/06', '12/06–13/06').
     """
-    d24 = _combine(entry.get('champion_24h'), entry.get('challenger_24h'), 'avg_decil')
-    p24 = _combine(entry.get('champion_24h'), entry.get('challenger_24h'), 'pct_d9_d10')
+    d_win = _combine(entry.get('champion'), entry.get('challenger'), 'avg_decil')
+    p_win = _combine(entry.get('champion'), entry.get('challenger'), 'pct_d9_d10')
     dlf = _combine(entry.get('champion_lf'), entry.get('challenger_lf'), 'avg_decil')
     plf = _combine(entry.get('champion_lf'), entry.get('challenger_lf'), 'pct_d9_d10')
 
@@ -423,7 +405,7 @@ def _mini_table_block(entry: dict, lf_label: str, marker: str, win_row_label: st
     table = (
         "```\n"
         f"{'':<13}média de decil   %D9, D10   leads\n"
-        f"{win_row_label[:13]:<13}{fd(d24):<16} {fp(p24):<10} {entry['n_24h']}\n"
+        f"{win_row_label[:13]:<13}{fd(d_win):<16} {fp(p_win):<10} {entry['n']}\n"
         f"{'Lançamento':<13}{fd(dlf):<16} {fp(plf):<10} {entry['n_lf']}\n"
         "```"
     )
@@ -436,7 +418,7 @@ def _mini_table_block(entry: dict, lf_label: str, marker: str, win_row_label: st
 
 def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
     """
-    Só Content. Mini-tabela alinhada (24h vs LF) por creative.
+    Só criativo (ad). Mini-tabela alinhada (janela vs LF) por criativo.
 
     - split_mode='single': lista única ranqueada pior → melhor (poucas UTMs)
     - split_mode='extremes': 🔴 Piores + 🟢 Melhores (muitas UTMs, disjuntas)
@@ -445,40 +427,33 @@ def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
 
     lf_label = r.window_lf.get('label') or 'LF'
     lf_state = 'em captação' if r.window_lf.get('is_active') else 'encerrado'
-    hours = r.window_24h.get('hours', 24)
-    n24 = r.window_24h.get('n_total', 0)
+    n_win = r.window.get('n_total', 0)
     nlf = r.window_lf.get('n_total', 0)
-    custom = r.window_24h.get('custom', False)
-    title_label = r.window_24h.get('title_label') or f"últimas {hours}h"
-    row_label = r.window_24h.get('row_label') or f"{hours}h"
+    win_label = r.window.get('label') or 'janela'
+    row_label = win_label
 
-    # Frases da janela primária — naturais nos dois modos.
-    if custom:
-        phrase_em = f"em {title_label}"          # "scoreados em 12/06"
-        phrase_de = f"de {title_label}"          # "decil médio de 12/06"
-    else:
-        phrase_em = f"nas {hours}h"
-        phrase_de = f"das últimas {hours}h"
+    phrase_em = f"em {win_label}"          # "scoreados em 12/06"
+    phrase_de = f"de {win_label}"          # "decil médio de 12/06"
 
-    data = r.by_level.get('ad', {})
-    qual = data.get('qualifying_min_volume', 0)
-    total = data.get('total_distinct_utms', 0)
+    data = r.ranking
+    qual = data.get('qualifying', 0)
+    total = data.get('total_distinct_creatives', 0)
     split_mode = data.get('split_mode', 'single')
     min_vol = r.min_volume
 
     blocks.append({
         'type': 'header',
         'text': {'type': 'plain_text',
-                 'text': f'Qualidade de Content — {title_label} × {lf_label}'},
+                 'text': f'Qualidade de Criativo — {win_label} × {lf_label}'},
     })
     blocks.append({
         'type': 'context',
         'elements': [{
             'type': 'mrkdwn',
             'text': (
-                f"*{n24}* leads scoreados {phrase_em} · "
+                f"*{n_win}* leads scoreados {phrase_em} · "
                 f"*{nlf}* no {lf_label} ({lf_state}) · "
-                f"*{qual}* de {total} creatives com *N ≥ {min_vol}* leads {phrase_em}"
+                f"*{qual}* de {total} criativos com *N ≥ {min_vol}* leads {phrase_em}"
             ),
         }],
     })
@@ -499,7 +474,7 @@ def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
         blocks.append({
             'type': 'context',
             'elements': [{'type': 'mrkdwn',
-                          'text': f'_nenhum creative com volume mínimo na janela ({title_label})._'}],
+                          'text': f'_nenhum criativo com volume mínimo na janela ({win_label})._'}],
         })
         return blocks
 
