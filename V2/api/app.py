@@ -4216,11 +4216,11 @@ async def utm_quality_endpoint(
         raise HTTPException(status_code=500, detail=f"compute_utm_quality falhou: {e}")
     return {
         'ok': True,
-        'window_24h': result.window_24h,
+        'window': result.window,
         'window_lf':  result.window_lf,
         'champion_name':  result.champion_name,
         'challenger_name': result.challenger_name,
-        'by_level': result.by_level,
+        'ranking': result.ranking,
     }
 
 
@@ -4248,7 +4248,7 @@ async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5, client
         raise HTTPException(status_code=500, detail=f"compute_utm_quality falhou: {e}")
     blocks = render_slack_blocks(result)
     lf_label = result.window_lf.get('label') or '—'
-    win_label = result.window_24h.get('title_label') or 'ontem'
+    win_label = result.window.get('label') or 'ontem'
     post = post_to_slack(UTM_QUALITY_TRAFEGO_CHANNEL, blocks, fallback_text=f'UTM Quality {win_label} × {lf_label}')
     post['blocks_count'] = len(blocks)
     if not post.get('ok'):
