@@ -1077,6 +1077,10 @@ def render_slack_blocks_client(view: dict) -> list[dict]:
     # Decis ontem + lançamento atual
     _slack_decis_window(view, blocks, 'previous_day')
     _slack_decis_window(view, blocks, 'current_launch')
+    # Taxa de resposta da pesquisa (cadastro→pesquisa) — esta view vai pro grupo
+    # de dados do cliente (#team-dados). Mesmo bloco da view completa; omite-se
+    # sozinho se a métrica veio ausente.
+    _slack_survey_response_rate(view, blocks)
     return blocks
 
 
