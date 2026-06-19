@@ -240,17 +240,21 @@ GIT_SHA=""
 HEAD_MERGED="unknown"
 
 check_clean_tree() {
-    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+    # --untracked-files=no de propósito: o fluxo de deploy por worktree copia
+    # artefatos mlruns/.env (untracked, não-gitignored) pra dentro da árvore.
+    # O perigo a barrar é CÓDIGO COMMITÁVEL editado e não-commitado, não build
+    # artifacts. Por isso só olhamos tracked (modificado/staged/deletado).
+    if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
         if [ "$DEPLOY_DIRTY" = "true" ]; then
-            print_warning "Árvore suja, mas DEPLOY_DIRTY=true — a revisão NÃO mapeia 1:1 um commit."
+            print_warning "Edições não-commitadas, mas DEPLOY_DIRTY=true — a revisão NÃO mapeia 1:1 um commit."
         else
-            print_error "Árvore de trabalho suja — deploy bloqueado."
+            print_error "Edições de código não-commitadas — deploy bloqueado."
             echo "      Commit/stash antes, ou (não recomendado) DEPLOY_DIRTY=true."
-            git status --short | head
+            git status --short --untracked-files=no | head
             exit 1
         fi
     else
-        print_success "Árvore de trabalho limpa."
+        print_success "Sem edição de código não-commitada (build artifacts untracked são OK)."
     fi
 }
 
