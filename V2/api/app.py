@@ -2663,6 +2663,37 @@ async def daily_monitoring_check_railway(
             _uf_records, date_brt_label=_uf_date_brt,
         )
 
+        # 1b-ter. Taxa de resposta da pesquisa (cadastro→pesquisa), série diária 7d
+        # BRT pro grupo de dados. Numerador = registros_ml (respostas) via repo
+        # (honra LEDGER_READ_SOURCE); denominador = tabela Client (cadastros
+        # all-source, Railway, schema do DevClub) — query GROUP BY dia guardada.
+        # Janela = 7 dias BRT COMPLETOS terminando ontem ([hoje-7d 00:00, hoje 00:00)).
+        # Tudo guardado: falha (inclusive cliente futuro sem Client) só omite a
+        # métrica, não derruba o relatório das 06:00.
+        survey_response_rate = None
+        try:
+            from src.monitoring.daily_check_aggregations import compute_survey_response_rate
+            _rr_days = 7
+            _rr_start_utc = (_uf_today_mid - timedelta(days=_rr_days)).astimezone(_tz.utc)
+            _rr_resp = _repo_leads.leads_in_range(_rr_start_utc, _uf_e)
+            _cad_rows = railway_conn.run(
+                'SELECT (("createdAt" - interval \'3 hours\')::date)::text AS d, COUNT(*) '
+                'FROM "Client" WHERE "createdAt" >= :s AND "createdAt" < :e GROUP BY 1',
+                s=_rr_start_utc, e=_uf_e,
+            )
+            _cad_by_day = {r[0]: int(r[1]) for r in _cad_rows}
+            survey_response_rate = compute_survey_response_rate(
+                _rr_resp, _cad_by_day, today_brt_mid=_uf_today_mid, days=_rr_days,
+            )
+            if survey_response_rate:
+                logger.info(
+                    f"📋 taxa de resposta 7d: ontem={survey_response_rate['ontem']['taxa']}% "
+                    f"· média={survey_response_rate['media_taxa']}%"
+                )
+        except Exception as _rre:
+            logger.warning(f"⚠️ taxa de resposta indisponível (segue sem): {_rre}")
+            survey_response_rate = None
+
         # 1c. Todos os leads com score (para métricas de qualidade por período)
         # UTMs + pageUrl extras pra split por variante A/B (baseline ponderado dos decis).
         # _calc_quality / _after / _decil_dist usam só [0]/[1]/[2], extras são ignorados.
@@ -2974,6 +3005,7 @@ async def daily_monitoring_check_railway(
                 'fbp_fbc_rolling': fbp_fbc_rolling,
             },
             'unified_funnel': unified_funnel,
+            'survey_response_rate': survey_response_rate,
             'scoring': {
                 'total_scored': len(leads_data),
                 'decil_distribution': {},
