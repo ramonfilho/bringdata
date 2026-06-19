@@ -71,11 +71,14 @@ def _classify_variant_from_record(record, ab_cfg,
 # ──────────────────────────────────────────────────────────────────────────
 
 def _utm_key(record, level_col: str) -> str:
-    """Pega o valor do UTM no nível pedido. Normaliza vazios pra 'sem_utm'."""
+    """Pega o valor do UTM no nível pedido. Normaliza vazios pra 'sem_utm'.
+
+    Hoje só o nível 'ad' (= utm_content). source/medium foram removidos: na conta
+    do DevClub adset é sempre "ABERTO" e campaign ≈ variante (já no split A/B), e
+    source/medium não interessam. O ad é o único com sinal de criativo.
+    """
     raw = {
-        'source':  record.utm_source,
-        'medium':  record.utm_medium,
-        'content': record.utm_content,
+        'ad': record.utm_content,
     }[level_col]
     val = (raw or '').strip().lower()
     return val if val else 'sem_utm'
@@ -188,7 +191,7 @@ class UtmQualityResult:
     window_lf: dict
     champion_name: str
     challenger_name: str
-    by_level: dict   # {'source'|'medium'|'content': {worst, best, totals}}
+    by_level: dict   # {'ad': {worst, best, totals}} — só o nível ad (utm_content)
     min_volume: int = 20  # N mínimo de leads em 24h pra um UTM aparecer
 
 
@@ -267,7 +270,7 @@ def compute_utm_quality(
     for rec in records_24h:
         if rec.score is None or rec.decil is None:
             continue
-        ck = _utm_key(rec, 'content')
+        ck = _utm_key(rec, 'ad')
         sv = (rec.utm_source or '').strip().lower() or 'sem_source'
         _content_src.setdefault(ck, {})
         _content_src[ck][sv] = _content_src[ck].get(sv, 0) + 1
@@ -276,7 +279,7 @@ def compute_utm_quality(
     }
 
     by_level: Dict[str, dict] = {}
-    for level in ('source', 'medium', 'content'):
+    for level in ('ad',):
         agg_24h = _aggregate(records_24h, level, ab_cfg, champion_name, challenger_name)
         agg_lf  = _aggregate(records_lf,  level, ab_cfg, champion_name, challenger_name)
 
@@ -301,7 +304,7 @@ def compute_utm_quality(
                 'challenger_24h': cl_24h,
                 'champion_lf': ch_lf,
                 'challenger_lf': cl_lf,
-                'source_hint': content_source_hint.get(utm) if level == 'content' else None,
+                'source_hint': content_source_hint.get(utm) if level == 'ad' else None,
             })
 
         qualifying = [e for e in entries
@@ -457,7 +460,7 @@ def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
         phrase_em = f"nas {hours}h"
         phrase_de = f"das últimas {hours}h"
 
-    data = r.by_level.get('content', {})
+    data = r.by_level.get('ad', {})
     qual = data.get('qualifying_min_volume', 0)
     total = data.get('total_distinct_utms', 0)
     split_mode = data.get('split_mode', 'single')
