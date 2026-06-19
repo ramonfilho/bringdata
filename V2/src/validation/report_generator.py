@@ -830,6 +830,7 @@ class ValidationReportGenerator:
                 'fbc': tracking_data['fbc'] if is_tracked else '',
                 'sale_date': tracking_data['sale_date'] if is_tracked else sale.get('sale_date', ''),
                 'sale_value': sale.get('sale_value', 0),
+                'sale_value_realizado': sale.get('sale_value_realizado', sale.get('sale_value', 0)),
                 'sale_origin': sale_origin,
                 'meio_pagamento': _meio_pagamento(sale_origin),
                 'campaign_id': tracking_data['campaign_id'] if is_tracked else '',
@@ -862,6 +863,7 @@ class ValidationReportGenerator:
             'data_captura',
             'sale_date',
             'sale_value',
+            'sale_value_realizado',
             'sale_origin',
             'meio_pagamento'
         ]]
@@ -887,6 +889,7 @@ class ValidationReportGenerator:
             'Data Captura',
             'Data Venda',
             'Valor Venda',
+            'Valor Recebido',
             'Fonte Venda',
             'Meio Pagamento'
         ]
@@ -907,8 +910,9 @@ class ValidationReportGenerator:
             worksheet.write(row_num, 8, str(row['data_captura']) if row['data_captura'] else '', formats['text'])
             worksheet.write(row_num, 9, str(row['sale_date']) if row['sale_date'] else '', formats['text'])
             worksheet.write(row_num, 10, row['sale_value'] if row['sale_value'] else 0, formats['currency'])
-            worksheet.write(row_num, 11, row['sale_origin'] if row['sale_origin'] else '', formats['text'])
-            worksheet.write(row_num, 12, row['meio_pagamento'] if row['meio_pagamento'] else '', formats['text'])
+            worksheet.write(row_num, 11, row['sale_value_realizado'] if row['sale_value_realizado'] else 0, formats['currency'])
+            worksheet.write(row_num, 12, row['sale_origin'] if row['sale_origin'] else '', formats['text'])
+            worksheet.write(row_num, 13, row['meio_pagamento'] if row['meio_pagamento'] else '', formats['text'])
 
         # Ajustar larguras
         worksheet.set_column(0, 0, 12)  # Trackeado
@@ -920,9 +924,9 @@ class ValidationReportGenerator:
         worksheet.set_column(6, 6, 50)  # Nome Campanha
         worksheet.set_column(7, 7, 12)  # Grupo
         worksheet.set_column(8, 9, 18)  # Datas
-        worksheet.set_column(10, 10, 15)  # Valor
-        worksheet.set_column(11, 11, 15)  # Fonte
-        worksheet.set_column(12, 12, 15)  # Meio Pagamento
+        worksheet.set_column(10, 11, 15)  # Valor Venda / Valor Recebido
+        worksheet.set_column(12, 12, 15)  # Fonte
+        worksheet.set_column(13, 13, 15)  # Meio Pagamento
 
     def _write_comparacao_ml(
         self,

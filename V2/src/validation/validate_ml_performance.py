@@ -286,7 +286,7 @@ Exemplos de uso:
         type=str,
         nargs='+',
         default=None,
-        help='Substrings (case-insensitive) no nome do produto a excluir (Guru/Hotmart). Default: ["Mentoria"]. Tudo o mais passa.'
+        help='Substrings (case-insensitive) no nome do produto a excluir (Guru/Hotmart). Default: ["Mentoria"]. Use "NENHUM" para incluir tudo (upsell incluído). Tudo o mais passa.'
     )
 
     # Tipo de relatório
@@ -1262,6 +1262,7 @@ def main():
                     # `registros_ml` no Railway (Etapa 5). Filtro em Python, não em SQL.
                     _ledger_conn = open_ledger_read_connection()
                     try:
+                        _ledger_conn.run("SET statement_timeout = '90s'")  # falha-rápido em vez de pendurar
                         _ledger_email_rows = _ledger_conn.run(
                             '''SELECT LOWER(email) FROM registros_ml
                                WHERE created_at >= :s AND created_at < :e AND email IS NOT NULL''',
@@ -1277,7 +1278,9 @@ def main():
                         database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
                         user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
                         password=os.environ['RAILWAY_DB_PASSWORD'],
+                        timeout=30,
                     )
+                    _conn.run("SET statement_timeout = '90s'")  # LATERAL UTMTracking é pesada; falha-rápido em vez de pendurar
                     _client_rows = _conn.run(
                         '''
                         SELECT c.email, c."firstName", c."lastName", c.phone,
@@ -1698,7 +1701,15 @@ def main():
     # DevClub FullStack Pro - OFICIAL, COMBOs etc.) passam todas — só dropamos o que é upsell
     # confirmadamente separado. Aplicado em canais com `product_name` (Guru/Hotmart);
     # Asaas/TMB passam direto (gateways de parcelamento sem nome).
-    product_exclude = getattr(args, 'product_exclude', None) or ['Mentoria']
+    # Sentinel p/ INCLUIR tudo (upsell/2º produto): --product-exclude NENHUM → lista vazia.
+    # (lista vazia desliga o filtro em combine_sales; sem sentinel, [] cairia no default.)
+    _pe = getattr(args, 'product_exclude', None)
+    if _pe is not None and len(_pe) == 1 and str(_pe[0]).strip().upper() in ('NENHUM', 'NONE', 'TODOS'):
+        product_exclude = []        # inclui todos os produtos (upsell incluído)
+    elif _pe:
+        product_exclude = _pe
+    else:
+        product_exclude = ['Mentoria']
 
     sales_df = sales_loader.combine_sales(
         guru_df=guru_df,
@@ -1923,68 +1934,40 @@ def main():
             logger.info(f"     Removidos (outro lançamento): {removed}")
             logger.info(f"     Restaram: {len(leads_df)}")
 
-        if ml_campaign_ids and control_campaign_ids:
-            # Usar função refinada que distingue Eventos ML vs Otimização ML
-            from src.validation.fair_campaign_comparison import create_refined_campaign_map
+        # Classificação de arm via resolvedor único (core/ab_arm) — variant-first.
+        # Verdade = registros_ml.variant (gravado por produção); nome/época só como
+        # fallback pré-ledger. Independe do split ml/controle por nome (que era frágil
+        # — não conhecia ML_MAR/PIXEL NOVO API e contaminava o Controle). O nível-campanha
+        # herda daqui via groupby(campaign_id) em ~2316.
+        from src.core.ab_arm import resolve_arm, EXTERNO
 
+        def _classify_arm(row):
+            arm = resolve_arm(
+                variant=row.get('variant'),
+                utm_campaign=row.get('campaign'),   # leads_df['campaign'] guarda a utm_campaign
+                campaign_name=row.get('campaign'),
+                captured_at=row.get('data_captura'),
+            )
+            return 'Outro' if arm == EXTERNO else arm  # 'Indeterminado' fica explícito (fora do A/B)
+
+        leads_df['comparison_group'] = leads_df.apply(_classify_arm, axis=1)
+
+        group_counts = leads_df['comparison_group'].value_counts()
+        logger.info(f"    Grupos (resolvedor ab_arm, variant-first):")
+        for group, count in group_counts.items():
+            logger.info(f"      {group}: {count} leads")
+
+        # Mapa campaign_id->grupo (por NOME) ainda alimenta a Comparação por ADSETS
+        # (matched pairs, ~seção 2492) — view secundária e mais granular. O split do
+        # estudo (Champion/Challenger/Controle) vem do lead acima (resolvedor); este
+        # mapa fica como está por ora (migrar depois se necessário).
+        if ml_campaign_ids and control_campaign_ids:
+            from src.validation.fair_campaign_comparison import create_refined_campaign_map
             comparison_group_map_15 = create_refined_campaign_map(
                 campaigns_df=campaigns_df,
                 ml_campaign_ids=ml_campaign_ids,
-                control_campaign_ids=control_campaign_ids
+                control_campaign_ids=control_campaign_ids,
             )
-
-            # Mapear leads para grupos refinados usando campaign_id (primeiros 15 dígitos)
-            def map_to_refined_group(row):
-                # Tentar obter campaign_id de várias fontes
-                campaign_id = None
-
-                # Fonte 1: campaign_id_meta (leads CAPI)
-                if pd.notna(row.get('campaign_id_meta')):
-                    campaign_id = str(row['campaign_id_meta'])
-
-                # Fonte 2: Extrair do nome da campanha (formato: "nome|ID")
-                elif pd.notna(row.get('campaign')):
-                    campaign_str = str(row['campaign'])
-                    # Procurar por ID de 18 dígitos após o último "|"
-                    if '|' in campaign_str:
-                        parts = campaign_str.split('|')
-                        last_part = parts[-1].strip()
-                        # Verificar se é um ID numérico de 18 dígitos
-                        if last_part.isdigit() and len(last_part) == 18:
-                            campaign_id = last_part
-
-                # Se conseguimos um campaign_id, mapear usando os primeiros 15 dígitos
-                if campaign_id:
-                    cid_15 = campaign_id[:15]
-                    grupo = comparison_group_map_15.get(cid_15)
-                    if grupo:
-                        return grupo
-
-                # Fallback para ml_type
-                # SEM_ML = Controle puro (DEVLF sem sufixo ML)
-                # COM_ML = ML genérico (preferimos identificar Champion ML vs Challenger ML via map acima;
-                # fallback aqui ocorre quando não conseguimos o campaign_id pra olhar no map)
-                if row.get('ml_type') == 'SEM_ML':
-                    return 'Controle'
-                elif row.get('ml_type') == 'COM_ML':
-                    return 'Champion'  # Default — sem ID não dá pra distinguir Champion vs Challenger ML
-                else:
-                    return 'Outro'
-
-            leads_df['comparison_group'] = leads_df.apply(map_to_refined_group, axis=1)
-
-            group_counts = leads_df['comparison_group'].value_counts()
-            logger.info(f"    Grupos refinados criados:")
-            for group, count in group_counts.items():
-                logger.info(f"      {group}: {count} leads")
-        else:
-            # Fallback: usar mapeamento simples
-            # SEM_ML = Controle puro; COM_ML = ML genérico (sem distinção Champion vs Challenger por falta de map)
-            logger.warning("    Não foi possível criar mapeamento refinado, usando simples")
-            leads_df['comparison_group'] = leads_df['ml_type'].map({
-                'COM_ML': 'Champion',
-                'SEM_ML': 'Controle'
-            }).fillna('Outro')
     else:
         logger.warning("    Coluna ml_type não encontrada, pulando criação de grupos")
 
@@ -2344,27 +2327,24 @@ def main():
                 database=os.environ['RAILWAY_DB_NAME'], ssl_context=_ssl_ctx,
             )
             _rows = _conn.run(
-                """SELECT LOWER("clientEmail") AS email, campaign
+                """SELECT LOWER("clientEmail") AS email, campaign, "trackedAt"::date AS tracked
                    FROM "UTMTracking"
                    WHERE "trackedAt"::date BETWEEN :s AND :e""",
                 s=start_date, e=end_date,
             )
             _conn.close()
-            _utm_df = pd.DataFrame(_rows, columns=['email', 'utm_campaign']).drop_duplicates('email')
+            _utm_df = pd.DataFrame(_rows, columns=['email', 'utm_campaign', 'tracked']).drop_duplicates('email')
 
-            # Classifica cada email pela mesma lógica de comparison_group
-            def _classify_utm(name):
-                if not isinstance(name, str):
-                    return 'Outro'
-                up = name.upper()
-                if 'LEADHQLB' in up or 'HQLB' in up:
-                    return 'Challenger'
-                if 'LEADQUALIFIED' in up or 'MACHINE LEARNING' in up or '| ML |' in up:
-                    return 'Champion'
-                if 'DEVLF' in up and 'PG1' in up:
-                    return 'Controle'
-                return 'Outro'
-            _utm_df['_group'] = _utm_df['utm_campaign'].apply(_classify_utm)
+            # Classifica cada email pelo MESMO resolvedor (core/ab_arm) usado no lead-level.
+            # UTMTracking não guarda variant → resolve por nome+data (era moderna tem tag limpa).
+            from src.core.ab_arm import resolve_arm as _resolve_arm, EXTERNO as _EXTERNO
+            def _classify_utm_row(r):
+                arm = _resolve_arm(
+                    utm_campaign=r['utm_campaign'], campaign_name=r['utm_campaign'],
+                    captured_at=r.get('tracked'),
+                )
+                return 'Outro' if arm == _EXTERNO else arm
+            _utm_df['_group'] = _utm_df.apply(_classify_utm_row, axis=1)
             _target_per_group = _utm_df['_group'].value_counts().to_dict()
             logger.info(f"    Leads únicos (UTMTracking) por grupo: {_target_per_group}")
 
