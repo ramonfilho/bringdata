@@ -115,6 +115,61 @@ def compute_unified_funnel(
     }
 
 
+def compute_survey_response_rate(
+    response_records: List[LeadRecord],
+    cadastro_by_brt_day: Dict[str, int],
+    *,
+    today_brt_mid: datetime,
+    days: int = 7,
+) -> Dict[str, Any]:
+    """Taxa de resposta da pesquisa (cadastro→pesquisa) por dia BRT.
+
+    Numerador: leads que responderam a pesquisa = `registros_ml` (`response_records`,
+    LeadRecord; `criado_em` vem offset-naive do pg8000, UTC implícito). Bucketizado
+    aqui por dia BRT (UTC − 3h).
+    Denominador: leads cadastrados = tabela `Client` (todas as fontes), já agregado
+    por dia BRT pelo handler em `cadastro_by_brt_day` ({'YYYY-MM-DD': n}). Fica no
+    handler porque é schema-específico do cliente (Railway), não passa pelo repo.
+
+    Série = os `days` últimos dias BRT COMPLETOS (terminando ONTEM); hoje (parcial)
+    fica de fora pra não enganar. `today_brt_mid` = hoje 00:00 BRT (tz-aware), âncora.
+
+    Returns:
+        {ontem: {dia, n_resp, n_cad, taxa}, serie: [...], media_taxa, days} — `taxa`
+        em % (None se n_cad=0 no dia). Média = ponderada (Σresp/Σcad, mais honesta
+        que média de taxas). Retorna None se NENHUM dia tem cadastro (degrada — o
+        handler/digest só omite a métrica, nunca quebra o relatório).
+    """
+    from datetime import timedelta
+
+    resp_by_day: Dict[str, int] = {}
+    for r in response_records:
+        c = r.criado_em
+        if c is None:
+            continue
+        brt_day = (c.replace(tzinfo=None) - timedelta(hours=3)).date().isoformat()
+        resp_by_day[brt_day] = resp_by_day.get(brt_day, 0) + 1
+
+    serie = []
+    for i in range(days, 0, -1):  # days..1 dias atrás → ordem cronológica, termina ontem
+        dia = (today_brt_mid - timedelta(days=i)).date().isoformat()
+        n_resp = resp_by_day.get(dia, 0)
+        n_cad = int(cadastro_by_brt_day.get(dia, 0))
+        taxa = round(n_resp / n_cad * 100, 1) if n_cad else None
+        serie.append({'dia': dia, 'n_resp': n_resp, 'n_cad': n_cad, 'taxa': taxa})
+
+    if not any(p['n_cad'] for p in serie):
+        return None
+    sum_resp = sum(p['n_resp'] for p in serie)
+    sum_cad = sum(p['n_cad'] for p in serie)
+    return {
+        'ontem': serie[-1],
+        'serie': serie,
+        'media_taxa': round(sum_resp / sum_cad * 100, 1) if sum_cad else None,
+        'days': days,
+    }
+
+
 _VARIANT_BUCKETS = ('Lead', 'Champion', 'Challenger')
 
 

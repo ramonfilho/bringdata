@@ -271,6 +271,21 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'funnel_metrics.unified_funnel.pipeline.aceito.fb':                                 (R, None),
     'funnel_metrics.unified_funnel.pipeline.aceito.ggl':                                (R, None),
     'funnel_metrics.unified_funnel.pipeline.aceito.outr':                               (R, None),
+    # Taxa de resposta da pesquisa (cadastro→pesquisa), série diária 7d BRT — grupo de dados.
+    # Pode vir None (degrada sem quebrar): declarar o pai cobre esse caso.
+    'funnel_metrics.survey_response_rate':                                              (R, None),  # dict ou None
+    'funnel_metrics.survey_response_rate.days':                                         (R, None),  # ex: 7
+    'funnel_metrics.survey_response_rate.media_taxa':                                   (R, None),  # ex: 72.6 (% ponderada)
+    'funnel_metrics.survey_response_rate.ontem':                                        (R, None),  # dict(4): último dia completo
+    'funnel_metrics.survey_response_rate.ontem.dia':                                    (R, None),  # 'YYYY-MM-DD' BRT
+    'funnel_metrics.survey_response_rate.ontem.n_cad':                                  (R, None),  # cadastros (Client)
+    'funnel_metrics.survey_response_rate.ontem.n_resp':                                 (R, None),  # respostas (registros_ml)
+    'funnel_metrics.survey_response_rate.ontem.taxa':                                   (R, None),  # % (None se n_cad=0)
+    'funnel_metrics.survey_response_rate.serie':                                        (R, None),  # list(7) dias BRT
+    'funnel_metrics.survey_response_rate.serie[].dia':                                  (R, None),  # 'YYYY-MM-DD' BRT
+    'funnel_metrics.survey_response_rate.serie[].n_cad':                                (R, None),
+    'funnel_metrics.survey_response_rate.serie[].n_resp':                               (R, None),
+    'funnel_metrics.survey_response_rate.serie[].taxa':                                 (R, None),
     'funnel_metrics.meta_response':                                                     (R, None),  # ex: dict(7)
     'funnel_metrics.meta_response.acceptance_rate':                                     (R, None),  # ex: 100.0
     'funnel_metrics.meta_response.error_count':                                         (R, None),  # ex: 0

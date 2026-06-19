@@ -821,6 +821,7 @@ def render_slack_blocks(view: dict) -> list[dict]:
     _slack_alerts(view, blocks, include_audience_drift=False)
     blocks.append({'type': 'divider'})
     _slack_unified_funnel(view, blocks)
+    _slack_survey_response_rate(view, blocks)
     blocks.append({'type': 'divider'})
     _slack_lead_quality(view, blocks)
     blocks.append({'type': 'divider'})
@@ -1657,6 +1658,40 @@ def _slack_unified_funnel(v: dict, B: list):
         "Pipeline = todas as fontes · fb = facebook-ads/ig/fb · ggl = google-ads · outr = resto. "
         f"leads_capi na janela: 7d={_n(r7,'n'):.0f} · 3d={_n(r3,'n'):.0f} · 1d={_n(r1,'n'):.0f}_"
     )}]})
+
+
+def _slack_survey_response_rate(v: dict, B: list):
+    """Taxa de resposta da pesquisa (cadastro→pesquisa) — SÓ grupo de dados.
+    Número do dia anterior em destaque + mini-tendência dos últimos 7 dias.
+    Omite o bloco se a métrica veio ausente (degradou no handler)."""
+    rr = (v.get('funnel') or {}).get('survey_response_rate')
+    if not rr:
+        return
+    serie = rr.get('serie') or []
+    ontem = rr.get('ontem') or {}
+    if not serie or not ontem:
+        return
+
+    def _taxa(t, dec=1):
+        return (f"{t:.{dec}f}".replace('.', ',') + "%") if t is not None else "—"
+
+    def _int_br(n):
+        return f"{int(n or 0):,}".replace(',', '.')
+
+    def _dia(iso):
+        p = (iso or '').split('-')
+        return f"{p[2]}/{p[1]}" if len(p) == 3 else (iso or '?')
+
+    trend = " · ".join(_taxa(p.get('taxa'), 0) for p in serie)
+    dias = rr.get('days', len(serie))
+    lines = [
+        f"Ontem ({_dia(ontem.get('dia'))}):  {_taxa(ontem.get('taxa'))}"
+        f"   ({_int_br(ontem.get('n_resp'))} / {_int_br(ontem.get('n_cad'))} cadastros)",
+        f"Últimos {dias}d:  {trend}   ·  méd {_taxa(rr.get('media_taxa'))}",
+    ]
+    B.append({'type': 'section', 'text': {'type': 'mrkdwn',
+        'text': (f"*📋 Taxa de resposta da pesquisa*  ·  _cadastro→pesquisa (todas as fontes)_\n"
+                 f"```\n" + "\n".join(lines) + "\n```")}})
 
 
 def _slack_funnel(v: dict, B: list):
