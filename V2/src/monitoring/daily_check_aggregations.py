@@ -178,6 +178,7 @@ def compute_variant_cpl_conv(
     meta_rows: List[Dict[str, Any]],
     client_campaigns: List,
     classify_fn,
+    tax_rate: float = 0.0,
 ) -> Dict[str, Dict[str, Any]]:
     """CPL real e conversão de LP por variante (Lead/Champion/Challenger).
 
@@ -197,9 +198,15 @@ def compute_variant_cpl_conv(
       - `client_campaigns`: list de `utm_campaign` (string), 1 por lead já
         deduplicado no caller.
 
+    `tax_rate`: imposto da Meta (ex.: 0.1215 = PIS/COFINS+ISS no BR/2026). Entra
+    SÓ no `cpl` (custo real = spend*(1+tax)/leads); o campo `spend` continua sendo
+    a MÍDIA pura (não grossa), pra o "Spend" do topo do funil seguir coerente.
+    Default 0.0 = sem imposto (outros clientes / chamadas legadas inalteradas).
+
     Returns:
         {bucket: {leads, spend, lpv, cpl, conv_lp}} pros 3 buckets. `cpl` =
-        spend/leads (None se leads=0). `conv_lp` = leads/lpv*100 (None se lpv=0).
+        spend*(1+tax_rate)/leads (None se leads=0). `conv_lp` = leads/lpv*100
+        (None se lpv=0).
     """
     agg = {b: {'leads': 0, 'spend': 0.0, 'lpv': 0} for b in _VARIANT_BUCKETS}
 
@@ -225,7 +232,7 @@ def compute_variant_cpl_conv(
             'leads': leads,
             'spend': round(spend, 2),
             'lpv': lpv,
-            'cpl': round(spend / leads, 2) if leads > 0 else None,
+            'cpl': round(spend * (1 + tax_rate) / leads, 2) if leads > 0 else None,
             'conv_lp': round(leads / lpv * 100, 1) if lpv > 0 else None,
         }
     return out

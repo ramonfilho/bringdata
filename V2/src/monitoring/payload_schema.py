@@ -936,6 +936,26 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'traffic_metrics.dia_anterior.por_variante.Challenger.conv_lp':                     (R, None),
     'traffic_metrics.dia_anterior.por_variante.Challenger.spend':                       (S, 'insumo do CPL; não renderizado direto'),
     'traffic_metrics.dia_anterior.por_variante.Challenger.lpv':                         (S, 'insumo da conv LP; não renderizado direto'),
+    # Acumulado do lançamento atual (cap_start→hoje) — mesmo formato do por_variante diário.
+    'traffic_metrics.por_variante_lf':                                                  (R, None),  # dict(3) buckets — acum. do LF
+    'traffic_metrics.por_variante_lf.Lead':                                             (R, None),
+    'traffic_metrics.por_variante_lf.Lead.leads':                                       (R, None),
+    'traffic_metrics.por_variante_lf.Lead.cpl':                                         (R, None),  # custo real (c/ imposto)
+    'traffic_metrics.por_variante_lf.Lead.conv_lp':                                     (R, None),
+    'traffic_metrics.por_variante_lf.Lead.spend':                                       (S, 'insumo do CPL; não renderizado direto'),
+    'traffic_metrics.por_variante_lf.Lead.lpv':                                         (S, 'insumo da conv LP; não renderizado direto'),
+    'traffic_metrics.por_variante_lf.Champion':                                         (R, None),
+    'traffic_metrics.por_variante_lf.Champion.leads':                                   (R, None),
+    'traffic_metrics.por_variante_lf.Champion.cpl':                                     (R, None),
+    'traffic_metrics.por_variante_lf.Champion.conv_lp':                                 (R, None),
+    'traffic_metrics.por_variante_lf.Champion.spend':                                   (S, 'insumo do CPL; não renderizado direto'),
+    'traffic_metrics.por_variante_lf.Champion.lpv':                                     (S, 'insumo da conv LP; não renderizado direto'),
+    'traffic_metrics.por_variante_lf.Challenger':                                       (R, None),
+    'traffic_metrics.por_variante_lf.Challenger.leads':                                 (R, None),
+    'traffic_metrics.por_variante_lf.Challenger.cpl':                                   (R, None),
+    'traffic_metrics.por_variante_lf.Challenger.conv_lp':                               (R, None),
+    'traffic_metrics.por_variante_lf.Challenger.spend':                                 (S, 'insumo do CPL; não renderizado direto'),
+    'traffic_metrics.por_variante_lf.Challenger.lpv':                                   (S, 'insumo da conv LP; não renderizado direto'),
     'traffic_metrics.ultimas_24h':                                                      (R, None),  # ex: dict(5)
     'traffic_metrics.ultimas_24h.clicks':                                               (R, None),  # ex: 4051
     'traffic_metrics.ultimas_24h.cpl':                                                  (R, None),  # ex: 6.79

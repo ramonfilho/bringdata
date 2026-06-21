@@ -1626,18 +1626,24 @@ def _slack_unified_funnel(v: dict, B: list):
     # Por variante (Lead/Champion/Challenger) — CPL real (spend Meta ÷ leads reais
     # da Client) e conversão de LP (leads reais ÷ landing_page_views). Leads reais =
     # TODOS os leads captados (tabela Client, não respostas de pesquisa), restritos a
-    # source Meta (allowlist CAPI). Só renderiza se a coleta no app.py preencheu.
+    # source Meta (allowlist CAPI). CPL já com imposto da Meta (PIS/COFINS+ISS).
+    # Duas colunas: "ontem" (dia anterior, leads ao lado) e "LF" (acumulado do
+    # lançamento). LF omitido se a coleta não preencheu. Só renderiza se houver diário.
     _pv = tr.get('por_variante') or {}
+    _pv_lf = (v.get('traffic') or {}).get('por_variante_lf') or {}
     if _pv:
-        lines.append("── Por variante (leads reais Meta) ──")
+        def _rs(x): return (f"R$ {x:.2f}".replace('.', ',')) if x is not None else "R$ —"
+        lines.append("── Por variante (leads reais Meta · CPL c/ imposto) ──")
         for _vk in ('Lead', 'Champion', 'Challenger'):
             _vd = _pv.get(_vk) or {}
+            _vl = _pv_lf.get(_vk) or {}
             _vn = _n(_vd, 'leads')
-            _cpl = _vd.get('cpl')
             _conv = _vd.get('conv_lp')
-            _cpl_s = (f"R$ {_cpl:.2f}".replace('.', ',')) if _cpl is not None else "R$ —"
             _conv_s = (f"{_conv:.1f}%".replace('.', ',')) if _conv is not None else "—"
-            lines.append(f"{_vk:<11}{_vn:>10,.0f}   CPL {_cpl_s} · LP {_conv_s}")
+            if _pv_lf:
+                lines.append(f"{_vk:<11}{_vn:>6,.0f}  CPL ontem {_rs(_vd.get('cpl'))} · LF {_rs(_vl.get('cpl'))} · LP {_conv_s}")
+            else:
+                lines.append(f"{_vk:<11}{_vn:>6,.0f}   CPL {_rs(_vd.get('cpl'))} · LP {_conv_s}")
     lines += [
         f"Pesquisa       {_n(stg('pesquisa'),'total'):>13,.0f}   {brk(stg('pesquisa'))}",
         f"Scoreado       {_n(stg('scoreado'),'total'):>13,.0f}   {brk(stg('scoreado'))}",
