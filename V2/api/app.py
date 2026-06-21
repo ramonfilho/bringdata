@@ -3748,60 +3748,73 @@ async def daily_monitoring_check_railway(
                     from src.validation.campaign_classifier import classify_variant as _classify_variant
                     from src.monitoring.daily_check_aggregations import compute_variant_cpl_conv as _variant_cpl
                     _PV_BUCKETS = ('Lead', 'Champion', 'Challenger')
-                    # 1) Lado Meta: spend + landing_page_views por campanha (dia anterior).
-                    _pv_meta_raw = _meta.get_insights(
-                        account_id=_account, level='campaign',
-                        fields=['campaign_name', 'spend', 'actions'],
-                        since_date=_dia_ant_str, until_date=_dia_ant_str,
-                        filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}],
+                    # Imposto da Meta (PIS/COFINS+ISS, BR 2026) — entra só no CPL
+                    # (custo real); vem do ClientConfig (default 0.0). Aplica nas
+                    # duas janelas (diário e lançamento).
+                    _tax = float(
+                        (pipeline._client_config.monitoring.meta_tax_rate
+                         if pipeline and pipeline._client_config and pipeline._client_config.monitoring
+                         else 0.0) or 0.0
                     )
-                    _pv_meta_rows = []
-                    for _mr in _pv_meta_raw:
-                        _lpv = 0
-                        for _a in (_mr.get('actions') or []):
-                            if _a.get('action_type') == 'landing_page_view':
-                                _lpv = int(float(_a.get('value', 0) or 0))
-                                break
-                        _pv_meta_rows.append({
-                            'campaign_name': _mr.get('campaign_name'),
-                            'spend': float(_mr.get('spend', 0) or 0),
-                            'lpv': _lpv,
-                        })
-                    # 2) Lado Client: leads reais (dia anterior BRT), 1 touch por email.
-                    _pv_conn = pg8000.native.Connection(
-                        host=os.environ['RAILWAY_DB_HOST'],
-                        port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
-                        database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
-                        user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
-                        password=os.environ['RAILWAY_DB_PASSWORD'],
-                        timeout=30,
-                    )
-                    try:
-                        _pv_rows = _pv_conn.run(
-                            'SELECT LOWER(TRIM(c.email)) AS email, u.campaign, u."trackedAt" '
-                            'FROM "Client" c '
-                            'JOIN "UTMTracking" u ON LOWER(TRIM(u."clientEmail")) = LOWER(TRIM(c.email)) '
-                            'WHERE (c."firstSeenAt" - INTERVAL \'3 hours\')::date = :d',
-                            d=_dia_ant_str,
+
+                    # Helper local: CPL/conv por variante numa janela [since,until] Meta
+                    # + [fs_a,fs_b] de firstSeenAt (BRT) na Client. Reusado pro diário
+                    # e pro acumulado do lançamento — mesma forma da query, sem duplicar.
+                    def _pv_for_window(since_s, until_s, fs_a, fs_b):
+                        _raw = _meta.get_insights(
+                            account_id=_account, level='campaign',
+                            fields=['campaign_name', 'spend', 'actions'],
+                            since_date=since_s, until_date=until_s,
+                            filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}],
                         )
-                    finally:
-                        try: _pv_conn.close()
-                        except Exception: pass
-                    # Dedup por email: touch de captação (1 dos 3 buckets) mais recente.
-                    _pv_by_email: Dict[str, tuple] = {}
-                    for _em, _cmp, _tat in _pv_rows:
-                        if _classify_variant(_cmp) not in _PV_BUCKETS:
-                            continue
-                        _prev = _pv_by_email.get(_em)
-                        if _prev is None or (_tat is not None and (_prev[1] is None or _tat >= _prev[1])):
-                            _pv_by_email[_em] = (_cmp, _tat)
-                    _pv_client_campaigns = [v[0] for v in _pv_by_email.values()]
-                    # 3) Agrega (split por nome via classify_variant) e anexa ao dia_anterior.
-                    _pv_result = _variant_cpl(
-                        meta_rows=_pv_meta_rows,
-                        client_campaigns=_pv_client_campaigns,
-                        classify_fn=_classify_variant,
-                    )
+                        _mrows = []
+                        for _mr in _raw:
+                            _lpv = 0
+                            for _a in (_mr.get('actions') or []):
+                                if _a.get('action_type') == 'landing_page_view':
+                                    _lpv = int(float(_a.get('value', 0) or 0))
+                                    break
+                            _mrows.append({
+                                'campaign_name': _mr.get('campaign_name'),
+                                'spend': float(_mr.get('spend', 0) or 0),
+                                'lpv': _lpv,
+                            })
+                        _c = pg8000.native.Connection(
+                            host=os.environ['RAILWAY_DB_HOST'],
+                            port=int(os.environ.get('RAILWAY_DB_PORT', '11594')),
+                            database=os.environ.get('RAILWAY_DB_NAME', 'railway'),
+                            user=os.environ.get('RAILWAY_DB_USER', 'postgres'),
+                            password=os.environ['RAILWAY_DB_PASSWORD'],
+                            timeout=60,
+                        )
+                        try:
+                            _rows = _c.run(
+                                'SELECT LOWER(TRIM(c.email)) AS email, u.campaign, u."trackedAt" '
+                                'FROM "Client" c '
+                                'JOIN "UTMTracking" u ON LOWER(TRIM(u."clientEmail")) = LOWER(TRIM(c.email)) '
+                                'WHERE (c."firstSeenAt" - INTERVAL \'3 hours\')::date >= :a '
+                                'AND (c."firstSeenAt" - INTERVAL \'3 hours\')::date <= :b',
+                                a=fs_a, b=fs_b,
+                            )
+                        finally:
+                            try: _c.close()
+                            except Exception: pass
+                        _by_email: Dict[str, tuple] = {}
+                        for _em, _cmp, _tat in _rows:
+                            if _classify_variant(_cmp) not in _PV_BUCKETS:
+                                continue
+                            _prev = _by_email.get(_em)
+                            if _prev is None or (_tat is not None and (_prev[1] is None or _tat >= _prev[1])):
+                                _by_email[_em] = (_cmp, _tat)
+                        return _variant_cpl(
+                            meta_rows=_mrows,
+                            client_campaigns=[v[0] for v in _by_email.values()],
+                            classify_fn=_classify_variant,
+                            tax_rate=_tax,
+                        )
+
+                    # Diário (dia anterior completo).
+                    _pv_result = _pv_for_window(_dia_ant_str, _dia_ant_str, _dia_ant_str, _dia_ant_str)
                     if isinstance(meta_window_data.get('dia_anterior'), dict):
                         meta_window_data['dia_anterior']['por_variante'] = _pv_result
                         logger.info(
@@ -3810,6 +3823,21 @@ async def daily_monitoring_check_railway(
                                 for _b, _d in _pv_result.items()
                             )
                         )
+                    # Acumulado do lançamento atual (cap_start..hoje) — pra ver tendência.
+                    try:
+                        from src.core.launches import resolve_launch_window_brt as _rlw_pv
+                        _lw_pv = _rlw_pv(today=_anchor)
+                        _cap_s = _lw_pv.cap_start.isoformat()
+                        _today_s = _brt_now.strftime('%Y-%m-%d')
+                        _pv_lf = _pv_for_window(_cap_s, _today_s, _cap_s, _today_s)
+                        meta_window_data['por_variante_lf'] = _pv_lf
+                        logger.info(
+                            f"📊 Por variante ({_lw_pv.lf_name or 'LF'} acum. {_cap_s}→{_today_s}): "
+                            + " · ".join(f"{_b}: {_d['leads']} leads, CPL {_d['cpl']}"
+                                         for _b, _d in _pv_lf.items())
+                        )
+                    except Exception as _pvlfe:
+                        logger.warning(f"⚠️ CPL/conv por variante (lançamento): {_pvlfe}")
                 except Exception as _pve:
                     logger.warning(f"⚠️ CPL/conv por variante (dia anterior): {_pve}")
 

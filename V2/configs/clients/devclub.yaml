@@ -537,6 +537,7 @@ monitoring:
   funnel_lookback_hours: null
   display_date_format: null
   capi_events_per_lead_estimate: null
+  meta_tax_rate: 0.1215   # imposto Meta no CPL (BR 2026): PIS/COFINS 9,25% + ISS 2,9%
   thresholds: null
   missing_rate_ignore_columns: null
   sheets_url: null

@@ -269,6 +269,7 @@ class MonitoringConfig:
     funnel_lookback_hours: int = 12                         # #80
     display_date_format: Optional[str] = None               # #81
     capi_events_per_lead_estimate: float = 1.3              # #82
+    meta_tax_rate: float = 0.0                              # imposto Meta no CPL (BR 2026: 0.1215 = PIS/COFINS 9,25% + ISS 2,9%)
     thresholds: Optional[Dict[str, Any]] = None             # #83
     missing_rate_ignore_columns: Optional[List[str]] = None # #84
     sheets_url: Optional[str] = None                        # #85
