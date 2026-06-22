@@ -48,6 +48,15 @@ PUBSUB_PROJECT_ID = "smart-ads-451319"
 PUBSUB_SUBSCRIPTION_ID = "lead-capture-ingest-sub"
 
 
+def _event_ts_iso(skew_seconds: int = 60) -> str:
+    """Timestamp RFC3339 (UTC) com o mesmo recuo de ~60s do CAPI Meta —
+    formato exigido pelo `eventTimestamp` do Data Manager API (Google Ads)."""
+    import datetime
+    return datetime.datetime.fromtimestamp(
+        time.time() - skew_seconds, datetime.timezone.utc
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def is_enabled() -> bool:
     """Chave geral. Off por padrão — deploy/promover NÃO liga."""
     return os.environ.get("PUBSUB_CAPI_ENABLED", "false").strip().lower() == "true"
@@ -270,8 +279,10 @@ def process_pending_pubsub(
     no ack em lote.) O Railway vira espelho tolerante (warning) até a Etapa 4.
     """
     from api.capi_integration import send_batch_events
+    from api import google_ads_integration as google_ads
 
     allowlist = set(pipeline._client_config.capi.utm_source_allowlist or [])
+    google_cfg = pipeline._client_config.google_ads
     score_all = score_all_leads()
     sub_path = subscription_path()
 
@@ -456,6 +467,7 @@ def process_pending_pubsub(
     capi_leads: List[Dict] = []
     # (event_id, decil_str, decil_int, vname, ack_id, payload, utm, survey_dict, enrich)
     capi_meta: List[Tuple[str, str, Optional[int], Optional[str], str, Dict, Dict, Dict, Dict]] = []
+    google_leads: List[Dict] = []   # canal paralelo Google Ads (Fase A) — só populado quando google_ads.enabled
     n_scored_no_meta = 0
     for ack_id, payload, survey_dict, utm, enrich, meta_elig in to_score:
         eid = payload["eventId"]
@@ -473,7 +485,23 @@ def process_pending_pubsub(
         # Gates de dispatch (só ativos quando score_all=True — caso contrário,
         # classify já filtrou antes do scoring):
         if score_all and not meta_elig:
-            # Google/outros — scoreado, NÃO vai pro Meta CAPI.
+            # Não vai pro Meta. Pode ir pro Google Ads (canal paralelo — Fase A).
+            # is_eligible cobre enabled + source na allowlist Google. O ledger e o
+            # ack seguem IDÊNTICOS a hoje (o rastro googleAdsStatus vem na Fase B).
+            # Com google_ads.enabled=false → is_eligible=False → nada coletado →
+            # comportamento byte-a-byte igual ao de antes.
+            _g_ok, _g_reason = google_ads.is_eligible({"source": utm.get("source")}, google_cfg)
+            if _g_ok:
+                google_leads.append({
+                    "email": payload.get("email"),
+                    "phone": enrich.get("telefone"),
+                    "decil": dc,
+                    "event_id": eid,
+                    "event_timestamp_iso": _event_ts_iso(),
+                    "source": utm.get("source"),
+                    "gclid": payload.get("gclid"),          # None até o front popular
+                    "ab_conversion_rates": (ab_v.conversion_rates if ab_v else None),
+                })
             n_allow += 1
             n_scored_no_meta += 1
             pending_ledger.append((ledger_row(
@@ -577,6 +605,28 @@ def process_pending_pubsub(
             f"NÃO enviados, NÃO gravados, NÃO ackados"
         )
 
+    # 5b. Envio paralelo Google Ads (Fase A) — canal INDEPENDENTE do Meta.
+    # Não toca capi_leads nem o ledger Meta. google_leads só tem itens quando
+    # google_ads.enabled (is_eligible filtrou na coleta). O rastro no ledger
+    # (googleAdsStatus) vem na Fase B; aqui só envia + loga.
+    google_sent = 0
+    if google_leads and not dry_run:
+        gres = google_ads.send_batch_events(
+            google_leads,
+            google_config=google_cfg,
+            business_config=pipeline._client_config.business,
+            client_id=pipeline._client_config.client_id,
+        )
+        google_sent = gres.get("sent", 0)
+        logger.info(
+            f"📈 [pubsub_branch] Google Ads: sent={gres.get('sent')} "
+            f"skipped={gres.get('skipped')} errors={gres.get('errors')}"
+        )
+    elif google_leads and dry_run:
+        logger.info(
+            f"🧪 [pubsub_branch] dry_run — {len(google_leads)} Google leads montados, NÃO enviados"
+        )
+
     # 6. Persistir ledger + Ack (dry_run não grava nem acka)
     #
     # Destino por ledger_target() (PLANO_LEDGER_CLOUDSQL.md):
@@ -634,6 +684,7 @@ def process_pending_pubsub(
     summary = {
         "processed": len(parsed),
         "sent": sent,
+        "google_sent": google_sent,
         "scored_no_meta": n_scored_no_meta,
         "skipped_allowlist": n_allow,
         "skipped_missing_data": n_missing,

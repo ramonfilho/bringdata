@@ -29,6 +29,7 @@ from api.pubsub_branch import (
     payload_to_survey_dict,
     payload_to_utm,
 )
+from src.core.client_config import GoogleAdsConfig
 
 
 # Payload real do dono — primeira mensagem capturada em 2026-05-23T00:50:11Z
@@ -289,6 +290,7 @@ class _FakePipeline:
         class _Capi:
             utm_source_allowlist = ["facebook-ads"]
         capi = _Capi()
+        google_ads = GoogleAdsConfig()   # desligado (enabled=False) — canal Google inerte
         client_id = "devclub"
     _client_config = _Cfg()
 
