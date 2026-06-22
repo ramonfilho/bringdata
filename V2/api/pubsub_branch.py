@@ -48,6 +48,15 @@ PUBSUB_PROJECT_ID = "smart-ads-451319"
 PUBSUB_SUBSCRIPTION_ID = "lead-capture-ingest-sub"
 
 
+def _event_ts_iso(skew_seconds: int = 60) -> str:
+    """Timestamp RFC3339 (UTC) com o mesmo recuo de ~60s do CAPI Meta —
+    formato exigido pelo `eventTimestamp` do Data Manager API (Google Ads)."""
+    import datetime
+    return datetime.datetime.fromtimestamp(
+        time.time() - skew_seconds, datetime.timezone.utc
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def is_enabled() -> bool:
     """Chave geral. Off por padrão — deploy/promover NÃO liga."""
     return os.environ.get("PUBSUB_CAPI_ENABLED", "false").strip().lower() == "true"
@@ -146,6 +155,7 @@ def ledger_row(
     survey: Optional[Dict] = None,
     enrich: Optional[Dict] = None,
     has_computer: Optional[bool] = None,
+    google_ads_status: Optional[str] = None,
 ) -> Dict:
     """Pura. Monta dict do INSERT em `registros_ml`. PK = `event_id`.
 
@@ -201,6 +211,7 @@ def ledger_row(
         "user_agent": enrich.get("user_agent"),
         "ip":         enrich.get("ip"),
         "has_computer": has_computer,
+        "google_ads_status": google_ads_status,
     }
 
 
@@ -219,7 +230,8 @@ def _insert_ledger(conn, r: Dict) -> None:
         ' base_status, hq_meta_event_id, hq_status, capi_sent_at, error_message, '
         ' utm_source, utm_medium, utm_campaign, utm_content, utm_term, utm_url, '
         ' survey_responses, '
-        ' first_name, last_name, phone, fbp, fbc, user_agent, ip, has_computer) '
+        ' first_name, last_name, phone, fbp, fbc, user_agent, ip, has_computer, '
+        ' google_ads_status) '
         'VALUES (:event_id, :email, :variant, :lead_score, :decil, '
         ' :base_meta_event_id, :base_status, :hq_meta_event_id, :hq_status, '
         + ('NOW()' if r.pop("capi_sent_at_now", False) else 'NULL')
@@ -227,7 +239,7 @@ def _insert_ledger(conn, r: Dict) -> None:
         ' :utm_content, :utm_term, :utm_url, '
         ' CAST(:survey_responses AS JSONB), '
         ' :first_name, :last_name, :phone, :fbp, :fbc, :user_agent, :ip, '
-        ' :has_computer) '
+        ' :has_computer, :google_ads_status) '
         'ON CONFLICT (event_id) DO NOTHING',
         survey_responses=survey_json,
         **r,
@@ -270,8 +282,10 @@ def process_pending_pubsub(
     no ack em lote.) O Railway vira espelho tolerante (warning) até a Etapa 4.
     """
     from api.capi_integration import send_batch_events
+    from api import google_ads_integration as google_ads
 
     allowlist = set(pipeline._client_config.capi.utm_source_allowlist or [])
+    google_cfg = pipeline._client_config.google_ads
     score_all = score_all_leads()
     sub_path = subscription_path()
 
@@ -456,6 +470,7 @@ def process_pending_pubsub(
     capi_leads: List[Dict] = []
     # (event_id, decil_str, decil_int, vname, ack_id, payload, utm, survey_dict, enrich)
     capi_meta: List[Tuple[str, str, Optional[int], Optional[str], str, Dict, Dict, Dict, Dict]] = []
+    google_leads: List[Dict] = []   # canal paralelo Google Ads (Fase A) — só populado quando google_ads.enabled
     n_scored_no_meta = 0
     for ack_id, payload, survey_dict, utm, enrich, meta_elig in to_score:
         eid = payload["eventId"]
@@ -473,7 +488,30 @@ def process_pending_pubsub(
         # Gates de dispatch (só ativos quando score_all=True — caso contrário,
         # classify já filtrou antes do scoring):
         if score_all and not meta_elig:
-            # Google/outros — scoreado, NÃO vai pro Meta CAPI.
+            # Não vai pro Meta. Pode ir pro Google Ads (canal paralelo).
+            # Com google_ads.enabled=false → is_eligible=False → cai no else
+            # (skipped_allowlist + ack), byte-a-byte igual ao de antes.
+            _g_ok, _g_reason = google_ads.is_eligible({"source": utm.get("source")}, google_cfg)
+            if _g_ok:
+                # Google-elegível: DEFERE ledger + ack pro pós-send (como o Meta),
+                # pra gravar o google_ads_status real. O contexto do ledger viaja
+                # junto do payload de envio (chaves "_" são ignoradas pelo enviador,
+                # que só lê email/phone/decil/event_id/ts/gclid/source/rates).
+                n_scored_no_meta += 1
+                google_leads.append({
+                    "email": payload.get("email"),
+                    "phone": enrich.get("telefone"),
+                    "decil": dc,
+                    "event_id": eid,
+                    "event_timestamp_iso": _event_ts_iso(),
+                    "source": utm.get("source"),
+                    "gclid": payload.get("gclid"),          # None até o front popular
+                    "ab_conversion_rates": (ab_v.conversion_rates if ab_v else None),
+                    "_ack_id": ack_id, "_vn": vn, "_sc": sc, "_di_int": _di_int,
+                    "_payload": payload, "_utm": utm, "_survey": survey_dict, "_enrich": enrich,
+                })
+                continue
+            # não-Google não-Meta (orgânico/TikTok/etc) — inalterado:
             n_allow += 1
             n_scored_no_meta += 1
             pending_ledger.append((ledger_row(
@@ -577,6 +615,48 @@ def process_pending_pubsub(
             f"NÃO enviados, NÃO gravados, NÃO ackados"
         )
 
+    # 5b. Envio paralelo Google Ads — canal INDEPENDENTE do Meta. Não toca
+    # capi_leads nem o ledger Meta. google_leads só tem itens quando
+    # google_ads.enabled (is_eligible filtrou na coleta). Aqui: envia, mapeia o
+    # desfecho por lead e grava o ledger (base_status segue 'skipped_allowlist' —
+    # o Meta não enviou; google_ads_status carrega o desfecho Google) + acka.
+    # Em dry_run, espelha o Meta: não envia, não grava, não acka.
+    google_sent = 0
+    if google_leads and not dry_run:
+        gres = google_ads.send_batch_events(
+            google_leads,
+            google_config=google_cfg,
+            business_config=pipeline._client_config.business,
+            client_id=pipeline._client_config.client_id,
+        )
+        google_sent = gres.get("sent", 0)
+        # Status por lead a partir do evento 'value' (todo decil dispara value).
+        gstatus: Dict[str, str] = {}
+        for gr in gres.get("results", []):
+            geid = gr.get("event_id")
+            if gr.get("destination") == "value":
+                gstatus[geid] = "sent" if gr.get("status") == "sent" else "error"
+            elif geid not in gstatus:
+                gstatus[geid] = gr.get("status") or "error"
+        for gl in google_leads:
+            geid = gl["event_id"]
+            pending_ledger.append((ledger_row(
+                geid, gl.get("email"), gl.get("_vn"), gl.get("_sc"), gl.get("_di_int"),
+                "skipped_allowlist", utm=gl.get("_utm"), survey=gl.get("_survey"),
+                enrich=gl.get("_enrich"),
+                has_computer=(gl.get("_payload") or {}).get("hasComputer"),
+                google_ads_status=gstatus.get(geid, "error"),
+            ), gl.get("_ack_id")))
+            handled_ack_ids.append(gl.get("_ack_id"))
+        logger.info(
+            f"📈 [pubsub_branch] Google Ads: sent={gres.get('sent')} "
+            f"skipped={gres.get('skipped')} errors={gres.get('errors')}"
+        )
+    elif google_leads and dry_run:
+        logger.info(
+            f"🧪 [pubsub_branch] dry_run — {len(google_leads)} Google leads montados, NÃO enviados"
+        )
+
     # 6. Persistir ledger + Ack (dry_run não grava nem acka)
     #
     # Destino por ledger_target() (PLANO_LEDGER_CLOUDSQL.md):
@@ -634,6 +714,7 @@ def process_pending_pubsub(
     summary = {
         "processed": len(parsed),
         "sent": sent,
+        "google_sent": google_sent,
         "scored_no_meta": n_scored_no_meta,
         "skipped_allowlist": n_allow,
         "skipped_missing_data": n_missing,

@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Bring Data — Google Ads API Use — Design Document</title>
+<style>
+  @page { size: A4; margin: 18mm 18mm 20mm 18mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #111;
+    font-size: 11.5pt;
+    line-height: 1.55;
+    margin: 0;
+    padding: 24px 32px;
+    max-width: 800px;
+  }
+  h1 {
+    font-size: 22pt;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+  }
+  .subtitle {
+    color: #555;
+    font-size: 11pt;
+    margin-bottom: 18px;
+  }
+  .metablock {
+    background: #f5f7fa;
+    border-left: 3px solid #2563eb;
+    padding: 12px 16px;
+    margin: 0 0 24px;
+    font-size: 10.5pt;
+  }
+  .metablock div { padding: 2px 0; }
+  .metablock strong { display: inline-block; min-width: 145px; color: #333; }
+  h2 {
+    font-size: 13pt;
+    margin: 22px 0 8px;
+    border-bottom: 1px solid #e2e8f0;
+    padding-bottom: 4px;
+  }
+  h3 {
+    font-size: 11.5pt;
+    margin: 14px 0 6px;
+  }
+  p { margin: 6px 0 10px; }
+  ul, ol { margin: 6px 0 10px; padding-left: 22px; }
+  li { margin-bottom: 4px; }
+  code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 10pt;
+    background: #f3f4f6;
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  .codeblock {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 10pt;
+    background: #f3f4f6;
+    padding: 10px 12px;
+    border-radius: 4px;
+    margin: 8px 0;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 8px 0 14px;
+    font-size: 10.5pt;
+  }
+  th, td {
+    border: 1px solid #d1d5db;
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #f3f4f6; }
+  .footer {
+    border-top: 1px solid #e2e8f0;
+    margin-top: 28px;
+    padding-top: 10px;
+    font-size: 9.5pt;
+    color: #6b7280;
+  }
+</style>
+</head>
+<body>
+
+<h1>Bring Data — Google Ads API Use</h1>
+<div class="subtitle">Design Document v1.0 — June 2026</div>
+
+<div class="metablock">
+  <div><strong>Company (legal name):</strong> Los Angeles Producciones LTDA</div>
+  <div><strong>Operating brand:</strong> Bring Data</div>
+  <div><strong>Brazilian Tax ID (CNPJ):</strong> 33.947.215/0001-73</div>
+  <div><strong>Registered address:</strong> Rua Rio Grande do Norte 1435, sala 708, Savassi, Belo Horizonte/MG, CEP 30130-138, Brazil</div>
+  <div><strong>Website:</strong> https://bring-data.com</div>
+  <div><strong>API contact:</strong> ramon@bring-data.com</div>
+  <div><strong>Phone:</strong> +55 (37) 99961-0179</div>
+  <div><strong>Google Ads MCC:</strong> 635-116-4315 (Bring Data)</div>
+  <div><strong>GCP project:</strong> smart-ads-451319</div>
+  <div><strong>Principal place of business:</strong> Brazil</div>
+</div>
+
+<h2>1. Overview</h2>
+<p>
+  Bring Data operates a machine-learning lead scoring service for Brazilian
+  businesses running paid traffic (B2B). Our clients capture leads through
+  their landing pages; our ML models score each lead in real time; and we
+  send qualified-lead conversion events to advertising platforms so the
+  platforms can optimize bidding toward high-quality leads. Meta Conversions
+  API (CAPI) is in production today; Google Ads is being added now.
+</p>
+<p>
+  This document describes the specific use of the Google Ads API by Bring
+  Data, the operations performed, the runtime architecture (which is mostly
+  served by a different Google API), authentication, expected volume,
+  access control, and security posture.
+</p>
+
+<h2>2. Scope of Google Ads API use</h2>
+<p>
+  The Google Ads API is used <strong>solely to perform one-time configuration of
+  conversion actions</strong> on client accounts. Specifically:
+</p>
+
+<table>
+  <tr><th>Field</th><th>Value</th></tr>
+  <tr><td>API service</td><td>ConversionActionService (mutation, via GoogleAdsService)</td></tr>
+  <tr><td>Operation</td><td>MutateConversionActions (create)</td></tr>
+  <tr><td>Resource type created</td><td>conversion_action (type=UPLOAD_CLICKS, category=QUALIFIED_LEAD)</td></tr>
+  <tr><td>Read operations</td><td>Single GoogleAdsService.search query checking whether a conversion action with the same name already exists (idempotency check)</td></tr>
+  <tr><td>When invoked</td><td>Once per client account during onboarding</td></tr>
+  <tr><td>Where invoked</td><td>From a developer workstation, by running the script <code>create_google_ads_conversion_actions.py</code></td></tr>
+</table>
+
+<p>
+  Two conversion actions are created per client account:
+</p>
+<ul>
+  <li><strong>LeadQualified</strong> — fires whenever the ML model classifies a captured lead as qualified, with a per-conversion value proportional to the score decile.</li>
+  <li><strong>LeadQualifiedHighQuality</strong> — fires only for top-decile leads (D9–D10).</li>
+</ul>
+
+<h3>Why API-based creation is necessary</h3>
+<p>
+  Our clients' Google Ads accounts have been migrated to the unified
+  conversion-action setup. On migrated accounts, the Google Ads UI does
+  not expose the path to create a bare UPLOAD_CLICKS conversion action —
+  the "+ Create conversion action" wizard forces a Google Sheets data
+  source connector and loops back to the connector even when "Skip and
+  set up later" is selected. Manual UI creation is therefore impossible
+  for our client accounts. The ConversionActionService (mutation) is the
+  only available path. This API-based creation route uses MUTATION
+  endpoints of the Google Ads API, not the deprecated
+  <code>UploadClickConversions</code> endpoint.
+</p>
+
+<h3>What this implementation does NOT do</h3>
+<ul>
+  <li>Query reports (no GoogleAdsService.search beyond the idempotency check above)</li>
+  <li>Modify bidding strategies</li>
+  <li>Modify campaigns, ad groups, ads, or keywords</li>
+  <li>Add or remove negative keywords</li>
+  <li>Manage budgets</li>
+  <li>Manage account access or linking</li>
+  <li>Upload conversion events (this runs through Data Manager API — see section 3)</li>
+</ul>
+
+<h2>3. Runtime architecture (NOT using the Google Ads API)</h2>
+<p>
+  Actual event upload at runtime — i.e., sending lead conversion events to
+  Google Ads when leads are scored — uses the Google
+  <strong>Data Manager API</strong>
+  (<code>datamanager.googleapis.com/v1/events:ingest</code>),
+  <strong>not</strong> the Google Ads API.
+</p>
+<p>
+  This design follows Google's published guidance from the Google Ads
+  Developer Blog (May 2026): <em>"We don't recommend implementing new
+  offline conversion workflows using the Google Ads API. Upgrade to the
+  Data Manager API."</em> The Data Manager API authenticates via service
+  account (no developer token required) and uses the
+  <code>events:ingest</code> endpoint to send events to the conversion
+  actions previously created by the one-time script.
+</p>
+
+<h3>End-to-end data flow</h3>
+<div class="codeblock">[Client landing page]
+       │ lead submit (POST /lead_capture, fields: contact + utm + gclid)
+       ▼
+[Bring Data backend on Cloud Run]
+       │
+       ├── ML scoring (LightGBM models, latency ~80ms)
+       │
+       ├── Persist to leads_capi table (Cloud SQL)
+       │
+       ├── Decision: should_send_to_destination(lead, capi_config, dest)
+       │
+       ├──▶ Meta Conversions API (existing, production)
+       │
+       └──▶ Google Data Manager API: events:ingest
+              (productDestinationId = conversion_action_id
+               created previously via Google Ads API)</div>
+
+<p>
+  The Google Ads API is only invoked from the developer workstation by
+  the script <code>create_google_ads_conversion_actions.py</code> during
+  initial client onboarding. The Cloud Run runtime never imports the
+  <code>google-ads</code> SDK and never makes Google Ads API calls.
+</p>
+
+<h2>4. Authentication</h2>
+
+<table>
+  <tr><th>Item</th><th>Value</th></tr>
+  <tr><td>Developer token</td><td>Issued to MCC 635-116-4315 (Bring Data)</td></tr>
+  <tr><td>OAuth2 client type</td><td>Desktop app, registered in GCP project smart-ads-451319</td></tr>
+  <tr><td>Refresh token</td><td>Bound to ramon@bring-data.com (administrator of the MCC)</td></tr>
+  <tr><td>login_customer_id</td><td>635-116-4315 (the MCC)</td></tr>
+  <tr><td>customer_id</td><td>Client account (e.g. 626-644-1811 for DevClub)</td></tr>
+  <tr><td>Credential storage</td><td>Local <code>.env</code> on developer workstation, not committed to source control, not deployed to runtime infrastructure</td></tr>
+  <tr><td>OAuth scope</td><td>https://www.googleapis.com/auth/adwords</td></tr>
+</table>
+
+<h2>5. Tool architecture and code</h2>
+<p>
+  Bring Data developed all components in-house. We do not use any
+  third-party tool with our Google Ads API token. Stack:
+</p>
+<ul>
+  <li>Python 3.11, official <code>google-ads</code> Python library (v27+)</li>
+  <li>Single-file CLI script: <code>create_google_ads_conversion_actions.py</code> (idempotent — re-runs do not duplicate)</li>
+  <li>Supports <code>--dry-run</code> via <code>validate_only=True</code> for safe rehearsal</li>
+  <li>Helper to mint the OAuth refresh token: <code>google_ads_oauth_refresh_token.py</code></li>
+</ul>
+
+<h2>6. Expected volume</h2>
+
+<table>
+  <tr><th>Phase</th><th>Calls per client</th><th>Notes</th></tr>
+  <tr><td>Onboarding (one-time)</td><td>3–4 calls</td><td>2 idempotency search queries + 2 MutateConversionActions calls</td></tr>
+  <tr><td>Steady state</td><td>0 calls</td><td>No recurring Google Ads API traffic</td></tr>
+  <tr><td>Annual total (across ~5–10 clients)</td><td>~20–40 calls</td><td>Far below any documented rate limit</td></tr>
+</table>
+
+<p>
+  Runtime conversion-event volume (which goes to <strong>Data Manager
+  API</strong>, not the Google Ads API) is on the order of 10<sup>5</sup>–10<sup>6</sup>
+  events per year aggregated across all clients.
+</p>
+
+<h2>7. Access control</h2>
+<p>
+  Only Bring Data's internal technical team has access to the Google Ads
+  API credentials and to the script that calls the API. Credentials are
+  not shared with clients or with external users. Client Google Ads
+  accounts are linked to the Bring Data MCC for operational purposes
+  (Bring Data team members access the MCC to monitor that conversion
+  actions are firing correctly), but clients do not have access to
+  Bring Data's API credentials.
+</p>
+
+<h2>8. Security and data handling</h2>
+<ul>
+  <li>API credentials kept in environment variables, never in source control (<code>V2/.env</code> is git-ignored).</li>
+  <li>Logs redact PII (email/phone are hashed before any log emission for downstream destinations).</li>
+  <li>The system complies with the Brazilian General Data Protection Law (LGPD, Law 13.709/2018).</li>
+  <li>Privacy policy published at <code>https://bring-data.com/privacy.html</code>.</li>
+  <li>Internal documentation classifies the developer token as a secret; rotation procedure exists in the runbook.</li>
+</ul>
+
+<h2>9. Token lifecycle and policy compliance</h2>
+<ul>
+  <li>The API contact email (ramon@bring-data.com) is monitored daily and will be kept up to date with the Google Ads API team.</li>
+  <li>We commit to responding promptly to all communications from the Google Ads API team.</li>
+  <li>We will not share the developer token, share API credentials, or use the token in ways inconsistent with the Google Ads API Terms and Conditions.</li>
+  <li>We will continue to follow Google's guidance to use the Data Manager API for runtime conversion event upload, and limit our Google Ads API usage to the scope described in section 2.</li>
+</ul>
+
+<h2>10. Summary</h2>
+<p>
+  This is a minimal, well-scoped use of the Google Ads API — limited to
+  one-time conversion action creation on client accounts. Runtime event
+  upload uses the Data Manager API as Google recommends. We are applying
+  for Basic Access because Test Access does not permit conversion action
+  creation on production accounts, and the migrated-account UI does not
+  expose an alternative path. The developer token, once Basic Access is
+  granted and the conversion actions are created, has no ongoing role in
+  our runtime traffic.
+</p>
+
+<div class="footer">
+  Los Angeles Producciones LTDA (operating as Bring Data) — CNPJ 33.947.215/0001-73<br>
+  Belo Horizonte/MG, Brazil — ramon@bring-data.com — https://bring-data.com
+</div>
+
+</body>
+</html>
