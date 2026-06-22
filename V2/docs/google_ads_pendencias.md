@@ -1,8 +1,8 @@
 # Google Ads — Envio de conversão de lead (status da implementação)
 
-> Criado: 2026-04-14 · Atualizado: 2026-06-15
+> Criado: 2026-04-14 · Atualizado: 2026-06-22
 >
-> Antes se chamava *"Pendências antes de implementar"*. A maior parte já foi implementada e **validada ponta a ponta** — este doc agora rastreia o **status** da frente, mantendo o histórico das decisões.
+> Antes se chamava *"Pendências antes de implementar"*. Implementado e **validado ponta a ponta** (sender + despachante no consumer, Fase A+B); falta só o go-live operacional. Este doc rastreia o **status** da frente, mantendo o histórico das decisões.
 >
 > Posição no roadmap: **H6 — Diversificação de canais** do `PLANO_EXECUCAO.md` (tese estratégica em `swot_bringdata.md`: modelo único → N canais, sair da concentração 100% Meta). Escopo: **só DevClub**. Código na branch **`feat/google-ads`** (worktree `~/bring_data.worktrees/google-ads`).
 
@@ -20,8 +20,9 @@ Todo o código está **DESLIGADO** (`google_ads.enabled=false`, allowlist vazia 
 | Config (`GoogleAdsConfig`) + bloco `google_ads:` no yaml | ✅ inerte na branch |
 | Módulo enviador `api/google_ads_integration.py` | ✅ inerte na branch |
 | Forma do payload `events:ingest` confirmada (`validateOnly` 200) | ✅ |
-| **Despachante** plugando o envio no caminho vivo (consumer Pub/Sub) | ⏳ **FALTA** |
-| Ligar `enabled:true` + allowlist + envio real de teste → canary | ⏳ **FALTA** |
+| Despachante no consumer Pub/Sub (Fase A — canal paralelo, Meta intacto) | ✅ feito |
+| Rastro `google_ads_status` no ledger (Fase B) + migração idempotente | ✅ feito |
+| Go-live operacional (migração → merge → deploy canary → ligar `enabled`) | ⏳ **FALTA** |
 
 ## Como funciona — decisões fixadas (histórico)
 
@@ -80,11 +81,19 @@ Versões anteriores marcavam a captura de `gclid` como **bloqueante 🔴**, pelo
 
 O caminho de envio **vivo** hoje (`PUBSUB_CAPI_ENABLED=true`) é o **consumer Pub/Sub** `api/pubsub_branch.py`: o front do dono publica o lead na fila → o consumer scoreia, decide elegibilidade Meta por `is_meta_eligible`, dispara o CAPI via `send_batch_events` e grava o ledger `registros_ml`. **É aí que o envio Google deve plugar.**
 
-## O que falta
+## Implementação no consumer (feita — Fase A + B)
 
-1. **Despachante único por canal** no send path do consumer Pub/Sub — uma fachada que recebe o lead scoreado e percorre os canais ligados na config (Meta hoje, Google a seguir), em vez de espelhar a decisão por canal em vários pontos (evita reabrir o vazamento histórico de lead ir pro canal errado). Toca código que roda → exige teste de paridade (o Meta tem que continuar idêntico).
-2. **Coluna `googleAdsStatus`** no ledger, mesmo vocabulário do status do Meta (`allowed`/`skipped`/`blocked`/`sent`).
-3. **Ligar:** `google_ads.enabled=true` + `source_allowlist: ["google-ads"]` no `devclub.yaml`; **envio real** (não-dry-run) de teste; canary.
+O envio Google entra como **canal paralelo** no único ponto de dispatch do consumer Pub/Sub (`api/pubsub_branch.py`), não como fachada pesada — o consumer já centraliza o dispatch (a fachada que colapsaria "N caminhos" era dos webhooks legado, que estão mortos).
+
+- **Fase A** — no ramo `not meta_elig` (onde leads não-Meta viravam `skipped_allowlist`): se `google_ads.is_eligible` (enabled + source na allowlist Google), o lead é coletado e enviado por um `send_batch_events` Google paralelo ao Meta. **Paridade por construção:** a mudança vive só no ramo dos leads que NÃO vão pro Meta; com `enabled=false`, nada é coletado → comportamento byte-a-byte igual.
+- **Fase B** — coluna `google_ads_status TEXT` no `registros_ml` (desfecho do envio Google por lead, análogo a `base_status`/`capi_sent_at` do Meta; `base_status` segue `skipped_allowlist`). O lead Google é deferido pro pós-send (como o Meta) pra gravar o desfecho real. Migração idempotente dual-target em `scripts/add_google_ads_status_column.py`.
+- **Testes:** `tests/test_pubsub_branch.py` 25/25, incl. caminho Google ligado (coletado → enviado → ledger `sent`, Meta intacto).
+
+## O que falta — go-live operacional
+
+1. **Migração nos DOIS ledgers** (antes do deploy): `add_google_ads_status_column.py --target railway` **e** `--target cloudsql`. A coluna tem que existir antes do código que a escreve (o INSERT do consumer passa a referenciá-la).
+2. **Merge** `feat/google-ads` → `main` (PR) → **deploy canary** sem tráfego, validar.
+3. **Ligar:** `google_ads.enabled=true` + `source_allowlist: ["google-ads"]` no `devclub.yaml`; **envio real** (não-dry-run) de teste; monitorar; soltar.
 4. **`gclid`** no payload do Pub/Sub (pedido pro front) + coluna no ledger — melhora atribuição, posterior.
 
 ## Observações arquiteturais
