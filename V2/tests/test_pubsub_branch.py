@@ -341,6 +341,80 @@ def test_dedup_in_batch_dispara_capi_uma_vez():
     assert len(conn.inserts) == 1, [i["params"].get("event_id") for i in conn.inserts]
 
 
+def test_score_all_envia_google_e_grava_status():
+    """Caminho Google LIGADO (Fase A+B): lead source=google-ads (não-Meta) é
+    scoreado, coletado, enviado pro Google e gravado no ledger com
+    google_ads_status='sent' — base_status segue 'skipped_allowlist' (Meta não
+    enviou). Mocka scoring e o send Google (sem rede)."""
+    import copy
+    import api.pubsub_branch as pb
+    import api.google_ads_integration as gmod
+
+    class _Exp:
+        lead_score = 0.91
+        decil = 10
+        variant = "challenger_abr28"
+        lead_score_calibrated = None
+
+    class _PipelineGoogle:
+        class _Cfg:
+            class _Capi:
+                utm_source_allowlist = ["facebook-ads"]   # google-ads NÃO é Meta-elegível
+            capi = _Capi()
+            google_ads = GoogleAdsConfig(
+                enabled=True, source_allowlist=["google-ads"],
+                customer_id="6266441811", login_customer_id="6351164315",
+                conversion_action_id_with_value="111",
+                conversion_action_id_high_quality="222",
+                currency="BRL", high_quality_decils=["D09", "D10"],
+            )
+            class _Biz:
+                product_value = 1563.75
+                conversion_rates = {"D10": 0.0132}
+            business = _Biz()
+            client_id = "devclub"
+        _client_config = _Cfg()
+        def get_ab_variant(self, *a, **k):  # noqa: ARG002
+            return None
+
+    payload = copy.deepcopy(PAYLOAD_REAL)
+    payload["eventId"] = "google-evt-1"
+    payload["utm"]["source"] = "google-ads"
+    raw = json.dumps(payload).encode("utf-8")
+    sub = _FakeSubscriber([_FakeReceived("ack-g", _FakeMessage(raw, "msg-g"))])
+    conn = _FakeConn()
+
+    captured = {}
+    def _fake_score(p, pipeline):  # noqa: ARG001
+        return _Exp()
+    def _fake_gsend(leads, **kw):  # noqa: ARG001
+        captured["leads"] = leads
+        return {"sent": 1, "skipped": 0, "errors": 0,
+                "results": [{"event_id": leads[0]["event_id"],
+                             "destination": "value", "status": "sent"}]}
+
+    _orig_score, _orig_send = pb.score_lead_from_payload, gmod.send_batch_events
+    pb.score_lead_from_payload = _fake_score
+    gmod.send_batch_events = _fake_gsend
+    try:
+        with _EnvGuard(SCORE_ALL_LEADS="true"):
+            summary = pb.process_pending_pubsub(sub, conn, _PipelineGoogle(), dry_run=False)
+    finally:
+        pb.score_lead_from_payload = _orig_score
+        gmod.send_batch_events = _orig_send
+
+    assert summary["google_sent"] == 1, summary
+    assert summary["sent"] == 0, summary                     # nada pro Meta
+    assert captured["leads"][0]["source"] == "google-ads", captured
+    assert captured["leads"][0]["decil"] == "D10", captured
+    assert len(conn.inserts) == 1, conn.inserts
+    p = conn.inserts[0]["params"]
+    assert p["event_id"] == "google-evt-1", p
+    assert p["google_ads_status"] == "sent", p
+    assert p["base_status"] == "skipped_allowlist", p        # Meta não enviou
+    assert sub.acked == ["ack-g"], sub.acked
+
+
 # ---------------------------------------------------------------------------
 # Dual-write do ledger (PLANO_LEDGER_CLOUDSQL.md Etapa 1)
 # ---------------------------------------------------------------------------
@@ -490,6 +564,7 @@ def _run():
         test_ledger_row_grava_utm_quando_passado,
         test_ledger_row_utm_parcial_grava_o_que_existe,
         test_dedup_in_batch_dispara_capi_uma_vez,
+        test_score_all_envia_google_e_grava_status,
         test_ledger_target_parsing,
         test_dual_write_grava_nos_dois_e_acka,
         test_cloudsql_primario_falha_nao_acka,
