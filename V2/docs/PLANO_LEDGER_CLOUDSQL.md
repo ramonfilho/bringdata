@@ -137,14 +137,13 @@ Ordem do menor risco pro maior:
 
 **Rollback:** cada commit é pequeno e reversível individualmente; env vars decidem a fonte.
 
-### Etapa 4 — Cortar o espelho Railway
+### Etapa 4 — Cortar o espelho Railway ✅ FEITA E NO AR — 23/06/2026
 
-- [ ] `LEDGER_TARGET=cloudsql` (consumer grava SÓ no Cloud SQL — flip via `gcloud run services update`, sem rebuild)
-- [ ] Critério: ≥7 dias de paridade limpa + monitoramento verde + `/validation/weekly` rodou ok na fonte nova
-  - **Reconciliação de acervo já confirmada (16/06):** `event_id` 23.636=23.636 nos dois bancos, 0 só num lado. Leitura no Cloud SQL no ar e estável desde 16/06 — o relógio dos 7 dias conta a partir daqui.
-  - Antes de cortar, **re-rodar o anti-join `event_id` por garantia** (deve continuar 0 só-no-Railway); o Cloud SQL é primário/mais completo, o risco real é só lead que exista no Railway e não no Cloud SQL.
+- [x] `LEDGER_TARGET=cloudsql` (consumer grava SÓ no Cloud SQL). Default mudado `dual`→`cloudsql` no `config.sh:157` (commit `4f19b5f`, durável) + aplicado live via `gcloud run services update --image <fixa> --update-env-vars` + `update-traffic` (rev `00439-twf`, mesma imagem do daily-check, sem rebuild).
+- [x] Critério ≥7 dias de paridade limpa: **16→23/06 cumprido.** Anti-join `event_id` re-rodado no corte: **28.573=28.573, 0 só-no-Railway.**
+- [x] **Teste pós-corte (validado):** 10min após o corte, leads novos Railway=**0** / Cloud SQL=**8**; Railway congelou no último lead 17:25 UTC, Cloud SQL seguiu até 17:40. Logs do consumer: `ledger_target=cloudsql`, `ledger_errors=0`, `unacked_for_retry=0`, 0 erros/5xx no serviço. Monitoramento (leitor) intacto — já lia Cloud SQL.
 
-**Rollback:** religar o dual-write (os dados do período sem espelho podem ser re-copiados do Cloud SQL pro Railway se precisar voltar — improvável).
+**Rollback:** religar `LEDGER_TARGET=dual` (env + `config.sh`); os leads gravados só-no-Cloud-SQL durante o corte podem ser re-copiados pro Railway se precisar (improvável — o Cloud SQL é a fonte canônica agora).
 
 ### Etapa 5 — Limpeza do estoque histórico na infra do cliente
 
@@ -206,6 +205,7 @@ O item 1 do plano de remediação de score (cache versionado regenerado no daily
 | 13/06 | 3.1b | Orchestrator (daily-check) lê o ledger via helper | `726814c` |
 | 16/06 | 3.1c | Readers restantes via helper (4 endpoints + reader principal do daily-check + early-return + fallback E6). PR #3 → `main` | `ba41d8c` |
 | 16/06 | 3→virada | **Leitura virada pro Cloud SQL em produção.** `LEDGER_READ_SOURCE=cloudsql`, rev `00427-k59` @100% (mesma imagem `ae016041`). Detalhe: `--update-env-vars` sozinho não pegou (tráfego pinado em tag de canary) → precisou `update-traffic --to-revisions`. Validado: acervo `event_id` 23.636=23.636 (0 só num lado); views privada+cliente idênticas (só sub-0,1pp no "Anteontem" do drift geral, 1 lead de borda) | — |
+| 23/06 | 4 | **Corte da escrita no Railway.** `config.sh` default `dual`→`cloudsql` + aplicado live (rev `00439-twf`, mesma imagem, sem rebuild). Acervo no corte 28.573=28.573, 0 só-no-Railway. Teste pós-corte: 10min → Railway **0** leads novos (congelou 17:25 UTC), Cloud SQL **+8** (até 17:40); consumer `ledger_target=cloudsql`/`ledger_errors=0`, 0 erros/5xx | `4f19b5f` |
 
 ## 8. Como retomar numa sessão nova
 
