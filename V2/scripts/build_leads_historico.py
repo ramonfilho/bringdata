@@ -31,9 +31,26 @@ from pathlib import Path
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CACHE = PROJECT_ROOT / "files" / "validation" / "cache"
-SHEET_PROD = CACHE / "sheets_1VYti8jX277VNMkvzrfnJSR_Ko8L1LQFDdMEeD6D8_Vo_all_all.parquet"
-SHEET_BACKUP = CACHE / "sheets_1OqNYA5zU9ix1uf52ovRYIdLhcugzwgfKOheKxE_zgvE_all_all.parquet"
+# Planilha CRUA via export CSV (gid=0, aba "[LF] Pesquisa"). O cache normalizado
+# perde as colunas de pesquisa (vêm vazias) — a fonte boa é a crua, com os
+# cabeçalhos em português + colunas `decil`/`lead_score`.
+SHEET_PROD_URL = "https://docs.google.com/spreadsheets/d/1VYti8jX277VNMkvzrfnJSR_Ko8L1LQFDdMEeD6D8_Vo/export?format=csv&gid=0"
+SHEET_BACKUP_URL = "https://docs.google.com/spreadsheets/d/1OqNYA5zU9ix1uf52ovRYIdLhcugzwgfKOheKxE_zgvE/export?format=csv&gid=0"
+
+# Cabeçalho em PT da planilha crua → chave canônica.
+MAP_SHEET_PT = {
+    "O seu gênero:": "genero",
+    "Qual a sua idade?": "idade",
+    "O que você faz atualmente?": "ocupacao",
+    "Atualmente, qual a sua faixa salarial?": "faixa_salarial",
+    "Você possui cartão de crédito?": "cartao_credito",
+    "Já estudou programação?": "estudou_programacao",
+    "Você já fez/faz/pretende fazer faculdade?": "faculdade",
+    "Já investiu em algum curso online para aprender uma nova forma de ganhar dinheiro?": "investiu_curso",
+    "O que mais te chama atenção na profissão de Programador?": "atracao_profissao",
+    "O que mais você quer ver no evento?": "interesse_evento",
+    "Tem computador/notebook?": "tem_computador",
+}
 
 # Janelas de captação (nome, cap_start, cap_end). Fonte: PC FORMULÁRIOS.
 # LF40–44 e LF59 acrescentados às janelas do gerar_scores_2026.LAUNCHES.
@@ -164,6 +181,16 @@ def _decil_str(v) -> str | None:
         return None
 
 
+def _parse_score(v):
+    """lead_score da planilha vem com vírgula decimal ('0,4888...')."""
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    try:
+        return float(str(v).strip().replace(",", "."))
+    except ValueError:
+        return None
+
+
 def _norm_json_survey(raw, key_map) -> dict:
     d = json.loads(raw) if isinstance(raw, str) else (raw or {})
     return {can: d.get(src) for src, can in key_map.items() if d.get(src) is not None}
@@ -198,31 +225,41 @@ def _insert(cs, recs, fonte_label):
 
 
 def from_sheets(cs):
-    """Pré-18/02 (+ a parte 03–17/02 do LF45): caches PROD+BACKUP. survey snake_case + decile."""
+    """Pré-18/02 (+ a parte 03–17/02 do LF45): planilha CRUA (PROD+BACKUP).
+    Pesquisa sob cabeçalhos em PT + colunas `decil`/`lead_score`."""
     wins = [w for w in LAUNCH_WINDOWS if w[1] < "2026-02-24"]  # cap_start antes de LF46
     frames = []
-    for f in (SHEET_PROD, SHEET_BACKUP):
-        if f.exists():
-            frames.append(pd.read_parquet(f))
-    df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-    df["email"] = df["email"].astype(str).str.lower().str.strip()
-    df = df.sort_values("decile", na_position="last").drop_duplicates("email", keep="first")
-    df["_lf"] = pd.to_datetime(df["data_captura"], errors="coerce").map(lambda d: _lf_for(d, wins))
-    df = df[df["_lf"].notna()]
+    for url in (SHEET_PROD_URL, SHEET_BACKUP_URL):
+        try:
+            frames.append(pd.read_csv(url, low_memory=False, dtype=str))
+        except Exception as e:
+            print(f"  aviso: falha lendo planilha ({e})")
+    if not frames:
+        print("  planilhas: nenhuma lida")
+        return 0
+    df = pd.concat(frames, ignore_index=True)
+    df["email"] = df["E-mail"].astype(str).str.lower().str.strip()
+    df["_dt"] = pd.to_datetime(df["Data"], errors="coerce", dayfirst=True)
+    # dedup por email: preferir a linha com decil preenchido
+    df = (df.assign(_hasdec=df["decil"].notna())
+            .sort_values("_hasdec", ascending=False, kind="stable")
+            .drop_duplicates("email", keep="first"))
+    df["_lf"] = df["_dt"].map(lambda d: _lf_for(d, wins))
+    df = df[df["_lf"].notna() & df["email"].str.contains("@", na=False)]
     recs = []
     for _, r in df.iterrows():
-        survey = {can: r.get(src) for src, can in MAP_SHEET.items()
-                  if pd.notna(r.get(src))}
+        survey = {can: r.get(src) for src, can in MAP_SHEET_PT.items()
+                  if pd.notna(r.get(src)) and str(r.get(src)).strip()}
         recs.append({
-            "email": r["email"], "lf": r["_lf"], "nome": r.get("nome"),
-            "telefone": r.get("telefone"), "data_captura": pd.to_datetime(r["data_captura"], errors="coerce"),
-            "utm_source": r.get("source"), "utm_medium": r.get("medium"),
-            "utm_campaign": r.get("campaign"), "utm_content": r.get("content"), "utm_term": r.get("term"),
-            "survey_responses": survey, "tem_computador": r.get("tem_computador"),
-            "fonte": "planilha", "score_producao": r.get("lead_score"),
-            "decil_producao": _decil_str(r.get("decile")),
+            "email": r["email"], "lf": r["_lf"], "nome": r.get("Nome Completo"),
+            "telefone": r.get("Telefone"), "data_captura": r["_dt"],
+            "utm_source": r.get("Source"), "utm_medium": r.get("Medium"),
+            "utm_campaign": r.get("Campaign"), "utm_content": r.get("Content"), "utm_term": r.get("Term"),
+            "survey_responses": survey, "tem_computador": survey.get("tem_computador"),
+            "fonte": "planilha", "score_producao": _parse_score(r.get("lead_score")),
+            "decil_producao": _decil_str(r.get("decil")),
         })
-    return _insert(cs, recs, "planilhas (pré-18/02)")
+    return _insert(cs, recs, "planilhas crua (pré-18/02)")
 
 
 def from_lead_legado(cs):
