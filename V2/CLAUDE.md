@@ -70,6 +70,22 @@ Toda menção a um item técnico identificado por código — cenários da audit
 - Itens M-X de prioridade operacional → `docs/PLANO_EXECUCAO.md`
 - Erros históricos e Clusters → `docs/registro_erros_ml.md`
 
+### Resumo de uma frase no topo de toda mensagem longa
+
+**Regra obrigatória.** Toda mensagem com mais de **~800 caracteres** (≈ 130 palavras — o tamanho de um diagnóstico de uns 3 parágrafos com uma tabela) **abre com um resumo de UMA frase** do que aquilo quer dizer ou do que vai acontecer. Só se a frase única for impossível é que vale um parágrafo curto. O detalhamento (diagnóstico, tabelas, código) vem **depois** do resumo.
+
+**Por que esta regra existe:** o operador lê dezenas de mensagens longas por dia e precisa do "no fim das contas, o que isso significa / o que você vai fazer" **antes** de decidir se lê o resto. Sem o resumo no topo, cada decisão custa reler um bloco inteiro de diagnóstico só pra extrair a conclusão que já podia estar na primeira linha.
+
+### Mensagem com 2+ termos técnicos vai INTEIRA na linguagem do projeto
+
+**Regra obrigatória — endurece a regra de linguagem natural acima.** Se uma mensagem contém **dois ou mais** termos técnicos, nomes de função, de tabela, de variável ou de coluna física do banco, a **mensagem inteira** é escrita na linguagem do projeto: cada nome técnico vem acompanhado, na mesma frase, de uma descrição verbal do papel que ele cumpre no fluxo. Não precisa descer ao nível ultra básico — precisa que o leitor entenda o que cada peça faz sem ter que abrir o código.
+
+| Errado | Certo |
+|---|---|
+| "Fail-safe: o per-variant já é `try/except` (`orchestrator:454`) → se a query nova falhar, degrada pro fallback do bloco." | "Fail-safe: o trecho que conta quantos leads cada modelo do teste A/B scoreou (a contagem por variante, em `orchestrator:454`) já está protegido por `try/except` → se a query nova falhar, ele volta ao comportamento antigo do bloco em vez de derrubar o relatório das 06:00." |
+
+A referência `arquivo:linha` pode ficar entre parênteses; o que não pode é o nome técnico aparecer **sozinho**, sem dizer o que ele significa.
+
 ---
 
 ## Antes de mudança arquitetural — consultar `/sw-architect`
