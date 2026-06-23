@@ -4,7 +4,7 @@
 **Frente:** `feat/monitoring-term-source-aware` (só monitoramento — sem retreino)
 **Relacionado:** [analise_valor_decil_por_canal_google_vs_meta.md](analise_valor_decil_por_canal_google_vs_meta.md)
 
-> **Em uma frase:** o bucket "outros" do `utm_term` estava inflado por dois motivos que o alerta confundia — placeholder do Meta que não renderizou (problema real, pequeno) e ID de campanha do Google Ads (legítimo, crescente) — e esta frente ensina o monitoramento a separar os dois; o conserto definitivo (dar ao Google categoria própria) fica para o próximo retreino.
+> **Em uma frase:** o bucket "outros" do `utm_term` estava inflado por dois motivos que o alerta confundia — placeholder do Meta que não renderizou (problema real, pequeno) e ID de campanha do Google Ads (legítimo, crescente) — e esta frente ensina o monitoramento a separar os dois; no próximo retreino, a decisão a tomar não é "criar categoria pro Google", e sim **testar por ablação se o `Term`/UTM deve seguir no scoring**, porque é redundante com a feature de fonte (`Source`) e quase não move a métrica.
 
 ---
 
@@ -46,14 +46,23 @@ A medida de drift de "outros" no `utm_term` é cega de fonte (mistura Google), e
 
 ## 3. Nota de retreino (frente futura — NÃO feita aqui)
 
-No próximo retreino, **dar ao Google uma categoria própria no espaço de feature do `utm_term`** (ex.: `Term_google`) em vez de jogar todo o tráfego Google em `Term_outros`. Motivo: o volume de Google subiu de ~10% para ~23% e tende a crescer; misturá-lo com "outros" (que também contém o macro Meta quebrado e qualquer categoria genuinamente nova) desperdiça sinal e deixa o baseline de drift estruturalmente errado.
+**Recomendação principal: rodar uma ablação do `Term`/UTM antes de mexer nas categorias.** A intuição que motiva isso (registrada em conversa de 2026-06-23): a feature `Term` é em boa parte **redundante** com a feature de fonte (`Source`). O eixo "Meta vs Google" está nos dois — `Source_google-ads` ≈ `Term_outros`, já que o Google cai em "outros" por design. O **único** pedaço exclusivo do `Term` é o sub-source **Instagram vs Facebook** (que o `Source` não vê, porque o `utm_source` chega cravado como `facebook-ads`).
 
-Pontos a considerar quando essa frente for executada:
+Isso importa porque:
 
-1. **A discriminação Google × Meta já é parcialmente capturada pela feature `Source`** (`Source_google-ads` vs `Source_facebook-ads`). O ganho de uma categoria de `Term` própria é incremental — vale medir antes de assumir.
-2. **O valor do lead Google já foi analisado** (ver [analise_valor_decil_por_canal_google_vs_meta.md](analise_valor_decil_por_canal_google_vs_meta.md)): o ranqueamento de decil do Challenger transfere pro Google e o valor (componente de conversão) é ≈ igual ao do Meta. Ou seja, o Google não é um público "pior" — só é um canal sem sub-source IG/FB.
-3. **Ao recomputar o baseline de drift do treino** (`capture_training_distributions`), capturar a distribuição do `utm_term` de forma consistente com a feature nova (Google com rótulo próprio), pra o drift voltar a ser comparável.
-4. **Quando o retreino entrar, o silêncio do Item B sai:** remover a entrada `Term/outros` de `silenced_drift_changes` e reavaliar o drift com o novo espaço de feature.
+1. **O modelo é uma RandomForest** — colinearidade não quebra a predição (quem sofre com isso é modelo linear), mas **reparte a importância** entre as features correlacionadas. É parte do motivo de o `Term` aparecer no meio-baixo do ranking: o `Source` já carrega o sinal compartilhado.
+2. **O experimento de moat** ([EXPERIMENTO_MOAT_MODELO.md](EXPERIMENTO_MOAT_MODELO.md)) mediu que as features de UTM **diluíram a AUC em −0,0024 vs usar só a pesquisa** — ou seja, no dataset atual o `Term`/UTM provavelmente não está pagando o próprio lugar no scoring.
+
+**Decisão a tomar no retreino (não antes):**
+
+- **Treinar com e sem `Term`/UTM e comparar** (AUC, calibração, distribuição de decis). 
+- Se o `Term`/UTM **não ajuda** (ou atrapalha): **tirar do scoring** e manter UTM só pra atribuição. Isso dissolve o problema do "outros" na raiz — sem feature de `Term`, não há bucket pra inflar.
+- Se o `Term`/UTM **ajuda mesmo assim**: aí sim **dar ao Google uma categoria própria** (ex.: `Term_google`) em vez de empilhar em `Term_outros`, pra a feature mantida ficar limpa — e recomputar o baseline de drift (`capture_training_distributions`) consistente com o novo rótulo.
+
+Em qualquer dos caminhos:
+
+- **O valor do lead Google já foi analisado** (ver [analise_valor_decil_por_canal_google_vs_meta.md](analise_valor_decil_por_canal_google_vs_meta.md)): o ranqueamento de decil do Challenger transfere pro Google e o valor (componente de conversão) é ≈ igual ao do Meta. O Google não é público "pior" — só é canal sem sub-source IG/FB.
+- **Quando o retreino entrar, o silêncio do Item B sai:** remover a entrada `Term/outros` de `silenced_drift_changes` e reavaliar o drift com o espaço de feature decidido.
 
 ---
 
