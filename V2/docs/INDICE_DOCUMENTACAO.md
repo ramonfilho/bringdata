@@ -1,6 +1,6 @@
 # Índice de Documentação — Bring Data V2
 
-**Atualizado:** 2026-05-24
+**Atualizado:** 2026-06-23
 **Propósito:** mapa de todos os documentos da pasta `docs/`, seus papéis, status e como se relacionam.
 
 > **Reorganização de nomenclatura (10/05/2026):** os docs operacionais (este índice, `PLANO_EXECUCAO`, `registro_erros_ml`, `AUDITORIA_QUEBRA_PRODUCAO`) foram reescritos pra usar linguagem natural primeiro. Os catálogos técnicos (`PLANO_SAFEGUARD`, `PLANO_REFACTOR_MLOPS`) ganharam título verbal por item + identificador codificado (`T1-X`, `DT-X`) movido pro rodapé. Identificadores continuam funcionais pra cruzar com commits e issues antigas, mas o nome verbal é o que aparece no fluxo de leitura.
@@ -213,6 +213,11 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Papel:** snapshots da comparação de perfil de público entre o lançamento corrente (DEV20 / LF54) e o pool Top 5 ROAS histórico (LF40, LF41, LF44, LF45, LF47, n=39.771). Identificam drift de audiência por característica (gênero, idade, ocupação, faixa salarial, cartão, programação, computador) com Δpp e chi².
 **Status:** ativos como artefatos de análise. Reproduzíveis via [scripts/perfil_audiencia.py](../scripts/perfil_audiencia.py) — `python -m scripts.perfil_audiencia --target <LF>`.
 **Relação:** motivam **T1-13** em `PLANO_SAFEGUARD.md` (`audience_profile_drift` no monitoring) e a sequela 08/05/2026 em `PLANO_EXECUCAO.md`. A ausência desse check no monitoring está registrada como erro em `registro_erros_ml.md` § V.4.
+
+### `monitoramento_term_google_vs_meta.md`
+**Papel:** explica por que o bucket "outros" do `utm_term` no monitoramento juntava dois problemas distintos — placeholder do Meta não-renderizado (`{{...}}`, problema operacional pequeno) e ID de campanha do Google Ads (legítimo, ~23% do volume e crescendo) — e documenta as duas mudanças de monitoramento que separam os dois: (A) o alerta de bucket inflado passa a distinguir "categoria-nova" (alerta >2%) de "macro Meta" (só alerta se estourar >10%); (B) o drift cego-de-fonte de `Term/outros` foi silenciado, deixando o alerta restrito a Meta como autoridade única. Carrega a **nota de retreino**: dar ao Google categoria própria no `utm_term` (ex.: `Term_google`) em vez de "outros".
+**Status:** ✅ ativo. Criado em 2026-06-23 na frente `feat/monitoring-term-source-aware` (só monitoramento, sem retreino).
+**Relação:** o item de retreino se conecta a `analise_valor_decil_por_canal_google_vs_meta.md` (decil transfere pro Google, valor ≈ igual). Código: `src/monitoring/data_quality.py` (`_check_outros_buckets`, `_query_railway_outros_breakdown_enriched`), `src/monitoring/config.py` (`THRESHOLDS['outros_buckets']`), `configs/clients/devclub.yaml` (`silenced_drift_changes`).
 
 ### `analise_calibracao_jan30_abr28.md`
 **Papel:** medição empírica de quão miscalibrados estão os scores brutos do Random Forest dos dois modelos em produção. Computa Expected Calibration Error (ECE) por decil a partir dos `model_metadata.json` dos runs `d51757f5...` (Champion `jan30`, 33k leads no test set) e `5d158f0a...` (Challenger `abr28`, 40k leads). Ajusta calibração isotônica in-sample e projeta razões de inflação que a fórmula `leadScore × ticket / CPL` sofreria sem calibração (D10 do Champion: 33×; D10 do Challenger: 27×). Declara 6 limitações honestamente, incluindo a ausência de validação out-of-sample como cota superior do ganho.

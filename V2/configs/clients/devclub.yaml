@@ -561,6 +561,9 @@ monitoring:
     - column: Term
       categoria: facebook
       reason: "shift natural para Instagram-heavy delivery; Term é só sub-source IG/FB, esperado até próximo retreino"
+    - column: Term
+      categoria: outros
+      reason: "Google Ads cresceu no mix e põe IDs de campanha/adset/anúncio no utm_term (cai em 'outros' por design — Google não tem sub-source IG/FB). O drift mede produção all-sources contra baseline de treino Meta-heavy, gerando ~32% de 'outros' falso. Autoridade real de Term-outros é o alerta 'bucket inflado' (restrito a facebook-ads), que isola o macro Meta de verdade. Reavaliar no próximo retreino — quando o Google ganhar categoria própria, este silêncio sai. Ver docs/monitoramento_term_google_vs_meta.md"
 capi:
   pixel_id: '1937807493703815'
   event_name_with_value: LeadQualified
