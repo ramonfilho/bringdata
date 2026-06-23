@@ -143,18 +143,20 @@ build_env_vars() {
     # Default propagated entre deploys; mude pra "false" aqui em emergência.
     ENV_VARS="$ENV_VARS,PUBSUB_CAPI_ENABLED=true"
 
-    # Ledger no Cloud SQL nosso (PLANO_LEDGER_CLOUDSQL.md Etapa 1).
-    # LEDGER_TARGET: railway | dual (migração — DEFAULT) | cloudsql (final).
-    # DEFAULT=dual durante a migração: sem isso, qualquer deploy concorrente de
-    # outro terminal que não exporte a env reverte o consumer pra gravar SÓ no
-    # Railway, e o Cloud SQL para de receber leads em silêncio (aconteceu
-    # 13/06 ~18h UTC — 40 leads ficaram só no Railway). Mudar pra 'cloudsql' na
-    # Etapa 4; pra 'railway' só em rollback consciente.
+    # Ledger no Cloud SQL nosso (PLANO_LEDGER_CLOUDSQL.md Etapa 4).
+    # LEDGER_TARGET: railway | dual (migração) | cloudsql (final — DEFAULT desde 23/06).
+    # DEFAULT=cloudsql: a Etapa 4 cortou a escrita no Railway após 7 dias de
+    # paridade limpa (16→23/06; acervo event_id 28.573=28.573, 0 só-no-Railway).
+    # O consumer grava SÓ no Cloud SQL agora. 'dual' religa o espelho Railway
+    # (rollback consciente); 'railway' nunca mais (Cloud SQL é a fonte canônica).
+    # Por que o comportamento crítico mora no default daqui e não em env
+    # exportada: em 13/06 ~18h UTC um deploy concorrente sem a env reverteu pra
+    # railway e o Cloud SQL ficou ~2h sem receber (40 leads só no Railway).
     # Senha NUNCA em texto plano aqui — vem do Secret Manager no momento do
     # deploy (env exportada tem precedência). Falha em obter a senha emite
     # sentinela que o caller (deploy_capi.sh) aborta — exit aqui morreria só
     # no subshell do $(build_env_vars).
-    LEDGER_TARGET="${LEDGER_TARGET:-dual}"
+    LEDGER_TARGET="${LEDGER_TARGET:-cloudsql}"
     ENV_VARS="$ENV_VARS,LEDGER_TARGET=$LEDGER_TARGET"
     if [ "$LEDGER_TARGET" != "railway" ]; then
         LEDGER_DB_PASSWORD="${LEDGER_DB_PASSWORD:-$(gcloud secrets versions access latest --secret=ledger-db-password --project="$PROJECT_ID" 2>/dev/null)}"
