@@ -144,7 +144,7 @@ class MonitoringOrchestrator:
             'capi_quality': CAPIQualityMonitor(self._repo, client_config=self._client_config)
         }
 
-    def run_daily_check(self, leads_data: List[Dict], anchor_date=None) -> Dict:
+    def run_daily_check(self, leads_data: List[Dict], anchor_date=None, prev_day_window=None) -> Dict:
         """
         Executa check diário completo.
 
@@ -286,7 +286,7 @@ class MonitoringOrchestrator:
         critical_summary = self._generate_critical_summary(alerts, funnel_metrics, lead_quality_metrics)
 
         # T3-5: rotinas operacionais consolidadas no mesmo log
-        operational_routines = self._generate_operational_routines_summary()
+        operational_routines = self._generate_operational_routines_summary(prev_day_window=prev_day_window)
 
         # Sumários top-level que o digest do Slack espera (TRAINING_DRIFT_24H +
         # PUBSUB_24H). Ficam separados de `operational_routines` porque o digest
@@ -315,18 +315,32 @@ class MonitoringOrchestrator:
             'training_drift_24h_summary': training_drift_24h_summary,
         }
 
-    def _generate_operational_routines_summary(self) -> Dict:
+    def _generate_operational_routines_summary(self, prev_day_window=None) -> Dict:
         """T3-5: consolida status das rotinas operacionais no log de monitoramento.
 
         Reporta: run_id do modelo ativo, Cloud Run revision, último scoring (proxy
         do polling Railway), e contadores 24h de leads recebidos/scoreados/CAPI enviados.
         Tudo num bloco único — evita ter que abrir log por log para checar saúde.
+
+        prev_day_window=(início, fim) em UTC: quando injetado pelo handler, as
+        contagens POR VARIANTE (A/B) passam a usar "ontem BRT completo" — a mesma
+        janela do Drift/Decis e do spend Meta —, em vez de rolling-24h. Mantém o
+        bloco A/B do relatório coerente (as duas metades na mesma janela).
         """
         import os as _os
         import yaml as _yaml
         from sqlalchemy import func as _sa_func
 
         result: Dict = {}
+        # Janela das contagens por variante (A/B). Com prev_day_window injetado =
+        # "ontem BRT completo"; sem injeção (ex.: chamada fora do relatório diário)
+        # = legado rolling-24h. NÃO afeta os agregados leads_received/scored/capi_24h
+        # abaixo (que seguem 24h) — só o split por variante do bloco A/B.
+        if prev_day_window:
+            _ws, _we = prev_day_window
+            _ab_win_clause = f"created_at >= '{_ws.isoformat()}' AND created_at < '{_we.isoformat()}'"
+        else:
+            _ab_win_clause = "created_at >= NOW() - INTERVAL '24 hours'"
         # 1. Modelo ativo (run_id do YAML)
         # [O1] Tenta múltiplos paths — em produção (Cloud Run) o WORKDIR é /app
         # e o repo fica em /app/V2; em dev local fica em $REPO_ROOT/V2/...
@@ -429,7 +443,7 @@ class MonitoringOrchestrator:
                             'SELECT utm_source, utm_medium, utm_campaign, utm_content, utm_term, utm_url '
                             'FROM registros_ml '
                             'WHERE lead_score IS NOT NULL '
-                            "  AND created_at >= NOW() - INTERVAL '24 hours'"
+                            f"  AND {_ab_win_clause}"
                         )
                         _by_variant = {n: 0 for n in _ab_cfg.variants.keys()}
                         _default = next(
@@ -467,7 +481,7 @@ class MonitoringOrchestrator:
                         _capi_rows = _conn.run(
                             'SELECT utm_source, utm_medium, utm_campaign, utm_content, utm_term, utm_url '
                             'FROM registros_ml '
-                            "WHERE created_at >= NOW() - INTERVAL '24 hours' "
+                            f"WHERE {_ab_win_clause} "
                             "  AND base_status != 'skipped_allowlist'"
                         )
                         _by_variant_capi = {n: 0 for n in _ab_cfg2.variants.keys()}

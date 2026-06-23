@@ -1970,7 +1970,7 @@ def _slack_ab(v: dict, B: list):
             total_meta = (ml or 0) + (nonml or 0)
             if total_meta > 0:
                 out.append('')
-                out.append(f"*Investimento Meta em captação (últimas 24h):* R$ {_fmt_brl(total_meta)}")
+                out.append(f"*Investimento Meta em captação (ontem):* R$ {_fmt_brl(total_meta)}")
                 out.append(f"  • R$ {_fmt_brl(ml)} ({ml/total_meta*100:.0f}%) em adsets otimizando pelo *evento ML*")
                 out.append(f"  • R$ {_fmt_brl(nonml)} ({nonml/total_meta*100:.0f}%) em adsets otimizando pelo *evento Lead padrão*")
         return out
@@ -1992,7 +1992,7 @@ def _slack_ab(v: dict, B: list):
             label = _variant_label(vv.get('name', '?'))
             scored = by.get(vv.get('name')) or 0
             pct = (scored / total * 100) if total else 0
-            lines.append(f"• *{label}* scoreou {scored:,} de {total:,} eventos ({pct:.1f}%) nas últimas 24h")
+            lines.append(f"• *{label}* scoreou {scored:,} de {total:,} eventos ({pct:.1f}%) ontem")
         lines += _invest_lines()
         B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': "\n".join(lines)}})
         return
@@ -2008,7 +2008,7 @@ def _slack_ab(v: dict, B: list):
         scored = by.get(vv.get('name')) or 0
         lines = [
             '*🤖 Teste A/B — sem comparação ativa*',
-            f"*{label}* é o modelo em produção · scoreou {scored:,} leads nas últimas 24h",
+            f"*{label}* é o modelo em produção · scoreou {scored:,} leads ontem",
             '_Sem Challenger rodando no momento._',
         ]
     else:

@@ -3517,7 +3517,14 @@ async def daily_monitoring_check_railway(
         except Exception:
             pass
         try:
-            result = orchestrator.run_daily_check(leads_data, anchor_date=_anchor)
+            # prev_day_window = "ontem BRT completo" (mesma fronteira que o survey
+            # funnel e o Drift/Decis já usam) — alinha as contagens por variante do
+            # bloco A/B à janela do spend Meta. A seção Meta inteira é now-based hoje,
+            # então anchor histórico não muda essa janela (dívida conhecida).
+            result = orchestrator.run_daily_check(
+                leads_data, anchor_date=_anchor,
+                prev_day_window=(_dia_ant_start_utc, _dia_ant_end_utc),
+            )
         finally:
             try: orchestrator_conn.close()
             except Exception: pass
@@ -3536,6 +3543,11 @@ async def daily_monitoring_check_railway(
             _account = os.getenv('META_ACCOUNT_ID', META_CONFIG.get('account_id', 'act_188005769808959'))
             if _token:
                 _today      = datetime.now(_tz(timedelta(hours=-3))).strftime('%Y-%m-%d')
+                # "Ontem BRT" (dia anterior completo) — janela do spend do bloco A/B.
+                # Bate com o que o operador vê na Meta por dia e com Drift/Decis 'Ontem'.
+                # Antes o spend ia de ontem até hoje (`until` inclusivo da Meta), somando
+                # ontem + parte de hoje. Reusado no bloco de janelas históricas abaixo.
+                _dia_ant_str = (datetime.now(_tz(timedelta(hours=-3))) - timedelta(days=1)).strftime('%Y-%m-%d')
                 _launch_str = launch_window_start.strftime('%Y-%m-%d')
                 _meta = MetaAdsIntegration(access_token=_token)
 
@@ -3602,11 +3614,10 @@ async def daily_monitoring_check_railway(
                             elif not _vc.utm_pattern and not _vc.url_pattern:
                                 _champion_name = _vname
                     if _challenger_pat and _challenger_name and _champion_name:
-                        _24h_since = (datetime.now(_tz(timedelta(hours=-3))) - timedelta(hours=24)).strftime('%Y-%m-%d')
                         _rows_24h_v = _meta.get_insights(
                             account_id=_account, level='campaign',
                             fields=['campaign_name', 'spend'],
-                            since_date=_24h_since, until_date=_today,
+                            since_date=_dia_ant_str, until_date=_dia_ant_str,
                             filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}]
                         )
                         _spend_v = {_champion_name: 0.0, _challenger_name: 0.0}
@@ -3636,11 +3647,10 @@ async def daily_monitoring_check_railway(
                 # Sem esse filtro, a soma da linha de otimização ficava maior
                 # que a soma das variants e confundia o operador.
                 try:
-                    _24h_since2 = (datetime.now(_tz(timedelta(hours=-3))) - timedelta(hours=24)).strftime('%Y-%m-%d')
                     _adsets_cap = _meta.get_insights(
                         account_id=_account, level='adset',
                         fields=['adset_id', 'spend'],
-                        since_date=_24h_since2, until_date=_today,
+                        since_date=_dia_ant_str, until_date=_dia_ant_str,
                         filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}],
                     )
                     _ML_EVENTS = {'LeadQualified', 'LeadQualifiedHighQuality', 'HQLB', 'HQLB_LQ'}
@@ -3678,7 +3688,7 @@ async def daily_monitoring_check_railway(
                 # rendendo coluna "mês" vazia no Tráfego Meta. Survey funnel
                 # e lead quality mantêm "mês" próprio via DB.
                 _brt_now = datetime.now(_tz(timedelta(hours=-3)))
-                _dia_ant_str = (_brt_now - timedelta(days=1)).strftime('%Y-%m-%d')
+                # _dia_ant_str já definido no topo do bloco Meta (janela do spend A/B)
                 _meta_hist_windows = {
                     'ultima_semana': (_brt_now - timedelta(days=7)).strftime('%Y-%m-%d'),
                     'ultimas_24h':   (_brt_now - timedelta(hours=24)).strftime('%Y-%m-%d'),
