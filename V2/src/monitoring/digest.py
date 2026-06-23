@@ -323,10 +323,17 @@ def render_text(view: dict) -> str:
     return '\n'.join(lines)
 
 
-# Mapa amigável de variant_name → label curto
+# Mapa amigável de variant_name → label curto.
+# 2026-06-23: o teste A/B foi decidido — a variante da campanha LEADHQLB (abr_28)
+# venceu e virou o Champion de produção; a antiga (jan_30, campanha LEADQUALIFIED)
+# foi desligada. O rótulo passa a refletir isso. ATENÇÃO: aqui é só APRESENTAÇÃO —
+# a promoção formal do abr_28 a modelo default no config (e o desligamento do
+# jan_30 do roteamento) é frente separada. Enquanto não acontece, o jan_30 segue
+# sendo o default e ainda scoreia os leads sem tag (Google/orgânico/Lead); esses
+# aparecem nas tabelas sob Lead/Google/Outros, não como um braço "Champion".
 _VARIANT_LABEL = {
-    'champion_jan30':   'Champion',
-    'challenger_abr28': 'Challenger',
+    'champion_jan30':   'jan_30 (anterior)',
+    'challenger_abr28': 'Champion (abr_28)',
 }
 
 
@@ -1906,6 +1913,33 @@ def _slack_traffic(v: dict, B: list):
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': f"*📺 Tráfego Meta*\n{table}"}})
 
 
+def _arm_delivery_counts(v: dict) -> dict:
+    """Leads Meta por BRAÇO DE CAMPANHA (tag de optimization_goal no nome da
+    campanha: LEADQUALIFIED→champion, LEADHQLB→challenger, resto→lead), lidos do
+    alerta de drift por A/B (janela 'ontem').
+
+    Diferente de `leads_scored_by_variant_24h`, que é roteamento de MODELO — onde o
+    braço default/catch-all aparece sempre >0 porque engole todo lead sem tag
+    (Google/orgânico/Lead). Aqui o número reflete a CAMPANHA realmente no ar. Usado
+    pra decidir se um braço está entregando (n>0) e esconder o que não está
+    ("o que não está scoreando some").
+
+    Retorna {} se não houver o alerta (ex.: dados insuficientes) — nesse caso o
+    chamador NÃO esconde nada (fallback seguro pra não ocultar dado real).
+    """
+    for a in (v.get('alerts') or []):
+        if a.get('type') != 'audience_profile_drift_by_variant':
+            continue
+        d = a.get('details') or {}
+        if d.get('window') == 'previous_day':
+            return {
+                'champion':   int(d.get('champion_n', 0) or 0),
+                'challenger': int(d.get('challenger_n', 0) or 0),
+                'lead':       int(d.get('lead_n', 0) or 0),
+            }
+    return {}
+
+
 def _slack_ab(v: dict, B: list):
     op = v['ab_test']
     enabled = bool(op.get('ab_test_enabled', False))
@@ -1914,62 +1948,72 @@ def _slack_ab(v: dict, B: list):
             'text': '*🤖 A/B Test* — DESATIVADO'}})
         return
     by = op.get('leads_scored_by_variant_24h') or {}
-    by_spend = op.get('spend_by_variant_24h_brl') or {}
-    by_cpl = op.get('cpl_by_variant_24h_brl') or {}
-    total_scored_24h = sum((n or 0) for n in by.values())
-    # "Ativo" no back-end ≠ "rodando na prática". Se alguma variant tem
-    # spend=0 ou 0 leads escoreados, sinaliza que o teste não está efetivamente
-    # comparando — tabelas Drift por A/B são suprimidas (vide _ab_test_active).
-    active_in_practice = _ab_test_active(v)
-    if active_in_practice:
-        header = '*🤖 A/B Test* — ATIVO'
-    else:
-        # Identifica quais variants estão sem tráfego — exibe nominalmente
-        # pra o operador saber o estado real (ex.: 'sem tráfego no Challenger').
-        sem_trafego = [
-            _variant_label(vv.get('name', '?'))
-            for vv in (op.get('ab_variants') or [])
-            if (by_spend.get(vv.get('name')) or 0) <= 0
-            or (by.get(vv.get('name')) or 0) <= 0
-        ]
-        if sem_trafego:
-            quem = ', '.join(sem_trafego)
-            header = f'*🤖 A/B Test* — ATIVO no back-end, *sem tráfego no {quem}*'
+    variants = op.get('ab_variants') or []
+
+    # Quais braços estão REALMENTE entregando campanha. O leads_scored_by_variant
+    # (roteamento de modelo) não serve: o braço default/catch-all aparece sempre >0
+    # porque engole Google/orgânico/Lead. A verdade vem da contagem por tag de
+    # campanha (_arm_delivery_counts). Mapa: variante com padrão de UTM
+    # (routing_active) ↔ braço 'challenger'; default (sem padrão) ↔ braço 'champion'.
+    counts = _arm_delivery_counts(v)
+    def _arm(vv): return 'challenger' if vv.get('routing_active') else 'champion'
+    delivering = [vv for vv in variants if counts.get(_arm(vv), 0) > 0] if counts else list(variants)
+
+    # Investimento Meta por evento de otimização (ML vs Lead padrão). Independe de
+    # quantos braços estão no ar — separado pra não confundir spend de campanha com
+    # spend sob otimização do modelo (a maior parte está em adsets de evento Lead).
+    def _invest_lines():
+        ml = op.get('spend_ml_24h_brl')
+        nonml = op.get('spend_nonml_24h_brl')
+        out: list[str] = []
+        if ml is not None and nonml is not None:
+            total_meta = (ml or 0) + (nonml or 0)
+            if total_meta > 0:
+                out.append('')
+                out.append(f"*Investimento Meta em captação (últimas 24h):* R$ {_fmt_brl(total_meta)}")
+                out.append(f"  • R$ {_fmt_brl(ml)} ({ml/total_meta*100:.0f}%) em adsets otimizando pelo *evento ML*")
+                out.append(f"  • R$ {_fmt_brl(nonml)} ({nonml/total_meta*100:.0f}%) em adsets otimizando pelo *evento Lead padrão*")
+        return out
+
+    # Caso comparativo: 2+ braços com campanha no ar (teste de verdade rodando) OU
+    # sem dado de campanha (fallback). Mantém o formato Champion × Challenger com %.
+    if not counts or len(delivering) >= 2:
+        by_spend = op.get('spend_by_variant_24h_brl') or {}
+        if _ab_test_active(v):
+            header = '*🤖 A/B Test* — ATIVO'
         else:
-            header = '*🤖 A/B Test* — ATIVO no back-end, *sem tráfego efetivo*'
-    lines = [header]
-    for vv in op.get('ab_variants', []) or []:
-        name = vv.get('name','?')
-        label = _variant_label(name)
-        scored = by.get(name) or 0
-        pct = (scored / total_scored_24h * 100) if total_scored_24h else 0
-        # Sem "R$ X investidos" na linha de variant: o spend total da campanha
-        # ≠ spend sob otimização do modelo (a maior parte hoje está em adsets
-        # otimizando evento Lead padrão, não ML). O bloco abaixo separa.
-        lines.append(f"• *{label}* (`{name}`) scoreou {scored:,} de {total_scored_24h:,} eventos ({pct:.1f}%) nas últimas 24h")
-    # Investimento Meta em captação separado, com split por evento de
-    # otimização (ML vs Lead padrão). Evita a leitura errada de que o spend
-    # do Champion = spend sob ML — na prática só uma fatia (~8% hoje) está
-    # em adsets otimizando pelos eventos custom do modelo
-    # (LeadQualified/LeadQualifiedHighQuality/HQLB/HQLB_LQ).
-    ml = op.get('spend_ml_24h_brl')
-    nonml = op.get('spend_nonml_24h_brl')
-    if ml is not None and nonml is not None:
-        total_meta = (ml or 0) + (nonml or 0)
-        if total_meta > 0:
-            pct_ml = ml / total_meta * 100
-            pct_nonml = nonml / total_meta * 100
-            lines.append('')
-            lines.append(
-                f"*Investimento Meta em captação (últimas 24h):* "
-                f"R$ {_fmt_brl(total_meta)}"
-            )
-            lines.append(
-                f"  • R$ {_fmt_brl(ml)} ({pct_ml:.0f}%) em adsets otimizando pelo *evento ML*"
-            )
-            lines.append(
-                f"  • R$ {_fmt_brl(nonml)} ({pct_nonml:.0f}%) em adsets otimizando pelo *evento Lead padrão*"
-            )
+            sem = [_variant_label(vv.get('name', '?')) for vv in variants
+                   if (by_spend.get(vv.get('name')) or 0) <= 0 or (by.get(vv.get('name')) or 0) <= 0]
+            header = (f'*🤖 A/B Test* — ATIVO no back-end, *sem tráfego no {", ".join(sem)}*'
+                      if sem else '*🤖 A/B Test* — ATIVO no back-end, *sem tráfego efetivo*')
+        total = sum((by.get(vv.get('name')) or 0) for vv in delivering) or sum((n or 0) for n in by.values())
+        lines = [header]
+        for vv in delivering:
+            label = _variant_label(vv.get('name', '?'))
+            scored = by.get(vv.get('name')) or 0
+            pct = (scored / total * 100) if total else 0
+            lines.append(f"• *{label}* scoreou {scored:,} de {total:,} eventos ({pct:.1f}%) nas últimas 24h")
+        lines += _invest_lines()
+        B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': "\n".join(lines)}})
+        return
+
+    # Caso braço único: não há comparação. O braço vivo é o modelo de produção
+    # (decisão 23/06: a campanha LEADHQLB / abr_28 venceu e virou o Champion). Sem
+    # "% de N" — não há contra o quê comparar. O braço sem campanha some (o default
+    # jan_30 ainda scoreia leads sem tag, mas eles aparecem nas tabelas sob
+    # Lead/Google/Outros, não como um braço Champion aqui).
+    if delivering:
+        vv = delivering[0]
+        label = _variant_label(vv.get('name', '?'))
+        scored = by.get(vv.get('name')) or 0
+        lines = [
+            '*🤖 Teste A/B — sem comparação ativa*',
+            f"*{label}* é o modelo em produção · scoreou {scored:,} leads nas últimas 24h",
+            '_Sem Challenger rodando no momento._',
+        ]
+    else:
+        lines = ['*🤖 Teste A/B* — sem tráfego efetivo nas campanhas A/B']
+    lines += _invest_lines()
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': "\n".join(lines)}})
 
 
