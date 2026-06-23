@@ -1744,13 +1744,18 @@ class DataQualityMonitor:
 
     def _query_railway_outros_breakdown_enriched(self, column: str, hours: int = 24,
                                                   top_n: int = 8,
-                                                  restrict_to_sources: List[str] | None = None) -> Dict:
+                                                  restrict_to_sources: List[str] | None = None,
+                                                  macro_markers: List[str] | None = None) -> Dict:
         """
         Versão enriquecida do breakdown. Retorna dict com:
           - 'column'
           - 'total_count'           — leads na janela com a coluna não-nula
           - 'outros_count'          — leads que caíram em 'outros' após unify
           - 'outros_pct_of_total'   — outros_count / total_count
+          - 'macro_count'           — subset de 'outros' que é macro Meta não-resolvido
+          - 'macro_pct_of_total'    — macro_count / total_count
+          - 'novel_count'           — subset de 'outros' que NÃO é macro (categoria-nova)
+          - 'novel_pct_of_total'    — novel_count / total_count
           - 'breakdown'             — lista de dicts:
               {'raw_value': str, 'count': int, 'pct_total': float}
             ordenada por count desc, limitada a top_n.
@@ -1762,6 +1767,12 @@ class DataQualityMonitor:
         legitimamente caem em 'outros' (Google Ads passa IDs no term, etc.).
         Restringindo a `['facebook-ads']`, o alerta foca em misconfig real do
         Meta (placeholders `{{...}}`, etc.) e ignora ruído estrutural.
+
+        Param `macro_markers` (default `['{', '%7b']`): marcadores que classificam
+        um raw_value como macro Meta não-resolvido (placeholder `{{...}}` que o
+        Meta não substituiu — artefato de tracking conhecido, in-app). O caller
+        usa o split macro vs novel pra aplicar thresholds diferentes: categoria-
+        nova alerta no nível normal; macro só alerta se ESTOURAR.
 
         Retorna dict vazio {} em qualquer falha (env, config, query, etc.).
         """
@@ -1833,6 +1844,26 @@ class DataQualityMonitor:
         outros_count = int(mask.sum())
         outros_pct_of_total = (outros_count / total_count) if total_count > 0 else 0.0
 
+        # Split macro vs categoria-nova dentro do bucket 'outros'.
+        #   - macro: raw_value contém um marcador de placeholder Meta não-resolvido
+        #     ({{...}} que o Meta não substituiu). Artefato de tracking conhecido.
+        #   - novel: o resto — valor de UTM que o modelo nunca viu no treino.
+        # O caller alerta cada um com threshold próprio.
+        markers = [str(m).lower() for m in (macro_markers or ['{', '%7b'])]
+        macro_count = 0
+        if outros_count > 0:
+            raw_outros = df_raw.loc[mask, column].fillna('').astype(str).str.lower()
+            is_macro = raw_outros.apply(lambda v: any(mk in v for mk in markers))
+            macro_count = int(is_macro.sum())
+        novel_count = outros_count - macro_count
+        # Fail-loud: o split tem que cobrir exatamente o bucket 'outros'.
+        assert macro_count + novel_count == outros_count, (
+            f"[outros_breakdown] split macro/novel não fecha em {column}: "
+            f"{macro_count}+{novel_count} != {outros_count}"
+        )
+        macro_pct_of_total = (macro_count / total_count) if total_count > 0 else 0.0
+        novel_pct_of_total = (novel_count / total_count) if total_count > 0 else 0.0
+
         breakdown: List[Dict] = []
         if outros_count > 0:
             raw_values = df_raw.loc[mask, column].fillna('(vazio)').astype(str)
@@ -1849,6 +1880,10 @@ class DataQualityMonitor:
             'total_count': total_count,
             'outros_count': outros_count,
             'outros_pct_of_total': outros_pct_of_total,
+            'macro_count': macro_count,
+            'macro_pct_of_total': macro_pct_of_total,
+            'novel_count': novel_count,
+            'novel_pct_of_total': novel_pct_of_total,
             'breakdown': breakdown,
             'window_hours': hours,
             'restrict_to_sources': list(restrict_to_sources) if restrict_to_sources else None,
@@ -1857,17 +1892,28 @@ class DataQualityMonitor:
     def _check_outros_buckets(self) -> List[Dict]:
         """
         Independente do `categorical_distribution_drift`: pra cada coluna
-        monitorada (Source, Term, Medium), checa o tamanho do bucket 'outros'
-        na janela de 24h. Se outros_count / total_count > min_pct_threshold,
-        emite alerta `outros_bucket_inflated` com o breakdown raw_value→count
-        ordenado por contribuição ao bucket Outros.
+        monitorada (Source, Term, Medium), checa o bucket 'outros' na janela
+        de 24h, separando dois tipos de 'outros' que antes eram contados juntos:
+
+          - categoria-nova: valor de UTM nunca visto no treino (o modelo não tem
+            feature pra ele). Sinal valioso → alerta no nível normal (>min_pct).
+          - macro Meta não-resolvido: placeholder `{{...}}` que o Meta não
+            substituiu (tráfego in-app; nível estável de ~1-3%). Artefato de
+            tracking conhecido → só alerta se ESTOURAR (>macro_spike_threshold),
+            porque o conserto é operacional (descodificar o macro no anúncio),
+            não de modelo.
+
+        Emite `outros_bucket_inflated` com o breakdown raw_value→count e o split
+        macro/novel. O gatilho (categoria-nova vs macro) vai em `details`.
 
         Configurável via self._thresholds['outros_buckets']:
-          - 'enabled'            (bool, default True)
-          - 'min_pct_threshold'  (float, default 0.02 — emite quando >2%)
-          - 'window_hours'       (int, default 24)
-          - 'top_n'              (int, default 8 — top raw_values do breakdown)
-          - 'columns'            (list, default ['Source','Term','Medium'])
+          - 'enabled'                (bool, default True)
+          - 'min_pct_threshold'      (float, default 0.02 — categoria-nova >2%)
+          - 'macro_spike_threshold'  (float, default 0.10 — macro só se estourar >10%)
+          - 'macro_markers'          (list, default ['{', '%7b'])
+          - 'window_hours'           (int, default 24)
+          - 'top_n'                  (int, default 8 — top raw_values do breakdown)
+          - 'columns'                (list, default ['Source','Term','Medium'])
           - 'restrict_to_sources_by_column' (dict, default {'Term': ['facebook-ads']})
             Por que: Term só faz sentido como sub-source no Meta (IG vs FB);
             Google/TikTok/YouTube colocando IDs/strings no term cai em 'outros'
@@ -1875,15 +1921,17 @@ class DataQualityMonitor:
             mantém o alerta sensível ao que importa (placeholders `{{...}}`,
             criativos Meta mal-tageados) e ignora o ruído estrutural.
 
-        Severity:
-          - LOW se outros_pct < 5%
-          - MEDIUM se outros_pct >= 5%
+        Severity (pelo % do gatilho dominante):
+          - LOW se < 5%
+          - MEDIUM se >= 5%
           (não bloqueia pipeline; é sinal informativo)
         """
         from datetime import datetime, timezone
 
         cfg = self._thresholds.get('outros_buckets', {}) if hasattr(self, '_thresholds') else {}
         min_pct = float(cfg.get('min_pct_threshold', 0.02))
+        macro_spike = float(cfg.get('macro_spike_threshold', 0.10))
+        macro_markers = cfg.get('macro_markers', ['{', '%7b'])
         hours = int(cfg.get('window_hours', 24))
         top_n = int(cfg.get('top_n', 8))
         columns = cfg.get('columns', ['Source', 'Term', 'Medium'])
@@ -1896,15 +1944,47 @@ class DataQualityMonitor:
         for column in columns:
             restrict = restrict_map.get(column)
             data = self._query_railway_outros_breakdown_enriched(
-                column, hours=hours, top_n=top_n, restrict_to_sources=restrict
+                column, hours=hours, top_n=top_n, restrict_to_sources=restrict,
+                macro_markers=macro_markers,
             )
             if not data:
                 continue
             pct = float(data.get('outros_pct_of_total', 0.0))
-            if pct <= min_pct:
+            # Fallback pros campos novos: se ausentes (config/versão antiga),
+            # trata todo 'outros' como categoria-nova (comportamento anterior).
+            novel_pct = float(data.get('novel_pct_of_total', pct))
+            macro_pct = float(data.get('macro_pct_of_total', 0.0))
+
+            novel_fired = novel_pct > min_pct
+            macro_fired = macro_pct > macro_spike
+            if not (novel_fired or macro_fired):
                 continue
 
-            severity = 'MEDIUM' if pct >= 0.05 else 'LOW'
+            # Gatilho dominante: categoria-nova tem prioridade (mais acionável).
+            if novel_fired:
+                trigger = 'categoria-nova'
+                drive_pct = novel_pct
+            else:
+                trigger = 'macro-estourou'
+                drive_pct = macro_pct
+            severity = 'MEDIUM' if drive_pct >= 0.05 else 'LOW'
+
+            details = {
+                'column': column,
+                'window_hours': data.get('window_hours', hours),
+                'total_count': data.get('total_count', 0),
+                'outros_count': data.get('outros_count', 0),
+                'outros_pct_of_total': pct,
+                'novel_count': data.get('novel_count', data.get('outros_count', 0)),
+                'novel_pct_of_total': novel_pct,
+                'macro_count': data.get('macro_count', 0),
+                'macro_pct_of_total': macro_pct,
+                'trigger': trigger,
+                'min_pct_threshold': min_pct,
+                'macro_spike_threshold': macro_spike,
+                'restrict_to_sources': data.get('restrict_to_sources'),
+                'breakdown': data.get('breakdown', []),
+            }
             alerts.append({
                 'type': 'outros_bucket_inflated',
                 'severity': severity,
@@ -1912,27 +1992,27 @@ class DataQualityMonitor:
                 'message': (
                     f"Bucket 'outros' inflado em {column}: "
                     f"{data.get('outros_count', 0)}/{data.get('total_count', 0)} "
-                    f"({pct*100:.1f}% do total) — janela {data.get('window_hours', hours)}h"
+                    f"({pct*100:.1f}% do total — categoria-nova {novel_pct*100:.1f}%, "
+                    f"macro {macro_pct*100:.1f}%) — gatilho: {trigger} — "
+                    f"janela {data.get('window_hours', hours)}h"
                 ),
-                'details': {
-                    'column': column,
-                    'window_hours': data.get('window_hours', hours),
-                    'total_count': data.get('total_count', 0),
-                    'outros_count': data.get('outros_count', 0),
-                    'outros_pct_of_total': pct,
-                    'min_pct_threshold': min_pct,
-                    'restrict_to_sources': data.get('restrict_to_sources'),
-                    'breakdown': data.get('breakdown', []),
-                },
-                'metric_value': pct,
-                'threshold': min_pct,
+                'details': details,
+                'metric_value': drive_pct,
+                'threshold': min_pct if novel_fired else macro_spike,
                 'timestamp': now_iso,
+                # Espelho plano dos campos (digest/consumidores leem do nível raiz)
                 'column': column,
                 'window_hours': data.get('window_hours', hours),
                 'total_count': data.get('total_count', 0),
                 'outros_count': data.get('outros_count', 0),
                 'outros_pct_of_total': pct,
+                'novel_count': data.get('novel_count', data.get('outros_count', 0)),
+                'novel_pct_of_total': novel_pct,
+                'macro_count': data.get('macro_count', 0),
+                'macro_pct_of_total': macro_pct,
+                'trigger': trigger,
                 'min_pct_threshold': min_pct,
+                'macro_spike_threshold': macro_spike,
                 'restrict_to_sources': data.get('restrict_to_sources'),
                 'breakdown': data.get('breakdown', []),
                 'timestamp_utc': now_iso,
