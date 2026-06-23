@@ -341,6 +341,23 @@ def _variant_label(name: str) -> str:
     return _VARIANT_LABEL.get(name, name)
 
 
+# Rótulo de exibição do balde por TAG de campanha (Lead/Champion/Challenger) — usado
+# nas tabelas de Drift e Decis e no funil. Espelha _VARIANT_LABEL (que é por MODELO).
+# 2026-06-23: a campanha LEADHQLB (balde 'Challenger') venceu e virou o Champion de
+# produção; a LEADQUALIFIED (balde 'Champion') foi aposentada → o balde dela vira
+# "Anterior (jan_30)" e some das tabelas quando não tem lead. Só apresentação: o
+# classificador campaign_classifier.bucket_from_utm segue 3-way (chaves intactas).
+_AB_BUCKET_LABEL = {
+    'Lead':       'Lead',
+    'Champion':   'Anterior (jan_30)',
+    'Challenger': 'Champion (abr_28)',
+}
+
+
+def _ab_bucket_label(bucket: str) -> str:
+    return _AB_BUCKET_LABEL.get(bucket, bucket)
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Humanização SÓ-DISPLAY de nome de feature/coluna e valor de categoria.
 #
@@ -1273,59 +1290,60 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
     # leads Meta separados pela tag de optimization_goal no nome da campanha,
     # lida localmente sem Meta API) + 2 que ficam fora da tabela mas aparecem pra
     # deixar claro o universo total (Google e Outros).
+    # Colunas dinâmicas: só os baldes com leads > 0 entram ("o que não está
+    # scoreando some"). Rótulo via _ab_bucket_label (fonte única) — a campanha
+    # LEADHQLB/abr_28 vira "Champion (abr_28)"; a LEADQUALIFIED antiga (jan_30),
+    # quando não está no ar, nem aparece. Lead não compete (não ganha ✅).
+    _arms = [
+        ('Lead',       n_lead,       False, 'lead_pct',       'lead_delta_pp',       'lead_quality'),
+        ('Champion',   n_champion,   True,  'champion_pct',   'champion_delta_pp',   'champion_quality'),
+        ('Challenger', n_challenger, True,  'challenger_pct', 'challenger_delta_pp', 'challenger_quality'),
+    ]
+    _arms = [a for a in _arms if a[1] > 0]
+    _n_compete = sum(1 for a in _arms if a[2])  # ✅ de vencedor só faz sentido com 2 braços comparáveis
+    _AW = 22  # largura da coluna de cada braço (cabe "Champion (abr_28)(Δ)")
+
     if (n_lead + n_champion + n_challenger + n_google + n_outros) > 0:
-        in_table = f"Lead={n_lead:,} · Champion={n_champion:,} · Challenger={n_challenger:,}"
+        in_table = ' · '.join(f"{_ab_bucket_label(b)}={n:,}" for b, n, *_ in _arms)
         out_table = f"Google={n_google:,} · Outros={n_outros:,}"
         header += f"\n_n Meta na tabela: {in_table}  ·  fora da tabela: {out_table}_"
     rows = [header]
-    col_header = (
-        f"{'Característica':<32} {'Top%':>5}  "
-        f"{'Lead(Δ)':>16}  {'Champion(Δ)':>20}  {'Challenger(Δ)':>20}"
+    col_header = f"{'Característica':<32} {'Top%':>5}  " + '  '.join(
+        f"{_ab_bucket_label(b) + '(Δ)':>{_AW}}" for b, *_ in _arms
     )
     rows.append(f"`{col_header}`")
 
-    def cell_qual(pct, delta, quality, is_winner=False):
-        if pct is None or delta is None: return f"{'—':>20}"
-        winner_mark = ' ✅' if is_winner else '   '
-        return f"{_quality_emoji(quality)} {pct:>5.1f}%({delta:+.1f}){winner_mark}"
-
-    def cell_lead(pct, delta, quality):
-        # Coluna Lead: sem winner mark (não compete com Champion/Challenger)
-        if pct is None or delta is None: return f"{'—':>16}"
-        return f"{_quality_emoji(quality)} {pct:>5.1f}%({delta:+.1f})"
+    def cell(pct, delta, quality, is_winner):
+        if pct is None or delta is None:
+            return f"{'—':>{_AW}}"
+        mark = ' ✅' if is_winner else ''
+        return f"{_quality_emoji(quality)} {pct:>5.1f}%({delta:+.1f}){mark}"
 
     def _pick_winner_direction(direction, ch_delta, cl_delta):
-        """Variante mais alinhada à direção da categoria.
-        - positive: maior Δpp vence (mais é melhor)
-        - negative: Δpp mais negativo vence (menos é melhor)
-        - neutral/uncertain/insufficient: sem winner
+        """Braço mais alinhado à direção da categoria (só vale com 2 comparáveis).
+        positive: maior Δpp vence; negative: Δpp mais negativo vence; neutro: sem winner.
         """
         if direction not in ('positive', 'very_positive', 'negative', 'very_negative'):
             return None
         if ch_delta is None or cl_delta is None:
             return None
         sign = 1 if direction in ('positive', 'very_positive') else -1
-        ch_score = ch_delta * sign
-        cl_score = cl_delta * sign
-        if ch_score == cl_score: return None
-        return 'champion' if ch_score > cl_score else 'challenger'
+        if ch_delta * sign == cl_delta * sign:
+            return None
+        return 'champion' if ch_delta * sign > cl_delta * sign else 'challenger'
 
     for it in top:
         label = _short(f"{it['feature_label']}: {_humanize_category(it['category'])}", 32)
         ref = it.get('reference_pct', 0)
-        direction = it.get('direction')
-        ch_delta = it.get('champion_delta_pp')
-        cl_delta = it.get('challenger_delta_pp')
-        winner = _pick_winner_direction(direction, ch_delta, cl_delta)
-        ch_cell = cell_qual(it.get('champion_pct'), ch_delta, it.get('champion_quality'),
-                            is_winner=(winner == 'champion'))
-        cl_cell = cell_qual(it.get('challenger_pct'), cl_delta, it.get('challenger_quality'),
-                            is_winner=(winner == 'challenger'))
-        lead_cell = cell_lead(it.get('lead_pct'), it.get('lead_delta_pp'), it.get('lead_quality'))
-        rows.append(
-            f"`{label:<32} {ref:>4.1f}%  "
-            f"{lead_cell:>16}  {ch_cell:>20}  {cl_cell:>20}`"
-        )
+        winner = (_pick_winner_direction(it.get('direction'),
+                                         it.get('champion_delta_pp'),
+                                         it.get('challenger_delta_pp'))
+                  if _n_compete >= 2 else None)
+        parts = [f"{label:<32} {ref:>4.1f}%"]
+        for b, _n, compete, pk, dk, qk in _arms:
+            is_winner = compete and winner == b.lower()
+            parts.append(f"{cell(it.get(pk), it.get(dk), it.get(qk), is_winner):>{_AW}}")
+        rows.append('`' + '  '.join(parts) + '`')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
 
@@ -1505,7 +1523,7 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     _sg = info.get('score_geral') or {}
     if _sg.get('decil_medio') is not None:
         rows.append(
-            f"🎯 *Score geral ({_sg.get('modelo', 'Challenger')}): "
+            f"🎯 *Score geral ({_ab_bucket_label(_sg.get('modelo', 'Challenger'))}): "
             f"{_sg['decil_medio']:.1f}/10*  ·  {_sg.get('pct_d9_d10', 0):.0f}% em D9-D10"
             f"  ·  n={_sg.get('n', 0):,} ({_sg.get('populacao', 'todas as fontes')})"
         )
@@ -1515,21 +1533,21 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     rows.append('_🟢 bom · 🔴 ruim · ⚪ neutro/incerto_')
     ref_parts = []
     if ref_champion is not None:
-        ref_parts.append(f'Champion={ref_champion["pct_d9_d10"]:.1f}%/{ref_champion["avg"]:.1f}')
+        ref_parts.append(f'{_ab_bucket_label("Champion")}={ref_champion["pct_d9_d10"]:.1f}%/{ref_champion["avg"]:.1f}')
     if ref_challenger is not None:
-        ref_parts.append(f'Challenger={ref_challenger["pct_d9_d10"]:.1f}%/{ref_challenger["avg"]:.1f}')
+        ref_parts.append(f'{_ab_bucket_label("Challenger")}={ref_challenger["pct_d9_d10"]:.1f}%/{ref_challenger["avg"]:.1f}')
     if ref_weighted is not None:
         ref_parts.append(f'Ponderada={ref_weighted["pct_d9_d10"]:.1f}%/{ref_weighted["avg"]:.1f}')
     if ref_parts:
         rows.append('_Refs %D9-D10/avg: ' + ' · '.join(ref_parts) + '_')
     rows.append('```')
     rows.append(
-        f'{"Bucket":<14}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
+        f'{"Bucket":<18}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
     )
 
     def _row(label: str, kpis: dict | None, ref: dict | None, ref_name: str = '') -> str:
         if kpis is None:
-            return f'{label:<14}  {"—":>5}   {"—":>7}  {"—":>20}      {"—":>4}'
+            return f'{label:<18}  {"—":>5}   {"—":>7}  {"—":>20}      {"—":>4}'
         pct = kpis['pct_d9_d10']
         avg = kpis['avg_decil']
         if ref is not None:
@@ -1542,12 +1560,12 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
         else:
             delta_str = ''
             avg_str = f'{avg:>4.1f}'
-        return f'{label:<14}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}      {avg_str}'
+        return f'{label:<18}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}      {avg_str}'
 
     # Bloco por fonte (Slack block 1)
     rows.append(_row('Total',  _kpis(dist, total),                                              ref_weighted,   'Ponderada'))
     rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta),              ref_weighted,   'Ponderada'))
-    rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl),                ref_champion,   'Champion'))
+    rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl),                ref_champion,   'jan_30'))
     rows.append('```')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
@@ -1559,11 +1577,13 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     if show_og:
         og_rows = ['```']
         og_rows.append(
-            f'{"Bucket":<14}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
+            f'{"Bucket":<18}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
         )
-        og_rows.append(_row('Lead',       _kpis(og_lead_info.get('distribution') or {}, n_og_lead), ref_champion,   'Champion'))
-        og_rows.append(_row('Champion',   _kpis(og_chmp_info.get('distribution') or {}, n_og_chmp), ref_champion,   'Champion'))
-        og_rows.append(_row('Challenger', _kpis(og_chal_info.get('distribution') or {}, n_og_chal), ref_challenger, 'Challenger'))
+        og_rows.append(_row('Lead', _kpis(og_lead_info.get('distribution') or {}, n_og_lead), ref_champion, 'jan_30'))
+        # Balde da campanha antiga LEADQUALIFIED (jan_30): só aparece se entregou lead.
+        if n_og_chmp > 0:
+            og_rows.append(_row(_ab_bucket_label('Champion'), _kpis(og_chmp_info.get('distribution') or {}, n_og_chmp), ref_champion, 'jan_30'))
+        og_rows.append(_row(_ab_bucket_label('Challenger'), _kpis(og_chal_info.get('distribution') or {}, n_og_chal), ref_challenger, 'abr_28'))
         og_rows.append('```')
         B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(og_rows)}})
 
@@ -1645,12 +1665,17 @@ def _slack_unified_funnel(v: dict, B: list):
             _vd = _pv.get(_vk) or {}
             _vl = _pv_lf.get(_vk) or {}
             _vn = _n(_vd, 'leads')
+            # Balde sem lead (nem ontem nem no lançamento) some — ex.: a campanha
+            # antiga LEADQUALIFIED (Champion), desligada. Rótulo via fonte única.
+            if _vn <= 0 and _n(_vl, 'leads') <= 0:
+                continue
+            _lbl = _ab_bucket_label(_vk)
             _conv = _vd.get('conv_lp')
             _conv_s = (f"{_conv:.1f}%".replace('.', ',')) if _conv is not None else "—"
             if _pv_lf:
-                lines.append(f"{_vk:<11}{_vn:>6,.0f}  CPL ontem {_rs(_vd.get('cpl'))} · LF {_rs(_vl.get('cpl'))} · LP {_conv_s}")
+                lines.append(f"{_lbl:<18}{_vn:>6,.0f}  CPL ontem {_rs(_vd.get('cpl'))} · LF {_rs(_vl.get('cpl'))} · LP {_conv_s}")
             else:
-                lines.append(f"{_vk:<11}{_vn:>6,.0f}   CPL {_rs(_vd.get('cpl'))} · LP {_conv_s}")
+                lines.append(f"{_lbl:<18}{_vn:>6,.0f}   CPL {_rs(_vd.get('cpl'))} · LP {_conv_s}")
     lines += [
         f"Pesquisa       {_n(stg('pesquisa'),'total'):>13,.0f}   {brk(stg('pesquisa'))}",
         f"Scoreado       {_n(stg('scoreado'),'total'):>13,.0f}   {brk(stg('scoreado'))}",
