@@ -29,7 +29,14 @@
 --   Fase 2 → sales            (habilita o enriquecimento de compradores)
 --   Fase 3 → leads
 --   (meta_insights entra junto da Fase 1, é fonte de gasto/CPL do relatório)
+--
+-- ONDE: schema `analytics` DENTRO do database `ledger` (mesma conexão do
+-- ledger_connection.py). As tabelas vivem qualificadas como analytics.*.
+-- O search_path abaixo vale para a execução deste script como um todo.
 -- =====================================================================
+
+CREATE SCHEMA IF NOT EXISTS analytics;
+SET search_path TO analytics, public;
 
 
 -- ---------------------------------------------------------------------
