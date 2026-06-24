@@ -3170,6 +3170,9 @@ async def daily_monitoring_check_railway(
         # funil/insights (spend/CPL). Mantém filtro Meta-source (allowlist CAPI) —
         # Google/orgânico ficam só nas linhas de fonte (Total/Meta/Google).
         from src.monitoring.campaign_classifier import bucket_from_utm as _bucket_from_utm
+        # Frente 2: tag→balde derivado do YAML (fonte única); None → classificador usa legado.
+        _abc_og = getattr(pipeline, '_ab_test_config', None) if pipeline else None
+        _ab_bucket_map_og = _abc_og.campaign_bucket_map() if (_abc_og and _abc_og.enabled) else None
         _allow_capi = (pipeline._client_config.capi.utm_source_allowlist
                        if pipeline and pipeline._client_config and pipeline._client_config.capi
                        else None) or []
@@ -3197,7 +3200,7 @@ async def daily_monitoring_check_railway(
                 src = (rec.utm_source or '').strip().lower()
                 if src not in _META_SOURCES_OG:
                     continue
-                bucket = _bucket_from_utm(rec.utm_campaign)
+                bucket = _bucket_from_utm(rec.utm_campaign, _ab_bucket_map_og)
                 key = f'D{int(rec.decil):02d}'
                 if key in dists[bucket]:
                     dists[bucket][key] += 1
