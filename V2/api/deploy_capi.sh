@@ -702,8 +702,9 @@ print(','.join(stale))
         ENV_FILE="$SCRIPT_DIR/../.env"
         GATE_C_N=50
         if [ -f "$GATE_C_SCRIPT" ] && [ -f "$ENV_FILE" ]; then
-            # Carrega RAILWAY_DB_* (escopo seletivo evita problema com '|' em GURU_API_TOKEN)
-            eval "$(grep -E '^RAILWAY_DB_' "$ENV_FILE" | sed 's/^/export /')"
+            # Carrega RAILWAY_DB_* + LEDGER_DB_* (Gate C lê registros_ml do Cloud SQL
+            # desde a Etapa 5 — DROP da cópia Railway). Escopo seletivo evita '|' em GURU_API_TOKEN.
+            eval "$(grep -E '^(RAILWAY_DB_|LEDGER_DB_)' "$ENV_FILE" | sed 's/^/export /')"
 
             print_info "[Gate C.1] modo predict — score raw + decil ($GATE_C_N leads)..."
             if python3 "$GATE_C_SCRIPT" "$NEW_REVISION" \

@@ -127,18 +127,21 @@ def get_prod_revision(region: str, project: str, service: str = 'smart-ads-api')
 # Railway data fetching
 # ============================================================================
 
-def _connect_railway() -> pg8000.native.Connection:
-    # Sem ssl_context: conecta igual à produção (api/database.py monta um
-    # postgresql:// sem sslmode → sem verificação de cert). O ssl_context=True
-    # anterior forçava verificação estrita e quebrava em máquina com proxy TLS
-    # (cert auto-assinado na cadeia) — único ponto do projeto mais estrito que a
-    # própria produção que o gate valida.
+def _connect_ledger() -> pg8000.native.Connection:
+    # registros_ml mora no Cloud SQL `ledger` — a Etapa 5 do PLANO_LEDGER_CLOUDSQL
+    # dropou a cópia do Railway. Conecta direto na fonte canônica (LEDGER_DB_*),
+    # com ssl CERT_NONE igual aos demais leitores do ledger (proxy TLS na cadeia).
+    import ssl
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
     return pg8000.native.Connection(
-        host=os.environ['RAILWAY_DB_HOST'],
-        port=int(os.environ['RAILWAY_DB_PORT']),
-        user=os.environ['RAILWAY_DB_USER'],
-        password=os.environ['RAILWAY_DB_PASSWORD'],
-        database=os.environ['RAILWAY_DB_NAME'],
+        host=os.environ['LEDGER_DB_HOST'],
+        port=int(os.environ.get('LEDGER_DB_PORT', '5432')),
+        user=os.environ.get('LEDGER_DB_USER', 'ledger_app'),
+        password=os.environ['LEDGER_DB_PASSWORD'],
+        database=os.environ.get('LEDGER_DB_NAME', 'ledger'),
+        ssl_context=ctx,
     )
 
 
@@ -156,7 +159,7 @@ def fetch_leads_predict_mode(n: int) -> list[dict[str, Any]]:
     extrai via `->>'<key>'`. PESQUISA_KEYS mapeia chave Sheets → key do
     JSONB. `has_computer` está top-level em `registros_ml` (não no JSONB).
     """
-    conn = _connect_railway()
+    conn = _connect_ledger()
     # mapeia chave JSONB → coluna no resultado com nome da chave Sheets
     survey_cols = ', '.join(
         f"r.survey_responses->>'{ls_col}' AS \"{sheets_key}\""
@@ -168,20 +171,12 @@ def fetch_leads_predict_mode(n: int) -> list[dict[str, Any]]:
                r.created_at AS data,
                TRIM(COALESCE(r.first_name, '') || ' ' || COALESCE(r.last_name, '')) AS "Nome Completo",
                r.phone          AS "Telefone",
-               COALESCE(r.utm_source, u.source) AS "Source",
-               COALESCE(r.utm_medium, u.medium) AS "Medium",
-               COALESCE(r.utm_term,   u.term)   AS "Term",
+               r.utm_source AS "Source",
+               r.utm_medium AS "Medium",
+               r.utm_term   AS "Term",
                r.has_computer  AS "Tem computador/notebook?",
                {survey_cols}
         FROM registros_ml r
-        LEFT JOIN LATERAL (
-            SELECT source, medium, term
-            FROM "UTMTracking"
-            WHERE LOWER("clientEmail") = LOWER(r.email)
-              AND "trackedAt" <= r.created_at
-            ORDER BY "trackedAt" DESC
-            LIMIT 1
-        ) u ON true
         WHERE r.created_at >= NOW() - INTERVAL '7 days'
           AND r.survey_responses IS NOT NULL
           AND r.email IS NOT NULL
@@ -226,30 +221,22 @@ def fetch_leads_capi_mode(n: int) -> list[dict[str, Any]]:
     matching no challenger_abr28. A outra metade fica com utm_campaign do
     banco — quase sempre vai pelo Champion shim.
     """
-    conn = _connect_railway()
+    conn = _connect_ledger()
     sql = """
         SELECT
             r.email,
             r.lead_score,
             r.created_at AS data,
-            COALESCE(r.utm_source,   u.source) AS "Source",
-            COALESCE(r.utm_medium,   u.medium) AS "Medium",
-            COALESCE(r.utm_term,     u.term)   AS "Term",
-            COALESCE(r.utm_source,   u.source) AS utm_source,
-            COALESCE(r.utm_medium,   u.medium) AS utm_medium,
-            COALESCE(r.utm_term,     u.term)   AS utm_term,
-            COALESCE(r.utm_campaign, u.campaign) AS utm_campaign,
-            COALESCE(r.utm_content,  u.content)  AS utm_content,
-            COALESCE(r.utm_url,      u.url)      AS event_source_url
+            r.utm_source AS "Source",
+            r.utm_medium AS "Medium",
+            r.utm_term   AS "Term",
+            r.utm_source AS utm_source,
+            r.utm_medium AS utm_medium,
+            r.utm_term   AS utm_term,
+            r.utm_campaign AS utm_campaign,
+            r.utm_content  AS utm_content,
+            r.utm_url      AS event_source_url
         FROM registros_ml r
-        LEFT JOIN LATERAL (
-            SELECT source, medium, term, campaign, content, url
-            FROM "UTMTracking"
-            WHERE LOWER("clientEmail") = LOWER(r.email)
-              AND "trackedAt" <= r.created_at
-            ORDER BY "trackedAt" DESC
-            LIMIT 1
-        ) u ON true
         WHERE r.lead_score IS NOT NULL
           AND r.created_at >= NOW() - INTERVAL '7 days'
         ORDER BY r.created_at DESC
