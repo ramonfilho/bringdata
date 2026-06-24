@@ -285,36 +285,23 @@ def _window_start_utc_naive() -> datetime:
     return datetime.utcnow() - timedelta(minutes=WINDOW_MIN)
 
 
-def rule_no_leads_arriving(conn) -> RuleResult:
-    """Regra 4: 0 respostas de pesquisa novas nos últimos 60min.
+def rule_no_leads_arriving(repo) -> RuleResult:
+    """Regra 4: 0 leads novos nos últimos 60min.
 
-    Fonte: `lead_surveys.submittedAt` (verdade nova do inflow desde 12/05/2026 —
-    o front migrou a gravação do formulário pra essa tabela; `Lead` deixou de
-    receber a maioria dos leads). 24/7 sem quiet hours: surveys entram de
-    madrugada também (decisão B revertida em 17/05 — o ruído noturno era
-    artefato de consultar `Lead`, que estava faminto, não falta de tráfego).
-
-    `submittedAt` é `timestamp without time zone` em UTC → cutoff UTC naive.
+    Fonte: `registros_ml` (ledger no Cloud SQL, populado pelo consumer Pub/Sub),
+    lido pela camada `LeadRepository` — mesma fonte das demais regras Pub/Sub.
+    Substitui a `lead_surveys` (morta em 21/05 — o front parou de gravar nela;
+    a regra antiga dava falso positivo com inflow real saudável). 24/7, sem
+    quiet hours.
     """
-    cutoff = _window_start_utc_naive()
-    rows = conn.run(
-        'SELECT COUNT(*) AS n, MAX("submittedAt") AS last_at FROM lead_surveys '
-        'WHERE "submittedAt" >= :cutoff',
-        cutoff=cutoff,
-    )
-    n, last_at = rows[0]
-    n = n or 0
-    if n > 0:
+    leads = repo.recent_leads(window_minutes=WINDOW_MIN)
+    if len(leads) > 0:
         return RuleResult('no_leads_arriving', fired=False)
-    last_rows = conn.run('SELECT MAX("submittedAt") FROM lead_surveys')
-    last_global = last_rows[0][0] if last_rows else None
     msg = (
-        f"Zero respostas de pesquisa em {WINDOW_MIN}min (lead_surveys). "
-        f"Último insert: {last_global.isoformat() if last_global else 'desconhecido'}. "
-        f"LP/Prisma pode estar travado."
+        f"Zero leads novos em {WINDOW_MIN}min (registros_ml). "
+        f"O inflow do Pub/Sub (LP/Prisma → consumer) pode estar travado."
     )
-    return RuleResult('no_leads_arriving', fired=True, message=msg,
-                      details={'last_lead_at': last_global.isoformat() if last_global else None})
+    return RuleResult('no_leads_arriving', fired=True, message=msg)
 
 
 def rule_capi_success_low(repo) -> RuleResult:
@@ -799,15 +786,17 @@ def run_critical_checks(
     fired_details: list[dict] = []
     try:
         repo = compose_repository('registros_ml', railway_conn=ledger_conn)
-        baseline_repo = compose_repository('legacy', railway_conn=railway_conn)
-
+        # baseline_repo (legacy/Lead) APOSENTADO — a Etapa 5 anulou Lead.leadScore/decil
+        # e o ledger já passou de 30d (>22/06). O drift usa `repo` (registros_ml,
+        # Cloud SQL) como baseline também. Monitoramento agora 100% Cloud SQL,
+        # sem nenhuma leitura no Railway (lead_surveys/Lead).
         rules: list[Callable[[], RuleResult]] = [
-            lambda: rule_no_leads_arriving(railway_conn),
+            lambda: rule_no_leads_arriving(repo),
             lambda: rule_capi_success_low(repo),
             lambda: rule_variant_no_capi(repo),
             lambda: rule_utm_source_missing(repo),
             lambda: rule_polling_500(store),
-            lambda: rule_score_drift(repo, baseline_repo, expected_decil_dist),
+            lambda: rule_score_drift(repo, repo, expected_decil_dist),
             lambda: rule_pubsub_consumer_stalled(ledger_conn),
             lambda: rule_pubsub_error_rate_high(ledger_conn),
             lambda: rule_pubsub_skipped_missing_data_high(ledger_conn),
