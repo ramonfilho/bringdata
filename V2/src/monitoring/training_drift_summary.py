@@ -35,6 +35,17 @@ logger = logging.getLogger(__name__)
 WINDOW_HOURS = 24
 TOP_FEATURES_LIMIT = 5
 
+# Só mostra no digest uma feature que está EFETIVAMENTE ZERADA — obs colapsou
+# pra perto de 0, a assinatura de bug de encoding/ingestão (categoria sumiu,
+# parse JSONB quebrou, casing mudou). O T1-16 por batch dispara já com obs <30%
+# do treino, o que também pega "reduzido mas presente" (drift de mix, ruído de
+# amostragem num batch de ~50): isso enche o alerta de falso positivo. Aqui no
+# agregador, só sobe ao digest quem caiu abaixo deste fator do esperado de
+# treino (obs <= 10% do exp = ~zerado). O resto é suprimido do digest (e logado
+# pra auditoria). NÃO enfraquece a salvaguarda: o log T1-16 por batch segue
+# intacto, e um zeramento real (obs→0) continua aparecendo.
+ZEROED_OBS_FACTOR = 0.10
+
 # Casa o conteúdo "Exemplos: FEATURE_A (obs=0.060 vs exp=0.223), FEATURE_B (obs=0.260 vs exp=0.899)"
 # do log T1-16 WARNING. Captura todos os triples (feature, obs, exp) por linha.
 _FEATURE_OBS_EXP_RE = re.compile(
@@ -140,34 +151,74 @@ def compute_training_drift_summary(
             except ValueError:
                 continue
 
-    total_observacoes = sum(len(v) for v in obs_por_feature.values())
-
-    # Top features pelo número de vezes que apareceram drifted.
-    ranked = sorted(
-        obs_por_feature.items(),
-        key=lambda kv: len(kv[1]),
-        reverse=True,
-    )
-    top_features = []
-    for feat, pairs in ranked[:TOP_FEATURES_LIMIT]:
+    # Separa ZERADA de verdade (obs ~0 → bug de encoding/ingestão) de apenas
+    # REDUZIDA (drift de mix / ruído de amostragem por batch — obs baixo mas
+    # presente). Só as zeradas viram alerta no digest; o resto é suprimido
+    # (e logado). Ver ZEROED_OBS_FACTOR.
+    real_zeradas: Dict[str, tuple] = {}     # feat -> (obs_media, exp, count)
+    suprimidas: Dict[str, tuple] = {}
+    for feat, pairs in obs_por_feature.items():
         obs_mean = sum(p[0] for p in pairs) / len(pairs)
-        # `exp` é constante (vem do treino, fixo por feature) — pega o primeiro.
-        exp_value = pairs[0][1]
+        exp_value = pairs[0][1]  # `exp` é fixo por feature (vem do treino)
+        if exp_value > 0 and obs_mean <= ZEROED_OBS_FACTOR * exp_value:
+            real_zeradas[feat] = (obs_mean, exp_value, len(pairs))
+        else:
+            suprimidas[feat] = (obs_mean, exp_value, len(pairs))
+
+    if suprimidas:
+        logger.info(
+            "[training_drift] %d feature(s) suprimida(s) do digest como ruído "
+            "(reduzidas, não zeradas — obs acima de %.0f%% do treino): %s",
+            len(suprimidas), ZEROED_OBS_FACTOR * 100,
+            ', '.join(f"{f}(obs={v[0]:.3f} vs exp={v[1]:.3f}, {v[2]}x)"
+                      for f, v in suprimidas.items()),
+        )
+
+    # Nenhuma feature efetivamente zerada → estado limpo (bloco some do digest).
+    if not real_zeradas:
+        return {
+            'window_hours': hours,
+            'batches_com_drift': 0,
+            'total_observacoes': 0,
+            'top_features': [],
+            'suppressed_features': len(suprimidas),
+            'observacao': (
+                f'{len(suprimidas)} feature(s) apenas reduzida(s) (drift/ruído de '
+                f'amostragem) — suprimidas; nenhuma efetivamente zerada'
+            ),
+        }
+
+    # Recontagem restrita às features realmente zeradas: quantos batches as
+    # contêm e quantas ocorrências (pra o header do digest não inflar com ruído).
+    real_feats = set(real_zeradas)
+    batches_reais = 0
+    total_obs_reais = 0
+    for line in raw_lines:
+        feats_na_linha = {m.group(1) for m in _FEATURE_OBS_EXP_RE.finditer(line)}
+        inter = feats_na_linha & real_feats
+        if inter:
+            batches_reais += 1
+            total_obs_reais += len(inter)
+
+    ranked = sorted(real_zeradas.items(), key=lambda kv: kv[1][2], reverse=True)
+    top_features = []
+    for feat, (obs_mean, exp_value, count) in ranked[:TOP_FEATURES_LIMIT]:
         top_features.append({
             'feature': feat,
             'obs_media': round(obs_mean, 4),
             'exp': round(exp_value, 4),
             'delta_pp': round(100 * (obs_mean - exp_value), 1),
-            'count': len(pairs),
+            'count': count,
         })
 
     return {
         'window_hours': hours,
-        'batches_com_drift': batches_com_drift,
-        'total_observacoes': total_observacoes,
+        'batches_com_drift': batches_reais,
+        'total_observacoes': total_obs_reais,
         'top_features': top_features,
+        'suppressed_features': len(suprimidas),
         'observacao': (
-            'mix de tráfego em produção difere do que o modelo Champion viu no '
-            'treino — não é bug de pipeline, é drift natural do dado'
+            'ATENÇÃO: feature(s) efetivamente ZERADA(S) na produção (obs ~0% vs '
+            'treino) — possível bug de encoding/ingestão; investigar (não é só drift)'
         ),
     }
