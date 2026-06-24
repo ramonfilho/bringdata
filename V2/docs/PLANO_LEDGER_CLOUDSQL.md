@@ -163,7 +163,7 @@ Score/decil **fora do alcance do cliente no banco**: a `Lead` está anulada, a `
 - [x] **Resíduo 3.7 (alertas 100% Cloud SQL):** `rule_no_leads_arriving` (lia `lead_surveys` morta → falso positivo) e `rule_score_drift` baseline (lia `Lead` anulada) → ambos leem `registros_ml` via repo. `run_critical_checks` não lê mais nenhuma tabela do Railway. Commit `e99604c`, deployado (rev `00778-hud`), confirmado live (9 regras, 0 disparadas, 0 erros).
 - [ ] **Planilha "[LF] Pesquisa - Produção" (MANUAL — colunas protegidas + Apps Script):** remover proteção das colunas `lead_score` (AN) e `decil` (AO), limpar valores, deletar trigger `executarPolling5Min`. A planilha congelou em 27/03 (polling roda no vazio). Backup em `leads_historico` + exports.
 - [ ] **Follow-up offline:** repoint `ml_evolution_report.py`/`extract_evolution_metrics.py` (multi-fonte: Sheets+Cloud SQL backup+Railway) pro `lead_legado` — só importa quando alguém rodar o relatório.
-- [ ] Gate C migrado pro Cloud SQL (`test_revision_equivalence.py` + `deploy_capi.sh` exporta `LEDGER_DB_*`) — forçado pelo DROP (commit `da2af22`).
+- [x] Gate C migrado pro Cloud SQL (`test_revision_equivalence.py` + `deploy_capi.sh` exporta `LEDGER_DB_*`) — forçado pelo DROP (commit `da2af22`).
 
 **Rollback:** restore do dump (GCS) de volta pro Railway. O dump fica pra sempre; sem pressa de apagar nada do nosso lado.
 
