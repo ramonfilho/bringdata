@@ -27,7 +27,7 @@ A solução: **os dados passam a viver em tabelas no nosso Cloud SQL**, e os pip
 | Multi-cliente | **`client_id` em todas as tabelas** desde o dia 1 | Cliente B chegando. |
 | Feature store "de verdade" | **Adiada** (fase travada) | Só quando point-in-time estiver provado por parity audit. Por ora isto é um data lake consolidado, não feature store. |
 | Resultados de validação | **Tabela relacional** (`validation_*`), não MLflow | Quer consultar cruzando lançamentos (SQL); MLflow continua dono de modelo/dataset-version. |
-| Onde mora | **Mesma instância do `ledger`**, database/schema `analytics` separado | Isola escrita OLTP do consumer Pub/Sub da leitura analítica pesada do treino. |
+| Onde mora | **Schema `analytics` no database `ledger`** (decisão do dono, 24/06) | Mesma conexão do `ledger_connection.py`; setup leve (`CREATE SCHEMA`). Contenção é instância-level de qualquer jeito, então database à parte não isolaria performance. |
 
 ---
 
@@ -52,11 +52,12 @@ ETL (loaders de API/arquivo de hoje)  ──escreve──►  Cloud SQL `analyti
 
 Cada fase roda dual-read (tabela vs API ao vivo) e só vira a chave quando a paridade bater coluna-a-coluna. Rollback = repositório volta ao adaptador de API ao vivo (um arquivo, minutos).
 
-### Fase 0 — Fundação ◐ EM ANDAMENTO
+### Fase 0 — Fundação ✅ CONCLUÍDA (24/06)
 - [x] Worktree + branch.
 - [x] DDL das tabelas: `api/db/analytics_schema.sql` (leads, sales, validation_runs/metrics, meta_insights).
-- [ ] **Rodar o DDL contra o Cloud SQL** (database/schema `analytics`) — *único passo que toca infra; pede "go" + verificar estado live antes.*
-- [ ] Helper de conexão `analytics` (espelha `ledger_connection.py`).
+- [x] **DDL aplicado no Cloud SQL**: schema `analytics` no database `ledger` (instância `smart-ads-db`, RUNNABLE/ALWAYS, IP 104.197.138.129). 5 tabelas, 87 colunas. Owner `postgres` (ledger_app não tem DDL na database); `ledger_app` recebeu USAGE/CREATE no schema + ALL em tables/sequences.
+- [x] **Smoke `ledger_app`** (usuário do pipeline): SELECT nas 5 tabelas + INSERT em validation_runs/metrics + JOIN por FK + DELETE CASCADE. Tudo OK.
+- [x] Conexão: **reusa `ledger_connection.py`** (mesmo database `ledger`) + `SET search_path TO analytics`. Não precisa de helper novo.
 
 ### Fase 1 — Resultados (risco mínimo, valor imediato, zero implicação de paridade)
 - Writer da validação grava em `validation_runs`/`validation_metrics` **além** do `.xlsx`.
@@ -88,7 +89,7 @@ Cada fase roda dual-read (tabela vs API ao vivo) e só vira a chave quando a par
 
 ## Estado pendente — o que verificar ao retomar
 
-1. **DDL já foi aplicado no Cloud SQL?** `\dt analytics.*` deve listar as 5 tabelas. Se não, é a próxima ação (Fase 0, pede "go").
+1. **DDL já foi aplicado no Cloud SQL?** ✅ SIM (24/06). `\dt analytics.*` lista as 5 tabelas. Próxima ação é a Fase 1.
 2. **Helper de conexão `analytics` existe?** (`src/data/analytics_connection.py` ou equivalente).
 3. **Verificações sanitárias antes de qualquer virada de consumidor:** parity audit da fase correspondente passou?
 
