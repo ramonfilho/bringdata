@@ -4955,7 +4955,8 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
             # independente de haver batch atual de leads pendentes.
             _run_critical_alerts_safely(railway_conn)
             _run_survey_branch_safely(railway_conn)
-            return {"processed": 0, "skipped": 0, "message": "Nenhum lead pendente"}
+            return {"processed": 0, "skipped": 0, "dry_run": dry_run,
+                    "message": "Nenhum lead pendente"}
 
         logger.info(f"📋 Railway polling: {len(rows)} leads pendentes encontrados")
 
