@@ -1153,6 +1153,35 @@ Fechamento desta etapa: **uma única fonte de verdade** (YAML) para `conversion_
 
 ---
 
+### Troca de modelo em produção como UMA operação de config atômica (Champion ou Challenger)
+
+**Dor (o que o usuário quer eliminar):** hoje, subir um modelo novo pra produção exige editar/sincronizar **vários campos em vários lugares à mão**:
+- o `run_id` aparece duplicado em `active_model.mlflow_run_id` **e** na variante-shim `champion_jan30` dentro de `ab_test.variants` (mesmo run, dois lugares) — divergência silenciosa já causou o bug `value=0` (7 dias);
+- `conversion_rates` (tabela de valor por decil pro CAPI) vive em `clients/{cliente}.yaml` (Champion) **e** em `active_models/{cliente}.yaml` (por variante);
+- trocar o Challenger é edição manual multi-campo do bloco da variante (`run_id` + `utm_pattern`/tag + `conversion_rates` + nomes de evento CAPI + pixel).
+
+**Objetivo (north-star):** trocar Champion **ou** Challenger = **uma operação atômica de config** — "o novo modelo é o run X, tag Y" num único comando/edição, sem sincronização manual e sem possibilidade de divergência. Vale pra produção (roteamento/CAPI); o monitoramento segue de carona via a Frente 2.
+
+**O que já está no caminho (NÃO re-registrar — este item só consolida e aponta o que falta):**
+- **DT-16** — deprecar o shim do Champion por convergência → elimina a duplicação do `run_id`.
+- **DT-17** — `--set-active` copia `conversion_rates` do artifact do MLflow run pro YAML → uma fonte só de valor por decil.
+- **Frente 2** (monitoramento) — cada variante declara `role` (champion/challenger), `campaign_tag` e `display_name`; classificador e rótulos do relatório derivam disso.
+
+**Deltas que FALTAM pra fechar o atomic swap (o que o `/sw-architect` acrescenta além de DT-16/17):**
+1. **Ponteiro derivado do papel:** `active_model` passa a ser **derivado** da variante com `role: champion` (campo que a Frente 2 já cria), em vez de carregar uma cópia do `mlflow_run_id`. Mata a sincronização à mão na raiz — não depende só de o DT-16 remover o shim.
+2. **CLI simétrico pro Challenger:** análogo ao `--set-active`, um `--set-variant <role> <run_id> [--tag <tag>]` que atualiza o bloco da variante **atomicamente** (run_id + tag + copia rates do artifact). Hoje só o Champion tem caminho de CLI (`--set-active`); o Challenger é edição manual.
+3. **Gate fail-loud de divergência:** enquanto o shim existir (pré-DT-16), um assert no boot/deploy de que `active_model.mlflow_run_id == variante[role=champion].run_id` — falha alto se divergirem. É a salvaguarda direta contra a classe de bug `value=0`; **atacável já, barato, independente do resto.**
+
+**Resultado esperado:** `--set-variant champion <run_id>` (ou `--set-variant challenger <run_id> --tag LEADHQLB2`) resolve run_id + tag + rates + roteamento + monitoramento de uma fonte só, num comando. O **deploy continua passo separado** (rebuild da imagem com o artefato + gates B/C/D) — a atomicidade é da **config**, não do deploy.
+
+**Pré-requisitos:** Frente 2 (campos `role`/`campaign_tag`/`display_name`) + DT-17 (rates como artifact do run). DT-16 (remover shim) é simplificação adicional, não bloqueio.
+
+**Prioridade:** média — o delta 3 (gate de divergência) é atacável imediatamente como salvaguarda; deltas 1-2 dependem da Frente 2 e do próximo retreino.
+
+*Identificador histórico: DT-19.*
+
+---
+
 ### Normalizar 4 features binárias raw (`genero`, `estudouProgramacao`, `faculdade`, `investiuCurso`) — bloqueia A/B com Challenger novo
 
 **Contexto:** quatro features categóricas vindas da pesquisa do front chegam ao modelo **sem normalização** (sem `.lower()`, sem `unidecode`, sem `.strip()`):
