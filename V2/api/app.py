@@ -4909,19 +4909,17 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
             timeout=30,
         )
 
-        # 2. Buscar leads sem score (máximo configurável por execução)
-        _polling_limit = pipeline._client_config.api.railway_polling_batch_size
-        rows = railway_conn.run(
-            'SELECT id, data, "nomeCompleto", email, telefone, pesquisa, '
-            'source, medium, campaign, content, term, '
-            '"remoteIp", "userAgent", fbc, fbp, "pageUrl" '
-            f'FROM "Lead" WHERE "leadScore" IS NULL '
-            # [Estancar o estrago] não re-selecionar leads que o validador
-            # pós-encoding já segurou — sem isto o polling re-pega os mesmos
-            # a cada 5min num loop infinito (registro_erros_ml.md § V.5).
-            f'AND ("capiStatus" IS NULL OR "capiStatus" <> \'blocked_feature\') '
-            f'ORDER BY "createdAt" ASC LIMIT {_polling_limit}'
-        )
+        # 2. Re-scoring da Lead APOSENTADO — Etapa 5 do PLANO_LEDGER_CLOUDSQL.
+        # A tabela Lead morreu (~17/05); o scoring novo é via Pub/Sub → ledger
+        # registros_ml no Cloud SQL. Re-scorear aqui re-popularia o
+        # leadScore/decil que a Etapa 5 anula (UPDATE Lead) E re-enviaria CAPI ao
+        # Meta dos 142k leads antigos. Forçamos `rows = []` → o endpoint cai no
+        # caminho "nenhum lead pendente", que ainda dispara os alertas críticos +
+        # heartbeat (que SÓ rodam aqui — vide /sw-architect). O bloco de scoring
+        # abaixo fica inalcançável; remoção + desacoplamento dos alertas pra job
+        # próprio = follow-up (item 3.7 do plano).
+        _polling_limit = pipeline._client_config.api.railway_polling_batch_size  # noqa: F841 (legado)
+        rows = []
 
         def _run_critical_alerts_safely(_conn):
             """Hook crítico: registra status do polling + roda as 6 regras.
