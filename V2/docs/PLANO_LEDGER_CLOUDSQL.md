@@ -151,14 +151,21 @@ Ordem do menor risco pro maior:
 
 ⚠️ **Conflito (resolvido pela Etapa 2b):** os relatórios históricos (`ml_evolution_report.py` lê `Lead.decil`; catálogo de consumidores de score decidiu "preservar histórico operacional") quebrariam quando `Lead.leadScore`/`decil` fossem anulados. Com a consolidação da Etapa 2b, `leads_historico` preserva o score de produção da época (`score_producao`/`decil_producao`) — basta repointar esses relatórios pra lá ANTES de anular as colunas no Railway. Adicionar checkbox: repoint de `ml_evolution_report.py`/`extract_evolution_metrics.py` pro Cloud SQL.
 
-- [ ] Dump completo pro nosso lado: `Lead` (id, email, createdAt, leadScore, decil, capiSentAt), `leads_capi` (colunas de score), `registros_ml` inteira → GCS nosso + (opcional) tabela `lead_legado` no Cloud SQL
-- [ ] `UPDATE "Lead" SET "leadScore"=NULL, decil=NULL` (142.940 linhas)
-- [ ] `UPDATE leads_capi SET lead_score=NULL, decil=NULL, scored_at=NULL` (21 linhas)
-- [ ] `DROP TABLE registros_ml` no Railway
-- [ ] Planilha "[LF] Pesquisa": deletar trigger `executarPolling5Min` (e avaliar `executarMonitoramentoDiario`), apagar/limpar as colunas `lead_score` e `decil` (backup CSV antes)
-- [ ] Nosso código tolera a planilha sem score (`data_loader.py:487-517` condiciona; `validate_ml_performance.py:1513-1514` põe NaN) — smoke do relatório de validação depois
+### ✅ ETAPA 5 — OBJETIVO CENTRAL ATINGIDO (24/06/2026)
 
-**Rollback:** restore do dump (GCS) de volta pro Railway. Janela de arrependimento: manter o dump para sempre; não há pressa em apagar nada do nosso lado.
+Score/decil **fora do alcance do cliente no banco**: a `Lead` está anulada, a `registros_ml` saiu do Railway, tudo salvo do nosso lado (`lead_legado` + `leads_historico` + dump GCS). Só falta a planilha (manual) e o repoint offline do relatório.
+
+- [x] Dump completo → GCS (`gs://smart-ads-validation-reports/ledger_etapa5_backup/2026-06-23/`: Lead 142.943, leads_capi 21, registros_ml 28.575, verificado íntegro) + tabela `lead_legado` no Cloud SQL (cópia fiel da Lead).
+- [x] **Pré-passo (gut do re-scoring):** o `/railway/process-pending` re-scoreava a Lead a cada 5min → re-popularia o que anulamos + re-CAPI 142k ao Meta. Forçado `rows=[]` (commit `7149dd2`), deployado e **confirmado ativo** (sonda dry_run pós-anulação: processed=0). Alertas críticos seguem rodando ali.
+- [x] `DROP TABLE registros_ml` no Railway (0 FKs; Cloud SQL intacta e crescendo).
+- [x] `UPDATE leads_capi SET lead_score=NULL, decil=NULL` (21 linhas) — **`scored_at` MANTIDO** (decisão do usuário: timestamp não vaza o modelo).
+- [x] `UPDATE "Lead" SET "leadScore"=NULL, decil=NULL` (142.940 → 0). Readers de runtime de decil/leadScore (E6 + drift) já caem no fallback do ledger; os outros 3 readers de `Lead` leem identidade/pesquisa (inalterados).
+- [x] **Resíduo 3.7 (alertas 100% Cloud SQL):** `rule_no_leads_arriving` (lia `lead_surveys` morta → falso positivo) e `rule_score_drift` baseline (lia `Lead` anulada) → ambos leem `registros_ml` via repo. `run_critical_checks` não lê mais nenhuma tabela do Railway. Commit `e99604c`, deployado (rev `00778-hud`), confirmado live (9 regras, 0 disparadas, 0 erros).
+- [ ] **Planilha "[LF] Pesquisa - Produção" (MANUAL — colunas protegidas + Apps Script):** remover proteção das colunas `lead_score` (AN) e `decil` (AO), limpar valores, deletar trigger `executarPolling5Min`. A planilha congelou em 27/03 (polling roda no vazio). Backup em `leads_historico` + exports.
+- [ ] **Follow-up offline:** repoint `ml_evolution_report.py`/`extract_evolution_metrics.py` (multi-fonte: Sheets+Cloud SQL backup+Railway) pro `lead_legado` — só importa quando alguém rodar o relatório.
+- [x] Gate C migrado pro Cloud SQL (`test_revision_equivalence.py` + `deploy_capi.sh` exporta `LEDGER_DB_*`) — forçado pelo DROP (commit `da2af22`).
+
+**Rollback:** restore do dump (GCS) de volta pro Railway. O dump fica pra sempre; sem pressa de apagar nada do nosso lado.
 
 ---
 
@@ -206,6 +213,10 @@ O item 1 do plano de remediação de score (cache versionado regenerado no daily
 | 16/06 | 3.1c | Readers restantes via helper (4 endpoints + reader principal do daily-check + early-return + fallback E6). PR #3 → `main` | `ba41d8c` |
 | 16/06 | 3→virada | **Leitura virada pro Cloud SQL em produção.** `LEDGER_READ_SOURCE=cloudsql`, rev `00427-k59` @100% (mesma imagem `ae016041`). Detalhe: `--update-env-vars` sozinho não pegou (tráfego pinado em tag de canary) → precisou `update-traffic --to-revisions`. Validado: acervo `event_id` 23.636=23.636 (0 só num lado); views privada+cliente idênticas (só sub-0,1pp no "Anteontem" do drift geral, 1 lead de borda) | — |
 | 23/06 | 4 | **Corte da escrita no Railway.** `config.sh` default `dual`→`cloudsql` + aplicado live (rev `00439-twf`, mesma imagem, sem rebuild). Acervo no corte 28.573=28.573, 0 só-no-Railway. Teste pós-corte: 10min → Railway **0** leads novos (congelou 17:25 UTC), Cloud SQL **+8** (até 17:40); consumer `ledger_target=cloudsql`/`ledger_errors=0`, 0 erros/5xx | `4f19b5f` |
+| 23-24/06 | 2b | `lead_legado` (cópia fiel da Lead, 142.943) + `leads_historico` (233k, LF40→LF59, pesquisa canônica + decil real, 3 fontes) no Cloud SQL — fonte de validação. Bug do cache de planilha (pesquisa vazia) corrigido lendo planilha crua | `6acf061` `6d0e35a` `bb2e765` |
+| 24/06 | 5-gut | Re-scoring da Lead aposentado no railway-polling (`rows=[]`); deployado (rev `00775-joj`), gut confirmado ativo | `7149dd2` `d11cbf4` |
+| 24/06 | 5 | **DROP registros_ml (Railway) + anular leads_capi (21, scored_at mantido) + anular Lead (142.940→0).** Dump GCS verificado antes. Sonda dry_run pós-anulação: processed=0 (gut impede re-scoring). **Score/decil fora do banco do cliente.** | — |
+| 24/06 | 5-3.7 | Alertas 100% Cloud SQL: `no_leads_arriving`→`registros_ml`, drift baseline→ledger. Conserta falso positivo. Deployado (rev `00778-hud`), confirmado (9 regras/0 fired/0 erro). Gate C migrado pro Cloud SQL | `e99604c` `da2af22` |
 
 ## 8. Como retomar numa sessão nova
 
