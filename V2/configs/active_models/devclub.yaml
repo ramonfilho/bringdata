@@ -67,6 +67,10 @@ ab_test:
     # =============================================================================
     champion_jan30:
       run_id: d51757f5041c44b7ab1a056fce8c3c35   # mesmo do active_model
+      # Frente 2 — metadado do MONITORAMENTO (inerte pro roteamento; match_variant ignora):
+      role: champion
+      campaign_tag: "LEADQUALIFIED"              # tag no nome da campanha = balde Champion (classificador)
+      display_name: "Anterior (jan_30)"          # rótulo no relatório (campanha LEADQUALIFIED desligada)
       utm_pattern: {}                            # vazio = nunca matcheia
       # sem url_pattern (None) — também nunca matcheia
       capi_event_name: LeadQualified
@@ -100,6 +104,10 @@ ab_test:
 
     challenger_abr28:
       run_id: 5d158f0aa6e54b489498470446194a6c
+      # Frente 2 — metadado do MONITORAMENTO (inerte pro roteamento; match_variant ignora):
+      role: challenger
+      campaign_tag: "HQLB"                       # substring p/ classificador (cobre LEADHQLB/HQLB/HQLB_LQ) = balde Challenger
+      display_name: "Champion (abr_28)"          # rótulo no relatório (venceu o A/B, virou produção)
       utm_pattern:
         utm_campaign: "LEADHQLB"                 # match substring case-insensitive → bate em "DEVLF | ... | LEADHQLB|..."
       url_pattern: "ml-parabens-psq-devf"        # OR com utm_pattern — redundância (URL exclusiva pós-form Challenger)

@@ -2589,6 +2589,21 @@ class DataQualityMonitor:
                 return 'Google'
             return 'Outros'
 
+        # Frente 2: mapa tag→balde derivado do YAML (ABTestConfig.campaign_bucket_map) —
+        # fonte única, substitui as tags chumbadas em campaign_classifier. None → o
+        # classificador cai no legado hardcoded (compat / estrangulamento).
+        _ab_bucket_map = None
+        try:
+            from core.client_config import ABTestConfig as _ABTestConfig
+            import os as _os_bm
+            _bm_path = _os_bm.path.abspath(_os_bm.path.join(
+                _os_bm.path.dirname(__file__), '..', '..', 'configs', 'active_models',
+                f'{self.client_config.client_id}.yaml',
+            ))
+            _ab_bucket_map = _ABTestConfig.from_active_model_yaml(_bm_path).campaign_bucket_map()
+        except Exception as _e_bm:
+            logger.debug(f"  monitoring: campaign_bucket_map indisponível ({_e_bm}) — classificador usa legado")
+
         def _split_df_by_variant(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
             """Divide df em buckets pra a tabela "Drift por A/B", pela TAG de
             optimization_goal no NOME da campanha (utm_campaign) — NÃO mais via
@@ -2638,7 +2653,7 @@ class DataQualityMonitor:
                 return base
             buckets = {'Lead': [], 'Champion': [], 'Challenger': []}
             for i, row in df_meta.iterrows():
-                buckets[_bucket_from_utm(row.get('campaign'))].append(i)
+                buckets[_bucket_from_utm(row.get('campaign'), _ab_bucket_map)].append(i)
             base['Lead']       = df_meta.loc[buckets['Lead']]       if buckets['Lead']       else empty
             base['Champion']   = df_meta.loc[buckets['Champion']]   if buckets['Champion']   else empty
             base['Challenger'] = df_meta.loc[buckets['Challenger']] if buckets['Challenger'] else empty

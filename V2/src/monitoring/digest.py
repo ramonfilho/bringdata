@@ -309,6 +309,7 @@ def _bases_md(leads_total: float, scored) -> str:
 # ──────────────────────────────────────────────────────────────────────────
 
 def render_text(view: dict) -> str:
+    _set_render_labels(view)   # Frente 2: rótulos do YAML (fallback legado)
     lines: list[str] = []
     _render_text_header(view, lines)
     _render_text_ab(view, lines)
@@ -331,14 +332,40 @@ def render_text(view: dict) -> str:
 # jan_30 do roteamento) é frente separada. Enquanto não acontece, o jan_30 segue
 # sendo o default e ainda scoreia os leads sem tag (Google/orgânico/Lead); esses
 # aparecem nas tabelas sob Lead/Google/Outros, não como um braço "Champion".
+# DEPRECATED (Frente 2/DT-19): a fonte única é o YAML (display_name por variante),
+# injetado via _set_render_labels. Este mapa é só FALLBACK; remover após 1 ciclo de
+# produção confirmar o config-driven.
 _VARIANT_LABEL = {
     'champion_jan30':   'jan_30 (anterior)',
     'challenger_abr28': 'Champion (abr_28)',
 }
 
+# Frente 2: rótulos derivados do YAML (campo display_name por variante, injetado no
+# payload em ab_test.ab_variants pelo orchestrator). Preenchido por _set_render_labels()
+# no início de cada render; vazio → cai nos mapas chumbados (legado/compat —
+# estrangulamento). Render é sequencial, então o estado de módulo é seguro.
+_RENDER_LABELS: dict = {'variant': {}, 'bucket': {}}
+
+
+def _set_render_labels(v: dict) -> None:
+    """Monta os mapas de rótulo (por MODELO e por BALDE) a partir das variantes do
+    payload (ab_test.ab_variants, cada uma com role/display_name vindos do YAML).
+    Fonte única; variante sem display_name cai no mapa legado no lookup."""
+    variant_map: dict = {}
+    bucket_map: dict = {'Lead': 'Lead'}
+    _bucket_of = {'champion': 'Champion', 'challenger': 'Challenger'}
+    for vv in ((v.get('ab_test') or {}).get('ab_variants') or []):
+        name, dn, role = vv.get('name'), vv.get('display_name'), (vv.get('role') or '').lower()
+        if name and dn:
+            variant_map[name] = dn
+        if role in _bucket_of and dn:
+            bucket_map[_bucket_of[role]] = dn
+    _RENDER_LABELS['variant'] = variant_map
+    _RENDER_LABELS['bucket'] = bucket_map
+
 
 def _variant_label(name: str) -> str:
-    return _VARIANT_LABEL.get(name, name)
+    return _RENDER_LABELS['variant'].get(name) or _VARIANT_LABEL.get(name, name)
 
 
 # Rótulo de exibição do balde por TAG de campanha (Lead/Champion/Challenger) — usado
@@ -347,6 +374,8 @@ def _variant_label(name: str) -> str:
 # produção; a LEADQUALIFIED (balde 'Champion') foi aposentada → o balde dela vira
 # "Anterior (jan_30)" e some das tabelas quando não tem lead. Só apresentação: o
 # classificador campaign_classifier.bucket_from_utm segue 3-way (chaves intactas).
+# DEPRECATED (Frente 2/DT-19): fonte única é o YAML (display_name por variante via
+# role→balde), injetado por _set_render_labels. Só FALLBACK; remover após 1 ciclo de prod.
 _AB_BUCKET_LABEL = {
     'Lead':       'Lead',
     'Champion':   'Anterior (jan_30)',
@@ -355,7 +384,7 @@ _AB_BUCKET_LABEL = {
 
 
 def _ab_bucket_label(bucket: str) -> str:
-    return _AB_BUCKET_LABEL.get(bucket, bucket)
+    return _RENDER_LABELS['bucket'].get(bucket) or _AB_BUCKET_LABEL.get(bucket, bucket)
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -838,6 +867,7 @@ def render_slack_blocks(view: dict) -> list[dict]:
     em batch, previsão de faturamento.
     """
     blocks: list[dict] = []
+    _set_render_labels(view)   # Frente 2: rótulos do YAML (fallback legado)
     _slack_header(view, blocks)
     _slack_launch_fallback_notice_dm(view, blocks)  # DM-only — no-op se YAML em dia
     _slack_score_distribution_change_dm(view, blocks)  # Drift de Score (decis)
@@ -1061,6 +1091,7 @@ def render_slack_blocks_client(view: dict) -> list[dict]:
     """View 'cliente' — A/B test + 2 tabelas de drift por variante + drift geral
     com cores 🟢🟡🔴 + 2 distribuições de decis (ontem + lançamento atual)."""
     blocks: list[dict] = []
+    _set_render_labels(view)   # Frente 2: rótulos do YAML (fallback legado)
     _slack_header(view, blocks)
     _slack_ab(view, blocks)
     blocks.append({'type': 'divider'})
