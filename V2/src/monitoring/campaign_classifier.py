@@ -80,6 +80,10 @@ def _bucket_from_adsets(adsets: list) -> str:
 # (utm_campaign) — espelham _CHAMPION_GOALS/_CHALLENGER_GOALS. O gestor tagueia
 # o nome: "DEVLF | ... | 2026-06-04 | LEADQUALIFIED|<id>" (Champion),
 # "... | LEADHQLB|<id>" (Challenger), sem tag = Lead/otimização padrão.
+# DEPRECATED (Frente 2/DT-19): a fonte única passou a ser o YAML
+# (ABTestConfig.campaign_bucket_map, campo campaign_tag/role por variante), injetado
+# via `bucket_map`. Estas frozensets são só FALLBACK quando o mapa não é passado.
+# Remover após 1 ciclo de produção confirmar o caminho config-driven no relatório.
 _CHALLENGER_NAME_TAGS = frozenset({"HQLB"})            # cobre LEADHQLB, HQLB, HQLB_LQ
 _CHAMPION_NAME_TAGS   = frozenset({"LEADQUALIFIED"})   # cobre LeadQualified(HighQuality)
 

@@ -332,6 +332,9 @@ def render_text(view: dict) -> str:
 # jan_30 do roteamento) é frente separada. Enquanto não acontece, o jan_30 segue
 # sendo o default e ainda scoreia os leads sem tag (Google/orgânico/Lead); esses
 # aparecem nas tabelas sob Lead/Google/Outros, não como um braço "Champion".
+# DEPRECATED (Frente 2/DT-19): a fonte única é o YAML (display_name por variante),
+# injetado via _set_render_labels. Este mapa é só FALLBACK; remover após 1 ciclo de
+# produção confirmar o config-driven.
 _VARIANT_LABEL = {
     'champion_jan30':   'jan_30 (anterior)',
     'challenger_abr28': 'Champion (abr_28)',
@@ -371,6 +374,8 @@ def _variant_label(name: str) -> str:
 # produção; a LEADQUALIFIED (balde 'Champion') foi aposentada → o balde dela vira
 # "Anterior (jan_30)" e some das tabelas quando não tem lead. Só apresentação: o
 # classificador campaign_classifier.bucket_from_utm segue 3-way (chaves intactas).
+# DEPRECATED (Frente 2/DT-19): fonte única é o YAML (display_name por variante via
+# role→balde), injetado por _set_render_labels. Só FALLBACK; remover após 1 ciclo de prod.
 _AB_BUCKET_LABEL = {
     'Lead':       'Lead',
     'Champion':   'Anterior (jan_30)',
