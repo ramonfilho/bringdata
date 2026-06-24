@@ -20,6 +20,7 @@ Uso:
 """
 
 import argparse
+import json
 import sys
 import os
 from pathlib import Path
@@ -2845,6 +2846,35 @@ def main():
     )
     print(f"    Excel salvo: {excel_path}", flush=True)
     print(flush=True)
+
+    # === Fase 1 (consolidação Cloud SQL): persistir resultados no schema analytics ===
+    # Sink PARALELO ao .xlsx — os mesmos números viram tabela consultável. Falha de
+    # banco loga alto mas NÃO derruba o relatório (xlsx é a fonte durante a Fase 1).
+    try:
+        from src.validation.results_store import save_validation_run
+        _model_run_id = None
+        try:
+            _md = json.loads(Path(model_metadata_path).read_text())
+            _model_run_id = _md.get('run_id') or _md.get('mlflow_run_id') or _md.get('model_run_id')
+        except Exception:
+            pass
+        _vrun = save_validation_run(
+            lf=args.lf_name,
+            cap_start=start_date, cap_end=end_date,
+            sales_start=sales_start, sales_end=sales_end,
+            report_type=args.report_type,
+            matching_method=args.matching_method,
+            matching_stats=matching_stats,
+            decile_metrics=decile_metrics,
+            campaign_metrics=campaign_metrics,
+            ml_comparison=ml_comparison,
+            model_run_id=_model_run_id,
+            params=config_params,
+        )
+        print(f"    Resultados gravados em analytics.validation_* (run_id={_vrun})", flush=True)
+        print(flush=True)
+    except Exception as _store_err:
+        logger.warning(f"    [results_store] FALHA ao gravar no banco (xlsx OK, segue): {_store_err}")
 
     # 11. Gerar gráficos
     # DESABILITADO: Gerando apenas análise em console até finalizar formato

@@ -57,12 +57,16 @@ Cada fase roda dual-read (tabela vs API ao vivo) e só vira a chave quando a par
 - [x] DDL das tabelas: `api/db/analytics_schema.sql` (leads, sales, validation_runs/metrics, meta_insights).
 - [x] **DDL aplicado no Cloud SQL**: schema `analytics` no database `ledger` (instância `smart-ads-db`, RUNNABLE/ALWAYS, IP 104.197.138.129). 5 tabelas, 87 colunas. Owner `postgres` (ledger_app não tem DDL na database); `ledger_app` recebeu USAGE/CREATE no schema + ALL em tables/sequences.
 - [x] **Smoke `ledger_app`** (usuário do pipeline): SELECT nas 5 tabelas + INSERT em validation_runs/metrics + JOIN por FK + DELETE CASCADE. Tudo OK.
-- [x] Conexão: **reusa `ledger_connection.py`** (mesmo database `ledger`) + `SET search_path TO analytics`. Não precisa de helper novo.
+- [x] Conexão: helper próprio `src/data/analytics_connection.py` (Cloud SQL `ledger` + `SET search_path TO analytics`). `ledger_connection.py` é leitura do `registros_ml` e o docstring dele proíbe escrita — por isso helper à parte.
 
-### Fase 1 — Resultados (risco mínimo, valor imediato, zero implicação de paridade)
-- Writer da validação grava em `validation_runs`/`validation_metrics` **além** do `.xlsx`.
-- `meta_insights` populado pelo loader da Meta.
-- Arquivo continua como export sob demanda.
+### Fase 1 — Resultados ◐ EM ANDAMENTO (24/06)
+- [x] `src/data/analytics_connection.py` — conexão de leitura/escrita do schema analytics.
+- [x] `src/validation/results_store.py` — writer **append-only** (`run_id` com timestamp); mapeia decile/campaign/overall → `validation_runs` + `validation_metrics`. Não calcula nada (recebe as estruturas já computadas).
+- [x] Plugado em `validate_ml_performance.py` logo após o Excel salvo, **guardado em try/except** (falha de banco loga alto, não derruba o `.xlsx`).
+- [x] Smoke do writer contra o banco real: cabeçalho + 2 decis + 1 campanha + overall, `extra` jsonb, FK cascade. Verde.
+- [ ] **Exercitar no próximo run real** de validação (o pipeline pesado puxa Meta/Guru; o bloco roda naturalmente lá — só não foi rodado fim-a-fim ainda).
+- [ ] `meta_insights` populado pelo loader da Meta (próximo passo da Fase 1).
+- Arquivo `.xlsx` continua como export sob demanda.
 
 ### Fase 2 — Vendas (`sales`) — **habilita o enriquecimento de compradores**
 - ETL dos gateways (loaders do `data_loader` viram readers do ETL): guru, hotmart, asaas, boletex, hotpay, tmb.
