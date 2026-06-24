@@ -286,9 +286,15 @@ def _window_start_utc_naive() -> datetime:
 
 
 def rule_no_leads_arriving(conn) -> RuleResult:
-    """Regra 4: 0 respostas de pesquisa novas nos últimos 60min.
+    """[APOSENTADA 2026-06-24 — não é mais registrada/avaliada] Regra 4.
 
-    Fonte: `lead_surveys.submittedAt` (verdade nova do inflow desde 12/05/2026 —
+    Lia `lead_surveys`, que MORREU em 21/05/2026 (inflow migrou pro ledger
+    `registros_ml`). Desde então achava sempre 0 e disparava CRÍTICO falso de
+    poucos em poucos minutos ("LP/Prisma travado"). O inflow real passou a ser
+    coberto por `rule_pubsub_consumer_stalled` (R1), que checa `registros_ml` ao
+    vivo. Mantida só como histórico; NÃO re-registrar sem repontar a fonte.
+
+    Fonte original: `lead_surveys.submittedAt` (verdade nova do inflow desde 12/05/2026 —
     o front migrou a gravação do formulário pra essa tabela; `Lead` deixou de
     receber a maioria dos leads). 24/7 sem quiet hours: surveys entram de
     madrugada também (decisão B revertida em 17/05 — o ruído noturno era
@@ -802,7 +808,9 @@ def run_critical_checks(
         baseline_repo = compose_repository('legacy', railway_conn=railway_conn)
 
         rules: list[Callable[[], RuleResult]] = [
-            lambda: rule_no_leads_arriving(railway_conn),
+            # [APOSENTADA 2026-06-24] rule_no_leads_arriving lia `lead_surveys`
+            # (morta desde 21/05) → CRÍTICO falso a cada run ("LP/Prisma travado").
+            # Inflow real é coberto por rule_pubsub_consumer_stalled (registros_ml ao vivo).
             lambda: rule_capi_success_low(repo),
             lambda: rule_variant_no_capi(repo),
             lambda: rule_utm_source_missing(repo),
