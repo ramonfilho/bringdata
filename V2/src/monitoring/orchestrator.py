@@ -382,6 +382,10 @@ class MonitoringOrchestrator:
                             'run_id': _v.get('run_id'),
                             'routing_active': _has_routing,
                             'routing_desc': ' | '.join(_route_desc) if _route_desc else 'default (não match)',
+                            # Frente 2: metadado pro digest derivar rótulos do YAML
+                            # (fonte única) em vez dos mapas chumbados.
+                            'role': _v.get('role'),
+                            'display_name': _v.get('display_name'),
                         })
                     result['ab_variants'] = _variants
                     _yaml_loaded = True
