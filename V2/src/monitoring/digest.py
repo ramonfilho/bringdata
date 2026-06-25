@@ -324,33 +324,18 @@ def render_text(view: dict) -> str:
     return '\n'.join(lines)
 
 
-# Mapa amigável de variant_name → label curto.
-# 2026-06-23: o teste A/B foi decidido — a variante da campanha LEADHQLB (abr_28)
-# venceu e virou o Champion de produção; a antiga (jan_30, campanha LEADQUALIFIED)
-# foi desligada. O rótulo passa a refletir isso. ATENÇÃO: aqui é só APRESENTAÇÃO —
-# a promoção formal do abr_28 a modelo default no config (e o desligamento do
-# jan_30 do roteamento) é frente separada. Enquanto não acontece, o jan_30 segue
-# sendo o default e ainda scoreia os leads sem tag (Google/orgânico/Lead); esses
-# aparecem nas tabelas sob Lead/Google/Outros, não como um braço "Champion".
-# DEPRECATED (Frente 2/DT-19): a fonte única é o YAML (display_name por variante),
-# injetado via _set_render_labels. Este mapa é só FALLBACK; remover após 1 ciclo de
-# produção confirmar o config-driven.
-_VARIANT_LABEL = {
-    'champion_jan30':   'jan_30 (anterior)',
-    'challenger_abr28': 'Champion (abr_28)',
-}
-
-# Frente 2: rótulos derivados do YAML (campo display_name por variante, injetado no
-# payload em ab_test.ab_variants pelo orchestrator). Preenchido por _set_render_labels()
-# no início de cada render; vazio → cai nos mapas chumbados (legado/compat —
-# estrangulamento). Render é sequencial, então o estado de módulo é seguro.
+# Frente 2 (DT-19): os rótulos do relatório vêm do YAML — cada variante declara
+# display_name (e role), o orchestrator injeta em ab_test.ab_variants no payload, e
+# _set_render_labels() monta os mapas (por MODELO e por BALDE) no início de cada
+# render. FONTE ÚNICA — os mapas chumbados antigos (_VARIANT_LABEL/_AB_BUCKET_LABEL)
+# foram removidos. Render é sequencial, então o estado de módulo é seguro.
 _RENDER_LABELS: dict = {'variant': {}, 'bucket': {}}
 
 
 def _set_render_labels(v: dict) -> None:
     """Monta os mapas de rótulo (por MODELO e por BALDE) a partir das variantes do
     payload (ab_test.ab_variants, cada uma com role/display_name vindos do YAML).
-    Fonte única; variante sem display_name cai no mapa legado no lookup."""
+    Fonte única; variante sem display_name cai no nome cru no lookup."""
     variant_map: dict = {}
     bucket_map: dict = {'Lead': 'Lead'}
     _bucket_of = {'champion': 'Champion', 'challenger': 'Challenger'}
@@ -365,26 +350,11 @@ def _set_render_labels(v: dict) -> None:
 
 
 def _variant_label(name: str) -> str:
-    return _RENDER_LABELS['variant'].get(name) or _VARIANT_LABEL.get(name, name)
-
-
-# Rótulo de exibição do balde por TAG de campanha (Lead/Champion/Challenger) — usado
-# nas tabelas de Drift e Decis e no funil. Espelha _VARIANT_LABEL (que é por MODELO).
-# 2026-06-23: a campanha LEADHQLB (balde 'Challenger') venceu e virou o Champion de
-# produção; a LEADQUALIFIED (balde 'Champion') foi aposentada → o balde dela vira
-# "Anterior (jan_30)" e some das tabelas quando não tem lead. Só apresentação: o
-# classificador campaign_classifier.bucket_from_utm segue 3-way (chaves intactas).
-# DEPRECATED (Frente 2/DT-19): fonte única é o YAML (display_name por variante via
-# role→balde), injetado por _set_render_labels. Só FALLBACK; remover após 1 ciclo de prod.
-_AB_BUCKET_LABEL = {
-    'Lead':       'Lead',
-    'Champion':   'Anterior (jan_30)',
-    'Challenger': 'Champion (abr_28)',
-}
+    return _RENDER_LABELS['variant'].get(name, name)
 
 
 def _ab_bucket_label(bucket: str) -> str:
-    return _RENDER_LABELS['bucket'].get(bucket) or _AB_BUCKET_LABEL.get(bucket, bucket)
+    return _RENDER_LABELS['bucket'].get(bucket, bucket)
 
 
 # ──────────────────────────────────────────────────────────────────────────
