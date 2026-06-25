@@ -80,12 +80,8 @@ def _bucket_from_adsets(adsets: list) -> str:
 # (utm_campaign) — espelham _CHAMPION_GOALS/_CHALLENGER_GOALS. O gestor tagueia
 # o nome: "DEVLF | ... | 2026-06-04 | LEADQUALIFIED|<id>" (Champion),
 # "... | LEADHQLB|<id>" (Challenger), sem tag = Lead/otimização padrão.
-# DEPRECATED (Frente 2/DT-19): a fonte única passou a ser o YAML
-# (ABTestConfig.campaign_bucket_map, campo campaign_tag/role por variante), injetado
-# via `bucket_map`. Estas frozensets são só FALLBACK quando o mapa não é passado.
-# Remover após 1 ciclo de produção confirmar o caminho config-driven no relatório.
-_CHALLENGER_NAME_TAGS = frozenset({"HQLB"})            # cobre LEADHQLB, HQLB, HQLB_LQ
-_CHAMPION_NAME_TAGS   = frozenset({"LEADQUALIFIED"})   # cobre LeadQualified(HighQuality)
+# As tags por variante vivem no YAML (campos campaign_tag/role) e chegam aqui via
+# bucket_map (ABTestConfig.campaign_bucket_map) — fonte única (Frente 2/DT-19).
 
 
 def bucket_from_utm(utm_campaign, bucket_map=None) -> str:
@@ -100,22 +96,19 @@ def bucket_from_utm(utm_campaign, bucket_map=None) -> str:
     por A/B. A Meta API fica reservada só pro funil/insights (spend/CPL), que
     não tem outra fonte.
 
-    Frente 2 (config-driven): se `bucket_map` for injetado (de
-    ABTestConfig.campaign_bucket_map — fonte única no YAML), as tags vêm de lá.
-    Sem ele, cai nas tags chumbadas abaixo (legado, compat — estrangulamento).
-    Formato do mapa: {'tags': [(TAG_UPPER, bucket), ...], 'fallback': 'Lead'}.
+    `bucket_map` (de ABTestConfig.campaign_bucket_map — fonte única no YAML, campos
+    campaign_tag/role por variante) define tag→balde, na ordem de precedência
+    (challenger antes de champion). Formato: {'tags': [(TAG_UPPER, bucket), ...],
+    'fallback': 'Lead'}. Sem bucket_map, tudo cai em 'Lead' (default seguro) — todos
+    os consumidores de produção (data_quality, app.py) injetam o mapa.
     """
     c = (str(utm_campaign) if utm_campaign is not None else "").upper()
-    if bucket_map:
-        for tag, bucket in bucket_map.get("tags", []):
-            if tag in c:
-                return bucket
-        return bucket_map.get("fallback", "Lead")
-    if any(t in c for t in _CHALLENGER_NAME_TAGS):
-        return "Challenger"
-    if any(t in c for t in _CHAMPION_NAME_TAGS):
-        return "Champion"
-    return "Lead"
+    if not bucket_map:
+        return "Lead"
+    for tag, bucket in bucket_map.get("tags", []):
+        if tag in c:
+            return bucket
+    return bucket_map.get("fallback", "Lead")
 
 
 def classify_campaign_buckets(
