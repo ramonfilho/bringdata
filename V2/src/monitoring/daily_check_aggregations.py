@@ -238,6 +238,102 @@ def compute_variant_cpl_conv(
     return out
 
 
+def compute_google_funnel(
+    campaign_rows: List[Dict[str, Any]],
+    conv_rows: List[Dict[str, Any]],
+    *,
+    our_action_names: tuple,
+    total_google_leads: int | None = None,
+) -> Dict[str, Any]:
+    """Funil Google pro digest — custo/conversão por campanha + CPL agregado.
+
+    Pura: sem I/O. O caller (`api/app.py`) faz os pulls da Google Ads API
+    (cliente `GoogleAdsReportingClient`) + conta os leads `google-ads` do
+    ledger, e passa tudo pronto.
+
+    Decisão de junção:
+      - **por campanha**: spend/cliques (de `campaign_rows`) ⨝ contagem das
+        NOSSAS ações (de `conv_rows`) por `campaign_id`. Confiável — os dois
+        lados vêm da mesma API com o mesmo id.
+      - **CPL**: fica **agregado** (`spend total ÷ total_google_leads`), NÃO
+        por campanha. Casar campanha-Google ↔ `utm_campaign` do ledger é
+        frágil (auto-tagging não popula utm_campaign de forma estável); só o
+        agregado é confiável hoje. CPL por campanha entra quando/se o gclid
+        permitir amarrar lead↔campanha.
+
+    Args:
+        campaign_rows: saída de `get_campaign_metrics` —
+            `{campaign_id, campaign_name, spend, clicks, ...}`.
+        conv_rows: saída de `get_campaign_conversions_by_action` —
+            `{campaign_id, conversion_action_name, all_conversions, ...}`.
+        our_action_names: nomes das NOSSAS ações a destacar por campanha
+            (ex.: `('LeadQualified', 'LeadQualifiedHighQuality')`). Conversões
+            de outras ações (lead form do gestor etc.) são ignoradas aqui.
+        total_google_leads: nº de leads `google-ads` na janela (do ledger).
+            Se None, `cpl_agregado` sai None.
+
+    Returns:
+        dict:
+          - `por_campanha`: list ordenada por spend desc, cada item
+            `{campaign_id, campaign_name, spend, clicks, conv_por_acao}` onde
+            `conv_por_acao` = {nome_acao: contagem} só das nossas ações.
+          - `total_spend`, `total_clicks`
+          - `total_por_acao`: {nome_acao: soma} das nossas ações na conta toda
+          - `n_leads`: total_google_leads (eco)
+          - `cpl_agregado`: total_spend ÷ n_leads (None se n_leads ausente/0)
+    """
+    wanted = set(our_action_names)
+
+    # conversões das NOSSAS ações por campanha
+    conv_by_camp: Dict[str, Dict[str, float]] = {}
+    total_por_acao: Dict[str, float] = {a: 0.0 for a in our_action_names}
+    for r in conv_rows:
+        name = r.get('conversion_action_name')
+        if name not in wanted:
+            continue
+        cid = r.get('campaign_id')
+        cnt = float(r.get('all_conversions') or 0)
+        conv_by_camp.setdefault(cid, {})[name] = (
+            conv_by_camp.setdefault(cid, {}).get(name, 0.0) + cnt
+        )
+        total_por_acao[name] = total_por_acao.get(name, 0.0) + cnt
+
+    por_campanha: List[Dict[str, Any]] = []
+    total_spend = 0.0
+    total_clicks = 0
+    for r in campaign_rows:
+        cid = r.get('campaign_id')
+        spend = float(r.get('spend') or 0)
+        clicks = int(r.get('clicks') or 0)
+        total_spend += spend
+        total_clicks += clicks
+        por_campanha.append({
+            'campaign_id': cid,
+            'campaign_name': r.get('campaign_name'),
+            'spend': round(spend, 2),
+            'clicks': clicks,
+            'conv_por_acao': {
+                k: round(v, 2) for k, v in conv_by_camp.get(cid, {}).items()
+            },
+        })
+
+    por_campanha.sort(key=lambda x: x['spend'], reverse=True)
+
+    cpl_agregado = (
+        round(total_spend / total_google_leads, 2)
+        if total_google_leads else None
+    )
+
+    return {
+        'por_campanha': por_campanha,
+        'total_spend': round(total_spend, 2),
+        'total_clicks': total_clicks,
+        'total_por_acao': {k: round(v, 2) for k, v in total_por_acao.items()},
+        'n_leads': total_google_leads,
+        'cpl_agregado': cpl_agregado,
+    }
+
+
 def compute_stats_window(records: List[LeadRecord]) -> Dict[str, int]:
     """Agregação total/scored/capi_sent/success/error/with_phone numa janela.
 
