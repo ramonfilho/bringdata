@@ -78,8 +78,9 @@ Cada fase roda dual-read (tabela vs API ao vivo) e só vira a chave quando a par
 - [x] **TMB incluído**: `contas_a_receber_09062026_1028.xlsx` (80.077 parcelas → 7.066 pedidos únicos após status+agrupamento). report_type=fechamento (inclusivo; irrelevante pro treino, que filtra status sozinho).
 - [x] **Backfill amplo CONCLUÍDO** (início = period_start do dataset do Champion `jan30` = **2025-03-01**; APIs até hoje; TMB traz recebíveis desde 2022). **Total no `sales`: 13.201** (guru 3.118, tmb 7.066, asaas 1.193, boletex 1.549, hotmart 275). Idempotente (781 do run parcial puladas).
 - [x] **Enriquecimento medido**: 3.017 vendas / **1.455 compradores únicos** em hotmart+asaas+boletex (gateways que o treino não lê). É o TETO recuperável; positivos novos reais = os que também responderam a pesquisa (medir no match).
-- [ ] `SalesRecord` + leitura: treino lê vendas do `sales` (todos os gateways) via repositório, em vez de só Guru+TMB. **← fecha o enriquecimento**
-- [ ] Parity audit: venda do DB == soma dos gateways via API, antes de virar a chave no treino.
+- [x] **Reader** `src/data/sales_reader.py` — lê analytics.sales no shape dos loaders (drop-in pro `df_vendas`; `core/matching.match_leads` não muda). `gateways=['guru','tmb']` reproduz o treino atual. Dedup cross-gateway é irrelevante pro label (match = pertinência), então reader não replica combine_sales. Smoke: todos 13.201 / guru+tmb 10.184 / enriquecimento 3.017.
+- [ ] **Parity audit** (seguro, sem produção): carregar a pesquisa do treino 1x, casar contra vendas velhas (guru+tmb) vs novas (todos) → **positivos novos reais** (não o teto 1.455) + checagem de contaminação (inadimplente). ← próximo
+- [ ] **Gated** (muda o label → protocolo completo): decidir `grau_de_risco` no schema (filtro de risco TMB); apontar `train_pipeline` atrás de flag (composição única, default OFF, rollback = flag off); **retrain + canary** leva o enriquecimento a produção. Apontar o treino ≠ deploy.
 
 ### Fase 3 — Leads (`leads`)
 - Backfill **único** do histórico estático: Sheets backup, Railway antigo (jan–mai), Railway novo (congelado ~28.575).
