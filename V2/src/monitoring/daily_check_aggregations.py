@@ -259,6 +259,108 @@ def compute_variant_cpl_conv(
     return out
 
 
+def compute_google_funnel(
+    campaign_rows: List[Dict[str, Any]],
+    conv_rows: List[Dict[str, Any]],
+    *,
+    action_with_value: str | None = None,
+    action_high_quality: str | None = None,
+    total_google_leads: int | None = None,
+) -> Dict[str, Any]:
+    """Funil Google pro digest — custo/conversão por campanha + CPL agregado.
+
+    Pura: sem I/O. O caller (`api/app.py`) faz os pulls da Google Ads API
+    (cliente `GoogleAdsReportingClient`) + conta os leads `google-ads` do
+    ledger, e passa tudo pronto.
+
+    Chaves por PAPEL, não por nome de ação: `with_value` (= LeadQualified,
+    evento value-weighted) e `high_quality` (= LeadQualifiedHighQuality, só
+    decis altos) — espelha a dualidade base/HQ do CAPI Meta. O nome real de
+    cada ação vem da config do cliente (`event_name_*`); aqui entram como
+    papel. Isso mantém o payload com chaves FIXAS (multi-cliente + sem drift
+    no schema estrito do digest, que falha alto em chave nova).
+
+    Decisão de junção:
+      - **por campanha**: spend/cliques (de `campaign_rows`) ⨝ contagem das
+        NOSSAS ações (de `conv_rows`) por `campaign_id`. Confiável — os dois
+        lados vêm da mesma API com o mesmo id.
+      - **CPL**: fica **agregado** (`spend total ÷ total_google_leads`), NÃO
+        por campanha. Casar campanha-Google ↔ `utm_campaign` do ledger é
+        frágil (auto-tagging não popula utm_campaign de forma estável); só o
+        agregado é confiável hoje. CPL por campanha entra quando/se o gclid
+        permitir amarrar lead↔campanha.
+
+    Args:
+        campaign_rows: saída de `get_campaign_metrics`.
+        conv_rows: saída de `get_campaign_conversions_by_action`.
+        action_with_value: nome da conversion action value-weighted (LeadQualified).
+        action_high_quality: nome da conversion action de decil alto (HQ).
+        total_google_leads: nº de leads `google-ads` na janela (do ledger).
+            Se None, `cpl_agregado` sai None.
+
+    Returns:
+        dict com chaves FIXAS:
+          - `por_campanha`: ordenada por spend desc, cada item
+            `{campaign_id, campaign_name, spend, clicks, conv_with_value,
+            conv_high_quality}`.
+          - `total_spend`, `total_clicks`, `total_with_value`,
+            `total_high_quality`, `n_leads`, `cpl_agregado`.
+    """
+    # conversões das NOSSAS ações por campanha, mapeadas a PAPEL (chave fixa)
+    conv_by_camp: Dict[str, Dict[str, float]] = {}
+    total_wv = 0.0
+    total_hq = 0.0
+    for r in conv_rows:
+        name = r.get('conversion_action_name')
+        cnt = float(r.get('all_conversions') or 0)
+        if action_with_value and name == action_with_value:
+            role = 'conv_with_value'
+            total_wv += cnt
+        elif action_high_quality and name == action_high_quality:
+            role = 'conv_high_quality'
+            total_hq += cnt
+        else:
+            continue  # ação de terceiro (lead form do gestor etc.) — ignora
+        d = conv_by_camp.setdefault(r.get('campaign_id'), {})
+        d[role] = d.get(role, 0.0) + cnt
+
+    por_campanha: List[Dict[str, Any]] = []
+    total_spend = 0.0
+    total_clicks = 0
+    for r in campaign_rows:
+        cid = r.get('campaign_id')
+        spend = float(r.get('spend') or 0)
+        clicks = int(r.get('clicks') or 0)
+        total_spend += spend
+        total_clicks += clicks
+        _cc = conv_by_camp.get(cid, {})
+        por_campanha.append({
+            'campaign_id': cid,
+            'campaign_name': r.get('campaign_name'),
+            'spend': round(spend, 2),
+            'clicks': clicks,
+            'conv_with_value': round(_cc.get('conv_with_value', 0.0), 2),
+            'conv_high_quality': round(_cc.get('conv_high_quality', 0.0), 2),
+        })
+
+    por_campanha.sort(key=lambda x: x['spend'], reverse=True)
+
+    cpl_agregado = (
+        round(total_spend / total_google_leads, 2)
+        if total_google_leads else None
+    )
+
+    return {
+        'por_campanha': por_campanha,
+        'total_spend': round(total_spend, 2),
+        'total_clicks': total_clicks,
+        'total_with_value': round(total_wv, 2),
+        'total_high_quality': round(total_hq, 2),
+        'n_leads': total_google_leads,
+        'cpl_agregado': cpl_agregado,
+    }
+
+
 def compute_stats_window(records: List[LeadRecord]) -> Dict[str, int]:
     """Agregação total/scored/capi_sent/success/error/with_phone numa janela.
 

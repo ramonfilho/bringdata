@@ -3875,6 +3875,49 @@ async def daily_monitoring_check_railway(
         except Exception as _e:
             logger.warning(f"⚠️ Meta Ads metrics indisponível: {_e}")
 
+        # --- Funil Google (LEITURA da Google Ads API) — atrás de flag, isolado ---
+        # Read-only: custo/cliques/conversões por campanha + CPL agregado, pro
+        # bloco "Funil Google" do digest. NÃO toca o envio (Data Manager API,
+        # outro caminho) nem o funil Meta. Janela = mesma 7d de `_records_7d`.
+        # Pré-req em produção: as 5 env vars GOOGLE_ADS_* (developer token + OAuth)
+        # no Cloud Run. Sem elas / token expirado / flag off → só omite o bloco
+        # (log "indisponível"), NUNCA derruba o relatório das 06:00.
+        try:
+            _gcfg = (pipeline._client_config.google_ads
+                     if (pipeline and pipeline._client_config) else None)
+            if _gcfg and getattr(_gcfg, 'reporting_enabled', False) and _gcfg.customer_id:
+                from src.validation.google_ads_api_client import GoogleAdsReportingClient
+                from src.monitoring.daily_check_aggregations import compute_google_funnel
+                _g_start = _fb_d7.strftime('%Y-%m-%d')
+                _g_end = _fb_anchor.strftime('%Y-%m-%d')
+                _our_actions = tuple(
+                    a for a in (_gcfg.event_name_with_value, _gcfg.event_name_high_quality) if a
+                )
+                _g_allow = {s.lower() for s in (_gcfg.source_allowlist or [])}
+                _g_leads = sum(
+                    1 for r in _records_7d if (r.utm_source or '').lower() in _g_allow
+                )
+                _gclient = GoogleAdsReportingClient(_gcfg.customer_id)
+                _g_cmp = _gclient.get_campaign_metrics(_g_start, _g_end)
+                _g_conv = _gclient.get_campaign_conversions_by_action(
+                    _g_start, _g_end, action_names=_our_actions or None,
+                )
+                _g_funnel = compute_google_funnel(
+                    _g_cmp, _g_conv,
+                    action_with_value=_gcfg.event_name_with_value,
+                    action_high_quality=_gcfg.event_name_high_quality,
+                    total_google_leads=_g_leads,
+                )
+                result.setdefault('operational_routines', {})['google_funnel'] = _g_funnel
+                logger.info(
+                    "📊 Funil Google (7d): spend R$ %.0f · %d campanhas · CPL %s · LQ %s · LQHQ %s",
+                    _g_funnel['total_spend'], len(_g_funnel['por_campanha']),
+                    _g_funnel['cpl_agregado'], _g_funnel['total_with_value'],
+                    _g_funnel['total_high_quality'],
+                )
+        except Exception as _gfe:
+            logger.warning(f"⚠️ Funil Google indisponível: {_gfe}")
+
         # Regenerar critical_summary com dados Railway (lead_quality_metrics corretos)
         from src.monitoring.models import Alert as AlertModel
         alerts_objs = [AlertModel.from_dict(a) for a in result['alerts']]

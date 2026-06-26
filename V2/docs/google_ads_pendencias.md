@@ -1,16 +1,16 @@
 # Google Ads — Envio de conversão de lead (status da implementação)
 
-> Criado: 2026-04-14 · Atualizado: 2026-06-22
+> Criado: 2026-04-14 · Atualizado: 2026-06-26
 >
-> Antes se chamava *"Pendências antes de implementar"*. Implementado e **validado ponta a ponta** (sender + despachante no consumer, Fase A+B); falta só o go-live operacional. Este doc rastreia o **status** da frente, mantendo o histórico das decisões.
+> Antes se chamava *"Pendências antes de implementar"*. Hoje o **envio está NO AR em produção** (desde 22/06) e a **leitura de campanhas/dados via API está validada** (26/06). Este doc rastreia o **status** da frente, mantendo o histórico das decisões.
 >
-> Posição no roadmap: **H6 — Diversificação de canais** do `PLANO_EXECUCAO.md` (tese estratégica em `swot_bringdata.md`: modelo único → N canais, sair da concentração 100% Meta). Escopo: **só DevClub**. Código na branch **`feat/google-ads`** (worktree `~/bring_data.worktrees/google-ads`).
+> Posição no roadmap: **H6 — Diversificação de canais** do `PLANO_EXECUCAO.md` (tese estratégica em `swot_bringdata.md`: modelo único → N canais, sair da concentração 100% Meta). Escopo: **só DevClub**. Mergeado na `main` (PR #16); worktree `~/bring_data.worktrees/google-ads` pode ser removida.
 
-## Status atual (2026-06-15)
+## Status atual (2026-06-26)
 
-**O caminho de envio está validado ponta a ponta** contra a API real, em modo `validateOnly` (HTTP 200): autenticação, acesso da service account e a forma do payload — tudo confirmado. **Nenhuma conversão real foi enviada ainda.**
+**Envio NO AR.** O consumer Pub/Sub envia conversão pro Google a cada lead `google-ads` (`google_ads.enabled=true`, allowlist `["google-ads"]`), na revisão Cloud Run `smart-ads-api-00766-gut` (100% do tráfego). Até 26/06: **786 enviados, 2 erros** (~200/dia), todos aceitos pela Data Manager API (HTTP 200, `registros_ml.google_ads_status='sent'`).
 
-Todo o código está **DESLIGADO** (`google_ads.enabled=false`, allowlist vazia → inerte). Não toca o envio Meta que já roda.
+> ⚠️ **Mas o Google atribuiu ZERO conversões em 30 dias** (786 enviados × 0 casados). Não é lag — é **casamento**: ver "gclid virou requisito" abaixo. Confirmado por query de reporting em 26/06.
 
 | Item | Estado |
 |---|---|
@@ -22,7 +22,9 @@ Todo o código está **DESLIGADO** (`google_ads.enabled=false`, allowlist vazia 
 | Forma do payload `events:ingest` confirmada (`validateOnly` 200) | ✅ |
 | Despachante no consumer Pub/Sub (Fase A — canal paralelo, Meta intacto) | ✅ feito |
 | Rastro `google_ads_status` no ledger (Fase B) + migração idempotente | ✅ feito |
-| Go-live operacional (migração → merge → deploy canary → ligar `enabled`) | ⏳ **FALTA** |
+| Go-live operacional (migração → merge → deploy canary → ligar `enabled`) | ✅ feito (22/06, rev `00766-gut`, 100% tráfego) |
+| Leitura de campanhas/dados via Google Ads API (reporting) | ✅ validada (26/06) — ver seção própria abaixo |
+| Atribuição real (Google casar e reportar a conversão) | 🔴 **0/786** — bloqueada por `gclid` (ver abaixo) |
 
 ## Como funciona — decisões fixadas (histórico)
 
@@ -70,10 +72,15 @@ A aplicação pesada ao **developer token Basic** (com revisão de site/modelo d
 
 **Conclusão:** o tier Basic **não é necessário** pra esta frente. Só voltaria a importar se um dia formos usar a Google Ads API legada pra outra coisa em escala (ex.: gerenciar campanhas por API).
 
-### gclid — NÃO é bloqueante (corrige o 🔴 anterior)
-Versões anteriores marcavam a captura de `gclid` como **bloqueante 🔴**, pelo caminho da landing page → schema → tabela `leads_capi`. **Dois motivos derrubam isso:**
-1. O Enhanced Conversions for Leads casa por **email/telefone hasheado** (que o ledger já tem) — `gclid` é opcional, melhora atribuição.
-2. O caminho de captura daquela versão **morreu na migração de 17/05** (landing/`leads_capi` são legado). Hoje a captura é o **front do dono publicando no Pub/Sub → consumer → ledger `registros_ml`**. Quando o `gclid` for incluído, é: front popula no payload do Pub/Sub → coluna `gclid` no `registros_ml` → disponível no disparo. Aditivo e posterior.
+### gclid — VIROU REQUISITO (corrige o "opcional" de 15/06)
+
+> **Correção empírica (2026-06-26).** A teoria dizia que o Enhanced Conversions for Leads casaria **só por email/telefone hasheado**, deixando o `gclid` opcional. **Os dados desmentiram:** 786 conversões enviadas só com hash = **0 casadas** pelo Google em 30 dias. Na prática, pro nosso fluxo, **o `gclid` é o que falta pra atribuir qualquer coisa.**
+
+**Por que o casamento por email não funcionou:** ele só fecha se o **site do DevClub gravar o par email↔clique no momento do formulário** (a tag de Enhanced Conversions for Leads do próprio Google no site). Como deu 0/786, isso **não está acontecendo** — então o único caminho de atribuição que sobra é **mandarmos o `gclid` direto no evento** (`adIdentifiers.gclid`, que o sender `build_event` já sabe preencher; só falta o valor).
+
+**O que fazer (desbloqueio):** front captura o `gclid` da URL de entrada (`?gclid=...` ou cookie `_gcl_*`) e popula no payload do Pub/Sub → vira coluna `gclid` no `registros_ml` → o consumer passa no `build_event`. Depois disso, re-rodar `scripts/probe_google_ads_reporting.py`: se as conversões começarem a aparecer, a atribuição fechou. Se mesmo com `gclid` continuar 0, investigar roteamento da Data Manager API (destino/linkagem da conversion action).
+
+**Consequência operacional:** enquanto o `gclid` não entrar, qualquer campanha que o gestor configure pra otimizar pelo nosso evento (LeadQualified/LeadQualifiedHighQuality) **vê 0 conversão** — o Smart Bidding não tem sinal pra aprender. O evento **está sendo enviado e aceito**, mas a atribuição só liga com o `gclid`.
 
 ## Ponto de integração — o consumer Pub/Sub (corrige "os 4 paths")
 
@@ -103,6 +110,106 @@ O envio Google entra como **canal paralelo** no único ponto de dispatch do cons
 - **Módulo separado por design.** `api/google_ads_integration.py` não se junta com `capi_integration.py` (soldado ao SDK do Facebook). Fala a Data Manager API por REST (`POST /v1/events:ingest`), espelha a interface `send_batch_events` do CAPI. Limites: 2.000 events/request, 300 req/min, 100k req/dia por projeto GCP.
 - **Sem vazamento cross-canal.** Meta usa allowlist `["facebook-ads","instagram"]` e Google usará `["google-ads"]` — leads não sangram pro canal errado.
 - **TikTok Events API** segue o mesmo padrão, depois do Google Ads (também H6).
+
+---
+
+# Leitura de campanhas e dados (reporting) — acesso e integração no monitoramento
+
+> Esta parte é o **espelho de leitura** do que já fazemos com o Meta: hoje puxamos da **Meta Insights API** o spend e os leads por adset pra calcular CPL e popular o monitoramento (camada `src/data/cost_attribution/`, via `src/validation/meta_api_client.py`). Aqui fica **tudo que é preciso pra puxar o equivalente do Google** (custo, cliques, conversões por campanha e por ação) e plugar no mesmo monitoramento. **Validado em 2026-06-26** com o token que já temos — sem precisar do Basic access.
+
+## Duas APIs diferentes — não confundir
+
+| Função | API | Como autentica |
+|---|---|---|
+| **Enviar** evento (já no ar) | **Data Manager API** (`datamanager.googleapis.com/v1/events:ingest`) | service account (App Engine SA via ADC), escopo `datamanager`. **Sem developer token.** |
+| **Ler** relatório (custo, conversão por campanha) | **Google Ads API** (`googleads.googleapis.com`, lib `google-ads` v31) | developer token + OAuth do usuário + `login_customer_id` do MCC |
+
+A leitura usa a **mesma credencial** que criou as conversion actions (`scripts/create_google_ads_conversion_actions.py`) — só que agora pra `SELECT` (GAQL via `GoogleAdsService.search_stream`), não pra mutação.
+
+## Credenciais necessárias (todas já no `V2/.env`)
+
+| Env var | Papel | Valor |
+|---|---|---|
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | token de API (tier Explorer) | (no `.env`) |
+| `GOOGLE_ADS_CLIENT_ID` / `_CLIENT_SECRET` | OAuth client "Desktop app" | (no `.env`) |
+| `GOOGLE_ADS_REFRESH_TOKEN` | refresh token do usuário `ramonfceo@gmail.com` | (no `.env`) |
+| `GOOGLE_ADS_CUSTOMER_ID` | conta DevClub (destino da query) | `6266441811` |
+| `GOOGLE_ADS_LOGIN_CUSTOMER_ID` | MCC BringData (quem autentica) | `6351164315` |
+
+**Nível de acesso — confirmado suficiente.** O `developer token` está no tier **Explorer** (liberado por padrão, sem revisão). Em 26/06 ele **leu relatório da conta de produção sem erro de quota** — ou seja, **não precisa do Basic access** (aquela aplicação com revisão de site que foi recusada) pra um pull diário de baixa frequência. O Basic só voltaria a importar se um dia formos fazer reporting em alto volume.
+
+**Cuidado com o refresh token:** ele **expira/é revogado** (já aconteceu — `invalid_grant`). Pra renovar: `python scripts/google_ads_oauth_refresh_token.py` logado como `ramonfceo@gmail.com` e colar o novo valor em `GOOGLE_ADS_REFRESH_TOKEN` no `.env`.
+
+## Autenticação (padrão reusável)
+
+```python
+from google.ads.googleads.client import GoogleAdsClient
+client = GoogleAdsClient.load_from_dict({
+    "developer_token": os.environ["GOOGLE_ADS_DEVELOPER_TOKEN"],
+    "client_id":       os.environ["GOOGLE_ADS_CLIENT_ID"],
+    "client_secret":   os.environ["GOOGLE_ADS_CLIENT_SECRET"],
+    "refresh_token":   os.environ["GOOGLE_ADS_REFRESH_TOKEN"],
+    "login_customer_id": os.environ["GOOGLE_ADS_LOGIN_CUSTOMER_ID"],  # MCC, só dígitos
+    "use_proto_plus":  True,
+})
+ga = client.get_service("GoogleAdsService")
+for batch in ga.search_stream(customer_id="6266441811", query=GAQL):
+    for row in batch.results:
+        ...
+```
+
+O builder está pronto em `scripts/probe_google_ads_reporting.py::build_client` (importável). Customer da query = DevClub (`6266441811`); login = MCC (`6351164315`).
+
+## Queries GAQL que funcionam (validadas 26/06)
+
+**1) Custo + conversões por campanha** (o "funil Google"):
+```sql
+SELECT campaign.id, campaign.name, campaign.status,
+       metrics.cost_micros, metrics.clicks, metrics.conversions, metrics.all_conversions
+FROM campaign
+WHERE segments.date DURING LAST_7_DAYS AND metrics.cost_micros > 0
+ORDER BY metrics.cost_micros DESC
+```
+`cost_micros / 1_000_000` = valor em BRL.
+
+**2) Conversões quebradas POR ação** (acha LeadQualified / LeadQualifiedHighQuality por campanha):
+```sql
+SELECT segments.conversion_action_name, metrics.all_conversions, metrics.conversions
+FROM customer
+WHERE segments.date DURING LAST_30_DAYS
+```
+
+**3) Status/existência das conversion actions:**
+```sql
+SELECT conversion_action.id, conversion_action.name, conversion_action.status, conversion_action.type
+FROM conversion_action
+WHERE conversion_action.id IN (7649573174, 7649572493)
+```
+
+**4) Quais campanhas otimizam por qual objetivo** (custom goals, account-default, biddable por categoria) — ver `scripts/probe_google_ads_goal_usage.py`.
+
+### Gotchas descobertos
+- O recurso `conversion_action` **rejeita** `metrics.conversions` (`PROHIBITED_METRIC_IN_SELECT_OR_WHERE_CLAUSE`). Pra contar conversão por ação, consultar `FROM customer`/`FROM campaign` segmentado por `segments.conversion_action_name`.
+- `login_customer_id` (MCC) é obrigatório — sem ele a auth falha.
+- Janela canônica exclui o dia corrente (spend intraday flutua) — igual ao refresh do Meta.
+
+## Scripts-semente (probes descartáveis, read-only)
+- `scripts/probe_google_ads_reporting.py` — custo + conversões por campanha e por ação. **Re-rodar este depois que o `gclid` entrar** pra confirmar atribuição.
+- `scripts/probe_google_ads_goal_usage.py` — quais campanhas estão configuradas pra otimizar pelas nossas ações (independe de ter conversão). Em 26/06: custom goal `LQHQ` (id `6458091660`) existe mas **nenhuma campanha linkada**; categoria `QUALIFIED_LEAD` é biddable no account-default mas só **3 campanhas ENABLED** (de venda, `DEV16 | Vendas`) herdam; as de captação que gastam otimizam por outra categoria → **o gestor ainda não plugou o evento em nenhuma campanha de captação**.
+
+## Integração no monitoramento — plano (espelho do funil Meta)
+
+**Onde o Meta vive (modelo a copiar):**
+- `src/validation/meta_api_client.py` — cliente da Meta Insights API (batch, v24.0, filtro `campaign_name contém 'CAP'`).
+- `src/data/cost_attribution/refresh.py` — job que puxa spend+leads da janela móvel e faz UPSERT nas tabelas `cpl_adset` / `ad_to_adset_map` (Railway).
+- `src/data/cost_attribution/` (`cpl_repository.py`, `cpl_lookup.py`, adapters) — camada de acesso; o digest das 06:00 (`src/monitoring/digest.py`) consome dela pra mostrar Spend/CPL por variante.
+
+**O análogo Google (a fazer):**
+1. **Cliente de leitura** `GoogleAdsReportingClient` (semente: as duas probes) — encapsula `build_client` + as queries GAQL acima.
+2. **Job de refresh** que puxa, por campanha, custo + cliques + conversões (inclusive `LeadQualified`/`LeadQualifiedHighQuality`) da janela móvel e grava numa tabela de custo Google (espelho de `cpl_adset`), reusando a **camada `cost_attribution`** (repository/adapters) em vez de um pull bespoke.
+3. **Superfície no monitoramento** — o endpoint que já roda o digest (`api/app.py`, rotas `slack-digest`/`daily-check`) passa a mostrar o bloco "funil Google" (Spend/CPL/conversão por campanha), ao lado do Meta.
+
+**Antes de codar:** isto adiciona **acesso a dados externo + componente novo** → **invocar `/sw-architect`** (regra do `CLAUDE.md`), reusando a abstração de `cost_attribution` (não espalhar query direta de API pelos monitores).
 
 ---
 
