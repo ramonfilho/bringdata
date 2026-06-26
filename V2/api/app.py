@@ -2704,7 +2704,12 @@ async def daily_monitoring_check_railway(
         # crescem junto naturalmente.
         from src.monitoring.daily_check_aggregations import records_to_quality_rows
         _quality_window_start = now_utc - timedelta(days=90)
-        _records_90d = _repo_leads.leads_in_range(
+        # Projeção LEVE: os consumidores de 90d (quality_rows, forecast de decil,
+        # funil de pesquisa, decis por variante) só usam score/decil/data/variante/
+        # status/UTMs — nenhum toca survey/PII. summaries_in_range pula o parse do
+        # JSONB de pesquisa + PII em ~24k linhas, cortando o maior pico de RAM do
+        # relatório. Mesmo conjunto de linhas que leads_in_range.
+        _records_90d = _repo_leads.summaries_in_range(
             _quality_window_start, now_utc, limit=50_000,
         )
         _records_90d_scored = [r for r in _records_90d if r.score is not None and r.decil is not None]
