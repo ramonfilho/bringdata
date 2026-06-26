@@ -296,7 +296,7 @@ def _assert_retraining_decisions_resolved(config_path: str, set_active: bool) ->
     logger.info(f"  [set-active gate] retraining_decisions OK: {decisions}")
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False):
     # Guard: Cloud SQL MLflow precisa estar RUNNABLE. Falha alto se NEVER.
     assert_mlflow_backend_running()
     register_mlflow_cleanup_reminder()
@@ -686,6 +686,16 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
 
     # Parte 1: Unificar colunas de PESQUISA
     df_pesquisa_unificado = _unify_survey(df_pesquisa, client_config.ingestion)
+
+    # === Consolidação Cloud SQL: dumpar a pesquisa carregada → analytics.leads ===
+    # Reusa o carregamento EXATO do treino e grava cada linha como snapshot verbatim
+    # (jsonb) → o reader reconstrói df_pesquisa idêntico (paridade por construção).
+    # Encerra aqui (não treina). É o ETL de pesquisa da Fase 3.
+    if dump_pesquisa_db:
+        from src.data.etl_leads import pesquisa_to_leads
+        _dump = pesquisa_to_leads(df_pesquisa_unificado, source='train_pesquisa')
+        logger.info(f"  [dump-pesquisa-db] {_dump}")
+        return {'status': 'PESQUISA_DUMPED_TO_DB', 'result': _dump}
 
     # Parte 2: Unificar colunas de VENDAS — em db mode as vendas já vêm canônicas
     # do analytics.sales (substituídas na Cell 4), então pula o unify.
@@ -1526,6 +1536,13 @@ if __name__ == "__main__":
         help="Com --sales-source db: limitar a esses gateways (ex: guru tmb reproduz o treino "
              "atual). Default: todos (guru hotmart asaas boletex tmb)."
     )
+    parser.add_argument(
+        '--dump-pesquisa-db',
+        action='store_true',
+        default=False,
+        help="ETL Fase 3: carrega a pesquisa (como o treino) e grava em analytics.leads "
+             "como snapshot jsonb verbatim, depois encerra (não treina)."
+    )
 
     args = parser.parse_args()
 
@@ -1566,4 +1583,5 @@ if __name__ == "__main__":
         export_matched_dataset=args.export_matched_dataset,
         sales_source=args.sales_source,
         sales_gateways=args.sales_gateways,
+        dump_pesquisa_db=args.dump_pesquisa_db,
     )

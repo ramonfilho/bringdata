@@ -90,7 +90,7 @@ tabular pergunta→valor) entram verbatim; ledger (camelCase) passa por
 verbatim → mesmas colunas. **É a parte mais sensível (pesquisa = feature do modelo).**
 
 - [x] `src/data/leads_store.py` — upsert de leads em lote, idempotente (`ON CONFLICT DO NOTHING` pega os 2 índices), pesquisa como jsonb (chaves = perguntas), `_s` robusto a None/NaN/NaT. Smoke verde.
-- [ ] **ETL de leads/pesquisa**: Sheets produção (`load_leads_from_sheets training_mode=True`) + arquivos locais (histórico) + ledger `registros_ml` (recente, via `railway_lead_to_sheets_row`). Plano: re-carregar a pesquisa como o treino carrega → upsert (round-trip identidade).
+- [x] **ETL de pesquisa** `src/data/etl_leads.py` + flag `train_pipeline --dump-pesquisa-db` (reusa o carregamento EXATO do treino → grava cada linha como snapshot jsonb verbatim). Rodado (`--dump-pesquisa-db --sales-source db --no-api-data`): **99.275 linhas** em `analytics.leads` (source=train_pesquisa), 112 filtradas (sem identidade), jsonb com 23 colunas incl. todas as perguntas. Range 2024-12-30→2025-10-21 (arquivos locais; tail recente = rodar sem `--no-api-data` p/ incluir Sheets).
 - [ ] **Reader** `leads` → `df_pesquisa` (jsonb→colunas verbatim).
 - [ ] `train_pipeline --leads-source db` lê a pesquisa do banco; **checagem coluna-a-coluna** contra o caminho de arquivo (correção, não métrica).
 - [ ] Backfill: Sheets backup, Railway antigo (jan–mai), Railway novo (congelado ~28.575) — se/quando precisar do universo completo (validação/monitoramento), não só a pesquisa do treino.
