@@ -191,3 +191,120 @@ def launch_score_geral(lf_name: Optional[str], *, conn=None) -> Optional[Dict[st
                 conn.close()
             except Exception:
                 pass
+
+
+# Mapeia o nível pedido pra coluna física de registros_ml. Whitelist: o nome
+# entra INTERPOLADO na query (nome de coluna não dá pra parametrizar), então
+# nunca aceitar valor fora deste dict (proteção contra injeção).
+_UTM_LEVEL_COL = {
+    'creative': 'utm_content',
+    'campaign': 'utm_campaign',
+}
+
+
+def challenger_quality_by_utm(
+    lf_name: Optional[str],
+    *,
+    level: str,
+    challenger_run_id: str,
+    win_start,
+    win_end,
+    conn=None,
+) -> list:
+    """Qualidade Challenger (pct_d9_d10 + decil médio) por criativo ou campanha
+    no lançamento — `scores_historicos` ⋈ `registros_ml`.
+
+    A `scores_historicos` tem o `decil_challenger` (régua única) mas não guarda
+    UTM; o UTM vem do `registros_ml` (mesmo banco Cloud SQL), juntado por email.
+    Anti fan-out: `DISTINCT ON (email)` pega 1 UTM por lead (o mais recente na
+    janela do LF).
+
+    Filtra `challenger_run_id = :run_id` pra NÃO misturar réguas — o caller passa
+    o run_id do baseline TOP5 (mesmo modelo). Reusa o predicado de decil do
+    `launch_score_geral` ('D09'/'D10' zero-padded).
+
+    Args:
+        lf_name: lançamento. None/'' → [].
+        level: 'creative' (utm_content) ou 'campaign' (utm_campaign).
+        challenger_run_id: run_id do Challenger a casar (= run_id do baseline TOP5).
+        win_start, win_end: janela UTC do LF — limita o `registros_ml` lido e
+            prende o UTM ao período do lançamento (evita pegar UTM de outro LF de
+            um lead recorrente).
+        conn: conexão Cloud SQL opcional (injetada); None → abre e fecha.
+
+    Returns:
+        list[dict] {utm, n, pct_d9_d10, avg_decil}, ordenada por n desc. []
+        quando não há dados / lf|level inválido / falha (degrada silencioso — o
+        relatório só omite a seção vs-TOP5, nunca quebra). min-N e significância
+        ficam na montagem, não aqui (read-model devolve cru).
+    """
+    if not lf_name or not challenger_run_id:
+        return []
+    col = _UTM_LEVEL_COL.get(level)
+    if col is None:
+        logger.warning("[challenger_quality_by_utm] level inválido: %r", level)
+        return []
+
+    own = conn is None
+    if own:
+        try:
+            conn = _cloudsql_conn()
+        except Exception as e:
+            logger.warning("[challenger_quality_by_utm] conexão falhou: %s", e)
+            return []
+    try:
+        sql = (
+            "WITH utm_por_lead AS ("
+            f"  SELECT DISTINCT ON (lower(email)) lower(email) AS email_k, {col} AS utm "
+            "  FROM registros_ml "
+            f"  WHERE {col} IS NOT NULL AND {col} <> '' "
+            "    AND created_at >= :ws AND created_at < :we "
+            "  ORDER BY lower(email), created_at DESC"
+            ") "
+            "SELECT u.utm, COUNT(*) AS n, "
+            "AVG(CASE WHEN s.decil_challenger IN ('D09','D10') THEN 1.0 ELSE 0.0 END) AS pct, "
+            "AVG(CAST(REPLACE(s.decil_challenger,'D','') AS INTEGER)) AS avg_decil "
+            "FROM scores_historicos s "
+            "JOIN utm_por_lead u ON u.email_k = lower(s.email) "
+            "WHERE s.lf = :lf AND s.challenger_run_id = :run_id "
+            "  AND s.decil_challenger IS NOT NULL "
+            "GROUP BY u.utm "
+            "ORDER BY n DESC"
+        )
+        rows = conn.run(sql, lf=lf_name, run_id=challenger_run_id,
+                        ws=win_start, we=win_end)
+        out = [
+            {
+                'utm': r[0],
+                'n': int(r[1]),
+                'pct_d9_d10': round(float(r[2]) * 100, 1),
+                'avg_decil': round(float(r[3]), 2),
+            }
+            for r in rows
+        ]
+        # Fail-loud: há população Challenger pro LF mas o join não casou nenhum
+        # UTM → registros_ml sem UTM na janela, ou chave de email divergindo.
+        if not out:
+            chk = conn.run(
+                "SELECT COUNT(*) FROM scores_historicos "
+                "WHERE lf = :lf AND challenger_run_id = :run_id "
+                "  AND decil_challenger IS NOT NULL",
+                lf=lf_name, run_id=challenger_run_id,
+            )
+            if int(chk[0][0] or 0) > 0:
+                logger.warning(
+                    "[challenger_quality_by_utm] LF=%s tem %s leads na régua mas o "
+                    "join por email não casou nenhum UTM (%s) — registros_ml sem UTM "
+                    "na janela?", lf_name, chk[0][0], level,
+                )
+        return out
+    except Exception as e:
+        logger.warning("[challenger_quality_by_utm] query falhou (lf=%s, level=%s): %s",
+                       lf_name, level, e)
+        return []
+    finally:
+        if own:
+            try:
+                conn.close()
+            except Exception:
+                pass

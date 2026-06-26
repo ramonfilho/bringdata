@@ -193,6 +193,7 @@ class UtmQualityResult:
     challenger_name: str
     ranking: dict    # {split_mode, ranked, worst, best, total_distinct_creatives, qualifying}
     min_volume: int = 20  # N mínimo de leads na janela pra um criativo aparecer
+    challenger_run_id: Optional[str] = None  # run_id do Challenger (p/ casar a barra TOP5)
 
 
 def compute_utm_quality(
@@ -238,6 +239,8 @@ def compute_utm_quality(
         (n for n in variant_names if 'challenger' in n.lower()),
         variant_names[1] if len(variant_names) > 1 else 'challenger',
     )
+    _cv = ab_cfg.variants.get(challenger_name)
+    challenger_run_id = getattr(_cv, 'run_id', None)
 
     win_start, win_end, anchor = start_utc, end_utc, end_utc
     _s_brt, _e_brt = start_utc.astimezone(BRT), end_utc.astimezone(BRT)
@@ -339,7 +342,137 @@ def compute_utm_quality(
         challenger_name=challenger_name,
         ranking=ranking,
         min_volume=min_volume,
+        challenger_run_id=challenger_run_id,
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Comparação vs barra TOP5 ROAS (régua única Challenger, via scores_historicos)
+# ──────────────────────────────────────────────────────────────────────────
+
+def _load_top5_baseline(client_id: str = 'devclub') -> Optional[dict]:
+    """Lê a barra TOP5 ROAS de configs/reference_audience_profiles/{id}_quality_signal.json.
+
+    Devolve {pct_d9_d10 (em %), run_id, pool_label, generated_at} ou None. O
+    pct vem do baseline como fração (0-1) e é convertido pra % aqui, pra casar
+    com o pct_d9_d10 (já em %) do read-model challenger_quality_by_utm.
+    """
+    from pathlib import Path
+    candidates = [
+        Path(f'configs/reference_audience_profiles/{client_id}_quality_signal.json'),
+        Path(__file__).resolve().parents[2] / 'configs' / 'reference_audience_profiles'
+        / f'{client_id}_quality_signal.json',
+    ]
+    for c in candidates:
+        try:
+            if not c.exists():
+                continue
+            with open(c) as f:
+                d = json.load(f)
+            pct = d.get('metrics', {}).get('pct_d9_d10')
+            return {
+                'pct_d9_d10': float(pct) * 100 if pct is not None else None,
+                'run_id': d.get('model', {}).get('run_id'),
+                'pool_label': d.get('reference_pool', {}).get('label', 'Top5 ROAS'),
+                'generated_at': d.get('generated_at'),
+            }
+        except Exception as e:
+            logger.warning('[top5_baseline] erro ao ler %s: %s', c, e)
+    return None
+
+
+def build_top5_comparison(
+    *,
+    lf_name: Optional[str],
+    challenger_run_id: Optional[str],
+    win_start,
+    win_end,
+    client_id: str = 'devclub',
+    min_n: int = 100,
+    conn=None,
+) -> Optional[dict]:
+    """Monta a comparação por criativo e por campanha vs a barra TOP5 ROAS.
+
+    Régua única do Challenger (lê decil_challenger da scores_historicos via
+    challenger_quality_by_utm). Para cada UTM com N ≥ min_n, deriva o Δpp vs a
+    barra e classifica acima/abaixo SÓ quando o Δ supera ~2 erros-padrão (senão
+    'neutro' — evita falso-alarme de amostra pequena).
+
+    Guard de run_id: a barra e o decil gravado têm que ser do MESMO modelo;
+    se divergirem, suprime (régua diferente). Degrada pra None (seção omitida)
+    em qualquer indisponibilidade — nunca quebra o relatório.
+    """
+    import math
+
+    baseline = _load_top5_baseline(client_id)
+    if not baseline or baseline.get('pct_d9_d10') is None:
+        logger.info('[top5] baseline indisponível — seção vs-TOP5 omitida.')
+        return None
+    bar = baseline['pct_d9_d10']
+
+    if (baseline.get('run_id') and challenger_run_id
+            and baseline['run_id'] != challenger_run_id):
+        logger.warning(
+            '[top5] suprimido: baseline run_id %s ≠ challenger ativo %s — régua '
+            'diferente, regenerar baseline.', baseline['run_id'], challenger_run_id)
+        return None
+
+    from src.data.scores_historicos import challenger_quality_by_utm, _cloudsql_conn
+
+    own = conn is None
+    if own:
+        try:
+            conn = _cloudsql_conn()
+        except Exception as e:
+            logger.warning('[top5] conexão Cloud SQL falhou: %s', e)
+            return None
+
+    def _enrich(rows):
+        shown, hidden = [], 0
+        for e in rows:
+            if e['n'] < min_n:
+                hidden += 1
+                continue
+            p = e['pct_d9_d10'] / 100.0
+            se_pp = math.sqrt(max(p * (1 - p), 0.0) / e['n']) * 100 if e['n'] else None
+            delta = e['pct_d9_d10'] - bar
+            if se_pp is not None and abs(delta) > 2 * se_pp:
+                status = 'acima' if delta > 0 else 'abaixo'
+            else:
+                status = 'neutro'
+            shown.append({
+                **e,
+                'delta_pp': round(delta, 1),
+                'se_pp': round(se_pp, 1) if se_pp is not None else None,
+                'status': status,
+            })
+        return shown, hidden
+
+    try:
+        out = {
+            'bar_pct': round(bar, 1),
+            'pool_label': baseline['pool_label'],
+            'generated_at': baseline.get('generated_at'),
+            'min_n': min_n,
+            'levels': {},
+        }
+        for level in ('creative', 'campaign'):
+            rows = challenger_quality_by_utm(
+                lf_name, level=level, challenger_run_id=challenger_run_id,
+                win_start=win_start, win_end=win_end, conn=conn,
+            )
+            shown, hidden = _enrich(rows)
+            out['levels'][level] = {'rows': shown, 'hidden_below_min_n': hidden}
+    finally:
+        if own:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    if not any(out['levels'][lv]['rows'] for lv in out['levels']):
+        return None
+    return out
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -416,7 +549,56 @@ def _mini_table_block(entry: dict, lf_label: str, marker: str, win_row_label: st
     return {'type': 'section', 'text': {'type': 'mrkdwn', 'text': text}}
 
 
-def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
+_TOP5_MARK = {'acima': '🟢', 'abaixo': '🔴', 'neutro': '⚪'}
+_TOP5_LEVEL_LABEL = {'creative': 'Criativos', 'campaign': 'Campanhas'}
+
+
+def _render_top5_section(top5: dict) -> List[dict]:
+    """Seção Slack 'vs padrão TOP5 ROAS' — leitura ABSOLUTA (acima/abaixo da
+    barra), separada do ranking relativo. Régua única do Challenger."""
+    blocks: List[dict] = [{'type': 'divider'}, {
+        'type': 'header',
+        'text': {'type': 'plain_text', 'text': 'vs padrão TOP5 ROAS (régua Challenger)'},
+    }]
+    bar = top5['bar_pct']
+    pool = top5.get('pool_label') or 'Top5 ROAS'
+    gen = (top5.get('generated_at') or '')[:10] or '?'
+    min_n = top5.get('min_n')
+    blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': (
+        f"Barra = *{bar:.0f}%* em D9–D10 — qualidade *prevista* pelo Challenger das "
+        f"audiências dos melhores lançamentos ({pool}, de {gen}); não é conversão "
+        f"real. 🟢 acima · 🔴 abaixo · ⚪ dentro do ruído · só N ≥ {min_n}."
+    )}]})
+    CAP = 20
+    for level in ('creative', 'campaign'):
+        lv = top5['levels'].get(level) or {}
+        rows = lv.get('rows') or []
+        if not rows:
+            continue
+        rows_sorted = sorted(rows, key=lambda e: e['pct_d9_d10'], reverse=True)
+        extra = max(0, len(rows_sorted) - CAP)
+        lines = []
+        for e in rows_sorted[:CAP]:
+            mark = _TOP5_MARK.get(e['status'], '⚪')
+            name = _display_creative(e) if level == 'creative' else (e.get('utm') or 'sem_utm')
+            sign = '+' if e['delta_pp'] >= 0 else ''
+            lines.append(
+                f"{mark} *{name}* — {e['pct_d9_d10']:.0f}% D9-D10 "
+                f"({sign}{e['delta_pp']:.0f}pp · n={e['n']})"
+            )
+        txt = f"*{_TOP5_LEVEL_LABEL[level]}*\n" + "\n".join(lines)
+        notes = []
+        if extra:
+            notes.append(f"+{extra} não listados")
+        if lv.get('hidden_below_min_n'):
+            notes.append(f"{lv['hidden_below_min_n']} abaixo de N≥{min_n} ocultos")
+        if notes:
+            txt += f"\n_{' · '.join(notes)}_"
+        blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': txt}})
+    return blocks
+
+
+def render_slack_blocks(r: UtmQualityResult, top5: Optional[dict] = None) -> List[dict]:
     """
     Só criativo (ad). Mini-tabela alinhada (janela vs LF) por criativo.
 
@@ -476,6 +658,8 @@ def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
             'elements': [{'type': 'mrkdwn',
                           'text': f'_nenhum criativo com volume mínimo na janela ({win_label})._'}],
         })
+        if top5:
+            blocks.extend(_render_top5_section(top5))
         return blocks
 
     if split_mode == 'single':
@@ -504,6 +688,8 @@ def render_slack_blocks(r: UtmQualityResult) -> List[dict]:
         for e in best:
             blocks.append(_mini_table_block(e, lf_label, '🟢', row_label))
 
+    if top5:
+        blocks.extend(_render_top5_section(top5))
     return blocks
 
 
