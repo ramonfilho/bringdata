@@ -645,6 +645,11 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     if leads_source == 'db':
         from src.data.leads_reader import read_pesquisa
         df_pesquisa = read_pesquisa()
+        # 'Data' vem como ISO no jsonb (inequívoco) → parsear SEM dayfirst. Com
+        # dayfirst=True (o default da validação) o pandas infere formato errado na
+        # precisão mista (Sheets tem hora) e coage a maioria a NaT.
+        if 'Data' in df_pesquisa.columns:
+            df_pesquisa['Data'] = pd.to_datetime(df_pesquisa['Data'], errors='coerce')
         assert len(df_pesquisa) > 0, "[leads_source=db] analytics.leads retornou 0 linhas de pesquisa"
         logger.info(f"  [leads_source=db] {len(df_pesquisa):,} linhas de pesquisa do analytics.leads "
                     f"— substitui arquivos/Sheets")
