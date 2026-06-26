@@ -349,6 +349,7 @@ class GoogleAdsConfig:
     source_allowlist: Optional[List[str]] = None               # utm_source RAW que vão pro Google (ex: ["google-ads"]); vazio/None = nada enviado
     currency: Optional[str] = None                             # moeda do value (ex: BRL)
     sa_secret: Optional[str] = None                            # referência ao Secret da service account (NOME, não o valor)
+    reporting_enabled: bool = False                            # LEITURA (funil Google no digest) — independente do envio; default off
 
 
 # ---------------------------------------------------------------------------
