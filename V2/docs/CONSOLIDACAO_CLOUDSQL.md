@@ -82,11 +82,18 @@ Cada fase roda dual-read (tabela vs API ao vivo) e só vira a chave quando a par
 - [x] **`train_pipeline` lê vendas do DB** (`--sales-source db`, default `files` = rollback). Injeta `analytics.sales` no `df_vendas` pré-validação; pula `unify_sales` + Cell 5.3 (já filtrado no ETL; exige `tmb_risk_filter` all|none) e mantém produto nulo na 5.4 (gateways de boleto). **Sanity verde end-to-end:** 13.201 vendas do DB → match → 79.296 leads / 1.349 positivos, dataset exportado. `core/matching` e demais cells intactos.
 - [ ] **Gated** (muda o label → protocolo completo): se quiser `tmb_risk_filter` low/low_medium, adicionar `grau_de_risco` ao schema+ETL; **retrain + canary** leva o modelo enriquecido a produção. Apontar o treino ≠ deploy.
 
-### Fase 3 — Leads (`leads`)
-- Backfill **único** do histórico estático: Sheets backup, Railway antigo (jan–mai), Railway novo (congelado ~28.575).
-- Ongoing (sob demanda): ledger `registros_ml` (live) + Sheets produção.
-- Treino e validação leem leads pelo repositório.
-- Parity audit coluna-a-coluna contra o pull atual.
+### Fase 3 — Leads/pesquisa (`leads`) ◐ EM ANDAMENTO (26/06)
+**Design (lossless, paridade por construção):** `leads.survey_responses` é jsonb com
+**chaves = os textos das perguntas** (nomes canônicos do treino). Sheets/arquivos (já
+tabular pergunta→valor) entram verbatim; ledger (camelCase) passa por
+`api/railway_mapping.railway_lead_to_sheets_row` antes. Treino lê jsonb→DataFrame
+verbatim → mesmas colunas. **É a parte mais sensível (pesquisa = feature do modelo).**
+
+- [x] `src/data/leads_store.py` — upsert de leads em lote, idempotente (`ON CONFLICT DO NOTHING` pega os 2 índices), pesquisa como jsonb (chaves = perguntas), `_s` robusto a None/NaN/NaT. Smoke verde.
+- [ ] **ETL de leads/pesquisa**: Sheets produção (`load_leads_from_sheets training_mode=True`) + arquivos locais (histórico) + ledger `registros_ml` (recente, via `railway_lead_to_sheets_row`). Plano: re-carregar a pesquisa como o treino carrega → upsert (round-trip identidade).
+- [ ] **Reader** `leads` → `df_pesquisa` (jsonb→colunas verbatim).
+- [ ] `train_pipeline --leads-source db` lê a pesquisa do banco; **checagem coluna-a-coluna** contra o caminho de arquivo (correção, não métrica).
+- [ ] Backfill: Sheets backup, Railway antigo (jan–mai), Railway novo (congelado ~28.575) — se/quando precisar do universo completo (validação/monitoramento), não só a pesquisa do treino.
 
 ### Fase 4 — Feature store de verdade (TRAVADA)
 - Só depois de point-in-time provado: materializar features via o *mesmo* `src/core/`, com parity audit como gate de promoção.
