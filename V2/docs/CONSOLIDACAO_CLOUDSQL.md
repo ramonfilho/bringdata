@@ -91,9 +91,10 @@ verbatim → mesmas colunas. **É a parte mais sensível (pesquisa = feature do 
 
 - [x] `src/data/leads_store.py` — upsert de leads em lote, idempotente (`ON CONFLICT DO NOTHING` pega os 2 índices), pesquisa como jsonb (chaves = perguntas), `_s` robusto a None/NaN/NaT. Smoke verde.
 - [x] **ETL de pesquisa** `src/data/etl_leads.py` + flag `train_pipeline --dump-pesquisa-db` (reusa o carregamento EXATO do treino → grava cada linha como snapshot jsonb verbatim). Rodado (`--dump-pesquisa-db --sales-source db --no-api-data`): **99.275 linhas** em `analytics.leads` (source=train_pesquisa), 112 filtradas (sem identidade), jsonb com 23 colunas incl. todas as perguntas. Range 2024-12-30→2025-10-21 (arquivos locais; tail recente = rodar sem `--no-api-data` p/ incluir Sheets).
-- [ ] **Reader** `leads` → `df_pesquisa` (jsonb→colunas verbatim).
-- [ ] `train_pipeline --leads-source db` lê a pesquisa do banco; **checagem coluna-a-coluna** contra o caminho de arquivo (correção, não métrica).
-- [ ] Backfill: Sheets backup, Railway antigo (jan–mai), Railway novo (congelado ~28.575) — se/quando precisar do universo completo (validação/monitoramento), não só a pesquisa do treino.
+- [x] **Reader** `src/data/leads_reader.read_pesquisa` — reconstrói `df_pesquisa` do snapshot jsonb verbatim (99.387 × 23 col).
+- [x] **`train_pipeline --leads-source db`** (default `files` = rollback) — injeta a pesquisa reconstruída pré-validação, pula unify. `event_id`=hash do conteúdo (nada dropado por falta de identidade); `Data` normalizada a datetime no dump (evita formato misto no jsonb).
+- [x] **PARITY EXATA** (arquivo vs DB): 79.296 linhas / target 1.349 idênticos, **19/19 colunas de feature 100% iguais**. Classe do bug Medium eliminada.
+- Nota: o snapshot atual cobre os arquivos locais (2024-12→2025-10, `--no-api-data`). Pro tail recente, rodar `--dump-pesquisa-db` sem `--no-api-data` (inclui Sheets). Backfill do universo completo (Railway/Client/VIP, p/ validação/monitoramento) fica p/ quando precisar — não é necessário pro treino.
 
 ### Fase 4 — Feature store de verdade (TRAVADA)
 - Só depois de point-in-time provado: materializar features via o *mesmo* `src/core/`, com parity audit como gate de promoção.
