@@ -608,6 +608,36 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info(f"  Dataset Vendas: {len(df_vendas):,} registros, {len(df_vendas.columns)} colunas")
     logger.info("")
 
+    # === Consolidação Cloud SQL: substituir vendas dos arquivos pelo analytics.sales ===
+    # sales_source='db' troca a FONTE das vendas pelo banco (todos os gateways já
+    # consolidados), no shape canônico (email/telefone/data/produto/status/valor/
+    # origem) → validação de ingestão, Cell 5.1 e o match (core/matching) seguem
+    # idênticos. Substituído aqui (pré-validação) pois as vendas de arquivo seriam
+    # descartadas. Rollback: sales_source='files' (default).
+    if sales_source == 'db':
+        if tmb_risk_filter not in ('all', 'none'):
+            raise ValueError(
+                f"sales_source='db' só suporta tmb_risk_filter all|none por ora — o filtro de "
+                f"risco TMB precisa de 'Grau de risco', ainda não no analytics.sales. "
+                f"Recebi tmb_risk_filter={tmb_risk_filter!r}."
+            )
+        from src.data.sales_reader import read_sales
+        _db = read_sales(gateways=sales_gateways)
+        df_vendas = pd.DataFrame({
+            'email':          _db['email'],
+            'telefone':       _db['telefone'],
+            'nome':           _db['nome'],
+            'valor':          _db['sale_value'],
+            'produto':        _db['product_name'],
+            'data':           pd.to_datetime(_db['sale_date'], errors='coerce', utc=True).dt.tz_localize(None),
+            'status':         _db['status'],
+            'origem':         _db['origem'],
+            'arquivo_origem': _db['origem'],
+        })
+        assert len(df_vendas) > 0, "[sales_source=db] analytics.sales retornou 0 vendas"
+        logger.info(f"  [sales_source=db] {len(df_vendas):,} vendas do analytics.sales "
+                    f"(gateways={sales_gateways or 'todos'}) — substitui arquivos/API")
+
     # === VALIDAÇÃO DE INGESTÃO (pós-Célula 4) ===
     val_ingestion = validate_ingestion(df_pesquisa, df_vendas, client_config.validation)
     val_ingestion.log("validate_ingestion")
@@ -657,37 +687,12 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     # Parte 1: Unificar colunas de PESQUISA
     df_pesquisa_unificado = _unify_survey(df_pesquisa, client_config.ingestion)
 
-    # Parte 2: Unificar colunas de VENDAS
-    df_vendas_unificado = _unify_sales(df_vendas, client_config.ingestion)
-
-    # === Consolidação Cloud SQL: ler vendas do analytics.sales em vez dos arquivos ===
-    # sales_source='db' troca a FONTE das vendas pelo banco (todos os gateways já
-    # consolidados), mantendo o shape canônico (email/telefone/data/produto/status/
-    # valor/origem) → os Cells 5.1/5.4 e o match (core/matching) seguem idênticos.
-    # Rollback: sales_source='files' (default).
+    # Parte 2: Unificar colunas de VENDAS — em db mode as vendas já vêm canônicas
+    # do analytics.sales (substituídas na Cell 4), então pula o unify.
     if sales_source == 'db':
-        if tmb_risk_filter not in ('all', 'none'):
-            raise ValueError(
-                f"sales_source='db' só suporta tmb_risk_filter all|none por ora — o filtro "
-                f"de risco TMB precisa de 'Grau de risco', que ainda não está no analytics.sales. "
-                f"Recebi tmb_risk_filter={tmb_risk_filter!r}."
-            )
-        from src.data.sales_reader import read_sales
-        _db = read_sales(gateways=sales_gateways)
-        df_vendas_unificado = pd.DataFrame({
-            'email':          _db['email'],
-            'telefone':       _db['telefone'],
-            'nome':           _db['nome'],
-            'valor':          _db['sale_value'],
-            'produto':        _db['product_name'],
-            'data':           pd.to_datetime(_db['sale_date'], errors='coerce', utc=True).dt.tz_localize(None),
-            'status':         _db['status'],
-            'origem':         _db['origem'],
-            'arquivo_origem': _db['origem'],
-        })
-        assert len(df_vendas_unificado) > 0, "[sales_source=db] analytics.sales retornou 0 vendas"
-        logger.info(f"  [sales_source=db] {len(df_vendas_unificado):,} vendas do analytics.sales "
-                    f"(gateways={sales_gateways or 'todos'}) — substitui arquivos/API")
+        df_vendas_unificado = df_vendas
+    else:
+        df_vendas_unificado = _unify_sales(df_vendas, client_config.ingestion)
 
     logger.info("=" * 80)
     # === CÉLULA 5.1: Filtro temporal ===
