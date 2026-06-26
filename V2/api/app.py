@@ -2675,15 +2675,28 @@ async def daily_monitoring_check_railway(
             from src.monitoring.daily_check_aggregations import compute_survey_response_rate
             _rr_days = 7
             _rr_start_utc = (_uf_today_mid - timedelta(days=_rr_days)).astimezone(_tz.utc)
-            _rr_resp = _repo_leads.leads_in_range(_rr_start_utc, _uf_e)
+            # Respostas: e-mails que responderam, de _rr_start até AGORA (não _uf_e =
+            # 00:00 BRT de hoje). Crucial pra coorte: a resposta do lead de ontem chega
+            # de madrugada/manhã de hoje; cortar na meia-noite perderia essa cauda e
+            # reintroduziria a distorção que estamos corrigindo.
+            _rr_end_utc = datetime.now(_tz.utc)
+            _rr_resp = _repo_leads.leads_in_range(_rr_start_utc, _rr_end_utc, limit=50_000)
+            # Cadastros por dia BRT de cadastro, com e-mail normalizado (lower/trim) —
+            # coorte por dia de cadastro, não por hora de processamento da resposta.
+            # Acesso ao Client mora aqui por ser schema-específico do Railway.
             _cad_rows = railway_conn.run(
-                'SELECT (("createdAt" - interval \'3 hours\')::date)::text AS d, COUNT(*) '
-                'FROM "Client" WHERE "createdAt" >= :s AND "createdAt" < :e GROUP BY 1',
+                'SELECT (("createdAt" - interval \'3 hours\')::date)::text AS d, '
+                'lower(trim("email")) AS e '
+                'FROM "Client" WHERE "createdAt" >= :s AND "createdAt" < :e '
+                'AND "email" IS NOT NULL',
                 s=_rr_start_utc, e=_uf_e,
             )
-            _cad_by_day = {r[0]: int(r[1]) for r in _cad_rows}
+            _cad_emails_by_day = {}
+            for _d, _e in _cad_rows:
+                if _e:
+                    _cad_emails_by_day.setdefault(_d, []).append(_e)
             survey_response_rate = compute_survey_response_rate(
-                _rr_resp, _cad_by_day, today_brt_mid=_uf_today_mid, days=_rr_days,
+                _rr_resp, _cad_emails_by_day, today_brt_mid=_uf_today_mid, days=_rr_days,
             )
             if survey_response_rate:
                 logger.info(
@@ -2704,7 +2717,12 @@ async def daily_monitoring_check_railway(
         # crescem junto naturalmente.
         from src.monitoring.daily_check_aggregations import records_to_quality_rows
         _quality_window_start = now_utc - timedelta(days=90)
-        _records_90d = _repo_leads.leads_in_range(
+        # Projeção LEVE: os consumidores de 90d (quality_rows, forecast de decil,
+        # funil de pesquisa, decis por variante) só usam score/decil/data/variante/
+        # status/UTMs — nenhum toca survey/PII. summaries_in_range pula o parse do
+        # JSONB de pesquisa + PII em ~24k linhas, cortando o maior pico de RAM do
+        # relatório. Mesmo conjunto de linhas que leads_in_range.
+        _records_90d = _repo_leads.summaries_in_range(
             _quality_window_start, now_utc, limit=50_000,
         )
         _records_90d_scored = [r for r in _records_90d if r.score is not None and r.decil is not None]
@@ -3170,6 +3188,9 @@ async def daily_monitoring_check_railway(
         # funil/insights (spend/CPL). Mantém filtro Meta-source (allowlist CAPI) —
         # Google/orgânico ficam só nas linhas de fonte (Total/Meta/Google).
         from src.monitoring.campaign_classifier import bucket_from_utm as _bucket_from_utm
+        # Frente 2: tag→balde derivado do YAML (fonte única); None → classificador usa legado.
+        _abc_og = getattr(pipeline, '_ab_test_config', None) if pipeline else None
+        _ab_bucket_map_og = _abc_og.campaign_bucket_map() if (_abc_og and _abc_og.enabled) else None
         _allow_capi = (pipeline._client_config.capi.utm_source_allowlist
                        if pipeline and pipeline._client_config and pipeline._client_config.capi
                        else None) or []
@@ -3197,7 +3218,7 @@ async def daily_monitoring_check_railway(
                 src = (rec.utm_source or '').strip().lower()
                 if src not in _META_SOURCES_OG:
                     continue
-                bucket = _bucket_from_utm(rec.utm_campaign)
+                bucket = _bucket_from_utm(rec.utm_campaign, _ab_bucket_map_og)
                 key = f'D{int(rec.decil):02d}'
                 if key in dists[bucket]:
                     dists[bucket][key] += 1

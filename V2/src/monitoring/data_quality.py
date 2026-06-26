@@ -1143,6 +1143,26 @@ class DataQualityMonitor:
         return alerts
 
     def _iter_active_variants(self):
+        """Devolve as variantes ativas (Champion + Challengers) materializadas e
+        cacheadas UMA vez por instância do monitor.
+
+        Antes este método era o gerador que relia os modelos do disco a cada
+        chamada; como os 5 checks de drift/features iteram sobre ele, o mesmo
+        Champion + Challenger eram desserializados ~5× por relatório (custo de
+        RAM/CPU desnecessário). Agora o carregamento real vive em
+        `_load_active_variants()` e roda só na primeira chamada; as demais
+        reusam a lista. Os modelos são imutáveis dentro do processo (bakeados na
+        imagem Docker — troca de modelo = novo deploy = novo processo), então o
+        cache nunca fica velho. Contrato idêntico ao anterior: um iterável de
+        tuplas (variant_name, predictor, effective_encoding).
+        """
+        cache = getattr(self, '_active_variants_cache', None)
+        if cache is None:
+            cache = list(self._load_active_variants())
+            self._active_variants_cache = cache
+        return cache
+
+    def _load_active_variants(self):
         """
         Yields (variant_name, predictor, effective_encoding) para cada modelo
         "ativo" que recebe tráfego em produção:
@@ -2589,6 +2609,21 @@ class DataQualityMonitor:
                 return 'Google'
             return 'Outros'
 
+        # Frente 2: mapa tag→balde derivado do YAML (ABTestConfig.campaign_bucket_map) —
+        # fonte única, substitui as tags chumbadas em campaign_classifier. None → o
+        # classificador cai no legado hardcoded (compat / estrangulamento).
+        _ab_bucket_map = None
+        try:
+            from core.client_config import ABTestConfig as _ABTestConfig
+            import os as _os_bm
+            _bm_path = _os_bm.path.abspath(_os_bm.path.join(
+                _os_bm.path.dirname(__file__), '..', '..', 'configs', 'active_models',
+                f'{self.client_config.client_id}.yaml',
+            ))
+            _ab_bucket_map = _ABTestConfig.from_active_model_yaml(_bm_path).campaign_bucket_map()
+        except Exception as _e_bm:
+            logger.debug(f"  monitoring: campaign_bucket_map indisponível ({_e_bm}) — classificador usa legado")
+
         def _split_df_by_variant(df: pd.DataFrame) -> Dict[str, pd.DataFrame]:
             """Divide df em buckets pra a tabela "Drift por A/B", pela TAG de
             optimization_goal no NOME da campanha (utm_campaign) — NÃO mais via
@@ -2638,7 +2673,7 @@ class DataQualityMonitor:
                 return base
             buckets = {'Lead': [], 'Champion': [], 'Challenger': []}
             for i, row in df_meta.iterrows():
-                buckets[_bucket_from_utm(row.get('campaign'))].append(i)
+                buckets[_bucket_from_utm(row.get('campaign'), _ab_bucket_map)].append(i)
             base['Lead']       = df_meta.loc[buckets['Lead']]       if buckets['Lead']       else empty
             base['Champion']   = df_meta.loc[buckets['Champion']]   if buckets['Champion']   else empty
             base['Challenger'] = df_meta.loc[buckets['Challenger']] if buckets['Challenger'] else empty

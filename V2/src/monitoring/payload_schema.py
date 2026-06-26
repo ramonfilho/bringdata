@@ -624,6 +624,8 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'operational_routines.ab_variants[].routing_active':                                (R, None),  # ex: False
     'operational_routines.ab_variants[].routing_desc':                                  (R, None),  # ex: 'default (não match)'
     'operational_routines.ab_variants[].run_id':                                        (S, 'ruído visual'),
+    'operational_routines.ab_variants[].role':                                          (R, None),  # Frente 2 — 'champion'|'challenger' (fonte dos rótulos)
+    'operational_routines.ab_variants[].display_name':                                  (R, None),  # Frente 2 — rótulo de exibição do relatório
     'operational_routines.active_model_yaml_path':                                      (S, 'debug interno, não pro relatório'),
     'operational_routines.active_run_id':                                               (S, 'redundante com lista de variants'),
     'operational_routines.capi_sent_24h':                                               (S, 'não renderizado standalone'),
@@ -1023,6 +1025,7 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'training_drift_24h_summary.batches_com_drift':                                     (R, None),
     'training_drift_24h_summary.total_observacoes':                                     (R, None),
     'training_drift_24h_summary.observacao':                                            (R, None),
+    'training_drift_24h_summary.suppressed_features':                                   (R, None),  # PR #19 — nº de features só reduzidas (ruído), suprimidas
     'training_drift_24h_summary.top_features':                                          (R, None),  # ex: list até 5
     'training_drift_24h_summary.top_features[].feature':                                (R, None),
     'training_drift_24h_summary.top_features[].obs_media':                              (R, None),

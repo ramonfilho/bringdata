@@ -35,6 +35,16 @@ class LeadRepository(Protocol):
         """Leads no intervalo [start, end). Range máximo: 90 dias."""
         ...
 
+    def summaries_in_range(
+        self, start: datetime, end: datetime, limit: int = DEFAULT_LIMIT,
+    ) -> list[LeadRecord]:
+        """Como `leads_in_range`, mas projeção LEVE: `LeadRecord` só com
+        score/decil/variante/UTMs/status_envio. Campos pesados (survey_responses,
+        PII) ficam None — não são lidos. Mesmo conjunto de linhas que
+        `leads_in_range`. Pra agregações de monitoramento que não tocam
+        survey/PII e precisam carregar janelas longas (ex.: 90d) sem o peso."""
+        ...
+
     def get_by_event_id(self, event_id: str) -> Optional[LeadRecord]:
         """Um lead pelo event_id. Devolve None se não existir.
 

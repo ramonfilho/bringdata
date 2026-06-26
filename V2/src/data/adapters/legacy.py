@@ -70,6 +70,12 @@ class LegacyAdapter:
             limit_value=limit, start=start, end=end, lim=limit,
         )
 
+    def summaries_in_range(self, start: datetime, end: datetime, limit: int = 10_000) -> list[LeadRecord]:
+        # Legacy é histórico e fora do caminho de 90d em produção (lê do ledger
+        # novo). Delega à carga cheia pra honrar o contrato — sem ganho de
+        # projeção aqui, mas o volume legado não justifica otimizar.
+        return self.leads_in_range(start, end, limit)
+
     def get_by_event_id(self, event_id: str) -> Optional[LeadRecord]:
         # Convenção do adaptador: event_id da Lead antiga é `legacy-{id}`.
         # Despack pra consultar a tabela pelo id numérico real.

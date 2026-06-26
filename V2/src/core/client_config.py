@@ -521,6 +521,14 @@ class ABTestVariantConfig:
                                              # de decil (D1_D5/D6_D9/D10) DESTA variante, pro revenue_forecast
                                              # ML-aware. None → usa business.conversion_rate_benchmark
                                              # (default/Champion). Estrutura: {periodo_referencia, D1_D5, D6_D9, D10}.
+    # --- Frente 2 (config-driven): metadado pro MONITORAMENTO. INERTE pro roteamento
+    # (match_variant só usa utm_pattern/url_pattern). Fonte única do classificador de
+    # campanha + rótulos do relatório, em vez de tags/labels chumbados no código. ---
+    role: Optional[str] = None           # 'champion' | 'challenger' — papel da variante (balde A/B).
+    campaign_tag: Optional[str] = None   # tag de optimization_goal no NOME da campanha (substring,
+                                         # ex.: 'HQLB', 'LEADQUALIFIED'). É o que o classificador de
+                                         # campanha (monitoramento) casa — independe do utm_pattern (routing).
+    display_name: Optional[str] = None   # nome de exibição no relatório (ex.: 'Champion (abr_28)').
 
 
 @dataclass
@@ -596,6 +604,9 @@ class ABTestConfig:
                 calibrated_run_id=vdata.get("calibrated_run_id"),
                 roas_v1=roas_v1,
                 conversion_rate_benchmark=vdata.get("conversion_rate_benchmark"),
+                role=vdata.get("role"),
+                campaign_tag=vdata.get("campaign_tag"),
+                display_name=vdata.get("display_name"),
             )
         return cls(enabled=True, variants=variants)
 
@@ -623,6 +634,41 @@ class ABTestConfig:
             if variant.url_pattern and url and variant.url_pattern.lower() in url:
                 return variant
         return None
+
+    def campaign_bucket_map(self) -> Optional[Dict[str, Any]]:
+        """Frente 2 — mapa derivado pro MONITORAMENTO: como a tag no nome da campanha
+        (utm_campaign) vira balde A/B (Lead/Champion/Challenger) + o rótulo de exibição
+        de cada balde. Fonte única = as variantes do YAML (campos role/campaign_tag/
+        display_name), substituindo as tags/labels chumbados em campaign_classifier.py
+        e digest.py.
+
+        Retorna None se nenhuma variante declarar role+campaign_tag — aí o classificador
+        de campanha CAI no comportamento legado (hardcoded), preservando compatibilidade
+        (estrangulamento: legado vivo até todas as variantes migrarem).
+
+        Contrato (chaves de balde 'Lead'/'Champion'/'Challenger' INALTERADAS — os
+        consumidores de drift/decis não quebram):
+            {'tags':     [(TAG_UPPER, bucket), ...],   # precedência: challenger antes de champion
+             'display':  {bucket: display_name, ...},  # inclui 'Lead'
+             'fallback': 'Lead'}
+        """
+        tagged = [
+            (v.campaign_tag, (v.role or "").lower(), v.display_name)
+            for v in self.variants.values()
+            if v.campaign_tag and v.role
+        ]
+        if not tagged:
+            return None
+        bucket_of = {"champion": "Champion", "challenger": "Challenger"}
+        # Precedência challenger > champion (idêntica ao classificador legado).
+        order = {"challenger": 0, "champion": 1}
+        tagged.sort(key=lambda t: order.get(t[1], 9))
+        tags = [(tag.upper(), bucket_of.get(role, role.capitalize())) for tag, role, _ in tagged]
+        display: Dict[str, str] = {"Lead": "Lead"}
+        for tag, role, dn in tagged:
+            b = bucket_of.get(role, role.capitalize())
+            display[b] = dn or b
+        return {"tags": tags, "display": display, "fallback": "Lead"}
 
 
 # ---------------------------------------------------------------------------
