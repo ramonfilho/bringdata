@@ -148,9 +148,16 @@ CREATE TABLE IF NOT EXISTS sales (
 );
 
 -- Mesma transação do mesmo gateway não duplica no backfill/refresh.
+-- Caso 1: gateway expõe id de transação → dedup por ele.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_sales_gateway_external
     ON sales (client_id, gateway, external_id)
     WHERE external_id IS NOT NULL;
+-- Caso 2: loaders atuais NÃO expõem id → chave natural (gateway+email+data+valor).
+-- Arbiter do ON CONFLICT DO NOTHING do ETL: re-pull não duplica; ingested_at fica
+-- no "primeiro visto" (preserva o timing do label).
+CREATE UNIQUE INDEX IF NOT EXISTS uq_sales_natural
+    ON sales (client_id, gateway, email, sale_date, sale_value)
+    WHERE external_id IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_sales_email     ON sales (client_id, email);
 CREATE INDEX IF NOT EXISTS idx_sales_phone     ON sales (client_id, phone);

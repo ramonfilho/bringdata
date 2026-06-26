@@ -68,11 +68,14 @@ Cada fase roda dual-read (tabela vs API ao vivo) e só vira a chave quando a par
 - **`meta_insights` ADIADO (decisão 25/06):** a feature de gasto/CPL não se provou útil por ora. A tabela fica criada e **vazia**; se precisar, populamos depois **retroativamente com script separado**. Nenhum loader Meta grava nela agora.
 - Arquivo `.xlsx` continua como export sob demanda.
 
-### Fase 2 — Vendas (`sales`) — **habilita o enriquecimento de compradores**
-- ETL dos gateways (loaders do `data_loader` viram readers do ETL): guru, hotmart, asaas, boletex, hotpay, tmb.
-- `SalesRecord` + `SalesRepository`.
-- Treino passa a ler vendas pelo repositório (todos os gateways) em vez de só Guru+TMB.
-- Parity audit: venda do DB == soma dos gateways via API.
+### Fase 2 — Vendas (`sales`) ◐ EM ANDAMENTO (26/06) — **habilita o enriquecimento de compradores**
+- [x] Índice natural `uq_sales_natural` (gateway+email+data+valor) — arbiter do ON CONFLICT (loaders não expõem id de transação).
+- [x] `src/validation/sales_store.py` — upsert idempotente; grava **por gateway** (sem dedup cross-gateway, isso é leitura); só valor cru (`sale_value_realizado` fica pra leitura/`src/core`). Resultado expõe inserted/skipped/**filtered** (não dropa em silêncio).
+- [x] `src/validation/etl_sales.py` — orquestrador + CLI: puxa guru/hotmart/asaas/boletex (API) + tmb/hotpay (arquivo) e faz upsert. Um gateway fora não derruba o resto.
+- [x] Smoke do upsert (sintético): inserção + idempotência (2ª vez insere 0) + linha sem data filtrada visível. Verde.
+- [ ] **Rodar o ETL real** numa janela (puxa as APIs dos gateways — precisa de creds/janela; pede go).
+- [ ] `SalesRecord` + leitura: treino lê vendas do `sales` (todos os gateways) via repositório, em vez de só Guru+TMB. **← é o enriquecimento**
+- [ ] Parity audit: venda do DB == soma dos gateways via API, antes de virar a chave no treino.
 
 ### Fase 3 — Leads (`leads`)
 - Backfill **único** do histórico estático: Sheets backup, Railway antigo (jan–mai), Railway novo (congelado ~28.575).
