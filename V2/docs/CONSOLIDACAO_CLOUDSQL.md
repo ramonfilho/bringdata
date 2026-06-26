@@ -73,8 +73,10 @@ Cada fase roda dual-read (tabela vs API ao vivo) e só vira a chave quando a par
 - [x] `src/validation/sales_store.py` — upsert idempotente; grava **por gateway** (sem dedup cross-gateway, isso é leitura); só valor cru (`sale_value_realizado` fica pra leitura/`src/core`). Resultado expõe inserted/skipped/**filtered** (não dropa em silêncio).
 - [x] `src/validation/etl_sales.py` — orquestrador + CLI: puxa guru/hotmart/asaas/boletex (API) + tmb/hotpay (arquivo) e faz upsert. Um gateway fora não derruba o resto.
 - [x] Smoke do upsert (sintético): inserção + idempotência (2ª vez insere 0) + linha sem data filtrada visível. Verde.
-- [ ] **Rodar o ETL real** numa janela (puxa as APIs dos gateways — precisa de creds/janela; pede go).
-- [ ] `SalesRecord` + leitura: treino lê vendas do `sales` (todos os gateways) via repositório, em vez de só Guru+TMB. **← é o enriquecimento**
+- [x] **ETL real rodado** (26/05–25/06, só APIs): **297 vendas** — guru 124, hotmart 24, asaas 61, boletex 88. Todas com email, 0 erro. **173 vêm de gateways que o treino hoje NÃO lê** (hotmart/asaas/boletex) — só num mês = o enriquecimento, concreto. (asaas/boletex têm `sale_value` baixo = valor por parcela; agregação/realizado é transform de leitura.)
+- [ ] **TMB**: arquivo confirmado `contas_a_receber_09062026_1028.xlsx` (78 MB; único que casa Pedido+Parcela+Grau de risco). Aguarda go + `--report-type`.
+- [ ] **Backfill amplo** (janela que o treino usa) depois de validada a janela recente.
+- [ ] `SalesRecord` + leitura: treino lê vendas do `sales` (todos os gateways) via repositório, em vez de só Guru+TMB. **← fecha o enriquecimento**
 - [ ] Parity audit: venda do DB == soma dos gateways via API, antes de virar a chave no treino.
 
 ### Fase 3 — Leads (`leads`)
