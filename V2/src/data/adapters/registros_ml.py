@@ -63,6 +63,19 @@ class RegistrosMLAdapter:
         'user_agent', 'ip', 'has_computer',
     )
 
+    # Projeção LEVE pras agregações de monitoramento (séries de qualidade,
+    # forecast de decil, funil de pesquisa). Só os campos que essas seções
+    # leem; pula `survey_responses` (JSONB parseado linha a linha) e PII.
+    # Na carga de 90 dias do daily-check (~24k linhas) isso corta o maior
+    # pico de RAM + 24k parses de JSON. Ordem fixa — `_row_to_summary` depende
+    # dela. Mesmo conjunto de LINHAS que `_COLUMNS` (sem filtro), menos colunas.
+    _SUMMARY_COLUMNS = (
+        'event_id', 'email', 'created_at', 'base_status',
+        'decil', 'lead_score', 'variant',
+        'utm_source', 'utm_medium', 'utm_campaign',
+        'utm_content', 'utm_term', 'utm_url',
+    )
+
     def __init__(self, railway_conn):
         """`railway_conn`: conexão `pg8000.native.Connection` aberta pro Railway."""
         self.conn = railway_conn
@@ -89,6 +102,34 @@ class RegistrosMLAdapter:
             'ORDER BY created_at DESC LIMIT :lim',
             limit_value=limit, start=start, end=end, lim=limit,
         )
+
+    def summaries_in_range(
+        self, start: datetime, end: datetime, limit: int = 10_000,
+    ) -> list[LeadRecord]:
+        """Como `leads_in_range`, mas projeção leve: devolve `LeadRecord` só com
+        score/decil/variante/UTMs/status_envio. Campos pesados (survey_responses,
+        PII) ficam None — não são lidos do banco nem parseados. Mesmo conjunto de
+        linhas que `leads_in_range` (sem filtro de scored). Pra agregações que
+        não tocam survey/PII (daily-check 90d)."""
+        _validate_range(start, end)
+        sql = (
+            f"SELECT {', '.join(self._SUMMARY_COLUMNS)} "
+            f"FROM registros_ml "
+            f"WHERE created_at >= :start AND created_at < :end "
+            f"ORDER BY created_at DESC LIMIT :lim"
+        )
+        rows = self.conn.run(sql, start=start, end=end, lim=limit)
+        records = [self._row_to_summary(r) for r in rows]
+        logger.info(
+            "[registros_ml_adapter] summaries_in_range: %d leads (projeção leve)",
+            len(records),
+        )
+        if len(records) >= limit:
+            logger.warning(
+                "[registros_ml_adapter] summaries_in_range bateu no limite de %d "
+                "linhas — resultado possivelmente truncado", limit
+            )
+        return records
 
     def get_by_event_id(self, event_id: str) -> Optional[LeadRecord]:
         records = self._fetch(
@@ -149,6 +190,31 @@ class RegistrosMLAdapter:
             user_agent=user_agent,
             ip=ip,
             has_computer=has_computer,
+        )
+
+    @staticmethod
+    def _row_to_summary(row: Any) -> LeadRecord:
+        """Mapeia uma linha da projeção `_SUMMARY_COLUMNS` pra LeadRecord leve.
+        Sem `_parse_survey` — survey/PII ficam None (não foram selecionados)."""
+        (event_id, email, created_at, base_status,
+         decil, lead_score, variant,
+         utm_source, utm_medium, utm_campaign,
+         utm_content, utm_term, utm_url) = row
+        return LeadRecord(
+            event_id=event_id,
+            email=email,
+            criado_em=created_at,
+            status_envio=_STATUS_MAP.get(base_status, base_status),
+            decil=int(decil) if decil is not None else None,
+            score=float(lead_score) if lead_score is not None else None,
+            variant=variant,
+            utm_source=utm_source,
+            utm_medium=utm_medium,
+            utm_campaign=utm_campaign,
+            utm_content=utm_content,
+            utm_term=utm_term,
+            utm_url=utm_url,
+            # survey_responses, PII, capi_*, erro ficam None (projeção leve).
         )
 
 
