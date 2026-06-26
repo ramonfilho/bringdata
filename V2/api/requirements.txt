@@ -38,6 +38,11 @@ google-auth-httplib2==0.2.0
 google-api-python-client==2.110.0
 gspread==5.12.3
 
+# Google Ads API — LEITURA (funil Google no digest). Sem isto a imagem não tem
+# `google.ads` e o funil degrada em runtime ("No module named 'google.ads'").
+# Py3.10: exige protobuf>=4.25 (compatível; bump p/ protobuf 5 só em >=3.13).
+google-ads==31.0.0
+
 # BigQuery
 google-cloud-bigquery==3.14.1
 
