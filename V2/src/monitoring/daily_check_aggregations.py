@@ -242,7 +242,8 @@ def compute_google_funnel(
     campaign_rows: List[Dict[str, Any]],
     conv_rows: List[Dict[str, Any]],
     *,
-    our_action_names: tuple,
+    action_with_value: str | None = None,
+    action_high_quality: str | None = None,
     total_google_leads: int | None = None,
 ) -> Dict[str, Any]:
     """Funil Google pro digest — custo/conversão por campanha + CPL agregado.
@@ -250,6 +251,13 @@ def compute_google_funnel(
     Pura: sem I/O. O caller (`api/app.py`) faz os pulls da Google Ads API
     (cliente `GoogleAdsReportingClient`) + conta os leads `google-ads` do
     ledger, e passa tudo pronto.
+
+    Chaves por PAPEL, não por nome de ação: `with_value` (= LeadQualified,
+    evento value-weighted) e `high_quality` (= LeadQualifiedHighQuality, só
+    decis altos) — espelha a dualidade base/HQ do CAPI Meta. O nome real de
+    cada ação vem da config do cliente (`event_name_*`); aqui entram como
+    papel. Isso mantém o payload com chaves FIXAS (multi-cliente + sem drift
+    no schema estrito do digest, que falha alto em chave nova).
 
     Decisão de junção:
       - **por campanha**: spend/cliques (de `campaign_rows`) ⨝ contagem das
@@ -262,41 +270,38 @@ def compute_google_funnel(
         permitir amarrar lead↔campanha.
 
     Args:
-        campaign_rows: saída de `get_campaign_metrics` —
-            `{campaign_id, campaign_name, spend, clicks, ...}`.
-        conv_rows: saída de `get_campaign_conversions_by_action` —
-            `{campaign_id, conversion_action_name, all_conversions, ...}`.
-        our_action_names: nomes das NOSSAS ações a destacar por campanha
-            (ex.: `('LeadQualified', 'LeadQualifiedHighQuality')`). Conversões
-            de outras ações (lead form do gestor etc.) são ignoradas aqui.
+        campaign_rows: saída de `get_campaign_metrics`.
+        conv_rows: saída de `get_campaign_conversions_by_action`.
+        action_with_value: nome da conversion action value-weighted (LeadQualified).
+        action_high_quality: nome da conversion action de decil alto (HQ).
         total_google_leads: nº de leads `google-ads` na janela (do ledger).
             Se None, `cpl_agregado` sai None.
 
     Returns:
-        dict:
-          - `por_campanha`: list ordenada por spend desc, cada item
-            `{campaign_id, campaign_name, spend, clicks, conv_por_acao}` onde
-            `conv_por_acao` = {nome_acao: contagem} só das nossas ações.
-          - `total_spend`, `total_clicks`
-          - `total_por_acao`: {nome_acao: soma} das nossas ações na conta toda
-          - `n_leads`: total_google_leads (eco)
-          - `cpl_agregado`: total_spend ÷ n_leads (None se n_leads ausente/0)
+        dict com chaves FIXAS:
+          - `por_campanha`: ordenada por spend desc, cada item
+            `{campaign_id, campaign_name, spend, clicks, conv_with_value,
+            conv_high_quality}`.
+          - `total_spend`, `total_clicks`, `total_with_value`,
+            `total_high_quality`, `n_leads`, `cpl_agregado`.
     """
-    wanted = set(our_action_names)
-
-    # conversões das NOSSAS ações por campanha
+    # conversões das NOSSAS ações por campanha, mapeadas a PAPEL (chave fixa)
     conv_by_camp: Dict[str, Dict[str, float]] = {}
-    total_por_acao: Dict[str, float] = {a: 0.0 for a in our_action_names}
+    total_wv = 0.0
+    total_hq = 0.0
     for r in conv_rows:
         name = r.get('conversion_action_name')
-        if name not in wanted:
-            continue
-        cid = r.get('campaign_id')
         cnt = float(r.get('all_conversions') or 0)
-        conv_by_camp.setdefault(cid, {})[name] = (
-            conv_by_camp.setdefault(cid, {}).get(name, 0.0) + cnt
-        )
-        total_por_acao[name] = total_por_acao.get(name, 0.0) + cnt
+        if action_with_value and name == action_with_value:
+            role = 'conv_with_value'
+            total_wv += cnt
+        elif action_high_quality and name == action_high_quality:
+            role = 'conv_high_quality'
+            total_hq += cnt
+        else:
+            continue  # ação de terceiro (lead form do gestor etc.) — ignora
+        d = conv_by_camp.setdefault(r.get('campaign_id'), {})
+        d[role] = d.get(role, 0.0) + cnt
 
     por_campanha: List[Dict[str, Any]] = []
     total_spend = 0.0
@@ -307,14 +312,14 @@ def compute_google_funnel(
         clicks = int(r.get('clicks') or 0)
         total_spend += spend
         total_clicks += clicks
+        _cc = conv_by_camp.get(cid, {})
         por_campanha.append({
             'campaign_id': cid,
             'campaign_name': r.get('campaign_name'),
             'spend': round(spend, 2),
             'clicks': clicks,
-            'conv_por_acao': {
-                k: round(v, 2) for k, v in conv_by_camp.get(cid, {}).items()
-            },
+            'conv_with_value': round(_cc.get('conv_with_value', 0.0), 2),
+            'conv_high_quality': round(_cc.get('conv_high_quality', 0.0), 2),
         })
 
     por_campanha.sort(key=lambda x: x['spend'], reverse=True)
@@ -328,7 +333,8 @@ def compute_google_funnel(
         'por_campanha': por_campanha,
         'total_spend': round(total_spend, 2),
         'total_clicks': total_clicks,
-        'total_por_acao': {k: round(v, 2) for k, v in total_por_acao.items()},
+        'total_with_value': round(total_wv, 2),
+        'total_high_quality': round(total_hq, 2),
         'n_leads': total_google_leads,
         'cpl_agregado': cpl_agregado,
     }

@@ -132,6 +132,7 @@ def extract_view(payload: dict, *, audit: bool = True) -> dict:
         'revenue_forecast':  payload.get('revenue_forecast', {}) or {},
         'traffic':           payload.get('traffic_metrics', {}) or {},
         'ab_test':           op,
+        'google_funnel':     op.get('google_funnel') or {},
         'critical_summary':  payload.get('critical_summary', ''),
         'skipped':           get_skipped_summary(payload),
         # Resolução da janela do LF atual; consumido só pelo aviso de fallback no DM.
@@ -845,6 +846,7 @@ def render_slack_blocks(view: dict) -> list[dict]:
     _slack_alerts(view, blocks, include_audience_drift=False)
     blocks.append({'type': 'divider'})
     _slack_unified_funnel(view, blocks)
+    _slack_google_funnel(view, blocks)
     _slack_survey_response_rate(view, blocks)
     blocks.append({'type': 'divider'})
     _slack_lead_quality(view, blocks)
@@ -1699,6 +1701,51 @@ def _slack_unified_funnel(v: dict, B: list):
         "_Anúncio = Meta Insights (Google Ads não tem ad-data aqui · não passa pelo pixel/leads_capi). "
         "Pipeline = todas as fontes · fb = facebook-ads/ig/fb · ggl = google-ads · outr = resto. "
         f"leads_capi na janela: 7d={_n(r7,'n'):.0f} · 3d={_n(r3,'n'):.0f} · 1d={_n(r1,'n'):.0f}_"
+    )}]})
+
+
+def _slack_google_funnel(v: dict, B: list):
+    """Funil Google (leitura da Google Ads API) — custo/cliques por campanha,
+    CPL agregado (spend ÷ leads google do ledger) e contagem das NOSSAS ações
+    de conversão (LeadQualified/LeadQualifiedHighQuality) por campanha.
+
+    No-op se o funil veio ausente: flag `reporting_enabled` off, sem credencial
+    GOOGLE_ADS_* em produção, ou o pull falhou (o handler em app.py degrada e
+    não anexa `google_funnel`). Custo/cliques são reais; as conversões das
+    nossas ações só sobem quando o Google casar o evento (depende do gclid)."""
+    g = v.get('google_funnel') or {}
+    camps = g.get('por_campanha') or []
+    if not camps and not g.get('total_spend'):
+        return
+
+    def _rs(x):
+        return (f"R$ {x:,.0f}".replace(',', '.')) if x is not None else "R$ —"
+
+    def _cpl(x):
+        return (f"R$ {x:.2f}".replace('.', ',')) if x is not None else "R$ —"
+
+    def _conv_str(wv, hq):
+        return f"LQ {wv:.0f} · LQHQ {hq:.0f}"
+
+    _clicks = f"{int(g.get('total_clicks') or 0):,}".replace(',', '.')
+    lines = [
+        f"Spend total     {_rs(g.get('total_spend')):>12}",
+        f"Cliques         {_clicks:>12}",
+        f"CPL (agregado)  {_cpl(g.get('cpl_agregado')):>12}   ({int(g.get('n_leads') or 0)} leads google)",
+        f"Nossas conv     {_conv_str(g.get('total_with_value') or 0, g.get('total_high_quality') or 0)}",
+        "── Top campanhas (por spend) ──",
+    ]
+    for c in camps[:8]:
+        nm = (c.get('campaign_name') or '?')[:42]
+        _cs = _conv_str(c.get('conv_with_value') or 0, c.get('conv_high_quality') or 0)
+        lines.append(f"{nm:<42} {_rs(c.get('spend')):>10} · {_cs}")
+
+    B.append({'type': 'section', 'text': {'type': 'mrkdwn',
+        'text': (f"*🟦 Funil Google*  ·  _últimos 7 dias · Google Ads API_\n"
+                 f"```\n" + "\n".join(lines) + "\n```")}})
+    B.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': (
+        "_Custo/cliques reais. Conversões das NOSSAS ações (LQ/LQHQ) só sobem quando o Google "
+        "casar o evento — depende do gclid no payload. CPL = spend ÷ leads google do ledger (agregado)._"
     )}]})
 
 

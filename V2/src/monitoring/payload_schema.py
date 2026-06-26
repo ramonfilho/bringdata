@@ -648,6 +648,23 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'operational_routines.spend_nonml_24h_brl':                                         (R, None),  # ex: 7291.33 — adsets otimizando evento Lead padrão
     'operational_routines.minutes_since_last_score':                                    (S, 'debug interno; último scoring não renderizado'),
 
+    # Funil Google (leitura da Google Ads API) — bloco "🟦 Funil Google" no digest.
+    # Chaves FIXAS por papel (with_value/high_quality) pra não driftar o schema.
+    'operational_routines.google_funnel':                                               (R, None),  # ex: dict — custo/conv por campanha (7d)
+    'operational_routines.google_funnel.por_campanha':                                  (R, None),  # ex: list ordenada por spend desc
+    'operational_routines.google_funnel.por_campanha[].campaign_id':                    (R, None),  # ex: '6266...'
+    'operational_routines.google_funnel.por_campanha[].campaign_name':                  (R, None),  # ex: 'DEVLF | CAP | ...'
+    'operational_routines.google_funnel.por_campanha[].spend':                          (R, None),  # ex: 4730.06 (BRL)
+    'operational_routines.google_funnel.por_campanha[].clicks':                         (R, None),  # ex: 2411
+    'operational_routines.google_funnel.por_campanha[].conv_with_value':                (R, None),  # ex: 0.0 — LeadQualified casadas
+    'operational_routines.google_funnel.por_campanha[].conv_high_quality':              (R, None),  # ex: 0.0 — LeadQualifiedHighQuality casadas
+    'operational_routines.google_funnel.total_spend':                                   (R, None),  # ex: 12000.0 (BRL)
+    'operational_routines.google_funnel.total_clicks':                                  (R, None),  # ex: 6000
+    'operational_routines.google_funnel.total_with_value':                              (R, None),  # ex: 0.0
+    'operational_routines.google_funnel.total_high_quality':                            (R, None),  # ex: 0.0
+    'operational_routines.google_funnel.n_leads':                                       (R, None),  # ex: 786 — leads google-ads no ledger (denominador CPL)
+    'operational_routines.google_funnel.cpl_agregado':                                  (R, None),  # ex: 15.27 (None se n_leads=0)
+
     # ──────────────────────────────────────────────────────────────────────────
     # LAUNCH_RESOLUTION — fonte da janela do LF atual (src.core.launches)
     # ──────────────────────────────────────────────────────────────────────────

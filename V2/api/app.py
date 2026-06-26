@@ -3883,14 +3883,16 @@ async def daily_monitoring_check_railway(
                 )
                 _g_funnel = compute_google_funnel(
                     _g_cmp, _g_conv,
-                    our_action_names=_our_actions,
+                    action_with_value=_gcfg.event_name_with_value,
+                    action_high_quality=_gcfg.event_name_high_quality,
                     total_google_leads=_g_leads,
                 )
                 result.setdefault('operational_routines', {})['google_funnel'] = _g_funnel
                 logger.info(
-                    "📊 Funil Google (7d): spend R$ %.0f · %d campanhas · CPL %s · nossas conv %s",
+                    "📊 Funil Google (7d): spend R$ %.0f · %d campanhas · CPL %s · LQ %s · LQHQ %s",
                     _g_funnel['total_spend'], len(_g_funnel['por_campanha']),
-                    _g_funnel['cpl_agregado'], _g_funnel['total_por_acao'],
+                    _g_funnel['cpl_agregado'], _g_funnel['total_with_value'],
+                    _g_funnel['total_high_quality'],
                 )
         except Exception as _gfe:
             logger.warning(f"⚠️ Funil Google indisponível: {_gfe}")
