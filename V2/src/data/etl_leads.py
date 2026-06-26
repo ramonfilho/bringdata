@@ -14,6 +14,8 @@ pesquisa já carregada pelo pipeline e encerra — reuso do carregamento exato).
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import math
 from typing import Optional
@@ -23,6 +25,14 @@ import pandas as pd
 from src.data.leads_store import upsert_leads
 
 logger = logging.getLogger(__name__)
+
+
+def _row_hash(d: dict) -> str:
+    """Hash estável do conteúdo da linha — vira event_id sintético pra que NENHUMA
+    linha de pesquisa seja dropada por falta de email/telefone (o treino mantém
+    esses leads como negativos). Linhas idênticas colapsam (dedup correto)."""
+    blob = json.dumps(d, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.md5(blob.encode("utf-8")).hexdigest()
 
 
 def _jsonsafe(v):
@@ -76,12 +86,26 @@ def pesquisa_to_leads(df_pesquisa: pd.DataFrame, source: str = "train_pesquisa",
         logger.warning("[etl_leads] df_pesquisa vazio — nada a gravar")
         return {"attempted": 0, "inserted": 0, "skipped": 0, "filtered": 0}
 
+    df_pesquisa = df_pesquisa.copy()
+    # 'Data' no df do treino é object MISTO (Timestamp + string). Serializar misto
+    # vira formato misto no jsonb e o pd.to_datetime downstream coerce a maioria a
+    # NaT. Parsear aqui (mesmo dayfirst do pipeline) dá ISO uniforme → reconstrução
+    # parseável e data parseada IDÊNTICA (o pipeline parseia 'Data' de qualquer jeito).
+    if "Data" in df_pesquisa.columns:
+        df_pesquisa["Data"] = pd.to_datetime(
+            df_pesquisa["Data"], errors="coerce", dayfirst=True
+        )
+
     out = pd.DataFrame(index=df_pesquisa.index)
     out["email"] = df_pesquisa.apply(lambda r: _first(r, _EMAIL_ALIASES), axis=1)
     out["telefone"] = df_pesquisa.apply(lambda r: _first(r, _PHONE_ALIASES), axis=1)
     out["data_captura"] = df_pesquisa.apply(lambda r: _first(r, _DATA_ALIASES), axis=1)
     out["campaign"] = df_pesquisa.apply(lambda r: _first(r, _CAMPAIGN_ALIASES), axis=1)
-    out["survey_responses"] = [_row_to_clean_dict(r) for _, r in df_pesquisa.iterrows()]
+    survey = [_row_to_clean_dict(r) for _, r in df_pesquisa.iterrows()]
+    out["survey_responses"] = survey
+    # event_id = hash do conteúdo → toda linha tem chave (nada dropado por falta de
+    # email/telefone) e o dedup (uq_leads_source_event) fica uniforme.
+    out["event_id"] = [_row_hash(d) for d in survey]
 
     res = upsert_leads(out, source=source, client_id=client_id)
     logger.info("[etl_leads] pesquisa→leads (source=%s): %s", source, res)
