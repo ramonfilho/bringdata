@@ -59,29 +59,77 @@ def _dt(x) -> Optional[str]:
         return None
 
 
-_INSERT = """
-INSERT INTO sales
-  (client_id, gateway, email, phone, nome, sale_value, sale_date, produto, status)
-VALUES
-  (:client_id, :gateway, :email, :phone, :nome, :sale_value,
-   CAST(:sale_date AS timestamptz), :produto, :status)
-ON CONFLICT (client_id, gateway, email, sale_date, sale_value) WHERE external_id IS NULL
-DO NOTHING
-"""
+# Colunas gravadas (na ordem). external_id e sale_value_realizado ficam NULL
+# (loaders não expõem id; realizado é transform de leitura).
+_COLS = ("client_id", "gateway", "email", "phone", "nome",
+         "sale_value", "sale_date", "produto", "status")
 
 
-def upsert_sales(df: pd.DataFrame, client_id: str = "devclub", conn=None) -> dict:
-    """Grava as vendas do DataFrame em analytics.sales (idempotente).
+def _row_params(r, client_id: str):
+    """Normaliza uma linha do loader → dict pronto pra gravar, ou None se a linha
+    não tem gateway/data/identidade (não dá pra dedup → descartada)."""
+    gw = _s(r.get("origem")) or _s(r.get("gateway"))
+    sale_date = _dt(r.get("sale_date"))
+    email = _s(r.get("email"))
+    phone = _s(r.get("telefone"))
+    if not gw or not sale_date or not (email or phone):
+        return None
+    return {
+        "client_id": client_id, "gateway": gw, "email": email, "phone": phone,
+        "nome": _s(r.get("nome")), "sale_value": _f(r.get("sale_value")),
+        "sale_date": sale_date, "produto": _s(r.get("product_name")),
+        "status": _s(r.get("status")),
+    }
 
-    Retorna {attempted, inserted, skipped, filtered, by_gateway}.
-      - inserted: linhas novas gravadas.
-      - skipped:  já existiam (ON CONFLICT na chave natural).
-      - filtered: descartadas ANTES de tentar (sem gateway/data/identidade) —
-                  exposto de propósito pra não dropar em silêncio.
+
+def _insert_chunk(conn, chunk) -> None:
+    """INSERT multi-row de um lote (1 round-trip), ON CONFLICT DO NOTHING."""
+    values, params = [], {}
+    for i, p in enumerate(chunk):
+        cells = []
+        for col in _COLS:
+            key = f"{col}_{i}"
+            params[key] = p[col]
+            cells.append(f"CAST(:{key} AS timestamptz)" if col == "sale_date" else f":{key}")
+        values.append("(" + ", ".join(cells) + ")")
+    sql = (
+        f"INSERT INTO sales ({', '.join(_COLS)}) VALUES " + ", ".join(values)
+        + " ON CONFLICT (client_id, gateway, email, sale_date, sale_value)"
+        + " WHERE external_id IS NULL DO NOTHING"
+    )
+    conn.run(sql, **params)
+
+
+def upsert_sales(df: pd.DataFrame, client_id: str = "devclub", conn=None,
+                 batch_size: int = 500) -> dict:
+    """Grava as vendas do DataFrame em analytics.sales (idempotente, em lote).
+
+    Retorna {attempted, inserted, skipped, filtered, intra_dup, by_gateway}.
+      - inserted:  linhas novas gravadas.
+      - skipped:   já existiam (ON CONFLICT na chave natural).
+      - filtered:  descartadas ANTES de tentar (sem gateway/data/identidade).
+      - intra_dup: mesma chave natural repetida no próprio lote (deduplicada
+                   pra não conflitar dentro do mesmo INSERT).
+    Tudo exposto de propósito — não dropa em silêncio.
     """
-    empty = {"attempted": 0, "inserted": 0, "skipped": 0, "filtered": 0, "by_gateway": {}}
+    empty = {"attempted": 0, "inserted": 0, "skipped": 0, "filtered": 0,
+             "intra_dup": 0, "by_gateway": {}}
     if df is None or getattr(df, "empty", True):
         return empty
+
+    rows, filtered, intra_dup, seen, by_gw = [], 0, 0, set(), {}
+    for _, r in df.iterrows():
+        p = _row_params(r, client_id)
+        if p is None:
+            filtered += 1
+            continue
+        key = (p["gateway"], p["email"], p["sale_date"], p["sale_value"])
+        if key in seen:
+            intra_dup += 1
+            continue
+        seen.add(key)
+        rows.append(p)
+        by_gw[p["gateway"]] = by_gw.get(p["gateway"], 0) + 1
 
     own = conn is None
     conn = conn or open_analytics_connection()
@@ -89,36 +137,18 @@ def upsert_sales(df: pd.DataFrame, client_id: str = "devclub", conn=None) -> dic
         before = conn.run(
             "SELECT count(*) FROM sales WHERE client_id = :c", c=client_id
         )[0][0]
-        attempted = 0
-        filtered = 0
-        by_gw: dict = {}
-        for _, r in df.iterrows():
-            gw = _s(r.get("origem")) or _s(r.get("gateway"))
-            sale_date = _dt(r.get("sale_date"))
-            email = _s(r.get("email"))
-            phone = _s(r.get("telefone"))
-            # sem gateway, sem data, ou sem identidade → não dá pra dedup; pula.
-            if not gw or not sale_date or not (email or phone):
-                filtered += 1
-                continue
-            conn.run(
-                _INSERT,
-                client_id=client_id, gateway=gw,
-                email=email, phone=phone, nome=_s(r.get("nome")),
-                sale_value=_f(r.get("sale_value")), sale_date=sale_date,
-                produto=_s(r.get("product_name")), status=_s(r.get("status")),
-            )
-            attempted += 1
-            by_gw[gw] = by_gw.get(gw, 0) + 1
+        for start in range(0, len(rows), batch_size):
+            _insert_chunk(conn, rows[start:start + batch_size])
         after = conn.run(
             "SELECT count(*) FROM sales WHERE client_id = :c", c=client_id
         )[0][0]
         inserted = after - before
         res = {
-            "attempted": attempted,
+            "attempted": len(rows),
             "inserted": inserted,
-            "skipped": attempted - inserted,
+            "skipped": len(rows) - inserted,
             "filtered": filtered,
+            "intra_dup": intra_dup,
             "by_gateway": by_gw,
         }
         logger.info("[sales_store] %s", res)
