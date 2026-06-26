@@ -74,8 +74,10 @@ Cada fase roda dual-read (tabela vs API ao vivo) e só vira a chave quando a par
 - [x] `src/validation/etl_sales.py` — orquestrador + CLI: puxa guru/hotmart/asaas/boletex (API) + tmb/hotpay (arquivo) e faz upsert. Um gateway fora não derruba o resto.
 - [x] Smoke do upsert (sintético): inserção + idempotência (2ª vez insere 0) + linha sem data filtrada visível. Verde.
 - [x] **ETL real rodado** (26/05–25/06, só APIs): **297 vendas** — guru 124, hotmart 24, asaas 61, boletex 88. Todas com email, 0 erro. **173 vêm de gateways que o treino hoje NÃO lê** (hotmart/asaas/boletex) — só num mês = o enriquecimento, concreto. (asaas/boletex têm `sale_value` baixo = valor por parcela; agregação/realizado é transform de leitura.)
-- [ ] **TMB**: arquivo confirmado `contas_a_receber_09062026_1028.xlsx` (78 MB; único que casa Pedido+Parcela+Grau de risco). Aguarda go + `--report-type`.
-- [ ] **Backfill amplo** (janela que o treino usa) depois de validada a janela recente.
+- [x] **Upsert em lote** (fix): linha-a-linha estourava timeout no backfill (13k round-trips) → INSERT multi-row de 500 + dedup intra-lote. (commit 50470e2)
+- [x] **TMB incluído**: `contas_a_receber_09062026_1028.xlsx` (80.077 parcelas → 7.066 pedidos únicos após status+agrupamento). report_type=fechamento (inclusivo; irrelevante pro treino, que filtra status sozinho).
+- [x] **Backfill amplo CONCLUÍDO** (início = period_start do dataset do Champion `jan30` = **2025-03-01**; APIs até hoje; TMB traz recebíveis desde 2022). **Total no `sales`: 13.201** (guru 3.118, tmb 7.066, asaas 1.193, boletex 1.549, hotmart 275). Idempotente (781 do run parcial puladas).
+- [x] **Enriquecimento medido**: 3.017 vendas / **1.455 compradores únicos** em hotmart+asaas+boletex (gateways que o treino não lê). É o TETO recuperável; positivos novos reais = os que também responderam a pesquisa (medir no match).
 - [ ] `SalesRecord` + leitura: treino lê vendas do `sales` (todos os gateways) via repositório, em vez de só Guru+TMB. **← fecha o enriquecimento**
 - [ ] Parity audit: venda do DB == soma dos gateways via API, antes de virar a chave no treino.
 
