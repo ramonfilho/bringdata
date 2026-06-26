@@ -117,44 +117,65 @@ def compute_unified_funnel(
 
 def compute_survey_response_rate(
     response_records: List[LeadRecord],
-    cadastro_by_brt_day: Dict[str, int],
+    cadastro_emails_by_day: Dict[str, List[str]],
     *,
     today_brt_mid: datetime,
     days: int = 7,
 ) -> Dict[str, Any]:
-    """Taxa de resposta da pesquisa (cadastro→pesquisa) por dia BRT.
+    """Taxa de resposta da pesquisa por COORTE DE CADASTRO (dia BRT).
 
-    Numerador: leads que responderam a pesquisa = `registros_ml` (`response_records`,
-    LeadRecord; `criado_em` vem offset-naive do pg8000, UTC implícito). Bucketizado
-    aqui por dia BRT (UTC − 3h).
-    Denominador: leads cadastrados = tabela `Client` (todas as fontes), já agregado
-    por dia BRT pelo handler em `cadastro_by_brt_day` ({'YYYY-MM-DD': n}). Fica no
-    handler porque é schema-específico do cliente (Railway), não passa pelo repo.
+    Mede, para os leads que se CADASTRARAM no dia D, quantos responderam a
+    pesquisa — `taxa = responderam / cadastraram`. É de propósito por coorte de
+    cadastro, NÃO por "respostas processadas no dia": o `created_at` do
+    `registros_ml` é a hora em que o NOSSO processo gravou a resposta, não a
+    hora em que o lead respondeu. A versão antiga bucketizava o numerador por
+    esse carimbo de processamento e o denominador pela hora real do cadastro —
+    dois relógios diferentes. Resultado: o lead que entrava perto da meia-noite
+    era partido entre dois dias e os dias de pico de cadastro pareciam ter taxa
+    mais baixa (ex.: 25/06/2026 mostrou ~78% sendo que a taxa real por coorte
+    era ~84%). Casar por e-mail elimina a distorção: não importa QUANDO
+    processamos a resposta, só SE aquele e-mail respondeu.
 
-    Série = os `days` últimos dias BRT COMPLETOS (terminando ONTEM); hoje (parcial)
-    fica de fora pra não enganar. `today_brt_mid` = hoje 00:00 BRT (tz-aware), âncora.
+    Numerador (quem respondeu): conjunto de e-mails presentes no `registros_ml`
+    (`response_records`, LeadRecord). O handler busca esse conjunto de
+    `_rr_start` até AGORA (não até 00:00 de hoje) — senão o coorte de ontem
+    perderia quem respondeu depois da meia-noite, que é exatamente a cauda que
+    causava a distorção.
+    Denominador (quem cadastrou): e-mails da tabela `Client` por dia BRT de
+    cadastro, já normalizados (lower/trim) e agrupados pelo handler em
+    `cadastro_emails_by_day` ({'YYYY-MM-DD': [email, ...]}). Fica no handler
+    porque é schema-específico do cliente (Railway), não passa pelo repo. A
+    contagem de cadastros é o tamanho da lista (1 por registro com e-mail);
+    registros sem e-mail ficam de fora dos dois lados (são incasáveis, contá-los
+    como "não respondeu" seria injusto — na prática são ~0).
+
+    Série = os `days` últimos dias BRT COMPLETOS (terminando ONTEM); hoje
+    (parcial) fica de fora pra não enganar. `today_brt_mid` = hoje 00:00 BRT
+    (tz-aware), âncora.
 
     Returns:
-        {ontem: {dia, n_resp, n_cad, taxa}, serie: [...], media_taxa, days} — `taxa`
-        em % (None se n_cad=0 no dia). Média = ponderada (Σresp/Σcad, mais honesta
-        que média de taxas). Retorna None se NENHUM dia tem cadastro (degrada — o
-        handler/digest só omite a métrica, nunca quebra o relatório).
+        {ontem: {dia, n_resp, n_cad, taxa}, serie: [...], media_taxa, days} —
+        formato IDÊNTICO ao da versão antiga (digest/payload_schema dependem).
+        `taxa` em % (None se n_cad=0 no dia). Média = ponderada (Σresp/Σcad).
+        Retorna None se NENHUM dia tem cadastro (degrada — o handler/digest só
+        omite a métrica, nunca quebra o relatório).
     """
     from datetime import timedelta
 
-    resp_by_day: Dict[str, int] = {}
+    # Quem respondeu: e-mails normalizados presentes no ledger (independe de
+    # quando processamos). Mesma normalização do handler nos cadastros (lower/trim).
+    responderam = set()
     for r in response_records:
-        c = r.criado_em
-        if c is None:
-            continue
-        brt_day = (c.replace(tzinfo=None) - timedelta(hours=3)).date().isoformat()
-        resp_by_day[brt_day] = resp_by_day.get(brt_day, 0) + 1
+        e = (r.email or '').strip().lower()
+        if e:
+            responderam.add(e)
 
     serie = []
     for i in range(days, 0, -1):  # days..1 dias atrás → ordem cronológica, termina ontem
         dia = (today_brt_mid - timedelta(days=i)).date().isoformat()
-        n_resp = resp_by_day.get(dia, 0)
-        n_cad = int(cadastro_by_brt_day.get(dia, 0))
+        emails = cadastro_emails_by_day.get(dia) or []
+        n_cad = len(emails)
+        n_resp = sum(1 for e in emails if e in responderam)
         taxa = round(n_resp / n_cad * 100, 1) if n_cad else None
         serie.append({'dia': dia, 'n_resp': n_resp, 'n_cad': n_cad, 'taxa': taxa})
 
