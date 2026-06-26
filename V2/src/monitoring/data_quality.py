@@ -1143,6 +1143,26 @@ class DataQualityMonitor:
         return alerts
 
     def _iter_active_variants(self):
+        """Devolve as variantes ativas (Champion + Challengers) materializadas e
+        cacheadas UMA vez por instância do monitor.
+
+        Antes este método era o gerador que relia os modelos do disco a cada
+        chamada; como os 5 checks de drift/features iteram sobre ele, o mesmo
+        Champion + Challenger eram desserializados ~5× por relatório (custo de
+        RAM/CPU desnecessário). Agora o carregamento real vive em
+        `_load_active_variants()` e roda só na primeira chamada; as demais
+        reusam a lista. Os modelos são imutáveis dentro do processo (bakeados na
+        imagem Docker — troca de modelo = novo deploy = novo processo), então o
+        cache nunca fica velho. Contrato idêntico ao anterior: um iterável de
+        tuplas (variant_name, predictor, effective_encoding).
+        """
+        cache = getattr(self, '_active_variants_cache', None)
+        if cache is None:
+            cache = list(self._load_active_variants())
+            self._active_variants_cache = cache
+        return cache
+
+    def _load_active_variants(self):
         """
         Yields (variant_name, predictor, effective_encoding) para cada modelo
         "ativo" que recebe tráfego em produção:
