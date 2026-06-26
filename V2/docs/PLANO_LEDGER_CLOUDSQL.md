@@ -194,7 +194,14 @@ O item 1 do plano de remediação de score (cache versionado regenerado no daily
 7. **Latência/limites do db-f1-micro** (shared core, ~25 conexões úteis): consumer + monitoramento + MLflow no mesmo micro. Observar na Etapa 1; subir tier é mudança de 1 flag.
 8. **Instância aberta em `0.0.0.0/0`** (herança da era MLflow; só senha protege). Aceito temporariamente pra não bloquear a migração; endurecer na Etapa 4-5: Cloud SQL connector no Cloud Run + remover a authorized network aberta + (opcional) trocar a senha do `postgres`, que está hardcoded em `src/model/training_model.py:28`.
 9. **`created_at` difere ~0,3s entre os bancos** pro mesmo lead (o dual-write insere em cada banco com seu próprio `now()`). Inofensivo — mesmo `event_id`, mesma data; só leads exatamente na borda da meia-noite BRT podem cair em dias diferentes, mexendo contagens por dia em sub-0,1pp (visto na coluna "Anteontem" do drift geral na validação da virada). **Some na Etapa 4** (um escritor só → um `created_at` só). Não reconciliar.
-10. **Daily-check perto do teto de memória (2 GB) do Cloud Run** — observado um OOM (2093 MiB usados → 503) quando 2+ chamadas pesadas de daily-check/slack-digest rodam **concorrentes** (artefato de teste; em produção roda 1×/06:00 via cron). Pré-existente, **não** ligado à virada (ler de Cloud SQL ou Railway tem o mesmo perfil de memória). Achado correlato — se virar recorrente, subir a memória da revisão. Escopo separado.
+10. **Daily-check perto do teto de memória (2 GB) do Cloud Run** — observado um OOM (2093 MiB usados → 503) quando 2+ chamadas pesadas de daily-check/slack-digest rodam **concorrentes**. Pré-existente, **não** ligado à virada (ler de Cloud SQL ou Railway tem o mesmo perfil de memória).
+
+    **✅ MITIGADO em 26/06/2026.** O OOM se materializou em produção (o relatório do DM das 06:10 não chegou). A suposição "1×/06:00 via cron" estava errada: havia **dois** jobs de digest (cliente às 06:00 + DM às 06:10) e o de criativo (`utm-quality`) também às 06:00 — daí a concorrência. Correção em três frentes, sem tocar scoring/CAPI:
+    - **(a) Crons espaçados** (06:00 / 06:20 / 06:40) pra nenhum job pesado rodar junto nem pegar o container ainda quente do anterior.
+    - **(b) Modelo carregado 1× por relatório** (era ~5×): `data_quality._iter_active_variants` agora memoiza Champion+Challenger na instância em vez de reler do disco a cada checagem de drift.
+    - **(c) Projeção leve na carga de 90 dias**: novo `LeadRepository.summaries_in_range` traz só score/decil/data/variante/status/UTMs das ~24k linhas — pula `survey_responses` (JSONB parseado linha a linha) e PII, que nenhum consumidor de 90d usa.
+
+    Com (b)+(c) o pico voltou pra dentro de 2 GB: daily-check validado a **2Gi** no canary (45,8s) e em produção (55,6s), sem OOM. A memória subiu temporariamente pra 4Gi como cinto de segurança e **voltou a 2Gi** após os cortes (custo de volta ao baseline). PR #24, revisão `smart-ads-api-00795-juq`.
 
 ## 7. Registro de execução
 
