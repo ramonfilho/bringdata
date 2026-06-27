@@ -146,11 +146,26 @@ LF56:
 LF57:
   cap_start: "2026-06-01"
   cap_end:   "2026-06-07"
-  vendas_start: "2026-06-15"   # inferido (cadência semanal) — planilha sem vendas definidas
+  vendas_start: "2026-06-15"   # confirmado na planilha PC FORMULÁRIOS (CPL 08–11/06)
   vendas_end:   "2026-06-21"
+  notes: "Sem RMKT"
 
 LF58:
   cap_start: "2026-06-08"
   cap_end:   "2026-06-14"
-  vendas_start: "2026-06-22"   # inferido (cadência semanal) — planilha sem vendas definidas
+  vendas_start: "2026-06-22"   # inferido — planilha tem CPL 15–18/06 mas vendas em branco
   vendas_end:   "2026-06-28"
+  notes: "Com RMKT"
+
+LF59:
+  cap_start: "2026-06-15"
+  cap_end:   "2026-06-21"
+  vendas_start: "2026-06-29"   # inferido (cadência) — planilha sem CPL/vendas
+  vendas_end:   "2026-07-05"
+
+LF60:
+  cap_start: "2026-06-22"
+  cap_end:   "2026-06-29"
+  vendas_start: "2026-07-06"   # inferido (cadência) — planilha sem CPL/vendas
+  vendas_end:   "2026-07-12"
+  notes: "lançamento atual em 27/06"
