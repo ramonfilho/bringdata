@@ -3876,9 +3876,11 @@ async def daily_monitoring_check_railway(
             logger.warning(f"⚠️ Meta Ads metrics indisponível: {_e}")
 
         # --- Funil Google (LEITURA da Google Ads API) — atrás de flag, isolado ---
-        # Read-only: custo/cliques/conversões por campanha + CPL agregado, pro
-        # bloco "Funil Google" do digest. NÃO toca o envio (Data Manager API,
-        # outro caminho) nem o funil Meta. Janela = mesma 7d de `_records_7d`.
+        # Read-only: custo/cliques/conversões + CPL agregado + SPLIT POR VARIANTE
+        # (Lead/Champion/Challenger), pro bloco "Funil Google" do digest na MESMA
+        # forma do Meta. NÃO toca o envio (Data Manager API, outro caminho) nem o
+        # funil Meta. Janela = dia BRT anterior completo (idêntica ao "Anúncio
+        # (Meta Insights)") + acumulado do lançamento (LF).
         # Pré-req em produção: as 5 env vars GOOGLE_ADS_* (developer token + OAuth)
         # no Cloud Run. Sem elas / token expirado / flag off → só omite o bloco
         # (log "indisponível"), NUNCA derruba o relatório das 06:00.
@@ -3887,33 +3889,103 @@ async def daily_monitoring_check_railway(
                      if (pipeline and pipeline._client_config) else None)
             if _gcfg and getattr(_gcfg, 'reporting_enabled', False) and _gcfg.customer_id:
                 from src.validation.google_ads_api_client import GoogleAdsReportingClient
-                from src.monitoring.daily_check_aggregations import compute_google_funnel
-                _g_start = _fb_d7.strftime('%Y-%m-%d')
-                _g_end = _fb_anchor.strftime('%Y-%m-%d')
+                from src.monitoring.daily_check_aggregations import (
+                    compute_google_funnel,
+                    compute_variant_cpl_conv as _variant_cpl_g,
+                )
+                from src.monitoring.google_variant import (
+                    campaign_id_from_utm_term as _gcid,
+                    build_campaign_variant_map as _build_gvm,
+                    make_classifier as _make_gclassify,
+                )
+                # Janela = dia BRT anterior completo (idêntica ao Meta), não 7d.
+                _g_yest_str = (_uf_today_mid - timedelta(days=1)).strftime('%Y-%m-%d')
+                _g_start = _g_yest_str
+                _g_end = _g_yest_str
                 _our_actions = tuple(
                     a for a in (_gcfg.event_name_with_value, _gcfg.event_name_high_quality) if a
                 )
                 _g_allow = {s.lower() for s in (_gcfg.source_allowlist or [])}
-                _g_leads = sum(
-                    1 for r in _records_7d if (r.utm_source or '').lower() in _g_allow
-                )
+
+                # Classificador de variante (Estratégia espelhando o Meta): hoje o
+                # mapa goal→variante está vazio (nenhuma campanha Google plugada no
+                # A/B de modelo) → tudo cai em 'Lead' e nem bate na API de goals.
+                # Quando o gestor ligar o sinal ML, preencher variant_goal_map no
+                # YAML e Champion/Challenger populam sozinhos.
+                _g_cvm = _build_gvm(None, getattr(_gcfg, 'variant_goal_map', None))
+                _g_classify = _make_gclassify(_g_cvm)
+
                 _gclient = GoogleAdsReportingClient(_gcfg.customer_id)
                 _g_cmp = _gclient.get_campaign_metrics(_g_start, _g_end)
                 _g_conv = _gclient.get_campaign_conversions_by_action(
                     _g_start, _g_end, action_names=_our_actions or None,
                 )
+                # leads google-ads de ONTEM (mesma janela do Meta `_uf_records`) —
+                # denominador do CPL agregado e numerador do split por variante.
+                _g_yest_records = [
+                    r for r in _uf_records if (r.utm_source or '').lower() in _g_allow
+                ]
+                _g_leads = len(_g_yest_records)
+
+                # Helper: CPL/conv por variante reusando a MESMA função pura do
+                # Meta. Spend por campanha chaveado por campaign_id; leads por
+                # campaign_id extraído do utm_term ValueTrack. lpv = clicks (o
+                # análogo Google do landing_page_view); imposto = 0 (Google não
+                # tem o imposto Meta). Mesmo formato de saída → render idêntico.
+                def _g_pv(cmp_rows, lead_records):
+                    _ids = {r['campaign_id'] for r in cmp_rows}
+                    _spend_rows = [
+                        {'campaign_name': r['campaign_id'], 'spend': r['spend'], 'lpv': r['clicks']}
+                        for r in cmp_rows
+                    ]
+                    _cids, _unm = [], 0
+                    for r in lead_records:
+                        cid = _gcid(r.utm_term)
+                        _cids.append(cid)
+                        if cid is not None and cid not in _ids:
+                            _unm += 1
+                    if _unm:
+                        logger.warning(
+                            "⚠️ Funil Google: %d leads c/ campaign_id fora da API (template UTM mudou?)",
+                            _unm,
+                        )
+                    return _variant_cpl_g(
+                        meta_rows=_spend_rows, client_campaigns=_cids,
+                        classify_fn=_g_classify, tax_rate=0.0,
+                    )
+
                 _g_funnel = compute_google_funnel(
                     _g_cmp, _g_conv,
                     action_with_value=_gcfg.event_name_with_value,
                     action_high_quality=_gcfg.event_name_high_quality,
                     total_google_leads=_g_leads,
                 )
+                # Split por variante — IDÊNTICO ao Meta (ontem + acumulado do LF).
+                _g_funnel['por_variante'] = _g_pv(_g_cmp, _g_yest_records)
+                try:
+                    from src.core.launches import resolve_launch_window_brt as _rlw_g
+                    _lw_g = _rlw_g(today=_anchor)
+                    _cap_s = _lw_g.cap_start.isoformat()
+                    _today_s = _uf_today_mid.strftime('%Y-%m-%d')
+                    _g_cmp_lf = _gclient.get_campaign_metrics(_cap_s, _today_s)
+                    _cap_dt = datetime(
+                        _lw_g.cap_start.year, _lw_g.cap_start.month, _lw_g.cap_start.day,
+                        tzinfo=_uf_brt,
+                    ).astimezone(_tz.utc)
+                    _lf_records_all = _repo_leads.leads_in_range(_cap_dt, datetime.now(_tz.utc))
+                    _g_lf_records = [
+                        r for r in _lf_records_all if (r.utm_source or '').lower() in _g_allow
+                    ]
+                    _g_funnel['por_variante_lf'] = _g_pv(_g_cmp_lf, _g_lf_records)
+                except Exception as _glfe:
+                    logger.warning(f"⚠️ Por variante Google (lançamento): {_glfe}")
+
                 result.setdefault('operational_routines', {})['google_funnel'] = _g_funnel
                 logger.info(
-                    "📊 Funil Google (7d): spend R$ %.0f · %d campanhas · CPL %s · LQ %s · LQHQ %s",
-                    _g_funnel['total_spend'], len(_g_funnel['por_campanha']),
-                    _g_funnel['cpl_agregado'], _g_funnel['total_with_value'],
-                    _g_funnel['total_high_quality'],
+                    "📊 Funil Google (ontem %s): spend R$ %.0f · %d campanhas · %d leads · CPL %s · variante %s",
+                    _g_yest_str, _g_funnel['total_spend'], len(_g_funnel['por_campanha']),
+                    _g_leads, _g_funnel['cpl_agregado'],
+                    " · ".join(f"{_b}:{_d['leads']}" for _b, _d in _g_funnel['por_variante'].items()),
                 )
         except Exception as _gfe:
             logger.warning(f"⚠️ Funil Google indisponível: {_gfe}")

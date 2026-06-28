@@ -666,6 +666,48 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'operational_routines.google_funnel.total_high_quality':                            (R, None),  # ex: 0.0
     'operational_routines.google_funnel.n_leads':                                       (R, None),  # ex: 786 — leads google-ads no ledger (denominador CPL)
     'operational_routines.google_funnel.cpl_agregado':                                  (R, None),  # ex: 15.27 (None se n_leads=0)
+    # Split por variante (Lead/Champion/Challenger) — MESMA forma do Meta
+    # (traffic_metrics.dia_anterior.por_variante). Hoje só Lead é populado
+    # (nenhuma campanha Google no A/B); Champion/Challenger ficam zerados.
+    'operational_routines.google_funnel.por_variante':                                  (R, None),  # dict(3) buckets — dia anterior
+    'operational_routines.google_funnel.por_variante.Lead':                             (R, None),
+    'operational_routines.google_funnel.por_variante.Lead.leads':                       (R, None),  # leads google-ads (utm_term→campaign_id→variante)
+    'operational_routines.google_funnel.por_variante.Lead.cpl':                         (R, None),  # spend Google ÷ leads
+    'operational_routines.google_funnel.por_variante.Lead.conv_lp':                     (R, None),  # leads ÷ cliques (análogo Google da conv LP)
+    'operational_routines.google_funnel.por_variante.Lead.spend':                       (S, 'insumo do CPL; não renderizado direto'),
+    'operational_routines.google_funnel.por_variante.Lead.lpv':                         (S, 'cliques (slot lpv); insumo da conv; não renderizado direto'),
+    'operational_routines.google_funnel.por_variante.Champion':                         (R, None),
+    'operational_routines.google_funnel.por_variante.Champion.leads':                   (R, None),
+    'operational_routines.google_funnel.por_variante.Champion.cpl':                     (R, None),
+    'operational_routines.google_funnel.por_variante.Champion.conv_lp':                 (R, None),
+    'operational_routines.google_funnel.por_variante.Champion.spend':                   (S, 'insumo do CPL; não renderizado direto'),
+    'operational_routines.google_funnel.por_variante.Champion.lpv':                     (S, 'cliques (slot lpv); insumo da conv; não renderizado direto'),
+    'operational_routines.google_funnel.por_variante.Challenger':                       (R, None),
+    'operational_routines.google_funnel.por_variante.Challenger.leads':                 (R, None),
+    'operational_routines.google_funnel.por_variante.Challenger.cpl':                   (R, None),
+    'operational_routines.google_funnel.por_variante.Challenger.conv_lp':               (R, None),
+    'operational_routines.google_funnel.por_variante.Challenger.spend':                 (S, 'insumo do CPL; não renderizado direto'),
+    'operational_routines.google_funnel.por_variante.Challenger.lpv':                   (S, 'cliques (slot lpv); insumo da conv; não renderizado direto'),
+    # Acumulado do lançamento (cap_start→hoje) — mesmo formato do por_variante diário.
+    'operational_routines.google_funnel.por_variante_lf':                               (R, None),  # dict(3) buckets — acum. do LF
+    'operational_routines.google_funnel.por_variante_lf.Lead':                          (R, None),
+    'operational_routines.google_funnel.por_variante_lf.Lead.leads':                    (R, None),
+    'operational_routines.google_funnel.por_variante_lf.Lead.cpl':                      (R, None),
+    'operational_routines.google_funnel.por_variante_lf.Lead.conv_lp':                  (R, None),
+    'operational_routines.google_funnel.por_variante_lf.Lead.spend':                    (S, 'insumo do CPL; não renderizado direto'),
+    'operational_routines.google_funnel.por_variante_lf.Lead.lpv':                      (S, 'cliques (slot lpv); insumo da conv; não renderizado direto'),
+    'operational_routines.google_funnel.por_variante_lf.Champion':                      (R, None),
+    'operational_routines.google_funnel.por_variante_lf.Champion.leads':                (R, None),
+    'operational_routines.google_funnel.por_variante_lf.Champion.cpl':                  (R, None),
+    'operational_routines.google_funnel.por_variante_lf.Champion.conv_lp':              (R, None),
+    'operational_routines.google_funnel.por_variante_lf.Champion.spend':                (S, 'insumo do CPL; não renderizado direto'),
+    'operational_routines.google_funnel.por_variante_lf.Champion.lpv':                  (S, 'cliques (slot lpv); insumo da conv; não renderizado direto'),
+    'operational_routines.google_funnel.por_variante_lf.Challenger':                    (R, None),
+    'operational_routines.google_funnel.por_variante_lf.Challenger.leads':              (R, None),
+    'operational_routines.google_funnel.por_variante_lf.Challenger.cpl':                (R, None),
+    'operational_routines.google_funnel.por_variante_lf.Challenger.conv_lp':            (R, None),
+    'operational_routines.google_funnel.por_variante_lf.Challenger.spend':              (S, 'insumo do CPL; não renderizado direto'),
+    'operational_routines.google_funnel.por_variante_lf.Challenger.lpv':                (S, 'cliques (slot lpv); insumo da conv; não renderizado direto'),
 
     # ──────────────────────────────────────────────────────────────────────────
     # LAUNCH_RESOLUTION — fonte da janela do LF atual (src.core.launches)

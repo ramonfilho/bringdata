@@ -350,6 +350,13 @@ class GoogleAdsConfig:
     currency: Optional[str] = None                             # moeda do value (ex: BRL)
     sa_secret: Optional[str] = None                            # referência ao Secret da service account (NOME, não o valor)
     reporting_enabled: bool = False                            # LEITURA (funil Google no digest) — independente do envio; default off
+    # Mapa conversion-goal → variante (Lead/Champion/Challenger) pro split do
+    # funil Google igual ao Meta. Chave = goal_id da campanha (lido da API);
+    # valor = 'Champion'|'Challenger'. VAZIO/None = nenhuma campanha Google está
+    # plugada no A/B de modelo (estado de hoje) → tudo cai em 'Lead'. Quando o
+    # gestor plugar campanhas nos nossos eventos Champion/Challenger, preencher
+    # aqui e o split popula sozinho — sem tocar código. Ver src/monitoring/google_variant.py.
+    variant_goal_map: Optional[Dict[str, str]] = None
 
 
 # ---------------------------------------------------------------------------

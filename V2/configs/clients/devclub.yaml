@@ -616,6 +616,7 @@ google_ads:
   currency: BRL
   sa_secret: null                        # nome do Secret da service account (datamanager scope) — não o valor
   reporting_enabled: true                # LEITURA: funil Google no digest (read-only, isolado por try/except). Precisa das env vars GOOGLE_ADS_* no Cloud Run
+  variant_goal_map: {}                    # goal_id da campanha → 'Champion'|'Challenger'. VAZIO hoje: nenhuma campanha Google plugada no A/B de modelo → tudo cai em 'Lead'. Preencher quando o gestor ligar o sinal ML no Google
 api:
   cors_origins:
   - https://lp.devclub.com.br
