@@ -23,6 +23,15 @@ from typing import Any, Iterable
 from .payload_schema import PAYLOAD_SCHEMA, FieldDecision
 
 
+# N mínimo pra um balde (Lead/Champion/Challenger por optimization_goal) entrar
+# nas tabelas de Decis e Drift por A/B. Abaixo disso, %D9-D10 e Δ viram ruído de
+# amostra (ex.: 1 lead de uma campanha antiga LEADQUALIFIED ainda no ar polui o
+# painel com "100% D9-D10 / 0%"). Baldes omitidos viram nota, nunca somem em
+# silêncio. NÃO se aplica aos baldes por fonte (Total/Meta/Google), que são a
+# população inteira e sempre fazem sentido.
+MIN_BUCKET_N = 30
+
+
 # ──────────────────────────────────────────────────────────────────────────
 # Audit
 # ──────────────────────────────────────────────────────────────────────────
@@ -1300,14 +1309,20 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
         ('Champion',   n_champion,   True,  'champion_pct',   'champion_delta_pp',   'champion_quality'),
         ('Challenger', n_challenger, True,  'challenger_pct', 'challenger_delta_pp', 'challenger_quality'),
     ]
-    _arms = [a for a in _arms if a[1] > 0]
+    # Corte N<MIN_BUCKET_N: balde com pouquíssimo lead vira ruído (Δ de 100%/0%).
+    # Some da tabela e vira nota — nunca cai em silêncio.
+    _omitted = [(b, n) for b, n, *_ in _arms if 0 < n < MIN_BUCKET_N]
+    _arms = [a for a in _arms if a[1] >= MIN_BUCKET_N]
     _n_compete = sum(1 for a in _arms if a[2])  # ✅ de vencedor só faz sentido com 2 braços comparáveis
     _AW = 22  # largura da coluna de cada braço (cabe "Champion (abr_28)(Δ)")
 
     if (n_lead + n_champion + n_challenger + n_google + n_outros) > 0:
-        in_table = ' · '.join(f"{_ab_bucket_label(b)}={n:,}" for b, n, *_ in _arms)
+        in_table = ' · '.join(f"{_ab_bucket_label(b)}={n:,}" for b, n, *_ in _arms) or '—'
         out_table = f"Google={n_google:,} · Outros={n_outros:,}"
         header += f"\n_n Meta na tabela: {in_table}  ·  fora da tabela: {out_table}_"
+        if _omitted:
+            header += "\n_Omitidos (N<%d): %s_" % (
+                MIN_BUCKET_N, ' · '.join(f"{_ab_bucket_label(b)}={n:,}" for b, n in _omitted))
     rows = [header]
     col_header = f"{'Característica':<32} {'Top%':>5}  " + '  '.join(
         f"{_ab_bucket_label(b) + '(Δ)':>{_AW}}" for b, *_ in _arms
@@ -1576,17 +1591,28 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     # bloco fica grande. Lead = campanhas de otimização padrão (sem evento ML);
     # Champion = LEADQUALIFIED; Challenger = LEADHQLB.
     if show_og:
-        og_rows = ['```']
-        og_rows.append(
-            f'{"Bucket":<18}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
-        )
-        og_rows.append(_row('Lead', _kpis(og_lead_info.get('distribution') or {}, n_og_lead), ref_champion, 'jan_30'))
-        # Balde da campanha antiga LEADQUALIFIED (jan_30): só aparece se entregou lead.
-        if n_og_chmp > 0:
-            og_rows.append(_row(_ab_bucket_label('Champion'), _kpis(og_chmp_info.get('distribution') or {}, n_og_chmp), ref_champion, 'jan_30'))
-        og_rows.append(_row(_ab_bucket_label('Challenger'), _kpis(og_chal_info.get('distribution') or {}, n_og_chal), ref_challenger, 'abr_28'))
-        og_rows.append('```')
-        B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(og_rows)}})
+        # Corte N<MIN_BUCKET_N: balde por optimization_goal com pouquíssimo lead
+        # (ex.: 1 lead de campanha antiga LEADQUALIFIED ainda no ar) vira ruído de
+        # %D9-D10 — sai da tabela e vira nota de omitidos, nunca some em silêncio.
+        _og_buckets = [
+            ('Lead',                         og_lead_info, n_og_lead, ref_champion,   'jan_30'),
+            (_ab_bucket_label('Champion'),   og_chmp_info, n_og_chmp, ref_champion,   'jan_30'),
+            (_ab_bucket_label('Challenger'), og_chal_info, n_og_chal, ref_challenger, 'abr_28'),
+        ]
+        _og_shown   = [t for t in _og_buckets if t[2] >= MIN_BUCKET_N]
+        _og_omitted = [(t[0], t[2]) for t in _og_buckets if 0 < t[2] < MIN_BUCKET_N]
+        if _og_shown:
+            og_rows = ['```']
+            og_rows.append(
+                f'{"Bucket":<18}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
+            )
+            for _lbl, _info, _n, _ref, _rn in _og_shown:
+                og_rows.append(_row(_lbl, _kpis(_info.get('distribution') or {}, _n), _ref, _rn))
+            og_rows.append('```')
+            if _og_omitted:
+                og_rows.append('_Omitidos (N<%d): %s_' % (
+                    MIN_BUCKET_N, ' · '.join(f'{l}={n:,}' for l, n in _og_omitted)))
+            B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(og_rows)}})
 
 
 def _slack_category_drifts_consolidated(alerts: list, B: list):
