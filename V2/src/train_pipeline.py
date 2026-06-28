@@ -296,7 +296,7 @@ def _assert_retraining_decisions_resolved(config_path: str, set_active: bool) ->
     logger.info(f"  [set-active gate] retraining_decisions OK: {decisions}")
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, exclude_features=None, export_matched_dataset=None):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False, leads_source='files'):
     # Guard: Cloud SQL MLflow precisa estar RUNNABLE. Falha alto se NEVER.
     assert_mlflow_backend_running()
     register_mlflow_cleanup_reminder()
@@ -608,6 +608,52 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info(f"  Dataset Vendas: {len(df_vendas):,} registros, {len(df_vendas.columns)} colunas")
     logger.info("")
 
+    # === Consolidação Cloud SQL: substituir vendas dos arquivos pelo analytics.sales ===
+    # sales_source='db' troca a FONTE das vendas pelo banco (todos os gateways já
+    # consolidados), no shape canônico (email/telefone/data/produto/status/valor/
+    # origem) → validação de ingestão, Cell 5.1 e o match (core/matching) seguem
+    # idênticos. Substituído aqui (pré-validação) pois as vendas de arquivo seriam
+    # descartadas. Rollback: sales_source='files' (default).
+    if sales_source == 'db':
+        if tmb_risk_filter not in ('all', 'none'):
+            raise ValueError(
+                f"sales_source='db' só suporta tmb_risk_filter all|none por ora — o filtro de "
+                f"risco TMB precisa de 'Grau de risco', ainda não no analytics.sales. "
+                f"Recebi tmb_risk_filter={tmb_risk_filter!r}."
+            )
+        from src.data.sales_reader import read_sales
+        _db = read_sales(gateways=sales_gateways)
+        df_vendas = pd.DataFrame({
+            'email':          _db['email'],
+            'telefone':       _db['telefone'],
+            'nome':           _db['nome'],
+            'valor':          _db['sale_value'],
+            'produto':        _db['product_name'],
+            'data':           pd.to_datetime(_db['sale_date'], errors='coerce', utc=True).dt.tz_localize(None),
+            'status':         _db['status'],
+            'origem':         _db['origem'],
+            'arquivo_origem': _db['origem'],
+        })
+        assert len(df_vendas) > 0, "[sales_source=db] analytics.sales retornou 0 vendas"
+        logger.info(f"  [sales_source=db] {len(df_vendas):,} vendas do analytics.sales "
+                    f"(gateways={sales_gateways or 'todos'}) — substitui arquivos/API")
+
+    # === Consolidação Cloud SQL: substituir pesquisa dos arquivos pelo analytics.leads ===
+    # Snapshot jsonb verbatim → reconstrução idêntica do df_pesquisa (paridade por
+    # construção). Substituído aqui (pré-validação/unify); Cell 5 pula o unify.
+    # Rollback: leads_source='files' (default).
+    if leads_source == 'db':
+        from src.data.leads_reader import read_pesquisa
+        df_pesquisa = read_pesquisa()
+        # 'Data' vem como ISO no jsonb (inequívoco) → parsear SEM dayfirst. Com
+        # dayfirst=True (o default da validação) o pandas infere formato errado na
+        # precisão mista (Sheets tem hora) e coage a maioria a NaT.
+        if 'Data' in df_pesquisa.columns:
+            df_pesquisa['Data'] = pd.to_datetime(df_pesquisa['Data'], errors='coerce')
+        assert len(df_pesquisa) > 0, "[leads_source=db] analytics.leads retornou 0 linhas de pesquisa"
+        logger.info(f"  [leads_source=db] {len(df_pesquisa):,} linhas de pesquisa do analytics.leads "
+                    f"— substitui arquivos/Sheets")
+
     # === VALIDAÇÃO DE INGESTÃO (pós-Célula 4) ===
     val_ingestion = validate_ingestion(df_pesquisa, df_vendas, client_config.validation)
     val_ingestion.log("validate_ingestion")
@@ -654,11 +700,29 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 5: UNIFICAÇÃO DE COLUNAS DUPLICADAS")
     logger.info("")
 
-    # Parte 1: Unificar colunas de PESQUISA
-    df_pesquisa_unificado = _unify_survey(df_pesquisa, client_config.ingestion)
+    # Parte 1: Unificar colunas de PESQUISA — em db mode já vem canônica (snapshot
+    # post-unify do analytics.leads), então pula o unify.
+    if leads_source == 'db':
+        df_pesquisa_unificado = df_pesquisa
+    else:
+        df_pesquisa_unificado = _unify_survey(df_pesquisa, client_config.ingestion)
 
-    # Parte 2: Unificar colunas de VENDAS
-    df_vendas_unificado = _unify_sales(df_vendas, client_config.ingestion)
+    # === Consolidação Cloud SQL: dumpar a pesquisa carregada → analytics.leads ===
+    # Reusa o carregamento EXATO do treino e grava cada linha como snapshot verbatim
+    # (jsonb) → o reader reconstrói df_pesquisa idêntico (paridade por construção).
+    # Encerra aqui (não treina). É o ETL de pesquisa da Fase 3.
+    if dump_pesquisa_db:
+        from src.data.etl_leads import pesquisa_to_leads
+        _dump = pesquisa_to_leads(df_pesquisa_unificado, source='train_pesquisa')
+        logger.info(f"  [dump-pesquisa-db] {_dump}")
+        return {'status': 'PESQUISA_DUMPED_TO_DB', 'result': _dump}
+
+    # Parte 2: Unificar colunas de VENDAS — em db mode as vendas já vêm canônicas
+    # do analytics.sales (substituídas na Cell 4), então pula o unify.
+    if sales_source == 'db':
+        df_vendas_unificado = df_vendas
+    else:
+        df_vendas_unificado = _unify_sales(df_vendas, client_config.ingestion)
 
     logger.info("=" * 80)
     # === CÉLULA 5.1: Filtro temporal ===
@@ -683,8 +747,15 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 5.3: FILTRO DE STATUS E RISCO")
     logger.info("")
 
-    df_vendas_filtrado = _filtro_status_risco(df_vendas_sem_utm, client_config.ingestion, tmb_risk_filter=tmb_risk_filter, tmb_risk_lookup=tmb_risk_lookup)
-    _log_step_count("filtro_status_risco_vendas", df_vendas_filtrado, df_before=df_vendas_sem_utm)
+    if sales_source == 'db':
+        # status/risco já filtrados no load/ETL (guru=aprovadas, asaas=pagos,
+        # boletex=sem refund/chargeback, tmb=efetivado); tmb_risk_filter all|none
+        # validado acima. Pular evita dropar gateways novos por status incompatível.
+        df_vendas_filtrado = df_vendas_sem_utm
+        logger.info("  [sales_source=db] Cell 5.3 (status/risco) pulada — já filtrado no ETL")
+    else:
+        df_vendas_filtrado = _filtro_status_risco(df_vendas_sem_utm, client_config.ingestion, tmb_risk_filter=tmb_risk_filter, tmb_risk_lookup=tmb_risk_lookup)
+        _log_step_count("filtro_status_risco_vendas", df_vendas_filtrado, df_before=df_vendas_sem_utm)
 
     logger.info("=" * 80)
     # === CÉLULA 5.4: Filtro de produtos DevClub ===
@@ -692,6 +763,13 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("CÉLULA 5.4: FILTRO DE PRODUTOS DEVCLUB")
     logger.info("")
 
+    if sales_source == 'db':
+        # gateways de boleto (asaas/boletex/tmb) não têm nome de produto e são DevClub
+        # por natureza → não devem ser dropados pelo filtro. Preenche produto nulo com
+        # a keyword pra sobreviverem; guru/hotmart (com nome) seguem filtrados normal.
+        _kw = client_config.ingestion.product_filter_keyword or 'devclub'
+        df_vendas_filtrado = df_vendas_filtrado.copy()
+        df_vendas_filtrado['produto'] = df_vendas_filtrado['produto'].fillna(_kw)
     df_vendas_final = _filtrar_produto(df_vendas_filtrado, client_config.ingestion)
     _log_step_count("filtro_produto_vendas", df_vendas_final, df_before=df_vendas_filtrado)
 
@@ -1462,6 +1540,37 @@ if __name__ == "__main__":
              'de qualidade de audiência sem rodar treino completo. Combina com --use-cached-data '
              'para evitar re-pull das APIs.'
     )
+    parser.add_argument(
+        '--sales-source',
+        type=str,
+        choices=['files', 'db'],
+        default='files',
+        help="Fonte das vendas: 'files' (default, arquivos+API) ou 'db' (analytics.sales "
+             "consolidado no Cloud SQL, todos os gateways). 'db' só suporta --tmb-risk-filter all|none."
+    )
+    parser.add_argument(
+        '--sales-gateways',
+        type=str,
+        nargs='+',
+        default=None,
+        help="Com --sales-source db: limitar a esses gateways (ex: guru tmb reproduz o treino "
+             "atual). Default: todos (guru hotmart asaas boletex tmb)."
+    )
+    parser.add_argument(
+        '--dump-pesquisa-db',
+        action='store_true',
+        default=False,
+        help="ETL Fase 3: carrega a pesquisa (como o treino) e grava em analytics.leads "
+             "como snapshot jsonb verbatim, depois encerra (não treina)."
+    )
+    parser.add_argument(
+        '--leads-source',
+        type=str,
+        choices=['files', 'db'],
+        default='files',
+        help="Fonte da pesquisa: 'files' (default, arquivos+Sheets) ou 'db' (reconstrói do "
+             "snapshot em analytics.leads). Requer ter rodado --dump-pesquisa-db antes."
+    )
 
     args = parser.parse_args()
 
@@ -1500,4 +1609,8 @@ if __name__ == "__main__":
         control_alpha=args.control_alpha,
         exclude_features=[p.strip() for p in args.exclude_features.split(',')] if args.exclude_features else None,
         export_matched_dataset=args.export_matched_dataset,
+        sales_source=args.sales_source,
+        sales_gateways=args.sales_gateways,
+        dump_pesquisa_db=args.dump_pesquisa_db,
+        leads_source=args.leads_source,
     )
