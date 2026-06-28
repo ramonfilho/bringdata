@@ -22,7 +22,10 @@
     "score_mean": 0.4399,
     "pct_d10": 0.1122,
     "pct_d9_d10": 0.2836,
-    "pct_d8_d10": 0.378
+    "pct_d8_d10": 0.378,
+    "avg_decil": 6.44,
+    "decil_std": 2.65,
+    "avg_decil_note": "Media de decil (regua Challenger) e desvio nas TOP5 LFs; calculado 2026-06-28 sobre LF43/44/45/46 (LF41 ausente da scores_historicos, ~8% do pool, qualidade equivalente)."
   },
   "thresholds": {
     "delta_pct_d9_d10_warn": -0.03,

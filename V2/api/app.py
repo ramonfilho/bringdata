@@ -4363,6 +4363,57 @@ def _utm_quality_compute(start_utc, end_utc, *, min_volume: int, top_n: int, cli
             pass
 
 
+def _build_top5_for(result, client_id: str):
+    """Comparação vs barra TOP5 ROAS (régua Challenger) por criativo e campanha,
+    no nível do LANÇAMENTO acumulado (lê scores_historicos ⋈ registros_ml na
+    janela do LF). Composição no endpoint — separado do ranking relativo. Degrada
+    pra None (seção omitida)."""
+    from src.monitoring.utm_quality import build_top5_comparison
+    from datetime import datetime as _dt
+    lf_name = result.window_lf.get('label')
+    lf_s = result.window_lf.get('start')
+    lf_e = result.window_lf.get('end')
+    if not (lf_name and lf_s and lf_e and result.challenger_run_id):
+        return None
+    try:
+        return build_top5_comparison(
+            lf_name=lf_name,
+            challenger_run_id=result.challenger_run_id,
+            win_start=_dt.fromisoformat(lf_s),
+            win_end=_dt.fromisoformat(lf_e),
+            client_id=client_id,
+        )
+    except Exception as e:
+        logger.warning("[utm-quality] build_top5 LF falhou (lf=%s): %s", lf_name, e)
+        return None
+
+
+def _build_top5_window(result, client_id: str, min_n: int = 50):
+    """vs barra TOP5 da JANELA do ranking (start..end) — 'ontem' no job diário,
+    ou o intervalo pedido no endpoint. Mesma régua/barra do LF, só muda a janela
+    do `registros_ml` (os leads ainda casam pela scores_historicos do LF atual).
+    N mínimo menor (default 50) porque 1 dia tem menos volume por criativo."""
+    from src.monitoring.utm_quality import build_top5_comparison
+    from datetime import datetime as _dt
+    lf_name = result.window_lf.get('label')
+    w_s = result.window.get('start')
+    w_e = result.window.get('end')
+    if not (lf_name and w_s and w_e and result.challenger_run_id):
+        return None
+    try:
+        return build_top5_comparison(
+            lf_name=lf_name,
+            challenger_run_id=result.challenger_run_id,
+            win_start=_dt.fromisoformat(w_s),
+            win_end=_dt.fromisoformat(w_e),
+            client_id=client_id,
+            min_n=min_n,
+        )
+    except Exception as e:
+        logger.warning("[utm-quality] build_top5 janela falhou (lf=%s): %s", lf_name, e)
+        return None
+
+
 @app.get("/monitoring/utm-quality")
 async def utm_quality_endpoint(
     start_date: Optional[str] = None,
@@ -4406,6 +4457,8 @@ async def utm_quality_endpoint(
         'champion_name':  result.champion_name,
         'challenger_name': result.challenger_name,
         'ranking': result.ranking,
+        'top5_vs_padrao_janela': _build_top5_window(result, client_id),
+        'top5_vs_padrao_lf': _build_top5_for(result, client_id),
     }
 
 
@@ -4431,7 +4484,9 @@ async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5, client
         result = _utm_quality_compute(start_utc, end_utc, min_volume=min_volume, top_n=top_n, client_id=client_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"compute_utm_quality falhou: {e}")
-    blocks = render_slack_blocks(result)
+    top5_lf = _build_top5_for(result, client_id)
+    top5_window = _build_top5_window(result, client_id)
+    blocks = render_slack_blocks(result, top5_lf=top5_lf, top5_window=top5_window)
     lf_label = result.window_lf.get('label') or '—'
     win_label = result.window.get('label') or 'ontem'
     post = post_to_slack(UTM_QUALITY_TRAFEGO_CHANNEL, blocks, fallback_text=f'UTM Quality {win_label} × {lf_label}')
