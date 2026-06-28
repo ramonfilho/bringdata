@@ -848,8 +848,7 @@ def render_slack_blocks(view: dict) -> list[dict]:
     _slack_unified_funnel(view, blocks)
     _slack_survey_response_rate(view, blocks)
     blocks.append({'type': 'divider'})
-    _slack_lead_quality(view, blocks)
-    blocks.append({'type': 'divider'})
+    # _slack_lead_quality (Qualidade dos Leads séries temporais) removido do DM a pedido (28/06).
     _slack_pubsub_24h(view, blocks)
     blocks.append({'type': 'divider'})
     _slack_training_drift_24h(view, blocks)  # Features OHE zeradas em batch (T1-16)
@@ -1709,22 +1708,7 @@ def _slack_unified_funnel(v: dict, B: list):
     B.append({'type': 'section', 'text': {'type': 'mrkdwn',
         'text': (f"*🎬 Funil completo*  ·  _{ufw.get('label','dia anterior')} ({ufw.get('date_brt','?')}) BRT_\n"
                  f"```\n" + "\n".join(lines) + "\n```")}})
-
-    trk = [
-        "        7d      3d      1d",
-        f"FBP   {_n(r7,'fbp_pct'):>6.1f}% {_n(r3,'fbp_pct'):>6.1f}% {_n(r1,'fbp_pct'):>6.1f}%",
-        f"FBC   {_n(r7,'fbc_pct'):>6.1f}% {_n(r3,'fbc_pct'):>6.1f}% {_n(r1,'fbc_pct'):>6.1f}%",
-        f"Phone {_n(uf,'phone_pct'):>6.1f}%   (sobre leads no banco)",
-    ]
-    B.append({'type': 'section', 'text': {'type': 'mrkdwn',
-        'text': (f"*🎯 Tracking FBP/FBC*  ·  _% sobre leads capturados (leads_capi)_\n"
-                 f"```\n" + "\n".join(trk) + "\n```")}})
-    B.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': (
-        "_Meta = Meta Insights · Google = Google Ads API (ambos: spend/cliques + CPL por variante, dia anterior + LF). "
-        "Meta: CPL inclui imposto (12,15%), LP = leads÷landing_page_views. Google: sem imposto, LP = leads÷cliques. "
-        "Pipeline = todas as fontes · fb = facebook-ads/ig/fb · ggl = google-ads · outr = resto. "
-        f"leads_capi na janela: 7d={_n(r7,'n'):.0f} · 3d={_n(r3,'n'):.0f} · 1d={_n(r1,'n'):.0f}_"
-    )}]})
+    # Bloco "Tracking FBP/FBC" + nota de contexto removidos do DM a pedido (28/06).
 
 
 def _slack_google_funnel(v: dict, B: list):
