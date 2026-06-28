@@ -26,6 +26,7 @@ from src.monitoring.google_variant import (
     DEFAULT_BUCKET,
 )
 from src.monitoring.daily_check_aggregations import compute_variant_cpl_conv
+from src.monitoring.digest import _ab_bucket_label as _ab_label
 
 
 # ── parse do elo lead→campanha ────────────────────────────────────────────────
@@ -170,10 +171,41 @@ def test_render_bloco_por_variante_google():
         b.get("text", {}).get("text", "") if b["type"] == "section" else b["elements"][0]["text"]
         for b in B
     )
-    assert "Por variante (leads reais Google" in txt, txt
+    assert "── Google ──" in txt, txt    # seção Google unificada (spend/cliques + variante)
     assert "192" in txt           # leads do bucket Lead
     # Champion/Challenger (0 leads) não devem aparecer como linha de variante Google
     # (some igual ao Meta); só o cabeçalho + a linha Lead.
+
+
+def test_render_esconde_balde_fantasma():
+    # balde com 0 lead ontem E LF cpl=0,00 (campanha antiga desligada, sem spend)
+    # NÃO deve aparecer; balde com LF cpl real (>0) aparece.
+    from src.monitoring.digest import _slack_unified_funnel
+    pv = {
+        'Lead': {'leads': 100, 'cpl': 5.0, 'conv_lp': 30.0, 'spend': 500.0, 'lpv': 333},
+        'Champion': {'leads': 0, 'cpl': None, 'conv_lp': None, 'spend': 0.0, 'lpv': 0},
+        'Challenger': {'leads': 0, 'cpl': None, 'conv_lp': None, 'spend': 0.0, 'lpv': 0},
+    }
+    pv_lf = {
+        'Lead': {'leads': 700, 'cpl': 5.2, 'conv_lp': 31.0, 'spend': 3640.0, 'lpv': 2258},
+        'Champion': {'leads': 3, 'cpl': 0.0, 'conv_lp': None, 'spend': 0.0, 'lpv': 0},   # FANTASMA
+        'Challenger': {'leads': 0, 'cpl': None, 'conv_lp': None, 'spend': 0.0, 'lpv': 0},
+    }
+    v = {
+        "funnel": {"unified_funnel": {"window": {}, "pipeline": {}}, "data_quality": {"fbp_fbc_rolling": {}}},
+        "traffic": {"dia_anterior": {"spend": 1000, "clicks": 500, "por_variante": pv}, "por_variante_lf": pv_lf},
+        "google_funnel": {},
+    }
+    B = []
+    _slack_unified_funnel(v, B)
+    txt = " ".join(
+        b.get("text", {}).get("text", "") if b["type"] == "section" else b["elements"][0]["text"]
+        for b in B
+    )
+    assert "── Meta ──" in txt
+    lead_lbl = _ab_label('Lead'); champ_lbl = _ab_label('Champion')
+    assert lead_lbl in txt, "Lead (com dado) deve aparecer"
+    assert champ_lbl not in txt, "Champion fantasma (0 ontem + LF cpl 0) deve sumir"
 
 
 # ── schema estrito: todos os paths novos declarados ──────────────────────────
@@ -206,6 +238,7 @@ tests = [
     test_integra_split_futuro,
     test_lead_sem_campaign_id_conta_em_lead,
     test_render_bloco_por_variante_google,
+    test_render_esconde_balde_fantasma,
     test_schema_declara_por_variante_google,
 ]
 

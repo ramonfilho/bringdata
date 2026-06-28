@@ -1647,73 +1647,59 @@ def _slack_unified_funnel(v: dict, B: list):
     def brk(s):
         return f"fb {_n(s,'fb'):.0f} · ggl {_n(s,'ggl'):.0f} · outr {_n(s,'outr'):.0f}"
 
+    # Funil de anúncio em DOIS blocos espelhados — Meta e Google — cada um com
+    # Spend/Cliques + split por variante (Lead/Champion/Challenger) na mesma
+    # forma. CPL real (spend ÷ leads reais) e conversão de LP. Leads reais =
+    # TODOS os captados (Client/ledger, não respostas de pesquisa). Meta: CPL
+    # com imposto (PIS/COFINS+ISS), LP = leads ÷ landing_page_views. Google:
+    # sem imposto, LP = leads ÷ cliques. Colunas "ontem" (dia anterior) e "LF"
+    # (acumulado do lançamento; omitida se a coleta não preencheu).
+    def _rs(x):
+        return (f"R$ {x:.2f}".replace('.', ',')) if x is not None else "R$ —"
+
+    def _variante_rows(pv, pv_lf):
+        """Linhas por variante. Um balde só aparece se tiver DADO real: leads
+        ontem, OU um CPL de lançamento real (>0). Some o balde fantasma — ex.:
+        campanha antiga desligada, 0 lead ontem e sem spend no LF (R$ — / 0,00)."""
+        out = []
+        for _vk in ('Lead', 'Champion', 'Challenger'):
+            _vd = (pv or {}).get(_vk) or {}
+            _vl = (pv_lf or {}).get(_vk) or {}
+            _vn = _n(_vd, 'leads')
+            _lf_cpl = _vl.get('cpl')
+            if _vn <= 0 and (_lf_cpl is None or _lf_cpl == 0):
+                continue
+            _lbl = _ab_bucket_label(_vk)
+            _conv = _vd.get('conv_lp')
+            _conv_s = (f"{_conv:.1f}%".replace('.', ',')) if _conv is not None else "—"
+            if pv_lf:
+                out.append(f"{_lbl:<18}{_vn:>6,.0f}  CPL ontem {_rs(_vd.get('cpl'))} · LF {_rs(_lf_cpl)} · LP {_conv_s}")
+            else:
+                out.append(f"{_lbl:<18}{_vn:>6,.0f}   CPL {_rs(_vd.get('cpl'))} · LP {_conv_s}")
+        return out
+
+    # ── Meta ── (Meta Insights: spend/cliques + split por variante)
     lines = [
-        "── Anúncio (Meta Insights) ──",
+        "── Meta ──",
         f"Spend          R$ {_n(tr,'spend'):>10,.0f}",
         f"Cliques        {_n(tr,'clicks'):>13,.0f}",
     ]
-    # Anúncio (Google Ads) — gasto do Google na MESMA forma do Meta acima, sem
-    # nome de campanha. Dados do funil Google embutido na view (google_funnel).
+    lines += _variante_rows(tr.get('por_variante') or {},
+                            (v.get('traffic') or {}).get('por_variante_lf') or {})
+
+    # ── Google ── (Google Ads API: MESMA forma do Meta — spend/cliques + split
+    # por variante). Hoje tudo cai em 'Lead' (nenhuma campanha Google plugada no
+    # A/B de modelo); Champion/Challenger aparecem quando o gestor ligar o sinal
+    # ML no Google (basta preencher variant_goal_map no YAML).
     _gf = v.get('google_funnel') or {}
-    if _gf and (_gf.get('total_spend') or _gf.get('por_campanha')):
-        _gcpl = _gf.get('cpl_agregado')
-        _gcpl_s = (("R$ %.2f" % _gcpl).replace('.', ',')) if _gcpl is not None else "R$ —"
+    if _gf and (_gf.get('total_spend') or _gf.get('por_campanha') or _gf.get('por_variante')):
         lines += [
-            "── Anúncio (Google Ads) ──",
+            "── Google ──",
             f"Spend          R$ {(_gf.get('total_spend') or 0):>10,.0f}",
             f"Cliques        {(_gf.get('total_clicks') or 0):>13,.0f}",
-            f"CPL            {_gcpl_s:>13}   ({int(_gf.get('n_leads') or 0)} leads)",
         ]
-    # Por variante (Lead/Champion/Challenger) — CPL real (spend Meta ÷ leads reais
-    # da Client) e conversão de LP (leads reais ÷ landing_page_views). Leads reais =
-    # TODOS os leads captados (tabela Client, não respostas de pesquisa), restritos a
-    # source Meta (allowlist CAPI). CPL já com imposto da Meta (PIS/COFINS+ISS).
-    # Duas colunas: "ontem" (dia anterior, leads ao lado) e "LF" (acumulado do
-    # lançamento). LF omitido se a coleta não preencheu. Só renderiza se houver diário.
-    _pv = tr.get('por_variante') or {}
-    _pv_lf = (v.get('traffic') or {}).get('por_variante_lf') or {}
-    if _pv:
-        def _rs(x): return (f"R$ {x:.2f}".replace('.', ',')) if x is not None else "R$ —"
-        lines.append("── Por variante (leads reais Meta · CPL c/ imposto) ──")
-        for _vk in ('Lead', 'Champion', 'Challenger'):
-            _vd = _pv.get(_vk) or {}
-            _vl = _pv_lf.get(_vk) or {}
-            _vn = _n(_vd, 'leads')
-            # Balde sem lead (nem ontem nem no lançamento) some — ex.: a campanha
-            # antiga LEADQUALIFIED (Champion), desligada. Rótulo via fonte única.
-            if _vn <= 0 and _n(_vl, 'leads') <= 0:
-                continue
-            _lbl = _ab_bucket_label(_vk)
-            _conv = _vd.get('conv_lp')
-            _conv_s = (f"{_conv:.1f}%".replace('.', ',')) if _conv is not None else "—"
-            if _pv_lf:
-                lines.append(f"{_lbl:<18}{_vn:>6,.0f}  CPL ontem {_rs(_vd.get('cpl'))} · LF {_rs(_vl.get('cpl'))} · LP {_conv_s}")
-            else:
-                lines.append(f"{_lbl:<18}{_vn:>6,.0f}   CPL {_rs(_vd.get('cpl'))} · LP {_conv_s}")
-    # Por variante (Google) — MESMA forma do Meta acima. CPL = spend Google ÷
-    # leads Google (sem imposto Meta); LP = leads ÷ cliques (análogo Google do
-    # landing_page_view). Hoje tudo cai em 'Lead' (nenhuma campanha Google plugada
-    # no A/B de modelo); Champion/Challenger aparecem quando o gestor ligar o
-    # sinal ML no Google (basta preencher variant_goal_map no YAML). Os baldes
-    # com 0 lead somem — igual ao Meta.
-    _gpv = _gf.get('por_variante') or {}
-    _gpv_lf = _gf.get('por_variante_lf') or {}
-    if _gpv:
-        def _grs(x): return (f"R$ {x:.2f}".replace('.', ',')) if x is not None else "R$ —"
-        lines.append("── Por variante (leads reais Google · CPL) ──")
-        for _vk in ('Lead', 'Champion', 'Challenger'):
-            _vd = _gpv.get(_vk) or {}
-            _vl = _gpv_lf.get(_vk) or {}
-            _vn = _n(_vd, 'leads')
-            if _vn <= 0 and _n(_vl, 'leads') <= 0:
-                continue
-            _lbl = _ab_bucket_label(_vk)
-            _conv = _vd.get('conv_lp')
-            _conv_s = (f"{_conv:.1f}%".replace('.', ',')) if _conv is not None else "—"
-            if _gpv_lf:
-                lines.append(f"{_lbl:<18}{_vn:>6,.0f}  CPL ontem {_grs(_vd.get('cpl'))} · LF {_grs(_vl.get('cpl'))} · LP {_conv_s}")
-            else:
-                lines.append(f"{_lbl:<18}{_vn:>6,.0f}   CPL {_grs(_vd.get('cpl'))} · LP {_conv_s}")
+        lines += _variante_rows(_gf.get('por_variante') or {}, _gf.get('por_variante_lf') or {})
+
     lines += [
         f"Pesquisa       {_n(stg('pesquisa'),'total'):>13,.0f}   {brk(stg('pesquisa'))}",
         f"Scoreado       {_n(stg('scoreado'),'total'):>13,.0f}   {brk(stg('scoreado'))}",
@@ -1734,7 +1720,8 @@ def _slack_unified_funnel(v: dict, B: list):
         'text': (f"*🎯 Tracking FBP/FBC*  ·  _% sobre leads capturados (leads_capi)_\n"
                  f"```\n" + "\n".join(trk) + "\n```")}})
     B.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': (
-        "_Anúncio = Meta Insights (spend/cliques por variante) + Google Ads API (spend/cliques/CPL + split por variante, dia anterior). "
+        "_Meta = Meta Insights · Google = Google Ads API (ambos: spend/cliques + CPL por variante, dia anterior + LF). "
+        "Meta: CPL inclui imposto (12,15%), LP = leads÷landing_page_views. Google: sem imposto, LP = leads÷cliques. "
         "Pipeline = todas as fontes · fb = facebook-ads/ig/fb · ggl = google-ads · outr = resto. "
         f"leads_capi na janela: 7d={_n(r7,'n'):.0f} · 3d={_n(r3,'n'):.0f} · 1d={_n(r1,'n'):.0f}_"
     )}]})
