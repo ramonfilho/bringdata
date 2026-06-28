@@ -3964,6 +3964,8 @@ async def daily_monitoring_check_railway(
                 _g_funnel['por_variante'] = _g_pv(_g_cmp, _g_yest_records)
                 try:
                     from src.core.launches import resolve_launch_window_brt as _rlw_g
+                    from src.data.ledger_connection import open_ledger_read_connection as _open_ledger_g
+                    from src.data import compose_repository as _compose_repo_g
                     _lw_g = _rlw_g(today=_anchor)
                     _cap_s = _lw_g.cap_start.isoformat()
                     _today_s = _uf_today_mid.strftime('%Y-%m-%d')
@@ -3972,11 +3974,20 @@ async def daily_monitoring_check_railway(
                         _lw_g.cap_start.year, _lw_g.cap_start.month, _lw_g.cap_start.day,
                         tzinfo=_uf_brt,
                     ).astimezone(_tz.utc)
-                    _lf_records_all = _repo_leads.leads_in_range(_cap_dt, datetime.now(_tz.utc))
-                    _g_lf_records = [
-                        r for r in _lf_records_all if (r.utm_source or '').lower() in _g_allow
-                    ]
-                    _g_funnel['por_variante_lf'] = _g_pv(_g_cmp_lf, _g_lf_records)
+                    # _repo_leads/_uf_records já não servem aqui: a ledger_conn original
+                    # foi fechada acima no handler. Abre conexão dedicada (mesmo padrão
+                    # do orchestrator_conn) e fecha no finally — não vaza conexão.
+                    _g_lf_conn = _open_ledger_g()
+                    try:
+                        _g_lf_repo = _compose_repo_g('registros_ml', railway_conn=_g_lf_conn)
+                        _lf_records_all = _g_lf_repo.leads_in_range(_cap_dt, datetime.now(_tz.utc))
+                        _g_lf_records = [
+                            r for r in _lf_records_all if (r.utm_source or '').lower() in _g_allow
+                        ]
+                        _g_funnel['por_variante_lf'] = _g_pv(_g_cmp_lf, _g_lf_records)
+                    finally:
+                        try: _g_lf_conn.close()
+                        except Exception: pass
                 except Exception as _glfe:
                     logger.warning(f"⚠️ Por variante Google (lançamento): {_glfe}")
 
