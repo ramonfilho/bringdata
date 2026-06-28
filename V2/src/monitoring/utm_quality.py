@@ -353,9 +353,9 @@ def compute_utm_quality(
 def _load_top5_baseline(client_id: str = 'devclub') -> Optional[dict]:
     """Lê a barra TOP5 ROAS de configs/reference_audience_profiles/{id}_quality_signal.json.
 
-    Devolve {pct_d9_d10 (em %), run_id, pool_label, generated_at} ou None. O
-    pct vem do baseline como fração (0-1) e é convertido pra % aqui, pra casar
-    com o pct_d9_d10 (já em %) do read-model challenger_quality_by_utm.
+    Devolve {pct_d9_d10 (em %), avg_decil, decil_std, run_id, pool_label,
+    generated_at} ou None. O pct vem do baseline como fração (0-1) e é convertido
+    pra % aqui; avg_decil/decil_std (nota-alvo na régua Challenger) vêm direto.
     """
     from pathlib import Path
     candidates = [
@@ -369,9 +369,12 @@ def _load_top5_baseline(client_id: str = 'devclub') -> Optional[dict]:
                 continue
             with open(c) as f:
                 d = json.load(f)
-            pct = d.get('metrics', {}).get('pct_d9_d10')
+            m = d.get('metrics', {})
+            pct = m.get('pct_d9_d10')
             return {
                 'pct_d9_d10': float(pct) * 100 if pct is not None else None,
+                'avg_decil': m.get('avg_decil'),
+                'decil_std': m.get('decil_std'),
                 'run_id': d.get('model', {}).get('run_id'),
                 'pool_label': d.get('reference_pool', {}).get('label', 'Top5 ROAS'),
                 'generated_at': d.get('generated_at'),
@@ -409,6 +412,8 @@ def build_top5_comparison(
         logger.info('[top5] baseline indisponível — seção vs-TOP5 omitida.')
         return None
     bar = baseline['pct_d9_d10']
+    bar_decil = baseline.get('avg_decil')
+    decil_std = baseline.get('decil_std')
 
     if (baseline.get('run_id') and challenger_run_id
             and baseline['run_id'] != challenger_run_id):
@@ -433,6 +438,7 @@ def build_top5_comparison(
             if e['n'] < min_n:
                 hidden += 1
                 continue
+            # Significância na proporção D9-D10 (mantida p/ JSON/compat)
             p = e['pct_d9_d10'] / 100.0
             se_pp = math.sqrt(max(p * (1 - p), 0.0) / e['n']) * 100 if e['n'] else None
             delta = e['pct_d9_d10'] - bar
@@ -440,17 +446,32 @@ def build_top5_comparison(
                 status = 'acima' if delta > 0 else 'abaixo'
             else:
                 status = 'neutro'
+            # Significância na NOTA (média de decil) — usada pela cor do relatório.
+            # SE pela std do pool TOP5 (aprox.); 2·SE = mesma régua de ruído do pct.
+            delta_decil = se_decil = status_decil = None
+            if bar_decil is not None and e.get('avg_decil') is not None:
+                delta_decil = e['avg_decil'] - bar_decil
+                if decil_std and e['n']:
+                    se_decil = decil_std / math.sqrt(e['n'])
+                if se_decil is not None and abs(delta_decil) > 2 * se_decil:
+                    status_decil = 'acima' if delta_decil > 0 else 'abaixo'
+                else:
+                    status_decil = 'neutro'
             shown.append({
                 **e,
                 'delta_pp': round(delta, 1),
                 'se_pp': round(se_pp, 1) if se_pp is not None else None,
                 'status': status,
+                'delta_decil': round(delta_decil, 2) if delta_decil is not None else None,
+                'se_decil': round(se_decil, 2) if se_decil is not None else None,
+                'status_decil': status_decil,
             })
         return shown, hidden
 
     try:
         out = {
             'bar_pct': round(bar, 1),
+            'bar_decil': bar_decil,
             'pool_label': baseline['pool_label'],
             'generated_at': baseline.get('generated_at'),
             'min_n': min_n,
@@ -522,6 +543,45 @@ def _display_creative(entry: dict) -> str:
     return entry.get('utm', '')
 
 
+_CAMP_AUDIENCE = ('FRIO', 'QUENTE', 'MORNO')
+_DATE_RE = re.compile(r'\d{4}-\d{2}-\d{2}')
+
+
+def _short_campaign_name(utm: str) -> str:
+    """Encurta a UTM de campanha (pipe-delimitada, longona) pro essencial:
+    público + data + tag de optimization_goal. Ex.:
+    'DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1 | 2026-05-26 | LEADHQLB|120244...'
+    → 'FRIO · 2026-05-26 · LEADHQLB'. Sem tag legível, desambígua pelo fim do ID.
+    A UTM completa continua no endpoint JSON; aqui é só leitura no Slack.
+
+    A tag é o token 'LEAD…' imediatamente antes do ID numérico (LEADQUALIFIED =
+    Champion, LEADHQLB = Challenger, ver campaign_classifier); o 'LEAD' solto da
+    taxonomia da campanha é ignorado de propósito."""
+    raw = (utm or '').strip()
+    if not raw:
+        return 'sem_utm'
+    if '{{' in raw:
+        return 'macro não resolvido'
+    if _BARE_ID_RE.match(raw):
+        return f"campanha sem nome (#{raw[-6:]})"
+    parts = [p.strip() for p in raw.split('|') if p.strip()]
+    if len(parts) <= 2:
+        return raw  # já curta (ex.: 'devlf')
+    aud = next((p.upper() for p in parts if p.upper() in _CAMP_AUDIENCE), None)
+    date = next((m.group(0) for p in parts for m in [_DATE_RE.search(p)] if m), None)
+    tag = None
+    if re.fullmatch(r'\d+', parts[-1]) and len(parts) >= 2:
+        cand = re.sub(r'[^A-Za-z]', '', parts[-2]).upper()
+        if re.fullmatch(r'LEAD[A-Z]+', cand) and cand != 'LEAD':
+            tag = cand
+    idtail = None
+    if not tag:
+        m = re.search(r'(\d{6,})\D*$', raw)
+        idtail = f"#{m.group(1)[-6:]}" if m else None
+    bits = [b for b in (aud, date, tag or idtail) if b]
+    return ' · '.join(bits) if bits else raw
+
+
 def _mini_table_block(entry: dict, lf_label: str, marker: str, win_row_label: str = 'janela') -> dict:
     """Section mrkdwn: nome + mini-tabela monoespaçada (janela vs LF).
 
@@ -537,9 +597,9 @@ def _mini_table_block(entry: dict, lf_label: str, marker: str, win_row_label: st
 
     table = (
         "```\n"
-        f"{'':<13}média de decil   %D9, D10   leads\n"
-        f"{win_row_label[:13]:<13}{fd(d_win):<16} {fp(p_win):<10} {entry['n']}\n"
-        f"{'Lançamento':<13}{fd(dlf):<16} {fp(plf):<10} {entry['n_lf']}\n"
+        f"{'':<15}média de decil   %D9, D10   leads\n"
+        f"{win_row_label[:14]:<15}{fd(d_win):<16} {fp(p_win):<10} {entry['n']}\n"
+        f"{'Lançamento':<15}{fd(dlf):<16} {fp(plf):<10} {entry['n_lf']}\n"
         "```"
     )
     text = f"{marker} *{_display_creative(entry)}*\n{table}"
@@ -553,23 +613,35 @@ _TOP5_MARK = {'acima': '🟢', 'abaixo': '🔴', 'neutro': '⚪'}
 _TOP5_LEVEL_LABEL = {'creative': 'Criativos', 'campaign': 'Campanhas'}
 
 
-def _render_top5_section(top5: dict) -> List[dict]:
-    """Seção Slack 'vs padrão TOP5 ROAS' — leitura ABSOLUTA (acima/abaixo da
-    barra), separada do ranking relativo. Régua única do Challenger."""
-    blocks: List[dict] = [{'type': 'divider'}, {
-        'type': 'header',
-        'text': {'type': 'plain_text', 'text': 'vs padrão TOP5 ROAS (régua Challenger)'},
-    }]
+def _top5_line(e: dict, level: str) -> str:
+    """Linha alinhada (code block): status, %D9-D10, Δ vs barra, n, nome. O nome
+    vai no FIM pra os números ficarem sempre alinhados (nome é o campo variável,
+    e nomes de campanha compartilham prefixo — alinhar pelo nome quebraria)."""
+    mark = _TOP5_MARK.get(e['status'], '⚪')
+    if e['status'] == 'neutro':
+        delta = '~padrão'
+    else:
+        sign = '+' if e['delta_pp'] >= 0 else ''
+        delta = f"{sign}{e['delta_pp']:.0f}pp"
+    name = _display_creative(e) if level == 'creative' else _short_campaign_name(e.get('utm') or '')
+    return f"{mark} {e['pct_d9_d10']:>3.0f}% D9-D10  {delta:>8}  n={e['n']:<6} {name}"
+
+
+def _render_unified_top5(top5: dict, lf_label: str, lf_state: str, nlf: int) -> List[dict]:
+    """Lista única por criativo (e por campanha) com o vs-TOP5 embutido — leitura
+    ABSOLUTA na régua do Challenger. Sem mini-tabela, sem seção à parte. Ordenada
+    por %D9-D10 (melhor → pior)."""
     bar = top5['bar_pct']
     pool = top5.get('pool_label') or 'Top5 ROAS'
     gen = (top5.get('generated_at') or '')[:10] or '?'
     min_n = top5.get('min_n')
-    blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': (
-        f"Barra = *{bar:.0f}%* em D9–D10 — qualidade *prevista* pelo Challenger das "
-        f"audiências dos melhores lançamentos ({pool}, de {gen}); não é conversão "
-        f"real. 🟢 acima · 🔴 abaixo · ⚪ dentro do ruído · só N ≥ {min_n}."
-    )}]})
-    CAP = 20
+    blocks: List[dict] = [{'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': (
+        f"*{nlf}* leads no {lf_label} ({lf_state}). Barra TOP5 = *{bar:.0f}%* em "
+        f"D9–D10 — qualidade *prevista* pelo Challenger das audiências dos melhores "
+        f"lançamentos ({pool}, de {gen}); não é conversão real. "
+        f"🟢 acima · 🔴 abaixo · ⚪ dentro do ruído · só N ≥ {min_n}."
+    )}]}]
+    CAP = 25
     for level in ('creative', 'campaign'):
         lv = top5['levels'].get(level) or {}
         rows = lv.get('rows') or []
@@ -577,119 +649,141 @@ def _render_top5_section(top5: dict) -> List[dict]:
             continue
         rows_sorted = sorted(rows, key=lambda e: e['pct_d9_d10'], reverse=True)
         extra = max(0, len(rows_sorted) - CAP)
-        lines = []
-        for e in rows_sorted[:CAP]:
-            mark = _TOP5_MARK.get(e['status'], '⚪')
-            name = _display_creative(e) if level == 'creative' else (e.get('utm') or 'sem_utm')
-            sign = '+' if e['delta_pp'] >= 0 else ''
-            lines.append(
-                f"{mark} *{name}* — {e['pct_d9_d10']:.0f}% D9-D10 "
-                f"({sign}{e['delta_pp']:.0f}pp · n={e['n']})"
-            )
-        txt = f"*{_TOP5_LEVEL_LABEL[level]}*\n" + "\n".join(lines)
+        body = "\n".join(_top5_line(e, level) for e in rows_sorted[:CAP])
+        blocks.append({'type': 'section', 'text': {'type': 'mrkdwn',
+            'text': f"*{_TOP5_LEVEL_LABEL[level]}*\n```\n{body}\n```"}})
         notes = []
         if extra:
             notes.append(f"+{extra} não listados")
         if lv.get('hidden_below_min_n'):
             notes.append(f"{lv['hidden_below_min_n']} abaixo de N≥{min_n} ocultos")
         if notes:
-            txt += f"\n_{' · '.join(notes)}_"
-        blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': txt}})
+            blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn',
+                'text': '_' + ' · '.join(notes) + '_'}]})
     return blocks
 
 
-def render_slack_blocks(r: UtmQualityResult, top5: Optional[dict] = None) -> List[dict]:
-    """
-    Só criativo (ad). Mini-tabela alinhada (janela vs LF) por criativo.
+def _twoline_entry(name: str, marker: str, ontem: Optional[dict], lf: Optional[dict],
+                   win_label: str) -> str:
+    """Bloco de 3 linhas pra um criativo/campanha: nome + linha da janela (ontem)
+    + linha do lançamento, cada uma com a NOTA (média de decil na régua Challenger)
+    e o volume. Linha sem volume mínimo vira '— sem N suficiente'."""
+    def fmt(label: str, row: Optional[dict]) -> str:
+        if not row or row.get('avg_decil') is None:
+            return f"   {label:<11}— Poucos leads"
+        return f"   {label:<11}nota {row['avg_decil']:>4.1f}   Leads={row['n']}"
+    return "\n".join([f"{marker} {name}", fmt(win_label[:10], ontem), fmt('Lançamento', lf)])
 
-    - split_mode='single': lista única ranqueada pior → melhor (poucas UTMs)
-    - split_mode='extremes': 🔴 Piores + 🟢 Melhores (muitas UTMs, disjuntas)
+
+def _render_twoline_top5(top5_window: Optional[dict], top5_lf: Optional[dict], *,
+                         win_label: str, lf_label: str, lf_state: str,
+                         n_win: int, nlf: int) -> List[dict]:
+    """Por criativo/campanha, DUAS linhas — janela (ontem) e lançamento — cada uma
+    com a NOTA (média de decil, régua Challenger). No topo, a nota-alvo dos TOP5.
+    Cor pela nota do lançamento vs alvo. Ordenado pela nota do lançamento."""
+    base = top5_lf or top5_window
+    bar_decil = base.get('bar_decil')
+    alvo = f"{bar_decil:.1f}" if bar_decil is not None else "—"
+    blocks: List[dict] = [{'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': (
+        f"Nota-alvo TOP5 = {alvo}"
+    )}]}]
+    CAP = 20
+
+    def _key(e):  # ordena pela nota; cai pro pct se nota ausente
+        return (e.get('avg_decil') if e.get('avg_decil') is not None else e.get('pct_d9_d10', 0))
+    for level in ('creative', 'campaign'):
+        wmap = {e['utm']: e for e in (((top5_window or {}).get('levels', {}).get(level) or {}).get('rows') or [])}
+        lrows = ((top5_lf or {}).get('levels', {}).get(level) or {}).get('rows') or []
+        order = sorted(lrows, key=_key, reverse=True) if lrows else \
+            sorted(wmap.values(), key=_key, reverse=True)
+        if not order:
+            continue
+        lmap = {e['utm']: e for e in lrows}
+        extra = max(0, len(order) - CAP)
+        entries = []
+        for e in order[:CAP]:
+            utm = e['utm']
+            name = _display_creative(e) if level == 'creative' else _short_campaign_name(utm)
+            ref = lmap.get(utm) or e
+            marker = _TOP5_MARK.get(ref.get('status_decil') or ref.get('status'), '⚪')
+            entries.append(_twoline_entry(name, marker, wmap.get(utm), lmap.get(utm), win_label))
+        body = "\n".join(entries)
+        blocks.append({'type': 'section', 'text': {'type': 'mrkdwn',
+            'text': f"*{_TOP5_LEVEL_LABEL[level]}*\n```\n{body}\n```"}})
+        if extra:
+            blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn',
+                'text': f"_+{extra} não listados_"}]})
+    return blocks
+
+
+def render_slack_blocks(r: UtmQualityResult, top5_lf: Optional[dict] = None,
+                        top5_window: Optional[dict] = None) -> List[dict]:
+    """Relatório de criativo.
+
+    Caminho normal (há barra TOP5): por criativo e campanha, DUAS linhas — janela
+    (ontem) e lançamento — cada uma com %D9-D10 na régua Challenger e Δ vs a barra
+    TOP5. Caminho degradado (sem scores_historicos pro LF / run_id divergente):
+    cai no ranking relativo da janela (mini-tabela), pra não ficar sem nada.
     """
     blocks: List[dict] = []
-
     lf_label = r.window_lf.get('label') or 'LF'
     lf_state = 'em captação' if r.window_lf.get('is_active') else 'encerrado'
-    n_win = r.window.get('n_total', 0)
     nlf = r.window_lf.get('n_total', 0)
     win_label = r.window.get('label') or 'janela'
-    row_label = win_label
 
-    phrase_em = f"em {win_label}"          # "scoreados em 12/06"
-    phrase_de = f"de {win_label}"          # "decil médio de 12/06"
+    blocks.append({
+        'type': 'header',
+        'text': {'type': 'plain_text', 'text': f'Qualidade de Criativo — {lf_label}'},
+    })
 
+    if top5_lf or top5_window:
+        blocks.extend(_render_twoline_top5(
+            top5_window, top5_lf, win_label=win_label, lf_label=lf_label,
+            lf_state=lf_state, n_win=r.window.get('n_total', 0), nlf=nlf))
+        return blocks
+
+    # ── Degradado: sem barra TOP5 (scores_historicos indisponível pro LF) ──
+    n_win = r.window.get('n_total', 0)
     data = r.ranking
     qual = data.get('qualifying', 0)
     total = data.get('total_distinct_creatives', 0)
     split_mode = data.get('split_mode', 'single')
     min_vol = r.min_volume
+    row_label = win_label
 
-    blocks.append({
-        'type': 'header',
-        'text': {'type': 'plain_text',
-                 'text': f'Qualidade de Criativo — {win_label} × {lf_label}'},
-    })
-    blocks.append({
-        'type': 'context',
-        'elements': [{
-            'type': 'mrkdwn',
-            'text': (
-                f"*{n_win}* leads scoreados {phrase_em} · "
-                f"*{nlf}* no {lf_label} ({lf_state}) · "
-                f"*{qual}* de {total} criativos com *N ≥ {min_vol}* leads {phrase_em}"
-            ),
-        }],
-    })
-    blocks.append({
-        'type': 'context',
-        'elements': [{
-            'type': 'mrkdwn',
-            'text': (
-                f"Classificação pelo *decil médio {phrase_de}*. "
-                f'A linha "Lançamento" não afeta o ranking, é apenas '
-                f'informação de tendência.'
-            ),
-        }],
-    })
+    blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': (
+        f"_Comparação vs TOP5 indisponível pro {lf_label} — mostrando ranking "
+        f"relativo da janela ({win_label})._"
+    )}]})
+    blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': (
+        f"*{n_win}* leads em {win_label} · *{nlf}* no {lf_label} ({lf_state}) · "
+        f"*{qual}* de {total} criativos com *N ≥ {min_vol}*"
+    )}]})
     blocks.append({'type': 'divider'})
 
     if qual == 0:
-        blocks.append({
-            'type': 'context',
-            'elements': [{'type': 'mrkdwn',
-                          'text': f'_nenhum criativo com volume mínimo na janela ({win_label})._'}],
-        })
-        if top5:
-            blocks.extend(_render_top5_section(top5))
+        blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn',
+            'text': f'_nenhum criativo com volume mínimo na janela ({win_label})._'}]})
         return blocks
 
     if split_mode == 'single':
         ranked = data.get('ranked') or []
-        blocks.append({
-            'type': 'section',
-            'text': {'type': 'mrkdwn', 'text': '*Ranking — pior → melhor*'},
-        })
+        blocks.append({'type': 'section',
+                       'text': {'type': 'mrkdwn', 'text': '*Ranking — pior → melhor*'}})
         for i, e in enumerate(ranked):
             marker = '🔴' if i == 0 else ('🟢' if i == len(ranked) - 1 else '⚪')
             blocks.append(_mini_table_block(e, lf_label, marker, row_label))
     else:
         worst = data.get('worst') or []
         best = data.get('best') or []
-        blocks.append({
-            'type': 'section',
-            'text': {'type': 'mrkdwn', 'text': '🔴 *Piores*'},
-        })
+        blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '🔴 *Piores*'}})
         for e in worst:
             blocks.append(_mini_table_block(e, lf_label, '🔴', row_label))
         blocks.append({'type': 'divider'})
-        blocks.append({
-            'type': 'section',
-            'text': {'type': 'mrkdwn', 'text': '🟢 *Melhores*'},
-        })
+        blocks.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '🟢 *Melhores*'}})
         for e in best:
             blocks.append(_mini_table_block(e, lf_label, '🟢', row_label))
 
-    if top5:
-        blocks.extend(_render_top5_section(top5))
     return blocks
 
 
