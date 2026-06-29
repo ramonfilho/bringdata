@@ -71,16 +71,18 @@ def _resolve_variantes(pipeline) -> Optional[Dict[str, Dict[str, Any]]]:
     return {"champion": champion, "challenger": challenger}
 
 
-def _load_launch_leads(railway_conn, cap_start: str, cap_end: str) -> pd.DataFrame:
-    """Leads scoráveis da janela de captação, do `registros_ml` (ledger vivo) →
-    formato Sheets. Equivale ao `load_ledger_window` de gerar_scores_2026 (que
-    vive em scripts/, fora da imagem): mesma query, mesmo mapeamento, pra que o
-    delta online use a MESMA definição de janela do backfill. `has_computer` vem
-    do payload ('SIM'/'NAO', 100% fill em quem respondeu pesquisa)."""
+def _load_launch_leads(read_conn, cap_start: str, cap_end: str) -> pd.DataFrame:
+    """Leads scoráveis da janela de captação, do `registros_ml` (ledger vivo, hoje
+    no Cloud SQL) → formato Sheets. Equivale ao `load_ledger_window` de
+    gerar_scores_2026 (que vive em scripts/, fora da imagem): mesma query, mesmo
+    mapeamento, pra que o delta online use a MESMA definição de janela do
+    backfill. `has_computer` vem do payload ('SIM'/'NAO', 100% fill em quem
+    respondeu pesquisa). `read_conn` vem do ponto único
+    `open_ledger_read_connection` (segue a env LEDGER_READ_SOURCE)."""
     from api.railway_mapping import railway_lead_to_sheets_row
 
     end_excl = (pd.to_datetime(cap_end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
-    rows = railway_conn.run(
+    rows = read_conn.run(
         """
         SELECT email, phone, first_name, last_name, created_at, survey_responses,
                utm_source, utm_medium, utm_campaign, utm_content, utm_term,
@@ -175,7 +177,7 @@ def refresh_launch_scores(
     cap_start: str,
     cap_end: str,
     pipeline,
-    railway_conn=None,
+    ledger_read_conn=None,
     ledger_conn=None,
     max_leads: int = MAX_LEADS_POR_RUN,
     core_commit: Optional[str] = None,
@@ -189,8 +191,12 @@ def refresh_launch_scores(
         lf_name: nome do lançamento (ex.: 'LF59'). Vazio → no-op.
         cap_start, cap_end: datas ISO 'YYYY-MM-DD' (BRT) — mesma janela do backfill.
         pipeline: LeadScoringPipeline já instanciado (com A/B carregado).
-        railway_conn, ledger_conn: conexões opcionais (injetadas); se None, abre
-            e fecha as próprias.
+        ledger_read_conn: conexão de LEITURA do `registros_ml`, opcional (injetada
+            nos testes); se None, abre pelo ponto único `open_ledger_read_connection`
+            (segue a env LEDGER_READ_SOURCE → Cloud SQL em prod). NÃO abrir conexão
+            Railway crua aqui: a tabela foi dropada de lá em 24/06.
+        ledger_conn: conexão da tabela `scores_historicos` (Cloud SQL), opcional;
+            se None, abre e fecha a própria via `_cloudsql_conn`.
         max_leads: teto de leads re-scoreados nesta run.
         core_commit: marca de proveniência; default = revisão do Cloud Run.
 
@@ -208,18 +214,11 @@ def refresh_launch_scores(
         return {"status": "skipped", "reason": "A/B não habilitado / variantes não identificadas"}
     champ, chall = papeis["champion"], papeis["challenger"]
 
-    own_railway = railway_conn is None
+    own_read = ledger_read_conn is None
     own_ledger = ledger_conn is None
-    if own_railway:
-        import pg8000.native
-        railway_conn = pg8000.native.Connection(
-            host=os.environ["RAILWAY_DB_HOST"],
-            port=int(os.environ.get("RAILWAY_DB_PORT", "11594")),
-            database=os.environ.get("RAILWAY_DB_NAME", "railway"),
-            user=os.environ.get("RAILWAY_DB_USER", "postgres"),
-            password=os.environ["RAILWAY_DB_PASSWORD"],
-            timeout=30,
-        )
+    if own_read:
+        from src.data.ledger_connection import open_ledger_read_connection
+        ledger_read_conn = open_ledger_read_connection()
     try:
         from src.data.scores_historicos import (
             _cloudsql_conn, existing_score_emails, upsert_scores,
@@ -230,7 +229,7 @@ def refresh_launch_scores(
             existing = existing_score_emails(
                 ledger_conn, lf_name, champ["run_id"], chall["run_id"]
             )
-            leads = _load_launch_leads(railway_conn, cap_start, cap_end)
+            leads = _load_launch_leads(ledger_read_conn, cap_start, cap_end)
             total_janela = len(leads)
             if total_janela:
                 leads = leads[~leads["email"].isin(existing)].reset_index(drop=True)
@@ -296,8 +295,8 @@ def refresh_launch_scores(
                 except Exception:
                     pass
     finally:
-        if own_railway:
+        if own_read:
             try:
-                railway_conn.close()
+                ledger_read_conn.close()
             except Exception:
                 pass
