@@ -605,7 +605,7 @@ google_ads:
   enabled: true
   customer_id: '6266441811'              # conta DevClub (só dígitos)
   login_customer_id: '6351164315'        # MCC BringData (gerencia a conta DevClub 6266441811) — acesso da SA é concedido aqui e cascateia
-  conversion_action_id_with_value: '7649573174'   # LeadQualified (criada 14/06 via create_google_ads_conversion_actions.py)
+  conversion_action_id_with_value: null            # DESLIGADO 29/06 (decisão do operador, PRIORIDADE MÁXIMA): NENHUMA campanha Google deve usar o evento COM VALOR. Só o D9+D10 (high_quality) é enviado. NÃO restaurar sem ordem explícita. (id original: 7649573174 = LeadQualified)
   conversion_action_id_high_quality: '7649572493'  # LeadQualifiedHighQuality
   event_name_with_value: LeadQualified
   event_name_high_quality: LeadQualifiedHighQuality
