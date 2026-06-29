@@ -53,14 +53,19 @@ def _recent_union_cte() -> str:
     as 11 perguntas. registros_ml já vem canônico (copia direto)."""
     hist_survey = _survey_obj("survey_responses", 1)
     leg_survey = _survey_obj("pesquisa", 2)
+    ml_survey = _survey_obj("survey_responses", 2)  # ledger cru é camelCase, data em created_at
     return f"""
     src AS (
-      -- prioridade 1 = produção (registros_ml): survey_responses já é canônico
-      SELECT 1 AS prio, lower(email) AS em, (survey_responses->>'Data')::timestamptz AS dt,
+      -- prioridade 1 = produção (registros_ml, ledger cru): survey camelCase, Data=created_at
+      SELECT 1 AS prio, lower(email) AS em, created_at AS dt,
              email, phone, utm_source, utm_medium, utm_term, utm_campaign, utm_content,
-             user_agent, survey_responses AS canon
+             user_agent,
+             jsonb_build_object('Data', to_char(created_at, 'YYYY-MM-DD"T"HH24:MI:SS'),
+               'E-mail', email, 'Nome Completo', concat_ws(' ', first_name, last_name),
+               'Telefone', phone, 'Source', utm_source, 'Medium', utm_medium, 'Term', utm_term)
+             || {ml_survey} AS canon
       FROM public.registros_ml
-      WHERE (survey_responses->>'Data') ~ '^[0-9]{{4}}-'
+      WHERE created_at >= '{BOUNDARY}'
 
       UNION ALL
       -- prioridade 2 = Railway novo (leads_historico): snake_case → canônico
