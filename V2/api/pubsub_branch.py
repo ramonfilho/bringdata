@@ -633,14 +633,17 @@ def process_pending_pubsub(
             client_id=pipeline._client_config.client_id,
         )
         google_sent = gres.get("sent", 0)
-        # Status por lead a partir do evento 'value' (todo decil dispara value).
+        # Status por lead = melhor desfecho entre os eventos disparados
+        # (sent > error > skipped). Robusto ao evento com valor desligado: se só o
+        # D9+D10 (high_quality) foi enviado, o lead fica 'sent'; quem não recebeu
+        # nada (não-HQ com value off) fica 'skipped', não 'error'.
+        _grank = {"sent": 3, "error": 2, "skipped": 1}
         gstatus: Dict[str, str] = {}
         for gr in gres.get("results", []):
             geid = gr.get("event_id")
-            if gr.get("destination") == "value":
-                gstatus[geid] = "sent" if gr.get("status") == "sent" else "error"
-            elif geid not in gstatus:
-                gstatus[geid] = gr.get("status") or "error"
+            st = gr.get("status") or "error"
+            if _grank.get(st, 0) > _grank.get(gstatus.get(geid, ""), -1):
+                gstatus[geid] = st
         for gl in google_leads:
             geid = gl["event_id"]
             pending_ledger.append((ledger_row(

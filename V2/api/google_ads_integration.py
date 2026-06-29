@@ -305,8 +305,8 @@ def send_batch_events(
     currency = google_config.currency or "BRL"
     hq_decils = set(google_config.high_quality_decils or [])
 
-    if not customer_id or not ca_value:
-        logger.error("GoogleAdsConfig incompleto (customer_id/conversion_action_id_with_value) — não envia.")
+    if not customer_id or (not ca_value and not ca_hq):
+        logger.error("GoogleAdsConfig incompleto (customer_id + nenhuma conversion_action) — não envia.")
         out["errors"] = len(leads)
         return out
 
@@ -329,14 +329,22 @@ def send_batch_events(
             gclid=lead.get("gclid"),   # opcional — None até o front popular
         )
 
-        # 1) evento value-weighted (todos os decis)
-        req = build_ingest_request(
-            events=[event], customer_id=customer_id, conversion_action_id=ca_value,
-            login_customer_id=google_config.login_customer_id, validate_only=dry_run,
-        )
-        res = _post_ingest(req)
-        out["results"].append({"event_id": lead.get("event_id"), "destination": "value", "decil": decil, **res})
-        out["sent" if res["status"] == "sent" else "errors"] += 1
+        # 1) evento value-weighted (todos os decis) — DESLIGÁVEL por config.
+        # conversion_action_id_with_value=null ⇒ NÃO envia. Decisão do operador
+        # (29/06, prioridade máxima): NENHUMA campanha Google deve usar o evento
+        # com valor; só o D9+D10 (high_quality) abaixo.
+        if ca_value:
+            req = build_ingest_request(
+                events=[event], customer_id=customer_id, conversion_action_id=ca_value,
+                login_customer_id=google_config.login_customer_id, validate_only=dry_run,
+            )
+            res = _post_ingest(req)
+            out["results"].append({"event_id": lead.get("event_id"), "destination": "value", "decil": decil, **res})
+            out["sent" if res["status"] == "sent" else "errors"] += 1
+        else:
+            out["results"].append({"event_id": lead.get("event_id"), "destination": "value",
+                                    "decil": decil, "status": "skipped", "reason": "value_event_disabled"})
+            out["skipped"] += 1
 
         # 2) evento HQ (só decis altos) — paralelo ao high_quality do Meta
         if ca_hq and decil in hq_decils:
