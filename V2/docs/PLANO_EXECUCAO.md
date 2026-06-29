@@ -300,7 +300,7 @@ Componentes que só fazem sentido quando a infraestrutura atual virar gargalo re
 
 ### Features futuras (data flywheel)
 Aproveitam volume agregado de múltiplos clientes:
-- **User Agent + dispositivos** — sinal hoje ausente.
+- **User Agent + dispositivos** — **avaliada e arquivada (2026-06-29)**: valor marginal ~zero por redundância com a pesquisa (+0,005 AUC, zero de concentração de decis). Ver [analise_feature_user_agent.md](analise_feature_user_agent.md).
 - **Similar leads** (kNN no espaço de features) — leverage do flywheel cross-cliente.
 - **LTV por comprador** — recompra/upsell.
 - **Histórico de lead_scores anteriores** — quando o mesmo lead reaparece em lançamento posterior.

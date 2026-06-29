@@ -229,6 +229,11 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Status:** snapshot — criado em 2026-06-10. Reproduzível (leads via `load_match_spend_for_lf`; grupo via CSVs `data/devclub/SendFlow*.csv`).
 **Relação:** subsídio empírico da feature "entrou no grupo de WhatsApp" (coleta live em produção via Sendhook). O confounder de **seleção/causalidade** (quem entra já tende a comprar) fica em aberto — só um grupo de controle resolve; o artefato de **match** está descartado.
 
+### `analise_feature_user_agent.md`
+**Papel:** avaliação da feature **User Agent** (aparelho do lead) com a skill `/data-scientist` — e, de passagem, o que prediz o grau de risco da TMB. Veredito: UA **arquivada** (valor marginal ~zero, redundante com a pesquisa: +0,005 AUC, zero de concentração de decis); o grau de risco TMB é dominado por uma única feature ("Você possui cartão de crédito?" — sem cartão ~dobra a chance de "Alto"). Inclui o desenho do teste mínimo no modelo real, caso reabra.
+**Status:** snapshot — criado em 2026-06-29. Modelos de adaptação (RF simplificado) reproduzíveis; dados via `analytics.leads`/`analytics.sales`.
+**Relação:** fecha o item "User Agent + dispositivos" do backlog de features (`PLANO_EXECUCAO.md`, `EXPERIMENTO_MOAT_MODELO.md`). Dados do UA: `CONSOLIDACAO_CLOUDSQL.md`.
+
 ### `INVESTIGACAO_BAIXO_DESEMPENHO.md`
 **Papel:** investigação completa da queda do D10 de ~42% (P1) para ~30% (P3). Documenta hipóteses testadas, causas confirmadas (mudança LQHQ→LQ em 10/03, crash P2 por TMB All + encoding quebrado), análise do gap residual e rollback executado em 13/04/2026.
 **Status:** ativo. Última atualização: 2026-04-13. Investigação encerrada — todas as hipóteses testadas, nenhuma pendente de verificação.
@@ -317,6 +322,7 @@ ANÁLISES (snapshots históricos)
   analise_perfil_leads_devclub.md      (perfil P1→P3)
   analise_calibracao_jan30_abr28.md    (ECE Champion + Challenger — 08/05)
   EXPERIMENTO_MOAT_MODELO.md           (decomposição do moat — 24/04)
+  analise_feature_user_agent.md        (avaliação da feature User Agent — 29/06)
   SISTEMA_VALIDACAO_ML.md              (validate_ml_performance.py)
   revenue_forecast.md                  (previsão de faturamento — MAE 2,6%)
 
