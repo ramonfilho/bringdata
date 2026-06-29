@@ -12,6 +12,12 @@ Trava as duas regressões que derrubaram o relatório de criativo em 28-29/06/20
    `open_ledger_read_connection`. Foi exatamente isso que quebrou: ele apontava
    `RAILWAY_DB_*` na mão e não seguiu a virada de fonte.
 
+3. O carregador dos backfills locais (scripts/gerar_scores_2026.py,
+   `load_ledger_window`) tinha o MESMO bug — lia o `registros_ml` do Railway cru.
+   Ele também deve ler pela porta única. (Outros scripts que leem Railway de
+   propósito — migração/backup pré-drop — ficam de fora; a checagem é só do corpo
+   de `load_ledger_window`, o carregador que alimenta os re-scores dos backfills.)
+
 Contexto arquitetural: `src/data/ledger_connection.py` é o ÚNICO ponto de entrada
 de leitura do `registros_ml`. Nenhum outro módulo deve construir conexão crua pra
 essa tabela.
@@ -68,4 +74,24 @@ def test_caminho_da_scores_historicos_delega_o_literal_de_conexao():
     assert not offenders, (
         f"{offenders} voltou a abrir conexão Cloud SQL crua; delegue pra "
         "open_cloudsql_ledger_connection (ponto único do literal)."
+    )
+
+
+def test_backfill_loader_le_registros_ml_pela_porta_unica():
+    """O carregador dos backfills locais (gerar_scores_2026.load_ledger_window),
+    que faz `FROM registros_ml`, lê pela porta única — não pelo `_railway_conn`
+    cru. Checa só o corpo dessa função: `_railway_conn` segue legítimo em
+    `load_lf55_hybrid` (lê `lead_surveys`, tabela só-Railway)."""
+    src = (V2_ROOT / "scripts" / "gerar_scores_2026.py").read_text()
+    m = re.search(r"def load_ledger_window\(.*?(?=\ndef )", src, re.DOTALL)
+    assert m, "load_ledger_window não encontrada em gerar_scores_2026.py"
+    body = m.group(0)
+    assert "FROM registros_ml" in body, "sanity: load_ledger_window deveria ler registros_ml"
+    # Checa a CHAMADA (com paren), não o nome solto — o docstring cita _railway_conn.
+    assert "_railway_conn(" not in body, (
+        "load_ledger_window voltou a ler o registros_ml do Railway cru; use "
+        "open_ledger_read_connection() (registros_ml só existe no Cloud SQL)."
+    )
+    assert "open_ledger_read_connection(" in body, (
+        "load_ledger_window deve ler pela porta única open_ledger_read_connection."
     )
