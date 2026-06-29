@@ -115,6 +115,37 @@ verbatim → mesmas colunas. **É a parte mais sensível (pesquisa = feature do 
 
 ---
 
+## Recuperação de leads + user_agent (29/06/2026) — branch `feat/recuperacao-leads-ua`
+
+**Motivo.** A `analytics.leads` era um snapshot só da pesquisa antiga (`source=train_pesquisa`) que **parou de capturar a cauda** quando a captação migrou para o `registros_ml` (23/05), e a coluna `user_agent` estava **100% vazia**. Diagnóstico: (1) faltavam ~33k leads recentes (mai/jun) **inteiros**; (2) os ~132k leads de 2026 já presentes estavam **sem UA**. O UA existe ~100% desde fev/2026 — nas tabelas antigas do front (`Lead.userAgent`/`leads_capi.user_agent`, Railway) até mai e no `registros_ml` (Cloud SQL) de mai em diante. Nada perdido — só não puxado.
+
+**ETL: `src/data/etl_leads_recovery.py`** (estende o writer multi-fonte `leads_store`, não cria paralelo — decisão `/sw-architect`). Idempotente, **dry-run por padrão**.
+
+- **Parte A — `recuperar_leads_registros_ml`:** lê `public.registros_ml` (mesma instância Cloud SQL), traduz a pesquisa pelo MESMO `api.railway_mapping.railway_lead_to_sheets_row` que o `scores_refresh` usa, e faz `upsert_leads(source='registros_ml')`. **Resultado: 35.798 leads inseridos** (33.415 net-new), 100% com `user_agent`, 35.753 com `decil`/`score`.
+- **Parte B — `backfill_user_agent`:** UPDATE pontual do `user_agent` nos `source=train_pesquisa` (UA nulo), casando por email + **data mais próxima** (point-in-time — um email pode ter vários UA no tempo) a partir de `Lead.userAgent`/`leads_capi` (Railway). **Resultado: 131.643 linhas preenchidas.**
+
+**Estado final.** `analytics.leads` = **303.475 linhas** (train_pesquisa 267.677 + registros_ml 35.798). UA em **mar–jun/2026 ~100%**; leads de 2025 ficam sem UA (correto — o dado não existia).
+
+**Comando / rollback (minutos).**
+- `python -m src.data.etl_leads_recovery --part A|B|all [--execute]` (sem `--execute` = dry-run).
+- A: `DELETE FROM analytics.leads WHERE source='registros_ml';`
+- B: `UPDATE analytics.leads SET user_agent=NULL WHERE source='train_pesquisa';`
+
+**PENDENTE — para o treino/experimentos enxergarem os leads recuperados:** `leads_reader.read_pesquisa` lê só `source='train_pesquisa'`. Para consumir os `registros_ml`, estender para **união de sources com dedup por email** (prioridade `train_pesquisa`). Mudança aditiva, ainda **não feita**.
+
+---
+
+## Auditoria de qualidade do DB (29/06) — outros buracos, NÃO tratados nesta frente
+
+Profiling read-only do `analytics.*`. Integridade de chaves OK (0 emails/event_id duplicados em `leads`; 0 valores ≤0 e 0 datas futuras/pré-2022 em `sales`). Defeitos/incompletudes registrados para decisão (escopo restrito — não emendados aqui):
+
+1. 🔴 **`sales` — valores do Hotmart corrompidos:** 7 vendas a **~R$1,28–1,30 milhão** (média Hotmart R$30k vs ~R$2k nos outros gateways) — erro de escala/moeda no ETL do Hotmart. Contamina ticket/peso.
+2. 🟡 **`leads.decil`/`leads.score` 100% nulos nos `train_pesquisa`** (snapshot pré-scoring; os `registros_ml` já vêm com decil/score).
+3. 🟡 **`sales.external_id` 100% nulo** (sem chave estável de dedup), `status` 100% nulo, `produto` 62,7% nulo.
+4. 🟡 **`validation_runs`/`validation_metrics`/`meta_insights` = 0 linhas** — camada de resultados nunca populada.
+
+---
+
 ## Documentos relacionados
 
 - `docs/REFATOR_MONITORAMENTO_CAMADA_ACESSO.md` — a camada `src/data/` que esta frente estende.

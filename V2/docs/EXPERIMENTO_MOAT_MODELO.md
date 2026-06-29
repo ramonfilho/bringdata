@@ -112,6 +112,8 @@ Mesmo que a AUC das regras seja competitiva, a **calibração de decis** (propor
 - **Gap real** (gestor em Excel com matching limitado a uma fonte e survey não-normalizado): **~50-60%**
 - **Gap projetado** (após implementar features do backlog — User Agent, Similar_leads, LTV, Lead_score_anteriores, Interação página): **~70-80%**, porque essas features são **flywheel-exclusive** — só existem se o sistema já estiver rodando
 
+> Nota (2026-06-29): o **User Agent** deste backlog foi avaliado e **arquivado** — valor marginal ~zero por redundância com a pesquisa (proxy de poder de compra que a pesquisa já captura). Ver [analise_feature_user_agent.md](analise_feature_user_agent.md).
+
 ### Hipótese de melhoria de modelo identificada
 
 Deploy do Champion v4 com feature set `survey_plus_engineered` (46 features, sem UTM) em vez de `all_features` (60). Ganho esperado: +11pp em monotonia de decis, +0.06 em D10 lift, AUC praticamente igual. Requer retreino + parity audit + canary. Fora do escopo deste experimento.
