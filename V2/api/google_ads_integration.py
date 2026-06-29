@@ -119,6 +119,33 @@ def compute_value(
 
 
 # ---------------------------------------------------------------------------
+# Anti-corrupção do click-id — o front embute o gclid na URL (?gclid=...), não
+# num campo próprio. Esta função traduz "URL crua do Google" → nosso gclid, na
+# fronteira de ingestão. Fonte única: ninguém mais regexa a utm_url por aí.
+# ---------------------------------------------------------------------------
+
+def parse_gclid_from_url(url: Optional[str]) -> Optional[str]:
+    """Extrai o `gclid` (id de clique determinístico do Google) de uma URL de
+    landing page. Robusto a encoding e múltiplos params via urllib.
+
+    Pega só o `gclid` — o id que o `adIdentifiers` do envio já aceita. gbraid/
+    wbraid (variantes de iOS/privacidade) ficam de fora até o envio mapear esses
+    campos; quando entrarem, é só estender aqui (a borda já é única).
+
+    Returns o gclid (str) ou None se a URL não tiver `?gclid=`.
+    """
+    if not url:
+        return None
+    from urllib.parse import urlparse, parse_qs
+    try:
+        vals = parse_qs(urlparse(str(url)).query).get("gclid") or []
+    except Exception:
+        return None
+    g = (vals[0] if vals else "").strip()
+    return g or None
+
+
+# ---------------------------------------------------------------------------
 # Roteamento (allowlist) — thin; o despachante único é quem decide de fato
 # ---------------------------------------------------------------------------
 
