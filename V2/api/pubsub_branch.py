@@ -505,7 +505,10 @@ def process_pending_pubsub(
                     "event_id": eid,
                     "event_timestamp_iso": _event_ts_iso(),
                     "source": utm.get("source"),
-                    "gclid": payload.get("gclid"),          # None até o front popular
+                    # gclid: campo próprio do payload se o front mandar; senão,
+                    # extrai da URL (?gclid=...) na borda de ingestão. Match
+                    # determinístico no envio sem depender de mudança no front.
+                    "gclid": payload.get("gclid") or google_ads.parse_gclid_from_url(utm.get("url")),
                     "ab_conversion_rates": (ab_v.conversion_rates if ab_v else None),
                     "_ack_id": ack_id, "_vn": vn, "_sc": sc, "_di_int": _di_int,
                     "_payload": payload, "_utm": utm, "_survey": survey_dict, "_enrich": enrich,
@@ -648,10 +651,22 @@ def process_pending_pubsub(
                 google_ads_status=gstatus.get(geid, "error"),
             ), gl.get("_ack_id")))
             handled_ack_ids.append(gl.get("_ack_id"))
+        # Cobertura de gclid no lote — fail-loud de atribuição: gclid é o match
+        # key determinístico; se a cobertura despencar, atribuição degrada em
+        # silêncio (3 campanhas de venda já dependem dela). Logado pra alertar.
+        _g_with_gclid = sum(1 for gl in google_leads if gl.get("gclid"))
+        _g_total = len(google_leads)
+        _g_cov = (100.0 * _g_with_gclid / _g_total) if _g_total else 0.0
         logger.info(
             f"📈 [pubsub_branch] Google Ads: sent={gres.get('sent')} "
-            f"skipped={gres.get('skipped')} errors={gres.get('errors')}"
+            f"skipped={gres.get('skipped')} errors={gres.get('errors')} "
+            f"gclid_cov={_g_with_gclid}/{_g_total} ({_g_cov:.0f}%)"
         )
+        if _g_total and _g_cov < 50.0:
+            logger.warning(
+                f"⚠️ [pubsub_branch] cobertura de gclid baixa ({_g_cov:.0f}%) — "
+                f"atribuição Google pode degradar (front parou de mandar ?gclid=?)"
+            )
     elif google_leads and dry_run:
         logger.info(
             f"🧪 [pubsub_branch] dry_run — {len(google_leads)} Google leads montados, NÃO enviados"
