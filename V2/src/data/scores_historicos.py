@@ -15,30 +15,18 @@ load_scores_historicos_cloudsql / ledger_connection).
 from __future__ import annotations
 
 import logging
-import os
-import ssl
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
 
 def _cloudsql_conn():
-    """Abre conexão pg8000 no Cloud SQL ledger (SSL sem verificação — cert
-    self-signed do proxy, mesmo padrão de load_scores_historicos_cloudsql)."""
-    import pg8000.native
-
-    ctx = ssl.create_default_context()
-    ctx.check_hostname = False
-    ctx.verify_mode = ssl.CERT_NONE
-    return pg8000.native.Connection(
-        host=os.environ["LEDGER_DB_HOST"],
-        port=int(os.environ.get("LEDGER_DB_PORT", "5432")),
-        database=os.environ.get("LEDGER_DB_NAME", "ledger"),
-        user=os.environ.get("LEDGER_DB_USER", "ledger_app"),
-        password=os.environ["LEDGER_DB_PASSWORD"],
-        ssl_context=ctx,
-        timeout=30,
-    )
+    """Conexão pg8000 no Cloud SQL ledger — delega pro conector único em
+    `ledger_connection` (fonte única do literal de conexão Cloud SQL). Usada pelo
+    lado da TABELA `scores_historicos` (nossa, só Cloud SQL): leitura do JOIN com
+    `registros_ml` e escrita do upsert."""
+    from src.data.ledger_connection import open_cloudsql_ledger_connection
+    return open_cloudsql_ledger_connection()
 
 
 # ---------------------------------------------------------------------------
