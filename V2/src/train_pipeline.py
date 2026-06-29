@@ -644,7 +644,11 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     # Rollback: leads_source='files' (default).
     if leads_source == 'db':
         from src.data.leads_reader import read_pesquisa
-        df_pesquisa = read_pesquisa()
+        # Fonte ÚNICA unificada (src/data/leads_unify.py): 3 Sheets (início histórico)
+        # + Railway antigo (lead_legado) + Railway novo (leads_historico) + Cloud SQL
+        # ledger (registros_ml), canonizados e deduplicados. Substitui o 'train_pesquisa'
+        # (dump de Sheets, fonte morta e lossy nas 2 features de pesquisa desde mar/2026).
+        df_pesquisa = read_pesquisa(source='train_unified')
         # 'Data' vem como ISO no jsonb (inequívoco) → parsear SEM dayfirst. Com
         # dayfirst=True (o default da validação) o pandas infere formato errado na
         # precisão mista (Sheets tem hora) e coage a maioria a NaT.
