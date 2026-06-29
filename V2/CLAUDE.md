@@ -110,12 +110,14 @@ Toda frente de trabalho (feature nova, refator, migração, mudança de código 
 
 **Fluxo:**
 
-1. **Abrir worktree por frente:** `git worktree add ~/bring_data.worktrees/<nome> -b feat/<nome>`. Cada frente tem working tree próprio — o trabalho não-commitado de uma não vaza pra outra.
+1. **Abrir worktree por frente:** `bash scripts/feature-start.sh <nome>` — faz `git fetch origin` e cria a worktree **a partir do `origin/main` atual**, nunca do HEAD local (que fica velho quando outro terminal avança a `main` — causa recorrente de base desatualizada e diff sujo). Cada frente tem working tree próprio — o trabalho não-commitado de uma não vaza pra outra.
 2. **Avançar isolado:** commits na branch da frente, no seu ritmo.
 3. **Testar em canary SEM tráfego:** `deploy_capi.sh` sai `--no-traffic` (tag canary). Validar na URL da tag. **Nunca** `update-traffic ... =100` de uma revisão que não veio da `main`.
-4. **Juntar via PR → `main`:** resolver conflitos no merge, com as frentes lado a lado.
+4. **Fechar com PR → `main`:** `bash scripts/feature-finish.sh` (push + abre o PR). **O PR é o passo de fechamento OBRIGATÓRIO de toda feature** — a frente não se considera concluída sem PR. Resolver conflitos no merge, com as frentes lado a lado.
 5. **Só então deployar produção** a partir da `main` consolidada e promover o tráfego.
 6. **Limpar:** `git worktree remove <path>` ao terminar (apaga pasta + referência); `git worktree prune` varre órfãs. Worktrees ficam em `~/bring_data.worktrees/`, fora do Desktop.
+
+**Enforcement automático (desde 2026-06-29).** Um hook `PreToolUse` (`.claude/hooks/block-feature-edit-on-main.sh`, registrado em `.claude/settings.local.json`) **bloqueia** qualquer edição de código de feature (`V2/src/`, `V2/api/`, `src/`, `api/`) enquanto o working tree principal está na `main` — forçando a worktree. Docs/configs/`.claude`/`scripts` seguem livres (exceção de infra/trivial). Os helpers `scripts/feature-start.sh` (base sempre `origin/main`) e `scripts/feature-finish.sh` (push + PR) tornam o caminho certo o mais fácil. Com isso a regra acima é **garantida**, não só recomendada — e o passo de PR vira parte fixa do fluxo.
 
 **Por que esta regra existe:** em 13/06/2026 dois terminais trabalhavam na **mesma `main`, no mesmo working tree**, e ambos deployavam direto pra produção. Resultado: um deploy reverteu a env do outro (o consumer voltou a gravar só no Railway e o Cloud SQL ficou ~2h sem receber — **40 leads perdidos** até o backfill), a produção ficou com **pedaços de duas frentes misturados**, e o working tree sujo de uma frente "vazava" pro deploy da outra. Worktree por frente + produção só da `main` teria evitado os três.
 
