@@ -128,8 +128,14 @@ def _survey_para_row(base: dict, pesquisa: dict) -> dict:
 
 def load_ledger_window(cap_start: str, cap_end: str) -> pd.DataFrame:
     """registros_ml (todas as variantes) → formato Sheets. has_computer vem
-    direto do payload Pub/Sub gravado no ledger ('SIM'/'NAO', 100% fill)."""
-    conn = _railway_conn()
+    direto do payload Pub/Sub gravado no ledger ('SIM'/'NAO', 100% fill).
+
+    Lê pela porta única `open_ledger_read_connection` (segue LEDGER_READ_SOURCE →
+    Cloud SQL por default). NÃO usar `_railway_conn` aqui: o `registros_ml` foi
+    dropado do Railway em 24/06; só existe no Cloud SQL. (`_railway_conn` segue
+    legítimo no `load_lf55_hybrid`, que lê `lead_surveys`, tabela só-Railway.)"""
+    from src.data.ledger_connection import open_ledger_read_connection
+    conn = open_ledger_read_connection()
     end_excl = (pd.to_datetime(cap_end) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
     rows = conn.run(
         """
