@@ -4408,6 +4408,7 @@ def _build_top5_window(result, client_id: str, min_n: int = 50):
             win_end=_dt.fromisoformat(w_e),
             client_id=client_id,
             min_n=min_n,
+            pin_lf=False,  # visão do DIA: conta quem entrou na janela, sem amarrar no lf
         )
     except Exception as e:
         logger.warning("[utm-quality] build_top5 janela falhou (lf=%s): %s", lf_name, e)

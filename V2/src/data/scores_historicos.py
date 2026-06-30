@@ -197,27 +197,39 @@ def challenger_quality_by_utm(
     challenger_run_id: str,
     win_start,
     win_end,
+    pin_lf: bool = True,
     conn=None,
 ) -> list:
-    """Qualidade Challenger (pct_d9_d10 + decil médio) por criativo ou campanha
-    no lançamento — `scores_historicos` ⋈ `registros_ml`.
+    """Qualidade Challenger (pct_d9_d10 + decil médio) por criativo ou campanha —
+    `scores_historicos` ⋈ `registros_ml`.
 
     A `scores_historicos` tem o `decil_challenger` (régua única) mas não guarda
     UTM; o UTM vem do `registros_ml` (mesmo banco Cloud SQL), juntado por email.
     Anti fan-out: `DISTINCT ON (email)` pega 1 UTM por lead (o mais recente na
-    janela do LF).
+    janela).
 
     Filtra `challenger_run_id = :run_id` pra NÃO misturar réguas — o caller passa
     o run_id do baseline TOP5 (mesmo modelo). Reusa o predicado de decil do
     `launch_score_geral` ('D09'/'D10' zero-padded).
 
+    Dois modos (DESACOPLAMENTO da janela vs lançamento):
+        pin_lf=True  (LANÇAMENTO): conta só leads carimbados com `lf=:lf` na
+            janela. É a visão acumulada do lançamento — depende do rótulo de LF,
+            o que é correto: a linha "Lançamento" É sobre o lançamento.
+        pin_lf=False (JANELA/diário): conta TODO lead que entrou na janela
+            [win_start, win_end), INDEPENDENTE de qual lançamento carimbou ele.
+            "Quantos entraram ontem" não tem a ver com qual LF o sistema acha que
+            está ativo — então não filtra `lf`. Dedup por email (um lead pode ter
+            linha em >1 LF; o `decil_challenger` é o mesmo, é a régua única) pra
+            não inflar a contagem. Robusto a bagunça de calendário/rótulo.
+
     Args:
-        lf_name: lançamento. None/'' → [].
+        lf_name: lançamento (só usado se pin_lf=True). None/'' com pin_lf=True → [].
         level: 'creative' (utm_content) ou 'campaign' (utm_campaign).
         challenger_run_id: run_id do Challenger a casar (= run_id do baseline TOP5).
-        win_start, win_end: janela UTC do LF — limita o `registros_ml` lido e
-            prende o UTM ao período do lançamento (evita pegar UTM de outro LF de
-            um lead recorrente).
+        win_start, win_end: janela UTC — limita o `registros_ml` lido.
+        pin_lf: True = visão do lançamento (filtra lf); False = visão da janela
+            (só data, sem lf). Default True (compat com a linha "Lançamento").
         conn: conexão Cloud SQL opcional (injetada); None → abre e fecha.
 
     Returns:
@@ -226,7 +238,7 @@ def challenger_quality_by_utm(
         relatório só omite a seção vs-TOP5, nunca quebra). min-N e significância
         ficam na montagem, não aqui (read-model devolve cru).
     """
-    if not lf_name or not challenger_run_id:
+    if not challenger_run_id or (pin_lf and not lf_name):
         return []
     col = _UTM_LEVEL_COL.get(level)
     if col is None:
@@ -241,7 +253,7 @@ def challenger_quality_by_utm(
             logger.warning("[challenger_quality_by_utm] conexão falhou: %s", e)
             return []
     try:
-        sql = (
+        utm_cte = (
             "WITH utm_por_lead AS ("
             f"  SELECT DISTINCT ON (lower(email)) lower(email) AS email_k, {col} AS utm "
             "  FROM registros_ml "
@@ -249,18 +261,41 @@ def challenger_quality_by_utm(
             "    AND created_at >= :ws AND created_at < :we "
             "  ORDER BY lower(email), created_at DESC"
             ") "
+        )
+        if pin_lf:
+            # Visão do LANÇAMENTO: prende ao rótulo do LF (1 linha por email no LF).
+            scores_join = (
+                "FROM scores_historicos s "
+                "JOIN utm_por_lead u ON u.email_k = lower(s.email) "
+                "WHERE s.lf = :lf AND s.challenger_run_id = :run_id "
+                "  AND s.decil_challenger IS NOT NULL "
+            )
+        else:
+            # Visão da JANELA (diário): SEM filtro de lf — conta quem entrou na
+            # janela, independente do rótulo de lançamento. Dedup por email (o
+            # decil é a régua única, igual em qualquer lf) pra não inflar.
+            scores_join = (
+                "FROM ("
+                "  SELECT DISTINCT ON (lower(email)) lower(email) AS email, decil_challenger "
+                "  FROM scores_historicos "
+                "  WHERE challenger_run_id = :run_id AND decil_challenger IS NOT NULL "
+                "  ORDER BY lower(email), generated_at DESC"
+                ") s "
+                "JOIN utm_por_lead u ON u.email_k = s.email "
+            )
+        sql = (
+            utm_cte +
             "SELECT u.utm, COUNT(*) AS n, "
             "AVG(CASE WHEN s.decil_challenger IN ('D09','D10') THEN 1.0 ELSE 0.0 END) AS pct, "
             "AVG(CAST(REPLACE(s.decil_challenger,'D','') AS INTEGER)) AS avg_decil "
-            "FROM scores_historicos s "
-            "JOIN utm_por_lead u ON u.email_k = lower(s.email) "
-            "WHERE s.lf = :lf AND s.challenger_run_id = :run_id "
-            "  AND s.decil_challenger IS NOT NULL "
+            + scores_join +
             "GROUP BY u.utm "
             "ORDER BY n DESC"
         )
-        rows = conn.run(sql, lf=lf_name, run_id=challenger_run_id,
-                        ws=win_start, we=win_end)
+        params = {'run_id': challenger_run_id, 'ws': win_start, 'we': win_end}
+        if pin_lf:
+            params['lf'] = lf_name
+        rows = conn.run(sql, **params)
         out = [
             {
                 'utm': r[0],
@@ -270,9 +305,10 @@ def challenger_quality_by_utm(
             }
             for r in rows
         ]
-        # Fail-loud: há população Challenger pro LF mas o join não casou nenhum
-        # UTM → registros_ml sem UTM na janela, ou chave de email divergindo.
-        if not out:
+        # Fail-loud (só na visão de lançamento): há população Challenger pro LF
+        # mas o join não casou nenhum UTM → registros_ml sem UTM na janela, ou
+        # chave de email divergindo.
+        if not out and pin_lf:
             chk = conn.run(
                 "SELECT COUNT(*) FROM scores_historicos "
                 "WHERE lf = :lf AND challenger_run_id = :run_id "
