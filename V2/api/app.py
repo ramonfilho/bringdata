@@ -4463,26 +4463,52 @@ async def utm_quality_endpoint(
     }
 
 
-@app.get("/monitoring/utm-quality/daily-trafego")
-async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5, client_id: str = 'devclub'):
-    """
-    Relatório diário de criativo do **dia anterior** (dia-calendário BRT), postado
-    no grupo de tráfego. Chamado pelo Cloud Scheduler às 06:00.
+def _resolve_report_channel(dest: str) -> str:
+    """Ponto ÚNICO de destino do relatório de criativo. 'trafego' (default) = canal
+    do cliente (produção, usado pelo cron); 'dm'/'validacao' = DM do operador
+    (validação de formatação antes de liberar pro cliente). Os IDs vêm do config.sh
+    (`UTM_QUALITY_TRAFEGO_CHANNEL` / `SLACK_VALIDATION_DM_CHANNEL`) — pinados lá, não
+    no default da app, pra não vazarem entre revisões (deploy usa --update-env-vars)."""
+    d = (dest or 'trafego').strip().lower()
+    if d in ('dm', 'validacao', 'validation'):
+        return os.getenv('SLACK_VALIDATION_DM_CHANNEL', 'D0A9USV3XEX')
+    return UTM_QUALITY_TRAFEGO_CHANNEL
 
-    O canal é fixo no servidor (`UTM_QUALITY_TRAFEGO_CHANNEL`) — não é param
-    público, então quem chama não escolhe onde posta (só este endpoint posta, e
-    só nesse canal). Reproduzível 1:1 por
-    `/monitoring/utm-quality?start_date=ONTEM&end_date=ONTEM`.
+
+@app.get("/monitoring/utm-quality/daily-trafego")
+async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5,
+                                    client_id: str = 'devclub',
+                                    dest: str = 'trafego',
+                                    date: Optional[str] = None):
+    """
+    Relatório diário de criativo, postado no Slack. Default: dia ANTERIOR (BRT) →
+    grupo de tráfego (cliente), chamado pelo Cloud Scheduler às 06:00.
+
+    Destino parametrizado via `_resolve_report_channel` (ponto único):
+      - dest='trafego' (default): canal do cliente. É o que o cron usa.
+      - dest='dm' (ou 'validacao'): DM do operador — pra VALIDAR formatação antes
+        de liberar pro cliente (política: validação→DM, OK explícito→trafego).
+    `date` (YYYY-MM-DD BRT, opcional): posta um dia específico em vez do ontem —
+    pra conferir um dia passado no DM. Sem `date` = ontem (comportamento do cron).
+
+    Substitui o antigo hack de subir canary com env de canal redirecionado pra
+    postar no DM: agora é `?dest=dm[&date=YYYY-MM-DD]`.
     """
     from src.monitoring.utm_quality import render_slack_blocks, post_to_slack
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-    _BRT = _tz(_td(hours=-3))
-    _ontem = (_dt.now(_BRT) - _td(days=1)).date()
-    _s = _dt(_ontem.year, _ontem.month, _ontem.day, 0, 0, 0, tzinfo=_BRT)
-    _e = _dt(_ontem.year, _ontem.month, _ontem.day, 23, 59, 59, tzinfo=_BRT)
-    start_utc, end_utc = _s.astimezone(_tz.utc), _e.astimezone(_tz.utc)
+    if date:
+        start_utc, end_utc = _utm_quality_day_range_brt(date, date)
+    else:
+        _BRT = _tz(_td(hours=-3))
+        _ontem = (_dt.now(_BRT) - _td(days=1)).date()
+        _s = _dt(_ontem.year, _ontem.month, _ontem.day, 0, 0, 0, tzinfo=_BRT)
+        _e = _dt(_ontem.year, _ontem.month, _ontem.day, 23, 59, 59, tzinfo=_BRT)
+        start_utc, end_utc = _s.astimezone(_tz.utc), _e.astimezone(_tz.utc)
+    channel = _resolve_report_channel(dest)
     try:
         result = _utm_quality_compute(start_utc, end_utc, min_volume=min_volume, top_n=top_n, client_id=client_id)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"compute_utm_quality falhou: {e}")
     top5_lf = _build_top5_for(result, client_id)
@@ -4490,11 +4516,11 @@ async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5, client
     blocks = render_slack_blocks(result, top5_lf=top5_lf, top5_window=top5_window)
     lf_label = result.window_lf.get('label') or '—'
     win_label = result.window.get('label') or 'ontem'
-    post = post_to_slack(UTM_QUALITY_TRAFEGO_CHANNEL, blocks, fallback_text=f'UTM Quality {win_label} × {lf_label}')
+    post = post_to_slack(channel, blocks, fallback_text=f'UTM Quality {win_label} × {lf_label}')
     post['blocks_count'] = len(blocks)
     if not post.get('ok'):
         raise HTTPException(status_code=502, detail=f"Slack: {post.get('error')}")
-    return {'ok': True, 'channel': UTM_QUALITY_TRAFEGO_CHANNEL, 'window': win_label, 'post': post}
+    return {'ok': True, 'channel': channel, 'dest': dest, 'window': win_label, 'post': post}
 
 
 @app.get("/smoke/run-variants")

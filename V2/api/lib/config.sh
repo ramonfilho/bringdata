@@ -181,6 +181,15 @@ build_env_vars() {
     # Voltar pra 'railway' só em rollback consciente.
     ENV_VARS="$ENV_VARS,LEDGER_READ_SOURCE=${LEDGER_READ_SOURCE:-cloudsql}"
 
+    # Canais Slack do relatório de criativo — PINADOS aqui (não confiar no default
+    # da app). O deploy usa --update-env-vars (MESCLA), então um override por-revisão
+    # (ex.: uma canary de validação apontando o relatório pro DM) VAZARIA pro próximo
+    # deploy se o canal de produção não fosse re-setado aqui. Mesmo motivo do
+    # LEDGER_READ_SOURCE acima. C09VD6J8A72 = team-trafego (cliente); D0A9USV3XEX = DM
+    # do operador (validação). O endpoint escolhe via ?dest=trafego|dm.
+    ENV_VARS="$ENV_VARS,UTM_QUALITY_TRAFEGO_CHANNEL=${UTM_QUALITY_TRAFEGO_CHANNEL:-C09VD6J8A72}"
+    ENV_VARS="$ENV_VARS,SLACK_VALIDATION_DM_CHANNEL=${SLACK_VALIDATION_DM_CHANNEL:-D0A9USV3XEX}"
+
     # Preserva META_ACCESS_TOKEN existente
     local CURRENT_META_TOKEN=$(gcloud run services describe "$SERVICE_NAME" \
         --region="$REGION" \
