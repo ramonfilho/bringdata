@@ -113,12 +113,13 @@ Cobertura temporal contínua **2024-12 → 2026-06** (sem gaps); fill rate de `i
 | 5 | `xlsx:*` | 77.703 | 2 | 110 | 0 | 77.591 |
 | | **total** | | | | | **319.257** |
 
-**Pegadinha do `Tem computador/notebook?`:** no `registros_ml` (produção) essa resposta NÃO vem no
-`survey_responses` jsonb — vem na **coluna `has_computer`** (`'SIM'/'NAO'`, mesmo vocabulário do
-`lead_legado`). O branch do `registros_ml` faz override dessa chave canônica a partir da coluna
-(senão os ~38k recentes ficariam com computador nulo). Fill de computador: 71% → **82,6%** geral,
-**100% em jun/26**. O resto faltante é sheet/xlsx histórico que nunca perguntou (irrecuperável do
-ledger) + `lead_surveys` (1.613; recuperável só via `Client.hasComputer`).
+**Pegadinha do `Tem computador/notebook?`:** essa resposta NÃO vem no `survey_responses` jsonb das
+fontes vivas — vem de **coluna separada** (`'SIM'/'NAO'`, mesmo vocabulário do `lead_legado`):
+- `registros_ml` (produção): coluna `has_computer` → override da chave canônica (97,8%; resto = nulos na origem).
+- `lead_surveys`: o `Client.hasComputer` do Railway, puxado por email no mirror (subquery correlata, sem fan-out) → **100%**.
+
+Fill de computador no `train_unified`: 71% → **83,1%** geral, **100% em jun/26**. O que falta é só
+sheet/xlsx histórico que nunca perguntou (irrecuperável — o dado nunca foi coletado).
 
 ---
 

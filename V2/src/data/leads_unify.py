@@ -94,12 +94,14 @@ def _src_cte() -> str:
       FROM public.lead_legado WHERE data IS NOT NULL
 
       UNION ALL
-      -- 3) lead_surveys (espelhado): survey em colunas camelCase, data=submittedAt
+      -- 3) lead_surveys (espelhado): survey em colunas camelCase, data=submittedAt.
+      --    computador vem do Client.hasComputer (espelhado na coluna has_computer do staging).
       SELECT 3, 'lead_surveys', lower("clientEmail"), "submittedAt",
              "clientEmail", NULL, NULL, NULL, NULL, NULL, NULL, NULL,
              jsonb_build_object('Data', {_dt('"submittedAt"')}, 'E-mail', "clientEmail",
                'Nome Completo', NULL, 'Telefone', NULL,
-               'Source', NULL, 'Medium', NULL, 'Term', NULL) || {surv} AS canon
+               'Source', NULL, 'Medium', NULL, 'Term', NULL) || {surv}
+             || jsonb_build_object('Tem computador/notebook?', has_computer) AS canon
       FROM public.{STG_LEAD_SURVEYS} WHERE "submittedAt" IS NOT NULL
 
       UNION ALL
@@ -132,10 +134,15 @@ def mirror_lead_surveys(railway_conn, cloud_conn) -> int:
     """Espelha Railway.lead_surveys → Cloud SQL public.lead_surveys_stg (transform registrado).
     ATÔMICO (DDL transacional: kill no meio faz rollback, nunca deixa tabela parcial) e
     LOSSLESS (assert staging == origem; aborta se perder linha)."""
+    # computador NÃO está no lead_surveys (sem coluna); vem do Client.hasComputer (mesmo
+    # vocabulário 'SIM'/'NAO'). Subquery correlata com LIMIT 1 evita fan-out de join.
     rows = railway_conn.run(
-        'SELECT "clientEmail", "submittedAt", genero, idade, ocupacao, "faixaSalarial", '
-        '"cartaoCredito", "estudouProgramacao", faculdade, "investiuCurso", "atracaoProfissao", '
-        '"interesseEvento" FROM public.lead_surveys')
+        'SELECT ls."clientEmail", ls."submittedAt", ls.genero, ls.idade, ls.ocupacao, '
+        'ls."faixaSalarial", ls."cartaoCredito", ls."estudouProgramacao", ls.faculdade, '
+        'ls."investiuCurso", ls."atracaoProfissao", ls."interesseEvento", '
+        '(SELECT c."hasComputer" FROM public."Client" c '
+        ' WHERE lower(c.email)=lower(ls."clientEmail") AND c."hasComputer" IS NOT NULL LIMIT 1) '
+        'FROM public.lead_surveys ls')
     cloud_conn.run("BEGIN")
     try:
         cloud_conn.run(f"DROP TABLE IF EXISTS public.{STG_LEAD_SURVEYS}")
@@ -143,10 +150,10 @@ def mirror_lead_surveys(railway_conn, cloud_conn) -> int:
             "clientEmail" varchar, "submittedAt" timestamptz, genero varchar, idade varchar,
             ocupacao varchar, "faixaSalarial" varchar, "cartaoCredito" varchar,
             "estudouProgramacao" varchar, faculdade varchar, "investiuCurso" varchar,
-            "atracaoProfissao" varchar, "interesseEvento" varchar)''')
+            "atracaoProfissao" varchar, "interesseEvento" varchar, has_computer varchar)''')
         # batch insert (1 round-trip por lote, não por linha): row-by-row sobre a conexão
         # cloud estourava o timeout de socket em ~1.6k INSERTs.
-        ncols, chunk = 12, 400
+        ncols, chunk = 13, 400
         for start in range(0, len(rows), chunk):
             batch = rows[start:start + chunk]
             vals, params = [], {}
