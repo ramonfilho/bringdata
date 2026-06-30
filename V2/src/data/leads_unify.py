@@ -73,12 +73,15 @@ def _src_cte() -> str:
     surv = _survey_from_cols()
     return f"""
     src AS (
-      -- 1) registros_ml (ledger cru, camelCase, data=created_at)
+      -- 1) registros_ml (ledger cru, camelCase, data=created_at). O computador NÃO vem no
+      --    survey_responses do ledger: vem na coluna has_computer ('SIM'/'NAO', mesmo vocabulário
+      --    do lead_legado). Override da chave canônica pra não perder ~37k recentes.
       SELECT 1 AS prio, 'registros_ml'::text AS prov, lower(email) AS em, created_at AS dt,
              email, phone, utm_source, utm_medium, utm_term, utm_campaign, utm_content, user_agent,
              jsonb_build_object('Data', {_dt('created_at')}, 'E-mail', email,
                'Nome Completo', concat_ws(' ', first_name, last_name), 'Telefone', phone,
-               'Source', utm_source, 'Medium', utm_medium, 'Term', utm_term) || {ml} AS canon
+               'Source', utm_source, 'Medium', utm_medium, 'Term', utm_term) || {ml}
+             || jsonb_build_object('Tem computador/notebook?', has_computer) AS canon
       FROM public.registros_ml WHERE created_at IS NOT NULL
 
       UNION ALL

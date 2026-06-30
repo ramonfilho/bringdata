@@ -100,18 +100,25 @@ não-negativa, e tem motivo. Nenhuma linha "some". O write **aborta** se alguma 
 
 ## 3a. Resultado da reconstrução (execução de 29/06/2026)
 
-`source='train_unified'` em `analytics.leads`: **318.229 linhas**, linhagem 1:1 em
-`analytics.leads_provenance` (318.229), `conserva_tudo = true`, `tudo_bate = true`. Cobertura
-temporal contínua **2024-12 → 2026-06** (sem gaps); fill rate de `idade` ~100% em toda a série.
+`source='train_unified'` em `analytics.leads`: **319.257 linhas** (o total flutua com o `registros_ml`
+vivo), linhagem 1:1 em `analytics.leads_provenance`, `conserva_tudo = true`, `tudo_bate = true`.
+Cobertura temporal contínua **2024-12 → 2026-06** (sem gaps); fill rate de `idade` ~100% na série.
 
 | prio | fonte | na_fonte | excl_data | excl_email | deduplicadas | incluídas |
 |---|---|---|---|---|---|---|
-| 1 | `registros_ml` | 37.325 | 0 | 0 | 2 | 37.323 |
+| 1 | `registros_ml` | 38.353 | 0 | 0 | 2 | 38.351 |
 | 2 | `Lead` | 142.943 | 0 | 51 | 916 | 141.976 |
 | 3 | `lead_surveys` | 1.624 | 0 | 0 | 11 | 1.613 |
 | 4 | `sheet:*` | 59.726 | 0 | 0 | 0 | 59.726 |
 | 5 | `xlsx:*` | 77.703 | 2 | 110 | 0 | 77.591 |
-| | **total** | | | | | **318.229** |
+| | **total** | | | | | **319.257** |
+
+**Pegadinha do `Tem computador/notebook?`:** no `registros_ml` (produção) essa resposta NÃO vem no
+`survey_responses` jsonb — vem na **coluna `has_computer`** (`'SIM'/'NAO'`, mesmo vocabulário do
+`lead_legado`). O branch do `registros_ml` faz override dessa chave canônica a partir da coluna
+(senão os ~38k recentes ficariam com computador nulo). Fill de computador: 71% → **82,6%** geral,
+**100% em jun/26**. O resto faltante é sheet/xlsx histórico que nunca perguntou (irrecuperável do
+ledger) + `lead_surveys` (1.613; recuperável só via `Client.hasComputer`).
 
 ---
 
