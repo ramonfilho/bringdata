@@ -332,3 +332,122 @@ def challenger_quality_by_utm(
                 conn.close()
             except Exception:
                 pass
+
+
+def _empty_decil_dist() -> Dict[str, int]:
+    return {f'D{i:02d}': 0 for i in range(1, 11)}
+
+
+def challenger_decil_dist_by_source(
+    sources,
+    *,
+    challenger_run_id: str,
+    win_start,
+    win_end,
+    lf_name: Optional[str] = None,
+    pin_lf: bool = False,
+    conn=None,
+) -> Optional[Dict[str, Any]]:
+    """Distribuição de decil (D01..D10) na régua ÚNICA do Challenger para os leads
+    de uma FONTE (utm_source) — `scores_historicos` ⋈ `registros_ml`.
+
+    Irmã de `challenger_quality_by_utm`, mas: (a) filtra por `utm_source` (não
+    agrupa por criativo/campanha) e (b) devolve a DISTRIBUIÇÃO de decil (mesmo
+    contrato de `by_source[...]` no digest: `{'distribution': {D01..D10:int},
+    'total':int}`), não pct/avg. Serve pra avaliar um bucket de fonte (ex.: Google,
+    que em produção é roteado ao Champion) na régua do Challenger — o
+    `decil_challenger` existe pra TODO lead, então o bucket é bem-definido.
+
+    `challenger_run_id` casa o baseline/ref (mesmo modelo) — nunca mistura réguas.
+    Dedup por email (DISTINCT ON) nos dois lados evita fan-out do `registros_ml`.
+
+    pin_lf=False (default, JANELA/diário): conta quem entrou em [win_start,win_end)
+    independente do rótulo de LF. pin_lf=True (LANÇAMENTO): prende ao `lf=:lf`.
+
+    Args:
+        sources: iterável de utm_source RAW a incluir (case-insensitive), ex.
+            ['google-ads']. Vazio → distribuição zerada.
+        challenger_run_id: run_id do Challenger a casar (= run_id do baseline).
+        win_start, win_end: janela UTC (limita o `registros_ml`).
+        lf_name: lançamento (só usado se pin_lf=True).
+        pin_lf: prende ao rótulo de LF (default False = visão da janela).
+        conn: conexão Cloud SQL opcional (injetada); None → abre e fecha.
+
+    Returns:
+        {'distribution': {D01..D10:int}, 'total':int} — total pode ser 0 (fonte
+        sem lead na régua). None só em falha dura (conexão/query) — o caller
+        decide degradar (NÃO cair no jan_30). Se pin_lf=True sem lf_name → None.
+    """
+    srcs = [str(s).strip().lower() for s in (sources or []) if str(s).strip()]
+    if not challenger_run_id or (pin_lf and not lf_name):
+        return None
+    if not srcs:
+        return {'distribution': _empty_decil_dist(), 'total': 0}
+
+    own = conn is None
+    if own:
+        try:
+            conn = _cloudsql_conn()
+        except Exception as e:
+            logger.warning("[challenger_decil_dist_by_source] conexão falhou: %s", e)
+            return None
+    try:
+        src_params = {f'src{i}': s for i, s in enumerate(srcs)}
+        src_in = ", ".join(f":{k}" for k in src_params)
+        # 1 fonte por lead (a mais recente na janela).
+        src_cte = (
+            "WITH src_por_lead AS ("
+            "  SELECT DISTINCT ON (lower(email)) lower(email) AS email_k, "
+            "         lower(utm_source) AS src "
+            "  FROM registros_ml "
+            "  WHERE utm_source IS NOT NULL AND utm_source <> '' "
+            "    AND created_at >= :ws AND created_at < :we "
+            "  ORDER BY lower(email), created_at DESC"
+            ") "
+        )
+        if pin_lf:
+            scores_join = (
+                "FROM scores_historicos s "
+                "JOIN src_por_lead u ON u.email_k = lower(s.email) "
+                "WHERE s.lf = :lf AND s.challenger_run_id = :run_id "
+                "  AND s.decil_challenger IS NOT NULL "
+                f"  AND u.src IN ({src_in}) "
+            )
+        else:
+            scores_join = (
+                "FROM ("
+                "  SELECT DISTINCT ON (lower(email)) lower(email) AS email, decil_challenger "
+                "  FROM scores_historicos "
+                "  WHERE challenger_run_id = :run_id AND decil_challenger IS NOT NULL "
+                "  ORDER BY lower(email), generated_at DESC"
+                ") s "
+                "JOIN src_por_lead u ON u.email_k = s.email "
+                f"WHERE u.src IN ({src_in}) "
+            )
+        sql = (
+            src_cte +
+            "SELECT s.decil_challenger AS decil, COUNT(*) AS n "
+            + scores_join +
+            "GROUP BY s.decil_challenger"
+        )
+        params = {'run_id': challenger_run_id, 'ws': win_start, 'we': win_end, **src_params}
+        if pin_lf:
+            params['lf'] = lf_name
+        rows = conn.run(sql, **params)
+        dist = _empty_decil_dist()
+        total = 0
+        for r in rows:
+            key = r[0]
+            if key in dist:
+                dist[key] += int(r[1])
+                total += int(r[1])
+        return {'distribution': dist, 'total': total}
+    except Exception as e:
+        logger.warning("[challenger_decil_dist_by_source] query falhou: %s", e)
+        return None
+    finally:
+        if own:
+            try:
+                conn.close()
+            except Exception:
+                pass

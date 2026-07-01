@@ -3330,6 +3330,40 @@ async def daily_monitoring_check_railway(
         _baseline_champion_payload   = _pure_baseline(_base_champion)
         _baseline_challenger_payload = _pure_baseline(_base_challenger)
 
+        # Régua ÚNICA (Challenger) para o bucket Google. Em produção o Google é
+        # roteado ao Champion (jan_30), então o `by_source` combinado avalia o
+        # Google pelo modelo ANTIGO. Aqui lemos o decil_challenger da
+        # scores_historicos (MESMA régua do score geral) só pra AVALIAR o Google no
+        # Challenger — não toca scoring/CAPI, é relatório. Degrada pra None (o
+        # digest cai no combinado SEM ref, nunca compara com o jan_30).
+        _chal_run_id = None
+        try:
+            _abc_dist = getattr(pipeline, '_ab_test_config', None) if pipeline else None
+            if _abc_dist and getattr(_abc_dist, 'enabled', False):
+                _vn = list(_abc_dist.variants.keys())
+                _chn = next((n for n in _vn if 'challenger' in n.lower()),
+                            _vn[1] if len(_vn) > 1 else None)
+                _cv = _abc_dist.variants.get(_chn) if _chn else None
+                _chal_run_id = getattr(_cv, 'run_id', None)
+        except Exception as _cre:
+            logger.warning(f"⚠️ challenger run_id p/ régua Google falhou: {_cre}")
+
+        def _ggl_challenger_by_source(start_utc, end_utc):
+            """Bucket Google (só) na régua Challenger p/ a janela dada. None se
+            indisponível (sem run_id / falha) → digest não usa jan_30."""
+            if not _chal_run_id:
+                return None
+            try:
+                from src.data.scores_historicos import challenger_decil_dist_by_source
+                g = challenger_decil_dist_by_source(
+                    list(_SRC_GGL_DECIL), challenger_run_id=_chal_run_id,
+                    win_start=start_utc, win_end=end_utc, pin_lf=False,
+                )
+                return {'google': g} if g is not None else None
+            except Exception as _ge:
+                logger.warning(f"⚠️ régua Challenger p/ Google falhou: {_ge}")
+                return None
+
         # Ontem completo BRT (00:00→23:59 BRT do dia anterior)
         _brt = _tz(timedelta(hours=-3))
         _today_brt_midnight = datetime.now(_brt).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -3351,6 +3385,7 @@ async def daily_monitoring_check_railway(
             'baseline_champion':   _baseline_champion_payload,
             'baseline_challenger': _baseline_challenger_payload,
             'by_source':  _decil_dist_by_source(_yest_rows),
+            'by_source_challenger': _ggl_challenger_by_source(_yest_start_utc, _yest_end_utc),
             'by_optgoal': _decil_dist_by_variant(_rec_between(_records_90d_scored, _yest_start_utc, _yest_end_utc, False)),
         }
 
@@ -3396,6 +3431,7 @@ async def daily_monitoring_check_railway(
                 'baseline_champion':   _baseline_champion_payload,
                 'baseline_challenger': _baseline_challenger_payload,
                 'by_source':  _decil_dist_by_source(_lf_rows),
+                'by_source_challenger': _ggl_challenger_by_source(_cs_dt, _ce_dt),
                 'by_optgoal': _decil_dist_by_variant(_rec_between(_records_90d_scored, _cs_dt, _ce_dt, True)),
             }
             # Refresh incremental ONLINE da scores_historicos (passo 3): SÓ na run
