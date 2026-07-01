@@ -1544,7 +1544,9 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
             f"  ·  n={_sg.get('n', 0):,} ({_sg.get('populacao', 'todas as fontes')})"
         )
     # 3 réguas declaradas. Total/Meta usam Ponderada (peso A/B × ref). Lead/
-    # Champion/Google usam Champion. Challenger usa Challenger. Cada linha
+    # Champion (optgoal A/B) usam Champion. Challenger usa Challenger. GOOGLE agora
+    # usa Challenger (régua única, scores_historicos) — em produção é roteado ao
+    # Champion, mas o relatório o AVALIA no Challenger, nunca no jan_30. Cada linha
     # mostra inline qual régua usa pra evitar ambiguidade.
     rows.append('_🟢 bom · 🔴 ruim · ⚪ neutro/incerto_')
     ref_parts = []
@@ -1581,7 +1583,15 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     # Bloco por fonte (Slack block 1)
     rows.append(_row('Total',  _kpis(dist, total),                                              ref_weighted,   'Ponderada'))
     rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta),              ref_weighted,   'Ponderada'))
-    rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl),                ref_champion,   'jan_30'))
+    # Google na régua ÚNICA do Challenger (decil_challenger, scores_historicos) —
+    # NUNCA jan_30. Se a régua Challenger não veio (refresh não rodou / sem run_id),
+    # mostra a distribuição combinada SEM ref (⚪), sem comparar com o modelo antigo.
+    _ggl_chal = (info.get('by_source_challenger') or {}).get('google')
+    if _ggl_chal and int(_ggl_chal.get('total', 0) or 0) > 0:
+        rows.append(_row('Google', _kpis(_ggl_chal.get('distribution') or {}, int(_ggl_chal['total'])),
+                         ref_challenger, 'abr_28'))
+    else:
+        rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl), None))
     rows.append('```')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
