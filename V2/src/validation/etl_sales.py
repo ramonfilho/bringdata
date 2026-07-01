@@ -48,17 +48,40 @@ _FILE_GATEWAYS = ("tmb", "hotpay")
 _DEFAULT_GATEWAYS = _API_GATEWAYS + ("tmb",)  # hotpay é legado, só se pedido
 
 
+def tmb_drop_dir(client_id: str = "devclub") -> Path:
+    """Pasta local (gitignored, V2/data/) onde o operador larga o xlsx do tmb baixado.
+    O tmb não tem API — este é o ponto de entrada manual: baixou → joga aqui → roda o ETL."""
+    return _V2_ROOT / "data" / client_id / "tmb"
+
+
+def _resolve_tmb_paths(tmb_paths, tmb_dir: Path):
+    """Se veio --tmb-paths explícito, usa. Senão, descobre os *.xlsx na pasta de drop."""
+    if tmb_paths:
+        return list(tmb_paths)
+    if tmb_dir and tmb_dir.is_dir():
+        found = sorted(str(p) for p in tmb_dir.glob("*.xlsx"))
+        if found:
+            logger.info("  tmb: %d arquivo(s) descoberto(s) em %s", len(found), tmb_dir)
+            return found
+        logger.info("  tmb: nenhum .xlsx em %s (largue o relatório lá)", tmb_dir)
+    return None
+
+
 def run_sales_etl(
     start: str, end: str, *,
-    gateways=None, tmb_paths=None, hotpay_paths=None,
+    gateways=None, tmb_paths=None, tmb_dir=None, hotpay_paths=None,
     report_type: str = "fechamento", client_id: str = "devclub",
 ) -> dict:
     """Carrega os gateways pedidos e faz upsert em analytics.sales. Retorna o
-    resumo do upsert + contagem carregada por gateway."""
+    resumo do upsert + contagem carregada por gateway. Para o tmb (manual, sem API), se
+    `tmb_paths` não vier, descobre os xlsx na pasta de drop (tmb_drop_dir)."""
     loader = SalesDataLoader()
     gws = list(gateways) if gateways else list(_DEFAULT_GATEWAYS)
     frames = []
     loaded = {}
+
+    if "tmb" in gws:
+        tmb_paths = _resolve_tmb_paths(tmb_paths, Path(tmb_dir) if tmb_dir else tmb_drop_dir(client_id))
 
     def _try(name, fn):
         if name not in gws:
@@ -154,7 +177,10 @@ def main():
     p.add_argument("--end", help="Data fim das vendas (YYYY-MM-DD) — obrigatório fora do --daily")
     p.add_argument("--gateways", nargs="+", default=None,
                    help=f"Gateways a puxar (default: {' '.join(_DEFAULT_GATEWAYS)})")
-    p.add_argument("--tmb-paths", nargs="+", default=None, help="Arquivos TMB (xlsx)")
+    p.add_argument("--tmb-paths", nargs="+", default=None,
+                   help="Arquivos TMB (xlsx) explícitos; se omitido, descobre na pasta de drop")
+    p.add_argument("--tmb-dir", default=None,
+                   help="Pasta com os xlsx do TMB (default: V2/data/<client>/tmb)")
     p.add_argument("--hotpay-paths", nargs="+", default=None, help="Arquivos HotPay (legado)")
     p.add_argument("--report-type", default="fechamento", choices=["fechamento", "pos-devolucoes"])
     p.add_argument("--client", default="devclub")
@@ -167,7 +193,7 @@ def main():
         p.error("--start e --end são obrigatórios (ou use --daily)")
     run_sales_etl(
         args.start, args.end, gateways=args.gateways,
-        tmb_paths=args.tmb_paths, hotpay_paths=args.hotpay_paths,
+        tmb_paths=args.tmb_paths, tmb_dir=args.tmb_dir, hotpay_paths=args.hotpay_paths,
         report_type=args.report_type, client_id=args.client,
     )
 

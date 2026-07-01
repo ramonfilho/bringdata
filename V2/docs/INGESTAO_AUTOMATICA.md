@@ -24,12 +24,28 @@ Só **uma é viva: a `registros_ml`**, onde a produção grava cada lead ao scor
 diário só precisa puxar o pedaço vivo. O rebuild completo das 5 fontes (`leads_unify --write`)
 continua existindo para reconstruir o histórico do zero quando necessário.
 
-### O tmb continua manual (de propósito)
+### O tmb continua manual (de propósito), mas com fluxo de pasta
 
-O tmb é **54% das vendas** mas só vem por **arquivo Excel** (não tem API). Então o job diário
-puxa só os 4 gateways de API; o tmb continua sendo subido na mão no fechamento de cada lançamento
-(`etl_sales --gateways tmb --tmb-paths <xlsx>`), e o job diário **alerta no Slack** se a última
-venda tmb ficar velha — pra essa fonte não sumir em silêncio do dado de treino.
+O tmb é **54% das vendas** mas só vem por **arquivo Excel** (não tem API). Então o job diário na
+nuvem puxa só os 4 gateways de API, e o job diário **alerta no Slack** se a última venda tmb ficar
+velha — pra essa fonte não sumir em silêncio do dado de treino.
+
+Quando você precisar do tmb no banco (ex.: pra emitir uma validação), o fluxo é **local** e simples:
+
+```bash
+# 1) baixe o relatório do tmb e jogue nesta pasta (gitignored, criada na hora):
+#    V2/data/devclub/tmb/
+# 2) rode (da pasta V2/, com o .env presente):
+python -m src.validation.etl_sales --gateways tmb
+```
+
+O `etl_sales` **descobre sozinho** os `.xlsx` em `V2/data/<client>/tmb/` (não precisa digitar
+caminho) e faz upsert no `analytics.sales` do Cloud SQL (idempotente — re-rodar não duplica).
+Pra apontar outra pasta/arquivo: `--tmb-dir <pasta>` ou `--tmb-paths <xlsx…>`.
+
+> Esse fluxo é **local** (roda na sua máquina, grava no banco remoto). O job diário da nuvem não
+> enxerga sua pasta local — se um dia quiser o tmb no job **semanal de validação da nuvem** também,
+> aí sim sobe pro GCS (`upload_tmb_files.sh`).
 
 ---
 
