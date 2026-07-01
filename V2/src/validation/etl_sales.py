@@ -67,6 +67,34 @@ def _resolve_tmb_paths(tmb_paths, tmb_dir: Path):
     return None
 
 
+def tmb_risk_drop_dir(client_id: str = "devclub") -> Path:
+    """Pasta local (gitignored) onde o operador larga o relatório de CONTAS A RECEBER da
+    TMB — o export de parcelas que tem a coluna 'Grau de risco'. É DIFERENTE do de
+    fechamento (que vira as vendas): este alimenta só a satélite analytics.sales_tmb_risk."""
+    return _V2_ROOT / "data" / client_id / "tmb_risco"
+
+
+def ingest_tmb_risk(paths=None, risk_dir=None, client_id: str = "devclub") -> dict:
+    """Lê o(s) relatório(s) de contas a receber da TMB e popula analytics.sales_tmb_risk
+    (email → grau de risco). Se `paths` não vier, descobre os *.xlsx na pasta de drop
+    (tmb_risk_drop_dir). Idempotente (upsert; grau mais recente vence)."""
+    from src.validation.tmb_risk_store import read_tmb_risk_report, upsert_tmb_risk
+
+    d = Path(risk_dir) if risk_dir else tmb_risk_drop_dir(client_id)
+    files = _resolve_tmb_paths(paths, d)  # mesmo resolvedor: paths explícitos ou *.xlsx na pasta
+    if not files:
+        logger.warning("[tmb_risk] nenhum relatório de contas a receber encontrado "
+                       "(largue o xlsx em %s ou passe --tmb-risk-report)", d)
+        return {"loaded_files": 0, "emails": 0, "upsert": {"attempted": 0, "upserted": 0}}
+
+    risk_map: dict = {}
+    for f in files:
+        risk_map.update(read_tmb_risk_report(f))  # múltiplos arquivos: união por email
+    res = upsert_tmb_risk(risk_map, client_id=client_id)
+    logger.info("[tmb_risk] %d arquivo(s), %d emails → satélite: %s", len(files), len(risk_map), res)
+    return {"loaded_files": len(files), "emails": len(risk_map), "upsert": res}
+
+
 def run_sales_etl(
     start: str, end: str, *,
     gateways=None, tmb_paths=None, tmb_dir=None, hotpay_paths=None,
@@ -184,7 +212,16 @@ def main():
     p.add_argument("--hotpay-paths", nargs="+", default=None, help="Arquivos HotPay (legado)")
     p.add_argument("--report-type", default="fechamento", choices=["fechamento", "pos-devolucoes"])
     p.add_argument("--client", default="devclub")
+    p.add_argument("--ingest-tmb-risk", action="store_true",
+                   help="modo satélite de risco: lê o relatório de CONTAS A RECEBER da TMB "
+                        "(coluna 'Grau de risco') e popula analytics.sales_tmb_risk. Não mexe em vendas.")
+    p.add_argument("--tmb-risk-report", nargs="+", default=None,
+                   help="Arquivo(s) de contas a receber TMB; se omitido, descobre em V2/data/<client>/tmb_risco")
+    p.add_argument("--tmb-risk-dir", default=None, help="Pasta com o relatório de risco (default: V2/data/<client>/tmb_risco)")
     args = p.parse_args()
+    if args.ingest_tmb_risk:
+        ingest_tmb_risk(paths=args.tmb_risk_report, risk_dir=args.tmb_risk_dir, client_id=args.client)
+        return
     if args.daily:
         run_daily(window_days=args.window_days, client_id=args.client,
                   tmb_threshold_days=args.tmb_threshold_days)
