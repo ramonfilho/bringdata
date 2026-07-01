@@ -42,6 +42,29 @@ Quando houver dúvida sobre como implementar um item específico: ir ao catálog
 
 ## Comunicação no projeto — linguagem natural sempre primeiro
 
+### REGRA MECÂNICA DE FECHAMENTO (a mais importante desta seção — cumprir SEMPRE)
+
+**Toda resposta que mencione qualquer coisa técnica** — nome de função, tabela, coluna,
+variável, comando (`gcloud …`), arquivo, ID codificado, número de PR/revisão, trecho de SQL —
+**TERMINA com uma linha começando literalmente por `**Em uma frase:**`** seguida de UMA frase
+em português corrente dizendo o que aquilo significa / o que foi feito / o que vem agora.
+
+- **Sem auto-medição:** não existe limite de caracteres pra disparar. Se a mensagem tem um único
+  termo técnico, ela já tem a frase final. É a **última** coisa da mensagem, sempre.
+- **É uma frase, não um parágrafo.** Linguagem que o operador entende sem abrir o código.
+- **Vale para esta mensagem também** e para toda mensagem da sessão, sem exceção.
+
+**Por que esta regra é MECÂNICA e por que as versões anteriores não pegavam:** as regras abaixo
+(resumo no topo só se >800 caracteres; descrever cada termo se houver 2+) eram *condicionais* — exigiam
+o agente parar no meio de uma tarefa técnica, medir tamanho/contar termos e decidir se aplicava. Sob
+foco na tarefa (escrever SQL, rodar ETL, deployar), essa auto-medição é a primeira coisa que cai, e o
+operador recebia resposta após resposta cheia de nome de função sem tradução. A correção é tirar a
+condição: **um artefato fixo, rotulado, na posição final, que se cumpre ou não se cumpre** — fácil de
+checar, impossível de "esquecer por estar no meio do código". Se você está prestes a enviar sem a linha
+`**Em uma frase:**`, a resposta está incompleta.
+
+---
+
 **Regra obrigatória — aplica a conversas em sessão E a documentação nova.**
 
 Toda menção a um item técnico identificado por código — cenários da auditoria de quebra de produção (1.1, 1.2, 2.1, 3.1, etc.), salvaguardas (T1-X, T2-X, T3-X), dívidas técnicas (DT-X), pré-requisitos do segundo cliente (R-X), itens M1/M2/etc do roadmap, gates A/B/C/D, "Cluster N do Erro 2", etc. — precisa vir acompanhada de uma **descrição em linguagem natural** que permita entender o item sem abrir o catálogo correspondente.
