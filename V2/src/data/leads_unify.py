@@ -65,24 +65,31 @@ _DEDUP = ("SELECT DISTINCT ON (em, (dt::date)) * FROM {rel} "
           "WHERE em IS NOT NULL AND em <> '' ORDER BY em, (dt::date), prio")
 
 
-def _src_cte() -> str:
-    """CTE `src`: union das 5 fontes ATÔMICAS, cada uma já canônica + provenance + prioridade.
-    Pré-dedup (inclui linhas sem email — contadas como excluídas na auditoria)."""
+def _registros_ml_select(where_sql: str = "created_at IS NOT NULL") -> str:
+    """Branch prio-1 (registros_ml, ledger vivo) já canônico. `where_sql` parametriza a janela
+    (rebuild = tudo; incremental = created_at > watermark). MESMO transform nos dois → paridade.
+    O computador NÃO vem no survey_responses do ledger: vem na coluna has_computer ('SIM'/'NAO',
+    mesmo vocabulário do lead_legado) → override da chave canônica."""
     ml = _survey_from_jsonb("survey_responses")
-    leg = _survey_from_jsonb("pesquisa")
-    surv = _survey_from_cols()
     return f"""
-    src AS (
-      -- 1) registros_ml (ledger cru, camelCase, data=created_at). O computador NÃO vem no
-      --    survey_responses do ledger: vem na coluna has_computer ('SIM'/'NAO', mesmo vocabulário
-      --    do lead_legado). Override da chave canônica pra não perder ~37k recentes.
       SELECT 1 AS prio, 'registros_ml'::text AS prov, lower(email) AS em, created_at AS dt,
              email, phone, utm_source, utm_medium, utm_term, utm_campaign, utm_content, user_agent,
              jsonb_build_object('Data', {_dt('created_at')}, 'E-mail', email,
                'Nome Completo', concat_ws(' ', first_name, last_name), 'Telefone', phone,
                'Source', utm_source, 'Medium', utm_medium, 'Term', utm_term) || {ml}
              || jsonb_build_object('Tem computador/notebook?', has_computer) AS canon
-      FROM public.registros_ml WHERE created_at IS NOT NULL
+      FROM public.registros_ml WHERE {where_sql}"""
+
+
+def _src_cte() -> str:
+    """CTE `src`: union das 5 fontes ATÔMICAS, cada uma já canônica + provenance + prioridade.
+    Pré-dedup (inclui linhas sem email — contadas como excluídas na auditoria)."""
+    leg = _survey_from_jsonb("pesquisa")
+    surv = _survey_from_cols()
+    return f"""
+    src AS (
+      -- 1) registros_ml (ledger cru, camelCase, data=created_at)
+      {_registros_ml_select()}
 
       UNION ALL
       -- 2) Lead (= lead_legado): pesquisa jsonb camelCase, data=data
@@ -304,6 +311,63 @@ def build_unified(cloud_conn, *, write: bool = False) -> dict:
             "tudo_bate": total == prov_n == incl_total, "por_fonte": rows}
 
 
+def build_incremental(cloud_conn, *, window_days: int = 7) -> dict:
+    """Append/refresh dos leads RECENTES do registros_ml (ledger vivo) no train_unified, SEM tocar
+    no histórico congelado. Reprocessa a janela móvel dos últimos `window_days` (idempotente:
+    upsert por event_id; registros_ml é prio 1 → sobrescreve qualquer fonte de prio menor).
+    Janela móvel (em vez de watermark exato) evita bug de TZ (created_at é naive, capturado_em é
+    timestamptz) e é robusto a gaps: basta a cadência ser < window_days. Para o rebuild completo
+    do histórico use --write."""
+    cloud_conn.run("SET search_path TO analytics, public")
+    _ensure_provenance_table(cloud_conn)
+    # CURRENT_DATE - N é naive (date) → compara com created_at (timestamp) sem conversão de TZ.
+    branch = _registros_ml_select(f"created_at >= (CURRENT_DATE - {int(window_days)})")
+    cloud_conn.run("BEGIN")
+    try:
+        cloud_conn.run("DROP TABLE IF EXISTS _new")
+        cloud_conn.run(
+            f"CREATE TEMP TABLE _new AS SELECT *, md5(em || '|' || (dt::date)::text) AS event_id "
+            f"FROM (SELECT DISTINCT ON (em,(dt::date)) * FROM ({branch}) b "
+            f"      WHERE em IS NOT NULL AND em <> '' ORDER BY em,(dt::date), prio) q")
+        processados = cloud_conn.run("SELECT count(*) FROM _new")[0][0]
+        # quantos já existem no train_unified (qualquer fonte) → serão substituídos (prio 1 vence)
+        substituidos = cloud_conn.run(
+            f"SELECT count(*) FROM analytics.leads WHERE source='{UNIFIED_SOURCE}' "
+            f"AND event_id IN (SELECT event_id FROM _new)")[0][0]
+        if processados:
+            cloud_conn.run(f"DELETE FROM analytics.leads WHERE source='{UNIFIED_SOURCE}' "
+                           f"AND event_id IN (SELECT event_id FROM _new)")
+            cloud_conn.run(f"""
+                INSERT INTO analytics.leads
+                  (client_id, source, event_id, email, phone, capturado_em,
+                   utm_source, utm_medium, utm_campaign, utm_content, utm_term, user_agent,
+                   survey_responses, ingested_at)
+                SELECT 'devclub', '{UNIFIED_SOURCE}', event_id, email, phone, dt,
+                       utm_source, utm_medium, utm_campaign, utm_content, utm_term, user_agent,
+                       canon, now()
+                FROM _new""")
+            cloud_conn.run(f"DELETE FROM {PROVENANCE_TBL} WHERE source='{UNIFIED_SOURCE}' "
+                           f"AND event_id IN (SELECT event_id FROM _new)")
+            cloud_conn.run(f"""
+                INSERT INTO {PROVENANCE_TBL} (source, event_id, provenance, prio, ingested_at)
+                SELECT '{UNIFIED_SOURCE}', event_id, prov, prio, now() FROM _new""")
+        cloud_conn.run("COMMIT")
+    except Exception:
+        try:
+            cloud_conn.run("ROLLBACK")
+        except Exception:
+            pass
+        raise
+    total = cloud_conn.run(f"SELECT count(*) FROM analytics.leads WHERE source='{UNIFIED_SOURCE}'")[0][0]
+    prov_n = cloud_conn.run(f"SELECT count(*) FROM {PROVENANCE_TBL} WHERE source='{UNIFIED_SOURCE}'")[0][0]
+    novos = processados - substituidos
+    logger.info("[leads_unify] incremental janela=%dd: processados=%d novos=%d refresh=%d total=%d",
+                window_days, processados, novos, substituidos, total)
+    return {"mode": "incremental", "window_days": window_days, "processados": processados,
+            "novos": novos, "refresh": substituidos, "total": total, "linhagem": prov_n,
+            "tudo_bate": total == prov_n}
+
+
 def audit_unified(cloud_conn) -> dict:
     """Verificador READ-ONLY: lê a última reconciliação persistida (gerada pelo write, em snapshot
     congelado) e confere que leads == linhagem == soma(incluídas). Não recomputa sobre fonte viva."""
@@ -337,20 +401,25 @@ def main():
     load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     ap = argparse.ArgumentParser(description="Reconstrução da fonte única de leads (train_unified)")
-    ap.add_argument("--write", action="store_true", help="grava + audita atomicamente (default: dry-run)")
+    ap.add_argument("--write", action="store_true", help="rebuild completo + audita atomicamente (default: dry-run)")
+    ap.add_argument("--incremental", action="store_true", help="append/refresh só dos leads recentes do registros_ml (janela móvel) — para a automação diária")
+    ap.add_argument("--window-days", type=int, default=7, help="janela móvel do --incremental em dias (default 7)")
     ap.add_argument("--audit", action="store_true", help="verifica a última reconciliação gravada (read-only)")
     ap.add_argument("--skip-mirror", action="store_true", help="não re-espelhar lead_surveys")
     args = ap.parse_args()
 
     cloud = _open("LEDGER_DB", timeout=1800)  # write materializa ~316k linhas com jsonb: socket folgado
     cloud.run("SET search_path TO analytics, public")
-    if not args.skip_mirror and not args.audit:
+    # incremental e audit não tocam no lead_surveys → não espelham
+    if not args.skip_mirror and not args.audit and not args.incremental:
         rail = _open("RAILWAY_DB", timeout=120)
         mirror_lead_surveys(rail, cloud); rail.close()
 
     def _run():
         if args.audit:
             return audit_unified(cloud)
+        if args.incremental:
+            return build_incremental(cloud, window_days=args.window_days)
         return build_unified(cloud, write=args.write)
 
     # operação transacional + idempotente → retry seguro reconectando em blip de rede.

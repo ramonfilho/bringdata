@@ -83,6 +83,18 @@ SCHEDULER_SCHEDULE="${SCHEDULER_SCHEDULE:-0 10 * * MON}"  # Segunda 10h UTC (7h 
 SCHEDULER_DESCRIPTION="${SCHEDULER_DESCRIPTION:-Validação semanal do modelo ML (toda segunda 10h UTC)}"
 
 # =============================================================================
+# INGESTÃO AUTOMÁTICA (leads incremental + vendas diário) — Cloud Run Jobs
+# =============================================================================
+# Dois jobs batch que populam o banco sozinhos (deploy_ingestion_job.sh):
+#   leads → leads_unify --incremental (anexa leads novos do ledger ao train_unified)
+#   sales → etl_sales --daily (4 gateways de API + alerta se o tmb manual atrasar)
+INGESTION_LEADS_JOB="${INGESTION_LEADS_JOB:-ingestion-leads-incremental}"
+INGESTION_SALES_JOB="${INGESTION_SALES_JOB:-ingestion-sales-daily}"
+# Schedules em UTC. 09:00 UTC = 06:00 BRT (leads), 09:30 UTC = 06:30 BRT (vendas, após leads).
+INGESTION_LEADS_SCHEDULE="${INGESTION_LEADS_SCHEDULE:-0 9 * * *}"
+INGESTION_SALES_SCHEDULE="${INGESTION_SALES_SCHEDULE:-30 9 * * *}"
+
+# =============================================================================
 # SLACK (NOTIFICATIONS)
 # =============================================================================
 
