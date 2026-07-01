@@ -451,3 +451,54 @@ def aplicar_filtro_status_risco(
     logger.info(f"  TOTAL FINAL: {after:,} vendas")
     logger.info("")
     return df
+
+
+def filtrar_risco_tmb(
+    df_vendas: pd.DataFrame,
+    tmb_risk_filter: str,
+    tmb_risk_lookup: dict,
+    risk_values: list,
+    *,
+    origem_col: str = 'origem',
+    email_col: str = 'email',
+) -> pd.DataFrame:
+    """Filtro de risco TMB para quando as vendas vêm do banco (`sales_source='db'`).
+
+    Diferente de `aplicar_filtro_status_risco`: aqui o STATUS já foi filtrado no ETL
+    (guru=aprovadas, asaas=pagos, boletex=sem refund, tmb=efetivado). Este aplica SÓ o
+    grau de risco TMB, mantendo intactos todos os outros gateways. O grau vem do
+    `tmb_risk_lookup` (satélite `analytics.sales_tmb_risk`, servido por `tmb_risk_reader`).
+
+    Semântica idêntica ao caminho de arquivos (paridade):
+      all        → mantém todas as vendas
+      none       → remove todas as TMB (mantém guru/asaas/boletex/hotmart)
+      low        → TMB só com grau em risk_values[:1]  (+ risco desconhecido, igual files)
+      low_medium → TMB só com grau em risk_values      (+ risco desconhecido, igual files)
+
+    Manter TMB de risco desconhecido em low/low_medium espelha `_risk_ok` do modo files
+    (`risk is None or risk in allowed`) — paridade acima de opinião.
+    """
+    if tmb_risk_filter == 'all' or origem_col not in df_vendas.columns:
+        return df_vendas
+
+    df = df_vendas.copy()
+    is_tmb = df[origem_col].astype(str).str.lower().eq('tmb')
+
+    if tmb_risk_filter == 'none':
+        keep_tmb = pd.Series(False, index=df.index)
+    elif tmb_risk_filter in ('low', 'low_medium'):
+        allowed = set(risk_values[:1] if tmb_risk_filter == 'low' else risk_values)
+        emails = df[email_col].astype(str).str.strip().str.lower() if email_col in df.columns else pd.Series('', index=df.index)
+        grau = emails.map(lambda e: (tmb_risk_lookup or {}).get(e))
+        keep_tmb = is_tmb & (grau.isna() | grau.isin(allowed))
+    else:
+        logger.warning(f"  filtrar_risco_tmb: filtro '{tmb_risk_filter}' inválido — mantendo todas TMB")
+        return df_vendas
+
+    keep = (~is_tmb) | keep_tmb
+    before, tmb_before = len(df), int(is_tmb.sum())
+    df = df[keep].copy()
+    tmb_after = int((keep & is_tmb).sum())
+    logger.info(f"  [db] filtro risco TMB '{tmb_risk_filter}': TMB {tmb_after:,}/{tmb_before:,} mantidas; "
+                f"total {len(df):,} (de {before:,})")
+    return df
