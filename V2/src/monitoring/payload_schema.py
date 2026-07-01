@@ -436,6 +436,24 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'lead_quality_metrics.decil_distribution_previous_day.by_source.google.distribution.D09': (R, None),
     'lead_quality_metrics.decil_distribution_previous_day.by_source.google.distribution.D10': (R, None),
     'lead_quality_metrics.decil_distribution_previous_day.by_source.google.total':      (R, None),
+    # by_source_challenger — bucket Google reavaliado na régua ÚNICA do Challenger
+    # (decil_challenger, scores_historicos). Renderizado na linha Google do painel de
+    # decis (nunca jan_30). Pode vir None (régua indisponível) → chave só aparece como
+    # leaf; o audit não exige presença, só declaração.
+    'lead_quality_metrics.decil_distribution_previous_day.by_source_challenger':                       (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.by_source_challenger.google':                (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.by_source_challenger.google.distribution':   (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.by_source_challenger.google.distribution.D01': (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.by_source_challenger.google.distribution.D02': (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.by_source_challenger.google.distribution.D03': (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.by_source_challenger.google.distribution.D04': (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.by_source_challenger.google.distribution.D05': (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.by_source_challenger.google.distribution.D06': (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.by_source_challenger.google.distribution.D07': (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.by_source_challenger.google.distribution.D08': (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.by_source_challenger.google.distribution.D09': (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.by_source_challenger.google.distribution.D10': (R, None),
+    'lead_quality_metrics.decil_distribution_previous_day.by_source_challenger.google.total':          (R, None),
     # by_optgoal — 3 buckets excludentes (Lead/Champion/Challenger) por optimization_goal Meta
     'lead_quality_metrics.decil_distribution_previous_day.by_optgoal':                  (R, None),
     'lead_quality_metrics.decil_distribution_previous_day.by_optgoal.lead':             (R, None),
@@ -572,6 +590,21 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'lead_quality_metrics.decil_distribution_current_launch.by_source.google.distribution.D09': (R, None),
     'lead_quality_metrics.decil_distribution_current_launch.by_source.google.distribution.D10': (R, None),
     'lead_quality_metrics.decil_distribution_current_launch.by_source.google.total':    (R, None),
+    # by_source_challenger — bucket Google na régua ÚNICA do Challenger (ver janela previous_day).
+    'lead_quality_metrics.decil_distribution_current_launch.by_source_challenger':                       (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.by_source_challenger.google':                (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.by_source_challenger.google.distribution':   (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.by_source_challenger.google.distribution.D01': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.by_source_challenger.google.distribution.D02': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.by_source_challenger.google.distribution.D03': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.by_source_challenger.google.distribution.D04': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.by_source_challenger.google.distribution.D05': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.by_source_challenger.google.distribution.D06': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.by_source_challenger.google.distribution.D07': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.by_source_challenger.google.distribution.D08': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.by_source_challenger.google.distribution.D09': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.by_source_challenger.google.distribution.D10': (R, None),
+    'lead_quality_metrics.decil_distribution_current_launch.by_source_challenger.google.total':          (R, None),
     # by_optgoal — 3 buckets excludentes (Lead/Champion/Challenger) por optimization_goal Meta
     'lead_quality_metrics.decil_distribution_current_launch.by_optgoal':                (R, None),
     'lead_quality_metrics.decil_distribution_current_launch.by_optgoal.lead':           (R, None),
