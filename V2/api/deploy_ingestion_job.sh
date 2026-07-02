@@ -232,7 +232,13 @@ parse_arguments() {
             *) print_error "Argumento desconhecido: $1"; usage;;
         esac
     done
-    [ -z "$JOB_KIND" ] && { print_error "--job é obrigatório (leads|sales)"; usage; }
+    # NÃO usar `[ -z ] && {…}` como última linha: quando JOB_KIND é válido o teste
+    # retorna 1 e, sob `set -e`, mata o script antes de resolver/buildar/deployar
+    # (era o motivo de a ingestão nunca ter subido). if/then/fi não propaga o status.
+    if [ -z "$JOB_KIND" ]; then
+        print_error "--job é obrigatório (leads|sales)"
+        usage
+    fi
 }
 
 # =============================================================================
