@@ -3238,11 +3238,12 @@ async def daily_monitoring_check_railway(
                 'challenger': {'distribution': dists['Challenger'], 'total': totals['Challenger']},
             }
 
-        # Baselines de decis Top 6 ROAS (scoreados separadamente por Champion e Challenger).
-        # Em runtime, ponderamos pela proporção de leads atribuídos a cada variante na
-        # janela — Champion é mais "pessimista" (D10≈36%), Challenger mais "otimista"
-        # (D10≈12%), comparar contra um único baseline gerava falso alarme.
-        _base_champion: Optional[Dict[str, Any]] = None
+        # Baseline de decis Top 6 ROAS na régua ÚNICA do Challenger (abr_28). É a
+        # referência de TODOS os buckets — o relatório inteiro roda numa régua só,
+        # e cada bucket é reavaliado no `decil_challenger` (scores_historicos) antes
+        # de comparar. O modelo anterior jan_30 foi REMOVIDO do relatório: não há
+        # mais baseline Champion nem Ponderada (mistura ponderada jan_30+abr_28) —
+        # eles davam a ilusão do bucket Lead "38% em D9-D10" na régua otimista antiga.
         _base_challenger: Optional[Dict[str, Any]] = None
         _base_label = 'Top 6 ROAS atribuível 60d'
         try:
@@ -3252,73 +3253,17 @@ async def daily_monitoring_check_railway(
             if _baseline_path.exists():
                 _bjson = _json_decil.loads(_baseline_path.read_text())
                 _rp = (_bjson.get('reference_pool') or {})
-                _bch = _rp.get('decil_distribution_champion') or {}
                 _bcl = _rp.get('decil_distribution_challenger') or {}
                 _base_label = _rp.get('label', _base_label)
-                if _bch and _bcl:
-                    _base_champion   = {'distribution': _bch.get('distribution', {}), 'total': _bch.get('n_leads', 0)}
+                if _bcl:
                     _base_challenger = {'distribution': _bcl.get('distribution', {}), 'total': _bcl.get('n_leads', 0)}
         except Exception as _be:
             logger.warning(f"⚠️ baseline decis indisponível: {_be}")
 
-        # Helper: split tuples (com UTMs) por variante A/B usando ABTestConfig do pipeline.
-        # Cada tuple = (leadScore, decil, createdAt, source, medium, campaign, content, term, pageUrl).
-        # Retorna (n_champion, n_challenger). Default = champion (utm_pattern vazio).
-        def _split_by_variant(rows: list) -> tuple:
-            _ab = getattr(pipeline, '_ab_test_config', None) if pipeline else None
-            if not _ab or not _ab.enabled or not _ab.variants:
-                return (len(rows), 0)
-            _champ_name = next((n for n, v in _ab.variants.items() if not v.utm_pattern and not v.url_pattern), None)
-            _chal_name = next((n for n in _ab.variants.keys() if n != _champ_name), None)
-            n_c, n_ch = 0, 0
-            for r in rows:
-                _utms = {'utm_source': r[3], 'utm_medium': r[4], 'utm_campaign': r[5],
-                         'utm_content': r[6], 'utm_term': r[7]}
-                _m = _ab.match_variant(_utms, event_source_url=r[8])
-                if _m is None:
-                    n_c += 1  # default → champion
-                else:
-                    _mn = next((n for n, v in _ab.variants.items() if v is _m), None)
-                    if _mn == _chal_name:
-                        n_ch += 1
-                    else:
-                        n_c += 1
-            return (n_c, n_ch)
-
-        # Helper: baseline ponderado dado n_champion + n_challenger da janela.
-        # Retorna dict {pct: {D01..D10}, n_champion, n_challenger, w_champion, w_challenger, label}.
-        def _weighted_baseline(n_champ: int, n_chal: int) -> Optional[Dict[str, Any]]:
-            if not _base_champion or not _base_challenger:
-                return None
-            n_total = n_champ + n_chal
-            if n_total == 0:
-                return None
-            w_c = n_champ / n_total
-            w_ch = n_chal / n_total
-            _ch_d = _base_champion['distribution']; _ch_t = _base_champion['total'] or 1
-            _cl_d = _base_challenger['distribution']; _cl_t = _base_challenger['total'] or 1
-            pct = {}
-            for k in [f'D{i:02d}' for i in range(1, 11)]:
-                _pc = (_ch_d.get(k, 0) / _ch_t) * 100
-                _pl = (_cl_d.get(k, 0) / _cl_t) * 100
-                pct[k] = round(w_c * _pc + w_ch * _pl, 2)
-            return {
-                'pct':           pct,
-                'n_champion':    int(n_champ),
-                'n_challenger':  int(n_chal),
-                'w_champion':    round(w_c, 4),
-                'w_challenger':  round(w_ch, 4),
-                'label':         _base_label,
-            }
-
-        # Helper: baseline puro (sem ponderação) — usado pelo digest pra
-        # comparar buckets isolados contra a régua correta.
-        # Champion bucket (e Lead/Google scoreados pelo Champion model) usa
-        # _base_champion. Challenger bucket usa _base_challenger.
-        # Bug histórico (2026-05-28): _slack_decis_window comparava todos os
-        # buckets contra a baseline ponderada, fazendo o bucket Challenger
-        # (~28% D9-D10 na régua dele) parecer -31pp ruim contra Champion
-        # baseline (57.8%). Fix: passar as 2 baselines separadas no payload.
+        # Helper: baseline puro (pct por decil) na régua do Challenger — a ÚNICA
+        # referência do relatório agora. (Antes havia baseline Champion + Ponderada
+        # pra comparar buckets scoreados por modelos diferentes; com o relatório
+        # inteiro reavaliado no decil_challenger, uma régua e uma ref bastam.)
         def _pure_baseline(b: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
             if not b:
                 return None
@@ -3327,15 +3272,9 @@ async def daily_monitoring_check_railway(
             pct = {f'D{i:02d}': round((d.get(f'D{i:02d}', 0) / t) * 100, 2) for i in range(1, 11)}
             return {'pct': pct, 'n_leads': int(b.get('total') or 0), 'label': _base_label}
 
-        _baseline_champion_payload   = _pure_baseline(_base_champion)
         _baseline_challenger_payload = _pure_baseline(_base_challenger)
 
-        # Régua ÚNICA (Challenger) para o bucket Google. Em produção o Google é
-        # roteado ao Champion (jan_30), então o `by_source` combinado avalia o
-        # Google pelo modelo ANTIGO. Aqui lemos o decil_challenger da
-        # scores_historicos (MESMA régua do score geral) só pra AVALIAR o Google no
-        # Challenger — não toca scoring/CAPI, é relatório. Degrada pra None (o
-        # digest cai no combinado SEM ref, nunca compara com o jan_30).
+        # run_id do Challenger (abr_28) — casa os leads na régua única scores_historicos.
         _chal_run_id = None
         try:
             _abc_dist = getattr(pipeline, '_ab_test_config', None) if pipeline else None
@@ -3346,23 +3285,94 @@ async def daily_monitoring_check_railway(
                 _cv = _abc_dist.variants.get(_chn) if _chn else None
                 _chal_run_id = getattr(_cv, 'run_id', None)
         except Exception as _cre:
-            logger.warning(f"⚠️ challenger run_id p/ régua Google falhou: {_cre}")
+            logger.warning(f"⚠️ challenger run_id p/ régua de decis falhou: {_cre}")
 
-        def _ggl_challenger_by_source(start_utc, end_utc):
-            """Bucket Google (só) na régua Challenger p/ a janela dada. None se
-            indisponível (sem run_id / falha) → digest não usa jan_30."""
-            if not _chal_run_id:
-                return None
-            try:
-                from src.data.scores_historicos import challenger_decil_dist_by_source
-                g = challenger_decil_dist_by_source(
-                    list(_SRC_GGL_DECIL), challenger_run_id=_chal_run_id,
-                    win_start=start_utc, win_end=end_utc, pin_lf=False,
-                )
-                return {'google': g} if g is not None else None
-            except Exception as _ge:
-                logger.warning(f"⚠️ régua Challenger p/ Google falhou: {_ge}")
-                return None
+        def _challenger_decis_buckets(recs) -> Dict[str, Any]:
+            """recs: List[ChallengerDecilRec] (régua abr_28) → distribution (Total),
+            by_source (meta/google) e by_optgoal (lead/champion/challenger), TODOS na
+            MESMA régua e MESMA população. Reusa os MESMOS classificadores das versões
+            de produção (_SRC_META_DECIL/_SRC_GGL_DECIL por fonte; _bucket_from_utm por
+            optgoal, só em fontes Meta) — só a régua (decil_challenger) muda."""
+            _mk = lambda: {f'D{i:02d}': 0 for i in range(1, 11)}
+            d_tot = _mk(); n_tot = 0
+            d_meta = _mk(); n_meta = 0
+            d_ggl = _mk(); n_ggl = 0
+            og   = {b: _mk() for b in ('Lead', 'Champion', 'Challenger')}
+            og_n = {b: 0     for b in ('Lead', 'Champion', 'Challenger')}
+            for rec in recs:
+                dk = rec.decil
+                if dk not in d_tot:
+                    continue
+                d_tot[dk] += 1; n_tot += 1
+                src = (rec.utm_source or '').strip().lower()
+                if src in _SRC_META_DECIL:
+                    d_meta[dk] += 1; n_meta += 1
+                elif src in _SRC_GGL_DECIL:
+                    d_ggl[dk] += 1; n_ggl += 1
+                if src in _META_SOURCES_OG:
+                    _b = _bucket_from_utm(rec.utm_campaign, _ab_bucket_map_og)
+                    og[_b][dk] += 1; og_n[_b] += 1
+            if og_n['Lead'] > 0 and (og_n['Champion'] + og_n['Challenger']) == 0:
+                logger.warning(
+                    "[decis by_optgoal chal] %d leads Meta mas 0 com tag ML — "
+                    "convenção de nome de campanha mudou?", og_n['Lead'])
+            return {
+                'distribution': d_tot, 'total': n_tot,
+                'by_source': {
+                    'meta':   {'distribution': d_meta, 'total': n_meta},
+                    'google': {'distribution': d_ggl,  'total': n_ggl},
+                },
+                'by_optgoal': {
+                    'lead':       {'distribution': og['Lead'],       'total': og_n['Lead']},
+                    'champion':   {'distribution': og['Champion'],   'total': og_n['Champion']},
+                    'challenger': {'distribution': og['Challenger'], 'total': og_n['Challenger']},
+                },
+            }
+
+        def _build_decis_window_payload(window_label, start_utc, end_utc,
+                                        pin_lf, lf_name, fb_rows, fb_records) -> Dict[str, Any]:
+            """Payload de decis de uma janela na régua ÚNICA do Challenger (abr_28):
+            todos os buckets saem de challenger_decils_in_window (uma população, uma
+            régua) e comparam contra a ref única (_baseline_challenger_payload).
+            Fail-soft: se a régua não veio (sem run_id / falha dura), cai na régua de
+            PRODUÇÃO só pra mostrar as barras, SEM ref (⚪) — NUNCA jan_30."""
+            recs = None
+            if _chal_run_id:
+                try:
+                    from src.data.scores_historicos import challenger_decils_in_window
+                    recs = challenger_decils_in_window(
+                        challenger_run_id=_chal_run_id, win_start=start_utc,
+                        win_end=end_utc, lf_name=lf_name, pin_lf=pin_lf)
+                except Exception as _de:
+                    logger.warning(f"⚠️ régua Challenger p/ decis ({window_label}) falhou: {_de}")
+                    recs = None
+            if recs is not None:
+                b = _challenger_decis_buckets(recs)
+                _prod = len(fb_rows)
+                if _prod > 0 and b['total'] < _prod * 0.9:
+                    logger.warning(
+                        "[decis %s] cobertura Challenger %d/%d (<90%%) — refresh da "
+                        "scores_historicos incompleto?", window_label, b['total'], _prod)
+                return {
+                    'distribution':        b['distribution'],
+                    'total':               b['total'],
+                    'window_label':        window_label,
+                    'baseline_challenger': _baseline_challenger_payload,
+                    'by_source':           b['by_source'],
+                    'by_optgoal':          b['by_optgoal'],
+                }
+            # Degradado: régua Challenger indisponível → produção SEM ref (nunca jan_30).
+            logger.warning(
+                "[decis %s] régua Challenger indisponível — barras na régua de produção "
+                "SEM referência (jan_30 nunca é usado).", window_label)
+            return {
+                'distribution':        _decil_dist(fb_rows),
+                'total':               len(fb_rows),
+                'window_label':        window_label,
+                'baseline_challenger': None,
+                'by_source':           _decil_dist_by_source(fb_rows),
+                'by_optgoal':          _decil_dist_by_variant(fb_records),
+            }
 
         # Ontem completo BRT (00:00→23:59 BRT do dia anterior)
         _brt = _tz(timedelta(hours=-3))
@@ -3376,18 +3386,11 @@ async def daily_monitoring_check_railway(
                       ) >= _yest_start_utc and (
                           r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
                       ) < _yest_end_utc]
-        _yest_n_c, _yest_n_ch = _split_by_variant(_yest_rows)
-        railway_lead_quality['decil_distribution_previous_day'] = {
-            'distribution': _decil_dist(_yest_rows),
-            'total': len(_yest_rows),
-            'window_label': 'Ontem',
-            'baseline': _weighted_baseline(_yest_n_c, _yest_n_ch),
-            'baseline_champion':   _baseline_champion_payload,
-            'baseline_challenger': _baseline_challenger_payload,
-            'by_source':  _decil_dist_by_source(_yest_rows),
-            'by_source_challenger': _ggl_challenger_by_source(_yest_start_utc, _yest_end_utc),
-            'by_optgoal': _decil_dist_by_variant(_rec_between(_records_90d_scored, _yest_start_utc, _yest_end_utc, False)),
-        }
+        railway_lead_quality['decil_distribution_previous_day'] = _build_decis_window_payload(
+            window_label='Ontem', start_utc=_yest_start_utc, end_utc=_yest_end_utc,
+            pin_lf=False, lf_name=None, fb_rows=_yest_rows,
+            fb_records=_rec_between(_records_90d_scored, _yest_start_utc, _yest_end_utc, False),
+        )
 
         # Qualidade do LF de referência — apenas LF ativo no launches.yaml,
         # sem fallback ao encerrado (vide commit que adicionou src/core/launches.py).
@@ -3422,18 +3425,12 @@ async def daily_monitoring_check_railway(
                     )
             except Exception as _ce:
                 logger.warning(f"⚠️ lead_quality lf_referencia count override falhou: {_ce}")
-            _lf_n_c, _lf_n_ch = _split_by_variant(_lf_rows)
-            railway_lead_quality['decil_distribution_current_launch'] = {
-                'distribution': _decil_dist(_lf_rows),
-                'total': len(_lf_rows),
-                'window_label': f"{_ln} ({_lw.cap_start.strftime('%d/%m')}→{_cap_end_eff.strftime('%d/%m')} BRT)",
-                'baseline': _weighted_baseline(_lf_n_c, _lf_n_ch),
-                'baseline_champion':   _baseline_champion_payload,
-                'baseline_challenger': _baseline_challenger_payload,
-                'by_source':  _decil_dist_by_source(_lf_rows),
-                'by_source_challenger': _ggl_challenger_by_source(_cs_dt, _ce_dt),
-                'by_optgoal': _decil_dist_by_variant(_rec_between(_records_90d_scored, _cs_dt, _ce_dt, True)),
-            }
+            railway_lead_quality['decil_distribution_current_launch'] = _build_decis_window_payload(
+                window_label=f"{_ln} ({_lw.cap_start.strftime('%d/%m')}→{_cap_end_eff.strftime('%d/%m')} BRT)",
+                start_utc=_cs_dt, end_utc=_ce_dt, pin_lf=False, lf_name=None,
+                fb_rows=_lf_rows,
+                fb_records=_rec_between(_records_90d_scored, _cs_dt, _ce_dt, True),
+            )
             # Refresh incremental ONLINE da scores_historicos (passo 3): SÓ na run
             # AO VIVO (anchor_date is None — relatório histórico não re-scoreia o
             # passado; isso é trabalho do backfill). Re-scoreia pelos 2 modelos só
