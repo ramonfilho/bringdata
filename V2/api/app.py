@@ -3956,11 +3956,39 @@ async def daily_monitoring_check_railway(
                 _g_conv = _gclient.get_campaign_conversions_by_action(
                     _g_start, _g_end, action_names=_our_actions or None,
                 )
-                # leads google-ads de ONTEM (mesma janela do Meta `_uf_records`) —
-                # denominador do CPL agregado e numerador do split por variante.
-                _g_yest_records = [
+                # Volume de leads = CADASTROS (Client/Railway), a fonte da verdade
+                # de "quantos leads o Google trouxe" (= o form submit, que é o que
+                # o Google Ads conta). NÃO os respondentes do `registros_ml`, que
+                # só tem quem respondeu a pesquisa e subestima ~8%. Fail-soft: se o
+                # Railway não responder ou o dia não tiver cadastro google, cai nos
+                # respondentes — nunca derruba o relatório das 06:00.
+                _g_responders = [
                     r for r in _uf_records if (r.utm_source or '').lower() in _g_allow
                 ]
+                _g_yest_records, _g_basis = _g_responders, 'respondentes'
+                try:
+                    from src.data.cadastro_records import (
+                        open_railway_connection as _open_rail_g,
+                        google_cadastro_records as _gcadr,
+                    )
+                    _rc = _open_rail_g()
+                    try:
+                        _cad = _gcadr(_rc, _g_yest_str, _g_yest_str, _g_allow)
+                    finally:
+                        try: _rc.close()
+                        except Exception: pass
+                    if _cad:
+                        _g_yest_records, _g_basis = _cad, 'cadastros'
+                    else:
+                        logger.warning(
+                            "⚠️ Funil Google: 0 cadastros google na Client p/ %s — usando respondentes",
+                            _g_yest_str,
+                        )
+                except Exception as _cade:
+                    logger.warning(
+                        "⚠️ Funil Google: cadastros da Client indisponíveis (%s) — usando respondentes",
+                        _cade,
+                    )
                 _g_leads = len(_g_yest_records)
 
                 # Helper: CPL/conv por variante reusando a MESMA função pura do
@@ -4010,28 +4038,47 @@ async def daily_monitoring_check_railway(
                         _lw_g.cap_start.year, _lw_g.cap_start.month, _lw_g.cap_start.day,
                         tzinfo=_uf_brt,
                     ).astimezone(_tz.utc)
-                    # _repo_leads/_uf_records já não servem aqui: a ledger_conn original
-                    # foi fechada acima no handler. Abre conexão dedicada (mesmo padrão
-                    # do orchestrator_conn) e fecha no finally — não vaza conexão.
-                    _g_lf_conn = _open_ledger_g()
+                    # Acumulado do LF por CADASTROS (Client/Railway) — MESMA fonte do
+                    # diário, pra o bloco não misturar bases. Fallback pros respondentes
+                    # do ledger se o Railway falhar ou o LF não tiver cadastro google
+                    # (não derruba o bloco). A ledger_conn original foi fechada acima.
+                    _g_lf_records = None
                     try:
-                        _g_lf_repo = _compose_repo_g('registros_ml', railway_conn=_g_lf_conn)
-                        _lf_records_all = _g_lf_repo.leads_in_range(_cap_dt, datetime.now(_tz.utc))
-                        _g_lf_records = [
-                            r for r in _lf_records_all if (r.utm_source or '').lower() in _g_allow
-                        ]
-                        _g_funnel['por_variante_lf'] = _g_pv(_g_cmp_lf, _g_lf_records)
-                    finally:
-                        try: _g_lf_conn.close()
-                        except Exception: pass
+                        from src.data.cadastro_records import (
+                            open_railway_connection as _open_rail_lf,
+                            google_cadastro_records as _gcadr_lf,
+                        )
+                        _rc_lf = _open_rail_lf()
+                        try:
+                            _g_lf_records = _gcadr_lf(_rc_lf, _cap_s, _today_s, _g_allow) or None
+                        finally:
+                            try: _rc_lf.close()
+                            except Exception: pass
+                    except Exception as _lfce:
+                        logger.warning(
+                            "⚠️ Google LF: cadastros da Client indisponíveis (%s) — fallback ledger", _lfce,
+                        )
+                    if _g_lf_records is None:
+                        _g_lf_conn = _open_ledger_g()
+                        try:
+                            _g_lf_repo = _compose_repo_g('registros_ml', railway_conn=_g_lf_conn)
+                            _lf_records_all = _g_lf_repo.leads_in_range(_cap_dt, datetime.now(_tz.utc))
+                            _g_lf_records = [
+                                r for r in _lf_records_all if (r.utm_source or '').lower() in _g_allow
+                            ]
+                        finally:
+                            try: _g_lf_conn.close()
+                            except Exception: pass
+                    _g_funnel['por_variante_lf'] = _g_pv(_g_cmp_lf, _g_lf_records)
                 except Exception as _glfe:
                     logger.warning(f"⚠️ Por variante Google (lançamento): {_glfe}")
 
                 result.setdefault('operational_routines', {})['google_funnel'] = _g_funnel
                 logger.info(
-                    "📊 Funil Google (ontem %s): spend R$ %.0f · %d campanhas · %d leads · CPL %s · variante %s",
+                    "📊 Funil Google (ontem %s): spend R$ %.0f · %d campanhas · %d leads "
+                    "[base=%s; respondentes=%d] · CPL %s · variante %s",
                     _g_yest_str, _g_funnel['total_spend'], len(_g_funnel['por_campanha']),
-                    _g_leads, _g_funnel['cpl_agregado'],
+                    _g_leads, _g_basis, len(_g_responders), _g_funnel['cpl_agregado'],
                     " · ".join(f"{_b}:{_d['leads']}" for _b, _d in _g_funnel['por_variante'].items()),
                 )
         except Exception as _gfe:
