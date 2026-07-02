@@ -1443,8 +1443,9 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     direto. Aqui o canal de cliente recebe só o sinal que dispara ação.
 
     Direction-aware: %D9-D10 alto = bom (D10 direction=positive). Δpp > +2 =
-    🟢, Δpp < -2 = 🔴, |Δpp| ≤ 2 = ⚪. Mesma escala pro avg decil em torno do
-    ref calculado a partir da baseline ponderada.
+    🟢, Δpp < -2 = 🔴, |Δpp| ≤ 2 = ⚪. Mesma escala pro avg decil em torno da
+    referência única (abr_28) — TODOS os buckets são reavaliados no
+    decil_challenger e comparam contra ela; o modelo anterior jan_30 saiu.
     """
     lq = v.get('lead_quality') or {}
     key = f'decil_distribution_{window_key}'
@@ -1457,17 +1458,12 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     if total == 0:
         return
 
-    baseline = info.get('baseline') or {}
-    base_pct = baseline.get('pct') or {}
-    base_label = baseline.get('label', '')
-
-    # Baselines puras por variante — usadas pra comparar buckets isolados
-    # contra a régua correta. Bug corrigido 2026-05-29: antes todos os
-    # buckets (Lead/Champion/Challenger) eram comparados contra a baseline
-    # ponderada (~57% D9-D10 dominada pelo Champion model). O bucket
-    # Challenger (~28% D9-D10 na régua dele) aparecia falsamente como -31pp.
-    baseline_champion   = info.get('baseline_champion') or {}
+    # Régua ÚNICA do relatório: Challenger (abr_28). O modelo anterior jan_30 foi
+    # removido — todos os buckets já vêm reavaliados no decil_challenger
+    # (scores_historicos) antes de comparar, então não há mais baseline Champion
+    # (jan_30) nem Ponderada (mistura ponderada jan_30+abr_28).
     baseline_challenger = info.get('baseline_challenger') or {}
+    base_label = baseline_challenger.get('label', '')
 
     keys = [f'D{i:02d}' for i in range(1, 11)]
 
@@ -1491,9 +1487,7 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
             'avg':        sum(int(k[1:]) * float(pct.get(k, 0) or 0) for k in keys) / 100.0,
         }
 
-    # Referências disponíveis pra cada tipo de bucket.
-    ref_weighted   = _ref_from_pct(base_pct)
-    ref_champion   = _ref_from_pct(baseline_champion.get('pct') or {})
+    # Referência única (abr_28) — todos os buckets comparam contra ela.
     ref_challenger = _ref_from_pct(baseline_challenger.get('pct') or {})
 
     def _emoji_d9d10(delta_pp: float | None) -> str:
@@ -1543,21 +1537,16 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
             f"{_sg['decil_medio']:.1f}/10*  ·  {_sg.get('pct_d9_d10', 0):.0f}% em D9-D10"
             f"  ·  n={_sg.get('n', 0):,} ({_sg.get('populacao', 'todas as fontes')})"
         )
-    # 3 réguas declaradas. Total/Meta usam Ponderada (peso A/B × ref). Lead/
-    # Champion (optgoal A/B) usam Champion. Challenger usa Challenger. GOOGLE agora
-    # usa Challenger (régua única, scores_historicos) — em produção é roteado ao
-    # Champion, mas o relatório o AVALIA no Challenger, nunca no jan_30. Cada linha
-    # mostra inline qual régua usa pra evitar ambiguidade.
+    # Régua ÚNICA (abr_28, scores_historicos): TODOS os buckets — Total, Meta,
+    # Google, Lead e os de optimization_goal — são reavaliados no decil_challenger e
+    # comparam contra a MESMA referência abr_28. O modelo anterior jan_30 saiu do
+    # relatório (nem barra, nem ref, nem Ponderada).
     rows.append('_🟢 bom · 🔴 ruim · ⚪ neutro/incerto_')
-    ref_parts = []
-    if ref_champion is not None:
-        ref_parts.append(f'{_ab_bucket_label("Champion")}={ref_champion["pct_d9_d10"]:.1f}%/{ref_champion["avg"]:.1f}')
     if ref_challenger is not None:
-        ref_parts.append(f'{_ab_bucket_label("Challenger")}={ref_challenger["pct_d9_d10"]:.1f}%/{ref_challenger["avg"]:.1f}')
-    if ref_weighted is not None:
-        ref_parts.append(f'Ponderada={ref_weighted["pct_d9_d10"]:.1f}%/{ref_weighted["avg"]:.1f}')
-    if ref_parts:
-        rows.append('_Refs %D9-D10/avg: ' + ' · '.join(ref_parts) + '_')
+        rows.append(
+            f'_Ref %D9-D10/avg (abr_28): '
+            f'{ref_challenger["pct_d9_d10"]:.1f}%/{ref_challenger["avg"]:.1f}_'
+        )
     rows.append('```')
     rows.append(
         f'{"Bucket":<18}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
@@ -1580,18 +1569,11 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
             avg_str = f'{avg:>4.1f}'
         return f'{label:<18}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}      {avg_str}'
 
-    # Bloco por fonte (Slack block 1)
-    rows.append(_row('Total',  _kpis(dist, total),                                              ref_weighted,   'Ponderada'))
-    rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta),              ref_weighted,   'Ponderada'))
-    # Google na régua ÚNICA do Challenger (decil_challenger, scores_historicos) —
-    # NUNCA jan_30. Se a régua Challenger não veio (refresh não rodou / sem run_id),
-    # mostra a distribuição combinada SEM ref (⚪), sem comparar com o modelo antigo.
-    _ggl_chal = (info.get('by_source_challenger') or {}).get('google')
-    if _ggl_chal and int(_ggl_chal.get('total', 0) or 0) > 0:
-        rows.append(_row('Google', _kpis(_ggl_chal.get('distribution') or {}, int(_ggl_chal['total'])),
-                         ref_challenger, 'abr_28'))
-    else:
-        rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl), None))
+    # Bloco por fonte (Slack block 1) — todos na régua única abr_28. `ref_challenger`
+    # é None no fail-soft (régua indisponível) → _row mostra sem Δ (⚪), nunca jan_30.
+    rows.append(_row('Total',  _kpis(dist, total),                                              ref_challenger, 'abr_28'))
+    rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta),              ref_challenger, 'abr_28'))
+    rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl),               ref_challenger, 'abr_28'))
     rows.append('```')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
@@ -1605,8 +1587,8 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
         # (ex.: 1 lead de campanha antiga LEADQUALIFIED ainda no ar) vira ruído de
         # %D9-D10 — sai da tabela e vira nota de omitidos, nunca some em silêncio.
         _og_buckets = [
-            ('Lead',                         og_lead_info, n_og_lead, ref_champion,   'jan_30'),
-            (_ab_bucket_label('Champion'),   og_chmp_info, n_og_chmp, ref_champion,   'jan_30'),
+            ('Lead',                         og_lead_info, n_og_lead, ref_challenger, 'abr_28'),
+            (_ab_bucket_label('Champion'),   og_chmp_info, n_og_chmp, ref_challenger, 'abr_28'),
             (_ab_bucket_label('Challenger'), og_chal_info, n_og_chal, ref_challenger, 'abr_28'),
         ]
         _og_shown   = [t for t in _og_buckets if t[2] >= MIN_BUCKET_N]
