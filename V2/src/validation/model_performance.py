@@ -9,8 +9,11 @@ produção; aqui só cruzamos com vendas por email/telefone pra obter o desfecho
 Responsabilidade ÚNICA: dado um LF, devolver um objeto com as métricas por braço.
 NÃO persiste (Etapa 2) nem emite Slack (Etapa 3) — isso fica na composição.
 
+Métricas empíricas (decil de produção do ledger × vendas casadas) — lift vs o
+baseline OBSERVADO de cada braço, concentração top3/top5. NÃO usa metadata de
+treino nem mlruns (o usuário avalia bom/ruim olhando o resultado).
+
 Reuso (fonte única, não recria):
-  - métricas de modelo:  validation.ml_monitoring_calculator.MLMonitoringCalculator
   - matching:            core.matching.match_leads_to_sales_unified (email+tel+last6)
   - janelas de LF:       core.launches.load_launches
   - atribuição de braço: coluna `variant` do ledger (verdade de produção)
@@ -31,7 +34,6 @@ import pandas as pd
 
 from src.core.launches import load_launches
 from src.core.matching import match_leads_to_sales_unified
-from src.validation.ml_monitoring_calculator import MLMonitoringCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +41,6 @@ logger = logging.getLogger(__name__)
 # LFs cuja captação termina antes disso não têm dado no ledger.
 LEDGER_START = date(2026, 5, 23)
 
-# Raiz dos artefatos MLflow (model_metadata.json por run).
-_DEFAULT_MLRUNS = Path(__file__).resolve().parents[2] / "mlruns"
 _DEFAULT_ACTIVE_MODELS = (
     Path(__file__).resolve().parents[2] / "configs" / "active_models" / "devclub.yaml"
 )
@@ -59,9 +59,8 @@ class ArmPerformance:
     conversion_rate: float       # n_conversions / n_leads (fração)
     revenue: float               # soma de sale_value (bruto) das vendas casadas neste braço
     mean_score: float            # qualidade de entrada (não depende de desfecho)
-    decile_performance: pd.DataFrame   # qcut rebalanceado vs taxa esperada do test set
-    lift: pd.DataFrame                 # decil de PRODUÇÃO (lift vs baseline)
-    concentration: dict                # top-3 / top-5 decis (produção vs test set)
+    lift: pd.DataFrame                 # decil de PRODUÇÃO; lift vs baseline OBSERVADO do braço
+    concentration: dict                # top-3 / top-5 decis (produção, empírico)
 
 
 @dataclass(frozen=True)
@@ -89,25 +88,20 @@ class _ModelInfo:
     variant_key: Optional[str]
     run_id: str
     display_name: str
-    metadata_path: Path
 
 
 class ModelRegistry:
-    """Mapeia o `variant` do ledger → modelo (run_id, rótulo, metadata.json).
+    """Mapeia o `variant` do ledger → modelo (run_id + rótulo humano).
 
     `variant='challenger_abr28'` → Challenger. `variant` nulo → braço default
-    (Champion = active_model). Lê de configs/active_models/devclub.yaml; resolve
-    o model_metadata.json varrendo mlruns pelo run_id.
+    (Champion = active_model). Lê só de configs/active_models/devclub.yaml — NÃO
+    precisa de mlruns/model_metadata: as métricas são empíricas (decil de produção
+    × vendas casadas), então nenhum artefato de treino é necessário.
     """
 
-    def __init__(
-        self,
-        active_models_path: Optional[Path] = None,
-        mlruns_root: Optional[Path] = None,
-    ):
+    def __init__(self, active_models_path: Optional[Path] = None):
         import yaml
 
-        self._mlruns_root = Path(mlruns_root or _DEFAULT_MLRUNS)
         cfg_path = Path(active_models_path or _DEFAULT_ACTIVE_MODELS)
         with open(cfg_path) as f:
             cfg = yaml.safe_load(f) or {}
@@ -125,7 +119,6 @@ class ModelRegistry:
         self._champion = _ModelInfo(
             arm="champion", variant_key=None, run_id=self._active_run,
             display_name=champ_display,
-            metadata_path=self._resolve_metadata(self._active_run),
         )
 
         # demais variants (challenger etc.), chaveados pelo valor cru do ledger.
@@ -139,16 +132,7 @@ class ModelRegistry:
                 variant_key=key,
                 run_id=run_id,
                 display_name=v.get("display_name", key),
-                metadata_path=self._resolve_metadata(run_id),
             )
-
-    def _resolve_metadata(self, run_id: str) -> Path:
-        cands = list(self._mlruns_root.glob(f"*/{run_id}*/artifacts/model_metadata.json"))
-        if not cands:
-            raise FileNotFoundError(
-                f"model_metadata.json não encontrado para run {run_id} em {self._mlruns_root}"
-            )
-        return cands[0]
 
     def for_variant(self, variant: Optional[str]) -> Optional[_ModelInfo]:
         """Modelo que scoreou um lead com esse `variant`. None=Champion default.
@@ -256,8 +240,41 @@ def _cart_closed(cfg: dict, as_of: date) -> bool:
     return ve is not None and ve <= as_of
 
 
+_LIFT_COLS = ["decile", "leads", "conversions", "conversion_rate", "baseline_rate", "lift"]
+
+
+def _lift_by_decile(arm_df: pd.DataFrame) -> pd.DataFrame:
+    """Lift por decil de PRODUÇÃO vs baseline OBSERVADO do próprio braço (empírico,
+    sem metadata de treino). Mesmas colunas que o display/persist consomem:
+    decile, leads, conversions, conversion_rate (%), baseline_rate (%), lift."""
+    df = arm_df[arm_df["decile"].notna()]
+    if df.empty:
+        return pd.DataFrame(columns=_LIFT_COLS)
+    conv = df["converted"].fillna(False).astype(bool)
+    g = df.assign(_c=conv).groupby("decile")["_c"].agg(["count", "sum"]).reset_index()
+    g.columns = ["decile", "leads", "conversions"]
+    g["conversion_rate"] = g["conversions"] / g["leads"] * 100
+    total_leads, total_conv = int(g["leads"].sum()), int(g["conversions"].sum())
+    baseline = (total_conv / total_leads * 100) if total_leads else 0.0
+    g["baseline_rate"] = baseline
+    g["lift"] = (g["conversion_rate"] / baseline) if baseline else 0.0
+    g["_n"] = g["decile"].str.extract(r"(\d+)").astype(int)
+    return g.sort_values("_n").drop(columns="_n").reset_index(drop=True)
+
+
+def _concentration(arm_df: pd.DataFrame) -> dict:
+    """% dos compradores nos top decis de produção (empírico): top3 = D8–D10,
+    top5 = D6–D10."""
+    conv = arm_df[arm_df["converted"].fillna(False).astype(bool)].groupby("decile").size()
+    total = int(conv.sum())
+    if total == 0:
+        return {"top3_production": 0.0, "top5_production": 0.0}
+    top3 = sum(int(conv.get(d, 0)) for d in ("D8", "D9", "D10"))
+    top5 = sum(int(conv.get(d, 0)) for d in ("D6", "D7", "D8", "D9", "D10"))
+    return {"top3_production": top3 / total * 100, "top5_production": top5 / total * 100}
+
+
 def _arm_metrics(arm_df: pd.DataFrame, info: _ModelInfo) -> ArmPerformance:
-    calc = MLMonitoringCalculator(str(info.metadata_path))
     n = len(arm_df)
     conv_mask = arm_df["converted"].fillna(False).astype(bool)
     conv = int(conv_mask.sum())
@@ -278,9 +295,8 @@ def _arm_metrics(arm_df: pd.DataFrame, info: _ModelInfo) -> ArmPerformance:
         conversion_rate=(conv / n) if n else 0.0,
         revenue=revenue,
         mean_score=float(scores.mean()) if n else float("nan"),
-        decile_performance=calc.calculate_decile_performance(arm_df),
-        lift=calc.calculate_lift_by_decile(arm_df),
-        concentration=calc.calculate_concentration_metrics(arm_df),
+        lift=_lift_by_decile(arm_df),
+        concentration=_concentration(arm_df),
     )
 
 
