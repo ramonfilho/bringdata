@@ -496,8 +496,9 @@ def process_pending_pubsub(
                 # Google-elegível: DEFERE ledger + ack pro pós-send (como o Meta),
                 # pra gravar o google_ads_status real. O contexto do ledger viaja
                 # junto do payload de envio (chaves "_" são ignoradas pelo enviador,
-                # que só lê email/phone/decil/event_id/ts/gclid/source/rates).
+                # que só lê email/phone/decil/event_id/ts/gclid/gbraid/wbraid/source/rates).
                 n_scored_no_meta += 1
+                _click_ids = google_ads.parse_click_ids_from_url(utm.get("url"))
                 google_leads.append({
                     "email": payload.get("email"),
                     "phone": enrich.get("telefone"),
@@ -505,10 +506,12 @@ def process_pending_pubsub(
                     "event_id": eid,
                     "event_timestamp_iso": _event_ts_iso(),
                     "source": utm.get("source"),
-                    # gclid: campo próprio do payload se o front mandar; senão,
-                    # extrai da URL (?gclid=...) na borda de ingestão. Match
-                    # determinístico no envio sem depender de mudança no front.
-                    "gclid": payload.get("gclid") or google_ads.parse_gclid_from_url(utm.get("url")),
+                    # Ids de clique: campo próprio do payload se o front mandar;
+                    # senão, extrai da URL na borda única (parse_click_ids_from_url).
+                    # gclid = desktop/Android/web; gbraid/wbraid = iOS (recuperam
+                    # atribuição que se perde no Safari/app). Sem depender do front.
+                    **{k: (payload.get(k) or _click_ids.get(k))
+                       for k in ("gclid", "gbraid", "wbraid")},
                     "ab_conversion_rates": (ab_v.conversion_rates if ab_v else None),
                     "_ack_id": ack_id, "_vn": vn, "_sc": sc, "_di_int": _di_int,
                     "_payload": payload, "_utm": utm, "_survey": survey_dict, "_enrich": enrich,
