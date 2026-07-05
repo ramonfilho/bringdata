@@ -60,12 +60,32 @@ Sem retreino, a régua é única automática (todo lead nasce com o decil do cha
 - **Fase 1 — schema.** Adiciona as 8 colunas nulas no `registros_ml`. Zero comportamento. *Rollback: DROP das colunas (nulas, sem consumidor).*
 - **Fase 2 — escrita dupla.** Consumer scoreia os dois e grava ambos + run_ids + `scored_at`/`core_commit`; o roteado ainda manda CAPI igual. O 2º score é protegido (falha loga, não bloqueia envio/ledger). **Canary + Gate C de paridade** — passa porque o evento enviado não muda (mesmo decil roteado, mesmo value). *Rollback: para de gravar os 2; roteado/envio intactos.*
 - **Fase 3 — leitura.** Read-models apontam pro `registros_ml`; `scores_historicos` fica viva em paralelo até o ledger cobrir um lançamento inteiro. *Rollback: read-models voltam pra `scores_historicos` (refresh ainda roda).*
-- **Fase 4 — backfill histórico.** One-time (lote) dos leads antigos que só têm 1 decil, pra história dos relatórios. Com auditoria de cobertura.
+- **Fase 4 — backfill histórico.** One-time (lote) dos leads antigos que só têm 1 decil, pra história dos relatórios. Com auditoria de cobertura. **Spec completo em "Fase 4 em detalhe" abaixo.**
 - **Fase 5 — aposentadoria.** Tira o refresh do daily-check 06:00 e **dropa a `scores_historicos`** (após o gate abaixo). O `_score_population` fica só pra retreino-backfill.
+
+### Status da Fase 2 (05/07/2026)
+Fases 1+2 **LIVE** (PR #56, rev 00851-woh a 100%; validação em prod: Gate C 0 divergências, batch real de 20 leads com colunas populadas, prod intacta por log). O `core_commit` foi cabeado no consumer num follow-up no mesmo dia (antes era gravado NULL) — cada linha scoreada online agora carrega a revisão do Cloud Run que a scoreou.
 
 ## Gate de cobertura antes de dropar (obrigatório)
 
 Reconciliação: **todo `(email, lf)` da `scores_historicos` tem decil_challenger correspondente no `registros_ml`** pós-backfill, com contagem de não-cobertos = 0. Só então dropa, com **dump em GCS antes** (mesma reversibilidade do drop da `Lead`/`registros_ml` do Railway).
+
+## Fase 4 em detalhe — backfill histórico do ledger
+
+**Objetivo.** Os relatórios de qualidade de lançamentos passados (painel de decis, score geral, relatório de criativo com `date=`) precisam ler o `registros_ml` pela régua única do challenger. Os leads gravados **antes da Fase 2 (05/07/2026)** têm só o decil roteado — falta `decil_champion`/`decil_challenger`. O backfill preenche essas colunas nesses leads, one-time.
+
+**População-alvo.** Linhas do `registros_ml` com `survey_responses IS NOT NULL AND email IS NOT NULL AND decil_challenger IS NULL` (ainda não dual-scoreadas), na janela que o ledger cobre — **do nascimento do ledger (~25/05/2026) até 05/07/2026** (quando a Fase 2 subiu). O predicado `decil_challenger IS NULL` torna o backfill **idempotente**: re-rodar pula quem já tem.
+
+**Como scoreia.** Reusa o `_score_population` (o scorer em lote que ficou vivo) com champion + challenger **vigentes** (run_ids pinados — os MESMOS do scoring online, pra régua idêntica). **Chunked + local:** processa em lotes (por janela de `created_at`, ex. por semana, ou por N≈2–3k eventos) rodando **na máquina local**, não no Cloud Run de 2GB — foi exatamente esse teto que estourou no refresh (~9k leads). Grava por `UPDATE registros_ml SET (as 6 colunas) WHERE event_id = :eid` — **grão de evento, não de email** (o ledger é 1 linha por `event_id`; o dedup-por-email que o refresh faz **não** vale aqui, senão perde eventos do mesmo email).
+
+**Lineage / reversibilidade (data-architect).** Cada linha backfillada leva `core_commit = 'backfill_fase4_YYYYMMDD'` e `scored_at = now()` — rótulo de proveniência que separa backfill de scoring online. **Rollback:** `UPDATE ... SET decil_champion=NULL, decil_challenger=NULL, ... WHERE core_commit='backfill_fase4_YYYYMMDD'` — desfaz só o backfill, sem tocar os leads scoreados online. Aditivo e reversível em minutos.
+
+**Auditoria de cobertura (obrigatória — alimenta o gate da Fase 5).**
+1. **Reconciliação vs `scores_historicos`:** todo `(email, lf)` que a `scores_historicos` tem com `decil_challenger` (no run_id pinado) tem `decil_challenger` correspondente no `registros_ml` pós-backfill; não-cobertos por LF = 0.
+2. **Fill-rate por período:** % de linhas com `decil_challenger` preenchido por LF/semana — **sem buraco no meio** (pega o caso "completo no passado, vazio no recente", que é a razão de existir a auditoria por período).
+3. **Grão:** nº de eventos scoreados == nº de eventos elegíveis (survey não-nulo) na janela; zero perda.
+
+**Buraco estrutural a decidir (não silenciar).** O `registros_ml` só nasce ~25/05/2026; a `scores_historicos` tem LFs **anteriores** ao ledger (via backfill de `lead_legado`/`leads_historico`). Esses leads **não existem** no `registros_ml` → o backfill não os alcança. Antes de dropar a `scores_historicos` (Fase 5), decidir e **registrar**: esses lançamentos pré-ledger ainda são consultados nos relatórios? Se **sim** → precisam de ingest histórico próprio no `registros_ml` (escopo maior, vizinho da consolidação `analytics`) OU a `scores_historicos` sobrevive só pra eles; se **não** → o gate cobre só a janela do ledger e o drop é seguro. **Não dropar sem essa decisão registrada.**
 
 ## Riscos
 

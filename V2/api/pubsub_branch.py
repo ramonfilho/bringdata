@@ -221,6 +221,10 @@ def ledger_row(
         "decil_challenger": None,
         "champion_run_id": None,
         "challenger_run_id": None,
+        # Proveniência: qual revisão do Cloud Run scoreou. `ledger_row` deixa None;
+        # o passe de enriquecimento pós-scoring preenche (K_REVISION) só nos rows
+        # scoreados — paralelo a `scored_at_now`.
+        "core_commit": None,
         "scored_at_now": False,
     }
 
@@ -234,7 +238,8 @@ def _insert_ledger(conn, r: Dict) -> None:
     # row veio de um caminho que não passou por `ledger_row` (senão pg8000 real
     # reclama de `:score_champion` não-bound). Produção sempre passa por ledger_row.
     for _k in ("score_champion", "decil_champion", "score_challenger",
-               "decil_challenger", "champion_run_id", "challenger_run_id"):
+               "decil_challenger", "champion_run_id", "challenger_run_id",
+               "core_commit"):
         r.setdefault(_k, None)
     # JSONB precisa de string serializada — pg8000 não converte dict
     # diretamente. None vira NULL no SQL.
@@ -251,7 +256,7 @@ def _insert_ledger(conn, r: Dict) -> None:
         ' first_name, last_name, phone, fbp, fbc, user_agent, ip, has_computer, '
         ' google_ads_status, '
         ' score_champion, decil_champion, score_challenger, decil_challenger, '
-        ' champion_run_id, challenger_run_id, scored_at) '
+        ' champion_run_id, challenger_run_id, core_commit, scored_at) '
         'VALUES (:event_id, :email, :variant, :lead_score, :decil, '
         ' :base_meta_event_id, :base_status, :hq_meta_event_id, :hq_status, '
         + ('NOW()' if r.pop("capi_sent_at_now", False) else 'NULL')
@@ -261,7 +266,7 @@ def _insert_ledger(conn, r: Dict) -> None:
         ' :first_name, :last_name, :phone, :fbp, :fbc, :user_agent, :ip, '
         ' :has_computer, :google_ads_status, '
         ' :score_champion, :decil_champion, :score_challenger, :decil_challenger, '
-        ' :champion_run_id, :challenger_run_id, '
+        ' :champion_run_id, :challenger_run_id, :core_commit, '
         + scored_at_sql
         + ') '
         'ON CONFLICT (event_id) DO NOTHING',
@@ -461,7 +466,10 @@ def process_pending_pubsub(
     scored: Dict[str, Tuple[float, str, object, Optional[str]]] = {}
     # Régua no ledger: decil pelos DOIS modelos por lead (Fase 2 do refator
     # dual-decil). Preenchido no passe de enriquecimento antes do INSERT.
+    # `core_commit` = revisão do Cloud Run que scoreou (proveniência p/ o
+    # backfill-de-retreino da Fase 4); resolvido 1x, igual pro batch inteiro.
     dual_by_eid: Dict[str, Dict] = {}
+    _core_commit = os.environ.get("K_REVISION")
     for _, payload, survey_dict, utm, enrich, _meta_elig in to_score:
         eid = payload["eventId"]
         try:
@@ -477,6 +485,7 @@ def process_pending_pubsub(
             "decil_challenger": exp.decil_challenger,
             "champion_run_id": exp.champion_run_id,
             "challenger_run_id": exp.challenger_run_id,
+            "core_commit": _core_commit,
             "scored_at_now": True,
         }
         ab_v = pipeline.get_ab_variant(

@@ -28,7 +28,8 @@ class _CapConn:
 def test_ledger_row_tem_campos_dual_default_none():
     r = ledger_row("e1", "a@b.c", "champion", 0.5, 5, "success")
     for k in ("score_champion", "decil_champion", "score_challenger",
-              "decil_challenger", "champion_run_id", "challenger_run_id"):
+              "decil_challenger", "champion_run_id", "challenger_run_id",
+              "core_commit"):
         assert k in r and r[k] is None, f"{k} deveria existir e ser None"
     assert r["scored_at_now"] is False
 
@@ -40,16 +41,18 @@ def test_insert_ledger_emite_colunas_dual_e_bind():
         "score_champion": 0.30, "decil_champion": 4,
         "score_challenger": 0.91, "decil_challenger": 10,
         "champion_run_id": "d51757f5", "challenger_run_id": "5d158f0a",
+        "core_commit": "smart-ads-api-00851-woh",
         "scored_at_now": True,
     })
     c = _CapConn()
     _insert_ledger(c, r)
     for col in ("decil_champion", "decil_challenger", "champion_run_id",
-                "challenger_run_id", "scored_at"):
+                "challenger_run_id", "core_commit", "scored_at"):
         assert col in c.sql, f"{col} ausente no INSERT"
     assert "NOW()" in c.sql, "scored_at deveria ser NOW() em row scoreado"
     assert c.params["decil_challenger"] == 10
     assert c.params["champion_run_id"] == "d51757f5"
+    assert c.params["core_commit"] == "smart-ads-api-00851-woh"
     # flags de NOW() não podem virar param (senão pg8000 reclama de coluna inexistente)
     assert "scored_at_now" not in c.params
     assert "capi_sent_at_now" not in c.params
@@ -70,6 +73,7 @@ def test_insert_ledger_blindado_contra_row_sem_dual():
     c = _CapConn()
     _insert_ledger(c, row)  # não deve levantar
     assert c.params["decil_challenger"] is None
+    assert c.params["core_commit"] is None  # blindagem cobre core_commit também
     assert "NULL" in c.sql  # scored_at NULL em row não-scoreado
 
 
