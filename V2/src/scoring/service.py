@@ -35,6 +35,7 @@ from src.core.payload_normalization import (
 from src.data.lead_record import LeadRecord
 from src.model.decil_thresholds import atribuir_decil_por_threshold
 from src.production_pipeline import LeadScoringPipeline
+from src.scoring.variants import resolve_champion_challenger
 
 
 @dataclass(frozen=True)
@@ -64,11 +65,49 @@ class ScoringExplanation:
     # no YAML → caminho ROAS V1 desligado por construção pra esse lead.
     lead_score_calibrated: Optional[float] = None
 
+    # Régua no ledger: decil pelos DOIS modelos (champion + challenger), gravados
+    # no `registros_ml` no scoreamento online — o que aposenta o refresh diário e
+    # a `scores_historicos`. None quando o A/B não resolve os dois papéis (degrada:
+    # colunas ficam nulas, relatórios caem no fallback). `run_id` por lead = qual
+    # régua produziu o decil (comparabilidade a prova de retreino).
+    score_champion: Optional[float] = None
+    decil_champion: Optional[int] = None
+    score_challenger: Optional[float] = None
+    decil_challenger: Optional[int] = None
+    champion_run_id: Optional[str] = None
+    challenger_run_id: Optional[str] = None
+
 
 # `LeadScoringPipeline` tem estado mutável (`self.data`, `self.original_data`)
 # que muda a cada chamada de `preprocess`. Para usar a mesma instância sob
 # múltiplas threads (endpoint REST, /explain), serializamos o acesso.
 _pipeline_lock = threading.RLock()
+
+
+def _score_variant(pipeline, df_in, predictor, encoding_overrides):
+    """Scoreia UM lead por UMA variante: preprocess (com o encoding dela) +
+    predict + decil (pelos thresholds dela). Devolve `(lead_score, decil_int,
+    encoded_df)`.
+
+    Primitivo ÚNICO do scoreamento por variante — consumido pelo caminho roteado
+    (o que vai pro CAPI) e pela avaliação dos dois modelos no mesmo lead. Serializa
+    o estado mutável do pipeline no `_pipeline_lock` (RLock reentrante), então pode
+    ser chamado 1..N vezes por lead sem corromper `self.data`.
+    """
+    with _pipeline_lock:
+        pipeline.data = df_in
+        pipeline.original_data = df_in.copy()
+        encoded_df = pipeline.preprocess(
+            encoding_overrides=encoding_overrides,
+            predictor_override=predictor,
+        )
+        result = pipeline.predict(predictor_override=predictor)
+    if result is None or len(result) == 0:
+        raise RuntimeError("pipeline retornou resultado vazio")
+    lead_score = float(result["lead_score"].iloc[0])
+    thresholds = predictor.metadata.get("decil_thresholds", {}).get("thresholds", {})
+    decil_str = atribuir_decil_por_threshold(lead_score, thresholds) if thresholds else "D05"
+    return lead_score, int(decil_str[1:]), encoded_df
 
 
 def _variant_name(pipeline: LeadScoringPipeline, ab_variant) -> Optional[str]:
@@ -136,47 +175,49 @@ def score_lead_from_payload(
         ) if base_run_id else None
         encoding_overrides = vcfg.encoding_overrides if vcfg else None
 
-    # 4. Rodar preprocess + predict em memória, com lock contra concorrência.
+    # 4-5. Scoring. O primitivo `_score_variant` faz preprocess+predict+decil por
+    # variante (serializado no lock). O ROTEADO é o que vai pro CAPI — comportamento
+    # idêntico ao de antes (mesmo predictor, mesmo encoding, mesmos thresholds).
     df_in = pd.DataFrame([dataframe_row])
+    lead_score, decil, encoded_df = _score_variant(pipeline, df_in, predictor, encoding_overrides)
+    encoded_features = (
+        {k: _to_python_scalar(v) for k, v in encoded_df.iloc[0].to_dict().items()}
+        if len(encoded_df) > 0 else {}
+    )
 
-    with _pipeline_lock:
-        pipeline.data = df_in
-        pipeline.original_data = df_in.copy()
-        encoded_df = pipeline.preprocess(
-            encoding_overrides=encoding_overrides,
-            predictor_override=predictor,
-        )
-        # Capturar o vetor encodado antes do predict — preprocess já retornou
-        # self.data com as 52 colunas alinhadas com o feature_registry do
-        # predictor escolhido.
-        encoded_features = (
-            {k: _to_python_scalar(v) for k, v in encoded_df.iloc[0].to_dict().items()}
-            if len(encoded_df) > 0 else {}
-        )
-        result = pipeline.predict(predictor_override=predictor)
+    # Bloco F — score calibrado pra fórmula ROAS V1 (roteado only). Reusa o
+    # `encoded_df` do roteado (52 features alinhadas) — não repreprocessa. Modelos
+    # calibrados são bit-idênticos aos parents + `calibrator.pkl` → mesmo feature_registry.
+    lead_score_calibrated: Optional[float] = None
+    calibrated_predictor = pipeline.get_variant_calibrated_predictor(variant_name) if variant_name else None
+    if calibrated_predictor is not None:
+        calib_proba = calibrated_predictor.predict_proba(encoded_df)
+        if calib_proba is not None and len(calib_proba) > 0:
+            lead_score_calibrated = float(calib_proba[0])
 
-        # Bloco F — score calibrado pra fórmula ROAS V1.
-        # Reusa o `encoded_df` (52 features alinhadas) pra evitar repreprocess.
-        # Modelos calibrados são bit-idênticos aos parents (mesmo SHA256 do
-        # model.pkl), apenas com `calibrator.pkl` adicional → mesmo feature_registry,
-        # `predict_proba(encoded_df)` funciona direto.
-        # Predictor calibrado existe SÓ quando a variante (ou predictor base mapeado
-        # pra variante) declarou `calibrated_run_id` no YAML.
-        lead_score_calibrated: Optional[float] = None
-        calibrated_predictor = pipeline.get_variant_calibrated_predictor(variant_name) if variant_name else None
-        if calibrated_predictor is not None:
-            calib_proba = calibrated_predictor.predict_proba(encoded_df)
-            if calib_proba is not None and len(calib_proba) > 0:
-                lead_score_calibrated = float(calib_proba[0])
+    # 6. Régua no ledger: decil pelos DOIS modelos (champion + challenger). O
+    # roteado já foi scoreado → reusa; só o OUTRO papel precisa de 1 predict extra.
+    # Degrada p/ None se o A/B não resolve os dois papéis (colunas do ledger nulas).
+    sc_champ = dc_champ = sc_chall = dc_chall = None
+    champ_run = chall_run = None
+    papeis = resolve_champion_challenger(pipeline)
+    if papeis:
+        routed_run = getattr(predictor, "mlflow_run_id", None)
 
-    # 5. Extrair score e decil.
-    if result is None or len(result) == 0:
-        raise RuntimeError("pipeline retornou resultado vazio")
+        def _score_papel(info):
+            if info["run_id"] == routed_run:
+                return lead_score, decil  # roteado já scoreado — reusa
+            s, d, _ = _score_variant(
+                pipeline, df_in,
+                pipeline.get_variant_predictor(info["variant_name"]),
+                info["encoding_overrides"],
+            )
+            return s, d
 
-    lead_score = float(result["lead_score"].iloc[0])
-    thresholds = predictor.metadata.get("decil_thresholds", {}).get("thresholds", {})
-    decil_str = atribuir_decil_por_threshold(lead_score, thresholds) if thresholds else "D05"
-    decil = int(decil_str[1:])
+        sc_champ, dc_champ = _score_papel(papeis["champion"])
+        sc_chall, dc_chall = _score_papel(papeis["challenger"])
+        champ_run = papeis["champion"]["run_id"]
+        chall_run = papeis["challenger"]["run_id"]
 
     return ScoringExplanation(
         payload_normalizado=survey_dict,
@@ -186,6 +227,12 @@ def score_lead_from_payload(
         decil=decil,
         variant=variant_name,
         lead_score_calibrated=lead_score_calibrated,
+        score_champion=sc_champ,
+        decil_champion=dc_champ,
+        score_challenger=sc_chall,
+        decil_challenger=dc_chall,
+        champion_run_id=champ_run,
+        challenger_run_id=chall_run,
     )
 
 

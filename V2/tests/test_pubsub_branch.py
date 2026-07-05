@@ -355,6 +355,13 @@ def test_score_all_envia_google_e_grava_status():
         decil = 10
         variant = "challenger_abr28"
         lead_score_calibrated = None
+        # Fase 2 dual-decil: decil pelos 2 modelos (roteado=challenger aqui).
+        score_champion = 0.30
+        decil_champion = 4
+        score_challenger = 0.91
+        decil_challenger = 10
+        champion_run_id = "d51757f5"
+        challenger_run_id = "5d158f0a"
 
     class _PipelineGoogle:
         class _Cfg:
