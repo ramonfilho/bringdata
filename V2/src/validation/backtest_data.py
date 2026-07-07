@@ -170,19 +170,36 @@ def _load_launch_dates(lf_name: str) -> Dict[str, str]:
 
 
 def _load_leads(cap_start: str, cap_end: str) -> pd.DataFrame:
-    """Railway primário (única fonte com dados pós-2026-03-27). Sheets como fallback.
+    """Cloud SQL (analytics.leads/train_unified) primário — fonte viva desde a
+    consolidação. Railway (tabela Lead, anulada em 24/06) e Sheets como fallback
+    histórico.
 
-    Sheets é chamado com training_mode=True para preservar nomes originais do
-    formulário (PT-BR canônico, igual ao train_pipeline) — sem isso, leads pré-Railway
-    (LF≤41 / nov-dez 2025) chegam em schema lowercase incompatível com o pipeline
-    de scoring.
+    read_pesquisa reconstrói o df_pesquisa no mesmo formato-planilha canônico que o
+    train_pipeline usa com --leads-source db (colunas 'E-mail'/'Data'/'Campaign' +
+    perguntas), então a saída flui idêntica pela normalização/matching downstream.
+    A janela [cap_start, cap_end] é aplicada em seguida por filter_by_period (em
+    data_captura), igual ao caminho antigo — aqui só trocamos a FONTE, não a lógica.
     """
+    from src.data.leads_reader import read_pesquisa
+
+    try:
+        leads_df = read_pesquisa(source="train_unified", client_id="devclub")
+    except Exception as e:  # conexão/schema — degrada pro caminho legado
+        logger.warning(f"[backtest_data] Cloud SQL leads falhou ({e}) — fallback Railway/Sheets")
+        leads_df = pd.DataFrame()
+    if len(leads_df) > 0:
+        logger.info(
+            f"[backtest_data] {len(leads_df)} leads do Cloud SQL "
+            f"(analytics.leads/train_unified) — janela aplicada downstream"
+        )
+        return leads_df
+
     from src.validation.data_loader import LeadDataLoader, SalesDataLoader
 
     sales_loader = SalesDataLoader()
     leads_df = sales_loader.load_railway_leads(start_date=cap_start, end_date=cap_end)
     if len(leads_df) > 0:
-        logger.info(f"[backtest_data] {len(leads_df)} leads do Railway")
+        logger.info(f"[backtest_data] {len(leads_df)} leads do Railway (fallback)")
         return leads_df
 
     logger.warning("[backtest_data] Railway vazio — fallback Sheets (training_mode=True)")
