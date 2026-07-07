@@ -193,6 +193,14 @@ build_env_vars() {
     # Voltar pra 'railway' só em rollback consciente.
     ENV_VARS="$ENV_VARS,LEDGER_READ_SOURCE=${LEDGER_READ_SOURCE:-cloudsql}"
 
+    # Fonte do decil_challenger dos RELATÓRIOS (refator dual-decil, Fase 3):
+    # scores_historicos (legado) | ledger (lê registros_ml direto, onde a Fase 2
+    # grava ao vivo e a Fase 4 copiou o histórico). DEFAULT=ledger — o flip da
+    # Fase 3. Mesmo motivo dos LEDGER_* acima: default no config.sh pra não
+    # depender de env por-revisão. Rollback = voltar tráfego pra revisão anterior
+    # (sem o flag → cai em scores_historicos) OU setar =scores_historicos aqui.
+    ENV_VARS="$ENV_VARS,LEDGER_DECIL_READ_SOURCE=${LEDGER_DECIL_READ_SOURCE:-ledger}"
+
     # Canais Slack do relatório de criativo — PINADOS aqui (não confiar no default
     # da app). O deploy usa --update-env-vars (MESCLA), então um override por-revisão
     # (ex.: uma canary de validação apontando o relatório pro DM) VAZARIA pro próximo

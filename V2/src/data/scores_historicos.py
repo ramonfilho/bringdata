@@ -346,10 +346,11 @@ def challenger_quality_by_utm(
             }
             for r in rows
         ]
-        # Fail-loud (só na visão de lançamento): há população Challenger pro LF
-        # mas o join não casou nenhum UTM → registros_ml sem UTM na janela, ou
-        # chave de email divergindo.
-        if not out and pin_lf:
+        # Fail-loud (só na visão de lançamento E no caminho LEGADO): há população
+        # Challenger pro LF mas o join não casou nenhum UTM → registros_ml sem UTM
+        # na janela, ou chave de email divergindo. No caminho 'ledger' não há join
+        # (decil e UTM na mesma tabela), então esse modo de falha não existe.
+        if not out and pin_lf and _decil_read_source() != "ledger":
             chk = conn.run(
                 "SELECT COUNT(*) FROM scores_historicos "
                 "WHERE lf = :lf AND challenger_run_id = :run_id "
