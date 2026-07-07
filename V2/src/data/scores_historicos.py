@@ -15,6 +15,7 @@ load_scores_historicos_cloudsql / ledger_connection).
 from __future__ import annotations
 
 import logging
+import os
 from collections import namedtuple
 from typing import Any, Dict, List, Optional
 
@@ -153,14 +154,34 @@ def launch_score_geral(lf_name: Optional[str], *, conn=None) -> Optional[Dict[st
             logger.warning("[score_geral] conexão Cloud SQL falhou: %s", e)
             return None
     try:
-        r = conn.run(
-            "SELECT COUNT(*), "
-            "AVG(CAST(REPLACE(decil_challenger, 'D', '') AS INTEGER)), "
-            "AVG(CASE WHEN decil_challenger IN ('D09', 'D10') THEN 1.0 ELSE 0.0 END) "
-            "FROM scores_historicos "
-            "WHERE lf = :lf AND decil_challenger IS NOT NULL",
-            lf=lf_name,
-        )
+        if _decil_read_source() == "ledger":
+            # Fase 3: lê da `registros_ml`. Não tem coluna `lf` → resolve a janela
+            # do lançamento pelo calendário e filtra por `created_at`. Dedup por
+            # email (o ledger é 1 linha por evento). decil é INT → AVG direto,
+            # D9-D10 = IN (9,10). Sem janela cadastrada → degrada (None).
+            win = _lf_window_utc(lf_name)
+            if win is None:
+                return None
+            ws, we = win
+            r = conn.run(
+                "SELECT COUNT(*), AVG(decil_challenger), "
+                "AVG(CASE WHEN decil_challenger IN (9, 10) THEN 1.0 ELSE 0.0 END) "
+                "FROM ( SELECT DISTINCT ON (lower(email)) lower(email) AS e, decil_challenger "
+                "       FROM registros_ml "
+                "       WHERE created_at >= :ws AND created_at < :we "
+                "         AND decil_challenger IS NOT NULL "
+                "       ORDER BY lower(email), created_at DESC ) s",
+                ws=ws, we=we,
+            )
+        else:
+            r = conn.run(
+                "SELECT COUNT(*), "
+                "AVG(CAST(REPLACE(decil_challenger, 'D', '') AS INTEGER)), "
+                "AVG(CASE WHEN decil_challenger IN ('D09', 'D10') THEN 1.0 ELSE 0.0 END) "
+                "FROM scores_historicos "
+                "WHERE lf = :lf AND decil_challenger IS NOT NULL",
+                lf=lf_name,
+            )
         n = int(r[0][0] or 0)
         if n == 0:
             return None
@@ -254,48 +275,67 @@ def challenger_quality_by_utm(
             logger.warning("[challenger_quality_by_utm] conexão falhou: %s", e)
             return []
     try:
-        utm_cte = (
-            "WITH utm_por_lead AS ("
-            f"  SELECT DISTINCT ON (lower(email)) lower(email) AS email_k, {col} AS utm "
-            "  FROM registros_ml "
-            f"  WHERE {col} IS NOT NULL AND {col} <> '' "
-            "    AND created_at >= :ws AND created_at < :we "
-            "  ORDER BY lower(email), created_at DESC"
-            ") "
-        )
-        if pin_lf:
-            # Visão do LANÇAMENTO: prende ao rótulo do LF (1 linha por email no LF).
-            scores_join = (
-                "FROM scores_historicos s "
-                "JOIN utm_por_lead u ON u.email_k = lower(s.email) "
-                "WHERE s.lf = :lf AND s.challenger_run_id = :run_id "
-                "  AND s.decil_challenger IS NOT NULL "
+        if _decil_read_source() == "ledger":
+            # Fase 3: decil + UTM na MESMA tabela (`registros_ml`) — sem join.
+            # decil é INT → IN (9,10) / AVG direto. pin_lf não filtra `lf` (o
+            # ledger não tem; a janela [ws,we) escopa). Dedup por email (1 evento).
+            sql = (
+                "SELECT t.utm, COUNT(*) AS n, "
+                "AVG(CASE WHEN t.decil IN (9,10) THEN 1.0 ELSE 0.0 END) AS pct, "
+                "AVG(t.decil) AS avg_decil "
+                "FROM ( SELECT DISTINCT ON (lower(email)) "
+                f"         {col} AS utm, decil_challenger AS decil "
+                "       FROM registros_ml "
+                f"       WHERE {col} IS NOT NULL AND {col} <> '' "
+                "         AND created_at >= :ws AND created_at < :we "
+                "         AND challenger_run_id = :run_id AND decil_challenger IS NOT NULL "
+                "       ORDER BY lower(email), created_at DESC ) t "
+                "GROUP BY t.utm ORDER BY n DESC"
             )
+            params = {'run_id': challenger_run_id, 'ws': win_start, 'we': win_end}
         else:
-            # Visão da JANELA (diário): SEM filtro de lf — conta quem entrou na
-            # janela, independente do rótulo de lançamento. Dedup por email (o
-            # decil é a régua única, igual em qualquer lf) pra não inflar.
-            scores_join = (
-                "FROM ("
-                "  SELECT DISTINCT ON (lower(email)) lower(email) AS email, decil_challenger "
-                "  FROM scores_historicos "
-                "  WHERE challenger_run_id = :run_id AND decil_challenger IS NOT NULL "
-                "  ORDER BY lower(email), generated_at DESC"
-                ") s "
-                "JOIN utm_por_lead u ON u.email_k = s.email "
+            utm_cte = (
+                "WITH utm_por_lead AS ("
+                f"  SELECT DISTINCT ON (lower(email)) lower(email) AS email_k, {col} AS utm "
+                "  FROM registros_ml "
+                f"  WHERE {col} IS NOT NULL AND {col} <> '' "
+                "    AND created_at >= :ws AND created_at < :we "
+                "  ORDER BY lower(email), created_at DESC"
+                ") "
             )
-        sql = (
-            utm_cte +
-            "SELECT u.utm, COUNT(*) AS n, "
-            "AVG(CASE WHEN s.decil_challenger IN ('D09','D10') THEN 1.0 ELSE 0.0 END) AS pct, "
-            "AVG(CAST(REPLACE(s.decil_challenger,'D','') AS INTEGER)) AS avg_decil "
-            + scores_join +
-            "GROUP BY u.utm "
-            "ORDER BY n DESC"
-        )
-        params = {'run_id': challenger_run_id, 'ws': win_start, 'we': win_end}
-        if pin_lf:
-            params['lf'] = lf_name
+            if pin_lf:
+                # Visão do LANÇAMENTO: prende ao rótulo do LF (1 linha por email no LF).
+                scores_join = (
+                    "FROM scores_historicos s "
+                    "JOIN utm_por_lead u ON u.email_k = lower(s.email) "
+                    "WHERE s.lf = :lf AND s.challenger_run_id = :run_id "
+                    "  AND s.decil_challenger IS NOT NULL "
+                )
+            else:
+                # Visão da JANELA (diário): SEM filtro de lf — conta quem entrou na
+                # janela, independente do rótulo de lançamento. Dedup por email (o
+                # decil é a régua única, igual em qualquer lf) pra não inflar.
+                scores_join = (
+                    "FROM ("
+                    "  SELECT DISTINCT ON (lower(email)) lower(email) AS email, decil_challenger "
+                    "  FROM scores_historicos "
+                    "  WHERE challenger_run_id = :run_id AND decil_challenger IS NOT NULL "
+                    "  ORDER BY lower(email), generated_at DESC"
+                    ") s "
+                    "JOIN utm_por_lead u ON u.email_k = s.email "
+                )
+            sql = (
+                utm_cte +
+                "SELECT u.utm, COUNT(*) AS n, "
+                "AVG(CASE WHEN s.decil_challenger IN ('D09','D10') THEN 1.0 ELSE 0.0 END) AS pct, "
+                "AVG(CAST(REPLACE(s.decil_challenger,'D','') AS INTEGER)) AS avg_decil "
+                + scores_join +
+                "GROUP BY u.utm "
+                "ORDER BY n DESC"
+            )
+            params = {'run_id': challenger_run_id, 'ws': win_start, 'we': win_end}
+            if pin_lf:
+                params['lf'] = lf_name
         rows = conn.run(sql, **params)
         out = [
             {
@@ -346,6 +386,36 @@ def _empty_decil_dist() -> Dict[str, int]:
 ChallengerDecilRec = namedtuple("ChallengerDecilRec", ["utm_source", "utm_campaign", "decil"])
 
 
+def _decil_read_source() -> str:
+    """Fonte do decil_challenger dos relatórios (estrangulamento da Fase 3):
+    'scores_historicos' (default, legado) ou 'ledger' (lê da `registros_ml`, onde
+    a Fase 2 grava ao vivo e a Fase 4 copiou o histórico). Flip via env
+    LEDGER_DECIL_READ_SOURCE (default no config.sh) → rollback instantâneo sem
+    deploy. Removido junto do caminho legado na Fase 5."""
+    return os.environ.get("LEDGER_DECIL_READ_SOURCE", "scores_historicos").strip().lower()
+
+
+def _lf_window_utc(lf_name):
+    """Janela de captação de um LF (BRT→UTC, fim exclusivo) do `launches.yaml`,
+    como (ws_iso, we_iso). None se o LF não tem janela cadastrada — o caminho
+    'ledger' usa isso pra escopar a `registros_ml`, que não tem coluna `lf`."""
+    from datetime import datetime, timedelta, timezone
+    from src.core.launches import load_launches
+    cfg = (load_launches() or {}).get(lf_name) or {}
+    cs_str, ce_str = cfg.get("cap_start"), cfg.get("cap_end")
+    if not (cs_str and ce_str):
+        return None
+    try:
+        cs = datetime.strptime(cs_str, "%Y-%m-%d").date()
+        ce = datetime.strptime(ce_str, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    brt = timezone(timedelta(hours=-3))
+    ws = datetime(cs.year, cs.month, cs.day, tzinfo=brt).astimezone(timezone.utc)
+    we = (datetime(ce.year, ce.month, ce.day, tzinfo=brt) + timedelta(days=1)).astimezone(timezone.utc)
+    return ws.strftime("%Y-%m-%d %H:%M:%S"), we.strftime("%Y-%m-%d %H:%M:%S")
+
+
 def challenger_decils_in_window(
     *,
     challenger_run_id: str,
@@ -353,6 +423,7 @@ def challenger_decils_in_window(
     win_end,
     lf_name: Optional[str] = None,
     pin_lf: bool = False,
+    source: Optional[str] = None,
     conn=None,
 ) -> Optional[List[ChallengerDecilRec]]:
     """Base ÚNICA do split de decis na régua do Challenger — `scores_historicos`
@@ -393,36 +464,53 @@ def challenger_decils_in_window(
         except Exception as e:
             logger.warning("[challenger_decils_in_window] conexão falhou: %s", e)
             return None
+    src = (source or _decil_read_source())
     try:
-        # 1 linha por lead: prioriza a que tem utm_source (dado presente), depois a
-        # mais recente. Lead sem NENHUMA fonte entra com src=NULL (só no Total).
-        src_cte = (
-            "WITH src_por_lead AS ("
-            "  SELECT DISTINCT ON (lower(email)) lower(email) AS email_k, "
-            "         lower(utm_source) AS src, utm_campaign AS campaign "
-            "  FROM registros_ml "
-            "  WHERE created_at >= :ws AND created_at < :we "
-            "  ORDER BY lower(email), "
-            "           (utm_source IS NOT NULL AND utm_source <> '') DESC, created_at DESC"
-            ") "
-        )
-        # scores_historicos deduplicado por email nos DOIS caminhos (idempotência do
-        # upsert por (email,lf) deveria bastar, mas o DISTINCT ON blinda contra
-        # fan-out). Único diff entre janela/LF: a cláusula WHERE (com/sem lf=:lf).
-        _lf_clause = "lf = :lf AND " if pin_lf else ""
-        scores_join = (
-            "FROM ("
-            "  SELECT DISTINCT ON (lower(email)) lower(email) AS email, decil_challenger "
-            "  FROM scores_historicos "
-            f"  WHERE {_lf_clause}challenger_run_id = :run_id AND decil_challenger IS NOT NULL "
-            "  ORDER BY lower(email), generated_at DESC"
-            ") s "
-            "JOIN src_por_lead u ON u.email_k = s.email "
-        )
-        sql = src_cte + "SELECT u.src, u.campaign, s.decil_challenger AS decil " + scores_join
-        params = {'run_id': challenger_run_id, 'ws': win_start, 'we': win_end}
-        if pin_lf:
-            params['lf'] = lf_name
+        if src == "ledger":
+            # Fase 3: decil + UTM na MESMA tabela (`registros_ml`) — sem join. A
+            # Fase 2 grava o decil ao vivo e a Fase 4 copiou o histórico. O
+            # `decil_challenger` é INT; formata 'D0x' pra manter o contrato dos
+            # consumidores. `pin_lf` NÃO filtra `lf` (o ledger não tem essa coluna;
+            # a janela [ws,we) já é o escopo do lançamento). Dedup por email igual:
+            # prioriza a linha com utm_source, depois a mais recente.
+            sql = (
+                "SELECT DISTINCT ON (lower(email)) "
+                "       lower(utm_source) AS src, utm_campaign AS campaign, "
+                "       'D' || lpad(decil_challenger::text, 2, '0') AS decil "
+                "FROM registros_ml "
+                "WHERE created_at >= :ws AND created_at < :we "
+                "  AND challenger_run_id = :run_id AND decil_challenger IS NOT NULL "
+                "ORDER BY lower(email), "
+                "         (utm_source IS NOT NULL AND utm_source <> '') DESC, created_at DESC"
+            )
+            params = {'run_id': challenger_run_id, 'ws': win_start, 'we': win_end}
+        else:
+            # Legado: `scores_historicos` (decil) ⋈ `registros_ml` (UTM) por email.
+            # 1 linha por lead: prioriza a que tem utm_source, depois a mais recente.
+            src_cte = (
+                "WITH src_por_lead AS ("
+                "  SELECT DISTINCT ON (lower(email)) lower(email) AS email_k, "
+                "         lower(utm_source) AS src, utm_campaign AS campaign "
+                "  FROM registros_ml "
+                "  WHERE created_at >= :ws AND created_at < :we "
+                "  ORDER BY lower(email), "
+                "           (utm_source IS NOT NULL AND utm_source <> '') DESC, created_at DESC"
+                ") "
+            )
+            _lf_clause = "lf = :lf AND " if pin_lf else ""
+            scores_join = (
+                "FROM ("
+                "  SELECT DISTINCT ON (lower(email)) lower(email) AS email, decil_challenger "
+                "  FROM scores_historicos "
+                f"  WHERE {_lf_clause}challenger_run_id = :run_id AND decil_challenger IS NOT NULL "
+                "  ORDER BY lower(email), generated_at DESC"
+                ") s "
+                "JOIN src_por_lead u ON u.email_k = s.email "
+            )
+            sql = src_cte + "SELECT u.src, u.campaign, s.decil_challenger AS decil " + scores_join
+            params = {'run_id': challenger_run_id, 'ws': win_start, 'we': win_end}
+            if pin_lf:
+                params['lf'] = lf_name
         rows = conn.run(sql, **params)
         return [ChallengerDecilRec(utm_source=r[0], utm_campaign=r[1], decil=r[2]) for r in rows]
     except Exception as e:
