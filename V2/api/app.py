@@ -3431,13 +3431,17 @@ async def daily_monitoring_check_railway(
                 fb_rows=_lf_rows,
                 fb_records=_rec_between(_records_90d_scored, _cs_dt, _ce_dt, True),
             )
-            # Refresh incremental ONLINE da scores_historicos (passo 3): SÓ na run
-            # AO VIVO (anchor_date is None — relatório histórico não re-scoreia o
-            # passado; isso é trabalho do backfill). Re-scoreia pelos 2 modelos só
-            # os leads NOVOS do LF atual e faz upsert idempotente, ANTES de ler o
-            # score geral, pra a nota refletir os leads mais recentes. Totalmente
-            # guardado: qualquer falha aqui só pula o refresh, não derruba o relatório.
-            if _anchor is None and pipeline is not None and _lw.lf_name:
+            # Refresh incremental ONLINE da scores_historicos: DESLIGADO por padrão
+            # (Fase 5a). Depois que a Fase 3 passou a ler o decil direto do ledger
+            # (`registros_ml`, flag LEDGER_DECIL_READ_SOURCE=ledger), re-scorear os
+            # leads do LF pra dentro da `scores_historicos` virou peso morto: o
+            # relatório não lê mais dela. E era ISTO que carregava os 2 modelos e
+            # estourava a memória (OOM 2198/2048 MiB) derrubando o digest do DM das
+            # 06:20 de forma intermitente. Fica atrás de um flag SÓ pra rollback:
+            # REPORT_SCORES_REFRESH=on volta o comportamento antigo; default 'off'.
+            _refresh_on = os.environ.get(
+                "REPORT_SCORES_REFRESH", "off").strip().lower() in ("on", "true", "1", "yes")
+            if _refresh_on and _anchor is None and pipeline is not None and _lw.lf_name:
                 try:
                     from api.scores_refresh import refresh_launch_scores
                     _rf = refresh_launch_scores(
