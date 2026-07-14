@@ -1,11 +1,17 @@
 """
 launch_calendar.py — Repositório compartilhado do calendário de LFs.
 
-FONTE ÚNICA das datas de lançamento = a planilha do Google (aba FORMS). Este
-módulo lê a planilha, parseia as janelas (captação/vendas) e GERA o
-`configs/launches.yaml`, que vira projeção/cache — nunca mais editado à mão.
-Todos os consumidores continuam lendo por `core.launches.load_launches()`; só a
-origem do arquivo muda.
+FONTE ÚNICA das datas de lançamento = a planilha "PC FORMULÁRIOS" (aba "LF's").
+Este módulo lê a planilha PELA API do Sheets, parseia as janelas
+(captação/vendas) e GERA o `configs/launches.yaml`, que vira projeção/cache —
+nunca mais editado à mão. Todos os consumidores continuam lendo por
+`core.launches.load_launches()`; só a origem do arquivo muda.
+
+ESTE é o caminho oficial pra qualquer pergunta de "quando começou/terminou o
+LFxx". Não abrir a planilha na mão, não baixar CSV, não inferir por heurística
+de segunda-feira: rodar `--dry-run` (ver) ou `--sync` (gravar). Autenticação =
+service account do `.env` (GOOGLE_APPLICATION_CREDENTIALS); a credencial pessoal
+do gcloud NÃO tem escopo de Sheets e devolve 403.
 
 Regras (decididas com o usuário):
   - "Se não está na planilha, não aconteceu" — a planilha manda nas DATAS. Sem
@@ -34,9 +40,11 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1gZlXL9-S-LmQceTdJy9MAYfqUrXySVNiY-Z6W5i_B3U/edit"
-FORMS_TAB = "FORMS"
+# Aba do calendário na planilha "PC FORMULÁRIOS". Se for renomeada, o erro de
+# leitura lista as abas disponíveis — ajustar aqui, não adivinhar data.
+FORMS_TAB = "LF's"
 
-# Cabeçalhos na aba FORMS (localizados por nome, robusto a reordenação de coluna).
+# Cabeçalhos na aba do calendário (localizados por nome, robusto a reordenação de coluna).
 COL_TAG = "PROJETO (TAG)"
 COL_CAP = "DATAS CAPTAÇÃO"
 COL_VENDAS = "DATAS VENDAS"
@@ -134,19 +142,21 @@ def _assign_years(caps: list[Optional[tuple]], today: date) -> list[Optional[int
 
 # ───────────────────────── leitura da planilha (gspread + CSV) ──────────────
 def fetch_forms_rows(sheet_url: str = DEFAULT_SHEET_URL) -> list[dict]:
-    """Lê a aba FORMS e devolve [{tag, cap_raw, vendas_raw}, ...] em ordem.
+    """Lê a aba do calendário e devolve [{tag, cap_raw, vendas_raw}, ...] em ordem.
 
-    Reusa o padrão do projeto: gspread (ADC/service account) só pra achar a aba,
-    download via CSV-export (curl) pra contornar o hang do gspread.get_all_values.
+    Leitura 100% pela API do Sheets (gspread autenticado pela service account do
+    `.env`, via GOOGLE_APPLICATION_CREDENTIALS). `get_all_values()` devolve a aba
+    INTEIRA — sem truncar e sem baixar arquivo nenhum. (A versão anterior baixava
+    um CSV-export por `curl` SEM autenticação: quebra em planilha privada e sujava
+    o disco. Não voltar a isso.)
+
+    Raises:
+        RuntimeError: aba ausente (lista as disponíveis) ou coluna esperada ausente.
+            Falha ALTO de propósito — nunca inventar data de lançamento.
     """
-    import subprocess
-    import tempfile
-
     import gspread
-    import pandas as pd
     from google.auth import default as gauth_default
 
-    sheet_id = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", sheet_url).group(1)
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets.readonly",
         "https://www.googleapis.com/auth/drive.readonly",
@@ -156,33 +166,42 @@ def fetch_forms_rows(sheet_url: str = DEFAULT_SHEET_URL) -> list[dict]:
     ss = gc.open_by_url(sheet_url)
     ws = next((w for w in ss.worksheets() if w.title == FORMS_TAB), None)
     if ws is None:
-        raise RuntimeError(f"Aba {FORMS_TAB!r} não encontrada em {sheet_url}")
+        disponiveis = [w.title for w in ss.worksheets()]
+        raise RuntimeError(
+            f"Aba {FORMS_TAB!r} não encontrada em {ss.title!r}. Abas disponíveis: "
+            f"{disponiveis}. Se a aba foi renomeada, ajuste FORMS_TAB em "
+            f"src/data/launch_calendar.py — não adivinhe as datas."
+        )
 
-    export = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={ws.id}"
-    with tempfile.NamedTemporaryFile(mode="w+", suffix=".csv", delete=False) as tmp:
-        r = subprocess.run(["curl", "-sL", "--max-time", "30", export, "-o", tmp.name], timeout=35)
-        if r.returncode != 0:
-            raise RuntimeError(f"curl falhou (exit {r.returncode}) baixando aba {FORMS_TAB}")
-        df = pd.read_csv(tmp.name, low_memory=False, header=None, dtype=str)
-    Path(tmp.name).unlink(missing_ok=True)
+    values = ws.get_all_values()
+    if not values:
+        raise RuntimeError(f"Aba {FORMS_TAB!r} está vazia em {ss.title!r}")
 
-    header = [str(c).strip() for c in df.iloc[0].tolist()]
+    header = [str(c).strip() for c in values[0]]
 
     def col(name):
         if name not in header:
-            raise RuntimeError(f"Coluna {name!r} não achada na aba FORMS (cabeçalhos: {header})")
+            raise RuntimeError(
+                f"Coluna {name!r} não achada na aba {FORMS_TAB!r} (cabeçalhos: {header})"
+            )
         return header.index(name)
 
     ci_tag, ci_cap, ci_vendas = col(COL_TAG), col(COL_CAP), col(COL_VENDAS)
+
+    # gspread apara células vazias no fim da linha — a linha pode vir mais curta
+    # que o cabeçalho.
+    def cell(row, i):
+        return row[i] if i < len(row) else ""
+
     rows = []
-    for i in range(1, len(df)):
-        tag_raw = str(df.iat[i, ci_tag]).strip()
+    for row in values[1:]:
+        tag_raw = str(cell(row, ci_tag)).strip()
         if not tag_raw or tag_raw.lower() == "nan":
             continue
         rows.append({
             "tag": tag_raw,
-            "cap_raw": df.iat[i, ci_cap],
-            "vendas_raw": df.iat[i, ci_vendas],
+            "cap_raw": cell(row, ci_cap),
+            "vendas_raw": cell(row, ci_vendas),
         })
     return rows
 
