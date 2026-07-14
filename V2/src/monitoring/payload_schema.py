@@ -1010,6 +1010,11 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'traffic_metrics.dia_anterior.ctr_lead':                                            (R, None),
     'traffic_metrics.dia_anterior.meta_leads':                                          (R, None),
     'traffic_metrics.dia_anterior.spend':                                               (R, None),
+    # TOTAL de cadastros Meta do dia, contado por utm_source na Client (mesma base do
+    # total do Google). Renderizado como a linha "Cadastros" sob "── Meta ──". Existe
+    # porque as linhas por_variante abaixo contam SÓ campanha reconhecida e somam menos
+    # que o total — lidas sozinhas, faziam a Meta parecer ter trazido só o balde "Lead".
+    'traffic_metrics.dia_anterior.total_cadastros':                                     (R, None),
     # Por variante (Lead/Champion/Challenger) — CPL real + conv LP no funil.
     'traffic_metrics.dia_anterior.por_variante':                                        (R, None),  # dict(3) buckets
     'traffic_metrics.dia_anterior.por_variante.Lead':                                   (R, None),

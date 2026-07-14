@@ -3891,6 +3891,42 @@ async def daily_monitoring_check_railway(
                                 for _b, _d in _pv_result.items()
                             )
                         )
+
+                    # TOTAL de cadastros Meta do dia — a linha que faltava no funil.
+                    # O split por variante acima conta só quem tem campanha reconhecida
+                    # como Lead/Champion/Challenger e DESCARTA o resto, então o número
+                    # dele (ex.: "Lead 136") é um SUBCONJUNTO, não o total da Meta — e
+                    # lido sozinho passa a impressão de que a Meta trouxe quase nada.
+                    # Aqui contamos por FONTE (utm_source), sem depender da campanha,
+                    # reusando a MESMA leitura de cadastros que o funil do Google usa
+                    # (por isso o total Meta e o total Google são comparáveis: ambos
+                    # saem da Client, fechados por createdAt, deduplicados por email).
+                    # Guardado: se falhar, o funil sai como antes, sem a linha.
+                    try:
+                        from src.data.cadastro_records import (
+                            open_railway_connection as _open_rail_m,
+                            google_cadastro_records as _cadastros_por_fonte,
+                        )
+                        _meta_srcs = list(
+                            (pipeline._client_config.capi.utm_source_allowlist or [])
+                            if (pipeline and pipeline._client_config and pipeline._client_config.capi)
+                            else []
+                        )
+                        if _meta_srcs and isinstance(meta_window_data.get('dia_anterior'), dict):
+                            _rc_m = _open_rail_m()
+                            try:
+                                _meta_cad = _cadastros_por_fonte(
+                                    _rc_m, _dia_ant_str, _dia_ant_str, _meta_srcs)
+                            finally:
+                                try: _rc_m.close()
+                                except Exception: pass
+                            meta_window_data['dia_anterior']['total_cadastros'] = len(_meta_cad)
+                            logger.info(
+                                f"📊 Total de cadastros Meta (dia anterior): {len(_meta_cad)} "
+                                f"(fontes: {_meta_srcs})"
+                            )
+                    except Exception as _mce:
+                        logger.warning(f"⚠️ total de cadastros Meta indisponível (funil segue sem): {_mce}")
                     # Acumulado do lançamento atual (cap_start..hoje) — pra ver tendência.
                     try:
                         from src.core.launches import resolve_launch_window_brt as _rlw_pv
