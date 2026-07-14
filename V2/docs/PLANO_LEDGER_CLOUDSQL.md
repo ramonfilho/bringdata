@@ -203,6 +203,19 @@ O item 1 do plano de remediação de score (cache versionado regenerado no daily
 
     Com (b)+(c) o pico voltou pra dentro de 2 GB: daily-check validado a **2Gi** no canary (45,8s) e em produção (55,6s), sem OOM. A memória subiu temporariamente pra 4Gi como cinto de segurança e **voltou a 2Gi** após os cortes (custo de volta ao baseline). PR #24, revisão `smart-ads-api-00795-juq`.
 
+    **🔴 REINCIDIU em 11/07 e 14/07/2026 — memória de volta pra 4Gi (permanente até o item abaixo).** O relatório do cliente (`slack-digest-daily`, 06:00 → `#team-dados`) voltou a morrer: `Memory limit of 2048 MiB exceeded with 2115 MiB used` → HTTP 503 → o Cloud Scheduler registrou `code 14` (UNAVAILABLE) e **nada foi postado** (11/07 e 14/07; um OOM também em 07/07). Diagnóstico correto desta vez:
+
+    - **NÃO é concorrência entre os dois digests.** O espaçamento de crons de 26/06 (item (a)) funcionou: cliente 06:00 e DM 06:20 estão 20 min apart e cada um dura 50-75s — **nunca se sobrepõem**. Prova: em 14/07 o das 06:00 morreu de OOM e o das 06:20 rodou **200 OK**. São independentes.
+    - **O pico de UMA execução já passa de 2 GB.** O volume cresceu (~1.000-1.300 leads/dia) e os cortes de 26/06 foram dimensionados pra um dataset menor.
+    - **A concorrência real é digest × polling.** `containerConcurrency=80` faz o relatório dividir o **mesmo container** com `railway-polling` e `pubsub-process-pending`, que rodam **a cada 5 min** e carregam o modelo pra scorear. O digest leva ~60s, então **sempre** cai em cima de um batch de polling — as memórias somam.
+    - **Não há rede de segurança:** os jobs de digest **não têm retry** (`retryCount` ausente no `retryConfig`). Uma falha = zero relatório no dia.
+
+    **Ação em 14/07:** memória **2Gi → 4Gi**, revisão `smart-ads-api-00474-n59` (mesma imagem de `00858-xev`, só o limite muda), promovida a 100%. Rollback: `update-traffic ...=smart-ads-api-00858-xev=100`.
+
+    **⚠️ NÃO fundir os dois crons de digest numa chamada só.** O endpoint aceita `channel_client` + `channel_full` juntos (uma build de payload, dois posts), e a economia é real — mas **não conserta o OOM** (não reduz o pico de uma execução única, que é o que estoura) e **dobra o raio do estrago**: em 14/07, foi justamente a separação que preservou o relatório do DM enquanto o do cliente morria. Fundido, um OOM derrubaria os dois. Só considerar depois que a memória estiver folgada, e por custo.
+
+    **Pendente (conserto arquitetural):** tirar o digest de dentro do container que faz scoring em tempo real — container próprio (Cloud Run Job / serviço separado) ou concorrência 1 pro caminho do relatório. Enquanto isso não existir, o 4Gi é o que segura.
+
 ## 7. Registro de execução
 
 | Data | Etapa | O que foi feito | Commit |
