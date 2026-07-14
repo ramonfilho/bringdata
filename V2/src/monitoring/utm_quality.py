@@ -392,9 +392,14 @@ def build_top5_comparison(
     win_end,
     client_id: str = 'devclub',
     min_n: int = 100,
+    pin_lf: bool = True,
     conn=None,
 ) -> Optional[dict]:
     """Monta a comparação por criativo e por campanha vs a barra TOP5 ROAS.
+
+    pin_lf=True (lançamento): conta só leads do `lf_name`. pin_lf=False (janela/
+    diário): conta quem entrou na janela independente do lançamento — a visão do
+    dia NÃO depende do rótulo de LF (desacoplado do calendário).
 
     Régua única do Challenger (lê decil_challenger da scores_historicos via
     challenger_quality_by_utm). Para cada UTM com N ≥ min_n, deriva o Δpp vs a
@@ -480,7 +485,7 @@ def build_top5_comparison(
         for level in ('creative', 'campaign'):
             rows = challenger_quality_by_utm(
                 lf_name, level=level, challenger_run_id=challenger_run_id,
-                win_start=win_start, win_end=win_end, conn=conn,
+                win_start=win_start, win_end=win_end, pin_lf=pin_lf, conn=conn,
             )
             shown, hidden = _enrich(rows)
             out['levels'][level] = {'rows': shown, 'hidden_below_min_n': hidden}

@@ -83,6 +83,18 @@ SCHEDULER_SCHEDULE="${SCHEDULER_SCHEDULE:-0 10 * * MON}"  # Segunda 10h UTC (7h 
 SCHEDULER_DESCRIPTION="${SCHEDULER_DESCRIPTION:-Validação semanal do modelo ML (toda segunda 10h UTC)}"
 
 # =============================================================================
+# INGESTÃO AUTOMÁTICA (leads incremental + vendas diário) — Cloud Run Jobs
+# =============================================================================
+# Dois jobs batch que populam o banco sozinhos (deploy_ingestion_job.sh):
+#   leads → leads_unify --incremental (anexa leads novos do ledger ao train_unified)
+#   sales → etl_sales --daily (4 gateways de API + alerta se o tmb manual atrasar)
+INGESTION_LEADS_JOB="${INGESTION_LEADS_JOB:-ingestion-leads-incremental}"
+INGESTION_SALES_JOB="${INGESTION_SALES_JOB:-ingestion-sales-daily}"
+# Schedules em UTC. 09:00 UTC = 06:00 BRT (leads), 09:30 UTC = 06:30 BRT (vendas, após leads).
+INGESTION_LEADS_SCHEDULE="${INGESTION_LEADS_SCHEDULE:-0 9 * * *}"
+INGESTION_SALES_SCHEDULE="${INGESTION_SALES_SCHEDULE:-30 9 * * *}"
+
+# =============================================================================
 # SLACK (NOTIFICATIONS)
 # =============================================================================
 
@@ -180,6 +192,23 @@ build_env_vars() {
     # Railway em silêncio (frágil por design enquanto era override por-revisão).
     # Voltar pra 'railway' só em rollback consciente.
     ENV_VARS="$ENV_VARS,LEDGER_READ_SOURCE=${LEDGER_READ_SOURCE:-cloudsql}"
+
+    # Fonte do decil_challenger dos RELATÓRIOS (refator dual-decil, Fase 3):
+    # scores_historicos (legado) | ledger (lê registros_ml direto, onde a Fase 2
+    # grava ao vivo e a Fase 4 copiou o histórico). DEFAULT=ledger — o flip da
+    # Fase 3. Mesmo motivo dos LEDGER_* acima: default no config.sh pra não
+    # depender de env por-revisão. Rollback = voltar tráfego pra revisão anterior
+    # (sem o flag → cai em scores_historicos) OU setar =scores_historicos aqui.
+    ENV_VARS="$ENV_VARS,LEDGER_DECIL_READ_SOURCE=${LEDGER_DECIL_READ_SOURCE:-ledger}"
+
+    # Canais Slack do relatório de criativo — PINADOS aqui (não confiar no default
+    # da app). O deploy usa --update-env-vars (MESCLA), então um override por-revisão
+    # (ex.: uma canary de validação apontando o relatório pro DM) VAZARIA pro próximo
+    # deploy se o canal de produção não fosse re-setado aqui. Mesmo motivo do
+    # LEDGER_READ_SOURCE acima. C09VD6J8A72 = team-trafego (cliente); D0A9USV3XEX = DM
+    # do operador (validação). O endpoint escolhe via ?dest=trafego|dm.
+    ENV_VARS="$ENV_VARS,UTM_QUALITY_TRAFEGO_CHANNEL=${UTM_QUALITY_TRAFEGO_CHANNEL:-C09VD6J8A72}"
+    ENV_VARS="$ENV_VARS,SLACK_VALIDATION_DM_CHANNEL=${SLACK_VALIDATION_DM_CHANNEL:-D0A9USV3XEX}"
 
     # Preserva META_ACCESS_TOKEN existente
     local CURRENT_META_TOKEN=$(gcloud run services describe "$SERVICE_NAME" \

@@ -106,10 +106,16 @@ Diagnostique o que está variando, depois escolha. Não invoque padrão sem just
 - Se nenhum encaixa exatamente, qual chega mais perto? Combinação de 2?
 - Justificar em uma frase por que esse e não outro.
 
-### 3. Checagem de reuso
+### 3. Checagem de reuso — OBRIGATÓRIO diffar contra o CÓDIGO concreto, não só "o conceito"
+
+**Antes de fechar o design, ABRA e LEIA o corpo da função/módulo concreto mais próximo do que você vai escrever**, e faça o diff mental: *"o que eu vou escrever re-implementa algum join, query, parse ou lógica que já existe aqui?"*.
+
 - A abstração já existe no projeto? Posso reusar?
 - Se quase existe, vale estender em vez de criar paralelo?
-- Se existir algo parecido mas não exatamente o que preciso, considerar generalizar antes de criar competidor.
+- **Espelhar um "padrão" ≠ reusar código.** Se você vai escrever uma função "irmã" de uma existente e as duas compartilham o pedaço difícil (o join, a query, o parse), o design certo é **extrair esse pedaço pra uma base única e fazer a função antiga consumir ela** (a antiga vira wrapper fino) — NUNCA duas funções paralelas com o mesmo miolo copiado.
+- **Falsa confiança da fonte-única de DADOS:** ter uma régua/fonte-de-verdade única nos *dados* NÃO garante código sem duplicação — são ortogonais. Um design pode passar em "fonte única de verdade" no conceito e ainda duplicar o código-leitor.
+
+> **Por que este passo endureceu (incidente real):** um design foi apresentado validado contra TODOS os princípios (Repositório, fonte-única, direção de dependência) mas duplicaria um join `scores_historicos ⋈ registros_ml` que já existia numa função. O operador pegou, não a skill — porque a skill validou contra princípios **sem diffar contra o código concreto**. Princípios dizem se o design é limpo no abstrato; só o diff contra a árvore atual diz se ele duplica.
 
 ### 4. Plano de introdução
 - Onde colocar o código novo? (`src/data/`, `src/core/`, `src/monitoring/`, etc.)
@@ -170,6 +176,8 @@ Pra qualquer tarefa onde a skill foi invocada:
 4. **Plano de migração gradual** se afeta código existente. Quem migra primeiro, quem depois.
 5. **Liste os detalhes operacionais** que vão manter a abstração viva (injeção, composição única, contrato, limites).
 6. **Critério de rollback** — como volta se der ruim, em quanto tempo.
+
+**GATE OBRIGATÓRIO antes de apresentar o design:** você já LEU o corpo da(s) função(ões) concreta(s) ao lado da(s) qual(is) o código novo vai sentar, e confirmou que ele não re-implementa nada que já existe lá (passo 3)? Se não leu, o design **não está pronto** — termine a leitura antes de propor. **Nunca apresente a arquitetura no mesmo turno em que ainda está lendo o código.** Se o design cria uma função "irmã" de uma existente, diga explicitamente onde fica o miolo compartilhado e como a função antiga passa a consumi-lo — ou justifique por que não há miolo compartilhado.
 
 Se a tarefa for ambígua, pergunte antes de propor. Decisão arquitetural errada custa mais semanas do que uma hora de conversa.
 

@@ -39,36 +39,10 @@ logger = logging.getLogger(__name__)
 MAX_LEADS_POR_RUN = 6000
 
 
-def _resolve_variantes(pipeline) -> Optional[Dict[str, Dict[str, Any]]]:
-    """Mapeia champion/challenger → (variant_name, run_id, encoding_overrides) a
-    partir do A/B config do pipeline. Champion = variante cujo run_id == o do
-    active_model (pipeline.predictor); challenger = a outra. Retorna None se o
-    A/B não está habilitado ou não dá pra identificar os dois papéis."""
-    ab = getattr(pipeline, "_ab_test_config", None)
-    if not ab or not getattr(ab, "enabled", False):
-        return None
-    variants = getattr(ab, "variants", None) or {}
-    if len(variants) < 2:
-        return None
-    champ_run = getattr(getattr(pipeline, "predictor", None), "mlflow_run_id", None)
-    if not champ_run:
-        return None
-
-    champion = challenger = None
-    for vname, v in variants.items():
-        run_id = getattr(v, "run_id", None)
-        info = {
-            "variant_name": vname,
-            "run_id": run_id,
-            "encoding_overrides": getattr(v, "encoding_overrides", None),
-        }
-        if run_id == champ_run and champion is None:
-            champion = info
-        else:
-            challenger = info
-    if not champion or not challenger or not challenger["run_id"]:
-        return None
-    return {"champion": champion, "challenger": challenger}
+# Resolução de papéis champion/challenger movida pra src/scoring/variants.py
+# (fonte ÚNICA — o scoring online em src/ também consome; src/ não pode importar
+# de api/). O alias mantém o call site interno (`_resolve_variantes`) funcionando.
+from src.scoring.variants import resolve_champion_challenger as _resolve_variantes
 
 
 def _load_launch_leads(read_conn, cap_start: str, cap_end: str) -> pd.DataFrame:

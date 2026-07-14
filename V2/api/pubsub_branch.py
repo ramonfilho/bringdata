@@ -212,6 +212,20 @@ def ledger_row(
         "ip":         enrich.get("ip"),
         "has_computer": has_computer,
         "google_ads_status": google_ads_status,
+        # Régua no ledger: decil pelos DOIS modelos (champion + challenger).
+        # `ledger_row` deixa None; o passe de enriquecimento pós-scoring (por
+        # event_id) preenche nos rows scoreados. `scored_at_now`=NOW() só nesses.
+        "score_champion": None,
+        "decil_champion": None,
+        "score_challenger": None,
+        "decil_challenger": None,
+        "champion_run_id": None,
+        "challenger_run_id": None,
+        # Proveniência: qual revisão do Cloud Run scoreou. `ledger_row` deixa None;
+        # o passe de enriquecimento pós-scoring preenche (K_REVISION) só nos rows
+        # scoreados — paralelo a `scored_at_now`.
+        "core_commit": None,
+        "scored_at_now": False,
     }
 
 
@@ -220,10 +234,19 @@ def _insert_ledger(conn, r: Dict) -> None:
     # Cópia: o dual-write insere a MESMA linha em 2 bancos — os pops abaixo
     # não podem mutilar o dict do caller entre o 1º e o 2º INSERT.
     r = dict(r)
+    # Blindagem: garante que as colunas dual-decil existem como param mesmo se o
+    # row veio de um caminho que não passou por `ledger_row` (senão pg8000 real
+    # reclama de `:score_champion` não-bound). Produção sempre passa por ledger_row.
+    for _k in ("score_champion", "decil_champion", "score_challenger",
+               "decil_challenger", "champion_run_id", "challenger_run_id",
+               "core_commit"):
+        r.setdefault(_k, None)
     # JSONB precisa de string serializada — pg8000 não converte dict
     # diretamente. None vira NULL no SQL.
     survey_raw = r.pop("survey_responses", None)
     survey_json = _json.dumps(survey_raw) if survey_raw is not None else None
+    # scored_at é NOW() só em row scoreado (flag do enriquecimento), como capi_sent_at.
+    scored_at_sql = 'NOW()' if r.pop("scored_at_now", False) else 'NULL'
     conn.run(
         'INSERT INTO registros_ml '
         '(event_id, email, variant, lead_score, decil, base_meta_event_id, '
@@ -231,7 +254,9 @@ def _insert_ledger(conn, r: Dict) -> None:
         ' utm_source, utm_medium, utm_campaign, utm_content, utm_term, utm_url, '
         ' survey_responses, '
         ' first_name, last_name, phone, fbp, fbc, user_agent, ip, has_computer, '
-        ' google_ads_status) '
+        ' google_ads_status, '
+        ' score_champion, decil_champion, score_challenger, decil_challenger, '
+        ' champion_run_id, challenger_run_id, core_commit, scored_at) '
         'VALUES (:event_id, :email, :variant, :lead_score, :decil, '
         ' :base_meta_event_id, :base_status, :hq_meta_event_id, :hq_status, '
         + ('NOW()' if r.pop("capi_sent_at_now", False) else 'NULL')
@@ -239,7 +264,11 @@ def _insert_ledger(conn, r: Dict) -> None:
         ' :utm_content, :utm_term, :utm_url, '
         ' CAST(:survey_responses AS JSONB), '
         ' :first_name, :last_name, :phone, :fbp, :fbc, :user_agent, :ip, '
-        ' :has_computer, :google_ads_status) '
+        ' :has_computer, :google_ads_status, '
+        ' :score_champion, :decil_champion, :score_challenger, :decil_challenger, '
+        ' :champion_run_id, :challenger_run_id, :core_commit, '
+        + scored_at_sql
+        + ') '
         'ON CONFLICT (event_id) DO NOTHING',
         survey_responses=survey_json,
         **r,
@@ -435,6 +464,12 @@ def process_pending_pubsub(
     # (objeto da variante A/B, usado abaixo pra montar CAPI) é resolvido
     # de novo aqui — chamada barata, evita inflar o DTO.
     scored: Dict[str, Tuple[float, str, object, Optional[str]]] = {}
+    # Régua no ledger: decil pelos DOIS modelos por lead (Fase 2 do refator
+    # dual-decil). Preenchido no passe de enriquecimento antes do INSERT.
+    # `core_commit` = revisão do Cloud Run que scoreou (proveniência p/ o
+    # backfill-de-retreino da Fase 4); resolvido 1x, igual pro batch inteiro.
+    dual_by_eid: Dict[str, Dict] = {}
+    _core_commit = os.environ.get("K_REVISION")
     for _, payload, survey_dict, utm, enrich, _meta_elig in to_score:
         eid = payload["eventId"]
         try:
@@ -443,6 +478,16 @@ def process_pending_pubsub(
             n_err += 1
             logger.warning(f"[pubsub_branch] erro score {eid}: {e}")
             continue
+        dual_by_eid[eid] = {
+            "score_champion": exp.score_champion,
+            "decil_champion": exp.decil_champion,
+            "score_challenger": exp.score_challenger,
+            "decil_challenger": exp.decil_challenger,
+            "champion_run_id": exp.champion_run_id,
+            "challenger_run_id": exp.challenger_run_id,
+            "core_commit": _core_commit,
+            "scored_at_now": True,
+        }
         ab_v = pipeline.get_ab_variant(
             {"utm_campaign": utm.get("campaign"),
              "utm_content":  utm.get("content"),
@@ -496,8 +541,9 @@ def process_pending_pubsub(
                 # Google-elegível: DEFERE ledger + ack pro pós-send (como o Meta),
                 # pra gravar o google_ads_status real. O contexto do ledger viaja
                 # junto do payload de envio (chaves "_" são ignoradas pelo enviador,
-                # que só lê email/phone/decil/event_id/ts/gclid/source/rates).
+                # que só lê email/phone/decil/event_id/ts/gclid/gbraid/wbraid/source/rates).
                 n_scored_no_meta += 1
+                _click_ids = google_ads.parse_click_ids_from_url(utm.get("url"))
                 google_leads.append({
                     "email": payload.get("email"),
                     "phone": enrich.get("telefone"),
@@ -505,10 +551,12 @@ def process_pending_pubsub(
                     "event_id": eid,
                     "event_timestamp_iso": _event_ts_iso(),
                     "source": utm.get("source"),
-                    # gclid: campo próprio do payload se o front mandar; senão,
-                    # extrai da URL (?gclid=...) na borda de ingestão. Match
-                    # determinístico no envio sem depender de mudança no front.
-                    "gclid": payload.get("gclid") or google_ads.parse_gclid_from_url(utm.get("url")),
+                    # Ids de clique: campo próprio do payload se o front mandar;
+                    # senão, extrai da URL na borda única (parse_click_ids_from_url).
+                    # gclid = desktop/Android/web; gbraid/wbraid = iOS (recuperam
+                    # atribuição que se perde no Safari/app). Sem depender do front.
+                    **{k: (payload.get(k) or _click_ids.get(k))
+                       for k in ("gclid", "gbraid", "wbraid")},
                     "ab_conversion_rates": (ab_v.conversion_rates if ab_v else None),
                     "_ack_id": ack_id, "_vn": vn, "_sc": sc, "_di_int": _di_int,
                     "_payload": payload, "_utm": utm, "_survey": survey_dict, "_enrich": enrich,
@@ -693,6 +741,15 @@ def process_pending_pubsub(
             f"degradando pra railway neste batch"
         )
         target = "railway"
+
+    # Enriquecimento dual-decil (Fase 2): preenche os campos dos DOIS modelos
+    # (+ scored_at) nos rows que foram scoreados, casando por event_id. Ponto
+    # ÚNICO — cobre todos os caminhos (skipped/meta/google) sem espalhar o campo
+    # por cada `ledger_row`. Rows não-scoreados (erro) ficam com None (default).
+    for _r, _ in pending_ledger:
+        _dual = dual_by_eid.get(_r.get("event_id"))
+        if _dual:
+            _r.update(_dual)
 
     failed_acks: set = set()
     if not dry_run:

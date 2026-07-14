@@ -124,25 +124,38 @@ def compute_value(
 # fronteira de ingestão. Fonte única: ninguém mais regexa a utm_url por aí.
 # ---------------------------------------------------------------------------
 
-def parse_gclid_from_url(url: Optional[str]) -> Optional[str]:
-    """Extrai o `gclid` (id de clique determinístico do Google) de uma URL de
-    landing page. Robusto a encoding e múltiplos params via urllib.
+# Ids de clique do Google, em ordem de precisão/prioridade: gclid (determinístico,
+# desktop/Android/web) > gbraid (iOS app) > wbraid (iOS web/Safari). Um clique tem
+# no máximo UM deles; gbraid/wbraid substituem o gclid quando o clique vem do
+# ecossistema Apple (privacidade). Enviar o id de iOS recupera atribuição que hoje
+# se perde (só ~80% dos leads Google têm gclid; ~18% têm só gbraid/wbraid).
+CLICK_ID_PARAMS = ("gclid", "gbraid", "wbraid")
 
-    Pega só o `gclid` — o id que o `adIdentifiers` do envio já aceita. gbraid/
-    wbraid (variantes de iOS/privacidade) ficam de fora até o envio mapear esses
-    campos; quando entrarem, é só estender aqui (a borda já é única).
 
-    Returns o gclid (str) ou None se a URL não tiver `?gclid=`.
+def parse_click_ids_from_url(url: Optional[str]) -> Dict[str, Optional[str]]:
+    """Extrai os ids de clique do Google de uma URL de landing page →
+    `{gclid, gbraid, wbraid}` (None pra ausente). Robusto a encoding e múltiplos
+    params via urllib. Fonte ÚNICA — ninguém mais regexa a utm_url por aí; é a
+    borda de anti-corrupção do click-id (o front embute na URL, não em campo próprio).
     """
+    out: Dict[str, Optional[str]] = {k: None for k in CLICK_ID_PARAMS}
     if not url:
-        return None
+        return out
     from urllib.parse import urlparse, parse_qs
     try:
-        vals = parse_qs(urlparse(str(url)).query).get("gclid") or []
+        qs = parse_qs(urlparse(str(url)).query)
     except Exception:
-        return None
-    g = (vals[0] if vals else "").strip()
-    return g or None
+        return out
+    for k in CLICK_ID_PARAMS:
+        v = (qs.get(k) or [""])[0].strip()
+        out[k] = v or None
+    return out
+
+
+def parse_gclid_from_url(url: Optional[str]) -> Optional[str]:
+    """Só o `gclid` — wrapper fino sobre `parse_click_ids_from_url` (borda única).
+    Mantido pra compatibilidade com callers que só querem o gclid."""
+    return parse_click_ids_from_url(url).get("gclid")
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +211,8 @@ def build_event(
     event_timestamp_iso: str,
     transaction_id: str,
     gclid: Optional[str] = None,
+    gbraid: Optional[str] = None,
+    wbraid: Optional[str] = None,
     event_source: str = "WEB",
 ) -> Dict:
     """Monta um Event do events:ingest.
@@ -216,8 +231,12 @@ def build_event(
     user_ids = hash_user_identifiers(email, phone)
     if user_ids:
         event["userData"] = {"userIdentifiers": user_ids}
-    if gclid:
-        event["adIdentifiers"] = {"gclid": gclid}
+    # Um id de clique por evento (são mutuamente exclusivos por clique): gclid tem
+    # prioridade (determinístico); na ausência dele, o id de iOS (gbraid/wbraid)
+    # recupera atribuição do Safari/app Apple. Sem nenhum, casa só por email/telefone.
+    click = next(((k, v) for k, v in (("gclid", gclid), ("gbraid", gbraid), ("wbraid", wbraid)) if v), None)
+    if click:
+        event["adIdentifiers"] = {click[0]: click[1]}
     # Sem bloco `consent`: DevClub é tráfego BR (fora do EEA). Para clientes EEA,
     # preencher consent.adUserData / consent.adPersonalization aqui.
     return event
@@ -326,7 +345,9 @@ def send_batch_events(
             currency=currency,
             event_timestamp_iso=lead.get("event_timestamp_iso"),
             transaction_id=lead.get("event_id"),
-            gclid=lead.get("gclid"),   # opcional — None até o front popular
+            gclid=lead.get("gclid"),     # id de clique (desktop/Android/web)
+            gbraid=lead.get("gbraid"),   # id de clique iOS app
+            wbraid=lead.get("wbraid"),   # id de clique iOS web/Safari
         )
 
         # 1) evento value-weighted (todos os decis) — DESLIGÁVEL por config.
