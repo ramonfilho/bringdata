@@ -210,3 +210,39 @@ df = pd.read_csv(url)
 - [gspread Documentation](https://docs.gspread.org/)
 - [Google Sheets API Quotas](https://developers.google.com/sheets/api/limits)
 - [Google Cloud ADC](https://cloud.google.com/docs/authentication/application-default-credentials)
+
+---
+
+## Calendário de lançamentos (LF) — caminho OFICIAL
+
+**Pergunta típica:** "quando começou/terminou a captação da LF61?"
+
+**Fonte canônica:** planilha **PC FORMULÁRIOS**, aba **`LF's`** (id `1gZlXL9-S-LmQceTdJy9MAYfqUrXySVNiY-Z6W5i_B3U`).
+Em conflito de data, **a planilha vence** — não existe camada de override no yaml.
+
+**NÃO** abra a planilha na mão, **não** baixe CSV, **não** peça screenshot e **não**
+infira data por heurística de segunda-feira (a LF62 tem captação de 2 semanas — um
+chute semanal erra). Use a ferramenta:
+
+```bash
+cd V2 && set -a; source .env; set +a           # .env traz a service account (obrigatório)
+
+python -m src.data.launch_calendar --dry-run   # ver as datas e reconciliar com o yaml
+python -m src.data.launch_calendar --sync      # regenerar configs/launches.yaml
+python -m src.data.launch_calendar --check     # cruzar com o ledger (LF não cadastrado / dia órfão)
+```
+
+- `configs/launches.yaml` é **gerado**. Não editar à mão: data errada se corrige **na planilha**.
+- A curadoria que a planilha não tem (`excluded_from_reference` dos outliers do Top 5,
+  `notes`) é **preservada** no sync.
+- **403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT`?** É a credencial pessoal do `gcloud`, que não
+  tem escopo de Sheets. O `.env` aponta pra service account correta — carregue-o.
+- Leitura é **API pura** (`gspread.get_all_values()`, lê a aba inteira sem truncar).
+  O `read_file_content` do conector Drive **trunca na ~LF50** — isso é limite do leitor,
+  **não** da planilha.
+
+**Depois de cadastrar um LF novo:** cheque o buraco de decil no ledger e rode
+`scripts/backfill_dual_decil_from_scores_historicos.py` (a janela nova pode cair antes
+da escrita dupla online). Detalhe em `plano_decis_dois_modelos_ledger.md`.
+
+*Ferramenta: `V2/src/data/launch_calendar.py` (PR #45, na main desde 10/07/2026).*
