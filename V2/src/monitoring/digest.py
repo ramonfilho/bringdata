@@ -1695,12 +1695,19 @@ def _slack_unified_funnel(v: dict, B: list):
                 out.append(f"{_lbl:<18}{_vn:>6,.0f}   CPL {_rs(_vd.get('cpl'))} · LP {_conv_s}")
         return out
 
-    # ── Meta ── (Meta Insights: spend/cliques + split por variante)
+    # ── Meta ── (Meta Insights: spend/cliques + TOTAL de cadastros + split por variante)
     lines = [
         "── Meta ──",
         f"Spend          R$ {_n(tr,'spend'):>10,.0f}",
         f"Cliques        {_n(tr,'clicks'):>13,.0f}",
     ]
+    # TOTAL de cadastros Meta (por utm_source, na Client) — precisa vir ANTES das
+    # linhas por variante: elas contam só quem tem campanha reconhecida e somam
+    # MENOS que o total, então, sem esta linha, o funil dava a impressão de que a
+    # Meta trouxe só o punhado do balde "Lead". Mesma base do total do Google.
+    _meta_cad = tr.get('total_cadastros')
+    if _meta_cad is not None:
+        lines.append(f"Cadastros      {_meta_cad:>13,.0f}")
     lines += _variante_rows(tr.get('por_variante') or {},
                             (v.get('traffic') or {}).get('por_variante_lf') or {})
 
