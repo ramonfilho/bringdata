@@ -53,6 +53,16 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'alerts[].details.total_rows':                                                      (R, None),  # ex: 276 — total avaliado no missing_rate_high
     'alerts[].details.total_leads':                                                     (R, None),  # ex: 325 — total na janela de score_distribution_change
     'alerts[].details.baseline_source':                                                 (R, None),  # ex: 'rolling_30d' — origem do baseline (rolling x treino)
+    # Alerta de bucket 'outros' term-source-aware (PR #18): separa macro Meta
+    # não-resolvido ({{...}}) de categoria-nova. Só aparecem QUANDO o alerta
+    # dispara — por isso passaram sem declaração desde 23/06 e derrubavam o
+    # digest com 500 no dia em que o alerta acendia.
+    'alerts[].details.trigger':                                                         (R, None),  # ex: 'novel' | 'macro' — o que acendeu o alerta
+    'alerts[].details.macro_count':                                                     (R, None),  # ex: 42 — subset de 'outros' que é macro Meta {{...}} não-resolvido
+    'alerts[].details.macro_pct_of_total':                                              (R, None),  # ex: 0.02 — macro_count / total_count
+    'alerts[].details.macro_spike_threshold':                                           (R, None),  # ex: 0.10 — teto do macro antes de alertar
+    'alerts[].details.novel_count':                                                     (R, None),  # ex: 90 — subset de 'outros' que é categoria-nova (não macro)
+    'alerts[].details.novel_pct_of_total':                                              (R, None),  # ex: 0.03 — novel_count / total_count
     'alerts[].details.changes[].decil':                                                 (R, None),  # ex: 'D10' — decil afetado em score_distribution_change
     'alerts[].details.changes[].atual':                                                 (R, None),  # ex: 0.246 — pct atual no decil
     'alerts[].details.changes[].esperado':                                              (R, None),  # ex: 0.349 — pct esperado no baseline
