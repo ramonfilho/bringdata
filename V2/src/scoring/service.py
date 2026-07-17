@@ -137,7 +137,8 @@ def score_lead_from_payload(
     # 1. Normalizar payload → dicts no vocabulário interno (PT-Long).
     survey_dict = payload_to_survey_dict(payload)
     enrich = payload_to_enrich(payload)
-    utm = payload_to_utm(payload)
+    utm = payload_to_utm(
+        payload, pipeline._client_config.utm.source_from_url_slug)
 
     # 2. Montar a linha do DataFrame no formato Railway.
     dataframe_row = survey_lead_to_sheets_row(

@@ -229,6 +229,17 @@ utm:
   - youtube
   - tiktok
   - outros
+  # Fallback de origem pelo slug da landing page: quando o lead chega SEM
+  # utm_source (o front não populou a querystring), deriva o canal do path da
+  # URL de captura. Recupera leads Meta/Google que perdiam a origem (não iam pro
+  # CAPI) e rotula o orgânico. Validado no ledger (03-17/07): cap-meta carrega
+  # facebook-ads 99,7%, cap-go carrega google-ads 100%. Match por trecho contido
+  # no path; NUNCA sobrescreve origem já presente. Valores batem com a
+  # utm_source_allowlist (match exato) e com google_ads.source_allowlist.
+  source_from_url_slug:
+    cap-meta: facebook-ads
+    cap-go: google-ads
+    cap-org: organic
   term_mappings:
     ig: instagram
     fb: facebook

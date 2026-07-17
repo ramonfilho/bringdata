@@ -12,7 +12,8 @@ uma transforma um dict em outro dict.
 Quem importa: `api/pubsub_branch.py` (consumer Pub/Sub) e, daqui pra frente,
 `src/scoring/` (casa do scoring de um lead).
 """
-from typing import Dict
+from typing import Dict, Optional
+from urllib.parse import urlparse
 
 from api.railway_mapping import traduzir_survey_slugs
 
@@ -54,6 +55,35 @@ def payload_to_enrich(payload: Dict) -> Dict:
     }
 
 
-def payload_to_utm(payload: Dict) -> Dict:
-    """Cópia rasa do bloco `utm` do payload. Dict vazio se ausente."""
-    return dict(payload.get("utm") or {})
+def payload_to_utm(
+    payload: Dict,
+    source_from_url_slug: Optional[Dict[str, str]] = None,
+) -> Dict:
+    """Cópia rasa do bloco `utm` do payload. Dict vazio se ausente.
+
+    Fallback de origem: quando o front NÃO manda `utm.source` mas a URL de
+    captura carrega o canal no próprio slug da landing page (ex.: `/cap-meta-a-v1/`
+    é tráfego Meta; `/cap-go-.../` é Google), deriva `source` do path da URL.
+
+    `source_from_url_slug` (opcional): mapa {trecho-do-path: source RAW}, vindo de
+    `ClientConfig.utm.source_from_url_slug`. O primeiro trecho contido no path
+    vence. NUNCA sobrescreve origem já presente — só preenche a vazia. Sem o mapa
+    (None/vazio) o comportamento é idêntico ao legado (só a cópia rasa).
+    """
+    utm = dict(payload.get("utm") or {})
+    if not source_from_url_slug:
+        return utm
+    if (utm.get("source") or "").strip():
+        return utm  # origem presente é autoritativa — nunca sobrescreve
+    url = utm.get("url")
+    if not url:
+        return utm
+    try:
+        path = (urlparse(str(url)).path or "").lower()
+    except Exception:
+        return utm  # URL malformada: degrada pro legado (source segue vazio)
+    for slug, source in source_from_url_slug.items():
+        if slug and slug.lower() in path:
+            utm["source"] = source
+            break
+    return utm
