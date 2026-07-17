@@ -3139,10 +3139,10 @@ async def daily_monitoring_check_railway(
         except Exception as _ce:
             logger.warning(f"⚠️ lead_quality count override (4 janelas) falhou: {_ce}")
 
-        # Decis distribution por janela — usado no digest do cliente (2 barras horizontais).
+        # Decis distribution por janela - usado no digest do cliente (2 barras horizontais).
         # O cálculo (Total + by_source Meta/Google + by_optgoal Lead/Champion/Challenger na
         # régua ÚNICA do Challenger abr_28, contra a ref única, com fail-soft pra régua de
-        # produção) foi extraído pra src/monitoring/decis_by_channel.py — fonte única
+        # produção) foi extraído pra src/monitoring/decis_by_channel.py - fonte única
         # compartilhada com o endpoint de dashboard /monitoring/audience-quality, pra os
         # números baterem por construção. quality_rows = [(leadScore, decil, createdAt, source, ...), ...].
         from src.monitoring.decis_by_channel import (
@@ -4222,7 +4222,7 @@ async def audience_quality_endpoint(
     date: Optional[str] = None,
 ):
     """
-    Qualidade de público num só lugar, pro dashboard do cliente — SÓ LEITURA.
+    Qualidade de público num só lugar, pro dashboard do cliente - SÓ LEITURA.
 
     Junta, sem vazar receita/tráfego, as duas dimensões que importam:
 
@@ -4237,13 +4237,13 @@ async def audience_quality_endpoint(
 
     Reusa EXATAMENTE os mesmos cálculos do relatório das 06:00 (métodos do
     `DataQualityMonitor` + módulo `decis_by_channel`), então os números batem com
-    o Slack por construção. Sem auth (padrão `/monitoring/*`), sem PII — dado
+    o Slack por construção. Sem auth (padrão `/monitoring/*`), sem PII - dado
     demográfico agregado. Leitura do ledger pela fonte de `LEDGER_READ_SOURCE`.
     Latência ~10-20s (várias queries); cachear no front.
 
     Args:
         client_id: cliente (default `devclub`).
-        date: opcional `YYYY-MM-DD` — "hoje" simulado (ontem/D-2/LF ficam relativos).
+        date: opcional `YYYY-MM-DD` - "hoje" simulado (ontem/D-2/LF ficam relativos).
     """
     from datetime import date as _date_cls, datetime as _dt2, timezone as _tz2, timedelta as _td2
     import pandas as _pd

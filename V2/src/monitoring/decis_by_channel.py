@@ -1,11 +1,11 @@
-"""Decis por canal na régua ÚNICA do Challenger (abr_28) — miolo reusável.
+"""Decis por canal na régua ÚNICA do Challenger (abr_28) - miolo reusável.
 
 Extraído do handler `daily-check/railway` (api/app.py) para virar fonte única
 de cálculo: o relatório das 06:00 E o endpoint de dashboard do cliente
 (`/monitoring/audience-quality`) consomem exatamente as MESMAS funções, sobre
 os MESMOS readers (`challenger_decils_in_window`, ledger via
 `LEDGER_READ_SOURCE`). Assim os números do dashboard batem com os do Slack por
-construção — não por coincidência.
+construção - não por coincidência.
 
 Contrato de saída (payload por janela) idêntico ao que o daily-check já
 produzia antes da extração:
@@ -24,7 +24,7 @@ produzia antes da extração:
 Todos os buckets saem de UMA população numa régua só (o `decil_challenger` da
 `scores_historicos`); a comparação é sempre contra a ref única do Challenger.
 Fail-soft: se a régua não veio, cai na régua de PRODUÇÃO só pra mostrar as
-barras, SEM referência (⚪) — NUNCA o modelo antigo jan_30.
+barras, SEM referência (⚪) - NUNCA o modelo antigo jan_30.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-# Split por fonte (Meta vs Google) — mesmo bucketing do unified_funnel em
+# Split por fonte (Meta vs Google) - mesmo bucketing do unified_funnel em
 # src/monitoring/daily_check_aggregations._classify_source. Outras fontes
 # (orgânico, tiktok, sem_utm) ficam implícitas na barra Total.
 META_SOURCES_DECIL = frozenset({'facebook-ads', 'fb', 'ig'})
@@ -49,7 +49,7 @@ GGL_SOURCES_DECIL = frozenset({'google-ads'})
 class DecisContext:
     """Contexto de cálculo dos decis por canal, resolvido uma vez por request
     a partir do pipeline (A/B config + ClientConfig) e do snapshot de baseline.
-    Injetado em `build_decis_window_payload` — o miolo não conhece o pipeline."""
+    Injetado em `build_decis_window_payload` - o miolo não conhece o pipeline."""
     challenger_run_id: Optional[str] = None
     baseline_payload: Optional[Dict[str, Any]] = None   # pct por decil na régua Challenger, ou None
     meta_sources_og: set = field(default_factory=set)   # allowlist CAPI (filtro do by_optgoal)
@@ -61,8 +61,8 @@ def resolve_decis_context(pipeline, *, client_id: str = 'devclub',
     """Resolve o `DecisContext` do request. Reúne o que antes eram locais soltos
     do handler: run_id do Challenger (régua), baseline puro do snapshot, allowlist
     de fontes Meta (filtro do split por optimization_goal) e o mapa tag→balde do
-    YAML. Fail-soft campo a campo — nenhum pedaço faltando derruba o resto."""
-    # 1. run_id do Challenger (abr_28) — casa os leads na régua única scores_historicos.
+    YAML. Fail-soft campo a campo - nenhum pedaço faltando derruba o resto."""
+    # 1. run_id do Challenger (abr_28) - casa os leads na régua única scores_historicos.
     challenger_run_id = None
     try:
         _abc = getattr(pipeline, '_ab_test_config', None) if pipeline else None
@@ -119,7 +119,7 @@ def resolve_decis_context(pipeline, *, client_id: str = 'devclub',
 
 
 def pure_baseline(b: Optional[Dict[str, Any]], label: str) -> Optional[Dict[str, Any]]:
-    """Baseline puro (pct por decil) na régua do Challenger — a ÚNICA referência
+    """Baseline puro (pct por decil) na régua do Challenger - a ÚNICA referência
     do relatório. Deriva pct a partir de distribution/total."""
     if not b:
         return None
@@ -176,7 +176,7 @@ def decil_dist_by_source(rows) -> Dict[str, Dict]:
 def decil_dist_by_variant(records, *, meta_sources_og: set,
                           ab_bucket_map: Optional[dict]) -> Dict[str, Dict]:
     """Split Lead/Champion/Challenger pela TAG de optimization_goal no NOME da
-    campanha (utm_campaign), via campaign_classifier.bucket_from_utm — SEM Meta
+    campanha (utm_campaign), via campaign_classifier.bucket_from_utm - SEM Meta
     API. Só fontes Meta (allowlist CAPI). Path de fallback (régua de produção)."""
     from src.monitoring.campaign_classifier import bucket_from_utm
     buckets = ('Lead', 'Champion', 'Challenger')
@@ -196,7 +196,7 @@ def decil_dist_by_variant(records, *, meta_sources_og: set,
     if totals['Lead'] > 0 and (totals['Champion'] + totals['Challenger']) == 0:
         logger.warning(
             "[decis by_variant] %d leads Meta mas 0 com tag LEADQUALIFIED/LEADHQLB "
-            "— convenção de nome de campanha mudou? Tudo caiu em Lead.",
+            "- convenção de nome de campanha mudou? Tudo caiu em Lead.",
             totals['Lead'],
         )
     return {
@@ -212,7 +212,7 @@ def challenger_decis_buckets(recs, *, meta_sources_og: set,
     by_source (meta/google) e by_optgoal (lead/champion/challenger), TODOS na
     MESMA régua e MESMA população. Reusa os MESMOS classificadores das versões
     de produção (META/GGL_SOURCES_DECIL por fonte; bucket_from_utm por optgoal,
-    só em fontes Meta) — só a régua (decil_challenger) muda."""
+    só em fontes Meta) - só a régua (decil_challenger) muda."""
     from src.monitoring.campaign_classifier import bucket_from_utm
     d_tot = _empty_decil(); n_tot = 0
     d_meta = _empty_decil(); n_meta = 0
@@ -234,7 +234,7 @@ def challenger_decis_buckets(recs, *, meta_sources_og: set,
             og[_b][dk] += 1; og_n[_b] += 1
     if og_n['Lead'] > 0 and (og_n['Champion'] + og_n['Challenger']) == 0:
         logger.warning(
-            "[decis by_optgoal chal] %d leads Meta mas 0 com tag ML — "
+            "[decis by_optgoal chal] %d leads Meta mas 0 com tag ML - "
             "convenção de nome de campanha mudou?", og_n['Lead'])
     return {
         'distribution': d_tot, 'total': n_tot,
@@ -274,7 +274,7 @@ def build_decis_window_payload(*, window_label: str, start_utc, end_utc,
     todos os buckets saem de `challenger_decils_in_window` (uma população, uma
     régua) e comparam contra a ref única (`ctx.baseline_payload`). Fail-soft: se a
     régua não veio (sem run_id / falha dura), cai na régua de PRODUÇÃO só pra
-    mostrar as barras, SEM ref (⚪) — NUNCA jan_30.
+    mostrar as barras, SEM ref (⚪) - NUNCA jan_30.
 
     `fallback_rows` / `fallback_records` são só pro caminho degradado (quality_rows
     e records de ledger da janela). No caminho normal (régua Challenger) não são
@@ -295,7 +295,7 @@ def build_decis_window_payload(*, window_label: str, start_utc, end_utc,
         _prod = len(fallback_rows)
         if _prod > 0 and b['total'] < _prod * 0.9:
             logger.warning(
-                "[decis %s] cobertura Challenger %d/%d (<90%%) — refresh da "
+                "[decis %s] cobertura Challenger %d/%d (<90%%) - refresh da "
                 "scores_historicos incompleto?", window_label, b['total'], _prod)
         return {
             'distribution': b['distribution'],
@@ -307,7 +307,7 @@ def build_decis_window_payload(*, window_label: str, start_utc, end_utc,
         }
     # Degradado: régua Challenger indisponível → produção SEM ref (nunca jan_30).
     logger.warning(
-        "[decis %s] régua Challenger indisponível — barras na régua de produção "
+        "[decis %s] régua Challenger indisponível - barras na régua de produção "
         "SEM referência (jan_30 nunca é usado).", window_label)
     return {
         'distribution': decil_dist(fallback_rows),
