@@ -402,7 +402,8 @@ def process_pending_pubsub(
         # Pré-computa utm e enrich pra que TODOS os pending_ledger gravem
         # tudo que o payload trouxer (inclusive os de erro de slug, que
         # falham antes do classify).
-        utm = payload_to_utm(payload)
+        utm = payload_to_utm(
+            payload, pipeline._client_config.utm.source_from_url_slug)
         enrich = payload_to_enrich(payload)
         has_computer = payload.get("hasComputer")
         # Tradução slug→PT pode levantar (fail-loud em slug desconhecido)
