@@ -173,6 +173,11 @@ class UTMConfig:
     source_to_outros: Optional[List[str]] = None            # #35
     source_to_channel_mapping: Optional[Dict[str, str]] = None  # dev/retreino — ex: {'youtube-bio': 'youtube'}
     source_canonical_values: Optional[List[str]] = None     # whitelist final pós-mapping; valores fora viram 'outros'
+    # Fallback de origem pelo slug da landing page quando o payload chega SEM
+    # utm_source. Mapa {trecho-do-path-da-url: source RAW}. Ex DevClub:
+    # {'cap-meta': 'facebook-ads', 'cap-go': 'google-ads', 'cap-org': 'organic'}.
+    # None/ausente = sem fallback (idêntico ao legado). Opt-in por cliente.
+    source_from_url_slug: Optional[Dict[str, str]] = None
     term_mappings: Optional[Dict[str, str]] = None          # #63
     term_outros_patterns: Optional[List[str]] = None        # #63
     term_long_id_threshold: int = 10                        # #67
