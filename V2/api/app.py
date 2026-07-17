@@ -3139,240 +3139,16 @@ async def daily_monitoring_check_railway(
         except Exception as _ce:
             logger.warning(f"⚠️ lead_quality count override (4 janelas) falhou: {_ce}")
 
-        # Decis distribution por janela — usado no digest do cliente (2 barras horizontais).
-        # quality_rows = [(leadScore, decil, createdAt, source, ...), ...].
-        def _decil_dist(rows) -> Dict[str, int]:
-            dist = {f'D{i:02d}': 0 for i in range(1, 11)}
-            for r in rows:
-                d = r[1]
-                if d is None: continue
-                key = f'D{int(d):02d}'
-                if key in dist:
-                    dist[key] += 1
-            return dist
-
-        # Split por fonte (Meta vs Google) — mesmo bucketing do unified_funnel
-        # em src/monitoring/daily_check_aggregations._classify_source. Reusado
-        # pra renderizar colunas Meta / Google ao lado da barra Total nas
-        # tabelas de decis. Outras fontes (orgânico, tiktok, sem_utm) ficam
-        # implícitas na barra Total — não têm volume hoje pra justificar coluna.
-        _SRC_META_DECIL = frozenset({'facebook-ads', 'fb', 'ig'})
-        _SRC_GGL_DECIL  = frozenset({'google-ads'})
-        def _decil_dist_by_source(rows) -> Dict[str, Dict]:
-            dist_meta = {f'D{i:02d}': 0 for i in range(1, 11)}
-            dist_ggl  = {f'D{i:02d}': 0 for i in range(1, 11)}
-            n_meta = n_ggl = 0
-            for r in rows:
-                d = r[1]; src = (r[3] or '').strip().lower() if len(r) > 3 else ''
-                if d is None: continue
-                key = f'D{int(d):02d}'
-                if src in _SRC_META_DECIL:
-                    if key in dist_meta:
-                        dist_meta[key] += 1
-                        n_meta += 1
-                elif src in _SRC_GGL_DECIL:
-                    if key in dist_ggl:
-                        dist_ggl[key] += 1
-                        n_ggl += 1
-            return {
-                'meta':   {'distribution': dist_meta, 'total': n_meta},
-                'google': {'distribution': dist_ggl,  'total': n_ggl},
-            }
-
-        # Split Lead/Champion/Challenger pela TAG de optimization_goal no NOME da
-        # campanha (utm_campaign), via campaign_classifier.bucket_from_utm — SEM
-        # Meta API. O objetivo já vem escrito no nome (LEADQUALIFIED=Champion,
-        # LEADHQLB=Challenger, sem tag=Lead). Substitui tanto a consulta à Meta API
-        # (que rate-limitava e zerava o split) quanto a tentativa por `variant` (que
-        # só dava 2-way e diluía o Lead dentro do Champion). A Meta API fica só pro
-        # funil/insights (spend/CPL). Mantém filtro Meta-source (allowlist CAPI) —
-        # Google/orgânico ficam só nas linhas de fonte (Total/Meta/Google).
-        from src.monitoring.campaign_classifier import bucket_from_utm as _bucket_from_utm
-        # Frente 2: tag→balde derivado do YAML (fonte única); None → classificador usa legado.
-        _abc_og = getattr(pipeline, '_ab_test_config', None) if pipeline else None
-        _ab_bucket_map_og = _abc_og.campaign_bucket_map() if (_abc_og and _abc_og.enabled) else None
-        _allow_capi = (pipeline._client_config.capi.utm_source_allowlist
-                       if pipeline and pipeline._client_config and pipeline._client_config.capi
-                       else None) or []
-        _META_SOURCES_OG = {str(x).lower().strip() for x in _allow_capi}
-
-        def _rec_between(recs, a_utc, b_utc, incl_b):
-            out = []
-            for rec in recs:
-                c = rec.criado_em
-                if c is None:
-                    continue
-                if c.tzinfo is None:
-                    c = c.replace(tzinfo=_tz.utc)
-                if c >= a_utc and (c <= b_utc if incl_b else c < b_utc):
-                    out.append(rec)
-            return out
-
-        def _decil_dist_by_variant(records) -> Dict[str, Dict]:
-            buckets = ('Lead', 'Champion', 'Challenger')
-            dists = {b: {f'D{i:02d}': 0 for i in range(1, 11)} for b in buckets}
-            totals = {b: 0 for b in buckets}
-            for rec in records:
-                if rec.decil is None:
-                    continue
-                src = (rec.utm_source or '').strip().lower()
-                if src not in _META_SOURCES_OG:
-                    continue
-                bucket = _bucket_from_utm(rec.utm_campaign, _ab_bucket_map_og)
-                key = f'D{int(rec.decil):02d}'
-                if key in dists[bucket]:
-                    dists[bucket][key] += 1
-                    totals[bucket] += 1
-            # Fail-loud: leads Meta presentes mas nenhuma tag ML (Champion+Challenger=0)
-            # → convenção de nome de campanha pode ter mudado. Loga em vez de mostrar
-            # tudo em Lead silenciosamente.
-            if totals['Lead'] > 0 and (totals['Champion'] + totals['Challenger']) == 0:
-                logger.warning(
-                    "[decis by_variant] %d leads Meta mas 0 com tag LEADQUALIFIED/LEADHQLB "
-                    "— convenção de nome de campanha mudou? Tudo caiu em Lead.",
-                    totals['Lead'],
-                )
-            return {
-                'lead':       {'distribution': dists['Lead'],       'total': totals['Lead']},
-                'champion':   {'distribution': dists['Champion'],   'total': totals['Champion']},
-                'challenger': {'distribution': dists['Challenger'], 'total': totals['Challenger']},
-            }
-
-        # Baseline de decis Top 6 ROAS na régua ÚNICA do Challenger (abr_28). É a
-        # referência de TODOS os buckets — o relatório inteiro roda numa régua só,
-        # e cada bucket é reavaliado no `decil_challenger` (scores_historicos) antes
-        # de comparar. O modelo anterior jan_30 foi REMOVIDO do relatório: não há
-        # mais baseline Champion nem Ponderada (mistura ponderada jan_30+abr_28) —
-        # eles davam a ilusão do bucket Lead "38% em D9-D10" na régua otimista antiga.
-        _base_challenger: Optional[Dict[str, Any]] = None
-        _base_label = 'Top 6 ROAS atribuível 60d'
-        try:
-            import json as _json_decil
-            from pathlib import Path as _Path
-            _baseline_path = _Path(__file__).resolve().parents[1] / 'configs' / 'reference_audience_profiles' / 'devclub.json'
-            if _baseline_path.exists():
-                _bjson = _json_decil.loads(_baseline_path.read_text())
-                _rp = (_bjson.get('reference_pool') or {})
-                _bcl = _rp.get('decil_distribution_challenger') or {}
-                _base_label = _rp.get('label', _base_label)
-                if _bcl:
-                    _base_challenger = {'distribution': _bcl.get('distribution', {}), 'total': _bcl.get('n_leads', 0)}
-        except Exception as _be:
-            logger.warning(f"⚠️ baseline decis indisponível: {_be}")
-
-        # Helper: baseline puro (pct por decil) na régua do Challenger — a ÚNICA
-        # referência do relatório agora. (Antes havia baseline Champion + Ponderada
-        # pra comparar buckets scoreados por modelos diferentes; com o relatório
-        # inteiro reavaliado no decil_challenger, uma régua e uma ref bastam.)
-        def _pure_baseline(b: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-            if not b:
-                return None
-            d = b.get('distribution') or {}
-            t = b.get('total') or 1
-            pct = {f'D{i:02d}': round((d.get(f'D{i:02d}', 0) / t) * 100, 2) for i in range(1, 11)}
-            return {'pct': pct, 'n_leads': int(b.get('total') or 0), 'label': _base_label}
-
-        _baseline_challenger_payload = _pure_baseline(_base_challenger)
-
-        # run_id do Challenger (abr_28) — casa os leads na régua única scores_historicos.
-        _chal_run_id = None
-        try:
-            _abc_dist = getattr(pipeline, '_ab_test_config', None) if pipeline else None
-            if _abc_dist and getattr(_abc_dist, 'enabled', False):
-                _vn = list(_abc_dist.variants.keys())
-                _chn = next((n for n in _vn if 'challenger' in n.lower()),
-                            _vn[1] if len(_vn) > 1 else None)
-                _cv = _abc_dist.variants.get(_chn) if _chn else None
-                _chal_run_id = getattr(_cv, 'run_id', None)
-        except Exception as _cre:
-            logger.warning(f"⚠️ challenger run_id p/ régua de decis falhou: {_cre}")
-
-        def _challenger_decis_buckets(recs) -> Dict[str, Any]:
-            """recs: List[ChallengerDecilRec] (régua abr_28) → distribution (Total),
-            by_source (meta/google) e by_optgoal (lead/champion/challenger), TODOS na
-            MESMA régua e MESMA população. Reusa os MESMOS classificadores das versões
-            de produção (_SRC_META_DECIL/_SRC_GGL_DECIL por fonte; _bucket_from_utm por
-            optgoal, só em fontes Meta) — só a régua (decil_challenger) muda."""
-            _mk = lambda: {f'D{i:02d}': 0 for i in range(1, 11)}
-            d_tot = _mk(); n_tot = 0
-            d_meta = _mk(); n_meta = 0
-            d_ggl = _mk(); n_ggl = 0
-            og   = {b: _mk() for b in ('Lead', 'Champion', 'Challenger')}
-            og_n = {b: 0     for b in ('Lead', 'Champion', 'Challenger')}
-            for rec in recs:
-                dk = rec.decil
-                if dk not in d_tot:
-                    continue
-                d_tot[dk] += 1; n_tot += 1
-                src = (rec.utm_source or '').strip().lower()
-                if src in _SRC_META_DECIL:
-                    d_meta[dk] += 1; n_meta += 1
-                elif src in _SRC_GGL_DECIL:
-                    d_ggl[dk] += 1; n_ggl += 1
-                if src in _META_SOURCES_OG:
-                    _b = _bucket_from_utm(rec.utm_campaign, _ab_bucket_map_og)
-                    og[_b][dk] += 1; og_n[_b] += 1
-            if og_n['Lead'] > 0 and (og_n['Champion'] + og_n['Challenger']) == 0:
-                logger.warning(
-                    "[decis by_optgoal chal] %d leads Meta mas 0 com tag ML — "
-                    "convenção de nome de campanha mudou?", og_n['Lead'])
-            return {
-                'distribution': d_tot, 'total': n_tot,
-                'by_source': {
-                    'meta':   {'distribution': d_meta, 'total': n_meta},
-                    'google': {'distribution': d_ggl,  'total': n_ggl},
-                },
-                'by_optgoal': {
-                    'lead':       {'distribution': og['Lead'],       'total': og_n['Lead']},
-                    'champion':   {'distribution': og['Champion'],   'total': og_n['Champion']},
-                    'challenger': {'distribution': og['Challenger'], 'total': og_n['Challenger']},
-                },
-            }
-
-        def _build_decis_window_payload(window_label, start_utc, end_utc,
-                                        pin_lf, lf_name, fb_rows, fb_records) -> Dict[str, Any]:
-            """Payload de decis de uma janela na régua ÚNICA do Challenger (abr_28):
-            todos os buckets saem de challenger_decils_in_window (uma população, uma
-            régua) e comparam contra a ref única (_baseline_challenger_payload).
-            Fail-soft: se a régua não veio (sem run_id / falha dura), cai na régua de
-            PRODUÇÃO só pra mostrar as barras, SEM ref (⚪) — NUNCA jan_30."""
-            recs = None
-            if _chal_run_id:
-                try:
-                    from src.data.scores_historicos import challenger_decils_in_window
-                    recs = challenger_decils_in_window(
-                        challenger_run_id=_chal_run_id, win_start=start_utc,
-                        win_end=end_utc, lf_name=lf_name, pin_lf=pin_lf)
-                except Exception as _de:
-                    logger.warning(f"⚠️ régua Challenger p/ decis ({window_label}) falhou: {_de}")
-                    recs = None
-            if recs is not None:
-                b = _challenger_decis_buckets(recs)
-                _prod = len(fb_rows)
-                if _prod > 0 and b['total'] < _prod * 0.9:
-                    logger.warning(
-                        "[decis %s] cobertura Challenger %d/%d (<90%%) — refresh da "
-                        "scores_historicos incompleto?", window_label, b['total'], _prod)
-                return {
-                    'distribution':        b['distribution'],
-                    'total':               b['total'],
-                    'window_label':        window_label,
-                    'baseline_challenger': _baseline_challenger_payload,
-                    'by_source':           b['by_source'],
-                    'by_optgoal':          b['by_optgoal'],
-                }
-            # Degradado: régua Challenger indisponível → produção SEM ref (nunca jan_30).
-            logger.warning(
-                "[decis %s] régua Challenger indisponível — barras na régua de produção "
-                "SEM referência (jan_30 nunca é usado).", window_label)
-            return {
-                'distribution':        _decil_dist(fb_rows),
-                'total':               len(fb_rows),
-                'window_label':        window_label,
-                'baseline_challenger': None,
-                'by_source':           _decil_dist_by_source(fb_rows),
-                'by_optgoal':          _decil_dist_by_variant(fb_records),
-            }
+        # Decis distribution por janela - usado no digest do cliente (2 barras horizontais).
+        # O cálculo (Total + by_source Meta/Google + by_optgoal Lead/Champion/Challenger na
+        # régua ÚNICA do Challenger abr_28, contra a ref única, com fail-soft pra régua de
+        # produção) foi extraído pra src/monitoring/decis_by_channel.py - fonte única
+        # compartilhada com o endpoint de dashboard /monitoring/audience-quality, pra os
+        # números baterem por construção. quality_rows = [(leadScore, decil, createdAt, source, ...), ...].
+        from src.monitoring.decis_by_channel import (
+            resolve_decis_context, build_decis_window_payload, records_between,
+        )
+        _decis_ctx = resolve_decis_context(pipeline)
 
         # Ontem completo BRT (00:00→23:59 BRT do dia anterior)
         _brt = _tz(timedelta(hours=-3))
@@ -3386,10 +3162,10 @@ async def daily_monitoring_check_railway(
                       ) >= _yest_start_utc and (
                           r[2].replace(tzinfo=_tz.utc) if (hasattr(r[2], 'tzinfo') and r[2].tzinfo is None) else r[2]
                       ) < _yest_end_utc]
-        railway_lead_quality['decil_distribution_previous_day'] = _build_decis_window_payload(
+        railway_lead_quality['decil_distribution_previous_day'] = build_decis_window_payload(
             window_label='Ontem', start_utc=_yest_start_utc, end_utc=_yest_end_utc,
-            pin_lf=False, lf_name=None, fb_rows=_yest_rows,
-            fb_records=_rec_between(_records_90d_scored, _yest_start_utc, _yest_end_utc, False),
+            pin_lf=False, lf_name=None, ctx=_decis_ctx, fallback_rows=_yest_rows,
+            fallback_records=records_between(_records_90d_scored, _yest_start_utc, _yest_end_utc, False),
         )
 
         # Qualidade do LF de referência — apenas LF ativo no launches.yaml,
@@ -3425,11 +3201,11 @@ async def daily_monitoring_check_railway(
                     )
             except Exception as _ce:
                 logger.warning(f"⚠️ lead_quality lf_referencia count override falhou: {_ce}")
-            railway_lead_quality['decil_distribution_current_launch'] = _build_decis_window_payload(
+            railway_lead_quality['decil_distribution_current_launch'] = build_decis_window_payload(
                 window_label=f"{_ln} ({_lw.cap_start.strftime('%d/%m')}→{_cap_end_eff.strftime('%d/%m')} BRT)",
                 start_utc=_cs_dt, end_utc=_ce_dt, pin_lf=False, lf_name=None,
-                fb_rows=_lf_rows,
-                fb_records=_rec_between(_records_90d_scored, _cs_dt, _ce_dt, True),
+                ctx=_decis_ctx, fallback_rows=_lf_rows,
+                fallback_records=records_between(_records_90d_scored, _cs_dt, _ce_dt, True),
             )
             # Refresh incremental ONLINE da scores_historicos: DESLIGADO por padrão
             # (Fase 5a). Depois que a Fase 3 passou a ler o decil direto do ledger
@@ -4437,6 +4213,140 @@ async def audience_drift_endpoint(
     if drift is None:
         return {'top_list': [], 'details': {}}
     return drift.get('details', {})
+
+
+@app.get("/monitoring/audience-quality")
+async def audience_quality_endpoint(
+    pipeline: PipelineOptDep,
+    client_id: str = 'devclub',
+    date: Optional[str] = None,
+):
+    """
+    Qualidade de público num só lugar, pro dashboard do cliente - SÓ LEITURA.
+
+    Junta, sem vazar receita/tráfego, as duas dimensões que importam:
+
+      • `audience`  → CARACTERÍSTICAS do público vs Top ROAS (perfil do comprador):
+          - `general`    : todas as categorias, todas as fontes (ontem / D-2 / lançamento)
+          - `by_source`  : Meta vs Google, por categoria (ontem + lançamento)
+          - `by_variant` : Lead/Champion/Challenger (A/B), por categoria (ontem + lançamento)
+      • `model_score` → NOTA do modelo (decis na régua ÚNICA do Challenger abr_28):
+          - `previous_day` / `current_launch`, cada um com `distribution` (Total) +
+            `by_source` (Meta/Google) + `by_optgoal` (Lead/Champion/Challenger) +
+            `baseline_challenger` (ref Top ROAS) + `score_geral` no lançamento.
+
+    Reusa EXATAMENTE os mesmos cálculos do relatório das 06:00 (métodos do
+    `DataQualityMonitor` + módulo `decis_by_channel`), então os números batem com
+    o Slack por construção. Sem auth (padrão `/monitoring/*`), sem PII - dado
+    demográfico agregado. Leitura do ledger pela fonte de `LEDGER_READ_SOURCE`.
+    Latência ~10-20s (várias queries); cachear no front.
+
+    Args:
+        client_id: cliente (default `devclub`).
+        date: opcional `YYYY-MM-DD` - "hoje" simulado (ontem/D-2/LF ficam relativos).
+    """
+    from datetime import date as _date_cls, datetime as _dt2, timezone as _tz2, timedelta as _td2
+    import pandas as _pd
+    from src.data import compose_repository
+    from src.data.ledger_connection import open_ledger_read_connection
+    from src.monitoring.data_quality import DataQualityMonitor
+    from src.monitoring.daily_check_aggregations import records_to_quality_rows
+    from src.monitoring.decis_by_channel import (
+        resolve_decis_context, build_decis_window_payload, records_between,
+    )
+    from src.core.client_config import ClientConfig
+    from src.core.launches import resolve_launch_window_brt
+
+    anchor_date = None
+    if date:
+        try:
+            anchor_date = _date_cls.fromisoformat(date)
+        except ValueError:
+            raise HTTPException(status_code=400,
+                                detail=f"date inválido: '{date}'. Use YYYY-MM-DD.")
+
+    cfg_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        'configs', 'clients', f'{client_id}.yaml',
+    )
+    client_config = ClientConfig.from_yaml(cfg_path)
+
+    ledger_conn = open_ledger_read_connection()
+    try:
+        repo = compose_repository('registros_ml', railway_conn=ledger_conn)
+
+        # ---- AUDIENCE: características do público vs Top ROAS ----
+        # Mesma cadeia do orchestrator.check(): geral raw (todas as categorias) →
+        # alimenta os cortes por variante A/B e por fonte com o MESMO top_list, pra
+        # o dashboard cobrir todas as categorias com números idênticos aos do Slack.
+        monitor = DataQualityMonitor(model_path='', client_config=client_config, db=None, repo=repo)
+        _aud_alerts = monitor._check_audience_profile_drift(
+            _pd.DataFrame(), raw=True, anchor_date=anchor_date)
+        _general = next((a for a in _aud_alerts if a.get('type') == 'audience_profile_drift'), None)
+        _general_details = (_general.get('details', {}) if _general else {})
+        _top_list = _general_details.get('top_list') or []
+        _by_variant = (monitor._check_audience_drift_by_variant(_top_list, anchor_date=anchor_date)
+                       if _top_list else [])
+        _by_source = (monitor._check_audience_drift_by_source(_top_list, anchor_date=anchor_date)
+                      if _top_list else [])
+        audience = {
+            'general': _general_details,
+            'by_source': [a.get('details', {}) for a in _by_source],
+            'by_variant': [a.get('details', {}) for a in _by_variant],
+        }
+
+        # ---- MODEL SCORE: decis por canal na régua ÚNICA do Challenger ----
+        ctx = resolve_decis_context(pipeline, client_id=client_id)
+        brt = _tz2(_td2(hours=-3))
+        _today_brt = anchor_date or _dt2.now(brt).date()
+        _today_mid = _dt2(_today_brt.year, _today_brt.month, _today_brt.day, 0, 0, 0, tzinfo=brt)
+        _yest_start = (_today_mid - _td2(days=1)).astimezone(_tz2.utc)
+        _yest_end = _today_mid.astimezone(_tz2.utc)
+        _lw = resolve_launch_window_brt(today=anchor_date)
+        _cap_end_eff = _lw.cap_end or _today_brt
+        _ln = _lw.lf_name or 'LF atual (inferido)'
+        _cs_dt = _dt2(_lw.cap_start.year, _lw.cap_start.month, _lw.cap_start.day,
+                      0, 0, 0, tzinfo=brt).astimezone(_tz2.utc)
+        _ce_dt = _dt2(_cap_end_eff.year, _cap_end_eff.month, _cap_end_eff.day,
+                      23, 59, 59, tzinfo=brt).astimezone(_tz2.utc)
+        # Fetch dos summaries cobrindo ambas as janelas (ontem ∪ lançamento) de uma vez.
+        _recs = repo.summaries_in_range(min(_yest_start, _cs_dt), max(_yest_end, _ce_dt), limit=50_000)
+        _recs_scored = [r for r in _recs if r.score is not None and r.decil is not None]
+        _yest_records = records_between(_recs_scored, _yest_start, _yest_end, False)
+        _lf_records = records_between(_recs_scored, _cs_dt, _ce_dt, True)
+        previous_day = build_decis_window_payload(
+            window_label='Ontem', start_utc=_yest_start, end_utc=_yest_end,
+            pin_lf=False, lf_name=None, ctx=ctx,
+            fallback_rows=records_to_quality_rows(_yest_records), fallback_records=_yest_records,
+        )
+        current_launch = build_decis_window_payload(
+            window_label=f"{_ln} ({_lw.cap_start.strftime('%d/%m')}→{_cap_end_eff.strftime('%d/%m')} BRT)",
+            start_utc=_cs_dt, end_utc=_ce_dt, pin_lf=False, lf_name=None, ctx=ctx,
+            fallback_rows=records_to_quality_rows(_lf_records), fallback_records=_lf_records,
+        )
+        try:
+            from src.data.scores_historicos import launch_score_geral
+            _sg = launch_score_geral(_lw.lf_name)
+            if _sg:
+                current_launch['score_geral'] = _sg
+        except Exception as _sge:
+            logger.warning(f"⚠️ [audience-quality] score_geral falhou: {_sge}")
+    finally:
+        try:
+            ledger_conn.close()
+        except Exception:
+            pass
+
+    return {
+        'ok': True,
+        'client_id': client_id,
+        'anchor_date': anchor_date.isoformat() if anchor_date else None,
+        'audience': audience,
+        'model_score': {
+            'previous_day': previous_day,
+            'current_launch': current_launch,
+        },
+    }
 
 
 # Canal do grupo de tráfego pro relatório diário de criativo. Override por env
