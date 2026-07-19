@@ -4,6 +4,7 @@ Busca dados de custo para enriquecer análise UTM
 """
 
 import requests
+import time
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -15,10 +16,42 @@ logger = logging.getLogger(__name__)
 class MetaAdsIntegration:
     """Cliente para integração com Meta Ads API"""
 
+    # Retry de insights: o Meta devolve erros transientes de forma intermitente
+    # (code 2 "Service temporarily unavailable", code 1, e limites 4/17/613).
+    # Sem retry, um único soluço zera o gasto e o relatório sai SEM os dados da
+    # Meta (visto em 19/07). Backoff curto e poucas tentativas de propósito — o
+    # digest é sensível a tempo (histórico de OOM/timeout).
+    INSIGHTS_MAX_RETRIES = 3
+    INSIGHTS_RETRY_BASE_DELAY = 1.0  # segundos; backoff exponencial (1s, 2s)
+    _RETRYABLE_META_CODES = frozenset({1, 2, 4, 17, 341, 613})
+
     def __init__(self, access_token: str, api_version: str = "v24.0"):
         self.access_token = access_token
         self.api_version = api_version
         self.base_url = f"https://graph.facebook.com/{api_version}"
+
+    def _is_retryable_insights_error(self, exc) -> bool:
+        """True se o erro do Meta é transiente/limite (vale re-tentar).
+
+        Timeout/conexão (sem response) = transiente. HTTP 5xx = servidor. Um 400
+        só é retentado se o Meta marcar `is_transient` OU trouxer um `code` de
+        instabilidade/limite (2 = Service temporarily unavailable, 1, 4, 17, 341,
+        613). Um 400 de parâmetro inválido NÃO é retentado (falha rápido).
+        A flag `is_transient` do Meta é pouco confiável (veio `false` num code 2),
+        por isso a decisão principal é pelo `code`.
+        """
+        resp = getattr(exc, 'response', None)
+        if resp is None:
+            return True  # timeout / connection error — transiente
+        if resp.status_code >= 500:
+            return True
+        try:
+            err = (resp.json() or {}).get('error', {}) or {}
+        except Exception:
+            return False
+        if err.get('is_transient'):
+            return True
+        return err.get('code') in self._RETRYABLE_META_CODES
 
     def get_insights(
         self,
@@ -91,21 +124,37 @@ class MetaAdsIntegration:
 
         logger.info(f"Buscando insights: account={account_id}, level={level}, days={days}, attribution={action_attribution_windows or 'default'}, filtering={bool(filtering)}")
 
-        try:
-            response = requests.get(url, params=params, timeout=10)
-            response.raise_for_status()
+        for attempt in range(self.INSIGHTS_MAX_RETRIES):
+            try:
+                response = requests.get(url, params=params, timeout=10)
+                response.raise_for_status()
 
-            data = response.json()
-            results = data.get('data', [])
+                data = response.json()
+                results = data.get('data', [])
 
-            logger.info(f"✅ Insights obtidos: {len(results)} registros")
-            return results
+                if attempt:
+                    logger.info(f"✅ Insights obtidos: {len(results)} registros (após {attempt + 1} tentativas)")
+                else:
+                    logger.info(f"✅ Insights obtidos: {len(results)} registros")
+                return results
 
-        except requests.exceptions.RequestException as e:
-            logger.error(f"❌ Erro ao buscar insights: {e}")
-            if hasattr(e.response, 'text'):
-                logger.error(f"Response: {e.response.text}")
-            return []
+            except requests.exceptions.RequestException as e:
+                body = getattr(getattr(e, 'response', None), 'text', '') or ''
+                is_last = attempt >= self.INSIGHTS_MAX_RETRIES - 1
+                if self._is_retryable_insights_error(e) and not is_last:
+                    wait = self.INSIGHTS_RETRY_BASE_DELAY * (2 ** attempt)
+                    logger.warning(
+                        f"⚠️ Insights transiente (tentativa {attempt + 1}/{self.INSIGHTS_MAX_RETRIES}, "
+                        f"aguardando {wait:.1f}s): {e}"
+                    )
+                    time.sleep(wait)
+                    continue
+                logger.error(f"❌ Erro ao buscar insights: {e}")
+                if body:
+                    logger.error(f"Response: {body}")
+                return []
+
+        return []
 
     def get_campaign_budget_info(self, campaign_id: str) -> Dict:
         """
