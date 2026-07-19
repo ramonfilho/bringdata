@@ -3,6 +3,7 @@ Integração com Meta Ads API
 Busca dados de custo para enriquecer análise UTM
 """
 
+import re
 import requests
 import time
 import logging
@@ -11,6 +12,20 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+
+# O Meta Graph API leva o access_token na query string, então a URL que a
+# exceção do requests ecoa ("... for url: ...?access_token=EAAS...") carrega o
+# token em texto puro — vazamento de credencial nos logs do Cloud Run. Toda
+# string de erro/resposta passa por _redact() antes de ir pro log.
+_SECRET_PARAM_RE = re.compile(
+    r'(access_token|client_secret|api_key|auth_token)=[^&\s"\']+', re.IGNORECASE
+)
+
+
+def _redact(value) -> str:
+    """Raspa segredos (access_token etc.) de qualquer string antes de logar."""
+    return _SECRET_PARAM_RE.sub(r'\1=<REDACTED>', str(value))
 
 
 class MetaAdsIntegration:
@@ -149,9 +164,9 @@ class MetaAdsIntegration:
                     )
                     time.sleep(wait)
                     continue
-                logger.error(f"❌ Erro ao buscar insights: {e}")
+                logger.error(f"❌ Erro ao buscar insights: {_redact(e)}")
                 if body:
-                    logger.error(f"Response: {body}")
+                    logger.error(f"Response: {_redact(body)}")
                 return []
 
         return []
@@ -203,7 +218,7 @@ class MetaAdsIntegration:
             }
 
         except requests.exceptions.RequestException as e:
-            logger.warning(f"⚠️  Erro ao buscar budget info da campaign {campaign_id}: {e}")
+            logger.warning(f"⚠️  Erro ao buscar budget info da campaign {campaign_id}: {_redact(e)}")
             # Default: assumir que tem budget (comportamento atual)
             return {
                 'has_campaign_budget': True,
@@ -253,7 +268,7 @@ class MetaAdsIntegration:
                 return data.get('optimization_goal')
 
         except requests.exceptions.RequestException as e:
-            logger.warning(f"⚠️  Erro ao buscar dados do adset {adset_id}: {e}")
+            logger.warning(f"⚠️  Erro ao buscar dados do adset {adset_id}: {_redact(e)}")
             return None
 
     def batch_get_adset_optimization_goals(
@@ -302,7 +317,7 @@ class MetaAdsIntegration:
             except Exception as e:
                 logger.warning(
                     "[batch_get_adset_optimization_goals] batch falhou (%d adsets): %s",
-                    len(chunk), e,
+                    len(chunk), _redact(e),
                 )
                 for aid in chunk:
                     result[aid] = None
@@ -396,7 +411,7 @@ class MetaAdsIntegration:
                 responses = r.json()
             except Exception as e:
                 logger.warning(
-                    "[batch_get_adsets] batch falhou (%d cids): %s", len(chunk), e
+                    "[batch_get_adsets] batch falhou (%d cids): %s", len(chunk), _redact(e)
                 )
                 for cid in chunk:
                     result[cid] = None
@@ -421,7 +436,7 @@ class MetaAdsIntegration:
                     body = _json.loads(resp["body"])
                 except Exception as e:
                     logger.warning(
-                        "[batch_get_adsets] campaign %s parse falhou: %s", cid, e
+                        "[batch_get_adsets] campaign %s parse falhou: %s", cid, _redact(e)
                     )
                     result[cid] = None
                     continue
@@ -475,7 +490,7 @@ class MetaAdsIntegration:
             }
 
         except requests.exceptions.RequestException as e:
-            logger.warning(f"⚠️  Erro ao buscar budget info do adset {adset_id}: {e}")
+            logger.warning(f"⚠️  Erro ao buscar budget info do adset {adset_id}: {_redact(e)}")
             # Default: assumir que tem budget próprio (comportamento conservador)
             return {
                 'has_adset_budget': True,
