@@ -52,7 +52,14 @@ def normalize_phone_br(phone: Optional[str]) -> Optional[str]:
     """
     if not phone:
         return None
-    digits = re.sub(r"\D", "", str(phone))
+    s = str(phone).strip()
+    # Telefone guardado como float em algum ponto do pipeline vira texto com sufixo
+    # decimal ("5531975766341.0"): o ".0" injeta um dígito 0 a mais e quebra o
+    # tamanho (13→14). Remove a parte decimal ANTES de extrair dígitos — recupera
+    # ~44k dos ~45k telefones de leads que antes caíam. (Nº de telefone não tem
+    # casa decimal legítima, então tirar "\.\d+$" é seguro.)
+    s = re.sub(r"\.\d+$", "", s)
+    digits = re.sub(r"\D", "", s)
     if not digits:
         return None
     if digits.startswith(_DEFAULT_PHONE_CC) and len(digits) in (12, 13):
