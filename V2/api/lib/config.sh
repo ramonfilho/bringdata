@@ -90,9 +90,15 @@ SCHEDULER_DESCRIPTION="${SCHEDULER_DESCRIPTION:-Validação semanal do modelo ML
 #   sales → etl_sales --daily (4 gateways de API + alerta se o tmb manual atrasar)
 INGESTION_LEADS_JOB="${INGESTION_LEADS_JOB:-ingestion-leads-incremental}"
 INGESTION_SALES_JOB="${INGESTION_SALES_JOB:-ingestion-sales-daily}"
-# Schedules em UTC. 09:00 UTC = 06:00 BRT (leads), 09:30 UTC = 06:30 BRT (vendas, após leads).
+# gasto de anúncio (etl_ad_spend --daily): materializa Meta (+Google quando o token
+# OAuth voltar) por campanha×dia em analytics.ad_spend. O relatório do DM LÊ dessa
+# tabela (leve, sem API viva); este job é quem a enche.
+INGESTION_SPEND_JOB="${INGESTION_SPEND_JOB:-ingestion-ad-spend}"
+# Schedules em UTC. 09:00 UTC = 06:00 BRT (leads), 09:30 UTC = 06:30 BRT (vendas, após leads),
+# 09:45 UTC = 06:45 BRT (gasto, antes do relatório semanal de segunda 10:00 UTC).
 INGESTION_LEADS_SCHEDULE="${INGESTION_LEADS_SCHEDULE:-0 9 * * *}"
 INGESTION_SALES_SCHEDULE="${INGESTION_SALES_SCHEDULE:-30 9 * * *}"
+INGESTION_SPEND_SCHEDULE="${INGESTION_SPEND_SCHEDULE:-45 9 * * *}"
 
 # =============================================================================
 # SLACK (NOTIFICATIONS)

@@ -147,15 +147,37 @@ def run_ad_spend_etl(start: str, end: str, *, platforms=("meta", "google"),
     return {"loaded": loaded, "upsert": res}
 
 
+def run_daily(*, window_days: int = 35, platforms=("meta",), account_id=None,
+              customer_id=None, client_id: str = "devclub") -> dict:
+    """Janela móvel dos últimos `window_days` dias (default 35). 35 > 28 da janela de
+    atribuição da Meta (que restata o passado) e cobre a captação do LF mais recente
+    com carrinho fechado antes de o relatório semanal rodar. Espelha etl_sales.run_daily.
+    Google fica FORA do default até o refresh token OAuth ser regenerado (invalid_grant)."""
+    end = date.today().isoformat()
+    start = (date.today() - timedelta(days=window_days)).isoformat()
+    logger.info("[ad_spend daily] janela %s → %s | plataformas: %s", start, end, ", ".join(platforms))
+    return run_ad_spend_etl(start, end, platforms=tuple(platforms), account_id=account_id,
+                            customer_id=customer_id, client_id=client_id)
+
+
 def main():
     p = argparse.ArgumentParser(description="ETL de gasto de anúncio → analytics.ad_spend")
-    p.add_argument("--start", required=True, help="YYYY-MM-DD")
-    p.add_argument("--end", required=True, help="YYYY-MM-DD")
+    p.add_argument("--daily", action="store_true",
+                   help="janela móvel dos últimos --window-days dias (dispensa --start/--end)")
+    p.add_argument("--window-days", type=int, default=35, help="janela móvel do --daily (default 35)")
+    p.add_argument("--start", help="YYYY-MM-DD — obrigatório fora do --daily")
+    p.add_argument("--end", help="YYYY-MM-DD — obrigatório fora do --daily")
     p.add_argument("--platforms", nargs="+", default=["meta", "google"], choices=["meta", "google"])
     p.add_argument("--account-id", default=None, help="Meta account_id (default: do MetaAPIClient)")
     p.add_argument("--customer-id", default=None, help="Google Ads customer_id (default: env GOOGLE_ADS_CUSTOMER_ID)")
     p.add_argument("--client", default="devclub")
     args = p.parse_args()
+    if args.daily:
+        run_daily(window_days=args.window_days, platforms=tuple(args.platforms),
+                  account_id=args.account_id, customer_id=args.customer_id, client_id=args.client)
+        return
+    if not (args.start and args.end):
+        p.error("--start e --end são obrigatórios (ou use --daily)")
     run_ad_spend_etl(args.start, args.end, platforms=tuple(args.platforms),
                      account_id=args.account_id, customer_id=args.customer_id, client_id=args.client)
 

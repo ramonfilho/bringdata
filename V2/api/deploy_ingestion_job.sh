@@ -7,7 +7,7 @@
 #            o banco sozinhos (batch). Espelha o deploy_validation_job.sh, que é
 #            parametrizado por --report-type; aqui o parâmetro é --job.
 #
-# Uso: ./deploy_ingestion_job.sh --job {leads|sales} [--reuse-image] [--execute-now] [--yes]
+# Uso: ./deploy_ingestion_job.sh --job {leads|sales|spend} [--reuse-image] [--execute-now] [--yes]
 #
 #   --job leads  → ingestion-leads-incremental
 #                  python /app/src/data/leads_unify.py --incremental
@@ -15,6 +15,9 @@
 #   --job sales  → ingestion-sales-daily
 #                  python /app/src/validation/etl_sales.py --daily
 #                  puxa os 4 gateways de API + alerta no Slack se o tmb (manual) atrasar.
+#   --job spend  → ingestion-ad-spend
+#                  python /app/src/validation/etl_ad_spend.py --daily --platforms meta
+#                  materializa gasto por campanha×dia em analytics.ad_spend (o relatório do DM lê daí).
 #
 # ⚠️  DISTINÇÃO (mesma do validation):
 #   - deploy_capi.sh             = API de produção (Cloud Run Service 24/7)
@@ -69,8 +72,16 @@ resolve_job() {
             JOB_DESC="puxa vendas dos 4 gateways de API + alerta se o tmb manual atrasar"
             JOB_TASK_TIMEOUT="900"
             ;;
+        spend)
+            JOB_NAME="$INGESTION_SPEND_JOB"
+            # --platforms meta: Google fica FORA até o refresh token OAuth voltar
+            # (invalid_grant). Quando voltar: trocar p/ "...,--platforms,meta,google".
+            JOB_ARGS="/app/src/validation/etl_ad_spend.py,--daily,--platforms,meta"
+            JOB_DESC="materializa gasto de anúncio (Meta) por campanha×dia em analytics.ad_spend"
+            JOB_TASK_TIMEOUT="900"
+            ;;
         *)
-            print_error "--job inválido: '$JOB_KIND' (use 'leads' ou 'sales')"
+            print_error "--job inválido: '$JOB_KIND' (use 'leads', 'sales' ou 'spend')"
             exit 1
             ;;
     esac
@@ -211,9 +222,9 @@ print_final_report() {
 # =============================================================================
 
 usage() {
-    echo "Uso: $0 --job {leads|sales} [OPTIONS]"
+    echo "Uso: $0 --job {leads|sales|spend} [OPTIONS]"
     echo ""
-    echo "  --job leads|sales      Qual job de ingestão deployar (obrigatório)"
+    echo "  --job leads|sales|spend  Qual job de ingestão deployar (obrigatório)"
     echo "  --reuse-image          Reusar imagem :latest (não fazer build)"
     echo "  --execute-now          Executar o job logo após o deploy (teste)"
     echo "  --yes, -y              Pular confirmação"
@@ -236,7 +247,7 @@ parse_arguments() {
     # retorna 1 e, sob `set -e`, mata o script antes de resolver/buildar/deployar
     # (era o motivo de a ingestão nunca ter subido). if/then/fi não propaga o status.
     if [ -z "$JOB_KIND" ]; then
-        print_error "--job é obrigatório (leads|sales)"
+        print_error "--job é obrigatório (leads|sales|spend)"
         usage
     fi
 }
