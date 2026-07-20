@@ -111,6 +111,28 @@ def bucket_from_utm(utm_campaign, bucket_map=None) -> str:
     return bucket_map.get("fallback", "Lead")
 
 
+# Canal de mídia paga a partir do utm_source. Espelha analytics.ad_spend.platform
+# ('meta'/'google'), que é como o gasto entra. Os aliases seguem o
+# source_to_channel_mapping do config do cliente (fb/ig/facebook→facebook-ads=Meta;
+# google→google-ads=Google). Fora de Meta/Google → 'organic' (orgânico/manychat/vazio),
+# que não tem gasto de anúncio. Valor novo cai em 'organic' (fail-safe, sem gasto).
+_META_SOURCES = frozenset({"facebook-ads", "facebook-ads-sitelink", "facebook", "fb", "ig", "instagram", "meta"})
+_GOOGLE_SOURCES = frozenset({"google-ads", "google"})
+
+
+def channel_from_source(utm_source, *, meta_sources=_META_SOURCES,
+                        google_sources=_GOOGLE_SOURCES) -> str:
+    """Canal do lead pela utm_source: 'meta' | 'google' | 'organic'. Usado pra
+    separar o balde 'Lead' por canal (o cliente separa Lead Padrão Meta / Google /
+    Orgânico) — sem isso a receita de um canal era creditada contra o gasto de outro."""
+    s = (str(utm_source) if utm_source is not None else "").strip().lower()
+    if s in meta_sources:
+        return "meta"
+    if s in google_sources:
+        return "google"
+    return "organic"
+
+
 def classify_campaign_buckets(
     utm_campaigns: Iterable,
     *,

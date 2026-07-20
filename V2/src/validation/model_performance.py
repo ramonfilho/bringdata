@@ -37,12 +37,14 @@ from src.core.matching import match_leads_to_sales_unified
 from src.core.payment_method import CARTAO, BOLETO, forma_pagamento
 # bucket_from_utm é função PURA (utm_campaign+bucket_map→balde). Fonte única do
 # split por tag; a MESMA que o digest do monitoramento usa. Reuso por import.
-from src.monitoring.campaign_classifier import bucket_from_utm
+from src.monitoring.campaign_classifier import bucket_from_utm, channel_from_source
 
 logger = logging.getLogger(__name__)
 
-# Ordem de exibição dos baldes (Lead primeiro, depois os modelos).
-_BUCKET_ORDER = {"Lead": 0, "Champion": 1, "Challenger": 2}
+# Ordem de exibição dos baldes — espelha o debriefing do cliente:
+# LEADQUALIFIED (Anterior jan_30) → HQLB (Champion abr_28) → Lead Padrão (Meta sem
+# tag) → Google → Orgânico/Outro.
+_BUCKET_ORDER = {"Champion": 0, "Challenger": 1, "Lead": 2, "Google": 3, "Organico": 4}
 
 # Data em que o ledger `registros_ml` passou a ser populado (consumer Pub/Sub).
 # LFs cuja captação termina antes disso não têm dado no ledger.
@@ -157,8 +159,12 @@ class ModelRegistry:
         # Precedência Challenger > Champion (challenger primeiro na lista). Os
         # rótulos (bucket_labels) vêm do display_name do YAML — o MESMO que o
         # digest usa via _set_render_labels. Nada duplicado aqui.
+        # Rótulos dos baldes de canal (Lead=Meta sem tag, Google, Orgânico) espelham
+        # as linhas do debriefing; Champion/Challenger vêm do display_name do YAML.
         _role_to_bucket = {"champion": "Champion", "challenger": "Challenger"}
-        tags, self._bucket_labels = [], {"Lead": "Lead"}
+        tags = []
+        self._bucket_labels = {"Lead": "Lead Padrão (Meta)", "Google": "Google",
+                               "Organico": "Orgânico/Outro"}
         # ordena challenger antes de champion pra respeitar a precedência
         _ordered = sorted(variants.items(),
                           key=lambda kv: 0 if str(kv[1].get("role", "")).lower() == "challenger" else 1)
@@ -191,7 +197,7 @@ class ModelRegistry:
 # ───────────────────────── leitores (data access) ───────────────────────────
 # Projeções enxutas; ficam aqui na Etapa 1. Fase 2 do estrangulamento move pra
 # repositórios em src/data/. O chamador injeta a conexão (dono de fechá-la).
-_LEDGER_COLS = ("email", "phone", "created_at", "decil", "lead_score", "variant", "utm_campaign")
+_LEDGER_COLS = ("email", "phone", "created_at", "decil", "lead_score", "variant", "utm_campaign", "utm_source")
 _SALES_COLS = ("email", "phone", "sale_value", "sale_value_realizado", "sale_date", "gateway")
 
 
@@ -316,12 +322,31 @@ def _concentration(arm_df: pd.DataFrame) -> dict:
     return {"top3_production": top3 / total * 100, "top5_production": top5 / total * 100}
 
 
+def _bucket_of_lead(utm_source, utm_campaign, bucket_map) -> str:
+    """Balde do lead na régua de CANAL do cliente: canal (utm_source) primeiro, tag
+    A/B (utm_campaign) dentro do Meta. Google→'Google', orgânico/outro→'Organico',
+    Meta+HQLB→'Challenger', Meta+LEADQUALIFIED→'Champion', Meta sem tag→'Lead'.
+    Separar o canal impede creditar receita de um canal contra o gasto de outro."""
+    ch = channel_from_source(utm_source)
+    if ch == "google":
+        return "Google"
+    if ch == "organic":
+        return "Organico"
+    return bucket_from_utm(utm_campaign, bucket_map)  # meta: Champion/Challenger/Lead
+
+
 def _spend_by_bucket(spend_df: pd.DataFrame, registry: ModelRegistry) -> dict:
-    """Gasto (ad_spend) somado por balde: classifica campaign_name→balde pela MESMA
-    régua dos leads (bucket_from_utm). Google/orgânico/Meta-sem-tag caem em 'Lead'."""
+    """Gasto (ad_spend) somado por balde na MESMA régua de canal dos leads: platform
+    'google'→'Google'; Meta → split por tag do campaign_name (bucket_from_utm). Orgânico
+    não tem gasto de anúncio (nenhuma linha). Assim cada balde casa gasto×receita do
+    mesmo canal — o que corrige o ROAS que antes misturava Meta+Google no 'Lead'."""
     if spend_df is None or spend_df.empty:
         return {}
-    b = spend_df["campaign_name"].apply(lambda c: bucket_from_utm(c, registry.bucket_map))
+    def _b(row):
+        if str(row["platform"]).strip().lower() == "google":
+            return "Google"
+        return bucket_from_utm(row["campaign_name"], registry.bucket_map)  # meta
+    b = spend_df.apply(_b, axis=1)
     return spend_df.assign(_b=b).groupby("_b")["spend"].sum().to_dict()
 
 
@@ -434,7 +459,9 @@ def _buckets_from_matched(matched: pd.DataFrame, registry: ModelRegistry, *,
     buckets: list[BucketPerformance] = []
     seen = set()
     if not matched.empty:
-        bcol = matched["utm_campaign"].apply(lambda c: bucket_from_utm(c, registry.bucket_map))
+        bcol = matched.apply(
+            lambda r: _bucket_of_lead(r.get("utm_source"), r.get("utm_campaign"), registry.bucket_map),
+            axis=1)
         for bucket, grp in matched.assign(_bucket=bcol).groupby("_bucket", dropna=False):
             bk = str(bucket)
             seen.add(bk)
@@ -718,7 +745,6 @@ def _print_result(res: LFModelPerformance, sales_max: Optional[date] = None) -> 
 
 
 # ───────────────────────── Slack DM (Etapa 3) ───────────────────────────────
-_LOW_N_CONV = 30  # abaixo disso, métrica de desfecho é ruído — sinaliza
 
 
 def _lift_at(arm: "BucketPerformance", decile: str) -> Optional[float]:
@@ -792,9 +818,14 @@ def _fmt_lf_block(res: LFModelPerformance, sales_max: Optional[date] = None) -> 
         t_tot += b.n_conversions; t_fat += b.faturamento
         if b.investimento is not None:
             any_inv = True; t_inv += b.investimento
-        if b.lucro is not None:
-            t_lucro += b.lucro
+    # TOTAL: toda a receita atribuída contra o gasto pago disponível (mesma régua do
+    # debriefing do cliente) — ROAS e lucro na MESMA escala, sem a inconsistência de
+    # somar só o lucro dos baldes com gasto. Baldes com receita mas sem gasto
+    # (Google sem token, Orgânico) creditam a receita aqui; o aviso abaixo explica.
+    t_lucro = (t_fat - t_inv) if (any_inv and t_inv) else 0.0
     t_roas = f"{t_fat/t_inv:.2f}" if any_inv and t_inv else "—"
+    _sem_gasto = [(b.display_name, b.faturamento) for b in res.buckets
+                  if b.investimento is None and b.faturamento > 0]
     brows.append(
         f"{'TOTAL':<19}{(_brl(t_inv) if any_inv else '—'):>13}{int(t_leads):>7}"
         f"{(_brl(t_inv/t_leads) if any_inv and t_leads else '—'):>9}"
@@ -819,16 +850,17 @@ def _fmt_lf_block(res: LFModelPerformance, sales_max: Optional[date] = None) -> 
             strips.append(f"  {_short_label(b):<7} {_conv_strip(b)}")
         block += "\n*MODELO (ranqueamento)*\n```\n" + "\n".join(mrows + strips) + "\n```"
 
-    low = [f"{b.display_name}: {b.n_conversions} vendas"
-           for b in res.buckets if b.bucket in ("Champion", "Challenger") and b.n_conversions < _LOW_N_CONV]
     gap = _obs_gap_days(res, sales_max)
     if gap:
         block += (f"\n⚠ *vendas incompletas*: banco só até {sales_max:%d/%m} "
                   f"(faltam {gap}d de observação) — números subcontados")
     if not any_inv:
         block += "\n⚠ *sem gasto na tabela ad_spend p/ esta janela* — investimento/CPL/ROAS/lucro vazios (rode o etl_ad_spend)"
-    if low:
-        block += f"\n⚠ amostra baixa p/ ranqueamento: {', '.join(low)}"
+    if _sem_gasto:
+        _desc = ", ".join(f"{nm} {_brl(fat)}" for nm, fat in _sem_gasto)
+        block += (f"\n⚠ *receita sem gasto no ROAS/lucro do TOTAL*: {_desc} — "
+                  f"o gasto do Google não está carregado (token OAuth), então essa "
+                  f"receita é creditada contra o gasto Meta e o ROAS do TOTAL fica otimista")
     return block
 
 
@@ -844,8 +876,8 @@ def _coverage_note(coverage: Optional[dict]) -> str:
 def format_slack(results: list, as_of: date, window_days: int, coverage: Optional[dict] = None) -> str:
     sales_max = coverage.get("overall") if coverage else None
     head = (f"*Performance por LF — negócio + modelo*\n"
-            f"_as_of {as_of:%d/%m/%Y} · janela {window_days}d · baldes pela tag da campanha (Lead / Anterior jan_30 / Champion abr_28)_\n"
-            f"_boleto conta a 50% no faturamento (convenção do cliente) · ROAS = faturamento÷investimento · gasto de ad_spend (Meta+Google)_"
+            f"_as_of {as_of:%d/%m/%Y} · janela {window_days}d · baldes por canal×tag (Anterior jan_30 / Champion abr_28 / Lead Padrão Meta / Google / Orgânico)_\n"
+            f"_boleto conta a 50% no faturamento (convenção do cliente) · ROAS = faturamento÷investimento · gasto de ad_spend (Meta; Google pendente de token)_"
             f"{_coverage_note(coverage)}")
     return head + "\n\n" + "\n\n".join(_fmt_lf_block(r, sales_max) for r in results)
 
