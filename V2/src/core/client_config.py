@@ -439,6 +439,14 @@ class BusinessConfig:
     # Usado para calcular faturamento_recebido = cartão líquido Guru + 1ª parcela boleto
     n_parcelas_boleto: int = 12                            # número total de pagamentos (entrada + mensais)
 
+    # Convenção do cliente no debriefing: faturamento de BOLETO conta a 50% do valor
+    # (risco de calote). Aplicado no RENDER do relatório de negócio (guarda-se valor
+    # cheio no banco). Régua mais precisa no futuro = analytics.sales_tmb_risk.
+    boleto_haircut: float = 0.5                             # fração do valor de boleto que conta no faturamento/ROAS
+    # Conjuntos gateway→forma (fonte única em core/payment_method.py; ver CARTAO/BOLETO_GATEWAYS)
+    cartao_gateways: frozenset = frozenset({"guru", "hotmart"})
+    boleto_gateways: frozenset = frozenset({"asaas", "boletex", "tmb", "hotpay"})
+
     # Benchmark de taxa de conversão por faixa de decil (base: produção observada)
     # Usado para calcular tc_esperada do lançamento em curso a partir da distribuição atual de leads.
     # Estrutura: { periodo_referencia, D1_D5, D6_D9, D10 }
