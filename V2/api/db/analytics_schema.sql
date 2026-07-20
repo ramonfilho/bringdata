@@ -266,3 +266,39 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_meta_campaign_date
 CREATE INDEX IF NOT EXISTS idx_meta_date ON meta_insights (client_id, insight_date);
 
 COMMENT ON TABLE meta_insights IS 'Gasto/CPL por campanha por dia (Meta Ads API). Evita re-pull da Meta a cada validação.';
+
+
+-- ---------------------------------------------------------------------
+-- ad_spend — gasto de anúncio por campanha por dia, Meta E Google
+-- ---------------------------------------------------------------------
+-- Conceito único "gasto de anúncio" (mesmo pra Meta e Google) rotulado por
+-- `platform`. Grão campanha×dia (não adset, não 30d rolling como o cpl_adset
+-- do Railway, que é de scoring). O `campaign_name` é guardado cru pra o
+-- relatório classificar campanha→balde (Lead/Champion/Challenger) pela tag,
+-- via campaign_classifier.bucket_from_utm. Enchida pelo etl_ad_spend (reusa
+-- MetaReportsLoader + GoogleAdsReportingClient). O relatório LÊ daqui — não
+-- bate Meta/Google ao vivo. Idempotente: ON CONFLICT na chave natural.
+CREATE TABLE IF NOT EXISTS ad_spend (
+    id            BIGSERIAL PRIMARY KEY,
+    client_id     VARCHAR(64)  NOT NULL DEFAULT 'devclub',
+    platform      VARCHAR(16)  NOT NULL,          -- 'meta' | 'google'
+
+    account_id    VARCHAR(64),
+    campaign_id   VARCHAR(64),
+    campaign_name VARCHAR(512),                    -- cru, p/ classificar campanha→balde pela tag
+    spend_date    DATE         NOT NULL,
+
+    spend         DOUBLE PRECISION NOT NULL,       -- BRL (anti-corrupção já feita nos loaders)
+    leads         INTEGER,
+    impressions   BIGINT,
+    clicks        BIGINT,
+
+    extra         JSONB,
+    ingested_at   TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ad_spend_natural
+    ON ad_spend (client_id, platform, campaign_id, spend_date);
+CREATE INDEX IF NOT EXISTS idx_ad_spend_date ON ad_spend (client_id, spend_date);
+
+COMMENT ON TABLE ad_spend IS 'Gasto de anúncio por campanha por dia (Meta + Google), rotulado por platform. Fonte única do gasto pro relatório de negócio; enchida pelo etl_ad_spend.';
