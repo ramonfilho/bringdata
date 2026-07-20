@@ -34,7 +34,33 @@ def test_bucket_map_e_rotulos():
     # rótulos vêm do display_name do YAML (fonte única, = digest)
     assert "abr_28" in reg.bucket_label("Challenger")
     assert "jan_30" in reg.bucket_label("Champion")
-    assert reg.bucket_label("Lead") == "Lead"
+    # baldes de canal (espelham as linhas do debriefing do cliente)
+    assert reg.bucket_label("Lead") == "Lead Padrão (Meta)"
+    assert reg.bucket_label("Google") == "Google"
+    assert reg.bucket_label("Organico") == "Orgânico/Outro"
+
+
+def test_channel_from_source():
+    from src.monitoring.campaign_classifier import channel_from_source
+    assert channel_from_source("facebook-ads") == "meta"
+    assert channel_from_source("FB") == "meta"          # alias + case
+    assert channel_from_source("ig") == "meta"
+    assert channel_from_source("google-ads") == "google"
+    assert channel_from_source("organico") == "organic"
+    assert channel_from_source("manychat") == "organic"  # fora de Meta/Google
+    assert channel_from_source(None) == "organic"        # vazio → sem gasto
+
+
+def test_bucket_of_lead_canal_x_tag():
+    from src.validation.model_performance import _bucket_of_lead, ModelRegistry
+    bm = ModelRegistry().bucket_map
+    # Meta: split pela tag A/B
+    assert _bucket_of_lead("facebook-ads", "DEVLF|...|LEADHQLB|...", bm) == "Challenger"
+    assert _bucket_of_lead("facebook-ads", "DEVLF|...|LEADQUALIFIED", bm) == "Champion"
+    assert _bucket_of_lead("facebook-ads", "DEVLF sem tag", bm) == "Lead"   # Meta sem tag
+    # canal vence a tag: Google e orgânico saem do Meta mesmo com tag no nome
+    assert _bucket_of_lead("google-ads", "qualquer LEADHQLB", bm) == "Google"
+    assert _bucket_of_lead("organico", "qualquer LEADQUALIFIED", bm) == "Organico"
 
 
 def test_bucket_metrics_negocio():
@@ -61,5 +87,7 @@ def test_bucket_metrics_negocio():
 if __name__ == "__main__":
     test_forma_pagamento()
     test_bucket_map_e_rotulos()
+    test_channel_from_source()
+    test_bucket_of_lead_canal_x_tag()
     test_bucket_metrics_negocio()
     print("OK — testes de negócio+modelo passaram")
