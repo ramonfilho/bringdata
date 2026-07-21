@@ -114,7 +114,10 @@ def main() -> int:
                 logger.error("sem audience_id configurado pra %s — pulando.", label)
                 continue
             if label == "leads":
-                members = read_leads_audience(client_id=args.client, conn_analytics=conn_a)
+                members = read_leads_audience(
+                    client_id=args.client, conn_analytics=conn_a,
+                    respondents_source=ma.leads_source,
+                )
             else:
                 members = read_buyers_audience(client_id=args.client, conn=conn_a)
             summary = client.replace_users(aid, members, dry_run=dry_run)

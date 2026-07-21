@@ -8,7 +8,8 @@ alunos" e recebe uma lista de pessoas, sem saber que leads = união de duas base
 
 Fontes (decididas com o operador, 20/07/2026):
   LEADS  = TODOS os leads (respondentes da pesquisa OU não). União de:
-             (a) `analytics.leads` source='train_unified' (Cloud SQL, fresco) —
+             (a) `analytics.leads` source=`respondents_source` (Cloud SQL, fresco;
+                 nome CONFIGURÁVEL — hoje `leads_treino_prod`, era `train_unified`) —
                  só respondentes, mas histórico completo (~325k, email+telefone);
              (b) `Client` (Railway, base do front) — todos os cadastros, inclusive
                  quem não respondeu, desde ~mar/2026 (~109k, email+telefone).
@@ -48,6 +49,12 @@ logger = logging.getLogger(__name__)
 # não é um alvo, é um alarme de "isso não pode estar certo".
 _MIN_LEADS = 50_000
 _MIN_BUYERS = 3_000
+
+# Nome da source unificada de respondentes no `analytics.leads`. Default = o nome
+# ATUAL (a fonte foi renomeada `train_unified` → `leads_treino_prod` em 21/07 por
+# um deploy de ingestão fora da main). É só o default; o valor de produção vem de
+# `meta_audiences.leads_source` no yaml do cliente e é passado pelo CLI.
+_DEFAULT_RESPONDENTS_SOURCE = "leads_treino_prod"
 
 
 def _dedup_by_email(df: pd.DataFrame) -> pd.DataFrame:
@@ -94,13 +101,21 @@ def read_leads_audience(
     *,
     conn_analytics=None,
     conn_railway=None,
+    respondents_source: str = _DEFAULT_RESPONDENTS_SOURCE,
     min_size: int = _MIN_LEADS,
 ) -> pd.DataFrame:
-    """Público de LEADS: união de respondentes (Cloud SQL, train_unified) + todos
-    os cadastros (Railway, Client) → {email, phone} deduplicado por email.
+    """Público de LEADS: união de respondentes (Cloud SQL, source=`respondents_source`)
+    + todos os cadastros (Railway, Client) → {email, phone} deduplicado por email.
 
-    Abre e fecha as conexões que criar (se não vierem prontas). Levanta ValueError
-    se a união vier abaixo de `min_size` (guarda contra zerar o público).
+    `respondents_source` é CONFIGURÁVEL (não cravado) porque o nome da fonte
+    unificada já mudou uma vez sem aviso (era `train_unified`, virou
+    `leads_treino_prod` em 21/07 num deploy de ingestão que não foi pra main) e
+    deixou o job lendo 0 → público degradado. Vem de `meta_audiences.leads_source`
+    no yaml, então re-apontar é 1 linha, sem deploy de código.
+
+    FAIL-LOUD: se a fonte de respondentes vier VAZIA, levanta erro ANTES de qualquer
+    escrita (nome de source stale não pode virar replace silencioso pela metade — foi
+    o que aconteceu em 21/07). Também levanta se a união ficar abaixo de `min_size`.
     """
     # (a) Respondentes — Cloud SQL analytics.leads, fonte unificada e fresca.
     own_a = conn_analytics is None
@@ -108,15 +123,21 @@ def read_leads_audience(
     try:
         rows_resp = conn_a.run(
             "SELECT email, phone FROM analytics.leads "
-            "WHERE client_id = :c AND source = 'train_unified' "
+            "WHERE client_id = :c AND source = :src "
             "AND email IS NOT NULL AND email <> ''",
-            c=client_id,
+            c=client_id, src=respondents_source,
         )
     finally:
         if own_a:
             conn_a.close()
     df_resp = pd.DataFrame(rows_resp, columns=["email", "phone"])
-    logger.info("[audience_reader] leads/respondentes (Cloud SQL train_unified): %d", len(df_resp))
+    logger.info("[audience_reader] leads/respondentes (Cloud SQL source=%s): %d", respondents_source, len(df_resp))
+    if df_resp.empty:
+        raise ValueError(
+            f"[audience_reader] fonte de respondentes '{respondents_source}' VAZIA — "
+            "provável rename da source no pipeline (ver meta_audiences.leads_source no yaml). "
+            "Abortando ANTES de escrever pra não degradar o público."
+        )
 
     # (b) Todos os cadastros — Railway Client (base do front). Client é mono-cliente
     # (devclub) no Railway, então não há filtro de client_id lá.

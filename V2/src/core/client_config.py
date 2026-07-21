@@ -380,6 +380,7 @@ class MetaAudiencesConfig:
     ad_account_id: Optional[str] = None            # conta de anúncios (act_XXXX) dona dos públicos
     leads_audience_id: Optional[str] = None        # id do público de LEADS a substituir
     buyers_audience_id: Optional[str] = None       # id do público de ALUNOS a substituir
+    leads_source: str = "leads_treino_prod"        # source da fonte unificada de respondentes no analytics.leads (renomeável sem deploy; era train_unified até 21/07)
     api_version: str = "v24.0"                     # versão da Graph API
 
 
