@@ -1551,6 +1551,35 @@ class SalesDataLoader:
             logger.warning(f"    Aviso: cache Boletex não salvo: {e}")
         return df
 
+    def load_tmb_api(self, start_date: str, end_date: str) -> pd.DataFrame:
+        """Carrega vendas TMB via API REST (pedidos Efetivados) com cache parquet.
+
+        Substitui o xlsx manual (`load_tmb_sales`) como fonte VIVA da TMB: traz
+        telefone (~100%) e `external_id`=pedido_id (dedup limpa no analytics.sales).
+        `load_tmb_sales` fica pra histórico/backfill do 'Grau de risco'."""
+        cache_file = self._cache_path('tmb_api', start_date, end_date)
+        if _cache_is_fresh(cache_file, end_date):
+            logger.info(f"    Cache HIT TMB API: {cache_file.name}")
+            return pd.read_parquet(cache_file)
+
+        from src.validation.tmb_api_extractor import TMBSalesExtractor
+        logger.info(f" Buscando vendas TMB via API ({start_date} → {end_date})")
+        df = TMBSalesExtractor().generate_report(start_date, end_date)
+        if df.empty:
+            return pd.DataFrame()
+
+        # Colunas de debug (_tmb_*) fora antes de salvar/gravar; external_id fica.
+        debug_cols = [c for c in df.columns if c.startswith('_')]
+        if debug_cols:
+            df = df.drop(columns=debug_cols)
+
+        try:
+            df.to_parquet(cache_file, index=False)
+            logger.info(f"    Cache SAVED TMB API: {cache_file.name}")
+        except Exception as e:
+            logger.warning(f"    Aviso: cache TMB API não salvo: {e}")
+        return df
+
     def combine_sales(self, guru_df: pd.DataFrame = None, tmb_df: pd.DataFrame = None,
                      hotpay_df: pd.DataFrame = None, hotmart_df: pd.DataFrame = None,
                      asaas_df: pd.DataFrame = None, boletex_df: pd.DataFrame = None,
