@@ -22,11 +22,15 @@ from __future__ import annotations
 
 import os
 from collections import namedtuple
+from datetime import date
 from typing import Iterable, List
 
 # Registro leve: só o que o funil Google precisa — a fonte (pra rótulo/filtro) e
 # o utm_term ValueTrack (do qual sai o campaign_id no split por variante).
 CadastroRec = namedtuple("CadastroRec", ["utm_source", "utm_term"])
+
+# Shape que o matcher do relatório espera (mesmas colunas do ledger_reader, sem decil).
+_CAD_COLS = ["email", "telefone", "data_captura", "utm_campaign", "utm_source"]
 
 
 def open_railway_connection():
@@ -93,3 +97,39 @@ def google_cadastro_records(
         if prev is None or (tracked is not None and (prev[0] is None or tracked >= prev[0])):
             latest[email] = (tracked, source, term)
     return [CadastroRec(utm_source=v[1], utm_term=v[2]) for v in latest.values()]
+
+
+def read_cadastros(conn, cap_start: date, cap_end: date):
+    """TODOS os cadastros (Client⋈UTMTracking) com captação BRT em [cap_start, cap_end],
+    no shape do matcher: email, telefone, data_captura, utm_campaign, utm_source. Dedup por
+    email = UTM mais recente (last-touch, mesma regra do split Meta).
+
+    É a base do bloco NEGÓCIO do relatório do DM (compradores/faturamento/CPL por balde):
+    inclui quem NÃO respondeu a pesquisa — ao contrário do `registros_ml` (só respondentes),
+    que subconta compradores e distorce o ROAS por balde. O bloco MODELO (decil/lift)
+    continua no ledger. Janela BRT por `(createdAt - 3h)::date` (mesmo dia que o cliente usa).
+    """
+    import pandas as pd
+
+    rows = conn.run(
+        'SELECT LOWER(TRIM(c.email)) AS email, c.phone AS phone, c."createdAt" AS cria, '
+        'u.campaign AS campaign, LOWER(u.source) AS source, u."trackedAt" AS tracked '
+        'FROM "Client" c '
+        'JOIN "UTMTracking" u ON LOWER(TRIM(u."clientEmail")) = LOWER(TRIM(c.email)) '
+        'WHERE (c."createdAt" - INTERVAL \'3 hours\')::date >= :s '
+        'AND (c."createdAt" - INTERVAL \'3 hours\')::date <= :e',
+        s=cap_start.isoformat(), e=cap_end.isoformat(),
+    )
+    latest = {}  # email -> (tracked, phone, cria, campaign, source)
+    for email, phone, cria, campaign, source, tracked in rows:
+        prev = latest.get(email)
+        if prev is None or (tracked is not None and (prev[0] is None or tracked >= prev[0])):
+            latest[email] = (tracked, phone, cria, campaign, source)
+    if not latest:
+        return pd.DataFrame(columns=_CAD_COLS)
+    df = pd.DataFrame(
+        [{"email": e, "telefone": v[1], "data_captura": v[2],
+          "utm_campaign": v[3], "utm_source": v[4]} for e, v in latest.items()]
+    )
+    df["data_captura"] = pd.to_datetime(df["data_captura"], utc=True, errors="coerce").dt.tz_localize(None)
+    return df
