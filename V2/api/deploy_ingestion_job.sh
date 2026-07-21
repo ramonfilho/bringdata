@@ -127,8 +127,18 @@ build_docker_image() {
     local IMAGE_FULL="$GCR_REGISTRY/$PROJECT_ID/$SERVICE_NAME:$IMAGE_TAG"
     local IMAGE_LATEST="$GCR_REGISTRY/$PROJECT_ID/$SERVICE_NAME:latest"
 
+    # Resolve o modelo igual ao deploy_capi.sh / deploy_meta_audiences_job.sh: o modo
+    # novo (mlflow_run_id em active_models/<cliente>.yaml) tem precedência sobre o
+    # legado (model_path). Estes jobs de ingestão NÃO usam o modelo, mas o Dockerfile
+    # compartilhado sempre COPY ${MODEL_PATH} → aponta pro real (barato) pra imagem
+    # ficar superconjunto da de produção. (Sem isto o deploy quebra: o YAML por cliente
+    # já não tem 'model_path:', só 'mlflow_run_id:'.)
+    local MLFLOW_RUN_ID
     MODEL_PATH=$(grep "model_path:" "$CONFIG_FILE" | awk '{print $2}')
-    [ -z "$MODEL_PATH" ] && { print_error "model_path não encontrado em $CONFIG_FILE"; exit 1; }
+    MLFLOW_RUN_ID=$(grep "mlflow_run_id:" "$CONFIG_FILE" | awk '{print $2}' | tr -d '"')
+    [ -n "$MLFLOW_RUN_ID" ] && MODEL_PATH="mlruns/1/${MLFLOW_RUN_ID}/artifacts"
+    [ -z "$MODEL_PATH" ] && { print_error "nem mlflow_run_id nem model_path em $CONFIG_FILE"; exit 1; }
+    [ -d "$PROJECT_ROOT/$MODEL_PATH" ] || { print_error "artefatos do modelo ausentes: $MODEL_PATH (rode do tree principal, não da worktree — ver projeto_deploy_por_worktree_gotchas)"; exit 1; }
 
     print_info "Build linux/amd64 (tag $IMAGE_TAG)…"
     cd "$PROJECT_ROOT"
