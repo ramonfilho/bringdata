@@ -59,9 +59,10 @@ def _dt(x) -> Optional[str]:
         return None
 
 
-# Colunas gravadas (na ordem). external_id e sale_value_realizado ficam NULL
-# (loaders não expõem id; realizado é transform de leitura).
-_COLS = ("client_id", "gateway", "email", "phone", "nome",
+# Colunas gravadas (na ordem). external_id vem preenchido só nos gateways com id
+# de transação estável (ex.: tmb via API = pedido_id); nos outros fica NULL.
+# sale_value_realizado (transform de leitura) fica NULL.
+_COLS = ("client_id", "gateway", "external_id", "email", "phone", "nome",
          "sale_value", "sale_date", "produto", "status")
 
 
@@ -75,15 +76,39 @@ def _row_params(r, client_id: str):
     if not gw or not sale_date or not (email or phone):
         return None
     return {
-        "client_id": client_id, "gateway": gw, "email": email, "phone": phone,
+        "client_id": client_id, "gateway": gw,
+        "external_id": _s(r.get("external_id")),
+        "email": email, "phone": phone,
         "nome": _s(r.get("nome")), "sale_value": _f(r.get("sale_value")),
         "sale_date": sale_date, "produto": _s(r.get("product_name")),
         "status": _s(r.get("status")),
     }
 
 
-def _insert_chunk(conn, chunk) -> None:
-    """INSERT multi-row de um lote (1 round-trip), ON CONFLICT DO NOTHING."""
+# Dois caminhos de conflito — ambos apoiados em índices únicos que JÁ existem em
+# analytics.sales (nenhum ALTER/DDL; a tabela é do postgres):
+#  - natural: linhas SEM external_id → uq_sales_natural (client_id,gateway,email,
+#    sale_date,sale_value) WHERE external_id IS NULL. DO NOTHING (primeiro-visto).
+#  - external: linhas COM external_id (ex.: tmb via API, external_id=pedido_id) →
+#    uq_sales_gateway_external (client_id,gateway,external_id). DO UPDATE pra
+#    enriquecer num re-run (telefone/status podem mudar) — idempotente e fresco.
+_CONFLICT_NATURAL = (
+    "ON CONFLICT (client_id, gateway, email, sale_date, sale_value) "
+    "WHERE external_id IS NULL DO NOTHING"
+)
+_CONFLICT_EXTERNAL = (
+    # WHERE external_id IS NOT NULL repete o predicado do índice PARCIAL
+    # uq_sales_gateway_external (senão o Postgres não casa o ON CONFLICT — 42P10).
+    "ON CONFLICT (client_id, gateway, external_id) WHERE external_id IS NOT NULL "
+    "DO UPDATE SET "
+    "email = EXCLUDED.email, phone = EXCLUDED.phone, nome = EXCLUDED.nome, "
+    "sale_value = EXCLUDED.sale_value, sale_date = EXCLUDED.sale_date, "
+    "produto = EXCLUDED.produto, status = EXCLUDED.status"
+)
+
+
+def _insert_chunk(conn, chunk, conflict_sql: str) -> None:
+    """INSERT multi-row de um lote (1 round-trip) com a cláusula de conflito dada."""
     values, params = [], {}
     for i, p in enumerate(chunk):
         cells = []
@@ -94,8 +119,7 @@ def _insert_chunk(conn, chunk) -> None:
         values.append("(" + ", ".join(cells) + ")")
     sql = (
         f"INSERT INTO sales ({', '.join(_COLS)}) VALUES " + ", ".join(values)
-        + " ON CONFLICT (client_id, gateway, email, sale_date, sale_value)"
-        + " WHERE external_id IS NULL DO NOTHING"
+        + " " + conflict_sql
     )
     conn.run(sql, **params)
 
@@ -123,7 +147,12 @@ def upsert_sales(df: pd.DataFrame, client_id: str = "devclub", conn=None,
         if p is None:
             filtered += 1
             continue
-        key = (p["gateway"], p["email"], p["sale_date"], p["sale_value"])
+        # Dedup intra-lote: por external_id quando existe (gateway com id estável),
+        # senão pela chave natural (gateway+email+data+valor).
+        if p["external_id"]:
+            key = (p["gateway"], "ext", p["external_id"])
+        else:
+            key = (p["gateway"], p["email"], p["sale_date"], p["sale_value"])
         if key in seen:
             intra_dup += 1
             continue
@@ -131,14 +160,20 @@ def upsert_sales(df: pd.DataFrame, client_id: str = "devclub", conn=None,
         rows.append(p)
         by_gw[p["gateway"]] = by_gw.get(p["gateway"], 0) + 1
 
+    # Particiona pelos 2 caminhos de conflito (índices únicos distintos).
+    rows_ext = [p for p in rows if p["external_id"]]
+    rows_nat = [p for p in rows if not p["external_id"]]
+
     own = conn is None
     conn = conn or open_analytics_connection()
     try:
         before = conn.run(
             "SELECT count(*) FROM sales WHERE client_id = :c", c=client_id
         )[0][0]
-        for start in range(0, len(rows), batch_size):
-            _insert_chunk(conn, rows[start:start + batch_size])
+        for start in range(0, len(rows_nat), batch_size):
+            _insert_chunk(conn, rows_nat[start:start + batch_size], _CONFLICT_NATURAL)
+        for start in range(0, len(rows_ext), batch_size):
+            _insert_chunk(conn, rows_ext[start:start + batch_size], _CONFLICT_EXTERNAL)
         after = conn.run(
             "SELECT count(*) FROM sales WHERE client_id = :c", c=client_id
         )[0][0]

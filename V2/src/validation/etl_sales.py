@@ -43,9 +43,9 @@ from src.validation.sales_store import upsert_sales
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
-_API_GATEWAYS = ("guru", "hotmart", "asaas", "boletex")
-_FILE_GATEWAYS = ("tmb", "hotpay")
-_DEFAULT_GATEWAYS = _API_GATEWAYS + ("tmb",)  # hotpay é legado, só se pedido
+_API_GATEWAYS = ("guru", "hotmart", "asaas", "boletex", "tmb")  # tmb passou a ter API (Efetivados)
+_FILE_GATEWAYS = ("hotpay",)  # hotpay legado (xlsx); load_tmb_sales fica p/ backfill do 'Grau de risco'
+_DEFAULT_GATEWAYS = _API_GATEWAYS
 
 
 def tmb_drop_dir(client_id: str = "devclub") -> Path:
@@ -80,9 +80,6 @@ def run_sales_etl(
     frames = []
     loaded = {}
 
-    if "tmb" in gws:
-        tmb_paths = _resolve_tmb_paths(tmb_paths, Path(tmb_dir) if tmb_dir else tmb_drop_dir(client_id))
-
     def _try(name, fn):
         if name not in gws:
             return
@@ -101,7 +98,7 @@ def run_sales_etl(
     _try("hotmart", lambda: loader.load_hotmart_sales_from_api(start, end))
     _try("asaas", lambda: loader.load_asaas_sales(start, end))
     _try("boletex", lambda: loader.load_boletex_sales_from_api(start, end))
-    _try("tmb", lambda: loader.load_tmb_sales(tmb_paths, report_type=report_type))
+    _try("tmb", lambda: loader.load_tmb_api(start, end))  # API REST (Efetivados, com telefone + pedido_id)
     _try("hotpay", lambda: loader.load_hotpay_sales(hotpay_paths) if hotpay_paths else None)
 
     if not frames:

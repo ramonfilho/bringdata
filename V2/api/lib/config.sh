@@ -239,6 +239,13 @@ print(','.join(f'{k}={env[k]}' for k in keys if env.get(k)))
         ENV_VARS="$ENV_VARS,$CREDS"
     fi
 
+    # Token da API da TMB (gateway de vendas TMB no etl_sales). Secret dedicado
+    # `tmb-api-token`; só entra se existir (opt-in). Guarda contra job sem o token
+    # é o fail-loud do próprio extractor (não esvazia a TMB em silêncio).
+    local TMB_TOKEN
+    TMB_TOKEN="${TMB_API_TOKEN:-$(gcloud secrets versions access latest --secret=tmb-api-token --project="$PROJECT_ID" 2>/dev/null)}"
+    [ -n "$TMB_TOKEN" ] && ENV_VARS="$ENV_VARS,TMB_API_TOKEN=$TMB_TOKEN"
+
     echo "$ENV_VARS"
 }
 
