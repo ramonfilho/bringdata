@@ -364,6 +364,25 @@ class GoogleAdsConfig:
     variant_goal_map: Optional[Dict[str, str]] = None
 
 
+@dataclass
+class MetaAudiencesConfig:
+    """Automação dos Públicos Personalizados (Custom Audiences) da Meta — substitui
+    os membros de 2 públicos (leads + alunos) por email/telefone hasheado, lendo
+    das tabelas frescas (ver src/data/audience_reader.py e api/meta_audiences.py).
+
+    Bloco `meta_audiences:` no YAML do cliente. Auth = `META_ACCESS_TOKEN` (o mesmo
+    do CAPI/insights), mas o REPLACE de membros exige escopo `ads_management` no
+    token — sem isso, só leitura/dry-run.
+
+    Default `enabled=False` = INERTE: o job existe mas não substitui nada até o
+    cliente ligar explicitamente. Rollback = enabled:false."""
+    enabled: bool = False                          # master switch — dark por padrão
+    ad_account_id: Optional[str] = None            # conta de anúncios (act_XXXX) dona dos públicos
+    leads_audience_id: Optional[str] = None        # id do público de LEADS a substituir
+    buyers_audience_id: Optional[str] = None       # id do público de ALUNOS a substituir
+    api_version: str = "v24.0"                     # versão da Graph API
+
+
 # ---------------------------------------------------------------------------
 # Sub-configs — Grupo B: API operacional (Fase 2)
 # ---------------------------------------------------------------------------
@@ -717,6 +736,7 @@ class ClientConfig:
     monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
     capi: CAPIConfig = field(default_factory=CAPIConfig)
     google_ads: GoogleAdsConfig = field(default_factory=GoogleAdsConfig)
+    meta_audiences: MetaAudiencesConfig = field(default_factory=MetaAudiencesConfig)
     api: APIConfig = field(default_factory=APIConfig)
     retrain: RetainConfig = field(default_factory=RetainConfig)
     business: BusinessConfig = field(default_factory=BusinessConfig)
@@ -740,6 +760,7 @@ class ClientConfig:
             monitoring=_make(MonitoringConfig, data.get("monitoring", {})),
             capi=_load_capi_config(data.get("capi", {})),
             google_ads=_make(GoogleAdsConfig, data.get("google_ads", {})),
+            meta_audiences=_make(MetaAudiencesConfig, data.get("meta_audiences", {})),
             api=_make(APIConfig, data.get("api", {})),
             retrain=_make(RetainConfig, data.get("retrain", {})),
             business=_make(BusinessConfig, data.get("business", {})),

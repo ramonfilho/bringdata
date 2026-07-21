@@ -628,6 +628,20 @@ google_ads:
   sa_secret: null                        # nome do Secret da service account (datamanager scope) — não o valor
   reporting_enabled: true                # LEITURA: funil Google no digest (read-only, isolado por try/except). Precisa das env vars GOOGLE_ADS_* no Cloud Run
   variant_goal_map: {}                    # goal_id da campanha → 'Champion'|'Challenger'. VAZIO hoje: nenhuma campanha Google plugada no A/B de modelo → tudo cai em 'Lead'. Preencher quando o gestor ligar o sinal ML no Google
+
+# Públicos Personalizados (Custom Audiences) da Meta — substitui membros de 2
+# públicos por email/telefone hasheado, lendo das tabelas frescas. Ver
+# api/meta_audiences.py e src/data/audience_reader.py.
+# LIGADO (21/07): o job diário `meta-audiences-daily` (Cloud Run, 07:15 BRT) roda
+# o sync sozinho. Token com `ads_management` vem de um Secret DEDICADO
+# (meta-audiences-token) só nesse job — o META_ACCESS_TOKEN do serviço fica intocado.
+# Rollback: enabled:false (o job vira no-op pela trava do CLI) OU pausar o scheduler.
+meta_audiences:
+  enabled: true
+  ad_account_id: 'act_188005769808959'       # conta de anúncios DevClub (dos logs de insights, confirmada via Graph API)
+  leads_audience_id: '120248123634020390'    # público existente "lista_leads_devclub_320.csv" (~191k) — será substituído pela união leads
+  buyers_audience_id: '120248123531220390'   # público existente "lista_alunos_devclub_10.csv" (~6.8k) — será substituído pelos compradores
+  api_version: v24.0
 api:
   cors_origins:
   - https://lp.devclub.com.br
