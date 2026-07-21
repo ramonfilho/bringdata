@@ -100,36 +100,41 @@ def google_cadastro_records(
 
 
 def read_cadastros(conn, cap_start: date, cap_end: date):
-    """TODOS os cadastros (Client⋈UTMTracking) com captação BRT em [cap_start, cap_end],
-    no shape do matcher: email, telefone, data_captura, utm_campaign, utm_source. Dedup por
-    email = UTM mais recente (last-touch, mesma regra do split Meta).
+    """TODOS os cadastros com um toque de UTM rastreado em [cap_start, cap_end], no shape
+    do matcher: email, telefone, data_captura, utm_campaign, utm_source. Dedup por email =
+    UTM mais recente DENTRO da janela (last-touch, mesma regra do split Meta).
+
+    Janela pela DATA DO TOQUE (`UTMTracking.trackedAt`, BRT `-3h`), NÃO pela criação do
+    cadastro (`Client.createdAt`): é assim que o cliente conta o lead no LF (bate no número
+    — LF60: 12.187 vs 12.189 do debriefing; por createdAt dava 11.917). `data_captura` =
+    trackedAt do toque selecionado (quando o lead engajou com este LF), usado no casamento
+    da venda dentro da janela.
 
     É a base do bloco NEGÓCIO do relatório do DM (compradores/faturamento/CPL por balde):
     inclui quem NÃO respondeu a pesquisa — ao contrário do `registros_ml` (só respondentes),
-    que subconta compradores e distorce o ROAS por balde. O bloco MODELO (decil/lift)
-    continua no ledger. Janela BRT por `(createdAt - 3h)::date` (mesmo dia que o cliente usa).
+    que subconta compradores e distorce o ROAS. O bloco MODELO (decil/lift) continua no ledger.
     """
     import pandas as pd
 
     rows = conn.run(
-        'SELECT LOWER(TRIM(c.email)) AS email, c.phone AS phone, c."createdAt" AS cria, '
+        'SELECT LOWER(TRIM(c.email)) AS email, c.phone AS phone, '
         'u.campaign AS campaign, LOWER(u.source) AS source, u."trackedAt" AS tracked '
         'FROM "Client" c '
         'JOIN "UTMTracking" u ON LOWER(TRIM(u."clientEmail")) = LOWER(TRIM(c.email)) '
-        'WHERE (c."createdAt" - INTERVAL \'3 hours\')::date >= :s '
-        'AND (c."createdAt" - INTERVAL \'3 hours\')::date <= :e',
+        'WHERE (u."trackedAt" - INTERVAL \'3 hours\')::date >= :s '
+        'AND (u."trackedAt" - INTERVAL \'3 hours\')::date <= :e',
         s=cap_start.isoformat(), e=cap_end.isoformat(),
     )
-    latest = {}  # email -> (tracked, phone, cria, campaign, source)
-    for email, phone, cria, campaign, source, tracked in rows:
+    latest = {}  # email -> (tracked, phone, campaign, source)
+    for email, phone, campaign, source, tracked in rows:
         prev = latest.get(email)
         if prev is None or (tracked is not None and (prev[0] is None or tracked >= prev[0])):
-            latest[email] = (tracked, phone, cria, campaign, source)
+            latest[email] = (tracked, phone, campaign, source)
     if not latest:
         return pd.DataFrame(columns=_CAD_COLS)
     df = pd.DataFrame(
-        [{"email": e, "telefone": v[1], "data_captura": v[2],
-          "utm_campaign": v[3], "utm_source": v[4]} for e, v in latest.items()]
+        [{"email": e, "telefone": v[1], "data_captura": v[0],
+          "utm_campaign": v[2], "utm_source": v[3]} for e, v in latest.items()]
     )
     df["data_captura"] = pd.to_datetime(df["data_captura"], utc=True, errors="coerce").dt.tz_localize(None)
     return df
