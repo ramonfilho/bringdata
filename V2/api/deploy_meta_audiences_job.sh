@@ -75,8 +75,16 @@ build_docker_image() {
     IMAGE_TAG="v$(date +%Y%m%d_%H%M%S)"
     local IMAGE_FULL="$GCR_REGISTRY/$PROJECT_ID/$SERVICE_NAME:$IMAGE_TAG"
     local IMAGE_LATEST="$GCR_REGISTRY/$PROJECT_ID/$SERVICE_NAME:latest"
-    local MODEL_PATH; MODEL_PATH=$(grep "model_path:" "$CONFIG_FILE" | awk '{print $2}')
-    [ -z "$MODEL_PATH" ] && { print_error "model_path não encontrado em $CONFIG_FILE"; exit 1; }
+    # Resolve o modelo igual ao deploy_capi.sh: modo novo (mlflow_run_id) tem
+    # precedência sobre o legado (model_path). O job de públicos NÃO usa o modelo,
+    # mas o Dockerfile compartilhado sempre COPY ${MODEL_PATH} → aponta pro real
+    # (10M, barato) pra imagem ficar superconjunto da de produção.
+    local MODEL_PATH MLFLOW_RUN_ID
+    MLFLOW_RUN_ID=$(grep "mlflow_run_id:" "$CONFIG_FILE" | awk '{print $2}' | tr -d '"')
+    MODEL_PATH=$(grep "model_path:" "$CONFIG_FILE" | awk '{print $2}')
+    [ -n "$MLFLOW_RUN_ID" ] && MODEL_PATH="mlruns/1/${MLFLOW_RUN_ID}/artifacts"
+    [ -z "$MODEL_PATH" ] && { print_error "nem mlflow_run_id nem model_path em $CONFIG_FILE"; exit 1; }
+    [ -d "$PROJECT_ROOT/$MODEL_PATH" ] || { print_error "artefatos do modelo ausentes: $MODEL_PATH (rode do tree principal, não da worktree — ver projeto_deploy_por_worktree_gotchas)"; exit 1; }
     print_info "Build linux/amd64 (tag $IMAGE_TAG)…"
     cd "$PROJECT_ROOT"
     docker buildx build --platform linux/amd64 --build-arg MODEL_PATH="$MODEL_PATH" \
