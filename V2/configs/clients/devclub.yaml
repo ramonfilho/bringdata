@@ -830,6 +830,14 @@ business:
   n_parcelas_boleto: 12              # entrada + 11 mensais (fonte: contas_a_receber TMB)
   boleto_haircut: 0.5                # boleto conta a 50% no faturamento/ROAS do debriefing (risco de calote); aplicado no render
   meta_spend_gross_up: 1.13          # gasto Meta da API vem SEM imposto; cliente lança a fatura c/ ~13% (multiplica só Meta no render, Google não). Empírico: cliente/nosso=1,1298 uniforme LF57-59
+  # Produtos do LANÇAMENTO (substrings, lower) — o relatório conta como venda do LF só as
+  # vendas desses produtos na janela de carrinho; exclui evergreen ("Operação 50k") e combos
+  # ("Vitalício"/"Club Hub"/"Pro"). O cliente cura isto na coluna Tipo=Principal do debriefing.
+  # Estáveis entre LFs. Vazio = sem filtro (conta todas as vendas, comportamento antigo).
+  launch_products:
+    - "full stack 2026"        # DevClub - Full Stack 2026 (curso principal, todo LF)
+    - "programação com ia"     # [Aniversário DevClub] Formação em Programação com IA
+    - "full stack br"          # Formação DevClub Full Stack BR
   # Recalibração 08/05/2026: janela LF43–LF53 (11 lançamentos), exclui LF42 (dez/2025 desatualizado).
   # Janela anterior LF42–LF47 ficou estagnada e ignorava degradação de conv geral observada em LF48–LF53.
   conv_rastr_mediana: 0.005376       # mediana LF43–LF53: vendas_matched/total_leads_meta (range 0.31–0.74%, CV 24%)

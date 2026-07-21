@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 # Ordem de exibição dos baldes — espelha o debriefing do cliente:
 # LEADQUALIFIED (Anterior jan_30) → HQLB (Champion abr_28) → Lead Padrão (Meta sem
 # tag) → Google → Orgânico/Outro.
-_BUCKET_ORDER = {"Champion": 0, "Challenger": 1, "Lead": 2, "Google": 3, "Organico": 4}
+_BUCKET_ORDER = {"Champion": 0, "Challenger": 1, "Lead": 2, "Google": 3, "Organico": 4, "Naobase": 5}
 
 # Data em que o ledger `registros_ml` passou a ser populado (consumer Pub/Sub).
 # LFs cuja captação termina antes disso não têm dado no ledger.
@@ -198,7 +198,7 @@ class ModelRegistry:
 # Projeções enxutas; ficam aqui na Etapa 1. Fase 2 do estrangulamento move pra
 # repositórios em src/data/. O chamador injeta a conexão (dono de fechá-la).
 _LEDGER_COLS = ("email", "phone", "created_at", "decil", "lead_score", "variant", "utm_campaign", "utm_source")
-_SALES_COLS = ("email", "phone", "sale_value", "sale_value_realizado", "sale_date", "gateway")
+_SALES_COLS = ("email", "phone", "sale_value", "sale_value_realizado", "sale_date", "gateway", "produto")
 
 
 def read_ledger_leads(ledger_conn, cap_start: date, cap_end: date) -> pd.DataFrame:
@@ -425,11 +425,25 @@ def _load_matched(
     # vendas: da captação até captura + janela (cobre o teto de qualquer lead do LF)
     sales_end = min(as_of, (cap_end + timedelta(days=window_days))) if cap_end else as_of
     sales_df = sales_reader(cap_start, sales_end + timedelta(days=1))
-    # MODELO (respondentes com decil)
+    # MODELO (respondentes com decil) — casa com TODAS as vendas na janela do lead
     matched_modelo = build_matched_df(ledger_reader(cap_start, cap_end), sales_df, window_days=window_days)
     # NEGÓCIO (todos os cadastros); sem cadastro_reader cai no ledger (compat)
+    naobase_sales = None
     if cadastro_reader is not None:
-        matched_negocio = build_matched_df(cadastro_reader(cap_start, cap_end), sales_df, window_days=window_days)
+        cadastros = cadastro_reader(cap_start, cap_end)
+        launch_patterns = _load_launch_products()
+        if launch_patterns:
+            # conta como venda do LF só os PRODUTOS do lançamento na janela de CARRINHO
+            # (exclui evergreen/combos, como o cliente). Casa por identidade → janela larga
+            # (o carrinho é ~2-3 semanas após a captação). Não-casadas = 'Não-base'.
+            launch_sales = _filter_launch_sales(sales_df, launch_patterns, vendas_start, vendas_end)
+            neg_window = window_days
+            if vendas_end and cap_start:
+                neg_window = max(window_days, (vendas_end - cap_start).days + 3)
+            matched_negocio = build_matched_df(cadastros, launch_sales, window_days=neg_window)
+            naobase_sales = _unmatched_launch(launch_sales, matched_negocio)
+        else:
+            matched_negocio = build_matched_df(cadastros, sales_df, window_days=window_days)
     else:
         matched_negocio = matched_modelo
 
@@ -440,6 +454,7 @@ def _load_matched(
 
     return {
         "matched_negocio": matched_negocio, "matched_modelo": matched_modelo,
+        "naobase_sales": naobase_sales,
         "spend_df": spend_df,
         "cap_start": cap_start, "cap_end": cap_end,
         "vendas_start": vendas_start, "vendas_end": vendas_end,
@@ -489,6 +504,76 @@ def _load_meta_gross_up(path: Optional[Path] = None) -> float:
         return 1.0
 
 
+def _load_launch_products(path: Optional[Path] = None) -> list:
+    """Produtos do LANÇAMENTO (substrings lower) — só as vendas desses produtos contam como
+    venda do LF (exclui evergreen/combos). Fonte única = configs/clients/devclub.yaml
+    (launch_products). Vazio = sem filtro (conta todas as vendas, comportamento antigo)."""
+    import yaml
+    try:
+        cfg = yaml.safe_load(open(path or _DEFAULT_CLIENT_CFG)) or {}
+        v = _find_key(cfg, "launch_products")
+        return [str(p).strip().lower() for p in v if str(p).strip()] if v else []
+    except Exception:  # noqa: BLE001 — config ausente não derruba o relatório
+        return []
+
+
+def _filter_launch_sales(sales_df, patterns, vendas_start, vendas_end):
+    """Vendas do LANÇAMENTO: produto casa algum `patterns` E sale_date na janela de carrinho
+    [vendas_start, vendas_end]. Sem patterns → devolve as vendas como estão (fallback)."""
+    if sales_df is None or sales_df.empty or not patterns:
+        return sales_df
+    prod = sales_df.get("produto", pd.Series([""] * len(sales_df), index=sales_df.index)).astype(str).str.lower()
+    df = sales_df[prod.apply(lambda s: any(p in s for p in patterns))]
+    if vendas_start and vendas_end and not df.empty:
+        sd = pd.to_datetime(df["sale_date"]).dt.date
+        df = df[(sd >= vendas_start) & (sd <= vendas_end)]
+    return df
+
+
+def _sale_sig(dt, val, org):
+    return (pd.to_datetime(dt).strftime("%Y-%m-%d %H:%M") if pd.notna(dt) else None,
+            round(float(val), 2) if pd.notna(val) else None,
+            (str(org).strip().lower() or None) if org is not None else None)
+
+
+def _unmatched_launch(launch_sales, matched_negocio):
+    """Vendas do lançamento que NÃO casaram nenhum cadastro (a 'Não-base' do cliente).
+    Deriva por assinatura (data-minuto, valor, gateway) das vendas dos cadastros convertidos."""
+    if launch_sales is None or launch_sales.empty:
+        return launch_sales
+    conv = (matched_negocio[matched_negocio["converted"].fillna(False)]
+            if matched_negocio is not None and not matched_negocio.empty else None)
+    msigs = set()
+    if conv is not None:
+        for r in conv.itertuples():
+            msigs.add(_sale_sig(getattr(r, "sale_date", None), getattr(r, "sale_value", None),
+                                getattr(r, "sale_origin", None)))
+    sig = launch_sales.apply(lambda r: _sale_sig(r["sale_date"], r["sale_value"], r.get("origem")), axis=1)
+    return launch_sales[~sig.isin(msigs)]
+
+
+def _naobase_bucket(naobase_sales, haircut: float) -> Optional[BucketPerformance]:
+    """Linha 'Não está na base': compradores/faturamento das vendas do lançamento não casadas
+    (sem lead → leads=0, sem gasto → CPL/ROAS/lucro vazios). None se não houver."""
+    if naobase_sales is None or naobase_sales.empty:
+        return None
+    forma = naobase_sales["origem"].apply(forma_pagamento)
+    sv = pd.to_numeric(naobase_sales["sale_value"], errors="coerce").fillna(0.0)
+    is_cart, is_bol = (forma == CARTAO), (forma == BOLETO)
+    valor_cartao = float(sv.where(is_cart, 0.0).sum())
+    valor_boleto = float(sv.where(is_bol, 0.0).sum()) * haircut
+    n = len(naobase_sales)
+    return BucketPerformance(
+        bucket="Naobase", display_name="Não está na base",
+        investimento=None, n_leads=0, cpl=None,
+        compradores_cartao=int(is_cart.sum()), compradores_boleto=int(is_bol.sum()),
+        n_conversions=n, conversion_rate=0.0,
+        valor_cartao=valor_cartao, valor_boleto=valor_boleto, faturamento=valor_cartao + valor_boleto,
+        roas=None, lucro=None, mean_score=float("nan"),
+        lift=pd.DataFrame(columns=_LIFT_COLS), concentration={},
+    )
+
+
 def _bucketize(df: pd.DataFrame, registry: ModelRegistry) -> dict:
     """Agrupa um matched_df por BALDE (canal×tag via _bucket_of_lead). Retorna
     {balde: subframe}. Vazio se df vazio."""
@@ -502,9 +587,11 @@ def _bucketize(df: pd.DataFrame, registry: ModelRegistry) -> dict:
 
 def _buckets_from_matched(matched_negocio: pd.DataFrame, matched_modelo: pd.DataFrame,
                           registry: ModelRegistry, *,
-                          spend_by_bucket: dict, haircut: float) -> tuple:
+                          spend_by_bucket: dict, haircut: float,
+                          naobase_sales=None) -> tuple:
     """Por BALDE: NEGÓCIO dos CADASTROS (matched_negocio) + MODELO dos RESPONDENTES
-    (matched_modelo, com decil). Balde com gasto mas sem cadastros ainda aparece."""
+    (matched_modelo, com decil). Balde com gasto mas sem cadastros ainda aparece.
+    `naobase_sales`: vendas do lançamento sem cadastro → linha 'Não está na base'."""
     neg = _bucketize(matched_negocio, registry)
     mod = _bucketize(matched_modelo, registry)
     empty = (matched_negocio.iloc[0:0].copy() if matched_negocio is not None and not matched_negocio.empty
@@ -521,6 +608,9 @@ def _buckets_from_matched(matched_negocio: pd.DataFrame, matched_modelo: pd.Data
             buckets.append(_bucket_metrics(
                 empty, bk, registry.bucket_label(bk),
                 investimento=inv, haircut=haircut, model_df=mod.get(bk)))
+    nb = _naobase_bucket(naobase_sales, haircut)
+    if nb is not None:
+        buckets.append(nb)
     buckets.sort(key=lambda b: _BUCKET_ORDER.get(b.bucket, 9))
     return tuple(buckets)
 
@@ -557,7 +647,8 @@ def compute_lf_performance(
         days_since_cap_end=m["days_since"], maturity=m["maturity"],
         ledger_covered=m["ledger_covered"], n_leads_total=len(m["matched_negocio"]),
         buckets=_buckets_from_matched(m["matched_negocio"], m["matched_modelo"], registry,
-                                      spend_by_bucket=spend_by_bucket, haircut=haircut),
+                                      spend_by_bucket=spend_by_bucket, haircut=haircut,
+                                      naobase_sales=m["naobase_sales"]),
     )
 
 
@@ -582,8 +673,18 @@ def compute_range_performance(
     sales_end = min(as_of, end + timedelta(days=window_days))
     sales_df = sales_reader(start, sales_end + timedelta(days=1))
     matched_modelo = build_matched_df(ledger_reader(start, end), sales_df, window_days=window_days)
-    matched_negocio = (build_matched_df(cadastro_reader(start, end), sales_df, window_days=window_days)
-                       if cadastro_reader is not None else matched_modelo)
+    naobase_sales = None
+    if cadastro_reader is not None:
+        launch_patterns = _load_launch_products()
+        if launch_patterns:
+            # intervalo livre: filtra produto do lançamento (sem janela de carrinho fixa)
+            launch_sales = _filter_launch_sales(sales_df, launch_patterns, None, None)
+            matched_negocio = build_matched_df(cadastro_reader(start, end), launch_sales, window_days=window_days)
+            naobase_sales = _unmatched_launch(launch_sales, matched_negocio)
+        else:
+            matched_negocio = build_matched_df(cadastro_reader(start, end), sales_df, window_days=window_days)
+    else:
+        matched_negocio = matched_modelo
     spend_df = spend_reader(start, end + timedelta(days=1)) if spend_reader is not None else None
     spend_by_bucket = _spend_by_bucket(spend_df, registry, meta_gross_up=meta_gross_up)
     days_since = (as_of - end).days
@@ -594,7 +695,8 @@ def compute_range_performance(
         maturity="mature" if days_since >= window_days else "provisional",
         ledger_covered=(end >= LEDGER_START), n_leads_total=len(matched_negocio),
         buckets=_buckets_from_matched(matched_negocio, matched_modelo, registry,
-                                      spend_by_bucket=spend_by_bucket, haircut=haircut),
+                                      spend_by_bucket=spend_by_bucket, haircut=haircut,
+                                      naobase_sales=naobase_sales),
     )
 
 
@@ -619,7 +721,7 @@ def compute_aggregate_performance(
     haircut = _load_boleto_haircut() if haircut is None else haircut
     meta_gross_up = _load_meta_gross_up()
 
-    parts_neg, parts_mod, spend_parts, used, cap_starts, cap_ends = [], [], [], [], [], []
+    parts_neg, parts_mod, parts_nb, spend_parts, used, cap_starts, cap_ends = [], [], [], [], [], [], []
     covered_all = True
     for lf in lfs:
         m = _load_matched(lf, ledger_reader=ledger_reader, sales_reader=sales_reader,
@@ -629,6 +731,8 @@ def compute_aggregate_performance(
             covered_all = False
         if m["spend_df"] is not None and not m["spend_df"].empty:
             spend_parts.append(m["spend_df"])
+        if m["naobase_sales"] is not None and not m["naobase_sales"].empty:
+            parts_nb.append(m["naobase_sales"])
         mn, mm = m["matched_negocio"], m["matched_modelo"]
         if mn.empty and mm.empty:
             continue
@@ -644,6 +748,7 @@ def compute_aggregate_performance(
 
     pooled = pd.concat(parts_neg, ignore_index=True) if parts_neg else pd.DataFrame()
     pooled_mod = pd.concat(parts_mod, ignore_index=True) if parts_mod else pd.DataFrame()
+    pooled_nb = pd.concat(parts_nb, ignore_index=True) if parts_nb else None
     pooled_spend = pd.concat(spend_parts, ignore_index=True) if spend_parts else None
     spend_by_bucket = _spend_by_bucket(pooled_spend, registry, meta_gross_up=meta_gross_up)
     cap_start = min(cap_starts) if cap_starts else None
@@ -658,7 +763,8 @@ def compute_aggregate_performance(
         days_since_cap_end=days_since, maturity="mature" if all_mature else "provisional",
         ledger_covered=covered_all, n_leads_total=len(pooled),
         buckets=_buckets_from_matched(pooled, pooled_mod, registry,
-                                      spend_by_bucket=spend_by_bucket, haircut=haircut),
+                                      spend_by_bucket=spend_by_bucket, haircut=haircut,
+                                      naobase_sales=pooled_nb),
         n_lfs=len(used),
     )
 
