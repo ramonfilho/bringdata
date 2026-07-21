@@ -268,9 +268,14 @@ def build_matched_df(leads_df: pd.DataFrame, sales_df: pd.DataFrame, *, window_d
         within = matched["converted"].fillna(False) & sd.notna() & (delta_days >= 0) & (delta_days <= window_days)
         matched["converted"] = within.astype(bool)
 
-    matched["decile"] = matched["decil"].apply(
-        lambda d: f"D{int(d)}" if pd.notna(d) else None
-    )
+    # decil só existe na base de respondentes (ledger); a base de cadastros (NEGÓCIO)
+    # não tem — o bloco MODELO não usa esse matched, então decile fica vazio.
+    if "decil" in matched.columns:
+        matched["decile"] = matched["decil"].apply(
+            lambda d: f"D{int(d)}" if pd.notna(d) else None
+        )
+    else:
+        matched["decile"] = None
     return matched
 
 
@@ -351,14 +356,18 @@ def _spend_by_bucket(spend_df: pd.DataFrame, registry: ModelRegistry) -> dict:
 
 
 def _bucket_metrics(bdf: pd.DataFrame, bucket: str, label: str,
-                    *, investimento: Optional[float], haircut: float) -> BucketPerformance:
-    """Métricas de NEGÓCIO (colunas do debriefing) + MODELO de um balde. Compradores
-    e valor por forma via forma_pagamento(gateway); boleto entra no faturamento com o
-    haircut do cliente. Investimento (se houver) → CPL/ROAS/Lucro."""
+                    *, investimento: Optional[float], haircut: float,
+                    model_df: Optional[pd.DataFrame] = None) -> BucketPerformance:
+    """Métricas de um balde. NEGÓCIO (leads/compradores/faturamento/CPL/ROAS) vem do
+    `bdf` = CADASTROS casados a vendas (todos os leads, respondentes ou não — bate com a
+    base do debriefing). MODELO (mean_score/lift/concentração por decil) vem do `model_df`
+    = RESPONDENTES casados (registros_ml, tem decil); sem ele, campos de modelo vazios.
+    Compradores/valor por forma via forma_pagamento(gateway); boleto entra no faturamento
+    com o haircut do cliente. Investimento (se houver) → CPL/ROAS/Lucro."""
     n = len(bdf)
-    conv_mask = bdf["converted"].fillna(False).astype(bool)
+    conv_mask = (bdf["converted"].fillna(False).astype(bool) if n
+                 else pd.Series([], dtype=bool))
     conv = int(conv_mask.sum())
-    scores = pd.to_numeric(bdf["lead_score"], errors="coerce")
     sv = pd.to_numeric(
         bdf.get("sale_value", pd.Series(0.0, index=bdf.index)), errors="coerce"
     ).fillna(0.0)
@@ -372,6 +381,9 @@ def _bucket_metrics(bdf: pd.DataFrame, bucket: str, label: str,
     cpl = (investimento / n) if (investimento not in (None,) and n) else None
     roas = (faturamento / investimento) if investimento else None
     lucro = (faturamento - investimento) if investimento is not None else None
+    # MODELO: respondentes com decil deste balde (base separada da de negócio).
+    mdf = model_df if model_df is not None else bdf.iloc[0:0]
+    scores = pd.to_numeric(mdf.get("lead_score", pd.Series(dtype=float)), errors="coerce")
     return BucketPerformance(
         bucket=bucket, display_name=label,
         investimento=investimento, n_leads=n, cpl=cpl,
@@ -379,18 +391,19 @@ def _bucket_metrics(bdf: pd.DataFrame, bucket: str, label: str,
         n_conversions=conv, conversion_rate=(conv / n) if n else 0.0,
         valor_cartao=valor_cartao, valor_boleto=valor_boleto, faturamento=faturamento,
         roas=roas, lucro=lucro,
-        mean_score=float(scores.mean()) if n else float("nan"),
-        lift=_lift_by_decile(bdf), concentration=_concentration(bdf),
+        mean_score=float(scores.mean()) if len(mdf) else float("nan"),
+        lift=_lift_by_decile(mdf), concentration=_concentration(mdf),
     )
 
 
 def _load_matched(
-    lf: str, *, ledger_reader, sales_reader, spend_reader=None,
+    lf: str, *, ledger_reader, sales_reader, spend_reader=None, cadastro_reader=None,
     as_of: date, window_days: int, launches: dict
 ) -> dict:
-    """Lê o ledger + vendas (+ gasto, se `spend_reader` injetado) de UM LF e devolve
-    o matched_df + spend_df + metadados de janela. Peça reusada por `compute_lf_performance`
-    e `compute_aggregate_performance` — mesma leitura, mesma régua de casamento."""
+    """Lê cadastros + ledger + vendas (+ gasto) de UM LF e devolve DOIS matched_df +
+    spend_df + metadados. Peça reusada por compute_lf/range/aggregate. NEGÓCIO casa
+    CADASTROS (todos os leads, via cadastro_reader) × vendas; MODELO casa RESPONDENTES
+    (registros_ml, com decil) × vendas. Mesma janela, mesma régua de casamento."""
     cfg = launches.get(lf)
     if not cfg:
         raise KeyError(f"LF {lf!r} não encontrado em launches.yaml")
@@ -403,11 +416,16 @@ def _load_matched(
     maturity = "mature" if days_since >= window_days else "provisional"
     ledger_covered = bool(cap_end and cap_end >= LEDGER_START)
 
-    leads_df = ledger_reader(cap_start, cap_end)
     # vendas: da captação até captura + janela (cobre o teto de qualquer lead do LF)
     sales_end = min(as_of, (cap_end + timedelta(days=window_days))) if cap_end else as_of
     sales_df = sales_reader(cap_start, sales_end + timedelta(days=1))
-    matched = build_matched_df(leads_df, sales_df, window_days=window_days)
+    # MODELO (respondentes com decil)
+    matched_modelo = build_matched_df(ledger_reader(cap_start, cap_end), sales_df, window_days=window_days)
+    # NEGÓCIO (todos os cadastros); sem cadastro_reader cai no ledger (compat)
+    if cadastro_reader is not None:
+        matched_negocio = build_matched_df(cadastro_reader(cap_start, cap_end), sales_df, window_days=window_days)
+    else:
+        matched_negocio = matched_modelo
 
     # gasto de anúncio na janela de CAPTAÇÃO (é o que adquire os leads → CPL/ROAS).
     spend_df = None
@@ -415,7 +433,8 @@ def _load_matched(
         spend_df = spend_reader(cap_start, cap_end + timedelta(days=1))
 
     return {
-        "matched": matched, "spend_df": spend_df,
+        "matched_negocio": matched_negocio, "matched_modelo": matched_modelo,
+        "spend_df": spend_df,
         "cap_start": cap_start, "cap_end": cap_end,
         "vendas_start": vendas_start, "vendas_end": vendas_end,
         "days_since": days_since, "maturity": maturity, "ledger_covered": ledger_covered,
@@ -451,29 +470,38 @@ def _load_boleto_haircut(path: Optional[Path] = None) -> float:
         return 0.5
 
 
-def _buckets_from_matched(matched: pd.DataFrame, registry: ModelRegistry, *,
+def _bucketize(df: pd.DataFrame, registry: ModelRegistry) -> dict:
+    """Agrupa um matched_df por BALDE (canal×tag via _bucket_of_lead). Retorna
+    {balde: subframe}. Vazio se df vazio."""
+    if df is None or df.empty:
+        return {}
+    bcol = df.apply(
+        lambda r: _bucket_of_lead(r.get("utm_source"), r.get("utm_campaign"), registry.bucket_map),
+        axis=1)
+    return {str(bk): grp for bk, grp in df.assign(_bucket=bcol).groupby("_bucket", dropna=False)}
+
+
+def _buckets_from_matched(matched_negocio: pd.DataFrame, matched_modelo: pd.DataFrame,
+                          registry: ModelRegistry, *,
                           spend_by_bucket: dict, haircut: float) -> tuple:
-    """Agrupa o matched_df por BALDE (bucket_from_utm sobre utm_campaign) e computa
-    negócio+modelo por balde. Lead primeiro, depois Champion, depois Challenger.
-    Balde com gasto mas sem leads (ex.: Champion desligado) ainda aparece."""
+    """Por BALDE: NEGÓCIO dos CADASTROS (matched_negocio) + MODELO dos RESPONDENTES
+    (matched_modelo, com decil). Balde com gasto mas sem cadastros ainda aparece."""
+    neg = _bucketize(matched_negocio, registry)
+    mod = _bucketize(matched_modelo, registry)
+    empty = (matched_negocio.iloc[0:0].copy() if matched_negocio is not None and not matched_negocio.empty
+             else pd.DataFrame())
     buckets: list[BucketPerformance] = []
-    seen = set()
-    if not matched.empty:
-        bcol = matched.apply(
-            lambda r: _bucket_of_lead(r.get("utm_source"), r.get("utm_campaign"), registry.bucket_map),
-            axis=1)
-        for bucket, grp in matched.assign(_bucket=bcol).groupby("_bucket", dropna=False):
-            bk = str(bucket)
-            seen.add(bk)
-            buckets.append(_bucket_metrics(
-                grp.copy(), bk, registry.bucket_label(bk),
-                investimento=(spend_by_bucket or {}).get(bk), haircut=haircut))
-    # baldes com gasto mas sem leads no ledger (não some do relatório)
+    for bk, grp in neg.items():
+        buckets.append(_bucket_metrics(
+            grp.copy(), bk, registry.bucket_label(bk),
+            investimento=(spend_by_bucket or {}).get(bk), haircut=haircut,
+            model_df=mod.get(bk)))
+    # baldes com gasto mas sem cadastros no LF (Champion desligado etc.) não somem
     for bk, inv in (spend_by_bucket or {}).items():
-        if bk not in seen and inv:
+        if bk not in neg and inv:
             buckets.append(_bucket_metrics(
-                matched.iloc[0:0].copy(), bk, registry.bucket_label(bk),
-                investimento=inv, haircut=haircut))
+                empty, bk, registry.bucket_label(bk),
+                investimento=inv, haircut=haircut, model_df=mod.get(bk)))
     buckets.sort(key=lambda b: _BUCKET_ORDER.get(b.bucket, 9))
     return tuple(buckets)
 
@@ -484,6 +512,7 @@ def compute_lf_performance(
     ledger_reader: Callable[[date, date], pd.DataFrame],
     sales_reader: Callable[[date, date], pd.DataFrame],
     spend_reader: Optional[Callable[[date, date], pd.DataFrame]] = None,
+    cadastro_reader: Optional[Callable[[date, date], pd.DataFrame]] = None,
     registry: ModelRegistry,
     as_of_date: Optional[date] = None,
     window_days: int = 60,
@@ -491,13 +520,14 @@ def compute_lf_performance(
     haircut: Optional[float] = None,
 ) -> LFModelPerformance:
     """Computa negócio+modelo por BALDE no `lf`. Leitores injetados (DI). `spend_reader`
-    opcional: sem ele, as colunas de gasto (investimento/CPL/ROAS/lucro) vêm vazias."""
+    opcional: sem ele, as colunas de gasto (investimento/CPL/ROAS/lucro) vêm vazias.
+    `cadastro_reader` opcional: com ele, o NEGÓCIO casa contra todos os cadastros."""
     launches = launches if launches is not None else load_launches()
     as_of = as_of_date or datetime.utcnow().date()
     haircut = _load_boleto_haircut() if haircut is None else haircut
     m = _load_matched(lf, ledger_reader=ledger_reader, sales_reader=sales_reader,
-                      spend_reader=spend_reader, as_of=as_of, window_days=window_days,
-                      launches=launches)
+                      spend_reader=spend_reader, cadastro_reader=cadastro_reader,
+                      as_of=as_of, window_days=window_days, launches=launches)
     spend_by_bucket = _spend_by_bucket(m["spend_df"], registry)
 
     return LFModelPerformance(
@@ -505,8 +535,8 @@ def compute_lf_performance(
         vendas_start=m["vendas_start"], vendas_end=m["vendas_end"],
         as_of_date=as_of, window_days=window_days,
         days_since_cap_end=m["days_since"], maturity=m["maturity"],
-        ledger_covered=m["ledger_covered"], n_leads_total=len(m["matched"]),
-        buckets=_buckets_from_matched(m["matched"], registry,
+        ledger_covered=m["ledger_covered"], n_leads_total=len(m["matched_negocio"]),
+        buckets=_buckets_from_matched(m["matched_negocio"], m["matched_modelo"], registry,
                                       spend_by_bucket=spend_by_bucket, haircut=haircut),
     )
 
@@ -517,6 +547,7 @@ def compute_range_performance(
     ledger_reader: Callable[[date, date], pd.DataFrame],
     sales_reader: Callable[[date, date], pd.DataFrame],
     spend_reader: Optional[Callable[[date, date], pd.DataFrame]] = None,
+    cadastro_reader: Optional[Callable[[date, date], pd.DataFrame]] = None,
     registry: ModelRegistry,
     as_of_date: Optional[date] = None,
     window_days: int = 60,
@@ -527,10 +558,11 @@ def compute_range_performance(
     `end` mais recuado = mais dias observados por lead."""
     as_of = as_of_date or datetime.utcnow().date()
     haircut = _load_boleto_haircut() if haircut is None else haircut
-    leads_df = ledger_reader(start, end)
     sales_end = min(as_of, end + timedelta(days=window_days))
     sales_df = sales_reader(start, sales_end + timedelta(days=1))
-    matched = build_matched_df(leads_df, sales_df, window_days=window_days)
+    matched_modelo = build_matched_df(ledger_reader(start, end), sales_df, window_days=window_days)
+    matched_negocio = (build_matched_df(cadastro_reader(start, end), sales_df, window_days=window_days)
+                       if cadastro_reader is not None else matched_modelo)
     spend_df = spend_reader(start, end + timedelta(days=1)) if spend_reader is not None else None
     spend_by_bucket = _spend_by_bucket(spend_df, registry)
     days_since = (as_of - end).days
@@ -539,8 +571,8 @@ def compute_range_performance(
         lf=label, cap_start=start, cap_end=end, vendas_start=None, vendas_end=None,
         as_of_date=as_of, window_days=window_days, days_since_cap_end=days_since,
         maturity="mature" if days_since >= window_days else "provisional",
-        ledger_covered=(end >= LEDGER_START), n_leads_total=len(matched),
-        buckets=_buckets_from_matched(matched, registry,
+        ledger_covered=(end >= LEDGER_START), n_leads_total=len(matched_negocio),
+        buckets=_buckets_from_matched(matched_negocio, matched_modelo, registry,
                                       spend_by_bucket=spend_by_bucket, haircut=haircut),
     )
 
@@ -551,6 +583,7 @@ def compute_aggregate_performance(
     ledger_reader: Callable[[date, date], pd.DataFrame],
     sales_reader: Callable[[date, date], pd.DataFrame],
     spend_reader: Optional[Callable[[date, date], pd.DataFrame]] = None,
+    cadastro_reader: Optional[Callable[[date, date], pd.DataFrame]] = None,
     registry: ModelRegistry,
     as_of_date: Optional[date] = None,
     window_days: int = 60,
@@ -564,29 +597,31 @@ def compute_aggregate_performance(
     as_of = as_of_date or datetime.utcnow().date()
     haircut = _load_boleto_haircut() if haircut is None else haircut
 
-    parts, spend_parts, used, cap_starts, cap_ends = [], [], [], [], []
+    parts_neg, parts_mod, spend_parts, used, cap_starts, cap_ends = [], [], [], [], [], []
     covered_all = True
     for lf in lfs:
         m = _load_matched(lf, ledger_reader=ledger_reader, sales_reader=sales_reader,
-                          spend_reader=spend_reader, as_of=as_of, window_days=window_days,
-                          launches=launches)
+                          spend_reader=spend_reader, cadastro_reader=cadastro_reader,
+                          as_of=as_of, window_days=window_days, launches=launches)
         if not m["ledger_covered"]:
             covered_all = False
         if m["spend_df"] is not None and not m["spend_df"].empty:
             spend_parts.append(m["spend_df"])
-        mt = m["matched"]
-        if mt.empty:
+        mn, mm = m["matched_negocio"], m["matched_modelo"]
+        if mn.empty and mm.empty:
             continue
-        mt = mt.copy()
-        mt["_lf"] = lf
-        parts.append(mt)
+        if not mn.empty:
+            parts_neg.append(mn.assign(_lf=lf))
+        if not mm.empty:
+            parts_mod.append(mm.assign(_lf=lf))
         used.append(lf)
         if m["cap_start"]:
             cap_starts.append(m["cap_start"])
         if m["cap_end"]:
             cap_ends.append(m["cap_end"])
 
-    pooled = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+    pooled = pd.concat(parts_neg, ignore_index=True) if parts_neg else pd.DataFrame()
+    pooled_mod = pd.concat(parts_mod, ignore_index=True) if parts_mod else pd.DataFrame()
     pooled_spend = pd.concat(spend_parts, ignore_index=True) if spend_parts else None
     spend_by_bucket = _spend_by_bucket(pooled_spend, registry)
     cap_start = min(cap_starts) if cap_starts else None
@@ -600,8 +635,9 @@ def compute_aggregate_performance(
         vendas_start=None, vendas_end=None, as_of_date=as_of, window_days=window_days,
         days_since_cap_end=days_since, maturity="mature" if all_mature else "provisional",
         ledger_covered=covered_all, n_leads_total=len(pooled),
-        buckets=_buckets_from_matched(pooled, registry, spend_by_bucket=spend_by_bucket,
-                                      haircut=haircut), n_lfs=len(used),
+        buckets=_buckets_from_matched(pooled, pooled_mod, registry,
+                                      spend_by_bucket=spend_by_bucket, haircut=haircut),
+        n_lfs=len(used),
     )
 
 
@@ -692,12 +728,17 @@ def _open_real_readers():
     from src.data.ledger_connection import open_ledger_read_connection
     from src.data.analytics_connection import open_analytics_connection
     from src.data.ad_spend_reader import read_ad_spend
+    from src.data.cadastro_records import open_railway_connection, read_cadastros
 
     lc = open_ledger_read_connection()
     ac = open_analytics_connection()
+    rc = open_railway_connection()  # base do front (Client/UTMTracking) = cadastros do NEGÓCIO
 
     def ledger_reader(cs, ce):
         return read_ledger_leads(lc, cs, ce)
+
+    def cadastro_reader(cs, ce):
+        return read_cadastros(rc, cs, ce)
 
     def sales_reader(s, e):
         return read_analytics_sales(ac, s, e)
@@ -711,8 +752,9 @@ def _open_real_readers():
     def closer():
         lc.close()
         ac.close()
+        rc.close()
 
-    return ledger_reader, sales_reader, spend_reader, coverage_reader, closer
+    return ledger_reader, sales_reader, spend_reader, cadastro_reader, coverage_reader, closer
 
 
 def _print_result(res: LFModelPerformance, sales_max: Optional[date] = None) -> None:
@@ -724,7 +766,7 @@ def _print_result(res: LFModelPerformance, sales_max: Optional[date] = None) -> 
     gap = _obs_gap_days(res, sales_max)
     stale = f"  ⚠ VENDAS INCOMPLETAS (banco só até {sales_max:%d/%m}, faltam {gap}d de observação)" if gap else ""
     print(f"\n{'='*72}\n{res.lf}  cap {res.cap_start}→{res.cap_end}  | {flag}{cov}{stale}")
-    print(f"  leads no ledger: {res.n_leads_total}  | as_of={res.as_of_date}")
+    print(f"  cadastros (base do negócio): {res.n_leads_total}  | as_of={res.as_of_date}")
     if not res.buckets:
         print("  (sem baldes com dados)")
         return
@@ -878,7 +920,8 @@ def format_slack(results: list, as_of: date, window_days: int, coverage: Optiona
     sales_max = coverage.get("overall") if coverage else None
     head = (f"*Performance por LF — negócio + modelo*\n"
             f"_as_of {as_of:%d/%m/%Y} · janela {window_days}d · baldes por canal×tag (Anterior jan_30 / Champion abr_28 / Lead Padrão Meta / Google / Orgânico)_\n"
-            f"_boleto conta a 50% no faturamento (convenção do cliente) · ROAS = faturamento÷investimento · gasto de ad_spend (Meta; Google pendente de token)_"
+            f"_NEGÓCIO casa TODOS os cadastros (base do cliente) · MODELO usa só respondentes (registros_ml, tem decil)_\n"
+            f"_boleto conta a 50% no faturamento (convenção do cliente) · ROAS = faturamento÷investimento · gasto de ad_spend (Meta+Google)_"
             f"{_coverage_note(coverage)}")
     return head + "\n\n" + "\n\n".join(_fmt_lf_block(r, sales_max) for r in results)
 
@@ -965,7 +1008,7 @@ def main():
         lfs = [x.strip() for x in args.lf.split(",") if x.strip()]
 
     registry = ModelRegistry()
-    ledger_reader, sales_reader, spend_reader, coverage_reader, closer = _open_real_readers()
+    ledger_reader, sales_reader, spend_reader, cadastro_reader, coverage_reader, closer = _open_real_readers()
     coverage = coverage_reader()
     sales_max = coverage.get("overall")
     results = []
@@ -974,7 +1017,8 @@ def main():
             for lf in lfs:
                 res = compute_lf_performance(
                     lf, ledger_reader=ledger_reader, sales_reader=sales_reader,
-                    spend_reader=spend_reader, registry=registry, as_of_date=as_of,
+                    spend_reader=spend_reader, cadastro_reader=cadastro_reader,
+                    registry=registry, as_of_date=as_of,
                     window_days=args.window_days, launches=launches,
                 )
                 results.append(res)
@@ -984,7 +1028,8 @@ def main():
         if lfs and (args.aggregate or args.aggregate_only) and len(lfs) > 1:
             agg = compute_aggregate_performance(
                 lfs, ledger_reader=ledger_reader, sales_reader=sales_reader,
-                spend_reader=spend_reader, registry=registry, as_of_date=as_of,
+                spend_reader=spend_reader, cadastro_reader=cadastro_reader,
+                registry=registry, as_of_date=as_of,
                 window_days=args.window_days, launches=launches,
             )
             results.append(agg)
@@ -995,7 +1040,8 @@ def main():
             rng = compute_range_performance(
                 _coerce_date(args.start_date), _coerce_date(args.end_date),
                 ledger_reader=ledger_reader, sales_reader=sales_reader,
-                spend_reader=spend_reader, registry=registry, as_of_date=as_of,
+                spend_reader=spend_reader, cadastro_reader=cadastro_reader,
+                registry=registry, as_of_date=as_of,
                 window_days=args.window_days,
             )
             results.append(rng)
