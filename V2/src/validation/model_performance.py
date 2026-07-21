@@ -916,40 +916,77 @@ def _coverage_note(coverage: Optional[dict]) -> str:
     return f"\n_vendas no banco até {overall:%d/%m}{tmb_s}_"
 
 
-def format_slack(results: list, as_of: date, window_days: int, coverage: Optional[dict] = None) -> str:
-    sales_max = coverage.get("overall") if coverage else None
-    head = (f"*Performance por LF — negócio + modelo*\n"
+# Acima de ~4k chars o Slack PARA de renderizar os blocos ``` de uma mensagem única
+# (mostra o ``` cru e a tabela desalinhada, como aconteceu com LF59+). Quebramos em
+# mensagens ≤ este limite, SEMPRE no fim de um LF (nunca no meio de um bloco de código).
+_SLACK_MAX_CHARS = 2600
+
+
+def _slack_head(as_of: date, window_days: int, coverage: Optional[dict] = None) -> str:
+    return (f"*Performance por LF — negócio + modelo*\n"
             f"_as_of {as_of:%d/%m/%Y} · janela {window_days}d · baldes por canal×tag (Anterior jan_30 / Champion abr_28 / Lead Padrão Meta / Google / Orgânico)_\n"
             f"_NEGÓCIO casa TODOS os cadastros (base do cliente) · MODELO usa só respondentes (registros_ml, tem decil)_\n"
             f"_boleto conta a 50% no faturamento (convenção do cliente) · ROAS = faturamento÷investimento · gasto de ad_spend (Meta+Google)_"
             f"{_coverage_note(coverage)}")
+
+
+def format_slack(results: list, as_of: date, window_days: int, coverage: Optional[dict] = None) -> str:
+    """Relatório inteiro num texto só (usado no preview do --slack-dry-run)."""
+    sales_max = coverage.get("overall") if coverage else None
+    head = _slack_head(as_of, window_days, coverage)
     return head + "\n\n" + "\n\n".join(_fmt_lf_block(r, sales_max) for r in results)
 
 
-def post_slack_dm(text: str, *, dry_run: bool = False) -> str:
-    """Posta no DM do usuário (SLACK_USER_DM via chat.postMessage). Sem creds ou
-    dry_run → só imprime o preview. Mesmo endpoint do critical_alerts (sem a
-    máquina de cooldown, que é de alerta)."""
+def format_slack_chunks(results: list, as_of: date, window_days: int,
+                        coverage: Optional[dict] = None) -> list:
+    """Quebra o relatório em N mensagens do Slack ≤ _SLACK_MAX_CHARS, empacotando LFs
+    INTEIROS (nunca corta um bloco ``` no meio → o Slack sempre renderiza monoespaçado).
+    O cabeçalho vai junto do 1º LF; cada mensagem seguinte começa num LF novo."""
+    sales_max = coverage.get("overall") if coverage else None
+    head = _slack_head(as_of, window_days, coverage)
+    blocks = [_fmt_lf_block(r, sales_max) for r in results]
+    chunks, cur = [], head
+    for b in blocks:
+        cand = f"{cur}\n\n{b}" if cur else b
+        if cur and len(cand) > _SLACK_MAX_CHARS:
+            chunks.append(cur)
+            cur = b
+        else:
+            cur = cand
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
+def post_slack_dm(text, *, dry_run: bool = False) -> str:
+    """Posta no DM do usuário (SLACK_USER_DM via chat.postMessage). `text` pode ser uma
+    string OU uma lista de mensagens (chunks) — cada uma vira UM chat.postMessage, na
+    ordem. Sem creds ou dry_run → só imprime o preview. Mesmo endpoint do critical_alerts."""
     import json as _json
     import os as _os
     import urllib.request
 
+    chunks = text if isinstance(text, list) else [text]
     chan, token = _os.environ.get("SLACK_USER_DM"), _os.environ.get("SLACK_BOT_TOKEN")
     if dry_run or not (chan and token):
         if not (chan and token):
             logger.warning("[model_performance] SLACK_USER_DM/SLACK_BOT_TOKEN ausente — preview")
-        print("\n----- DM Slack (preview) -----\n" + text + "\n------------------------------")
+        print("\n----- DM Slack (preview) -----")
+        for i, c in enumerate(chunks, 1):
+            print(f"\n[mensagem {i}/{len(chunks)}]\n{c}")
+        print("------------------------------")
         return "dry_run"
-    body = _json.dumps({"channel": chan, "text": text}).encode("utf-8")
-    req = urllib.request.Request(
-        "https://slack.com/api/chat.postMessage", data=body,
-        headers={"Content-Type": "application/json; charset=utf-8", "Authorization": f"Bearer {token}"},
-    )
-    with urllib.request.urlopen(req, timeout=10) as r:
-        resp = _json.load(r)
-    if not resp.get("ok"):
-        logger.error("[model_performance] Slack rejeitou: %s", resp)
-        return "error"
+    for c in chunks:
+        body = _json.dumps({"channel": chan, "text": c}).encode("utf-8")
+        req = urllib.request.Request(
+            "https://slack.com/api/chat.postMessage", data=body,
+            headers={"Content-Type": "application/json; charset=utf-8", "Authorization": f"Bearer {token}"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as r:
+            resp = _json.load(r)
+        if not resp.get("ok"):
+            logger.error("[model_performance] Slack rejeitou: %s", resp)
+            return "error"
     return "sent"
 
 
@@ -1052,8 +1089,8 @@ def main():
         closer()
 
     if (args.slack or args.slack_dry_run) and results:
-        text = format_slack(results, results[0].as_of_date, args.window_days, coverage)
-        print(f"\n[slack] {post_slack_dm(text, dry_run=args.slack_dry_run)}")
+        chunks = format_slack_chunks(results, results[0].as_of_date, args.window_days, coverage)
+        print(f"\n[slack] {post_slack_dm(chunks, dry_run=args.slack_dry_run)} ({len(chunks)} msg)")
 
 
 if __name__ == "__main__":
