@@ -85,14 +85,26 @@ def load_meta_spend(start: str, end: str, account_id=None) -> pd.DataFrame:
     return out
 
 
-def load_google_spend(start: date, end: date, customer_id=None) -> pd.DataFrame:
+def _config_customer_id(client_id: str = "devclub"):
+    """customer_id do Google Ads do config do cliente — MESMA fonte do funil Google
+    do digest (`ClientConfig.google_ads.customer_id`). Deixa o job não depender de
+    GOOGLE_ADS_CUSTOMER_ID no ambiente (o serviço nem tem essa env)."""
+    try:
+        from src.core.client_config import ClientConfig
+        cfg = ClientConfig.from_yaml(_V2_ROOT / "configs" / "clients" / f"{client_id}.yaml")
+        return (cfg.google_ads.customer_id or "").replace("-", "") or None
+    except Exception:  # noqa: BLE001 — config ausente não derruba o ETL
+        return None
+
+
+def load_google_spend(start: date, end: date, customer_id=None, client_id="devclub") -> pd.DataFrame:
     """Gasto Google por campanha×dia (a API agrega na janela → loop dia-a-dia).
     statuses=None p/ pegar campanhas hoje pausadas que gastaram no passado."""
     from src.validation.google_ads_api_client import GoogleAdsReportingClient
 
-    cid = customer_id or os.environ.get("GOOGLE_ADS_CUSTOMER_ID")
+    cid = customer_id or os.environ.get("GOOGLE_ADS_CUSTOMER_ID") or _config_customer_id(client_id)
     if not cid:
-        logger.warning("[google] GOOGLE_ADS_CUSTOMER_ID ausente — pulando Google")
+        logger.warning("[google] customer_id ausente (env e config) — pulando Google")
         return pd.DataFrame()
     client = GoogleAdsReportingClient(customer_id=cid)
     rows = []
@@ -127,7 +139,7 @@ def run_ad_spend_etl(start: str, end: str, *, platforms=("meta", "google"),
 
     if "google" in platforms:
         try:
-            df = load_google_spend(s, e, customer_id=customer_id)
+            df = load_google_spend(s, e, customer_id=customer_id, client_id=client_id)
             loaded["google"] = 0 if df is None else len(df)
             if df is not None and not df.empty:
                 frames.append(df)

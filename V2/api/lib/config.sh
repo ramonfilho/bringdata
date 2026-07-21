@@ -216,13 +216,27 @@ build_env_vars() {
     ENV_VARS="$ENV_VARS,UTM_QUALITY_TRAFEGO_CHANNEL=${UTM_QUALITY_TRAFEGO_CHANNEL:-C09VD6J8A72}"
     ENV_VARS="$ENV_VARS,SLACK_VALIDATION_DM_CHANNEL=${SLACK_VALIDATION_DM_CHANNEL:-D0A9USV3XEX}"
 
-    # Preserva META_ACCESS_TOKEN existente
-    local CURRENT_META_TOKEN=$(gcloud run services describe "$SERVICE_NAME" \
-        --region="$REGION" \
-        --format="value(spec.template.spec.containers[0].env.find(name=META_ACCESS_TOKEN).value)" 2>/dev/null || echo "")
-
-    if [ -n "$CURRENT_META_TOKEN" ]; then
-        ENV_VARS="$ENV_VARS,META_ACCESS_TOKEN=$CURRENT_META_TOKEN"
+    # Propaga credenciais de API do serviço 24/7 (fonte de verdade) pros jobs:
+    # META_ACCESS_TOKEN (Meta Insights, gasto Meta) + GOOGLE_ADS_* OAuth (reporting de
+    # gasto do etl_ad_spend, MESMO caminho do funil Google do digest). O
+    # `.find(name=...).value` do gcloud retorna VAZIO nessa estrutura aninhada — bug
+    # histórico que deixava os jobs SEM o token (o gasto Meta/Google falhava por
+    # permissão). Por isso extraímos via JSON+python. O customer_id NÃO vem daqui: o
+    # etl_ad_spend lê de ClientConfig.google_ads.customer_id (fonte única do config).
+    local CREDS
+    CREDS=$(gcloud run services describe "$SERVICE_NAME" --region="$REGION" --format=json 2>/dev/null | python3 -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    env = {x['name']: x.get('value', '') for x in d['spec']['template']['spec']['containers'][0].get('env', [])}
+except Exception:
+    env = {}
+keys = ['META_ACCESS_TOKEN', 'GOOGLE_ADS_DEVELOPER_TOKEN', 'GOOGLE_ADS_CLIENT_ID',
+        'GOOGLE_ADS_CLIENT_SECRET', 'GOOGLE_ADS_REFRESH_TOKEN', 'GOOGLE_ADS_LOGIN_CUSTOMER_ID']
+print(','.join(f'{k}={env[k]}' for k in keys if env.get(k)))
+" 2>/dev/null || echo "")
+    if [ -n "$CREDS" ]; then
+        ENV_VARS="$ENV_VARS,$CREDS"
     fi
 
     echo "$ENV_VARS"
