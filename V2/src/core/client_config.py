@@ -463,6 +463,11 @@ class BusinessConfig:
     # (risco de calote). Aplicado no RENDER do relatório de negócio (guarda-se valor
     # cheio no banco). Régua mais precisa no futuro = analytics.sales_tmb_risk.
     boleto_haircut: float = 0.5                             # fração do valor de boleto que conta no faturamento/ROAS
+    # Gross-up de imposto do gasto META no relatório: a API da Meta traz o `spend` SEM
+    # imposto (custo de mídia); o cliente lança a FATURA, com imposto (~13% no DevClub).
+    # Multiplica só o gasto Meta no render (Google NÃO — a fatura dele já bate). Default
+    # 1.0 = sem gross-up (outros clientes intactos). Empírico: cliente/nosso = 1,1298 uniforme.
+    meta_spend_gross_up: float = 1.0
     # Conjuntos gateway→forma (fonte única em core/payment_method.py; ver CARTAO/BOLETO_GATEWAYS)
     cartao_gateways: frozenset = frozenset({"guru", "hotmart"})
     boleto_gateways: frozenset = frozenset({"asaas", "boletex", "tmb", "hotpay"})

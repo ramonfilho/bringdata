@@ -340,19 +340,25 @@ def _bucket_of_lead(utm_source, utm_campaign, bucket_map) -> str:
     return bucket_from_utm(utm_campaign, bucket_map)  # meta: Champion/Challenger/Lead
 
 
-def _spend_by_bucket(spend_df: pd.DataFrame, registry: ModelRegistry) -> dict:
+def _spend_by_bucket(spend_df: pd.DataFrame, registry: ModelRegistry,
+                     *, meta_gross_up: float = 1.0) -> dict:
     """Gasto (ad_spend) somado por balde na MESMA régua de canal dos leads: platform
     'google'→'Google'; Meta → split por tag do campaign_name (bucket_from_utm). Orgânico
     não tem gasto de anúncio (nenhuma linha). Assim cada balde casa gasto×receita do
-    mesmo canal — o que corrige o ROAS que antes misturava Meta+Google no 'Lead'."""
+    mesmo canal — o que corrige o ROAS que antes misturava Meta+Google no 'Lead'.
+
+    `meta_gross_up`: multiplica SÓ o gasto Meta (a API traz sem imposto; o cliente lança a
+    fatura com ~13%). Google fica intacto (a fatura dele já bate)."""
     if spend_df is None or spend_df.empty:
         return {}
-    def _b(row):
-        if str(row["platform"]).strip().lower() == "google":
-            return "Google"
-        return bucket_from_utm(row["campaign_name"], registry.bucket_map)  # meta
-    b = spend_df.apply(_b, axis=1)
-    return spend_df.assign(_b=b).groupby("_b")["spend"].sum().to_dict()
+    plat = spend_df["platform"].astype(str).str.strip().str.lower()
+    b = spend_df.assign(_p=plat).apply(
+        lambda r: "Google" if r["_p"] == "google"
+        else bucket_from_utm(r["campaign_name"], registry.bucket_map), axis=1)
+    # gross-up do imposto só nas linhas Meta
+    spend_adj = pd.to_numeric(spend_df["spend"], errors="coerce").fillna(0.0) * plat.map(
+        lambda p: meta_gross_up if p == "meta" else 1.0)
+    return spend_adj.groupby(b).sum().to_dict()
 
 
 def _bucket_metrics(bdf: pd.DataFrame, bucket: str, label: str,
@@ -470,6 +476,19 @@ def _load_boleto_haircut(path: Optional[Path] = None) -> float:
         return 0.5
 
 
+def _load_meta_gross_up(path: Optional[Path] = None) -> float:
+    """Gross-up de imposto do gasto Meta (a API traz sem imposto; o cliente lança a fatura
+    com ~13%). Fonte única = configs/clients/devclub.yaml (meta_spend_gross_up). Default 1.0
+    (sem gross-up) — só multiplica o gasto Meta no render, Google intacto."""
+    import yaml
+    try:
+        cfg = yaml.safe_load(open(path or _DEFAULT_CLIENT_CFG)) or {}
+        v = _find_key(cfg, "meta_spend_gross_up")
+        return float(v) if v is not None else 1.0
+    except Exception:  # noqa: BLE001 — config ausente não derruba o relatório
+        return 1.0
+
+
 def _bucketize(df: pd.DataFrame, registry: ModelRegistry) -> dict:
     """Agrupa um matched_df por BALDE (canal×tag via _bucket_of_lead). Retorna
     {balde: subframe}. Vazio se df vazio."""
@@ -525,10 +544,11 @@ def compute_lf_performance(
     launches = launches if launches is not None else load_launches()
     as_of = as_of_date or datetime.utcnow().date()
     haircut = _load_boleto_haircut() if haircut is None else haircut
+    meta_gross_up = _load_meta_gross_up()
     m = _load_matched(lf, ledger_reader=ledger_reader, sales_reader=sales_reader,
                       spend_reader=spend_reader, cadastro_reader=cadastro_reader,
                       as_of=as_of, window_days=window_days, launches=launches)
-    spend_by_bucket = _spend_by_bucket(m["spend_df"], registry)
+    spend_by_bucket = _spend_by_bucket(m["spend_df"], registry, meta_gross_up=meta_gross_up)
 
     return LFModelPerformance(
         lf=lf, cap_start=m["cap_start"], cap_end=m["cap_end"],
@@ -558,13 +578,14 @@ def compute_range_performance(
     `end` mais recuado = mais dias observados por lead."""
     as_of = as_of_date or datetime.utcnow().date()
     haircut = _load_boleto_haircut() if haircut is None else haircut
+    meta_gross_up = _load_meta_gross_up()
     sales_end = min(as_of, end + timedelta(days=window_days))
     sales_df = sales_reader(start, sales_end + timedelta(days=1))
     matched_modelo = build_matched_df(ledger_reader(start, end), sales_df, window_days=window_days)
     matched_negocio = (build_matched_df(cadastro_reader(start, end), sales_df, window_days=window_days)
                        if cadastro_reader is not None else matched_modelo)
     spend_df = spend_reader(start, end + timedelta(days=1)) if spend_reader is not None else None
-    spend_by_bucket = _spend_by_bucket(spend_df, registry)
+    spend_by_bucket = _spend_by_bucket(spend_df, registry, meta_gross_up=meta_gross_up)
     days_since = (as_of - end).days
     label = f"AGREGADO captações {start:%d/%m}–{end:%d/%m}"
     return LFModelPerformance(
@@ -596,6 +617,7 @@ def compute_aggregate_performance(
     launches = launches if launches is not None else load_launches()
     as_of = as_of_date or datetime.utcnow().date()
     haircut = _load_boleto_haircut() if haircut is None else haircut
+    meta_gross_up = _load_meta_gross_up()
 
     parts_neg, parts_mod, spend_parts, used, cap_starts, cap_ends = [], [], [], [], [], []
     covered_all = True
@@ -623,7 +645,7 @@ def compute_aggregate_performance(
     pooled = pd.concat(parts_neg, ignore_index=True) if parts_neg else pd.DataFrame()
     pooled_mod = pd.concat(parts_mod, ignore_index=True) if parts_mod else pd.DataFrame()
     pooled_spend = pd.concat(spend_parts, ignore_index=True) if spend_parts else None
-    spend_by_bucket = _spend_by_bucket(pooled_spend, registry)
+    spend_by_bucket = _spend_by_bucket(pooled_spend, registry, meta_gross_up=meta_gross_up)
     cap_start = min(cap_starts) if cap_starts else None
     cap_end = max(cap_ends) if cap_ends else None
     days_since = (as_of - cap_end).days if cap_end else -1
@@ -926,7 +948,7 @@ def _slack_head(as_of: date, window_days: int, coverage: Optional[dict] = None) 
     return (f"*Performance por LF — negócio + modelo*\n"
             f"_as_of {as_of:%d/%m/%Y} · janela {window_days}d · baldes por canal×tag (Anterior jan_30 / Champion abr_28 / Lead Padrão Meta / Google / Orgânico)_\n"
             f"_NEGÓCIO casa TODOS os cadastros (base do cliente) · MODELO usa só respondentes (registros_ml, tem decil)_\n"
-            f"_boleto conta a 50% no faturamento (convenção do cliente) · ROAS = faturamento÷investimento · gasto de ad_spend (Meta+Google)_"
+            f"_boleto conta a 50% no faturamento (convenção do cliente) · ROAS = faturamento÷investimento · gasto Meta com imposto ×1,13 (Google sem)_"
             f"{_coverage_note(coverage)}")
 
 
