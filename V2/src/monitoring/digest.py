@@ -1674,10 +1674,26 @@ def _slack_unified_funnel(v: dict, B: list):
     def _rs(x):
         return (f"R$ {x:.2f}".replace('.', ',')) if x is not None else "R$ —"
 
-    def _variante_rows(pv, pv_lf):
+    # CPL qualificado = gasto ÷ leads D9-D10. Reusa a contagem CRUA de decis já no
+    # payload (mesma janela "ontem" do funil): by_optgoal p/ as variantes Meta,
+    # by_source.google p/ o Google (hoje todo 'Lead', não entra em by_optgoal).
+    # Gasto por variante não é campo próprio: cpl = gasto÷leads → CPL_qual =
+    # cpl × leads/d9d10 (herda a janela do cpl, evita o spend de 7d do Google).
+    _decis = (v.get('lead_quality') or {}).get('decil_distribution_previous_day') or {}
+    def _d9d10(info):
+        d = (info or {}).get('distribution') or {}
+        return (d.get('D09') or 0) + (d.get('D10') or 0)
+    _og = _decis.get('by_optgoal') or {}
+    _bs = _decis.get('by_source') or {}
+    _meta_q = {'Lead': _d9d10(_og.get('lead')), 'Champion': _d9d10(_og.get('champion')),
+               'Challenger': _d9d10(_og.get('challenger'))}
+    _ggl_q = {'Lead': _d9d10(_bs.get('google'))}
+
+    def _variante_rows(pv, pv_lf, q_by_bucket=None):
         """Linhas por variante. Um balde só aparece se tiver DADO real: leads
         ontem, OU um CPL de lançamento real (>0). Some o balde fantasma — ex.:
-        campanha antiga desligada, 0 lead ontem e sem spend no LF (R$ — / 0,00)."""
+        campanha antiga desligada, 0 lead ontem e sem spend no LF (R$ — / 0,00).
+        `q_by_bucket`: leads D9-D10 por variante → acrescenta 'CPLq' (qualificado)."""
         out = []
         for _vk in ('Lead', 'Champion', 'Challenger'):
             _vd = (pv or {}).get(_vk) or {}
@@ -1689,10 +1705,15 @@ def _slack_unified_funnel(v: dict, B: list):
             _lbl = _ab_bucket_label(_vk)
             _conv = _vd.get('conv_lp')
             _conv_s = (f"{_conv:.1f}%".replace('.', ',')) if _conv is not None else "—"
+            # CPL qualificado (gasto ÷ leads D9-D10) = cpl × leads/d9d10. "—" se faltar dado.
+            _cpl = _vd.get('cpl')
+            _q = (q_by_bucket or {}).get(_vk) or 0
+            _cplq = (_cpl * _vn / _q) if (_cpl and _vn and _q) else None
+            _cplq_s = f" · CPLq {_rs(_cplq)}"
             if pv_lf:
-                out.append(f"{_lbl:<18}{_vn:>6,.0f}  CPL ontem {_rs(_vd.get('cpl'))} · LF {_rs(_lf_cpl)} · LP {_conv_s}")
+                out.append(f"{_lbl:<18}{_vn:>6,.0f}  CPL ontem {_rs(_vd.get('cpl'))} · LF {_rs(_lf_cpl)}{_cplq_s} · LP {_conv_s}")
             else:
-                out.append(f"{_lbl:<18}{_vn:>6,.0f}   CPL {_rs(_vd.get('cpl'))} · LP {_conv_s}")
+                out.append(f"{_lbl:<18}{_vn:>6,.0f}   CPL {_rs(_vd.get('cpl'))}{_cplq_s} · LP {_conv_s}")
         return out
 
     # ── Meta ── (Meta Insights: spend/cliques + TOTAL de cadastros + split por variante)
@@ -1708,8 +1729,14 @@ def _slack_unified_funnel(v: dict, B: list):
     _meta_cad = tr.get('total_cadastros')
     if _meta_cad is not None:
         lines.append(f"Cadastros      {_meta_cad:>13,.0f}")
+    # CPL qualificado do canal Meta inteiro (gasto ontem ÷ leads D9-D10 Meta).
+    _meta_ch_q = _d9d10(_bs.get('meta'))
+    _meta_spend = _n(tr, 'spend')
+    if _meta_ch_q > 0 and _meta_spend > 0:
+        lines.append(f"CPL qualif.    {_rs(_meta_spend / _meta_ch_q)}   (por lead D9-D10)")
     lines += _variante_rows(tr.get('por_variante') or {},
-                            (v.get('traffic') or {}).get('por_variante_lf') or {})
+                            (v.get('traffic') or {}).get('por_variante_lf') or {},
+                            _meta_q)
 
     # ── Google ── (Google Ads API: MESMA forma do Meta — spend/cliques + split
     # por variante). Hoje tudo cai em 'Lead' (nenhuma campanha Google plugada no
@@ -1722,7 +1749,7 @@ def _slack_unified_funnel(v: dict, B: list):
             f"Spend          R$ {(_gf.get('total_spend') or 0):>10,.0f}",
             f"Cliques        {(_gf.get('total_clicks') or 0):>13,.0f}",
         ]
-        lines += _variante_rows(_gf.get('por_variante') or {}, _gf.get('por_variante_lf') or {})
+        lines += _variante_rows(_gf.get('por_variante') or {}, _gf.get('por_variante_lf') or {}, _ggl_q)
 
     lines += [
         f"Pesquisa       {_n(stg('pesquisa'),'total'):>13,.0f}   {brk(stg('pesquisa'))}",
