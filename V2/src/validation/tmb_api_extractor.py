@@ -51,6 +51,7 @@ _BROWSER_UA = (
 )
 _PAGE_SIZE = 100  # máximo aceito pela API
 _EFETIVADO = "Efetivado"  # status_pedido que conta como venda
+_MAX_RETRIES = 6  # a API 500a em rajadas; backoff exp. até 30s ≈ 60s de janela
 
 
 class TMBCloudflareBlocked(RuntimeError):
@@ -75,10 +76,15 @@ class TMBSalesExtractor:
         })
 
     def _get(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """GET /api/pedidos com retry. Falha ALTO no bloqueio Cloudflare (1010)."""
+        """GET /api/pedidos com retry robusto. Falha ALTO no bloqueio Cloudflare (1010).
+
+        A API da TMB devolve HTTP 500 de forma INTERMITENTE (rajadas de dezenas de
+        segundos, sem relação com página/janela). Por isso o backoff exponencial vai
+        até ~30s e são 6 tentativas (~60s de janela) — o suficiente pra atravessar
+        uma rajada. Isso vale tanto pro backfill quanto pro job diário."""
         url = f"{TMB_BASE_URL}/api/pedidos"
         last_exc = None
-        for attempt in range(3):
+        for attempt in range(_MAX_RETRIES):
             try:
                 r = self.session.get(url, params=params, timeout=60)
                 if r.status_code == 403 and "1010" in (r.text or ""):
@@ -90,11 +96,13 @@ class TMBSalesExtractor:
                 return r.json()
             except TMBCloudflareBlocked:
                 raise  # bloqueio de UA não se resolve com retry — falha alto já
-            except Exception as e:  # noqa: BLE001 — borda de rede; retry
+            except Exception as e:  # noqa: BLE001 — borda de rede / 500 transiente
                 last_exc = e
-                logger.warning("[tmb_api] tentativa %d falhou: %s", attempt + 1, str(e)[:120])
-                time.sleep(1.5 * (attempt + 1))
-        raise RuntimeError(f"[tmb_api] falha após 3 tentativas: {last_exc}")
+                wait = min(2 ** attempt, 30)  # 1,2,4,8,16,30
+                logger.warning("[tmb_api] tentativa %d/%d falhou: %s (aguarda %ds)",
+                               attempt + 1, _MAX_RETRIES, str(e)[:120], wait)
+                time.sleep(wait)
+        raise RuntimeError(f"[tmb_api] falha após {_MAX_RETRIES} tentativas: {last_exc}")
 
     def fetch_pedidos(self, start_date: str, end_date: str,
                       produto_id: Optional[int] = None) -> List[Dict[str, Any]]:
