@@ -74,11 +74,12 @@ resolve_job() {
             ;;
         spend)
             JOB_NAME="$INGESTION_SPEND_JOB"
-            # --platforms meta: Google fica FORA até o refresh token OAuth voltar
-            # (invalid_grant). Quando voltar: trocar p/ "...,--platforms,meta,google".
-            JOB_ARGS="/app/src/validation/etl_ad_spend.py,--daily,--platforms,meta"
-            JOB_DESC="materializa gasto de anúncio (Meta) por campanha×dia em analytics.ad_spend"
-            JOB_TASK_TIMEOUT="900"
+            # Meta + Google: as creds (META_ACCESS_TOKEN + GOOGLE_ADS_* OAuth) vêm do
+            # serviço via build_env_vars; o customer_id do Google sai de
+            # ClientConfig.google_ads.customer_id (não precisa de env no job).
+            JOB_ARGS="/app/src/validation/etl_ad_spend.py,--daily,--platforms,meta,google"
+            JOB_DESC="materializa gasto de anúncio (Meta+Google) por campanha×dia em analytics.ad_spend"
+            JOB_TASK_TIMEOUT="1200"
             ;;
         *)
             print_error "--job inválido: '$JOB_KIND' (use 'leads', 'sales' ou 'spend')"

@@ -821,11 +821,13 @@ def _fmt_lf_block(res: LFModelPerformance, sales_max: Optional[date] = None) -> 
     # TOTAL: toda a receita atribuída contra o gasto pago disponível (mesma régua do
     # debriefing do cliente) — ROAS e lucro na MESMA escala, sem a inconsistência de
     # somar só o lucro dos baldes com gasto. Baldes com receita mas sem gasto
-    # (Google sem token, Orgânico) creditam a receita aqui; o aviso abaixo explica.
+    # Orgânico credita a receita aqui (tráfego grátis, esperado — como no debriefing).
     t_lucro = (t_fat - t_inv) if (any_inv and t_inv) else 0.0
     t_roas = f"{t_fat/t_inv:.2f}" if any_inv and t_inv else "—"
-    _sem_gasto = [(b.display_name, b.faturamento) for b in res.buckets
-                  if b.investimento is None and b.faturamento > 0]
+    # Só alerta se o GOOGLE (canal pago) tiver receita sem gasto (falha de carga do
+    # etl_ad_spend); Orgânico sem gasto é esperado e não vira alerta.
+    _google_sem_gasto = [(b.display_name, b.faturamento) for b in res.buckets
+                         if b.bucket == "Google" and b.investimento is None and b.faturamento > 0]
     brows.append(
         f"{'TOTAL':<19}{(_brl(t_inv) if any_inv else '—'):>13}{int(t_leads):>7}"
         f"{(_brl(t_inv/t_leads) if any_inv and t_leads else '—'):>9}"
@@ -856,11 +858,10 @@ def _fmt_lf_block(res: LFModelPerformance, sales_max: Optional[date] = None) -> 
                   f"(faltam {gap}d de observação) — números subcontados")
     if not any_inv:
         block += "\n⚠ *sem gasto na tabela ad_spend p/ esta janela* — investimento/CPL/ROAS/lucro vazios (rode o etl_ad_spend)"
-    if _sem_gasto:
-        _desc = ", ".join(f"{nm} {_brl(fat)}" for nm, fat in _sem_gasto)
-        block += (f"\n⚠ *receita sem gasto no ROAS/lucro do TOTAL*: {_desc} — "
-                  f"o gasto do Google não está carregado (token OAuth), então essa "
-                  f"receita é creditada contra o gasto Meta e o ROAS do TOTAL fica otimista")
+    if _google_sem_gasto:
+        _desc = ", ".join(f"{nm} {_brl(fat)}" for nm, fat in _google_sem_gasto)
+        block += (f"\n⚠ *gasto do Google ausente nesta janela* ({_desc} de receita sem gasto) — "
+                  f"rode o etl_ad_spend com --platforms google; o ROAS do TOTAL fica otimista")
     return block
 
 
