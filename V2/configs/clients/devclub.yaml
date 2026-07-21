@@ -829,6 +829,7 @@ business:
   pct_cartao_historico: 0.422        # % cartão mediana LF43–LF53 (recalibrado 09/05; queda real de 47% → 42% em LF48–LF53)
   n_parcelas_boleto: 12              # entrada + 11 mensais (fonte: contas_a_receber TMB)
   boleto_haircut: 0.5                # boleto conta a 50% no faturamento/ROAS do debriefing (risco de calote); aplicado no render
+  meta_spend_gross_up: 1.13          # gasto Meta da API vem SEM imposto; cliente lança a fatura c/ ~13% (multiplica só Meta no render, Google não). Empírico: cliente/nosso=1,1298 uniforme LF57-59
   # Recalibração 08/05/2026: janela LF43–LF53 (11 lançamentos), exclui LF42 (dez/2025 desatualizado).
   # Janela anterior LF42–LF47 ficou estagnada e ignorava degradação de conv geral observada em LF48–LF53.
   conv_rastr_mediana: 0.005376       # mediana LF43–LF53: vendas_matched/total_leads_meta (range 0.31–0.74%, CV 24%)
