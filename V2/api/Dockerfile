@@ -39,6 +39,10 @@ COPY ./api/ ./api/
 # Copiar módulos src necessários
 COPY ./src/ ./src/
 
+# Copiar entrypoints de scripts/ (ex.: scripts/meta_audiences_sync.py, rodado pelo
+# Cloud Run Job meta-audiences-daily). Sem isto, /app/scripts/ não existe na imagem.
+COPY ./scripts/ ./scripts/
+
 # Copiar configurações
 COPY ./configs/ ./configs/
 
