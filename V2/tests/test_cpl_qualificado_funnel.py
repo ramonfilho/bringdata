@@ -54,8 +54,8 @@ def _text(v):
 
 
 def test_meta_canal_cpl_qualificado():
-    # 6000 gasto ÷ (60+40 D9-D10 Meta) = R$ 60,00
-    assert "CPL qualif.    R$ 60,00" in _text(_view())
+    # gasto COM imposto = 20×300 + 25×200 = 11000 ÷ (60+40 D9-D10 Meta) = R$ 110,00
+    assert "CPL qualif.    R$ 110,00" in _text(_view())
 
 
 def test_meta_variante_cpl_qualificado():

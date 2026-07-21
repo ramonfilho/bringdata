@@ -1730,10 +1730,19 @@ def _slack_unified_funnel(v: dict, B: list):
     if _meta_cad is not None:
         lines.append(f"Cadastros      {_meta_cad:>13,.0f}")
     # CPL qualificado do canal Meta inteiro (gasto ontem ÷ leads D9-D10 Meta).
+    # COM imposto (mesma base das linhas por variante): o gasto do canal é a soma
+    # dos gastos COM imposto por variante (cpl × leads), não o spend cru — assim
+    # o canal é o agregado exato das variantes, tudo na mesma base.
     _meta_ch_q = _d9d10(_bs.get('meta'))
-    _meta_spend = _n(tr, 'spend')
-    if _meta_ch_q > 0 and _meta_spend > 0:
-        lines.append(f"CPL qualif.    {_rs(_meta_spend / _meta_ch_q)}   (por lead D9-D10)")
+    _pv_meta = tr.get('por_variante') or {}
+    _meta_taxed_spend = sum(
+        _bd.get('cpl') * _n(_bd, 'leads')
+        for _b in ('Lead', 'Champion', 'Challenger')
+        for _bd in [_pv_meta.get(_b) or {}]
+        if _bd.get('cpl') and _n(_bd, 'leads')
+    )
+    if _meta_ch_q > 0 and _meta_taxed_spend > 0:
+        lines.append(f"CPL qualif.    {_rs(_meta_taxed_spend / _meta_ch_q)}   (por lead D9-D10)")
     lines += _variante_rows(tr.get('por_variante') or {},
                             (v.get('traffic') or {}).get('por_variante_lf') or {},
                             _meta_q)
