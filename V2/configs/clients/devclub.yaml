@@ -632,11 +632,12 @@ google_ads:
 # Públicos Personalizados (Custom Audiences) da Meta — substitui membros de 2
 # públicos por email/telefone hasheado, lendo das tabelas frescas. Ver
 # api/meta_audiences.py e src/data/audience_reader.py.
-# DESLIGADO: enabled=false = job existe mas não substitui nada.
-# Para ligar: o cliente concede `ads_management` ao System User no Business Manager
-# (o token atual só tem escopos de leitura), então enabled:true. Rollback = enabled:false.
+# LIGADO (21/07): o job diário `meta-audiences-daily` (Cloud Run, 07:15 BRT) roda
+# o sync sozinho. Token com `ads_management` vem de um Secret DEDICADO
+# (meta-audiences-token) só nesse job — o META_ACCESS_TOKEN do serviço fica intocado.
+# Rollback: enabled:false (o job vira no-op pela trava do CLI) OU pausar o scheduler.
 meta_audiences:
-  enabled: false
+  enabled: true
   ad_account_id: 'act_188005769808959'       # conta de anúncios DevClub (dos logs de insights, confirmada via Graph API)
   leads_audience_id: '120248123634020390'    # público existente "lista_leads_devclub_320.csv" (~191k) — será substituído pela união leads
   buyers_audience_id: '120248123531220390'   # público existente "lista_alunos_devclub_10.csv" (~6.8k) — será substituído pelos compradores
