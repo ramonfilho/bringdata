@@ -468,6 +468,10 @@ class BusinessConfig:
     # Multiplica só o gasto Meta no render (Google NÃO — a fatura dele já bate). Default
     # 1.0 = sem gross-up (outros clientes intactos). Empírico: cliente/nosso = 1,1298 uniforme.
     meta_spend_gross_up: float = 1.0
+    # Produtos do LANÇAMENTO (substrings lower): o relatório conta como venda do LF só as
+    # vendas desses produtos na janela de carrinho (exclui evergreen/combos). Vazio = sem
+    # filtro (conta todas as vendas). O cliente cura isto (coluna Tipo=Principal do debriefing).
+    launch_products: tuple = ()
     # Conjuntos gateway→forma (fonte única em core/payment_method.py; ver CARTAO/BOLETO_GATEWAYS)
     cartao_gateways: frozenset = frozenset({"guru", "hotmart"})
     boleto_gateways: frozenset = frozenset({"asaas", "boletex", "tmb", "hotpay"})
