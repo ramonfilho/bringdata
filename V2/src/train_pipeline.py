@@ -167,7 +167,8 @@ logger = logging.getLogger(__name__)
 def _compute_control_weights(df: 'pd.DataFrame', alpha: float = 1.0,
                               campaign_col: str = 'Campaign',
                               train_mask: 'pd.Series' = None,
-                              label_map: dict = None) -> 'pd.Series':
+                              label_map: dict = None,
+                              control_boost: float = 1.0) -> 'pd.Series':
     """T2-3: pesos por grupo (CONTROLE / ML / NEUTRO) via inverso de frequência com expoente alpha.
 
     Identifica grupos a partir do nome da campanha:
@@ -188,6 +189,13 @@ def _compute_control_weights(df: 'pd.DataFrame', alpha: float = 1.0,
       - 0   → todos os pesos = 1 (sem correção)
       - 0.5 → meio caminho
       - 1   → balanceamento pleno (CONTROLE e ML "pesam" igual no fit)
+
+    control_boost ≥ 1.0: ênfase DIRECIONAL no grupo CONTROLE, aplicada POR CIMA do
+    balanceamento (peso_control_final = peso_control_balanceado × control_boost). É o
+    anti-feedback-loop de verdade: dá peso MAIOR aos leads que nenhum modelo tocou
+    (contrafactual), em vez de só equilibrar CONTROLE×ML. control_boost=1.0 → sem
+    ênfase (só o balanceamento, comportamento anterior). Ex.: 2.0 = controle conta o
+    dobro; ML e NEUTRO ficam iguais.
 
     train_mask: Series booleana alinhada a df.index. Se fornecida, n_control/n_ml são
     contados APENAS sobre as linhas onde train_mask=True. Os pesos são aplicados a todas
@@ -224,13 +232,22 @@ def _compute_control_weights(df: 'pd.DataFrame', alpha: float = 1.0,
     w_control = (n_total / (2 * n_control)) ** alpha
     w_ml = (n_total / (2 * n_ml)) ** alpha
 
+    # Ênfase direcional no CONTROLE (por cima do balanceamento). control_boost=1.0 → no-op.
+    w_control_bal = w_control
+    if control_boost != 1.0:
+        if control_boost <= 0:
+            logger.warning(f"  [control_weights] control_boost={control_boost} inválido (≤0) — usando 1.0")
+            control_boost = 1.0
+        w_control = w_control * control_boost
+
     weights = pd.Series(1.0, index=df.index)
     weights.loc[classes_full == 'CONTROLE'] = w_control
     weights.loc[classes_full == 'ML'] = w_ml
 
+    _boost_txt = "" if control_boost == 1.0 else f" [boost={control_boost}× sobre {w_control_bal:.3f}]"
     logger.info(
-        f"  [control_weights] alpha={alpha} (scope={scope}, fonte={fonte}) | "
-        f"CONTROLE: n={n_control:,} peso={w_control:.3f} | "
+        f"  [control_weights] alpha={alpha} boost={control_boost} (scope={scope}, fonte={fonte}) | "
+        f"CONTROLE: n={n_control:,} peso={w_control:.3f}{_boost_txt} | "
         f"ML: n={n_ml:,} peso={w_ml:.3f} | NEUTRO: n={n_neutro:,} peso=1.000"
     )
     return weights
@@ -308,7 +325,7 @@ def _assert_retraining_decisions_resolved(config_path: str, set_active: bool) ->
     logger.info(f"  [set-active gate] retraining_decisions OK: {decisions}")
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False, leads_source='files'):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, control_boost=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False, leads_source='files'):
     # Guard: Cloud SQL MLflow precisa estar RUNNABLE. Falha alto se NEVER.
     assert_mlflow_backend_running()
     register_mlflow_cleanup_reminder()
@@ -1024,6 +1041,10 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         _cw_alpha = float(_cw_config.get('alpha', 1.0)) if isinstance(_cw_config, dict) else 1.0
         if control_alpha is not None:
             _cw_alpha = float(control_alpha)  # CLI override
+        # control_boost: ênfase direcional no CONTROLE (default 1.0 = só balanceamento).
+        _cw_boost = float(_cw_config.get('control_boost', 1.0)) if isinstance(_cw_config, dict) else 1.0
+        if control_boost is not None:
+            _cw_boost = float(control_boost)  # CLI/param override
 
         # Fonte única dos rótulos de campanha: a curadoria manual em
         # analytics.campaign_labels (assinatura de tag → Controle/Champion/
@@ -1062,6 +1083,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
             campaign_col='__campaign_for_weights__',
             train_mask=_train_mask,
             label_map=_label_map,
+            control_boost=_cw_boost,
         )
     else:
         control_weights = None
@@ -1525,6 +1547,15 @@ if __name__ == "__main__":
              'Útil para varrer alphas sem editar o YAML.'
     )
     parser.add_argument(
+        '--control-boost',
+        type=float,
+        default=None,
+        help='Ênfase DIRECIONAL no grupo CONTROLE, por cima do balanceamento (T2-3). '
+             '1.0=sem ênfase (só balanceamento), 2.0=controle conta o dobro, etc. '
+             'É o anti-feedback-loop de verdade (peso MAIOR nos leads que nenhum modelo tocou). '
+             'Default None usa o valor do YAML (1.0 se não especificado).'
+    )
+    parser.add_argument(
         '--save-encoded',
         action='store_true',
         default=False,
@@ -1666,6 +1697,7 @@ if __name__ == "__main__":
         use_control_weights=args.control_group_weights,
         train_ratio=args.train_ratio,
         control_alpha=args.control_alpha,
+        control_boost=args.control_boost,
         exclude_features=[p.strip() for p in args.exclude_features.split(',')] if args.exclude_features else None,
         export_matched_dataset=args.export_matched_dataset,
         sales_source=args.sales_source,
