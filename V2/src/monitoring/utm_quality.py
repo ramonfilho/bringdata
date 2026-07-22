@@ -671,12 +671,12 @@ def _render_unified_top5(top5: dict, lf_label: str, lf_state: str, nlf: int) -> 
 def _twoline_entry(name: str, marker: str, ontem: Optional[dict], lf: Optional[dict],
                    win_label: str) -> str:
     """Bloco de 3 linhas pra um criativo/campanha: nome + linha da janela (ontem)
-    + linha do lançamento, cada uma com a NOTA (média de decil na régua Challenger)
-    e o volume. Linha sem volume mínimo vira '— sem N suficiente'."""
+    + linha do lançamento, cada uma com o %D9-D10 (fatia de leads no topo na régua
+    Challenger) e o volume. Linha sem volume mínimo vira '— Poucos leads'."""
     def fmt(label: str, row: Optional[dict]) -> str:
-        if not row or row.get('avg_decil') is None:
+        if not row or row.get('pct_d9_d10') is None:
             return f"   {label:<11}— Poucos leads"
-        return f"   {label:<11}nota {row['avg_decil']:>4.1f}   Leads={row['n']}"
+        return f"   {label:<11}{row['pct_d9_d10']:>3.0f}% D9-D10   Leads={row['n']}"
     return "\n".join([f"{marker} {name}", fmt(win_label[:10], ontem), fmt('Lançamento', lf)])
 
 
@@ -684,18 +684,19 @@ def _render_twoline_top5(top5_window: Optional[dict], top5_lf: Optional[dict], *
                          win_label: str, lf_label: str, lf_state: str,
                          n_win: int, nlf: int) -> List[dict]:
     """Por criativo/campanha, DUAS linhas — janela (ontem) e lançamento — cada uma
-    com a NOTA (média de decil, régua Challenger). No topo, a nota-alvo dos TOP5.
-    Cor pela nota do lançamento vs alvo. Ordenado pela nota do lançamento."""
+    com o %D9-D10 (fatia de leads no topo, régua Challenger). No topo, o alvo dos
+    TOP5 em D9-D10. Cor pelo %D9-D10 do lançamento vs alvo. Ordenado pelo %D9-D10
+    do lançamento."""
     base = top5_lf or top5_window
-    bar_decil = base.get('bar_decil')
-    alvo = f"{bar_decil:.1f}" if bar_decil is not None else "—"
+    bar_pct = base.get('bar_pct')
+    alvo = f"{bar_pct:.0f}%" if bar_pct is not None else "—"
     blocks: List[dict] = [{'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': (
-        f"Nota-alvo TOP5 = {alvo}"
+        f"Alvo TOP5 = {alvo} em D9–D10"
     )}]}]
     CAP = 20
 
-    def _key(e):  # ordena pela nota; cai pro pct se nota ausente
-        return (e.get('avg_decil') if e.get('avg_decil') is not None else e.get('pct_d9_d10', 0))
+    def _key(e):  # ordena pelo %D9-D10; cai pra nota se pct ausente
+        return (e.get('pct_d9_d10') if e.get('pct_d9_d10') is not None else e.get('avg_decil', 0))
     for level in ('creative', 'campaign'):
         wmap = {e['utm']: e for e in (((top5_window or {}).get('levels', {}).get(level) or {}).get('rows') or [])}
         lrows = ((top5_lf or {}).get('levels', {}).get(level) or {}).get('rows') or []
@@ -710,7 +711,7 @@ def _render_twoline_top5(top5_window: Optional[dict], top5_lf: Optional[dict], *
             utm = e['utm']
             name = _display_creative(e) if level == 'creative' else _short_campaign_name(utm)
             ref = lmap.get(utm) or e
-            marker = _TOP5_MARK.get(ref.get('status_decil') or ref.get('status'), '⚪')
+            marker = _TOP5_MARK.get(ref.get('status'), '⚪')
             entries.append(_twoline_entry(name, marker, wmap.get(utm), lmap.get(utm), win_label))
         body = "\n".join(entries)
         blocks.append({'type': 'section', 'text': {'type': 'mrkdwn',
