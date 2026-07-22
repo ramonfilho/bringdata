@@ -31,7 +31,7 @@ TOKEN_SECRET="${META_AUDIENCES_TOKEN_SECRET:-meta-audiences-token}"
 JOB_MEMORY="${META_AUDIENCES_MEMORY:-2Gi}"
 JOB_CPU="${META_AUDIENCES_CPU:-1}"
 JOB_TIMEOUT="${META_AUDIENCES_TIMEOUT:-1800}"
-JOB_ARGS="/app/scripts/meta_audiences_sync.py,--audience,both,--execute,--yes-write-to-client-meta"
+JOB_ARGS="/app/scripts/meta_audiences_sync.py,--audience,all,--execute,--yes-write-to-client-meta"
 
 REUSE_IMAGE=false; WITH_SCHEDULER=false; EXECUTE_NOW=false; YES_FLAG=false
 IMAGE_TAG=""

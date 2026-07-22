@@ -75,6 +75,46 @@ class MetaCustomAudienceClient:
             return {"status": "error", "http_status": r.status_code, "message": _redact(r.text)[:400]}
         return {"status": "ok", **r.json()}
 
+    # ---------------------------------------------------------------- criação
+    def create_audience(
+        self,
+        ad_account_id: str,
+        name: str,
+        description: str = "",
+        *,
+        dry_run: bool = True,
+    ) -> Dict:
+        """Cria um Custom Audience de 'customer file' VAZIO na conta e devolve o id.
+
+        subtype=CUSTOM + customer_file_source=USER_PROVIDED_ONLY = mesmo tipo dos
+        públicos de leads/alunos (lista hasheada que a gente substitui via
+        `usersreplace`). Idempotência NÃO é garantida pela Graph API (2 chamadas =
+        2 públicos), então quem chama deve criar UMA vez e guardar o id no yaml.
+
+        dry_run=True (default): descreve o que criaria SEM escrever. dry_run=False
+        cria de verdade (write na conta do cliente — exige ads_management)."""
+        if not ad_account_id:
+            raise ValueError("ad_account_id ausente — não crio público.")
+        payload = {
+            "name": name,
+            "description": description,
+            "subtype": "CUSTOM",
+            "customer_file_source": "USER_PROVIDED_ONLY",
+        }
+        if dry_run:
+            logger.info("[meta_audiences] DRY-RUN create '%s' em %s (NADA enviado).", name, ad_account_id)
+            return {"status": "dry_run_ok", "would_create": payload, "ad_account_id": ad_account_id}
+        r = requests.post(
+            f"{self.base_url}/{ad_account_id}/customaudiences",
+            data={**payload, "access_token": self.access_token},
+            timeout=30,
+        )
+        if r.status_code >= 400:
+            return {"status": "error", "http_status": r.status_code, "message": _redact(r.text)[:400]}
+        body = r.json() if r.content else {}
+        logger.info("[meta_audiences] público criado: id=%s nome='%s'", body.get("id"), name)
+        return {"status": "created", **body}
+
     # -------------------------------------------------------------- payload
     @staticmethod
     def build_rows(members: pd.DataFrame) -> List[List[str]]:

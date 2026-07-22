@@ -380,7 +380,12 @@ class MetaAudiencesConfig:
     ad_account_id: Optional[str] = None            # conta de anúncios (act_XXXX) dona dos públicos
     leads_audience_id: Optional[str] = None        # id do público de LEADS a substituir
     buyers_audience_id: Optional[str] = None       # id do público de ALUNOS a substituir
+    cardonly_audience_id: Optional[str] = None     # id do público de ALUNOS SÓ CARTÃO (comprou só em card_gateways, nunca boleto_gateways)
     leads_source: str = "leads_treino_prod"        # source da fonte unificada de respondentes no analytics.leads (renomeável sem deploy; era train_unified até 21/07)
+    # Régua gateway→forma-de-pagamento (do cliente, não cravada no código). DevClub:
+    # cartão = guru/hotmart; boleto = tmb/boletex/asaas. Usada só pelo público SÓ CARTÃO.
+    card_gateways: Optional[List[str]] = None      # gateways que representam CARTÃO
+    boleto_gateways: Optional[List[str]] = None    # gateways que representam BOLETO (exclui do "só cartão")
     api_version: str = "v24.0"                     # versão da Graph API
 
 

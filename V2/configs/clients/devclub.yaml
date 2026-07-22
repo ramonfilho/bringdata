@@ -641,7 +641,10 @@ meta_audiences:
   ad_account_id: 'act_188005769808959'       # conta de anúncios DevClub (dos logs de insights, confirmada via Graph API)
   leads_audience_id: '120248123634020390'    # público existente "lista_leads_devclub_320.csv" (~191k) — será substituído pela união leads
   buyers_audience_id: '120248123531220390'   # público existente "lista_alunos_devclub_10.csv" (~6.8k) — será substituído pelos compradores
+  cardonly_audience_id: '120248267145830390' # público "lista_alunos_cartao_devclub.csv" (alunos só cartão), criado via API em 22/07
   leads_source: leads_treino_prod            # source da fonte unificada de respondentes (analytics.leads). Era 'train_unified' até 21/07; renomear AQUI se o pipeline mudar de novo (o reader falha-alto se vier vazia)
+  card_gateways: [guru, hotmart]             # régua do cliente: cartão = Guru + Hotmart
+  boleto_gateways: [tmb, boletex, asaas]     # boleto = TMB + boletex + Asaas (quem tem qualquer um destes NÃO é "só cartão")
   api_version: v24.0
 api:
   cors_origins:
