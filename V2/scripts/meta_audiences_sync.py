@@ -39,7 +39,11 @@ if _ENV.exists():
             os.environ.setdefault(_k.strip(), _v.strip())
 
 from src.core.client_config import ClientConfig
-from src.data.audience_reader import read_buyers_audience, read_leads_audience
+from src.data.audience_reader import (
+    read_buyers_audience,
+    read_cardonly_audience,
+    read_leads_audience,
+)
 from api.meta_audiences import MetaCustomAudienceClient
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -69,7 +73,8 @@ def _open_analytics_long():
 def main() -> int:
     ap = argparse.ArgumentParser(description="Sync de Públicos Personalizados da Meta")
     ap.add_argument("--client", default="devclub")
-    ap.add_argument("--audience", choices=["leads", "buyers", "both"], default="both")
+    ap.add_argument("--audience", choices=["leads", "buyers", "cardonly", "both", "all"], default="both",
+                    help="'both'=leads+alunos (compat); 'all'=leads+alunos+cartão (usado pelo job diário)")
     ap.add_argument("--show-target", action="store_true",
                     help="GET dos públicos-alvo (read-only) pra confirmar antes de escrever")
     ap.add_argument("--execute", action="store_true",
@@ -96,10 +101,12 @@ def main() -> int:
     client = MetaCustomAudienceClient(token, api_version=ma.api_version)
 
     targets = []
-    if args.audience in ("leads", "both"):
+    if args.audience in ("leads", "both", "all"):
         targets.append(("leads", ma.leads_audience_id))
-    if args.audience in ("buyers", "both"):
+    if args.audience in ("buyers", "both", "all"):
         targets.append(("buyers", ma.buyers_audience_id))
+    if args.audience in ("cardonly", "all"):
+        targets.append(("cardonly", ma.cardonly_audience_id))
 
     if args.show_target:
         for label, aid in targets:
@@ -117,6 +124,11 @@ def main() -> int:
                 members = read_leads_audience(
                     client_id=args.client, conn_analytics=conn_a,
                     respondents_source=ma.leads_source,
+                )
+            elif label == "cardonly":
+                members = read_cardonly_audience(
+                    client_id=args.client, conn=conn_a,
+                    card_gateways=ma.card_gateways, boleto_gateways=ma.boleto_gateways,
                 )
             else:
                 members = read_buyers_audience(client_id=args.client, conn=conn_a)

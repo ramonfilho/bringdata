@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 # não é um alvo, é um alarme de "isso não pode estar certo".
 _MIN_LEADS = 50_000
 _MIN_BUYERS = 3_000
+_MIN_CARDONLY = 2_000   # público SÓ CARTÃO é subconjunto dos alunos (~2,8k hoje); piso = alarme, não alvo
 
 # Nome da source unificada de respondentes no `analytics.leads`. Default = o nome
 # ATUAL (a fonte foi renomeada `train_unified` → `leads_treino_prod` em 21/07 por
@@ -93,6 +94,51 @@ def read_buyers_audience(
                 n, int((result["phone"].map(lambda p: bool(p) and str(p).strip() not in ('', 'None'))).sum()))
     if n < min_size:
         raise ValueError(f"[audience_reader] só {n} alunos (< {min_size}) — suspeito, abortando.")
+    return result
+
+
+def read_cardonly_audience(
+    client_id: str = "devclub",
+    *,
+    conn=None,
+    card_gateways=None,
+    boleto_gateways=None,
+    min_size: int = _MIN_CARDONLY,
+) -> pd.DataFrame:
+    """Público de ALUNOS SÓ CARTÃO: compradores cujas compras são TODAS em gateways
+    de cartão (`card_gateways`) e NENHUMA em gateway de boleto (`boleto_gateways`).
+
+    A régua gateway→forma-de-pagamento é do cliente (no DevClub: Guru/Hotmart =
+    cartão; TMB/boletex/Asaas = boleto) e vem do YAML — nunca cravada aqui. Reusa
+    `read_sales` (mesma fonte/shape do público de alunos) e `_dedup_by_email`; só
+    acrescenta a partição por gateway NO NÍVEL DO EMAIL (não do pedido: quem comprou
+    1x no cartão e 1x no boleto NÃO entra — é 'apenas cartão')."""
+    card = {g for g in (card_gateways or [])}
+    boleto = {g for g in (boleto_gateways or [])}
+    if not card:
+        raise ValueError("[audience_reader] card_gateways vazio — não monto o público de cartão "
+                         "(configure meta_audiences.card_gateways no yaml).")
+    sales = read_sales(client_id=client_id, gateways=None, conn=conn)  # todos os gateways
+    if sales.empty:
+        raise ValueError("[audience_reader] analytics.sales vazio — não substituo público de cartão.")
+    df = sales.rename(columns={"telefone": "phone"}).copy()
+    df["_em"] = df["email"].map(normalize_email)
+    df = df[df["_em"].notna()]
+    # Por email: comprou em cartão? comprou em boleto? ('origem' = gateway, do read_sales)
+    gws_por_email = df.groupby("_em")["origem"].agg(lambda s: set(s))
+    so_cartao = gws_por_email[
+        gws_por_email.map(lambda gws: bool(gws & card) and not (gws & boleto))
+    ].index
+    only = df[df["_em"].isin(so_cartao)]
+    result = _dedup_by_email(only[["email", "phone"]])
+    n = len(result)
+    com_tel = int(result["phone"].map(
+        lambda p: 0 if (p is None or str(p).strip() == "" or str(p).strip().lower() == "none") else 1
+    ).sum())
+    logger.info("[audience_reader] só-cartão: %d compradores (%d com telefone) | cartão=%s boleto=%s",
+                n, com_tel, sorted(card), sorted(boleto))
+    if n < min_size:
+        raise ValueError(f"[audience_reader] só {n} alunos de cartão (< {min_size}) — suspeito, abortando.")
     return result
 
 
