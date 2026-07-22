@@ -10,12 +10,108 @@ Lógica de classificação:
 4. EXCLUIR: Não contém filtro base (não é campanha de captação)
 """
 
+import re
 import pandas as pd
 import numpy as np
 from typing import Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# ASSINATURA DE TAG (tokenização de utm_campaign) — chave da curadoria manual
+# =============================================================================
+# Reduz o nome longo da campanha à "assinatura de tag": os segmentos que
+# identificam o BRAÇO da campanha (LEADHQLB, MACHINE LEARNING, ESCALA SCORE...),
+# descartando o que é só convenção de nomenclatura (fase, página, data, ID,
+# aquecimento). É a chave de `analytics.campaign_labels` — a mesma lógica que
+# gerou as assinaturas curadas manualmente. Precisa ser idêntica bit-a-bit à
+# curadoria, senão o lookup erra. Coberta por tests/test_campaign_signature.py.
+
+# Segmentos estruturais descartados (convenção DevClub, não o objetivo de
+# otimização): nome do funil, tipo de tráfego, aquecimento, página.
+_SIG_DROP_TOKENS = frozenset({'devlf', 'cap', 'frio', 'quente', 'adv', '', 'pg1', 'pg2', 'cópia'})
+_SIG_DATE_RE = re.compile(r'\d{4}-\d{2}-\d{2}')
+_SIG_FASE_RE = re.compile(r'fase\s*\d+', re.I)
+_SIG_PG_RE = re.compile(r'pg\s*\d+', re.I)
+
+
+def tag_signature(utm_campaign) -> str:
+    """Reduz `utm_campaign` à assinatura de tag (chave de analytics.campaign_labels).
+
+    Quebra o nome por '|' e '%' (o '%7C' url-encoded vira '7c' e é limpo),
+    normaliza cada segmento (lower/strip), e descarta os estruturais: nome do
+    funil, tráfego, aquecimento, fase, página, data (AAAA-MM-DD) e IDs numéricos.
+    O que sobra é a assinatura do braço; vazio → '(sem tag)'.
+
+    Examples:
+        >>> tag_signature("DEVLF | CAP | FRIO | FASE 04 | ADV | LEADHQLB | 2026-05-01 | 120240")
+        'leadhqlb'
+        >>> tag_signature("DEVLF | CAP | FRIO | MACHINE LEARNING | LQ | PG2")
+        'machine learning | lq'
+        >>> tag_signature("DEVLF | CAP | FRIO | FASE 01")
+        '(sem tag)'
+        >>> tag_signature(None)
+        '(sem tag)'
+    """
+    if utm_campaign is None:
+        return '(sem tag)'
+    try:
+        if pd.isna(utm_campaign):
+            return '(sem tag)'
+    except (TypeError, ValueError):
+        pass
+    keep = []
+    for p in re.split(r'[|%]', str(utm_campaign)):
+        t = p.strip().lower().replace('7c', '').strip()
+        if not t or t in _SIG_DROP_TOKENS:
+            continue
+        if (_SIG_DATE_RE.search(t) or _SIG_FASE_RE.fullmatch(t)
+                or _SIG_PG_RE.fullmatch(t) or t.replace(' ', '').isdigit()):
+            continue
+        keep.append(t)
+    return ' | '.join(keep) if keep else '(sem tag)'
+
+
+# Rótulos curados (analytics.campaign_labels) → grupo de reponderação do controle.
+# Controle e Lead = leads de captação que NENHUM modelo ML otimizou (o
+# contrafactual que deve pesar mais no retreino, contra o feedback loop);
+# Champion e Challenger = leads selecionados por evento ML; Excluir = fora do
+# reweighting (peso 1). Mesma partição 2-grupos que _compute_control_weights usa.
+_CATEGORIA_TO_GROUP = {
+    'Controle':   'CONTROLE',
+    'Lead':       'CONTROLE',
+    'Champion':   'ML',
+    'Challenger': 'ML',
+    'Excluir':    'NEUTRO',
+}
+
+# Fallback legado (quando a tabela está vazia/ausente): traduz o classificador
+# por substring (classify_campaign) pros mesmos 3 grupos, preservando o
+# comportamento antigo (estrangulamento: tabela nova ativa, substring vivo).
+_LEGACY_ML_TYPE_TO_GROUP = {
+    'SEM_ML':  'CONTROLE',
+    'COM_ML':  'ML',
+    'EXCLUIR': 'NEUTRO',
+}
+
+
+def classify_for_weights(campaign_name, label_map: Optional[dict] = None) -> str:
+    """Grupo de reponderação do controle: 'CONTROLE' | 'ML' | 'NEUTRO'.
+
+    Se `label_map` (assinatura de tag → categoria curada de analytics.campaign_labels)
+    for fornecido, classifica pela CURADORIA: assinatura → categoria → grupo.
+    Assinatura não catalogada cai em 'NEUTRO' (peso 1, sem efeito) e é logada
+    pelo chamador. Sem `label_map`, usa o classificador por substring legado.
+    """
+    if label_map:
+        sig = tag_signature(campaign_name)
+        categoria = label_map.get(sig)
+        if categoria is None:
+            return 'NEUTRO'
+        return _CATEGORIA_TO_GROUP.get(categoria, 'NEUTRO')
+    return _LEGACY_ML_TYPE_TO_GROUP.get(classify_campaign(campaign_name), 'NEUTRO')
 
 
 def _check_campaign_ids_in_meta(excluded_df: pd.DataFrame, campaign_col: str):
