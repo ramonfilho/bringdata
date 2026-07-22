@@ -52,7 +52,11 @@ from src.core.dataset_versioning import criar_dataset_pos_cutoff, aplicar_janela
 from src.core.matching import match_leads as _match_leads
 from src.core.feature_engineering import create_features as _create_features
 from src.core.encoding import apply_encoding as _apply_encoding
-from src.validation.campaign_classifier import classify_campaign as _classify_campaign
+from src.validation.campaign_classifier import (
+    classify_campaign as _classify_campaign,
+    classify_for_weights as _classify_for_weights,
+    tag_signature as _tag_signature,
+)
 from src.model.training_model import (
     registrar_features_e_modelo_devclub,
     assert_mlflow_backend_running,
@@ -162,13 +166,19 @@ logger = logging.getLogger(__name__)
 
 def _compute_control_weights(df: 'pd.DataFrame', alpha: float = 1.0,
                               campaign_col: str = 'Campaign',
-                              train_mask: 'pd.Series' = None) -> 'pd.Series':
+                              train_mask: 'pd.Series' = None,
+                              label_map: dict = None) -> 'pd.Series':
     """T2-3: pesos por grupo (CONTROLE / ML / NEUTRO) via inverso de frequência com expoente alpha.
 
-    Identifica grupos a partir do nome da campanha (campaign_classifier):
-      - CONTROLE: campanha de captação SEM evento ML (DEVLF | CAP | FRIO sem 'machine learning')
-      - ML:       campanha de captação COM evento ML
-      - NEUTRO:   demais leads (orgânico, fora de captação) — peso 1.0 (não entra no reweighting)
+    Identifica grupos a partir do nome da campanha:
+      - CONTROLE: leads que NENHUM modelo ML otimizou (controle deliberado + Lead padrão)
+      - ML:       leads selecionados por evento ML (Champion + Challenger)
+      - NEUTRO:   demais leads (fora de captação / não catalogado) — peso 1.0
+
+    Se `label_map` (assinatura de tag → categoria curada de analytics.campaign_labels)
+    for fornecido, a classificação vem da CURADORIA MANUAL (via
+    campaign_classifier.classify_for_weights); senão, do classificador por
+    substring legado (estrangulamento: tabela nova ativa, legado como fallback).
 
     Fórmula (Opção A, soft balancing):
       peso_grupo = ((n_total_reweighted) / (k × n_grupo)) ** alpha
@@ -189,7 +199,8 @@ def _compute_control_weights(df: 'pd.DataFrame', alpha: float = 1.0,
         logger.warning(f"  [control_weights] coluna '{campaign_col}' ausente — feature desabilitada (pesos=1)")
         return pd.Series(1.0, index=df.index)
 
-    classes_full = df[campaign_col].apply(_classify_campaign)
+    fonte = "curadoria (analytics.campaign_labels)" if label_map else "substring legado"
+    classes_full = df[campaign_col].apply(lambda c: _classify_for_weights(c, label_map))
 
     if train_mask is not None:
         classes_for_count = classes_full[train_mask]
@@ -198,14 +209,14 @@ def _compute_control_weights(df: 'pd.DataFrame', alpha: float = 1.0,
         classes_for_count = classes_full
         scope = "full"
 
-    n_control = (classes_for_count == 'SEM_ML').sum()
-    n_ml = (classes_for_count == 'COM_ML').sum()
-    n_neutro = (classes_for_count == 'EXCLUIR').sum()
+    n_control = (classes_for_count == 'CONTROLE').sum()
+    n_ml = (classes_for_count == 'ML').sum()
+    n_neutro = (classes_for_count == 'NEUTRO').sum()
 
     if n_control == 0 or n_ml == 0:
         logger.warning(
             f"  [control_weights] grupo vazio no {scope} (CONTROLE={n_control}, ML={n_ml}) — "
-            f"feature desabilitada (pesos=1)"
+            f"feature desabilitada (pesos=1). Fonte de rótulo: {fonte}"
         )
         return pd.Series(1.0, index=df.index)
 
@@ -214,11 +225,12 @@ def _compute_control_weights(df: 'pd.DataFrame', alpha: float = 1.0,
     w_ml = (n_total / (2 * n_ml)) ** alpha
 
     weights = pd.Series(1.0, index=df.index)
-    weights.loc[classes_full == 'SEM_ML'] = w_control
-    weights.loc[classes_full == 'COM_ML'] = w_ml
+    weights.loc[classes_full == 'CONTROLE'] = w_control
+    weights.loc[classes_full == 'ML'] = w_ml
 
     logger.info(
-        f"  [control_weights] alpha={alpha} (scope={scope}) | CONTROLE: n={n_control:,} peso={w_control:.3f} | "
+        f"  [control_weights] alpha={alpha} (scope={scope}, fonte={fonte}) | "
+        f"CONTROLE: n={n_control:,} peso={w_control:.3f} | "
         f"ML: n={n_ml:,} peso={w_ml:.3f} | NEUTRO: n={n_neutro:,} peso=1.000"
     )
     return weights
@@ -648,7 +660,10 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         # + Railway antigo (lead_legado) + Railway novo (leads_historico) + Cloud SQL
         # ledger (registros_ml), canonizados e deduplicados. Substitui o 'train_pesquisa'
         # (dump de Sheets, fonte morta e lossy nas 2 features de pesquisa desde mar/2026).
-        df_pesquisa = read_pesquisa(source='train_unified')
+        # include_utm=use_control_weights: anexa __utm_campaign__ (coluna utm_campaign
+        # da linha) pro peso de controle enxergar as campanhas recentes do A/B
+        # (LEADHQLB/LEADQUALIFIED, que moram em utm_campaign e não no jsonb 'Campaign').
+        df_pesquisa = read_pesquisa(source='train_unified', include_utm=use_control_weights)
         # 'Data' vem como ISO no jsonb (inequívoco) → parsear SEM dayfirst. Com
         # dayfirst=True (o default da validação) o pandas infere formato errado na
         # precisão mista (Sheets tem hora) e coage a maioria a NaT.
@@ -788,12 +803,33 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
 
     df_pesquisa_final_unificado = _unify_categories(df_pesquisa_final, client_config.category)
 
-    # T2-3: preservar 'Campaign' em coluna técnica antes da Célula 8 removê-la,
+    # T2-3: preservar a campanha em coluna técnica antes da Célula 8 removê-la,
     # para que _compute_control_weights tenha acesso ao classificador de campanha.
-    # A coluna técnica usa nome dunder para não ser confundida com feature do modelo.
-    if use_control_weights and 'Campaign' in df_pesquisa_final_unificado.columns:
-        df_pesquisa_final_unificado['__campaign_for_weights__'] = df_pesquisa_final_unificado['Campaign']
-        logger.debug("  T2-3: Campaign preservada em '__campaign_for_weights__' antes da Célula 8")
+    # Nome dunder → não é confundida com feature do modelo.
+    # COALESCE 'Campaign' (jsonb da pesquisa) com '__utm_campaign__' (coluna
+    # utm_campaign, presente só no modo banco com include_utm): as campanhas
+    # recentes do A/B moram em utm_campaign e ficam vazias no 'Campaign' do jsonb
+    # — sem o COALESCE viram '(sem tag)' e o grupo ML sai subestimado.
+    if use_control_weights:
+        _camp = None
+        if 'Campaign' in df_pesquisa_final_unificado.columns:
+            _camp = df_pesquisa_final_unificado['Campaign']
+        if '__utm_campaign__' in df_pesquisa_final_unificado.columns:
+            _utm = df_pesquisa_final_unificado['__utm_campaign__']
+            if _camp is None:
+                _camp = _utm
+            else:
+                _blank = _camp.isna() | (_camp.astype(str).str.strip() == '')
+                _camp = _camp.where(~_blank, _utm)
+        if _camp is not None:
+            df_pesquisa_final_unificado = df_pesquisa_final_unificado.copy()
+            df_pesquisa_final_unificado['__campaign_for_weights__'] = _camp
+            logger.debug("  T2-3: campanha em '__campaign_for_weights__' (COALESCE Campaign/utm_campaign)")
+        else:
+            logger.warning("  T2-3: sem 'Campaign' nem '__utm_campaign__' — peso de controle ficará neutro")
+        # __utm_campaign__ já absorvida; remover pra não vazar pro FE/encoding.
+        if '__utm_campaign__' in df_pesquisa_final_unificado.columns:
+            df_pesquisa_final_unificado = df_pesquisa_final_unificado.drop(columns='__utm_campaign__')
 
     logger.info("=" * 80)
     # === CÉLULA 8: Remoção de features desnecessárias ===
@@ -989,6 +1025,24 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         if control_alpha is not None:
             _cw_alpha = float(control_alpha)  # CLI override
 
+        # Fonte única dos rótulos de campanha: a curadoria manual em
+        # analytics.campaign_labels (assinatura de tag → Controle/Champion/
+        # Challenger/Lead/Excluir). Vazio (tabela ausente / modo arquivos offline)
+        # → classify_for_weights cai no classificador por substring legado.
+        from src.data.campaign_labels_reader import read_campaign_labels
+        _label_map = read_campaign_labels(client_id=client_config.client_id)
+        if _label_map and '__campaign_for_weights__' in dataset_v1_devclub.columns:
+            _sigs = dataset_v1_devclub['__campaign_for_weights__'].apply(_tag_signature)
+            _cobertas = _sigs.isin(_label_map).sum()
+            _nao_catalogadas = sorted(set(_sigs[~_sigs.isin(_label_map)].dropna().unique()))
+            logger.info(
+                "  [control_weights] rótulos: %d assinaturas na curadoria | "
+                "cobertura %d/%d leads (%.1f%%) | não catalogadas (→NEUTRO): %s",
+                len(_label_map), int(_cobertas), len(_sigs),
+                100.0 * _cobertas / max(len(_sigs), 1),
+                _nao_catalogadas[:15] or "nenhuma",
+            )
+
         # Replicar split temporal_leads para identificar quais leads vão para o train.
         # Outras estratégias (temporal, stratified) caem no fallback "scope=full".
         _train_mask = None
@@ -1007,6 +1061,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
             alpha=_cw_alpha,
             campaign_col='__campaign_for_weights__',
             train_mask=_train_mask,
+            label_map=_label_map,
         )
     else:
         control_weights = None
