@@ -4509,7 +4509,9 @@ def _resolve_report_channel(dest: str) -> str:
 async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5,
                                     client_id: str = 'devclub',
                                     dest: str = 'trafego',
-                                    date: Optional[str] = None):
+                                    date: Optional[str] = None,
+                                    start_date: Optional[str] = None,
+                                    end_date: Optional[str] = None):
     """
     Relatório diário de criativo, postado no Slack. Default: dia ANTERIOR (BRT) →
     grupo de tráfego (cliente), chamado pelo Cloud Scheduler às 06:00.
@@ -4518,15 +4520,22 @@ async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5,
       - dest='trafego' (default): canal do cliente. É o que o cron usa.
       - dest='dm' (ou 'validacao'): DM do operador — pra VALIDAR formatação antes
         de liberar pro cliente (política: validação→DM, OK explícito→trafego).
-    `date` (YYYY-MM-DD BRT, opcional): posta um dia específico em vez do ontem —
-    pra conferir um dia passado no DM. Sem `date` = ontem (comportamento do cron).
+
+    Janela (BRT), em ordem de precedência:
+      - `start_date`+`end_date` (YYYY-MM-DD): intervalo FUNDIDO (ex.: ontem+hoje num
+        só relatório). ≤90d, valida em `_utm_quality_day_range_brt`.
+      - `date` (YYYY-MM-DD): um dia específico.
+      - nada: dia ANTERIOR (comportamento do cron).
+    A linha "Lançamento" é sempre o acumulado; só a janela muda.
 
     Substitui o antigo hack de subir canary com env de canal redirecionado pra
-    postar no DM: agora é `?dest=dm[&date=YYYY-MM-DD]`.
+    postar no DM: agora é `?dest=dm[&date=…]` ou `?dest=dm&start_date=…&end_date=…`.
     """
     from src.monitoring.utm_quality import render_slack_blocks, post_to_slack
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
-    if date:
+    if start_date and end_date:
+        start_utc, end_utc = _utm_quality_day_range_brt(start_date, end_date)
+    elif date:
         start_utc, end_utc = _utm_quality_day_range_brt(date, date)
     else:
         _BRT = _tz(_td(hours=-3))
