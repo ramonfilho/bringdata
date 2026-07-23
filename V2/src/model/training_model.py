@@ -445,6 +445,25 @@ def registrar_features_e_modelo_devclub(
         mlflow.log_param("total_positives", int(y.sum()))
         mlflow.log_param("positive_rate", float(y.mean()))
 
+        # Fingerprint do dataset (lineage/reprodutibilidade): sha256 do conjunto
+        # ordenado de (email, target). Pin exato das linhas e rótulos de treino,
+        # mesmo com analytics.sales mutável (ver docs/MODEL_CHANGELOG.md). Fail-soft:
+        # sem 'E-mail', cai num hash posicional só do target (mais fraco, não quebra).
+        import hashlib as _hashlib
+        try:
+            if 'E-mail' in dataset_original.columns:
+                _emails = dataset_original['E-mail'].astype(str).str.strip().str.lower().values
+                _pairs = sorted(f"{e}|{int(t)}" for e, t in zip(_emails, y.values))
+            else:
+                logger.warning("  [dataset_fingerprint] sem coluna 'E-mail' — hash posicional só do target")
+                _pairs = [f"{i}|{int(t)}" for i, t in enumerate(y.values)]
+            dataset_fingerprint = _hashlib.sha256("\n".join(_pairs).encode()).hexdigest()[:16]
+        except Exception as _e:
+            dataset_fingerprint = "erro"
+            logger.warning(f"  [dataset_fingerprint] falhou: {_e}")
+        mlflow.log_param("dataset_fingerprint", dataset_fingerprint)
+        logger.info(f"  dataset_fingerprint: {dataset_fingerprint} (n={len(y)}, pos={int(y.sum())})")
+
         # Split 70/30 (temporal ou stratified)
         data_dt = pd.to_datetime(dataset_original['Data'], errors='coerce')
         data_min = data_dt.min()
