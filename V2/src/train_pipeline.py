@@ -325,7 +325,7 @@ def _assert_retraining_decisions_resolved(config_path: str, set_active: bool) ->
     logger.info(f"  [set-active gate] retraining_decisions OK: {decisions}")
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, control_boost=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False, leads_source='files', use_feature_selection=False):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, control_boost=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False, leads_source='files', use_feature_selection=False, model_card=False):
     # Guard: Cloud SQL MLflow precisa estar RUNNABLE. Falha alto se NEVER.
     assert_mlflow_backend_running()
     register_mlflow_cleanup_reminder()
@@ -1468,6 +1468,22 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info(f"  TEMPO TOTAL: {pipeline_total_time:.1f}s ({pipeline_total_time/60:.1f} min)")
     logger.info("=" * 80)
 
+    # [model card] Se pedido, gera e insere a entrada do MODEL_CHANGELOG a partir
+    # do run recém-criado (fatos preenchidos sozinhos; sobra só a linha de decisão).
+    # Fail-soft: um erro aqui não pode derrubar um treino que já concluiu.
+    if model_card:
+        try:
+            _run_id_card = (resultado_registro_devclub or {}).get('mlflow_run_id')
+            if _run_id_card:
+                from src.model.model_card import generate_card, append_to_changelog
+                _md = generate_card(_run_id_card)
+                _p = append_to_changelog(_md)
+                logger.info(f"  [model card] entrada inserida em {_p}")
+            else:
+                logger.warning("  [model card] run_id ausente no resultado — card não gerado")
+        except Exception as _e:
+            logger.warning(f"  [model card] falhou (treino OK, card não gerado): {_e}")
+
     # Retornar metadata completo para uso pelo orquestrador de retreino
     return resultado_registro_devclub
 
@@ -1521,6 +1537,12 @@ if __name__ == "__main__":
         '--set-active',
         action='store_true',
         help='Definir este modelo como ativo em configs/active_model.yaml (baixa arquivos do MLflow automaticamente)'
+    )
+    parser.add_argument(
+        '--model-card',
+        action='store_true',
+        default=False,
+        help='Ao fim do treino, gera e insere a entrada do MODEL_CHANGELOG.md a partir do run (fatos preenchidos sozinhos; sobra só a decisão).'
     )
     parser.add_argument(
         '--medium-strategy',
@@ -1746,4 +1768,5 @@ if __name__ == "__main__":
         sales_gateways=args.sales_gateways,
         dump_pesquisa_db=args.dump_pesquisa_db,
         leads_source=args.leads_source,
+        model_card=args.model_card,
     )

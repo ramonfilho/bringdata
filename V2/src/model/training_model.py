@@ -23,12 +23,10 @@ from src.core.client_config import ClientConfig
 
 logger = logging.getLogger(__name__)
 
-# Configurar MLflow tracking URI (apenas URI, não o experimento — feito dentro da função)
-_default_tracking = (
-    "postgresql+psycopg2://postgres:SmartAds2026DB!@104.197.138.129:5432/mlflow"
-)
-_tracking_uri = os.environ.get("MLFLOW_TRACKING_URI", _default_tracking)
-mlflow.set_tracking_uri(_tracking_uri)
+# Configurar MLflow tracking URI (fonte única em core/mlflow_setup; experimento é
+# setado dentro da função). Respeita override por MLFLOW_TRACKING_URI.
+from src.core.mlflow_setup import ensure_tracking_uri
+_tracking_uri = ensure_tracking_uri()
 
 
 # ---------------------------------------------------------------------------
@@ -463,6 +461,17 @@ def registrar_features_e_modelo_devclub(
             logger.warning(f"  [dataset_fingerprint] falhou: {_e}")
         mlflow.log_param("dataset_fingerprint", dataset_fingerprint)
         logger.info(f"  dataset_fingerprint: {dataset_fingerprint} (n={len(y)}, pos={int(y.sum())})")
+
+        # Carimbo do commit do código (lineage código→modelo). Fonte única em
+        # core/git_info. Torna o vínculo código→modelo AUTOMÁTICO — antes ele só
+        # existia se alguém digitasse o SHA à mão no MODEL_CHANGELOG. Fail-soft:
+        # sem git, grava 'unknown' e segue.
+        from src.core.git_info import git_commit as _git_commit_fn, git_is_dirty as _git_dirty_fn
+        _git_commit = _git_commit_fn(short=True) or "unknown"
+        _git_dirty = _git_dirty_fn()
+        mlflow.log_param("git_commit", _git_commit)
+        mlflow.log_param("git_dirty", "unknown" if _git_dirty is None else str(bool(_git_dirty)).lower())
+        logger.info(f"  git_commit: {_git_commit} (dirty={_git_dirty})")
 
         # Split 70/30 (temporal ou stratified)
         data_dt = pd.to_datetime(dataset_original['Data'], errors='coerce')
