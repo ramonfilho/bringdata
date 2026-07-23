@@ -680,7 +680,9 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         # include_utm=use_control_weights: anexa __utm_campaign__ (coluna utm_campaign
         # da linha) pro peso de controle enxergar as campanhas recentes do A/B
         # (LEADHQLB/LEADQUALIFIED, que moram em utm_campaign e não no jsonb 'Campaign').
-        df_pesquisa = read_pesquisa(source='train_unified', include_utm=use_control_weights)
+        # Source 'leads_treino_prod' = o universo consolidado real (342k). O nome antigo
+        # 'train_unified' virou resíduo (~7,4k) da ingestão diária — ler ele treinava no lixo.
+        df_pesquisa = read_pesquisa(source='leads_treino_prod', include_utm=use_control_weights)
         # 'Data' vem como ISO no jsonb (inequívoco) → parsear SEM dayfirst. Com
         # dayfirst=True (o default da validação) o pandas infere formato errado na
         # precisão mista (Sheets tem hora) e coage a maioria a NaT.
