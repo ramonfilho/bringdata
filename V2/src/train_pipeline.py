@@ -325,7 +325,7 @@ def _assert_retraining_decisions_resolved(config_path: str, set_active: bool) ->
     logger.info(f"  [set-active gate] retraining_decisions OK: {decisions}")
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, control_boost=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False, leads_source='files'):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, control_boost=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False, leads_source='files', use_feature_selection=False):
     # Guard: Cloud SQL MLflow precisa estar RUNNABLE. Falha alto se NEVER.
     assert_mlflow_backend_running()
     register_mlflow_cleanup_reminder()
@@ -1193,6 +1193,37 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         for col in to_drop:
             logger.info(f"    - {col}")
 
+    # === Feature selection por importância de permutação (etapa final opcional) ===
+    # Roda com --feature-selection. Remove features que não ajudam a generalizar
+    # (importância <= threshold no holdout temporal); trava de não-regressão mantém
+    # todas se o AUC piorar. Corte por COLUNA EXATA (não prefixo). Dropa ANTES do fit
+    # → o feature_registry no MLflow já reflete o subset e produção alinha (mesmo
+    # mecanismo do --exclude-features acima). Método eleito num torneio (permutação
+    # ganhou de RF-nativo/L1/RFE/informação-mútua).
+    if use_feature_selection:
+        from src.model.feature_selection import select_features
+        _fs = (client_config.model.feature_selection or {}) if (client_config and client_config.model) else {}
+        _fs_feats = [c for c in dataset_v1_devclub_encoded.columns if c != 'target']
+        _fs_result = select_features(
+            X=dataset_v1_devclub_encoded[_fs_feats],
+            y=dataset_v1_devclub_encoded['target'].astype(int).values,
+            dates=dataset_v1_devclub['Data'].values,
+            train_ratio=train_ratio,
+            estimator_params=client_config.model.hyperparameters,
+            method=_fs.get('method', 'permutation'),
+            threshold=float(_fs.get('threshold', 0.0)),
+            min_features=int(_fs.get('min_features', 20)),
+            n_repeats=int(_fs.get('n_repeats', 5)),
+        )
+        if _fs_result.dropped:
+            dataset_v1_devclub_encoded = dataset_v1_devclub_encoded.drop(columns=_fs_result.dropped)
+            logger.info("  [feature-selection] %d → %d features (AUC holdout %.4f → %.4f) — feature_registry gravará o subset",
+                        _fs_result.n_before, _fs_result.n_after, _fs_result.auc_baseline, _fs_result.auc_selected)
+            for c in _fs_result.dropped:
+                logger.info("    - %s", c)
+        else:
+            logger.info("  [feature-selection] nenhuma feature removida (%s)", _fs_result.reason)
+
     # === Pesos por tipo de comprador — obrigatoriamente do ClientConfig (R2/DT-10) ===
     # Sem fallback: pesos são específicos por cliente (TMB é DevClub). Se um cliente novo
     # esquecer model.buyer_weights no YAML, abortar é melhor que treinar com pesos errados.
@@ -1556,6 +1587,14 @@ if __name__ == "__main__":
              'Default None usa o valor do YAML (1.0 se não especificado).'
     )
     parser.add_argument(
+        '--feature-selection',
+        action='store_true',
+        default=False,
+        help='Roda a seleção de features por importância de permutação como etapa final '
+             '(remove features que não ajudam a generalizar, com trava de não-regressão de AUC). '
+             'Parâmetros em client_config.model.feature_selection. Default off (opt-in).'
+    )
+    parser.add_argument(
         '--save-encoded',
         action='store_true',
         default=False,
@@ -1698,6 +1737,7 @@ if __name__ == "__main__":
         train_ratio=args.train_ratio,
         control_alpha=args.control_alpha,
         control_boost=args.control_boost,
+        use_feature_selection=args.feature_selection,
         exclude_features=[p.strip() for p in args.exclude_features.split(',')] if args.exclude_features else None,
         export_matched_dataset=args.export_matched_dataset,
         sales_source=args.sales_source,

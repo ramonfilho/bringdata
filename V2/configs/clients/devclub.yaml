@@ -523,6 +523,15 @@ model:
     tmb_medio: 0.67
     tmb_alto: 0.49
     tmb_sem: 0.42
+  # Seleção de features por importância de permutação (etapa final opcional do treino).
+  # Só roda com a flag --feature-selection (opt-in); aqui ficam os parâmetros.
+  # Remove features com importância <= threshold no holdout temporal; trava de
+  # não-regressão aborta se o AUC piorar. Torneio elegeu permutação (RF-nativo/L1/RFE piores).
+  feature_selection:
+    method: permutation
+    threshold: 0.0        # remove features que não ajudam a generalizar (imp <= 0)
+    min_features: 20      # nunca cortar abaixo disso
+    n_repeats: 5          # repetições da permutação
   mlflow_experiment_name: devclub_lead_scoring
   mlflow_experiment_id: '1'
   model_name_template: v1_devclub_rf_{split_method}_single
