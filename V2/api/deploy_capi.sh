@@ -787,17 +787,24 @@ print(','.join(stale))
     DEPLOY_TAG="deploy/$(date +%Y-%m-%d)-${NEW_REVISION##*-api-}"
     git tag "$DEPLOY_TAG" 2>/dev/null && print_info "Git tag criada: $DEPLOY_TAG" || print_warning "Git tag não criada (repo sujo ou tag já existe)"
 
-    # Se acesso público temporário
+    # allUsers é OBRIGATÓRIO neste serviço, NÃO temporário: o endpoint
+    # /webhook/lead_capture recebe POST ANÔNIMO de browser (o formulário do lead
+    # submete direto, sem token). Reafirmamos o binding a cada deploy (idempotente,
+    # self-healing). NUNCA remover — remover derruba a captura de lead no portão de
+    # entrada E os crons dependentes (apagão de 22-23/07/2026: alguém seguiu a antiga
+    # instrução "remover antes de produção" e o scoring parou ~22h). Os crons hoje
+    # autenticam por OIDC (defense-in-depth), mas o webhook não pode. Detalhe em
+    # docs/RUNBOOK_scoring_pipeline.md.
     if [ "$ALLOW_PUBLIC" = true ]; then
-        print_warning "Configurando acesso público (TEMPORÁRIO)"
+        print_info "Reafirmando acesso público (obrigatório: webhook de captura é anônimo)"
         gcloud run services add-iam-policy-binding $SERVICE_NAME \
             --region=$REGION \
             --member="allUsers" \
             --role="roles/run.invoker" \
             --quiet || {
-                print_error "Falha ao configurar acesso público"
+                print_error "Falha ao reafirmar acesso público (webhook de captura pode dar 403)"
             }
-        print_warning "⚠️  API está PÚBLICA - remover antes de produção!"
+        print_success "Serviço público por design (webhook anônimo). NÃO remover o allUsers."
     fi
 
     # Obter URL do serviço
@@ -1000,15 +1007,14 @@ print_final_report() {
     echo "   gcloud run services describe $SERVICE_NAME --region=$REGION"
     echo ""
 
-    # Avisos
+    # Acesso (NÃO é um aviso pra remover — o serviço é público de propósito)
     if [ "$ALLOW_PUBLIC" = true ]; then
-        echo -e "${YELLOW}⚠️  AVISOS:${NC}"
-        echo "   - API está PÚBLICA (temporário)"
-        echo "   - Remover antes de produção:"
-        echo "     gcloud run services remove-iam-policy-binding $SERVICE_NAME \\"
-        echo "       --region=$REGION \\"
-        echo "       --member=\"allUsers\" \\"
-        echo "       --role=\"roles/run.invoker\""
+        echo "ℹ️  ACESSO:"
+        echo "   - Serviço é PÚBLICO por design: /webhook/lead_capture recebe POST"
+        echo "     anônimo de browser (formulário do lead). NÃO remover o binding"
+        echo "     allUsers — removê-lo derruba a captura de lead e os crons (apagão"
+        echo "     22-23/07/2026). Crons autenticam por OIDC como rede extra; o webhook"
+        echo "     não pode. Runbook: docs/RUNBOOK_scoring_pipeline.md"
         echo ""
     fi
 }
