@@ -43,7 +43,13 @@ from src.scoring.service import score_lead_from_payload
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BATCH = 25
+# Mensagens puxadas por invocação. Subido de 25→250 em 23/07/2026 (pós-apagão):
+# a 25/rodada × cron de 5min o teto era ~300/h, então um backlog de ~1.000 (parada
+# de ~22h) levava HORAS pra drenar. A 250/rodada o teto vira ~3.000/h → o mesmo
+# backlog drena em ~20min. 250 é conservador (o pull do Pub/Sub aceita até 1.000) e
+# em dia normal puxa só o que houver (fluxo baixo), sem custo. Ver
+# docs/RUNBOOK_scoring_pipeline.md e memória incidente_allusers_derruba_crons.
+DEFAULT_BATCH = 250
 PUBSUB_PROJECT_ID = "smart-ads-451319"
 PUBSUB_SUBSCRIPTION_ID = "lead-capture-ingest-sub"
 
