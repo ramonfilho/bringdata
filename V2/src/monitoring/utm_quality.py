@@ -617,6 +617,29 @@ def _mini_table_block(entry: dict, lf_label: str, marker: str, win_row_label: st
 _TOP5_MARK = {'acima': '🟢', 'abaixo': '🔴', 'neutro': '⚪'}
 _TOP5_LEVEL_LABEL = {'creative': 'Criativos', 'campaign': 'Campanhas'}
 
+# Guarda de recência (decisão do usuário, 23/07/2026): NÃO manda desligar (🔴) um
+# criativo que está só marginalmente abaixo do alvo no lançamento (até este limite
+# em pp) E melhorou na janela recente (ontem > acumulado). Motivo: com volume
+# gigante (8k+ leads) o teste marca "abaixo significativo" por ~1pp, matando
+# criativo em recuperação. Só afeta o caso 'abaixo' marginal+melhorando → vira ⚪.
+RECENCY_GUARD_PP = 2.0
+
+
+def _mark_with_recency_guard(ref: Optional[dict], win: Optional[dict],
+                             bar_pct: Optional[float]) -> str:
+    """Marcador (🟢/🔴/⚪) da linha, com a guarda de recência aplicada só quando o
+    lançamento cairia em 🔴. `ref` = linha do lançamento (acumulado); `win` = linha
+    da janela recente (ontem); `bar_pct` = alvo TOP5 em %D9-D10."""
+    status = (ref or {}).get('status')
+    if status == 'abaixo' and bar_pct is not None:
+        lf_pct = (ref or {}).get('pct_d9_d10')
+        win_pct = (win or {}).get('pct_d9_d10')
+        # pouco abaixo do alvo (≤ RECENCY_GUARD_PP) E melhorou ontem (janela > acum.)
+        if (lf_pct is not None and (bar_pct - lf_pct) <= RECENCY_GUARD_PP
+                and win_pct is not None and win_pct > lf_pct):
+            status = 'neutro'
+    return _TOP5_MARK.get(status, '⚪')
+
 
 def _top5_line(e: dict, level: str) -> str:
     """Linha alinhada (code block): status, %D9-D10, Δ vs barra, n, nome. O nome
@@ -711,7 +734,7 @@ def _render_twoline_top5(top5_window: Optional[dict], top5_lf: Optional[dict], *
             utm = e['utm']
             name = _display_creative(e) if level == 'creative' else _short_campaign_name(utm)
             ref = lmap.get(utm) or e
-            marker = _TOP5_MARK.get(ref.get('status'), '⚪')
+            marker = _mark_with_recency_guard(ref, wmap.get(utm), bar_pct)
             entries.append(_twoline_entry(name, marker, wmap.get(utm), lmap.get(utm), win_label))
         body = "\n".join(entries)
         blocks.append({'type': 'section', 'text': {'type': 'mrkdwn',
