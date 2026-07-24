@@ -43,49 +43,11 @@ import urllib.request
 DEFAULT_IGNORE_FEATURES = frozenset(['target'])
 
 
-def get_revision_url(revision: str, region: str, project: str, service: str = 'smart-ads-api') -> str:
-    """
-    Obtém a URL tagged da revisão via `gcloud run services describe`.
-
-    URLs tagged (necessárias para atingir revisão com 0% de tráfego) vivem
-    em status.traffic[].url do SERVIÇO, não em status.url da revisão.
-    Exemplo: https://canary-1713xxxx---smart-ads-api-gazrm25mda-uc.a.run.app
-    """
-    import json
-
-    try:
-        result = subprocess.run(
-            ['gcloud', 'run', 'services', 'describe', service,
-             '--region', region, '--project', project,
-             '--format=json'],
-            capture_output=True, text=True, check=True, timeout=30,
-        )
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"gcloud falhou ao descrever serviço: {e.stderr.strip()}")
-
-    try:
-        svc = json.loads(result.stdout)
-    except json.JSONDecodeError as e:
-        raise RuntimeError(f"JSON inválido de gcloud: {e}")
-
-    traffic = svc.get('status', {}).get('traffic', [])
-    if not traffic:
-        raise RuntimeError(f"Serviço '{service}' sem tráfego configurado")
-
-    for entry in traffic:
-        if entry.get('revisionName') == revision and entry.get('url'):
-            return entry['url']
-
-    # Não achou com URL. Listar o que tem para diagnóstico.
-    summary = [
-        f"{e.get('revisionName', '?')} (tag={e.get('tag', '-')}, pct={e.get('percent', 0)})"
-        for e in traffic
-    ]
-    raise RuntimeError(
-        f"Revisão '{revision}' não tem URL tagged em status.traffic.\n"
-        f"Deploy precisa usar --tag para gerar URL direta.\n"
-        f"Tráfego atual: {summary}"
-    )
+# Resolução de URL da revisão vem da fonte única cloud_run_urls.py (mesma lógica
+# antes copiada aqui; a versão canônica ainda cobre o fallback pro URL do serviço
+# quando a revisão está a 100% sem tag — inócuo aqui, pois o smoke sempre bate
+# numa canary tagged).
+from cloud_run_urls import get_revision_url  # noqa: E402
 
 
 def trigger_encoding_pipeline(url: str, timeout: int = 300) -> tuple[int, str]:
