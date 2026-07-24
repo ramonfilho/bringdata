@@ -81,8 +81,17 @@ resolve_job() {
             JOB_DESC="materializa gasto de anúncio (Meta+Google) por campanha×dia em analytics.ad_spend"
             JOB_TASK_TIMEOUT="1200"
             ;;
+        launch_cal)
+            JOB_NAME="$INGESTION_LAUNCH_CAL_JOB"
+            # Lê a planilha canônica do cliente (gspread via ADC do runtime SA — o SA
+            # precisa ter acesso de leitura à planilha) e materializa as datas de LF em
+            # analytics.launch_calendar. Fonte runtime do resolvedor (LAUNCHES_SOURCE=table).
+            JOB_ARGS="/app/src/data/launch_calendar.py,--sync-to-table"
+            JOB_DESC="materializa o calendário de LFs (planilha do cliente) em analytics.launch_calendar"
+            JOB_TASK_TIMEOUT="600"
+            ;;
         *)
-            print_error "--job inválido: '$JOB_KIND' (use 'leads', 'sales' ou 'spend')"
+            print_error "--job inválido: '$JOB_KIND' (use 'leads', 'sales', 'spend' ou 'launch_cal')"
             exit 1
             ;;
     esac

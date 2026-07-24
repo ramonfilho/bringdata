@@ -302,3 +302,40 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_ad_spend_natural
 CREATE INDEX IF NOT EXISTS idx_ad_spend_date ON ad_spend (client_id, spend_date);
 
 COMMENT ON TABLE ad_spend IS 'Gasto de anúncio por campanha por dia (Meta + Google), rotulado por platform. Fonte única do gasto pro relatório de negócio; enchida pelo etl_ad_spend.';
+
+
+-- ---------------------------------------------------------------------
+-- launch_calendar — calendário de lançamentos (LFs), materializado da planilha
+-- ---------------------------------------------------------------------
+-- FONTE RUNTIME das datas de LF, substituindo o `configs/launches.yaml` estático
+-- embutido na imagem Docker (que exigia deploy a cada novo LF e deixava o LF
+-- atual — ex.: DEV21 — invisível pro relatório). O job diário
+-- (src/data/launch_calendar.py --sync-to-table) lê a planilha canônica do
+-- cliente, mergeia as datas com a curadoria do yaml (excluded_from_reference etc.)
+-- e grava aqui. `core.launches.load_launches()` lê desta tabela quando
+-- LAUNCHES_SOURCE=table (com fallback automático pro yaml se vazia/indisponível).
+--
+-- `entry` (jsonb) guarda o dict COMPLETO do LF — mesmo shape que o yaml — pra o
+-- leitor reconstruir o contrato sem perda. As colunas de data tipadas são
+-- projeção pra consulta/point-in-time. Upsert idempotente na chave (client_id,
+-- lf_name); nunca apaga LF (histórico preservado, igual ao merge_for_write).
+CREATE TABLE IF NOT EXISTS launch_calendar (
+    client_id    VARCHAR(64)  NOT NULL DEFAULT 'devclub',
+    lf_name      VARCHAR(32)  NOT NULL,       -- 'LF62' | 'DEV21' | ...
+
+    cap_start    DATE,                        -- projeção de entry->>'cap_start'
+    cap_end      DATE,
+    vendas_start DATE,
+    vendas_end   DATE,
+
+    entry        JSONB        NOT NULL,       -- dict completo do LF (datas + curadoria) = contrato de load_launches
+    source       VARCHAR(32)  NOT NULL DEFAULT 'sheet_sync',  -- proveniência do sync
+    synced_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+
+    PRIMARY KEY (client_id, lf_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_launch_cal_cap ON launch_calendar (client_id, cap_start, cap_end);
+
+COMMENT ON TABLE  launch_calendar IS 'Calendário de LFs materializado da planilha do cliente (refresh diário). Fonte runtime de load_launches quando LAUNCHES_SOURCE=table; fallback pro configs/launches.yaml.';
+COMMENT ON COLUMN launch_calendar.entry IS 'Dict completo do LF (cap_*/vendas_*/curadoria) em jsonb — mesmo shape do yaml. É o contrato lido por core.launches.load_launches.';

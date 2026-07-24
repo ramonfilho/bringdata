@@ -403,6 +403,8 @@ def main():
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--dry-run", action="store_true", help="só reconcilia planilha × yaml, não escreve")
     g.add_argument("--sync", action="store_true", help="regenera o launches.yaml")
+    g.add_argument("--sync-to-table", action="store_true",
+                   help="materializa o calendário em analytics.launch_calendar (fonte runtime, sem deploy)")
     g.add_argument("--check", action="store_true", help="checa o calendário contra o ledger (LF não cadastrado / dia órfão)")
     args = ap.parse_args()
 
@@ -445,6 +447,21 @@ def main():
             yaml.safe_dump(merged, f, sort_keys=False, allow_unicode=True, default_flow_style=False)
         tmp.replace(_YAML_PATH)
         print(f"\n✅ launches.yaml regenerado ({len(merged)} LFs) em {_YAML_PATH}")
+
+    if args.sync_to_table:
+        # Datas da planilha + curadoria do yaml (mesma regra do --sync) → tabela.
+        # A tabela vira a fonte runtime de load_launches (LAUNCHES_SOURCE=table),
+        # sem precisar de deploy a cada novo LF.
+        from src.data.analytics_connection import open_analytics_connection
+        from src.data.launch_calendar_store import upsert_launch_calendar
+        merged = merge_for_write(calendar, current)
+        conn = open_analytics_connection()
+        try:
+            stats = upsert_launch_calendar(merged, conn=conn)
+        finally:
+            conn.close()
+        print(f"\n✅ analytics.launch_calendar sincronizada: "
+              f"{stats['written']}/{stats['attempted']} LFs gravados")
 
 
 if __name__ == "__main__":

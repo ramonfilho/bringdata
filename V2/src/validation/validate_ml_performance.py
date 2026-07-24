@@ -792,16 +792,18 @@ def main():
     # 1. Parse argumentos
     args = parse_args()
 
-    # 1.1. Carregar datas de launches.yaml quando --lf for especificado
+    # 1.1. Carregar datas do calendário de LFs quando --lf for especificado.
+    # Fonte única via core.launches: analytics.launch_calendar quando
+    # LAUNCHES_SOURCE=table (refresh diário da planilha), senão configs/launches.yaml.
+    # Não ler o yaml direto aqui — deixava a validação cega ao LF atual (ex.: DEV21).
     if args.lf:
-        _launches_path = Path(__file__).parent.parent.parent / 'configs' / 'launches.yaml'
-        if not _launches_path.exists():
-            logger.error(f" configs/launches.yaml não encontrado em {_launches_path}")
+        from src.core.launches import load_launches
+        _launches = load_launches()
+        if not _launches:
+            logger.error(" Calendário de LFs vazio (analytics.launch_calendar / launches.yaml indisponível)")
             sys.exit(1)
-        with open(_launches_path, 'r') as _f:
-            _launches = yaml.safe_load(_f)
         if args.lf not in _launches:
-            logger.error(f" Lançamento '{args.lf}' não encontrado em launches.yaml. Disponíveis: {', '.join(_launches.keys())}")
+            logger.error(f" Lançamento '{args.lf}' não encontrado no calendário de LFs. Disponíveis: {', '.join(_launches.keys())}")
             sys.exit(1)
         _lf_cfg = _launches[args.lf]
         args.start_date = _lf_cfg['cap_start']

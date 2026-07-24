@@ -19,6 +19,7 @@ API:
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -63,8 +64,52 @@ class LaunchWindow:
                         0, 0, 0, tzinfo=BRT).astimezone(timezone.utc)
 
 
+def _launches_source() -> str:
+    """Fonte do calendário: 'yaml' (default) ou 'table'.
+
+    Controla `load_launches`:
+      - 'yaml': lê `configs/launches.yaml` (comportamento histórico).
+      - 'table': lê `analytics.launch_calendar` (refresh diário da planilha do
+        cliente), COM fallback automático pro yaml se a tabela vier vazia ou
+        indisponível.
+
+    Default 'yaml' de propósito — a leitura da tabela é opt-in (liga via env
+    LAUNCHES_SOURCE=table no serviço) e reversível (basta desligar a env). Valor
+    inválido cai no default seguro."""
+    s = os.environ.get("LAUNCHES_SOURCE", "yaml").strip().lower()
+    return s if s in ("yaml", "table") else "yaml"
+
+
+def _load_launches_from_table() -> dict:
+    """Lê o calendário de `analytics.launch_calendar`. Devolve `{}` em QUALQUER
+    falha (import, conexão, tabela ausente) → o chamador cai no yaml.
+
+    Import lazy de propósito: mantém `core` sem dependência de `src/data`/driver
+    de banco no import-time — o acoplamento só existe quando LAUNCHES_SOURCE=table
+    e é fail-safe (nunca levanta)."""
+    try:
+        from src.data.launch_calendar_reader import read_calendar_from_table
+        return read_calendar_from_table()
+    except Exception as e:
+        logger.warning(f"[launches] leitura de analytics.launch_calendar falhou ({e}) — fallback yaml")
+        return {}
+
+
 def load_launches(path: Optional[Path] = None) -> dict:
-    """Lê launches.yaml. Retorna `{}` se arquivo ausente ou inválido."""
+    """Lê o calendário de LFs. Fonte controlada pela env `LAUNCHES_SOURCE`
+    (ver `_launches_source`): 'table' lê `analytics.launch_calendar` com fallback
+    automático pro yaml; 'yaml' (default) lê `configs/launches.yaml`.
+
+    `path` explícito FORÇA o yaml (usado por testes e pelo `--sync`). Retorna
+    `{}` se nada disponível."""
+    # Fonte tabela (opt-in via env), fail-safe pro yaml.
+    if path is None and _launches_source() == "table":
+        data = _load_launches_from_table()
+        if data:
+            return data
+        logger.warning("[launches] LAUNCHES_SOURCE=table mas calendário vazio/"
+                       "indisponível — fallback configs/launches.yaml")
+
     import yaml
     candidates = [path] if path else _CANDIDATE_PATHS
     for p in candidates:

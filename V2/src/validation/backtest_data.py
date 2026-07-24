@@ -160,12 +160,14 @@ def load_match_spend_for_lf(
 # --------------------------------------------------------------------------- #
 
 def _load_launch_dates(lf_name: str) -> Dict[str, str]:
-    if not LAUNCHES_PATH.exists():
-        raise FileNotFoundError(f"{LAUNCHES_PATH} não encontrado")
-    with open(LAUNCHES_PATH) as f:
-        launches = yaml.safe_load(f)
+    # Fonte única via core.launches: analytics.launch_calendar quando
+    # LAUNCHES_SOURCE=table (refresh diário da planilha), senão configs/launches.yaml.
+    # Não ler o yaml direto aqui — deixava este caminho cego ao LF atual (ex.: DEV21).
+    from src.core.launches import load_launches
+    launches = load_launches()
     if lf_name not in launches:
-        raise ValueError(f"Lançamento {lf_name} não está em {LAUNCHES_PATH}")
+        raise ValueError(f"Lançamento {lf_name} não está no calendário de LFs "
+                         f"(analytics.launch_calendar / launches.yaml)")
     return launches[lf_name]
 
 
