@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -60,67 +59,10 @@ VALUE_TOL = 0.01  # R$ 0.01 — round() na expressão value=value, evita flutua�
 
 
 # ============================================================================
-# gcloud helpers
+# gcloud helpers — resolução de URL vem da fonte única cloud_run_urls.py
 # ============================================================================
 
-def get_revision_url(revision: str, region: str, project: str, service: str = 'smart-ads-api') -> str:
-    """URL pra chamar a revisão diretamente.
-
-    Caminho 1: a revisão tem tag → devolve a URL prefixada com a tag
-    (ex.: ``https://prod---<svc>.run.app``).
-
-    Caminho 2 (fallback p/ a revisão que está a 100%): se a revisão alvo
-    serve 100% de tráfego e não tem tag, devolve a URL principal do serviço
-    (ex.: ``https://<svc>.run.app``). Essa URL **por definição** roteia pra
-    quem está a 100% no momento — não exige tag.
-
-    Sem isso, o gate falha sempre que alguém promove uma revisão via
-    ``update-traffic --to-revisions=…`` sem renomear a tag ``prod`` — o que
-    é o estado natural depois de qualquer promoção feita à mão (ver
-    deploy_capi.sh, que documenta a promoção como passo manual). A
-    convenção "tag prod fica na revisão de 100%" deixou de ser
-    pré-requisito do gate.
-    """
-    res = subprocess.run(
-        ['gcloud', 'run', 'services', 'describe', service,
-         '--region', region, '--project', project, '--format=json'],
-        capture_output=True, text=True, check=True, timeout=30,
-    )
-    svc = json.loads(res.stdout)
-    status = svc.get('status', {})
-    traffic = status.get('traffic', [])
-    main_url = status.get('url') or svc.get('status', {}).get('address', {}).get('url')
-
-    for entry in traffic:
-        if entry.get('revisionName') != revision:
-            continue
-        # Caminho 1: tag presente → URL tagged
-        if entry.get('url'):
-            return entry['url']
-        # Caminho 2: revisão de 100% sem tag → URL principal do serviço
-        if entry.get('percent') == 100 and main_url:
-            return main_url
-
-    summary = [f"{e.get('revisionName')} (tag={e.get('tag', '-')}, pct={e.get('percent', 0)})" for e in traffic]
-    raise RuntimeError(
-        f"Revisão '{revision}' sem URL acessível "
-        f"(sem tag e sem 100% de tráfego).\nTráfego atual: {summary}"
-    )
-
-
-def get_prod_revision(region: str, project: str, service: str = 'smart-ads-api') -> str:
-    """Retorna a revisão com 100% de tráfego (rolling baseline)."""
-    res = subprocess.run(
-        ['gcloud', 'run', 'services', 'describe', service,
-         '--region', region, '--project', project, '--format=json'],
-        capture_output=True, text=True, check=True, timeout=30,
-    )
-    svc = json.loads(res.stdout)
-    traffic = svc.get('status', {}).get('traffic', [])
-    candidates = [e for e in traffic if e.get('percent') == 100]
-    if len(candidates) == 1:
-        return candidates[0]['revisionName']
-    raise RuntimeError(f"Não consegui identificar revisão 100%. Candidatos: {candidates}")
+from cloud_run_urls import get_revision_url, get_prod_revision  # noqa: E402
 
 
 # ============================================================================

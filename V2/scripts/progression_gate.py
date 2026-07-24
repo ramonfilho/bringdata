@@ -91,13 +91,9 @@ class GateResult:
 # Helpers
 # =============================================================================
 
-def get_service_url(service: str, region: str, project: str) -> str:
-    result = subprocess.run(
-        ['gcloud', 'run', 'services', 'describe', service,
-         '--region', region, '--project', project, '--format=value(status.url)'],
-        capture_output=True, text=True, check=True, timeout=30,
-    )
-    return result.stdout.strip()
+# Resolução de URL (revisão canary + serviço) vem da fonte única cloud_run_urls.py
+# — mesma lógica antes copiada em 3 scripts de deploy.
+from cloud_run_urls import get_revision_url, get_service_url  # noqa: E402
 
 
 def fetch_json(url: str, timeout: int = 180) -> Optional[Dict[str, Any]]:
@@ -337,12 +333,26 @@ def main():
         print(f"[gate] NOTA: {stage['note']}")
     print()
 
+    # [fix OOM de deploy] Os checks pesados (daily-check ~300s, feature-report)
+    # rodam contra a revisão CANARY isolada — instâncias próprias (min-instance=1
+    # pela tag), 0% de tráfego — em vez da revisão VIVA que serve produção +
+    # scoring. Antes, base_url era o URL do serviço (roteia pra revisão de 100%):
+    # a carga do gate co-locava com o scoring e derrubava a instância viva por
+    # OOM a cada deploy. daily-check lê o ledger global (mesmo resultado em
+    # qualquer revisão); feature-report já filtra por --revision. Fallback pro URL
+    # do serviço só se a canary não tiver URL própria — não regride o antigo.
     try:
-        base_url = get_service_url(args.service, args.region, args.project)
-        print(f"[gate] Base URL do serviço: {base_url}")
+        base_url = get_revision_url(args.revision, args.region, args.project, args.service)
+        print(f"[gate] Base URL (revisão canary isolada, não toca o scoring vivo): {base_url}")
     except Exception as e:
-        print(f"[gate] ERRO: não conseguiu obter URL do serviço — {e}", file=sys.stderr)
-        return 3
+        print(f"[gate] canary '{args.revision}' sem URL própria ({e})", file=sys.stderr)
+        print(f"[gate] fallback: URL do serviço (bate na revisão viva)", file=sys.stderr)
+        try:
+            base_url = get_service_url(args.service, args.region, args.project)
+            print(f"[gate] Base URL do serviço: {base_url}")
+        except Exception as e2:
+            print(f"[gate] ERRO: não conseguiu obter URL — {e2}", file=sys.stderr)
+            return 3
     print()
 
     feat = check_feature_report(base_url, args.revision, hours)
