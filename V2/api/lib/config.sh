@@ -99,6 +99,12 @@ INGESTION_SPEND_JOB="${INGESTION_SPEND_JOB:-ingestion-ad-spend}"
 # a fonte runtime do resolvedor de LF (LAUNCHES_SOURCE=table) — sem deploy a cada
 # novo LF. Roda ANTES do digest/relatórios pra a tabela estar fresca.
 INGESTION_LAUNCH_CAL_JOB="${INGESTION_LAUNCH_CAL_JOB:-ingestion-launch-calendar}"
+# O job do calendário lê a planilha do cliente via gspread (ADC do runtime SA), então
+# PRECISA rodar como a conta que tem acesso de leitura à planilha — a MESMA do serviço
+# da API (smart-ads-api roda como appspot; provado que lê a planilha). Os demais jobs
+# rodam como a compute default (não leem Sheets). Se a compute default for compartilhada
+# na planilha um dia, dá pra apontar pra ela aqui. Vazio = compute default.
+INGESTION_LAUNCH_CAL_SA="${INGESTION_LAUNCH_CAL_SA:-smart-ads-451319@appspot.gserviceaccount.com}"
 # Schedules em UTC. 08:30 UTC = 05:30 BRT (calendário, antes de tudo), 09:00 UTC = 06:00 BRT (leads),
 # 09:30 UTC = 06:30 BRT (vendas, após leads), 09:45 UTC = 06:45 BRT (gasto, antes do relatório
 # semanal de segunda 10:00 UTC).

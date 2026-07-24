@@ -59,6 +59,7 @@ INGESTION_CPU="${INGESTION_CPU:-1}"
 # =============================================================================
 
 resolve_job() {
+    JOB_SERVICE_ACCOUNT=""   # vazio = compute default; sobrescrito por job que precise de outra identidade
     case "$JOB_KIND" in
         leads)
             JOB_NAME="$INGESTION_LEADS_JOB"
@@ -83,12 +84,14 @@ resolve_job() {
             ;;
         launch_cal)
             JOB_NAME="$INGESTION_LAUNCH_CAL_JOB"
-            # Lê a planilha canônica do cliente (gspread via ADC do runtime SA — o SA
-            # precisa ter acesso de leitura à planilha) e materializa as datas de LF em
-            # analytics.launch_calendar. Fonte runtime do resolvedor (LAUNCHES_SOURCE=table).
+            # Lê a planilha canônica do cliente (gspread via ADC do runtime SA) e materializa
+            # as datas de LF em analytics.launch_calendar. Fonte runtime do resolvedor
+            # (LAUNCHES_SOURCE=table). Roda como a SA que TEM acesso de leitura à planilha
+            # (mesma do serviço da API) — senão gspread dá 403.
             JOB_ARGS="/app/src/data/launch_calendar.py,--sync-to-table"
             JOB_DESC="materializa o calendário de LFs (planilha do cliente) em analytics.launch_calendar"
             JOB_TASK_TIMEOUT="600"
+            JOB_SERVICE_ACCOUNT="$INGESTION_LAUNCH_CAL_SA"
             ;;
         *)
             print_error "--job inválido: '$JOB_KIND' (use 'leads', 'sales', 'spend' ou 'launch_cal')"
@@ -185,6 +188,11 @@ deploy_ingestion_job() {
 
     # Sem --set-cloudsql-instances: o ledger é acessado por IP público + SSL (LEDGER_DB_*),
     # igual ao leads_unify._open / analytics_connection. Cloud Run Jobs usam --set-env-vars.
+    # --service-account só quando o job precisa de identidade específica (ex.: o
+    # calendário lê a planilha e roda como a SA da API). Vazio → compute default.
+    if [ -n "$JOB_SERVICE_ACCOUNT" ]; then
+        print_info "Service account: $JOB_SERVICE_ACCOUNT"
+    fi
     gcloud run jobs deploy "$JOB_NAME" \
         --image "$IMAGE_TO_DEPLOY" \
         --region "$REGION" \
@@ -193,6 +201,7 @@ deploy_ingestion_job() {
         --task-timeout "$JOB_TASK_TIMEOUT" \
         --max-retries 1 \
         --set-env-vars="$ENV_VARS" \
+        ${JOB_SERVICE_ACCOUNT:+--service-account="$JOB_SERVICE_ACCOUNT"} \
         --command python \
         --args="$JOB_ARGS" \
         --quiet || { print_error "Falha no deploy do Cloud Run Job"; exit 1; }
