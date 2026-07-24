@@ -1,6 +1,6 @@
 # Índice de Documentação — Bring Data V2
 
-**Atualizado:** 2026-06-23
+**Atualizado:** 2026-07-24
 **Propósito:** mapa de todos os documentos da pasta `docs/`, seus papéis, status e como se relacionam.
 
 > **Reorganização de nomenclatura (10/05/2026):** os docs operacionais (este índice, `PLANO_EXECUCAO`, `registro_erros_ml`, `AUDITORIA_QUEBRA_PRODUCAO`) foram reescritos pra usar linguagem natural primeiro. Os catálogos técnicos (`PLANO_SAFEGUARD`, `PLANO_REFACTOR_MLOPS`) ganharam título verbal por item + identificador codificado (`T1-X`, `DT-X`) movido pro rodapé. Identificadores continuam funcionais pra cruzar com commits e issues antigas, mas o nome verbal é o que aparece no fluxo de leitura.
@@ -181,6 +181,16 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Status:** ativo. Criado em 2026-05-10. Sucessor da seção V.3 do `registro_erros_ml.md` (que continua válida como histórico mas perde papel operacional).
 **Relação:** camada operacional de auditoria. Quando precisa de detalhe técnico, links pra `PLANO_SAFEGUARD.md`, `PLANO_REFACTOR_MLOPS.md` ou `registro_erros_ml.md`. Não duplica conteúdo, apenas referencia.
 
+### `RUNBOOK_scoring_pipeline.md` 🛟 Runbook de confiabilidade
+**Papel:** runbook operacional da confiabilidade do pipeline de scoring (consumer Pub/Sub até CAPI). Fixa a **invariante de que o serviço `smart-ads-api` é público por design** (o webhook de captura recebe POST anônimo do browser) e que **`allUsers` NUNCA deve ser removido**. Documenta o apagão de 22-23/07/2026 (remover `allUsers` como "limpeza pós-deploy" deu 403 nos crons por ~22h e empilhou ~1.060 leads na fila) e o endurecimento aplicado no mesmo PR: deploy nunca mais remove `allUsers` (self-healing), crons com OIDC como defesa extra, `DEFAULT_BATCH` de 25 para 250, alertas de Cloud Monitoring. Inclui o procedimento de drenagem da fila.
+**Status:** ✅ ativo. Criado em 2026-07-23. **Leitura obrigatória antes de qualquer mexida em IAM/acesso público do serviço.**
+**Relação:** invariante reforçada no `api/deploy_capi.sh` (reafirma `allUsers` a cada deploy). Incidente também na memória `incidente_allusers_derruba_crons.md`. Complementa `operacoes_gcp_custos.md` (custos/infra) e `ROLLBACK_DECISION.md`.
+
+### `ROLLBACK_DECISION.md` 🛟 Runbook de rollback
+**Papel:** racional e procedimento canônico de rollback: **troca de tráfego no Cloud Run** (`update-traffic --to-revisions=<rev>=100`, ~10s) em vez de redeploy. Explica a aposentadoria dos worktrees locais de rollback (removidos em 19/04/2026 por darem "falsa segurança", já que restaurar código local não reverte produção) e a rastreabilidade git↔revisão via tags `deploy/AAAA-MM-DD-NNNNN` e a env `DEPLOY_GIT_SHA` carimbada em cada revisão.
+**Status:** ✅ ativo. **Não existe rollback automático por health check: é sempre manual.**
+**Relação:** procedimento inline no `api/deploy_capi.sh` (`rollback_deploy`). Complementa `RUNBOOK_scoring_pipeline.md`. Protocolo de progressão de tráfego em `PLANO_SAFEGUARD.md`.
+
 ---
 
 ---
@@ -255,6 +265,11 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Papel:** documentação interna do modelo em produção (run `2a98e51c`, 59 features, AUC 0.745).
 **Status:** snapshot histórico — o modelo ativo em produção hoje é o jan30 (`d51757f5`), não o `2a98e51c`. Complementa `memory/project_active_model.md`.
 
+### `MODEL_CHANGELOG.md` 📒 Changelog de modelos
+**Papel:** histórico dos modelos que passaram por produção, uma entrada por modelo com o vínculo de lineage (commit de treino, `run_id`, e se foi CANDIDATO ou DEPLOYADO). Gerado a partir do model card automático do treino (o pipeline carimba `git_commit`/`git_dirty` no run; `src/model/model_card.py` monta a entrada).
+**Status:** ✅ ativo. Criado com o model card automático (PR #92, 2026-07-23).
+**Relação:** alimentado por `src/model/model_card.py` + CLI `scripts/gen_model_card.py` (ou `train_pipeline --model-card`). Fecha o versionamento código→modelo. Promoção de modelo em `PROMOCAO_MODELO_CHECKLIST.md`.
+
 ---
 
 ## Camada 5 — Histórico (decisões passadas, concluídas)
@@ -305,6 +320,7 @@ ESTRATÉGIA (porquê)
 
 REFERÊNCIA TÉCNICA (como o sistema funciona)
   ARQUITETURA_SISTEMA_COMPLETA.md    ← atualizar para estado atual
+  MODEL_CHANGELOG.md                 (changelog de modelos + lineage)
 
 ROADMAP ÚNICO (o que fazer e quando)  ⭐ leitura diária
   PLANO_EXECUCAO.md
@@ -328,6 +344,8 @@ ANÁLISES (snapshots históricos)
 RUNBOOKS (tarefas específicas)
   acesso_sql.md / acesso_sheets.md / MLFLOW.md / monitoring-api.md
   operacoes_gcp_custos.md              (otimizações + protocolo Cloud SQL)
+  RUNBOOK_scoring_pipeline.md          (confiabilidade do scoring; invariante allUsers)
+  ROLLBACK_DECISION.md                 (rollback via troca de tráfego, ~10s)
 
 ARQUIVADOS (concluído, referência)
   arquivo/ROADMAP_MLOPS_MATURIDADE.md  (absorvido pelo PLANO_EXECUCAO)
