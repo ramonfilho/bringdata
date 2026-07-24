@@ -4526,23 +4526,45 @@ async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5,
         de liberar pro cliente (política: validação→DM, OK explícito→trafego).
 
     Janela (BRT), em ordem de precedência:
-      - `start_date`+`end_date` (YYYY-MM-DD): intervalo FUNDIDO (ex.: ontem+hoje num
-        só relatório). ≤90d, valida em `_utm_quality_day_range_brt`.
-      - `date` (YYYY-MM-DD): um dia específico.
-      - nada: dia ANTERIOR (comportamento do cron).
-    A linha "Lançamento" é sempre o acumulado; só a janela muda.
+      - `start_date`+`end_date`: intervalo FUNDIDO (ex.: ontem+hoje num só
+        relatório). ≤90d, valida em `_utm_quality_day_range_brt`.
+      - `date`: um dia específico.
+      - nada: dia ANTERIOR (comportamento do cron da manhã 06:40).
+    Aceitam YYYY-MM-DD OU os tokens relativos `hoje`/`ontem` (resolvidos no
+    request). É assim que o cron da TARDE (14h) manda ontem+hoje sem a URL saber a
+    data: `?start_date=ontem&end_date=hoje`. A linha "Lançamento" é sempre o
+    acumulado; só a janela muda.
 
     Substitui o antigo hack de subir canary com env de canal redirecionado pra
     postar no DM: agora é `?dest=dm[&date=…]` ou `?dest=dm&start_date=…&end_date=…`.
     """
     from src.monitoring.utm_quality import render_slack_blocks, post_to_slack
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    _BRT = _tz(_td(hours=-3))
+
+    def _rel_day(tok):
+        """Tokens relativos p/ o cron pedir janela dinâmica numa URL estática:
+        'hoje'/'ontem' → 'YYYY-MM-DD' BRT (resolvido no request). YYYY-MM-DD
+        explícito passa direto. É o que permite o envio das 14h mandar ontem+hoje
+        (start_date=ontem&end_date=hoje) sem a URL saber a data."""
+        if not tok:
+            return tok
+        t = str(tok).strip().lower()
+        _today = _dt.now(_BRT).date()
+        if t == 'hoje':
+            return _today.isoformat()
+        if t == 'ontem':
+            return (_today - _td(days=1)).isoformat()
+        return tok
+
+    date = _rel_day(date)
+    start_date = _rel_day(start_date)
+    end_date = _rel_day(end_date)
     if start_date and end_date:
         start_utc, end_utc = _utm_quality_day_range_brt(start_date, end_date)
     elif date:
         start_utc, end_utc = _utm_quality_day_range_brt(date, date)
     else:
-        _BRT = _tz(_td(hours=-3))
         _ontem = (_dt.now(_BRT) - _td(days=1)).date()
         _s = _dt(_ontem.year, _ontem.month, _ontem.day, 0, 0, 0, tzinfo=_BRT)
         _e = _dt(_ontem.year, _ontem.month, _ontem.day, 23, 59, 59, tzinfo=_BRT)
