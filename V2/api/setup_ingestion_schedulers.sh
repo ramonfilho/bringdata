@@ -113,6 +113,7 @@ main() {
     echo "║   Bring Data - Setup dos Schedulers de Ingestão Automática      ║"
     echo "╚════════════════════════════════════════════════════════════════╝"
     print_info "Projeto: $PROJECT_ID | Região: $REGION"
+    print_info "Calend.: $INGESTION_LAUNCH_CAL_JOB   ($INGESTION_LAUNCH_CAL_SCHEDULE UTC)"
     print_info "Leads:   $INGESTION_LEADS_JOB   ($INGESTION_LEADS_SCHEDULE UTC)"
     print_info "Vendas:  $INGESTION_SALES_JOB   ($INGESTION_SALES_SCHEDULE UTC)"
     print_info "Gasto:   $INGESTION_SPEND_JOB   ($INGESTION_SPEND_SCHEDULE UTC)"
@@ -121,11 +122,13 @@ main() {
     validate_prerequisites
 
     if [ "$YES_FLAG" = false ]; then
-        read -p "Criar/atualizar os 3 schedulers? (y/n) " -n 1 -r; echo ""
+        read -p "Criar/atualizar os 4 schedulers? (y/n) " -n 1 -r; echo ""
         [[ $REPLY =~ ^[Yy]$ ]] || { print_warning "Cancelado"; exit 0; }
     fi
 
     print_header "2. CLOUD SCHEDULERS"
+    upsert_scheduler "${INGESTION_LAUNCH_CAL_JOB}-cron" "$INGESTION_LAUNCH_CAL_SCHEDULE" \
+        "$INGESTION_LAUNCH_CAL_JOB" "Ingestão diária: calendário de LFs (planilha do cliente) → analytics.launch_calendar"
     upsert_scheduler "${INGESTION_LEADS_JOB}-cron" "$INGESTION_LEADS_SCHEDULE" \
         "$INGESTION_LEADS_JOB" "Ingestão diária: anexa leads novos do ledger ao train_unified"
     upsert_scheduler "${INGESTION_SALES_JOB}-cron" "$INGESTION_SALES_SCHEDULE" \
@@ -135,12 +138,13 @@ main() {
 
     print_header "PRONTO"
     echo "Schedulers (região $REGION):"
+    echo "  ${INGESTION_LAUNCH_CAL_JOB}-cron   $INGESTION_LAUNCH_CAL_SCHEDULE UTC (05:30 BRT)"
     echo "  ${INGESTION_LEADS_JOB}-cron   $INGESTION_LEADS_SCHEDULE UTC (06:00 BRT)"
     echo "  ${INGESTION_SALES_JOB}-cron   $INGESTION_SALES_SCHEDULE UTC (06:30 BRT)"
     echo "  ${INGESTION_SPEND_JOB}-cron   $INGESTION_SPEND_SCHEDULE UTC (06:45 BRT)"
     echo ""
     echo "Disparar um agora (teste):"
-    echo "  gcloud scheduler jobs run ${INGESTION_LEADS_JOB}-cron --location $REGION"
+    echo "  gcloud scheduler jobs run ${INGESTION_LAUNCH_CAL_JOB}-cron --location $REGION"
     echo ""
     print_success "Concluído! 🎉"
 }
