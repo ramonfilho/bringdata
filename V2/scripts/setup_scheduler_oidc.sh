@@ -15,7 +15,7 @@ SA="scheduler-invoker@${PROJECT}.iam.gserviceaccount.com"
 AUD="https://smart-ads-api-gazrm25mda-uc.a.run.app"
 # Só os crons que chamam o smart-ads-api por HTTP. Os de ingestão chamam a API
 # run.googleapis.com (:run) e já autenticam por OAuth — fora deste script.
-JOBS="slack-digest-daily slack-digest-daily-dm utm-quality-daily-trafego railway-polling cpl-refresh-daily pubsub-process-pending"
+JOBS="slack-digest-daily slack-digest-daily-dm utm-quality-daily-trafego utm-quality-daily-trafego-tarde railway-polling cpl-refresh-daily pubsub-process-pending"
 
 echo "== 1. SA dedicada (cria se não existir) =="
 gcloud iam service-accounts describe "$SA" --project="$PROJECT" >/dev/null 2>&1 \
