@@ -3928,9 +3928,13 @@ async def daily_monitoring_check_railway(
         # anterior — permite comparar previsão atual com previsão histórica).
         try:
             lf_ref_name = railway_lead_quality.get('lf_referencia_label')
-            if revenue_forecast and lf_ref_name and os.path.exists(launches_path):
-                with open(launches_path) as _lf_f2:
-                    _launches_cfg2 = yaml.safe_load(_lf_f2) or {}
+            # Fonte única via core.launches (analytics.launch_calendar quando
+            # LAUNCHES_SOURCE=table, senão yaml). Antes lia `launches_path`, que NUNCA
+            # era definido aqui → NameError e esta previsão do LF anterior degradava
+            # sempre. Agora enxerga a tabela como o resto do resolvedor.
+            from src.core.launches import load_launches as _load_launches2
+            _launches_cfg2 = _load_launches2() if (revenue_forecast and lf_ref_name) else {}
+            if revenue_forecast and lf_ref_name and lf_ref_name in _launches_cfg2:
                 _lf_cfg = _launches_cfg2.get(lf_ref_name) or {}
                 _cs = _lf_cfg.get('cap_start'); _ce = _lf_cfg.get('cap_end')
                 if _cs and _ce:
