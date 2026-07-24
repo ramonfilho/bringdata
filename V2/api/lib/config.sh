@@ -212,6 +212,16 @@ build_env_vars() {
     # Voltar pra 'railway' só em rollback consciente.
     ENV_VARS="$ENV_VARS,LEDGER_READ_SOURCE=${LEDGER_READ_SOURCE:-cloudsql}"
 
+    # Fonte do CALENDÁRIO de LFs do resolvedor (core.launches.load_launches):
+    # yaml (configs/launches.yaml estático) | table (analytics.launch_calendar,
+    # refresh diário da planilha do cliente pelo job ingestion-launch-calendar).
+    # DEFAULT=table desde 24/07/2026 (validado: resolvia a DEV21 que faltava no
+    # yaml). Fixo no config.sh pelo mesmo motivo do LEDGER_READ_SOURCE: sem isso,
+    # um deploy que não exporte a env reverteria pro yaml estático em silêncio.
+    # O código tem fallback automático pro yaml se a tabela vier vazia/indisponível;
+    # rollback consciente = LAUNCHES_SOURCE=yaml.
+    ENV_VARS="$ENV_VARS,LAUNCHES_SOURCE=${LAUNCHES_SOURCE:-table}"
+
     # Fonte do decil_challenger dos RELATÓRIOS (refator dual-decil, Fase 3):
     # scores_historicos (legado) | ledger (lê registros_ml direto, onde a Fase 2
     # grava ao vivo e a Fase 4 copiou o histórico). DEFAULT=ledger — o flip da
