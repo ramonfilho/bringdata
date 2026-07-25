@@ -30,50 +30,58 @@ _VALID_DECILS = {f"D{i:02d}" for i in range(1, 11)}
 _MAX_EXTRA_HQ_DESTINATIONS = 5
 
 
-def _parse_extra_hq_destinations(raw: Any) -> Optional[List["ExtraHQDestination"]]:
-    """Parse fail-loud da lista capi.extra_hq_destinations do YAML.
+def _parse_extra_hq_destinations(
+    raw: Any, field_label: str = "capi.extra_hq_destinations"
+) -> Optional[List["ExtraHQDestination"]]:
+    """Parse fail-loud de uma lista de destinos HQ (event_name + pixel_id + decils).
 
-    None/ausente → None (sem fan-out). Lista vazia → None (idem).
+    Reusado por dois campos com a MESMA forma: o `capi.extra_hq_destinations`
+    (global, espelho do HQ primário em outro pixel) e o
+    `ab_test.variants.*.capi_secondary_hq_events` (por variante, evento HQ
+    adicional tipo "nata" D10). `field_label` só ajusta a mensagem de erro
+    pra apontar o campo certo.
+
+    None/ausente → None. Lista vazia → None.
     Qualquer entrada inválida levanta ValueError com mensagem acionável.
     """
     if raw is None:
         return None
     if not isinstance(raw, list):
         raise ValueError(
-            f"capi.extra_hq_destinations deve ser lista, recebido {type(raw).__name__}"
+            f"{field_label} deve ser lista, recebido {type(raw).__name__}"
         )
     if not raw:
         return None
     if len(raw) > _MAX_EXTRA_HQ_DESTINATIONS:
         raise ValueError(
-            f"capi.extra_hq_destinations com {len(raw)} entradas excede o máximo "
+            f"{field_label} com {len(raw)} entradas excede o máximo "
             f"de {_MAX_EXTRA_HQ_DESTINATIONS} (salvaguarda contra runaway)"
         )
     out: List["ExtraHQDestination"] = []
     for i, entry in enumerate(raw):
         if not isinstance(entry, dict):
             raise ValueError(
-                f"capi.extra_hq_destinations[{i}] deve ser dict, recebido {type(entry).__name__}"
+                f"{field_label}[{i}] deve ser dict, recebido {type(entry).__name__}"
             )
         event_name = entry.get("event_name")
         pixel_id = entry.get("pixel_id")
         decils = entry.get("decils")
         if not event_name or not isinstance(event_name, str):
             raise ValueError(
-                f"capi.extra_hq_destinations[{i}].event_name obrigatório (string não vazia)"
+                f"{field_label}[{i}].event_name obrigatório (string não vazia)"
             )
         if not pixel_id or not isinstance(pixel_id, str):
             raise ValueError(
-                f"capi.extra_hq_destinations[{i}].pixel_id obrigatório (string não vazia)"
+                f"{field_label}[{i}].pixel_id obrigatório (string não vazia)"
             )
         if not isinstance(decils, list) or not decils:
             raise ValueError(
-                f"capi.extra_hq_destinations[{i}].decils obrigatório (lista não vazia)"
+                f"{field_label}[{i}].decils obrigatório (lista não vazia)"
             )
         bad = [d for d in decils if d not in _VALID_DECILS]
         if bad:
             raise ValueError(
-                f"capi.extra_hq_destinations[{i}].decils contém valores inválidos: {bad} "
+                f"{field_label}[{i}].decils contém valores inválidos: {bad} "
                 f"(esperado subconjunto de D01..D10)"
             )
         out.append(ExtraHQDestination(
@@ -567,6 +575,13 @@ class ABTestVariantConfig:
     capi_high_quality_decils: Optional[List[str]] = None  # Override por variante da faixa de decis que dispara HQ event.
                                                           # None → cai no global capi_config.high_quality_decils (default D09+D10).
                                                           # Ex.: ['D08','D09','D10'] estende HQLB sem afetar Champion.
+    capi_secondary_hq_events: Optional[List["ExtraHQDestination"]] = None  # Eventos HQ ADICIONAIS desta variante
+                                                          # (mesma forma de ExtraHQDestination: event_name + pixel_id + decils),
+                                                          # disparados junto do HQ primário mas com NOME próprio, faixa própria
+                                                          # e event_id próprio (dedup). Ex.: um evento "nata" só do D10 no mesmo
+                                                          # pixel. Difere do capi.extra_hq_destinations (global, mesmo-nome→outro
+                                                          # pixel): este é por variante e usa nome diferente do primário.
+                                                          # None/ausente → nenhum evento extra (Champion/abr28 intactos).
     calibrated_run_id: Optional[str] = None  # Bloco F — run MLflow do modelo CALIBRADO (sufixo -calibrated-isotonic).
                                              # None → usa run_id original (NoneCalibrator = identidade); RoasV1 não roda.
                                              # Quando setado, scoring carrega este run pra obter prob_calib via predict_proba.
@@ -646,6 +661,13 @@ class ABTestConfig:
                     thresholds=roas_v1_raw.get("thresholds"),
                 )
 
+            # Eventos HQ adicionais desta variante (ex.: nata D10). Mesma forma/validação
+            # de ExtraHQDestination — reusa o parser fail-loud, só troca o rótulo de erro.
+            secondary_hq_events = _parse_extra_hq_destinations(
+                vdata.get("capi_secondary_hq_events"),
+                field_label=f"variante '{name}'.capi_secondary_hq_events",
+            )
+
             variants[name] = ABTestVariantConfig(
                 run_id=vdata["run_id"],
                 utm_pattern=vdata.get("utm_pattern") or {},
@@ -656,6 +678,7 @@ class ABTestConfig:
                 url_pattern=vdata.get("url_pattern"),
                 pixel_id_override=vdata.get("pixel_id_override"),
                 capi_high_quality_decils=hq_decils_raw,
+                capi_secondary_hq_events=secondary_hq_events,
                 calibrated_run_id=vdata.get("calibrated_run_id"),
                 roas_v1=roas_v1,
                 conversion_rate_benchmark=vdata.get("conversion_rate_benchmark"),
