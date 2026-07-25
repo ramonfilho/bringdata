@@ -1095,6 +1095,7 @@ async def webhook_update_survey(
                 lead_capi_dict['ab_conversion_rates'] = ab_variant.conversion_rates
                 lead_capi_dict['ab_pixel_id'] = ab_variant.pixel_id_override
                 lead_capi_dict['ab_high_quality_decils'] = ab_variant.capi_high_quality_decils
+                lead_capi_dict['ab_secondary_hq_events'] = ab_variant.capi_secondary_hq_events
 
             # UTM filter: blocklist por campaign + allowlist por source (DT-CAPI-01/02)
             _allowed, _reason = should_send_to_destination(
@@ -1639,6 +1640,7 @@ async def process_daily_batch_capi(
                     lead_capi['ab_conversion_rates'] = ab_variant.conversion_rates
                     lead_capi['ab_pixel_id'] = ab_variant.pixel_id_override
                     lead_capi['ab_high_quality_decils'] = ab_variant.capi_high_quality_decils
+                    lead_capi['ab_secondary_hq_events'] = ab_variant.capi_secondary_hq_events
 
             enriched_leads.append(lead_capi)
 
@@ -5468,6 +5470,7 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
                     capi_lead['ab_conversion_rates'] = ab_v.conversion_rates
                     capi_lead['ab_pixel_id'] = ab_v.pixel_id_override
                     capi_lead['ab_high_quality_decils'] = ab_v.capi_high_quality_decils
+                    capi_lead['ab_secondary_hq_events'] = ab_v.capi_secondary_hq_events
 
                 # UTM filter: blocklist por campaign + allowlist por source (DT-CAPI-01/02)
                 _allowed, _reason = should_send_to_destination(lead, pipeline._client_config.capi, destination='meta')

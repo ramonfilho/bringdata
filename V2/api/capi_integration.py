@@ -712,6 +712,7 @@ def send_both_lead_events(
     ab_variant_config = None,  # ABTestVariantConfig — type hint omitido pra evitar import circular
     lead_score_calibrated: Optional[float] = None,
     cost_context = None,       # LeadCostContext — type hint omitido pra evitar import circular
+    secondary_hq_events=None,  # List[ExtraHQDestination] da variante (ex.: nata D10). None → nenhum extra.
     dry_run: bool = False,
 ) -> Dict:
     """
@@ -829,6 +830,7 @@ def send_both_lead_events(
         capi_config=capi_config,
         business_config=business_config,
         client_id=client_id,
+        secondary_hq_events=secondary_hq_events,
         dry_run=dry_run,
     )
 
@@ -843,6 +845,7 @@ def send_both_lead_events(
         "evento_com_valor": first["evento_com_valor"],
         "evento_high_quality": first["evento_high_quality"],
         "extra_hq_results": first["extra_hq_results"],
+        "secondary_hq_results": all_result.get("secondary_hq_results", []),
     }
 
 
@@ -862,6 +865,66 @@ def send_both_lead_events(
 # atribuição lendo o `capi.extra_hq_destinations` por nome do evento HQ
 # de cada uma. Eventos novos (sufixo _ROAS_V1) coexistem com os antigos
 # sem sobreposição.
+
+def _fire_hq_destinations(
+    destinations,
+    *,
+    email, phone, first_name, last_name, lead_score, decil, event_id,
+    fbp, fbc, user_agent, client_ip, event_source_url, event_timestamp,
+    test_event_code, survey_data, db, capi_config, client_id, dry_run,
+    only_matching_name=None,
+    distinct_event_id=False,
+) -> List[Dict]:
+    """Dispara N cópias do evento HQ (uma por destino), reusando `send_lead_qualified_high_quality`.
+
+    Mesmo corpo usado em 2 lugares (a regra do sw-architect: irmãs compartilham o miolo):
+      - Fan-out global (`capi.extra_hq_destinations`): `only_matching_name`=<HQ primário>,
+        mesmo `event_id`, outro pixel → só ESPELHA o HQ que acabou de sair.
+      - Eventos HQ adicionais por variante (`capi_secondary_hq_events`, ex.: nata D10):
+        `only_matching_name`=None (dispara todos) e `distinct_event_id`=True → NOME próprio
+        + `event_id` próprio (dedup em dobro: Meta deduplica por (nome, event_id)).
+    Cada destino é um `ExtraHQDestination` (event_name + pixel_id + decils). O filtro por
+    faixa de decis (`high_quality_decils_override`) é aplicado dentro da sub-função: decil
+    fora da faixa → `skipped` (não emite). Falha de um destino é logada, não derruba os outros.
+    """
+    results: List[Dict] = []
+    for i, dest in enumerate(destinations or []):
+        if only_matching_name is not None and dest.event_name != only_matching_name:
+            continue
+        eid = f"{event_id}_{dest.event_name}" if distinct_event_id else event_id
+        try:
+            r = send_lead_qualified_high_quality(
+                email=email,
+                phone=phone,
+                first_name=first_name,
+                last_name=last_name,
+                lead_score=lead_score,
+                decil=decil,
+                event_id=eid,
+                fbp=fbp,
+                fbc=fbc,
+                user_agent=user_agent,
+                client_ip=client_ip,
+                event_source_url=event_source_url,
+                event_timestamp=event_timestamp,
+                test_event_code=test_event_code,
+                survey_data=survey_data,
+                db=db,
+                capi_config=capi_config,
+                client_id=client_id,
+                event_name_override=dest.event_name,
+                pixel_id_override=dest.pixel_id,
+                high_quality_decils_override=list(dest.decils),
+                dry_run=dry_run,
+            )
+            results.append(r)
+        except Exception as e:
+            logger.warning(
+                f"⚠️  HQ copy [{i}] '{dest.event_name}' → pixel {dest.pixel_id} "
+                f"falhou para {email}: {e}"
+            )
+    return results
+
 
 def send_all_lead_events(
     assignments: List["DecileAssignment"],
@@ -883,6 +946,7 @@ def send_all_lead_events(
     capi_config: Optional[CAPIConfig] = None,
     business_config: Optional[BusinessConfig] = None,
     client_id: str = 'devclub',
+    secondary_hq_events=None,
     dry_run: bool = False,
 ) -> Dict:
     """Itera sobre N atribuições de decil e dispara o trio (base + HQ + fan-out) por uma.
@@ -954,46 +1018,21 @@ def send_all_lead_events(
             dry_run=dry_run,
         )
 
-        # Fan-out HQ — laço idêntico ao anterior, match case-sensitive
-        # pelo `event_name_hq` desta atribuição (não pelo HQ global).
-        extra_results: List[Dict] = []
+        # Fan-out HQ — espelha o HQ primário (MESMO nome) em outros pixels do cliente.
+        # Reusa _fire_hq_destinations (mesmo miolo do disparo por variante); o filtro
+        # `only_matching_name` preserva o comportamento antigo (só espelha o HQ desta
+        # atribuição), e sem `distinct_event_id` mantém o mesmo event_id de antes.
         extras = capi_config.extra_hq_destinations if (capi_config and capi_config.extra_hq_destinations) else []
-        primary_hq_event_name = assignment.event_name_hq
-        if extras:
-            for i, dest in enumerate(extras):
-                if dest.event_name != primary_hq_event_name:
-                    continue
-                try:
-                    r = send_lead_qualified_high_quality(
-                        email=email,
-                        phone=phone,
-                        first_name=first_name,
-                        last_name=last_name,
-                        lead_score=lead_score,
-                        decil=decil,
-                        event_id=event_id,
-                        fbp=fbp,
-                        fbc=fbc,
-                        user_agent=user_agent,
-                        client_ip=client_ip,
-                        event_source_url=event_source_url,
-                        event_timestamp=event_timestamp,
-                        test_event_code=test_event_code,
-                        survey_data=survey_data,
-                        db=db,
-                        capi_config=capi_config,
-                        client_id=client_id,
-                        event_name_override=dest.event_name,
-                        pixel_id_override=dest.pixel_id,
-                        high_quality_decils_override=list(dest.decils),
-                        dry_run=dry_run,
-                    )
-                    extra_results.append(r)
-                except Exception as e:
-                    logger.warning(
-                        f"⚠️  Fan-out HQ [{i}] '{dest.event_name}' → pixel {dest.pixel_id} "
-                        f"falhou para {email}: {e}"
-                    )
+        extra_results = _fire_hq_destinations(
+            extras,
+            email=email, phone=phone, first_name=first_name, last_name=last_name,
+            lead_score=lead_score, decil=decil, event_id=event_id,
+            fbp=fbp, fbc=fbc, user_agent=user_agent, client_ip=client_ip,
+            event_source_url=event_source_url, event_timestamp=event_timestamp,
+            test_event_code=test_event_code, survey_data=survey_data, db=db,
+            capi_config=capi_config, client_id=client_id, dry_run=dry_run,
+            only_matching_name=assignment.event_name_hq,
+        )
 
         per_assignment_results.append({
             "strategy_id": assignment.strategy_id,
@@ -1003,11 +1042,29 @@ def send_all_lead_events(
             "extra_hq_results": extra_results,
         })
 
+    # Eventos HQ adicionais da variante (ex.: nata D10) — disparados 1x por lead
+    # (não por atribuição), com NOME e event_id próprios (dedup). Decil = o da
+    # atribuição de Propensão (assignments[0]), o decil REAL do lead. Nenhum disparo
+    # se o campo não vier → Champion/abr28 (que não declaram) ficam intactos.
+    secondary_hq_results = _fire_hq_destinations(
+        secondary_hq_events,
+        email=email, phone=phone, first_name=first_name, last_name=last_name,
+        lead_score=lead_score,
+        decil=(assignments[0].decile if assignments else None),
+        event_id=event_id,
+        fbp=fbp, fbc=fbc, user_agent=user_agent, client_ip=client_ip,
+        event_source_url=event_source_url, event_timestamp=event_timestamp,
+        test_event_code=test_event_code, survey_data=survey_data, db=db,
+        capi_config=capi_config, client_id=client_id, dry_run=dry_run,
+        distinct_event_id=True,
+    ) if secondary_hq_events else []
+
     return {
         "status": "success",
         "email": email,
         "decil": assignments[0].decile if assignments else None,
         "events": per_assignment_results,
+        "secondary_hq_results": secondary_hq_results,
     }
 
 
@@ -1240,6 +1297,7 @@ def send_batch_events(leads: List[Dict], db=None, capi_config: Optional[CAPIConf
             ab_variant_config=lead.get('ab_variant_config'),
             lead_score_calibrated=lead.get('ab_lead_score_calibrated'),
             cost_context=lead.get('ab_cost_context'),
+            secondary_hq_events=lead.get('ab_secondary_hq_events'),
             dry_run=dry_run,
             # test_event_code=None (padrão) -> vai para PRODUÇÃO
         )

@@ -612,6 +612,7 @@ def process_pending_pubsub(
             cl["ab_conversion_rates"]  = ab_v.conversion_rates
             cl["ab_pixel_id"]          = ab_v.pixel_id_override
             cl["ab_high_quality_decils"] = ab_v.capi_high_quality_decils
+            cl["ab_secondary_hq_events"] = ab_v.capi_secondary_hq_events
             # Bloco F do EVENTOS_E_DECIS_PLANO — popula ingredientes da
             # RoasV1DecileStrategy quando TODOS estão presentes:
             #   (a) variante declarou roas_v1 e está enabled
