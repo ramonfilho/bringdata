@@ -76,12 +76,16 @@ ab_test:
 
     # =============================================================================
     # jul_24 — CHALLENGER NOVO. Retreino limpo (feature selection + peso de controle ON,
-    # lineage git 135b219). Roteia pelo próprio nome ("jul_24"). Dois eventos de qualidade
-    # no MESMO pixel do abr28 (1513): jul_24_top30 (D8-D10, primário) e jul_24_top10
-    # (D10, a nata) via capi_secondary_hq_events (PR #101). Sem encoding_overrides
-    # (encoding padrão, igual ao abr28). conversion_rates reusa a régua do abr28 — o
-    # evento base (jul_24_lq) é ignorado pelo Meta (não cadastrado, como o HQLB_LQ);
-    # quem otimiza são os eventos de qualidade (ocorrência, não valor).
+    # lineage git 135b219). Roteia pelo próprio nome ("jul_24"). Vários eventos de qualidade
+    # no MESMO pixel do abr28 (1513) pra o tráfego testar cortes diferentes:
+    #   Primário:   jul_24_top30 (D8-D10, top 30%).
+    #   Secundários (via capi_secondary_hq_events):
+    #     - agregados (topo, cumulativos): jul_24_top10 (D10), jul_24_top50 (D6-D10).
+    #     - isolados (faixa de percentil):  jul_24_70-90 (D8-D9), jul_24_50-70 (D6-D7).
+    # Nomenclatura: agregado leva "top", isolado é a faixa de percentil pura.
+    # Sem encoding_overrides (encoding padrão, igual ao abr28). conversion_rates reusa a
+    # régua do abr28 — o evento base (jul_24_lq) é ignorado pelo Meta (não cadastrado,
+    # como o HQLB_LQ); quem otimiza são os eventos de qualidade (ocorrência, não valor).
     # =============================================================================
     challenger_jul_24:
       run_id: b085b63681bc4d0d90bdbd466106763a
@@ -95,9 +99,18 @@ ab_test:
       capi_event_name_high_quality: jul_24_top30
       capi_high_quality_decils: ['D08', 'D09', 'D10']
       capi_secondary_hq_events:
-        - event_name: jul_24_top10
+        - event_name: jul_24_top10          # agregado: top 10% (a nata)
           pixel_id: "1513132406527995"
           decils: ['D10']
+        - event_name: jul_24_top50          # agregado: top 50% (~baseline, D6-D10)
+          pixel_id: "1513132406527995"
+          decils: ['D06', 'D07', 'D08', 'D09', 'D10']
+        - event_name: "jul_24_70-90"        # isolado: percentil 70-90 (D8-D9)
+          pixel_id: "1513132406527995"
+          decils: ['D08', 'D09']
+        - event_name: "jul_24_50-70"        # isolado: percentil 50-70 (D6-D7)
+          pixel_id: "1513132406527995"
+          decils: ['D06', 'D07']
       conversion_rates:
         D01: 0.000454
         D02: 0.001816
