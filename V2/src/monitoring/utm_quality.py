@@ -625,20 +625,27 @@ _TOP5_LEVEL_LABEL = {'creative': 'Criativos', 'campaign': 'Campanhas'}
 RECENCY_GUARD_PP = 2.0
 
 
-def _mark_with_recency_guard(ref: Optional[dict], win: Optional[dict],
-                             bar_pct: Optional[float]) -> str:
-    """Marcador (🟢/🔴/⚪) da linha, com a guarda de recência aplicada só quando o
-    lançamento cairia em 🔴. `ref` = linha do lançamento (acumulado); `win` = linha
-    da janela recente (ontem); `bar_pct` = alvo TOP5 em %D9-D10."""
+def _guarded_status(ref: Optional[dict], win: Optional[dict],
+                    bar_pct: Optional[float]) -> str:
+    """Status FINAL vs o alvo TOP5 com a guarda de recência: 'acima' | 'abaixo' |
+    'neutro'. `ref` = linha do lançamento (acumulado); `win` = linha da janela
+    recente (ontem); `bar_pct` = alvo TOP5 em %D9-D10. Só rebaixa 'abaixo'→'neutro'
+    quando está pouco abaixo (≤ RECENCY_GUARD_PP) E melhorou ontem (janela > acum.).
+    É o classificador único usado pelo marcador E pelo agrupamento por ação."""
     status = (ref or {}).get('status')
     if status == 'abaixo' and bar_pct is not None:
         lf_pct = (ref or {}).get('pct_d9_d10')
         win_pct = (win or {}).get('pct_d9_d10')
-        # pouco abaixo do alvo (≤ RECENCY_GUARD_PP) E melhorou ontem (janela > acum.)
         if (lf_pct is not None and (bar_pct - lf_pct) <= RECENCY_GUARD_PP
                 and win_pct is not None and win_pct > lf_pct):
             status = 'neutro'
-    return _TOP5_MARK.get(status, '⚪')
+    return status or 'neutro'
+
+
+def _mark_with_recency_guard(ref: Optional[dict], win: Optional[dict],
+                             bar_pct: Optional[float]) -> str:
+    """Marcador (🟢/🔴/⚪) da linha — wrapper fino sobre _guarded_status."""
+    return _TOP5_MARK.get(_guarded_status(ref, win, bar_pct), '⚪')
 
 
 def _top5_line(e: dict, level: str) -> str:
@@ -703,45 +710,81 @@ def _twoline_entry(name: str, marker: str, ontem: Optional[dict], lf: Optional[d
     return "\n".join([f"{marker} {name}", fmt(win_label[:10], ontem), fmt('Lançamento', lf)])
 
 
+# Ação sugerida por nível: acima do alvo = ampliar, abaixo = cortar. Orçamento é
+# decisão de CAMPANHA; no criativo o verbo vira escalar/pausar.
+_TOP5_ACTION = {
+    'campaign': ('📈 Aumentar orçamento', '📉 Reduzir orçamento'),
+    'creative': ('📈 Escalar', '📉 Pausar ou revisar'),
+}
+# Trava de segurança por grupo (limite de ~3000 chars por section do Slack). Com
+# min_n=100 os grupos são pequenos; raramente estoura, e o excedente vira nota.
+_GROUP_CAP = 15
+
+
 def _render_twoline_top5(top5_window: Optional[dict], top5_lf: Optional[dict], *,
                          win_label: str, lf_label: str, lf_state: str,
                          n_win: int, nlf: int) -> List[dict]:
-    """Por criativo/campanha, DUAS linhas — janela (ontem) e lançamento — cada uma
-    com o %D9-D10 (fatia de leads no topo, régua Challenger). No topo, o alvo dos
-    TOP5 em D9-D10. Cor pelo %D9-D10 do lançamento vs alvo. Ordenado pelo %D9-D10
-    do lançamento."""
+    """Por criativo/campanha, agrupado por AÇÃO em vez de lista única: as ACIMA do
+    alvo (aumentar orçamento/escalar) e as ABAIXO (reduzir/pausar), cada uma em duas
+    linhas (janela + lançamento) com o %D9-D10 na régua Challenger. As dentro do
+    alvo (⚪) são omitidas — só o total é informado. Mostra TODAS as acionáveis
+    (sem corte por extremos), até a trava de segurança do Slack por grupo."""
     base = top5_lf or top5_window
     bar_pct = base.get('bar_pct')
     alvo = f"{bar_pct:.0f}%" if bar_pct is not None else "—"
     blocks: List[dict] = [{'type': 'context', 'elements': [{'type': 'mrkdwn', 'text': (
-        f"Alvo TOP5 = {alvo} em D9–D10"
+        f"Alvo TOP5 = {alvo} em D9–D10 · 🟢 acima → aumentar · 🔴 abaixo → reduzir · "
+        f"dentro do alvo omitido"
     )}]}]
-    CAP = 20
 
     def _key(e):  # ordena pelo %D9-D10; cai pra nota se pct ausente
         return (e.get('pct_d9_d10') if e.get('pct_d9_d10') is not None else e.get('avg_decil', 0))
+
+    def _group_block(level, title, marker, rows, wmap, lmap):
+        if not rows:
+            return []
+        shown = rows[:_GROUP_CAP]
+        extra = len(rows) - len(shown)
+        entries = []
+        for e in shown:
+            utm = e['utm']
+            name = _display_creative(e) if level == 'creative' else _short_campaign_name(utm)
+            entries.append(_twoline_entry(name, marker, wmap.get(utm), lmap.get(utm), win_label))
+        out = [{'type': 'section', 'text': {'type': 'mrkdwn',
+                'text': f"*{_TOP5_LEVEL_LABEL[level]} — {title} ({len(rows)})*\n```\n"
+                        + "\n".join(entries) + "\n```"}}]
+        if extra:
+            out.append({'type': 'context', 'elements': [{'type': 'mrkdwn',
+                        'text': f"_+{extra} não listadas_"}]})
+        return out
+
     for level in ('creative', 'campaign'):
         wmap = {e['utm']: e for e in (((top5_window or {}).get('levels', {}).get(level) or {}).get('rows') or [])}
         lrows = ((top5_lf or {}).get('levels', {}).get(level) or {}).get('rows') or []
-        order = sorted(lrows, key=_key, reverse=True) if lrows else \
-            sorted(wmap.values(), key=_key, reverse=True)
+        lmap = {e['utm']: e for e in lrows}
+        order = lrows if lrows else list(wmap.values())
         if not order:
             continue
-        lmap = {e['utm']: e for e in lrows}
-        extra = max(0, len(order) - CAP)
-        entries = []
-        for e in order[:CAP]:
-            utm = e['utm']
-            name = _display_creative(e) if level == 'creative' else _short_campaign_name(utm)
-            ref = lmap.get(utm) or e
-            marker = _mark_with_recency_guard(ref, wmap.get(utm), bar_pct)
-            entries.append(_twoline_entry(name, marker, wmap.get(utm), lmap.get(utm), win_label))
-        body = "\n".join(entries)
-        blocks.append({'type': 'section', 'text': {'type': 'mrkdwn',
-            'text': f"*{_TOP5_LEVEL_LABEL[level]}*\n```\n{body}\n```"}})
-        if extra:
+        aumentar, reduzir, n_neutro = [], [], 0
+        for e in order:
+            st = _guarded_status(lmap.get(e['utm']) or e, wmap.get(e['utm']), bar_pct)
+            if st == 'acima':
+                aumentar.append(e)
+            elif st == 'abaixo':
+                reduzir.append(e)
+            else:
+                n_neutro += 1
+        aumentar.sort(key=_key, reverse=True)   # melhores no topo
+        reduzir.sort(key=_key)                   # piores no topo (maior corte primeiro)
+        up_lbl, down_lbl = _TOP5_ACTION[level]
+        blocks.extend(_group_block(level, up_lbl, '🟢', aumentar, wmap, lmap))
+        blocks.extend(_group_block(level, down_lbl, '🔴', reduzir, wmap, lmap))
+        if not aumentar and not reduzir:
+            blocks.append({'type': 'section', 'text': {'type': 'mrkdwn',
+                'text': f"*{_TOP5_LEVEL_LABEL[level]}* — todas dentro do alvo (sem ação)"}})
+        elif n_neutro:
             blocks.append({'type': 'context', 'elements': [{'type': 'mrkdwn',
-                'text': f"_+{extra} não listados_"}]})
+                'text': f"_{n_neutro} {_TOP5_LEVEL_LABEL[level].lower()} dentro do alvo (manter)_"}]})
     return blocks
 
 
