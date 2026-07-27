@@ -554,10 +554,14 @@ _DATE_RE = re.compile(r'\d{4}-\d{2}-\d{2}')
 
 def _short_campaign_name(utm: str) -> str:
     """Encurta a UTM de campanha (pipe-delimitada, longona) pro essencial:
-    público + data + tag de optimization_goal. Ex.:
-    'DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1 | 2026-05-26 | LEADHQLB|120244...'
-    → 'FRIO · 2026-05-26 · LEADHQLB'. Sem tag legível, desambígua pelo fim do ID.
+    público + data + tag de optimization_goal + ID da campanha na Meta. Ex.:
+    'DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1 | 2026-05-26 | LEADHQLB|120244621534140390'
+    → 'FRIO · 2026-05-26 · LEADHQLB · ID 120244621534140390'.
     A UTM completa continua no endpoint JSON; aqui é só leitura no Slack.
+
+    O ID (corrida de dígitos no FIM da UTM) é o identificador da campanha no
+    gerenciador da Meta — o gestor usa esse número pra achar a campanha; por isso
+    vai SEMPRE no fim do rótulo (decisão do usuário, 27/07/2026).
 
     A tag é o token 'LEAD…' imediatamente antes do ID numérico (LEADQUALIFIED =
     Champion, LEADHQLB = Challenger, ver campaign_classifier); o 'LEAD' solto da
@@ -567,11 +571,14 @@ def _short_campaign_name(utm: str) -> str:
         return 'sem_utm'
     if '{{' in raw:
         return 'macro não resolvido'
+    # ID completo da campanha na Meta = corrida de dígitos que fecha a UTM.
+    m_id = re.search(r'(\d{8,})\D*$', raw)
+    camp_id = m_id.group(1) if m_id else None
     if _BARE_ID_RE.match(raw):
-        return f"campanha sem nome (#{raw[-6:]})"
+        return f"campanha sem nome (ID {raw})"
     parts = [p.strip() for p in raw.split('|') if p.strip()]
     if len(parts) <= 2:
-        return raw  # já curta (ex.: 'devlf')
+        return raw  # já curta (ex.: 'devlf'); ID, se houver, já está inline no raw
     aud = next((p.upper() for p in parts if p.upper() in _CAMP_AUDIENCE), None)
     date = next((m.group(0) for p in parts for m in [_DATE_RE.search(p)] if m), None)
     tag = None
@@ -579,11 +586,9 @@ def _short_campaign_name(utm: str) -> str:
         cand = re.sub(r'[^A-Za-z]', '', parts[-2]).upper()
         if re.fullmatch(r'LEAD[A-Z]+', cand) and cand != 'LEAD':
             tag = cand
-    idtail = None
-    if not tag:
-        m = re.search(r'(\d{6,})\D*$', raw)
-        idtail = f"#{m.group(1)[-6:]}" if m else None
-    bits = [b for b in (aud, date, tag or idtail) if b]
+    bits = [b for b in (aud, date, tag) if b]
+    if camp_id:
+        bits.append(f"ID {camp_id}")
     return ' · '.join(bits) if bits else raw
 
 
