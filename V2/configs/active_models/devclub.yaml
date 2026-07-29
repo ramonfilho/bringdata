@@ -90,10 +90,13 @@ ab_test:
     challenger_jul_24:
       run_id: b085b63681bc4d0d90bdbd466106763a
       role: challenger
-      campaign_tag: "jul_24"
+      # As campanhas na Meta se chamam "JUL24_TOP30/TOP10/TOP50" (sem underline antes do 24).
+      # A etiqueta ERA "jul_24" e nunca casava (substring) → leads caíam em variant=None e
+      # recebiam os eventos padrão, não os do jul_24 (A/B parado). "JUL24" casa os 3 tiers.
+      campaign_tag: "JUL24"                     # classificador do relatório (mesmo typo)
       display_name: "Challenger (jul_24)"
       utm_pattern:
-        utm_campaign: "jul_24"
+        utm_campaign: "JUL24"                   # roteamento: casa JUL24_TOP30/TOP10/TOP50
       pixel_id_override: "1513132406527995"
       capi_event_name: jul_24_lq
       capi_event_name_high_quality: jul_24_top30
