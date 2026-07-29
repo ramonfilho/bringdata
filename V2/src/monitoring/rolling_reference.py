@@ -28,7 +28,7 @@ from typing import Optional
 
 import pandas as pd
 
-from src.data.matured_window import build_matured_window, matured_bounds
+from src.data.matured_window import build_matured_window, matured_bounds, resolve_ruler_run_id
 # NOTE(sw-architect): build_matched_df/read_analytics_sales moram hoje em
 # src/validation/model_performance. É reuso (não duplicação); a limpeza de camada
 # (mover o join pra src/data e os dois consumirem de lá) fica pra um passo próprio.
@@ -110,6 +110,18 @@ def fit_calibrator(matched_df: pd.DataFrame, *, method: str = "isotonic"):
     return cal
 
 
+def sample_calibration_curve(cal, *, n: int = 101) -> dict:
+    """Serializa o calibrador como uma curva amostrada score→P num grid [0,1]. O
+    leitor reconstrói a conversão ESPERADA de um lead com np.interp — portável, sem
+    depender de sklearn na leitura (jsonb na tabela da referência)."""
+    import numpy as np
+    x = np.linspace(0.0, 1.0, n)
+    y = cal.transform(x)
+    return {"method": getattr(cal, "method", "unknown"),
+            "x": [round(float(v), 4) for v in x.tolist()],
+            "y": [round(float(v), 6) for v in y.tolist()]}
+
+
 def build_conversion_reference(
     *,
     as_of: Optional[date] = None,
@@ -124,6 +136,7 @@ def build_conversion_reference(
     calibrador. Devolve o dict pronto pra materializar na tabela da referência.
     """
     as_of = as_of or date.today()
+    run_id = ruler_run_id or resolve_ruler_run_id(client_id)
     win_start, win_end = matured_bounds(window_days=window_days,
                                         maturation_days=maturation_days, as_of=as_of)
 
@@ -133,7 +146,7 @@ def build_conversion_reference(
     try:
         matured = build_matured_window(
             window_days=window_days, maturation_days=maturation_days, as_of=as_of,
-            client_id=client_id, ruler_run_id=ruler_run_id, conn=conn,
+            client_id=client_id, ruler_run_id=run_id, conn=conn,
         )
         # Vendas de [win_start, as_of]: cobre a janela de conversão (até 60d após a
         # captação mais recente da janela, que já passou). end exclusivo → +1 dia.
@@ -149,6 +162,7 @@ def build_conversion_reference(
         "window_start": win_start.date().isoformat(),
         "window_end": win_end.date().isoformat(),
         "as_of": as_of.isoformat(),
+        "ruler_run_id": run_id,
         "n_leads": len(matched),
         "conversion": conv,
         "calibrator": cal,
