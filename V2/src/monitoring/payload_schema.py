@@ -677,18 +677,31 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'operational_routines.last_scored_at':                                              (S, 'debug interno'),
     'operational_routines.leads_received_24h':                                          (S, 'não renderizado standalone'),
     'operational_routines.leads_scored_24h':                                            (S, 'não renderizado; total computado de sum(variants)'),
+    # Nomes de variante são DADO (mudam a cada A/B), mas a trava casa chave exata.
+    # 29/07/2026: o A/B do jul_24 entrou em produção (scorer em 68ae49e) e passou a
+    # gravar `challenger_jul_24`; abr28 foi promovido a champion. Declaradas aqui pra
+    # não derrubar o digest. FOLLOW-UP: tornar a trava tolerante a nome de variante
+    # sob os agrupamentos *_by_variant_* (com /sw-architect) pra parar de reincidir.
     'operational_routines.leads_scored_by_variant_24h':                                 (R, None),  # ex: dict(2)
     'operational_routines.leads_scored_by_variant_24h.challenger_abr28':                (R, None),  # ex: 88
     'operational_routines.leads_scored_by_variant_24h.champion_jan30':                  (R, None),  # ex: 676
+    'operational_routines.leads_scored_by_variant_24h.challenger_jul_24':               (R, None),  # A/B jul_24 (29/07)
+    'operational_routines.leads_scored_by_variant_24h.champion_abr28':                  (R, None),  # abr28 promovido a champion
     'operational_routines.leads_capi_by_variant_24h':                                   (R, None),  # ex: dict(2) — denominador do CPL Meta
     'operational_routines.leads_capi_by_variant_24h.challenger_abr28':                  (R, None),  # ex: 120
     'operational_routines.leads_capi_by_variant_24h.champion_jan30':                    (R, None),  # ex: 900
+    'operational_routines.leads_capi_by_variant_24h.challenger_jul_24':                 (R, None),  # A/B jul_24 (29/07)
+    'operational_routines.leads_capi_by_variant_24h.champion_abr28':                    (R, None),  # abr28 promovido a champion
     'operational_routines.spend_by_variant_24h_brl':                                    (R, None),  # ex: dict(2) — split por campaign.name
     'operational_routines.spend_by_variant_24h_brl.challenger_abr28':                   (R, None),  # ex: 234.56
     'operational_routines.spend_by_variant_24h_brl.champion_jan30':                     (R, None),  # ex: 1234.56
+    'operational_routines.spend_by_variant_24h_brl.challenger_jul_24':                  (R, None),  # A/B jul_24 (29/07)
+    'operational_routines.spend_by_variant_24h_brl.champion_abr28':                     (R, None),  # abr28 promovido a champion
     'operational_routines.cpl_by_variant_24h_brl':                                      (R, None),  # ex: dict(2) — spend/leads_capi
     'operational_routines.cpl_by_variant_24h_brl.challenger_abr28':                     (R, None),  # ex: 1.95
     'operational_routines.cpl_by_variant_24h_brl.champion_jan30':                       (R, None),  # ex: 1.37
+    'operational_routines.cpl_by_variant_24h_brl.challenger_jul_24':                    (R, None),  # A/B jul_24 (29/07)
+    'operational_routines.cpl_by_variant_24h_brl.champion_abr28':                       (R, None),  # abr28 promovido a champion
     'operational_routines.spend_ml_24h_brl':                                            (R, None),  # ex: 630.92 — adsets otimizando evento ML (Champion+Challenger)
     'operational_routines.spend_nonml_24h_brl':                                         (R, None),  # ex: 7291.33 — adsets otimizando evento Lead padrão
     'operational_routines.minutes_since_last_score':                                    (S, 'debug interno; último scoring não renderizado'),
