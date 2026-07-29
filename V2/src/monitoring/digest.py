@@ -1496,6 +1496,28 @@ def _slack_audience_drift_by_source_dm(v: dict, B: list):
         B.append({'type': 'divider'})
 
 
+def _rolling_ref_for_render(v: dict):
+    """Lê a referência rolante 1x por render e cacheia em `v` (o painel de decis roda
+    2x: ontem + lançamento). None quando REFERENCE_SOURCE!=rolling (default) ou sem
+    referência → as colunas novas somem e o painel fica idêntico ao de hoje."""
+    if '_rolling_ref' not in v:
+        try:
+            from src.data.reference_reader import rolling_enabled, read_rolling_reference
+            v['_rolling_ref'] = read_rolling_reference() if rolling_enabled() else None
+        except Exception:
+            v['_rolling_ref'] = None
+    return v['_rolling_ref']
+
+
+def _emoji_conv(delta_pp: float | None) -> str:
+    """Δ da conversão esperada vs referência rolante (pp). Maior = melhor. |Δ|≤0.1 neutro."""
+    if delta_pp is None:
+        return '⚪'
+    if delta_pp > 0.1: return '🟢'
+    if delta_pp < -0.1: return '🔴'
+    return '⚪'
+
+
 def _slack_decis_window(v: dict, B: list, window_key: str):
     """KPI panel da distribuição de decis por janela.
 
@@ -1577,6 +1599,34 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
         if delta_avg < -0.3: return '🔴'
         return '⚪'
 
+    # ── Referência rolante (Fase 2): conversão ESPERADA do público vs conversão
+    # REALIZADA da janela rolante, como COLUNAS extras (mantém %D9-D10 vs Top5 do
+    # lado, a pedido). has_conv=False (frozen/sem ref) → tabela idêntica à de hoje.
+    _rr = _rolling_ref_for_render(v)
+    _conv_ref = (_rr or {}).get('conversion') or {}
+    _by_decile = _conv_ref.get('by_decile') or {}
+    _by_channel = _conv_ref.get('by_channel') or {}
+    _by_bucket = _conv_ref.get('by_bucket') or {}
+    _overall_rate = (_conv_ref.get('overall') or {}).get('rate')
+    has_conv = bool(_rr) and bool(_by_decile)
+
+    def _conv(distribution: dict, n: int, seg_rate) -> dict | None:
+        """Conversão esperada = Σ_decil (share_hoje × conv_realizada_ref_decil), na
+        régua única. `seg_rate` = conversão realizada da referência rolante pro
+        segmento (overall/canal/balde). None quando frozen ou bucket vazio."""
+        if not has_conv or n <= 0:
+            return None
+        exp = 0.0
+        for i in range(1, 11):
+            rate = (_by_decile.get(f'D{i:02d}') or {}).get('rate')
+            if rate is None:
+                continue
+            exp += (int(distribution.get(f'D{i:02d}', 0) or 0) / n) * float(rate)
+        exp_pct = exp * 100.0
+        ref_pct = (seg_rate * 100.0) if seg_rate is not None else None
+        return {'exp': exp_pct, 'ref': ref_pct,
+                'delta': (exp_pct - ref_pct) if ref_pct is not None else None}
+
     # Buckets por fonte
     by_src = info.get('by_source') or {}
     meta_info = by_src.get('meta') or {}
@@ -1618,14 +1668,31 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
             f'_Ref %D9-D10/avg (abr_28): '
             f'{ref_challenger["pct_d9_d10"]:.1f}%/{ref_challenger["avg"]:.1f}_'
         )
+    if has_conv:
+        rows.append('_ConvEsp = conversão esperada (mix de decil × conversão da janela '
+                    'rolante) · Δ vs conversão realizada da referência rolante_')
+    _hdr = f'{"Bucket":<18}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
+    if has_conv:
+        _hdr += f'   {"ConvEsp":>7}  {"Δ vs ref rolante":>16}'
     rows.append('```')
-    rows.append(
-        f'{"Bucket":<18}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
-    )
+    rows.append(_hdr)
 
-    def _row(label: str, kpis: dict | None, ref: dict | None, ref_name: str = '') -> str:
+    def _conv_cell(conv: dict | None) -> str:
+        """Colunas ConvEsp + Δ rolante. '' quando has_conv=False (some da tabela)."""
+        if not has_conv:
+            return ''
+        if conv is None:
+            return f'   {"—":>7}  {"—":>16}'
+        exp = f'{conv["exp"]:>6.2f}%'
+        if conv['delta'] is None:
+            return f'   {exp}  {"—":>16}'
+        return f'   {exp}  {_emoji_conv(conv["delta"])} {conv["delta"]:>+5.2f} (rol {conv["ref"]:.2f}%)'
+
+    def _row(label: str, kpis: dict | None, ref: dict | None, ref_name: str = '',
+             conv: dict | None = None) -> str:
         if kpis is None:
-            return f'{label:<18}  {"—":>5}   {"—":>7}  {"—":>20}      {"—":>4}'
+            return (f'{label:<18}  {"—":>5}   {"—":>7}  {"—":>20}      {"—":>4}'
+                    + _conv_cell(None))
         pct = kpis['pct_d9_d10']
         avg = kpis['avg_decil']
         if ref is not None:
@@ -1638,13 +1705,19 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
         else:
             delta_str = ''
             avg_str = f'{avg:>4.1f}'
-        return f'{label:<18}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}      {avg_str}'
+        return (f'{label:<18}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}      {avg_str}'
+                + _conv_cell(conv))
 
     # Bloco por fonte (Slack block 1) — todos na régua única abr_28. `ref_challenger`
     # é None no fail-soft (régua indisponível) → _row mostra sem Δ (⚪), nunca jan_30.
-    rows.append(_row('Total',  _kpis(dist, total),                                              ref_challenger, 'abr_28'))
-    rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta),              ref_challenger, 'abr_28'))
-    rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl),               ref_challenger, 'abr_28'))
+    _meta_dist = meta_info.get('distribution') or {}
+    _ggl_dist = ggl_info.get('distribution') or {}
+    rows.append(_row('Total',  _kpis(dist, total),          ref_challenger, 'abr_28',
+                     _conv(dist, total, _overall_rate)))
+    rows.append(_row('Meta',   _kpis(_meta_dist, n_meta),   ref_challenger, 'abr_28',
+                     _conv(_meta_dist, n_meta, (_by_channel.get('meta') or {}).get('rate'))))
+    rows.append(_row('Google', _kpis(_ggl_dist, n_ggl),     ref_challenger, 'abr_28',
+                     _conv(_ggl_dist, n_ggl, (_by_channel.get('google') or {}).get('rate'))))
     rows.append('```')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
@@ -1657,20 +1730,22 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
         # Corte N<MIN_BUCKET_N: balde por optimization_goal com pouquíssimo lead
         # (ex.: 1 lead de campanha antiga LEADQUALIFIED ainda no ar) vira ruído de
         # %D9-D10 — sai da tabela e vira nota de omitidos, nunca some em silêncio.
+        # 6º elemento = chave do balde em by_bucket da referência rolante (para a
+        # coluna ConvEsp/Δ rolante). bucket_from_utm devolve Lead/Champion/Challenger.
         _og_buckets = [
-            ('Lead',                         og_lead_info, n_og_lead, ref_challenger, 'abr_28'),
-            (_ab_bucket_label('Champion'),   og_chmp_info, n_og_chmp, ref_challenger, 'abr_28'),
-            (_ab_bucket_label('Challenger'), og_chal_info, n_og_chal, ref_challenger, 'abr_28'),
+            ('Lead',                         og_lead_info, n_og_lead, ref_challenger, 'abr_28', 'Lead'),
+            (_ab_bucket_label('Champion'),   og_chmp_info, n_og_chmp, ref_challenger, 'abr_28', 'Champion'),
+            (_ab_bucket_label('Challenger'), og_chal_info, n_og_chal, ref_challenger, 'abr_28', 'Challenger'),
         ]
         _og_shown   = [t for t in _og_buckets if t[2] >= MIN_BUCKET_N]
         _og_omitted = [(t[0], t[2]) for t in _og_buckets if 0 < t[2] < MIN_BUCKET_N]
         if _og_shown:
             og_rows = ['```']
-            og_rows.append(
-                f'{"Bucket":<18}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
-            )
-            for _lbl, _info, _n, _ref, _rn in _og_shown:
-                og_rows.append(_row(_lbl, _kpis(_info.get('distribution') or {}, _n), _ref, _rn))
+            og_rows.append(_hdr)
+            for _lbl, _info, _n, _ref, _rn, _bk in _og_shown:
+                _d = _info.get('distribution') or {}
+                og_rows.append(_row(_lbl, _kpis(_d, _n), _ref, _rn,
+                                    _conv(_d, _n, (_by_bucket.get(_bk) or {}).get('rate'))))
             og_rows.append('```')
             if _og_omitted:
                 og_rows.append('_Omitidos (N<%d): %s_' % (
