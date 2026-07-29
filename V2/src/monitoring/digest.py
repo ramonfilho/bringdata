@@ -52,16 +52,35 @@ def _walk_paths(d: Any, prefix: str = '') -> Iterable[str]:
             yield from _walk_paths(item, f'{prefix}[]')
 
 
+def _schema_decision(path: str) -> "tuple[FieldDecision, str | None] | None":
+    """Resolve a decisão declarada de um path: match EXATO primeiro, depois CURINGA.
+
+    Convenção de curinga no PAYLOAD_SCHEMA: uma entrada terminada em '.*'
+    (ex.: 'operational_routines.leads_scored_by_variant_24h.*') declara QUALQUER
+    folha DIRETA daquele container. Existe pros agrupamentos por variante do A/B,
+    cujas chaves são NOME DE VARIANTE (dado que muda a cada teste — challenger_abr28,
+    champion_jan30, challenger_jul_24, …), não schema fixo. Cobre só 1 nível: casa
+    o filho imediato do container '.*'; 'X.variante.foo' tem outro pai (sem '.*') e
+    continua fail-loud. Devolve None se o path não está declarado nem coberto.
+    """
+    entry = PAYLOAD_SCHEMA.get(path)
+    if entry is not None:
+        return entry
+    dot = path.rfind('.')
+    if dot != -1:
+        return PAYLOAD_SCHEMA.get(path[:dot] + '.*')
+    return None
+
+
 def audit_payload_schema(payload: dict) -> None:
     """Falha alto se houver paths novos ou SKIPPED sem razão.
 
     Chamada por extract_view() antes de qualquer renderização — uma única
-    barreira de entrada pros dois renderers.
+    barreira de entrada pros dois renderers. Curinga '.*' (ver _schema_decision)
+    tolera nome de variante do A/B sob os agrupamentos *_by_variant_24h*; todo o
+    resto segue fail-loud por match exato.
     """
-    actual   = set(_walk_paths(payload))
-    declared = set(PAYLOAD_SCHEMA.keys())
-
-    unknown = sorted(actual - declared)
+    unknown = sorted(p for p in set(_walk_paths(payload)) if _schema_decision(p) is None)
     skipped_no_reason = sorted([
         k for k, (d, r) in PAYLOAD_SCHEMA.items()
         if d == FieldDecision.SKIPPED and not r
@@ -100,8 +119,8 @@ def get_skipped_summary(payload: dict) -> list[tuple[str, str]]:
 
 
 def _is_rendered(path: str) -> bool:
-    """Helper pra renderers: deve mostrar este path?"""
-    entry = PAYLOAD_SCHEMA.get(path)
+    """Helper pra renderers: deve mostrar este path? (exato ou curinga '.*')"""
+    entry = _schema_decision(path)
     return entry is not None and entry[0] == FieldDecision.RENDERED
 
 

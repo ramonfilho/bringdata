@@ -8,6 +8,12 @@ Regras:
   - Todo path produzido pelo endpoint precisa estar declarado aqui.
   - Decisão obrigatória: RENDERED (mostra no digest) ou SKIPPED (não mostra; razão obrigatória).
   - Se o endpoint adicionar campo novo sem declaração, audit_payload_schema() falha alto.
+  - CURINGA `.*`: uma entrada `'X.*'` declara QUALQUER folha DIRETA do container X
+    (1 nível só). Usada onde a chave da folha é DADO, não schema — os agrupamentos
+    por variante do A/B (`*_by_variant_24h*`), cuja folha é nome de variante e muda
+    a cada teste. Resolvido em digest.py::_schema_decision. NÃO usar pra baldes de
+    conjunto FECHADO (ex.: por_variante Lead/Champion/Challenger) — esses ficam
+    literais pra manter o fail-loud se surgir bucket inesperado.
 """
 from __future__ import annotations
 from enum import Enum
@@ -677,31 +683,20 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'operational_routines.last_scored_at':                                              (S, 'debug interno'),
     'operational_routines.leads_received_24h':                                          (S, 'não renderizado standalone'),
     'operational_routines.leads_scored_24h':                                            (S, 'não renderizado; total computado de sum(variants)'),
-    # Nomes de variante são DADO (mudam a cada A/B), mas a trava casa chave exata.
-    # 29/07/2026: o A/B do jul_24 entrou em produção (scorer em 68ae49e) e passou a
-    # gravar `challenger_jul_24`; abr28 foi promovido a champion. Declaradas aqui pra
-    # não derrubar o digest. FOLLOW-UP: tornar a trava tolerante a nome de variante
-    # sob os agrupamentos *_by_variant_* (com /sw-architect) pra parar de reincidir.
+    # Agrupamentos por VARIANTE do A/B. A folha é NOME DE VARIANTE (challenger_abr28,
+    # champion_jan30, challenger_jul_24, …) — DADO que muda a cada troca de A/B, não
+    # schema fixo. Por isso a folha é declarada por CURINGA `.*` (ver
+    # digest.py::_schema_decision): "qualquer folha direta deste container é RENDERED".
+    # Assim nenhum A/B novo derruba o digest (era o bug que reincidiu em #48/#61/#108).
+    # O curinga cobre só 1 nível; nível mais fundo segue fail-loud.
     'operational_routines.leads_scored_by_variant_24h':                                 (R, None),  # ex: dict(2)
-    'operational_routines.leads_scored_by_variant_24h.challenger_abr28':                (R, None),  # ex: 88
-    'operational_routines.leads_scored_by_variant_24h.champion_jan30':                  (R, None),  # ex: 676
-    'operational_routines.leads_scored_by_variant_24h.challenger_jul_24':               (R, None),  # A/B jul_24 (29/07)
-    'operational_routines.leads_scored_by_variant_24h.champion_abr28':                  (R, None),  # abr28 promovido a champion
+    'operational_routines.leads_scored_by_variant_24h.*':                               (R, None),  # folha = nome de variante (qualquer)
     'operational_routines.leads_capi_by_variant_24h':                                   (R, None),  # ex: dict(2) — denominador do CPL Meta
-    'operational_routines.leads_capi_by_variant_24h.challenger_abr28':                  (R, None),  # ex: 120
-    'operational_routines.leads_capi_by_variant_24h.champion_jan30':                    (R, None),  # ex: 900
-    'operational_routines.leads_capi_by_variant_24h.challenger_jul_24':                 (R, None),  # A/B jul_24 (29/07)
-    'operational_routines.leads_capi_by_variant_24h.champion_abr28':                    (R, None),  # abr28 promovido a champion
+    'operational_routines.leads_capi_by_variant_24h.*':                                 (R, None),  # folha = nome de variante (qualquer)
     'operational_routines.spend_by_variant_24h_brl':                                    (R, None),  # ex: dict(2) — split por campaign.name
-    'operational_routines.spend_by_variant_24h_brl.challenger_abr28':                   (R, None),  # ex: 234.56
-    'operational_routines.spend_by_variant_24h_brl.champion_jan30':                     (R, None),  # ex: 1234.56
-    'operational_routines.spend_by_variant_24h_brl.challenger_jul_24':                  (R, None),  # A/B jul_24 (29/07)
-    'operational_routines.spend_by_variant_24h_brl.champion_abr28':                     (R, None),  # abr28 promovido a champion
+    'operational_routines.spend_by_variant_24h_brl.*':                                  (R, None),  # folha = nome de variante (qualquer)
     'operational_routines.cpl_by_variant_24h_brl':                                      (R, None),  # ex: dict(2) — spend/leads_capi
-    'operational_routines.cpl_by_variant_24h_brl.challenger_abr28':                     (R, None),  # ex: 1.95
-    'operational_routines.cpl_by_variant_24h_brl.champion_jan30':                       (R, None),  # ex: 1.37
-    'operational_routines.cpl_by_variant_24h_brl.challenger_jul_24':                    (R, None),  # A/B jul_24 (29/07)
-    'operational_routines.cpl_by_variant_24h_brl.champion_abr28':                       (R, None),  # abr28 promovido a champion
+    'operational_routines.cpl_by_variant_24h_brl.*':                                    (R, None),  # folha = nome de variante (qualquer)
     'operational_routines.spend_ml_24h_brl':                                            (R, None),  # ex: 630.92 — adsets otimizando evento ML (Champion+Challenger)
     'operational_routines.spend_nonml_24h_brl':                                         (R, None),  # ex: 7291.33 — adsets otimizando evento Lead padrão
     'operational_routines.minutes_since_last_score':                                    (S, 'debug interno; último scoring não renderizado'),
