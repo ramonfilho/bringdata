@@ -157,6 +157,10 @@ def build_conversion_reference(
 
     matched = label_matured(matured, sales, conversion_window_days=maturation_days)
     conv = conversion_reference(matched, bucket_map=bucket_map)
+    # Economia do teto (Fase 3): valor por venda da janela (cartão 2k + boleto 50%,
+    # mistura REAL de gateways). Vive dentro do `conversion` jsonb → sem coluna nova.
+    from src.monitoring.teto import value_per_sale_from_sales
+    conv["economics"] = value_per_sale_from_sales(sales)
     cal = fit_calibrator(matched)
     return {
         "window_start": win_start.date().isoformat(),
