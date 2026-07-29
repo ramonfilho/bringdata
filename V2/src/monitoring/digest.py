@@ -871,6 +871,7 @@ def render_slack_blocks(view: dict) -> list[dict]:
     _slack_launch_fallback_notice_dm(view, blocks)  # DM-only — no-op se YAML em dia
     _slack_score_distribution_change_dm(view, blocks)  # Drift de Score (decis)
     blocks.append({'type': 'divider'})
+    _slack_audience_rolling_dm(view, blocks)  # 2 tabelas reancoradas (só REFERENCE_SOURCE=rolling)
     _slack_alerts(view, blocks, include_audience_drift=False)
     blocks.append({'type': 'divider'})
     _slack_unified_funnel(view, blocks)
@@ -909,6 +910,37 @@ def _slack_audience_drift_by_variant_dm(v: dict, B: list):
     )
     for a in by_variant:
         _slack_alert_audience_by_variant(a, B)
+        B.append({'type': 'divider'})
+
+
+def _slack_audience_rolling_dm(v: dict, B: list):
+    """DM (Fase 1c da referência rolante): 2 tabelas reancoradas — Drift A/B e Drift
+    por fonte, SÓ da janela de LANÇAMENTO — com a referência rolante (comprador 90d)
+    como coluna Compr% ao lado da Top% legada. Substitui as 5 tabelas antigas por
+    estas 2, a pedido.
+
+    Gate REFERENCE_SOURCE=rolling: frozen (default) → no-op, o DM segue sem drift de
+    público (comportamento atual). Rollback = flag, sem deploy.
+    """
+    from src.data.reference_reader import rolling_enabled
+    if not rolling_enabled():
+        return
+    alerts = v.get('alerts') or []
+
+    def _launch(kind):
+        return [a for a in alerts if a.get('type') == kind
+                and (a.get('details') or {}).get('window') == 'current_launch']
+
+    by_variant = _launch('audience_profile_drift_by_variant')
+    by_source = _launch('audience_profile_drift_by_source')
+    if not by_variant and not by_source:
+        return
+    _slack_drift_legend_header(B)
+    for a in by_variant:
+        _slack_alert_audience_by_variant(a, B)
+        B.append({'type': 'divider'})
+    for a in by_source:
+        _slack_alert_audience_by_source(a, B)
         B.append({'type': 'divider'})
 
 
@@ -1250,6 +1282,22 @@ def _slack_distribution_drifts_consolidated(alerts: list, B: list):
         B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(lines)}})
 
 
+def _ref_cols_header(has_rolling: bool) -> str:
+    """Cabeçalho da(s) coluna(s) de referência: só Top% (legado) ou Top% + Compr%
+    (comprador rolante) quando a referência rolante está ligada. Fonte única dos 2
+    renderers de drift (por A/B e por fonte) — ver Fase 1c da referência rolante."""
+    return f"{'Top%':>5}  {'Compr%':>6}" if has_rolling else f"{'Top%':>5}"
+
+
+def _ref_cols_cell(ref, rolling_pct, has_rolling: bool) -> str:
+    """Célula de referência alinhada ao `_ref_cols_header`. Compr% ausente vira '—'."""
+    base = f"{ref:>4.1f}%"
+    if not has_rolling:
+        return base
+    rp = f"{rolling_pct:.1f}%" if rolling_pct is not None else "—"
+    return f"{base}  {rp:>6}"
+
+
 def _slack_alert_audience(a: dict, B: list):
     """Drift geral com 🟢 bom · 🔴 ruim · ⚪ neutro/uncertain.
 
@@ -1343,7 +1391,8 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
             header += "\n_Omitidos (N<%d): %s_" % (
                 MIN_BUCKET_N, ' · '.join(f"{_ab_bucket_label(b)}={n:,}" for b, n in _omitted))
     rows = [header]
-    col_header = f"{'Característica':<32} {'Top%':>5}  " + '  '.join(
+    has_rolling = any(it.get('rolling_reference_pct') is not None for it in top)
+    col_header = f"{'Característica':<32} {_ref_cols_header(has_rolling)}  " + '  '.join(
         f"{_ab_bucket_label(b) + '(Δ)':>{_AW}}" for b, *_ in _arms
     )
     rows.append(f"`{col_header}`")
@@ -1374,7 +1423,7 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
                                          it.get('champion_delta_pp'),
                                          it.get('challenger_delta_pp'))
                   if _n_compete >= 2 else None)
-        parts = [f"{label:<32} {ref:>4.1f}%"]
+        parts = [f"{label:<32} {_ref_cols_cell(ref, it.get('rolling_reference_pct'), has_rolling)}"]
         for b, _n, compete, pk, dk, qk in _arms:
             is_winner = compete and winner == b.lower()
             parts.append(f"{cell(it.get(pk), it.get(dk), it.get(qk), is_winner):>{_AW}}")
@@ -1402,7 +1451,9 @@ def _slack_alert_audience_by_source(a: dict, B: list):
     header = (f"*📉 Drift por Fonte - {window_title}*  "
               f"·  Meta `n={n_meta:,}`  ·  Google `n={n_ggl:,}`")
     rows = [header]
-    col_header = f"{'Característica':<32} {'Top%':>5}  {'Meta(Δ)':>20}  {'Google(Δ)':>20}"
+    has_rolling = any(it.get('rolling_reference_pct') is not None for it in top)
+    col_header = (f"{'Característica':<32} {_ref_cols_header(has_rolling)}  "
+                  f"{'Meta(Δ)':>20}  {'Google(Δ)':>20}")
     rows.append(f"`{col_header}`")
 
     def cell_qual(pct, delta, quality):
@@ -1416,7 +1467,8 @@ def _slack_alert_audience_by_source(a: dict, B: list):
                               it.get('meta_quality'))
         ggl_cell  = cell_qual(it.get('google_pct'), it.get('google_delta_pp'),
                               it.get('google_quality'))
-        rows.append(f"`{label:<32} {ref:>4.1f}%  {meta_cell:>20}  {ggl_cell:>20}`")
+        ref_cell = _ref_cols_cell(ref, it.get('rolling_reference_pct'), has_rolling)
+        rows.append(f"`{label:<32} {ref_cell}  {meta_cell:>20}  {ggl_cell:>20}`")
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
 

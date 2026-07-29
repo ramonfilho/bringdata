@@ -1639,6 +1639,31 @@ class DataQualityMonitor:
             logger.warning(f"[audience_direction_map] Erro ao carregar: {e}")
             return {}
 
+    def _load_rolling_audience_map(self) -> dict:
+        """Perfil de comprador da referência rolante como {col: {cat: pct_0_100}}.
+
+        Vazio se REFERENCE_SOURCE != rolling (default), se não houver referência, ou
+        se a janela não tiver perfil — em todos os casos o drift segue igual, só sem
+        a coluna extra (degradação limpa, nunca quebra por falta de referência)."""
+        try:
+            from src.data.reference_reader import rolling_enabled, read_rolling_reference
+        except Exception:
+            return {}
+        if not rolling_enabled():
+            return {}
+        client_id = getattr(self.client_config, 'client_id', 'devclub') if self.client_config else 'devclub'
+        try:
+            ref = read_rolling_reference(client_id)
+        except Exception as e:
+            logger.warning("[audience_profile_drift] referência rolante indisponível: %s", e)
+            return {}
+        ap = (ref or {}).get('audience_profile') or {}
+        out = {}
+        for col, entry in (ap.get('categorical_features') or {}).items():
+            props = entry.get('proportions') or {}
+            out[col] = {cat: round(float(p) * 100, 1) for cat, p in props.items()}
+        return out
+
     def _classify_drift_quality(self, direction: str, delta_pp: float) -> str:
         """Combina direção da categoria (do direction_map) com sinal do Δpp
         pra retornar quality ∈ {'bom', 'ruim', 'neutro', 'unknown'}.
@@ -2273,6 +2298,13 @@ class DataQualityMonitor:
         # Sem map, classify_drift_quality retorna 'unknown' / 'neutro'.
         direction_map = self._load_direction_map()
 
+        # Referência rolante (perfil de comprador) como COLUNA extra por (col, cat).
+        # Só quando REFERENCE_SOURCE=rolling; frozen (default) → rolling_map vazio e
+        # os itens saem sem `rolling_reference_pct` (render omite a coluna). O perfil
+        # já passou pela MESMA régua de categoria (normalize_audience_series), então
+        # as chaves batem com o observado.
+        rolling_map = self._load_rolling_audience_map()
+
         top_list: List[Dict] = []
         total_responses_day = 0
         total_responses_prev_day = 0
@@ -2394,6 +2426,9 @@ class DataQualityMonitor:
                     'is_critical': is_critical_feat,
                     'category': cat,
                     'reference_pct': round(ref_p * 100, 1),
+                    # Referência rolante (comprador 90d) por (col, cat). None quando
+                    # frozen ou categoria ausente do perfil → render omite a coluna.
+                    'rolling_reference_pct': rolling_map.get(col, {}).get(cat),
                     'launch_pct': launch_pct,
                     'launch_delta_pp': launch_delta_pp,
                     'launch_quality': quality_launch,
@@ -2792,6 +2827,7 @@ class DataQualityMonitor:
                     'category': cat,
                     'is_critical': entry.get('is_critical', False),
                     'reference_pct': ref_pct,
+                    'rolling_reference_pct': entry.get('rolling_reference_pct'),
                     'lead_pct': round(lead_pct, 1) if lead_pct is not None else None,
                     'lead_delta_pp': lead_delta,
                     'lead_quality': lead_quality,
@@ -2916,6 +2952,7 @@ class DataQualityMonitor:
                     'category': cat,
                     'is_critical': entry.get('is_critical', False),
                     'reference_pct': ref_pct,
+                    'rolling_reference_pct': entry.get('rolling_reference_pct'),
                     'meta_pct': round(meta_pct, 1) if meta_pct is not None else None,
                     'meta_delta_pp': meta_delta,
                     'meta_quality': meta_quality,
