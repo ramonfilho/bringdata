@@ -49,6 +49,7 @@ def main() -> None:
     from src.monitoring.rolling_reference import (
         build_conversion_reference, sample_calibration_curve,
     )
+    from src.monitoring.buyer_profile import build_buyer_profile
     from src.data.reference_store import upsert_reference
 
     conn = open_analytics_connection(timeout=180)
@@ -66,6 +67,18 @@ def main() -> None:
               f"(lift {d10/ov['rate']:.2f}x)" if ov["rate"] else "")
         print(f"  canal/balde de {ref['conversion']['channel_bucket_coverage']['leads_com_utm']:,} leads c/ UTM")
 
+        # Perfil de comprador (Fase 1) — best-effort: janela de COMPRA própria
+        # (ancorada em as_of, não na madura), thin/erro não derruba a conversão.
+        profile = None
+        try:
+            profile = build_buyer_profile(
+                as_of=as_of, window_days=args.window_days, client_id=args.client, conn=conn,
+            )
+            print(f"  perfil comprador: {profile['n_buyers_surveyed']:,}/{profile['n_buyers_total']:,} "
+                  f"c/ survey (cobertura {profile['coverage']*100:.1f}%)")
+        except Exception as e:
+            print(f"  perfil comprador: indisponível ({e})")
+
         if args.dry_run:
             print("[dry-run] nada gravado.")
             return
@@ -74,7 +87,7 @@ def main() -> None:
             conn, client_id=args.client,
             window_start=ref["window_start"], window_end=ref["window_end"], as_of=ref["as_of"],
             ruler_run_id=ref.get("ruler_run_id") or "", n_leads=ref["n_leads"],
-            conversion=ref["conversion"], calibration=curve,
+            conversion=ref["conversion"], calibration=curve, audience_profile=profile,
         )
         print(f"gravado em analytics.reference_rolling (window_end={ref['window_end']}, source=rolling).")
     finally:

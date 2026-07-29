@@ -38,8 +38,9 @@ def read_rolling_reference(client_id: str = "devclub", *, conn=None) -> Optional
 
     Returns:
         dict {window_start, window_end, as_of, ruler_run_id, n_leads, conversion,
-        calibration} ou None se não houver linha (o consumidor degrada pro caminho
-        congelado — nunca quebra por falta de referência).
+        calibration, audience_profile} ou None se não houver linha (o consumidor
+        degrada pro caminho congelado — nunca quebra por falta de referência).
+        `audience_profile` pode ser None (janela sem perfil de comprador).
     """
     own = conn is None
     if own:
@@ -52,7 +53,7 @@ def read_rolling_reference(client_id: str = "devclub", *, conn=None) -> Optional
     try:
         rows = conn.run(
             "SELECT window_start, window_end, as_of, ruler_run_id, n_leads, "
-            "       conversion, calibration "
+            "       conversion, calibration, audience_profile "
             "FROM reference_rolling WHERE client_id = :c AND source = 'rolling' "
             "ORDER BY window_end DESC LIMIT 1",
             c=client_id,
@@ -73,12 +74,17 @@ def read_rolling_reference(client_id: str = "devclub", *, conn=None) -> Optional
     r = rows[0]
     # jsonb volta como dict pelo pg8000; se vier string (driver diferente), parseia.
     import json
-    conv = r[5] if isinstance(r[5], dict) else json.loads(r[5])
-    cal = r[6] if isinstance(r[6], dict) else json.loads(r[6])
+
+    def _as_dict(v):
+        if v is None:
+            return None
+        return v if isinstance(v, dict) else json.loads(v)
+
     return {
         "window_start": str(r[0]), "window_end": str(r[1]), "as_of": str(r[2]),
         "ruler_run_id": r[3], "n_leads": int(r[4]),
-        "conversion": conv, "calibration": cal,
+        "conversion": _as_dict(r[5]), "calibration": _as_dict(r[6]),
+        "audience_profile": _as_dict(r[7]),
     }
 
 

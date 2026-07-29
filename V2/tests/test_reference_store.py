@@ -42,17 +42,31 @@ def test_upsert_idempotente_e_jsonb():
         conn, client_id="devclub", window_start="2026-03-01", window_end="2026-05-30",
         as_of="2026-07-29", ruler_run_id="abr28", n_leads=113752,
         conversion={"overall": {"rate": 0.0084}}, calibration={"method": "isotonic", "x": [0, 1], "y": [0, 0.5]},
+        audience_profile={"categorical_features": {"O seu gênero:": {"proportions": {"Masculino": 0.9}}}},
     )
-    # 1a chamada cria a tabela (idempotente), 2a faz o upsert
-    assert len(conn.calls) == 2
+    # 1a cria a tabela, 2a garante a coluna audience_profile, 3a faz o upsert
+    assert len(conn.calls) == 3
     ddl, _ = conn.calls[0]
-    up, params = conn.calls[1]
+    migrate, _ = conn.calls[1]
+    up, params = conn.calls[2]
     assert "CREATE TABLE IF NOT EXISTS reference_rolling" in ddl
+    assert "ADD COLUMN IF NOT EXISTS audience_profile" in migrate
     assert "ON CONFLICT (client_id, window_end, source) DO UPDATE" in up
-    # conversão e calibração vão como jsonb serializado
+    # conversão, calibração e perfil vão como jsonb serializado
     assert json.loads(params["conversion"])["overall"]["rate"] == 0.0084
     assert json.loads(params["calibration"])["method"] == "isotonic"
+    assert json.loads(params["audience_profile"])["categorical_features"]["O seu gênero:"]["proportions"]["Masculino"] == 0.9
     assert params["source"] == "rolling" and params["n_leads"] == 113752
+
+
+def test_audience_profile_none_vira_null():
+    conn = CapConn()
+    upsert_reference(
+        conn, client_id="devclub", window_start="2026-03-01", window_end="2026-05-30",
+        as_of="2026-07-29", ruler_run_id="abr28", n_leads=1,
+        conversion={}, calibration={},  # sem audience_profile
+    )
+    assert conn.calls[2][1]["audience_profile"] is None  # None → NULL (coluna nullable)
 
 
 def test_ruler_run_id_vazio_vira_string():
@@ -62,12 +76,12 @@ def test_ruler_run_id_vazio_vira_string():
         as_of="2026-07-29", ruler_run_id=None, n_leads=1,
         conversion={}, calibration={},
     )
-    assert conn.calls[1][1]["ruler_run_id"] == ""  # None → "" (coluna NOT NULL)
+    assert conn.calls[2][1]["ruler_run_id"] == ""  # None → "" (coluna NOT NULL)
 
 
 if __name__ == "__main__":
     for fn in (test_sample_calibration_curve, test_upsert_idempotente_e_jsonb,
-               test_ruler_run_id_vazio_vira_string):
+               test_audience_profile_none_vira_null, test_ruler_run_id_vazio_vira_string):
         fn()
         print(f"ok: {fn.__name__}")
     print("PASS")

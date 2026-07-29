@@ -35,12 +35,22 @@ def test_flag_de_fonte():
 
 def test_read_devolve_dict_e_nao_fecha_conn_injetada():
     row = ("2026-03-01", "2026-05-30", "2026-07-29", "abr28", 113752,
-           {"overall": {"rate": 0.0084}}, {"method": "isotonic", "x": [0, 0.5, 1], "y": [0, 0.01, 0.08]})
+           {"overall": {"rate": 0.0084}}, {"method": "isotonic", "x": [0, 0.5, 1], "y": [0, 0.01, 0.08]},
+           {"categorical_features": {"O seu gênero:": {"proportions": {"Masculino": 0.9}}}})
     conn = FakeConn([row])
     r = read_rolling_reference(conn=conn)
     assert r["n_leads"] == 113752 and r["conversion"]["overall"]["rate"] == 0.0084
     assert r["calibration"]["method"] == "isotonic"
+    assert r["audience_profile"]["categorical_features"]["O seu gênero:"]["proportions"]["Masculino"] == 0.9
     assert conn.closed is False
+
+
+def test_read_audience_profile_null_ok():
+    # janela sem perfil de comprador → audience_profile None, não quebra
+    row = ("2026-03-01", "2026-05-30", "2026-07-29", "abr28", 100,
+           {"overall": {"rate": 0.01}}, {"method": "isotonic", "x": [0, 1], "y": [0, 0.1]}, None)
+    r = read_rolling_reference(conn=FakeConn([row]))
+    assert r["audience_profile"] is None
 
 
 def test_read_none_quando_vazio():
@@ -60,6 +70,7 @@ def test_expected_conversion_interpola():
 
 if __name__ == "__main__":
     for fn in (test_flag_de_fonte, test_read_devolve_dict_e_nao_fecha_conn_injetada,
+               test_read_audience_profile_null_ok,
                test_read_none_quando_vazio, test_expected_conversion_interpola):
         fn()
         print(f"ok: {fn.__name__}")
