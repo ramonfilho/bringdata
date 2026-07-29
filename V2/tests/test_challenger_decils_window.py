@@ -82,11 +82,36 @@ def test_wrapper_case_insensitive_e_vazio():
     assert z["total"] == 0 and conn2.calls == 0
 
 
+def test_ledger_reconstrói_régua_das_duas_colunas():
+    """Regressão do bug de 27-28/07/2026: o ramo `ledger` pinava só
+    `challenger_run_id` + lia só `decil_challenger`. Quando o A/B do challenger
+    novo (jul_24) entrou, o run_id alvo (abr28) passou a ser gravado em
+    `decil_champion`, e o filtro antigo jogava esses leads fora — CPL qualificado
+    inflado (R$125 em vez de ~R$29) e painel de decis zerando a partir de 28/07.
+    A régua tem que sair de QUALQUER das duas colunas de decil."""
+    class CapConn(FakeConn):
+        def run(self, sql, **params):
+            self.last_sql = sql
+            return super().run(sql, **params)
+
+    conn = CapConn([("facebook-ads", "LEADHQLB", "D10")])
+    recs = challenger_decils_in_window(
+        challenger_run_id="abr28", win_start=1, win_end=2, source="ledger", conn=conn)
+    assert recs is not None and len(recs) == 1
+    sql = conn.last_sql
+    # a régua alvo é reconstruída das DUAS colunas (onde quer que o run_id esteja)
+    assert "decil_champion" in sql and "decil_challenger" in sql, sql
+    assert "champion_run_id" in sql and "challenger_run_id" in sql, sql
+    # e NÃO reintroduz o pin do bug (só challenger + só decil_challenger)
+    assert "AND challenger_run_id = :run_id AND decil_challenger IS NOT NULL" not in sql, sql
+
+
 if __name__ == "__main__":
     for fn in (test_base_devolve_um_rec_por_linha,
                test_base_guarda_config_invalida,
                test_wrapper_filtra_por_fonte_e_reusa_a_base,
-               test_wrapper_case_insensitive_e_vazio):
+               test_wrapper_case_insensitive_e_vazio,
+               test_ledger_reconstrói_régua_das_duas_colunas):
         fn()
         print(f"ok: {fn.__name__}")
     print("PASS")

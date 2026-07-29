@@ -469,18 +469,34 @@ def challenger_decils_in_window(
     try:
         if src == "ledger":
             # Fase 3: decil + UTM na MESMA tabela (`registros_ml`) — sem join. A
-            # Fase 2 grava o decil ao vivo e a Fase 4 copiou o histórico. O
-            # `decil_challenger` é INT; formata 'D0x' pra manter o contrato dos
-            # consumidores. `pin_lf` NÃO filtra `lf` (o ledger não tem essa coluna;
-            # a janela [ws,we) já é o escopo do lançamento). Dedup por email igual:
-            # prioriza a linha com utm_source, depois a mais recente.
+            # Fase 2 grava o decil ao vivo e a Fase 4 copiou o histórico. `pin_lf`
+            # NÃO filtra `lf` (o ledger não tem essa coluna; a janela [ws,we) já é
+            # o escopo do lançamento). Dedup por email: prioriza a linha com
+            # utm_source, depois a mais recente.
+            #
+            # Régua ÚNICA (o run_id alvo) reconstruída de QUALQUER das duas colunas
+            # de decil do ledger: o MESMO modelo é gravado como `decil_champion`
+            # quando é o pega-tudo (champion_run_id) OU como `decil_challenger`
+            # quando é o braço de teste (challenger_run_id). Pinar só
+            # `challenger_run_id` subcontava: a partir do A/B do challenger novo
+            # (jul_24, 26/07/2026) a maioria dos leads passou a ter o run_id alvo
+            # (abr28) na coluna `decil_champion`, e o filtro antigo os jogava fora
+            # — CPL qualificado inflado e painel de decis zerando a partir de
+            # 28/07. O COALESCE acha o decil do run_id alvo onde quer que ele
+            # esteja → cobertura 100%, número estável independente de A/B.
+            # decil_* é INT; formata 'D0x' pra manter o contrato dos consumidores.
+            ruler = (
+                "COALESCE("
+                "CASE WHEN champion_run_id = :run_id THEN decil_champion END, "
+                "CASE WHEN challenger_run_id = :run_id THEN decil_challenger END)"
+            )
             sql = (
                 "SELECT DISTINCT ON (lower(email)) "
                 "       lower(utm_source) AS src, utm_campaign AS campaign, "
-                "       'D' || lpad(decil_challenger::text, 2, '0') AS decil "
+                f"       'D' || lpad(({ruler})::text, 2, '0') AS decil "
                 "FROM registros_ml "
                 "WHERE created_at >= :ws AND created_at < :we "
-                "  AND challenger_run_id = :run_id AND decil_challenger IS NOT NULL "
+                f"  AND ({ruler}) IS NOT NULL "
                 "ORDER BY lower(email), "
                 "         (utm_source IS NOT NULL AND utm_source <> '') DESC, created_at DESC"
             )
