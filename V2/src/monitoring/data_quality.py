@@ -75,6 +75,96 @@ def normalizar_categoria_para_comparacao(texto):
     return texto_norm if texto_norm else None
 
 
+# ── Canonicalização de público (fonte ÚNICA) ──────────────────────────────────
+# Estas 3 peças eram privadas de DataQualityMonitor. Foram promovidas a nível de
+# módulo porque a referência rolante (perfil de comprador em buyer_profile.py)
+# PRECISA passar pela MESMA régua de categoria que o drift observado — só assim as
+# duas referências (legado Top5 e rolante) e o dado observado são comparáveis. O
+# método/atributo da classe agora delegam pra cá (wrapper fino).
+
+# Unificação de rótulos por feature (ex.: "18 24 anos" → "18-24"). Aplicada DEPOIS
+# de normalizar_categoria_para_comparacao. DataQualityMonitor._AUDIENCE_UNIFICATION
+# é um alias deste dict.
+AUDIENCE_UNIFICATION = {
+    'Qual a sua idade?': {
+        'menos de 18 anos': '<18', 'menos de 18': '<18',
+        '18 24 anos': '18-24', '18 24': '18-24',
+        '25 34 anos': '25-34', '25 34': '25-34',
+        '35 44 anos': '35-44', '35 44': '35-44',
+        '45 54 anos': '45-54', '45 54': '45-54',
+        'mais de 55 anos': '55+', '55': '55+',
+    },
+    'O que você faz atualmente?': {
+        'sou cltfuncionario publico': 'CLT/funcionário público',
+        'clt funcionario publico':    'CLT/funcionário público',
+        'sou autonomo':               'Autônomo',
+        'autonomo empreendedor':      'Autônomo',
+        'sou apenas estudante':       'Estudante',
+        'estudante':                  'Estudante',
+        'sou aposentado':             'Aposentado',
+        'aposentado':                 'Aposentado',
+        'nao trabalho e nem estudo':  'Não trabalho/nem estudo',
+        'desempregado':               'Não trabalho/nem estudo',
+    },
+    'Atualmente, qual a sua faixa salarial?': {
+        'entre r1000 a r2000 reais ao mes': 'Até R$2.000',
+        'ate r 2000':                       'Até R$2.000',
+        'entre r2001 a r3000 reais ao mes': 'R$2.001-3.000',
+        'r 2001 a 3000':                    'R$2.001-3.000',
+        'entre r3001 a r5000 reais ao mes': 'R$3.001-5.000',
+        'r 3001 a 5000':                    'R$3.001-5.000',
+        'mais de r5001 reais ao mes':       'Acima de R$5.000',
+        'acima de r 5000':                  'Acima de R$5.000',
+        'nao tenho renda':                  'Sem renda',
+        'nenhuma renda':                    'Sem renda',
+    },
+    'O seu gênero:':                  {'masculino': 'Masculino', 'feminino': 'Feminino'},
+    'Você possui cartão de crédito?': {'sim': 'Sim', 'nao': 'Não'},
+    'Já estudou programação?':        {'sim': 'Sim', 'nao': 'Não'},
+    'Tem computador/notebook?':       {'sim': 'Sim', 'nao': 'Não'},
+}
+
+
+def normalize_audience_series(s: pd.Series, col: str, unification: dict = None) -> pd.Series:
+    """Normaliza categoria (lower/deaccent/pontuação) + aplica unificação canônica
+    da coluna. Fonte ÚNICA da régua de categoria de público: o drift observado e o
+    perfil de comprador da referência rolante passam por aqui, logo comparáveis.
+    `unification` default = AUDIENCE_UNIFICATION.
+    """
+    unif = AUDIENCE_UNIFICATION if unification is None else unification
+    s = s.fillna('(nulo)').astype(str).str.strip()
+    s = s.replace({'': '(nulo)', 'None': '(nulo)', 'nan': '(nulo)'})
+    s = s.apply(lambda v: '(nulo)' if v == '(nulo)' else (normalizar_categoria_para_comparacao(v) or '(nulo)'))
+    mapping = unif.get(col)
+    if mapping:
+        s = s.map(lambda v: mapping.get(v, v))
+    return s
+
+
+# Aliases de chave da pesquisa: PT-Long (analytics.leads / ledger novo via consumer)
+# ⟷ slug (payload Pub/Sub legado). Fonte única do mapeamento, consumida pelo drift
+# (_records_to_pesquisa_df) e pelo perfil de comprador (buyer_profile).
+_SURVEY_CANONICAL_KEYS = (
+    ('O seu gênero:',                          ('O seu gênero:', 'genero')),
+    ('Qual a sua idade?',                      ('Qual a sua idade?', 'idade')),
+    ('O que você faz atualmente?',             ('O que você faz atualmente?', 'ocupacao')),
+    ('Atualmente, qual a sua faixa salarial?', ('Atualmente, qual a sua faixa salarial?', 'faixaSalarial')),
+    ('Você possui cartão de crédito?',         ('Você possui cartão de crédito?', 'cartaoCredito')),
+    ('Já estudou programação?',                ('Já estudou programação?', 'estudouProgramacao')),
+)
+
+
+def survey_to_canonical(survey: dict, has_computer=None) -> dict:
+    """Expande um `survey_responses` (PT-Long OU slug) nas 7 colunas canônicas de
+    característica. `has_computer` (coluna top-level do ledger novo) tem prioridade
+    sobre a chave `computador` do vocabulário legado. Fonte única do mapeamento."""
+    s = survey or {}
+    out = {canon: _pick_survey_value(s, *keys) for canon, keys in _SURVEY_CANONICAL_KEYS}
+    out['Tem computador/notebook?'] = (
+        has_computer if has_computer else _pick_survey_value(s, 'Tem computador/notebook?', 'computador'))
+    return out
+
+
 def calculate_missing_rate(df: pd.DataFrame, col: str) -> float:
     """
     Calcula taxa de valores ausentes em uma coluna.
@@ -1501,44 +1591,8 @@ class DataQualityMonitor:
     # Mapeamento canônico de variantes do formulário → label canônico.
     # Mantido em paralelo com scripts/perfil_audiencia.py:UNIFICATION para que
     # o monitoring não dependa de scripts/. Mantenha sincronizado.
-    _AUDIENCE_UNIFICATION = {
-        'Qual a sua idade?': {
-            'menos de 18 anos': '<18', 'menos de 18': '<18',
-            '18 24 anos': '18-24', '18 24': '18-24',
-            '25 34 anos': '25-34', '25 34': '25-34',
-            '35 44 anos': '35-44', '35 44': '35-44',
-            '45 54 anos': '45-54', '45 54': '45-54',
-            'mais de 55 anos': '55+', '55': '55+',
-        },
-        'O que você faz atualmente?': {
-            'sou cltfuncionario publico': 'CLT/funcionário público',
-            'clt funcionario publico':    'CLT/funcionário público',
-            'sou autonomo':               'Autônomo',
-            'autonomo empreendedor':      'Autônomo',
-            'sou apenas estudante':       'Estudante',
-            'estudante':                  'Estudante',
-            'sou aposentado':             'Aposentado',
-            'aposentado':                 'Aposentado',
-            'nao trabalho e nem estudo':  'Não trabalho/nem estudo',
-            'desempregado':               'Não trabalho/nem estudo',
-        },
-        'Atualmente, qual a sua faixa salarial?': {
-            'entre r1000 a r2000 reais ao mes': 'Até R$2.000',
-            'ate r 2000':                       'Até R$2.000',
-            'entre r2001 a r3000 reais ao mes': 'R$2.001-3.000',
-            'r 2001 a 3000':                    'R$2.001-3.000',
-            'entre r3001 a r5000 reais ao mes': 'R$3.001-5.000',
-            'r 3001 a 5000':                    'R$3.001-5.000',
-            'mais de r5001 reais ao mes':       'Acima de R$5.000',
-            'acima de r 5000':                  'Acima de R$5.000',
-            'nao tenho renda':                  'Sem renda',
-            'nenhuma renda':                    'Sem renda',
-        },
-        'O seu gênero:':                  {'masculino': 'Masculino', 'feminino': 'Feminino'},
-        'Você possui cartão de crédito?': {'sim': 'Sim', 'nao': 'Não'},
-        'Já estudou programação?':        {'sim': 'Sim', 'nao': 'Não'},
-        'Tem computador/notebook?':       {'sim': 'Sim', 'nao': 'Não'},
-    }
+    # Alias do dict de módulo (fonte única) — ver AUDIENCE_UNIFICATION lá em cima.
+    _AUDIENCE_UNIFICATION = AUDIENCE_UNIFICATION
 
     def _load_reference_audience_profile(self):
         """
@@ -1611,14 +1665,8 @@ class DataQualityMonitor:
         return 'neutro'
 
     def _normalize_audience_series(self, s: pd.Series, col: str) -> pd.Series:
-        """Normaliza categoria + aplica mapeamento canônico para a coluna."""
-        s = s.fillna('(nulo)').astype(str).str.strip()
-        s = s.replace({'': '(nulo)', 'None': '(nulo)', 'nan': '(nulo)'})
-        s = s.apply(lambda v: '(nulo)' if v == '(nulo)' else (normalizar_categoria_para_comparacao(v) or '(nulo)'))
-        mapping = self._AUDIENCE_UNIFICATION.get(col)
-        if mapping:
-            s = s.map(lambda v: mapping.get(v, v))
-        return s
+        """Delega pra `normalize_audience_series` (módulo, fonte única da régua)."""
+        return normalize_audience_series(s, col, self._AUDIENCE_UNIFICATION)
 
     def _railway_pesquisa_columns_select(self) -> str:
         """SQL fragment com SELECT da pesquisa em formato canônico (mesmas colunas do snapshot).
@@ -1679,19 +1727,12 @@ class DataQualityMonitor:
         rows = []
         for r in records:
             s = r.survey_responses or {}
+            # survey_to_canonical (módulo) expande as 7 features nas colunas
+            # canônicas cobrindo PT-Long + slug, e resolve has_computer da coluna
+            # top-level. Mesmo mapeamento que o perfil de comprador da ref. rolante.
             rows.append({
                 'data': r.criado_em,
-                'O seu gênero:':                       _pick_survey_value(s, 'O seu gênero:', 'genero'),
-                'Qual a sua idade?':                   _pick_survey_value(s, 'Qual a sua idade?', 'idade'),
-                'O que você faz atualmente?':          _pick_survey_value(s, 'O que você faz atualmente?', 'ocupacao'),
-                'Atualmente, qual a sua faixa salarial?': _pick_survey_value(s, 'Atualmente, qual a sua faixa salarial?', 'faixaSalarial'),
-                'Você possui cartão de crédito?':      _pick_survey_value(s, 'Você possui cartão de crédito?', 'cartaoCredito'),
-                'Já estudou programação?':             _pick_survey_value(s, 'Já estudou programação?', 'estudouProgramacao'),
-                # `has_computer` vive em coluna top-level no ledger novo (não
-                # dentro de `survey_responses`, que é o vocabulário do Pub/Sub).
-                # Fallback pra survey cobre o adaptador legado, que ainda tem
-                # `computador` dentro de pesquisa.
-                'Tem computador/notebook?':            (r.has_computer if r.has_computer else _pick_survey_value(s, 'Tem computador/notebook?', 'computador')),
+                **survey_to_canonical(s, r.has_computer),
                 'source':   r.utm_source,
                 'medium':   r.utm_medium,
                 'campaign': r.utm_campaign,
