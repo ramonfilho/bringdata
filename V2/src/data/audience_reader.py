@@ -55,7 +55,20 @@ _MIN_CARDONLY = 2_000   # público SÓ CARTÃO é subconjunto dos alunos (~2,8k 
 # ATUAL (a fonte foi renomeada `train_unified` → `leads_treino_prod` em 21/07 por
 # um deploy de ingestão fora da main). É só o default; o valor de produção vem de
 # `meta_audiences.leads_source` no yaml do cliente e é passado pelo CLI.
-_DEFAULT_RESPONDENTS_SOURCE = "leads_treino_prod"
+def _default_respondents_source() -> str:
+    """Default = o dono único do nome (`ingestion.leads_unified_source` no config).
+
+    Era uma terceira cópia literal do nome. Em produção o valor chega injetado pelo CLI
+    (`meta_audiences.leads_source`, que por sua vez herda do dono), então este default só
+    vale pra chamada direta — mas manter uma cópia literal aqui era exatamente o padrão
+    que deixou escritor e leitor divergirem por 9 dias.
+    """
+    from src.data.leads_unify import unified_source
+
+    return unified_source()
+
+
+_DEFAULT_RESPONDENTS_SOURCE = _default_respondents_source()
 
 
 def _dedup_by_email(df: pd.DataFrame) -> pd.DataFrame:

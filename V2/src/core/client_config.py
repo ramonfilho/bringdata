@@ -147,6 +147,19 @@ class IngestionConfig:
     columns_to_remove: Optional[List[str]] = None           # #69 — substitui cleaning.colunas_remover
     column_rename_mapping: Optional[Dict[str, str]] = None  # #68
     dataset_cutoff_date: Optional[str] = None               # #38
+
+    # DONO ÚNICO do nome da fonte unificada de leads em `analytics.leads` — o universo que
+    # a ingestão diária materializa e que o TREINO lê. Mora aqui porque é um fato do
+    # dataset, não de quem consome.
+    #
+    # Por que virou config: o nome estava cravado em DOIS lugares que não se falavam —
+    # `leads_unify.UNIFIED_SOURCE` (quem escreve) e uma string no `train_pipeline` (quem
+    # lê). Em 21/07/2026 a fonte foi renomeada `train_unified` -> `leads_treino_prod` num
+    # deploy que não foi pra main; o leitor migrou, o escritor não, e o job diário passou a
+    # alimentar uma fonte PARALELA que ninguém lia. O treino ficou 9 dias congelado em
+    # 342.264 leads sem nada falhar, e 12.873 leads novos ficaram invisíveis pro retreino.
+    leads_unified_source: str = "leads_treino_prod"
+
     # TMB dual-source: arquivo de pedidos (email + telefone, sem risco) (#154–#156)
     tmb_pedidos_detection_columns: Optional[List[str]] = None   # #154 — colunas que identificam arquivo de pedidos
     tmb_pedidos_column_mapping: Optional[Dict[str, str]] = None  # #155 — renomeação para formato canônico
@@ -390,7 +403,11 @@ class MetaAudiencesConfig:
     leads_audience_id: Optional[str] = None        # id do público de LEADS a substituir
     buyers_audience_id: Optional[str] = None       # id do público de ALUNOS a substituir
     cardonly_audience_id: Optional[str] = None     # id do público de ALUNOS SÓ CARTÃO (comprou só em card_gateways, nunca boleto_gateways)
-    leads_source: str = "leads_treino_prod"        # source da fonte unificada de respondentes no analytics.leads (renomeável sem deploy; era train_unified até 21/07)
+    # None = HERDA de `ingestion.leads_unified_source` (o dono único do nome), resolvido no
+    # carregador do config. Aceita valor explícito como override por cliente, mas o normal é
+    # OMITIR: público da Meta e treino leem o MESMO universo, e ter o nome declarado em dois
+    # lugares foi o que deixou o treino congelado por 9 dias sem ninguém perceber.
+    leads_source: Optional[str] = None
     # Régua gateway→forma-de-pagamento (do cliente, não cravada no código). DevClub:
     # cartão = guru/hotmart; boleto = tmb/boletex/asaas. Usada só pelo público SÓ CARTÃO.
     card_gateways: Optional[List[str]] = None      # gateways que representam CARTÃO
@@ -787,7 +804,7 @@ class ClientConfig:
     def from_yaml(cls, path: str | Path) -> "ClientConfig":
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
-        return cls(
+        cfg = cls(
             client_id=data.get("client_id", ""),
             infra=_make(InfraConfig, data.get("infra", {})),
             ingestion=_make(IngestionConfig, data.get("ingestion", {})),
@@ -807,6 +824,13 @@ class ClientConfig:
             business=_make(BusinessConfig, data.get("business", {})),
             validation=_make(ValidationConfig, data.get("validation", {})),
         )
+        # PONTO ÚNICO DE COMPOSIÇÃO do nome da fonte unificada: quem não declarou herda do
+        # dono (`ingestion.leads_unified_source`). Resolver aqui, no carregador, mantém os
+        # chamadores existentes inalterados (continuam lendo `meta_audiences.leads_source`
+        # como string) sem que o nome precise ser repetido no YAML.
+        if cfg.meta_audiences.leads_source is None:
+            cfg.meta_audiences.leads_source = cfg.ingestion.leads_unified_source
+        return cfg
 
     def validate(self) -> None:
         """Levanta ValueError com mensagem acionável se config inválida."""
