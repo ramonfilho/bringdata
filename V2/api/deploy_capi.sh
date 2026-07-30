@@ -624,6 +624,7 @@ print(','.join(stale))
         --max-instances $MAX_INSTANCES \
         --concurrency $CONCURRENCY \
         --update-env-vars="$ENV_VARS" \
+        --update-secrets="HOTMART_BASIC=hotmart-basic:latest" \
         $AUTH_FLAG \
         $TRAFFIC_FLAG \
         --quiet || {

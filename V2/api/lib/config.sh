@@ -185,6 +185,11 @@ build_env_vars() {
     # URL pública deste serviço — é o endereço que mandamos pra Hotmart chamar de
     # volta. Sem ela o selo nunca voltaria (o endpoint recusa submeter, fail-loud).
     ENV_VARS="$ENV_VARS,HOTLEADS_PUBLIC_URL=${HOTLEADS_PUBLIC_URL:-https://smart-ads-api-gazrm25mda-uc.a.run.app}"
+    # A credencial Basic da Hotmart (HOTMART_BASIC) NÃO entra aqui: o valor tem
+    # ESPAÇO ("Basic xxx") e vai por --update-secrets no deploy_capi.sh, montado
+    # do Secret Manager (hotmart-basic). Ela nunca esteve no Cloud Run porque até
+    # 30/07 a Hotmart só era chamada em job/local — sem ela o submit do HotLeads
+    # devolve "sem token Hotmart" e o cron vira no-op silencioso.
 
     # Consumer Pub/Sub do sistema novo (PROCESSO_CAPI_LEAD_SURVEYS §5).
     # Sem essa flag a revisão deployada vira no-op no /pubsub/process-pending.
