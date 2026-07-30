@@ -316,6 +316,27 @@ def parse_webhook(body: Dict) -> Tuple[Optional[str], List[Dict]]:
 # 4. CAPI — evento dos leads quentes
 # =============================================================================
 
+def lead_event_timestamp(created_at) -> int:
+    """`created_at` do ledger → epoch UNIX para o `event_time` do Meta.
+
+    ⚠️ A coluna é `timestamp WITHOUT time zone` guardando UTC. Um naive
+    datetime.timestamp() interpreta o valor como horário LOCAL — no Cloud Run,
+    onde TZ=America/Sao_Paulo, isso joga o evento 3h no FUTURO e a Meta rejeita
+    o lote inteiro ("Call was not successful"). Foi assim que os 18 primeiros
+    eventos quentes falharam em 30/07. Por isso o tzinfo é explicitado aqui.
+
+    Guarda extra de 60s no fim: mesmo com o fuso certo, um lead capturado no
+    exato instante da chamada poderia arredondar pra frente. Os outros senders
+    do projeto resolvem o mesmo risco com `int(time.time()) - 60`.
+    """
+    now = int(time.time())
+    if not created_at:
+        return now - 60
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    return min(int(created_at.timestamp()), now - 60)
+
+
 def send_lead_scoring_hot(
     lead: Dict,
     cfg: HotLeadsConfig,
@@ -329,8 +350,8 @@ def send_lead_scoring_hot(
     parse_meta_capi_response) — não reimplementa hashing nem parse de resposta.
     Sem valor monetário: o selo é binário, atribuir R$ seria inventar número.
 
-    `event_time` é o do lead original (não o de agora), igual aos outros
-    senders; lead mais velho que a janela do Meta é pulado em vez de rejeitado.
+    `event_time` é o do lead original (não o de agora); lead mais velho que a
+    janela do Meta é pulado em vez de rejeitado.
     """
     from api.capi_integration import (ACCESS_TOKEN, build_lead_user_data,
                                       parse_meta_capi_response)
@@ -349,8 +370,7 @@ def send_lead_scoring_hot(
         return {"status": "error", "event_id": event_id,
                 "message": "pixel_id não configurado"}
 
-    created_at = lead.get("created_at")
-    event_timestamp = int(created_at.timestamp()) if created_at else int(time.time())
+    event_timestamp = lead_event_timestamp(lead.get("created_at"))
     age_days = (time.time() - event_timestamp) / 86400
     if age_days > META_MAX_EVENT_AGE_DAYS:
         return {"status": "skipped", "event_id": event_id,
@@ -445,6 +465,60 @@ def run_submit_batch(conn, client_config: ClientConfig, webhook_url: str,
                 f"(execution_id={result.get('execution_id')})")
     return {"status": "ok", "submitted": marked,
             "execution_id": result.get("execution_id")}
+
+
+def select_failed_sends(conn, limit: int = 500) -> List[Dict]:
+    """Leads QUENTES cujo selo já chegou mas cujo evento não saiu ('error').
+
+    Sem este caminho, qualquer falha no envio (soluço da Meta, token expirado,
+    bug como o do fuso em 30/07) deixaria o lead órfão pra sempre: o seletor de
+    submissão não o pega de volta (status não é NULL nem 'submitted') e o
+    webhook não repete. O selo já está no ledger, então reenviar NÃO custa nova
+    chamada à Hotmart — é só refazer o passo do CAPI.
+    """
+    rows = conn.run(
+        """
+        SELECT event_id, email, phone, first_name, last_name, fbp, fbc,
+               user_agent, ip, utm_url, survey_responses, created_at,
+               hotleads_status
+        FROM registros_ml
+        WHERE hotleads_status = 'error'
+          AND hotleads_hot IS TRUE
+          AND hotleads_capi_sent_at IS NULL
+        ORDER BY hotleads_scored_at DESC
+        LIMIT :lim
+        """,
+        lim=limit,
+    )
+    cols = ["event_id", "email", "phone", "first_name", "last_name", "fbp", "fbc",
+            "user_agent", "ip", "utm_url", "survey_responses", "created_at",
+            "hotleads_status"]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def run_retry_failed(conn, client_config: ClientConfig, limit: int = 500,
+                     dry_run: bool = False) -> Dict:
+    """Refaz o envio CAPI dos quentes que ficaram em 'error'."""
+    cfg = client_config.hotleads
+    if not cfg.enabled:
+        return {"status": "disabled", "retried": 0}
+
+    leads = select_failed_sends(conn, limit=limit)
+    stats = {"candidates": len(leads), "sent": 0, "skipped": 0, "errors": 0}
+    for lead in leads:
+        res = send_lead_scoring_hot(lead, cfg, capi_config=client_config.capi,
+                                    dry_run=dry_run)
+        if res.get("status") in ("success", "partial", "dry_run"):
+            if not dry_run:
+                mark_capi_sent(conn, lead["event_id"], ok=True)
+            stats["sent"] += 1
+        elif res.get("status") == "skipped":
+            stats["skipped"] += 1
+        else:
+            stats["errors"] += 1
+    if leads:
+        logger.info(f"[hotleads] retry de falhas | {stats}")
+    return {"status": "ok", **stats}
 
 
 def run_process_webhook(conn, client_config: ClientConfig, body: Dict,
