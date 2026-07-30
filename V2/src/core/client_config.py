@@ -431,6 +431,11 @@ class HotLeadsConfig:
     ligar explicitamente. Rollback = enabled:false."""
     enabled: bool = False                          # master switch — dark por padrão
     event_name: str = "LeadScoringHot"             # evento CAPI dos leads quentes (≠ "LeadScoring" nativo da Hotmart, evita colisão se um dia ligarem o envio deles)
+    # Pixel de destino. None = herda `capi.pixel_id` (o padrão do cliente).
+    # Existe como campo próprio porque o selo da Hotmart é um sinal SEPARADO do
+    # nosso modelo e o operador pode querer isolá-lo num conjunto de dados
+    # diferente — no DevClub ele vai pro DEVLF-API, não pro pixel padrão.
+    pixel_id: Optional[str] = None
     submit_window_days: int = 7                    # janela de leads elegíveis; também é o teto de event_time retroativo que o Meta aceita
     batch_limit: int = 1000                        # máx. de leads por chamada (limite da API HotLeads)
     resubmit_after_hours: int = 6                  # re-submete lead ainda sem selo após N horas (webhook perdido)
