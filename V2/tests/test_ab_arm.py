@@ -45,14 +45,33 @@ CASES = [
         campaign_name="DEVLF | CAP | FRIO | FASE 01 | ADV | MACHINE LEARNING | PG2 | 2026-06-08|1",
         captured_at="2026-06-08"), CHAMPION),
 
-    # 4. Era ambígua (PIXEL NOVO API, 29/04-27/05): sem variant -> indeterminado
-    ("PIXEL NOVO API ambíguo sem variant -> indeterminado", dict(
+    # 4. A família do "pixel novo" (mai/2026). Era tratada como ambígua e devolvia
+    # INDETERMINADO, jogando fora lead real. Medição de 30/07/2026 sobre os backups do
+    # Railway (`lead_legado` tem o decil que a PRODUÇÃO gravou) cruzados com
+    # `scores_historicos` (os dois modelos recalculados) mostrou que as três grafias NÃO
+    # são a mesma campanha: só a que tem "API" é Challenger. Ver _RETIRED_CHALLENGER_MARKERS.
+    ("PIXEL NOVO API = challenger (41,6% x 14,7% no desempate)", dict(
         campaign_name="DEVLF | CAP | FRIO | FASE 04 | ADV | PIXEL NOVO API | MACHINE LEARNING | LEAD | PG2 | 1",
-        captured_at="2026-05-10"), INDETERMINADO),
+        captured_at="2026-05-10"), CHALLENGER),
     ("PIXEL NOVO API + variant champion -> champion (variant vence)", dict(
         variant="champion_jan30",
         campaign_name="DEVLF | CAP | FRIO | FASE 04 | ADV | PIXEL NOVO API | MACHINE LEARNING | LEAD | PG2 | 1",
         captured_at="2026-05-10"), CHAMPION),
+    ("PIXEL NOVO sem API = champion (65,0% x -0,2%)", dict(
+        campaign_name="DEVLF | CAP | FRIO | FASE 04 | ADV | PIXEL NOVO | MACHINE LEARNING | PG2 | 2025-04-15",
+        captured_at="2026-05-10"), CHAMPION),
+    ("NOVO PIXEL = champion (54,6% x -1,0%)", dict(
+        campaign_name="DEVLF | CAP | FRIO | FASE 04 | ADV | NOVO PIXEL | MACHINE LEARNING | PG2 | 2026-04-16",
+        captured_at="2026-05-05"), CHAMPION),
+    ("QUENTE + NOVO PIXEL = champion (mesma família, mesmo perfil)", dict(
+        campaign_name="DEVLF | CAP | QUENTE | FASE 04 | ADV | NOVO PIXEL | MACHINE LEARNING | PG2 | 2025-04-25",
+        captured_at="2026-05-03"), CHAMPION),
+    # "API" tem que vencer o marcador de Champion mesmo com "MACHINE LEARNING" no nome:
+    # o passo do challenger aposentado roda antes, e "pixel novo api" é mais específico
+    # que "pixel novo". Sem esta ordem, a única grafia Challenger seria lida como Champion.
+    ("API vence 'machine learning' na mesma string", dict(
+        campaign_name="DEVLF | CAP | FRIO | ADV | PIXEL NOVO API | MACHINE LEARNING | PAGINA NOVA",
+        captured_at="2026-05-15"), CHALLENGER),
 
     # 5. Controle: captação sem evento ML (lead puro, score, faixa)
     ("LEAD puro = controle", dict(
@@ -134,25 +153,6 @@ CASES = [
     # declarados Champion pelo marcador de champion aposentado, sem base: nessa janela o
     # pixel novo era a chave do Challenger, e não há `variant` pra desempatar (a família
     # morreu em 18/05, o ledger só começa em 25/05).
-    ("NOVO PIXEL (sem API) também é ambíguo", dict(
-        campaign_name="DEVLF | CAP | FRIO | FASE 04 | ADV | NOVO PIXEL | MACHINE LEARNING | PG2 | 2026-04-16",
-        captured_at="2026-05-05"), INDETERMINADO),
-    ("PIXEL NOVO (sem API) também é ambíguo", dict(
-        campaign_name="DEVLF | CAP | FRIO | FASE 04 | ADV | PIXEL NOVO | MACHINE LEARNING | LP NOVA | PG2",
-        captured_at="2026-05-13"), INDETERMINADO),
-    ("QUENTE + NOVO PIXEL em maio = ambíguo (não Champion)", dict(
-        campaign_name="DEVLF | CAP | QUENTE | FASE 04 | ADV | NOVO PIXEL | MACHINE LEARNING | PG2 | 2025-04-25",
-        captured_at="2026-05-03"), INDETERMINADO),
-    # SEM data o marcador ambíguo continua valendo: não se pode afirmar que estamos FORA
-    # da janela. Antes o `captured_at=None` desligava a guarda e o nome caía em Champion,
-    # o oposto do que ela existe pra fazer.
-    ("marcador ambíguo SEM data -> indeterminado, não Champion", dict(
-        campaign_name="DEVLF | CAP | FRIO | FASE 04 | ADV | PIXEL NOVO | MACHINE LEARNING | PG2"),
-        INDETERMINADO),
-    # Fora da janela o mesmo nome volta a ser legível (a ambiguidade era daquela época).
-    ("mesmo nome DEPOIS da janela = champion aposentado", dict(
-        campaign_name="DEVLF | CAP | FRIO | FASE 04 | ADV | PIXEL NOVO | MACHINE LEARNING | PG2",
-        captured_at="2026-07-01"), CHAMPION),
 
     # 11c. A campanha QUENTE de 29/07 NÃO depende de inferência por nome: 764 leads dela
     # têm variant='challenger_abr28' no ledger, e o abr28 é Champion desde 25/07.

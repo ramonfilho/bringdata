@@ -94,7 +94,24 @@ _RETIRED_VARIANT_ROLES: Dict[str, str] = {
 # Marcadores de nome de modelos aposentados (substring, lower). Só valem quando a TAG do
 # YAML não casou — modelo ativo sempre ganha.
 _RETIRED_CHAMPION_MARKERS: Tuple[str, ...] = ("leadqualified", "machine learning", "| ml |")
-_RETIRED_CHALLENGER_MARKERS: Tuple[str, ...] = ("ml_mar", "utm_pixel")
+# "pixel novo api" é mais específico que "pixel novo" e precisa ser testado ANTES do
+# marcador de Champion — por isso mora aqui (o passo 2b roda antes do 2d).
+#
+# COMO SE SABE (medição de 30/07/2026, não suposição): os backups do Railway guardam o
+# decil que a PRODUÇÃO gravou (`public.lead_legado`), e `public.scores_historicos` tem os
+# dois modelos recalculados sobre os mesmos leads. O modelo cujo decil bate com o de
+# produção é o que scoreou. Entre os leads em que os dois modelos DISCORDAM:
+#
+#   referência Champion (MACHINE LEARNING puro, n=24.764):  58,6% champion /  ~0% challenger
+#   referência Challenger (ML_MAR, n=4.137):                15,4% champion /  4,0% challenger
+#   PIXEL NOVO API (n=1.664):                               14,7% champion / 41,6% challenger
+#   PIXEL NOVO sem API (n=16.985):                          65,0% champion / -0,2% challenger
+#   NOVO PIXEL (n=15.430):                                  54,6% champion / -1,0% challenger
+#
+# Ou seja: as três grafias NÃO são a mesma campanha. "API" é o discriminador — só ela é
+# Challenger. As outras duas seguem para o marcador de Champion via "machine learning",
+# que é o comportamento correto e já era o de antes.
+_RETIRED_CHALLENGER_MARKERS: Tuple[str, ...] = ("ml_mar", "utm_pixel", "pixel novo api")
 
 # Marcadores de Controle: captação SEM evento ML (Lead puro, score, faixa).
 _CONTROLE_MARKERS: Tuple[str, ...] = ("escala score", "aberto adv", "faixa ", "score")
@@ -108,21 +125,11 @@ class _AmbiguousEra:
     markers: Tuple[str, ...]
 
 
-# O pixel novo foi a chave de routing do Challenger de 29/04–27/05, mas o mesmo nome
-# aparece em campanha Champion — então sozinho não classifica. Exige `variant`.
-#
-# A lista cobre a FAMÍLIA inteira de grafias, não só "pixel novo api". Levantamento de
-# 30/07/2026 em `analytics.ad_spend`: as 20 campanhas dessa família rodaram de 01 a
-# 18/05/2026 (dentro desta janela) escritas de três formas — "PIXEL NOVO API",
-# "PIXEL NOVO" e "NOVO PIXEL" — e TODAS carregam "MACHINE LEARNING" no nome. Só a grafia
-# com "API" estava listada aqui, então as outras ~R$ 135 mil caíam no marcador de Champion
-# aposentado e eram declaradas Champion sem base. Não há como desempatar pelo nome e não
-# há `variant` pra consultar: a família morreu em 18/05 e o ledger só começa em 25/05
-# (verificado: zero leads com utm_campaign dessa família em registros_ml). O honesto é
-# INDETERMINADO, que é o contrato deste módulo pra janela ambígua sem variant.
-_AMBIGUOUS_ERAS: Tuple[_AmbiguousEra, ...] = (
-    _AmbiguousEra(date(2026, 4, 29), date(2026, 5, 27), ("pixel novo", "novo pixel")),
-)
+# VAZIO hoje. A única época ambígua que existia aqui ("pixel novo api", 29/04–27/05/2026)
+# foi RESOLVIDA por evidência em 30/07/2026 — ver `_RETIRED_CHALLENGER_MARKERS`. O
+# mecanismo fica de pé porque a próxima janela ambígua vai aparecer, e o contrato dele
+# (marcador presente + época + sem `variant` -> INDETERMINADO) é o certo pra ela.
+_AMBIGUOUS_ERAS: Tuple[_AmbiguousEra, ...] = ()
 
 
 # ───────────────────────────── config dos modelos ATIVOS ─────────────────────────────
@@ -273,13 +280,11 @@ def _coerce_date(value) -> Optional[date]:
 def _ambiguous_marker_hit(t: str, d: Optional[date]) -> bool:
     """True se o texto bate um marcador ambíguo e a data NÃO descarta a janela dele.
 
-    Sem data, bater o marcador já conta como ambíguo. Antes o `d is None` desligava a
-    guarda inteira, e aí o nome caía no marcador de Champion aposentado e era declarado
-    Champion — exatamente o oposto do que a guarda existe pra fazer. Sem data não se pode
-    afirmar que estamos FORA da janela, e as campanhas dessa família só existiram DENTRO
-    dela (01-18/05/2026). Se um dia aparecer campanha nova com esse nome, ela sai como
-    INDETERMINADO e a guarda `seed_campaign_labels_faltantes --check` grita — que é o modo
-    de falhar certo, em vez de entrar calada no balde errado.
+    Sem data, bater o marcador já conta como ambíguo: não se pode afirmar que estamos FORA
+    da janela, e o custo de errar pra menos (INDETERMINADO, que a guarda
+    `seed_campaign_labels_faltantes --check` acusa) é menor que o de afirmar um braço
+    errado calado. `_AMBIGUOUS_ERAS` está vazia hoje, então isto só volta a valer quando
+    uma nova época ambígua for declarada.
     """
     for era in _AMBIGUOUS_ERAS:
         if not any(m in t for m in era.markers):
