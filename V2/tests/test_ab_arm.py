@@ -16,7 +16,11 @@ from src.core.ab_arm import (
 # (descrição, kwargs, esperado)
 CASES = [
     # 1. variant do ledger é a verdade — vence qualquer nome
-    ("variant challenger vence", dict(variant="challenger_abr28",
+    # O papel do abr28 MUDOU em 25/07/2026 (challenger -> champion), então este caso
+    # precisa de data pra ser determinístico. Antes ele não tinha, e passava só porque
+    # o papel estava cravado no código. A datação é o ponto: ver bloco 8.
+    ("variant challenger vence (na data em que abr28 era challenger)", dict(
+        variant="challenger_abr28", captured_at="2026-06-15",
         campaign_name="DEVLF | CAP | FRIO | ... | LEADQUALIFIED|1"), CHALLENGER),
     ("variant champion vence", dict(variant="champion_jan30",
         campaign_name="DEVLF | CAP | FRIO | ... | LEADHQLB|1"), CHAMPION),
@@ -84,6 +88,54 @@ CASES = [
     ("utm_campaign usado quando presente", dict(
         utm_campaign="DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1 | 2026-05-26 | LEADHQLB|1",
         campaign_name="qualquer coisa", captured_at="2026-05-26"), CHALLENGER),
+
+    # 8. PAPEL TEM DATA — o abr28 virou champion em 25/07/2026. O mesmo lead, o mesmo
+    # nome de campanha, resolve diferente antes e depois. Sem isto, promover um modelo
+    # reescreve o passado de todo relatório histórico.
+    ("abr28 na véspera da promoção = challenger", dict(
+        variant="challenger_abr28", captured_at="2026-07-24"), CHALLENGER),
+    ("abr28 no dia da promoção = champion", dict(
+        variant="challenger_abr28", captured_at="2026-07-25"), CHAMPION),
+    ("HQLB por NOME antes da promoção = challenger", dict(
+        utm_campaign="DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1 | 2026-06-18 | LEADHQLB|1",
+        captured_at="2026-06-18"), CHALLENGER),
+    ("HQLB por NOME depois da promoção = champion", dict(
+        utm_campaign="DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1 | 2026-06-18 | LEADHQLB|1",
+        captured_at="2026-07-29"), CHAMPION),
+
+    # 9. Challenger jul_24 — antes o variant dele nem existia no mapa e caía em
+    # INDETERMINADO; a tag JUL24 caía em 'Lead'. Ambos vinham do YAML não ser lido.
+    ("variant jul_24 = challenger", dict(
+        variant="challenger_jul_24", captured_at="2026-07-29"), CHALLENGER),
+    ("tag JUL24_TOP10 por nome = challenger", dict(
+        utm_campaign="DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1 | 2026-06-18 | JUL24_TOP10",
+        captured_at="2026-07-29"), CHALLENGER),
+    ("tag JUL24_TOP50 por nome = challenger", dict(
+        utm_campaign="DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1 | 2026-06-18 | JUL24_TOP50",
+        captured_at="2026-07-29"), CHALLENGER),
+
+    # 10. PÚBLICO não define captação. A campanha QUENTE existe desde 29/07/2026 e
+    # gastou R$ 2.271 no primeiro dia; o filtro exigia literalmente 'FRIO' e ela caía
+    # em EXTERNO (balde de Google/orgânico), desaparecendo do relatório.
+    ("QUENTE + HQLB é captação, não externo", dict(
+        utm_campaign="DEVLF | CAP | QUENTE | FASE 04 | ADV | LEAD | PG1 | 2026-06-29 | LEADHQLB",
+        captured_at="2026-07-29"), CHAMPION),
+    ("QUENTE + LEAD puro = controle", dict(
+        utm_campaign="DEVLF | CAP | QUENTE | FASE 04 | ADV | LEAD | PG1 | 2026-06-29",
+        captured_at="2026-07-29"), CONTROLE),
+    ("MORNO tambem é captação", dict(
+        utm_campaign="DEVLF | CAP | MORNO | FASE 04 | ADV | LEAD | PG1 | 2026-06-29 | LEADHQLB",
+        captured_at="2026-07-29"), CHAMPION),
+
+    # 11. Variações de nome que o gestor cria (sufixo/prefixo) continuam casando pela
+    # SUBSTRING da tag — é a vantagem estrutural do YAML sobre a assinatura exata da
+    # tabela curada, que precisava de uma linha nova pra cada variação.
+    ("HQLB com sufixo TESTEPROMESSA", dict(
+        utm_campaign="DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1 | LEADHQLB | TESTEPROMESSA",
+        captured_at="2026-07-29"), CHAMPION),
+    ("HQLB com sufixo DUPLICADOS", dict(
+        utm_campaign="DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1 | LEADHQLB | DUPLICADOS",
+        captured_at="2026-07-29"), CHAMPION),
 ]
 
 
