@@ -110,6 +110,7 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'alerts[].details.top_list[].launch_delta_pp':                                      (R, None),  # ex: None
     'alerts[].details.top_list[].launch_pct':                                           (R, None),  # ex: None
     'alerts[].details.top_list[].reference_pct':                                        (R, None),  # ex: None
+    'alerts[].details.top_list[].rolling_reference_pct':                                (R, None),  # ex: None — perfil comprador 90d por (col,cat); só REFERENCE_SOURCE=rolling (frozen→None, render omite a coluna)
     'alerts[].details.top_list[].today_delta_pp':                                       (R, None),  # ex: None
     'alerts[].details.top_list[].today_pct':                                            (R, None),  # ex: None
     'alerts[].details.top_list[].prev_day_pct':                                         (R, None),  # ex: None — D-2 full BRT day (anteontem)

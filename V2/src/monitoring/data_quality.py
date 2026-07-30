@@ -2300,9 +2300,9 @@ class DataQualityMonitor:
 
         # Referência rolante (perfil de comprador) como COLUNA extra por (col, cat).
         # Só quando REFERENCE_SOURCE=rolling; frozen (default) → rolling_map vazio e
-        # os itens saem sem `rolling_reference_pct` (render omite a coluna). O perfil
-        # já passou pela MESMA régua de categoria (normalize_audience_series), então
-        # as chaves batem com o observado.
+        # `rolling_reference_pct` sai None em cada item (chave declarada no
+        # payload_schema; render omite a coluna). O perfil já passou pela MESMA régua
+        # de categoria (normalize_audience_series), então as chaves batem com o observado.
         rolling_map = self._load_rolling_audience_map()
 
         top_list: List[Dict] = []
