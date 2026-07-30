@@ -53,6 +53,29 @@ DEFAULT_BATCH = 250
 PUBSUB_PROJECT_ID = "smart-ads-451319"
 PUBSUB_SUBSCRIPTION_ID = "lead-capture-ingest-sub"
 
+# ─────────────────────────── drenagem até esvaziar ───────────────────────────
+# UM pull por invocação sempre deixou resto: o cron acorda de 5 em 5 minutos, puxa no
+# máximo DEFAULT_BATCH e vai embora, mesmo com fila cheia. O que sobra só é olhado 5
+# minutos depois, então mensagem antiga envelhece em degrau e o alerta de
+# "oldest unacked" dispara com a fila drenando normalmente. Era isso que obrigava a
+# drenar na mão com um laço de POST.
+#
+# Agora a invocação repete o pull até a fila devolver vazio, dentro de dois limites:
+#
+# _DRAIN_SECONDS: teto de tempo. O Cloud Scheduler desta rota tem attemptDeadline de
+#   180s; parar em 120s deixa folga pra abrir conexões, montar a resposta e o próprio
+#   overhead do Cloud Run. Estourar o deadline faria o Scheduler contar como falha e
+#   reentregar, o que é pior que sobrar mensagem pro próximo tick.
+# _DRAIN_MAX_ROUNDS: teto de rodadas, rede de segurança contra publisher em loop
+#   (fila que se realimenta mais rápido do que drena nunca devolveria vazio).
+#
+# Teto por invocação sai de 250 para 2.000 mensagens, e o teto por hora de ~3.000 para
+# ~24.000, sem mexer na cadência do cron nem na memória (cada rodada processa e solta;
+# o pico é o de UMA rodada, que é o mesmo de hoje — importa porque esta revisão divide
+# container com o scoring e já houve OOM por concorrência).
+_DRAIN_SECONDS = 120.0
+_DRAIN_MAX_ROUNDS = 8
+
 
 def _event_ts_iso(skew_seconds: int = 60) -> str:
     """Timestamp RFC3339 (UTC) com o mesmo recuo de ~60s do CAPI Meta —
@@ -811,3 +834,75 @@ def process_pending_pubsub(
     }
     logger.info(f"📨 [pubsub_branch] {summary}")
     return summary
+
+
+def drain_pending_pubsub(
+    subscriber,
+    conn,
+    pipeline,
+    *,
+    dry_run: bool = False,
+    batch: int = DEFAULT_BATCH,
+    ledger_conn=None,
+    max_seconds: float = _DRAIN_SECONDS,
+    max_rounds: int = _DRAIN_MAX_ROUNDS,
+) -> Dict:
+    """Repete `process_pending_pubsub` até a fila esvaziar (ou bater um dos tetos).
+
+    INVÓLUCRO FINO de propósito: toda a lógica de pull/parse/score/CAPI/ledger/ack
+    continua em `process_pending_pubsub`, intocada. Aqui só mora "quantas vezes" —
+    duplicar aquele miolo pra ganhar um laço seria trocar um problema de operação por
+    um de manutenção.
+
+    Por que existe: uma invocação puxava no máximo `batch` e ia embora mesmo com fila
+    cheia, então o resto só era olhado no tick seguinte (5 min depois). Mensagem antiga
+    envelhecia em degrau e o alerta de backlog disparava com a fila drenando normal —
+    era isso que obrigava a drenar na mão.
+
+    Para quando:
+      - uma rodada devolve 0 processadas (fila vazia) — o caso normal;
+      - o tempo passa de `max_seconds` (deixa folga pro attemptDeadline do Scheduler);
+      - bate `max_rounds` (rede contra publisher em loop).
+
+    Devolve a soma das rodadas, mais `rounds` e `drain_stop` dizendo POR QUE parou —
+    sem isso, "processou 2.000" não distingue fila drenada de teto batido, que é
+    exatamente a diferença entre estar tudo bem e precisar de ação.
+    """
+    t0 = time.time()
+    total: Dict = {}
+    rounds = 0
+    stop = "fila_vazia"
+
+    for _ in range(max_rounds):
+        r = process_pending_pubsub(
+            subscriber, conn, pipeline,
+            dry_run=dry_run, batch=batch, ledger_conn=ledger_conn,
+        )
+        rounds += 1
+        for k, v in r.items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                total[k] = total.get(k, 0) + v
+            else:
+                total.setdefault(k, v)
+
+        if not r.get("processed"):
+            stop = "fila_vazia"
+            break
+        if time.time() - t0 >= max_seconds:
+            # Não é erro: sobra pro próximo tick, que é o comportamento de sempre.
+            stop = "teto_de_tempo"
+            break
+    else:
+        stop = "teto_de_rodadas"
+
+    total["rounds"] = rounds
+    total["drain_stop"] = stop
+    total["drain_seconds"] = round(time.time() - t0, 1)
+    total["dry_run"] = dry_run
+    if stop != "fila_vazia":
+        logger.warning(
+            "[pubsub_branch] drenagem parou por %s após %d rodada(s)/%.0fs — sobrou fila "
+            "pro próximo tick (processadas=%s)",
+            stop, rounds, total["drain_seconds"], total.get("processed"),
+        )
+    return total
