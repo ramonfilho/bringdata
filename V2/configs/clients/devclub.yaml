@@ -664,6 +664,21 @@ meta_audiences:
   card_gateways: [guru, hotmart]             # régua do cliente: cartão = Guru + Hotmart
   boleto_gateways: [tmb, boletex, asaas]     # boleto = TMB + boletex + Asaas (quem tem qualquer um destes NÃO é "só cartão")
   api_version: v24.0
+
+# HotLeads (lead scoring da Hotmart) — selo binário quente/frio por lead virando
+# evento CAPI próprio. Submissão SEM credenciais de pixel: a Hotmart NÃO fala com
+# o Meta; o evento sai pela NOSSA CAPI (mesmo dedup/user_data dos demais).
+# Ver api/hotleads_integration.py. Credencial Basic é a MESMA da ingestão de
+# vendas Hotmart (HOTMART_BASIC). Rollback: enabled:false (submit e webhook viram
+# no-op) OU pausar o scheduler `hotleads-submit`.
+hotleads:
+  enabled: true
+  event_name: LeadScoringHot        # ≠ "LeadScoring" nativo da Hotmart — evita colisão se um dia ligarem o envio deles
+  submit_window_days: 7             # janela de elegíveis; é também o teto de event_time retroativo que o Meta aceita
+  batch_limit: 1000                 # limite da API HotLeads por chamada
+  resubmit_after_hours: 6           # re-submete lead ainda sem selo após 6h (webhook perdido)
+  expected_ticket: 2000.0           # ticket informado à Hotmart (metadado do campaign)
+  currency: BRL
 api:
   cors_origins:
   - https://lp.devclub.com.br

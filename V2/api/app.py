@@ -1167,6 +1167,100 @@ async def webhook_sendflow_group_join(request: Request):
     return {"status": "ok", "received": len(rows), "inserted": inserted}
 
 
+# =============================================================================
+# HOTLEADS (lead scoring da Hotmart) — submissão em lote + retorno do selo
+# =============================================================================
+# Dois endpoints, um por ponta do fluxo assíncrono (ver api/hotleads_integration):
+#   POST /hotleads/submit-batch  — chamado pelo Cloud Scheduler; empurra leads
+#   POST /hotleads/webhook       — chamado PELA HOTMART; recebe o selo e dispara CAPI
+#
+# Ambos são protegidos por token próprio porque o serviço é PÚBLICO (allUsers é
+# obrigatório enquanto os crons não mandam OIDC — ver incidente 23/07). O webhook
+# leva o token na QUERY porque a Hotmart não permite header customizado: a URL
+# que registramos no batch_enrich já vai com ?token=...
+
+def _hotleads_webhook_url() -> str:
+    """URL pública deste serviço que a Hotmart vai chamar de volta, com o token.
+    `HOTLEADS_PUBLIC_URL` permite apontar pra outra revisão em teste."""
+    import os as _os
+    base = (_os.environ.get('HOTLEADS_PUBLIC_URL')
+            or _os.environ.get('SERVICE_PUBLIC_URL') or '').rstrip('/')
+    token = _os.environ.get('HOTLEADS_WEBHOOK_TOKEN', '')
+    return f"{base}/hotleads/webhook?token={token}"
+
+
+@app.post("/hotleads/submit-batch")
+async def hotleads_submit_batch(
+    request: Request,
+    pipeline: PipelineDep,
+    limit: Optional[int] = None,
+    dry_run: bool = False,
+):
+    """Submete leads recentes sem selo ao batch_enrich da Hotmart (sem pixel).
+    Idempotente por construção: só pega quem está com `hotleads_status` NULL ou
+    'submitted' vencido, então rodar duas vezes seguidas não duplica."""
+    import os as _os
+    expected = _os.environ.get('HOTLEADS_CRON_TOKEN')
+    token = request.headers.get('x-hotleads-token') or request.query_params.get('token')
+    if not expected or token != expected:
+        raise HTTPException(status_code=401, detail="token inválido ou não configurado")
+
+    cfg = pipeline._client_config
+    if not cfg.hotleads.enabled:
+        return {"status": "disabled", "submitted": 0}
+
+    webhook_url = _hotleads_webhook_url()
+    if not dry_run and not webhook_url.startswith('http'):
+        raise HTTPException(
+            status_code=500,
+            detail="HOTLEADS_PUBLIC_URL/SERVICE_PUBLIC_URL não configurada — "
+                   "sem URL de retorno o selo nunca voltaria"
+        )
+
+    from api.hotleads_integration import run_submit_batch
+    from src.data.ledger_connection import open_cloudsql_ledger_connection
+    conn = open_cloudsql_ledger_connection()
+    try:
+        return run_submit_batch(conn, cfg, webhook_url=webhook_url,
+                                limit=limit, dry_run=dry_run)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@app.post("/hotleads/webhook")
+async def hotleads_webhook(request: Request, pipeline: PipelineDep,
+                           token: Optional[str] = None, dry_run: bool = False):
+    """Recebe o selo (quente/frio) por lead e dispara o evento dos quentes.
+
+    Responde 200 mesmo com falhas parciais: a Hotmart não reentrega, então
+    devolver erro só jogaria fora os selos que deram certo. O que falhou fica
+    registrado em `hotleads_error` no ledger.
+    """
+    import os as _os
+    expected = _os.environ.get('HOTLEADS_WEBHOOK_TOKEN')
+    if not expected or token != expected:
+        raise HTTPException(status_code=401, detail="token inválido ou não configurado")
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="payload inválido (JSON esperado)")
+
+    from api.hotleads_integration import run_process_webhook
+    from src.data.ledger_connection import open_cloudsql_ledger_connection
+    conn = open_cloudsql_ledger_connection()
+    try:
+        return run_process_webhook(conn, pipeline._client_config, body,
+                                   dry_run=dry_run)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 @app.get("/webhook/lead_capture/stats")
 async def lead_capture_stats(
     start_date: Optional[str] = None,
