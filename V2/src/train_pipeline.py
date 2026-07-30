@@ -270,6 +270,56 @@ def _log_step_count(step: str, df_after, df_before=None, target_col: str = 'targ
     logger.info("  " + " | ".join(parts))
 
 
+# Atraso máximo tolerado entre o lead mais recente do universo de treino e hoje. A
+# ingestão roda DIÁRIA, então qualquer coisa acima de uma semana significa que ela parou
+# ou está enchendo outra fonte. Folga generosa de propósito: isto é alarme de incêndio,
+# não medida de qualidade — não pode disparar por um fim de semana com pouco tráfego.
+_MAX_ATRASO_UNIVERSO_DIAS = 7
+
+
+def _assert_universo_fresco(df_pesquisa, *, fonte: str, max_atraso_dias: int) -> None:
+    """Aborta o treino se o universo lido estiver PARADO NO TEMPO.
+
+    POR QUE ISTO EXISTE (incidente de 21-30/07/2026)
+    -----------------------------------------------
+    O nome da fonte unificada estava cravado em dois lugares: aqui e no escritor da
+    ingestão diária (`src/data/leads_unify.py`). A fonte foi renomeada e só este lado
+    migrou. A ingestão seguiu enchendo o nome velho, este pipeline seguiu lendo o novo, e
+    o universo ficou congelado em 342.264 leads por 9 dias — 12.873 leads novos invisíveis
+    pro retreino. NADA falhou: a leitura devolvia centenas de milhares de linhas, o assert
+    de "não veio vazio" passava, e o log dizia um número grande e tranquilizador.
+
+    A lição é que "veio muita linha" não prova que a fonte está VIVA. Só a data do lead
+    mais recente prova. Esta guarda é o que transforma o próximo rename numa falha barulhenta
+    no minuto zero, em vez de um modelo treinado com dado velho descoberto semanas depois.
+    """
+    import pandas as _pd
+
+    if 'Data' not in df_pesquisa.columns:
+        logger.warning("  [universo] sem coluna 'Data' — guarda de frescor NÃO aplicada")
+        return
+    datas = _pd.to_datetime(df_pesquisa['Data'], errors='coerce').dropna()
+    if datas.empty:
+        raise AssertionError(
+            f"[universo] source={fonte!r} tem {len(df_pesquisa):,} linhas mas NENHUMA data "
+            f"válida em 'Data' — universo ilegível, treino abortado.")
+    mais_recente = datas.max()
+    # tz-naive dos dois lados (o jsonb grava ISO sem timezone).
+    agora = _pd.Timestamp.now(tz=mais_recente.tz) if mais_recente.tz else _pd.Timestamp.now()
+    atraso = (agora - mais_recente).days
+    if atraso > max_atraso_dias:
+        raise AssertionError(
+            f"[universo] source={fonte!r} PARADO: lead mais recente em "
+            f"{mais_recente.date()} ({atraso} dias atrás, limite {max_atraso_dias}). "
+            f"A ingestão diária provavelmente está escrevendo em OUTRA source. "
+            f"Confira `ingestion.leads_unified_source` no config do cliente contra o que "
+            f"existe em analytics.leads (SELECT source, count(*), max(capturado_em) "
+            f"FROM analytics.leads GROUP BY 1). Treino abortado de propósito: treinar com "
+            f"universo congelado produz modelo cego pras campanhas recentes.")
+    logger.info(f"  [universo] source={fonte} fresco: lead mais recente em "
+                f"{mais_recente.date()} ({atraso}d atrás, limite {max_atraso_dias}d)")
+
+
 def _assert_retraining_decisions_resolved(config_path: str, set_active: bool) -> None:
     """
     Bloqueia a promoção (--set-active) enquanto houver decisão de retreino
@@ -680,9 +730,12 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         # include_utm=use_control_weights: anexa __utm_campaign__ (coluna utm_campaign
         # da linha) pro peso de controle enxergar as campanhas recentes do A/B
         # (LEADHQLB/LEADQUALIFIED, que moram em utm_campaign e não no jsonb 'Campaign').
-        # Source 'leads_treino_prod' = o universo consolidado real (342k). O nome antigo
-        # 'train_unified' virou resíduo (~7,4k) da ingestão diária — ler ele treinava no lixo.
-        df_pesquisa = read_pesquisa(source='leads_treino_prod', include_utm=use_control_weights)
+        # O NOME da fonte vem do config (`ingestion.leads_unified_source`), não cravado
+        # aqui. Estava cravado dos dois lados — aqui e no escritor (`leads_unify`) — e em
+        # 21/07/2026 só este lado migrou pro nome novo: a ingestão diária seguiu enchendo o
+        # nome velho e o treino ficou 9 dias parado em 342.264 leads sem nada falhar.
+        _fonte_treino = client_config.ingestion.leads_unified_source
+        df_pesquisa = read_pesquisa(source=_fonte_treino, include_utm=use_control_weights)
         # 'Data' vem como ISO no jsonb (inequívoco) → parsear SEM dayfirst. Com
         # dayfirst=True (o default da validação) o pandas infere formato errado na
         # precisão mista (Sheets tem hora) e coage a maioria a NaT.
@@ -690,7 +743,9 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
             df_pesquisa['Data'] = pd.to_datetime(df_pesquisa['Data'], errors='coerce')
         assert len(df_pesquisa) > 0, "[leads_source=db] analytics.leads retornou 0 linhas de pesquisa"
         logger.info(f"  [leads_source=db] {len(df_pesquisa):,} linhas de pesquisa do analytics.leads "
-                    f"— substitui arquivos/Sheets")
+                    f"(source={_fonte_treino}) — substitui arquivos/Sheets")
+        _assert_universo_fresco(df_pesquisa, fonte=_fonte_treino,
+                                max_atraso_dias=_MAX_ATRASO_UNIVERSO_DIAS)
 
     # === VALIDAÇÃO DE INGESTÃO (pós-Célula 4) ===
     val_ingestion = validate_ingestion(df_pesquisa, df_vendas, client_config.validation)

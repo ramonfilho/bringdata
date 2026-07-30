@@ -52,6 +52,12 @@ infra:
   guru_api_transactions_endpoint: null
   db_url_env_var: RAILWAY
 ingestion:
+  # DONO ÚNICO do nome do universo de leads em analytics.leads: quem ESCREVE (a ingestão
+  # diária, src/data/leads_unify.py) e quem LÊ (o treino, e o público de leads da Meta)
+  # apontam pra este valor. Renomear a fonte = mudar SÓ esta linha.
+  # Era cravado em dois arquivos; em 21/07/2026 só um migrou e o treino ficou 9 dias
+  # congelado em 342.264 leads, cego pros 12.873 leads novos, sem nada falhar.
+  leads_unified_source: leads_treino_prod
   training_data_dir: null
   tmb_detection_columns:
   - Pedido
@@ -651,7 +657,10 @@ meta_audiences:
   leads_audience_id: '120248123634020390'    # público existente "lista_leads_devclub_320.csv" (~191k) — será substituído pela união leads
   buyers_audience_id: '120248123531220390'   # público existente "lista_alunos_devclub_10.csv" (~6.8k) — será substituído pelos compradores
   cardonly_audience_id: '120248267145830390' # público "lista_alunos_cartao_devclub.csv" (alunos só cartão), criado via API em 22/07
-  leads_source: leads_treino_prod            # source da fonte unificada de respondentes (analytics.leads). Era 'train_unified' até 21/07; renomear AQUI se o pipeline mudar de novo (o reader falha-alto se vier vazia)
+  # leads_source REMOVIDO daqui de propósito: herda de `ingestion.leads_unified_source`,
+  # o dono único do nome. Declarar em dois lugares foi o que permitiu escritor e leitor
+  # divergirem e congelar o treino por 9 dias. Só volte a declarar aqui se o público da
+  # Meta precisar de um universo DIFERENTE do de treino (hoje não precisa).
   card_gateways: [guru, hotmart]             # régua do cliente: cartão = Guru + Hotmart
   boleto_gateways: [tmb, boletex, asaas]     # boleto = TMB + boletex + Asaas (quem tem qualquer um destes NÃO é "só cartão")
   api_version: v24.0

@@ -1,4 +1,7 @@
-"""Reconstrução da fonte única de leads (`train_unified`) a partir das fontes ATÔMICAS.
+"""Reconstrução da fonte única de leads a partir das fontes ATÔMICAS.
+
+O NOME da fonte vem do config do cliente (`ingestion.leads_unified_source`), não é cravado
+aqui — ver `unified_source()` abaixo pra por que isso deixou de ser constante.
 
 Metodologia e legenda: V2/docs/RECONSTRUCAO_LEADS_UNIFICADA.md (skill /data-architect).
 
@@ -18,11 +21,37 @@ Dedup determinístico por (lower(email), dia), menor prio vence. Rollback = DELE
 """
 from __future__ import annotations
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-UNIFIED_SOURCE = "train_unified"
 STG_LEAD_SURVEYS = "lead_surveys_stg"  # espelho do lead_surveys do Railway no Cloud SQL
+
+_V2_ROOT = Path(__file__).resolve().parents[2]
+
+
+def unified_source(client_id: str = "devclub") -> str:
+    """Nome da fonte unificada em `analytics.leads` — LIDO DO CONFIG DO CLIENTE.
+
+    Era a constante `UNIFIED_SOURCE = "train_unified"` cravada aqui, e o treino tinha o
+    nome cravado no arquivo DELE. Quando a fonte foi renomeada pra `leads_treino_prod` em
+    21/07/2026, só o lado do treino mudou: este escritor seguiu alimentando o nome velho e
+    criou uma fonte PARALELA que ninguém lia. O treino ficou 9 dias congelado em 342.264
+    leads sem nada falhar. Agora os dois lados leem `ingestion.leads_unified_source`.
+
+    Fail-safe: config ilegível cai no default da dataclass, que é o nome CORRENTE (não o
+    histórico) — degradar nunca pode ressuscitar o bug que este parâmetro veio matar.
+    """
+    from src.core.client_config import ClientConfig, IngestionConfig
+
+    try:
+        cfg = ClientConfig.from_yaml(_V2_ROOT / "configs" / "clients" / f"{client_id}.yaml")
+        return cfg.ingestion.leads_unified_source
+    except Exception as e:  # noqa: BLE001 — config ausente não pode derrubar a ingestão
+        fallback = IngestionConfig().leads_unified_source
+        logger.warning("[leads_unify] config de %s ilegível (%s) — usando default %r",
+                       client_id, e, fallback)
+        return fallback
 
 # (chave canônica texto-pergunta, chave camelCase nativa)
 _CANON = [
@@ -243,9 +272,10 @@ def _conservation_rows(conn) -> list:
     return rows
 
 
-def build_unified(cloud_conn, *, write: bool = False) -> dict:
-    """Reconstrói o train_unified das fontes atômicas. Pressupõe lead_surveys_stg já espelhado.
+def build_unified(cloud_conn, *, write: bool = False, source: str | None = None) -> dict:
+    """Reconstrói a fonte unificada das fontes atômicas. Pressupõe lead_surveys_stg já espelhado.
     write=False = dry-run (conta por proveniência). write=True grava + audita atomicamente."""
+    FONTE = source or unified_source()   # injetavel; default = dono unico no config
     cloud_conn.run("SET search_path TO analytics, public")
     src = _src_cte()
     if not write:
@@ -271,21 +301,21 @@ def build_unified(cloud_conn, *, write: bool = False) -> dict:
         rows = _conservation_rows(cloud_conn)
         if not all(r["conserva"] for r in rows):
             raise RuntimeError(f"conservação falhou: {[r for r in rows if not r['conserva']]}")
-        # 3) substitui train_unified + linhagem (idempotente; rollback = transação)
-        deleted = cloud_conn.run(f"WITH d AS (DELETE FROM analytics.leads WHERE source='{UNIFIED_SOURCE}' RETURNING 1) SELECT count(*) FROM d")[0][0]
+        # 3) substitui a fonte unificada + linhagem (idempotente; rollback = transação)
+        deleted = cloud_conn.run(f"WITH d AS (DELETE FROM analytics.leads WHERE source='{FONTE}' RETURNING 1) SELECT count(*) FROM d")[0][0]
         cloud_conn.run(f"""
             INSERT INTO analytics.leads
               (client_id, source, event_id, email, phone, capturado_em,
                utm_source, utm_medium, utm_campaign, utm_content, utm_term, user_agent,
                survey_responses, ingested_at)
-            SELECT 'devclub', '{UNIFIED_SOURCE}', event_id, email, phone, dt,
+            SELECT 'devclub', '{FONTE}', event_id, email, phone, dt,
                    utm_source, utm_medium, utm_campaign, utm_content, utm_term, user_agent,
                    canon, now()
             FROM _u""")
-        cloud_conn.run(f"DELETE FROM {PROVENANCE_TBL} WHERE source='{UNIFIED_SOURCE}'")
+        cloud_conn.run(f"DELETE FROM {PROVENANCE_TBL} WHERE source='{FONTE}'")
         cloud_conn.run(f"""
             INSERT INTO {PROVENANCE_TBL} (source, event_id, provenance, prio, ingested_at)
-            SELECT '{UNIFIED_SOURCE}', event_id, prov, prio, now() FROM _u""")
+            SELECT '{FONTE}', event_id, prov, prio, now() FROM _u""")
         # 4) persiste a reconciliação desta execução (mesmo snapshot); limpa runs impossíveis
         cloud_conn.run(f"DELETE FROM {AUDIT_TBL} WHERE deduplicadas < 0 OR excl_data < 0 OR conserva = false")
         for r in rows:
@@ -293,7 +323,7 @@ def build_unified(cloud_conn, *, write: bool = False) -> dict:
                 f"INSERT INTO {AUDIT_TBL} (run_at, source, prio, fonte, na_fonte, excl_data, "
                 f"excl_email, deduplicadas, incluidas, conserva) "
                 f"VALUES (now(),:s,:p,:f,:nf,:ed,:ee,:dd,:inc,:cv)",
-                s=UNIFIED_SOURCE, p=r["prio"], f=r["fonte"], nf=r["na_fonte"], ed=r["excl_data"],
+                s=FONTE, p=r["prio"], f=r["fonte"], nf=r["na_fonte"], ed=r["excl_data"],
                 ee=r["excl_email"], dd=r["deduplicadas"], inc=r["incluidas"], cv=r["conserva"])
         cloud_conn.run("COMMIT")
     except Exception:
@@ -302,22 +332,23 @@ def build_unified(cloud_conn, *, write: bool = False) -> dict:
         except Exception:
             pass
         raise
-    total = cloud_conn.run(f"SELECT count(*) FROM analytics.leads WHERE source='{UNIFIED_SOURCE}'")[0][0]
-    prov_n = cloud_conn.run(f"SELECT count(*) FROM {PROVENANCE_TBL} WHERE source='{UNIFIED_SOURCE}'")[0][0]
+    total = cloud_conn.run(f"SELECT count(*) FROM analytics.leads WHERE source='{FONTE}'")[0][0]
+    prov_n = cloud_conn.run(f"SELECT count(*) FROM {PROVENANCE_TBL} WHERE source='{FONTE}'")[0][0]
     incl_total = sum(r["incluidas"] for r in rows)
-    logger.info("[leads_unify] source=%s deletados=%d gravados=%d linhagem=%d", UNIFIED_SOURCE, deleted, total, prov_n)
+    logger.info("[leads_unify] source=%s deletados=%d gravados=%d linhagem=%d", FONTE, deleted, total, prov_n)
     return {"mode": "write", "deleted_before": deleted, "total": total, "linhagem": prov_n,
             "conserva_tudo": all(r["conserva"] for r in rows),
             "tudo_bate": total == prov_n == incl_total, "por_fonte": rows}
 
 
-def build_incremental(cloud_conn, *, window_days: int = 7) -> dict:
-    """Append/refresh dos leads RECENTES do registros_ml (ledger vivo) no train_unified, SEM tocar
+def build_incremental(cloud_conn, *, window_days: int = 7, source: str | None = None) -> dict:
+    """Append/refresh dos leads RECENTES do registros_ml (ledger vivo) na fonte unificada, SEM tocar
     no histórico congelado. Reprocessa a janela móvel dos últimos `window_days` (idempotente:
     upsert por event_id; registros_ml é prio 1 → sobrescreve qualquer fonte de prio menor).
     Janela móvel (em vez de watermark exato) evita bug de TZ (created_at é naive, capturado_em é
     timestamptz) e é robusto a gaps: basta a cadência ser < window_days. Para o rebuild completo
     do histórico use --write."""
+    FONTE = source or unified_source()   # injetavel; default = dono unico no config
     cloud_conn.run("SET search_path TO analytics, public")
     _ensure_provenance_table(cloud_conn)
     # CURRENT_DATE - N é naive (date) → compara com created_at (timestamp) sem conversão de TZ.
@@ -330,27 +361,27 @@ def build_incremental(cloud_conn, *, window_days: int = 7) -> dict:
             f"FROM (SELECT DISTINCT ON (em,(dt::date)) * FROM ({branch}) b "
             f"      WHERE em IS NOT NULL AND em <> '' ORDER BY em,(dt::date), prio) q")
         processados = cloud_conn.run("SELECT count(*) FROM _new")[0][0]
-        # quantos já existem no train_unified (qualquer fonte) → serão substituídos (prio 1 vence)
+        # quantos já existem na fonte unificada (qualquer origem) → serão substituídos (prio 1 vence)
         substituidos = cloud_conn.run(
-            f"SELECT count(*) FROM analytics.leads WHERE source='{UNIFIED_SOURCE}' "
+            f"SELECT count(*) FROM analytics.leads WHERE source='{FONTE}' "
             f"AND event_id IN (SELECT event_id FROM _new)")[0][0]
         if processados:
-            cloud_conn.run(f"DELETE FROM analytics.leads WHERE source='{UNIFIED_SOURCE}' "
+            cloud_conn.run(f"DELETE FROM analytics.leads WHERE source='{FONTE}' "
                            f"AND event_id IN (SELECT event_id FROM _new)")
             cloud_conn.run(f"""
                 INSERT INTO analytics.leads
                   (client_id, source, event_id, email, phone, capturado_em,
                    utm_source, utm_medium, utm_campaign, utm_content, utm_term, user_agent,
                    survey_responses, ingested_at)
-                SELECT 'devclub', '{UNIFIED_SOURCE}', event_id, email, phone, dt,
+                SELECT 'devclub', '{FONTE}', event_id, email, phone, dt,
                        utm_source, utm_medium, utm_campaign, utm_content, utm_term, user_agent,
                        canon, now()
                 FROM _new""")
-            cloud_conn.run(f"DELETE FROM {PROVENANCE_TBL} WHERE source='{UNIFIED_SOURCE}' "
+            cloud_conn.run(f"DELETE FROM {PROVENANCE_TBL} WHERE source='{FONTE}' "
                            f"AND event_id IN (SELECT event_id FROM _new)")
             cloud_conn.run(f"""
                 INSERT INTO {PROVENANCE_TBL} (source, event_id, provenance, prio, ingested_at)
-                SELECT '{UNIFIED_SOURCE}', event_id, prov, prio, now() FROM _new""")
+                SELECT '{FONTE}', event_id, prov, prio, now() FROM _new""")
         cloud_conn.run("COMMIT")
     except Exception:
         try:
@@ -358,8 +389,8 @@ def build_incremental(cloud_conn, *, window_days: int = 7) -> dict:
         except Exception:
             pass
         raise
-    total = cloud_conn.run(f"SELECT count(*) FROM analytics.leads WHERE source='{UNIFIED_SOURCE}'")[0][0]
-    prov_n = cloud_conn.run(f"SELECT count(*) FROM {PROVENANCE_TBL} WHERE source='{UNIFIED_SOURCE}'")[0][0]
+    total = cloud_conn.run(f"SELECT count(*) FROM analytics.leads WHERE source='{FONTE}'")[0][0]
+    prov_n = cloud_conn.run(f"SELECT count(*) FROM {PROVENANCE_TBL} WHERE source='{FONTE}'")[0][0]
     novos = processados - substituidos
     logger.info("[leads_unify] incremental janela=%dd: processados=%d novos=%d refresh=%d total=%d",
                 window_days, processados, novos, substituidos, total)
@@ -368,9 +399,10 @@ def build_incremental(cloud_conn, *, window_days: int = 7) -> dict:
             "tudo_bate": total == prov_n}
 
 
-def audit_unified(cloud_conn) -> dict:
+def audit_unified(cloud_conn, *, source: str | None = None) -> dict:
     """Verificador READ-ONLY: lê a última reconciliação persistida (gerada pelo write, em snapshot
     congelado) e confere que leads == linhagem == soma(incluídas). Não recomputa sobre fonte viva."""
+    FONTE = source or unified_source()   # injetavel; default = dono unico no config
     cloud_conn.run("SET search_path TO analytics, public")
     last = cloud_conn.run(
         f"SELECT prio, fonte, na_fonte, excl_data, excl_email, deduplicadas, incluidas, conserva "
@@ -378,8 +410,8 @@ def audit_unified(cloud_conn) -> dict:
     por_fonte = [{"prio": p, "fonte": f, "na_fonte": nf, "excl_data": ed, "excl_email": ee,
                   "deduplicadas": dd, "incluidas": inc, "conserva": cv}
                  for p, f, nf, ed, ee, dd, inc, cv in last]
-    leads_n = cloud_conn.run(f"SELECT count(*) FROM analytics.leads WHERE source='{UNIFIED_SOURCE}'")[0][0]
-    prov_n = cloud_conn.run(f"SELECT count(*) FROM {PROVENANCE_TBL} WHERE source='{UNIFIED_SOURCE}'")[0][0]
+    leads_n = cloud_conn.run(f"SELECT count(*) FROM analytics.leads WHERE source='{FONTE}'")[0][0]
+    prov_n = cloud_conn.run(f"SELECT count(*) FROM {PROVENANCE_TBL} WHERE source='{FONTE}'")[0][0]
     incl_total = sum(r["incluidas"] for r in por_fonte)
     return {"mode": "audit-verify", "conserva_tudo": all(r["conserva"] for r in por_fonte),
             "leads": leads_n, "linhagem": prov_n, "audit_incluidas_total": incl_total,
@@ -400,7 +432,7 @@ def main():
     from dotenv import load_dotenv
     load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    ap = argparse.ArgumentParser(description="Reconstrução da fonte única de leads (train_unified)")
+    ap = argparse.ArgumentParser(description="Reconstrução da fonte única de leads (nome vem do config)")
     ap.add_argument("--write", action="store_true", help="rebuild completo + audita atomicamente (default: dry-run)")
     ap.add_argument("--incremental", action="store_true", help="append/refresh só dos leads recentes do registros_ml (janela móvel) — para a automação diária")
     ap.add_argument("--window-days", type=int, default=7, help="janela móvel do --incremental em dias (default 7)")
