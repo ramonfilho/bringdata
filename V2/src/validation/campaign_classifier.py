@@ -299,7 +299,10 @@ def classify_variant(campaign_name: str, captured_at=None) -> str:
     arm = resolve_arm(campaign_name=campaign_name, captured_at=captured_at)
     if arm == EXTERNO:
         return VARIANT_EXTERNO
-    return arm_to_bucket(arm, contexto=str(campaign_name)[:80])
+    # `arm_to_bucket` devolve None quando o papel é INDETERMINADO (janela ambígua sem
+    # `variant` pra desempatar). Aí a campanha sai do recorte por variante em vez de
+    # entrar num balde chutado — é o mesmo destino que ela já tinha antes deste refator.
+    return arm_to_bucket(arm, contexto=str(campaign_name)[:80]) or VARIANT_EXTERNO
 
 
 def add_ml_classification(df: pd.DataFrame, campaign_col: str = 'campaign') -> pd.DataFrame:

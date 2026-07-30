@@ -127,7 +127,41 @@ CASES = [
         utm_campaign="DEVLF | CAP | MORNO | FASE 04 | ADV | LEAD | PG1 | 2026-06-29 | LEADHQLB",
         captured_at="2026-07-29"), CHAMPION),
 
-    # 11. Variações de nome que o gestor cria (sufixo/prefixo) continuam casando pela
+    # 11b. A FAMÍLIA do pixel novo é ambígua inteira, não só a grafia com "API".
+    # Levantamento de 30/07/2026: as 20 campanhas dessa família rodaram de 01 a 18/05/2026
+    # escritas de três formas ("PIXEL NOVO API", "PIXEL NOVO", "NOVO PIXEL") e TODAS levam
+    # "MACHINE LEARNING" no nome. Só a com "API" estava marcada, então ~R$ 135 mil eram
+    # declarados Champion pelo marcador de champion aposentado, sem base: nessa janela o
+    # pixel novo era a chave do Challenger, e não há `variant` pra desempatar (a família
+    # morreu em 18/05, o ledger só começa em 25/05).
+    ("NOVO PIXEL (sem API) também é ambíguo", dict(
+        campaign_name="DEVLF | CAP | FRIO | FASE 04 | ADV | NOVO PIXEL | MACHINE LEARNING | PG2 | 2026-04-16",
+        captured_at="2026-05-05"), INDETERMINADO),
+    ("PIXEL NOVO (sem API) também é ambíguo", dict(
+        campaign_name="DEVLF | CAP | FRIO | FASE 04 | ADV | PIXEL NOVO | MACHINE LEARNING | LP NOVA | PG2",
+        captured_at="2026-05-13"), INDETERMINADO),
+    ("QUENTE + NOVO PIXEL em maio = ambíguo (não Champion)", dict(
+        campaign_name="DEVLF | CAP | QUENTE | FASE 04 | ADV | NOVO PIXEL | MACHINE LEARNING | PG2 | 2025-04-25",
+        captured_at="2026-05-03"), INDETERMINADO),
+    # SEM data o marcador ambíguo continua valendo: não se pode afirmar que estamos FORA
+    # da janela. Antes o `captured_at=None` desligava a guarda e o nome caía em Champion,
+    # o oposto do que ela existe pra fazer.
+    ("marcador ambíguo SEM data -> indeterminado, não Champion", dict(
+        campaign_name="DEVLF | CAP | FRIO | FASE 04 | ADV | PIXEL NOVO | MACHINE LEARNING | PG2"),
+        INDETERMINADO),
+    # Fora da janela o mesmo nome volta a ser legível (a ambiguidade era daquela época).
+    ("mesmo nome DEPOIS da janela = champion aposentado", dict(
+        campaign_name="DEVLF | CAP | FRIO | FASE 04 | ADV | PIXEL NOVO | MACHINE LEARNING | PG2",
+        captured_at="2026-07-01"), CHAMPION),
+
+    # 11c. A campanha QUENTE de 29/07 NÃO depende de inferência por nome: 764 leads dela
+    # têm variant='challenger_abr28' no ledger, e o abr28 é Champion desde 25/07.
+    ("QUENTE de 29/07 pelo variant do ledger = champion", dict(
+        variant="challenger_abr28", captured_at="2026-07-29",
+        utm_campaign="DEVLF | CAP | QUENTE | FASE 04 | ADV | LEAD | PG1 | 2026-06-29 | LEADHQLB"),
+        CHAMPION),
+
+    # 12. Variações de nome que o gestor cria (sufixo/prefixo) continuam casando pela
     # SUBSTRING da tag — é a vantagem estrutural do YAML sobre a assinatura exata da
     # tabela curada, que precisava de uma linha nova pra cada variação.
     ("HQLB com sufixo TESTEPROMESSA", dict(

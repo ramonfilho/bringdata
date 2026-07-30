@@ -80,8 +80,11 @@ _ARM_TO_BUCKET: Dict[str, str] = {
     CHAMPION: CHAMPION,
     CHALLENGER: CHALLENGER,
     CONTROLE: BUCKET_LEAD,
-    INDETERMINADO: BUCKET_LEAD,   # colapsa, mas loga (ver `arm_to_bucket`)
 }
+# INDETERMINADO NÃO entra no mapa de propósito: "não sei" não pode virar uma linha do
+# relatório. Quem chama trata como fora do escopo (o `classify_variant` devolve EXTERNO),
+# que é o mesmo destino que essas campanhas já tinham. Mapear pra 'Lead' seria trocar uma
+# afirmação errada (Champion) por outra (Controle).
 
 # ─────────────────────── modelos APOSENTADOS (fatos congelados) ───────────────────────
 # `registros_ml.variant` de modelos que saíram do ar. Não estão no YAML de ativos.
@@ -105,10 +108,20 @@ class _AmbiguousEra:
     markers: Tuple[str, ...]
 
 
-# `PIXEL NOVO API` foi a chave de routing do Challenger de 29/04–27/05, mas o mesmo
-# nome aparece em campanha Champion — então sozinho não classifica. Exige `variant`.
+# O pixel novo foi a chave de routing do Challenger de 29/04–27/05, mas o mesmo nome
+# aparece em campanha Champion — então sozinho não classifica. Exige `variant`.
+#
+# A lista cobre a FAMÍLIA inteira de grafias, não só "pixel novo api". Levantamento de
+# 30/07/2026 em `analytics.ad_spend`: as 20 campanhas dessa família rodaram de 01 a
+# 18/05/2026 (dentro desta janela) escritas de três formas — "PIXEL NOVO API",
+# "PIXEL NOVO" e "NOVO PIXEL" — e TODAS carregam "MACHINE LEARNING" no nome. Só a grafia
+# com "API" estava listada aqui, então as outras ~R$ 135 mil caíam no marcador de Champion
+# aposentado e eram declaradas Champion sem base. Não há como desempatar pelo nome e não
+# há `variant` pra consultar: a família morreu em 18/05 e o ledger só começa em 25/05
+# (verificado: zero leads com utm_campaign dessa família em registros_ml). O honesto é
+# INDETERMINADO, que é o contrato deste módulo pra janela ambígua sem variant.
 _AMBIGUOUS_ERAS: Tuple[_AmbiguousEra, ...] = (
-    _AmbiguousEra(date(2026, 4, 29), date(2026, 5, 27), ("pixel novo api",)),
+    _AmbiguousEra(date(2026, 4, 29), date(2026, 5, 27), ("pixel novo", "novo pixel")),
 )
 
 
@@ -258,11 +271,20 @@ def _coerce_date(value) -> Optional[date]:
 
 
 def _ambiguous_marker_hit(t: str, d: Optional[date]) -> bool:
-    """True se o texto bate um marcador ambíguo dentro da janela dele."""
-    if d is None:
-        return False
+    """True se o texto bate um marcador ambíguo e a data NÃO descarta a janela dele.
+
+    Sem data, bater o marcador já conta como ambíguo. Antes o `d is None` desligava a
+    guarda inteira, e aí o nome caía no marcador de Champion aposentado e era declarado
+    Champion — exatamente o oposto do que a guarda existe pra fazer. Sem data não se pode
+    afirmar que estamos FORA da janela, e as campanhas dessa família só existiram DENTRO
+    dela (01-18/05/2026). Se um dia aparecer campanha nova com esse nome, ela sai como
+    INDETERMINADO e a guarda `seed_campaign_labels_faltantes --check` grita — que é o modo
+    de falhar certo, em vez de entrar calada no balde errado.
+    """
     for era in _AMBIGUOUS_ERAS:
-        if era.start <= d < era.end and any(m in t for m in era.markers):
+        if not any(m in t for m in era.markers):
+            continue
+        if d is None or era.start <= d < era.end:
             return True
     return False
 
@@ -288,16 +310,18 @@ def is_captacao(text: Optional[str], config: Optional[ArmConfig] = None) -> bool
     return cfg.cap_marker in t.lower()
 
 
-def arm_to_bucket(arm: str, *, contexto: str = "") -> str:
+def arm_to_bucket(arm: str, *, contexto: str = "") -> Optional[str]:
     """Traduz o rótulo do miolo pro vocabulário de 3 baldes dos agregadores.
 
-    CONTROLE -> 'Lead'. INDETERMINADO -> 'Lead' também, porque devolver um quarto rótulo
-    zeraria o balde em silêncio nos consumidores (ver BUCKET_LEAD). Mas o colapso é
-    LOGADO: indeterminado é o sinal de que apareceu campanha que a régua não conhece, e
-    perder esse sinal foi exatamente o que deixou R$ 3.250 de gasto sem rótulo por dias.
+    CONTROLE -> 'Lead'. INDETERMINADO -> None (não há balde honesto): quem chama decide
+    excluir. Devolver 'Lead' seria trocar uma afirmação errada por outra, e devolver um
+    quarto rótulo zeraria o balde em silêncio nos consumidores (ver BUCKET_LEAD).
+    O caso é LOGADO: indeterminado é o sinal de que apareceu campanha que a régua não
+    conhece, e perder esse sinal foi o que deixou R$ 3.250 de gasto sem rótulo por dias.
     """
     if arm == INDETERMINADO:
-        warn_once(f"arm indeterminado colapsado em '{BUCKET_LEAD}'", contexto)
+        warn_once("arm indeterminado, campanha excluida do recorte por variante", contexto)
+        return None
     return _ARM_TO_BUCKET.get(arm, BUCKET_LEAD)
 
 
