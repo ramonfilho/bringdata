@@ -611,6 +611,9 @@ class ABTestConfig:
     """
     enabled: bool = False
     variants: Dict[str, ABTestVariantConfig] = field(default_factory=dict)
+    # Caminho do YAML de origem. Guardado pra `campaign_bucket_map` poder delegar ao
+    # miolo (`core.ab_arm`) em vez de reimplementar a derivação tag->papel.
+    yaml_path: Optional[str] = None
 
     @classmethod
     def from_active_model_yaml(cls, path: str | Path) -> "ABTestConfig":
@@ -686,7 +689,7 @@ class ABTestConfig:
                 campaign_tag=vdata.get("campaign_tag"),
                 display_name=vdata.get("display_name"),
             )
-        return cls(enabled=True, variants=variants)
+        return cls(enabled=True, variants=variants, yaml_path=str(path))
 
     def match_variant(
         self,
@@ -713,7 +716,7 @@ class ABTestConfig:
                 return variant
         return None
 
-    def campaign_bucket_map(self) -> Optional[Dict[str, Any]]:
+    def campaign_bucket_map(self, as_of=None) -> Optional[Dict[str, Any]]:
         """Frente 2 — mapa derivado pro MONITORAMENTO: como a tag no nome da campanha
         (utm_campaign) vira balde A/B (Lead/Champion/Challenger) + o rótulo de exibição
         de cada balde. Fonte única = as variantes do YAML (campos role/campaign_tag/
@@ -729,24 +732,23 @@ class ABTestConfig:
             {'tags':     [(TAG_UPPER, bucket), ...],   # precedência: challenger antes de champion
              'display':  {bucket: display_name, ...},  # inclui 'Lead'
              'fallback': 'Lead'}
+
+        INVÓLUCRO: a derivação mora em `core.ab_arm.bucket_map_for`, construtor ÚNICO do
+        mapa. Este método e `ModelRegistry.bucket_map` eram duas implementações
+        independentes da mesma derivação — duas fontes de verdade pro mesmo conceito, que
+        é exatamente o que o refator de 30/07/2026 veio matar. `as_of` permite pedir o
+        mapa VIGENTE numa data passada (relatório histórico não é reescrito por promoção).
         """
-        tagged = [
-            (v.campaign_tag, (v.role or "").lower(), v.display_name)
-            for v in self.variants.values()
-            if v.campaign_tag and v.role
-        ]
-        if not tagged:
-            return None
-        bucket_of = {"champion": "Champion", "challenger": "Challenger"}
-        # Precedência challenger > champion (idêntica ao classificador legado).
-        order = {"challenger": 0, "champion": 1}
-        tagged.sort(key=lambda t: order.get(t[1], 9))
-        tags = [(tag.upper(), bucket_of.get(role, role.capitalize())) for tag, role, _ in tagged]
-        display: Dict[str, str] = {"Lead": "Lead"}
-        for tag, role, dn in tagged:
-            b = bucket_of.get(role, role.capitalize())
-            display[b] = dn or b
-        return {"tags": tags, "display": display, "fallback": "Lead"}
+        from src.core.ab_arm import bucket_map_for, load_arm_config
+
+        cfg = load_arm_config(self.yaml_path) if self.yaml_path else None
+        mapa = bucket_map_for(as_of=as_of, config=cfg)
+        if not mapa["tags"]:
+            return None      # nenhuma variante com role+campaign_tag -> caller cai no legado
+        # O rótulo do balde 'Lead' é escolha de apresentação de cada relatório (aqui
+        # 'Lead', no ModelRegistry 'Lead Padrão (Meta)'), não identidade de modelo.
+        mapa["display"] = {"Lead": "Lead", **mapa["display"]}
+        return mapa
 
 
 # ---------------------------------------------------------------------------

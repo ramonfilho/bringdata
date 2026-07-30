@@ -123,6 +123,7 @@ class ModelRegistry:
         import yaml
 
         cfg_path = Path(active_models_path or _DEFAULT_ACTIVE_MODELS)
+        self._yaml_path = cfg_path
         with open(cfg_path) as f:
             cfg = yaml.safe_load(f) or {}
 
@@ -161,22 +162,18 @@ class ModelRegistry:
         # digest usa via _set_render_labels. Nada duplicado aqui.
         # Rótulos dos baldes de canal (Lead=Meta sem tag, Google, Orgânico) espelham
         # as linhas do debriefing; Champion/Challenger vêm do display_name do YAML.
-        _role_to_bucket = {"champion": "Champion", "challenger": "Challenger"}
-        tags = []
+        # INVÓLUCRO: a derivação tag->papel mora em `core.ab_arm.bucket_map_for`. Aqui
+        # ficava uma SEGUNDA implementação dela (ordenação, _role_to_bucket, rótulos),
+        # independente da de `ABTestConfig.campaign_bucket_map` — duas fontes de verdade
+        # pro mesmo conceito, que divergiram na promoção do abr28 em 25/07/2026.
+        from src.core.ab_arm import bucket_map_for, load_arm_config
+
+        _mapa = bucket_map_for(config=load_arm_config(self._yaml_path))
+        self.bucket_map = {"tags": _mapa["tags"], "fallback": _mapa["fallback"]}
+        # Rótulos dos baldes de CANAL são apresentação deste relatório (espelham as linhas
+        # do debriefing do cliente); os de Champion/Challenger vêm do display_name do YAML.
         self._bucket_labels = {"Lead": "Lead Padrão (Meta)", "Google": "Google",
-                               "Organico": "Orgânico/Outro"}
-        # ordena challenger antes de champion pra respeitar a precedência
-        _ordered = sorted(variants.items(),
-                          key=lambda kv: 0 if str(kv[1].get("role", "")).lower() == "challenger" else 1)
-        for key, v in _ordered:
-            role = str(v.get("role", "")).lower()
-            tag = str(v.get("campaign_tag", "")).strip().upper()
-            bucket = _role_to_bucket.get(role)
-            if bucket and tag:
-                tags.append((tag, bucket))
-            if bucket and v.get("display_name"):
-                self._bucket_labels[bucket] = v["display_name"]
-        self.bucket_map = {"tags": tags, "fallback": "Lead"}
+                               "Organico": "Orgânico/Outro", **_mapa["display"]}
 
     def bucket_label(self, bucket: str) -> str:
         """Balde ('Lead'|'Champion'|'Challenger') → rótulo humano do YAML."""

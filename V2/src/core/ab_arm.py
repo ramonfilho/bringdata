@@ -54,11 +54,34 @@ _DEFAULT_ACTIVE_MODELS = (
     Path(__file__).resolve().parents[2] / "configs" / "active_models" / "devclub.yaml"
 )
 
-# Prefixo que identifica campanha de CAPTAÇÃO Meta. Deliberadamente NÃO inclui o
-# público: era "devlf | cap | frio" e a campanha "DEVLF | CAP | QUENTE | ... | LEADHQLB"
-# (R$ 2.271 em 29/07/2026) caía em EXTERNO, desaparecendo dos relatórios. O público
-# (FRIO/QUENTE/MORNO) é escolha de mídia, não muda o fato de ser captação.
-_CAP_PREFIX_DEFAULT = "devlf | cap |"
+# Marcador que identifica campanha de CAPTAÇÃO Meta, casado por SUBSTRING (não por
+# prefixo). Duas decisões aqui, cada uma com dinheiro medido atrás:
+#
+#   1. NÃO inclui o público. Era "devlf | cap | frio", e a campanha
+#      "DEVLF | CAP | QUENTE | ... | LEADHQLB" (R$ 2.271 em 29/07/2026) caía em EXTERNO,
+#      desaparecendo dos relatórios. Público (FRIO/QUENTE/MORNO) é escolha de mídia,
+#      não muda o fato de ser captação.
+#   2. SUBSTRING, não prefixo. Existe campanha real com caractere antes do nome:
+#      "*DEVLF | CAP | FRIO | FASE 04 | ADV | PIXEL NOVO | LEAD | PG2" (R$ 7.383 e
+#      1.813 leads em 01-07/05/2026). Com `startswith` ela vira EXTERNO e o gasto sai
+#      do funil calado. `validation.is_captacao_campaign` sempre usou substring; a
+#      divergência de operador entre os dois módulos era um bug latente.
+_CAP_MARKER_DEFAULT = "devlf | cap |"
+
+# ─────────────────── vocabulário dos agregadores (contrato de saída) ───────────────────
+# Os relatórios chamam de 'Lead' o que aqui é CONTROLE, e não conhecem INDETERMINADO.
+# Isto NÃO é cosmético: `daily_check_aggregations` cria o dict com exatamente 3 chaves e
+# faz `if bucket in agg` sem `else`. Rótulo fora do vocabulário não levanta erro, ele
+# ZERA o balde em silêncio — o funil sai no Slack com aparência normal e sem as linhas
+# por variante. Todo invólucro traduz por aqui antes de devolver.
+BUCKET_LEAD = "Lead"
+
+_ARM_TO_BUCKET: Dict[str, str] = {
+    CHAMPION: CHAMPION,
+    CHALLENGER: CHALLENGER,
+    CONTROLE: BUCKET_LEAD,
+    INDETERMINADO: BUCKET_LEAD,   # colapsa, mas loga (ver `arm_to_bucket`)
+}
 
 # ─────────────────────── modelos APOSENTADOS (fatos congelados) ───────────────────────
 # `registros_ml.variant` de modelos que saíram do ar. Não estão no YAML de ativos.
@@ -96,7 +119,7 @@ class ArmConfig:
     variant_roles: Tuple[Tuple[str, Tuple[Tuple[date, str], ...]], ...]
     tag_variants: Tuple[Tuple[str, str], ...]   # (TAG_UPPER, variant_key), em precedência
     display_names: Tuple[Tuple[str, str], ...]  # (variant_key, rótulo humano)
-    cap_prefix: str = _CAP_PREFIX_DEFAULT
+    cap_marker: str = _CAP_MARKER_DEFAULT
 
     def role_at(self, variant_key: str, as_of: Optional[date] = None) -> Optional[str]:
         """Papel ('champion'/'challenger') do variant NA DATA. None se não conhecido.
@@ -256,13 +279,103 @@ def is_captacao(text: Optional[str], config: Optional[ArmConfig] = None) -> bool
 
     Exposto porque o mesmo teste está duplicado em validation.campaign_classifier
     (`is_captacao_campaign`), que exige o público 'FRIO' cravado e por isso perde as
-    campanhas QUENTE.
+    campanhas QUENTE. Ver `_CAP_MARKER_DEFAULT` para por que é substring e não prefixo.
     """
     t = _clean_str(text)
     if not t:
         return False
     cfg = config or _default_config()
-    return t.lower().startswith(cfg.cap_prefix)
+    return cfg.cap_marker in t.lower()
+
+
+def arm_to_bucket(arm: str, *, contexto: str = "") -> str:
+    """Traduz o rótulo do miolo pro vocabulário de 3 baldes dos agregadores.
+
+    CONTROLE -> 'Lead'. INDETERMINADO -> 'Lead' também, porque devolver um quarto rótulo
+    zeraria o balde em silêncio nos consumidores (ver BUCKET_LEAD). Mas o colapso é
+    LOGADO: indeterminado é o sinal de que apareceu campanha que a régua não conhece, e
+    perder esse sinal foi exatamente o que deixou R$ 3.250 de gasto sem rótulo por dias.
+    """
+    if arm == INDETERMINADO:
+        warn_once(f"arm indeterminado colapsado em '{BUCKET_LEAD}'", contexto)
+    return _ARM_TO_BUCKET.get(arm, BUCKET_LEAD)
+
+
+_WARNED: set = set()
+
+
+def warn_once(msg: str, contexto: str = "") -> None:
+    """Loga uma vez por (mensagem, contexto). Nome de campanha é conjunto pequeno e
+    estável, então o cache não cresce sem limite; sem o `once` isto viraria uma linha
+    de log por lead."""
+    import logging
+
+    k = (msg, contexto)
+    if k in _WARNED:
+        return
+    _WARNED.add(k)
+    logging.getLogger(__name__).warning("[ab_arm] %s | contexto=%r", msg, contexto)
+
+
+def first_match(text: Optional[str], pares) -> Optional[str]:
+    """Primeiro valor cuja chave aparece como substring em `text` (case-insensitive).
+
+    Miolo do casamento de TAG, compartilhado por `resolve_arm`, `resolve_bucket_by_tag` e
+    `monitoring.bucket_from_utm`. Existia copiado nos três — a precedência (challenger
+    antes de champion) mora na ORDEM da lista, então três loops iguais é convite pra três
+    precedências diferentes.
+    """
+    t = _clean_str(text)
+    if not t:
+        return None
+    t = t.upper()
+    for chave, valor in pares:
+        if str(chave).upper() in t:
+            return valor
+    return None
+
+
+def bucket_map_for(*, as_of: Optional[date] = None,
+                   config: Optional[ArmConfig] = None) -> Dict:
+    """Mapa tag->balde no formato que os consumidores já esperam, resolvido NA DATA.
+
+    Formato: {'tags': [(TAG_UPPER, balde), ...] em precedência, 'display': {balde: rótulo},
+    'fallback': 'Lead'}. Construtor ÚNICO: `ABTestConfig.campaign_bucket_map` e
+    `ModelRegistry.bucket_map` eram duas implementações independentes do mesmo mapa, o que
+    é a definição de duas fontes de verdade para o mesmo conceito.
+    """
+    # Ressalva ao usar `as_of` no passado: o `display_name` do YAML embute o PAPEL de hoje
+    # ("Champion (abr_28)"), então o rótulo do balde de um mapa histórico sai trocado
+    # (balde Challenger rotulado "Champion (abr_28)"). Nenhum consumidor passa `as_of`
+    # ainda; quem for wirar precisa antes separar nome do modelo de papel no display_name.
+    cfg = config or _default_config()
+    tags, display = [], {}
+    for tag, key in cfg.tag_variants:
+        role = cfg.role_at(key, as_of)
+        if not role:
+            continue                       # variante ainda não vigente nessa data
+        balde = _ROLE_TO_LABEL[role]
+        tags.append((tag, balde))
+        nome = cfg.display_name(key)
+        if nome:
+            display[balde] = nome
+    return {"tags": tags, "display": display, "fallback": BUCKET_LEAD}
+
+
+def resolve_bucket_by_tag(text: Optional[str], *, captured_at=None,
+                          config: Optional[ArmConfig] = None) -> str:
+    """Balde do A/B pela TAG apenas: 'Lead' | 'Champion' | 'Challenger'.
+
+    Porta SEPARADA do `resolve_arm`, de propósito. Os painéis de decil e o drift por A/B
+    atribuem balde a QUALQUER campanha Meta (o filtro de canal já aconteceu antes, na
+    fonte), sem exigir nome de captação. Passar por `is_captacao` aqui jogaria em 'Lead'
+    toda campanha cujo nome fuja do padrão, ou seja, perderia campanha real e mexeria em
+    número publicado. Quem precisa do filtro de captação é `classify_variant`, que separa
+    Meta de Google/orgânico — lá a porta é o `resolve_arm` completo.
+    """
+    cfg = config or _default_config()
+    mapa = bucket_map_for(as_of=_coerce_date(captured_at), config=cfg)
+    return first_match(text, mapa["tags"]) or BUCKET_LEAD
 
 
 # ─────────────────────────────── resolvedor ───────────────────────────────
@@ -313,12 +426,11 @@ def resolve_arm(
     if not is_captacao(t, cfg):
         return EXTERNO  # Google/orgânico/sem campanha/outro lançamento
 
-    # 2a. TAG de modelo ATIVO (fonte única: YAML) — com o papel vigente na data
-    for tag, key in cfg.tag_variants:
-        if tag.lower() in t:
-            role = cfg.role_at(key, d)
-            if role:
-                return _ROLE_TO_LABEL[role]
+    # 2a. TAG de modelo ATIVO (fonte única: YAML) — com o papel vigente na data.
+    # Mesmo casamento que `resolve_bucket_by_tag` usa (miolo em `first_match`).
+    balde = first_match(t, bucket_map_for(as_of=d, config=cfg)["tags"])
+    if balde:
+        return balde
 
     # 2b. Marcador de Challenger aposentado (ML_MAR de mar/2026, tag transitória)
     if any(m in t for m in _RETIRED_CHALLENGER_MARKERS):

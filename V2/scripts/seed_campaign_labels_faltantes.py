@@ -32,10 +32,25 @@ Dry-run por padrão. Rollback: `DELETE FROM analytics.campaign_labels WHERE sour
 para as inseridas, e restaurar a categoria antiga das reconciliadas (o script imprime
 o valor anterior de cada uma antes de escrever).
 
+MODO --check (guarda fail-loud, para rodar sozinho)
+---------------------------------------------------
+Sai com código 1 quando existe campanha COM GASTO que o sistema não sabe rotular, nas
+duas réguas que importam:
+
+  (a) papel do modelo indeterminado (`core.ab_arm.resolve_arm` devolve INDETERMINADO):
+      o gasto dela cai no balde errado do relatório;
+  (b) assinatura ausente de `analytics.campaign_labels`: o lead entra no retreino como
+      NEUTRO, ou seja, como se nenhum modelo o tivesse tocado.
+
+Esta guarda existe porque as duas falhas são MUDAS. Em 29/07/2026 três campanhas novas
+(JUL24_TOP10/30/50) e uma QUENTE gastaram R$ 5.500 sem rótulo em lugar nenhum, e o único
+sintoma foi uma linha do relatório parecendo zerada.
+
 Uso:
     python3 -m scripts.seed_campaign_labels_faltantes                 # dry-run, 30 dias
     python3 -m scripts.seed_campaign_labels_faltantes --days 60
     python3 -m scripts.seed_campaign_labels_faltantes --apply
+    python3 -m scripts.seed_campaign_labels_faltantes --check         # guarda (exit 1)
 """
 from __future__ import annotations
 
@@ -87,12 +102,71 @@ def _categoria_de(campaign_name: str, yaml_tags: list[tuple[str, str]]) -> str |
     return None
 
 
+def _check(*, days: int, client_id: str) -> int:
+    """Guarda fail-loud. Exit 1 se alguma campanha com gasto não tiver papel resolvível
+    (régua do relatório) ou não tiver assinatura curada (régua do peso de treino)."""
+    from datetime import date, timedelta
+
+    from src.core.ab_arm import INDETERMINADO, resolve_arm
+    from src.data.analytics_connection import open_analytics_connection
+    from src.data.campaign_labels_reader import read_campaign_labels
+    from src.validation.campaign_classifier import tag_signature
+
+    start = date.today() - timedelta(days=days)
+    conn = open_analytics_connection()
+    try:
+        labels = read_campaign_labels(client_id=client_id, conn=conn)
+        rows = conn.run(
+            "SELECT campaign_name, sum(spend) FROM ad_spend "
+            "WHERE spend_date >= :s AND spend > 0 AND platform = 'meta' GROUP BY 1",
+            s=start.isoformat(),
+        )
+    finally:
+        conn.close()
+
+    sem_papel = []
+    # Agrega por ASSINATURA, não por nome: nomes diferentes colapsam na mesma assinatura
+    # (é o ponto do tokenizador), e listar duas vezes a mesma chave confunde o operador.
+    _por_sig: dict[str, float] = {}
+    for nome, spend in rows:
+        gasto = float(spend or 0)
+        if resolve_arm(campaign_name=nome) == INDETERMINADO:
+            sem_papel.append((gasto, nome))
+        sig = tag_signature(nome)
+        if labels.get(sig) is None:
+            _por_sig[sig] = _por_sig.get(sig, 0.0) + gasto
+    sem_rotulo = [(g, s) for s, g in _por_sig.items()]
+
+    print(f"janela: últimos {days} dias | {len(rows)} campanhas Meta com gasto\n")
+    ok = True
+    if sem_papel:
+        ok = False
+        print(f"!! {len(sem_papel)} campanha(s) SEM PAPEL RESOLVÍVEL "
+              f"(R$ {sum(g for g, _ in sem_papel):,.0f}) — balde errado no relatório:")
+        for g, n in sorted(sem_papel, reverse=True):
+            print(f"   R$ {g:>9,.0f}  {n[:90]}")
+    if sem_rotulo:
+        ok = False
+        print(f"!! {len(sem_rotulo)} assinatura(s) SEM RÓTULO CURADO "
+              f"(R$ {sum(g for g, _ in sem_rotulo):,.0f}) — entram como NEUTRO no treino:")
+        for g, sig in sorted(sem_rotulo, reverse=True):
+            print(f"   R$ {g:>9,.0f}  {sig!r}")
+        print("   conserto: rode este script sem --check e depois com --apply")
+    if ok:
+        print("OK — toda campanha com gasto tem papel resolvível e rótulo curado.")
+    return 0 if ok else 1
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--days", type=int, default=30, help="janela de gasto a varrer (default 30)")
     ap.add_argument("--apply", action="store_true", help="escreve (sem isso é dry-run)")
+    ap.add_argument("--check", action="store_true",
+                    help="guarda: exit 1 se houver campanha com gasto sem papel/rótulo")
     ap.add_argument("--client-id", default="devclub")
     args = ap.parse_args()
+    if args.check:
+        return _check(days=args.days, client_id=args.client_id)
 
     from src.data.analytics_connection import open_analytics_connection
     from src.data.campaign_labels_reader import read_campaign_labels
