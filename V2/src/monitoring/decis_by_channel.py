@@ -54,6 +54,11 @@ class DecisContext:
     baseline_payload: Optional[Dict[str, Any]] = None   # pct por decil na régua Challenger, ou None
     meta_sources_og: set = field(default_factory=set)   # allowlist CAPI (filtro do by_optgoal)
     ab_bucket_map: Optional[dict] = None                 # tag→balde do YAML; None → classificador usa legado
+    # Braço A/B challenger (jul_24): pontua o bucket Challenger na régua PRÓPRIA dele
+    # (não a régua única abr_28) e compara contra a baseline própria. None → o bucket
+    # Challenger segue na régua única (comportamento antigo).
+    challenger_variant_run_id: Optional[str] = None
+    challenger_variant_baseline: Optional[Dict[str, Any]] = None   # pct por decil na régua do jul_24
 
 
 def resolve_decis_context(pipeline, *, client_id: str = 'devclub',
@@ -92,7 +97,21 @@ def resolve_decis_context(pipeline, *, client_id: str = 'devclub',
 
     # 3. Baseline de decis Top ROAS na régua ÚNICA do Challenger (abr_28). É a
     #    referência de TODOS os buckets. O modelo jan_30 foi REMOVIDO do relatório.
+    # 2b. Braço A/B challenger (jul_24) = o OUTRO variante challenger, cujo run_id
+    #     difere da régua única (abr_28). É ele que ganha régua+baseline próprios.
+    challenger_variant_run_id = None
+    try:
+        if _abc and getattr(_abc, 'enabled', False):
+            for _n, _v in _abc.variants.items():
+                _rid = getattr(_v, 'run_id', None)
+                if _rid and _rid != challenger_run_id and 'challenger' in _n.lower():
+                    challenger_variant_run_id = _rid
+                    break
+    except Exception as e:
+        logger.warning(f"⚠️ run_id do braço challenger p/ régua própria falhou: {e}")
+
     baseline_payload = None
+    challenger_variant_baseline = None
     _base_label = 'Top 6 ROAS atribuível 60d'
     try:
         root = config_root or Path(__file__).resolve().parents[2]
@@ -107,6 +126,18 @@ def resolve_decis_context(pipeline, *, client_id: str = 'devclub',
                     {'distribution': _bcl.get('distribution', {}), 'total': _bcl.get('n_leads', 0)},
                     _base_label,
                 )
+            # Baseline própria do braço jul_24 (Top5 scoreado por ele). Só entra se o
+            # run_id gravado casa com o braço A/B vivo — senão é baseline de outro
+            # modelo e ignoramos (fail-soft → régua única no bucket Challenger).
+            _cv = _rp.get('decil_distribution_challenger_variant') or {}
+            if _cv and _cv.get('distribution') and _cv.get('run_id') == challenger_variant_run_id:
+                challenger_variant_baseline = pure_baseline(
+                    {'distribution': _cv['distribution'], 'total': _cv.get('n_leads', 0)},
+                    _cv.get('label', 'régua do braço challenger'),
+                )
+            elif _cv and _cv.get('run_id') != challenger_variant_run_id:
+                logger.info("[decis] baseline de variante ignorada (run_id %s ≠ braço vivo %s)",
+                            (_cv.get('run_id') or '?')[:8], (challenger_variant_run_id or '?')[:8])
     except Exception as e:
         logger.warning(f"⚠️ baseline decis indisponível: {e}")
 
@@ -115,6 +146,8 @@ def resolve_decis_context(pipeline, *, client_id: str = 'devclub',
         baseline_payload=baseline_payload,
         meta_sources_og=meta_sources_og,
         ab_bucket_map=ab_bucket_map,
+        challenger_variant_run_id=challenger_variant_run_id,
+        challenger_variant_baseline=challenger_variant_baseline,
     )
 
 
@@ -266,6 +299,37 @@ def records_between(recs, a_utc, b_utc, incl_b: bool) -> List:
     return out
 
 
+def _challenger_variant_payload(ctx: DecisContext, *, start_utc, end_utc,
+                                lf_name, pin_lf) -> Optional[Dict[str, Any]]:
+    """Bucket Challenger na régua PRÓPRIA do braço jul_24 (o decil dele) + baseline
+    própria. Reusa `challenger_decils_in_window` com o run_id do braço (o COALESCE
+    acha o decil do jul_24 onde ele estiver gravado) e o MESMO split por optgoal, e
+    devolve só o bucket Challenger. None quando o braço/baseline não está
+    configurado ou a régua não veio → o render mantém o bucket na régua única."""
+    if not (ctx.challenger_variant_run_id and ctx.challenger_variant_baseline):
+        return None
+    try:
+        from src.data.scores_historicos import challenger_decils_in_window
+        recs_v = challenger_decils_in_window(
+            challenger_run_id=ctx.challenger_variant_run_id, win_start=start_utc,
+            win_end=end_utc, lf_name=lf_name, pin_lf=pin_lf)
+    except Exception as e:
+        logger.warning("⚠️ régua do braço challenger (%s) falhou: %s",
+                       (ctx.challenger_variant_run_id or '?')[:8], e)
+        return None
+    if not recs_v:
+        return None
+    bv = challenger_decis_buckets(
+        recs_v, meta_sources_og=ctx.meta_sources_og, ab_bucket_map=ctx.ab_bucket_map)
+    chal = bv['by_optgoal']['challenger']
+    return {
+        'run_id': ctx.challenger_variant_run_id,
+        'distribution': chal['distribution'],
+        'total': chal['total'],
+        'baseline': ctx.challenger_variant_baseline,
+    }
+
+
 def build_decis_window_payload(*, window_label: str, start_utc, end_utc,
                                pin_lf: bool, lf_name: Optional[str],
                                ctx: DecisContext,
@@ -304,6 +368,10 @@ def build_decis_window_payload(*, window_label: str, start_utc, end_utc,
             'baseline_challenger': ctx.baseline_payload,
             'by_source': b['by_source'],
             'by_optgoal': b['by_optgoal'],
+            # Bucket Challenger reavaliado na régua PRÓPRIA do jul_24 (None se não
+            # configurado → render usa a régua única pro Challenger também).
+            'challenger_variant': _challenger_variant_payload(
+                ctx, start_utc=start_utc, end_utc=end_utc, lf_name=lf_name, pin_lf=pin_lf),
         }
     # Degradado: régua Challenger indisponível → produção SEM ref (nunca jan_30).
     logger.warning(
@@ -318,4 +386,5 @@ def build_decis_window_payload(*, window_label: str, start_utc, end_utc,
         'by_optgoal': decil_dist_by_variant(
             fallback_records, meta_sources_og=ctx.meta_sources_og,
             ab_bucket_map=ctx.ab_bucket_map),
+        'challenger_variant': None,
     }

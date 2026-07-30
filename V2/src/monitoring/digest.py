@@ -1732,10 +1732,21 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
         # %D9-D10 — sai da tabela e vira nota de omitidos, nunca some em silêncio.
         # 6º elemento = chave do balde em by_bucket da referência rolante (para a
         # coluna ConvEsp/Δ rolante). bucket_from_utm devolve Lead/Champion/Challenger.
+        # Braço jul_24: se o payload trouxer `challenger_variant`, a linha Challenger
+        # é pontuada na régua PRÓPRIA dele (decil do jul_24) e comparada à baseline
+        # dele (Top5 scoreado pelo jul_24), NÃO à régua única abr_28. _bk=None marca
+        # essa linha pra pular a coluna ConvEsp (a conversão por decil da rolante é da
+        # régua abr_28, não faz sentido cruzar com o decil do jul_24).
+        _cv = info.get('challenger_variant') or {}
+        if _cv.get('distribution'):
+            chal_row = ({'distribution': _cv['distribution']}, int(_cv.get('total', 0) or 0),
+                        _ref_from_pct((_cv.get('baseline') or {}).get('pct') or {}), 'jul_24', None)
+        else:
+            chal_row = (og_chal_info, n_og_chal, ref_challenger, 'abr_28', 'Challenger')
         _og_buckets = [
             ('Lead',                         og_lead_info, n_og_lead, ref_challenger, 'abr_28', 'Lead'),
             (_ab_bucket_label('Champion'),   og_chmp_info, n_og_chmp, ref_challenger, 'abr_28', 'Champion'),
-            (_ab_bucket_label('Challenger'), og_chal_info, n_og_chal, ref_challenger, 'abr_28', 'Challenger'),
+            (_ab_bucket_label('Challenger'), *chal_row),
         ]
         _og_shown   = [t for t in _og_buckets if t[2] >= MIN_BUCKET_N]
         _og_omitted = [(t[0], t[2]) for t in _og_buckets if 0 < t[2] < MIN_BUCKET_N]
@@ -1744,8 +1755,8 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
             og_rows.append(_hdr)
             for _lbl, _info, _n, _ref, _rn, _bk in _og_shown:
                 _d = _info.get('distribution') or {}
-                og_rows.append(_row(_lbl, _kpis(_d, _n), _ref, _rn,
-                                    _conv(_d, _n, (_by_bucket.get(_bk) or {}).get('rate'))))
+                _cv_cell = _conv(_d, _n, (_by_bucket.get(_bk) or {}).get('rate')) if _bk else None
+                og_rows.append(_row(_lbl, _kpis(_d, _n), _ref, _rn, _cv_cell))
             og_rows.append('```')
             if _og_omitted:
                 og_rows.append('_Omitidos (N<%d): %s_' % (

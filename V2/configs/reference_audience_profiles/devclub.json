@@ -42,6 +42,24 @@
         "D09": 8468,
         "D10": 5544
       }
+    },
+    "decil_distribution_challenger_variant": {
+      "run_id": "b085b63681bc4d0d90bdbd466106763a",
+      "label": "Top5 ROAS · régua jul_24 (in-sample)",
+      "source": "scored_jul24 — LF45,44,46,41,43",
+      "n_leads": 49407,
+      "distribution": {
+        "D01": 2438,
+        "D02": 4974,
+        "D03": 4142,
+        "D04": 9458,
+        "D05": 4263,
+        "D06": 4507,
+        "D07": 3930,
+        "D08": 6002,
+        "D09": 5519,
+        "D10": 4174
+      }
     }
   },
   "is_critical": [
