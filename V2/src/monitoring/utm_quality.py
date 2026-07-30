@@ -387,6 +387,77 @@ def _load_top5_baseline(client_id: str = 'devclub') -> Optional[dict]:
     return None
 
 
+def _norm_campaign(s) -> str:
+    """Chave de casamento utm_campaign ↔ ad_spend.campaign_name (Meta usa o mesmo
+    nome nos dois; normaliza espaço/caixa pra tolerar diferença cosmética)."""
+    return ' '.join(str(s or '').split()).casefold()
+
+
+def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclub'):
+    """Anexa `cpl`, `teto_cpl` e `budget_signal` ('aumentar'|'reduzir') às linhas de
+    CAMPANHA, pelo BREAKEVEN econômico: CPL (gasto ÷ leads, de analytics.ad_spend —
+    MESMA fonte do funil do DM) vs teto (conversão esperada da campanha × valor por
+    venda, da referência rolante). Substitui o critério de qualidade vs TOP5 nas
+    campanhas quando ligado.
+
+    Conversão esperada da campanha = interpola pelo %D9-D10 dela entre a taxa de
+    conversão dos leads D9-D10 e a dos demais (ambas da referência). Teto =
+    conversão esperada × valor por venda (breakeven, ROAS 1).
+
+    Só com REFERENCE_SOURCE=rolling; senão devolve `rows` intactas (relatório de
+    hoje, qualidade vs TOP5). Campanha sem gasto casado fica sem sinal (segue no
+    critério de qualidade)."""
+    from src.data.reference_reader import rolling_enabled, read_rolling_reference
+    if not rolling_enabled() or not rows:
+        return rows
+    ref = read_rolling_reference(client_id)
+    conv = (ref or {}).get('conversion') or {}
+    vps = (conv.get('economics') or {}).get('value_per_sale')
+    by_dec = conv.get('by_decile') or {}
+    if not vps or not by_dec:
+        return rows
+
+    def _rate(keys):
+        c = sum((by_dec.get(k) or {}).get('conv', 0) or 0 for k in keys)
+        n = sum((by_dec.get(k) or {}).get('leads', 0) or 0 for k in keys)
+        return (c / n) if n else None
+    conv_hi = _rate(['D09', 'D10'])                                   # conversão D9-D10
+    conv_lo = _rate([f'D{i:02d}' for i in range(1, 9)])              # conversão D1-D8
+    if conv_hi is None or conv_lo is None:
+        return rows
+
+    from src.data.ad_spend_reader import read_ad_spend
+    from src.monitoring.teto import teto_cpl
+    _sd = win_start.date() if hasattr(win_start, 'date') else win_start
+    _ed = win_end.date() if hasattr(win_end, 'date') else win_end
+    from datetime import timedelta as _td
+    spend_df = read_ad_spend(_sd, _ed + _td(days=1), client_id=client_id)   # end exclusivo → +1 dia
+    spend_by = {}
+    if not spend_df.empty:
+        g = spend_df.groupby(spend_df['campaign_name'].map(_norm_campaign)).agg(
+            spend=('spend', 'sum'), leads=('leads', 'sum'))
+        spend_by = {k: (float(r['spend']), int(r['leads'])) for k, r in g.iterrows()}
+
+    _matched = 0
+    for e in rows:
+        sp = spend_by.get(_norm_campaign(e.get('utm')))
+        p = e.get('pct_d9_d10')
+        if not sp or p is None:
+            continue
+        spend, leads = sp
+        if leads <= 0:
+            continue
+        cpl = spend / leads
+        exp_conv = (p / 100.0) * conv_hi + (1 - p / 100.0) * conv_lo
+        teto = teto_cpl(exp_conv, vps, roas_alvo=1.0)
+        e['cpl'] = round(cpl, 2)
+        e['teto_cpl'] = round(teto, 2) if teto is not None else None
+        e['budget_signal'] = ('aumentar' if teto is not None and cpl <= teto else 'reduzir') if teto is not None else None
+        _matched += 1
+    logger.info("[top5] budget breakeven: %d/%d campanhas casaram gasto", _matched, len(rows))
+    return rows
+
+
 def build_top5_comparison(
     *,
     lf_name: Optional[str],
@@ -491,6 +562,11 @@ def build_top5_comparison(
                 win_start=win_start, win_end=win_end, pin_lf=pin_lf, conn=conn,
             )
             shown, hidden = _enrich(rows)
+            if level == 'campaign':
+                # Breakeven econômico (CPL vs teto) só pras campanhas — elas têm gasto.
+                # No-op quando REFERENCE_SOURCE!=rolling. Criativos seguem por qualidade.
+                shown = enrich_campaign_budget(
+                    shown, win_start=win_start, win_end=win_end, client_id=client_id)
             out['levels'][level] = {'rows': shown, 'hidden_below_min_n': hidden}
     finally:
         if own:
@@ -706,16 +782,25 @@ def _render_unified_top5(top5: dict, lf_label: str, lf_state: str, nlf: int) -> 
     return blocks
 
 
+def _budget_suffix(e: dict) -> str:
+    """' · CPL R$X / teto R$Y' pras campanhas com breakeven (Fase 3b). Vazio quando
+    não há sinal econômico (criativo, ou campanha sem gasto casado / frozen)."""
+    cpl, teto = e.get('cpl'), e.get('teto_cpl')
+    if cpl is None or teto is None:
+        return ''
+    return (f"  · CPL R$ {cpl:.2f} / teto R$ {teto:.2f}").replace('.', ',')
+
+
 def _twoline_entry(name: str, marker: str, ontem: Optional[dict], lf: Optional[dict],
-                   win_label: str) -> str:
-    """Bloco de 3 linhas pra um criativo/campanha: nome + linha da janela (ontem)
-    + linha do lançamento, cada uma com o %D9-D10 (fatia de leads no topo na régua
-    Challenger) e o volume. Linha sem volume mínimo vira '— Poucos leads'."""
+                   win_label: str, budget: str = '') -> str:
+    """Bloco de 3 linhas pra um criativo/campanha: nome (+ CPL/teto se houver) + linha
+    da janela (ontem) + linha do lançamento, cada uma com o %D9-D10 (fatia de leads no
+    topo na régua Challenger) e o volume. Linha sem volume mínimo vira '— Poucos leads'."""
     def fmt(label: str, row: Optional[dict]) -> str:
         if not row or row.get('pct_d9_d10') is None:
             return f"   {label:<11}— Poucos leads"
         return f"   {label:<11}{row['pct_d9_d10']:>3.0f}% D9-D10   Leads={row['n']}"
-    return "\n".join([f"{marker} {name}", fmt(win_label[:10], ontem), fmt('Lançamento', lf)])
+    return "\n".join([f"{marker} {name}{budget}", fmt(win_label[:10], ontem), fmt('Lançamento', lf)])
 
 
 # Ação sugerida por nível: acima do alvo = ampliar, abaixo = cortar. Orçamento é
@@ -757,7 +842,8 @@ def _render_twoline_top5(top5_window: Optional[dict], top5_lf: Optional[dict], *
         for e in shown:
             utm = e['utm']
             name = _display_creative(e) if level == 'creative' else _short_campaign_name(utm)
-            entries.append(_twoline_entry(name, marker, wmap.get(utm), lmap.get(utm), win_label))
+            entries.append(_twoline_entry(name, marker, wmap.get(utm), lmap.get(utm),
+                                          win_label, _budget_suffix(e)))
         out = [{'type': 'section', 'text': {'type': 'mrkdwn',
                 'text': f"*{_TOP5_LEVEL_LABEL[level]} — {title} ({len(rows)})*\n```\n"
                         + "\n".join(entries) + "\n```"}}]
@@ -775,13 +861,22 @@ def _render_twoline_top5(top5_window: Optional[dict], top5_lf: Optional[dict], *
             continue
         aumentar, reduzir, n_neutro = [], [], 0
         for e in order:
-            st = _guarded_status(lmap.get(e['utm']) or e, wmap.get(e['utm']), bar_pct)
-            if st == 'acima':
+            # Campanhas com breakeven econômico (Fase 3b) usam o CPL vs teto como
+            # DEFINIDOR; sem sinal (criativo, ou sem gasto casado, ou frozen) cai no
+            # critério de qualidade vs TOP5.
+            sig = e.get('budget_signal')
+            if sig == 'aumentar':
                 aumentar.append(e)
-            elif st == 'abaixo':
+            elif sig == 'reduzir':
                 reduzir.append(e)
             else:
-                n_neutro += 1
+                st = _guarded_status(lmap.get(e['utm']) or e, wmap.get(e['utm']), bar_pct)
+                if st == 'acima':
+                    aumentar.append(e)
+                elif st == 'abaixo':
+                    reduzir.append(e)
+                else:
+                    n_neutro += 1
         aumentar.sort(key=_key, reverse=True)   # melhores no topo
         reduzir.sort(key=_key)                   # piores no topo (maior corte primeiro)
         up_lbl, down_lbl = _TOP5_ACTION[level]

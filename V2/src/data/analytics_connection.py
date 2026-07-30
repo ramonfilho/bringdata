@@ -19,8 +19,12 @@ import ssl
 logger = logging.getLogger(__name__)
 
 
-def open_analytics_connection():
+def open_analytics_connection(*, timeout: int = 30):
     """Abre uma `pg8000.native.Connection` no schema analytics do Cloud SQL.
+
+    Args:
+        timeout: timeout de socket em segundos (default 30). Scans pesados de 200k+
+            linhas / jsonb precisam de ≥180s — o default estoura neles.
 
     Raises:
         KeyError: se `LEDGER_DB_HOST`/`LEDGER_DB_PASSWORD` não estiverem no ambiente.
@@ -37,7 +41,7 @@ def open_analytics_connection():
         user=os.environ.get("LEDGER_DB_USER", "ledger_app"),
         password=os.environ["LEDGER_DB_PASSWORD"],
         ssl_context=ctx,
-        timeout=30,
+        timeout=timeout,
     )
     conn.run("SET search_path TO analytics, public")
     logger.debug("[analytics_connection] conectado ao schema analytics")

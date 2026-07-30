@@ -871,6 +871,7 @@ def render_slack_blocks(view: dict) -> list[dict]:
     _slack_launch_fallback_notice_dm(view, blocks)  # DM-only — no-op se YAML em dia
     _slack_score_distribution_change_dm(view, blocks)  # Drift de Score (decis)
     blocks.append({'type': 'divider'})
+    _slack_audience_rolling_dm(view, blocks)  # 2 tabelas reancoradas (só REFERENCE_SOURCE=rolling)
     _slack_alerts(view, blocks, include_audience_drift=False)
     blocks.append({'type': 'divider'})
     _slack_unified_funnel(view, blocks)
@@ -909,6 +910,37 @@ def _slack_audience_drift_by_variant_dm(v: dict, B: list):
     )
     for a in by_variant:
         _slack_alert_audience_by_variant(a, B)
+        B.append({'type': 'divider'})
+
+
+def _slack_audience_rolling_dm(v: dict, B: list):
+    """DM (Fase 1c da referência rolante): 2 tabelas reancoradas — Drift A/B e Drift
+    por fonte, SÓ da janela de LANÇAMENTO — com a referência rolante (comprador 90d)
+    como coluna Compr% ao lado da Top% legada. Substitui as 5 tabelas antigas por
+    estas 2, a pedido.
+
+    Gate REFERENCE_SOURCE=rolling: frozen (default) → no-op, o DM segue sem drift de
+    público (comportamento atual). Rollback = flag, sem deploy.
+    """
+    from src.data.reference_reader import rolling_enabled
+    if not rolling_enabled():
+        return
+    alerts = v.get('alerts') or []
+
+    def _launch(kind):
+        return [a for a in alerts if a.get('type') == kind
+                and (a.get('details') or {}).get('window') == 'current_launch']
+
+    by_variant = _launch('audience_profile_drift_by_variant')
+    by_source = _launch('audience_profile_drift_by_source')
+    if not by_variant and not by_source:
+        return
+    _slack_drift_legend_header(B)
+    for a in by_variant:
+        _slack_alert_audience_by_variant(a, B)
+        B.append({'type': 'divider'})
+    for a in by_source:
+        _slack_alert_audience_by_source(a, B)
         B.append({'type': 'divider'})
 
 
@@ -1134,6 +1166,13 @@ def render_slack_blocks_client(view: dict) -> list[dict]:
     # de dados do cliente (#team-dados). Mesmo bloco da view completa; omite-se
     # sozinho se a métrica veio ausente.
     _slack_survey_response_rate(view, blocks)
+    # Resumo do tráfego (Fase 4): o funil SEM as 4 linhas de plumbing
+    # (Pesquisa/Scoreado/CAPI/Aceito), após a pesquisa — a pedido. Só com
+    # REFERENCE_SOURCE=rolling (frozen → grupo segue sem funil, como hoje). A view é
+    # a MESMA do DM, que já renderiza o funil — então roda igual.
+    from src.data.reference_reader import rolling_enabled
+    if rolling_enabled():
+        _slack_unified_funnel(view, blocks, resumo=True)
     return blocks
 
 
@@ -1250,6 +1289,22 @@ def _slack_distribution_drifts_consolidated(alerts: list, B: list):
         B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(lines)}})
 
 
+def _ref_cols_header(has_rolling: bool) -> str:
+    """Cabeçalho da(s) coluna(s) de referência: só Top% (legado) ou Top% + Compr%
+    (comprador rolante) quando a referência rolante está ligada. Fonte única dos 2
+    renderers de drift (por A/B e por fonte) — ver Fase 1c da referência rolante."""
+    return f"{'Top%':>5}  {'Compr%':>6}" if has_rolling else f"{'Top%':>5}"
+
+
+def _ref_cols_cell(ref, rolling_pct, has_rolling: bool) -> str:
+    """Célula de referência alinhada ao `_ref_cols_header`. Compr% ausente vira '—'."""
+    base = f"{ref:>4.1f}%"
+    if not has_rolling:
+        return base
+    rp = f"{rolling_pct:.1f}%" if rolling_pct is not None else "—"
+    return f"{base}  {rp:>6}"
+
+
 def _slack_alert_audience(a: dict, B: list):
     """Drift geral com 🟢 bom · 🔴 ruim · ⚪ neutro/uncertain.
 
@@ -1343,7 +1398,8 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
             header += "\n_Omitidos (N<%d): %s_" % (
                 MIN_BUCKET_N, ' · '.join(f"{_ab_bucket_label(b)}={n:,}" for b, n in _omitted))
     rows = [header]
-    col_header = f"{'Característica':<32} {'Top%':>5}  " + '  '.join(
+    has_rolling = any(it.get('rolling_reference_pct') is not None for it in top)
+    col_header = f"{'Característica':<32} {_ref_cols_header(has_rolling)}  " + '  '.join(
         f"{_ab_bucket_label(b) + '(Δ)':>{_AW}}" for b, *_ in _arms
     )
     rows.append(f"`{col_header}`")
@@ -1374,7 +1430,7 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
                                          it.get('champion_delta_pp'),
                                          it.get('challenger_delta_pp'))
                   if _n_compete >= 2 else None)
-        parts = [f"{label:<32} {ref:>4.1f}%"]
+        parts = [f"{label:<32} {_ref_cols_cell(ref, it.get('rolling_reference_pct'), has_rolling)}"]
         for b, _n, compete, pk, dk, qk in _arms:
             is_winner = compete and winner == b.lower()
             parts.append(f"{cell(it.get(pk), it.get(dk), it.get(qk), is_winner):>{_AW}}")
@@ -1402,7 +1458,9 @@ def _slack_alert_audience_by_source(a: dict, B: list):
     header = (f"*📉 Drift por Fonte - {window_title}*  "
               f"·  Meta `n={n_meta:,}`  ·  Google `n={n_ggl:,}`")
     rows = [header]
-    col_header = f"{'Característica':<32} {'Top%':>5}  {'Meta(Δ)':>20}  {'Google(Δ)':>20}"
+    has_rolling = any(it.get('rolling_reference_pct') is not None for it in top)
+    col_header = (f"{'Característica':<32} {_ref_cols_header(has_rolling)}  "
+                  f"{'Meta(Δ)':>20}  {'Google(Δ)':>20}")
     rows.append(f"`{col_header}`")
 
     def cell_qual(pct, delta, quality):
@@ -1416,7 +1474,8 @@ def _slack_alert_audience_by_source(a: dict, B: list):
                               it.get('meta_quality'))
         ggl_cell  = cell_qual(it.get('google_pct'), it.get('google_delta_pp'),
                               it.get('google_quality'))
-        rows.append(f"`{label:<32} {ref:>4.1f}%  {meta_cell:>20}  {ggl_cell:>20}`")
+        ref_cell = _ref_cols_cell(ref, it.get('rolling_reference_pct'), has_rolling)
+        rows.append(f"`{label:<32} {ref_cell}  {meta_cell:>20}  {ggl_cell:>20}`")
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
 
@@ -1442,6 +1501,28 @@ def _slack_audience_drift_by_source_dm(v: dict, B: list):
     for a in by_source:
         _slack_alert_audience_by_source(a, B)
         B.append({'type': 'divider'})
+
+
+def _rolling_ref_for_render(v: dict):
+    """Lê a referência rolante 1x por render e cacheia em `v` (o painel de decis roda
+    2x: ontem + lançamento). None quando REFERENCE_SOURCE!=rolling (default) ou sem
+    referência → as colunas novas somem e o painel fica idêntico ao de hoje."""
+    if '_rolling_ref' not in v:
+        try:
+            from src.data.reference_reader import rolling_enabled, read_rolling_reference
+            v['_rolling_ref'] = read_rolling_reference() if rolling_enabled() else None
+        except Exception:
+            v['_rolling_ref'] = None
+    return v['_rolling_ref']
+
+
+def _emoji_conv(delta_pp: float | None) -> str:
+    """Δ da conversão esperada vs referência rolante (pp). Maior = melhor. |Δ|≤0.1 neutro."""
+    if delta_pp is None:
+        return '⚪'
+    if delta_pp > 0.1: return '🟢'
+    if delta_pp < -0.1: return '🔴'
+    return '⚪'
 
 
 def _slack_decis_window(v: dict, B: list, window_key: str):
@@ -1525,6 +1606,34 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
         if delta_avg < -0.3: return '🔴'
         return '⚪'
 
+    # ── Referência rolante (Fase 2): conversão ESPERADA do público vs conversão
+    # REALIZADA da janela rolante, como COLUNAS extras (mantém %D9-D10 vs Top5 do
+    # lado, a pedido). has_conv=False (frozen/sem ref) → tabela idêntica à de hoje.
+    _rr = _rolling_ref_for_render(v)
+    _conv_ref = (_rr or {}).get('conversion') or {}
+    _by_decile = _conv_ref.get('by_decile') or {}
+    _by_channel = _conv_ref.get('by_channel') or {}
+    _by_bucket = _conv_ref.get('by_bucket') or {}
+    _overall_rate = (_conv_ref.get('overall') or {}).get('rate')
+    has_conv = bool(_rr) and bool(_by_decile)
+
+    def _conv(distribution: dict, n: int, seg_rate) -> dict | None:
+        """Conversão esperada = Σ_decil (share_hoje × conv_realizada_ref_decil), na
+        régua única. `seg_rate` = conversão realizada da referência rolante pro
+        segmento (overall/canal/balde). None quando frozen ou bucket vazio."""
+        if not has_conv or n <= 0:
+            return None
+        exp = 0.0
+        for i in range(1, 11):
+            rate = (_by_decile.get(f'D{i:02d}') or {}).get('rate')
+            if rate is None:
+                continue
+            exp += (int(distribution.get(f'D{i:02d}', 0) or 0) / n) * float(rate)
+        exp_pct = exp * 100.0
+        ref_pct = (seg_rate * 100.0) if seg_rate is not None else None
+        return {'exp': exp_pct, 'ref': ref_pct,
+                'delta': (exp_pct - ref_pct) if ref_pct is not None else None}
+
     # Buckets por fonte
     by_src = info.get('by_source') or {}
     meta_info = by_src.get('meta') or {}
@@ -1566,14 +1675,31 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
             f'_Ref %D9-D10/avg (abr_28): '
             f'{ref_challenger["pct_d9_d10"]:.1f}%/{ref_challenger["avg"]:.1f}_'
         )
+    if has_conv:
+        rows.append('_ConvEsp = conversão esperada (mix de decil × conversão da janela '
+                    'rolante) · Δ vs conversão realizada da referência rolante_')
+    _hdr = f'{"Bucket":<18}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
+    if has_conv:
+        _hdr += f'   {"ConvEsp":>7}  {"Δ vs ref rolante":>16}'
     rows.append('```')
-    rows.append(
-        f'{"Bucket":<18}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
-    )
+    rows.append(_hdr)
 
-    def _row(label: str, kpis: dict | None, ref: dict | None, ref_name: str = '') -> str:
+    def _conv_cell(conv: dict | None) -> str:
+        """Colunas ConvEsp + Δ rolante. '' quando has_conv=False (some da tabela)."""
+        if not has_conv:
+            return ''
+        if conv is None:
+            return f'   {"—":>7}  {"—":>16}'
+        exp = f'{conv["exp"]:>6.2f}%'
+        if conv['delta'] is None:
+            return f'   {exp}  {"—":>16}'
+        return f'   {exp}  {_emoji_conv(conv["delta"])} {conv["delta"]:>+5.2f} (rol {conv["ref"]:.2f}%)'
+
+    def _row(label: str, kpis: dict | None, ref: dict | None, ref_name: str = '',
+             conv: dict | None = None) -> str:
         if kpis is None:
-            return f'{label:<18}  {"—":>5}   {"—":>7}  {"—":>20}      {"—":>4}'
+            return (f'{label:<18}  {"—":>5}   {"—":>7}  {"—":>20}      {"—":>4}'
+                    + _conv_cell(None))
         pct = kpis['pct_d9_d10']
         avg = kpis['avg_decil']
         if ref is not None:
@@ -1586,13 +1712,19 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
         else:
             delta_str = ''
             avg_str = f'{avg:>4.1f}'
-        return f'{label:<18}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}      {avg_str}'
+        return (f'{label:<18}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}      {avg_str}'
+                + _conv_cell(conv))
 
     # Bloco por fonte (Slack block 1) — todos na régua única abr_28. `ref_challenger`
     # é None no fail-soft (régua indisponível) → _row mostra sem Δ (⚪), nunca jan_30.
-    rows.append(_row('Total',  _kpis(dist, total),                                              ref_challenger, 'abr_28'))
-    rows.append(_row('Meta',   _kpis(meta_info.get('distribution') or {}, n_meta),              ref_challenger, 'abr_28'))
-    rows.append(_row('Google', _kpis(ggl_info.get('distribution') or {}, n_ggl),               ref_challenger, 'abr_28'))
+    _meta_dist = meta_info.get('distribution') or {}
+    _ggl_dist = ggl_info.get('distribution') or {}
+    rows.append(_row('Total',  _kpis(dist, total),          ref_challenger, 'abr_28',
+                     _conv(dist, total, _overall_rate)))
+    rows.append(_row('Meta',   _kpis(_meta_dist, n_meta),   ref_challenger, 'abr_28',
+                     _conv(_meta_dist, n_meta, (_by_channel.get('meta') or {}).get('rate'))))
+    rows.append(_row('Google', _kpis(_ggl_dist, n_ggl),     ref_challenger, 'abr_28',
+                     _conv(_ggl_dist, n_ggl, (_by_channel.get('google') or {}).get('rate'))))
     rows.append('```')
     B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': '\n'.join(rows)}})
 
@@ -1605,20 +1737,33 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
         # Corte N<MIN_BUCKET_N: balde por optimization_goal com pouquíssimo lead
         # (ex.: 1 lead de campanha antiga LEADQUALIFIED ainda no ar) vira ruído de
         # %D9-D10 — sai da tabela e vira nota de omitidos, nunca some em silêncio.
+        # 6º elemento = chave do balde em by_bucket da referência rolante (para a
+        # coluna ConvEsp/Δ rolante). bucket_from_utm devolve Lead/Champion/Challenger.
+        # Braço jul_24: se o payload trouxer `challenger_variant`, a linha Challenger
+        # é pontuada na régua PRÓPRIA dele (decil do jul_24) e comparada à baseline
+        # dele (Top5 scoreado pelo jul_24), NÃO à régua única abr_28. _bk=None marca
+        # essa linha pra pular a coluna ConvEsp (a conversão por decil da rolante é da
+        # régua abr_28, não faz sentido cruzar com o decil do jul_24).
+        _cv = info.get('challenger_variant') or {}
+        if _cv.get('distribution'):
+            chal_row = ({'distribution': _cv['distribution']}, int(_cv.get('total', 0) or 0),
+                        _ref_from_pct((_cv.get('baseline') or {}).get('pct') or {}), 'jul_24', None)
+        else:
+            chal_row = (og_chal_info, n_og_chal, ref_challenger, 'abr_28', 'Challenger')
         _og_buckets = [
-            ('Lead',                         og_lead_info, n_og_lead, ref_challenger, 'abr_28'),
-            (_ab_bucket_label('Champion'),   og_chmp_info, n_og_chmp, ref_challenger, 'abr_28'),
-            (_ab_bucket_label('Challenger'), og_chal_info, n_og_chal, ref_challenger, 'abr_28'),
+            ('Lead',                         og_lead_info, n_og_lead, ref_challenger, 'abr_28', 'Lead'),
+            (_ab_bucket_label('Champion'),   og_chmp_info, n_og_chmp, ref_challenger, 'abr_28', 'Champion'),
+            (_ab_bucket_label('Challenger'), *chal_row),
         ]
         _og_shown   = [t for t in _og_buckets if t[2] >= MIN_BUCKET_N]
         _og_omitted = [(t[0], t[2]) for t in _og_buckets if 0 < t[2] < MIN_BUCKET_N]
         if _og_shown:
             og_rows = ['```']
-            og_rows.append(
-                f'{"Bucket":<18}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
-            )
-            for _lbl, _info, _n, _ref, _rn in _og_shown:
-                og_rows.append(_row(_lbl, _kpis(_info.get('distribution') or {}, _n), _ref, _rn))
+            og_rows.append(_hdr)
+            for _lbl, _info, _n, _ref, _rn, _bk in _og_shown:
+                _d = _info.get('distribution') or {}
+                _cv_cell = _conv(_d, _n, (_by_bucket.get(_bk) or {}).get('rate')) if _bk else None
+                og_rows.append(_row(_lbl, _kpis(_d, _n), _ref, _rn, _cv_cell))
             og_rows.append('```')
             if _og_omitted:
                 og_rows.append('_Omitidos (N<%d): %s_' % (
@@ -1663,7 +1808,7 @@ def _slack_alert_other(a: dict, B: list):
         'text': f"{e} *{a.get('type','?').upper()}* `{sev}` · category=`{a.get('category','?')}`{extra_tag}\n   {a.get('message','?')[:300]}"}})
 
 
-def _slack_unified_funnel(v: dict, B: list):
+def _slack_unified_funnel(v: dict, B: list, resumo: bool = False):
     """Funil completo numa história só: anúncio (Meta Insights) → captura →
     pipeline (TODAS as fontes, quebra fb/ggl/outr) → tracking FBP/FBC.
 
@@ -1708,6 +1853,26 @@ def _slack_unified_funnel(v: dict, B: list):
                'Challenger': _d9d10(_og.get('challenger'))}
     _ggl_q = {'Lead': _d9d10(_bs.get('google'))}
 
+    # Teto de CPL breakeven (Fase 3): CPL máximo pra não dar prejuízo =
+    # conversão(segmento) × valor_por_venda. Vem da referência rolante; só aparece
+    # com REFERENCE_SOURCE=rolling (senão _vps=None → teto None → funil igual a hoje).
+    from src.monitoring.teto import teto_cpl
+    _rr = _rolling_ref_for_render(v)
+    _conv_ref = (_rr or {}).get('conversion') or {}
+    _vps = (_conv_ref.get('economics') or {}).get('value_per_sale')
+
+    def _teto_bucket(bk):
+        rate = ((_conv_ref.get('by_bucket') or {}).get(bk) or {}).get('rate')
+        return teto_cpl(rate, _vps, roas_alvo=1.0)
+
+    def _teto_annot(cpl, teto):
+        """' 🟢/🔴 teto R$Y' ao lado do CPL (TODOS os leads — o breakeven é por lead,
+        não por lead D9-D10). CPL ≤ teto = 🟢 (lucra), acima = 🔴 (queima). Teto None
+        (frozen/sem ref) → vazio (funil de hoje)."""
+        if cpl is None or teto is None:
+            return ''
+        return f" {'🟢' if cpl <= teto else '🔴'} teto {_rs(teto)}"
+
     def _variante_rows(pv, pv_lf, q_by_bucket=None):
         """Linhas por variante. Um balde só aparece se tiver DADO real: leads
         ontem, OU um CPL de lançamento real (>0). Some o balde fantasma — ex.:
@@ -1729,10 +1894,12 @@ def _slack_unified_funnel(v: dict, B: list):
             _q = (q_by_bucket or {}).get(_vk) or 0
             _cplq = (_cpl * _vn / _q) if (_cpl and _vn and _q) else None
             _cplq_s = f" · CPLq {_rs(_cplq)}"
+            # Teto de breakeven ao lado do CPL (todos os leads): conversão do balde × valor.
+            _teto_s = _teto_annot(_cpl, _teto_bucket(_vk))
             if pv_lf:
-                out.append(f"{_lbl:<18}{_vn:>6,.0f}  CPL ontem {_rs(_vd.get('cpl'))} · LF {_rs(_lf_cpl)}{_cplq_s} · LP {_conv_s}")
+                out.append(f"{_lbl:<18}{_vn:>6,.0f}  CPL ontem {_rs(_cpl)}{_teto_s} · LF {_rs(_lf_cpl)}{_cplq_s} · LP {_conv_s}")
             else:
-                out.append(f"{_lbl:<18}{_vn:>6,.0f}   CPL {_rs(_vd.get('cpl'))}{_cplq_s} · LP {_conv_s}")
+                out.append(f"{_lbl:<18}{_vn:>6,.0f}   CPL {_rs(_cpl)}{_teto_s}{_cplq_s} · LP {_conv_s}")
         return out
 
     # ── Meta ── (Meta Insights: spend/cliques + TOTAL de cadastros + split por variante)
@@ -1779,14 +1946,18 @@ def _slack_unified_funnel(v: dict, B: list):
         ]
         lines += _variante_rows(_gf.get('por_variante') or {}, _gf.get('por_variante_lf') or {}, _ggl_q)
 
-    lines += [
-        f"Pesquisa       {_n(stg('pesquisa'),'total'):>13,.0f}   {brk(stg('pesquisa'))}",
-        f"Scoreado       {_n(stg('scoreado'),'total'):>13,.0f}   {brk(stg('scoreado'))}",
-        f"CAPI enviado   {_n(stg('capi_enviado'),'total'):>13,.0f}",
-        f"Aceito Meta    {_n(stg('aceito'),'total'):>13,.0f}",
-    ]
+    # As 4 linhas de plumbing do pipeline (Pesquisa/Scoreado/CAPI/Aceito) só no funil
+    # COMPLETO (DM). O "resumo do tráfego" do grupo omite elas — a pedido.
+    if not resumo:
+        lines += [
+            f"Pesquisa       {_n(stg('pesquisa'),'total'):>13,.0f}   {brk(stg('pesquisa'))}",
+            f"Scoreado       {_n(stg('scoreado'),'total'):>13,.0f}   {brk(stg('scoreado'))}",
+            f"CAPI enviado   {_n(stg('capi_enviado'),'total'):>13,.0f}",
+            f"Aceito Meta    {_n(stg('aceito'),'total'):>13,.0f}",
+        ]
+    _title = '📊 Resumo do tráfego' if resumo else '🎬 Funil completo'
     B.append({'type': 'section', 'text': {'type': 'mrkdwn',
-        'text': (f"*🎬 Funil completo*  ·  _{ufw.get('label','dia anterior')} ({ufw.get('date_brt','?')}) BRT_\n"
+        'text': (f"*{_title}*  ·  _{ufw.get('label','dia anterior')} ({ufw.get('date_brt','?')}) BRT_\n"
                  f"```\n" + "\n".join(lines) + "\n```")}})
     # Bloco "Tracking FBP/FBC" + nota de contexto removidos do DM a pedido (28/06).
 
