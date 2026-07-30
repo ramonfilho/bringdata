@@ -1050,18 +1050,10 @@ class SalesDataLoader:
             logger.info(f"    Cache HIT Hotmart: {cache_file.name}")
             return pd.read_parquet(cache_file)
 
-        # Autenticar
-        try:
-            token_resp = requests.post(
-                'https://api-sec-vlc.hotmart.com/security/oauth/token',
-                headers={'Authorization': basic, 'Content-Type': 'application/json'},
-                params={'grant_type': 'client_credentials'},
-                timeout=30
-            )
-            token_resp.raise_for_status()
-            token = token_resp.json()['access_token']
-        except Exception as e:
-            logger.error(f" Falha na autenticação Hotmart: {e}")
+        # Autenticar (fonte única — compartilhada com a integração HotLeads)
+        from src.core.hotmart_auth import get_hotmart_access_token
+        token = get_hotmart_access_token()
+        if not token:
             return pd.DataFrame()
 
         # Converter datas para milliseconds (end_date inclusive)

@@ -242,6 +242,63 @@ def parse_meta_capi_response(response) -> Dict:
 
     return result
 
+def build_lead_user_data(
+    email: Optional[str],
+    phone: Optional[str],
+    first_name: Optional[str],
+    last_name: Optional[str],
+    survey_data: Optional[Dict] = None,
+    country_code: str = 'br',
+    client_ip: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    fbp: Optional[str] = None,
+    fbc: Optional[str] = None,
+) -> UserData:
+    """
+    Monta o UserData de um lead (PII hasheada + contexto) — miolo ÚNICO.
+
+    Era duplicado verbatim em send_lead_qualified_with_value e
+    send_lead_qualified_high_quality; qualquer sender novo de evento de lead
+    (ex.: HotLeads) consome daqui em vez de criar uma terceira cópia.
+    Estado via DDD, cidade/CEP/gênero da pesquisa melhoram o Event Quality
+    Score do Meta. O sender de Purchase usa um subconjunto próprio (sem
+    estado/pesquisa) e fica fora de propósito — unificar mudaria o payload.
+    """
+    # 1. Estado: inferir do DDD do telefone
+    state = get_state_from_phone(phone)
+
+    # 2. País: só acompanha telefone (comportamento original preservado)
+    country = country_code if phone else None
+
+    # 3. Cidade, CEP e Gênero: do survey_data se disponível
+    city = None
+    zip_code = None
+    gender = None
+    if survey_data:
+        city = survey_data.get('cidade')
+        zip_code = survey_data.get('cep')
+        # Gênero: normalizar para formato Meta (m/f)
+        # Nota: app.py monta survey_data com chave 'genero' (não 'O seu gênero:')
+        gender = normalize_gender(survey_data.get('genero'))
+
+    return UserData(
+        emails=[hash_data(email)] if email else None,
+        phones=[hash_data(phone)] if phone else None,
+        first_names=[hash_data(first_name)] if first_name else None,
+        last_names=[hash_data(last_name)] if last_name else None,
+        # Campos extras de matching:
+        states=[hash_data(state)] if state else None,
+        cities=[hash_data(city)] if city else None,
+        country_codes=[hash_data(country)] if country else None,
+        zip_codes=[hash_data(zip_code)] if zip_code else None,
+        genders=[gender] if gender else None,
+        # Campos de contexto (não hashados):
+        client_ip_address=client_ip,
+        client_user_agent=user_agent,
+        fbp=fbp,
+        fbc=fbc,
+    )
+
 def send_lead_qualified_with_value(
     email: str,
     phone: Optional[str],
@@ -309,44 +366,11 @@ def send_lead_qualified_with_value(
     country_code = (capi_config.country_code if capi_config and capi_config.country_code else 'br')
 
     try:
-        # Extrair dados adicionais para melhor matching
-        # 1. Estado: inferir do DDD do telefone
-        state = get_state_from_phone(phone)
-
-        # 2. País: do CAPIConfig ou Brasil como padrão
-        country = country_code if phone else None
-
-        # 3. Cidade, CEP e Gênero: do survey_data se disponível
-        city = None
-        zip_code = None
-        gender = None
-
-        if survey_data:
-            city = survey_data.get('cidade')
-            zip_code = survey_data.get('cep')
-            # Gênero: normalizar para formato Meta (m/f)
-            # Nota: app.py monta survey_data com chave 'genero' (não 'O seu gênero:')
-            gender_raw = survey_data.get('genero')
-            gender = normalize_gender(gender_raw)
-
-        # UserData (dados do usuário hashados)
-        # IMPORTANTE: Esses campos melhoram o Event Quality Score do Meta
-        user_data = UserData(
-            emails=[hash_data(email)] if email else None,
-            phones=[hash_data(phone)] if phone else None,
-            first_names=[hash_data(first_name)] if first_name else None,
-            last_names=[hash_data(last_name)] if last_name else None,
-            # Novos campos para melhorar matching:
-            states=[hash_data(state)] if state else None,
-            cities=[hash_data(city)] if city else None,
-            country_codes=[hash_data(country)] if country else None,
-            zip_codes=[hash_data(zip_code)] if zip_code else None,
-            genders=[gender] if gender else None,
-            # Campos de contexto (não hashados):
-            client_ip_address=client_ip,
-            client_user_agent=user_agent,
-            fbp=fbp,
-            fbc=fbc
+        # UserData — miolo único (build_lead_user_data)
+        user_data = build_lead_user_data(
+            email=email, phone=phone, first_name=first_name, last_name=last_name,
+            survey_data=survey_data, country_code=country_code,
+            client_ip=client_ip, user_agent=user_agent, fbp=fbp, fbc=fbc,
         )
 
         # CustomData (valor projetado = product_value × taxa_conversao do decil)
@@ -538,44 +562,11 @@ def send_lead_qualified_high_quality(
         return {"status": "error", "message": "ACCESS_TOKEN não configurado"}
 
     try:
-        # Extrair dados adicionais para melhor matching
-        # 1. Estado: inferir do DDD do telefone
-        state = get_state_from_phone(phone)
-
-        # 2. País: do CAPIConfig ou Brasil como padrão
-        country = country_code if phone else None
-
-        # 3. Cidade, CEP e Gênero: do survey_data se disponível
-        city = None
-        zip_code = None
-        gender = None
-
-        if survey_data:
-            city = survey_data.get('cidade')
-            zip_code = survey_data.get('cep')
-            # Gênero: normalizar para formato Meta (m/f)
-            # Nota: app.py monta survey_data com chave 'genero' (não 'O seu gênero:')
-            gender_raw = survey_data.get('genero')
-            gender = normalize_gender(gender_raw)
-
-        # UserData (dados do usuário hashados)
-        # IMPORTANTE: Esses campos melhoram o Event Quality Score do Meta
-        user_data = UserData(
-            emails=[hash_data(email)] if email else None,
-            phones=[hash_data(phone)] if phone else None,
-            first_names=[hash_data(first_name)] if first_name else None,
-            last_names=[hash_data(last_name)] if last_name else None,
-            # Novos campos para melhorar matching:
-            states=[hash_data(state)] if state else None,
-            cities=[hash_data(city)] if city else None,
-            country_codes=[hash_data(country)] if country else None,
-            zip_codes=[hash_data(zip_code)] if zip_code else None,
-            genders=[gender] if gender else None,
-            # Campos de contexto (não hashados):
-            client_ip_address=client_ip,
-            client_user_agent=user_agent,
-            fbp=fbp,
-            fbc=fbc
+        # UserData — miolo único (build_lead_user_data)
+        user_data = build_lead_user_data(
+            email=email, phone=phone, first_name=first_name, last_name=last_name,
+            survey_data=survey_data, country_code=country_code,
+            client_ip=client_ip, user_agent=user_agent, fbp=fbp, fbc=fbc,
         )
 
         # CustomData (SEM valor - Meta otimiza para volume)

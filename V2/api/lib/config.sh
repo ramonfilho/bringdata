@@ -169,6 +169,23 @@ build_env_vars() {
     # /webhook/sendflow_group_join valida este header. Só inclui se estiver no ambiente.
     [ -n "${SENDFLOW_SENDTOK:-}" ] && ENV_VARS="$ENV_VARS,SENDFLOW_SENDTOK=$SENDFLOW_SENDTOK"
 
+    # HotLeads (lead scoring da Hotmart → evento LeadScoringHot).
+    # Dois tokens porque são duas portas com donos diferentes: o cron (nosso
+    # scheduler, manda no header) e o webhook (a HOTMART chama, e como ela não
+    # permite header customizado o token vai na query da URL que registramos).
+    # Vêm do Secret Manager e são PINADOS aqui pelo mesmo motivo do
+    # LEDGER_READ_SOURCE: o deploy usa --update-env-vars (mescla), mas um deploy
+    # que não os setasse deixaria os endpoints 401 em silêncio — o cron pararia
+    # de submeter e ninguém veria, porque 401 no scheduler não gera alerta.
+    # Rollback da feature é hotleads.enabled:false no YAML, não tirar o token.
+    HOTLEADS_CRON_TOKEN="${HOTLEADS_CRON_TOKEN:-$(gcloud secrets versions access latest --secret=hotleads-cron-token --project="$PROJECT_ID" 2>/dev/null)}"
+    HOTLEADS_WEBHOOK_TOKEN="${HOTLEADS_WEBHOOK_TOKEN:-$(gcloud secrets versions access latest --secret=hotleads-webhook-token --project="$PROJECT_ID" 2>/dev/null)}"
+    [ -n "$HOTLEADS_CRON_TOKEN" ] && ENV_VARS="$ENV_VARS,HOTLEADS_CRON_TOKEN=$HOTLEADS_CRON_TOKEN"
+    [ -n "$HOTLEADS_WEBHOOK_TOKEN" ] && ENV_VARS="$ENV_VARS,HOTLEADS_WEBHOOK_TOKEN=$HOTLEADS_WEBHOOK_TOKEN"
+    # URL pública deste serviço — é o endereço que mandamos pra Hotmart chamar de
+    # volta. Sem ela o selo nunca voltaria (o endpoint recusa submeter, fail-loud).
+    ENV_VARS="$ENV_VARS,HOTLEADS_PUBLIC_URL=${HOTLEADS_PUBLIC_URL:-https://smart-ads-api-gazrm25mda-uc.a.run.app}"
+
     # Consumer Pub/Sub do sistema novo (PROCESSO_CAPI_LEAD_SURVEYS §5).
     # Sem essa flag a revisão deployada vira no-op no /pubsub/process-pending.
     # Default propagated entre deploys; mude pra "false" aqui em emergência.

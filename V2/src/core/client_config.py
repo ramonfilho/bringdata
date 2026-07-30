@@ -415,6 +415,30 @@ class MetaAudiencesConfig:
     api_version: str = "v24.0"                     # versão da Graph API
 
 
+@dataclass
+class HotLeadsConfig:
+    """Integração HotLeads (lead scoring da Hotmart) — selo binário quente/frio
+    por lead, virando evento CAPI próprio pros quentes.
+
+    Fluxo (api/hotleads_integration.py): job recorrente submete leads recentes
+    do registros_ml ao batch_enrich SEM credenciais de pixel (a Hotmart não
+    fala com o Meta; o evento sai pela NOSSA CAPI, com dedup e user_data
+    padrão), o selo volta por webhook (~2 min) e os hot=1 disparam
+    `event_name` no pixel do cliente.
+
+    Bloco `hotleads:` no YAML. Default `enabled=False` = INERTE (mesmo padrão
+    do GoogleAdsConfig/MetaAudiencesConfig): nada é submetido nem enviado até
+    ligar explicitamente. Rollback = enabled:false."""
+    enabled: bool = False                          # master switch — dark por padrão
+    event_name: str = "LeadScoringHot"             # evento CAPI dos leads quentes (≠ "LeadScoring" nativo da Hotmart, evita colisão se um dia ligarem o envio deles)
+    submit_window_days: int = 7                    # janela de leads elegíveis; também é o teto de event_time retroativo que o Meta aceita
+    batch_limit: int = 1000                        # máx. de leads por chamada (limite da API HotLeads)
+    resubmit_after_hours: int = 6                  # re-submete lead ainda sem selo após N horas (webhook perdido)
+    expected_ticket: float = 2000.0                # campaign.expected_ticket informado à Hotmart
+    currency: str = "BRL"                          # campaign.currency_code_type
+    basic_auth_env_var: str = "HOTMART_BASIC"      # env var da credencial Basic (a MESMA da ingestão de vendas Hotmart)
+
+
 # ---------------------------------------------------------------------------
 # Sub-configs — Grupo B: API operacional (Fase 2)
 # ---------------------------------------------------------------------------
@@ -795,6 +819,7 @@ class ClientConfig:
     capi: CAPIConfig = field(default_factory=CAPIConfig)
     google_ads: GoogleAdsConfig = field(default_factory=GoogleAdsConfig)
     meta_audiences: MetaAudiencesConfig = field(default_factory=MetaAudiencesConfig)
+    hotleads: HotLeadsConfig = field(default_factory=HotLeadsConfig)
     api: APIConfig = field(default_factory=APIConfig)
     retrain: RetainConfig = field(default_factory=RetainConfig)
     business: BusinessConfig = field(default_factory=BusinessConfig)
@@ -819,6 +844,7 @@ class ClientConfig:
             capi=_load_capi_config(data.get("capi", {})),
             google_ads=_make(GoogleAdsConfig, data.get("google_ads", {})),
             meta_audiences=_make(MetaAudiencesConfig, data.get("meta_audiences", {})),
+            hotleads=_make(HotLeadsConfig, data.get("hotleads", {})),
             api=_make(APIConfig, data.get("api", {})),
             retrain=_make(RetainConfig, data.get("retrain", {})),
             business=_make(BusinessConfig, data.get("business", {})),
