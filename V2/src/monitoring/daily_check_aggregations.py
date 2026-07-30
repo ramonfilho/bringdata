@@ -23,10 +23,13 @@ Decisões de modelagem:
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Dict, List
 
 from ..data.lead_record import LeadRecord
+
+logger = logging.getLogger(__name__)
 
 
 _STATUS_TENTOU_CAPI = ('success', 'error')
@@ -230,6 +233,15 @@ def compute_variant_cpl_conv(
         (None se lpv=0).
     """
     agg = {b: {'leads': 0, 'spend': 0.0, 'lpv': 0} for b in _VARIANT_BUCKETS}
+    # Contadores do que ficou de fora. O `if bucket in agg` sem `else` era um descarte
+    # MUDO: rótulo fora do vocabulário (ou um 'Controle' em vez de 'Lead') zerava os 3
+    # baldes, e o funil saía no Slack com aparência normal, só sem as linhas por variante.
+    _fora: Dict[str, Dict[str, float]] = {}
+
+    def _conta_fora(bucket, spend=0.0, leads=0):
+        e = _fora.setdefault(str(bucket), {'spend': 0.0, 'leads': 0})
+        e['spend'] += float(spend or 0)
+        e['leads'] += int(leads or 0)
 
     # Lado Meta: spend + landing_page_views por bucket.
     for r in meta_rows:
@@ -237,12 +249,26 @@ def compute_variant_cpl_conv(
         if bucket in agg:
             agg[bucket]['spend'] += float(r.get('spend') or 0)
             agg[bucket]['lpv'] += int(r.get('lpv') or 0)
+        else:
+            _conta_fora(bucket, spend=r.get('spend'))
 
     # Lado Client: leads reais por bucket.
     for camp in client_campaigns:
         bucket = classify_fn(camp)
         if bucket in agg:
             agg[bucket]['leads'] += 1
+        else:
+            _conta_fora(bucket, leads=1)
+
+    # 'EXTERNO' fora é esperado (Google/orgânico/não-captação). Qualquer OUTRO rótulo é
+    # divergência de vocabulário entre o classificador e este agregador: fail-loud.
+    _inesperado = {k: v for k, v in _fora.items() if k != 'EXTERNO'}
+    if _inesperado:
+        logger.error(
+            "[variant_cpl] classify_fn devolveu rótulo(s) fora de %s: %s — gasto e leads "
+            "DESCARTADOS, linhas por variante saem subestimadas",
+            _VARIANT_BUCKETS + ('EXTERNO',), _inesperado,
+        )
 
     out: Dict[str, Dict[str, Any]] = {}
     for b in _VARIANT_BUCKETS:

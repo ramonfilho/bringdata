@@ -25,6 +25,8 @@ import time
 from collections import Counter
 from typing import Iterable, Optional, TYPE_CHECKING
 
+from src.core.ab_arm import BUCKET_LEAD, first_match, warn_once
+
 if TYPE_CHECKING:
     from api.meta_integration import MetaAdsIntegration
 
@@ -101,14 +103,20 @@ def bucket_from_utm(utm_campaign, bucket_map=None) -> str:
     (challenger antes de champion). Formato: {'tags': [(TAG_UPPER, bucket), ...],
     'fallback': 'Lead'}. Sem bucket_map, tudo cai em 'Lead' (default seguro) — todos
     os consumidores de produção (data_quality, app.py) injetam o mapa.
+
+    INVÓLUCRO FINO: o casamento de tag mora em `core.ab_arm.first_match` (miolo único,
+    compartilhado com `resolve_arm`). Aqui só ficam o contrato de assinatura que os 5
+    consumidores já usam e o default de balde. A precedência é a ORDEM da lista de tags,
+    então três loops copiados era convite pra três precedências divergentes.
     """
-    c = (str(utm_campaign) if utm_campaign is not None else "").upper()
     if not bucket_map:
-        return "Lead"
-    for tag, bucket in bucket_map.get("tags", []):
-        if tag in c:
-            return bucket
-    return bucket_map.get("fallback", "Lead")
+        # Não é só "default seguro": com o A/B ligado, mapa vazio faz TODO lead Meta cair
+        # em Lead e os baldes Champion/Challenger saírem zerados no painel de decis e no
+        # drift, sem erro nenhum. Logar pra o degrade ser visível.
+        warn_once("bucket_map ausente — todos os leads caem em 'Lead'", "bucket_from_utm")
+        return BUCKET_LEAD
+    return first_match(utm_campaign, bucket_map.get("tags", [])) \
+        or bucket_map.get("fallback", BUCKET_LEAD)
 
 
 # Canal de mídia paga a partir do utm_source. Espelha analytics.ad_spend.platform

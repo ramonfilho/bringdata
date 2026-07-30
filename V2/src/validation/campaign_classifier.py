@@ -259,23 +259,33 @@ def classify_campaign(campaign_name: str) -> str:
         return 'SEM_ML'
 
 
-def classify_variant(campaign_name: str) -> str:
+VARIANT_EXTERNO = 'EXTERNO'
+
+
+def classify_variant(campaign_name: str, captured_at=None) -> str:
     """Classifica campanha em 'Lead', 'Champion', 'Challenger' ou 'EXTERNO'.
 
-    Mesmo critério de NOME do relatório de validação do LF (`classify_campaign`),
-    refinado em 3 buckets em vez de COM_ML/SEM_ML:
+    INVÓLUCRO FINO sobre `core.ab_arm.resolve_arm` (fonte única de qual modelo tem qual
+    papel). O que sobra aqui é só o CONTRATO DE VOCABULÁRIO desta borda: os agregadores
+    do funil (`daily_check_aggregations`) só conhecem estes 4 valores e descartam em
+    silêncio qualquer outro, então a tradução Controle->'Lead' e Indeterminado->'Lead' é
+    obrigatória e nenhum rótulo novo pode vazar daqui.
 
-    1. Não é captação (`DEVLF | CAP | FRIO`) → 'EXTERNO' (Google/orgânico/etc.).
-    2. Contém 'leadhqlb' ou 'hqlb' → 'Challenger' (A/B abr28).
-    3. Contém 'leadqualified' / 'machine learning' / '| ml |' → 'Champion'.
-    4. Captação sem marker ML → 'Lead' (Lead padrão Meta, sem evento ML).
+    Antes desta mudança as regras estavam cravadas neste arquivo e divergiram do YAML em
+    três frentes, todas com efeito em relatório publicado:
+      1. 'hqlb' -> 'Challenger' fixo, mesmo depois de o abr28 ser promovido a Champion em
+         25/07/2026: o gasto do HQLB caía numa linha e os leads D9-D10 dele em outra.
+      2. Público 'FRIO' exigido no nome, então a campanha QUENTE de R$ 2.271 (29/07)
+         virava 'EXTERNO' e sumia do funil.
+      3. Nenhum conhecimento do challenger jul_24 (tag JUL24), que também sumia.
 
-    Precedência Challenger > Champion > Lead (igual ao split por A/B). É o critério
-    canônico pra quebra por variante do monitoramento (CPL real / conversão de LP),
-    deliberadamente o do arquivo de validação — não o `optimization_goal` do adset.
+    `captured_at` (opcional) resolve o papel VIGENTE na data. Sem ele vale o papel de
+    hoje, que é o certo pra janela diária e mantém a coluna acumulada do lançamento
+    coerente (um rótulo por campanha, em vez de a mesma campanha aparecer metade em
+    Champion e metade em Challenger por atravessar a data da promoção).
 
     Examples:
-        >>> classify_variant("DEVLF | CAP | FRIO | ... | LEADHQLB|123")
+        >>> classify_variant("DEVLF | CAP | FRIO | ... | LEADHQLB|123", "2026-06-18")
         'Challenger'
         >>> classify_variant("DEVLF | CAP | FRIO | ... | LEADQUALIFIED|123")
         'Champion'
@@ -284,16 +294,15 @@ def classify_variant(campaign_name: str) -> str:
         >>> classify_variant("devlf")
         'EXTERNO'
     """
-    if not campaign_name or pd.isna(campaign_name):
-        return 'EXTERNO'
-    if not is_captacao_campaign(campaign_name):
-        return 'EXTERNO'
-    campaign_lower = str(campaign_name).lower()
-    if 'leadhqlb' in campaign_lower or 'hqlb' in campaign_lower:
-        return 'Challenger'
-    if 'leadqualified' in campaign_lower or 'machine learning' in campaign_lower or '| ml |' in campaign_lower:
-        return 'Champion'
-    return 'Lead'
+    from src.core.ab_arm import EXTERNO, arm_to_bucket, resolve_arm
+
+    arm = resolve_arm(campaign_name=campaign_name, captured_at=captured_at)
+    if arm == EXTERNO:
+        return VARIANT_EXTERNO
+    # `arm_to_bucket` devolve None quando o papel é INDETERMINADO (janela ambígua sem
+    # `variant` pra desempatar). Aí a campanha sai do recorte por variante em vez de
+    # entrar num balde chutado — é o mesmo destino que ela já tinha antes deste refator.
+    return arm_to_bucket(arm, contexto=str(campaign_name)[:80]) or VARIANT_EXTERNO
 
 
 def add_ml_classification(df: pd.DataFrame, campaign_col: str = 'campaign') -> pd.DataFrame:

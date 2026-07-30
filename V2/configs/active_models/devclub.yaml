@@ -47,7 +47,15 @@ ab_test:
     # =============================================================================
     challenger_abr28:
       run_id: 5d158f0aa6e54b489498470446194a6c
-      role: champion                             # promovido 25/07/2026: abr28 é o champion
+      role: champion                             # papel ATUAL (promovido 25/07/2026)
+      # Papel ao longo do tempo — fonte única da datação (core/ab_arm.role_at).
+      # Relatório histórico precisa saber que em junho este modelo era o CHALLENGER;
+      # sem isto, promover um modelo reescreve o passado de todos os relatórios.
+      # `from` é inclusivo. Evidência das datas: evento HQLB criado 29/04/2026 (test
+      # event TEST25625); promoção a champion documentada em 25/07/2026.
+      role_history:
+        - {role: challenger, from: 2026-04-29}
+        - {role: champion,   from: 2026-07-25}
       campaign_tag: "HQLB"                        # substring p/ classificador (cobre LEADHQLB/HQLB/HQLB_LQ)
       display_name: "Champion (abr_28)"
       utm_pattern:
@@ -90,6 +98,11 @@ ab_test:
     challenger_jul_24:
       run_id: b085b63681bc4d0d90bdbd466106763a
       role: challenger
+      # Papel ao longo do tempo (ver explicação no bloco do abr28). Data evidenciada em
+      # DOIS lugares independentes: 1º gasto das campanhas JUL24 em analytics.ad_spend e
+      # 1º lead com variant='challenger_jul_24' no ledger, ambos em 2026-07-29.
+      role_history:
+        - {role: challenger, from: 2026-07-29}
       # As campanhas na Meta se chamam "JUL24_TOP30/TOP10/TOP50" (sem underline antes do 24).
       # A etiqueta ERA "jul_24" e nunca casava (substring) → leads caíam em variant=None e
       # recebiam os eventos padrão, não os do jul_24 (A/B parado). "JUL24" casa os 3 tiers.

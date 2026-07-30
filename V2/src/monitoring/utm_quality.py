@@ -230,15 +230,18 @@ def compute_utm_quality(
     if not ab_cfg.enabled:
         raise RuntimeError(f'A/B test not enabled in {yaml_path}')
 
+    # Papel resolvido pelo YAML (fonte única), NÃO pela substring do nome da chave.
+    # A busca por 'champion' no nome da chave não achava ninguém (as duas variantes se
+    # chamam `challenger_abr28` e `challenger_jul_24`) e caía no `variant_names[0]`, então
+    # champion e challenger apontavam pro MESMO modelo neste relatório.
+    from src.core.ab_arm import load_arm_config
+
+    _arm_cfg = load_arm_config(ab_cfg.yaml_path)
     variant_names = list(ab_cfg.variants.keys())
-    champion_name = next(
-        (n for n in variant_names if 'champion' in n.lower()),
-        variant_names[0] if variant_names else 'champion',
-    )
-    challenger_name = next(
-        (n for n in variant_names if 'challenger' in n.lower()),
-        variant_names[1] if len(variant_names) > 1 else 'challenger',
-    )
+    champion_name = _arm_cfg.variant_for_role('champion') or (
+        variant_names[0] if variant_names else 'champion')
+    challenger_name = _arm_cfg.variant_for_role('challenger') or (
+        variant_names[1] if len(variant_names) > 1 else 'challenger')
     _cv = ab_cfg.variants.get(challenger_name)
     challenger_run_id = getattr(_cv, 'run_id', None)
 
