@@ -64,8 +64,28 @@ def test_frozen_sem_teto():
     assert 'CPLq R$ 50,00' in txt   # CPLq segue normal
 
 
+def test_resumo_omite_as_4_linhas():
+    """Fase 4: resumo=True → título 'Resumo do tráfego' e SEM as 4 linhas de plumbing."""
+    B = []
+    _slack_unified_funnel(_base_v(_ROLLING), B, resumo=True)
+    txt = _text(B)
+    assert '📊 Resumo do tráfego' in txt and '🎬 Funil completo' not in txt
+    for linha in ('Pesquisa', 'Scoreado', 'CAPI enviado', 'Aceito Meta'):
+        assert linha not in txt
+    assert '── Meta ──' in txt   # o resto do funil continua
+
+
+def test_funil_completo_mantem_plumbing():
+    B = []
+    _slack_unified_funnel(_base_v(_ROLLING), B, resumo=False)
+    txt = _text(B)
+    assert '🎬 Funil completo' in txt
+    assert 'Pesquisa' in txt and 'CAPI enviado' in txt and 'Aceito Meta' in txt
+
+
 if __name__ == "__main__":
-    for fn in (test_teto_aparece_com_rolling, test_frozen_sem_teto):
+    for fn in (test_teto_aparece_com_rolling, test_frozen_sem_teto,
+               test_resumo_omite_as_4_linhas, test_funil_completo_mantem_plumbing):
         fn()
         print(f"ok: {fn.__name__}")
     print("PASS")

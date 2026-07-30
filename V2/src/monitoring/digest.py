@@ -1166,6 +1166,13 @@ def render_slack_blocks_client(view: dict) -> list[dict]:
     # de dados do cliente (#team-dados). Mesmo bloco da view completa; omite-se
     # sozinho se a métrica veio ausente.
     _slack_survey_response_rate(view, blocks)
+    # Resumo do tráfego (Fase 4): o funil SEM as 4 linhas de plumbing
+    # (Pesquisa/Scoreado/CAPI/Aceito), após a pesquisa — a pedido. Só com
+    # REFERENCE_SOURCE=rolling (frozen → grupo segue sem funil, como hoje). A view é
+    # a MESMA do DM, que já renderiza o funil — então roda igual.
+    from src.data.reference_reader import rolling_enabled
+    if rolling_enabled():
+        _slack_unified_funnel(view, blocks, resumo=True)
     return blocks
 
 
@@ -1801,7 +1808,7 @@ def _slack_alert_other(a: dict, B: list):
         'text': f"{e} *{a.get('type','?').upper()}* `{sev}` · category=`{a.get('category','?')}`{extra_tag}\n   {a.get('message','?')[:300]}"}})
 
 
-def _slack_unified_funnel(v: dict, B: list):
+def _slack_unified_funnel(v: dict, B: list, resumo: bool = False):
     """Funil completo numa história só: anúncio (Meta Insights) → captura →
     pipeline (TODAS as fontes, quebra fb/ggl/outr) → tracking FBP/FBC.
 
@@ -1939,14 +1946,18 @@ def _slack_unified_funnel(v: dict, B: list):
         ]
         lines += _variante_rows(_gf.get('por_variante') or {}, _gf.get('por_variante_lf') or {}, _ggl_q)
 
-    lines += [
-        f"Pesquisa       {_n(stg('pesquisa'),'total'):>13,.0f}   {brk(stg('pesquisa'))}",
-        f"Scoreado       {_n(stg('scoreado'),'total'):>13,.0f}   {brk(stg('scoreado'))}",
-        f"CAPI enviado   {_n(stg('capi_enviado'),'total'):>13,.0f}",
-        f"Aceito Meta    {_n(stg('aceito'),'total'):>13,.0f}",
-    ]
+    # As 4 linhas de plumbing do pipeline (Pesquisa/Scoreado/CAPI/Aceito) só no funil
+    # COMPLETO (DM). O "resumo do tráfego" do grupo omite elas — a pedido.
+    if not resumo:
+        lines += [
+            f"Pesquisa       {_n(stg('pesquisa'),'total'):>13,.0f}   {brk(stg('pesquisa'))}",
+            f"Scoreado       {_n(stg('scoreado'),'total'):>13,.0f}   {brk(stg('scoreado'))}",
+            f"CAPI enviado   {_n(stg('capi_enviado'),'total'):>13,.0f}",
+            f"Aceito Meta    {_n(stg('aceito'),'total'):>13,.0f}",
+        ]
+    _title = '📊 Resumo do tráfego' if resumo else '🎬 Funil completo'
     B.append({'type': 'section', 'text': {'type': 'mrkdwn',
-        'text': (f"*🎬 Funil completo*  ·  _{ufw.get('label','dia anterior')} ({ufw.get('date_brt','?')}) BRT_\n"
+        'text': (f"*{_title}*  ·  _{ufw.get('label','dia anterior')} ({ufw.get('date_brt','?')}) BRT_\n"
                  f"```\n" + "\n".join(lines) + "\n```")}})
     # Bloco "Tracking FBP/FBC" + nota de contexto removidos do DM a pedido (28/06).
 
