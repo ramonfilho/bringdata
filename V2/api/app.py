@@ -5637,7 +5637,11 @@ async def pubsub_process_pending(pipeline: PipelineDep, dry_run: bool = False):
 
     Chamado pelo Cloud Scheduler em cadência fixa.
 
-    Fluxo (delega tudo a api.pubsub_branch.process_pending_pubsub):
+    Fluxo (delega tudo a api.pubsub_branch.drain_pending_pubsub):
+      0. Repete os passos abaixo até a fila esvaziar (tetos de tempo e de rodadas
+         no pubsub_branch). Antes era UM pull por invocação e o resto esperava o
+         tick seguinte de 5 min, o que fazia mensagem envelhecer em degrau e
+         disparar o alerta de backlog com a fila drenando normalmente.
       1. Pull batch da sub Pub/Sub.
       2. Por mensagem: parse → traduz slugs → classifica → scoreia (pipeline.run)
                        → CAPI (send_batch_events) → ledger registros_ml → ack.
@@ -5653,7 +5657,7 @@ async def pubsub_process_pending(pipeline: PipelineDep, dry_run: bool = False):
                  smoke contra o backlog real do canary sem efeito colateral.
     """
     import pg8000.native
-    from api.pubsub_branch import is_enabled, ledger_target, process_pending_pubsub
+    from api.pubsub_branch import drain_pending_pubsub, is_enabled, ledger_target
 
     if not is_enabled():
         return {
@@ -5695,7 +5699,10 @@ async def pubsub_process_pending(pipeline: PipelineDep, dry_run: bool = False):
                 timeout=30,
             )
         subscriber = pubsub_v1.SubscriberClient()
-        summary = process_pending_pubsub(
+        # DRENA até a fila esvaziar (antes era um pull só por invocação, e o resto
+        # esperava o próximo tick de 5 min — era isso que obrigava a drenar na mão).
+        # Os tetos de tempo/rodadas vivem no `pubsub_branch`; ver drain_pending_pubsub.
+        summary = drain_pending_pubsub(
             subscriber, railway_conn, pipeline, dry_run=dry_run,
             ledger_conn=ledger_conn,
         )
