@@ -361,8 +361,13 @@ def send_lead_scoring_hot(
     from facebook_business.adobjects.serverside.event_request import EventRequest
 
     event_id = lead["event_id"]
-    pixel_id = (capi_config.pixel_id if capi_config and capi_config.pixel_id
-                else os.getenv("META_PIXEL_ID"))
+    # Pixel próprio do HotLeads tem prioridade; sem ele, herda o padrão do
+    # cliente. O selo é sinal EXTERNO ao nosso modelo, então o operador pode
+    # querer o evento num conjunto de dados separado (no DevClub: DEVLF-API).
+    pixel_id = (cfg.pixel_id
+                or (capi_config.pixel_id if capi_config and capi_config.pixel_id
+                    else None)
+                or os.getenv("META_PIXEL_ID"))
     if not ACCESS_TOKEN:
         return {"status": "error", "event_id": event_id,
                 "message": "META_ACCESS_TOKEN não configurado"}

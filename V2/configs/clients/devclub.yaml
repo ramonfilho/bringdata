@@ -674,6 +674,7 @@ meta_audiences:
 hotleads:
   enabled: true
   event_name: LeadScoringHot        # ≠ "LeadScoring" nativo da Hotmart — evita colisão se um dia ligarem o envio deles
+  pixel_id: '1513132406527995'      # DEVLF - API (decisão do operador 30/07). NÃO é o pixel padrão (1937…, "DEV QUENTE"): o selo da Hotmart é sinal externo ao nosso modelo e fica isolado neste conjunto de dados
   submit_window_days: 7             # janela de elegíveis; é também o teto de event_time retroativo que o Meta aceita
   batch_limit: 1000                 # limite da API HotLeads por chamada
   resubmit_after_hours: 6           # re-submete lead ainda sem selo após 6h (webhook perdido)
