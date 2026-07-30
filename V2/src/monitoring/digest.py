@@ -1858,18 +1858,13 @@ def _slack_unified_funnel(v: dict, B: list):
         rate = ((_conv_ref.get('by_bucket') or {}).get(bk) or {}).get('rate')
         return teto_cpl(rate, _vps, roas_alvo=1.0)
 
-    def _teto_channel(ch):
-        rate = ((_conv_ref.get('by_channel') or {}).get(ch) or {}).get('rate')
-        return teto_cpl(rate, _vps, roas_alvo=1.0)
-
-    def _cplq_annot(cplq, teto):
-        """' · CPLq R$X' + ' 🟢/🔴 teto R$Y' quando há teto. CPLq ≤ teto = 🟢 (sobra),
-        acima = 🔴 (queima). Teto None (frozen/sem ref) → só o CPLq (funil de hoje)."""
-        base = f" · CPLq {_rs(cplq)}"
-        if cplq is None or teto is None:
-            return base
-        emoji = '🟢' if cplq <= teto else '🔴'
-        return f"{base} {emoji} teto {_rs(teto)}"
+    def _teto_annot(cpl, teto):
+        """' 🟢/🔴 teto R$Y' ao lado do CPL (TODOS os leads — o breakeven é por lead,
+        não por lead D9-D10). CPL ≤ teto = 🟢 (lucra), acima = 🔴 (queima). Teto None
+        (frozen/sem ref) → vazio (funil de hoje)."""
+        if cpl is None or teto is None:
+            return ''
+        return f" {'🟢' if cpl <= teto else '🔴'} teto {_rs(teto)}"
 
     def _variante_rows(pv, pv_lf, q_by_bucket=None):
         """Linhas por variante. Um balde só aparece se tiver DADO real: leads
@@ -1891,11 +1886,13 @@ def _slack_unified_funnel(v: dict, B: list):
             _cpl = _vd.get('cpl')
             _q = (q_by_bucket or {}).get(_vk) or 0
             _cplq = (_cpl * _vn / _q) if (_cpl and _vn and _q) else None
-            _cplq_s = _cplq_annot(_cplq, _teto_bucket(_vk))
+            _cplq_s = f" · CPLq {_rs(_cplq)}"
+            # Teto de breakeven ao lado do CPL (todos os leads): conversão do balde × valor.
+            _teto_s = _teto_annot(_cpl, _teto_bucket(_vk))
             if pv_lf:
-                out.append(f"{_lbl:<18}{_vn:>6,.0f}  CPL ontem {_rs(_vd.get('cpl'))} · LF {_rs(_lf_cpl)}{_cplq_s} · LP {_conv_s}")
+                out.append(f"{_lbl:<18}{_vn:>6,.0f}  CPL ontem {_rs(_cpl)}{_teto_s} · LF {_rs(_lf_cpl)}{_cplq_s} · LP {_conv_s}")
             else:
-                out.append(f"{_lbl:<18}{_vn:>6,.0f}   CPL {_rs(_vd.get('cpl'))}{_cplq_s} · LP {_conv_s}")
+                out.append(f"{_lbl:<18}{_vn:>6,.0f}   CPL {_rs(_cpl)}{_teto_s}{_cplq_s} · LP {_conv_s}")
         return out
 
     # ── Meta ── (Meta Insights: spend/cliques + TOTAL de cadastros + split por variante)
@@ -1924,12 +1921,7 @@ def _slack_unified_funnel(v: dict, B: list):
         if _bd.get('cpl') and _n(_bd, 'leads')
     )
     if _meta_ch_q > 0 and _meta_taxed_spend > 0:
-        _meta_cplq = _meta_taxed_spend / _meta_ch_q
-        _meta_teto = _teto_channel('meta')
-        _teto_s = ''
-        if _meta_teto is not None:
-            _teto_s = f"  {'🟢' if _meta_cplq <= _meta_teto else '🔴'} teto {_rs(_meta_teto)}"
-        lines.append(f"CPL qualif.    {_rs(_meta_cplq)}   (por lead D9-D10){_teto_s}")
+        lines.append(f"CPL qualif.    {_rs(_meta_taxed_spend / _meta_ch_q)}   (por lead D9-D10)")
     lines += _variante_rows(tr.get('por_variante') or {},
                             (v.get('traffic') or {}).get('por_variante_lf') or {},
                             _meta_q)

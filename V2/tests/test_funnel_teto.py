@@ -46,13 +46,14 @@ def test_teto_aparece_com_rolling():
     B = []
     _slack_unified_funnel(_base_v(_ROLLING), B)
     txt = _text(B)
-    # Lead: CPLq = 5×100/10 = R$50 ; teto = 0.011×1320 = R$14,52 → acima → 🔴
-    assert 'teto R$ 14,52' in txt and 'CPLq R$ 50,00' in txt
-    assert '🔴 teto R$ 14,52' in txt
-    # Champion: teto = 0.0194×1320 = R$25,61
-    assert 'teto R$ 25,6' in txt
-    # Canal Meta: teto = 0.0112×1320 = R$14,78
-    assert 'teto R$ 14,7' in txt
+    # Teto fica no CPL (todos os leads), não no CPLq. Lead: CPL R$5 ≤ teto
+    # 0.011×1320=R$14,52 → 🟢 (lucra). CPLq segue plano.
+    assert 'CPL R$ 5,00 🟢 teto R$ 14,52' in txt
+    assert 'CPLq R$ 50,00' in txt
+    # Champion: CPL R$8 ≤ teto 0.0194×1320=R$25,61 → 🟢
+    assert '🟢 teto R$ 25,6' in txt
+    # a linha "CPL qualif." do canal NÃO ganha teto (denominador D9-D10)
+    assert 'D9-D10)  🟢' not in txt and 'D9-D10)  🔴' not in txt
 
 
 def test_frozen_sem_teto():
