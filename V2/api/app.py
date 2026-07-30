@@ -1217,12 +1217,17 @@ async def hotleads_submit_batch(
                    "sem URL de retorno o selo nunca voltaria"
         )
 
-    from api.hotleads_integration import run_submit_batch
+    from api.hotleads_integration import run_retry_failed, run_submit_batch
     from src.data.ledger_connection import open_cloudsql_ledger_connection
     conn = open_cloudsql_ledger_connection()
     try:
-        return run_submit_batch(conn, cfg, webhook_url=webhook_url,
-                                limit=limit, dry_run=dry_run)
+        # Antes de puxar leads novos, destrava os quentes cujo evento falhou —
+        # o selo deles já está pago, só o envio ao Meta ficou pendente. Sem isso
+        # eles ficariam órfãos (nenhum outro caminho os pega de volta).
+        retry = run_retry_failed(conn, cfg, dry_run=dry_run)
+        result = run_submit_batch(conn, cfg, webhook_url=webhook_url,
+                                  limit=limit, dry_run=dry_run)
+        return {**result, "retry": retry}
     finally:
         try:
             conn.close()
