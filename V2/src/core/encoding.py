@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -28,6 +29,23 @@ import pandas as pd
 from .client_config import EncodingConfig
 
 logger = logging.getLogger(__name__)
+
+
+def _clean_column_name(nome: str) -> str:
+    """Normaliza um nome de coluna com a MESMA regra aplicada ao DataFrame encodado.
+
+    Existe para o check T1-10 conseguir ligar uma feature encodada
+    (`Tem_computador_notebook_sim`) à pergunta que a gerou
+    (`Tem computador/notebook?`). Sem isso, não dá pra distinguir "categoria que
+    este batch não teve" de "pergunta que não chegou" — e o check acusava as duas
+    como cegueira do modelo.
+
+    Precisa acompanhar o passo 5 de `apply_encoding`: se a regra de lá mudar, esta
+    muda junto, senão o check volta a errar a classificação.
+    """
+    nome = re.sub(r'[^A-Za-z0-9_]', '_', str(nome))
+    nome = re.sub(r'__+', '_', nome)
+    return nome.strip('_')
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +311,9 @@ def apply_encoding(
     # -----------------------------------------------------------------------
     # 5. Normalizar nomes das colunas (clean_column_names — produção canonical)
     # -----------------------------------------------------------------------
+    # Mesma regra de `_clean_column_name` — mantidas juntas de propósito: o check
+    # T1-10 do passo 7 depende de normalizar nomes de origem exatamente assim para
+    # reconhecer qual pergunta gerou qual feature encodada.
     df_encoded.columns = df_encoded.columns.str.replace('[^A-Za-z0-9_]', '_', regex=True)
     df_encoded.columns = df_encoded.columns.str.replace('__+', '_', regex=True)
     df_encoded.columns = df_encoded.columns.str.strip('_')
@@ -327,16 +348,54 @@ def apply_encoding(
         # Motivação: uma vez preenchida com 0, a feature parece existir mas o
         # modelo está cego para seu sinal. Detectar ausência de features críticas
         # (top 10 por importância no modelo ativo) antes da homogeneização.
+        #
+        # DUAS AUSÊNCIAS DIFERENTES, e só uma é problema (corrigido 31/07/2026):
+        #
+        #   (a) Categoria não escolhida. O one-hot cria uma coluna por categoria
+        #       PRESENTE nos dados. Quem respondeu "Tem computador: sim" gera
+        #       `Tem_computador_notebook_sim` e NÃO gera `..._nao`. Preencher a
+        #       ausente com 0 é a codificação CORRETA de "não é esta categoria",
+        #       não cegueira. Verificado em 400 leads reais: o score é idêntico
+        #       entre um lote (que gera mais colunas) e o caminho de 1 lead.
+        #
+        #   (b) Pergunta que não veio. A coluna de origem não existia no
+        #       DataFrame, então NENHUMA categoria dela foi gerada. Aí sim o
+        #       modelo fica cego, e é isso que este check nasceu para pegar.
+        #
+        # Antes desta correção os dois gritavam igual, em nível ERROR, e o caso
+        # (a) é estrutural em batch pequeno: o log de produção vivia cheio de
+        # "modelo fica cego" para features rank 1 a 5 sem nada errado
+        # acontecendo. Alerta que sempre dispara é alerta que ninguém lê.
         if missing:
             top_features = _load_top_features(artifacts, min_importance=0.01)
             if top_features:
                 missing_set = set(missing)
                 critical_missing = [f for f in top_features if f['name'] in missing_set]
+                # Prefixos das colunas que ENTRARAM no one-hot, normalizados com a
+                # mesma regra do passo 5 — é o que liga a feature encodada à sua
+                # pergunta de origem.
+                prefixos_ohe = {
+                    p for p in (_clean_column_name(c) for c in variaveis_one_hot) if p
+                }
                 for f in critical_missing:
+                    origem_presente = any(
+                        f['name'].startswith(p + '_') for p in prefixos_ohe
+                    )
+                    if origem_presente:
+                        # Caso (a): a pergunta veio, este batch só não teve esta
+                        # categoria. Zero é a resposta certa.
+                        logger.debug(
+                            f"  [T1-10] '{f['name']}' ausente porque a categoria não "
+                            f"ocorreu neste batch (a pergunta de origem veio) — 0 é o "
+                            f"valor correto, não é cegueira"
+                        )
+                        continue
+                    # Caso (b): órfã de verdade.
                     msg = (
                         f"  [T1-10] Feature CRÍTICA ausente do DataFrame: '{f['name']}' "
                         f"(rank {f['rank']}, importância {f['importance']*100:.2f}%) "
-                        f"— será preenchida com 0, modelo fica cego para esse sinal"
+                        f"— NENHUMA coluna de origem gerou esta feature, será "
+                        f"preenchida com 0 e o modelo fica cego para esse sinal"
                     )
                     if f['importance'] >= 0.05:
                         logger.error(msg)
