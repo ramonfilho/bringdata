@@ -76,6 +76,23 @@ PUBSUB_SUBSCRIPTION_ID = "lead-capture-ingest-sub"
 _DRAIN_SECONDS = 120.0
 _DRAIN_MAX_ROUNDS = 8
 
+# Pulls vazios CONSECUTIVOS antes de concluir que não há mais o que fazer agora.
+# Um pull vazio NÃO significa fila vazia: o pull unário devolve o que está disponível
+# no instante da chamada e volta vazio mesmo com backlog. Em 31/07/2026 o drain
+# declarou `fila_vazia` com 253 leads parados — daí o nome do estado ser
+# `sem_resposta` e não `fila_vazia`, e daí exigirmos mais de um vazio.
+_DRAIN_EMPTY_PULLS = 3
+
+# Renovação do lease durante a rodada. O ackDeadline da subscription é o teto do
+# SERVIDOR (600s desde 31/07/2026); isto aqui é o que mantém a mensagem nossa
+# enquanto a rodada trabalha, em vez de depender de um valor fixo bem chutado.
+# Renovamos a cada bloco ackado, pedindo _ACK_EXTENSION_SECONDS de fôlego.
+_ACK_EXTENSION_SECONDS = 600
+# Mensagens confirmadas por vez. Ackar só no fim significa que qualquer atraso joga
+# fora a rodada INTEIRA (foi o que travou 1.468 leads por 27h). Em blocos, o estrago
+# de uma falha fica no bloco.
+_ACK_CHUNK = 25
+
 
 def _event_ts_iso(skew_seconds: int = 60) -> str:
     """Timestamp RFC3339 (UTC) com o mesmo recuo de ~60s do CAPI Meta —
@@ -317,6 +334,63 @@ def _variant_name(pipeline, ab_variant) -> Optional[str]:
 # Orquestração (recebe subscriber, conn, pipeline)
 # ---------------------------------------------------------------------------
 
+def _renovar_lease(subscriber, sub_path: str, ack_ids: List[str]) -> None:
+    """Pede mais tempo ao Pub/Sub pras mensagens que ainda estamos processando.
+
+    Sem isto, o prazo é o `ackDeadlineSeconds` da subscription, um número fixo que
+    alguém chutou. Se a rodada demorar mais que ele, o Pub/Sub conclui que morremos,
+    reentrega tudo, e o `acknowledge` do fim não vale mais nada — foi exatamente o
+    que travou 1.468 leads por 27h em 28-31/07/2026: rodada de ~90s contra prazo de
+    60s, processando e reprocessando o mesmo bloco sem nunca dar baixa.
+
+    Falha aqui NÃO derruba a rodada: perder a renovação significa, no pior caso,
+    reprocessar mensagem (o ledger dedupa por ON CONFLICT), enquanto abortar
+    significaria perder trabalho já feito.
+    """
+    if not ack_ids:
+        return
+    try:
+        subscriber.modify_ack_deadline(
+            request={
+                "subscription": sub_path,
+                "ack_ids": ack_ids,
+                "ack_deadline_seconds": _ACK_EXTENSION_SECONDS,
+            }
+        )
+    except Exception as e:
+        logger.warning(
+            f"[pubsub_branch] falha ao renovar lease de {len(ack_ids)} msg(s): {e} "
+            f"— segue processando (pior caso: reentrega, ledger dedupa)"
+        )
+
+
+def _ack_em_blocos(subscriber, sub_path: str, ack_ids: List[str]) -> int:
+    """Confirma as mensagens em blocos de `_ACK_CHUNK`, devolvendo quantas confirmou.
+
+    Em bloco, e não tudo de uma vez, porque um `acknowledge` que falha no fim da
+    rodada joga fora o trabalho da rodada INTEIRA. Confirmando de 25 em 25, uma falha
+    custa 25 leads reprocessados, não 250.
+    """
+    n_ok = 0
+    for i in range(0, len(ack_ids), _ACK_CHUNK):
+        bloco = ack_ids[i:i + _ACK_CHUNK]
+        try:
+            subscriber.acknowledge(
+                request={"subscription": sub_path, "ack_ids": bloco}
+            )
+            n_ok += len(bloco)
+        except Exception as e:
+            logger.error(
+                f"[pubsub_branch] erro ack no bloco {i // _ACK_CHUNK + 1} "
+                f"({len(bloco)} ids): {e} — bloco será reentregue"
+            )
+    if n_ok < len(ack_ids):
+        logger.error(
+            f"[pubsub_branch] ack parcial: {n_ok}/{len(ack_ids)} confirmadas"
+        )
+    return n_ok
+
+
 def process_pending_pubsub(
     subscriber,
     conn,
@@ -500,7 +574,18 @@ def process_pending_pubsub(
     # backfill-de-retreino da Fase 4); resolvido 1x, igual pro batch inteiro.
     dual_by_eid: Dict[str, Dict] = {}
     _core_commit = os.environ.get("K_REVISION")
-    for _, payload, survey_dict, utm, enrich, _meta_elig in to_score:
+    # Lease renovado ANTES de começar e a cada `_ACK_CHUNK` leads: o scoring é a parte
+    # cara da rodada (medido em 0,73s/lead em 31/07/2026), então é aqui que o prazo
+    # estoura. Renovar durante o trabalho é o que substitui depender de um
+    # ackDeadline fixo grande o bastante — que ninguém consegue dimensionar sem saber
+    # se o pull vai trazer 8 ou 250 mensagens.
+    _todos_ack_ids = [a for a, _, _, _, _, _ in to_score]
+    _renovar_lease(subscriber, sub_path, _todos_ack_ids)
+
+    for _i, (_, payload, survey_dict, utm, enrich, _meta_elig) in enumerate(to_score):
+        if _i and _i % _ACK_CHUNK == 0:
+            # Só as que ainda faltam — as já scoreadas seguem no lease anterior.
+            _renovar_lease(subscriber, sub_path, _todos_ack_ids[_i:])
         eid = payload["eventId"]
         try:
             exp = score_lead_from_payload(payload, pipeline)
@@ -783,6 +868,7 @@ def process_pending_pubsub(
             _r.update(_dual)
 
     failed_acks: set = set()
+    n_acked = 0
     if not dry_run:
         for r, r_ack in pending_ledger:
             if target in ("dual", "cloudsql"):
@@ -807,15 +893,7 @@ def process_pending_pubsub(
         ack_ids = list(
             set(handled_ack_ids + error_ack_ids + duplicate_ack_ids) - failed_acks
         )
-        if ack_ids:
-            try:
-                subscriber.acknowledge(
-                    request={"subscription": sub_path, "ack_ids": ack_ids}
-                )
-            except Exception as e:
-                logger.error(
-                    f"[pubsub_branch] erro ack ({len(ack_ids)} ids): {e}"
-                )
+        n_acked = _ack_em_blocos(subscriber, sub_path, ack_ids)
 
     summary = {
         "processed": len(parsed),
@@ -831,6 +909,10 @@ def process_pending_pubsub(
         "ledger_target": target,
         "ledger_errors": n_ledger_err,
         "unacked_for_retry": len(failed_acks),
+        # Quantas mensagens o Pub/Sub confirmou de fato. Divergir de `processed` é o
+        # sintoma que faltava no incidente de 28-31/07/2026: lá processávamos 246 e
+        # confirmávamos 0, e nada no resumo dizia isso.
+        "acked": n_acked,
     }
     logger.info(f"📨 [pubsub_branch] {summary}")
     return summary
@@ -860,9 +942,17 @@ def drain_pending_pubsub(
     era isso que obrigava a drenar na mão.
 
     Para quando:
-      - uma rodada devolve 0 processadas (fila vazia) — o caso normal;
+      - `_DRAIN_EMPTY_PULLS` pulls consecutivos voltam sem mensagem (`sem_resposta`);
       - o tempo passa de `max_seconds` (deixa folga pro attemptDeadline do Scheduler);
       - bate `max_rounds` (rede contra publisher em loop).
+
+    ATENÇÃO ao nome `sem_resposta`: ele NÃO quer dizer fila vazia. O pull unário do
+    Pub/Sub devolve o que está disponível no instante da chamada, e volta vazio mesmo
+    com backlog — medido em 31/07/2026, quando o drain declarou fim de fila com 253
+    leads parados. Quem quiser saber o tamanho REAL da fila tem que perguntar pra
+    métrica `num_undelivered_messages` do Monitoring, não pro retorno do pull.
+    Por isso paramos só depois de `_DRAIN_EMPTY_PULLS` vazios seguidos, e mesmo assim
+    logando: um vazio isolado é rotina, três seguidos ainda é palpite, não certeza.
 
     Devolve a soma das rodadas, mais `rounds` e `drain_stop` dizendo POR QUE parou —
     sem isso, "processou 2.000" não distingue fila drenada de teto batido, que é
@@ -871,7 +961,8 @@ def drain_pending_pubsub(
     t0 = time.time()
     total: Dict = {}
     rounds = 0
-    stop = "fila_vazia"
+    empty_pulls = 0
+    stop = "sem_resposta"
 
     for _ in range(max_rounds):
         r = process_pending_pubsub(
@@ -886,8 +977,13 @@ def drain_pending_pubsub(
                 total.setdefault(k, v)
 
         if not r.get("processed"):
-            stop = "fila_vazia"
-            break
+            empty_pulls += 1
+            if empty_pulls >= _DRAIN_EMPTY_PULLS:
+                stop = "sem_resposta"
+                break
+        else:
+            # Veio mensagem: o silêncio anterior era do pull, não da fila.
+            empty_pulls = 0
         if time.time() - t0 >= max_seconds:
             # Não é erro: sobra pro próximo tick, que é o comportamento de sempre.
             stop = "teto_de_tempo"
@@ -897,12 +993,13 @@ def drain_pending_pubsub(
 
     total["rounds"] = rounds
     total["drain_stop"] = stop
+    total["empty_pulls"] = empty_pulls
     total["drain_seconds"] = round(time.time() - t0, 1)
     total["dry_run"] = dry_run
-    if stop != "fila_vazia":
-        logger.warning(
-            "[pubsub_branch] drenagem parou por %s após %d rodada(s)/%.0fs — sobrou fila "
-            "pro próximo tick (processadas=%s)",
-            stop, rounds, total["drain_seconds"], total.get("processed"),
-        )
+    logger.info(
+        "[pubsub_branch] drenagem parou por %s após %d rodada(s)/%.0fs "
+        "(processadas=%s, pulls vazios seguidos=%d) — `sem_resposta` NÃO garante fila "
+        "vazia; conferir num_undelivered_messages se houver suspeita de backlog",
+        stop, rounds, total["drain_seconds"], total.get("processed"), empty_pulls,
+    )
     return total

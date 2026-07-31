@@ -84,16 +84,33 @@ class ScoringExplanation:
 _pipeline_lock = threading.RLock()
 
 
-def _score_variant(pipeline, df_in, predictor, encoding_overrides):
-    """Scoreia UM lead por UMA variante: preprocess (com o encoding dela) +
-    predict + decil (pelos thresholds dela). Devolve `(lead_score, decil_int,
-    encoded_df)`.
+class LinhasPerdidasNoPreprocess(RuntimeError):
+    """O preprocess devolveu menos linhas do que recebeu — lead sumiu no caminho.
 
-    Primitivo ÚNICO do scoreamento por variante — consumido pelo caminho roteado
-    (o que vai pro CAPI) e pela avaliação dos dois modelos no mesmo lead. Serializa
-    o estado mutável do pipeline no `_pipeline_lock` (RLock reentrante), então pode
-    ser chamado 1..N vezes por lead sem corromper `self.data`.
+    Acontece porque `core/preprocessing.preprocess` faz `drop_duplicates(keep='first')`
+    sobre TODAS as colunas. Com 1 lead por chamada isso nunca aparece; scoreando em
+    lote, dois leads idênticos (mesmo e-mail, nome, telefone e data) colapsam num só.
+
+    Fail-loud de propósito: um lead que some silenciosamente é um lead que não é
+    scoreado, não vai pro CAPI e não entra no ledger, e ninguém descobre. Quem captura
+    esta exceção deve cair no caminho lead-a-lead, que é imune por construção.
     """
+
+
+def _score_variant_batch(pipeline, df_in, predictor, encoding_overrides):
+    """Scoreia N leads por UMA variante: preprocess + predict + decil, em UMA passada.
+
+    Primitivo ÚNICO do scoreamento por variante. `_score_variant` (1 lead) é um
+    wrapper fino sobre este — não existe lógica duplicada entre os dois caminhos.
+
+    Devolve `(scores, decis, encoded_df)`, com `scores`/`decis` na MESMA ORDEM das
+    linhas de `df_in`. Essa ordem é o contrato: quem chama casa resultado com lead
+    por posição, então qualquer linha perdida no meio corromperia o pareamento.
+    Daí o guard de contagem levantar em vez de seguir.
+
+    Serializa o estado mutável do pipeline no `_pipeline_lock` (RLock reentrante).
+    """
+    n_in = len(df_in)
     with _pipeline_lock:
         pipeline.data = df_in
         pipeline.original_data = df_in.copy()
@@ -104,10 +121,30 @@ def _score_variant(pipeline, df_in, predictor, encoding_overrides):
         result = pipeline.predict(predictor_override=predictor)
     if result is None or len(result) == 0:
         raise RuntimeError("pipeline retornou resultado vazio")
-    lead_score = float(result["lead_score"].iloc[0])
+    if len(result) != n_in or len(encoded_df) != n_in:
+        raise LinhasPerdidasNoPreprocess(
+            f"entraram {n_in} leads, saíram {len(result)} scores e "
+            f"{len(encoded_df)} linhas encodadas — pareamento por posição "
+            f"não é mais confiável"
+        )
     thresholds = predictor.metadata.get("decil_thresholds", {}).get("thresholds", {})
-    decil_str = atribuir_decil_por_threshold(lead_score, thresholds) if thresholds else "D05"
-    return lead_score, int(decil_str[1:]), encoded_df
+    scores = [float(v) for v in result["lead_score"].tolist()]
+    decis = [
+        int((atribuir_decil_por_threshold(s, thresholds) if thresholds else "D05")[1:])
+        for s in scores
+    ]
+    return scores, decis, encoded_df
+
+
+def _score_variant(pipeline, df_in, predictor, encoding_overrides):
+    """Scoreia UM lead por UMA variante. Wrapper fino sobre `_score_variant_batch`.
+
+    Mantido porque é o contrato que os consumidores existentes já usam; o miolo
+    mora no `_batch` para que o caminho de 1 lead e o de N leads não possam divergir.
+    """
+    scores, decis, encoded_df = _score_variant_batch(
+        pipeline, df_in, predictor, encoding_overrides)
+    return scores[0], decis[0], encoded_df
 
 
 def _variant_name(pipeline: LeadScoringPipeline, ab_variant) -> Optional[str]:

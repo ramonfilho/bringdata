@@ -289,7 +289,12 @@ class _FakePipeline:
     class _Cfg:
         class _Capi:
             utm_source_allowlist = ["facebook-ads"]
+        class _Utm:
+            # Fallback de utm_source pelo slug da LP (cap-meta→facebook-ads etc).
+            # None = desligado, que é o default de quem não opta pelo recurso.
+            source_from_url_slug = None
         capi = _Capi()
+        utm = _Utm()
         google_ads = GoogleAdsConfig()   # desligado (enabled=False) — canal Google inerte
         client_id = "devclub"
     _client_config = _Cfg()
@@ -367,7 +372,11 @@ def test_score_all_envia_google_e_grava_status():
         class _Cfg:
             class _Capi:
                 utm_source_allowlist = ["facebook-ads"]   # google-ads NÃO é Meta-elegível
+            class _Utm:
+                # Ver nota em _FakePipeline._Cfg._Utm — None = fallback desligado.
+                source_from_url_slug = None
             capi = _Capi()
+            utm = _Utm()
             google_ads = GoogleAdsConfig(
                 enabled=True, source_allowlist=["google-ads"],
                 customer_id="6266441811", login_customer_id="6351164315",
