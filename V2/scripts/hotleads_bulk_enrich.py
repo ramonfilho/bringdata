@@ -36,6 +36,8 @@ from src.data.analytics_connection import open_analytics_connection  # noqa: E40
 
 API = "https://developers.hotmart.com/send/api/v1/leadscoring/batch_enrich"
 BATCH = 1000
+MAX_TENTATIVAS = 5      # a API da Hotmart oscila: timeout e 500 sob volume
+ESPERA_BASE = 10        # segundos; dobra a cada tentativa (10, 20, 40, 80)
 
 
 def main() -> int:
@@ -123,22 +125,38 @@ def main() -> int:
             "utm": {"source": "", "campaign": "", "medium": "", "term": "", "content": ""},
         } for r in pedaco]
 
-        try:
-            resp = requests.post(
-                API, headers=headers,
-                json={"webhook": webhook, "leads": leads,
-                      "campaign": {"launch_date": "2026-08-04",
-                                   "expected_ticket": cfg.hotleads.expected_ticket,
-                                   "currency_code_type": cfg.hotleads.currency}},
-                timeout=90,
-            )
-        except Exception as e:
-            print(f"  lote {lote_n}: EXCEÇÃO {e} — parando para não martelar a API")
-            break
+        # A API da Hotmart oscila sob volume: numa passada deu read timeout,
+        # noutra HTTP 500 (internal_server_error). Tratar isso como fatal fazia
+        # o script morrer no lote 23 de 338 e exigir religar na mão. Agora
+        # reenvia o MESMO lote com espera progressiva; só desiste após
+        # MAX_TENTATIVAS seguidas, aí sim para pra não martelar.
+        resp = None
+        for tentativa in range(1, MAX_TENTATIVAS + 1):
+            try:
+                resp = requests.post(
+                    API, headers=headers,
+                    json={"webhook": webhook, "leads": leads,
+                          "campaign": {"launch_date": "2026-08-04",
+                                       "expected_ticket": cfg.hotleads.expected_ticket,
+                                       "currency_code_type": cfg.hotleads.currency}},
+                    timeout=120,
+                )
+                if resp.status_code in (200, 201):
+                    break
+                motivo = f"HTTP {resp.status_code}"
+            except Exception as e:
+                resp = None
+                motivo = f"{type(e).__name__}"
+            espera = ESPERA_BASE * (2 ** (tentativa - 1))
+            if tentativa < MAX_TENTATIVAS:
+                print(f"      {motivo} no lote {lote_n + 1} — tentativa "
+                      f"{tentativa}/{MAX_TENTATIVAS}, aguardando {espera}s")
+                time.sleep(espera)
 
         lote_n += 1
-        if resp.status_code not in (200, 201):
-            print(f"  lote {lote_n}: HTTP {resp.status_code} {resp.text[:200]} — parando")
+        if resp is None or resp.status_code not in (200, 201):
+            print(f"  lote {lote_n}: falhou {MAX_TENTATIVAS}x seguidas — parando. "
+                  f"Rode de novo depois; o script retoma de onde parou.")
             break
 
         enviados += len(leads)
