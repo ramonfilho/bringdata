@@ -21,3 +21,7 @@ gh pr create --repo ramonfilho/bringdata --base main --head "$branch" --fill
 
 echo ""
 echo "✅ PR aberto para $branch."
+echo ""
+echo "ℹ️  Ao mergear o PR, feche esta sala pra não acumular:"
+echo "      bash scripts/worktree-janitor.sh            # dry-run (mostra o que faria)"
+echo "      bash scripts/worktree-janitor.sh --apply    # remove worktrees + branches locais já na main"
