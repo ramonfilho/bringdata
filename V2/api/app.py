@@ -3003,7 +3003,7 @@ async def daily_monitoring_check_railway(
             # Mesmo sem leads na Lead antiga (morta desde 2026-05-17), os
             # sumários novos (ledger novo e logs T1-16) têm vida própria.
             # Composição local: abre conn pg8000 → repo registros_ml → calcula.
-            _ps_early, _td_early = None, None
+            _ps_early, _td_early, _hl_early = None, None, None
             try:
                 from src.data import compose_repository
                 from src.data.ledger_connection import open_ledger_read_connection
@@ -3018,6 +3018,14 @@ async def daily_monitoring_check_railway(
                     try: _early_conn.close()
                     except Exception: pass
                 _td_early = compute_training_drift_summary()
+                # HotLeads: cron proprio, vida independente do fluxo de scoring.
+                # Justamente no dia sem lead scoreado e que importa saber se ele
+                # segue vivo — por isso entra tambem neste retorno antecipado.
+                from src.monitoring.hotleads_summary import compute_hotleads_summary
+                _hl_early = compute_hotleads_summary(
+                    source_allowlist=(pipeline._client_config.capi.utm_source_allowlist or None)
+                    if pipeline else None
+                )
             except Exception as _e:
                 logger.warning(f"⚠️ early-return: falha calculando sumários top-level: {_e}")
             return DailyCheckResponse(
@@ -3029,6 +3037,7 @@ async def daily_monitoring_check_railway(
                 timestamp=datetime.now().isoformat(),
                 pubsub_24h_summary=_ps_early,
                 training_drift_24h_summary=_td_early,
+                hotleads_24h_summary=_hl_early,
             )
 
         logger.info(f"🔍 Railway monitoring: {len(scored_rows)} leads com score — {window_label}")
@@ -4149,6 +4158,7 @@ async def daily_monitoring_check_railway(
             launch_resolution=launch_resolution_payload,
             pubsub_24h_summary=result.get('pubsub_24h_summary'),
             training_drift_24h_summary=result.get('training_drift_24h_summary'),
+            hotleads_24h_summary=result.get('hotleads_24h_summary'),
         )
 
     except FileNotFoundError as e:
@@ -4964,6 +4974,7 @@ async def daily_monitoring_check(
             operational_routines=result.get('operational_routines'),
             pubsub_24h_summary=result.get('pubsub_24h_summary'),
             training_drift_24h_summary=result.get('training_drift_24h_summary'),
+            hotleads_24h_summary=result.get('hotleads_24h_summary'),
         )
 
     except FileNotFoundError as e:
