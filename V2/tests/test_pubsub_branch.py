@@ -262,16 +262,24 @@ class _FakeResponse:
 
 
 class _FakeSubscriber:
-    """Mock mínimo do SubscriberClient — só registra pulls e acks."""
+    """Mock mínimo do SubscriberClient — registra pulls, acks e renovações de lease."""
     def __init__(self, received):
         self._received = received
         self.acked: list = []
+        self.leases_renovados: list = []
 
     def pull(self, request, timeout):  # noqa: ARG002
         return _FakeResponse(self._received)
 
     def acknowledge(self, request):
         self.acked.extend(request["ack_ids"])
+
+    def modify_ack_deadline(self, request):
+        """Renovação de lease (incidente 28-31/07/2026). Precisa existir aqui: sem
+        o método, o código real cai no except e o teste passaria por acidente,
+        exercitando o caminho degradado em vez do normal."""
+        self.leases_renovados.append(
+            (list(request["ack_ids"]), request["ack_deadline_seconds"]))
 
 
 class _FakeConn:
@@ -298,6 +306,12 @@ class _FakePipeline:
         google_ads = GoogleAdsConfig()   # desligado (enabled=False) — canal Google inerte
         client_id = "devclub"
     _client_config = _Cfg()
+
+    def get_ab_variant(self, utm, event_source_url=None):  # noqa: ARG002
+        """Lead fora do A/B. Necessário desde que o consumidor passou a scorear
+        todo lead com has_computer (SCORE_ALL_LEADS=true), que é o caminho onde
+        a variante é resolvida depois do scoring."""
+        return None
 
 
 def test_dedup_in_batch_dispara_capi_uma_vez():
@@ -476,6 +490,92 @@ def _processa_um_lead(target: str, railway_conn, ledger_conn):
             ledger_conn=ledger_conn,
         )
     return sub, summary
+
+
+# ---------------------------------------------------------------------------
+# Scoring em lote (SCORING_EM_LOTE) — incidente 28-31/07/2026
+# ---------------------------------------------------------------------------
+
+class _ExpFake:
+    """ScoringExplanation mínimo — só os campos que o consumidor lê."""
+    lead_score = 0.91
+    decil = 10
+    variant = "challenger_abr28"
+    lead_score_calibrated = None
+    score_champion = 0.30
+    decil_champion = 4
+    score_challenger = 0.91
+    decil_challenger = 10
+    champion_run_id = "d51757f5"
+    challenger_run_id = "5d158f0a"
+
+
+def _processa_com_lote(env_valor, fake_lote):
+    """Roda uma mensagem com SCORE_ALL_LEADS=true, trocando a função de lote."""
+    import api.pubsub_branch as pb
+    import src.scoring.service as svc
+    raw = json.dumps(PAYLOAD_REAL).encode("utf-8")
+    sub = _FakeSubscriber([_FakeReceived("ack-1", _FakeMessage(raw, "msg-1"))])
+    conn = _FakeConn()
+
+    chamou_individual = {"n": 0}
+    def _fake_individual(p, pipeline):  # noqa: ARG001
+        chamou_individual["n"] += 1
+        return _ExpFake()
+
+    _orig_ind = pb.score_lead_from_payload
+    _orig_lote = svc.score_leads_from_payloads
+    pb.score_lead_from_payload = _fake_individual
+    svc.score_leads_from_payloads = fake_lote
+    try:
+        with _EnvGuard(SCORE_ALL_LEADS="true", SCORING_EM_LOTE=env_valor):
+            summary = pb.process_pending_pubsub(
+                sub, conn, _FakePipeline(), dry_run=False)
+    finally:
+        pb.score_lead_from_payload = _orig_ind
+        svc.score_leads_from_payloads = _orig_lote
+    return sub, summary, chamou_individual["n"]
+
+
+def test_scoring_em_lote_desligado_usa_caminho_individual():
+    """Default OFF: deploy não liga. O lote nem é chamado."""
+    chamadas = {"n": 0}
+    def _lote(payloads, pipeline):  # noqa: ARG001
+        chamadas["n"] += 1
+        return [_ExpFake() for _ in payloads]
+
+    _, summary, n_ind = _processa_com_lote("false", _lote)
+    assert chamadas["n"] == 0, "lote não devia ser chamado com a flag off"
+    assert n_ind == 1, "devia ter scoreado lead a lead"
+    assert summary["processed"] == 1, summary
+
+
+def test_scoring_em_lote_ligado_nao_chama_individual():
+    """Com a flag on, o lote resolve tudo e o caminho individual não é tocado."""
+    def _lote(payloads, pipeline):  # noqa: ARG001
+        return [_ExpFake() for _ in payloads]
+
+    sub, summary, n_ind = _processa_com_lote("true", _lote)
+    assert n_ind == 0, "com lote ligado, não devia chamar o individual"
+    assert summary["processed"] == 1, summary
+    assert sub.acked == ["ack-1"], sub.acked
+
+
+def test_scoring_em_lote_falha_cai_pro_individual_sem_perder_lead():
+    """Lote quebrado NÃO pode custar lead: a rodada cai pro caminho de sempre.
+
+    É a garantia que torna seguro ligar a flag em produção — inclusive para
+    `LinhasPerdidasNoPreprocess`, quando o drop_duplicates do preprocess colapsa
+    dois leads idênticos no mesmo lote.
+    """
+    def _lote_quebrado(payloads, pipeline):  # noqa: ARG001
+        raise RuntimeError("preprocess explodiu")
+
+    sub, summary, n_ind = _processa_com_lote("true", _lote_quebrado)
+    assert n_ind == 1, "devia ter caído pro individual"
+    assert summary["processed"] == 1, summary
+    assert summary["errors"] == 0, summary
+    assert sub.acked == ["ack-1"], sub.acked
 
 
 def test_ledger_target_parsing():
