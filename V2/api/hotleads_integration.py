@@ -308,8 +308,42 @@ def parse_webhook(body: Dict) -> Tuple[Optional[str], List[Dict]]:
             hot = int(lead.get("score") or 0) == 1
         except (TypeError, ValueError):
             hot = False
-        out.append({"event_id": event_id, "hot": hot})
+        out.append({"event_id": event_id, "hot": hot,
+                    "email": (lead.get("email") or "").strip().lower()})
     return execution_id, out
+
+
+# Rótulo que marca lead do ENRIQUECIMENTO EM LOTE da base histórica. Esses não
+# são leads correntes: não têm `event_id`, não entram no ciclo do ledger e NÃO
+# geram evento no pixel (seriam recusados pela regra dos 7 dias do Meta de
+# qualquer forma). Vão para `analytics.hotleads_seal`, por email.
+BULK_LABEL = "bulk"
+
+
+def store_bulk_seals(conn, seals: List[Dict], execution_id: Optional[str] = None) -> int:
+    """Grava selos do enriquecimento histórico (upsert por email).
+
+    Sobrescreve `hot`/`sealed_at` num re-enriquecimento de propósito: o selo é um
+    retrato datado, e o retrato mais novo é o que vale.
+    """
+    n = 0
+    for s in seals:
+        email = (s.get("email") or "").strip().lower()
+        if not email:
+            continue
+        conn.run(
+            """
+            INSERT INTO analytics.hotleads_seal (email, hot, sealed_at, execution_id)
+            VALUES (:email, :hot, NOW(), :exec_id)
+            ON CONFLICT (email) DO UPDATE
+              SET hot = EXCLUDED.hot,
+                  sealed_at = EXCLUDED.sealed_at,
+                  execution_id = EXCLUDED.execution_id
+            """,
+            email=email, hot=bool(s.get("hot")), exec_id=execution_id,
+        )
+        n += 1
+    return n
 
 
 # =============================================================================
@@ -539,6 +573,26 @@ def run_process_webhook(conn, client_config: ClientConfig, body: Dict,
         return {"status": "disabled", "received": 0}
 
     execution_id, seals = parse_webhook(body)
+
+    # Lote HISTÓRICO: só persiste o selo por email. Nunca dispara evento — são
+    # leads antigos, fora da janela do Meta, e o objetivo é medir/segmentar.
+    bulk = [s for s in seals if s.get("event_id") == BULK_LABEL]
+    if bulk:
+        from src.data.analytics_connection import open_analytics_connection
+        aconn = open_analytics_connection()
+        try:
+            gravados = store_bulk_seals(aconn, bulk, execution_id)
+        finally:
+            try:
+                aconn.close()
+            except Exception:
+                pass
+        logger.info(f"[hotleads] lote historico execution_id={execution_id} | "
+                    f"{gravados} selos gravados ({sum(1 for b in bulk if b['hot'])} quentes)")
+        return {"status": "ok", "execution_id": execution_id, "bulk": True,
+                "received": len(bulk), "gravados": gravados,
+                "hot": sum(1 for b in bulk if b["hot"])}
+
     stats = {"received": len(seals), "hot": 0, "cold": 0,
              "sent": 0, "skipped": 0, "errors": 0}
 
