@@ -91,33 +91,37 @@ def main() -> int:
         return 1
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
+    # Carrega a lista de pendentes UMA VEZ e itera sobre ela.
+    #
+    # ⚠️ Não dá pra reconsultar "quem ainda não tem selo" a cada lote: o selo só
+    # volta pelo webhook ~2 min depois, e o laço avança em segundos. Reconsultar
+    # devolveria os MESMOS emails e o script remoeria o primeiro bloco pra
+    # sempre — foi exatamente o que aconteceu no teste de 2.000 (os 2 lotes
+    # voltaram idênticos, 986 selos e 92 quentes nos dois). A consulta inicial
+    # já exclui quem tem selo, então a retomada entre execuções segue valendo.
+    todos = conn.run(
+        """
+        SELECT lower(l.email), MAX(l.phone)
+        FROM analytics.leads l
+        LEFT JOIN analytics.hotleads_seal s ON s.email = lower(l.email)
+        WHERE l.email IS NOT NULL AND l.email <> '' AND s.email IS NULL
+        GROUP BY lower(l.email)
+        LIMIT :n
+        """,
+        n=alvo,
+    )
+    print(f"carregados  : {len(todos):,} emails distintos\n")
+
     enviados = 0
     lote_n = 0
-    while enviados < alvo:
-        # Relê a cada volta: o webhook vai gravando selos em paralelo, então a
-        # consulta naturalmente encolhe e nunca reenvia o que já voltou.
-        restante = min(BATCH, alvo - enviados)
-        rows = conn.run(
-            """
-            SELECT DISTINCT lower(l.email), MAX(l.phone)
-            FROM analytics.leads l
-            LEFT JOIN analytics.hotleads_seal s ON s.email = lower(l.email)
-            WHERE l.email IS NOT NULL AND l.email <> '' AND s.email IS NULL
-            GROUP BY lower(l.email)
-            LIMIT :n
-            """,
-            n=restante,
-        )
-        if not rows:
-            print("sem mais pendentes.")
-            break
-
+    for i in range(0, len(todos), BATCH):
+        pedaco = todos[i:i + BATCH]
         leads = [{
             "custom_label": "bulk",
             "email": r[0],
             "phone": str(r[1] or ""),
             "utm": {"source": "", "campaign": "", "medium": "", "term": "", "content": ""},
-        } for r in rows]
+        } for r in pedaco]
 
         try:
             resp = requests.post(
@@ -138,8 +142,8 @@ def main() -> int:
             break
 
         enviados += len(leads)
-        print(f"  lote {lote_n:3d}: {len(leads):4d} enviados "
-              f"({enviados:,}/{alvo:,}) exec={resp.json().get('executionId','?')[:8]}")
+        print(f"  lote {lote_n:3d}/{-(-len(todos)//BATCH)}: {len(leads):4d} enviados "
+              f"({enviados:,}/{len(todos):,}) exec={resp.json().get('executionId','?')[:8]}")
         time.sleep(args.sleep)
 
     print(f"\nsubmetidos nesta execução: {enviados:,}")
