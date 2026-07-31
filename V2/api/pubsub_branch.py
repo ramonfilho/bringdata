@@ -108,6 +108,25 @@ def is_enabled() -> bool:
     return os.environ.get("PUBSUB_CAPI_ENABLED", "false").strip().lower() == "true"
 
 
+def scoring_em_lote() -> bool:
+    """Scoreia a rodada inteira numa passada, em vez de lead a lead.
+
+    Off por padrão: deploy NÃO liga. Flip em ~2min via
+    `gcloud run services update --update-env-vars SCORING_EM_LOTE=true`.
+
+    Por que existe: medido em produção 31/07/2026, o caminho lead-a-lead custa
+    0,73s por lead e dava teto de ~96 leads/h contra cadastro normal de ~80/h.
+    Foi essa margem de 15% que transformou uma hora de pico em três dias de fila.
+    Em bancada contra 400 leads reais o lote saiu 97x mais rápido no pacote
+    completo, com score, decil, variante e run_ids idênticos.
+
+    Ligar é seguro por construção: se o lote falhar por qualquer motivo, a rodada
+    cai sozinha no caminho lead-a-lead (ver `process_pending_pubsub`). Critério de
+    remoção da flag: 7-14 dias sem divergência de decil no relatório.
+    """
+    return os.environ.get("SCORING_EM_LOTE", "false").strip().lower() == "true"
+
+
 def score_all_leads() -> bool:
     """Desacoplamento scoring × Meta CAPI.
 
@@ -582,13 +601,44 @@ def process_pending_pubsub(
     _todos_ack_ids = [a for a, _, _, _, _, _ in to_score]
     _renovar_lease(subscriber, sub_path, _todos_ack_ids)
 
+    # Scoring em lote (atrás de env): uma passada de preprocess+predict por variante
+    # em vez de uma por lead. O resultado entra num dict por event_id e o laço abaixo
+    # continua IDÊNTICO — só muda de onde o `exp` vem. Manter o laço intacto é o que
+    # permite cair no caminho antigo sem código paralelo.
+    #
+    # Falha aqui NÃO derruba a rodada: cai pro lead-a-lead, que é o comportamento de
+    # sempre. Vale para qualquer motivo, inclusive `LinhasPerdidasNoPreprocess` (o
+    # drop_duplicates do preprocess colapsando dois leads idênticos no mesmo lote).
+    _exp_por_eid: Dict[str, object] = {}
+    if scoring_em_lote() and to_score:
+        _payloads_lote = [p for _, p, _, _, _, _ in to_score]
+        try:
+            from src.scoring.service import score_leads_from_payloads
+            _t_lote = time.time()
+            _exps = score_leads_from_payloads(_payloads_lote, pipeline)
+            _exp_por_eid = {
+                p["eventId"]: e for p, e in zip(_payloads_lote, _exps)
+            }
+            logger.info(
+                "[pubsub_branch] scoring em lote: %d leads em %.2fs (%.1f ms/lead)",
+                len(_exps), time.time() - _t_lote,
+                (time.time() - _t_lote) * 1000 / max(len(_exps), 1),
+            )
+        except Exception as e:
+            logger.warning(
+                "[pubsub_branch] scoring em lote falhou (%s: %s) — rodada cai pro "
+                "caminho lead-a-lead, sem perda", type(e).__name__, e
+            )
+            _exp_por_eid = {}
+
     for _i, (_, payload, survey_dict, utm, enrich, _meta_elig) in enumerate(to_score):
         if _i and _i % _ACK_CHUNK == 0:
             # Só as que ainda faltam — as já scoreadas seguem no lease anterior.
             _renovar_lease(subscriber, sub_path, _todos_ack_ids[_i:])
         eid = payload["eventId"]
         try:
-            exp = score_lead_from_payload(payload, pipeline)
+            # Dict vazio (lote desligado ou falhou) → caminho de sempre, lead a lead.
+            exp = _exp_por_eid.get(eid) or score_lead_from_payload(payload, pipeline)
         except Exception as e:
             n_err += 1
             logger.warning(f"[pubsub_branch] erro score {eid}: {e}")

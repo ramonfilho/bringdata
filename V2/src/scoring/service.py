@@ -22,7 +22,7 @@ canônica usada por treino, monitoramento e jobs batch).
 """
 import threading
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -54,6 +54,20 @@ class ScoringExplanation:
 
     # Vetor encodado: 52 colunas alinhadas com `feature_registry.json` do modelo.
     # Cada valor é 0/1 (binárias e OHE) ou float (numéricas como `nome_comprimento`).
+    #
+    # ATENÇÃO ao scorear em LOTE (`score_leads_from_payloads` com N>1): o conjunto de
+    # CHAVES depende de quem mais estava no lote. O one-hot cria uma coluna por
+    # categoria presente no DataFrame, então um lead pode vir com colunas de
+    # categorias que são de OUTRO lead (valor 0, porque ele não tem aquela
+    # categoria). Os VALORES das colunas em comum são idênticos ao caminho de 1
+    # lead — verificado em 400 leads reais por scripts/validar_scoring_em_lote.py —
+    # e o score não muda, porque o alinhamento com o feature_registry descarta o
+    # excedente e preenche o que falta com 0 antes de chegar no modelo.
+    #
+    # Quem consome este campo (endpoint /explain e auditar_integridade_pipeline)
+    # chama pelo caminho de 1 lead, onde o comportamento é o de sempre. Se algum dia
+    # alguém auditar a partir do lote, precisa saber que a AUSÊNCIA de uma chave aqui
+    # não significa que a feature não existe para o modelo.
     encoded_features: Dict[str, float]
 
     # Resultado da inferência.
@@ -157,19 +171,15 @@ def _variant_name(pipeline: LeadScoringPipeline, ab_variant) -> Optional[str]:
     )
 
 
-def score_lead_from_payload(
-    payload: Dict,
-    pipeline: LeadScoringPipeline,
-) -> ScoringExplanation:
-    """Pega um payload Pub/Sub e devolve o pacote completo de scoring.
+def _contexto_do_lead(payload: Dict, pipeline: LeadScoringPipeline) -> Dict:
+    """Tudo que se resolve por lead ANTES de encostar no modelo.
 
-    Não acessa banco. Não envia CAPI. Não persiste nada. Função stateless do
-    ponto de vista do chamador — qualquer estado mutável fica protegido pelo
-    lock interno.
+    Normalização, montagem da linha e escolha de predictor/encoding são row-wise e
+    baratas — o custo do scoring está no preprocess+predict, não aqui. Isolar este
+    pedaço é o que permite o caminho de 1 lead e o de N leads compartilharem
+    exatamente a mesma resolução de variante, sem lógica duplicada.
 
-    Pode levantar:
-      - `ValueError` se o payload tiver slug fora do vocabulário.
-      - `RuntimeError` se o pipeline retornar resultado vazio.
+    Levanta `ValueError` se o payload tiver slug fora do vocabulário.
     """
     # 1. Normalizar payload → dicts no vocabulário interno (PT-Long).
     survey_dict = payload_to_survey_dict(payload)
@@ -213,65 +223,150 @@ def score_lead_from_payload(
         ) if base_run_id else None
         encoding_overrides = vcfg.encoding_overrides if vcfg else None
 
-    # 4-5. Scoring. O primitivo `_score_variant` faz preprocess+predict+decil por
-    # variante (serializado no lock). O ROTEADO é o que vai pro CAPI — comportamento
-    # idêntico ao de antes (mesmo predictor, mesmo encoding, mesmos thresholds).
-    df_in = pd.DataFrame([dataframe_row])
-    lead_score, decil, encoded_df = _score_variant(pipeline, df_in, predictor, encoding_overrides)
-    encoded_features = (
-        {k: _to_python_scalar(v) for k, v in encoded_df.iloc[0].to_dict().items()}
-        if len(encoded_df) > 0 else {}
-    )
+    return {
+        "survey_dict": survey_dict,
+        "dataframe_row": dataframe_row,
+        "variant_name": variant_name,
+        "predictor": predictor,
+        "encoding_overrides": encoding_overrides,
+        "routed_run": getattr(predictor, "mlflow_run_id", None),
+    }
 
-    # Bloco F — score calibrado pra fórmula ROAS V1 (roteado only). Reusa o
-    # `encoded_df` do roteado (52 features alinhadas) — não repreprocessa. Modelos
-    # calibrados são bit-idênticos aos parents + `calibrator.pkl` → mesmo feature_registry.
-    lead_score_calibrated: Optional[float] = None
-    calibrated_predictor = pipeline.get_variant_calibrated_predictor(variant_name) if variant_name else None
-    if calibrated_predictor is not None:
-        calib_proba = calibrated_predictor.predict_proba(encoded_df)
-        if calib_proba is not None and len(calib_proba) > 0:
-            lead_score_calibrated = float(calib_proba[0])
 
-    # 6. Régua no ledger: decil pelos DOIS modelos (champion + challenger). O
-    # roteado já foi scoreado → reusa; só o OUTRO papel precisa de 1 predict extra.
-    # Degrada p/ None se o A/B não resolve os dois papéis (colunas do ledger nulas).
-    sc_champ = dc_champ = sc_chall = dc_chall = None
-    champ_run = chall_run = None
+def score_leads_from_payloads(
+    payloads: List[Dict],
+    pipeline: LeadScoringPipeline,
+) -> List[ScoringExplanation]:
+    """Scoreia N leads com UMA passada de preprocess+predict por variante.
+
+    É aqui que mora a lógica; `score_lead_from_payload` é o caso N=1. A ordem da
+    saída casa com a da entrada.
+
+    POR QUE EM LOTE: medido em produção (31/07/2026), o caminho de 1 lead custa
+    0,73s, porque paga o overhead de montar DataFrame, preprocessar e chamar o
+    modelo uma vez POR LEAD, 2 a 3 vezes cada. Esse overhead é praticamente fixo:
+    250 leads numa passada custam quase o mesmo que 1. Em bancada contra 400 leads
+    reais, o ganho foi de 188x (champion) e 240x (challenger), com score e decil
+    idênticos aos do caminho individual.
+
+    O que continua sendo POR LEAD (barato, row-wise): normalização, montagem da
+    linha e resolução da variante A/B. O que virou por GRUPO: preprocess+predict.
+    Leads que resolvem variantes diferentes vão em grupos diferentes, porque cada
+    variante tem seu predictor e seu encoding — misturar produziria encoding errado.
+
+    Levanta `ValueError` se ALGUM payload tiver slug fora do vocabulário: quem
+    chama deve filtrar antes, ou usar o singular por lead para isolar o culpado.
+    """
+    if not payloads:
+        return []
+
+    ctxs = [_contexto_do_lead(p, pipeline) for p in payloads]
+    df_todos = pd.DataFrame([c["dataframe_row"] for c in ctxs])
     papeis = resolve_champion_challenger(pipeline)
-    if papeis:
-        routed_run = getattr(predictor, "mlflow_run_id", None)
 
-        def _score_papel(info):
-            if info["run_id"] == routed_run:
-                return lead_score, decil  # roteado já scoreado — reusa
-            s, d, _ = _score_variant(
-                pipeline, df_in,
-                pipeline.get_variant_predictor(info["variant_name"]),
-                info["encoding_overrides"],
-            )
-            return s, d
+    # Um grupo por variante roteada: leads que compartilham predictor E encoding
+    # podem ser preprocessados juntos. `variant_name=None` (fora do A/B) é um
+    # grupo legítimo, com o predictor base.
+    grupos: Dict[Any, List[int]] = {}
+    for i, c in enumerate(ctxs):
+        grupos.setdefault(c["variant_name"], []).append(i)
 
-        sc_champ, dc_champ = _score_papel(papeis["champion"])
-        sc_chall, dc_chall = _score_papel(papeis["challenger"])
-        champ_run = papeis["champion"]["run_id"]
-        chall_run = papeis["challenger"]["run_id"]
+    # Resultado do ROTEADO (o que vai pro CAPI), por lead.
+    scores: List[Optional[float]] = [None] * len(ctxs)
+    decis: List[Optional[int]] = [None] * len(ctxs)
+    calibrados: List[Optional[float]] = [None] * len(ctxs)
+    encodadas: List[Dict[str, float]] = [{} for _ in ctxs]
 
-    return ScoringExplanation(
-        payload_normalizado=survey_dict,
-        dataframe_row=dataframe_row,
-        encoded_features=encoded_features,
-        lead_score=lead_score,
-        decil=decil,
-        variant=variant_name,
-        lead_score_calibrated=lead_score_calibrated,
-        score_champion=sc_champ,
-        decil_champion=dc_champ,
-        score_challenger=sc_chall,
-        decil_challenger=dc_chall,
-        champion_run_id=champ_run,
-        challenger_run_id=chall_run,
-    )
+    for variant_name, idxs in grupos.items():
+        c0 = ctxs[idxs[0]]
+        sc, dc, enc = _score_variant_batch(
+            pipeline, df_todos.iloc[idxs].reset_index(drop=True),
+            c0["predictor"], c0["encoding_overrides"],
+        )
+        for pos, i in enumerate(idxs):
+            scores[i] = sc[pos]
+            decis[i] = dc[pos]
+            encodadas[i] = {
+                k: _to_python_scalar(v) for k, v in enc.iloc[pos].to_dict().items()
+            }
+        # Bloco F — calibrado do roteado. `predict_proba` já é vetorizado, então o
+        # lote inteiro do grupo sai numa chamada, reusando o `enc` (sem repreprocessar).
+        calib_pred = (
+            pipeline.get_variant_calibrated_predictor(variant_name)
+            if variant_name else None
+        )
+        if calib_pred is not None:
+            proba = calib_pred.predict_proba(enc)
+            if proba is not None and len(proba) == len(idxs):
+                for pos, i in enumerate(idxs):
+                    calibrados[i] = float(proba[pos])
+
+    # Régua no ledger: decil pelos DOIS papéis. Quem já foi scoreado como roteado
+    # reusa; o resto entra numa passada única por papel sobre os leads que faltam.
+    por_papel: Dict[str, List[Optional[float]]] = {}
+    for papel in ("champion", "challenger"):
+        s_papel: List[Optional[float]] = [None] * len(ctxs)
+        d_papel: List[Optional[int]] = [None] * len(ctxs)
+        if papeis:
+            info = papeis[papel]
+            faltam = [
+                i for i, c in enumerate(ctxs) if c["routed_run"] != info["run_id"]
+            ]
+            for i, c in enumerate(ctxs):
+                if c["routed_run"] == info["run_id"]:
+                    s_papel[i], d_papel[i] = scores[i], decis[i]
+            if faltam:
+                sc, dc, _ = _score_variant_batch(
+                    pipeline, df_todos.iloc[faltam].reset_index(drop=True),
+                    pipeline.get_variant_predictor(info["variant_name"]),
+                    info["encoding_overrides"],
+                )
+                for pos, i in enumerate(faltam):
+                    s_papel[i], d_papel[i] = sc[pos], dc[pos]
+        por_papel[f"s_{papel}"] = s_papel
+        por_papel[f"d_{papel}"] = d_papel
+
+    champ_run = papeis["champion"]["run_id"] if papeis else None
+    chall_run = papeis["challenger"]["run_id"] if papeis else None
+
+    return [
+        ScoringExplanation(
+            payload_normalizado=c["survey_dict"],
+            dataframe_row=c["dataframe_row"],
+            encoded_features=encodadas[i],
+            lead_score=scores[i],
+            decil=decis[i],
+            variant=c["variant_name"],
+            lead_score_calibrated=calibrados[i],
+            score_champion=por_papel["s_champion"][i],
+            decil_champion=por_papel["d_champion"][i],
+            score_challenger=por_papel["s_challenger"][i],
+            decil_challenger=por_papel["d_challenger"][i],
+            champion_run_id=champ_run if papeis else None,
+            challenger_run_id=chall_run if papeis else None,
+        )
+        for i, c in enumerate(ctxs)
+    ]
+
+
+def score_lead_from_payload(
+    payload: Dict,
+    pipeline: LeadScoringPipeline,
+) -> ScoringExplanation:
+    """Pega um payload Pub/Sub e devolve o pacote completo de scoring.
+
+    Wrapper de `score_leads_from_payloads` com N=1 — o miolo é um só, então o
+    caminho de 1 lead e o de N leads não podem divergir com o tempo.
+
+    Não acessa banco. Não envia CAPI. Não persiste nada. Função stateless do
+    ponto de vista do chamador — qualquer estado mutável fica protegido pelo
+    lock interno.
+
+    Pode levantar:
+      - `ValueError` se o payload tiver slug fora do vocabulário.
+      - `RuntimeError` se o pipeline retornar resultado vazio.
+    """
+    return score_leads_from_payloads([payload], pipeline)[0]
 
 
 def _to_python_scalar(v):

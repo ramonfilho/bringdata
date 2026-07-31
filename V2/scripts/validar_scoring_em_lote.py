@@ -69,6 +69,8 @@ from src.scoring.service import (
     _score_variant,
     _score_variant_batch,
     payload_from_record,
+    score_lead_from_payload,
+    score_leads_from_payloads,
 )
 from src.scoring.variants import resolve_champion_challenger
 from api.survey_mapping import survey_lead_to_sheets_row
@@ -203,6 +205,94 @@ def main() -> int:
             falhas.append(f"{papel_nome}: {div_decil} decis divergentes")
         if div_score:
             falhas.append(f"{papel_nome}: {div_score} scores fora da tolerância")
+
+    # ------------------------------------------------------------------
+    # Prova END-TO-END: o pacote completo (`ScoringExplanation`), não só o
+    # primitivo. É o que o consumidor Pub/Sub realmente consome — inclui decil
+    # dos dois papéis, score calibrado e variante roteada. Um primitivo correto
+    # com um agrupamento errado passaria no teste de cima e falharia aqui.
+    # ------------------------------------------------------------------
+    print("--- pacote completo (ScoringExplanation) ---")
+    payloads = [payload_from_record(l) for l in leads]
+    payloads = [p for p in payloads if _linha_do_lead(p, pipeline) is not None]
+
+    t0 = time.time()
+    individuais = [score_lead_from_payload(p, pipeline) for p in payloads]
+    t_ind = time.time() - t0
+
+    t0 = time.time()
+    em_lote = score_leads_from_payloads(payloads, pipeline)
+    t_lote = time.time() - t0
+
+    CAMPOS_EXATOS = ('decil', 'decil_champion', 'decil_challenger', 'variant',
+                     'champion_run_id', 'challenger_run_id')
+    CAMPOS_FLOAT = ('lead_score', 'score_champion', 'score_challenger',
+                    'lead_score_calibrated')
+    div_campo = {}
+    colunas_extras_lote = set()
+    for i, (a, b) in enumerate(zip(individuais, em_lote)):
+        for campo in CAMPOS_EXATOS:
+            if getattr(a, campo) != getattr(b, campo):
+                div_campo[campo] = div_campo.get(campo, 0) + 1
+                if div_campo[campo] <= 2:
+                    print(f"  !! {campo} difere em {ids[i]}: "
+                          f"individual={getattr(a, campo)!r} lote={getattr(b, campo)!r}")
+        for campo in CAMPOS_FLOAT:
+            va, vb = getattr(a, campo), getattr(b, campo)
+            if (va is None) != (vb is None):
+                div_campo[campo] = div_campo.get(campo, 0) + 1
+                continue
+            if va is not None and abs(va - vb) > args.tol:
+                div_campo[campo] = div_campo.get(campo, 0) + 1
+                if div_campo[campo] <= 2:
+                    print(f"  !! {campo} difere em {ids[i]}: "
+                          f"individual={va!r} lote={vb!r}")
+        # encoded_features: o que FALHA é valor divergente numa chave comum. Chave a
+        # mais no lote é esperado e inofensivo — o one-hot cria uma coluna por
+        # categoria presente no DataFrame, então o lote traz categorias de outros
+        # leads (com valor 0 para este). O alinhamento com o feature_registry
+        # descarta o excedente antes do modelo, e é por isso que o score não muda.
+        # Comparar os dicts com `!=` reprovaria por diferença de composição, não de
+        # conteúdo, e mascararia o que realmente importa.
+        comuns = set(a.encoded_features) & set(b.encoded_features)
+        divergentes = [
+            k for k in comuns if a.encoded_features[k] != b.encoded_features[k]
+        ]
+        if divergentes:
+            div_campo['encoded_features'] = div_campo.get('encoded_features', 0) + 1
+            if div_campo['encoded_features'] <= 2:
+                k = divergentes[0]
+                print(f"  !! encoded_features[{k}] difere em {ids[i]}: "
+                      f"individual={a.encoded_features[k]!r} "
+                      f"lote={b.encoded_features[k]!r}")
+        extras = set(b.encoded_features) - set(a.encoded_features)
+        if extras:
+            colunas_extras_lote.update(extras)
+        faltantes = set(a.encoded_features) - set(b.encoded_features)
+        if faltantes:
+            # Este caso NÃO é benigno: chave que existe no individual e some no lote
+            # significaria feature perdida, não categoria emprestada de outro lead.
+            div_campo['encoded_features_faltante'] = (
+                div_campo.get('encoded_features_faltante', 0) + 1)
+
+    print(f"  tempo individual: {t_ind:6.2f}s  ({t_ind / len(payloads) * 1000:7.1f} ms/lead)")
+    print(f"  tempo em lote:    {t_lote:6.2f}s  ({t_lote / len(payloads) * 1000:7.1f} ms/lead)")
+    print(f"  ganho: {(t_ind / t_lote) if t_lote else float('inf'):.0f}x")
+    if div_campo:
+        for campo, n in div_campo.items():
+            print(f"  !! {campo}: {n} divergências")
+            falhas.append(f"pacote completo, {campo}: {n} divergências")
+    else:
+        print(f"  divergências: NENHUMA em {len(payloads)} leads "
+              f"({len(CAMPOS_EXATOS) + len(CAMPOS_FLOAT)} campos + encoded_features)")
+    if colunas_extras_lote:
+        print(f"  (nota: o lote expôs {len(colunas_extras_lote)} coluna(s) one-hot a "
+              f"mais, de categorias presentes em outros leads do lote. Valor 0 para "
+              f"quem não tem a categoria, descartadas no alinhamento com o "
+              f"feature_registry — por isso o score não muda.)")
+        for c in sorted(colunas_extras_lote)[:3]:
+            print(f"     - {c}")
+    print()
 
     print("=" * 62)
     if falhas:
