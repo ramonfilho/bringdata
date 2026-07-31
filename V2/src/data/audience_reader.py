@@ -49,6 +49,7 @@ logger = logging.getLogger(__name__)
 # não é um alvo, é um alarme de "isso não pode estar certo".
 _MIN_LEADS = 50_000
 _MIN_BUYERS = 3_000
+_MIN_HOTLEADS = 5_000   # piso do público de compradores Hotmart; a base ~339k rende ~8-10% quentes (~30k)
 _MIN_CARDONLY = 2_000   # público SÓ CARTÃO é subconjunto dos alunos (~2,8k hoje); piso = alarme, não alvo
 
 # Nome da source unificada de respondentes no `analytics.leads`. Default = o nome
@@ -223,4 +224,59 @@ def read_leads_audience(
     logger.info("[audience_reader] leads (união dedup por email): %d pessoas (%d com telefone)", n, n_phone)
     if n < min_size:
         raise ValueError(f"[audience_reader] só {n} leads (< {min_size}) — suspeito, abortando.")
+    return result
+
+
+def read_hotleads_buyers_audience(
+    client_id: str = "devclub",
+    *,
+    conn_analytics=None,
+    min_size: int = _MIN_HOTLEADS,
+) -> pd.DataFrame:
+    """Público COMPRADORES HOTMART: quem o HotLeads marcou como já tendo comprado
+    algum produto na Hotmart (qualquer produtor) → {email, phone}.
+
+    Diferente dos outros três públicos, este NÃO sai de venda nossa: é sinal
+    externo, vindo do enriquecimento em lote (`analytics.hotleads_seal`). Vale
+    como semente de lookalike porque marca comprador COMPROVADO de produto
+    digital — inclusive gente que nunca comprou de nós.
+
+    O telefone vem de `analytics.leads` por email; quem não tiver entra só com
+    email (a Meta casa com uma chave só, com match rate menor).
+
+    FAIL-LOUD abaixo de `min_size`, mesmo motivo dos outros: `usersreplace`
+    substitui o público inteiro, então lista curta por bug de leitura zeraria
+    um público bom.
+    """
+    own_a = conn_analytics is None
+    conn_a = conn_analytics or open_analytics_connection()
+    try:
+        rows = conn_a.run(
+            """
+            SELECT s.email, MAX(l.phone) AS phone
+            FROM analytics.hotleads_seal s
+            LEFT JOIN analytics.leads l
+                   ON lower(l.email) = s.email AND l.client_id = :c
+            WHERE s.hot IS TRUE
+            GROUP BY s.email
+            """,
+            c=client_id,
+        )
+    finally:
+        if own_a:
+            conn_a.close()
+
+    df = pd.DataFrame(rows, columns=["email", "phone"])
+    logger.info("[audience_reader] hotleads/compradores Hotmart: %d", len(df))
+    if df.empty:
+        raise ValueError(
+            "[audience_reader] analytics.hotleads_seal sem nenhum quente — "
+            "o enriquecimento em lote rodou? Abortando ANTES de escrever."
+        )
+    result = _dedup_by_email(df)
+    n = len(result)
+    n_phone = int((result["phone"].map(lambda p: bool(p) and str(p).strip() not in ('', 'None'))).sum())
+    logger.info("[audience_reader] hotleads (dedup por email): %d pessoas (%d com telefone)", n, n_phone)
+    if n < min_size:
+        raise ValueError(f"[audience_reader] só {n} compradores Hotmart (< {min_size}) — suspeito, abortando.")
     return result
