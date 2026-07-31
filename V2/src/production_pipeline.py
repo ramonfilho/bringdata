@@ -370,17 +370,19 @@ class LeadScoringPipeline:
             logger.warning(f"  {len(drift_alerts)} alertas de category drift detectados:")
             for alert in drift_alerts:
                 logger.warning(f"   {alert['message']}")
-
-            # Armazenar alertas para enviar depois (implementação futura)
-            if not hasattr(self, 'alerts'):
-                self.alerts = []
-            self.alerts.extend(drift_alerts)
         else:
             logger.info("    Nenhuma categoria nova detectada")
 
         # 8.5. Verificar distribution drift (mudanças nas proporções)
         # Pulado quando predictor não expõe model_path (modo MLflow run_id via A/B test).
         # Daily-check cobre o mesmo sinal com janela maior — ver check_category_drift().
+        #
+        # NA PRÁTICA ISTO NÃO RODA NO SCORING ONLINE: o A/B carrega os modelos por
+        # `mlflow_run_id` e o predictor não expõe `model_path`. Verificado em
+        # 31/07/2026. Mantido porque o caminho por `model_path` continua válido
+        # (treino, backtest, cliente sem A/B) e as funções são compartilhadas com
+        # `src/monitoring`. Se um dia o objetivo for vigiar distribuição no
+        # online, o lugar é o daily-check, não aqui.
         if self.predictor.model_path:
             logger.info(" [8.5/12] Verificando distribution drift...")
             try:
@@ -391,9 +393,6 @@ class LeadScoringPipeline:
                     logger.warning(f"  {len(distribution_alerts)} alertas de distribution drift detectados:")
                     for alert in distribution_alerts:
                         logger.warning(f"   {alert['message']}")
-                    if not hasattr(self, 'alerts'):
-                        self.alerts = []
-                    self.alerts.extend(distribution_alerts)
                 else:
                     logger.info("    Nenhuma mudança drástica nas distribuições")
             except FileNotFoundError as e:
