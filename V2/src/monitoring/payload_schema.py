@@ -1194,4 +1194,23 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'training_drift_24h_summary.top_features[].delta_pp':                               (R, None),
     'training_drift_24h_summary.top_features[].count':                                  (R, None),
     'training_drift_24h_summary.erro':                                                  (R, None),
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # HOTLEADS_24H_SUMMARY  (selo da Hotmart → evento LeadScoringHot — 2026-07-30)
+    # Saúde do pipeline que roda em cron PRÓPRIO (a cada 15 min), fora do fluxo
+    # do monitoramento. Sem este bloco uma parada seria invisível: o scheduler
+    # não alerta em 401/500 e a Hotmart não reentrega webhook perdido.
+    # Lê o ledger (`registros_ml`, colunas `hotleads_*`); fail-soft — todas as
+    # chaves sempre presentes, zeradas quando não há dado.
+    # ──────────────────────────────────────────────────────────────────────────
+    'hotleads_24h_summary':                                                             (R, None),
+    'hotleads_24h_summary.window_hours':                                                (R, None),
+    'hotleads_24h_summary.selados':                                                     (R, None),
+    'hotleads_24h_summary.quentes':                                                     (R, None),
+    'hotleads_24h_summary.pct_quentes':                                                 (R, None),
+    'hotleads_24h_summary.eventos_enviados':                                            (R, None),
+    'hotleads_24h_summary.erros':                                                       (R, None),
+    'hotleads_24h_summary.aguardando_selo':                                             (R, None),
+    'hotleads_24h_summary.sem_selo_na_janela':                                          (R, None),
+    'hotleads_24h_summary.disponivel':                                                  (R, None),
 }

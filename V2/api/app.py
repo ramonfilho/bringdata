@@ -105,6 +105,9 @@ class DailyCheckResponse(BaseModel):
     # Sumário T1-16: paridade treino × produção 24h (2026-05-25).
     # Renderizado no bloco "🎯 Paridade treino × produção (24h)" do digest.
     training_drift_24h_summary: Optional[Dict[str, Any]] = None
+    # Saúde do pipeline HotLeads 24h (selo da Hotmart → evento LeadScoringHot).
+    # Renderizado no bloco "🔥 HotLeads 24h" do digest (só DM).
+    hotleads_24h_summary: Optional[Dict[str, Any]] = None
 
 # Inicializar a aplicação FastAPI
 app = FastAPI(

@@ -168,6 +168,8 @@ def extract_view(payload: dict, *, audit: bool = True) -> dict:
         # Sumário do consumer Pub/Sub (24h) — Etapa 7 do refator do monitoramento.
         'pubsub_24h':        payload.get('pubsub_24h_summary', {}) or {},
         'training_drift_24h': payload.get('training_drift_24h_summary', {}) or {},
+        # Saúde do pipeline HotLeads (cron próprio, fora deste fluxo).
+        'hotleads_24h':      payload.get('hotleads_24h_summary', {}) or {},
     }
 
 
@@ -879,6 +881,7 @@ def render_slack_blocks(view: dict) -> list[dict]:
     blocks.append({'type': 'divider'})
     # _slack_lead_quality (Qualidade dos Leads séries temporais) removido do DM a pedido (28/06).
     _slack_pubsub_24h(view, blocks)
+    _slack_hotleads_24h(view, blocks)  # selo Hotmart → LeadScoringHot (cron próprio)
     blocks.append({'type': 'divider'})
     _slack_training_drift_24h(view, blocks)  # Features OHE zeradas em batch (T1-16)
     blocks.append({'type': 'divider'})
@@ -994,6 +997,58 @@ def _slack_score_distribution_change_dm(v: dict, B: list):
                       'text': {'type': 'mrkdwn', 'text': '\n'.join(lines)}})
 
     B.append({'type': 'divider'})
+
+
+def _slack_hotleads_24h(v: dict, B: list):
+    """Bloco "🔥 HotLeads 24h" — saúde do selo da Hotmart → evento LeadScoringHot.
+
+    Existe porque esse pipeline roda num cron SEPARADO (15 em 15 min) e falha
+    em silêncio: o Cloud Scheduler não alerta em 401/500 e a Hotmart não
+    reentrega webhook perdido. Sem esta linha, "o evento parou" só apareceria
+    dias depois no Events Manager.
+
+    Sinais de alarme explicitados no texto (não deixa o operador inferir):
+      - selados=0 com fila cheia  → cron parado ou submissão falhando
+      - erros>0                   → evento não saiu; o retry do cron tenta de novo
+    """
+    h = v.get('hotleads_24h') or {}
+    if not h.get('disponivel'):
+        return  # não conseguiu ler — silencioso (≠ de "leu e deu zero")
+
+    selados = h.get('selados', 0) or 0
+    quentes = h.get('quentes', 0) or 0
+    pct     = h.get('pct_quentes', 0.0) or 0.0
+    enviados = h.get('eventos_enviados', 0) or 0
+    erros   = h.get('erros', 0) or 0
+    fila    = h.get('sem_selo_na_janela', 0) or 0
+    aguard  = h.get('aguardando_selo', 0) or 0
+
+    B.append({'type': 'header',
+              'text': {'type': 'plain_text', 'text': '🔥 HotLeads 24h', 'emoji': True}})
+
+    linha = (f"*{selados}* leads selados · 🔥 {quentes} quentes ({pct}%) · "
+             f"📤 {enviados} eventos enviados")
+    if erros:
+        linha += f" · ❌ {erros} com erro"
+    B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': linha}})
+
+    # Diagnóstico em português — o operador não deve precisar deduzir do número.
+    diag = []
+    if selados == 0 and fila > 0:
+        diag.append(f"⚠️ *Nenhum lead selado em 24h* com {fila} na fila — "
+                    f"cron `hotleads-submit` parado ou submissão falhando.")
+    elif fila > 2000:
+        diag.append(f"⚠️ Fila alta: {fila} leads ainda sem selo (o cron drena "
+                    f"até 1.000 por rodada).")
+    if erros:
+        diag.append(f"❌ {erros} evento(s) não saíram pro Meta — o próprio cron "
+                    f"tenta reenviar na próxima rodada; se não cair, investigar.")
+    if aguard:
+        diag.append(f"⏳ {aguard} aguardando retorno da Hotmart "
+                    f"(normal por ~2 min; re-submete sozinho após 6h).")
+    if diag:
+        B.append({'type': 'section',
+                  'text': {'type': 'mrkdwn', 'text': '\n'.join(diag)}})
 
 
 def _slack_pubsub_24h(v: dict, B: list):

@@ -292,10 +292,18 @@ class MonitoringOrchestrator:
         # PUBSUB_24H). Ficam separados de `operational_routines` porque o digest
         # acessa direto via payload['pubsub_24h_summary'] e similar — nested
         # dentro de operational_routines vira invisível pro render.
+        from .hotleads_summary import compute_hotleads_summary
         from .pubsub_summary import compute_pubsub_summary
         from .training_drift_summary import compute_training_drift_summary
         pubsub_24h_summary = compute_pubsub_summary(self._repo)
         training_drift_24h_summary = compute_training_drift_summary()
+        # HotLeads roda em cron próprio, fora deste fluxo — sem esta leitura uma
+        # parada dele seria invisível (scheduler não alerta, webhook não repete).
+        # A allowlist é a MESMA que o submit usa: sem ela a "fila" contaria lead
+        # de google-ads/orgânico, que nunca é submetido, e o bloco alarmaria sempre.
+        hotleads_24h_summary = compute_hotleads_summary(
+            source_allowlist=(self._client_config.capi.utm_source_allowlist or None)
+        )
 
         # Mensagem de conclusão
         logger.info(f"\n Monitoramento concluído!")
@@ -313,6 +321,7 @@ class MonitoringOrchestrator:
             'operational_routines': operational_routines,
             'pubsub_24h_summary': pubsub_24h_summary,
             'training_drift_24h_summary': training_drift_24h_summary,
+            'hotleads_24h_summary': hotleads_24h_summary,
         }
 
     def _generate_operational_routines_summary(self, prev_day_window=None) -> Dict:
