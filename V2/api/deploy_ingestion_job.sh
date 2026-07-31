@@ -18,6 +18,9 @@
 #   --job spend  → ingestion-ad-spend
 #                  python /app/src/validation/etl_ad_spend.py --daily --platforms meta
 #                  materializa gasto por campanha×dia em analytics.ad_spend (o relatório do DM lê daí).
+#   --job cadastros → ingestion-cadastros-daily
+#                  python /app/src/data/cadastros_ingest.py --full
+#                  materializa TODOS os cadastros (Client + leads_capi do Railway) em analytics.cadastros.
 #
 # ⚠️  DISTINÇÃO (mesma do validation):
 #   - deploy_capi.sh             = API de produção (Cloud Run Service 24/7)
@@ -93,8 +96,14 @@ resolve_job() {
             JOB_TASK_TIMEOUT="600"
             JOB_SERVICE_ACCOUNT="$INGESTION_LAUNCH_CAL_SA"
             ;;
+        cadastros)
+            JOB_NAME="$INGESTION_CADASTROS_JOB"
+            JOB_ARGS="/app/src/data/cadastros_ingest.py,--full"
+            JOB_DESC="materializa todos os cadastros (Client + leads_capi) em analytics.cadastros"
+            JOB_TASK_TIMEOUT="900"
+            ;;
         *)
-            print_error "--job inválido: '$JOB_KIND' (use 'leads', 'sales', 'spend' ou 'launch_cal')"
+            print_error "--job inválido: '$JOB_KIND' (use 'leads', 'sales', 'spend', 'launch_cal' ou 'cadastros')"
             exit 1
             ;;
     esac

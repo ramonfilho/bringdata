@@ -117,12 +117,13 @@ main() {
     print_info "Leads:   $INGESTION_LEADS_JOB   ($INGESTION_LEADS_SCHEDULE UTC)"
     print_info "Vendas:  $INGESTION_SALES_JOB   ($INGESTION_SALES_SCHEDULE UTC)"
     print_info "Gasto:   $INGESTION_SPEND_JOB   ($INGESTION_SPEND_SCHEDULE UTC)"
+    print_info "Cadastr: $INGESTION_CADASTROS_JOB   ($INGESTION_CADASTROS_SCHEDULE UTC)"
     echo ""
 
     validate_prerequisites
 
     if [ "$YES_FLAG" = false ]; then
-        read -p "Criar/atualizar os 4 schedulers? (y/n) " -n 1 -r; echo ""
+        read -p "Criar/atualizar os 5 schedulers? (y/n) " -n 1 -r; echo ""
         [[ $REPLY =~ ^[Yy]$ ]] || { print_warning "Cancelado"; exit 0; }
     fi
 
@@ -135,6 +136,8 @@ main() {
         "$INGESTION_SALES_JOB" "Ingestão diária: vendas dos 4 gateways API + alerta tmb stale"
     upsert_scheduler "${INGESTION_SPEND_JOB}-cron" "$INGESTION_SPEND_SCHEDULE" \
         "$INGESTION_SPEND_JOB" "Ingestão diária: gasto de anúncio (Meta) por campanha×dia em analytics.ad_spend"
+    upsert_scheduler "${INGESTION_CADASTROS_JOB}-cron" "$INGESTION_CADASTROS_SCHEDULE" \
+        "$INGESTION_CADASTROS_JOB" "Ingestão diária: todos os cadastros (Client+leads_capi) → analytics.cadastros"
 
     print_header "PRONTO"
     echo "Schedulers (região $REGION):"
@@ -142,6 +145,7 @@ main() {
     echo "  ${INGESTION_LEADS_JOB}-cron   $INGESTION_LEADS_SCHEDULE UTC (06:00 BRT)"
     echo "  ${INGESTION_SALES_JOB}-cron   $INGESTION_SALES_SCHEDULE UTC (06:30 BRT)"
     echo "  ${INGESTION_SPEND_JOB}-cron   $INGESTION_SPEND_SCHEDULE UTC (06:45 BRT)"
+    echo "  ${INGESTION_CADASTROS_JOB}-cron   $INGESTION_CADASTROS_SCHEDULE UTC (07:00 BRT)"
     echo ""
     echo "Disparar um agora (teste):"
     echo "  gcloud scheduler jobs run ${INGESTION_LAUNCH_CAL_JOB}-cron --location $REGION"
