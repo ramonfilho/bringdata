@@ -42,6 +42,7 @@ from src.core.client_config import ClientConfig
 from src.data.audience_reader import (
     read_buyers_audience,
     read_cardonly_audience,
+    read_hotleads_buyers_audience,
     read_leads_audience,
 )
 from api.meta_audiences import MetaCustomAudienceClient
@@ -73,7 +74,7 @@ def _open_analytics_long():
 def main() -> int:
     ap = argparse.ArgumentParser(description="Sync de Públicos Personalizados da Meta")
     ap.add_argument("--client", default="devclub")
-    ap.add_argument("--audience", choices=["leads", "buyers", "cardonly", "both", "all"], default="both",
+    ap.add_argument("--audience", choices=["leads", "buyers", "cardonly", "hotleads", "both", "all"], default="both",
                     help="'both'=leads+alunos (compat); 'all'=leads+alunos+cartão (usado pelo job diário)")
     ap.add_argument("--show-target", action="store_true",
                     help="GET dos públicos-alvo (read-only) pra confirmar antes de escrever")
@@ -107,6 +108,9 @@ def main() -> int:
         targets.append(("buyers", ma.buyers_audience_id))
     if args.audience in ("cardonly", "all"):
         targets.append(("cardonly", ma.cardonly_audience_id))
+    # Compradores Hotmart: sinal EXTERNO (selo do HotLeads), não venda nossa.
+    if args.audience in ("hotleads", "all"):
+        targets.append(("hotleads", ma.hotleads_audience_id))
 
     if args.show_target:
         for label, aid in targets:
@@ -124,6 +128,10 @@ def main() -> int:
                 members = read_leads_audience(
                     client_id=args.client, conn_analytics=conn_a,
                     respondents_source=ma.leads_source,
+                )
+            elif label == "hotleads":
+                members = read_hotleads_buyers_audience(
+                    client_id=args.client, conn_analytics=conn_a,
                 )
             elif label == "cardonly":
                 members = read_cardonly_audience(

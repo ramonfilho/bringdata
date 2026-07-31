@@ -403,6 +403,7 @@ class MetaAudiencesConfig:
     leads_audience_id: Optional[str] = None        # id do público de LEADS a substituir
     buyers_audience_id: Optional[str] = None       # id do público de ALUNOS a substituir
     cardonly_audience_id: Optional[str] = None     # id do público de ALUNOS SÓ CARTÃO (comprou só em card_gateways, nunca boleto_gateways)
+    hotleads_audience_id: Optional[str] = None     # id do público COMPRADORES HOTMART (selo externo, de analytics.hotleads_seal — não é venda nossa)
     # None = HERDA de `ingestion.leads_unified_source` (o dono único do nome), resolvido no
     # carregador do config. Aceita valor explícito como override por cliente, mas o normal é
     # OMITIR: público da Meta e treino leem o MESMO universo, e ter o nome declarado em dois
