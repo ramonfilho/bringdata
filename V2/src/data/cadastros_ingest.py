@@ -112,51 +112,110 @@ def pull_buyers(led) -> set:
     return b
 
 
+def backfill_leads(buyers) -> dict:
+    """Adiciona os respondentes ANTIGOS (analytics.leads) que ainda não estão em cadastros,
+    100% SERVER-SIDE (INSERT ... SELECT no próprio Cloud SQL): nada de trazer 357k linhas pro
+    Python — só a contagem volta, então é robusto a queda de socket. `ON CONFLICT DO NOTHING`
+    não toca quem já veio de Client/leads_capi. is_buyer é reafirmado por PK (lista pequena)."""
+    # Chunk em 16 baldes por md5(email): cada ~22k linhas → rápido, o socket não estoura.
+    # md5 é determinístico por email, então TODOS os registros de uma pessoa caem no MESMO
+    # balde → DISTINCT ON e min(capturado_em) continuam corretos (1 linha por pessoa).
+    insert_sql = (
+        "INSERT INTO cadastros "
+        "(email, phone, first_name, last_name, is_buyer, first_seen_at, "
+        " utm_source, utm_medium, utm_campaign, utm_content, utm_term, "
+        " has_computer, fbp, fbc, ip, user_agent, decil, lead_score, is_respondent, source) "
+        "SELECT DISTINCT ON (lower(email)) "
+        "  lower(email), phone, first_name, last_name, false, "
+        "  min(capturado_em) OVER (PARTITION BY lower(email)), "
+        "  utm_source, utm_medium, utm_campaign, utm_content, utm_term, "
+        "  has_computer, fbp, fbc, ip, user_agent, decil, score, true, 'leads' "
+        "FROM analytics.leads WHERE email IS NOT NULL AND left(md5(lower(email)), 1) = :bkt "
+        "ORDER BY lower(email), capturado_em DESC NULLS LAST "
+        "ON CONFLICT (email) DO NOTHING"
+    )
+    led = open_analytics_connection(timeout=600)
+    try:
+        before = led.run("SELECT count(*) FROM cadastros")[0][0]
+        for bkt in "0123456789abcdef":
+            for attempt in range(5):
+                try:
+                    led.run(insert_sql, bkt=bkt)
+                    break
+                except Exception as e:  # noqa: BLE001 — rede instável; reconecta e re-tenta o balde
+                    if attempt == 4:
+                        raise
+                    logger.warning("[backfill_leads] balde %s falhou (%s); reconectando", bkt, str(e)[:60])
+                    try:
+                        led.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    led = open_analytics_connection(timeout=600)
+        blist = sorted(e for e in buyers if e)
+        if blist:
+            led.run("UPDATE cadastros SET is_buyer = true WHERE email = ANY(:b)", b=blist)
+        after = led.run("SELECT count(*) FROM cadastros")[0][0]
+        return {"before": before, "after": after, "inserted": after - before}
+    finally:
+        led.close()
+
+
+def _naive(x):
+    # analytics.leads.capturado_em é timestamptz (aware); Client/leads_capi são naive.
+    # Compara/grava tudo como wall-clock naive (o sistema opera em UTC).
+    if x is not None and getattr(x, "tzinfo", None) is not None:
+        return x.replace(tzinfo=None)
+    return x
+
+
 def _min(a, b):
-    xs = [x for x in (a, b) if x is not None]
+    xs = [_naive(x) for x in (a, b) if x is not None]
     return min(xs) if xs else None
 
 
 def _max(a, b):
-    xs = [x for x in (a, b) if x is not None]
+    xs = [_naive(x) for x in (a, b) if x is not None]
     return max(xs) if xs else None
 
 
-def build_rows(client: dict, capi: dict, respondents: set, buyers: set) -> list:
-    """Merge por email: identidade da Client, atribuição da leads_capi, is_respondent
-    (respondeu pesquisa) e is_buyer (comprou, de analytics.sales), source rotulado."""
+def build_rows(client: dict, capi: dict, leads: dict, respondents: set, buyers: set) -> list:
+    """Merge por email de 3 fontes: Client (identidade+front), leads_capi (atribuição),
+    analytics.leads (respondentes antigos). COALESCE na ordem client > leads_capi > leads.
+    is_respondent (respondeu pesquisa), is_buyer (comprou, de analytics.sales), source rotulado."""
     rows = []
-    for e in set(client) | set(capi):
+    allem = set(client) | set(capi) | set(leads)
+    for e in allem:
         c = client.get(e, {})
         k = capi.get(e, {})
-        in_c, in_k = bool(c), bool(k)
-        source = "client+leads_capi" if (in_c and in_k) else ("client" if in_c else "leads_capi")
+        l = leads.get(e, {})
+        present = [n for n, d in (("client", c), ("leads_capi", k), ("leads", l)) if d]
+        pick = lambda f: c.get(f) or k.get(f) or l.get(f)  # COALESCE client > capi > leads
         rows.append({
             "email": e,
-            "phone": c.get("phone") or k.get("phone"),
-            "first_name": c.get("first_name") or k.get("first_name"),
-            "last_name": c.get("last_name") or k.get("last_name"),
+            "phone": pick("phone"),
+            "first_name": pick("first_name"),
+            "last_name": pick("last_name"),
             "is_buyer": e in buyers,
-            "first_seen_at": _min(c.get("first_seen_at"), k.get("first_seen_at")),
+            "first_seen_at": _min(_min(c.get("first_seen_at"), k.get("first_seen_at")), l.get("first_seen_at")),
             "last_activity_at": c.get("last_activity_at"),
             "campaign_key": c.get("campaign_key"),
-            "utm_source": k.get("utm_source"),
-            "utm_medium": k.get("utm_medium"),
-            "utm_campaign": k.get("utm_campaign"),
-            "utm_content": k.get("utm_content"),
-            "utm_term": k.get("utm_term"),
-            "has_computer": c.get("has_computer"),
-            "fbp": c.get("fbp") or k.get("fbp"),
-            "fbc": c.get("fbc") or k.get("fbc"),
-            "ip": c.get("ip") or k.get("ip"),
-            "user_agent": c.get("user_agent") or k.get("user_agent"),
+            "utm_source": k.get("utm_source") or l.get("utm_source"),
+            "utm_medium": k.get("utm_medium") or l.get("utm_medium"),
+            "utm_campaign": k.get("utm_campaign") or l.get("utm_campaign"),
+            "utm_content": k.get("utm_content") or l.get("utm_content"),
+            "utm_term": k.get("utm_term") or l.get("utm_term"),
+            "has_computer": c.get("has_computer") or l.get("has_computer"),
+            "fbp": pick("fbp"),
+            "fbc": pick("fbc"),
+            "ip": pick("ip"),
+            "user_agent": pick("user_agent"),
             "page_source": c.get("page_source"),
             "referrer": c.get("referrer"),
             "event_id": c.get("event_id") or k.get("event_id"),
-            "lead_score": k.get("lead_score"),
-            "decil": k.get("decil"),
+            "lead_score": k.get("lead_score") or l.get("lead_score"),
+            "decil": k.get("decil") or l.get("decil"),
             "is_respondent": e in respondents,
-            "source": source,
+            "source": "+".join(present),
             "updated_at_src": _max(c.get("updated_at_src"), k.get("updated_at_src")),
         })
     return rows
@@ -175,7 +234,7 @@ def _audit(rows: list) -> None:
 
 
 def main(full: bool = True, since: str | None = None, dry_run: bool = False) -> dict:
-    led = open_analytics_connection(timeout=300)
+    led = open_analytics_connection(timeout=600)
     rw = open_railway_connection(timeout=300)
     try:
         print("[cadastros_ingest] puxando Client…", flush=True)
@@ -186,18 +245,29 @@ def main(full: bool = True, since: str | None = None, dry_run: bool = False) -> 
         respondents = pull_respondents(led)
         buyers = pull_buyers(led)
         print(f"[cadastros_ingest] respondentes={len(respondents)} compradores={len(buyers)}", flush=True)
-        rows = build_rows(client, capi, respondents, buyers)
+        # Front-era (Client + leads_capi, Railway) montada no Python:
+        rows = build_rows(client, capi, {}, respondents, buyers)
         _audit(rows)
         if dry_run:
             print("[cadastros_ingest] DRY-RUN — nada escrito.")
             return {"rows": len(rows), "dry_run": True}
         ensure_table(led)
-        res = upsert_cadastros(rows, conn=led)
-        print(f"[cadastros_ingest] upsert: {res}")
-        return res
     finally:
         rw.close()
-        led.close()
+        try:
+            led.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+    # Escrita separada da leitura: cada store abre a própria conexão (resiliente a queda).
+    # Front-era via upsert Python; respondentes ANTIGOS via backfill server-side no Cloud SQL.
+    res = upsert_cadastros(rows)
+    print(f"[cadastros_ingest] upsert front-era: {res}")
+    if full:
+        bf = backfill_leads(buyers)
+        print(f"[cadastros_ingest] backfill leads (server-side): {bf}")
+        res["backfill_leads"] = bf
+    return res
 
 
 if __name__ == "__main__":

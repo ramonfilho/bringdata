@@ -198,11 +198,29 @@ def upsert_cadastros(rows: Iterable[dict], conn=None, batch_size: int = 500) -> 
         clean.append(rr)
 
     own = conn is None
-    conn = conn or open_analytics_connection()
+    conn = conn or open_analytics_connection(timeout=300)
     try:
         before = conn.run("SELECT count(*) FROM cadastros")[0][0]
+        # Conexão longa cai em cargas grandes (Cloud SQL derruba socket ocioso). Como o
+        # upsert é idempotente (ON CONFLICT DO UPDATE), re-aplicar um lote é seguro:
+        # em falha de rede, reconecta e re-tenta o mesmo lote.
         for start in range(0, len(clean), batch_size):
-            _insert_chunk(conn, clean[start:start + batch_size])
+            chunk = clean[start:start + batch_size]
+            for attempt in range(5):
+                try:
+                    _insert_chunk(conn, chunk)
+                    break
+                except Exception as e:  # noqa: BLE001 — rede instável; reconecta e re-tenta
+                    if attempt == 4:
+                        raise
+                    logger.warning("[cadastros_store] lote em %d falhou (%s); reconectando",
+                                   start, str(e)[:70])
+                    try:
+                        conn.close()
+                    except Exception:  # noqa: BLE001
+                        pass
+                    conn = open_analytics_connection(timeout=300)
+                    own = True
         after = conn.run("SELECT count(*) FROM cadastros")[0][0]
         res = {"attempted": len(clean), "table_before": before,
                "table_after": after, "inserted_net": after - before}
