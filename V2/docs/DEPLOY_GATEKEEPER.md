@@ -34,8 +34,8 @@ V2/api/deploy-gate.sh sync-monitoring  # alinha o monitoring (mata o overlay)
 |---|---|---|
 | `status` | Visão única: SHA vivo/serviço, relação c/ main, drift, lock, ledger | não |
 | `deploy [--dry-run] [--yes]` | Lock → frescor(B) → monotonicidade(C) → `deploy_capi.sh` (canary api) → ledger | só sem `--dry-run` |
-| `promote --revision R [--service S] [--to N]` | Lock → C → update-traffic → **verify** → ledger | só sem `--dry-run` |
-| `sync-monitoring [--dry-run]` | Alinha o monitoring à imagem viva do api (mata drift/overlay) | só sem `--dry-run` |
+| `promote --revision R [--to N] [--no-sync]` | Lock → C → update-traffic → **verify** → **LOCKSTEP: alinha o monitoring** à mesma imagem → ledger | só sem `--dry-run` |
+| `sync-monitoring [--dry-run]` | Cria revisão do monitoring na imagem viva do api, **ROTEIA o tráfego** (trata tráfego pinado), verifica Ready, faz rollback se não subir | só sem `--dry-run` |
 | `unlock` | Quebra lock preso (confirmação) | remove só o lock |
 
 Overrides (uso consciente): `--allow-behind` (canary fora do topo, não promova), `--rollback` (promover atrás do vivo).
