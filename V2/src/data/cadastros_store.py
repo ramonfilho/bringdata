@@ -141,9 +141,20 @@ def _placeholder(col, key):
 
 
 # no conflito por email: nunca apaga valor existente com null; datas pegam o
-# extremo certo (primeiro contato = menor; última atividade = maior); flags e
-# rótulo de origem refletem o cálculo mais recente do ETL.
-def _update_clause() -> str:
+# extremo certo (primeiro contato = menor; última atividade = maior).
+#
+# `mode` decide o tratamento de `source`/`is_respondent`/`is_buyer` — as colunas
+# que o ETL calcula a partir do conjunto de fontes visto naquela rodada:
+#   - "full": o build_rows vê as 3 fontes (Client+leads_capi+leads) e recalcula o
+#     valor autoritativo → EXCLUDED sobrescreve (pode inclusive rebaixar, é o certo).
+#   - "incremental": o build_rows só viu a Client (leads_capi/leads vêm vazios), então
+#     EXCLUDED traria "source=client" e flags=false — o que REBAIXARIA quem já estava
+#     como client+leads_capi+leads e apagaria flags. Por isso, no conflito, essas 3
+#     colunas são PRESERVADAS (mantém o valor existente); a verdade das flags é
+#     reafirmada depois, server-side, por reconcile_flags. Linha NOVA ainda entra
+#     com o valor calculado (source=client, flags=false → reconcile promove).
+def _update_clause(mode: str = "full") -> str:
+    preserve = mode == "incremental"
     parts = []
     for col in _COLS:
         if col == "email":
@@ -152,18 +163,22 @@ def _update_clause() -> str:
             parts.append("first_seen_at = LEAST(cadastros.first_seen_at, EXCLUDED.first_seen_at)")
         elif col == "last_activity_at":
             parts.append("last_activity_at = GREATEST(cadastros.last_activity_at, EXCLUDED.last_activity_at)")
-        elif col in ("is_respondent", "source", "is_buyer", "updated_at_src"):
-            parts.append(f"{col} = EXCLUDED.{col}")
+        elif col in ("is_respondent", "source", "is_buyer"):
+            # incremental preserva (não rebaixa); full sobrescreve com o recálculo autoritativo
+            parts.append(f"{col} = cadastros.{col}" if preserve else f"{col} = EXCLUDED.{col}")
+        elif col == "updated_at_src":
+            # sempre reflete o updatedAt novo da Client (marca d'água do incremental)
+            parts.append("updated_at_src = EXCLUDED.updated_at_src")
         else:
             parts.append(f"{col} = COALESCE(EXCLUDED.{col}, cadastros.{col})")
     parts.append("refreshed_at = now()")
     return ", ".join(parts)
 
 
-_UPDATE = _update_clause()
+_UPDATE = {"full": _update_clause("full"), "incremental": _update_clause("incremental")}
 
 
-def _insert_chunk(conn, chunk) -> None:
+def _insert_chunk(conn, chunk, mode: str = "full") -> None:
     values, params = [], {}
     for i, row in enumerate(chunk):
         cells = []
@@ -174,18 +189,23 @@ def _insert_chunk(conn, chunk) -> None:
         values.append("(" + ", ".join(cells) + ")")
     sql = (
         f"INSERT INTO cadastros ({', '.join(_COLS)}) VALUES " + ", ".join(values)
-        + f" ON CONFLICT (email) DO UPDATE SET {_UPDATE}"
+        + f" ON CONFLICT (email) DO UPDATE SET {_UPDATE[mode]}"
     )
     conn.run(sql, **params)
 
 
-def upsert_cadastros(rows: Iterable[dict], conn=None, batch_size: int = 500) -> dict:
+def upsert_cadastros(rows: Iterable[dict], conn=None, batch_size: int = 500,
+                     mode: str = "full") -> dict:
     """Grava/atualiza cadastros (lista de dicts no shape canônico `_COLS`).
 
     Idempotente: `ON CONFLICT (email) DO UPDATE` (COALESCE nos campos de
-    enriquecimento, LEAST/GREATEST nas datas). Retorna {attempted, table_before,
-    table_after, inserted_net}.
+    enriquecimento, LEAST/GREATEST nas datas). `mode` = "full" (recálculo
+    autoritativo de source/flags) | "incremental" (preserva source/flags no
+    conflito pra não rebaixar — ver `_update_clause`). Retorna {attempted,
+    table_before, table_after, inserted_net}.
     """
+    if mode not in _UPDATE:
+        raise ValueError(f"mode inválido: {mode!r} (use 'full' ou 'incremental')")
     clean = []
     for r in rows:
         email = _s(r.get("email"))
@@ -208,7 +228,7 @@ def upsert_cadastros(rows: Iterable[dict], conn=None, batch_size: int = 500) -> 
             chunk = clean[start:start + batch_size]
             for attempt in range(5):
                 try:
-                    _insert_chunk(conn, chunk)
+                    _insert_chunk(conn, chunk, mode=mode)
                     break
                 except Exception as e:  # noqa: BLE001 — rede instável; reconecta e re-tenta
                     if attempt == 4:

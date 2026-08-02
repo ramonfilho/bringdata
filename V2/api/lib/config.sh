@@ -94,9 +94,12 @@ INGESTION_SALES_JOB="${INGESTION_SALES_JOB:-ingestion-sales-daily}"
 # OAuth voltar) por campanha×dia em analytics.ad_spend. O relatório do DM LÊ dessa
 # tabela (leve, sem API viva); este job é quem a enche.
 INGESTION_SPEND_JOB="${INGESTION_SPEND_JOB:-ingestion-ad-spend}"
-# cadastros (cadastros_ingest --full): materializa TODOS os cadastros (Client + leads_capi
-# do Railway) em analytics.cadastros — a espinha de identidade (respondente da pesquisa ou
-# não). Carga cheia idempotente (upsert por email), self-healing, recomputa is_respondent.
+# cadastros (cadastros_ingest --since auto): atualiza analytics.cadastros — a espinha de
+# identidade (respondente da pesquisa ou não) — de forma INCREMENTAL: puxa só a Client
+# alterada desde a marca d'água e reconcilia is_buyer/is_respondent server-side. Barato
+# (< 1 min). A carga CHEIA (--full, ~60 min, reconstrói tudo + backfill dos respondentes
+# antigos) NÃO roda no cron: é manual/semanal, pra mudança de schema ou reconciliar
+# rebaixamento (estorno). Comando: python -m src.data.cadastros_ingest --full.
 INGESTION_CADASTROS_JOB="${INGESTION_CADASTROS_JOB:-ingestion-cadastros-daily}"
 # calendário de LFs (launch_calendar --sync-to-table): lê a planilha canônica do
 # cliente e materializa as datas de lançamento em analytics.launch_calendar. Vira

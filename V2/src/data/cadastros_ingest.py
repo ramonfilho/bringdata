@@ -11,15 +11,23 @@ Merge por email (COALESCE: identidade da Client, atribuição da leads_capi). `i
 leads_capi / client+leads_capi. Alvo = `analytics.cadastros` (Cloud SQL), upsert idempotente.
 
 Uso:
-  python -m src.data.cadastros_ingest --full            # carga cheia (Client + leads_capi)
-  python -m src.data.cadastros_ingest --since <ISO>     # incremental (Client alterada)
+  python -m src.data.cadastros_ingest --since auto      # incremental (o CRON diário roda este)
+  python -m src.data.cadastros_ingest --since <ISO>     # incremental a partir de uma data
+  python -m src.data.cadastros_ingest --full            # carga CHEIA (manual/semanal, ~60 min)
   python -m src.data.cadastros_ingest --full --dry-run  # só audita, não escreve
+
+MODOS:
+  - CHEIO (--full): reconstrói tudo (Client+leads_capi + backfill dos respondentes antigos).
+    Caro; use manualmente após mudança de schema ou pra reconciliar estorno/rebaixamento.
+  - INCREMENTAL (--since): só a Client alterada + reconciliação de flags server-side. Barato,
+    é o modo do cron diário. `auto` = marca d'água (maior updated_at_src já ingerido − 1 dia).
 """
 from __future__ import annotations
 
 import argparse
 import logging
 from collections import Counter
+from datetime import timedelta
 
 from src.data.analytics_connection import open_analytics_connection
 from src.data.cadastro_records import open_railway_connection
@@ -160,6 +168,53 @@ def backfill_leads(buyers) -> dict:
         led.close()
 
 
+def reconcile_flags(led) -> dict:
+    """Reafirma is_buyer/is_respondent na tabela INTEIRA, 100% server-side (set-based,
+    tudo no mesmo Cloud SQL — nenhuma linha vai pro Python).
+
+    Por que é obrigatório no incremental: uma pessoa pode VIRAR compradora (nova linha
+    em analytics.sales) ou respondente (novo lead em analytics.leads) sem que a linha
+    dela na Client mude (`updatedAt` não avança), então o pull incremental nem a toca.
+    Só esta reconciliação pega essas viradas.
+
+    Promove-só (false→true): é barato (2 UPDATEs indexados por email) e cobre o caso
+    real (quase toda virada é ganhar o selo, não perder). Rebaixamento (true→false, ex.
+    estorno que sai de analytics.sales) é raro e fica pra carga cheia semanal, que
+    recalcula os dois flags de forma autoritativa no build_rows.
+
+    is_respondent reconcilia contra analytics.leads (Cloud SQL). Os respondentes que
+    chegaram hoje via registros_ml (Railway) já entraram em analytics.leads pelo job de
+    leads das 06:00 — por isso o cron de cadastros roda às 07:00, depois dele."""
+    before_b = led.run("SELECT count(*) FROM cadastros WHERE is_buyer")[0][0]
+    before_r = led.run("SELECT count(*) FROM cadastros WHERE is_respondent")[0][0]
+    led.run(
+        "UPDATE cadastros SET is_buyer = true, refreshed_at = now() "
+        "WHERE COALESCE(is_buyer, false) = false AND email IN "
+        "(SELECT lower(email) FROM analytics.sales WHERE email IS NOT NULL)"
+    )
+    led.run(
+        "UPDATE cadastros SET is_respondent = true, refreshed_at = now() "
+        "WHERE COALESCE(is_respondent, false) = false AND email IN "
+        "(SELECT lower(email) FROM analytics.leads WHERE email IS NOT NULL)"
+    )
+    after_b = led.run("SELECT count(*) FROM cadastros WHERE is_buyer")[0][0]
+    after_r = led.run("SELECT count(*) FROM cadastros WHERE is_respondent")[0][0]
+    return {"is_buyer": (before_b, after_b, after_b - before_b),
+            "is_respondent": (before_r, after_r, after_r - before_r)}
+
+
+def _resolve_since(led, since: str | None) -> str | None:
+    """`--since auto` → marca d'água = maior `updated_at_src` já ingerido, menos 1 dia
+    de folga (o upsert é idempotente, então overlap é inofensivo e cobre atraso de relógio
+    /linha que chegou tarde). Tabela vazia → None (o caller cai pra carga cheia)."""
+    if since != "auto":
+        return since
+    hw = led.run("SELECT max(updated_at_src) FROM cadastros")[0][0]
+    if hw is None:
+        return None
+    return (hw - timedelta(days=1)).isoformat()
+
+
 def _naive(x):
     # analytics.leads.capturado_em é timestamptz (aware); Client/leads_capi são naive.
     # Compara/grava tudo como wall-clock naive (o sistema opera em UTC).
@@ -221,36 +276,62 @@ def build_rows(client: dict, capi: dict, leads: dict, respondents: set, buyers: 
     return rows
 
 
-def _audit(rows: list) -> None:
+def _audit(rows: list, incremental: bool = False) -> None:
     src = Counter(r["source"] for r in rows)
-    resp = sum(1 for r in rows if r["is_respondent"])
-    buyers = sum(1 for r in rows if r["is_buyer"])
     ds = [r["first_seen_at"] for r in rows if r["first_seen_at"]]
     print(f"  cadastros construídos: {len(rows)}")
     print(f"  por source: {dict(src)}")
-    print(f"  respondentes={resp}  não-respondentes={len(rows)-resp}  compradores={buyers}")
+    if incremental:
+        # no incremental as flags saem de reconcile_flags (server-side), não das rows
+        print("  (flags is_respondent/is_buyer reconciliadas server-side após o upsert)")
+    else:
+        resp = sum(1 for r in rows if r["is_respondent"])
+        buyers = sum(1 for r in rows if r["is_buyer"])
+        print(f"  respondentes={resp}  não-respondentes={len(rows)-resp}  compradores={buyers}")
     if ds:
         print(f"  janela first_seen: {min(ds).date()} .. {max(ds).date()}")
 
 
 def main(full: bool = True, since: str | None = None, dry_run: bool = False) -> dict:
+    """Dois modos:
+      - CHEIO (--full): reconstrói a base toda (Client+leads_capi do Railway + backfill
+        dos respondentes antigos de analytics.leads). Caro (~60 min); manual/semanal.
+      - INCREMENTAL (--since ISO | --since auto): puxa só a Client alterada desde a marca
+        d'água, upsert NÃO-destrutivo (não rebaixa source/flags), e reconcilia is_buyer/
+        is_respondent server-side. Barato (< 1 min); é o que o cron diário roda."""
     led = open_analytics_connection(timeout=600)
     rw = open_railway_connection(timeout=300)
     try:
-        print("[cadastros_ingest] puxando Client…", flush=True)
-        client = pull_client(rw, since=None if full else since)
-        capi = pull_capi(rw) if full else {}
-        print(f"[cadastros_ingest] Client={len(client)} leads_capi={len(capi)}", flush=True)
-        print("[cadastros_ingest] puxando respondentes + compradores…", flush=True)
-        respondents = pull_respondents(led)
-        buyers = pull_buyers(led)
-        print(f"[cadastros_ingest] respondentes={len(respondents)} compradores={len(buyers)}", flush=True)
-        # Front-era (Client + leads_capi, Railway) montada no Python:
-        rows = build_rows(client, capi, {}, respondents, buyers)
-        _audit(rows)
+        if not full:
+            since = _resolve_since(led, since)
+            if since is None:
+                print("[cadastros_ingest] cadastros vazia — caindo pra carga cheia.", flush=True)
+                full = True
+
+        if full:
+            print("[cadastros_ingest] MODO CHEIO — puxando Client + leads_capi…", flush=True)
+            client = pull_client(rw, since=None)
+            capi = pull_capi(rw)
+            print(f"[cadastros_ingest] Client={len(client)} leads_capi={len(capi)}", flush=True)
+            respondents = pull_respondents(led)
+            buyers = pull_buyers(led)
+            print(f"[cadastros_ingest] respondentes={len(respondents)} compradores={len(buyers)}", flush=True)
+            rows = build_rows(client, capi, {}, respondents, buyers)
+            _audit(rows, incremental=False)
+        else:
+            print(f"[cadastros_ingest] MODO INCREMENTAL — Client com updatedAt > {since}…", flush=True)
+            client = pull_client(rw, since=since)
+            print(f"[cadastros_ingest] Client alterada={len(client)}", flush=True)
+            # leads_capi/leads vazios → source/flags saem como 'client'/false na linha;
+            # o upsert incremental PRESERVA source/flags de quem já existe (não rebaixa),
+            # e reconcile_flags reafirma is_buyer/is_respondent no fim.
+            buyers = set()  # não usado no incremental (reconcile faz server-side)
+            rows = build_rows(client, {}, {}, set(), set())
+            _audit(rows, incremental=True)
+
         if dry_run:
             print("[cadastros_ingest] DRY-RUN — nada escrito.")
-            return {"rows": len(rows), "dry_run": True}
+            return {"rows": len(rows), "dry_run": True, "mode": "full" if full else "incremental"}
         ensure_table(led)
     finally:
         rw.close()
@@ -260,21 +341,32 @@ def main(full: bool = True, since: str | None = None, dry_run: bool = False) -> 
             pass
 
     # Escrita separada da leitura: cada store abre a própria conexão (resiliente a queda).
-    # Front-era via upsert Python; respondentes ANTIGOS via backfill server-side no Cloud SQL.
-    res = upsert_cadastros(rows)
-    print(f"[cadastros_ingest] upsert front-era: {res}")
+    res = upsert_cadastros(rows, mode="full" if full else "incremental")
+    print(f"[cadastros_ingest] upsert ({'cheio' if full else 'incremental'}): {res}")
     if full:
+        # respondentes ANTIGOS (analytics.leads) via backfill server-side no Cloud SQL.
         bf = backfill_leads(buyers)
         print(f"[cadastros_ingest] backfill leads (server-side): {bf}")
         res["backfill_leads"] = bf
+
+    # Reconciliação de flags server-side (ambos os modos): pega quem virou comprador/
+    # respondente sem a Client mudar. Conexão própria (o led de leitura já foi fechado).
+    led2 = open_analytics_connection(timeout=600)
+    try:
+        rec = reconcile_flags(led2)
+        print(f"[cadastros_ingest] reconcile_flags: {rec}")
+        res["reconcile_flags"] = rec
+    finally:
+        led2.close()
     return res
 
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     ap = argparse.ArgumentParser()
-    ap.add_argument("--full", action="store_true", help="carga cheia (Client + leads_capi)")
-    ap.add_argument("--since", default=None, help="incremental: Client com updatedAt > ISO")
+    ap.add_argument("--full", action="store_true", help="carga cheia (Client + leads_capi + backfill); manual/semanal")
+    ap.add_argument("--since", default=None,
+                    help="incremental: Client com updatedAt > ISO, ou 'auto' (marca d'água). O cron usa 'auto'.")
     ap.add_argument("--dry-run", action="store_true", help="audita, não escreve")
     a = ap.parse_args()
     main(full=a.full or a.since is None, since=a.since, dry_run=a.dry_run)
