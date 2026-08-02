@@ -19,8 +19,9 @@
 #                  python /app/src/validation/etl_ad_spend.py --daily --platforms meta
 #                  materializa gasto por campanha×dia em analytics.ad_spend (o relatório do DM lê daí).
 #   --job cadastros → ingestion-cadastros-daily
-#                  python /app/src/data/cadastros_ingest.py --full
-#                  materializa TODOS os cadastros (Client + leads_capi do Railway) em analytics.cadastros.
+#                  python /app/src/data/cadastros_ingest.py --since auto
+#                  atualiza analytics.cadastros de forma INCREMENTAL (só a Client alterada +
+#                  reconciliação de flags server-side). Carga cheia (--full) é manual/semanal.
 #
 # ⚠️  DISTINÇÃO (mesma do validation):
 #   - deploy_capi.sh             = API de produção (Cloud Run Service 24/7)
@@ -98,8 +99,11 @@ resolve_job() {
             ;;
         cadastros)
             JOB_NAME="$INGESTION_CADASTROS_JOB"
-            JOB_ARGS="/app/src/data/cadastros_ingest.py,--full"
-            JOB_DESC="materializa todos os cadastros (Client + leads_capi) em analytics.cadastros"
+            # INCREMENTAL (--since auto): só a Client alterada desde a marca d'água +
+            # reconciliação de flags server-side. Barato (< 1 min). A carga CHEIA (--full,
+            # ~60 min) NÃO roda no cron — é manual/semanal (ver comentário em config.sh).
+            JOB_ARGS="/app/src/data/cadastros_ingest.py,--since,auto"
+            JOB_DESC="atualiza analytics.cadastros (incremental: Client alterada + reconcilia flags)"
             JOB_TASK_TIMEOUT="900"
             ;;
         *)
