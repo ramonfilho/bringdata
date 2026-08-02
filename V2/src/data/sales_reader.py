@@ -44,6 +44,7 @@ def read_sales(
     *,
     client_id: str = "devclub",
     gateways: Optional[Sequence[str]] = None,
+    as_of: Optional[str] = None,
     conn=None,
 ) -> pd.DataFrame:
     """Lê vendas de analytics.sales no shape dos loaders.
@@ -53,6 +54,12 @@ def read_sales(
         client_id:  cliente (multi-cliente desde o dia 1).
         gateways:   None = todos (enriquecimento). Lista = só esses (ex.: ['guru','tmb']
                     reproduz o treino atual, pro parity audit).
+        as_of:      leitura POINT-IN-TIME (YYYY-MM-DD): a tabela como ela era naquele dia.
+                    Aqui `ingested_at` SERVE como linhagem — ao contrário de
+                    analytics.leads, esta tabela é append (o ETL insere, não reescreve),
+                    então a data de entrada de cada venda se preserva. Necessário porque
+                    venda antiga ingerida com atraso vira target=1 num lead que era 0:
+                    sem cortar, o rótulo de um treino passado não se reproduz.
 
     Returns:
         DataFrame com colunas email, telefone, nome, sale_value, sale_date,
@@ -66,6 +73,9 @@ def read_sales(
     if end:
         where.append("sale_date < CAST(:end AS timestamptz) + interval '1 day'")
         params["end"] = end
+    if as_of:
+        where.append("ingested_at < CAST(:as_of AS timestamptz) + interval '1 day'")
+        params["as_of"] = as_of
     if gateways:
         # placeholders nomeados :gw0, :gw1, ... (pg8000.native não aceia lista direta)
         ph = []
