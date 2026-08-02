@@ -7,7 +7,7 @@
 #   A. LOCK/FILA        — um deploy por vez (lock distribuído no GCS; cross-máquina/sessão).
 #   B. FRESCOR = TOPO   — só deploya se HEAD == origin/main (o TOPO), não só ancestral.
 #   C. MONOTONICIDADE   — recusa subir/promover um SHA que está ATRÁS do que já está vivo.
-#   D. ANTI-DRIFT       — status flagra api≠monitoring; sync-monitoring alinha os dois.
+#   D. LOCKSTEP         — ao promover o api, alinha o monitoring à MESMA imagem (fim do drift).
 #   E. LEDGER + VERIFY  — registra todo deploy (durável, compartilhado) e confere pós-promote.
 #
 # NUNCA toca produção em `status` nem em `--dry-run`. NUNCA remove allUsers/main.
@@ -15,10 +15,10 @@
 # Uso:
 #   deploy-gate.sh status                          # visão única: SHA vivo/serviço, relação c/ main, drift, lock, ledger
 #   deploy-gate.sh deploy [--dry-run] [--yes]      # trava+frescor+monotonicidade -> deploy_capi (canary api) -> ledger
-#   deploy-gate.sh promote --revision R [--service S] [--to N] [--dry-run]   # promoção governada + verificação
-#   deploy-gate.sh sync-monitoring [--dry-run]     # alinha monitoring à imagem VIVA do api (mata overlay/drift)
+#   deploy-gate.sh promote --revision R [--to N] [--no-sync] [--dry-run]   # promove api + LOCKSTEP do monitoring + verifica
+#   deploy-gate.sh sync-monitoring [--dry-run]     # cria revisão do monitoring na imagem viva do api, ROTEIA tráfego, Ready, rollback
 #   deploy-gate.sh unlock                          # quebra lock preso (confirmação)
-# Overrides (uso consciente): --allow-behind (canary fora do topo)  --rollback (promover atrás do vivo)
+# Overrides (uso consciente): --allow-behind (canary fora do topo)  --rollback (promover atrás do vivo)  --no-sync (não alinhar monitoring)
 set -uo pipefail
 
 REPO="/Users/ramonmoreira/Desktop/bring_data"
@@ -50,6 +50,7 @@ try:
   e={x['name']:x.get('value') for x in c.get('env',[]) if 'value' in x}
   print({'sha':e.get('DEPLOY_GIT_SHA') or 'unknown','image':c.get('image','')}.get('$2',''))
 except Exception: pass"; }
+rev_ready(){ gcloud run revisions describe "$1" --region="$REGION" --project="$PROJECT" --format='value(status.conditions[0].status)' 2>/dev/null; }
 rel_to_main(){ local sha="$1"
   { [ -z "$sha" ] || [ "$sha" = "unknown" ]; } && { echo "SHA desconhecido (overlay/label velho)"; return; }
   git -C "$REPO" cat-file -e "${sha}^{commit}" 2>/dev/null || { echo "SHA não existe neste repo"; return; }
@@ -109,14 +110,14 @@ behind_live(){ local target="$1" live; live=$(rev_field "$(live_revision "$API_S
   [ "$(git -C "$PWD" rev-parse "$target")" != "$(git -C "$PWD" rev-parse "$live")" ] && git -C "$PWD" merge-base --is-ancestor "$target" "$live" 2>/dev/null; }
 
 cmd_deploy(){ [ -f "$DEPLOY_CAPI" ] || { err "deploy_capi.sh não achado"; exit 1; }
-  info "gate de deploy (serviço-base: $API_SVC; monitoring alinha depois via sync-monitoring)"
+  info "gate de deploy (serviço-base: $API_SVC; monitoring alinha no promote via lockstep)"
   precheck || exit 1
   if behind_live HEAD; then err "REGRESSÃO: HEAD ($HEAD_SHA) está ATRÁS do vivo. Reverteria produção."; [ "${ROLLBACK:-false}" = true ] || { echo "      rollback intencional? --rollback"; exit 1; }; warn "ROLLBACK=true — seguindo."; else ok "monotonicidade OK."; fi
-  if [ "${DRY_RUN:-false}" = true ]; then echo "── PLANO (dry-run) ──"; echo "  1) lock  2) deploy_capi.sh (canary $API_SVC de $HEAD_SHA)  3) ledger"; echo "  (promoção: deploy-gate.sh promote --revision <canary>; monitoring: sync-monitoring)"; return 0; fi
+  if [ "${DRY_RUN:-false}" = true ]; then echo "── PLANO (dry-run) ──"; echo "  1) lock  2) deploy_capi.sh (canary $API_SVC de $HEAD_SHA)  3) ledger"; echo "  (promoção: deploy-gate.sh promote --revision <canary> — já faz o lockstep do monitoring)"; return 0; fi
   [ "${YES:-false}" = true ] || { read -r -p "Confirmar canary de $HEAD_SHA? [y/N] " a; [ "$a" = y ] || { warn abortado.; exit 1; }; }
   lock_acquire || exit 1; trap lock_release EXIT
   local from; from=$(rev_field "$(live_revision "$API_SVC")" sha)
-  if ( cd "$PWD" && bash "$DEPLOY_CAPI" --yes ); then ok "canary do $API_SVC criado (0% tráfego)."; ledger_write deploy "$API_SVC" "${from:-?}" "$HEAD_SHA" ok "canary criado"; info "próximo: promote --revision <canary>, depois sync-monitoring."
+  if ( cd "$PWD" && bash "$DEPLOY_CAPI" --yes ); then ok "canary do $API_SVC criado (0% tráfego)."; ledger_write deploy "$API_SVC" "${from:-?}" "$HEAD_SHA" ok "canary criado"; info "próximo: deploy-gate.sh promote --revision <canary> (promove api + alinha monitoring)."
   else err "deploy_capi.sh falhou."; ledger_write deploy "$API_SVC" "${from:-?}" "$HEAD_SHA" fail deploy_capi; exit 1; fi; }
 
 cmd_promote(){ local rev="${PROMOTE_REV:-}" svc="${PROMOTE_SVC:-$API_SVC}" to="${PROMOTE_TO:-100}"
@@ -125,30 +126,50 @@ cmd_promote(){ local rev="${PROMOTE_REV:-}" svc="${PROMOTE_SVC:-$API_SVC}" to="$
   local rsha live; rsha=$(rev_field "$rev" sha); live=$(rev_field "$(live_revision "$svc")" sha)
   info "promover $rev ($rsha) -> ${to}% em $svc (vivo: $live)"
   if behind_live "$rsha"; then err "REGRESSÃO: promover $rsha reverteria o vivo ($live)."; [ "${ROLLBACK:-false}" = true ] || { echo "      rollback intencional? --rollback"; exit 1; }; warn "ROLLBACK=true — seguindo."; fi
-  if [ "${DRY_RUN:-false}" = true ]; then echo "── PLANO (dry-run) ── update-traffic $svc --to-revisions=$rev=$to"; return 0; fi
+  if [ "${DRY_RUN:-false}" = true ]; then echo "── PLANO (dry-run) ── update-traffic $svc --to-revisions=$rev=$to"; [ "$svc" = "$API_SVC" ] && [ "${NO_SYNC:-false}" != true ] && echo "  + LOCKSTEP: alinha $MON_SVC à mesma imagem depois"; return 0; fi
   [ "${YES:-false}" = true ] || { read -r -p "Promover $rev a ${to}% em $svc? [y/N] " a; [ "$a" = y ] || { warn abortado.; exit 1; }; }
   lock_acquire || exit 1; trap lock_release EXIT
   gcloud run services update-traffic "$svc" --region="$REGION" --project="$PROJECT" --to-revisions="$rev=$to" >/dev/null 2>&1 || { err "update-traffic falhou."; ledger_write promote "$svc" "${live:-?}" "$rsha" fail update-traffic; exit 1; }
   sleep 3; local nl; nl=$(rev_field "$(live_revision "$svc")" sha)
-  [ "$nl" = "$rsha" ] && { ok "VERIFICADO: vivo == $rsha."; ledger_write promote "$svc" "${live:-?}" "$rsha" ok "to=$to verificado"; } || { warn "vivo=$nl != pretendido=$rsha — confira."; ledger_write promote "$svc" "${live:-?}" "$rsha" warn verify-mismatch; }; }
+  if [ "$nl" = "$rsha" ]; then ok "VERIFICADO: vivo == $rsha."; ledger_write promote "$svc" "${live:-?}" "$rsha" ok "to=$to verificado"
+  else warn "vivo=$nl != pretendido=$rsha — confira."; ledger_write promote "$svc" "${live:-?}" "$rsha" warn verify-mismatch; fi
+  # LOCKSTEP: promoveu o api a 100% → alinha o monitoring à MESMA imagem (não-fatal; api já está de pé).
+  if [ "$svc" = "$API_SVC" ] && [ "$to" = 100 ] && [ "$nl" = "$rsha" ] && [ "${NO_SYNC:-false}" != true ]; then
+    info "lockstep: alinhando $MON_SVC à imagem promovida ($rsha)…"
+    ( _GATE_LOCKED=1; YES=true; cmd_sync_monitoring ) || warn "lockstep do monitoring falhou — api OK; rode 'deploy-gate.sh sync-monitoring' na mão."
+  fi; }
 
 cmd_sync_monitoring(){ local ar ai as mr mi; ar=$(live_revision "$API_SVC"); ai=$(rev_field "$ar" image); as=$(rev_field "$ar" sha); mr=$(live_revision "$MON_SVC"); mi=$(rev_field "$mr" image)
-  info "api vivo: $as"; info "monitoring vivo: $(rev_field "$mr" sha)"
+  info "api vivo: $as ($ar)"; info "monitoring vivo: $(rev_field "$mr" sha) ($mr)"
   [ "$ai" = "$mi" ] && { ok "já na mesma imagem — nada a fazer."; return 0; }
-  if [ "${DRY_RUN:-false}" = true ]; then echo "── PLANO (dry-run) ── $MON_SVC -> imagem do api + label DEPLOY_GIT_SHA=$as"; return 0; fi
+  if [ "${DRY_RUN:-false}" = true ]; then echo "── PLANO (dry-run) ── $MON_SVC -> imagem viva do api ($as): cria revisão, ROTEIA tráfego 100%, verifica Ready, rollback p/ $mr se falhar"; return 0; fi
   [ "${YES:-false}" = true ] || { read -r -p "Alinhar $MON_SVC à imagem do api ($as)? [y/N] " a; [ "$a" = y ] || { warn abortado.; exit 1; }; }
-  lock_acquire || exit 1; trap lock_release EXIT
-  gcloud run services update "$MON_SVC" --region="$REGION" --project="$PROJECT" --image="$ai" --update-env-vars="DEPLOY_GIT_SHA=$as" >/dev/null 2>&1 \
-    && { ok "$MON_SVC alinhado a $as."; ledger_write sync "$MON_SVC" "$mi" "$as" ok align; } || { err "falha ao alinhar."; ledger_write sync "$MON_SVC" "$mi" "$as" fail update; exit 1; }; }
+  # lock: pula se já sob o lock do promote (lockstep)
+  [ "${_GATE_LOCKED:-0}" = 1 ] || { lock_acquire || exit 1; trap lock_release EXIT; }
+  # 1) cria a revisão nova (imagem viva do api + label correta). Tráfego pinado => nasce a 0%.
+  local newrev
+  newrev=$(gcloud run services update "$MON_SVC" --region="$REGION" --project="$PROJECT" --image="$ai" --update-env-vars="DEPLOY_GIT_SHA=$as" --format='value(status.latestCreatedRevisionName)' 2>/dev/null)
+  [ -n "$newrev" ] || { err "não criei a revisão nova do $MON_SVC."; ledger_write sync "$MON_SVC" "$mi" "$as" fail update; return 1; }
+  info "revisão nova: $newrev"
+  # 2) ROTEIA o tráfego (o passo que faltava: trata o tráfego pinado)
+  gcloud run services update-traffic "$MON_SVC" --region="$REGION" --project="$PROJECT" --to-revisions="$newrev=100" >/dev/null 2>&1 || { err "update-traffic falhou."; ledger_write sync "$MON_SVC" "$mi" "$as" fail route; return 1; }
+  # 3) verifica Ready (a imagem é a viva do api, já comprovada em prod); rollback se não subir
+  sleep 4; local ready; ready=$(rev_ready "$newrev")
+  if [ "$ready" != "True" ]; then err "revisão nova não ficou Ready ($ready) — ROLLBACK p/ $mr."
+    gcloud run services update-traffic "$MON_SVC" --region="$REGION" --project="$PROJECT" --to-revisions="$mr=100" >/dev/null 2>&1
+    ledger_write sync "$MON_SVC" "$mi" "$as" fail rollback-not-ready; return 1; fi
+  ok "$MON_SVC roteado p/ $newrev ($as), Ready."
+  ledger_write sync "$MON_SVC" "$mi" "$as" ok route+ready
+  info "rollback (se precisar): gcloud run services update-traffic $MON_SVC --region=$REGION --to-revisions=$mr=100"; }
 
 cmd_unlock(){ local h; h=$(lock_holder); [ -z "$h" ] && { info "nenhum lock ativo."; return 0; }
   warn "lock atual: $h"; read -r -p "Quebrar? (só se NENHUM deploy roda) [y/N] " a; [ "$a" = y ] && { lock_release; ok "quebrado."; } || info mantido.; }
 
 # ───────── main ─────────
 CMD="${1:-status}"; shift 2>/dev/null || true
-DRY_RUN=false; YES=false; ALLOW_BEHIND=false; ROLLBACK=false; PROMOTE_REV=""; PROMOTE_SVC="$API_SVC"; PROMOTE_TO=100
+DRY_RUN=false; YES=false; ALLOW_BEHIND=false; ROLLBACK=false; NO_SYNC=false; PROMOTE_REV=""; PROMOTE_SVC="$API_SVC"; PROMOTE_TO=100
 while [ $# -gt 0 ]; do case "$1" in
-  --dry-run) DRY_RUN=true;; --yes|-y) YES=true;; --allow-behind) ALLOW_BEHIND=true;; --rollback) ROLLBACK=true;;
+  --dry-run) DRY_RUN=true;; --yes|-y) YES=true;; --allow-behind) ALLOW_BEHIND=true;; --rollback) ROLLBACK=true;; --no-sync) NO_SYNC=true;;
   --revision) PROMOTE_REV="${2:-}"; shift;; --service) PROMOTE_SVC="${2:-}"; shift;; --to) PROMOTE_TO="${2:-}"; shift;;
   -h|--help) sed -n '2,30p' "$0"; exit 0;; *) err "flag desconhecida: $1"; exit 2;;
 esac; shift; done
