@@ -94,6 +94,10 @@ INGESTION_SALES_JOB="${INGESTION_SALES_JOB:-ingestion-sales-daily}"
 # OAuth voltar) por campanha×dia em analytics.ad_spend. O relatório do DM LÊ dessa
 # tabela (leve, sem API viva); este job é quem a enche.
 INGESTION_SPEND_JOB="${INGESTION_SPEND_JOB:-ingestion-ad-spend}"
+# cadastros (cadastros_ingest --full): materializa TODOS os cadastros (Client + leads_capi
+# do Railway) em analytics.cadastros — a espinha de identidade (respondente da pesquisa ou
+# não). Carga cheia idempotente (upsert por email), self-healing, recomputa is_respondent.
+INGESTION_CADASTROS_JOB="${INGESTION_CADASTROS_JOB:-ingestion-cadastros-daily}"
 # calendário de LFs (launch_calendar --sync-to-table): lê a planilha canônica do
 # cliente e materializa as datas de lançamento em analytics.launch_calendar. Vira
 # a fonte runtime do resolvedor de LF (LAUNCHES_SOURCE=table) — sem deploy a cada
@@ -112,6 +116,9 @@ INGESTION_LAUNCH_CAL_SCHEDULE="${INGESTION_LAUNCH_CAL_SCHEDULE:-30 8 * * *}"
 INGESTION_LEADS_SCHEDULE="${INGESTION_LEADS_SCHEDULE:-0 9 * * *}"
 INGESTION_SALES_SCHEDULE="${INGESTION_SALES_SCHEDULE:-30 9 * * *}"
 INGESTION_SPEND_SCHEDULE="${INGESTION_SPEND_SCHEDULE:-45 9 * * *}"
+# 10:00 UTC = 07:00 BRT — DEPOIS do job de leads (06:00), pra o is_respondent refletir os
+# respondentes que entraram hoje. cadastros não alimenta treino, então horário é folgado.
+INGESTION_CADASTROS_SCHEDULE="${INGESTION_CADASTROS_SCHEDULE:-0 10 * * *}"
 
 # =============================================================================
 # SLACK (NOTIFICATIONS)

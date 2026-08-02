@@ -33,9 +33,13 @@ CadastroRec = namedtuple("CadastroRec", ["utm_source", "utm_term"])
 _CAD_COLS = ["email", "telefone", "data_captura", "utm_campaign", "utm_source"]
 
 
-def open_railway_connection():
+def open_railway_connection(timeout: int = 30):
     """Abre uma `pg8000.native.Connection` no Railway (base do front do cliente:
     `Client`/`UTMTracking`). O chamador é dono da conexão (deve fechá-la).
+
+    Args:
+        timeout: segundos de socket. Default 30 (leitura janelada do relatório);
+            cargas de snapshot cheio (100k+ linhas) devem passar >=180.
 
     Raises:
         KeyError: se `RAILWAY_DB_HOST`/`RAILWAY_DB_PASSWORD` não estiverem no
@@ -49,7 +53,7 @@ def open_railway_connection():
         database=os.environ.get("RAILWAY_DB_NAME", "railway"),
         user=os.environ.get("RAILWAY_DB_USER", "postgres"),
         password=os.environ["RAILWAY_DB_PASSWORD"],
-        timeout=30,
+        timeout=timeout,
     )
 
 
