@@ -237,6 +237,15 @@ def _ensure_provenance_table(conn) -> None:
     conn.run(f"""CREATE TABLE IF NOT EXISTS {PROVENANCE_TBL} (
         source varchar, event_id varchar, provenance varchar, prio smallint, ingested_at timestamptz,
         PRIMARY KEY (source, event_id))""")
+    # `first_seen_at`: quando o lead foi visto PELA PRIMEIRA vez, preservado em toda
+    # reescrita. `ingested_at` não serve pra isso — os dois caminhos de escrita reescrevem
+    # linhas existentes e o carimbam de novo, então ele significa "último rebuild".
+    # Sem esta coluna não dá pra saber o que a tabela continha num dia passado, e sem isso
+    # nenhum modelo treinado no passado é reproduzível (caso jul_24, 02/08/2026).
+    # Mora AQUI e não em analytics.leads porque leads é do usuário `postgres` e o job roda
+    # como `ledger_app` — é exatamente o motivo desta sidecar existir.
+    conn.run(f"ALTER TABLE {PROVENANCE_TBL} ADD COLUMN IF NOT EXISTS first_seen_at timestamptz")
+    conn.run(f"UPDATE {PROVENANCE_TBL} SET first_seen_at = ingested_at WHERE first_seen_at IS NULL")
 
 
 def _ensure_audit_table(conn) -> None:
@@ -312,10 +321,40 @@ def build_unified(cloud_conn, *, write: bool = False, source: str | None = None)
                    utm_source, utm_medium, utm_campaign, utm_content, utm_term, user_agent,
                    canon, now()
             FROM _u""")
+        # Antes de apagar a linhagem, guarda o "primeiro visto" de quem já existia.
+        # Reescrever a tabela derivada é legítimo (mantém a dedup globalmente correta);
+        # perder a data de quem já estava lá é que não é.
+        cloud_conn.run("DROP TABLE IF EXISTS _fs")
+        # FAIL-LOUD de linhagem: quantos ficaram com "primeiro visto" = agora?
+        # Num rebuild, a esmagadora maioria já existia e deve PRESERVAR a data antiga.
+        # Se quase tudo sair como novo, a preservação quebrou (event_id instável, sidecar
+        # vazia) e acabamos de destruir a linhagem outra vez — que é exatamente o bug que
+        # esta mudança existe pra impedir. Silencioso, ele só apareceria meses depois,
+        # na hora de tentar reproduzir um modelo.
+        _novos = cloud_conn.run(
+            f"SELECT count(*) FROM {PROVENANCE_TBL} "
+            f"WHERE source='{FONTE}' AND first_seen_at >= now() - interval '1 hour'")[0][0]
+        _total_prov = cloud_conn.run(
+            f"SELECT count(*) FROM {PROVENANCE_TBL} WHERE source='{FONTE}'")[0][0]
+        _pct = 100.0 * _novos / max(_total_prov, 1)
+        logger.info("[linhagem] %d/%d (%.1f%%) com primeiro-visto novo; %d preservados",
+                 _novos, _total_prov, _pct, _total_prov - _novos)
+        if deleted > 0 and _pct > 50.0:
+            raise RuntimeError(
+                f"[linhagem] {_pct:.1f}% do universo saiu com primeiro-visto NOVO num rebuild "
+                f"que apagou {deleted:,} linhas preexistentes. A preservação falhou — "
+                f"provável event_id instável ou sidecar fora de sincronia. Abortado: "
+                f"seguir destruiria a linhagem e tornaria irreproduzível todo modelo futuro.")
+        cloud_conn.run(f"""CREATE TEMP TABLE _fs AS
+            SELECT event_id, MIN(COALESCE(first_seen_at, ingested_at)) AS first_seen_at
+            FROM {PROVENANCE_TBL} WHERE source='{FONTE}' GROUP BY event_id""")
+        cloud_conn.run("CREATE INDEX ON _fs (event_id)")
         cloud_conn.run(f"DELETE FROM {PROVENANCE_TBL} WHERE source='{FONTE}'")
         cloud_conn.run(f"""
-            INSERT INTO {PROVENANCE_TBL} (source, event_id, provenance, prio, ingested_at)
-            SELECT '{FONTE}', event_id, prov, prio, now() FROM _u""")
+            INSERT INTO {PROVENANCE_TBL} (source, event_id, provenance, prio, ingested_at, first_seen_at)
+            SELECT '{FONTE}', u.event_id, u.prov, u.prio, now(), COALESCE(f.first_seen_at, now())
+            FROM _u u LEFT JOIN _fs f USING (event_id)""")
+        cloud_conn.run("DROP TABLE IF EXISTS _fs")
         # 4) persiste a reconciliação desta execução (mesmo snapshot); limpa runs impossíveis
         cloud_conn.run(f"DELETE FROM {AUDIT_TBL} WHERE deduplicadas < 0 OR excl_data < 0 OR conserva = false")
         for r in rows:
@@ -377,11 +416,19 @@ def build_incremental(cloud_conn, *, window_days: int = 7, source: str | None = 
                        utm_source, utm_medium, utm_campaign, utm_content, utm_term, user_agent,
                        canon, now()
                 FROM _new""")
+            cloud_conn.run("DROP TABLE IF EXISTS _fs")
+            cloud_conn.run(f"""CREATE TEMP TABLE _fs AS
+                SELECT event_id, MIN(COALESCE(first_seen_at, ingested_at)) AS first_seen_at
+                FROM {PROVENANCE_TBL} WHERE source='{FONTE}'
+                  AND event_id IN (SELECT event_id FROM _new) GROUP BY event_id""")
+            cloud_conn.run("CREATE INDEX ON _fs (event_id)")
             cloud_conn.run(f"DELETE FROM {PROVENANCE_TBL} WHERE source='{FONTE}' "
                            f"AND event_id IN (SELECT event_id FROM _new)")
             cloud_conn.run(f"""
-                INSERT INTO {PROVENANCE_TBL} (source, event_id, provenance, prio, ingested_at)
-                SELECT '{FONTE}', event_id, prov, prio, now() FROM _new""")
+                INSERT INTO {PROVENANCE_TBL} (source, event_id, provenance, prio, ingested_at, first_seen_at)
+                SELECT '{FONTE}', n.event_id, n.prov, n.prio, now(), COALESCE(f.first_seen_at, now())
+                FROM _new n LEFT JOIN _fs f USING (event_id)""")
+            cloud_conn.run("DROP TABLE IF EXISTS _fs")
         cloud_conn.run("COMMIT")
     except Exception:
         try:

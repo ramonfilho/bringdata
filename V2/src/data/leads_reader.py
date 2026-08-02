@@ -20,12 +20,36 @@ from src.data.analytics_connection import open_analytics_connection
 
 logger = logging.getLogger(__name__)
 
+# Data a partir da qual a leitura point-in-time é CONFIÁVEL.
+#
+# `first_seen_at` foi criado em 02/08/2026 e o histórico anterior foi preenchido com
+# `ingested_at` — que para 312.677 linhas (86% da tabela) é a data do rebuild completo de
+# 30/06/2026, não a data real em que o lead entrou. Logo, pedir o universo de uma data
+# ANTERIOR a esse rebuild devolveria um recorte errado: leads capturados em 2025 só
+# apareceriam a partir de 30/06.
+#
+# Levantar é melhor que responder errado: um universo silenciosamente torto vira um
+# baseline torto, que vira uma decisão de modelo tomada em cima de nada.
+_ASOF_CONFIAVEL_DESDE = "2026-06-30"
+
+
+def _assert_asof_confiavel(as_of: str) -> None:
+    if str(as_of) < _ASOF_CONFIAVEL_DESDE:
+        raise ValueError(
+            f"[leads_reader] as_of={as_of} é anterior a {_ASOF_CONFIAVEL_DESDE}, quando o "
+            f"universo de treino foi reconstruído por inteiro. Antes dessa data a linhagem "
+            f"não existe (o rebuild recarimbou tudo) e o recorte sairia errado — leads "
+            f"antigos apareceriam como se tivessem entrado em 30/06. Reprodução de modelo "
+            f"treinado antes disso não é possível com os dados atuais."
+        )
+
 
 def read_pesquisa(
     source: str = "train_pesquisa",
     client_id: str = "devclub",
     conn=None,
     include_utm: bool = False,
+    as_of: Optional[str] = None,
 ) -> pd.DataFrame:
     """Reconstrói o df_pesquisa do snapshot jsonb em analytics.leads.
 
@@ -40,6 +64,18 @@ def read_pesquisa(
             treino a resolve em `__campaign_for_weights__` e a dropa antes do FE.
             Default False → contrato inalterado pros demais consumidores.
 
+        as_of: leitura POINT-IN-TIME (YYYY-MM-DD) — devolve o universo COMO ELE ERA
+            naquele dia, filtrando por `first_seen_at` da sidecar de linhagem.
+            None = agora (contrato inalterado).
+
+            Existe porque `analytics.leads` é uma tabela DERIVADA que o `leads_unify`
+            reescreve (DELETE+INSERT). Sem lineage preservado não dá pra saber o que a
+            tabela continha num dia passado — e sem isso nenhum modelo treinado no
+            passado é reproduzível. Foi o que inviabilizou reproduzir o jul_24.
+
+            LIMITE DURO: só vale de `_ASOF_CONFIAVEL_DESDE` em diante (ver constante).
+            Data anterior levanta, em vez de devolver um universo errado em silêncio.
+
     Returns:
         DataFrame com as mesmas colunas do df_pesquisa dumpado. Vazio se nada.
     """
@@ -47,10 +83,23 @@ def read_pesquisa(
     conn = conn or open_analytics_connection()
     try:
         cols = "survey_responses, utm_campaign" if include_utm else "survey_responses"
+        _params = {"c": client_id, "s": source}
+        _join = _where = ""
+        if as_of:
+            _assert_asof_confiavel(as_of)
+            # A linhagem mora na sidecar (analytics.leads é do usuário `postgres`; o job
+            # roda como `ledger_app` e não pode ALTER). Auditado 02/08/2026: 1:1 exato,
+            # zero órfãos, zero event_id nulo — o join não perde lead.
+            _join = (" JOIN analytics.leads_provenance p "
+                     "ON p.source = l.source AND p.event_id = l.event_id")
+            _where = " AND p.first_seen_at < CAST(:a AS timestamptz) + interval '1 day'"
+            _params["a"] = as_of
+        _cols_q = ", ".join(f"l.{c.strip()}" for c in cols.split(","))
         rows = conn.run(
-            f"SELECT {cols} FROM leads "
-            "WHERE client_id = :c AND source = :s AND survey_responses IS NOT NULL",
-            c=client_id, s=source,
+            f"SELECT {_cols_q} FROM leads l{_join} "
+            "WHERE l.client_id = :c AND l.source = :s "
+            f"AND l.survey_responses IS NOT NULL{_where}",
+            **_params,
         )
     finally:
         if own:
