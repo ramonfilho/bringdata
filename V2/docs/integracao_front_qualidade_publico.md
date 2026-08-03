@@ -149,6 +149,17 @@ três buckets são as campanhas por objetivo de otimização: **Lead** (campanha
 padrão), **Champion** e **Challenger** (campanhas com o evento de qualidade do
 modelo). `winner` indica qual bucket está mais próximo do perfil de comprador.
 
+> **`winner` pode vir `null`, e o front precisa tratar.** Desde 02/08/2026 a regra
+> é única no projeto (`data_quality.pick_variant_winner`): vence quem tem o menor
+> `|delta_pp|` contra a referência, **e só** em característica de direção
+> conhecida. Vem `null` quando a `direction` é `uncertain`/`insufficient_data`/
+> `neutral` (não existe "melhor"), quando algum dos dois braços está sem medição
+> na categoria (`champion_pct` ou `challenger_pct` nulo, sem o que comparar),
+> ou quando as duas distâncias empatam. Antes desta data o campo elegia vencedor
+> mesmo nesses casos, inclusive em corrida de um braço só: o exemplo abaixo é um
+> deles e hoje devolveria `null`, por ter `champion_pct: null` e
+> `direction: "uncertain"`.
+
 ```json
 [
   {

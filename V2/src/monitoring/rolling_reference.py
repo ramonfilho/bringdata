@@ -28,7 +28,10 @@ from typing import Optional
 
 import pandas as pd
 
-from src.data.matured_window import build_matured_window, matured_bounds, resolve_ruler_run_id
+from src.data.matured_window import (
+    build_matured_window, matured_bounds, resolve_ruler_run_id,
+    DEFAULT_MATURATION_DAYS,
+)
 # NOTE(sw-architect): build_matched_df/read_analytics_sales moram hoje em
 # src/validation/model_performance. É reuso (não duplicação); a limpeza de camada
 # (mover o join pra src/data e os dois consumirem de lá) fica pra um passo próprio.
@@ -40,29 +43,59 @@ logger = logging.getLogger(__name__)
 
 
 def label_matured(matured_df: pd.DataFrame, sales_df: pd.DataFrame, *,
-                  conversion_window_days: int = 60) -> pd.DataFrame:
+                  conversion_window_days: int = DEFAULT_MATURATION_DAYS) -> pd.DataFrame:
     """Casa a janela madura com as vendas (matcher canônico) e devolve `matured_df` +
     coluna `converted` (venda dentro de `conversion_window_days` da captação)."""
     return build_matched_df(matured_df, sales_df, window_days=conversion_window_days)
 
 
-def _conv_by(df: pd.DataFrame, key) -> dict:
-    """conversão por grão: {chave: {leads, conv, rate}} a partir da coluna `converted`."""
-    out = {}
+# Base mínima pra um SEGMENTO (canal ou balde) publicar taxa de conversão própria.
+# Abaixo disso o segmento não entra em by_channel/by_bucket, e o consumidor degrada
+# pra "—" (é o que o painel de decis já faz com balde ausente).
+#
+# Por que existe: em 02/08/2026 o teto de CPL do Champion saiu R$20,81 no relatório
+# porque a taxa dele vinha de 7 vendas em 438 leads (1,598%, quase o dobro da
+# população). O operador identificou na hora que o teto real é menos da metade
+# disso. Uma taxa de conversão de ordem 1% precisa de centenas de leads e dezenas de
+# vendas pra ter erro tolerável; com 7 vendas o intervalo de confiança cobre de
+# ~0,8% a ~3,3%, e qualquer Δ ou teto derivado dali é ruído com aparência de número.
+MIN_SEGMENT_CONV = 30      # vendas na janela madura
+MIN_SEGMENT_LEADS = 1000   # leads na janela madura
+
+
+def _conv_by(df: pd.DataFrame, key, *, min_conv: int = 0, min_leads: int = 0) -> dict:
+    """conversão por grão: {chave: {leads, conv, rate}} a partir da coluna `converted`.
+
+    `min_conv`/`min_leads` cortam segmento de base fina (ver MIN_SEGMENT_*): ele fica
+    FORA do dict em vez de publicar taxa de ruído. Quem sai é logado, nunca silencioso.
+    """
+    out, cortados = {}, []
     g = df.groupby(key)["converted"]
     for k, s in g:
         n = int(s.size)
         c = int(s.sum())
+        if c < min_conv or n < min_leads:
+            cortados.append(f"{k}({c}v/{n}l)")
+            continue
         out[k] = {"leads": n, "conv": c, "rate": (c / n) if n else 0.0}
+    if cortados:
+        logger.warning("[rolling_reference] segmentos sem base mínima (%dv/%dl), fora da "
+                       "referência: %s", min_conv, min_leads, " · ".join(cortados))
     return out
 
 
-def conversion_reference(matched_df: pd.DataFrame, *, bucket_map=None) -> dict:
+def conversion_reference(matched_df: pd.DataFrame, *, bucket_map=None,
+                        min_segment_conv: int = MIN_SEGMENT_CONV,
+                        min_segment_leads: int = MIN_SEGMENT_LEADS) -> dict:
     """Conversão realizada por decil (tudo), e por canal/balde (só a fatia com UTM).
 
     by_decile / overall usam a janela inteira (o decil é da régua, vale pra ponte e
     ledger). by_channel / by_bucket usam só linhas COM utm_source (o ledger) — a
     ponte sem UTM não pode virar canal falso.
+
+    `min_segment_conv`/`min_segment_leads`: piso de base pra um segmento publicar taxa
+    própria (ver MIN_SEGMENT_*). Zerar os dois desliga o corte: serve pra teste de
+    agregação com fixture pequena, NÃO pra produção.
     """
     if matched_df.empty:
         return {"overall": {"leads": 0, "conv": 0, "rate": 0.0},
@@ -80,12 +113,15 @@ def conversion_reference(matched_df: pd.DataFrame, *, bucket_map=None) -> dict:
     dec["_dk"] = dec["decil_challenger"].astype(int).map(lambda d: f"D{d:02d}")
     by_decile = _conv_by(dec, "_dk")
 
-    # canal/balde só onde há UTM (fatia do ledger)
+    # canal/balde só onde há UTM (fatia do ledger), e só com base mínima. Segmento
+    # fino sai fora e o consumidor mostra "—" em vez de taxa de ruído.
     utm = m[m["utm_source"].notna()].copy()
     utm["channel"] = utm["utm_source"].apply(channel_from_source)
     utm["bucket"] = utm["utm_campaign"].apply(lambda x: bucket_from_utm(x, bucket_map))
-    by_channel = _conv_by(utm, "channel")
-    by_bucket = _conv_by(utm, "bucket")
+    by_channel = _conv_by(utm, "channel",
+                          min_conv=min_segment_conv, min_leads=min_segment_leads)
+    by_bucket = _conv_by(utm, "bucket",
+                         min_conv=min_segment_conv, min_leads=min_segment_leads)
 
     logger.info(
         "[rolling_reference] conversão: overall %.3f%% (%d/%d) · canal/balde de %d leads c/ UTM",
@@ -126,7 +162,7 @@ def build_conversion_reference(
     *,
     as_of: Optional[date] = None,
     window_days: int = 90,
-    maturation_days: int = 60,
+    maturation_days: int = DEFAULT_MATURATION_DAYS,
     client_id: str = "devclub",
     ruler_run_id: Optional[str] = None,
     bucket_map=None,

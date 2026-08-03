@@ -14,6 +14,8 @@ from __future__ import annotations
 import argparse
 import logging
 from datetime import date, datetime
+
+from src.data.matured_window import DEFAULT_MATURATION_DAYS
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -38,7 +40,8 @@ def main() -> None:
     ap.add_argument("--client", default="devclub")
     ap.add_argument("--as-of", default=None, help="YYYY-MM-DD (default hoje)")
     ap.add_argument("--window-days", type=int, default=90)
-    ap.add_argument("--maturation-days", type=int, default=60)
+    ap.add_argument("--maturation-days", type=int, default=DEFAULT_MATURATION_DAYS,
+                    help="dias que o lead tem pra comprar (default: ciclo do LF)")
     ap.add_argument("--dry-run", action="store_true", help="calcula e imprime, não grava")
     args = ap.parse_args()
 
