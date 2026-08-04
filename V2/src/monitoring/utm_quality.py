@@ -25,6 +25,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Tuple
 
+from src.monitoring.traffic_gate import contar_leads_pagos
+
 logger = logging.getLogger(__name__)
 
 BRT = timezone(timedelta(hours=-3))
@@ -333,6 +335,10 @@ def compute_utm_quality(
             'end': win_end.isoformat(),
             'label': win_label,
             'n_total': len(records_win),
+            # Leads de origem paga na janela. Alimenta a trava de tráfego
+            # (`traffic_gate.check_from_utm_result`): sem lead pago não há
+            # criativo pra ranquear, então o relatório não sai.
+            'n_pago': contar_leads_pagos(records_win),
         },
         window_lf={
             'label': lf_label,
