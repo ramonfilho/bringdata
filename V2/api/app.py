@@ -4179,6 +4179,7 @@ async def post_slack_digest(
     hours: int = 24,
     include_today_partial: bool = False,
     date: Optional[str] = None,
+    force: bool = False,
 ):
     """
     Renderiza o daily-check em 2 views distintas e posta em canais separados.
@@ -4194,6 +4195,12 @@ async def post_slack_digest(
     Reusa o handler /monitoring/daily-check/railway in-process e aplica os
     renderers do `src/monitoring/digest`. Token vem do env `SLACK_BOT_TOKEN`
     (Secret Manager).
+
+    Trava de tráfego (`src/monitoring/traffic_gate`): sem gasto nem lead pago na
+    janela, o daily-check roda mas NÃO posta — devolve 200 com `skipped`. Entre
+    lançamentos a captação fica pausada e o relatório seria só tabela de zeros.
+    `force=1` posta de qualquer jeito (validação de formatação no DM), e a env
+    `REPORTS_REQUIRE_TRAFFIC=0` desliga a trava sem deploy.
     """
     import os
     import json as _json
@@ -4202,6 +4209,7 @@ async def post_slack_digest(
         extract_view, render_slack_blocks, render_slack_blocks_client,
         PayloadSchemaDriftError,
     )
+    from src.monitoring.traffic_gate import check_from_daily_check, trava_habilitada
 
     token = os.environ.get('SLACK_BOT_TOKEN')
     if not token:
@@ -4229,6 +4237,19 @@ async def post_slack_digest(
         anchor_date=date,
     )
     payload = response.model_dump() if hasattr(response, 'model_dump') else dict(response)
+
+    # Trava de tráfego ANTES de renderizar: sem veiculação na janela não há
+    # relatório. Mede no mesmo payload que seria renderizado, então gate e
+    # relatório nunca discordam sobre a janela.
+    _gate = check_from_daily_check(payload)
+    if not _gate.ativo and not force and trava_habilitada():
+        logger.info(f"⏸️ slack-digest NÃO postado — {_gate.motivo}")
+        return {
+            'ok': True,
+            'skipped': 'sem_trafego',
+            'posts': [],
+            'gate': _gate.as_dict(),
+        }
 
     try:
         view = extract_view(payload)
@@ -4268,6 +4289,7 @@ async def post_slack_digest(
     return {
         'ok': True,
         'posts': results,
+        'gate': _gate.as_dict(),
     }
 
 
@@ -4629,7 +4651,8 @@ async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5,
                                     dest: str = 'trafego',
                                     date: Optional[str] = None,
                                     start_date: Optional[str] = None,
-                                    end_date: Optional[str] = None):
+                                    end_date: Optional[str] = None,
+                                    force: bool = False):
     """
     Relatório diário de criativo, postado no Slack. Default: dia ANTERIOR (BRT) →
     grupo de tráfego (cliente), chamado pelo Cloud Scheduler às 06:00.
@@ -4651,8 +4674,14 @@ async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5,
 
     Substitui o antigo hack de subir canary com env de canal redirecionado pra
     postar no DM: agora é `?dest=dm[&date=…]` ou `?dest=dm&start_date=…&end_date=…`.
+
+    Trava de tráfego (`src/monitoring/traffic_gate`): sem lead de origem PAGA na
+    janela não há criativo pra ranquear, então não posta — devolve 200 com
+    `skipped`. `force=1` posta de qualquer jeito; `REPORTS_REQUIRE_TRAFFIC=0`
+    desliga a trava sem deploy.
     """
     from src.monitoring.utm_quality import render_slack_blocks, post_to_slack
+    from src.monitoring.traffic_gate import check_from_utm_result, trava_habilitada
     from datetime import datetime as _dt, timezone as _tz, timedelta as _td
     _BRT = _tz(_td(hours=-3))
 
@@ -4690,6 +4719,13 @@ async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5,
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"compute_utm_quality falhou: {e}")
+
+    _gate = check_from_utm_result(result)
+    if not _gate.ativo and not force and trava_habilitada():
+        logger.info(f"⏸️ utm-quality NÃO postado ({channel}) — {_gate.motivo}")
+        return {'ok': True, 'skipped': 'sem_trafego', 'channel': channel, 'dest': dest,
+                'window': result.window.get('label'), 'gate': _gate.as_dict()}
+
     top5_lf = _build_top5_for(result, client_id)
     top5_window = _build_top5_window(result, client_id)
     blocks = render_slack_blocks(result, top5_lf=top5_lf, top5_window=top5_window)
@@ -4699,7 +4735,8 @@ async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5,
     post['blocks_count'] = len(blocks)
     if not post.get('ok'):
         raise HTTPException(status_code=502, detail=f"Slack: {post.get('error')}")
-    return {'ok': True, 'channel': channel, 'dest': dest, 'window': win_label, 'post': post}
+    return {'ok': True, 'channel': channel, 'dest': dest, 'window': win_label, 'post': post,
+            'gate': _gate.as_dict()}
 
 
 @app.get("/smoke/run-variants")
