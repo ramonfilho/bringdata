@@ -13,6 +13,7 @@ import os
 from datetime import datetime
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score
+from scipy.stats import ks_2samp
 from sklearn.model_selection import train_test_split
 import sklearn
 import logging
@@ -924,6 +925,9 @@ def registrar_features_e_modelo_devclub(
         modelo_final.fit(X_train, y_train, sample_weight=w_train)
         y_prob = modelo_final.predict_proba(X_test)[:, 1]
         auc_final = roc_auc_score(y_test, y_prob)
+        # KS (Kolmogorov-Smirnov): maior gap entre as CDFs de score de positivos vs negativos.
+        # Usa os mesmos arrays alinhados do AUC. Mascara posicional (.values) para casar com o numpy y_prob.
+        ks_final = ks_2samp(y_prob[y_test.values == 1], y_prob[y_test.values == 0]).statistic
         logger.info("")
 
         # Feature importance
@@ -1115,6 +1119,7 @@ def registrar_features_e_modelo_devclub(
 
         # Logar métricas principais
         mlflow.log_metric("auc", auc_final)
+        mlflow.log_metric("ks", ks_final)
         mlflow.log_metric("top3_decil_concentration", top3_conversoes)
         mlflow.log_metric("top5_decil_concentration", top5_conversoes)
         mlflow.log_metric("lift_maximum", lift_maximo)
@@ -1165,6 +1170,7 @@ def registrar_features_e_modelo_devclub(
             },
             "performance_metrics": {
                 "auc": float(auc_final),
+                "ks": float(ks_final),
                 "top3_decil_concentration": float(top3_conversoes),
                 "top5_decil_concentration": float(top5_conversoes),
                 "lift_maximum": float(lift_maximo),
@@ -1276,6 +1282,7 @@ def registrar_features_e_modelo_devclub(
                     'split_method': split_method,
                     'performance': {
                         'auc': float(auc_final),
+                        'ks': float(ks_final),
                         'monotonia_percentage': float(monotonia),
                         'lift_maximum': float(lift_maximo)
                     }
@@ -1325,6 +1332,7 @@ def registrar_features_e_modelo_devclub(
         logger.info(f"  Matching: {matching_method}")
         logger.info(f"  Métricas de performance:")
         logger.info(f"    AUC: {auc_final:.3f}")
+        logger.info(f"    KS: {ks_final:.3f}")
         logger.info(f"    Top 3 decis: {top3_conversoes:.1f}%")
         logger.info(f"    Lift máximo: {lift_maximo:.1f}x")
         logger.info(f"    Monotonia: {monotonia:.1f}%")
