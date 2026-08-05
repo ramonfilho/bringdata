@@ -51,6 +51,7 @@ from src.core.medium import unify_medium
 from src.core.dataset_versioning import criar_dataset_pos_cutoff, aplicar_janela_conversao as _aplicar_janela_conversao
 from src.core.matching import match_leads as _match_leads
 from src.core.feature_engineering import create_features as _create_features
+from src.core.nota_criativo import adicionar_nota_criativo
 from src.core.encoding import apply_encoding as _apply_encoding
 from src.validation.campaign_classifier import (
     classify_campaign as _classify_campaign,
@@ -375,7 +376,7 @@ def _assert_retraining_decisions_resolved(config_path: str, set_active: bool) ->
     logger.info(f"  [set-active gate] retraining_decisions OK: {decisions}")
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, control_boost=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False, leads_source='files', use_feature_selection=False, model_card=False):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, control_boost=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False, leads_source='files', use_feature_selection=False, model_card=False, nota_criativo=False):
     # Guard: Cloud SQL MLflow precisa estar RUNNABLE. Falha alto se NEVER.
     assert_mlflow_backend_running()
     register_mlflow_cleanup_reminder()
@@ -912,6 +913,15 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("")
 
     # Determinar se deve remover Medium (opção 3)
+    # === NOTA DO CRIATIVO (opt-in) ===
+    # Precisa entrar AQUI: a Célula 8 remove 'Content', e sem ele não dá para saber de qual
+    # anúncio o lead veio. A nota é a versão segura do que 'Content' seria como categoria —
+    # um número calculado só com o passado, que não guarda a identidade do anúncio.
+    if nota_criativo:
+        logger.info("")
+        logger.info("  NOTA DO CRIATIVO: calculando ponto a ponto no tempo (opt-in)")
+        df_pesquisa_final_unificado = adicionar_nota_criativo(df_pesquisa_final_unificado)
+
     remover_medium = (medium_strategy == 'remove')
     df_features_removidas = remover_features_desnecessarias(df_pesquisa_final_unificado, remover_medium=remover_medium)
 
@@ -1594,6 +1604,12 @@ if __name__ == "__main__":
         help='Definir este modelo como ativo em configs/active_model.yaml (baixa arquivos do MLflow automaticamente)'
     )
     parser.add_argument(
+        '--nota-criativo',
+        action='store_true',
+        help='Adiciona a nota do criativo (conversão passada do anúncio, calculada ponto a '
+             'ponto no tempo) como feature numérica. Desligado por padrão.'
+    )
+    parser.add_argument(
         '--model-card',
         action='store_true',
         default=False,
@@ -1809,6 +1825,7 @@ if __name__ == "__main__":
         capture_parity_snapshots=args.capture_parity_snapshots,
         cli_args=vars(args),
         use_cached_data=args.use_cached_data,
+        nota_criativo=args.nota_criativo,
         fixed_hyperparams=json.loads(args.hyperparams) if args.hyperparams else None,
         max_date=args.max_date,
         min_date=args.min_date,
