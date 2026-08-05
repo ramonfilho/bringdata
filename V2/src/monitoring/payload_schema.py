@@ -59,6 +59,13 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'alerts[].details.total_rows':                                                      (R, None),  # ex: 276 — total avaliado no missing_rate_high
     'alerts[].details.total_leads':                                                     (R, None),  # ex: 325 — total na janela de score_distribution_change
     'alerts[].details.baseline_source':                                                 (R, None),  # ex: 'rolling_30d' — origem do baseline (rolling x treino)
+    # Alertas de silêncio operacional (no_leads_received / no_capi_sent). Só
+    # aparecem quando o pipeline fica quieto, que é justamente o estado normal
+    # entre lançamentos — por isso ficaram anos sem ser declarados e derrubaram o
+    # digest com 500 na primeira pausa de captação (05/08/2026).
+    'alerts[].details.hours_since':                                                     (R, None),  # ex: 11.01 — horas desde o último lead/envio
+    'alerts[].details.last_lead_at':                                                    (R, None),  # ex: '2026-08-05T01:20:04Z' — último lead recebido
+    'alerts[].details.last_capi_at':                                                    (R, None),  # ex: '2026-08-05T01:20:04Z' — último evento CAPI enviado
     # Alerta de bucket 'outros' term-source-aware (PR #18): separa macro Meta
     # não-resolvido ({{...}}) de categoria-nova. Só aparecem QUANDO o alerta
     # dispara — por isso passaram sem declaração desde 23/06 e derrubavam o

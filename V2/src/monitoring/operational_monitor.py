@@ -74,10 +74,11 @@ class OperationalMonitor:
                 f"Nenhum lead recebido nas últimas {hours_since:.1f} horas "
                 f"(último: {last_t.isoformat()})"
             ),
+            # SEM e-mail: alerta é renderizado no Slack, inclusive no canal do
+            # cliente. O timestamp já localiza o lead no ledger, sem expor PII.
             'details': {
                 'last_lead_at': last_t.isoformat(),
                 'hours_since': hours_since,
-                'last_lead_email': last_lead.email,
             },
             'timestamp': now.isoformat(),
             'metric_value': hours_since,
@@ -113,10 +114,10 @@ class OperationalMonitor:
                 f"Nenhum evento CAPI enviado nas últimas {hours_since:.1f} horas "
                 f"(último: {last_t.isoformat()})"
             ),
+            # SEM e-mail: mesmo motivo do no_leads_received acima.
             'details': {
                 'last_capi_at': last_t.isoformat(),
                 'hours_since': hours_since,
-                'last_lead_email': last_capi.email,
             },
             'timestamp': now.isoformat(),
             'metric_value': hours_since,
