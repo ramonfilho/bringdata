@@ -403,6 +403,38 @@ A salvaguarda pós-encoding (validador "feature zerada em massa" / conservação
 
 ---
 
+### 20. Senha do banco de produção em texto claro num repositório público (descoberto e fechado em 05/08/2026)
+
+> **Estado: FECHADO.** Este item está aqui porque o padrão que o gerou é o mais didático do registro inteiro, não porque falte ação. Furos de segurança que seguem **abertos** não são documentados no repositório, porque ele é público e isso seria mapa de ataque: eles vivem num documento privado fora do repo, e migram pra cá quando fecham.
+
+Achado por acidente, durante um levantamento de como o MLflow se conectava ao banco, dentro de outra tarefa (desenhar a entrega de dados pra agência do cliente).
+
+**O que era.** A senha do usuário `postgres` da instância Cloud SQL `smart-ads-db` estava escrita em **texto claro** em **11 arquivos versionados**, junto com o IP público da instância. Origem: a constante `DEFAULT_TRACKING_URI` em `src/core/mlflow_setup.py`, criada como default "prático" pra não precisar configurar ambiente.
+
+**Escopo real, medido e não presumido.** A senha conectava da máquina local, de fora de qualquer rede do projeto, nos três bancos (`ledger`, `mlflow`, `postgres`), e **sem TLS** (a instância aceitava conexão não criptografada). O role `postgres` é **dono** de `analytics.leads` (366.384 leads com e-mail, telefone e nome) e de `analytics.sales` (14.127 vendas), com leitura **e escrita**. E tem `CREATEROLE`, o que no PostgreSQL 15 permite `ALTER ROLE ... PASSWORD` em qualquer role não-superusuário, inclusive no `ledger_app` que a produção usa. Ou seja: acesso total, não parcial.
+
+**Correção, na ordem em que foi aplicada:**
+
+1. **Senha rotacionada** (40 caracteres aleatórios). Verificado que a antiga passou a dar `password authentication failed` e que a produção (`ledger_app`) seguiu conectando.
+2. Nova senha no **Secret Manager** (`mlflow-db-password`) e no `V2/.env`, que é gitignored.
+3. `sslMode = ENCRYPTED_ONLY` na instância, pra credencial não trafegar em claro. Foi seguro porque os três conectores do projeto já passavam contexto TLS e o `psycopg2` do MLflow usa `sslmode=prefer`, que negocia TLS. Depois de aplicar: texto claro leva `pg_hba.conf rejects connection`, produção em TLS 1.3 confirmado em `pg_stat_ssl`.
+4. `REVOKE CONNECT ... FROM PUBLIC` nos bancos `postgres` e `cloudsqladmin`. Por ACL default o Postgres deixa qualquer role autenticada conectar em banco novo: comprovado que o `ledger_app`, sem privilégio nenhum de banco, **conectava** no `postgres` e no `template1`.
+5. Senha removida dos 11 arquivos, e `DEFAULT_TRACKING_URI` **eliminada**. A URI passa a vir do ambiente, e a falta dela levanta exceção com a instrução de correção. Cair calado num MLflow local vazio seria pior: o run do treino iria pra lugar nenhum e ninguém veria.
+6. Achada e removida uma **segunda** senha literal, em `src/monitoring/run_monitoring_local.sh`, do Cloud SQL `bring-data-db`. Já estava morta (instância descomissionada em 25/02/2026, e a senha não autentica na instância viva, testado).
+7. **Teste de regressão** `V2/tests/test_sem_credencial_no_repo.py`: varre tudo que o `git ls-files` devolve e falha se credencial literal aparecer. Casa por **forma** (URI com senha inline, atribuição direta a variável de senha, token de bot do Slack, chave privada), **não por valor**, então pega segredo novo e não só o que já vazou. Validado com controle negativo: duas iscas plantadas em arquivo versionado foram pegas.
+
+Tudo em `PR #141`.
+
+**Causa-raiz, e é a parte que importa.** Não foi descuido pontual. A senha entrou como default de conveniência num arquivo de código e de lá foi **copiada** pra doc, pra script e pra checklist ao longo de meses. Cada cópia parecia inofensiva porque "a senha já estava no projeto". Nenhum teste, revisão ou gate olhava para isso, então nenhuma das cópias novas teve chance de ser barrada.
+
+**Padrão que isso confirma, e que já aparece nos Erros 11, 12 e 16:** *quando nada verifica uma propriedade, ela degrada silenciosamente e o custo aparece meses depois*. É o mesmo esqueleto de `Medium_Linguagem_programacao` zerada por semanas e de D9 sem evento CAPI por dois meses. A diferença é que aqui o custo potencial não era sinal de ML degradado, era vazamento de PII de 366 mil pessoas.
+
+**Lição operacional:** a correção que vale não é remover a senha, é o teste. Remover resolve as 11 cópias de hoje; o teste resolve a 12ª, que seria escrita por alguém (ou por mim) daqui a três meses com a mesma justificativa de conveniência.
+
+**Decisão consciente registrada:** o histórico do git continua com a senha antiga. Ela está morta, e reescrever histórico com force-push invalidaria o ledger de deploys (que compara commits) e qualquer PR aberto. Não vale o preço.
+
+---
+
 ## III. Backtests de dano (mar–mai/2026)
 
 Esta seção consolida os backtests contrafactuais executados em mai/2026 para quantificar dano dos bugs de encoding e features faltantes.

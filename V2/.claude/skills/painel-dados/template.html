@@ -1,0 +1,222 @@
+<!--
+  PAINEL-DADOS: template declarativo reutilizável.
+  Para um painel novo: NÃO reescreva o runtime. Só edite o objeto SPEC lá embaixo
+  e publique este arquivo com a ferramenta Artifact.
+
+  SPEC = {
+    eyebrow, title, subtitle(html), source,
+    tiles: [{color, label, value, note}],
+    sections: [
+      { title, sub, chart: {                       // gráfico de barras (1 série)
+          type:'bars', unit:'%'|'R$'|'', dec, color:'accent'|'c1'|'#hex',
+          data:[{label, mean, std?, partial?}] } },
+      { title, sub, chart: {                        // barras agrupadas (N séries)
+          type:'grouped', unit, dec,
+          series:[{name, color}],                   // 2-3; cores c1/c2/c3
+          groups:[{label, values:[{mean,std?}], partial?}] } },
+      { title, sub, chart: {                        // linha (série temporal / ordinal)
+          type:'line', unit, dec,
+          xlabels:[...], series:[{name, color, points:[num,...]}] } },
+      { title, sub, chart: {                        // tabela-mapa (heatmap por bucket)
+          type:'heat', unit, dec, cols:[...],
+          rows:[{label, values:[num,...]}],
+          buckets:[{lt:8,cls:'s'},{lt:20,cls:'m'},{cls:'v'}] } },  // s=verde m=amarelo v=vermelho
+      { title, sub, html:'<p>...</p>' }             // seção de prosa livre
+    ],
+    footer
+  }
+  Regras: 1 eixo por gráfico; hues categóricas em ordem fixa (c1,c2,c3), nunca cicladas;
+  legenda quando >=2 séries; hastes = ±1 desvio (passe std) pra mostrar estabilidade;
+  cores já validadas (CVD) em light e dark. Para 4+ séries, rode o validador do /dataviz.
+-->
+<style>
+  :root{
+    --surface:#fcfcfb; --surface-2:#f4f4f1; --border:#e5e4df;
+    --ink:#1b2128; --muted:#5c6672; --faint:#8a929c; --grid:#e8e7e2;
+    --accent:#6d54d9; --c1:#2f6df0; --c2:#e08a1e; --c3:#0f9d8f;
+    --s:#2f9e6a; --m:#c8871b; --v:#d64545;
+    --s-bg:#e5f3ec; --m-bg:#f7edda; --v-bg:#f7e2e2;
+    --shadow:0 1px 2px rgba(20,25,32,.05),0 4px 16px rgba(20,25,32,.04);
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --surface:#16181c; --surface-2:#1f2228; --border:#2c3037;
+    --ink:#e9ebee; --muted:#9aa3ad; --faint:#6b7480; --grid:#282c33;
+    --accent:#8a78ea; --c1:#5b8dff; --c2:#c67d1c; --c3:#1f9c8b;
+    --s:#3fb37f; --m:#d99a35; --v:#e56a6a;
+    --s-bg:#16302440; --m-bg:#33280f60; --v-bg:#3a1e1e60;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
+  }}
+  :root[data-theme="light"]{--surface:#fcfcfb;--surface-2:#f4f4f1;--border:#e5e4df;--ink:#1b2128;--muted:#5c6672;--faint:#8a929c;--grid:#e8e7e2;--accent:#6d54d9;--c1:#2f6df0;--c2:#e08a1e;--c3:#0f9d8f;--s:#2f9e6a;--m:#c8871b;--v:#d64545;--s-bg:#e5f3ec;--m-bg:#f7edda;--v-bg:#f7e2e2;}
+  :root[data-theme="dark"]{--surface:#16181c;--surface-2:#1f2228;--border:#2c3037;--ink:#e9ebee;--muted:#9aa3ad;--faint:#6b7480;--grid:#282c33;--accent:#8a78ea;--c1:#5b8dff;--c2:#c67d1c;--c3:#1f9c8b;--s:#3fb37f;--m:#d99a35;--v:#e56a6a;--s-bg:#16302440;--m-bg:#33280f60;--v-bg:#3a1e1e60;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--surface);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:40px 24px 64px}
+  .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:650;margin:0 0 10px}
+  h1{font-size:clamp(26px,4vw,38px);line-height:1.1;letter-spacing:-.02em;margin:0 0 12px;text-wrap:balance;font-weight:720}
+  .sub{color:var(--muted);font-size:15px;max-width:72ch;margin:0 0 4px}
+  .sub b{color:var(--ink);font-weight:620}
+  .src{margin-top:6px;font-size:13px;color:var(--faint)}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:30px 0 8px}
+  .tile{background:var(--surface-2);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:var(--shadow)}
+  .tile .lab{font-size:12.5px;color:var(--muted);font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:7px}
+  .tile .val{font-size:26px;font-weight:730;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+  .tile .note{font-size:12.5px;color:var(--faint);margin-top:5px}
+  .dot{width:9px;height:9px;border-radius:3px;display:inline-block;flex:none}
+  section{margin-top:40px}
+  h2{font-size:19px;font-weight:680;letter-spacing:-.01em;margin:0 0 4px}
+  .h2sub{color:var(--muted);font-size:13.5px;margin:0 0 16px;max-width:74ch}
+  .card{background:var(--surface-2);border:1px solid var(--border);border-radius:16px;padding:22px 20px 14px;box-shadow:var(--shadow);overflow-x:auto}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin:0 4px 12px;font-size:13px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  svg{display:block;width:100%;height:auto;min-width:520px}
+  .grid-l{stroke:var(--grid);stroke-width:1}
+  .axis-t{fill:var(--faint);font-size:11px;font-family:var(--mono)}
+  .xlab{fill:var(--muted);font-size:12.5px;font-weight:600;font-family:var(--sans)}
+  .xlab.part{fill:var(--faint)}
+  .vlab{fill:var(--ink);font-size:11.5px;font-weight:640;font-family:var(--mono)}
+  .whisk{stroke:var(--ink);stroke-width:1.6;opacity:.5}
+  .bar{cursor:pointer} .bar.part{opacity:.42}
+  .mk{stroke:var(--surface);stroke-width:2}
+  table{border-collapse:collapse;width:100%;font-size:13px;min-width:520px}
+  th,td{padding:9px 10px;text-align:center;font-variant-numeric:tabular-nums}
+  th{color:var(--muted);font-weight:600;font-size:12px;border-bottom:1px solid var(--border)}
+  td.metric{text-align:left;color:var(--ink);font-weight:600;white-space:nowrap}
+  tbody tr+tr td{border-top:1px solid var(--border)}
+  .chip{border-radius:7px;font-family:var(--mono);font-weight:640;padding:3px 7px}
+  .cv-s{color:var(--s);background:var(--s-bg)} .cv-m{color:var(--m);background:var(--m-bg)} .cv-v{color:var(--v);background:var(--v-bg)}
+  .prose{color:var(--muted);font-size:14.5px;max-width:74ch}
+  .prose b{color:var(--ink)} .prose li{margin:9px 0}
+  .prose code{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:1px 5px;color:var(--ink)}
+  .foot{margin-top:44px;color:var(--faint);font-size:12px;border-top:1px solid var(--border);padding-top:16px}
+  #tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .1s;z-index:9;background:var(--ink);color:var(--surface);font-size:12px;font-family:var(--mono);padding:7px 10px;border-radius:8px;box-shadow:var(--shadow);white-space:nowrap;transform:translate(-50%,-115%)}
+</style>
+
+<div class="wrap" id="app"></div>
+<div id="tip"></div>
+
+<script>
+/* ==== SPEC: edite só isto para um painel novo (exemplo abaixo = qualidade por LF) ==== */
+const SPEC = {
+  eyebrow:"DevClub · Qualidade por lançamento",
+  title:"Estabilidade da qualidade e do custo por lead qualificado",
+  subtitle:"Cada barra é a <b>média diária</b> dentro do lançamento; a haste é <b>±1 desvio padrão</b> (menor = mais estável). Lead qualificado = decil <b>D9-D10</b> do Challenger.",
+  source:"Relatório diário corrigido (08/06–22/07/2026); rótulos de LF conforme planilha canônica. DEV21 em curso (2 dias).",
+  tiles:[
+    {color:"accent",label:"Qualidade do lead",value:"estável ↗",note:"% D9-D10 com CV 2-11%, subindo de ~22% (LF58) a ~27% (LF63)."},
+    {color:"c1",label:"Custo Meta / qualificado",value:"estável ↘",note:"CPL D9-D10 com CV 6-14%; caiu de R$44 (LF58) a ~R$27 (LF63)."},
+    {color:"c2",label:"Custo Google / qualificado",value:"volátil",note:"CPL D9-D10 com CV 20-61% (pouco volume/dia); só estabiliza no LF63."}
+  ],
+  sections:[
+    {title:"% de leads no topo (D9-D10) por lançamento", sub:"A qualidade do público. Hastes curtas = pouca variação dia a dia.",
+     chart:{type:"bars",unit:"%",dec:1,color:"accent",data:[
+       {label:"LF58",mean:22.49,std:1.12},{label:"LF59",mean:25.26,std:2.72},{label:"LF60",mean:28.92,std:2.50},
+       {label:"LF61",mean:28.28,std:1.40},{label:"LF62",mean:24.71,std:1.97},{label:"LF63",mean:27.23,std:0.63},
+       {label:"DEV21",mean:26.90,std:0.57,partial:true}]}},
+    {title:"Custo por lead qualificado (D9-D10) por lançamento e canal", sub:"Barras por canal. A haste enorme do Google no LF59 mostra a volatilidade do custo.",
+     chart:{type:"grouped",unit:"R$",dec:0,series:[{name:"Meta",color:"c1"},{name:"Google",color:"c2"}],groups:[
+       {label:"LF58",values:[{mean:44.07,std:3.84},{mean:29.36,std:6.54}]},
+       {label:"LF59",values:[{mean:45.23,std:5.41},{mean:40.76,std:24.92}]},
+       {label:"LF60",values:[{mean:23.62,std:3.37},{mean:29.53,std:5.69}]},
+       {label:"LF61",values:[{mean:23.95,std:3.40},{mean:24.13,std:8.65}]},
+       {label:"LF62",values:[{mean:30.31,std:2.51},{mean:21.23,std:7.21}]},
+       {label:"LF63",values:[{mean:27.05,std:1.60},{mean:25.87,std:2.64}]},
+       {label:"DEV21",values:[{mean:22.86,std:0.28},{mean:34.73,std:1.03}],partial:true}]}},
+    {title:"Mapa de estabilidade — coeficiente de variação (CV)", sub:"CV = desvio ÷ média (%). Verde <8% estável · amarelo 8-20% moderado · vermelho >20% volátil.",
+     chart:{type:"heat",unit:"%",dec:1,cols:["LF58","LF59","LF60","LF61","LF62","LF63","DEV21*"],
+       buckets:[{lt:8,cls:"s"},{lt:20,cls:"m"},{cls:"v"}],rows:[
+         {label:"% D9-D10",values:[5.0,10.8,8.7,4.9,8.0,2.3,2.1]},
+         {label:"Nota Challenger",values:[0.9,3.4,2.4,1.4,2.4,1.7,1.7]},
+         {label:"CPL Meta D9-D10",values:[8.7,12.0,14.3,14.2,8.3,5.9,1.2]},
+         {label:"CPL Google D9-D10",values:[22.3,61.1,19.3,35.9,33.9,10.2,3.0]}]}},
+    {title:"Como ler e o que mais dá pra produzir",
+     html:`<p>Métricas de estabilidade que saem da mesma tabela com um <code>groupby</code>:</p><ul>
+       <li><b>Desvio padrão (σ):</b> a haste. Variação absoluta dia a dia.</li>
+       <li><b>Coef. de variação (CV=σ/média):</b> a tabela. Adimensional, compara % com R$ na mesma régua.</li>
+       <li><b>Amplitude (máx-mín):</b> o pior/melhor dia que a média esconde.</li>
+       <li><b>Tendência intra-período (inclinação):</b> o número sobe/cai <i>durante</i> o período? Separa ruído de deriva.</li>
+       <li><b>Variação entre grupos (σ das médias):</b> consistência de um período pro outro.</li></ul>`}
+  ],
+  footer:"Barras = média · hastes = ±1 desvio padrão · gerado com a skill painel-dados."
+};
+
+/* ==== runtime (não precisa mexer) ==== */
+const SVGNS="http://www.w3.org/2000/svg";
+const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
+const col=c=>!c?"var(--c1)":(c[0]==="#"?c:`var(--${c})`);
+const svg=(w,h)=>{const s=document.createElementNS(SVGNS,"svg");s.setAttribute("viewBox",`0 0 ${w} ${h}`);s.setAttribute("role","img");return s;};
+const A=(p,t,at)=>{const e=document.createElementNS(SVGNS,t);for(const k in at)e.setAttribute(k,at[k]);p.appendChild(e);return e;};
+const T=(p,x,y,cls,s,anc="middle")=>{const t=A(p,"text",{x,y,class:cls,"text-anchor":anc});t.textContent=s;return t;};
+const tip=document.getElementById("tip");
+const hov=(e,html)=>{e.addEventListener("mousemove",ev=>{tip.innerHTML=html;tip.style.opacity=1;tip.style.left=ev.clientX+"px";tip.style.top=ev.clientY+"px";});e.addEventListener("mouseleave",()=>tip.style.opacity=0);};
+const fmt=(v,ch)=>{const d=ch.dec??(ch.unit==="%"?1:0);return (ch.unit==="R$"?"R$":"")+(+v).toFixed(d)+(ch.unit==="%"?"%":"");};
+const fmtAx=(v,ch)=>(ch.unit==="R$"?"R$":"")+v;
+function scale(maxv){let ym=maxv*1.14;const steps=[1,2,5,10,20,25,50,100,200,500,1000];let st=steps.find(s=>ym/s<=5)||1000;ym=Math.ceil(ym/st)*st;const t=[];for(let v=0;v<=ym+1e-6;v+=st)t.push(+v.toFixed(6));return{ym,t};}
+const W=760,H=360,M={t:26,r:14,b:42,l:46},PW=W-M.l-M.r,PH=H-M.t-M.b;
+function axis(s,ym,ticks,ch){const y=v=>M.t+PH*(1-v/ym);ticks.forEach(tk=>{A(s,"line",{x1:M.l,x2:W-M.r,y1:y(tk),y2:y(tk),class:"grid-l"});T(s,M.l-8,y(tk)+3.5,"axis-t",fmtAx(tk,ch),"end");});return y;}
+function whisker(s,cx,yt,yb,cap){A(s,"line",{x1:cx,x2:cx,y1:yt,y2:yb,class:"whisk"});A(s,"line",{x1:cx-cap,x2:cx+cap,y1:yt,y2:yt,class:"whisk"});A(s,"line",{x1:cx-cap,x2:cx+cap,y1:yb,y2:yb,class:"whisk"});}
+
+function bars(host,ch){
+  const mx=Math.max(...ch.data.map(d=>d.mean+(d.std||0)));const{ym,t}=scale(mx);const s=svg(W,H);const y=axis(s,ym,t,ch);
+  const slot=PW/ch.data.length,bw=Math.min(46,slot*0.5);
+  ch.data.forEach((d,i)=>{const cx=M.l+slot*(i+.5);
+    const r=A(s,"rect",{x:cx-bw/2,y:y(d.mean),width:bw,height:Math.max(0,M.t+PH-y(d.mean)),rx:4,class:"bar"+(d.partial?" part":""),style:`fill:${col(ch.color)}`});
+    hov(r,`<b>${d.label}</b> · ${fmt(d.mean,ch)}${d.std!=null?` · σ ±${d.std}`:""}`);
+    if(d.std!=null)whisker(s,cx,y(d.mean+d.std),y(Math.max(0,d.mean-d.std)),6);
+    T(s,cx,y(d.mean+(d.std||0))-7,"vlab",fmt(d.mean,ch));
+    T(s,cx,H-M.b+20,"xlab"+(d.partial?" part":""),d.label);});
+  host.appendChild(s);
+}
+function grouped(host,ch){
+  const mx=Math.max(...ch.groups.flatMap(g=>g.values.map(v=>v.mean+(v.std||0))));const{ym,t}=scale(mx);const s=svg(W,H);const y=axis(s,ym,t,ch);
+  const n=ch.series.length,slot=PW/ch.groups.length,bw=Math.min(24,slot*0.7/n),gap=3,span=n*bw+(n-1)*gap;
+  ch.groups.forEach((g,i)=>{const gc=M.l+slot*(i+.5);
+    g.values.forEach((v,j)=>{const cx=gc-span/2+bw/2+j*(bw+gap);
+      const r=A(s,"rect",{x:cx-bw/2,y:y(v.mean),width:bw,height:Math.max(0,M.t+PH-y(v.mean)),rx:4,class:"bar"+(g.partial?" part":""),style:`fill:${col(ch.series[j].color)}`});
+      hov(r,`<b>${g.label}</b> · ${ch.series[j].name} ${fmt(v.mean,ch)}${v.std!=null?` · σ ±${v.std}`:""}`);
+      if(v.std!=null)whisker(s,cx,y(v.mean+v.std),y(Math.max(0,v.mean-v.std)),5);
+      T(s,cx,y(v.mean+(v.std||0))-6,"vlab",fmt(v.mean,ch));});
+    T(s,gc,H-M.b+20,"xlab"+(g.partial?" part":""),g.label);});
+  host.appendChild(s);
+}
+function line(host,ch){
+  const all=ch.series.flatMap(se=>se.points);const{ym,t}=scale(Math.max(...all));const s=svg(W,H);const y=axis(s,ym,t,ch);
+  const n=ch.xlabels.length,step=PW/(n-1||1),x=i=>M.l+step*i;
+  ch.series.forEach(se=>{const c=col(se.color);
+    let dpath=se.points.map((p,i)=>(i?"L":"M")+x(i)+" "+y(p)).join(" ");
+    A(s,"path",{d:dpath,fill:"none",style:`stroke:${c}`,"stroke-width":2.2,"stroke-linejoin":"round","stroke-linecap":"round"});
+    se.points.forEach((p,i)=>{const m=A(s,"circle",{cx:x(i),cy:y(p),r:4,class:"mk",style:`fill:${c}`});hov(m,`<b>${ch.xlabels[i]}</b> · ${se.name}: ${fmt(p,ch)}`);});});
+  ch.xlabels.forEach((l,i)=>T(s,x(i),H-M.b+20,"xlab",l));
+  host.appendChild(s);
+}
+function heat(host,ch){
+  const tb=el("table"),th=el("thead"),tr=el("tr");tr.appendChild(el("th","metric","Métrica"));
+  ch.cols.forEach(c=>{const e=el("th",null,c);tr.appendChild(e);});th.appendChild(tr);tb.appendChild(th);
+  const bd=el("tbody");
+  ch.rows.forEach(r=>{const t=el("tr");const m=el("td","metric",r.label);t.appendChild(m);
+    r.values.forEach(v=>{const b=ch.buckets.find(bk=>bk.lt==null||v<bk.lt)||ch.buckets[ch.buckets.length-1];
+      const td=el("td",null,`<span class="chip cv-${b.cls}">${fmt(v,ch)}</span>`);t.appendChild(td);});
+    bd.appendChild(t);});
+  tb.appendChild(bd);host.appendChild(tb);
+}
+
+function build(){
+  const app=document.getElementById("app");
+  if(SPEC.eyebrow)app.appendChild(el("p","eyebrow",SPEC.eyebrow));
+  app.appendChild(el("h1",null,SPEC.title));
+  if(SPEC.subtitle)app.appendChild(el("p","sub",SPEC.subtitle));
+  if(SPEC.source)app.appendChild(el("p","sub src",SPEC.source));
+  if(SPEC.tiles?.length){const g=el("div","tiles");SPEC.tiles.forEach(t=>{
+    const d=el("div","tile");d.innerHTML=`<div class="lab"><span class="dot" style="background:${col(t.color)}"></span>${t.label}</div><div class="val"${t.value&&/vol|instáv|crít/i.test(t.value)?' style="color:var(--v)"':''}>${t.value}</div>${t.note?`<div class="note">${t.note}</div>`:""}`;g.appendChild(d);});app.appendChild(g);}
+  SPEC.sections.forEach(sec=>{const s=el("section");s.appendChild(el("h2",null,sec.title));if(sec.sub)s.appendChild(el("p","h2sub",sec.sub));
+    if(sec.html){const p=el("div","prose",sec.html);s.appendChild(p);}
+    else{const ch=sec.chart;
+      if(ch.type==="grouped"||(ch.type==="line"&&ch.series.length>1)){const lg=el("div","legend");ch.series.forEach(se=>lg.innerHTML+=`<span><span class="dot" style="background:${col(se.color)}"></span>${se.name}</span>`);if(ch.type==="grouped"&&ch.groups.some(g=>g.values.some(v=>v.std!=null)))lg.innerHTML+='<span style="color:var(--faint)">haste = ±1 desvio</span>';s.appendChild(lg);}
+      const card=el("div","card");s.appendChild(card);
+      ({bars,grouped,line,heat}[ch.type]||(()=>{}))(card,ch);}
+    app.appendChild(s);});
+  if(SPEC.footer)app.appendChild(el("p","foot",SPEC.footer));
+}
+build();
+</script>

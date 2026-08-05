@@ -40,6 +40,20 @@
 
 ---
 
+## 🔴 FRENTE ATIVA URGENTE: Endurecimento de segurança da plataforma (05/08/2026)
+
+**O que é:** duas frentes de endurecimento de infraestrutura em aberto, descobertas em 05/08/2026 durante o desenho da entrega de dados para a agência do cliente. Uma delas expõe dado pessoal e a saída do modelo; a outra deixa o banco alcançável de qualquer lugar.
+
+**Por que o detalhe não está aqui:** este repositório é **público**. Descrever qual defesa está aberta, e como, seria publicar mapa de ataque. O estado completo, com evidência medida de cada item, o que quebra se consertar sem cuidado e o caminho de correção, vive num documento **privado** fora do repositório, no acervo sincronizado do iCloud: `claude-config/security/postura_seguranca_bringdata.md`.
+
+**O que já foi fechado em 05/08/2026** (esses podem ser ditos, porque estão resolvidos): credencial de banco rotacionada e removida do código, conexão ao banco passou a exigir criptografia, e o `PUBLIC` do Postgres perdeu acesso de conexão a banco que não devia alcançar. Post-mortem completo em `registro_erros_ml.md`, Erro 20. Código no `PR #141`.
+
+**Prioridade:** acima da entrega de dados para a agência (`entrega_dados_dashboard_zanelato.md`), e é pré-requisito dela. Não faz sentido blindar uma view somente-leitura enquanto há caminho aberto para o mesmo dado.
+
+**Como executar:** protocolo por item, igual às demais frentes. Cada item é desenhado, implementado, testado, commitado, validado em canary sem tráfego e só então promovido. Nenhum item começa sem autorização explícita.
+
+---
+
 ## 🔴 FRENTE ATIVA URGENTE — Restaurar CAPI scoreado para a captação migrada (17/05/2026)
 
 **O que aconteceu:** a captação de produção migrou da tabela `Lead` para `lead_surveys`. Nosso pipeline de scoring/CAPI só lê `Lead` → o evento scoreado por ML (`LeadQualified`/`LeadQualifiedHighQuality` com valor por decil) parou de ser enviado para a inflow viva. Mitigação já aplicada (schedulers pausados) só silencia alarme falso; **não restaura o sinal**.

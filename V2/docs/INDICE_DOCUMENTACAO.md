@@ -253,7 +253,19 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Papel:** registro técnico unificado — bugs com impacto real, decisões erradas, padrões repetidos, **backtests contrafactuais (mar–mai/2026)** quantificando dano dos clusters de encoding, **medidas corretivas implementadas** (abr–mai/2026) e **frentes preventivas em aberto** (auditoria viva: por que parquets+smoke não pegaram Cluster 5, 4 features binárias raw, backlog "tentar quebrar produção").
 **Status:** ativo. Documento vivo — adicionar novos erros conforme ocorrem; expandir Seção V conforme cada cenário do backlog é validado.
 **Origem:** unificação de `Erros_cometidos.md` (criado abr/2026) + `auditoria_dano_bugs_ml.md` (criado mai/2026, audiência cliente externo, re-tecnicado para uso interno).
-**Relação:** é a motivação de cada item do `PLANO_SAFEGUARD.md`. Leitura obrigatória antes de qualquer mudança de infraestrutura. Seção V (Frentes preventivas em aberto) alimenta H1/H2 do `PLANO_EXECUCAO.md`.
+**Relação:** é a motivação de cada item do `PLANO_SAFEGUARD.md`. Leitura obrigatória antes de qualquer mudança de infraestrutura. Seção V (Frentes preventivas em aberto) alimenta H1/H2 do `PLANO_EXECUCAO.md`. **Desde 05/08/2026 também é o destino dos post-mortems de segurança JÁ FECHADOS** (Erro 20: credencial de banco em repositório público). Furos de segurança **abertos** não entram aqui, por decisão explícita: ver a nota logo abaixo.
+
+### 🔒 Documento de segurança FORA deste repositório (nota de política, 05/08/2026)
+
+**Papel:** o estado de segurança da plataforma (o que está aberto, com evidência, e o caminho de correção de cada item) vive em `claude-config/security/postura_seguranca_bringdata.md`, no acervo privado do iCloud que já sincroniza entre as duas máquinas.
+**Por que não está no repositório:** `ramonfilho/bringdata` é **público**. Um documento que descreve qual defesa está aberta, e como, é mapa de ataque. Manter isso versionado aqui trocaria rastreabilidade por exposição.
+**Regra de trânsito:** enquanto o furo está **aberto**, mora só no documento privado. Quando **fecha**, o post-mortem migra pra `registro_erros_ml.md` (público) e no privado fica o resumo com ponteiro. A frente priorizada aparece no `PLANO_EXECUCAO.md` **sem** o detalhe explorável.
+**Relação:** frente urgente no `PLANO_EXECUCAO.md`; pré-requisito de `entrega_dados_dashboard_zanelato.md`; post-mortems fechados em `registro_erros_ml.md`; trava de reincidência em `V2/tests/test_sem_credencial_no_repo.py`.
+
+### `entrega_dados_dashboard_zanelato.md`
+**Papel:** desenho da entrega somente-leitura de dados de lead para o time da Zanelato (agência de tráfego do DevClub), com credencial dedicada. Cobre a regra de que score e decil não saem, o aviso sobre `utm_term` significar coisas diferentes em cada canal, o mapa de cobertura das fontes em 2026, o esquema de colunas proposto e o desenho de acesso com teste de aceitação obrigatório.
+**Status:** ativo, em definição. Nada implementado. Decisão tomada em 05/08/2026: a entrega mora em **banco separado** com refresh, não em view no banco de produção, porque o catálogo do Postgres é legível por qualquer role que conecte e é por banco.
+**Relação:** bloqueado pela frente de endurecimento de segurança do `PLANO_EXECUCAO.md`. Detalhe de segurança da instância fica no documento privado (ver nota acima). Diagnóstico da tabela de entrada em grupo de WhatsApp cruza com `analise_lift_entrada_grupo_whatsapp.md`. Critério de UTM replicado de `RECONSTRUCAO_LEADS_UNIFICADA.md`.
 
 ### `arquivo/Erros_cometidos.md` 📦 ARQUIVADO
 **Status:** ✅ **ARQUIVADO em 2026-05-08.** Conteúdo migrado para `registro_erros_ml.md`. Permanece para referência histórica.
