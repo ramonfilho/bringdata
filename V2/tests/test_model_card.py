@@ -31,7 +31,7 @@ def _fixture_data():
             "n_estimators": "300", "max_depth": "8", "max_features": "sqrt",
         },
         "metrics": {
-            "auc": 0.7290, "lift_maximum": 3.22, "top3_decil_concentration": 63.07,
+            "auc": 0.7290, "ks": 0.42, "lift_maximum": 3.22, "top3_decil_concentration": 63.07,
             "top5_decil_concentration": 79.55, "monotonia_percentage": 88.89,
             "baseline_conversion_rate": 0.0083,
         },
@@ -54,6 +54,7 @@ def test_render_reflete_os_fatos_do_run():
     assert "`9175264`" in md               # commit do código
     assert "`deadbeef12345678`" in md      # fingerprint
     assert "0.7290" in md                  # AUC
+    assert "0.4200" in md                  # KS
     assert "3.22" in md                    # lift
     assert "63.07%" in md                  # top-3
     assert "features=53" in md
