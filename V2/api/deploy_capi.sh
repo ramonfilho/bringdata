@@ -573,6 +573,10 @@ deploy_to_cloud_run() {
         print_error "LEDGER_TARGET≠railway mas a senha do ledger não veio (Secret Manager ledger-db-password). Abortando deploy."
         exit 1
     fi
+    if [[ "$ENV_VARS" == *"ERROR_API_INTERNAL_TOKEN_UNAVAILABLE"* ]]; then
+        print_error "Token das rotas internas não veio (Secret Manager api-internal-token). Sem ele as rotas fechadas devolvem 401 pra todo mundo. Abortando deploy."
+        exit 1
+    fi
     print_success "Variáveis de ambiente configuradas (via lib/config.sh)"
 
     TRAFFIC_FLAG=""

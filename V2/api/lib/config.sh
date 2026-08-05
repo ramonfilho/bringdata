@@ -234,6 +234,17 @@ build_env_vars() {
         ENV_VARS="$ENV_VARS,LEDGER_DB_PASSWORD=$LEDGER_DB_PASSWORD"
     fi
 
+    # Token das rotas internas da API (guarda de api/auth.py). Sem ele, as 15 rotas
+    # fechadas devolvem 401 para todo mundo, inclusive para nós. Isso é o fail-safe
+    # certo (segredo ausente FECHA a porta), mas seria um jeito bobo de derrubar
+    # ferramenta interna, então o deploy aborta em vez de subir sem o token.
+    API_INTERNAL_TOKEN="${API_INTERNAL_TOKEN:-$(gcloud secrets versions access latest --secret=api-internal-token --project="$PROJECT_ID" 2>/dev/null)}"
+    if [ -z "$API_INTERNAL_TOKEN" ]; then
+        echo "ERROR_API_INTERNAL_TOKEN_UNAVAILABLE"
+        return 1
+    fi
+    ENV_VARS="$ENV_VARS,API_INTERNAL_TOKEN=$API_INTERNAL_TOKEN"
+
     # Fonte de LEITURA do ledger (PLANO_LEDGER_CLOUDSQL.md Etapa 3 — ENCERRADA):
     # railway | cloudsql (DEFAULT). Os leitores (monitoramento, validação) abrem
     # a conexão por open_ledger_read_connection() conforme esta env.

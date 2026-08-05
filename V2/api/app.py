@@ -31,6 +31,8 @@ from src.production_pipeline import LeadScoringPipeline
 from api.database import get_db, init_database, create_lead_capi, count_leads, count_leads_with_fbp, count_leads_with_fbc, get_leads_by_emails, LeadCAPI
 from api.capi_integration import send_batch_events, should_send_to_destination
 from fastapi import Depends, Header, Request
+
+from api.auth import exigir_token, exigir_token_interno
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from src.model.decil_thresholds import atribuir_decil_por_threshold
@@ -152,6 +154,22 @@ app.add_middleware(
     allow_headers=["*"],
     allow_credentials=True,
 )
+
+
+# Exposição por papel do serviço. Inerte por default (`SERVICE_ROLE` ausente = `full`
+# = tudo responde, comportamento de hoje). Existe para o dia em que o callback da
+# Hotmart passar a morar num serviço separado e público: como os dois serviços rodam
+# a MESMA imagem, sem este filtro o serviço público reexporia as 36 rotas e o buraco
+# voltaria pela porta dos fundos. Ver api/auth.py.
+@app.middleware("http")
+async def _filtrar_por_papel(request: Request, call_next):
+    from api.auth import papel_do_servico, rota_exposta
+    papel = papel_do_servico()
+    if papel != "full" and not rota_exposta(request.url.path, papel):
+        # 404 e não 403: para quem sonda de fora, a rota simplesmente não existe
+        # neste serviço. 403 confirmaria que ela existe em algum lugar.
+        return JSONResponse(status_code=404, content={"detail": "Not Found"})
+    return await call_next(request)
 
 # A2: dicionário de pipelines indexado por client_id
 pipelines: Dict[str, LeadScoringPipeline] = {}
@@ -326,7 +344,7 @@ async def health_check():
         "version": "2.0.0"
     }
 
-@app.get("/model/info")
+@app.get("/model/info", dependencies=[Depends(exigir_token_interno())])
 async def get_model_info(pipeline: PipelineDep):
     """
     Retorna informações sobre o modelo: metadados, performance e feature importances
@@ -484,7 +502,7 @@ async def predict_batch_json(request: BatchPredictionRequest, pipeline: Pipeline
         if temp_file and os.path.exists(temp_file):
             os.remove(temp_file)
 
-@app.post("/predict/csv")
+@app.post("/predict/csv", dependencies=[Depends(exigir_token_interno())])
 async def predict_batch_csv(pipeline: PipelineDep, file: UploadFile = File(...)):
     """
     Predição em batch via upload CSV
@@ -558,7 +576,8 @@ class DecilCalculationResponse(BaseModel):
     results: List[DecilCalculationResult]
     timestamp: str
 
-@app.post("/calculate_decils", response_model=DecilCalculationResponse)
+@app.post("/calculate_decils", response_model=DecilCalculationResponse,
+          dependencies=[Depends(exigir_token_interno())])
 async def calculate_decils(request: DecilCalculationRequest, pipeline: PipelineDep):
     """
     Calcula decis para scores já existentes (útil para backfill).
@@ -872,7 +891,7 @@ async def webhook_lead_capture(
         logger.error(f"❌ Erro ao capturar lead: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro ao capturar lead: {str(e)}")
 
-@app.post("/webhook/update_survey")
+@app.post("/webhook/update_survey", dependencies=[Depends(exigir_token_interno())])
 async def webhook_update_survey(
     request: Request,
     survey_data: UpdateSurveyRequest,
@@ -1147,18 +1166,14 @@ async def webhook_update_survey(
         raise HTTPException(status_code=500, detail=f"Erro ao atualizar lead: {str(e)}")
 
 
-@app.post("/webhook/sendflow_group_join")
+@app.post("/webhook/sendflow_group_join",
+          dependencies=[Depends(exigir_token("SENDFLOW_SENDTOK", header="sendtok"))])
 async def webhook_sendflow_group_join(request: Request):
     """
     Recebe o Sendhook do SendFlow (membro adicionado ao grupo de WhatsApp) e grava a
     entrada em whatsapp_group_joins (feature "entrou no grupo"). Valida o header `sendtok`.
     Lógica de tradução/persistência em api/sendflow_receiver (anti-corrupção + idempotente).
     """
-    import os
-    expected = os.environ.get('SENDFLOW_SENDTOK')
-    token = request.headers.get('sendtok')
-    if not expected or token != expected:
-        raise HTTPException(status_code=401, detail="sendtok inválido ou não configurado")
     try:
         body = await request.json()
     except Exception:
@@ -1177,10 +1192,18 @@ async def webhook_sendflow_group_join(request: Request):
 #   POST /hotleads/submit-batch  — chamado pelo Cloud Scheduler; empurra leads
 #   POST /hotleads/webhook       — chamado PELA HOTMART; recebe o selo e dispara CAPI
 #
-# Ambos são protegidos por token próprio porque o serviço é PÚBLICO (allUsers é
-# obrigatório enquanto os crons não mandam OIDC — ver incidente 23/07). O webhook
-# leva o token na QUERY porque a Hotmart não permite header customizado: a URL
-# que registramos no batch_enrich já vai com ?token=...
+# Ambos são protegidos por token próprio (guarda única em api/auth.py). O webhook
+# leva o token na QUERY porque a Hotmart não permite header customizado: a URL que
+# registramos no batch_enrich já vai com ?token=...
+#
+# Correção de premissa, 05/08/2026: a versão anterior deste comentário dizia que
+# "allUsers é obrigatório enquanto os crons não mandam OIDC (ver incidente 23/07)".
+# Isso EXPIROU. Os crons passaram a mandar OIDC (scripts/setup_scheduler_oidc.sh) e
+# a conta `scheduler-invoker@` tem `roles/run.invoker` própria, então remover o
+# `allUsers` não os afeta. O chamador que exige acesso anônimo de verdade é a
+# Hotmart aqui embaixo, porque terceiro não assina token do Google. É para isso que
+# existe o papel `webhook` em api/auth.py: mover só esta rota para um serviço
+# público e fechar o principal.
 
 def _hotleads_webhook_url() -> str:
     """URL pública deste serviço que a Hotmart vai chamar de volta, com o token.
@@ -1192,7 +1215,10 @@ def _hotleads_webhook_url() -> str:
     return f"{base}/hotleads/webhook?token={token}"
 
 
-@app.post("/hotleads/submit-batch")
+@app.post("/hotleads/submit-batch",
+          dependencies=[Depends(exigir_token("HOTLEADS_CRON_TOKEN",
+                                             header="x-hotleads-token",
+                                             aceita_query=True))])
 async def hotleads_submit_batch(
     request: Request,
     pipeline: PipelineDep,
@@ -1202,12 +1228,6 @@ async def hotleads_submit_batch(
     """Submete leads recentes sem selo ao batch_enrich da Hotmart (sem pixel).
     Idempotente por construção: só pega quem está com `hotleads_status` NULL ou
     'submitted' vencido, então rodar duas vezes seguidas não duplica."""
-    import os as _os
-    expected = _os.environ.get('HOTLEADS_CRON_TOKEN')
-    token = request.headers.get('x-hotleads-token') or request.query_params.get('token')
-    if not expected or token != expected:
-        raise HTTPException(status_code=401, detail="token inválido ou não configurado")
-
     cfg = pipeline._client_config
     if not cfg.hotleads.enabled:
         return {"status": "disabled", "submitted": 0}
@@ -1238,7 +1258,9 @@ async def hotleads_submit_batch(
             pass
 
 
-@app.post("/hotleads/webhook")
+@app.post("/hotleads/webhook",
+          dependencies=[Depends(exigir_token("HOTLEADS_WEBHOOK_TOKEN",
+                                             aceita_query=True))])
 async def hotleads_webhook(request: Request, pipeline: PipelineDep,
                            token: Optional[str] = None, dry_run: bool = False):
     """Recebe o selo (quente/frio) por lead e dispara o evento dos quentes.
@@ -1247,10 +1269,6 @@ async def hotleads_webhook(request: Request, pipeline: PipelineDep,
     devolver erro só jogaria fora os selos que deram certo. O que falhou fica
     registrado em `hotleads_error` no ledger.
     """
-    import os as _os
-    expected = _os.environ.get('HOTLEADS_WEBHOOK_TOKEN')
-    if not expected or token != expected:
-        raise HTTPException(status_code=401, detail="token inválido ou não configurado")
     try:
         body = await request.json()
     except Exception:
@@ -1269,7 +1287,7 @@ async def hotleads_webhook(request: Request, pipeline: PipelineDep,
             pass
 
 
-@app.get("/webhook/lead_capture/stats")
+@app.get("/webhook/lead_capture/stats", dependencies=[Depends(exigir_token_interno())])
 async def lead_capture_stats(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -1321,7 +1339,7 @@ async def lead_capture_stats(
         logger.error(f"❌ Erro ao obter stats: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro ao obter stats: {str(e)}")
 
-@app.get("/webhook/lead_capture/recent")
+@app.get("/webhook/lead_capture/recent", dependencies=[Depends(exigir_token_interno())])
 async def get_recent_leads_endpoint(
     pipeline: PipelineOptDep,
     limit: int = 10,
@@ -1372,7 +1390,7 @@ async def get_recent_leads_endpoint(
         logger.error(f"❌ Erro ao buscar leads: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
 
-@app.post("/webhook/lead_capture/by_emails")
+@app.post("/webhook/lead_capture/by_emails", dependencies=[Depends(exigir_token_interno())])
 async def get_leads_by_emails_endpoint(
     pipeline: PipelineOptDep,
     request: dict,
@@ -1802,7 +1820,7 @@ async def process_daily_batch_capi(
         logger.error(f"Stack trace: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Erro no batch CAPI: {str(e)}")
 
-@app.post("/capi/check_sent")
+@app.post("/capi/check_sent", dependencies=[Depends(exigir_token_interno())])
 async def check_capi_sent(
     request: CapiCheckSentRequest,
     pipeline: PipelineOptDep,
@@ -1992,7 +2010,7 @@ def _send_single_purchase_event(
         return {"status": "error", "message": str(e)}
 
 
-@app.post("/capi/send_purchase_events")
+@app.post("/capi/send_purchase_events", dependencies=[Depends(exigir_token_interno())])
 async def send_purchase_events(request: SendPurchaseEventsRequest):
     """
     Envia eventos Purchase para a Meta CAPI para compradores confirmados de um lançamento.
@@ -2074,7 +2092,7 @@ async def send_purchase_events(request: SendPurchaseEventsRequest):
     return results
 
 
-@app.post("/admin/migrate_capi_sent_at")
+@app.post("/admin/migrate_capi_sent_at", dependencies=[Depends(exigir_token_interno())])
 async def migrate_capi_sent_at(db: Session = Depends(get_db)):
     """Endpoint temporário para executar migração da coluna capi_sent_at"""
     try:
@@ -2126,7 +2144,7 @@ async def migrate_capi_sent_at(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Erro na migração: {str(e)}")
 
 
-@app.post("/admin/cleanup_duplicates")
+@app.post("/admin/cleanup_duplicates", dependencies=[Depends(exigir_token_interno())])
 async def cleanup_duplicates(ids_to_delete: List[int], db: Session = Depends(get_db)):
     """
     Deleta registros duplicados da página Parabéns
@@ -2176,7 +2194,7 @@ async def cleanup_duplicates(ids_to_delete: List[int], db: Session = Depends(get
         raise HTTPException(status_code=500, detail=f"Erro na deleção: {str(e)}")
 
 
-@app.post("/admin/cleanup-canary-tags")
+@app.post("/admin/cleanup-canary-tags", dependencies=[Depends(exigir_token_interno())])
 async def cleanup_canary_tags(dry_run: bool = False):
     """Remove tags canary-* de revisões sem tráfego (percent==0).
 
@@ -5027,7 +5045,7 @@ async def daily_monitoring_check(
 # VALIDAÇÃO SEMANAL
 # =============================================================================
 
-@app.get("/validation/test")
+@app.get("/validation/test", dependencies=[Depends(exigir_token_interno())])
 async def test_validation_dependencies():
     """
     Testa rapidamente se todas as dependências para validação estão OK.
@@ -5099,7 +5117,7 @@ async def test_validation_dependencies():
         }
 
 
-@app.post("/validation/weekly")
+@app.post("/validation/weekly", dependencies=[Depends(exigir_token_interno())])
 async def execute_weekly_validation(db: Session = Depends(get_db)):
     """
     Executa validação semanal do modelo ML.
@@ -5889,7 +5907,7 @@ class ExplainRequest(BaseModel):
     source: str = Field('registros_ml', description="Fonte do lead: 'registros_ml' (default) ou 'legacy'")
 
 
-@app.post("/predict/explain")
+@app.post("/predict/explain", dependencies=[Depends(exigir_token_interno())])
 async def predict_explain(request: ExplainRequest, pipeline: PipelineDep):
     """Re-scoreia 1 lead já persistido e devolve todo o caminho de scoring.
 
