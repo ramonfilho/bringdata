@@ -107,7 +107,7 @@ cd /Users/ramonmoreira/Desktop/bring_data_refactor/V2
 # Subir proxy do banco
 cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db --port=5432 &
 sleep 8
-export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bring_data DB_USER=postgres DB_PASSWORD=SmartAds2026DB!
+export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bring_data DB_USER=postgres DB_PASSWORD=<senha: gcloud secrets versions access latest --secret=mlflow-db-password>
 
 # Capturar snapshot — dry-run com data fixa para reprodutibilidade
 python -c "
@@ -236,7 +236,7 @@ curl -s "$NEW_REVISION_URL/monitoring/status" \
 # Subir proxy local se ainda não estiver ativo
 cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db --port=5432 &
 sleep 8
-export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bring_data DB_USER=postgres DB_PASSWORD=SmartAds2026DB!
+export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bring_data DB_USER=postgres DB_PASSWORD=<senha: gcloud secrets versions access latest --secret=mlflow-db-password>
 
 python -c "
 import json

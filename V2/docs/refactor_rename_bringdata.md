@@ -50,9 +50,21 @@ gsutil mb gs://bring-data-mlflow
 gsutil -m cp -r gs://smart-ads-mlflow/* gs://bring-data-mlflow/
 ```
 
-### Senha `SmartAds2026DB!` — dívida técnica pré-existente
-Credencial hardcoded em `src/model/training_model.py:28`. Independente do rename, deve virar env var.
-A string `SmartAds2026DB!` **não foi alterada** — é uma credencial ativa, não um nome de projeto.
+### Senha do `postgres` hardcoded: RESOLVIDA em 05/08/2026
+
+Era dívida técnica conhecida: a senha do usuário `postgres` do Cloud SQL estava escrita
+em texto claro no código (na época em `src/model/training_model.py:28`, depois em
+`src/core/mlflow_setup.py:18`) e em 10 outros arquivos versionados, num repositório
+**público**. Como a instância aceitava conexão de qualquer IP, a credencial dava acesso de
+**dono** a `analytics.leads` (366 mil leads com e-mail, telefone e nome) e a
+`analytics.sales`.
+
+Fechado em 05/08/2026: senha rotacionada, guardada no Secret Manager
+(`mlflow-db-password`) e lida do `V2/.env` (gitignored). A URI de tracking do MLflow não
+tem mais default embutido: falta de configuração levanta exceção com a instrução de
+correção, em vez de cair calada num MLflow local vazio. Um teste de regressão
+(`V2/tests/test_sem_credencial_no_repo.py`) varre os arquivos versionados e falha se
+qualquer credencial literal voltar.
 
 ### Paths absolutos locais
 `configs/devclub.yaml` e `mlflow_tracking/0/meta.yaml` foram atualizados para `/Users/ramonmoreira/Desktop/bring_data/`.

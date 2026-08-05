@@ -56,7 +56,7 @@ ENVIRONMENT="${ENVIRONMENT:-production}"
 # CLOUD_SQL_CONNECTION="${CLOUD_SQL_CONNECTION:-$PROJECT_ID:$REGION:$CLOUD_SQL_INSTANCE}"
 # DB_NAME="${DB_NAME:-bring_data}"
 # DB_USER="${DB_USER:-postgres}"
-# DB_PASSWORD="${DB_PASSWORD:-SmartAds2026DB!}"
+# DB_PASSWORD="${DB_PASSWORD:-<senha: gcloud secrets versions access latest --secret=mlflow-db-password>}"
 
 # =============================================================================
 # RAILWAY POSTGRESQL (LEAD SCORING — CAMINHO B)

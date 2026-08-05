@@ -135,7 +135,7 @@ https://lp.devclub.com.br/parabens-psq-devf-v2/?nome=ramon&email=ramonfceo%40gma
 
 ### 1. SQL ✅ COMPLETO
 
-**Executado em 14/02/2026** via cloud-sql-proxy. Adicionadas 14 colunas (dados pesquisa + ML scores). Nomes normalizados no banco (ex: "O seu gênero:" → `genero`). Mapeamento Sheets→PostgreSQL será feito no Python (Passo 2). Senha: `SmartAds2026DB!` (em `lib/config.sh`).
+**Executado em 14/02/2026** via cloud-sql-proxy. Adicionadas 14 colunas (dados pesquisa + ML scores). Nomes normalizados no banco (ex: "O seu gênero:" → `genero`). Mapeamento Sheets→PostgreSQL será feito no Python (Passo 2). Senha: `<senha: gcloud secrets versions access latest --secret=mlflow-db-password>` (em `lib/config.sh`).
 
 ```sql
 -- Migration executada com sucesso

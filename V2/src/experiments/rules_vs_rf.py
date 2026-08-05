@@ -418,10 +418,11 @@ def main():
         logger.info(f"\nResultados salvos em {args.out}")
 
     if args.mlflow_log:
-        os.environ.setdefault(
-            "MLFLOW_TRACKING_URI",
-            "postgresql+psycopg2://postgres:SmartAds2026DB!@104.197.138.129:5432/mlflow",
-        )
+        # Fonte única da URI, com a credencial fora do código (mora no V2/.env).
+        # Este trecho tinha a senha do `postgres` escrita inline. O cabeçalho de
+        # core/mlflow_setup.py explica por que ela não pode voltar pra cá.
+        from src.core.mlflow_setup import ensure_tracking_uri
+        ensure_tracking_uri()
         import mlflow
         mlflow.set_experiment(f"baselines_vs_{ref_label}")
         for row in rows:
