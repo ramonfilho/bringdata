@@ -23,6 +23,9 @@ Cada relatório mede o que ele mesmo mostra, na janela que ele mesmo usa:
 - Relatório de criativo (utm-quality): leads de origem PAGA na janela, contados
   nos registros que o próprio endpoint já carregou. Sem chamada extra. Orgânico
   não conta como tráfego: não tem custo, não tem criativo, não orienta gestor.
+- Relatório semanal de performance de modelo: gasto em `analytics.ad_spend` na
+  semana. Janela longa não precisa de API viva — a tabela já é o materializado
+  daquelas mesmas APIs e, com uma semana de folga, está completa.
 """
 
 from __future__ import annotations
@@ -36,6 +39,10 @@ MIN_SPEND_BRL = 1.0
 
 # Piso de leads pagos na janela. Zero = qualquer lead pago já conta como tráfego.
 MIN_LEADS = 0
+
+# Quantos dias olhar ATRÁS da janela para saber se `analytics.ad_spend` está viva.
+# Serve só para separar "não houve veiculação" de "a ingestão quebrou".
+LOOKBACK_SANITY_DAYS = 60
 
 # Origens pagas. Mesmo conjunto usado no split de canal do digest
 # (`daily_check_aggregations._SRC_META` + allowlist do Google), replicado aqui
@@ -176,6 +183,61 @@ def check_from_utm_result(result: Any, **kwargs) -> TrafficCheck:
         spend=None,
         leads=_num(pagos),
         fontes={'ledger': {'leads_pagos': pagos, 'leads_total': win.get('n_total')}},
+        **kwargs,
+    )
+
+
+def check_from_ad_spend(start, end, *, conn=None, client_id: str = 'devclub',
+                        lookback_days: int = LOOKBACK_SANITY_DAYS, **kwargs) -> TrafficCheck:
+    """Trava de janela longa (relatório semanal), lida de `analytics.ad_spend`.
+
+    Janela `[start, end)`, fim exclusivo, igual ao reader. Aqui não vale chamar a
+    API viva: a tabela já é o materializado das mesmas APIs e, com uma semana de
+    folga, está completa.
+
+    O detalhe que importa é a **desambiguação da tabela vazia**. Zero linha na
+    semana pode ser "não houve veiculação" ou "a ingestão quebrou", e os dois
+    pedem decisões opostas. Desempata olhando `lookback_days` para trás: se a
+    tabela tem linha recente, a ingestão está viva e a semana vazia é fato
+    (bloqueia); se não tem nada nem no lookback, a tabela é que é suspeita
+    (posta, fail-safe).
+    """
+    from datetime import timedelta
+
+    fontes: Dict[str, Any] = {'ad_spend': {'start': str(start), 'end': str(end)}}
+    try:
+        import pandas as pd
+        from src.data.ad_spend_reader import read_ad_spend
+        df = read_ad_spend(start - timedelta(days=lookback_days), end,
+                           conn=conn, client_id=client_id)
+    except Exception as exc:  # noqa: BLE001 — tabela ilegível não pode calar o relatório
+        fontes['ad_spend']['erro'] = f'{type(exc).__name__}: {exc}'
+        return TrafficCheck(
+            ativo=True, medido=False,
+            motivo='ad_spend ilegível — posta por segurança',
+            fontes=fontes,
+        )
+
+    if df.empty:
+        fontes['ad_spend']['linhas_no_lookback'] = 0
+        return TrafficCheck(
+            ativo=True, medido=False,
+            motivo=f'ad_spend sem nenhuma linha nos {lookback_days}d anteriores '
+                   '(ingestão suspeita) — posta por segurança',
+            fontes=fontes,
+        )
+
+    dias = pd.to_datetime(df['spend_date']).dt.date
+    na_janela = df[(dias >= start) & (dias < end)]
+    fontes['ad_spend'].update({
+        'linhas_na_janela': int(len(na_janela)),
+        'linhas_no_lookback': int(len(df)),
+        'ultimo_dia_com_gasto': str(max(dias)),
+    })
+    return avaliar_trafego(
+        spend=float(na_janela['spend'].sum()),
+        leads=float(pd.to_numeric(na_janela['leads'], errors='coerce').fillna(0).sum()),
+        fontes=fontes,
         **kwargs,
     )
 

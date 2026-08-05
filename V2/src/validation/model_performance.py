@@ -1144,6 +1144,12 @@ def main():
                     help="grava as métricas em analytics.validation_* (report_type=model_performance)")
     ap.add_argument("--slack", action="store_true", help="manda um DM com todos os LFs no Slack")
     ap.add_argument("--slack-dry-run", action="store_true", help="mostra o preview do DM, sem postar")
+    ap.add_argument("--gate-window-days", type=int, default=7,
+                    help="janela da trava de tráfego (dias antes do as-of). Entre lançamentos este "
+                         "DM repetia o mesmo relatório toda segunda; sem veiculação paga na janela, "
+                         "não posta. Default 7 = a cadência do próprio relatório.")
+    ap.add_argument("--force", action="store_true",
+                    help="posta mesmo sem tráfego na janela (ignora a trava)")
     args = ap.parse_args()
 
     if not args.lf and not (args.start_date and args.end_date):
@@ -1214,8 +1220,22 @@ def main():
         closer()
 
     if (args.slack or args.slack_dry_run) and results:
+        # Trava de tráfego: entre lançamentos este DM repetia o mesmo relatório toda
+        # segunda, porque os LFs fechados não mudam. Sem veiculação paga na semana,
+        # não posta. Fail-safe: ad_spend ilegível/suspeita → posta. O preview
+        # (--slack-dry-run) nunca é travado: ele não incomoda ninguém.
+        from src.monitoring.traffic_gate import check_from_ad_spend, trava_habilitada
+        gate = None
+        if args.slack and not args.force and trava_habilitada():
+            gate = check_from_ad_spend(
+                as_of_eff - timedelta(days=args.gate_window_days), as_of_eff,
+            )
+            if not gate.ativo:
+                print(f"\n[slack] NÃO postado — {gate.motivo}")
+                return
         chunks = format_slack_chunks(results, results[0].as_of_date, args.window_days, coverage)
-        print(f"\n[slack] {post_slack_dm(chunks, dry_run=args.slack_dry_run)} ({len(chunks)} msg)")
+        print(f"\n[slack] {post_slack_dm(chunks, dry_run=args.slack_dry_run)} ({len(chunks)} msg)"
+              + (f" · {gate.motivo}" if gate else ""))
 
 
 if __name__ == "__main__":

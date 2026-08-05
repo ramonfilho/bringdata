@@ -13,6 +13,7 @@ from src.monitoring.traffic_gate import (
     MIN_SPEND_BRL,
     PAID_SOURCES,
     avaliar_trafego,
+    check_from_ad_spend,
     check_from_daily_check,
     check_from_utm_result,
     contar_leads_pagos,
@@ -179,3 +180,65 @@ def test_env_desliga_a_trava(valor):
 def test_env_qualquer_outro_valor_mantem_ligada():
     assert trava_habilitada({'REPORTS_REQUIRE_TRAFFIC': '1'}) is True
     assert trava_habilitada({'REPORTS_REQUIRE_TRAFFIC': 'sim'}) is True
+
+
+# ── Extrator do relatório semanal (analytics.ad_spend) ───────────────────────
+
+def _spend_df(rows):
+    import pandas as pd
+    return pd.DataFrame(rows, columns=['platform', 'account_id', 'campaign_id',
+                                       'campaign_name', 'spend_date', 'spend',
+                                       'leads', 'impressions', 'clicks'])
+
+
+def _com_reader(monkeypatch, rows):
+    import src.data.ad_spend_reader as r
+    monkeypatch.setattr(r, 'read_ad_spend', lambda s, e, **kw: _spend_df(rows))
+
+
+def test_semanal_com_gasto_na_janela_libera(monkeypatch):
+    from datetime import date
+    _com_reader(monkeypatch, [('meta', 'a', '1', 'c', date(2026, 8, 2), 5000.0, 800, 0, 0)])
+    c = check_from_ad_spend(date(2026, 8, 1), date(2026, 8, 8))
+    assert c.ativo is True
+    assert c.medido is True
+
+
+def test_semanal_sem_gasto_na_janela_mas_tabela_viva_bloqueia(monkeypatch):
+    """Linha antiga no lookback prova que a ingestão funciona, então semana
+    vazia é fato e não falha de pipeline."""
+    from datetime import date
+    _com_reader(monkeypatch, [('meta', 'a', '1', 'c', date(2026, 7, 1), 5000.0, 800, 0, 0)])
+    c = check_from_ad_spend(date(2026, 8, 1), date(2026, 8, 8))
+    assert c.ativo is False
+    assert c.medido is True
+
+
+def test_semanal_tabela_totalmente_vazia_libera(monkeypatch):
+    """Nada nem no lookback: pode ser ingestão quebrada. Na dúvida, posta."""
+    from datetime import date
+    _com_reader(monkeypatch, [])
+    c = check_from_ad_spend(date(2026, 8, 1), date(2026, 8, 8))
+    assert c.ativo is True
+    assert c.medido is False
+    assert 'ingestão suspeita' in c.motivo
+
+
+def test_semanal_tabela_ilegivel_libera(monkeypatch):
+    from datetime import date
+    import src.data.ad_spend_reader as r
+    def _boom(*a, **kw):
+        raise RuntimeError('conexão caiu')
+    monkeypatch.setattr(r, 'read_ad_spend', _boom)
+    c = check_from_ad_spend(date(2026, 8, 1), date(2026, 8, 8))
+    assert c.ativo is True
+    assert c.medido is False
+
+
+def test_semanal_fim_da_janela_e_exclusivo(monkeypatch):
+    """Gasto no dia do `end` não conta — mesma convenção do read_ad_spend."""
+    from datetime import date
+    _com_reader(monkeypatch, [('meta', 'a', '1', 'c', date(2026, 8, 8), 9000.0, 900, 0, 0),
+                              ('meta', 'a', '1', 'c', date(2026, 7, 1), 10.0, 1, 0, 0)])
+    c = check_from_ad_spend(date(2026, 8, 1), date(2026, 8, 8))
+    assert c.ativo is False
