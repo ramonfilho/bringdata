@@ -45,7 +45,10 @@ export DB_HOST=127.0.0.1
 export DB_PORT=5432
 export DB_NAME=bring_data
 export DB_USER=postgres
-export DB_PASSWORD=SmartAds2025!
+# Senha do Cloud SQL `bring-data-db`, descomissionado em 25/02/2026. Estava
+# escrita aqui em texto claro, em repositorio publico. Se for reativar acesso a
+# um Cloud SQL local, exporte antes de rodar; nao escreva a senha neste arquivo.
+export DB_PASSWORD="${DB_PASSWORD:-}"
 
 # Carregar .env (trata o | no GURU_API_TOKEN corretamente via python-dotenv)
 python -c "

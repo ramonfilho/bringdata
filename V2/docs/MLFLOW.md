@@ -13,19 +13,28 @@
 
 ## Conectar ao MLflow
 
-```python
-import mlflow
+A URI **não fica no código**. Ela mora no `V2/.env` (que é gitignored) e é lida por
+`src/core/mlflow_setup.py`, que é a fonte única:
 
-mlflow.set_tracking_uri(
-    "postgresql+psycopg2://postgres:SmartAds2026DB!@104.197.138.129:5432/mlflow"
-)
+```python
+from src.core.mlflow_setup import ensure_tracking_uri
+ensure_tracking_uri()   # aponta o MLflow pro backend e devolve a URI usada
 ```
 
-Ou via variável de ambiente (preferido):
+Se a env var não estiver configurada, isso levanta exceção com a instrução de correção,
+em vez de cair calado num MLflow local vazio. Para configurar (uma vez por máquina):
 
 ```bash
-export MLFLOW_TRACKING_URI="postgresql+psycopg2://postgres:SmartAds2026DB!@104.197.138.129:5432/mlflow"
+SENHA=$(gcloud secrets versions access latest --secret=mlflow-db-password --project=smart-ads-451319)
+echo "MLFLOW_TRACKING_URI=postgresql+psycopg2://postgres:$SENHA@104.197.138.129:5432/mlflow?sslmode=require" >> V2/.env
 ```
+
+> **Por que não pode voltar pro código:** até 05/08/2026 a senha do usuário `postgres`
+> estava escrita em texto claro em 11 arquivos versionados deste repositório, que é
+> **público**. Como a instância aceita conexão de qualquer IP, a credencial dava acesso de
+> dono a `analytics.leads` (366 mil leads com e-mail, telefone e nome) e a
+> `analytics.sales`. A senha foi rotacionada e o teste
+> `V2/tests/test_sem_credencial_no_repo.py` falha se qualquer credencial literal voltar.
 
 ---
 
@@ -34,7 +43,8 @@ export MLFLOW_TRACKING_URI="postgresql+psycopg2://postgres:SmartAds2026DB!@104.1
 ```python
 import mlflow
 
-mlflow.set_tracking_uri("postgresql+psycopg2://postgres:SmartAds2026DB!@104.197.138.129:5432/mlflow")
+from src.core.mlflow_setup import ensure_tracking_uri
+ensure_tracking_uri()
 client = mlflow.tracking.MlflowClient()
 
 # Listar todos os runs do experimento

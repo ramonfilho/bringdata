@@ -81,7 +81,7 @@ SERVICE_NAME="bring-data-api"
 CLOUD_SQL_INSTANCE="bring-data-db"
 DB_NAME="bring_data"
 DB_USER="postgres"
-DB_PASSWORD="SmartAds2026DB!"
+DB_PASSWORD="<senha: gcloud secrets versions access latest --secret=mlflow-db-password>"
 
 # Validação
 BUCKET_NAME="bring-data-validation-reports"
@@ -173,7 +173,7 @@ gcloud sql databases create bring_data --instance=bring-data-db
 # Configurar senha
 gcloud sql users set-password postgres \
   --instance=bring-data-db \
-  --password=SmartAds2026DB!
+  --password=<senha: gcloud secrets versions access latest --secret=mlflow-db-password>
 ```
 
 ### 2. APIs GCP Habilitadas
@@ -227,7 +227,7 @@ gcloud run services update bring-data-api \
 CLOUD_SQL_CONNECTION_NAME=smart-ads-451319:us-central1:bring-data-db,\
 DB_NAME=bring_data,\
 DB_USER=postgres,\
-DB_PASSWORD=SmartAds2026DB!,\
+DB_PASSWORD=<senha: gcloud secrets versions access latest --secret=mlflow-db-password>,\
 META_DATA_SOURCE=api,\
 VALIDATION_REPORTS_BUCKET=bring-data-validation-reports,\
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/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"
@@ -545,7 +545,7 @@ vi lib/config.sh
 # Ajustar:
 #   - PROJECT_ID="novo-cliente-123"
 #   - CLOUD_SQL_INSTANCE="novo-cliente-db"
-#   - DB_PASSWORD="SuaSenhaSegura2026!"
+#   - DB_PASSWORD="<senha-do-novo-cliente>"
 #   - BUCKET_NAME="novo-cliente-validation-reports"
 #   - SLACK_WEBHOOK_URL="https://hooks.slack.com/..."
 
@@ -568,7 +568,7 @@ gcloud scheduler jobs run validation-weekly --location=us-central1
 # Útil para CI/CD pipelines
 export PROJECT_ID="novo-cliente-123"
 export CLOUD_SQL_INSTANCE="novo-cliente-db"
-export DB_PASSWORD="SuaSenhaSegura2026!"
+export DB_PASSWORD="<senha-do-novo-cliente>"
 export BUCKET_NAME="novo-cliente-validation-reports"
 export SLACK_WEBHOOK_URL="https://hooks.slack.com/..."
 

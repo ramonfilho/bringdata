@@ -137,7 +137,10 @@ CLOUDSQL_HOST     = os.environ.get("DB_HOST", "127.0.0.1")
 CLOUDSQL_PORT     = int(os.environ.get("DB_PORT", "5433"))
 CLOUDSQL_DB       = os.environ.get("DB_NAME", "bring_data")
 CLOUDSQL_USER     = os.environ.get("DB_USER", "postgres")
-CLOUDSQL_PASSWORD = os.environ.get("DB_PASSWORD") or os.environ.get("CLOUDSQL_PASSWORD", "SmartAds2026DB!")
+# Sem default: a senha tinha um literal aqui, e este arquivo vive em repositório
+# PÚBLICO. Faltando a env var o script para com KeyError na hora de conectar, que
+# é o comportamento desejado. Ver cabeçalho de src/core/mlflow_setup.py.
+CLOUDSQL_PASSWORD = os.environ.get("DB_PASSWORD") or os.environ.get("CLOUDSQL_PASSWORD")
 
 
 def load_cloudsql_capi_data() -> dict:

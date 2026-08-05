@@ -21,7 +21,7 @@ Checks:
 Uso:
     cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db &
     sleep 5
-    export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bring_data DB_USER=postgres DB_PASSWORD=SmartAds2026DB!
+    export DB_HOST=127.0.0.1 DB_PORT=5432 DB_NAME=bring_data DB_USER=postgres DB_PASSWORD="$(gcloud secrets versions access latest --secret=mlflow-db-password)"
     python scripts/validate_orchestration_layer.py
 """
 
