@@ -21,11 +21,15 @@ para `lead_score`, `score_champion`, `score_challenger`, `decil*`,
 (A/B/C/D, quartil, quente/frio). Trocar 10 decis por 4 letras não protege nada: com
 volume, a ordenação é recuperável, e a ordenação É o método.
 
-Sobre dado pessoal: a tabela sai SEM nome, e-mail e telefone. O identificador é um
-hash do e-mail, estável, que serve para contar e cruzar dentro da própria tabela mas
-não identifica ninguém sozinho. Eles são gestores de tráfego montando painel de
-criativo, e para isso não precisam saber quem é a pessoa. Se um caso de uso concreto
-exigir, é decisão consciente de quem opera, não default.
+Sobre dado pessoal: a tabela SAI COM nome e e-mail, por decisão do operador em
+06/08/2026. A razão é que o time de tráfego já obtém esses campos por outras
+ferramentas, então retê-los aqui só atrapalharia o cruzamento deles sem reduzir
+exposição real. Telefone segue fora, porque não foi pedido.
+
+Consequência que essa decisão tem sobre o `lead_id`: com o e-mail na mesma linha, o
+hash com sal deixa de proteger qualquer coisa, e passa a valer só como chave estável
+de junção. Ele foi mantido por isso, não por pseudonimização, e este comentário
+existe para ninguém depois olhar o hash e concluir que a tabela é anonimizada.
 
 Uso:
     python -m scripts.provisiona_dash_zanelato --dry-run     # conta, não grava
@@ -50,6 +54,11 @@ SCHEMA = "dash"
 TABELA = "leads_2026"
 ROLE = "dash_zanelato"
 ANO = 2026
+
+# Mínimo de leads para um criativo ou campanha publicar qualidade agregada. Abaixo
+# disso o "agregado" viraria o score individual disfarçado: um anúncio com 1 lead
+# publicaria o decil daquele lead.
+MIN_LEADS_AGREGADO = 30
 
 # Tabelas que o usuário da entrega NÃO pode alcançar. O teste de aceitação exige
 # `permission denied` em todas, e ele roda antes de qualquer credencial sair daqui.
@@ -171,8 +180,19 @@ def sql_fonte() -> str:
         for chave, alias in PESQUISA
     )
     return f"""
+    WITH url_por_email AS (
+      -- A URL de captura é 0% na base derivada e 100% no ledger vivo, de junho em
+      -- diante. Vem daqui, e por isso fica vazia para lead anterior a junho.
+      SELECT DISTINCT ON (lower(email)) lower(email) AS email, utm_url
+        FROM public.registros_ml
+       WHERE coalesce(utm_url,'') <> ''
+       ORDER BY lower(email), created_at DESC
+    )
     SELECT DISTINCT ON (l.event_id)
            encode(sha256((:sal || lower(l.email))::bytea), 'hex') AS lead_id,
+           nullif(l.survey_responses->>'Nome Completo', '') AS nome,
+           lower(l.email) AS email,
+           nullif(coalesce(l.phone, l.survey_responses->>'Telefone'), '') AS telefone,
            l.capturado_em,
            cal.lf_name AS lf,
            CASE
@@ -188,17 +208,24 @@ def sql_fonte() -> str:
                            nullif(l.survey_responses->>'Source',''), '') = '' THEN NULL
              ELSE 'outros'
            END AS canal,
+           u.utm_url AS url_captura,
            lower(coalesce(nullif(l.utm_source,''),
                           nullif(l.survey_responses->>'Source',''))) AS utm_source,
+           nullif(coalesce(l.utm_medium, l.survey_responses->>'Medium'),'') AS utm_medium,
            nullif(l.utm_campaign,'') AS utm_campaign,
            nullif(l.utm_content,'')  AS utm_content,
            nullif(l.utm_term,'')     AS utm_term,
            {cols_pesquisa},
-           (comp.email IS NOT NULL) AS comprou
+           (comp.email IS NOT NULL) AS comprou,
+           NULL::boolean AS entrou_no_grupo,
+           NULL::text AS grupo_whatsapp,
+           NULL::timestamp AS entrou_no_grupo_em
       FROM analytics.leads l
       LEFT JOIN (SELECT DISTINCT lower(email) AS email FROM analytics.sales
                   WHERE email IS NOT NULL) comp
              ON comp.email = lower(l.email)
+      LEFT JOIN url_por_email u   ON u.email = lower(l.email)
+
       LEFT JOIN analytics.launch_calendar cal
              ON cal.client_id = l.client_id
             AND l.capturado_em::date BETWEEN cal.cap_start AND cal.cap_end
@@ -211,17 +238,114 @@ def sql_fonte() -> str:
 
 
 def colunas_da_tabela():
-    base = [("lead_id", "text"), ("capturado_em", "timestamp"), ("lf", "text"),
-            ("canal", "text"), ("utm_source", "text"), ("utm_campaign", "text"),
-            ("utm_content", "text"), ("utm_term", "text")]
+    base = [("lead_id", "text"), ("nome", "text"), ("email", "text"),
+            ("telefone", "text"), ("capturado_em", "timestamp"), ("lf", "text"),
+            ("canal", "text"), ("url_captura", "text"),
+            ("utm_source", "text"), ("utm_medium", "text"),
+            ("utm_campaign", "text"), ("utm_content", "text"), ("utm_term", "text"),
+]
     base += [(alias, "text") for _, alias in PESQUISA]
     base += [("comprou", "boolean")]
+    # Entrada no grupo de WhatsApp. Sai NULO em TODAS as linhas hoje, de propósito.
+    #
+    # O dado existe (112.825 registros), mas a coleta parou em 23/06/2026: o backfill
+    # veio de exports manuais em CSV do painel do SendFlow, e o webhook que substituiu
+    # aquilo funcionou quatro dias e morreu. Recuperar isso é frente própria.
+    #
+    # Por que a coluna existe VAZIA em vez de não existir: o dashboard deles pode ser
+    # construído já contando com ela, e quando a coleta voltar o campo se preenche
+    # sozinho, sem mexer no painel. E NULO é honesto, quer dizer "não sei". Se
+    # entregássemos o dado congelado, todo lead captado depois de 23/06 apareceria
+    # como `false`, ou seja, "não entrou no grupo", o que é FALSO e levaria a decisão
+    # errada sobre canal. Coluna vazia com aviso é melhor que coluna cheia de mentira.
+    # O pedido citava "telefone que entrou, grupo/turma e data de entrada". O
+    # telefone NAO se repete aqui: ja e coluna propria da linha, e duplicar o
+    # mesmo dado em duas colunas so cria a chance de elas discordarem depois.
+    base += [("entrou_no_grupo", "boolean"),
+             ("grupo_whatsapp", "text"),
+             ("entrou_no_grupo_em", "timestamp")]
     return base
 
 
-def ddl_tabela() -> str:
+# Chave da linha. NÃO é só o lead_id: a mesma pessoa que se cadastra em dias
+# diferentes vira linhas diferentes na origem (medido: 253.502 linhas para 234.814
+# e-mails distintos). Com lead_id sozinho como chave, essas 18.688 linhas colidiriam
+# e a carga incremental jogaria fora cadastro legítimo.
+CHAVE = ("lead_id", "capturado_em")
+
+# Tabela companheira com a qualidade agregada. Ela existe SEPARADA de propósito.
+#
+# A primeira versão colava o percentual do criativo em cada linha de lead. Medido:
+# num dia comum isso faria reescrever 1.363 linhas em vez de 27, porque basta o
+# percentual de um criativo mexer na primeira casa decimal para todas as linhas dele
+# mudarem. E era o mesmo punhado de valores repetido 250 mil vezes: 58 números
+# distintos espalhados por um quarto de milhão de linhas.
+#
+# Aqui são ~60 linhas que mudam por dia, e o painel junta por `utm_content` ou
+# `utm_campaign`. De quebra, é onde a REFERÊNCIA cabe: sem ela, "42,4%" não diz se o
+# criativo é bom, e o número sozinho não orienta decisão nenhuma.
+TABELA_QUALIDADE = "qualidade_por_anuncio"
+
+
+def colunas_qualidade():
+    return [("tipo", "text"), ("chave", "text"), ("leads", "integer"),
+            ("pct_top_deciles", "numeric"), ("referencia_pct", "numeric"),
+            ("diferenca_vs_referencia", "numeric"), ("atualizado_em", "timestamp")]
+
+
+def ddl_qualidade() -> str:
+    cols = ",\n      ".join(f"{n} {t}" for n, t in colunas_qualidade())
+    return (f"CREATE TABLE {SCHEMA}.{TABELA_QUALIDADE} (\n      {cols},\n"
+            f"      PRIMARY KEY (tipo, chave)\n    )")
+
+
+def sql_qualidade() -> str:
+    """Qualidade agregada por anúncio e por campanha, com a régua junto.
+
+    `pct_top_deciles` é o percentual dos leads daquele anúncio nos dois decis mais
+    altos do modelo, que é a mesma métrica do relatório diário do grupo de tráfego.
+
+    `referencia_pct` é o mesmo percentual calculado sobre TODOS os leads do período.
+    Ela vai junto porque o número sozinho não diz nada: 42% pode ser ótimo ou
+    medíocre dependendo de onde a base inteira está. Com a referência na mesma linha,
+    o painel mostra a comparação sem ninguém precisar lembrar o valor de cabeça, e
+    sem depender de a gente avisar quando a régua mudar.
+
+    O corte de {MIN} leads impede que o "agregado" vire o score individual
+    disfarçado: um anúncio com um lead só publicaria o decil daquele lead.
+    """
+    return f"""
+    WITH ref AS (
+      SELECT round(100.0 * count(*) FILTER (WHERE decil >= 9) / count(*), 1) AS pct
+        FROM public.registros_ml WHERE decil IS NOT NULL
+    )
+    SELECT 'criativo' AS tipo, utm_content AS chave, count(*)::int AS leads,
+           round(100.0 * count(*) FILTER (WHERE decil >= 9) / count(*), 1) AS pct_top_deciles,
+           (SELECT pct FROM ref) AS referencia_pct,
+           round(100.0 * count(*) FILTER (WHERE decil >= 9) / count(*), 1)
+             - (SELECT pct FROM ref) AS diferenca_vs_referencia,
+           now()::timestamp AS atualizado_em
+      FROM public.registros_ml
+     WHERE decil IS NOT NULL AND coalesce(utm_content,'') <> ''
+     GROUP BY 1, 2 HAVING count(*) >= {MIN_LEADS_AGREGADO}
+    UNION ALL
+    SELECT 'campanha', utm_campaign, count(*)::int,
+           round(100.0 * count(*) FILTER (WHERE decil >= 9) / count(*), 1),
+           (SELECT pct FROM ref),
+           round(100.0 * count(*) FILTER (WHERE decil >= 9) / count(*), 1)
+             - (SELECT pct FROM ref),
+           now()::timestamp
+      FROM public.registros_ml
+     WHERE decil IS NOT NULL AND coalesce(utm_campaign,'') <> ''
+     GROUP BY 1, 2 HAVING count(*) >= {MIN_LEADS_AGREGADO}
+    """.replace("{MIN}", str(MIN_LEADS_AGREGADO))
+
+
+def ddl_tabela(nome: str | None = None) -> str:
+    alvo = nome or f"{SCHEMA}.{TABELA}"
     cols = ",\n      ".join(f"{n} {t}" for n, t in colunas_da_tabela())
-    return f"CREATE TABLE {SCHEMA}.{TABELA} (\n      {cols}\n    )"
+    return (f"CREATE TABLE {alvo} (\n      {cols},\n"
+            f"      PRIMARY KEY ({', '.join(CHAVE)})\n    )")
 
 
 # ── ações ────────────────────────────────────────────────────────────────────
@@ -258,12 +382,25 @@ def provisionar(senha_role: str):
         # DDL do Postgres não aceita parâmetro ligado, então a senha entra no texto
         # do comando. Escapada dobrando a aspa simples, que é a regra do literal SQL.
         lit = "'" + senha_role.replace("'", "''") + "'"
+        # Sem NOREPLICATION: no Cloud SQL o `postgres` não é superusuário de verdade,
+        # e alterar esse atributo devolve "must be superuser". É o default de
+        # qualquer role nova, então pedir explicitamente só quebrava o reprovisionamento.
         atributos = ("LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT "
-                     f"NOREPLICATION PASSWORD {lit}")
+                     f"PASSWORD {lit}")
         tem = c.run(f"SELECT 1 FROM pg_roles WHERE rolname='{ROLE}'")
         if tem:
-            c.run(f"ALTER ROLE {ROLE} WITH {atributos}")
-            print(f"  role {ROLE}: já existia, atributos e senha reaplicados")
+            # No ALTER só a senha. No Cloud SQL o `postgres` não é superusuário de
+            # verdade, e reaplicar NOSUPERUSER devolve "must be superuser", o que
+            # quebrava todo reprovisionamento. Os atributos já foram fixados na
+            # criação; o que se confere aqui é que eles continuam certos.
+            c.run(f"ALTER ROLE {ROLE} WITH LOGIN PASSWORD {lit}")
+            a = c.run(f"""SELECT rolsuper, rolcreatedb, rolcreaterole, rolinherit
+                            FROM pg_roles WHERE rolname='{ROLE}'""")[0]
+            if any(a[:3]) or a[3]:
+                raise RuntimeError(
+                    f"role {ROLE} está com atributo demais: super={a[0]} "
+                    f"createdb={a[1]} createrole={a[2]} inherit={a[3]}")
+            print(f"  role {ROLE}: já existia, senha reaplicada e atributos conferidos")
         else:
             c.run(f"CREATE ROLE {ROLE} WITH {atributos}")
             print(f"  role {ROLE}: criada")
@@ -284,6 +421,9 @@ def provisionar(senha_role: str):
         c.run(f"DROP TABLE IF EXISTS {SCHEMA}.{TABELA}")
         c.run(ddl_tabela())
         c.run(f"GRANT USAGE ON SCHEMA {SCHEMA} TO {ROLE}")
+        c.run(f"CREATE INDEX IF NOT EXISTS {TABELA}_capturado_em ON {SCHEMA}.{TABELA} (capturado_em)")
+        c.run(f"CREATE INDEX IF NOT EXISTS {TABELA}_lf ON {SCHEMA}.{TABELA} (lf)")
+        c.run(f"CREATE INDEX IF NOT EXISTS {TABELA}_email ON {SCHEMA}.{TABELA} (email)")
         c.run(f"GRANT SELECT ON {SCHEMA}.{TABELA} TO {ROLE}")
         # Sem DEFAULT PRIVILEGES: tabela nova neste schema NÃO fica visível
         # automaticamente. Conceder é ato consciente, um por um.
@@ -293,8 +433,22 @@ def provisionar(senha_role: str):
 
 
 def refresh():
-    """Recarrega a tabela da entrega. Troca em transação: quem estiver lendo
-    durante a carga vê a versão anterior inteira, nunca um estado pela metade."""
+    """Atualiza a entrega gravando SÓ o que mudou.
+
+    Antes isto refazia a tabela inteira todo dia. Medido em 06/08/2026, isso era
+    reescrever **253.502 linhas para mudar 27**: entram cerca de 22 leads novos por
+    dia e cerca de 5 pessoas passam a constar como compradoras. Mesmo em pico de
+    lançamento seriam ~2.500, ou 1% da tabela. Reescrever tudo custava uns 10 minutos
+    numa instância pequena, sem ganho nenhum.
+
+    Agora: insere o que é novo, atualiza o que mudou, e apaga o que sumiu da origem.
+    Tudo numa transação, então quem estiver consultando vê a versão anterior inteira
+    até o commit.
+
+    A remoção existe porque a tabela de origem é reconstruída periodicamente e a
+    deduplicação pode mudar: sem ela, linha que deixou de existir na origem ficaria
+    aqui para sempre, e o painel deles contaria lead que a gente já não reconhece.
+    """
     origem = origem_leitura()
     try:
         linhas = origem.run(sql_fonte(), sal=sal())
@@ -302,13 +456,18 @@ def refresh():
         origem.close()
     print(f"  lidas {len(linhas):,} linhas da origem")
 
+    cols = [n for n, _ in colunas_da_tabela()]
+    mutaveis = [c for c in cols if c not in CHAVE]
     adm = _admin()
     destino = conectar("postgres", adm, BANCO)
     try:
-        cols = [n for n, _ in colunas_da_tabela()]
+        antes = destino.run(f"SELECT count(*) FROM {SCHEMA}.{TABELA}")[0][0]
         destino.run("BEGIN")
-        destino.run(f"DROP TABLE IF EXISTS {SCHEMA}.{TABELA}_novo")
-        destino.run(ddl_tabela().replace(f"{SCHEMA}.{TABELA}", f"{SCHEMA}.{TABELA}_novo"))
+
+        # Área de estágio com o retrato completo da origem. Ela existe para as três
+        # operações saírem de UMA leitura só, sem ficar perguntando linha a linha.
+        destino.run(f"DROP TABLE IF EXISTS {SCHEMA}._stg")
+        destino.run(ddl_tabela(f"{SCHEMA}._stg"))
         lote = 500
         for i in range(0, len(linhas), lote):
             pedaco = linhas[i:i + lote]
@@ -320,17 +479,36 @@ def refresh():
                     params[nome] = v
                     marcas.append(f":{nome}")
                 vals.append("(" + ",".join(marcas) + ")")
-            destino.run(
-                f"INSERT INTO {SCHEMA}.{TABELA}_novo ({','.join(cols)}) VALUES "
-                + ",".join(vals), **params)
-        destino.run(f"DROP TABLE IF EXISTS {SCHEMA}.{TABELA}")
-        destino.run(f"ALTER TABLE {SCHEMA}.{TABELA}_novo RENAME TO {TABELA}")
+            destino.run(f"INSERT INTO {SCHEMA}._stg ({','.join(cols)}) VALUES "
+                        + ",".join(vals), **params)
+
+        cond = " AND ".join(f"t.{k} = s.{k}" for k in CHAVE)
+        sets = ", ".join(f"{c} = EXCLUDED.{c}" for c in mutaveis)
+        # Só conta como mudança o que de fato difere. `IS DISTINCT FROM` trata NULO
+        # como valor, senão linha com campo nulo apareceria como alterada todo dia.
+        difere = " OR ".join(f"t.{c} IS DISTINCT FROM s.{c}" for c in mutaveis)
+
+        novas = destino.run(f"""SELECT count(*) FROM {SCHEMA}._stg s
+            WHERE NOT EXISTS (SELECT 1 FROM {SCHEMA}.{TABELA} t WHERE {cond})""")[0][0]
+        alteradas = destino.run(f"""SELECT count(*) FROM {SCHEMA}._stg s
+            JOIN {SCHEMA}.{TABELA} t ON {cond} WHERE {difere}""")[0][0]
+
+        destino.run(f"""INSERT INTO {SCHEMA}.{TABELA} ({','.join(cols)})
+            SELECT {','.join(cols)} FROM {SCHEMA}._stg
+            ON CONFLICT ({', '.join(CHAVE)}) DO UPDATE SET {sets}""")
+
+        sumidas = destino.run(f"""WITH d AS (
+            DELETE FROM {SCHEMA}.{TABELA} t
+             WHERE NOT EXISTS (SELECT 1 FROM {SCHEMA}._stg s WHERE {cond})
+            RETURNING 1) SELECT count(*) FROM d""")[0][0]
+
+        destino.run(f"DROP TABLE {SCHEMA}._stg")
         destino.run(f"GRANT SELECT ON {SCHEMA}.{TABELA} TO {ROLE}")
-        destino.run(f"CREATE INDEX ON {SCHEMA}.{TABELA} (capturado_em)")
-        destino.run(f"CREATE INDEX ON {SCHEMA}.{TABELA} (lf)")
         destino.run("COMMIT")
-        n = destino.run(f"SELECT count(*) FROM {SCHEMA}.{TABELA}")[0][0]
-        print(f"  {SCHEMA}.{TABELA}: {n:,} linhas, índices criados, SELECT reconcedido")
+
+        depois = destino.run(f"SELECT count(*) FROM {SCHEMA}.{TABELA}")[0][0]
+        print(f"  {novas} novas, {alteradas} alteradas, {sumidas} removidas")
+        print(f"  {SCHEMA}.{TABELA}: {antes:,} -> {depois:,} linhas")
     except Exception:
         destino.run("ROLLBACK")
         raise
@@ -390,9 +568,22 @@ def aceitacao(senha_role: str) -> bool:
                      WHERE column_name ~* '(score|decil|decile)'""")[0][0]
         print(f"     {r} colunas. {'(esperado: 0)' if r == 0 else 'FALHA'}")
         ok = ok and r == 0
-        t = c.run("""SELECT table_schema||'.'||table_name FROM information_schema.tables
-                     WHERE table_schema NOT IN ('pg_catalog','information_schema')""")
-        print(f"     tabelas visíveis no catálogo: {[x[0] for x in t]}")
+        vis = sorted(x[0] for x in c.run(
+            """SELECT table_schema||'.'||table_name FROM information_schema.tables
+                WHERE table_schema NOT IN ('pg_catalog','information_schema')"""))
+        print(f"     tabelas visíveis no catálogo: {vis}")
+        esperado = sorted([f"{SCHEMA}.{TABELA}", f"{SCHEMA}.{TABELA_QUALIDADE}"])
+        if vis != esperado:
+            print(f"     FALHA: esperava exatamente {esperado}")
+            ok = False
+    finally:
+        c.close()
+
+    print("  5. lê a tabela de qualidade agregada?")
+    c = conectar(ROLE, senha_role, BANCO)
+    try:
+        n = c.run(f"SELECT count(*) FROM {SCHEMA}.{TABELA_QUALIDADE}")[0][0]
+        print(f"     sim, {n} linhas. (esperado)")
     finally:
         c.close()
     return ok
