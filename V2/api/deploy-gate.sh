@@ -117,7 +117,7 @@ cmd_deploy(){ [ -f "$DEPLOY_CAPI" ] || { err "deploy_capi.sh não achado"; exit 
   [ "${YES:-false}" = true ] || { read -r -p "Confirmar canary de $HEAD_SHA? [y/N] " a; [ "$a" = y ] || { warn abortado.; exit 1; }; }
   lock_acquire || exit 1; trap lock_release EXIT
   local from; from=$(rev_field "$(live_revision "$API_SVC")" sha)
-  if ( cd "$PWD" && bash "$DEPLOY_CAPI" --yes ); then ok "canary do $API_SVC criado (0% tráfego)."; ledger_write deploy "$API_SVC" "${from:-?}" "$HEAD_SHA" ok "canary criado"; info "próximo: deploy-gate.sh promote --revision <canary> (promove api + alinha monitoring)."
+  if ( cd "$PWD" && DEPLOY_VIA_GATE=1 bash "$DEPLOY_CAPI" --yes ); then ok "canary do $API_SVC criado (0% tráfego)."; ledger_write deploy "$API_SVC" "${from:-?}" "$HEAD_SHA" ok "canary criado"; info "próximo: deploy-gate.sh promote --revision <canary> (promove api + alinha monitoring)."
   else err "deploy_capi.sh falhou."; ledger_write deploy "$API_SVC" "${from:-?}" "$HEAD_SHA" fail deploy_capi; exit 1; fi; }
 
 cmd_promote(){ local rev="${PROMOTE_REV:-}" svc="${PROMOTE_SVC:-$API_SVC}" to="${PROMOTE_TO:-100}"

@@ -1,0 +1,21 @@
+{
+  "_comentario": [
+    "Configuração VERSIONADA do projeto. O `settings.local.json` é gitignored e",
+    "portanto vale só na máquina onde foi escrito: hook registrado lá não existe",
+    "na outra máquina, e uma trava que só vale em um lugar não é uma trava.",
+    "Registro que precisa valer sempre vem para cá."
+  ],
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/block-deploy-fora-do-gate.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
