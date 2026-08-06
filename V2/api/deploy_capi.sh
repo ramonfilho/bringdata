@@ -245,7 +245,7 @@ check_clean_tree() {
     # O perigo a barrar é CÓDIGO COMMITÁVEL editado e não-commitado, não build
     # artifacts. Por isso só olhamos tracked (modificado/staged/deletado).
     if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null)" ]; then
-        if [ "$DEPLOY_DIRTY" = "true" ]; then
+        if [ "${DEPLOY_DIRTY:-false}" = "true" ]; then
             print_warning "Edições não-commitadas, mas DEPLOY_DIRTY=true — a revisão NÃO mapeia 1:1 um commit."
         else
             print_error "Edições de código não-commitadas — deploy bloqueado."
@@ -792,30 +792,46 @@ print(','.join(stale))
     DEPLOY_TAG="deploy/$(date +%Y-%m-%d)-${NEW_REVISION##*-api-}"
     git tag "$DEPLOY_TAG" 2>/dev/null && print_info "Git tag criada: $DEPLOY_TAG" || print_warning "Git tag não criada (repo sujo ou tag já existe)"
 
-    # allUsers é OBRIGATÓRIO neste serviço, NÃO temporário: o endpoint
-    # /webhook/lead_capture recebe POST ANÔNIMO de browser (o formulário do lead
-    # submete direto, sem token). Reafirmamos o binding a cada deploy (idempotente,
-    # self-healing). NUNCA remover — remover derruba a captura de lead no portão de
-    # entrada E os crons dependentes (apagão de 22-23/07/2026: alguém seguiu a antiga
-    # instrução "remover antes de produção" e o scoring parou ~22h). Os crons hoje
-    # autenticam por OIDC (defense-in-depth), mas o webhook não pode. Detalhe em
-    # docs/RUNBOOK_scoring_pipeline.md.
+    # NÃO reafirmamos mais o `allUsers` aqui. A versão anterior deste bloco
+    # readicionava o binding a cada deploy, com a justificativa de que
+    # /webhook/lead_capture recebe POST anônimo do formulário do lead. Essa premissa
+    # venceu, e foi medido em 05-06/08/2026:
+    #
+    #   - /webhook/lead_capture grava na tabela `leads_capi`, aposentada em 17/05/2026.
+    #     Em 20 dias: 52 linhas, ZERO com score, ZERO enviadas ao CAPI, e 45 das 52
+    #     também entraram pelo caminho vivo. No mesmo período a tabela viva `Client`
+    #     recebeu 29.923 leads. A rota responde por 0,17% do volume, quase toda
+    #     duplicata, e o que ela grava ninguém lê.
+    #   - Os crons passaram a autenticar por OIDC e a conta `scheduler-invoker@` tem
+    #     `roles/run.invoker` própria, então não dependem do allUsers.
+    #   - O único chamador externo que não assina token do Google é a Hotmart, e ela
+    #     foi movida para o serviço `smart-ads-webhook`, que é público e serve APENAS
+    #     as rotas de webhook (papel `webhook` em api/auth.py; todo o resto dá 404).
+    #
+    # O apagão de 22-23/07/2026 aconteceu quando os crons ainda NÃO mandavam OIDC.
+    # Reafirmar o binding aqui hoje desfaria, a cada deploy e em silêncio, o
+    # fechamento do serviço.
+    #
+    # Para reabrir em emergência, um comando, efeito em segundos:
+    #   gcloud run services add-iam-policy-binding smart-ads-api \
+    #     --region=us-central1 --member=allUsers --role=roles/run.invoker
     if [ "$ALLOW_PUBLIC" = true ]; then
-        print_info "Reafirmando acesso público (obrigatório: webhook de captura é anônimo)"
-        gcloud run services add-iam-policy-binding $SERVICE_NAME \
-            --region=$REGION \
-            --member="allUsers" \
-            --role="roles/run.invoker" \
-            --quiet || {
-                print_error "Falha ao reafirmar acesso público (webhook de captura pode dar 403)"
-            }
-        print_success "Serviço público por design (webhook anônimo). NÃO remover o allUsers."
+        print_info "Acesso público NÃO é reafirmado (serviço fechado por design desde 06/08/2026)"
+        print_info "Webhook de terceiro mora em smart-ads-webhook. Reabrir: ver comentário acima."
     fi
 
     # Obter URL do serviço
     SERVICE_URL=$(gcloud run services describe $SERVICE_NAME \
         --region=$REGION \
         --format="value(status.url)")
+
+    # Identidade nas chamadas do smoke test. Antes iam com curl puro, o que só
+    # funcionava porque o serviço aceitava anônimo. Vazio se o gcloud falhar: aí o
+    # curl segue sem cabeçalho e o erro aparece como 401, com motivo, em vez de
+    # virar mistério.
+    ID_TOKEN=$(gcloud auth print-identity-token --audiences="$SERVICE_URL" 2>/dev/null || echo "")
+    AUTH_HDR=()
+    [ -n "$ID_TOKEN" ] && AUTH_HDR=(-H "Authorization: Bearer $ID_TOKEN")
 
     print_success "URL: $SERVICE_URL"
     echo ""
@@ -844,7 +860,7 @@ run_post_deploy_tests() {
 
     # 4.1 Health Check
     print_info "Teste 1/3: Health Check..."
-    HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "$SERVICE_URL/health" || echo "000")
+    HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "${AUTH_HDR[@]}" "$SERVICE_URL/health" || echo "000")
 
     if [ "$HEALTH_RESPONSE" != "200" ]; then
         print_error "Health check falhou (HTTP $HEALTH_RESPONSE)"
@@ -900,6 +916,7 @@ run_post_deploy_tests() {
 }'
 
     PRED_RESPONSE=$(curl -s -X POST "$SERVICE_URL/predict/batch" \
+        "${AUTH_HDR[@]}" \
         -H "Content-Type: application/json" \
         -d "$TEST_PAYLOAD" || echo "")
 
@@ -1012,14 +1029,16 @@ print_final_report() {
     echo "   gcloud run services describe $SERVICE_NAME --region=$REGION"
     echo ""
 
-    # Acesso (NÃO é um aviso pra remover — o serviço é público de propósito)
+    # Acesso. O serviço é FECHADO desde 06/08/2026; ver o bloco de comentário na
+    # etapa de deploy para a medição que derrubou a premissa antiga.
     if [ "$ALLOW_PUBLIC" = true ]; then
         echo "ℹ️  ACESSO:"
-        echo "   - Serviço é PÚBLICO por design: /webhook/lead_capture recebe POST"
-        echo "     anônimo de browser (formulário do lead). NÃO remover o binding"
-        echo "     allUsers — removê-lo derruba a captura de lead e os crons (apagão"
-        echo "     22-23/07/2026). Crons autenticam por OIDC como rede extra; o webhook"
-        echo "     não pode. Runbook: docs/RUNBOOK_scoring_pipeline.md"
+        echo "   - Serviço FECHADO: só chamador com identidade Google entra."
+        echo "     Webhook de terceiro (Hotmart) mora em smart-ads-webhook, que é"
+        echo "     público e serve APENAS as rotas de webhook."
+        echo "   - Reabrir em emergência (efeito em segundos):"
+        echo "     gcloud run services add-iam-policy-binding $SERVICE_NAME \\"
+        echo "       --region=$REGION --member=allUsers --role=roles/run.invoker"
         echo ""
     fi
 }

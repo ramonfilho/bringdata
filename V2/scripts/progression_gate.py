@@ -39,6 +39,11 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+
+# Identidade nas chamadas ao Cloud Run. Este gate falava com o serviço SEM
+# credencial, o que só funcionava porque o serviço aceitava chamada anônima.
+# Ver scripts/gcp_auth.py.
+from scripts.gcp_auth import instalar_auth_gcp  # noqa: E402
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -302,6 +307,7 @@ def execute_promotion(revision: str, from_pct: int, to_pct: int,
 # =============================================================================
 
 def main():
+    instalar_auth_gcp()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--revision', required=True, help='Nome da revisão canary (ex: smart-ads-api-00NNN-xxx)')
     parser.add_argument('--from', dest='from_pct', type=int, required=True, choices=[0, 10, 50],

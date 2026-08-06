@@ -37,6 +37,11 @@ import time
 import urllib.error
 import urllib.request
 
+# Identidade nas chamadas ao Cloud Run. Este gate falava com o serviço SEM
+# credencial, o que só funcionava porque o serviço aceitava chamada anônima.
+# Ver scripts/gcp_auth.py.
+from scripts.gcp_auth import instalar_auth_gcp  # noqa: E402
+
 # Issues do feature_validator que não devem bloquear progressão de tráfego.
 # 'target' é a label do treino — não existe em produção por design (é predict,
 # não fit). Outras features podem ser adicionadas via --ignore-feature.
@@ -220,6 +225,7 @@ def fetch_revision_logs(revision: str, project: str, freshness_seconds: int = 60
 
 
 def main() -> int:
+    instalar_auth_gcp()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('revision', help='Nome da revisão Cloud Run (ex: smart-ads-api-00272-abc)')
     parser.add_argument('--region', default='us-central1')

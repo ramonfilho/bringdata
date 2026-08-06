@@ -267,3 +267,76 @@ def test_papel_invalido_cai_no_default_seguro(monkeypatch):
     monkeypatch.setenv(auth.ENV_PAPEL, 'wehbook')
     assert auth.papel_do_servico() == 'full'
     assert auth.rota_exposta('/monitoring/utm-quality')
+
+
+# ── 4. Superfície pública: o que o serviço nem deve anunciar ─────────────────
+
+def test_documentacao_automatica_desligada_por_default():
+    """`/docs`, `/redoc` e `/openapi.json` serviam, anonimamente, 53 KB com o mapa
+    completo da API: toda rota, todo parâmetro, todo nome de campo, inclusive
+    `lead_score` e `decil`. Era o índice que tornava as outras rotas descobríveis.
+    Fechar rota e continuar publicando o mapa é meio serviço."""
+    fonte = _APP_PY.read_text()
+    assert 'docs_url="/docs" if _DOCS else None' in fonte, (
+        'docs_url voltou a ser incondicional')
+    assert 'redoc_url="/redoc" if _DOCS else None' in fonte
+    assert 'openapi_url="/openapi.json" if _DOCS else None' in fonte, (
+        'openapi_url ausente: sem passar None explícito o FastAPI serve /openapi.json')
+
+    import re
+    m = re.search(r'_DOCS = os\.environ\.get\("API_DOCS_ENABLED", ""\)', fonte)
+    assert m, 'a chave de reativação mudou de nome; atualize este teste junto'
+
+
+def test_deploy_nao_reafirma_acesso_publico():
+    """O `deploy_capi.sh` readicionava `allUsers` a cada deploy, de propósito. Se
+    isso voltar, todo deploy desfaz o fechamento do serviço EM SILÊNCIO, e o furo
+    reaparece sem ninguém mexer em nada."""
+    from pathlib import Path as _P
+    sh = (_P(auth.__file__).parent / 'deploy_capi.sh').read_text()
+
+    # Proíbe a EXECUÇÃO, não a menção. Comentário explicando a decisão e `echo` com
+    # o comando de reabertura de emergência são desejáveis: quem estiver de plantão
+    # precisa saber como voltar atrás. O que não pode é o script conceder sozinho.
+    junto = sh.replace('\\\n', ' ')   # o comando é multilinha; junta as continuações
+
+    def _executa(linha: str) -> bool:
+        nu = linha.strip()
+        if nu.startswith('#') or nu.startswith('echo ') or nu.startswith('print_'):
+            return False
+        return 'add-iam-policy-binding' in nu and 'allUsers' in nu
+
+    culpadas = [l.strip()[:110] for l in junto.splitlines() if _executa(l)]
+    assert not culpadas, f'deploy voltou a conceder allUsers: {culpadas}'
+
+    # E a reabertura de emergência tem que seguir documentada no script: fechar sem
+    # dizer como abrir é armadilha para a próxima madrugada.
+    assert 'add-iam-policy-binding' in sh and 'allUsers' in sh, (
+        'sumiu a instrução de como reabrir o acesso em emergência')
+
+
+def test_gates_de_deploy_autenticam():
+    """Os três gates falavam com o Cloud Run sem credencial. Isso só funcionava
+    porque o serviço aceitava anônimo, que é justamente o que estamos removendo.
+    Sem isto, fechar o serviço quebra o deploy inteiro, não só o health check."""
+    from pathlib import Path as _P
+    base = _P(auth.__file__).parent.parent / 'scripts'
+    for nome in ('smoke_test_revision.py', 'progression_gate.py',
+                 'test_revision_equivalence.py'):
+        fonte = (base / nome).read_text()
+        assert 'from scripts.gcp_auth import instalar_auth_gcp' in fonte, (
+            f'{nome} não importa a camada de identidade')
+        assert 'instalar_auth_gcp()' in fonte, f'{nome} importa mas não chama'
+
+
+def test_identidade_usa_audiencia_da_propria_url():
+    """O Cloud Run exige que o `aud` do token bata com a URL chamada. Os gates falam
+    com a URL do serviço E com URLs de tag (`canary-xxx---...`), que são hosts
+    diferentes: audiência fixa passaria num caso e daria 401 no outro."""
+    from scripts import gcp_auth
+    assert gcp_auth.audiencia_de(
+        'https://canary-123---smart-ads-api-x.a.run.app/monitoring/feature-report?h=1'
+    ) == 'https://canary-123---smart-ads-api-x.a.run.app'
+    assert gcp_auth.audiencia_de(
+        'https://smart-ads-api-x.a.run.app/health'
+    ) == 'https://smart-ads-api-x.a.run.app'
