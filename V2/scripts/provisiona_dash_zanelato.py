@@ -21,10 +21,11 @@ para `lead_score`, `score_champion`, `score_challenger`, `decil*`,
 (A/B/C/D, quartil, quente/frio). Trocar 10 decis por 4 letras não protege nada: com
 volume, a ordenação é recuperável, e a ordenação É o método.
 
-Sobre dado pessoal: a tabela SAI COM nome e e-mail, por decisão do operador em
-06/08/2026. A razão é que o time de tráfego já obtém esses campos por outras
+Sobre dado pessoal: a tabela SAI COM nome, e-mail E TELEFONE, por decisão do operador
+em 06/08/2026. A razão é que o time de tráfego já obtém esses campos por outras
 ferramentas, então retê-los aqui só atrapalharia o cruzamento deles sem reduzir
-exposição real. Telefone segue fora, porque não foi pedido.
+exposição real. Os três constam do pedido escrito. Continuam FORA: CPF, endereço e
+qualquer documento.
 
 Consequência que essa decisão tem sobre o `lead_id`: com o e-mail na mesma linha, o
 hash com sal deixa de proteger qualquer coisa, e passa a valer só como chave estável
@@ -289,7 +290,7 @@ TABELA_QUALIDADE = "qualidade_por_anuncio"
 
 def colunas_qualidade():
     return [("tipo", "text"), ("chave", "text"), ("leads", "integer"),
-            ("pct_top_deciles", "numeric"), ("referencia_pct", "numeric"),
+            ("pct_alta_qualidade", "numeric"), ("referencia_pct", "numeric"),
             ("diferenca_vs_referencia", "numeric"), ("atualizado_em", "timestamp")]
 
 
@@ -302,7 +303,7 @@ def ddl_qualidade() -> str:
 def sql_qualidade() -> str:
     """Qualidade agregada por anúncio e por campanha, com a régua junto.
 
-    `pct_top_deciles` é o percentual dos leads daquele anúncio nos dois decis mais
+    `pct_alta_qualidade` é o percentual dos leads daquele anúncio nos dois decis mais
     altos do modelo, que é a mesma métrica do relatório diário do grupo de tráfego.
 
     `referencia_pct` é o mesmo percentual calculado sobre TODOS os leads do período.
@@ -320,7 +321,7 @@ def sql_qualidade() -> str:
         FROM public.registros_ml WHERE decil IS NOT NULL
     )
     SELECT 'criativo' AS tipo, utm_content AS chave, count(*)::int AS leads,
-           round(100.0 * count(*) FILTER (WHERE decil >= 9) / count(*), 1) AS pct_top_deciles,
+           round(100.0 * count(*) FILTER (WHERE decil >= 9) / count(*), 1) AS pct_alta_qualidade,
            (SELECT pct FROM ref) AS referencia_pct,
            round(100.0 * count(*) FILTER (WHERE decil >= 9) / count(*), 1)
              - (SELECT pct FROM ref) AS diferenca_vs_referencia,
@@ -509,16 +510,59 @@ def refresh():
 
         destino.run(f"DROP TABLE {SCHEMA}._stg")
         destino.run(f"GRANT SELECT ON {SCHEMA}.{TABELA} TO {ROLE}")
+
+        # Na MESMA transação de propósito: as duas tabelas são consultadas juntas,
+        # e commitar em separado deixaria uma janela com o agregado de ontem ao lado
+        # dos leads de hoje.
+        n_qual = refresh_qualidade(destino)
+
         destino.run("COMMIT")
 
         depois = destino.run(f"SELECT count(*) FROM {SCHEMA}.{TABELA}")[0][0]
         print(f"  {novas} novas, {alteradas} alteradas, {sumidas} removidas")
         print(f"  {SCHEMA}.{TABELA}: {antes:,} -> {depois:,} linhas")
+        print(f"  {SCHEMA}.{TABELA_QUALIDADE}: {n_qual} linhas (substituição total)")
     except Exception:
         destino.run("ROLLBACK")
         raise
     finally:
         destino.close()
+
+
+def refresh_qualidade(destino):
+    """Recarrega a tabela agregada por inteiro, dentro da transação de quem chama.
+
+    Aqui a substituição total é a escolha certa, ao contrário da tabela de leads:
+    são umas dezenas de linhas, e TODA linha muda de valor todo dia, porque o
+    percentual é recalculado sobre a base inteira. Fazer diferencial custaria mais
+    do que refazer.
+
+    Lê da origem porque `decil` mora no ledger e NUNCA é copiado para cá: o que
+    atravessa é só o agregado, com o corte de MIN_LEADS_AGREGADO leads.
+    """
+    origem = origem_leitura()
+    try:
+        linhas = origem.run(sql_qualidade())
+    finally:
+        origem.close()
+
+    cols = [n for n, _ in colunas_qualidade()]
+    destino.run(f"DELETE FROM {SCHEMA}.{TABELA_QUALIDADE}")
+    lote = 500
+    for i in range(0, len(linhas), lote):
+        pedaco = linhas[i:i + lote]
+        vals, params = [], {}
+        for j, linha in enumerate(pedaco):
+            marcas = []
+            for k, v in enumerate(linha):
+                nome = f"q{j}_{k}"
+                params[nome] = v
+                marcas.append(f":{nome}")
+            vals.append("(" + ",".join(marcas) + ")")
+        destino.run(f"INSERT INTO {SCHEMA}.{TABELA_QUALIDADE} ({','.join(cols)}) VALUES "
+                    + ",".join(vals), **params)
+    destino.run(f"GRANT SELECT ON {SCHEMA}.{TABELA_QUALIDADE} TO {ROLE}")
+    return len(linhas)
 
 
 def aceitacao(senha_role: str) -> bool:
