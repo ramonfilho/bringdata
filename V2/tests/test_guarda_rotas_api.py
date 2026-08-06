@@ -368,3 +368,37 @@ def test_gates_rodam_QUANDO_INVOCADOS_POR_CAMINHO():
             capture_output=True, text=True, timeout=120, cwd=str(v2.parent))
         assert 'ModuleNotFoundError' not in r.stderr, (
             f'{nome} não carrega quando invocado por caminho:\n{r.stderr[-500:]}')
+
+
+def test_smoke_do_deploy_sobrevive_a_token_ausente():
+    """O smoke test do deploy roda sob `set -u`. Se o token de identidade não vier
+    (gcloud fora de sessão, por exemplo), o caminho sem cabeçalho tem que funcionar.
+
+    Este teste existe porque a primeira versão usava um array bash vazio e o expandia
+    com `"${AUTH_HDR[@]}"`. O bash do macOS é a versão 3.2, e nela expandir array
+    VAZIO sob `set -u` é erro de "unbound variable": a substituição morre antes do
+    curl rodar, o `|| echo "000"` nem é avaliado, e o deploy falhou com
+    "Health check falhou (HTTP )", sem código nenhum. O sintoma não apontava para a
+    causa, que é o pior tipo de bug de script.
+    """
+    import re
+    import subprocess
+    from pathlib import Path as _P
+    sh = (_P(auth.__file__).parent / 'deploy_capi.sh').read_text()
+
+    # 1. O cabeçalho de autenticação não pode voltar a ser array. Arrays que a
+    #    lógica pode deixar VAZIOS são o caso perigoso; array de lista fixa (como
+    #    AUTHORIZED_BRANCHES, sempre populado) é seguro e fica de fora do critério.
+    ativas = [l.strip() for l in sh.splitlines()
+              if not l.strip().startswith('#') and 'AUTH_HDR' in l]
+    assert not ativas, f'cabeçalho de auth voltou a ser array: {ativas}'
+
+    # 2. A função existe e roda com token vazio sob `set -u`, nas duas versões de
+    #    bash que a máquina possa ter. Extrai só a função, não o script inteiro.
+    m = re.search(r'    curl_com_identidade\(\) \{.*?\n    \}\n', sh, re.S)
+    assert m, 'a função curl_com_identidade sumiu do deploy'
+    corpo = m.group(0).replace('curl -s', 'echo CURL')
+    prog = f'set -eu\nID_TOKEN=""\n{corpo}\ncurl_com_identidade -o /dev/null x\n'
+    r = subprocess.run(['bash', '-c', prog], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, f'quebrou com token vazio sob set -u: {r.stderr[-300:]}'
+    assert 'CURL' in r.stdout

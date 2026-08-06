@@ -829,9 +829,21 @@ print(','.join(stale))
     # funcionava porque o serviço aceitava anônimo. Vazio se o gcloud falhar: aí o
     # curl segue sem cabeçalho e o erro aparece como 401, com motivo, em vez de
     # virar mistério.
+    #
+    # SEM ARRAY, de propósito. A primeira versão usava `AUTH_HDR=()` e expandia com
+    # `"${AUTH_HDR[@]}"`. O bash do macOS é a versão 3.2, e nela expandir array VAZIO
+    # sob `set -u` é erro de "unbound variable": a substituição morre antes do curl
+    # rodar, o `|| echo "000"` nem chega a ser avaliado, e o teste pós-deploy falhou
+    # com "Health check falhou (HTTP )", sem código nenhum. Função com if é imune.
     ID_TOKEN=$(gcloud auth print-identity-token --audiences="$SERVICE_URL" 2>/dev/null || echo "")
-    AUTH_HDR=()
-    [ -n "$ID_TOKEN" ] && AUTH_HDR=(-H "Authorization: Bearer $ID_TOKEN")
+
+    curl_com_identidade() {
+        if [ -n "${ID_TOKEN:-}" ]; then
+            curl -s -H "Authorization: Bearer $ID_TOKEN" "$@"
+        else
+            curl -s "$@"
+        fi
+    }
 
     print_success "URL: $SERVICE_URL"
     echo ""
@@ -860,7 +872,7 @@ run_post_deploy_tests() {
 
     # 4.1 Health Check
     print_info "Teste 1/3: Health Check..."
-    HEALTH_RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" "${AUTH_HDR[@]}" "$SERVICE_URL/health" || echo "000")
+    HEALTH_RESPONSE=$(curl_com_identidade -o /dev/null -w "%{http_code}" "$SERVICE_URL/health" || echo "000")
 
     if [ "$HEALTH_RESPONSE" != "200" ]; then
         print_error "Health check falhou (HTTP $HEALTH_RESPONSE)"
@@ -915,8 +927,7 @@ run_post_deploy_tests() {
   ]
 }'
 
-    PRED_RESPONSE=$(curl -s -X POST "$SERVICE_URL/predict/batch" \
-        "${AUTH_HDR[@]}" \
+    PRED_RESPONSE=$(curl_com_identidade -X POST "$SERVICE_URL/predict/batch" \
         -H "Content-Type: application/json" \
         -d "$TEST_PAYLOAD" || echo "")
 
