@@ -182,12 +182,36 @@ def sql_fonte() -> str:
     )
     return f"""
     WITH url_por_email AS (
-      -- A URL de captura é 0% na base derivada e 100% no ledger vivo, de junho em
-      -- diante. Vem daqui, e por isso fica vazia para lead anterior a junho.
-      SELECT DISTINCT ON (lower(email)) lower(email) AS email, utm_url
-        FROM public.registros_ml
-       WHERE coalesce(utm_url,'') <> ''
-       ORDER BY lower(email), created_at DESC
+      -- A URL de captura NÃO existe na base derivada: vem de duas fontes, nesta
+      -- ordem de prioridade.
+      --
+      -- 1. `registros_ml` é o ledger VIVO, e só existe a partir de 23/05/2026. Daí a
+      --    cobertura ser 100% de junho em diante e quase zero antes.
+      -- 2. `lead_legado` é a tabela `Lead` antiga, que morreu em ~17/05/2026. Ela
+      --    guarda `page_url` com 100% de preenchimento de FEV a MAI/2026.
+      --
+      -- A fonte 2 estava fora da consulta, e por isso a entrega saía com 35% de
+      -- cobertura quando o dado existia no banco o tempo todo. Medido em 06/08/2026,
+      -- incluí-la recupera 137.763 URLs (fev +15.623, mar +57.594, abr +45.868,
+      -- mai +18.677) e leva a cobertura de 35,4% para ~90%.
+      --
+      -- JANEIRO CONTINUA VAZIO (16.166 leads, 1,9%): a `lead_legado` só começa em
+      -- fevereiro. Recuperar janeiro depende dos arquivos locais e de nuvem usados
+      -- para montar as tabelas, e é frente separada.
+      --
+      -- Prioridade por coluna `prio` em vez de COALESCE de duas subconsultas: assim a
+      -- regra fica num lugar só, e fonte nova entra como 3 sem reescrever nada.
+      SELECT DISTINCT ON (email) email, url AS utm_url
+        FROM (
+          SELECT lower(email) AS email, utm_url AS url, 1 AS prio, created_at
+            FROM public.registros_ml
+           WHERE coalesce(utm_url,'') <> '' AND coalesce(email,'') <> ''
+          UNION ALL
+          SELECT lower(email), page_url, 2, created_at
+            FROM public.lead_legado
+           WHERE coalesce(page_url,'') <> '' AND coalesce(email,'') <> ''
+        ) f
+       ORDER BY email, prio, created_at DESC
     )
     SELECT DISTINCT ON (l.event_id)
            encode(sha256((:sal || lower(l.email))::bytea), 'hex') AS lead_id,
