@@ -1088,6 +1088,43 @@ print_final_report() {
 }
 
 # =============================================================================
+# TRAVA: este script NÃO é a porta de entrada do deploy
+# =============================================================================
+# O caminho certo é `deploy-gate.sh` (skill /deploy), que envelopa este script e
+# adiciona o que ele sozinho não tem: lock compartilhado, checagem de frescor
+# (HEAD é o topo de origin/main?), monotonicidade (não regride o que está vivo),
+# registro no ledger durável, e o LOCKSTEP que alinha o serviço de monitoramento
+# à mesma imagem na hora de promover.
+#
+# Por que a trava existe: em 05-06/08/2026 este script foi chamado direto SEIS
+# vezes, com promoção de tráfego na mão. Resultado: nenhum dos seis deploys entrou
+# no ledger, o lockstep nunca rodou, e o serviço de monitoramento ficou numa imagem
+# diferente da do scorer sem ninguém notar. Nada impedia: o script é executável e
+# não perguntava quem o chamou. As travas existiam e foram contornadas por ser mais
+# rápido.
+#
+# Escape hatch consciente: `DEPLOY_SEM_GATE=1`. Existe porque emergência acontece,
+# e porque trava sem saída vira gambiarra pior. Mas ela grita no log e fica no
+# histórico do shell, então é decisão registrada, não atalho silencioso.
+if [ "${DEPLOY_VIA_GATE:-0}" != "1" ] && [ "${DEPLOY_SEM_GATE:-0}" != "1" ]; then
+    echo ""
+    echo "  ✋ deploy_capi.sh não deve ser chamado direto."
+    echo ""
+    echo "     Use:  bash V2/api/deploy-gate.sh deploy      (ou a skill /deploy)"
+    echo "     Depois: bash V2/api/deploy-gate.sh promote --revision <canary>"
+    echo ""
+    echo "     O gatekeeper adiciona lock, frescor, monotonicidade, ledger e o"
+    echo "     lockstep do monitoring. Chamando direto, você perde os cinco."
+    echo ""
+    echo "     Emergência de verdade:  DEPLOY_SEM_GATE=1 bash V2/api/deploy_capi.sh …"
+    echo ""
+    exit 1
+fi
+if [ "${DEPLOY_SEM_GATE:-0}" = "1" ]; then
+    echo "  ⚠️  DEPLOY_SEM_GATE=1: rodando FORA do gatekeeper. Sem ledger, sem lockstep."
+fi
+
+# =============================================================================
 # PARSE DE ARGUMENTOS
 # =============================================================================
 
