@@ -154,7 +154,7 @@ def test_qualidade_sai_AGREGADA_por_criativo_e_campanha():
     # Mora em tabela PRÓPRIA, não colada em cada lead: colar fazia 1.363 linhas
     # serem reescritas por dia em vez de 27, e repetia 58 valores em 250 mil linhas.
     nomes = {n for n, _ in prov.colunas_qualidade()}
-    assert {'tipo', 'chave', 'pct_top_deciles'} <= nomes
+    assert {'tipo', 'chave', 'pct_alta_qualidade'} <= nomes
     sql = prov.sql_qualidade()
     assert 'GROUP BY 1, 2 HAVING count(*) >=' in sql, 'o agregado deixou de ser agrupado'
     assert "'criativo'" in sql and "'campanha'" in sql
