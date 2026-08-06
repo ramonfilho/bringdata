@@ -142,8 +142,13 @@ def _carrega_historico() -> pd.DataFrame:
     return hist.drop(columns=["email", "tel"])
 
 
-def _notas_da_semana(hist_ate_aqui: pd.DataFrame) -> dict:
-    """NOTA por criativo, usando SÓ o histórico passado como argumento."""
+def _notas_da_semana(hist_ate_aqui: pd.DataFrame, alvo: dict = None) -> dict:
+    """NOTA por criativo, usando SÓ o histórico passado como argumento.
+
+    `alvo` é para onde o encolhimento puxa quem tem pouco histórico. Sem ele, puxa para
+    o neutro (1,0), que é o mesmo que dizer "não faço ideia". Com ele, puxa para o que a
+    fala e o ritmo do vídeo sugerem, que é bem melhor que não fazer ideia.
+    """
     if len(hist_ate_aqui) < MIN_HIST_PERIODO:
         return {}
     nivel = hist_ate_aqui["buy"].mean()
@@ -155,14 +160,21 @@ def _notas_da_semana(hist_ate_aqui: pd.DataFrame) -> dict:
         return {}
     lift = (g["k"] / g["n"]) / nivel
     peso = g["n"] / (g["n"] + K_ENCOLHIMENTO)
-    return (peso * lift + (1 - peso) * NOTA_NEUTRA).to_dict()
+    destino = (g.index.map(lambda c: (alvo or {}).get(c, NOTA_NEUTRA))
+               if alvo else NOTA_NEUTRA)
+    return (peso * lift + (1 - peso) * destino).to_dict()
 
 
-def _notas_por_canal(hist_ate_aqui: pd.DataFrame) -> dict:
-    """A mesma NOTA, mas calculada DENTRO de cada canal. Chave = (canal, criativo)."""
+def _notas_por_canal(hist_ate_aqui: pd.DataFrame, alvo: dict = None) -> dict:
+    """A mesma NOTA, mas calculada DENTRO de cada canal. Chave = (canal, criativo).
+
+    O `alvo` do encolhimento é compartilhado entre os canais de propósito: a fala do vídeo
+    não muda quando ele roda no Google em vez da Meta. O que muda por canal é o LIFT, que
+    é medido contra a conversão daquele canal.
+    """
     out = {}
     for cn, bloco in hist_ate_aqui.groupby("canal"):
-        for cr, val in _notas_da_semana(bloco).items():
+        for cr, val in _notas_da_semana(bloco, alvo=alvo).items():
             out[(cn, cr)] = val
     return out
 
@@ -281,6 +293,7 @@ def adicionar_nota_criativo(df: pd.DataFrame, *, col_criativo: str = "Content",
     trs = _carrega_transcricoes() if transcricoes is None else transcricoes
 
     por_semana, por_semana_canal, por_semana_texto = {}, {}, {}
+    por_semana_canal_texto = {}
     for sem in sorted(s for s in semana.dropna().unique()):
         # só histórico já MADURO: o desfecho de 45 dias precisa ter tido tempo de existir
         corte = sem.start_time - pd.Timedelta(days=CARENCIA_DIAS)
@@ -307,8 +320,15 @@ def adicionar_nota_criativo(df: pd.DataFrame, *, col_criativo: str = "Content",
             for cr, pv in prior.items():
                 comb.setdefault(cr, pv)      # estreante ganha a nota que o vídeo sugere
             por_semana_texto[sem] = comb
+            # A QUARTA VARIANTE: canal E texto na mesma nota. As duas anteriores foram
+            # construídas como ALTERNATIVAS, e a comparação entre elas trocava duas coisas
+            # de uma vez (adicionava o canal e removia o texto), então não dava para
+            # atribuir a diferença a nenhuma das duas. Aqui o lift é medido dentro do
+            # canal e o encolhimento puxa para o que o vídeo sugere, em vez do 1,0 cego.
+            por_semana_canal_texto[sem] = _notas_por_canal(passado, alvo=prior)
         else:
             por_semana_texto[sem] = base
+            por_semana_canal_texto[sem] = por_semana_canal[sem]
 
     def _monta(mapa, chave_canal=False):
         return np.array([
@@ -321,12 +341,17 @@ def adicionar_nota_criativo(df: pd.DataFrame, *, col_criativo: str = "Content",
     nota_canal = _monta(por_semana_canal, chave_canal=True)
     nota_canal = np.where(np.isnan(nota_canal), nota, nota_canal)   # sem canal → a geral
     nota_texto = np.nan_to_num(_monta(por_semana_texto), nan=NOTA_NEUTRA)
+    nota_canal_texto = _monta(por_semana_canal_texto, chave_canal=True)
+    # sem canal → cai na de texto, que já tem o prior; nem aí volta pro 1,0 cego
+    nota_canal_texto = np.where(np.isnan(nota_canal_texto), nota_texto, nota_canal_texto)
 
     out = df.copy()
     out[nome_saida] = nota
     out[f"{nome_saida}_canal"] = nota_canal
     out[f"{nome_saida}_texto"] = nota_texto
-    for rot, v in (("canal", nota_canal), ("texto", nota_texto)):
+    out[f"{nome_saida}_canal_texto"] = nota_canal_texto
+    for rot, v in (("canal", nota_canal), ("texto", nota_texto),
+                   ("canal_texto", nota_canal_texto)):
         logger.info(f"  [nota_criativo] {nome_saida}_{rot}: cobertura "
                     f"{(v != NOTA_NEUTRA).mean()*100:.1f}% · mediana {np.median(v):.2f}")
     cobertura = float((nota != NOTA_NEUTRA).mean())
