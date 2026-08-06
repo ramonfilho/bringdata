@@ -40,7 +40,18 @@ import urllib.request
 # Identidade nas chamadas ao Cloud Run. Este gate falava com o serviço SEM
 # credencial, o que só funcionava porque o serviço aceitava chamada anônima.
 # Ver scripts/gcp_auth.py.
-from scripts.gcp_auth import instalar_auth_gcp  # noqa: E402
+#
+# O import aceita as DUAS formas de execução. O `deploy_capi.sh` invoca por CAMINHO
+# (`python V2/api/../scripts/smoke_test_revision.py`), e nesse modo `scripts` não é
+# pacote importável. Sem este fallback o gate morre com ModuleNotFoundError, que foi
+# exatamente o que aconteceu no primeiro deploy depois desta mudança.
+try:  # como módulo: python -m scripts.x, a partir de V2/
+    from scripts.gcp_auth import instalar_auth_gcp  # noqa: E402
+except ModuleNotFoundError:  # por caminho: python V2/scripts/x.py
+    import sys as _sys
+    from pathlib import Path as _Path
+    _sys.path.insert(0, str(_Path(__file__).resolve().parent))
+    from gcp_auth import instalar_auth_gcp  # noqa: E402
 
 # Issues do feature_validator que não devem bloquear progressão de tráfego.
 # 'target' é a label do treino — não existe em produção por design (é predict,

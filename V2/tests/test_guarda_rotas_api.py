@@ -340,3 +340,31 @@ def test_identidade_usa_audiencia_da_propria_url():
     assert gcp_auth.audiencia_de(
         'https://smart-ads-api-x.a.run.app/health'
     ) == 'https://smart-ads-api-x.a.run.app'
+
+
+def test_gates_rodam_QUANDO_INVOCADOS_POR_CAMINHO():
+    """O `deploy_capi.sh` invoca os gates por caminho
+    (`python V2/api/../scripts/smoke_test_revision.py`), não como módulo. Nesse modo
+    `scripts` não é pacote importável.
+
+    Este teste existe porque o import da camada de identidade foi escrito na forma
+    de módulo e derrubou o Gate B no primeiro deploy depois da mudança: o gate morreu
+    com ModuleNotFoundError ANTES de testar qualquer coisa, e a mensagem que apareceu
+    foi 'features críticas ausentes no encoding', que não tinha nada a ver.
+    """
+    import subprocess
+    import sys
+    from pathlib import Path as _P
+    v2 = _P(auth.__file__).parent.parent
+    for nome in ('smoke_test_revision.py', 'progression_gate.py',
+                 'test_revision_equivalence.py'):
+        # Invoca EXATAMENTE como o deploy: `python <caminho>`. A forma importa:
+        # em `python arquivo.py` o Python põe o diretório DO ARQUIVO em sys.path[0];
+        # em `python -c` ele põe o diretório atual. Reproduzir com `-c` faz o teste
+        # passar batido, que foi o que aconteceu na primeira versão deste teste.
+        # Sem argumento o script morre no argparse, mas o import roda antes disso.
+        r = subprocess.run(
+            [sys.executable, str(v2 / 'scripts' / nome)],
+            capture_output=True, text=True, timeout=120, cwd=str(v2.parent))
+        assert 'ModuleNotFoundError' not in r.stderr, (
+            f'{nome} não carrega quando invocado por caminho:\n{r.stderr[-500:]}')
