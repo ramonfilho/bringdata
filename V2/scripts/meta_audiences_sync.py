@@ -41,6 +41,7 @@ if _ENV.exists():
 from src.core.client_config import ClientConfig
 from src.data.audience_reader import (
     read_buyers_audience,
+    read_captacoes_audience,
     read_cardonly_audience,
     read_hotleads_buyers_audience,
     read_leads_audience,
@@ -74,8 +75,8 @@ def _open_analytics_long():
 def main() -> int:
     ap = argparse.ArgumentParser(description="Sync de Públicos Personalizados da Meta")
     ap.add_argument("--client", default="devclub")
-    ap.add_argument("--audience", choices=["leads", "buyers", "cardonly", "hotleads", "both", "all"], default="both",
-                    help="'both'=leads+alunos (compat); 'all'=leads+alunos+cartão (usado pelo job diário)")
+    ap.add_argument("--audience", choices=["leads", "buyers", "cardonly", "hotleads", "captacoes", "both", "all"], default="both",
+                    help="'both'=leads+alunos (compat); 'all'=leads+alunos+cartão+hotleads+captações (usado pelo job diário)")
     ap.add_argument("--show-target", action="store_true",
                     help="GET dos públicos-alvo (read-only) pra confirmar antes de escrever")
     ap.add_argument("--execute", action="store_true",
@@ -111,6 +112,9 @@ def main() -> int:
     # Compradores Hotmart: sinal EXTERNO (selo do HotLeads), não venda nossa.
     if args.audience in ("hotleads", "all"):
         targets.append(("hotleads", ma.hotleads_audience_id))
+    # Captações: universo bruto de TODOS os leads captados (analytics.captacoes ~500k).
+    if args.audience in ("captacoes", "all"):
+        targets.append(("captacoes", ma.captacoes_audience_id))
 
     if args.show_target:
         for label, aid in targets:
@@ -138,6 +142,8 @@ def main() -> int:
                     client_id=args.client, conn=conn_a,
                     card_gateways=ma.card_gateways, boleto_gateways=ma.boleto_gateways,
                 )
+            elif label == "captacoes":
+                members = read_captacoes_audience(client_id=args.client, conn=conn_a)
             else:
                 members = read_buyers_audience(client_id=args.client, conn=conn_a)
             summary = client.replace_users(aid, members, dry_run=dry_run)

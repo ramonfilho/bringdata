@@ -115,6 +115,28 @@ class MetaCustomAudienceClient:
         logger.info("[meta_audiences] público criado: id=%s nome='%s'", body.get("id"), name)
         return {"status": "created", **body}
 
+    def rename_audience(self, audience_id: str, new_name: str, *, dry_run: bool = True) -> Dict:
+        """Muda o NOME de exibição de um Custom Audience existente. O ID é estável —
+        campanhas referenciam o público por ID, NÃO por nome, então renomear NÃO
+        quebra nem afeta nenhuma campanha viva; só troca o rótulo no Ads Manager.
+
+        dry_run=True (default): descreve sem escrever. dry_run=False escreve na conta
+        do cliente (exige ads_management). Reversível: renomear de volta."""
+        if not audience_id:
+            raise ValueError("audience_id ausente — não renomeio.")
+        if dry_run:
+            logger.info("[meta_audiences] DRY-RUN rename %s -> '%s' (NADA enviado).", audience_id, new_name)
+            return {"status": "dry_run_ok", "audience_id": audience_id, "would_rename_to": new_name}
+        r = requests.post(
+            f"{self.base_url}/{audience_id}",
+            data={"name": new_name, "access_token": self.access_token},
+            timeout=30,
+        )
+        if r.status_code >= 400:
+            return {"status": "error", "http_status": r.status_code, "message": _redact(r.text)[:400]}
+        logger.info("[meta_audiences] público %s renomeado para '%s'", audience_id, new_name)
+        return {"status": "renamed", "audience_id": audience_id, "new_name": new_name}
+
     # -------------------------------------------------------------- payload
     @staticmethod
     def build_rows(members: pd.DataFrame) -> List[List[str]]:

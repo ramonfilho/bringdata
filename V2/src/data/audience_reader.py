@@ -51,6 +51,7 @@ _MIN_LEADS = 50_000
 _MIN_BUYERS = 3_000
 _MIN_HOTLEADS = 5_000   # piso do público de compradores Hotmart; a base ~339k rende ~8-10% quentes (~30k)
 _MIN_CARDONLY = 2_000   # público SÓ CARTÃO é subconjunto dos alunos (~2,8k hoje); piso = alarme, não alvo
+_MIN_CAPTACOES = 200_000  # público de TODAS as captações (analytics.captacoes ~500k linhas); piso = alarme, não alvo
 
 # Nome da source unificada de respondentes no `analytics.leads`. Default = o nome
 # ATUAL (a fonte foi renomeada `train_unified` → `leads_treino_prod` em 21/07 por
@@ -108,6 +109,47 @@ def read_buyers_audience(
                 n, int((result["phone"].map(lambda p: bool(p) and str(p).strip() not in ('', 'None'))).sum()))
     if n < min_size:
         raise ValueError(f"[audience_reader] só {n} alunos (< {min_size}) — suspeito, abortando.")
+    return result
+
+
+def read_captacoes_audience(
+    client_id: str = "devclub",
+    *,
+    conn=None,
+    min_size: int = _MIN_CAPTACOES,
+) -> pd.DataFrame:
+    """Público de TODOS OS LEADS CAPTADOS: distinct {email, phone} de
+    `analytics.captacoes` (a base completa de captações, ~500k linhas — todo lead
+    que preencheu a captação, respondente da pesquisa OU não).
+
+    Espelha `read_buyers_audience`: puxa a fonte, reduz a email+telefone distinto
+    (reusa `_dedup_by_email`) e levanta ValueError se vier abaixo de `min_size`
+    (fail-loud — não deixa um soluço de banco ZERAR o público na conta do cliente).
+
+    Difere do público de leads (`read_leads_audience`, que é a UNIÃO respondentes +
+    Client): este é a base BRUTA de captações, o universo mais amplo.
+    """
+    own = conn is None
+    c = conn or open_analytics_connection()
+    try:
+        rows = c.run(
+            "SELECT email, phone FROM analytics.captacoes "
+            "WHERE email IS NOT NULL AND email <> ''"
+        )
+    finally:
+        if own:
+            c.close()
+    df = pd.DataFrame(rows, columns=["email", "phone"])
+    if df.empty:
+        raise ValueError("[audience_reader] analytics.captacoes vazio — não substituo público de captações.")
+    result = _dedup_by_email(df)
+    n = len(result)
+    logger.info(
+        "[audience_reader] captações: %d leads únicos (%d com telefone)",
+        n, int((result["phone"].map(lambda p: bool(p) and str(p).strip() not in ('', 'None'))).sum()),
+    )
+    if n < min_size:
+        raise ValueError(f"[audience_reader] só {n} captações (< {min_size}) — suspeito, abortando.")
     return result
 
 

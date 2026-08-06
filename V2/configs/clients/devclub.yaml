@@ -654,10 +654,11 @@ google_ads:
 meta_audiences:
   enabled: true
   ad_account_id: 'act_188005769808959'       # conta de anúncios DevClub (dos logs de insights, confirmada via Graph API)
-  leads_audience_id: '120248123634020390'    # público existente "lista_leads_devclub_320.csv" (~191k) — será substituído pela união leads
+  leads_audience_id: '120248123634020390'    # RENOMEADO 03/08 p/ "Respondentes de Pesquisa - DevClub". Conteúdo = união respondentes (leads_treino_prod) + Client (~366k); read_leads_audience. (Era "lista_leads_devclub_320.csv".)
   buyers_audience_id: '120248123531220390'   # público existente "lista_alunos_devclub_10.csv" (~6.8k) — será substituído pelos compradores
   cardonly_audience_id: '120248267145830390' # público "lista_alunos_cartao_devclub.csv" (alunos só cartão), criado via API em 22/07
   hotleads_audience_id: '120248507059700390' # "COMPRADORES HOTMART (BringData)", criado via API em 31/07 com 28.001 membros. Sinal EXTERNO (selo do HotLeads), NÃO é comprador nosso — semente de lookalike de comprador comprovado de produto digital
+  captacoes_audience_id: '120248662341800390' # "Leads - Todas as Captacoes (~500k) - DevClub", criado via API em 03/08. Universo BRUTO de todo lead captado (analytics.captacoes, 431k únicos, 100% telefone) — respondente OU não; read_captacoes_audience
   # leads_source REMOVIDO daqui de propósito: herda de `ingestion.leads_unified_source`,
   # o dono único do nome. Declarar em dois lugares foi o que permitiu escritor e leitor
   # divergirem e congelar o treino por 9 dias. Só volte a declarar aqui se o público da
