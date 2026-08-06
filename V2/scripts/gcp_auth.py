@@ -26,6 +26,7 @@ log em vez de virar mistério.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import urllib.parse
 import urllib.request
@@ -36,34 +37,79 @@ logger = logging.getLogger(__name__)
 _CACHE: Dict[str, Optional[str]] = {}
 
 
+# Conta de serviço a personificar. O `gcloud auth print-identity-token
+# --audiences=X` **exige conta de serviço**: com conta de usuário ele responde
+# "Invalid account type for --audiences". Como quem roda os gates é uma pessoa,
+# o caminho é personificar a mesma conta que os crons usam, que já tem
+# `roles/run.invoker` no serviço. Quem for rodar precisa de
+# `roles/iam.serviceAccountTokenCreator` sobre ela.
+SA_PADRAO = "scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com"
+
+
 def token_de_identidade(audiencia: str) -> Optional[str]:
     """Token de identidade do Google para a audiência dada, ou None.
 
-    Cacheado por audiência: o gate faz dezenas de chamadas e cada `gcloud auth
-    print-identity-token` custa perto de um segundo.
+    Tenta primeiro direto (funciona quando quem roda JÁ é conta de serviço, como
+    numa esteira automática) e, se o gcloud recusar por tipo de conta, personifica
+    a conta de serviço dos crons.
+
+    Cacheado por audiência: o gate faz dezenas de chamadas e cada chamada ao gcloud
+    custa perto de um segundo.
     """
     if audiencia in _CACHE:
         return _CACHE[audiencia]
-    try:
-        out = subprocess.run(
-            ["gcloud", "auth", "print-identity-token", f"--audiences={audiencia}"],
-            capture_output=True, text=True, timeout=30,
-        )
-        tok = out.stdout.strip() if out.returncode == 0 else None
-        if not tok:
-            logger.warning("[auth] sem token para %s (%s). Seguindo sem cabeçalho.",
-                           audiencia, (out.stderr or "").strip()[:120])
-    except (OSError, subprocess.SubprocessError) as e:
-        tok = None
-        logger.warning("[auth] gcloud indisponível (%s). Seguindo sem cabeçalho.", e)
+
+    sa = os.environ.get("GCP_IMPERSONATE_SA", SA_PADRAO)
+    tentativas = [
+        (["gcloud", "auth", "print-identity-token", f"--audiences={audiencia}"],
+         "direto"),
+        (["gcloud", "auth", "print-identity-token",
+          f"--impersonate-service-account={sa}", f"--audiences={audiencia}"],
+         f"personificando {sa.split('@')[0]}"),
+    ]
+    tok, ultimo_erro = None, ""
+    for cmd, comoquem in tentativas:
+        try:
+            out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as e:
+            ultimo_erro = str(e)
+            continue
+        # A personificação escreve aviso no stderr e o token no stdout; pega só a
+        # última linha não vazia, que é o token.
+        cand = (out.stdout or "").strip().splitlines()
+        cand = cand[-1].strip() if cand else ""
+        if out.returncode == 0 and len(cand) > 100:
+            tok = cand
+            logger.info("[auth] token obtido %s", comoquem)
+            break
+        ultimo_erro = (out.stderr or "").strip()[:160]
+
+    if not tok:
+        logger.warning(
+            "[auth] SEM token para %s (%s). As chamadas vão sem cabeçalho e o "
+            "serviço, que está fechado, vai responder 403.", audiencia, ultimo_erro)
     _CACHE[audiencia] = tok
     return tok
 
 
 def audiencia_de(url: str) -> str:
-    """Audiência esperada pelo Cloud Run: esquema + host, sem caminho."""
+    """Audiência esperada pelo Cloud Run para esta URL.
+
+    Para a URL normal do serviço é esquema + host. Para URL de TAG
+    (`https://<tag>---<servico>-<hash>-<regiao>.a.run.app`, que é como os gates de
+    deploy falam com a revisão canário) a audiência continua sendo a **URL base do
+    serviço**, sem o prefixo da tag.
+
+    Isso foi MEDIDO, e contra a minha suposição inicial: token com audiência igual à
+    URL de tag leva 401 na própria URL de tag; token com audiência igual à URL base
+    leva 200 nela. A primeira versão deste módulo derivava a audiência da URL literal
+    e por isso o gate levou 401 assim que o serviço foi fechado.
+    """
     p = urllib.parse.urlsplit(url)
-    return f"{p.scheme}://{p.netloc}"
+    host = p.netloc
+    if "---" in host:
+        host = host.rsplit("---", 1)[1]
+    return f"{p.scheme}://{host}"
 
 
 class _AnexaIdentidade(urllib.request.BaseHandler):

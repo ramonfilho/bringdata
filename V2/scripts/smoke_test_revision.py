@@ -66,6 +66,24 @@ DEFAULT_IGNORE_FEATURES = frozenset(['target'])
 from cloud_run_urls import get_revision_url  # noqa: E402
 
 
+def falha_de_autenticacao(payload) -> bool:
+    """O gate levou 401/403, ou seja: ele NÃO RODOU.
+
+    Existe porque as três checagens deste smoke tratavam qualquer erro de HTTP como
+    "não bloqueante, o gate não conseguiu opinar". Isso é razoável para um endpoint
+    com soluço, e é perigoso para 401/403: em 06/08/2026, depois que o serviço foi
+    fechado, as três checagens levaram 403 e o smoke ainda assim imprimiu
+    "Todos os gates passaram. Prossegue.". Um gate cego dizendo que está tudo bem é
+    pior que gate nenhum, porque ele compra confiança que não tem.
+
+    401/403 aqui quase sempre é o token de identidade faltando. Ver scripts/gcp_auth.py.
+    """
+    try:
+        return int(payload.get('http_status', 0)) in (401, 403)
+    except (AttributeError, TypeError, ValueError):
+        return False
+
+
 def trigger_encoding_pipeline(url: str, timeout: int = 300) -> tuple[int, str]:
     """
     Chama /monitoring/daily-check/railway?hours=1 para acionar apply_encoding
@@ -360,6 +378,13 @@ def main() -> int:
             print("scoreando com sinal incompleto (missing_column/wrong_dtype/etc).")
             return 1
 
+        if decision == 'error' and falha_de_autenticacao(fr_payload):
+            print("[smoke test] ❌ feature-report devolveu 401/403: o gate NÃO RODOU.")
+            print("    O serviço está fechado e a chamada saiu sem identidade.")
+            print("    Confira: gcloud auth print-identity-token "
+                  "--impersonate-service-account=scheduler-invoker@smart-ads-451319"
+                  ".iam.gserviceaccount.com --audiences=<url>")
+            return 1
         if decision == 'error':
             print(f"[smoke test] ⚠️  feature-report falhou: {fr_payload}")
             print("[smoke test] Não bloqueante (gate não conseguiu opinar) — verifique manualmente.")
@@ -398,6 +423,10 @@ def main() -> int:
             print("encoding_overrides ausente, predictor inválido ou run_id divergente.")
             return 1
 
+        if ab_decision == 'error' and falha_de_autenticacao(ab_payload):
+            print("[smoke test] ❌ /smoke/run-variants devolveu 401/403: o gate NÃO RODOU.")
+            print("    O serviço está fechado e a chamada saiu sem identidade. Ver scripts/gcp_auth.py.")
+            return 1
         if ab_decision == 'error':
             print(f"[smoke test] ⚠️  /smoke/run-variants falhou: {ab_payload}")
             print("[smoke test] Não bloqueante (gate não conseguiu opinar) — verifique manualmente.")
@@ -433,6 +462,10 @@ def main() -> int:
             print("dedup .str accessor, railway_mapping, etc).")
             return 1
 
+        if rp_decision == 'error' and falha_de_autenticacao(rp_payload):
+            print("[smoke test] ❌ /railway/process-pending devolveu 401/403: o gate NÃO RODOU.")
+            print("    O serviço está fechado e a chamada saiu sem identidade. Ver scripts/gcp_auth.py.")
+            return 1
         if rp_decision == 'error':
             print(f"[smoke test] ⚠️  /railway/process-pending falhou: {rp_payload}")
             print("[smoke test] Não bloqueante (gate não conseguiu opinar) — verifique manualmente.")

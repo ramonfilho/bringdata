@@ -329,17 +329,50 @@ def test_gates_de_deploy_autenticam():
         assert 'instalar_auth_gcp()' in fonte, f'{nome} importa mas não chama'
 
 
-def test_identidade_usa_audiencia_da_propria_url():
-    """O Cloud Run exige que o `aud` do token bata com a URL chamada. Os gates falam
-    com a URL do serviço E com URLs de tag (`canary-xxx---...`), que são hosts
-    diferentes: audiência fixa passaria num caso e daria 401 no outro."""
+def test_audiencia_de_url_de_tag_e_a_url_BASE_do_servico():
+    """Para URL de tag do Cloud Run
+    (`https://<tag>---<servico>-<hash>-<regiao>.a.run.app`, que é como os gates falam
+    com a revisão canário) a audiência do token continua sendo a URL BASE do serviço.
+
+    Foi MEDIDO, e contra a suposição da primeira versão: token com audiência igual à
+    URL de tag leva **401** na própria URL de tag; com audiência igual à URL base leva
+    **200**. Derivar a audiência da URL literal foi o que fez o gate levar 401 assim
+    que o serviço foi fechado."""
     from scripts import gcp_auth
+    base = 'https://smart-ads-api-x.a.run.app'
     assert gcp_auth.audiencia_de(
-        'https://canary-123---smart-ads-api-x.a.run.app/monitoring/feature-report?h=1'
-    ) == 'https://canary-123---smart-ads-api-x.a.run.app'
-    assert gcp_auth.audiencia_de(
-        'https://smart-ads-api-x.a.run.app/health'
-    ) == 'https://smart-ads-api-x.a.run.app'
+        f'https://canary-123---smart-ads-api-x.a.run.app'
+        f'/monitoring/feature-report?h=1') == base
+    assert gcp_auth.audiencia_de(f'{base}/health') == base
+
+
+def test_gate_BLOQUEIA_quando_leva_401_ou_403():
+    """Um gate que não consegue autenticar NÃO RODOU, e não pode dizer que passou.
+
+    Em 06/08/2026, logo depois de fechar o serviço, as três checagens do smoke
+    levaram 403 e o script ainda assim imprimiu "Todos os gates passaram. Prossegue."
+    Gate cego dizendo que está tudo bem é pior que gate nenhum, porque compra
+    confiança que ele não tem."""
+    import importlib.util
+    from pathlib import Path as _P
+    caminho = _P(auth.__file__).parent.parent / 'scripts' / 'smoke_test_revision.py'
+    spec = importlib.util.spec_from_file_location('_smoke', caminho)
+    mod = importlib.util.module_from_spec(spec)
+    import sys as _sys
+    _sys.path.insert(0, str(caminho.parent))
+    spec.loader.exec_module(mod)
+
+    assert mod.falha_de_autenticacao({'http_status': 401})
+    assert mod.falha_de_autenticacao({'http_status': 403})
+    assert not mod.falha_de_autenticacao({'http_status': 500})
+    assert not mod.falha_de_autenticacao({'http_status': 200})
+    assert not mod.falha_de_autenticacao(None)
+    assert not mod.falha_de_autenticacao('erro de rede')
+
+    # E as três checagens têm que consultar o helper antes de decidir "não bloqueante".
+    fonte = caminho.read_text()
+    assert fonte.count('falha_de_autenticacao(') >= 4, (
+        'alguma checagem do smoke voltou a tratar 401/403 como não bloqueante')
 
 
 def test_gates_rodam_QUANDO_INVOCADOS_POR_CAMINHO():
@@ -402,3 +435,37 @@ def test_smoke_do_deploy_sobrevive_a_token_ausente():
     r = subprocess.run(['bash', '-c', prog], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, f'quebrou com token vazio sob set -u: {r.stderr[-300:]}'
     assert 'CURL' in r.stdout
+
+
+def test_identidade_personifica_quando_a_conta_e_de_usuario(monkeypatch):
+    """`gcloud auth print-identity-token --audiences=X` EXIGE conta de serviço: com
+    conta de usuário ele responde "Invalid account type for --audiences". Quem roda os
+    gates é uma pessoa, então o caminho é personificar a mesma conta que os crons já
+    usam, que tem `roles/run.invoker` no serviço.
+
+    Sem esse fallback o token nunca sai e todo gate leva 401 no serviço fechado."""
+    import subprocess as _sp
+    from scripts import gcp_auth
+
+    gcp_auth._CACHE.clear()
+    chamadas = []
+
+    class _Saida:
+        def __init__(self, rc, out, err):
+            self.returncode, self.stdout, self.stderr = rc, out, err
+
+    def _falso_run(cmd, **kw):
+        chamadas.append(cmd)
+        if any(c.startswith('--impersonate-service-account=') for c in cmd):
+            return _Saida(0, 'AVISO qualquer\n' + 'T' * 400 + '\n', '')
+        return _Saida(1, '', 'ERROR: Invalid account type for `--audiences`.')
+
+    monkeypatch.setattr(_sp, 'run', _falso_run)
+    tok = gcp_auth.token_de_identidade('https://x.a.run.app')
+    gcp_auth._CACHE.clear()
+
+    assert tok and len(tok) > 100, 'não obteve token pelo caminho de personificação'
+    assert len(chamadas) == 2, f'esperava tentar direto e depois personificando: {chamadas}'
+    assert any(c.startswith('--impersonate-service-account=') for c in chamadas[1])
+    # O token vem na ÚLTIMA linha do stdout: a personificação escreve aviso antes.
+    assert 'AVISO' not in tok
