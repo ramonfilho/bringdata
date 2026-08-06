@@ -112,12 +112,22 @@ class DailyCheckResponse(BaseModel):
     hotleads_24h_summary: Optional[Dict[str, Any]] = None
 
 # Inicializar a aplicação FastAPI
+# Documentação automática DESLIGADA. `/docs`, `/redoc` e `/openapi.json` serviam,
+# anonimamente, 53 KB com o mapa completo da API: toda rota, todo parâmetro e todo
+# nome de campo, inclusive `lead_score` e `decil`. Era o índice que tornava as
+# outras rotas descobríveis por quem não conhece o sistema. Nada nosso consome
+# esses caminhos (conferido em api/, scripts/ e nos gates de deploy); a
+# rastreabilidade de "o que roda em produção" vem das labels git da revisão.
+# Para reativar em desenvolvimento: exportar API_DOCS_ENABLED=1.
+_DOCS = os.environ.get("API_DOCS_ENABLED", "").strip() in ("1", "true", "True")
+
 app = FastAPI(
     title="Bring Data Lead Scoring API V2",
     description="API otimizada para predições em batch via Google Sheets",
     version="2.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
+    docs_url="/docs" if _DOCS else None,
+    redoc_url="/redoc" if _DOCS else None,
+    openapi_url="/openapi.json" if _DOCS else None,
 )
 
 # Adicionar CORS para Google Apps Script e Landing Pages

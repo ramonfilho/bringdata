@@ -35,6 +35,11 @@ import os
 import sys
 import urllib.error
 import urllib.request
+
+# Identidade nas chamadas ao Cloud Run. Este gate falava com o serviço SEM
+# credencial, o que só funcionava porque o serviço aceitava chamada anônima.
+# Ver scripts/gcp_auth.py.
+from scripts.gcp_auth import instalar_auth_gcp  # noqa: E402
 from typing import Any
 
 import pg8000.native
@@ -390,6 +395,7 @@ def _verdict(any_diff: bool, expect_change: bool, sample_decil_diffs: list) -> i
 # ============================================================================
 
 def main() -> int:
+    instalar_auth_gcp()
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('target', help='Revisão alvo (ex: smart-ads-api-00404-xxx)')
     ap.add_argument('--reference', help='Revisão referência. Default: revisão com 100% tráfego.')
