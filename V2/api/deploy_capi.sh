@@ -672,7 +672,13 @@ print(','.join(stale))
             if python3 "$SMOKE_SCRIPT" "$NEW_REVISION" --region "$REGION" --project "$PROJECT_ID"; then
                 print_success "[T1-10 Gate B] Smoke test passou — revisão saudável"
             else
-                print_error "[T1-10 Gate B] Smoke test FALHOU — features críticas ausentes no encoding"
+                # A mensagem antiga cravava "features críticas ausentes no
+                # encoding" para QUALQUER saída não-zero do smoke: crash, erro de
+                # import, 403 por falta de identidade, tudo. Em 06/08/2026 o gate
+                # morreu com ModuleNotFoundError e a mensagem mandou procurar
+                # encoding, que não tinha nada a ver. O motivo real o smoke já
+                # imprime acima; aqui é só o rótulo.
+                print_error "[T1-10 Gate B] Smoke test FALHOU (exit != 0). O motivo está impresso acima."
                 print_warning "Revisão permanece em 0% de tráfego. NÃO progredir tráfego até resolver."
                 print_info "Para descartar: gcloud run revisions delete $NEW_REVISION --region=$REGION"
                 exit 1
