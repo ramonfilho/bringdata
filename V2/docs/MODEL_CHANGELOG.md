@@ -23,6 +23,45 @@ fingerprint) e **modelo** (run MLflow + métricas). Uma entrada por modelo, mais
 
 ---
 
+## 2026-07-27 — peaceful-hawk-814 — CANDIDATO
+
+- **run_id:** `76841105b1cf41b58d962eaf076d05ec`  ·  **código:** `f3174e5` ⚠️árvore suja  ·  **modelo anterior:** `b085b63681bc4d0d90bdbd466106763a`
+- **Dados:** matched **100014** leads, **283** compradores (0.28% positivos), fingerprint `a7ed2821922a4f9a`. Split `temporal_leads`, corte 2026-03-31, período 2026-02-04..2026-04-12 (treino 80011 / teste 20003).
+- **Config:** n_estimators=300, max_depth=8, min_samples_split=2, min_samples_leaf=1, max_features=sqrt, class_weight=balanced, random_state=42. buyer_weights=True, tmb_risk_filter=all, matching=email_telefone, features=41.
+- **Métricas (test):** AUC **0.7168** · lift **2.44** · top-3 **64.44%** · top-5 82.22% · monotonia 66.67% · baseline 0.22%.
+- **Δ vs anterior:** _(preencher: comparação exige rodar o modelo anterior no mesmo test set)_
+- **Mudanças de código desde o anterior (rascunho automático, curar):**
+  - aa47ce8 feat(relatório criativo): mostra o ID da campanha na Meta no rótulo
+  - f1c5454 feat(relatório criativo): agrupa por AÇÃO (aumentar/reduzir orçamento) em vez de lista única
+  - ee2010d feat(capi): jul_24 dispara 5 eventos de qualidade (top10/top30/top50 + 70-90/50-70)
+  - bcd3111 feat(ab): promove abr28 a champion + jul_24 challenger (eventos top30/top10)
+  - 3873026 feat(capi): segundo evento de qualidade por variante (capi_secondary_hq_events)
+- **Decisão:** CANDIDATO — registrado no MLflow, não ativado, produção intacta. Promover exige o [`PROMOCAO_MODELO_CHECKLIST.md`](PROMOCAO_MODELO_CHECKLIST.md) + deploy com canário.
+
+---
+
+## 2026-07-25 — secretive-owl-433 — CANDIDATO
+
+- **run_id:** `b085b63681bc4d0d90bdbd466106763a`  ·  **código:** `135b219` ⚠️árvore suja  ·  **modelo anterior:** `1f0f0a71061648368fc29cb58ab0cbd0`
+- **Dados:** matched **316280** leads, **4043** compradores (1.28% positivos), fingerprint `2c3e423ca07bf12f`. Split `temporal_leads`, corte 2026-04-29, período 2025-01-03..2026-07-01 (treino 253024 / teste 63256).
+- **Config:** n_estimators=300, max_depth=8, min_samples_split=2, min_samples_leaf=1, max_features=sqrt, class_weight=balanced, random_state=42. buyer_weights=True, tmb_risk_filter=all, matching=email_telefone, features=53.
+- **Métricas (test):** AUC **0.7297** · lift **3.32** · top-3 **63.82%** · top-5 79.92% · monotonia 88.89% · baseline 0.83%.
+- **Δ vs anterior:** _(preencher: comparação exige rodar o modelo anterior no mesmo test set)_
+- **Mudanças de código desde o anterior (rascunho automático, curar):**
+  - 0eaee9f docs(indice): lista RUNBOOK_scoring_pipeline, ROLLBACK_DECISION e MODEL_CHANGELOG
+  - 96fa6d6 fix(deploy): isola gate de progressão na revisão canary + fonte única de URL Cloud Run
+  - edb8198 feat(relatório criativo): tokens relativos hoje/ontem na janela (envio das 14h)
+  - d0c5289 chore(scheduler): 2º envio diário do relatório de criativo (14h BRT) na lista OIDC
+  - 7de65d9 fix(launches): 3º bypass do digest (revenue_forecast) + LAUNCHES_SOURCE durável no config.sh
+  - cbddbbf fix(launches): job do calendário roda como a SA que lê a planilha (evita 403)
+  - f15c484 feat(launches): fonte runtime de LF via analytics.launch_calendar (refresh diário da planilha)
+  - d3c2bc4 feat(relatório criativo): daily-trafego aceita start_date/end_date (janela fundida) (#93)
+  - c4c5a46 feat(lineage): model card automatico + carimbo de commit no treino
+  - 784dea4 feat(lineage): dataset_fingerprint no MLflow + MODEL_CHANGELOG.md
+- **Decisão:** CANDIDATO — registrado no MLflow, não ativado, produção intacta. Promover exige o [`PROMOCAO_MODELO_CHECKLIST.md`](PROMOCAO_MODELO_CHECKLIST.md) + deploy com canário.
+
+---
+
 ## 2026-07-23 — RF + feature selection (permutação) — CANDIDATO
 
 - **run_id:** `1f0f0a71061648368fc29cb58ab0cbd0`  ·  **código:** `9175264` (PR #90)  ·  **modelo anterior (produção):** Challenger `abr28` = `5d158f0aa6e54b489498470446194a6c` (treinado 28/04/2026)

@@ -1,6 +1,6 @@
-# Portfólio LinkedIn — Bring Data V2
+# Portfólio LinkedIn - Bring Data V2
 
-Knowledge base para o agente `/linkedin` compor posts. Não é material de venda — é o inventário técnico pessoal de Ramon Filho sobre o projeto Bring Data como portfólio.
+Knowledge base para o agente `/linkedin` compor posts. Não é material de venda - é o inventário técnico pessoal de Ramon Filho sobre o projeto Bring Data como portfólio.
 
 **Regras duras de uso:**
 - Todo número sai deste arquivo ou de `/comercial`. Se precisar de um número que não está aqui, parar e perguntar.
@@ -16,7 +16,7 @@ Knowledge base para o agente `/linkedin` compor posts. Não é material de venda
 
 Sistema de lead scoring por ML que, em menos de 5 minutos após o lead chegar, envia um sinal calibrado ao Meta via Conversions API com valor proporcional à propensão de compra (decil D01–D10). Rodando em produção desde dez/2025 com o cliente DevClub.
 
-**Por que isso importa:** o Meta otimiza anúncios a partir de eventos de conversão. O evento padrão `Purchase` só acontece 7–21 dias depois da compra real. `LeadQualified` com score calibrado chega em 5 min — o algoritmo aprende 56× mais rápido. Campanhas novas saem do "modo exploração" em 7 dias em vez de 35–70.
+**Por que isso importa:** o Meta otimiza anúncios a partir de eventos de conversão. O evento padrão `Purchase` só acontece 7–21 dias depois da compra real. `LeadQualified` com score calibrado chega em 5 min - o algoritmo aprende 56× mais rápido. Campanhas novas saem do "modo exploração" em 7 dias em vez de 35–70.
 
 ---
 
@@ -50,7 +50,7 @@ Sistema de lead scoring por ML que, em menos de 5 minutos após o lead chegar, e
 - pandas 2.0, joblib
 - MLflow (tracking em Cloud SQL Postgres, artifacts em GCS)
 
-**Cloud — GCP**
+**Cloud - GCP**
 - Cloud Run (API + Jobs)
 - Cloud Scheduler (monitoramento diário + retreino mensal)
 - Cloud SQL Postgres (MLflow backend)
@@ -79,27 +79,27 @@ Sistema de lead scoring por ML que, em menos de 5 minutos após o lead chegar, e
 
 ---
 
-## 4. NÚCLEO TÉCNICO — DECISÕES DE DESIGN POSTÁVEIS
+## 4. NÚCLEO TÉCNICO - DECISÕES DE DESIGN POSTÁVEIS
 
 ### 4.1 SSoT em `src/core/` (nasceu de um bug)
 15 módulos consolidam transformações de 3 pipelines (treino, produção, monitoramento) em uma única implementação. Contrato de assinatura: `transform(df, config, **artifacts) -> df`.
 
-**Motivação real:** em mar/2026 descobri que treino e produção aplicavam regras diferentes para encoding, Medium e UTM — divergências que estavam no código há meses, mascaradas porque o modelo anterior tinha sido treinado e servido com as mesmas regras erradas. Ao trocar o modelo, a divergência veio à tona: o score em produção não correspondia ao esperado pelo treino. O refactor inteiro nasceu desse incidente.
+**Motivação real:** em mar/2026 descobri que treino e produção aplicavam regras diferentes para encoding, Medium e UTM - divergências que estavam no código há meses, mascaradas porque o modelo anterior tinha sido treinado e servido com as mesmas regras erradas. Ao trocar o modelo, a divergência veio à tona: o score em produção não correspondia ao esperado pelo treino. O refactor inteiro nasceu desse incidente.
 
 **Módulos principais:**
-- `preprocessing.py` — orquestra a sequência canônica
-- `encoding.py` — ordinal + one-hot com feature registry do MLflow
-- `matching.py` — consolidou 6 arquivos antigos (`src/matching/`) em 1
-- `utm.py`, `medium.py` — unificação de canais (consolidou 3 arquivos de Medium em 1)
-- `feature_engineering.py` — features derivadas
-- `client_config.py` — dataclass com 15 sub-configs
+- `preprocessing.py` - orquestra a sequência canônica
+- `encoding.py` - ordinal + one-hot com feature registry do MLflow
+- `matching.py` - consolidou 6 arquivos antigos (`src/matching/`) em 1
+- `utm.py`, `medium.py` - unificação de canais (consolidou 3 arquivos de Medium em 1)
+- `feature_engineering.py` - features derivadas
+- `client_config.py` - dataclass com 15 sub-configs
 
 ### 4.2 ClientConfig multi-cliente (153 hardcodes → 1 YAML)
-Dataclass tipado em Python com 15 sub-configs e ~130 campos parametrizando **153 hardcodes** extraídos do código. Onboarding de novo cliente não requer alteração de código — é 1 YAML.
+Dataclass tipado em Python com 15 sub-configs e ~130 campos parametrizando **153 hardcodes** extraídos do código. Onboarding de novo cliente não requer alteração de código - é 1 YAML.
 
 Sub-configs: `InfraConfig`, `IngestionConfig`, `UTMConfig`, `MediumConfig`, `MatchingConfig`, `EncodingConfig`, `MonitoringConfig`, `ModelConfig`, `BusinessConfig`, `CAPIConfig`, `ABTestConfig`.
 
-### 4.3 Padrão A2 — pipelines dict por client_id
+### 4.3 Padrão A2 - pipelines dict por client_id
 ```python
 pipelines: Dict[str, LeadScoringPipeline]
 ```
@@ -108,7 +108,7 @@ Header `X-Client-ID: devclub`. Suporta N clientes em um único serviço Cloud Ru
 ### 4.4 A/B testing via UTM + event names CAPI distintos
 Gestor de tráfego cria dois grupos de campanhas com UTMs diferentes (ex.: `ML_V1` vs `ML_V2`). Pipeline detecta pelo UTM do lead qual modelo rodar. Cada modelo envia evento CAPI com nome diferente (`LeadQualified` vs `LeadQualifiedCha`).
 
-**Consequência:** Meta atribui compras a cada evento separadamente — ROAS por variante é lido direto no Ads Manager, sem análise contrafactual. Crítica de promoção: ROAS do challenger ≥ champion após 1 lançamento com janela de conversão fechada (≥27 dias).
+**Consequência:** Meta atribui compras a cada evento separadamente - ROAS por variante é lido direto no Ads Manager, sem análise contrafactual. Crítica de promoção: ROAS do challenger ≥ champion após 1 lançamento com janela de conversão fechada (≥27 dias).
 
 ### 4.5 Parity audit (o teste que pega o que humano não pega)
 `train_pipeline.py --capture-parity-snapshots` captura (input, output) de 4 transformações críticas (UTM, Medium, feature_engineering, encoding). Depois `tests/parity_audit.py` compara coluna-a-coluna treino vs produção, falha alto em divergência, lista as top 3 colunas divergentes.
@@ -116,18 +116,18 @@ Gestor de tráfego cria dois grupos de campanhas com UTMs diferentes (ex.: `ML_V
 Foi o teste que pegou o bug histórico de `Medium_Linguagem_programacao` zerada.
 
 ### 4.6 Retraining orchestrator com hook injection
-Retreino mensal reutiliza 100% do `train_pipeline.py` via hook injection — zero duplicação de lógica. Compara champion (em produção) vs challenger (novo): AUC, monotonia entre decis, concentração de positivos. Deploy condicional por quality gate.
+Retreino mensal reutiliza 100% do `train_pipeline.py` via hook injection - zero duplicação de lógica. Compara champion (em produção) vs challenger (novo): AUC, monotonia entre decis, concentração de positivos. Deploy condicional por quality gate.
 
 ### 4.7 Dispatch CAPI por plataforma (DT-CAPI-01)
 `utm_source_allowlist` em `CAPIConfig`: só envia evento Meta se `utm_source` estiver na lista permitida (`["facebook-ads", "instagram"]`). Leads de Google Ads e orgânicos recebem `capiStatus = 'skipped'`.
 
-**Por que:** incluir leads que o Meta nunca gerou faz o algoritmo aprender padrões que ele não consegue usar para targeting — dilui o sinal sem benefício. Descoberta de abr/2026.
+**Por que:** incluir leads que o Meta nunca gerou faz o algoritmo aprender padrões que ele não consegue usar para targeting - dilui o sinal sem benefício. Descoberta de abr/2026.
 
 ### 4.8 Validador pré-encoding (Safeguard T1-11)
 Contrato offline via snapshot de features esperadas + validação runtime com tolerância configurável de missing por feature. Log JSON estruturado. Endpoint `/monitoring/feature-report`.
 
 ### 4.9 Fail-loud em todo transform novo
-Regra dura em `CLAUDE.md`: todo transform novo em `src/core/` inclui pelo menos um `assert` que falha alto se output for inesperadamente zero/nulo. Se remover o assert não causaria confusão em produção, não precisa. Se causaria — obrigatório.
+Regra dura em `CLAUDE.md`: todo transform novo em `src/core/` inclui pelo menos um `assert` que falha alto se output for inesperadamente zero/nulo. Se remover o assert não causaria confusão em produção, não precisa. Se causaria - obrigatório.
 
 Motivado por dois bugs reais: `Medium_Linguagem_programacao` zerada por semanas e D9 sem eventos por 2 meses. Falhas silenciosas degradam sinal sem avisar.
 
@@ -145,8 +145,8 @@ Bug de comparação de strings: código comparava `'D9'` mas sistema formatava d
 
 **Ângulo postável:** "Tive um bug que sumiu 10% dos meus eventos de conversão por 2 meses. Não era crash. Era um `'D9' vs 'D09'` de caractere."
 
-### 5.2 `Medium_Linguagem_programacao` zerada — a 5ª feature mais importante
-5ª feature mais importante do modelo (5,31% de peso) estava sendo preenchida com zero para 100% dos leads desde que o modelo foi implantado. Bug silencioso — nenhum erro explícito, apenas eliminação do sinal. Descoberto ao investigar queda de D10% após rollback: mesmo com modelo correto, D10 estabilizou em ~30% em vez de voltar aos ~42% de antes.
+### 5.2 `Medium_Linguagem_programacao` zerada - a 5ª feature mais importante
+5ª feature mais importante do modelo (5,31% de peso) estava sendo preenchida com zero para 100% dos leads desde que o modelo foi implantado. Bug silencioso - nenhum erro explícito, apenas eliminação do sinal. Descoberto ao investigar queda de D10% após rollback: mesmo com modelo correto, D10 estabilizou em ~30% em vez de voltar aos ~42% de antes.
 
 **Correção estrutural:** validador pré-encoding (T1-11) + fail-loud obrigatório em core.
 
@@ -167,7 +167,7 @@ Encoding, Medium e UTM aplicavam regras diferentes entre treino e produção há
 ### 5.5 Feedback loop de 3 meses sem grupo controle
 Modelo foi treinado em dados produzidos por ele mesmo: classificou leads em D10, direcionou orçamento, Meta passou a entregar mais leads com esse perfil, que eram super-representados no próximo treino. **D10 chegou a 41% dos leads (esperado ~10%).** Feedback loop ativo desde dez/2025, diagnosticado só em 11/03/2026. Grupo controle (10–20% do budget fora do ML) ativado em 15/03/2026.
 
-**Ângulo postável:** "Meu modelo treinou em dados que ele mesmo produziu por 3 meses. O D10 chegou a 41% — quase 5× o esperado. Grupo controle não é luxo, é infraestrutura."
+**Ângulo postável:** "Meu modelo treinou em dados que ele mesmo produziu por 3 meses. O D10 chegou a 41% - quase 5× o esperado. Grupo controle não é luxo, é infraestrutura."
 
 ### 5.6 Mudança de evento de otimização sem grupo controle
 10/03/2026: migrei todas as campanhas de `LQHQ` (só D9-D10, sinal de topo) para `LQ` (todos decis com valor proporcional) de uma vez, sem A/B. Meta recalibrou para audiência mais ampla. **D10 caiu de ~42% para ~30% em 2 dias.**
@@ -177,28 +177,28 @@ Modelo foi treinado em dados produzidos por ele mesmo: classificou leads em D10,
 ### 5.7 Valor CAPI errado em 3 gerações
 - **v1:** tabela fixa hardcoded descolada do produto real
 - **v2 (15/03):** correção do formato `D1 → D01` quebrou, gerando valores nulos em 9/10 decis por dias
-- **v3 (22/03):** cálculo runtime `ticket_médio × taxa_conversão_decil` — mas `ticket_médio` era média simples (não ponderada Guru-à-vista vs TMB-parcelado)
+- **v3 (22/03):** cálculo runtime `ticket_médio × taxa_conversão_decil` - mas `ticket_médio` era média simples (não ponderada Guru-à-vista vs TMB-parcelado)
 - **v4 (03/04):** ticket Guru real × fator de realização TMB
 
 **Ângulo postável:** "O número que você envia ao Meta é a função-objetivo do algoritmo dele. Errei esse número 3 vezes. Cada erro virou um trimestre de ajuste."
 
 ### 5.8 Timezone bug recorrente em 3 componentes
-UTC vs Brasília (UTC−3). Apareceu em 17/01 (monitoramento × Sheets), 18/02 (filtro com sinal invertido — somou em vez de subtrair), 19/02 (Railway × hora do servidor). Leads perdidos em janelas de corte.
+UTC vs Brasília (UTC−3). Apareceu em 17/01 (monitoramento × Sheets), 18/02 (filtro com sinal invertido - somou em vez de subtrair), 19/02 (Railway × hora do servidor). Leads perdidos em janelas de corte.
 
 **Correção estrutural:** regra dura `datetime.now(timezone.utc)` em todo o código (T1-4).
 
 ### 5.9 UTM fantasma (origens não mapeadas)
-`ig`, `manychat`, `org`, campo vazio viraram features zeradas no modelo ao aparecer em produção. Três correções ao longo de 2 meses, todas reativas. Reincidiu em UTM Term (`'0405'` com 669 leads/dia, 16% do volume) — a lógica de unificação tinha uma exceção para preservar códigos numéricos que virou brecha.
+`ig`, `manychat`, `org`, campo vazio viraram features zeradas no modelo ao aparecer em produção. Três correções ao longo de 2 meses, todas reativas. Reincidiu em UTM Term (`'0405'` com 669 leads/dia, 16% do volume) - a lógica de unificação tinha uma exceção para preservar códigos numéricos que virou brecha.
 
 **Lição:** regras de unificação de UTM precisam ser whitelist estrita, sem ramos condicionais que "preservam" casos.
 
-### 5.10 FBP/FBC — 4 tentativas no mesmo dia
+### 5.10 FBP/FBC - 4 tentativas no mesmo dia
 Percentual de cobertura de cookies calculado errado em 4 formas distintas, todas no mesmo dia (03/04/2026): (1) sem filtro de período, (2) filtro só no numerador, (3) duplicatas não deduplicadas, (4) JOIN finalmente correto por email + período + dedup.
 
-**Lição:** cálculo incremental sem número de referência externo acumula erros — cada correção resolvia um problema mas criava outro porque não havia como validar.
+**Lição:** cálculo incremental sem número de referência externo acumula erros - cada correção resolvia um problema mas criava outro porque não havia como validar.
 
 ### 5.11 Janela de conversão assimétrica + TMB filter fora de ordem
-**Janela assimétrica:** removia do dataset só os compradores que chegaram tarde. Não-compradores do mesmo período ficavam — criando ilusão de que "leads do fim raramente compram". Modelo aprendia padrão falso.
+**Janela assimétrica:** removia do dataset só os compradores que chegaram tarde. Não-compradores do mesmo período ficavam - criando ilusão de que "leads do fim raramente compram". Modelo aprendia padrão falso.
 
 **TMB filter:** filtro de inadimplentes aplicado **depois** do matching com vendas. Compradores inadimplentes já tinham sido marcados como "comprou=sim" antes de serem filtrados, e ao sair do dataset desapareciam silenciosamente.
 
@@ -230,7 +230,7 @@ Ambos corrigidos em 06/03/2026, na auditoria do refactor.
 | **Total LF40–LF48** | **~R$ 793k** | Combinação |
 
 ### 6.3 Sinal de honestidade metodológica
-- Valores são **conservadores** — tracking rate varia de 14,8% a 65% (subestimativa proporcional)
+- Valores são **conservadores** - tracking rate varia de 14,8% a 65% (subestimativa proporcional)
 - **Sem canibalização:** correlação Pearson −0,23 entre % budget ML e ROAS controle
 - LF48 controle com 3 conversões → excluído do baseline (CI 95%: [−0,10; 1,69])
 - LF40 e LF41 inconclusivos por N pequeno (4 e 17 conversões ML), não por ausência de efeito
@@ -254,7 +254,7 @@ ML envia ao Meta sinais de leads de alta propensão (`LeadQualified` com score c
 | **Bootstrap reativo** | nov/25 – fev/26 | Cada componente novo (banco, CAPI, MLflow, deploy) estreou com bug de integração. Correções pontuais. Ausência de testes de integração era a causa raiz. |
 | **Consolidação** | fev – mar/26 | Refactor `src/core/`. 6 arquivos de matching → 1. 3 arquivos de Medium → 1. 153 hardcodes → ClientConfig. Parity audit. Schema validation. |
 | **Safeguards Tier 1** | abr/26 | 11 itens implementados um a um: encoding fail-loud, alerta CAPI por decil, dedup CAPI webhook, timezone UTC, parity audit no deploy, progression gate, coverage check, smoke test pós-deploy, validador pré-encoding, endpoint feature-report. |
-| **Horizonte** | pós-Cliente B | GitHub Actions CI, BigQuery Feature Store, Vertex AI Model Registry, Pub/Sub + Dataflow — ativados por gargalos reais (3+ clientes, 10k+ leads/dia), não por prescrição. |
+| **Horizonte** | pós-Cliente B | GitHub Actions CI, BigQuery Feature Store, Vertex AI Model Registry, Pub/Sub + Dataflow - ativados por gargalos reais (3+ clientes, 10k+ leads/dia), não por prescrição. |
 
 **Princípio de escalada:** cada nova peça de infraestrutura entra quando a atual vira gargalo real, não por "seguir as práticas". Cloud Run + MLflow + Postgres fica ~3 clientes; Vertex AI Model Registry entra quando aponta dor de gerenciar 3+ modelos manualmente.
 
@@ -265,26 +265,26 @@ ML envia ao Meta sinais de leads de alta propensão (`LeadQualified` com score c
 - **Transição atípica:** vendeu escola de budismo, foi estudar ML do zero
 - **Formação técnica:** Stanford (ML), University of Michigan (Python), DeepLearning.AI (ML in Production), Google ML Engineer Certificate, MLOps Community, IBM (SQL/DB)
 - **Bagagem de domínio:** 7 anos de mercado em captação, +120 ciclos de lançamento
-- **Diferencial intelectual:** crítica a lead scoring linear via Kahneman ("ilusão da validade" em modelos lineares); RandomForest captura não-linearidade que pontuação por regras não consegue — o peso de uma variável muda dependendo do valor das outras
+- **Diferencial intelectual:** crítica a lead scoring linear via Kahneman ("ilusão da validade" em modelos lineares); RandomForest captura não-linearidade que pontuação por regras não consegue - o peso de uma variável muda dependendo do valor das outras
 - **Referências comerciais que usa para explicar:** Netflix (predição de churn), Nubank (classificação de risco), iFood (recomendação)
-- **Citação-assinatura:** "In God we trust, all others must bring data." — W. Edwards Deming
+- **Citação-assinatura:** "In God we trust, all others must bring data." - W. Edwards Deming
 
 ---
 
 ## 9. INVENTÁRIO DE TEMAS PARA POSTS
 
-1. **Technical deep dive** — SSoT `src/core/`, A/B via UTM, feature registry, parity audit, dispatch por plataforma
-2. **War stories / lição aprendida** — §5 inteiro: D9 silencioso, feature zerada, feedback loop, deploy 100%, timezone recorrente, valor CAPI errado
-3. **Business value** — ROAS com contrafactual, CPL −44%, significância p<0,001, honestidade metodológica
-4. **Design decisions** — multi-cliente via config, event names distintos no A/B, fail-loud vs silent warning, allowlist por plataforma
-5. **Journey arc** — de bootstrap reativo a safeguards Tier 1, 153 hardcodes → ClientConfig, refactor nasceu de incidente
-6. **Meta insights** — `LeadQualified` em 5 min vs `Purchase` em 21 dias, ilusão de validade em lead scoring linear, 56× mais aprendizado
-7. **Carreira** — transição budismo → ML, formação, diferencial de domínio em captação
-8. **Milestone / release** — primeiro mês 100% ML, refactor mergeado, Safeguard T1-X concluído, Cliente B onboardado (quando for público)
+1. **Technical deep dive** - SSoT `src/core/`, A/B via UTM, feature registry, parity audit, dispatch por plataforma
+2. **War stories / lição aprendida** - §5 inteiro: D9 silencioso, feature zerada, feedback loop, deploy 100%, timezone recorrente, valor CAPI errado
+3. **Business value** - ROAS com contrafactual, CPL −44%, significância p<0,001, honestidade metodológica
+4. **Design decisions** - multi-cliente via config, event names distintos no A/B, fail-loud vs silent warning, allowlist por plataforma
+5. **Journey arc** - de bootstrap reativo a safeguards Tier 1, 153 hardcodes → ClientConfig, refactor nasceu de incidente
+6. **Meta insights** - `LeadQualified` em 5 min vs `Purchase` em 21 dias, ilusão de validade em lead scoring linear, 56× mais aprendizado
+7. **Carreira** - transição budismo → ML, formação, diferencial de domínio em captação
+8. **Milestone / release** - primeiro mês 100% ML, refactor mergeado, Safeguard T1-X concluído, Cliente B onboardado (quando for público)
 
 ---
 
-## 10. CLAIMS — PERMITIDOS E PROIBIDOS
+## 10. CLAIMS - PERMITIDOS E PROIBIDOS
 
 ### Permitidos (com fonte)
 
@@ -339,15 +339,15 @@ ML envia ao Meta sinais de leads de alta propensão (`LeadQualified` com score c
 
 ## 12. REGRAS DE FORMATAÇÃO PARA LINKEDIN
 
-- Primeira linha é o **hook** — o que aparece antes de "ver mais". Nunca gastar com "Hoje eu quero falar sobre".
-- Parágrafos curtos — máximo 3 frases. Usuário lê no celular.
-- Linha em branco entre parágrafos — LinkedIn respeita quebras.
-- **Nada de markdown** — asteriscos, underline, bold viram caracteres literais.
-- Listas com `—` (travessão), não `•` nem `1.`.
+- Primeira linha é o **hook** - o que aparece antes de "ver mais". Nunca gastar com "Hoje eu quero falar sobre".
+- Parágrafos curtos - máximo 3 frases. Usuário lê no celular.
+- Linha em branco entre parágrafos - LinkedIn respeita quebras.
+- **Nada de markdown** - asteriscos, underline, bold viram caracteres literais.
+- Listas com `-` (travessão), não `•` nem `1.`.
 - **Hashtags:** 3–5 no final, separadas por espaço. Nunca no meio.
 - **Link externo:** no primeiro comentário, não no post (LinkedIn penaliza links no post).
 - **Emoji:** só se o usuário pedir explicitamente.
-- **Primeira pessoa** — "eu construí", "errei", "descobri" é mais forte que "foi construído".
+- **Primeira pessoa** - "eu construí", "errei", "descobri" é mais forte que "foi construído".
 
 ---
 
