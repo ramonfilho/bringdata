@@ -428,6 +428,11 @@ def provisionar(senha_role: str):
         # Sem DEFAULT PRIVILEGES: tabela nova neste schema NÃO fica visível
         # automaticamente. Conceder é ato consciente, um por um.
         print(f"  {SCHEMA}.{TABELA}: criada, SELECT concedido só a {ROLE}")
+
+        c.run(f"DROP TABLE IF EXISTS {SCHEMA}.{TABELA_QUALIDADE}")
+        c.run(ddl_qualidade())
+        c.run(f"GRANT SELECT ON {SCHEMA}.{TABELA_QUALIDADE} TO {ROLE}")
+        print(f"  {SCHEMA}.{TABELA_QUALIDADE}: criada, SELECT concedido só a {ROLE}")
     finally:
         c.close()
 
