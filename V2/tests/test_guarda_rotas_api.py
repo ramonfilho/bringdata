@@ -497,3 +497,36 @@ def test_deploy_nasce_FECHADO_e_reabrir_e_ato_explicito():
               if '--allow-unauthenticated' in l and not l.strip().startswith('#')
               and 'AUTH_FLAG=' not in l]
     assert not soltas, f'--allow-unauthenticated fora do controle de ALLOW_PUBLIC: {soltas}'
+
+
+def test_deploy_tenta_personificar_quando_o_token_direto_nao_sai():
+    """O `curl` do smoke test do deploy tem o mesmo problema dos gates em Python:
+    `gcloud auth print-identity-token --audiences=X` exige conta de serviço, e quem
+    roda o deploy é uma pessoa.
+
+    Sem o fallback, o deploy fica preso num laço bobo: o serviço fica fechado (que é
+    o que queremos), o smoke não consegue token, leva 403, e o deploy falha no
+    próprio teste pós-deploy. Foi exatamente o que aconteceu antes deste conserto."""
+    import re
+    from pathlib import Path as _P
+    sh = (_P(auth.__file__).parent / 'deploy_capi.sh').read_text()
+
+    # Casa com a EXECUÇÃO, não com a menção: a mensagem de aviso também cita a flag,
+    # e a primeira versão deste teste passou batido justamente por isso.
+    junto = sh.replace('\\\n', ' ')
+    executa = [l.strip() for l in junto.splitlines()
+               if '--impersonate-service-account=' in l
+               and 'print-identity-token' in l
+               and not l.strip().startswith('#')
+               and not l.strip().startswith('print_')]
+    assert executa, (
+        'o deploy não CHAMA o gcloud personificando; com conta de usuário o token '
+        'nunca sai e o smoke leva 403 no serviço fechado')
+
+    # E o aviso tem que existir: falhar sem dizer por quê é o pior desfecho.
+    assert 'Sem token de identidade' in sh, (
+        'sumiu o aviso que explica o 403 quando o token não sai')
+
+    # A conta a personificar é parametrizável, para outra máquina ou esteira.
+    assert re.search(r'IMPERSONATE_SA="\$\{IMPERSONATE_SA:-', sh), (
+        'a conta de personificação virou hardcode sem override')

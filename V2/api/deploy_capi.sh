@@ -847,7 +847,22 @@ print(','.join(stale))
     # sob `set -u` é erro de "unbound variable": a substituição morre antes do curl
     # rodar, o `|| echo "000"` nem chega a ser avaliado, e o teste pós-deploy falhou
     # com "Health check falhou (HTTP )", sem código nenhum. Função com if é imune.
-    ID_TOKEN=$(gcloud auth print-identity-token --audiences="$SERVICE_URL" 2>/dev/null || echo "")
+    # Mesma história do scripts/gcp_auth.py: `--audiences` EXIGE conta de serviço,
+    # e com conta de usuário o gcloud responde "Invalid account type". Tenta direto
+    # (serve pra esteira automática) e cai pra personificar a conta dos crons, que
+    # já tem run.invoker no serviço.
+    IMPERSONATE_SA="${IMPERSONATE_SA:-scheduler-invoker@smart-ads-451319.iam.gserviceaccount.com}"
+    ID_TOKEN=$(gcloud auth print-identity-token --audiences="$SERVICE_URL" 2>/dev/null | tail -1)
+    if [ "${#ID_TOKEN}" -lt 100 ]; then
+        ID_TOKEN=$(gcloud auth print-identity-token \
+            --impersonate-service-account="$IMPERSONATE_SA" \
+            --audiences="$SERVICE_URL" 2>/dev/null | tail -1)
+    fi
+    if [ "${#ID_TOKEN}" -lt 100 ]; then
+        ID_TOKEN=""
+        print_warning "Sem token de identidade. O serviço está FECHADO, então o smoke vai levar 403."
+        print_warning "Confira: gcloud auth print-identity-token --impersonate-service-account=$IMPERSONATE_SA --audiences=$SERVICE_URL"
+    fi
 
     curl_com_identidade() {
         if [ -n "${ID_TOKEN:-}" ]; then
