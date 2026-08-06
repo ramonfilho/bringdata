@@ -206,20 +206,25 @@ def read_leads_audience(
     respondents_source: str = _DEFAULT_RESPONDENTS_SOURCE,
     min_size: int = _MIN_LEADS,
 ) -> pd.DataFrame:
-    """Público de LEADS: união de respondentes (Cloud SQL, source=`respondents_source`)
-    + todos os cadastros (Railway, Client) → {email, phone} deduplicado por email.
+    """Público de RESPONDENTES DE PESQUISA: só quem respondeu a pesquisa
+    (Cloud SQL `analytics.leads`, source=`respondents_source`) → {email, phone}
+    deduplicado por email.
 
-    `respondents_source` é CONFIGURÁVEL (não cravado) porque o nome da fonte
-    unificada já mudou uma vez sem aviso (era `train_unified`, virou
-    `leads_treino_prod` em 21/07 num deploy de ingestão que não foi pra main) e
-    deixou o job lendo 0 → público degradado. Vem de `meta_audiences.leads_source`
-    no yaml, então re-apontar é 1 linha, sem deploy de código.
+    PURIFICADO (06/08/2026): dropada a antiga união com a `Client` (Railway), que
+    trazia ~20k cadastros que NÃO responderam a pesquisa. O universo bruto de TODOS
+    os leads (respondente OU não) virou público PRÓPRIO — `read_captacoes_audience`
+    (analytics.captacoes, ~500k). Aqui fica SÓ o respondente. `conn_railway` é aceito
+    e IGNORADO (mantido na assinatura por compatibilidade; não lê mais o Railway).
 
-    FAIL-LOUD: se a fonte de respondentes vier VAZIA, levanta erro ANTES de qualquer
-    escrita (nome de source stale não pode virar replace silencioso pela metade — foi
-    o que aconteceu em 21/07). Também levanta se a união ficar abaixo de `min_size`.
+    `respondents_source` é CONFIGURÁVEL (não cravado) porque o nome da fonte já mudou
+    uma vez sem aviso (`train_unified` → `leads_treino_prod`) e deixou o job lendo 0.
+    Vem de `meta_audiences.leads_source` no yaml. A fonte tem rebuild diário (cron
+    06:00), então respondente de ontem já entra; o de HOJE entra no rebuild seguinte.
+
+    FAIL-LOUD: se a fonte vier VAZIA, levanta erro ANTES de qualquer escrita (não pode
+    virar replace que ZERA o público). Idem se ficar abaixo de `min_size`.
     """
-    # (a) Respondentes — Cloud SQL analytics.leads, fonte unificada e fresca.
+    # Respondentes — Cloud SQL analytics.leads, fonte unificada e fresca (rebuild diário).
     own_a = conn_analytics is None
     conn_a = conn_analytics or open_analytics_connection()
     try:
@@ -233,39 +238,18 @@ def read_leads_audience(
         if own_a:
             conn_a.close()
     df_resp = pd.DataFrame(rows_resp, columns=["email", "phone"])
-    logger.info("[audience_reader] leads/respondentes (Cloud SQL source=%s): %d", respondents_source, len(df_resp))
     if df_resp.empty:
         raise ValueError(
             f"[audience_reader] fonte de respondentes '{respondents_source}' VAZIA — "
             "provável rename da source no pipeline (ver meta_audiences.leads_source no yaml). "
             "Abortando ANTES de escrever pra não degradar o público."
         )
-
-    # (b) Todos os cadastros — Railway Client (base do front). Client é mono-cliente
-    # (devclub) no Railway, então não há filtro de client_id lá.
-    own_r = conn_railway is None
-    conn_r = conn_railway or open_railway_connection()
-    try:
-        rows_cad = conn_r.run(
-            'SELECT LOWER(TRIM(email)) AS email, phone FROM "Client" '
-            "WHERE email IS NOT NULL AND email <> ''"
-        )
-    finally:
-        if own_r:
-            conn_r.close()
-    df_cad = pd.DataFrame(rows_cad, columns=["email", "phone"])
-    logger.info("[audience_reader] leads/cadastros (Railway Client): %d", len(df_cad))
-
-    if df_resp.empty and df_cad.empty:
-        raise ValueError("[audience_reader] ambas as fontes de leads vazias — não substituo o público.")
-
-    combined = pd.concat([df_resp, df_cad], ignore_index=True)
-    result = _dedup_by_email(combined)
+    result = _dedup_by_email(df_resp)
     n = len(result)
     n_phone = int((result["phone"].map(lambda p: bool(p) and str(p).strip() not in ('', 'None'))).sum())
-    logger.info("[audience_reader] leads (união dedup por email): %d pessoas (%d com telefone)", n, n_phone)
+    logger.info("[audience_reader] respondentes de pesquisa (dedup por email): %d pessoas (%d com telefone)", n, n_phone)
     if n < min_size:
-        raise ValueError(f"[audience_reader] só {n} leads (< {min_size}) — suspeito, abortando.")
+        raise ValueError(f"[audience_reader] só {n} respondentes (< {min_size}) — suspeito, abortando.")
     return result
 
 
