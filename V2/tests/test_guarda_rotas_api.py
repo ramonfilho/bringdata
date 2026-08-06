@@ -469,3 +469,31 @@ def test_identidade_personifica_quando_a_conta_e_de_usuario(monkeypatch):
     assert any(c.startswith('--impersonate-service-account=') for c in chamadas[1])
     # O token vem na ÚLTIMA linha do stdout: a personificação escreve aviso antes.
     assert 'AVISO' not in tok
+
+
+def test_deploy_nasce_FECHADO_e_reabrir_e_ato_explicito():
+    """`ALLOW_PUBLIC` governa DOIS caminhos que concedem `allUsers`: a flag
+    `--allow-unauthenticated` do `gcloud run deploy`, e o bloco que reafirmava o
+    binding depois. Fechar só um deixa o outro reabrindo o serviço em silêncio.
+
+    Foi o que aconteceu em 06/08/2026: o binding foi removido à mão, o bloco de
+    reafirmação já tinha saído no PR anterior, e mesmo assim o deploy seguinte
+    reabriu tudo pela flag. O serviço passou de 403 para 200 anônimo sem ninguém
+    pedir, e só apareceu porque eu fui conferir outra coisa."""
+    import re
+    from pathlib import Path as _P
+    sh = (_P(auth.__file__).parent / 'deploy_capi.sh').read_text()
+
+    m = re.search(r'^ALLOW_PUBLIC=(\w+)', sh, re.M)
+    assert m, 'ALLOW_PUBLIC sumiu do deploy'
+    assert m.group(1) == 'false', (
+        f'deploy voltaria a nascer PÚBLICO (ALLOW_PUBLIC={m.group(1)})')
+
+    # Reabrir tem que ser ato explícito de quem roda, com flag própria.
+    assert '--publico)' in sh, 'sumiu a flag explícita de reabrir'
+
+    # E a flag do gcloud continua amarrada à variável, nunca solta.
+    soltas = [l.strip() for l in sh.splitlines()
+              if '--allow-unauthenticated' in l and not l.strip().startswith('#')
+              and 'AUTH_FLAG=' not in l]
+    assert not soltas, f'--allow-unauthenticated fora do controle de ALLOW_PUBLIC: {soltas}'

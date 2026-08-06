@@ -45,7 +45,19 @@ source "$SCRIPT_DIR/lib/config.sh"
 MODEL_VERSION=""
 IMAGE_TAG=""
 SKIP_TESTS=false
-ALLOW_PUBLIC=true  # Temporário - mudar para false em produção
+# Serviço FECHADO por default desde 06/08/2026. Só chamador com identidade Google
+# entra; webhook de terceiro (Hotmart) mora no serviço `smart-ads-webhook`, que é
+# público e serve APENAS as rotas de webhook.
+#
+# Esta variável controla DOIS caminhos que concedem `allUsers`, e é por isso que ela
+# existe: a flag `--allow-unauthenticated` do `gcloud run deploy` (abaixo) e o bloco
+# que reafirmava o binding depois do deploy. Fechar só um deixa o outro reabrindo o
+# serviço em silêncio, que foi exatamente o que aconteceu: o binding foi removido à
+# mão, o bloco de reafirmação já tinha saído, e mesmo assim o deploy seguinte
+# reabriu tudo pela flag.
+#
+# Para reabrir de propósito: `--publico`.
+ALLOW_PUBLIC=false
 PREVIOUS_REVISION=""
 YES_FLAG=false  # Pula confirmação se true
 NO_TRAFFIC=true   # [E7] Canary obrigatório — deploy SEMPRE cria revisão com 0% de tráfego
@@ -1098,7 +1110,12 @@ parse_arguments() {
                 shift
                 ;;
             --no-public)
-                ALLOW_PUBLIC=false
+                ALLOW_PUBLIC=false   # mantida por compatibilidade; já é o default
+                shift
+                ;;
+            --publico)
+                # Reabre o serviço pra chamada anônima. Só com motivo explícito.
+                ALLOW_PUBLIC=true
                 shift
                 ;;
             --no-traffic)
