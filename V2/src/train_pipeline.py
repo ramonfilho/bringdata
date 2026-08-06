@@ -1257,6 +1257,11 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     # → o feature_registry no MLflow já reflete o subset e produção alinha (mesmo
     # mecanismo do --exclude-features acima). Método eleito num torneio (permutação
     # ganhou de RF-nativo/L1/RFE/informação-mútua).
+    #
+    # O resultado vira PARÂMETRO do run (feature_selection.params_mlflow), sempre —
+    # inclusive `false` quando não rodou. Ver o docstring de params_mlflow para o porquê.
+    from src.model.feature_selection import params_mlflow as _fs_params_mlflow
+    _fs_params: dict = _fs_params_mlflow(None)
     if use_feature_selection:
         from src.model.feature_selection import select_features
         _fs = (client_config.model.feature_selection or {}) if (client_config and client_config.model) else {}
@@ -1272,6 +1277,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
             min_features=int(_fs.get('min_features', 20)),
             n_repeats=int(_fs.get('n_repeats', 5)),
         )
+        _fs_params = _fs_params_mlflow(_fs_result)
         if _fs_result.dropped:
             dataset_v1_devclub_encoded = dataset_v1_devclub_encoded.drop(columns=_fs_result.dropped)
             logger.info("  [feature-selection] %d → %d features (AUC holdout %.4f → %.4f) — feature_registry gravará o subset",
@@ -1436,7 +1442,8 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         client_config=client_config,
         tmb_risk_filter=tmb_risk_filter,
         use_buyer_weights=use_buyer_weights,
-        train_ratio=train_ratio
+        train_ratio=train_ratio,
+        feature_selection_params=_fs_params
     )
 
     cell_timers['Célula 21'] = time.time() - cell_start
