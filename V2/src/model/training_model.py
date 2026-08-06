@@ -341,7 +341,8 @@ def registrar_features_e_modelo_devclub(
     client_config: ClientConfig = None,
     tmb_risk_filter: str = 'all',
     use_buyer_weights: bool = True,
-    train_ratio: float = 0.7
+    train_ratio: float = 0.7,
+    feature_selection_params: dict = None
 ) -> dict:
     """
     Registra features e salva modelo DevClub para produção.
@@ -392,6 +393,13 @@ def registrar_features_e_modelo_devclub(
         mlflow.log_param("save_test_predictions", save_test_predictions)
         mlflow.log_param("tmb_risk_filter", tmb_risk_filter)
         mlflow.log_param("use_buyer_weights", use_buyer_weights)
+
+        # Seleção de features: sempre logada, inclusive quando não rodou (ver
+        # feature_selection.params_mlflow). Default explícito para chamadas que não
+        # passam o parâmetro, senão o run sai sem a informação e volta a ambiguidade.
+        from src.model.feature_selection import params_mlflow as _fs_params_mlflow
+        for _k, _v in (feature_selection_params or _fs_params_mlflow(None)).items():
+            mlflow.log_param(_k, _v)
 
         # 1. PREPARAR DADOS E TREINAR MODELO FINAL
         logger.info("  Removendo a coluna Target")

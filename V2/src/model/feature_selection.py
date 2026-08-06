@@ -46,6 +46,35 @@ class SelectionResult:
     threshold: float
 
 
+def params_mlflow(result: Optional['SelectionResult'] = None) -> Dict[str, object]:
+    """Parâmetros do run que descrevem a seleção de features.
+
+    Existe porque contagem de features NÃO prova que a seleção rodou. Ao comparar abr28
+    (60 features) com jul_24 (53) em 06/08/2026 foi preciso inferir pela contagem, e a
+    inferência era ambígua: das 7 de diferença, parte veio da seleção e parte veio de o
+    formulário ter trocado de opções entre abril e julho — os dois efeitos se somam.
+
+    `result=None` significa "a seleção não rodou" e é logado como `false`, não omitido:
+    parâmetro ausente é indistinguível de run antigo que nem conhecia a flag.
+    """
+    if result is None:
+        return {'use_feature_selection': False}
+    p: Dict[str, object] = {
+        'use_feature_selection': True,
+        'feature_selection_method': result.method,
+        'feature_selection_threshold': result.threshold,
+        'feature_selection_n_before': result.n_before,
+        'feature_selection_n_after': result.n_after,
+        'feature_selection_n_dropped': len(result.dropped),
+        'feature_selection_auc_before': round(float(result.auc_baseline), 6),
+        'feature_selection_auc_after': round(float(result.auc_selected), 6),
+        'feature_selection_aborted': result.aborted,
+    }
+    if not result.dropped:
+        p['feature_selection_reason'] = str(result.reason)[:250]
+    return p
+
+
 def _temporal_holdout_mask(dates, train_ratio: float) -> np.ndarray:
     """Máscara booleana posicional (True=treino): ordena por data e pega os primeiros
     train_ratio. Espelha o split temporal_leads do treino — mesmo critério, então o
