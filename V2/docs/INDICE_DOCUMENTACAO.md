@@ -239,6 +239,11 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Status:** ativo. Criado em 08/05/2026 como subsídio empírico à decisão de tratar calibração como caminho crítico.
 **Relação:** motiva a criação de **DT-20** em `PLANO_REFACTOR_MLOPS.md` (calibração de probabilidades de scoring) e expõe a direção real do viés do `class_weight='balanced'` (superestima, não subestima). Validação out-of-sample com leads recentes do Railway é próximo passo declarado.
 
+### `AUDITORIA_CONTRATO_FEATURES.md`
+**Papel:** auditoria de 06/08/2026 que verifica se produção entrega a cada modelo a lista de features que ele espera, quando champion e challenger têm listas diferentes (60 contra 53). Prova empírica em 400 leads reais: zero features órfãs nos dois, contrato honrado nos 5 caminhos de scoring. O achado real é outro — o **formulário de pesquisa teve 3 gerações** de opções de resposta desde dez/2024, e cada troca deixou resíduo: 2 features permanentemente zeradas dentro do champion (herdadas do formulário aposentado em fev/2025) e um **formulário fantasma que rodou de 16/02 a 14/06/2026** com textos que não casam com nenhuma categoria conhecida, deixando ~2.800 leads com dois grupos de features inteiramente zerados.
+**Status:** ✅ ativo. Criado em 2026-08-06. O formulário fantasma está **inativo** desde 14/06/2026 (não é problema corrente).
+**Relação:** confirma que a dívida técnica **DT-12** (encoding usa o registro de features da variante certa) está resolvida em todos os caminhos, e que a trava **DT-19** (grupo de colunas zerado) funciona — ela bloqueou o próprio teste da auditoria quando montado errado. Motiva um alerta novo, ainda não implementado: "chegou um texto de resposta que nunca vi nesta pergunta", registrado em `registro_erros_ml.md` § V.7. O log de seleção de features que a auditoria pediu saiu no [PR #145](https://github.com/ramonfilho/bringdata/pull/145).
+
 ### `analise_lift_entrada_grupo_whatsapp.md`
 **Papel:** mede se entrar no grupo de WhatsApp do lançamento prevê compra, sem artefato de match. "Entrou" casado por **telefone** (única chave do SendFlow, DDD+8); "comprou" por **e-mail** (chave neutra) — desenho que descarta a hipótese de o lift ser só maior casabilidade de telefone. Base = **todos os leads** (tabela `Lead`), não a pesquisa. Lift agregado **2,52x** (entrou 0,70% vs não 0,28%; ~110k leads, LF48–55+DEV20). Verificação: conversão é 100% casada por e-mail → chaves disjuntas.
 **Status:** snapshot — criado em 2026-06-10. Reproduzível (leads via `load_match_spend_for_lf`; grupo via CSVs `data/devclub/SendFlow*.csv`).
@@ -349,6 +354,7 @@ ANÁLISES (snapshots históricos)
   analise_valor_ml_devclub.md          (ROAS LF40→LF48)
   analise_perfil_leads_devclub.md      (perfil P1→P3)
   analise_calibracao_jan30_abr28.md    (ECE Champion + Challenger — 08/05)
+  AUDITORIA_CONTRATO_FEATURES.md       (contrato de features por modelo + 3 gerações de formulário — 06/08)
   EXPERIMENTO_MOAT_MODELO.md           (decomposição do moat — 24/04)
   SISTEMA_VALIDACAO_ML.md              (validate_ml_performance.py)
   revenue_forecast.md                  (previsão de faturamento — MAE 2,6%)

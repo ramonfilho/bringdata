@@ -680,3 +680,21 @@ Já o sensor de comparação-com-treino, com a amostra representativa, deu **OK*
 **Lição:** o baseline de treino **não** é prova de que produção não tem um segmento. O treino pode simplesmente não ter tido aquele segmento (aqui: orgânico/sem-UTM ≈ 0% no treino, ~3-4% em produção). Descartar uma qualificação do desenho com base em "o baseline mostra X" exige antes confirmar X **no dado real de produção** — não no dado de treino.
 
 ---
+
+### V.7 — Falta alerta de "texto de resposta que nunca vi nesta pergunta" (descoberto 06/08/2026)
+
+**Achado.** Entre **16/02/2026 e 14/06/2026** rodou uma terceira versão do formulário de pesquisa, com respostas escritas de outro jeito: `CLT / Funcionário Público` em vez de `Sou CLT/Funcionário Público`, `Desempregado` em vez de `Não trabalho e nem estudo`, `Estabilidade / nunca faltar emprego` em vez de `A ideia de nunca faltar emprego na área`. Não é acento nem pontuação (a limpeza de texto resolveria); é redação diferente.
+
+Resultado: cerca de **2.800 leads** receberam os grupos de features de **ocupação** e de **interesse em programação** inteiramente zerados. Para o modelo, essas pessoas responderam "nenhuma das alternativas" a duas perguntas relevantes. Não é erro de scoring — é informação perdida na entrada.
+
+**Por que nenhuma trava pegou.** A verificação de grupo one-hot inteiro zerado (**DT-19**, a checagem entre colunas do mesmo grupo) mede a **fração do lote** e compara com um limiar de 2%. Esses leads eram gotejamento: ~2.800 espalhados por 4 meses, contra ~1.500 leads/dia no pico. Nunca cruzaram o limiar. A trava está correta — ela nasceu para pegar quebra sistêmica, não gotejamento.
+
+**O que falta.** O sistema alerta quando um grupo de features **zera em massa**. Falta o alerta complementar, que é sobre a **entrada** e não sobre a saída: *"chegou um texto de resposta que nunca vi antes nesta pergunta"*. Esse dispararia em **16/02/2026 com o primeiro lead**, não em junho com 2.800. O mesmo alerta teria pego a troca de formulário de fev/2025 no dia.
+
+**Estado:** o formulário fantasma está **inativo** desde 14/06/2026. Sem dano ativo. Fica como salvaguarda a especificar, não como bug aberto.
+
+**Não recuperar retroativamente.** Remapear os textos da geração 3 para as categorias vivas mudaria o passado do dataset de treino sem ganho claro: são 0,8% do universo.
+
+**Lição:** trava por fração do lote não pega mudança que entra devagar. Toda verificação de "isso zerou" precisa de uma irmã do lado da entrada: "isso chegou diferente". Detalhe completo, incluindo as três gerações de formulário e as duas features permanentemente zeradas dentro do champion, em `AUDITORIA_CONTRATO_FEATURES.md`.
+
+---
