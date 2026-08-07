@@ -87,11 +87,12 @@ def test_cobertura_baixa_falha_alto():
         adicionar_nota_criativo(_df(["DESCONHECIDO"] * 10, "2026-03-09"), historico=h, transcricoes={})
 
 
-def test_gera_as_tres_colunas():
-    """As três variantes de conteúdo da nota, não só a básica."""
+def test_gera_as_quatro_colunas():
+    """As quatro variantes de conteúdo da nota, não só a básica."""
     out = adicionar_nota_criativo(_df(["AD_BOM", "AD_RUIM"], "2026-03-09"),
                                   historico=_historico(), transcricoes={})
-    for c in ("nota_criativo", "nota_criativo_canal", "nota_criativo_texto"):
+    for c in ("nota_criativo", "nota_criativo_canal", "nota_criativo_texto",
+              "nota_criativo_canal_texto"):
         assert c in out.columns, f"faltou {c}"
     assert (out["nota_criativo_canal"] > 0).all()
 
@@ -108,7 +109,8 @@ def test_nao_mexe_nas_outras_colunas():
     df = _df(["AD_BOM", "AD_RUIM"], "2026-03-09")
     out = adicionar_nota_criativo(df, historico=h, transcricoes={})
     assert list(df.columns) + ["nota_criativo", "nota_criativo_canal",
-                               "nota_criativo_texto"] == list(out.columns)
+                               "nota_criativo_texto",
+                               "nota_criativo_canal_texto"] == list(out.columns)
     assert out["outra_coluna"].tolist() == df["outra_coluna"].tolist()
     assert "nota_criativo" not in df.columns, "não pode mutar o df de entrada"
 
@@ -166,7 +168,7 @@ def test_carencia_encolhe_o_historico_usado():
     import src.core.nota_criativo as nc
     vistos = []
     orig = nc._notas_da_semana
-    nc._notas_da_semana = lambda d: (vistos.append(len(d)), orig(d))[1]
+    nc._notas_da_semana = lambda d, **kw: (vistos.append(len(d)), orig(d, **kw))[1]
     try:
         adicionar_nota_criativo(_df(["AD_BOM"], "2026-04-01"), historico=h,
                                 transcricoes={}, cobertura_minima=0.0)
@@ -179,4 +181,36 @@ def test_carencia_encolhe_o_historico_usado():
         nc._notas_da_semana = orig
     assert perto < longe, (
         f"lead de abril viu {perto:,} linhas e o de junho {longe:,}: a carencia nao encolheu nada"
+    )
+
+
+def test_canal_texto_encolhe_para_o_video_e_nao_para_o_neutro():
+    """A quarta variante: lift medido DENTRO do canal, alvo do encolhimento vindo do vídeo.
+
+    Sem transcricao ela tem que cair na nota por canal (nao inventar nada). Este teste
+    trava so o caso degenerado; o efeito do prior de verdade e medido offline, porque
+    depende de vizinhanca entre videos reais.
+    """
+    h = _historico()
+    out = adicionar_nota_criativo(_df(["AD_BOM", "AD_RUIM"], "2026-03-09"),
+                                  historico=h, transcricoes={})
+    assert out["nota_criativo_canal_texto"].tolist() == out["nota_criativo_canal"].tolist(), (
+        "sem transcricao, canal_texto tem que ser identica a canal"
+    )
+
+
+def test_alvo_do_encolhimento_desloca_a_nota_do_criativo_raro():
+    """Trocar o alvo de 1,0 para outro valor tem que mover a nota de quem tem pouco dado."""
+    from src.core.nota_criativo import _notas_da_semana
+    h = _historico()
+    raro = pd.DataFrame([{"criativo": "AD_RARO", "dia": pd.Timestamp("2026-01-05"),
+                          "buy": b, "canal": "meta"}
+                         for b in ([1] * 6 + [0] * 194)])
+    hist = pd.concat([h, raro])
+    neutro = _notas_da_semana(hist)["AD_RARO"]
+    puxado = _notas_da_semana(hist, alvo={"AD_RARO": 2.0})["AD_RARO"]
+    assert puxado > neutro, "o alvo nao esta sendo usado no encolhimento"
+    assert abs(puxado - neutro) > 0.5, (
+        f"com 200 leads o peso e ~0,05, entao mover o alvo de 1,0 para 2,0 devia "
+        f"mover a nota ~0,95; moveu {puxado - neutro:.3f}"
     )
