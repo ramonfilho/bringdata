@@ -247,3 +247,30 @@ def test_alvo_carrega_a_diferenca_RELATIVA_e_nao_o_nivel():
     assert any(abs(a1[c] - a3[c]) > 1e-6 for c in a1), (
         "inverter a ORDEM do alvo nao mudou nada: o alvo virou decorativo"
     )
+
+
+def test_alvo_nao_desloca_o_nivel_medio_da_nota():
+    """O invariante que faltava, e que custou duas tentativas erradas.
+
+    A conta do deslocamento e:  nota_com_alvo - nota_sem_alvo = (1-peso) x (alvo - 1,0)
+
+    A nota so sobe se o alvo for MAIOR que 1,0, porque e o neutro 1,0 que ele substitui.
+    Centrar o alvo contra a media das NOTAS (0,81) forca quase todo alvo abaixo de 1,0 e
+    faz quase toda nota descer. Este teste trava o alvo certo: o deslocamento medio, no
+    peso em que ele de fato ocorre, tem que ser ZERO.
+    """
+    import numpy as np
+    from src.core.nota_criativo import _notas_da_semana, K_ENCOLHIMENTO
+    h = _historico(n_por_semana=6000, semanas=8)
+    sem = _notas_da_semana(h)
+    # alvo torto de proposito: metade do nivel das notas, que e o formato do prior real
+    com = _notas_da_semana(h, alvo={c: v * 0.5 for c, v in sem.items()})
+    n = h.groupby("criativo").size()
+    comuns = sorted(set(sem) & set(com))
+    peso = np.array([n[c] / (n[c] + K_ENCOLHIMENTO) for c in comuns])
+    w = (1 - peso) * np.array([n[c] for c in comuns], dtype=float)
+    desloc = np.array([com[c] - sem[c] for c in comuns])
+    medio = float(np.average(desloc, weights=w))
+    assert abs(medio) < 1e-9, (
+        f"deslocamento medio {medio:+.6f} — o alvo esta empurrando a nota para um lado"
+    )

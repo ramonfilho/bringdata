@@ -171,27 +171,32 @@ def _notas_da_semana(hist_ate_aqui: pd.DataFrame, alvo: dict = None) -> dict:
     # são vizinhos de cada criativo), então reordena e estraga o ranking.
     #
     # Duas suposições minhas caíram aqui, ambas por medição:
-    #   1. "a média das notas é 1,0". NÃO É: mede 0,81. O corte de MIN_HIST descarta os
-    #      criativos pequenos, mas o `nivel` de referência é medido sobre o histórico
-    #      INTEIRO, e os pequenos convertem acima da média — sobra menos de 1,0.
-    #   2. Centrar contra as notas GERAIS servia para o cálculo POR CANAL. Não serve:
-    #      cada canal tem nível próprio. Centrado para um, descentrado para o outro,
-    #      e o resultado foram 30.604 notas deslocadas para baixo contra ZERO para cima.
+    #   1. Centrar contra as notas GERAIS e aplicar no cálculo POR CANAL: cada canal tem
+    #      nível próprio, então centrado para um é descentrado para o outro.
+    #   2. Centrar contra a MÉDIA DAS NOTAS (0,81). Errado, e é a chave de tudo. A conta
+    #      do deslocamento é:
     #
-    # Centrar aqui dentro resolve a classe inteira do problema: a função é chamada uma
-    # vez por fatia (geral, meta, google), e cada chamada centra contra as próprias
-    # notas. É um fator multiplicativo único, então preserva a ORDEM e move só o NÍVEL.
-    nota_neutra = peso * lift + (1 - peso) * NOTA_NEUTRA
+    #            nota_com_alvo − nota_sem_alvo = (1 − peso) × (alvo − 1,0)
+    #
+    #      A nota sobe se e somente se o alvo for MAIOR QUE 1,0, porque é o neutro 1,0
+    #      que o alvo substitui. Centrar em 0,81 força quase todo alvo para baixo de 1,0
+    #      e garante que quase toda nota desça: 30.576 para baixo contra 1 para cima,
+    #      PIOR que os 28.020/710 de não centrar nada.
+    #
+    # O alvo certo é NOTA_NEUTRA. É um fator multiplicativo único, então preserva a
+    # ORDEM (a única coisa que o palpite tem de informação) e zera o deslocamento médio.
     comuns = [c for c in g.index if c in alvo]
     if comuns:
-        w = g.loc[comuns, "n"].astype(float).values
+        # O peso da centragem é (1-peso)*n, que é EXATAMENTE quanto cada criativo
+        # participa do deslocamento — assim a soma dos deslocamentos dá zero, e não
+        # só a média dos alvos.
+        w = ((1 - peso.loc[comuns]) * g.loc[comuns, "n"]).astype(float).values
         centro_alvo = float(np.average([alvo[c] for c in comuns], weights=w))
-        centro_nota = float(np.average(nota_neutra.loc[comuns].values, weights=w))
         if centro_alvo > 0:
-            fator = centro_nota / centro_alvo
+            fator = NOTA_NEUTRA / centro_alvo
             alvo = {c: v * fator for c, v in alvo.items()}
-            logger.debug("  [nota_criativo] alvo centrado %.3f -> %.3f (fator %.3f, "
-                         "%d criativos na fatia)", centro_alvo, centro_nota, fator, len(comuns))
+            logger.debug("  [nota_criativo] alvo centrado %.3f -> %.1f (fator %.3f, "
+                         "%d criativos na fatia)", centro_alvo, NOTA_NEUTRA, fator, len(comuns))
     destino = g.index.map(lambda c: alvo.get(c, NOTA_NEUTRA))
     return (peso * lift + (1 - peso) * destino).to_dict()
 
