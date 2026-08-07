@@ -241,6 +241,34 @@ def _prior_por_texto(notas: dict, volumes: dict, transcricoes: dict) -> dict:
                 vals.append(float(np.mean(p)))
         if vals:
             out[cr] = float(np.mean(vals))
+
+    # CENTRAGEM (achado de 06/08/2026). O prior serve de ALVO do encolhimento, e alvo
+    # significa "não sei nada sobre este criativo". Sem centrar, ele chegava com
+    # tendência central 0,77 contra 1,02 das notas: em 75 mil leads, 28.020 notas eram
+    # empurradas PARA BAIXO contra 710 para cima. Isso não informa, desloca — e o
+    # deslocamento não é uniforme (depende de quais vizinhos cada criativo tem), então
+    # reordena. Foi o que fez a variante com texto perder 18 compradores no top 5% e me
+    # levou a descartá-la por uma medida enviesada.
+    #
+    # A causa é a média ponderada dos vizinhos: a distribuição das notas é torta (a
+    # maioria dos criativos abaixo de 1,0, poucos bons carregando o volume), então
+    # qualquer média puxa para baixo do centro.
+    #
+    # O conserto preserva a ORDEM (é um fator multiplicativo único) e só alinha o NÍVEL:
+    # a tendência central do prior passa a bater com a das notas observadas, medida nos
+    # MESMOS criativos e com o MESMO peso de volume. Depois disso, o prior só carrega o
+    # que ele tem de informação de verdade, que é a diferença relativa entre criativos.
+    if out:
+        comuns = [c for c in out if c in notas and volumes.get(c, 0) > 0]
+        if comuns:
+            w = np.array([volumes[c] for c in comuns], dtype=float)
+            centro_prior = float(np.average([out[c] for c in comuns], weights=w))
+            centro_nota = float(np.average([notas[c] for c in comuns], weights=w))
+            if centro_prior > 0:
+                fator = centro_nota / centro_prior
+                logger.debug("  [nota_criativo] prior centrado: %.3f -> %.3f (fator %.3f, "
+                             "%d criativos)", centro_prior, centro_nota, fator, len(comuns))
+                out = {c: v * fator for c, v in out.items()}
     return out
 
 

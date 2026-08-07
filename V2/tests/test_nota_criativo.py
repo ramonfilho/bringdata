@@ -214,3 +214,36 @@ def test_alvo_do_encolhimento_desloca_a_nota_do_criativo_raro():
         f"com 200 leads o peso e ~0,05, entao mover o alvo de 1,0 para 2,0 devia "
         f"mover a nota ~0,95; moveu {puxado - neutro:.3f}"
     )
+
+
+def test_prior_sai_centrado_no_mesmo_nivel_das_notas():
+    """O alvo do encolhimento tem que significar "nao sei", nao "provavelmente ruim".
+
+    Sem centragem o prior chegava com tendencia central 0,77 contra 1,02 das notas e
+    empurrava 28.020 notas pra baixo contra 710 pra cima (medido em 75 mil leads,
+    06/08/2026). Isso reordena, porque o deslocamento depende dos vizinhos de cada
+    criativo. A centragem e um fator multiplicativo unico: preserva a ORDEM e alinha
+    so o NIVEL.
+    """
+    import numpy as np
+    from src.core.nota_criativo import _prior_por_texto
+    rng = np.random.default_rng(7)
+    # 30 videos com fala distinta e notas tortas (a maioria abaixo de 1,0), que e o
+    # formato real que produzia o vies.
+    vocab = ["curso", "programacao", "salario", "emprego", "carreira", "codigo",
+             "vaga", "renda", "estudo", "projeto"]
+    trs, notas, vols = {}, {}, {}
+    for i in range(30):
+        pal = rng.choice(vocab, size=25)
+        trs[f"AD{i:03d}"] = {"texto": " ".join(pal) * 3, "ritmo": 3.0 + rng.random()}
+        notas[f"AD{i:03d}"] = float(np.clip(rng.gamma(2.0, 0.35), 0.2, 3.0))
+        vols[f"AD{i:03d}"] = int(rng.integers(500, 20000))
+    pr = _prior_por_texto(notas, vols, trs)
+    assert pr, "o prior nao devolveu nada — teste nao exercita o que devia"
+    comuns = [c for c in pr if c in notas]
+    w = np.array([vols[c] for c in comuns], dtype=float)
+    centro_prior = np.average([pr[c] for c in comuns], weights=w)
+    centro_nota = np.average([notas[c] for c in comuns], weights=w)
+    assert abs(centro_prior - centro_nota) < 1e-6, (
+        f"prior centrado em {centro_prior:.4f} contra {centro_nota:.4f} das notas"
+    )
