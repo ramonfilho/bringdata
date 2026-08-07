@@ -49,25 +49,36 @@ def _fake(respostas, registro=None):
     return _f
 
 
-def test_drena_ate_a_fila_esvaziar(monkeypatch):
-    """Caso normal: continua puxando enquanto vier mensagem, para no primeiro vazio."""
+def test_drena_ate_parar_de_vir_resposta(monkeypatch):
+    """Caso normal: continua puxando enquanto vier mensagem, e só desiste depois de
+    `_DRAIN_EMPTY_PULLS` vazios CONSECUTIVOS.
+
+    Não para no primeiro vazio de propósito: o pull unário devolve o que está
+    disponível no instante da chamada e volta vazio mesmo com backlog. Em 31/07/2026
+    o dreno declarou fila vazia com 253 leads parados, e foi por isso que o estado
+    passou a se chamar `sem_resposta`. Este teste existe para ninguém "otimizar" de
+    volta para o primeiro vazio."""
     monkeypatch.setattr(pb, "process_pending_pubsub",
-                        _fake([_rodada(250), _rodada(250), _rodada(37), _rodada(0)]))
+                        _fake([_rodada(250), _rodada(250), _rodada(37)]))
     r = pb.drain_pending_pubsub(None, None, None)
 
-    assert r["rounds"] == 4                    # 3 com carga + 1 que achou vazio
-    assert r["drain_stop"] == "fila_vazia"
+    assert r["rounds"] == 3 + pb._DRAIN_EMPTY_PULLS   # 3 com carga + os vazios exigidos
+    assert r["drain_stop"] == "sem_resposta"
     assert r["processed"] == 537               # soma, não sobrescreve
     assert r["sent"] == 537
 
 
-def test_uma_rodada_quando_a_fila_ja_esta_vazia(monkeypatch):
-    """Dia normal (fluxo baixo): não pode custar rodada extra à toa."""
-    monkeypatch.setattr(pb, "process_pending_pubsub", _fake([_rodada(0)]))
+def test_fila_vazia_custa_exatamente_os_pulls_de_confirmacao(monkeypatch):
+    """Dia de fluxo baixo: o piso é o número de vazios exigidos, e nada além disso.
+
+    Trava o custo nos dois sentidos. Se alguém subir `_DRAIN_EMPTY_PULLS`, o tick de
+    5 em 5 minutos passa a gastar rodadas à toa; se derrubar para 1, volta o bug de
+    31/07 que deixou 253 leads parados."""
+    monkeypatch.setattr(pb, "process_pending_pubsub", _fake([]))
     r = pb.drain_pending_pubsub(None, None, None)
 
-    assert r["rounds"] == 1
-    assert r["drain_stop"] == "fila_vazia"
+    assert r["rounds"] == pb._DRAIN_EMPTY_PULLS
+    assert r["drain_stop"] == "sem_resposta"
     assert r["processed"] == 0
 
 
@@ -96,12 +107,12 @@ def test_repassa_os_argumentos_de_cada_rodada(monkeypatch):
     dry_run a partir da 2ª, um smoke em canary passaria a escrever de verdade."""
     reg = []
     monkeypatch.setattr(pb, "process_pending_pubsub",
-                        _fake([_rodada(250), _rodada(0)], registro=reg))
+                        _fake([_rodada(250)], registro=reg))
     sentinela = object()
     pb.drain_pending_pubsub(None, None, None, dry_run=True, batch=77,
                             ledger_conn=sentinela)
 
-    assert len(reg) == 2
+    assert len(reg) == 1 + pb._DRAIN_EMPTY_PULLS
     for kw in reg:
         assert kw["dry_run"] is True
         assert kw["batch"] == 77

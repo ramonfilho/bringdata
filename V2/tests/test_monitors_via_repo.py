@@ -255,7 +255,17 @@ def test_records_to_pesquisa_df_cobre_ambos_vocabularios():
     m = DataQualityMonitor(model_path='', repo=None)
     df = m._records_to_pesquisa_df([rec_pt, rec_slug])
 
-    assert df.shape == (2, 14), f"esperava 2 linhas x 14 colunas, peguei {df.shape}"
+    # Número mágico de colunas era frágil: quebrou quando `variant` (a variante do
+    # teste A/B) entrou legitimamente, e o teste passou a acusar defeito onde havia
+    # evolução. O que importa é que TODA coluna consumida rio abaixo continue vindo,
+    # e que uma linha por registro saia. Coluna nova não quebra; coluna que SUMIR sim.
+    _ESPERADAS = {'data', 'source', 'medium', 'campaign', 'content', 'term', 'pageUrl',
+                  'O seu gênero:', 'Qual a sua idade?', 'O que você faz atualmente?',
+                  'Atualmente, qual a sua faixa salarial?', 'Você possui cartão de crédito?',
+                  'Já estudou programação?', 'Tem computador/notebook?'}
+    faltando = _ESPERADAS - set(df.columns)
+    assert not faltando, f"coluna sumiu do df de pesquisa: {sorted(faltando)}"
+    assert len(df) == 2, f"esperava 1 linha por registro, peguei {len(df)}"
     assert list(df['O seu gênero:']) == ['Feminino', 'Masculino']
     assert list(df['Qual a sua idade?']) == ['25 - 34 anos', '18 - 24 anos']
     assert list(df['source']) == ['facebook-ads', 'ig']
