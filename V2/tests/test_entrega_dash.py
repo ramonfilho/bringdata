@@ -180,7 +180,13 @@ def test_decil_individual_continua_fora():
         assert proibido not in nomes
 
 
-# ── carga incremental ────────────────────────────────────────────────────────
+# ── carga: reconstrução total por tabela sombra ──────────────────────────────
+#
+# Estes testes trocaram de lado em 07/08/2026. Antes travavam a carga INCREMENTAL;
+# agora travam a RECONSTRUÇÃO. Motivo, medido no mesmo job: incremental 28,1 min
+# contra 8,4-9,6 min da reconstrução. A escrita nunca foi o custo (245 linhas mudam
+# por dia); o custo é ler 253.502 linhas da origem, o que as duas versões fazem
+# igual. A incremental só somava estágio, dois cruzamentos e uma varredura por cima.
 
 def test_a_chave_da_linha_nao_e_so_o_lead_id():
     """A mesma pessoa cadastrada em dias diferentes vira linhas diferentes: 253.502
@@ -190,37 +196,58 @@ def test_a_chave_da_linha_nao_e_so_o_lead_id():
     assert "PRIMARY KEY (lead_id, capturado_em)" in prov.ddl_tabela()
 
 
-def test_refresh_e_INCREMENTAL_e_nao_refaz_a_tabela():
-    """Medido: entram ~22 leads novos e ~5 compradores por dia, ou seja 27 linhas em
-    253.502. Refazer tudo era reescrever a tabela inteira para mudar 0,01% dela."""
+def test_a_troca_e_por_tabela_sombra_e_nao_esvazia_a_tabela_viva():
+    """Quem estiver consultando durante a carga tem que ver a versão anterior
+    INTEIRA, nunca um estado pela metade.
+
+    Encher tabela sombra e trocar com RENAME garante isso. `TRUNCATE`/`DELETE`
+    seguido de INSERT na tabela VIVA não garante: mesmo dentro de transação, é a
+    tabela que o cliente consulta que fica sendo reescrita, e qualquer erro no meio
+    a deixa mutilada."""
     import inspect
     fonte = inspect.getsource(prov.refresh)
-    assert 'ON CONFLICT' in fonte, 'o refresh voltou a ser substituição total'
-    # `DO UPDATE SET`, não `DO NOTHING`: com DO NOTHING a linha nova entra mas a
-    # existente nunca muda, e a virada do `comprou` (que é o principal motivo de a
-    # linha antiga mudar) jamais chegaria ao painel deles.
-    assert 'DO UPDATE SET' in fonte, (
-        'o upsert virou DO NOTHING: lead que passou a comprar não seria atualizado')
-    assert 'DROP TABLE IF EXISTS' in fonte and '_stg' in fonte, 'sumiu a área de estágio'
-    for proibido in (f'DROP TABLE IF EXISTS {prov.SCHEMA}.{prov.TABELA}"',
-                     'RENAME TO'):
-        assert proibido not in fonte, f'o refresh voltou a trocar a tabela: {proibido}'
+    assert '_novo' in fonte, 'sumiu a tabela sombra'
+    assert 'RENAME TO' in fonte, 'a troca deixou de ser por RENAME'
+    for proibido in ('TRUNCATE', f'DELETE FROM {prov.SCHEMA}.{prov.TABELA} '):
+        assert proibido not in fonte, (
+            f'a carga passou a esvaziar a tabela VIVA ({proibido}): '
+            'o cliente pode ler tabela pela metade')
 
 
-def test_refresh_remove_o_que_sumiu_da_origem():
-    """A origem é reconstruída periodicamente e a deduplicação pode mudar. Sem a
-    remoção, linha que deixou de existir ficaria aqui para sempre e o painel contaria
-    lead que a gente já não reconhece."""
+def test_o_grant_e_reconcedido_depois_da_troca():
+    """O `DROP TABLE` leva o GRANT junto. Sem reconceder, a carga termina "com
+    sucesso" e o cliente perde o acesso à entrega até alguém reparar. É o tipo de
+    quebra que não aparece no log de quem roda, só na cara de quem consulta."""
     import inspect
     fonte = inspect.getsource(prov.refresh)
-    assert 'DELETE FROM' in fonte and 'NOT EXISTS' in fonte
+    i_rename = fonte.index('RENAME TO')
+    i_grant = fonte.index('GRANT SELECT')
+    assert i_grant > i_rename, (
+        'o GRANT está ANTES do RENAME: seria concedido na tabela que vai ser '
+        'renomeada e some na troca')
+    # o nome do papel entra interpolado (`{ROLE}`), não literal
+    assert '{ROLE}' in fonte[i_grant:i_grant + 120], (
+        'o GRANT deixou de mirar o papel da entrega')
 
 
-def test_refresh_so_conta_como_alterado_o_que_de_fato_mudou():
-    """`IS DISTINCT FROM` trata nulo como valor. Com `<>` puro, toda linha com campo
-    nulo apareceria como alterada todo dia e o relatório da carga viraria ruído."""
+def test_os_indices_voltam_depois_da_troca():
+    """Índice mora na tabela, e a tabela é nova a cada carga. Sem recriar, a consulta
+    do painel deles degrada em varredura completa e ninguém liga uma coisa à outra."""
     import inspect
-    assert 'IS DISTINCT FROM' in inspect.getsource(prov.refresh)
+    fonte = inspect.getsource(prov.refresh)
+    assert fonte.count('CREATE INDEX') >= 2, 'os índices deixaram de ser recriados'
+    assert 'capturado_em' in fonte and '(lf)' in fonte
+
+
+def test_a_carga_e_uma_transacao_so():
+    """Leads e qualidade agregada são consultados juntos. Commitar em separado abre
+    janela com o agregado de ontem ao lado dos leads de hoje."""
+    import inspect
+    fonte = inspect.getsource(prov.refresh)
+    assert fonte.count('BEGIN') == 1 and fonte.count('COMMIT') == 1
+    assert 'ROLLBACK' in fonte, 'sem rollback, falha no meio deixa a sombra para trás'
+    assert fonte.index('refresh_qualidade') < fonte.index('"COMMIT"'), (
+        'a qualidade agregada ficou fora da transação dos leads')
 
 
 # ── campos novos que o pedido original citava ────────────────────────────────
