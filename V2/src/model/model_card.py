@@ -112,6 +112,7 @@ def render_card(data: dict, *, status_label: str, decision: str,
 
     linha_metricas = (
         f"- **Métricas (test):** AUC **{_f4(m.get('auc'))}** · "
+        f"KS **{_f4(m.get('ks'))}** · "
         f"lift **{_f2(m.get('lift_maximum'))}** · "
         f"top-3 **{_pct(m.get('top3_decil_concentration'))}** · "
         f"top-5 {_pct(m.get('top5_decil_concentration'))} · "
