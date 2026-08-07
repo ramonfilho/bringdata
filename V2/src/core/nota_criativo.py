@@ -160,8 +160,39 @@ def _notas_da_semana(hist_ate_aqui: pd.DataFrame, alvo: dict = None) -> dict:
         return {}
     lift = (g["k"] / g["n"]) / nivel
     peso = g["n"] / (g["n"] + K_ENCOLHIMENTO)
-    destino = (g.index.map(lambda c: (alvo or {}).get(c, NOTA_NEUTRA))
-               if alvo else NOTA_NEUTRA)
+    if not alvo:
+        return (peso * lift + (1 - peso) * NOTA_NEUTRA).to_dict()
+
+    # CENTRAGEM DO ALVO, contra a PRÓPRIA fatia (achado de 07/08/2026, 2a tentativa).
+    #
+    # O alvo do encolhimento significa "não sei nada sobre este criativo", e por isso
+    # precisa estar no MESMO nível das notas da fatia onde vai ser usado. Sem isso ele
+    # não informa, DESLOCA — e o deslocamento não é uniforme (depende de quais vídeos
+    # são vizinhos de cada criativo), então reordena e estraga o ranking.
+    #
+    # Duas suposições minhas caíram aqui, ambas por medição:
+    #   1. "a média das notas é 1,0". NÃO É: mede 0,81. O corte de MIN_HIST descarta os
+    #      criativos pequenos, mas o `nivel` de referência é medido sobre o histórico
+    #      INTEIRO, e os pequenos convertem acima da média — sobra menos de 1,0.
+    #   2. Centrar contra as notas GERAIS servia para o cálculo POR CANAL. Não serve:
+    #      cada canal tem nível próprio. Centrado para um, descentrado para o outro,
+    #      e o resultado foram 30.604 notas deslocadas para baixo contra ZERO para cima.
+    #
+    # Centrar aqui dentro resolve a classe inteira do problema: a função é chamada uma
+    # vez por fatia (geral, meta, google), e cada chamada centra contra as próprias
+    # notas. É um fator multiplicativo único, então preserva a ORDEM e move só o NÍVEL.
+    nota_neutra = peso * lift + (1 - peso) * NOTA_NEUTRA
+    comuns = [c for c in g.index if c in alvo]
+    if comuns:
+        w = g.loc[comuns, "n"].astype(float).values
+        centro_alvo = float(np.average([alvo[c] for c in comuns], weights=w))
+        centro_nota = float(np.average(nota_neutra.loc[comuns].values, weights=w))
+        if centro_alvo > 0:
+            fator = centro_nota / centro_alvo
+            alvo = {c: v * fator for c, v in alvo.items()}
+            logger.debug("  [nota_criativo] alvo centrado %.3f -> %.3f (fator %.3f, "
+                         "%d criativos na fatia)", centro_alvo, centro_nota, fator, len(comuns))
+    destino = g.index.map(lambda c: alvo.get(c, NOTA_NEUTRA))
     return (peso * lift + (1 - peso) * destino).to_dict()
 
 
@@ -242,33 +273,6 @@ def _prior_por_texto(notas: dict, volumes: dict, transcricoes: dict) -> dict:
         if vals:
             out[cr] = float(np.mean(vals))
 
-    # CENTRAGEM (achado de 06/08/2026). O prior serve de ALVO do encolhimento, e alvo
-    # significa "não sei nada sobre este criativo". Sem centrar, ele chegava com
-    # tendência central 0,77 contra 1,02 das notas: em 75 mil leads, 28.020 notas eram
-    # empurradas PARA BAIXO contra 710 para cima. Isso não informa, desloca — e o
-    # deslocamento não é uniforme (depende de quais vizinhos cada criativo tem), então
-    # reordena. Foi o que fez a variante com texto perder 18 compradores no top 5% e me
-    # levou a descartá-la por uma medida enviesada.
-    #
-    # A causa é a média ponderada dos vizinhos: a distribuição das notas é torta (a
-    # maioria dos criativos abaixo de 1,0, poucos bons carregando o volume), então
-    # qualquer média puxa para baixo do centro.
-    #
-    # O conserto preserva a ORDEM (é um fator multiplicativo único) e só alinha o NÍVEL:
-    # a tendência central do prior passa a bater com a das notas observadas, medida nos
-    # MESMOS criativos e com o MESMO peso de volume. Depois disso, o prior só carrega o
-    # que ele tem de informação de verdade, que é a diferença relativa entre criativos.
-    if out:
-        comuns = [c for c in out if c in notas and volumes.get(c, 0) > 0]
-        if comuns:
-            w = np.array([volumes[c] for c in comuns], dtype=float)
-            centro_prior = float(np.average([out[c] for c in comuns], weights=w))
-            centro_nota = float(np.average([notas[c] for c in comuns], weights=w))
-            if centro_prior > 0:
-                fator = centro_nota / centro_prior
-                logger.debug("  [nota_criativo] prior centrado: %.3f -> %.3f (fator %.3f, "
-                             "%d criativos)", centro_prior, centro_nota, fator, len(comuns))
-                out = {c: v * fator for c, v in out.items()}
     return out
 
 

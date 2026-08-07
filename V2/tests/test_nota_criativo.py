@@ -199,51 +199,51 @@ def test_canal_texto_encolhe_para_o_video_e_nao_para_o_neutro():
     )
 
 
-def test_alvo_do_encolhimento_desloca_a_nota_do_criativo_raro():
-    """Trocar o alvo de 1,0 para outro valor tem que mover a nota de quem tem pouco dado."""
+def test_alvo_centrado_no_nivel_da_propria_fatia():
+    """O invariante do desenho: o alvo NAO pode mexer no nivel medio da fatia.
+
+    Alvo do encolhimento significa "nao sei nada sobre este criativo". Se ele chega
+    fora do nivel das notas da fatia, ele DESLOCA em vez de informar, e o
+    deslocamento reordena porque depende de quais vizinhos cada criativo tem.
+
+    Historico do erro (07/08/2026): a 1a tentativa centrou contra as notas GERAIS e
+    aplicou no calculo POR CANAL, que tem nivel proprio. Resultado medido em 75 mil
+    leads: 30.604 notas deslocadas pra baixo contra ZERO pra cima. A centragem passou
+    a acontecer DENTRO da fatia, e este teste e o que trava isso.
+    """
+    import numpy as np
     from src.core.nota_criativo import _notas_da_semana
     h = _historico()
-    raro = pd.DataFrame([{"criativo": "AD_RARO", "dia": pd.Timestamp("2026-01-05"),
-                          "buy": b, "canal": "meta"}
-                         for b in ([1] * 6 + [0] * 194)])
-    hist = pd.concat([h, raro])
-    neutro = _notas_da_semana(hist)["AD_RARO"]
-    puxado = _notas_da_semana(hist, alvo={"AD_RARO": 2.0})["AD_RARO"]
-    assert puxado > neutro, "o alvo nao esta sendo usado no encolhimento"
-    assert abs(puxado - neutro) > 0.5, (
-        f"com 200 leads o peso e ~0,05, entao mover o alvo de 1,0 para 2,0 devia "
-        f"mover a nota ~0,95; moveu {puxado - neutro:.3f}"
+    sem = _notas_da_semana(h)
+    # alvo grosseiramente fora do nivel: 5x acima. A centragem tem que absorver.
+    com = _notas_da_semana(h, alvo={c: v * 5.0 for c, v in sem.items()})
+    vol = h.groupby("criativo").size()
+    comuns = sorted(set(sem) & set(com))
+    w = np.array([vol[c] for c in comuns], dtype=float)
+    m_sem = np.average([sem[c] for c in comuns], weights=w)
+    m_com = np.average([com[c] for c in comuns], weights=w)
+    assert abs(m_sem - m_com) < 1e-9, (
+        f"o alvo mexeu no nivel da fatia: {m_sem:.4f} -> {m_com:.4f}. "
+        f"A centragem devia absorver qualquer escala do alvo."
     )
 
 
-def test_prior_sai_centrado_no_mesmo_nivel_das_notas():
-    """O alvo do encolhimento tem que significar "nao sei", nao "provavelmente ruim".
+def test_alvo_carrega_a_diferenca_RELATIVA_e_nao_o_nivel():
+    """O que o alvo tem de informacao util e a ordem entre criativos, nao a escala.
 
-    Sem centragem o prior chegava com tendencia central 0,77 contra 1,02 das notas e
-    empurrava 28.020 notas pra baixo contra 710 pra cima (medido em 75 mil leads,
-    06/08/2026). Isso reordena, porque o deslocamento depende dos vizinhos de cada
-    criativo. A centragem e um fator multiplicativo unico: preserva a ORDEM e alinha
-    so o NIVEL.
+    Dobrar o alvo inteiro nao pode mudar nada (a centragem tira a escala), mas
+    INVERTER a ordem dele tem que mudar a nota de quem tem pouco historico.
     """
-    import numpy as np
-    from src.core.nota_criativo import _prior_por_texto
-    rng = np.random.default_rng(7)
-    # 30 videos com fala distinta e notas tortas (a maioria abaixo de 1,0), que e o
-    # formato real que produzia o vies.
-    vocab = ["curso", "programacao", "salario", "emprego", "carreira", "codigo",
-             "vaga", "renda", "estudo", "projeto"]
-    trs, notas, vols = {}, {}, {}
-    for i in range(30):
-        pal = rng.choice(vocab, size=25)
-        trs[f"AD{i:03d}"] = {"texto": " ".join(pal) * 3, "ritmo": 3.0 + rng.random()}
-        notas[f"AD{i:03d}"] = float(np.clip(rng.gamma(2.0, 0.35), 0.2, 3.0))
-        vols[f"AD{i:03d}"] = int(rng.integers(500, 20000))
-    pr = _prior_por_texto(notas, vols, trs)
-    assert pr, "o prior nao devolveu nada — teste nao exercita o que devia"
-    comuns = [c for c in pr if c in notas]
-    w = np.array([vols[c] for c in comuns], dtype=float)
-    centro_prior = np.average([pr[c] for c in comuns], weights=w)
-    centro_nota = np.average([notas[c] for c in comuns], weights=w)
-    assert abs(centro_prior - centro_nota) < 1e-6, (
-        f"prior centrado em {centro_prior:.4f} contra {centro_nota:.4f} das notas"
+    from src.core.nota_criativo import _notas_da_semana
+    h = _historico()
+    base = _notas_da_semana(h)
+    a1 = _notas_da_semana(h, alvo=base)
+    a2 = _notas_da_semana(h, alvo={c: v * 2.0 for c, v in base.items()})
+    assert all(abs(a1[c] - a2[c]) < 1e-9 for c in a1), (
+        "dobrar o alvo inteiro mudou a nota: a centragem nao esta tirando a escala"
+    )
+    invertido = {c: 1.0 / v for c, v in base.items()}
+    a3 = _notas_da_semana(h, alvo=invertido)
+    assert any(abs(a1[c] - a3[c]) > 1e-6 for c in a1), (
+        "inverter a ORDEM do alvo nao mudou nada: o alvo virou decorativo"
     )
