@@ -41,6 +41,7 @@ from src.core.column_unification import (
 )
 from src.core.ingestion import (
     aplicar_filtro_status_risco as _filtro_status_risco,
+    filtrar_risco_tmb as _filtrar_risco_tmb_db,
     filter_sales_by_product as _filtrar_produto,
 )
 from src.core.category_unification import unify_categories as _unify_categories
@@ -400,7 +401,7 @@ def _assert_retraining_decisions_resolved(config_path: str, set_active: bool) ->
     logger.info(f"  [set-active gate] retraining_decisions OK: {decisions}")
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, control_boost=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False, leads_source='files', use_feature_selection=False, model_card=False, nota_criativo=False, use_hotleads_feature=False, as_of=None):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, control_boost=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False, leads_source='files', use_feature_selection=False, model_card=False, nota_criativo=False, use_hotleads_feature=False, as_of=None, export_pesquisa=None):
     # Guard: Cloud SQL MLflow precisa estar RUNNABLE. Falha alto se NEVER.
     assert_mlflow_backend_running()
     register_mlflow_cleanup_reminder()
@@ -719,12 +720,6 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     # idênticos. Substituído aqui (pré-validação) pois as vendas de arquivo seriam
     # descartadas. Rollback: sales_source='files' (default).
     if sales_source == 'db':
-        if tmb_risk_filter not in ('all', 'none'):
-            raise ValueError(
-                f"sales_source='db' só suporta tmb_risk_filter all|none por ora — o filtro de "
-                f"risco TMB precisa de 'Grau de risco', ainda não no analytics.sales. "
-                f"Recebi tmb_risk_filter={tmb_risk_filter!r}."
-            )
         from src.data.sales_reader import read_sales
         _db = read_sales(gateways=sales_gateways, as_of=as_of)
         df_vendas = pd.DataFrame({
@@ -741,6 +736,24 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         assert len(df_vendas) > 0, "[sales_source=db] analytics.sales retornou 0 vendas"
         logger.info(f"  [sales_source=db] {len(df_vendas):,} vendas do analytics.sales "
                     f"(gateways={sales_gateways or 'todos'}) — substitui arquivos/API")
+
+        # Grau de risco TMB vive na satélite analytics.sales_tmb_risk (o analytics.sales
+        # não guarda — coluna específica de gateway; ver frente TMB-risco). Servir o MESMO
+        # tmb_risk_lookup que o modo files monta do relatório de contas a receber, agora do
+        # banco → habilita o filtro low/low_medium (Cell 5.3) e os pesos graduados por
+        # comprador com sales_source='db' (paridade: mesmo relatório, mesma agregação).
+        if tmb_risk_filter in ('low', 'low_medium') or use_buyer_weights:
+            from src.data.tmb_risk_reader import read_tmb_risk
+            tmb_risk_lookup = read_tmb_risk(client_id=client_config.client_id or 'devclub')
+            logger.info(f"  [sales_source=db] tmb_risk_lookup: {len(tmb_risk_lookup):,} "
+                        f"emails com grau de risco (satélite)")
+            if tmb_risk_filter in ('low', 'low_medium') and not tmb_risk_lookup:
+                raise ValueError(
+                    f"tmb_risk_filter={tmb_risk_filter!r} exige o grau de risco TMB, mas a "
+                    f"satélite analytics.sales_tmb_risk está vazia. Rode antes: "
+                    f"python -m src.validation.etl_sales --ingest-tmb-risk (largue o relatório "
+                    f"de contas a receber em V2/data/<client>/tmb_risco)."
+                )
 
     # === Consolidação Cloud SQL: substituir pesquisa dos arquivos pelo analytics.leads ===
     # Snapshot jsonb verbatim → reconstrução idêntica do df_pesquisa (paridade por
@@ -835,6 +848,18 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         logger.info(f"  [dump-pesquisa-db] {_dump}")
         return {'status': 'PESQUISA_DUMPED_TO_DB', 'result': _dump}
 
+    # === Captura para AUDITORIA: exporta a pesquisa consolidada (todas as fontes
+    # atômicas já unificadas + dedup cross-source) para arquivo local e encerra.
+    # Aditivo e reversível — só roda com --export-pesquisa; nenhum efeito no treino. ===
+    if export_pesquisa:
+        _p = os.path.abspath(export_pesquisa)
+        os.makedirs(os.path.dirname(_p), exist_ok=True)
+        df_pesquisa_unificado.to_pickle(_p)
+        logger.info(f"  [export-pesquisa] {len(df_pesquisa_unificado):,} linhas, "
+                    f"{len(df_pesquisa_unificado.columns)} colunas → {_p}")
+        return {'status': 'PESQUISA_EXPORTED', 'path': _p,
+                'rows': len(df_pesquisa_unificado)}
+
     # Parte 2: Unificar colunas de VENDAS — em db mode as vendas já vêm canônicas
     # do analytics.sales (substituídas na Cell 4), então pula o unify.
     if sales_source == 'db':
@@ -866,11 +891,16 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     logger.info("")
 
     if sales_source == 'db':
-        # status/risco já filtrados no load/ETL (guru=aprovadas, asaas=pagos,
-        # boletex=sem refund/chargeback, tmb=efetivado); tmb_risk_filter all|none
-        # validado acima. Pular evita dropar gateways novos por status incompatível.
-        df_vendas_filtrado = df_vendas_sem_utm
-        logger.info("  [sales_source=db] Cell 5.3 (status/risco) pulada — já filtrado no ETL")
+        # STATUS já filtrado no load/ETL (guru=aprovadas, asaas=pagos, boletex=sem
+        # refund/chargeback, tmb=efetivado) → não re-aplicar (dropar gateways novos por
+        # status incompatível). Mas o RISCO TMB (all/none/low/low_medium) aplica aqui,
+        # usando o tmb_risk_lookup servido da satélite. all = mantém tudo; none = sem TMB;
+        # low/low_medium = TMB só nos graus permitidos (paridade com o modo files).
+        df_vendas_filtrado = _filtrar_risco_tmb_db(
+            df_vendas_sem_utm, tmb_risk_filter, tmb_risk_lookup,
+            client_config.ingestion.tmb_risk_values or [],
+        )
+        _log_step_count("filtro_risco_tmb_db", df_vendas_filtrado, df_before=df_vendas_sem_utm)
     else:
         df_vendas_filtrado = _filtro_status_risco(df_vendas_sem_utm, client_config.ingestion, tmb_risk_filter=tmb_risk_filter, tmb_risk_lookup=tmb_risk_lookup)
         _log_step_count("filtro_status_risco_vendas", df_vendas_filtrado, df_before=df_vendas_sem_utm)
@@ -1878,6 +1908,16 @@ if __name__ == "__main__":
         help="Fonte da pesquisa: 'files' (default, arquivos+Sheets) ou 'db' (reconstrói do "
              "snapshot em analytics.leads). Requer ter rodado --dump-pesquisa-db antes."
     )
+    parser.add_argument(
+        '--export-pesquisa',
+        type=str,
+        default=None,
+        metavar='PATH',
+        help="AUDITORIA: exporta a pesquisa consolidada (df_pesquisa_unificado — todas as "
+             "fontes atômicas + dedup cross-source, antes do match com vendas) para um "
+             "pickle local e encerra (não treina). Use para reproduzir/auditar o dataset "
+             "exato que o pipeline monta a partir das fontes."
+    )
 
     args = parser.parse_args()
 
@@ -1923,6 +1963,7 @@ if __name__ == "__main__":
         sales_source=args.sales_source,
         sales_gateways=args.sales_gateways,
         dump_pesquisa_db=args.dump_pesquisa_db,
+        export_pesquisa=args.export_pesquisa,
         leads_source=args.leads_source,
         model_card=args.model_card,
     )
