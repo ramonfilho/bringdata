@@ -463,21 +463,38 @@ def provisionar(senha_role: str):
 
 
 def refresh():
-    """Atualiza a entrega gravando SÓ o que mudou.
+    """Reconstrói a tabela da entrega inteira, numa transação.
 
-    Antes isto refazia a tabela inteira todo dia. Medido em 06/08/2026, isso era
-    reescrever **253.502 linhas para mudar 27**: entram cerca de 22 leads novos por
-    dia e cerca de 5 pessoas passam a constar como compradoras. Mesmo em pico de
-    lançamento seriam ~2.500, ou 1% da tabela. Reescrever tudo custava uns 10 minutos
-    numa instância pequena, sem ganho nenhum.
+    POR QUE RECONSTRUIR E NÃO ATUALIZAR SÓ O QUE MUDOU. A carga incremental existiu
+    aqui por um dia (06/08/2026) e foi revertida porque **piorou o que prometia
+    melhorar**. Medido nas duas versões, no mesmo job:
 
-    Agora: insere o que é novo, atualiza o que mudou, e apaga o que sumiu da origem.
-    Tudo numa transação, então quem estiver consultando vê a versão anterior inteira
-    até o commit.
+        reconstrução total  ...........  8,4 e 9,6 min
+        carga incremental   ...........  28,1 min   (3x mais lenta)
 
-    A remoção existe porque a tabela de origem é reconstruída periodicamente e a
-    deduplicação pode mudar: sem ela, linha que deixou de existir na origem ficaria
-    aqui para sempre, e o painel deles contaria lead que a gente já não reconhece.
+    A conta que eu tinha feito estava errada. Eu otimizei a ESCRITA (253.502 linhas
+    para mudar 245) quando o custo nunca esteve ali: ele está em **ler as 253.502
+    linhas da origem e trazê-las pela rede**, o que as duas versões fazem igual. A
+    incremental só somava, por cima disso, uma tabela de estágio, dois cruzamentos da
+    tabela contra ela mesma para contar diferenças, a fusão e uma varredura de
+    remoção. Mesma leitura, mais trabalho.
+
+    E POR QUE NÃO UMA MARCA D'ÁGUA, que evitaria a leitura. Porque `capturado_em` não
+    serve de marca: o que muda numa linha antiga não é a captação. Medido em 06/08:
+
+        leads novos por dia .............. 21 a 1.827 (1.800 em semana de captação)
+        vendas ingeridas retroativamente .. 5.329 num dia só, todas de compra ANTIGA
+        reconstrução da origem ........... 312.677 linhas de uma vez em 30/06
+
+    Ou seja: um lead de março vira comprador hoje, e a origem inteira é refeita de
+    tempos em tempos. Uma marca d'água por `ingested_at` até funcionaria, e cairia
+    para ~17 mil linhas num dia normal, mas cobra uma superfície de erro nova: se
+    deixar passar uma mudança, o cliente vê dado velho **e ninguém fica sabendo**.
+    Falha silenciosa numa entrega para terceiro é o pior modo de falhar aqui, e não
+    vale trocar por 8 minutos num job das 07:30 que não disputa nada com produção.
+
+    A troca é por tabela sombra e RENAME: quem estiver consultando durante a carga vê
+    a versão anterior inteira, nunca um estado pela metade.
     """
     origem = origem_leitura()
     try:
@@ -487,17 +504,17 @@ def refresh():
     print(f"  lidas {len(linhas):,} linhas da origem")
 
     cols = [n for n, _ in colunas_da_tabela()]
-    mutaveis = [c for c in cols if c not in CHAVE]
     adm = _admin()
     destino = conectar("postgres", adm, BANCO)
     try:
         antes = destino.run(f"SELECT count(*) FROM {SCHEMA}.{TABELA}")[0][0]
         destino.run("BEGIN")
 
-        # Área de estágio com o retrato completo da origem. Ela existe para as três
-        # operações saírem de UMA leitura só, sem ficar perguntando linha a linha.
-        destino.run(f"DROP TABLE IF EXISTS {SCHEMA}._stg")
-        destino.run(ddl_tabela(f"{SCHEMA}._stg"))
+        # Tabela sombra: enche primeiro, troca no fim. O DDL do Postgres é
+        # transacional, então o DROP+RENAME abaixo entra junto com o resto.
+        novo = f"{SCHEMA}.{TABELA}_novo"
+        destino.run(f"DROP TABLE IF EXISTS {novo}")
+        destino.run(ddl_tabela(novo))
         lote = 500
         for i in range(0, len(linhas), lote):
             pedaco = linhas[i:i + lote]
@@ -509,31 +526,16 @@ def refresh():
                     params[nome] = v
                     marcas.append(f":{nome}")
                 vals.append("(" + ",".join(marcas) + ")")
-            destino.run(f"INSERT INTO {SCHEMA}._stg ({','.join(cols)}) VALUES "
+            destino.run(f"INSERT INTO {novo} ({','.join(cols)}) VALUES "
                         + ",".join(vals), **params)
 
-        cond = " AND ".join(f"t.{k} = s.{k}" for k in CHAVE)
-        sets = ", ".join(f"{c} = EXCLUDED.{c}" for c in mutaveis)
-        # Só conta como mudança o que de fato difere. `IS DISTINCT FROM` trata NULO
-        # como valor, senão linha com campo nulo apareceria como alterada todo dia.
-        difere = " OR ".join(f"t.{c} IS DISTINCT FROM s.{c}" for c in mutaveis)
-
-        novas = destino.run(f"""SELECT count(*) FROM {SCHEMA}._stg s
-            WHERE NOT EXISTS (SELECT 1 FROM {SCHEMA}.{TABELA} t WHERE {cond})""")[0][0]
-        alteradas = destino.run(f"""SELECT count(*) FROM {SCHEMA}._stg s
-            JOIN {SCHEMA}.{TABELA} t ON {cond} WHERE {difere}""")[0][0]
-
-        destino.run(f"""INSERT INTO {SCHEMA}.{TABELA} ({','.join(cols)})
-            SELECT {','.join(cols)} FROM {SCHEMA}._stg
-            ON CONFLICT ({', '.join(CHAVE)}) DO UPDATE SET {sets}""")
-
-        sumidas = destino.run(f"""WITH d AS (
-            DELETE FROM {SCHEMA}.{TABELA} t
-             WHERE NOT EXISTS (SELECT 1 FROM {SCHEMA}._stg s WHERE {cond})
-            RETURNING 1) SELECT count(*) FROM d""")[0][0]
-
-        destino.run(f"DROP TABLE {SCHEMA}._stg")
+        destino.run(f"DROP TABLE IF EXISTS {SCHEMA}.{TABELA}")
+        destino.run(f"ALTER TABLE {novo} RENAME TO {TABELA}")
+        # O GRANT morre junto com a tabela velha: sem reconceder, a entrega fica
+        # inacessível pro cliente até alguém perceber.
         destino.run(f"GRANT SELECT ON {SCHEMA}.{TABELA} TO {ROLE}")
+        destino.run(f"CREATE INDEX ON {SCHEMA}.{TABELA} (capturado_em)")
+        destino.run(f"CREATE INDEX ON {SCHEMA}.{TABELA} (lf)")
 
         # Na MESMA transação de propósito: as duas tabelas são consultadas juntas,
         # e commitar em separado deixaria uma janela com o agregado de ontem ao lado
@@ -543,9 +545,9 @@ def refresh():
         destino.run("COMMIT")
 
         depois = destino.run(f"SELECT count(*) FROM {SCHEMA}.{TABELA}")[0][0]
-        print(f"  {novas} novas, {alteradas} alteradas, {sumidas} removidas")
-        print(f"  {SCHEMA}.{TABELA}: {antes:,} -> {depois:,} linhas")
-        print(f"  {SCHEMA}.{TABELA_QUALIDADE}: {n_qual} linhas (substituição total)")
+        print(f"  {SCHEMA}.{TABELA}: {antes:,} -> {depois:,} linhas, "
+              f"índices criados, SELECT reconcedido")
+        print(f"  {SCHEMA}.{TABELA_QUALIDADE}: {n_qual} linhas")
     except Exception:
         destino.run("ROLLBACK")
         raise
