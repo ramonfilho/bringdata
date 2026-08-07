@@ -133,13 +133,11 @@ LF59:
   cap_end: '2026-06-21'
   vendas_start: '2026-06-29'
   vendas_end: '2026-07-05'
-  vendas_inferred: true
 LF60:
   cap_start: '2026-06-22'
   cap_end: '2026-06-29'
   vendas_start: '2026-07-06'
   vendas_end: '2026-07-12'
-  vendas_inferred: true
   notes: lançamento atual em 27/06
 LF61:
   cap_start: '2026-06-29'
@@ -148,6 +146,16 @@ LF61:
   vendas_end: '2026-07-19'
 LF62:
   cap_start: '2026-07-06'
-  cap_end: '2026-07-19'
+  cap_end: '2026-07-12'
   vendas_start: '2026-07-20'
-  vendas_end: '2026-07-27'
+  vendas_end: '2026-07-26'
+LF63:
+  cap_start: '2026-07-13'
+  cap_end: '2026-07-20'
+  vendas_start: '2026-07-27'
+  vendas_end: '2026-07-30'
+DEV21:
+  cap_start: '2026-07-21'
+  cap_end: '2026-08-03'
+  vendas_start: '2026-08-10'
+  vendas_end: '2026-08-16'
