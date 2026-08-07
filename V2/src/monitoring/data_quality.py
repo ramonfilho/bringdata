@@ -645,6 +645,44 @@ def check_distribution_drift(df_producao: pd.DataFrame,
     return alertas
 
 
+#: Direções em que NÃO existe braço "melhor": a categoria não tem sinal de
+#: qualidade conhecido, então ninguém leva o ✅ na tabela de Drift por A/B.
+DIRECTIONS_WITHOUT_WINNER = (None, 'neutral', 'uncertain', 'insufficient_data')
+
+
+def pick_variant_winner(direction: Optional[str],
+                        champion_delta_pp: Optional[float],
+                        challenger_delta_pp: Optional[float]) -> Optional[str]:
+    """Regra CANÔNICA do ✅ na tabela de Drift por A/B (fonte única do projeto).
+
+    Vence o braço que chega MAIS PERTO do perfil de referência (menor |Δpp|
+    contra o Top%), e só em característica de direção conhecida. Lead não entra:
+    é o controle sem ML, não disputa qual modelo ranqueia melhor.
+
+    Devolve `None` (ninguém leva o ✅) quando:
+      - a direção é incerta / sem dado suficiente → não existe "melhor";
+      - algum braço não tem medição na categoria → não há o que comparar;
+      - as duas distâncias empatam → não elege ninguém.
+
+    Por que é distância e não intensidade: até 02/08/2026 o renderizador do Slack
+    tinha uma regra própria, que comparava os Δ entre si e premiava quem empurrava
+    o público mais forte na direção boa, ignorando quão longe do Top% ele
+    aterrissava, enquanto o campo `winner` calculado aqui não era lido por
+    ninguém. Como o Champion (abr_28) desloca o público muito mais que o
+    Challenger (jul_24), aquela regra dava o ✅ ao braço mais agressivo por
+    construção (9 das 10 linhas marcadas em 01/08/2026), inclusive em linhas onde
+    o Challenger estava praticamente em cima da referência.
+    """
+    if direction in DIRECTIONS_WITHOUT_WINNER:
+        return None
+    if champion_delta_pp is None or challenger_delta_pp is None:
+        return None
+    ch, cl = abs(champion_delta_pp), abs(challenger_delta_pp)
+    if ch == cl:
+        return None
+    return 'champion' if ch < cl else 'challenger'
+
+
 def load_training_distributions(model_path: str) -> Dict:
     """
     Carrega distribuições esperadas do arquivo JSON do modelo.
@@ -2807,17 +2845,11 @@ class DataQualityMonitor:
                 lead_delta = round(lead_pct - ref_pct, 1) if lead_pct is not None else None
                 ch_delta   = round(ch_pct   - ref_pct, 1) if ch_pct   is not None else None
                 cl_delta   = round(cl_pct   - ref_pct, 1) if cl_pct   is not None else None
-                # Winner Champion vs Challenger (não inclui Lead — ele é a referência
-                # "controle sem ML", os outros 2 é que disputam qual ML é melhor)
-                if ch_delta is None and cl_delta is None:
-                    winner = None
-                elif ch_delta is None:
-                    winner = 'challenger'
-                elif cl_delta is None:
-                    winner = 'champion'
-                else:
-                    winner = 'champion' if abs(ch_delta) <= abs(cl_delta) else 'challenger'
                 direction = (direction_map.get(col, {}).get(cat, {}) or {}).get('direction')
+                # Vencedor da linha (✅ do Slack). Regra canônica em
+                # `pick_variant_winner`: mais perto do Top% vence, só em direção
+                # conhecida. Não reimplementar aqui nem no renderizador.
+                winner = pick_variant_winner(direction, ch_delta, cl_delta)
                 lead_quality = self._classify_drift_quality(direction, lead_delta) if lead_delta is not None else None
                 ch_quality   = self._classify_drift_quality(direction, ch_delta)   if ch_delta   is not None else None
                 cl_quality   = self._classify_drift_quality(direction, cl_delta)   if cl_delta   is not None else None

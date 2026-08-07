@@ -63,7 +63,25 @@ def resolve_ruler_run_id(client_id: str = "devclub",
         return None
 
 
-def matured_bounds(*, window_days: int = 90, maturation_days: int = 60,
+#: Dias que um lead tem pra comprar. Fonte ÚNICA da maturação: quem precisar dela
+#: importa daqui em vez de repetir o número.
+#:
+#: 21 dias = o ciclo real de um lançamento DevClub: semana 1 captação (7d), semana 2
+#: CPL/nutrição (6d), semana 3 vendas/carrinho (7d). O lead compra no lançamento em
+#: que entrou; depois do carrinho fechar, ele só volta a ter oferta no lançamento
+#: seguinte, que é outro evento.
+#:
+#: Era 60 dias até 03/08/2026, e a folga custava caro: o fim da janela recuava 60 dias
+#: do hoje, o que jogava a janela inteira para ANTES do ledger (`registros_ml` nasce
+#: em 23/05/2026) e derrubava a fatia com UTM para 6,6%. Com isso as taxas por canal e
+#: por balde saíam de uma amostra minúscula. A do Champion vinha de 7 vendas em 438
+#: leads (1,598%) e puxava o teto de CPL dele para R$20,81, quando o real é ~R$9.
+#: Com 21 dias a mesma conta dá 159 vendas em 23.119 leads (0,688%) e teto R$9,29.
+DEFAULT_MATURATION_DAYS = 21
+
+
+def matured_bounds(*, window_days: int = 90,
+                   maturation_days: int = DEFAULT_MATURATION_DAYS,
                    as_of: Optional[date] = None) -> tuple[datetime, datetime]:
     """Fronteiras da janela madura em captação: [as_of - maturation - window,
     as_of - maturation). O fim recua `maturation_days` do hoje pra garantir que todo
@@ -77,7 +95,7 @@ def matured_bounds(*, window_days: int = 90, maturation_days: int = 60,
 def build_matured_window(
     *,
     window_days: int = 90,
-    maturation_days: int = 60,
+    maturation_days: int = DEFAULT_MATURATION_DAYS,
     as_of: Optional[date] = None,
     client_id: str = "devclub",
     ruler_run_id: Optional[str] = None,
@@ -88,7 +106,8 @@ def build_matured_window(
 
     Args:
         window_days: largura da janela de captação (default 90d).
-        maturation_days: quanto o fim recua do hoje pra garantir maturação (default 60d).
+        maturation_days: quanto o fim recua do hoje pra garantir maturação
+            (default DEFAULT_MATURATION_DAYS = 21d, o ciclo do lançamento).
         as_of: "hoje" (default date.today()); injetável pra teste/backfill.
         ruler_run_id: run_id da régua; None → resolve o `active_model` (abr_28).
         conn: conexão Cloud SQL injetada; None → abre e fecha (timeout 180s).

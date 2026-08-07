@@ -264,7 +264,8 @@ def _slack_drift_legend_header(B: list):
             'type': 'mrkdwn',
             'text': (
                 '*Drift de público — leitura das tabelas*\n'
-                '🟢 bom · 🔴 ruim · ⚪ neutro/incerto · ✅ modelo de melhor performance'
+                '🟢 bom · 🔴 ruim · ⚪ neutro/incerto · '
+                '✅ modelo mais perto do perfil de referência na linha'
             ),
         },
     })
@@ -1181,37 +1182,37 @@ def render_slack_blocks_client(view: dict) -> list[dict]:
     _slack_ab(view, blocks)
     blocks.append({'type': 'divider'})
 
-    # Per-variant drift tables (uma por janela). Desde 2026-05-28 split é por
-    # optimization_goal da campanha (3 buckets Lead/Champion/Challenger), não
-    # por A/B model routing — sempre faz sentido renderizar.
-    audience_by_variant = [a for a in view.get('alerts', [])
-                           if a.get('type') == 'audience_profile_drift_by_variant']
-    audience_by_source = [a for a in view.get('alerts', [])
-                          if a.get('type') == 'audience_profile_drift_by_source']
-    audience_general = [a for a in view.get('alerts', [])
-                        if a.get('type') == 'audience_profile_drift']
+    # Drift de característica: 2 tabelas, só da janela de LANÇAMENTO (Drift por A/B
+    # + Drift por fonte). Decisão de 29/07/2026: "A nova referência vai como coluna
+    # em todas as tabelas. As novas tabelas que ficam são: Drift A/B lançamento |
+    # Drift por fonte lançamento."
+    #
+    # Saíram as 3 redundantes: as duas de "Ontem" (A/B e fonte) e a "geral". Motivo:
+    # eram 5 tabelas de ~20 linhas cada dizendo a mesma coisa em cortes diferentes,
+    # e o sinal que move decisão de tráfego é o do lançamento em captação. A janela
+    # de ontem continua viva no painel de decis, que é onde ela decide algo.
+    #
+    # Esta é a MESMA redução que `_slack_audience_rolling_dm` já fazia no DM desde a
+    # Fase 1c da referência rolante; aplicada aqui em 02/08/2026, que era onde o
+    # pedido original tinha nascido ("as 5 primeiras tabelas da mensagem que vai
+    # para o grupo de dados").
+    def _launch_only(kind: str) -> list:
+        return [a for a in view.get('alerts', [])
+                if a.get('type') == kind
+                and (a.get('details') or {}).get('window') == 'current_launch']
+
+    audience_by_variant = _launch_only('audience_profile_drift_by_variant')
+    audience_by_source = _launch_only('audience_profile_drift_by_source')
     # Header único da seção de drift (Fix 1)
-    if audience_by_variant or audience_by_source or audience_general:
+    if audience_by_variant or audience_by_source:
         _slack_drift_legend_header(blocks)
 
-    # Ordena: previous_day primeiro, depois current_launch
-    audience_by_variant.sort(
-        key=lambda a: 0 if (a.get('details', {}) or {}).get('window') == 'previous_day' else 1
-    )
-    audience_by_source.sort(
-        key=lambda a: 0 if (a.get('details', {}) or {}).get('window') == 'previous_day' else 1
-    )
     for a in audience_by_variant:
         _slack_alert_audience_by_variant(a, blocks)
         blocks.append({'type': 'divider'})
 
     for a in audience_by_source:
         _slack_alert_audience_by_source(a, blocks)
-        blocks.append({'type': 'divider'})
-
-    # Drift geral com cores
-    for a in audience_general:
-        _slack_alert_audience(a, blocks)
         blocks.append({'type': 'divider'})
 
     # Decis ontem + lançamento atual
@@ -1425,16 +1426,14 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
     )
     # Legenda movida pra _slack_drift_legend_header (uma vez por seção).
     header = f"*📉 Drift por A/B - {window_title}*"
-    # Header: 3 contadores que entram nas colunas Δ (Lead/Champion/Challenger,
-    # leads Meta separados pela tag de optimization_goal no nome da campanha,
-    # lida localmente sem Meta API) + 2 que ficam fora da tabela mas aparecem pra
-    # deixar claro o universo total (Google e Outros).
-    # Colunas dinâmicas: só os baldes com leads > 0 entram ("o que não está
-    # scoreando some"). Rótulo via _ab_bucket_label (fonte única) — a campanha
-    # LEADHQLB/abr_28 vira "Champion (abr_28)"; a LEADQUALIFIED antiga (jan_30),
-    # quando não está no ar, nem aparece. Lead não compete (não ganha ✅).
+    # Só os 2 braços de ML entram nas colunas Δ. O Lead saiu da tabela em
+    # 02/08/2026: com ele a linha passava de 120 caracteres (e de 130 em produção,
+    # onde os rótulos levam o run do modelo) e o Slack quebrava no meio, deixando a
+    # coluna do Challenger órfã numa segunda linha. Ele é o controle sem ML, nunca
+    # disputou o ✅, e o volume dele continua no cabeçalho, então o que se perde é
+    # só o Δ por característica dele. Google/Outros seguem fora da tabela, no
+    # cabeçalho, pra deixar claro o universo total.
     _arms = [
-        ('Lead',       n_lead,       False, 'lead_pct',       'lead_delta_pp',       'lead_quality'),
         ('Champion',   n_champion,   True,  'champion_pct',   'champion_delta_pp',   'champion_quality'),
         ('Challenger', n_challenger, True,  'challenger_pct', 'challenger_delta_pp', 'challenger_quality'),
     ]
@@ -1443,49 +1442,42 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
     _omitted = [(b, n) for b, n, *_ in _arms if 0 < n < MIN_BUCKET_N]
     _arms = [a for a in _arms if a[1] >= MIN_BUCKET_N]
     _n_compete = sum(1 for a in _arms if a[2])  # ✅ de vencedor só faz sentido com 2 braços comparáveis
-    _AW = 22  # largura da coluna de cada braço (cabe "Champion (abr_28)(Δ)")
+    _AW = 16  # largura da coluna de cada braço (cabe "🟢 48.2%(+17.3)✅")
 
     if (n_lead + n_champion + n_challenger + n_google + n_outros) > 0:
         in_table = ' · '.join(f"{_ab_bucket_label(b)}={n:,}" for b, n, *_ in _arms) or '—'
-        out_table = f"Google={n_google:,} · Outros={n_outros:,}"
+        out_table = f"Lead={n_lead:,} · Google={n_google:,} · Outros={n_outros:,}"
         header += f"\n_n Meta na tabela: {in_table}  ·  fora da tabela: {out_table}_"
         if _omitted:
             header += "\n_Omitidos (N<%d): %s_" % (
                 MIN_BUCKET_N, ' · '.join(f"{_ab_bucket_label(b)}={n:,}" for b, n in _omitted))
     rows = [header]
     has_rolling = any(it.get('rolling_reference_pct') is not None for it in top)
-    col_header = f"{'Característica':<32} {_ref_cols_header(has_rolling)}  " + '  '.join(
-        f"{_ab_bucket_label(b) + '(Δ)':>{_AW}}" for b, *_ in _arms
+    # Rótulo curto na coluna: o run de cada modelo (abr_28 / jul_24) já aparece no
+    # cabeçalho acima, então repeti-lo aqui só custava largura.
+    _SHORT = {'Champion': 'Champ', 'Challenger': 'Chall', 'Lead': 'Lead'}
+    col_header = f"{'Característica':<26} {_ref_cols_header(has_rolling)}  " + '  '.join(
+        f"{_SHORT.get(b, b) + '(Δ)':>{_AW}}" for b, *_ in _arms
     )
     rows.append(f"`{col_header}`")
 
     def cell(pct, delta, quality, is_winner):
         if pct is None or delta is None:
             return f"{'—':>{_AW}}"
-        mark = ' ✅' if is_winner else ''
-        return f"{_quality_emoji(quality)} {pct:>5.1f}%({delta:+.1f}){mark}"
-
-    def _pick_winner_direction(direction, ch_delta, cl_delta):
-        """Braço mais alinhado à direção da categoria (só vale com 2 comparáveis).
-        positive: maior Δpp vence; negative: Δpp mais negativo vence; neutro: sem winner.
-        """
-        if direction not in ('positive', 'very_positive', 'negative', 'very_negative'):
-            return None
-        if ch_delta is None or cl_delta is None:
-            return None
-        sign = 1 if direction in ('positive', 'very_positive') else -1
-        if ch_delta * sign == cl_delta * sign:
-            return None
-        return 'champion' if ch_delta * sign > cl_delta * sign else 'challenger'
+        # ✅ colado no número (sem espaço) pra caber em _AW junto com o emoji.
+        return (f"{_quality_emoji(quality)} {pct:>4.1f}%({delta:+.1f})"
+                + ('✅' if is_winner else ''))
 
     for it in top:
-        label = _short(f"{it['feature_label']}: {_humanize_category(it['category'])}", 32)
+        label = _short(f"{it['feature_label']}: {_humanize_category(it['category'])}", 26)
         ref = it.get('reference_pct', 0)
-        winner = (_pick_winner_direction(it.get('direction'),
-                                         it.get('champion_delta_pp'),
-                                         it.get('challenger_delta_pp'))
-                  if _n_compete >= 2 else None)
-        parts = [f"{label:<32} {_ref_cols_cell(ref, it.get('rolling_reference_pct'), has_rolling)}"]
+        # `winner` vem PRONTO do payload (data_quality, bloco
+        # audience_profile_drift_by_variant): vence quem está mais perto do Top%,
+        # só em característica de direção conhecida. Aqui não se recalcula nada:
+        # até 02/08/2026 existia uma segunda regra local que dava o ✅ ao braço
+        # mais agressivo e contradizia o campo, que ninguém lia.
+        winner = it.get('winner') if _n_compete >= 2 else None
+        parts = [f"{label:<26} {_ref_cols_cell(ref, it.get('rolling_reference_pct'), has_rolling)}"]
         for b, _n, compete, pk, dk, qk in _arms:
             is_winner = compete and winner == b.lower()
             parts.append(f"{cell(it.get(pk), it.get(dk), it.get(qk), is_winner):>{_AW}}")
@@ -1584,10 +1576,13 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     """KPI panel da distribuição de decis por janela.
 
     Substitui a tabela tradicional de 10 linhas × N colunas por um sumário
-    compacto: 1 linha por bucket com `n`, `%D9-D10`, `Δpp vs Ref` (com emoji)
-    e `avg decil`. Decisão de design (2026-05-28) baseada em data-viz
-    research: 80+ células de detalhe diluíam o sinal; %D9-D10 é a métrica
-    que move decisão de tráfego.
+    compacto: 1 linha por bucket com `n`, `%D9-D10` e `Δpp vs Ref` (com emoji).
+    Decisão de design (2026-05-28) baseada em data-viz research: 80+ células de
+    detalhe diluíam o sinal; %D9-D10 é a métrica que move decisão de tráfego.
+
+    A coluna `Avg` (decil médio do bucket, com emoji próprio) saiu em 02/08/2026
+    a pedido: dizia a mesma coisa que o %D9-D10 com uma escala a mais pra ler. O
+    decil médio da população segue no `Score geral`, no topo do painel.
 
     Dois grupos no painel:
       - Por fonte: Total, Meta, Google
@@ -1598,9 +1593,9 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     direto. Aqui o canal de cliente recebe só o sinal que dispara ação.
 
     Direction-aware: %D9-D10 alto = bom (D10 direction=positive). Δpp > +2 =
-    🟢, Δpp < -2 = 🔴, |Δpp| ≤ 2 = ⚪. Mesma escala pro avg decil em torno da
-    referência única (abr_28) — TODOS os buckets são reavaliados no
-    decil_challenger e comparam contra ela; o modelo anterior jan_30 saiu.
+    🟢, Δpp < -2 = 🔴, |Δpp| ≤ 2 = ⚪, contra a referência única (abr_28). TODOS
+    os buckets são reavaliados no decil_challenger e comparam contra ela; o
+    modelo anterior jan_30 saiu.
     """
     lq = v.get('lead_quality') or {}
     key = f'decil_distribution_{window_key}'
@@ -1623,24 +1618,17 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     keys = [f'D{i:02d}' for i in range(1, 11)]
 
     def _kpis(distribution: dict, n: int) -> dict | None:
-        """Computa n, %D9-D10, avg_decil pra um bucket. None se vazio."""
+        """Computa n e %D9-D10 pra um bucket. None se vazio."""
         if n <= 0:
             return None
         n_d9_d10 = int(distribution.get('D09', 0) or 0) + int(distribution.get('D10', 0) or 0)
-        pct_d9_d10 = n_d9_d10 / n * 100
-        avg_decil = sum(
-            int(k[1:]) * int(distribution.get(k, 0) or 0) for k in keys
-        ) / n
-        return {'n': n, 'pct_d9_d10': pct_d9_d10, 'avg_decil': avg_decil}
+        return {'n': n, 'pct_d9_d10': n_d9_d10 / n * 100}
 
     def _ref_from_pct(pct: dict) -> dict | None:
-        """{D01..D10: pct} → {'pct_d9_d10': X, 'avg': Y} ou None se vazio."""
+        """{D01..D10: pct} → {'pct_d9_d10': X} ou None se vazio."""
         if not pct:
             return None
-        return {
-            'pct_d9_d10': float(pct.get('D09', 0) or 0) + float(pct.get('D10', 0) or 0),
-            'avg':        sum(int(k[1:]) * float(pct.get(k, 0) or 0) for k in keys) / 100.0,
-        }
+        return {'pct_d9_d10': float(pct.get('D09', 0) or 0) + float(pct.get('D10', 0) or 0)}
 
     # Referência única (abr_28) — todos os buckets comparam contra ela.
     ref_challenger = _ref_from_pct(baseline_challenger.get('pct') or {})
@@ -1651,14 +1639,6 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
             return '⚪'
         if delta_pp > 2: return '🟢'
         if delta_pp < -2: return '🔴'
-        return '⚪'
-
-    def _emoji_avg(delta_avg: float | None) -> str:
-        """Δ no avg decil: mais alto = bom. Limiar 0.3 (≈ 3pp num decil)."""
-        if delta_avg is None:
-            return '⚪'
-        if delta_avg > 0.3: return '🟢'
-        if delta_avg < -0.3: return '🔴'
         return '⚪'
 
     # ── Referência rolante (Fase 2): conversão ESPERADA do público vs conversão
@@ -1726,14 +1706,11 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     # relatório (nem barra, nem ref, nem Ponderada).
     rows.append('_🟢 bom · 🔴 ruim · ⚪ neutro/incerto_')
     if ref_challenger is not None:
-        rows.append(
-            f'_Ref %D9-D10/avg (abr_28): '
-            f'{ref_challenger["pct_d9_d10"]:.1f}%/{ref_challenger["avg"]:.1f}_'
-        )
+        rows.append(f'_Ref %D9-D10 (abr_28): {ref_challenger["pct_d9_d10"]:.1f}%_')
     if has_conv:
         rows.append('_ConvEsp = conversão esperada (mix de decil × conversão da janela '
                     'rolante) · Δ vs conversão realizada da referência rolante_')
-    _hdr = f'{"Bucket":<18}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}      {"Avg":>4}'
+    _hdr = f'{"Bucket":<18}  {"n":>5}   {"%D9-D10":>7}  {"Δ vs ref":>20}'
     if has_conv:
         _hdr += f'   {"ConvEsp":>7}  {"Δ vs ref rolante":>16}'
     rows.append('```')
@@ -1753,21 +1730,15 @@ def _slack_decis_window(v: dict, B: list, window_key: str):
     def _row(label: str, kpis: dict | None, ref: dict | None, ref_name: str = '',
              conv: dict | None = None) -> str:
         if kpis is None:
-            return (f'{label:<18}  {"—":>5}   {"—":>7}  {"—":>20}      {"—":>4}'
-                    + _conv_cell(None))
+            return f'{label:<18}  {"—":>5}   {"—":>7}  {"—":>20}' + _conv_cell(None)
         pct = kpis['pct_d9_d10']
-        avg = kpis['avg_decil']
         if ref is not None:
             d_pct = pct - ref['pct_d9_d10']
-            e_pct = _emoji_d9d10(d_pct)
-            delta_str = f'{e_pct} {d_pct:>+5.1f} ({ref_name} {ref["pct_d9_d10"]:.1f}%)'
-            d_avg = avg - ref['avg']
-            e_avg = _emoji_avg(d_avg)
-            avg_str = f'{avg:>4.1f} {e_avg}'
+            delta_str = (f'{_emoji_d9d10(d_pct)} {d_pct:>+5.1f} '
+                         f'({ref_name} {ref["pct_d9_d10"]:.1f}%)')
         else:
             delta_str = ''
-            avg_str = f'{avg:>4.1f}'
-        return (f'{label:<18}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str}      {avg_str}'
+        return (f'{label:<18}  {kpis["n"]:>5,}   {pct:>6.1f}%  {delta_str:<20}'
                 + _conv_cell(conv))
 
     # Bloco por fonte (Slack block 1) — todos na régua única abr_28. `ref_challenger`

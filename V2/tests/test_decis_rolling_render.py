@@ -58,6 +58,20 @@ def test_frozen_igual_a_hoje():
     assert 'ConvEsp' not in txt                       # sem coluna nova
 
 
+def test_sem_coluna_avg_em_nenhum_modo():
+    """A coluna `Avg` (decil médio por bucket) saiu do painel em 02/08/2026.
+
+    Ela repetia o sinal do %D9-D10 numa segunda escala, com emoji próprio. O
+    decil médio da população segue vivo no `Score geral`, no topo do painel.
+    """
+    for rr in (None, _RR):
+        blocks = []
+        _slack_decis_window(_view(rr), blocks, 'current_launch')
+        txt = _text(blocks)
+        assert 'Avg' not in txt, txt          # cabeçalho da coluna
+        assert '%D9-D10/avg' not in txt       # nota da referência no topo
+
+
 def test_rolling_adiciona_convesp():
     blocks = []
     _slack_decis_window(_view(_RR), blocks, 'current_launch')
