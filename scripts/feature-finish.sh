@@ -13,7 +13,7 @@ if [ "$branch" = "main" ]; then
   exit 1
 fi
 
-echo "→ push origin $branch…"
+echo "→ push origin ${branch}…"
 git -C "$wt" push -u origin "$branch"
 
 echo "→ abrindo PR contra main…"

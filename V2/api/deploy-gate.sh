@@ -7,7 +7,7 @@
 #   A. LOCK/FILA        — um deploy por vez (lock distribuído no GCS; cross-máquina/sessão).
 #   B. FRESCOR = TOPO   — só deploya se HEAD == origin/main (o TOPO), não só ancestral.
 #   C. MONOTONICIDADE   — recusa subir/promover um SHA que está ATRÁS do que já está vivo.
-#   D. LOCKSTEP         — ao promover o api, alinha o monitoring à MESMA imagem (fim do drift).
+#   D. LOCKSTEP         - ao promover o api, alinha TODOS os espelhos (monitoring + webhook) à MESMA imagem.
 #   E. LEDGER + VERIFY  — registra todo deploy (durável, compartilhado) e confere pós-promote.
 #
 # NUNCA toca produção em `status` nem em `--dry-run`. NUNCA remove allUsers/main.
@@ -15,7 +15,7 @@
 # Uso:
 #   deploy-gate.sh status                          # visão única: SHA vivo/serviço, relação c/ main, drift, lock, ledger
 #   deploy-gate.sh deploy [--dry-run] [--yes]      # trava+frescor+monotonicidade -> deploy_capi (canary api) -> ledger
-#   deploy-gate.sh promote --revision R [--to N] [--no-sync] [--dry-run]   # promove api + LOCKSTEP do monitoring + verifica
+#   deploy-gate.sh promote --revision R [--to N] [--no-sync] [--dry-run]   # promove api + LOCKSTEP de TODOS os espelhos + verifica
 #   deploy-gate.sh sync-monitoring [--dry-run]     # cria revisão do monitoring na imagem viva do api, ROTEIA tráfego, Ready, rollback
 #   deploy-gate.sh unlock                          # quebra lock preso (confirmação)
 # Overrides (uso consciente): --allow-behind (canary fora do topo)  --rollback (promover atrás do vivo)  --no-sync (não alinhar monitoring)
@@ -24,6 +24,13 @@ set -uo pipefail
 REPO="/Users/ramonmoreira/Desktop/bring_data"
 PROJECT="smart-ads-451319"; REGION="us-central1"
 API_SVC="smart-ads-api"; MON_SVC="smart-ads-monitoring"
+# Serviços que rodam a MESMA imagem do scorer e precisam andar junto com ele.
+# ESTA LISTA TEM QUE CASAR com a do `lib/sync_espelhos_cron.sh`. Em 06/08/2026 elas
+# divergiram: o cron do dia já conhecia o `smart-ads-webhook` (PR #153) e o gate NÃO,
+# então `promote` alinhava só o monitoring e deixava o webhook num commit anterior até
+# o cron do dia seguinte passar. Janela de horas com o serviço PÚBLICO que atende a
+# Hotmart rodando código diferente do resto. Serviço novo que espelhe a imagem entra AQUI.
+ESPELHOS="${ESPELHOS:-$MON_SVC smart-ads-webhook}"
 DEPLOY_CAPI="$REPO/V2/api/deploy_capi.sh"
 GS_BASE="gs://smart-ads-mlflow/deploy-gate"; LOCK_OBJ="$GS_BASE/lock.json"; LOCK_TTL_MIN=45
 
@@ -87,11 +94,15 @@ lock_release(){ gcloud storage rm "$LOCK_OBJ" --project="$PROJECT" >/dev/null 2>
 # ───────── comandos ─────────
 cmd_status(){ git -C "$REPO" fetch origin main --quiet 2>/dev/null || warn "git fetch falhou"
   echo "==== deploy-status ====  (origin/main topo = $(git -C "$REPO" rev-parse --short origin/main 2>/dev/null))"
-  local imgs=()
-  for s in "$API_SVC" "$MON_SVC"; do local rev sha img; rev=$(live_revision "$s"); sha=$(rev_field "$rev" sha); img=$(rev_field "$rev" image); imgs+=("$img")
-    echo "- $s"; echo "    revisão : ${rev:-?}"; echo "    SHA     : ${sha:-?}   [$(rel_to_main "$sha")]"; echo "    imagem  : ${img##*/}"; done
-  [ "${imgs[0]}" = "${imgs[1]}" ] && echo "- drift : nenhum (api e monitoring na mesma imagem)" \
-    || echo "- ${c_yel}DRIFT${c_off}: monitoring != imagem do api  ->  rode: deploy-gate.sh sync-monitoring"
+  # Percorre o scorer E TODOS os espelhos. Antes olhava só api+monitoring, então o
+  # `smart-ads-webhook` podia estar numa imagem antiga e o status dizia "drift: nenhum".
+  local img_api="" divergentes=""
+  for s in "$API_SVC" $ESPELHOS; do local rev sha img; rev=$(live_revision "$s"); sha=$(rev_field "$rev" sha); img=$(rev_field "$rev" image)
+    echo "- $s"; echo "    revisão : ${rev:-?}"; echo "    SHA     : ${sha:-?}   [$(rel_to_main "$sha")]"; echo "    imagem  : ${img##*/}"
+    if [ "$s" = "$API_SVC" ]; then img_api="$img"
+    elif [ "$img" != "$img_api" ]; then divergentes="$divergentes $s"; fi; done
+  [ -z "$divergentes" ] && echo "- drift : nenhum (todos os espelhos na imagem do api)" \
+    || echo "- ${c_yel}DRIFT${c_off}:$divergentes != imagem do api  ->  rode: deploy-gate.sh sync-monitoring"
   local h; h=$(lock_holder); echo "- lock  : $([ -n "$h" ] && echo "EM DEPLOY: $h" || echo "livre")"
   echo "- últimos deploys (ledger):"; ledger_tail 6; }
 
@@ -126,7 +137,7 @@ cmd_promote(){ local rev="${PROMOTE_REV:-}" svc="${PROMOTE_SVC:-$API_SVC}" to="$
   local rsha live; rsha=$(rev_field "$rev" sha); live=$(rev_field "$(live_revision "$svc")" sha)
   info "promover $rev ($rsha) -> ${to}% em $svc (vivo: $live)"
   if behind_live "$rsha"; then err "REGRESSÃO: promover $rsha reverteria o vivo ($live)."; [ "${ROLLBACK:-false}" = true ] || { echo "      rollback intencional? --rollback"; exit 1; }; warn "ROLLBACK=true — seguindo."; fi
-  if [ "${DRY_RUN:-false}" = true ]; then echo "── PLANO (dry-run) ── update-traffic $svc --to-revisions=$rev=$to"; [ "$svc" = "$API_SVC" ] && [ "${NO_SYNC:-false}" != true ] && echo "  + LOCKSTEP: alinha $MON_SVC à mesma imagem depois"; return 0; fi
+  if [ "${DRY_RUN:-false}" = true ]; then echo "── PLANO (dry-run) ── update-traffic $svc --to-revisions=$rev=$to"; [ "$svc" = "$API_SVC" ] && [ "${NO_SYNC:-false}" != true ] && echo "  + LOCKSTEP: alinha [$ESPELHOS] à mesma imagem depois"; return 0; fi
   [ "${YES:-false}" = true ] || { read -r -p "Promover $rev a ${to}% em $svc? [y/N] " a; [ "$a" = y ] || { warn abortado.; exit 1; }; }
   lock_acquire || exit 1; trap lock_release EXIT
   gcloud run services update-traffic "$svc" --region="$REGION" --project="$PROJECT" --to-revisions="$rev=$to" >/dev/null 2>&1 || { err "update-traffic falhou."; ledger_write promote "$svc" "${live:-?}" "$rsha" fail update-traffic; exit 1; }
@@ -135,32 +146,41 @@ cmd_promote(){ local rev="${PROMOTE_REV:-}" svc="${PROMOTE_SVC:-$API_SVC}" to="$
   else warn "vivo=$nl != pretendido=$rsha — confira."; ledger_write promote "$svc" "${live:-?}" "$rsha" warn verify-mismatch; fi
   # LOCKSTEP: promoveu o api a 100% → alinha o monitoring à MESMA imagem (não-fatal; api já está de pé).
   if [ "$svc" = "$API_SVC" ] && [ "$to" = 100 ] && [ "$nl" = "$rsha" ] && [ "${NO_SYNC:-false}" != true ]; then
-    info "lockstep: alinhando $MON_SVC à imagem promovida ($rsha)…"
-    ( _GATE_LOCKED=1; YES=true; cmd_sync_monitoring ) || warn "lockstep do monitoring falhou — api OK; rode 'deploy-gate.sh sync-monitoring' na mão."
+    info "lockstep: alinhando os espelhos [$ESPELHOS] à imagem promovida ($rsha)…"
+    ( _GATE_LOCKED=1; YES=true; cmd_sync_monitoring ) || warn "lockstep falhou em ao menos um espelho — api OK; rode 'deploy-gate.sh sync-monitoring' na mão."
   fi; }
 
-cmd_sync_monitoring(){ local ar ai as mr mi; ar=$(live_revision "$API_SVC"); ai=$(rev_field "$ar" image); as=$(rev_field "$ar" sha); mr=$(live_revision "$MON_SVC"); mi=$(rev_field "$mr" image)
-  info "api vivo: $as ($ar)"; info "monitoring vivo: $(rev_field "$mr" sha) ($mr)"
-  [ "$ai" = "$mi" ] && { ok "já na mesma imagem — nada a fazer."; return 0; }
-  if [ "${DRY_RUN:-false}" = true ]; then echo "── PLANO (dry-run) ── $MON_SVC -> imagem viva do api ($as): cria revisão, ROTEIA tráfego 100%, verifica Ready, rollback p/ $mr se falhar"; return 0; fi
-  [ "${YES:-false}" = true ] || { read -r -p "Alinhar $MON_SVC à imagem do api ($as)? [y/N] " a; [ "$a" = y ] || { warn abortado.; exit 1; }; }
-  # lock: pula se já sob o lock do promote (lockstep)
-  [ "${_GATE_LOCKED:-0}" = 1 ] || { lock_acquire || exit 1; trap lock_release EXIT; }
+# Alinha UM espelho à imagem viva do scorer. Devolve != 0 se falhar.
+sync_um_espelho(){ local svc="$1" ai="$2" as="$3" mr mi newrev ready
+  mr=$(live_revision "$svc"); mi=$(rev_field "$mr" image)
+  [ -n "$mr" ] || { warn "$svc: não achei revisão viva — pulo."; return 0; }
+  info "$svc vivo: $(rev_field "$mr" sha) ($mr)"
+  [ "$ai" = "$mi" ] && { ok "$svc: já na mesma imagem — nada a fazer."; return 0; }
+  if [ "${DRY_RUN:-false}" = true ]; then echo "── PLANO (dry-run) ── $svc -> imagem viva do api ($as): cria revisão, ROTEIA tráfego 100%, verifica Ready, rollback p/ $mr se falhar"; return 0; fi
   # 1) cria a revisão nova (imagem viva do api + label correta). Tráfego pinado => nasce a 0%.
-  local newrev
-  newrev=$(gcloud run services update "$MON_SVC" --region="$REGION" --project="$PROJECT" --image="$ai" --update-env-vars="DEPLOY_GIT_SHA=$as" --format='value(status.latestCreatedRevisionName)' 2>/dev/null)
-  [ -n "$newrev" ] || { err "não criei a revisão nova do $MON_SVC."; ledger_write sync "$MON_SVC" "$mi" "$as" fail update; return 1; }
-  info "revisão nova: $newrev"
+  newrev=$(gcloud run services update "$svc" --region="$REGION" --project="$PROJECT" --image="$ai" --update-env-vars="DEPLOY_GIT_SHA=$as" --format='value(status.latestCreatedRevisionName)' 2>/dev/null)
+  [ -n "$newrev" ] || { err "não criei a revisão nova do $svc."; ledger_write sync "$svc" "$mi" "$as" fail update; return 1; }
+  info "$svc: revisão nova $newrev"
   # 2) ROTEIA o tráfego (o passo que faltava: trata o tráfego pinado)
-  gcloud run services update-traffic "$MON_SVC" --region="$REGION" --project="$PROJECT" --to-revisions="$newrev=100" >/dev/null 2>&1 || { err "update-traffic falhou."; ledger_write sync "$MON_SVC" "$mi" "$as" fail route; return 1; }
+  gcloud run services update-traffic "$svc" --region="$REGION" --project="$PROJECT" --to-revisions="$newrev=100" >/dev/null 2>&1 || { err "$svc: update-traffic falhou."; ledger_write sync "$svc" "$mi" "$as" fail route; return 1; }
   # 3) verifica Ready (a imagem é a viva do api, já comprovada em prod); rollback se não subir
-  sleep 4; local ready; ready=$(rev_ready "$newrev")
-  if [ "$ready" != "True" ]; then err "revisão nova não ficou Ready ($ready) — ROLLBACK p/ $mr."
-    gcloud run services update-traffic "$MON_SVC" --region="$REGION" --project="$PROJECT" --to-revisions="$mr=100" >/dev/null 2>&1
-    ledger_write sync "$MON_SVC" "$mi" "$as" fail rollback-not-ready; return 1; fi
-  ok "$MON_SVC roteado p/ $newrev ($as), Ready."
-  ledger_write sync "$MON_SVC" "$mi" "$as" ok route+ready
-  info "rollback (se precisar): gcloud run services update-traffic $MON_SVC --region=$REGION --to-revisions=$mr=100"; }
+  sleep 4; ready=$(rev_ready "$newrev")
+  if [ "$ready" != "True" ]; then err "$svc: revisão nova não ficou Ready ($ready) — ROLLBACK p/ $mr."
+    gcloud run services update-traffic "$svc" --region="$REGION" --project="$PROJECT" --to-revisions="$mr=100" >/dev/null 2>&1
+    ledger_write sync "$svc" "$mi" "$as" fail rollback-not-ready; return 1; fi
+  ok "$svc roteado p/ $newrev ($as), Ready."
+  ledger_write sync "$svc" "$mi" "$as" ok route+ready
+  info "rollback (se precisar): gcloud run services update-traffic $svc --region=$REGION --to-revisions=$mr=100"; }
+
+cmd_sync_monitoring(){ local ar ai as falhou=0; ar=$(live_revision "$API_SVC"); ai=$(rev_field "$ar" image); as=$(rev_field "$ar" sha)
+  [ -n "$ai" ] || { err "não obtive a imagem do scorer — abortando sem tocar."; return 1; }
+  info "api vivo: $as ($ar)  espelhos: $ESPELHOS"
+  [ "${YES:-false}" = true ] || [ "${DRY_RUN:-false}" = true ] || { read -r -p "Alinhar [$ESPELHOS] à imagem do api ($as)? [y/N] " a; [ "$a" = y ] || { warn abortado.; exit 1; }; }
+  # lock: pula se já sob o lock do promote (lockstep)
+  [ "${DRY_RUN:-false}" = true ] || [ "${_GATE_LOCKED:-0}" = 1 ] || { lock_acquire || exit 1; trap lock_release EXIT; }
+  # Um espelho que falha NÃO impede os outros: melhor um alinhado do que nenhum.
+  for _svc in $ESPELHOS; do sync_um_espelho "$_svc" "$ai" "$as" || falhou=1; done
+  [ "$falhou" = 0 ] && ok "todos os espelhos alinhados." || { err "ao menos um espelho falhou."; return 1; }; }
 
 cmd_unlock(){ local h; h=$(lock_holder); [ -z "$h" ] && { info "nenhum lock ativo."; return 0; }
   warn "lock atual: $h"; read -r -p "Quebrar? (só se NENHUM deploy roda) [y/N] " a; [ "$a" = y ] && { lock_release; ok "quebrado."; } || info mantido.; }
