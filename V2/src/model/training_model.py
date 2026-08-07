@@ -869,6 +869,44 @@ def registrar_features_e_modelo_devclub(
         mlflow.log_param("period_start", data_min.strftime('%Y-%m-%d'))
         mlflow.log_param("period_end", data_max.strftime('%Y-%m-%d'))
 
+        # Censo da feature do HotLeads, quando ela está presente. Uma feature que
+        # chega ao modelo com cobertura ou balanço diferente entre treino e teste
+        # produz um ganho que não se repete em produção — e o agregado do dataset
+        # inteiro esconde isso. Só loga se as colunas existirem (a feature é opt-in,
+        # e a seleção de features pode tê-la descartado antes de chegar aqui).
+        _hl_cols = [c for c in X_train.columns if c.startswith('hotleads_hot')]
+        if _hl_cols:
+            logger.info("")
+            logger.info("=" * 78)
+            logger.info("  CENSO DA FEATURE HOTLEADS (o que de fato chegou ao modelo)")
+            logger.info(f"  colunas sobreviventes: {_hl_cols}")
+            for _nome, _X, _y in (("TREINO", X_train, y_train), ("TESTE", X_test, y_test)):
+                _n = len(_X)
+                _pos = int(_y.sum())
+                logger.info("")
+                logger.info(f"  {_nome}: {_n:,} registros · {_pos:,} positivos "
+                            f"({_pos/max(_n,1)*100:.3f}%) · {_n-_pos:,} negativos")
+                logger.info(f"    {'estado do selo':<22}{'registros':>11}{'positivos':>11}"
+                            f"{'negativos':>11}{'taxa':>9}{'lift':>7}")
+                _base = _pos / max(_n, 1)
+                for _c in _hl_cols:
+                    _m = _X[_c] == 1
+                    _cn = int(_m.sum())
+                    if _cn == 0:
+                        logger.info(f"    {_c:<22}{0:>11,}{'':>11}{'':>11}{'':>9}{'':>7}")
+                        continue
+                    _cp = int(_y[_m].sum())
+                    _tx = _cp / _cn
+                    logger.info(f"    {_c:<22}{_cn:>11,}{_cp:>11,}{_cn-_cp:>11,}"
+                                f"{_tx*100:>8.3f}%{_tx/max(_base,1e-12):>7.2f}")
+                # "com valor válido" = casou com algum estado conhecido (quente/frio).
+                # sem_selo é ausência de dado, não um valor.
+                _val = [c for c in _hl_cols if not c.endswith('sem_selo')]
+                _cob = int((_X[_val].sum(axis=1) > 0).sum()) if _val else 0
+                logger.info(f"    -> com valor VÁLIDO (quente ou frio): {_cob:,}/{_n:,} "
+                            f"({_cob/max(_n,1)*100:.1f}%)")
+            logger.info("=" * 78)
+
         # Treinar modelo Random Forest
         # Hiperparâmetros padrão (MELHOR MODELO - AUC 0.6979, Mono 77.8%)
         hyperparams = {
@@ -1124,6 +1162,60 @@ def registrar_features_e_modelo_devclub(
         taxas = analise_decis['taxa_conversao'].values
         crescimentos = sum(1 for i in range(1, len(taxas)) if taxas[i] >= taxas[i-1])
         monotonia = (crescimentos / (len(taxas) - 1)) * 100 if len(taxas) > 1 else 100.0
+
+        # ---- Métricas FATIADAS POR PERÍODO dentro do teste ----------------
+        # O top-3 agregado do teste inteiro compara modelos treinados em janelas
+        # diferentes como se fossem comparáveis, e eles não são: o teste é sempre
+        # "os últimos 20% no tempo", então cada retreino avalia num público
+        # diferente. Sem fatiar, não dá pra separar "o modelo piorou" de "a janela
+        # de avaliação ficou mais difícil".
+        try:
+            _dt_test = pd.to_datetime(
+                dataset_original.iloc[test_indices]['Data'], errors='coerce'
+            ).reset_index(drop=True)
+            _sl = pd.DataFrame({
+                'mes': _dt_test.dt.to_period('M').astype(str),
+                'p': y_prob,
+                'y': y_test.reset_index(drop=True).values,
+            }).dropna(subset=['mes'])
+            logger.info("")
+            logger.info("  MÉTRICAS POR PERÍODO DO TESTE (cada mês ranqueado isoladamente)")
+            logger.info(f"  {'mes':<10}{'leads':>9}{'compras':>9}{'taxa':>9}"
+                        f"{'top3 decis':>12}{'lift D10':>10}")
+            logger.info("  " + "-" * 60)
+            for _m, _g in _sl.groupby('mes'):
+                _n, _c = len(_g), int(_g['y'].sum())
+                if _n < 500 or _c < 10:
+                    logger.info(f"  {_m:<10}{_n:>9,}{_c:>9,}{'(pouco dado)':>30}")
+                    continue
+                _d = pd.qcut(_g['p'], 10, labels=False, duplicates='drop')
+                _porc = _g.groupby(_d)['y'].sum()
+                _top3 = _porc.tail(3).sum() / max(_c, 1) * 100
+                _taxa = _c / _n
+                _n10 = (_d == _d.max()).sum()
+                _liftd10 = (_porc.iloc[-1] / max(_n10, 1)) / max(_taxa, 1e-12)
+                logger.info(f"  {_m:<10}{_n:>9,}{_c:>9,}{_taxa*100:>8.3f}%"
+                            f"{_top3:>11.1f}%{_liftd10:>10.2f}")
+        except Exception as _e:
+            logger.warning(f"  [métricas por período] falhou: {_e}")
+
+        # A curva de decis só existia no metadado enviado ao MLflow. Quando o
+        # tracking está fora do ar (ou se quer comparar dois treinos rápido), a
+        # métrica agregada de monotonia diz QUE quebrou mas não ONDE — e "quebrou
+        # entre D1 e D2" é cosmético enquanto "quebrou entre D8 e D9" invalida a
+        # escada de valor enviada ao Meta. Logar a tabela custa nada e responde.
+        logger.info("")
+        logger.info("  CURVA DE DECIS (test set)")
+        logger.info(f"  {'decil':<7}{'leads':>9}{'compras':>9}{'taxa':>9}{'lift':>7}   quebra")
+        _taxa_ant = None
+        for _d, _row in analise_decis.iterrows():
+            _t = _row['taxa_conversao']
+            _quebrou = _taxa_ant is not None and _t < _taxa_ant
+            logger.info(
+                f"  {str(_d):<7}{int(_row['total_leads']):>9,}{int(_row['conversoes']):>9,}"
+                f"{_t*100:>8.2f}%{_row['lift']:>7.2f}   {'<<< QUEBRA' if _quebrou else ''}"
+            )
+            _taxa_ant = _t
 
         # Logar métricas principais
         mlflow.log_metric("auc", auc_final)

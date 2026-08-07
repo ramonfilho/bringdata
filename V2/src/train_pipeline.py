@@ -278,7 +278,8 @@ def _log_step_count(step: str, df_after, df_before=None, target_col: str = 'targ
 _MAX_ATRASO_UNIVERSO_DIAS = 7
 
 
-def _assert_universo_fresco(df_pesquisa, *, fonte: str, max_atraso_dias: int) -> None:
+def _assert_universo_fresco(df_pesquisa, *, fonte: str, max_atraso_dias: int,
+                            referencia=None) -> None:
     """Aborta o treino se o universo lido estiver PARADO NO TEMPO.
 
     POR QUE ISTO EXISTE (incidente de 21-30/07/2026)
@@ -305,9 +306,32 @@ def _assert_universo_fresco(df_pesquisa, *, fonte: str, max_atraso_dias: int) ->
             f"[universo] source={fonte!r} tem {len(df_pesquisa):,} linhas mas NENHUMA data "
             f"válida em 'Data' — universo ilegível, treino abortado.")
     mais_recente = datas.max()
-    # tz-naive dos dois lados (o jsonb grava ISO sem timezone).
-    agora = _pd.Timestamp.now(tz=mais_recente.tz) if mais_recente.tz else _pd.Timestamp.now()
+    # `referencia` é o relógio contra o qual "estar parado" é medido. Em treino normal
+    # é agora. Numa reconstrução point-in-time (as_of) o relógio é a data reconstruída:
+    # o universo daquele dia terminava naquele dia, e comparar com hoje faria a guarda
+    # abortar toda reprodução de modelo antigo — trocando um alarme de incêndio útil
+    # por um que impede investigar o incêndio passado.
+    if referencia is not None:
+        agora = _pd.Timestamp(referencia)
+        if mais_recente.tz:
+            agora = agora.tz_localize(mais_recente.tz) if agora.tz is None else agora
+    else:
+        # tz-naive dos dois lados (o jsonb grava ISO sem timezone).
+        agora = _pd.Timestamp.now(tz=mais_recente.tz) if mais_recente.tz else _pd.Timestamp.now()
     atraso = (agora - mais_recente).days
+    if atraso > max_atraso_dias and referencia is not None:
+        # Reconstrução point-in-time: o atraso é um FATO histórico daquele dia, não um
+        # defeito a corrigir agora. Abortar impediria auditar/reproduzir qualquer modelo
+        # treinado num dia em que a ingestão estava atrasada — que é justamente o caso
+        # que mais interessa investigar. Informa alto e segue.
+        logger.warning("")
+        logger.warning("  " + "!" * 72)
+        logger.warning(f"  [universo] RECONSTRUÇÃO as_of={referencia}: o universo daquele dia estava")
+        logger.warning(f"  ATRASADO {atraso} dias (lead mais recente {mais_recente.date()}, limite {max_atraso_dias}).")
+        logger.warning("  Não é erro desta execução: é o estado real da fonte na data reconstruída.")
+        logger.warning("  Qualquer modelo treinado naquele dia herdou este atraso.")
+        logger.warning("  " + "!" * 72)
+        return
     if atraso > max_atraso_dias:
         raise AssertionError(
             f"[universo] source={fonte!r} PARADO: lead mais recente em "
@@ -376,7 +400,7 @@ def _assert_retraining_decisions_resolved(config_path: str, set_active: bool) ->
     logger.info(f"  [set-active gate] retraining_decisions OK: {decisions}")
 
 
-def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, control_boost=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False, leads_source='files', use_feature_selection=False, model_card=False, nota_criativo=False):
+def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, control_boost=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False, leads_source='files', use_feature_selection=False, model_card=False, nota_criativo=False, use_hotleads_feature=False, as_of=None):
     # Guard: Cloud SQL MLflow precisa estar RUNNABLE. Falha alto se NEVER.
     assert_mlflow_backend_running()
     register_mlflow_cleanup_reminder()
@@ -702,7 +726,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
                 f"Recebi tmb_risk_filter={tmb_risk_filter!r}."
             )
         from src.data.sales_reader import read_sales
-        _db = read_sales(gateways=sales_gateways)
+        _db = read_sales(gateways=sales_gateways, as_of=as_of)
         df_vendas = pd.DataFrame({
             'email':          _db['email'],
             'telefone':       _db['telefone'],
@@ -736,7 +760,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         # 21/07/2026 só este lado migrou pro nome novo: a ingestão diária seguiu enchendo o
         # nome velho e o treino ficou 9 dias parado em 342.264 leads sem nada falhar.
         _fonte_treino = client_config.ingestion.leads_unified_source
-        df_pesquisa = read_pesquisa(source=_fonte_treino, include_utm=use_control_weights)
+        df_pesquisa = read_pesquisa(source=_fonte_treino, include_utm=use_control_weights, as_of=as_of)
         # 'Data' vem como ISO no jsonb (inequívoco) → parsear SEM dayfirst. Com
         # dayfirst=True (o default da validação) o pandas infere formato errado na
         # precisão mista (Sheets tem hora) e coage a maioria a NaT.
@@ -745,7 +769,7 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         assert len(df_pesquisa) > 0, "[leads_source=db] analytics.leads retornou 0 linhas de pesquisa"
         logger.info(f"  [leads_source=db] {len(df_pesquisa):,} linhas de pesquisa do analytics.leads "
                     f"(source={_fonte_treino}) — substitui arquivos/Sheets")
-        _assert_universo_fresco(df_pesquisa, fonte=_fonte_treino,
+        _assert_universo_fresco(df_pesquisa, fonte=_fonte_treino, referencia=as_of,
                                 max_atraso_dias=_MAX_ATRASO_UNIVERSO_DIAS)
 
     # === VALIDAÇÃO DE INGESTÃO (pós-Célula 4) ===
@@ -1096,6 +1120,50 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         logger.info(f"  Data range: {_date_min} → {_date_max}")
         logger.info("=" * 70)
         return {'export_path': _export_path, 'shape': _df_export.shape}
+
+    # === Feature opcional: selo do HotLeads ===
+    # `hotleads_hot` = "esta pessoa já comprou algum produto na Hotmart" (rótulo
+    # externo da Hotmart, de qualquer produtor). Entra AQUI porque é o último ponto
+    # em que a coluna de e-mail ainda existe — o feature engineering derruba
+    # 'E-mail' logo em seguida (feature.columns_to_drop_after_fe).
+    #
+    # Opt-in: sem a flag, o treino de produção segue byte a byte o que era antes.
+    if use_hotleads_feature:
+        from src.data.hotleads_seal_reader import read_hotleads_seals
+        _selos = read_hotleads_seals()
+        _email_col = client_config.feature.pesquisa_email_column
+        if _email_col not in dataset_v1_devclub.columns:
+            raise RuntimeError(
+                f"[hotleads] coluna de e-mail '{_email_col}' ausente no dataset matcheado — "
+                "sem chave de junção não dá pra colar o selo."
+            )
+        _emails_norm = dataset_v1_devclub[_email_col].astype('string').str.strip().str.lower()
+        dataset_v1_devclub['hotleads_hot'] = _emails_norm.map(_selos)
+        _n = len(dataset_v1_devclub)
+        _cob = int(dataset_v1_devclub['hotleads_hot'].notna().sum())
+        _quentes = int((dataset_v1_devclub['hotleads_hot'] == True).sum())  # noqa: E712
+        logger.info("")
+        logger.info("=" * 70)
+        logger.info("  FEATURE HOTLEADS ativada")
+        logger.info(f"  cobertura: {_cob:,}/{_n:,} leads ({_cob/max(_n,1)*100:.1f}%)")
+        logger.info(f"  quentes:   {_quentes:,} ({_quentes/max(_cob,1)*100:.1f}% dos cobertos)")
+        logger.info("=" * 70)
+        # Fail-loud (CLAUDE.md): cobertura baixa = join errado (formato de e-mail,
+        # universo de treino diferente do enriquecido). Treinar assim mede ruído.
+        if _cob / max(_n, 1) < 0.70:
+            raise RuntimeError(
+                f"[hotleads] cobertura de apenas {_cob/max(_n,1)*100:.1f}% — esperado ~95%. "
+                "Provável divergência de normalização de e-mail entre o dataset de treino "
+                "e analytics.hotleads_seal. Abortando."
+            )
+        # Categórica de 3 estados de propósito: quente / frio / sem selo. Deixar
+        # como booleano com NaN faria o encoder tratar o ausente como frio, o que
+        # é uma afirmação que o dado não sustenta (~5% nunca foram enriquecidos).
+        dataset_v1_devclub['hotleads_hot'] = (
+            dataset_v1_devclub['hotleads_hot']
+            .map({True: 'quente', False: 'frio'})
+            .fillna('sem_selo')
+        )
 
     # T2-3: calcular control_weights AQUI (antes do FE/encoding), enquanto a coluna técnica
     # '__campaign_for_weights__' ainda existe. Pesos são calculados com a distribuição do
@@ -1795,6 +1863,14 @@ if __name__ == "__main__":
              "como snapshot jsonb verbatim, depois encerra (não treina)."
     )
     parser.add_argument(
+        '--hotleads-feature',
+        action='store_true',
+        default=False,
+        help='Inclui o selo do HotLeads ("ja comprou algum produto na Hotmart") como '
+             'feature do modelo. Opt-in: sem a flag o treino e identico ao de producao. '
+             'Falha alto se o selo nao vier ou a cobertura do join for < 70%%.'
+    )
+    parser.add_argument(
         '--leads-source',
         type=str,
         choices=['files', 'db'],
@@ -1843,6 +1919,7 @@ if __name__ == "__main__":
         use_feature_selection=args.feature_selection,
         exclude_features=[p.strip() for p in args.exclude_features.split(',')] if args.exclude_features else None,
         export_matched_dataset=args.export_matched_dataset,
+        use_hotleads_feature=args.hotleads_feature,
         sales_source=args.sales_source,
         sales_gateways=args.sales_gateways,
         dump_pesquisa_db=args.dump_pesquisa_db,
