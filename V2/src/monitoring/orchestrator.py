@@ -383,7 +383,13 @@ class MonitoringOrchestrator:
                         _has_routing = bool(_utm) or bool(_url)
                         _route_desc = []
                         if _utm:
-                            _route_desc.append(', '.join(f"{k}={v}" for k, v in _utm.items()))
+                            # valor pode ser string (forma antiga) ou lista de substrings
+                            # (um modelo servindo campanhas de gerações diferentes) — o log
+                            # do operador mostra "campo=a|b", não o repr da lista Python.
+                            _route_desc.append(', '.join(
+                                f"{k}={'|'.join(v) if isinstance(v, list) else v}"
+                                for k, v in _utm.items()
+                            ))
                         if _url:
                             _route_desc.append(f"url~{_url}")
                         _variants.append({
