@@ -60,6 +60,43 @@ def test_sinal_por_breakeven():
     assert abs(rows[1]['teto_cpl'] - 9.24) < 0.05
 
 
+def test_casa_por_campaign_id_quando_nome_diverge():
+    """O caso real que estava zerando o breakeven: o `utm_campaign` do lead traz o
+    id grudado no fim e o nome do Meta tem uma tag extra do A/B, então NENHUM nome
+    casa — mas o `campaign_id` casa. Também confere a folga (teto − CPL)."""
+    def _fake_spend_id(s, e, client_id='devclub'):
+        return pd.DataFrame([
+            {'platform': 'meta', 'account_id': 'x', 'campaign_id': '120245448615560390',
+             'campaign_name': 'DEVLF | CAP | FRIO | FASE 04 | ... | 2026-06-18 | jul24_top30',
+             'spend_date': s, 'spend': 1000.0, 'leads': 100, 'impressions': 0, 'clicks': 0},
+        ])
+    _o1, _o2 = rr.read_rolling_reference, ads.read_ad_spend
+    rr.read_rolling_reference = lambda cid: _REF
+    ads.read_ad_spend = _fake_spend_id
+    os.environ['REFERENCE_SOURCE'] = 'rolling'
+    try:
+        rows = [{'utm': 'DEVLF | CAP | FRIO | FASE 04 | ... | 2026-06-18|120245448615560390',
+                 'pct_d9_d10': 80.0}]
+        enrich_campaign_budget(rows, win_start=date(2026, 7, 21), win_end=date(2026, 7, 29))
+    finally:
+        rr.read_rolling_reference, ads.read_ad_spend = _o1, _o2
+        os.environ.pop('REFERENCE_SOURCE', None)
+    # casou por id (nome não bateria): cpl=10 ; teto=27,72 ; folga=17,72 ; aumentar
+    assert rows[0]['cpl'] == 10.0 and rows[0]['budget_signal'] == 'aumentar'
+    assert abs(rows[0]['teto_cpl'] - 27.72) < 0.05
+    assert abs(rows[0]['folga'] - 17.72) < 0.05
+
+
+def test_folga_negativa_e_render():
+    """Folga negativa quando o CPL passa do teto, e ela aparece no sufixo do render."""
+    from src.monitoring.utm_quality import _budget_suffix
+    e = {'cpl': 30.0, 'teto_cpl': 15.0, 'folga': -15.0}
+    suf = _budget_suffix(e)
+    assert 'folga -R$ 15,00' in suf and 'CPL R$ 30,00' in suf and 'teto R$ 15,00' in suf
+    # folga positiva
+    assert 'folga +R$ 5,00' in _budget_suffix({'cpl': 10.0, 'teto_cpl': 15.0, 'folga': 5.0})
+
+
 def test_frozen_noop():
     os.environ.pop('REFERENCE_SOURCE', None)   # frozen
     rows = [{'utm': 'CAMP A', 'pct_d9_d10': 80.0}]
@@ -87,7 +124,8 @@ def test_breakeven_e_o_definidor_no_render():
 
 
 if __name__ == "__main__":
-    for fn in (test_sinal_por_breakeven, test_frozen_noop,
+    for fn in (test_sinal_por_breakeven, test_casa_por_campaign_id_quando_nome_diverge,
+               test_folga_negativa_e_render, test_frozen_noop,
                test_breakeven_e_o_definidor_no_render):
         fn()
         print(f"ok: {fn.__name__}")
