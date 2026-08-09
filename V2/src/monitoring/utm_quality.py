@@ -405,9 +405,24 @@ def _load_top5_baseline(client_id: str = 'devclub') -> Optional[dict]:
 
 
 def _norm_campaign(s) -> str:
-    """Chave de casamento utm_campaign ↔ ad_spend.campaign_name (Meta usa o mesmo
-    nome nos dois; normaliza espaço/caixa pra tolerar diferença cosmética)."""
+    """Chave de casamento POR NOME (fallback): normaliza espaço/caixa. Só resolve
+    diferença cosmética — NÃO cobre o caso comum de o `utm_campaign` do lead trazer
+    o id grudado no fim (`...|<id>`) ou o nome do Meta ter uma tag extra
+    (`... | jul24_top30`). Pra esses, o casamento certo é por `campaign_id`
+    (ver `_campaign_id_from_utm`); o nome é só o último recurso."""
     return ' '.join(str(s or '').split()).casefold()
+
+
+def _campaign_id_from_utm(s) -> Optional[str]:
+    """Extrai o `campaign_id` do Meta grudado no fim do `utm_campaign`, quando existe.
+
+    O tráfego cola o id da campanha no último segmento do UTM, sem espaço
+    (`DEVLF | CAP | ... | 2026-06-04|120245448615560390`). O id é o último pedaço
+    ao quebrar por `|`, formado só por dígitos e longo (ids do Meta têm ~15+).
+    Devolve `None` quando o UTM termina em texto/data (ex.: `... | 2026-06-04`),
+    caso em que o casamento cai no fallback por nome."""
+    last = str(s or '').split('|')[-1].strip()
+    return last if last.isdigit() and len(last) >= 10 else None
 
 
 def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclub'):
@@ -449,15 +464,27 @@ def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclu
     _ed = win_end.date() if hasattr(win_end, 'date') else win_end
     from datetime import timedelta as _td
     spend_df = read_ad_spend(_sd, _ed + _td(days=1), client_id=client_id)   # end exclusivo → +1 dia
-    spend_by = {}
+    # Dois índices de gasto: por campaign_id (casamento estável — o Meta usa o mesmo
+    # id no ledger e no ad_spend) e por nome normalizado (fallback pros leads cujo
+    # UTM não trouxe o id). O id é a chave primária porque o NOME diverge entre os
+    # dois lados (id grudado no UTM do lead vs tag do A/B no nome do Meta).
+    spend_by_id, spend_by_name = {}, {}
     if not spend_df.empty:
-        g = spend_df.groupby(spend_df['campaign_name'].map(_norm_campaign)).agg(
+        gi = spend_df.groupby(spend_df['campaign_id'].astype(str)).agg(
             spend=('spend', 'sum'), leads=('leads', 'sum'))
-        spend_by = {k: (float(r['spend']), int(r['leads'])) for k, r in g.iterrows()}
+        spend_by_id = {k: (float(r['spend']), int(r['leads'])) for k, r in gi.iterrows()}
+        gn = spend_df.groupby(spend_df['campaign_name'].map(_norm_campaign)).agg(
+            spend=('spend', 'sum'), leads=('leads', 'sum'))
+        spend_by_name = {k: (float(r['spend']), int(r['leads'])) for k, r in gn.iterrows()}
 
-    _matched = 0
+    _matched = _matched_by_id = 0
     for e in rows:
-        sp = spend_by.get(_norm_campaign(e.get('utm')))
+        cid = _campaign_id_from_utm(e.get('utm'))
+        sp = spend_by_id.get(cid) if cid else None
+        if sp is not None:
+            _matched_by_id += 1
+        else:
+            sp = spend_by_name.get(_norm_campaign(e.get('utm')))
         p = e.get('pct_d9_d10')
         if not sp or p is None:
             continue
@@ -469,9 +496,13 @@ def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclu
         teto = teto_cpl(exp_conv, vps, roas_alvo=1.0)
         e['cpl'] = round(cpl, 2)
         e['teto_cpl'] = round(teto, 2) if teto is not None else None
+        # Folga = teto − CPL: quanto o CPL ainda pode subir sem passar do breakeven
+        # (positiva = espaço p/ aumentar; negativa = já queima dinheiro). É o "delta".
+        e['folga'] = round(teto - cpl, 2) if teto is not None else None
         e['budget_signal'] = ('aumentar' if teto is not None and cpl <= teto else 'reduzir') if teto is not None else None
         _matched += 1
-    logger.info("[top5] budget breakeven: %d/%d campanhas casaram gasto", _matched, len(rows))
+    logger.info("[top5] budget breakeven: %d/%d campanhas casaram gasto (%d por campaign_id)",
+                _matched, len(rows), _matched_by_id)
     return rows
 
 
@@ -801,12 +832,17 @@ def _render_unified_top5(top5: dict, lf_label: str, lf_state: str, nlf: int) -> 
 
 
 def _budget_suffix(e: dict) -> str:
-    """' · CPL R$X / teto R$Y' pras campanhas com breakeven (Fase 3b). Vazio quando
-    não há sinal econômico (criativo, ou campanha sem gasto casado / frozen)."""
+    """' · CPL R$X / teto R$Y / folga R$Z' pras campanhas com breakeven (Fase 3b).
+    A folga (teto − CPL) é o delta: positiva = espaço p/ subir orçamento, negativa =
+    já passou do breakeven. Vazio quando não há sinal econômico (criativo, ou
+    campanha sem gasto casado / frozen)."""
     cpl, teto = e.get('cpl'), e.get('teto_cpl')
     if cpl is None or teto is None:
         return ''
-    return (f"  · CPL R$ {cpl:.2f} / teto R$ {teto:.2f}").replace('.', ',')
+    folga = e.get('folga')
+    folga = (teto - cpl) if folga is None else folga
+    sinal = '+' if folga >= 0 else '-'
+    return (f"  · CPL R$ {cpl:.2f} / teto R$ {teto:.2f} / folga {sinal}R$ {abs(folga):.2f}").replace('.', ',')
 
 
 def _twoline_entry(name: str, marker: str, ontem: Optional[dict], lf: Optional[dict],
