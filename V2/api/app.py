@@ -3599,7 +3599,9 @@ async def daily_monitoring_check_railway(
                         for _r in _rows_24h_v:
                             _cn = (_r.get('campaign_name') or '').lower()
                             _sp = float(_r.get('spend', 0) or 0)
-                            if _challenger_pat.lower() in _cn:
+                            # utm_pattern carrega LISTA de substrings por campo (um modelo pode
+                            # servir campanhas de gerações diferentes) — basta uma casar.
+                            if any(_p.lower() in _cn for _p in _challenger_pat):
                                 _spend_v[_challenger_name] += _sp
                             else:
                                 _spend_v[_champion_name] += _sp

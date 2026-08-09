@@ -34,6 +34,50 @@ _VALID_DECILS = {f"D{i:02d}" for i in range(1, 11)}
 _MAX_EXTRA_HQ_DESTINATIONS = 8
 
 
+def _normalize_utm_pattern(raw: Any, *, variant_name: str) -> Dict[str, List[str]]:
+    """Normaliza `utm_pattern` do YAML para {campo: [substrings]}, fail-loud.
+
+    Aceita as duas formas, porque as duas descrevem a mesma intenção:
+        utm_campaign: "LEADHQLB"                      -> {"utm_campaign": ["LEADHQLB"]}
+        utm_campaign: ["LEADHQLB", "ABR_28_TOP30"]    -> as duas substrings
+
+    A lista existe porque um modelo pode servir campanhas de gerações diferentes ao mesmo
+    tempo: em 09/08/2026 o gestor subiu campanhas novas etiquetadas ABR_28_TOP30 /
+    JUL_24_TOP30 enquanto as antigas (LEADHQLB / JUL24_*) seguiam gastando. Com uma
+    substring só, ligar a geração nova desligaria a antiga no mesmo commit — e os leads
+    dela cairiam calados no fallback (eventos padrão, pixel errado).
+
+    Fail-loud em vez de ignorar entrada torta: `utm_pattern` é o que decide QUAL modelo
+    scoreia o lead e QUAL evento a Meta recebe. Padrão vazio/None aqui não é "sem filtro",
+    é "esta variante nunca casa" — silencioso e caro.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"variante '{variant_name}': utm_pattern deve ser dict "
+            f"{{campo_utm: substring|lista}}, recebido {type(raw).__name__}"
+        )
+    out: Dict[str, List[str]] = {}
+    for field_name, value in raw.items():
+        patterns = value if isinstance(value, list) else [value]
+        if not patterns:
+            raise ValueError(
+                f"variante '{variant_name}': utm_pattern['{field_name}'] é lista vazia — "
+                f"remova o campo ou declare ao menos uma substring"
+            )
+        limpos: List[str] = []
+        for p in patterns:
+            if not isinstance(p, str) or not p.strip():
+                raise ValueError(
+                    f"variante '{variant_name}': utm_pattern['{field_name}'] tem entrada "
+                    f"inválida {p!r} — só string não-vazia"
+                )
+            limpos.append(p)
+        out[field_name] = limpos
+    return out
+
+
 def _parse_extra_hq_destinations(
     raw: Any, field_label: str = "capi.extra_hq_destinations"
 ) -> Optional[List["ExtraHQDestination"]]:
@@ -617,7 +661,14 @@ class RoasV1Config:
 class ABTestVariantConfig:
     """Configuração de uma variante do teste A/B (champion ou challenger)."""
     run_id: str
-    utm_pattern: Dict[str, str]          # OR logic: basta 1 campo casar
+    utm_pattern: Dict[str, List[str]]    # {campo UTM: [substrings]} — OR total: basta 1
+                                         # substring de 1 campo casar. O YAML aceita string
+                                         # solta (forma antiga) ou lista; `from_active_model_yaml`
+                                         # normaliza tudo para lista. Lista existe porque o
+                                         # MESMO modelo serve campanhas de gerações diferentes
+                                         # ao mesmo tempo (ex.: abr_28 servindo as antigas
+                                         # LEADHQLB e as novas ABR_28_TOP30) — sem ela, ligar a
+                                         # geração nova desliga a antiga no mesmo instante.
     capi_event_name: str
     capi_event_name_high_quality: str
     conversion_rates: Dict[str, float]   # D01–D10, com PAV aplicado se necessário
@@ -725,7 +776,7 @@ class ABTestConfig:
 
             variants[name] = ABTestVariantConfig(
                 run_id=vdata["run_id"],
-                utm_pattern=vdata.get("utm_pattern") or {},
+                utm_pattern=_normalize_utm_pattern(vdata.get("utm_pattern"), variant_name=name),
                 capi_event_name=vdata["capi_event_name"],
                 capi_event_name_high_quality=vdata["capi_event_name_high_quality"],
                 conversion_rates=vdata["conversion_rates"],
@@ -756,13 +807,18 @@ class ABTestConfig:
                    utm_content, utm_term (valores podem ser None).
         event_source_url: URL da página de origem (opcional). Se a variante
                    tiver url_pattern definido, faz substring match case-insensitive.
+
+        Cada campo do utm_pattern carrega uma LISTA de substrings e basta UMA casar
+        (mesma lógica OR que já valia entre campos) — é o que permite a um modelo servir
+        campanhas de gerações diferentes ao mesmo tempo sem que ligar a nova desligue a
+        antiga. Ver `_normalize_utm_pattern`.
         """
         url = (event_source_url or "").lower()
         for variant in self.variants.values():
             if variant.utm_pattern:
-                for field_name, pattern in variant.utm_pattern.items():
-                    value = lead_utms.get(field_name) or ""
-                    if pattern.lower() in value.lower():
+                for field_name, patterns in variant.utm_pattern.items():
+                    value = (lead_utms.get(field_name) or "").lower()
+                    if any(p.lower() in value for p in patterns):
                         return variant
             if variant.url_pattern and url and variant.url_pattern.lower() in url:
                 return variant
