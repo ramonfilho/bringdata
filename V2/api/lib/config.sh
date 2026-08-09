@@ -282,6 +282,14 @@ build_env_vars() {
     ENV_VARS="$ENV_VARS,UTM_QUALITY_TRAFEGO_CHANNEL=${UTM_QUALITY_TRAFEGO_CHANNEL:-C09VD6J8A72}"
     ENV_VARS="$ENV_VARS,SLACK_VALIDATION_DM_CHANNEL=${SLACK_VALIDATION_DM_CHANNEL:-D0A9USV3XEX}"
 
+    # Teto do alerta de custo do Cloud Run, em reais por dia (uso bruto, antes da
+    # camada gratuita). Pinado aqui pelo mesmo motivo dos canais acima: o deploy
+    # MESCLA env vars, então um teto de teste setado numa canary vazaria pro
+    # próximo deploy se o valor de produção não fosse re-afirmado. R$ 10 fica
+    # acima do dia típico (R$ 3 a R$ 5) e abaixo do pico da virada de julho/2026
+    # (R$ 12,21). Pra mudar o teto sem deploy: --update-env-vars no serviço.
+    ENV_VARS="$ENV_VARS,CLOUD_RUN_COST_ALERT_BRL=${CLOUD_RUN_COST_ALERT_BRL:-10}"
+
     # Propaga credenciais de API do serviço 24/7 (fonte de verdade) pros jobs:
     # META_ACCESS_TOKEN (Meta Insights, gasto Meta) + GOOGLE_ADS_* OAuth (reporting de
     # gasto do etl_ad_spend, MESMO caminho do funil Google do digest). O
