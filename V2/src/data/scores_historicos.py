@@ -279,16 +279,20 @@ def challenger_quality_by_utm(
             # Fase 3: decil + UTM na MESMA tabela (`registros_ml`) — sem join.
             # decil é INT → IN (9,10) / AVG direto. pin_lf não filtra `lf` (o
             # ledger não tem; a janela [ws,we) escopa). Dedup por email (1 evento).
+            # Ruler ÚNICO (mesmo COALESCE do painel de decis): reconstrói o decil da
+            # régua (run_id alvo) de QUALQUER das 2 colunas, pra não subcontar leads
+            # após uma promoção de modelo (o decil do run_id alvo migra de coluna).
+            ruler = _decil_ruler_sql()
             sql = (
                 "SELECT t.utm, COUNT(*) AS n, "
                 "AVG(CASE WHEN t.decil IN (9,10) THEN 1.0 ELSE 0.0 END) AS pct, "
                 "AVG(t.decil) AS avg_decil "
                 "FROM ( SELECT DISTINCT ON (lower(email)) "
-                f"         {col} AS utm, decil_challenger AS decil "
+                f"         {col} AS utm, {ruler} AS decil "
                 "       FROM registros_ml "
                 f"       WHERE {col} IS NOT NULL AND {col} <> '' "
                 "         AND created_at >= :ws AND created_at < :we "
-                "         AND challenger_run_id = :run_id AND decil_challenger IS NOT NULL "
+                f"         AND ({ruler}) IS NOT NULL "
                 "       ORDER BY lower(email), created_at DESC ) t "
                 "GROUP BY t.utm ORDER BY n DESC"
             )
@@ -417,6 +421,22 @@ def _lf_window_utc(lf_name):
     return ws.strftime("%Y-%m-%d %H:%M:%S"), we.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _decil_ruler_sql() -> str:
+    """SQL que reconstrói o decil da RÉGUA (run_id alvo em `:run_id`) de QUALQUER das
+    duas colunas do ledger: o MESMO modelo é gravado em `decil_champion` quando é o
+    pega-tudo (champion_run_id) OU em `decil_challenger` quando é braço de teste
+    (challenger_run_id). Fonte única reusada pelo painel de decis
+    (`challenger_decils_in_window`) E pelo relatório de criativo
+    (`challenger_quality_by_utm`) pra nenhum dos dois subcontar leads após uma
+    promoção de modelo (bug do A/B jul_24, 26/07). Devolve o decil INT; o caller
+    formata 'D0x' se precisar do contrato antigo."""
+    return (
+        "COALESCE("
+        "CASE WHEN champion_run_id = :run_id THEN decil_champion END, "
+        "CASE WHEN challenger_run_id = :run_id THEN decil_challenger END)"
+    )
+
+
 def challenger_decils_in_window(
     *,
     challenger_run_id: str,
@@ -485,11 +505,7 @@ def challenger_decils_in_window(
             # 28/07. O COALESCE acha o decil do run_id alvo onde quer que ele
             # esteja → cobertura 100%, número estável independente de A/B.
             # decil_* é INT; formata 'D0x' pra manter o contrato dos consumidores.
-            ruler = (
-                "COALESCE("
-                "CASE WHEN champion_run_id = :run_id THEN decil_champion END, "
-                "CASE WHEN challenger_run_id = :run_id THEN decil_challenger END)"
-            )
+            ruler = _decil_ruler_sql()
             sql = (
                 "SELECT DISTINCT ON (lower(email)) "
                 "       lower(utm_source) AS src, utm_campaign AS campaign, "

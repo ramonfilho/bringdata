@@ -4571,12 +4571,14 @@ def _build_top5_for(result, client_id: str):
     lf_name = result.window_lf.get('label')
     lf_s = result.window_lf.get('start')
     lf_e = result.window_lf.get('end')
-    if not (lf_name and lf_s and lf_e and result.challenger_run_id):
+    if not (lf_name and lf_s and lf_e and result.champion_run_id):
         return None
     try:
         return build_top5_comparison(
             lf_name=lf_name,
-            challenger_run_id=result.challenger_run_id,
+            # régua = CHAMPION (o pega-tudo), resolvido via ab_arm - casa com o
+            # baseline fixo (gerado no champion) e segue promoções sozinho.
+            challenger_run_id=result.champion_run_id,
             win_start=_dt.fromisoformat(lf_s),
             win_end=_dt.fromisoformat(lf_e),
             client_id=client_id,
@@ -4596,12 +4598,13 @@ def _build_top5_window(result, client_id: str, min_n: int = 50):
     lf_name = result.window_lf.get('label')
     w_s = result.window.get('start')
     w_e = result.window.get('end')
-    if not (lf_name and w_s and w_e and result.challenger_run_id):
+    if not (lf_name and w_s and w_e and result.champion_run_id):
         return None
     try:
         return build_top5_comparison(
             lf_name=lf_name,
-            challenger_run_id=result.challenger_run_id,
+            # régua = CHAMPION (ver _build_top5_for): casa o baseline fixo e segue promoção.
+            challenger_run_id=result.champion_run_id,
             win_start=_dt.fromisoformat(w_s),
             win_end=_dt.fromisoformat(w_e),
             client_id=client_id,

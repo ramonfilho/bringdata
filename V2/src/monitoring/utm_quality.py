@@ -195,7 +195,8 @@ class UtmQualityResult:
     challenger_name: str
     ranking: dict    # {split_mode, ranked, worst, best, total_distinct_creatives, qualifying}
     min_volume: int = 20  # N mínimo de leads na janela pra um criativo aparecer
-    challenger_run_id: Optional[str] = None  # run_id do Challenger (p/ casar a barra TOP5)
+    challenger_run_id: Optional[str] = None  # run_id do Challenger (contexto A/B)
+    champion_run_id: Optional[str] = None    # run_id do Champion = régua da barra TOP5 (segue a promoção via ab_arm)
 
 
 def compute_utm_quality(
@@ -240,12 +241,21 @@ def compute_utm_quality(
 
     _arm_cfg = load_arm_config(ab_cfg.yaml_path)
     variant_names = list(ab_cfg.variants.keys())
-    champion_name = _arm_cfg.variant_for_role('champion') or (
+    # Papel resolvido point-in-time (pela data da janela): relatório de um dia
+    # passado usa quem era champion/challenger NAQUELE dia, não hoje.
+    _as_of = end_utc.astimezone(BRT).date()
+    champion_name = _arm_cfg.variant_for_role('champion', as_of=_as_of) or (
         variant_names[0] if variant_names else 'champion')
-    challenger_name = _arm_cfg.variant_for_role('challenger') or (
+    challenger_name = _arm_cfg.variant_for_role('challenger', as_of=_as_of) or (
         variant_names[1] if len(variant_names) > 1 else 'challenger')
     _cv = ab_cfg.variants.get(challenger_name)
     challenger_run_id = getattr(_cv, 'run_id', None)
+    # Régua da barra TOP5 = o CHAMPION (o pega-tudo que scoreia a maioria dos
+    # leads), NÃO o challenger. O baseline fixo é gerado no champion; seguir o
+    # champion via ab_arm faz a barra acompanhar promoções sozinha (abr28 virou
+    # champion em 25/07 → a barra tem que casar abr28, não o challenger novo jul_24).
+    _champ_v = ab_cfg.variants.get(champion_name)
+    champion_run_id = getattr(_champ_v, 'run_id', None)
 
     win_start, win_end, anchor = start_utc, end_utc, end_utc
     _s_brt, _e_brt = start_utc.astimezone(BRT), end_utc.astimezone(BRT)
@@ -352,6 +362,7 @@ def compute_utm_quality(
         ranking=ranking,
         min_volume=min_volume,
         challenger_run_id=challenger_run_id,
+        champion_run_id=champion_run_id,
     )
 
 
@@ -503,8 +514,9 @@ def build_top5_comparison(
     if (baseline.get('run_id') and challenger_run_id
             and baseline['run_id'] != challenger_run_id):
         logger.warning(
-            '[top5] suprimido: baseline run_id %s ≠ challenger ativo %s — régua '
-            'diferente, regenerar baseline.', baseline['run_id'], challenger_run_id)
+            '[top5] suprimido: baseline run_id %s difere da régua/champion ativo %s '
+            '(régua diferente, regenerar baseline pro champion atual).',
+            baseline['run_id'], challenger_run_id)
         return None
 
     from src.data.scores_historicos import challenger_quality_by_utm, _cloudsql_conn
