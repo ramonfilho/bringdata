@@ -109,6 +109,30 @@ def test_a_consulta_deduplica_por_lead():
         'do lançamento que COMEÇA nele')
 
 
+def test_a_url_tem_as_TRES_fontes_de_prioridade():
+    """Janeiro tinha 303 URLs em 34.903 leads porque a consulta só olhava duas
+    fontes, e nenhuma das duas cobre aquele mês: `registros_ml` começa em 23/05 e
+    `lead_legado` em fevereiro.
+
+    A terceira é a repescagem de backup (`scripts/recupera_url_legado.py`). Medido em
+    09/08/2026: leva janeiro de 0,9% para 98,6% e recupera 56.481 URLs no ano.
+
+    Este teste trava as três porque cada uma cobre um pedaço do calendário que as
+    outras não cobrem — perder qualquer uma abre um buraco de meses inteiros, e é um
+    buraco silencioso: a coluna simplesmente vem nula e ninguém é avisado.
+    """
+    sql = prov.sql_fonte()
+    for fonte, papel in (('public.registros_ml', 'ledger vivo, de 23/05 em diante'),
+                         ('public.lead_legado', 'tabela Lead antiga, fev a mai'),
+                         ('analytics.url_captura_legado', 'repescagem de backup, janeiro')):
+        assert fonte in sql, f'sumiu a fonte de URL {fonte} ({papel})'
+    for prio in ('1 AS prio', ' 2,', ' 3,'):
+        assert prio in sql, f'sumiu a prioridade {prio!r} da montagem da URL'
+    assert 'ORDER BY email, prio, created_at DESC' in sql, (
+        'sumiu a ordem de prioridade: sem ela a URL escolhida vira sorteio entre as '
+        'três fontes, e a mais fraca pode ganhar da mais forte')
+
+
 def test_escopo_e_2026():
     sql = prov.sql_fonte()
     assert "'2026-01-01'" in sql and "'2027-01-01'" in sql
