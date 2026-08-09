@@ -4772,6 +4772,73 @@ async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5,
             'gate': _gate.as_dict()}
 
 
+@app.get("/monitoring/cost-alert")
+async def cost_alert(limite: Optional[float] = None,
+                     servico: str = 'Cloud Run',
+                     date: Optional[str] = None,
+                     force: bool = False):
+    """
+    Alerta de custo de infraestrutura - manda DM se o gasto de um dia estourar o teto.
+
+    É o ponto único de composição do alerta: aqui se decide o dia, o teto e o
+    destino; a leitura do faturamento e a regra ficam em
+    `src/monitoring/gcp_cost.py` e `src/monitoring/cost_alert.py`.
+
+    Chamado 1x/dia pelo Cloud Scheduler de manhã, logo depois do relatório
+    diário. Só produz mensagem quando há o que avisar:
+      - uso do dia acima do teto → DM com o ranking de quem gastou
+      - faturamento sem nenhuma linha do dia → DM de "não consegui medir"
+        (export quebrado devolveria zero, e zero passaria por dia calmo)
+      - dentro do teto → responde 200 sem postar nada
+
+    Parâmetros:
+      - `limite`: teto do dia em reais. Sem ele, vale o valor da variável de
+        ambiente `CLOUD_RUN_COST_ALERT_BRL` (hoje R$ 10) - mudar o teto não
+        exige deploy.
+      - `servico`: nome do serviço no faturamento do Google ('Cloud Run',
+        'Cloud SQL', 'BigQuery'…). Default 'Cloud Run'.
+      - `date`: dia YYYY-MM-DD no calendário de Brasília, ou os tokens
+        `ontem`/`hoje`. Sem ele, ontem - o último dia completo.
+      - `force=1`: posta mesmo estando dentro do teto, pra validar a formatação
+        da mensagem sem esperar um estouro real.
+
+    O destino é SEMPRE o DM do operador (`SLACK_USER_DM`), nunca canal de
+    cliente: é informação de infraestrutura nossa.
+    """
+    from datetime import date as _date, datetime as _dt, timedelta as _td
+    from src.monitoring.cost_alert import LIMITE_DEFAULT, dia_anterior_brt, executar
+    from src.monitoring.gcp_cost import BRT
+
+    dia: Optional[_date] = None
+    if date:
+        tok = str(date).strip().lower()
+        if tok == 'ontem':
+            dia = dia_anterior_brt()
+        elif tok == 'hoje':
+            dia = _dt.now(BRT).date()
+        else:
+            try:
+                dia = _dt.strptime(tok, '%Y-%m-%d').date()
+            except ValueError:
+                raise HTTPException(status_code=400,
+                                    detail="date inválida - use YYYY-MM-DD, 'ontem' ou 'hoje'")
+
+    try:
+        resultado = executar(dia=dia,
+                             limite=LIMITE_DEFAULT if limite is None else float(limite),
+                             servico=servico, force=force)
+    except Exception as e:
+        # Falha de leitura do faturamento (permissão, tabela sumida, BigQuery
+        # fora do ar) é erro de verdade - 500 pra aparecer como falha do cron,
+        # não 200 silencioso que passaria por "dia dentro do teto".
+        logger.error(f"[cost-alert] falhou ao avaliar custo: {e}")
+        raise HTTPException(status_code=500, detail=f"cost-alert falhou: {e}")
+
+    if not resultado.get('ok'):
+        raise HTTPException(status_code=502, detail=f"cost-alert: {resultado.get('erro')}")
+    return resultado
+
+
 @app.get("/smoke/run-variants")
 async def smoke_run_variants(
     pipeline: PipelineDep,

@@ -1021,29 +1021,12 @@ def render_slack_blocks(r: UtmQualityResult, top5_lf: Optional[dict] = None,
 # ──────────────────────────────────────────────────────────────────────────
 
 def post_to_slack(channel: str, blocks: List[dict], fallback_text: str) -> dict:
-    """Posta via chat.postMessage. Retorna {ok, channel, ts?, error?}."""
-    token = os.environ.get('SLACK_BOT_TOKEN')
-    if not token:
-        return {'ok': False, 'channel': channel, 'error': 'SLACK_BOT_TOKEN missing'}
-    import urllib.request
-    body = json.dumps({
-        'channel': channel,
-        'blocks': blocks,
-        'text': fallback_text,
-    }).encode('utf-8')
-    req = urllib.request.Request(
-        'https://slack.com/api/chat.postMessage',
-        data=body,
-        headers={
-            'Content-Type': 'application/json; charset=utf-8',
-            'Authorization': f'Bearer {token}',
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            resp = json.load(r)
-        if not resp.get('ok'):
-            return {'ok': False, 'channel': channel, 'error': resp.get('error')}
-        return {'ok': True, 'channel': channel, 'ts': resp.get('ts')}
-    except Exception as e:
-        return {'ok': False, 'channel': channel, 'error': str(e)}
+    """Posta via chat.postMessage. Retorna {ok, channel, ts?, error?}.
+
+    O corpo mudou de casa em 09/08/2026: o envio ao Slack agora mora em
+    `src/monitoring/slack_client.post_blocks`, que é o miolo único usado também
+    pelo alerta de custo do Cloud Run. Esta função continua existindo, com a
+    mesma assinatura, pra não mexer em quem já a importava (`api/app.py`).
+    """
+    from src.monitoring.slack_client import post_blocks
+    return post_blocks(channel, blocks, fallback_text)
