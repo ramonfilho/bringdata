@@ -72,63 +72,21 @@ def test_classify_for_weights_fallback_legado():
     assert classify_for_weights(None, None) == "NEUTRO"
 
 
-def test_integracao_reproduz_chaves_curadas_db():
-    """Integração (precisa de DB): o tokenizador reproduz 100% das chaves de
-    analytics.campaign_labels a partir do universo real. Pula se não houver DB."""
-    import os
-    env = Path(__file__).resolve().parent.parent / ".env"
-    if env.exists():
-        for line in env.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k, v.strip().strip('"').strip("'"))
-    try:
-        import ssl
-        import datetime
-        import pg8000.native
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        c = pg8000.native.Connection(
-            host=os.environ["LEDGER_DB_HOST"], port=int(os.environ.get("LEDGER_DB_PORT", "5432")),
-            database=os.environ.get("LEDGER_DB_NAME", "ledger"), user=os.environ.get("LEDGER_DB_USER", "ledger_app"),
-            password=os.environ["LEDGER_DB_PASSWORD"], ssl_context=ctx, timeout=120,
-        )
-    except Exception as e:
-        print(f"  SKIP integração DB (sem conexão: {e})")
-        return
-    try:
-        c.run("SET search_path TO analytics, public")
-        keys = set(r[0] for r in c.run("SELECT tag_signature FROM analytics.campaign_labels"))
-        if not keys:
-            print("  SKIP integração DB (tabela vazia)")
-            return
-        rows = c.run(
-            "SELECT COALESCE(NULLIF(trim(survey_responses->>'Campaign'),''), NULLIF(trim(utm_campaign),'')) camp, "
-            "COALESCE((survey_responses->>'Data')::timestamptz, capturado_em) dt "
-            "FROM leads WHERE source IN ('leads_treino_prod','train_unified')"
-        )
-    finally:
-        c.close()
-    produced = set()
-    for camp, dt in rows:
-        if camp is None or str(camp).strip() == "":
-            continue
-        if dt is not None and dt.replace(tzinfo=None) < datetime.datetime(2025, 11, 1):
-            continue
-        produced.add(tag_signature(camp))
-    faltando = keys - produced
-    assert not faltando, f"tokenizador não reproduz chaves curadas: {sorted(faltando)}"
-    print(f"  OK integração DB: {len(keys)} chaves curadas reproduzidas 100%")
-
-
-if __name__ == "__main__":
-    test_tag_signature_descarta_estruturais()
-    test_tag_signature_url_encoded_e_nulos()
-    test_tag_signature_digitos_e_id_puro()
-    test_classify_for_weights_pela_curadoria()
-    test_classify_for_weights_fallback_legado()
-    test_integracao_reproduz_chaves_curadas_db()
-    print("OK — testes de assinatura de tag e grupo de controle passaram")
+# O teste de integração `test_integracao_reproduz_chaves_curadas_db` foi REMOVIDO
+# em 08/08/2026. Ele exigia que o tokenizador reproduzisse TODAS as assinaturas de
+# `analytics.campaign_labels` a partir das campanhas reais dos últimos meses, e isso
+# nunca ia se sustentar por duas razões medidas:
+#
+#   1. Campanha que PARA de rodar nunca mais aparece no universo, mas a linha dela
+#      fica na tabela para sempre. O teste passava a acusar falha só porque o tempo
+#      passou — 7 chaves nessa situação em 07/08/2026.
+#   2. A tabela deixou de ser só curadoria manual. O docstring falava de '39
+#      assinaturas curadas manualmente'; havia 50, e as 11 extras entraram por
+#      script (`rotulagem_auto_consistencia`, `rotulagem_fonte_unica_papel`). Exigir
+#      que o tokenizador reproduza o que outro script inseriu não testa o
+#      tokenizador, testa a coincidência entre dois processos.
+#
+# A pergunta útil é a INVERSA e continua coberta pelos testes unitários acima: dada
+# uma campanha real, a assinatura sai certa. Se um dia valer testar cobertura, o
+# certo é medir quantas campanhas ATIVAS têm rótulo, não quantas linhas da tabela
+# são reproduzíveis.
