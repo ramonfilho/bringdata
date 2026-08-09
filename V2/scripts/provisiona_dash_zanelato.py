@@ -237,7 +237,7 @@ def sql_fonte() -> str:
     )
     return f"""
     WITH url_por_email AS (
-      -- A URL de captura NÃO existe na base derivada: vem de duas fontes, nesta
+      -- A URL de captura NÃO existe na base derivada: vem de TRÊS fontes, nesta
       -- ordem de prioridade.
       --
       -- 1. `registros_ml` é o ledger VIVO, e só existe a partir de 23/05/2026. Daí a
@@ -250,12 +250,25 @@ def sql_fonte() -> str:
       -- incluí-la recupera 137.763 URLs (fev +15.623, mar +57.594, abr +45.868,
       -- mai +18.677) e leva a cobertura de 35,4% para ~90%.
       --
-      -- JANEIRO CONTINUA VAZIO (16.166 leads, 1,9%): a `lead_legado` só começa em
-      -- fevereiro. Recuperar janeiro depende dos arquivos locais e de nuvem usados
-      -- para montar as tabelas, e é frente separada.
+      -- 3. `analytics.url_captura_legado` é a repescagem de backup, montada em
+      --    09/08/2026 por `scripts/recupera_url_legado.py`. É ela que conserta
+      --    JANEIRO, que estava com 303 URLs em 34.903 leads (0,9%).
       --
-      -- Prioridade por coluna `prio` em vez de COALESCE de duas subconsultas: assim a
-      -- regra fica num lugar só, e fonte nova entra como 3 sem reescrever nada.
+      -- Janeiro parecia perdido e não estava. A URL daquele mês morava em
+      -- `leads_capi.event_source_url`; a tabela morreu em 30/04/2026 e hoje a coluna
+      -- está VAZIA, então quem consulta a tabela viva conclui que ela nunca teve o
+      -- dado. No dump do Cloud SQL de 25/02/2026 ela está cheia: o dado não se
+      -- perdeu, deixou de ser copiado adiante quando o schema mudou. Medido em
+      -- 09/08/2026: a fonte 3 leva janeiro de 0,9% para 98,6% e recupera 56.481 URLs
+      -- no ano de 2026.
+      --
+      -- Fica de aprendizado para a próxima coluna que "sempre foi vazia": conferir um
+      -- backup ANTERIOR à migração que aposentou a tabela, antes de concluir que o
+      -- dado nunca existiu.
+      --
+      -- Prioridade por coluna `prio` em vez de COALESCE de subconsultas: assim a
+      -- regra fica num lugar só, e fonte nova entra sem reescrever nada — foi
+      -- exatamente o que aconteceu quando a 3 chegou.
       SELECT DISTINCT ON (email) email, url AS utm_url
         FROM (
           SELECT lower(email) AS email, utm_url AS url, 1 AS prio, created_at
@@ -265,6 +278,12 @@ def sql_fonte() -> str:
           SELECT lower(email), page_url, 2, created_at
             FROM public.lead_legado
            WHERE coalesce(page_url,'') <> '' AND coalesce(email,'') <> ''
+          UNION ALL
+          -- `recuperado_em` no lugar de `created_at` só para casar o tipo da coluna
+          -- do UNION. Ele nunca desempata nada: a prioridade 3 é a última, e dentro
+          -- dela o e-mail é chave primária, então não há duas linhas para escolher.
+          SELECT email, utm_url, 3, recuperado_em
+            FROM analytics.url_captura_legado
         ) f
        ORDER BY email, prio, created_at DESC
     )
