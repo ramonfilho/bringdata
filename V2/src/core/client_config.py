@@ -27,7 +27,11 @@ def _make(cls, data: dict):
 
 
 _VALID_DECILS = {f"D{i:02d}" for i in range(1, 11)}
-_MAX_EXTRA_HQ_DESTINATIONS = 5
+# Teto de destinos HQ por lista — salvaguarda contra runaway (alguém colar 50 destinos
+# num YAML e cada lead virar 50 chamadas à Meta). Subiu de 5 para 8 em 08/08/2026, quando
+# o jul_24 passou a espelhar top30 e top50 no pixel novo (4 destinos antigos + 2 novos = 6).
+# Continua sendo um teto folgado: no pior caso hoje um lead D10 dispara 6 eventos.
+_MAX_EXTRA_HQ_DESTINATIONS = 8
 
 
 def _parse_extra_hq_destinations(

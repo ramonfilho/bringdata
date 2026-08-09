@@ -65,6 +65,15 @@ ab_test:
       capi_event_name: HQLB_LQ
       capi_event_name_high_quality: HQLB
       capi_high_quality_decils: ['D08', 'D09', 'D10']   # D8 entra (lift ≈ D9); D7 é baseline
+      # Espelho do top 30 no pixel NOVO (1349518197389751, "DEVLF - NOVO", criado 08/08/2026).
+      # Mesma faixa do HQLB primário (D8-D10 = top 30%), nome explícito pra ficar comparável
+      # lado a lado com o jul_24_top30 no MESMO pixel — que é o objetivo do pixel novo.
+      # NÃO mexe no HQLB do 1513: o primário segue igual e as campanhas atuais não sentem nada.
+      # Rollback = deletar este bloco (a lista vira None e o laço de fan-out fica inerte).
+      capi_secondary_hq_events:
+        - event_name: abr_28_top30            # top 30% do Champion abr_28 (= faixa do HQLB)
+          pixel_id: "1349518197389751"
+          decils: ['D08', 'D09', 'D10']
       conversion_rates:                          # back-calculado de LEAD_VALUE_BY_DECILE ÷ 1563.75
         D01: 0.000454   # 0.71 / 1563.75
         D02: 0.001816   # 2.84 / 1563.75
@@ -127,6 +136,16 @@ ab_test:
         - event_name: "jul_24_50-70"        # isolado: percentil 50-70 (D6-D7)
           pixel_id: "1513132406527995"
           decils: ['D06', 'D07']
+        # Espelhos no pixel NOVO (1349518197389751, "DEVLF - NOVO", criado 08/08/2026).
+        # Mesmos nomes e mesmas faixas dos que já saem no 1513 — o que muda é só o destino.
+        # Meta deduplica por (pixel, nome do evento, event_id), então nome repetido em pixel
+        # diferente não colide. O 1513 segue recebendo tudo; isto só ADICIONA destino.
+        - event_name: jul_24_top30          # top 30% do Challenger jul_24 (= faixa do HQ primário)
+          pixel_id: "1349518197389751"
+          decils: ['D08', 'D09', 'D10']
+        - event_name: jul_24_top50          # top 50% do Challenger jul_24 (D6-D10)
+          pixel_id: "1349518197389751"
+          decils: ['D06', 'D07', 'D08', 'D09', 'D10']
       conversion_rates:
         D01: 0.000454
         D02: 0.001816
