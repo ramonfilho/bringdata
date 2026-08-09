@@ -56,6 +56,14 @@ TABELA = "leads_2026"
 ROLE = "dash_zanelato"
 ANO = 2026
 
+# Cliente do calendário de lançamentos. Fica explícito aqui porque
+# `analytics.cadastros` não tem coluna de cliente, ao contrário de `analytics.leads`
+# (que traz `client_id` e é usada direto no braço de quem respondeu). Medido em
+# 09/08/2026: `analytics.launch_calendar` só tem 'devclub', então hoje as duas formas
+# dão o mesmo resultado. Quando o segundo cliente entrar, ISTO AQUI é o ponto que
+# quebra — e quebra visível, com nome, em vez de uma string solta no meio da query.
+CLIENTE_CALENDARIO = "devclub"
+
 # Mínimo de leads para um criativo ou campanha publicar qualidade agregada. Abaixo
 # disso o "agregado" viraria o score individual disfarçado: um anúncio com 1 lead
 # publicaria o decil daquele lead.
@@ -157,6 +165,47 @@ def _admin():
 def sql_fonte() -> str:
     """Uma linha por lead de 2026, com UTM, pesquisa, LF e marcador de compra.
 
+    São DOIS braços somados, e a distinção importa para quem lê a entrega:
+
+    1. **Quem respondeu a pesquisa**, vindo de `analytics.leads` (o universo de
+       treino do modelo). É o braço que já existia.
+    2. **Quem NÃO respondeu**, vindo de `analytics.cadastros` (a espinha com todo
+       mundo que se cadastrou, respondente ou não).
+
+    O braço 2 entrou em 09/08/2026 e o motivo é o viés, não o volume. Medido: em
+    2026 a base tem 300.254 pessoas, e 69.335 (23%) nunca responderam a pesquisa —
+    mas 97,9% delas têm `utm_content`, ou seja, são plenamente utilizáveis para
+    analisar criativo. A taxa de resposta varia MUITO por período (janeiro perdia
+    54,7% dos cadastros, março 14,6%), e quase certamente varia por criativo
+    também. Entregar só respondente fazia um anúncio que atrai gente que não
+    responde aparecer com menos leads do que realmente trouxe — e ranking de
+    criativo por volume é exatamente o que a agência usa para decidir verba.
+
+    O recorte antigo nunca foi uma decisão: a entrega herdou o universo de treino
+    porque foi ele a fonte mais à mão. Não era restrição de privacidade — como não
+    entregamos score nem decil, incluir quem não respondeu não abre nada. Os
+    não respondentes, aliás, não têm score nem decil no banco (medido: zero).
+
+    Por que SOMAR em vez de trocar a fonte por `analytics.cadastros`: trocar
+    reescreveria as 253 mil linhas que a agência já pode estar usando, e o
+    `cadastros` nem guarda o jsonb com as respostas da pesquisa. Somando, linha
+    existente não muda de valor — só entram linhas novas.
+
+    Não há risco de duplicar pessoa: medido, os 69.335 e-mails do braço 2 são todos
+    distintos entre si e ZERO deles aparece no braço 1.
+
+    O que o braço 2 NÃO tem, e sai nulo de propósito:
+
+    - **as colunas de pesquisa** — quem não respondeu não tem resposta. É para isso
+      que existe a coluna `respondeu_pesquisa`: sem ela, a agência veria pesquisa em
+      branco e não saberia se é gente que não respondeu ou dado que faltou.
+    - **url_captura** — medido: NENHUM dos 69.335 tem URL em nenhuma das duas
+      fontes. O `page_source` do cadastro é slug ('lista-vip'), não URL, e só existe
+      em 1.558; o `referrer` é de onde a pessoa VEIO, não a página de captura, e
+      trocar um pelo outro seria preencher a coluna com coisa errada.
+    - **event_id** como chave — só 30% deles têm. A chave da linha aqui é o e-mail,
+      que é 100%.
+
     Decisões que valem a leitura:
 
     - **canal** sai de `COALESCE(utm_source, survey_responses->>'Source')`. A coluna
@@ -179,6 +228,12 @@ def sql_fonte() -> str:
     cols_pesquisa = ",\n           ".join(
         f"nullif(l.survey_responses->>'{chave}', '') AS {alias}"
         for chave, alias in PESQUISA
+    )
+    # No braço de quem não respondeu, as mesmas colunas saem nulas. Precisam vir na
+    # MESMA ordem e com o MESMO nome, senão o UNION cola dado de uma pergunta na
+    # coluna de outra sem reclamar de nada.
+    cols_pesquisa_nulas = ",\n           ".join(
+        f"NULL::text AS {alias}" for _, alias in PESQUISA
     )
     return f"""
     WITH url_por_email AS (
@@ -213,6 +268,8 @@ def sql_fonte() -> str:
         ) f
        ORDER BY email, prio, created_at DESC
     )
+    -- BRAÇO 1: quem respondeu a pesquisa (universo de treino do modelo).
+    (
     SELECT DISTINCT ON (l.event_id)
            encode(sha256((:sal || lower(l.email))::bytea), 'hex') AS lead_id,
            nullif(l.survey_responses->>'Nome Completo', '') AS nome,
@@ -240,6 +297,7 @@ def sql_fonte() -> str:
            nullif(l.utm_campaign,'') AS utm_campaign,
            nullif(l.utm_content,'')  AS utm_content,
            nullif(l.utm_term,'')     AS utm_term,
+           true AS respondeu_pesquisa,
            {cols_pesquisa},
            (comp.email IS NOT NULL) AS comprou,
            NULL::boolean AS entrou_no_grupo,
@@ -259,6 +317,65 @@ def sql_fonte() -> str:
        AND l.capturado_em <  '{ANO + 1}-01-01'
        AND l.email IS NOT NULL AND l.email <> ''
      ORDER BY l.event_id, cal.cap_start DESC
+    )
+
+    UNION ALL
+
+    -- BRAÇO 2: quem NÃO respondeu a pesquisa. Mesmas colunas, na mesma ordem.
+    --
+    -- `DISTINCT ON (lower(c.email))` pelo mesmo motivo do braço 1: três pares de
+    -- janelas de captação se sobrepõem em 2026, e sem isso o lead do dia de emenda
+    -- apareceria duas vezes (medido: 71.531 linhas para 69.335 pessoas, 2.196 a
+    -- mais). A convenção é idêntica à do outro braço — o dia de emenda pertence ao
+    -- lançamento que COMEÇA nele, daí o `cap_start DESC`.
+    (
+    SELECT DISTINCT ON (lower(c.email))
+           encode(sha256((:sal || lower(c.email))::bytea), 'hex') AS lead_id,
+           nullif(trim(concat_ws(' ', c.first_name, c.last_name)), '') AS nome,
+           lower(c.email) AS email,
+           nullif(c.phone, '') AS telefone,
+           c.first_seen_at AS capturado_em,
+           cal.lf_name AS lf,
+           CASE
+             WHEN lower(coalesce(c.utm_source,'')) IN
+                  ('facebook-ads','facebook-ads-sitelink','facebook','fb','ig',
+                   'instagram','meta') THEN 'meta'
+             WHEN lower(coalesce(c.utm_source,'')) IN
+                  ('google-ads','google','googleads','gclid','youtube','youtube-bio')
+                  THEN 'google'
+             WHEN coalesce(c.utm_source,'') = '' THEN NULL
+             ELSE 'outros'
+           END AS canal,
+           -- Sempre nulo aqui, e é medição, não descuido: nenhum dos 69.335 tem URL
+           -- em `registros_ml` nem em `lead_legado`. Fica o LEFT JOIN mesmo assim,
+           -- porque se a fonte da URL passar a cobrir esse público a coluna se
+           -- preenche sozinha, sem ninguém precisar lembrar de mexer aqui.
+           u.utm_url AS url_captura,
+           lower(nullif(c.utm_source,'')) AS utm_source,
+           nullif(c.utm_medium,'')   AS utm_medium,
+           nullif(c.utm_campaign,'') AS utm_campaign,
+           nullif(c.utm_content,'')  AS utm_content,
+           nullif(c.utm_term,'')     AS utm_term,
+           false AS respondeu_pesquisa,
+           {cols_pesquisa_nulas},
+           (comp.email IS NOT NULL) AS comprou,
+           NULL::boolean AS entrou_no_grupo,
+           NULL::text AS grupo_whatsapp,
+           NULL::timestamp AS entrou_no_grupo_em
+      FROM analytics.cadastros c
+      LEFT JOIN (SELECT DISTINCT lower(email) AS email FROM analytics.sales
+                  WHERE email IS NOT NULL) comp
+             ON comp.email = lower(c.email)
+      LEFT JOIN url_por_email u   ON u.email = lower(c.email)
+      LEFT JOIN analytics.launch_calendar cal
+             ON cal.client_id = '{CLIENTE_CALENDARIO}'
+            AND c.first_seen_at::date BETWEEN cal.cap_start AND cal.cap_end
+     WHERE NOT c.is_respondent
+       AND c.first_seen_at >= '{ANO}-01-01'
+       AND c.first_seen_at <  '{ANO + 1}-01-01'
+       AND c.email IS NOT NULL AND c.email <> ''
+     ORDER BY lower(c.email), cal.cap_start DESC
+    )
     """
 
 
@@ -269,6 +386,11 @@ def colunas_da_tabela():
             ("utm_source", "text"), ("utm_medium", "text"),
             ("utm_campaign", "text"), ("utm_content", "text"), ("utm_term", "text"),
 ]
+    # Vem IMEDIATAMENTE antes das colunas de pesquisa porque é o que as explica: com
+    # `false` aqui, as nove colunas seguintes saem vazias por definição, não por
+    # falha de coleta. Sem este marcador a agência não teria como distinguir as duas
+    # coisas, e "não sei" é diferente de "não respondeu".
+    base += [("respondeu_pesquisa", "boolean")]
     base += [(alias, "text") for _, alias in PESQUISA]
     base += [("comprou", "boolean")]
     # Entrada no grupo de WhatsApp. Sai NULO em TODAS as linhas hoje, de propósito.
