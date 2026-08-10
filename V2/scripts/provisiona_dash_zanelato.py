@@ -162,8 +162,15 @@ def _admin():
 
 # ── consulta que monta a entrega ─────────────────────────────────────────────
 
-def sql_fonte() -> str:
+def sql_fonte(janela: bool = False) -> str:
     """Uma linha por lead de 2026, com UTM, pesquisa, LF e marcador de compra.
+
+    `janela=True` acrescenta o recorte do que MUDOU desde `:desde`, para a carga
+    incremental de 5 em 5 minutos. É parâmetro desta função, e não uma segunda
+    consulta, de propósito: duas definições do formato da entrega divergiriam, e a
+    divergência apareceria como coluna trocada no painel do cliente. Uma definição,
+    um filtro opcional.
+
 
     São DOIS braços somados, e a distinção importa para quem lê a entrega:
 
@@ -235,8 +242,40 @@ def sql_fonte() -> str:
     cols_pesquisa_nulas = ",\n           ".join(
         f"NULL::text AS {alias}" for _, alias in PESQUISA
     )
+    # Recorte do que mudou. Reúne num só lugar TODAS as origens que fazem uma linha da
+    # entrega mudar de valor, porque esquecer uma delas é o modo silencioso de falhar:
+    # o cliente veria dado velho e ninguém saberia. As quatro são:
+    #
+    #   1. lead novo ou reescrito em `analytics.leads` (o job diário reescreve 7 dias)
+    #   2. cadastro novo ou reescrito em `analytics.cadastros`
+    #   3. VENDA ingerida — vira o `comprou` de um lead que pode ser de meses atrás.
+    #      Medido em 06/08: 5.329 vendas num dia só, TODAS de compra antiga. Sem esta
+    #      linha aqui, comprador ficaria eternamente marcado como não comprador.
+    #   4. URL repescada de backup (`url_captura_legado`)
+    #
+    # O calendário de lançamento (`launch_calendar`) NÃO entra: ele muda a coluna `lf`
+    # de linhas antigas sem tocar em nenhuma das quatro marcas acima. Quem cobre isso é
+    # a passada de reconciliação diária, e é por isso que ela existe.
+    mudou = """
+      mudou AS (
+        SELECT lower(email) AS email FROM analytics.leads
+         WHERE ingested_at >= :desde AND nullif(email,'') IS NOT NULL
+        UNION
+        SELECT lower(email) FROM analytics.cadastros
+         WHERE (ingested_at >= :desde OR refreshed_at >= :desde)
+           AND nullif(email,'') IS NOT NULL
+        UNION
+        SELECT lower(email) FROM analytics.sales
+         WHERE ingested_at >= :desde AND nullif(email,'') IS NOT NULL
+        UNION
+        SELECT email FROM analytics.url_captura_legado
+         WHERE recuperado_em >= :desde
+      ),
+    """ if janela else ""
+    filtro_1 = "AND lower(l.email) IN (SELECT email FROM mudou)" if janela else ""
+    filtro_2 = "AND lower(c.email) IN (SELECT email FROM mudou)" if janela else ""
     return f"""
-    WITH url_por_email AS (
+    WITH {mudou} url_por_email AS (
       -- A URL de captura NÃO existe na base derivada: vem de TRÊS fontes, nesta
       -- ordem de prioridade.
       --
@@ -335,6 +374,7 @@ def sql_fonte() -> str:
        AND l.capturado_em >= '{ANO}-01-01'
        AND l.capturado_em <  '{ANO + 1}-01-01'
        AND l.email IS NOT NULL AND l.email <> ''
+       {filtro_1}
      ORDER BY l.event_id, cal.cap_start DESC
     )
 
@@ -393,6 +433,7 @@ def sql_fonte() -> str:
        AND c.first_seen_at >= '{ANO}-01-01'
        AND c.first_seen_at <  '{ANO + 1}-01-01'
        AND c.email IS NOT NULL AND c.email <> ''
+       {filtro_2}
      ORDER BY lower(c.email), cal.cap_start DESC
     )
     """
