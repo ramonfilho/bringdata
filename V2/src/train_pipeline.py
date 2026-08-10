@@ -1127,6 +1127,24 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     )
     _log_step_count("janela_conversao", dataset_v1_devclub, df_before=_dataset_v1_devclub_pre_janela)
 
+    # Retrato do conjunto, para o modelo ficar reproduzível. AQUI é o ponto certo: o
+    # dataset já passou por matching, cutoff e janela de conversão, e ainda não sofreu
+    # feature engineering nem encoding — ou seja, é o dado como veio do mundo, legível.
+    #
+    # Sempre, sem flag. A flag `--export-matched-dataset` logo abaixo faz um dump
+    # parecido, mas ela ENCERRA o treino: é ferramenta de análise, e por isso quem
+    # treina de verdade nunca a passa. Foi justamente essa opcionalidade que deixou os
+    # modelos antigos sem conjunto guardado. O anexo ao run acontece depois, dentro do
+    # `with mlflow.start_run()` de `training_model`.
+    from src.core import train_snapshot as _retrato
+    _retrato.guardar(dataset_v1_devclub, extra={
+        'origem_dos_leads': leads_source,
+        'origem_das_vendas': sales_source,
+        'matching_inicial': initial_matching,
+        'max_date': str(max_date) if max_date else None,
+        'min_date': str(min_date) if min_date else None,
+    })
+
     # --export-matched-dataset: dump pré-FE/encoding e encerra. Útil para análise
     # de qualidade de audiência sem treinar — features brutas + Data + target.
     if export_matched_dataset:

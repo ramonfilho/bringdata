@@ -1409,6 +1409,14 @@ def registrar_features_e_modelo_devclub(
         mlflow.log_dict(model_metadata, "model_metadata.json")
         mlflow.log_dict(feature_registry, "feature_registry.json")
 
+        # O conjunto de treino que gerou ESTE modelo, anexado ao run dele. Sem isto,
+        # um modelo que se comporta mal é indebatível: a tabela de origem é viva (o
+        # job diário reescreve os últimos 7 dias) e não dá para saber se piorou por
+        # causa do dado ou do código. Fotografado lá em `train_pipeline`, anexado
+        # aqui, que é onde o run existe.
+        from src.core import train_snapshot as _retrato
+        _retrato.registrar_no_mlflow(mlflow)
+
         # Sempre logar categorias e distribuições esperadas (drift detection)
         if categorias_treino:
             mlflow.log_dict(categorias_treino, "categorias_esperadas.json")
