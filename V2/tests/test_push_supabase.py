@@ -28,22 +28,65 @@ def test_as_11_colunas_sao_as_que_o_cliente_pediu():
         'gravação). Sobrescrever isso quebra o incremental de um jeito silencioso')
 
 
-def test_a_ordem_do_SELECT_bate_com_a_ordem_das_COLUNAS():
-    """A falha que este teste pega é a pior de todas aqui: se a ordem divergir, o
-    INSERT continua funcionando (é tudo texto) e a agência recebe campanha na coluna de
-    conteúdo. Ninguém vê erro, o painel deles só passa a mentir."""
+def _fontes(janela=False):
+    """Devolve o SQL de cada braço do UNION, separados.
+
+    Corta em `-- FONTE ` e não em `UNION ALL`: a CTE de URL dentro da entrega curada
+    também usa `UNION ALL`, e cortar por ela partiria o braço 1 no meio.
+    """
+    sel = p._select(janela)
+    partes = sel.split("-- FONTE ")
+    assert len(partes) == 3, (
+        f'esperava 2 fontes (curada + ledger vivo), achei {len(partes) - 1}')
+    return partes[1], partes[2]
+
+
+def _ordem_dos_apelidos(braco):
+    """Em que ordem as 11 colunas saem deste braço.
+
+    Olha só a PROJEÇÃO (o pedaço entre o `SELECT` e o `FROM` dele). Sem isso, o braço
+    da entrega curada casa com os apelidos de dentro de `sql_fonte`, que é uma query
+    inteira aninhada com as mesmas 11 palavras em outra ordem — e o teste reprovaria
+    código correto.
+    """
     import re
-    sel = p._select(False)
-    corpo = sel[sel.index("SELECT DISTINCT ON"):sel.index("FROM (")]
+    corte = re.search(r"^\s*FROM\s", braco, re.M)
+    assert corte, 'braço sem FROM'
+    braco = braco[:corte.start()]
     posicoes = []
     for c in p.COLUNAS:
         # Sai com apelido (`... AS email`) ou com o nome cru (`q.nome,`). O espaçamento
         # entre a expressão e o AS é livre, daí a busca por padrão e não por texto fixo.
-        m = re.search(rf"\bAS\s+{c}\b", corpo) or re.search(rf"\bq\.{c}\b", corpo)
-        assert m, f'a coluna {c} não sai do SELECT'
+        m = re.search(rf"\bAS\s+{c}\b", braco) or re.search(rf"\bq\.{c}\b", braco)
+        assert m, f'a coluna {c} não sai deste braço'
         posicoes.append((m.start(), c))
-    assert [c for _, c in sorted(posicoes)] == p.COLUNAS, (
-        f'ordem do SELECT divergiu de COLUNAS: {[c for _, c in sorted(posicoes)]}')
+    return [c for _, c in sorted(posicoes)]
+
+
+def test_a_ordem_do_SELECT_bate_com_a_ordem_das_COLUNAS():
+    """A falha que este teste pega é a pior de todas aqui: se a ordem divergir, o
+    INSERT continua funcionando (é tudo texto) e a agência recebe campanha na coluna de
+    conteúdo. Ninguém vê erro, o painel deles só passa a mentir.
+
+    Checa CADA braço do UNION, não o SELECT de fora, porque é ali que o erro nasce
+    (ver o teste do casamento por posição, abaixo).
+    """
+    for i, braco in enumerate(_fontes(), start=1):
+        assert _ordem_dos_apelidos(braco) == p.COLUNAS, (
+            f'a fonte {i} emite as colunas em ordem diferente de COLUNAS')
+
+
+def test_as_duas_FONTES_casam_por_POSICAO_e_por_isso_a_ordem_tem_que_ser_identica():
+    """O `UNION ALL` do Postgres casa coluna por POSIÇÃO, não por nome do apelido.
+
+    Se a fonte 2 emitir `telefone` onde a fonte 1 emite `nome`, o SQL continua válido
+    (é tudo texto), o SELECT de fora continua chamando a primeira coluna de `nome`, e
+    a agência recebe telefone na coluna de nome só nas linhas que vieram do ledger.
+    Não há erro em lugar nenhum: metade da tabela fica trocada em silêncio.
+    """
+    curada, ledger = _fontes()
+    assert _ordem_dos_apelidos(curada) == _ordem_dos_apelidos(ledger), (
+        'as duas fontes do UNION emitem as colunas em ordens diferentes')
 
 
 def test_a_janela_e_de_90_dias_nos_dois_modos():
@@ -56,7 +99,7 @@ def test_a_janela_e_de_90_dias_nos_dois_modos():
         # porque a expressão antiga (`interval '90 days'`) sobreviveu num COMENTÁRIO do
         # código, mesmo depois do filtro ter mudado. Teste que passa em comentário não
         # trava nada.
-        assert f"q.capturado_em::date >= (current_date - {p.DIAS})" in sel, (
+        assert f"(q.capturado_em AT TIME ZONE '{p.FUSO}')::date >= {p.CORTE_SQL}" in sel, (
             f'sumiu o recorte de {p.DIAS} dias no modo janela={janela}')
 
 
@@ -69,7 +112,8 @@ def test_o_recorte_e_por_DIA_e_nao_por_instante():
     As três operações (carga, poda, auditoria) têm que usar a MESMA fronteira de dia.
     """
     sel = p._select(False)
-    assert "::date >= (current_date" in sel, 'o recorte voltou a ser por instante'
+    assert f"::date\n                 >= {p.CORTE_SQL}" in sel or \
+           f"::date >= {p.CORTE_SQL}" in sel, 'o recorte voltou a ser por instante'
     # Descarta as linhas de comentário INTEIRAS. Remover só o marcador `--` deixaria o
     # texto do comentário no meio do SQL e o teste passaria (ou falharia) pelo motivo
     # errado — foi o que aconteceu na primeira versão deste teste.
@@ -81,17 +125,154 @@ def test_o_recorte_e_por_DIA_e_nao_por_instante():
 def test_a_data_sai_no_formato_que_a_coluna_deles_espera():
     """A coluna `data` no destino é TEXTO, não data. Deixar o Postgres formatar por
     conta dele faria o formato virar surpresa (e mudar com a configuração do servidor)."""
-    assert "to_char(q.capturado_em, 'YYYY-MM-DD')" in p._select(False)
+    sel = p._select(False)
+    assert sel.count("'YYYY-MM-DD'") >= 2, (
+        'cada fonte tem que formatar a data explicitamente')
+
+
+def test_a_data_sai_em_HORARIO_DE_BRASILIA_nas_duas_fontes():
+    """Este teste existe por causa de um "leads faltando" que não existia.
+
+    Em 10/08/2026 a agência apontou 15 leads do dia 09/08 ausentes da entrega. 14
+    estavam lá, datados 10/08, e todos os 14 tinham chegado entre 00:05 e 02:55 UTC —
+    isto é, entre 21:05 e 23:55 de Brasília do dia 09. Desvio sistemático de 3 horas:
+    todo lead que entrava depois das 21h aparecia no dia seguinte para ela.
+
+    A causa não estava escrita no código: a conexão de leitura tem `TimeZone = UTC`, e
+    `to_char(timestamptz, ...)` renderiza no fuso da SESSÃO. O UTC vinha do ambiente.
+    Por isso o teste checa o fuso EXPLÍCITO no SQL — é a única forma de não depender de
+    como o servidor está configurado.
+    """
+    for i, braco in enumerate(_fontes(), start=1):
+        assert f"AT TIME ZONE '{p.FUSO}'" in braco, (
+            f'a fonte {i} voltou a datar no fuso da sessão; em UTC, o lead da noite '
+            f'aparece no dia seguinte para a agência')
+    assert p.FUSO == "America/Sao_Paulo"
+
+
+def test_o_ledger_declara_que_o_timestamp_dele_esta_em_UTC():
+    """`registros_ml.created_at` é `timestamp WITHOUT time zone` guardando UTC, enquanto
+    `analytics.leads.capturado_em` é `WITH time zone` (verificado em 10/08/2026). Num
+    valor sem fuso, um `AT TIME ZONE` sozinho faz o Postgres assumir o fuso da sessão:
+    daria 3 horas de erro, na direção contrária, e só nas linhas vindas do ledger.
+    """
+    _, ledger = _fontes()
+    assert f"AT TIME ZONE 'UTC' AT TIME ZONE '{p.FUSO}'" in ledger, (
+        'o braço do ledger precisa declarar UTC antes de converter, porque a coluna '
+        'dele não guarda fuso')
+
+
+def test_a_fronteira_da_janela_esta_no_MESMO_fuso_da_coluna_data():
+    """Fronteira num fuso e valor em outro faz a linha da borda entrar na carga e sair
+    na poda, a cada rodada, para sempre. Não daria erro nenhum: só uma linha piscando na
+    tabela do cliente e uma auditoria contando trabalho pendente que nunca acaba."""
+    assert f"AT TIME ZONE '{p.FUSO}'" in p.CORTE_SQL, (
+        'a fronteira da janela voltou a ser calculada em outro fuso que não o da '
+        'coluna `data`')
+    sel = p._select(False)
+    codigo = "\n".join(l for l in sel.splitlines() if not l.strip().startswith("--"))
+    assert f"(current_date - {p.DIAS})" not in codigo, (
+        'sobrou a fronteira antiga em UTC no SQL de verdade')
+    assert codigo.count(p.CORTE_SQL) == 2, (
+        'as duas fontes têm que usar a MESMA expressão de fronteira')
 
 
 def test_deduplica_por_email_e_data_porque_o_destino_NAO_tem_chave_unica():
     """Medido em 10/08/2026: a chave primária da tabela deles é `id` sequencial, e não
     existe restrição de unicidade em (email, data). Ou seja, linha repetida entra
     calada e a agência conta o mesmo lead duas vezes. A defesa tem que morar aqui
-    porque não existe do lado deles."""
+    porque não existe do lado deles.
+
+    Com duas fontes isso deixou de ser zelo e virou obrigação: o mesmo lead existe nas
+    duas quando as tabelas derivadas alcançam o ledger no dia seguinte.
+    """
     sel = p._select(False)
-    assert "DISTINCT ON (lower(q.email), to_char(q.capturado_em, 'YYYY-MM-DD'))" in sel, (
+    assert "SELECT DISTINCT ON (email, data)" in sel, (
         'sumiu a deduplicação por (email, data)')
+
+
+def test_a_fonte_CURADA_ganha_do_ledger_no_desempate():
+    """Sem esta ordem, a linha JÁ ENTREGUE mudaria de valor sozinha.
+
+    O lead chega pelo ledger hoje e é entregue. Amanhã as tabelas derivadas o alcançam,
+    com matching e calendário aplicados. Se o ledger ganhasse o desempate, o painel da
+    agência veria o mesmo lead trocar de campanha de um dia para o outro sem nada ter
+    acontecido — e a explicação estaria escondida na nossa ordem de UNION.
+
+    `ORDER BY email, data, prio` com prio crescente = ganha o menor = a curada.
+    """
+    curada, ledger = _fontes()
+    assert "1 AS prio" in curada, 'a fonte curada deixou de ser a prioridade 1'
+    assert "2 AS prio" in ledger, 'o ledger vivo deixou de ser a prioridade 2'
+    sel = p._select(False)
+    assert "ORDER BY email, data, prio" in sel, 'sumiu o desempate por prioridade'
+    assert "prio DESC" not in sel, (
+        'prioridade em ordem decrescente inverte o desempate: o ledger passaria a '
+        'sobrescrever a entrega curada')
+
+
+def test_o_LEDGER_VIVO_esta_na_entrega():
+    """A razão de existir desta mudança, em uma linha de teste.
+
+    As tabelas `analytics.leads` e `analytics.cadastros` são reconstruídas uma vez por
+    dia (09:00 e 10:00). A agência abre o painel várias vezes ao dia para decidir verba,
+    e até 10/08/2026 recebia o lead de hoje só amanhã. Medido naquele dia: 165 leads
+    estavam no ledger e ausentes das derivadas; a entrega do dia saía com 33 linhas
+    contra 215 na planilha deles, e com o ledger foi para 221.
+    """
+    _, ledger = _fontes()
+    assert "public.registros_ml" in ledger, (
+        'o braço do ledger vivo saiu da entrega: a agência volta a ver o lead de hoje '
+        'só amanhã')
+
+
+def test_o_ledger_tambem_respeita_os_90_dias():
+    """Se o braço novo não tivesse o recorte, a carga cheia mandaria o ledger inteiro
+    (2 anos) e a tabela da agência estouraria o combinado de 90 dias por baixo."""
+    _, ledger = _fontes()
+    assert p.CORTE_SQL in ledger and "r.created_at AT TIME ZONE" in ledger, (
+        f'sumiu o recorte de {p.DIAS} dias no braço do ledger')
+
+
+def test_no_incremental_o_ledger_le_APENAS_a_janela():
+    """Sem este filtro o incremental continuaria correto e ficaria caro: leria os 90
+    dias do ledger a cada rodada. Numa cadência de minutos, cada rodada custaria como
+    uma carga cheia, e o custo apareceria como lentidão, não como erro."""
+    _, ledger_janela = _fontes(janela=True)
+    _, ledger_cheia = _fontes(janela=False)
+    assert "r.created_at >= :desde" in ledger_janela, (
+        'o incremental está lendo o ledger inteiro em vez da janela')
+    assert "r.created_at >= :desde" not in ledger_cheia, (
+        'a carga cheia não tem `:desde` para casar; o SQL quebraria por parâmetro '
+        'ausente')
+
+
+def test_os_dois_bracos_normalizam_o_email_em_MINUSCULO():
+    """O dedupe é por (email, data) em texto. Se um braço mandasse `Joao@x.com` e o
+    outro `joao@x.com`, seriam duas chaves diferentes: a mesma pessoa entraria duas
+    vezes e o dedupe passaria batido."""
+    for i, braco in enumerate(_fontes(), start=1):
+        assert "lower(" in braco and "email" in braco, (
+            f'a fonte {i} não normaliza o e-mail em minúsculo')
+    _, ledger = _fontes()
+    assert "lower(r.email)" in ledger, 'o ledger não normaliza o e-mail'
+
+
+def test_o_ledger_NAO_vaza_score_nem_decil():
+    """É proibido entregar score ou decil por lead, e este é o ponto do código onde
+    vazar sem querer é mais fácil: `registros_ml` guarda `lead_score`, `decil_champion`
+    e `decil_challenger` na coluna vizinha das que a entrega usa. Um `SELECT r.*` ou um
+    copiar-colar de outra query já bastaria.
+
+    Descarta comentários antes de olhar: a primeira versão deste teste falhou por
+    causa do próprio comentário que EXPLICA a proibição.
+    """
+    sel = p._select(False)
+    codigo = "\n".join(l for l in sel.splitlines() if not l.strip().startswith("--"))
+    for proibida in ("lead_score", "decil", "score_champion", "score_challenger",
+                     "decile_propensity", "decile_roas", "hotleads_hot", "r.*"):
+        assert proibida not in codigo, (
+            f'"{proibida}" apareceu no SQL da entrega: score por lead é proibido')
 
 
 def test_o_ssl_nao_verifica_e_isso_e_deliberado():
@@ -134,6 +315,42 @@ def test_o_incremental_nao_inventa_janela_quando_o_destino_esta_vazio():
         'o incremental deveria RECUSAR rodar sem marca, não adivinhar uma janela')
 
 
+def test_a_poda_apaga_pela_MESMA_fronteira_que_a_carga_usa():
+    """A poda é a única operação que APAGA dado do cliente, e a fronteira dela mudou de
+    lugar: era calculada em Python, em UTC, e virou SQL no fuso de Brasília.
+
+    Se a fronteira ficasse em UTC com a coluna `data` em Brasília, a linha da borda
+    entraria na carga e sairia na poda a cada rodada, para sempre. Nada quebraria: só
+    uma linha piscando na tabela do cliente.
+    """
+    vistos = []
+
+    class _Destino:
+        def run(self, sql, **kw):
+            vistos.append((sql, kw))
+            if "::text" in sql and "count(" not in sql:
+                return [["2026-05-12"]]
+            if sql.strip().startswith("SELECT count("):
+                return [[100]]
+            return []
+        def close(self):
+            pass
+
+    orig = p.destino
+    p.destino = lambda porta=None: _Destino()
+    try:
+        p.podar()
+    finally:
+        p.destino = orig
+    pergunta = [s for s, _ in vistos if "::text" in s and "count(" not in s]
+    assert pergunta, 'a poda não perguntou a fronteira ao banco'
+    assert p.CORTE_SQL in pergunta[0], (
+        'a poda calcula a fronteira de um jeito diferente da carga')
+    apaga = [(s, k) for s, k in vistos if s.strip().startswith("DELETE")]
+    assert apaga and apaga[0][1].get("lim") == "2026-05-12", (
+        'a poda tem que apagar usando a fronteira que ELA perguntou, não outra')
+
+
 class _ConnAuditoria:
     """Dublê que responde por TIPO de pergunta, não sempre a mesma coisa.
 
@@ -145,10 +362,13 @@ class _ConnAuditoria:
         self._por_mes, self._a_podar = por_mes, a_podar
 
     def run(self, sql, **kw):
-        # Detecção por padrão ESPECÍFICO: a consulta por mês também menciona
-        # `current_date` (o filtro da janela mora dentro dela), então casar só por
-        # 'current_date' devolveria a data no lugar da lista de meses.
-        if sql.strip().startswith("SELECT (current_date"):
+        # Detecção por FORMA, não por texto literal. A primeira versão casava
+        # `startswith("SELECT (current_date")`; quando a fronteira mudou de fuso e virou
+        # `SELECT ((now() AT TIME ZONE ...))::text`, o dublê parou de reconhecê-la e
+        # devolveu a lista de meses no lugar da data. Os testes continuaram passando —
+        # por sorte, porque o valor errado só era repassado como parâmetro. Dublê que
+        # deixa de casar em silêncio é pior que dublê que quebra.
+        if "::text" in sql and "count(" not in sql:
             return [["2026-05-12"]]
         if "data <" in sql:
             return [[self._a_podar]]

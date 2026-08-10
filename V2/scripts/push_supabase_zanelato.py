@@ -96,7 +96,7 @@ import os
 import ssl
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from urllib.parse import unquote, urlparse
 
 # Reaproveita a definição ÚNICA da entrega. Se este script montasse a sua própria
@@ -111,6 +111,36 @@ PROJETO_GCP = "smart-ads-451319"
 DIAS = 90
 LOTE = 500
 FOLGA_MINUTOS = 15
+
+# Fuso em que a coluna `data` é entregue. NÃO é preferência estética: até 10/08/2026 a
+# entrega saía em UTC, e a agência compara essa coluna com a planilha de leads dela e
+# com o painel da Meta, os dois em horário de Brasília.
+#
+# O sintoma foi um "leads faltando" que não existia. Ela apontou 15 leads do dia 09/08
+# ausentes da entrega; 14 estavam lá, datados 10/08. Os 14 chegaram entre 00:05 e 02:55
+# UTC, ou seja, entre 21:05 e 23:55 de Brasília do dia 09 — todos, sem exceção. Não é
+# coincidência de fronteira, é desvio sistemático de 3 horas: TODO lead que entra depois
+# das 21h aparecia no dia seguinte para ela.
+#
+# Por que isso passou batido: a conexão de leitura tem `TimeZone = UTC` (verificado com
+# `SHOW TimeZone`), e `to_char(timestamptz, 'YYYY-MM-DD')` renderiza no fuso da SESSÃO.
+# Ou seja, o código não dizia UTC em lugar nenhum; o UTC vinha do ambiente. É o tipo de
+# erro que não aparece na revisão do SQL, só na conferência contra o dado do cliente.
+#
+# Consequência prática de errar: o CPL por dia dela fica errado nas duas pontas (leads
+# da noite contados no dia seguinte, contra gasto do dia certo), e a diferença é maior
+# justamente nos dias de pico, que são os que decidem verba.
+FUSO = "America/Sao_Paulo"
+
+# A fronteira da janela de 90 dias, como EXPRESSÃO ÚNICA. A carga, a poda e a auditoria
+# avaliam este mesmo texto, cada uma na conexão que já tem na mão.
+#
+# Tem que ser o mesmo DIA em que a coluna `data` é gravada, e é por isso que sai de
+# `now() AT TIME ZONE FUSO` e não de `current_date`: `current_date` numa sessão em UTC dá
+# o dia em UTC. Com a `data` em Brasília e a fronteira em UTC, o lead que chegasse entre
+# 00h e 03h UTC do dia da fronteira seria gravado com data de um dia ANTES do corte — a
+# carga o inseria, a poda o apagava, e isso se repetiria a cada rodada, para sempre.
+CORTE_SQL = f"((now() AT TIME ZONE '{FUSO}')::date - {DIAS})"
 
 # As 11 colunas da tabela deles, na ordem em que o SELECT abaixo as produz. `id` e
 # `recebido_em` ficam de fora: o primeiro é identidade automática, o segundo tem
@@ -170,35 +200,98 @@ def _select(janela: bool) -> str:
     `data` sai como texto no formato que eles pediram (YYYY-MM-DD) porque a coluna é
     `text`, não `date`. Mandar um objeto de data deixaria o Postgres formatar do jeito
     dele, e o formato viraria surpresa.
+
+    `data` sai em HORÁRIO DE BRASÍLIA, e isso é o oposto do que fazíamos até
+    10/08/2026. Ver `FUSO` para o porquê e para a medição.
     """
+    # No modo janela, o ledger também é recortado pelo que chegou desde `:desde`. Sem
+    # isto o incremental leria os 90 dias do ledger a cada rodada, e a rodada de 5
+    # minutos passaria a custar como uma carga cheia.
+    filtro_ledger = "AND r.created_at >= :desde" if janela else ""
     return f"""
-      SELECT DISTINCT ON (lower(q.email), to_char(q.capturado_em, 'YYYY-MM-DD'))
-             q.nome,
-             lower(q.email)                              AS email,
-             q.telefone,
-             q.utm_source                                AS source,
-             q.utm_medium                                AS medium,
-             q.utm_campaign                              AS campaign,
-             q.utm_term                                  AS term,
-             q.utm_content                               AS content,
-             to_char(q.capturado_em, 'YYYY-MM-DD')       AS data,
-             q.tem_computador,
-             q.url_captura                               AS utm_url
-        FROM ({sql_fonte(janela=janela)}) q
-       -- Corte por DIA, e não por instante. A primeira versão usava
-       -- `capturado_em >= now() - interval '90 days'`, que é um instante, enquanto a
-       -- coluna `data` do destino guarda só o dia. Consequência medida em 10/08/2026:
-       -- entre a carga (13:59) e a auditoria, o relógio andou e 14 linhas do dia
-       -- 12/05 saíram da janela da ORIGEM continuando no DESTINO. A auditoria acusou
-       -- divergência de +14 onde não havia dado errado nenhum.
-       --
-       -- Isso é pior do que parece: auditoria que dá falso positivo todo dia ensina a
-       -- ignorar auditoria, e aí ela deixa de servir justamente quando importa. As
-       -- três operações (carga, poda e auditoria) usam a MESMA fronteira de dia.
-       WHERE q.capturado_em::date >= (current_date - {DIAS})
-         AND nullif(q.email, '') IS NOT NULL
-       ORDER BY lower(q.email), to_char(q.capturado_em, 'YYYY-MM-DD'),
-                q.capturado_em DESC
+      SELECT DISTINCT ON (email, data)
+             nome, email, telefone, source, medium, campaign, term, content,
+             data, tem_computador, utm_url
+        FROM (
+          -- FONTE 1: a entrega curada. Passa por matching, calendário de lançamento e
+          -- dedupe, e é a MESMA definição usada na entrega do nosso banco. Mas lê
+          -- `analytics.leads` e `analytics.cadastros`, que são reconstruídas UMA VEZ
+          -- POR DIA (09:00 e 10:00). Por isso ela sozinha nunca tem o lead de hoje.
+          SELECT q.nome,
+                 lower(q.email)                        AS email,
+                 q.telefone,
+                 q.utm_source                          AS source,
+                 q.utm_medium                          AS medium,
+                 q.utm_campaign                        AS campaign,
+                 q.utm_term                            AS term,
+                 q.utm_content                         AS content,
+                 to_char(q.capturado_em AT TIME ZONE '{FUSO}', 'YYYY-MM-DD') AS data,
+                 q.tem_computador,
+                 q.url_captura                         AS utm_url,
+                 1 AS prio
+            FROM ({sql_fonte(janela=janela)}) q
+           -- Corte por DIA, e não por instante. A primeira versão usava
+           -- `capturado_em >= now() - interval '90 days'`, que é um instante, enquanto
+           -- a coluna `data` do destino guarda só o dia. Medido em 10/08/2026: entre a
+           -- carga (13:59) e a auditoria o relógio andou, 14 linhas do dia 12/05
+           -- saíram da janela da ORIGEM continuando no DESTINO, e a auditoria acusou
+           -- divergência de +14 onde não havia erro. Auditoria que dá falso positivo
+           -- todo dia ensina a ignorar auditoria. As três operações (carga, poda e
+           -- auditoria) usam a MESMA fronteira de dia, e no MESMO fuso da coluna.
+           WHERE (q.capturado_em AT TIME ZONE '{FUSO}')::date >= {CORTE_SQL}
+             AND nullif(q.email, '') IS NOT NULL
+
+          UNION ALL
+
+          -- FONTE 2: o LEDGER VIVO. Recebe o lead em minutos, via a fila do Pub/Sub.
+          --
+          -- Ela existe porque a fonte 1 não serve ao caso de uso. A agência abre o
+          -- painel várias vezes por dia para decidir verba, e até 10/08/2026 a entrega
+          -- só tinha o lead do dia seguinte. Pior: eu tinha respondido a um pedido de
+          -- atualização de 5 em 5 minutos dizendo que não fazia sentido "porque a
+          -- origem só muda uma vez por dia" — o que era defender a limitação em vez de
+          -- removê-la. Medido no dia em que isto foi escrito: o ledger tinha 165 leads
+          -- que as tabelas derivadas ainda não tinham.
+          --
+          -- Cobertura medida no ledger nos 7 dias anteriores: nome 100%, telefone
+          -- 99,2%, source 100%, tem_computador 100%, url 100%, e as UTM de medium,
+          -- campanha, termo e conteúdo entre 88% e 93%. Ou seja, a linha que vem daqui
+          -- não é pior que a da fonte 1 em nada que a agência use.
+          --
+          -- `prio = 2`: quando o mesmo lead existe nas duas, a fonte 1 ganha. Assim a
+          -- linha que já foi entregue não muda de valor quando o lead aparece nas
+          -- derivadas no dia seguinte — só linhas NOVAS vêm daqui.
+          --
+          -- NÃO seleciona `lead_score`, `decil`, `score_champion`, `decil_challenger`
+          -- nem nada derivado: score por lead é proibido nesta entrega, e este é o
+          -- ponto do código onde seria mais fácil vazar sem querer, porque a tabela
+          -- tem todas essas colunas ao lado das que a gente usa.
+          SELECT nullif(trim(concat_ws(' ', r.first_name, r.last_name)), '') AS nome,
+                 lower(r.email)                        AS email,
+                 nullif(r.phone, '')                   AS telefone,
+                 lower(nullif(r.utm_source, ''))       AS source,
+                 nullif(r.utm_medium, '')              AS medium,
+                 nullif(r.utm_campaign, '')            AS campaign,
+                 nullif(r.utm_term, '')                AS term,
+                 nullif(r.utm_content, '')             AS content,
+                 -- Dois `AT TIME ZONE` em sequência, e os dois são necessários. Esta
+                 -- coluna é `timestamp WITHOUT time zone` guardando UTC (a de
+                 -- `analytics.leads` é `WITH time zone`; verificado, não suposto). O
+                 -- primeiro diz ao Postgres em que fuso o número está — sem ele, ele
+                 -- assume o fuso da sessão e a conversão erra. O segundo converte para
+                 -- Brasília. Um só, aqui, daria 3 horas de erro na direção contrária.
+                 to_char(r.created_at AT TIME ZONE 'UTC' AT TIME ZONE '{FUSO}',
+                         'YYYY-MM-DD')                 AS data,
+                 nullif(r.has_computer, '')            AS tem_computador,
+                 nullif(r.utm_url, '')                 AS utm_url,
+                 2 AS prio
+            FROM public.registros_ml r
+           WHERE (r.created_at AT TIME ZONE 'UTC' AT TIME ZONE '{FUSO}')::date
+                 >= {CORTE_SQL}
+             AND nullif(r.email, '') IS NOT NULL
+             {filtro_ledger}
+        ) u
+       ORDER BY email, data, prio
     """
 
 
@@ -220,6 +313,13 @@ def _grava(dst, linhas: list, *, apagar_chaves: bool) -> int:
     `ON CONFLICT` não tem em que conflitar. Apagar-e-inserir escopado às chaves do
     lote dá o mesmo resultado e é idempotente — é o que permite usar janela com folga
     sem medo de duplicar.
+
+    LIMITE QUE IMPORTA NA HORA DE SUBIR MUDANÇA: o escopo do DELETE é (email, data). Se a
+    `data` de um lead MUDAR de valor entre duas versões deste código, o incremental apaga
+    a chave NOVA e insere, e a linha com a data ANTIGA fica órfã ao lado — o lead aparece
+    duas vezes para a agência. Aconteceria com o conserto de fuso de 10/08/2026, que
+    mudou a data de ~12% das linhas. Por isso: toda mudança que altere o VALOR de `data`
+    exige uma `--full` logo depois do deploy, não é opcional.
     """
     if not linhas:
         return 0
@@ -296,12 +396,13 @@ def podar() -> dict:
     Sem esta passada a tabela cresce para sempre e a "janela de 90 dias" combinada com
     o cliente deixa de ser verdade. É o outro motivo da permissão de DELETE.
     """
-    # Mesma fronteira de dia da carga e da auditoria. Calculada aqui em UTC porque é o
-    # fuso do servidor deles; a diferença de um dia não importa para uma janela de 90,
-    # mas a CONSISTÊNCIA entre as três operações importa (ver o comentário em `_select`).
-    limite = (datetime.now(timezone.utc) - timedelta(days=DIAS)).strftime("%Y-%m-%d")
+    # Mesma fronteira de dia da carga e da auditoria: a expressão de `CORTE_SQL`, avaliada
+    # na conexão que esta função já tem na mão. Antes era calculada aqui em Python, em
+    # UTC; virou SQL quando a coluna `data` passou a sair em horário de Brasília, porque
+    # fronteira num fuso e valor em outro apaga a linha da borda a cada rodada.
     dst = destino(porta=5432)
     try:
+        limite = str(dst.run(f"SELECT ({CORTE_SQL})::text")[0][0])
         antes = dst.run(f"SELECT count(*) FROM {TABELA_DESTINO}")[0][0]
         dst.run("BEGIN")
         dst.run(f"DELETE FROM {TABELA_DESTINO} WHERE data < :lim", lim=limite)
@@ -325,7 +426,7 @@ def auditar() -> dict:
         # A MESMA fronteira de dia usada pela carga e pela poda, calculada de um lado só
         # e aplicada nos dois. Calcular duas vezes, uma em cada ponta, foi o que gerou o
         # falso positivo de +14 em 10/08/2026.
-        corte = str(origem.run(f"SELECT (current_date - {DIAS})::text")[0][0])
+        corte = str(origem.run(f"SELECT ({CORTE_SQL})::text")[0][0])
         esperado = {str(r[0]): int(r[1]) for r in origem.run(
             f"SELECT substr(data,1,7), count(*) FROM ({_select(False)}) s GROUP BY 1",
             sal=sal())}
