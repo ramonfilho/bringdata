@@ -414,8 +414,49 @@ def podar() -> dict:
         dst.close()
 
 
+def _avisa_no_dm(linhas_texto: list, resumo: str, poster=None, canal: str = "") -> dict:
+    """Manda o resultado da auditoria para o DM. NUNCA levanta exceção.
+
+    POR QUE ISTO EXISTE: até 10/08/2026 a auditoria detectava a divergência, saía com
+    erro, e o erro morria no log do Cloud Run. Ninguém olha log por hábito. Verificado
+    no dia: das 3 políticas de alerta do projeto, nenhuma cobre este job — a de
+    `Cron falhou` dispara quando o Scheduler não consegue DISPARAR o job (403/500), não
+    quando o job roda e falha por dentro. Ou seja, a defesa mais importante da entrega
+    era invisível, e uma defesa que ninguém vê não é defesa.
+
+    MANDA TAMBÉM QUANDO ESTÁ TUDO CERTO, em uma linha. Não é enfeite: sem a mensagem de
+    "bateu", silêncio significa duas coisas ao mesmo tempo (nada divergiu, ou o job não
+    rodou), e são justamente essas duas que precisam ser distinguidas. Uma linha por dia
+    resolve a ambiguidade. Se virar ruído, o que se corta é a linha do sucesso, não a
+    do erro.
+
+    `poster` e `canal` são injetáveis para o teste rodar sem Slack.
+    """
+    if poster is None:
+        try:
+            from src.monitoring.slack_client import post_blocks as poster
+        except Exception as e:                            # sem o pacote, segue a vida
+            return {"ok": False, "erro": f"import: {e}"}
+    # Mesma cadeia de resolução do resto do projeto (`cost_alert`, `app.py`), incluindo o
+    # mesmo último recurso fixo. O ID do DM não é segredo, e deixá-lo aqui evita o pior
+    # caso: variável esquecida no job faz o aviso virar um no-op silencioso, que é
+    # exatamente o defeito que esta função existe para consertar.
+    canal = canal or os.getenv("SLACK_USER_DM") or os.getenv(
+        "SLACK_VALIDATION_DM_CHANNEL") or "D0A9USV3XEX"
+    blocos = [{"type": "section",
+               "text": {"type": "mrkdwn", "text": resumo}}]
+    if linhas_texto:
+        blocos.append({"type": "section",
+                       "text": {"type": "mrkdwn",
+                                "text": "```\n" + "\n".join(linhas_texto) + "\n```"}})
+    try:
+        return poster(canal, blocos, resumo)
+    except Exception as e:                                # contrato: nunca derruba
+        return {"ok": False, "erro": str(e)}
+
+
 def auditar() -> dict:
-    """Compara origem e destino por mês. Sai com erro se divergir.
+    """Compara origem e destino por mês. Avisa no DM e sai com erro se divergir.
 
     É esta defesa que torna a carga incremental aceitável numa entrega para terceiro.
     As outras dependem de eu ter listado certo todas as origens de mudança; esta não
@@ -448,19 +489,38 @@ def auditar() -> dict:
 
     print(f"corte da janela: data >= {corte} ({DIAS} dias)")
     print(f"{'mês':<9} {'origem':>9} {'destino':>9} {'dif':>8}")
-    ruins = []
+    tabela, ruins = [f"{'mês':<9} {'origem':>9} {'destino':>9} {'dif':>8}"], []
     for m in sorted(set(esperado) | set(obtido)):
         e, o = esperado.get(m, 0), obtido.get(m, 0)
-        print(f"{m:<9} {e:>9,} {o:>9,} {o - e:>+8,}")
+        linha = f"{m:<9} {e:>9,} {o:>9,} {o - e:>+8,}"
+        print(linha)
+        tabela.append(linha)
         if o != e:
             ruins.append((m, e, o))
     if a_podar:
         print(f"\n(fora da janela, aguardando poda: {a_podar:,} linhas — não é divergência)")
+        tabela.append(f"fora da janela, aguardando poda: {a_podar:,} (não é divergência)")
+
     if ruins:
         det = "; ".join(f"{m}: origem {e:,} destino {o:,} ({o - e:+,})" for m, e, o in ruins)
+        # DM ANTES do SystemExit. Invertido, o `raise` mataria o processo e o aviso nunca
+        # sairia — que é exatamente o defeito que esta mudança conserta.
+        _avisa_no_dm(
+            tabela,
+            f":rotating_light: *Entrega Zanelato: a auditoria não bateu.*\n"
+            f"{len(ruins)} mês(es) divergindo. A tabela deles está diferente do que a "
+            f"nossa consulta produz, e o incremental não conserta isso sozinho.\n"
+            f"*O que fazer:* rodar a carga cheia (`--full`) e auditar de novo.")
         raise SystemExit(f"AUDITORIA FALHOU — {len(ruins)} mês(es) divergindo: {det}")
-    print(f"\nOK: {sum(esperado.values()):,} linhas, todos os meses batem")
-    return {"modo": "auditar", "linhas": sum(esperado.values()), "a_podar": a_podar}
+
+    total = sum(esperado.values())
+    print(f"\nOK: {total:,} linhas, todos os meses batem")
+    _avisa_no_dm(
+        [],
+        f":white_check_mark: Entrega Zanelato conferida: *{total:,} leads*, "
+        f"todos os {len(esperado)} meses batem."
+        + (f" ({a_podar:,} linhas aguardando a poda.)" if a_podar else ""))
+    return {"modo": "auditar", "linhas": total, "a_podar": a_podar}
 
 
 def main() -> int:

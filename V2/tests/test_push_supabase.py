@@ -315,6 +315,100 @@ def test_o_incremental_nao_inventa_janela_quando_o_destino_esta_vazio():
         'o incremental deveria RECUSAR rodar sem marca, não adivinhar uma janela')
 
 
+def _captura_dm(monkeypatch=None):
+    """Substitui o poster do Slack por um que só guarda o que seria enviado."""
+    enviados = []
+
+    def _poster(canal, blocos, texto):
+        enviados.append({"canal": canal, "blocos": blocos, "texto": texto})
+        return {"ok": True}
+    return enviados, _poster
+
+
+def test_a_auditoria_AVISA_no_DM_quando_diverge():
+    """Até 10/08/2026 a auditoria detectava, quebrava, e o erro morria no log do Cloud
+    Run. Verificado naquele dia: das 3 políticas de alerta do projeto, NENHUMA cobre
+    este job (a de `Cron falhou` pega o Scheduler não conseguir disparar, não o job
+    falhar por dentro). A defesa mais importante da entrega era invisível.
+    """
+    enviados, poster = _captura_dm()
+    orig = p._avisa_no_dm
+    p._avisa_no_dm = lambda linhas, resumo, **kw: poster("D_TESTE", linhas, resumo)
+    o_l, o_d = _com_dubles([["2026-08", 100]], [["2026-08", 90]])
+    try:
+        with pytest.raises(SystemExit):
+            p.auditar()
+    finally:
+        p.origem_leitura, p.destino = o_l, o_d
+        p._avisa_no_dm = orig
+    assert enviados, 'a auditoria divergiu e NÃO avisou ninguém'
+    assert "auditoria não bateu" in enviados[0]["texto"], (
+        'a mensagem tem que dizer o que aconteceu, não só alertar')
+    assert "--full" in enviados[0]["texto"], (
+        'a mensagem tem que dizer o que FAZER; alerta sem ação vira ruído')
+
+
+def test_o_DM_sai_ANTES_do_erro_que_mata_o_processo():
+    """A ordem aqui é o bug inteiro. `raise SystemExit` encerra o processo: se o aviso
+    fosse depois, ele nunca sairia, e o conserto teria a aparência de estar funcionando
+    (código presente, teste de conteúdo passando) sem nunca entregar uma mensagem."""
+    ordem = []
+    orig = p._avisa_no_dm
+    p._avisa_no_dm = lambda linhas, resumo, **kw: ordem.append("dm")
+    o_l, o_d = _com_dubles([["2026-08", 100]], [["2026-08", 90]])
+    try:
+        with pytest.raises(SystemExit):
+            p.auditar()
+        ordem.append("exit")
+    finally:
+        p.origem_leitura, p.destino = o_l, o_d
+        p._avisa_no_dm = orig
+    assert ordem == ["dm", "exit"], f'ordem errada: {ordem}'
+
+
+def test_a_auditoria_avisa_tambem_quando_BATE():
+    """Sem a linha de sucesso, silêncio quer dizer duas coisas ao mesmo tempo: nada
+    divergiu, ou o job não rodou. São exatamente as duas que precisam ser distinguidas,
+    e a segunda é a que já mordeu este projeto antes."""
+    enviados, poster = _captura_dm()
+    orig = p._avisa_no_dm
+    p._avisa_no_dm = lambda linhas, resumo, **kw: poster("D_TESTE", linhas, resumo)
+    iguais = [["2026-07", 100], ["2026-08", 50]]
+    o_l, o_d = _com_dubles(list(iguais), list(iguais))
+    try:
+        r = p.auditar()
+    finally:
+        p.origem_leitura, p.destino = o_l, o_d
+        p._avisa_no_dm = orig
+    assert r["linhas"] == 150
+    assert enviados, 'auditoria limpa não avisou nada: silêncio ambíguo de novo'
+    assert "150" in enviados[0]["texto"], 'a mensagem de sucesso tem que trazer o número'
+
+
+def test_o_aviso_do_DM_NUNCA_derruba_a_auditoria():
+    """Slack fora do ar não pode virar falha de entrega. A auditoria continua sendo a
+    fonte da verdade; o DM é só o mensageiro."""
+    def _explode(canal, blocos, texto):
+        raise RuntimeError("slack fora do ar")
+    r = p._avisa_no_dm(["x"], "y", poster=_explode, canal="D_TESTE")
+    assert r["ok"] is False and "slack fora do ar" in r["erro"]
+
+
+def test_o_DM_da_auditoria_nao_leva_score_nem_decil():
+    """A mensagem é contagem por mês. Se algum dia alguém colar detalhe de lead aqui,
+    isso sai do nosso ambiente para o Slack, que é o caminho mais fácil de vazar o que
+    é proibido entregar."""
+    import re
+    fonte = (Path(__file__).resolve().parents[1] / "scripts" /
+             "push_supabase_zanelato.py").read_text()
+    corpo = fonte[fonte.index("def _avisa_no_dm"):fonte.index("def main(")]
+    codigo = "\n".join(l for l in corpo.splitlines()
+                       if not l.strip().startswith("#"))
+    for proibida in ("lead_score", "decil", "score_champion", "hotleads_hot", "email"):
+        assert not re.search(rf"\b{proibida}\b", codigo), (
+            f'"{proibida}" apareceu no caminho do DM da auditoria')
+
+
 def test_a_poda_apaga_pela_MESMA_fronteira_que_a_carga_usa():
     """A poda é a única operação que APAGA dado do cliente, e a fronteira dela mudou de
     lugar: era calculada em Python, em UTC, e virou SQL no fuso de Brasília.
