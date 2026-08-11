@@ -49,6 +49,21 @@ def _fake(respostas, registro=None):
     return _f
 
 
+# Desde 11/08/2026 a drenagem tem um atalho: quando a métrica do Pub/Sub confirma
+# que não sobrou mensagem, ela pode parar já no primeiro pull vazio em vez de gastar
+# os `_DRAIN_EMPTY_PULLS` de confirmação. Os testes deste arquivo protegem o caminho
+# SEM esse atalho (a regra de sempre, que vale quando a métrica não responde), então
+# passam `SEM_ATALHO` explicitamente. São duas garantias diferentes:
+#
+#   - aqui:                          pull vazio SOZINHO nunca encerra a drenagem;
+#   - test_drain_atalho_fila_vazia:  o atalho só encurta, e só com resposta da fila.
+#
+# Passar explicitamente também deixa o teste hermético. Sem isso ele chamaria a API
+# de métricas de verdade e o resultado passaria a depender de haver credencial na
+# máquina e de a fila estar vazia naquele instante.
+SEM_ATALHO = lambda: False
+
+
 def test_drena_ate_parar_de_vir_resposta(monkeypatch):
     """Caso normal: continua puxando enquanto vier mensagem, e só desiste depois de
     `_DRAIN_EMPTY_PULLS` vazios CONSECUTIVOS.
@@ -60,7 +75,7 @@ def test_drena_ate_parar_de_vir_resposta(monkeypatch):
     volta para o primeiro vazio."""
     monkeypatch.setattr(pb, "process_pending_pubsub",
                         _fake([_rodada(250), _rodada(250), _rodada(37)]))
-    r = pb.drain_pending_pubsub(None, None, None)
+    r = pb.drain_pending_pubsub(None, None, None, fila_vazia_fn=SEM_ATALHO)
 
     assert r["rounds"] == 3 + pb._DRAIN_EMPTY_PULLS   # 3 com carga + os vazios exigidos
     assert r["drain_stop"] == "sem_resposta"
@@ -75,7 +90,7 @@ def test_fila_vazia_custa_exatamente_os_pulls_de_confirmacao(monkeypatch):
     5 em 5 minutos passa a gastar rodadas à toa; se derrubar para 1, volta o bug de
     31/07 que deixou 253 leads parados."""
     monkeypatch.setattr(pb, "process_pending_pubsub", _fake([]))
-    r = pb.drain_pending_pubsub(None, None, None)
+    r = pb.drain_pending_pubsub(None, None, None, fila_vazia_fn=SEM_ATALHO)
 
     assert r["rounds"] == pb._DRAIN_EMPTY_PULLS
     assert r["drain_stop"] == "sem_resposta"
@@ -85,7 +100,7 @@ def test_fila_vazia_custa_exatamente_os_pulls_de_confirmacao(monkeypatch):
 def test_para_no_teto_de_rodadas_e_avisa(monkeypatch):
     """Fila que nunca esvazia (publisher em loop) não pode prender a request."""
     monkeypatch.setattr(pb, "process_pending_pubsub", _fake([_rodada(250)] * 50))
-    r = pb.drain_pending_pubsub(None, None, None, max_rounds=3)
+    r = pb.drain_pending_pubsub(None, None, None, max_rounds=3, fila_vazia_fn=SEM_ATALHO)
 
     assert r["rounds"] == 3
     assert r["drain_stop"] == "teto_de_rodadas"
@@ -96,7 +111,7 @@ def test_para_no_teto_de_tempo(monkeypatch):
     """O prazo do Scheduler é 180s; estourar faria ele contar falha e reentregar.
     Sobrar mensagem pro próximo tick é o desfecho barato, e é o escolhido."""
     monkeypatch.setattr(pb, "process_pending_pubsub", _fake([_rodada(250)] * 50))
-    r = pb.drain_pending_pubsub(None, None, None, max_seconds=0.0, max_rounds=99)
+    r = pb.drain_pending_pubsub(None, None, None, max_seconds=0.0, max_rounds=99, fila_vazia_fn=SEM_ATALHO)
 
     assert r["rounds"] == 1                    # sai já na 1ª checagem de tempo
     assert r["drain_stop"] == "teto_de_tempo"
@@ -110,7 +125,7 @@ def test_repassa_os_argumentos_de_cada_rodada(monkeypatch):
                         _fake([_rodada(250)], registro=reg))
     sentinela = object()
     pb.drain_pending_pubsub(None, None, None, dry_run=True, batch=77,
-                            ledger_conn=sentinela)
+                            ledger_conn=sentinela, fila_vazia_fn=SEM_ATALHO)
 
     assert len(reg) == 1 + pb._DRAIN_EMPTY_PULLS
     for kw in reg:
@@ -123,7 +138,7 @@ def test_nao_soma_campos_booleanos(monkeypatch):
     """`dry_run` é bool; somar viraria 2 e o consumidor leria como verdadeiro estranho."""
     monkeypatch.setattr(pb, "process_pending_pubsub",
                         _fake([_rodada(10, dry_run=True), _rodada(0, dry_run=True)]))
-    r = pb.drain_pending_pubsub(None, None, None, dry_run=True)
+    r = pb.drain_pending_pubsub(None, None, None, dry_run=True, fila_vazia_fn=SEM_ATALHO)
 
     assert r["dry_run"] is True
     assert r["processed"] == 10
