@@ -219,3 +219,32 @@ def test_o_telefone_vira_os_8_ultimos_digitos_para_casar_venda():
     assert ing._tel8("+55 (11) 98765-4321") == "87654321"
     assert ing._tel8("1234") is None, "número curto deveria virar None, não lixo"
     assert ing._tel8(None) is None
+
+
+def test_NAO_existe_teto_de_linhas_por_rodada_e_isso_e_medido():
+    """Fatiar em lotes com avanço parcial da marca resolveria o caso "volume maior que o
+    job aguenta". Esse caso está 85x longe.
+
+    Cronometrado contra o Railway em 11/08/2026: 1 dia = 639 registros em 3,7s; 8 dias =
+    2.558 em 3,0s; 30 dias = 39.684 em 6,6s, mais 0,10s para montar em Python. Um atraso
+    catastrófico de 30 dias cabe em 7 segundos de um limite de 600.
+
+    Código para um problema que não existe é código que ninguém testa. Este teste existe
+    para que a decisão fique explícita: se um dia o AVISO começar a disparar, é aí que o
+    teto entra — não antes.
+    """
+    fonte = (Path(__file__).resolve().parents[1] / "scripts" /
+             "ingest_captacoes_railway.py").read_text()
+    assert "TIMEOUT_JOB_S" in fonte and "AVISA_ACIMA_DE" in fonte, (
+        "sem teto E sem aviso: estourar o limite voltaria a ser falha silenciosa")
+
+
+def test_o_aviso_dispara_ANTES_do_limite_e_nao_depois():
+    """Avisar quando já estourou não serve para nada: o job já morreu. O aviso tem que sair
+    com folga suficiente para alguém agir — daí a fração, e não um valor absoluto."""
+    assert 0 < ing.AVISA_ACIMA_DE < 1, "a fração tem que ser um pedaço do orçamento"
+    assert ing.AVISA_ACIMA_DE <= 0.7, (
+        "avisar com menos de 30% de folga deixa pouco espaço para reagir")
+    assert ing.TIMEOUT_JOB_S == 600, (
+        "o limite tem que casar com o `timeoutSeconds` do job no Cloud Run; se mudar lá, "
+        "muda aqui, senão o aviso mede contra um orçamento que não existe")

@@ -91,6 +91,7 @@ import argparse
 import os
 import ssl
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -109,6 +110,26 @@ SEM_LF = "SEM_LF"
 FOLGA_HORAS = 2
 LOTE = 500
 FUSO = "America/Sao_Paulo"
+
+# Limite do job no Cloud Run, e a fração dele a partir da qual esta rodada RECLAMA.
+#
+# NÃO existe teto de linhas por rodada, e é decisão medida. Em 11/08/2026, cronometrado
+# contra o Railway de verdade:
+#
+#     1 dia   ->    639 registros em 3,7s
+#     8 dias  ->  2.558 registros em 3,0s
+#    30 dias  -> 39.684 registros em 6,6s   (+ 0,10s para montar em Python)
+#
+# Um atraso catastrófico de 30 dias cabe em 7 segundos de um limite de 600. Fatiar em lotes
+# com avanço parcial da marca resolveria o caso "volume maior que o job aguenta", mas esse
+# caso está 85x longe, e código para um problema que não existe é código que ninguém testa.
+#
+# O que fica no lugar é o AVISO. Falhar por volume seria silencioso: o job morre no limite,
+# a transação é desfeita, a marca não avança e a rodada seguinte tenta o mesmo. A auditoria
+# diária pegaria a divergência, mas dias depois. Reclamar ao passar da metade do orçamento
+# de tempo dá aviso ANTES de quebrar, que é a diferença entre consertar e descobrir.
+TIMEOUT_JOB_S = 600
+AVISA_ACIMA_DE = 0.5
 
 # As colunas que este script escreve, na ordem do INSERT. `bought_45d`/`bought_ever` e
 # `ad_base`/`ad_name` NÃO entram: são preenchidas por outro processo (casamento com vendas
@@ -323,6 +344,7 @@ def main() -> int:
     ap.add_argument("--check", action="store_true", help="conta e não escreve")
     a = ap.parse_args()
 
+    inicio = time.monotonic()
     c = open_analytics_connection(timeout=1800)
     try:
         if a.desde:
@@ -378,6 +400,18 @@ def main() -> int:
             c.run("ROLLBACK")
             raise
         print(f"\n  {n:,} linhas gravadas · {delta:+,} de saldo na tabela")
+
+        # O aviso. Ver `TIMEOUT_JOB_S`: sem ele, estourar o limite é falha silenciosa.
+        gasto = time.monotonic() - inicio
+        fracao = gasto / TIMEOUT_JOB_S
+        print(f"  rodada levou {gasto:.1f}s de um limite de {TIMEOUT_JOB_S}s "
+              f"({fracao*100:.0f}% do orçamento)")
+        if fracao > AVISA_ACIMA_DE:
+            print(f"AVISO: esta rodada usou {fracao*100:.0f}% do tempo do job para "
+                  f"{len(montadas):,} linhas. Perto do limite, a rodada é MORTA no meio, a "
+                  f"transação é desfeita e a marca não avança — a seguinte tentaria o mesmo "
+                  f"volume e falharia igual. Se isto repetir, é hora de fatiar em lotes com "
+                  f"avanço parcial da marca.", file=sys.stderr)
         return 0
     finally:
         c.close()

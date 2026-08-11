@@ -162,50 +162,8 @@ def _admin():
 
 # ── consulta que monta a entrega ─────────────────────────────────────────────
 
-MAGRO_PESQUISA = {"tem_computador"}   # o único campo de pesquisa que o Supabase entrega
-
-
-def sql_fonte(janela: bool = False, magro: bool = False) -> str:
+def sql_fonte(janela: bool = False) -> str:
     """Uma linha por lead de 2026, com UTM, pesquisa, LF e marcador de compra.
-
-    `magro=True` produz AS MESMAS LINHAS com menos colunas: só o que a entrega do
-    Supabase (`push_supabase_zanelato.py`) realmente manda. Existem duas entregas
-    diferentes lendo esta função, e a do Supabase manda 11 colunas das 27 daqui.
-
-    O que `magro` corta, e por que cortar é seguro:
-
-    - **`lead_id`** (sha256 do e-mail com sal). Consequência prática: o job do Supabase
-      deixa de precisar do segredo `dash-lead-id-salt`. Ele pedia um segredo só para
-      calcular um hash que jogava fora.
-    - **`lf` e os dois LEFT JOIN em `analytics.launch_calendar`**. Este é o corte que
-      importa para o custo. O join casa um lead com TODA janela de captação que contém a
-      data dele, e três pares de janelas se sobrepõem em 2026 — então ele MULTIPLICA
-      linhas, e o `DISTINCT ON` existe para desfazer a multiplicação. Medido por
-      `EXPLAIN` em 10/08/2026: o braço 2 chegava ao `Sort` com 789.840 linhas para
-      ~455 mil de `analytics.cadastros`, e esse único `Sort` custava ~592 mil de um
-      total de 1,52 milhão (39% do plano inteiro).
-    - **`comprou` e os dois LEFT JOIN em `analytics.sales`**.
-    - **`entrou_no_grupo`, `grupo_whatsapp`, `entrou_no_grupo_em`**, sempre nulas.
-    - **8 das 9 colunas de pesquisa**, mantendo só `tem_computador`. Não muda linha
-      nenhuma e estreita a linha, que é onde o `Sort` gasta.
-
-    POR QUE UM PARÂMETRO E NÃO UMA SEGUNDA CONSULTA: duas definições da mesma entrega
-    divergem com o tempo — alguém conserta uma e esquece a outra, e o sintoma aparece
-    como coluna trocada no painel do cliente. Aqui a diferença entre as duas entregas é
-    UM booleano, e o teste de equivalência prova que as linhas são as mesmas.
-
-    AVISO PARA QUEM FOR MEXER: `magro` só pode remover COLUNA, nunca mudar quais LINHAS
-    saem. O calendário é o caso delicado: ele pode ser removido porque as linhas que ele
-    duplica são idênticas em tudo menos em `lf`, então o `DISTINCT ON` escolhia entre
-    cópias. Se algum dia o calendário passar a FILTRAR (deixar de ser LEFT JOIN), este
-    raciocínio cai.
-
-    `janela=True` acrescenta o recorte do que MUDOU desde `:desde`, para a carga
-    incremental de 5 em 5 minutos. É parâmetro desta função, e não uma segunda
-    consulta, de propósito: duas definições do formato da entrega divergiriam, e a
-    divergência apareceria como coluna trocada no painel do cliente. Uma definição,
-    um filtro opcional.
-
 
     São DOIS braços somados, e a distinção importa para quem lê a entrega:
 
@@ -267,8 +225,7 @@ def sql_fonte(janela: bool = False, magro: bool = False) -> str:
     - **comprou** é marcador, sem valor nem data: quanto entrou é informação de
       receita e não faz parte desta entrega.
     """
-    pesquisa = [(k, a) for k, a in PESQUISA
-                if not magro or a in MAGRO_PESQUISA]
+    pesquisa = list(PESQUISA)
     cols_pesquisa = ",\n           ".join(
         f"nullif(l.survey_responses->>'{chave}', '') AS {alias}"
         for chave, alias in pesquisa
@@ -280,30 +237,26 @@ def sql_fonte(janela: bool = False, magro: bool = False) -> str:
         f"NULL::text AS {alias}" for _, alias in pesquisa
     )
 
-    # Os pedaços que `magro` remove. Cada um aparece nos DOIS braços, e a única forma de
-    # não esquecer um lado é montá-los aqui, uma vez, e interpolar nos dois.
+    # Pedaços que aparecem nos DOIS braços. Montados aqui, uma vez, e interpolados nos
+    # dois: é a única forma de não esquecer um lado ao mexer.
     def _lead_id(ap):                       # `ap` = apelido da tabela no braço (l ou c)
-        return ("" if magro else
-                f"encode(sha256((:sal || lower({ap}.email))::bytea), 'hex') AS lead_id,\n           ")
-    col_lf = "" if magro else "cal.lf_name AS lf,\n           "
-    # A cauda vai INTEIRA num pedaço só, começando pela vírgula. Montada coluna por
-    # coluna, o modo magro deixaria uma vírgula solta depois da última coluna de
-    # pesquisa e o SQL nem parsearia.
-    cauda = "" if magro else (
+        return f"encode(sha256((:sal || lower({ap}.email))::bytea), 'hex') AS lead_id,\n           "
+    col_lf = "cal.lf_name AS lf,\n           "
+    # A cauda vai INTEIRA num pedaço só, começando pela vírgula: montada coluna por
+    # coluna, uma variação futura deixaria vírgula solta e o SQL nem parsearia.
+    cauda = (
         ",\n           (comp.email IS NOT NULL) AS comprou,"
         "\n           NULL::boolean AS entrou_no_grupo,"
         "\n           NULL::text AS grupo_whatsapp,"
         "\n           NULL::timestamp AS entrou_no_grupo_em")
 
     def _join_sales(ap):
-        return "" if magro else (
+        return (
             f"\n      LEFT JOIN (SELECT DISTINCT lower(email) AS email FROM analytics.sales"
             f"\n                  WHERE email IS NOT NULL) comp"
             f"\n             ON comp.email = lower({ap}.email)")
 
     def _join_cal(ap, col_data, por_id):
-        if magro:
-            return ""
         alvo = (f"cal.client_id = {ap}.client_id" if por_id
                 else f"cal.client_id = '{CLIENTE_CALENDARIO}'")
         return (f"\n      LEFT JOIN analytics.launch_calendar cal"
@@ -312,7 +265,7 @@ def sql_fonte(janela: bool = False, magro: bool = False) -> str:
 
     # Sem o calendário não há linha duplicada para desempatar, então o `cap_start DESC`
     # sai junto — deixá-lo referenciaria uma tabela que não está mais no FROM.
-    ord_cal = "" if magro else ", cal.cap_start DESC"
+    ord_cal = ", cal.cap_start DESC"
     # Recorte do que mudou. Reúne num só lugar TODAS as origens que fazem uma linha da
     # entrega mudar de valor, porque esquecer uma delas é o modo silencioso de falhar:
     # o cliente veria dado velho e ninguém saberia. As quatro são:
@@ -327,11 +280,7 @@ def sql_fonte(janela: bool = False, magro: bool = False) -> str:
     # O calendário de lançamento (`launch_calendar`) NÃO entra: ele muda a coluna `lf`
     # de linhas antigas sem tocar em nenhuma das quatro marcas acima. Quem cobre isso é
     # a passada de reconciliação diária, e é por isso que ela existe.
-    # No modo magro a venda NÃO entra: `comprou` não é entregue, então uma venda não faz
-    # nenhuma coluna mudar de valor. Mantê-la aqui reenviaria linhas idênticas — medido
-    # em 06/08/2026, 5.329 vendas num único dia, todas de compra antiga, virariam 5.329
-    # regravações sem efeito.
-    origem_venda = "" if magro else """
+    origem_venda = """
         UNION
         SELECT lower(email) FROM analytics.sales
          WHERE ingested_at >= :desde AND nullif(email,'') IS NOT NULL"""

@@ -198,6 +198,11 @@ def test_o_incremental_nao_inventa_janela_quando_o_destino_esta_vazio():
     terceiro. O certo é recusar e pedir a carga cheia."""
     class _DestinoVazio:
         def run(self, sql, **kw):
+            # Responde por TIPO de pergunta. Um dublê que devolve a mesma coisa para tudo
+            # fazia a trava de concorrência "negar" o lock e este teste passava a exercitar
+            # o caminho errado — dizia `ja_rodando` quando o assunto era destino vazio.
+            if "advisory_lock" in sql:
+                return [[True]]
             return [[None]]          # max(recebido_em) de tabela vazia
         def close(self):
             pass
@@ -463,3 +468,42 @@ def test_a_entrega_NAO_depende_mais_da_consulta_da_outra_entrega():
         "a entrega voltou a CHAMAR a consulta da entrega do `dash`")
     assert not re.search(r"\bsal\s*\(\s*\)", codigo), (
         "voltou a usar o sal do `lead_id`, que esta entrega não entrega")
+
+
+def test_o_incremental_SAI_quando_outra_rodada_esta_em_curso():
+    """Cron de 5 minutos com rodada que leva 6 não espera a anterior: o Cloud Run dispara as
+    duas. Duas rodadas gravando as mesmas chaves ao mesmo tempo é travamento ou trabalho
+    duplicado, e num cron que roda 288 vezes por dia isso deixa de ser hipótese.
+
+    A trava é `pg_try_advisory_lock` no banco DELES porque é o único ponto que as duas
+    rodadas concorrentes têm em comum. E é lock de SESSÃO: morre junto com a conexão, então
+    job morto no meio não deixa cadeado órfão para alguém destravar na mão.
+    """
+    tentou_gravar = []
+
+    class _Ocupado:
+        def run(self, sql, **kw):
+            if "advisory_lock" in sql:
+                return [[False]]              # outra rodada já tem a trava
+            tentou_gravar.append(sql)
+            return [[None]]
+        def close(self):
+            pass
+
+    orig = p.destino
+    p.destino = lambda porta=None: _Ocupado()
+    try:
+        r = p.incremental()
+    finally:
+        p.destino = orig
+    assert r.get("erro") == "ja_rodando"
+    assert not tentou_gravar, (
+        f"saiu pela trava mas ainda tocou o banco: {tentou_gravar}")
+
+
+def test_a_folga_do_incremental_e_pouco_maior_que_a_cadencia():
+    """A folga cobre a sobreposição entre rodadas. Era 15 minutos, o que numa cadência de 5
+    fazia cada linha ser reenviada ~3 vezes — não quebra nada (a gravação é idempotente), só
+    é desperdício. Muito menor que a cadência, porém, deixa buraco entre rodadas."""
+    assert 5 < p.FOLGA_MINUTOS <= 10, (
+        f"folga de {p.FOLGA_MINUTOS} min não casa com uma cadência de 5 minutos")

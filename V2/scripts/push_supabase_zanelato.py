@@ -125,7 +125,25 @@ PROJETO_GCP = "smart-ads-451319"
 
 DIAS = 90
 LOTE = 500
-FOLGA_MINUTOS = 15
+# 6 minutos: só um pouco mais que o intervalo do cron (5 min). Era 15, o que numa cadência
+# de 5 minutos fazia cada linha ser reenviada ~3 vezes — não quebra nada (a gravação é
+# idempotente), só é desperdício.
+#
+# A folga cobre TRÊS coisas, e a terceira é a que ninguém lembra:
+#
+#   1. rodada que falhou: sem sobreposição, a seguinte partiria do ponto novo e o intervalo
+#      da que falhou nunca seria enviado.
+#   2. rodada que foi PULADA pela trava de concorrência (ver `incremental`).
+#   3. RELÓGIOS DIFERENTES. A janela sai de `max(recebido_em)` da tabela DELES (relógio
+#      deles) e filtra `ingested_at` na NOSSA (relógio nosso). São dois relógios, e se o
+#      deles estiver adiantado a janela começaria no futuro em relação ao nosso carimbo e
+#      pularia linhas em silêncio.
+#
+#      Medido em 11/08/2026: o banco deles está +2,5 segundos à frente do nosso. A folga de
+#      360s cobre isso com 144x de margem. Fica o número em vez de "a folga cobre", porque
+#      sem medida essa afirmação é fé — e se algum dia a diferença crescer, é aqui que se
+#      compara.
+FOLGA_MINUTOS = 6
 
 # Fuso em que a coluna `data` é entregue. NÃO é preferência estética: até 10/08/2026 a
 # entrega saía em UTC, e a agência compara essa coluna com a planilha de leads dela e
@@ -346,9 +364,26 @@ def full() -> dict:
 
 
 def incremental(minutos: int = FOLGA_MINUTOS) -> dict:
-    """Só o que mudou desde a nossa última gravação. Roda de 5 em 5 minutos."""
+    """Só o que mudou desde a nossa última gravação. Roda de 5 em 5 minutos.
+
+    TRAVA CONTRA RODADAS SE ATROPELANDO: cron de 5 minutos com rodada que leva 6 não
+    espera a anterior — o Cloud Run dispara as duas. Duas rodadas gravando as mesmas
+    chaves ao mesmo tempo é travamento ou trabalho duplicado, e num cron que roda 288
+    vezes por dia isso deixa de ser hipótese.
+
+    A trava é um lock de sessão do Postgres no banco DELES (`pg_try_advisory_lock`), e é
+    ali de propósito: é o único ponto que as duas rodadas concorrentes têm em comum, e
+    lock de sessão morre junto com a conexão — se o job for morto no meio, a trava sai
+    sozinha, sem deixar cadeado órfão para alguém destravar na mão.
+    """
     dst = destino(porta=6543)          # pooler: eles indicaram esta para sync contínuo
     try:
+        # Número arbitrário mas FIXO: é a identidade da trava. Mudar isto faz duas versões
+        # do job deixarem de se ver.
+        if not dst.run("SELECT pg_try_advisory_lock(728411)")[0][0]:
+            print("outra rodada do incremental está em curso: saindo sem fazer nada. "
+                  "Não é erro — é a trava fazendo o trabalho dela.", file=sys.stderr)
+            return {"modo": "incremental", "erro": "ja_rodando"}
         marca = dst.run(f"SELECT max(recebido_em) FROM {TABELA_DESTINO}")[0][0]
         if marca is None:
             # Tabela vazia: pode ser primeira execução ou alguém truncou. Em nenhum dos
