@@ -968,6 +968,34 @@ def process_pending_pubsub(
     return summary
 
 
+def atalho_de_fila_ligado() -> bool:
+    """Interruptor do atalho de fila vazia, sem precisar de deploy pra desligar.
+
+    `DRAIN_USA_METRICA_DE_FILA=false` no serviço faz a drenagem voltar exatamente
+    ao comportamento anterior (três pulls vazios pra confirmar). É o rollback
+    barato caso o atalho se mostre ruim em produção.
+    """
+    return os.getenv('DRAIN_USA_METRICA_DE_FILA', 'true').strip().lower() in ('1', 'true', 'yes', 'sim')
+
+
+def fila_vazia() -> bool:
+    """Pergunta pra fila do Pub/Sub se sobrou alguma mensagem sem entregar.
+
+    True SÓ com resposta explícita de zero. Erro de rede, permissão negada,
+    métrica indisponível ou interruptor desligado devolvem False, que faz a
+    drenagem seguir a regra antiga. Nunca levanta: esta função roda no meio do
+    consumo de leads e uma exceção aqui pararia o scoring.
+    """
+    if not atalho_de_fila_ligado():
+        return False
+    try:
+        from src.monitoring.pubsub_backlog import fila_comprovadamente_vazia
+        return fila_comprovadamente_vazia(PUBSUB_PROJECT_ID, PUBSUB_SUBSCRIPTION_ID)
+    except Exception as e:
+        logger.warning(f"[pubsub_branch] atalho de fila indisponível ({e}), seguindo pelos pulls vazios")
+        return False
+
+
 def drain_pending_pubsub(
     subscriber,
     conn,
@@ -978,6 +1006,7 @@ def drain_pending_pubsub(
     ledger_conn=None,
     max_seconds: float = _DRAIN_SECONDS,
     max_rounds: int = _DRAIN_MAX_ROUNDS,
+    fila_vazia_fn=fila_vazia,
 ) -> Dict:
     """Repete `process_pending_pubsub` até a fila esvaziar (ou bater um dos tetos).
 
@@ -1004,6 +1033,24 @@ def drain_pending_pubsub(
     Por isso paramos só depois de `_DRAIN_EMPTY_PULLS` vazios seguidos, e mesmo assim
     logando: um vazio isolado é rotina, três seguidos ainda é palpite, não certeza.
 
+    ATALHO DE FILA VAZIA (11/08/2026). É exatamente a métrica citada acima que agora
+    permite parar no PRIMEIRO vazio, em vez de gastar mais dois pulls de 10s só pra
+    confirmar. Cada pull vazio segura a máquina ligada por 10 segundos (o servidor do
+    Pub/Sub faz espera longa e só devolve no prazo), e isso saía a ~R$ 46/mês pra
+    confirmar o óbvio na maioria das invocações: em 08/08/2026, 174 das 288 invocações
+    do dia não acharam nada e mesmo assim pagaram os 30 segundos.
+
+    O atalho é DELIBERADAMENTE assimétrico, e a assimetria é a salvaguarda:
+      - fila responde ZERO  → para agora (o pior caso é um lead que chegou nos últimos
+        segundos esperar o próximo tick de 5 min, custo aceito pelo operador);
+      - fila responde QUALQUER OUTRA COISA, inclusive erro → segue a regra antiga dos
+        `_DRAIN_EMPTY_PULLS` vazios.
+    Ou seja, a métrica só encurta, nunca prolonga. Com isso o custo desta rota nunca
+    fica pior do que era, e o comportamento em backlog continua idêntico ao de antes,
+    o que importa porque a métrica tem ~26s de atraso e, logo depois de uma drenagem,
+    ela ainda ecoa o backlog velho. Confiar nesse eco pra CONTINUAR puxando seria
+    reintroduzir o desperdício pela porta dos fundos.
+
     Devolve a soma das rodadas, mais `rounds` e `drain_stop` dizendo POR QUE parou —
     sem isso, "processou 2.000" não distingue fila drenada de teto batido, que é
     exatamente a diferença entre estar tudo bem e precisar de ação.
@@ -1028,6 +1075,12 @@ def drain_pending_pubsub(
 
         if not r.get("processed"):
             empty_pulls += 1
+            # Atalho: perguntar pra fila é mais barato e mais confiável do que
+            # deduzir de pulls vazios. Só vale pra PARAR ANTES (ver docstring);
+            # se a fila não responder zero, cai na regra antiga logo abaixo.
+            if empty_pulls < _DRAIN_EMPTY_PULLS and fila_vazia_fn():
+                stop = "fila_vazia_confirmada"
+                break
             if empty_pulls >= _DRAIN_EMPTY_PULLS:
                 stop = "sem_resposta"
                 break
@@ -1049,7 +1102,8 @@ def drain_pending_pubsub(
     logger.info(
         "[pubsub_branch] drenagem parou por %s após %d rodada(s)/%.0fs "
         "(processadas=%s, pulls vazios seguidos=%d) — `sem_resposta` NÃO garante fila "
-        "vazia; conferir num_undelivered_messages se houver suspeita de backlog",
+        "vazia (é palpite de pull); só `fila_vazia_confirmada` veio da métrica "
+        "num_undelivered_messages. Suspeita de backlog: conferir a métrica",
         stop, rounds, total["drain_seconds"], total.get("processed"), empty_pulls,
     )
     return total
