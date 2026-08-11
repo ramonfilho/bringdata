@@ -86,9 +86,33 @@ derivadas**, porque as duas são reconstruídas de madrugada. Tem que ler o ledg
 | Consumidor | Lê | Por quê |
 |---|---|---|
 | Pipeline de treino | `analytics.leads` | é o universo de treino |
-| Entrega para a agência | as três | derivada quando existe, ledger para o lead do dia |
+| Entrega para a agência de tráfego | **`analytics.captacoes`, só ela** | fonte única desde 11/08/2026; antes somava as três |
+| Nota do criativo | `analytics.captacoes` | histórico de captação com desfecho |
 | Contagem de volume real de captação | `analytics.cadastros` | é a única com quem não respondeu |
 | Relatórios de decil e score | `public.registros_ml` | é onde score e decil moram |
+
+### A QUARTA tabela de lead: `analytics.captacoes`
+
+Ela não entra no desenho acima porque não vem daquela cadeia. As três de cima nascem da
+PESQUISA; a `captacoes` nasce do CADASTRO, direto do Railway (`Client` LEFT JOIN
+`UTMTracking`), por `scripts/ingest_captacoes_railway.py`.
+
+```
+   Railway: Client (todo mundo)  +  UTMTracking (a campanha)
+                 │
+                 ▼
+   analytics.captacoes ......... uma linha por INSCRIÇÃO.
+   (chave lf+email+origem_id)    Chega em minutos. É a fonte da entrega
+                                 para a agência e da nota do criativo.
+```
+
+O grão dela é o único que permite a MESMA pessoa aparecer duas vezes no mesmo lançamento —
+as outras três colapsam por pessoa ou por (pessoa, dia). Foi essa a razão da mudança de
+chave em 11/08/2026: a agência precisa ver o recadastro.
+
+Cuidado ao contar gente nela: 505 mil linhas NÃO são 505 mil pessoas. Quem for contar
+público tem que deduplicar por e-mail — `read_captacoes_audience` já faz, e `nota_criativo`
+deduplica por (pessoa, criativo, dia) porque a nota é uma taxa.
 """
 
 # A ÚNICA parte manual. Uma linha por tabela dizendo para que ela serve — o resto o
@@ -133,8 +157,13 @@ PARA_QUE_SERVE = {
         "abr28, lado a lado — 418 linhas. Serviu para comparar os dois na mesma régua; "
         "não é alimentada por nada, é registro de uma análise.",
     "analytics.captacoes":
-        "Histórico de captação no grão lead x LANÇAMENTO, com o anúncio que trouxe cada "
-        "um e se comprou. Montada das planilhas do Drive. É a base da nota do criativo.",
+        "Histórico de captação, uma linha por INSCRIÇÃO (chave `lf, chave, origem_id`). É a "
+        "FONTE ÚNICA da entrega de leads para a agência de tráfego e a base da nota do "
+        "criativo. Alimentada por `ingest_captacoes_railway.py` a partir do Railway "
+        "(`Client` LEFT JOIN `UTMTracking`) a cada 5 min; as ~503 mil linhas antigas vieram "
+        "das planilhas do Drive (coluna `planilha` guarda a procedência). Até 11/08/2026 "
+        "não tinha escritor nenhum no repositório — por isso parou sozinha em 03/08 e o "
+        "LF64 ficou com ZERO linhas com o lançamento rodando.",
     "analytics.sales":
         "Vendas de todos os gateways (Guru, TMB, Boletex, Asaas, Hotmart), já unificadas.",
     "analytics.sales_tmb_risk":

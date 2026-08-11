@@ -143,7 +143,11 @@ def preencher(c) -> None:
     print(f"\n{falta:,} linhas sem url. Lotes de {LOTE:,}.", flush=True)
     total = 0
     while True:
-        n = c.run(f"""
+        # `run()` devolve as LINHAS de um SELECT; num UPDATE devolve None. Ler o retorno
+        # como contagem fazia o laço achar que nada mudou e parar na primeira volta — e o
+        # script terminava imprimindo "OK: 0 URLs preenchidas", que é falha se anunciando
+        # como sucesso. A contagem de verdade está em `row_count`.
+        c.run(f"""
             WITH alvo AS (
               SELECT cap.ctid, m.url
                 FROM analytics.captacoes cap
@@ -154,7 +158,7 @@ def preencher(c) -> None:
             UPDATE analytics.captacoes c
                SET utm_url = alvo.url
               FROM alvo WHERE c.ctid = alvo.ctid""")
-        feitas = int(n or 0)
+        feitas = int(c.row_count or 0)
         total += feitas
         print(f"    +{feitas:,} (total {total:,})", flush=True)
         if feitas == 0:

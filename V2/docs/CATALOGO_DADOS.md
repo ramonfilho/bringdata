@@ -6,23 +6,23 @@ As partes escritas por gente são duas, as duas dentro do script: a coluna *Para
 
 **Como ler a coluna Estado:** 🟢 escrita nos últimos 2 dias · 🟡 parada há até 15 dias · 🔴 parada há mais de 15 dias · ⬜ vazia. Parada não quer dizer quebrada: uma tabela de captação fica parada de propósito entre lançamentos. Quer dizer *confira antes de confiar*.
 
-**23 tabelas** · 8 escritas nos últimos 2 dias · 3 paradas há mais de 15 dias.
+**23 tabelas** · 9 escritas nos últimos 2 dias · 3 paradas há mais de 15 dias.
 
 ## Schema `analytics` (18 tabelas)
 
 | Tabela | Linhas | Estado | Última escrita | Janela dos dados | Para que serve |
 |---|---:|---|---|---|---|
-| `captacoes` | 503,438 | 🟡 8d sem escrita | 2026-08-03 | 2024-12-30 a 2026-08-03 | Histórico de captação no grão lead x LANÇAMENTO, com o anúncio que trouxe cada um e se comprou. Montada das planilhas do Drive. É a base da nota do criativo. |
+| `captacoes` | 505,371 | 🟢 viva | 2026-08-11 | 2024-12-30 a 2026-08-11 | Histórico de captação, uma linha por INSCRIÇÃO (chave `lf, chave, origem_id`). É a FONTE ÚNICA da entrega de leads para a agência de tráfego e a base da nota do criativo. Alimentada por `ingest_captacoes_railway.py` a partir do Railway (`Client` LEFT JOIN `UTMTracking`) a cada 5 min; as ~503 mil linhas antigas vieram das planilhas do Drive (coluna `planilha` guarda a procedência). Até 11/08/2026 não tinha escritor nenhum no repositório — por isso parou sozinha em 03/08 e o LF64 ficou com ZERO linhas com o lançamento rodando. |
 | `cadastros` | 455,679 | 🟢 viva | 2026-08-11 | 2024-12-30 a 2026-08-11 | Espinha de TODOS os cadastros, respondentes ou não, uma linha por PESSOA. Serve para contar volume real de captação e casar compra. **Não é base de treino**: a marca `is_respondent` dela é calculada perguntando se a pessoa está em `analytics.leads`. |
 | `leads` | 367,289 | 🟢 viva | 2026-08-11 | 2024-12-30 a 2026-08-11 | Universo de treino: os leads que responderam a pesquisa, unificados de CINCO fontes por `leads_unify.py` (a prioridade 1 é `registros_ml`). É daqui que o pipeline de treino lê. Uma linha por (e-mail, dia). **Não é a tabela de todos os leads** — quem não respondeu não está aqui, está em `analytics.cadastros`. |
 | `leads_provenance` | 367,289 | 🟢 viva | 2026-08-11 | 2026-06-30 a 2026-08-11 | De qual fonte veio cada lead do universo de treino. Trilha de lineage. |
 | `hotleads_seal` | 323,134 | ❔ sem coluna de data | - | - | Selo do HotLeads da Hotmart por lead: se a pessoa já comprou algo na plataforma. |
-| `url_captura_legado` | 101,389 | ❔ sem coluna de data | - | - | **SEM DESCRIÇÃO** (escrever no script) |
+| `url_captura_legado` | 101,389 | ❔ sem coluna de data | - | - | Repescagem da URL de captura de JANEIRO e fevereiro/2026, montada em 09/08/2026 por `scripts/recupera_url_legado.py` a partir do dump do Cloud SQL de 25/02. Estática de propósito: é histórico recuperado, não fonte viva. Existe porque a URL daquele período morava em `leads_capi.event_source_url`, que hoje está vazia — o dado não se perdeu, deixou de ser copiado adiante numa migração de schema. Levou janeiro de 0,9% para 98,6% de cobertura na entrega da agência. |
 | `ad_spend` | 78,308 | 🟢 viva | 2026-08-11 | - | Gasto por anúncio e por dia, vindo da API da Meta. Denominador do ROAS. |
 | `sales` | 19,714 | 🟢 viva | 2026-08-11 | 2022-11-18 a 2026-08-11 | Vendas de todos os gateways (Guru, TMB, Boletex, Asaas, Hotmart), já unificadas. |
 | `sales_tmb_risk` | 6,650 | 🔴 41d sem escrita | 2026-07-01 | - | Grau de risco de inadimplência das vendas por boleto da TMB. |
 | `validation_metrics` | 2,746 | 🟢 viva | 2026-08-10 | 2026-06-30 a 2026-08-10 | Métricas de cada rodada de validação. |
-| `decis_backfill_jul24` | 418 | 🔴 21d sem escrita | 2026-07-21 | 2026-07-21 a 2026-07-21 | **SEM DESCRIÇÃO** (escrever no script) |
+| `decis_backfill_jul24` | 418 | 🔴 21d sem escrita | 2026-07-21 | 2026-07-21 a 2026-07-21 | Foto pontual (21/07/2026) do decil do MESMO lead pelos dois modelos, jul24 e abr28, lado a lado — 418 linhas. Serviu para comparar os dois na mesma régua; não é alimentada por nada, é registro de uma análise. |
 | `transcricoes` | 101 | 🟡 6d sem escrita | 2026-08-05 | - | Transcrição da fala dos vídeos dos criativos, com duração e contagem de palavras. Alimenta o palpite para criativo estreante. |
 | `validation_runs` | 67 | 🟢 viva | 2026-08-10 | 2026-06-30 a 2026-08-10 | Cabeçalho de cada rodada de validação do modelo. |
 | `campaign_labels` | 50 | ❔ sem coluna de data | - | - | Rótulo de cada campanha por qual MODELO a tocou, para o relatório saber a quem creditar cada lead. |
@@ -38,7 +38,7 @@ As partes escritas por gente são duas, as duas dentro do script: a coluna *Para
 | `scores_historicos` | 221,415 | ❔ sem coluna de data | - | - | Score e decil recalculados retroativamente para leads antigos, quando um modelo novo precisa pontuar quem já tinha passado. |
 | `leads_historico` | 202,803 | ❔ sem coluna de data | - | - | Backup da outra tabela de leads do Railway (nov/2025 a jun/2026), com a pesquisa em snake_case. Só histórico. |
 | `lead_legado` | 142,943 | 🔴 58d sem escrita | 2026-06-14 | 2026-02-18 a 2026-06-14 | Backup da tabela de leads do front antigo do Railway (fev a jun/2026), com a pesquisa em camelCase. Só histórico. |
-| `registros_ml` | 86,512 | 🟢 viva | 2026-08-11 | 2026-05-23 a 2026-08-11 | O ledger do ML. O consumer do Pub/Sub escreve uma linha por lead no momento em que o scoreia. É a fonte VIVA de decil, score, variante do A/B, respostas da pesquisa e status do envio ao Meta. **É a prioridade 1 de `analytics.leads`** — as duas cobrem a mesma gente de 23/05/2026 pra cá; ver Relações entre tabelas. |
+| `registros_ml` | 86,708 | 🟢 viva | 2026-08-11 | 2026-05-23 a 2026-08-11 | O ledger do ML. O consumer do Pub/Sub escreve uma linha por lead no momento em que o scoreia. É a fonte VIVA de decil, score, variante do A/B, respostas da pesquisa e status do envio ao Meta. **É a prioridade 1 de `analytics.leads`** — as duas cobrem a mesma gente de 23/05/2026 pra cá; ver Relações entre tabelas. |
 | `lead_surveys_stg` | 1,624 | ❔ sem coluna de data | - | - | Área de passagem da migração de schema de maio/2026. Morta. |
 
 ## Relações entre tabelas
@@ -89,9 +89,33 @@ derivadas**, porque as duas são reconstruídas de madrugada. Tem que ler o ledg
 | Consumidor | Lê | Por quê |
 |---|---|---|
 | Pipeline de treino | `analytics.leads` | é o universo de treino |
-| Entrega para a agência | as três | derivada quando existe, ledger para o lead do dia |
+| Entrega para a agência de tráfego | **`analytics.captacoes`, só ela** | fonte única desde 11/08/2026; antes somava as três |
+| Nota do criativo | `analytics.captacoes` | histórico de captação com desfecho |
 | Contagem de volume real de captação | `analytics.cadastros` | é a única com quem não respondeu |
 | Relatórios de decil e score | `public.registros_ml` | é onde score e decil moram |
+
+### A QUARTA tabela de lead: `analytics.captacoes`
+
+Ela não entra no desenho acima porque não vem daquela cadeia. As três de cima nascem da
+PESQUISA; a `captacoes` nasce do CADASTRO, direto do Railway (`Client` LEFT JOIN
+`UTMTracking`), por `scripts/ingest_captacoes_railway.py`.
+
+```
+   Railway: Client (todo mundo)  +  UTMTracking (a campanha)
+                 │
+                 ▼
+   analytics.captacoes ......... uma linha por INSCRIÇÃO.
+   (chave lf+email+origem_id)    Chega em minutos. É a fonte da entrega
+                                 para a agência e da nota do criativo.
+```
+
+O grão dela é o único que permite a MESMA pessoa aparecer duas vezes no mesmo lançamento —
+as outras três colapsam por pessoa ou por (pessoa, dia). Foi essa a razão da mudança de
+chave em 11/08/2026: a agência precisa ver o recadastro.
+
+Cuidado ao contar gente nela: 505 mil linhas NÃO são 505 mil pessoas. Quem for contar
+público tem que deduplicar por e-mail — `read_captacoes_audience` já faz, e `nota_criativo`
+deduplica por (pessoa, criativo, dia) porque a nota é uma taxa.
 
 ## Colunas de cada tabela
 
@@ -109,7 +133,7 @@ derivadas**, porque as duas são reconstruídas de madrugada. Tem que ler o ledg
 
 ### `analytics.captacoes`
 
-`lf`, `chave`, `email`, `phone`, `phone8`, `nome`, `captured_at`, `utm_source`, `utm_campaign`, `utm_content`, `ad_base`, `has_computer`, `planilha`, `bought_45d`, `bought_ever`, `ingested_at`, `ad_name`
+`lf`, `chave`, `email`, `phone`, `phone8`, `nome`, `captured_at`, `utm_source`, `utm_campaign`, `utm_content`, `ad_base`, `has_computer`, `planilha`, `bought_45d`, `bought_ever`, `ingested_at`, `ad_name`, `utm_medium`, `utm_term`, `utm_url`, `origem_id`
 
 ### `analytics.decis_backfill_jul24`
 

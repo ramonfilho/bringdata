@@ -5,7 +5,7 @@ tráfego (Zanelato). Elas fazem a mesma coisa por caminhos opostos, e **só uma 
 ligada**. Este documento existe porque as duas dividem código, e mexer numa sem saber da
 outra quebra a que ninguém estava olhando.
 
-Última verificação contra produção: **2026-08-10**.
+Última verificação contra produção: **2026-08-11**.
 
 | | Fonte A — banco `dash` | Fonte B — Supabase deles |
 |---|---|---|
@@ -13,8 +13,9 @@ outra quebra a que ninguém estava olhando.
 | **Quem conecta em quem** | eles leem o nosso | nós escrevemos no deles |
 | **Estado** | ⏸ **desligada** | ✅ **no ar** |
 | **Script** | `V2/scripts/provisiona_dash_zanelato.py` | `V2/scripts/push_supabase_zanelato.py` |
-| **O que dispara** | cron `dash-zanelato-refresh-daily` (PAUSADO) | 3 jobs do Cloud Run |
+| **O que dispara** | cron `dash-zanelato-refresh-daily` (PAUSADO) | 4 jobs do Cloud Run |
 | **Tabelas de destino** | `dash.leads_2026`, `dash.qualidade_por_anuncio` | `public.leads_inbound`, `public.scores_inbound` |
+| **De onde LÊ** | 3 tabelas + calendário + vendas | **só `analytics.captacoes`** |
 | **Colunas de lead** | 27 | 11 |
 | **Janela** | ano de 2026 inteiro | últimos 90 dias |
 
@@ -59,13 +60,17 @@ foram removidos**, de propósito: se a Fonte B tiver problema, religar é despau
 
 **Script:** `V2/scripts/push_supabase_zanelato.py`
 
-Três jobs do Cloud Run, cada um com um horário:
+Quatro jobs do Cloud Run. **A ordem dos dois primeiros importa:**
 
 | Job | Quando | O que faz |
 |---|---|---|
-| `zanelato-supabase-incremental` | de hora em hora | manda só o que mudou desde a nossa última gravação |
+| `captacoes-ingest-railway` | 5 min | Railway → nossa `captacoes` (`ingest_captacoes_railway.py`) |
+| `zanelato-supabase-incremental` | 5 min, **depois** | nossa `captacoes` → Supabase deles |
 | `zanelato-supabase-podar` | 1x/dia | apaga o que passou de 90 dias |
-| `zanelato-supabase-auditar` | 1x/dia | conta as duas pontas por mês e avisa no DM |
+| `zanelato-supabase-auditar` | 1x/dia | conta as duas pontas por mês e **avisa no DM** |
+
+Se a entrega rodar antes da ingestão, ela manda o estado velho e o lead novo só chega na
+rodada seguinte.
 
 Existe um quarto modo, `--full`, que manda os 90 dias inteiros. Não tem cron: é para a
 primeira carga e para recuperação.
@@ -111,46 +116,134 @@ sem erro nenhum aparecendo.
 
 ---
 
-## De onde saem os dados (Fonte B)
+## De onde saem os dados (Fonte B) — mudou em 11/08/2026
 
-Sete tabelas nossas, e só **três dão lead**:
+**UMA tabela: `analytics.captacoes`.** Nada mais.
 
-| tabela | quem vem dela | viva? |
+```
+Railway (Client LEFT JOIN UTMTracking)
+         ↓  scripts/ingest_captacoes_railway.py   (job, 5 min)
+   analytics.captacoes          ← a nossa tabela, uma linha por INSCRIÇÃO
+         ↓  scripts/push_supabase_zanelato.py     (job, 5 min, logo depois)
+   Supabase deles: public.leads_inbound
+```
+
+A ordem dos dois jobs importa: se a entrega rodar antes da ingestão, ela manda o estado
+velho e o lead novo só chega 5 minutos depois.
+
+### Por que uma fonte só
+
+Antes eram TRÊS somadas num `UNION` com desempate por prioridade (`analytics.leads` para
+respondente, `analytics.cadastros` para não-respondente, o ledger `registros_ml` para o lead
+do dia), com a consulta herdada da Fonte A. Funcionava, e era difícil de explicar: a mesma
+coluna podia vir de três lugares com regras diferentes, e responder "de onde saiu este lead"
+exigia ler três braços.
+
+### E SEM enriquecimento na hora de entregar
+
+**Regra do cliente:** se o dado falta no lead, ele falta na tabela da agência. A versão
+anterior preenchia `utm_url` de fontes de fora (o ledger, a `lead_legado`, a repescagem de
+backup) no momento de entregar.
+
+O motivo de tirar: remendo na entrega faz a tabela do cliente parecer melhor do que o dado
+é, e esconde o que precisa ser consertado na origem. Foi assim que a falha de cobertura do
+front em 05-06/08/2026 apareceu. **Completar dado é trabalho da INGESTÃO**, dentro da
+`captacoes`, num lugar só e igual para todo consumidor —
+`scripts/completa_url_captacoes.py` faz isso para a `utm_url` do histórico.
+
+### O grão: uma linha por inscrição, e o limite honesto dele
+
+A chave da `captacoes` saiu de `(lf, chave)` para `(lf, chave, origem_id)`. Era a chave
+antiga que PROIBIA a mesma pessoa duas vezes no mesmo lançamento.
+
+`origem_id` é `NOT NULL` de propósito: em Postgres dois NULL **não** conflitam num índice
+único, então discriminador nulável faria a ingestão reinserir as mesmas linhas para sempre,
+sem erro nenhum.
+
+Mas o Railway só registra recadastro parcialmente:
+
+| tabela | linhas por pessoa | |
 |---|---|---|
-| `analytics.leads` | quem respondeu a pesquisa | não, refeita 09:00 |
-| `analytics.cadastros` | quem **não** respondeu | não, refeita 10:00 |
-| `public.registros_ml` | quem respondeu, **em minutos** | **sim, tempo real** |
+| `Client` | **1,00** | não sabe dizer que alguém se inscreveu duas vezes |
+| `UTMTracking` | 1,06 | 7.328 pessoas com 2+ eventos, cada um com data e UTM |
 
-As outras quatro só completam campo: `public.lead_legado` e
-`analytics.url_captura_legado` preenchem `utm_url`; `analytics.sales` e
-`analytics.launch_calendar` são usadas **apenas** pela Fonte A (ver acoplamento abaixo).
+Então "uma linha por inscrição" é, na prática: pessoa com N eventos → N linhas; pessoa sem
+evento → 1 linha com UTM nula. É o teto da fonte, não uma escolha.
 
-O braço de `registros_ml` entrou em 10/08/2026. Antes dele, as duas primeiras tabelas
-serem reconstruídas uma vez por dia significava que **o lead de hoje só chegava amanhã**,
-para uma agência que abre o painel várias vezes ao dia para decidir verba. Medido no dia:
-165 leads estavam no ledger e ausentes das derivadas, e a entrega do dia tinha 33 linhas
-contra 215 na planilha deles.
+**Efeito prático medido:** no backfill de 04 a 11/08, 1.936 linhas para 1.923 pessoas
+(1,007 por pessoa). O recadastro aparece mais ENTRE lançamentos, que a chave antiga já
+permitia. Quem muda a contagem para a agência é o **não-respondente**, não o recadastro.
 
-### O que AINDA falta em tempo real
+### `SEM_LF`: a sentinela de quem cai entre lançamentos
 
-`registros_ml` é **só respondente** (medido: 244 de 244 linhas de hoje têm a pesquisa
-preenchida). Quem se cadastrou e não respondeu só aparece no dia seguinte, via
-`analytics.cadastros`.
+`lf` sai do calendário por data de captação e é `NOT NULL`. Existe cadastro FORA de qualquer
+janela: 04 a 06/08/2026 cai entre o fim do DEV21 (03/08) e o início do LF64 (07/08), e são
+377 leads. Eles entram com `lf = 'SEM_LF'`, não descartados — a agência pagou por eles.
 
-A tabela viva com **não-respondente** existe e é nossa: **Railway `Client`**. Medido em
-10/08/2026, ela tinha 294 cadastros no dia contra 244 respondentes no ledger. Trazer
-esses ~50 esbarra em dois problemas que precisam ser resolvidos ANTES:
+### A folga da janela é de HORAS, e o número é medido
 
-1. **A origem vem pobre.** `Client` + `UTMTracking` dão `source` em 71,7% e `campaign`
-   em 68,9%, contra 100% e 91,9% no ledger. A diferença é o nosso preenchimento pelo
-   slug da página (`cap-meta` → facebook-ads), que roda **só no caminho da pesquisa**
-   (`src/scoring/service.py`, `api/pubsub_branch.py`) e preenche **só `source`**.
-2. **A data não bate.** `Client.createdAt` é o primeiro cadastro; `cadastros.first_seen_at`
-   é a primeira vez que a pessoa foi vista, na vida. Para quem já se cadastrou antes, são
-   meses de diferença. Como o `DELETE` é por (email, data), isso **duplicaria** em vez de
-   substituir.
+Atraso da `UTMTracking` em relação ao `Client`, sobre 36.621 cadastros de 30 dias:
 
----
+| quando a UTM chegou | |
+|---|---|
+| antes ou junto | 0,2% |
+| até 1 HORA | **98,3%** |
+| entre 1h e 48h | **0,0%** |
+| depois de 48h | 6 casos em 36.621 |
+| nunca | 1,6% |
+
+Por isso a folga da ingestão é de 2 horas. A primeira versão usava 48, que era chute e
+errava por um fator de 48.
+
+> **CUIDADO ao ler cobertura baixa como atraso.** Os cadastros dos últimos 7 dias apareciam
+> com 78,2% de UTM contra 98,4% nos de 30 dias, e é tentador aumentar a folga. Não era
+> atraso: por semana, a taxa SEM nenhuma UTM ficou entre 0,2% e 1,7% durante oito semanas
+> (01/06 a 27/07) e saltou para 8,4% em 03/08 e 5,4% em 10/08. Degrau, não curva: falha de
+> cobertura no front. **Folga nenhuma conserta dado que nunca foi gravado.**
+
+### Sem teto por rodada, com AVISO
+
+Cronometrado contra o Railway: 1 dia = 639 registros em 3,7s; 8 dias = 2.558 em 3,0s;
+**30 dias = 39.684 em 6,6s**. Um atraso catastrófico de 30 dias cabe em 7 segundos de um
+limite de 600 — o caso está 85x longe, e código para problema que não existe é código que
+ninguém testa.
+
+O que existe é o aviso: a rodada reporta quanto do orçamento de tempo usou e **reclama acima
+de 50%**. Sem ele, estourar seria silencioso — o job morre, a transação é desfeita, a marca
+não avança e a rodada seguinte tenta o mesmo volume.
+
+### A trava de concorrência
+
+Cron de 5 minutos com rodada de 6 não espera a anterior: o Cloud Run dispara as duas.
+`pg_try_advisory_lock` no banco DELES, porque é o único ponto que as duas têm em comum, e
+lock de SESSÃO porque morre com a conexão — job morto não deixa cadeado órfão.
+
+**Não há cascata:** rodada pulada não acumula, porque a seguinte parte da marca que a
+anterior deixou. E rodada pendurada é morta pelo `timeoutSeconds=600` do job.
+
+### Os dois relógios
+
+A janela sai de `max(recebido_em)` da tabela DELES e filtra `ingested_at` na NOSSA. São dois
+relógios: se o deles estiver adiantado, a janela começaria no futuro em relação ao nosso
+carimbo e pularia linhas em silêncio. Medido: **+2,5 segundos** de diferença contra 360s de
+folga, 144x de margem.
+
+### `ingested_at` NÃO é a data do lead
+
+`captured_at` é a data fiel da entrada, e é ela que vai na coluna `data`. `ingested_at` é o
+carimbo da NOSSA escrita, e é por ele que o incremental filtra — um lead de ontem cuja UTM
+chegou hoje tem `captured_at` de ontem, e filtrando pela data do lead ele nunca mais seria
+reenviado, ficando sem campanha para sempre.
+
+### O que ainda falta em tempo real
+
+`Client.hasComputer` **parou de ser gravado pelo front**: 13% em maio, **0,0% em junho,
+julho e agosto**. Não está escondido em JSON (procurado em `Activity.metadata`,
+`Client.device` e no log do payload cru: zero menções a "comput" em 30 dias de payload).
+
+O dado CHEGA no nosso webhook (no ledger é 100%), então o front tem a informação. **Pedido
+aberto:** voltar a preencher `Client.hasComputer` e não remover a coluna. Do nosso lado nada
+muda: `leads_unify` já lê de lá.
 
 ## O acoplamento entre as duas (leia antes de mexer)
 
@@ -225,16 +318,31 @@ quando o job roda e falha por dentro.
 
 ## Estado pendente
 
-- [ ] Ligar `SLACK_BOT_TOKEN` no job `zanelato-supabase-auditar` (o segredo
-      `slack-bot-token` já existe). Sem ele o aviso registra o erro e segue.
-- [ ] Tirar `dash-lead-id-salt` do job do Supabase — o modo magro não usa mais.
-- [ ] Popular `public.scores_inbound` (criada por eles com 7 colunas e chave única em
-      `(tipo, chave)`, ainda **vazia**).
-- [ ] Decidir a cadência do incremental. Está de hora em hora; com o ledger vivo, 5
-      minutos passou a fazer sentido.
-- [ ] Decidir se o não-respondente do dia entra via Railway `Client` (ver os dois
-      problemas na seção acima).
-- [ ] Pedir a eles o índice único em `(email, data)`.
+**No front (pedido a eles)**
+- [ ] Voltar a preencher `Client.hasComputer` no Railway, e **não remover a coluna** (0,0%
+      desde junho; o dado chega no nosso webhook, então eles têm a informação).
+- [ ] Consertar a cobertura de UTM que caiu em 03/08 (de 0,2-1,7% sem UTM em oito semanas
+      para 8,4%). Já em recuperação: 98,6% em 11/08.
+- [ ] Não mexer em `Client` e `UTMTracking` sem avisar — são as duas vivas de que a ingestão
+      depende. E não apagar `leads_capi`: é a única do Railway sem cópia nossa (300 mil
+      linhas). Precedente: `leads_capi.event_source_url` esvaziou numa migração de schema e
+      recuperar a URL de janeiro exigiu um backup de fevereiro.
+
+**Deles (Supabase)**
+- [ ] `CREATE UNIQUE INDEX ON public.leads_inbound (email, data)` — uma linha, dispensa o
+      apaga-e-insere.
+- [ ] `public.scores_inbound` criada com 7 colunas e chave única, ainda **vazia**.
+
+**Nosso**
+- [ ] Ligar `SLACK_BOT_TOKEN` no job de auditoria (o segredo `slack-bot-token` já existe).
+      Sem ele o aviso registra o erro e segue.
+- [ ] Levar o AVISO de teto da ingestão para o DM. Hoje ele sai só em `stderr`, o que
+      repete o problema que a auditoria já teve: aviso que ninguém vê.
+- [ ] Copiar `leads_capi` do Railway para o nosso banco.
+- [ ] Completar `utm_medium` e `utm_term` do histórico. Fonte: `UTMTracking`, com 143 mil
+      linhas contra 503 mil da `captacoes` — recuperação PARCIAL por construção, e merece a
+      própria medição antes.
+- [ ] Aposentar de vez a Fonte A, ou decidir mantê-la como plano B por escrito.
 
 ## Onde olhar no código
 
@@ -244,4 +352,8 @@ quando o job roda e falha por dentro.
 | Fonte B (4 modos, auditoria, aviso no DM) | `V2/scripts/push_supabase_zanelato.py` |
 | Testes da consulta compartilhada e do modo magro | `V2/tests/test_entrega_dash.py` |
 | Testes da Fonte B | `V2/tests/test_push_supabase.py` |
+| Ingestão Railway → `captacoes` | `V2/scripts/ingest_captacoes_railway.py` |
+| Migração do grão da `captacoes` | `V2/scripts/migrate_captacoes_por_inscricao.py` |
+| Preenchimento da `utm_url` histórica | `V2/scripts/completa_url_captacoes.py` |
+| Testes da ingestão | `V2/tests/test_ingest_captacoes.py` |
 | Repescagem das URLs de janeiro/fevereiro | `V2/scripts/recupera_url_legado.py` |
