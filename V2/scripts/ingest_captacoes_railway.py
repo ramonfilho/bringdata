@@ -202,6 +202,17 @@ def _monta(linhas, cal, agora) -> list:
     for (email, phone, nome, has_pc, criado, utm_id, rastreado,
          src, med, camp, cont, term, url) in linhas:
         quando = rastreado or criado
+        # NUNCA datar o lead ANTES de ele existir como cadastro. Medido em 11/08/2026 no
+        # backfill: 28 de 1.935 linhas saíram datadas de março a julho porque a pessoa
+        # tinha um evento de rastreio ANTIGO (visitou a página em março) e se cadastrou
+        # agora. Datar pelo evento fazia esse lead aparecer como lead de março na contagem
+        # diária da agência, quando ele virou lead em agosto.
+        #
+        # Não é o mesmo que ignorar o evento: quando o rastreio vem DEPOIS do cadastro (o
+        # caso normal, 98,3% em menos de 1h), a data do evento é a que vale — é ela que
+        # distingue a segunda inscrição da primeira.
+        if quando is not None and criado is not None and quando < criado:
+            quando = criado
         if quando is None:
             continue                       # sem data não há lançamento nem coluna `data`
         # O Railway guarda UTC em coluna sem fuso. Declarar antes de converter, senão o
