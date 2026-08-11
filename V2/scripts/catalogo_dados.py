@@ -33,6 +33,64 @@ from src.data.analytics_connection import open_analytics_connection  # noqa: E40
 
 SAIDA = Path(__file__).resolve().parents[1] / "docs" / "CATALOGO_DADOS.md"
 
+# A OUTRA parte manual. Existe porque a tabela de cima descreve UMA tabela por vez, e a
+# dúvida que mais custa tempo não é "o que é esta tabela", é "então esta e aquela são a
+# mesma coisa?". Sem um lugar para a RELAÇÃO, o leitor precisa deduzir de duas linhas
+# distantes — e em 10/08/2026 essa dedução saiu errada em conversa, com `analytics.leads`
+# e `analytics.cadastros` trocadas de papel por quem conhece o projeto.
+RELACOES = """## Relações entre tabelas
+
+A tabela acima descreve cada tabela isolada. Esta seção diz como elas se cruzam, que é a
+parte que a listagem não consegue mostrar.
+
+### Os três lugares onde um lead pode estar (e por que não é redundância)
+
+```
+      o lead responde a pesquisa
+                 │
+                 ▼
+   public.registros_ml ......... LEDGER VIVO. Uma linha por RESPOSTA.
+   (23/05/2026 em diante)        Chega em minutos, pela fila do Pub/Sub.
+                 │
+                 │  prio 1 de cinco fontes (leads_unify.py)
+                 ▼
+   analytics.leads ............. UNIVERSO DE TREINO. Só respondente.
+   (histórico completo)          Uma linha por (e-mail, dia). Refeita 09:00.
+                 │
+                 │  define a marca is_respondent
+                 ▼
+   analytics.cadastros ......... ESPINHA. Respondente E não-respondente.
+   (histórico completo)          Uma linha por PESSOA. Refeita 10:00.
+```
+
+**`registros_ml` e `analytics.leads` cobrem a mesma gente de 23/05/2026 para cá.** Não é
+duplicação por descuido: o ledger é a fonte CRUA e VIVA, e `analytics.leads` é a
+consolidação tratada que o INGERE como prioridade 1. Antes de 23/05 o ledger não existia,
+e naquele período `analytics.leads` é a única que tem o dado — ele vem das outras quatro
+fontes (`lead_legado`, `lead_surveys`, planilhas do Sheets e arquivos `.xlsx`).
+
+Consequência prática, e é a que morde: **quem quer o lead de HOJE não pode ler as duas
+derivadas**, porque as duas são reconstruídas de madrugada. Tem que ler o ledger.
+
+### Os dois erros de leitura mais fáceis de cometer
+
+1. **"`analytics.leads` tem todos os leads."** Não. Ela tem os que RESPONDERAM a pesquisa.
+   Quem se cadastrou e não respondeu (23% da base em 2026) só existe em
+   `analytics.cadastros`.
+2. **"`analytics.cadastros` é a base de treino."** Não. O treino lê `analytics.leads`. A
+   marca `is_respondent` de `cadastros` é derivada de estar em `analytics.leads`, então
+   inverter os dois papéis inverte a direção da dependência.
+
+### Onde cada uma é consumida
+
+| Consumidor | Lê | Por quê |
+|---|---|---|
+| Pipeline de treino | `analytics.leads` | é o universo de treino |
+| Entrega para a agência | as três | derivada quando existe, ledger para o lead do dia |
+| Contagem de volume real de captação | `analytics.cadastros` | é a única com quem não respondeu |
+| Relatórios de decil e score | `public.registros_ml` | é onde score e decil moram |
+"""
+
 # A ÚNICA parte manual. Uma linha por tabela dizendo para que ela serve — o resto o
 # script descobre sozinho. Tabela que aparecer no banco e não estiver aqui sai no
 # relatório marcada como SEM DESCRIÇÃO, que é o lembrete de vir escrever uma linha.
@@ -40,7 +98,8 @@ PARA_QUE_SERVE = {
     "public.registros_ml":
         "O ledger do ML. O consumer do Pub/Sub escreve uma linha por lead no momento em "
         "que o scoreia. É a fonte VIVA de decil, score, variante do A/B, respostas da "
-        "pesquisa e status do envio ao Meta.",
+        "pesquisa e status do envio ao Meta. **É a prioridade 1 de `analytics.leads`** — "
+        "as duas cobrem a mesma gente de 23/05/2026 pra cá; ver Relações entre tabelas.",
     "public.scores_historicos":
         "Score e decil recalculados retroativamente para leads antigos, quando um modelo "
         "novo precisa pontuar quem já tinha passado.",
@@ -53,11 +112,26 @@ PARA_QUE_SERVE = {
     "public.lead_surveys_stg":
         "Área de passagem da migração de schema de maio/2026. Morta.",
     "analytics.leads":
-        "Universo de treino: os leads que responderam a pesquisa, unificados de todas as "
-        "fontes. É daqui que o pipeline de treino lê.",
+        "Universo de treino: os leads que responderam a pesquisa, unificados de CINCO "
+        "fontes por `leads_unify.py` (a prioridade 1 é `registros_ml`). É daqui que o "
+        "pipeline de treino lê. Uma linha por (e-mail, dia). **Não é a tabela de todos os "
+        "leads** — quem não respondeu não está aqui, está em `analytics.cadastros`.",
     "analytics.cadastros":
         "Espinha de TODOS os cadastros, respondentes ou não, uma linha por PESSOA. Serve "
-        "para contar volume real de captação e casar compra.",
+        "para contar volume real de captação e casar compra. **Não é base de treino**: a "
+        "marca `is_respondent` dela é calculada perguntando se a pessoa está em "
+        "`analytics.leads`.",
+    "analytics.url_captura_legado":
+        "Repescagem da URL de captura de JANEIRO e fevereiro/2026, montada em 09/08/2026 "
+        "por `scripts/recupera_url_legado.py` a partir do dump do Cloud SQL de 25/02. "
+        "Estática de propósito: é histórico recuperado, não fonte viva. Existe porque a "
+        "URL daquele período morava em `leads_capi.event_source_url`, que hoje está vazia "
+        "— o dado não se perdeu, deixou de ser copiado adiante numa migração de schema. "
+        "Levou janeiro de 0,9% para 98,6% de cobertura na entrega da agência.",
+    "analytics.decis_backfill_jul24":
+        "Foto pontual (21/07/2026) do decil do MESMO lead pelos dois modelos, jul24 e "
+        "abr28, lado a lado — 418 linhas. Serviu para comparar os dois na mesma régua; "
+        "não é alimentada por nada, é registro de uma análise.",
     "analytics.captacoes":
         "Histórico de captação no grão lead x LANÇAMENTO, com o anúncio que trouxe cada "
         "um e se comprou. Montada das planilhas do Drive. É a base da nota do criativo.",
@@ -198,9 +272,10 @@ def render(tabelas, hoje, sem_colunas=False):
              "[scripts/catalogo_dados.py](../scripts/catalogo_dados.py). "
              "Não editar à mão: rode o script de novo.")
     L.append("")
-    L.append("A única parte escrita por gente é a coluna *Para que serve*, que mora no "
-             "dicionário `PARA_QUE_SERVE` dentro do script. Tabela nova aparece aqui "
-             "sozinha, marcada como SEM DESCRIÇÃO até alguém escrever a linha dela.")
+    L.append("As partes escritas por gente são duas, as duas dentro do script: a coluna "
+             "*Para que serve* (dicionário `PARA_QUE_SERVE`) e a seção *Relações entre "
+             "tabelas* (constante `RELACOES`). Tabela nova aparece aqui sozinha, marcada "
+             "como SEM DESCRIÇÃO até alguém escrever a linha dela.")
     L.append("")
     L.append("**Como ler a coluna Estado:** 🟢 escrita nos últimos 2 dias · "
              "🟡 parada há até 15 dias · 🔴 parada há mais de 15 dias · ⬜ vazia. "
@@ -228,6 +303,10 @@ def render(tabelas, hoje, sem_colunas=False):
             L.append(f"| `{t['nome'].split('.')[1]}` | {linhas} | {_sinal(t)} | "
                      f"{_fmt(t['ultima'])} | {jan} | {desc} |")
         L.append("")
+
+    # Vem ANTES da lista de colunas de propósito: quem abre o catálogo com dúvida de
+    # "estas duas são a mesma coisa?" desiste antes de rolar 200 linhas de nomes de coluna.
+    L.append(RELACOES)
 
     if not sem_colunas:
         L.append("## Colunas de cada tabela")

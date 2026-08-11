@@ -548,5 +548,8 @@ def test_reaproveita_a_definicao_UNICA_da_entrega():
     fonte = (Path(__file__).resolve().parents[1] / "scripts" /
              "push_supabase_zanelato.py").read_text()
     assert "from scripts.provisiona_dash_zanelato import" in fonte
-    assert "sql_fonte(janela=janela)" in fonte, (
+    assert "sql_fonte(janela=janela" in fonte, (
         'o script deixou de reusar a consulta canônica da entrega')
+    assert "magro=True" in fonte, (
+        'a entrega do Supabase tem que pedir o modo enxuto; sem ele volta a arrastar o '
+        'hash, o calendário e o join de vendas que ela não usa')

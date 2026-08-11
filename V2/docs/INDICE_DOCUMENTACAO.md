@@ -282,6 +282,12 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Papel:** documentação interna do modelo em produção (run `2a98e51c`, 59 features, AUC 0.745).
 **Status:** snapshot histórico — o modelo ativo em produção hoje é o jan30 (`d51757f5`), não o `2a98e51c`. Complementa `memory/project_active_model.md`.
 
+### `ENTREGA_DADOS_AGENCIA.md` 📤 As duas fontes de entrega para o gestor de tráfego
+**Papel:** documenta as DUAS formas de entregar banco de dados para a agência (Zanelato), o que cada uma faz, de quais tabelas nossas cada uma lê, e o acoplamento entre elas. **Fonte A** = banco `dash` no nosso Cloud SQL, que eles leriam de fora (⏸ desligada; cron pausado, banco e papel de leitura preservados de propósito). **Fonte B** = tabelas `public.leads_inbound` e `public.scores_inbound` no Supabase **deles**, onde nós escrevemos via 3 jobs do Cloud Run (✅ no ar).
+**Status:** ✅ ativo, verificado contra produção em 2026-08-10.
+**Relação:** as duas dividem `sql_fonte()` de [scripts/provisiona_dash_zanelato.py](../scripts/provisiona_dash_zanelato.py) — mexer numa sem saber da outra quebra a que ninguém estava olhando. O parâmetro `magro` é o que separa as duas entregas (−61% no custo do plano); a regra é "pode remover coluna, nunca mudar quais linhas saem". Escrita em [scripts/push_supabase_zanelato.py](../scripts/push_supabase_zanelato.py); testes em [tests/test_entrega_dash.py](../tests/test_entrega_dash.py) e [tests/test_push_supabase.py](../tests/test_push_supabase.py). Tabelas de origem catalogadas em [CATALOGO_DADOS.md](CATALOGO_DADOS.md). O doc também registra o que NUNCA sai nesta entrega (score e decil por lead).
+**Ação sugerida:** ver a seção "Estado pendente" do doc — token do Slack no job de auditoria, `scores_inbound` ainda vazia, cadência do incremental, e o não-respondente do dia.
+
 ### `MODEL_CHANGELOG.md` 📒 Changelog de modelos
 **Papel:** histórico dos modelos que passaram por produção, uma entrada por modelo com o vínculo de lineage (commit de treino, `run_id`, e se foi CANDIDATO ou DEPLOYADO). Gerado a partir do model card automático do treino (o pipeline carimba `git_commit`/`git_dirty` no run; `src/model/model_card.py` monta a entrada).
 **Status:** ✅ ativo. Criado com o model card automático (PR #92, 2026-07-23).
@@ -338,6 +344,8 @@ ESTRATÉGIA (porquê)
 REFERÊNCIA TÉCNICA (como o sistema funciona)
   ARQUITETURA_SISTEMA_COMPLETA.md    ← atualizar para estado atual
   MODEL_CHANGELOG.md                 (changelog de modelos + lineage)
+  ENTREGA_DADOS_AGENCIA.md           (as 2 fontes p/ o gestor de tráfego)
+        └── CATALOGO_DADOS.md            (as tabelas de origem)
 
 ROADMAP ÚNICO (o que fazer e quando)  ⭐ leitura diária
   PLANO_EXECUCAO.md

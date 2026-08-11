@@ -102,7 +102,7 @@ from urllib.parse import unquote, urlparse
 # Reaproveita a definição ÚNICA da entrega. Se este script montasse a sua própria
 # consulta de leads, ela divergiria da do `provisiona` na primeira coluna nova, e a
 # divergência apareceria como dado trocado no painel da agência.
-from scripts.provisiona_dash_zanelato import origem_leitura, sal, sql_fonte
+from scripts.provisiona_dash_zanelato import origem_leitura, sql_fonte
 
 TABELA_DESTINO = "public.leads_inbound"
 SEGREDO_URL = "dash-zanelato-supabase-url"
@@ -229,7 +229,7 @@ def _select(janela: bool) -> str:
                  q.tem_computador,
                  q.url_captura                         AS utm_url,
                  1 AS prio
-            FROM ({sql_fonte(janela=janela)}) q
+            FROM ({sql_fonte(janela=janela, magro=True)}) q
            -- Corte por DIA, e não por instante. A primeira versão usava
            -- `capturado_em >= now() - interval '90 days'`, que é um instante, enquanto
            -- a coluna `data` do destino guarda só o dia. Medido em 10/08/2026: entre a
@@ -298,7 +298,10 @@ def _select(janela: bool) -> str:
 def _le(janela: bool, desde: datetime | None = None) -> list:
     origem = origem_leitura(timeout=1800)
     try:
-        params = {"sal": sal()}
+        # Sem `sal`: no modo magro a consulta não calcula o hash `lead_id`, então não
+        # há parâmetro para preencher. É o que tira do job a dependência do segredo
+        # `dash-lead-id-salt`, que ele pedia só para descartar o resultado.
+        params = {}
         if janela:
             params["desde"] = desde
         return origem.run(_select(janela), **params)
@@ -469,8 +472,7 @@ def auditar() -> dict:
         # falso positivo de +14 em 10/08/2026.
         corte = str(origem.run(f"SELECT ({CORTE_SQL})::text")[0][0])
         esperado = {str(r[0]): int(r[1]) for r in origem.run(
-            f"SELECT substr(data,1,7), count(*) FROM ({_select(False)}) s GROUP BY 1",
-            sal=sal())}
+            f"SELECT substr(data,1,7), count(*) FROM ({_select(False)}) s GROUP BY 1")}
     finally:
         origem.close()
     dst = destino(porta=5432)

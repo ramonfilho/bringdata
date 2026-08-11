@@ -363,3 +363,82 @@ def test_a_carga_e_uma_transacao_so():
 def test_campo_pedido_pelo_cliente_esta_na_entrega(coluna):
     """Os três constavam do pedido escrito e tinham ficado de fora."""
     assert coluna in {n for n, _ in prov.colunas_da_tabela()}
+
+
+# ---------------------------------------------------------------------------
+# MODO MAGRO — a entrega do Supabase manda 11 das 27 colunas daqui, e por isso pede
+# `sql_fonte(magro=True)`. A regra inteira do modo magro é: pode remover COLUNA, não
+# pode mudar quais LINHAS saem. Os testes abaixo travam as duas metades disso.
+# ---------------------------------------------------------------------------
+
+def _sem_comentario(sql):
+    return "\n".join(l for l in sql.splitlines() if not l.strip().startswith("--"))
+
+
+def test_magro_remove_exatamente_o_que_a_entrega_do_supabase_nao_usa():
+    """O que sai, sai por um motivo medido — ver o docstring de `sql_fonte`. O caso mais
+    importante é o `launch_calendar`: por `EXPLAIN` em 10/08/2026, ele multiplicava o
+    braço 2 de ~455 mil para 789.840 linhas, e o `Sort` dessa multiplicação custava
+    ~592 mil de um plano de 1,52 milhão."""
+    magro = _sem_comentario(prov.sql_fonte(magro=True))
+    for fora in ("lead_id", ":sal", "sha256", "launch_calendar", "analytics.sales",
+                 "comprou", "entrou_no_grupo", "grupo_whatsapp", "cap_start DESC"):
+        assert fora not in magro, f'"{fora}" continua no modo magro'
+
+
+def test_magro_NAO_remove_o_que_a_entrega_do_supabase_precisa():
+    """A outra metade: cortar demais entrega coluna vazia para a agência, que é pior que
+    não cortar. `tem_computador` é a única pergunta de pesquisa que sai na entrega, e a
+    URL de captura veio de uma investigação inteira — perdê-la aqui seria refazer o
+    prejuízo dos 35% de cobertura."""
+    magro = _sem_comentario(prov.sql_fonte(magro=True))
+    for dentro in ("nome", "email", "telefone", "capturado_em", "utm_source",
+                   "utm_medium", "utm_campaign", "utm_content", "utm_term",
+                   "tem_computador", "url_captura", "respondeu_pesquisa",
+                   "url_por_email", "analytics.cadastros", "analytics.leads"):
+        assert dentro in magro, f'"{dentro}" desapareceu do modo magro'
+
+
+def test_magro_mantem_os_DOIS_bracos():
+    """Se o corte matasse um braço, a entrega perderia um público inteiro (o
+    não-respondente, que são 23% da base) e a contagem cairia sem nenhum erro."""
+    assert len(prov.sql_fonte(magro=True).split("-- BRAÇO ")) == 3
+
+
+def test_magro_e_cheio_tem_a_MESMA_clausula_de_LINHA():
+    """O teste central do modo magro. Ele não pode mudar QUEM sai, só o que sai por
+    linha. Então os filtros e as chaves de deduplicação têm que ser idênticos nos dois
+    modos — comparados aqui um a um, não por contagem."""
+    import re
+    cheio, magro = _sem_comentario(prov.sql_fonte()), _sem_comentario(prov.sql_fonte(magro=True))
+    for padrao, nome in (
+        (r"DISTINCT ON \(l\.event_id\)", "dedupe do braço 1"),
+        (r"DISTINCT ON \(lower\(c\.email\)\)", "dedupe do braço 2"),
+        (r"WHERE l\.source = 'leads_treino_prod'", "filtro do braço 1"),
+        (r"WHERE NOT c\.is_respondent", "filtro do braço 2"),
+        (r"l\.email IS NOT NULL AND l\.email <> ''", "e-mail obrigatório no braço 1"),
+        (r"c\.email IS NOT NULL AND c\.email <> ''", "e-mail obrigatório no braço 2"),
+    ):
+        assert bool(re.search(padrao, cheio)) == bool(re.search(padrao, magro)) is True, (
+            f'{nome} difere entre os modos: o magro mudaria QUAIS linhas saem')
+
+
+def test_magro_no_incremental_ignora_venda_mas_nao_o_resto():
+    """Venda vira `comprou`, e `comprou` não é entregue no Supabase. Mantê-la na lista do
+    que mudou reenviaria linha idêntica: medido em 06/08/2026, 5.329 vendas num dia só,
+    todas de compra antiga, seriam 5.329 regravações sem efeito. As outras três origens
+    continuam, porque essas SIM mudam valor entregue."""
+    magro = _sem_comentario(prov.sql_fonte(janela=True, magro=True))
+    assert "analytics.sales" not in magro, 'venda ainda entra na lista do que mudou'
+    for origem in ("analytics.leads", "analytics.cadastros",
+                   "analytics.url_captura_legado"):
+        assert origem in magro, f'{origem} saiu da lista do que mudou'
+
+
+def test_o_modo_cheio_continua_intacto():
+    """A entrega do banco `dash` está desligada, não removida. Se ela voltar, tem que
+    voltar igual — o modo magro não pode ter mexido nela de passagem."""
+    cheio = _sem_comentario(prov.sql_fonte())
+    for tem in ("lead_id", ":sal", "launch_calendar", "analytics.sales", "comprou",
+                "entrou_no_grupo", "cap_start DESC", "genero", "faixa_salarial"):
+        assert tem in cheio, f'"{tem}" sumiu do modo CHEIO — regressão na outra entrega'
