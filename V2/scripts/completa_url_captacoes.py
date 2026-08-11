@@ -147,6 +147,17 @@ def preencher(c) -> None:
         # como contagem fazia o laço achar que nada mudou e parar na primeira volta — e o
         # script terminava imprimindo "OK: 0 URLs preenchidas", que é falha se anunciando
         # como sucesso. A contagem de verdade está em `row_count`.
+        #
+        # E o UPDATE carimba `ingested_at` junto. Sem isso, a mudança fica INVISÍVEL para a
+        # entrega: ela descobre o que mudou olhando essa coluna, então uma linha com a URL
+        # nova e a marca velha "não mudou" na visão dela. A URL certa ficaria no nosso banco
+        # convivendo com a antiga no do cliente, indefinidamente, até alguém rodar uma carga
+        # cheia na mão.
+        #
+        # REGRA GERAL para qualquer script futuro: quem altera um valor ENTREGUE carimba a
+        # coluna que a entrega usa como marca. É irmão de dois erros que este projeto já
+        # teve — a auditoria que detectava e morria no log, e o índice que existia e não
+        # valia: peça certa, sem o elo que a torna visível.
         c.run(f"""
             WITH alvo AS (
               SELECT cap.ctid, m.url
@@ -156,7 +167,8 @@ def preencher(c) -> None:
                LIMIT {LOTE}
             )
             UPDATE analytics.captacoes c
-               SET utm_url = alvo.url
+               SET utm_url = alvo.url,
+                   ingested_at = now()
               FROM alvo WHERE c.ctid = alvo.ctid""")
         feitas = int(c.row_count or 0)
         total += feitas

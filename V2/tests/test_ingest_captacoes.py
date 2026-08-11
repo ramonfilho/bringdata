@@ -248,3 +248,23 @@ def test_o_aviso_dispara_ANTES_do_limite_e_nao_depois():
     assert ing.TIMEOUT_JOB_S == 600, (
         "o limite tem que casar com o `timeoutSeconds` do job no Cloud Run; se mudar lá, "
         "muda aqui, senão o aviso mede contra um orçamento que não existe")
+
+
+def test_quem_altera_valor_entregue_carimba_a_marca_da_entrega():
+    """REGRA GERAL, e ela nasceu de um furo real.
+
+    A entrega descobre o que mudou olhando `ingested_at`. O script que preenche a `utm_url`
+    do histórico alterava só a coluna da URL — então, do ponto de vista da entrega, aquelas
+    linhas "não mudaram", e a URL certa ficaria no nosso banco convivendo com a antiga no do
+    cliente, indefinidamente, até alguém rodar uma carga cheia na mão.
+
+    Vale para qualquer script futuro que mexa em coluna entregue: carimbar a marca ou a
+    mudança não propaga. É irmão da auditoria que morria no log e do índice que existia e não
+    valia — peça certa, sem o elo que a torna visível.
+    """
+    fonte = (Path(__file__).resolve().parents[1] / "scripts" /
+             "completa_url_captacoes.py").read_text()
+    codigo = "\n".join(l for l in fonte.splitlines()
+                       if not l.strip().startswith("#") and "--" not in l)
+    assert "ingested_at = now()" in codigo, (
+        "o preenchimento da URL não carimba `ingested_at`: a entrega nunca veria a mudança")
