@@ -28,249 +28,145 @@ def test_as_11_colunas_sao_as_que_o_cliente_pediu():
         'gravação). Sobrescrever isso quebra o incremental de um jeito silencioso')
 
 
-def _fontes(janela=False):
-    """Devolve o SQL de cada braço do UNION, separados.
+def _codigo(janela=False):
+    """O SQL da entrega SEM as linhas de comentário.
 
-    Corta em `-- FONTE ` e não em `UNION ALL`: a CTE de URL dentro da entrega curada
-    também usa `UNION ALL`, e cortar por ela partiria o braço 1 no meio.
+    Existe porque metade dos testes daqui procura ausência ("tal tabela NÃO aparece"), e
+    comentário que explica a regra contém as palavras da regra. Um teste que falha por
+    causa do próprio comentário que documenta a proibição já aconteceu duas vezes neste
+    arquivo.
     """
     sel = p._select(janela)
-    partes = sel.split("-- FONTE ")
-    assert len(partes) == 3, (
-        f'esperava 2 fontes (curada + ledger vivo), achei {len(partes) - 1}')
-    return partes[1], partes[2]
+    return "\n".join(l for l in sel.splitlines() if not l.strip().startswith("--"))
 
 
-def _ordem_dos_apelidos(braco):
-    """Em que ordem as 11 colunas saem deste braço.
+def test_a_entrega_le_UMA_fonte_e_ela_e_a_captacoes():
+    """A decisão de 11/08/2026, em uma linha de teste.
 
-    Olha só a PROJEÇÃO (o pedaço entre o `SELECT` e o `FROM` dele). Sem isso, o braço
-    da entrega curada casa com os apelidos de dentro de `sql_fonte`, que é uma query
-    inteira aninhada com as mesmas 11 palavras em outra ordem — e o teste reprovaria
-    código correto.
+    Antes a entrega somava três tabelas (`analytics.leads`, `analytics.cadastros` e o
+    ledger `registros_ml`) num UNION com desempate por prioridade. Funcionava e era
+    difícil de explicar: a mesma coluna podia vir de três lugares com regras diferentes.
+
+    Agora a fonte é uma só, alimentada pela ingestão do Railway.
     """
     import re
-    corte = re.search(r"^\s*FROM\s", braco, re.M)
-    assert corte, 'braço sem FROM'
-    braco = braco[:corte.start()]
-    posicoes = []
-    for c in p.COLUNAS:
-        # Sai com apelido (`... AS email`) ou com o nome cru (`q.nome,`). O espaçamento
-        # entre a expressão e o AS é livre, daí a busca por padrão e não por texto fixo.
-        m = re.search(rf"\bAS\s+{c}\b", braco) or re.search(rf"\bq\.{c}\b", braco)
-        assert m, f'a coluna {c} não sai deste braço'
-        posicoes.append((m.start(), c))
-    return [c for _, c in sorted(posicoes)]
+    codigo = _codigo()
+    tabelas = set(re.findall(r"FROM\s+([a-z_]+\.[a-z_]+)", codigo))
+    assert tabelas == {"analytics.captacoes"}, (
+        f"a entrega deveria ler só a captacoes, e lê: {sorted(tabelas)}")
+
+
+def test_a_entrega_NAO_enriquece_de_outras_fontes():
+    """Regra do cliente, não preferência de implementação: se o dado falta no lead, ele
+    falta na tabela da agência.
+
+    A versão anterior preenchia `utm_url` do ledger de respondentes, da `lead_legado` e da
+    repescagem de backup no MOMENTO de entregar. Remendo na entrega faz a tabela do cliente
+    parecer melhor do que o dado é, e esconde o que precisa ser consertado na origem — foi
+    exatamente assim que a falha de cobertura do front em 05-06/08/2026 apareceu.
+
+    Completar dado é trabalho de INGESTÃO, dentro da `captacoes`, num lugar só.
+    """
+    codigo = _codigo()
+    for proibida in ("registros_ml", "lead_legado", "url_captura_legado",
+                     "analytics.leads", "analytics.cadastros", "launch_calendar",
+                     "analytics.sales"):
+        assert proibida not in codigo, (
+            f'"{proibida}" voltou a ser lida na hora da entrega; enriquecimento é '
+            f'trabalho da ingestão, não da entrega')
 
 
 def test_a_ordem_do_SELECT_bate_com_a_ordem_das_COLUNAS():
-    """A falha que este teste pega é a pior de todas aqui: se a ordem divergir, o
-    INSERT continua funcionando (é tudo texto) e a agência recebe campanha na coluna de
-    conteúdo. Ninguém vê erro, o painel deles só passa a mentir.
-
-    Checa CADA braço do UNION, não o SELECT de fora, porque é ali que o erro nasce
-    (ver o teste do casamento por posição, abaixo).
-    """
-    for i, braco in enumerate(_fontes(), start=1):
-        assert _ordem_dos_apelidos(braco) == p.COLUNAS, (
-            f'a fonte {i} emite as colunas em ordem diferente de COLUNAS')
-
-
-def test_as_duas_FONTES_casam_por_POSICAO_e_por_isso_a_ordem_tem_que_ser_identica():
-    """O `UNION ALL` do Postgres casa coluna por POSIÇÃO, não por nome do apelido.
-
-    Se a fonte 2 emitir `telefone` onde a fonte 1 emite `nome`, o SQL continua válido
-    (é tudo texto), o SELECT de fora continua chamando a primeira coluna de `nome`, e
-    a agência recebe telefone na coluna de nome só nas linhas que vieram do ledger.
-    Não há erro em lugar nenhum: metade da tabela fica trocada em silêncio.
-    """
-    curada, ledger = _fontes()
-    assert _ordem_dos_apelidos(curada) == _ordem_dos_apelidos(ledger), (
-        'as duas fontes do UNION emitem as colunas em ordens diferentes')
+    """A falha que este teste pega é a pior de todas aqui: se a ordem divergir, o INSERT
+    continua funcionando (é tudo texto) e a agência recebe campanha na coluna de conteúdo.
+    Ninguém vê erro, o painel deles só passa a mentir."""
+    import re
+    codigo = _codigo()
+    corpo = codigo[codigo.index("SELECT c.nome"):codigo.index("FROM analytics.captacoes")]
+    posicoes = []
+    for c in p.COLUNAS:
+        m = (re.search(rf"\bAS\s+{c}\b", corpo)
+             or re.search(rf"\bc\.{c}\b", corpo))
+        assert m, f"a coluna {c} não sai do SELECT"
+        posicoes.append((m.start(), c))
+    assert [c for _, c in sorted(posicoes)] == p.COLUNAS, (
+        f"ordem divergiu de COLUNAS: {[c for _, c in sorted(posicoes)]}")
 
 
-def test_a_janela_e_de_90_dias_nos_dois_modos():
-    """O combinado com o cliente é 90 dias. Se a janela crescer sem ninguém mexer no
-    combinado, a tabela deles engorda; se encolher, eles perdem histórico sem aviso."""
+def test_a_janela_e_de_90_dias_e_no_fuso_da_coluna():
+    """O combinado com o cliente é 90 dias. E a fronteira tem que estar no MESMO fuso da
+    coluna `data`: fronteira num fuso e valor em outro faz a linha da borda entrar na carga
+    e sair na poda a cada rodada, para sempre, sem erro nenhum aparecendo."""
     assert p.DIAS == 90
+    assert f"AT TIME ZONE '{p.FUSO}'" in p.CORTE_SQL
     for janela in (False, True):
-        sel = p._select(janela)
-        # Verifica o FILTRO, não texto solto: a primeira versão deste teste passava
-        # porque a expressão antiga (`interval '90 days'`) sobreviveu num COMENTÁRIO do
-        # código, mesmo depois do filtro ter mudado. Teste que passa em comentário não
-        # trava nada.
-        assert f"(q.capturado_em AT TIME ZONE '{p.FUSO}')::date >= {p.CORTE_SQL}" in sel, (
-            f'sumiu o recorte de {p.DIAS} dias no modo janela={janela}')
+        assert (f"(c.captured_at AT TIME ZONE '{p.FUSO}')::date >= {p.CORTE_SQL}"
+                in p._select(janela)), f"sumiu o recorte no modo janela={janela}"
 
 
 def test_o_recorte_e_por_DIA_e_nao_por_instante():
-    """Foi este detalhe que produziu o falso positivo de +14 linhas em 10/08/2026.
+    """Foi este detalhe que produziu o falso positivo de +14 linhas em 10/08/2026: a origem
+    filtrava por instante e o destino guarda só o dia, então entre a carga e a auditoria o
+    relógio andava e linhas da fronteira saíam de um lado e ficavam no outro."""
+    codigo = _codigo()
+    assert "::date >=" in codigo, "o recorte voltou a ser por instante"
+    assert "now() - interval" not in codigo, "sobrou filtro por instante no SQL de verdade"
 
-    A origem filtrava por instante (`now() - interval '90 days'`) e o destino guarda a
-    data só como dia. Entre a carga e a auditoria o relógio andou, linhas da fronteira
-    saíram de um lado e ficaram no outro, e a auditoria acusou erro onde não havia.
-    As três operações (carga, poda, auditoria) têm que usar a MESMA fronteira de dia.
+
+def test_a_data_sai_em_BRASILIA_e_no_formato_que_a_coluna_deles_espera():
+    """A coluna `data` no destino é TEXTO, e a agência compara com a planilha dela e com o
+    painel da Meta, os dois em horário de Brasília.
+
+    Em 10/08/2026 ela apontou 15 leads do dia 09/08 ausentes; 14 estavam lá datados 10/08,
+    e os 14 tinham chegado entre 21:05 e 23:55 de Brasília do dia 09 — desvio sistemático
+    de 3 horas. A causa não estava escrita no código: a conexão tem `TimeZone = UTC` e
+    `to_char(timestamptz, ...)` renderiza no fuso da SESSÃO. Daí o fuso EXPLÍCITO aqui.
     """
-    sel = p._select(False)
-    assert f"::date\n                 >= {p.CORTE_SQL}" in sel or \
-           f"::date >= {p.CORTE_SQL}" in sel, 'o recorte voltou a ser por instante'
-    # Descarta as linhas de comentário INTEIRAS. Remover só o marcador `--` deixaria o
-    # texto do comentário no meio do SQL e o teste passaria (ou falharia) pelo motivo
-    # errado — foi o que aconteceu na primeira versão deste teste.
-    codigo = "\n".join(l for l in sel.splitlines() if not l.strip().startswith("--"))
-    assert "now() - interval" not in codigo, (
-        'sobrou filtro por instante no SQL de verdade, fora de comentário')
-
-
-def test_a_data_sai_no_formato_que_a_coluna_deles_espera():
-    """A coluna `data` no destino é TEXTO, não data. Deixar o Postgres formatar por
-    conta dele faria o formato virar surpresa (e mudar com a configuração do servidor)."""
-    sel = p._select(False)
-    assert sel.count("'YYYY-MM-DD'") >= 2, (
-        'cada fonte tem que formatar a data explicitamente')
-
-
-def test_a_data_sai_em_HORARIO_DE_BRASILIA_nas_duas_fontes():
-    """Este teste existe por causa de um "leads faltando" que não existia.
-
-    Em 10/08/2026 a agência apontou 15 leads do dia 09/08 ausentes da entrega. 14
-    estavam lá, datados 10/08, e todos os 14 tinham chegado entre 00:05 e 02:55 UTC —
-    isto é, entre 21:05 e 23:55 de Brasília do dia 09. Desvio sistemático de 3 horas:
-    todo lead que entrava depois das 21h aparecia no dia seguinte para ela.
-
-    A causa não estava escrita no código: a conexão de leitura tem `TimeZone = UTC`, e
-    `to_char(timestamptz, ...)` renderiza no fuso da SESSÃO. O UTC vinha do ambiente.
-    Por isso o teste checa o fuso EXPLÍCITO no SQL — é a única forma de não depender de
-    como o servidor está configurado.
-    """
-    for i, braco in enumerate(_fontes(), start=1):
-        assert f"AT TIME ZONE '{p.FUSO}'" in braco, (
-            f'a fonte {i} voltou a datar no fuso da sessão; em UTC, o lead da noite '
-            f'aparece no dia seguinte para a agência')
+    codigo = _codigo()
+    assert (f"to_char(c.captured_at AT TIME ZONE '{p.FUSO}', 'YYYY-MM-DD')" in codigo)
     assert p.FUSO == "America/Sao_Paulo"
 
 
-def test_o_ledger_declara_que_o_timestamp_dele_esta_em_UTC():
-    """`registros_ml.created_at` é `timestamp WITHOUT time zone` guardando UTC, enquanto
-    `analytics.leads.capturado_em` é `WITH time zone` (verificado em 10/08/2026). Num
-    valor sem fuso, um `AT TIME ZONE` sozinho faz o Postgres assumir o fuso da sessão:
-    daria 3 horas de erro, na direção contrária, e só nas linhas vindas do ledger.
+def test_o_incremental_filtra_por_INGESTED_AT_e_nao_por_captured_at():
+    """A diferença entre os dois muda o que a agência recebe.
+
+    `captured_at` é quando o lead entrou; `ingested_at` é quando a NOSSA ingestão escreveu
+    aquela linha. Um lead de ontem cuja UTM chegou hoje tem `captured_at` de ontem e
+    precisa ser reenviado — filtrando por `captured_at`, ele nunca mais seria olhado e
+    ficaria sem campanha na tabela deles para sempre.
     """
-    _, ledger = _fontes()
-    assert f"AT TIME ZONE 'UTC' AT TIME ZONE '{p.FUSO}'" in ledger, (
-        'o braço do ledger precisa declarar UTC antes de converter, porque a coluna '
-        'dele não guarda fuso')
-
-
-def test_a_fronteira_da_janela_esta_no_MESMO_fuso_da_coluna_data():
-    """Fronteira num fuso e valor em outro faz a linha da borda entrar na carga e sair
-    na poda, a cada rodada, para sempre. Não daria erro nenhum: só uma linha piscando na
-    tabela do cliente e uma auditoria contando trabalho pendente que nunca acaba."""
-    assert f"AT TIME ZONE '{p.FUSO}'" in p.CORTE_SQL, (
-        'a fronteira da janela voltou a ser calculada em outro fuso que não o da '
-        'coluna `data`')
-    sel = p._select(False)
-    codigo = "\n".join(l for l in sel.splitlines() if not l.strip().startswith("--"))
-    assert f"(current_date - {p.DIAS})" not in codigo, (
-        'sobrou a fronteira antiga em UTC no SQL de verdade')
-    assert codigo.count(p.CORTE_SQL) == 2, (
-        'as duas fontes têm que usar a MESMA expressão de fronteira')
+    assert "c.ingested_at >= :desde" in p._select(True), (
+        "o incremental precisa seguir a marca da INGESTÃO, não a data do lead")
+    assert ":desde" not in p._select(False), (
+        "a carga cheia não tem `:desde` para casar; o SQL quebraria por parâmetro ausente")
 
 
 def test_deduplica_por_email_e_data_porque_o_destino_NAO_tem_chave_unica():
-    """Medido em 10/08/2026: a chave primária da tabela deles é `id` sequencial, e não
-    existe restrição de unicidade em (email, data). Ou seja, linha repetida entra
-    calada e a agência conta o mesmo lead duas vezes. A defesa tem que morar aqui
-    porque não existe do lado deles.
+    """A chave primária da tabela deles é `id` sequencial, e não existe restrição de
+    unicidade em (email, data): linha repetida entra calada e a agência conta o mesmo lead
+    duas vezes.
 
-    Com duas fontes isso deixou de ser zelo e virou obrigação: o mesmo lead existe nas
-    duas quando as tabelas derivadas alcançam o ledger no dia seguinte.
+    A `captacoes` já é única em `(lf, chave, origem_id)`, mas o mesmo lead pode estar em
+    dois LANÇAMENTOS — e para a agência, que enxerga só (e-mail, data), isso seria duplicata.
     """
-    sel = p._select(False)
-    assert "SELECT DISTINCT ON (email, data)" in sel, (
-        'sumiu a deduplicação por (email, data)')
+    assert "SELECT DISTINCT ON (email, data)" in p._select(False)
 
 
-def test_a_fonte_CURADA_ganha_do_ledger_no_desempate():
-    """Sem esta ordem, a linha JÁ ENTREGUE mudaria de valor sozinha.
-
-    O lead chega pelo ledger hoje e é entregue. Amanhã as tabelas derivadas o alcançam,
-    com matching e calendário aplicados. Se o ledger ganhasse o desempate, o painel da
-    agência veria o mesmo lead trocar de campanha de um dia para o outro sem nada ter
-    acontecido — e a explicação estaria escondida na nossa ordem de UNION.
-
-    `ORDER BY email, data, prio` com prio crescente = ganha o menor = a curada.
-    """
-    curada, ledger = _fontes()
-    assert "1 AS prio" in curada, 'a fonte curada deixou de ser a prioridade 1'
-    assert "2 AS prio" in ledger, 'o ledger vivo deixou de ser a prioridade 2'
-    sel = p._select(False)
-    assert "ORDER BY email, data, prio" in sel, 'sumiu o desempate por prioridade'
-    assert "prio DESC" not in sel, (
-        'prioridade em ordem decrescente inverte o desempate: o ledger passaria a '
-        'sobrescrever a entrega curada')
+def test_o_email_sai_em_MINUSCULO():
+    """O dedupe é por (email, data) em texto. Sem normalizar, `Joao@x.com` e `joao@x.com`
+    seriam duas chaves e a mesma pessoa entraria duas vezes. E isso NÃO é hipotético: a
+    chave primária do `Client` no Railway preserva o caso, e medido em 11/08/2026 são
+    136.622 linhas lá para 136.484 e-mails distintos em minúsculo."""
+    assert "lower(c.email)" in _codigo()
 
 
-def test_o_LEDGER_VIVO_esta_na_entrega():
-    """A razão de existir desta mudança, em uma linha de teste.
-
-    As tabelas `analytics.leads` e `analytics.cadastros` são reconstruídas uma vez por
-    dia (09:00 e 10:00). A agência abre o painel várias vezes ao dia para decidir verba,
-    e até 10/08/2026 recebia o lead de hoje só amanhã. Medido naquele dia: 165 leads
-    estavam no ledger e ausentes das derivadas; a entrega do dia saía com 33 linhas
-    contra 215 na planilha deles, e com o ledger foi para 221.
-    """
-    _, ledger = _fontes()
-    assert "public.registros_ml" in ledger, (
-        'o braço do ledger vivo saiu da entrega: a agência volta a ver o lead de hoje '
-        'só amanhã')
-
-
-def test_o_ledger_tambem_respeita_os_90_dias():
-    """Se o braço novo não tivesse o recorte, a carga cheia mandaria o ledger inteiro
-    (2 anos) e a tabela da agência estouraria o combinado de 90 dias por baixo."""
-    _, ledger = _fontes()
-    assert p.CORTE_SQL in ledger and "r.created_at AT TIME ZONE" in ledger, (
-        f'sumiu o recorte de {p.DIAS} dias no braço do ledger')
-
-
-def test_no_incremental_o_ledger_le_APENAS_a_janela():
-    """Sem este filtro o incremental continuaria correto e ficaria caro: leria os 90
-    dias do ledger a cada rodada. Numa cadência de minutos, cada rodada custaria como
-    uma carga cheia, e o custo apareceria como lentidão, não como erro."""
-    _, ledger_janela = _fontes(janela=True)
-    _, ledger_cheia = _fontes(janela=False)
-    assert "r.created_at >= :desde" in ledger_janela, (
-        'o incremental está lendo o ledger inteiro em vez da janela')
-    assert "r.created_at >= :desde" not in ledger_cheia, (
-        'a carga cheia não tem `:desde` para casar; o SQL quebraria por parâmetro '
-        'ausente')
-
-
-def test_os_dois_bracos_normalizam_o_email_em_MINUSCULO():
-    """O dedupe é por (email, data) em texto. Se um braço mandasse `Joao@x.com` e o
-    outro `joao@x.com`, seriam duas chaves diferentes: a mesma pessoa entraria duas
-    vezes e o dedupe passaria batido."""
-    for i, braco in enumerate(_fontes(), start=1):
-        assert "lower(" in braco and "email" in braco, (
-            f'a fonte {i} não normaliza o e-mail em minúsculo')
-    _, ledger = _fontes()
-    assert "lower(r.email)" in ledger, 'o ledger não normaliza o e-mail'
-
-
-def test_o_ledger_NAO_vaza_score_nem_decil():
-    """É proibido entregar score ou decil por lead, e este é o ponto do código onde
-    vazar sem querer é mais fácil: `registros_ml` guarda `lead_score`, `decil_champion`
-    e `decil_challenger` na coluna vizinha das que a entrega usa. Um `SELECT r.*` ou um
-    copiar-colar de outra query já bastaria.
-
-    Descarta comentários antes de olhar: a primeira versão deste teste falhou por
-    causa do próprio comentário que EXPLICA a proibição.
-    """
-    sel = p._select(False)
-    codigo = "\n".join(l for l in sel.splitlines() if not l.strip().startswith("--"))
+def test_a_entrega_NAO_leva_score_nem_decil():
+    """Score e decil por lead são proibidos nesta entrega. A `captacoes` guarda
+    `lead_score` e `decil` como colunas, então um `SELECT c.*` ou um copiar-colar de outra
+    query bastaria para vazar."""
+    codigo = _codigo()
     for proibida in ("lead_score", "decil", "score_champion", "score_challenger",
-                     "decile_propensity", "decile_roas", "hotleads_hot", "r.*"):
+                     "decile_propensity", "decile_roas", "hotleads_hot", "c.*"):
         assert proibida not in codigo, (
             f'"{proibida}" apareceu no SQL da entrega: score por lead é proibido')
 
@@ -541,15 +437,29 @@ def test_a_auditoria_compara_por_MES_e_nao_so_o_total():
         p.origem_leitura, p.destino = o_leitura, o_destino
 
 
-def test_reaproveita_a_definicao_UNICA_da_entrega():
-    """Se este script montasse a sua própria consulta de leads, ela divergiria da do
-    `provisiona` na primeira coluna nova, e a divergência apareceria como dado trocado
-    no painel da agência. Uma definição, um filtro opcional."""
+def test_a_entrega_NAO_depende_mais_da_consulta_da_outra_entrega():
+    """O acoplamento que este teste trava é o INVERSO do que ele travava antes.
+
+    Até 11/08/2026 este script importava `sql_fonte` da entrega do banco `dash` (27
+    colunas) e projetava 11 delas. A razão era boa — uma definição, duas entregas, sem
+    divergir. O preço era arrastar o trabalho inteiro da outra: a consulta calculava e
+    jogava fora `lead_id` (um hash sha256), `lf`, `comprou` e 8 das 9 perguntas da
+    pesquisa, e o job exigia o segredo `dash-lead-id-salt` só para descartar o resultado.
+
+    Com a `captacoes` como fonte única, as duas entregas ficaram independentes. Este teste
+    existe para que ninguém religue esse acoplamento sem perceber.
+    """
+    import re
     fonte = (Path(__file__).resolve().parents[1] / "scripts" /
              "push_supabase_zanelato.py").read_text()
-    assert "from scripts.provisiona_dash_zanelato import" in fonte
-    assert "sql_fonte(janela=janela" in fonte, (
-        'o script deixou de reusar a consulta canônica da entrega')
-    assert "magro=True" in fonte, (
-        'a entrega do Supabase tem que pedir o modo enxuto; sem ele volta a arrastar o '
-        'hash, o calendário e o join de vendas que ela não usa')
+    # Olha CÓDIGO, não prosa: o cabeçalho do módulo explica de propósito o que a entrega
+    # deixou de fazer, e um teste que casa com a explicação da proibição falha por causa da
+    # própria documentação. Aconteceu três vezes neste arquivo.
+    codigo = "\n".join(l for l in fonte.splitlines()
+                       if not l.strip().startswith("#"))
+    assert not re.search(r"import .*\bsql_fonte\b", codigo), (
+        "a entrega voltou a IMPORTAR a consulta da entrega do `dash`")
+    assert not re.search(r"\bsql_fonte\s*\(", codigo), (
+        "a entrega voltou a CHAMAR a consulta da entrega do `dash`")
+    assert not re.search(r"\bsal\s*\(\s*\)", codigo), (
+        "voltou a usar o sal do `lead_id`, que esta entrega não entrega")

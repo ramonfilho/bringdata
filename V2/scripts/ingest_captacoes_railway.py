@@ -198,9 +198,27 @@ def _monta(linhas, cal, agora) -> list:
     não existe. Usar sempre a do cadastro colapsaria as duas inscrições da mesma pessoa no
     mesmo dia, que é justamente o que o grão novo existe para não fazer.
     """
-    out = []
+    # Dedupe pela CHAVE, dentro do próprio lote, ANTES de tocar no banco.
+    #
+    # Não é zelo: o Postgres RECUSA um `INSERT ... ON CONFLICT DO UPDATE` que traga a mesma
+    # chave duas vezes no mesmo comando (21000, "cannot affect row a second time"). E a
+    # colisão acontece de verdade — a chave primária do `Client` é `email` com o CASO
+    # preservado, então `Joao@x.com` e `joao@x.com` são duas linhas lá e viram a MESMA
+    # chave aqui, porque a ingestão normaliza para minúsculo. Medido em 11/08/2026:
+    # 136.622 linhas no `Client` para 136.484 e-mails distintos em minúsculo.
+    #
+    # Guardar num dicionário pela chave resolve, e o `colapsadas` sai no log: dedupe que
+    # acontece calado é o tipo de coisa que esconde crescimento de duplicata na origem.
+    vistas: dict = {}
     for (email, phone, nome, has_pc, criado, utm_id, rastreado,
          src, med, camp, cont, term, url) in linhas:
+        # Minúsculo AQUI, e não só no SQL. A consulta já faz `lower(c.email)`, mas a
+        # invariante da CHAVE tem que morar junto com quem monta a chave: se alguém mexer
+        # na consulta, a colisão por caixa volta e o Postgres recusa o lote inteiro com
+        # 21000. Defesa em dois lugares custa uma linha.
+        email = (email or "").strip().lower() or None
+        if email is None:
+            continue
         quando = rastreado or criado
         # NUNCA datar o lead ANTES de ele existir como cadastro. Medido em 11/08/2026 no
         # backfill: 28 de 1.935 linhas saíram datadas de março a julho porque a pessoa
@@ -220,10 +238,13 @@ def _monta(linhas, cal, agora) -> list:
         # jogou lead da noite para o dia seguinte na entrega da agência.
         quando = quando.replace(tzinfo=timezone.utc)
         dia_brt = (quando - timedelta(hours=3)).date()
-        out.append([
-            _lf_de(dia_brt, cal),
+        lf = _lf_de(dia_brt, cal)
+        origem = f"utm:{utm_id}" if utm_id is not None else f"client:{email}"
+        chave = (lf, email, origem)
+        linha = [
+            lf,
             email,                                        # `chave` é o e-mail
-            f"utm:{utm_id}" if utm_id is not None else f"client:{email}",
+            origem,
             email, phone, _tel8(phone), nome,
             quando,
             (src or "").strip().lower() or None,
@@ -235,8 +256,19 @@ def _monta(linhas, cal, agora) -> list:
             (has_pc or "").strip() or None,
             PROCEDENCIA,
             agora,
-        ])
-    return out
+        ]
+        # Empate resolvido pela linha MAIS COMPLETA, não pela última que chegou. Entre duas
+        # variantes de caso do mesmo e-mail, ficar com a que tem UTM e telefone preenchidos
+        # é melhor que ficar com a que veio por último por acidente de ordenação.
+        anterior = vistas.get(chave)
+        if anterior is None or _preenchidos(linha) > _preenchidos(anterior):
+            vistas[chave] = linha
+    return list(vistas.values())
+
+
+def _preenchidos(linha) -> int:
+    """Quantos campos da linha têm valor. Critério de desempate entre linhas iguais."""
+    return sum(1 for v in linha if v not in (None, ""))
 
 
 def _grava(c, linhas) -> tuple:
@@ -319,6 +351,14 @@ def main() -> int:
         agora = datetime.now(timezone.utc)
         montadas = _monta(linhas, cal, agora)
         print(f"  {len(montadas):,} linhas montadas")
+        # O dedupe interno do lote sai no log de propósito. Ele existe por causa de
+        # variante de CAIXA no e-mail do `Client` (a PK de lá preserva o caso), e se esse
+        # número começar a crescer é sinal de que a origem está duplicando pessoa — coisa
+        # que a gente quer VER, não absorver em silêncio.
+        colapsadas = len(linhas) - len(montadas)
+        if colapsadas:
+            print(f"  {colapsadas:,} colapsadas por chave repetida dentro do lote "
+                  f"(variante de caixa no e-mail, ou registro sem data)")
         sem_lf = sum(1 for x in montadas if x[0] == SEM_LF)
         if sem_lf:
             print(f"  {sem_lf:,} fora de qualquer janela de captação -> lf={SEM_LF}")

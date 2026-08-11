@@ -27,9 +27,23 @@ minutos, e reescrever 130 mil linhas a cada 5 minutos não é "mais lento", é i
 a tabela ficaria em reconstrução permanente.
 
 O erro de 06/08 foi otimizar a ESCRITA quando o custo estava na LEITURA. Aqui as duas
-encolhem: `sql_fonte(janela=True)` só traz o que mudou. Medido em 09/08/2026, nas
-últimas 24h: 3.190 linhas mexidas em `analytics.leads` e 440 em `analytics.cadastros`,
-de universos de 366 mil e 455 mil. Numa rodada de 5 minutos são dezenas de linhas.
+encolhem: o modo janela lê só o que a ingestão mexeu desde a última gravação.
+
+A FONTE É UMA SÓ (mudou em 11/08/2026)
+======================================
+`analytics.captacoes`, alimentada por `scripts/ingest_captacoes_railway.py` a partir do
+Railway (`Client` LEFT JOIN `UTMTracking`), que é onde o cadastro nasce.
+
+Antes eram TRÊS tabelas somadas num UNION com desempate por prioridade
+(`analytics.leads` para respondente, `analytics.cadastros` para não-respondente e o ledger
+`registros_ml` para o lead do dia), e a consulta era herdada da entrega do banco `dash`.
+Funcionava. Era difícil de explicar: a mesma coluna podia vir de três lugares com regras
+diferentes, e responder "de onde saiu este lead" exigia ler três braços.
+
+E NÃO HÁ ENRIQUECIMENTO NA HORA DA ENTREGA. Se o dado falta no lead, ele falta na tabela da
+agência. Remendo na entrega faz a tabela do cliente parecer melhor do que o dado é e
+esconde o que precisa ser consertado na origem. Completar dado é trabalho da INGESTÃO,
+dentro da `captacoes`, num lugar só e igual para todo consumidor.
 
 O QUE A TABELA DELES ACEITA (medido em 10/08/2026, não suposto)
 ===============================================================
@@ -99,10 +113,11 @@ import sys
 from datetime import datetime, timedelta
 from urllib.parse import unquote, urlparse
 
-# Reaproveita a definição ÚNICA da entrega. Se este script montasse a sua própria
-# consulta de leads, ela divergiria da do `provisiona` na primeira coluna nova, e a
-# divergência apareceria como dado trocado no painel da agência.
-from scripts.provisiona_dash_zanelato import origem_leitura, sql_fonte
+# Só a conexão. A consulta de leads NÃO vem mais daqui: até 11/08/2026 este script
+# reusava o `sql_fonte` da entrega do banco `dash` (27 colunas) e projetava 11 delas.
+# A fonte agora é a `analytics.captacoes`, alimentada pela ingestão do Railway, e o
+# acoplamento com a outra entrega deixou de existir — ver `_select`.
+from scripts.provisiona_dash_zanelato import origem_leitura
 
 TABELA_DESTINO = "public.leads_inbound"
 SEGREDO_URL = "dash-zanelato-supabase-url"
@@ -191,107 +206,70 @@ def destino(porta: int | None = None):
 
 
 def _select(janela: bool) -> str:
-    """Traduz a entrega de 27 colunas para as 11 que eles pediram.
+    """As 11 colunas da entrega, lidas de UMA fonte: `analytics.captacoes`.
 
-    `DISTINCT ON (email, data)` não é zelo: a tabela deles não tem restrição de
-    unicidade, então uma linha repetida entraria calada e a agência contaria o mesmo
-    lead duas vezes. A defesa mora aqui porque não pode morar lá.
+    POR QUE UMA FONTE SÓ
+    ====================
+    Até 11/08/2026 esta consulta somava TRÊS tabelas (`analytics.leads`,
+    `analytics.cadastros` e o ledger `public.registros_ml`) e reusava a definição da
+    entrega antiga do banco `dash`. Funcionava, e era difícil de explicar: a mesma coluna
+    podia vir de três lugares com regras diferentes, e "de onde saiu este lead" exigia ler
+    um UNION de três braços com desempate por prioridade.
 
-    `data` sai como texto no formato que eles pediram (YYYY-MM-DD) porque a coluna é
-    `text`, não `date`. Mandar um objeto de data deixaria o Postgres formatar do jeito
-    dele, e o formato viraria surpresa.
+    Agora a `captacoes` é a fonte, e ela é alimentada por
+    `scripts/ingest_captacoes_railway.py` a partir do Railway (`Client` LEFT JOIN
+    `UTMTracking`), que é onde o cadastro nasce.
 
-    `data` sai em HORÁRIO DE BRASÍLIA, e isso é o oposto do que fazíamos até
-    10/08/2026. Ver `FUSO` para o porquê e para a medição.
+    SEM ENRIQUECIMENTO NA HORA DA ENTREGA — E ISSO É REGRA, NÃO PREGUIÇA
+    ====================================================================
+    A versão anterior preenchia `utm_url` de fontes de fora (o ledger de respondentes, a
+    `lead_legado`, a repescagem de backup) no MOMENTO de entregar. Foi decidido tirar:
+    se o dado falta no lead, ele falta na tabela da agência.
+
+    O motivo é que remendo na entrega faz a tabela do cliente parecer melhor do que o dado
+    é, e esconde justamente o que precisa ser consertado na origem (o front parou de
+    gravar UTM em 05-06/08/2026 — foi assim que a falha apareceu). Completar dado é
+    trabalho de INGESTÃO, dentro da `captacoes`, num lugar só e igual para todo consumidor.
+
+    O `DISTINCT ON` continua
+    ========================
+    A tabela deles não tem restrição de unicidade (a chave primária é um `id` sequencial),
+    então linha repetida entraria calada e a agência contaria o mesmo lead duas vezes. A
+    `captacoes` já é única em `(lf, chave, origem_id)`, mas o mesmo lead pode estar em dois
+    LANÇAMENTOS — e para a agência, que enxerga só (e-mail, data), isso seria duplicata.
+
+    `data` sai em HORÁRIO DE BRASÍLIA e como TEXTO no formato que eles pediram. Ver `FUSO`.
     """
-    # No modo janela, o ledger também é recortado pelo que chegou desde `:desde`. Sem
-    # isto o incremental leria os 90 dias do ledger a cada rodada, e a rodada de 5
-    # minutos passaria a custar como uma carga cheia.
-    filtro_ledger = "AND r.created_at >= :desde" if janela else ""
+    # No modo janela, só o que a ingestão mexeu desde `:desde`. `ingested_at` é carimbado
+    # pela ingestão em cada linha que ela escreve ou atualiza, então ele é a marca certa —
+    # `captured_at` não serve: um lead de ontem cuja UTM chegou hoje tem `captured_at` de
+    # ontem e precisa ser reenviado.
+    filtro = "AND c.ingested_at >= :desde" if janela else ""
     return f"""
       SELECT DISTINCT ON (email, data)
              nome, email, telefone, source, medium, campaign, term, content,
              data, tem_computador, utm_url
         FROM (
-          -- FONTE 1: a entrega curada. Passa por matching, calendário de lançamento e
-          -- dedupe, e é a MESMA definição usada na entrega do nosso banco. Mas lê
-          -- `analytics.leads` e `analytics.cadastros`, que são reconstruídas UMA VEZ
-          -- POR DIA (09:00 e 10:00). Por isso ela sozinha nunca tem o lead de hoje.
-          SELECT q.nome,
-                 lower(q.email)                        AS email,
-                 q.telefone,
-                 q.utm_source                          AS source,
-                 q.utm_medium                          AS medium,
-                 q.utm_campaign                        AS campaign,
-                 q.utm_term                            AS term,
-                 q.utm_content                         AS content,
-                 to_char(q.capturado_em AT TIME ZONE '{FUSO}', 'YYYY-MM-DD') AS data,
-                 q.tem_computador,
-                 q.url_captura                         AS utm_url,
-                 1 AS prio
-            FROM ({sql_fonte(janela=janela, magro=True)}) q
-           -- Corte por DIA, e não por instante. A primeira versão usava
-           -- `capturado_em >= now() - interval '90 days'`, que é um instante, enquanto
-           -- a coluna `data` do destino guarda só o dia. Medido em 10/08/2026: entre a
-           -- carga (13:59) e a auditoria o relógio andou, 14 linhas do dia 12/05
-           -- saíram da janela da ORIGEM continuando no DESTINO, e a auditoria acusou
-           -- divergência de +14 onde não havia erro. Auditoria que dá falso positivo
-           -- todo dia ensina a ignorar auditoria. As três operações (carga, poda e
-           -- auditoria) usam a MESMA fronteira de dia, e no MESMO fuso da coluna.
-           WHERE (q.capturado_em AT TIME ZONE '{FUSO}')::date >= {CORTE_SQL}
-             AND nullif(q.email, '') IS NOT NULL
-
-          UNION ALL
-
-          -- FONTE 2: o LEDGER VIVO. Recebe o lead em minutos, via a fila do Pub/Sub.
-          --
-          -- Ela existe porque a fonte 1 não serve ao caso de uso. A agência abre o
-          -- painel várias vezes por dia para decidir verba, e até 10/08/2026 a entrega
-          -- só tinha o lead do dia seguinte. Pior: eu tinha respondido a um pedido de
-          -- atualização de 5 em 5 minutos dizendo que não fazia sentido "porque a
-          -- origem só muda uma vez por dia" — o que era defender a limitação em vez de
-          -- removê-la. Medido no dia em que isto foi escrito: o ledger tinha 165 leads
-          -- que as tabelas derivadas ainda não tinham.
-          --
-          -- Cobertura medida no ledger nos 7 dias anteriores: nome 100%, telefone
-          -- 99,2%, source 100%, tem_computador 100%, url 100%, e as UTM de medium,
-          -- campanha, termo e conteúdo entre 88% e 93%. Ou seja, a linha que vem daqui
-          -- não é pior que a da fonte 1 em nada que a agência use.
-          --
-          -- `prio = 2`: quando o mesmo lead existe nas duas, a fonte 1 ganha. Assim a
-          -- linha que já foi entregue não muda de valor quando o lead aparece nas
-          -- derivadas no dia seguinte — só linhas NOVAS vêm daqui.
-          --
-          -- NÃO seleciona `lead_score`, `decil`, `score_champion`, `decil_challenger`
-          -- nem nada derivado: score por lead é proibido nesta entrega, e este é o
-          -- ponto do código onde seria mais fácil vazar sem querer, porque a tabela
-          -- tem todas essas colunas ao lado das que a gente usa.
-          SELECT nullif(trim(concat_ws(' ', r.first_name, r.last_name)), '') AS nome,
-                 lower(r.email)                        AS email,
-                 nullif(r.phone, '')                   AS telefone,
-                 lower(nullif(r.utm_source, ''))       AS source,
-                 nullif(r.utm_medium, '')              AS medium,
-                 nullif(r.utm_campaign, '')            AS campaign,
-                 nullif(r.utm_term, '')                AS term,
-                 nullif(r.utm_content, '')             AS content,
-                 -- Dois `AT TIME ZONE` em sequência, e os dois são necessários. Esta
-                 -- coluna é `timestamp WITHOUT time zone` guardando UTC (a de
-                 -- `analytics.leads` é `WITH time zone`; verificado, não suposto). O
-                 -- primeiro diz ao Postgres em que fuso o número está — sem ele, ele
-                 -- assume o fuso da sessão e a conversão erra. O segundo converte para
-                 -- Brasília. Um só, aqui, daria 3 horas de erro na direção contrária.
-                 to_char(r.created_at AT TIME ZONE 'UTC' AT TIME ZONE '{FUSO}',
-                         'YYYY-MM-DD')                 AS data,
-                 nullif(r.has_computer, '')            AS tem_computador,
-                 nullif(r.utm_url, '')                 AS utm_url,
-                 2 AS prio
-            FROM public.registros_ml r
-           WHERE (r.created_at AT TIME ZONE 'UTC' AT TIME ZONE '{FUSO}')::date
-                 >= {CORTE_SQL}
-             AND nullif(r.email, '') IS NOT NULL
-             {filtro_ledger}
-        ) u
-       ORDER BY email, data, prio
+          SELECT c.nome,
+                 lower(c.email)                        AS email,
+                 nullif(c.phone, '')                   AS telefone,
+                 c.utm_source                          AS source,
+                 c.utm_medium                          AS medium,
+                 c.utm_campaign                        AS campaign,
+                 c.utm_term                            AS term,
+                 c.utm_content                         AS content,
+                 to_char(c.captured_at AT TIME ZONE '{FUSO}', 'YYYY-MM-DD') AS data,
+                 c.has_computer                        AS tem_computador,
+                 c.utm_url
+            FROM analytics.captacoes c
+           -- Corte por DIA e no MESMO fuso da coluna `data`. Fronteira num fuso e valor em
+           -- outro faz a linha da borda entrar na carga e sair na poda a cada rodada, para
+           -- sempre, sem erro nenhum aparecendo.
+           WHERE (c.captured_at AT TIME ZONE '{FUSO}')::date >= {CORTE_SQL}
+             AND nullif(c.email, '') IS NOT NULL
+             {filtro}
+        ) q
+       ORDER BY email, data
     """
 
 
