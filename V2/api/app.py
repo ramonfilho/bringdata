@@ -1257,7 +1257,28 @@ async def hotleads_submit_batch(
         # Antes de puxar leads novos, destrava os quentes cujo evento falhou —
         # o selo deles já está pago, só o envio ao Meta ficou pendente. Sem isso
         # eles ficariam órfãos (nenhum outro caminho os pega de volta).
-        retry = run_retry_failed(conn, cfg, dry_run=dry_run)
+        #
+        # A repesca é CONTIDA: falha nela não pode derrubar a submissão, que é o
+        # trabalho principal desta rota. Em 11-12/08/2026 o oposto aconteceu 23
+        # vezes em 24h — a query da repesca estourava o timeout de 30s (Seq Scan
+        # de 220 MB, resolvido depois com índice parcial) e a request inteira
+        # morria em 500, então os leads NOVOS não eram submetidos naquela rodada.
+        # A causa daquele timeout já foi corrigida, mas o acoplamento não: qualquer
+        # falha futura aqui (Hotmart fora, soluço de rede, bug novo) voltaria a
+        # custar a submissão.
+        #
+        # É o mesmo princípio que `run_process_webhook` já aplica um nível abaixo
+        # ("falha de um lead não derruba o lote"), agora no nível do passo. Conter
+        # NÃO é engolir: o erro é logado em ERROR e volta no payload, em `retry`.
+        try:
+            retry = run_retry_failed(conn, cfg, dry_run=dry_run)
+        except Exception as e:
+            logger.error(
+                f"[hotleads] repesca falhou ({type(e).__name__}: {e}) — "
+                f"submissão segue normalmente; os quentes em 'error' ficam para "
+                f"a próxima rodada (15min)"
+            )
+            retry = {"status": "failed", "error": f"{type(e).__name__}: {e}"}
         result = run_submit_batch(conn, cfg, webhook_url=webhook_url,
                                   limit=limit, dry_run=dry_run)
         return {**result, "retry": retry}
