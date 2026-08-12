@@ -4590,11 +4590,29 @@ def _build_top5_for(result, client_id: str):
         return None
 
 
-def _build_top5_window(result, client_id: str, min_n: int = 50):
+def _build_top5_window(result, client_id: str, min_n: int = 100):
     """vs barra TOP5 da JANELA do ranking (start..end) — 'ontem' no job diário,
     ou o intervalo pedido no endpoint. Mesma régua/barra do LF, só muda a janela
     do `registros_ml` (os leads ainda casam pela scores_historicos do LF atual).
-    N mínimo menor (default 50) porque 1 dia tem menos volume por criativo."""
+
+    N MÍNIMO 100, IGUAL À VISÃO DO LANÇAMENTO (era 50 até 12/08/2026)
+    ================================================================
+    O 50 vinha de "1 dia tem menos volume por criativo", que é verdade e não basta: a
+    diferença REAL entre criativos é de ~11 pontos percentuais (desvio-padrão de 13,3pp
+    medido em 21 criativos com N≥200, descontado o ruído de amostra desses mesmos 200).
+    Dois erros-padrão dão 14,1pp em N=50 contra 10,0pp em N=100. Ou seja, em N=50 a barra
+    de erro é MAIOR que a diferença que ela deveria medir, e a coluna de Δpp fica decorativa:
+    exibe um número que não distingue criativo ruim de criativo azarado.
+
+    Volume menor no dia é motivo para mostrar MENOS linha, não para baixar o piso. Efeito
+    medido no dia 11/08/2026 (658 cadastros): a visão do dia sai de 7 linhas para 4, e as 3
+    que somem são exatamente as que tinham entre 50 e 100 leads. Não é blecaute — é a mesma
+    régua da visão do lançamento, que já usava 100 (o default de `build_top5_comparison`).
+
+    E alinha com o que a agência recebe: a `scores_inbound` no Supabase deles publica com
+    piso 100, então o número que ela lê e o que aparece aqui passam a ser o mesmo. Piso
+    diferente nos dois lados é duas contas divergirem sem ninguém saber qual está certa.
+    """
     from src.monitoring.utm_quality import build_top5_comparison
     from datetime import datetime as _dt
     lf_name = result.window_lf.get('label')
