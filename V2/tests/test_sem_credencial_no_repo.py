@@ -83,6 +83,41 @@ PADROES_PROIBIDOS = [
                 r"""(?![<$\s"'}])(?![a-z0-9]+(?:-[a-z0-9]+)+\})[^}\s"']{6,}\}"""),
      "segredo no fallback de env var do shell (${VAR:-segredo}) — use "
      "$(gcloud secrets versions access …)"),
+    # O MESMO buraco, na forma do Python: `os.environ.get("X_PASSWORD", "segredo")`.
+    #
+    # Encontrado em 12/08/2026, HORAS depois de fechar a versão shell logo acima, e em dois
+    # arquivos que estavam vivos no repositório público (`dt12_impact_analysis.py` e
+    # `test_encoding_overrides.py`). A causa é a mesma de sempre: o lookahead
+    # `(?![^\s"',)]*\()` do padrão de "senha em texto claro" existe para deixar passar
+    # leitura de ambiente, que é uma chamada de função — e o segredo estava no ARGUMENTO
+    # DEFAULT dessa chamada, do lado de dentro do que o guard ignorava.
+    #
+    # A lição vale mais que os dois padrões: TODA construção "usa o ambiente, senão usa
+    # isto" é um esconderijo de segredo, porque a metade "usa o ambiente" é exatamente o que
+    # faz o guard olhar para o outro lado. Se aparecer uma terceira forma (`config.get(…)`,
+    # `?? "…"` em JS, `or "…"` em Python), o padrão novo vem PARA CÁ — nunca como remendo
+    # nos lookaheads dos outros, que foi o que deixou este passar duas vezes.
+    #
+    # O nome da chave tem que sugerir credencial e o default tem que ser literal não-vazio:
+    # `os.getenv("X_PASSWORD")` sem default passa, e é justamente o jeito certo.
+    #
+    # E vale a MESMA exclusão de kebab-case do padrão do shell, pelo mesmo motivo:
+    # `os.getenv("SECRET_NAME", "railway-db-password")` guarda o NOME de um secret, não o
+    # valor. Sem essa exclusão o guard acusaria código correto — e guard que grita em código
+    # correto é desligado, e desligado não protege nada.
+    #
+    # O preço, medido e não suposto: um segredo com hífens passa por aqui. Testado com
+    # `os.getenv("SLACK_TOKEN", "xoxb-abc-def-ghi")` — este padrão NÃO pega, mas o padrão
+    # `xoxb-…` logo abaixo pega, então o caso concreto está coberto por outra via. Não há
+    # separação limpa por regex entre `railway-db-password` (nome) e `xoxb-abc-def-ghi`
+    # (valor): as duas têm a mesma forma. Quem quiser fechar isto de vez precisa de uma
+    # lista dos nomes de secret válidos, não de mais um lookahead.
+    (re.compile(r"""os\.(?:environ\.get|getenv)\(\s*["'][A-Za-z_]*"""
+                r"""(?:PASSWORD|SENHA|SECRET|TOKEN|APIKEY|API_KEY|CREDENTIAL)"""
+                r"""[A-Za-z_]*["']\s*,\s*["']"""
+                r"""(?![a-z0-9]+(?:-[a-z0-9]+)+["'])[^"']{6,}["']"""),
+     "segredo no default de os.environ.get / os.getenv — tire o default e deixe "
+     "estourar, ou leia do Secret Manager"),
     (re.compile(r"xoxb-[A-Za-z0-9]{8,}-[A-Za-z0-9-]{8,}"), "token de bot do Slack"),
     (re.compile(r"\bghp_[A-Za-z0-9]{30,}\b"), "token pessoal do GitHub"),
     (re.compile(r"\bAIza[A-Za-z0-9_\-]{30,}\b"), "chave de API do Google"),
