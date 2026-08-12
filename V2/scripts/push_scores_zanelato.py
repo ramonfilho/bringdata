@@ -3,16 +3,52 @@
 ESTADO EM 12/08/2026: ESCRITO, NÃO LIGADO. Nenhum cron chama este script, então ele é
 inerte em produção. Falta:
 
-  1. Decidir o PISO de N. A conta: a diferença real entre criativos é ~11pp (desvio-padrão
-     de 13,3pp medido em 21 criativos com N>=200, descontado o ruído de amostra desses
-     mesmos 200). Dois erros-padrão dão 18,2pp em N=30, 14,1pp em N=50 e 10,0pp em N=100.
-     Abaixo de 100, o ruído é maior que a diferença entre criativos e a coluna de delta
-     vira decorativa. Recomendação: 100 (o default da função).
-  2. `LEDGER_DECIL_READ_SOURCE=ledger` no ambiente onde ele rodar. Sem isso a função cai no
-     ramo legado que lê a `scores_historicos`, aposentada em 08/07/2026 — e devolve VAZIO
-     para qualquer lançamento depois do LF61. A produção já tem a variável; um ambiente
-     local sem ela reproduz um falso "não tem dado".
-  3. Criar o cron. A `scores_inbound` não tem alimentação nenhuma hoje.
+  1. `LEDGER_DECIL_READ_SOURCE=ledger` no ambiente onde ele rodar. Sem isso a função cai
+     no ramo legado que lê a `scores_historicos`, aposentada em 08/07/2026 — e devolve
+     VAZIO para qualquer lançamento depois do LF61. A produção já tem a variável; um
+     ambiente local sem ela reproduz um falso "não tem dado" (foi o que me fez acusar,
+     erradamente, que o relatório diário estava incompleto).
+  2. Criar o cron. A `scores_inbound` não tem alimentação nenhuma hoje.
+
+PISO DE N = 100, DECIDIDO EM 12/08/2026 (e é o default da função, então não há override)
+=======================================================================================
+Não é escolha de gosto, é onde o sinal passa o ruído. Medido: a diferença REAL entre
+criativos é ~11pp — o desvio-padrão observado entre 21 criativos com N>=200 é 13,3pp, e
+descontando o ruído de amostra desses mesmos 200 (7,1pp) sobra ~11,2pp de diferença
+verdadeira. Contra isso, dois erros-padrão (o limiar que a função usa para dizer
+"diferente") valem:
+
+    N= 30 -> 18,2pp   ruído MAIOR que a diferença entre criativos
+    N= 50 -> 14,1pp   ruído ainda maior
+    N=100 -> 10,0pp   passa, mas NA MARGEM
+    N=200 ->  7,1pp   confortável
+
+Abaixo de 100 a coluna de delta vira decorativa: tudo dá "neutro" e a agência move verba
+com base em número que sacode sozinho. Consequência aceita: no começo de um lançamento
+poucos criativos aparecem, e vão aparecendo conforme acumulam lead. Poucos com nota firme é
+melhor que muitos com nota que oscila mais que a diferença entre eles.
+
+O relatório diário usa 50 na visão de janela, o que significa que a classificação
+acima/abaixo dele está subdimensionada. Observação registrada, não consertada aqui.
+
+A RÉGUA É CONGELADA DE PROPÓSITO — não "conserte" isso
+=====================================================
+A barra de referência (`referencia_pct`, os ~28,4%) vem de
+`configs/reference_audience_profiles/devclub_quality_signal.json`, **gerado em 14/05/2026** e
+não recalculado desde então. Nenhum cron o regenera; quem gera é
+`scripts/build_quality_signal_baseline.py`, rodado à mão.
+
+Isso é decisão consciente, confirmada em 12/08/2026, e não dado esquecido. Régua que se
+recalcula todo dia não é régua: um criativo mudaria de cor sem ter mudado de desempenho, só
+porque a referência andou. O ponto de comparação precisa ficar parado para a comparação
+significar algo.
+
+Fica registrado porque a data antiga no arquivo CONVIDA a interpretar como abandono — foi
+exatamente o que eu concluí antes de perguntar. O que exige atenção é outro detalhe, este sim
+uma armadilha real: **cada promoção de modelo exige regerar o arquivo**, senão o guard de
+`run_id` derruba a comparação para ranking posicional em silêncio. Verificado em 12/08: o
+`run_id` do baseline casa com o champion vivo.
+
 
 O QUE ESTE SCRIPT É, E O QUE ELE NÃO É
 ======================================

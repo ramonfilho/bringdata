@@ -11,7 +11,7 @@ outra quebra a que ninguém estava olhando.
 |---|---|---|
 | **Onde mora o banco** | nosso Cloud SQL | Supabase deles (AWS sa-east-1) |
 | **Quem conecta em quem** | eles leem o nosso | nós escrevemos no deles |
-| **Estado** | ⏸ **desligada** | ✅ **no ar** |
+| **Estado** | 📐 **TEMPLATE de onboarding** (não roda, não apagar) | ✅ **no ar** |
 | **Script** | `V2/scripts/provisiona_dash_zanelato.py` | `V2/scripts/push_supabase_zanelato.py` |
 | **O que dispara** | cron `dash-zanelato-refresh-daily` (PAUSADO) | 4 jobs do Cloud Run |
 | **Tabelas de destino** | `dash.leads_2026`, `dash.qualidade_por_anuncio` | `public.leads_inbound`, `public.scores_inbound` |
@@ -51,8 +51,23 @@ data pertence), `comprou`, as 9 perguntas da pesquisa e as colunas de grupo de W
 Também mantém `dash.qualidade_por_anuncio`, com **qualidade agregada por criativo**, 95
 linhas. Agregado, com mínimo de 30 leads por linha. Nunca score por lead.
 
-**Estado:** o cron está PAUSADO. O banco `dash` e o papel de leitura da agência **não
-foram removidos**, de propósito: se a Fonte B tiver problema, religar é despausar um cron.
+**Estado: TEMPLATE DE ONBOARDING.** O cron está pausado e o banco não roda mais para a
+Zanelato. Decidido em 12/08/2026 que ele **FICA**, e a razão não é nostalgia:
+
+Este é o único lugar do projeto que sabe **provisionar uma entrega de dados para um cliente
+do zero** — cria banco separado, papel somente-leitura, tabela, e traz um teste de aceitação
+(`--aceitacao`) que PROVA o isolamento tentando ler cada tabela proibida e exigindo
+`permission denied` em todas, antes de qualquer credencial sair daqui.
+
+E ele resolve por construção um problema que uma view não resolve: todo banco Postgres tem um
+catálogo de si mesmo legível por qualquer role que consiga conectar, e o catálogo mostra nome
+de coluna. Uma view protegeria os dados e ainda deixaria o cliente ver que existem colunas
+chamadas `lead_score` e `decil`. Banco separado tem catálogo separado.
+
+Quando o segundo cliente chegar, é daqui que se parte. Por isso o rótulo é **template** e não
+"desligada": "desligada" convida alguém a apagar.
+
+Se a Fonte B tiver problema, religar continua sendo despausar um cron.
 
 ---
 

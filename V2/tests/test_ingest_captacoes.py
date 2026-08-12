@@ -268,3 +268,32 @@ def test_quem_altera_valor_entregue_carimba_a_marca_da_entrega():
                        if not l.strip().startswith("#") and "--" not in l)
     assert "ingested_at = now()" in codigo, (
         "o preenchimento da URL não carimba `ingested_at`: a entrega nunca veria a mudança")
+
+
+def test_a_gravacao_confirma_LOTE_POR_LOTE_e_em_ordem_de_data():
+    """As duas coisas juntas, e uma sem a outra é pior que nenhuma.
+
+    COMMIT POR LOTE: com transação única para a rodada inteira, uma rodada morta no limite
+    do job é DESFEITA — nada escrito, marca não avança, a seguinte tenta o mesmo volume e
+    morre igual. Trava para sempre, e piora, porque o acúmulo cresce. Com commit por lote, a
+    rodada morta mantém o que escreveu.
+
+    ORDEM DE DATA CRESCENTE: a marca d'água é `max(captured_at)` do que está gravado. Em
+    ordem arbitrária, um lote com um lead de HOJE faria a marca saltar para hoje e os leads
+    mais antigos ainda não escritos ficariam atrás dela, perdidos em silêncio — trocaria
+    uma rodada que não avança por perda de lead, que é pior.
+    """
+    fonte = (Path(__file__).resolve().parents[1] / "scripts" /
+             "ingest_captacoes_railway.py").read_text()
+    codigo = "\n".join(l for l in fonte.splitlines()
+                       if not l.strip().startswith("#"))
+    corpo = codigo[codigo.index("def _grava("):codigo.index("def marca_dagua(")]
+    assert 'c.run("BEGIN")' in corpo and 'c.run("COMMIT")' in corpo, (
+        "a gravação deixou de confirmar por lote")
+    assert "sorted(linhas, key=lambda x: x[7])" in corpo, (
+        "os lotes deixaram de ir em ordem de data; a marca d'água pode saltar e deixar "
+        "lead antigo atrás dela")
+    # E a transação externa NÃO pode voltar: ela anularia o commit por lote.
+    main = codigo[codigo.index("def main("):]
+    assert 'c.run("BEGIN")' not in main, (
+        "voltou uma transação envolvendo a rodada inteira — anula o commit por lote")
