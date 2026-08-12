@@ -93,15 +93,22 @@ def test_a_ordem_do_SELECT_bate_com_a_ordem_das_COLUNAS():
         f"ordem divergiu de COLUNAS: {[c for _, c in sorted(posicoes)]}")
 
 
-def test_a_janela_e_de_90_dias_e_no_fuso_da_coluna():
-    """O combinado com o cliente é 90 dias. E a fronteira tem que estar no MESMO fuso da
-    coluna `data`: fronteira num fuso e valor em outro faz a linha da borda entrar na carga
-    e sair na poda a cada rodada, para sempre, sem erro nenhum aparecendo."""
+def test_a_janela_e_de_90_dias_e_na_mesma_regra_de_dia_da_coluna():
+    """O combinado com o cliente é 90 dias. E a fronteira tem que usar a MESMA regra de dia
+    da coluna `data`: fronteira numa regra e valor em outra faz a linha da borda entrar na
+    carga e sair na poda a cada rodada, para sempre, sem erro nenhum aparecendo.
+
+    Atualizado em 12/08/2026: a regra de dia deixou de ser uma expressão fixa e passou a
+    depender da procedência (ver `DIA_SQL`), então o que este teste trava é a IGUALDADE
+    entre as duas, não o texto de uma delas.
+    """
     assert p.DIAS == 90
     assert f"AT TIME ZONE '{p.FUSO}'" in p.CORTE_SQL
     for janela in (False, True):
-        assert (f"(c.captured_at AT TIME ZONE '{p.FUSO}')::date >= {p.CORTE_SQL}"
-                in p._select(janela)), f"sumiu o recorte no modo janela={janela}"
+        sql = p._select(janela)
+        assert f"{p.DIA_SQL} >= {p.CORTE_SQL}" in sql, (
+            f"sumiu o recorte no modo janela={janela}, ou ele deixou de usar a mesma "
+            f"expressão de dia da coluna `data`")
 
 
 def test_o_recorte_e_por_DIA_e_nao_por_instante():
@@ -109,21 +116,31 @@ def test_o_recorte_e_por_DIA_e_nao_por_instante():
     filtrava por instante e o destino guarda só o dia, então entre a carga e a auditoria o
     relógio andava e linhas da fronteira saíam de um lado e ficavam no outro."""
     codigo = _codigo()
-    assert "::date >=" in codigo, "o recorte voltou a ser por instante"
+    # Os dois ramos da regra de dia terminam em `::date`, então a comparação é entre datas.
+    assert codigo.count("::date") >= 2, "o recorte voltou a ser por instante"
+    assert "END >=" in codigo, "a comparação de dia perdeu o corte"
     assert "now() - interval" not in codigo, "sobrou filtro por instante no SQL de verdade"
 
 
-def test_a_data_sai_em_BRASILIA_e_no_formato_que_a_coluna_deles_espera():
+def test_a_data_sai_como_TEXTO_no_formato_que_a_coluna_deles_espera():
     """A coluna `data` no destino é TEXTO, e a agência compara com a planilha dela e com o
     painel da Meta, os dois em horário de Brasília.
 
     Em 10/08/2026 ela apontou 15 leads do dia 09/08 ausentes; 14 estavam lá datados 10/08,
     e os 14 tinham chegado entre 21:05 e 23:55 de Brasília do dia 09 — desvio sistemático
     de 3 horas. A causa não estava escrita no código: a conexão tem `TimeZone = UTC` e
-    `to_char(timestamptz, ...)` renderiza no fuso da SESSÃO. Daí o fuso EXPLÍCITO aqui.
+    `to_char(timestamptz, ...)` renderiza no fuso da SESSÃO. Daí o fuso EXPLÍCITO.
+
+    Em 12/08/2026 descobriu-se que aquele conserto estava certo só para METADE da tabela:
+    nas linhas de planilha, `captured_at` já É a data local e converter a corrompia. Qual
+    ramo vale para qual procedência é o assunto de
+    `test_a_data_entregue_depende_da_PROCEDENCIA_da_linha`; aqui só se trava que a saída é
+    texto no formato pedido.
     """
     codigo = _codigo()
-    assert (f"to_char(c.captured_at AT TIME ZONE '{p.FUSO}', 'YYYY-MM-DD')" in codigo)
+    assert "'YYYY-MM-DD')      AS data" in codigo or "'YYYY-MM-DD')" in codigo, (
+        "a coluna `data` deixou de sair como texto no formato pedido")
+    assert "to_char(" in codigo
     assert p.FUSO == "America/Sao_Paulo"
 
 
@@ -507,3 +524,57 @@ def test_a_folga_do_incremental_e_pouco_maior_que_a_cadencia():
     é desperdício. Muito menor que a cadência, porém, deixa buraco entre rodadas."""
     assert 5 < p.FOLGA_MINUTOS <= 10, (
         f"folga de {p.FOLGA_MINUTOS} min não casa com uma cadência de 5 minutos")
+
+
+def test_a_data_entregue_depende_da_PROCEDENCIA_da_linha():
+    """Converter uma data local para outro fuso não a corrige, corrompe.
+
+    Em `analytics.captacoes`, `captured_at` significa duas coisas diferentes conforme a
+    origem da linha, e tratar as duas igual erra numa delas:
+
+      - procedência `railway`: é INSTANTE (vem do `trackedAt` do evento de UTM). Converter
+        para Brasília é o certo.
+      - procedência `planilha`: NÃO é instante. 494.195 de 503.438 linhas (98,2%) estão em
+        00:00:00 UTC exato, porque é uma DATA guardada como meia-noite, e a data que a
+        planilha do Drive trazia já era a data local brasileira. `AT TIME ZONE
+        'America/Sao_Paulo'` devolve 21h do dia ANTERIOR e o dia anda −1.
+
+    Medido em 12/08/2026 contra o `Client` do Railway (fonte de FORA, de propósito), 2.998
+    linhas de planilha na janela: lido como UTC acerta 90,6%, lido em Brasília acerta 0,0%.
+    Contra o calendário de lançamentos, a leitura UTC bate `min(data)` com `cap_start` em 8
+    de 10 LFs; a leitura em Brasília dá −1 dia em 8 de 10.
+
+    Este teste existe porque o defeito é INVISÍVEL para a auditoria: ela compara a nossa
+    contagem por mês com a deles, e as duas usam a mesma expressão. Deslocamento uniforme
+    casa perfeitamente. Só uma fonte de fora, ou este teste, pega.
+    """
+    import scripts.push_supabase_zanelato as p
+
+    for janela in (False, True):
+        sql = p._select(janela)
+        assert "origem_id LIKE 'planilha:" in sql, (
+            "a expressão de dia deixou de separar por procedência — as linhas de planilha "
+            "voltam a ser entregues com a data 1 dia adiantada")
+        assert "AT TIME ZONE 'UTC'" in sql, (
+            "sumiu a leitura UTC, que é a correta para as linhas de planilha")
+        assert "AT TIME ZONE 'America/Sao_Paulo'" in sql, (
+            "sumiu a conversão para Brasília, que é a correta para as linhas do Railway")
+
+
+def test_o_corte_de_90_dias_usa_a_MESMA_expressao_de_dia_que_a_coluna_data():
+    """Fronteira num critério e valor em outro faz a linha da borda oscilar para sempre.
+
+    A carga insere quem passa do corte e a poda apaga quem tem `data` antes dele. Se os dois
+    calcularem o dia de formas diferentes, a linha da borda entra na carga e sai na poda a
+    cada rodada, indefinidamente, e nenhuma das duas dá erro. Por isso `DIA_SQL` aparece nos
+    dois lugares do SELECT em vez de haver uma segunda cópia escrita à mão.
+    """
+    import scripts.push_supabase_zanelato as p
+
+    sql = p._select(False)
+    # A expressão de dia é a mesma string nos dois usos: a projeção da coluna e o WHERE.
+    corpo = p.DIA_SQL.strip()
+    assert sql.count(corpo) == 2, (
+        f"`DIA_SQL` aparece {sql.count(corpo)}x no SELECT; tem que aparecer 2x (a coluna "
+        f"`data` e o corte de 90 dias). Cópia escrita à mão em um dos dois é o que faz a "
+        f"linha da borda oscilar entre carga e poda")
