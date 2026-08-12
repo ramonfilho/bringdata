@@ -83,6 +83,63 @@ _DRAIN_MAX_ROUNDS = 8
 # `sem_resposta` e não `fila_vazia`, e daí exigirmos mais de um vazio.
 _DRAIN_EMPTY_PULLS = 3
 
+# Quanto tempo cada pergunta à fila fica esperando resposta, em segundos.
+#
+# POR QUE ISTO EXISTE E POR QUE CAIU DE 10 PARA 3 (12/08/2026):
+# quando a fila está vazia, o servidor do Pub/Sub NÃO responde "vazio" na hora.
+# Ele segura a conexão aberta até o prazo acabar, na esperança de aparecer uma
+# mensagem. Ou seja, esse tempo não é espera morta, é escuta: um lead que chegar
+# durante ela é entregue na mesma invocação, em vez de esperar o próximo tick de
+# 5 minutos.
+#
+# O problema é que o Cloud Run cobra pelo tempo que a chamada fica aberta, não
+# pelo trabalho feito, e a máquina tem 2 CPUs. Com 3 perguntas de confirmação por
+# invocação e 288 invocações por dia, os 10 segundos custavam ~R$ 3/dia MESMO EM
+# DIA SEM LEAD NENHUM. Medido: em 06/08/2026 o sistema processou 27 leads e
+# custou R$ 3,47; em 07/07/2026 processou 1.364 leads e custou R$ 0,69. O custo
+# tinha deixado de depender do volume, que é a assinatura de custo por invocação.
+#
+# O QUE SE PERDE: a janela de escuta encolhe de ~30s para ~9s por invocação, então
+# lead que chegar depois disso espera o próximo ciclo. Custo medido e aceito pelo
+# operador em 12/08/2026: 26 de 175 leads (14,9%) em 08/08 chegaram depois do
+# primeiro pull. Ninguém se perde, e o atraso continua dentro dos ~5 minutos que
+# o sistema promete.
+#
+# O QUE **NÃO** SE PERDE: a proteção contra o caso de 31/07/2026, quando o dreno
+# declarou fila vazia com 253 leads parados. Aquilo não foi falta de tempo de
+# espera. A documentação do Pub/Sub é explícita: um pull volta vazio mesmo com
+# backlog porque OUTRO consumidor está segurando a posse das mensagens naquele
+# instante, e por isso "resposta com 0 mensagens não deve ser usada como indicador
+# de que não há mensagens na fila". Esperar 10s em vez de 3s não muda isso. Quem
+# protege contra aquele caso são os `_DRAIN_EMPTY_PULLS` e a consulta à métrica
+# de fila, ambos intactos.
+#
+# Ajustável sem deploy por `PUBSUB_PULL_WAIT_S`. Voltar a 10 restaura o
+# comportamento anterior em ~2min.
+_PULL_WAIT_SECONDS_DEFAULT = 3.0
+
+
+def tempo_de_espera_do_pull() -> float:
+    """Segundos que cada pergunta à fila espera antes de desistir.
+
+    Valor inválido ou fora de faixa cai no default em vez de derrubar o consumo
+    de leads: esta função roda no caminho quente e um typo na variável de
+    ambiente não pode parar o scoring. Teto de 30s pra ninguém configurar algo
+    que estoure o prazo do Cloud Scheduler nesta rota.
+    """
+    try:
+        v = float(os.environ.get("PUBSUB_PULL_WAIT_S", _PULL_WAIT_SECONDS_DEFAULT))
+    except (TypeError, ValueError):
+        return _PULL_WAIT_SECONDS_DEFAULT
+    if not (0.5 <= v <= 30.0):
+        logger.warning(
+            "[pubsub_branch] PUBSUB_PULL_WAIT_S=%s fora da faixa 0.5-30s, usando %s",
+            v, _PULL_WAIT_SECONDS_DEFAULT,
+        )
+        return _PULL_WAIT_SECONDS_DEFAULT
+    return v
+
+
 # Renovação do lease durante a rodada. O ackDeadline da subscription é o teto do
 # SERVIDOR (600s desde 31/07/2026); isto aqui é o que mantém a mensagem nossa
 # enquanto a rodada trabalha, em vez de depender de um valor fixo bem chutado.
@@ -449,7 +506,7 @@ def process_pending_pubsub(
     try:
         response = subscriber.pull(
             request={"subscription": sub_path, "max_messages": int(batch)},
-            timeout=10.0,
+            timeout=tempo_de_espera_do_pull(),
         )
         received = list(response.received_messages)
     except _gax_exc.DeadlineExceeded:
