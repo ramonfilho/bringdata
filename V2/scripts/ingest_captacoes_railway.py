@@ -100,6 +100,7 @@ from dotenv import load_dotenv                                          # noqa: 
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
+from scripts.aviso_dm import avisa_no_dm                                # noqa: E402
 from src.data.analytics_connection import open_analytics_connection     # noqa: E402
 
 TABELA = "analytics.captacoes"
@@ -445,11 +446,29 @@ def main() -> int:
         print(f"  rodada levou {gasto:.1f}s de um limite de {TIMEOUT_JOB_S}s "
               f"({fracao*100:.0f}% do orçamento)")
         if fracao > AVISA_ACIMA_DE:
-            print(f"AVISO: esta rodada usou {fracao*100:.0f}% do tempo do job para "
-                  f"{len(montadas):,} linhas. Perto do limite, a rodada é MORTA no meio, a "
-                  f"transação é desfeita e a marca não avança — a seguinte tentaria o mesmo "
-                  f"volume e falharia igual. Se isto repetir, é hora de fatiar em lotes com "
-                  f"avanço parcial da marca.", file=sys.stderr)
+            # A frase antiga dizia que a rodada morta "desfaz a transação e não avança a
+            # marca". Isso deixou de ser verdade com o commit por lote em ordem de data
+            # (PR #179): hoje a rodada morta CONSERVA os lotes já confirmados e a seguinte
+            # continua de onde parou. O risco que sobra é outro e é mais lento de perceber:
+            # se o volume por rodada cresce, cada rodada termina uma fração menor do
+            # trabalho, a fila de atraso se acumula, e a entrega vai ficando velha sem
+            # nenhuma rodada nunca falhar.
+            texto = (f"esta rodada usou {fracao*100:.0f}% do tempo do job "
+                     f"({gasto:.0f}s de {TIMEOUT_JOB_S}s) para {len(montadas):,} linhas. "
+                     f"Com o commit por lote, morrer no meio não perde trabalho — a rodada "
+                     f"seguinte continua de onde parou. O risco é o atraso ACUMULAR sem "
+                     f"nenhuma rodada falhar. Se isto repetir, é hora de teto de linhas por "
+                     f"rodada ou cron mais frequente.")
+            print(f"AVISO: {texto}", file=sys.stderr)
+            # E vai para o DM. Ficar só no stderr é o mesmo defeito que a auditoria da
+            # entrega tinha até 10/08/2026: o alerta existia, ninguém via, e a política de
+            # `Cron falhou` não cobre job que roda e avisa por dentro.
+            avisa_no_dm(
+                [f"linhas na rodada: {len(montadas):,}",
+                 f"tempo: {gasto:.0f}s de {TIMEOUT_JOB_S}s ({fracao*100:.0f}%)",
+                 f"aviso dispara acima de {AVISA_ACIMA_DE*100:.0f}%"],
+                f":hourglass_flowing_sand: *Ingestão de captações perto do teto de tempo* — "
+                f"{texto}")
         return 0
     finally:
         c.close()

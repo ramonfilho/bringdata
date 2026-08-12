@@ -297,3 +297,67 @@ def test_a_gravacao_confirma_LOTE_POR_LOTE_e_em_ordem_de_data():
     main = codigo[codigo.index("def main("):]
     assert 'c.run("BEGIN")' not in main, (
         "voltou uma transação envolvendo a rodada inteira — anula o commit por lote")
+
+
+def test_o_aviso_de_teto_vai_para_o_DM_e_nao_so_para_o_stderr():
+    """Aviso que só existe no log é o mesmo defeito que a auditoria da entrega tinha.
+
+    Até 10/08/2026 a auditoria DETECTAVA a divergência e morria no log do Cloud Run. As 3
+    políticas de alerta do projeto não cobrem este caso: a de `Cron falhou` dispara quando o
+    Scheduler não consegue DISPARAR o job, não quando o job roda e avisa por dentro. O aviso
+    de teto da ingestão nasceu com o mesmo defeito, e este teste é o que impede a regressão.
+    """
+    fonte = (Path(__file__).resolve().parents[1] / "scripts" /
+             "ingest_captacoes_railway.py").read_text()
+    assert "from scripts.aviso_dm import avisa_no_dm" in fonte, (
+        "a ingestão não importa o avisador do DM")
+    codigo = "\n".join(l for l in fonte.splitlines()
+                       if not l.strip().startswith("#"))
+    trecho = codigo[codigo.index("if fracao > AVISA_ACIMA_DE:"):]
+    assert "avisa_no_dm(" in trecho, (
+        "o aviso de teto voltou a ficar só no stderr")
+
+
+def test_o_avisador_do_DM_nunca_levanta_excecao():
+    """Contrato do módulo: aviso que derruba o job que ele vigia é pior que aviso nenhum.
+
+    Transformaria um problema pequeno ("a rodada está lenta") num grande ("a ingestão
+    parou"). Por isso toda falha volta como dicionário e nada propaga.
+    """
+    import sys
+    raiz = Path(__file__).resolve().parents[1]
+    if str(raiz) not in sys.path:
+        sys.path.insert(0, str(raiz))
+    from scripts.aviso_dm import avisa_no_dm
+
+    def explode(*_a, **_k):
+        raise RuntimeError("slack fora do ar")
+
+    r = avisa_no_dm(["x"], "y", poster=explode, canal="D_TESTE")
+    assert r["ok"] is False and "slack fora do ar" in r["erro"]
+
+
+def test_o_avisador_manda_o_resumo_e_o_bloco_de_linhas():
+    """O resumo vira texto do Slack e as linhas viram bloco de código, nessa ordem."""
+    import sys
+    raiz = Path(__file__).resolve().parents[1]
+    if str(raiz) not in sys.path:
+        sys.path.insert(0, str(raiz))
+    from scripts.aviso_dm import avisa_no_dm
+
+    capturado = {}
+
+    def poster(canal, blocos, resumo):
+        capturado.update(canal=canal, blocos=blocos, resumo=resumo)
+        return {"ok": True}
+
+    avisa_no_dm(["linha A", "linha B"], "resumo aqui", poster=poster, canal="D_TESTE")
+    assert capturado["canal"] == "D_TESTE"
+    assert capturado["resumo"] == "resumo aqui"
+    assert "resumo aqui" in capturado["blocos"][0]["text"]["text"]
+    assert "linha A\nlinha B" in capturado["blocos"][1]["text"]["text"]
+
+    # Sem linhas, manda só o resumo — não um bloco de código vazio.
+    capturado.clear()
+    avisa_no_dm(None, "só o resumo", poster=poster, canal="D_TESTE")
+    assert len(capturado["blocos"]) == 1
