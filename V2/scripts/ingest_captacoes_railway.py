@@ -113,21 +113,29 @@ FUSO = "America/Sao_Paulo"
 
 # Limite do job no Cloud Run, e a fração dele a partir da qual esta rodada RECLAMA.
 #
-# NÃO existe teto de linhas por rodada, e é decisão medida. Em 11/08/2026, cronometrado
-# contra o Railway de verdade:
+# NÃO existe teto de LINHAS por rodada, e a decisão é medida — mas a medição que a sustenta
+# não é a que eu usei primeiro, e a diferença importa.
 #
-#     1 dia   ->    639 registros em 3,7s
-#     8 dias  ->  2.558 registros em 3,0s
-#    30 dias  -> 39.684 registros em 6,6s   (+ 0,10s para montar em Python)
+# Primeiro eu cronometrei só a LEITURA do Railway: 1 dia = 639 registros em 3,7s; 8 dias =
+# 2.558 em 3,0s; 30 dias = 39.684 em 6,6s. Concluí "85x de margem" e descartei fatiar.
+# Estava medindo a metade fácil. Na primeira execução no Cloud Run (12/08/2026) a GRAVAÇÃO
+# apareceu: 515 linhas em 148s, ou ~3,5 linhas/s — 70x mais lenta que a leitura. O teto real
+# por rodada é ~1.400 linhas, não 40 mil.
 #
-# Um atraso catastrófico de 30 dias cabe em 7 segundos de um limite de 600. Fatiar em lotes
-# com avanço parcial da marca resolveria o caso "volume maior que o job aguenta", mas esse
-# caso está 85x longe, e código para um problema que não existe é código que ninguém testa.
+# Por que ainda não há teto de linhas: o que decide não é o teto absoluto, é a TAXA DE
+# CHEGADA. A gravação faz ~210 linhas/min contra ~1/min de chegada real neste projeto, e uns
+# 20-30/min num cliente com investimento muito maior. Sobra margem de 7x no pior caso
+# imaginável. Teto de linhas continua sendo código para um problema que não existe.
 #
-# O que fica no lugar é o AVISO. Falhar por volume seria silencioso: o job morre no limite,
-# a transação é desfeita, a marca não avança e a rodada seguinte tenta o mesmo. A auditoria
-# diária pegaria a divergência, mas dias depois. Reclamar ao passar da metade do orçamento
-# de tempo dá aviso ANTES de quebrar, que é a diferença entre consertar e descobrir.
+# O que existe, e foi implementado: COMMIT POR LOTE em ordem de data (ver `_grava`). Ele
+# cobre o único caso que sobra, a PARADA LONGA — a fila do Pub/Sub já ficou travada 27h uma
+# vez, e um acúmulo desse tamanho passa do que cabe numa rodada. Com transação única, a
+# rodada morta era desfeita e a seguinte tentava o mesmo volume: travava para sempre e
+# piorava. Com commit por lote, ela mantém o que escreveu e a seguinte continua de onde parou.
+#
+# E fica o AVISO, porque estourar o limite seria silencioso: o job morre, a rodada seguinte
+# tenta, e a auditoria diária só pegaria a divergência dias depois. Reclamar ao passar da
+# metade do orçamento dá aviso ANTES de quebrar.
 TIMEOUT_JOB_S = 600
 AVISA_ACIMA_DE = 0.5
 
@@ -309,6 +317,17 @@ def _grava(c, linhas) -> tuple:
     atualiza = ",".join(
         f"{k}=EXCLUDED.{k}" for k in COLUNAS
         if k not in ("lf", "chave", "origem_id"))
+    # ORDEM DE DATA CRESCENTE, e ela é o que torna o commit por lote SEGURO.
+    #
+    # A marca d'água é `max(captured_at)` das linhas gravadas. Se os lotes fossem em ordem
+    # arbitrária e um deles contivesse um lead de hoje, a marca saltaria para hoje e os
+    # leads mais ANTIGOS ainda não escritos ficariam atrás dela — perdidos em silêncio.
+    # Isso seria trocar uma rodada que não avança por perda de lead, que é pior.
+    #
+    # Em ordem crescente, depois do lote k tudo com data até o máximo do lote k está
+    # gravado, e a marca diz a verdade. Índice 7 é `captured_at` (ver COLUNAS).
+    linhas = sorted(linhas, key=lambda x: x[7])
+
     for i in range(0, len(linhas), LOTE):
         pedaco = linhas[i:i + LOTE]
         vals, par = [], {}
@@ -318,8 +337,30 @@ def _grava(c, linhas) -> tuple:
                 par[f"p{j}_{k}"] = v
                 marcas.append(f":p{j}_{k}")
             vals.append("(" + ",".join(marcas) + ")")
-        c.run(f"INSERT INTO {TABELA} ({cols}) VALUES " + ",".join(vals) +
-              f" ON CONFLICT (lf, chave, origem_id) DO UPDATE SET {atualiza}", **par)
+        # COMMIT POR LOTE, e não uma transação para a rodada inteira.
+        #
+        # Com transação única, uma rodada morta no meio (limite do job) é DESFEITA: nada
+        # foi escrito, a marca não avança, e a rodada seguinte tenta o mesmo volume e morre
+        # igual — trava para sempre, e piora, porque o acúmulo cresce.
+        #
+        # Medido em 12/08/2026 na primeira execução no Cloud Run: a gravação faz ~3,5
+        # linhas/s (515 linhas em 148s). Em regime normal isso é 210/min contra ~1/min de
+        # chegada real neste projeto, então sobra margem. O caso que importa é PARADA
+        # LONGA: a fila do Pub/Sub já ficou travada 27h uma vez, e um acúmulo desse
+        # tamanho passa do que cabe numa rodada.
+        #
+        # Com commit por lote, rodada morta MANTÉM o que escreveu e a seguinte continua de
+        # onde parou. É a mesma lição da migração desta tabela, aplicada lá e esquecida aqui.
+        c.run("BEGIN")
+        try:
+            c.run(f"INSERT INTO {TABELA} ({cols}) VALUES " + ",".join(vals) +
+                  f" ON CONFLICT (lf, chave, origem_id) DO UPDATE SET {atualiza}", **par)
+            c.run("COMMIT")
+        except Exception:
+            c.run("ROLLBACK")
+            raise
+        print(f"    lote {i // LOTE + 1}: +{len(pedaco)} confirmado "
+              f"(até {pedaco[-1][7].isoformat()})", flush=True)
     depois = c.run(f"SELECT count(*) FROM {TABELA}")[0][0]
     return len(linhas), depois - antes
 
@@ -392,13 +433,10 @@ def main() -> int:
             print("\n--check: nada gravado.")
             return 0
 
-        c.run("BEGIN")
-        try:
-            n, delta = _grava(c, montadas)
-            c.run("COMMIT")
-        except Exception:
-            c.run("ROLLBACK")
-            raise
+        # SEM transação externa: `_grava` confirma lote por lote, de propósito. Envolver
+        # tudo numa transação aqui anularia isso e traria de volta o "rodada morta perde
+        # todo o trabalho".
+        n, delta = _grava(c, montadas)
         print(f"\n  {n:,} linhas gravadas · {delta:+,} de saldo na tabela")
 
         # O aviso. Ver `TIMEOUT_JOB_S`: sem ele, estourar o limite é falha silenciosa.
