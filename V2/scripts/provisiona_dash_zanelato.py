@@ -165,13 +165,6 @@ def _admin():
 def sql_fonte(janela: bool = False) -> str:
     """Uma linha por lead de 2026, com UTM, pesquisa, LF e marcador de compra.
 
-    `janela=True` acrescenta o recorte do que MUDOU desde `:desde`, para a carga
-    incremental de 5 em 5 minutos. É parâmetro desta função, e não uma segunda
-    consulta, de propósito: duas definições do formato da entrega divergiriam, e a
-    divergência apareceria como coluna trocada no painel do cliente. Uma definição,
-    um filtro opcional.
-
-
     São DOIS braços somados, e a distinção importa para quem lê a entrega:
 
     1. **Quem respondeu a pesquisa**, vindo de `analytics.leads` (o universo de
@@ -232,16 +225,47 @@ def sql_fonte(janela: bool = False) -> str:
     - **comprou** é marcador, sem valor nem data: quanto entrou é informação de
       receita e não faz parte desta entrega.
     """
+    pesquisa = list(PESQUISA)
     cols_pesquisa = ",\n           ".join(
         f"nullif(l.survey_responses->>'{chave}', '') AS {alias}"
-        for chave, alias in PESQUISA
+        for chave, alias in pesquisa
     )
     # No braço de quem não respondeu, as mesmas colunas saem nulas. Precisam vir na
     # MESMA ordem e com o MESMO nome, senão o UNION cola dado de uma pergunta na
     # coluna de outra sem reclamar de nada.
     cols_pesquisa_nulas = ",\n           ".join(
-        f"NULL::text AS {alias}" for _, alias in PESQUISA
+        f"NULL::text AS {alias}" for _, alias in pesquisa
     )
+
+    # Pedaços que aparecem nos DOIS braços. Montados aqui, uma vez, e interpolados nos
+    # dois: é a única forma de não esquecer um lado ao mexer.
+    def _lead_id(ap):                       # `ap` = apelido da tabela no braço (l ou c)
+        return f"encode(sha256((:sal || lower({ap}.email))::bytea), 'hex') AS lead_id,\n           "
+    col_lf = "cal.lf_name AS lf,\n           "
+    # A cauda vai INTEIRA num pedaço só, começando pela vírgula: montada coluna por
+    # coluna, uma variação futura deixaria vírgula solta e o SQL nem parsearia.
+    cauda = (
+        ",\n           (comp.email IS NOT NULL) AS comprou,"
+        "\n           NULL::boolean AS entrou_no_grupo,"
+        "\n           NULL::text AS grupo_whatsapp,"
+        "\n           NULL::timestamp AS entrou_no_grupo_em")
+
+    def _join_sales(ap):
+        return (
+            f"\n      LEFT JOIN (SELECT DISTINCT lower(email) AS email FROM analytics.sales"
+            f"\n                  WHERE email IS NOT NULL) comp"
+            f"\n             ON comp.email = lower({ap}.email)")
+
+    def _join_cal(ap, col_data, por_id):
+        alvo = (f"cal.client_id = {ap}.client_id" if por_id
+                else f"cal.client_id = '{CLIENTE_CALENDARIO}'")
+        return (f"\n      LEFT JOIN analytics.launch_calendar cal"
+                f"\n             ON {alvo}"
+                f"\n            AND {ap}.{col_data}::date BETWEEN cal.cap_start AND cal.cap_end")
+
+    # Sem o calendário não há linha duplicada para desempatar, então o `cap_start DESC`
+    # sai junto — deixá-lo referenciaria uma tabela que não está mais no FROM.
+    ord_cal = ", cal.cap_start DESC"
     # Recorte do que mudou. Reúne num só lugar TODAS as origens que fazem uma linha da
     # entrega mudar de valor, porque esquecer uma delas é o modo silencioso de falhar:
     # o cliente veria dado velho e ninguém saberia. As quatro são:
@@ -256,17 +280,18 @@ def sql_fonte(janela: bool = False) -> str:
     # O calendário de lançamento (`launch_calendar`) NÃO entra: ele muda a coluna `lf`
     # de linhas antigas sem tocar em nenhuma das quatro marcas acima. Quem cobre isso é
     # a passada de reconciliação diária, e é por isso que ela existe.
-    mudou = """
+    origem_venda = """
+        UNION
+        SELECT lower(email) FROM analytics.sales
+         WHERE ingested_at >= :desde AND nullif(email,'') IS NOT NULL"""
+    mudou = f"""
       mudou AS (
         SELECT lower(email) AS email FROM analytics.leads
          WHERE ingested_at >= :desde AND nullif(email,'') IS NOT NULL
         UNION
         SELECT lower(email) FROM analytics.cadastros
          WHERE (ingested_at >= :desde OR refreshed_at >= :desde)
-           AND nullif(email,'') IS NOT NULL
-        UNION
-        SELECT lower(email) FROM analytics.sales
-         WHERE ingested_at >= :desde AND nullif(email,'') IS NOT NULL
+           AND nullif(email,'') IS NOT NULL{origem_venda}
         UNION
         SELECT email FROM analytics.url_captura_legado
          WHERE recuperado_em >= :desde
@@ -329,13 +354,11 @@ def sql_fonte(janela: bool = False) -> str:
     -- BRAÇO 1: quem respondeu a pesquisa (universo de treino do modelo).
     (
     SELECT DISTINCT ON (l.event_id)
-           encode(sha256((:sal || lower(l.email))::bytea), 'hex') AS lead_id,
-           nullif(l.survey_responses->>'Nome Completo', '') AS nome,
+           {_lead_id('l')}nullif(l.survey_responses->>'Nome Completo', '') AS nome,
            lower(l.email) AS email,
            nullif(coalesce(l.phone, l.survey_responses->>'Telefone'), '') AS telefone,
            l.capturado_em,
-           cal.lf_name AS lf,
-           CASE
+           {col_lf}CASE
              WHEN lower(coalesce(nullif(l.utm_source,''),
                                  nullif(l.survey_responses->>'Source',''), '')) IN
                   ('facebook-ads','facebook-ads-sitelink','facebook','fb','ig',
@@ -356,26 +379,15 @@ def sql_fonte(janela: bool = False) -> str:
            nullif(l.utm_content,'')  AS utm_content,
            nullif(l.utm_term,'')     AS utm_term,
            true AS respondeu_pesquisa,
-           {cols_pesquisa},
-           (comp.email IS NOT NULL) AS comprou,
-           NULL::boolean AS entrou_no_grupo,
-           NULL::text AS grupo_whatsapp,
-           NULL::timestamp AS entrou_no_grupo_em
-      FROM analytics.leads l
-      LEFT JOIN (SELECT DISTINCT lower(email) AS email FROM analytics.sales
-                  WHERE email IS NOT NULL) comp
-             ON comp.email = lower(l.email)
-      LEFT JOIN url_por_email u   ON u.email = lower(l.email)
-
-      LEFT JOIN analytics.launch_calendar cal
-             ON cal.client_id = l.client_id
-            AND l.capturado_em::date BETWEEN cal.cap_start AND cal.cap_end
+           {cols_pesquisa}{cauda}
+      FROM analytics.leads l{_join_sales('l')}
+      LEFT JOIN url_por_email u   ON u.email = lower(l.email){_join_cal('l', 'capturado_em', True)}
      WHERE l.source = 'leads_treino_prod'
        AND l.capturado_em >= '{ANO}-01-01'
        AND l.capturado_em <  '{ANO + 1}-01-01'
        AND l.email IS NOT NULL AND l.email <> ''
        {filtro_1}
-     ORDER BY l.event_id, cal.cap_start DESC
+     ORDER BY l.event_id{ord_cal}
     )
 
     UNION ALL
@@ -389,13 +401,11 @@ def sql_fonte(janela: bool = False) -> str:
     -- lançamento que COMEÇA nele, daí o `cap_start DESC`.
     (
     SELECT DISTINCT ON (lower(c.email))
-           encode(sha256((:sal || lower(c.email))::bytea), 'hex') AS lead_id,
-           nullif(trim(concat_ws(' ', c.first_name, c.last_name)), '') AS nome,
+           {_lead_id('c')}nullif(trim(concat_ws(' ', c.first_name, c.last_name)), '') AS nome,
            lower(c.email) AS email,
            nullif(c.phone, '') AS telefone,
            c.first_seen_at AS capturado_em,
-           cal.lf_name AS lf,
-           CASE
+           {col_lf}CASE
              WHEN lower(coalesce(c.utm_source,'')) IN
                   ('facebook-ads','facebook-ads-sitelink','facebook','fb','ig',
                    'instagram','meta') THEN 'meta'
@@ -416,25 +426,15 @@ def sql_fonte(janela: bool = False) -> str:
            nullif(c.utm_content,'')  AS utm_content,
            nullif(c.utm_term,'')     AS utm_term,
            false AS respondeu_pesquisa,
-           {cols_pesquisa_nulas},
-           (comp.email IS NOT NULL) AS comprou,
-           NULL::boolean AS entrou_no_grupo,
-           NULL::text AS grupo_whatsapp,
-           NULL::timestamp AS entrou_no_grupo_em
-      FROM analytics.cadastros c
-      LEFT JOIN (SELECT DISTINCT lower(email) AS email FROM analytics.sales
-                  WHERE email IS NOT NULL) comp
-             ON comp.email = lower(c.email)
-      LEFT JOIN url_por_email u   ON u.email = lower(c.email)
-      LEFT JOIN analytics.launch_calendar cal
-             ON cal.client_id = '{CLIENTE_CALENDARIO}'
-            AND c.first_seen_at::date BETWEEN cal.cap_start AND cal.cap_end
+           {cols_pesquisa_nulas}{cauda}
+      FROM analytics.cadastros c{_join_sales('c')}
+      LEFT JOIN url_por_email u   ON u.email = lower(c.email){_join_cal('c', 'first_seen_at', False)}
      WHERE NOT c.is_respondent
        AND c.first_seen_at >= '{ANO}-01-01'
        AND c.first_seen_at <  '{ANO + 1}-01-01'
        AND c.email IS NOT NULL AND c.email <> ''
        {filtro_2}
-     ORDER BY lower(c.email), cal.cap_start DESC
+     ORDER BY lower(c.email){ord_cal}
     )
     """
 

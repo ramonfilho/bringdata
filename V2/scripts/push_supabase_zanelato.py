@@ -27,9 +27,23 @@ minutos, e reescrever 130 mil linhas a cada 5 minutos não é "mais lento", é i
 a tabela ficaria em reconstrução permanente.
 
 O erro de 06/08 foi otimizar a ESCRITA quando o custo estava na LEITURA. Aqui as duas
-encolhem: `sql_fonte(janela=True)` só traz o que mudou. Medido em 09/08/2026, nas
-últimas 24h: 3.190 linhas mexidas em `analytics.leads` e 440 em `analytics.cadastros`,
-de universos de 366 mil e 455 mil. Numa rodada de 5 minutos são dezenas de linhas.
+encolhem: o modo janela lê só o que a ingestão mexeu desde a última gravação.
+
+A FONTE É UMA SÓ (mudou em 11/08/2026)
+======================================
+`analytics.captacoes`, alimentada por `scripts/ingest_captacoes_railway.py` a partir do
+Railway (`Client` LEFT JOIN `UTMTracking`), que é onde o cadastro nasce.
+
+Antes eram TRÊS tabelas somadas num UNION com desempate por prioridade
+(`analytics.leads` para respondente, `analytics.cadastros` para não-respondente e o ledger
+`registros_ml` para o lead do dia), e a consulta era herdada da entrega do banco `dash`.
+Funcionava. Era difícil de explicar: a mesma coluna podia vir de três lugares com regras
+diferentes, e responder "de onde saiu este lead" exigia ler três braços.
+
+E NÃO HÁ ENRIQUECIMENTO NA HORA DA ENTREGA. Se o dado falta no lead, ele falta na tabela da
+agência. Remendo na entrega faz a tabela do cliente parecer melhor do que o dado é e
+esconde o que precisa ser consertado na origem. Completar dado é trabalho da INGESTÃO,
+dentro da `captacoes`, num lugar só e igual para todo consumidor.
 
 O QUE A TABELA DELES ACEITA (medido em 10/08/2026, não suposto)
 ===============================================================
@@ -96,13 +110,14 @@ import os
 import ssl
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from urllib.parse import unquote, urlparse
 
-# Reaproveita a definição ÚNICA da entrega. Se este script montasse a sua própria
-# consulta de leads, ela divergiria da do `provisiona` na primeira coluna nova, e a
-# divergência apareceria como dado trocado no painel da agência.
-from scripts.provisiona_dash_zanelato import origem_leitura, sal, sql_fonte
+# Só a conexão. A consulta de leads NÃO vem mais daqui: até 11/08/2026 este script
+# reusava o `sql_fonte` da entrega do banco `dash` (27 colunas) e projetava 11 delas.
+# A fonte agora é a `analytics.captacoes`, alimentada pela ingestão do Railway, e o
+# acoplamento com a outra entrega deixou de existir — ver `_select`.
+from scripts.provisiona_dash_zanelato import origem_leitura
 
 TABELA_DESTINO = "public.leads_inbound"
 SEGREDO_URL = "dash-zanelato-supabase-url"
@@ -110,7 +125,55 @@ PROJETO_GCP = "smart-ads-451319"
 
 DIAS = 90
 LOTE = 500
-FOLGA_MINUTOS = 15
+# 6 minutos: só um pouco mais que o intervalo do cron (5 min). Era 15, o que numa cadência
+# de 5 minutos fazia cada linha ser reenviada ~3 vezes — não quebra nada (a gravação é
+# idempotente), só é desperdício.
+#
+# A folga cobre TRÊS coisas, e a terceira é a que ninguém lembra:
+#
+#   1. rodada que falhou: sem sobreposição, a seguinte partiria do ponto novo e o intervalo
+#      da que falhou nunca seria enviado.
+#   2. rodada que foi PULADA pela trava de concorrência (ver `incremental`).
+#   3. RELÓGIOS DIFERENTES. A janela sai de `max(recebido_em)` da tabela DELES (relógio
+#      deles) e filtra `ingested_at` na NOSSA (relógio nosso). São dois relógios, e se o
+#      deles estiver adiantado a janela começaria no futuro em relação ao nosso carimbo e
+#      pularia linhas em silêncio.
+#
+#      Medido em 11/08/2026: o banco deles está +2,5 segundos à frente do nosso. A folga de
+#      360s cobre isso com 144x de margem. Fica o número em vez de "a folga cobre", porque
+#      sem medida essa afirmação é fé — e se algum dia a diferença crescer, é aqui que se
+#      compara.
+FOLGA_MINUTOS = 6
+
+# Fuso em que a coluna `data` é entregue. NÃO é preferência estética: até 10/08/2026 a
+# entrega saía em UTC, e a agência compara essa coluna com a planilha de leads dela e
+# com o painel da Meta, os dois em horário de Brasília.
+#
+# O sintoma foi um "leads faltando" que não existia. Ela apontou 15 leads do dia 09/08
+# ausentes da entrega; 14 estavam lá, datados 10/08. Os 14 chegaram entre 00:05 e 02:55
+# UTC, ou seja, entre 21:05 e 23:55 de Brasília do dia 09 — todos, sem exceção. Não é
+# coincidência de fronteira, é desvio sistemático de 3 horas: TODO lead que entra depois
+# das 21h aparecia no dia seguinte para ela.
+#
+# Por que isso passou batido: a conexão de leitura tem `TimeZone = UTC` (verificado com
+# `SHOW TimeZone`), e `to_char(timestamptz, 'YYYY-MM-DD')` renderiza no fuso da SESSÃO.
+# Ou seja, o código não dizia UTC em lugar nenhum; o UTC vinha do ambiente. É o tipo de
+# erro que não aparece na revisão do SQL, só na conferência contra o dado do cliente.
+#
+# Consequência prática de errar: o CPL por dia dela fica errado nas duas pontas (leads
+# da noite contados no dia seguinte, contra gasto do dia certo), e a diferença é maior
+# justamente nos dias de pico, que são os que decidem verba.
+FUSO = "America/Sao_Paulo"
+
+# A fronteira da janela de 90 dias, como EXPRESSÃO ÚNICA. A carga, a poda e a auditoria
+# avaliam este mesmo texto, cada uma na conexão que já tem na mão.
+#
+# Tem que ser o mesmo DIA em que a coluna `data` é gravada, e é por isso que sai de
+# `now() AT TIME ZONE FUSO` e não de `current_date`: `current_date` numa sessão em UTC dá
+# o dia em UTC. Com a `data` em Brasília e a fronteira em UTC, o lead que chegasse entre
+# 00h e 03h UTC do dia da fronteira seria gravado com data de um dia ANTES do corte — a
+# carga o inseria, a poda o apagava, e isso se repetiria a cada rodada, para sempre.
+CORTE_SQL = f"((now() AT TIME ZONE '{FUSO}')::date - {DIAS})"
 
 # As 11 colunas da tabela deles, na ordem em que o SELECT abaixo as produz. `id` e
 # `recebido_em` ficam de fora: o primeiro é identidade automática, o segundo tem
@@ -161,51 +224,80 @@ def destino(porta: int | None = None):
 
 
 def _select(janela: bool) -> str:
-    """Traduz a entrega de 27 colunas para as 11 que eles pediram.
+    """As 11 colunas da entrega, lidas de UMA fonte: `analytics.captacoes`.
 
-    `DISTINCT ON (email, data)` não é zelo: a tabela deles não tem restrição de
-    unicidade, então uma linha repetida entraria calada e a agência contaria o mesmo
-    lead duas vezes. A defesa mora aqui porque não pode morar lá.
+    POR QUE UMA FONTE SÓ
+    ====================
+    Até 11/08/2026 esta consulta somava TRÊS tabelas (`analytics.leads`,
+    `analytics.cadastros` e o ledger `public.registros_ml`) e reusava a definição da
+    entrega antiga do banco `dash`. Funcionava, e era difícil de explicar: a mesma coluna
+    podia vir de três lugares com regras diferentes, e "de onde saiu este lead" exigia ler
+    um UNION de três braços com desempate por prioridade.
 
-    `data` sai como texto no formato que eles pediram (YYYY-MM-DD) porque a coluna é
-    `text`, não `date`. Mandar um objeto de data deixaria o Postgres formatar do jeito
-    dele, e o formato viraria surpresa.
+    Agora a `captacoes` é a fonte, e ela é alimentada por
+    `scripts/ingest_captacoes_railway.py` a partir do Railway (`Client` LEFT JOIN
+    `UTMTracking`), que é onde o cadastro nasce.
+
+    SEM ENRIQUECIMENTO NA HORA DA ENTREGA — E ISSO É REGRA, NÃO PREGUIÇA
+    ====================================================================
+    A versão anterior preenchia `utm_url` de fontes de fora (o ledger de respondentes, a
+    `lead_legado`, a repescagem de backup) no MOMENTO de entregar. Foi decidido tirar:
+    se o dado falta no lead, ele falta na tabela da agência.
+
+    O motivo é que remendo na entrega faz a tabela do cliente parecer melhor do que o dado
+    é, e esconde justamente o que precisa ser consertado na origem (o front parou de
+    gravar UTM em 05-06/08/2026 — foi assim que a falha apareceu). Completar dado é
+    trabalho de INGESTÃO, dentro da `captacoes`, num lugar só e igual para todo consumidor.
+
+    O `DISTINCT ON` continua
+    ========================
+    A tabela deles não tem restrição de unicidade (a chave primária é um `id` sequencial),
+    então linha repetida entraria calada e a agência contaria o mesmo lead duas vezes. A
+    `captacoes` já é única em `(lf, chave, origem_id)`, mas o mesmo lead pode estar em dois
+    LANÇAMENTOS — e para a agência, que enxerga só (e-mail, data), isso seria duplicata.
+
+    `data` sai em HORÁRIO DE BRASÍLIA e como TEXTO no formato que eles pediram. Ver `FUSO`.
     """
+    # No modo janela, só o que a ingestão mexeu desde `:desde`. `ingested_at` é carimbado
+    # pela ingestão em cada linha que ela escreve ou atualiza, então ele é a marca certa —
+    # `captured_at` não serve: um lead de ontem cuja UTM chegou hoje tem `captured_at` de
+    # ontem e precisa ser reenviado.
+    filtro = "AND c.ingested_at >= :desde" if janela else ""
     return f"""
-      SELECT DISTINCT ON (lower(q.email), to_char(q.capturado_em, 'YYYY-MM-DD'))
-             q.nome,
-             lower(q.email)                              AS email,
-             q.telefone,
-             q.utm_source                                AS source,
-             q.utm_medium                                AS medium,
-             q.utm_campaign                              AS campaign,
-             q.utm_term                                  AS term,
-             q.utm_content                               AS content,
-             to_char(q.capturado_em, 'YYYY-MM-DD')       AS data,
-             q.tem_computador,
-             q.url_captura                               AS utm_url
-        FROM ({sql_fonte(janela=janela)}) q
-       -- Corte por DIA, e não por instante. A primeira versão usava
-       -- `capturado_em >= now() - interval '90 days'`, que é um instante, enquanto a
-       -- coluna `data` do destino guarda só o dia. Consequência medida em 10/08/2026:
-       -- entre a carga (13:59) e a auditoria, o relógio andou e 14 linhas do dia
-       -- 12/05 saíram da janela da ORIGEM continuando no DESTINO. A auditoria acusou
-       -- divergência de +14 onde não havia dado errado nenhum.
-       --
-       -- Isso é pior do que parece: auditoria que dá falso positivo todo dia ensina a
-       -- ignorar auditoria, e aí ela deixa de servir justamente quando importa. As
-       -- três operações (carga, poda e auditoria) usam a MESMA fronteira de dia.
-       WHERE q.capturado_em::date >= (current_date - {DIAS})
-         AND nullif(q.email, '') IS NOT NULL
-       ORDER BY lower(q.email), to_char(q.capturado_em, 'YYYY-MM-DD'),
-                q.capturado_em DESC
+      SELECT DISTINCT ON (email, data)
+             nome, email, telefone, source, medium, campaign, term, content,
+             data, tem_computador, utm_url
+        FROM (
+          SELECT c.nome,
+                 lower(c.email)                        AS email,
+                 nullif(c.phone, '')                   AS telefone,
+                 c.utm_source                          AS source,
+                 c.utm_medium                          AS medium,
+                 c.utm_campaign                        AS campaign,
+                 c.utm_term                            AS term,
+                 c.utm_content                         AS content,
+                 to_char(c.captured_at AT TIME ZONE '{FUSO}', 'YYYY-MM-DD') AS data,
+                 c.has_computer                        AS tem_computador,
+                 c.utm_url
+            FROM analytics.captacoes c
+           -- Corte por DIA e no MESMO fuso da coluna `data`. Fronteira num fuso e valor em
+           -- outro faz a linha da borda entrar na carga e sair na poda a cada rodada, para
+           -- sempre, sem erro nenhum aparecendo.
+           WHERE (c.captured_at AT TIME ZONE '{FUSO}')::date >= {CORTE_SQL}
+             AND nullif(c.email, '') IS NOT NULL
+             {filtro}
+        ) q
+       ORDER BY email, data
     """
 
 
 def _le(janela: bool, desde: datetime | None = None) -> list:
     origem = origem_leitura(timeout=1800)
     try:
-        params = {"sal": sal()}
+        # Sem `sal`: no modo magro a consulta não calcula o hash `lead_id`, então não
+        # há parâmetro para preencher. É o que tira do job a dependência do segredo
+        # `dash-lead-id-salt`, que ele pedia só para descartar o resultado.
+        params = {}
         if janela:
             params["desde"] = desde
         return origem.run(_select(janela), **params)
@@ -220,6 +312,13 @@ def _grava(dst, linhas: list, *, apagar_chaves: bool) -> int:
     `ON CONFLICT` não tem em que conflitar. Apagar-e-inserir escopado às chaves do
     lote dá o mesmo resultado e é idempotente — é o que permite usar janela com folga
     sem medo de duplicar.
+
+    LIMITE QUE IMPORTA NA HORA DE SUBIR MUDANÇA: o escopo do DELETE é (email, data). Se a
+    `data` de um lead MUDAR de valor entre duas versões deste código, o incremental apaga
+    a chave NOVA e insere, e a linha com a data ANTIGA fica órfã ao lado — o lead aparece
+    duas vezes para a agência. Aconteceria com o conserto de fuso de 10/08/2026, que
+    mudou a data de ~12% das linhas. Por isso: toda mudança que altere o VALOR de `data`
+    exige uma `--full` logo depois do deploy, não é opcional.
     """
     if not linhas:
         return 0
@@ -265,9 +364,26 @@ def full() -> dict:
 
 
 def incremental(minutos: int = FOLGA_MINUTOS) -> dict:
-    """Só o que mudou desde a nossa última gravação. Roda de 5 em 5 minutos."""
+    """Só o que mudou desde a nossa última gravação. Roda de 5 em 5 minutos.
+
+    TRAVA CONTRA RODADAS SE ATROPELANDO: cron de 5 minutos com rodada que leva 6 não
+    espera a anterior — o Cloud Run dispara as duas. Duas rodadas gravando as mesmas
+    chaves ao mesmo tempo é travamento ou trabalho duplicado, e num cron que roda 288
+    vezes por dia isso deixa de ser hipótese.
+
+    A trava é um lock de sessão do Postgres no banco DELES (`pg_try_advisory_lock`), e é
+    ali de propósito: é o único ponto que as duas rodadas concorrentes têm em comum, e
+    lock de sessão morre junto com a conexão — se o job for morto no meio, a trava sai
+    sozinha, sem deixar cadeado órfão para alguém destravar na mão.
+    """
     dst = destino(porta=6543)          # pooler: eles indicaram esta para sync contínuo
     try:
+        # Número arbitrário mas FIXO: é a identidade da trava. Mudar isto faz duas versões
+        # do job deixarem de se ver.
+        if not dst.run("SELECT pg_try_advisory_lock(728411)")[0][0]:
+            print("outra rodada do incremental está em curso: saindo sem fazer nada. "
+                  "Não é erro — é a trava fazendo o trabalho dela.", file=sys.stderr)
+            return {"modo": "incremental", "erro": "ja_rodando"}
         marca = dst.run(f"SELECT max(recebido_em) FROM {TABELA_DESTINO}")[0][0]
         if marca is None:
             # Tabela vazia: pode ser primeira execução ou alguém truncou. Em nenhum dos
@@ -296,12 +412,13 @@ def podar() -> dict:
     Sem esta passada a tabela cresce para sempre e a "janela de 90 dias" combinada com
     o cliente deixa de ser verdade. É o outro motivo da permissão de DELETE.
     """
-    # Mesma fronteira de dia da carga e da auditoria. Calculada aqui em UTC porque é o
-    # fuso do servidor deles; a diferença de um dia não importa para uma janela de 90,
-    # mas a CONSISTÊNCIA entre as três operações importa (ver o comentário em `_select`).
-    limite = (datetime.now(timezone.utc) - timedelta(days=DIAS)).strftime("%Y-%m-%d")
+    # Mesma fronteira de dia da carga e da auditoria: a expressão de `CORTE_SQL`, avaliada
+    # na conexão que esta função já tem na mão. Antes era calculada aqui em Python, em
+    # UTC; virou SQL quando a coluna `data` passou a sair em horário de Brasília, porque
+    # fronteira num fuso e valor em outro apaga a linha da borda a cada rodada.
     dst = destino(porta=5432)
     try:
+        limite = str(dst.run(f"SELECT ({CORTE_SQL})::text")[0][0])
         antes = dst.run(f"SELECT count(*) FROM {TABELA_DESTINO}")[0][0]
         dst.run("BEGIN")
         dst.run(f"DELETE FROM {TABELA_DESTINO} WHERE data < :lim", lim=limite)
@@ -313,8 +430,49 @@ def podar() -> dict:
         dst.close()
 
 
+def _avisa_no_dm(linhas_texto: list, resumo: str, poster=None, canal: str = "") -> dict:
+    """Manda o resultado da auditoria para o DM. NUNCA levanta exceção.
+
+    POR QUE ISTO EXISTE: até 10/08/2026 a auditoria detectava a divergência, saía com
+    erro, e o erro morria no log do Cloud Run. Ninguém olha log por hábito. Verificado
+    no dia: das 3 políticas de alerta do projeto, nenhuma cobre este job — a de
+    `Cron falhou` dispara quando o Scheduler não consegue DISPARAR o job (403/500), não
+    quando o job roda e falha por dentro. Ou seja, a defesa mais importante da entrega
+    era invisível, e uma defesa que ninguém vê não é defesa.
+
+    MANDA TAMBÉM QUANDO ESTÁ TUDO CERTO, em uma linha. Não é enfeite: sem a mensagem de
+    "bateu", silêncio significa duas coisas ao mesmo tempo (nada divergiu, ou o job não
+    rodou), e são justamente essas duas que precisam ser distinguidas. Uma linha por dia
+    resolve a ambiguidade. Se virar ruído, o que se corta é a linha do sucesso, não a
+    do erro.
+
+    `poster` e `canal` são injetáveis para o teste rodar sem Slack.
+    """
+    if poster is None:
+        try:
+            from src.monitoring.slack_client import post_blocks as poster
+        except Exception as e:                            # sem o pacote, segue a vida
+            return {"ok": False, "erro": f"import: {e}"}
+    # Mesma cadeia de resolução do resto do projeto (`cost_alert`, `app.py`), incluindo o
+    # mesmo último recurso fixo. O ID do DM não é segredo, e deixá-lo aqui evita o pior
+    # caso: variável esquecida no job faz o aviso virar um no-op silencioso, que é
+    # exatamente o defeito que esta função existe para consertar.
+    canal = canal or os.getenv("SLACK_USER_DM") or os.getenv(
+        "SLACK_VALIDATION_DM_CHANNEL") or "D0A9USV3XEX"
+    blocos = [{"type": "section",
+               "text": {"type": "mrkdwn", "text": resumo}}]
+    if linhas_texto:
+        blocos.append({"type": "section",
+                       "text": {"type": "mrkdwn",
+                                "text": "```\n" + "\n".join(linhas_texto) + "\n```"}})
+    try:
+        return poster(canal, blocos, resumo)
+    except Exception as e:                                # contrato: nunca derruba
+        return {"ok": False, "erro": str(e)}
+
+
 def auditar() -> dict:
-    """Compara origem e destino por mês. Sai com erro se divergir.
+    """Compara origem e destino por mês. Avisa no DM e sai com erro se divergir.
 
     É esta defesa que torna a carga incremental aceitável numa entrega para terceiro.
     As outras dependem de eu ter listado certo todas as origens de mudança; esta não
@@ -325,10 +483,9 @@ def auditar() -> dict:
         # A MESMA fronteira de dia usada pela carga e pela poda, calculada de um lado só
         # e aplicada nos dois. Calcular duas vezes, uma em cada ponta, foi o que gerou o
         # falso positivo de +14 em 10/08/2026.
-        corte = str(origem.run(f"SELECT (current_date - {DIAS})::text")[0][0])
+        corte = str(origem.run(f"SELECT ({CORTE_SQL})::text")[0][0])
         esperado = {str(r[0]): int(r[1]) for r in origem.run(
-            f"SELECT substr(data,1,7), count(*) FROM ({_select(False)}) s GROUP BY 1",
-            sal=sal())}
+            f"SELECT substr(data,1,7), count(*) FROM ({_select(False)}) s GROUP BY 1")}
     finally:
         origem.close()
     dst = destino(porta=5432)
@@ -347,19 +504,38 @@ def auditar() -> dict:
 
     print(f"corte da janela: data >= {corte} ({DIAS} dias)")
     print(f"{'mês':<9} {'origem':>9} {'destino':>9} {'dif':>8}")
-    ruins = []
+    tabela, ruins = [f"{'mês':<9} {'origem':>9} {'destino':>9} {'dif':>8}"], []
     for m in sorted(set(esperado) | set(obtido)):
         e, o = esperado.get(m, 0), obtido.get(m, 0)
-        print(f"{m:<9} {e:>9,} {o:>9,} {o - e:>+8,}")
+        linha = f"{m:<9} {e:>9,} {o:>9,} {o - e:>+8,}"
+        print(linha)
+        tabela.append(linha)
         if o != e:
             ruins.append((m, e, o))
     if a_podar:
         print(f"\n(fora da janela, aguardando poda: {a_podar:,} linhas — não é divergência)")
+        tabela.append(f"fora da janela, aguardando poda: {a_podar:,} (não é divergência)")
+
     if ruins:
         det = "; ".join(f"{m}: origem {e:,} destino {o:,} ({o - e:+,})" for m, e, o in ruins)
+        # DM ANTES do SystemExit. Invertido, o `raise` mataria o processo e o aviso nunca
+        # sairia — que é exatamente o defeito que esta mudança conserta.
+        _avisa_no_dm(
+            tabela,
+            f":rotating_light: *Entrega Zanelato: a auditoria não bateu.*\n"
+            f"{len(ruins)} mês(es) divergindo. A tabela deles está diferente do que a "
+            f"nossa consulta produz, e o incremental não conserta isso sozinho.\n"
+            f"*O que fazer:* rodar a carga cheia (`--full`) e auditar de novo.")
         raise SystemExit(f"AUDITORIA FALHOU — {len(ruins)} mês(es) divergindo: {det}")
-    print(f"\nOK: {sum(esperado.values()):,} linhas, todos os meses batem")
-    return {"modo": "auditar", "linhas": sum(esperado.values()), "a_podar": a_podar}
+
+    total = sum(esperado.values())
+    print(f"\nOK: {total:,} linhas, todos os meses batem")
+    _avisa_no_dm(
+        [],
+        f":white_check_mark: Entrega Zanelato conferida: *{total:,} leads*, "
+        f"todos os {len(esperado)} meses batem."
+        + (f" ({a_podar:,} linhas aguardando a poda.)" if a_podar else ""))
+    return {"modo": "auditar", "linhas": total, "a_podar": a_podar}
 
 
 def main() -> int:

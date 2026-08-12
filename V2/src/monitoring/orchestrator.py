@@ -1197,10 +1197,50 @@ class MonitoringOrchestrator:
         }
 
         # ETAPA 2: QUALIDADE DOS DADOS CAPI
-        _q_recent = self.db.query(LeadCAPI).filter(LeadCAPI.created_at >= lookback_time)
-        if self._filter_by_client:
-            _q_recent = _q_recent.filter(text("leads_capi.client_id = :cid").bindparams(cid=_client_id))
-        recent_leads = _q_recent.all()
+        #
+        # Lia `leads_capi` numa janela RECENTE. Essa tabela parou de receber em 17/05/2026:
+        # a etapa devolvia lista vazia, a seção `data_quality` desaparecia do relatório e
+        # ninguém reclamou — por quase 3 meses. É o mesmo destino que o denominador da
+        # ETAPA 1 teve e que foi migrado logo acima; este bloco ficou para trás.
+        #
+        # Agora sai do ledger vivo, pelo MESMO caminho da etapa anterior. E é o lugar certo
+        # por definição: `fbp`, `fbc`, nome e telefone só importam nos leads que vão para o
+        # Meta, e é exatamente esses que o ledger guarda.
+        #
+        # POPULAÇÃO = tudo que NÃO foi pulado por allowlist, a mesma definição de
+        # `daily_check_aggregations.compute_fbp_fbc_meta_population`. Inclui de propósito o
+        # `skipped_missing_data`: lead não enviado POR FALTA DE DADO é um caso de má
+        # qualidade, e tirá-lo do denominador esconderia justamente a falha que esta métrica
+        # existe para mostrar.
+        #
+        # Medido em 11/08/2026 na janela de 7 dias: 673 `success`, 517 `skipped_allowlist`,
+        # 3 `skipped_missing_data`. E sobre os enviados, a qualidade é ~100% (fbp 100%,
+        # fbc 100%, nome 100%, telefone 99,9%) — que é a razão de ninguém ter sentido falta
+        # da seção: ela não estava escondendo problema, estava escondendo que estava boa.
+        recent_leads = []
+        try:
+            from types import SimpleNamespace
+
+            from src.data.ledger_connection import open_ledger_read_connection
+            _c = open_ledger_read_connection()
+            if _c is not None:
+                try:
+                    _sql = ("SELECT fbp, fbc, first_name, phone FROM registros_ml "
+                            "WHERE created_at >= :t "
+                            "AND coalesce(base_status,'') <> 'skipped_allowlist'")
+                    _par = {"t": lookback_time}
+                    if self._filter_by_client:
+                        _sql += " AND client_id = :cid"
+                        _par["cid"] = _client_id
+                    recent_leads = [
+                        SimpleNamespace(fbp=r[0], fbc=r[1], first_name=r[2], phone=r[3])
+                        for r in _c.run(_sql, **_par)
+                    ]
+                finally:
+                    _c.close()
+        except Exception as _e:
+            logger.warning(
+                f"  [qualidade CAPI] ledger não respondeu, seção omitida: {_e}")
 
         if recent_leads:
             with_fbp = sum(1 for lead in recent_leads if lead.fbp and lead.fbp.strip())

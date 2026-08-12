@@ -103,11 +103,26 @@ def _carrega_historico() -> pd.DataFrame:
         # utm_content, não ad_name: a coluna do treino também é utm_content, e casar por
         # ela cobre 61% dos leads contra 54% do ad_name (que é uma versão normalizada,
         # com 1.287 nomes distintos contra 1.969). A união não acrescenta nada.
+        # `DISTINCT ON` porque a `captacoes` MUDOU DE GRÃO em 11/08/2026: a chave saiu de
+        # `(lf, email)` para `(lf, email, origem_id)`, e a mesma pessoa passou a poder
+        # aparecer mais de uma vez no mesmo lançamento — uma linha por inscrição, que é o
+        # que a entrega para a agência precisa mostrar.
+        #
+        # A nota é uma TAXA: `n` = quantos leads o criativo trouxe, `k` = quantos
+        # compraram. Sem deduplicar, quem se inscreve duas vezes pelo mesmo criativo entra
+        # duas vezes nos DOIS, e a nota passa a depender de quantas vezes as pessoas se
+        # recadastraram — que não é informação sobre o criativo.
+        #
+        # A chave do dedupe é (pessoa, criativo, DIA) e não só (pessoa, criativo): a mesma
+        # pessoa atraída pelo mesmo criativo em dias diferentes são duas captações de
+        # verdade, e a janela de desfecho desta nota é contada por dia.
         linhas = conn.run("""
-            SELECT utm_content, utm_source, captured_at::date,
+            SELECT DISTINCT ON (lower(trim(email)), utm_content, captured_at::date)
+                   utm_content, utm_source, captured_at::date,
                    lower(trim(email)), phone
             FROM captacoes
             WHERE utm_content IS NOT NULL AND captured_at IS NOT NULL
+            ORDER BY lower(trim(email)), utm_content, captured_at::date
         """)
         vendas = conn.run("""
             SELECT lower(trim(email)), phone, sale_date::date
