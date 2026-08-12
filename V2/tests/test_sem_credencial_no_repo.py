@@ -37,12 +37,52 @@ _REPO = Path(__file__).resolve().parents[2]
 #                          `${VAR:-…}`) e f-string do Python (`{password}`);
 #   `(?![^\s"',)]*\()`   deixa passar leitura de ambiente (`os.environ.get(…)`),
 #                          que é chamada de função, não valor literal.
+#
+# O BURACO QUE ESTES LOOKAHEADS ABRIRAM, E QUE CUSTOU UMA SEGUNDA CREDENCIAL
+# ==========================================================================
+# Liberar `${` era necessário e não era suficiente. Em bash, `${VAR:-valor}` é o idioma de
+# "env var com fallback", e o FALLBACK é um valor literal. Ou seja, o lookahead que ignorava
+# `${` para não acusar leitura de ambiente estava ignorando também tudo o que vinha depois —
+# inclusive um segredo.
+#
+# Foi exatamente onde a senha do Railway ficou, em `V2/api/lib/config.sh`, até 12/08/2026:
+#
+#     RAILWAY_DB_PASSWORD="${RAILWAY_DB_PASSWORD:-<a senha de verdade>}"
+#
+# O teste passava. A senha estava num repositório público. Este arquivo foi escrito em
+# 05/08/2026 justamente para travar a reincidência, e a reincidência estava dentro dele, na
+# forma que ele decidiu não olhar.
+#
+# A lição é sobre a forma da trava, não sobre esta credencial: um guard que precisa abrir
+# exceção sintática tem que checar o que está DENTRO da exceção. Por isso o padrão novo
+# abaixo é separado, e não um remendo no lookahead do padrão antigo — o antigo continua
+# fazendo o trabalho dele, e o novo cobre o que ele estruturalmente não vê.
 PADROES_PROIBIDOS = [
     (re.compile(r"postgres(?:ql)?(?:\+\w+)?://[^\s:/{]+:(?![<${])[^\s@/{}]{6,}@"),
      "URI de banco com senha embutida (use env var / Secret Manager)"),
     (re.compile(r"""[A-Z_]*PASSWORD[A-Z_]*\s*=\s*["']?(?![<${\s"'])"""
                 r"""(?![^\s"',)]*\()[^\s"',)]{6,}"""),
      "senha atribuída em texto claro"),
+    # Segredo escondido no fallback de uma env var do shell: `${VAR:-segredo}`.
+    #
+    # Três condições, e cada uma existe para calibrar um falso positivo REAL do projeto:
+    #   1. o nome da variável tem que sugerir credencial — senão pegaria `${PORT:-5432}`,
+    #      `${LEDGER_DB_HOST:-104.197.138.129}` e todo default legítimo;
+    #   2. o fallback tem que ser LITERAL — `$(gcloud secrets …)`, `<placeholder>`,
+    #      `${outra}` e string vazia passam, que é exatamente o jeito certo de escrever;
+    #   3. o fallback NÃO pode ser kebab-case (`meta-audiences-token`), porque essa é a
+    #      convenção de NOME de recurso no GCP, e `TOKEN_SECRET="${…:-meta-audiences-token}"`
+    #      guarda o nome de um secret, não o valor dele.
+    #
+    # O preço da condição 3, dito às claras: uma senha que fosse toda minúscula com hífen
+    # (uma passphrase tipo `cavalo-bateria-grampo`) passaria batido. É um buraco estreito e
+    # conhecido, e o alternativa era acusar todo nome de secret do projeto — guard que grita
+    # em código correto é desligado, e desligado não protege nada.
+    (re.compile(r"""(?:PASSWORD|SENHA|SECRET|TOKEN|APIKEY|API_KEY|_KEY|CREDENTIAL)"""
+                r"""[A-Z_]*\s*=\s*["']?\$\{[A-Za-z_][A-Za-z0-9_]*:-"""
+                r"""(?![<$\s"'}])(?![a-z0-9]+(?:-[a-z0-9]+)+\})[^}\s"']{6,}\}"""),
+     "segredo no fallback de env var do shell (${VAR:-segredo}) — use "
+     "$(gcloud secrets versions access …)"),
     (re.compile(r"xoxb-[A-Za-z0-9]{8,}-[A-Za-z0-9-]{8,}"), "token de bot do Slack"),
     (re.compile(r"\bghp_[A-Za-z0-9]{30,}\b"), "token pessoal do GitHub"),
     (re.compile(r"\bAIza[A-Za-z0-9_\-]{30,}\b"), "chave de API do Google"),
