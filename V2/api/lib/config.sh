@@ -66,7 +66,18 @@ RAILWAY_DB_HOST="${RAILWAY_DB_HOST:-shortline.proxy.rlwy.net}"
 RAILWAY_DB_PORT="${RAILWAY_DB_PORT:-11594}"
 RAILWAY_DB_NAME="${RAILWAY_DB_NAME:-railway}"
 RAILWAY_DB_USER="${RAILWAY_DB_USER:-postgres}"
-RAILWAY_DB_PASSWORD="${RAILWAY_DB_PASSWORD:-THxguXxQPZaSWIzquYRiLlVhJBnPoRGu}"
+# Senha NUNCA em texto plano aqui: este repositório é PÚBLICO. Vem do Secret Manager no
+# momento do deploy, e env exportada tem precedência (é assim que o desenvolvimento local
+# usa o `V2/.env`, que está no `.gitignore`).
+#
+# ESTA LINHA CARREGOU A SENHA EM TEXTO CLARO DE 2026 ATÉ 12/08/2026, num repositório
+# público, e o teste que existe justamente para travar isso não pegou. O buraco era a forma:
+# `${VAR:-valor}` é o idioma de "env var com fallback", e o teste tinha um lookahead que
+# liberava `${` de propósito, para não acusar leitura de ambiente. O segredo estava DENTRO
+# do fallback, do lado de dentro do que o teste ignorava. Corrigido em
+# `V2/tests/test_sem_credencial_no_repo.py` no mesmo commit — a trava e o vazamento que ela
+# deixou passar consertam juntos, senão a próxima cópia passa igual.
+RAILWAY_DB_PASSWORD="${RAILWAY_DB_PASSWORD:-$(gcloud secrets versions access latest --secret=railway-db-password --project="$PROJECT_ID" 2>/dev/null)}"
 
 # =============================================================================
 # CLOUD STORAGE (VALIDATION REPORTS)
@@ -173,6 +184,14 @@ build_env_vars() {
     ENV_VARS="$ENV_VARS,RAILWAY_DB_PORT=$RAILWAY_DB_PORT"
     ENV_VARS="$ENV_VARS,RAILWAY_DB_NAME=$RAILWAY_DB_NAME"
     ENV_VARS="$ENV_VARS,RAILWAY_DB_USER=$RAILWAY_DB_USER"
+    # Fail-loud igual ao do ledger: sem a senha, a API cai no SQLite e o scoring para de
+    # ler o banco operacional — em silêncio, porque nada nas rotas devolve erro por isso.
+    # A sentinela é impressa e o caller aborta; `exit` aqui morreria só no subshell do
+    # `$(build_env_vars)` e o deploy seguiria sem a variável.
+    if [ -z "$RAILWAY_DB_PASSWORD" ]; then
+        echo "ERROR_RAILWAY_SECRET_UNAVAILABLE"
+        return 1
+    fi
     ENV_VARS="$ENV_VARS,RAILWAY_DB_PASSWORD=$RAILWAY_DB_PASSWORD"
 
     # Receiver do Sendhook do SendFlow (feature "entrou no grupo"): o endpoint

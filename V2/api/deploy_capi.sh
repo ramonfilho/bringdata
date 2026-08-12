@@ -585,6 +585,10 @@ deploy_to_cloud_run() {
         print_error "LEDGER_TARGET≠railway mas a senha do ledger não veio (Secret Manager ledger-db-password). Abortando deploy."
         exit 1
     fi
+    if [[ "$ENV_VARS" == *"ERROR_RAILWAY_SECRET_UNAVAILABLE"* ]]; then
+        print_error "A senha do Railway não veio (Secret Manager railway-db-password). Sem ela a API cai no SQLite e o scoring para de ler o banco operacional, em silêncio. Abortando deploy."
+        exit 1
+    fi
     if [[ "$ENV_VARS" == *"ERROR_API_INTERNAL_TOKEN_UNAVAILABLE"* ]]; then
         print_error "Token das rotas internas não veio (Secret Manager api-internal-token). Sem ele as rotas fechadas devolvem 401 pra todo mundo. Abortando deploy."
         exit 1
