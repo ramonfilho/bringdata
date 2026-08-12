@@ -165,6 +165,40 @@ FOLGA_MINUTOS = 6
 # justamente nos dias de pico, que são os que decidem verba.
 FUSO = "America/Sao_Paulo"
 
+# O DIA DE UM LEAD, E POR QUE A EXPRESSÃO DEPENDE DA PROCEDÊNCIA
+# ==============================================================
+# O conserto de fuso acima estava certo para METADE da tabela e errado para a outra, e o
+# jeito de descobrir isso foi conferir contra o Railway em vez de contra o próprio dado.
+#
+# Nas linhas de procedência `railway`, `captured_at` é INSTANTE de verdade (vem do
+# `trackedAt` do evento de UTM), e converter para Brasília é o certo — é o caso que a
+# validação de 10/08/2026 usou, porque o LF64 é todo dessa origem, e por isso passou 100%.
+#
+# Nas linhas de PLANILHA, `captured_at` NÃO é instante: 494.195 das 503.438 (98,2%) estão em
+# 00:00:00 UTC exato. É uma DATA guardada como meia-noite, e a data que a planilha do Drive
+# trazia já era a data local brasileira. Converter uma data local para outro fuso não a
+# corrige, CORROMPE: `AT TIME ZONE 'America/Sao_Paulo'` devolve 21h do dia ANTERIOR, e o dia
+# anda −1.
+#
+# Medido em 12/08/2026, e a medição é de fora do sistema de propósito: para 2.998 linhas de
+# planilha na janela, o dia entregue foi procurado entre as datas de cadastro da MESMA pessoa
+# na tabela `Client` do Railway.
+#
+#     lido como UTC ....... 2.716 de 2.998   (90,6%)
+#     lido em Brasília .......... 0 de 2.998   ( 0,0%)
+#
+# E contra o calendário de lançamentos, `min(data)` por LF: a leitura UTC bate exatamente com
+# `cap_start` em 8 de 10 lançamentos; a leitura em Brasília dá −1 dia em 8 de 10.
+#
+# POR QUE NINGUÉM VIU: a auditoria diária compara a nossa contagem por mês com a deles, e as
+# duas usam esta mesma expressão. Deslocamento UNIFORME casa perfeitamente e é invisível para
+# conferência de contagem — só aparece comparando com uma fonte de fora.
+DIA_SQL = f"""
+        CASE WHEN c.origem_id LIKE 'planilha:%%'
+             THEN (c.captured_at AT TIME ZONE 'UTC')::date
+             ELSE (c.captured_at AT TIME ZONE '{FUSO}')::date
+        END"""
+
 # A fronteira da janela de 90 dias, como EXPRESSÃO ÚNICA. A carga, a poda e a auditoria
 # avaliam este mesmo texto, cada uma na conexão que já tem na mão.
 #
@@ -256,7 +290,10 @@ def _select(janela: bool) -> str:
     `captacoes` já é única em `(lf, chave, origem_id)`, mas o mesmo lead pode estar em dois
     LANÇAMENTOS — e para a agência, que enxerga só (e-mail, data), isso seria duplicata.
 
-    `data` sai em HORÁRIO DE BRASÍLIA e como TEXTO no formato que eles pediram. Ver `FUSO`.
+    `data` sai como TEXTO no formato que eles pediram, e o DIA é calculado por `DIA_SQL`:
+    Brasília para as linhas do Railway (instante de verdade) e UTC para as de planilha
+    (onde o valor guardado já É a data local). Ver `FUSO` e `DIA_SQL` — a regra ser por
+    procedência não é detalhe, é o que separa converter de corromper.
     """
     # No modo janela, só o que a ingestão mexeu desde `:desde`. `ingested_at` é carimbado
     # pela ingestão em cada linha que ela escreve ou atualiza, então ele é a marca certa —
@@ -276,14 +313,15 @@ def _select(janela: bool) -> str:
                  c.utm_campaign                        AS campaign,
                  c.utm_term                            AS term,
                  c.utm_content                         AS content,
-                 to_char(c.captured_at AT TIME ZONE '{FUSO}', 'YYYY-MM-DD') AS data,
+                 to_char({DIA_SQL}, 'YYYY-MM-DD')      AS data,
                  c.has_computer                        AS tem_computador,
                  c.utm_url
             FROM analytics.captacoes c
-           -- Corte por DIA e no MESMO fuso da coluna `data`. Fronteira num fuso e valor em
-           -- outro faz a linha da borda entrar na carga e sair na poda a cada rodada, para
-           -- sempre, sem erro nenhum aparecendo.
-           WHERE (c.captured_at AT TIME ZONE '{FUSO}')::date >= {CORTE_SQL}
+           -- Corte pela MESMA expressão de dia que a coluna `data` usa. Fronteira num
+           -- critério e valor em outro faz a linha da borda entrar na carga e sair na poda a
+           -- cada rodada, para sempre, sem erro nenhum aparecendo. Por isso `DIA_SQL` está
+           -- nos dois lugares e não há uma segunda cópia escrita à mão.
+           WHERE {DIA_SQL} >= {CORTE_SQL}
              AND nullif(c.email, '') IS NOT NULL
              {filtro}
         ) q
