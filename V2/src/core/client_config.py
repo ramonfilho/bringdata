@@ -258,6 +258,13 @@ class MediumConfig:
     valid_categories: Optional[List[str]] = None            # #7 — None = modo treino (threshold); preenchido = modo produção (whitelist)
     discontinued_categories: Optional[List[str]] = None     # #7 — deprecated; mantido para compatibilidade
     category_mappings: Optional[Dict[str, str]] = None      # #7 — mapeamento de variantes históricas
+    # Mapeamento por PADRÃO (regex), para valor com cauda variável — onde a igualdade
+    # exata de `category_mappings` não alcança. Ordem de declaração = precedência
+    # (primeiro que casa vence). Motivo: em 10/08/2026 a Meta passou a mandar
+    # "[<conjunto>]<nome do anúncio>" no utm_medium do DevClub, e o nome do anúncio muda
+    # a cada criativo — enumerar valor por valor morreria no anúncio seguinte.
+    # Espelha `UTMConfig.term_outros_patterns` (consumido em core/utm.py).
+    pattern_mappings: Optional[Dict[str, str]] = None
     adv_prefix: Optional[str] = None                        # #36 — prefixo a remover (ex: 'ADV')
     manual_unifications: Optional[Dict[str, str]] = None    # #37 — unificações adicionais pós-mapping
     binary_top3_categories: Optional[List[str]] = None      # #50 — pendente resolução em encoding
