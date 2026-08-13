@@ -941,3 +941,60 @@ class ClientConfig:
             raise ValueError(
                 "ClientConfig inválida:\n" + "\n".join(f"  - {e}" for e in errors)
             )
+
+
+# ---------------------------------------------------------------------------
+# Resolução do modelo em produção — fonte ÚNICA do "quem está ativo"
+# ---------------------------------------------------------------------------
+#
+# Existe porque a lista de caminhos candidatos abaixo estava chumbada dentro do
+# `orchestrator._rotinas_operacionais` e qualquer outro consumidor precisaria
+# copiá-la. Em produção (Cloud Run) o WORKDIR é /app e o repo mora em /app/V2;
+# em dev local fica em $REPO_ROOT/V2. Copiar essa lista é como as fontes de
+# verdade divergem.
+
+def active_model_yaml_path(client_id: str = "devclub") -> Optional[str]:
+    """Caminho do `configs/active_models/{client_id}.yaml`, ou None se não achar."""
+    import os as _os
+
+    candidatos = [
+        _os.path.abspath(_os.path.join(
+            _os.path.dirname(__file__), '..', '..', 'configs', 'active_models', f'{client_id}.yaml')),
+        f'/app/V2/configs/active_models/{client_id}.yaml',
+        f'/app/configs/active_models/{client_id}.yaml',
+        _os.path.abspath(_os.path.join(
+            _os.getcwd(), 'configs', 'active_models', f'{client_id}.yaml')),
+    ]
+    return next((p for p in candidatos if _os.path.exists(p)), None)
+
+
+def active_model_run_id(client_id: str = "devclub") -> Optional[str]:
+    """`mlflow_run_id` do modelo em produção, ou None.
+
+    Devolve None em vez de levantar: o chamador decide se a ausência é fatal.
+    Quem usa isto para montar `artifacts` do `unify_medium` deve tratar None
+    como "não consigo resolver a whitelist" e NÃO seguir em silêncio para o
+    modo frequência — foi assim que o monitoramento passou a ler o Medium de um
+    jeito diferente da produção sem ninguém perceber (10/08/2026).
+    """
+    path = active_model_yaml_path(client_id)
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception:
+        return None
+    return (data.get("active_model") or {}).get("mlflow_run_id")
+
+
+def medium_artifacts(client_id: str = "devclub") -> Optional[Dict[str, str]]:
+    """Dict de `artifacts` para `core.medium.unify_medium`, ou None.
+
+    Ponto único de composição da escolha de MODO do `unify_medium`: quem chama
+    isto está declarando "eu sou um caminho de leitura, quero a whitelist do
+    modelo ativo". O treino NÃO deve chamar — lá a whitelist está nascendo dos
+    dados e usar a do modelo anterior congelaria o vocabulário para sempre.
+    """
+    run_id = active_model_run_id(client_id)
+    return {'mlflow_run_id': run_id} if run_id else None
