@@ -108,30 +108,43 @@ menos de cartão derrubaram todo teto em 4,1%.
 
 Numa métrica que move verba, ter recibo é o que separa "erramos" de "não sabemos".
 
-### Achado em aberto: qual referência o leitor escolhe
+### Achado: o job da referência roda código congelado em 31/07
 
 Ao conferir o teto contra o banco real (14/08/2026), a referência devolvida foi a de
-**03/08**, não a de **10/08**. O motivo é que o leitor ordena por **fim da janela**, e não
-por data de geração:
+**03/08**, não a de **10/08**. Puxando o fio, o que estava por baixo não era uma escolha
+de ordenação e sim **um job de produção rodando código velho**.
 
-| gerado em | as_of | fim da janela | leads |
-|---|---|---|---|
-| 10/08 06:32 | 2026-08-10 | 2026-06-11 | 104.453 |
-| **03/08 19:15** | 2026-08-03 | **2026-07-13** | **86.141** ← é esta que sai |
-| 03/08 11:27 | 2026-08-03 | 2026-06-04 | 107.986 |
+A janela madura é `as_of − maturação`. Aplicando a cada linha:
 
-A reconstrução mais recente (10/08) usou uma janela mais ANTIGA, provavelmente para ter
-desfecho maduro, e por isso perde o critério de ordenação. O efeito nos tetos entregues
-não é pequeno: pela referência de 10/08 o balde D1-D2 dá R$ 1,36; pela de 03/08 dá
-R$ 1,64, e o D9-D10 vai de R$ 10,47 para R$ 9,50.
+| gerado em | as_of | fim da janela | maturação implícita | leads |
+|---|---|---|---|---|
+| 10/08 06:32 (cron) | 2026-08-10 | 2026-06-11 | **60 dias** | 104.453 |
+| **03/08 19:15 (manual)** | 2026-08-03 | 2026-07-13 | **21 dias** | 86.141 |
+| 03/08 11:27 (cron) | 2026-08-03 | 2026-06-04 | 60 dias | 107.986 |
+| 30/07 21:48 (cron) | 2026-07-30 | 2026-05-31 | 60 dias | 112.766 |
+| 29/07 20:23 (cron) | 2026-07-29 | 2026-05-30 | 60 dias | 113.752 |
 
-**Não foi consertado aqui, de propósito**: é comportamento anterior a esta frente, mexer
-nele muda todo teto de novo, e a escolha entre "janela mais recente" e "reconstrução mais
-recente" é decisão, não bug óbvio. Fica registrado como pergunta a responder antes do
-passo 3 (a trava de reconferência), porque a trava precisa saber contra qual referência
-está conferindo.
+**21 é o valor correto**, e a mudança de 60 para 21 foi feita em **07/08/2026** justamente
+porque 60 inflava o teto: com a maturação longa, a conversão de um balde vinha de amostra
+minúscula (7 vendas em 438 leads = 1,598%) e empurrava o teto do Champion para R$ 20,81
+quando o real é ~R$ 9,29.
 
-*As tabelas de valores neste documento foram calculadas sobre a referência de 10/08.*
+**Mas o job semanal nunca recebeu essa mudança.** Ele roda um contêiner fixado por digest,
+construído em **31/07**, uma semana antes da correção. Toda segunda ele escreve uma
+referência com a maturação que o projeto já abandonou.
+
+**A ordenação está acidentalmente nos salvando.** O leitor ordena por fim da janela, e
+maturação de 21 dias produz um fim MAIS RECENTE que a de 60. Por isso ele serve a única
+linha correta que existe — a manual de 03/08 — e ignora as do cron.
+
+**A armadilha, e é o motivo de isto estar escrito aqui:** "consertar" a ordenação para
+data de geração **sem antes atualizar o job** faria o teto pular para os números inflados
+da maturação de 60. A ordem certa é o contrário: primeiro reconstruir o job, depois
+revisar a ordenação (que aí passa a ser indiferente, porque a linha mais nova também terá
+o fim de janela mais recente).
+
+*As tabelas de valores neste documento foram calculadas sobre a referência correta, a de
+maturação 21.*
 
 ---
 
@@ -245,7 +258,7 @@ que torna leitura de meio de dia pouco confiável para decidir verba.
 
 ---
 
-## Em aberto 2 — O criativo converte diferente por TIPO de campanha?
+## Em aberto 2 — O criativo converte diferente por TIPO de campanha? SIM
 
 **O buraco, apontado em 14/08/2026.** A nota do criativo se divide por **canal**
 (Meta/Google), porque os dois convertem diferente. Mas o mesmo criativo também roda em
@@ -258,36 +271,67 @@ mistura de decis daquela campanha. Isso captura *quem esta campanha traz*. O que
 diferente: *como este criativo VENDE neste tipo de campanha*. Já foi medido que as duas
 coisas divergem (49,2% do topo do modelo vinha de anúncios que convertem mal).
 
-**Medido, e o dado ainda não decide.** Sobre 323.797 captações de 2026:
+### Correção de uma medição errada
 
-| tipo | leads | compradores | conversão |
+A primeira medição desta pergunta usou uma regra de classificação **inventada por
+substring** e concluiu que só 3 criativos tinham volume nos dois tipos, portanto que não
+havia como decidir. Estava errada em dois pontos:
+
+1. O projeto tem classificação canônica: `campaign_classifier.tag_signature` mais a
+   curadoria em `analytics.campaign_labels` (Controle / Champion / Challenger / Lead /
+   Excluir), curada em 22/07/2026. Reimplementar por substring violou a regra de nunca
+   refazer transformação que já existe.
+2. A regra inventada colapsava **Controle** e **Excluir** dentro de "Lead". Controle é
+   grupo de controle deliberado, não campanha de lead padrão.
+
+**E a cobertura sempre existiu: 95,8% das captações têm categoria curada**, sobre 501.105
+linhas de dez/2024 a hoje. Não havia nada a esperar.
+
+### O que o rótulo certo mostra
+
+| categoria | leads | compradores | conversão |
 |---|---|---|---|
-| Lead | 255.361 | 2.082 | 0,815% |
-| ML | 68.436 | 442 | 0,646% |
+| Lead | 152.736 | 1.849 | 1,211% |
+| Champion | 240.407 | 1.827 | 0,760% |
+| Controle | 75.747 | 689 | 0,910% |
+| Challenger | 5.995 | 49 | 0,817% |
 
-Só **3 criativos** de 906 rodaram nos dois tipos com pelo menos 300 leads em cada, que é o
-mínimo para a comparação dentro do criativo significar algo. Desses 3, um difere de
-verdade:
+Sobreposição real: **17 criativos** rodaram nos dois tipos com pelo menos 100 leads em
+cada, somando 176.927 leads — não 3. E o efeito é grande e vai **nos dois sentidos**:
 
 | criativo | Lead | ML | razão | p |
 |---|---|---|---|---|
-| DEV-AD0160 - VID - CAPTAÇÃO | 0,88% (25k) | 1,32% (4k) | **1,50x** | **0,003** |
-| DEV-AD0027-vid-captação-V0-DEV | 0,87% (30k) | 1,07% | 1,23x | 0,58 |
-| DEV-AD0150-vid-captação-V0 | 0,53% (42k) | 0,43% | 0,81x | 0,76 |
+| DEV-AD0017-vid-captação-V0-PODCAST | 1,44% (9k) | 0,42% (3k) | **0,29x** | 0,0000 |
+| DEV-AD0141-vid-captação-V0-PODCAST | 0,05% (6k) | 0,31% (17k) | **6,53x** | 0,0003 |
+| DEV-AD0150-vid-captação-V0 | 0,24% (3k) | 0,60% (34k) | 2,50x | 0,0082 |
+| DEV-AD0160 - VID - CAPTAÇÃO | 0,77% (5k) | 1,09% (23k) | 1,41x | 0,0377 |
 
-**Por que a amostra é tão fina:** na prática o criativo roda em um tipo, não nos dois. A
-sobreposição é exceção, e é ela que permitiria comparar sem confundir criativo com tipo.
+**4 de 17 diferem a p < 0,05**, e os dois primeiros sobrevivem até a correção para
+múltiplos testes (limiar 0,0029 para 17 comparações). Com 17 testes, o esperado por acaso
+seria menos de um.
 
-**Cuidado com a leitura agregada.** A tabela de cima sugere que ML converte PIOR (0,646%
-contra 0,815%), o que é o contrário do esperado. Mas são criativos, períodos e públicos
-diferentes: comparar os agregados é comparar coisas distintas. A comparação válida é a de
-dentro do criativo, e ela aponta para o outro lado (mediana 1,23x a favor do ML).
+**O que torna isto convincente não é a contagem, é a bidirecionalidade.** Um viés
+sistemático (por exemplo "campanha de ML sempre entrega público pior") apareceria como
+razões todas do mesmo lado. Aqui um criativo converte 3,4 vezes PIOR no ML e outro 6,5
+vezes MELHOR. Isso é assinatura de interação real entre criativo e tipo de campanha, não
+de ruído nem de viés de nível.
 
-**Encaminhamento:** não dividir a nota por tipo agora — com 3 criativos, dividir só
-fragmentaria a amostra e pioraria as duas metades. **Instrumentar**: gravar o tipo de
-campanha junto da nota desde já, para que a pergunta tenha resposta em um ou dois
-lançamentos, em vez de continuar sem dado. O caso do AD0160 é forte o bastante para
-justificar a instrumentação, e fraco demais para justificar a divisão.
+### A ameaça que ainda não foi descartada
+
+As células são acumuladas sobre toda a história. Se um criativo rodou em campanha de Lead
+num período e em ML noutro, **a diferença pode ser de período e não de tipo**. É o único
+concorrente sério à explicação de interação, e ele se testa comparando só dentro de
+janelas onde o criativo rodou nos dois tipos ao mesmo tempo.
+
+**Encaminhamento:** vale perseguir, e o próximo passo é descartar o confundimento
+temporal — não instrumentar e esperar, porque o dado já existe. Se a diferença sobreviver
+ao recorte por período, a nota passa a se dividir por tipo do mesmo jeito que já se divide
+por canal.
+
+**Armadilha de leitura, registrada.** No agregado o Lead converte melhor (1,211% contra
+0,760% do Champion), o que parece dizer que a campanha de ML é pior. É ilusão de
+composição: são criativos, períodos e públicos diferentes. A comparação válida é a de
+dentro do criativo.
 
 ---
 
@@ -303,9 +347,9 @@ justificar a instrumentação, e fraco demais para justificar a divisão.
 | 6 | Palpite pela fala do vídeo entra no teto | sim | |
 | 7 | Histórico diário de CPL contra teto (serve "em aberto 1") + grão de anúncio | sim, para nós | |
 
-Os passos 5 e 6 passam pelo portão do passo 3 antes de chegar ao gestor. A instrumentação
-do tipo de campanha ("em aberto 2") entra junto do passo 5, que é quando a nota de
-conversão passa a ser gravada de qualquer jeito.
+Os passos 5 e 6 passam pelo portão do passo 3 antes de chegar ao gestor. O tipo de
+campanha ("em aberto 2") entra no passo 5, se o recorte por período confirmar que a
+diferença não é de época.
 
 ---
 
