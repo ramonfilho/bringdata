@@ -47,7 +47,22 @@ MIN_HIST_PERIODO = 20_000  # leads mínimos no passado para a semana ser calcul�
 # a fração de leads com nota de 82,5% para 49,8%, e metade dos leads em nota neutra é onde
 # o ganho morria. Medido offline em 67 mil leads: com 45 o composto dava AUC 0,6510 e 71
 # compradores no top 10%; com 21 dá 0,6763 e 79 (modelo sozinho: 0,6348 e 61).
-JANELA_DESFECHO_DIAS = 21
+#
+# ESTE NÚMERO NÃO MORA MAIS AQUI (14/08/2026). Ele é IMPORTADO de `data.matured_window`,
+# que se declara a fonte única da maturação. Antes havia um 21 escrito à mão aqui e outro
+# lá: coincidiam por sorte, e quando a fonte única mudou de 60 para 21 em 07/08 só um dos
+# dois se mexeu. Duas cópias do mesmo número é a definição de divergência agendada.
+#
+# E ele passou a ser PISO, não resposta: quando o lançamento do lead é conhecido, quem
+# manda é o calendário (`maturacao_do_lancamento`), porque lançamento grande fecha o
+# carrinho depois do dia 21 — no LF45 isso descartava 55,6% dos compradores dele.
+from src.data.matured_window import (  # noqa: E402
+    MATURACAO_MINIMA_DIAS,
+    compra_conta_para_o_lead,
+    maturacao_do_lancamento,
+)
+
+JANELA_DESFECHO_DIAS = MATURACAO_MINIMA_DIAS
 CARENCIA_DIAS = JANELA_DESFECHO_DIAS
 NOTA_NEUTRA = 1.0         # criativo sem histórico não é bom nem ruim
 
@@ -119,7 +134,7 @@ def _carrega_historico() -> pd.DataFrame:
         linhas = conn.run("""
             SELECT DISTINCT ON (lower(trim(email)), utm_content, captured_at::date)
                    utm_content, utm_source, captured_at::date,
-                   lower(trim(email)), phone
+                   lower(trim(email)), phone, lf
             FROM captacoes
             WHERE utm_content IS NOT NULL AND captured_at IS NOT NULL
             ORDER BY lower(trim(email)), utm_content, captured_at::date
@@ -131,7 +146,7 @@ def _carrega_historico() -> pd.DataFrame:
     finally:
         conn.close()
 
-    hist = pd.DataFrame(linhas, columns=["criativo", "source", "dia", "email", "tel"])
+    hist = pd.DataFrame(linhas, columns=["criativo", "source", "dia", "email", "tel", "lf"])
     hist["canal"] = hist["source"].map(_canal)
     hist["dia"] = pd.to_datetime(hist["dia"])
     hist["criativo"] = hist["criativo"].astype(str).str.strip()
@@ -142,18 +157,32 @@ def _carrega_historico() -> pd.DataFrame:
     por_email = v.dropna(subset=["email"]).groupby("email")["dt"].apply(list).to_dict()
     por_tel = v.dropna(subset=["tel8"]).groupby("tel8")["dt"].apply(list).to_dict()
 
-    janela = pd.Timedelta(days=JANELA_DESFECHO_DIAS)
+    # A compra conta se caiu DENTRO do lançamento em que o lead entrou, e não dentro de
+    # um número fixo de dias. O `lf` vem da própria `captacoes`, que é quem sabe: ela
+    # cobre 100% das linhas contra 98% de derivar pela data, e onde os dois existem
+    # concordam em 98,4% — as discordâncias são todas em fronteira, onde duas janelas de
+    # captação se encostam e só o operador sabe qual valia.
+    from src.core.launches import load_launches
+    cal = load_launches()
+    mat = {nome: maturacao_do_lancamento(e) for nome, e in (cal or {}).items()}
     hist["buy"] = [
-        int(any(d0 <= s <= d0 + janela
+        int(any(compra_conta_para_o_lead(data_captura=d0, data_compra=s,
+                                         lf_name=lf, launches=cal)
                 for s in (por_email.get(e, []) + por_tel.get(_tel8(t), []))))
-        for e, t, d0 in zip(hist["email"], hist["tel"], hist["dia"])
+        for e, t, d0, lf in zip(hist["email"], hist["tel"], hist["dia"], hist["lf"])
     ]
     if hist["buy"].sum() == 0:
         raise ValueError(
-            "[nota_criativo] histórico saiu com ZERO compradores em "
-            f"{JANELA_DESFECHO_DIAS} dias sobre {len(hist):,} captações. A nota inteira "
-            "viraria neutra em silêncio. Verificar o cruzamento com `analytics.sales`."
+            f"[nota_criativo] histórico saiu com ZERO compradores sobre {len(hist):,} "
+            "captações. A nota inteira viraria neutra em silêncio. Verificar o cruzamento "
+            "com `analytics.sales`."
         )
+    if mat:
+        logger.info("  [nota_criativo] maturação pelo calendário: %d lançamentos · "
+                    "min %dd · mediana %dd · max %dd (o fixo de %dd virou piso)",
+                    len(mat), min(mat.values()),
+                    sorted(mat.values())[len(mat) // 2], max(mat.values()),
+                    MATURACAO_MINIMA_DIAS)
     return hist.drop(columns=["email", "tel"])
 
 
@@ -295,11 +324,30 @@ def adicionar_nota_criativo(df: pd.DataFrame, *, col_criativo: str = "Content",
                        f"vai sair igual à geral")
     trs = _carrega_transcricoes() if transcricoes is None else transcricoes
 
+    # CARÊNCIA POR LANÇAMENTO. A regra é a mesma de sempre — só entra no histórico o
+    # lead cujo desfecho já teve tempo de existir — mas agora "teve tempo" é lido do
+    # calendário em vez de suposto: o carrinho do lançamento DELE já fechou antes da
+    # semana que está sendo pontuada.
+    #
+    # O invariante janela == carência continua valendo, e é por isso que os dois lados
+    # usam a MESMA data: o desfecho de um lead vai até `vendas_end` do lançamento dele
+    # (em `_carrega_historico`), e é esse mesmo `vendas_end` que decide aqui se ele já
+    # pode entrar. Fixar um dos dois e não o outro reabriria o vazamento.
+    from src.core.launches import load_launches as _load_cal
+    _cal = _load_cal()
+    _fim_vendas = {}
+    for _nome, _e in (_cal or {}).items():
+        _ve = (_e or {}).get("vendas_end")
+        if _ve:
+            _fim_vendas[_nome] = pd.Timestamp(str(_ve)[:10])
+    # Lead sem lançamento conhecido cai no piso de dias, contado da captação dele.
+    _fim_do_lead = hist["lf"].map(_fim_vendas) if "lf" in hist.columns else pd.Series(
+        [pd.NaT] * len(hist), index=hist.index)
+    _fim_do_lead = _fim_do_lead.fillna(hist["dia"] + pd.Timedelta(days=CARENCIA_DIAS))
+
     por_semana, por_semana_canal, por_semana_texto = {}, {}, {}
     for sem in sorted(s for s in semana.dropna().unique()):
-        # só histórico já MADURO: o desfecho de 45 dias precisa ter tido tempo de existir
-        corte = sem.start_time - pd.Timedelta(days=CARENCIA_DIAS)
-        passado = hist[hist["dia"] < corte]
+        passado = hist[_fim_do_lead < sem.start_time]
         base = _notas_da_semana(passado)
         por_semana[sem] = base
         por_semana_canal[sem] = _notas_por_canal(passado)
