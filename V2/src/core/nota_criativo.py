@@ -186,8 +186,13 @@ def _carrega_historico() -> pd.DataFrame:
     return hist.drop(columns=["email", "tel"])
 
 
-def _notas_da_semana(hist_ate_aqui: pd.DataFrame) -> dict:
-    """NOTA por criativo, usando SÓ o histórico passado como argumento."""
+def _notas_da_semana(hist_ate_aqui: pd.DataFrame, alvo: dict = None) -> dict:
+    """NOTA por criativo, usando SÓ o histórico passado como argumento.
+
+    `alvo` é para onde o encolhimento puxa quem tem pouco histórico. Sem ele, puxa para
+    o neutro (1,0), que é o mesmo que dizer "não faço ideia". Com ele, puxa para o que a
+    fala e o ritmo do vídeo sugerem, que é bem melhor que não fazer ideia.
+    """
     if len(hist_ate_aqui) < MIN_HIST_PERIODO:
         return {}
     nivel = hist_ate_aqui["buy"].mean()
@@ -199,14 +204,57 @@ def _notas_da_semana(hist_ate_aqui: pd.DataFrame) -> dict:
         return {}
     lift = (g["k"] / g["n"]) / nivel
     peso = g["n"] / (g["n"] + K_ENCOLHIMENTO)
-    return (peso * lift + (1 - peso) * NOTA_NEUTRA).to_dict()
+    if not alvo:
+        return (peso * lift + (1 - peso) * NOTA_NEUTRA).to_dict()
+
+    # CENTRAGEM DO ALVO, contra a PRÓPRIA fatia (achado de 07/08/2026, 2a tentativa).
+    #
+    # O alvo do encolhimento significa "não sei nada sobre este criativo", e por isso
+    # precisa estar no MESMO nível das notas da fatia onde vai ser usado. Sem isso ele
+    # não informa, DESLOCA — e o deslocamento não é uniforme (depende de quais vídeos
+    # são vizinhos de cada criativo), então reordena e estraga o ranking.
+    #
+    # Duas suposições minhas caíram aqui, ambas por medição:
+    #   1. Centrar contra as notas GERAIS e aplicar no cálculo POR CANAL: cada canal tem
+    #      nível próprio, então centrado para um é descentrado para o outro.
+    #   2. Centrar contra a MÉDIA DAS NOTAS (0,81). Errado, e é a chave de tudo. A conta
+    #      do deslocamento é:
+    #
+    #            nota_com_alvo − nota_sem_alvo = (1 − peso) × (alvo − 1,0)
+    #
+    #      A nota sobe se e somente se o alvo for MAIOR QUE 1,0, porque é o neutro 1,0
+    #      que o alvo substitui. Centrar em 0,81 força quase todo alvo para baixo de 1,0
+    #      e garante que quase toda nota desça: 30.576 para baixo contra 1 para cima,
+    #      PIOR que os 28.020/710 de não centrar nada.
+    #
+    # O alvo certo é NOTA_NEUTRA. É um fator multiplicativo único, então preserva a
+    # ORDEM (a única coisa que o palpite tem de informação) e zera o deslocamento médio.
+    comuns = [c for c in g.index if c in alvo]
+    if comuns:
+        # O peso da centragem é (1-peso)*n, que é EXATAMENTE quanto cada criativo
+        # participa do deslocamento — assim a soma dos deslocamentos dá zero, e não
+        # só a média dos alvos.
+        w = ((1 - peso.loc[comuns]) * g.loc[comuns, "n"]).astype(float).values
+        centro_alvo = float(np.average([alvo[c] for c in comuns], weights=w))
+        if centro_alvo > 0:
+            fator = NOTA_NEUTRA / centro_alvo
+            alvo = {c: v * fator for c, v in alvo.items()}
+            logger.debug("  [nota_criativo] alvo centrado %.3f -> %.1f (fator %.3f, "
+                         "%d criativos na fatia)", centro_alvo, NOTA_NEUTRA, fator, len(comuns))
+    destino = g.index.map(lambda c: alvo.get(c, NOTA_NEUTRA))
+    return (peso * lift + (1 - peso) * destino).to_dict()
 
 
-def _notas_por_canal(hist_ate_aqui: pd.DataFrame) -> dict:
-    """A mesma NOTA, mas calculada DENTRO de cada canal. Chave = (canal, criativo)."""
+def _notas_por_canal(hist_ate_aqui: pd.DataFrame, alvo: dict = None) -> dict:
+    """A mesma NOTA, mas calculada DENTRO de cada canal. Chave = (canal, criativo).
+
+    O `alvo` do encolhimento é compartilhado entre os canais de propósito: a fala do vídeo
+    não muda quando ele roda no Google em vez da Meta. O que muda por canal é o LIFT, que
+    é medido contra a conversão daquele canal.
+    """
     out = {}
     for cn, bloco in hist_ate_aqui.groupby("canal"):
-        for cr, val in _notas_da_semana(bloco).items():
+        for cr, val in _notas_da_semana(bloco, alvo=alvo).items():
             out[(cn, cr)] = val
     return out
 
@@ -273,6 +321,7 @@ def _prior_por_texto(notas: dict, volumes: dict, transcricoes: dict) -> dict:
                 vals.append(float(np.mean(p)))
         if vals:
             out[cr] = float(np.mean(vals))
+
     return out
 
 
@@ -346,6 +395,7 @@ def adicionar_nota_criativo(df: pd.DataFrame, *, col_criativo: str = "Content",
     _fim_do_lead = _fim_do_lead.fillna(hist["dia"] + pd.Timedelta(days=CARENCIA_DIAS))
 
     por_semana, por_semana_canal, por_semana_texto = {}, {}, {}
+    por_semana_canal_texto = {}
     for sem in sorted(s for s in semana.dropna().unique()):
         passado = hist[_fim_do_lead < sem.start_time]
         base = _notas_da_semana(passado)
@@ -370,8 +420,15 @@ def adicionar_nota_criativo(df: pd.DataFrame, *, col_criativo: str = "Content",
             for cr, pv in prior.items():
                 comb.setdefault(cr, pv)      # estreante ganha a nota que o vídeo sugere
             por_semana_texto[sem] = comb
+            # A QUARTA VARIANTE: canal E texto na mesma nota. As duas anteriores foram
+            # construídas como ALTERNATIVAS, e a comparação entre elas trocava duas coisas
+            # de uma vez (adicionava o canal e removia o texto), então não dava para
+            # atribuir a diferença a nenhuma das duas. Aqui o lift é medido dentro do
+            # canal e o encolhimento puxa para o que o vídeo sugere, em vez do 1,0 cego.
+            por_semana_canal_texto[sem] = _notas_por_canal(passado, alvo=prior)
         else:
             por_semana_texto[sem] = base
+            por_semana_canal_texto[sem] = por_semana_canal[sem]
 
     def _monta(mapa, chave_canal=False):
         return np.array([
@@ -384,12 +441,17 @@ def adicionar_nota_criativo(df: pd.DataFrame, *, col_criativo: str = "Content",
     nota_canal = _monta(por_semana_canal, chave_canal=True)
     nota_canal = np.where(np.isnan(nota_canal), nota, nota_canal)   # sem canal → a geral
     nota_texto = np.nan_to_num(_monta(por_semana_texto), nan=NOTA_NEUTRA)
+    nota_canal_texto = _monta(por_semana_canal_texto, chave_canal=True)
+    # sem canal → cai na de texto, que já tem o prior; nem aí volta pro 1,0 cego
+    nota_canal_texto = np.where(np.isnan(nota_canal_texto), nota_texto, nota_canal_texto)
 
     out = df.copy()
     out[nome_saida] = nota
     out[f"{nome_saida}_canal"] = nota_canal
     out[f"{nome_saida}_texto"] = nota_texto
-    for rot, v in (("canal", nota_canal), ("texto", nota_texto)):
+    out[f"{nome_saida}_canal_texto"] = nota_canal_texto
+    for rot, v in (("canal", nota_canal), ("texto", nota_texto),
+                   ("canal_texto", nota_canal_texto)):
         logger.info(f"  [nota_criativo] {nome_saida}_{rot}: cobertura "
                     f"{(v != NOTA_NEUTRA).mean()*100:.1f}% · mediana {np.median(v):.2f}")
     cobertura = float((nota != NOTA_NEUTRA).mean())

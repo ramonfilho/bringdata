@@ -87,11 +87,12 @@ def test_cobertura_baixa_falha_alto():
         adicionar_nota_criativo(_df(["DESCONHECIDO"] * 10, "2026-03-09"), historico=h, transcricoes={})
 
 
-def test_gera_as_tres_colunas():
-    """As três variantes de conteúdo da nota, não só a básica."""
+def test_gera_as_quatro_colunas():
+    """As quatro variantes de conteúdo da nota, não só a básica."""
     out = adicionar_nota_criativo(_df(["AD_BOM", "AD_RUIM"], "2026-03-09"),
                                   historico=_historico(), transcricoes={})
-    for c in ("nota_criativo", "nota_criativo_canal", "nota_criativo_texto"):
+    for c in ("nota_criativo", "nota_criativo_canal", "nota_criativo_texto",
+              "nota_criativo_canal_texto"):
         assert c in out.columns, f"faltou {c}"
     assert (out["nota_criativo_canal"] > 0).all()
 
@@ -108,7 +109,8 @@ def test_nao_mexe_nas_outras_colunas():
     df = _df(["AD_BOM", "AD_RUIM"], "2026-03-09")
     out = adicionar_nota_criativo(df, historico=h, transcricoes={})
     assert list(df.columns) + ["nota_criativo", "nota_criativo_canal",
-                               "nota_criativo_texto"] == list(out.columns)
+                               "nota_criativo_texto",
+                               "nota_criativo_canal_texto"] == list(out.columns)
     assert out["outra_coluna"].tolist() == df["outra_coluna"].tolist()
     assert "nota_criativo" not in df.columns, "não pode mutar o df de entrada"
 
@@ -166,7 +168,7 @@ def test_carencia_encolhe_o_historico_usado():
     import src.core.nota_criativo as nc
     vistos = []
     orig = nc._notas_da_semana
-    nc._notas_da_semana = lambda d: (vistos.append(len(d)), orig(d))[1]
+    nc._notas_da_semana = lambda d, **kw: (vistos.append(len(d)), orig(d, **kw))[1]
     try:
         adicionar_nota_criativo(_df(["AD_BOM"], "2026-04-01"), historico=h,
                                 transcricoes={}, cobertura_minima=0.0)
@@ -179,4 +181,96 @@ def test_carencia_encolhe_o_historico_usado():
         nc._notas_da_semana = orig
     assert perto < longe, (
         f"lead de abril viu {perto:,} linhas e o de junho {longe:,}: a carencia nao encolheu nada"
+    )
+
+
+def test_canal_texto_encolhe_para_o_video_e_nao_para_o_neutro():
+    """A quarta variante: lift medido DENTRO do canal, alvo do encolhimento vindo do vídeo.
+
+    Sem transcricao ela tem que cair na nota por canal (nao inventar nada). Este teste
+    trava so o caso degenerado; o efeito do prior de verdade e medido offline, porque
+    depende de vizinhanca entre videos reais.
+    """
+    h = _historico()
+    out = adicionar_nota_criativo(_df(["AD_BOM", "AD_RUIM"], "2026-03-09"),
+                                  historico=h, transcricoes={})
+    assert out["nota_criativo_canal_texto"].tolist() == out["nota_criativo_canal"].tolist(), (
+        "sem transcricao, canal_texto tem que ser identica a canal"
+    )
+
+
+def test_alvo_centrado_no_nivel_da_propria_fatia():
+    """O invariante do desenho: o alvo NAO pode mexer no nivel medio da fatia.
+
+    Alvo do encolhimento significa "nao sei nada sobre este criativo". Se ele chega
+    fora do nivel das notas da fatia, ele DESLOCA em vez de informar, e o
+    deslocamento reordena porque depende de quais vizinhos cada criativo tem.
+
+    Historico do erro (07/08/2026): a 1a tentativa centrou contra as notas GERAIS e
+    aplicou no calculo POR CANAL, que tem nivel proprio. Resultado medido em 75 mil
+    leads: 30.604 notas deslocadas pra baixo contra ZERO pra cima. A centragem passou
+    a acontecer DENTRO da fatia, e este teste e o que trava isso.
+    """
+    import numpy as np
+    from src.core.nota_criativo import _notas_da_semana
+    h = _historico()
+    sem = _notas_da_semana(h)
+    # alvo grosseiramente fora do nivel: 5x acima. A centragem tem que absorver.
+    com = _notas_da_semana(h, alvo={c: v * 5.0 for c, v in sem.items()})
+    vol = h.groupby("criativo").size()
+    comuns = sorted(set(sem) & set(com))
+    w = np.array([vol[c] for c in comuns], dtype=float)
+    m_sem = np.average([sem[c] for c in comuns], weights=w)
+    m_com = np.average([com[c] for c in comuns], weights=w)
+    assert abs(m_sem - m_com) < 1e-9, (
+        f"o alvo mexeu no nivel da fatia: {m_sem:.4f} -> {m_com:.4f}. "
+        f"A centragem devia absorver qualquer escala do alvo."
+    )
+
+
+def test_alvo_carrega_a_diferenca_RELATIVA_e_nao_o_nivel():
+    """O que o alvo tem de informacao util e a ordem entre criativos, nao a escala.
+
+    Dobrar o alvo inteiro nao pode mudar nada (a centragem tira a escala), mas
+    INVERTER a ordem dele tem que mudar a nota de quem tem pouco historico.
+    """
+    from src.core.nota_criativo import _notas_da_semana
+    h = _historico()
+    base = _notas_da_semana(h)
+    a1 = _notas_da_semana(h, alvo=base)
+    a2 = _notas_da_semana(h, alvo={c: v * 2.0 for c, v in base.items()})
+    assert all(abs(a1[c] - a2[c]) < 1e-9 for c in a1), (
+        "dobrar o alvo inteiro mudou a nota: a centragem nao esta tirando a escala"
+    )
+    invertido = {c: 1.0 / v for c, v in base.items()}
+    a3 = _notas_da_semana(h, alvo=invertido)
+    assert any(abs(a1[c] - a3[c]) > 1e-6 for c in a1), (
+        "inverter a ORDEM do alvo nao mudou nada: o alvo virou decorativo"
+    )
+
+
+def test_alvo_nao_desloca_o_nivel_medio_da_nota():
+    """O invariante que faltava, e que custou duas tentativas erradas.
+
+    A conta do deslocamento e:  nota_com_alvo - nota_sem_alvo = (1-peso) x (alvo - 1,0)
+
+    A nota so sobe se o alvo for MAIOR que 1,0, porque e o neutro 1,0 que ele substitui.
+    Centrar o alvo contra a media das NOTAS (0,81) forca quase todo alvo abaixo de 1,0 e
+    faz quase toda nota descer. Este teste trava o alvo certo: o deslocamento medio, no
+    peso em que ele de fato ocorre, tem que ser ZERO.
+    """
+    import numpy as np
+    from src.core.nota_criativo import _notas_da_semana, K_ENCOLHIMENTO
+    h = _historico(n_por_semana=6000, semanas=8)
+    sem = _notas_da_semana(h)
+    # alvo torto de proposito: metade do nivel das notas, que e o formato do prior real
+    com = _notas_da_semana(h, alvo={c: v * 0.5 for c, v in sem.items()})
+    n = h.groupby("criativo").size()
+    comuns = sorted(set(sem) & set(com))
+    peso = np.array([n[c] / (n[c] + K_ENCOLHIMENTO) for c in comuns])
+    w = (1 - peso) * np.array([n[c] for c in comuns], dtype=float)
+    desloc = np.array([com[c] - sem[c] for c in comuns])
+    medio = float(np.average(desloc, weights=w))
+    assert abs(medio) < 1e-9, (
+        f"deslocamento medio {medio:+.6f} — o alvo esta empurrando a nota para um lado"
     )
