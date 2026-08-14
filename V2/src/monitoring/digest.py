@@ -1000,6 +1000,12 @@ def _slack_score_distribution_change_dm(v: dict, B: list):
     B.append({'type': 'divider'})
 
 
+# Acima disto, o retorno da Hotmart está quebrado, não lento. A volta normal leva
+# ~17s e o re-submit automático é de 6h, então 3h não pega oscilação nem colide
+# com o ciclo de retentativa.
+_IDADE_RETORNO_ALARME_H = 3.0
+
+
 def _slack_hotleads_24h(v: dict, B: list):
     """Bloco "🔥 HotLeads 24h" — saúde do selo da Hotmart → evento LeadScoringHot.
 
@@ -1009,8 +1015,16 @@ def _slack_hotleads_24h(v: dict, B: list):
     dias depois no Events Manager.
 
     Sinais de alarme explicitados no texto (não deixa o operador inferir):
-      - selados=0 com fila cheia  → cron parado ou submissão falhando
+      - idade do mais antigo aguardando alta → RETORNO parado (a volta morreu)
+      - selados=0 com fila cheia  → cron parado ou submissão falhando (a IDA)
       - erros>0                   → evento não saiu; o retry do cron tenta de novo
+
+    A primeira linha nasceu de uma falha real: de 06 a 14/08/2026 o retorno ficou
+    8 dias morto (403 do IAM no callback) e este bloco não gritou nenhuma vez. O
+    alarme de então exigia `selados == 0 AND fila > 0`, e a fila NUNCA subia
+    porque o cron continuava drenando — a ida estava saudável. Pior: os presos
+    apareciam na linha calma "⏳ aguardando retorno da Hotmart". Alerta que mede o
+    lado errado é pior que não ter alerta, porque tranquiliza.
     """
     h = v.get('hotleads_24h') or {}
     if not h.get('disponivel'):
@@ -1023,6 +1037,7 @@ def _slack_hotleads_24h(v: dict, B: list):
     erros   = h.get('erros', 0) or 0
     fila    = h.get('sem_selo_na_janela', 0) or 0
     aguard  = h.get('aguardando_selo', 0) or 0
+    idade   = h.get('idade_max_aguardando_h', 0.0) or 0.0
 
     B.append({'type': 'header',
               'text': {'type': 'plain_text', 'text': '🔥 HotLeads 24h', 'emoji': True}})
@@ -1035,7 +1050,19 @@ def _slack_hotleads_24h(v: dict, B: list):
 
     # Diagnóstico em português — o operador não deve precisar deduzir do número.
     diag = []
-    if selados == 0 and fila > 0:
+    # RETORNO quebrado — o alarme que faltava. Ver docstring: o antigo exigia
+    # `selados == 0 AND fila > 0` e nunca tinha as duas ao mesmo tempo, porque o
+    # cron drenava a fila enquanto a volta estava morta.
+    if idade >= _IDADE_RETORNO_ALARME_H:
+        diag.append(f"🔴 *Retorno da Hotmart parado há {idade:.0f}h* — o mais antigo "
+                    f"dos {aguard} aguardando foi submetido nesse intervalo e o selo "
+                    f"não voltou (o normal são ~17s). A SUBMISSÃO está saudável: o "
+                    f"que quebrou é a volta. Conferir a URL de callback "
+                    f"(`HOTLEADS_PUBLIC_URL`) e se ela responde sem token.")
+    elif selados == 0 and aguard > 0:
+        diag.append(f"⚠️ *Nenhum lead selado em 24h* com {aguard} aguardando — "
+                    f"retorno da Hotmart provavelmente parado.")
+    elif selados == 0 and fila > 0:
         diag.append(f"⚠️ *Nenhum lead selado em 24h* com {fila} na fila — "
                     f"cron `hotleads-submit` parado ou submissão falhando.")
     elif fila > 2000:
@@ -1044,9 +1071,9 @@ def _slack_hotleads_24h(v: dict, B: list):
     if erros:
         diag.append(f"❌ {erros} evento(s) não saíram pro Meta — o próprio cron "
                     f"tenta reenviar na próxima rodada; se não cair, investigar.")
-    if aguard:
-        diag.append(f"⏳ {aguard} aguardando retorno da Hotmart "
-                    f"(normal por ~2 min; re-submete sozinho após 6h).")
+    if aguard and idade < _IDADE_RETORNO_ALARME_H:
+        diag.append(f"⏳ {aguard} aguardando retorno da Hotmart, o mais antigo há "
+                    f"{idade:.1f}h (normal por ~2 min; re-submete sozinho após 6h).")
     if diag:
         B.append({'type': 'section',
                   'text': {'type': 'mrkdwn', 'text': '\n'.join(diag)}})

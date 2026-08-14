@@ -33,6 +33,7 @@ def _empty_summary() -> Dict[str, Any]:
         'eventos_enviados': 0, # quentes cujo evento CAPI saiu
         'erros': 0,            # falhas de envio ainda não resolvidas
         'aguardando_selo': 0,  # submetidos e sem retorno da Hotmart
+        'idade_max_aguardando_h': 0.0,  # há quanto tempo o mais antigo espera
         'sem_selo_na_janela': 0,  # elegíveis que o cron ainda não pegou
         'disponivel': False,   # False = não conseguiu ler (não confundir com "zero")
     }
@@ -70,7 +71,16 @@ def compute_hotleads_summary(conn=None, source_allowlist=None) -> Dict[str, Any]
                                  AND hotleads_hot IS TRUE),
               COUNT(*) FILTER (WHERE hotleads_capi_sent_at >= NOW() - (:h * INTERVAL '1 hour')),
               COUNT(*) FILTER (WHERE hotleads_status = 'error'),
-              COUNT(*) FILTER (WHERE hotleads_status = 'submitted')
+              COUNT(*) FILTER (WHERE hotleads_status = 'submitted'),
+              -- SINAL PRINCIPAL de retorno quebrado. A volta normal leva ~17s;
+              -- qualquer coisa acima de uma hora é anomalia inequívoca, e este
+              -- número CRESCE sozinho enquanto o problema durar. A fila não
+              -- serve para isso: o cron a drena, e foi por isso que o alarme
+              -- ficou mudo os 8 dias de 06 a 14/08/2026.
+              COALESCE(EXTRACT(EPOCH FROM (
+                  NOW() - MIN(hotleads_submitted_at)
+                    FILTER (WHERE hotleads_status = 'submitted')
+              )) / 3600.0, 0)
             FROM registros_ml
             """,
             h=WINDOW_HOURS,
@@ -80,6 +90,7 @@ def compute_hotleads_summary(conn=None, source_allowlist=None) -> Dict[str, Any]
         out['eventos_enviados'] = int(row[2] or 0)
         out['erros'] = int(row[3] or 0)
         out['aguardando_selo'] = int(row[4] or 0)
+        out['idade_max_aguardando_h'] = round(float(row[5] or 0), 1)
         if out['selados']:
             out['pct_quentes'] = round(100.0 * out['quentes'] / out['selados'], 1)
 

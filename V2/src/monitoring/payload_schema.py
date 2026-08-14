@@ -1218,6 +1218,7 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'hotleads_24h_summary.eventos_enviados':                                            (R, None),
     'hotleads_24h_summary.erros':                                                       (R, None),
     'hotleads_24h_summary.aguardando_selo':                                             (R, None),
+    'hotleads_24h_summary.idade_max_aguardando_h':                                      (R, None),
     'hotleads_24h_summary.sem_selo_na_janela':                                          (R, None),
     'hotleads_24h_summary.disponivel':                                                  (R, None),
 }
