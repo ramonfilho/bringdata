@@ -261,8 +261,11 @@ medium:
   #   "[ADVTG_ABERTO]DEV-AD0160 - VID - CAPTAÇÃO"       → 453 leads
   #   "[ADVTG_ABERTO]DEV-AD0150-vid-captação-V0-..."    → 235 leads
   # Sem isto, `Aberto` (49,9% do treino) some e o modelo deixa de aplicar a
-  # penalidade do público frio, INFLANDO a nota (medido: %D9-D10 22,01% contra
-  # 17,77% real, e teto de CPL ~13,4% acima do devido).
+  # penalidade do público frio, INFLANDO a nota. Medido: %D9-D10 22,01% contra
+  # 17,77% real; o VALOR do lead enviado ao Meta saiu 11,8% alto (mapa
+  # `conversion_rates` deste yaml) e o TETO DE CPL 10,1% alto (mapa `by_decile` da
+  # `analytics.reference_rolling`, que é outro e bem mais plano — confundir os
+  # dois foi o que produziu o "13,4%" que circulou primeiro).
   # Âncora `^` e colchete escapado DE PROPÓSITO: "[ADVTG_ABERTO_QUENTE]" é outro
   # público e não pode virar Aberto sem decisão explícita.
   pattern_mappings:

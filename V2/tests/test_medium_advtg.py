@@ -6,8 +6,20 @@ O QUE ACONTECEU. A Meta passou a mandar "[<conjunto>]<nome do anúncio>" no
 do dataset de treino — sumiu da produção, e o modelo deixou de aplicar a
 penalidade que aprendeu para o público frio. Efeito medido em 2.031 leads
 reescoreados pelo pipeline de produção: 54,7% deles ficaram no decil errado,
-quase todos INFLADOS; o %D9-D10 reportado foi 22,01% contra 17,77% real; e o
-teto de CPL saiu ~13,4% acima do devido durante 4 dias.
+quase todos INFLADOS, e o %D9-D10 reportado foi 22,01% contra 17,77% real.
+
+DOIS MAPAS DE CONVERSÃO, e a primeira medição confundiu os dois. Cada um serve
+uma coisa, e o bug inflou os dois em graus diferentes:
+
+    `conversion_rates` do active_models yaml  → VALOR do lead no evento do Meta
+                                                0,537% → 0,474%  (-11,8%)
+    `conversion.by_decile` da reference_rolling → TETO DE CPL
+                                                0,766% → 0,689%  (-10,1%)
+
+O "-13,4%" que circulou primeiro saiu de aplicar o mapa do yaml ao teto, com
+ROAS alvo 1,5. Errado por dois motivos: o teto lê o OUTRO mapa, e o ROAS alvo em
+produção era 1,0. A direção e a ordem de grandeza se sustentam; os valores
+absolutos em reais, não.
 
 POR QUE O TESTE NÃO DEPENDE DE `mlruns/`. `tests/test_medium_artifacts.py` pula
 2 dos 4 casos quando o diretório do run não está presente (é o que acontece numa
