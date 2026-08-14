@@ -29,7 +29,16 @@ JOB_NAME="${HOTLEADS_JOB_NAME:-hotleads-submit}"
 # A cada 15 min: o lote é de até 1.000 leads e a captação do DevClub em pico faz
 # ~1.500/dia, então 15 min mantém a fila sempre curta sem martelar a API.
 SCHEDULE="${HOTLEADS_SCHEDULE:-*/15 * * * *}"
-SERVICE_URL="${HOTLEADS_PUBLIC_URL:-https://smart-ads-api-gazrm25mda-uc.a.run.app}"
+# Onde o CRON bate para disparar a submissão — é o serviço PRINCIPAL, e está certo
+# assim: o Cloud Scheduler assina token OIDC e a conta `scheduler-invoker@` tem
+# `roles/run.invoker` própria, então ele entra no serviço fechado sem problema.
+#
+# NÃO reusar `HOTLEADS_PUBLIC_URL` aqui. Aquela variável é o endereço de RETORNO
+# que a Hotmart chama, e desde 06/08/2026 ela aponta para o `smart-ads-webhook`.
+# Se este script lesse a mesma variável, o cron passaria a bater no serviço de
+# webhook, que responde 404 em tudo que não é rota de webhook — e `/hotleads/
+# submit-batch` não é. O cron viraria no-op silencioso.
+SERVICE_URL="${HOTLEADS_CRON_TARGET_URL:-https://smart-ads-api-gazrm25mda-uc.a.run.app}"
 
 PAUSE=false
 RUN_NOW=false

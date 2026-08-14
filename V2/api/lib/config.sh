@@ -211,9 +211,23 @@ build_env_vars() {
     HOTLEADS_WEBHOOK_TOKEN="${HOTLEADS_WEBHOOK_TOKEN:-$(gcloud secrets versions access latest --secret=hotleads-webhook-token --project="$PROJECT_ID" 2>/dev/null)}"
     [ -n "$HOTLEADS_CRON_TOKEN" ] && ENV_VARS="$ENV_VARS,HOTLEADS_CRON_TOKEN=$HOTLEADS_CRON_TOKEN"
     [ -n "$HOTLEADS_WEBHOOK_TOKEN" ] && ENV_VARS="$ENV_VARS,HOTLEADS_WEBHOOK_TOKEN=$HOTLEADS_WEBHOOK_TOKEN"
-    # URL pública deste serviço — é o endereço que mandamos pra Hotmart chamar de
-    # volta. Sem ela o selo nunca voltaria (o endpoint recusa submeter, fail-loud).
-    ENV_VARS="$ENV_VARS,HOTLEADS_PUBLIC_URL=${HOTLEADS_PUBLIC_URL:-https://smart-ads-api-gazrm25mda-uc.a.run.app}"
+    # Endereço que mandamos pra Hotmart chamar de volta com o selo. Vai junto de
+    # CADA submissão (api/app.py:_hotleads_webhook_url), então corrigir aqui
+    # conserta o retorno sem precisar mexer em nada no painel da Hotmart.
+    #
+    # APONTA PRO smart-ads-webhook, NÃO pro smart-ads-api. O principal foi fechado
+    # em 06/08/2026 (perdeu o `allUsers`) e só aceita chamador com identidade
+    # Google; a Hotmart é terceiro e não assina token do Google. O default anterior
+    # apontava pro principal e ficou apontando depois do fechamento: a Hotmart
+    # passou a levar 403 do IAM ANTES de chegar na aplicação, 478 vezes em 30 dias,
+    # e o selo parou de voltar por 8 dias (último em 05/08 19:15, primeiro 403 em
+    # 06/08 17:30). Nada no nosso lado gritou, porque quem quebrou foi o RETORNO e
+    # o alerta do relatório vigia a fila de submissão, que o cron drena normalmente.
+    #
+    # O smart-ads-webhook é público de propósito e serve APENAS as rotas de webhook
+    # (papel `webhook` em api/auth.py, que inclui /hotleads/webhook); todo o resto
+    # dá 404. É a portaria: recebe entrega de terceiro sem abrir o prédio inteiro.
+    ENV_VARS="$ENV_VARS,HOTLEADS_PUBLIC_URL=${HOTLEADS_PUBLIC_URL:-https://smart-ads-webhook-gazrm25mda-uc.a.run.app}"
     # A credencial Basic da Hotmart (HOTMART_BASIC) NÃO entra aqui: o valor tem
     # ESPAÇO ("Basic xxx") e vai por --update-secrets no deploy_capi.sh, montado
     # do Secret Manager (hotmart-basic). Ela nunca esteve no Cloud Run porque até
