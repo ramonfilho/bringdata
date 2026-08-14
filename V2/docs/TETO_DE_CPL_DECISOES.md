@@ -108,6 +108,31 @@ menos de cartão derrubaram todo teto em 4,1%.
 
 Numa métrica que move verba, ter recibo é o que separa "erramos" de "não sabemos".
 
+### Achado em aberto: qual referência o leitor escolhe
+
+Ao conferir o teto contra o banco real (14/08/2026), a referência devolvida foi a de
+**03/08**, não a de **10/08**. O motivo é que o leitor ordena por **fim da janela**, e não
+por data de geração:
+
+| gerado em | as_of | fim da janela | leads |
+|---|---|---|---|
+| 10/08 06:32 | 2026-08-10 | 2026-06-11 | 104.453 |
+| **03/08 19:15** | 2026-08-03 | **2026-07-13** | **86.141** ← é esta que sai |
+| 03/08 11:27 | 2026-08-03 | 2026-06-04 | 107.986 |
+
+A reconstrução mais recente (10/08) usou uma janela mais ANTIGA, provavelmente para ter
+desfecho maduro, e por isso perde o critério de ordenação. O efeito nos tetos entregues
+não é pequeno: pela referência de 10/08 o balde D1-D2 dá R$ 1,36; pela de 03/08 dá
+R$ 1,64, e o D9-D10 vai de R$ 10,47 para R$ 9,50.
+
+**Não foi consertado aqui, de propósito**: é comportamento anterior a esta frente, mexer
+nele muda todo teto de novo, e a escolha entre "janela mais recente" e "reconstrução mais
+recente" é decisão, não bug óbvio. Fica registrado como pergunta a responder antes do
+passo 3 (a trava de reconferência), porque a trava precisa saber contra qual referência
+está conferindo.
+
+*As tabelas de valores neste documento foram calculadas sobre a referência de 10/08.*
+
 ---
 
 ## Decisão 4 — O teto é obrigatório; quem pode faltar é o CPL
@@ -195,7 +220,7 @@ o número na tela do gestor, e cada uma passa pelo mesmo portão.
 | # | passo | entrega valor sozinho? | estado |
 |---|---|---|---|
 | 1 | Montagem do teto vira função única; os dois relatórios viram clientes finos dela | não, é base | **feito** |
-| 2 | Cinco baldes + ROAS 2 + carimbo da referência | sim | |
+| 2 | Cinco baldes + ROAS 2 + carimbo da referência | sim | **feito** |
 | 3 | **Trava: reconferência contra lançamentos passados** | portão | |
 | 4 | Popular o teto em `scores_inbound` (coluna já pedida à agência em paralelo) | sim, o gestor recebe | |
 | 5 | Nota de conversão do criativo entra no teto | sim | |

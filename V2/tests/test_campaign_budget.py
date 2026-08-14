@@ -46,18 +46,25 @@ def _run(rows):
         os.environ.pop('REFERENCE_SOURCE', None)
 
 
-def test_sinal_por_breakeven():
+def test_sinal_por_meta_de_roas():
+    # A linha carrega a DISTRIBUIÇÃO de decis da campanha, não só a fatia no topo:
+    # é ela que distingue uma campanha D7-D8 de uma D1-D2 (ver monitoring/teto.py).
     rows = [
-        {'utm': 'CAMP A', 'pct_d9_d10': 80.0},   # qualidade alta → teto alto
-        {'utm': 'Camp B', 'pct_d9_d10': 10.0},   # qualidade baixa → teto baixo (casa por norm)
+        {'utm': 'CAMP A', 'decis': {'D09': 40, 'D10': 40, 'D01': 10, 'D02': 10}},
+        {'utm': 'Camp B', 'decis': {'D09': 5, 'D10': 5, 'D01': 45, 'D02': 45}},
     ]
     _run(rows)
-    # CAMP A: cpl=10 ; exp=0.8×0.025+0.2×0.005=0.021 ; teto=27,72 → 10≤27,72 → aumentar
+    # CAMP A: cpl=10 ; exp=(80×0,025 + 20×0,005)/100=0,021 ; teto=0,021×1320/2=13,86
     assert rows[0]['cpl'] == 10.0 and rows[0]['budget_signal'] == 'aumentar'
-    assert abs(rows[0]['teto_cpl'] - 27.72) < 0.05
-    # Camp B: exp=0.1×0.025+0.9×0.005=0.007 ; teto=9,24 → 10>9,24 → reduzir
+    assert abs(rows[0]['teto_cpl'] - 13.86) < 0.05
+    # Camp B: exp=(10×0,025 + 90×0,005)/100=0,007 ; teto=0,007×1320/2=4,62 → reduzir
     assert rows[1]['budget_signal'] == 'reduzir'
-    assert abs(rows[1]['teto_cpl'] - 9.24) < 0.05
+    assert abs(rows[1]['teto_cpl'] - 4.62) < 0.05
+    # ROAS alvo 2,0 (não mais breakeven): o teto entregue é METADE do de antes.
+    assert rows[0]['teto_roas_alvo'] == 2.0
+    # e cada linha carrega de qual reconstrução da referência ela saiu
+    assert rows[0]['teto_referencia_as_of'] == _REF.get('as_of')
+    assert rows[0]['teto_motivo'] == 'ok'
 
 
 def test_casa_por_campaign_id_quando_nome_diverge():
@@ -76,15 +83,15 @@ def test_casa_por_campaign_id_quando_nome_diverge():
     os.environ['REFERENCE_SOURCE'] = 'rolling'
     try:
         rows = [{'utm': 'DEVLF | CAP | FRIO | FASE 04 | ... | 2026-06-18|120245448615560390',
-                 'pct_d9_d10': 80.0}]
+                 'decis': {'D09': 40, 'D10': 40, 'D01': 10, 'D02': 10}}]
         enrich_campaign_budget(rows, win_start=date(2026, 7, 21), win_end=date(2026, 7, 29))
     finally:
         rr.read_rolling_reference, ads.read_ad_spend = _o1, _o2
         os.environ.pop('REFERENCE_SOURCE', None)
-    # casou por id (nome não bateria): cpl=10 ; teto=27,72 ; folga=17,72 ; aumentar
+    # casou por id (nome não bateria): cpl=10 ; teto=13,86 ; folga=3,86 ; aumentar
     assert rows[0]['cpl'] == 10.0 and rows[0]['budget_signal'] == 'aumentar'
-    assert abs(rows[0]['teto_cpl'] - 27.72) < 0.05
-    assert abs(rows[0]['folga'] - 17.72) < 0.05
+    assert abs(rows[0]['teto_cpl'] - 13.86) < 0.05
+    assert abs(rows[0]['folga'] - 3.86) < 0.05
 
 
 def test_folga_negativa_e_render():
@@ -99,7 +106,7 @@ def test_folga_negativa_e_render():
 
 def test_frozen_noop():
     os.environ.pop('REFERENCE_SOURCE', None)   # frozen
-    rows = [{'utm': 'CAMP A', 'pct_d9_d10': 80.0}]
+    rows = [{'utm': 'CAMP A', 'decis': {'D09': 80, 'D01': 20}}]
     out = enrich_campaign_budget(rows, win_start=date(2026, 7, 21), win_end=date(2026, 7, 29))
     assert 'budget_signal' not in out[0] and 'cpl' not in out[0]
 

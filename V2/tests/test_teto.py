@@ -51,24 +51,28 @@ if __name__ == "__main__":
 
 
 # ===========================================================================
-# CalculadoraDeTeto — a montagem que saiu dos dois relatórios (passo 1, 14/08/2026)
+# CalculadoraDeTeto — cinco baldes de decil e ROAS alvo 2,0 (14/08/2026)
 # ===========================================================================
-# Estes testes existem para uma coisa só: provar que tirar a montagem de dentro dos
-# relatórios NÃO mudou nenhum número entregue. O que eles comparam é a conta NOVA
-# contra a conta ANTIGA reescrita à mão, sobre a referência real de 10/08/2026.
+# O teste de paridade que existia aqui (a conta nova batendo com a antiga) foi
+# REMOVIDO DE PROPÓSITO: ele provava que o refator anterior não movia número, e este
+# passo é justamente o que move. Manter os dois seria pedir que a conta nova fosse
+# igual e diferente da antiga ao mesmo tempo. No lugar dele entram testes que fixam o
+# comportamento NOVO, incluindo os valores publicados na documentação.
 
 from src.monitoring.teto import (  # noqa: E402
-    CalculadoraDeTeto, MOTIVO_OK, MOTIVO_SEM_CONVERSAO, MOTIVO_SEM_REFERENCIA,
-    MOTIVO_SEM_VALOR_POR_VENDA, MOTIVO_SEGMENTO_VAZIO,
+    BALDES_DE_DECIL, CalculadoraDeTeto, ROAS_ALVO_PADRAO,
+    MOTIVO_OK, MOTIVO_SEM_CONVERSAO, MOTIVO_SEM_DISTRIBUICAO,
+    MOTIVO_SEM_REFERENCIA, MOTIVO_SEM_VALOR_POR_VENDA, MOTIVO_SEGMENTO_VAZIO,
 )
 
 # Referência viva de 10/08/2026: 104.453 leads, 881 compradores, cartão 29,4%.
 _DECIS = [(8732, 10), (8891, 27), (9402, 30), (10041, 50), (10284, 53),
           (10748, 76), (11116, 106), (11193, 140), (11645, 149), (12401, 240)]
+_VPS = 1293.98
 _REF = {
     'as_of': '2026-08-10',
     'conversion': {
-        'economics': {'value_per_sale': 1293.98, 'pct_cartao': 0.294},
+        'economics': {'value_per_sale': _VPS, 'pct_cartao': 0.294},
         'by_decile': {f'D{i:02d}': {'leads': n, 'conv': k}
                       for i, (n, k) in enumerate(_DECIS, 1)},
         'by_bucket': {'Lead': {'rate': 0.008718526869597896},
@@ -77,85 +81,127 @@ _REF = {
 }
 
 
-def _teto_do_jeito_antigo(pct_topo):
-    """A conta EXATA que morava em `enrich_campaign_budget` antes do passo 1."""
-    by_dec = _REF['conversion']['by_decile']
-    vps = _REF['conversion']['economics']['value_per_sale']
-
-    def _rate(keys):
-        c = sum((by_dec.get(k) or {}).get('conv', 0) or 0 for k in keys)
-        n = sum((by_dec.get(k) or {}).get('leads', 0) or 0 for k in keys)
-        return (c / n) if n else None
-    conv_hi = _rate(['D09', 'D10'])
-    conv_lo = _rate([f'D{i:02d}' for i in range(1, 9)])
-    exp_conv = (pct_topo / 100.0) * conv_hi + (1 - pct_topo / 100.0) * conv_lo
-    return teto_cpl(exp_conv, vps, roas_alvo=1.0)
+def _so_no_balde(decis, n=1000):
+    """Um segmento inteiramente dentro de um balde."""
+    return {d: n // len(decis) for d in decis}
 
 
-def test_montagem_nova_bate_com_a_antiga_em_toda_faixa():
-    """O refator não pode mover NENHUM número. Se este teste cair, ele moveu."""
+def test_roas_alvo_padrao_e_dois_e_nao_breakeven():
+    """Decisão de negócio de 13/08/2026. Breakeven não é meta, é piso de sobrevivência.
+
+    Fixado em teste porque a virada dobra o rigor de TODO teto entregue de uma vez, e
+    um retorno silencioso pra 1,0 passaria despercebido no relatório."""
+    assert ROAS_ALVO_PADRAO == 2.0
+
+
+def test_cinco_baldes_distinguem_o_que_dois_baldes_achatavam():
+    """O problema que este passo resolve, no caso mais concreto possível.
+
+    Antes, tudo abaixo do D9 caía num balde só e recebia R$ 3,96. Um criativo
+    inteiramente D7-D8 e outro inteiramente D1-D2 saíam com o MESMO teto, apesar de a
+    conversão real deles diferir 5,2 vezes."""
     calc = CalculadoraDeTeto.de_referencia_carregada(_REF)
-    for pct in (0.0, 7.3, 25.0, 30.0, 50.0, 66.6, 100.0):
-        assert calc.por_fatia_no_topo(pct).valor == _teto_do_jeito_antigo(pct), (
-            f"o teto da fatia {pct}% mudou com o refator"
-        )
+    baixo = calc.por_mistura_de_decis(_so_no_balde(('D01', 'D02')))
+    alto = calc.por_mistura_de_decis(_so_no_balde(('D07', 'D08')))
+    assert baixo.ok and alto.ok
+    assert alto.valor > 5 * baixo.valor          # 5,2x na referência viva
+    # e o teto único de antes ficava no meio dos dois, errando os DOIS lados
+    teto_antigo = (sum(k for _, k in _DECIS[:8]) / sum(n for n, _ in _DECIS[:8])) * _VPS / 2
+    assert baixo.valor < teto_antigo < alto.valor
 
 
-def test_balde_bate_com_a_conta_antiga_do_resumo_diario():
+def test_valores_dos_cinco_baldes_batem_com_a_documentacao():
+    """Os R$ publicados em docs/TETO_DE_CPL_DECISOES.md, decisão 1. Se este teste cair,
+    ou a conta mudou ou a documentação está mentindo — e as duas exigem ação."""
     calc = CalculadoraDeTeto.de_referencia_carregada(_REF)
-    for balde, taxa in _REF['conversion']['by_bucket'].items():
-        assert calc.por_balde(balde).valor == teto_cpl(
-            taxa['rate'], _REF['conversion']['economics']['value_per_sale'], roas_alvo=1.0)
+    esperado = {'D1-D2': 1.36, 'D3-D4': 2.66, 'D5-D6': 3.97,
+                'D7-D8': 7.13, 'D9-D10': 10.47}
+    for nome, decis in BALDES_DE_DECIL:
+        t = calc.por_mistura_de_decis(_so_no_balde(decis))
+        assert abs(t.valor - esperado[nome]) < 0.01, f"balde {nome}: {t.valor:.2f}"
+
+
+def test_mistura_pondera_pelo_volume_do_SEGMENTO():
+    """Meio a meio entre o balde de baixo e o de cima cai no meio dos dois tetos."""
+    calc = CalculadoraDeTeto.de_referencia_carregada(_REF)
+    so_baixo = calc.por_mistura_de_decis({'D01': 100, 'D02': 100}).valor
+    so_alto = calc.por_mistura_de_decis({'D09': 100, 'D10': 100}).valor
+    meio = calc.por_mistura_de_decis({'D01': 50, 'D02': 50, 'D09': 50, 'D10': 50}).valor
+    assert so_baixo < meio < so_alto
+    assert abs(meio - (so_baixo + so_alto) / 2) < 0.01
 
 
 def test_conversao_agrega_por_VOLUME_e_nao_por_media_das_taxas():
     """Somar compradores e somar leads antes de dividir, não tirar média das taxas.
 
     Média das taxas daria o mesmo peso a um decil de 8.732 leads e a outro de 12.401,
-    e o resultado não seria a conversão de ninguém. Com esta referência a diferença é
-    visível: ponderado dá 0,612% no D1-D8, e a média simples das 8 taxas dá 0,582%.
-    """
+    e o resultado não seria a conversão de ninguém."""
     calc = CalculadoraDeTeto.de_referencia_carregada(_REF)
-    ponderado = calc.por_fatia_no_topo(0.0).conversao
-    media_simples = sum(k / n for n, k in _DECIS[:8]) / 8
-    assert abs(ponderado - 0.006119) < 1e-5
-    assert abs(ponderado - media_simples) > 1e-4        # os dois NÃO coincidem
+    d9d10 = calc.por_mistura_de_decis({'D09': 500, 'D10': 500}).conversao
+    ponderado = (149 + 240) / (11645 + 12401)
+    media_simples = (149 / 11645 + 240 / 12401) / 2
+    assert abs(d9d10 - ponderado) < 1e-9
+    assert abs(d9d10 - media_simples) > 1e-4         # os dois NÃO coincidem
+
+
+def test_balde_sem_taxa_na_referencia_SAI_da_conta_em_vez_de_contar_zero():
+    """Excluir é neutro; contar como conversão zero rebaixaria o teto sistematicamente
+    toda vez que a referência tivesse um buraco — e teto rebaixado manda cortar verba
+    de campanha saudável."""
+    ref_furada = {'as_of': 'x', 'conversion': {
+        'economics': {'value_per_sale': _VPS},
+        'by_decile': {'D09': {'leads': 11645, 'conv': 149},
+                      'D10': {'leads': 12401, 'conv': 240}},   # D01-D08 ausentes
+    }}
+    calc = CalculadoraDeTeto.de_referencia_carregada(ref_furada)
+    so_topo = calc.por_mistura_de_decis({'D09': 500, 'D10': 500}).valor
+    com_buraco = calc.por_mistura_de_decis({'D01': 9000, 'D09': 500, 'D10': 500}).valor
+    assert com_buraco == so_topo      # os 9.000 sem taxa não puxaram o teto pra baixo
+
+
+def test_balde_de_variante_usa_a_taxa_medida_e_o_roas_vigente():
+    calc = CalculadoraDeTeto.de_referencia_carregada(_REF)
+    for balde, taxa in _REF['conversion']['by_bucket'].items():
+        assert calc.por_balde(balde).valor == teto_cpl(
+            taxa['rate'], _VPS, roas_alvo=ROAS_ALVO_PADRAO)
 
 
 def test_carimbo_da_referencia_viaja_junto():
-    """Sem o carimbo, 'por que o teto era X naquele dia' fica sem resposta depois que
-    a referência é reconstruída na segunda seguinte."""
+    """Sem o carimbo, 'por que o teto era X naquele dia' fica sem resposta depois que a
+    referência é reconstruída na segunda seguinte."""
     calc = CalculadoraDeTeto.de_referencia_carregada(_REF)
-    assert calc.por_fatia_no_topo(30.0).referencia_as_of == '2026-08-10'
+    assert calc.por_mistura_de_decis({'D05': 1}).referencia_as_of == '2026-08-10'
     assert calc.por_balde('Champion').referencia_as_of == '2026-08-10'
 
 
 def test_cada_ingrediente_que_falta_tem_MOTIVO_proprio():
-    """O achado que motivou o dataclass: 'não há teto' e 'não deu para calcular'
-    eram indistinguíveis na tela do gestor. Cada falta agora se nomeia."""
+    """O achado que motivou o dataclass: 'não há teto' e 'não deu para calcular' eram
+    indistinguíveis na tela do gestor. Cada falta agora se nomeia."""
     sem_ref = CalculadoraDeTeto.de_referencia_carregada(None)
-    assert sem_ref.por_fatia_no_topo(30.0).motivo == MOTIVO_SEM_REFERENCIA
+    assert sem_ref.por_mistura_de_decis({'D05': 1}).motivo == MOTIVO_SEM_REFERENCIA
     assert not sem_ref.utilizavel
 
     sem_economia = CalculadoraDeTeto.de_referencia_carregada(
         {'as_of': 'x', 'conversion': {'by_decile': _REF['conversion']['by_decile']}})
-    assert sem_economia.por_fatia_no_topo(30.0).motivo == MOTIVO_SEM_VALOR_POR_VENDA
-    assert not sem_economia.utilizavel
+    assert sem_economia.por_mistura_de_decis({'D05': 1}).motivo == MOTIVO_SEM_VALOR_POR_VENDA
 
     sem_decis = CalculadoraDeTeto.de_referencia_carregada(
         {'as_of': 'x', 'conversion': {'economics': {'value_per_sale': 1000.0}}})
-    assert sem_decis.utilizavel                     # a BASE está de pé...
-    assert sem_decis.por_fatia_no_topo(30.0).motivo == MOTIVO_SEM_CONVERSAO   # ...o segmento não
+    assert sem_decis.utilizavel                       # a BASE está de pé...
+    assert sem_decis.por_mistura_de_decis({'D05': 1}).motivo == MOTIVO_SEM_CONVERSAO
 
     calc = CalculadoraDeTeto.de_referencia_carregada(_REF)
-    assert calc.por_fatia_no_topo(None).motivo == MOTIVO_SEGMENTO_VAZIO
-    assert calc.por_fatia_no_topo(30.0).motivo == MOTIVO_OK
+    # distribuição AUSENTE (leitor no caminho legado) é diferente de segmento VAZIO
+    assert calc.por_mistura_de_decis(None).motivo == MOTIVO_SEM_DISTRIBUICAO
+    assert calc.por_mistura_de_decis({}).motivo == MOTIVO_SEGMENTO_VAZIO
+    assert calc.por_mistura_de_decis({'D05': 0}).motivo == MOTIVO_SEGMENTO_VAZIO
+    assert calc.por_mistura_de_decis({'D05': 1}).motivo == MOTIVO_OK
 
 
 def test_roas_alvo_e_parametro_da_calculadora_inteira():
-    """O passo 2 sobe o alvo para 2,0 mudando UM valor, não N chamadas espalhadas."""
-    breakeven = CalculadoraDeTeto.de_referencia_carregada(_REF)
-    dobro = CalculadoraDeTeto.de_referencia_carregada(_REF, roas_alvo=2.0)
-    a, b = breakeven.por_fatia_no_topo(30.0), dobro.por_fatia_no_topo(30.0)
+    """Mudar a meta de retorno é mudar UM valor, não N chamadas espalhadas."""
+    dois = CalculadoraDeTeto.de_referencia_carregada(_REF)
+    quatro = CalculadoraDeTeto.de_referencia_carregada(_REF, roas_alvo=4.0)
+    a, b = dois.por_mistura_de_decis({'D09': 1}), quatro.por_mistura_de_decis({'D09': 1})
     assert abs(a.valor / 2 - b.valor) < 1e-9
-    assert b.roas_alvo == 2.0        # o alvo viaja no resultado, para o render explicar
+    assert b.roas_alvo == 4.0        # o alvo viaja no resultado, pro render explicar

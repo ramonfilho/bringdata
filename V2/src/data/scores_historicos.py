@@ -212,6 +212,30 @@ _UTM_LEVEL_COL = {
 }
 
 
+def _contagem_por_decil_sql(expr_decil: str, *, texto: bool) -> str:
+    """As dez contagens de decil, uma coluna por decil.
+
+    CRU DE PROPÓSITO: quem agrupa decil em balde é o teto (`monitoring/teto.py`), que
+    é o dono dessa decisão e tem a evidência dela documentada. Devolver o balde já
+    formado daqui colocaria a mesma regra em dois lugares — que é o que o refator
+    anterior desfez, e o que faria os cinco baldes divergirem entre os relatórios.
+
+    Args:
+        expr_decil: a expressão SQL que produz o decil naquele ramo da consulta.
+        texto: True quando o decil é texto zero-padded ('D01'..'D10'), como na
+            `scores_historicos`; False quando é inteiro, como no ledger.
+    """
+    if texto:
+        return ", ".join(
+            f"COUNT(*) FILTER (WHERE {expr_decil} = 'D{d:02d}') AS n_d{d:02d}"
+            for d in range(1, 11)
+        )
+    return ", ".join(
+        f"COUNT(*) FILTER (WHERE {expr_decil} = {d}) AS n_d{d:02d}"
+        for d in range(1, 11)
+    )
+
+
 def challenger_quality_by_utm(
     lf_name: Optional[str],
     *,
@@ -286,7 +310,8 @@ def challenger_quality_by_utm(
             sql = (
                 "SELECT t.utm, COUNT(*) AS n, "
                 "AVG(CASE WHEN t.decil IN (9,10) THEN 1.0 ELSE 0.0 END) AS pct, "
-                "AVG(t.decil) AS avg_decil "
+                "AVG(t.decil) AS avg_decil, "
+                + _contagem_por_decil_sql("t.decil", texto=False) + " "
                 "FROM ( SELECT DISTINCT ON (lower(email)) "
                 f"         {col} AS utm, {ruler} AS decil "
                 "       FROM registros_ml "
@@ -332,7 +357,8 @@ def challenger_quality_by_utm(
                 utm_cte +
                 "SELECT u.utm, COUNT(*) AS n, "
                 "AVG(CASE WHEN s.decil_challenger IN ('D09','D10') THEN 1.0 ELSE 0.0 END) AS pct, "
-                "AVG(CAST(REPLACE(s.decil_challenger,'D','') AS INTEGER)) AS avg_decil "
+                "AVG(CAST(REPLACE(s.decil_challenger,'D','') AS INTEGER)) AS avg_decil, "
+                + _contagem_por_decil_sql("s.decil_challenger", texto=True) + " "
                 + scores_join +
                 "GROUP BY u.utm "
                 "ORDER BY n DESC"
@@ -347,6 +373,11 @@ def challenger_quality_by_utm(
                 'n': int(r[1]),
                 'pct_d9_d10': round(float(r[2]) * 100, 1),
                 'avg_decil': round(float(r[3]), 2),
+                # Distribuição CRUA por decil. É o que o teto usa para saber em que
+                # faixa os leads deste UTM caíram — `pct_d9_d10` sozinho não distingue
+                # um segmento inteiramente D7-D8 de um inteiramente D1-D2, e a
+                # conversão real entre esses dois difere 5,2 vezes.
+                'decis': {f'D{d:02d}': int(r[3 + d] or 0) for d in range(1, 11)},
             }
             for r in rows
         ]

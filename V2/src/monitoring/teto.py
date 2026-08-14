@@ -47,10 +47,34 @@ logger = logging.getLogger(__name__)
 CARTAO_VALUE = 2000.0   # "cartão a 2k" (planilha devclub geral; ≠ ticket_contracted 2200)
 BOLETO_HAIRCUT = 0.5    # boleto conta a 50% (risco de calote), convenção do debriefing
 
-# ROAS alvo padrão. 1,0 = breakeven (o CPL máximo pra não dar prejuízo). A decisão de
-# negócio de 13/08/2026 é subir pra 2,0, e isso é o passo 2 — deliberadamente FORA
-# deste passo, que não muda nenhum número entregue, só de onde ele é montado.
-ROAS_ALVO_PADRAO = 1.0
+# ROAS alvo. 2,0 desde 14/08/2026 (decisão de negócio de 13/08): o teto responde "qual
+# o CPL máximo para o retorno ser o DOBRO do investido". Antes era 1,0, o breakeven —
+# que não é meta, é piso de sobrevivência, e mirar nele aceita lucro zero como
+# resultado bom. Todo teto entregue cai pela metade nesta virada, e o gestor precisa
+# saber disso ANTES, não ao abrir o relatório.
+ROAS_ALVO_PADRAO = 2.0
+
+# Os cinco baldes de decil, em pares.
+#
+# POR QUE NÃO DOIS (o que era até 14/08/2026): tudo de D1 a D8 recebia o mesmo teto,
+# R$ 3,96, quando a conversão real dentro dessa faixa varia 5,2 vezes. Uma campanha
+# inteiramente D7-D8 era mandada cortar verba tendo 59% de folga escondida; uma
+# inteiramente D1-D2 recebia teto quase 3 vezes acima do que sustenta.
+#
+# POR QUE NÃO DEZ: sobre a referência viva (104.453 leads, 881 compradores), 5 dos 9
+# pares vizinhos de decil são estatisticamente INDISTINGUÍVEIS (D2-D3, D3-D4, D4-D5,
+# D5-D6 e D8-D9). Separá-los seria vender ruído como precisão. Em pares, o pior par
+# vizinho ainda dá p = 4,6 × 10⁻³.
+#
+# Evidência completa e critério para revisitar (todo par vizinho com p < 0,05) em
+# `docs/TETO_DE_CPL_DECISOES.md`, decisão 1.
+BALDES_DE_DECIL = (
+    ('D1-D2',  ('D01', 'D02')),
+    ('D3-D4',  ('D03', 'D04')),
+    ('D5-D6',  ('D05', 'D06')),
+    ('D7-D8',  ('D07', 'D08')),
+    ('D9-D10', ('D09', 'D10')),
+)
 
 # Por que os motivos são constantes e não literais espalhados: eles vão virar texto na
 # tela do gestor e critério de alarme. Literal solto diverge entre chamadores.
@@ -59,6 +83,7 @@ MOTIVO_SEM_REFERENCIA = 'sem_referencia'            # nenhuma linha de referênc
 MOTIVO_SEM_VALOR_POR_VENDA = 'sem_valor_por_venda'  # referência sem economia apurada
 MOTIVO_SEM_CONVERSAO = 'sem_conversao'              # o segmento não tem taxa apurada
 MOTIVO_SEGMENTO_VAZIO = 'segmento_vazio'            # segmento sem lead nenhum
+MOTIVO_SEM_DISTRIBUICAO = 'sem_distribuicao_de_decis'  # não sabemos em que faixa caiu
 
 
 def value_per_sale_from_sales(sales_df, *, cartao_value: float = CARTAO_VALUE,
@@ -220,31 +245,44 @@ class CalculadoraDeTeto:
         n = sum((self._by_decile.get(k) or {}).get('leads', 0) or 0 for k in decis)
         return (c / n) if n else None
 
-    def por_fatia_no_topo(self, pct_topo: Optional[float]) -> Teto:
-        """Teto de um segmento do qual só se sabe QUE FATIA dele está em D9-D10.
+    def por_mistura_de_decis(self, distribuicao: Optional[dict]) -> Teto:
+        """Teto de um segmento, pela distribuição de decis DELE.
 
-        É o recorte que o relatório de criativo tem hoje: cada linha carrega o
-        `%D9-D10` e mais nada da distribuição. A conversão esperada interpola entre a
-        taxa de quem está no topo e a taxa de todo o resto.
+        Substituiu `por_fatia_no_topo` em 14/08/2026. Aquele método só sabia que
+        fatia do segmento estava em D9-D10 e jogava todo o resto num balde só, o que
+        dava o MESMO teto para um criativo inteiramente D7-D8 e outro inteiramente
+        D1-D2 — cuja conversão real difere 5,2 vezes. Foi removido em vez de mantido
+        ao lado: dois jeitos de calcular o mesmo teto é como esta bagunça começou.
 
-        LIMITE CONHECIDO, e é o que o passo 2 conserta: "todo o resto" são os decis 1
-        a 8 juntos, cuja conversão real varia 5,2 vezes por dentro. Um segmento
-        inteiramente D7-D8 e outro inteiramente D1-D2 recebem hoje o mesmo teto.
-        Trocar isto exige a distribuição completa por linha, que o chamador ainda não
-        carrega.
+        A conta é uma média ponderada: cada balde entra com a conversão medida dele
+        na referência, pesada por quantos leads DESTE segmento caíram nele.
 
         Args:
-            pct_topo: fatia dos leads em D9-D10, em PONTOS PERCENTUAIS (0 a 100),
-                que é como as linhas do relatório já a carregam.
+            distribuicao: `{'D01': n, ..., 'D10': n}` com a contagem de leads do
+                segmento em cada decil. Chaves ausentes contam como zero.
         """
-        if pct_topo is None:
+        if distribuicao is None:
+            return self._monta(None, MOTIVO_SEM_DISTRIBUICAO)
+        if not sum(int(v or 0) for v in distribuicao.values()):
             return self._monta(None, MOTIVO_SEGMENTO_VAZIO)
-        alto = self._taxa_dos_decis(['D09', 'D10'])
-        baixo = self._taxa_dos_decis([f'D{i:02d}' for i in range(1, 9)])
-        if alto is None or baixo is None:
+
+        soma, peso = 0.0, 0
+        for _, decis in BALDES_DE_DECIL:
+            n_balde = sum(int(distribuicao.get(d) or 0) for d in decis)
+            if not n_balde:
+                continue
+            taxa = self._taxa_dos_decis(decis)
+            if taxa is None:
+                continue      # ver o comentário do peso, logo abaixo
+            soma += n_balde * taxa
+            peso += n_balde
+        if not peso:
             return self._monta(None, MOTIVO_SEM_CONVERSAO)
-        f = pct_topo / 100.0
-        return self._monta(f * alto + (1 - f) * baixo, MOTIVO_SEM_CONVERSAO)
+        # Normaliza pelo peso CONHECIDO, não pelo total do segmento. Lead num balde
+        # sem taxa apurada na referência sai da conta em vez de entrar como conversão
+        # zero: excluir é neutro, contar como zero rebaixaria o teto sistematicamente
+        # sempre que a referência tivesse um buraco.
+        return self._monta(soma / peso, MOTIVO_SEM_CONVERSAO)
 
     # ------------------------------------------------------------------ por balde
     def por_balde(self, balde: Optional[str]) -> Teto:
