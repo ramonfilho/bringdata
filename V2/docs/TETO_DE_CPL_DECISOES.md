@@ -258,7 +258,7 @@ que torna leitura de meio de dia pouco confiável para decidir verba.
 
 ---
 
-## Em aberto 2 — O criativo converte diferente por TIPO de campanha? SIM
+## Resolvido — O criativo converte diferente por TIPO de campanha?
 
 **O buraco, apontado em 14/08/2026.** A nota do criativo se divide por **canal**
 (Meta/Google), porque os dois convertem diferente. Mas o mesmo criativo também roda em
@@ -316,17 +316,58 @@ razões todas do mesmo lado. Aqui um criativo converte 3,4 vezes PIOR no ML e ou
 vezes MELHOR. Isso é assinatura de interação real entre criativo e tipo de campanha, não
 de ruído nem de viés de nível.
 
-### A ameaça que ainda não foi descartada
+### O confundimento temporal era real, e foi testado
 
-As células são acumuladas sobre toda a história. Se um criativo rodou em campanha de Lead
-num período e em ML noutro, **a diferença pode ser de período e não de tipo**. É o único
-concorrente sério à explicação de interação, e ele se testa comparando só dentro de
-janelas onde o criativo rodou nos dois tipos ao mesmo tempo.
+O caso levantado por quem opera: o AD0150 rodou em campanha de Lead **quando era o melhor
+criativo e o ML mal existia**; hoje roda nos dois e vai mal nos dois. Logo o "2,50x melhor
+no ML" dele era a FASE dele, não o tipo de campanha.
 
-**Encaminhamento:** vale perseguir, e o próximo passo é descartar o confundimento
-temporal — não instrumentar e esperar, porque o dado já existe. Se a diferença sobreviver
-ao recorte por período, a nota passa a se dividir por tipo do mesmo jeito que já se divide
-por canal.
+Teste correto: comparar o criativo consigo mesmo **dentro da mesma janela**, e agregar por
+Mantel-Haenszel, que junta tabelas estratificadas sem deixar a mistura entre estratos criar
+efeito que não existe.
+
+| estratificado por | estratos | leads | razão de chances (ML vs Lead) | p |
+|---|---|---|---|---|
+| lançamento | 13 | 17.947 | **2,33** | 0,0002 |
+| mês | 10 | 31.962 | **2,26** | 0,0000 |
+
+**O efeito sobreviveu.** Controlando a época, campanha de ML converte ~2,3x mais que
+campanha de Lead **para o mesmo criativo**.
+
+### Mas 2,3x não é interação: é o modelo funcionando
+
+Antes de dividir a nota por tipo, era obrigatório descartar a explicação óbvia: campanha
+de ML **otimiza pelo nosso próprio evento de qualidade**, então o Meta a entrega para quem
+o modelo pontuaria alto, e essa gente converte mais **por construção**.
+
+O que separa as duas hipóteses é a **homogeneidade**:
+
+- razão parecida em todo criativo → é efeito de NÍVEL, ou seja, o modelo
+- razão que muda por criativo → é interação real, e aí a nota precisa dividir
+
+| criativo | estratos | leads | razão | p |
+|---|---|---|---|---|
+| DEV-AD0141-vid-captação-V0-PODCAST | 2 | 11.522 | 4,97 | 0,009 |
+| DEV-AD0150-vid-captação-V0 | 2 | 6.473 | 5,07 | 0,012 |
+| DEV-AD0027-vid-captação-V0-DEV | 2 | 4.052 | 2,42 | 0,050 |
+| DEV-AD0160 - VID - CAPTAÇÃO | 2 | 9.176 | 1,66 | 0,034 |
+| DEV-AD0135-vid-captação-V0-PODCAST | 1 | 364 | 1,63 | 0,97 |
+
+**Teste de heterogeneidade: qui-quadrado 9,65 com 8 graus, p = 0,29.** As razões não
+diferem entre criativos além do acaso.
+
+**Veredito: NÃO dividir a nota por tipo de campanha.** O 2,3x é o mesmo para todo mundo, o
+que é assinatura do modelo entregando a pessoa certa, não do criativo se comportando
+diferente. E **o teto já captura isso**: campanha de ML traz leads de decil mais alto, e o
+teto sai da mistura de decis da campanha. Dividir a nota por tipo contaria o mesmo efeito
+duas vezes.
+
+**Ressalva honesta.** São 6 criativos com dado suficiente, então o teste de heterogeneidade
+tem pouca força: p = 0,29 é "não há evidência de diferença", não "prova de igualdade". Mas
+o ônus da prova é de quem quer dividir, e ele não foi cumprido.
+
+**Onde isso reaparece:** se um dia a nota do criativo passar a alimentar algo que NÃO usa
+mistura de decis, a pergunta volta, porque aí o efeito deixa de estar capturado.
 
 **Armadilha de leitura, registrada.** No agregado o Lead converte melhor (1,211% contra
 0,760% do Champion), o que parece dizer que a campanha de ML é pior. É ilusão de
@@ -348,8 +389,8 @@ dentro do criativo.
 | 7 | Histórico diário de CPL contra teto (serve "em aberto 1") + grão de anúncio | sim, para nós | |
 
 Os passos 5 e 6 passam pelo portão do passo 3 antes de chegar ao gestor. O tipo de
-campanha ("em aberto 2") entra no passo 5, se o recorte por período confirmar que a
-diferença não é de época.
+campanha saiu do plano: foi investigado e o efeito dele já está capturado pela mistura de
+decis (ver a seção "Resolvido" acima).
 
 ---
 
