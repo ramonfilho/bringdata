@@ -427,14 +427,14 @@ def _campaign_id_from_utm(s) -> Optional[str]:
 
 def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclub'):
     """Anexa `cpl`, `teto_cpl` e `budget_signal` ('aumentar'|'reduzir') às linhas de
-    CAMPANHA, pelo BREAKEVEN econômico: CPL (gasto ÷ leads, de analytics.ad_spend —
+    CAMPANHA, pela META DE ROAS: CPL (gasto ÷ leads, de analytics.ad_spend —
     MESMA fonte do funil do DM) vs teto (conversão esperada da campanha × valor por
     venda, da referência rolante). Substitui o critério de qualidade vs TOP5 nas
     campanhas quando ligado.
 
     Conversão esperada da campanha = interpola pelo %D9-D10 dela entre a taxa de
     conversão dos leads D9-D10 e a dos demais (ambas da referência). Teto =
-    conversão esperada × valor por venda (breakeven, ROAS 1).
+    conversão esperada × valor por venda ÷ ROAS alvo, hoje 2,0).
 
     Só com REFERENCE_SOURCE=rolling; senão devolve `rows` intactas (relatório de
     hoje, qualidade vs TOP5). Campanha sem gasto casado fica sem sinal (segue no
@@ -450,7 +450,7 @@ def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclu
     # Sonda: se nem um segmento nominal produz teto, falta referência, economia ou a
     # tabela de decis — e aí as linhas voltam INTACTAS, como sempre voltaram (o
     # relatório segue no critério de qualidade vs TOP5).
-    if not calc.por_fatia_no_topo(0.0).ok:
+    if not calc.por_mistura_de_decis({'D05': 1}).ok:
         return rows
 
     from src.data.ad_spend_reader import read_ad_spend
@@ -479,27 +479,46 @@ def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclu
             _matched_by_id += 1
         else:
             sp = spend_by_name.get(_norm_campaign(e.get('utm')))
-        p = e.get('pct_d9_d10')
-        if not sp or p is None:
+        if not sp:
             continue
         spend, leads = sp
         if leads <= 0:
             continue
         cpl = spend / leads
-        t = calc.por_fatia_no_topo(p)
+        # A distribuição de decis DESTA campanha, e não só a fatia dela no topo: é o
+        # que distingue uma campanha inteiramente D7-D8 de uma inteiramente D1-D2,
+        # que antes recebiam o mesmo teto.
+        t = calc.por_mistura_de_decis(e.get('decis'))
         teto = t.valor
         e['cpl'] = round(cpl, 2)
         e['teto_cpl'] = t.arredondado()
-        # `t` já carrega o motivo e o carimbo da referência; expor os dois nas linhas é
-        # o passo 2, junto com os cinco baldes. Aqui o payload sai IDÊNTICO ao de antes,
-        # que é o que torna este passo um refator conferível por teste.
-        # Folga = teto − CPL: quanto o CPL ainda pode subir sem passar do breakeven
-        # (positiva = espaço p/ aumentar; negativa = já queima dinheiro). É o "delta".
+        # Carimbo de qual reconstrução semanal da referência este teto saiu, e por que
+        # ele não saiu quando não sai. Sem o carimbo, "por que o teto era X naquele
+        # dia?" fica sem resposta depois que a referência é sobrescrita na segunda
+        # seguinte; sem o motivo, "não há teto" e "não deu para calcular" são a mesma
+        # coisa na tela do gestor.
+        e['teto_referencia_as_of'] = t.referencia_as_of
+        e['teto_motivo'] = t.motivo
+        e['teto_roas_alvo'] = t.roas_alvo
+        # Folga = teto − CPL: quanto o CPL ainda pode subir sem furar a meta de ROAS
+        # (positiva = espaço p/ aumentar; negativa = já passou). É o "delta".
         e['folga'] = round(teto - cpl, 2) if teto is not None else None
         e['budget_signal'] = ('aumentar' if teto is not None and cpl <= teto else 'reduzir') if teto is not None else None
         _matched += 1
-    logger.info("[top5] budget breakeven: %d/%d campanhas casaram gasto (%d por campaign_id)",
+    logger.info("[top5] teto (ROAS %.1f): %d/%d campanhas casaram gasto (%d por campaign_id)",
+                calc.por_mistura_de_decis({'D05': 1}).roas_alvo,
                 _matched, len(rows), _matched_by_id)
+    # FAIL-LOUD de inércia: casou gasto em campanha nenhuma teve teto significa que a
+    # distribuição de decis não chegou nas linhas (leitor no caminho legado, ou consulta
+    # mudada). O teto some do relatório inteiro sem nada quebrar, e o gestor não tem
+    # como distinguir isso de "nenhuma campanha gastou hoje". Grita.
+    _sem_teto = [e.get('teto_motivo') for e in rows if e.get('cpl') is not None
+                 and e.get('teto_cpl') is None]
+    if _sem_teto:
+        from collections import Counter as _C
+        logger.error("[top5] %d de %d campanhas com gasto ficaram SEM TETO — motivos: %s. "
+                     "Teto ausente é falha, não estado normal (ver docs/TETO_DE_CPL_DECISOES.md).",
+                     len(_sem_teto), _matched, dict(_C(_sem_teto)))
     return rows
 
 
@@ -609,7 +628,7 @@ def build_top5_comparison(
             )
             shown, hidden = _enrich(rows)
             if level == 'campaign':
-                # Breakeven econômico (CPL vs teto) só pras campanhas — elas têm gasto.
+                # Teto vs CPL só pras campanhas — elas têm gasto.
                 # No-op quando REFERENCE_SOURCE!=rolling. Criativos seguem por qualidade.
                 shown = enrich_campaign_budget(
                     shown, win_start=win_start, win_end=win_end, client_id=client_id)
@@ -829,9 +848,9 @@ def _render_unified_top5(top5: dict, lf_label: str, lf_state: str, nlf: int) -> 
 
 
 def _budget_suffix(e: dict) -> str:
-    """' · CPL R$X / teto R$Y / folga R$Z' pras campanhas com breakeven (Fase 3b).
+    """' · CPL R$X / teto R$Y / folga R$Z' pras campanhas com sinal econômico.
     A folga (teto − CPL) é o delta: positiva = espaço p/ subir orçamento, negativa =
-    já passou do breakeven. Vazio quando não há sinal econômico (criativo, ou
+    já passou da meta de ROAS. Vazio quando não há sinal econômico (criativo, ou
     campanha sem gasto casado / frozen)."""
     cpl, teto = e.get('cpl'), e.get('teto_cpl')
     if cpl is None or teto is None:
@@ -912,7 +931,7 @@ def _render_twoline_top5(top5_window: Optional[dict], top5_lf: Optional[dict], *
             continue
         aumentar, reduzir, n_neutro = [], [], 0
         for e in order:
-            # Campanhas com breakeven econômico (Fase 3b) usam o CPL vs teto como
+            # Campanhas com sinal econômico usam o CPL vs teto como
             # DEFINIDOR; sem sinal (criativo, ou sem gasto casado, ou frozen) cai no
             # critério de qualidade vs TOP5.
             sig = e.get('budget_signal')

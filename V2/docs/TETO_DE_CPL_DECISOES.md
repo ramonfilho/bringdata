@@ -108,6 +108,44 @@ menos de cartão derrubaram todo teto em 4,1%.
 
 Numa métrica que move verba, ter recibo é o que separa "erramos" de "não sabemos".
 
+### Achado: o job da referência roda código congelado em 31/07
+
+Ao conferir o teto contra o banco real (14/08/2026), a referência devolvida foi a de
+**03/08**, não a de **10/08**. Puxando o fio, o que estava por baixo não era uma escolha
+de ordenação e sim **um job de produção rodando código velho**.
+
+A janela madura é `as_of − maturação`. Aplicando a cada linha:
+
+| gerado em | as_of | fim da janela | maturação implícita | leads |
+|---|---|---|---|---|
+| 10/08 06:32 (cron) | 2026-08-10 | 2026-06-11 | **60 dias** | 104.453 |
+| **03/08 19:15 (manual)** | 2026-08-03 | 2026-07-13 | **21 dias** | 86.141 |
+| 03/08 11:27 (cron) | 2026-08-03 | 2026-06-04 | 60 dias | 107.986 |
+| 30/07 21:48 (cron) | 2026-07-30 | 2026-05-31 | 60 dias | 112.766 |
+| 29/07 20:23 (cron) | 2026-07-29 | 2026-05-30 | 60 dias | 113.752 |
+
+**21 é o valor correto**, e a mudança de 60 para 21 foi feita em **07/08/2026** justamente
+porque 60 inflava o teto: com a maturação longa, a conversão de um balde vinha de amostra
+minúscula (7 vendas em 438 leads = 1,598%) e empurrava o teto do Champion para R$ 20,81
+quando o real é ~R$ 9,29.
+
+**Mas o job semanal nunca recebeu essa mudança.** Ele roda um contêiner fixado por digest,
+construído em **31/07**, uma semana antes da correção. Toda segunda ele escreve uma
+referência com a maturação que o projeto já abandonou.
+
+**A ordenação está acidentalmente nos salvando.** O leitor ordena por fim da janela, e
+maturação de 21 dias produz um fim MAIS RECENTE que a de 60. Por isso ele serve a única
+linha correta que existe — a manual de 03/08 — e ignora as do cron.
+
+**A armadilha, e é o motivo de isto estar escrito aqui:** "consertar" a ordenação para
+data de geração **sem antes atualizar o job** faria o teto pular para os números inflados
+da maturação de 60. A ordem certa é o contrário: primeiro reconstruir o job, depois
+revisar a ordenação (que aí passa a ser indiferente, porque a linha mais nova também terá
+o fim de janela mais recente).
+
+*As tabelas de valores neste documento foram calculadas sobre a referência correta, a de
+maturação 21.*
+
 ---
 
 ## Decisão 4 — O teto é obrigatório; quem pode faltar é o CPL
@@ -190,19 +228,128 @@ o número na tela do gestor, e cada uma passa pelo mesmo portão.
 
 ---
 
+## Em aberto 1 — Guardar o histórico de CPL contra teto
+
+**O que se quer.** Poder reconstruir depois: em quantos dias, em qual criativo, o gasto
+ficou acima ou abaixo do esperado. É um pedido de **memória**, e ele não estava no plano.
+
+**A cadência proposta era de 10 em 10 minutos, e ela não serve ao objetivo.** O gasto é
+ingerido **uma vez por dia**, às 09:45. Empurrar de 10 em 10 minutos escreveria o mesmo
+número 144 vezes por dia sem torná-lo mais fresco:
+
+| cadência | linhas/dia (~50 criativos) | linhas/ano | informação nova/dia |
+|---|---|---|---|
+| a cada 10 min | 7.200 | ~2,6 milhões | 50 |
+| **1× por dia, append** | **50** | **~18 mil** | **50** |
+
+Custo de infraestrutura não é o gargalo (o job de 10 minutos já existe e o acréscimo
+seria de centavos). O gargalo é que uma tabela com 144 vezes de redundância fica cara de
+consultar exatamente quando alguém for fazer a pergunta que motivou guardá-la.
+
+**Encaminhamento:** uma linha por (dia, criativo, campanha) que **nunca é sobrescrita**,
+carregando CPL, teto, folga e o carimbo da referência. Serve o objetivo inteiro com 1/144
+do volume, e é a mesma linha que a conferência diária (passo 7) já vai produzir.
+
+**Quando 10 minutos seria certo:** se o objetivo virasse *pegar um criativo queimando
+dinheiro às 14h em vez de amanhã*. Isso é requisito diferente, exige bater na API do Meta
+a cada 10 minutos (~21 mil chamadas/dia) e esbarra em dois problemas: o limite de
+requisições da plataforma, e o fato de o Meta **reafirmar o gasto ao longo do dia**, o
+que torna leitura de meio de dia pouco confiável para decidir verba.
+
+---
+
+## Em aberto 2 — O criativo converte diferente por TIPO de campanha? SIM
+
+**O buraco, apontado em 14/08/2026.** A nota do criativo se divide por **canal**
+(Meta/Google), porque os dois convertem diferente. Mas o mesmo criativo também roda em
+tipos de campanha diferentes — otimizada por Lead puro, ou otimizada pelo evento de
+qualidade do modelo — e **é a campanha que decide a quem o Meta entrega o anúncio**. Nada
+no escopo cobria isso.
+
+**Não confundir com o que o teto já faz.** O teto já muda por campanha, porque usa a
+mistura de decis daquela campanha. Isso captura *quem esta campanha traz*. O que falta é
+diferente: *como este criativo VENDE neste tipo de campanha*. Já foi medido que as duas
+coisas divergem (49,2% do topo do modelo vinha de anúncios que convertem mal).
+
+### Correção de uma medição errada
+
+A primeira medição desta pergunta usou uma regra de classificação **inventada por
+substring** e concluiu que só 3 criativos tinham volume nos dois tipos, portanto que não
+havia como decidir. Estava errada em dois pontos:
+
+1. O projeto tem classificação canônica: `campaign_classifier.tag_signature` mais a
+   curadoria em `analytics.campaign_labels` (Controle / Champion / Challenger / Lead /
+   Excluir), curada em 22/07/2026. Reimplementar por substring violou a regra de nunca
+   refazer transformação que já existe.
+2. A regra inventada colapsava **Controle** e **Excluir** dentro de "Lead". Controle é
+   grupo de controle deliberado, não campanha de lead padrão.
+
+**E a cobertura sempre existiu: 95,8% das captações têm categoria curada**, sobre 501.105
+linhas de dez/2024 a hoje. Não havia nada a esperar.
+
+### O que o rótulo certo mostra
+
+| categoria | leads | compradores | conversão |
+|---|---|---|---|
+| Lead | 152.736 | 1.849 | 1,211% |
+| Champion | 240.407 | 1.827 | 0,760% |
+| Controle | 75.747 | 689 | 0,910% |
+| Challenger | 5.995 | 49 | 0,817% |
+
+Sobreposição real: **17 criativos** rodaram nos dois tipos com pelo menos 100 leads em
+cada, somando 176.927 leads — não 3. E o efeito é grande e vai **nos dois sentidos**:
+
+| criativo | Lead | ML | razão | p |
+|---|---|---|---|---|
+| DEV-AD0017-vid-captação-V0-PODCAST | 1,44% (9k) | 0,42% (3k) | **0,29x** | 0,0000 |
+| DEV-AD0141-vid-captação-V0-PODCAST | 0,05% (6k) | 0,31% (17k) | **6,53x** | 0,0003 |
+| DEV-AD0150-vid-captação-V0 | 0,24% (3k) | 0,60% (34k) | 2,50x | 0,0082 |
+| DEV-AD0160 - VID - CAPTAÇÃO | 0,77% (5k) | 1,09% (23k) | 1,41x | 0,0377 |
+
+**4 de 17 diferem a p < 0,05**, e os dois primeiros sobrevivem até a correção para
+múltiplos testes (limiar 0,0029 para 17 comparações). Com 17 testes, o esperado por acaso
+seria menos de um.
+
+**O que torna isto convincente não é a contagem, é a bidirecionalidade.** Um viés
+sistemático (por exemplo "campanha de ML sempre entrega público pior") apareceria como
+razões todas do mesmo lado. Aqui um criativo converte 3,4 vezes PIOR no ML e outro 6,5
+vezes MELHOR. Isso é assinatura de interação real entre criativo e tipo de campanha, não
+de ruído nem de viés de nível.
+
+### A ameaça que ainda não foi descartada
+
+As células são acumuladas sobre toda a história. Se um criativo rodou em campanha de Lead
+num período e em ML noutro, **a diferença pode ser de período e não de tipo**. É o único
+concorrente sério à explicação de interação, e ele se testa comparando só dentro de
+janelas onde o criativo rodou nos dois tipos ao mesmo tempo.
+
+**Encaminhamento:** vale perseguir, e o próximo passo é descartar o confundimento
+temporal — não instrumentar e esperar, porque o dado já existe. Se a diferença sobreviver
+ao recorte por período, a nota passa a se dividir por tipo do mesmo jeito que já se divide
+por canal.
+
+**Armadilha de leitura, registrada.** No agregado o Lead converte melhor (1,211% contra
+0,760% do Champion), o que parece dizer que a campanha de ML é pior. É ilusão de
+composição: são criativos, períodos e públicos diferentes. A comparação válida é a de
+dentro do criativo.
+
+---
+
 ## A ordem de execução
 
 | # | passo | entrega valor sozinho? | estado |
 |---|---|---|---|
 | 1 | Montagem do teto vira função única; os dois relatórios viram clientes finos dela | não, é base | **feito** |
-| 2 | Cinco baldes + ROAS 2 + carimbo da referência | sim | |
+| 2 | Cinco baldes + ROAS 2 + carimbo da referência | sim | **feito** |
 | 3 | **Trava: reconferência contra lançamentos passados** | portão | |
 | 4 | Popular o teto em `scores_inbound` (coluna já pedida à agência em paralelo) | sim, o gestor recebe | |
 | 5 | Nota de conversão do criativo entra no teto | sim | |
 | 6 | Palpite pela fala do vídeo entra no teto | sim | |
-| 7 | Grão de anúncio no relatório diário + conferência do teto de ontem | sim, para nós | |
+| 7 | Histórico diário de CPL contra teto (serve "em aberto 1") + grão de anúncio | sim, para nós | |
 
-Os passos 5 e 6 passam pelo portão do passo 3 antes de chegar ao gestor.
+Os passos 5 e 6 passam pelo portão do passo 3 antes de chegar ao gestor. O tipo de
+campanha ("em aberto 2") entra no passo 5, se o recorte por período confirmar que a
+diferença não é de época.
 
 ---
 

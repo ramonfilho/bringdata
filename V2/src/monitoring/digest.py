@@ -1879,7 +1879,7 @@ def _slack_unified_funnel(v: dict, B: list, resumo: bool = False):
                'Challenger': _d9d10(_og.get('challenger'))}
     _ggl_q = {'Lead': _d9d10(_bs.get('google'))}
 
-    # Teto de CPL breakeven (Fase 3): CPL máximo pra não dar prejuízo =
+    # Teto de CPL: o CPL máximo pra bater a meta de ROAS (2,0 desde 14/08/2026) =
     # conversão(segmento) × valor_por_venda. Vem da referência rolante; só aparece
     # com REFERENCE_SOURCE=rolling (senão _vps=None → teto None → funil igual a hoje).
     # A montagem mora em `CalculadoraDeTeto` (ver o cabeçalho de monitoring/teto.py):
@@ -1894,7 +1894,7 @@ def _slack_unified_funnel(v: dict, B: list, resumo: bool = False):
         return _calc_teto.por_balde(bk).valor
 
     def _teto_annot(cpl, teto):
-        """' 🟢/🔴 teto R$Y' ao lado do CPL (TODOS os leads — o breakeven é por lead,
+        """' 🟢/🔴 teto R$Y' ao lado do CPL (TODOS os leads — o teto é por lead,
         não por lead D9-D10). CPL ≤ teto = 🟢 (lucra), acima = 🔴 (queima). Teto None
         (frozen/sem ref) → vazio (funil de hoje)."""
         if cpl is None or teto is None:
@@ -1922,7 +1922,7 @@ def _slack_unified_funnel(v: dict, B: list, resumo: bool = False):
             _q = (q_by_bucket or {}).get(_vk) or 0
             _cplq = (_cpl * _vn / _q) if (_cpl and _vn and _q) else None
             _cplq_s = f" · CPLq {_rs(_cplq)}"
-            # Teto de breakeven ao lado do CPL (todos os leads): conversão do balde × valor.
+            # Teto ao lado do CPL (todos os leads): conversão do balde × valor ÷ ROAS.
             _teto_s = _teto_annot(_cpl, _teto_bucket(_vk))
             if pv_lf:
                 out.append(f"{_lbl:<18}{_vn:>6,.0f}  CPL ontem {_rs(_cpl)}{_teto_s} · LF {_rs(_lf_cpl)}{_cplq_s} · LP {_conv_s}")

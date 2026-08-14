@@ -47,11 +47,15 @@ def test_teto_aparece_com_rolling():
     _slack_unified_funnel(_base_v(_ROLLING), B)
     txt = _text(B)
     # Teto fica no CPL (todos os leads), não no CPLq. Lead: CPL R$5 ≤ teto
-    # 0.011×1320=R$14,52 → 🟢 (lucra). CPLq segue plano.
-    assert 'CPL R$ 5,00 🟢 teto R$ 14,52' in txt
+    # 0,011×1320÷2 = R$7,26 → 🟢 (bate a meta). CPLq segue plano.
+    #
+    # OS VALORES CAÍRAM PELA METADE em 14/08/2026: o ROAS alvo subiu de 1,0 (breakeven)
+    # para 2,0. Não é regressão — é a decisão de negócio, e é exatamente o número que o
+    # gestor vê mudar de um dia para o outro.
+    assert 'CPL R$ 5,00 🟢 teto R$ 7,26' in txt
     assert 'CPLq R$ 50,00' in txt
-    # Champion: CPL R$8 ≤ teto 0.0194×1320=R$25,61 → 🟢
-    assert '🟢 teto R$ 25,6' in txt
+    # Champion: CPL R$8 ≤ teto 0,0194×1320÷2 = R$12,80 → 🟢
+    assert '🟢 teto R$ 12,8' in txt
     # a linha "CPL qualif." do canal NÃO ganha teto (denominador D9-D10)
     assert 'D9-D10)  🟢' not in txt and 'D9-D10)  🔴' not in txt
 
