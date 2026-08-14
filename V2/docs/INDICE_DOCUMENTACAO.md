@@ -211,6 +211,12 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Papel:** documenta o sistema de validação — como `validate_ml_performance.py` funciona, métricas calculadas.
 **Status:** ativo, atualizado em 2026-03-17.
 
+### `METODOLOGIA_QUALIDADE_POR_PUBLICO.md`
+**Papel:** receita reproduzível para medir, numa janela de captação, a qualidade dos leads por público (quente/frio/orgânico), a taxa de conversão de cada um e a capacidade de separação de cada modelo (o topo converte mais que a base?). Documenta as sete etapas e as sete armadilhas que já produziram número errado — fuso do `created_at`, papel do modelo que muda com o tempo, cobertura furada quando um modelo entra no meio da janela, atraso de um dia da `analytics.sales`, casamento de venda sem validação temporal, escalas incomparáveis entre modelos e referência Top 5 dentro do treino.
+**Status:** ativo. Criado em 2026-08-10 a partir da apuração do DEV21.
+**Executável:** `scripts/analise_qualidade_publico.py` — o script é a fonte de verdade do cálculo, o doc é a fonte de verdade do raciocínio.
+**Relação:** consome o casador de `SISTEMA_VALIDACAO_ML.md` e a régua de `METODOLOGIA_TOP5_ROAS.md`.
+
 ### `analise_valor_ml_devclub.md`
 **Papel:** análise de valor real do ML para DevClub (LF40→LF46), responde se o sistema gera ROAS genuíno.
 **Status:** snapshot — válido para o período analisado, não atualizado automaticamente.
