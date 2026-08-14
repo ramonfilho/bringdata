@@ -36,10 +36,14 @@ def test_flag_de_fonte():
 def test_read_devolve_dict_e_nao_fecha_conn_injetada():
     row = ("2026-03-01", "2026-05-30", "2026-07-29", "abr28", 113752,
            {"overall": {"rate": 0.0084}}, {"method": "isotonic", "x": [0, 0.5, 1], "y": [0, 0.01, 0.08]},
-           {"categorical_features": {"O seu gênero:": {"proportions": {"Masculino": 0.9}}}})
+           {"categorical_features": {"O seu gênero:": {"proportions": {"Masculino": 0.9}}}},
+           "2026-07-29 20:23:16")
     conn = FakeConn([row])
     r = read_rolling_reference(conn=conn)
     assert r["n_leads"] == 113752 and r["conversion"]["overall"]["rate"] == 0.0084
+    # `as_of` NÃO identifica a linha: em 03/08/2026 duas reconstruções gravaram a
+    # mesma data com políticas de maturação diferentes. O instante desempata.
+    assert r["referencia_id"] == "2026-07-29T20:23"
     assert r["calibration"]["method"] == "isotonic"
     assert r["audience_profile"]["categorical_features"]["O seu gênero:"]["proportions"]["Masculino"] == 0.9
     assert conn.closed is False
@@ -48,7 +52,8 @@ def test_read_devolve_dict_e_nao_fecha_conn_injetada():
 def test_read_audience_profile_null_ok():
     # janela sem perfil de comprador → audience_profile None, não quebra
     row = ("2026-03-01", "2026-05-30", "2026-07-29", "abr28", 100,
-           {"overall": {"rate": 0.01}}, {"method": "isotonic", "x": [0, 1], "y": [0, 0.1]}, None)
+           {"overall": {"rate": 0.01}}, {"method": "isotonic", "x": [0, 1], "y": [0, 0.1]},
+           None, "2026-07-29 20:23:16")
     r = read_rolling_reference(conn=FakeConn([row]))
     assert r["audience_profile"] is None
 

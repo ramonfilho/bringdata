@@ -85,6 +85,23 @@ MOTIVO_SEM_CONVERSAO = 'sem_conversao'              # o segmento não tem taxa a
 MOTIVO_SEGMENTO_VAZIO = 'segmento_vazio'            # segmento sem lead nenhum
 MOTIVO_SEM_DISTRIBUICAO = 'sem_distribuicao_de_decis'  # não sabemos em que faixa caiu
 
+# CHAVES DE AMBIENTE QUE MUDAM O TETO SEM PASSAR POR COMMIT.
+#
+# São o pior caso da procedência: código tem histórico, dado tem carimbo, mas uma
+# chave de ambiente muda o número e não deixa rastro em lugar nenhum. Já custou caro
+# aqui — um deploy ligou `REFERENCE_SOURCE=rolling` a partir de um template sujo, sem
+# ninguém pedir, e o relatório mudou sozinho.
+#
+# São gravadas junto do resultado porque não existe outra fonte a consultar depois.
+CHAVES_QUE_MUDAM_O_TETO = ("REFERENCE_SOURCE", "LAUNCHES_SOURCE", "LEDGER_DECIL_READ_SOURCE")
+
+
+def _configuracao_vigente() -> dict:
+    """As chaves acima como estão AGORA. Ausente vira '(default)', que é informação:
+    diz que ninguém definiu, e não que a chave não existe."""
+    import os
+    return {k: (os.environ.get(k) or "(default)") for k in CHAVES_QUE_MUDAM_O_TETO}
+
 
 def value_per_sale_from_sales(sales_df, *, cartao_value: float = CARTAO_VALUE,
                               boleto_haircut: float = BOLETO_HAIRCUT) -> dict:
@@ -152,6 +169,21 @@ class Teto:
     valor_por_venda: Optional[float] = None
     roas_alvo: float = ROAS_ALVO_PADRAO
     referencia_as_of: Optional[str] = None
+    # ── PROCEDÊNCIA ─────────────────────────────────────────────────────────────
+    # Três coisas mudam este número, e cada uma se registra de um jeito diferente:
+    #
+    #   o que varia sozinho   -> `conversao` e `valor_por_venda` acima, gravados como
+    #                            VALOR, porque não há outra fonte a consultar depois
+    #   decisão de código     -> `codigo`, um carimbo só, que responde por K, número
+    #                            de baldes, fórmula do encolhimento e todo parâmetro
+    #                            futuro sem precisar de coluna nova pra cada um
+    #   configuração          -> `configuracao`, porque chave de ambiente muda o
+    #                            número e não aparece em commit nenhum
+    #
+    # Com os três, "por que o teto era X naquele dia" é consulta, não arqueologia.
+    referencia_id: Optional[str] = None      # único: "2026-08-03T19:15"
+    codigo: Optional[dict] = None            # {commit, dirty, origem}
+    configuracao: Optional[dict] = None      # {REFERENCE_SOURCE: ..., ...}
 
     @property
     def ok(self) -> bool:
@@ -176,9 +208,15 @@ class CalculadoraDeTeto:
     """
 
     def __init__(self, ref: Optional[dict], *, roas_alvo: float = ROAS_ALVO_PADRAO):
+        from src.core.git_info import versao_do_codigo
         self._roas = roas_alvo
         conv = (ref or {}).get('conversion') or {}
         self._as_of = str((ref or {}).get('as_of') or '') or None
+        self._ref_id = (ref or {}).get('referencia_id') or self._as_of
+        # Lidos UMA vez, na construção: são constantes durante a vida da calculadora e
+        # ler por linha custaria um subprocesso de git por campanha.
+        self._codigo = versao_do_codigo()
+        self._config = _configuracao_vigente()
         self._vps = (conv.get('economics') or {}).get('value_per_sale')
         self._by_decile = conv.get('by_decile') or {}
         self._by_bucket = conv.get('by_bucket') or {}
@@ -223,15 +261,17 @@ class CalculadoraDeTeto:
         return self._as_of
 
     def _monta(self, conversao: Optional[float], motivo_se_falta: str) -> Teto:
+        proc = dict(referencia_as_of=self._as_of, referencia_id=self._ref_id,
+                    codigo=self._codigo, configuracao=self._config)
         base = self._falta_base()
         if base:
-            return Teto(None, base, roas_alvo=self._roas, referencia_as_of=self._as_of)
+            return Teto(None, base, roas_alvo=self._roas, **proc)
         if conversao is None:
             return Teto(None, motivo_se_falta, valor_por_venda=self._vps,
-                        roas_alvo=self._roas, referencia_as_of=self._as_of)
+                        roas_alvo=self._roas, **proc)
         return Teto(teto_cpl(conversao, self._vps, roas_alvo=self._roas), MOTIVO_OK,
                     conversao=conversao, valor_por_venda=self._vps,
-                    roas_alvo=self._roas, referencia_as_of=self._as_of)
+                    roas_alvo=self._roas, **proc)
 
     # ------------------------------------------------------------------ por decil
     def _taxa_dos_decis(self, decis) -> Optional[float]:

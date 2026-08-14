@@ -62,9 +62,16 @@ def test_sinal_por_meta_de_roas():
     assert abs(rows[1]['teto_cpl'] - 4.62) < 0.05
     # ROAS alvo 2,0 (não mais breakeven): o teto entregue é METADE do de antes.
     assert rows[0]['teto_roas_alvo'] == 2.0
-    # e cada linha carrega de qual reconstrução da referência ela saiu
-    assert rows[0]['teto_referencia_as_of'] == _REF.get('as_of')
+    # A LINHA SE EXPLICA SOZINHA: além do valor, os dois números que o produziram e a
+    # procedência. É deliberado — a tabela da referência é reescrita quando o mesmo fim
+    # de janela é recalculado, então recibo que só aponta pra ela leva a um endereço
+    # cujo conteúdo pode ter mudado.
+    assert abs(rows[0]['teto_conversao'] - 0.021) < 1e-9
+    assert rows[0]['teto_valor_por_venda'] == 1320.0
     assert rows[0]['teto_motivo'] == 'ok'
+    # e a configuração vigente, que é o único registro possível: chave de ambiente
+    # muda o número e não aparece em commit nenhum.
+    assert 'REFERENCE_SOURCE' in rows[0]['teto_config']
 
 
 def test_casa_por_campaign_id_quando_nome_diverge():

@@ -224,3 +224,92 @@ def test_roas_alvo_e_parametro_da_calculadora_inteira():
     a, b = dois.por_mistura_de_decis({'D09': 1}), quatro.por_mistura_de_decis({'D09': 1})
     assert abs(a.valor / 2 - b.valor) < 1e-9
     assert b.roas_alvo == 4.0        # o alvo viaja no resultado, pro render explicar
+
+
+# ===========================================================================
+# PROCEDÊNCIA — de onde saiu este número (14/08/2026)
+# ===========================================================================
+
+def test_a_linha_do_teto_se_explica_sozinha():
+    """A tabela da referência é reescrita quando o mesmo fim de janela é recalculado
+    (`ON CONFLICT DO UPDATE`). Um recibo que só APONTASSE pra ela levaria a um endereço
+    cujo conteúdo pode ter mudado depois — e quem investigasse leria números diferentes
+    dos que foram usados, sem nada avisando. Por isso os dois números viajam junto."""
+    t = CalculadoraDeTeto.de_referencia_carregada(_REF).por_mistura_de_decis({'D09': 1})
+    assert t.conversao is not None and t.valor_por_venda is not None
+    assert abs(t.valor - t.conversao * t.valor_por_venda / t.roas_alvo) < 1e-9
+
+
+def test_o_identificador_da_referencia_desempata_o_que_a_data_nao():
+    """Em 03/08/2026 duas reconstruções gravaram a mesma data: uma com 86.141 leads (a
+    servida, maturação 21) e outra com 107.986 (maturação 60, a política abandonada).
+    Um carimbo que apontasse pras duas não seria carimbo."""
+    ref = dict(_REF, referencia_id='2026-08-03T19:15')
+    t = CalculadoraDeTeto.de_referencia_carregada(ref).por_mistura_de_decis({'D09': 1})
+    assert t.referencia_id == '2026-08-03T19:15'
+    assert t.referencia_id != t.referencia_as_of      # a data sozinha não bastava
+
+
+def test_um_carimbo_de_codigo_responde_por_TODO_parametro_de_codigo():
+    """K, número de baldes e fórmula do encolhimento não ganham coluna cada um: o
+    commit responde por todos, inclusive pelos que ainda não existem. Coluna por
+    parâmetro é coluna que alguém esquece de acrescentar no parâmetro seguinte."""
+    t = CalculadoraDeTeto.de_referencia_carregada(_REF).por_mistura_de_decis({'D09': 1})
+    assert t.codigo is not None and 'origem' in t.codigo
+    # 'git' na máquina de desenvolvimento, 'imagem' no contêiner, 'desconhecida' se
+    # não houver nenhum dos dois — e ter o buraco NOMEADO vale mais que um None solto.
+    assert t.codigo['origem'] in ('git', 'imagem', 'desconhecida')
+
+
+def test_a_configuracao_vigente_viaja_porque_git_nao_a_ve():
+    """Chave de ambiente muda o número e não deixa rastro em commit nenhum. Já custou
+    caro: um deploy ligou REFERENCE_SOURCE=rolling de um template sujo, sem ninguém
+    pedir. É a única das três procedências sem outra fonte a consultar depois."""
+    import os
+    from src.monitoring.teto import CHAVES_QUE_MUDAM_O_TETO
+    salvo = os.environ.get('REFERENCE_SOURCE')
+    os.environ['REFERENCE_SOURCE'] = 'rolling'
+    try:
+        t = CalculadoraDeTeto.de_referencia_carregada(_REF).por_mistura_de_decis({'D09': 1})
+        assert t.configuracao['REFERENCE_SOURCE'] == 'rolling'
+        assert set(t.configuracao) == set(CHAVES_QUE_MUDAM_O_TETO)
+    finally:
+        if salvo is None:
+            os.environ.pop('REFERENCE_SOURCE', None)
+        else:
+            os.environ['REFERENCE_SOURCE'] = salvo
+
+
+def test_chave_ausente_vira_default_explicito_e_nao_buraco():
+    """'(default)' diz 'ninguém definiu'. Célula vazia não diferencia isso de 'não
+    conseguimos ler', que é a mesma confusão que o motivo do teto resolve."""
+    import os
+    salvo = os.environ.pop('LAUNCHES_SOURCE', None)
+    try:
+        t = CalculadoraDeTeto.de_referencia_carregada(_REF).por_mistura_de_decis({'D09': 1})
+        assert t.configuracao['LAUNCHES_SOURCE'] == '(default)'
+    finally:
+        if salvo is not None:
+            os.environ['LAUNCHES_SOURCE'] = salvo
+
+
+def test_o_carimbo_funciona_sem_git_que_e_o_caso_do_conteiner():
+    """O `.dockerignore` exclui `.git/`, então em produção não há repositório a quem
+    perguntar. Sem a leitura do carimbo assado no build, `versao_do_codigo` devolveria
+    'desconhecida' exatamente onde a procedência faz falta."""
+    import os
+    from src.core.git_info import versao_do_codigo
+    salvo = os.environ.get('APP_COMMIT')
+    os.environ['APP_COMMIT'] = 'abc1234def'
+    try:
+        v = versao_do_codigo()
+        # Numa worktree o git existe e VENCE (é a verdade do instante); o que este
+        # teste garante é que o carimbo nunca é ignorado quando o git falta.
+        assert v['origem'] in ('git', 'imagem')
+        if v['origem'] == 'imagem':
+            assert v['commit'] == 'abc1234'
+    finally:
+        if salvo is None:
+            os.environ.pop('APP_COMMIT', None)
+        else:
+            os.environ['APP_COMMIT'] = salvo
