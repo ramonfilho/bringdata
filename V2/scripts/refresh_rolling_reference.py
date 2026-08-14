@@ -41,7 +41,9 @@ def main() -> None:
     ap.add_argument("--as-of", default=None, help="YYYY-MM-DD (default hoje)")
     ap.add_argument("--window-days", type=int, default=90)
     ap.add_argument("--maturation-days", type=int, default=DEFAULT_MATURATION_DAYS,
-                    help="dias que o lead tem pra comprar (default: ciclo do LF)")
+                    help="recuo mínimo da janela de captação (piso). O prazo de "
+                         "compra de cada lead vem do CALENDÁRIO do lançamento dele; "
+                         "isto aqui só garante que lead fresco não entra")
     ap.add_argument("--dry-run", action="store_true", help="calcula e imprime, não grava")
     args = ap.parse_args()
 

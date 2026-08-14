@@ -197,6 +197,67 @@ def compra_conta_para_o_lead(*, data_captura, data_compra, lf_name: Optional[str
     return compra <= limite
 
 
+def limites_de_compra(datas_captura: pd.Series,
+                      launches: Optional[dict] = None) -> pd.DataFrame:
+    """Para cada captação, o LANÇAMENTO em que ela caiu e a DATA-LIMITE de compra.
+
+    Mesma regra de `compra_conta_para_o_lead`, vetorizada pra janela madura (que não
+    carrega `lf` — o lançamento sai da DATA: captação dentro de [cap_start, cap_end]
+    de um lançamento → limite = `vendas_end` dele). Fora de qualquer lançamento, o
+    limite cai no piso: captação + `MATURACAO_MINIMA_DIAS`.
+
+    O teto de sanidade (`MATURACAO_MAXIMA_DIAS`) NÃO é reaplicado aqui: quem chama
+    casa as vendas com `window_days=MATURACAO_MAXIMA_DIAS`, então compra além do teto
+    já não casa — reimpor aqui seria a mesma regra em dois lugares.
+
+    Returns:
+        DataFrame alinhado ao índice de `datas_captura`, colunas `lf` (str ou None)
+        e `limite` (date ou None — None só quando a captação não tem data legível).
+    """
+    if launches is None:
+        from src.core.launches import load_launches
+        launches = load_launches()
+
+    # Mapa dia→(lf, vendas_end). Calendários são pequenos (dezenas de lançamentos ×
+    # ~7 dias de captação); em colisão de datas vence o lançamento que começou depois
+    # (é o que está ativo naquele dia), com aviso — colisão é erro de planilha.
+    dia_map: dict = {}
+    for nome, e in (launches or {}).items():
+        cs, ce, ve = _d((e or {}).get("cap_start")), _d((e or {}).get("cap_end")), _d((e or {}).get("vendas_end"))
+        if cs is None or ve is None:
+            continue
+        ce = ce or ve
+        d = cs
+        while d <= ce:
+            prev = dia_map.get(d)
+            if prev is not None and prev[2] > cs:
+                d += timedelta(days=1)
+                continue
+            if prev is not None and prev[2] != cs:
+                logger.warning("[matured_window] captação de %s e %s colidem em %s; "
+                               "fica o mais recente", prev[0], nome, d)
+            dia_map[d] = (nome, ve, cs)
+            d += timedelta(days=1)
+
+    dias = pd.to_datetime(datas_captura, errors="coerce")
+    try:
+        dias = dias.dt.tz_localize(None)
+    except TypeError:
+        pass  # já era naive
+
+    lfs, limites = [], []
+    for ts in dias:
+        d0 = None if pd.isna(ts) else ts.date()
+        hit = dia_map.get(d0) if d0 else None
+        if hit:
+            lfs.append(hit[0])
+            limites.append(hit[1])
+        else:
+            lfs.append(None)
+            limites.append(d0 + timedelta(days=MATURACAO_MINIMA_DIAS) if d0 else None)
+    return pd.DataFrame({"lf": lfs, "limite": limites}, index=datas_captura.index)
+
+
 def matured_bounds(*, window_days: int = 90,
                    maturation_days: int = DEFAULT_MATURATION_DAYS,
                    as_of: Optional[date] = None) -> tuple[datetime, datetime]:

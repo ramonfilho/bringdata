@@ -244,6 +244,45 @@ o número na tela do gestor, e cada uma passa pelo mesmo portão.
 
 ---
 
+## Decisão 8 — Uma régua só de contagem de compra: o calendário. E o 1,21 morreu.
+
+**O contexto.** Para medir conversão, cada lead ganha um prazo: comprou dentro, conta;
+depois, não. Existiam **duas regras convivendo**: a nota do criativo contava pelo
+calendário (a compra vale até o `vendas_end` do lançamento do lead), e a referência
+rolante, que alimenta o teto, contava com **prazo fixo de 21 dias** para todo lead.
+
+**A medição que decidiu (14/08/2026, 317 mil leads, 26 lançamentos fechados, 2.437
+compradores casados por email/telefone).** Dentro da regra do calendário:
+
+| recorte | compra depois do dia 21 |
+|---|---|
+| todos os lançamentos | 3,7% |
+| só LF56+ (o que a janela de 90d da referência enxerga) | **0,0%** |
+| DEV19 (ciclo de 40 dias) | **15,4%** |
+
+Nos lançamentos de ciclo de 21 dias não existe dia 22, então o prazo fixo não perdia
+nada. Mas os lançamentos estilo DEV têm ciclo maior (DEV19: 40d; DEV21: 26d), e neles o
+prazo fixo **descartava até 15% dos compradores**, subestimando a conversão e, por
+consequência, o teto.
+
+**O que mudou.** O construtor da referência (`rolling_reference.label_matured`) passou a
+contar a compra pela mesma regra do calendário (`compra_conta_para_o_lead`), com o piso
+de 21 dias para lead fora de calendário. Lead cujo lançamento ainda vende fica **fora**
+da referência até a janela fechar (contá-lo cedo subestimaria a taxa). A regra usada
+fica carimbada no payload (`conversion.conversion_window`), pra ninguém precisar de
+arqueologia de git pra saber como o número foi contado.
+
+**E o 1,21 morreu.** O documento de teto de 03/08 aplicava um fator 1,21 porque "17%
+compram depois de 21 dias". Medido de novo dentro da regra do calendário, esse 17% era
+em maioria gente comprando **depois do fim das vendas do lançamento dela**, isto é, no
+lançamento seguinte, dinheiro que a nossa regra de atribuição credita ao lançamento
+seguinte, não ao criativo que captou meses antes. A cauda legítima é 3,7% no histórico e
+zero nos ciclos de 21d. **Nenhum teto futuro reaplica o 1,21**: com a contagem pelo
+calendário, a correção não corrige nada, só infla. (Conferido em 14/08: o fator nunca
+existiu em código, só na conta manual daquele documento.)
+
+---
+
 ## Em aberto 1 — Guardar o histórico de CPL contra teto
 
 **O que se quer.** Poder reconstruir depois: em quantos dias, em qual criativo, o gasto
