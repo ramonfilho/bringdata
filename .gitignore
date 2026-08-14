@@ -86,3 +86,28 @@ V2/comercial/.last_push_count.json
 # Runtime lock files
 .claude/scheduled_tasks.lock
 env_bringdata.txt
+
+# ---------------------------------------------------------------------------
+# DADO NÃO ENTRA NO REPOSITÓRIO. Este repositório é PÚBLICO.
+#
+# Em 14/08/2026 foi encontrado `V2/compare_encoded.parquet` commitado desde
+# 08/03/2026 com 202.219 e-mails reais e 2.636 compradores identificáveis.
+# Cinco meses exposto. E-mail não se rotaciona como senha se rotaciona.
+#
+# O teste anti-credencial que existe desde 05/08 procura SEGREDO, não DADO
+# PESSOAL — um parquet de 6 MB não parece um segredo e passou por dois
+# incidentes de segurança sem ninguém olhar dentro.
+#
+# A regra aqui é por FORMATO, não por conteúdo: arquivo de dado tabular não
+# entra, independente do que se acredite que tem dentro. Quem precisar de
+# dado versionado usa o bucket (`gs://smart-ads-mlflow/`).
+# ---------------------------------------------------------------------------
+*.parquet
+*.csv
+*.xlsx
+*.feather
+
+# Exceções conscientes: configuração e fixture pequena de teste entram, mas
+# só por caminho explícito, nunca por padrão amplo.
+!V2/configs/**/*.csv
+!V2/tests/fixtures/*.csv
