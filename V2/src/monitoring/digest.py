@@ -1882,14 +1882,16 @@ def _slack_unified_funnel(v: dict, B: list, resumo: bool = False):
     # Teto de CPL breakeven (Fase 3): CPL máximo pra não dar prejuízo =
     # conversão(segmento) × valor_por_venda. Vem da referência rolante; só aparece
     # com REFERENCE_SOURCE=rolling (senão _vps=None → teto None → funil igual a hoje).
-    from src.monitoring.teto import teto_cpl
-    _rr = _rolling_ref_for_render(v)
-    _conv_ref = (_rr or {}).get('conversion') or {}
-    _vps = (_conv_ref.get('economics') or {}).get('value_per_sale')
+    # A montagem mora em `CalculadoraDeTeto` (ver o cabeçalho de monitoring/teto.py):
+    # este render e o relatório de criativo montavam o mesmo conceito de dois jeitos, e
+    # com os cinco baldes chegando isso viraria dois tetos diferentes no mesmo dia.
+    # Aqui ela recebe a referência JÁ CARREGADA do payload que vai ser renderizado —
+    # reler do banco arriscaria os dois relatórios do dia usarem versões diferentes.
+    from src.monitoring.teto import CalculadoraDeTeto
+    _calc_teto = CalculadoraDeTeto.de_referencia_carregada(_rolling_ref_for_render(v))
 
     def _teto_bucket(bk):
-        rate = ((_conv_ref.get('by_bucket') or {}).get(bk) or {}).get('rate')
-        return teto_cpl(rate, _vps, roas_alvo=1.0)
+        return _calc_teto.por_balde(bk).valor
 
     def _teto_annot(cpl, teto):
         """' 🟢/🔴 teto R$Y' ao lado do CPL (TODOS os leads — o breakeven é por lead,

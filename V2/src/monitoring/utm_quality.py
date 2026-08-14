@@ -439,27 +439,21 @@ def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclu
     Só com REFERENCE_SOURCE=rolling; senão devolve `rows` intactas (relatório de
     hoje, qualidade vs TOP5). Campanha sem gasto casado fica sem sinal (segue no
     critério de qualidade)."""
-    from src.data.reference_reader import rolling_enabled, read_rolling_reference
+    from src.data.reference_reader import rolling_enabled
+    from src.monitoring.teto import CalculadoraDeTeto
     if not rolling_enabled() or not rows:
         return rows
-    ref = read_rolling_reference(client_id)
-    conv = (ref or {}).get('conversion') or {}
-    vps = (conv.get('economics') or {}).get('value_per_sale')
-    by_dec = conv.get('by_decile') or {}
-    if not vps or not by_dec:
-        return rows
-
-    def _rate(keys):
-        c = sum((by_dec.get(k) or {}).get('conv', 0) or 0 for k in keys)
-        n = sum((by_dec.get(k) or {}).get('leads', 0) or 0 for k in keys)
-        return (c / n) if n else None
-    conv_hi = _rate(['D09', 'D10'])                                   # conversão D9-D10
-    conv_lo = _rate([f'D{i:02d}' for i in range(1, 9)])              # conversão D1-D8
-    if conv_hi is None or conv_lo is None:
+    # A montagem (qual conversão, que recorte de decil, que ROAS) mora em
+    # `CalculadoraDeTeto`; aqui só se pede o teto do recorte desta linha. Ver o
+    # cabeçalho de `monitoring/teto.py` para por que ela saiu daqui.
+    calc = CalculadoraDeTeto.da_referencia(client_id)
+    # Sonda: se nem um segmento nominal produz teto, falta referência, economia ou a
+    # tabela de decis — e aí as linhas voltam INTACTAS, como sempre voltaram (o
+    # relatório segue no critério de qualidade vs TOP5).
+    if not calc.por_fatia_no_topo(0.0).ok:
         return rows
 
     from src.data.ad_spend_reader import read_ad_spend
-    from src.monitoring.teto import teto_cpl
     _sd = win_start.date() if hasattr(win_start, 'date') else win_start
     _ed = win_end.date() if hasattr(win_end, 'date') else win_end
     from datetime import timedelta as _td
@@ -492,10 +486,13 @@ def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclu
         if leads <= 0:
             continue
         cpl = spend / leads
-        exp_conv = (p / 100.0) * conv_hi + (1 - p / 100.0) * conv_lo
-        teto = teto_cpl(exp_conv, vps, roas_alvo=1.0)
+        t = calc.por_fatia_no_topo(p)
+        teto = t.valor
         e['cpl'] = round(cpl, 2)
-        e['teto_cpl'] = round(teto, 2) if teto is not None else None
+        e['teto_cpl'] = t.arredondado()
+        # `t` já carrega o motivo e o carimbo da referência; expor os dois nas linhas é
+        # o passo 2, junto com os cinco baldes. Aqui o payload sai IDÊNTICO ao de antes,
+        # que é o que torna este passo um refator conferível por teste.
         # Folga = teto − CPL: quanto o CPL ainda pode subir sem passar do breakeven
         # (positiva = espaço p/ aumentar; negativa = já queima dinheiro). É o "delta".
         e['folga'] = round(teto - cpl, 2) if teto is not None else None
