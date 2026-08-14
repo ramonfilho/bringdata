@@ -53,7 +53,7 @@ def read_rolling_reference(client_id: str = "devclub", *, conn=None) -> Optional
     try:
         rows = conn.run(
             "SELECT window_start, window_end, as_of, ruler_run_id, n_leads, "
-            "       conversion, calibration, audience_profile "
+            "       conversion, calibration, audience_profile, generated_at "
             "FROM reference_rolling WHERE client_id = :c AND source = 'rolling' "
             "ORDER BY window_end DESC LIMIT 1",
             c=client_id,
@@ -80,11 +80,21 @@ def read_rolling_reference(client_id: str = "devclub", *, conn=None) -> Optional
             return None
         return v if isinstance(v, dict) else json.loads(v)
 
+    # `as_of` NÃO identifica a linha: em 03/08/2026 duas reconstruções diferentes
+    # gravaram a mesma data — uma com 86.141 leads (a servida) e outra com 107.986,
+    # feitas com políticas de maturação diferentes. Um recibo que aponta para as duas
+    # não é recibo. `generated_at` é único e resolve, e por isso vira o identificador.
+    gerado = str(r[8])[:16] if r[8] is not None else None
     return {
         "window_start": str(r[0]), "window_end": str(r[1]), "as_of": str(r[2]),
         "ruler_run_id": r[3], "n_leads": int(r[4]),
         "conversion": _as_dict(r[5]), "calibration": _as_dict(r[6]),
         "audience_profile": _as_dict(r[7]),
+        "generated_at": gerado,
+        # O identificador que viaja nos recibos: legível (a data salta) e único (o
+        # instante desempata). Ex.: "2026-08-03T19:15".
+        "referencia_id": (f"{str(r[2])}T{gerado[11:16]}" if gerado and len(gerado) >= 16
+                          else str(r[2])),
     }
 
 

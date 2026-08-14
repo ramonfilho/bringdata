@@ -506,9 +506,18 @@ def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclu
         # dia?" fica sem resposta depois que a referência é sobrescrita na segunda
         # seguinte; sem o motivo, "não há teto" e "não deu para calcular" são a mesma
         # coisa na tela do gestor.
-        e['teto_referencia_as_of'] = t.referencia_as_of
-        e['teto_motivo'] = t.motivo
+        # A linha se explica sozinha: além do valor, os DOIS números que o produziram
+        # e a procedência inteira. Isso a torna auto-suficiente, e é deliberado — a
+        # tabela da referência é reescrita quando o mesmo fim de janela é recalculado
+        # (`ON CONFLICT DO UPDATE`), então um recibo que só apontasse para ela levaria
+        # a um endereço cujo conteúdo pode ter mudado depois.
+        e['teto_conversao'] = t.conversao
+        e['teto_valor_por_venda'] = t.valor_por_venda
         e['teto_roas_alvo'] = t.roas_alvo
+        e['teto_referencia'] = t.referencia_id          # único: "2026-08-03T19:15"
+        e['teto_codigo'] = (t.codigo or {}).get('commit')
+        e['teto_config'] = t.configuracao
+        e['teto_motivo'] = t.motivo
         # Folga = teto − CPL: quanto o CPL ainda pode subir sem furar a meta de ROAS
         # (positiva = espaço p/ aumentar; negativa = já passou). É o "delta".
         e['folga'] = round(teto - cpl, 2) if teto is not None else None
