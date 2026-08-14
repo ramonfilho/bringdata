@@ -27,7 +27,55 @@ def _make(cls, data: dict):
 
 
 _VALID_DECILS = {f"D{i:02d}" for i in range(1, 11)}
-_MAX_EXTRA_HQ_DESTINATIONS = 5
+# Teto de destinos HQ por lista — salvaguarda contra runaway (alguém colar 50 destinos
+# num YAML e cada lead virar 50 chamadas à Meta). Subiu de 5 para 8 em 08/08/2026, quando
+# o jul_24 passou a espelhar top30 e top50 no pixel novo (4 destinos antigos + 2 novos = 6).
+# Continua sendo um teto folgado: no pior caso hoje um lead D10 dispara 6 eventos.
+_MAX_EXTRA_HQ_DESTINATIONS = 8
+
+
+def _normalize_utm_pattern(raw: Any, *, variant_name: str) -> Dict[str, List[str]]:
+    """Normaliza `utm_pattern` do YAML para {campo: [substrings]}, fail-loud.
+
+    Aceita as duas formas, porque as duas descrevem a mesma intenção:
+        utm_campaign: "LEADHQLB"                      -> {"utm_campaign": ["LEADHQLB"]}
+        utm_campaign: ["LEADHQLB", "ABR_28_TOP30"]    -> as duas substrings
+
+    A lista existe porque um modelo pode servir campanhas de gerações diferentes ao mesmo
+    tempo: em 09/08/2026 o gestor subiu campanhas novas etiquetadas ABR_28_TOP30 /
+    JUL_24_TOP30 enquanto as antigas (LEADHQLB / JUL24_*) seguiam gastando. Com uma
+    substring só, ligar a geração nova desligaria a antiga no mesmo commit — e os leads
+    dela cairiam calados no fallback (eventos padrão, pixel errado).
+
+    Fail-loud em vez de ignorar entrada torta: `utm_pattern` é o que decide QUAL modelo
+    scoreia o lead e QUAL evento a Meta recebe. Padrão vazio/None aqui não é "sem filtro",
+    é "esta variante nunca casa" — silencioso e caro.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"variante '{variant_name}': utm_pattern deve ser dict "
+            f"{{campo_utm: substring|lista}}, recebido {type(raw).__name__}"
+        )
+    out: Dict[str, List[str]] = {}
+    for field_name, value in raw.items():
+        patterns = value if isinstance(value, list) else [value]
+        if not patterns:
+            raise ValueError(
+                f"variante '{variant_name}': utm_pattern['{field_name}'] é lista vazia — "
+                f"remova o campo ou declare ao menos uma substring"
+            )
+        limpos: List[str] = []
+        for p in patterns:
+            if not isinstance(p, str) or not p.strip():
+                raise ValueError(
+                    f"variante '{variant_name}': utm_pattern['{field_name}'] tem entrada "
+                    f"inválida {p!r} — só string não-vazia"
+                )
+            limpos.append(p)
+        out[field_name] = limpos
+    return out
 
 
 def _parse_extra_hq_destinations(
@@ -210,6 +258,13 @@ class MediumConfig:
     valid_categories: Optional[List[str]] = None            # #7 — None = modo treino (threshold); preenchido = modo produção (whitelist)
     discontinued_categories: Optional[List[str]] = None     # #7 — deprecated; mantido para compatibilidade
     category_mappings: Optional[Dict[str, str]] = None      # #7 — mapeamento de variantes históricas
+    # Mapeamento por PADRÃO (regex), para valor com cauda variável — onde a igualdade
+    # exata de `category_mappings` não alcança. Ordem de declaração = precedência
+    # (primeiro que casa vence). Motivo: em 10/08/2026 a Meta passou a mandar
+    # "[<conjunto>]<nome do anúncio>" no utm_medium do DevClub, e o nome do anúncio muda
+    # a cada criativo — enumerar valor por valor morreria no anúncio seguinte.
+    # Espelha `UTMConfig.term_outros_patterns` (consumido em core/utm.py).
+    pattern_mappings: Optional[Dict[str, str]] = None
     adv_prefix: Optional[str] = None                        # #36 — prefixo a remover (ex: 'ADV')
     manual_unifications: Optional[Dict[str, str]] = None    # #37 — unificações adicionais pós-mapping
     binary_top3_categories: Optional[List[str]] = None      # #50 — pendente resolução em encoding
@@ -613,7 +668,14 @@ class RoasV1Config:
 class ABTestVariantConfig:
     """Configuração de uma variante do teste A/B (champion ou challenger)."""
     run_id: str
-    utm_pattern: Dict[str, str]          # OR logic: basta 1 campo casar
+    utm_pattern: Dict[str, List[str]]    # {campo UTM: [substrings]} — OR total: basta 1
+                                         # substring de 1 campo casar. O YAML aceita string
+                                         # solta (forma antiga) ou lista; `from_active_model_yaml`
+                                         # normaliza tudo para lista. Lista existe porque o
+                                         # MESMO modelo serve campanhas de gerações diferentes
+                                         # ao mesmo tempo (ex.: abr_28 servindo as antigas
+                                         # LEADHQLB e as novas ABR_28_TOP30) — sem ela, ligar a
+                                         # geração nova desliga a antiga no mesmo instante.
     capi_event_name: str
     capi_event_name_high_quality: str
     conversion_rates: Dict[str, float]   # D01–D10, com PAV aplicado se necessário
@@ -721,7 +783,7 @@ class ABTestConfig:
 
             variants[name] = ABTestVariantConfig(
                 run_id=vdata["run_id"],
-                utm_pattern=vdata.get("utm_pattern") or {},
+                utm_pattern=_normalize_utm_pattern(vdata.get("utm_pattern"), variant_name=name),
                 capi_event_name=vdata["capi_event_name"],
                 capi_event_name_high_quality=vdata["capi_event_name_high_quality"],
                 conversion_rates=vdata["conversion_rates"],
@@ -752,13 +814,18 @@ class ABTestConfig:
                    utm_content, utm_term (valores podem ser None).
         event_source_url: URL da página de origem (opcional). Se a variante
                    tiver url_pattern definido, faz substring match case-insensitive.
+
+        Cada campo do utm_pattern carrega uma LISTA de substrings e basta UMA casar
+        (mesma lógica OR que já valia entre campos) — é o que permite a um modelo servir
+        campanhas de gerações diferentes ao mesmo tempo sem que ligar a nova desligue a
+        antiga. Ver `_normalize_utm_pattern`.
         """
         url = (event_source_url or "").lower()
         for variant in self.variants.values():
             if variant.utm_pattern:
-                for field_name, pattern in variant.utm_pattern.items():
-                    value = lead_utms.get(field_name) or ""
-                    if pattern.lower() in value.lower():
+                for field_name, patterns in variant.utm_pattern.items():
+                    value = (lead_utms.get(field_name) or "").lower()
+                    if any(p.lower() in value for p in patterns):
                         return variant
             if variant.url_pattern and url and variant.url_pattern.lower() in url:
                 return variant
@@ -874,3 +941,60 @@ class ClientConfig:
             raise ValueError(
                 "ClientConfig inválida:\n" + "\n".join(f"  - {e}" for e in errors)
             )
+
+
+# ---------------------------------------------------------------------------
+# Resolução do modelo em produção — fonte ÚNICA do "quem está ativo"
+# ---------------------------------------------------------------------------
+#
+# Existe porque a lista de caminhos candidatos abaixo estava chumbada dentro do
+# `orchestrator._rotinas_operacionais` e qualquer outro consumidor precisaria
+# copiá-la. Em produção (Cloud Run) o WORKDIR é /app e o repo mora em /app/V2;
+# em dev local fica em $REPO_ROOT/V2. Copiar essa lista é como as fontes de
+# verdade divergem.
+
+def active_model_yaml_path(client_id: str = "devclub") -> Optional[str]:
+    """Caminho do `configs/active_models/{client_id}.yaml`, ou None se não achar."""
+    import os as _os
+
+    candidatos = [
+        _os.path.abspath(_os.path.join(
+            _os.path.dirname(__file__), '..', '..', 'configs', 'active_models', f'{client_id}.yaml')),
+        f'/app/V2/configs/active_models/{client_id}.yaml',
+        f'/app/configs/active_models/{client_id}.yaml',
+        _os.path.abspath(_os.path.join(
+            _os.getcwd(), 'configs', 'active_models', f'{client_id}.yaml')),
+    ]
+    return next((p for p in candidatos if _os.path.exists(p)), None)
+
+
+def active_model_run_id(client_id: str = "devclub") -> Optional[str]:
+    """`mlflow_run_id` do modelo em produção, ou None.
+
+    Devolve None em vez de levantar: o chamador decide se a ausência é fatal.
+    Quem usa isto para montar `artifacts` do `unify_medium` deve tratar None
+    como "não consigo resolver a whitelist" e NÃO seguir em silêncio para o
+    modo frequência — foi assim que o monitoramento passou a ler o Medium de um
+    jeito diferente da produção sem ninguém perceber (10/08/2026).
+    """
+    path = active_model_yaml_path(client_id)
+    if not path:
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+    except Exception:
+        return None
+    return (data.get("active_model") or {}).get("mlflow_run_id")
+
+
+def medium_artifacts(client_id: str = "devclub") -> Optional[Dict[str, str]]:
+    """Dict de `artifacts` para `core.medium.unify_medium`, ou None.
+
+    Ponto único de composição da escolha de MODO do `unify_medium`: quem chama
+    isto está declarando "eu sou um caminho de leitura, quero a whitelist do
+    modelo ativo". O treino NÃO deve chamar — lá a whitelist está nascendo dos
+    dados e usar a do modelo anterior congelaria o vocabulário para sempre.
+    """
+    run_id = active_model_run_id(client_id)
+    return {'mlflow_run_id': run_id} if run_id else None

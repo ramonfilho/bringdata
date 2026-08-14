@@ -1000,6 +1000,12 @@ def _slack_score_distribution_change_dm(v: dict, B: list):
     B.append({'type': 'divider'})
 
 
+# Acima disto, o retorno da Hotmart está quebrado, não lento. A volta normal leva
+# ~17s e o re-submit automático é de 6h, então 3h não pega oscilação nem colide
+# com o ciclo de retentativa.
+_IDADE_RETORNO_ALARME_H = 3.0
+
+
 def _slack_hotleads_24h(v: dict, B: list):
     """Bloco "🔥 HotLeads 24h" — saúde do selo da Hotmart → evento LeadScoringHot.
 
@@ -1009,8 +1015,16 @@ def _slack_hotleads_24h(v: dict, B: list):
     dias depois no Events Manager.
 
     Sinais de alarme explicitados no texto (não deixa o operador inferir):
-      - selados=0 com fila cheia  → cron parado ou submissão falhando
+      - idade do mais antigo aguardando alta → RETORNO parado (a volta morreu)
+      - selados=0 com fila cheia  → cron parado ou submissão falhando (a IDA)
       - erros>0                   → evento não saiu; o retry do cron tenta de novo
+
+    A primeira linha nasceu de uma falha real: de 06 a 14/08/2026 o retorno ficou
+    8 dias morto (403 do IAM no callback) e este bloco não gritou nenhuma vez. O
+    alarme de então exigia `selados == 0 AND fila > 0`, e a fila NUNCA subia
+    porque o cron continuava drenando — a ida estava saudável. Pior: os presos
+    apareciam na linha calma "⏳ aguardando retorno da Hotmart". Alerta que mede o
+    lado errado é pior que não ter alerta, porque tranquiliza.
     """
     h = v.get('hotleads_24h') or {}
     if not h.get('disponivel'):
@@ -1023,6 +1037,7 @@ def _slack_hotleads_24h(v: dict, B: list):
     erros   = h.get('erros', 0) or 0
     fila    = h.get('sem_selo_na_janela', 0) or 0
     aguard  = h.get('aguardando_selo', 0) or 0
+    idade   = h.get('idade_max_aguardando_h', 0.0) or 0.0
 
     B.append({'type': 'header',
               'text': {'type': 'plain_text', 'text': '🔥 HotLeads 24h', 'emoji': True}})
@@ -1035,7 +1050,19 @@ def _slack_hotleads_24h(v: dict, B: list):
 
     # Diagnóstico em português — o operador não deve precisar deduzir do número.
     diag = []
-    if selados == 0 and fila > 0:
+    # RETORNO quebrado — o alarme que faltava. Ver docstring: o antigo exigia
+    # `selados == 0 AND fila > 0` e nunca tinha as duas ao mesmo tempo, porque o
+    # cron drenava a fila enquanto a volta estava morta.
+    if idade >= _IDADE_RETORNO_ALARME_H:
+        diag.append(f"🔴 *Retorno da Hotmart parado há {idade:.0f}h* — o mais antigo "
+                    f"dos {aguard} aguardando foi submetido nesse intervalo e o selo "
+                    f"não voltou (o normal são ~17s). A SUBMISSÃO está saudável: o "
+                    f"que quebrou é a volta. Conferir a URL de callback "
+                    f"(`HOTLEADS_PUBLIC_URL`) e se ela responde sem token.")
+    elif selados == 0 and aguard > 0:
+        diag.append(f"⚠️ *Nenhum lead selado em 24h* com {aguard} aguardando — "
+                    f"retorno da Hotmart provavelmente parado.")
+    elif selados == 0 and fila > 0:
         diag.append(f"⚠️ *Nenhum lead selado em 24h* com {fila} na fila — "
                     f"cron `hotleads-submit` parado ou submissão falhando.")
     elif fila > 2000:
@@ -1044,9 +1071,9 @@ def _slack_hotleads_24h(v: dict, B: list):
     if erros:
         diag.append(f"❌ {erros} evento(s) não saíram pro Meta — o próprio cron "
                     f"tenta reenviar na próxima rodada; se não cair, investigar.")
-    if aguard:
-        diag.append(f"⏳ {aguard} aguardando retorno da Hotmart "
-                    f"(normal por ~2 min; re-submete sozinho após 6h).")
+    if aguard and idade < _IDADE_RETORNO_ALARME_H:
+        diag.append(f"⏳ {aguard} aguardando retorno da Hotmart, o mais antigo há "
+                    f"{idade:.1f}h (normal por ~2 min; re-submete sozinho após 6h).")
     if diag:
         B.append({'type': 'section',
                   'text': {'type': 'mrkdwn', 'text': '\n'.join(diag)}})
@@ -1879,20 +1906,22 @@ def _slack_unified_funnel(v: dict, B: list, resumo: bool = False):
                'Challenger': _d9d10(_og.get('challenger'))}
     _ggl_q = {'Lead': _d9d10(_bs.get('google'))}
 
-    # Teto de CPL breakeven (Fase 3): CPL máximo pra não dar prejuízo =
+    # Teto de CPL: o CPL máximo pra bater a meta de ROAS (2,0 desde 14/08/2026) =
     # conversão(segmento) × valor_por_venda. Vem da referência rolante; só aparece
     # com REFERENCE_SOURCE=rolling (senão _vps=None → teto None → funil igual a hoje).
-    from src.monitoring.teto import teto_cpl
-    _rr = _rolling_ref_for_render(v)
-    _conv_ref = (_rr or {}).get('conversion') or {}
-    _vps = (_conv_ref.get('economics') or {}).get('value_per_sale')
+    # A montagem mora em `CalculadoraDeTeto` (ver o cabeçalho de monitoring/teto.py):
+    # este render e o relatório de criativo montavam o mesmo conceito de dois jeitos, e
+    # com os cinco baldes chegando isso viraria dois tetos diferentes no mesmo dia.
+    # Aqui ela recebe a referência JÁ CARREGADA do payload que vai ser renderizado —
+    # reler do banco arriscaria os dois relatórios do dia usarem versões diferentes.
+    from src.monitoring.teto import CalculadoraDeTeto
+    _calc_teto = CalculadoraDeTeto.de_referencia_carregada(_rolling_ref_for_render(v))
 
     def _teto_bucket(bk):
-        rate = ((_conv_ref.get('by_bucket') or {}).get(bk) or {}).get('rate')
-        return teto_cpl(rate, _vps, roas_alvo=1.0)
+        return _calc_teto.por_balde(bk).valor
 
     def _teto_annot(cpl, teto):
-        """' 🟢/🔴 teto R$Y' ao lado do CPL (TODOS os leads — o breakeven é por lead,
+        """' 🟢/🔴 teto R$Y' ao lado do CPL (TODOS os leads — o teto é por lead,
         não por lead D9-D10). CPL ≤ teto = 🟢 (lucra), acima = 🔴 (queima). Teto None
         (frozen/sem ref) → vazio (funil de hoje)."""
         if cpl is None or teto is None:
@@ -1920,7 +1949,7 @@ def _slack_unified_funnel(v: dict, B: list, resumo: bool = False):
             _q = (q_by_bucket or {}).get(_vk) or 0
             _cplq = (_cpl * _vn / _q) if (_cpl and _vn and _q) else None
             _cplq_s = f" · CPLq {_rs(_cplq)}"
-            # Teto de breakeven ao lado do CPL (todos os leads): conversão do balde × valor.
+            # Teto ao lado do CPL (todos os leads): conversão do balde × valor ÷ ROAS.
             _teto_s = _teto_annot(_cpl, _teto_bucket(_vk))
             if pv_lf:
                 out.append(f"{_lbl:<18}{_vn:>6,.0f}  CPL ontem {_rs(_cpl)}{_teto_s} · LF {_rs(_lf_cpl)}{_cplq_s} · LP {_conv_s}")

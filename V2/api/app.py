@@ -1257,7 +1257,28 @@ async def hotleads_submit_batch(
         # Antes de puxar leads novos, destrava os quentes cujo evento falhou —
         # o selo deles já está pago, só o envio ao Meta ficou pendente. Sem isso
         # eles ficariam órfãos (nenhum outro caminho os pega de volta).
-        retry = run_retry_failed(conn, cfg, dry_run=dry_run)
+        #
+        # A repesca é CONTIDA: falha nela não pode derrubar a submissão, que é o
+        # trabalho principal desta rota. Em 11-12/08/2026 o oposto aconteceu 23
+        # vezes em 24h — a query da repesca estourava o timeout de 30s (Seq Scan
+        # de 220 MB, resolvido depois com índice parcial) e a request inteira
+        # morria em 500, então os leads NOVOS não eram submetidos naquela rodada.
+        # A causa daquele timeout já foi corrigida, mas o acoplamento não: qualquer
+        # falha futura aqui (Hotmart fora, soluço de rede, bug novo) voltaria a
+        # custar a submissão.
+        #
+        # É o mesmo princípio que `run_process_webhook` já aplica um nível abaixo
+        # ("falha de um lead não derruba o lote"), agora no nível do passo. Conter
+        # NÃO é engolir: o erro é logado em ERROR e volta no payload, em `retry`.
+        try:
+            retry = run_retry_failed(conn, cfg, dry_run=dry_run)
+        except Exception as e:
+            logger.error(
+                f"[hotleads] repesca falhou ({type(e).__name__}: {e}) — "
+                f"submissão segue normalmente; os quentes em 'error' ficam para "
+                f"a próxima rodada (15min)"
+            )
+            retry = {"status": "failed", "error": f"{type(e).__name__}: {e}"}
         result = run_submit_batch(conn, cfg, webhook_url=webhook_url,
                                   limit=limit, dry_run=dry_run)
         return {**result, "retry": retry}
@@ -3599,7 +3620,9 @@ async def daily_monitoring_check_railway(
                         for _r in _rows_24h_v:
                             _cn = (_r.get('campaign_name') or '').lower()
                             _sp = float(_r.get('spend', 0) or 0)
-                            if _challenger_pat.lower() in _cn:
+                            # utm_pattern carrega LISTA de substrings por campo (um modelo pode
+                            # servir campanhas de gerações diferentes) — basta uma casar.
+                            if any(_p.lower() in _cn for _p in _challenger_pat):
                                 _spend_v[_challenger_name] += _sp
                             else:
                                 _spend_v[_champion_name] += _sp
@@ -4571,12 +4594,14 @@ def _build_top5_for(result, client_id: str):
     lf_name = result.window_lf.get('label')
     lf_s = result.window_lf.get('start')
     lf_e = result.window_lf.get('end')
-    if not (lf_name and lf_s and lf_e and result.challenger_run_id):
+    if not (lf_name and lf_s and lf_e and result.champion_run_id):
         return None
     try:
         return build_top5_comparison(
             lf_name=lf_name,
-            challenger_run_id=result.challenger_run_id,
+            # régua = CHAMPION (o pega-tudo), resolvido via ab_arm - casa com o
+            # baseline fixo (gerado no champion) e segue promoções sozinho.
+            challenger_run_id=result.champion_run_id,
             win_start=_dt.fromisoformat(lf_s),
             win_end=_dt.fromisoformat(lf_e),
             client_id=client_id,
@@ -4586,22 +4611,41 @@ def _build_top5_for(result, client_id: str):
         return None
 
 
-def _build_top5_window(result, client_id: str, min_n: int = 50):
+def _build_top5_window(result, client_id: str, min_n: int = 100):
     """vs barra TOP5 da JANELA do ranking (start..end) — 'ontem' no job diário,
     ou o intervalo pedido no endpoint. Mesma régua/barra do LF, só muda a janela
     do `registros_ml` (os leads ainda casam pela scores_historicos do LF atual).
-    N mínimo menor (default 50) porque 1 dia tem menos volume por criativo."""
+
+    N MÍNIMO 100, IGUAL À VISÃO DO LANÇAMENTO (era 50 até 12/08/2026)
+    ================================================================
+    O 50 vinha de "1 dia tem menos volume por criativo", que é verdade e não basta: a
+    diferença REAL entre criativos é de ~11 pontos percentuais (desvio-padrão de 13,3pp
+    medido em 21 criativos com N≥200, descontado o ruído de amostra desses mesmos 200).
+    Dois erros-padrão dão 14,1pp em N=50 contra 10,0pp em N=100. Ou seja, em N=50 a barra
+    de erro é MAIOR que a diferença que ela deveria medir, e a coluna de Δpp fica decorativa:
+    exibe um número que não distingue criativo ruim de criativo azarado.
+
+    Volume menor no dia é motivo para mostrar MENOS linha, não para baixar o piso. Efeito
+    medido no dia 11/08/2026 (658 cadastros): a visão do dia sai de 7 linhas para 4, e as 3
+    que somem são exatamente as que tinham entre 50 e 100 leads. Não é blecaute — é a mesma
+    régua da visão do lançamento, que já usava 100 (o default de `build_top5_comparison`).
+
+    E alinha com o que a agência recebe: a `scores_inbound` no Supabase deles publica com
+    piso 100, então o número que ela lê e o que aparece aqui passam a ser o mesmo. Piso
+    diferente nos dois lados é duas contas divergirem sem ninguém saber qual está certa.
+    """
     from src.monitoring.utm_quality import build_top5_comparison
     from datetime import datetime as _dt
     lf_name = result.window_lf.get('label')
     w_s = result.window.get('start')
     w_e = result.window.get('end')
-    if not (lf_name and w_s and w_e and result.challenger_run_id):
+    if not (lf_name and w_s and w_e and result.champion_run_id):
         return None
     try:
         return build_top5_comparison(
             lf_name=lf_name,
-            challenger_run_id=result.challenger_run_id,
+            # régua = CHAMPION (ver _build_top5_for): casa o baseline fixo e segue promoção.
+            challenger_run_id=result.champion_run_id,
             win_start=_dt.fromisoformat(w_s),
             win_end=_dt.fromisoformat(w_e),
             client_id=client_id,
@@ -4765,6 +4809,73 @@ async def utm_quality_daily_trafego(min_volume: int = 20, top_n: int = 5,
         raise HTTPException(status_code=502, detail=f"Slack: {post.get('error')}")
     return {'ok': True, 'channel': channel, 'dest': dest, 'window': win_label, 'post': post,
             'gate': _gate.as_dict()}
+
+
+@app.get("/monitoring/cost-alert")
+async def cost_alert(limite: Optional[float] = None,
+                     servico: str = 'Cloud Run',
+                     date: Optional[str] = None,
+                     force: bool = False):
+    """
+    Alerta de custo de infraestrutura - manda DM se o gasto de um dia estourar o teto.
+
+    É o ponto único de composição do alerta: aqui se decide o dia, o teto e o
+    destino; a leitura do faturamento e a regra ficam em
+    `src/monitoring/gcp_cost.py` e `src/monitoring/cost_alert.py`.
+
+    Chamado 1x/dia pelo Cloud Scheduler de manhã, logo depois do relatório
+    diário. Só produz mensagem quando há o que avisar:
+      - uso do dia acima do teto → DM com o ranking de quem gastou
+      - faturamento sem nenhuma linha do dia → DM de "não consegui medir"
+        (export quebrado devolveria zero, e zero passaria por dia calmo)
+      - dentro do teto → responde 200 sem postar nada
+
+    Parâmetros:
+      - `limite`: teto do dia em reais. Sem ele, vale o valor da variável de
+        ambiente `CLOUD_RUN_COST_ALERT_BRL` (hoje R$ 10) - mudar o teto não
+        exige deploy.
+      - `servico`: nome do serviço no faturamento do Google ('Cloud Run',
+        'Cloud SQL', 'BigQuery'…). Default 'Cloud Run'.
+      - `date`: dia YYYY-MM-DD no calendário de Brasília, ou os tokens
+        `ontem`/`hoje`. Sem ele, ontem - o último dia completo.
+      - `force=1`: posta mesmo estando dentro do teto, pra validar a formatação
+        da mensagem sem esperar um estouro real.
+
+    O destino é SEMPRE o DM do operador (`SLACK_USER_DM`), nunca canal de
+    cliente: é informação de infraestrutura nossa.
+    """
+    from datetime import date as _date, datetime as _dt, timedelta as _td
+    from src.monitoring.cost_alert import LIMITE_DEFAULT, dia_anterior_brt, executar
+    from src.monitoring.gcp_cost import BRT
+
+    dia: Optional[_date] = None
+    if date:
+        tok = str(date).strip().lower()
+        if tok == 'ontem':
+            dia = dia_anterior_brt()
+        elif tok == 'hoje':
+            dia = _dt.now(BRT).date()
+        else:
+            try:
+                dia = _dt.strptime(tok, '%Y-%m-%d').date()
+            except ValueError:
+                raise HTTPException(status_code=400,
+                                    detail="date inválida - use YYYY-MM-DD, 'ontem' ou 'hoje'")
+
+    try:
+        resultado = executar(dia=dia,
+                             limite=LIMITE_DEFAULT if limite is None else float(limite),
+                             servico=servico, force=force)
+    except Exception as e:
+        # Falha de leitura do faturamento (permissão, tabela sumida, BigQuery
+        # fora do ar) é erro de verdade - 500 pra aparecer como falha do cron,
+        # não 200 silencioso que passaria por "dia dentro do teto".
+        logger.error(f"[cost-alert] falhou ao avaliar custo: {e}")
+        raise HTTPException(status_code=500, detail=f"cost-alert falhou: {e}")
+
+    if not resultado.get('ok'):
+        raise HTTPException(status_code=502, detail=f"cost-alert: {resultado.get('erro')}")
+    return resultado
 
 
 @app.get("/smoke/run-variants")

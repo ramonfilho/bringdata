@@ -21,20 +21,29 @@ active_model:
 # A/B test — Champion abr28 (pega-tudo) vs Challenger jul_24 (tag "jul_24")
 # =============================================================================
 # Roteamento (substring case-insensitive, ver src/core/client_config.py:match_variant):
-#   - utm_campaign contendo "jul_24"   → Challenger jul_24 (modelo novo, pós-FS + controle ON)
-#   - utm_campaign contendo "LEADHQLB" → abr28 (dispara HQLB — campanhas atuais seguem iguais)
-#   - qualquer outro UTM/URL           → default/fallback = active_model (abr28)
+# Cada campo do utm_pattern carrega uma LISTA e basta UMA substring casar.
+#   - utm_campaign contendo "LEADHQLB" ou "ABR_28_TOP30" → Champion abr28
+#   - utm_campaign contendo "JUL24"    ou "JUL_24"       → Challenger jul_24
+#   - qualquer outro UTM/URL                             → default/fallback = active_model (abr28)
 #
-# Padrão de nomenclatura NOVO: cada modelo roteia pelo PRÓPRIO nome (jul_24), sem
-# abreviações tipo HQLB. O HQLB fica como legado do abr28 até ele ser aposentado.
+# DUAS GERAÇÕES DE CAMPANHA CONVIVEM (09/08/2026). O gestor subiu uma estrutura nova no
+# pixel NOVO (1349518197389751, "DEVLF - NOVO") enquanto a antiga seguia gastando:
+#   geração antiga: "DEVLF | CAP | FRIO | ... | JUL24_TOP30"          → pixel 1513, evento jul_24_top30
+#   geração nova:   "[14][DEVLF][CAP]...[PIXELNOVO][JUL_24_TOP30]"    → pixel 1349, evento jul_24_top30
+# A etiqueta chega no utm_campaign porque as ads usam url_tags
+# `utm_campaign={{campaign.name}}|{{campaign.id}}` — o nome INTEIRO da campanha vira UTM.
+# Atenção ao underline: "JUL24" NÃO casa "JUL_24_TOP30". Ligar só a etiqueta nova
+# desligaria a antiga no mesmo commit, e os leads dela cairiam calados no fallback.
 #
 # Eventos Meta:
 #   - Fallback/pega-tudo (abr28, lead sem tag): eventos default do bloco `capi:` do cliente
 #     (LeadQualified/LeadQualifiedHighQuality, pixel 1937) — ignorados pelas campanhas.
-#   - abr28 tag LEADHQLB: HQLB_LQ (base, value=0, ignorado) + HQLB (D8-D10, pixel 1513).
+#   - abr28: HQLB_LQ (base, value=0, ignorado) + HQLB (D8-D10, pixel 1513)
+#     + abr_28_top30 (D8-D10, pixel 1349) — este é o que a campanha [13] otimiza.
 #   - jul_24: jul_24_lq (base, ignorado como o HQLB_LQ) + jul_24_top30 (D8-D10)
-#     + jul_24_top10 (D10, a nata), ambos no pixel 1513. Criar no Meta via test event
-#     (mesmo método do HQLB, criado em 29/04/2026 via test event TEST25625).
+#     + top10/top50/70-90/50-70 no pixel 1513, e top30/top50 espelhados no pixel 1349
+#     — que é o que as campanhas [14] e [15] otimizam.
+#   Evento novo se cria no Meta via test event (mesmo método do HQLB, 29/04/2026, TEST25625).
 # =============================================================================
 ab_test:
   enabled: true
@@ -58,13 +67,29 @@ ab_test:
         - {role: champion,   from: 2026-07-25}
       campaign_tag: "HQLB"                        # substring p/ classificador (cobre LEADHQLB/HQLB/HQLB_LQ)
       display_name: "Champion (abr_28)"
+      # Duas gerações de campanha convivem, por isso a LISTA (basta uma substring casar):
+      #   - "LEADHQLB": geração antiga, "DEVLF | CAP | ... | LEADHQLB" (pixel 1513, evento HQLB).
+      #   - "ABR_28_TOP30": geração de 09/08/2026, "[13][DEVLF][CAP]...[PIXELNOVO][ABR_28_TOP30]"
+      #     (pixel 1349…, evento abr_28_top30). A etiqueta vem no utm_campaign porque as ads
+      #     usam url_tags `utm_campaign={{campaign.name}}|{{campaign.id}}`.
+      # Sem a lista, ligar a etiqueta nova desligaria a antiga no mesmo commit e os leads dela
+      # cairiam calados no fallback (eventos padrão, pixel errado).
       utm_pattern:
-        utm_campaign: "LEADHQLB"                 # campanhas atuais seguem roteando por LEADHQLB
+        utm_campaign: ["LEADHQLB", "ABR_28_TOP30"]
       url_pattern: "ml-parabens-psq-devf"        # OR com utm_pattern — redundância (URL pós-form)
       pixel_id_override: "1513132406527995"      # HQLB cadastrado neste pixel
       capi_event_name: HQLB_LQ
       capi_event_name_high_quality: HQLB
       capi_high_quality_decils: ['D08', 'D09', 'D10']   # D8 entra (lift ≈ D9); D7 é baseline
+      # Espelho do top 30 no pixel NOVO (1349518197389751, "DEVLF - NOVO", criado 08/08/2026).
+      # Mesma faixa do HQLB primário (D8-D10 = top 30%), nome explícito pra ficar comparável
+      # lado a lado com o jul_24_top30 no MESMO pixel — que é o objetivo do pixel novo.
+      # NÃO mexe no HQLB do 1513: o primário segue igual e as campanhas atuais não sentem nada.
+      # Rollback = deletar este bloco (a lista vira None e o laço de fan-out fica inerte).
+      capi_secondary_hq_events:
+        - event_name: abr_28_top30            # top 30% do Champion abr_28 (= faixa do HQLB)
+          pixel_id: "1349518197389751"
+          decils: ['D08', 'D09', 'D10']
       conversion_rates:                          # back-calculado de LEAD_VALUE_BY_DECILE ÷ 1563.75
         D01: 0.000454   # 0.71 / 1563.75
         D02: 0.001816   # 2.84 / 1563.75
@@ -108,8 +133,13 @@ ab_test:
       # recebiam os eventos padrão, não os do jul_24 (A/B parado). "JUL24" casa os 3 tiers.
       campaign_tag: "JUL24"                     # classificador do relatório (mesmo typo)
       display_name: "Challenger (jul_24)"
+      # Duas gerações de campanha convivem, por isso a LISTA (basta uma substring casar):
+      #   - "JUL24":  geração antiga, "DEVLF | CAP | ... | JUL24_TOP30/TOP10/TOP50" (pixel 1513).
+      #   - "JUL_24": geração de 09/08/2026, "[14]...[PIXELNOVO][JUL_24_TOP30]" e
+      #     "[15]...[JUL_24_TOP50]" (pixel 1349…). COM underline — "JUL24" NÃO casa "JUL_24".
+      # As duas substrings são necessárias: uma não é prefixo da outra.
       utm_pattern:
-        utm_campaign: "JUL24"                   # roteamento: casa JUL24_TOP30/TOP10/TOP50
+        utm_campaign: ["JUL24", "JUL_24"]
       pixel_id_override: "1513132406527995"
       capi_event_name: jul_24_lq
       capi_event_name_high_quality: jul_24_top30
@@ -127,6 +157,16 @@ ab_test:
         - event_name: "jul_24_50-70"        # isolado: percentil 50-70 (D6-D7)
           pixel_id: "1513132406527995"
           decils: ['D06', 'D07']
+        # Espelhos no pixel NOVO (1349518197389751, "DEVLF - NOVO", criado 08/08/2026).
+        # Mesmos nomes e mesmas faixas dos que já saem no 1513 — o que muda é só o destino.
+        # Meta deduplica por (pixel, nome do evento, event_id), então nome repetido em pixel
+        # diferente não colide. O 1513 segue recebendo tudo; isto só ADICIONA destino.
+        - event_name: jul_24_top30          # top 30% do Challenger jul_24 (= faixa do HQ primário)
+          pixel_id: "1349518197389751"
+          decils: ['D08', 'D09', 'D10']
+        - event_name: jul_24_top50          # top 50% do Challenger jul_24 (D6-D10)
+          pixel_id: "1349518197389751"
+          decils: ['D06', 'D07', 'D08', 'D09', 'D10']
       conversion_rates:
         D01: 0.000454
         D02: 0.001816

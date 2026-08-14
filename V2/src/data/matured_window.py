@@ -79,6 +79,123 @@ def resolve_ruler_run_id(client_id: str = "devclub",
 #: Com 21 dias a mesma conta dá 159 vendas em 23.119 leads (0,688%) e teto R$9,29.
 DEFAULT_MATURATION_DAYS = 21
 
+#: Piso da maturação. Serve de PISO, não de resposta: quando o calendário sabe o
+#: lançamento do lead, quem manda é ele (`maturacao_do_lancamento`). Este número só
+#: cobre o lead que caiu fora de qualquer janela de captação.
+MATURACAO_MINIMA_DIAS = DEFAULT_MATURATION_DAYS
+
+#: Teto de sanidade. Lançamento com janela declarada acima disto é erro de planilha
+#: (data trocada, ano errado), e aceitar calado empurraria a janela madura meses pra
+#: trás sem ninguém notar. Medido: o maior real é 40 dias (LF45, captação de 21 dias).
+MATURACAO_MAXIMA_DIAS = 75
+
+
+def _d(v) -> Optional[date]:
+    """Aceita date, datetime ou 'YYYY-MM-DD'. None se não der pra ler."""
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    try:
+        return datetime.strptime(str(v)[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return None
+
+
+def maturacao_do_lancamento(entry: Optional[dict]) -> int:
+    """Quantos dias o lead daquele lançamento tem pra comprar, LIDO DO CALENDÁRIO.
+
+    A conta é `fim das vendas − início da captação`: é o tempo que o lead captado no
+    PRIMEIRO dia espera até o carrinho fechar. Quem entrou depois espera menos, então
+    esta é a cota que cobre todo mundo do lançamento.
+
+    POR QUE ISTO EXISTE, e não um número fixo. O 21 fixo assumia o formato padrão
+    (captação de 7 dias, nutrição de 6, vendas de 7 = 20 dias). Medido no calendário
+    canônico: 6 dos 28 lançamentos passam disso, e são justamente os grandes — o LF45
+    captou por 21 dias e precisa de 33. Nele a janela fixa descartava 55,6% dos
+    compradores DO PRÓPRIO LANÇAMENTO, porque o carrinho fechava depois do corte.
+
+    Args:
+        entry: dict do lançamento no shape de `core.launches.load_launches()`
+            (cap_start / vendas_end). None ou incompleto devolve o piso.
+
+    Returns:
+        Dias de maturação, entre `MATURACAO_MINIMA_DIAS` e `MATURACAO_MAXIMA_DIAS`.
+    """
+    cs = _d((entry or {}).get("cap_start"))
+    ve = _d((entry or {}).get("vendas_end"))
+    if not (cs and ve):
+        return MATURACAO_MINIMA_DIAS
+    dias = (ve - cs).days
+    if dias > MATURACAO_MAXIMA_DIAS:
+        logger.warning("[maturação] lançamento com janela de %d dias (cap_start=%s, "
+                       "vendas_end=%s) acima do teto de %d — provável data errada na "
+                       "planilha; usando o teto", dias, cs, ve, MATURACAO_MAXIMA_DIAS)
+        return MATURACAO_MAXIMA_DIAS
+    return max(dias, MATURACAO_MINIMA_DIAS)
+
+
+def maturacao_por_lancamento(launches: Optional[dict] = None) -> dict:
+    """`{lf_name: dias de maturação}` para todo o calendário.
+
+    O calendário é injetado (padrão do projeto). Sem ele, lê a fonte corrente —
+    que em produção é `analytics.launch_calendar`, alimentada do PC FORMULÁRIOS.
+    """
+    if launches is None:
+        from src.core.launches import load_launches
+        launches = load_launches()
+    return {nome: maturacao_do_lancamento(e) for nome, e in (launches or {}).items()}
+
+
+def lead_esta_maduro(*, lf_name: Optional[str], data_captura, as_of: Optional[date] = None,
+                     launches: Optional[dict] = None) -> bool:
+    """O lead já teve chance COMPLETA de comprar?
+
+    Maturidade deixou de ser "passaram N dias" e virou **"o carrinho do MEU lançamento
+    já fechou"**. É a mesma pergunta que o número fixo tentava responder, agora lida do
+    calendário em vez de suposta a partir do formato padrão.
+
+    Sem `lf_name` (lead fora de qualquer janela de captação, ~2% da base), cai no piso
+    de dias — não dá pra saber o carrinho de quem não entrou em lançamento nenhum.
+    """
+    dia = _d(data_captura)
+    if dia is None:
+        return False
+    hoje = as_of or date.today()
+    if launches is None:
+        from src.core.launches import load_launches
+        launches = load_launches()
+    entry = (launches or {}).get(lf_name) if lf_name else None
+    ve = _d((entry or {}).get("vendas_end"))
+    if ve is not None:
+        return ve < hoje
+    return (hoje - dia).days >= MATURACAO_MINIMA_DIAS
+
+
+def compra_conta_para_o_lead(*, data_captura, data_compra, lf_name: Optional[str] = None,
+                             launches: Optional[dict] = None) -> bool:
+    """A compra pertence ao lançamento em que o lead entrou?
+
+    Conta se caiu entre a captação e o fim das vendas DAQUELE lançamento. Depois disso
+    o lead só volta a receber oferta no lançamento seguinte, que é outro evento com
+    outra promessa — creditar aquela venda ao criativo que o captou meses antes seria
+    dar crédito pelo trabalho de outro.
+
+    Sem lançamento conhecido, cai no piso de dias a partir da captação.
+    """
+    dia, compra = _d(data_captura), _d(data_compra)
+    if dia is None or compra is None or compra < dia:
+        return False
+    if launches is None and lf_name:
+        from src.core.launches import load_launches
+        launches = load_launches()
+    entry = (launches or {}).get(lf_name) if lf_name else None
+    ve = _d((entry or {}).get("vendas_end"))
+    limite = ve if ve is not None else dia + timedelta(days=MATURACAO_MINIMA_DIAS)
+    return compra <= limite
+
 
 def matured_bounds(*, window_days: int = 90,
                    maturation_days: int = DEFAULT_MATURATION_DAYS,

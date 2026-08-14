@@ -44,6 +44,7 @@ import requests
 
 from src.core.client_config import ClientConfig, HotLeadsConfig
 from src.core.hotmart_auth import get_hotmart_access_token
+from src.data.hotleads_seal_writer import upsert_seals_from_ledger
 
 logger = logging.getLogger(__name__)
 
@@ -323,27 +324,13 @@ BULK_LABEL = "bulk"
 def store_bulk_seals(conn, seals: List[Dict], execution_id: Optional[str] = None) -> int:
     """Grava selos do enriquecimento histórico (upsert por email).
 
-    Sobrescreve `hot`/`sealed_at` num re-enriquecimento de propósito: o selo é um
-    retrato datado, e o retrato mais novo é o que vale.
+    Wrapper fino sobre o dono da tabela (`src/data/hotleads_seal_writer`). A
+    política de conflito ("o retrato mais novo vence") saiu daqui e foi para lá
+    quando o ciclo diário passou a escrever na mesma tabela: duas cópias da
+    cláusula divergiriam com o tempo, e foi assim que esta tabela ficou sem dono.
     """
-    n = 0
-    for s in seals:
-        email = (s.get("email") or "").strip().lower()
-        if not email:
-            continue
-        conn.run(
-            """
-            INSERT INTO analytics.hotleads_seal (email, hot, sealed_at, execution_id)
-            VALUES (:email, :hot, NOW(), :exec_id)
-            ON CONFLICT (email) DO UPDATE
-              SET hot = EXCLUDED.hot,
-                  sealed_at = EXCLUDED.sealed_at,
-                  execution_id = EXCLUDED.execution_id
-            """,
-            email=email, hot=bool(s.get("hot")), exec_id=execution_id,
-        )
-        n += 1
-    return n
+    from src.data.hotleads_seal_writer import upsert_seals
+    return upsert_seals(conn, seals, execution_id)
 
 
 # =============================================================================
@@ -635,6 +622,21 @@ def run_process_webhook(conn, client_config: ClientConfig, body: Dict,
                 mark_capi_sent(conn, event_id, ok=False, error=str(e))
             except Exception:
                 pass
+
+    # Espelha os selos na tabela que alimenta o PÚBLICO PERSONALIZADO. Sem isto,
+    # o selo do ciclo diário morre no ledger: vira evento e nunca vira público —
+    # foi o que manteve o "COMPRADORES HOTMART" congelado em 31/07 por duas
+    # semanas, com 19.872 emails já selados e nenhum deles lá dentro.
+    #
+    # DEPOIS do laço, e não dentro, por três motivos: uma ida ao banco em vez de
+    # N, o selo já está gravado no ledger (que é a origem do SELECT), e falha
+    # aqui não pode derrubar o envio do evento, que é o caminho de valor imediato.
+    try:
+        espelhados = upsert_seals_from_ledger(conn, [s["event_id"] for s in seals])
+        stats["espelhados_no_publico"] = espelhados
+    except Exception as e:
+        stats["espelhados_no_publico"] = 0
+        logger.error(f"[hotleads] falha ao espelhar selo no público: {e}")
 
     logger.info(f"[hotleads] webhook execution_id={execution_id} | {stats}")
     return {"status": "ok", "execution_id": execution_id, **stats}

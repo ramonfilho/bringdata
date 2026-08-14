@@ -2,6 +2,18 @@
 Provisiona a entrega de dados para o time da Zanelato (agência de tráfego do
 DevClub): banco separado, tabela única, usuário somente-leitura.
 
+ESTADO EM 12/08/2026: TEMPLATE DE ONBOARDING — NÃO APAGAR.
+==========================================================
+A entrega para a Zanelato migrou para o Supabase deles (ver `push_supabase_zanelato.py` e
+`docs/ENTREGA_DADOS_AGENCIA.md`) e o cron daqui está pausado. Este arquivo FICA por decisão
+explícita: é o único lugar do projeto que sabe provisionar uma entrega para um cliente do
+zero, com o teste de aceitação que prova o isolamento antes de a credencial sair.
+
+Quando o segundo cliente chegar, é daqui que se parte.
+
+E ATENÇÃO PARA QUEM FOR MEXER: `push_supabase_zanelato.py`, que está EM PRODUÇÃO, importa
+`origem_leitura` deste arquivo. Apagar ou renomear essa função quebra a entrega viva.
+
 Por que BANCO SEPARADO e não uma view no `ledger`:
 
   1. Todo banco Postgres carrega um catálogo de si mesmo (`information_schema`,
@@ -55,6 +67,14 @@ SCHEMA = "dash"
 TABELA = "leads_2026"
 ROLE = "dash_zanelato"
 ANO = 2026
+
+# Cliente do calendário de lançamentos. Fica explícito aqui porque
+# `analytics.cadastros` não tem coluna de cliente, ao contrário de `analytics.leads`
+# (que traz `client_id` e é usada direto no braço de quem respondeu). Medido em
+# 09/08/2026: `analytics.launch_calendar` só tem 'devclub', então hoje as duas formas
+# dão o mesmo resultado. Quando o segundo cliente entrar, ISTO AQUI é o ponto que
+# quebra — e quebra visível, com nome, em vez de uma string solta no meio da query.
+CLIENTE_CALENDARIO = "devclub"
 
 # Mínimo de leads para um criativo ou campanha publicar qualidade agregada. Abaixo
 # disso o "agregado" viraria o score individual disfarçado: um anúncio com 1 lead
@@ -154,8 +174,49 @@ def _admin():
 
 # ── consulta que monta a entrega ─────────────────────────────────────────────
 
-def sql_fonte() -> str:
+def sql_fonte(janela: bool = False) -> str:
     """Uma linha por lead de 2026, com UTM, pesquisa, LF e marcador de compra.
+
+    São DOIS braços somados, e a distinção importa para quem lê a entrega:
+
+    1. **Quem respondeu a pesquisa**, vindo de `analytics.leads` (o universo de
+       treino do modelo). É o braço que já existia.
+    2. **Quem NÃO respondeu**, vindo de `analytics.cadastros` (a espinha com todo
+       mundo que se cadastrou, respondente ou não).
+
+    O braço 2 entrou em 09/08/2026 e o motivo é o viés, não o volume. Medido: em
+    2026 a base tem 300.254 pessoas, e 69.335 (23%) nunca responderam a pesquisa —
+    mas 97,9% delas têm `utm_content`, ou seja, são plenamente utilizáveis para
+    analisar criativo. A taxa de resposta varia MUITO por período (janeiro perdia
+    54,7% dos cadastros, março 14,6%), e quase certamente varia por criativo
+    também. Entregar só respondente fazia um anúncio que atrai gente que não
+    responde aparecer com menos leads do que realmente trouxe — e ranking de
+    criativo por volume é exatamente o que a agência usa para decidir verba.
+
+    O recorte antigo nunca foi uma decisão: a entrega herdou o universo de treino
+    porque foi ele a fonte mais à mão. Não era restrição de privacidade — como não
+    entregamos score nem decil, incluir quem não respondeu não abre nada. Os
+    não respondentes, aliás, não têm score nem decil no banco (medido: zero).
+
+    Por que SOMAR em vez de trocar a fonte por `analytics.cadastros`: trocar
+    reescreveria as 253 mil linhas que a agência já pode estar usando, e o
+    `cadastros` nem guarda o jsonb com as respostas da pesquisa. Somando, linha
+    existente não muda de valor — só entram linhas novas.
+
+    Não há risco de duplicar pessoa: medido, os 69.335 e-mails do braço 2 são todos
+    distintos entre si e ZERO deles aparece no braço 1.
+
+    O que o braço 2 NÃO tem, e sai nulo de propósito:
+
+    - **as colunas de pesquisa** — quem não respondeu não tem resposta. É para isso
+      que existe a coluna `respondeu_pesquisa`: sem ela, a agência veria pesquisa em
+      branco e não saberia se é gente que não respondeu ou dado que faltou.
+    - **url_captura** — medido: NENHUM dos 69.335 tem URL em nenhuma das duas
+      fontes. O `page_source` do cadastro é slug ('lista-vip'), não URL, e só existe
+      em 1.558; o `referrer` é de onde a pessoa VEIO, não a página de captura, e
+      trocar um pelo outro seria preencher a coluna com coisa errada.
+    - **event_id** como chave — só 30% deles têm. A chave da linha aqui é o e-mail,
+      que é 100%.
 
     Decisões que valem a leitura:
 
@@ -176,13 +237,83 @@ def sql_fonte() -> str:
     - **comprou** é marcador, sem valor nem data: quanto entrou é informação de
       receita e não faz parte desta entrega.
     """
+    pesquisa = list(PESQUISA)
     cols_pesquisa = ",\n           ".join(
         f"nullif(l.survey_responses->>'{chave}', '') AS {alias}"
-        for chave, alias in PESQUISA
+        for chave, alias in pesquisa
     )
+    # No braço de quem não respondeu, as mesmas colunas saem nulas. Precisam vir na
+    # MESMA ordem e com o MESMO nome, senão o UNION cola dado de uma pergunta na
+    # coluna de outra sem reclamar de nada.
+    cols_pesquisa_nulas = ",\n           ".join(
+        f"NULL::text AS {alias}" for _, alias in pesquisa
+    )
+
+    # Pedaços que aparecem nos DOIS braços. Montados aqui, uma vez, e interpolados nos
+    # dois: é a única forma de não esquecer um lado ao mexer.
+    def _lead_id(ap):                       # `ap` = apelido da tabela no braço (l ou c)
+        return f"encode(sha256((:sal || lower({ap}.email))::bytea), 'hex') AS lead_id,\n           "
+    col_lf = "cal.lf_name AS lf,\n           "
+    # A cauda vai INTEIRA num pedaço só, começando pela vírgula: montada coluna por
+    # coluna, uma variação futura deixaria vírgula solta e o SQL nem parsearia.
+    cauda = (
+        ",\n           (comp.email IS NOT NULL) AS comprou,"
+        "\n           NULL::boolean AS entrou_no_grupo,"
+        "\n           NULL::text AS grupo_whatsapp,"
+        "\n           NULL::timestamp AS entrou_no_grupo_em")
+
+    def _join_sales(ap):
+        return (
+            f"\n      LEFT JOIN (SELECT DISTINCT lower(email) AS email FROM analytics.sales"
+            f"\n                  WHERE email IS NOT NULL) comp"
+            f"\n             ON comp.email = lower({ap}.email)")
+
+    def _join_cal(ap, col_data, por_id):
+        alvo = (f"cal.client_id = {ap}.client_id" if por_id
+                else f"cal.client_id = '{CLIENTE_CALENDARIO}'")
+        return (f"\n      LEFT JOIN analytics.launch_calendar cal"
+                f"\n             ON {alvo}"
+                f"\n            AND {ap}.{col_data}::date BETWEEN cal.cap_start AND cal.cap_end")
+
+    # Sem o calendário não há linha duplicada para desempatar, então o `cap_start DESC`
+    # sai junto — deixá-lo referenciaria uma tabela que não está mais no FROM.
+    ord_cal = ", cal.cap_start DESC"
+    # Recorte do que mudou. Reúne num só lugar TODAS as origens que fazem uma linha da
+    # entrega mudar de valor, porque esquecer uma delas é o modo silencioso de falhar:
+    # o cliente veria dado velho e ninguém saberia. As quatro são:
+    #
+    #   1. lead novo ou reescrito em `analytics.leads` (o job diário reescreve 7 dias)
+    #   2. cadastro novo ou reescrito em `analytics.cadastros`
+    #   3. VENDA ingerida — vira o `comprou` de um lead que pode ser de meses atrás.
+    #      Medido em 06/08: 5.329 vendas num dia só, TODAS de compra antiga. Sem esta
+    #      linha aqui, comprador ficaria eternamente marcado como não comprador.
+    #   4. URL repescada de backup (`url_captura_legado`)
+    #
+    # O calendário de lançamento (`launch_calendar`) NÃO entra: ele muda a coluna `lf`
+    # de linhas antigas sem tocar em nenhuma das quatro marcas acima. Quem cobre isso é
+    # a passada de reconciliação diária, e é por isso que ela existe.
+    origem_venda = """
+        UNION
+        SELECT lower(email) FROM analytics.sales
+         WHERE ingested_at >= :desde AND nullif(email,'') IS NOT NULL"""
+    mudou = f"""
+      mudou AS (
+        SELECT lower(email) AS email FROM analytics.leads
+         WHERE ingested_at >= :desde AND nullif(email,'') IS NOT NULL
+        UNION
+        SELECT lower(email) FROM analytics.cadastros
+         WHERE (ingested_at >= :desde OR refreshed_at >= :desde)
+           AND nullif(email,'') IS NOT NULL{origem_venda}
+        UNION
+        SELECT email FROM analytics.url_captura_legado
+         WHERE recuperado_em >= :desde
+      ),
+    """ if janela else ""
+    filtro_1 = "AND lower(l.email) IN (SELECT email FROM mudou)" if janela else ""
+    filtro_2 = "AND lower(c.email) IN (SELECT email FROM mudou)" if janela else ""
     return f"""
-    WITH url_por_email AS (
-      -- A URL de captura NÃO existe na base derivada: vem de duas fontes, nesta
+    WITH {mudou} url_por_email AS (
+      -- A URL de captura NÃO existe na base derivada: vem de TRÊS fontes, nesta
       -- ordem de prioridade.
       --
       -- 1. `registros_ml` é o ledger VIVO, e só existe a partir de 23/05/2026. Daí a
@@ -195,12 +326,25 @@ def sql_fonte() -> str:
       -- incluí-la recupera 137.763 URLs (fev +15.623, mar +57.594, abr +45.868,
       -- mai +18.677) e leva a cobertura de 35,4% para ~90%.
       --
-      -- JANEIRO CONTINUA VAZIO (16.166 leads, 1,9%): a `lead_legado` só começa em
-      -- fevereiro. Recuperar janeiro depende dos arquivos locais e de nuvem usados
-      -- para montar as tabelas, e é frente separada.
+      -- 3. `analytics.url_captura_legado` é a repescagem de backup, montada em
+      --    09/08/2026 por `scripts/recupera_url_legado.py`. É ela que conserta
+      --    JANEIRO, que estava com 303 URLs em 34.903 leads (0,9%).
       --
-      -- Prioridade por coluna `prio` em vez de COALESCE de duas subconsultas: assim a
-      -- regra fica num lugar só, e fonte nova entra como 3 sem reescrever nada.
+      -- Janeiro parecia perdido e não estava. A URL daquele mês morava em
+      -- `leads_capi.event_source_url`; a tabela morreu em 30/04/2026 e hoje a coluna
+      -- está VAZIA, então quem consulta a tabela viva conclui que ela nunca teve o
+      -- dado. No dump do Cloud SQL de 25/02/2026 ela está cheia: o dado não se
+      -- perdeu, deixou de ser copiado adiante quando o schema mudou. Medido em
+      -- 09/08/2026: a fonte 3 leva janeiro de 0,9% para 98,6% e recupera 56.481 URLs
+      -- no ano de 2026.
+      --
+      -- Fica de aprendizado para a próxima coluna que "sempre foi vazia": conferir um
+      -- backup ANTERIOR à migração que aposentou a tabela, antes de concluir que o
+      -- dado nunca existiu.
+      --
+      -- Prioridade por coluna `prio` em vez de COALESCE de subconsultas: assim a
+      -- regra fica num lugar só, e fonte nova entra sem reescrever nada — foi
+      -- exatamente o que aconteceu quando a 3 chegou.
       SELECT DISTINCT ON (email) email, url AS utm_url
         FROM (
           SELECT lower(email) AS email, utm_url AS url, 1 AS prio, created_at
@@ -210,17 +354,23 @@ def sql_fonte() -> str:
           SELECT lower(email), page_url, 2, created_at
             FROM public.lead_legado
            WHERE coalesce(page_url,'') <> '' AND coalesce(email,'') <> ''
+          UNION ALL
+          -- `recuperado_em` no lugar de `created_at` só para casar o tipo da coluna
+          -- do UNION. Ele nunca desempata nada: a prioridade 3 é a última, e dentro
+          -- dela o e-mail é chave primária, então não há duas linhas para escolher.
+          SELECT email, utm_url, 3, recuperado_em
+            FROM analytics.url_captura_legado
         ) f
        ORDER BY email, prio, created_at DESC
     )
+    -- BRAÇO 1: quem respondeu a pesquisa (universo de treino do modelo).
+    (
     SELECT DISTINCT ON (l.event_id)
-           encode(sha256((:sal || lower(l.email))::bytea), 'hex') AS lead_id,
-           nullif(l.survey_responses->>'Nome Completo', '') AS nome,
+           {_lead_id('l')}nullif(l.survey_responses->>'Nome Completo', '') AS nome,
            lower(l.email) AS email,
            nullif(coalesce(l.phone, l.survey_responses->>'Telefone'), '') AS telefone,
            l.capturado_em,
-           cal.lf_name AS lf,
-           CASE
+           {col_lf}CASE
              WHEN lower(coalesce(nullif(l.utm_source,''),
                                  nullif(l.survey_responses->>'Source',''), '')) IN
                   ('facebook-ads','facebook-ads-sitelink','facebook','fb','ig',
@@ -240,25 +390,64 @@ def sql_fonte() -> str:
            nullif(l.utm_campaign,'') AS utm_campaign,
            nullif(l.utm_content,'')  AS utm_content,
            nullif(l.utm_term,'')     AS utm_term,
-           {cols_pesquisa},
-           (comp.email IS NOT NULL) AS comprou,
-           NULL::boolean AS entrou_no_grupo,
-           NULL::text AS grupo_whatsapp,
-           NULL::timestamp AS entrou_no_grupo_em
-      FROM analytics.leads l
-      LEFT JOIN (SELECT DISTINCT lower(email) AS email FROM analytics.sales
-                  WHERE email IS NOT NULL) comp
-             ON comp.email = lower(l.email)
-      LEFT JOIN url_por_email u   ON u.email = lower(l.email)
-
-      LEFT JOIN analytics.launch_calendar cal
-             ON cal.client_id = l.client_id
-            AND l.capturado_em::date BETWEEN cal.cap_start AND cal.cap_end
+           true AS respondeu_pesquisa,
+           {cols_pesquisa}{cauda}
+      FROM analytics.leads l{_join_sales('l')}
+      LEFT JOIN url_por_email u   ON u.email = lower(l.email){_join_cal('l', 'capturado_em', True)}
      WHERE l.source = 'leads_treino_prod'
        AND l.capturado_em >= '{ANO}-01-01'
        AND l.capturado_em <  '{ANO + 1}-01-01'
        AND l.email IS NOT NULL AND l.email <> ''
-     ORDER BY l.event_id, cal.cap_start DESC
+       {filtro_1}
+     ORDER BY l.event_id{ord_cal}
+    )
+
+    UNION ALL
+
+    -- BRAÇO 2: quem NÃO respondeu a pesquisa. Mesmas colunas, na mesma ordem.
+    --
+    -- `DISTINCT ON (lower(c.email))` pelo mesmo motivo do braço 1: três pares de
+    -- janelas de captação se sobrepõem em 2026, e sem isso o lead do dia de emenda
+    -- apareceria duas vezes (medido: 71.531 linhas para 69.335 pessoas, 2.196 a
+    -- mais). A convenção é idêntica à do outro braço — o dia de emenda pertence ao
+    -- lançamento que COMEÇA nele, daí o `cap_start DESC`.
+    (
+    SELECT DISTINCT ON (lower(c.email))
+           {_lead_id('c')}nullif(trim(concat_ws(' ', c.first_name, c.last_name)), '') AS nome,
+           lower(c.email) AS email,
+           nullif(c.phone, '') AS telefone,
+           c.first_seen_at AS capturado_em,
+           {col_lf}CASE
+             WHEN lower(coalesce(c.utm_source,'')) IN
+                  ('facebook-ads','facebook-ads-sitelink','facebook','fb','ig',
+                   'instagram','meta') THEN 'meta'
+             WHEN lower(coalesce(c.utm_source,'')) IN
+                  ('google-ads','google','googleads','gclid','youtube','youtube-bio')
+                  THEN 'google'
+             WHEN coalesce(c.utm_source,'') = '' THEN NULL
+             ELSE 'outros'
+           END AS canal,
+           -- Sempre nulo aqui, e é medição, não descuido: nenhum dos 69.335 tem URL
+           -- em `registros_ml` nem em `lead_legado`. Fica o LEFT JOIN mesmo assim,
+           -- porque se a fonte da URL passar a cobrir esse público a coluna se
+           -- preenche sozinha, sem ninguém precisar lembrar de mexer aqui.
+           u.utm_url AS url_captura,
+           lower(nullif(c.utm_source,'')) AS utm_source,
+           nullif(c.utm_medium,'')   AS utm_medium,
+           nullif(c.utm_campaign,'') AS utm_campaign,
+           nullif(c.utm_content,'')  AS utm_content,
+           nullif(c.utm_term,'')     AS utm_term,
+           false AS respondeu_pesquisa,
+           {cols_pesquisa_nulas}{cauda}
+      FROM analytics.cadastros c{_join_sales('c')}
+      LEFT JOIN url_por_email u   ON u.email = lower(c.email){_join_cal('c', 'first_seen_at', False)}
+     WHERE NOT c.is_respondent
+       AND c.first_seen_at >= '{ANO}-01-01'
+       AND c.first_seen_at <  '{ANO + 1}-01-01'
+       AND c.email IS NOT NULL AND c.email <> ''
+       {filtro_2}
+     ORDER BY lower(c.email){ord_cal}
+    )
     """
 
 
@@ -269,6 +458,11 @@ def colunas_da_tabela():
             ("utm_source", "text"), ("utm_medium", "text"),
             ("utm_campaign", "text"), ("utm_content", "text"), ("utm_term", "text"),
 ]
+    # Vem IMEDIATAMENTE antes das colunas de pesquisa porque é o que as explica: com
+    # `false` aqui, as nove colunas seguintes saem vazias por definição, não por
+    # falha de coleta. Sem este marcador a agência não teria como distinguir as duas
+    # coisas, e "não sei" é diferente de "não respondeu".
+    base += [("respondeu_pesquisa", "boolean")]
     base += [(alias, "text") for _, alias in PESQUISA]
     base += [("comprou", "boolean")]
     # Entrada no grupo de WhatsApp. Sai NULO em TODAS as linhas hoje, de propósito.

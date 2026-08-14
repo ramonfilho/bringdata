@@ -279,20 +279,34 @@ def capture_training_categories(df: pd.DataFrame, output_path: str = None) -> Di
 
 
 def check_category_drift(df_producao: pd.DataFrame,
-                         categorias_esperadas: Dict[str, List[str]]) -> List[Dict]:
+                         categorias_esperadas: Dict[str, List[str]],
+                         valores_crus: Optional[Dict[str, pd.Series]] = None) -> List[Dict]:
     """
     Verifica se há categorias novas em produção não vistas no treino.
 
     Args:
         df_producao: DataFrame de produção ANTES do encoding
         categorias_esperadas: Dict carregado do JSON do treino
+        valores_crus: {coluna: Series} com o valor ANTES da unificação, para as
+            colunas em que a unificação apaga a evidência. Sem isto o detector
+            fica cego exatamente quando é útil: com a whitelist do modelo ativo,
+            valor desconhecido vira 'Outros', que É categoria de treino, e a
+            mudança de vocabulário do cliente não gera alerta nenhum. Foi o que
+            quase aconteceu quando a Meta trocou a nomenclatura de campanha em
+            10/08/2026 — o alerta só saiu porque o monitoramento estava, por
+            acidente, rodando o Medium no modo de frequência.
 
     Returns:
         Lista de alertas (vazia se tudo OK)
     """
     alertas = []
+    valores_crus = valores_crus or {}
 
     for col, categorias_treino in categorias_esperadas.items():
+        # Coluna com valor cru disponível: a evidência de vocabulário novo mora
+        # nele, não no valor já traduzido.
+        if col in valores_crus:
+            df_producao = df_producao.assign(**{col: valores_crus[col].reindex(df_producao.index)})
         if col not in df_producao.columns:
             # Coluna esperada não existe em produção
             alertas.append({
@@ -769,7 +783,8 @@ class DataQualityMonitor:
             else MISSING_RATE_IGNORE_COLUMNS
         )
 
-    def check(self, df: pd.DataFrame, anchor_date=None) -> List[Dict]:
+    def check(self, df: pd.DataFrame, anchor_date=None,
+              valores_crus: Optional[Dict[str, pd.Series]] = None) -> List[Dict]:
         """
         Executa todos os checks de qualidade de dados.
 
@@ -791,7 +806,7 @@ class DataQualityMonitor:
 
         # 1. Category drift
         if self._thresholds['category_drift']['enabled']:
-            alerts.extend(self._check_category_drift(df))
+            alerts.extend(self._check_category_drift(df, valores_crus))
 
         # 2. Distribution drift
         if self._thresholds['distribution_drift']['enabled']:
@@ -888,7 +903,8 @@ class DataQualityMonitor:
                         return candidate
         return None
 
-    def _check_category_drift(self, df: pd.DataFrame) -> List[Dict]:
+    def _check_category_drift(self, df: pd.DataFrame,
+                              valores_crus: Optional[Dict[str, pd.Series]] = None) -> List[Dict]:
         """
         Verifica categorias não vistas no treino, POR VARIANT ativa.
 
@@ -922,7 +938,7 @@ class DataQualityMonitor:
                 continue
 
             try:
-                drift_results = check_category_drift(df, categorias_esperadas)
+                drift_results = check_category_drift(df, categorias_esperadas, valores_crus)
             except Exception as e:
                 logger.error(f"[category_drift] variant '{variant_name}' erro check: {e}")
                 continue
@@ -1939,7 +1955,11 @@ class DataQualityMonitor:
                 df_unified = unify_utm(df_unified, self.client_config.utm)
             elif column == 'Medium' and self.client_config.medium:
                 from core.medium import unify_medium
-                df_unified = unify_medium(df_unified, self.client_config.medium)
+                from core.client_config import medium_artifacts
+                # Mesmo modo da produção — ver comentário no orchestrator.
+                _cid = getattr(self.client_config, 'client_id', 'devclub') or 'devclub'
+                df_unified = unify_medium(df_unified, self.client_config.medium,
+                                          medium_artifacts(_cid))
         except Exception as e:
             logger.error(f"[outros_breakdown] {column} erro unify: {e}")
             return {}

@@ -44,5 +44,22 @@ def open_analytics_connection(*, timeout: int = 30):
         timeout=timeout,
     )
     conn.run("SET search_path TO analytics, public")
+    # `statement_timeout` casado com o timeout de socket. Isto conserta uma CLASSE de
+    # incidente, não um detalhe de estilo.
+    #
+    # Quando o socket estoura, o CLIENTE morre e a query CONTINUA VIVA no servidor: o
+    # Postgres só descobre que ninguém está ouvindo quando tenta devolver o resultado. Uma
+    # consulta analítica de 10 minutos vira uma órfã de horas segurando snapshot, e
+    # snapshot aberto FAZ DDL ESPERAR.
+    #
+    # Duas vezes já: em 30/07/2026 uma órfã de 31,5h travou um ALTER na `registros_ml` e
+    # derrubou leitura nova (um ALTER na fila bloqueia quem chega depois); em 11/08/2026
+    # duas órfãs minhas, de 4h e 1h, impediram a criação de um índice único na `captacoes`
+    # e a tabela ficou um tempo sem proteção de unicidade.
+    #
+    # Com o timeout do lado do SERVIDOR, a órfã se mata sozinha, sem depender de alguém
+    # lembrar de rodar `pg_cancel_backend`. Um pouco maior que o socket de propósito: quem
+    # deve reclamar primeiro é o cliente, que sabe dizer em que linha do script parou.
+    conn.run(f"SET statement_timeout = '{int(timeout) + 60}s'")
     logger.debug("[analytics_connection] conectado ao schema analytics")
     return conn

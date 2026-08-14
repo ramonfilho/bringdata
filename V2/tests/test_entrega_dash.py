@@ -99,13 +99,120 @@ def test_a_consulta_deduplica_por_lead():
     vezes e infla a contagem do painel deles em ~3.100 linhas."""
     sql = prov.sql_fonte()
     assert 'DISTINCT ON (l.event_id)' in sql, 'sumiu o dedupe por lead'
-    assert 'cap_start DESC' in sql, (
-        'sumiu o critério de desempate: o dia de emenda é do lançamento que COMEÇA nele')
+    # O braço de quem não respondeu deduplica por E-MAIL, não por event_id: medido,
+    # só 30% deles têm event_id, então usá-lo como chave jogaria fora 70% do público.
+    assert 'DISTINCT ON (lower(c.email))' in sql, (
+        'sumiu o dedupe do braço de quem não respondeu — sem ele o lead do dia de '
+        'emenda entra duas vezes (medido: 71.531 linhas para 69.335 pessoas)')
+    assert sql.count('cap_start DESC') >= 2, (
+        'sumiu o critério de desempate em algum dos dois braços: o dia de emenda é '
+        'do lançamento que COMEÇA nele')
+
+
+def test_a_url_tem_as_TRES_fontes_de_prioridade():
+    """Janeiro tinha 303 URLs em 34.903 leads porque a consulta só olhava duas
+    fontes, e nenhuma das duas cobre aquele mês: `registros_ml` começa em 23/05 e
+    `lead_legado` em fevereiro.
+
+    A terceira é a repescagem de backup (`scripts/recupera_url_legado.py`). Medido em
+    09/08/2026: leva janeiro de 0,9% para 98,6% e recupera 56.481 URLs no ano.
+
+    Este teste trava as três porque cada uma cobre um pedaço do calendário que as
+    outras não cobrem — perder qualquer uma abre um buraco de meses inteiros, e é um
+    buraco silencioso: a coluna simplesmente vem nula e ninguém é avisado.
+    """
+    sql = prov.sql_fonte()
+    for fonte, papel in (('public.registros_ml', 'ledger vivo, de 23/05 em diante'),
+                         ('public.lead_legado', 'tabela Lead antiga, fev a mai'),
+                         ('analytics.url_captura_legado', 'repescagem de backup, janeiro')):
+        assert fonte in sql, f'sumiu a fonte de URL {fonte} ({papel})'
+    for prio in ('1 AS prio', ' 2,', ' 3,'):
+        assert prio in sql, f'sumiu a prioridade {prio!r} da montagem da URL'
+    assert 'ORDER BY email, prio, created_at DESC' in sql, (
+        'sumiu a ordem de prioridade: sem ela a URL escolhida vira sorteio entre as '
+        'três fontes, e a mais fraca pode ganhar da mais forte')
 
 
 def test_escopo_e_2026():
     sql = prov.sql_fonte()
     assert "'2026-01-01'" in sql and "'2027-01-01'" in sql
+    # Nos DOIS braços. Um braço sem recorte de ano derramaria 2025 na entrega.
+    assert sql.count("'2026-01-01'") == 2 and sql.count("'2027-01-01'") == 2, (
+        'algum braço da consulta ficou sem o recorte de ano')
+
+
+def _bracos(sql):
+    """Os dois braços da consulta, separados pelo comentário que os rotula."""
+    partes = sql.split('-- BRAÇO ')
+    assert len(partes) == 3, (
+        'esperado exatamente dois braços rotulados na consulta; se os rótulos '
+        f'mudaram, ajuste este helper (achei {len(partes) - 1})')
+    return partes[1:]
+
+
+def test_a_entrega_inclui_quem_NAO_respondeu_a_pesquisa():
+    """Entregar só respondente enviesava o ranking de criativo da agência.
+
+    Medido em 09/08/2026: dos 300.254 cadastros de 2026, 69.335 (23%) nunca
+    responderam a pesquisa — e 97,9% deles têm `utm_content`, ou seja, servem
+    perfeitamente para analisar anúncio. A taxa de resposta varia muito por período
+    (janeiro perdia 54,7%, março 14,6%), então um criativo que atrai gente que não
+    responde aparecia com menos leads do que de fato trouxe.
+
+    O recorte antigo nunca foi decisão consciente: a entrega herdou o universo de
+    treino do modelo, que por construção só tem quem respondeu.
+    """
+    sql = prov.sql_fonte()
+    assert 'analytics.cadastros' in sql, (
+        'sumiu a fonte de quem não respondeu — a entrega voltou a ser só do universo '
+        'de treino, que exclui 23% dos leads de 2026')
+    assert 'NOT c.is_respondent' in sql, (
+        'o braço novo deixou de filtrar por não respondente: sem isso ele repete '
+        'quem já vem do braço 1')
+    assert 'UNION ALL' in sql, 'os dois braços deixaram de ser somados'
+
+
+def test_quem_nao_respondeu_vem_MARCADO():
+    """Sem o marcador, pesquisa em branco é ambíguo: a agência não sabe se é gente
+    que não respondeu ou dado que faltou na coleta. São coisas diferentes e levam a
+    decisões diferentes."""
+    nomes = [n for n, _ in prov.colunas_da_tabela()]
+    assert 'respondeu_pesquisa' in nomes, 'sumiu o marcador de quem respondeu'
+    assert dict(prov.colunas_da_tabela())['respondeu_pesquisa'] == 'boolean'
+    sql = prov.sql_fonte()
+    assert 'true AS respondeu_pesquisa' in sql and 'false AS respondeu_pesquisa' in sql, (
+        'o marcador tem que sair fixo em cada braço: true no de quem respondeu, '
+        'false no de quem não respondeu')
+    # Ele antecede as colunas de pesquisa porque é o que as explica.
+    assert nomes.index('respondeu_pesquisa') < nomes.index(prov.PESQUISA[0][1])
+
+
+def test_as_colunas_dos_dois_bracos_batem_em_numero_e_ordem():
+    """A falha que este teste existe para pegar é SILENCIOSA: um UNION com as colunas
+    fora de ordem não dá erro nenhum, ele cola a resposta de uma pergunta na coluna de
+    outra. Como os dois braços entregam quase tudo como texto, o banco aceita numa
+    boa e o estrago só aparece no painel da agência, já como número errado."""
+    # Separa pelos marcadores dos braços, e NÃO por 'UNION ALL': existe um UNION ALL
+    # dentro do bloco que junta as duas fontes de URL, e dividir por ele dá 3 pedaços.
+    bracos = _bracos(prov.sql_fonte())
+    # Cada alias de pesquisa aparece uma vez em cada braço, na mesma posição relativa.
+    for _, alias in prov.PESQUISA:
+        pos = [b.find(f' AS {alias}') for b in bracos]
+        assert all(p > 0 for p in pos), f'{alias} sumiu de algum dos braços'
+    ordem = [[a for _, a in prov.PESQUISA if f' AS {a}' in b] for b in bracos]
+    assert ordem[0] == ordem[1] == [a for _, a in prov.PESQUISA], (
+        'as colunas de pesquisa saíram em ordem diferente nos dois braços')
+
+
+def test_quem_nao_respondeu_tambem_nao_leva_score_nem_decil():
+    """A inclusão não pode ser a porta dos fundos da regra de privacidade. Medido:
+    esses 69.335 não têm score nem decil no banco, mas o teste trava a intenção, não
+    o estado do dado — se um dia passarem a ter, isto aqui quebra antes de vazar."""
+    braco = _bracos(prov.sql_fonte())[1]
+    for proibido in ('lead_score', 'c.decil', 'decile'):
+        assert proibido not in braco, (
+            f'{proibido} entrou no braço de quem não respondeu — não entregamos nem '
+            'score nem decil individual, para ninguém')
 
 
 def test_o_teste_de_aceitacao_cobre_as_tabelas_sensiveis():

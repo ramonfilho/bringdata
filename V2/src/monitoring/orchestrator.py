@@ -22,6 +22,10 @@ from .models import Alert, Severity
 from core.client_config import ClientConfig
 from core.utm import unify_utm
 from core.medium import unify_medium
+from core.client_config import (
+    active_model_yaml_path as _active_model_yaml_path,
+    medium_artifacts as _medium_artifacts,
+)
 from core.category_unification import unify_categories as _unify_categories
 from core.preprocessing import preprocess_for_monitoring
 from core.feature_engineering import create_features as _fe_create
@@ -190,9 +194,26 @@ class MonitoringOrchestrator:
 
             # Aplicar unificação de Medium (mesmo processamento que treino e produção)
             # Isso garante que 'ABERTO | AD0022' seja normalizado para 'Aberto'
+            #
+            # `medium_artifacts()` é o que faz este caminho ler o Medium do MESMO
+            # jeito que a produção. Sem ele o `unify_medium` caía no modo treino
+            # (validade por frequência NO LOTE), e o relatório passava a descrever
+            # um encoding que a produção não produz — foi o que fez o daily-check
+            # de 10-13/08/2026 acusar "grupo Medium todo-zerado em 81,3%" enquanto
+            # o scoring mandava tudo para 'Outros'.
+            #
+            # `valores_crus` guarda o Medium ANTES da tradução porque as duas
+            # necessidades são opostas: reproduzir o modelo exige o valor
+            # traduzido, detectar que o cliente mudou a nomenclatura exige o cru.
+            # Com whitelist, valor desconhecido vira 'Outros', que É categoria de
+            # treino — o detector de vocabulário ficaria mudo justamente na hora
+            # em que ele é útil.
+            valores_crus = {}
             if 'Medium' in df.columns:
+                valores_crus['Medium'] = df['Medium'].copy()
                 medium_antes = df['Medium'].nunique()
-                df = unify_medium(df, self._client_config.medium)
+                _client_id = getattr(self._client_config, 'client_id', 'devclub') or 'devclub'
+                df = unify_medium(df, self._client_config.medium, _medium_artifacts(_client_id))
                 medium_depois = df['Medium'].nunique()
                 logger.info(f" Medium unificado: {medium_antes}  {medium_depois} categorias únicas")
 
@@ -229,7 +250,8 @@ class MonitoringOrchestrator:
             saldo_fe = colunas_depois_fe - colunas_antes_fe
             logger.info(f" Features derivadas criadas: {saldo_fe:+d} colunas (total: {colunas_depois_fe})")
 
-            all_alerts_dict.extend(self.monitors['data_quality'].check(df, anchor_date=anchor_date))
+            all_alerts_dict.extend(self.monitors['data_quality'].check(
+                df, anchor_date=anchor_date, valores_crus=valores_crus))
 
         # 2. Operational (usa PostgreSQL)
         all_alerts_dict.extend(self.monitors['operational'].check())
@@ -354,12 +376,12 @@ class MonitoringOrchestrator:
         # [O1] Tenta múltiplos paths — em produção (Cloud Run) o WORKDIR é /app
         # e o repo fica em /app/V2; em dev local fica em $REPO_ROOT/V2/...
         client_id = getattr(self._client_config, 'client_id', 'devclub') if self._client_config else 'devclub'
-        _candidate_yamls = [
-            _os.path.abspath(_os.path.join(_os.path.dirname(__file__), '..', '..', 'configs', 'active_models', f'{client_id}.yaml')),
-            f'/app/V2/configs/active_models/{client_id}.yaml',
-            f'/app/configs/active_models/{client_id}.yaml',
-            _os.path.abspath(_os.path.join(_os.getcwd(), 'configs', 'active_models', f'{client_id}.yaml')),
-        ]
+        # Lista de caminhos vive em core.client_config.active_model_yaml_path — era
+        # chumbada aqui, e qualquer outro consumidor (ex.: o `medium_artifacts` que
+        # o passo do Medium usa) teria que copiá-la. Copiar é como fonte de verdade
+        # diverge.
+        _resolved = _active_model_yaml_path(client_id)
+        _candidate_yamls = [_resolved] if _resolved else []
         _yaml_loaded = False
         for _path in _candidate_yamls:
             if _os.path.exists(_path):
@@ -383,7 +405,13 @@ class MonitoringOrchestrator:
                         _has_routing = bool(_utm) or bool(_url)
                         _route_desc = []
                         if _utm:
-                            _route_desc.append(', '.join(f"{k}={v}" for k, v in _utm.items()))
+                            # valor pode ser string (forma antiga) ou lista de substrings
+                            # (um modelo servindo campanhas de gerações diferentes) — o log
+                            # do operador mostra "campo=a|b", não o repr da lista Python.
+                            _route_desc.append(', '.join(
+                                f"{k}={'|'.join(v) if isinstance(v, list) else v}"
+                                for k, v in _utm.items()
+                            ))
                         if _url:
                             _route_desc.append(f"url~{_url}")
                         _variants.append({
@@ -562,203 +590,76 @@ class MonitoringOrchestrator:
         logger.info("=" * 60)
         return result
 
-    def _count_sheet_tab2_responses(self, lookback_time) -> int:
-        """
-        Conta número de respostas na segunda aba da planilha (últimas 24h).
-
-        Args:
-            lookback_time: Datetime UTC para filtrar últimas 24h
-
-        Returns:
-            Número de linhas na segunda aba (últimas 24h)
-        """
-        import gspread
-        from google.auth import default as gauth_default
-        from datetime import timezone, timedelta
-
-        try:
-            # Importar URL da planilha do app.py
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../api'))
-            from app import GOOGLE_SHEETS_URL
-
-            if not GOOGLE_SHEETS_URL:
-                logger.warning("  GOOGLE_SHEETS_URL não configurado, pulando contagem aba 2")
-                return 0
-
-            # Autenticar
-            scopes = [
-                'https://www.googleapis.com/auth/spreadsheets.readonly',
-                'https://www.googleapis.com/auth/drive.readonly'
-            ]
-            creds, _ = gauth_default(scopes=scopes)
-            gc = gspread.authorize(creds)
-
-            # Abrir segunda aba (índice 1)
-            spreadsheet = gc.open_by_url(GOOGLE_SHEETS_URL)
-            worksheet = spreadsheet.get_worksheet(1)  # Segunda aba
-
-            if not worksheet:
-                logger.warning("  Segunda aba não encontrada na planilha")
-                return 0
-
-            # Buscar todos os dados
-            valores = worksheet.get_all_values()
-            if len(valores) <= 1:  # Só header ou vazio
-                return 0
-
-            headers = valores[0]
-            dados = valores[1:]
-
-            # Tentar filtrar por data (últimas 24h)
-            date_columns = [i for i, col in enumerate(headers) if any(
-                term in col.lower() for term in ['data', 'timestamp', 'hora', 'date', 'time', 'envio']
-            )]
-
-            if date_columns and dados:
-                date_col_idx = date_columns[0]
-                count = 0
-                parse_errors = 0  # T2-6: contar linhas malformadas
-
-                for row in dados:
-                    if date_col_idx < len(row) and row[date_col_idx]:
-                        try:
-                            # Parse com formato brasileiro (DD/MM/YYYY HH:MM:SS)
-                            row_date = pd.to_datetime(row[date_col_idx], format='%d/%m/%Y %H:%M:%S', errors='coerce')
-                            if pd.notna(row_date):
-                                # Aba 2 usa formato brasileiro (DD/MM/YYYY) → datas em BRT.
-                                # Atribuir BRT (não UTC) para comparar corretamente com lookback_time.
-                                if row_date.tzinfo is None:
-                                    brt = timezone(timedelta(hours=-3))
-                                    row_date = row_date.replace(tzinfo=brt)
-
-                                if row_date >= lookback_time:
-                                    count += 1
-                        except Exception:
-                            # T2-6: linha malformada — contar e seguir; log agregado no fim
-                            parse_errors += 1
-                            continue
-
-                if parse_errors > 0:
-                    logger.warning(
-                        f"  [T2-6] {parse_errors} linha(s) da aba 2 com data ilegível "
-                        f"foram puladas no count de leads"
-                    )
-                return count
-            else:
-                # Sem coluna de data, avisar
-                logger.warning(f"     Sem coluna de data na aba 2, retornando 0")
-                return 0
-
-        except Exception as e:
-            logger.warning(f"  Erro ao contar aba 2: {e}")
-            return 0
-
     def _calculate_lead_quality_metrics(self) -> Dict:
-        """
-        Calcula métricas de qualidade dos leads em diferentes períodos.
+        """Score médio, %D9 e %D10 por período, lidos do LEDGER VIVO.
 
-        Acessa Google Sheets e calcula:
-        - Score Médio (Histórico, Último mês, Última semana, Últimas 24h)
-        - % em D9 (4 períodos)
-        - % em D10 (4 períodos)
+        MIGRADO EM 08/08/2026. Antes esta função abria uma planilha do Google e
+        calculava tudo em pandas em cima dela. A planilha PAROU DE SER ATUALIZADA
+        EM 27/03/2026 — o último lead lá é de 27/03 às 07:58. Como o cálculo divide
+        por período (24h, 7d, 30d), os três períodos curtos vinham VAZIOS e o
+        "histórico" congelou no retrato de março. Esses números são renderizados no
+        digest diário do Slack, ou seja: a seção de qualidade de lead que o operador
+        lê todo dia estava parada há mais de quatro meses, sem nada avisando.
 
-        Returns:
-            Dict com métricas por período
+        A fonte certa é `registros_ml`, o ledger que o consumer Pub/Sub popula desde
+        23/05/2026, e que já é a fonte dos outros blocos deste mesmo arquivo (o bloco
+        de contadores 24h foi migrado em 23/05; este ficou para trás).
+
+        Contrato de saída INALTERADO de propósito, para o digest não precisar mudar:
+        `{historico, ultimo_mes, ultima_semana, ultimas_24h}`, cada um com
+        `{score, d9, d10, count}`, mais `lf_referencia`/`lf_referencia_label` quando
+        há lançamento ativo.
+
+        Diferença de tipo que vale registrar: na planilha o decil era texto ('D9'),
+        no ledger é inteiro (9). Daí a comparação ser `decil = 9`, não `= 'D9'`.
         """
-        import gspread
-        from google.auth import default as gauth_default
         from datetime import datetime, timedelta, timezone
 
         try:
-            # Importar URL da planilha
-            sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../api'))
-            from app import GOOGLE_SHEETS_URL
-
-            if not GOOGLE_SHEETS_URL:
-                logger.warning(" GOOGLE_SHEETS_URL não configurado")
+            from src.data.ledger_connection import open_ledger_read_connection
+            conn = open_ledger_read_connection()
+            if conn is None:
+                logger.warning("  [qualidade] ledger indisponível — seção sai vazia")
                 return {}
+        except Exception as e:
+            logger.warning(f"  [qualidade] falha ao abrir ledger: {e}")
+            return {}
 
-            # Autenticar
-            scopes = [
-                'https://www.googleapis.com/auth/spreadsheets.readonly',
-                'https://www.googleapis.com/auth/drive.readonly'
-            ]
-            creds, _ = gauth_default(scopes=scopes)
-            gc = gspread.authorize(creds)
-
-            # Abrir primeira aba
-            spreadsheet = gc.open_by_url(GOOGLE_SHEETS_URL)
-            worksheet = spreadsheet.get_worksheet(0)
-
-            # Pegar todos os dados
-            valores = worksheet.get_all_values()
-            if len(valores) <= 1:
-                return {}
-
-            headers = valores[0]
-            dados = valores[1:]
-            df = pd.DataFrame(dados, columns=headers)
-
-            # Filtrar leads válidos (com decil e score)
-            df_valid = df[
-                (df['decil'].notna()) &
-                (df['decil'] != '') &
-                (df['decil'] != 'MODELO 6 ML') &
-                (df['lead_score'].notna()) &
-                (df['lead_score'] != '')
-            ].copy()
-
-            if len(df_valid) == 0:
-                return {}
-
-            # Converter score para float
-            df_valid['lead_score_float'] = df_valid['lead_score'].str.replace(',', '.').astype(float)
-
-            # Parsear data
-            df_valid['data_parsed'] = pd.to_datetime(df_valid['Data'], format='%Y-%m-%d %H:%M:%S', errors='coerce', utc=True)
-            df_with_date = df_valid[df_valid['data_parsed'].notna()].copy()
-
-            if len(df_with_date) == 0:
-                return {}
-
-            # Definir períodos
-            now = datetime.now(timezone.utc)
-            last_24h = now - timedelta(days=1)
-            last_week = now - timedelta(days=7)
-            last_month = now - timedelta(days=30)
-
-            # Filtrar por período
-            df_24h = df_with_date[df_with_date['data_parsed'] >= last_24h]
-            df_week = df_with_date[df_with_date['data_parsed'] >= last_week]
-            df_month = df_with_date[df_with_date['data_parsed'] >= last_month]
-            df_all = df_with_date
-
-            # Calcular métricas
-            def calc_metrics(df_period):
-                if len(df_period) == 0:
-                    return {'score': 0, 'd9': 0, 'd10': 0, 'count': 0}
-
-                score_mean = df_period['lead_score_float'].mean()
-                d9_pct = (df_period['decil'] == 'D9').sum() / len(df_period) * 100
-                d10_pct = (df_period['decil'] == 'D10').sum() / len(df_period) * 100
-
-                return {
-                    'score': score_mean,
-                    'd9': d9_pct,
-                    'd10': d10_pct,
-                    'count': len(df_period)
-                }
-
-            result = {
-                'historico': calc_metrics(df_all),
-                'ultimo_mes': calc_metrics(df_month),
-                'ultima_semana': calc_metrics(df_week),
-                'ultimas_24h': calc_metrics(df_24h)
+        def _janela(desde=None, ate=None):
+            """Agrega uma janela. `desde`/`ate` None = sem limite daquele lado."""
+            cond = ["lead_score IS NOT NULL", "decil IS NOT NULL"]
+            params = {}
+            if desde is not None:
+                cond.append("created_at >= :desde"); params["desde"] = desde
+            if ate is not None:
+                cond.append("created_at <= :ate"); params["ate"] = ate
+            row = conn.run(
+                "SELECT count(*), avg(lead_score), "
+                "       count(*) FILTER (WHERE decil = 9), "
+                "       count(*) FILTER (WHERE decil = 10) "
+                f"FROM registros_ml WHERE {' AND '.join(cond)}", **params
+            )[0]
+            n = int(row[0] or 0)
+            if n == 0:
+                return {'score': 0, 'd9': 0, 'd10': 0, 'count': 0}
+            return {
+                'score': float(row[1] or 0),
+                'd9': int(row[2] or 0) / n * 100,
+                'd10': int(row[3] or 0) / n * 100,
+                'count': n,
             }
 
-            # Lançamento de referência: APENAS LF ativo no launches.yaml (sem
-            # fallback ao último encerrado). Quando não há LF ativo, o bloco
-            # lf_referencia some do payload — o operador deve atualizar o YAML.
+        try:
+            agora = datetime.now(timezone.utc)
+            result = {
+                'historico': _janela(),
+                'ultimo_mes': _janela(desde=agora - timedelta(days=30)),
+                'ultima_semana': _janela(desde=agora - timedelta(days=7)),
+                'ultimas_24h': _janela(desde=agora - timedelta(days=1)),
+            }
+
+            # Lançamento de referência: APENAS LF ativo (sem fallback ao último
+            # encerrado). Sem LF ativo, o bloco some do payload de propósito.
             dqc = self.monitors.get('data_quality')
             if dqc is not None:
                 try:
@@ -769,13 +670,10 @@ class MonitoringOrchestrator:
                 if lf:
                     lf_name, cs_str, ce_str = lf
                     try:
-                        cs_ts = pd.Timestamp(cs_str, tz='UTC')
-                        ce_ts = pd.Timestamp(ce_str, tz='UTC') + pd.Timedelta(days=1, seconds=-1)
-                        df_lf = df_with_date[
-                            (df_with_date['data_parsed'] >= cs_ts) &
-                            (df_with_date['data_parsed'] <= ce_ts)
-                        ]
-                        result['lf_referencia'] = calc_metrics(df_lf)
+                        cs = pd.Timestamp(cs_str, tz='UTC').to_pydatetime()
+                        ce = (pd.Timestamp(ce_str, tz='UTC')
+                              + pd.Timedelta(days=1, seconds=-1)).to_pydatetime()
+                        result['lf_referencia'] = _janela(desde=cs, ate=ce)
                         result['lf_referencia_label'] = lf_name
                     except Exception as _e:
                         logger.debug(f"filtragem LF referência falhou: {_e}")
@@ -783,9 +681,13 @@ class MonitoringOrchestrator:
             return result
 
         except Exception as e:
-            logger.warning(f" Erro ao calcular métricas de qualidade: {e}")
+            logger.warning(f"  [qualidade] erro ao calcular no ledger: {e}")
             return {}
-
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
     def _generate_critical_summary(self, alerts: List[Alert], funnel_metrics: Dict, lead_quality_metrics: Dict = None, meta_metrics: Dict = None) -> str:
         """
         Gera sumário crítico consolidado do sistema.
@@ -904,7 +806,11 @@ class MonitoringOrchestrator:
 
         # 6. Envio CAPI para Meta
         capture = funnel_metrics.get('capture', {})
-        total_db = capture.get('total_database', 0)
+        # `total_database` pode vir None quando o ledger não respondeu. None e 0 são
+        # coisas DIFERENTES aqui: 0 afirma "ninguém se cadastrou", None diz "não sei".
+        # O relatório imprime "—" no caso None em vez de mentir um zero.
+        total_db_raw = capture.get('total_database')
+        total_db = total_db_raw or 0
         capi_sent = funnel_metrics.get('capi_sent', {})
         leads_sent = capi_sent.get('leads_sent', 0)
         estimated_events = capi_sent.get('estimated_events', 0)
@@ -930,13 +836,15 @@ class MonitoringOrchestrator:
 
         # 9. Funil de Conversão
         total_sheets = capture.get('total_sheets_combined', 0)
+        _cap_str = f"{total_db_raw:,}" if total_db_raw is not None else "—"
         lines.append(f"\n9. Funil de Conversão:")
-        lines.append(f"    Capturados: {total_db:,}  Respostas: {total_sheets:,}  Enviados CAPI: {leads_sent:,}  Aceitos Meta: {success_count:,}")
+        lines.append(f"    Capturados: {_cap_str}  Respostas: {total_sheets:,}  Enviados CAPI: {leads_sent:,}  Aceitos Meta: {success_count:,}")
 
         # 10. Taxa de Resposta
-        response_rate = capture.get('response_rate', 0)
+        response_rate = capture.get('response_rate')
+        _rr_str = f"{response_rate:.1f}%" if response_rate is not None else "— (ledger sem resposta)"
         lines.append(f"\n10. Taxa de Resposta:")
-        lines.append(f"    - Resposta pesquisa: {response_rate:.1f}%")
+        lines.append(f"    - Resposta pesquisa: {_rr_str}")
 
         # 11. Qualidade dos Leads
         quality_metrics = lead_quality_metrics if lead_quality_metrics is not None else self._calculate_lead_quality_metrics()
@@ -1269,32 +1177,92 @@ class MonitoringOrchestrator:
         }
 
         # ETAPA 1: CAPTURA DE LEADS
-        total_sheets_tab1 = len(leads_data) if leads_data else 0
-        total_sheets_tab2 = self._count_sheet_tab2_responses(lookback_time)
-        total_sheets = total_sheets_tab1 + total_sheets_tab2
+        #
+        # Este bloco ficou PARA TRÁS na migração de 23/05/2026 e vinha publicando
+        # número construído sobre duas fontes mortas, sem nunca reclamar:
+        #
+        #   1. A "aba 2" saía de uma planilha do Google que PAROU DE SER ATUALIZADA
+        #      em 27/03/2026. A leitura vivia dentro de um try/except que engolia o
+        #      erro e devolvia 0. Não existe equivalente vivo: a captação hoje entra
+        #      por fila Pub/Sub e polling, não por planilha. A fonte foi REMOVIDA,
+        #      não repontada, porque repontar o que não tem destino seria inventar.
+        #   2. O denominador saía de `leads_capi`, que o próprio comentário do bloco
+        #      de 24h neste arquivo (linha ~419) já registrava como legado que
+        #      "parou de receber scoring em 30/04". Os outros blocos foram migrados
+        #      para `registros_ml` naquela ocasião; este não. Resultado: denominador
+        #      perto de zero e "Taxa de Resposta" sem significado.
+        #
+        # Agora o denominador é o ledger vivo, pelo MESMO caminho que o bloco de 24h
+        # já usa. Se o ledger não responder, `total_db` fica None e a taxa sai None
+        # em vez de 0: zero mente dizendo "ninguém se cadastrou", None diz "não sei".
+        total_sheets = len(leads_data) if leads_data else 0
 
-        _client_id = self._client_config.client_id if self._client_config else 'devclub'
-
-        _q_total = self.db.query(func.count(distinct(LeadCAPI.email))).filter(
-            LeadCAPI.created_at >= lookback_time
-        )
-        if self._filter_by_client:
-            _q_total = _q_total.filter(text("leads_capi.client_id = :cid").bindparams(cid=_client_id))
-        total_db = _q_total.scalar()
+        total_db = None
+        try:
+            from src.data.ledger_connection import open_ledger_read_connection
+            _c = open_ledger_read_connection()
+            if _c is not None:
+                try:
+                    total_db = _c.run(
+                        'SELECT COUNT(DISTINCT email) FROM registros_ml '
+                        'WHERE created_at >= :t', t=lookback_time
+                    )[0][0]
+                finally:
+                    _c.close()
+        except Exception as _e:
+            logger.warning(f"  [captura] ledger não respondeu, total_database=None: {_e}")
 
         metrics['capture'] = {
-            'total_sheets_tab1': total_sheets_tab1,
-            'total_sheets_tab2': total_sheets_tab2,
             'total_sheets_combined': total_sheets,
             'total_database': total_db,
-            'response_rate': (total_sheets / total_db * 100) if total_db > 0 else 0
+            'response_rate': (total_sheets / total_db * 100) if total_db else None,
         }
 
         # ETAPA 2: QUALIDADE DOS DADOS CAPI
-        _q_recent = self.db.query(LeadCAPI).filter(LeadCAPI.created_at >= lookback_time)
-        if self._filter_by_client:
-            _q_recent = _q_recent.filter(text("leads_capi.client_id = :cid").bindparams(cid=_client_id))
-        recent_leads = _q_recent.all()
+        #
+        # Lia `leads_capi` numa janela RECENTE. Essa tabela parou de receber em 17/05/2026:
+        # a etapa devolvia lista vazia, a seção `data_quality` desaparecia do relatório e
+        # ninguém reclamou — por quase 3 meses. É o mesmo destino que o denominador da
+        # ETAPA 1 teve e que foi migrado logo acima; este bloco ficou para trás.
+        #
+        # Agora sai do ledger vivo, pelo MESMO caminho da etapa anterior. E é o lugar certo
+        # por definição: `fbp`, `fbc`, nome e telefone só importam nos leads que vão para o
+        # Meta, e é exatamente esses que o ledger guarda.
+        #
+        # POPULAÇÃO = tudo que NÃO foi pulado por allowlist, a mesma definição de
+        # `daily_check_aggregations.compute_fbp_fbc_meta_population`. Inclui de propósito o
+        # `skipped_missing_data`: lead não enviado POR FALTA DE DADO é um caso de má
+        # qualidade, e tirá-lo do denominador esconderia justamente a falha que esta métrica
+        # existe para mostrar.
+        #
+        # Medido em 11/08/2026 na janela de 7 dias: 673 `success`, 517 `skipped_allowlist`,
+        # 3 `skipped_missing_data`. E sobre os enviados, a qualidade é ~100% (fbp 100%,
+        # fbc 100%, nome 100%, telefone 99,9%) — que é a razão de ninguém ter sentido falta
+        # da seção: ela não estava escondendo problema, estava escondendo que estava boa.
+        recent_leads = []
+        try:
+            from types import SimpleNamespace
+
+            from src.data.ledger_connection import open_ledger_read_connection
+            _c = open_ledger_read_connection()
+            if _c is not None:
+                try:
+                    _sql = ("SELECT fbp, fbc, first_name, phone FROM registros_ml "
+                            "WHERE created_at >= :t "
+                            "AND coalesce(base_status,'') <> 'skipped_allowlist'")
+                    _par = {"t": lookback_time}
+                    if self._filter_by_client:
+                        _sql += " AND client_id = :cid"
+                        _par["cid"] = _client_id
+                    recent_leads = [
+                        SimpleNamespace(fbp=r[0], fbc=r[1], first_name=r[2], phone=r[3])
+                        for r in _c.run(_sql, **_par)
+                    ]
+                finally:
+                    _c.close()
+        except Exception as _e:
+            logger.warning(
+                f"  [qualidade CAPI] ledger não respondeu, seção omitida: {_e}")
 
         if recent_leads:
             with_fbp = sum(1 for lead in recent_leads if lead.fbp and lead.fbp.strip())
@@ -1398,11 +1366,11 @@ class MonitoringOrchestrator:
             }
 
         # ETAPA 6: CONVERSÃO FINAL
-        response_rate = (total_sheets / total_db * 100) if total_db > 0 else 0
-
+        # `total_db` agora vem do ledger vivo e pode ser None (ledger sem resposta).
+        # `if total_db` cobre None e 0 sem estourar na comparação.
         metrics['conversion'] = {
             'responded_to_survey': total_sheets,
-            'response_rate': response_rate
+            'response_rate': (total_sheets / total_db * 100) if total_db else None,
         }
 
         return metrics

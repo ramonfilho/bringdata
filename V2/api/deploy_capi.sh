@@ -533,9 +533,23 @@ build_docker_image() {
     print_info "Iniciando build (linux/amd64)..."
     cd "$PROJECT_ROOT"
 
+    # Carimbo de procedência: de qual commit esta imagem sai. O contêiner não leva
+    # `.git` (excluído no .dockerignore), então sem isto todo número gravado em
+    # produção fica sem origem — foi assim que o job da referência rodou imagem de
+    # 31/07 por duas semanas sem nada denunciar.
+    BUILD_COMMIT="$(git -C "$PROJECT_ROOT" rev-parse --short HEAD 2>/dev/null || echo '')"
+    if [ -n "$(git -C "$PROJECT_ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]; then
+        BUILD_DIRTY="true"
+    else
+        BUILD_DIRTY="false"
+    fi
+    print_info "Carimbo de código: ${BUILD_COMMIT:-<sem git>} (sujo: $BUILD_DIRTY)"
+
     docker buildx build \
         --platform linux/amd64 \
         --build-arg MODEL_PATH="$MODEL_PATH" \
+        --build-arg APP_COMMIT="$BUILD_COMMIT" \
+        --build-arg APP_COMMIT_DIRTY="$BUILD_DIRTY" \
         -f api/Dockerfile \
         -t "$IMAGE_FULL" \
         -t "$IMAGE_LATEST" \
@@ -583,6 +597,10 @@ deploy_to_cloud_run() {
     ENV_VARS=$(build_env_vars)
     if [[ "$ENV_VARS" == *"ERROR_LEDGER_SECRET_UNAVAILABLE"* ]]; then
         print_error "LEDGER_TARGET≠railway mas a senha do ledger não veio (Secret Manager ledger-db-password). Abortando deploy."
+        exit 1
+    fi
+    if [[ "$ENV_VARS" == *"ERROR_RAILWAY_SECRET_UNAVAILABLE"* ]]; then
+        print_error "A senha do Railway não veio (Secret Manager railway-db-password). Sem ela a API cai no SQLite e o scoring para de ler o banco operacional, em silêncio. Abortando deploy."
         exit 1
     fi
     if [[ "$ENV_VARS" == *"ERROR_API_INTERNAL_TOKEN_UNAVAILABLE"* ]]; then

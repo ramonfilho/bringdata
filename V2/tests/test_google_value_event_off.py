@@ -4,6 +4,7 @@ só o D9+D10 (high_quality). Não-HQ fica 'skipped', não 'sent' nem 'error'.
 
 Rodável sem pytest:  python tests/test_google_value_event_off.py
 """
+import contextlib
 import os
 import sys
 
@@ -23,13 +24,37 @@ class _Cfg:
     source_allowlist = ["google-ads"]
 
 
+@contextlib.contextmanager
 def _stub():
-    # isola a lógica de dispatch (o que mudou); sem rede.
+    """Isola a lógica de dispatch (o que mudou); sem rede. E DESFAZ no fim.
+
+    Antes isto era uma função que sobrescrevia os cinco nomes do módulo por
+    atribuição direta e NUNCA restaurava. Consequência medida em 08/08/2026: depois
+    que este arquivo rodava, `G.is_eligible` continuava devolvendo (True, 'ok') para
+    o resto da suíte. No `test_pubsub_branch`, isso fazia TODO lead virar elegível
+    pro Google, o caminho do Google Ads ligar onde não devia, e os três testes de
+    scoring em lote morrerem com `'_Cfg' object has no attribute 'business'`.
+
+    O sintoma era o pior tipo: os três passavam rodando sozinhos e só quebravam na
+    suíte completa, o que faz parecer flakiness e não vazamento. Pior ainda, um stub
+    que sobrevive pode fazer um teste PASSAR quando deveria falhar.
+
+    Context manager em vez de `monkeypatch` de propósito: o arquivo se propõe a
+    rodar sem pytest (ver docstring do topo), e `monkeypatch` é fixture.
+    """
+    _orig = {n: getattr(G, n) for n in
+             ("is_eligible", "compute_value", "build_event",
+              "build_ingest_request", "_post_ingest")}
     G.is_eligible = lambda lead, cfg: (True, "ok")
     G.compute_value = lambda *a, **k: 1.0
     G.build_event = lambda **k: {"transaction_id": k.get("transaction_id")}
     G.build_ingest_request = lambda **k: {"conversion_action_id": k.get("conversion_action_id")}
     G._post_ingest = lambda req: {"status": "sent"}
+    try:
+        yield
+    finally:
+        for n, v in _orig.items():
+            setattr(G, n, v)
 
 
 def _leads():
@@ -40,8 +65,8 @@ def _leads():
 
 
 def test_value_off_nao_envia_value_so_hq():
-    _stub()
-    out = G.send_batch_events(_leads(), google_config=_Cfg(), business_config=None, dry_run=False)
+    with _stub():
+        out = G.send_batch_events(_leads(), google_config=_Cfg(), business_config=None, dry_run=False)
     res = out["results"]
     # NENHUM evento 'value' foi enviado (todos os 'value' são skipped)
     value_res = [r for r in res if r.get("destination") == "value"]
@@ -56,8 +81,8 @@ def test_value_off_nao_envia_value_so_hq():
 
 def test_value_off_nao_marca_erro_falso():
     # contadores: nada de 'sent' do value; o único 'sent' é o HQ do D10
-    _stub()
-    out = G.send_batch_events(_leads(), google_config=_Cfg(), business_config=None, dry_run=False)
+    with _stub():
+        out = G.send_batch_events(_leads(), google_config=_Cfg(), business_config=None, dry_run=False)
     assert out["sent"] == 1      # só o HQ do D10
     assert out["errors"] == 0    # value desligado não é erro
     assert out["skipped"] == 2   # os 2 'value' pulados

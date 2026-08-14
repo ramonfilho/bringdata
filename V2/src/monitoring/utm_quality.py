@@ -195,7 +195,8 @@ class UtmQualityResult:
     challenger_name: str
     ranking: dict    # {split_mode, ranked, worst, best, total_distinct_creatives, qualifying}
     min_volume: int = 20  # N mínimo de leads na janela pra um criativo aparecer
-    challenger_run_id: Optional[str] = None  # run_id do Challenger (p/ casar a barra TOP5)
+    challenger_run_id: Optional[str] = None  # run_id do Challenger (contexto A/B)
+    champion_run_id: Optional[str] = None    # run_id do Champion = régua da barra TOP5 (segue a promoção via ab_arm)
 
 
 def compute_utm_quality(
@@ -240,12 +241,21 @@ def compute_utm_quality(
 
     _arm_cfg = load_arm_config(ab_cfg.yaml_path)
     variant_names = list(ab_cfg.variants.keys())
-    champion_name = _arm_cfg.variant_for_role('champion') or (
+    # Papel resolvido point-in-time (pela data da janela): relatório de um dia
+    # passado usa quem era champion/challenger NAQUELE dia, não hoje.
+    _as_of = end_utc.astimezone(BRT).date()
+    champion_name = _arm_cfg.variant_for_role('champion', as_of=_as_of) or (
         variant_names[0] if variant_names else 'champion')
-    challenger_name = _arm_cfg.variant_for_role('challenger') or (
+    challenger_name = _arm_cfg.variant_for_role('challenger', as_of=_as_of) or (
         variant_names[1] if len(variant_names) > 1 else 'challenger')
     _cv = ab_cfg.variants.get(challenger_name)
     challenger_run_id = getattr(_cv, 'run_id', None)
+    # Régua da barra TOP5 = o CHAMPION (o pega-tudo que scoreia a maioria dos
+    # leads), NÃO o challenger. O baseline fixo é gerado no champion; seguir o
+    # champion via ab_arm faz a barra acompanhar promoções sozinha (abr28 virou
+    # champion em 25/07 → a barra tem que casar abr28, não o challenger novo jul_24).
+    _champ_v = ab_cfg.variants.get(champion_name)
+    champion_run_id = getattr(_champ_v, 'run_id', None)
 
     win_start, win_end, anchor = start_utc, end_utc, end_utc
     _s_brt, _e_brt = start_utc.astimezone(BRT), end_utc.astimezone(BRT)
@@ -352,6 +362,7 @@ def compute_utm_quality(
         ranking=ranking,
         min_volume=min_volume,
         challenger_run_id=challenger_run_id,
+        champion_run_id=champion_run_id,
     )
 
 
@@ -394,73 +405,136 @@ def _load_top5_baseline(client_id: str = 'devclub') -> Optional[dict]:
 
 
 def _norm_campaign(s) -> str:
-    """Chave de casamento utm_campaign ↔ ad_spend.campaign_name (Meta usa o mesmo
-    nome nos dois; normaliza espaço/caixa pra tolerar diferença cosmética)."""
+    """Chave de casamento POR NOME (fallback): normaliza espaço/caixa. Só resolve
+    diferença cosmética — NÃO cobre o caso comum de o `utm_campaign` do lead trazer
+    o id grudado no fim (`...|<id>`) ou o nome do Meta ter uma tag extra
+    (`... | jul24_top30`). Pra esses, o casamento certo é por `campaign_id`
+    (ver `_campaign_id_from_utm`); o nome é só o último recurso."""
     return ' '.join(str(s or '').split()).casefold()
+
+
+def _campaign_id_from_utm(s) -> Optional[str]:
+    """Extrai o `campaign_id` do Meta grudado no fim do `utm_campaign`, quando existe.
+
+    O tráfego cola o id da campanha no último segmento do UTM, sem espaço
+    (`DEVLF | CAP | ... | 2026-06-04|120245448615560390`). O id é o último pedaço
+    ao quebrar por `|`, formado só por dígitos e longo (ids do Meta têm ~15+).
+    Devolve `None` quando o UTM termina em texto/data (ex.: `... | 2026-06-04`),
+    caso em que o casamento cai no fallback por nome."""
+    last = str(s or '').split('|')[-1].strip()
+    return last if last.isdigit() and len(last) >= 10 else None
 
 
 def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclub'):
     """Anexa `cpl`, `teto_cpl` e `budget_signal` ('aumentar'|'reduzir') às linhas de
-    CAMPANHA, pelo BREAKEVEN econômico: CPL (gasto ÷ leads, de analytics.ad_spend —
+    CAMPANHA, pela META DE ROAS: CPL (gasto ÷ leads, de analytics.ad_spend —
     MESMA fonte do funil do DM) vs teto (conversão esperada da campanha × valor por
     venda, da referência rolante). Substitui o critério de qualidade vs TOP5 nas
     campanhas quando ligado.
 
     Conversão esperada da campanha = interpola pelo %D9-D10 dela entre a taxa de
     conversão dos leads D9-D10 e a dos demais (ambas da referência). Teto =
-    conversão esperada × valor por venda (breakeven, ROAS 1).
+    conversão esperada × valor por venda ÷ ROAS alvo, hoje 2,0).
 
     Só com REFERENCE_SOURCE=rolling; senão devolve `rows` intactas (relatório de
     hoje, qualidade vs TOP5). Campanha sem gasto casado fica sem sinal (segue no
     critério de qualidade)."""
-    from src.data.reference_reader import rolling_enabled, read_rolling_reference
+    from src.data.reference_reader import rolling_enabled
+    from src.monitoring.teto import CalculadoraDeTeto
     if not rolling_enabled() or not rows:
         return rows
-    ref = read_rolling_reference(client_id)
-    conv = (ref or {}).get('conversion') or {}
-    vps = (conv.get('economics') or {}).get('value_per_sale')
-    by_dec = conv.get('by_decile') or {}
-    if not vps or not by_dec:
-        return rows
-
-    def _rate(keys):
-        c = sum((by_dec.get(k) or {}).get('conv', 0) or 0 for k in keys)
-        n = sum((by_dec.get(k) or {}).get('leads', 0) or 0 for k in keys)
-        return (c / n) if n else None
-    conv_hi = _rate(['D09', 'D10'])                                   # conversão D9-D10
-    conv_lo = _rate([f'D{i:02d}' for i in range(1, 9)])              # conversão D1-D8
-    if conv_hi is None or conv_lo is None:
+    # A montagem (qual conversão, que recorte de decil, que ROAS) mora em
+    # `CalculadoraDeTeto`; aqui só se pede o teto do recorte desta linha. Ver o
+    # cabeçalho de `monitoring/teto.py` para por que ela saiu daqui.
+    calc = CalculadoraDeTeto.da_referencia(client_id)
+    # Sonda: se nem um segmento nominal produz teto, falta referência, economia ou a
+    # tabela de decis — e aí as linhas voltam INTACTAS, como sempre voltaram (o
+    # relatório segue no critério de qualidade vs TOP5).
+    if not calc.por_mistura_de_decis({'D05': 1}).ok:
         return rows
 
     from src.data.ad_spend_reader import read_ad_spend
-    from src.monitoring.teto import teto_cpl
     _sd = win_start.date() if hasattr(win_start, 'date') else win_start
     _ed = win_end.date() if hasattr(win_end, 'date') else win_end
     from datetime import timedelta as _td
     spend_df = read_ad_spend(_sd, _ed + _td(days=1), client_id=client_id)   # end exclusivo → +1 dia
-    spend_by = {}
+    # Dois índices de gasto: por campaign_id (casamento estável — o Meta usa o mesmo
+    # id no ledger e no ad_spend) e por nome normalizado (fallback pros leads cujo
+    # UTM não trouxe o id). O id é a chave primária porque o NOME diverge entre os
+    # dois lados (id grudado no UTM do lead vs tag do A/B no nome do Meta).
+    spend_by_id, spend_by_name = {}, {}
     if not spend_df.empty:
-        g = spend_df.groupby(spend_df['campaign_name'].map(_norm_campaign)).agg(
+        gi = spend_df.groupby(spend_df['campaign_id'].astype(str)).agg(
             spend=('spend', 'sum'), leads=('leads', 'sum'))
-        spend_by = {k: (float(r['spend']), int(r['leads'])) for k, r in g.iterrows()}
+        spend_by_id = {k: (float(r['spend']), int(r['leads'])) for k, r in gi.iterrows()}
+        gn = spend_df.groupby(spend_df['campaign_name'].map(_norm_campaign)).agg(
+            spend=('spend', 'sum'), leads=('leads', 'sum'))
+        spend_by_name = {k: (float(r['spend']), int(r['leads'])) for k, r in gn.iterrows()}
 
-    _matched = 0
+    _matched = _matched_by_id = 0
+    _sem_teto: list = []          # motivos das campanhas que casaram gasto e não tiveram teto
     for e in rows:
-        sp = spend_by.get(_norm_campaign(e.get('utm')))
-        p = e.get('pct_d9_d10')
-        if not sp or p is None:
+        cid = _campaign_id_from_utm(e.get('utm'))
+        sp = spend_by_id.get(cid) if cid else None
+        if sp is not None:
+            _matched_by_id += 1
+        else:
+            sp = spend_by_name.get(_norm_campaign(e.get('utm')))
+        if not sp:
             continue
         spend, leads = sp
         if leads <= 0:
             continue
         cpl = spend / leads
-        exp_conv = (p / 100.0) * conv_hi + (1 - p / 100.0) * conv_lo
-        teto = teto_cpl(exp_conv, vps, roas_alvo=1.0)
+        # A distribuição de decis DESTA campanha, e não só a fatia dela no topo: é o
+        # que distingue uma campanha inteiramente D7-D8 de uma inteiramente D1-D2,
+        # que antes recebiam o mesmo teto.
+        t = calc.por_mistura_de_decis(e.get('decis'))
+        if not t.ok:
+            # A linha volta INTACTA, como voltava antes. Gravar `cpl` sem teto parecia
+            # inofensivo e não era: inflava a contagem de "campanhas casaram gasto" no
+            # log (que passava a incluir quem não recebeu teto nenhum) e disparava o
+            # alarme abaixo em condição normal do caminho legado. Alarme que toca à toa
+            # é alarme que ninguém lê.
+            _sem_teto.append(t.motivo)
+            continue
+        teto = t.valor
         e['cpl'] = round(cpl, 2)
-        e['teto_cpl'] = round(teto, 2) if teto is not None else None
-        e['budget_signal'] = ('aumentar' if teto is not None and cpl <= teto else 'reduzir') if teto is not None else None
+        e['teto_cpl'] = t.arredondado()
+        # Carimbo de qual reconstrução semanal da referência este teto saiu, e por que
+        # ele não saiu quando não sai. Sem o carimbo, "por que o teto era X naquele
+        # dia?" fica sem resposta depois que a referência é sobrescrita na segunda
+        # seguinte; sem o motivo, "não há teto" e "não deu para calcular" são a mesma
+        # coisa na tela do gestor.
+        # A linha se explica sozinha: além do valor, os DOIS números que o produziram
+        # e a procedência inteira. Isso a torna auto-suficiente, e é deliberado — a
+        # tabela da referência é reescrita quando o mesmo fim de janela é recalculado
+        # (`ON CONFLICT DO UPDATE`), então um recibo que só apontasse para ela levaria
+        # a um endereço cujo conteúdo pode ter mudado depois.
+        e['teto_conversao'] = t.conversao
+        e['teto_valor_por_venda'] = t.valor_por_venda
+        e['teto_roas_alvo'] = t.roas_alvo
+        e['teto_referencia'] = t.referencia_id          # único: "2026-08-03T19:15"
+        e['teto_codigo'] = (t.codigo or {}).get('commit')
+        e['teto_config'] = t.configuracao
+        e['teto_motivo'] = t.motivo
+        # Folga = teto − CPL: quanto o CPL ainda pode subir sem furar a meta de ROAS
+        # (positiva = espaço p/ aumentar; negativa = já passou). É o "delta".
+        e['folga'] = round(teto - cpl, 2) if teto is not None else None
+        e['budget_signal'] = 'aumentar' if cpl <= teto else 'reduzir'
         _matched += 1
-    logger.info("[top5] budget breakeven: %d/%d campanhas casaram gasto", _matched, len(rows))
+    logger.info("[top5] teto (ROAS %.1f): %d/%d campanhas com teto entregue (%d casaram "
+                "gasto por campaign_id)", calc.por_mistura_de_decis({'D05': 1}).roas_alvo,
+                _matched, len(rows), _matched_by_id)
+    # FAIL-LOUD de inércia: casou gasto em campanha nenhuma teve teto significa que a
+    # distribuição de decis não chegou nas linhas (leitor no caminho legado, ou consulta
+    # mudada). O teto some do relatório inteiro sem nada quebrar, e o gestor não tem
+    # como distinguir isso de "nenhuma campanha gastou hoje". Grita.
+    if _sem_teto:
+        from collections import Counter as _C
+        logger.error("[top5] %d de %d campanhas com gasto ficaram SEM TETO — motivos: %s. "
+                     "Teto ausente é falha, não estado normal (ver docs/TETO_DE_CPL_DECISOES.md).",
+                     len(_sem_teto), _matched, dict(_C(_sem_teto)))
     return rows
 
 
@@ -503,8 +577,9 @@ def build_top5_comparison(
     if (baseline.get('run_id') and challenger_run_id
             and baseline['run_id'] != challenger_run_id):
         logger.warning(
-            '[top5] suprimido: baseline run_id %s ≠ challenger ativo %s — régua '
-            'diferente, regenerar baseline.', baseline['run_id'], challenger_run_id)
+            '[top5] suprimido: baseline run_id %s difere da régua/champion ativo %s '
+            '(régua diferente, regenerar baseline pro champion atual).',
+            baseline['run_id'], challenger_run_id)
         return None
 
     from src.data.scores_historicos import challenger_quality_by_utm, _cloudsql_conn
@@ -569,7 +644,7 @@ def build_top5_comparison(
             )
             shown, hidden = _enrich(rows)
             if level == 'campaign':
-                # Breakeven econômico (CPL vs teto) só pras campanhas — elas têm gasto.
+                # Teto vs CPL só pras campanhas — elas têm gasto.
                 # No-op quando REFERENCE_SOURCE!=rolling. Criativos seguem por qualidade.
                 shown = enrich_campaign_budget(
                     shown, win_start=win_start, win_end=win_end, client_id=client_id)
@@ -789,12 +864,17 @@ def _render_unified_top5(top5: dict, lf_label: str, lf_state: str, nlf: int) -> 
 
 
 def _budget_suffix(e: dict) -> str:
-    """' · CPL R$X / teto R$Y' pras campanhas com breakeven (Fase 3b). Vazio quando
-    não há sinal econômico (criativo, ou campanha sem gasto casado / frozen)."""
+    """' · CPL R$X / teto R$Y / folga R$Z' pras campanhas com sinal econômico.
+    A folga (teto − CPL) é o delta: positiva = espaço p/ subir orçamento, negativa =
+    já passou da meta de ROAS. Vazio quando não há sinal econômico (criativo, ou
+    campanha sem gasto casado / frozen)."""
     cpl, teto = e.get('cpl'), e.get('teto_cpl')
     if cpl is None or teto is None:
         return ''
-    return (f"  · CPL R$ {cpl:.2f} / teto R$ {teto:.2f}").replace('.', ',')
+    folga = e.get('folga')
+    folga = (teto - cpl) if folga is None else folga
+    sinal = '+' if folga >= 0 else '-'
+    return (f"  · CPL R$ {cpl:.2f} / teto R$ {teto:.2f} / folga {sinal}R$ {abs(folga):.2f}").replace('.', ',')
 
 
 def _twoline_entry(name: str, marker: str, ontem: Optional[dict], lf: Optional[dict],
@@ -867,7 +947,7 @@ def _render_twoline_top5(top5_window: Optional[dict], top5_lf: Optional[dict], *
             continue
         aumentar, reduzir, n_neutro = [], [], 0
         for e in order:
-            # Campanhas com breakeven econômico (Fase 3b) usam o CPL vs teto como
+            # Campanhas com sinal econômico usam o CPL vs teto como
             # DEFINIDOR; sem sinal (criativo, ou sem gasto casado, ou frozen) cai no
             # critério de qualidade vs TOP5.
             sig = e.get('budget_signal')
@@ -973,29 +1053,12 @@ def render_slack_blocks(r: UtmQualityResult, top5_lf: Optional[dict] = None,
 # ──────────────────────────────────────────────────────────────────────────
 
 def post_to_slack(channel: str, blocks: List[dict], fallback_text: str) -> dict:
-    """Posta via chat.postMessage. Retorna {ok, channel, ts?, error?}."""
-    token = os.environ.get('SLACK_BOT_TOKEN')
-    if not token:
-        return {'ok': False, 'channel': channel, 'error': 'SLACK_BOT_TOKEN missing'}
-    import urllib.request
-    body = json.dumps({
-        'channel': channel,
-        'blocks': blocks,
-        'text': fallback_text,
-    }).encode('utf-8')
-    req = urllib.request.Request(
-        'https://slack.com/api/chat.postMessage',
-        data=body,
-        headers={
-            'Content-Type': 'application/json; charset=utf-8',
-            'Authorization': f'Bearer {token}',
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            resp = json.load(r)
-        if not resp.get('ok'):
-            return {'ok': False, 'channel': channel, 'error': resp.get('error')}
-        return {'ok': True, 'channel': channel, 'ts': resp.get('ts')}
-    except Exception as e:
-        return {'ok': False, 'channel': channel, 'error': str(e)}
+    """Posta via chat.postMessage. Retorna {ok, channel, ts?, error?}.
+
+    O corpo mudou de casa em 09/08/2026: o envio ao Slack agora mora em
+    `src/monitoring/slack_client.post_blocks`, que é o miolo único usado também
+    pelo alerta de custo do Cloud Run. Esta função continua existindo, com a
+    mesma assinatura, pra não mexer em quem já a importava (`api/app.py`).
+    """
+    from src.monitoring.slack_client import post_blocks
+    return post_blocks(channel, blocks, fallback_text)

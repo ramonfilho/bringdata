@@ -65,6 +65,24 @@ COPY ./${MODEL_PATH}/ ./mlruns/
 ENV PYTHONPATH=/app
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
+
+# DE QUAL COMMIT ESTA IMAGEM SAIU.
+#
+# O `.dockerignore` exclui `.git/`, e com razão: a pasta não serve pra nada em
+# execução. O efeito colateral é que `core/git_info` devolvia None em produção — sem
+# repositório não há a quem perguntar. Então o build ASSA a resposta aqui.
+#
+# Por que importa: em 14/08/2026 o job da referência rodava imagem de 31/07 enquanto a
+# `main` estava duas versões à frente, e a única forma de descobrir foi conferir o
+# digest da imagem à mão. Número que sai de código velho não tem como se denunciar;
+# com o carimbo, toda linha gravada diz de onde veio.
+#
+# Vazio se o build não passar o argumento — e aí `versao_do_codigo()` devolve
+# origem='desconhecida', que é honesto, em vez de fingir que sabe.
+ARG APP_COMMIT=""
+ARG APP_COMMIT_DIRTY=""
+ENV APP_COMMIT=${APP_COMMIT}
+ENV APP_COMMIT_DIRTY=${APP_COMMIT_DIRTY}
 # Fix para matplotlib - usar diretório writable para cache
 ENV MPLCONFIGDIR=/home/appuser/.config/matplotlib
 

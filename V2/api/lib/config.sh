@@ -66,7 +66,18 @@ RAILWAY_DB_HOST="${RAILWAY_DB_HOST:-shortline.proxy.rlwy.net}"
 RAILWAY_DB_PORT="${RAILWAY_DB_PORT:-11594}"
 RAILWAY_DB_NAME="${RAILWAY_DB_NAME:-railway}"
 RAILWAY_DB_USER="${RAILWAY_DB_USER:-postgres}"
-RAILWAY_DB_PASSWORD="${RAILWAY_DB_PASSWORD:-THxguXxQPZaSWIzquYRiLlVhJBnPoRGu}"
+# Senha NUNCA em texto plano aqui: este repositório é PÚBLICO. Vem do Secret Manager no
+# momento do deploy, e env exportada tem precedência (é assim que o desenvolvimento local
+# usa o `V2/.env`, que está no `.gitignore`).
+#
+# ESTA LINHA CARREGOU A SENHA EM TEXTO CLARO DE 2026 ATÉ 12/08/2026, num repositório
+# público, e o teste que existe justamente para travar isso não pegou. O buraco era a forma:
+# `${VAR:-valor}` é o idioma de "env var com fallback", e o teste tinha um lookahead que
+# liberava `${` de propósito, para não acusar leitura de ambiente. O segredo estava DENTRO
+# do fallback, do lado de dentro do que o teste ignorava. Corrigido em
+# `V2/tests/test_sem_credencial_no_repo.py` no mesmo commit — a trava e o vazamento que ela
+# deixou passar consertam juntos, senão a próxima cópia passa igual.
+RAILWAY_DB_PASSWORD="${RAILWAY_DB_PASSWORD:-$(gcloud secrets versions access latest --secret=railway-db-password --project="$PROJECT_ID" 2>/dev/null)}"
 
 # =============================================================================
 # CLOUD STORAGE (VALIDATION REPORTS)
@@ -173,6 +184,14 @@ build_env_vars() {
     ENV_VARS="$ENV_VARS,RAILWAY_DB_PORT=$RAILWAY_DB_PORT"
     ENV_VARS="$ENV_VARS,RAILWAY_DB_NAME=$RAILWAY_DB_NAME"
     ENV_VARS="$ENV_VARS,RAILWAY_DB_USER=$RAILWAY_DB_USER"
+    # Fail-loud igual ao do ledger: sem a senha, a API cai no SQLite e o scoring para de
+    # ler o banco operacional — em silêncio, porque nada nas rotas devolve erro por isso.
+    # A sentinela é impressa e o caller aborta; `exit` aqui morreria só no subshell do
+    # `$(build_env_vars)` e o deploy seguiria sem a variável.
+    if [ -z "$RAILWAY_DB_PASSWORD" ]; then
+        echo "ERROR_RAILWAY_SECRET_UNAVAILABLE"
+        return 1
+    fi
     ENV_VARS="$ENV_VARS,RAILWAY_DB_PASSWORD=$RAILWAY_DB_PASSWORD"
 
     # Receiver do Sendhook do SendFlow (feature "entrou no grupo"): o endpoint
@@ -192,9 +211,23 @@ build_env_vars() {
     HOTLEADS_WEBHOOK_TOKEN="${HOTLEADS_WEBHOOK_TOKEN:-$(gcloud secrets versions access latest --secret=hotleads-webhook-token --project="$PROJECT_ID" 2>/dev/null)}"
     [ -n "$HOTLEADS_CRON_TOKEN" ] && ENV_VARS="$ENV_VARS,HOTLEADS_CRON_TOKEN=$HOTLEADS_CRON_TOKEN"
     [ -n "$HOTLEADS_WEBHOOK_TOKEN" ] && ENV_VARS="$ENV_VARS,HOTLEADS_WEBHOOK_TOKEN=$HOTLEADS_WEBHOOK_TOKEN"
-    # URL pública deste serviço — é o endereço que mandamos pra Hotmart chamar de
-    # volta. Sem ela o selo nunca voltaria (o endpoint recusa submeter, fail-loud).
-    ENV_VARS="$ENV_VARS,HOTLEADS_PUBLIC_URL=${HOTLEADS_PUBLIC_URL:-https://smart-ads-api-gazrm25mda-uc.a.run.app}"
+    # Endereço que mandamos pra Hotmart chamar de volta com o selo. Vai junto de
+    # CADA submissão (api/app.py:_hotleads_webhook_url), então corrigir aqui
+    # conserta o retorno sem precisar mexer em nada no painel da Hotmart.
+    #
+    # APONTA PRO smart-ads-webhook, NÃO pro smart-ads-api. O principal foi fechado
+    # em 06/08/2026 (perdeu o `allUsers`) e só aceita chamador com identidade
+    # Google; a Hotmart é terceiro e não assina token do Google. O default anterior
+    # apontava pro principal e ficou apontando depois do fechamento: a Hotmart
+    # passou a levar 403 do IAM ANTES de chegar na aplicação, 478 vezes em 30 dias,
+    # e o selo parou de voltar por 8 dias (último em 05/08 19:15, primeiro 403 em
+    # 06/08 17:30). Nada no nosso lado gritou, porque quem quebrou foi o RETORNO e
+    # o alerta do relatório vigia a fila de submissão, que o cron drena normalmente.
+    #
+    # O smart-ads-webhook é público de propósito e serve APENAS as rotas de webhook
+    # (papel `webhook` em api/auth.py, que inclui /hotleads/webhook); todo o resto
+    # dá 404. É a portaria: recebe entrega de terceiro sem abrir o prédio inteiro.
+    ENV_VARS="$ENV_VARS,HOTLEADS_PUBLIC_URL=${HOTLEADS_PUBLIC_URL:-https://smart-ads-webhook-gazrm25mda-uc.a.run.app}"
     # A credencial Basic da Hotmart (HOTMART_BASIC) NÃO entra aqui: o valor tem
     # ESPAÇO ("Basic xxx") e vai por --update-secrets no deploy_capi.sh, montado
     # do Secret Manager (hotmart-basic). Ela nunca esteve no Cloud Run porque até
@@ -281,6 +314,14 @@ build_env_vars() {
     # do operador (validação). O endpoint escolhe via ?dest=trafego|dm.
     ENV_VARS="$ENV_VARS,UTM_QUALITY_TRAFEGO_CHANNEL=${UTM_QUALITY_TRAFEGO_CHANNEL:-C09VD6J8A72}"
     ENV_VARS="$ENV_VARS,SLACK_VALIDATION_DM_CHANNEL=${SLACK_VALIDATION_DM_CHANNEL:-D0A9USV3XEX}"
+
+    # Teto do alerta de custo do Cloud Run, em reais por dia (uso bruto, antes da
+    # camada gratuita). Pinado aqui pelo mesmo motivo dos canais acima: o deploy
+    # MESCLA env vars, então um teto de teste setado numa canary vazaria pro
+    # próximo deploy se o valor de produção não fosse re-afirmado. R$ 10 fica
+    # acima do dia típico (R$ 3 a R$ 5) e abaixo do pico da virada de julho/2026
+    # (R$ 12,21). Pra mudar o teto sem deploy: --update-env-vars no serviço.
+    ENV_VARS="$ENV_VARS,CLOUD_RUN_COST_ALERT_BRL=${CLOUD_RUN_COST_ALERT_BRL:-10}"
 
     # Propaga credenciais de API do serviço 24/7 (fonte de verdade) pros jobs:
     # META_ACCESS_TOKEN (Meta Insights, gasto Meta) + GOOGLE_ADS_* OAuth (reporting de

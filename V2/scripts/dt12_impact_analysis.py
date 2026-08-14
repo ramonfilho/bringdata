@@ -39,7 +39,11 @@ def fetch_leads(limit: int, days: int) -> list[dict]:
     port     = int(os.environ.get("RAILWAY_DB_PORT", "11594"))
     database = os.environ.get("RAILWAY_DB_NAME", "railway")
     user     = os.environ.get("RAILWAY_DB_USER", "postgres")
-    password = os.environ.get("RAILWAY_DB_PASSWORD", "THxguXxQPZaSWIzquYRiLlVhJBnPoRGu")
+    # SEM default, e é a diferença que importa: a senha estava escrita aqui, num
+    # repositório PÚBLICO, dentro do default deste `get`. Explodir com KeyError quando a
+    # variável falta é o comportamento certo — script de análise que não roda é um
+    # inconveniente de 30 segundos, senha em repo público não tem conserto.
+    password = os.environ["RAILWAY_DB_PASSWORD"]
 
     conn = pg8000.native.Connection(
         host=host, port=port, database=database, user=user, password=password
