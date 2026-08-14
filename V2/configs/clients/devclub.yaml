@@ -255,6 +255,18 @@ utm:
   term_long_id_threshold: 10
 medium:
   adv_prefix: ADV
+  # 10/08/2026 — a nomenclatura de campanha mudou na Meta e o utm_medium deixou de
+  # ser o rótulo do público, passando a vir "[<conjunto>]<nome do anúncio>":
+  #   "[ADVTG_ABERTO]"                                  → 969 leads
+  #   "[ADVTG_ABERTO]DEV-AD0160 - VID - CAPTAÇÃO"       → 453 leads
+  #   "[ADVTG_ABERTO]DEV-AD0150-vid-captação-V0-..."    → 235 leads
+  # Sem isto, `Aberto` (49,9% do treino) some e o modelo deixa de aplicar a
+  # penalidade do público frio, INFLANDO a nota (medido: %D9-D10 22,01% contra
+  # 17,77% real, e teto de CPL ~13,4% acima do devido).
+  # Âncora `^` e colchete escapado DE PROPÓSITO: "[ADVTG_ABERTO_QUENTE]" é outro
+  # público e não pode virar Aberto sem decisão explícita.
+  pattern_mappings:
+    '^\[ADVTG_ABERTO\]': Aberto
   frequency_threshold: 0.025
   valid_categories: null
   discontinued_categories: null

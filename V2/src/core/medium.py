@@ -244,6 +244,54 @@ def unify_medium(df: pd.DataFrame, config: MediumConfig,
                      f"({len(mapping)} entradas)")
 
     # ------------------------------------------------------------------
+    # Passo 3b — Mapeamento por PADRÃO (config.pattern_mappings)
+    #
+    # Vem DEPOIS da igualdade exata de propósito: valor com entrada própria em
+    # category_mappings não é capturado por padrão genérico.
+    #
+    # Por que existe: a igualdade exata só alcança valor estável. Em 10/08/2026 o
+    # utm_medium do DevClub virou "[<conjunto>]<nome do anúncio>", e o nome do
+    # anúncio muda a cada criativo — enumerar valor por valor morre no próximo.
+    # Mesma forma do `term_outros_patterns` em core/utm.py.
+    # ------------------------------------------------------------------
+    SKIP = {'Outros', 'nan'}
+
+    # Resolver valid_categories aqui (e não só no passo 5) porque o guard de
+    # destino abaixo precisa dela: mapear para categoria que o modelo não conhece
+    # é pior que não mapear — gera coluna OHE fora do registry, que o alinhamento
+    # final descarta, deixando o grupo Medium TODO-ZERADO (estado que o modelo
+    # nunca viu no treino). Foi assim que o bug de 10/08/2026 passou despercebido.
+    valid_categories = config.valid_categories
+    if valid_categories is None and artifacts:
+        valid_categories = _load_valid_categories(artifacts)
+
+    if config.pattern_mappings:
+        if valid_categories is not None:
+            _fora = {destino for destino in config.pattern_mappings.values()
+                     if destino not in set(valid_categories) | SKIP}
+            if _fora:
+                raise ValueError(
+                    f"medium.pattern_mappings aponta para categoria que o modelo "
+                    f"ativo não conhece: {sorted(_fora)}. "
+                    f"Whitelist do modelo: {sorted(valid_categories)}. "
+                    f"Destino fora da whitelist vira coluna OHE fora do registry → "
+                    f"grupo Medium todo-zerado."
+                )
+
+        _as_str = df['Medium'].where(df['Medium'].notna(), '').astype(str)
+        _ja_casou = pd.Series(False, index=df.index)
+        for pattern, destino in config.pattern_mappings.items():
+            # Precedência: primeiro padrão que casa vence. Diferente do
+            # term_outros_patterns (core/utm.py), que tem destino único e por isso
+            # não precisa de guarda; aqui há N destinos possíveis.
+            mask = _as_str.str.contains(pattern, na=False, regex=True) & ~_ja_casou
+            if mask.any():
+                logger.info(f"  Medium passo 3b: {int(mask.sum())} leads "
+                            f"{pattern!r} → {destino!r}")
+                df.loc[mask, 'Medium'] = destino
+                _ja_casou |= mask
+
+    # ------------------------------------------------------------------
     # Passo 4 — Unificações adicionais opcionais (config.manual_unifications)
     # ------------------------------------------------------------------
     if config.manual_unifications:
@@ -256,14 +304,11 @@ def unify_medium(df: pd.DataFrame, config: MediumConfig,
 
     # ------------------------------------------------------------------
     # Passo 5 — Classificação de categorias válidas
+    #
+    # `valid_categories` e `SKIP` já foram resolvidos no passo 3b (o guard de
+    # destino precisa deles). Ordem de prioridade: config explícito > artifacts >
+    # None (modo treino, frequência nos dados).
     # ------------------------------------------------------------------
-    SKIP = {'Outros', 'nan'}
-
-    # Resolver valid_categories: config explícito > artifacts > None (treino)
-    valid_categories = config.valid_categories
-    if valid_categories is None and artifacts:
-        valid_categories = _load_valid_categories(artifacts)
-
     if valid_categories is not None:
         # ---- Modo produção: whitelist (config ou artifacts) ----
         valid_set = set(valid_categories)

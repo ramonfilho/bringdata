@@ -22,6 +22,10 @@ from .models import Alert, Severity
 from core.client_config import ClientConfig
 from core.utm import unify_utm
 from core.medium import unify_medium
+from core.client_config import (
+    active_model_yaml_path as _active_model_yaml_path,
+    medium_artifacts as _medium_artifacts,
+)
 from core.category_unification import unify_categories as _unify_categories
 from core.preprocessing import preprocess_for_monitoring
 from core.feature_engineering import create_features as _fe_create
@@ -190,9 +194,26 @@ class MonitoringOrchestrator:
 
             # Aplicar unificação de Medium (mesmo processamento que treino e produção)
             # Isso garante que 'ABERTO | AD0022' seja normalizado para 'Aberto'
+            #
+            # `medium_artifacts()` é o que faz este caminho ler o Medium do MESMO
+            # jeito que a produção. Sem ele o `unify_medium` caía no modo treino
+            # (validade por frequência NO LOTE), e o relatório passava a descrever
+            # um encoding que a produção não produz — foi o que fez o daily-check
+            # de 10-13/08/2026 acusar "grupo Medium todo-zerado em 81,3%" enquanto
+            # o scoring mandava tudo para 'Outros'.
+            #
+            # `valores_crus` guarda o Medium ANTES da tradução porque as duas
+            # necessidades são opostas: reproduzir o modelo exige o valor
+            # traduzido, detectar que o cliente mudou a nomenclatura exige o cru.
+            # Com whitelist, valor desconhecido vira 'Outros', que É categoria de
+            # treino — o detector de vocabulário ficaria mudo justamente na hora
+            # em que ele é útil.
+            valores_crus = {}
             if 'Medium' in df.columns:
+                valores_crus['Medium'] = df['Medium'].copy()
                 medium_antes = df['Medium'].nunique()
-                df = unify_medium(df, self._client_config.medium)
+                _client_id = getattr(self._client_config, 'client_id', 'devclub') or 'devclub'
+                df = unify_medium(df, self._client_config.medium, _medium_artifacts(_client_id))
                 medium_depois = df['Medium'].nunique()
                 logger.info(f" Medium unificado: {medium_antes}  {medium_depois} categorias únicas")
 
@@ -229,7 +250,8 @@ class MonitoringOrchestrator:
             saldo_fe = colunas_depois_fe - colunas_antes_fe
             logger.info(f" Features derivadas criadas: {saldo_fe:+d} colunas (total: {colunas_depois_fe})")
 
-            all_alerts_dict.extend(self.monitors['data_quality'].check(df, anchor_date=anchor_date))
+            all_alerts_dict.extend(self.monitors['data_quality'].check(
+                df, anchor_date=anchor_date, valores_crus=valores_crus))
 
         # 2. Operational (usa PostgreSQL)
         all_alerts_dict.extend(self.monitors['operational'].check())
@@ -354,12 +376,12 @@ class MonitoringOrchestrator:
         # [O1] Tenta múltiplos paths — em produção (Cloud Run) o WORKDIR é /app
         # e o repo fica em /app/V2; em dev local fica em $REPO_ROOT/V2/...
         client_id = getattr(self._client_config, 'client_id', 'devclub') if self._client_config else 'devclub'
-        _candidate_yamls = [
-            _os.path.abspath(_os.path.join(_os.path.dirname(__file__), '..', '..', 'configs', 'active_models', f'{client_id}.yaml')),
-            f'/app/V2/configs/active_models/{client_id}.yaml',
-            f'/app/configs/active_models/{client_id}.yaml',
-            _os.path.abspath(_os.path.join(_os.getcwd(), 'configs', 'active_models', f'{client_id}.yaml')),
-        ]
+        # Lista de caminhos vive em core.client_config.active_model_yaml_path — era
+        # chumbada aqui, e qualquer outro consumidor (ex.: o `medium_artifacts` que
+        # o passo do Medium usa) teria que copiá-la. Copiar é como fonte de verdade
+        # diverge.
+        _resolved = _active_model_yaml_path(client_id)
+        _candidate_yamls = [_resolved] if _resolved else []
         _yaml_loaded = False
         for _path in _candidate_yamls:
             if _os.path.exists(_path):
