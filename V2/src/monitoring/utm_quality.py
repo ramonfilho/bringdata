@@ -472,6 +472,7 @@ def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclu
         spend_by_name = {k: (float(r['spend']), int(r['leads'])) for k, r in gn.iterrows()}
 
     _matched = _matched_by_id = 0
+    _sem_teto: list = []          # motivos das campanhas que casaram gasto e não tiveram teto
     for e in rows:
         cid = _campaign_id_from_utm(e.get('utm'))
         sp = spend_by_id.get(cid) if cid else None
@@ -489,6 +490,14 @@ def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclu
         # que distingue uma campanha inteiramente D7-D8 de uma inteiramente D1-D2,
         # que antes recebiam o mesmo teto.
         t = calc.por_mistura_de_decis(e.get('decis'))
+        if not t.ok:
+            # A linha volta INTACTA, como voltava antes. Gravar `cpl` sem teto parecia
+            # inofensivo e não era: inflava a contagem de "campanhas casaram gasto" no
+            # log (que passava a incluir quem não recebeu teto nenhum) e disparava o
+            # alarme abaixo em condição normal do caminho legado. Alarme que toca à toa
+            # é alarme que ninguém lê.
+            _sem_teto.append(t.motivo)
+            continue
         teto = t.valor
         e['cpl'] = round(cpl, 2)
         e['teto_cpl'] = t.arredondado()
@@ -503,17 +512,15 @@ def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclu
         # Folga = teto − CPL: quanto o CPL ainda pode subir sem furar a meta de ROAS
         # (positiva = espaço p/ aumentar; negativa = já passou). É o "delta".
         e['folga'] = round(teto - cpl, 2) if teto is not None else None
-        e['budget_signal'] = ('aumentar' if teto is not None and cpl <= teto else 'reduzir') if teto is not None else None
+        e['budget_signal'] = 'aumentar' if cpl <= teto else 'reduzir'
         _matched += 1
-    logger.info("[top5] teto (ROAS %.1f): %d/%d campanhas casaram gasto (%d por campaign_id)",
-                calc.por_mistura_de_decis({'D05': 1}).roas_alvo,
+    logger.info("[top5] teto (ROAS %.1f): %d/%d campanhas com teto entregue (%d casaram "
+                "gasto por campaign_id)", calc.por_mistura_de_decis({'D05': 1}).roas_alvo,
                 _matched, len(rows), _matched_by_id)
     # FAIL-LOUD de inércia: casou gasto em campanha nenhuma teve teto significa que a
     # distribuição de decis não chegou nas linhas (leitor no caminho legado, ou consulta
     # mudada). O teto some do relatório inteiro sem nada quebrar, e o gestor não tem
     # como distinguir isso de "nenhuma campanha gastou hoje". Grita.
-    _sem_teto = [e.get('teto_motivo') for e in rows if e.get('cpl') is not None
-                 and e.get('teto_cpl') is None]
     if _sem_teto:
         from collections import Counter as _C
         logger.error("[top5] %d de %d campanhas com gasto ficaram SEM TETO — motivos: %s. "

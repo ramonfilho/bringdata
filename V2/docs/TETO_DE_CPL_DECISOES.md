@@ -16,36 +16,51 @@ número aqui é decisão a rever.
 
 **O que era.** Dois baldes: D9-D10 de um lado, **tudo de D1 a D8** do outro.
 
-**O problema, medido.** Todo criativo abaixo do D9 recebia o mesmo teto de R$ 3,96,
-quando a conversão real dentro dessa faixa varia 5,2 vezes:
+**O problema, medido.** Todo criativo abaixo do D9 recebia o mesmo teto, quando a
+conversão real dentro dessa faixa varia **3,85 vezes**.
+
+Números sobre a referência **que o leitor de fato serve** (`as_of` 03/08, janela até
+13/07, 86.141 leads, 700 compradores, valor por venda R$ 1.349,61):
 
 | balde | leads | compradores | conversão | teto (ROAS 2) |
 |---|---|---|---|---|
-| D1-D2 | 17.623 | 37 | 0,210% | R$ 1,36 |
-| D3-D4 | 19.443 | 80 | 0,411% | R$ 2,66 |
-| D5-D6 | 21.032 | 129 | 0,613% | R$ 3,97 |
-| D7-D8 | 22.309 | 246 | 1,103% | R$ 7,13 |
-| D9-D10 | 24.046 | 389 | 1,618% | R$ 10,47 |
-| *(antes: tudo de D1 a D8)* | *80.407* | *492* | *0,612%* | *R$ 3,96* |
+| D1-D2 | 10.720 | 26 | 0,243% | R$ 1,64 |
+| D3-D4 | 14.872 | 60 | 0,403% | R$ 2,72 |
+| D5-D6 | 17.507 | 106 | 0,605% | R$ 4,09 |
+| D7-D8 | 20.660 | 193 | 0,934% | R$ 6,30 |
+| D9-D10 | 22.382 | 315 | 1,407% | R$ 9,50 |
+| *(antes: tudo de D1 a D8)* | *63.759* | *385* | *0,604%* | *R$ 4,07* |
 
 Custo operacional do achatamento: uma campanha inteiramente D7-D8 recebia teto de
-R$ 3,96 quando o correto é R$ 7,13, e o gestor era mandado cortar verba de uma campanha
-com **59% de folga escondida**. No sentido oposto, uma campanha D1-D2 recebia teto quase
-3 vezes acima do que sustenta.
+R$ 4,07 quando o correto é R$ 6,30, e o gestor era mandado cortar verba de uma campanha
+com **55% de folga escondida**. No sentido oposto, uma campanha D1-D2 recebia teto
+2,5 vezes acima do que sustenta.
 
-**Por que cinco e não dez.** Teste de duas proporções em cada par vizinho, sobre a
-referência viva (104.453 leads, 881 compradores):
+> **Correção de 14/08/2026.** A primeira versão desta tabela saiu da referência de
+> **10/08** e prometia D9-D10 a R$ 10,47. Aquela linha foi construída com maturação de
+> 60 dias, a política abandonada em 07/08, e **não é a que o leitor serve** — a servida
+> é a de 03/08, com maturação de 21. O erro era de 9,3% na manchete, e o teste que
+> defendia a separação usava o limiar de 5x, que só passa na referência errada. Ambos
+> corrigidos. É exatamente o tipo de deslize que a **decisão 3 (o carimbo)** existe para
+> tornar detectável: sem registrar de qual referência o número saiu, essa divergência
+> não teria como aparecer.
 
-| corte | pior par vizinho | veredito |
-|---|---|---|
-| 2 baldes | p ≈ 0 | todos separam |
-| 3 baldes | p = 7,5 × 10⁻¹² | todos separam |
-| 4 baldes | p = 1,9 × 10⁻⁶ | todos separam |
-| **5 baldes** | **p = 4,6 × 10⁻³** | **todos separam** |
-| 10 baldes | — | **5 dos 9 pares são indistinguíveis** |
+**Por que cinco e não dez.** Teste de duas proporções em cada par vizinho. Com dez
+baldes, 5 dos 9 pares vizinhos são estatisticamente indistinguíveis (D2-D3, D3-D4,
+D4-D5, D5-D6 e D8-D9) — separá-los seria vender ruído como precisão.
 
-Com dez baldes, os pares D2-D3, D3-D4, D4-D5, D5-D6 e D8-D9 não se separam do ruído.
-Com cinco, o pior par ainda dá 1 em 216 de chance de ser acaso.
+Com cinco, todos os vizinhos se separam, e isso foi verificado nas **duas** referências
+disponíveis, o que é a evidência que sustenta a decisão independentemente de qual delas
+esteja sendo servida:
+
+| par vizinho | na referência servida (03/08) |
+|---|---|
+| D1-D2 vs D3-D4 | p = 2,8 × 10⁻² |
+| D3-D4 vs D5-D6 | p = 1,1 × 10⁻² |
+| D5-D6 vs D7-D8 | p = 2,8 × 10⁻⁴ |
+| D7-D8 vs D9-D10 | p = 5,6 × 10⁻⁶ |
+
+O pior par dá 1 chance em 35 de ser acaso.
 
 **Sobre o erro relativo do balde de baixo.** D1-D2 tem ±16,4% de erro na taxa, contra
 ±5,1% do D9-D10. Parece desequilibrado e não é: 16,4% de R$ 1,36 são **22 centavos**, e
@@ -143,8 +158,9 @@ da maturação de 60. A ordem certa é o contrário: primeiro reconstruir o job,
 revisar a ordenação (que aí passa a ser indiferente, porque a linha mais nova também terá
 o fim de janela mais recente).
 
-*As tabelas de valores neste documento foram calculadas sobre a referência correta, a de
-maturação 21.*
+*Os valores neste documento saem da referência **servida** (`as_of` 03/08, maturação de
+21 dias). Eles mudam a cada reconstrução da referência — é por isso que cada teto
+entregue carrega o carimbo de qual delas veio (decisão 3).*
 
 ---
 

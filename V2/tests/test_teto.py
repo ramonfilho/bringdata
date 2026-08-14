@@ -65,14 +65,21 @@ from src.monitoring.teto import (  # noqa: E402
     MOTIVO_SEM_REFERENCIA, MOTIVO_SEM_VALOR_POR_VENDA, MOTIVO_SEGMENTO_VAZIO,
 )
 
-# Referência viva de 10/08/2026: 104.453 leads, 881 compradores, cartão 29,4%.
-_DECIS = [(8732, 10), (8891, 27), (9402, 30), (10041, 50), (10284, 53),
-          (10748, 76), (11116, 106), (11193, 140), (11645, 149), (12401, 240)]
-_VPS = 1293.98
+# A referência que o leitor REALMENTE SERVE (as_of 03/08, janela até 13/07): 86.141
+# leads, 700 compradores, cartão 35,0%.
+#
+# A fixture anterior era a de 10/08, e estava errada por um motivo que vale registrar:
+# aquela linha foi construída com maturação de 60 dias, a política que o projeto
+# abandonou em 07/08 por inflar o teto. O leitor ordena por fim de janela, e maturação
+# curta termina mais tarde, então quem sai é a de 03/08. Calibrar o teste na linha que
+# NÃO é servida é testar um número que ninguém recebe.
+_DECIS = [(4922, 5), (5798, 21), (7058, 21), (7814, 39), (8254, 53),
+          (9253, 53), (10371, 82), (10289, 111), (10859, 135), (11523, 180)]
+_VPS = 1349.61
 _REF = {
-    'as_of': '2026-08-10',
+    'as_of': '2026-08-03',
     'conversion': {
-        'economics': {'value_per_sale': _VPS, 'pct_cartao': 0.294},
+        'economics': {'value_per_sale': _VPS, 'pct_cartao': 0.350},
         'by_decile': {f'D{i:02d}': {'leads': n, 'conv': k}
                       for i, (n, k) in enumerate(_DECIS, 1)},
         'by_bucket': {'Lead': {'rate': 0.008718526869597896},
@@ -97,14 +104,21 @@ def test_roas_alvo_padrao_e_dois_e_nao_breakeven():
 def test_cinco_baldes_distinguem_o_que_dois_baldes_achatavam():
     """O problema que este passo resolve, no caso mais concreto possível.
 
-    Antes, tudo abaixo do D9 caía num balde só e recebia R$ 3,96. Um criativo
-    inteiramente D7-D8 e outro inteiramente D1-D2 saíam com o MESMO teto, apesar de a
-    conversão real deles diferir 5,2 vezes."""
+    Antes, tudo abaixo do D9 caía num balde só. Um criativo inteiramente D7-D8 e outro
+    inteiramente D1-D2 saíam com o MESMO teto, apesar de a conversão real deles diferir
+    várias vezes.
+
+    O LIMIAR AQUI É 3x, E NÃO 5x, por uma correção de 14/08/2026: o 5x vinha da
+    referência de 10/08, que não é a servida. Na servida a razão é 3,85x. O limiar é
+    deliberadamente FROUXO em relação ao valor medido — ele existe para provar que os
+    extremos estão longe o bastante para o balde único ser um erro operacional, não
+    para congelar um número que muda a cada reconstrução da referência. O valor exato
+    de cada balde é fixado no teste seguinte, que é onde ele deve ser cobrado."""
     calc = CalculadoraDeTeto.de_referencia_carregada(_REF)
     baixo = calc.por_mistura_de_decis(_so_no_balde(('D01', 'D02')))
     alto = calc.por_mistura_de_decis(_so_no_balde(('D07', 'D08')))
     assert baixo.ok and alto.ok
-    assert alto.valor > 5 * baixo.valor          # 5,2x na referência viva
+    assert alto.valor > 3 * baixo.valor
     # e o teto único de antes ficava no meio dos dois, errando os DOIS lados
     teto_antigo = (sum(k for _, k in _DECIS[:8]) / sum(n for n, _ in _DECIS[:8])) * _VPS / 2
     assert baixo.valor < teto_antigo < alto.valor
@@ -114,8 +128,8 @@ def test_valores_dos_cinco_baldes_batem_com_a_documentacao():
     """Os R$ publicados em docs/TETO_DE_CPL_DECISOES.md, decisão 1. Se este teste cair,
     ou a conta mudou ou a documentação está mentindo — e as duas exigem ação."""
     calc = CalculadoraDeTeto.de_referencia_carregada(_REF)
-    esperado = {'D1-D2': 1.36, 'D3-D4': 2.66, 'D5-D6': 3.97,
-                'D7-D8': 7.13, 'D9-D10': 10.47}
+    esperado = {'D1-D2': 1.64, 'D3-D4': 2.72, 'D5-D6': 4.09,
+                'D7-D8': 6.30, 'D9-D10': 9.50}
     for nome, decis in BALDES_DE_DECIL:
         t = calc.por_mistura_de_decis(_so_no_balde(decis))
         assert abs(t.valor - esperado[nome]) < 0.01, f"balde {nome}: {t.valor:.2f}"
@@ -132,16 +146,21 @@ def test_mistura_pondera_pelo_volume_do_SEGMENTO():
 
 
 def test_conversao_agrega_por_VOLUME_e_nao_por_media_das_taxas():
-    """Somar compradores e somar leads antes de dividir, não tirar média das taxas.
+    """Dentro do balde, soma compradores e soma leads antes de dividir.
 
-    Média das taxas daria o mesmo peso a um decil de 8.732 leads e a outro de 12.401,
-    e o resultado não seria a conversão de ninguém."""
+    Média das taxas daria o mesmo peso a um decil de 4.922 leads e a outro de 5.798, e
+    o resultado não seria a conversão de ninguém. O caso exercitado é o D1-D2, onde os
+    dois decis têm volumes e taxas bem diferentes (5/4.922 contra 21/5.798) — nos
+    baldes de cima os volumes são parecidos e as duas contas quase coincidem, o que
+    faria o teste passar por coincidência da fixture em vez de por acerto do código."""
     calc = CalculadoraDeTeto.de_referencia_carregada(_REF)
-    d9d10 = calc.por_mistura_de_decis({'D09': 500, 'D10': 500}).conversao
-    ponderado = (149 + 240) / (11645 + 12401)
-    media_simples = (149 / 11645 + 240 / 12401) / 2
-    assert abs(d9d10 - ponderado) < 1e-9
-    assert abs(d9d10 - media_simples) > 1e-4         # os dois NÃO coincidem
+    obtido = calc.por_mistura_de_decis({'D01': 50, 'D02': 50}).conversao
+    (n1, k1), (n2, k2) = _DECIS[0], _DECIS[1]
+    ponderado = (k1 + k2) / (n1 + n2)
+    media_simples = (k1 / n1 + k2 / n2) / 2
+    assert abs(obtido - ponderado) < 1e-12          # é o ponderado, exato
+    assert obtido != media_simples                  # e NÃO é a média das taxas
+    assert abs(ponderado - media_simples) > 1e-4    # e a diferença é operacionalmente real
 
 
 def test_balde_sem_taxa_na_referencia_SAI_da_conta_em_vez_de_contar_zero():
@@ -170,8 +189,8 @@ def test_carimbo_da_referencia_viaja_junto():
     """Sem o carimbo, 'por que o teto era X naquele dia' fica sem resposta depois que a
     referência é reconstruída na segunda seguinte."""
     calc = CalculadoraDeTeto.de_referencia_carregada(_REF)
-    assert calc.por_mistura_de_decis({'D05': 1}).referencia_as_of == '2026-08-10'
-    assert calc.por_balde('Champion').referencia_as_of == '2026-08-10'
+    assert calc.por_mistura_de_decis({'D05': 1}).referencia_as_of == _REF['as_of']
+    assert calc.por_balde('Champion').referencia_as_of == _REF['as_of']
 
 
 def test_cada_ingrediente_que_falta_tem_MOTIVO_proprio():
