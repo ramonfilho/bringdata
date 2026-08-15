@@ -100,6 +100,9 @@ DIAS_CORTE = 3
 # lançamento. Mudar estes valores é mudar o CONTRATO com o painel da agência.
 CORTE_ACUMULADO = ""
 CORTE_CURTO = f"_{DIAS_CORTE}dias"
+# Corte HOJE (aprovado 16/08): a visão mais fresca possível que ainda é honesta —
+# só publica quem cruzou o piso de N no PRÓPRIO dia; em dia fraco a lista vem curta.
+CORTE_HOJE = "_hoje"
 
 # `atualizado_em` fica de fora: tem default `now()` no lado deles, e é o carimbo de quando
 # ELES receberam. Mandar valor sobrescreveria a informação deles com a nossa.
@@ -287,19 +290,37 @@ def coletar(conn) -> tuple:
     hoje = fim if fim < _hoje_brt() else _hoje_brt()
     curto_ini = max(ini, hoje - timedelta(days=DIAS_CORTE - 1))
     l, r = _um_corte(conn, lf, run_id, curto_ini, hoje, CORTE_CURTO, mapa_nome)
+    linhas += l
+    resumos.append(r)
+    # corte HOJE: mesmo piso de N, janela = o próprio dia
+    l, r = _um_corte(conn, lf, run_id, hoje, hoje, CORTE_HOJE, mapa_nome)
     # Corte curto vazio NÃO é erro: acontece de verdade quando nenhum criativo alcançou o
     # piso de N nos últimos dias. O que não pode é passar em silêncio, então vai para o
     # resumo e sai no log.
     linhas += l
     resumos.append(r)
-    # Dedup por (tipo, chave): a tradução ID->nome pode colidir com uma linha já
-    # nomeada do mesmo corte, e upsert com a mesma chave duas vezes no mesmo INSERT
-    # é erro no Postgres. Fica a de MAIOR n (mais leads = a linha mais completa).
+    # FUSÃO PONDERADA por (tipo, chave): dois anúncios com o mesmo nome após a
+    # tradução (ex.: o mesmo vídeo em dois grupos do Google) viram UMA linha que
+    # SOMA leads e pondera as métricas — antes ficava a de maior n e o resto sumia.
+    def _funde(a, b):
+        n1, n2 = int(a[2] or 0), int(b[2] or 0)
+        tot = (n1 + n2) or 1
+        def pond(x, y, casas=1):
+            if x is None and y is None:
+                return None
+            if x is None or y is None:
+                return y if x is None else x
+            return round((float(x) * n1 + float(y) * n2) / tot, casas)
+        teto = pond(a[6], b[6], 2)
+        return [a[0], a[1], n1 + n2, pond(a[3], b[3]),
+                a[4] if a[4] is not None else b[4], pond(a[5], b[5]),
+                (f"{teto:.2f}" if teto is not None else None),
+                a[7] if a[7] is not None else b[7],
+                a[8] if (a[8] and not str(a[8]).startswith("sem_teto")) else b[8]]
     vistos = {}
     for x in linhas:
         k = (x[0], x[1])
-        if k not in vistos or (x[2] or 0) > (vistos[k][2] or 0):
-            vistos[k] = x
+        vistos[k] = _funde(vistos[k], x) if k in vistos else x
     linhas = list(vistos.values())
     return linhas, {"lf": lf, "cortes": resumos}
 
@@ -338,7 +359,8 @@ def gravar(linhas) -> int:
         dst.run(f"INSERT INTO {TABELA_DESTINO} ({cols}) VALUES " + ",".join(vals) +
                 f" ON CONFLICT (tipo, chave) DO UPDATE SET {atualiza}, "
                 f"atualizado_em = now()", **par)
-        podadas = _poda_corte_curto(dst, linhas)
+        podadas = (_poda_sufixo(dst, linhas, CORTE_CURTO)
+                   + _poda_sufixo(dst, linhas, CORTE_HOJE))
         # Chave numérica publicada em rodada anterior vira lixo assim que a versão
         # nomeada existe: apaga toda linha de criativo cuja chave é só dígitos —
         # quem continua sem nome no mapa é re-upsertada nesta mesma rodada, então
@@ -354,7 +376,7 @@ def gravar(linhas) -> int:
         dst.close()
 
 
-def _poda_corte_curto(dst, linhas) -> int:
+def _poda_sufixo(dst, linhas, sufixo) -> int:
     """Apaga as linhas do corte curto que NÃO estão nesta rodada.
 
     POR QUE PODAR SÓ O CORTE CURTO
@@ -371,8 +393,8 @@ def _poda_corte_curto(dst, linhas) -> int:
     O `atualizado_em` não resolve sozinho, porque exigiria que quem lê compare carimbos e
     descarte linha velha. Defesa que depende do leitor lembrar não é defesa.
     """
-    chaves = [x[1] for x in linhas if str(x[0]).endswith(CORTE_CURTO)]
-    tipos = [t + CORTE_CURTO for t in list(TIPO.values()) + ["criativo_campanha"]]
+    chaves = [x[1] for x in linhas if str(x[0]).endswith(sufixo)]
+    tipos = [t + sufixo for t in list(TIPO.values()) + ["criativo_campanha"]]
     par = {f"t{i}": v for i, v in enumerate(tipos)}
     cond_tipo = "tipo IN (" + ",".join(f":t{i}" for i in range(len(tipos))) + ")"
     if not chaves:
@@ -406,7 +428,8 @@ def main() -> int:
     print(f"lançamento {resumo['lf']}")
     for corte in resumo["cortes"]:
         rotulo = ("acumulado do lançamento" if not corte["sufixo"]
-                  else f"últimos {DIAS_CORTE} dias")
+                  else ("hoje" if corte["sufixo"] == CORTE_HOJE
+                        else f"últimos {DIAS_CORTE} dias"))
         if corte.get("vazio"):
             print(f"  {rotulo} ({corte['ini']} a {corte['fim']}): VAZIO, "
                   f"nenhum criativo alcançou o piso de N")
