@@ -93,3 +93,13 @@ def tetos_por_chave(analytics_conn, ledger_conn, *, run_id: str,
                           win_start=win_start, win_end=win_end)
     return {k: teto_da_chave(k[0], k[1], d, calc, historico)
             for k, d in dists.items()}
+
+
+def carimbo(t: Teto) -> str:
+    """A coluna `teto_referencia` numa string: qual referência, qual fator, qual
+    commit geraram o número — ou o MOTIVO de não haver número. É o que torna
+    "por que o teto era X?" consulta e não arqueologia, do lado da agência."""
+    if not t.ok:
+        return f"sem_teto:{t.motivo}"
+    c = (t.codigo or {}).get("commit") or "?"
+    return f"{t.referencia_id}·fator{t.fator_rastreamento:.4f}·{str(c)[:7]}"
