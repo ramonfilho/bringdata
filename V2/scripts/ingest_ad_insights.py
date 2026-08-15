@@ -206,6 +206,44 @@ def main() -> int:
         conn.close()
     print(f"OK: {n} linhas em analytics.ad_insights · {len(ads)} em criativo_id_map")
 
+    # RESOLVEDOR DE ÓRFÃOS — braço GOOGLE. O utm numérico de lead google-ads é o
+    # creative ID do ValueTrack {creative}; o nome vem da Google Ads API (GAQL),
+    # com as credenciais que o envio de conversões já usa. ad.name vazio (tipos
+    # de anúncio sem nome) cai no nome do grupo de anúncios, que é o que o gestor
+    # reconhece no painel dele.
+    def _resolve_google(ids):
+        import requests as rq
+        cid = os.getenv("GOOGLE_ADS_CUSTOMER_ID", "").replace("-", "")
+        dev = os.getenv("GOOGLE_ADS_DEVELOPER_TOKEN")
+        if not (ids and cid and dev):
+            return {}
+        tok = rq.post("https://oauth2.googleapis.com/token", data={
+            "client_id": os.getenv("GOOGLE_ADS_CLIENT_ID"),
+            "client_secret": os.getenv("GOOGLE_ADS_CLIENT_SECRET"),
+            "refresh_token": os.getenv("GOOGLE_ADS_REFRESH_TOKEN"),
+            "grant_type": "refresh_token"}, timeout=20).json().get("access_token")
+        if not tok:
+            return {}
+        lista = ",".join(str(i) for i in ids)
+        q = ("SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group.name "
+             f"FROM ad_group_ad WHERE ad_group_ad.ad.id IN ({lista})")
+        r = rq.post(
+            f"https://googleads.googleapis.com/v22/customers/{cid}/googleAds:searchStream",
+            headers={"Authorization": f"Bearer {tok}", "developer-token": dev,
+                     "login-customer-id": os.getenv("GOOGLE_ADS_LOGIN_CUSTOMER_ID", cid).replace("-", "")},
+            json={"query": q}, timeout=60)
+        out = {}
+        if r.status_code == 200:
+            for bloco in r.json():
+                for row in bloco.get("results", []):
+                    ad = row.get("adGroupAd", {}).get("ad", {})
+                    nome = ad.get("name") or row.get("adGroup", {}).get("name")
+                    if ad.get("id") and nome:
+                        out[str(ad["id"])] = f"[G] {nome}"
+        else:
+            print(f"resolvedor google: HTTP {r.status_code}: {str(r.text)[:120]}")
+        return out
+
     # RESOLVEDOR DE ÓRFÃOS (roda toda rodada diária): utm_content numérico visto
     # nos últimos 7 dias e ausente do mapa ganha nome via GET /{id} da Meta.
     # Só os recentes: os ~288 mortos do histórico não voltam a ser tentados, e um
@@ -235,8 +273,19 @@ def main() -> int:
                           "DO UPDATE SET ad_name=EXCLUDED.ad_name, updated_at=now()",
                           c=CLIENTE, a=str(i), n=" ".join(str(nome).split()))
                 ok += 1
+        # quem a Meta não reconheceu tenta no Google (uma consulta em lote)
+        restantes = [i for i in orfaos if not conn2.run(
+            "SELECT 1 FROM criativo_id_map WHERE ad_id = :a AND ad_name IS NOT NULL", a=str(i))]
+        gnomes = _resolve_google(restantes)
+        for i, nome in gnomes.items():
+            conn2.run("INSERT INTO criativo_id_map (client_id, ad_id, ad_name, updated_at) "
+                      "VALUES (:c, :a, :n, now()) ON CONFLICT (client_id, ad_id) "
+                      "DO UPDATE SET ad_name=EXCLUDED.ad_name, updated_at=now()",
+                      c=CLIENTE, a=str(i), n=nome)
+        ok += len(gnomes)
         if orfaos:
-            print(f"resolvedor: {ok}/{len(orfaos)} órfãos recentes ganharam nome")
+            print(f"resolvedor: {ok}/{len(orfaos)} órfãos recentes ganharam nome "
+                  f"({len(gnomes)} via Google)")
     finally:
         conn2.close()
     return 0
