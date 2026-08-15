@@ -166,7 +166,21 @@ def _fronteira_utc(dia, fim_do_dia: bool = False):
     return base + timedelta(days=1) if fim_do_dia else base
 
 
-def _um_corte(conn, lf, run_id, ini, fim, sufixo: str) -> tuple:
+def _mapa_de_nomes(conn) -> dict:
+    """ad_id -> nome do anúncio, da criativo_id_map. Existe porque a macro de nome
+    falha em alguns anúncios e o utm chega como o ID numérico cru. Publicar número
+    numa linha e nome na outra é falha de consistência que corrói a confiança na
+    métrica (Ramon, 16/08) — então a CHAVE publicada é sempre o nome quando o mapa
+    o conhece; o ID fica só como fallback de anúncio ainda não mapeado."""
+    try:
+        return {str(r[0]): " ".join(str(r[1]).split())
+                for r in conn.run("SELECT ad_id, ad_name FROM analytics.criativo_id_map "
+                                  "WHERE ad_name IS NOT NULL")}
+    except Exception:
+        return {}
+
+
+def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict) -> tuple:
     """Roda a comparação numa janela e devolve (linhas, resumo). NÃO recalcula nada.
 
     O `sufixo` entra na coluna `tipo` e é o que faz os dois cortes conviverem na tabela
@@ -204,7 +218,10 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str) -> tuple:
         escondidas += dados.get("hidden_below_min_n", 0) or 0
         for r in dados["rows"]:
             chave = str(r.get("utm") or r.get("key") or "sem_utm").strip()
-            t = tetos.get((nivel, chave))
+            t = tetos.get((nivel, chave))   # o teto casa pela chave ORIGINAL do utm
+            if (nivel == "creative" and chave.isdigit() and len(chave) >= 10
+                    and chave in mapa_nome):
+                chave = mapa_nome[chave]    # publica o NOME; o ID morre na entrega
             linhas.append([
                 TIPO[nivel] + sufixo,
                 chave,
@@ -230,8 +247,9 @@ def coletar(conn) -> tuple:
     if not run_id:
         raise SystemExit("sem champion_run_id no ledger: a régua não existe")
 
+    mapa_nome = _mapa_de_nomes(conn)
     linhas, resumos = [], []
-    l, r = _um_corte(conn, lf, run_id, ini, fim, CORTE_ACUMULADO)
+    l, r = _um_corte(conn, lf, run_id, ini, fim, CORTE_ACUMULADO, mapa_nome)
     if not l:
         # O acumulado vazio é falha de verdade: significa que a comparação não achou lead
         # nenhum no lançamento. Morrer aqui é melhor que publicar só o corte curto e a
@@ -245,12 +263,21 @@ def coletar(conn) -> tuple:
     # — o mesmo motivo pelo qual a janela do acumulado sai do calendário e não de `now() - N`.
     hoje = fim if fim < _hoje_brt() else _hoje_brt()
     curto_ini = max(ini, hoje - timedelta(days=DIAS_CORTE - 1))
-    l, r = _um_corte(conn, lf, run_id, curto_ini, hoje, CORTE_CURTO)
+    l, r = _um_corte(conn, lf, run_id, curto_ini, hoje, CORTE_CURTO, mapa_nome)
     # Corte curto vazio NÃO é erro: acontece de verdade quando nenhum criativo alcançou o
     # piso de N nos últimos dias. O que não pode é passar em silêncio, então vai para o
     # resumo e sai no log.
     linhas += l
     resumos.append(r)
+    # Dedup por (tipo, chave): a tradução ID->nome pode colidir com uma linha já
+    # nomeada do mesmo corte, e upsert com a mesma chave duas vezes no mesmo INSERT
+    # é erro no Postgres. Fica a de MAIOR n (mais leads = a linha mais completa).
+    vistos = {}
+    for x in linhas:
+        k = (x[0], x[1])
+        if k not in vistos or (x[2] or 0) > (vistos[k][2] or 0):
+            vistos[k] = x
+    linhas = list(vistos.values())
     return linhas, {"lf": lf, "cortes": resumos}
 
 
@@ -289,6 +316,14 @@ def gravar(linhas) -> int:
                 f" ON CONFLICT (tipo, chave) DO UPDATE SET {atualiza}, "
                 f"atualizado_em = now()", **par)
         podadas = _poda_corte_curto(dst, linhas)
+        # Chave numérica publicada em rodada anterior vira lixo assim que a versão
+        # nomeada existe: apaga toda linha de criativo cuja chave é só dígitos —
+        # quem continua sem nome no mapa é re-upsertada nesta mesma rodada, então
+        # só a órfã (traduzida agora) morre de fato.
+        chaves_atuais = {x[1] for x in linhas}
+        dst.run("DELETE FROM " + TABELA_DESTINO +
+                " WHERE tipo LIKE 'criativo%' AND chave ~ '^[0-9]{10,}$'"
+                " AND NOT (chave = ANY(:atuais))", atuais=list(chaves_atuais))
         dst.run("COMMIT")
         n = dst.run(f"SELECT count(*) FROM {TABELA_DESTINO}")[0][0]
         return n, podadas
