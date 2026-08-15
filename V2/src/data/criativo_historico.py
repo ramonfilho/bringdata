@@ -75,10 +75,15 @@ def calcula_historico(conn, client_id: str = "devclub") -> pd.DataFrame:
     do calendário, a mesma da referência e da trava). Lançamento aberto fica fora
     inteiro: ele ainda não é história.
     """
+    # `vendas_end < hoje - 2`: a folga de 2 dias cobre o atraso de ingestão da
+    # analytics.sales (~1 dia). Sem ela, lançamento que fecha no domingo entraria na
+    # segunda com as vendas do fim de semana ainda fora do banco e ficaria uma semana
+    # subcontado. A entrada é POR LANÇAMENTO FECHADO, nunca por idade do lead — um
+    # ciclo longo (LF45, 33d) entra inteiro e maduro de uma vez, ou não entra.
     cal = {r[0]: r[1:] for r in conn.run(
         "SELECT lf_name, cap_start, cap_end, vendas_start, vendas_end "
         "FROM launch_calendar WHERE client_id = :c "
-        "  AND vendas_end IS NOT NULL AND vendas_end < CURRENT_DATE",
+        "  AND vendas_end IS NOT NULL AND vendas_end < CURRENT_DATE - 2",
         c=client_id)}
     if not cal:
         logger.warning("[criativo_historico] calendário vazio — nada a acumular")
