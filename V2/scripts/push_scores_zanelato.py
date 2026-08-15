@@ -207,8 +207,8 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict) -> tuple
     # Teto por chave (Decisão 9): calculado pela MESMA janela do corte, pelo módulo
     # de produção (teto_por_chave), e só traduzido aqui. Linha sem teto leva o
     # motivo no carimbo em vez de célula muda.
-    from src.monitoring.teto_por_chave import tetos_por_chave, carimbo
-    tetos = tetos_por_chave(
+    from src.monitoring.teto_por_chave import tetos_completos, carimbo
+    tetos, unidades_t = tetos_completos(
         conn, conn, run_id=run_id,
         win_start=_fronteira_utc(ini), win_end=_fronteira_utc(fim, fim_do_dia=True))
 
@@ -233,6 +233,29 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict) -> tuple
                 (t.roas_alvo if t is not None and t.ok else None),
                 (carimbo(t) if t is not None else "sem_teto:sem_distribuicao_de_decis"),
             ])
+    # O GRÃO DO PRODUTO: criativo DENTRO de cada campanha (o mesmo anúncio pode
+    # ter um teto numa campanha e outro na outra). tipo criativo_campanha[sufixo],
+    # chave "criativo @ campanha", mesmo piso de N das demais linhas.
+    min_n_u = comp.get("min_n") or 100
+    for u in unidades_t:
+        if u["n"] < min_n_u:
+            continue
+        t = u["teto"]
+        cr = u["criativo"]
+        if cr.isdigit() and len(cr) >= 10 and cr in mapa_nome:
+            cr = mapa_nome[cr]
+        linhas.append([
+            "criativo_campanha" + sufixo,
+            f"{cr} @ {u['campanha']}",
+            int(u["n"]),
+            round(u["pct"], 1),
+            barra,
+            round(u["pct"] - (barra or 0), 1),
+            (f"{t.valor:.2f}" if t.ok else None),
+            (t.roas_alvo if t.ok else None),
+            carimbo(t),
+        ])
+
     return linhas, {"sufixo": sufixo, "ini": ini, "fim": fim, "barra": barra,
                     "min_n": comp.get("min_n"), "escondidas": escondidas,
                     "linhas": len(linhas)}
@@ -349,7 +372,7 @@ def _poda_corte_curto(dst, linhas) -> int:
     descarte linha velha. Defesa que depende do leitor lembrar não é defesa.
     """
     chaves = [x[1] for x in linhas if str(x[0]).endswith(CORTE_CURTO)]
-    tipos = [t + CORTE_CURTO for t in TIPO.values()]
+    tipos = [t + CORTE_CURTO for t in list(TIPO.values()) + ["criativo_campanha"]]
     par = {f"t{i}": v for i, v in enumerate(tipos)}
     cond_tipo = "tipo IN (" + ",".join(f":t{i}" for i in range(len(tipos))) + ")"
     if not chaves:
