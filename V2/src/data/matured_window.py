@@ -310,14 +310,28 @@ def build_matured_window(
 
     # DUAS queries simples (plano previsível) em vez de uma costura pesada. Colunas na
     # ordem exata de CANONICAL_COLS nas duas — o concat depois é direto.
+    # A régua se busca pelo run_id NAS DUAS duplas de colunas. O ledger grava a nota
+    # de cada modelo na dupla do PAPEL que ele tinha no dia (champion/challenger), e
+    # os papéis trocam: o abr_28 era challenger até 25/07 e virou champion depois.
+    # Ler só a dupla de challenger fazia a janela perder os leads pós-troca conforme
+    # ela desliza (medido 15/08: 22.100 leads do abr_28 nas colunas de champion vs
+    # 1.213 nas de challenger desde 26/07). Mesmo padrão do casamento por run_id que
+    # já corrigiu o painel de decis.
     ledger_sql = (
         "SELECT lower(email) AS email, phone AS telefone, created_at AS data_captura, "
-        "       score_challenger, decil_challenger, "
+        "       CASE WHEN challenger_run_id = :run_id "
+        "                 AND decil_challenger IS NOT NULL AND score_challenger IS NOT NULL "
+        "            THEN score_challenger ELSE score_champion END AS score_challenger, "
+        "       CASE WHEN challenger_run_id = :run_id "
+        "                 AND decil_challenger IS NOT NULL AND score_challenger IS NOT NULL "
+        "            THEN decil_challenger ELSE decil_champion END AS decil_challenger, "
         "       utm_source, utm_campaign, utm_content, 'ledger' AS source "
         "FROM public.registros_ml "
         "WHERE created_at >= :cut AND created_at >= :ws AND created_at < :we "
-        "  AND challenger_run_id = :run_id "
-        "  AND decil_challenger IS NOT NULL AND score_challenger IS NOT NULL "
+        "  AND ((challenger_run_id = :run_id "
+        "        AND decil_challenger IS NOT NULL AND score_challenger IS NOT NULL) "
+        "    OR (champion_run_id = :run_id "
+        "        AND decil_champion IS NOT NULL AND score_champion IS NOT NULL)) "
         "  AND email IS NOT NULL AND email <> ''"
     )
     bridge_sql = (
