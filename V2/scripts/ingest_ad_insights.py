@@ -205,6 +205,40 @@ def main() -> int:
     finally:
         conn.close()
     print(f"OK: {n} linhas em analytics.ad_insights · {len(ads)} em criativo_id_map")
+
+    # RESOLVEDOR DE ÓRFÃOS (roda toda rodada diária): utm_content numérico visto
+    # nos últimos 7 dias e ausente do mapa ganha nome via GET /{id} da Meta.
+    # Só os recentes: os ~288 mortos do histórico não voltam a ser tentados, e um
+    # UTM quebrado na origem (número que nem é objeto da Meta) falha barato
+    # (1 chamada/dia) até o tráfego consertar o template.
+    import requests
+    conn2 = open_analytics_connection(timeout=120)
+    try:
+        orfaos = [r[0] for r in conn2.run(
+            "SELECT DISTINCT c.utm_content FROM captacoes c "
+            "WHERE c.utm_content ~ '^[0-9]{10,}$' "
+            "  AND c.captured_at >= CURRENT_DATE - 7 "
+            "  AND NOT EXISTS (SELECT 1 FROM criativo_id_map m "
+            "                  WHERE m.ad_id = c.utm_content)")]
+        ok = 0
+        for i in orfaos:
+            try:
+                r = requests.get(f"https://graph.facebook.com/v24.0/{i}",
+                                 params={"fields": "name", "access_token": token},
+                                 timeout=20)
+                nome = r.json().get("name") if r.status_code == 200 else None
+            except Exception:
+                nome = None
+            if nome:
+                conn2.run("INSERT INTO criativo_id_map (client_id, ad_id, ad_name, updated_at) "
+                          "VALUES (:c, :a, :n, now()) ON CONFLICT (client_id, ad_id) "
+                          "DO UPDATE SET ad_name=EXCLUDED.ad_name, updated_at=now()",
+                          c=CLIENTE, a=str(i), n=" ".join(str(nome).split()))
+                ok += 1
+        if orfaos:
+            print(f"resolvedor: {ok}/{len(orfaos)} órfãos recentes ganharam nome")
+    finally:
+        conn2.close()
     return 0
 
 
