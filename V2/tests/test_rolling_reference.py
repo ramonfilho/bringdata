@@ -176,3 +176,41 @@ if __name__ == "__main__":
         fn()
         print(f"ok: {fn.__name__}")
     print("PASS")
+
+
+def test_fator_de_rastreamento_decompoe_e_mede():
+    """5 casadas + 4 conhecidas + 1 sumida → fator (5+1)/5 = 1,2. As conhecidas
+    (outro funil) nunca entram na correção — é a Decisão 9."""
+    from src.monitoring.rolling_reference import fator_de_rastreamento
+    leads = pd.DataFrame({"email": [f"lead{i}@x.com" for i in range(5)],
+                          "telefone": [None] * 5})
+    vendas = pd.DataFrame({
+        "email": [f"lead{i}@x.com" for i in range(5)]        # casadas
+                 + [f"velho{i}@x.com" for i in range(4)]      # conhecidas
+                 + ["fantasma@x.com"],                        # sumida
+        "telefone": [None] * 10,
+    })
+    conhecidos = {f"velho{i}@x.com" for i in range(4)}
+    t = fator_de_rastreamento(vendas, leads, conhecidos, set())
+    assert t["casadas"] == 5 and t["conhecidas"] == 4 and t["sumidas"] == 1
+    assert abs(t["factor"] - 1.2) < 1e-9
+
+
+def test_fator_sem_venda_casada_nao_inventa_numero():
+    from src.monitoring.rolling_reference import fator_de_rastreamento
+    leads = pd.DataFrame({"email": ["lead@x.com"], "telefone": [None]})
+    vendas = pd.DataFrame({"email": ["outro@x.com"], "telefone": [None]})
+    assert fator_de_rastreamento(vendas, leads, set(), set()) is None
+
+
+def test_fator_deduplica_por_pessoa_e_casa_por_telefone():
+    """A mesma pessoa com 2 vendas conta uma vez; venda sem email casa pelo tel-8."""
+    from src.monitoring.rolling_reference import fator_de_rastreamento
+    leads = pd.DataFrame({"email": ["a@x.com"], "telefone": ["+55 11 91234-5678"]})
+    vendas = pd.DataFrame({
+        "email": ["a@x.com", "a@x.com", None],
+        "telefone": [None, None, "5511912345678"],
+    })
+    t = fator_de_rastreamento(vendas, leads, set(), set())
+    # a@x.com deduplicada; a venda por telefone casa com o mesmo lead
+    assert t["casadas"] == 2 and t["sumidas"] == 0 and t["factor"] == 1.0

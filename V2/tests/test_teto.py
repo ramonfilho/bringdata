@@ -313,3 +313,65 @@ def test_o_carimbo_funciona_sem_git_que_e_o_caso_do_conteiner():
             os.environ.pop('APP_COMMIT', None)
         else:
             os.environ['APP_COMMIT'] = salvo
+
+
+# ===========================================================================
+# Fator de rastreamento (Decisão 9): a conversão medida sobe pelo fator MEDIDO no
+# payload da referência antes de virar teto. Referência antiga (sem a chave) → 1,0.
+
+def _ref_com_fator(fator):
+    import copy
+    ref = copy.deepcopy(_REF)
+    ref['conversion']['tracking'] = {'factor': fator, 'casadas': 500,
+                                     'conhecidas': 400, 'sumidas': 100}
+    return ref
+
+
+def test_fator_de_rastreamento_sobe_o_teto_e_fica_carimbado():
+    sem = CalculadoraDeTeto.de_referencia_carregada(_REF).por_mistura_de_decis(_so_no_balde(('D09', 'D10')))
+    com = CalculadoraDeTeto.de_referencia_carregada(_ref_com_fator(1.2)).por_mistura_de_decis(_so_no_balde(('D09', 'D10')))
+    assert sem.fator_rastreamento == 1.0
+    assert com.fator_rastreamento == 1.2
+    # o invariante vale nos dois: valor = conversao × vps ÷ roas
+    for t in (sem, com):
+        assert abs(t.valor - t.conversao * t.valor_por_venda / t.roas_alvo) < 1e-9
+    # e o teto com fator é exatamente 1,2× o sem fator
+    assert abs(com.valor / sem.valor - 1.2) < 1e-9
+    assert abs(com.conversao / sem.conversao - 1.2) < 1e-9
+
+
+def test_referencia_antiga_sem_tracking_se_comporta_como_antes():
+    t = CalculadoraDeTeto.de_referencia_carregada(_REF).por_mistura_de_decis(_so_no_balde(('D09', 'D10')))
+    assert t.ok and t.fator_rastreamento == 1.0
+
+
+def test_fator_invalido_degrada_pra_1():
+    t = CalculadoraDeTeto.de_referencia_carregada(_ref_com_fator(-3)).por_mistura_de_decis(_so_no_balde(('D09', 'D10')))
+    assert t.ok and t.fator_rastreamento == 1.0
+
+
+# ===========================================================================
+# Fórmula da unidade (Decisão 9): conv = cm × (peso × lift + (1 − peso)).
+
+def test_unidade_estreante_fica_com_o_modelo():
+    from src.monitoring.teto import conversao_prevista_da_unidade
+    assert conversao_prevista_da_unidade(0.01, 0, 0, 0.0) == 0.01
+
+
+def test_unidade_com_historico_grande_converge_pro_lift():
+    from src.monitoring.teto import conversao_prevista_da_unidade
+    # criativo 2x acima da época dele, com 40k leads: peso ~0,95
+    prev = conversao_prevista_da_unidade(0.01, 40000, 400, 200.0, k=2000)
+    assert 0.019 < prev < 0.0198  # perto de cm×2, sem nunca chegar (modelo não sai)
+
+
+def test_unidade_lift_e_adimensional_o_nivel_vem_do_modelo():
+    from src.monitoring.teto import conversao_prevista_da_unidade
+    a = conversao_prevista_da_unidade(0.010, 5000, 60, 50.0)
+    b = conversao_prevista_da_unidade(0.020, 5000, 60, 50.0)
+    assert abs(b / a - 2.0) < 1e-9  # mercado dobra → previsão dobra, lift intacto
+
+
+def test_unidade_sem_esperados_cai_no_modelo():
+    from src.monitoring.teto import conversao_prevista_da_unidade
+    assert conversao_prevista_da_unidade(0.01, 500, 3, 0.0) == 0.01

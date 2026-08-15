@@ -95,6 +95,10 @@ MOTIVO_SEM_DISTRIBUICAO = 'sem_distribuicao_de_decis'  # não sabemos em que fai
 # São gravadas junto do resultado porque não existe outra fonte a consultar depois.
 CHAVES_QUE_MUDAM_O_TETO = ("REFERENCE_SOURCE", "LAUNCHES_SOURCE", "LEDGER_DECIL_READ_SOURCE")
 
+# Encolhimento do histórico do criativo (Decisão 9). Platô medido: 250 a 4.000 dão
+# praticamente o mesmo resultado no backtest; 2.000 é o valor documentado.
+K_HISTORICO_CRIATIVO = 2000
+
 
 def _configuracao_vigente() -> dict:
     """As chaves acima como estão AGORA. Ausente vira '(default)', que é informação:
@@ -150,6 +154,39 @@ def teto_cpl(conversion_rate, value_per_sale, roas_alvo: float = ROAS_ALVO_PADRA
     return conversion_rate * value_per_sale / roas_alvo
 
 
+def conversao_prevista_da_unidade(conv_modelo: Optional[float],
+                                  leads_historico: int,
+                                  compradores_historico: int,
+                                  compradores_esperados: float,
+                                  k: int = K_HISTORICO_CRIATIVO) -> Optional[float]:
+    """Conversão prevista de uma UNIDADE (um criativo rodando numa campanha) — Decisão 9.
+
+        conversão = conv_modelo × (peso × lift + (1 − peso))      peso = n ÷ (n + k)
+
+    - `conv_modelo`: a mistura de decis da campanha (braço "público"), lida da
+      referência. É o nível: quando o mercado se move, ele se move por aqui.
+    - `lift` = compradores_historico ÷ compradores_esperados. O mérito RELATIVO do
+      criativo: quantas vezes acima (ou abaixo) da média DA ÉPOCA em que ele rodou.
+      `compradores_esperados` = Σ leads do criativo em cada lançamento passado × a
+      conversão geral daquele lançamento — é o que ele teria vendido se fosse médio.
+      Adimensional: mercado dobra, lift não muda.
+    - `peso` cresce com o histórico: n=0 → 0 (estreante: só o modelo; é aqui que o
+      palpite do TEXTO vai entrar como prior); n=8.000 → 0,8; n=40.000 → 0,95.
+      O modelo NUNCA sai da fórmula.
+
+    Regra de ouro do backtest preservada por contrato: o histórico passado aqui deve
+    vir só de lançamentos ANTERIORES ao avaliado, nunca do próprio.
+    """
+    if conv_modelo is None:
+        return None
+    n = max(int(leads_historico or 0), 0)
+    if n <= 0 or not compradores_esperados or compradores_esperados <= 0:
+        return conv_modelo
+    lift = max(int(compradores_historico or 0), 0) / float(compradores_esperados)
+    peso = n / (n + float(k))
+    return conv_modelo * (peso * lift + (1.0 - peso))
+
+
 @dataclass(frozen=True)
 class Teto:
     """O teto de um segmento, com o MOTIVO de ele existir ou não.
@@ -165,9 +202,18 @@ class Teto:
     """
     valor: Optional[float]
     motivo: str
+    # Conversão ESPERADA usada na conta — já corrigida pelo fator de rastreamento
+    # (a medida crua é conversao ÷ fator_rastreamento). O invariante vale sempre:
+    # valor = conversao × valor_por_venda ÷ roas_alvo.
     conversao: Optional[float] = None
     valor_por_venda: Optional[float] = None
     roas_alvo: float = ROAS_ALVO_PADRAO
+    # Fator de rastreamento (Decisão 9): só ~6 de 10 compradores casam com um lead,
+    # e a decomposição de 15/08 mostrou que a correção legítima é ~1,2 (só as vendas
+    # "sumidas" — 16% das não-casadas — podem ser de lead nosso; as outras 84% são
+    # gente conhecida que comprou por outro funil). Vem MEDIDO do payload da
+    # referência; 1,0 = referência sem o fator (comportamento antigo).
+    fator_rastreamento: float = 1.0
     referencia_as_of: Optional[str] = None
     # ── PROCEDÊNCIA ─────────────────────────────────────────────────────────────
     # Três coisas mudam este número, e cada uma se registra de um jeito diferente:
@@ -220,6 +266,16 @@ class CalculadoraDeTeto:
         self._vps = (conv.get('economics') or {}).get('value_per_sale')
         self._by_decile = conv.get('by_decile') or {}
         self._by_bucket = conv.get('by_bucket') or {}
+        # Fator de rastreamento MEDIDO pelo job da referência na mesma janela
+        # (conversion.tracking.factor). Referência antiga sem a chave → 1,0.
+        try:
+            self._fator = float((conv.get('tracking') or {}).get('factor') or 1.0)
+        except (TypeError, ValueError):
+            self._fator = 1.0
+        if self._fator <= 0:
+            logger.warning("[teto] fator de rastreamento inválido (%s) — usando 1,0",
+                           self._fator)
+            self._fator = 1.0
         self._tem_ref = bool(ref)
 
     @classmethod
@@ -262,15 +318,20 @@ class CalculadoraDeTeto:
 
     def _monta(self, conversao: Optional[float], motivo_se_falta: str) -> Teto:
         proc = dict(referencia_as_of=self._as_of, referencia_id=self._ref_id,
-                    codigo=self._codigo, configuracao=self._config)
+                    codigo=self._codigo, configuracao=self._config,
+                    fator_rastreamento=self._fator)
         base = self._falta_base()
         if base:
             return Teto(None, base, roas_alvo=self._roas, **proc)
         if conversao is None:
             return Teto(None, motivo_se_falta, valor_por_venda=self._vps,
                         roas_alvo=self._roas, **proc)
-        return Teto(teto_cpl(conversao, self._vps, roas_alvo=self._roas), MOTIVO_OK,
-                    conversao=conversao, valor_por_venda=self._vps,
+        # A conversão MEDIDA sobe pelo fator de rastreamento antes de virar teto:
+        # a medida só enxerga os compradores casados, e a fatia "sumida" (falha de
+        # casamento) pertence aos leads. Ver Decisão 9 do doc do teto.
+        esperada = conversao * self._fator
+        return Teto(teto_cpl(esperada, self._vps, roas_alvo=self._roas), MOTIVO_OK,
+                    conversao=esperada, valor_por_venda=self._vps,
                     roas_alvo=self._roas, **proc)
 
     # ------------------------------------------------------------------ por decil
