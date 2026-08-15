@@ -92,7 +92,27 @@ dentro (ROAS 2,52) × 23% fora (1,18)"; exemplos por lançamento: LF56 17 unidad
 dentro ROAS 2,97 × 4 acima 0,55; LF50 71% dentro (3,10) × 8% fora (1,18).
 Obrigatório re-medir com o texto quando ele entrar.
 
-## 4. Operação
+## 4. Como o gestor de tráfego lê e usa (consumo)
+
+Onde: `public.scores_inbound` no Supabase da agência (o painel deles lê dali),
+atualizada de hora em hora no minuto :22. Chave única `(tipo, chave)`.
+
+| coluna | leitura do gestor |
+|---|---|
+| `tipo` | `criativo`/`campanha` = acumulado do lançamento; sufixo `_3dias` = janela recente (a visão pra decidir HOJE) |
+| `chave` | nome do anúncio ou da campanha; anúncio do GOOGLE aparece com o ID numérico até o braço Google do resolvedor existir |
+| `teto_cpl` | pague até ISTO por lead desta chave pra dobrar o dinheiro |
+| `teto_roas_alvo` | a meta embutida no número acima (2,0) |
+| `teto_referencia` | o selo: qual referência+fator+commit geraram o número, ou o MOTIVO de não haver teto |
+| `pct_top20`/`delta_vs_referencia` | a nota de qualidade do público que já existia antes |
+
+Uso no dia a dia: comparar o CPL do gerenciador com o `teto_cpl` da linha
+correspondente. Abaixo com folga = margem pra escalar; acima = reduzir lance/
+orçamento ou trocar criativo. Linha sem teto = ler o motivo no selo (quase sempre
+volume < 100 leads). O guia em linguagem do gestor está na doc do cliente
+(artifact "Teto de custo por lead", seção "Como usar no dia a dia").
+
+## 4b. Operação
 
 | ação | comando/mecanismo |
 |---|---|
