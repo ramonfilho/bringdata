@@ -103,9 +103,76 @@ def test_calibrador_monotono_e_calibrado():
     assert abs(float(allp.mean()) - float(m["converted"].mean())) < 0.15
 
 
+def _matched_com_datas():
+    """Fixture pra janela do CALENDÁRIO: leads com data de captação e de venda.
+
+    Calendário sintético: DEV19 capta 01-07/06 e vende até 10/07 (ciclo de 40d,
+    o caso real que motivou a mudança: 15,4% dos compradores dele depois do dia 21).
+    """
+    launches = {"DEV19": {"cap_start": "2026-06-01", "cap_end": "2026-06-07",
+                          "vendas_start": "2026-07-04", "vendas_end": "2026-07-10"}}
+    m = pd.DataFrame({
+        # a) DEV19, compra no dia 30 da captação: o prazo fixo de 21d jogava fora
+        # b) DEV19, compra DEPOIS do vendas_end: pertence ao lançamento seguinte
+        # c) fora de calendário, compra no dia 15: piso de 21d segura
+        # d) fora de calendário, compra no dia 30: passou do piso
+        # e) DEV19, sem compra
+        "data_captura": pd.to_datetime(["2026-06-02", "2026-06-05", "2026-05-10",
+                                        "2026-05-10", "2026-06-03"]),
+        "sale_date": pd.to_datetime(["2026-07-02", "2026-07-15", "2026-05-25",
+                                     "2026-06-09", pd.NaT]),
+        "converted": [True, True, True, True, False],
+    })
+    return m, launches
+
+
+def test_janela_de_compra_vem_do_calendario():
+    from datetime import date
+    from src.monitoring.rolling_reference import _aplica_janela_do_calendario
+    m, launches = _matched_com_datas()
+    out = _aplica_janela_do_calendario(m, as_of=date(2026, 8, 1), launches=launches)
+    assert len(out) == 5  # todas as janelas já fecharam em 01/08
+    conv = out["converted"].tolist()
+    assert conv[0] is True or conv[0] == True    # dia 30, dentro do vendas_end  # noqa: E712
+    assert not conv[1]                           # depois do vendas_end
+    assert conv[2]                               # piso: dia 15 conta
+    assert not conv[3]                           # piso: dia 30 não conta
+    assert not conv[4]                           # sem venda
+
+
+def test_lead_de_janela_aberta_fica_fora_da_referencia():
+    """Lead cujo lançamento ainda vende não pode entrar: a compra dele ainda pode
+    acontecer, e gravá-lo agora subestimaria a taxa da referência."""
+    from datetime import date
+    from src.monitoring.rolling_reference import _aplica_janela_do_calendario
+    m, launches = _matched_com_datas()
+    # em 05/07 o DEV19 ainda vende (vendas_end 10/07): os 3 leads dele saem;
+    # os 2 leads fora de calendário (limite = captação+21d, já passou) ficam.
+    out = _aplica_janela_do_calendario(m, as_of=date(2026, 7, 5), launches=launches)
+    assert len(out) == 2
+    assert out["data_captura"].dt.strftime("%Y-%m-%d").tolist() == ["2026-05-10", "2026-05-10"]
+
+
+def test_limites_de_compra_bate_com_a_regra_por_lead():
+    """A versão vetorizada e a por-lead (`compra_conta_para_o_lead`) são a MESMA
+    regra: para cada lead, comprar NO limite conta e um dia depois não conta."""
+    from src.data.matured_window import compra_conta_para_o_lead, limites_de_compra
+    m, launches = _matched_com_datas()
+    lim = limites_de_compra(m["data_captura"], launches)
+    for cap, lf, limite in zip(m["data_captura"], lim["lf"], lim["limite"]):
+        assert compra_conta_para_o_lead(data_captura=cap, data_compra=limite,
+                                        lf_name=lf, launches=launches)
+        assert not compra_conta_para_o_lead(data_captura=cap,
+                                            data_compra=limite + pd.Timedelta(days=1).to_pytimedelta(),
+                                            lf_name=lf, launches=launches)
+
+
 if __name__ == "__main__":
     for fn in (test_overall_e_por_decil_usam_tudo, test_canal_balde_so_com_utm,
-               test_vazio_degrada_limpo, test_calibrador_monotono_e_calibrado):
+               test_vazio_degrada_limpo, test_calibrador_monotono_e_calibrado,
+               test_janela_de_compra_vem_do_calendario,
+               test_lead_de_janela_aberta_fica_fora_da_referencia,
+               test_limites_de_compra_bate_com_a_regra_por_lead):
         fn()
         print(f"ok: {fn.__name__}")
     print("PASS")

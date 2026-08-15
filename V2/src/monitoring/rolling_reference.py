@@ -29,8 +29,8 @@ from typing import Optional
 import pandas as pd
 
 from src.data.matured_window import (
-    build_matured_window, matured_bounds, resolve_ruler_run_id,
-    DEFAULT_MATURATION_DAYS,
+    build_matured_window, limites_de_compra, matured_bounds, resolve_ruler_run_id,
+    DEFAULT_MATURATION_DAYS, MATURACAO_MAXIMA_DIAS, MATURACAO_MINIMA_DIAS,
 )
 # NOTE(sw-architect): build_matched_df/read_analytics_sales moram hoje em
 # src/validation/model_performance. É reuso (não duplicação); a limpeza de camada
@@ -42,11 +42,67 @@ from src.model.calibration import make_calibrator
 logger = logging.getLogger(__name__)
 
 
+def _aplica_janela_do_calendario(matched: pd.DataFrame, *, as_of: date,
+                                 launches: Optional[dict] = None) -> pd.DataFrame:
+    """Aperta o `converted` pro prazo do CALENDÁRIO e tira lead de janela aberta.
+
+    Regra por lead (a mesma de `compra_conta_para_o_lead`): a compra conta da
+    captação até o `vendas_end` do lançamento em que o lead entrou; sem lançamento,
+    piso de `MATURACAO_MINIMA_DIAS`. Lead cujo limite ainda não passou (janela
+    ABERTA) sai do resultado: ele ainda pode comprar, e contá-lo agora gravaria uma
+    taxa subestimada na referência.
+
+    Medição que motivou (14/08/2026, 26 lançamentos fechados): com ciclo de 21d a
+    diferença é zero, mas DEV19 (ciclo de 40d) tem 15,4% dos compradores DEPOIS do
+    dia 21 — o prazo fixo de 21d jogava esses compradores fora.
+    """
+    if matched.empty:
+        return matched
+    lim = limites_de_compra(matched["data_captura"], launches)
+    lim_ts = pd.to_datetime(lim["limite"])
+
+    sd = pd.to_datetime(matched["sale_date"], errors="coerce")
+    try:
+        sd = sd.dt.tz_localize(None)
+    except TypeError:
+        pass  # já era naive
+    dentro = (sd.dt.normalize() <= lim_ts).fillna(False)
+
+    out = matched.copy()
+    out["converted"] = (out["converted"].fillna(False) & dentro).astype(bool)
+
+    fechada = lim_ts.notna() & (lim_ts <= pd.Timestamp(as_of))
+    n_abertos = int((~fechada).sum())
+    if n_abertos:
+        logger.info("[rolling_reference] %d leads de janela ainda aberta fora da "
+                    "referência (limite > %s)", n_abertos, as_of)
+    logger.info("[rolling_reference] janela de compra por calendário: %d leads com "
+                "lançamento, %d no piso de %dd",
+                int(lim["lf"].notna().sum()), int(lim["lf"].isna().sum()),
+                MATURACAO_MINIMA_DIAS)
+    return out[fechada].copy()
+
+
 def label_matured(matured_df: pd.DataFrame, sales_df: pd.DataFrame, *,
-                  conversion_window_days: int = DEFAULT_MATURATION_DAYS) -> pd.DataFrame:
-    """Casa a janela madura com as vendas (matcher canônico) e devolve `matured_df` +
-    coluna `converted` (venda dentro de `conversion_window_days` da captação)."""
-    return build_matched_df(matured_df, sales_df, window_days=conversion_window_days)
+                  as_of: Optional[date] = None,
+                  launches: Optional[dict] = None,
+                  conversion_window_days: Optional[int] = None) -> pd.DataFrame:
+    """Casa a janela madura com as vendas (matcher canônico) e devolve os leads de
+    janela FECHADA + coluna `converted` (venda dentro da janela de compra do LEAD).
+
+    A janela de compra vem do CALENDÁRIO, não de um prazo fixo: da captação até o
+    `vendas_end` do lançamento do lead (depois disso a compra pertence ao lançamento
+    seguinte). O casamento roda com `window_days=MATURACAO_MAXIMA_DIAS` só como teto
+    de sanidade contra `vendas_end` absurdo na planilha.
+
+    `conversion_window_days` (diagnóstico): prazo FIXO igual pra todo lead, ignorando
+    o calendário. Serve pra reproduzir números antigos; nunca em produção.
+    """
+    if conversion_window_days is not None:
+        return build_matched_df(matured_df, sales_df, window_days=conversion_window_days)
+    matched = build_matched_df(matured_df, sales_df, window_days=MATURACAO_MAXIMA_DIAS)
+    return _aplica_janela_do_calendario(matched, as_of=as_of or date.today(),
+                                        launches=launches)
 
 
 # Base mínima pra um SEGMENTO (canal ou balde) publicar taxa de conversão própria.
@@ -166,10 +222,15 @@ def build_conversion_reference(
     client_id: str = "devclub",
     ruler_run_id: Optional[str] = None,
     bucket_map=None,
+    launches: Optional[dict] = None,
     conn=None,
 ) -> dict:
     """Orquestra: janela madura → casa vendas UMA vez → conversão de referência +
     calibrador. Devolve o dict pronto pra materializar na tabela da referência.
+
+    `maturation_days` é o RECUO da janela de captação (garante que todo lead já teve
+    o mínimo de dias pra comprar). O prazo de compra de cada lead vem do calendário
+    (`label_matured`); leads de lançamento ainda aberto saem lá.
     """
     as_of = as_of or date.today()
     run_id = ruler_run_id or resolve_ruler_run_id(client_id)
@@ -184,15 +245,22 @@ def build_conversion_reference(
             window_days=window_days, maturation_days=maturation_days, as_of=as_of,
             client_id=client_id, ruler_run_id=run_id, conn=conn,
         )
-        # Vendas de [win_start, as_of]: cobre a janela de conversão (até 60d após a
-        # captação mais recente da janela, que já passou). end exclusivo → +1 dia.
+        # Vendas de [win_start, as_of]: o limite de compra por lead é <= as_of (lead
+        # de janela aberta sai), então esse range cobre tudo. end exclusivo → +1 dia.
         sales = read_analytics_sales(conn, win_start.date(), as_of + timedelta(days=1))
     finally:
         if own:
             conn.close()
 
-    matched = label_matured(matured, sales, conversion_window_days=maturation_days)
+    matched = label_matured(matured, sales, as_of=as_of, launches=launches)
     conv = conversion_reference(matched, bucket_map=bucket_map)
+    # Proveniência da regra de contagem (valor no payload, não config implícita):
+    # quem ler a referência sabe COMO a compra foi contada, sem arqueologia de git.
+    conv["conversion_window"] = {
+        "mode": "calendar",
+        "floor_days": MATURACAO_MINIMA_DIAS,
+        "cap_days": MATURACAO_MAXIMA_DIAS,
+    }
     # Economia do teto (Fase 3): valor por venda da janela (cartão 2k + boleto 50%,
     # mistura REAL de gateways). Vive dentro do `conversion` jsonb → sem coluna nova.
     from src.monitoring.teto import value_per_sale_from_sales
