@@ -280,7 +280,8 @@ def capture_training_categories(df: pd.DataFrame, output_path: str = None) -> Di
 
 def check_category_drift(df_producao: pd.DataFrame,
                          categorias_esperadas: Dict[str, List[str]],
-                         valores_crus: Optional[Dict[str, pd.Series]] = None) -> List[Dict]:
+                         valores_crus: Optional[Dict[str, pd.Series]] = None,
+                         padroes_conhecidos: Optional[Dict[str, List[str]]] = None) -> List[Dict]:
     """
     Verifica se há categorias novas em produção não vistas no treino.
 
@@ -295,12 +296,27 @@ def check_category_drift(df_producao: pd.DataFrame,
             quase aconteceu quando a Meta trocou a nomenclatura de campanha em
             10/08/2026 — o alerta só saiu porque o monitoramento estava, por
             acidente, rodando o Medium no modo de frequência.
+        padroes_conhecidos: {coluna: [regex, ...]} com os padrões que o PIPELINE
+            já traduz sozinho (`medium.pattern_mappings`, `utm.term_outros_patterns`).
+            Contrapeso obrigatório de `valores_crus`: ler o valor cru devolve a
+            detecção, mas sem esta lista o detector não tem como saber que aquele
+            cru já é tratado, e passa a acusar como "categoria nova" um vocabulário
+            que o sistema resolve todo dia. Foi o que aconteceu de 14/08/2026 em
+            diante: mesmo com o passo 3b traduzindo `[ADVTG_ABERTO]...` → `Aberto`
+            em produção, o relatório listava as 16 variantes e 86,2% dos leads
+            diariamente, e a lista crescia a cada anúncio novo.
+
+            Valor cru que casa com padrão conhecido não é vocabulário novo: é
+            vocabulário conhecido e TRATADO. Sai do alerta e vai para o log.
+            Prefixo realmente novo (ex.: `[ADVTG_QUENTE]`) não casa com padrão
+            nenhum e continua alertando — a detecção fica intacta.
 
     Returns:
         Lista de alertas (vazia se tudo OK)
     """
     alertas = []
     valores_crus = valores_crus or {}
+    padroes_conhecidos = padroes_conhecidos or {}
 
     for col, categorias_treino in categorias_esperadas.items():
         # Coluna com valor cru disponível: a evidência de vocabulário novo mora
@@ -326,6 +342,33 @@ def check_category_drift(df_producao: pd.DataFrame,
             v for v in categorias_producao_str
             if v.strip() and v.lower() != 'nan'
         ]
+
+        # Tira da comparação o cru que o pipeline JÁ traduz. Sem isto, ler o
+        # valor cru (ver `valores_crus`) transforma todo padrão tratado em
+        # alarme permanente. Fail-soft por contrato: regex inválido no yaml não
+        # pode derrubar o relatório das 06:00 — loga e segue sem o padrão.
+        _tratados = set()
+        for _pattern in (padroes_conhecidos.get(col) or []):
+            try:
+                _rx = re.compile(_pattern)
+            except re.error as e:
+                logger.warning(
+                    f"[category_drift] padrão conhecido inválido em '{col}': "
+                    f"{_pattern!r} ({e}). Ignorado."
+                )
+                continue
+            _tratados.update(v for v in categorias_producao_str if _rx.search(v))
+
+        if _tratados:
+            categorias_producao_str = [
+                v for v in categorias_producao_str if v not in _tratados
+            ]
+            logger.info(
+                f"[category_drift] {col}: {len(_tratados)} valor(es) cru(s) "
+                f"suprimido(s) do alerta por casarem com padrão que o pipeline "
+                f"já traduz: {sorted(_tratados)[:5]}"
+                + (f" (e mais {len(_tratados) - 5})" if len(_tratados) > 5 else "")
+            )
 
         # NOVO: Normalizar ambas as listas para comparação
         # Isso evita falsos positivos onde "Sou autonomo" (sem acento) é detectado
@@ -903,6 +946,33 @@ class DataQualityMonitor:
                         return candidate
         return None
 
+    def _padroes_conhecidos(self) -> Dict[str, List[str]]:
+        """Padrões que o pipeline traduz sozinho, por coluna CRUA.
+
+        Fonte única: a mesma config que `core/medium.py` e `core/utm.py` leem
+        para de fato traduzir. Ler daqui (e não de uma lista própria do
+        monitoramento) é o que impede as duas visões de divergirem — se alguém
+        remover o padrão do yaml, o alerta volta a acusar no mesmo dia, que é o
+        comportamento correto.
+        """
+        cfg = self.client_config
+        if cfg is None:
+            return {}
+
+        padroes: Dict[str, List[str]] = {}
+
+        medium = getattr(cfg, 'medium', None)
+        mapeamentos = getattr(medium, 'pattern_mappings', None) if medium else None
+        if mapeamentos:
+            padroes['Medium'] = list(mapeamentos.keys())
+
+        utm = getattr(cfg, 'utm', None)
+        term_patterns = getattr(utm, 'term_outros_patterns', None) if utm else None
+        if term_patterns:
+            padroes['Term'] = list(term_patterns)
+
+        return padroes
+
     def _check_category_drift(self, df: pd.DataFrame,
                               valores_crus: Optional[Dict[str, pd.Series]] = None) -> List[Dict]:
         """
@@ -938,7 +1008,10 @@ class DataQualityMonitor:
                 continue
 
             try:
-                drift_results = check_category_drift(df, categorias_esperadas, valores_crus)
+                drift_results = check_category_drift(
+                    df, categorias_esperadas, valores_crus,
+                    padroes_conhecidos=self._padroes_conhecidos(),
+                )
             except Exception as e:
                 logger.error(f"[category_drift] variant '{variant_name}' erro check: {e}")
                 continue
