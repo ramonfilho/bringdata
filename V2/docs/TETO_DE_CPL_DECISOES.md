@@ -352,10 +352,20 @@ ORDEM é imune a elas — o nível, não (ver tabela abaixo).
 ROAS ≥ 2 na parte contada, mas o empate real permite pagar mais). Correção cheia pela
 taxa de reconhecimento da planilha do cliente (57,6% a 66,2%, estável; mediana 0,615)
 multiplica o teto por ~1,63, mas assume que todo comprador não-casado era lead nosso, o
-que corrige demais (parte nunca foi lead: aluno antigo, outro funil). A verdade está
-entre ×1,0 e ×1,63; a decomposição das vendas não-casadas contra a espinha de cadastros
-(quem existe lá = outro funil; quem não existe em lugar nenhum = falha de casamento)
-fecha o número com dado. Medição em curso em 15/08.
+que corrige demais (parte nunca foi lead: aluno antigo, outro funil).
+
+**Medido em 15/08/2026** (25 lançamentos com 30+ vendas na janela de vendas; 4.517
+vendas): 2.034 casaram com lead da captação do próprio lançamento; das 2.483 restantes,
+**84% são pessoas CONHECIDAS da base** (existem na espinha de cadastros ou em captação
+anterior — compraram pelo funil antigo/outro produto, não pela captação daquele
+lançamento) e só 401 (16%) "sumidas" (não existem em lugar nenhum — teto superior das
+falhas de casamento, porque inclui também quem comprou direto no checkout sem nunca
+preencher formulário). O fator de correção legítimo fica em **×1,18 na mediana por
+lançamento (×1,27 nos LF56+)**, contra os ×1,63 da correção cheia e os ×2,22 que a taxa
+bruta desta medição sugeriria. A faixa real do nível do teto é **×1,0 (piso) a ~×1,2
+(teto defensável)** — a decisão piso × fator medido é de negócio; se adotado o fator,
+ele deve ser calculado pelo próprio job da referência na mesma janela e carimbado no
+payload, como os demais insumos.
 
 ---
 
