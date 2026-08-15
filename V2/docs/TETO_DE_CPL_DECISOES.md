@@ -317,6 +317,17 @@ significância (p = 0,17). O desempate foi o argumento de época, não o dado. K
 específico piorar de verdade, o acumulado demora a refletir (a ordem entre criativos se
 mostrou estável por 6 meses nos artifacts, então o risco é baixo, mas existe).
 
+**Registro: a queda de 2026 foi de NÍVEL (mercado), não de separação (modelo).** A
+premissa da fórmula lift é que o nível se move para todo mundo e o mérito relativo
+fica. O dado sustenta: de LF43-46 (fev) para LF56-59 (jun), o topo D9-D10 caiu de
+3,67% para 1,74% (−53%) e a média geral caiu de 1,85% para 0,83% (−55%) — proporcional,
+com a razão topo÷média indo de 1,98x para 2,10x. No corte só-Meta (LF56-61), o ponto do
+topo caiu mais que o do meio (−53% vs −31%), mas a diferença se apoia em 16-21 compras
+e não passa no teste estatístico; a ordem nunca inverteu. Vigília aberta: o DEV21, onde
+a separação do pago da Meta deu 1,23x no dia 1 (não-Meta: 2,28x) — fenômeno posterior,
+específico do canal, com teste pré-registrado pendente. Se ele se confirmar, o problema
+é do braço do MODELO na Meta, não da fórmula do criativo.
+
 ### As métricas do backtest (documentação do resultado)
 
 Base: 314.752 leads deduplicados de 26 lançamentos fechados (25/11/2025 a 30/07/2026),
