@@ -82,15 +82,19 @@ def _conv_composta_da_unidade(dist: dict, criativo: str,
     return conv, n
 
 
-def tetos_por_chave(analytics_conn, ledger_conn, *, run_id: str,
-                    win_start, win_end, client_id: str = "devclub") -> dict:
-    """{('creative'|'campaign', chave): Teto}. Criativo e campanha são as DUAS
-    agregações das mesmas unidades, ponderadas por leads — nunca contas de
-    naturezas diferentes que possam divergir."""
+def tetos_completos(analytics_conn, ledger_conn, *, run_id: str,
+                    win_start, win_end, client_id: str = "devclub") -> tuple:
+    """(por_chave, por_unidade) numa passada só das MESMAS unidades.
+
+    por_chave: {('creative'|'campaign', chave): Teto} — as duas agregações.
+    por_unidade: lista de {campanha, criativo, n, pct, teto} — o GRÃO DO PRODUTO
+    (o mesmo criativo pode ter um teto numa campanha e outro na outra; é essa
+    linha que o gestor usa pra decidir, Ramon 16/08)."""
     calc = CalculadoraDeTeto.da_referencia(client_id, conn=analytics_conn)
     historico = le_historico(analytics_conn, client_id=client_id)
     us = unidades(ledger_conn, run_id=run_id, win_start=win_start, win_end=win_end)
 
+    por_unidade = []
     soma = {"creative": defaultdict(lambda: [0.0, 0]),
             "campaign": defaultdict(lambda: [0.0, 0])}
     for (camp, cria), dist in us.items():
@@ -98,6 +102,11 @@ def tetos_por_chave(analytics_conn, ledger_conn, *, run_id: str,
         if r is None:
             continue
         conv, n = r
+        topo = dist.get("D09", 0) + dist.get("D10", 0)
+        por_unidade.append(dict(
+            campanha=camp, criativo=cria, n=n,
+            pct=(100.0 * topo / n) if n else 0.0,
+            teto=calc.de_conversao_medida(conv, origem=f"unit:{cria}@{camp}")))
         for nivel, chave in (("creative", cria), ("campaign", camp)):
             soma[nivel][chave][0] += conv * n
             soma[nivel][chave][1] += n
@@ -107,10 +116,18 @@ def tetos_por_chave(analytics_conn, ledger_conn, *, run_id: str,
             if den > 0:
                 out[(nivel, chave)] = calc.de_conversao_medida(
                     num / den, origem=f"{nivel}:{chave}")
-    logger.info("[teto_por_chave] tetos: %d criativos · %d campanhas",
+    logger.info("[teto_por_chave] tetos: %d criativos · %d campanhas · %d unidades",
                 sum(1 for k in out if k[0] == "creative"),
-                sum(1 for k in out if k[0] == "campaign"))
-    return out
+                sum(1 for k in out if k[0] == "campaign"), len(por_unidade))
+    return out, por_unidade
+
+
+def tetos_por_chave(analytics_conn, ledger_conn, *, run_id: str,
+                    win_start, win_end, client_id: str = "devclub") -> dict:
+    """Compat: só as agregações. Ver `tetos_completos`."""
+    return tetos_completos(analytics_conn, ledger_conn, run_id=run_id,
+                           win_start=win_start, win_end=win_end,
+                           client_id=client_id)[0]
 
 
 def carimbo(t: Teto) -> str:
