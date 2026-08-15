@@ -333,6 +333,9 @@ def _poda_corte_curto(dst, linhas) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--check", action="store_true", help="calcula e mostra, não escreve")
+    ap.add_argument("--dump-parity", action="store_true",
+                    help="imprime CADA linha calculada (tipo;chave;teto) e não escreve — "
+                         "é o lado de cá do portão de paridade local×nuvem")
     a = ap.parse_args()
 
     from src.data.analytics_connection import open_analytics_connection
@@ -370,6 +373,12 @@ def main() -> int:
               f"top20={x[3]}% ref={x[4]}% delta={x[5]:+}pp "
               f"teto={'R$'+x[6] if x[6] else x[8]}")
 
+    if a.dump_parity:
+        print("PARITY-BEGIN")
+        for x in sorted(linhas, key=lambda r: (r[0], str(r[1]))):
+            print(f"P|{x[0]}|{x[1]}|{x[6] or ''}|{x[7] or ''}|{x[8] or ''}")
+        print("PARITY-END")
+        return 0
     if a.check:
         print("\n--check: nada gravado.")
         return 0
