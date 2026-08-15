@@ -78,7 +78,9 @@ class MetaAdsIntegration:
         until_date: Optional[str] = None,
         action_breakdowns: Optional[List[str]] = None,
         action_attribution_windows: Optional[List[str]] = None,
-        filtering: Optional[List[Dict]] = None
+        filtering: Optional[List[Dict]] = None,
+        time_increment: Optional[int] = None,
+        timeout_s: int = 10
     ) -> List[Dict]:
         """
         Busca insights (métricas) de uma conta de anúncios
@@ -124,6 +126,11 @@ class MetaAdsIntegration:
             'limit': 1000
         }
 
+        # 1 = uma linha por DIA (a ingestão por anúncio precisa do grão diário);
+        # None = comportamento de sempre (janela agregada numa linha só).
+        if time_increment:
+            params['time_increment'] = int(time_increment)
+
         # Adicionar breakdowns se fornecidos
         if action_breakdowns:
             params['action_breakdowns'] = ','.join(action_breakdowns)
@@ -141,7 +148,7 @@ class MetaAdsIntegration:
 
         for attempt in range(self.INSIGHTS_MAX_RETRIES):
             try:
-                response = requests.get(url, params=params, timeout=10)
+                response = requests.get(url, params=params, timeout=timeout_s)
                 response.raise_for_status()
 
                 data = response.json()
