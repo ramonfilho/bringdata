@@ -292,8 +292,13 @@ def coletar(conn) -> tuple:
     l, r = _um_corte(conn, lf, run_id, curto_ini, hoje, CORTE_CURTO, mapa_nome)
     linhas += l
     resumos.append(r)
-    # corte HOJE: mesmo piso de N, janela = o próprio dia
-    l, r = _um_corte(conn, lf, run_id, hoje, hoje, CORTE_HOJE, mapa_nome)
+    # corte HOJE: mesmo piso de N, janela = O DIA REAL de Brasília, SEM o grampo do
+    # calendário. Os outros cortes se ancoram no lançamento; este existe pra gerir
+    # o que roda AGORA — entre lançamentos (cap_end ontem, planilha ainda sem o
+    # próximo), "hoje" rotulando ontem enganaria o gestor (pego em 16/08: 117 leads
+    # do dia invisíveis porque o corte olhava 15/08).
+    hoje_real = _hoje_brt()
+    l, r = _um_corte(conn, lf, run_id, hoje_real, hoje_real, CORTE_HOJE, mapa_nome)
     # Corte curto vazio NÃO é erro: acontece de verdade quando nenhum criativo alcançou o
     # piso de N nos últimos dias. O que não pode é passar em silêncio, então vai para o
     # resumo e sai no log.
