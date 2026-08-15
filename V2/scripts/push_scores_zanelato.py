@@ -103,7 +103,8 @@ CORTE_CURTO = f"_{DIAS_CORTE}dias"
 
 # `atualizado_em` fica de fora: tem default `now()` no lado deles, e é o carimbo de quando
 # ELES receberam. Mandar valor sobrescreveria a informação deles com a nossa.
-COLUNAS = ["tipo", "chave", "leads", "pct_top20", "referencia_pct", "delta_vs_referencia"]
+COLUNAS = ["tipo", "chave", "leads", "pct_top20", "referencia_pct", "delta_vs_referencia",
+           "teto_cpl", "teto_roas_alvo", "teto_referencia"]
 
 # Tradução do nível interno para a palavra que a agência lê na coluna `tipo`. Explícita, e
 # não `level[:8]` ou coisa parecida: o valor vai para a tabela do cliente e é o que ele
@@ -189,18 +190,31 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str) -> tuple:
     if not comp:
         return [], {"vazio": True, "sufixo": sufixo, "ini": ini, "fim": fim}
 
+    # Teto por chave (Decisão 9): calculado pela MESMA janela do corte, pelo módulo
+    # de produção (teto_por_chave), e só traduzido aqui. Linha sem teto leva o
+    # motivo no carimbo em vez de célula muda.
+    from src.monitoring.teto_por_chave import tetos_por_chave, carimbo
+    tetos = tetos_por_chave(
+        conn, conn, run_id=run_id,
+        win_start=_fronteira_utc(ini), win_end=_fronteira_utc(fim, fim_do_dia=True))
+
     barra = comp["bar_pct"]
     linhas, escondidas = [], 0
     for nivel, dados in comp["levels"].items():
         escondidas += dados.get("hidden_below_min_n", 0) or 0
         for r in dados["rows"]:
+            chave = str(r.get("utm") or r.get("key") or "sem_utm").strip()
+            t = tetos.get((nivel, chave))
             linhas.append([
                 TIPO[nivel] + sufixo,
-                r.get("utm") or r.get("key") or "sem_utm",
+                chave,
                 int(r.get("n") or 0),
                 r.get("pct_d9_d10"),
                 barra,
                 r.get("delta_pp"),
+                (f"{t.valor:.2f}" if t is not None and t.ok else None),
+                (t.roas_alvo if t is not None and t.ok else None),
+                (carimbo(t) if t is not None else "sem_teto:sem_distribuicao_de_decis"),
             ])
     return linhas, {"sufixo": sufixo, "ini": ini, "fim": fim, "barra": barra,
                     "min_n": comp.get("min_n"), "escondidas": escondidas,
@@ -353,7 +367,8 @@ def main() -> int:
         print(f"    {t}: {n}")
     for x in sorted(linhas, key=lambda r: -(r[5] or -99))[:6]:
         print(f"    {x[0]:16s} {str(x[1])[:34]:36s} n={x[2]:>5} "
-              f"top20={x[3]}% ref={x[4]}% delta={x[5]:+}pp")
+              f"top20={x[3]}% ref={x[4]}% delta={x[5]:+}pp "
+              f"teto={'R$'+x[6] if x[6] else x[8]}")
 
     if a.check:
         print("\n--check: nada gravado.")

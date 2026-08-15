@@ -84,6 +84,17 @@ def main() -> None:
         except Exception as e:
             print(f"  perfil comprador: indisponível ({e})")
 
+        # Histórico por criativo (Decisão 9) — a memória da fórmula da unidade.
+        # Mesmo relógio semanal: o histórico só muda quando um lançamento FECHA.
+        # Calculado sempre (o dry-run mostra); gravado só fora do dry-run.
+        from src.data.criativo_historico import calcula_historico, grava_historico
+        historico = None
+        try:
+            historico = calcula_historico(conn, client_id=args.client)
+            print(f"  histórico por criativo: {len(historico)} criativos acumulados")
+        except Exception as e:
+            print(f"  histórico por criativo: indisponível ({e})")
+
         if args.dry_run:
             print("[dry-run] nada gravado.")
             return
@@ -95,6 +106,12 @@ def main() -> None:
             conversion=ref["conversion"], calibration=curve, audience_profile=profile,
         )
         print(f"gravado em analytics.reference_rolling (window_end={ref['window_end']}, source=rolling).")
+
+        # Grava o histórico DEPOIS da referência: se ele falhar, a referência da
+        # semana já está no ar (o push degrada pro modelo puro, nunca fica sem teto).
+        if historico is not None and not historico.empty:
+            grava_historico(conn, historico, client_id=args.client)
+            print(f"gravado em analytics.criativo_historico ({len(historico)} criativos).")
     finally:
         conn.close()
 

@@ -334,6 +334,12 @@ class CalculadoraDeTeto:
                     conversao=esperada, valor_por_venda=self._vps,
                     roas_alvo=self._roas, **proc)
 
+    def de_conversao_medida(self, conversao_medida, origem: str = '') -> Teto:
+        """Teto de uma conversão MEDIDA composta fora (ex.: o composto lift do
+        criativo em `teto_por_chave`). Mesmo funil `_monta` de sempre: fator de
+        rastreamento, valor por venda, ROAS e carimbos — nenhum caminho paralelo."""
+        return self._monta(conversao_medida, MOTIVO_SEM_CONVERSAO)
+
     # ------------------------------------------------------------------ por decil
     def _taxa_dos_decis(self, decis) -> Optional[float]:
         """Conversão agregada de um conjunto de decis, ponderada pelo volume real.
