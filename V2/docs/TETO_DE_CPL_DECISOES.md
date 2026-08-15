@@ -378,6 +378,17 @@ bruta desta medição sugeriria. A faixa real do nível do teto é **×1,0 (piso
 ele deve ser calculado pelo próprio job da referência na mesma janela e carimbado no
 payload, como os demais insumos.
 
+**Como explicar o fator ao cliente (a versão de 30 segundos, aprovada em 15/08):**
+
+> "De cada 100 vendas na janela de um lançamento, 45 a gente liga a um lead daquela
+> captação. Se calculássemos o teto só com essas, ele sairia baixo demais e mandaria
+> pagar menos do que o lead vale. A tentação era inflar tudo pela taxa de casamento,
+> mas fomos conferir venda a venda: 84% das não-ligadas são pessoas que já conhecemos
+> e que compraram por outro caminho — aluno antigo, outro produto — e essas não são
+> mérito da campanha de captação. Só 16% são compradores que não existem em cadastro
+> nenhum, os únicos que podem ser leads nossos que o casamento perdeu. Corrigindo só
+> por esses, o fator é 1,2. E mesmo ele é teto, não chute."
+
 ---
 
 ## Em aberto 1 — Guardar o histórico de CPL contra teto
