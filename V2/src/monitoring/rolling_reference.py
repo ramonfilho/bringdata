@@ -42,6 +42,98 @@ from src.model.calibration import make_calibrator
 logger = logging.getLogger(__name__)
 
 
+# Faixa esperada do fator de rastreamento (Decisão 9). Medido em 15/08/2026 sobre 25
+# lançamentos: mediana 1,18, recentes 1,27. Fora da faixa não bloqueia (o número é
+# gravado do mesmo jeito), mas grita: ou o funil mudou, ou o casamento quebrou.
+FATOR_RASTREAMENTO_FAIXA = (1.05, 1.40)
+
+
+def _t8(t) -> Optional[str]:
+    d = "".join(c for c in str(t or "") if c.isdigit())
+    return d[-8:] if len(d) >= 8 else None
+
+
+def identidades_conhecidas(conn) -> tuple[set, set]:
+    """Emails e telefones-8 de TODO MUNDO que já passou pela base (espinha de
+    cadastros + captações históricas). É o 'quem a gente conhece' da decomposição
+    do fator de rastreamento — venda não-casada de pessoa conhecida comprou por
+    outro caminho e não corrige a conversão por lead."""
+    emails: set = set()
+    t8s: set = set()
+    for sql in (
+        "SELECT lower(trim(email)), phone FROM cadastros WHERE email IS NOT NULL",
+        "SELECT lower(trim(email)), phone FROM captacoes WHERE email IS NOT NULL",
+    ):
+        for em, tel in conn.run(sql):
+            if em:
+                emails.add(em)
+            t = _t8(tel)
+            if t:
+                t8s.add(t)
+    return emails, t8s
+
+
+def fator_de_rastreamento(sales_df: pd.DataFrame, leads_df: pd.DataFrame,
+                          conhecidos_emails: set, conhecidos_t8: set) -> Optional[dict]:
+    """Decompõe as vendas da janela e mede o fator de correção do rastreamento.
+
+    Cada venda cai num de três baldes:
+      casada    — a identidade (email/tel-8) pertence a um lead da janela madura
+      conhecida — não é lead da janela, mas existe na base (outro funil/aluno antigo);
+                  NUNCA corrige a conversão por lead
+      sumida    — não existe em lugar nenhum; teto superior da falha de casamento
+
+        fator = (casadas + sumidas) ÷ casadas
+
+    Identidade simples (email/tel-8), não o matcher canônico completo: o fator é uma
+    razão entre contagens grandes, e o refinamento de last6/temporal muda as duas
+    pontas quase igual. Devolve None (e loga) se não houver venda casada — gravar um
+    fator sem base seria pior que não ter fator.
+    """
+    if sales_df is None or sales_df.empty or leads_df is None or leads_df.empty:
+        logger.warning("[rolling_reference] sem vendas ou sem leads — fator de "
+                       "rastreamento não calculado")
+        return None
+    em_janela = set(leads_df["email"].dropna().astype(str).str.lower())
+    tel_col = (leads_df["telefone"] if "telefone" in leads_df.columns
+               else pd.Series(dtype=object))
+    t8_janela = {t for t in tel_col.map(_t8) if t}
+    # 1 venda por PESSOA: dedup pela identidade (email, senão tel-8). Venda sem
+    # identidade nenhuma fica — vai cair em "sumida", que é o que ela é.
+    v = sales_df.copy()
+    v["_em"] = (v["email"].astype(str).str.lower().str.strip()
+                .where(v["email"].notna()))
+    v["_t8"] = v["telefone"].map(_t8) if "telefone" in v.columns else None
+    v["_key"] = v["_em"].fillna(v["_t8"])
+    vendas = pd.concat([v[v["_key"].notna()].drop_duplicates("_key"),
+                        v[v["_key"].isna()]])
+    casadas = conhecidas = sumidas = 0
+    for em, t in zip(vendas["_em"], vendas["_t8"]):
+        em = em if isinstance(em, str) and em else None
+        if (em and em in em_janela) or (t and t in t8_janela):
+            casadas += 1
+        elif (em and em in conhecidos_emails) or (t and t in conhecidos_t8):
+            conhecidas += 1
+        else:
+            sumidas += 1
+    if casadas <= 0:
+        logger.warning("[rolling_reference] nenhuma venda casada na janela — fator de "
+                       "rastreamento não calculado (%d conhecidas, %d sumidas)",
+                       conhecidas, sumidas)
+        return None
+    fator = (casadas + sumidas) / casadas
+    lo, hi = FATOR_RASTREAMENTO_FAIXA
+    if not (lo <= fator <= hi):
+        logger.warning("[rolling_reference] fator de rastreamento %.3f FORA da faixa "
+                       "esperada [%.2f, %.2f] — funil mudou ou casamento quebrou; "
+                       "gravado mesmo assim, investigar", fator, lo, hi)
+    logger.info("[rolling_reference] fator de rastreamento %.3f (%d casadas, %d "
+                "conhecidas, %d sumidas)", fator, casadas, conhecidas, sumidas)
+    return {"factor": round(fator, 4), "casadas": casadas, "conhecidas": conhecidas,
+            "sumidas": sumidas, "faixa_esperada": list(FATOR_RASTREAMENTO_FAIXA),
+            "metodo": "sumidas-only"}
+
+
 def _aplica_janela_do_calendario(matched: pd.DataFrame, *, as_of: date,
                                  launches: Optional[dict] = None) -> pd.DataFrame:
     """Aperta o `converted` pro prazo do CALENDÁRIO e tira lead de janela aberta.
@@ -248,12 +340,20 @@ def build_conversion_reference(
         # Vendas de [win_start, as_of]: o limite de compra por lead é <= as_of (lead
         # de janela aberta sai), então esse range cobre tudo. end exclusivo → +1 dia.
         sales = read_analytics_sales(conn, win_start.date(), as_of + timedelta(days=1))
+        # Identidades de toda a base, pra decompor as vendas não-casadas (fator de
+        # rastreamento). Carregado dentro do MESMO conn — depois ele pode fechar.
+        conhecidos_emails, conhecidos_t8 = identidades_conhecidas(conn)
     finally:
         if own:
             conn.close()
 
     matched = label_matured(matured, sales, as_of=as_of, launches=launches)
     conv = conversion_reference(matched, bucket_map=bucket_map)
+    # Fator de rastreamento MEDIDO na mesma janela (Decisão 9): a fatia de venda
+    # "sumida" pertence aos leads; o teto lê conversion.tracking.factor do payload.
+    tracking = fator_de_rastreamento(sales, matured, conhecidos_emails, conhecidos_t8)
+    if tracking:
+        conv["tracking"] = tracking
     # Proveniência da regra de contagem (valor no payload, não config implícita):
     # quem ler a referência sabe COMO a compra foi contada, sem arqueologia de git.
     conv["conversion_window"] = {
