@@ -283,6 +283,82 @@ existiu em código, só na conta manual daquele documento.)
 
 ---
 
+## Decisão 9 — A fórmula da conversão prevista: lift normalizado por época, K = 2.000
+
+**Decidido em 15/08/2026, com backtest.** A conversão prevista de cada unidade (um
+criativo rodando numa campanha do Meta) é:
+
+```
+conversão = conv_modelo × (peso × lift + (1 − peso))        peso = n ÷ (n + 2.000)
+```
+
+- `conv_modelo` = mistura de decis da campanha lida na referência rolante (o braço
+  "público": conta quantos leads da campanha caíram em cada decil e pondera pela
+  conversão de cada decil).
+- `lift` = compradores reais do criativo ÷ compradores esperados se ele fosse médio
+  **na época de cada lançamento em que rodou** (soma de leads × conversão geral daquele
+  lançamento). Sempre com lançamentos ANTERIORES ao avaliado, nunca o próprio.
+- `n` = leads maduros que o criativo já trouxe; `peso` vai de 0 (estreante, fica só o
+  modelo) a ~0,95 (40 mil leads). **O modelo nunca sai da fórmula.**
+
+**Por que normalizar por época:** o mercado caiu ao longo de 2026 (a faixa D9-D10
+convertia 3,67% nos lançamentos de fevereiro e 1,74% nos de junho). Histórico bruto de
+criativo antigo carrega época boa como se fosse mérito do criativo. O lift é
+adimensional: se o mercado voltar a subir, a referência rolante (refeita toda semana)
+sobe o nível, e o mérito relativo do criativo permanece comparável. A fórmula acompanha
+o mercado nos dois sentidos, com o atraso da maturação (semanas).
+
+**Empate empírico declarado:** no backtest a versão lift ganhou da aditiva bruta em
+quase tudo (ordem +0,39 vs +0,37; terços 2,33x vs 2,25x; 15 de 26 lançamentos), mas sem
+significância (p = 0,17). O desempate foi o argumento de época, não o dado. K é platô
+(250 a 4.000 dão quase o mesmo), mantido em 2.000.
+
+**Limitação registrada:** o lift é acumulado na vida do criativo; se um criativo
+específico piorar de verdade, o acumulado demora a refletir (a ordem entre criativos se
+mostrou estável por 6 meses nos artifacts, então o risco é baixo, mas existe).
+
+### As métricas do backtest (documentação do resultado)
+
+Base: 314.752 leads deduplicados de 26 lançamentos fechados (25/11/2025 a 30/07/2026),
+2.366 compradores casados por email/telefone, compra contada da captação até o fim das
+vendas do lançamento. 534 unidades criativo×campanha com 100+ leads (130 campanhas Meta,
+66 criativos; 85% das unidades com histórico próprio). Previsão sempre fora do tempo.
+
+| métrica (o que mede) | só modelo | aditiva K=2.000 | **lift K=2.000** |
+|---|---|---|---|
+| Correlação de posto previsto×realizado, média por lançamento | +0,29 | +0,37 | **+0,39** |
+| Aponta o criativo que MAIS converteu na campanha (28 campanhas com 3+ criativos; chute = 29%) | 39% (11/28) | 50% (14/28) | 46% (13/28) |
+| O apontado está entre os 2 melhores reais | 82% | 89% (25/28) | 89% (25/28) |
+| O apontado como pior nunca era o melhor ("evita o desastre") | 93% | 96% (27/28) | 96% (27/28) |
+| Terço previsto-melhor ÷ terço previsto-pior (conversão real, ~500 compradores/terço) | 1,75x | 2,25x | **2,33x** |
+
+Contra o acaso: composto vs só-modelo dá p = 0,045 (Wilcoxon nos 26 lançamentos), e a
+correlação observada está em ~106% do teto de ruído (o máximo que um preditor perfeito
+mostraria com esse volume de compradores por unidade). Dentro do lançamento, taxa de
+rastreamento e valor por venda multiplicam todas as unidades pelo mesmo fator, então a
+ORDEM é imune a elas — o nível, não (ver tabela abaixo).
+
+### Os confundidores do NÍVEL do teto (e o estado de cada um)
+
+`teto = conversão prevista × valor por venda ÷ 2`
+
+| insumo | como obtemos | viés conhecido | estado |
+|---|---|---|---|
+| conversão prevista | fórmula acima (ordem validada) | **subestima o nível: só ~6 de 10 compradores casam com um lead (rastreamento)** | ÚNICO ponto aberto; ver faixa abaixo |
+| valor por venda | medido por janela na mistura real de gateways (cartão a 2k, boleto a 50%) | premissa do boleto a 50% | documentado; melhorável com taxa real de compensação |
+| ROAS alvo = 2 | política do negócio | nenhum | fechado (Decisão 2) |
+
+**A faixa do rastreamento:** sem correção, o teto é um PISO (quem paga abaixo garante
+ROAS ≥ 2 na parte contada, mas o empate real permite pagar mais). Correção cheia pela
+taxa de reconhecimento da planilha do cliente (57,6% a 66,2%, estável; mediana 0,615)
+multiplica o teto por ~1,63, mas assume que todo comprador não-casado era lead nosso, o
+que corrige demais (parte nunca foi lead: aluno antigo, outro funil). A verdade está
+entre ×1,0 e ×1,63; a decomposição das vendas não-casadas contra a espinha de cadastros
+(quem existe lá = outro funil; quem não existe em lugar nenhum = falha de casamento)
+fecha o número com dado. Medição em curso em 15/08.
+
+---
+
 ## Em aberto 1 — Guardar o histórico de CPL contra teto
 
 **O que se quer.** Poder reconstruir depois: em quantos dias, em qual criativo, o gasto
