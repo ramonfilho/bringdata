@@ -265,10 +265,18 @@ def conversion_reference(matched_df: pd.DataFrame, *, bucket_map=None,
     # fino sai fora e o consumidor mostra "—" em vez de taxa de ruído.
     utm = m[m["utm_source"].notna()].copy()
     utm["channel"] = utm["utm_source"].apply(channel_from_source)
-    utm["bucket"] = utm["utm_campaign"].apply(lambda x: bucket_from_utm(x, bucket_map))
     by_channel = _conv_by(utm, "channel",
                           min_conv=min_segment_conv, min_leads=min_segment_leads)
-    by_bucket = _conv_by(utm, "bucket",
+    # Balde Lead/Champion/Challenger é conceito da CAPTAÇÃO META: 'Lead padrão'
+    # = captação fria da Meta sem etiqueta de modelo. Antes o balde era
+    # calculado sobre TODOS os canais e o 'Lead' saía com ~47% de google e
+    # orgânico dentro (medido em 16/08: 16.615 meta + 12.831 google + 1.800
+    # outros na janela de 90d) — e essa taxa contaminada virava o teto de CPL
+    # da linha Lead no relatório diário. Google/orgânico têm a própria linha
+    # em by_channel; no balde, só Meta entra.
+    meta = utm[utm["channel"] == "meta"].copy()
+    meta["bucket"] = meta["utm_campaign"].apply(lambda x: bucket_from_utm(x, bucket_map))
+    by_bucket = _conv_by(meta, "bucket",
                          min_conv=min_segment_conv, min_leads=min_segment_leads)
 
     logger.info(

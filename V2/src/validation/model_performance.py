@@ -349,9 +349,16 @@ def _spend_by_bucket(spend_df: pd.DataFrame, registry: ModelRegistry,
     if spend_df is None or spend_df.empty:
         return {}
     plat = spend_df["platform"].astype(str).str.strip().str.lower()
+    # Igualdade EXPLÍCITA com 'meta': o else antigo mandava qualquer plataforma
+    # desconhecida pro bucket_from_utm, cujo default é 'Lead' — gasto de uma
+    # eventual 3ª plataforma (tiktok?) entraria no Lead padrão Meta em
+    # silêncio. Hoje só existem meta e google no ad_spend (medido 16/08);
+    # plataforma nova ganha balde próprio com o nome dela, visível.
     b = spend_df.assign(_p=plat).apply(
         lambda r: "Google" if r["_p"] == "google"
-        else bucket_from_utm(r["campaign_name"], registry.bucket_map), axis=1)
+        else (bucket_from_utm(r["campaign_name"], registry.bucket_map)
+              if r["_p"] == "meta" else str(r["_p"]).title() or "Desconhecida"),
+        axis=1)
     # gross-up do imposto só nas linhas Meta
     spend_adj = pd.to_numeric(spend_df["spend"], errors="coerce").fillna(0.0) * plat.map(
         lambda p: meta_gross_up if p == "meta" else 1.0)

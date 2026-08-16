@@ -45,9 +45,15 @@ def test_canal_balde_so_com_utm():
     assert ref["channel_bucket_coverage"] == {"leads_com_utm": 4, "leads_total": 6}
     assert set(ref["by_channel"]) == {"meta", "google"}   # sem 'organic' falso da ponte
     assert ref["by_channel"]["meta"]["leads"] == 2 and ref["by_channel"]["google"]["leads"] == 2
-    # LEADHQLB → Challenger (1); resto cai no fallback Lead (3)
+    # Política de 16/08/2026 (varredura do Ramon): balde é conceito da
+    # captação META — google NÃO entra no 'Lead' padrão (antes os 2 google
+    # caíam nele e a taxa contaminada alimentava o teto de CPL da linha Lead).
+    # LEADHQLB → Challenger (1 meta); o outro meta sem tag → Lead (1);
+    # os 2 google ficam SÓ em by_channel.
     assert ref["by_bucket"]["Challenger"]["leads"] == 1
-    assert ref["by_bucket"]["Lead"]["leads"] == 3
+    assert ref["by_bucket"]["Lead"]["leads"] == 1
+    total_no_balde = sum(b["leads"] for b in ref["by_bucket"].values())
+    assert total_no_balde == 2, "só os leads Meta entram nos baldes"
 
 
 def test_segmento_de_base_fina_fica_fora_da_referencia():

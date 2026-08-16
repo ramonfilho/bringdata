@@ -384,7 +384,16 @@ def arm_to_bucket(arm: str, *, contexto: str = "") -> Optional[str]:
     if arm == INDETERMINADO:
         warn_once("arm indeterminado, campanha excluida do recorte por variante", contexto)
         return None
-    return _ARM_TO_BUCKET.get(arm, BUCKET_LEAD)
+    # EXTERNO e qualquer rótulo desconhecido NÃO caem no 'Lead' por default:
+    # 'Lead padrão' = captação fria da Meta, e o default antigo faria um
+    # chamador novo que passasse EXTERNO direto (google/orgânico) contar como
+    # Meta em silêncio. O único chamador de produção (classify_variant) trata
+    # EXTERNO antes de chamar — para ele nada muda.
+    if arm not in _ARM_TO_BUCKET:
+        warn_once("arm fora do vocabulario, excluido do recorte por variante",
+                  f"{arm}:{contexto}")
+        return None
+    return _ARM_TO_BUCKET[arm]
 
 
 _WARNED: set = set()
@@ -452,12 +461,18 @@ def resolve_bucket_by_tag(text: Optional[str], *, captured_at=None,
                           config: Optional[ArmConfig] = None) -> str:
     """Balde do A/B pela TAG apenas: 'Lead' | 'Champion' | 'Challenger'.
 
-    Porta SEPARADA do `resolve_arm`, de propósito. Os painéis de decil e o drift por A/B
-    atribuem balde a QUALQUER campanha Meta (o filtro de canal já aconteceu antes, na
-    fonte), sem exigir nome de captação. Passar por `is_captacao` aqui jogaria em 'Lead'
-    toda campanha cujo nome fuja do padrão, ou seja, perderia campanha real e mexeria em
-    número publicado. Quem precisa do filtro de captação é `classify_variant`, que separa
-    Meta de Google/orgânico — lá a porta é o `resolve_arm` completo.
+    ⚠️ PRÉ-CONDIÇÃO NÃO NEGOCIÁVEL: o chamador JÁ filtrou o tráfego para
+    SÓ META antes de chamar. O default aqui é 'Lead', e 'Lead padrão' =
+    captação fria da Meta — um lead de google/orgânico que chegue aqui vira
+    'Lead' em silêncio. (Auditoria de 16/08/2026: esta função NÃO tem nenhum
+    chamador de produção hoje — os painéis usam `monitoring.bucket_from_utm`,
+    cujos chamadores filtram canal na fonte. Se você for o primeiro consumidor
+    novo: filtre `utm_source` pela allowlist Meta ANTES, ou use o
+    `resolve_arm` completo, cuja porta de captação faz isso por você.)
+
+    Porta SEPARADA do `resolve_arm`, de propósito: passar por `is_captacao`
+    aqui jogaria em 'Lead' toda campanha Meta cujo nome fuja do padrão, ou
+    seja, perderia campanha real e mexeria em número publicado.
     """
     cfg = config or _default_config()
     mapa = bucket_map_for(as_of=_coerce_date(captured_at), config=cfg)
