@@ -1200,7 +1200,21 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'training_drift_24h_summary.top_features[].exp':                                    (R, None),
     'training_drift_24h_summary.top_features[].delta_pp':                               (R, None),
     'training_drift_24h_summary.top_features[].count':                                  (R, None),
+    'training_drift_24h_summary.top_features[].taxa_dia':                               (R, None),  # 2026-08-16 — taxa agregada do dia (None = fallback sem df)
     'training_drift_24h_summary.erro':                                                  (R, None),
+    # 2026-08-16 — confirmação no agregado do dia + transparência de origem.
+    # Todas SEMPRE presentes no dict (contrato estável da _aggregate_t116);
+    # 'revisoes' e 'suprimidas_saudaveis' são listas — item escalar não emite
+    # path, item dict emite cada folha (declaradas abaixo).
+    'training_drift_24h_summary.confirmacao':                                           (R, None),  # 'agregado_do_dia' | 'heuristica_fallback'
+    'training_drift_24h_summary.linhas_brutas':                                         (R, None),  # int, linhas cruas pré-dedup
+    'training_drift_24h_summary.eventos_dedup':                                         (R, None),  # int, eventos após dedup temporal <=5s
+    'training_drift_24h_summary.revisoes':                                              (R, None),  # list[str] revision_names de origem
+    'training_drift_24h_summary.suprimidas_saudaveis':                                  (R, None),  # flagradas em batch, saudáveis no agregado
+    'training_drift_24h_summary.suprimidas_saudaveis[].feature':                        (R, None),
+    'training_drift_24h_summary.suprimidas_saudaveis[].taxa_dia':                       (R, None),
+    'training_drift_24h_summary.suprimidas_saudaveis[].exp':                            (R, None),
+    'training_drift_24h_summary.suprimidas_saudaveis[].eventos':                        (R, None),
 
     # ──────────────────────────────────────────────────────────────────────────
     # HOTLEADS_24H_SUMMARY  (selo da Hotmart → evento LeadScoringHot — 2026-07-30)

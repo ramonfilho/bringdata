@@ -318,7 +318,16 @@ class MonitoringOrchestrator:
         from .pubsub_summary import compute_pubsub_summary
         from .training_drift_summary import compute_training_drift_summary
         pubsub_24h_summary = compute_pubsub_summary(self._repo)
-        training_drift_24h_summary = compute_training_drift_summary()
+        # Taxas agregadas do DIA por variante: o juiz da confirmação do bloco
+        # "Features zeradas em batch". Sem elas, o agregador cai na média das
+        # linhas flagradas (viés de seleção conhecido) e QUALQUER tráfego de
+        # gate/canário entra como se fosse produção — foi o que suprimiu o
+        # Medium_Aberto por 0,0007 em 14/08 e mostrou 3 features benignas.
+        # Guard idêntico ao da linha do funil: df só existe se leads_data.
+        _taxas_ohe = (self.monitors['data_quality'].compute_ohe_daily_rates(df)
+                      if leads_data else {})
+        training_drift_24h_summary = compute_training_drift_summary(
+            taxas_do_dia=_taxas_ohe)
         # HotLeads roda em cron próprio, fora deste fluxo — sem esta leitura uma
         # parada dele seria invisível (scheduler não alerta, webhook não repete).
         # A allowlist é a MESMA que o submit usa: sem ela a "fila" contaria lead

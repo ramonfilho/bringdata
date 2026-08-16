@@ -1359,6 +1359,93 @@ class DataQualityMonitor:
 
         return alerts
 
+    @staticmethod
+    def _variant_artifacts(predictor) -> Dict:
+        """Monta o dict `artifacts` do apply_encoding a partir do predictor da
+        variante — run_id preferencial, model_path como fallback.
+
+        Este trecho existia copiado 3× nos checks de features (missing/extra/
+        critical-coverage); o helper nasce para o consumidor novo
+        (`compute_ohe_daily_rates`) não virar a 4ª cópia. Migrar os 3 checks
+        existentes é mecânico e fica para um commit próprio (escopo restrito).
+        """
+        artifacts = {}
+        if predictor.mlflow_run_id:
+            artifacts['mlflow_run_id'] = predictor.mlflow_run_id
+        elif predictor.model_path:
+            artifacts['model_path'] = str(predictor.model_path)
+        return artifacts
+
+    def compute_ohe_daily_rates(self, df: pd.DataFrame) -> Dict[str, Dict[str, float]]:
+        """Taxa agregada do DIA de cada coluna OHE, por variante ativa.
+
+        É o juiz da confirmação do bloco "Features zeradas em batch": o T1-16
+        por batch dispara em qualquer tráfego (Pub/Sub real, canário 0%, gate
+        de equivalência) e nada na linha distingue a origem; a taxa agregada
+        do dia vem dos LEADS REAIS re-processados pelo MESMO core, então
+        tráfego de teste não a move. Ver training_drift_summary._aggregate_t116.
+
+        Args:
+            df: o df do dia do orchestrator, pós feature-engineering. PODE
+                conter decil/lead_score — o drop acontece AQUI dentro, porque
+                sem ele o `decil` (nunique<=20) viraria coluna OHE no encoding.
+
+        Returns:
+            {run_id[:8]: {coluna_ohe: taxa_float}} — só colunas do
+            feature_names da variante com valores binários {0,1}. Variante sem
+            run_id ou sem encoding core é pulada. NUNCA levanta: falha por
+            variante é logada e a variante sai do dict (o consumidor cai no
+            fallback heurístico por feature, marcado no payload).
+        """
+        out: Dict[str, Dict[str, float]] = {}
+        if df is None or df.empty:
+            return out
+
+        df_base = df.drop(columns=['decil', 'decil_normalized', 'lead_score'],
+                          errors='ignore')
+
+        for variant_name, predictor, effective_encoding in self._iter_active_variants():
+            try:
+                if effective_encoding is None or not predictor.mlflow_run_id:
+                    continue  # legacy/model_path: sem run_id não há como casar com a linha T1-16
+                run_id8 = predictor.mlflow_run_id[:8]
+                if run_id8 in out:
+                    # Colisão de prefixo entre variantes: silenciosa e sem como
+                    # desambiguar (a linha T1-16 só carrega 8 chars). Loga e
+                    # pula — as features desse run caem no fallback marcado.
+                    logger.warning(
+                        f"[ohe_daily_rates] colisão de run_id[:8]={run_id8} "
+                        f"entre variantes; '{variant_name}' pulada.")
+                    continue
+
+                from core.encoding import apply_encoding
+                artifacts = self._variant_artifacts(predictor)
+                df_encoded = apply_encoding(df_base.copy(), effective_encoding,
+                                            artifacts=artifacts)
+
+                if predictor.feature_names is None:
+                    predictor.load_model()
+                nomes = predictor.feature_names or []
+
+                taxas: Dict[str, float] = {}
+                for col in nomes:
+                    if col not in df_encoded.columns:
+                        continue
+                    valores = pd.unique(df_encoded[col].dropna())
+                    # Só colunas binárias: mean() de ordinal/numérica não é taxa.
+                    if not set(float(v) for v in valores) <= {0.0, 1.0}:
+                        continue
+                    taxas[col] = float(df_encoded[col].mean())
+                if taxas:
+                    out[run_id8] = taxas
+            except Exception as e:
+                logger.error(
+                    f"[ohe_daily_rates] variante '{variant_name}' falhou "
+                    f"({type(e).__name__}: {e}) — pulada; features desse run "
+                    f"caem no fallback heurístico do digest.")
+                continue
+        return out
+
     def _iter_active_variants(self):
         """Devolve as variantes ativas (Champion + Challengers) materializadas e
         cacheadas UMA vez por instância do monitor.
