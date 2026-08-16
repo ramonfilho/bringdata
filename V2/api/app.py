@@ -2951,7 +2951,16 @@ async def daily_monitoring_check_railway(
                 forecast_decil_dist[_key] = forecast_decil_dist.get(_key, 0) + 1
                 # Split por variante do A/B (registros_ml.variant gravado no
                 # scoring; null/'' = Champion). Base do ML-aware por variante.
+                # Lead de FORA da Meta (google/orgânico) tem variant vazio mas
+                # NÃO é do Champion — nenhum modelo o roteou por campanha; ele
+                # ganha segmento próprio no split ('fora_meta') pra não herdar
+                # rótulo/benchmark do Champion (auditoria 16/08). O POOLED
+                # continua all-source por desenho (denominador Client).
                 _vk = _rec.variant or ''
+                if not _vk:
+                    from src.monitoring.campaign_classifier import channel_from_source as _cfs
+                    if _cfs(_rec.utm_source) != 'meta':
+                        _vk = 'fora_meta'
                 forecast_decil_dist_by_variant.setdefault(_vk, {})
                 forecast_decil_dist_by_variant[_vk][_key] = forecast_decil_dist_by_variant[_vk].get(_key, 0) + 1
 

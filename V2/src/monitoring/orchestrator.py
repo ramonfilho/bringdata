@@ -492,11 +492,18 @@ class MonitoringOrchestrator:
                         # Campos: source→utm_source, ..., pageUrl→utm_url.
                         # updatedAt→created_at (no ledger não há updatedAt; created_at
                         # é o instante do insert, ≈ instante do scoring).
+                        # Mesmo filtro do contador irmão (leads_capi, abaixo):
+                        # sem ele, google/orgânico (100% scoreados, sem match de
+                        # padrão) caíam na variante default e inflavam o Champion
+                        # em ~217 leads/dia — o contador dizia medir o A/B da
+                        # captação Meta contando tráfego que nenhum modelo roteou
+                        # por campanha (auditoria 16/08/2026).
                         _utm_rows = _conn.run(
                             'SELECT utm_source, utm_medium, utm_campaign, utm_content, utm_term, utm_url '
                             'FROM registros_ml '
                             'WHERE lead_score IS NOT NULL '
-                            f"  AND {_ab_win_clause}"
+                            f"  AND {_ab_win_clause} "
+                            "  AND base_status != 'skipped_allowlist'"
                         )
                         _by_variant = {n: 0 for n in _ab_cfg.variants.keys()}
                         _default = next(
