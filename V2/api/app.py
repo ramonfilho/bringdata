@@ -2907,15 +2907,19 @@ async def daily_monitoring_check_railway(
             )
             launch_window_start_utc = launch_window_start.astimezone(_tz.utc)
             launch_window_end_utc   = now_utc
+            # "→ hoje": a janela do lançamento ATUAL termina no momento da
+            # execução, não no cap_end do calendário. Sem o sufixo, o DM de
+            # 15/08 mostrava "LF64 07/08 → 15/08" ao lado do anterior
+            # "07/08 → 17/08" e parecia divergência de dados — era só rótulo.
             if _lw.lf_name and not _lw.inferred:
                 launch_window_label = (
                     f"{_lw.lf_name} {_lw.cap_start.strftime('%d/%m/%Y')} → "
-                    f"{now_brt.strftime('%d/%m/%Y')}"
+                    f"{now_brt.strftime('%d/%m/%Y')} (até hoje)"
                 )
             elif _lw.lf_name and _lw.inferred:
                 launch_window_label = (
                     f"{_lw.lf_name} (inferido) {_lw.cap_start.strftime('%d/%m/%Y')} → "
-                    f"{now_brt.strftime('%d/%m/%Y')}"
+                    f"{now_brt.strftime('%d/%m/%Y')} (até hoje)"
                 )
             else:
                 launch_window_label = (
@@ -4091,13 +4095,30 @@ async def daily_monitoring_check_railway(
         # Previsão para o LF anterior (mesma metodologia aplicada ao lançamento
         # anterior — permite comparar previsão atual com previsão histórica).
         try:
-            lf_ref_name = railway_lead_quality.get('lf_referencia_label')
+            # `lf_referencia_label` é o LF ATIVO — usá-lo aqui era o bug que
+            # fazia o DM mostrar o MESMO lançamento como "atual" E "anterior"
+            # (com rótulos de janela diferentes, parecendo dado corrompido).
+            # Latente desde 12/05, vivo desde 24/07 quando o fix do NameError
+            # ressuscitou este bloco. O anterior DE VERDADE sai do calendário:
+            # o LF com maior cap_end estritamente ANTES do cap_start do ativo.
+            _lf_ativo = railway_lead_quality.get('lf_referencia_label')
             # Fonte única via core.launches (analytics.launch_calendar quando
             # LAUNCHES_SOURCE=table, senão yaml). Antes lia `launches_path`, que NUNCA
             # era definido aqui → NameError e esta previsão do LF anterior degradava
             # sempre. Agora enxerga a tabela como o resto do resolvedor.
             from src.core.launches import load_launches as _load_launches2
-            _launches_cfg2 = _load_launches2() if (revenue_forecast and lf_ref_name) else {}
+            _launches_cfg2 = _load_launches2() if (revenue_forecast and _lf_ativo) else {}
+            lf_ref_name = None
+            _cs_ativo = ((_launches_cfg2.get(_lf_ativo) or {}).get('cap_start')
+                         if _lf_ativo else None)
+            if _cs_ativo:
+                _cands = [(n, c) for n, c in _launches_cfg2.items()
+                          if (c or {}).get('cap_end') and (c or {}).get('cap_start')
+                          and c['cap_end'] < _cs_ativo]  # ISO: ordem lexicográfica = cronológica
+                if _cands:
+                    lf_ref_name = max(_cands, key=lambda kv: kv[1]['cap_end'])[0]
+            if lf_ref_name == _lf_ativo:
+                lf_ref_name = None  # guarda: nunca duplicar o LF corrente
             if revenue_forecast and lf_ref_name and lf_ref_name in _launches_cfg2:
                 _lf_cfg = _launches_cfg2.get(lf_ref_name) or {}
                 _cs = _lf_cfg.get('cap_start'); _ce = _lf_cfg.get('cap_end')
