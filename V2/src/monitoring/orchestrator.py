@@ -333,7 +333,10 @@ class MonitoringOrchestrator:
         # A allowlist é a MESMA que o submit usa: sem ela a "fila" contaria lead
         # de google-ads/orgânico, que nunca é submetido, e o bloco alarmaria sempre.
         hotleads_24h_summary = compute_hotleads_summary(
-            source_allowlist=(self._client_config.capi.utm_source_allowlist or None)
+            source_allowlist=(self._client_config.capi.utm_source_allowlist or None),
+            # A MESMA janela do submit: o alarme de idade só olha lead que o
+            # re-submit ainda pode pegar (fora dela = preso, contado à parte).
+            submit_window_days=self._client_config.hotleads.submit_window_days,
         )
 
         # Mensagem de conclusão
