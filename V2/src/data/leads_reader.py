@@ -82,7 +82,11 @@ def read_pesquisa(
     own = conn is None
     conn = conn or open_analytics_connection()
     try:
-        cols = "survey_responses, utm_campaign" if include_utm else "survey_responses"
+        # utm_source viaja junto do utm_campaign: o peso de controle precisa
+        # saber o CANAL do lead — sem isso, google/orgânico (campanha genérica
+        # 'devlf' ou vazia) caíam no grupo CONTROLE do reweighting como se
+        # fossem captação fria da Meta (~102k leads, medido em 16/08/2026).
+        cols = "survey_responses, utm_campaign, utm_source" if include_utm else "survey_responses"
         _params = {"c": client_id, "s": source}
         _join = _where = ""
         if as_of:
@@ -119,9 +123,10 @@ def read_pesquisa(
         # descasar. Reset do índice garante alinhamento posicional com `dicts`.
         df = df.reset_index(drop=True)
         df['__utm_campaign__'] = [r[1] for r in rows]
+        df['__utm_source__'] = [r[2] for r in rows]
         _n_utm = int(df['__utm_campaign__'].notna().sum())
-        logger.info("[leads_reader] __utm_campaign__ anexada p/ peso de controle "
-                    "(%d/%d linhas com utm_campaign)", _n_utm, len(df))
+        logger.info("[leads_reader] __utm_campaign__ + __utm_source__ anexadas p/ peso "
+                    "de controle (%d/%d linhas com utm_campaign)", _n_utm, len(df))
     logger.info("[leads_reader] %d linhas de pesquisa reconstruídas (source=%s, %d colunas)",
                 len(df), source, len(df.columns))
     return df

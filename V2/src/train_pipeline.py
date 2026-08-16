@@ -212,6 +212,28 @@ def _compute_control_weights(df: 'pd.DataFrame', alpha: float = 1.0,
     fonte = "curadoria (analytics.campaign_labels)" if label_map else "substring legado"
     classes_full = df[campaign_col].apply(lambda c: _classify_for_weights(c, label_map))
 
+    # GUARDA DE CANAL: o grupo CONTROLE é o contrafactual da CAPTAÇÃO META
+    # ('Lead padrão' = captação fria da Meta que nenhum modelo tocou). Leads de
+    # google/orgânico chegam com campanha genérica ('devlf') ou vazia, cuja
+    # assinatura a curadoria traduz como 'Lead' → caíam no CONTROLE e recebiam
+    # o control_boost como se fossem Meta (~102k leads na base de 16/08/2026:
+    # 23,6k google + 69k orgânico + 9,5k sem campanha). A assinatura NÃO
+    # distingue o canal (colisão estrutural: campanha Meta legítima também vira
+    # '(sem tag)'), então a guarda é pela FONTE do lead: fora da Meta → NEUTRO
+    # (peso 1, sem efeito no balanceamento).
+    if '__utm_source__' in df.columns:
+        from src.monitoring.campaign_classifier import channel_from_source
+        _nao_meta = df['__utm_source__'].apply(channel_from_source) != 'meta'
+        _rebaixados = int((_nao_meta & (classes_full != 'NEUTRO')).sum())
+        classes_full = classes_full.mask(_nao_meta, 'NEUTRO')
+        logger.info(f"  [control_weights] guarda de canal: {_rebaixados} leads "
+                    f"não-Meta (google/orgânico) movidos para NEUTRO — o grupo "
+                    f"CONTROLE é só captação Meta")
+    else:
+        logger.warning("  [control_weights] '__utm_source__' ausente (modo files?) — "
+                       "guarda de canal DESLIGADA; google/orgânico podem contar "
+                       "como CONTROLE")
+
     if train_mask is not None:
         classes_for_count = classes_full[train_mask]
         scope = "train"
@@ -1271,9 +1293,12 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     else:
         control_weights = None
 
-    # Remover a coluna técnica antes do FE/encoding — modelo nunca vê essa coluna.
-    if '__campaign_for_weights__' in dataset_v1_devclub.columns:
-        dataset_v1_devclub = dataset_v1_devclub.drop(columns='__campaign_for_weights__')
+    # Remover as colunas técnicas antes do FE/encoding — modelo nunca vê essas
+    # colunas ('__utm_source__' em especial tem poucos valores únicos e viraria
+    # one-hot se vazasse pro encoding).
+    for _col_tecnica in ('__campaign_for_weights__', '__utm_source__'):
+        if _col_tecnica in dataset_v1_devclub.columns:
+            dataset_v1_devclub = dataset_v1_devclub.drop(columns=_col_tecnica)
 
     # Recall metrics (não calculado após reorganização - vendas já filtradas na CÉLULA 5.4)
     recall_metrics = None
