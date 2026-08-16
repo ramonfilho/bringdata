@@ -330,10 +330,17 @@ def _scored_n(rf: dict):
     return ((rf.get('expected_conversion') or {}).get('distribuicao_leads') or {}).get('total_db')
 
 
-def _bases_md(leads_total: float, scored) -> str:
-    """Rótulo das duas bases do forecast: leads totais all-source (flat-rate) + respostas scoreadas (ML)."""
+def _bases_md(leads_total: float, scored, *, base: str = 'todas as fontes') -> str:
+    """Rótulo das duas bases do forecast: leads totais (flat-rate) + respostas scoreadas (ML).
+
+    `base` diz de ONDE vêm os leads do flat-rate — o lançamento ATUAL conta
+    todos os cadastros (Client, all-source); o ANTERIOR conta leads do pixel
+    Meta (Insights). Rotular os dois como "todas as fontes" fazia as contagens
+    parecerem inconsistentes (5.806 vs 5.492 no DM de 15/08) quando eram só
+    bases diferentes.
+    """
     s = f'  ·  {scored:,} respostas scoreadas (ML)' if scored else ''
-    return f'{leads_total:,.0f} leads — todas as fontes (flat-rate){s}'
+    return f'{leads_total:,.0f} leads — {base} (flat-rate){s}'
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -772,7 +779,7 @@ def _render_text_revenue(v: dict, L: list):
     if lf_ant:
         lf_inputs = lf_ant.get('inputs', {}) or {}
         lf_name = lf_inputs.get('lf_name', '?')
-        L.append(f'  Lançamento anterior ({lf_name} · {lf_inputs.get("launch_window_start_brt","?")}): {_bases_md(_n(lf_inputs,"total_leads_meta"), _scored_n(lf_ant))}')
+        L.append(f'  Lançamento anterior ({lf_name} · {lf_inputs.get("launch_window_start_brt","?")}): {_bases_md(_n(lf_inputs,"total_leads_meta"), _scored_n(lf_ant), base="pixel Meta")}')
         L.append('')
         _write_two_methods(lf_ant)
 
@@ -2308,7 +2315,7 @@ def _slack_revenue(v: dict, B: list):
 
         B.append({'type': 'section', 'text': {'type': 'mrkdwn', 'text': (
             f"*Lançamento anterior — {lf_name}*  ·  _{lf_inputs.get('launch_window_start_brt','?')}_  ·  "
-            f"{_bases_md(_n(lf_inputs,'total_leads_meta'), _scored_n(lf_ant))}\n"
+            f"{_bases_md(_n(lf_inputs,'total_leads_meta'), _scored_n(lf_ant), base='pixel Meta')}\n"
             f"_*Método 1:* taxa de conversão média LF43-LF53_\n"
             + "\n".join(m1_ant)
         )}})
