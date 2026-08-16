@@ -1081,6 +1081,17 @@ def _slack_hotleads_24h(v: dict, B: list):
     if aguard and idade < _IDADE_RETORNO_ALARME_H:
         diag.append(f"⏳ {aguard} aguardando retorno da Hotmart, o mais antigo há "
                     f"{idade:.1f}h (normal por ~2 min; re-submete sozinho após 6h).")
+    # Presos de incidente: submetidos sem retorno que envelheceram para FORA da
+    # janela de re-submissão — o retorno deles não vem nunca (a resposta da
+    # Hotmart bateu no endpoint morto durante a pane de 06-14/08) e o re-submit
+    # de 6h não os pega mais. Fora do alarme vermelho de propósito: vermelho
+    # permanente mascararia uma parada real futura. Mas VISÍVEIS, porque só
+    # saem daqui com ação manual (re-submissão forçada ou limpeza de status).
+    presos = h.get('presos_fora_da_janela', 0) or 0
+    if presos:
+        diag.append(f"🧟 {presos} lead(s) preso(s) de incidente antigo — submetidos, "
+                    f"sem retorno e já fora da janela de re-submissão; não voltam "
+                    f"sozinhos (re-submeter na mão ou limpar o status).")
     if diag:
         B.append({'type': 'section',
                   'text': {'type': 'mrkdwn', 'text': '\n'.join(diag)}})
@@ -1114,7 +1125,8 @@ def _slack_pubsub_24h(v: dict, B: list):
     smd  = by_status.get('skipped_missing_data', 0) or 0
     status_line = (
         f"*{total}* leads · ✅ {ok} sucesso · ❌ {err} erro · "
-        f"⏭️ {sall} fora da allowlist · 🚫 {smd} faltou fbp/fbc/computador"
+        f"⏭️ {sall} fora da allowlist Meta (google-ads é scoreado e segue pro canal Google) · "
+        f"🚫 {smd} faltou fbp/fbc/computador"
     )
     B.append({'type': 'section',
               'text': {'type': 'mrkdwn', 'text': status_line}})

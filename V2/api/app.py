@@ -3077,7 +3077,9 @@ async def daily_monitoring_check_railway(
                 from src.monitoring.hotleads_summary import compute_hotleads_summary
                 _hl_early = compute_hotleads_summary(
                     source_allowlist=(pipeline._client_config.capi.utm_source_allowlist or None)
-                    if pipeline else None
+                    if pipeline else None,
+                    submit_window_days=(pipeline._client_config.hotleads.submit_window_days
+                                        if pipeline else 7),
                 )
             except Exception as _e:
                 logger.warning(f"⚠️ early-return: falha calculando sumários top-level: {_e}")

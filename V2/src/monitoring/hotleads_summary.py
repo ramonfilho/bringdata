@@ -32,14 +32,17 @@ def _empty_summary() -> Dict[str, Any]:
         'pct_quentes': 0.0,
         'eventos_enviados': 0, # quentes cujo evento CAPI saiu
         'erros': 0,            # falhas de envio ainda não resolvidas
-        'aguardando_selo': 0,  # submetidos e sem retorno da Hotmart
-        'idade_max_aguardando_h': 0.0,  # há quanto tempo o mais antigo espera
+        'aguardando_selo': 0,  # submetidos sem retorno, AINDA re-submetíveis
+        'idade_max_aguardando_h': 0.0,  # há quanto tempo o mais antigo (re-submetível) espera
+        'presos_fora_da_janela': 0,  # submetidos sem retorno que JÁ saíram da
+                                     # janela de re-submissão: não voltam sozinhos
         'sem_selo_na_janela': 0,  # elegíveis que o cron ainda não pegou
         'disponivel': False,   # False = não conseguiu ler (não confundir com "zero")
     }
 
 
-def compute_hotleads_summary(conn=None, source_allowlist=None) -> Dict[str, Any]:
+def compute_hotleads_summary(conn=None, source_allowlist=None,
+                             submit_window_days: int = 7) -> Dict[str, Any]:
     """Resumo 24h do pipeline HotLeads.
 
     Args:
@@ -50,6 +53,16 @@ def compute_hotleads_summary(conn=None, source_allowlist=None) -> Dict[str, Any]
             NUNCA pega (o evento é do pixel do Meta) — na base do DevClub isso é
             a esmagadora maioria (2.757 de 2.767 numa medição de 30/07), e o
             bloco gritaria "fila alta" todo dia sem nada estar errado.
+        submit_window_days: a MESMA janela de elegibilidade do submit
+            (`hotleads.submit_window_days`). O alarme de idade só olha lead que
+            o re-submit de 6h ainda PODE pegar; lead submetido que envelheceu
+            para fora da janela nunca mais recebe retorno sozinho e viraria
+            alarme vermelho PERMANENTE — foi o que os 4 órfãos do incidente de
+            06-14/08 fizeram no primeiro DM pós-conserto (16/08): "retorno
+            parado há 70h" com o retorno comprovadamente saudável (950 selos
+            nas mesmas 24h). Vermelho permanente mascara parada real futura.
+            Esses leads saem do alarme e entram em `presos_fora_da_janela`,
+            que o digest mostra como pendência de ação manual.
 
     Returns:
         Dict com o esqueleto acima. `disponivel=False` distingue "não li" de
@@ -71,19 +84,26 @@ def compute_hotleads_summary(conn=None, source_allowlist=None) -> Dict[str, Any]
                                  AND hotleads_hot IS TRUE),
               COUNT(*) FILTER (WHERE hotleads_capi_sent_at >= NOW() - (:h * INTERVAL '1 hour')),
               COUNT(*) FILTER (WHERE hotleads_status = 'error'),
-              COUNT(*) FILTER (WHERE hotleads_status = 'submitted'),
+              COUNT(*) FILTER (WHERE hotleads_status = 'submitted'
+                                 AND created_at >= NOW() - (:wd * INTERVAL '1 day')),
               -- SINAL PRINCIPAL de retorno quebrado. A volta normal leva ~17s;
               -- qualquer coisa acima de uma hora é anomalia inequívoca, e este
               -- número CRESCE sozinho enquanto o problema durar. A fila não
               -- serve para isso: o cron a drena, e foi por isso que o alarme
               -- ficou mudo os 8 dias de 06 a 14/08/2026.
+              -- Só leads DENTRO da janela de re-submissão: fora dela o retorno
+              -- não vem nunca e a idade cresceria para sempre (falso vermelho
+              -- permanente — os 4 órfãos do incidente).
               COALESCE(EXTRACT(EPOCH FROM (
                   NOW() - MIN(hotleads_submitted_at)
-                    FILTER (WHERE hotleads_status = 'submitted')
-              )) / 3600.0, 0)
+                    FILTER (WHERE hotleads_status = 'submitted'
+                              AND created_at >= NOW() - (:wd * INTERVAL '1 day'))
+              )) / 3600.0, 0),
+              COUNT(*) FILTER (WHERE hotleads_status = 'submitted'
+                                 AND created_at < NOW() - (:wd * INTERVAL '1 day'))
             FROM registros_ml
             """,
-            h=WINDOW_HOURS,
+            h=WINDOW_HOURS, wd=submit_window_days,
         )[0]
         out['selados'] = int(row[0] or 0)
         out['quentes'] = int(row[1] or 0)
@@ -91,6 +111,7 @@ def compute_hotleads_summary(conn=None, source_allowlist=None) -> Dict[str, Any]
         out['erros'] = int(row[3] or 0)
         out['aguardando_selo'] = int(row[4] or 0)
         out['idade_max_aguardando_h'] = round(float(row[5] or 0), 1)
+        out['presos_fora_da_janela'] = int(row[6] or 0)
         if out['selados']:
             out['pct_quentes'] = round(100.0 * out['quentes'] / out['selados'], 1)
 

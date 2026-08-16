@@ -1233,6 +1233,7 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'hotleads_24h_summary.erros':                                                       (R, None),
     'hotleads_24h_summary.aguardando_selo':                                             (R, None),
     'hotleads_24h_summary.idade_max_aguardando_h':                                      (R, None),
+    'hotleads_24h_summary.presos_fora_da_janela':                                       (R, None),  # 2026-08-16 — submetidos sem retorno já fora da janela de re-submissão (ação manual)
     'hotleads_24h_summary.sem_selo_na_janela':                                          (R, None),
     'hotleads_24h_summary.disponivel':                                                  (R, None),
 }
