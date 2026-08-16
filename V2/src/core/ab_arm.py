@@ -68,6 +68,43 @@ _DEFAULT_ACTIVE_MODELS = (
 #      divergência de operador entre os dois módulos era um bug latente.
 _CAP_MARKER_DEFAULT = "devlf | cap |"
 
+# Em 09/08/2026 o gestor virou a nomenclatura pro formato de COLCHETES
+# ("[17][DEVLF][CAP][LEADS][SITE][FRIO]...[JUL_24_TOP50]|<id>") e o funil por
+# variante ZEROU por 7 dias sem ninguém ver: o marcador acima é substring com
+# pipes, e "[DEVLF][CAP]" não o contém — tudo virava EXTERNO calado, com
+# R$ 10,7k/dia de gasto classificado como campanha externa. A normalização
+# abaixo traduz colchetes pro formato canônico de pipes ANTES de qualquer
+# casamento, então os dois formatos (e o próximo que inventarem com
+# separadores) passam pelo MESMO teste. Decisão de desenho (Ramon, 16/08):
+# a ETIQUETA do modelo é o que decide; o formato do nome não pode cegar o
+# relatório de novo.
+_SEPARADORES_RE = re.compile(r"[\[\]]+")
+_PIPES_RE = re.compile(r"\s*\|[\s|]*")
+
+
+def _normaliza_nome(t: str) -> str:
+    """Formato canônico pra casamento: colchetes viram pipes, pipes colapsam.
+
+    '[17][DEVLF][CAP][LEADS]' -> '| 17 | devlf | cap | leads |'
+    'DEVLF | CAP | FRIO'      -> 'devlf | cap | frio' (inalterado na essência)
+    """
+    t = _SEPARADORES_RE.sub(" | ", t.lower())
+    t = _PIPES_RE.sub(" | ", t)
+    return t.strip()
+
+
+def _tokens(t_norm: str) -> list:
+    """Tokens do nome normalizado (pedaços entre pipes, sem vazios)."""
+    return [p.strip() for p in t_norm.split("|") if p.strip()]
+
+
+# Campanhas que NÃO entram no balde 'Lead' padrão mesmo sendo captação sem
+# etiqueta de modelo (decisão do Ramon, 16/08/2026): público quente e campanha
+# interna têm economia própria e poluiriam o CPL da captação fria padrão.
+# Etiqueta de modelo VENCE (campanha quente COM etiqueta segue pro modelo —
+# regra 2a roda antes): público é escolha de mídia, o modelo é quem otimiza.
+_FORA_DO_LEAD_TOKENS = ("quente", "interno", "interna")
+
 # ─────────────────── vocabulário dos agregadores (contrato de saída) ───────────────────
 # Os relatórios chamam de 'Lead' o que aqui é CONTROLE, e não conhecem INDETERMINADO.
 # Isto NÃO é cosmético: `daily_check_aggregations` cria o dict com exatamente 3 chaves e
@@ -114,7 +151,9 @@ _RETIRED_CHAMPION_MARKERS: Tuple[str, ...] = ("leadqualified", "machine learning
 _RETIRED_CHALLENGER_MARKERS: Tuple[str, ...] = ("ml_mar", "utm_pixel", "pixel novo api")
 
 # Marcadores de Controle: captação SEM evento ML (Lead puro, score, faixa).
-_CONTROLE_MARKERS: Tuple[str, ...] = ("escala score", "aberto adv", "faixa ", "score")
+# (Os marcadores explícitos de Controle — "escala score", "| lead |" etc. —
+# saíram em 16/08/2026: captação sem etiqueta de modelo agora cai em Controle
+# por DEFAULT, então listar sinônimos de "sem etiqueta" virou redundância.)
 
 
 @dataclass(frozen=True)
@@ -216,9 +255,25 @@ def load_arm_config(path: Optional[Path] = None) -> ArmConfig:
         hist = _parse_role_history(v)
         if hist:
             roles.append((key, hist))
-        tag = str(v.get("campaign_tag", "")).strip().upper()
-        if tag and hist:
-            tags.append((tag, key))
+        # Etiquetas: campaign_tag + a lista utm_pattern.utm_campaign — a MESMA
+        # que o roteamento do scoring usa (ABTestConfig.match_variant). Antes
+        # este leitor só via o campaign_tag ('HQLB', 'JUL24'), então as
+        # etiquetas novas 'ABR_28_TOP30' e 'JUL_24_TOP30/50' eram invisíveis
+        # pro relatório enquanto o scoring as roteava normalmente: os dois
+        # lados liam CAMPOS diferentes do mesmo YAML e divergiram em 09/08.
+        # Fonte única de agora em diante: o que roteia é o que classifica.
+        etiquetas = [str(v.get("campaign_tag", "")).strip().upper()]
+        utm_pat = (v.get("utm_pattern") or {}).get("utm_campaign") or []
+        if isinstance(utm_pat, str):
+            # O campo aceita string OU lista (o match_variant do scoring trata
+            # os dois). Iterar uma string daria etiquetas de 1 letra que casam
+            # com qualquer nome — envenenaria o mapa inteiro.
+            utm_pat = [utm_pat]
+        etiquetas += [str(p).strip().upper() for p in utm_pat]
+        if hist:
+            for tag in etiquetas:
+                if tag and (tag, key) not in tags:
+                    tags.append((tag, key))
         if v.get("display_name"):
             names.append((key, str(v["display_name"])))
 
@@ -312,7 +367,9 @@ def is_captacao(text: Optional[str], config: Optional[ArmConfig] = None) -> bool
     if not t:
         return False
     cfg = config or _default_config()
-    return cfg.cap_marker in t.lower()
+    # Normaliza ANTES do teste: '[DEVLF][CAP]' e 'DEVLF | CAP |' são a mesma
+    # campanha em formatos diferentes; o marcador é um só.
+    return cfg.cap_marker in _normaliza_nome(t) + " | "
 
 
 def arm_to_bucket(arm: str, *, contexto: str = "") -> Optional[str]:
@@ -473,9 +530,17 @@ def resolve_arm(
     if any(m in t for m in _RETIRED_CHAMPION_MARKERS) or _has_lq(t):
         return CHAMPION
 
-    # 2e. Captação sem evento ML -> Controle
-    if any(m in t for m in _CONTROLE_MARKERS) or "| lead |" in t or t.rstrip().endswith("lead"):
-        return CONTROLE
+    # 2e. Público quente / campanha interna SEM etiqueta de modelo -> fora do
+    # recorte por variante (não é a captação fria padrão; a economia é outra).
+    # Etiqueta VENCE: quente com etiqueta já saiu na regra 2a.
+    toks = _tokens(_normaliza_nome(t))
+    if any(m in toks for m in _FORA_DO_LEAD_TOKENS):
+        return EXTERNO
 
-    # 2f. Captação reconhecida mas sem nenhum marcador conhecido -> fail-loud
-    return INDETERMINADO
+    # 2f. Captação sem etiqueta de modelo -> Controle ('Lead' padrão).
+    # Era fail-loud (INDETERMINADO), e o resultado prático foi o oposto do
+    # pretendido: quando a nomenclatura mudou em 09/08, TODA campanha nova sem
+    # etiqueta sumiu do funil em silêncio. Decisão do Ramon (16/08): campanha
+    # de captação sem etiqueta passa ILESA pro balde padrão, seja qual for o
+    # formato do nome — só quem tem etiqueta é roteado pra um modelo.
+    return CONTROLE

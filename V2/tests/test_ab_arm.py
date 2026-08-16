@@ -139,9 +139,12 @@ CASES = [
     ("QUENTE + HQLB é captação, não externo", dict(
         utm_campaign="DEVLF | CAP | QUENTE | FASE 04 | ADV | LEAD | PG1 | 2026-06-29 | LEADHQLB",
         captured_at="2026-07-29"), CHAMPION),
-    ("QUENTE + LEAD puro = controle", dict(
+    # Política mudou em 16/08/2026 (decisão do Ramon): QUENTE sem etiqueta de
+    # modelo fica FORA do balde 'Lead' padrão — a economia do público quente
+    # não pode poluir o CPL da captação fria. Antes deste dia: CONTROLE.
+    ("QUENTE sem etiqueta = fora do recorte", dict(
         utm_campaign="DEVLF | CAP | QUENTE | FASE 04 | ADV | LEAD | PG1 | 2026-06-29",
-        captured_at="2026-07-29"), CONTROLE),
+        captured_at="2026-07-29"), EXTERNO),
     ("MORNO tambem é captação", dict(
         utm_campaign="DEVLF | CAP | MORNO | FASE 04 | ADV | LEAD | PG1 | 2026-06-29 | LEADHQLB",
         captured_at="2026-07-29"), CHAMPION),
