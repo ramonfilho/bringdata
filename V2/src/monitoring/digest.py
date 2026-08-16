@@ -1145,18 +1145,28 @@ def _slack_training_drift_24h(v: dict, B: list):
     aquele é categoria-level agregado do dia; este é OHE-level por batch.
 
     Mostra:
-      - Quantos batches dispararam (= quantos lotes do Pub/Sub vieram com
-        coluna OHE caída pra <30% do esperado de treino).
-      - Top 5 colunas OHE mais afetadas (obs vs treino, delta pp, em quantos
-        batches apareceram).
+      - Quantos batches de scoring dispararam (DEDUPLICADOS — o gate de deploy
+        loga o mesmo batch em 2-3 linhas), com features CONFIRMADAS no
+        agregado do dia (a taxa real dos leads do dia, imune a tráfego de
+        gate/canário).
+      - Top 5 colunas OHE afetadas (agregado do dia vs treino, delta pp).
+      - Linha de contexto quando produção acusa muito uma feature que o
+        agregado diz saudável (colapso parcial / divergência de paridade).
 
-    Skipado se não há warnings na janela (estado limpo).
+    Skipado se não há warnings na janela nem contexto digno de nota.
     """
     td = v.get('training_drift_24h') or {}
     batches = td.get('batches_com_drift', 0) or 0
     top = td.get('top_features') or []
+    # Contexto anti-cegueira: feature flagrada MUITO em batch mas saudável no
+    # agregado do dia é assinatura de colapso parcial persistente ou de
+    # divergência de paridade scoring×monitoramento — merece linha de contexto
+    # (não alerta cheio) mesmo quando nada foi confirmado.
+    from src.monitoring.training_drift_summary import CONTEXTO_MIN_EVENTOS
+    contexto_saudaveis = [s for s in (td.get('suprimidas_saudaveis') or [])
+                          if (s.get('eventos') or 0) >= CONTEXTO_MIN_EVENTOS]
 
-    if batches == 0 and not td.get('erro'):
+    if batches == 0 and not td.get('erro') and not contexto_saudaveis:
         return  # estado limpo — encoding consistente com treino
 
     B.append({'type': 'header',
@@ -1171,28 +1181,59 @@ def _slack_training_drift_24h(v: dict, B: list):
         return
 
     hours = td.get('window_hours', 24)
-    header_line = (
-        f"*{batches}* batches do Pub/Sub vieram com alguma coluna OHE zerada "
-        f"em massa nas últimas {hours}h "
-        f"({td.get('total_observacoes', 0)} ocorrências no total). "
-        f"_Diferente do drift de proporções (agregado do dia): aqui é por batch "
-        f"individual, no nível da coluna OHE pós-encoding._"
-    )
-    B.append({'type': 'section',
-              'text': {'type': 'mrkdwn', 'text': header_line}})
+    if batches:
+        # "batches de scoring", não "do Pub/Sub": o T1-16 dispara em QUALQUER
+        # tráfego (Pub/Sub, canário, gate de deploy) e a linha não distingue.
+        # Quem separa produção de teste é a confirmação no agregado do dia.
+        header_line = (
+            f"*{batches}* batches de scoring vieram com alguma coluna OHE zerada "
+            f"em massa nas últimas {hours}h "
+            f"({td.get('total_observacoes', 0)} ocorrências, "
+            f"{td.get('linhas_brutas', 0)} linhas brutas). "
+            f"_Diferente do drift de proporções: aqui é por batch individual, "
+            f"no nível da coluna OHE pós-encoding._"
+        )
+        B.append({'type': 'section',
+                  'text': {'type': 'mrkdwn', 'text': header_line}})
 
     if top:
-        lines = ['*Top colunas OHE zeradas (obs vs treino):*']
+        lines = ['*Top colunas OHE zeradas:*']
         for f in top:
             delta = f.get('delta_pp', 0)
             arrow = '🔻' if delta < 0 else '🔺'
+            taxa_dia = f.get('taxa_dia')
+            if taxa_dia is not None:
+                medida = (f"agregado do dia *{100*taxa_dia:.1f}%* "
+                          f"vs treino *{100*f.get('exp',0):.1f}%*")
+            else:
+                medida = (f"obs média das flagradas *{100*f.get('obs_media',0):.1f}%* "
+                          f"vs treino *{100*f.get('exp',0):.1f}%* (não confirmado no agregado)")
             lines.append(
-                f"• `{f.get('feature','?')}` — obs *{100*f.get('obs_media',0):.1f}%* "
-                f"vs treino *{100*f.get('exp',0):.1f}%* {arrow} {abs(delta):.1f}pp  "
+                f"• `{f.get('feature','?')}` — {medida} {arrow} {abs(delta):.1f}pp  "
                 f"(em {f.get('count', 0)} batches)"
             )
         B.append({'type': 'section',
                   'text': {'type': 'mrkdwn', 'text': '\n'.join(lines)}})
+
+    if contexto_saudaveis:
+        linhas_ctx = []
+        for s in contexto_saudaveis:
+            linhas_ctx.append(
+                f"⚠️ produção acusou `{s['feature']}` em *{s['eventos']}* batches, "
+                f"mas o agregado do dia está saudável "
+                f"(*{100*(s.get('taxa_dia') or 0):.1f}%* vs treino "
+                f"*{100*(s.get('exp') or 0):.1f}%*) — assinatura de colapso "
+                f"parcial ou divergência de paridade scoring×monitoramento, "
+                f"não de ruído")
+        B.append({'type': 'section',
+                  'text': {'type': 'mrkdwn', 'text': '\n'.join(linhas_ctx)}})
+
+    revisoes = td.get('revisoes') or []
+    if len(revisoes) > 1:
+        B.append({'type': 'context',
+                  'elements': [{'type': 'mrkdwn',
+                                'text': f"_linhas vindas de {len(revisoes)} revisões: "
+                                        f"{', '.join(f'`{r}`' for r in revisoes)}_"}]})
 
     obs = td.get('observacao')
     if obs:
