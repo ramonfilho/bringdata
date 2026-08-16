@@ -245,6 +245,7 @@ def challenger_quality_by_utm(
     win_end,
     pin_lf: bool = True,
     conn=None,
+    meta_sources: Optional[list] = None,
 ) -> list:
     """Qualidade Challenger (pct_d9_d10 + decil médio) por criativo ou campanha —
     `scores_historicos` ⋈ `registros_ml`.
@@ -277,6 +278,13 @@ def challenger_quality_by_utm(
         pin_lf: True = visão do lançamento (filtra lf); False = visão da janela
             (só data, sem lf). Default True (compat com a linha "Lançamento").
         conn: conexão Cloud SQL opcional (injetada); None → abre e fecha.
+        meta_sources: lista de utm_source da Meta. Quando fornecida, SÓ leads
+            dessas fontes entram na agregação. O nível CAMPANHA precisa disso:
+            leads do Google chegam com utm_campaign genérica 'devlf' (938
+            emails/7d, 100% google — medido 16/08/2026) e viravam uma
+            pseudo-campanha julgada na régua do champion na tabela vs-TOP5.
+            O nível CRIATIVO não passa a lista de propósito: criativo google
+            no ranking é deliberado (rotulado pelo source_hint).
 
     Returns:
         list[dict] {utm, n, pct_d9_d10, avg_decil}, ordenada por n desc. []
@@ -290,6 +298,16 @@ def challenger_quality_by_utm(
     if col is None:
         logger.warning("[challenger_quality_by_utm] level inválido: %r", level)
         return []
+
+    # Filtro de canal opcional (ver docstring de meta_sources). pg8000 não
+    # expande lista em IN — um placeholder por item, padrão da casa.
+    _src_filtro = ""
+    _src_params: dict = {}
+    if meta_sources:
+        for _i, _s in enumerate(meta_sources):
+            _src_params[f"msrc{_i}"] = _s
+        _src_filtro = " AND utm_source IN (" + ", ".join(
+            f":{k}" for k in _src_params) + ") "
 
     own = conn is None
     if own:
@@ -318,10 +336,12 @@ def challenger_quality_by_utm(
                 f"       WHERE {col} IS NOT NULL AND {col} <> '' "
                 "         AND created_at >= :ws AND created_at < :we "
                 f"         AND ({ruler}) IS NOT NULL "
+                f"         {_src_filtro}"
                 "       ORDER BY lower(email), created_at DESC ) t "
                 "GROUP BY t.utm ORDER BY n DESC"
             )
-            params = {'run_id': challenger_run_id, 'ws': win_start, 'we': win_end}
+            params = {'run_id': challenger_run_id, 'ws': win_start, 'we': win_end,
+                      **_src_params}
         else:
             utm_cte = (
                 "WITH utm_por_lead AS ("
@@ -329,6 +349,7 @@ def challenger_quality_by_utm(
                 "  FROM registros_ml "
                 f"  WHERE {col} IS NOT NULL AND {col} <> '' "
                 "    AND created_at >= :ws AND created_at < :we "
+                f"    {_src_filtro}"
                 "  ORDER BY lower(email), created_at DESC"
                 ") "
             )
@@ -363,7 +384,8 @@ def challenger_quality_by_utm(
                 "GROUP BY u.utm "
                 "ORDER BY n DESC"
             )
-            params = {'run_id': challenger_run_id, 'ws': win_start, 'we': win_end}
+            params = {'run_id': challenger_run_id, 'ws': win_start, 'we': win_end,
+                      **_src_params}
             if pin_lf:
                 params['lf'] = lf_name
         rows = conn.run(sql, **params)

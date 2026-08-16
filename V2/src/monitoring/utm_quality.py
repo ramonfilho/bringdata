@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 
 BRT = timezone(timedelta(hours=-3))
 
+# Balde dos leads de fora da Meta (google/orgânico) sem variante gravada. Eles
+# CONTINUAM no ranking de criativos (n e média combinada; o source_hint rotula a
+# origem), mas fora das colunas Champion×Challenger — antes caíam no default do
+# champion e inflavam a coluna dele (~6,5k leads/30d, auditoria 16/08/2026).
+FORA_DO_AB = 'fora_do_ab'
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # Variant attribution (reusa ABTestConfig.match_variant)
@@ -42,13 +48,19 @@ def _classify_variant_from_record(record, ab_cfg,
 
     Prefere `record.variant` quando preenchido (ledger novo registra a variante
     direto). Cai no match histórico via UTMs+URL apenas quando o ledger não
-    carrega (adaptador legado, leads pré-Pub/Sub).
+    carrega (adaptador legado, leads pré-Pub/Sub). Lead de fora da Meta sem
+    variante gravada vai pro balde FORA_DO_AB — nenhum modelo o roteou por
+    campanha, e o default antigo (champion) inflava a coluna do Champion.
 
     Migrado em 2026-05-24 (Etapa 6 do refator). Antes era tupla de strings;
     agora consome `LeadRecord` por injeção de dependência.
     """
     if record.variant in (champion_name, challenger_name):
         return record.variant
+
+    from src.monitoring.campaign_classifier import channel_from_source
+    if channel_from_source(record.utm_source) != 'meta':
+        return FORA_DO_AB
 
     # Fallback: match histórico via UTMs (mesmo critério de produção).
     src = (record.utm_source or '').strip().lower()
@@ -120,15 +132,16 @@ def _aggregate(records, level_col: str, ab_cfg,
     return out
 
 
-def _combined_avg_decil(ch: dict, cl: dict) -> Optional[float]:
-    n_ch = (ch or {}).get('n', 0) or 0
-    n_cl = (cl or {}).get('n', 0) or 0
-    n_total = n_ch + n_cl
+def _combined_avg_decil(*baldes: dict) -> Optional[float]:
+    """Média de decil ponderada sobre N baldes (champion, challenger e
+    fora_do_ab). Aceita vários porque o ranking de criativos inclui os leads
+    de fora da Meta no combinado — só a atribuição por modelo os exclui."""
+    n_total = sum(((b or {}).get('n', 0) or 0) for b in baldes)
     if n_total == 0:
         return None
-    sum_ch = ((ch or {}).get('avg_decil') or 0) * n_ch
-    sum_cl = ((cl or {}).get('avg_decil') or 0) * n_cl
-    return (sum_ch + sum_cl) / n_total
+    soma = sum((((b or {}).get('avg_decil') or 0) * ((b or {}).get('n', 0) or 0))
+               for b in baldes)
+    return soma / n_total
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -292,12 +305,16 @@ def compute_utm_quality(
     for utm in all_creatives:
         ch_win = agg_win.get(utm, {}).get(champion_name)
         cl_win = agg_win.get(utm, {}).get(challenger_name)
+        fx_win = agg_win.get(utm, {}).get(FORA_DO_AB)
         ch_lf  = agg_lf.get(utm, {}).get(champion_name)
         cl_lf  = agg_lf.get(utm, {}).get(challenger_name)
+        fx_lf  = agg_lf.get(utm, {}).get(FORA_DO_AB)
 
-        n_win = ((ch_win or {}).get('n') or 0) + ((cl_win or {}).get('n') or 0)
-        n_lf  = ((ch_lf  or {}).get('n') or 0) + ((cl_lf  or {}).get('n') or 0)
-        avg_combined = _combined_avg_decil(ch_win or {}, cl_win or {})
+        n_win = (((ch_win or {}).get('n') or 0) + ((cl_win or {}).get('n') or 0)
+                 + ((fx_win or {}).get('n') or 0))
+        n_lf  = (((ch_lf  or {}).get('n') or 0) + ((cl_lf  or {}).get('n') or 0)
+                 + ((fx_lf or {}).get('n') or 0))
+        avg_combined = _combined_avg_decil(ch_win or {}, cl_win or {}, fx_win or {})
 
         entries.append({
             'utm': utm,
@@ -638,9 +655,16 @@ def build_top5_comparison(
             'levels': {},
         }
         for level in ('creative', 'campaign'):
+            # Nível CAMPANHA: só fontes Meta — leads do Google chegam com a
+            # pseudo-campanha 'devlf' (100% google, medido 16/08) e viravam uma
+            # linha de campanha julgada na régua do champion. Nível CRIATIVO
+            # segue com todas as fontes de propósito (criativo google no
+            # ranking é deliberado, rotulado pelo source_hint).
+            from src.monitoring.campaign_classifier import _META_SOURCES
             rows = challenger_quality_by_utm(
                 lf_name, level=level, challenger_run_id=challenger_run_id,
                 win_start=win_start, win_end=win_end, pin_lf=pin_lf, conn=conn,
+                meta_sources=(sorted(_META_SOURCES) if level == 'campaign' else None),
             )
             shown, hidden = _enrich(rows)
             if level == 'campaign':
