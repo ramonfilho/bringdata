@@ -294,9 +294,11 @@ def coletar(conn) -> tuple:
     resumos.append(r)
     # corte HOJE: mesmo piso de N, janela = O DIA REAL de Brasília, SEM o grampo do
     # calendário. Os outros cortes se ancoram no lançamento; este existe pra gerir
-    # o que roda AGORA — entre lançamentos (cap_end ontem, planilha ainda sem o
-    # próximo), "hoje" rotulando ontem enganaria o gestor (pego em 16/08: 117 leads
-    # do dia invisíveis porque o corte olhava 15/08).
+    # o que roda AGORA: entre lançamentos (cap_end ontem, planilha ainda sem o
+    # próximo, como em 04 a 06/08/2026), "hoje" rotulando o último dia de captação
+    # enganaria o gestor. (A justificativa original citava "117 leads invisíveis";
+    # era artefato de um query de debug que agrupava campanha truncada. O cenário
+    # entre lançamentos acima é o motivo real e suficiente.)
     hoje_real = _hoje_brt()
     l, r = _um_corte(conn, lf, run_id, hoje_real, hoje_real, CORTE_HOJE, mapa_nome)
     # Corte curto vazio NÃO é erro: acontece de verdade quando nenhum criativo alcançou o
