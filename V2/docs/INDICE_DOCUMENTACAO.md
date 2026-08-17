@@ -265,6 +265,7 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Status:** ativo. Documento vivo — adicionar novos erros conforme ocorrem; expandir Seção V conforme cada cenário do backlog é validado.
 **Origem:** unificação de `Erros_cometidos.md` (criado abr/2026) + `auditoria_dano_bugs_ml.md` (criado mai/2026, audiência cliente externo, re-tecnicado para uso interno).
 **Relação:** é a motivação de cada item do `PLANO_SAFEGUARD.md`. Leitura obrigatória antes de qualquer mudança de infraestrutura. Seção V (Frentes preventivas em aberto) alimenta H1/H2 do `PLANO_EXECUCAO.md`. **Desde 05/08/2026 também é o destino dos post-mortems de segurança JÁ FECHADOS** (Erro 20: credencial de banco em repositório público). Furos de segurança **abertos** não entram aqui, por decisão explícita: ver a nota logo abaixo.
+**Última entrada (17/08/2026):** Erro 21 — enriquecimento HotLeads mudo por 8 dias porque fechar o serviço principal quebrou o endereço de **volta** que a Hotmart usa para responder, e o alarme vigiava o lado da **ida**. Inclui o encerramento dos 4 leads que envelheceram fora da janela de re-envio (script `V2/scripts/fechar_hotleads_presos_pane_agosto.py`).
 
 ### 🔒 Documento de segurança FORA deste repositório (nota de política, 05/08/2026)
 

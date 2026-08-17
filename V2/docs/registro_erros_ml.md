@@ -435,6 +435,30 @@ Tudo em `PR #141`.
 
 ---
 
+### 21. Enriquecimento HotLeads mudo por 8 dias — a resposta da Hotmart batia numa porta que passou a exigir crachá (06–14/08/2026; rabo fechado em 17/08/2026)
+
+> **Estado: FECHADO.** Fluxo restabelecido em 14/08, alarme corrigido em 16/08, os últimos 4 leads presos encerrados em 17/08. Impacto de negócio baixo por decisão do cliente: o selo do HotLeads (a informação "esse lead já comprou algo na Hotmart") ainda não é usado pela operação.
+
+**Como o fluxo funciona, em uma frase:** a cada 15 minutos mandamos um lote de e-mails para a Hotmart perguntando "esses já compraram algo com vocês?"; ela **não responde na hora** — processa e, ~17 segundos depois, bate num endereço nosso entregando a resposta. É ida e volta, com dois endereços diferentes.
+
+**O que aconteceu.** Em 06/08/2026 o serviço principal foi **fechado de propósito** (removido o acesso anônimo, decisão certa e mantida). O endereço de **volta** continuou apontando para esse serviço. A Hotmart é um terceiro e não tem credencial do Google: **478 tentativas em 30 dias, todas recusadas pelo controle de acesso antes de chegar na nossa aplicação** — por isso não havia nem log nosso do problema. E a Hotmart **não reentrega** resposta perdida. Último selo em 05/08 19:15, primeira recusa em 06/08 17:30: **8 dias, 3.069 leads sem resposta.**
+
+**Por que o alarme não gritou — a lição que vale além do HotLeads.** O alarme vigiava a **fila da ida** (leads ainda não enviados), e a ida estava perfeitamente saudável, devolvendo 200 a cada 15 minutos. Quem morreu foi a **volta**. A condição do alarme exigia "nenhum selo E fila cheia", e as duas coisas nunca aconteceram juntas: no lugar do alerta saía a frase tranquilizadora "aguardando retorno da Hotmart (normal por ~2 min)". **Alarme que mede o lado errado é pior que não ter alarme, porque tranquiliza.** Sinal correto, agora implementado: **há quanto tempo o mais antigo espera resposta** — a volta normal leva ~17s, e esse número cresce sozinho enquanto o problema durar.
+
+**Consertos:** `PR #191` (endereço de volta passa a apontar para o serviço público que existe para receber webhook de terceiro; a URL viaja em cada submissão, então não foi preciso mexer no painel da Hotmart) e `PR #195` (alarme por idade da espera + o ciclo diário passando a alimentar o público personalizado). Armadilha que o conserto criou e foi separada na hora: a mesma variável dizia onde o cron bate **e** onde a Hotmart responde, e os dois endereços são opostos — ida no serviço fechado (que assina credencial), volta no público.
+
+**O rabo do incidente: 4 leads que nunca voltaram.** O re-envio automático só pega lead com até 7 dias de vida. Quando o endereço foi consertado, 4 leads de 06–07/08 já tinham envelhecido além disso: ficaram em "esperando resposta" **para sempre**, e fizeram o alarme novo acordar vermelho todo dia ("retorno parado há 70h") com o fluxo comprovadamente saudável — 950 selos voltando nas mesmas 24h. Vermelho permanente ensina a ignorar o alarme e mascara a próxima parada real.
+
+- **16/08 (`PR #219`):** o alarme de idade passa a olhar **só lead que o re-envio automático ainda pode pegar**; quem envelheceu para fora da janela vira uma linha própria de pendência manual, sem vermelho.
+- **16/08 14:27:** os 4 foram re-submetidos **na mão** (execução `ad362391`). A Hotmart aceitou o lote.
+- **17/08:** 24h depois, **nenhum dos 4 recebeu resposta**, enquanto 1.525 selos voltaram normalmente no mesmo período (105 quentes) — ou seja, o fluxo está saudável e a recusa é específica desses e-mails. Encerrados por [`V2/scripts/fechar_hotleads_presos_pane_agosto.py`](../scripts/fechar_hotleads_presos_pane_agosto.py): **1** deles já tinha resposta guardada de uma captação anterior (não comprador, selado em 31/07) e essa resposta foi copiada para o ledger, exatamente o que a volta teria escrito; os outros **3** receberam o estado final `sem_retorno` com o motivo escrito no próprio registro. A linha de pendência foi a zero.
+
+**Causa-raiz.** Uma mudança de **infraestrutura** (fechar o serviço) quebrou um contrato de **integração** (o endereço que um terceiro usa para responder) porque nada relacionava as duas coisas: o inventário de "quem bate na nossa porta de fora" não existia. É o mesmo esqueleto do Erro 12 (migração de banco sem inventário dos pontos de integração), com terceiro no lugar de código nosso.
+
+**Lição operacional, em duas partes:** (1) alarme de fluxo de ida e volta tem que medir a **volta**, e por *idade da espera*, não por tamanho de fila — fila é drenada pelo próprio cron e mente; (2) toda janela de re-tentativa automática precisa de uma **saída** para quem envelheceu fora dela, senão o incidente deixa resíduo que vira alarme falso permanente.
+
+---
+
 ## III. Backtests de dano (mar–mai/2026)
 
 Esta seção consolida os backtests contrafactuais executados em mai/2026 para quantificar dano dos bugs de encoding e features faltantes.
