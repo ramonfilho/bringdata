@@ -48,7 +48,7 @@ BRT = timezone(timedelta(hours=-3))
 # gerava alerta tecnicamente verdadeiro e operacionalmente irrelevante
 # (caso [27] de 18/08). Abaixo disso o split não nasceria de qualquer jeito
 # (piso de 100 por linha).
-HOMONIMO_MIN_LEADS = float(os.getenv('PAINEL_VIGIA_HOMONIMO_LEADS', '50'))
+HOMONIMO_MIN_LEADS = int(float(os.getenv('PAINEL_VIGIA_HOMONIMO_LEADS', '50')))
 
 
 @dataclass
