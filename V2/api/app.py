@@ -4928,6 +4928,55 @@ async def cost_alert(limite: Optional[float] = None,
     return resultado
 
 
+@app.get("/monitoring/painel-vigia")
+async def painel_vigia(horas: Optional[float] = None, force: bool = False):
+    """
+    Vigia do painel da agência - DM se o painel travar, esvaziar ou ficar cego.
+
+    Ponto único de composição: aqui se escolhem as DUAS conexões (o banco da
+    agência onde o painel mora, e o analytics onde vive a janela do
+    gerenciador) e o destino do aviso. A regra inteira fica em
+    `src/monitoring/painel_vigia.py`.
+
+    Chamado de hora em hora pelo Cloud Scheduler, depois da rodada do robô de
+    publicação (cron :22). Só produz mensagem quando há o que avisar:
+      - painel sem escrita há mais de `horas` (default 2 = duas rodadas
+        perdidas) → 🔴 travado, com onde olhar
+      - painel sem nenhuma linha → 🔴 vazio
+      - conjuntos de anúncios homônimos na mesma campanha (janela de 3 dias)
+        → ⚠️ split por público cego; pedir nome distinto ao tráfego
+      - tudo em dia → responde 200 sem postar nada (`force=1` posta o 🟢)
+
+    Nasceu do incidente de 18/08/2026: o robô morreu na estreia do LF65 e o
+    painel exibiu o "hoje" de ontem por 11 horas - quem percebeu foi o gestor.
+    """
+    from src.monitoring.painel_vigia import LIMITE_HORAS_DEFAULT, executar as vigiar
+
+    def _abre_destino():
+        from scripts.push_supabase_zanelato import destino
+        return destino(porta=5432)
+
+    def _abre_analytics():
+        from src.data.analytics_connection import open_analytics_connection
+        return open_analytics_connection(timeout=120)
+
+    try:
+        resultado = vigiar(_abre_destino, _abre_analytics,
+                           limite_horas=(LIMITE_HORAS_DEFAULT if horas is None
+                                         else float(horas)),
+                           force=force)
+    except Exception as e:
+        # Vigia que não consegue medir É alarme: 500 aparece como falha do
+        # cron, nunca 200 silencioso passando por "painel em dia".
+        logger.error(f"[painel-vigia] falhou ao medir: {e}")
+        raise HTTPException(status_code=500, detail=f"painel-vigia falhou: {e}")
+
+    if not resultado.get('ok'):
+        raise HTTPException(status_code=502,
+                            detail=f"painel-vigia: {resultado.get('erro')}")
+    return resultado
+
+
 @app.get("/smoke/run-variants")
 async def smoke_run_variants(
     pipeline: PipelineDep,
