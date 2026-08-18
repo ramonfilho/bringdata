@@ -151,7 +151,17 @@ def grava_historico(conn, historico: pd.DataFrame, client_id: str = "devclub") -
 def le_historico(conn, client_id: str = "devclub") -> dict:
     """{criativo: {leads, compradores, esperados, prior_conversao, prior_fonte}} —
     o que o push consome. Tabela ausente devolve {} (o consumidor degrada pro
-    modelo puro, que é o comportamento sem histórico)."""
+    modelo puro, que é o comportamento sem histórico).
+
+    UNIFICAÇÃO POR NOME (18/08, regra "cópia é o mesmo anúncio"): a chave
+    gravada é o texto da UTM, e no Google o mesmo vídeo vive como VÁRIOS ids
+    numéricos (AD0139 = 9 ids) — o histórico picado zerava o peso do lift
+    justamente no canal onde o modelo não ordena (+0,05) e o histórico é o
+    único sinal (+0,35). Aqui, na LEITURA: id vira nome via criativo_id_map,
+    gavetas do mesmo nome SOMAM, e o id fica como APELIDO apontando pra MESMA
+    gaveta fundida — quem consulta por id ou por nome cai no mesmo lugar.
+    A tabela não muda (estrangulamento na leitura; o refresh semanal segue
+    gravando por chave crua)."""
     try:
         rows = conn.run(
             f"SELECT criativo, leads, compradores, esperados, prior_conversao, "
@@ -160,8 +170,37 @@ def le_historico(conn, client_id: str = "devclub") -> dict:
         logger.warning("[criativo_historico] leitura falhou (%s) — degradando pra "
                        "sem histórico", e)
         return {}
-    return {r[0]: {"leads": int(r[1]), "compradores": int(r[2]),
-                   "esperados": float(r[3]),
-                   "prior_conversao": (float(r[4]) if r[4] is not None else None),
-                   "prior_fonte": r[5]}
-            for r in rows}
+    try:
+        mapa = {str(r[0]): " ".join(str(r[1]).split())
+                for r in conn.run("SELECT ad_id, ad_name FROM criativo_id_map "
+                                  "WHERE ad_name IS NOT NULL")}
+    except Exception:
+        mapa = {}   # sem mapa, cada chave fica como está (comportamento antigo)
+
+    out: dict = {}
+    apelidos: list = []
+    for r in rows:
+        cru = str(r[0]).strip()
+        nome = mapa.get(cru, cru) if (cru.isdigit() and len(cru) >= 10) else cru
+        if nome != cru:
+            apelidos.append((cru, nome))
+        g = out.get(nome)
+        if g is None:
+            out[nome] = {"leads": int(r[1]), "compradores": int(r[2]),
+                         "esperados": float(r[3]),
+                         "prior_conversao": (float(r[4]) if r[4] is not None
+                                             else None),
+                         "prior_fonte": r[5]}
+        else:   # gaveta do mesmo anúncio: SOMA a evidência; prior existente fica
+            g["leads"] += int(r[1])
+            g["compradores"] += int(r[2])
+            g["esperados"] += float(r[3])
+            if g["prior_conversao"] is None and r[4] is not None:
+                g["prior_conversao"] = float(r[4])
+                g["prior_fonte"] = r[5]
+    for cru, nome in apelidos:
+        out[cru] = out[nome]   # MESMO objeto: busca por id acha a gaveta fundida
+    if apelidos:
+        logger.info("[criativo_historico] %d chaves numéricas fundidas por nome",
+                    len(apelidos))
+    return out
