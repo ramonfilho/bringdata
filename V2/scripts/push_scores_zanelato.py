@@ -332,6 +332,22 @@ def _moeda_do_gerenciador(linhas, ger) -> list:
     return out
 
 
+def _mapa_campanha_google(conn) -> dict:
+    """ad_id google -> nome da CAMPANHA real no Google Ads (criativo_id_map).
+
+    Existe porque no Google a campanha NÃO viaja na UTM (tudo chega 'devlf');
+    o ID do anúncio é o único portador de "em qual campanha este vídeo roda".
+    Traduzir ID->nome e fundir jogava fora exatamente essa informação — o
+    gestor precisa de cada colocação separada pra otimizar (Ramon, 18/08)."""
+    try:
+        return {str(r[0]): " ".join(str(r[1]).split())
+                for r in conn.run("SELECT ad_id, campaign_name "
+                                  "FROM analytics.criativo_id_map "
+                                  "WHERE campaign_name IS NOT NULL")}
+    except Exception:
+        return {}
+
+
 def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict) -> tuple:
     """Roda a comparação numa janela e devolve (linhas, resumo). NÃO recalcula nada.
 
@@ -389,16 +405,27 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict) -> tuple
     # ter um teto numa campanha e outro na outra). tipo criativo_campanha[sufixo],
     # chave "criativo @ campanha", mesmo piso de N das demais linhas.
     min_n_u = comp.get("min_n") or 100
+    mapa_camp_g = _mapa_campanha_google(conn)
     for u in unidades_t:
         if u["n"] < min_n_u:
             continue
         t = u["teto"]
         cr = u["criativo"]
-        if cr.isdigit() and len(cr) >= 10 and cr in mapa_nome:
-            cr = mapa_nome[cr]
+        camp_rotulo = u["campanha"]
+        if cr.isdigit() and len(cr) >= 10:
+            # Colocação do GOOGLE: a campanha real vem do mapa (a UTM só diz
+            # 'devlf'). Cada ID vira a própria linha "vídeo @ campanha-real";
+            # dois IDs do mesmo vídeo NA MESMA campanha ainda se fundem (aí
+            # sim é cópia da mesma colocação). O histórico/lift continua
+            # somado por vídeo — força de venda é do criativo, otimização é
+            # da colocação.
+            if cr in mapa_camp_g:
+                camp_rotulo = mapa_camp_g[cr]
+            if cr in mapa_nome:
+                cr = mapa_nome[cr]
         linhas.append([
             "criativo_campanha" + sufixo,
-            f"{cr} @ {u['campanha']}",
+            f"{cr} @ {camp_rotulo}",
             int(u["n"]),
             round(u["pct"], 1),
             barra,
