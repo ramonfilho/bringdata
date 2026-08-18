@@ -12,8 +12,32 @@ LER o campo, nunca recalcular.
 
 Rodável:  PYTHONPATH=. python tests/test_variant_winner_checkmark.py
 """
-from src.monitoring.data_quality import pick_variant_winner
+from src.monitoring.data_quality import pick_bucket_winner, pick_variant_winner
 from src.monitoring.digest import _slack_alert_audience_by_variant
+
+
+# --------------------------------------------- regra geral, com o Lead na disputa
+
+def test_lead_vence_quando_esta_mais_perto():
+    # Caso real de 01/08 (Idade 25-34, Top%=30.9) com o Lead colado na referência.
+    assert pick_bucket_winner('positive', {'lead': 0.2, 'champion': 17.3,
+                                           'challenger': 0.9}) == 'lead'
+
+
+def test_balde_sem_medicao_nao_impede_os_outros():
+    # Champion sem lead na categoria não anula a disputa entre os outros dois.
+    assert pick_bucket_winner('positive', {'lead': 5.0, 'champion': None,
+                                           'challenger': 0.9}) == 'challenger'
+
+
+def test_menos_de_dois_medidos_nao_elege():
+    assert pick_bucket_winner('positive', {'lead': 0.2, 'champion': None,
+                                           'challenger': None}) is None
+
+
+def test_empate_no_menor_delta_nao_elege():
+    assert pick_bucket_winner('positive', {'lead': 2.0, 'champion': -2.0,
+                                           'challenger': 9.9}) is None
 
 
 # ---------------------------------------------------------------- regra pura
@@ -112,28 +136,84 @@ def test_sem_os_dois_bracos_nao_marca_ninguem():
     assert '✅' not in _render(_alert([_row('challenger')], challenger_n=3))
 
 
-# ------------------------------------------- largura e colunas (02/08/2026)
+# ------------------------------------------- largura e colunas (18/08/2026)
 
-def test_lead_fora_da_tabela_e_linha_cabe_no_slack():
-    """Lead saiu das colunas e a linha voltou a caber sem quebrar.
+# Teto de largura da linha. O limite REAL é visual (o Slack quebra pela largura da
+# janela de quem lê), não um número do protocolo — então o teto aqui é ancorado no
+# que comprovadamente circula: a tabela `Drift por Fonte` vai pro grupo todo dia com
+# 92 chars / 94 colunas visuais sem quebrar. A de A/B com as 3 colunas mede 96 chars
+# / 100 visuais, validado na tela do leitor em 18/08/2026 antes de entrar. O teto
+# existe pra travar CRESCIMENTO: quem adicionar uma 4ª coluna ou alargar célula
+# quebra aqui, não no Slack do operador.
+MAX_LINHA_CHARS = 100
 
-    Antes: 3 braços + Top% + Compr% davam 120 chars (130+ em produção, onde o
-    rótulo leva o run do modelo) e o Slack quebrava a coluna do Challenger pra
-    uma segunda linha. Agora são 2 braços e rótulo curto.
+
+def test_lead_tem_coluna_e_a_linha_nao_cresce_sem_medir():
+    """Lead de volta às colunas (18/08/2026) sem estourar a largura validada.
+
+    Ele saiu em 02/08 porque a linha dava 120 chars (130+ quando o rótulo ainda
+    levava o run do modelo) e o Slack quebrava a coluna do Challenger pra uma
+    segunda linha. No MESMO dia entrou o rótulo curto (Champ/Chall), que resolveu a
+    largura — mas a coluna nunca voltou. Ela importa porque o Lead é o único grupo
+    SEM modelo: o único controle do mesmo dia e do mesmo leilão. Sem ele os braços de
+    ML só tinham como referência o Top5, congelado em maio de 2026.
     """
     rows = [_row('challenger')]
     for it in rows:
         it['rolling_reference_pct'] = 29.4          # liga a coluna Compr%
+        it['lead_pct'], it['lead_delta_pp'], it['lead_quality'] = 21.0, -8.4, 'ruim'
     alerta = _alert(rows)
     alerta['details']['lead_n'] = 88                # Lead acima do corte de N
     txt = _render(alerta)
     tabela = [ln for ln in txt.splitlines() if ln.startswith('`')]
     assert tabela, txt
-    assert max(len(ln) for ln in tabela) <= 90, max(len(ln) for ln in tabela)
-    # Lead não tem coluna...
-    assert 'Lead(' not in txt, txt
-    # ...mas o volume dele continua visível no cabeçalho.
+    assert max(len(ln) for ln in tabela) <= MAX_LINHA_CHARS, max(len(ln) for ln in tabela)
+    # Lead tem coluna própria...
+    assert 'Lead(' in txt, txt
+    # ...e passa a contar DENTRO da tabela, não mais no "fora da tabela".
     assert 'Lead=88' in txt, txt
+    assert 'fora da tabela: Google' in txt, txt
+
+
+def test_lead_disputa_e_pode_levar_o_check():
+    """O ✅ vai pra coluna mais perto da referência, seja ela qual for (18/08/2026).
+
+    Antes o Lead era excluído da disputa por ser "o controle sem ML". Isso garantia
+    que a resposta nunca fosse incômoda: se o tráfego SEM modelo estivesse mais perto
+    do público que dá retorno, a tabela não podia dizer isso. Agora pode.
+    """
+    rows = [_row('challenger')]
+    for it in rows:
+        # Lead colado no Top% (Δ 0.2) contra Champion +17.3 e Challenger +0.9
+        it['lead_pct'], it['lead_delta_pp'], it['lead_quality'] = 31.1, 0.2, 'bom'
+        it['winner'] = 'lead'          # o campo vem PRONTO do data_quality
+    alerta = _alert(rows)
+    alerta['details']['lead_n'] = 500
+    linha = _linha_dados(_render(alerta))
+    assert linha.count('✅') == 1, linha
+    # o ✅ tem que estar na coluna do Lead, ou seja, ANTES do valor do Challenger
+    assert linha.index('✅') < linha.index('31.8%'), linha
+
+
+def test_render_nunca_recalcula_o_vencedor():
+    """O renderizador só LÊ o campo `winner`. Se ele voltar a ter regra própria, esta
+    linha marcaria alguém mesmo com o campo vazio — foi o bug de 01/08/2026."""
+    rows = [_row(None)]                 # winner=None, mas com Δ que tentariam ganhar
+    for it in rows:
+        it['lead_pct'], it['lead_delta_pp'], it['lead_quality'] = 31.1, 0.2, 'bom'
+    alerta = _alert(rows)
+    alerta['details']['lead_n'] = 500
+    assert '✅' not in _render(alerta)
+
+
+def test_lead_abaixo_do_corte_vira_nota_como_qualquer_braco():
+    """Corte de N vale igual pros três: pouco lead = ruído de Δ, sai da tabela e
+    vira nota — nunca some em silêncio."""
+    alerta = _alert([_row('challenger')])
+    alerta['details']['lead_n'] = 3
+    txt = _render(alerta)
+    assert 'Lead(' not in txt, txt
+    assert 'Omitidos' in txt and 'Lead=3' in txt, txt
 
 
 if __name__ == '__main__':
