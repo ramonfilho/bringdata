@@ -127,12 +127,16 @@ def puxa_dia(meta, account_id: str, dia: date) -> list[dict]:
     return [x for x in out if x["ad"] and x["d"]]
 
 
-def grava(conn, linhas: list[dict], lote: int = 500) -> int:
-    """Upsert em LOTES multi-VALUES: 12 mil round-trips um a um derrubaram a
-    primeira carga no meio, sem barulho. ~25 comandos aguentam qualquer coisa."""
+def prepara(conn) -> None:
+    """DDL idempotente, UMA vez por execução (não a cada dia gravado)."""
     for stmt in DDL.strip().split(";"):
         if stmt.strip():
             conn.run(stmt)
+
+
+def grava(conn, linhas: list[dict], lote: int = 500) -> int:
+    """Upsert em LOTES multi-VALUES: 12 mil round-trips um a um derrubaram a
+    primeira carga no meio, sem barulho. ~25 comandos aguentam qualquer coisa."""
     cols = ("(client_id, ad_id, insight_date, ad_name, campaign_id, adset_id, "
             "adset_name, spend, leads, impressions, clicks, ingested_at)")
     upd = ("ad_name=EXCLUDED.ad_name, campaign_id=EXCLUDED.campaign_id, "
@@ -191,35 +195,44 @@ def main() -> int:
     else:
         ini = fim = date.today() - timedelta(days=1)  # rodada diária: ontem completo
 
-    todas, vazios = [], 0
-    d = ini
-    while d <= fim:
-        linhas = puxa_dia(meta, account, d)
-        if not linhas:
-            vazios += 1   # entre lançamentos a conta pode pausar; vazio não aborta
-            print(f"  {d}: vazio")
-        else:
-            gasto = sum(x["sp"] for x in linhas)
-            print(f"  {d}: {len(linhas)} anúncios · R$ {gasto:,.0f}")
-        todas += linhas
-        d += timedelta(days=1)
-    if todas == [] :
+    # Grava DIA A DIA, não tudo no fim: um backfill de meses que morre na
+    # última hora perdia TODO o trabalho (Ramon, 18/08). Morreu no dia 174?
+    # Os 173 já estão no banco e a re-execução só re-upserta (idempotente).
+    conn = None
+    if not a.check:
+        from src.data.analytics_connection import open_analytics_connection
+        conn = open_analytics_connection(timeout=600)
+        prepara(conn)
+    todas_n, gasto_total, ads, vazios = 0, 0.0, set(), 0
+    try:
+        d = ini
+        while d <= fim:
+            linhas = puxa_dia(meta, account, d)
+            if not linhas:
+                vazios += 1   # entre lançamentos a conta pode pausar; vazio não aborta
+                print(f"  {d}: vazio")
+            else:
+                gasto = sum(x["sp"] for x in linhas)
+                if conn is not None:
+                    grava(conn, linhas)
+                print(f"  {d}: {len(linhas)} anúncios · R$ {gasto:,.0f}"
+                      + ("" if conn is None else " · gravado"))
+                todas_n += len(linhas)
+                gasto_total += gasto
+                ads |= {x["ad"] for x in linhas}
+            d += timedelta(days=1)
+    finally:
+        if conn is not None:
+            conn.close()
+    if todas_n == 0:
         raise SystemExit("TODOS os dias vazios — API falhou; nada gravado")
 
-    ads = {x['ad'] for x in todas}
-    print(f"TOTAL: {len(todas)} linhas · {len(ads)} anúncios · "
-          f"R$ {sum(x['sp'] for x in todas):,.0f} de gasto")
+    print(f"TOTAL: {todas_n} linhas · {len(ads)} anúncios · "
+          f"R$ {gasto_total:,.0f} de gasto")
     if a.check:
         print("--check: nada gravado.")
         return 0
-
-    from src.data.analytics_connection import open_analytics_connection
-    conn = open_analytics_connection(timeout=600)
-    try:
-        n = grava(conn, todas)
-    finally:
-        conn.close()
-    print(f"OK: {n} linhas em analytics.ad_insights · {len(ads)} em criativo_id_map")
+    print(f"OK: {todas_n} linhas em analytics.ad_insights · {len(ads)} em criativo_id_map")
 
     # RESOLVEDOR DE ÓRFÃOS — braço GOOGLE. O utm numérico de lead google-ads é o
     # creative ID do ValueTrack {creative}; o nome vem da Google Ads API (GAQL),
