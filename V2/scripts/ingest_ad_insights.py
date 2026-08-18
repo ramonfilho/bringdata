@@ -91,14 +91,19 @@ def _leads_de(actions) -> int:
 def puxa_dia(meta, account_id: str, dia: date) -> list[dict]:
     """Insights level=ad de UM dia (since=until). Dia a dia de propósito: bloco
     mensal com time_increment=1 toma 500 subcode 99 da Meta e passaria do
-    limit=1000 sem paginação no cliente. Sem `actions`: leads por anúncio saem
-    do NOSSO banco (utm_content), a régua honesta — o pixel conta 3,1 eventos
-    por lead real."""
+    limit=1000 sem paginação no cliente.
+
+    `actions` entra (18/08) para preencher `leads` = a coluna "Leads" que o GESTOR
+    vê no gerenciador (action_type 'lead'; validado contra o painel dele: 33 vs 27
+    com 30min de defasagem). Ela NÃO substitui o lead real do nosso banco; ela vira a
+    moeda em que o teto sai na entrega, porque o gestor compara o teto
+    com o CPL do gerenciador. (O aviso antigo de "3,1 eventos por lead real" era
+    do pixel velho; com o [PIXELNOVO] as contagens andam proximas.)"""
     rows = meta.get_insights(
         account_id=account_id,
         level="ad",
         fields=["ad_id", "ad_name", "campaign_id", "spend",
-                "impressions", "clicks"],
+                "impressions", "clicks", "actions"],
         since_date=dia.isoformat(),
         until_date=dia.isoformat(),
         timeout_s=60,
@@ -109,7 +114,7 @@ def puxa_dia(meta, account_id: str, dia: date) -> list[dict]:
             ad=str(r.get("ad_id") or ""), nome=r.get("ad_name"),
             camp=str(r.get("campaign_id") or "") or None,
             d=r.get("date_start") or dia.isoformat(),
-            sp=float(r.get("spend") or 0), ld=0,
+            sp=float(r.get("spend") or 0), ld=_leads_de(r.get("actions")),
             imp=int(r.get("impressions") or 0), cl=int(r.get("clicks") or 0),
         ))
     return [x for x in out if x["ad"] and x["d"]]
