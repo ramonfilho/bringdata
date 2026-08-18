@@ -192,23 +192,66 @@ def _leads_do_gerenciador(conn, ini, fim) -> dict:
              "campanha": {cid: n}, "nome": {nome: n}}."""
     def _n(x):
         return " ".join(str(x or "").split()).lower()
-    out = {"fino": {}, "cn": {}, "campanha": {}, "nome": {}}
+    out = {"fino": {}, "cn": {}, "campanha": {}, "nome": {}, "cobertura": 1.0}
+
+    def _soma(cid, nome, conj, ld):
+        out["fino"][(cid, nome, conj)] = out["fino"].get((cid, nome, conj), 0) + ld
+        out["cn"][(cid, nome)] = out["cn"].get((cid, nome), 0) + ld
+        out["campanha"][cid] = out["campanha"].get(cid, 0) + ld
+        out["nome"][nome] = out["nome"].get(nome, 0) + ld
+
     try:
         rows = conn.run(
             "SELECT campaign_id, ad_name, coalesce(adset_name, ''), sum(leads) "
             "FROM ad_insights WHERE insight_date >= :i AND insight_date <= :f "
             "AND leads > 0 AND campaign_id IS NOT NULL GROUP BY 1, 2, 3",
             i=ini.isoformat(), f=fim.isoformat())
+        max_db = conn.run("SELECT max(insight_date) FROM ad_insights "
+                          "WHERE insight_date <= :f", f=fim.isoformat())[0][0]
     except Exception as e:
         print(f"  moeda do gerenciador INDISPONÍVEL nesta rodada ({e}); "
               f"linhas saem na moeda real, com selo dizendo isso")
+        out["cobertura"] = 0.0
         return out
     for cid, nome, conj, ld in rows:
-        cid, nome, conj, ld = str(cid), _n(nome), _n(conj), int(ld)
-        out["fino"][(cid, nome, conj)] = out["fino"].get((cid, nome, conj), 0) + ld
-        out["cn"][(cid, nome)] = out["cn"].get((cid, nome), 0) + ld
-        out["campanha"][cid] = out["campanha"].get(cid, 0) + ld
-        out["nome"][nome] = out["nome"].get(nome, 0) + ld
+        _soma(str(cid), _n(nome), _n(conj), int(ld))
+
+    # A ingestão do gerenciador fecha D-1; a janela dos cortes inclui HOJE.
+    # Sem esta puxada AO VIVO, a razão dos cortes hoje/3 dias sairia enviesada
+    # pra CIMA (leads reais do dia sem o par do gerenciador) — furo apontado
+    # pelo Ramon em 18/08. No máximo 3 dias por rodada (1 chamada/dia).
+    # Dia FUTURO não é dia descoberto: a janela do acumulado vai até o fim do
+    # lançamento no calendário (ex.: 24/08 num dia 18/08), e contar o futuro
+    # como buraco zerava a cobertura do acumulado (pego no --check de 18/08).
+    fim_real = min(fim, _hoje_brt())
+    faltam = []
+    d = ini
+    while d <= fim_real:
+        if max_db is None or d > max_db:
+            faltam.append(d)
+        d += timedelta(days=1)
+    if faltam:
+        token = os.getenv("META_ACCESS_TOKEN")
+        vivos = 0
+        if token and len(faltam) <= 3:
+            try:
+                from api.meta_integration import MetaAdsIntegration
+                from scripts.ingest_ad_insights import puxa_dia
+                meta = MetaAdsIntegration(access_token=token)
+                conta = os.getenv("META_ACCOUNT_ID", "act_188005769808959")
+                for d in faltam:
+                    for x in puxa_dia(meta, conta, d):
+                        if x["ld"] and x["camp"]:
+                            _soma(str(x["camp"]), _n(x["nome"]),
+                                  _n(x.get("cjn")), int(x["ld"]))
+                    vivos += 1
+            except Exception as e:
+                print(f"  puxada ao vivo do gerenciador falhou ({e})")
+        dias_janela = (fim_real - ini).days + 1
+        out["cobertura"] = (dias_janela - len(faltam) + vivos) / dias_janela
+        if vivos:
+            print(f"  gerenciador: {vivos} dia(s) puxado(s) ao vivo "
+                  f"(banco fecha D-1); cobertura {out['cobertura']:.0%}")
     return out
 
 
@@ -244,6 +287,14 @@ def _moeda_do_gerenciador(linhas, ger) -> list:
             return ("fino", (partes[2].split("|")[-1].strip(), _n(partes[0]),
                              _n(partes[1])))
         return (None, None)
+
+    # Janela mal coberta pelo gerenciador (API do dia falhou e o banco só tem
+    # D-1): converter enviesaria pra cima. Tudo sai na moeda real, com selo.
+    if ger.get("cobertura", 1.0) < 0.8:
+        print(f"  cobertura do gerenciador {ger.get('cobertura', 0):.0%} < 80%: "
+              f"corte sai na moeda real")
+        return [x if x[6] is None else x[:8] + [f"{x[8]}·moeda_real"]
+                for x in linhas]
 
     # razão agregada do corte: o fallback de linha sem razão própria confiável.
     tr = tg = 0
