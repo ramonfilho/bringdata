@@ -277,10 +277,29 @@ def coletar(conn) -> tuple:
     linhas, resumos = [], []
     l, r = _um_corte(conn, lf, run_id, ini, fim, CORTE_ACUMULADO, mapa_nome)
     if not l:
-        # O acumulado vazio é falha de verdade: significa que a comparação não achou lead
-        # nenhum no lançamento. Morrer aqui é melhor que publicar só o corte curto e a
-        # agência concluir que o lançamento inteiro sumiu.
-        raise SystemExit(f"a comparação voltou vazia para {lf}: nada a publicar")
+        # Acumulado vazio tem DUAS causas possíveis, e elas pedem reações opostas.
+        # No DIA DE ESTREIA do lançamento (pego em 18/08/2026, manhã do primeiro dia
+        # do LF65: 110 leads no dia inteiro, nenhum criativo no piso de 100) o vazio
+        # é o estado real — morrer aqui congelava o painel com o "hoje" de ONTEM
+        # (373 leads do último dia do LF64 passando por dado do dia). Já um vazio com
+        # a janela CHEIA de leads é a comparação quebrada, e aí publicar nada e morrer
+        # continua certo: a poda apagaria o painel por causa de um bug nosso.
+        # O critério que separa os dois é o próprio piso de publicação, aplicado no
+        # grão em que ele vale: POR ANÚNCIO. (110 leads na janela repartidos em dez
+        # anúncios ainda é vazio legítimo; um único anúncio com 100+ e comparação
+        # vazia é bug.)
+        maior = conn.run(
+            "SELECT coalesce(max(n), 0) FROM ("
+            "  SELECT count(*) AS n FROM public.registros_ml "
+            "  WHERE created_at >= :a AND created_at < :b "
+            "  GROUP BY utm_content) t",
+            a=_fronteira_utc(ini), b=_fronteira_utc(fim, fim_do_dia=True))[0][0]
+        if maior >= 100:
+            raise SystemExit(f"a comparação voltou vazia para {lf}, mas há anúncio "
+                             f"com {maior} leads na janela: falha real, nada a publicar")
+        print(f"  acumulado de {lf} vazio e LEGÍTIMO: o maior anúncio da janela tem "
+              f"{maior} leads (piso 100). Dia de estreia — os cortes curtos seguem "
+              f"e a poda tira do painel o que sobrou de ontem.")
     linhas += l
     resumos.append(r)
 
@@ -349,7 +368,20 @@ def gravar(linhas) -> int:
     três dias atrás.
     """
     if not linhas:
-        return 0
+        # Rodada sem linha nenhuma (estreia de lançamento, madrugada fraca): a poda
+        # ainda PRECISA rodar, senão o painel segura os cortes curtos de ontem como
+        # se fossem de agora — que é exatamente o que a poda existe pra impedir.
+        # (E o `return 0` antigo nem chegava vivo no chamador, que desempacota um par.)
+        dst = destino(porta=5432)
+        try:
+            dst.run("BEGIN")
+            podadas = (_poda_sufixo(dst, [], CORTE_CURTO)
+                       + _poda_sufixo(dst, [], CORTE_HOJE))
+            dst.run("COMMIT")
+            n = dst.run(f"SELECT count(*) FROM {TABELA_DESTINO}")[0][0]
+            return n, podadas
+        finally:
+            dst.close()
     dst = destino(porta=5432)
     try:
         cols = ",".join(COLUNAS)
