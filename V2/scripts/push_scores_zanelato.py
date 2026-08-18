@@ -211,7 +211,7 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict) -> tuple
     # de produção (teto_por_chave), e só traduzido aqui. Linha sem teto leva o
     # motivo no carimbo em vez de célula muda.
     from src.monitoring.teto_por_chave import tetos_completos, carimbo
-    tetos, unidades_t = tetos_completos(
+    tetos, unidades_t, conjuntos_t = tetos_completos(
         conn, conn, run_id=run_id,
         win_start=_fronteira_utc(ini), win_end=_fronteira_utc(fim, fim_do_dia=True))
 
@@ -258,6 +258,37 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict) -> tuple
             (t.roas_alvo if t.ok else None),
             carimbo(t),
         ])
+
+    # O grão do PÚBLICO (18/08): o mesmo anúncio na mesma campanha rodando em
+    # DOIS conjuntos são dois públicos — fundir os números esconde qual deles
+    # sustenta o teto. Só publica o split quando há 2+ conjuntos NOMEADOS do
+    # mesmo anúncio na campanha (com 1 só, a linha criativo_campanha já é o
+    # número exato e a duplicata seria ruído). Mesmo piso de N.
+    grupos = {}
+    for u in conjuntos_t:
+        grupos.setdefault((u["campanha"], u["criativo"]), []).append(u)
+    for (camp0, cria0), lst in grupos.items():
+        nomeados = [u for u in lst if u["conjunto"]]
+        if len(nomeados) < 2:
+            continue
+        for u in nomeados:
+            if u["n"] < min_n_u:
+                continue
+            t = u["teto"]
+            cr = u["criativo"]
+            if cr.isdigit() and len(cr) >= 10 and cr in mapa_nome:
+                cr = mapa_nome[cr]
+            linhas.append([
+                "criativo_conjunto_campanha" + sufixo,
+                f"{cr} @ {u['conjunto']} @ {u['campanha']}",
+                int(u["n"]),
+                round(u["pct"], 1),
+                barra,
+                round(u["pct"] - (barra or 0), 1),
+                (f"{t.valor:.2f}" if t.ok else None),
+                (t.roas_alvo if t.ok else None),
+                carimbo(t),
+            ])
 
     return linhas, {"sufixo": sufixo, "ini": ini, "fim": fim, "barra": barra,
                     "min_n": comp.get("min_n"), "escondidas": escondidas,
@@ -433,7 +464,8 @@ def _poda_sufixo(dst, linhas, sufixo) -> int:
     descarte linha velha. Defesa que depende do leitor lembrar não é defesa.
     """
     chaves = [x[1] for x in linhas if str(x[0]).endswith(sufixo)]
-    tipos = [t + sufixo for t in list(TIPO.values()) + ["criativo_campanha"]]
+    tipos = [t + sufixo for t in list(TIPO.values())
+             + ["criativo_campanha", "criativo_conjunto_campanha"]]
     par = {f"t{i}": v for i, v in enumerate(tipos)}
     cond_tipo = "tipo IN (" + ",".join(f":t{i}" for i in range(len(tipos))) + ")"
     if not chaves:

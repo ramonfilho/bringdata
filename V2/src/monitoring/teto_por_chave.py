@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 _SQL_UNIDADES = """
 SELECT utm_campaign, utm_content,
+       coalesce(utm_medium, '') AS conjunto,
        CASE WHEN challenger_run_id = :run_id
                  AND decil_challenger IS NOT NULL THEN decil_challenger
             ELSE decil_champion END AS decil,
@@ -44,18 +45,46 @@ WHERE created_at >= :ws AND created_at < :we
     OR (champion_run_id  = :run_id AND decil_champion  IS NOT NULL))
   AND utm_campaign IS NOT NULL AND utm_campaign <> ''
   AND utm_content  IS NOT NULL AND utm_content  <> ''
-GROUP BY 1, 2, 3
+GROUP BY 1, 2, 3, 4
 """
 
 
-def unidades(ledger_conn, *, run_id: str, win_start, win_end) -> dict:
-    """{(campanha, criativo): {'D01': n, ...}} na janela, régua por run_id."""
+def unidades_finas(ledger_conn, *, run_id: str, win_start, win_end) -> dict:
+    """{(campanha, conjunto, criativo): {'D01': n, ...}} na janela.
+
+    O conjunto de anúncios vem da `utm_medium` ({{adset.name}} no template do
+    cliente). É o grão MAIS FINO que o lead permite: o mesmo anúncio na mesma
+    campanha pode rodar em dois conjuntos = dois públicos, e fundir os dois num
+    número só esconde qual público sustenta o teto (Ramon, 18/08)."""
     out: dict = {}
-    for camp, cria, decil, n in ledger_conn.run(
+    for camp, cria, conj, decil, n in ledger_conn.run(
             _SQL_UNIDADES, run_id=run_id, ws=win_start, we=win_end):
-        d = out.setdefault((str(camp).strip(), str(cria).strip()), {})
+        d = out.setdefault((str(camp).strip(), str(conj or "").strip(),
+                            str(cria).strip()), {})
         k = f"D{int(decil):02d}"
         d[k] = d.get(k, 0) + int(n)
+    logger.info("[teto_por_chave] %d unidades campanha×conjunto×criativo", len(out))
+    return out
+
+
+def _agrega_finas(finas: dict) -> dict:
+    """Soma as distribuições de decis dos conjuntos → grão criativo×campanha.
+    Uma base só: `unidades` e `tetos_completos` consomem daqui (não duplicar)."""
+    out: dict = {}
+    for (camp, _conj, cria), dist in finas.items():
+        d = out.setdefault((camp, cria), {})
+        for k, n in dist.items():
+            d[k] = d.get(k, 0) + n
+    return out
+
+
+def unidades(ledger_conn, *, run_id: str, win_start, win_end) -> dict:
+    """{(campanha, criativo): {'D01': n, ...}} na janela, régua por run_id.
+
+    Agrega as finas somando a distribuição de decis — o resultado é IDÊNTICO ao
+    que esta função devolvia antes do grão de conjunto existir (mesma soma)."""
+    out = _agrega_finas(unidades_finas(
+        ledger_conn, run_id=run_id, win_start=win_start, win_end=win_end))
     logger.info("[teto_por_chave] %d unidades criativo×campanha", len(out))
     return out
 
@@ -84,15 +113,22 @@ def _conv_composta_da_unidade(dist: dict, criativo: str,
 
 def tetos_completos(analytics_conn, ledger_conn, *, run_id: str,
                     win_start, win_end, client_id: str = "devclub") -> tuple:
-    """(por_chave, por_unidade) numa passada só das MESMAS unidades.
+    """(por_chave, por_unidade, por_conjunto) numa passada só das MESMAS unidades.
 
     por_chave: {('creative'|'campaign', chave): Teto} — as duas agregações.
     por_unidade: lista de {campanha, criativo, n, pct, teto} — o GRÃO DO PRODUTO
     (o mesmo criativo pode ter um teto numa campanha e outro na outra; é essa
-    linha que o gestor usa pra decidir, Ramon 16/08)."""
+    linha que o gestor usa pra decidir, Ramon 16/08).
+    por_conjunto: lista de {campanha, conjunto, criativo, n, pct, teto} — o
+    grão por PÚBLICO (18/08): quem publica decide quando exibir (o push só
+    mostra quando o anúncio roda em 2+ conjuntos na mesma campanha)."""
     calc = CalculadoraDeTeto.da_referencia(client_id, conn=analytics_conn)
     historico = le_historico(analytics_conn, client_id=client_id)
-    us = unidades(ledger_conn, run_id=run_id, win_start=win_start, win_end=win_end)
+    finas = unidades_finas(ledger_conn, run_id=run_id,
+                           win_start=win_start, win_end=win_end)
+    # O grão criativo×campanha continua calculado da distribuição SOMADA (mesma
+    # conta de antes do conjunto existir — os números publicados não mudam).
+    us = _agrega_finas(finas)
 
     por_unidade = []
     soma = {"creative": defaultdict(lambda: [0.0, 0]),
@@ -116,10 +152,28 @@ def tetos_completos(analytics_conn, ledger_conn, *, run_id: str,
             if den > 0:
                 out[(nivel, chave)] = calc.de_conversao_medida(
                     num / den, origem=f"{nivel}:{chave}")
-    logger.info("[teto_por_chave] tetos: %d criativos · %d campanhas · %d unidades",
+
+    # O grão do CONJUNTO: mesma composição da Decisão 9, com a distribuição de
+    # decis SÓ daquele conjunto (o histórico do criativo é o mesmo — o prior é
+    # por criativo, não por público).
+    por_conjunto = []
+    for (camp, conj, cria), dist in finas.items():
+        r = _conv_composta_da_unidade(dist, cria, calc, historico)
+        if r is None:
+            continue
+        conv, n = r
+        topo = dist.get("D09", 0) + dist.get("D10", 0)
+        por_conjunto.append(dict(
+            campanha=camp, conjunto=conj, criativo=cria, n=n,
+            pct=(100.0 * topo / n) if n else 0.0,
+            teto=calc.de_conversao_medida(
+                conv, origem=f"adset:{cria}@{conj}@{camp}")))
+    logger.info("[teto_por_chave] tetos: %d criativos · %d campanhas · %d unidades "
+                "· %d unidades-conjunto",
                 sum(1 for k in out if k[0] == "creative"),
-                sum(1 for k in out if k[0] == "campaign"), len(por_unidade))
-    return out, por_unidade
+                sum(1 for k in out if k[0] == "campaign"), len(por_unidade),
+                len(por_conjunto))
+    return out, por_unidade, por_conjunto
 
 
 def tetos_por_chave(analytics_conn, ledger_conn, *, run_id: str,
@@ -127,7 +181,7 @@ def tetos_por_chave(analytics_conn, ledger_conn, *, run_id: str,
     """Compat: só as agregações. Ver `tetos_completos`."""
     return tetos_completos(analytics_conn, ledger_conn, run_id=run_id,
                            win_start=win_start, win_end=win_end,
-                           client_id=client_id)[0]
+                           client_id=client_id)[0]  # [0] segue valendo no trio
 
 
 def carimbo(t: Teto) -> str:

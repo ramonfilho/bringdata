@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS ad_insights (
     insight_date date    NOT NULL,
     ad_name      text    NULL,
     campaign_id  text    NULL,
+    adset_id     text    NULL,
+    adset_name   text    NULL,
     spend        numeric NOT NULL DEFAULT 0,
     leads        integer NOT NULL DEFAULT 0,
     impressions  bigint  NOT NULL DEFAULT 0,
@@ -49,6 +51,8 @@ CREATE TABLE IF NOT EXISTS ad_insights (
     ingested_at  timestamptz NOT NULL DEFAULT now(),
     PRIMARY KEY (client_id, ad_id, insight_date)
 );
+ALTER TABLE ad_insights ADD COLUMN IF NOT EXISTS adset_id   text NULL;
+ALTER TABLE ad_insights ADD COLUMN IF NOT EXISTS adset_name text NULL;
 CREATE TABLE IF NOT EXISTS criativo_id_map (
     client_id  text NOT NULL,
     ad_id      text NOT NULL,
@@ -60,10 +64,12 @@ CREATE TABLE IF NOT EXISTS criativo_id_map (
 
 _UP_INS = """
 INSERT INTO ad_insights (client_id, ad_id, insight_date, ad_name, campaign_id,
+                         adset_id, adset_name,
                          spend, leads, impressions, clicks, ingested_at)
-VALUES (:c, :ad, :d, :nome, :camp, :sp, :ld, :imp, :cl, now())
+VALUES (:c, :ad, :d, :nome, :camp, :cj, :cjn, :sp, :ld, :imp, :cl, now())
 ON CONFLICT (client_id, ad_id, insight_date) DO UPDATE SET
   ad_name=EXCLUDED.ad_name, campaign_id=EXCLUDED.campaign_id,
+  adset_id=EXCLUDED.adset_id, adset_name=EXCLUDED.adset_name,
   spend=EXCLUDED.spend, leads=EXCLUDED.leads,
   impressions=EXCLUDED.impressions, clicks=EXCLUDED.clicks,
   ingested_at=EXCLUDED.ingested_at
@@ -103,7 +109,7 @@ def puxa_dia(meta, account_id: str, dia: date) -> list[dict]:
         account_id=account_id,
         level="ad",
         fields=["ad_id", "ad_name", "campaign_id", "spend",
-                "impressions", "clicks", "actions"],
+                "impressions", "clicks", "actions", "adset_id", "adset_name"],
         since_date=dia.isoformat(),
         until_date=dia.isoformat(),
         timeout_s=60,
@@ -113,6 +119,7 @@ def puxa_dia(meta, account_id: str, dia: date) -> list[dict]:
         out.append(dict(
             ad=str(r.get("ad_id") or ""), nome=r.get("ad_name"),
             camp=str(r.get("campaign_id") or "") or None,
+            cj=str(r.get("adset_id") or "") or None, cjn=r.get("adset_name"),
             d=r.get("date_start") or dia.isoformat(),
             sp=float(r.get("spend") or 0), ld=_leads_de(r.get("actions")),
             imp=int(r.get("impressions") or 0), cl=int(r.get("clicks") or 0),
@@ -126,8 +133,10 @@ def grava(conn, linhas: list[dict], lote: int = 500) -> int:
     for stmt in DDL.strip().split(";"):
         if stmt.strip():
             conn.run(stmt)
-    cols = "(client_id, ad_id, insight_date, ad_name, campaign_id, spend, leads, impressions, clicks, ingested_at)"
+    cols = ("(client_id, ad_id, insight_date, ad_name, campaign_id, adset_id, "
+            "adset_name, spend, leads, impressions, clicks, ingested_at)")
     upd = ("ad_name=EXCLUDED.ad_name, campaign_id=EXCLUDED.campaign_id, "
+           "adset_id=EXCLUDED.adset_id, adset_name=EXCLUDED.adset_name, "
            "spend=EXCLUDED.spend, leads=EXCLUDED.leads, "
            "impressions=EXCLUDED.impressions, clicks=EXCLUDED.clicks, "
            "ingested_at=EXCLUDED.ingested_at")
@@ -136,11 +145,12 @@ def grava(conn, linhas: list[dict], lote: int = 500) -> int:
         vals, par = [], {}
         for j, x in enumerate(chunk):
             for k, v in (("ad", x["ad"]), ("d", x["d"]), ("no", x["nome"]),
-                         ("ca", x["camp"]), ("sp", x["sp"]), ("ld", x["ld"]),
+                         ("ca", x["camp"]), ("cj", x.get("cj")),
+                         ("cn", x.get("cjn")), ("sp", x["sp"]), ("ld", x["ld"]),
                          ("im", x["imp"]), ("cl", x["cl"])):
                 par[f"{k}{j}"] = v
-            vals.append(f"('{CLIENTE}', :ad{j}, :d{j}, :no{j}, :ca{j}, "
-                        f":sp{j}, :ld{j}, :im{j}, :cl{j}, now())")
+            vals.append(f"('{CLIENTE}', :ad{j}, :d{j}, :no{j}, :ca{j}, :cj{j}, "
+                        f":cn{j}, :sp{j}, :ld{j}, :im{j}, :cl{j}, now())")
         conn.run(f"INSERT INTO ad_insights {cols} VALUES " + ",".join(vals)
                  + f" ON CONFLICT (client_id, ad_id, insight_date) DO UPDATE SET {upd}",
                  **par)
