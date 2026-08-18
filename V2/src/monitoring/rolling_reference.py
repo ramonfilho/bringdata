@@ -288,6 +288,52 @@ def conversion_reference(matched_df: pd.DataFrame, *, bucket_map=None,
             "channel_bucket_coverage": {"leads_com_utm": len(utm), "leads_total": n}}
 
 
+# Faixa em que o lift medido é confiável; fora dela (ou sem massa) o payload
+# marca inválido e o teto usa 1,0. Estudo 18/08 (24 lançamentos fechados):
+# google agregado 1,31 estável; espalhamento por lançamento 0,7-2,0.
+LIFT_PLATAFORMA_FAIXA = (0.8, 1.8)
+LIFT_PLATAFORMA_MIN_LEADS = 2000
+LIFT_PLATAFORMA_MIN_COMPRADORES = 15
+
+
+def lift_de_plataforma(matched: pd.DataFrame):
+    """Razão conversão REAL ÷ prevista-pelos-decis dos leads GOOGLE, na mesma
+    janela madura da referência.
+
+    Por que existe (estudo 18/08, 24 lançamentos): o lead google converte ~31%
+    acima do que a mistura de decis dele prevê (a pesquisa dele parece mediana,
+    a compra não) — o teto google saía ~R$6,80 onde a prática sustenta ~R$8,90.
+    A Meta mediu 0,96 (calibrada): não recebe fator. Linhas da ponte sem UTM
+    ficam fora da medição (não dá pra saber a plataforma)."""
+    df = matched
+    for col in ("utm_source", "utm_campaign", "utm_content",
+                "decil_challenger", "converted"):
+        if col not in df.columns:
+            return None
+    base = df[df["utm_source"].notna() & df["decil_challenger"].notna()].copy()
+    if base.empty:
+        return None
+    google = (base["utm_source"].astype(str).str.contains("google", case=False)
+              | base["utm_content"].astype(str).str.match(r"^\d{10,}$")
+              | (base["utm_campaign"].astype(str) == "devlf"))
+    g = base[google]
+    conv_por_decil = base.groupby("decil_challenger")["converted"].mean()
+    n, compradores = len(g), int(g["converted"].sum())
+    if n < LIFT_PLATAFORMA_MIN_LEADS or compradores < LIFT_PLATAFORMA_MIN_COMPRADORES:
+        return {"google": {"lift": None, "valido": False, "n": n,
+                           "compradores": compradores, "motivo": "sem_massa"}}
+    prevista = float(g["decil_challenger"].map(conv_por_decil).mean())
+    real = float(g["converted"].mean())
+    lift = real / prevista if prevista > 0 else None
+    valido = (lift is not None
+              and LIFT_PLATAFORMA_FAIXA[0] <= lift <= LIFT_PLATAFORMA_FAIXA[1])
+    return {"google": {"lift": (round(lift, 4) if lift else None),
+                       "valido": bool(valido), "n": n,
+                       "compradores": compradores,
+                       "real": round(real, 6), "prevista": round(prevista, 6),
+                       "faixa": list(LIFT_PLATAFORMA_FAIXA)}}
+
+
 def fit_calibrator(matched_df: pd.DataFrame, *, method: str = "isotonic"):
     """Re-ajusta o calibrador (score_challenger → P(compra) real) na janela madura.
     É o passo que mantém a conversão ESPERADA fiel quando o mercado se move."""
@@ -373,6 +419,10 @@ def build_conversion_reference(
     # mistura REAL de gateways). Vive dentro do `conversion` jsonb → sem coluna nova.
     from src.monitoring.teto import value_per_sale_from_sales
     conv["economics"] = value_per_sale_from_sales(sales)
+    # Lift de PLATAFORMA medido na mesma janela (google ~1,31; ver estudo 18/08).
+    pl = lift_de_plataforma(matched)
+    if pl:
+        conv["platform_lift"] = pl
     cal = fit_calibrator(matched)
     return {
         "window_start": win_start.date().isoformat(),

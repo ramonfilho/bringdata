@@ -276,7 +276,17 @@ class CalculadoraDeTeto:
             logger.warning("[teto] fator de rastreamento inválido (%s) — usando 1,0",
                            self._fator)
             self._fator = 1.0
+        # Lift de plataforma MEDIDO pelo refresh (conversion.platform_lift):
+        # o lead google converte acima do que os decis preveem (estudo 18/08,
+        # +31%); inválido/ausente → 1,0 (comportamento antigo).
+        self._lift_plataforma = conv.get('platform_lift') or {}
         self._tem_ref = bool(ref)
+
+    def lift_da_plataforma(self, plataforma: str = 'google') -> float:
+        p = self._lift_plataforma.get(plataforma) or {}
+        if p.get('valido') and p.get('lift'):
+            return float(p['lift'])
+        return 1.0
 
     @classmethod
     def da_referencia(cls, client_id: str = 'devclub', *, conn=None,
