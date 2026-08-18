@@ -587,7 +587,8 @@ def gravar(linhas) -> int:
         dst = destino(porta=5432)
         try:
             dst.run("BEGIN")
-            podadas = (_poda_sufixo(dst, [], CORTE_CURTO)
+            podadas = (_poda_sufixo(dst, [], CORTE_ACUMULADO)
+                       + _poda_sufixo(dst, [], CORTE_CURTO)
                        + _poda_sufixo(dst, [], CORTE_HOJE))
             dst.run("COMMIT")
             n = dst.run(f"SELECT count(*) FROM {TABELA_DESTINO}")[0][0]
@@ -610,7 +611,12 @@ def gravar(linhas) -> int:
         dst.run(f"INSERT INTO {TABELA_DESTINO} ({cols}) VALUES " + ",".join(vals) +
                 f" ON CONFLICT (tipo, chave) DO UPDATE SET {atualiza}, "
                 f"atualizado_em = now()", **par)
-        podadas = (_poda_sufixo(dst, linhas, CORTE_CURTO)
+        # ACUMULADO entra na faxina (Ramon, 18/08): linha de lançamento
+        # anterior que não é republicada ficava congelada posando de atual
+        # (as 3 linhas [G] do LF64 depois da virada). Preço aceito: manhã de
+        # estreia mostra painel honesto e quase vazio, como os cortes curtos.
+        podadas = (_poda_sufixo(dst, linhas, CORTE_ACUMULADO)
+                   + _poda_sufixo(dst, linhas, CORTE_CURTO)
                    + _poda_sufixo(dst, linhas, CORTE_HOJE))
         # Chave numérica publicada em rodada anterior vira lixo assim que a versão
         # nomeada existe: apaga toda linha de criativo cuja chave é só dígitos —
@@ -644,9 +650,12 @@ def _poda_sufixo(dst, linhas, sufixo) -> int:
     O `atualizado_em` não resolve sozinho, porque exigiria que quem lê compare carimbos e
     descarte linha velha. Defesa que depende do leitor lembrar não é defesa.
     """
-    chaves = [x[1] for x in linhas if str(x[0]).endswith(sufixo)]
     tipos = [t + sufixo for t in list(TIPO.values())
              + ["criativo_campanha", "criativo_conjunto_campanha"]]
+    # Chave por tipo EXATO: com sufixo vazio (acumulado), o endswith antigo
+    # casava TODAS as linhas e a chave de um corte curto protegia linha velha
+    # do acumulado com o mesmo nome.
+    chaves = [x[1] for x in linhas if str(x[0]) in tipos]
     par = {f"t{i}": v for i, v in enumerate(tipos)}
     cond_tipo = "tipo IN (" + ",".join(f":t{i}" for i in range(len(tipos))) + ")"
     if not chaves:

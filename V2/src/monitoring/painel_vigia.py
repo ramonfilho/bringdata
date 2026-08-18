@@ -44,6 +44,12 @@ LIMITE_HORAS_DEFAULT = float(os.getenv('PAINEL_VIGIA_HORAS', '2'))
 
 BRT = timezone(timedelta(hours=-3))
 
+# Homônimo só vira aviso com volume que importa: campanha inativa com 2 leads
+# gerava alerta tecnicamente verdadeiro e operacionalmente irrelevante
+# (caso [27] de 18/08). Abaixo disso o split não nasceria de qualquer jeito
+# (piso de 100 por linha).
+HOMONIMO_MIN_LEADS = float(os.getenv('PAINEL_VIGIA_HOMONIMO_LEADS', '50'))
+
 
 @dataclass
 class EstadoPainel:
@@ -105,7 +111,8 @@ def medir(destino_conn, analytics_conn,
         "SELECT campaign_id, adset_name, count(DISTINCT adset_id) "
         "FROM ad_insights "
         "WHERE insight_date >= CURRENT_DATE - 3 AND adset_name IS NOT NULL "
-        "GROUP BY 1, 2 HAVING count(DISTINCT adset_id) >= 2")]
+        "GROUP BY 1, 2 HAVING count(DISTINCT adset_id) >= 2 "
+        "AND sum(leads) >= :piso", piso=HOMONIMO_MIN_LEADS)]
     return EstadoPainel(int(linhas or 0), ultima, horas, limite_horas, homonimos)
 
 
