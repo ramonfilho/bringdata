@@ -89,9 +89,17 @@ def unidades(ledger_conn, *, run_id: str, win_start, win_end) -> dict:
     return out
 
 
+def _eh_google(campanha: str, criativo: str) -> bool:
+    """Unidade do Google: a UTM de lá chega com campanha genérica 'devlf' e/ou
+    o criativo como ID numérico do ValueTrack."""
+    return (str(campanha) == "devlf"
+            or (str(criativo).isdigit() and len(str(criativo)) >= 10))
+
+
 def _conv_composta_da_unidade(dist: dict, criativo: str,
                               calc: CalculadoraDeTeto,
-                              historico: dict) -> Optional[tuple]:
+                              historico: dict,
+                              campanha: str = "") -> Optional[tuple]:
     """(conversão MEDIDA composta, n de leads) da unidade — ou None sem base.
 
     A composição da Decisão 9, em escala MEDIDA (o fator entra depois, uma vez,
@@ -101,6 +109,11 @@ def _conv_composta_da_unidade(dist: dict, criativo: str,
         return None
     n = sum(dist.values())
     conv = base.conversao / base.fator_rastreamento
+    # NOTA POR PLATAFORMA (Ramon, 18/08): antes da composição com o histórico,
+    # a mistura de decis de unidade google sobe pelo lift MEDIDO (a régua
+    # inteira sobe igual; quem diferencia criativo lá dentro é o histórico).
+    if _eh_google(campanha, criativo):
+        conv *= calc.lift_da_plataforma("google")
     h = historico.get(criativo)
     if h and h["leads"] > 0:
         conv = conversao_prevista_da_unidade(
@@ -134,7 +147,7 @@ def tetos_completos(analytics_conn, ledger_conn, *, run_id: str,
     soma = {"creative": defaultdict(lambda: [0.0, 0]),
             "campaign": defaultdict(lambda: [0.0, 0])}
     for (camp, cria), dist in us.items():
-        r = _conv_composta_da_unidade(dist, cria, calc, historico)
+        r = _conv_composta_da_unidade(dist, cria, calc, historico, campanha=camp)
         if r is None:
             continue
         conv, n = r
@@ -158,7 +171,7 @@ def tetos_completos(analytics_conn, ledger_conn, *, run_id: str,
     # por criativo, não por público).
     por_conjunto = []
     for (camp, conj, cria), dist in finas.items():
-        r = _conv_composta_da_unidade(dist, cria, calc, historico)
+        r = _conv_composta_da_unidade(dist, cria, calc, historico, campanha=camp)
         if r is None:
             continue
         conv, n = r
