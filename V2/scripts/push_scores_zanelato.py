@@ -183,6 +183,104 @@ def _mapa_de_nomes(conn) -> dict:
         return {}
 
 
+def _leads_do_gerenciador(conn, ini, fim) -> dict:
+    """Leads que o GERENCIADOR da Meta conta na janela, agregados nos grãos das
+    linhas publicadas. Cópia (mesmo nome, outro ad_id) SOMA — cópia é o mesmo
+    anúncio (Ramon, 18/08). Chaves normalizadas em minúsculas/espaço único.
+
+    Devolve {"fino": {(cid, nome, conjunto): n}, "cn": {(cid, nome): n},
+             "campanha": {cid: n}, "nome": {nome: n}}."""
+    def _n(x):
+        return " ".join(str(x or "").split()).lower()
+    out = {"fino": {}, "cn": {}, "campanha": {}, "nome": {}}
+    try:
+        rows = conn.run(
+            "SELECT campaign_id, ad_name, coalesce(adset_name, ''), sum(leads) "
+            "FROM ad_insights WHERE insight_date >= :i AND insight_date <= :f "
+            "AND leads > 0 AND campaign_id IS NOT NULL GROUP BY 1, 2, 3",
+            i=ini.isoformat(), f=fim.isoformat())
+    except Exception as e:
+        print(f"  moeda do gerenciador INDISPONÍVEL nesta rodada ({e}); "
+              f"linhas saem na moeda real, com selo dizendo isso")
+        return out
+    for cid, nome, conj, ld in rows:
+        cid, nome, conj, ld = str(cid), _n(nome), _n(conj), int(ld)
+        out["fino"][(cid, nome, conj)] = out["fino"].get((cid, nome, conj), 0) + ld
+        out["cn"][(cid, nome)] = out["cn"].get((cid, nome), 0) + ld
+        out["campanha"][cid] = out["campanha"].get(cid, 0) + ld
+        out["nome"][nome] = out["nome"].get(nome, 0) + ld
+    return out
+
+
+# Faixa em que a razão por linha é confiável; fora dela (ou sem casamento) a
+# linha usa a razão AGREGADA do corte. Medido em 18/08 sobre agosto inteiro:
+# mediana 0,82, p10-p90 0,65-0,90, agregado 0,778 — o gerenciador conta ~20-25%
+# mais leads que o nosso banco, e publicar teto real contra CPL do gerenciador
+# faria o gestor pagar ~22% acima achando que está dentro.
+RAZAO_FAIXA = (0.5, 1.5)
+
+
+def _moeda_do_gerenciador(linhas, ger) -> list:
+    """Converte o teto de cada linha Meta pra moeda do GERENCIADOR.
+
+    teto_ger = teto_real × (leads_reais ÷ leads_gerenciador) da PRÓPRIA janela.
+    A decisão do gestor não muda (o gasto é o mesmo e a razão cancela dos dois
+    lados); só a régua passa a falar a língua do CPL que ele vê na tela.
+    Linha sem casamento no gerenciador (Google, anúncio sem insight) fica na
+    moeda real com selo `moeda_real`."""
+    def _n(x):
+        return " ".join(str(x or "").split()).lower()
+
+    def _alvo(tipo, chave):
+        base = tipo.replace(CORTE_CURTO, "").replace(CORTE_HOJE, "")
+        partes = [p.strip() for p in str(chave).split(" @ ")]
+        if base == "campanha" and "|" in str(chave):
+            return ("campanha", str(chave).split("|")[-1].strip())
+        if base == "criativo":
+            return ("nome", _n(chave))
+        if base == "criativo_campanha" and len(partes) == 2 and "|" in partes[1]:
+            return ("cn", (partes[1].split("|")[-1].strip(), _n(partes[0])))
+        if base == "criativo_conjunto_campanha" and len(partes) == 3                 and "|" in partes[2]:
+            return ("fino", (partes[2].split("|")[-1].strip(), _n(partes[0]),
+                             _n(partes[1])))
+        return (None, None)
+
+    # razão agregada do corte: o fallback de linha sem razão própria confiável.
+    tr = tg = 0
+    for x in linhas:
+        cesta, k = _alvo(x[0], x[1])
+        if cesta == "cn" and ger["cn"].get(k):
+            tr += int(x[2] or 0)
+            tg += ger["cn"][k]
+    r_agg = (tr / tg) if tg else None
+
+    out = []
+    for x in linhas:
+        if x[6] is None:                     # linha já sem teto: só repassa
+            out.append(x)
+            continue
+        cesta, k = _alvo(x[0], x[1])
+        if cesta is None:
+            # Linha que não é da Meta (Google, campanha sem |id): a moeda do
+            # gerenciador DELA não é a nossa razão — fica na moeda real, dito
+            # no selo. Aplicar a razão agregada aqui foi o bug pego no teste
+            # de 18/08 (a linha [G] @ devlf saiu convertida por engano).
+            out.append(x[:8] + [f"{x[8]}·moeda_real"])
+            continue
+        n_ger = ger[cesta].get(k)
+        razao = (int(x[2] or 0) / n_ger) if n_ger else None
+        selo = "ger"
+        if razao is None or not (RAZAO_FAIXA[0] <= razao <= RAZAO_FAIXA[1]):
+            razao, selo = r_agg, "ger_agg"
+        if razao is None:
+            out.append(x[:8] + [f"{x[8]}·moeda_real"])
+            continue
+        teto_ger = float(x[6]) * razao
+        out.append(x[:6] + [f"{teto_ger:.2f}", x[7],
+                            f"{x[8]}·{selo}{razao:.2f}"])
+    return out
+
+
 def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict) -> tuple:
     """Roda a comparação numa janela e devolve (linhas, resumo). NÃO recalcula nada.
 
@@ -289,6 +387,11 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict) -> tuple
                 (t.roas_alvo if t.ok else None),
                 carimbo(t),
             ])
+
+    # A MOEDA DO GERENCIADOR entra por último, sobre as linhas prontas do corte:
+    # o teto continua CALCULADO por lead real (a régua honesta); aqui ele só é
+    # traduzido pra unidade que o gestor compara na tela dele.
+    linhas = _moeda_do_gerenciador(linhas, _leads_do_gerenciador(conn, ini, fim))
 
     return linhas, {"sufixo": sufixo, "ini": ini, "fim": fim, "barra": barra,
                     "min_n": comp.get("min_n"), "escondidas": escondidas,

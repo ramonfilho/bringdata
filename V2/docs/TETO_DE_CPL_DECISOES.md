@@ -555,7 +555,37 @@ Os passos 5 e 6 passam pelo portão do passo 3 antes de chegar ao gestor. O tipo
 campanha saiu do plano: foi investigado e o efeito dele já está capturado pela mistura de
 decis (ver a seção "Resolvido" acima).
 
+## Decisão 10 — O teto publicado fala a MOEDA DO GERENCIADOR (18/08)
+
+**O problema:** o gestor compara o teto com o CPL que ele vê no gerenciador da
+Meta, e as duas contagens de lead divergem de forma sistemática: medido sobre
+agosto/2026 inteiro (86 pares unidade-dia com 30+ leads, zero sem par), o
+gerenciador conta 20-25% MAIS leads que o nosso banco (razão real÷gerenciador:
+mediana 0,82, p10-p90 0,65-0,90, agregado 0,778 na era do pixel novo). Publicar
+teto por lead real contra CPL do gerenciador faria o gestor pagar ~22% acima do
+teto achando que está dentro.
+
+**A regra:** o teto continua CALCULADO por lead real (a régua honesta); na
+publicação, cada linha Meta é convertida: `teto_ger = teto_real × (leads_reais ÷
+leads_gerenciador)` **da própria janela do corte**, no grão da própria linha
+(campanha, anúncio, anúncio@campanha, anúncio@conjunto@campanha; cópias de
+anúncio SOMAM no lado do gerenciador — cópia é o mesmo anúncio).
+
+**Por que a decisão do gestor não muda:** o gasto é o mesmo dos dois lados, e a
+razão cancela: `CPL_ger < teto_ger ⟺ CPL_real < teto_real` — identidade
+algébrica, não aproximação. Só a moeda do número muda.
+
+**Faixa de sanidade:** razão da própria linha vale se estiver em [0,5-1,5] e
+houver casamento; senão a linha usa a razão AGREGADA do corte (selo `ger_agg`).
+Linha que não é da Meta (Google, campanha sem |id) fica na moeda real com selo
+`moeda_real` — o gerenciador dela é outro. O selo da linha SEMPRE diz qual
+razão foi usada (`ger0.84`, `ger_agg0.78`, `moeda_real`).
+
+**Fonte da contagem do gerenciador:** `analytics.ad_insights.leads` = coluna
+"Leads" da conta (action_type `lead`, = `fb_pixel_lead`), ingerida por anúncio
+por dia. O aviso antigo de "3,1 eventos por lead real" era do pixel velho.
+
 ---
 
-*Decisões registradas em 14/08/2026. Constantes da nota do criativo em
+*Decisões registradas em 14-18/08/2026. Constantes da nota do criativo em
 [NOTA_DO_CRIATIVO_PARAMETROS.md](NOTA_DO_CRIATIVO_PARAMETROS.md).*
