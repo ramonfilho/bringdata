@@ -12,8 +12,32 @@ LER o campo, nunca recalcular.
 
 Rodável:  PYTHONPATH=. python tests/test_variant_winner_checkmark.py
 """
-from src.monitoring.data_quality import pick_variant_winner
+from src.monitoring.data_quality import pick_bucket_winner, pick_variant_winner
 from src.monitoring.digest import _slack_alert_audience_by_variant
+
+
+# --------------------------------------------- regra geral, com o Lead na disputa
+
+def test_lead_vence_quando_esta_mais_perto():
+    # Caso real de 01/08 (Idade 25-34, Top%=30.9) com o Lead colado na referência.
+    assert pick_bucket_winner('positive', {'lead': 0.2, 'champion': 17.3,
+                                           'challenger': 0.9}) == 'lead'
+
+
+def test_balde_sem_medicao_nao_impede_os_outros():
+    # Champion sem lead na categoria não anula a disputa entre os outros dois.
+    assert pick_bucket_winner('positive', {'lead': 5.0, 'champion': None,
+                                           'challenger': 0.9}) == 'challenger'
+
+
+def test_menos_de_dois_medidos_nao_elege():
+    assert pick_bucket_winner('positive', {'lead': 0.2, 'champion': None,
+                                           'challenger': None}) is None
+
+
+def test_empate_no_menor_delta_nao_elege():
+    assert pick_bucket_winner('positive', {'lead': 2.0, 'champion': -2.0,
+                                           'challenger': 9.9}) is None
 
 
 # ---------------------------------------------------------------- regra pura
@@ -151,20 +175,35 @@ def test_lead_tem_coluna_e_a_linha_nao_cresce_sem_medir():
     assert 'fora da tabela: Google' in txt, txt
 
 
-def test_lead_nao_disputa_o_check_de_vencedor():
-    """O ✅ continua só entre os 2 braços de ML. O Lead entra como leitura, não como
-    competidor (`compete=False`) — era a razão de tirá-lo em 02/08 sem prejuízo pra
-    essa marcação. Se um dia o ✅ aparecer na coluna dele, alguém mexeu no `_arms`
-    sem entender o papel do balde."""
+def test_lead_disputa_e_pode_levar_o_check():
+    """O ✅ vai pra coluna mais perto da referência, seja ela qual for (18/08/2026).
+
+    Antes o Lead era excluído da disputa por ser "o controle sem ML". Isso garantia
+    que a resposta nunca fosse incômoda: se o tráfego SEM modelo estivesse mais perto
+    do público que dá retorno, a tabela não podia dizer isso. Agora pode.
+    """
     rows = [_row('challenger')]
     for it in rows:
-        it['lead_pct'], it['lead_delta_pp'], it['lead_quality'] = 99.9, 99.9, 'bom'
+        # Lead colado no Top% (Δ 0.2) contra Champion +17.3 e Challenger +0.9
+        it['lead_pct'], it['lead_delta_pp'], it['lead_quality'] = 31.1, 0.2, 'bom'
+        it['winner'] = 'lead'          # o campo vem PRONTO do data_quality
     alerta = _alert(rows)
     alerta['details']['lead_n'] = 500
-    txt = _render(alerta)
-    linha = _linha_dados(txt)
+    linha = _linha_dados(_render(alerta))
     assert linha.count('✅') == 1, linha
-    assert linha.index('✅') > linha.index('99.9%'), linha
+    # o ✅ tem que estar na coluna do Lead, ou seja, ANTES do valor do Challenger
+    assert linha.index('✅') < linha.index('31.8%'), linha
+
+
+def test_render_nunca_recalcula_o_vencedor():
+    """O renderizador só LÊ o campo `winner`. Se ele voltar a ter regra própria, esta
+    linha marcaria alguém mesmo com o campo vazio — foi o bug de 01/08/2026."""
+    rows = [_row(None)]                 # winner=None, mas com Δ que tentariam ganhar
+    for it in rows:
+        it['lead_pct'], it['lead_delta_pp'], it['lead_quality'] = 31.1, 0.2, 'bom'
+    alerta = _alert(rows)
+    alerta['details']['lead_n'] = 500
+    assert '✅' not in _render(alerta)
 
 
 def test_lead_abaixo_do_corte_vira_nota_como_qualquer_braco():

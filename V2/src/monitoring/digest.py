@@ -1529,12 +1529,15 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
     # mesmo leilão. Pior quando um braço cai no corte de N: em 17/08 o Champion tinha
     # 23 leads e a tabela ficou com UMA coluna, sem controle nenhum.
     #
-    # `compete=False`: o Lead entra como leitura, não como competidor. O ✅ de
-    # vencedor continua disputado só entre os 2 braços de ML (`_n_compete`), que era
-    # a razão original de tirá-lo sem prejuízo pra essa marcação.
+    # `compete=True` nos três: o ✅ vai pra coluna MAIS PERTO da referência, seja ela
+    # qual for. O Lead disputa desde 18/08/2026 (regra em
+    # `data_quality.pick_bucket_winner`) — a pergunta da linha é "qual coluna está
+    # mais perto do público que dá retorno", e se a resposta for o tráfego SEM
+    # modelo, isso é achado. Tirar o controle da disputa só garantia que a resposta
+    # nunca fosse incômoda.
     # Google/Outros seguem fora da tabela, no cabeçalho, pra deixar claro o universo.
     _arms = [
-        ('Lead',       n_lead,       False, 'lead_pct',       'lead_delta_pp',       'lead_quality'),
+        ('Lead',       n_lead,       True,  'lead_pct',       'lead_delta_pp',       'lead_quality'),
         ('Champion',   n_champion,   True,  'champion_pct',   'champion_delta_pp',   'champion_quality'),
         ('Challenger', n_challenger, True,  'challenger_pct', 'challenger_delta_pp', 'challenger_quality'),
     ]

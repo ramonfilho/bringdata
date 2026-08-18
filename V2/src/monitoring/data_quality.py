@@ -707,19 +707,27 @@ def check_distribution_drift(df_producao: pd.DataFrame,
 DIRECTIONS_WITHOUT_WINNER = (None, 'neutral', 'uncertain', 'insufficient_data')
 
 
-def pick_variant_winner(direction: Optional[str],
-                        champion_delta_pp: Optional[float],
-                        challenger_delta_pp: Optional[float]) -> Optional[str]:
+def pick_bucket_winner(direction: Optional[str],
+                       deltas: Dict[str, Optional[float]]) -> Optional[str]:
     """Regra CANÔNICA do ✅ na tabela de Drift por A/B (fonte única do projeto).
 
-    Vence o braço que chega MAIS PERTO do perfil de referência (menor |Δpp|
-    contra o Top%), e só em característica de direção conhecida. Lead não entra:
-    é o controle sem ML, não disputa qual modelo ranqueia melhor.
+    Vence o balde que chega MAIS PERTO do perfil de referência (menor |Δpp| contra
+    o Top%), e só em característica de direção conhecida. `deltas` é
+    {nome_do_balde: Δpp}; quem não tem medição na categoria simplesmente não
+    disputa aquela linha.
+
+    QUEM DISPUTA (mudou em 18/08/2026): o Lead entrou. Antes só Champion e
+    Challenger competiam, sob o argumento de que o Lead é "o controle sem ML e não
+    disputa qual modelo ranqueia melhor". A decisão do operador foi outra, e ela é
+    mais honesta: a pergunta da linha é "qual coluna está mais perto do público que
+    dá retorno", e se a resposta for o tráfego SEM modelo, isso é um achado, não uma
+    categoria a ser escondida da comparação. Esconder o controle da disputa só
+    garantia que a resposta nunca fosse incômoda.
 
     Devolve `None` (ninguém leva o ✅) quando:
       - a direção é incerta / sem dado suficiente → não existe "melhor";
-      - algum braço não tem medição na categoria → não há o que comparar;
-      - as duas distâncias empatam → não elege ninguém.
+      - menos de 2 baldes têm medição na categoria → não há o que comparar;
+      - o menor |Δpp| empata entre 2 ou mais → não elege ninguém.
 
     Por que é distância e não intensidade: até 02/08/2026 o renderizador do Slack
     tinha uma regra própria, que comparava os Δ entre si e premiava quem empurrava
@@ -732,12 +740,24 @@ def pick_variant_winner(direction: Optional[str],
     """
     if direction in DIRECTIONS_WITHOUT_WINNER:
         return None
-    if champion_delta_pp is None or challenger_delta_pp is None:
+    medidos = {nome: abs(d) for nome, d in (deltas or {}).items() if d is not None}
+    if len(medidos) < 2:
         return None
-    ch, cl = abs(champion_delta_pp), abs(challenger_delta_pp)
-    if ch == cl:
-        return None
-    return 'champion' if ch < cl else 'challenger'
+    menor = min(medidos.values())
+    empatados = [nome for nome, d in medidos.items() if d == menor]
+    return empatados[0] if len(empatados) == 1 else None
+
+
+def pick_variant_winner(direction: Optional[str],
+                        champion_delta_pp: Optional[float],
+                        challenger_delta_pp: Optional[float]) -> Optional[str]:
+    """Invólucro histórico de `pick_bucket_winner` restrito aos 2 braços de ML.
+
+    Mantido porque a assinatura de 2 posicionais é o contrato que os testes da
+    regra exercitam. Produção usa a forma geral (com o Lead na disputa).
+    """
+    return pick_bucket_winner(direction, {'champion': champion_delta_pp,
+                                          'challenger': challenger_delta_pp})
 
 
 def load_training_distributions(model_path: str) -> Dict:
@@ -3027,9 +3047,13 @@ class DataQualityMonitor:
                 cl_delta   = round(cl_pct   - ref_pct, 1) if cl_pct   is not None else None
                 direction = (direction_map.get(col, {}).get(cat, {}) or {}).get('direction')
                 # Vencedor da linha (✅ do Slack). Regra canônica em
-                # `pick_variant_winner`: mais perto do Top% vence, só em direção
+                # `pick_bucket_winner`: mais perto do Top% vence, só em direção
                 # conhecida. Não reimplementar aqui nem no renderizador.
-                winner = pick_variant_winner(direction, ch_delta, cl_delta)
+                # O Lead disputa desde 18/08/2026 — se o tráfego SEM modelo é o
+                # mais próximo da referência numa linha, isso é achado, não ruído.
+                winner = pick_bucket_winner(direction, {
+                    'lead': lead_delta, 'champion': ch_delta, 'challenger': cl_delta,
+                })
                 lead_quality = self._classify_drift_quality(direction, lead_delta) if lead_delta is not None else None
                 ch_quality   = self._classify_drift_quality(direction, ch_delta)   if ch_delta   is not None else None
                 cl_quality   = self._classify_drift_quality(direction, cl_delta)   if cl_delta   is not None else None
