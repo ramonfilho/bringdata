@@ -13,7 +13,7 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import yaml
 
@@ -864,6 +864,83 @@ class ABTestConfig:
         # 'Lead', no ModelRegistry 'Lead Padrão (Meta)'), não identidade de modelo.
         mapa["display"] = {"Lead": "Lead", **mapa["display"]}
         return mapa
+
+
+# ---------------------------------------------------------------------------
+# Destinos CAPI declarados — DONO ÚNICO do conceito "quais (pixel, evento) este
+# cliente dispara". Dois consumidores derivavam isso por conta própria e os dois
+# estavam errados de formas diferentes:
+#
+#   - `api/app.py` mantinha `_ML_EVENTS` CHUMBADO ({LeadQualified,
+#     LeadQualifiedHighQuality, HQLB, HQLB_LQ}) pra separar gasto Meta "ML" de
+#     "Lead padrão". Quando o jul_24 entrou (29/07/2026) os eventos novos não
+#     estavam na lista e o gasto deles virou "Lead padrão". Em 17/08/2026 o
+#     relatório do grupo publicou "0% em ML" com R$ 4.528,70 de gasto real em
+#     adsets otimizando por jul_24_top30/top50 e abr_28_top30.
+#   - `api/startup_capi_check._collect_pixel_event_pairs` varria as variantes mas
+#     ignorava `capi_secondary_hq_events`, então o pixel que só recebe evento
+#     secundário (o "DEVLF - NOVO", 1349…) nunca era validado no arranque — a
+#     salvaguarda contra "pixel inacessível, evento não entregue" ficava cega
+#     justamente no destino novo.
+#
+# Ambos perguntam a MESMA coisa ao MESMO config. Aqui fica a resposta; os dois
+# viram invólucros finos. Adicionar evento/destino novo passa a ser 1 edição no
+# YAML, sem código a reboque.
+# ---------------------------------------------------------------------------
+
+def declared_capi_destinations(client_config, ab_test_config) -> List[Tuple[str, str]]:
+    """Todo par (pixel_id, event_name) que este cliente DECLARA disparar.
+
+    Cobre, nesta ordem: os eventos default do bloco `capi` (base + high quality),
+    o fan-out global `capi.extra_hq_destinations`, e por variante do A/B o evento
+    base, o high quality e cada `capi_secondary_hq_events`. Variante sem
+    `pixel_id_override` herda o pixel default.
+
+    Pares repetidos são preservados na ordem de descoberta e deduplicados pelo
+    caller que precisar — a lista bruta é o contrato, porque um mesmo nome pode
+    legitimamente sair em mais de um pixel (é o que o fan-out faz).
+
+    Devolve [] quando não há config (fail-soft): quem chama decide o que fazer
+    com o vazio. Não levanta.
+    """
+    pares: List[Tuple[str, str]] = []
+    capi = getattr(client_config, "capi", None) if client_config else None
+    default_pixel = getattr(capi, "pixel_id", None) if capi else None
+
+    if capi:
+        for nome in (getattr(capi, "event_name_with_value", None),
+                     getattr(capi, "event_name_high_quality", None)):
+            if default_pixel and nome:
+                pares.append((str(default_pixel), str(nome)))
+        for dest in (getattr(capi, "extra_hq_destinations", None) or []):
+            if dest.pixel_id and dest.event_name:
+                pares.append((str(dest.pixel_id), str(dest.event_name)))
+
+    if ab_test_config and getattr(ab_test_config, "enabled", False):
+        for variant in (getattr(ab_test_config, "variants", None) or {}).values():
+            pixel = variant.pixel_id_override or default_pixel
+            if not pixel:
+                continue
+            for nome in (variant.capi_event_name, variant.capi_event_name_high_quality):
+                if nome:
+                    pares.append((str(pixel), str(nome)))
+            for dest in (variant.capi_secondary_hq_events or []):
+                if dest.pixel_id and dest.event_name:
+                    pares.append((str(dest.pixel_id), str(dest.event_name)))
+    return pares
+
+
+def ml_event_names(client_config, ab_test_config) -> Set[str]:
+    """Nomes de evento que significam "este adset otimiza pelo NOSSO sinal de ML".
+
+    É a projeção plana de `declared_capi_destinations` (só os nomes, sem pixel).
+    Inclui os eventos base (o `_lq`/`LeadQualified`), e isso é proposital: um
+    adset otimizando por eles também está otimizando por evento que só existe
+    porque o modelo pontuou o lead. Era o comportamento da lista chumbada
+    antiga, que já trazia `LeadQualified` e `HQLB_LQ` — preservado de propósito
+    pra troca não mexer no significado da métrica, só na cobertura dela.
+    """
+    return {evento for _pixel, evento in declared_capi_destinations(client_config, ab_test_config)}
 
 
 # ---------------------------------------------------------------------------

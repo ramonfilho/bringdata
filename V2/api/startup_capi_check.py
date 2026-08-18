@@ -39,35 +39,22 @@ def _collect_pixel_event_pairs(client_config, ab_test_config) -> Dict[str, set]:
     """
     Retorna {pixel_id: {event_names}} considerando default + variants A/B.
 
-    Default vem de client_config.capi (event_name_with_value + event_name_high_quality).
-    Cada variante override pode usar pixel_id_override; se None, herda o default.
+    INVÓLUCRO: a derivação mora em `core.client_config.declared_capi_destinations`,
+    dono único do conceito "quais (pixel, evento) este cliente dispara". Aqui só
+    agrupamos por pixel, que é a forma que esta validação consome.
+
+    MUDANÇA DE COBERTURA (18/08/2026): a versão anterior varria só os eventos
+    PRIMÁRIOS das variantes e ignorava `capi_secondary_hq_events`. Resultado: o
+    pixel que recebe APENAS evento secundário (o "DEVLF - NOVO", 1349…, destino
+    de abr_28_top30 / jul_24_top30 / jul_24_top50 desde 09/08/2026) nunca era
+    validado no arranque — a salvaguarda ficava cega justamente no destino novo,
+    que é o caso que ela existe pra pegar. Agora ele entra.
     """
+    from src.core.client_config import declared_capi_destinations
+
     pairs: Dict[str, set] = {}
-
-    default_pixel = (
-        client_config.capi.pixel_id
-        if client_config and client_config.capi and client_config.capi.pixel_id
-        else None
-    )
-    if default_pixel:
-        events = set()
-        if client_config.capi.event_name_with_value:
-            events.add(client_config.capi.event_name_with_value)
-        if client_config.capi.event_name_high_quality:
-            events.add(client_config.capi.event_name_high_quality)
-        pairs[default_pixel] = events
-
-    if ab_test_config and ab_test_config.enabled:
-        for variant in ab_test_config.variants.values():
-            pixel = variant.pixel_id_override or default_pixel
-            if not pixel:
-                continue
-            pairs.setdefault(pixel, set())
-            if variant.capi_event_name:
-                pairs[pixel].add(variant.capi_event_name)
-            if variant.capi_event_name_high_quality:
-                pairs[pixel].add(variant.capi_event_name_high_quality)
-
+    for pixel_id, event_name in declared_capi_destinations(client_config, ab_test_config):
+        pairs.setdefault(pixel_id, set()).add(event_name)
     return pairs
 
 
