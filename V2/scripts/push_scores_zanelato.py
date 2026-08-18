@@ -593,6 +593,7 @@ def main() -> int:
     a = ap.parse_args()
 
     from src.data.analytics_connection import open_analytics_connection
+
     conn = open_analytics_connection(timeout=1800)
     try:
         linhas, resumo = coletar(conn)
@@ -641,6 +642,22 @@ def main() -> int:
     if podadas:
         print(f"\n  {podadas} linha(s) do corte de {DIAS_CORTE} dias podadas "
               f"(criativo que saiu da janela: nota velha passando por atual)")
+
+    # CORAÇÃO da rodada: a vigia do painel mede a idade DISTO, não do conteúdo.
+    # Rodada sem linha nenhuma é legítima (estreia, madrugada) e não pode
+    # parecer robô morto; robô morto é coração parado (>2h sem bater).
+    conn2 = open_analytics_connection(timeout=60)
+    try:
+        conn2.run("CREATE TABLE IF NOT EXISTS job_heartbeats ("
+                  "job text PRIMARY KEY, ultima_ok timestamptz NOT NULL, "
+                  "detalhe text)")
+        conn2.run("INSERT INTO job_heartbeats (job, ultima_ok, detalhe) "
+                  "VALUES ('push-scores-zanelato', now(), :d) "
+                  "ON CONFLICT (job) DO UPDATE SET ultima_ok=now(), "
+                  "detalhe=EXCLUDED.detalhe",
+                  d=f"{len(linhas)} linhas · {total} na tabela")
+    finally:
+        conn2.close()
     print(f"\nOK: {len(linhas)} publicadas · {total} linhas na tabela deles")
     return 0
 
