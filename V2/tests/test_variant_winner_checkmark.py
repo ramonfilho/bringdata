@@ -112,28 +112,69 @@ def test_sem_os_dois_bracos_nao_marca_ninguem():
     assert '✅' not in _render(_alert([_row('challenger')], challenger_n=3))
 
 
-# ------------------------------------------- largura e colunas (02/08/2026)
+# ------------------------------------------- largura e colunas (18/08/2026)
 
-def test_lead_fora_da_tabela_e_linha_cabe_no_slack():
-    """Lead saiu das colunas e a linha voltou a caber sem quebrar.
+# Teto de largura da linha. O limite REAL é visual (o Slack quebra pela largura da
+# janela de quem lê), não um número do protocolo — então o teto aqui é ancorado no
+# que comprovadamente circula: a tabela `Drift por Fonte` vai pro grupo todo dia com
+# 92 chars / 94 colunas visuais sem quebrar. A de A/B com as 3 colunas mede 96 chars
+# / 100 visuais, validado na tela do leitor em 18/08/2026 antes de entrar. O teto
+# existe pra travar CRESCIMENTO: quem adicionar uma 4ª coluna ou alargar célula
+# quebra aqui, não no Slack do operador.
+MAX_LINHA_CHARS = 100
 
-    Antes: 3 braços + Top% + Compr% davam 120 chars (130+ em produção, onde o
-    rótulo leva o run do modelo) e o Slack quebrava a coluna do Challenger pra
-    uma segunda linha. Agora são 2 braços e rótulo curto.
+
+def test_lead_tem_coluna_e_a_linha_nao_cresce_sem_medir():
+    """Lead de volta às colunas (18/08/2026) sem estourar a largura validada.
+
+    Ele saiu em 02/08 porque a linha dava 120 chars (130+ quando o rótulo ainda
+    levava o run do modelo) e o Slack quebrava a coluna do Challenger pra uma
+    segunda linha. No MESMO dia entrou o rótulo curto (Champ/Chall), que resolveu a
+    largura — mas a coluna nunca voltou. Ela importa porque o Lead é o único grupo
+    SEM modelo: o único controle do mesmo dia e do mesmo leilão. Sem ele os braços de
+    ML só tinham como referência o Top5, congelado em maio de 2026.
     """
     rows = [_row('challenger')]
     for it in rows:
         it['rolling_reference_pct'] = 29.4          # liga a coluna Compr%
+        it['lead_pct'], it['lead_delta_pp'], it['lead_quality'] = 21.0, -8.4, 'ruim'
     alerta = _alert(rows)
     alerta['details']['lead_n'] = 88                # Lead acima do corte de N
     txt = _render(alerta)
     tabela = [ln for ln in txt.splitlines() if ln.startswith('`')]
     assert tabela, txt
-    assert max(len(ln) for ln in tabela) <= 90, max(len(ln) for ln in tabela)
-    # Lead não tem coluna...
-    assert 'Lead(' not in txt, txt
-    # ...mas o volume dele continua visível no cabeçalho.
+    assert max(len(ln) for ln in tabela) <= MAX_LINHA_CHARS, max(len(ln) for ln in tabela)
+    # Lead tem coluna própria...
+    assert 'Lead(' in txt, txt
+    # ...e passa a contar DENTRO da tabela, não mais no "fora da tabela".
     assert 'Lead=88' in txt, txt
+    assert 'fora da tabela: Google' in txt, txt
+
+
+def test_lead_nao_disputa_o_check_de_vencedor():
+    """O ✅ continua só entre os 2 braços de ML. O Lead entra como leitura, não como
+    competidor (`compete=False`) — era a razão de tirá-lo em 02/08 sem prejuízo pra
+    essa marcação. Se um dia o ✅ aparecer na coluna dele, alguém mexeu no `_arms`
+    sem entender o papel do balde."""
+    rows = [_row('challenger')]
+    for it in rows:
+        it['lead_pct'], it['lead_delta_pp'], it['lead_quality'] = 99.9, 99.9, 'bom'
+    alerta = _alert(rows)
+    alerta['details']['lead_n'] = 500
+    txt = _render(alerta)
+    linha = _linha_dados(txt)
+    assert linha.count('✅') == 1, linha
+    assert linha.index('✅') > linha.index('99.9%'), linha
+
+
+def test_lead_abaixo_do_corte_vira_nota_como_qualquer_braco():
+    """Corte de N vale igual pros três: pouco lead = ruído de Δ, sai da tabela e
+    vira nota — nunca some em silêncio."""
+    alerta = _alert([_row('challenger')])
+    alerta['details']['lead_n'] = 3
+    txt = _render(alerta)
+    assert 'Lead(' not in txt, txt
+    assert 'Omitidos' in txt and 'Lead=3' in txt, txt
 
 
 if __name__ == '__main__':

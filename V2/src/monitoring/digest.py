@@ -1513,14 +1513,28 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
     )
     # Legenda movida pra _slack_drift_legend_header (uma vez por seção).
     header = f"*📉 Drift por A/B - {window_title}*"
-    # Só os 2 braços de ML entram nas colunas Δ. O Lead saiu da tabela em
-    # 02/08/2026: com ele a linha passava de 120 caracteres (e de 130 em produção,
-    # onde os rótulos levam o run do modelo) e o Slack quebrava no meio, deixando a
-    # coluna do Challenger órfã numa segunda linha. Ele é o controle sem ML, nunca
-    # disputou o ✅, e o volume dele continua no cabeçalho, então o que se perde é
-    # só o Δ por característica dele. Google/Outros seguem fora da tabela, no
-    # cabeçalho, pra deixar claro o universo total.
+    # O Lead VOLTOU pra tabela em 18/08/2026. Ele saiu em 02/08 porque a linha
+    # passava de 120 caracteres (130 em produção, quando os rótulos ainda levavam o
+    # run do modelo) e o Slack quebrava no meio, deixando a coluna do Challenger
+    # órfã numa segunda linha. Nesse mesmo dia entrou o `_SHORT`
+    # (Champion->Champ, Challenger->Chall), que resolveu a largura — mas a coluna
+    # nunca foi devolvida. Medido em 18/08 sobre o payload real: com as 3 colunas a
+    # linha dá 100 colunas visuais, contra 94 da tabela por Fonte que vai pro grupo
+    # todo dia sem quebrar; validado na tela do leitor antes de entrar.
+    #
+    # Por que ele importa: o Lead é o ÚNICO grupo sem interferência do modelo, então
+    # é a régua natural pra "o modelo está escolhendo público diferente do que a Meta
+    # escolheria sozinha?". Sem ele, Champion e Challenger só podiam ser comparados
+    # contra o Top5, que é um retrato congelado de maio — nada do mesmo dia e do
+    # mesmo leilão. Pior quando um braço cai no corte de N: em 17/08 o Champion tinha
+    # 23 leads e a tabela ficou com UMA coluna, sem controle nenhum.
+    #
+    # `compete=False`: o Lead entra como leitura, não como competidor. O ✅ de
+    # vencedor continua disputado só entre os 2 braços de ML (`_n_compete`), que era
+    # a razão original de tirá-lo sem prejuízo pra essa marcação.
+    # Google/Outros seguem fora da tabela, no cabeçalho, pra deixar claro o universo.
     _arms = [
+        ('Lead',       n_lead,       False, 'lead_pct',       'lead_delta_pp',       'lead_quality'),
         ('Champion',   n_champion,   True,  'champion_pct',   'champion_delta_pp',   'champion_quality'),
         ('Challenger', n_challenger, True,  'challenger_pct', 'challenger_delta_pp', 'challenger_quality'),
     ]
@@ -1533,7 +1547,9 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
 
     if (n_lead + n_champion + n_challenger + n_google + n_outros) > 0:
         in_table = ' · '.join(f"{_ab_bucket_label(b)}={n:,}" for b, n, *_ in _arms) or '—'
-        out_table = f"Lead={n_lead:,} · Google={n_google:,} · Outros={n_outros:,}"
+        # Lead saiu daqui em 18/08: agora ele tem coluna própria e entra no `in_table`
+        # quando passa do corte de N (ou vira nota de omitido, como qualquer braço).
+        out_table = f"Google={n_google:,} · Outros={n_outros:,}"
         header += f"\n_n Meta na tabela: {in_table}  ·  fora da tabela: {out_table}_"
         if _omitted:
             header += "\n_Omitidos (N<%d): %s_" % (
