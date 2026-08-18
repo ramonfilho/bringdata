@@ -3666,7 +3666,25 @@ async def daily_monitoring_check_railway(
                         since_date=_dia_ant_str, until_date=_dia_ant_str,
                         filtering=[{'field': 'campaign.name', 'operator': 'CONTAIN', 'value': 'CAP'}],
                     )
-                    _ML_EVENTS = {'LeadQualified', 'LeadQualifiedHighQuality', 'HQLB', 'HQLB_LQ'}
+                    # Eventos de ML DERIVADOS do YAML (dono único: core.client_config).
+                    # Era uma lista chumbada {LeadQualified, LeadQualifiedHighQuality,
+                    # HQLB, HQLB_LQ} que não conhecia os eventos criados depois. Com o
+                    # jul_24 no ar desde 29/07/2026 e as campanhas novas desde 09/08, o
+                    # gasto delas caía todo em "Lead padrão": em 17/08 o relatório do
+                    # grupo publicou "0% em ML" enquanto R$ 4.528,70 dos R$ 8.098,72 do
+                    # dia estavam em adsets otimizando por jul_24_top50 (R$ 3.317,19),
+                    # jul_24_top30 (R$ 713,34) e abr_28_top30 (R$ 498,17). Agora modelo
+                    # novo entra com 1 edição no YAML, sem código a reboque.
+                    from src.core.client_config import ml_event_names
+                    _ML_EVENTS = ml_event_names(
+                        getattr(pipeline, '_client_config', None) if pipeline else None,
+                        getattr(pipeline, '_ab_test_config', None) if pipeline else None,
+                    )
+                    if not _ML_EVENTS:
+                        logger.warning(
+                            "⚠️ nenhum evento de ML declarado no config — split ML vs Lead "
+                            "padrão sai 100%% Lead. Config carregou?"
+                        )
                     # Pré-filtra adsets com spend > 0 e coleta IDs únicos pro batch.
                     _adsets_with_spend = [
                         (_row.get('adset_id'), float(_row.get('spend') or 0))
