@@ -99,7 +99,7 @@ atualizada de hora em hora no minuto :22. Chave única `(tipo, chave)`.
 
 | coluna | leitura do gestor |
 |---|---|
-| `tipo` | **`criativo_campanha` = O GRÃO DO PRODUTO e a linha principal do gestor** (chave "anúncio @ campanha"; o mesmo anúncio tem um teto por campanha). `criativo`/`campanha` = agregados. Sufixos: `_3dias` = janela recente; `_hoje` = só quem cruzou 100 leads no próprio dia |
+| `tipo` | **`criativo_campanha` = O GRÃO DO PRODUTO e a linha principal do gestor** (chave "anúncio @ campanha"; o mesmo anúncio tem um teto por campanha). `criativo_conjunto_campanha` (18/08) = o split por PÚBLICO (chave "anúncio @ conjunto @ campanha", conjunto = utm_medium = {{adset.name}}); só aparece quando o anúncio roda em 2+ conjuntos nomeados na MESMA campanha - com 1 conjunto a linha criativo_campanha já é o número exato. `criativo`/`campanha` = agregados. Sufixos: `_3dias` = janela recente; `_hoje` = só quem cruzou 100 leads no próprio dia |
 | `chave` | nome do anúncio/campanha (ou "anúncio @ campanha" nas unidades). Anúncio do GOOGLE leva prefixo `[G]` (resolvedor via Google Ads API v22, PR #212); dois anúncios com o mesmo nome fundem por soma ponderada de leads (PR #214) |
 | `teto_cpl` | pague até ISTO por lead desta chave pra dobrar o dinheiro |
 | `teto_roas_alvo` | a meta embutida no número acima (2,0) |
