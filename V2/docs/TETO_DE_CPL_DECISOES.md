@@ -587,5 +587,53 @@ por dia. O aviso antigo de "3,1 eventos por lead real" era do pixel velho.
 
 ---
 
-*Decisões registradas em 14-18/08/2026. Constantes da nota do criativo em
+## Decisão 11 — A escada de janelas ROLANTES; nenhuma corta na virada de LF (19/08)
+
+**O gatilho:** na virada do LF64 para o LF65 (17→18/08) o painel da agência foi
+de 7 criativos para 1, embora **17 anúncios tivessem atravessado a virada
+rodando**, os mesmos. Não foi perda de histórico: o corte de 3 dias era grampeado
+no início do lançamento (`max(cap_start, hoje-2)`) e no dia 1 a janela colapsou
+para 1 dia; o acumulado era a janela do LF e nasceu vazio junto.
+
+**A regra:** o painel publica QUATRO janelas, todas terminando hoje e contando
+para trás, **nenhuma ancorada no calendário**:
+
+| tipo | janela | para quê |
+|---|---|---|
+| `criativo` / `campanha` (sem sufixo) | 90 dias | o mesmo cálculo do `_historico`, reetiquetado (compatibilidade com o painel deles) |
+| `..._historico` | 90 dias | o teto estável do anúncio |
+| `..._7dias` | 7 dias | a semana |
+| `..._3dias` | 3 dias | o curto prazo que ainda passa do piso de 100 |
+| `criativo_hoje` | o dia | o mais fresco que ainda é honesto |
+
+Vale nos quatro grãos (`criativo`, `campanha`, `criativo_campanha`,
+`criativo_conjunto_campanha`), todos com o mesmo piso de N = 100.
+
+**Por que zerar deixa de ser problema, sem regra nova:** anúncio que estreou de
+fato não tem lead nos dias anteriores, não cruza o piso e simplesmente não
+aparece até merecer. Quem continuou rodando mantém a linha inteira. O "só zera
+quem começou do zero" é consequência do piso, não de um caso especial.
+
+**Por que 90 dias:** não é escolha de calendário, é o alcance da RÉGUA. A
+distribuição de decis só conta lead scoreado pelo champion ATUAL, que começou a
+scorear em **25/05/2026** — por isso 90 dias e 180 dias devolvem o mesmo
+conjunto. É também a janela em que a referência rolante mede conversão por
+decil, valor por venda e fator de rastreamento.
+
+**Por que o sem-sufixo é reetiquetado e não recalculado:** duas contas separadas
+para a mesma janela divergiriam na primeira mudança de régua e ninguém saberia
+qual está certa — é o erro de escritor×leitor que já custou 9 dias de sinal
+neste projeto. A linha do histórico é copiada com o outro rótulo, byte a byte.
+
+**O que sai:** a visão "acumulado DO LANÇAMENTO" deixa de existir neste painel.
+Ela continua no relatório interno (Slack/DM), que é onde a pergunta "este
+criativo prestou neste LF?" é feita. O painel da agência é ferramenta de compra
+de mídia, e para comprar hoje a pergunta é de recência, não de calendário.
+
+**Volume medido no `--check` de 19/08:** 404 linhas (histórico 164, 7 dias 52,
+3 dias 25, hoje 1, mais a cópia sem sufixo) contra as 17 que o painel tinha.
+
+---
+
+*Decisões registradas em 14-19/08/2026. Constantes da nota do criativo em
 [NOTA_DO_CRIATIVO_PARAMETROS.md](NOTA_DO_CRIATIVO_PARAMETROS.md).*

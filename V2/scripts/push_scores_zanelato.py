@@ -13,18 +13,40 @@ ESTADO: NO AR desde 12/08/2026. Job `push-scores-zanelato`, cron de hora em hora
     devolve VAZIO para qualquer lançamento depois do LF61. O job já tem a variável; um
     ambiente local sem ela reproduz um falso "não tem dado".
 
-OS DOIS CORTES: ACUMULADO E TRÊS DIAS
-=====================================
-A nota acumulada do lançamento responde "este criativo prestou?". Ela é a certa para decidir
-se um criativo entra no próximo lançamento, e é ruim para decidir hoje: depois de alguns dias
-ela para de se mexer, porque cada dia novo é uma fração pequena do total. Um criativo pode
-virar de ruim para bom e a nota acumulada leva uma semana para reconhecer.
+A ESCADA DE JANELAS ROLANTES (Ramon, 19/08/2026)
+================================================
+São QUATRO janelas, e NENHUMA delas é ancorada no calendário de lançamento:
 
-O corte de TRÊS DIAS existe para isso. Três e não um: um dia de criativo raramente alcança
-os 100 leads do piso, então o corte diário publicaria pouca linha ou nenhuma. Três dias é a
-menor janela que ainda passa do piso e ainda se move.
+    histórico (90 dias) → 7 dias → 3 dias → hoje
 
-Eles convivem na MESMA tabela sem pedir nada à agência, porque a chave única de lá é
+Todas terminam no dia de hoje e contam para trás. É a escada de recência que o gestor usa
+para decidir CPL: o histórico dá o teto estável do anúncio, o de hoje dá o mais fresco, e os
+do meio ficam entre os dois. Quanto mais curta a janela, mais rápido ela reage e menos
+linhas passam do piso de N.
+
+POR QUE NENHUMA É ANCORADA NO LANÇAMENTO
+----------------------------------------
+Até 19/08/2026 o corte curto era GRAMPEADO no início do lançamento (`max(cap_start, hoje-2)`)
+e o acumulado era a janela do lançamento inteiro. Na virada do LF64 para o LF65 (17→18/08)
+isso colapsou a janela de 3 dias para 1 dia e o painel foi de 7 criativos para 1, embora 17
+anúncios tivessem atravessado a virada rodando sem nenhuma mudança neles. A nota não se
+perdeu: a janela é que foi cortada na data.
+
+O grampo saiu. O "zerar só quem começou do zero" passa a valer sem regra nenhuma: anúncio
+que estreou não tem lead nos dias anteriores, não cruza o piso de 100 e simplesmente não
+aparece até merecer — enquanto quem continuou rodando mantém a linha inteira. E o tipo sem
+sufixo (o antigo acumulado do lançamento) passa a publicar a MESMA conta do histórico, para
+não quebrar quem já lê `tipo='criativo'` no painel deles.
+
+POR QUE 90 DIAS NO HISTÓRICO
+----------------------------
+Não é escolha de calendário: é o alcance da RÉGUA. A distribuição de decis só conta lead
+scoreado pelo champion ATUAL, e ele começou a scorear em 25/05/2026 (medido em 19/08). Por
+isso 90 dias e 180 dias devolvem exatamente o mesmo conjunto — 90 é todo o histórico que a
+régua enxerga, e é a mesma janela em que a referência rolante mede conversão por decil,
+valor por venda e fator de rastreamento.
+
+Todas convivem na MESMA tabela sem pedir nada à agência, porque a chave única de lá é
 `(tipo, chave)` e `tipo` é uma coluna de texto livre, sem CHECK e sem enum (verificado em
 12/08/2026). Então `('criativo', 'DEV-AD0160')` e `('criativo_3dias', 'DEV-AD0160')` são duas
 linhas distintas que não colidem.
@@ -46,8 +68,11 @@ cada um tinha a sua cópia do nome de uma fonte.
 
 AS 7 COLUNAS QUE ELES CRIARAM, E DE ONDE CADA UMA SAI
 =====================================================
-    tipo                 'criativo' / 'campanha'              = acumulado do lançamento
-                         'criativo_3dias' / 'campanha_3dias'  = últimos 3 dias
+    tipo                 'criativo' / 'campanha'                    = histórico (90 dias)
+                         'criativo_historico' / 'campanha_...'      = o MESMO, nome explícito
+                         'criativo_7dias' / 'campanha_7dias'        = últimos 7 dias
+                         'criativo_3dias' / 'campanha_3dias'        = últimos 3 dias
+                         'criativo_hoje'                            = o dia de hoje
     chave                nome do anúncio / da campanha
     leads                N de leads que entraram na conta
     pct_top20            % dos leads do criativo que caíram no topo (D9-D10)
@@ -90,19 +115,35 @@ from scripts.push_supabase_zanelato import destino                      # noqa: 
 TABELA_DESTINO = "public.scores_inbound"
 CLIENTE = "devclub"
 
-# Tamanho do corte curto, em dias. Três é o menor que ainda passa do piso de N=100 com o
-# volume que um criativo faz por dia neste cliente (60 a 100 leads/dia nos que rodam de
-# verdade). Baixar para 1 esvaziaria o corte; subir para 7 o deixaria tão inerte quanto o
-# acumulado, que é justamente o problema que ele resolve.
+# OS DEGRAUS DA ESCADA, em dias contados para trás a partir de HOJE.
+# 3 é o menor que ainda passa do piso de N=100 com o volume que um criativo faz por dia
+# neste cliente (60 a 100 leads/dia nos que rodam de verdade); 7 é a semana, que reage mais
+# devagar e sustenta mais linhas; 90 é o alcance da régua (ver docstring).
+DIAS_HISTORICO = 90
+DIAS_MEDIO = 7
 DIAS_CORTE = 3
 
-# Sufixo que separa os dois cortes na coluna `tipo` da tabela deles. Vazio = acumulado do
-# lançamento. Mudar estes valores é mudar o CONTRATO com o painel da agência.
+# Sufixo que separa os cortes na coluna `tipo` da tabela deles. Vazio = o tipo antigo, que
+# desde 19/08 publica a MESMA conta do histórico (era o acumulado do lançamento).
+# Mudar estes valores é mudar o CONTRATO com o painel da agência.
 CORTE_ACUMULADO = ""
+CORTE_HISTORICO = "_historico"
+CORTE_MEDIO = f"_{DIAS_MEDIO}dias"
 CORTE_CURTO = f"_{DIAS_CORTE}dias"
 # Corte HOJE (aprovado 16/08): a visão mais fresca possível que ainda é honesta —
 # só publica quem cruzou o piso de N no PRÓPRIO dia; em dia fraco a lista vem curta.
 CORTE_HOJE = "_hoje"
+
+# Todos os sufixos que este script é dono de escrever — e, portanto, de PODAR. Lista única:
+# um corte novo que entre aqui já nasce com faxina, e foi esquecer disso que deixou linha do
+# LF64 congelada no painel depois da virada.
+TODOS_OS_CORTES = [CORTE_ACUMULADO, CORTE_HISTORICO, CORTE_MEDIO, CORTE_CURTO, CORTE_HOJE]
+
+# Como cada corte se chama no log (o painel deles lê o `tipo`, não isto).
+ROTULO = {CORTE_HISTORICO: f"histórico ({DIAS_HISTORICO} dias)",
+          CORTE_MEDIO: f"últimos {DIAS_MEDIO} dias",
+          CORTE_CURTO: f"últimos {DIAS_CORTE} dias",
+          CORTE_HOJE: "hoje"}
 
 # `atualizado_em` fica de fora: tem default `now()` no lado deles, e é o carimbo de quando
 # ELES receberam. Mandar valor sobrescreveria a informação deles com a nossa.
@@ -183,6 +224,10 @@ def _mapa_de_nomes(conn) -> dict:
         return {}
 
 
+# Dia (date) -> linhas cruas da Meta, dentro de UMA rodada. Ver o uso, abaixo.
+_CACHE_DIA_VIVO: dict = {}
+
+
 def _leads_do_gerenciador(conn, ini, fim) -> dict:
     """Leads que o GERENCIADOR da Meta conta na janela, agregados nos grãos das
     linhas publicadas. Cópia (mesmo nome, outro ad_id) SOMA — cópia é o mesmo
@@ -240,7 +285,12 @@ def _leads_do_gerenciador(conn, ini, fim) -> dict:
                 meta = MetaAdsIntegration(access_token=token)
                 conta = os.getenv("META_ACCOUNT_ID", "act_188005769808959")
                 for d in faltam:
-                    for x in puxa_dia(meta, conta, d):
+                    # CACHE por dia: as quatro janelas da escada terminam todas em hoje,
+                    # então sem isto o mesmo dia seria pedido quatro vezes à API da Meta
+                    # na mesma rodada — mesma resposta, quatro vezes o custo de cota.
+                    if d not in _CACHE_DIA_VIVO:
+                        _CACHE_DIA_VIVO[d] = list(puxa_dia(meta, conta, d))
+                    for x in _CACHE_DIA_VIVO[d]:
                         if x["ld"] and x["camp"]:
                             _soma(str(x["camp"]), _n(x["nome"]),
                                   _n(x.get("cjn")), int(x["ld"]))
@@ -275,7 +325,14 @@ def _moeda_do_gerenciador(linhas, ger) -> list:
         return " ".join(str(x or "").split()).lower()
 
     def _alvo(tipo, chave):
-        base = tipo.replace(CORTE_CURTO, "").replace(CORTE_HOJE, "")
+        # Tira o sufixo do corte para achar o GRÃO da linha. Percorre a lista única de
+        # cortes: um sufixo novo esquecido aqui faria a linha não casar com cesta
+        # nenhuma e sair na moeda real, em silêncio.
+        base = tipo
+        for s in TODOS_OS_CORTES:
+            if s and base.endswith(s):
+                base = base[:-len(s)]
+                break
         partes = [p.strip() for p in str(chave).split(" @ ")]
         if base == "campanha" and "|" in str(chave):
             return ("campanha", str(chave).split("|")[-1].strip())
@@ -363,11 +420,11 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict) -> tuple
         win_end=_fronteira_utc(fim, fim_do_dia=True),
         client_id=CLIENTE,
         conn=conn,
-        # `pin_lf=False` no corte curto: a janela de 3 dias conta quem entrou NELA, sem
-        # amarrar no lançamento. No acumulado o default (amarrado) é o certo, porque ali a
-        # pergunta é sobre o lançamento inteiro. É a mesma distinção que o relatório faz
-        # entre a visão do dia e a visão do LF.
-        **({"pin_lf": False} if sufixo else {}),
+        # `pin_lf=False` em TODOS os cortes desde 19/08: cada janela conta quem entrou
+        # NELA, sem amarrar no rótulo de lançamento. Era o default só do corte curto,
+        # enquanto o acumulado era a visão do LF; com a escada rolante não há mais visão
+        # de LF neste painel (a nota por lançamento vive no relatório interno).
+        pin_lf=False,
     )
     if not comp:
         return [], {"vazio": True, "sufixo": sufixo, "ini": ini, "fim": fim}
@@ -477,8 +534,11 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict) -> tuple
 
 
 def coletar(conn) -> tuple:
-    """Devolve (linhas, resumos) com os DOIS cortes: acumulado do LF e últimos N dias."""
-    lf, ini, fim = _janela_do_lancamento(conn)
+    """Devolve (linhas, resumos) com a ESCADA de janelas rolantes: histórico (90d),
+    7 dias, 3 dias e hoje. Nenhuma delas é cortada pela virada de lançamento."""
+    # O lançamento entra só como RÓTULO (`lf_name` no log e na comparação, que roda com
+    # `pin_lf=False`): desde 19/08 nenhuma janela sai do calendário.
+    lf, _cap_ini, _cap_fim = _janela_do_lancamento(conn)
     if not lf:
         raise SystemExit("sem lançamento no calendário: nada a publicar")
     run_id = _champion_run_id(conn)
@@ -486,16 +546,20 @@ def coletar(conn) -> tuple:
         raise SystemExit("sem champion_run_id no ledger: a régua não existe")
 
     mapa_nome = _mapa_de_nomes(conn)
+    hoje = _hoje_brt()
     linhas, resumos = [], []
-    l, r = _um_corte(conn, lf, run_id, ini, fim, CORTE_ACUMULADO, mapa_nome)
+
+    # HISTÓRICO — a janela mais larga, e a que sustenta o teto estável do anúncio.
+    hist_ini = hoje - timedelta(days=DIAS_HISTORICO - 1)
+    l, r = _um_corte(conn, lf, run_id, hist_ini, hoje, CORTE_HISTORICO, mapa_nome)
     if not l:
-        # Acumulado vazio tem DUAS causas possíveis, e elas pedem reações opostas.
-        # No DIA DE ESTREIA do lançamento (pego em 18/08/2026, manhã do primeiro dia
-        # do LF65: 110 leads no dia inteiro, nenhum criativo no piso de 100) o vazio
-        # é o estado real — morrer aqui congelava o painel com o "hoje" de ONTEM
-        # (373 leads do último dia do LF64 passando por dado do dia). Já um vazio com
-        # a janela CHEIA de leads é a comparação quebrada, e aí publicar nada e morrer
-        # continua certo: a poda apagaria o painel por causa de um bug nosso.
+        # Histórico vazio tem DUAS causas possíveis, e elas pedem reações opostas.
+        # Vazio legítimo é o estado real quando nenhum anúncio chegou ao piso (era o
+        # caso na estreia de lançamento, quando esta janela ainda era a do LF: 110
+        # leads no dia inteiro em 18/08/2026) — morrer ali congelava o painel com o
+        # "hoje" de ONTEM. Já um vazio com a janela CHEIA de leads é a comparação
+        # quebrada, e aí publicar nada e morrer continua certo: a poda apagaria o
+        # painel por causa de um bug nosso.
         # O critério que separa os dois é o próprio piso de publicação, aplicado no
         # grão em que ele vale: POR ANÚNCIO. (110 leads na janela repartidos em dez
         # anúncios ainda é vazio legítimo; um único anúncio com 100+ e comparação
@@ -505,33 +569,38 @@ def coletar(conn) -> tuple:
             "  SELECT count(*) AS n FROM public.registros_ml "
             "  WHERE created_at >= :a AND created_at < :b "
             "  GROUP BY utm_content) t",
-            a=_fronteira_utc(ini), b=_fronteira_utc(fim, fim_do_dia=True))[0][0]
+            a=_fronteira_utc(hist_ini), b=_fronteira_utc(hoje, fim_do_dia=True))[0][0]
         if maior >= 100:
-            raise SystemExit(f"a comparação voltou vazia para {lf}, mas há anúncio "
+            raise SystemExit(f"a comparação voltou vazia no histórico, mas há anúncio "
                              f"com {maior} leads na janela: falha real, nada a publicar")
-        print(f"  acumulado de {lf} vazio e LEGÍTIMO: o maior anúncio da janela tem "
-              f"{maior} leads (piso 100). Dia de estreia — os cortes curtos seguem "
-              f"e a poda tira do painel o que sobrou de ontem.")
+        print(f"  histórico vazio e LEGÍTIMO: o maior anúncio da janela tem "
+              f"{maior} leads (piso 100). Os cortes curtos seguem e a poda tira do "
+              f"painel o que sobrou da rodada anterior.")
     linhas += l
     resumos.append(r)
 
-    # O corte curto é GRAMPEADO no início do lançamento. Sem isso, nos primeiros dias ele
-    # varreria dias do lançamento ANTERIOR e compararia criativo que rodou em outro contexto
-    # — o mesmo motivo pelo qual a janela do acumulado sai do calendário e não de `now() - N`.
-    hoje = fim if fim < _hoje_brt() else _hoje_brt()
-    curto_ini = max(ini, hoje - timedelta(days=DIAS_CORTE - 1))
-    l, r = _um_corte(conn, lf, run_id, curto_ini, hoje, CORTE_CURTO, mapa_nome)
-    linhas += l
-    resumos.append(r)
-    # corte HOJE: mesmo piso de N, janela = O DIA REAL de Brasília, SEM o grampo do
-    # calendário. Os outros cortes se ancoram no lançamento; este existe pra gerir
-    # o que roda AGORA: entre lançamentos (cap_end ontem, planilha ainda sem o
-    # próximo, como em 04 a 06/08/2026), "hoje" rotulando o último dia de captação
-    # enganaria o gestor. (A justificativa original citava "117 leads invisíveis";
-    # era artefato de um query de debug que agrupava campanha truncada. O cenário
-    # entre lançamentos acima é o motivo real e suficiente.)
-    hoje_real = _hoje_brt()
-    l, r = _um_corte(conn, lf, run_id, hoje_real, hoje_real, CORTE_HOJE, mapa_nome)
+    # O tipo SEM SUFIXO ('criativo', 'campanha', ...) é o mesmo cálculo do histórico,
+    # só reetiquetado. Reetiquetar e não recalcular é o ponto: se as duas contas
+    # rodassem separadas, um dia divergiriam e ninguém saberia qual está certa — o
+    # mesmo erro de escritor×leitor que já custou 9 dias de sinal neste projeto.
+    # Ele existe para não quebrar quem já lê `tipo='criativo'` no painel deles; o nome
+    # explícito é o `_historico`, e o dia em que a agência migrar, este some.
+    linhas += [[x[0][:-len(CORTE_HISTORICO)] + CORTE_ACUMULADO] + list(x[1:]) for x in l]
+
+    # SETE e TRÊS DIAS — rolantes, sem grampo de calendário (ver docstring).
+    for dias, sufixo in ((DIAS_MEDIO, CORTE_MEDIO), (DIAS_CORTE, CORTE_CURTO)):
+        l, r = _um_corte(conn, lf, run_id, hoje - timedelta(days=dias - 1), hoje,
+                         sufixo, mapa_nome)
+        linhas += l
+        resumos.append(r)
+
+    # corte HOJE: mesmo piso de N, janela = O DIA REAL de Brasília. Existe pra gerir o
+    # que roda AGORA: entre lançamentos (cap_end ontem, planilha ainda sem o próximo,
+    # como em 04 a 06/08/2026), "hoje" rotulando o último dia de captação enganaria o
+    # gestor. (A justificativa original citava "117 leads invisíveis"; era artefato de
+    # um query de debug que agrupava campanha truncada. O cenário entre lançamentos
+    # acima é o motivo real e suficiente.)
+    l, r = _um_corte(conn, lf, run_id, hoje, hoje, CORTE_HOJE, mapa_nome)
     # Corte curto vazio NÃO é erro: acontece de verdade quando nenhum criativo alcançou o
     # piso de N nos últimos dias. O que não pode é passar em silêncio, então vai para o
     # resumo e sai no log.
@@ -587,9 +656,7 @@ def gravar(linhas) -> int:
         dst = destino(porta=5432)
         try:
             dst.run("BEGIN")
-            podadas = (_poda_sufixo(dst, [], CORTE_ACUMULADO)
-                       + _poda_sufixo(dst, [], CORTE_CURTO)
-                       + _poda_sufixo(dst, [], CORTE_HOJE))
+            podadas = sum(_poda_sufixo(dst, [], s) for s in TODOS_OS_CORTES)
             dst.run("COMMIT")
             n = dst.run(f"SELECT count(*) FROM {TABELA_DESTINO}")[0][0]
             return n, podadas
@@ -615,9 +682,7 @@ def gravar(linhas) -> int:
         # anterior que não é republicada ficava congelada posando de atual
         # (as 3 linhas [G] do LF64 depois da virada). Preço aceito: manhã de
         # estreia mostra painel honesto e quase vazio, como os cortes curtos.
-        podadas = (_poda_sufixo(dst, linhas, CORTE_ACUMULADO)
-                   + _poda_sufixo(dst, linhas, CORTE_CURTO)
-                   + _poda_sufixo(dst, linhas, CORTE_HOJE))
+        podadas = sum(_poda_sufixo(dst, linhas, s) for s in TODOS_OS_CORTES)
         # Chave numérica publicada em rodada anterior vira lixo assim que a versão
         # nomeada existe: apaga toda linha de criativo cuja chave é só dígitos —
         # quem continua sem nome no mapa é re-upsertada nesta mesma rodada, então
@@ -689,9 +754,7 @@ def main() -> int:
 
     print(f"lançamento {resumo['lf']}")
     for corte in resumo["cortes"]:
-        rotulo = ("acumulado do lançamento" if not corte["sufixo"]
-                  else ("hoje" if corte["sufixo"] == CORTE_HOJE
-                        else f"últimos {DIAS_CORTE} dias"))
+        rotulo = ROTULO.get(corte["sufixo"], corte["sufixo"])
         if corte.get("vazio"):
             print(f"  {rotulo} ({corte['ini']} a {corte['fim']}): VAZIO, "
                   f"nenhum criativo alcançou o piso de N")
