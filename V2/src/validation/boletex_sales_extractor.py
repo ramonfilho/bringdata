@@ -138,6 +138,9 @@ def fetch_boletex_sales_from_api(start_date: str, end_date: str) -> pd.DataFrame
             'utm_campaign': None,  # API não expõe UTMs por venda
             'origem': 'boletex',
             'product_name': offer.get('name') or prod.get('description'),
+            # status já era lido acima só para filtrar INVALID_STATUSES; agora ele
+            # também é gravado, senão a linha nasce sem como distinguir pago de estornado.
+            'status': status or None,
             '_boletex_received_value': float(totals.get('received') or 0),
         })
 

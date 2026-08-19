@@ -784,9 +784,11 @@ class SalesDataLoader:
                 removed = before_dedup - after_dedup
                 logger.info(f"    Deduplicação: {removed} transações duplicadas removidas (1 venda por pessoa)")
 
-        # Drop status column if not needed (manter apenas se include_canceled=True para debug)
-        if not include_canceled and 'status' in df_norm.columns:
-            df_norm = df_norm.drop(columns=['status'])
+        # O status VIAJA junto: `analytics.sales.status` é coluna de primeira classe
+        # (sales_store._row_params lê r['status']) e é o único jeito de distinguir
+        # venda aprovada de reembolsada/estornada depois de gravada. Antes ele era
+        # descartado aqui quando include_canceled=False, que é justamente como o ETL
+        # diário chama — resultado: 7.856 linhas Guru no banco com status NULO.
 
         logger.info(f"    {len(df_norm)} vendas Guru carregadas e normalizadas")
 
@@ -1131,6 +1133,9 @@ class SalesDataLoader:
                 'sale_date':   sale_date,
                 'origem':      'hotmart',
                 'product_name': product.get('name'),  # usado por combine_sales pra filtro de produto
+                # status da compra na Hotmart (APPROVED / REFUNDED / CHARGEBACK / CANCELLED…).
+                # Sem ele não dá para abater reembolso depois que a venda está gravada.
+                'status':      purchase.get('status'),
             })
 
         df_norm = pd.DataFrame(rows)
@@ -1271,9 +1276,9 @@ class SalesDataLoader:
                 removed = before_dedup - after_dedup
                 logger.info(f"    Deduplicação: {removed} transações duplicadas removidas (1 venda por pessoa)")
 
-        # Drop status column if not needed (manter apenas se include_canceled=True para debug)
-        if not include_canceled and 'status' in df_norm.columns:
-            df_norm = df_norm.drop(columns=['status'])
+        # O status VIAJA junto (mesma razão do carregador de planilha acima): o ETL
+        # diário chama esta função SEM include_canceled, então era exatamente aqui
+        # que o status do Guru morria antes de chegar ao sales_store.
 
         # Salvar no cache
         try:
