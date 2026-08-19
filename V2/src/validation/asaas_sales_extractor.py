@@ -266,6 +266,10 @@ class AsaasSalesExtractor:
             'sale_date': sale_date,
             'utm_campaign': None,  # Asaas não tem UTM nativo
             'origem': 'asaas',
+            # status do pagamento (RECEIVED / CONFIRMED / REFUNDED / CHARGEBACK…).
+            # Já existia como _asaas_status, mas o prefixo `_` marca campo de debug e
+            # o sales_store lê a chave 'status' — por isso nunca chegava ao banco.
+            'status': payment.get('status'),
             # Campos extras para debug (não usados no matching)
             '_asaas_payment_id': payment.get('id'),
             '_asaas_customer_id': payment.get('customer'),
