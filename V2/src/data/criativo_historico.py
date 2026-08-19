@@ -22,6 +22,8 @@ Reversível: tabela nova, aditiva; nenhum consumidor existente muda.
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 from collections import defaultdict
 from typing import Optional
 
@@ -30,6 +32,70 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 TABELA = "criativo_historico"
+
+_PREFIXO_GOOGLE = re.compile(r"^\[G\]\s*", re.IGNORECASE)
+_ESPACOS = re.compile(r"\s+")
+
+
+def chave_canonica(criativo) -> str:
+    """A grafia única de um criativo, pra somar a evidência dele numa gaveta só.
+
+    Três coisas, e cada uma existe por um vazamento MEDIDO em 19/08/2026:
+
+    1. **Prefixo `[G] `**. Quem resolve o id numérico do Google na API põe esse
+       carimbo no nome (`ingest_ad_insights._resolve_google`). O MESMO vídeo já
+       rodou na Meta e tem passado gravado sem o carimbo, então `[G] DEV-AD0140`
+       nunca achava os 960 leads de `DEV-AD0140`. Medido no LF64: 4 dos 14
+       criativos vivos liam histórico ZERO tendo de 502 a 6.451 leads.
+    2. **Forma Unicode**. "captação" tem ç e ã, e cada acentuada existe em duas
+       grafias: um caractere só (NFC) ou letra + acento invisível (NFD). Iguais na
+       tela, diferentes em byte. A tabela abria DUAS linhas pro mesmo anúncio: 806
+       chaves cruas que são 769 criativos, 37 pares partidos. Pior que o caso 1
+       porque a busca ACHA uma das gavetas e devolve metade da evidência sem erro
+       nenhum — o peso `n/(n+2000)` cai e o teto afrouxa em silêncio.
+    3. **Caixa e espaço**. Mesma família dos dois acima, custo zero.
+
+    Aplicada só na LEITURA (`le_historico`), igual ao estrangulamento de id→nome
+    que já existia: o refresh semanal segue gravando por chave crua e a tabela não
+    muda de forma.
+    """
+    s = _PREFIXO_GOOGLE.sub("", str(criativo or "").strip())
+    return _ESPACOS.sub(" ", unicodedata.normalize("NFC", s)).casefold()
+
+
+class _HistoricoPorCriativo(dict):
+    """Dicionário do histórico que casa por grafia canônica.
+
+    Por que não devolver um dict cru com todas as grafias como apelido: a gente só
+    conhece as grafias que ESTÃO na tabela. O criativo do lead pode chegar do ledger
+    numa terceira grafia (NFD onde a tabela só tem NFC), e aí nenhum apelido salva.
+    Canonizando na consulta, qualquer grafia do mesmo nome cai na mesma gaveta.
+
+    Continua um `dict` de verdade: iterar, `len()` e as chaves cruas seguem
+    funcionando pra quem já consumia (o `== {}` do teste de tabela ausente inclusive).
+    """
+
+    __slots__ = ("_por_canonica",)
+
+    def __init__(self, gavetas: dict, por_canonica: dict):
+        super().__init__(gavetas)
+        self._por_canonica = por_canonica
+
+    def get(self, chave, default=None):
+        g = super().get(chave)
+        if g is not None:
+            return g
+        return self._por_canonica.get(chave_canonica(chave), default)
+
+    def __getitem__(self, chave):
+        try:
+            return super().__getitem__(chave)
+        except KeyError:
+            return self._por_canonica[chave_canonica(chave)]
+
+    def __contains__(self, chave):
+        return (super().__contains__(chave)
+                or chave_canonica(chave) in self._por_canonica)
 
 # DDL aditivo, aplicado com lock_timeout (regra da casa pra DDL no analytics).
 # PK (client_id, criativo): 1 linha por criativo por cliente.
@@ -161,7 +227,15 @@ def le_historico(conn, client_id: str = "devclub") -> dict:
     gavetas do mesmo nome SOMAM, e o id fica como APELIDO apontando pra MESMA
     gaveta fundida — quem consulta por id ou por nome cai no mesmo lugar.
     A tabela não muda (estrangulamento na leitura; o refresh semanal segue
-    gravando por chave crua)."""
+    gravando por chave crua).
+
+    UNIFICAÇÃO POR GRAFIA (19/08): a fusão acima era por nome CRU, e por isso ainda
+    partia o mesmo anúncio quando a grafia mudava — carimbo `[G] ` do resolvedor do
+    Google e forma Unicode do acento. Agora a soma é por `chave_canonica`, e a
+    consulta também canoniza (ver `_HistoricoPorCriativo`). Medido antes de mudar:
+    806 chaves cruas viram 769 criativos, e no LF64 quatro dos catorze criativos
+    vivos liam histórico ZERO tendo de 502 a 6.451 leads, o que inflava o teto deles
+    em até 81%."""
     try:
         rows = conn.run(
             f"SELECT criativo, leads, compradores, esperados, prior_conversao, "
@@ -177,20 +251,22 @@ def le_historico(conn, client_id: str = "devclub") -> dict:
     except Exception:
         mapa = {}   # sem mapa, cada chave fica como está (comportamento antigo)
 
-    out: dict = {}
-    apelidos: list = []
+    por_canonica: dict = {}
+    grafias: list = []      # (grafia vista na tabela, gaveta canônica dela)
     for r in rows:
         cru = str(r[0]).strip()
         nome = mapa.get(cru, cru) if (cru.isdigit() and len(cru) >= 10) else cru
+        k = chave_canonica(nome)
+        grafias.append((cru, k))
         if nome != cru:
-            apelidos.append((cru, nome))
-        g = out.get(nome)
+            grafias.append((nome, k))
+        g = por_canonica.get(k)
         if g is None:
-            out[nome] = {"leads": int(r[1]), "compradores": int(r[2]),
-                         "esperados": float(r[3]),
-                         "prior_conversao": (float(r[4]) if r[4] is not None
-                                             else None),
-                         "prior_fonte": r[5]}
+            por_canonica[k] = {"leads": int(r[1]), "compradores": int(r[2]),
+                               "esperados": float(r[3]),
+                               "prior_conversao": (float(r[4]) if r[4] is not None
+                                                   else None),
+                               "prior_fonte": r[5]}
         else:   # gaveta do mesmo anúncio: SOMA a evidência; prior existente fica
             g["leads"] += int(r[1])
             g["compradores"] += int(r[2])
@@ -198,9 +274,12 @@ def le_historico(conn, client_id: str = "devclub") -> dict:
             if g["prior_conversao"] is None and r[4] is not None:
                 g["prior_conversao"] = float(r[4])
                 g["prior_fonte"] = r[5]
-    for cru, nome in apelidos:
-        out[cru] = out[nome]   # MESMO objeto: busca por id acha a gaveta fundida
-    if apelidos:
-        logger.info("[criativo_historico] %d chaves numéricas fundidas por nome",
-                    len(apelidos))
-    return out
+    # As grafias cruas ficam como APELIDO apontando pro MESMO objeto da gaveta
+    # canônica: quem consulta pelo texto exato da tabela continua achando na hora,
+    # sem pagar a canonização. Quem chega com uma grafia que a tabela não tem cai
+    # no `get` canonizado do `_HistoricoPorCriativo`.
+    gavetas = {grafia: por_canonica[k] for grafia, k in grafias}
+    if len(gavetas) != len(por_canonica):
+        logger.info("[criativo_historico] %d grafias fundidas em %d criativos",
+                    len(gavetas), len(por_canonica))
+    return _HistoricoPorCriativo(gavetas, por_canonica)
