@@ -100,3 +100,62 @@ def test_google_nao_contamina_a_razao_agregada():
     assert sem_google[1][6] == com_google[1][6], (
         f"a linha do Google mudou o teto de um anúncio da META: "
         f"{sem_google[1][6]} → {com_google[1][6]}")
+
+
+# ───────────── Decisão 12: o cadastro sem pesquisa vale o crédito, não zero ─────────────
+
+def test_credito_valoriza_o_nao_respondente():
+    """resp=800, cadastros=1000, crédito=0,40 → numerador 800 + 0,4×200 = 880.
+    Com 1000 no gerenciador: razão 0,88 (era 0,80) e o teto sobe junto."""
+    linhas = [_linha("criativo_campanha", f"DEV-AD0160 @ {CAMPANHA_META}", 800, "10.00")]
+    ger = _gerenciador(cn={("120233445566", "dev-ad0160"): 1000})
+    cad = {"cn": {("120233445566", "dev-ad0160"): 1000}}
+    out = _moeda_do_gerenciador(linhas, ger, cad=cad, credito=0.40)
+    assert out[0][6] == "8.80", f"esperava 8.80 (razão 0,88), saiu {out[0][6]}"
+    assert "ger0.88" in out[0][8]
+
+
+def test_sem_credito_ou_sem_cadastros_cai_no_comportamento_antigo():
+    """Crédito inválido (None) OU linha sem contagem de cadastros → razão antiga
+    respondentes÷gerenciador, sem inventar valor."""
+    linhas = [_linha("criativo_campanha", f"DEV-AD0160 @ {CAMPANHA_META}", 800, "10.00")]
+    ger = _gerenciador(cn={("120233445566", "dev-ad0160"): 1000})
+    cad = {"cn": {("120233445566", "dev-ad0160"): 1000}}
+    sem_credito = _moeda_do_gerenciador(linhas, ger, cad=cad, credito=None)
+    sem_cad = _moeda_do_gerenciador(linhas, ger, cad={"cn": {}}, credito=0.40)
+    assert sem_credito[0][6] == "8.00"
+    assert sem_cad[0][6] == "8.00"
+
+
+def test_cadastros_menor_que_respondentes_clampa():
+    """Contagem de cadastros MENOR que a de respondentes (UTM/janela desalinhadas)
+    não pode virar crédito negativo: fica só o respondente."""
+    linhas = [_linha("criativo_campanha", f"DEV-AD0160 @ {CAMPANHA_META}", 800, "10.00")]
+    ger = _gerenciador(cn={("120233445566", "dev-ad0160"): 1000})
+    cad = {"cn": {("120233445566", "dev-ad0160"): 700}}
+    out = _moeda_do_gerenciador(linhas, ger, cad=cad, credito=0.40)
+    assert out[0][6] == "8.00", "cad < resp tem que clampar no resp"
+
+
+def test_credito_nao_toca_o_google():
+    """Linha [G] continua em moeda_real intocada, com crédito presente ou não."""
+    linhas = [_linha("criativo_campanha", f"[G] DEV-AD0140 @ {CAMPANHA_GOOGLE}",
+                     500, "13.22")]
+    ger = _gerenciador(cn={("120233445566", "dev-ad0160"): 1000})
+    cad = {"cn": {("Mercado", "[g] dev-ad0140"): 900}}
+    out = _moeda_do_gerenciador(linhas, ger, cad=cad, credito=0.40)
+    assert out[0][6] == "13.22"
+    assert out[0][8].endswith("moeda_real")
+
+
+def test_credito_entra_tambem_na_razao_agregada():
+    """A órfã (sem par próprio no gerenciador) usa a razão AGREGADA — que também
+    tem que ser valorada, senão as duas moedas divergem dentro do mesmo corte."""
+    casa = _linha("criativo_campanha", f"DEV-AD0160 @ {CAMPANHA_META}", 800, "10.00")
+    orfa = _linha("criativo_campanha", f"DEV-AD0161 @ {CAMPANHA_META}", 500, "10.00")
+    ger = _gerenciador(cn={("120233445566", "dev-ad0160"): 1000})
+    cad = {"cn": {("120233445566", "dev-ad0160"): 1000}}
+    out = _moeda_do_gerenciador([casa, orfa], ger, cad=cad, credito=0.40)
+    assert out[0][6] == "8.80"
+    assert out[1][6] == "8.80", "agregado valorado: 880/1000 = 0,88"
+    assert "ger_agg0.88" in out[1][8]

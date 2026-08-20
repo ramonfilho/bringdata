@@ -651,5 +651,50 @@ de mídia, e para comprar hoje a pergunta é de recência, não de calendário.
 
 ---
 
-*Decisões registradas em 14-19/08/2026. Constantes da nota do criativo em
+## Decisão 12 — O cadastro sem pesquisa vale o CRÉDITO medido, não zero (20/08)
+
+**O gatilho:** investigando um teto de R$ 2 (anúncio `[ADVTG_ABERTO]`), a razão
+da moeda do gerenciador foi decomposta e mostrou que ela mistura DUAS coisas:
+
+| componente | medido (17-19/08, anúncios 50+ leads) |
+|---|---|
+| inflação real do gerenciador (cadastros÷ger) | **0,93** — a Meta conta só ~7% a mais |
+| taxa de resposta da pesquisa (respondentes÷cadastros) | **0,81** |
+| razão usada até 20/08 (respondentes÷ger) | 0,75 — as duas coladas |
+
+Converter o teto por respondentes÷gerenciador assume que o cadastro que não
+respondeu vale ZERO — mas ele compra. Medido em **343k cadastros de 27
+lançamentos fechados**: conversão de 0,534% contra 0,863% do respondente.
+
+**A regra:** o numerador da razão vira `respondentes + crédito × (cadastros −
+respondentes)` — os "leads valorados". O **crédito** é a fração da conversão do
+respondente que o não-respondente carrega, **medido toda segunda pelo refresh na
+mesma janela madura de 90 dias** (`conversion.survey_coverage` no payload), com
+faixa de sanidade [0,10-0,90] e massa mínima (2.000 não-respondentes, 15
+compradores). Inválido/ausente → comportamento antigo (crédito zero), nunca
+inventa valor. Cadastros da linha vêm de `analytics.captacoes` no mesmo grão
+das cestas do gerenciador; contagem menor que a de respondentes clampa (crédito
+negativo seria punir a linha por defeito de contagem nossa).
+
+**Por que MEDIDO e não constante:** o valor depende do regime de resposta.
+Base cheia (517k cadastros, 27 LFs): crédito **~0,79** no regime antigo
+(resposta 53-65%, o não-respondente era gente comum sem pesquisa) e **~0,33**
+no regime atual (resposta 83-90%, quem sobra é o desengajado de verdade); os 9
+LFs mais recentes deram 0,45. Congelar um número quebraria na próxima mudança
+de operação.
+
+**Efeito esperado:** tetos da Meta sobem ~8% na média — mais nos anúncios cuja
+audiência responde pouco (o `[ADVTG_ABERTO]`, com 65% de resposta, sobe ~24%).
+Google não muda (linha `[G]` é moeda_real; o gerenciador da Meta não conta lead
+de lá). O anúncio de teto R$ 2 continua ruim depois da correção (R$ 2,62):
+2/3 dos leads dele caem no pior quarto dos decis — a Decisão só tira a punição
+indevida, não salva anúncio fraco.
+
+Travado em `tests/test_credito_nao_respondente.py` (função de medição, régua do
+calendário, faixa, massa) e `tests/test_moeda_do_gerenciador.py` (aplicação,
+fallbacks, clamp, Google intocado, agregada valorada).
+
+---
+
+*Decisões registradas em 14-20/08/2026. Constantes da nota do criativo em
 [NOTA_DO_CRIATIVO_PARAMETROS.md](NOTA_DO_CRIATIVO_PARAMETROS.md).*
