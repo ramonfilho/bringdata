@@ -111,6 +111,10 @@ from dotenv import load_dotenv                                          # noqa: 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 from scripts.push_supabase_zanelato import destino                      # noqa: E402
+# O padrão do carimbo `[G] ` vive num lugar só (ver a função lá): quem põe é o
+# resolvedor da ingestão, quem tira é a chave canônica do histórico, e quem
+# pergunta é a moeda do gerenciador aqui embaixo.
+from src.data.criativo_historico import tem_carimbo_google              # noqa: E402
 
 TABELA_DESTINO = "public.scores_inbound"
 CLIENTE = "devclub"
@@ -325,6 +329,20 @@ def _moeda_do_gerenciador(linhas, ger) -> list:
         return " ".join(str(x or "").split()).lower()
 
     def _alvo(tipo, chave):
+        # ANÚNCIO DO GOOGLE NÃO TEM MOEDA DE GERENCIADOR DA META. É a primeira
+        # coisa checada, antes de qualquer parsing: o gerenciador da Meta não conta
+        # lead do Google, então não existe razão a aplicar e a linha fica na moeda
+        # real. Sem esta guarda a linha do Google passava por linha da Meta, porque
+        # o critério era "tem `|` na campanha" (a marca do formato `nome|id` de lá)
+        # e as campanhas do Google se chamam `DEVLF | CAP | Dgen | Cold | ...`:
+        # 18 das 35 têm barra vertical no nome. Não achava par no gerenciador, caía
+        # na razão AGREGADA da Meta e publicava 37 linhas a 0,77 do valor devido —
+        # o teto do Google 23% mais apertado do que a régua manda, apagando um terço
+        # do lift de plataforma. Ficou escondido enquanto a campanha do Google
+        # chegava como 'devlf' (sem pipe); apareceu em 19/08, quando o mapa passou a
+        # ter a campanha real de cada colocação.
+        if tem_carimbo_google(chave):
+            return (None, None)
         # Tira o sufixo do corte para achar o GRÃO da linha. Percorre a lista única de
         # cortes: um sufixo novo esquecido aqui faria a linha não casar com cesta
         # nenhuma e sair na moeda real, em silêncio.
