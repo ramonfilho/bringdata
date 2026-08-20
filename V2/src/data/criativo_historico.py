@@ -63,6 +63,26 @@ def chave_canonica(criativo) -> str:
     return _ESPACOS.sub(" ", unicodedata.normalize("NFC", s)).casefold()
 
 
+def tem_carimbo_google(chave) -> bool:
+    """A chave publicada é de anúncio do GOOGLE? (carrega o carimbo `[G] `)
+
+    Mora aqui, junto de `chave_canonica`, para o padrão do carimbo existir num
+    lugar só: quem PÕE é o resolvedor da ingestão, quem TIRA é a canônica acima,
+    e quem PERGUNTA (a moeda do gerenciador, no push da agência) passa por esta
+    função. Três cópias da mesma expressão regular divergiriam no primeiro dia em
+    que o carimbo mudasse, e o consumidor que ficasse para trás falharia calado.
+
+    O caso que a criou (19/08/2026): a conversão do teto para a moeda do
+    gerenciador decidia "é da Meta" procurando um `|` na campanha (marca do
+    formato `nome|id` de lá). As campanhas do Google se chamam
+    `DEVLF | CAP | Dgen | Cold | ...` — 18 das 35 têm barra vertical no nome —,
+    então a linha do Google passava por linha da Meta, não achava par no
+    gerenciador e caía na razão AGREGADA de lá: 37 linhas publicadas a 0,77 do
+    valor devido, o teto do Google 23% mais apertado do que a régua manda.
+    """
+    return bool(_PREFIXO_GOOGLE.match(str(chave or "").strip()))
+
+
 class _HistoricoPorCriativo(dict):
     """Dicionário do histórico que casa por grafia canônica.
 

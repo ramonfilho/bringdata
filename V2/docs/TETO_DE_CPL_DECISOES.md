@@ -585,6 +585,22 @@ razão foi usada (`ger0.84`, `ger_agg0.78`, `moeda_real`).
 "Leads" da conta (action_type `lead`, = `fb_pixel_lead`), ingerida por anúncio
 por dia. O aviso antigo de "3,1 eventos por lead real" era do pixel velho.
 
+**Como uma linha é reconhecida como do GOOGLE (correção de 19/08):** pelo
+carimbo `[G] ` na chave, testado ANTES de qualquer outro critério
+(`criativo_historico.tem_carimbo_google`, o mesmo padrão que a chave canônica
+usa para tirar o carimbo — um lugar só). O critério anterior era pelo formato da
+campanha da Meta (`nome|id`, "tem `|` logo é de lá"), e as campanhas do Google
+se chamam `DEVLF | CAP | Dgen | Cold | ...`: **18 das 35 têm barra vertical no
+nome**. A linha do Google passava por linha da Meta, não achava par no
+gerenciador e caía na razão AGREGADA de lá — 37 linhas publicadas a 0,77 do
+valor devido, o teto do Google 23% mais apertado do que a régua manda, no
+sentido contrário ao lift de plataforma da Decisão anterior. Ficou escondido
+enquanto a campanha do Google chegava como `devlf` (sem pipe) e apareceu quando
+o mapa de IDs passou a ter a campanha real de cada colocação. A linha do Google
+também ficava DENTRO da média que forma a razão agregada, então contaminava o
+teto de anúncios da Meta que dependem dela. Travado em
+`tests/test_moeda_do_gerenciador.py`, com os dois casos falhando se a guarda sair.
+
 ---
 
 ## Decisão 11 — A escada de janelas ROLANTES; nenhuma corta na virada de LF (19/08)
