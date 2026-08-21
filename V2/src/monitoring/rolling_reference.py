@@ -36,7 +36,9 @@ from src.data.matured_window import (
 # src/validation/model_performance. É reuso (não duplicação); a limpeza de camada
 # (mover o join pra src/data e os dois consumirem de lá) fica pra um passo próprio.
 from src.validation.model_performance import build_matched_df, read_analytics_sales
-from src.monitoring.campaign_classifier import bucket_from_utm, channel_from_source
+from src.monitoring.campaign_classifier import (
+    _META_SOURCES, bucket_from_utm, channel_from_source,
+)
 from src.model.calibration import make_calibrator
 
 logger = logging.getLogger(__name__)
@@ -334,6 +336,120 @@ def lift_de_plataforma(matched: pd.DataFrame):
                        "faixa": list(LIFT_PLATAFORMA_FAIXA)}}
 
 
+# Crédito do NÃO-respondente (Decisão 12): faixa de sanidade e massa mínima.
+# A faixa vem da medição de 20/08 na base cheia (517k cadastros, 27 lançamentos):
+# ~0,33 no regime atual de resposta (83-90%) e ~0,79 no regime antigo (53-65%)
+# — fora de [0.10, 0.90] é medição quebrada, não comportamento novo.
+CREDITO_NR_FAIXA = (0.10, 0.90)
+CREDITO_NR_MIN_NAO = 2000
+CREDITO_NR_MIN_COMPRADORES = 15
+
+
+def credito_do_nao_respondente(cadastros_df: pd.DataFrame,
+                               emails_respondentes: set,
+                               sales_df: pd.DataFrame, *,
+                               launches: Optional[dict] = None,
+                               as_of: Optional[date] = None):
+    """Quanto vale o cadastro que NÃO respondeu a pesquisa, em fração da
+    conversão do respondente — medido na MESMA janela madura da referência,
+    e SÓ na META, que é a única plataforma onde o número é aplicado.
+
+    Por que existe (medição de 20/08, 343k cadastros de 27 lançamentos fechados):
+    a moeda do gerenciador convertia o teto pela razão respondentes÷gerenciador,
+    que mistura DUAS coisas: a inflação real do gerenciador (~7%) e a taxa de
+    resposta da pesquisa (~85%). Converter por ela assume que o cadastro sem
+    pesquisa vale ZERO — e ele compra: 33% a 45% da taxa do respondente no
+    regime atual. O teto da Meta saía ~8% baixo na média (até ~24% em anúncio
+    cuja audiência responde pouco).
+
+    E por que MEDIDO toda semana e não constante: o valor depende do regime de
+    resposta. Com resposta a 53-65% (operação antiga) o não-respondente era
+    gente comum sem pesquisa e valia ~79%; com resposta a 83-90% (hoje) quem
+    sobra é o desengajado e vale ~33%. Congelar um número quebraria na próxima
+    mudança de operação; a janela rolante acompanha sozinha.
+
+    SÓ META na medição, porque só linha da Meta recebe o crédito no push (a do
+    Google sai em moeda_real antes de qualquer razão). Medir numa população
+    multicanal e aplicar numa fatia mono-canal é a armadilha que já custou caro
+    aqui: tirar o não-Meta do balde 'Lead' mudou a taxa de 0,769% para 0,515%
+    (PRs #220/#221). O lead do Google converte acima do previsto (lift 1,5
+    medido neste mesmo arquivo) e contaminaria o crédito para cima.
+
+    JANELA DE COMPRA FECHADA só: cadastro cujo lançamento ainda vende (limite
+    > as_of) sai inteiro, como `_aplica_janela_do_calendario` faz com a janela
+    madura — contá-lo agora seria gravar buy=0 em quem ainda pode comprar, e o
+    calendário tem ciclos de 33-40 dias contra os 21 de recuo da janela.
+
+    A compra conta pela MESMA régua do resto da referência: da captação até o
+    fim de vendas do lançamento em que o cadastro caiu (`limites_de_compra`,
+    o mesmo miolo do calendário — não reimplementa a regra).
+    """
+    if (cadastros_df is None or cadastros_df.empty
+            or sales_df is None or sales_df.empty):
+        return None
+    d = cadastros_df.dropna(subset=["email"]).copy()
+    d["captured_at"] = pd.to_datetime(d["captured_at"],
+                                      errors="coerce").dt.tz_localize(None)
+    d = d.dropna(subset=["captured_at"])
+    # Só META (ver docstring). Sem utm_source legível a linha fica de fora: não
+    # dá pra saber a plataforma, e chutar contamina justamente o que se mede.
+    if "utm_source" in d.columns:
+        src = d["utm_source"].astype(str).str.strip().str.lower()
+        d = d[src.isin(_META_SOURCES)]
+    # Dedup DETERMINÍSTICO, ficando com a captação MAIS RECENTE da pessoa — a
+    # mesma convenção de `build_matured_window`. Sem o sort, o keep='first' fica
+    # na ordem física do Postgres: a mesma pessoa pode cair em lançamentos (e
+    # portanto limites de compra) diferentes entre duas rodadas, e o crédito
+    # gravado muda sem nenhum dado novo ter entrado.
+    d = (d.sort_values("captured_at", ascending=False)
+          .drop_duplicates("email", keep="first"))
+    if d.empty:
+        return None
+    lim = limites_de_compra(d["captured_at"], launches)
+    d["limite"] = pd.to_datetime(lim["limite"], errors="coerce")
+    d = d.dropna(subset=["limite"])
+    if as_of is not None:
+        fechada = d["limite"].dt.date <= as_of
+        d = d[fechada]
+
+    # reset_index: vendas podem chegar de um concat com rótulos duplicados, e o
+    # assign/groupby abaixo quebram com índice repetido (pego em teste).
+    v = sales_df.dropna(subset=["sale_date"]).reset_index(drop=True)
+    por_email = (v.dropna(subset=["email"]).groupby(v["email"].str.lower())
+                 ["sale_date"].apply(list).to_dict())
+    tel = v["telefone"] if "telefone" in v.columns else pd.Series(dtype=object)
+    v2 = v.assign(_t8=tel.map(_t8)).dropna(subset=["_t8"])
+    por_t8 = v2.groupby("_t8")["sale_date"].apply(list).to_dict()
+
+    tel_cad = (d["telefone"] if "telefone" in d.columns
+               else pd.Series(index=d.index, dtype=object))
+    compras = []
+    for e, t, c0, lim_ in zip(d["email"], tel_cad, d["captured_at"], d["limite"]):
+        datas = por_email.get(str(e).lower(), []) + por_t8.get(_t8(t), [])
+        # limite é DATA inclusiva (fim de vendas do lançamento do cadastro)
+        compras.append(int(any(c0 <= s <= lim_ + pd.Timedelta(days=1)
+                               for s in datas)))
+    d["buy"] = compras
+    d["respondeu"] = d["email"].astype(str).str.lower().isin(emails_respondentes)
+
+    resp, nao = d[d["respondeu"]], d[~d["respondeu"]]
+    n_r, n_n = len(resp), len(nao)
+    b_r, b_n = int(resp["buy"].sum()), int(nao["buy"].sum())
+    if n_n < CREDITO_NR_MIN_NAO or b_n < CREDITO_NR_MIN_COMPRADORES or not b_r:
+        return {"credito": None, "valido": False, "n_respondentes": n_r,
+                "n_nao": n_n, "compradores_nao": b_n, "motivo": "sem_massa"}
+    conv_r, conv_n = b_r / n_r, b_n / n_n
+    credito = conv_n / conv_r
+    valido = CREDITO_NR_FAIXA[0] <= credito <= CREDITO_NR_FAIXA[1]
+    logger.info("[rolling_reference] crédito do não-respondente %.3f "
+                "(%d resp %.3f%% · %d não %.3f%%)", credito, n_r,
+                conv_r * 100, n_n, conv_n * 100)
+    return {"credito": round(credito, 4), "valido": bool(valido),
+            "n_respondentes": n_r, "n_nao": n_n,
+            "compradores_nao": b_n, "conv_respondente": round(conv_r, 6),
+            "conv_nao": round(conv_n, 6), "faixa": list(CREDITO_NR_FAIXA)}
+
+
 def fit_calibrator(matched_df: pd.DataFrame, *, method: str = "isotonic"):
     """Re-ajusta o calibrador (score_challenger → P(compra) real) na janela madura.
     É o passo que mantém a conversão ESPERADA fiel quando o mercado se move."""
@@ -397,6 +513,40 @@ def build_conversion_reference(
         # Identidades de toda a base, pra decompor as vendas não-casadas (fator de
         # rastreamento). Carregado dentro do MESMO conn — depois ele pode fechar.
         conhecidos_emails, conhecidos_t8 = identidades_conhecidas(conn)
+        # Insumos do crédito do não-respondente (Decisão 12). BEST-EFFORT, como
+        # o perfil de comprador e o histórico por criativo: satélite que falha
+        # não pode derrubar a referência inteira — sem ela o teto, o painel de
+        # decis e a trava de ordenação congelam na semana anterior.
+        cadastros, emails_respondentes = None, set()
+        try:
+            cad_rows = conn.run(
+                "SELECT lower(trim(email)) AS email, phone AS telefone, "
+                "       captured_at, coalesce(utm_source,'') AS utm_source "
+                "FROM captacoes WHERE captured_at >= :a AND captured_at < :b "
+                "  AND email IS NOT NULL AND email <> ''",
+                a=win_start.isoformat(), b=win_end.isoformat())
+            cadastros = pd.DataFrame(
+                cad_rows, columns=["email", "telefone", "captured_at",
+                                   "utm_source"])
+            # Quem RESPONDEU a pesquisa — o universo todo, não só a janela
+            # madura. Marcar por "email na janela madura" subestimava: o
+            # respondente que a janela filtra (régua/ponte/dedup) caía no balde
+            # de não-respondente e inflava o crédito de 0,36 pra 0,79 (ensaio de
+            # 20/08: taxa de resposta implícita 74% contra os 85% medidos
+            # direto). O marcador é "existe como respondente em QUALQUER lugar":
+            # universo de treino + ledger.
+            resp_rows = conn.run(
+                "SELECT DISTINCT lower(trim(email)) FROM analytics.leads "
+                " WHERE email IS NOT NULL AND email <> '' "
+                "UNION "
+                "SELECT DISTINCT lower(trim(email)) FROM public.registros_ml "
+                " WHERE email IS NOT NULL AND email <> ''")
+            emails_respondentes = {r[0] for r in resp_rows}
+        except Exception as e:
+            logger.warning("[rolling_reference] insumos do crédito do "
+                           "não-respondente indisponíveis (%s) — a referência "
+                           "sai sem survey_coverage e o push mantém a moeda "
+                           "antiga", e)
     finally:
         if own:
             conn.close()
@@ -423,6 +573,17 @@ def build_conversion_reference(
     pl = lift_de_plataforma(matched)
     if pl:
         conv["platform_lift"] = pl
+    # Crédito do NÃO-respondente (Decisão 12), na mesma janela. O push lê
+    # conversion.survey_coverage.credito na moeda do gerenciador. Best-effort
+    # pelo mesmo motivo dos insumos acima.
+    try:
+        sc = credito_do_nao_respondente(cadastros, emails_respondentes, sales,
+                                        launches=launches, as_of=as_of)
+        if sc:
+            conv["survey_coverage"] = sc
+    except Exception as e:
+        logger.warning("[rolling_reference] crédito do não-respondente falhou "
+                       "(%s) — referência sai sem ele", e)
     cal = fit_calibrator(matched)
     return {
         "window_start": win_start.date().isoformat(),

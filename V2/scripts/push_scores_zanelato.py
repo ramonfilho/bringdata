@@ -114,7 +114,9 @@ from scripts.push_supabase_zanelato import destino                      # noqa: 
 # O padrão do carimbo `[G] ` vive num lugar só (ver a função lá): quem põe é o
 # resolvedor da ingestão, quem tira é a chave canônica do histórico, e quem
 # pergunta é a moeda do gerenciador aqui embaixo.
-from src.data.criativo_historico import tem_carimbo_google              # noqa: E402
+from src.data.criativo_historico import (                               # noqa: E402
+    chave_canonica, tem_carimbo_google,
+)
 
 TABELA_DESTINO = "public.scores_inbound"
 CLIENTE = "devclub"
@@ -309,6 +311,78 @@ def _leads_do_gerenciador(conn, ini, fim) -> dict:
     return out
 
 
+def _cadastros_da_janela(conn, ini, fim, mapa_nome: dict) -> dict:
+    """Cadastros TOTAIS (respondente ou não) da janela, nos mesmos grãos e com
+    as MESMAS chaves das cestas do gerenciador — o par da conta dos leads
+    valorados da Decisão 12. Fonte: analytics.captacoes (a espinha de captação;
+    registros_ml só tem quem respondeu, e o ponto aqui é justamente contar quem
+    não respondeu). O id da campanha sai do sufixo `nome|id` da utm_campaign da
+    Meta — linha sem esse formato (Google/devlf) fica fora, e o Google nem
+    chega aqui (sai em moeda_real antes).
+
+    PESSOAS, não inscrições: `count(DISTINCT email)`. A captacoes tem uma linha
+    por INSCRIÇÃO (a mesma pessoa reinscrita em dois lançamentos da janela de 90
+    dias vira duas linhas), enquanto o lado dos respondentes é deduplicado por
+    email e o próprio crédito foi medido sobre pessoas únicas. Contar linha
+    contra pessoa transformaria cada duplicata num "não-respondente" fantasma
+    creditado, inflando o teto.
+
+    E a chave sai TRADUZIDA pelo mesmo mapa de nomes da publicação, canonizada
+    igual ao histórico: a linha publicada usa o NOME do anúncio quando a macro
+    falhou e a UTM chegou como ID numérico, então indexar aqui pelo utm_content
+    cru faria o lookup falhar em silêncio — e o silêncio dá teto diferente para
+    anúncios equivalentes, indistinguível no selo. Mesma armadilha de grafia
+    (NFC/NFD) do histórico do criativo (PR #237)."""
+    def _k(x):
+        """Chave canônica do nome, na MESMA régua do casamento do histórico."""
+        return chave_canonica(x)
+    out = {"fino": {}, "cn": {}, "campanha": {}, "nome": {}}
+    try:
+        rows = conn.run(
+            "SELECT coalesce(utm_campaign,''), utm_content, "
+            "       coalesce(utm_medium,''), count(DISTINCT lower(trim(email))) "
+            "FROM analytics.captacoes "
+            "WHERE captured_at >= :a AND captured_at < :b "
+            "  AND utm_content IS NOT NULL AND utm_content <> '' "
+            "  AND email IS NOT NULL AND email <> '' "
+            "GROUP BY 1, 2, 3",
+            a=_fronteira_utc(ini), b=_fronteira_utc(fim, fim_do_dia=True))
+    except Exception as e:
+        print(f"  cadastros da janela indisponíveis ({e}); "
+              f"moeda segue sem o crédito do não-respondente")
+        return out
+    for camp, nome, conj, n in rows:
+        camp = str(camp)
+        if "|" not in camp:
+            continue
+        cid = camp.split("|")[-1].strip()
+        nome = str(nome).strip()
+        # ID numérico → nome publicado, igual à linha (senão a chave não casa).
+        if nome.isdigit() and len(nome) >= 10 and nome in mapa_nome:
+            nome = mapa_nome[nome]
+        nome, conj, n = _k(nome), _k(conj), int(n)
+        out["fino"][(cid, nome, conj)] = out["fino"].get((cid, nome, conj), 0) + n
+        out["cn"][(cid, nome)] = out["cn"].get((cid, nome), 0) + n
+        out["campanha"][cid] = out["campanha"].get(cid, 0) + n
+        out["nome"][nome] = out["nome"].get(nome, 0) + n
+    return out
+
+
+def _credito_da_referencia(conn):
+    """O crédito do não-respondente MEDIDO pelo refresh semanal
+    (conversion.survey_coverage do payload da referência). Inválido/ausente →
+    None, e a moeda cai no comportamento antigo."""
+    try:
+        from src.data.reference_reader import read_rolling_reference
+        ref = read_rolling_reference(CLIENTE, conn=conn) or {}
+        sc = (ref.get("conversion") or {}).get("survey_coverage") or {}
+        if sc.get("valido") and sc.get("credito"):
+            return float(sc["credito"])
+    except Exception as e:
+        print(f"  crédito do não-respondente indisponível ({e})")
+    return None
+
+
 # Faixa em que a razão por linha é confiável; fora dela (ou sem casamento) a
 # linha usa a razão AGREGADA do corte. Medido em 18/08 sobre agosto inteiro:
 # mediana 0,82, p10-p90 0,65-0,90, agregado 0,778 — o gerenciador conta ~20-25%
@@ -317,16 +391,52 @@ def _leads_do_gerenciador(conn, ini, fim) -> dict:
 RAZAO_FAIXA = (0.5, 1.5)
 
 
-def _moeda_do_gerenciador(linhas, ger) -> list:
+def _moeda_do_gerenciador(linhas, ger, cad=None, credito=None) -> list:
     """Converte o teto de cada linha Meta pra moeda do GERENCIADOR.
 
-    teto_ger = teto_real × (leads_reais ÷ leads_gerenciador) da PRÓPRIA janela.
+    teto_ger = teto_real × (leads VALORADOS ÷ leads_gerenciador) da PRÓPRIA janela.
     A decisão do gestor não muda (o gasto é o mesmo e a razão cancela dos dois
     lados); só a régua passa a falar a língua do CPL que ele vê na tela.
     Linha sem casamento no gerenciador (Google, anúncio sem insight) fica na
-    moeda real com selo `moeda_real`."""
+    moeda real com selo `moeda_real`.
+
+    LEADS VALORADOS (Decisão 12, 20/08): a razão antiga era respondentes÷ger, o
+    que descontava do teto DUAS coisas coladas — a inflação real do gerenciador
+    (~7%) e a taxa de resposta da pesquisa (~85%) — tratando o cadastro que não
+    respondeu como se valesse zero. Ele compra: ~33-45% da taxa do respondente
+    (medido em 343k cadastros). Então o numerador vira
+    `respondentes + credito × (cadastros − respondentes)`, com o `credito`
+    MEDIDO toda semana pelo refresh na janela madura (conversion.survey_coverage
+    do payload). Sem crédito válido ou sem contagem de cadastros da linha, cai
+    no comportamento antigo — conservador, nunca inventa valor."""
     def _n(x):
         return " ".join(str(x or "").split()).lower()
+
+    def _canon(cesta, k):
+        """A chave da cesta de CADASTROS, que é canonizada (NFC, sem carimbo,
+        caixa baixa) — a do gerenciador só normaliza espaço/caixa. Sem esta
+        tradução o lookup falharia em silêncio por diferença de grafia, e
+        silêncio aqui dá teto diferente para anúncios equivalentes."""
+        if cesta == "nome":
+            return chave_canonica(k)
+        if cesta == "cn":
+            return (k[0], chave_canonica(k[1]))
+        if cesta == "fino":
+            return (k[0], chave_canonica(k[1]), chave_canonica(k[2]))
+        return k
+
+    def _valorados(x, cesta, k) -> float:
+        """O numerador da razão da linha: respondentes + crédito dos cadastros
+        que não responderam. Clampa em `resp` quando a contagem de cadastros
+        vem menor que a de respondentes (janela/UTM desalinhados): crédito
+        negativo seria punir a linha por defeito de contagem nossa."""
+        resp = int(x[2] or 0)
+        if not credito or not cad:
+            return float(resp)
+        cad_n = cad.get(cesta, {}).get(_canon(cesta, k))
+        if not cad_n or cad_n <= resp:
+            return float(resp)
+        return resp + credito * (cad_n - resp)
 
     def _alvo(tipo, chave):
         # ANÚNCIO DO GOOGLE NÃO TEM MOEDA DE GERENCIADOR DA META. É a primeira
@@ -376,7 +486,7 @@ def _moeda_do_gerenciador(linhas, ger) -> list:
     for x in linhas:
         cesta, k = _alvo(x[0], x[1])
         if cesta == "cn" and ger["cn"].get(k):
-            tr += int(x[2] or 0)
+            tr += _valorados(x, cesta, k)
             tg += ger["cn"][k]
     r_agg = (tr / tg) if tg else None
 
@@ -394,7 +504,7 @@ def _moeda_do_gerenciador(linhas, ger) -> list:
             out.append(x[:8] + [f"{x[8]}·moeda_real"])
             continue
         n_ger = ger[cesta].get(k)
-        razao = (int(x[2] or 0) / n_ger) if n_ger else None
+        razao = (_valorados(x, cesta, k) / n_ger) if n_ger else None
         selo = "ger"
         if razao is None or not (RAZAO_FAIXA[0] <= razao <= RAZAO_FAIXA[1]):
             razao, selo = r_agg, "ger_agg"
@@ -423,7 +533,8 @@ def _mapa_campanha_google(conn) -> dict:
         return {}
 
 
-def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict) -> tuple:
+def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict,
+              credito=None) -> tuple:
     """Roda a comparação numa janela e devolve (linhas, resumo). NÃO recalcula nada.
 
     O `sufixo` entra na coluna `tipo` e é o que faz os dois cortes conviverem na tabela
@@ -543,8 +654,11 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict) -> tuple
 
     # A MOEDA DO GERENCIADOR entra por último, sobre as linhas prontas do corte:
     # o teto continua CALCULADO por lead real (a régua honesta); aqui ele só é
-    # traduzido pra unidade que o gestor compara na tela dele.
-    linhas = _moeda_do_gerenciador(linhas, _leads_do_gerenciador(conn, ini, fim))
+    # traduzido pra unidade que o gestor compara na tela dele — com o cadastro
+    # sem pesquisa valendo o crédito medido, não zero (Decisão 12).
+    linhas = _moeda_do_gerenciador(linhas, _leads_do_gerenciador(conn, ini, fim),
+                                   cad=_cadastros_da_janela(conn, ini, fim, mapa_nome),
+                                   credito=credito)
 
     return linhas, {"sufixo": sufixo, "ini": ini, "fim": fim, "barra": barra,
                     "min_n": comp.get("min_n"), "escondidas": escondidas,
@@ -564,12 +678,19 @@ def coletar(conn) -> tuple:
         raise SystemExit("sem champion_run_id no ledger: a régua não existe")
 
     mapa_nome = _mapa_de_nomes(conn)
+    # O crédito do não-respondente vem do payload da referência (medido toda
+    # segunda pelo refresh, Decisão 12) e vale para TODOS os cortes da rodada.
+    credito = _credito_da_referencia(conn)
+    if credito:
+        print(f"  crédito do não-respondente: {credito:.2f} "
+              f"(cadastro sem pesquisa vale isso de um respondente)")
     hoje = _hoje_brt()
     linhas, resumos = [], []
 
     # HISTÓRICO — a janela mais larga, e a que sustenta o teto estável do anúncio.
     hist_ini = hoje - timedelta(days=DIAS_HISTORICO - 1)
-    l, r = _um_corte(conn, lf, run_id, hist_ini, hoje, CORTE_HISTORICO, mapa_nome)
+    l, r = _um_corte(conn, lf, run_id, hist_ini, hoje, CORTE_HISTORICO, mapa_nome,
+                     credito=credito)
     if not l:
         # Histórico vazio tem DUAS causas possíveis, e elas pedem reações opostas.
         # Vazio legítimo é o estado real quando nenhum anúncio chegou ao piso (era o
@@ -608,7 +729,7 @@ def coletar(conn) -> tuple:
     # SETE e TRÊS DIAS — rolantes, sem grampo de calendário (ver docstring).
     for dias, sufixo in ((DIAS_MEDIO, CORTE_MEDIO), (DIAS_CORTE, CORTE_CURTO)):
         l, r = _um_corte(conn, lf, run_id, hoje - timedelta(days=dias - 1), hoje,
-                         sufixo, mapa_nome)
+                         sufixo, mapa_nome, credito=credito)
         linhas += l
         resumos.append(r)
 
@@ -618,7 +739,8 @@ def coletar(conn) -> tuple:
     # gestor. (A justificativa original citava "117 leads invisíveis"; era artefato de
     # um query de debug que agrupava campanha truncada. O cenário entre lançamentos
     # acima é o motivo real e suficiente.)
-    l, r = _um_corte(conn, lf, run_id, hoje, hoje, CORTE_HOJE, mapa_nome)
+    l, r = _um_corte(conn, lf, run_id, hoje, hoje, CORTE_HOJE, mapa_nome,
+                     credito=credito)
     # Corte curto vazio NÃO é erro: acontece de verdade quando nenhum criativo alcançou o
     # piso de N nos últimos dias. O que não pode é passar em silêncio, então vai para o
     # resumo e sai no log.
