@@ -95,3 +95,75 @@ def test_casa_venda_por_telefone_tambem():
     vendas = pd.concat([_vendas([f"resp{i}@x.com" for i in range(40)]), por_tel])
     r = credito_do_nao_respondente(cad, resp_set, vendas, launches=LAUNCHES)
     assert r["compradores_nao"] == 16
+
+
+# ───────── consertos do review adversarial de 20/08 ─────────
+
+def _cad_multicanal(n_meta_resp, n_meta_nao, n_google_nao):
+    rows = []
+    for i in range(n_meta_resp):
+        rows.append((f"resp{i}@x.com", f"1199988{i:04d}", "2026-07-03", "facebook-ads"))
+    for i in range(n_meta_nao):
+        rows.append((f"nao{i}@x.com", f"2199977{i:04d}", "2026-07-03", "facebook-ads"))
+    for i in range(n_google_nao):
+        rows.append((f"gnao{i}@x.com", f"3199966{i:04d}", "2026-07-03", "google-ads"))
+    return pd.DataFrame(rows, columns=["email", "telefone", "captured_at",
+                                       "utm_source"])
+
+
+def test_so_meta_entra_na_medicao():
+    """O crédito é aplicado só em linha da Meta (a do Google sai em moeda_real),
+    então medir numa população multicanal valoraria a Meta com conversão do
+    Google — a mesma classe do incidente dos baldes (PRs #220/#221)."""
+    cad = _cad_multicanal(4000, 4000, 4000)
+    resp_set = {f"resp{i}@x.com" for i in range(4000)}
+    # Meta: 40 resp (1%) e 16 não (0,4%) → crédito 0,40.
+    # Google: 200 não compram (5%) — se entrasse, o crédito dispararia.
+    vendas = _vendas([f"resp{i}@x.com" for i in range(40)]
+                     + [f"nao{i}@x.com" for i in range(16)]
+                     + [f"gnao{i}@x.com" for i in range(200)])
+    r = credito_do_nao_respondente(cad, resp_set, vendas, launches=LAUNCHES)
+    assert abs(r["credito"] - 0.40) < 1e-6, (
+        f"o Google contaminou a medição: crédito {r['credito']}")
+    assert r["n_nao"] == 4000, "só os não-respondentes da META entram"
+
+
+def test_janela_de_venda_ainda_aberta_fica_de_fora():
+    """Cadastro de lançamento que ainda vende (limite > as_of) sai inteiro: com
+    o carrinho aberto, buy=0 é 'ainda não comprou', não 'não compra'."""
+    import datetime as _dt
+    cad = _cad_multicanal(4000, 4000, 0)
+    resp_set = {f"resp{i}@x.com" for i in range(4000)}
+    vendas = _vendas([f"resp{i}@x.com" for i in range(40)]
+                     + [f"nao{i}@x.com" for i in range(16)])
+    # as_of ANTES do vendas_end do LF99 (20/07): tudo é janela aberta.
+    r = credito_do_nao_respondente(cad, resp_set, vendas, launches=LAUNCHES,
+                                   as_of=_dt.date(2026, 7, 15))
+    assert r["valido"] is False and r["motivo"] == "sem_massa", (
+        "com o carrinho aberto não há massa madura para medir")
+    # as_of DEPOIS: mede normal.
+    r2 = credito_do_nao_respondente(cad, resp_set, vendas, launches=LAUNCHES,
+                                    as_of=_dt.date(2026, 8, 1))
+    assert abs(r2["credito"] - 0.40) < 1e-6
+
+
+def test_dedup_fica_com_a_captacao_mais_recente_e_e_deterministico():
+    """Pessoa com 2 cadastros na janela: vale a captação MAIS RECENTE (convenção
+    de build_matured_window). Sem ordenar, o Postgres decide qual sobrevive e o
+    crédito muda entre rodadas sem dado novo."""
+    cad = _cad_multicanal(4000, 4000, 0)
+    # a mesma pessoa, cadastrada de novo DEPOIS (a linha que deve prevalecer)
+    extra = pd.DataFrame([("nao0@x.com", "2199977000", "2026-07-06",
+                           "facebook-ads")],
+                         columns=["email", "telefone", "captured_at",
+                                  "utm_source"])
+    resp_set = {f"resp{i}@x.com" for i in range(4000)}
+    vendas = _vendas([f"resp{i}@x.com" for i in range(40)]
+                     + [f"nao{i}@x.com" for i in range(16)])
+    a = credito_do_nao_respondente(pd.concat([cad, extra], ignore_index=True),
+                                   resp_set, vendas, launches=LAUNCHES)
+    b = credito_do_nao_respondente(pd.concat([extra, cad], ignore_index=True),
+                                   resp_set, vendas, launches=LAUNCHES)
+    assert a["credito"] == b["credito"], (
+        "a ordem das linhas de entrada mudou o crédito — não é determinístico")
+    assert a["n_nao"] == 4000, "a duplicata não pode virar duas pessoas"

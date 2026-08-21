@@ -690,9 +690,29 @@ de lá). O anúncio de teto R$ 2 continua ruim depois da correção (R$ 2,62):
 2/3 dos leads dele caem no pior quarto dos decis — a Decisão só tira a punição
 indevida, não salva anúncio fraco.
 
-Travado em `tests/test_credito_nao_respondente.py` (função de medição, régua do
-calendário, faixa, massa) e `tests/test_moeda_do_gerenciador.py` (aplicação,
-fallbacks, clamp, Google intocado, agregada valorada).
+**O que o review adversarial de 20/08 mudou no desenho** (11 achados
+confirmados; os que mexiam no número entraram antes do merge):
+
+| achado | conserto |
+|---|---|
+| crédito medido em TODOS os canais, aplicado só na Meta | medição **só Meta** (`_META_SOURCES`) — medir multicanal e aplicar mono-canal é a armadilha dos baldes (PRs #220/#221), e o lead google converte 1,5× o previsto |
+| cadastros contados por INSCRIÇÃO, respondentes por pessoa | `count(DISTINCT email)`: a duplicata da reinscrição virava "não-respondente fantasma" creditado |
+| chave dos cadastros = utm_content CRU | traduzida pelo mesmo `mapa_nome` da publicação e canonizada (`chave_canonica`): sem isso o anúncio de macro quebrada ficava sem crédito e o irmão ganhava, com o mesmo selo |
+| dedup por email sem ordenação | ordena por `captured_at DESC` (convenção do `build_matured_window`): o crédito mudava entre rodadas sem dado novo |
+| cadastro de lançamento ainda vendendo entrava com buy=0 | filtro `limite <= as_of`, o mesmo que `_aplica_janela_do_calendario` faz |
+| falha da medição derrubava o refresh inteiro | `try/except` best-effort, como perfil de comprador e histórico de criativo |
+
+**Limitação aceita e explícita:** o teto já embute o fator de rastreamento, que
+atribui 100% das vendas "sumidas" aos respondentes casados; a fatia creditada
+recebe esse fator junto (~1,7% a mais). Corrigir exigiria decidir a que
+população pertencem vendas que não existem em base nenhuma — não há dado para
+isso, e distribuí-las proporcionalmente ao total de leads reais é a hipótese
+mais defensável das disponíveis. Fica registrado, não corrigido.
+
+Travado em `tests/test_credito_nao_respondente.py` (medição, régua do
+calendário, faixa, massa, telefone, só-Meta, janela aberta, determinismo) e
+`tests/test_moeda_do_gerenciador.py` (aplicação, fallbacks, clamp, Google
+intocado, agregada valorada).
 
 ---
 

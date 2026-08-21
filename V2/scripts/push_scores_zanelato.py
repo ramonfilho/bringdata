@@ -114,7 +114,9 @@ from scripts.push_supabase_zanelato import destino                      # noqa: 
 # O padrão do carimbo `[G] ` vive num lugar só (ver a função lá): quem põe é o
 # resolvedor da ingestão, quem tira é a chave canônica do histórico, e quem
 # pergunta é a moeda do gerenciador aqui embaixo.
-from src.data.criativo_historico import tem_carimbo_google              # noqa: E402
+from src.data.criativo_historico import (                               # noqa: E402
+    chave_canonica, tem_carimbo_google,
+)
 
 TABELA_DESTINO = "public.scores_inbound"
 CLIENTE = "devclub"
@@ -309,24 +311,40 @@ def _leads_do_gerenciador(conn, ini, fim) -> dict:
     return out
 
 
-def _cadastros_da_janela(conn, ini, fim) -> dict:
+def _cadastros_da_janela(conn, ini, fim, mapa_nome: dict) -> dict:
     """Cadastros TOTAIS (respondente ou não) da janela, nos mesmos grãos e com
     as MESMAS chaves das cestas do gerenciador — o par da conta dos leads
     valorados da Decisão 12. Fonte: analytics.captacoes (a espinha de captação;
     registros_ml só tem quem respondeu, e o ponto aqui é justamente contar quem
     não respondeu). O id da campanha sai do sufixo `nome|id` da utm_campaign da
     Meta — linha sem esse formato (Google/devlf) fica fora, e o Google nem
-    chega aqui (sai em moeda_real antes)."""
-    def _n(x):
-        return " ".join(str(x or "").split()).lower()
+    chega aqui (sai em moeda_real antes).
+
+    PESSOAS, não inscrições: `count(DISTINCT email)`. A captacoes tem uma linha
+    por INSCRIÇÃO (a mesma pessoa reinscrita em dois lançamentos da janela de 90
+    dias vira duas linhas), enquanto o lado dos respondentes é deduplicado por
+    email e o próprio crédito foi medido sobre pessoas únicas. Contar linha
+    contra pessoa transformaria cada duplicata num "não-respondente" fantasma
+    creditado, inflando o teto.
+
+    E a chave sai TRADUZIDA pelo mesmo mapa de nomes da publicação, canonizada
+    igual ao histórico: a linha publicada usa o NOME do anúncio quando a macro
+    falhou e a UTM chegou como ID numérico, então indexar aqui pelo utm_content
+    cru faria o lookup falhar em silêncio — e o silêncio dá teto diferente para
+    anúncios equivalentes, indistinguível no selo. Mesma armadilha de grafia
+    (NFC/NFD) do histórico do criativo (PR #237)."""
+    def _k(x):
+        """Chave canônica do nome, na MESMA régua do casamento do histórico."""
+        return chave_canonica(x)
     out = {"fino": {}, "cn": {}, "campanha": {}, "nome": {}}
     try:
         rows = conn.run(
             "SELECT coalesce(utm_campaign,''), utm_content, "
-            "       coalesce(utm_medium,''), count(*) "
+            "       coalesce(utm_medium,''), count(DISTINCT lower(trim(email))) "
             "FROM analytics.captacoes "
             "WHERE captured_at >= :a AND captured_at < :b "
             "  AND utm_content IS NOT NULL AND utm_content <> '' "
+            "  AND email IS NOT NULL AND email <> '' "
             "GROUP BY 1, 2, 3",
             a=_fronteira_utc(ini), b=_fronteira_utc(fim, fim_do_dia=True))
     except Exception as e:
@@ -338,7 +356,11 @@ def _cadastros_da_janela(conn, ini, fim) -> dict:
         if "|" not in camp:
             continue
         cid = camp.split("|")[-1].strip()
-        nome, conj, n = _n(nome), _n(conj), int(n)
+        nome = str(nome).strip()
+        # ID numérico → nome publicado, igual à linha (senão a chave não casa).
+        if nome.isdigit() and len(nome) >= 10 and nome in mapa_nome:
+            nome = mapa_nome[nome]
+        nome, conj, n = _k(nome), _k(conj), int(n)
         out["fino"][(cid, nome, conj)] = out["fino"].get((cid, nome, conj), 0) + n
         out["cn"][(cid, nome)] = out["cn"].get((cid, nome), 0) + n
         out["campanha"][cid] = out["campanha"].get(cid, 0) + n
@@ -390,6 +412,19 @@ def _moeda_do_gerenciador(linhas, ger, cad=None, credito=None) -> list:
     def _n(x):
         return " ".join(str(x or "").split()).lower()
 
+    def _canon(cesta, k):
+        """A chave da cesta de CADASTROS, que é canonizada (NFC, sem carimbo,
+        caixa baixa) — a do gerenciador só normaliza espaço/caixa. Sem esta
+        tradução o lookup falharia em silêncio por diferença de grafia, e
+        silêncio aqui dá teto diferente para anúncios equivalentes."""
+        if cesta == "nome":
+            return chave_canonica(k)
+        if cesta == "cn":
+            return (k[0], chave_canonica(k[1]))
+        if cesta == "fino":
+            return (k[0], chave_canonica(k[1]), chave_canonica(k[2]))
+        return k
+
     def _valorados(x, cesta, k) -> float:
         """O numerador da razão da linha: respondentes + crédito dos cadastros
         que não responderam. Clampa em `resp` quando a contagem de cadastros
@@ -398,7 +433,7 @@ def _moeda_do_gerenciador(linhas, ger, cad=None, credito=None) -> list:
         resp = int(x[2] or 0)
         if not credito or not cad:
             return float(resp)
-        cad_n = cad.get(cesta, {}).get(k)
+        cad_n = cad.get(cesta, {}).get(_canon(cesta, k))
         if not cad_n or cad_n <= resp:
             return float(resp)
         return resp + credito * (cad_n - resp)
@@ -622,7 +657,7 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict,
     # traduzido pra unidade que o gestor compara na tela dele — com o cadastro
     # sem pesquisa valendo o crédito medido, não zero (Decisão 12).
     linhas = _moeda_do_gerenciador(linhas, _leads_do_gerenciador(conn, ini, fim),
-                                   cad=_cadastros_da_janela(conn, ini, fim),
+                                   cad=_cadastros_da_janela(conn, ini, fim, mapa_nome),
                                    credito=credito)
 
     return linhas, {"sufixo": sufixo, "ini": ini, "fim": fim, "barra": barra,
