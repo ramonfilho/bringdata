@@ -32,6 +32,14 @@ CadastroRec = namedtuple("CadastroRec", ["utm_source", "utm_term"])
 # Shape que o matcher do relatório espera (mesmas colunas do ledger_reader, sem decil).
 _CAD_COLS = ["email", "telefone", "data_captura", "utm_campaign", "utm_source"]
 
+# UTMs extras, sob bandeira (ver `read_cadastros`): a campanha do GOOGLE só viaja
+# no `utm_term` (ValueTrack), e o criativo no `utm_content`. Sem eles, os 1.401
+# cadastros e os R$ 11.186,79 do Google no LF64 (13,9% da verba) ficam sem
+# campanha e fora da unidade criativo x campanha. As três colunas já existem na
+# `UTMTracking` (source, medium, campaign, content, term, url), só não eram
+# selecionadas.
+_CAD_COLS_UTM = ["utm_content", "utm_medium", "utm_term"]
+
 
 def open_railway_connection(timeout: int = 30):
     """Abre uma `pg8000.native.Connection` no Railway (base do front do cliente:
@@ -103,10 +111,20 @@ def google_cadastro_records(
     return [CadastroRec(utm_source=v[1], utm_term=v[2]) for v in latest.values()]
 
 
-def read_cadastros(conn, cap_start: date, cap_end: date):
+def read_cadastros(conn, cap_start: date, cap_end: date, *, utms_extras: bool = False):
     """TODOS os cadastros com um toque de UTM rastreado em [cap_start, cap_end], no shape
     do matcher: email, telefone, data_captura, utm_campaign, utm_source. Dedup por email =
     UTM mais recente DENTRO da janela (last-touch, mesma regra do split Meta).
+
+    `utms_extras=True` acrescenta utm_content, utm_medium e utm_term (as três do MESMO
+    toque escolhido pelo last-touch, nunca de toques diferentes). Fica sob bandeira, e não
+    ligado sempre, porque o consumidor de hoje é UM (`model_performance._open_real_readers`
+    -> `cadastro_reader` -> `build_matched_df` -> `match_leads_to_sales_unified`) e esse
+    caminho percorre o DataFrame linha a linha com `iterrows`/`.at`: coluna a mais não
+    colide com nada (o matcher só acrescenta converted/sale_value/sale_date/sale_origin/
+    match_method), mas engorda cada Série de linha em ~27 mil leads por LF sem que o
+    relatório das 06:00 use uma delas. Com o default False a saída é a de sempre, coluna
+    por coluna. Quem precisa da campanha do Google (que só viaja no utm_term) pede True.
 
     Janela pela DATA DO TOQUE (`UTMTracking.trackedAt`, BRT `-3h`), NÃO pela criação do
     cadastro (`Client.createdAt`): é assim que o cliente conta o lead no LF (bate no número
@@ -120,25 +138,34 @@ def read_cadastros(conn, cap_start: date, cap_end: date):
     """
     import pandas as pd
 
+    extras = ', u.content AS content, u.medium AS medium, u.term AS term' if utms_extras else ''
     rows = conn.run(
         'SELECT LOWER(TRIM(c.email)) AS email, c.phone AS phone, '
-        'u.campaign AS campaign, LOWER(u.source) AS source, u."trackedAt" AS tracked '
-        'FROM "Client" c '
+        'u.campaign AS campaign, LOWER(u.source) AS source, u."trackedAt" AS tracked'
+        + extras +
+        ' FROM "Client" c '
         'JOIN "UTMTracking" u ON LOWER(TRIM(u."clientEmail")) = LOWER(TRIM(c.email)) '
         'WHERE (u."trackedAt" - INTERVAL \'3 hours\')::date >= :s '
         'AND (u."trackedAt" - INTERVAL \'3 hours\')::date <= :e',
         s=cap_start.isoformat(), e=cap_end.isoformat(),
     )
-    latest = {}  # email -> (tracked, phone, campaign, source)
-    for email, phone, campaign, source, tracked in rows:
+    cols = _CAD_COLS + (_CAD_COLS_UTM if utms_extras else [])
+    latest = {}  # email -> (tracked, phone, campaign, source, [content, medium, term])
+    for row in rows:
+        email, phone, campaign, source, tracked = row[:5]
         prev = latest.get(email)
         if prev is None or (tracked is not None and (prev[0] is None or tracked >= prev[0])):
-            latest[email] = (tracked, phone, campaign, source)
+            latest[email] = (tracked, phone, campaign, source) + tuple(row[5:])
     if not latest:
-        return pd.DataFrame(columns=_CAD_COLS)
-    df = pd.DataFrame(
-        [{"email": e, "telefone": v[1], "data_captura": v[0],
-          "utm_campaign": v[2], "utm_source": v[3]} for e, v in latest.items()]
-    )
+        return pd.DataFrame(columns=cols)
+    linhas = []
+    for e, v in latest.items():
+        d = {"email": e, "telefone": v[1], "data_captura": v[0],
+             "utm_campaign": v[2], "utm_source": v[3]}
+        if utms_extras:
+            # v[4:] são content, medium e term DO MESMO toque vencedor do last-touch.
+            d.update(dict(zip(_CAD_COLS_UTM, list(v[4:]) + [None, None, None])))
+        linhas.append(d)
+    df = pd.DataFrame(linhas)
     df["data_captura"] = pd.to_datetime(df["data_captura"], utc=True, errors="coerce").dt.tz_localize(None)
     return df
