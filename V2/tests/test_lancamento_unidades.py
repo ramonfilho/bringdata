@@ -292,3 +292,18 @@ def test_criativos_por_tipo():
     assert linha["leads_ledger"] == 10
     # sem venda: dinheiro None mesmo agregado (sum com min_count=1)
     assert pd.isna(linha["vendas"]) and pd.isna(linha["faturamento"])
+
+
+# ───────────────────────── linha "Não está na base" ──────────────────────────
+def test_linha_naobase():
+    """Venda do lançamento sem cadastro casado vira linha própria: leads=0,
+    gasto/CPL/ROAS/lucro None (nunca 0), boleto com haircut."""
+    nb = pd.DataFrame([
+        {"sale_date": "2026-08-24", "sale_value": 2000.0, "origem": "guru"},
+        {"sale_date": "2026-08-24", "sale_value": 1000.0, "origem": "tmb"},
+    ])
+    r = L.linha_naobase(nb, haircut=0.5)
+    assert r["vendas"] == 2 and r["leads"] == 0
+    assert r["faturamento"] == pytest.approx(2500.0)  # cartão + boleto×0,5
+    assert r["gasto"] is None and r["roas"] is None and r["lucro"] is None
+    assert L.linha_naobase(nb.iloc[0:0], haircut=0.5) is None
