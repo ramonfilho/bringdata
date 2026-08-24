@@ -49,18 +49,35 @@ GROUP BY 1, 2, 3, 4
 """
 
 
-def unidades_finas(ledger_conn, *, run_id: str, win_start, win_end) -> dict:
+def unidades_finas(ledger_conn, *, run_id: str, win_start, win_end,
+                   chave_criativo=None) -> dict:
     """{(campanha, conjunto, criativo): {'D01': n, ...}} na janela.
 
     O conjunto de anúncios vem da `utm_medium` ({{adset.name}} no template do
     cliente). É o grão MAIS FINO que o lead permite: o mesmo anúncio na mesma
     campanha pode rodar em dois conjuntos = dois públicos, e fundir os dois num
-    número só esconde qual público sustenta o teto (Ramon, 18/08)."""
+    número só esconde qual público sustenta o teto (Ramon, 18/08).
+
+    Args:
+        chave_criativo: função opcional que traduz o texto da UTM na chave do
+            criativo (ex.: `chave_canonica`, ou id numérico do Google para o nome
+            publicado). Serve pra quem RECONSTRÓI um lançamento passado e precisa
+            agrupar pela mesma grafia que o histórico usa. None (o default da
+            produção) mantém a chave crua, byte a byte como sempre foi.
+    """
     out: dict = {}
     for camp, cria, conj, decil, n in ledger_conn.run(
             _SQL_UNIDADES, run_id=run_id, ws=win_start, we=win_end):
-        d = out.setdefault((str(camp).strip(), str(conj or "").strip(),
-                            str(cria).strip()), {})
+        nome = str(cria).strip()
+        if chave_criativo is not None:
+            # Tradução best-effort: chave vazia ou tradutor que explode caem na
+            # grafia crua, porque perder a unidade seria pior que agrupá-la mal.
+            try:
+                nome = str(chave_criativo(nome) or nome)
+            except Exception as e:
+                logger.warning("[teto_por_chave] chave_criativo falhou em %r (%s), "
+                               "usando a grafia crua", nome, e)
+        d = out.setdefault((str(camp).strip(), str(conj or "").strip(), nome), {})
         k = f"D{int(decil):02d}"
         d[k] = d.get(k, 0) + int(n)
     logger.info("[teto_por_chave] %d unidades campanha×conjunto×criativo", len(out))
@@ -99,33 +116,66 @@ def _eh_google(campanha: str, criativo: str) -> bool:
 def _conv_composta_da_unidade(dist: dict, criativo: str,
                               calc: CalculadoraDeTeto,
                               historico: dict,
-                              campanha: str = "") -> Optional[tuple]:
-    """(conversão MEDIDA composta, n de leads) da unidade — ou None sem base.
+                              campanha: str = "") -> Optional[dict]:
+    """A conversão MEDIDA composta da unidade E a decomposição dela, ou None sem base.
 
     A composição da Decisão 9, em escala MEDIDA (o fator entra depois, uma vez,
-    no funil da calculadora — nunca duas)."""
+    no funil da calculadora, nunca duas).
+
+    POR QUE DEVOLVER A DECOMPOSIÇÃO (24/08): as parcelas abaixo já eram
+    calculadas aqui e jogadas fora, e quem quisesse explicar "por que o teto
+    deste criativo é esse" tinha que refazer a conta por fora, com risco de
+    refazer diferente. Agora saem junto:
+
+      conv           conversão composta (modelo × histórico), escala medida
+      n              leads da unidade na janela
+      conv_modelo    só a mistura de decis (com o lift de plataforma), SEM histórico
+      n_hist         leads do criativo em lançamentos anteriores
+      compradores_hist / esperados   numerador e denominador do lift
+      lift_criativo  compradores_hist ÷ esperados (None sem histórico utilizável)
+      peso           n_hist ÷ (n_hist + K), o quanto o histórico puxa
+      teto_so_modelo o teto que sairia SEM o histórico (contrafactual do lift)
+    """
     base = calc.por_mistura_de_decis(dist)
     if not base.ok:
         return None
     n = sum(dist.values())
-    conv = base.conversao / base.fator_rastreamento
+    conv_modelo = base.conversao / base.fator_rastreamento
     # NOTA POR PLATAFORMA (Ramon, 18/08): antes da composição com o histórico,
     # a mistura de decis de unidade google sobe pelo lift MEDIDO (a régua
     # inteira sobe igual; quem diferencia criativo lá dentro é o histórico).
     if _eh_google(campanha, criativo):
-        conv *= calc.lift_da_plataforma("google")
+        conv_modelo *= calc.lift_da_plataforma("google")
+    conv = conv_modelo
+    n_hist, compradores_hist, esperados = 0, 0, 0.0
+    peso, lift = 0.0, None
     h = historico.get(criativo)
     if h and h["leads"] > 0:
+        n_hist = int(h["leads"])
+        compradores_hist = int(h["compradores"] or 0)
+        esperados = float(h["esperados"] or 0.0)
         conv = conversao_prevista_da_unidade(
-            conv, h["leads"], h["compradores"], h["esperados"],
+            conv_modelo, h["leads"], h["compradores"], h["esperados"],
             k=K_HISTORICO_CRIATIVO)
+        if esperados > 0:
+            # As MESMAS duas linhas de `conversao_prevista_da_unidade`; ficam aqui
+            # só pra sair no relatório, e por isso a conta continua sendo dela.
+            lift = compradores_hist / esperados
+            peso = n_hist / (n_hist + float(K_HISTORICO_CRIATIVO))
     elif h and h.get("prior_conversao"):
         conv = float(h["prior_conversao"])  # o palpite do TEXTO (escala medida)
-    return conv, n
+    return dict(conv=conv, n=n, conv_modelo=conv_modelo, n_hist=n_hist,
+                compradores_hist=compradores_hist, esperados=esperados,
+                peso=peso, lift_criativo=lift,
+                teto_so_modelo=calc.de_conversao_medida(
+                    conv_modelo, origem=f"modelo:{criativo}@{campanha}"))
 
 
 def tetos_completos(analytics_conn, ledger_conn, *, run_id: str,
-                    win_start, win_end, client_id: str = "devclub") -> tuple:
+                    win_start, win_end, client_id: str = "devclub",
+                    calc: Optional[CalculadoraDeTeto] = None,
+                    historico: Optional[dict] = None,
+                    chave_criativo=None) -> tuple:
     """(por_chave, por_unidade, por_conjunto) numa passada só das MESMAS unidades.
 
     por_chave: {('creative'|'campaign', chave): Teto} — as duas agregações.
@@ -134,11 +184,27 @@ def tetos_completos(analytics_conn, ledger_conn, *, run_id: str,
     linha que o gestor usa pra decidir, Ramon 16/08).
     por_conjunto: lista de {campanha, conjunto, criativo, n, pct, teto} — o
     grão por PÚBLICO (18/08): quem publica decide quando exibir (o push só
-    mostra quando o anúncio roda em 2+ conjuntos na mesma campanha)."""
-    calc = CalculadoraDeTeto.da_referencia(client_id, conn=analytics_conn)
-    historico = le_historico(analytics_conn, client_id=client_id)
+    mostra quando o anúncio roda em 2+ conjuntos na mesma campanha).
+
+    AS DUAS ENTRADAS PODEM SER INJETADAS (24/08). Sem `calc`/`historico` a função
+    lê as duas de HOJE, e era só isso que existia: rodar um lançamento de julho
+    em outubro usava a referência e o histórico de outubro, ou seja o relatório
+    era irreproduzível por construção. Passando os dois, o chamador reconstrói o
+    estado da época (referência point-in-time por `generated_at_max`, histórico
+    só de lançamentos anteriores). Default None = comportamento de sempre.
+
+    Args:
+        calc: `CalculadoraDeTeto` já montada (ex.: de uma referência point-in-time).
+        historico: `{criativo: {leads, compradores, esperados, ...}}` já lido.
+        chave_criativo: tradutor de grafia do criativo (ver `unidades_finas`).
+    """
+    if calc is None:
+        calc = CalculadoraDeTeto.da_referencia(client_id, conn=analytics_conn)
+    if historico is None:
+        historico = le_historico(analytics_conn, client_id=client_id)
     finas = unidades_finas(ledger_conn, run_id=run_id,
-                           win_start=win_start, win_end=win_end)
+                           win_start=win_start, win_end=win_end,
+                           chave_criativo=chave_criativo)
     # O grão criativo×campanha continua calculado da distribuição SOMADA (mesma
     # conta de antes do conjunto existir — os números publicados não mudam).
     us = _agrega_finas(finas)
@@ -150,9 +216,13 @@ def tetos_completos(analytics_conn, ledger_conn, *, run_id: str,
         r = _conv_composta_da_unidade(dist, cria, calc, historico, campanha=camp)
         if r is None:
             continue
-        conv, n = r
+        conv, n = r["conv"], r["n"]
         topo = dist.get("D09", 0) + dist.get("D10", 0)
+        # A decomposição entra como chave ADITIVA: o consumidor de produção
+        # (`push_scores_zanelato`) lê n/teto/criativo/campanha/pct e ignora o
+        # resto, então nada do que ele publica muda.
         por_unidade.append(dict(
+            r,
             campanha=camp, criativo=cria, n=n,
             pct=(100.0 * topo / n) if n else 0.0,
             teto=calc.de_conversao_medida(conv, origem=f"unit:{cria}@{camp}")))
@@ -174,9 +244,10 @@ def tetos_completos(analytics_conn, ledger_conn, *, run_id: str,
         r = _conv_composta_da_unidade(dist, cria, calc, historico, campanha=camp)
         if r is None:
             continue
-        conv, n = r
+        conv, n = r["conv"], r["n"]
         topo = dist.get("D09", 0) + dist.get("D10", 0)
         por_conjunto.append(dict(
+            r,
             campanha=camp, conjunto=conj, criativo=cria, n=n,
             pct=(100.0 * topo / n) if n else 0.0,
             teto=calc.de_conversao_medida(
