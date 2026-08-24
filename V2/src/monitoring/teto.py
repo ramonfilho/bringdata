@@ -214,6 +214,12 @@ class Teto:
     # gente conhecida que comprou por outro funil). Vem MEDIDO do payload da
     # referência; 1,0 = referência sem o fator (comportamento antigo).
     fator_rastreamento: float = 1.0
+    # De ONDE saiu esse fator: 'tracking' (formato de hoje),
+    # 'late_purchase_uplift_legado' (formato antigo da referencia) ou 'ausente'.
+    # 'ausente' quer dizer que o payload nao tinha nenhum dos dois e o teto saiu
+    # com fator 1,0, ou seja ~17% mais baixo do que a medicao manda. E defeito,
+    # nao default, e por isso viaja carimbado ate a tela em vez de sumir.
+    fator_procedencia: Optional[str] = None
     referencia_as_of: Optional[str] = None
     # ── PROCEDÊNCIA ─────────────────────────────────────────────────────────────
     # Três coisas mudam este número, e cada uma se registra de um jeito diferente:
@@ -266,16 +272,23 @@ class CalculadoraDeTeto:
         self._vps = (conv.get('economics') or {}).get('value_per_sale')
         self._by_decile = conv.get('by_decile') or {}
         self._by_bucket = conv.get('by_bucket') or {}
-        # Fator de rastreamento MEDIDO pelo job da referência na mesma janela
-        # (conversion.tracking.factor). Referência antiga sem a chave → 1,0.
-        try:
-            self._fator = float((conv.get('tracking') or {}).get('factor') or 1.0)
-        except (TypeError, ValueError):
-            self._fator = 1.0
-        if self._fator <= 0:
-            logger.warning("[teto] fator de rastreamento inválido (%s) — usando 1,0",
-                           self._fator)
-            self._fator = 1.0
+        self._window_end = str((ref or {}).get('window_end') or '') or None
+        # Fator de rastreamento MEDIDO pelo job da referência na mesma janela.
+        # A LEITURA mora no leitor (`fator_de_rastreamento`), que conhece os dois
+        # formatos de payload: `tracking.factor` (hoje) e, no formato antigo,
+        # `economics.late_purchase_uplift`. Até 24/08/2026 aqui só se lia o
+        # primeiro com `or 1.0`, e contra uma linha antiga (window_end 2026-07-13,
+        # uplift 1,2105) o teto saía com fator 1,0: ~17% menor, sem erro e sem log.
+        from src.data.reference_reader import fator_de_rastreamento
+        self._fator, self._fator_procedencia = fator_de_rastreamento(conv)
+        if ref and self._fator_procedencia == 'ausente':
+            # ERRO, não warning: teto entregue sem o fator medido é número errado
+            # na tela do gestor, e o único jeito de saber qual linha causou é
+            # nomeá-la aqui.
+            logger.error("[teto] referência sem fator de rastreamento "
+                         "(window_end=%s, referencia_id=%s): teto sai com 1,0 e "
+                         "fica ~17%% abaixo do medido",
+                         self._window_end, self._ref_id)
         # Lift de plataforma MEDIDO pelo refresh (conversion.platform_lift):
         # o lead google converte acima do que os decis preveem (estudo 18/08,
         # +31%); inválido/ausente → 1,0 (comportamento antigo).
@@ -326,10 +339,21 @@ class CalculadoraDeTeto:
     def referencia_as_of(self) -> Optional[str]:
         return self._as_of
 
+    @property
+    def fator_rastreamento(self) -> float:
+        return self._fator
+
+    @property
+    def fator_procedencia(self) -> str:
+        """'tracking', 'late_purchase_uplift_legado' ou 'ausente'. Consultável pelo
+        chamador que quer decidir se publica o teto ou segura (ver o ERRO acima)."""
+        return self._fator_procedencia
+
     def _monta(self, conversao: Optional[float], motivo_se_falta: str) -> Teto:
         proc = dict(referencia_as_of=self._as_of, referencia_id=self._ref_id,
                     codigo=self._codigo, configuracao=self._config,
-                    fator_rastreamento=self._fator)
+                    fator_rastreamento=self._fator,
+                    fator_procedencia=self._fator_procedencia)
         base = self._falta_base()
         if base:
             return Teto(None, base, roas_alvo=self._roas, **proc)
