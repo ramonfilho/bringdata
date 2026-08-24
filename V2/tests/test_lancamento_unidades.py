@@ -267,6 +267,9 @@ def test_julga_com_venda_e_os_tres_cortes():
     assert d["roas_positivo"] == 2 and a["roas_positivo"] == 1
     assert d["roas_ponderado"] == pytest.approx(597.0 / 200.0)
     assert j["fisher_p"] is not None and 0.0 <= j["fisher_p"] <= 1.0
+    # A coluna dentro_do_teto tem True/False/None (dtype object) de propósito:
+    # o Mann-Whitney precisa sobreviver a isso (quebrou na rodada real do LF64).
+    assert j["mannwhitney_p"] is not None and 0.0 <= j["mannwhitney_p"] <= 1.0
 
 
 def test_julga_tolerancia_zero_derruba_o_197():

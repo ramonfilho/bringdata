@@ -338,8 +338,14 @@ def julga_dentro_vs_acima(unidades: pd.DataFrame, *,
             tab = [[d["vendas"], max(d["leads"] - d["vendas"], 0)],
                    [a["vendas"], max(a["leads"] - a["vendas"], 0)]]
             out["fisher_p"] = float(fisher_exact(tab)[1])
-            ra = pd.to_numeric(j[j["dentro_do_teto"]]["roas"], errors="coerce").dropna()
-            rb = pd.to_numeric(j[~j["dentro_do_teto"]]["roas"], errors="coerce").dropna()
+            # Igualdade explícita, não máscara booleana: a coluna carrega
+            # True/False/None (dtype object), e `~` em object faz conta de bit
+            # nos ints (-1/-2) em vez de negar — quebrou o Mann-Whitney na
+            # primeira rodada MEDIDA do LF64 (24/08).
+            ra = pd.to_numeric(j[j["dentro_do_teto"] == True]["roas"],   # noqa: E712
+                               errors="coerce").dropna()
+            rb = pd.to_numeric(j[j["dentro_do_teto"] == False]["roas"],  # noqa: E712
+                               errors="coerce").dropna()
             if len(ra) and len(rb):
                 out["mannwhitney_p"] = float(mannwhitneyu(ra, rb,
                                                           alternative="two-sided")[1])
