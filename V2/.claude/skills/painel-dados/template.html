@@ -52,13 +52,16 @@
   :root[data-theme="dark"]{--surface:#16181c;--surface-2:#1f2228;--border:#2c3037;--ink:#e9ebee;--muted:#9aa3ad;--faint:#6b7480;--grid:#282c33;--accent:#8a78ea;--c1:#5b8dff;--c2:#c67d1c;--c3:#1f9c8b;--s:#3fb37f;--m:#d99a35;--v:#e56a6a;--s-bg:#16302440;--m-bg:#33280f60;--v-bg:#3a1e1e60;}
   *{box-sizing:border-box}
   body{margin:0;background:var(--surface);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
-  .wrap{max-width:960px;margin:0 auto;padding:40px 24px 64px}
+  /* Largura FLUIDA (24/08/2026): a página usa o espaço que a tela der, até 1500px,
+     pra tabela larga sair inteira num print. Gráficos e texto ficam contidos nas
+     larguras de leitura próprias (.card/.tiles/max-width em ch). */
+  .wrap{max-width:1500px;margin:0 auto;padding:40px 24px 64px}
   .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:650;margin:0 0 10px}
   h1{font-size:clamp(26px,4vw,38px);line-height:1.1;letter-spacing:-.02em;margin:0 0 12px;text-wrap:balance;font-weight:720}
   .sub{color:var(--muted);font-size:15px;max-width:72ch;margin:0 0 4px}
   .sub b{color:var(--ink);font-weight:620}
   .src{margin-top:6px;font-size:13px;color:var(--faint)}
-  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:30px 0 8px}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:30px 0 8px;max-width:980px}
   .tile{background:var(--surface-2);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:var(--shadow)}
   .tile .lab{font-size:12.5px;color:var(--muted);font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:7px}
   .tile .val{font-size:26px;font-weight:730;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
@@ -67,7 +70,7 @@
   section{margin-top:40px}
   h2{font-size:19px;font-weight:680;letter-spacing:-.01em;margin:0 0 4px}
   .h2sub{color:var(--muted);font-size:13.5px;margin:0 0 16px;max-width:74ch}
-  .card{background:var(--surface-2);border:1px solid var(--border);border-radius:16px;padding:22px 20px 14px;box-shadow:var(--shadow);overflow-x:auto}
+  .card{background:var(--surface-2);border:1px solid var(--border);border-radius:16px;padding:22px 20px 14px;box-shadow:var(--shadow);overflow-x:auto;max-width:936px}
   .legend{display:flex;gap:18px;flex-wrap:wrap;margin:0 4px 12px;font-size:13px;color:var(--muted)}
   .legend span{display:inline-flex;align-items:center;gap:7px}
   svg{display:block;width:100%;height:auto;min-width:520px}
@@ -96,10 +99,6 @@
 /* Bloco de CSS de TABELA do relatorio executivo (nao existe no template da skill).
    A ultima linha e o FIX B: sem ela, .prose b{color:var(--ink)} sobrescreve o verde/vermelho. */
 .tw{overflow-x:auto;border:1px solid var(--line,#dde);border-radius:10px;margin-top:6px}
-/* Em tela larga a tabela ESCAPA da coluna de texto e usa a largura que precisar
-   (até 96vw): o print pro cliente sai com todas as colunas de uma vez, sem scroll.
-   Em tela estreita nada muda (scroll horizontal próprio). Pedido do Ramon, 24/08/2026. */
-@media (min-width:1000px){.tw{width:min(96vw,max-content);min-width:100%;position:relative;left:50%;transform:translateX(-50%)}}
 .tb{border-collapse:collapse;width:100%;font-size:13.5px;min-width:820px;font-variant-numeric:tabular-nums}
 .tb th{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted,#777);
   font-weight:700;text-align:right;padding:9px 11px;background:rgba(128,128,128,.09);white-space:nowrap}

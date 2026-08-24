@@ -33,6 +33,13 @@ def pct(v, dec=1):
     return "—" if v is None else f"{v:.{dec}f}%".replace(".", ",")
 
 
+def _cor(v, dec=2, prefixo="R$ "):
+    """Célula de dinheiro COLORIDA: verde positivo, vermelho negativo, traço ausente."""
+    if v is None:
+        return "—"
+    return (br(v, dec, prefixo), "pos" if v > 0 else "neg")
+
+
 def _tab(headers, rows, aggr=None):
     """Tabela no CSS .tb do relatório executivo (scroll horizontal próprio)."""
     th = "".join(f"<th>{h}</th>" for h in headers)
@@ -97,7 +104,7 @@ def main() -> int:
         linhas_c.append([x["campanha"][:46], x["modelo"], br(x["gasto"], 2, "R$ "),
                          f"{x['leads']:,}".replace(",", "."), br(x["cpl"], 2, "R$ "),
                          br(x.get("vendas"), 0), br(x.get("faturamento"), 2, "R$ "),
-                         br(x.get("roas"), 2), br(x.get("lucro"), 2, "R$ ")])
+                         br(x.get("roas"), 2), _cor(x.get("lucro"))])
     tab_camp = _tab(["Campanha", "Tipo", "Gasto", "Cadastros", "CPL", "Vendas",
                      "Faturamento", "ROAS", "Lucro"], linhas_c)
 
@@ -115,11 +122,13 @@ def main() -> int:
                  f"{int(x['leads_ledger']):,}".replace(",", "."), br(x["cpl"], 2, "R$ "),
                  pct(x.get("pct_d9_d10")),
                  br(x.get("lift_criativo"), 2) if x.get("lift_criativo") else "<span class='ic'>estreante</span>",
-                 br(x.get("conversao") and 100 * x["conversao"], 2) + ("%" if x.get("conversao") is not None else "")]
+                 br(x.get("vendas"), 0), br(x.get("faturamento"), 2, "R$ "),
+                 _cor(x.get("lucro"))]
                 for x in xs]
         blocos.append(f"<h4 class='bl'>{nome}<span>top 5 por verba</span></h4>"
                       + _tab(["Criativo", "Gasto", "Leads", "CPL", "% notas 9-10",
-                              "Nota histórica (lift)", "Conversão"], rows))
+                              "Nota histórica (lift)", "Vendas", "Faturamento",
+                              "Lucro"], rows))
     tela3 = "".join(blocos)
 
     # ── tela 4: teto (dentro vs acima) ───────────────────────────────────────
@@ -129,7 +138,7 @@ def main() -> int:
         b = j[lado]
         rows_j.append([f"<b>{rot}</b>", b["n"], br(b["gasto"], 2, "R$ "),
                        f"{b['leads']:,}".replace(",", "."), br(b.get("vendas"), 0),
-                       br(b.get("roas_ponderado"), 2), br(b.get("lucro"), 2, "R$ "),
+                       br(b.get("roas_ponderado"), 2), _cor(b.get("lucro")),
                        br(b.get("bateu_meta"), 0), br(b.get("lucro_acima_1000"), 0),
                        br(b.get("roas_positivo"), 0)])
     tab_teto = _tab(["", "Unidades", "Gasto", "Leads", "Vendas", "ROAS",
@@ -141,10 +150,11 @@ def main() -> int:
     rows5 = [[x["criativo"][:38], x["campanha"][:30], br(x["cpl"], 2, "R$ "),
               br(x["teto"], 2, "R$ "),
               (br(x["folga"], 2, "R$ "), "pos" if (x["folga"] or 0) >= 0 else "neg"),
-              f"{x['leads_ledger']:,}".replace(",", "."), pct(x.get("pct_d9_d10"))]
+              f"{x['leads_ledger']:,}".replace(",", "."), pct(x.get("pct_d9_d10")),
+              br(x.get("roas"), 2), _cor(x.get("lucro"))]
              for x in menor_cpl]
     tab_cpl = _tab(["Criativo", "Campanha", "CPL", "Teto", "Folga", "Leads",
-                    "% notas 9-10"], rows5)
+                    "% notas 9-10", "ROAS", "Lucro"], rows5)
 
     chave_rank = "lucro" if tem_venda else "folga"
     rank = sorted([x for x in um if x.get(chave_rank) is not None],
@@ -193,9 +203,10 @@ def main() -> int:
             {"title": "2 · Campanha a campanha (top 15 por gasto)",
              "sub": "As mesmas colunas do debriefing: gasto, cadastros, CPL, vendas, ROAS e lucro.",
              "html": tab_camp},
-            {"title": "3 · Criativos: quem levou a verba em cada tipo de campanha",
-             "sub": "O mesmo criativo muda de qualidade conforme o público que a campanha compra — "
-                    "\"% notas 9-10\" é a fração de leads no topo da régua do modelo.",
+            {"title": "3 · Criativos: quanto cada anúncio influenciou o lucro de cada tipo de campanha",
+             "sub": "Verba, vendas casadas e LUCRO de cada criativo dentro de cada tipo — o mesmo "
+                    "criativo muda de qualidade conforme o público que a campanha compra "
+                    "(\"% notas 9-10\" = fração de leads no topo da régua do modelo).",
              "html": tela3},
             {"title": f"4 · Teto de CPL — {modo}",
              "sub": "Unidade = criativo×campanha com ≥100 leads e ≥R$ 300 de gasto. "
