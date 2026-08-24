@@ -52,13 +52,28 @@ def test_o_gatekeeper_passa_o_sinal():
 
 
 def test_escotilha_de_emergencia_funciona():
-    """Precisa existir e precisa FUNCIONAR: escotilha que não abre é decoração."""
+    """Precisa existir e precisa FUNCIONAR: escotilha que não abre é decoração.
+
+    O argumento é `--help` de propósito, e isto NÃO é detalhe cosmético. A trava
+    roda antes do `main`, então o aviso da escotilha já saiu quando o parse de
+    argumentos começa; `--help` cai no `usage` e sai, sem validar, buildar nem
+    deployar. A primeira versão deste teste mandava `--yes`, que é o deploy de
+    verdade: em 24/08/2026 uma rodada da suíte estourou o timeout de 180s, o
+    Python desistiu de esperar, e o `docker buildx` + `gcloud run deploy` que ele
+    tinha começado ficaram órfãos e TERMINARAM — duas revisões novas no Cloud Run
+    saídas de um teste. Rodar a suíte não pode mexer em produção.
+    """
     import os
     env = {**os.environ, "DEPLOY_SEM_GATE": "1"}
-    r = subprocess.run(["bash", str(_V2 / "api" / "deploy_capi.sh"), "--yes"],
-                       capture_output=True, text=True, timeout=180, cwd=str(_RAIZ), env=env)
+    r = subprocess.run(["bash", str(_V2 / "api" / "deploy_capi.sh"), "--help"],
+                       capture_output=True, text=True, timeout=60, cwd=str(_RAIZ), env=env)
     assert "não deve ser chamado direto" not in r.stdout, "escotilha não abriu"
     assert "DEPLOY_SEM_GATE=1" in r.stdout, "escotilha abriu em silêncio; tem que gritar"
+    # Trava da reincidência: se alguém trocar o argumento por um que deploya, a
+    # etapa de build aparece na saída e o teste morre aqui, antes de subir imagem.
+    assert "BUILD DA IMAGEM" not in r.stdout, (
+        "o teste voltou a rodar o deploy de verdade; ele só pode PROVAR que a "
+        "escotilha abre, nunca executar o deploy")
 
 
 # ── camada 2: o hook pega antes de executar ──────────────────────────────────
