@@ -389,6 +389,24 @@ def criativos_por_tipo(unidades: pd.DataFrame, campanhas: pd.DataFrame) -> pd.Da
                            na_position="last").reset_index(drop=True)
 
 
+def linha_naobase(naobase_sales, haircut: float) -> Optional[dict]:
+    """A linha 'Não está na base' da tabela de campanhas: vendas do lançamento
+    que NÃO casaram nenhum cadastro da captação (compra por indicação, cadastro
+    antigo, e-mail/telefone diferentes). Sem ela o faturamento da tabela não
+    fecha com o debriefing do cliente — o relatório do DEV21 sempre a teve.
+    Sem lead e sem gasto: leads=0, CPL/ROAS/lucro None (nunca 0)."""
+    from src.validation.model_performance import _naobase_bucket
+    nb = _naobase_bucket(naobase_sales, haircut)
+    if nb is None:
+        return None
+    return dict(cid="", campanha="Não está na base (venda sem cadastro na captação)",
+                plataforma="", modelo="Não está na base", gasto=None,
+                leads=0, cpl=None, conversao=None,
+                vendas=nb.n_conversions, vendas_cartao=nb.compradores_cartao,
+                vendas_boleto=nb.compradores_boleto, faturamento=nb.faturamento,
+                roas=None, lucro=None)
+
+
 # ───────────────────────── composição (I/O real) ─────────────────────────────
 def _historico_para_consulta(hist_df: pd.DataFrame, mapa_nomes: dict) -> dict:
     """O acumulado point-in-time (`calcula_historico`) na forma que o teto consome
@@ -533,6 +551,10 @@ def constroi_lancamento(lf: str, *, as_of: Optional[date] = None,
 
         campanhas = tabela_campanhas(neg, m["spend_df"], haircut=haircut,
                                      meta_gross_up=gross_up, tem_venda=tem_venda)
+        nb = linha_naobase(m["naobase_sales"], haircut) if tem_venda else None
+        if nb is not None:
+            campanhas = pd.concat([campanhas, pd.DataFrame([nb])],
+                                  ignore_index=True)
         unidades = tabela_unidades(neg, por_unidade, gasto_unid,
                                    haircut=haircut, tem_venda=tem_venda)
         if len(unidades):
