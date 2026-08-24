@@ -25,6 +25,7 @@ import logging
 import re
 import unicodedata
 from collections import defaultdict
+from datetime import date, datetime
 from typing import Optional
 
 import pandas as pd
@@ -81,6 +82,71 @@ def tem_carimbo_google(chave) -> bool:
     valor devido, o teto do Google 23% mais apertado do que a régua manda.
     """
     return bool(_PREFIXO_GOOGLE.match(str(chave or "").strip()))
+
+
+def mapa_de_nomes(conn, client_id: str = "devclub") -> dict:
+    """{ad_id: nome do anúncio} da `analytics.criativo_id_map`.
+
+    Por que existe como FUNÇÃO: a macro de nome falha em alguns anúncios e o
+    `utm_content` chega como o ID numérico cru; publicar número numa linha e nome
+    na outra é falha de consistência que corrói a confiança na métrica (Ramon,
+    16/08). O passo id->nome já vivia em três lugares: esta consulta LITERAL em
+    `le_historico` (aqui) e em `scripts/push_scores_zanelato._mapa_de_nomes`, e
+    uma terceira versão em `scripts/assertividade_teto` que monta o mesmo
+    mapeamento pelos pares (ad_id, ad_name) da própria `ad_insights`, sem passar
+    pela `criativo_id_map`. Três grafias da mesma regra divergem no primeiro dia
+    em que ela mudar. Aqui é extração, não cópia nova: `le_historico` passou a
+    CONSUMIR esta função; os dois scripts seguem com a cópia deles, intocados.
+
+    Nome normalizado com espaço único, como as três cópias já faziam. A grafia
+    canônica NÃO é aplicada aqui de propósito: quem canoniza é quem indexa
+    (`le_historico`, `criativo_do_lead`), e o mapa continua servindo quem quer o
+    nome como está publicado.
+
+    Falha de leitura degrada para `{}` (mapa ausente = cada chave fica como está,
+    o comportamento de antes de o mapa existir), nunca derruba o consumidor.
+
+    Filtro por `client_id`: medido em 24/08/2026, a tabela tem 3.795 linhas e
+    TODAS são devclub, então o mapa devolvido é idêntico ao de antes do filtro.
+    """
+    try:
+        return {str(r[0]): " ".join(str(r[1]).split())
+                for r in conn.run("SELECT ad_id, ad_name FROM criativo_id_map "
+                                  "WHERE ad_name IS NOT NULL AND client_id = :c",
+                                  c=client_id)}
+    except Exception:
+        return {}   # sem mapa, cada chave fica como está (comportamento antigo)
+
+
+def criativo_do_lead(utm_content, mapa: dict) -> str:
+    """A chave de criativo de UM lead, a partir do `utm_content` que ele trouxe.
+
+    Duas etapas, nesta ordem:
+      1. id numérico (só dígitos, 6 ou mais) vira nome pelo `mapa_de_nomes`. Sem
+         achar no mapa, fica o próprio id: melhor uma gaveta com o número do que
+         jogar o lead fora. Medido no LF64 (24/08/2026): 39 utm_content numéricos
+         distintos de fonte google nos cadastros do Railway (40 pela
+         `analytics.captacoes`, que carrega um id a mais na borda de 18/08), e
+         TODOS estão na `criativo_id_map`, cobertura 100%.
+      2. `chave_canonica` por cima, sempre. É o que faz o lead do Google
+         (`[G] DEV-AD0140`) cair na mesma gaveta do passado dele na Meta.
+
+    Vazio ou None devolve string vazia: lead sem criativo é lead sem criativo,
+    não é o criativo de nome "None". O piso de 6 dígitos também protege o lead
+    orgânico: no LF64 o `utm_content` do grupo antigo do WhatsApp é "2907", e ele
+    tem que continuar sendo a chave "2907", não virar anúncio nenhum.
+
+    NÃO decide plataforma. Quem precisa saber se é Google ou Meta pergunta a quem
+    sabe o canal (a fonte do lead, o carimbo `[G] ` da chave publicada via
+    `tem_carimbo_google`), porque o id numérico sozinho não diz de onde veio: o
+    `utm_content` numérico existe nas duas plataformas.
+    """
+    cru = str(utm_content or "").strip()
+    if not cru:
+        return ""
+    if cru.isdigit() and len(cru) >= 6:
+        cru = (mapa or {}).get(cru, cru)
+    return chave_canonica(cru)
 
 
 class _HistoricoPorCriativo(dict):
@@ -149,28 +215,61 @@ ON CONFLICT (client_id, criativo) DO UPDATE SET
 # prior_conversao/prior_fonte ficam FORA do upsert de propósito (ver docstring).
 
 
+def _data(v) -> date:
+    """Aceita `date` ou texto 'YYYY-MM-DD' e devolve `date`. O parâmetro tem que
+    chegar no banco como DATA de verdade: pg8000 manda string como texto, e
+    `date < text` não é comparação que o Postgres aceite (erro de operador)."""
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    return datetime.strptime(str(v)[:10], "%Y-%m-%d").date()
+
+
 def _t8(t) -> Optional[str]:
     d = "".join(c for c in str(t or "") if c.isdigit())
     return d[-8:] if len(d) >= 8 else None
 
 
-def calcula_historico(conn, client_id: str = "devclub") -> pd.DataFrame:
+def calcula_historico(conn, client_id: str = "devclub",
+                      corte=None) -> pd.DataFrame:
     """Acumulado por criativo sobre TODOS os lançamentos fechados.
 
     A compra conta da captação até o `vendas_end` do lançamento do lead (a regra
     do calendário, a mesma da referência e da trava). Lançamento aberto fica fora
     inteiro: ele ainda não é história.
+
+    `corte=None` (default) = relógio de HOJE, byte a byte o comportamento de
+    sempre: entra o lançamento com `vendas_end < CURRENT_DATE - 2`. É o que o
+    refresh semanal quer, porque ele grava a memória do agora.
+
+    `corte=<date>` = relógio congelado naquela data: entra só o lançamento com
+    `vendas_end < corte`. Existe para o BACKTEST de um lançamento poder
+    reconstruir o histórico point-in-time, sem enxergar a si mesmo nem os
+    posteriores. Medido em 24/08/2026: o DEV21 fechou vendas em 16/08 e por isso
+    já conta como fechado desde 22/08 (27 lançamentos); com `corte=2026-08-07`
+    (captação do LF64) são 26, e o DEV21 sai. Sem o corte, o teto do LF64 sairia
+    calculado com a memória do lançamento anterior dentro dele.
     """
     # `vendas_end < hoje - 2`: a folga de 2 dias cobre o atraso de ingestão da
     # analytics.sales (~1 dia). Sem ela, lançamento que fecha no domingo entraria na
     # segunda com as vendas do fim de semana ainda fora do banco e ficaria uma semana
     # subcontado. A entrada é POR LANÇAMENTO FECHADO, nunca por idade do lead — um
     # ciclo longo (LF45, 33d) entra inteiro e maduro de uma vez, ou não entra.
-    cal = {r[0]: r[1:] for r in conn.run(
-        "SELECT lf_name, cap_start, cap_end, vendas_start, vendas_end "
-        "FROM launch_calendar WHERE client_id = :c "
-        "  AND vendas_end IS NOT NULL AND vendas_end < CURRENT_DATE - 2",
-        c=client_id)}
+    # O filtro de maturidade é UM dos dois, nunca os dois: com corte o relógio é
+    # o da data pedida (o "hoje" daquele lançamento), sem corte é o de agora.
+    if corte is None:
+        cal = {r[0]: r[1:] for r in conn.run(
+            "SELECT lf_name, cap_start, cap_end, vendas_start, vendas_end "
+            "FROM launch_calendar WHERE client_id = :c "
+            "  AND vendas_end IS NOT NULL AND vendas_end < CURRENT_DATE - 2",
+            c=client_id)}
+    else:
+        cal = {r[0]: r[1:] for r in conn.run(
+            "SELECT lf_name, cap_start, cap_end, vendas_start, vendas_end "
+            "FROM launch_calendar WHERE client_id = :c "
+            "  AND vendas_end IS NOT NULL AND vendas_end < :corte",
+            c=client_id, corte=_data(corte))}
     if not cal:
         logger.warning("[criativo_historico] calendário vazio — nada a acumular")
         return pd.DataFrame(columns=["criativo", "leads", "compradores",
@@ -264,12 +363,7 @@ def le_historico(conn, client_id: str = "devclub") -> dict:
         logger.warning("[criativo_historico] leitura falhou (%s) — degradando pra "
                        "sem histórico", e)
         return {}
-    try:
-        mapa = {str(r[0]): " ".join(str(r[1]).split())
-                for r in conn.run("SELECT ad_id, ad_name FROM criativo_id_map "
-                                  "WHERE ad_name IS NOT NULL")}
-    except Exception:
-        mapa = {}   # sem mapa, cada chave fica como está (comportamento antigo)
+    mapa = mapa_de_nomes(conn, client_id=client_id)
 
     por_canonica: dict = {}
     grafias: list = []      # (grafia vista na tabela, gaveta canônica dela)
