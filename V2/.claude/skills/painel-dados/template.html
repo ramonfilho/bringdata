@@ -91,6 +91,27 @@
   .prose code{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:1px 5px;color:var(--ink)}
   .foot{margin-top:44px;color:var(--faint);font-size:12px;border-top:1px solid var(--border);padding-top:16px}
   #tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .1s;z-index:9;background:var(--ink);color:var(--surface);font-size:12px;font-family:var(--mono);padding:7px 10px;border-radius:8px;box-shadow:var(--shadow);white-space:nowrap;transform:translate(-50%,-115%)}
+
+/* ==== tabelas do relatorio executivo (recuperado do painel DEV21, 24/08/2026) ==== */
+/* Bloco de CSS de TABELA do relatorio executivo (nao existe no template da skill).
+   A ultima linha e o FIX B: sem ela, .prose b{color:var(--ink)} sobrescreve o verde/vermelho. */
+.tw{overflow-x:auto;border:1px solid var(--line,#dde);border-radius:10px;margin-top:6px}
+.tb{border-collapse:collapse;width:100%;font-size:13.5px;min-width:820px;font-variant-numeric:tabular-nums}
+.tb th{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted,#777);
+  font-weight:700;text-align:right;padding:9px 11px;background:rgba(128,128,128,.09);white-space:nowrap}
+.tb th:first-child,.tb td:first-child{text-align:left}
+.tb td{padding:8px 11px;text-align:right;white-space:nowrap;border-top:1px solid rgba(128,128,128,.18)}
+.tb tr.ag td{font-weight:700;background:rgba(128,128,128,.07)}
+.tb td.pos{color:#1a7f52;font-weight:650} .tb td.neg{color:#b1442f;font-weight:650}
+.tb td.pos b,.tb td.neg b,.tb td.pos i,.tb td.neg i{color:inherit}
+@media (prefers-color-scheme:dark){.tb td.pos{color:#5cc192}.tb td.neg{color:#e08a7a}}
+h4.bl{margin:20px 0 4px;font-size:14px;font-weight:700;letter-spacing:.01em}
+h4.bl span{font-weight:400;font-size:12px;color:var(--muted,#777);margin-left:8px}
+.tb b.ok{color:#1a7f52} .tb .ic{font-size:10.5px;color:var(--muted,#888);white-space:nowrap}
+.tb .ruido{color:var(--muted,#999);font-style:italic;font-size:11.5px}
+.tb th.sp{font-size:9.5px;border-left:1px solid rgba(128,128,128,.28)}
+.tb td.z{color:var(--muted,#bbb);text-align:center}
+@media (prefers-color-scheme:dark){.tb b.ok{color:#5cc192}.tb td.z{color:#555}}
 </style>
 
 <div class="wrap" id="app"></div>
@@ -141,7 +162,10 @@ const SPEC = {
   footer:"Barras = média · hastes = ±1 desvio padrão · gerado com a skill painel-dados."
 };
 
-/* ==== runtime (não precisa mexer) ==== */
+/* ==== runtime (não precisa mexer) — versão CORRIGIDA 24/08/2026: eixo aceita
+   mínimo negativo (y0 + linha do zero), fmtAx com R$ e separador pt-BR, barra
+   negativa desenha a partir do zero com rótulo por baixo, e seção aceita
+   gráfico E prosa juntos (recuperada do painel do DEV21) ==== */
 const SVGNS="http://www.w3.org/2000/svg";
 const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
 const col=c=>!c?"var(--c1)":(c[0]==="#"?c:`var(--${c})`);
@@ -151,25 +175,25 @@ const T=(p,x,y,cls,s,anc="middle")=>{const t=A(p,"text",{x,y,class:cls,"text-anc
 const tip=document.getElementById("tip");
 const hov=(e,html)=>{e.addEventListener("mousemove",ev=>{tip.innerHTML=html;tip.style.opacity=1;tip.style.left=ev.clientX+"px";tip.style.top=ev.clientY+"px";});e.addEventListener("mouseleave",()=>tip.style.opacity=0);};
 const fmt=(v,ch)=>{const d=ch.dec??(ch.unit==="%"?1:0);return (ch.unit==="R$"?"R$":"")+(+v).toFixed(d)+(ch.unit==="%"?"%":"");};
-const fmtAx=(v,ch)=>(ch.unit==="R$"?"R$":"")+v;
-function scale(maxv){let ym=maxv*1.14;const steps=[1,2,5,10,20,25,50,100,200,500,1000];let st=steps.find(s=>ym/s<=5)||1000;ym=Math.ceil(ym/st)*st;const t=[];for(let v=0;v<=ym+1e-6;v+=st)t.push(+v.toFixed(6));return{ym,t};}
+const fmtAx=(v,ch)=>(ch.unit==="R$"?"R$ ":"")+(Math.abs(v)>=1000?v.toLocaleString("pt-BR"):v);
+function scale(maxv,minv){let hi=maxv>0?maxv*1.14:0,lo=(minv==null||minv>=0)?0:minv*1.14;const span=(hi-lo)||1;const mag=Math.pow(10,Math.floor(Math.log10(span/5)));const st=[1,2,2.5,5,10].map(m=>m*mag).find(s=>span/s<=6)||10*mag;hi=Math.ceil(hi/st)*st;lo=Math.floor(lo/st)*st;const t=[];for(let v=lo;v<=hi+1e-6;v+=st)t.push(+v.toFixed(6));return{ym:hi,y0:lo,t};}
 const W=760,H=360,M={t:26,r:14,b:42,l:46},PW=W-M.l-M.r,PH=H-M.t-M.b;
-function axis(s,ym,ticks,ch){const y=v=>M.t+PH*(1-v/ym);ticks.forEach(tk=>{A(s,"line",{x1:M.l,x2:W-M.r,y1:y(tk),y2:y(tk),class:"grid-l"});T(s,M.l-8,y(tk)+3.5,"axis-t",fmtAx(tk,ch),"end");});return y;}
+function axis(s,ym,ticks,ch,y0){y0=y0||0;const y=v=>M.t+PH*(1-(v-y0)/((ym-y0)||1));ticks.forEach(tk=>{A(s,"line",{x1:M.l,x2:W-M.r,y1:y(tk),y2:y(tk),class:"grid-l"});T(s,M.l-8,y(tk)+3.5,"axis-t",fmtAx(tk,ch),"end");});return y;}
 function whisker(s,cx,yt,yb,cap){A(s,"line",{x1:cx,x2:cx,y1:yt,y2:yb,class:"whisk"});A(s,"line",{x1:cx-cap,x2:cx+cap,y1:yt,y2:yt,class:"whisk"});A(s,"line",{x1:cx-cap,x2:cx+cap,y1:yb,y2:yb,class:"whisk"});}
 
 function bars(host,ch){
-  const mx=Math.max(...ch.data.map(d=>d.mean+(d.std||0)));const{ym,t}=scale(mx);const s=svg(W,H);const y=axis(s,ym,t,ch);
+  const mx=Math.max(...ch.data.map(d=>d.mean+(d.std||0)));const mn=Math.min(0,...ch.data.map(d=>d.mean-(d.std||0)));const{ym,y0,t}=scale(mx,mn);const s=svg(W,H);const y=axis(s,ym,t,ch,y0);const yz=y(0);if(y0<0)A(s,"line",{x1:M.l,x2:W-M.r,y1:yz,y2:yz,class:"grid-l",style:"stroke:var(--muted);opacity:.5"});
   const slot=PW/ch.data.length,bw=Math.min(46,slot*0.5);
   ch.data.forEach((d,i)=>{const cx=M.l+slot*(i+.5);
-    const r=A(s,"rect",{x:cx-bw/2,y:y(d.mean),width:bw,height:Math.max(0,M.t+PH-y(d.mean)),rx:4,class:"bar"+(d.partial?" part":""),style:`fill:${col(ch.color)}`});
+    const r=A(s,"rect",{x:cx-bw/2,y:Math.min(y(d.mean),yz),width:bw,height:Math.max(1,Math.abs(y(d.mean)-yz)),rx:4,class:"bar"+(d.partial?" part":""),style:`fill:${col(ch.color)}`});
     hov(r,`<b>${d.label}</b> · ${fmt(d.mean,ch)}${d.std!=null?` · σ ±${d.std}`:""}`);
     if(d.std!=null)whisker(s,cx,y(d.mean+d.std),y(Math.max(0,d.mean-d.std)),6);
-    T(s,cx,y(d.mean+(d.std||0))-7,"vlab",fmt(d.mean,ch));
+    T(s,cx,d.mean>=0?y(d.mean+(d.std||0))-7:y(d.mean)+15,"vlab",fmt(d.mean,ch));
     T(s,cx,H-M.b+20,"xlab"+(d.partial?" part":""),d.label);});
   host.appendChild(s);
 }
 function grouped(host,ch){
-  const mx=Math.max(...ch.groups.flatMap(g=>g.values.map(v=>v.mean+(v.std||0))));const{ym,t}=scale(mx);const s=svg(W,H);const y=axis(s,ym,t,ch);
+  const mx=Math.max(...ch.groups.flatMap(g=>g.values.map(v=>v.mean+(v.std||0))));const{ym,y0,t}=scale(mx);const s=svg(W,H);const y=axis(s,ym,t,ch,y0);
   const n=ch.series.length,slot=PW/ch.groups.length,bw=Math.min(24,slot*0.7/n),gap=3,span=n*bw+(n-1)*gap;
   ch.groups.forEach((g,i)=>{const gc=M.l+slot*(i+.5);
     g.values.forEach((v,j)=>{const cx=gc-span/2+bw/2+j*(bw+gap);
@@ -181,7 +205,7 @@ function grouped(host,ch){
   host.appendChild(s);
 }
 function line(host,ch){
-  const all=ch.series.flatMap(se=>se.points);const{ym,t}=scale(Math.max(...all));const s=svg(W,H);const y=axis(s,ym,t,ch);
+  const all=ch.series.flatMap(se=>se.points);const{ym,y0,t}=scale(Math.max(...all));const s=svg(W,H);const y=axis(s,ym,t,ch,y0);
   const n=ch.xlabels.length,step=PW/(n-1||1),x=i=>M.l+step*i;
   ch.series.forEach(se=>{const c=col(se.color);
     let dpath=se.points.map((p,i)=>(i?"L":"M")+x(i)+" "+y(p)).join(" ");
@@ -210,11 +234,12 @@ function build(){
   if(SPEC.tiles?.length){const g=el("div","tiles");SPEC.tiles.forEach(t=>{
     const d=el("div","tile");d.innerHTML=`<div class="lab"><span class="dot" style="background:${col(t.color)}"></span>${t.label}</div><div class="val"${t.value&&/vol|instáv|crít/i.test(t.value)?' style="color:var(--v)"':''}>${t.value}</div>${t.note?`<div class="note">${t.note}</div>`:""}`;g.appendChild(d);});app.appendChild(g);}
   SPEC.sections.forEach(sec=>{const s=el("section");s.appendChild(el("h2",null,sec.title));if(sec.sub)s.appendChild(el("p","h2sub",sec.sub));
-    if(sec.html){const p=el("div","prose",sec.html);s.appendChild(p);}
-    else{const ch=sec.chart;
+    const ch=sec.chart;
+    if(ch){
       if(ch.type==="grouped"||(ch.type==="line"&&ch.series.length>1)){const lg=el("div","legend");ch.series.forEach(se=>lg.innerHTML+=`<span><span class="dot" style="background:${col(se.color)}"></span>${se.name}</span>`);if(ch.type==="grouped"&&ch.groups.some(g=>g.values.some(v=>v.std!=null)))lg.innerHTML+='<span style="color:var(--faint)">haste = ±1 desvio</span>';s.appendChild(lg);}
       const card=el("div","card");s.appendChild(card);
       ({bars,grouped,line,heat}[ch.type]||(()=>{}))(card,ch);}
+    if(sec.html){const p=el("div","prose",sec.html);s.appendChild(p);}
     app.appendChild(s);});
   if(SPEC.footer)app.appendChild(el("p","foot",SPEC.footer));
 }
