@@ -52,10 +52,12 @@
   :root[data-theme="dark"]{--surface:#16181c;--surface-2:#1f2228;--border:#2c3037;--ink:#e9ebee;--muted:#9aa3ad;--faint:#6b7480;--grid:#282c33;--accent:#8a78ea;--c1:#5b8dff;--c2:#c67d1c;--c3:#1f9c8b;--s:#3fb37f;--m:#d99a35;--v:#e56a6a;--s-bg:#16302440;--m-bg:#33280f60;--v-bg:#3a1e1e60;}
   *{box-sizing:border-box}
   body{margin:0;background:var(--surface);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
-  /* Largura FLUIDA (24/08/2026): a página usa o espaço que a tela der, até 1500px,
-     pra tabela larga sair inteira num print. Gráficos e texto ficam contidos nas
-     larguras de leitura próprias (.card/.tiles/max-width em ch). */
-  .wrap{max-width:1500px;margin:0 auto;padding:40px 24px 64px}
+  /* Largura pela MAIOR TABELA (24/08/2026, 3ª e definitiva): a coluna da página
+     tem a largura natural do conteúdo mais largo (fit-content) e é centrada como
+     bloco. Assim a tabela larga sai INTEIRA no print quando a tela dá espaço, e o
+     resto do conteúdo acompanha a mesma coluna (nada cola na esquerda). Em tela
+     estreita, max-width:100% devolve o scroll horizontal só dentro da tabela. */
+  .wrap{width:fit-content;min-width:min(100%,760px);max-width:100%;margin:0 auto;padding:40px 24px 64px}
   .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:650;margin:0 0 10px}
   h1{font-size:clamp(26px,4vw,38px);line-height:1.1;letter-spacing:-.02em;margin:0 0 12px;text-wrap:balance;font-weight:720}
   .sub{color:var(--muted);font-size:15px;max-width:72ch;margin:0 0 4px}
@@ -89,7 +91,11 @@
   tbody tr+tr td{border-top:1px solid var(--border)}
   .chip{border-radius:7px;font-family:var(--mono);font-weight:640;padding:3px 7px}
   .cv-s{color:var(--s);background:var(--s-bg)} .cv-m{color:var(--m);background:var(--m-bg)} .cv-v{color:var(--v);background:var(--v-bg)}
-  .prose{color:var(--muted);font-size:14.5px;max-width:74ch}
+  /* A trava de 74ch fica nos ELEMENTOS DE TEXTO, não no contêiner: seção html
+     carrega tabela junto da prosa, e o cap no contêiner espremia a tabela a
+     ~674px em qualquer tela (causa-raiz de 3 consertos de largura falharem). */
+  .prose{color:var(--muted);font-size:14.5px}
+  .prose p,.prose ul,.prose ol{max-width:74ch}
   .prose b{color:var(--ink)} .prose li{margin:9px 0}
   .prose code{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:1px 5px;color:var(--ink)}
   .foot{margin-top:44px;color:var(--faint);font-size:12px;border-top:1px solid var(--border);padding-top:16px}
@@ -99,11 +105,15 @@
 /* Bloco de CSS de TABELA do relatorio executivo (nao existe no template da skill).
    A ultima linha e o FIX B: sem ela, .prose b{color:var(--ink)} sobrescreve o verde/vermelho. */
 .tw{overflow-x:auto;border:1px solid var(--line,#dde);border-radius:10px;margin-top:6px}
-.tb{border-collapse:collapse;width:100%;font-size:13.5px;min-width:820px;font-variant-numeric:tabular-nums}
+/* width:max-content é o que faz o fit-content do .wrap FUNCIONAR: largura em % é
+   indeterminada no cálculo intrínseco, então com width:100% a página nunca crescia
+   até a tabela (causa-raiz dos 2 consertos anteriores falharem). min-width:100%
+   mantém a tabela preenchendo quando outra tabela maior alargou a coluna. */
+.tb{border-collapse:collapse;width:max-content;min-width:100%;font-size:13px;font-variant-numeric:tabular-nums}
 .tb th{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted,#777);
   font-weight:700;text-align:right;padding:9px 11px;background:rgba(128,128,128,.09);white-space:nowrap}
 .tb th:first-child,.tb td:first-child{text-align:left}
-.tb td{padding:8px 11px;text-align:right;white-space:nowrap;border-top:1px solid rgba(128,128,128,.18)}
+.tb td{padding:7px 9px;text-align:right;white-space:nowrap;border-top:1px solid rgba(128,128,128,.18)}
 .tb tr.ag td{font-weight:700;background:rgba(128,128,128,.07)}
 .tb td.pos{color:#1a7f52;font-weight:650} .tb td.neg{color:#b1442f;font-weight:650}
 .tb td.pos b,.tb td.neg b,.tb td.pos i,.tb td.neg i{color:inherit}

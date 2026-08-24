@@ -19,6 +19,7 @@ from pathlib import Path
 
 _V2 = Path(__file__).resolve().parents[1]
 TEMPLATE = _V2 / ".claude" / "skills" / "painel-dados" / "template.html"
+ROTULO_GOOGLE = "Google Ads"   # mesmo literal de lancamento_unidades (o contrato ja vem rotulado)
 
 
 def br(v, dec=2, prefixo=""):
@@ -108,7 +109,30 @@ def main() -> int:
     tab_camp = _tab(["Campanha", "Tipo", "Gasto", "Cadastros", "CPL", "Vendas",
                      "Faturamento", "ROAS", "Lucro"], linhas_c)
 
-    # ── tela 3: criativos por tipo (verba + qualidade) ───────────────────────
+    # ── tela 3: criativos por tipo (verba + qualidade + efeito na conversão) ─
+    # Efeito do criativo = quanto o HISTÓRICO dele multiplica a conversão prevista
+    # da unidade: peso×lift + (1−peso). Agregado por (tipo, criativo) e por tipo,
+    # ponderado pelos leads — responde "quanto os criativos influenciaram a % de
+    # conversão da campanha" no lado PREVISTO (o realizado é a coluna Conversão).
+    rot_cid = dict(zip((x["cid"] for x in ca), (x["modelo"] for x in ca)))
+    efeito_cria, efeito_tipo = {}, {}
+    for x in u:
+        mod = ROTULO_GOOGLE if x["canal"] == "google" else rot_cid.get(x["cid"])
+        if mod is None:
+            continue
+        peso = x.get("peso_historico") or 0.0
+        lift = x.get("lift_criativo")
+        mult = (peso * lift + (1 - peso)) if lift is not None else 1.0
+        n = int(x.get("leads_ledger") or 0)
+        for chave, d in ((("c", mod, x["criativo"]), efeito_cria),
+                         (("t", mod), efeito_tipo)):
+            s = d.setdefault(chave, [0.0, 0])
+            s[0] += mult * n
+            s[1] += n
+    def _efeito(d, *k):
+        s = d.get(k)
+        return (s[0] / s[1] - 1.0) if s and s[1] else None
+
     by_mod = {}
     for x in ct:
         if x.get("gasto"):
@@ -118,17 +142,27 @@ def main() -> int:
         xs = sorted(by_mod.get(nome, []), key=lambda x: -x["gasto"])[:5]
         if not xs:
             continue
-        rows = [[x["criativo"][:40], br(x["gasto"], 2, "R$ "),
-                 f"{int(x['leads_ledger']):,}".replace(",", "."), br(x["cpl"], 2, "R$ "),
-                 pct(x.get("pct_d9_d10")),
-                 br(x.get("lift_criativo"), 2) if x.get("lift_criativo") else "<span class='ic'>estreante</span>",
-                 br(x.get("vendas"), 0), br(x.get("faturamento"), 2, "R$ "),
-                 _cor(x.get("lucro"))]
-                for x in xs]
-        blocos.append(f"<h4 class='bl'>{nome}<span>top 5 por verba</span></h4>"
+        rows = []
+        for x in xs:
+            ef = _efeito(efeito_cria, "c", nome, x["criativo"])
+            cel_ef = ("—" if ef is None else
+                      (f"{'+' if ef >= 0 else ''}{br(100 * ef, 1)}%",
+                       "pos" if ef >= 0 else "neg"))
+            rows.append([x["criativo"][:34], br(x["gasto"], 2, "R$ "),
+                         f"{int(x['leads_ledger']):,}".replace(",", "."),
+                         br(x["cpl"], 2, "R$ "), pct(x.get("pct_d9_d10")),
+                         br(x.get("lift_criativo"), 2) if x.get("lift_criativo")
+                         else "<span class='ic'>estreante</span>",
+                         cel_ef, br(x.get("vendas"), 0),
+                         br(x.get("faturamento"), 2, "R$ "), _cor(x.get("lucro"))])
+        ef_t = _efeito(efeito_tipo, "t", nome)
+        puxada = (f" · os criativos puxaram a conversão prevista do tipo em "
+                  f"<b>{'+' if ef_t >= 0 else ''}{br(100 * ef_t, 1)}%</b>"
+                  if ef_t is not None else "")
+        blocos.append(f"<h4 class='bl'>{nome}<span>top 5 por verba{puxada}</span></h4>"
                       + _tab(["Criativo", "Gasto", "Leads", "CPL", "% notas 9-10",
-                              "Nota histórica (lift)", "Vendas", "Faturamento",
-                              "Lucro"], rows))
+                              "Nota histórica (lift)", "Efeito na conversão",
+                              "Vendas", "Faturamento", "Lucro"], rows))
     tela3 = "".join(blocos)
 
     # ── tela 4: teto (dentro vs acima) ───────────────────────────────────────
@@ -143,6 +177,14 @@ def main() -> int:
                        br(b.get("roas_positivo"), 0)])
     tab_teto = _tab(["", "Unidades", "Gasto", "Leads", "Vendas", "ROAS",
                      "Lucro", "Bateu a meta*", "Lucro > R$ 1.000", "Deu lucro"], rows_j)
+    # A régua alternativa pedida (meta 1,5): o teto publicado usa alvo 2,0, então
+    # meta 1,5 equivale a teto ×(2,0/1,5). Mesmas unidades julgáveis.
+    uj = [x for x in u if x.get("no_corte") and x.get("dentro_do_teto") is not None]
+    d15 = [x for x in uj if x["cpl"] <= x["teto"] * (2.0 / 1.5)]
+    g15 = sum(x.get("gasto") or 0 for x in d15)
+    tab_teto += (f"<p class='h2sub' style='margin-top:10px'>Com meta de ROAS <b>1,5</b> "
+                 f"(teto ×1,33): <b>{len(d15)}</b> de {len(uj)} unidades dentro, "
+                 f"R$ {br(g15, 2)} de gasto.</p>")
 
     # ── telas 5 e 6: menor CPL e ranking ─────────────────────────────────────
     um = [x for x in u if x.get("cpl") is not None and (x.get("leads_ledger") or 0) >= 100]
