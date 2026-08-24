@@ -104,8 +104,12 @@ for GMIN, LMIN in PISOS:
         g_total = serie[-1][1]
         apos = sub[sub["dia"] > dstar]
         vend = apos[apos["converted"].fillna(False)]
+        l_star = next(l for (d, g, l, *_ ) in serie if d == dstar)
+        cpl_star = next(cc for (d, g, l, cc, _dt) in serie if d == dstar)
         res.append(dict(cid=unit[0], criativo=unit[1], teto=round(teto, 2), dstar=str(dstar),
-                        gasto_no_sinal=round(g_star), gasto_apos=round(g_total - g_star),
+                        gasto_no_sinal=round(g_star), leads_no_sinal=int(l_star),
+                        cpl_no_sinal=round(cpl_star, 2) if cpl_star else None,
+                        gasto_apos=round(g_total - g_star),
                         leads_apos=int(len(apos)), vendas_apos=int(len(vend)),
                         fat_apos=round(float(vend["sale_value"].sum())), voltou=volta))
     res.sort(key=lambda r: -r["gasto_apos"])
