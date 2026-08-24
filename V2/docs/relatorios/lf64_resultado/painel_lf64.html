@@ -1,0 +1,268 @@
+<!--
+  PAINEL-DADOS: template declarativo reutilizável.
+  Para um painel novo: NÃO reescreva o runtime. Só edite o objeto SPEC lá embaixo
+  e publique este arquivo com a ferramenta Artifact.
+
+  SPEC = {
+    eyebrow, title, subtitle(html), source,
+    tiles: [{color, label, value, note}],
+    sections: [
+      { title, sub, chart: {                       // gráfico de barras (1 série)
+          type:'bars', unit:'%'|'R$'|'', dec, color:'accent'|'c1'|'#hex',
+          data:[{label, mean, std?, partial?}] } },
+      { title, sub, chart: {                        // barras agrupadas (N séries)
+          type:'grouped', unit, dec,
+          series:[{name, color}],                   // 2-3; cores c1/c2/c3
+          groups:[{label, values:[{mean,std?}], partial?}] } },
+      { title, sub, chart: {                        // linha (série temporal / ordinal)
+          type:'line', unit, dec,
+          xlabels:[...], series:[{name, color, points:[num,...]}] } },
+      { title, sub, chart: {                        // tabela-mapa (heatmap por bucket)
+          type:'heat', unit, dec, cols:[...],
+          rows:[{label, values:[num,...]}],
+          buckets:[{lt:8,cls:'s'},{lt:20,cls:'m'},{cls:'v'}] } },  // s=verde m=amarelo v=vermelho
+      { title, sub, html:'<p>...</p>' }             // seção de prosa livre
+    ],
+    footer
+  }
+  Regras: 1 eixo por gráfico; hues categóricas em ordem fixa (c1,c2,c3), nunca cicladas;
+  legenda quando >=2 séries; hastes = ±1 desvio (passe std) pra mostrar estabilidade;
+  cores já validadas (CVD) em light e dark. Para 4+ séries, rode o validador do /dataviz.
+-->
+<style>
+  :root{
+    --surface:#fcfcfb; --surface-2:#f4f4f1; --border:#e5e4df;
+    --ink:#1b2128; --muted:#5c6672; --faint:#8a929c; --grid:#e8e7e2;
+    --accent:#6d54d9; --c1:#2f6df0; --c2:#e08a1e; --c3:#0f9d8f;
+    --s:#2f9e6a; --m:#c8871b; --v:#d64545;
+    --s-bg:#e5f3ec; --m-bg:#f7edda; --v-bg:#f7e2e2;
+    --shadow:0 1px 2px rgba(20,25,32,.05),0 4px 16px rgba(20,25,32,.04);
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --surface:#16181c; --surface-2:#1f2228; --border:#2c3037;
+    --ink:#e9ebee; --muted:#9aa3ad; --faint:#6b7480; --grid:#282c33;
+    --accent:#8a78ea; --c1:#5b8dff; --c2:#c67d1c; --c3:#1f9c8b;
+    --s:#3fb37f; --m:#d99a35; --v:#e56a6a;
+    --s-bg:#16302440; --m-bg:#33280f60; --v-bg:#3a1e1e60;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);
+  }}
+  :root[data-theme="light"]{--surface:#fcfcfb;--surface-2:#f4f4f1;--border:#e5e4df;--ink:#1b2128;--muted:#5c6672;--faint:#8a929c;--grid:#e8e7e2;--accent:#6d54d9;--c1:#2f6df0;--c2:#e08a1e;--c3:#0f9d8f;--s:#2f9e6a;--m:#c8871b;--v:#d64545;--s-bg:#e5f3ec;--m-bg:#f7edda;--v-bg:#f7e2e2;}
+  :root[data-theme="dark"]{--surface:#16181c;--surface-2:#1f2228;--border:#2c3037;--ink:#e9ebee;--muted:#9aa3ad;--faint:#6b7480;--grid:#282c33;--accent:#8a78ea;--c1:#5b8dff;--c2:#c67d1c;--c3:#1f9c8b;--s:#3fb37f;--m:#d99a35;--v:#e56a6a;--s-bg:#16302440;--m-bg:#33280f60;--v-bg:#3a1e1e60;}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--surface);color:var(--ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:960px;margin:0 auto;padding:40px 24px 64px}
+  .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:650;margin:0 0 10px}
+  h1{font-size:clamp(26px,4vw,38px);line-height:1.1;letter-spacing:-.02em;margin:0 0 12px;text-wrap:balance;font-weight:720}
+  .sub{color:var(--muted);font-size:15px;max-width:72ch;margin:0 0 4px}
+  .sub b{color:var(--ink);font-weight:620}
+  .src{margin-top:6px;font-size:13px;color:var(--faint)}
+  .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:30px 0 8px}
+  .tile{background:var(--surface-2);border:1px solid var(--border);border-radius:14px;padding:18px;box-shadow:var(--shadow)}
+  .tile .lab{font-size:12.5px;color:var(--muted);font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:7px}
+  .tile .val{font-size:26px;font-weight:730;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
+  .tile .note{font-size:12.5px;color:var(--faint);margin-top:5px}
+  .dot{width:9px;height:9px;border-radius:3px;display:inline-block;flex:none}
+  section{margin-top:40px}
+  h2{font-size:19px;font-weight:680;letter-spacing:-.01em;margin:0 0 4px}
+  .h2sub{color:var(--muted);font-size:13.5px;margin:0 0 16px;max-width:74ch}
+  .card{background:var(--surface-2);border:1px solid var(--border);border-radius:16px;padding:22px 20px 14px;box-shadow:var(--shadow);overflow-x:auto}
+  .legend{display:flex;gap:18px;flex-wrap:wrap;margin:0 4px 12px;font-size:13px;color:var(--muted)}
+  .legend span{display:inline-flex;align-items:center;gap:7px}
+  svg{display:block;width:100%;height:auto;min-width:520px}
+  .grid-l{stroke:var(--grid);stroke-width:1}
+  .axis-t{fill:var(--faint);font-size:11px;font-family:var(--mono)}
+  .xlab{fill:var(--muted);font-size:12.5px;font-weight:600;font-family:var(--sans)}
+  .xlab.part{fill:var(--faint)}
+  .vlab{fill:var(--ink);font-size:11.5px;font-weight:640;font-family:var(--mono)}
+  .whisk{stroke:var(--ink);stroke-width:1.6;opacity:.5}
+  .bar{cursor:pointer} .bar.part{opacity:.42}
+  .mk{stroke:var(--surface);stroke-width:2}
+  table{border-collapse:collapse;width:100%;font-size:13px;min-width:520px}
+  th,td{padding:9px 10px;text-align:center;font-variant-numeric:tabular-nums}
+  th{color:var(--muted);font-weight:600;font-size:12px;border-bottom:1px solid var(--border)}
+  td.metric{text-align:left;color:var(--ink);font-weight:600;white-space:nowrap}
+  tbody tr+tr td{border-top:1px solid var(--border)}
+  .chip{border-radius:7px;font-family:var(--mono);font-weight:640;padding:3px 7px}
+  .cv-s{color:var(--s);background:var(--s-bg)} .cv-m{color:var(--m);background:var(--m-bg)} .cv-v{color:var(--v);background:var(--v-bg)}
+  .prose{color:var(--muted);font-size:14.5px;max-width:74ch}
+  .prose b{color:var(--ink)} .prose li{margin:9px 0}
+  .prose code{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:1px 5px;color:var(--ink)}
+  .foot{margin-top:44px;color:var(--faint);font-size:12px;border-top:1px solid var(--border);padding-top:16px}
+  #tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .1s;z-index:9;background:var(--ink);color:var(--surface);font-size:12px;font-family:var(--mono);padding:7px 10px;border-radius:8px;box-shadow:var(--shadow);white-space:nowrap;transform:translate(-50%,-115%)}
+
+/* ==== tabelas do relatorio executivo (recuperado do painel DEV21, 24/08/2026) ==== */
+/* Bloco de CSS de TABELA do relatorio executivo (nao existe no template da skill).
+   A ultima linha e o FIX B: sem ela, .prose b{color:var(--ink)} sobrescreve o verde/vermelho. */
+.tw{overflow-x:auto;border:1px solid var(--line,#dde);border-radius:10px;margin-top:6px}
+.tb{border-collapse:collapse;width:100%;font-size:13.5px;min-width:820px;font-variant-numeric:tabular-nums}
+.tb th{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted,#777);
+  font-weight:700;text-align:right;padding:9px 11px;background:rgba(128,128,128,.09);white-space:nowrap}
+.tb th:first-child,.tb td:first-child{text-align:left}
+.tb td{padding:8px 11px;text-align:right;white-space:nowrap;border-top:1px solid rgba(128,128,128,.18)}
+.tb tr.ag td{font-weight:700;background:rgba(128,128,128,.07)}
+.tb td.pos{color:#1a7f52;font-weight:650} .tb td.neg{color:#b1442f;font-weight:650}
+.tb td.pos b,.tb td.neg b,.tb td.pos i,.tb td.neg i{color:inherit}
+@media (prefers-color-scheme:dark){.tb td.pos{color:#5cc192}.tb td.neg{color:#e08a7a}}
+h4.bl{margin:20px 0 4px;font-size:14px;font-weight:700;letter-spacing:.01em}
+h4.bl span{font-weight:400;font-size:12px;color:var(--muted,#777);margin-left:8px}
+.tb b.ok{color:#1a7f52} .tb .ic{font-size:10.5px;color:var(--muted,#888);white-space:nowrap}
+.tb .ruido{color:var(--muted,#999);font-style:italic;font-size:11.5px}
+.tb th.sp{font-size:9.5px;border-left:1px solid rgba(128,128,128,.28)}
+.tb td.z{color:var(--muted,#bbb);text-align:center}
+@media (prefers-color-scheme:dark){.tb b.ok{color:#5cc192}.tb td.z{color:#555}}
+</style>
+
+<div class="wrap" id="app"></div>
+<div id="tip"></div>
+
+<script>
+/* ==== SPEC: edite só isto para um painel novo (exemplo abaixo = qualidade por LF) ==== */
+const SPEC = {
+ "eyebrow": "DevClub · Lançamento LF64 · captação 07/08 a 17/08 · carrinho 24/08 a 30/08",
+ "title": "Painel do LF64",
+ "subtitle": "O mesmo relatório do DEV21, agora por máquina: um comando gera, o mesmo comando atualiza. Estado: <b>venda aberta</b>.",
+ "source": "Contrato congelado em 2026-08-24 09:06 · referência 2026-08-24T06:32 · régua 5d158f0a (abr_28) · 96,9% do gasto Meta casado por anúncio",
+ "tiles": [
+  {
+   "color": "c1",
+   "label": "Investimento total",
+   "value": "R$ 89.371",
+   "note": "Meta com imposto (×1,13) + Google."
+  },
+  {
+   "color": "accent",
+   "label": "Cadastros",
+   "value": "10.193",
+   "note": "CPL geral R$ 8,77 por cadastro."
+  },
+  {
+   "color": "c2",
+   "label": "Vendas",
+   "value": "aguardando",
+   "note": "Carrinho abriu hoje; preenche na próxima rodada."
+  }
+ ],
+ "sections": [
+  {
+   "title": "1 · Onde o dinheiro foi — por tipo de campanha",
+   "sub": "Tipo = o MODELO que escolhe o público da campanha (identidade estável, mesmo com os nomes novos da equipe de tráfego).",
+   "html": "<div class='tw'><table class='tb'><thead><tr><th>Tipo de campanha</th><th>Camp.</th><th>Gasto</th><th>Cadastros</th><th>CPL</th><th>Vendas</th><th>Faturamento</th><th>ROAS</th><th>Lucro</th></tr></thead><tbody><tr class=''><td><b>Lead Padrão (Meta)</b></td><td>25</td><td>R$ 38.719,26</td><td>5.385</td><td>R$ 7,19</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td><b>Challenger (jul_24)</b></td><td>11</td><td>R$ 34.140,62</td><td>2.710</td><td>R$ 12,60</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td><b>Google Ads</b></td><td>1</td><td>R$ 11.186,79</td><td>1.401</td><td>R$ 7,98</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td><b>Champion (abr_28)</b></td><td>3</td><td>R$ 5.324,35</td><td>375</td><td>R$ 14,20</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td><b>Orgânico/Outro</b></td><td>1</td><td>R$ 0,00</td><td>322</td><td>R$ 0,00</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class='ag'><td><b>TOTAL</b></td><td>41</td><td>R$ 89.371,02</td><td>10.193</td><td>R$ 8,77</td><td>—</td><td>—</td><td>—</td><td>—</td></tr></tbody></table></div><p><i>Carrinho aberto em 24/08. As colunas de vendas, faturamento, ROAS e lucro preenchem sozinhas na próxima rodada deste mesmo relatório, quando as vendas caírem — traço (—) significa \"ainda não medido\", nunca zero.</i></p>"
+  },
+  {
+   "title": "2 · Campanha a campanha (top 15 por gasto)",
+   "sub": "As mesmas colunas do debriefing: gasto, cadastros, CPL, vendas, ROAS e lucro.",
+   "html": "<div class='tw'><table class='tb'><thead><tr><th>Campanha</th><th>Tipo</th><th>Gasto</th><th>Cadastros</th><th>CPL</th><th>Vendas</th><th>Faturamento</th><th>ROAS</th><th>Lucro</th></tr></thead><tbody><tr class=''><td>Google Ads (agregado)</td><td>Google Ads</td><td>R$ 11.186,79</td><td>1.401</td><td>R$ 7,98</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td>[DEVLF][CAP][LEADS][FRIO][CBO][AUT][09.08][TES</td><td>Lead Padrão (Meta)</td><td>R$ 7.603,28</td><td>1.082</td><td>R$ 7,03</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td>[26][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Challenger (jul_24)</td><td>R$ 6.459,79</td><td>524</td><td>R$ 12,33</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td>[17][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Challenger (jul_24)</td><td>R$ 6.454,39</td><td>630</td><td>R$ 10,25</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td>[19][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Challenger (jul_24)</td><td>R$ 5.206,25</td><td>397</td><td>R$ 13,11</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td>[25][DEVLF][CAP][LEADS][FRIO][CBO][AUT][09.08]</td><td>Lead Padrão (Meta)</td><td>R$ 4.704,08</td><td>631</td><td>R$ 7,45</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td>[26][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Lead Padrão (Meta)</td><td>R$ 4.611,60</td><td>601</td><td>R$ 7,67</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td>[17][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Challenger (jul_24)</td><td>R$ 4.535,30</td><td>357</td><td>R$ 12,70</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td>[18][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Champion (abr_28)</td><td>R$ 4.341,87</td><td>321</td><td>R$ 13,53</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td>[23][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Lead Padrão (Meta)</td><td>R$ 3.975,46</td><td>837</td><td>R$ 4,75</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td>[24][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Lead Padrão (Meta)</td><td>R$ 3.557,83</td><td>466</td><td>R$ 7,63</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td>[20][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Lead Padrão (Meta)</td><td>R$ 3.248,44</td><td>378</td><td>R$ 8,59</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td>[21][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Lead Padrão (Meta)</td><td>R$ 3.239,30</td><td>472</td><td>R$ 6,86</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td>[22][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Lead Padrão (Meta)</td><td>R$ 3.164,90</td><td>506</td><td>R$ 6,25</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td>[17][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABER</td><td>Challenger (jul_24)</td><td>R$ 3.118,65</td><td>244</td><td>R$ 12,78</td><td>—</td><td>—</td><td>—</td><td>—</td></tr></tbody></table></div>"
+  },
+  {
+   "title": "3 · Criativos: quem levou a verba em cada tipo de campanha",
+   "sub": "O mesmo criativo muda de qualidade conforme o público que a campanha compra — \"% notas 9-10\" é a fração de leads no topo da régua do modelo.",
+   "html": "<h4 class='bl'>Lead Padrão (Meta)<span>top 5 por verba</span></h4><div class='tw'><table class='tb'><thead><tr><th>Criativo</th><th>Gasto</th><th>Leads</th><th>CPL</th><th>% notas 9-10</th><th>Nota histórica (lift)</th><th>Conversão</th></tr></thead><tbody><tr class=''><td>dev-ad0160 - vid - captação</td><td>R$ 13.393,91</td><td>1.758</td><td>R$ 7,62</td><td>15,9%</td><td>1,33</td><td>—</td></tr><tr class=''><td>dev-ad0156 - vid - captação</td><td>R$ 7.619,49</td><td>694</td><td>R$ 10,98</td><td>9,5%</td><td>1,08</td><td>—</td></tr><tr class=''><td>dev-ad0154-vid-captação-v0-sem luz</td><td>R$ 4.738,64</td><td>288</td><td>R$ 16,45</td><td>3,2%</td><td>2,96</td><td>—</td></tr><tr class=''><td>dev-ad0027-vid-captação-v0-dev</td><td>R$ 2.383,07</td><td>286</td><td>R$ 8,33</td><td>5,7%</td><td>1,05</td><td>—</td></tr><tr class=''><td>dev-ad01--vid-captação-saiu-na-band onte</td><td>R$ 2.312,74</td><td>429</td><td>R$ 5,39</td><td>9,6%</td><td><span class='ic'>estreante</span></td><td>—</td></tr></tbody></table></div><h4 class='bl'>Challenger (jul_24)<span>top 5 por verba</span></h4><div class='tw'><table class='tb'><thead><tr><th>Criativo</th><th>Gasto</th><th>Leads</th><th>CPL</th><th>% notas 9-10</th><th>Nota histórica (lift)</th><th>Conversão</th></tr></thead><tbody><tr class=''><td>dev-ad0160 - vid - captação</td><td>R$ 21.664,24</td><td>1.589</td><td>R$ 13,63</td><td>34,4%</td><td>1,33</td><td>—</td></tr><tr class=''><td>dev-ad0154-vid-captação-v0-sem luz</td><td>R$ 5.203,93</td><td>308</td><td>R$ 16,90</td><td>16,9%</td><td>2,96</td><td>—</td></tr><tr class=''><td>dev-ad0128-vid-captação-v0-papel — cópia</td><td>R$ 2.439,05</td><td>118</td><td>R$ 20,67</td><td>26,9%</td><td><span class='ic'>estreante</span></td><td>—</td></tr><tr class=''><td>dev-ad0150-vid-captação-v0-estão pagando</td><td>R$ 1.058,41</td><td>113</td><td>R$ 9,37</td><td>31,1%</td><td>0,74</td><td>—</td></tr><tr class=''><td>dev-ad0156 - vid - captação</td><td>R$ 1.057,65</td><td>59</td><td>R$ 17,93</td><td>32,7%</td><td>1,08</td><td>—</td></tr></tbody></table></div><h4 class='bl'>Champion (abr_28)<span>top 5 por verba</span></h4><div class='tw'><table class='tb'><thead><tr><th>Criativo</th><th>Gasto</th><th>Leads</th><th>CPL</th><th>% notas 9-10</th><th>Nota histórica (lift)</th><th>Conversão</th></tr></thead><tbody><tr class=''><td>dev-ad0160 - vid - captação</td><td>R$ 3.894,16</td><td>273</td><td>R$ 14,26</td><td>48,0%</td><td>1,33</td><td>—</td></tr><tr class=''><td>dev-ad0128-vid-captação-v0-papel — cópia</td><td>R$ 598,00</td><td>32</td><td>R$ 18,69</td><td>31,0%</td><td><span class='ic'>estreante</span></td><td>—</td></tr><tr class=''><td>dev-ad0156 - vid - captação</td><td>R$ 486,46</td><td>27</td><td>R$ 18,02</td><td>35,9%</td><td>1,08</td><td>—</td></tr><tr class=''><td>dev-ad0154-vid-captação-v0-sem luz</td><td>R$ 129,67</td><td>2</td><td>R$ 64,83</td><td>50,0%</td><td>2,96</td><td>—</td></tr><tr class=''><td>dev-ad0138-vid-captação-v0-podcast</td><td>R$ 33,31</td><td>1</td><td>R$ 33,31</td><td>100,0%</td><td>1,40</td><td>—</td></tr></tbody></table></div>"
+  },
+  {
+   "title": "4 · Teto de CPL — PREVISÃO — o julgamento fecha quando as vendas caírem",
+   "sub": "Unidade = criativo×campanha com ≥100 leads e ≥R$ 300 de gasto. *Meta = ROAS 2,0 com tolerância de 2% (um 1,97 conta).",
+   "html": "<div class='tw'><table class='tb'><thead><tr><th></th><th>Unidades</th><th>Gasto</th><th>Leads</th><th>Vendas</th><th>ROAS</th><th>Lucro</th><th>Bateu a meta*</th><th>Lucro > R$ 1.000</th><th>Deu lucro</th></tr></thead><tbody><tr class=''><td><b>Respeitaram o teto</b></td><td>1</td><td>R$ 784,85</td><td>113</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr><tr class=''><td><b>Estouraram o teto</b></td><td>21</td><td>R$ 54.175,45</td><td>5.172</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td><td>—</td></tr></tbody></table></div>"
+  },
+  {
+   "title": "5 · Os criativos de menor custo por lead",
+   "sub": "Barato não é sinônimo de dentro do teto: a folga compara o CPL com o teto DAQUELA unidade (folga negativa = pagando acima do que a qualidade sustenta).",
+   "html": "<div class='tw'><table class='tb'><thead><tr><th>Criativo</th><th>Campanha</th><th>CPL</th><th>Teto</th><th>Folga</th><th>Leads</th><th>% notas 9-10</th></tr></thead><tbody><tr class=''><td>dev-ad01--vid-captação-saiu-na-band on</td><td>[23][DEVLF][CAP][LEADS][SITE][</td><td>R$ 5,39</td><td>R$ 4,72</td><td class='neg'>R$ -0,68</td><td>429</td><td>9,6%</td></tr><tr class=''><td>dev-ad0150-vid-captação-v0-estão pagan</td><td>[21][DEVLF][CAP][LEADS][SITE][</td><td>R$ 5,93</td><td>R$ 3,35</td><td class='neg'>R$ -2,58</td><td>104</td><td>6,7%</td></tr><tr class=''><td>dev-ad0150-vid-captação-v0-estão pagan</td><td>[22][DEVLF][CAP][LEADS][SITE][</td><td>R$ 6,59</td><td>R$ 3,24</td><td class='neg'>R$ -3,35</td><td>160</td><td>7,5%</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>[21][DEVLF][CAP][LEADS][SITE][</td><td>R$ 6,95</td><td>R$ 7,34</td><td class='pos'>R$ 0,40</td><td>113</td><td>16,8%</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>[26][DEVLF][CAP][LEADS][SITE][</td><td>R$ 7,16</td><td>R$ 6,77</td><td class='neg'>R$ -0,39</td><td>265</td><td>12,8%</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>[DEVLF][CAP][LEADS][FRIO][CBO]</td><td>R$ 7,44</td><td>R$ 7,15</td><td class='neg'>R$ -0,30</td><td>753</td><td>14,1%</td></tr><tr class=''><td>dev-ad0027-vid-captação-v0-dev</td><td>[24][DEVLF][CAP][LEADS][SITE][</td><td>R$ 7,78</td><td>R$ 4,78</td><td class='neg'>R$ -3,00</td><td>147</td><td>10,2%</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>[25][DEVLF][CAP][LEADS][FRIO][</td><td>R$ 8,11</td><td>R$ 6,65</td><td class='neg'>R$ -1,46</td><td>346</td><td>12,7%</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>[22][DEVLF][CAP][LEADS][SITE][</td><td>R$ 8,96</td><td>R$ 5,75</td><td class='neg'>R$ -3,21</td><td>194</td><td>6,2%</td></tr><tr class=''><td>dev-ad0156 - vid - captação</td><td>[26][DEVLF][CAP][LEADS][SITE][</td><td>R$ 9,11</td><td>R$ 4,89</td><td class='neg'>R$ -4,22</td><td>100</td><td>7,0%</td></tr></tbody></table></div>"
+  },
+  {
+   "title": "6 · Ranking — por folga, enquanto não há lucro para ordenar",
+   "sub": "Sem venda ingerida a coluna de lucro fica vazia; a ordem provisória é a folga (quem mais respeita o teto). A rodada com vendas reordena por lucro.",
+   "html": "<div class='tw'><table class='tb'><thead><tr><th>Criativo</th><th>Campanha</th><th>Gasto</th><th>CPL</th><th>Folga</th><th>Faturamento</th><th>Lucro</th></tr></thead><tbody><tr class=''><td>dev-ad0160 - vid - captação</td><td>[21][DEVLF][CAP][LEADS][SITE][</td><td>R$ 784,85</td><td>R$ 6,95</td><td class='pos'>R$ 0,40</td><td>—</td><td>—</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>[DEVLF][CAP][LEADS][FRIO][CBO]</td><td>R$ 5.604,08</td><td>R$ 7,44</td><td class='neg'>R$ -0,30</td><td>—</td><td>—</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>[26][DEVLF][CAP][LEADS][SITE][</td><td>R$ 1.897,39</td><td>R$ 7,16</td><td class='neg'>R$ -0,39</td><td>—</td><td>—</td></tr><tr class=''><td>dev-ad01--vid-captação-saiu-na-band on</td><td>[23][DEVLF][CAP][LEADS][SITE][</td><td>R$ 2.312,74</td><td>R$ 5,39</td><td class='neg'>R$ -0,68</td><td>—</td><td>—</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>[25][DEVLF][CAP][LEADS][FRIO][</td><td>R$ 2.806,83</td><td>R$ 8,11</td><td class='neg'>R$ -1,46</td><td>—</td><td>—</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>[17][DEVLF][CAP][LEADS][SITE][</td><td>R$ 6.126,49</td><td>R$ 11,87</td><td class='neg'>R$ -2,10</td><td>—</td><td>—</td></tr><tr class=''><td>dev-ad0150-vid-captação-v0-estão pagan</td><td>[21][DEVLF][CAP][LEADS][SITE][</td><td>R$ 616,52</td><td>R$ 5,93</td><td class='neg'>R$ -2,58</td><td>—</td><td>—</td></tr><tr class=''><td>dev-ad0027-vid-captação-v0-dev</td><td>[24][DEVLF][CAP][LEADS][SITE][</td><td>R$ 1.143,56</td><td>R$ 7,78</td><td class='neg'>R$ -3,00</td><td>—</td><td>—</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>[22][DEVLF][CAP][LEADS][SITE][</td><td>R$ 1.738,84</td><td>R$ 8,96</td><td class='neg'>R$ -3,21</td><td>—</td><td>—</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>[18][DEVLF][CAP][LEADS][SITE][</td><td>R$ 3.451,17</td><td>R$ 14,26</td><td class='neg'>R$ -3,32</td><td>—</td><td>—</td></tr><tr class=''><td>dev-ad0150-vid-captação-v0-estão pagan</td><td>[22][DEVLF][CAP][LEADS][SITE][</td><td>R$ 1.055,16</td><td>R$ 6,59</td><td class='neg'>R$ -3,35</td><td>—</td><td>—</td></tr><tr class=''><td>dev-ad0160 - vid - captação</td><td>[17][DEVLF][CAP][LEADS][SITE][</td><td>R$ 2.922,72</td><td>R$ 13,79</td><td class='neg'>R$ -3,65</td><td>—</td><td>—</td></tr></tbody></table></div>"
+  },
+  {
+   "title": "7 · Régua e cobertura (o carimbo desta rodada)",
+   "html": "<ul><li><b>Âncora do teto:</b> a referência que a produção serve hoje (2026-08-24T06:32), fator de rastreamento 1,2312 (tracking), crédito do não-respondente 0,4102. O payload inteiro está congelado no contrato — o número não muda se a tabela viva for reescrita.</li><li><b>Histórico de criativo point-in-time:</b> só lançamentos fechados antes de 07/08 (485 criativos) — o lançamento anterior não contamina o teto deste.</li><li><b>Cobertura:</b> 96,9% do gasto Meta casado por anúncio; 175 cadastros sem criativo e 107 com macro quebrada ficam em baldes nomeados; 0 ids sem nome.</li><li><b>Boleto</b> conta 50% no faturamento; gasto Meta com imposto ×1,13; devolvidos: 0 (debriefing ainda não existe).</li><li><b>Comparabilidade:</b> os números do teto desta rodada usam a régua de produção de hoje (crédito medido) e <b>não</b> são comparáveis ao 1,73x publicado do DEV21, que foi certificado com crédito 1,00.</li></ul>"
+  }
+ ],
+ "footer": "Gerado do contrato.json por render_painel_lancamento.py · 2026-08-24 09:06 · traço (—) = ainda não medido"
+};
+
+/* ==== runtime (não precisa mexer) — versão CORRIGIDA 24/08/2026: eixo aceita
+   mínimo negativo (y0 + linha do zero), fmtAx com R$ e separador pt-BR, barra
+   negativa desenha a partir do zero com rótulo por baixo, e seção aceita
+   gráfico E prosa juntos (recuperada do painel do DEV21) ==== */
+const SVGNS="http://www.w3.org/2000/svg";
+const el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e;};
+const col=c=>!c?"var(--c1)":(c[0]==="#"?c:`var(--${c})`);
+const svg=(w,h)=>{const s=document.createElementNS(SVGNS,"svg");s.setAttribute("viewBox",`0 0 ${w} ${h}`);s.setAttribute("role","img");return s;};
+const A=(p,t,at)=>{const e=document.createElementNS(SVGNS,t);for(const k in at)e.setAttribute(k,at[k]);p.appendChild(e);return e;};
+const T=(p,x,y,cls,s,anc="middle")=>{const t=A(p,"text",{x,y,class:cls,"text-anchor":anc});t.textContent=s;return t;};
+const tip=document.getElementById("tip");
+const hov=(e,html)=>{e.addEventListener("mousemove",ev=>{tip.innerHTML=html;tip.style.opacity=1;tip.style.left=ev.clientX+"px";tip.style.top=ev.clientY+"px";});e.addEventListener("mouseleave",()=>tip.style.opacity=0);};
+const fmt=(v,ch)=>{const d=ch.dec??(ch.unit==="%"?1:0);return (ch.unit==="R$"?"R$":"")+(+v).toFixed(d)+(ch.unit==="%"?"%":"");};
+const fmtAx=(v,ch)=>(ch.unit==="R$"?"R$ ":"")+(Math.abs(v)>=1000?v.toLocaleString("pt-BR"):v);
+function scale(maxv,minv){let hi=maxv>0?maxv*1.14:0,lo=(minv==null||minv>=0)?0:minv*1.14;const span=(hi-lo)||1;const mag=Math.pow(10,Math.floor(Math.log10(span/5)));const st=[1,2,2.5,5,10].map(m=>m*mag).find(s=>span/s<=6)||10*mag;hi=Math.ceil(hi/st)*st;lo=Math.floor(lo/st)*st;const t=[];for(let v=lo;v<=hi+1e-6;v+=st)t.push(+v.toFixed(6));return{ym:hi,y0:lo,t};}
+const W=760,H=360,M={t:26,r:14,b:42,l:46},PW=W-M.l-M.r,PH=H-M.t-M.b;
+function axis(s,ym,ticks,ch,y0){y0=y0||0;const y=v=>M.t+PH*(1-(v-y0)/((ym-y0)||1));ticks.forEach(tk=>{A(s,"line",{x1:M.l,x2:W-M.r,y1:y(tk),y2:y(tk),class:"grid-l"});T(s,M.l-8,y(tk)+3.5,"axis-t",fmtAx(tk,ch),"end");});return y;}
+function whisker(s,cx,yt,yb,cap){A(s,"line",{x1:cx,x2:cx,y1:yt,y2:yb,class:"whisk"});A(s,"line",{x1:cx-cap,x2:cx+cap,y1:yt,y2:yt,class:"whisk"});A(s,"line",{x1:cx-cap,x2:cx+cap,y1:yb,y2:yb,class:"whisk"});}
+
+function bars(host,ch){
+  const mx=Math.max(...ch.data.map(d=>d.mean+(d.std||0)));const mn=Math.min(0,...ch.data.map(d=>d.mean-(d.std||0)));const{ym,y0,t}=scale(mx,mn);const s=svg(W,H);const y=axis(s,ym,t,ch,y0);const yz=y(0);if(y0<0)A(s,"line",{x1:M.l,x2:W-M.r,y1:yz,y2:yz,class:"grid-l",style:"stroke:var(--muted);opacity:.5"});
+  const slot=PW/ch.data.length,bw=Math.min(46,slot*0.5);
+  ch.data.forEach((d,i)=>{const cx=M.l+slot*(i+.5);
+    const r=A(s,"rect",{x:cx-bw/2,y:Math.min(y(d.mean),yz),width:bw,height:Math.max(1,Math.abs(y(d.mean)-yz)),rx:4,class:"bar"+(d.partial?" part":""),style:`fill:${col(ch.color)}`});
+    hov(r,`<b>${d.label}</b> · ${fmt(d.mean,ch)}${d.std!=null?` · σ ±${d.std}`:""}`);
+    if(d.std!=null)whisker(s,cx,y(d.mean+d.std),y(Math.max(0,d.mean-d.std)),6);
+    T(s,cx,d.mean>=0?y(d.mean+(d.std||0))-7:y(d.mean)+15,"vlab",fmt(d.mean,ch));
+    T(s,cx,H-M.b+20,"xlab"+(d.partial?" part":""),d.label);});
+  host.appendChild(s);
+}
+function grouped(host,ch){
+  const mx=Math.max(...ch.groups.flatMap(g=>g.values.map(v=>v.mean+(v.std||0))));const{ym,y0,t}=scale(mx);const s=svg(W,H);const y=axis(s,ym,t,ch,y0);
+  const n=ch.series.length,slot=PW/ch.groups.length,bw=Math.min(24,slot*0.7/n),gap=3,span=n*bw+(n-1)*gap;
+  ch.groups.forEach((g,i)=>{const gc=M.l+slot*(i+.5);
+    g.values.forEach((v,j)=>{const cx=gc-span/2+bw/2+j*(bw+gap);
+      const r=A(s,"rect",{x:cx-bw/2,y:y(v.mean),width:bw,height:Math.max(0,M.t+PH-y(v.mean)),rx:4,class:"bar"+(g.partial?" part":""),style:`fill:${col(ch.series[j].color)}`});
+      hov(r,`<b>${g.label}</b> · ${ch.series[j].name} ${fmt(v.mean,ch)}${v.std!=null?` · σ ±${v.std}`:""}`);
+      if(v.std!=null)whisker(s,cx,y(v.mean+v.std),y(Math.max(0,v.mean-v.std)),5);
+      T(s,cx,y(v.mean+(v.std||0))-6,"vlab",fmt(v.mean,ch));});
+    T(s,gc,H-M.b+20,"xlab"+(g.partial?" part":""),g.label);});
+  host.appendChild(s);
+}
+function line(host,ch){
+  const all=ch.series.flatMap(se=>se.points);const{ym,y0,t}=scale(Math.max(...all));const s=svg(W,H);const y=axis(s,ym,t,ch,y0);
+  const n=ch.xlabels.length,step=PW/(n-1||1),x=i=>M.l+step*i;
+  ch.series.forEach(se=>{const c=col(se.color);
+    let dpath=se.points.map((p,i)=>(i?"L":"M")+x(i)+" "+y(p)).join(" ");
+    A(s,"path",{d:dpath,fill:"none",style:`stroke:${c}`,"stroke-width":2.2,"stroke-linejoin":"round","stroke-linecap":"round"});
+    se.points.forEach((p,i)=>{const m=A(s,"circle",{cx:x(i),cy:y(p),r:4,class:"mk",style:`fill:${c}`});hov(m,`<b>${ch.xlabels[i]}</b> · ${se.name}: ${fmt(p,ch)}`);});});
+  ch.xlabels.forEach((l,i)=>T(s,x(i),H-M.b+20,"xlab",l));
+  host.appendChild(s);
+}
+function heat(host,ch){
+  const tb=el("table"),th=el("thead"),tr=el("tr");tr.appendChild(el("th","metric","Métrica"));
+  ch.cols.forEach(c=>{const e=el("th",null,c);tr.appendChild(e);});th.appendChild(tr);tb.appendChild(th);
+  const bd=el("tbody");
+  ch.rows.forEach(r=>{const t=el("tr");const m=el("td","metric",r.label);t.appendChild(m);
+    r.values.forEach(v=>{const b=ch.buckets.find(bk=>bk.lt==null||v<bk.lt)||ch.buckets[ch.buckets.length-1];
+      const td=el("td",null,`<span class="chip cv-${b.cls}">${fmt(v,ch)}</span>`);t.appendChild(td);});
+    bd.appendChild(t);});
+  tb.appendChild(bd);host.appendChild(tb);
+}
+
+function build(){
+  const app=document.getElementById("app");
+  if(SPEC.eyebrow)app.appendChild(el("p","eyebrow",SPEC.eyebrow));
+  app.appendChild(el("h1",null,SPEC.title));
+  if(SPEC.subtitle)app.appendChild(el("p","sub",SPEC.subtitle));
+  if(SPEC.source)app.appendChild(el("p","sub src",SPEC.source));
+  if(SPEC.tiles?.length){const g=el("div","tiles");SPEC.tiles.forEach(t=>{
+    const d=el("div","tile");d.innerHTML=`<div class="lab"><span class="dot" style="background:${col(t.color)}"></span>${t.label}</div><div class="val"${t.value&&/vol|instáv|crít/i.test(t.value)?' style="color:var(--v)"':''}>${t.value}</div>${t.note?`<div class="note">${t.note}</div>`:""}`;g.appendChild(d);});app.appendChild(g);}
+  SPEC.sections.forEach(sec=>{const s=el("section");s.appendChild(el("h2",null,sec.title));if(sec.sub)s.appendChild(el("p","h2sub",sec.sub));
+    const ch=sec.chart;
+    if(ch){
+      if(ch.type==="grouped"||(ch.type==="line"&&ch.series.length>1)){const lg=el("div","legend");ch.series.forEach(se=>lg.innerHTML+=`<span><span class="dot" style="background:${col(se.color)}"></span>${se.name}</span>`);if(ch.type==="grouped"&&ch.groups.some(g=>g.values.some(v=>v.std!=null)))lg.innerHTML+='<span style="color:var(--faint)">haste = ±1 desvio</span>';s.appendChild(lg);}
+      const card=el("div","card");s.appendChild(card);
+      ({bars,grouped,line,heat}[ch.type]||(()=>{}))(card,ch);}
+    if(sec.html){const p=el("div","prose",sec.html);s.appendChild(p);}
+    app.appendChild(s);});
+  if(SPEC.footer)app.appendChild(el("p","foot",SPEC.footer));
+}
+build();
+</script>
