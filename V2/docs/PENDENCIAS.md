@@ -39,6 +39,10 @@ bloqueado na main). Risco alto por ser a escotilha de emergência: testar sem to
 
 ## Agenda natural (não são defeitos)
 
+- **Revisão órfã `smart-ads-api-01133-pob`**: tag de canary removida e 0% de tráfego
+  (inerte); o Cloud Run não deleta a revisão mais RECENTE de um serviço, então ela só
+  pode ser apagada depois do próximo deploy real (ou esquecida sem custo).
+
 - **Rodada final do LF64** após o carrinho fechar em 30/08 (mesmos 2 comandos).
 - **LF65** como prova de reuso da máquina (conferir a cobertura do mapa de criativos
   que o CLI imprime).

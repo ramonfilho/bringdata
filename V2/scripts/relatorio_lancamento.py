@@ -151,10 +151,12 @@ def main() -> int:
           f"dentro {j['dentro']['n']} (R$ {j['dentro']['gasto']:,.2f}) · "
           f"acima {j['acima']['n']} (R$ {j['acima']['gasto']:,.2f})")
     if meta["tem_venda"]:
+        # lado vazio (0 unidades) tem ROAS/lucro None — imprimir o traço, não quebrar
+        _n = lambda v, spec: format(v, spec) if v is not None else "—"  # noqa: E731
         for lado in ("dentro", "acima"):
             b = j[lado]
-            print(f"  {lado:>6}: vendas {b['vendas']}  ROAS {b['roas_ponderado']:.2f}  "
-                  f"lucro R$ {b['lucro']:,.2f}  | bateu meta {b['bateu_meta']}  "
+            print(f"  {lado:>6}: vendas {b['vendas']}  ROAS {_n(b['roas_ponderado'], '.2f')}  "
+                  f"lucro R$ {_n(b['lucro'], ',.2f')}  | bateu meta {b['bateu_meta']}  "
                   f"lucro>1000 {b['lucro_acima_1000']}  positivo {b['roas_positivo']}")
         if j["fisher_p"] is not None:
             print(f"  Fisher p={j['fisher_p']:.4f}  Mann-Whitney p={j['mannwhitney_p']}")

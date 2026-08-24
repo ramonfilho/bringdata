@@ -96,11 +96,12 @@ def main() -> int:
                            (br(d["lu"], 2, "R$ "), "pos" if (d["lu"] or 0) > 0 else "neg") if d["lu"] is not None else "—"])
     tot_l = sum(d["l"] for _, d in ordem)
     tot_v = sum(d["v"] or 0 for _, d in ordem) if tem_venda else None
+    tot_f = sum(d["f"] or 0 for _, d in ordem) if tem_venda else None
     linhas_mod.append(["<b>TOTAL</b>", sum(d["n"] for _, d in ordem), br(tot_gasto, 2, "R$ "),
                        f"{tot_l:,}".replace(",", "."), br(cpl_geral, 2, "R$ "),
                        br(tot_v, 0) if tem_venda else "—",
                        pct(100 * tot_v / tot_l, 2) if (tem_venda and tot_l) else "—",
-                       "—", "—", "—"])
+                       br(tot_f, 2, "R$ ") if tem_venda else "—", "—", "—"])
     tab_modelo = _tab(["Tipo de campanha", "Camp.", "Gasto", "Cadastros", "CPL",
                        "Vendas", "Conversão", "Faturamento", "ROAS", "Lucro"],
                       linhas_mod[:-1], linhas_mod[-1])
@@ -148,37 +149,7 @@ def main() -> int:
         s = d.get(k)
         return (s[0] / s[1] - 1.0) if s and s[1] else None
 
-    by_mod = {}
-    for x in ct:
-        if x.get("gasto"):
-            by_mod.setdefault(x["modelo"], []).append(x)
-    blocos = []
-    for nome, _ in ordem:
-        xs = sorted(by_mod.get(nome, []), key=lambda x: -x["gasto"])[:5]
-        if not xs:
-            continue
-        rows = []
-        for x in xs:
-            ef = _efeito(efeito_cria, "c", nome, x["criativo"])
-            cel_ef = ("—" if ef is None else
-                      (f"{'+' if ef >= 0 else ''}{br(100 * ef, 1)}%",
-                       "pos" if ef >= 0 else "neg"))
-            tc = teto_cria.get((nome, x["criativo"]))
-            teto_m = tc[0] / tc[1] if tc and tc[1] else None
-            rows.append([x["criativo"][:34], br(x["gasto"], 2, "R$ "),
-                         f"{int(x['leads_ledger']):,}".replace(",", "."),
-                         br(x["cpl"], 2, "R$ "), br(teto_m, 2, "R$ "),
-                         cel_ef, br(x.get("vendas"), 0),
-                         br(x.get("faturamento"), 2, "R$ "), _cor(x.get("lucro"))])
-        ef_t = _efeito(efeito_tipo, "t", nome)
-        puxada = (f" · os criativos puxaram a conversão prevista do tipo em "
-                  f"<b>{'+' if ef_t >= 0 else ''}{br(100 * ef_t, 1)}%</b>"
-                  if ef_t is not None else "")
-        blocos.append(f"<h4 class='bl'>{nome}<span>top 5 por verba{puxada}</span></h4>"
-                      + _tab(["Criativo", "Gasto", "Leads", "CPL", "Teto",
-                              "Efeito na conversão",
-                              "Vendas", "Faturamento", "Lucro"], rows))
-    tela3 = "".join(blocos)
+    # (tela 3 fundida na 7 em 24/08: teto e efeito viram colunas da agregada)
 
     # ── tela 4: teto (dentro vs acima) ───────────────────────────────────────
     modo = "MEDIDO" if tem_venda else "PREVISÃO — o julgamento fecha quando as vendas caírem"
@@ -230,15 +201,7 @@ def main() -> int:
 
     # ── telas 5 e 6: menor CPL e ranking ─────────────────────────────────────
     um = [x for x in u if x.get("cpl") is not None and (x.get("leads_ledger") or 0) >= 100]
-    menor_cpl = sorted(um, key=lambda x: x["cpl"])[:10]
-    rows5 = [[x["criativo"][:38], _tipo(x), br(x["cpl"], 2, "R$ "),
-              br(x["teto"], 2, "R$ "),
-              (br(x["folga"], 2, "R$ "), "pos" if (x["folga"] or 0) >= 0 else "neg"),
-              f"{x['leads_ledger']:,}".replace(",", "."), pct(x.get("pct_d9_d10")),
-              br(x.get("roas"), 2), _cor(x.get("lucro"))]
-             for x in menor_cpl]
-    tab_cpl = _tab(["Criativo", "Tipo", "CPL", "Teto", "Folga", "Leads",
-                    "% notas 9-10", "ROAS", "Lucro"], rows5)
+    # (tela 5 'menor CPL' removida em 24/08: a lição dela vive na conclusão)
 
     chave_rank = "lucro" if tem_venda else "folga"
     rank = sorted([x for x in um if x.get(chave_rank) is not None],
@@ -262,12 +225,22 @@ def main() -> int:
     def _roas7(x):
         return (x["faturamento"] / x["gasto"]) if (x.get("faturamento") is not None
                                                    and x.get("gasto")) else None
-    rows7 = [[x["criativo"][:38], x["modelo"], br(x.get("gasto"), 2, "R$ "),
-              br(x.get("cpl"), 2, "R$ "),
-              br(x.get("faturamento"), 2, "R$ "), br(_roas7(x), 2), _cor(x.get("lucro"))]
-             for x in ct_ord if (x.get("gasto") or 0) > 300]
-    tab_cria_tipo = _tab(["Criativo", "Tipo", "Gasto", "CPL", "Faturamento", "ROAS", "Lucro"],
-                         rows7)
+    def _fx7(x):
+        tc = teto_cria.get((x["modelo"], x["criativo"]))
+        ef = _efeito(efeito_cria, "c", x["modelo"], x["criativo"])
+        cel_ef = ("—" if ef is None else
+                  (f"{'+' if ef >= 0 else ''}{br(100 * ef, 1)}%", "pos" if ef >= 0 else "neg"))
+        return (br(tc[0] / tc[1], 2, "R$ ") if tc and tc[1] else "—"), cel_ef
+    rows7 = []
+    for x in ct_ord:
+        if (x.get("gasto") or 0) <= 300:
+            continue
+        cel_teto, cel_ef = _fx7(x)
+        rows7.append([x["criativo"][:38], x["modelo"], br(x.get("gasto"), 2, "R$ "),
+                      br(x.get("cpl"), 2, "R$ "), cel_teto, cel_ef,
+                      br(x.get("faturamento"), 2, "R$ "), br(_roas7(x), 2), _cor(x.get("lucro"))])
+    tab_cria_tipo = _tab(["Criativo", "Tipo", "Gasto", "CPL", "Teto", "Efeito na conversão",
+                          "Faturamento", "ROAS", "Lucro"], rows7)
 
     import pandas as pd
     from openpyxl.styles import Font
@@ -338,20 +311,10 @@ def main() -> int:
             {"title": "2 · Campanha a campanha (top 15 por gasto)",
              "sub": "As mesmas colunas do debriefing: gasto, cadastros, CPL, vendas, ROAS e lucro.",
              "html": tab_camp},
-            {"title": "3 · Criativos: quanto cada anúncio influenciou o lucro de cada tipo de campanha",
-             "sub": "Verba, vendas casadas e LUCRO de cada criativo dentro de cada tipo — o mesmo "
-                    "criativo muda de teto conforme o público que a campanha compra "
-                    "(Teto = o CPL máximo que a unidade sustenta na meta de ROAS 2,0; condensa "
-                    "a qualidade do público e a nota histórica do criativo num número só).",
-             "html": tela3},
             {"title": f"4 · Teto de CPL — {modo}",
              "sub": "Unidade = criativo×campanha com ≥100 leads e ≥R$ 300 de gasto. "
                     "*Meta = ROAS 2,0 com tolerância de 2% (um 1,97 conta).",
              "html": tab_teto},
-            {"title": "5 · Os criativos de menor custo por lead",
-             "sub": "Barato não é sinônimo de dentro do teto: a folga compara o CPL com o teto "
-                    "DAQUELA unidade (folga negativa = pagando acima do que a qualidade sustenta).",
-             "html": tab_cpl},
             {"title": ("6 · Ranking por lucro" if tem_venda else
                        "6 · Ranking — por folga, enquanto não há lucro para ordenar"),
              "sub": ("Do maior para o menor lucro." if tem_venda else
@@ -359,10 +322,11 @@ def main() -> int:
                      "(quem mais respeita o teto). A rodada com vendas reordena por lucro."),
              "html": tab_rank},
             {"title": "7 · Criativo agregado por tipo de campanha",
-             "sub": "Cada linha soma TODAS as campanhas de um tipo em que o criativo rodou "
-                    "(ex.: todos os AD0160 dentro do Lead, todos dentro do jul_24, todos "
-                    "dentro do abr_28). Só gasto acima de R$ 300; a lista completa sai em "
-                    "XLSX junto do painel, na mesma rodada.",
+             "sub": "Cada linha soma TODAS as campanhas de um tipo em que o criativo rodou. "
+                    "Teto = o CPL máximo que a unidade sustenta na meta de ROAS 2,0 (condensa a "
+                    "qualidade do público e a nota histórica do criativo); Efeito na conversão = "
+                    "quanto o histórico do criativo puxou a conversão prevista. Só gasto acima de "
+                    "R$ 300; a lista completa sai em XLSX junto do painel, na mesma rodada.",
              "html": tab_cria_tipo},
             {"title": "8 · Régua e cobertura (o carimbo desta rodada)",
              "html": ("<ul>"
@@ -386,6 +350,18 @@ def main() -> int:
         "footer": f"Gerado do contrato.json por render_painel_lancamento.py · {m['gerado_em'][:16]} · "
                   "traço (—) = ainda não medido",
     }
+
+    # Conclusão do lançamento: análise autoral deste LF vive em conclusao.html na
+    # pasta do relatório (não no script, que é genérico); entra ANTES do carimbo.
+    conclusao = pasta / "conclusao.html"
+    if conclusao.exists():
+        carimbo = next(i for i, x in enumerate(spec["sections"])
+                       if "carimbo" in x["title"])
+        spec["sections"].insert(carimbo, {"title": "Conclusão — o que fazer no próximo lançamento",
+                                          "html": conclusao.read_text()})
+    for i, x in enumerate(spec["sections"], 1):   # renumera 1..N (sempre)
+        x["title"] = re.sub(r"^\d+ · ", "", x["title"])
+        x["title"] = f"{i} · {x['title']}"
 
     # Notas do lançamento: fatos pontuais deste LF vivem em notas.html na pasta
     # do relatório (não no script, que é genérico); se existir, vira a seção final.
