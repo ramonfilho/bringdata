@@ -87,15 +87,22 @@ def main() -> int:
     for nome, d in ordem:
         cpl = d["g"] / d["l"] if d["l"] else None
         roas = (d["f"] / d["g"]) if (d["f"] is not None and d["g"]) else None
+        conv = (d["v"] / d["l"]) if (d["v"] is not None and d["l"]) else None
         linhas_mod.append([f"<b>{nome}</b>", d["n"], br(d["g"], 2, "R$ "), f"{d['l']:,}".replace(",", "."),
-                           br(cpl, 2, "R$ "), br(d["v"], 0), br(d["f"], 2, "R$ "),
+                           br(cpl, 2, "R$ "), br(d["v"], 0),
+                           pct(100 * conv, 2) if conv is not None else "—",
+                           br(d["f"], 2, "R$ "),
                            br(roas, 2),
                            (br(d["lu"], 2, "R$ "), "pos" if (d["lu"] or 0) > 0 else "neg") if d["lu"] is not None else "—"])
+    tot_l = sum(d["l"] for _, d in ordem)
+    tot_v = sum(d["v"] or 0 for _, d in ordem) if tem_venda else None
     linhas_mod.append(["<b>TOTAL</b>", sum(d["n"] for _, d in ordem), br(tot_gasto, 2, "R$ "),
-                       f"{sum(d['l'] for _, d in ordem):,}".replace(",", "."), br(cpl_geral, 2, "R$ "),
-                       "—" if not tem_venda else br(sum(d["v"] or 0 for _, d in ordem), 0), "—", "—", "—"])
+                       f"{tot_l:,}".replace(",", "."), br(cpl_geral, 2, "R$ "),
+                       br(tot_v, 0) if tem_venda else "—",
+                       pct(100 * tot_v / tot_l, 2) if (tem_venda and tot_l) else "—",
+                       "—", "—", "—"])
     tab_modelo = _tab(["Tipo de campanha", "Camp.", "Gasto", "Cadastros", "CPL",
-                       "Vendas", "Faturamento", "ROAS", "Lucro"],
+                       "Vendas", "Conversão", "Faturamento", "ROAS", "Lucro"],
                       linhas_mod[:-1], linhas_mod[-1])
 
     # ── tela 2: campanha a campanha (top por gasto) ──────────────────────────
@@ -115,7 +122,11 @@ def main() -> int:
     # ponderado pelos leads — responde "quanto os criativos influenciaram a % de
     # conversão da campanha" no lado PREVISTO (o realizado é a coluna Conversão).
     rot_cid = dict(zip((x["cid"] for x in ca), (x["modelo"] for x in ca)))
-    efeito_cria, efeito_tipo = {}, {}
+
+    def _tipo(x):
+        return ROTULO_GOOGLE if x["canal"] == "google" else (rot_cid.get(x["cid"]) or "—")
+
+    efeito_cria, efeito_tipo, teto_cria = {}, {}, {}
     for x in u:
         mod = ROTULO_GOOGLE if x["canal"] == "google" else rot_cid.get(x["cid"])
         if mod is None:
@@ -124,6 +135,10 @@ def main() -> int:
         lift = x.get("lift_criativo")
         mult = (peso * lift + (1 - peso)) if lift is not None else 1.0
         n = int(x.get("leads_ledger") or 0)
+        if x.get("teto") is not None and n:
+            t = teto_cria.setdefault((mod, x["criativo"]), [0.0, 0])
+            t[0] += x["teto"] * n
+            t[1] += n
         for chave, d in ((("c", mod, x["criativo"]), efeito_cria),
                          (("t", mod), efeito_tipo)):
             s = d.setdefault(chave, [0.0, 0])
@@ -148,11 +163,11 @@ def main() -> int:
             cel_ef = ("—" if ef is None else
                       (f"{'+' if ef >= 0 else ''}{br(100 * ef, 1)}%",
                        "pos" if ef >= 0 else "neg"))
+            tc = teto_cria.get((nome, x["criativo"]))
+            teto_m = tc[0] / tc[1] if tc and tc[1] else None
             rows.append([x["criativo"][:34], br(x["gasto"], 2, "R$ "),
                          f"{int(x['leads_ledger']):,}".replace(",", "."),
-                         br(x["cpl"], 2, "R$ "), pct(x.get("pct_d9_d10")),
-                         br(x.get("lift_criativo"), 2) if x.get("lift_criativo")
-                         else "<span class='ic'>estreante</span>",
+                         br(x["cpl"], 2, "R$ "), br(teto_m, 2, "R$ "),
                          cel_ef, br(x.get("vendas"), 0),
                          br(x.get("faturamento"), 2, "R$ "), _cor(x.get("lucro"))])
         ef_t = _efeito(efeito_tipo, "t", nome)
@@ -160,8 +175,8 @@ def main() -> int:
                   f"<b>{'+' if ef_t >= 0 else ''}{br(100 * ef_t, 1)}%</b>"
                   if ef_t is not None else "")
         blocos.append(f"<h4 class='bl'>{nome}<span>top 5 por verba{puxada}</span></h4>"
-                      + _tab(["Criativo", "Gasto", "Leads", "CPL", "% notas 9-10",
-                              "Nota histórica (lift)", "Efeito na conversão",
+                      + _tab(["Criativo", "Gasto", "Leads", "CPL", "Teto",
+                              "Efeito na conversão",
                               "Vendas", "Faturamento", "Lucro"], rows))
     tela3 = "".join(blocos)
 
@@ -181,21 +196,48 @@ def main() -> int:
     # meta 1,5 equivale a teto ×(2,0/1,5). Mesmas unidades julgáveis.
     uj = [x for x in u if x.get("no_corte") and x.get("dentro_do_teto") is not None]
     d15 = [x for x in uj if x["cpl"] <= x["teto"] * (2.0 / 1.5)]
-    g15 = sum(x.get("gasto") or 0 for x in d15)
-    tab_teto += (f"<p class='h2sub' style='margin-top:10px'>Com meta de ROAS <b>1,5</b> "
-                 f"(teto ×1,33): <b>{len(d15)}</b> de {len(uj)} unidades dentro, "
-                 f"R$ {br(g15, 2)} de gasto.</p>")
+    a15 = [x for x in uj if not (x["cpl"] <= x["teto"] * (2.0 / 1.5))]
+
+    def _lado15(xs, rot):
+        gasto = sum(x.get("gasto") or 0 for x in xs)
+        leads = sum(int(x.get("leads_ledger") or 0) for x in xs)
+        if tem_venda and xs:
+            fat = sum(x.get("faturamento") or 0 for x in xs)
+            vendas = sum(x.get("vendas") or 0 for x in xs)
+            lucro = sum(x.get("lucro") or 0 for x in xs)
+            roas = fat / gasto if gasto else None
+            bateu = sum(1 for x in xs if (x.get("roas") or 0) >= 1.5 * (1 - j["tolerancia_meta"]))
+            l1000 = sum(1 for x in xs if (x.get("lucro") or 0) > 1000)
+            pos = sum(1 for x in xs if (x.get("lucro") or 0) > 0)
+        else:
+            vendas = roas = lucro = bateu = l1000 = pos = None
+        return [f"<b>{rot}</b>", len(xs), br(gasto, 2, "R$ "),
+                f"{leads:,}".replace(",", "."), br(vendas, 0), br(roas, 2),
+                _cor(lucro), br(bateu, 0), br(l1000, 0), br(pos, 0)]
+
+    tab_teto15 = _tab(["", "Unidades", "Gasto", "Leads", "Vendas", "ROAS",
+                       "Lucro", "Bateu a meta†", "Lucro > R$ 1.000", "Deu lucro"],
+                      [_lado15(d15, "Respeitaram o teto"), _lado15(a15, "Estouraram o teto")])
+    tab_teto += ("<p class='h2sub' style='margin-top:14px'>A mesma leitura com meta de ROAS "
+                 "<b>1,5</b> (o teto cresce ×1,33; †bateu a meta = ROAS ≥ 1,5 com a mesma "
+                 "tolerância de 2%):</p>" + tab_teto15
+                 + f"<p class='h2sub' style='margin-top:10px'>Mesmo com a régua mais folgada, "
+                 f"só <b>{len(d15)}</b> de {len(uj)} unidades couberam. O que aperta é o custo "
+                 "por lead: o cadastro do LF64 saiu <b>39% mais caro</b> que o do DEV21 "
+                 "(R$ 8,77 contra R$ 6,33), e essa alta pode ter vindo da troca de pixel "
+                 "(as campanhas recomeçaram o aprendizado no pixel novo) ou de outra causa "
+                 "ainda não isolada.</p>")
 
     # ── telas 5 e 6: menor CPL e ranking ─────────────────────────────────────
     um = [x for x in u if x.get("cpl") is not None and (x.get("leads_ledger") or 0) >= 100]
     menor_cpl = sorted(um, key=lambda x: x["cpl"])[:10]
-    rows5 = [[x["criativo"][:38], x["campanha"][:30], br(x["cpl"], 2, "R$ "),
+    rows5 = [[x["criativo"][:38], _tipo(x), br(x["cpl"], 2, "R$ "),
               br(x["teto"], 2, "R$ "),
               (br(x["folga"], 2, "R$ "), "pos" if (x["folga"] or 0) >= 0 else "neg"),
               f"{x['leads_ledger']:,}".replace(",", "."), pct(x.get("pct_d9_d10")),
               br(x.get("roas"), 2), _cor(x.get("lucro"))]
              for x in menor_cpl]
-    tab_cpl = _tab(["Criativo", "Campanha", "CPL", "Teto", "Folga", "Leads",
+    tab_cpl = _tab(["Criativo", "Tipo", "CPL", "Teto", "Folga", "Leads",
                     "% notas 9-10", "ROAS", "Lucro"], rows5)
 
     chave_rank = "lucro" if tem_venda else "folga"
@@ -203,13 +245,64 @@ def main() -> int:
                   key=lambda x: -(x[chave_rank]))[:12]
     # Coluna "Folga" REMOVIDA temporariamente do ranking (pedido do Ramon,
     # 24/08/2026); a ordenação provisória sem venda continua sendo por folga.
-    rows6 = [[x["criativo"][:38], x["campanha"][:30], br(x.get("gasto"), 2, "R$ "),
+    rows6 = [[x["criativo"][:38], _tipo(x), br(x.get("gasto"), 2, "R$ "),
               br(x.get("cpl"), 2, "R$ "),
               br(x.get("faturamento"), 2, "R$ "),
               (br(x.get("lucro"), 2, "R$ "), "pos" if (x.get("lucro") or 0) > 0 else "neg")
               if x.get("lucro") is not None else "—"]
              for x in rank]
-    tab_rank = _tab(["Criativo", "Campanha", "Gasto", "CPL", "Faturamento", "Lucro"], rows6)
+    tab_rank = _tab(["Criativo", "Tipo", "Gasto", "CPL", "Faturamento", "Lucro"], rows6)
+
+    # ── tela 7: criativo AGREGADO por tipo (todas as campanhas do tipo somadas) ──
+    # No HTML só entra gasto > R$ 300 (mesmo piso do corte do teto); a lista
+    # COMPLETA sai em XLSX ao lado do painel, na mesma rodada.
+    chave7 = "lucro" if tem_venda else "gasto"
+    ct_ord = sorted([x for x in ct if x.get("gasto")],
+                    key=lambda x: -(x.get(chave7) or 0))
+    def _roas7(x):
+        return (x["faturamento"] / x["gasto"]) if (x.get("faturamento") is not None
+                                                   and x.get("gasto")) else None
+    rows7 = [[x["criativo"][:38], x["modelo"], br(x.get("gasto"), 2, "R$ "),
+              br(x.get("cpl"), 2, "R$ "),
+              br(x.get("faturamento"), 2, "R$ "), br(_roas7(x), 2), _cor(x.get("lucro"))]
+             for x in ct_ord if (x.get("gasto") or 0) > 300]
+    tab_cria_tipo = _tab(["Criativo", "Tipo", "Gasto", "CPL", "Faturamento", "ROAS", "Lucro"],
+                         rows7)
+
+    import pandas as pd
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter
+    xlsx = pasta / f"criativos_por_tipo_{lf.lower()}.xlsx"
+    df7 = pd.DataFrame([{
+        "Criativo": x["criativo"], "Tipo": x["modelo"], "Unidades": x.get("unidades"),
+        "Leads": x.get("leads_ledger"), "Cadastros": x.get("cadastros"),
+        "Gasto": x.get("gasto"), "CPL": x.get("cpl"), "Vendas": x.get("vendas"),
+        "Faturamento": x.get("faturamento"), "ROAS": _roas7(x), "Lucro": x.get("lucro"),
+        "Conversão %": (100 * x["conversao"]) if x.get("conversao") is not None else None,
+        "% notas 9-10": x.get("pct_d9_d10"),
+    } for x in ct_ord])
+    # Formatação no padrão do painel: dinheiro em R$ com 2 casas, ROAS 2 casas,
+    # percentuais com o símbolo, inteiros sem casa; cabeçalho em negrito e congelado.
+    _FMT = {"Gasto": 'R$ #,##0.00', "CPL": 'R$ #,##0.00', "Faturamento": 'R$ #,##0.00',
+            "Lucro": 'R$ #,##0.00', "ROAS": '0.00', "Conversão %": '0.00"%"',
+            "% notas 9-10": '0.0"%"', "Leads": '#,##0', "Cadastros": '#,##0',
+            "Unidades": '0', "Vendas": '0'}
+    with pd.ExcelWriter(xlsx, engine="openpyxl") as xw:
+        df7.to_excel(xw, index=False, sheet_name="criativos_por_tipo")
+        ws = xw.sheets["criativos_por_tipo"]
+        for i, col in enumerate(df7.columns, 1):
+            letra = get_column_letter(i)
+            ws.column_dimensions[letra].width = (44 if col == "Criativo" else
+                                                 24 if col == "Tipo" else
+                                                 max(len(col) + 3, 12))
+            f = _FMT.get(col)
+            if f:
+                for cell in ws[letra][1:]:
+                    cell.number_format = f
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+        ws.freeze_panes = "A2"
+    print(f"xlsx:   {xlsx}  ({len(ct_ord)} linhas, completo, formatado)")
 
     # ── SPEC ─────────────────────────────────────────────────────────────────
     aguardando = ("" if tem_venda else
@@ -247,8 +340,9 @@ def main() -> int:
              "html": tab_camp},
             {"title": "3 · Criativos: quanto cada anúncio influenciou o lucro de cada tipo de campanha",
              "sub": "Verba, vendas casadas e LUCRO de cada criativo dentro de cada tipo — o mesmo "
-                    "criativo muda de qualidade conforme o público que a campanha compra "
-                    "(\"% notas 9-10\" = fração de leads no topo da régua do modelo).",
+                    "criativo muda de teto conforme o público que a campanha compra "
+                    "(Teto = o CPL máximo que a unidade sustenta na meta de ROAS 2,0; condensa "
+                    "a qualidade do público e a nota histórica do criativo num número só).",
              "html": tela3},
             {"title": f"4 · Teto de CPL — {modo}",
              "sub": "Unidade = criativo×campanha com ≥100 leads e ≥R$ 300 de gasto. "
@@ -264,7 +358,13 @@ def main() -> int:
                      "Sem venda ingerida a coluna de lucro fica vazia; a ordem provisória é a folga "
                      "(quem mais respeita o teto). A rodada com vendas reordena por lucro."),
              "html": tab_rank},
-            {"title": "7 · Régua e cobertura (o carimbo desta rodada)",
+            {"title": "7 · Criativo agregado por tipo de campanha",
+             "sub": "Cada linha soma TODAS as campanhas de um tipo em que o criativo rodou "
+                    "(ex.: todos os AD0160 dentro do Lead, todos dentro do jul_24, todos "
+                    "dentro do abr_28). Só gasto acima de R$ 300; a lista completa sai em "
+                    "XLSX junto do painel, na mesma rodada.",
+             "html": tab_cria_tipo},
+            {"title": "8 · Régua e cobertura (o carimbo desta rodada)",
              "html": ("<ul>"
                       f"<li><b>Âncora do teto:</b> a referência que a produção serve hoje "
                       f"({m['referencia_id']}), fator de rastreamento {br(m['fator_rastreamento'], 4)} "
@@ -286,6 +386,13 @@ def main() -> int:
         "footer": f"Gerado do contrato.json por render_painel_lancamento.py · {m['gerado_em'][:16]} · "
                   "traço (—) = ainda não medido",
     }
+
+    # Notas do lançamento: fatos pontuais deste LF vivem em notas.html na pasta
+    # do relatório (não no script, que é genérico); se existir, vira a seção final.
+    notas = pasta / "notas.html"
+    if notas.exists():
+        spec["sections"].append({"title": f"{len(spec['sections']) + 1} · Notas do lançamento",
+                                 "html": notas.read_text()})
 
     tpl = TEMPLATE.read_text()
     ini = tpl.index("const SPEC = {")

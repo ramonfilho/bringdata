@@ -50,6 +50,56 @@ def _jsonable(o):
     return str(o)
 
 
+def _janela_de_etl(cap_start, cap_end, vendas_start, vendas_end, hoje, sales_max):
+    """Decide SE o relatório puxa vendas novas antes de montar, e o intervalo.
+
+    Puxa só com carrinho aberto ou recém-fechado ainda imaturo (histórico maduro
+    não muda). Começa na última venda já ingerida — o upsert é idempotente, então
+    re-ler o dia da última venda não duplica nada. Devolve (estado, inicio, fim)
+    ou None quando não há o que puxar. Pura: testável sem banco."""
+    from src.validation.lancamento_unidades import estado_do_lancamento
+    estado = estado_do_lancamento(cap_start, cap_end, vendas_start, vendas_end,
+                                  as_of=hoje, sales_max=sales_max)
+    if estado not in ("venda_aberta", "venda_fechada_imatura"):
+        return None
+    inicio = max(d for d in (vendas_start, sales_max) if d)
+    return estado, inicio, hoje
+
+
+def _atualiza_vendas(lf: str, as_of) -> None:
+    """Gerar o relatório = gerar com vendas atualizadas: com carrinho aberto,
+    roda o ETL dos gateways ANTES de montar o contrato. `--sem-etl` desliga."""
+    from src.core.launches import load_launches
+    from src.data.analytics_connection import open_analytics_connection
+    from src.validation.etl_sales import run_sales_etl
+    from src.validation.lancamento_unidades import BRT
+    from src.validation.model_performance import read_sales_coverage
+
+    cfg = load_launches().get(lf)
+    if not cfg:
+        return  # constroi_lancamento falha alto com a mensagem certa
+
+    def _d(k):
+        v = cfg.get(k)
+        return datetime.strptime(str(v)[:10], "%Y-%m-%d").date() if v else None
+
+    hoje = as_of or datetime.now(BRT).date()
+    an = open_analytics_connection()
+    try:
+        sales_max = read_sales_coverage(an)["overall"]
+    finally:
+        an.close()
+    janela = _janela_de_etl(_d("cap_start"), _d("cap_end"),
+                            _d("vendas_start"), _d("vendas_end"), hoje, sales_max)
+    if not janela:
+        return
+    estado, inicio, fim = janela
+    print(f"[vendas] {estado.replace('_', ' ')} — puxando gateways {inicio} → {fim} "
+          f"antes de montar (desligue com --sem-etl)")
+    res = run_sales_etl(str(inicio), str(fim))
+    print(f"[vendas] ingerido por gateway: {res.get('loaded', res)}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Relatório por lançamento (um comando)")
     ap.add_argument("--lf", required=True, help="Nome do lançamento (ex.: LF64)")
@@ -58,11 +108,16 @@ def main() -> int:
                     help="Pasta de saída (default: docs/relatorios/<lf>_resultado)")
     ap.add_argument("--piso-gasto", type=float, default=0.90,
                     help="Piso da fração do gasto Meta casado por unidade (exit 3 abaixo)")
+    ap.add_argument("--sem-etl", action="store_true",
+                    help="NÃO puxar vendas novas antes de montar (default: puxa "
+                         "enquanto o carrinho está aberto ou imaturo)")
     args = ap.parse_args()
 
     from src.validation.lancamento_unidades import constroi_lancamento
 
     as_of = date.fromisoformat(args.as_of) if args.as_of else None
+    if not args.sem_etl:
+        _atualiza_vendas(args.lf, as_of)
     r = constroi_lancamento(args.lf, as_of=as_of)
     meta, cob = r["meta"], r["meta"]["cobertura"]
 
