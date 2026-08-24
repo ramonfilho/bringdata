@@ -149,14 +149,15 @@ def main() -> int:
     chave_rank = "lucro" if tem_venda else "folga"
     rank = sorted([x for x in um if x.get(chave_rank) is not None],
                   key=lambda x: -(x[chave_rank]))[:12]
+    # Coluna "Folga" REMOVIDA temporariamente do ranking (pedido do Ramon,
+    # 24/08/2026); a ordenação provisória sem venda continua sendo por folga.
     rows6 = [[x["criativo"][:38], x["campanha"][:30], br(x.get("gasto"), 2, "R$ "),
               br(x.get("cpl"), 2, "R$ "),
-              (br(x.get("folga"), 2, "R$ "), "pos" if (x.get("folga") or 0) >= 0 else "neg"),
               br(x.get("faturamento"), 2, "R$ "),
               (br(x.get("lucro"), 2, "R$ "), "pos" if (x.get("lucro") or 0) > 0 else "neg")
               if x.get("lucro") is not None else "—"]
              for x in rank]
-    tab_rank = _tab(["Criativo", "Campanha", "Gasto", "CPL", "Folga", "Faturamento", "Lucro"], rows6)
+    tab_rank = _tab(["Criativo", "Campanha", "Gasto", "CPL", "Faturamento", "Lucro"], rows6)
 
     # ── SPEC ─────────────────────────────────────────────────────────────────
     aguardando = ("" if tem_venda else

@@ -96,6 +96,10 @@
 /* Bloco de CSS de TABELA do relatorio executivo (nao existe no template da skill).
    A ultima linha e o FIX B: sem ela, .prose b{color:var(--ink)} sobrescreve o verde/vermelho. */
 .tw{overflow-x:auto;border:1px solid var(--line,#dde);border-radius:10px;margin-top:6px}
+/* Em tela larga a tabela ESCAPA da coluna de texto e usa a largura que precisar
+   (até 96vw): o print pro cliente sai com todas as colunas de uma vez, sem scroll.
+   Em tela estreita nada muda (scroll horizontal próprio). Pedido do Ramon, 24/08/2026. */
+@media (min-width:1000px){.tw{width:min(96vw,max-content);min-width:100%;position:relative;left:50%;transform:translateX(-50%)}}
 .tb{border-collapse:collapse;width:100%;font-size:13.5px;min-width:820px;font-variant-numeric:tabular-nums}
 .tb th{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted,#777);
   font-weight:700;text-align:right;padding:9px 11px;background:rgba(128,128,128,.09);white-space:nowrap}
