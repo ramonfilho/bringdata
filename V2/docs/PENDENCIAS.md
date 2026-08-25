@@ -30,8 +30,12 @@ bloqueado na main). Risco alto por ser a escotilha de emergência: testar sem to
 Hoje o teto por unidade só aparece depois de 100 leads. Entregar: (a) o QUADRO DE LARGADA
 por par criativo×campanha antes do primeiro real (teto de largada = nota histórica do
 criativo × conversão esperada do público × valor por venda ÷ meta; razão CPL corrente ÷
-teto de largada decide escala/teste/não-sobe); (b) primeira leitura a partir de ~15 leads /
-R$ 300 (pisos da auditoria de decisões do LF64). As peças já existem na máquina
+teto de largada decide escala/teste/não-sobe); (b) primeira leitura de PREÇO a partir de
+~R$ 300 gastos (CPL real vs teto de largada); a nota do PÚBLICO da unidade só entra aos
+~100 leads — abaixo disso é ruído (constatação do Ramon, 25/08). QUESTÃO ABERTA a medir
+antes de construir: o criativo carrega o próprio público? (se o histórico de %D9-D10 do
+CRIATIVO prevê o público realizado da unidade melhor que a média da campanha, o quadro
+ganha a metade do público sem esperar os 100 leads). As peças já existem na máquina
 (histórico point-in-time, referência, tetos_completos); falta o produto que entrega isso
 diariamente à mesa do tráfego.
 

@@ -137,21 +137,36 @@ def main() -> int:
                 dom_pos[top] = dom_pos.get(top, 0) + 1
         if pos and dom_pos:
             lider = max(dom_pos, key=dom_pos.get)
-            p_com = sum(1 for _, t in pos if t == lider)
-            n_com = sum(1 for _, t in neg if t == lider)
             zero = [x for x in ca if (x.get("gasto") or 0) > 1000 and x.get("vendas") == 0]
-            l_pos = sum(x["lucro"] for x, _ in pos)
-            l_neg = sum(x["lucro"] for x, _ in neg)
+            convs = [100 * d["v"] / d["l"] for _, d in ordem
+                     if d.get("v") is not None and d["l"] and d["g"]]
+            faixa = (f"a conversão por tipo vai de {br(min(convs), 2)}% a "
+                     f"{br(max(convs), 2)}%" if len(convs) >= 2 else "")
+            por_tipo, contras = [], []
+            for t in sorted({x["modelo"] for x, _ in pos + neg}):
+                a = sum(1 for x, top in pos if x["modelo"] == t and top == lider)
+                b = sum(1 for x, _ in pos if x["modelo"] == t)
+                cc = sum(1 for x, top in neg if x["modelo"] == t and top == lider)
+                dd = sum(1 for x, _ in neg if x["modelo"] == t)
+                if b + dd >= 3:
+                    por_tipo.append(f"{t}: {a} de {b} positivas contra {cc} de {dd} "
+                                    f"negativas com o líder à frente")
+                contras += [x for x, top in neg if x["modelo"] == t and top == lider]
+            contra_txt = ""
+            if contras:
+                x0 = contras[0]
+                contra_txt = (f" O contraponto que mantém o público no comando: a campanha "
+                              f"<b>{x0['campanha'][:34]}…</b> ficou negativa "
+                              f"({br(x0['lucro'], 0, 'R$ ')}) mesmo com o líder à frente — "
+                              f"o público daquela compra veio fraco.")
             tab_camp += (
-                f"<p class='h2sub' style='margin-top:10px'><b>Como ler os destaques:</b> o que "
-                f"separa campanha positiva de negativa aqui é o CRIATIVO que domina a verba dela. "
-                f"Das <b>{len(pos)}</b> campanhas com lucro (juntas {br(l_pos, 0, '+R$ ')}), "
-                f"<b>{p_com}</b> têm o <b>{lider}</b> como maior verba; das <b>{len(neg)}</b> "
-                f"negativas (juntas {br(l_neg, 0, 'R$ ')}), só {n_com}. "
-                f"{len(zero)} campanhas fecharam a captação com conversão ZERO tendo gasto "
-                f"{br(sum(x['gasto'] for x in zero), 0, 'R$ ')} — verba dominada por criativos "
-                f"fora do teto. A leitura vale para os três tipos: o público muda o tamanho do "
-                f"lucro, mas quem decide o SINAL é o criativo.</p>")
+                f"<p class='h2sub' style='margin-top:10px'><b>Como ler os destaques:</b> o "
+                f"PÚBLICO define o patamar ({faixa}; é o modelo quem o escolhe). DENTRO do "
+                f"mesmo tipo, quem separa campanha positiva de negativa é o criativo que "
+                f"domina a verba — <b>{'; '.join(por_tipo)}</b> (líder = <b>{lider}</b>)."
+                f"{contra_txt} {len(zero)} campanhas fecharam a captação com conversão ZERO "
+                f"tendo gasto {br(sum(x['gasto'] for x in zero), 0, 'R$ ')}. Nem criativo "
+                f"salva público ruim, nem público salva criativo caro: o teto julga o PAR.</p>")
 
     # ── tela 3: criativos por tipo (verba + qualidade + efeito na conversão) ─
     # Efeito do criativo = quanto o HISTÓRICO dele multiplica a conversão prevista

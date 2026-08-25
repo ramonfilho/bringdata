@@ -893,7 +893,7 @@ business:
     - "programação com ia"     # [Aniversário DevClub] Formação em Programação com IA
     - "full stack br"          # Formação DevClub Full Stack BR
     - "full stack - vitalício" # Formação DevClub Full Stack - Vitalício (decisão do Ramon 24/08/2026, LF64: ENTRA)
-    - "[anual] formação devclub fullstack pro"  # ★ [Anual] FullStack Pro - Comercial (decisão do Ramon 24/08/2026: ENTRA; o [Vitalício] FullStack Pro de R$ 997 fica FORA)
+    - "fullstack pro"          # família FullStack Pro INTEIRA (anual, vitalício, parcelamento de entrada) — decisão do Ramon 25/08/2026: TODAS as vendas entram. Isso também fecha o buraco que subcontava o DEV21.
   # Recalibração 08/05/2026: janela LF43–LF53 (11 lançamentos), exclui LF42 (dez/2025 desatualizado).
   # Janela anterior LF42–LF47 ficou estagnada e ignorava degradação de conv geral observada em LF48–LF53.
   conv_rastr_mediana: 0.005376       # mediana LF43–LF53: vendas_matched/total_leads_meta (range 0.31–0.74%, CV 24%)
