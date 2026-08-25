@@ -137,36 +137,65 @@ def main() -> int:
                 dom_pos[top] = dom_pos.get(top, 0) + 1
         if pos and dom_pos:
             lider = max(dom_pos, key=dom_pos.get)
-            zero = [x for x in ca if (x.get("gasto") or 0) > 1000 and x.get("vendas") == 0]
-            convs = [100 * d["v"] / d["l"] for _, d in ordem
-                     if d.get("v") is not None and d["l"] and d["g"]]
-            faixa = (f"a conversão por tipo vai de {br(min(convs), 2)}% a "
-                     f"{br(max(convs), 2)}%" if len(convs) >= 2 else "")
-            por_tipo, contras = [], []
-            for t in sorted({x["modelo"] for x, _ in pos + neg}):
-                a = sum(1 for x, top in pos if x["modelo"] == t and top == lider)
-                b = sum(1 for x, _ in pos if x["modelo"] == t)
-                cc = sum(1 for x, top in neg if x["modelo"] == t and top == lider)
-                dd = sum(1 for x, _ in neg if x["modelo"] == t)
-                if b + dd >= 3:
-                    por_tipo.append(f"{t}: {a} de {b} positivas contra {cc} de {dd} "
-                                    f"negativas com o líder à frente")
-                contras += [x for x, top in neg if x["modelo"] == t and top == lider]
-            contra_txt = ""
-            if contras:
-                x0 = contras[0]
-                contra_txt = (f" O contraponto que mantém o público no comando: a campanha "
-                              f"<b>{x0['campanha'][:34]}…</b> ficou negativa "
-                              f"({br(x0['lucro'], 0, 'R$ ')}) mesmo com o líder à frente — "
-                              f"o público daquela compra veio fraco.")
-            tab_camp += (
-                f"<p class='h2sub' style='margin-top:10px'><b>Como ler os destaques:</b> o "
-                f"PÚBLICO define o patamar ({faixa}; é o modelo quem o escolhe). DENTRO do "
-                f"mesmo tipo, quem separa campanha positiva de negativa é o criativo que "
-                f"domina a verba — <b>{'; '.join(por_tipo)}</b> (líder = <b>{lider}</b>)."
-                f"{contra_txt} {len(zero)} campanhas fecharam a captação com conversão ZERO "
-                f"tendo gasto {br(sum(x['gasto'] for x in zero), 0, 'R$ ')}. Nem criativo "
-                f"salva público ruim, nem público salva criativo caro: o teto julga o PAR.</p>")
+            # conversão do líder por tipo de público (unidades dele, por cid)
+            tipo_por_cid = {x["cid"]: x["modelo"] for x in ca}
+            cv = {}
+            for x in u:
+                if x["criativo"] != lider:
+                    continue
+                t = tipo_por_cid.get(x["cid"])
+                if not t:
+                    continue
+                d = cv.setdefault(t, [0.0, 0.0])
+                d[0] += x.get("cadastros") or 0
+                d[1] += x.get("vendas") or 0
+            # contraste = os 2 tipos onde o líder tem MAIS volume (leitura sólida)
+            top2 = sorted((t for t, (l, v) in cv.items() if l >= 100 and v),
+                          key=lambda t: -cv[t][0])[:2]
+            cv = {t: 100 * cv[t][1] / cv[t][0] for t in top2}
+            # tipo da separação = onde a fração de positivas com o líder à frente
+            # mais se descola da fração de negativas (>= 3 campanhas julgadas)
+            nit = {}
+            for t in {x["modelo"] for x, _ in pos + neg}:
+                b_ = sum(1 for x, _ in pos if x["modelo"] == t)
+                d_ = sum(1 for x, _ in neg if x["modelo"] == t)
+                if b_ + d_ < 3 or not b_:
+                    continue
+                a_ = sum(1 for x, top in pos if x["modelo"] == t and top == lider)
+                c_ = sum(1 for x, top in neg if x["modelo"] == t and top == lider)
+                nit[t] = a_ / b_ - (c_ / d_ if d_ else 0)
+            if len(cv) >= 2 and nit:
+                hi = max(cv, key=cv.get)
+                lo = min(cv, key=cv.get)
+                sep = max(nit, key=nit.get)
+                a2 = sum(1 for x, top in pos if x["modelo"] == sep and top == lider)
+                b2 = sum(1 for x, _ in pos if x["modelo"] == sep)
+                c2 = sum(1 for x, top in neg if x["modelo"] == sep and top == lider)
+                d2 = sum(1 for x, _ in neg if x["modelo"] == sep)
+                contras = [x for x, top in neg if top == lider]
+                contra_txt = ""
+                if contras:
+                    x0 = contras[0]
+                    contra_txt = (
+                        f" O porém que fecha o raciocínio: a campanha "
+                        f"<b>{x0['campanha'][:34]}…</b> tinha o {lider} à frente e mesmo "
+                        f"assim ficou negativa ({br(x0['lucro'], 0, 'R$ ')}), porque o "
+                        f"lote de leads que ELA comprou veio fraco: criativo não salva "
+                        f"público ruim.")
+                tab_camp += (
+                    f"<p class='h2sub' style='margin-top:10px'><b>Como ler os "
+                    f"destaques:</b> pegue o <b>{lider}</b> e olhe ele em dois públicos. "
+                    f"No {hi}, cada 100 cadastros dele viram ~{br(cv[hi], 2)} vendas; no "
+                    f"{lo}, ~{br(cv[lo], 2)}. Mesmo anúncio, valor por lead "
+                    f"{br(cv[hi] / cv[lo], 1)}x diferente: isso é o PÚBLICO definindo o "
+                    f"patamar, e quem escolhe o público de cada campanha é o modelo. "
+                    f"Agora trave o público e olhe só o {sep}: são {b2 + d2} campanhas "
+                    f"comprando o mesmo tipo de gente; das {b2} que lucraram, {a2} têm o "
+                    f"{lider} como maior verba, contra {c2} das {d2} que perderam. Mesmo "
+                    f"público, criativos diferentes, sinais opostos: dentro do tipo, quem "
+                    f"separa é o criativo.{contra_txt} Como nenhuma das metades decide "
+                    f"sozinha, a régua que junta as duas é o teto "
+                    f"(público × criativo × preço): por isso ele julga o PAR.</p>")
 
     # ── tela 3: criativos por tipo (verba + qualidade + efeito na conversão) ─
     # Efeito do criativo = quanto o HISTÓRICO dele multiplica a conversão prevista
