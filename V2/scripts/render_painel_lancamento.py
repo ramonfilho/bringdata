@@ -384,11 +384,6 @@ def main() -> int:
                     "*Meta = ROAS 2,0 com tolerância de 2% (um 1,97 conta).",
              "html": tab_teto},
             {"title": "7 · Criativo agregado por tipo de campanha",
-             "sub": "Cada linha soma TODAS as campanhas de um tipo em que o criativo rodou. "
-                    "Teto = o CPL máximo que a unidade sustenta na meta de ROAS 2,0 (condensa a "
-                    "qualidade do público e a nota histórica do criativo); Efeito na conversão = "
-                    "quanto o histórico do criativo puxou a conversão prevista. Só gasto acima de "
-                    "R$ 300; a lista completa sai em XLSX junto do painel, na mesma rodada.",
              "html": tab_cria_tipo},
             {"title": "8 · Régua e cobertura (o carimbo desta rodada)",
              "html": ("<ul>"
