@@ -156,6 +156,13 @@ ROTULO = {CORTE_HISTORICO: f"histórico ({DIAS_HISTORICO} dias)",
 COLUNAS = ["tipo", "chave", "leads", "pct_top20", "referencia_pct", "delta_vs_referencia",
            "teto_cpl", "teto_roas_alvo", "teto_referencia"]
 
+# Segundo teto, com meta de ROAS mais frouxa (pedido do Ramon, 23/08): a meta só
+# entra na fórmula como divisor, então o teto a 1,5 é o MESMO teto publicado
+# (já na moeda da linha) reescalado por alvo/1,5 — nada é recalculado, e a moeda
+# do gerenciador atravessa intacta porque a razão dela não depende da meta.
+ROAS_ALVO_SECUNDARIO = 1.5
+COLUNA_SECUNDARIA = "teto_cpl_roas15"
+
 # Tradução do nível interno para a palavra que a agência lê na coluna `tipo`. Explícita, e
 # não `level[:8]` ou coisa parecida: o valor vai para a tabela do cliente e é o que ele
 # filtra, então mudança aqui é mudança de contrato.
@@ -517,6 +524,21 @@ def _moeda_do_gerenciador(linhas, ger, cad=None, credito=None) -> list:
     return out
 
 
+def _com_teto_secundario(linhas) -> list:
+    """Acrescenta a 10ª posição da linha: o teto na meta secundária (ROAS 1,5).
+
+    Derivado do teto FINAL da linha (pós-moeda): teto ∝ 1/alvo, logo
+    teto@1,5 = teto_publicado × alvo/1,5. Linha sem teto leva None, nunca 0."""
+    out = []
+    for x in linhas:
+        if x[6] is None or x[7] is None:
+            out.append(list(x) + [None])
+            continue
+        out.append(list(x) +
+                   [f"{float(x[6]) * float(x[7]) / ROAS_ALVO_SECUNDARIO:.2f}"])
+    return out
+
+
 def _mapa_campanha_google(conn) -> dict:
     """ad_id google -> nome da CAMPANHA real no Google Ads (criativo_id_map).
 
@@ -768,7 +790,9 @@ def coletar(conn) -> tuple:
     for x in linhas:
         k = (x[0], x[1])
         vistos[k] = _funde(vistos[k], x) if k in vistos else x
-    linhas = list(vistos.values())
+    # O teto secundário é o ÚLTIMO passo, depois da fusão: a fusão reconstrói a
+    # linha em 9 posições, então derivar antes perderia a 10ª nos homônimos.
+    linhas = _com_teto_secundario(list(vistos.values()))
     return linhas, {"lf": lf, "cortes": resumos}
 
 
@@ -804,8 +828,21 @@ def gravar(linhas) -> int:
             dst.close()
     dst = destino(porta=5432)
     try:
-        cols = ",".join(COLUNAS)
-        atualiza = ",".join(f"{k}=EXCLUDED.{k}" for k in COLUNAS
+        # A coluna secundária é contrato NOVO com a agência (Decisão 6: coluna é
+        # combinada, não empurrada — e o ALTER é deles, somos só INSERT). Enquanto
+        # ela não existir lá, publicamos o contrato antigo e avisamos; quando o
+        # ALTER deles entrar, a rodada seguinte já a preenche sozinha.
+        tem_secundaria = bool(dst.run(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema='public' "
+            "AND table_name='scores_inbound' AND column_name=:c",
+            c=COLUNA_SECUNDARIA))
+        colunas = COLUNAS + [COLUNA_SECUNDARIA] if tem_secundaria else COLUNAS
+        if not tem_secundaria:
+            linhas = [x[:len(COLUNAS)] for x in linhas]
+            print(f"  coluna {COLUNA_SECUNDARIA} ainda não existe no destino: "
+                  f"publicando sem ela (pedir o ALTER à agência)")
+        cols = ",".join(colunas)
+        atualiza = ",".join(f"{k}=EXCLUDED.{k}" for k in colunas
                             if k not in ("tipo", "chave"))
         vals, par = [], {}
         for j, linha in enumerate(linhas):
