@@ -103,6 +103,7 @@ atualizada de hora em hora no minuto :22. Chave única `(tipo, chave)`.
 | `chave` | nome do anúncio/campanha (ou "anúncio @ campanha" nas unidades). Anúncio do GOOGLE leva prefixo `[G]` (resolvedor via Google Ads API v22, PR #212); dois anúncios com o mesmo nome fundem por soma ponderada de leads (PR #214) |
 | `teto_cpl` | pague até ISTO por lead desta chave pra dobrar o dinheiro |
 | `teto_roas_alvo` | a meta embutida no número acima (2,0) |
+| `teto_cpl_roas15` | o MESMO teto com meta de ROAS 1,5 (23/08): a meta é só divisor, então é o teto publicado × alvo/1,5, derivado por último (depois da moeda e da fusão de homônimos). Só é gravada se a coluna existir no Supabase deles (contrato: o ALTER é da agência, Decisão 6); sem ela o push publica o contrato antigo e avisa |
 | `teto_referencia` | o selo: qual referência+fator+commit geraram o número, ou o MOTIVO de não haver teto |
 | `pct_top20`/`delta_vs_referencia` | a nota de qualidade do público que já existia antes |
 
