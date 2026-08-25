@@ -116,6 +116,42 @@ def main() -> int:
                          br(x.get("roas"), 2), _cor(x.get("lucro"))])
     tab_camp = _tab(["Campanha", "Tipo", "Gasto", "Cadastros", "CPL", "Vendas",
                      "Faturamento", "ROAS", "Lucro"], linhas_c)
+    # Destaques gerados do próprio contrato: o criativo que DOMINA a verba da
+    # campanha separa positiva de negativa (pedido do Ramon, 24/08).
+    if tem_venda:
+        g_cria_cid = {}
+        for x in u:
+            if x.get("gasto"):
+                d = g_cria_cid.setdefault(x["cid"], {})
+                d[x["criativo"]] = d.get(x["criativo"], 0) + x["gasto"]
+        pos, neg, dom_pos = [], [], {}
+        for x in ca:
+            if not x.get("gasto") or x["gasto"] < 1000 or x.get("lucro") is None:
+                continue
+            d = g_cria_cid.get(x["cid"])
+            if not d:
+                continue
+            top = max(d, key=d.get)
+            (pos if x["lucro"] > 0 else neg).append((x, top))
+            if x["lucro"] > 0:
+                dom_pos[top] = dom_pos.get(top, 0) + 1
+        if pos and dom_pos:
+            lider = max(dom_pos, key=dom_pos.get)
+            p_com = sum(1 for _, t in pos if t == lider)
+            n_com = sum(1 for _, t in neg if t == lider)
+            zero = [x for x in ca if (x.get("gasto") or 0) > 1000 and x.get("vendas") == 0]
+            l_pos = sum(x["lucro"] for x, _ in pos)
+            l_neg = sum(x["lucro"] for x, _ in neg)
+            tab_camp += (
+                f"<p class='h2sub' style='margin-top:10px'><b>Como ler os destaques:</b> o que "
+                f"separa campanha positiva de negativa aqui é o CRIATIVO que domina a verba dela. "
+                f"Das <b>{len(pos)}</b> campanhas com lucro (juntas {br(l_pos, 0, '+R$ ')}), "
+                f"<b>{p_com}</b> têm o <b>{lider}</b> como maior verba; das <b>{len(neg)}</b> "
+                f"negativas (juntas {br(l_neg, 0, 'R$ ')}), só {n_com}. "
+                f"{len(zero)} campanhas fecharam a captação com conversão ZERO tendo gasto "
+                f"{br(sum(x['gasto'] for x in zero), 0, 'R$ ')} — verba dominada por criativos "
+                f"fora do teto. A leitura vale para os três tipos: o público muda o tamanho do "
+                f"lucro, mas quem decide o SINAL é o criativo.</p>")
 
     # ── tela 3: criativos por tipo (verba + qualidade + efeito na conversão) ─
     # Efeito do criativo = quanto o HISTÓRICO dele multiplica a conversão prevista
@@ -241,6 +277,15 @@ def main() -> int:
                       br(x.get("faturamento"), 2, "R$ "), br(_roas7(x), 2), _cor(x.get("lucro"))])
     tab_cria_tipo = _tab(["Criativo", "Tipo", "Gasto", "CPL", "Teto", "Efeito na conversão",
                           "Faturamento", "ROAS", "Lucro"], rows7)
+    ra = j["acima"].get("roas_ponderado")
+    tab_cria_tipo += (
+        "<p class='h2sub' style='margin-top:10px'><b>Como ler CPL acima do teto COM lucro:</b> "
+        "o teto é o preço máximo do lead que ainda entrega a META de ROAS 2,0 — não é a linha "
+        "do prejuízo. Quem comprou acima do teto e mesmo assim lucrou, lucrou ABAIXO da meta"
+        + (f" (o conjunto que estourou fez ROAS {br(ra, 2)} agregado, não 2,0)" if ra else "")
+        + ". Na régua de 1,5 em cogitação o teto cresce ×1,33, e casos assim passam a caber — "
+        "linha acima do teto com ROAS alto e POUCAS vendas é amostra pequena, não régua "
+        "errada.</p>")
 
     import pandas as pd
     from openpyxl.styles import Font

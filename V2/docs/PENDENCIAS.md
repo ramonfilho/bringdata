@@ -26,6 +26,15 @@ revisão com 100% do tráfego no describe do serviço. ~10 linhas de shell em 2 
 teste estilo escotilha (`--help`, sem deploy real). Exige worktree + PR (api/ é
 bloqueado na main). Risco alto por ser a escotilha de emergência: testar sem tocar produção.
 
+### 3. Teto ANTECIPADO para a equipe de tráfego (aprovado 25/08)
+Hoje o teto por unidade só aparece depois de 100 leads. Entregar: (a) o QUADRO DE LARGADA
+por par criativo×campanha antes do primeiro real (teto de largada = nota histórica do
+criativo × conversão esperada do público × valor por venda ÷ meta; razão CPL corrente ÷
+teto de largada decide escala/teste/não-sobe); (b) primeira leitura a partir de ~15 leads /
+R$ 300 (pisos da auditoria de decisões do LF64). As peças já existem na máquina
+(histórico point-in-time, referência, tetos_completos); falta o produto que entrega isso
+diariamente à mesa do tráfego.
+
 ## Registrados, sem prioridade (o dono mandou deixar pra lá por enquanto)
 
 - **Cadastros sem UTM desde 03/08** (13,6 mil linhas na `analytics.cadastros`): as 2
