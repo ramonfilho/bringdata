@@ -251,21 +251,8 @@ def main() -> int:
                  "ainda não isolada.</p>")
 
     # ── telas 5 e 6: menor CPL e ranking ─────────────────────────────────────
-    um = [x for x in u if x.get("cpl") is not None and (x.get("leads_ledger") or 0) >= 100]
-    # (tela 5 'menor CPL' removida em 24/08: a lição dela vive na conclusão)
+    # (telas 'menor CPL' e 'ranking por lucro' removidas a pedido do Ramon, 24-25/08)
 
-    chave_rank = "lucro" if tem_venda else "folga"
-    rank = sorted([x for x in um if x.get(chave_rank) is not None],
-                  key=lambda x: -(x[chave_rank]))[:12]
-    # Coluna "Folga" REMOVIDA temporariamente do ranking (pedido do Ramon,
-    # 24/08/2026); a ordenação provisória sem venda continua sendo por folga.
-    rows6 = [[x["criativo"][:38], _tipo(x), br(x.get("gasto"), 2, "R$ "),
-              br(x.get("cpl"), 2, "R$ "),
-              br(x.get("faturamento"), 2, "R$ "),
-              (br(x.get("lucro"), 2, "R$ "), "pos" if (x.get("lucro") or 0) > 0 else "neg")
-              if x.get("lucro") is not None else "—"]
-             for x in rank]
-    tab_rank = _tab(["Criativo", "Tipo", "Gasto", "CPL", "Faturamento", "Lucro"], rows6)
 
     # ── tela 7: criativo AGREGADO por tipo (todas as campanhas do tipo somadas) ──
     # No HTML só entra gasto > R$ 300 (mesmo piso do corte do teto); a lista
@@ -276,31 +263,23 @@ def main() -> int:
     def _roas7(x):
         return (x["faturamento"] / x["gasto"]) if (x.get("faturamento") is not None
                                                    and x.get("gasto")) else None
-    def _fx7(x):
-        tc = teto_cria.get((x["modelo"], x["criativo"]))
-        ef = _efeito(efeito_cria, "c", x["modelo"], x["criativo"])
-        cel_ef = ("—" if ef is None else
-                  (f"{'+' if ef >= 0 else ''}{br(100 * ef, 1)}%", "pos" if ef >= 0 else "neg"))
-        return (br(tc[0] / tc[1], 2, "R$ ") if tc and tc[1] else "—"), cel_ef
     rows7 = []
     for x in ct_ord:
         if (x.get("gasto") or 0) <= 300:
             continue
-        cel_teto, cel_ef = _fx7(x)
+        tc = teto_cria.get((x["modelo"], x["criativo"]))
+        t2 = tc[0] / tc[1] if tc and tc[1] else None
         rows7.append([x["criativo"][:38], x["modelo"], br(x.get("gasto"), 2, "R$ "),
-                      br(x.get("cpl"), 2, "R$ "), cel_teto, cel_ef,
+                      br(x.get("cpl"), 2, "R$ "), br(t2, 2, "R$ "),
+                      br(t2 * (2.0 / 1.5), 2, "R$ ") if t2 is not None else "—",
                       br(x.get("faturamento"), 2, "R$ "), br(_roas7(x), 2), _cor(x.get("lucro"))])
-    tab_cria_tipo = _tab(["Criativo", "Tipo", "Gasto", "CPL", "Teto", "Efeito na conversão",
+    tab_cria_tipo = _tab(["Criativo", "Tipo", "Gasto", "CPL", "Teto 2x", "Teto 1,5x",
                           "Faturamento", "ROAS", "Lucro"], rows7)
-    ra = j["acima"].get("roas_ponderado")
     tab_cria_tipo += (
-        "<p class='h2sub' style='margin-top:10px'><b>Como ler CPL acima do teto COM lucro:</b> "
-        "o teto é o preço máximo do lead que ainda entrega a META de ROAS 2,0 — não é a linha "
-        "do prejuízo. Quem comprou acima do teto e mesmo assim lucrou, lucrou ABAIXO da meta"
-        + (f" (o conjunto que estourou fez ROAS {br(ra, 2)} agregado, não 2,0)" if ra else "")
-        + ". Na régua de 1,5 em cogitação o teto cresce ×1,33, e casos assim passam a caber — "
-        "linha acima do teto com ROAS alto e POUCAS vendas é amostra pequena, não régua "
-        "errada.</p>")
+        "<p class='h2sub' style='margin-top:10px'>Os tetos acima são o agregado do criativo "
+        "no tipo (média ponderada pelos leads das campanhas em que ele rodou). Se precisarem "
+        "da quebra por campanha — quanto cada campanha contribuiu para esse número, útil "
+        "quando há configurações de campanha diferentes — é só pedir: a base já existe.</p>")
 
     import pandas as pd
     from openpyxl.styles import Font
@@ -375,12 +354,6 @@ def main() -> int:
              "sub": "Unidade = criativo×campanha com ≥100 leads e ≥R$ 300 de gasto. "
                     "*Meta = ROAS 2,0 com tolerância de 2% (um 1,97 conta).",
              "html": tab_teto},
-            {"title": ("6 · Ranking por lucro" if tem_venda else
-                       "6 · Ranking — por folga, enquanto não há lucro para ordenar"),
-             "sub": ("Do maior para o menor lucro." if tem_venda else
-                     "Sem venda ingerida a coluna de lucro fica vazia; a ordem provisória é a folga "
-                     "(quem mais respeita o teto). A rodada com vendas reordena por lucro."),
-             "html": tab_rank},
             {"title": "7 · Criativo agregado por tipo de campanha",
              "sub": "Cada linha soma TODAS as campanhas de um tipo em que o criativo rodou. "
                     "Teto = o CPL máximo que a unidade sustenta na meta de ROAS 2,0 (condensa a "

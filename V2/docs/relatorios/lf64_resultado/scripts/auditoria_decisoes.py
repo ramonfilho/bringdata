@@ -75,7 +75,7 @@ neg["dia"] = pd.to_datetime(neg["data_captura"], utc=True).dt.tz_convert("Americ
 neg["unit"] = list(zip(neg["cid"].astype(str), neg["criativo"]))
 
 FATOR15 = 2.0 / 1.5
-PISOS = [(300, 15), (500, 20), (1000, 30)]   # sensibilidade: o teto existe com pouco gasto
+PISOS = [(300, 15), (300, 100), (1000, 30)]   # (300,100) = alarme REAL: o teto so e confiavel aos 100 leads
 units = sorted({k for (k, _) in gasto_dia} & {(str(a), b) for a, b in teto_unid})
 saida = {}
 for GMIN, LMIN in PISOS:
@@ -122,7 +122,7 @@ for GMIN, LMIN in PISOS:
           f"→ devolveu {sum(r['vendas_apos'] for r in ev)} vendas R$ {sum(r['fat_apos'] for r in ev):,.0f}  "
           f"| falsos alarmes: pós-sinal R$ {sum(r['gasto_apos'] for r in fa):,.0f} "
           f"→ {sum(r['vendas_apos'] for r in fa)} vendas R$ {sum(r['fat_apos'] for r in fa):,.0f}")
-    if GMIN == 300:
+    if (GMIN, LMIN) == (300, 100):
         for r in res[:14]:
             print(f"    {r['criativo'][:30]:30s} teto {r['teto']:>6.2f}  sinal {r['dstar']} "
                   f"c/ R$ {r['gasto_no_sinal']:>5,}  APÓS: R$ {r['gasto_apos']:>6,} · "
