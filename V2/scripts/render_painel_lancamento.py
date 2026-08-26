@@ -410,6 +410,12 @@ def main() -> int:
 
     # Conclusão do lançamento: análise autoral deste LF vive em conclusao.html na
     # pasta do relatório (não no script, que é genérico); entra ANTES do carimbo.
+    # Nota por-LF sob a tabela do criativo agregado: nota_criativos.html na pasta.
+    nota_cria = pasta / "nota_criativos.html"
+    if nota_cria.exists():
+        sec = next(x for x in spec["sections"] if "Criativo agregado" in x["title"])
+        sec["html"] += nota_cria.read_text()
+
     conclusao = pasta / "conclusao.html"
     if conclusao.exists():
         carimbo = next(i for i, x in enumerate(spec["sections"])
