@@ -35,7 +35,12 @@ teto de largada decide escala/teste/não-sobe); (b) primeira leitura de PREÇO a
 ~100 leads — abaixo disso é ruído (constatação do Ramon, 25/08). QUESTÃO ABERTA a medir
 antes de construir: o criativo carrega o próprio público? (se o histórico de %D9-D10 do
 CRIATIVO prevê o público realizado da unidade melhor que a média da campanha, o quadro
-ganha a metade do público sem esperar os 100 leads). As peças já existem na máquina
+ganha a metade do público sem esperar os 100 leads). RESOLUÇÕES CANDIDATAS para o
+COLD START (criativo estreante, sem histórico nenhum — caso AD0424 do LF64): (a) o
+teto de largada acima; (b) verba de teste limitada (R$ 700-1.000 por criativo) até a
+primeira leitura; (c) **pontuação do criativo pelo TEXTO** antes de existir histórico
+de conversão — o Ramon já tem protótipo com pontuação mais eficiente que a nota cega;
+feature ainda não disponível (registrado 26/08). As peças já existem na máquina
 (histórico point-in-time, referência, tetos_completos); falta o produto que entrega isso
 diariamente à mesa do tráfego.
 
