@@ -44,6 +44,17 @@ feature ainda não disponível (registrado 26/08). As peças já existem na máq
 (histórico point-in-time, referência, tetos_completos); falta o produto que entrega isso
 diariamente à mesa do tráfego.
 
+### 4. Histórico de criativo em DOIS tempos por semana (seg + qui) — pedido 27/08
+Hoje o histórico que alimenta o teto vivo atualiza 1x/semana (refresh de segunda
+06:30 UTC) e só conta lançamento FECHADO (`vendas_end < hoje - 2`). O Ramon quer
+2 tempos (segunda E quinta), porque carrinho abre toda segunda e a maior parte
+das vendas é do 1º dia: a captação corrente precisa se beneficiar da performance
+do criativo no lançamento de carrinho aberto (ex.: AD0160/AD0424 do LF64).
+ATENÇÃO no desenho: frequência sozinha NÃO resolve — a regra de só contar
+lançamento fechado é o portão real; incluir lançamento aberto grava compra=0 em
+lead que ainda pode comprar (subconta). Precisa de desenho (janela parcial
+madura? contar só vendas já ocorridas com esperados da mesma janela?).
+
 ## Registrados, sem prioridade (o dono mandou deixar pra lá por enquanto)
 
 - **Cadastros sem UTM desde 03/08** (13,6 mil linhas na `analytics.cadastros`): as 2
