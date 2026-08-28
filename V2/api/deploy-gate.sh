@@ -31,6 +31,13 @@ API_SVC="smart-ads-api"; MON_SVC="smart-ads-monitoring"
 # o cron do dia seguinte passar. Janela de horas com o serviço PÚBLICO que atende a
 # Hotmart rodando código diferente do resto. Serviço novo que espelhe a imagem entra AQUI.
 ESPELHOS="${ESPELHOS:-$MON_SVC smart-ads-webhook}"
+# Papel de cada espelho (a env SERVICE_ROLE que api/auth.py lê). Vazio = papel `full`,
+# o default do código, que não precisa ser escrito. O `smart-ads-webhook` é o único
+# serviço público: sem SERVICE_ROLE=webhook ele volta a servir as 36 rotas da API.
+# `papel_do_servico()` cai em `full` quando a env falta, então o valor ausente ABRE a
+# superfície em silêncio. GÊMEA da função em lib/sync_espelhos_cron.sh: mudou aqui,
+# muda lá (aquele arquivo roda do GCS, sem o repo, e não pode sourcear este).
+papel_do_espelho(){ case "$1" in smart-ads-webhook) echo "webhook";; *) echo "";; esac; }
 DEPLOY_CAPI="$REPO/V2/api/deploy_capi.sh"
 GS_BASE="gs://smart-ads-mlflow/deploy-gate"; LOCK_OBJ="$GS_BASE/lock.json"; LOCK_TTL_MIN=45
 
@@ -55,7 +62,7 @@ rev_field(){ gcloud run revisions describe "$1" --region="$REGION" --project="$P
 try:
   d=json.load(sys.stdin); c=d['spec']['containers'][0]
   e={x['name']:x.get('value') for x in c.get('env',[]) if 'value' in x}
-  print({'sha':e.get('DEPLOY_GIT_SHA') or 'unknown','image':c.get('image','')}.get('$2',''))
+  print({'sha':e.get('DEPLOY_GIT_SHA') or 'unknown','image':c.get('image',''),'papel':e.get('SERVICE_ROLE') or ''}.get('$2',''))
 except Exception: pass"; }
 rev_ready(){ gcloud run revisions describe "$1" --region="$REGION" --project="$PROJECT" --format='value(status.conditions[0].status)' 2>/dev/null; }
 rel_to_main(){ local sha="$1"
@@ -151,14 +158,24 @@ cmd_promote(){ local rev="${PROMOTE_REV:-}" svc="${PROMOTE_SVC:-$API_SVC}" to="$
   fi; }
 
 # Alinha UM espelho à imagem viva do scorer. Devolve != 0 se falhar.
-sync_um_espelho(){ local svc="$1" ai="$2" as="$3" mr mi newrev ready
+sync_um_espelho(){ local svc="$1" ai="$2" as="$3" mr mi mp papel img envs precisa="" newrev ready
   mr=$(live_revision "$svc"); mi=$(rev_field "$mr" image)
   [ -n "$mr" ] || { warn "$svc: não achei revisão viva — pulo."; return 0; }
   info "$svc vivo: $(rev_field "$mr" sha) ($mr)"
-  [ "$ai" = "$mi" ] && { ok "$svc: já na mesma imagem — nada a fazer."; return 0; }
-  if [ "${DRY_RUN:-false}" = true ]; then echo "── PLANO (dry-run) ── $svc -> imagem viva do api ($as): cria revisão, ROTEIA tráfego 100%, verifica Ready, rollback p/ $mr se falhar"; return 0; fi
-  # 1) cria a revisão nova (imagem viva do api + label correta). Tráfego pinado => nasce a 0%.
-  newrev=$(gcloud run services update "$svc" --region="$REGION" --project="$PROJECT" --image="$ai" --update-env-vars="DEPLOY_GIT_SHA=$as" --format='value(status.latestCreatedRevisionName)' 2>/dev/null)
+  papel=$(papel_do_espelho "$svc"); mp=$(rev_field "$mr" papel)
+  # Imagem atrasada e papel ausente são drifts INDEPENDENTES. Um serviço recriado do
+  # zero nasce na imagem certa e sem SERVICE_ROLE, e nesse dia não há drift de imagem
+  # nenhum para carregar o conserto de carona.
+  [ "$ai" != "$mi" ] && precisa="imagem"
+  [ -n "$papel" ] && [ "$mp" != "$papel" ] && precisa="${precisa:+$precisa+}papel"
+  [ -n "$precisa" ] || { ok "$svc: mesma imagem e papel '${papel:-full}' correto — nada a fazer."; return 0; }
+  # Quando o buraco é só o papel, a revisão nova nasce da MESMA imagem que já serve:
+  # consertar env não é desculpa para empurrar imagem nova num serviço que não pediu.
+  img="$mi"; [ "$ai" != "$mi" ] && img="$ai"
+  envs="DEPLOY_GIT_SHA=$as"; [ -n "$papel" ] && envs="$envs,SERVICE_ROLE=$papel"
+  if [ "${DRY_RUN:-false}" = true ]; then echo "── PLANO (dry-run) ── $svc [$precisa] -> imagem $img (env: $envs): cria revisão, ROTEIA tráfego 100%, verifica Ready, rollback p/ $mr se falhar"; return 0; fi
+  # 1) cria a revisão nova (imagem certa + label + papel do serviço). Tráfego pinado => nasce a 0%.
+  newrev=$(gcloud run services update "$svc" --region="$REGION" --project="$PROJECT" --image="$img" --update-env-vars="$envs" --format='value(status.latestCreatedRevisionName)' 2>/dev/null)
   [ -n "$newrev" ] || { err "não criei a revisão nova do $svc."; ledger_write sync "$svc" "$mi" "$as" fail update; return 1; }
   info "$svc: revisão nova $newrev"
   # 2) ROTEIA o tráfego (o passo que faltava: trata o tráfego pinado)
@@ -168,8 +185,9 @@ sync_um_espelho(){ local svc="$1" ai="$2" as="$3" mr mi newrev ready
   if [ "$ready" != "True" ]; then err "$svc: revisão nova não ficou Ready ($ready) — ROLLBACK p/ $mr."
     gcloud run services update-traffic "$svc" --region="$REGION" --project="$PROJECT" --to-revisions="$mr=100" >/dev/null 2>&1
     ledger_write sync "$svc" "$mi" "$as" fail rollback-not-ready; return 1; fi
-  ok "$svc roteado p/ $newrev ($as), Ready."
-  ledger_write sync "$svc" "$mi" "$as" ok route+ready
+  ok "$svc roteado p/ $newrev ($as), Ready [$precisa]."
+  ledger_write sync "$svc" "$mi" "$as" ok "route+ready:$precisa"
+  [ "$precisa" = papel ] && warn "$svc estava SEM SERVICE_ROLE=$papel: enquanto faltou, ele servia as rotas todas."
   info "rollback (se precisar): gcloud run services update-traffic $svc --region=$REGION --to-revisions=$mr=100"; }
 
 cmd_sync_monitoring(){ local ar ai as falhou=0; ar=$(live_revision "$API_SVC"); ai=$(rev_field "$ar" image); as=$(rev_field "$ar" sha)
