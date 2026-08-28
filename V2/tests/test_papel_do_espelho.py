@@ -102,6 +102,36 @@ def test_o_papel_entra_no_update_env_vars(nome):
     )
 
 
+def _leitores_de_env() -> str:
+    """As funções que leem env de uma revisão, recortadas para rodar isoladas."""
+    linhas = _ARQUIVOS["sync_espelhos_cron.sh"].read_text(encoding="utf-8").splitlines()
+    ini = next(i for i, l in enumerate(linhas) if l.startswith("rev_env()"))
+    fim = next(i for i, l in enumerate(linhas) if l.startswith("rev_papel()"))
+    return "\n".join(linhas[ini:fim + 1])
+
+
+def _sem_gcloud(chamada: str) -> str:
+    """Roda a chamada com o `gcloud` mudo: simula revisão sem a env, sem rede."""
+    script = f'gcloud(){{ return 0; }}\nPROJECT=x; REGION=y\n{_leitores_de_env()}\n{chamada}'
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=30)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
+
+
+def test_papel_ausente_volta_vazio_e_nao_unknown():
+    """`${3:-unknown}` trocaria a string VAZIA pelo default e mentiria no log.
+
+    A auto-cura sobrevivia ao bug, porque qualquer valor diferente do declarado
+    dispara o conserto. O que quebrava era a leitura humana: o log diria papel
+    'unknown' onde o certo é 'ausente', e o comentário do código afirmava
+    exatamente o contrário do que o código fazia.
+    """
+    assert _sem_gcloud("rev_papel revisao-qualquer") == ""
+    assert _sem_gcloud("rev_sha revisao-qualquer") == "unknown", (
+        "o fallback explícito das outras chaves não pode ter sido perdido junto"
+    )
+
+
 @pytest.mark.parametrize("nome", sorted(_ARQUIVOS))
 def test_papel_e_conferido_mesmo_sem_drift_de_imagem(nome):
     """O contrato nº 3, o que a versão ingênua da correção não daria."""
