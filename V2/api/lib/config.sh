@@ -239,6 +239,21 @@ build_env_vars() {
     # Default propagated entre deploys; mude pra "false" aqui em emergência.
     ENV_VARS="$ENV_VARS,PUBSUB_CAPI_ENABLED=true"
 
+    # Alertas críticos: as 9 regras de src/monitoring/critical_alerts.py, avaliadas
+    # de carona no polling de 5 min. O CÓDIGO nasce MUDO: os dois pontos que leem a
+    # flag (critical_alerts.py:711 e :764) têm default 'true', e em dry-run o
+    # despachante só loga "[DRY-RUN] enviaria DM" e não posta nada.
+    # A produção está ao vivo desde ~15/08/2026 só porque alguém setou a env na mão
+    # no serviço, e o deploy usa --update-env-vars (MESCLA), que preserva o valor sem
+    # o script saber que ele existe. Recriar o serviço do zero, ou um deploy com
+    # --set-env-vars, devolveria os 9 alertas ao silêncio SEM NINGUÉM VER: alerta que
+    # não dispara não tem como avisar que parou. Mesmo motivo do LEDGER_TARGET abaixo:
+    # comportamento crítico mora no default daqui, não em env que alguém precisa
+    # lembrar. Rollback consciente = exportar CRITICAL_ALERTS_DRY_RUN=true.
+    # A entrega ainda depende de SLACK_BOT_TOKEN (secret montado no serviço) e de
+    # SLACK_USER_DM; sem os dois, _post_dm devolve 'error' e o alerta morre na porta.
+    ENV_VARS="$ENV_VARS,CRITICAL_ALERTS_DRY_RUN=${CRITICAL_ALERTS_DRY_RUN:-false}"
+
     # Ledger no Cloud SQL nosso (PLANO_LEDGER_CLOUDSQL.md Etapa 4).
     # LEDGER_TARGET: railway | dual (migração) | cloudsql (final — DEFAULT desde 23/06).
     # DEFAULT=cloudsql: a Etapa 4 cortou a escrita no Railway após 7 dias de
