@@ -48,12 +48,17 @@ try:
 except Exception: pass"; }
 rev_img(){ gcloud run revisions describe "$1" --region="$REGION" --project="$PROJECT" --format='value(spec.containers[0].image)' 2>/dev/null; }
 rev_env(){ gcloud run revisions describe "$1" --region="$REGION" --project="$PROJECT" --format=json 2>/dev/null \
-  | ENV_KEY="$2" ENV_FALLBACK="${3:-unknown}" python3 -c "import json,os,sys
+  | ENV_KEY="$2" ENV_FALLBACK="${3-unknown}" python3 -c "import json,os,sys
 try:
  d=json.load(sys.stdin); e={x['name']:x.get('value') for x in d['spec']['containers'][0].get('env',[]) if 'value' in x}
  print(e.get(os.environ['ENV_KEY'], os.environ['ENV_FALLBACK']))
 except Exception: print(os.environ['ENV_FALLBACK'])"; }
 rev_sha(){ rev_env "$1" DEPLOY_GIT_SHA unknown; }
+# `${3-unknown}` e NÃO `${3:-unknown}`: com os dois-pontos, o bash troca também a
+# string VAZIA pelo default, e o rev_papel abaixo, que passa "" de propósito, voltava
+# 'unknown' para serviço sem SERVICE_ROLE. A auto-cura ainda funcionava (qualquer
+# valor diferente do declarado dispara), mas o log dizia papel 'unknown' onde o
+# certo é 'ausente', e o comentário abaixo mentia sobre o próprio código.
 # Papel VIVO do serviço. Fallback vazio de propósito: env ausente é exatamente o
 # estado que precisa ser corrigido, e 'unknown' aqui viraria um papel inventado.
 rev_papel(){ rev_env "$1" SERVICE_ROLE ""; }
