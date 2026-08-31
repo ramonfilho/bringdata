@@ -558,6 +558,7 @@ def constroi_lancamento(lf: str, *, as_of: Optional[date] = None,
                                                   _load_launch_products,
                                                   _load_matched,
                                                   _load_meta_gross_up,
+                                                  build_matched_df,
                                                   read_analytics_sales,
                                                   read_ledger_leads,
                                                   read_sales_coverage)
@@ -646,6 +647,23 @@ def constroi_lancamento(lf: str, *, as_of: Optional[date] = None,
         sep_temp = separacao_por_temperatura(m["matched_modelo"],
                                              tem_venda=tem_venda)
 
+        # De onde veio o comprador (nota 8 do Ramon, 31/08): a tabela de
+        # campanhas casa venda SÓ com cadastro da captação DESTE LF; as vendas
+        # 'Não está na base' são re-casadas aqui contra os cadastros dos 90
+        # dias ANTERIORES à captação. O render monta a tabela: este LF /
+        # captação dos 90d anteriores / sem cadastro nos 90d. Mesmo matcher
+        # canônico e mesmo haircut de boleto das outras contas.
+        naobase_90d = None
+        if tem_venda and m["naobase_sales"] is not None and len(m["naobase_sales"]):
+            antigos = read_cadastros(rc, cap_start - timedelta(days=90),
+                                     cap_start - timedelta(days=1))
+            m90 = build_matched_df(antigos, m["naobase_sales"], window_days=180)
+            b90 = _bucket_metrics(m90, "cadastro 90d", "cadastro 90d",
+                                  investimento=None, haircut=haircut)
+            naobase_90d = dict(vendas=b90.n_conversions,
+                               faturamento=b90.faturamento,
+                               cadastros_antigos=int(len(antigos)))
+
         # RÉGUA DE PRODUTO — enumerado obrigatório da janela de vendas: cada
         # produto vendido, com a flag "casou algum padrão do yaml". Produto órfão
         # (vendeu e não casou) é o buraco de 36% do DEV21; aqui ele fica VISÍVEL
@@ -698,6 +716,7 @@ def constroi_lancamento(lf: str, *, as_of: Optional[date] = None,
                 leads_criativo_macro=int(crit.isin(("{{ad.name}}", "{{adset.name}}")).sum()),
                 ids_nao_resolvidos=ids_nao_resolvidos),
             produtos_janela=produtos,
+            naobase_90d=naobase_90d,
         )
         return dict(campanhas=campanhas, unidades=unidades,
                     criativos_por_tipo=por_tipo, julgamento=julg,
