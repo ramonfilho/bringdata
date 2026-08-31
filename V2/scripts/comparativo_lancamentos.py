@@ -186,22 +186,29 @@ def _veredito(alvo, at, prev):
         pct = (100 * (r["a_fat"] / at["gasto"]) / (r["p_fat"] / prev["gasto"])
                if (at["gasto"] and prev["gasto"] and r["p_fat"]) else None)
         em_curso = (f", e o {r['k']}º dia daqui ainda está em curso" if r["dia_corrente"] else "")
-        sinal = ("o ritmo por real investido já está no nível do anterior; a diferença é SÓ calendário"
-                 if (pct or 0) >= 95 else
-                 f"um ritmo de venda em {br(pct, 0)}% do anterior por real investido: pequeno demais pra condenar com o dia aberto, grande demais pra ignorar se persistir")
         p += (f"3- O carrinho é quase todo 1º dia: no {prev['lf']}, "
               f"{br(r['share1'], 0)}% do faturamento da semana caiu no dia da abertura "
               f"(R$ {br(r['p_fat'], 0)} de R$ {br(r['p_full'], 0)}){em_curso}. "
               + ("Medindo o MESMO 1º dia direto na tabela de vendas, " if r["k"] == 1
                  else f"Medindo os MESMOS {r['k']} primeiros dias direto na tabela de vendas, ")
-              + 
-              f"mesma régua pros dois: {alvo} R$ {br(r['a_fat'], 0)} "
+              + f"mesma régua pros dois: {alvo} R$ {br(r['a_fat'], 0)} "
               f"({br(r['a_fat'] / at['gasto'], 2)} por real gasto) contra "
               f"R$ {br(r['p_fat'], 0)} do {prev['lf']} "
-              f"({br(r['p_fat'] / prev['gasto'], 2)} por real). "
-              f"4- Veredito: a maior parte do buraco de lucro da tabela é o carrinho "
-              f"recém-aberto, não queda de conversão; o que já é sinal de verdade é {sinal}. "
-              f"Re-rodar o botão amanhã fecha a dúvida.")
+              f"({br(r['p_fat'] / prev['gasto'], 2)} por real). ")
+        if (pct or 0) >= 95:
+            p += (f"4- Conversão no nível do anterior ({br(pct, 0)}% por real investido): "
+                  "o buraco de lucro da tabela é só o calendário do carrinho. ")
+        else:
+            p += (f"4- A conversão do lançamento ESTÁ menor: {br(pct, 0)}% do ritmo do "
+                  f"{prev['lf']} por real investido, já descontado o calendário"
+                  + (" (o dia ainda aberto pode fechar parte disso)" if r["dia_corrente"] else "")
+                  + ". Das variáveis que a gente mede, a única que mudou pra pior e pode "
+                  "explicar essa queda é a verba menos concentrada no criativo campeão "
+                  f"({_pp(at['conc1'], prev['conc1'])}pp); lead mais caro e público pior "
+                  "estão descartados no item 1. O que passar disso NÃO tem explicação nas "
+                  "variáveis que medimos hoje (página, oferta, momento do público): fica "
+                  "registrado como efeito não medido, não como causa encontrada. ")
+        p += "Amanhã, com o dia fechado, este parágrafo se atualiza sozinho."
     p += "</p>"
     return p
 
