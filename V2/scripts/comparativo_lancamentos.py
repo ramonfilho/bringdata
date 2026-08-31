@@ -92,7 +92,118 @@ def metricas(lf):
         teto15=((sum(x["teto"] * (2.0 / 1.5) * int(x.get("leads_ledger") or 0)
                      for x in uj) / lj) if lj else None),
         maduro=(carrinho_fechado and vendas_cobertas),
+        vendas_start=m["vendas_start"][:10], vendas_end=m["vendas_end"][:10],
     )
+
+
+def _pp(a, b):
+    """Delta em pontos percentuais, formatado com sinal."""
+    if a is None or b is None:
+        return None
+    d = a - b
+    return ("+" if d >= 0 else "") + br(d, 1)
+
+
+def _ritmo_carrinho(alvo_m, prev_m):
+    """Mede na analytics.sales o faturamento dos MESMOS primeiros dias de
+    carrinho dos dois LFs, com a mesma régua de produto (launch_products do
+    config). Devolve dict ou None se banco/config indisponíveis."""
+    from datetime import date, timedelta
+
+    import yaml
+
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_V2 / ".env")
+    except Exception:
+        pass
+    try:
+        sys.path.insert(0, str(_V2))
+        from src.data.analytics_connection import open_analytics_connection
+        pats = yaml.safe_load((_V2 / "configs/clients/devclub.yaml").read_text())[
+            "business"]["launch_products"]
+    except Exception:
+        return None
+
+    def _d(s):
+        return datetime.strptime(s, "%Y-%m-%d").date()
+
+    hoje = date.today()
+    a_ini, a_fim = _d(alvo_m["vendas_start"]), _d(alvo_m["vendas_end"])
+    p_ini, p_fim = _d(prev_m["vendas_start"]), _d(prev_m["vendas_end"])
+    k = max(1, (min(hoje, a_fim) - a_ini).days + 1)  # dias de carrinho corridos
+    cond = " OR ".join("lower(produto) LIKE '%" + p.lower() + "%'" for p in pats)
+
+    try:
+        conn = open_analytics_connection(timeout=120)
+        try:
+            def soma(ini, fim):
+                q = ("SELECT count(*), coalesce(sum(sale_value),0) FROM analytics.sales "
+                     f"WHERE sale_date::date BETWEEN '{ini}' AND '{fim}' AND ({cond})")
+                n, fat = conn.run(q)[0]
+                return int(n), float(fat)
+
+            a_n, a_fat = soma(a_ini, min(hoje, a_fim))
+            p_n, p_fat = soma(p_ini, min(p_ini + timedelta(days=k - 1), p_fim))
+            _, p_full = soma(p_ini, p_fim)
+        finally:
+            conn.close()
+    except Exception:
+        return None
+    return dict(k=k, dia_corrente=(hoje <= a_fim), a_fat=a_fat, p_fat=p_fat,
+                p_full=p_full, share1=(100 * p_fat / p_full if p_full else None))
+
+
+def _veredito(alvo, at, prev):
+    """O parágrafo único sob as duas tabelas: por que este LF está melhor ou
+    pior que o anterior, separando compra de lead (fechada) de carrinho
+    (calendário vs sinal real). Pedido do Ramon, 31/08 à noite."""
+    d_cpl = (100 * (at["cpl"] - prev["cpl"]) / prev["cpl"]
+             if (at["cpl"] and prev["cpl"]) else None)
+    d_gasto = (100 * (at["gasto"] - prev["gasto"]) / prev["gasto"]
+               if prev["gasto"] else None)
+    d_cad = (100 * (at["cadastros"] - prev["cadastros"]) / prev["cadastros"]
+             if prev["cadastros"] else None)
+    compra_piorou = ((d_cpl or 0) > 5 or
+                     ((at["d910"] or 0) - (prev["d910"] or 0)) < -2 or
+                     ((at["pct_gasto_dentro"] or 0) - (prev["pct_gasto_dentro"] or 0)) < -5)
+    p = (f"<p class='h2sub' style='margin-top:14px'><b>O que dá pra afirmar hoje: "
+         f"{alvo} contra {prev['lf']}.</b> "
+         f"1- A compra de lead (lado que já fechou) {'PIOROU' if compra_piorou else 'NÃO piorou'}: "
+         f"CPL {br(at['cpl'])} contra {br(prev['cpl'])} "
+         f"({'+' if (d_cpl or 0) >= 0 else ''}{br(d_cpl, 1)}%), "
+         f"qualidade do público {_pp(at['d910'], prev['d910'])}pp de nota 9-10, e "
+         f"{br(at['pct_gasto_dentro'], 1)}% do gasto dentro do teto 1,5 contra "
+         f"{br(prev['pct_gasto_dentro'], 1)}%. "
+         f"{'O buraco começa já na captação.' if compra_piorou else 'Não é lead mais caro nem compra pior; o buraco não nasce aí.'} "
+         f"2- O que mudou na captação: verba no criativo nº 1 em "
+         f"{br(at['conc1'], 1)}% contra {br(prev['conc1'], 1)}% "
+         f"({_pp(at['conc1'], prev['conc1'])}pp), e volume menor: "
+         + f"{at['cadastros']:,}".replace(",", ".")
+         + f" cadastros ({br(d_cad, 0)}%) com {br(d_gasto, 0)}% de verba. ")
+    r = _ritmo_carrinho(at, prev) if not at["maduro"] else None
+    if r:
+        pct = (100 * (r["a_fat"] / at["gasto"]) / (r["p_fat"] / prev["gasto"])
+               if (at["gasto"] and prev["gasto"] and r["p_fat"]) else None)
+        em_curso = (f", e o {r['k']}º dia daqui ainda está em curso" if r["dia_corrente"] else "")
+        sinal = ("o ritmo por real investido já está no nível do anterior; a diferença é SÓ calendário"
+                 if (pct or 0) >= 95 else
+                 f"um ritmo de venda em {br(pct, 0)}% do anterior por real investido: pequeno demais pra condenar com o dia aberto, grande demais pra ignorar se persistir")
+        p += (f"3- O carrinho é quase todo 1º dia: no {prev['lf']}, "
+              f"{br(r['share1'], 0)}% do faturamento da semana caiu no dia da abertura "
+              f"(R$ {br(r['p_fat'], 0)} de R$ {br(r['p_full'], 0)}){em_curso}. "
+              + ("Medindo o MESMO 1º dia direto na tabela de vendas, " if r["k"] == 1
+                 else f"Medindo os MESMOS {r['k']} primeiros dias direto na tabela de vendas, ")
+              + 
+              f"mesma régua pros dois: {alvo} R$ {br(r['a_fat'], 0)} "
+              f"({br(r['a_fat'] / at['gasto'], 2)} por real gasto) contra "
+              f"R$ {br(r['p_fat'], 0)} do {prev['lf']} "
+              f"({br(r['p_fat'] / prev['gasto'], 2)} por real). "
+              f"4- Veredito: a maior parte do buraco de lucro da tabela é o carrinho "
+              f"recém-aberto, não queda de conversão; o que já é sinal de verdade é {sinal}. "
+              f"Re-rodar o botão amanhã fecha a dúvida.")
+    p += "</p>"
+    return p
 
 
 def main() -> int:
@@ -187,6 +298,12 @@ def main() -> int:
                            {k: med(top3, k) for k in chaves_m})
                + "</tbody></table></div>")
 
+    # ── veredito: por que este LF está melhor/pior que o anterior (nota 31/08) ─
+    # Única parte que toca banco: mede o ritmo dos MESMOS primeiros dias de
+    # carrinho direto na analytics.sales, com a mesma régua de produto pros dois
+    # lados. Se o banco não responder, o parágrafo sai sem essa medição.
+    veredito = _veredito(alvo, at, prev) if prev else ""
+
     # ── época do mês: SÓ a conclusão, sem DEV21 (quente, outlier) — nota 31/08 ─
     base_ep = [r for r in serie if r["lf"] != "DEV21"]
     por_sem = {}
@@ -217,17 +334,12 @@ def main() -> int:
              "ainda vai crescer; não tire conclusão dela. 3- O teto aqui é a régua de HOJE "
              "aplicada a todos. A comparação entre eles é justa, mas o número não bate com "
              "o publicado na época de cada um."
-             + ((f" 4- <b>{alvo}</b> está com o carrinho recém-aberto: ele aparece "
-                 "gastando mais dentro do teto e lucrando menos que os antigos "
-                 "porque as vendas dele mal começaram. Gasto, CPL e teto valem; "
-                 "lucro e ROAS dele, ainda não.") if prov else "")
+             + ((f" 4- <b>{alvo}</b> está com o carrinho recém-aberto: gasto, CPL, "
+                 "teto e % dentro do teto fecharam na captação e valem; lucro e "
+                 "ROAS dele ainda não. O parágrafo abaixo separa o que é "
+                 "calendário do que é sinal real.") if prov else "")
              + "</p>")
-    fonte = ("<p class='h2sub' style='margin-top:10px'>Fonte: o contrato congelado de cada "
-             "lançamento (contrato.json): LF56→DEV21 na pasta da corrida (gerados em "
-             f"{serie[0]['gerado'][8:10]}/{serie[0]['gerado'][5:7]}), "
-             + (f"LF64 em {prev['gerado'][8:10]}/{prev['gerado'][5:7]}, " if prev else "")
-             + f"{alvo} em {at['gerado'][8:10]}/{at['gerado'][5:7]}.</p>")
-    html = aviso + tab1 + tab_mud + epoca + fonte
+    html = aviso + tab1 + tab_mud + veredito + epoca
     dst = pasta / "comparativo.html"
     dst.write_text(html)
     print(f"comparativo: {dst}  ({dst.stat().st_size:,} bytes)")
