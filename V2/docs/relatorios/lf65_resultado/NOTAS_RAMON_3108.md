@@ -61,3 +61,29 @@ Decisões anteriores do dia que continuam valendo: corrida NÃO re-roda; balde
   ainda aberto) e agora é final: ROAS 1,62, lucro +R$ 55k, frio lift 2,98x.
 - Fonte dos números do comparativo: contrato.json de cada LF (corrida 27/08 para
   LF56→DEV21; LF64 e LF65 re-gerados em 31/08).
+
+## Terceira rodada de notas (31/08, print do painel) — status
+
+1. **[x] Comparativo ganhou o bloco "O que mudou"** (% verba no criativo nº 1 e
+   top 3, % leads D9-D10, CPL, teto 1,5 médio, folga) + coluna Teto 1,5 médio ao
+   lado do CPL na 1ª tabela + **top 3 ROAS SEM o DEV21** (quente, outlier) +
+   anterior detectado dinamicamente (nada de LF64 cravado).
+2. **[x] Botão atualiza o ANTERIOR sozinho**: painel_lancamento.sh re-roda o LF
+   anterior quando o carrinho dele fechou e o contrato ficou defasado
+   (PAINEL_SEM_ANTERIOR corta a recursão). Botão também roda o comparativo.
+3. **[x] Texto expandível**: caps de 74ch removidos do template (prose e h2sub
+   acompanham a largura da coluna/tabela).
+4. **[x] Narrativa da tabela de campanhas** agora abre respondendo "por que uma
+   campanha de ML lucra e a outra dá prejuízo" (criativo dominante + preço vs teto).
+5. **[x] Época do mês virou SÓ conclusão** (sem tabelas), sem DEV21, na voz dele.
+6. **[x] Ações re-escritas no molde do plano do grupo** (70/15/15, semáforo 7d/3d
+   contra teto 1,5, funil de teste em 3 etapas, AD0424 prioritário com status real).
+7. **[x] Aderência do LF66 medida** (janela assumida 25-30/08, LF66 AINDA SEM
+   linha na planilha PC FORMULÁRIOS → pendência do Ramon): ver
+   `../lf66_resultado/ADERENCIA_PLANO.md`. Resumo: AD0160 70,3% da verba; ML
+   68,6% (alvo 70); funil de teste abaixo do plano (R$ 5,7k de R$ 9k, 2 de 5-6
+   criativos com verba cheia); Lead padrão 31% (alvo 15).
+8. **[x] Respondida + implementada (PR #253):** a tabela de campanhas casa venda
+   SÓ com cadastro da captação DESTE LF; quem vem de captação anterior cai em
+   "Não está na base". Nova seção 9 no fundo racha essas vendas: cadastro dos
+   90d anteriores vs sem cadastro nos 90d.

@@ -4,7 +4,7 @@
   "lf": "LF65",
   "client_id": "devclub",
   "as_of": "2026-08-31",
-  "gerado_em": "2026-08-31 13:22:43.019115-03:00",
+  "gerado_em": "2026-08-31 13:43:47.018562-03:00",
   "cap_start": "2026-08-18",
   "cap_end": "2026-08-24",
   "vendas_start": "2026-08-31",
@@ -514,7 +514,12 @@
     "valor": 1997.0,
     "casou_padrao": true
    }
-  ]
+  ],
+  "naobase_90d": {
+   "vendas": 0,
+   "faturamento": 0.0,
+   "cadastros_antigos": 107277
+  }
  },
  "julgamento": {
   "julgaveis": 13,

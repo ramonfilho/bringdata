@@ -266,7 +266,11 @@ def main() -> int:
                         f"público ruim.")
                 tab_camp += (
                     f"<p class='h2sub' style='margin-top:10px'><b>O que tirar dessa "
-                    f"tabela:</b> pegue o <b>{lider}</b> e olhe ele em dois públicos. "
+                    f"tabela — por que uma campanha de ML lucra e a outra dá prejuízo?</b> "
+                    f"As campanhas de ML compram gente parecida (quem escolhe o público "
+                    f"é o modelo). O que separa o sinal é QUAL criativo ficou com a "
+                    f"verba, e o preço pago por lead contra o teto. A prova nos "
+                    f"números: pegue o <b>{lider}</b> e olhe ele em dois públicos. "
                     f"No {hi}, cada 100 cadastros dele viram ~{br(cv[hi], 2)} vendas; no "
                     f"{lo}, ~{br(cv[lo], 2)}. Mesmo anúncio, valor por lead "
                     f"{br(cv[hi] / cv[lo], 1)}x diferente: isso é o PÚBLICO definindo o "
@@ -275,8 +279,10 @@ def main() -> int:
                     f"comprando o mesmo tipo de gente; das {b2} que lucraram, {a2} têm o "
                     f"{lider} como maior verba, contra {c2} das {d2} que perderam. Mesmo "
                     f"público, criativos diferentes, sinais opostos: dentro do tipo, quem "
-                    f"separa é o criativo.{contra_txt} Como nenhuma das metades decide "
-                    f"sozinha, a régua que junta as duas é o teto "
+                    f"separa é o criativo.{contra_txt} Resposta curta: ML com a verba "
+                    f"concentrada no criativo certo e CPL dentro do teto lucra; ML "
+                    f"pagando lead caro em criativo fraco vira prejuízo. Como nenhuma "
+                    f"das metades decide sozinha, a régua que junta as duas é o teto "
                     f"(público × criativo × preço): por isso ele julga o PAR.</p>")
 
     # ── tela 3: criativos por tipo (verba + qualidade + efeito na conversão) ─
@@ -501,6 +507,37 @@ def main() -> int:
     if nota_cria.exists():
         sec = next(x for x in spec["sections"] if "Criativo agregado" in x["title"])
         sec["html"] += nota_cria.read_text()
+
+    # De onde veio o comprador (nota 8 do Ramon, 31/08): tabela no fundo, só
+    # quando o contrato novo traz o racha dos 90 dias (naobase_90d no meta).
+    nb90 = m.get("naobase_90d")
+    if tem_venda and nb90:
+        nb_row = next((x for x in ca if x["modelo"] == "Não está na base"), None)
+        v_este = sum(x.get("vendas") or 0 for x in ca
+                     if x["modelo"] != "Não está na base")
+        f_este = sum(x.get("faturamento") or 0 for x in ca
+                     if x["modelo"] != "Não está na base")
+        v_nb = (nb_row or {}).get("vendas") or 0
+        f_nb = (nb_row or {}).get("faturamento") or 0
+        v90, f90 = nb90.get("vendas") or 0, nb90.get("faturamento") or 0
+        varr = f"{nb90.get('cadastros_antigos', 0):,}".replace(",", ".")
+        rows_o = [
+            ["<b>Cadastro da captação DESTE LF</b>", br(v_este, 0),
+             br(f_este, 2, "R$ ")],
+            [f"<b>Cadastro dos 90 dias anteriores</b> ({varr} cadastros varridos)",
+             br(v90, 0), br(f90, 2, "R$ ")],
+            ["<b>Sem cadastro nos últimos 90 dias</b>",
+             br(max(v_nb - v90, 0), 0), br(max(f_nb - f90, 0), 2, "R$ ")],
+        ]
+        spec["sections"].append({
+            "title": "9 · De onde veio o comprador do carrinho",
+            "sub": "As tabelas lá de cima casam venda só com cadastro da captação "
+                   "DESTE lançamento. Aqui, as vendas 'não está na base' são "
+                   "re-casadas contra os cadastros dos 90 dias anteriores à "
+                   "captação (mesmo matcher, mesmo haircut de boleto).",
+            "html": _tab(["Origem do cadastro do comprador", "Vendas", "Faturamento"],
+                         rows_o),
+        })
 
     # Comparação com os lançamentos anteriores: gerada por
     # scripts/comparativo_lancamentos.py na pasta do LF; entra antes do carimbo.

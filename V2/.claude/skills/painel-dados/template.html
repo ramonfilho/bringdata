@@ -71,7 +71,7 @@
   .dot{width:9px;height:9px;border-radius:3px;display:inline-block;flex:none}
   section{margin-top:40px}
   h2{font-size:19px;font-weight:680;letter-spacing:-.01em;margin:0 0 4px}
-  .h2sub{color:var(--muted);font-size:13.5px;margin:0 0 16px;max-width:74ch}
+  .h2sub{color:var(--muted);font-size:13.5px;margin:0 0 16px}
   .card{background:var(--surface-2);border:1px solid var(--border);border-radius:16px;padding:22px 20px 14px;box-shadow:var(--shadow);overflow-x:auto;max-width:936px}
   .legend{display:flex;gap:18px;flex-wrap:wrap;margin:0 4px 12px;font-size:13px;color:var(--muted)}
   .legend span{display:inline-flex;align-items:center;gap:7px}
@@ -91,11 +91,10 @@
   tbody tr+tr td{border-top:1px solid var(--border)}
   .chip{border-radius:7px;font-family:var(--mono);font-weight:640;padding:3px 7px}
   .cv-s{color:var(--s);background:var(--s-bg)} .cv-m{color:var(--m);background:var(--m-bg)} .cv-v{color:var(--v);background:var(--v-bg)}
-  /* A trava de 74ch fica nos ELEMENTOS DE TEXTO, não no contêiner: seção html
-     carrega tabela junto da prosa, e o cap no contêiner espremia a tabela a
-     ~674px em qualquer tela (causa-raiz de 3 consertos de largura falharem). */
+  /* SEM trava de largura no texto (pedido do Ramon, 31/08): a prosa acompanha
+     a coluna da página, que cresce com a maior tabela. O cap de 74ch anterior
+     deixava o texto espremido à esquerda em janela larga. */
   .prose{color:var(--muted);font-size:14.5px}
-  .prose p,.prose ul,.prose ol{max-width:74ch}
   .prose b{color:var(--ink)} .prose li{margin:9px 0}
   .prose code{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);border:1px solid var(--border);border-radius:5px;padding:1px 5px;color:var(--ink)}
   .foot{margin-top:44px;color:var(--faint);font-size:12px;border-top:1px solid var(--border);padding-top:16px}
