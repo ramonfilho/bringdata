@@ -155,60 +155,53 @@ def _ritmo_carrinho(alvo_m, prev_m):
 
 
 def _veredito(alvo, at, prev):
-    """O parágrafo único sob as duas tabelas: por que este LF está melhor ou
-    pior que o anterior, separando compra de lead (fechada) de carrinho
-    (calendário vs sinal real). Pedido do Ramon, 31/08 à noite."""
+    """O parágrafo único sob as duas tabelas, no molde de texto do Ramon
+    (01/09): três itens numerados + dois fechos, sem frase de máquina."""
     d_cpl = (100 * (at["cpl"] - prev["cpl"]) / prev["cpl"]
              if (at["cpl"] and prev["cpl"]) else None)
     d_gasto = (100 * (at["gasto"] - prev["gasto"]) / prev["gasto"]
                if prev["gasto"] else None)
     d_cad = (100 * (at["cadastros"] - prev["cadastros"]) / prev["cadastros"]
              if prev["cadastros"] else None)
-    compra_piorou = ((d_cpl or 0) > 5 or
-                     ((at["d910"] or 0) - (prev["d910"] or 0)) < -2 or
-                     ((at["pct_gasto_dentro"] or 0) - (prev["pct_gasto_dentro"] or 0)) < -5)
-    p = (f"<p class='h2sub' style='margin-top:14px'><b>O que dá pra afirmar hoje: "
-         f"{alvo} contra {prev['lf']}.</b> "
-         f"1- A compra de lead (lado que já fechou) {'PIOROU' if compra_piorou else 'NÃO piorou'}: "
-         f"CPL {br(at['cpl'])} contra {br(prev['cpl'])} "
-         f"({'+' if (d_cpl or 0) >= 0 else ''}{br(d_cpl, 1)}%), "
+    d_conc = (at["conc1"] or 0) - (prev["conc1"] or 0)
+    cad = f"{at['cadastros']:,}".replace(",", ".")
+    p = (f"<p class='h2sub' style='margin-top:14px'><b>O que dá pra afirmar "
+         f"hoje: {alvo} contra {prev['lf']}</b><br><br>"
+         f"1- Não é lead mais caro nem de pior qualidade: CPL {br(at['cpl'])} "
+         f"contra {br(prev['cpl'])} ({'+' if (d_cpl or 0) >= 0 else ''}{br(d_cpl, 1)}%), "
          f"qualidade do público {_pp(at['d910'], prev['d910'])}pp de nota 9-10, e "
          f"{br(at['pct_gasto_dentro'], 1)}% do gasto dentro do teto 1,5 contra "
-         f"{br(prev['pct_gasto_dentro'], 1)}%. "
-         f"{'O buraco começa já na captação.' if compra_piorou else 'Não é lead mais caro nem compra pior; o buraco não nasce aí.'} "
-         f"2- O que mudou na captação: verba no criativo nº 1 em "
-         f"{br(at['conc1'], 1)}% contra {br(prev['conc1'], 1)}% "
-         f"({_pp(at['conc1'], prev['conc1'])}pp), e volume menor: "
-         + f"{at['cadastros']:,}".replace(",", ".")
-         + f" cadastros ({br(d_cad, 0)}%) com {br(d_gasto, 0)}% de verba. ")
+         f"{br(prev['pct_gasto_dentro'], 1)}%.<br><br>"
+         f"2- A verba no criativo nº 1 {'caiu' if d_conc < 0 else 'subiu'} "
+         f"({_pp(at['conc1'], prev['conc1'])}pp): foi {br(at['conc1'], 1)}% no "
+         f"{alvo} contra {br(prev['conc1'], 1)}% no {prev['lf']}, e volume "
+         f"{'menor' if (d_cad or 0) < 0 else 'maior'}: {cad} cadastros "
+         f"({br(d_cad, 0)}%) com {br(d_gasto, 0)}% de verba.")
     r = _ritmo_carrinho(at, prev) if not at["maduro"] else None
     if r:
         pct = (100 * (r["a_fat"] / at["gasto"]) / (r["p_fat"] / prev["gasto"])
                if (at["gasto"] and prev["gasto"] and r["p_fat"]) else None)
-        em_curso = (f", e o {r['k']}º dia daqui ainda está em curso" if r["dia_corrente"] else "")
-        p += (f"3- O carrinho é quase todo 1º dia: no {prev['lf']}, "
-              f"{br(r['share1'], 0)}% do faturamento da semana caiu no dia da abertura "
-              f"(R$ {br(r['p_fat'], 0)} de R$ {br(r['p_full'], 0)}){em_curso}. "
-              + ("Medindo o MESMO 1º dia direto na tabela de vendas, " if r["k"] == 1
-                 else f"Medindo os MESMOS {r['k']} primeiros dias direto na tabela de vendas, ")
-              + f"mesma régua pros dois: {alvo} R$ {br(r['a_fat'], 0)} "
-              f"({br(r['a_fat'] / at['gasto'], 2)} por real gasto) contra "
-              f"R$ {br(r['p_fat'], 0)} do {prev['lf']} "
-              f"({br(r['p_fat'] / prev['gasto'], 2)} por real). ")
+        janela = ("no dia da abertura" if r["k"] == 1
+                  else f"nos primeiros {r['k']} dias de carrinho")
+        par = (f"({alvo} R$ {br(r['a_fat'], 0)}, "
+               f"{br(r['a_fat'] / at['gasto'], 2)} por real gasto) contra "
+               f"({prev['lf']} R$ {br(r['p_fat'], 0)}, "
+               f"{br(r['p_fat'] / prev['gasto'], 2)} por real gasto)")
+        obs = (" Obs: o dia ainda aberto pode fechar parte disso."
+               if r["dia_corrente"] else "")
         if (pct or 0) >= 95:
-            p += (f"4- Conversão no nível do anterior ({br(pct, 0)}% por real investido): "
-                  "o buraco de lucro da tabela é só o calendário do carrinho. ")
+            p += (f"<br><br>3- Conversão no nível do anterior: faturamento "
+                  f"{janela} em {br(pct, 0)}% do ritmo por real {par}.<br><br>"
+                  "A diferença de lucro da tabela é só o calendário do carrinho.")
         else:
-            p += (f"4- A conversão do lançamento ESTÁ menor: {br(pct, 0)}% do ritmo do "
-                  f"{prev['lf']} por real investido, já descontado o calendário"
-                  + (" (o dia ainda aberto pode fechar parte disso)" if r["dia_corrente"] else "")
-                  + ". Das variáveis que a gente mede, a única que mudou pra pior e pode "
-                  "explicar essa queda é a verba menos concentrada no criativo campeão "
-                  f"({_pp(at['conc1'], prev['conc1'])}pp); lead mais caro e público pior "
-                  "estão descartados no item 1. O que passar disso NÃO tem explicação nas "
-                  "variáveis que medimos hoje (página, oferta, momento do público): fica "
-                  "registrado como efeito não medido, não como causa encontrada. ")
-        p += "Amanhã, com o dia fechado, este parágrafo se atualiza sozinho."
+            p += (f"<br><br>3- A conversão do lançamento está pior: faturamento "
+                  f"{janela} está {br(100 - (pct or 0), 0)}% pior {par}.{obs}<br><br>"
+                  "Das variáveis que a gente mede, a única que mudou pra pior e "
+                  "pode explicar essa queda é a verba menos concentrada no "
+                  f"criativo campeão ({_pp(at['conc1'], prev['conc1'])}pp). Lead "
+                  "mais caro e público pior estão descartados no item 1.<br><br>"
+                  "O que passar disso NÃO tem explicação nas variáveis que "
+                  "medimos hoje (página, oferta, momento do público).")
     p += "</p>"
     return p
 
