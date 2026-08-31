@@ -18,8 +18,15 @@ import sys
 from pathlib import Path
 
 _V2 = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_V2))
 TEMPLATE = _V2 / ".claude" / "skills" / "painel-dados" / "template.html"
 ROTULO_GOOGLE = "Google Ads"   # mesmo literal de lancamento_unidades (o contrato ja vem rotulado)
+ROTULO_LEAD = "Lead Padrão (Meta)"
+# baldes que NÃO são campanha de modelo (pro corte ML vs Lead da seção de público)
+_NAO_MODELO = {ROTULO_LEAD, ROTULO_GOOGLE, "Orgânico/Outro", "Não está na base"}
+
+# classificador canônico de público (fallback pra contrato antigo sem a coluna)
+from src.core.ab_arm import temperatura_da_campanha  # noqa: E402
 
 
 def br(v, dec=2, prefixo=""):
@@ -105,6 +112,79 @@ def main() -> int:
     tab_modelo = _tab(["Tipo de campanha", "Camp.", "Gasto", "Cadastros", "CPL",
                        "Vendas", "Conversão", "Faturamento", "ROAS", "Lucro"],
                       linhas_mod[:-1], linhas_mod[-1])
+
+    # ── tela 1b: público quente vs frio + lucro ML vs Lead — seções FIXAS ────
+    # (decisão do Ramon, 31/08: a descoberta do DEV21 — dentro do frio o modelo
+    #  não separava — e a pergunta "ML lucra mais que Lead?" deixam de ser
+    #  análise avulsa e entram em todo painel, todo lançamento.)
+    def _temp(x):
+        if x.get("plataforma") != "meta":
+            return None
+        t = x.get("temperatura")   # contrato novo traz a coluna; antigo não
+        return t if t is not None else temperatura_da_campanha(x.get("campanha"))
+
+    def _agg_pub(rows, rot):
+        g = sum(x.get("gasto") or 0 for x in rows)
+        l = sum(x.get("leads") or 0 for x in rows)
+        v = sum(x.get("vendas") or 0 for x in rows) if tem_venda else None
+        f = sum(x.get("faturamento") or 0 for x in rows) if tem_venda else None
+        lu = sum(x.get("lucro") or 0 for x in rows) if tem_venda else None
+        return [f"<b>{rot}</b>", len(rows), br(g, 2, "R$ "),
+                f"{l:,}".replace(",", "."), br(g / l if l else None, 2, "R$ "),
+                br(v, 0), pct(100 * v / l, 2) if (tem_venda and l) else "—",
+                br(f, 2, "R$ "), br(f / g, 2) if (tem_venda and g) else "—",
+                _cor(lu), _cor((lu / l) if (tem_venda and l and lu is not None) else None)]
+
+    head_pub = ["", "Camp.", "Gasto", "Cadastros", "CPL", "Vendas", "Conversão",
+                "Faturamento", "ROAS", "Lucro", "Lucro/cadastro"]
+    meta_rows = [x for x in ca if x.get("plataforma") == "meta"]
+    por_pub = {}
+    for x in meta_rows:
+        por_pub.setdefault(_temp(x), []).append(x)
+    ordem_pub = sorted(por_pub, key=lambda t: -sum(y.get("gasto") or 0 for y in por_pub[t]))
+    tab_pub = _tab(head_pub, [_agg_pub(por_pub[t], t) for t in ordem_pub])
+
+    frio_rows = [x for x in meta_rows if _temp(x) != "quente"]
+    ml_frio = [x for x in frio_rows if x["modelo"] not in _NAO_MODELO]
+    lead_frio = [x for x in frio_rows if x["modelo"] == ROTULO_LEAD]
+    quentes = [x for x in meta_rows if _temp(x) == "quente"]
+    linhas_ml = [_agg_pub(ml_frio, "Campanhas de MODELO (Champion+Challenger), frio"),
+                 _agg_pub(lead_frio, "Lead Padrão (Meta), frio")]
+    if quentes:
+        linhas_ml.append(_agg_pub(quentes, "Público quente (economia própria, fora da disputa)"))
+    tab_ml = ("<p class='h2sub' style='margin-top:14px'><b>Lucro: modelo contra Lead padrão</b> "
+              "— só público frio dos dois lados, porque o quente tem economia própria "
+              "(regra de 16/08) e inflaria o lado em que caísse:</p>") + _tab(head_pub, linhas_ml)
+    if tem_venda and ml_frio and lead_frio:
+        def _lucro_cad(rows):
+            l = sum(x.get("leads") or 0 for x in rows)
+            lu = sum(x.get("lucro") or 0 for x in rows)
+            return (lu / l) if l else None
+        a_, b_ = _lucro_cad(ml_frio), _lucro_cad(lead_frio)
+        if a_ is not None and b_ is not None:
+            tab_ml += (f"<p class='h2sub' style='margin-top:10px'>Neste lançamento, cada "
+                       f"cadastro frio do modelo rendeu <b>{br(a_, 2, 'R$ ')}</b> de lucro; "
+                       f"o do Lead padrão, <b>{br(b_, 2, 'R$ ')}</b>. Série dos fechados "
+                       f"(LF56→DEV21, régua atual): o modelo ganhou em 7 de 9.</p>")
+
+    sep = c.get("separacao_temperatura") or []
+    tab_sep = ""
+    if sep:
+        rows_s = []
+        for s in sep:
+            lift = s.get("lift")
+            rows_s.append([f"<b>{s['temperatura']}</b>",
+                           f"{s['leads']:,}".replace(",", "."),
+                           pct(s.get("pct_topo"), 1),
+                           pct(100 * s["taxa_topo"], 2) if s.get("taxa_topo") is not None else "—",
+                           pct(100 * s["taxa_base"], 2) if s.get("taxa_base") is not None else "—",
+                           (br(lift, 2) + "x") if lift is not None else "—"])
+        tab_sep = ("<p class='h2sub' style='margin-top:14px'><b>Separação dentro de cada "
+                   "público</b> (respondentes com nota; topo = notas 9-10, base = 1-8). "
+                   "No DEV21 o modelo não separava dentro do frio (lift 1,06x) — o lift "
+                   "agregado vinha de ordenar públicos. Esta tabela vigia se isso mudou:</p>"
+                   + _tab(["Público", "Leads c/ nota", "% no topo", "Conv. topo",
+                           "Conv. base", "Lift topo/base"], rows_s))
 
     # ── tela 2: campanha a campanha (top por gasto) ──────────────────────────
     top_camp = sorted([x for x in ca if x.get("gasto")], key=lambda x: -x["gasto"])[:15]
@@ -376,6 +456,11 @@ def main() -> int:
              "sub": "Tipo = o MODELO que escolhe o público da campanha (identidade estável, "
                     "mesmo com os nomes novos da equipe de tráfego).",
              "html": tab_modelo + aguardando},
+            {"title": "2 · Público quente vs frio — e o lucro do modelo contra o Lead",
+             "sub": "Público = a palavra QUENTE/FRIO no nome da campanha da Meta "
+                    "(escolha de mídia, não muda com etiqueta de modelo). Seção fixa "
+                    "de todo lançamento desde 31/08.",
+             "html": tab_pub + tab_ml + tab_sep},
             {"title": "2 · Campanha a campanha (top 15 por gasto)",
              "sub": "As mesmas colunas do debriefing: gasto, cadastros, CPL, vendas, ROAS e lucro.",
              "html": tab_camp},

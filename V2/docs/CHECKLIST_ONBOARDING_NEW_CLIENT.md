@@ -81,6 +81,15 @@ Verificar apenas:
 
 ---
 
+## 6. Primeiros lançamentos — medir antes de confiar no modelo
+
+O painel por lançamento (`scripts/relatorio_lancamento.py` + `scripts/render_painel_lancamento.py`) tem duas seções fixas que dizem se o modelo paga o próprio custo no cliente novo. Conferir nos 2-3 primeiros lançamentos fechados:
+
+- [ ] **Separação por público (quente/frio):** dentro do público FRIO, o topo (notas 9-10) converte mais que a base (1-8)? No DevClub a descoberta do DEV21 (10/08/2026) foi que NÃO (lift 1,06x): o lift agregado vinha de ordenar públicos, não pessoas do mesmo público. Se no cliente novo o frio não separar, o modelo não adiciona valor onde a verba está.
+- [ ] **Lucro ML vs Lead (só público frio):** campanha com etiqueta de modelo lucra mais por cadastro que a captação padrão? Régua DevClub para comparação (medida em 31/08/2026, LF56→DEV21, régua de produção atual): modelo ganhou em 7 de 9 fechados, R$ +1,36 por cadastro contra R$ -0,93 do Lead.
+
+---
+
 ## Referências
 
 - Arquitetura completa: `docs/ARQUITETURA_SISTEMA_COMPLETA.md`

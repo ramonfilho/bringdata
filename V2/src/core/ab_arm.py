@@ -98,6 +98,36 @@ def _tokens(t_norm: str) -> list:
     return [p.strip() for p in t_norm.split("|") if p.strip()]
 
 
+# ─────────────────── temperatura (público) da campanha ────────────────────────
+# Rótulo de quem não declara público no nome: campanhas do Google, orgânico e
+# Meta sem QUENTE/FRIO. É o mesmo balde "sem rótulo" da análise do DEV21.
+TEMPERATURA_SEM_PUBLICO = "sem público no nome"
+
+_TEMPERATURA_TOKENS = (("quente", ("quente",)),
+                       ("morno", ("morno", "morna")),
+                       ("frio", ("frio", "fria")))
+
+
+def temperatura_da_campanha(nome) -> str:
+    """Público da campanha pelo NOME: 'quente' | 'morno' | 'frio' | sem rótulo.
+
+    Vive aqui (e não no relatório) porque é vocabulário de nome de campanha,
+    como o marcador de captação: passa pela MESMA normalização de colchetes →
+    pipes, então '[DEVLF][CAP][QUENTE]' e 'DEVLF | CAP | QUENTE' caem no mesmo
+    balde. Token exato entre pipes, não substring — 'requente' não vira quente.
+
+    Diferente da etiqueta de modelo, o público NÃO some quando há etiqueta:
+    'QUENTE ... LEADHQLB' é modelo abr_28 E público quente ao mesmo tempo
+    (público é escolha de mídia; modelo é quem otimiza — decisão de 16/08).
+    Virou dimensão fixa do relatório por lançamento em 31/08/2026.
+    """
+    toks = set(_tokens(_normaliza_nome(str(nome or ""))))
+    for rotulo, aliases in _TEMPERATURA_TOKENS:
+        if toks.intersection(aliases):
+            return rotulo
+    return TEMPERATURA_SEM_PUBLICO
+
+
 # Campanhas que NÃO entram no balde 'Lead' padrão mesmo sendo captação sem
 # etiqueta de modelo (decisão do Ramon, 16/08/2026): público quente e campanha
 # interna têm economia própria e poluiriam o CPL da captação fria padrão.

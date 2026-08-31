@@ -161,11 +161,22 @@ def main() -> int:
         if j["fisher_p"] is not None:
             print(f"  Fisher p={j['fisher_p']:.4f}  Mann-Whitney p={j['mannwhitney_p']}")
 
+    # ── separação por público (a descoberta do DEV21 virou medição fixa)
+    sep = r.get("separacao_temperatura") or []
+    if sep:
+        print("\nseparação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):")
+        for s in sep:
+            _p = lambda v: f"{100*v:.2f}%" if v is not None else "—"  # noqa: E731
+            lift = f"{s['lift']:.2f}x" if s.get("lift") is not None else "—"
+            print(f"  {s['temperatura']:<22} leads {s['leads']:>7,}  "
+                  f"topo {_p(s.get('taxa_topo'))}  base {_p(s.get('taxa_base'))}  lift {lift}")
+
     # ── contrato congelado
     out = Path(args.out or f"docs/relatorios/{args.lf.lower()}_resultado")
     out.mkdir(parents=True, exist_ok=True)
     contrato = dict(
         lf=args.lf, meta=meta, julgamento=j,
+        separacao_temperatura=sep,
         tabelas=dict(
             campanhas=r["campanhas"],
             unidades=r["unidades"],
