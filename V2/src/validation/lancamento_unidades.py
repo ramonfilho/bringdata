@@ -371,18 +371,40 @@ def separacao_por_temperatura(ledger_matched: Optional[pd.DataFrame], *,
     torna essa medição uma seção fixa de todo lançamento, em vez de análise avulsa.
 
     `ledger_matched` é o matched de MODELO (`_load_matched`): respondentes do
-    ledger com `decil`, `utm_campaign` e `converted`. O público vem do nome da
-    campanha no utm (`temperatura_da_campanha`); lead do Google/orgânico não tem
-    QUENTE/FRIO no nome e cai em 'sem público no nome' — o mesmo balde "sem
-    rótulo" da análise original. Sem venda ingerida, taxas e lift saem None
-    (regra de ouro: nunca 0 fabricado). Lift com base zerada também sai None.
+    ledger com `decil`, `utm_campaign`, `utm_source` e `converted`. O balde nasce
+    do CANAL antes do nome (nota do Ramon, 31/08: no LF65 o rótulo único "sem
+    público no nome" escondia 1.078 leads do Google, 89 de rastro quebrado e 91
+    de orgânico/manychat, tudo somado como se fosse um público):
+
+      google                       → 'Google'
+      organic                      → 'orgânico / sem rastro'
+      meta com QUENTE/FRIO no nome → 'quente' / 'frio' / 'morno'
+      meta sem token de público    → 'Meta, sem público no nome'
+
+    Sem a coluna `utm_source` (contrato antigo, teste sintético) vale só o nome
+    da campanha, como antes. Sem venda ingerida, taxas e lift saem None (regra
+    de ouro: nunca 0 fabricado). Lift com base zerada também sai None.
     """
+    from src.core.ab_arm import TEMPERATURA_SEM_PUBLICO
     out: list = []
     if ledger_matched is None or len(ledger_matched) == 0:
         return out
     df = ledger_matched
     camp = df.get("utm_campaign", pd.Series([None] * len(df), index=df.index))
     temp = pd.Series([temperatura_da_campanha(c) for c in camp], index=df.index)
+    if "utm_source" in df.columns:
+        canal = df["utm_source"].map(lambda s: channel_from_source(s))
+
+        def _balde(c_, t_):
+            if c_ == "google":
+                return "Google"
+            if c_ != "meta":
+                return "orgânico / sem rastro"
+            return ("Meta, sem público no nome"
+                    if t_ == TEMPERATURA_SEM_PUBLICO else t_)
+
+        temp = pd.Series([_balde(c_, t_) for c_, t_ in zip(canal, temp)],
+                         index=df.index)
     dec = pd.to_numeric(df.get("decil"), errors="coerce")
     conv = (df.get("converted", pd.Series(False, index=df.index))
             .fillna(False).astype(bool))
