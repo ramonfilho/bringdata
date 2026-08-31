@@ -81,10 +81,13 @@ def main() -> int:
 
     def linha(rot, r, provisorio=False):
         tag = " <i>(provisório)</i>" if provisorio else ""
+        # o replace do milhar fica NUM fragmento só: f-strings adjacentes
+        # concatenam antes do .replace e ele comia a vírgula do rótulo
+        cad = f"{r['cadastros']:,}".replace(",", ".")
         return (f"<tr><td><b>{rot}</b>{tag}</td>"
                 f"<td>{br(r['gasto'], 0, 'R$ ')}</td>"
-                f"<td>{r['cadastros']:,}</td>".replace(",", ".")
-                + f"<td>{br(r['cpl'])}</td>"
+                f"<td>{cad}</td>"
+                f"<td>{br(r['cpl'])}</td>"
                 f"<td>{br(r['pct_gasto_dentro'], 1)}%</td>"
                 f"<td>{br(r['roas'])}</td>"
                 f"<td class='{'pos' if (r['lucro'] or 0) > 0 else 'neg'}'>{br(r['lucro'], 0, 'R$ ')}</td></tr>")
@@ -117,7 +120,7 @@ def main() -> int:
     for r in serie:      # só a série fechada entra na média por semana
         por_sem.setdefault(r["semana"], []).append(r)
     med_rows = "".join(
-        f"<tr><td><b>{s}ª semana</b></td><td>{len(g)} LFs</td><td></td>"
+        f"<tr><td><b>{s}ª semana</b></td><td>{len(g)} LF{'s' if len(g) > 1 else ''}</td><td></td>"
         f"<td>{br(med(g, 'cpl'))}</td><td>{br(med(g, 'roas'))}</td></tr>"
         for s, g in sorted(por_sem.items()))
     tab2 = ("<div class='tw'><table class='tb'><thead><tr><th>LF</th><th>Início captação</th>"
