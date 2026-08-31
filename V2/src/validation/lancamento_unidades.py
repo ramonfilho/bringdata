@@ -34,7 +34,8 @@ from typing import Optional
 
 import pandas as pd
 
-from src.core.ab_arm import _default_config, first_match
+from src.core.ab_arm import (_default_config, first_match,
+                             temperatura_da_campanha)
 from src.data.criativo_historico import chave_canonica, criativo_do_lead
 from src.monitoring.campaign_classifier import channel_from_source
 from src.monitoring.google_variant import campaign_id_from_utm_term
@@ -189,14 +190,15 @@ def tabela_campanhas(neg: pd.DataFrame, spend_df: Optional[pd.DataFrame], *,
         r = _met(neg[(neg["canal"] == "meta") & (neg["cid"] == cid)],
                  float(g["gasto"].sum()), nome)
         r.update(cid=cid, campanha=nome, plataforma="meta",
-                 modelo=rotulo_do_modelo(nome, "meta", cfg))
+                 modelo=rotulo_do_modelo(nome, "meta", cfg),
+                 temperatura=temperatura_da_campanha(nome))
         linhas.append(r)
     gg = gasto[gasto["plat"] == "google"]
     if len(gg):
         r = _met(neg[neg["canal"] == "google"], float(gg["gasto"].sum()),
                  ROTULO_GOOGLE)
         r.update(cid="", campanha="Google Ads (agregado)", plataforma="google",
-                 modelo=ROTULO_GOOGLE)
+                 modelo=ROTULO_GOOGLE, temperatura=None)
         linhas.append(r)
     usados = set(meta_g["cid"])
     orf = neg[((neg["canal"] == "meta") & (~neg["cid"].isin(usados)))
@@ -204,7 +206,7 @@ def tabela_campanhas(neg: pd.DataFrame, spend_df: Optional[pd.DataFrame], *,
     if len(orf):
         r = _met(orf, None, ROTULO_ORGANICO)
         r.update(cid="", campanha="Orgânico / sem campanha paga", plataforma="",
-                 modelo=ROTULO_ORGANICO)
+                 modelo=ROTULO_ORGANICO, temperatura=None)
         linhas.append(r)
     df = pd.DataFrame(linhas)
     if not tem_venda and len(df):
@@ -251,6 +253,8 @@ def tabela_unidades(neg: pd.DataFrame, por_unidade: list, gasto_unid: dict, *,
         cpl = (gasto / u["n"]) if (gasto is not None and u["n"]) else None
         linha = dict(
             cid=cid, campanha=u["campanha"], canal=canal, criativo=criativo,
+            temperatura=(temperatura_da_campanha(u["campanha"])
+                         if canal == "meta" else None),
             leads_ledger=int(u["n"]), cadastros=(int(n_cad) if n_cad else None),
             leads_gerenciador=leads_ger, pct_d9_d10=float(u["pct"]),
             gasto=gasto, cpl=cpl, teto=teto,
@@ -351,6 +355,57 @@ def julga_dentro_vs_acima(unidades: pd.DataFrame, *,
                                                           alternative="two-sided")[1])
         except Exception as e:  # scipy ausente não derruba o relatório
             logger.warning("[lancamento_unidades] testes estatísticos indisponíveis: %s", e)
+    return out
+
+
+# ───────────────────────── separação por temperatura ─────────────────────────
+def separacao_por_temperatura(ledger_matched: Optional[pd.DataFrame], *,
+                              tem_venda: bool = True,
+                              decil_topo: int = 9) -> list:
+    """Quanto o modelo SEPARA dentro de cada público (quente/frio/sem rótulo):
+    taxa de conversão do topo (D9-D10) contra a base (D1-D8) e o lift entre elas.
+
+    Existe porque a descoberta do DEV21 (10/08) foi estrutural: dentro do público
+    FRIO nenhum modelo separava (lift 1,06× no abr_28, 1,01× no jul_24) — o lift
+    agregado vinha de ordenar PÚBLICOS, não pessoas do mesmo público. Esta função
+    torna essa medição uma seção fixa de todo lançamento, em vez de análise avulsa.
+
+    `ledger_matched` é o matched de MODELO (`_load_matched`): respondentes do
+    ledger com `decil`, `utm_campaign` e `converted`. O público vem do nome da
+    campanha no utm (`temperatura_da_campanha`); lead do Google/orgânico não tem
+    QUENTE/FRIO no nome e cai em 'sem público no nome' — o mesmo balde "sem
+    rótulo" da análise original. Sem venda ingerida, taxas e lift saem None
+    (regra de ouro: nunca 0 fabricado). Lift com base zerada também sai None.
+    """
+    out: list = []
+    if ledger_matched is None or len(ledger_matched) == 0:
+        return out
+    df = ledger_matched
+    camp = df.get("utm_campaign", pd.Series([None] * len(df), index=df.index))
+    temp = pd.Series([temperatura_da_campanha(c) for c in camp], index=df.index)
+    dec = pd.to_numeric(df.get("decil"), errors="coerce")
+    conv = (df.get("converted", pd.Series(False, index=df.index))
+            .fillna(False).astype(bool))
+    ok = dec.notna()
+    for t in temp[ok].unique():
+        g = ok & (temp == t)
+        topo, base = g & (dec >= decil_topo), g & (dec < decil_topo)
+        n, n_topo, n_base = int(g.sum()), int(topo.sum()), int(base.sum())
+        linha = dict(temperatura=str(t), leads=n, leads_topo=n_topo,
+                     pct_topo=(100.0 * n_topo / n if n else None))
+        if tem_venda and n:
+            vt, vb = int(conv[topo].sum()), int(conv[base].sum())
+            tx_t = (vt / n_topo) if n_topo else None
+            tx_b = (vb / n_base) if n_base else None
+            linha.update(vendas_topo=vt, vendas_base=vb, taxa_topo=tx_t,
+                         taxa_base=tx_b,
+                         lift=((tx_t / tx_b)
+                               if (tx_t is not None and tx_b) else None))
+        else:
+            linha.update(vendas_topo=None, vendas_base=None, taxa_topo=None,
+                         taxa_base=None, lift=None)
+        out.append(linha)
+    out.sort(key=lambda r: -r["leads"])
     return out
 
 
@@ -566,6 +621,8 @@ def constroi_lancamento(lf: str, *, as_of: Optional[date] = None,
             if len(unidades) else unidades,
             tolerancia_meta=tolerancia_meta)
         por_tipo = criativos_por_tipo(unidades, campanhas)
+        sep_temp = separacao_por_temperatura(m["matched_modelo"],
+                                             tem_venda=tem_venda)
 
         # RÉGUA DE PRODUTO — enumerado obrigatório da janela de vendas: cada
         # produto vendido, com a flag "casou algum padrão do yaml". Produto órfão
@@ -621,7 +678,8 @@ def constroi_lancamento(lf: str, *, as_of: Optional[date] = None,
             produtos_janela=produtos,
         )
         return dict(campanhas=campanhas, unidades=unidades,
-                    criativos_por_tipo=por_tipo, julgamento=julg, meta=meta)
+                    criativos_por_tipo=por_tipo, julgamento=julg,
+                    separacao_temperatura=sep_temp, meta=meta)
     finally:
         for c in (lg, an, rc):
             try:

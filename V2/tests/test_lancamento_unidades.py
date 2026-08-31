@@ -307,3 +307,59 @@ def test_linha_naobase():
     assert r["faturamento"] == pytest.approx(2500.0)  # cartão + boleto×0,5
     assert r["gasto"] is None and r["roas"] is None and r["lucro"] is None
     assert L.linha_naobase(nb.iloc[0:0], haircut=0.5) is None
+
+
+# ───────────────────────── temperatura (quente/frio) ─────────────────────────
+def test_temperatura_da_campanha():
+    from src.core.ab_arm import (TEMPERATURA_SEM_PUBLICO,
+                                 temperatura_da_campanha as T)
+    assert T("DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1") == "frio"
+    # formato de colchetes do gestor (09/08) passa pela MESMA normalização
+    assert T("[17][DEVLF][CAP][LEADS][SITE][QUENTE][X]|12345") == "quente"
+    # etiqueta de modelo NÃO apaga o público: quente com HQLB continua quente
+    assert T("DEVLF | CAP | QUENTE | FASE 04 | LEADHQLB") == "quente"
+    assert T("CAP | FRIA | Y") == "frio"          # variante feminina
+    assert T("CAP | ABR_28_TOP30 | X") == TEMPERATURA_SEM_PUBLICO
+    assert T(None) == TEMPERATURA_SEM_PUBLICO
+
+
+def test_tabela_campanhas_tem_temperatura():
+    from src.core.ab_arm import TEMPERATURA_SEM_PUBLICO
+    t = L.tabela_campanhas(_neg(), _spend(), haircut=0.5, tem_venda=False, cfg=_cfg())
+    m2 = t[t["cid"] == "12024500000000002"].iloc[0]   # "CAP | FRIA | Y"
+    assert m2["temperatura"] == "frio"
+    m1 = t[t["cid"] == "12024500000000001"].iloc[0]   # sem público no nome
+    assert m1["temperatura"] == TEMPERATURA_SEM_PUBLICO
+    # temperatura é conceito de campanha da META: Google e orgânico saem None
+    g = t[t["plataforma"] == "google"].iloc[0]
+    assert g["temperatura"] is None
+
+
+# ───────────────────────── separação por temperatura ─────────────────────────
+def _ledger_temperatura():
+    return pd.DataFrame({
+        "utm_campaign": ["A | FRIO |1"] * 4 + ["A | QUENTE |2"] * 4,
+        "decil": [10, 9, 2, 1, 10, 9, 2, 1],
+        "converted": [True, False, False, False, False, False, True, False],
+    })
+
+
+def test_separacao_por_temperatura_com_venda():
+    s = {r["temperatura"]: r
+         for r in L.separacao_por_temperatura(_ledger_temperatura(), tem_venda=True)}
+    frio = s["frio"]
+    assert frio["leads"] == 4 and frio["leads_topo"] == 2
+    assert frio["taxa_topo"] == pytest.approx(0.5)
+    assert frio["taxa_base"] == pytest.approx(0.0)
+    assert frio["lift"] is None                     # base zerada: nada fabricado
+    quente = s["quente"]
+    assert quente["taxa_topo"] == pytest.approx(0.0)
+    assert quente["taxa_base"] == pytest.approx(0.5)
+    assert quente["lift"] == pytest.approx(0.0)
+
+
+def test_separacao_por_temperatura_sem_venda_e_vazio():
+    s = L.separacao_por_temperatura(_ledger_temperatura(), tem_venda=False)
+    assert s and all(r["lift"] is None and r["taxa_topo"] is None for r in s)
+    assert L.separacao_por_temperatura(None) == []
+    assert L.separacao_por_temperatura(pd.DataFrame()) == []
