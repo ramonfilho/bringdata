@@ -515,7 +515,7 @@ def main() -> int:
     if conclusao.exists():
         carimbo = next(i for i, x in enumerate(spec["sections"])
                        if "carimbo" in x["title"])
-        spec["sections"].insert(carimbo, {"title": "Conclusão — o que fazer no próximo lançamento",
+        spec["sections"].insert(carimbo, {"title": "Ações e recomendações",
                                           "html": conclusao.read_text()})
     for i, x in enumerate(spec["sections"], 1):   # renumera 1..N (sempre)
         x["title"] = re.sub(r"^\d+ · ", "", x["title"])

@@ -46,22 +46,34 @@ def carrega(lf):
 def metricas(lf):
     """As métricas de UM contrato, no grão que a comparação usa."""
     c = carrega(lf)
-    m, ca, j = c["meta"], c["tabelas"]["campanhas"], c["julgamento"]
+    m, ca = c["meta"], c["tabelas"]["campanhas"]
     gasto = sum(x.get("gasto") or 0 for x in ca)
     fat = sum(x.get("faturamento") or 0 for x in ca)
     cad = m["cobertura"]["cadastros"]
-    gd = (j["dentro"]["gasto"] or 0)
-    gj = gd + (j["acima"]["gasto"] or 0)
+    # % do gasto julgável dentro do TETO 1,5 (a régua atual do Ramon; o
+    # julgamento do contrato usa alvo 2,0, então recalcula das unidades:
+    # teto@1,5 = teto@2,0 × 4/3)
+    uj = [x for x in c["tabelas"]["unidades"]
+          if x.get("no_corte") and x.get("dentro_do_teto") is not None]
+    gj = sum(x.get("gasto") or 0 for x in uj)
+    gd = sum(x.get("gasto") or 0 for x in uj
+             if x["cpl"] <= x["teto"] * (2.0 / 1.5))
+    # provisório = ainda vai crescer: carrinho aberto, ou a ingestão de vendas
+    # (sales_max) ainda não passou do fim do carrinho. 'venda_fechada_imatura'
+    # com vendas ingeridas até o fim do carrinho JÁ é final para o NEGÓCIO
+    # (a janela de vendas do lançamento fecha com o carrinho).
+    carrinho_fechado = m["estado"] in ("venda_fechada_imatura", "maduro")
+    vendas_cobertas = str(m.get("sales_max"))[:10] >= m["vendas_end"][:10]
     cap = datetime.strptime(m["cap_start"][:10], "%Y-%m-%d").date()
     return dict(
         lf=lf, estado=m["estado"], cap_start=m["cap_start"][:10],
-        semana=min((cap.day - 1) // 7 + 1, 5),
+        gerado=m["gerado_em"][:10], semana=min((cap.day - 1) // 7 + 1, 5),
         gasto=gasto, cadastros=cad, cpl=(gasto / cad if cad else None),
         vendas=sum(x.get("vendas") or 0 for x in ca),
         faturamento=fat, roas=(fat / gasto if gasto else None),
         lucro=fat - gasto,
         pct_gasto_dentro=(100 * gd / gj if gj else None),
-        maduro=(m["estado"] == "maduro"),
+        maduro=(carrinho_fechado and vendas_cobertas),
     )
 
 
@@ -77,7 +89,7 @@ def main() -> int:
         vals = [r[k] for r in rows if r[k] is not None]
         return sum(vals) / len(vals) if vals else None
 
-    prov = at["estado"] != "maduro"
+    prov = not at["maduro"]
 
     def linha(rot, r, provisorio=False):
         tag = " <i>(provisório)</i>" if provisorio else ""
@@ -100,10 +112,10 @@ def main() -> int:
     t3["cadastros"] = int(t3["cadastros"] or 0)
 
     head = ("<tr><th></th><th>Gasto</th><th>Cadastros</th><th>CPL</th>"
-            "<th>% gasto dentro do teto</th><th>ROAS</th><th>Lucro</th></tr>")
+            "<th>% gasto dentro do teto 1,5</th><th>ROAS</th><th>Lucro</th></tr>")
     rows = [linha(f"{alvo} (este)", at, prov)]
     if prev:
-        rows.append(linha("LF64 (anterior)", prev, prev["estado"] != "maduro"))
+        rows.append(linha("LF64 (anterior)", prev, not prev["maduro"]))
     rows.append(linha("Média LF56→DEV21", media))
     rows.append(linha("Top 3 ROAS (" + ", ".join(r["lf"] for r in top3) + ")", t3))
     tab1 = (f"<div class='tw'><table class='tb'><thead>{head}</thead>"
@@ -115,7 +127,7 @@ def main() -> int:
         sem_rows.append(
             f"<tr><td><b>{r['lf']}</b></td><td>{r['cap_start'][8:10]}/{r['cap_start'][5:7]}</td>"
             f"<td>{r['semana']}ª</td><td>{br(r['cpl'])}</td><td>{br(r['roas'])}"
-            f"{' <i>(prov.)</i>' if r['estado'] != 'maduro' else ''}</td></tr>")
+            f"{' <i>(prov.)</i>' if not r['maduro'] else ''}</td></tr>")
     por_sem = {}
     for r in serie:      # só a série fechada entra na média por semana
         por_sem.setdefault(r["semana"], []).append(r)
@@ -131,13 +143,19 @@ def main() -> int:
             "<div class='tw'><table class='tb'><thead><tr><th>Semana</th><th>Base</th><th></th>"
             f"<th>CPL médio</th><th>ROAS médio</th></tr></thead><tbody>{med_rows}</tbody></table></div>")
 
-    aviso = ("<p class='h2sub'>Gasto, cadastros, CPL e o teto fecham na captação e "
-             "comparam sempre; ROAS e lucro de lançamento <i>provisório</i> ainda "
-             "crescem com a maturação e não sustentam conclusão. Todos os números "
-             "na régua de produção ATUAL (contratos da corrida) — comparação justa "
-             "entre si, não comparável ao publicado na época.</p>")
+    aviso = ("<p class='h2sub'>Como ler: 1- <b>Gasto, cadastros, CPL e teto</b> fecham "
+             "junto com a captação. Pode comparar sempre. 2- <b>ROAS e lucro</b> só fecham "
+             "quando o carrinho fecha e a venda cai no banco. Linha com <i>(provisório)</i> "
+             "ainda vai crescer; não tire conclusão dela. 3- O teto aqui é a régua de HOJE "
+             "aplicada a todos. A comparação entre eles é justa, mas o número não bate com "
+             "o publicado na época de cada um.</p>")
+    fonte = ("<p class='h2sub' style='margin-top:10px'>Fonte: o contrato congelado de cada "
+             "lançamento (contrato.json): LF56→DEV21 na pasta da corrida (gerados em "
+             f"{serie[0]['gerado'][8:10]}/{serie[0]['gerado'][5:7]}), "
+             + (f"LF64 em {prev['gerado'][8:10]}/{prev['gerado'][5:7]}, " if prev else "")
+             + f"{alvo} em {at['gerado'][8:10]}/{at['gerado'][5:7]}.</p>")
     html = aviso + tab1 + ("<p class='h2sub' style='margin-top:14px'><b>Hipótese da época "
-                           "do mês</b> — a semana em que a captação começa:</p>") + tab2
+                           "do mês</b> — a semana em que a captação começa:</p>") + tab2 + fonte
     dst = pasta / "comparativo.html"
     dst.write_text(html)
     print(f"comparativo: {dst}  ({dst.stat().st_size:,} bytes)")
