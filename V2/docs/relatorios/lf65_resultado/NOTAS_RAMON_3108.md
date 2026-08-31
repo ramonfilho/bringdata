@@ -43,3 +43,21 @@ o gateway inteiro está fora da régua de produto — pendência pro Ramon decid
 
 Decisões anteriores do dia que continuam valendo: corrida NÃO re-roda; balde
 "Quente sem modelo" só no próximo lançamento quente.
+
+## Segunda rodada de notas (31/08, mesma conversa) — TODAS resolvidas
+
+- **[x] Balde "sem público no nome" corrigido** (PR #252): canal decide antes do
+  nome. Baldes agora: frio / quente / Google / orgânico ou sem rastro / Meta sem
+  público no nome.
+- **[x] Parágrafo de leitura do comparativo** reescrito em língua de gente, com
+  linha de fonte (data de geração de cada contrato).
+- **[x] Seção "Ações e recomendações"** no fim do painel (conclusao.html da pasta;
+  título padronizado no render). LF65: comprar pelo teto 1,5; escalar ad0160;
+  desligar ad0154/ad0170 e as 5 campanhas >R$ 1k sem venda.
+- **[x] Coluna do comparativo virou "% gasto dentro do teto 1,5"** (era teto 2,0
+  sem dizer; recalculada das unidades: teto1,5 = teto2 × 4/3).
+- **[x] "(prov.)" honesto:** provisório = carrinho aberto OU ingestão de vendas
+  atrás do fim do carrinho. LF64 foi RE-RODADO (contrato era de 26/08, carrinho
+  ainda aberto) e agora é final: ROAS 1,62, lucro +R$ 55k, frio lift 2,98x.
+- Fonte dos números do comparativo: contrato.json de cada LF (corrida 27/08 para
+  LF56→DEV21; LF64 e LF65 re-gerados em 31/08).
