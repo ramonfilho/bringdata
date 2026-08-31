@@ -142,7 +142,10 @@ def main() -> int:
     for x in meta_rows:
         por_pub.setdefault(_temp(x), []).append(x)
     ordem_pub = sorted(por_pub, key=lambda t: -sum(y.get("gasto") or 0 for y in por_pub[t]))
-    tab_pub = _tab(head_pub, [_agg_pub(por_pub[t], t) for t in ordem_pub])
+    # A tabela por público só informa quando há MAIS de um público (nota do
+    # Ramon, 31/08): com só frio ela repete o total e sai do painel.
+    tab_pub = (_tab(head_pub, [_agg_pub(por_pub[t], t) for t in ordem_pub])
+               if len(ordem_pub) >= 2 else "")
 
     frio_rows = [x for x in meta_rows if _temp(x) != "quente"]
     ml_frio = [x for x in frio_rows if x["modelo"] not in _NAO_MODELO]
@@ -180,9 +183,8 @@ def main() -> int:
                            pct(100 * s["taxa_base"], 2) if s.get("taxa_base") is not None else "—",
                            (br(lift, 2) + "x") if lift is not None else "—"])
         tab_sep = ("<p class='h2sub' style='margin-top:14px'><b>Separação dentro de cada "
-                   "público</b> (respondentes com nota; topo = notas 9-10, base = 1-8). "
-                   "No DEV21 o modelo não separava dentro do frio (lift 1,06x) — o lift "
-                   "agregado vinha de ordenar públicos. Esta tabela vigia se isso mudou:</p>"
+                   "público</b> (respondentes com nota; topo = notas 9-10, base = 1-8; "
+                   "lift = quantas vezes o topo converte acima da base):</p>"
                    + _tab(["Público", "Leads c/ nota", "% no topo", "Conv. topo",
                            "Conv. base", "Lift topo/base"], rows_s))
 
@@ -263,8 +265,8 @@ def main() -> int:
                         f"lote de leads que ELA comprou veio fraco: criativo não salva "
                         f"público ruim.")
                 tab_camp += (
-                    f"<p class='h2sub' style='margin-top:10px'><b>Como ler os "
-                    f"destaques:</b> pegue o <b>{lider}</b> e olhe ele em dois públicos. "
+                    f"<p class='h2sub' style='margin-top:10px'><b>O que tirar dessa "
+                    f"tabela:</b> pegue o <b>{lider}</b> e olhe ele em dois públicos. "
                     f"No {hi}, cada 100 cadastros dele viram ~{br(cv[hi], 2)} vendas; no "
                     f"{lo}, ~{br(cv[lo], 2)}. Mesmo anúncio, valor por lead "
                     f"{br(cv[hi] / cv[lo], 1)}x diferente: isso é o PÚBLICO definindo o "
@@ -455,10 +457,10 @@ def main() -> int:
              "sub": "Tipo = o MODELO que escolhe o público da campanha (identidade estável, "
                     "mesmo com os nomes novos da equipe de tráfego).",
              "html": tab_modelo + aguardando},
-            {"title": "2 · Público quente vs frio — e o lucro do modelo contra o Lead",
+            {"title": "2 · Lucro do modelo contra o Lead — e a separação por público",
              "sub": "Público = a palavra QUENTE/FRIO no nome da campanha da Meta "
-                    "(escolha de mídia, não muda com etiqueta de modelo). Seção fixa "
-                    "de todo lançamento desde 31/08.",
+                    "(escolha de mídia, não muda com etiqueta de modelo). Seção fixa; "
+                    "a tabela quente vs frio só aparece quando há público quente no LF.",
              "html": tab_pub + tab_ml + tab_sep},
             {"title": "2 · Campanha a campanha (top 15 por gasto)",
              "sub": "As mesmas colunas do debriefing: gasto, cadastros, CPL, vendas, ROAS e lucro.",
@@ -499,6 +501,15 @@ def main() -> int:
     if nota_cria.exists():
         sec = next(x for x in spec["sections"] if "Criativo agregado" in x["title"])
         sec["html"] += nota_cria.read_text()
+
+    # Comparação com os lançamentos anteriores: gerada por
+    # scripts/comparativo_lancamentos.py na pasta do LF; entra antes do carimbo.
+    comparativo = pasta / "comparativo.html"
+    if comparativo.exists():
+        carimbo = next(i for i, x in enumerate(spec["sections"])
+                       if "carimbo" in x["title"])
+        spec["sections"].insert(carimbo, {"title": "Comparação com os lançamentos anteriores",
+                                          "html": comparativo.read_text()})
 
     conclusao = pasta / "conclusao.html"
     if conclusao.exists():
