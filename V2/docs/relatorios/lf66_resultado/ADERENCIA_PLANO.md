@@ -2,8 +2,8 @@
 
 **Ressalva de fonte:** o LF66 ainda NÃO está na planilha PC FORMULÁRIOS (aba
 LF's), então a tabela `analytics.launch_calendar` não o conhece e a máquina do
-painel não roda. A medição abaixo usa janela ASSUMIDA de captação
-**25/08 → 30/08** sobre `analytics.ad_insights` (gasto por anúncio, ×1,13) e o
+painel não roda. A medição abaixo usa janela de captação CONFIRMADA pelo Ramon (31/08)
+**25/08 → 30/08** (carrinho abre 07/09) sobre `analytics.ad_insights` (gasto por anúncio, ×1,13) e o
 rótulo de modelo pelo nome da campanha. Quando a linha entrar na planilha,
 `bash scripts/painel_lancamento.sh LF66` gera o painel oficial.
 

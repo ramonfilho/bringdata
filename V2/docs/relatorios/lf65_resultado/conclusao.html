@@ -1,30 +1,36 @@
-<p>O plano de verba enviado no grupo (70/15/15) é a régua; abaixo, cada frente
-com o status do LF65 hoje (carrinho aberto, números provisórios):</p>
+<p>Régua = o plano 70/15/15 do grupo. Cada frente em três tempos: o <b>ideal</b>,
+o que o gestor <b>fez na captação do LF66</b> (25→30/08, medido em
+<code>lf66_resultado/ADERENCIA_PLANO.md</code>) e o <b>próximo passo</b>. Os
+tetos abaixo são os RELIDOS de hoje, com o histórico completo até o LF64
+(<code>scripts/releitura_teto.py</code>, rodar 2x por semana enquanto a
+atualização automática do teto não vira arquitetura):</p>
 <ul>
-<li><b>1 · 70% — garanhão nas campanhas de ML, escalando em degraus.</b> O AD0160
-ainda cabe no teto (CPL R$ 11,31 contra teto 1,5 de R$ 13,09) e carrega sozinho o
-lucro de criativo do lançamento (+R$ 5,6k). Mecânica: sobe um degrau de verba,
-olha o CPL de 7 e de 3 dias contra o teto 1,5; verde ou amarelo, sobe outro;
-vermelho persistente, desce. Se a campanha de maior lucro trocar, a distribuição
-de verba acompanha. A prova de que concentrar funciona: a campanha que pôs 98% no
-AD0160 fez ROAS 1,56; a irmã, diluída em 5 criativos, fez 0,58.</li>
-<li><b>2 · 15% — funil de teste em 3 etapas.</b> (2.1) Leitura inicial: 5-6
-criativos novos a R$ 700-1.000 cada na campanha de Lead, onde os 100 leads chegam
-mais rápido; quem estourar o teto na regra combinada morre; quem fechar os 100
-leads abaixo disso puxa o próximo da fila. (2.2) Quem respeitar o teto sobe pra
-campanha de ML com ~R$ 1.300 próprios (o preço dos mesmos 100 leads no lead de
-ML) e roda no semáforo com o teto da campanha. (2.3) Performance consistente vira
-garanhão e disputa escala com o AD0160. <b>AD0424 é candidato prioritário nas
-duas frentes</b> (re-leitura no Lead + confirmação no ML, ~R$ 2 mil): hoje ele
-roda no Lead com CPL R$ 8,13 contra teto 1,5 de R$ 4,57 — vermelho; precisa
-passar na re-leitura antes de subir.</li>
-<li><b>3 · 15% — Lead padrão com os garanhões.</b> O AD0160 no Lead está no
-limite do empate: CPL R$ 6,20, teto 1,5 de R$ 8,50 (dentro), ROAS 0,99
-provisório.</li>
-<li><b>Cortes imediatos:</b> dev-ad0154 "sem luz" e dev-ad0170 (CPL ~50% acima do
-teto) e as 5 campanhas com mais de R$ 1.000 gastos e zero venda (~R$ 11k). Regra
-da corrida: corta após R$ 1,5-2k sem conversão.</li>
+<li><b>1 · 70% — garanhão nas campanhas de ML, em degraus.</b>
+<b>Ideal:</b> AD0160 dominando o ML; sobe um degrau de verba, olha o CPL de 7 e
+3 dias contra o teto 1,5 (verde/amarelo sobe, vermelho persistente desce); se o
+líder de lucro trocar, a verba acompanha.
+<b>Feito no LF66:</b> seguido com força — AD0160 levou 86,4% do ML e 70,3% de
+toda a verba Meta.
+<b>Próximo:</b> teto 1,5 relido do AD0160 = <b>R$ 12,09</b> contra CPL de
+R$ 11,31: amarelo com folga curta; vale UM degrau, re-olhando em 3 dias.</li>
+<li><b>2 · 15% — funil de teste em 3 etapas.</b>
+<b>Ideal:</b> 5-6 criativos novos a R$ 700-1.000 cada na campanha de Lead (100
+leads chegam rápido; estourou a regra combinada, morre); quem respeita sobe pro
+ML com ~R$ 1.300; consistente vira garanhão.
+<b>Feito no LF66:</b> parcial — R$ 5,7k dos R$ 9k, e só 2 criativos com verba
+cheia (dev-0002 R$ 3.457 e ad0505 R$ 1.863; os cap_0014-16 ficaram em R$ 54-150).
+<b>Próximo:</b> completar a fila com mais 3-4 criativos no valor combinado.
+<b>AD0424, re-leitura FEITA por query:</b> teto 1,5 relido = <b>R$ 4,47</b>
+contra CPL de R$ 8,13 — vermelho MESMO com o LF64 no histórico. Não sobe pro
+ML; se a tese nele continuar viva, o caminho é variação nova (edição/gancho),
+não mais verba na mesma peça.</li>
+<li><b>3 · 15% — Lead padrão com os garanhões.</b>
+<b>Ideal:</b> 15% da verba. <b>Feito no LF66:</b> 31,4% — o dobro.
+<b>Próximo:</b> devolver o excedente pro ML (frente 1) ou pro funil (frente 2).</li>
+<li><b>Cortes imediatos:</b> ad0154 (CPL 11,64-15,73 contra teto relido de
+R$ 9,57) e ad0170 seguem vermelhos; mais as 5 campanhas com >R$ 1.000 e zero
+venda (~R$ 11k parados). Regra da corrida: corta após R$ 1,5-2k sem conversão.</li>
 </ul>
-<p>Carrinho fecha em 06/09. Re-rodar o botão
-(<code>bash scripts/painel_lancamento.sh LF65</code>) atualiza os números e
-reavalia estas ações na rodada final.</p>
+<p>Carrinho do LF65 fecha 06/09; o do LF66 abre 07/09. Re-rodar o botão
+(<code>bash scripts/painel_lancamento.sh LF65</code>) atualiza este painel e o
+anterior junto.</p>

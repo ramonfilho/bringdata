@@ -108,7 +108,12 @@ def main() -> int:
                        f"{tot_l:,}".replace(",", "."), br(cpl_geral, 2, "R$ "),
                        br(tot_v, 0) if tem_venda else "—",
                        pct(100 * tot_v / tot_l, 2) if (tem_venda and tot_l) else "—",
-                       br(tot_f, 2, "R$ ") if tem_venda else "—", "—", "—"])
+                       br(tot_f, 2, "R$ ") if tem_venda else "—",
+                       # TOTAL soma de verdade (pedido do Ramon, 31/08): ROAS =
+                       # tudo que entrou / tudo que saiu; lucro = a diferença.
+                       # Inclui orgânico e 'não está na base' no faturamento.
+                       br(tot_f / tot_gasto, 2) if (tem_venda and tot_gasto) else "—",
+                       _cor(tot_f - tot_gasto) if tem_venda else "—"])
     tab_modelo = _tab(["Tipo de campanha", "Camp.", "Gasto", "Cadastros", "CPL",
                        "Vendas", "Conversão", "Faturamento", "ROAS", "Lucro"],
                       linhas_mod[:-1], linhas_mod[-1])
@@ -397,6 +402,39 @@ def main() -> int:
         "da quebra por campanha — quanto cada campanha contribuiu para esse número, útil "
         "quando há configurações de campanha diferentes — é só pedir: a base já existe.</p>")
 
+    # Lucrou ACIMA do teto (nota do Ramon, 31/08): ou o teto está desinformado
+    # (criativo sem histórico próprio), ou a amostra é pequena, ou o estouro é
+    # real e o teto merece releitura — o painel diz qual é o caso.
+    if tem_venda:
+        exp = []
+        for x in ct_ord:
+            if (x.get("gasto") or 0) <= 300 or (x.get("lucro") or 0) <= 0:
+                continue
+            tc = teto_cria.get((x["modelo"], x["criativo"]))
+            t15 = tc[0] / tc[1] * (2.0 / 1.5) if tc and tc[1] else None
+            cpl = x.get("cpl")
+            if t15 is None or cpl is None or cpl <= t15:
+                continue
+            v = int(x.get("vendas") or 0)
+            n_h = int(x.get("n_hist") or 0)
+            if n_h < 1000:
+                motivo = (f"histórico de só {n_h} leads — o teto quase não conhece "
+                          "o criativo e sai apertado demais; estourar e lucrar é "
+                          "esperado até o histórico formar")
+            elif v < 3:
+                motivo = (f"{v} venda(s) em {int(x.get('leads_ledger') or 0)} leads — "
+                          "amostra pequena, pode ser sorte")
+            else:
+                motivo = (f"histórico de {n_h:,} leads e {v} vendas — estouro "
+                          "lucrativo REAL; o teto dele merece releitura"
+                          ).replace(",", ".")
+            exp.append(f"<b>{x['criativo'][:32]}</b> ({x['modelo']}): CPL {br(cpl)} "
+                       f"contra teto 1,5 de {br(t15)} — {motivo}")
+        if exp:
+            tab_cria_tipo += ("<p class='h2sub' style='margin-top:10px'><b>Estourou o "
+                              "teto e mesmo assim lucrou — por quê?</b> "
+                              + "; ".join(exp) + ".</p>")
+
     import pandas as pd
     from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
@@ -477,24 +515,6 @@ def main() -> int:
              "html": tab_teto},
             {"title": "7 · Criativo agregado por tipo de campanha",
              "html": tab_cria_tipo},
-            {"title": "8 · Régua e cobertura (o carimbo desta rodada)",
-             "html": ("<ul>"
-                      f"<li><b>Âncora do teto:</b> a referência que a produção serve hoje "
-                      f"({m['referencia_id']}), fator de rastreamento {br(m['fator_rastreamento'], 4)} "
-                      f"({m['fator_procedencia']}), crédito do não-respondente {br(m['credito_nao_respondente'], 4)}. "
-                      f"O payload inteiro está congelado no contrato — o número não muda se a tabela viva for reescrita.</li>"
-                      f"<li><b>Histórico de criativo point-in-time:</b> só lançamentos fechados antes de "
-                      f"{m['historico_corte'][8:10]}/{m['historico_corte'][5:7]} ({m['historico_criativos']} criativos) — "
-                      f"o lançamento anterior não contamina o teto deste.</li>"
-                      f"<li><b>Cobertura:</b> {br(100 * (cob['pct_gasto_casado'] or 0), 1)}% do gasto Meta casado por anúncio; "
-                      f"{cob['leads_sem_criativo']} cadastros sem criativo e {cob['leads_criativo_macro']} com macro quebrada "
-                      f"ficam em baldes nomeados; {cob['ids_nao_resolvidos']} ids sem nome.</li>"
-                      f"<li><b>Boleto</b> conta {br(100 * m['boleto_haircut'], 0)}% no faturamento; gasto Meta com imposto "
-                      f"×{br(m['meta_gross_up'], 2)}; devolvidos: {m['devolvidos_n']} (debriefing ainda não existe).</li>"
-                      "<li><b>Comparabilidade:</b> os números do teto desta rodada usam a régua de produção de hoje "
-                      "(crédito medido) e <b>não</b> são comparáveis ao 1,73x publicado do DEV21, que foi certificado "
-                      "com crédito 1,00.</li>"
-                      "</ul>")},
         ],
         "footer": f"Gerado do contrato.json por render_painel_lancamento.py · {m['gerado_em'][:16]} · "
                   "traço (—) = ainda não medido",
@@ -543,17 +563,15 @@ def main() -> int:
     # scripts/comparativo_lancamentos.py na pasta do LF; entra antes do carimbo.
     comparativo = pasta / "comparativo.html"
     if comparativo.exists():
-        carimbo = next(i for i, x in enumerate(spec["sections"])
-                       if "carimbo" in x["title"])
-        spec["sections"].insert(carimbo, {"title": "Comparação com os lançamentos anteriores",
-                                          "html": comparativo.read_text()})
+        idx = next((i for i, x in enumerate(spec["sections"])
+                    if "De onde veio" in x["title"]), len(spec["sections"]))
+        spec["sections"].insert(idx, {"title": "Comparação com os lançamentos anteriores",
+                                      "html": comparativo.read_text()})
 
     conclusao = pasta / "conclusao.html"
     if conclusao.exists():
-        carimbo = next(i for i, x in enumerate(spec["sections"])
-                       if "carimbo" in x["title"])
-        spec["sections"].insert(carimbo, {"title": "Ações e recomendações",
-                                          "html": conclusao.read_text()})
+        spec["sections"].append({"title": "Ações e recomendações",
+                                 "html": conclusao.read_text()})
     for i, x in enumerate(spec["sections"], 1):   # renumera 1..N (sempre)
         x["title"] = re.sub(r"^\d+ · ", "", x["title"])
         x["title"] = f"{i} · {x['title']}"

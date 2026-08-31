@@ -99,6 +99,8 @@ def main() -> int:
     alvo = sys.argv[1] if len(sys.argv) > 1 else "LF65"
     pasta = _V2 / f"docs/relatorios/{alvo.lower()}_resultado"
     serie = [metricas(lf) for lf in SERIE]
+    # média SEM o DEV21 (quente, outlier — nota do Ramon, 31/08)
+    serie_sem = [r for r in serie if r["lf"] != "DEV21"]
     at = metricas(alvo)
     # anterior = o LF conhecido (corrida + pastas *_resultado) com a captação
     # imediatamente antes da deste — nada de LF64 cravado no código
@@ -136,7 +138,7 @@ def main() -> int:
                 f"<td>{br(r['roas'])}</td>"
                 f"<td class='{'pos' if (r['lucro'] or 0) > 0 else 'neg'}'>{br(r['lucro'], 0, 'R$ ')}</td></tr>")
 
-    media = {k: med(serie, k) for k in
+    media = {k: med(serie_sem, k) for k in
              ("gasto", "cadastros", "cpl", "teto15", "pct_gasto_dentro", "roas",
            "lucro", "conc1", "conc3", "d910")}
     media["cadastros"] = int(media["cadastros"] or 0)
@@ -151,7 +153,7 @@ def main() -> int:
     rows = [linha(f"{alvo} (este)", at, prov)]
     if prev:
         rows.append(linha(f"{prev['lf']} (anterior)", prev, not prev["maduro"]))
-    rows.append(linha("Média LF56→DEV21", media))
+    rows.append(linha("Média LF56→LF63 (sem o DEV21, quente)", media))
     rows.append(linha("Top 3 ROAS (" + ", ".join(r["lf"] for r in top3) + ")", t3))
     tab1 = (f"<div class='tw'><table class='tb'><thead>{head}</thead>"
             f"<tbody>{''.join(rows)}</tbody></table></div>")
@@ -180,7 +182,7 @@ def main() -> int:
                "<th>Folga (teto − CPL)</th></tr></thead><tbody>"
                + linha_mud(f"{alvo} (este)", at)
                + (linha_mud(f"{prev['lf']} (anterior)", prev) if prev else "")
-               + linha_mud("Média LF56→DEV21", {k: med(serie, k) for k in chaves_m})
+               + linha_mud("Média LF56→LF63 (sem o DEV21)", {k: med(serie_sem, k) for k in chaves_m})
                + linha_mud("Top 3 ROAS (" + ", ".join(r["lf"] for r in top3) + ")",
                            {k: med(top3, k) for k in chaves_m})
                + "</tbody></table></div>")
@@ -214,7 +216,12 @@ def main() -> int:
              "quando o carrinho fecha e a venda cai no banco. Linha com <i>(provisório)</i> "
              "ainda vai crescer; não tire conclusão dela. 3- O teto aqui é a régua de HOJE "
              "aplicada a todos. A comparação entre eles é justa, mas o número não bate com "
-             "o publicado na época de cada um.</p>")
+             "o publicado na época de cada um."
+             + ((f" 4- <b>{alvo}</b> está com o carrinho recém-aberto: ele aparece "
+                 "gastando mais dentro do teto e lucrando menos que os antigos "
+                 "porque as vendas dele mal começaram. Gasto, CPL e teto valem; "
+                 "lucro e ROAS dele, ainda não.") if prov else "")
+             + "</p>")
     fonte = ("<p class='h2sub' style='margin-top:10px'>Fonte: o contrato congelado de cada "
              "lançamento (contrato.json): LF56→DEV21 na pasta da corrida (gerados em "
              f"{serie[0]['gerado'][8:10]}/{serie[0]['gerado'][5:7]}), "

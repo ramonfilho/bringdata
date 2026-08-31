@@ -87,3 +87,28 @@ Decisões anteriores do dia que continuam valendo: corrida NÃO re-roda; balde
    SÓ com cadastro da captação DESTE LF; quem vem de captação anterior cai em
    "Não está na base". Nova seção 9 no fundo racha essas vendas: cadastro dos
    90d anteriores vs sem cadastro nos 90d.
+
+## Quarta rodada de notas (31/08, print da tabela 1) — status
+
+1. **[x] Tabela 5:** nota automática "Estourou o teto e mesmo assim lucrou — por
+   quê?" sob a tabela: criativo sem histórico (AD0128, n_hist=0 → teto
+   desinformado), amostra pequena (AD0156, 1-2 vendas), ou estouro lucrativo
+   REAL que pede releitura (AD0160 Challenger: 29.353 leads de histórico,
+   14 vendas).
+2. **[x] Tabela 6:** média agora SEM o DEV21; aviso ganha o ponto 4 nomeando o
+   alvo provisório ("gastou mais dentro do teto e lucra menos porque o carrinho
+   mal abriu"). Leitura dele confirmada nos números: LF65 comprou público
+   +3,8pp mais qualificado (23,2% vs 19,4% D9-10) e concentrou -11,8pp no
+   melhor criativo (39,6% vs 51,4%).
+3. **[x] Releitura do teto SEM mexer em arquitetura:** scripts/releitura_teto.py
+   (histórico com corte = amanhã, inclui o último LF fechado; imprime relido vs
+   painel). Rodar 2x por semana. AD0424: teto do painel não via o LF64.
+4. **[x] Carimbo (seção 8) removido** do painel.
+5. **[x] Respondido:** 37 = vendas casadas com cadastro DESTE LF; 9 "não está na
+   base"; total 46. Das 9, ZERO casam cadastro dos 90d anteriores (107.277
+   varridos) — não há venda de captação anterior neste LF até agora.
+6. **[x] Aderência entranhada nas ações** (ideal → feito no LF66 → próximo).
+7. **[x] LF66:** datas confirmadas (captação 25→30/08; carrinho abre 07/09);
+   nota de aderência atualizada. Falta só a linha na planilha pro painel rodar.
+8. **[x] TOTAL da tabela 1 com soma real:** ROAS 1,22 e lucro +R$ 12.864,63
+   (fatura tudo, inclusive orgânico e não-base, contra todo o gasto).
