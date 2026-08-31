@@ -363,3 +363,24 @@ def test_separacao_por_temperatura_sem_venda_e_vazio():
     assert s and all(r["lift"] is None and r["taxa_topo"] is None for r in s)
     assert L.separacao_por_temperatura(None) == []
     assert L.separacao_por_temperatura(pd.DataFrame()) == []
+
+
+def test_separacao_divide_por_canal_quando_ha_utm_source():
+    """Nota do Ramon (31/08): 'sem público no nome' escondia Google + rastro
+    quebrado + orgânico num balde só. Com utm_source, o canal decide primeiro."""
+    df = pd.DataFrame({
+        "utm_campaign": ["A | FRIO |1", "A | FRIO |1", "devlf", "devlf",
+                         "CAP | X", None],
+        "utm_source": ["facebook-ads", "facebook-ads", "google-ads",
+                       "google-ads", "facebook-ads", "whatsapp"],
+        "decil": [10, 1, 10, 1, 9, 2],
+        "converted": [True, False, True, False, False, False],
+    })
+    s = {r["temperatura"]: r for r in L.separacao_por_temperatura(df)}
+    assert set(s) == {"frio", "Google", "Meta, sem público no nome",
+                      "orgânico / sem rastro"}
+    assert s["Google"]["leads"] == 2 and s["Google"]["taxa_topo"] == pytest.approx(1.0)
+    assert s["frio"]["leads"] == 2
+    # sem utm_source (contrato antigo/teste), cai no comportamento antigo
+    velho = {r["temperatura"] for r in L.separacao_por_temperatura(_ledger_temperatura())}
+    assert velho == {"frio", "quente"}
