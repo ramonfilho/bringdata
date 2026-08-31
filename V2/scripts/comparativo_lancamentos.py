@@ -328,18 +328,7 @@ def main() -> int:
                 if at["semana"] != pior_s
                 else ": a época pode estar pesando aqui.") + "</p>")
 
-    aviso = ("<p class='h2sub'>Como ler: 1- <b>Gasto, cadastros, CPL e teto</b> fecham "
-             "junto com a captação. Pode comparar sempre. 2- <b>ROAS e lucro</b> só fecham "
-             "quando o carrinho fecha e a venda cai no banco. Linha com <i>(provisório)</i> "
-             "ainda vai crescer; não tire conclusão dela. 3- O teto aqui é a régua de HOJE "
-             "aplicada a todos. A comparação entre eles é justa, mas o número não bate com "
-             "o publicado na época de cada um."
-             + ((f" 4- <b>{alvo}</b> está com o carrinho recém-aberto: gasto, CPL, "
-                 "teto e % dentro do teto fecharam na captação e valem; lucro e "
-                 "ROAS dele ainda não. O parágrafo abaixo separa o que é "
-                 "calendário do que é sinal real.") if prov else "")
-             + "</p>")
-    html = aviso + tab1 + tab_mud + veredito + epoca
+    html = tab1 + tab_mud + veredito + epoca
     dst = pasta / "comparativo.html"
     dst.write_text(html)
     print(f"comparativo: {dst}  ({dst.stat().st_size:,} bytes)")
