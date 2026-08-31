@@ -62,6 +62,53 @@ def _tab(headers, rows, aggr=None):
             f"<tbody>{body}{ag}</tbody></table></div>")
 
 
+def _serie_ml_vs_lead(pasta_alvo):
+    """Placar dinâmico do lucro POR CADASTRO (ML frio vs Lead frio) sobre todos
+    os contratos disponíveis. Devolve (ganha, total, alvo_ganha_parcial|None)."""
+    base = Path("docs/relatorios")
+    fontes = {}
+    for q in sorted(base.glob("_corrida/*/contrato.json")):
+        fontes[q.parent.name.upper()] = q
+    for q in sorted(base.glob("lf*_resultado/contrato.json")):
+        fontes[q.parent.name[:-10].upper()] = q      # pasta vence a corrida
+    alvo_nome = pasta_alvo.name[:-10].upper()
+
+    def _placar_de(q):
+        c = json.loads(q.read_text())
+        ca = c["tabelas"]["campanhas"]
+        meta_rows = [x for x in ca if x.get("plataforma") == "meta"]
+        frio = [x for x in meta_rows
+                if temperatura_da_campanha(x["campanha"]) != "quente"]
+        ml = [x for x in frio if x["modelo"] not in _NAO_MODELO]
+        ld = [x for x in frio if x["modelo"] == ROTULO_LEAD]
+
+        def _lc(rows):
+            l = sum(x.get("leads") or 0 for x in rows)
+            return (sum(x.get("lucro") or 0 for x in rows) / l) if l else None
+        a, b = _lc(ml), _lc(ld)
+        fechado = (c["meta"]["estado"] in ("venda_fechada_imatura", "maduro")
+                   and str(c["meta"].get("sales_max"))[:10] >= c["meta"]["vendas_end"][:10])
+        return a, b, fechado
+
+    ganha = total = 0
+    alvo_parcial = None
+    for lf, q in fontes.items():
+        try:
+            a, b, fechado = _placar_de(q)
+        except Exception:
+            continue
+        if a is None or b is None:
+            continue
+        if lf == alvo_nome and not fechado:
+            alvo_parcial = a > b
+            continue
+        if not fechado:
+            continue
+        total += 1
+        ganha += 1 if a > b else 0
+    return ganha, total, alvo_parcial
+
+
 def main() -> int:
     pasta = Path(sys.argv[1] if len(sys.argv) > 1 else "docs/relatorios/lf64_resultado")
     c = json.loads((pasta / "contrato.json").read_text())
@@ -172,8 +219,18 @@ def main() -> int:
         if a_ is not None and b_ is not None:
             tab_ml += (f"<p class='h2sub' style='margin-top:10px'>Neste lançamento, cada "
                        f"cadastro frio do modelo rendeu <b>{br(a_, 2, 'R$ ')}</b> de lucro; "
-                       f"o do Lead padrão, <b>{br(b_, 2, 'R$ ')}</b>. Série dos fechados "
-                       f"(LF56→DEV21, régua atual): o modelo ganhou em 7 de 9.</p>")
+                       f"o do Lead padrão, <b>{br(b_, 2, 'R$ ')}</b>.")
+            try:
+                g_, t_, alvo_p = _serie_ml_vs_lead(pasta)
+                extra = ""
+                if alvo_p is not None:
+                    extra = (" Incluindo este parcial, "
+                             f"{g_ + (1 if alvo_p else 0)} de {t_ + 1}.")
+                tab_ml += (f"<p class='h2sub' style='margin-top:6px'>Série dos lançamentos "
+                           f"fechados (régua atual): o modelo ganhou em {g_} de {t_}."
+                           + extra + "</p>")
+            except Exception:
+                pass
 
     sep = c.get("separacao_temperatura") or []
     tab_sep = ""
@@ -502,9 +559,7 @@ def main() -> int:
                     "mesmo com os nomes novos da equipe de tráfego).",
              "html": tab_modelo + aguardando},
             {"title": "2 · Lucro do modelo contra o Lead — e a separação por público",
-             "sub": "Público = a palavra QUENTE/FRIO no nome da campanha da Meta "
-                    "(escolha de mídia, não muda com etiqueta de modelo). Seção fixa; "
-                    "a tabela quente vs frio só aparece quando há público quente no LF.",
+             "sub": "",
              "html": tab_pub + tab_ml + tab_sep},
             {"title": "2 · Campanha a campanha (top 15 por gasto)",
              "sub": "As mesmas colunas do debriefing: gasto, cadastros, CPL, vendas, ROAS e lucro.",
@@ -528,45 +583,12 @@ def main() -> int:
         sec = next(x for x in spec["sections"] if "Criativo agregado" in x["title"])
         sec["html"] += nota_cria.read_text()
 
-    # De onde veio o comprador (nota 8 do Ramon, 31/08): tabela no fundo, só
-    # quando o contrato novo traz o racha dos 90 dias (naobase_90d no meta).
-    nb90 = m.get("naobase_90d")
-    if tem_venda and nb90:
-        nb_row = next((x for x in ca if x["modelo"] == "Não está na base"), None)
-        v_este = sum(x.get("vendas") or 0 for x in ca
-                     if x["modelo"] != "Não está na base")
-        f_este = sum(x.get("faturamento") or 0 for x in ca
-                     if x["modelo"] != "Não está na base")
-        v_nb = (nb_row or {}).get("vendas") or 0
-        f_nb = (nb_row or {}).get("faturamento") or 0
-        v90, f90 = nb90.get("vendas") or 0, nb90.get("faturamento") or 0
-        varr = f"{nb90.get('cadastros_antigos', 0):,}".replace(",", ".")
-        rows_o = [
-            ["<b>Cadastro da captação DESTE LF</b>", br(v_este, 0),
-             br(f_este, 2, "R$ ")],
-            [f"<b>Cadastro dos 90 dias anteriores</b> ({varr} cadastros varridos)",
-             br(v90, 0), br(f90, 2, "R$ ")],
-            ["<b>Sem cadastro nos últimos 90 dias</b>",
-             br(max(v_nb - v90, 0), 0), br(max(f_nb - f90, 0), 2, "R$ ")],
-        ]
-        spec["sections"].append({
-            "title": "9 · De onde veio o comprador do carrinho",
-            "sub": "As tabelas lá de cima casam venda só com cadastro da captação "
-                   "DESTE lançamento. Aqui, as vendas 'não está na base' são "
-                   "re-casadas contra os cadastros dos 90 dias anteriores à "
-                   "captação (mesmo matcher, mesmo haircut de boleto).",
-            "html": _tab(["Origem do cadastro do comprador", "Vendas", "Faturamento"],
-                         rows_o),
-        })
-
     # Comparação com os lançamentos anteriores: gerada por
     # scripts/comparativo_lancamentos.py na pasta do LF; entra antes do carimbo.
     comparativo = pasta / "comparativo.html"
     if comparativo.exists():
-        idx = next((i for i, x in enumerate(spec["sections"])
-                    if "De onde veio" in x["title"]), len(spec["sections"]))
-        spec["sections"].insert(idx, {"title": "Comparação com os lançamentos anteriores",
-                                      "html": comparativo.read_text()})
+        spec["sections"].append({"title": "Comparação com os lançamentos anteriores",
+                                 "html": comparativo.read_text()})
 
     conclusao = pasta / "conclusao.html"
     if conclusao.exists():

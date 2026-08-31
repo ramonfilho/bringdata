@@ -4,7 +4,7 @@
   "lf": "LF65",
   "client_id": "devclub",
   "as_of": "2026-08-31",
-  "gerado_em": "2026-08-31 13:43:47.018562-03:00",
+  "gerado_em": "2026-08-31 15:29:24.202331-03:00",
   "cap_start": "2026-08-18",
   "cap_end": "2026-08-24",
   "vendas_start": "2026-08-31",
@@ -513,6 +513,13 @@
     "n": 1,
     "valor": 1997.0,
     "casou_padrao": true
+   },
+   {
+    "produto": "★ [Vitalício] Formação DevClub FullStack Pro - OFICIAL",
+    "gateway": "guru",
+    "n": 1,
+    "valor": 1497.0,
+    "casou_padrao": true
    }
   ],
   "naobase_90d": {
@@ -945,10 +952,10 @@
     "leads": 0,
     "cpl": null,
     "conversao": null,
-    "vendas": 9,
-    "vendas_cartao": 8,
+    "vendas": 10,
+    "vendas_cartao": 9,
     "vendas_boleto": 1,
-    "faturamento": 17058.36,
+    "faturamento": 18555.36,
     "roas": null,
     "lucro": null,
     "gasto": null,
