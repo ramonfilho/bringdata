@@ -352,12 +352,11 @@ def main() -> int:
     tab_teto += ("<p class='h2sub' style='margin-top:14px'>A mesma leitura com meta de ROAS "
                  "<b>1,5</b> (o teto cresce ×1,33; †bateu a meta = ROAS ≥ 1,5 com a mesma "
                  "tolerância de 2%):</p>" + tab_teto15
-                 + f"<p class='h2sub' style='margin-top:10px'>Mesmo com a régua mais folgada, "
-                 f"só <b>{len(d15)}</b> de {len(uj)} unidades couberam. O que aperta é o custo "
-                 "por lead: o cadastro do LF64 saiu <b>39% mais caro</b> que o do DEV21 "
-                 "(R$ 8,77 contra R$ 6,33), e essa alta pode ter vindo da troca de pixel "
-                 "(as campanhas recomeçaram o aprendizado no pixel novo) ou de outra causa "
-                 "ainda não isolada.</p>")
+                 + f"<p class='h2sub' style='margin-top:10px'>Com a régua mais folgada, "
+                 f"<b>{len(d15)}</b> de {len(uj)} unidades couberam no teto.</p>")
+    # (análise autoral do porquê — ex.: o CPL 39% mais caro do LF64 — vive em
+    #  conclusao.html/notas.html na pasta do LF, nunca aqui: o script é genérico
+    #  e o texto do LF64 vazou pro painel do LF65 na primeira prova de reuso.)
 
     # ── telas 5 e 6: menor CPL e ranking ─────────────────────────────────────
     # (telas 'menor CPL' e 'ranking por lucro' removidas a pedido do Ramon, 24-25/08)
