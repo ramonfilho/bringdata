@@ -4,7 +4,7 @@
   "lf": "LF65",
   "client_id": "devclub",
   "as_of": "2026-08-31",
-  "gerado_em": "2026-08-31 12:16:41.531919-03:00",
+  "gerado_em": "2026-08-31 13:22:43.019115-03:00",
   "cap_start": "2026-08-18",
   "cap_end": "2026-08-24",
   "vendas_start": "2026-08-31",
@@ -475,8 +475,8 @@
    {
     "produto": "DevClub - Full Stack 2026",
     "gateway": "tmb",
-    "n": 23,
-    "valor": 55968.4,
+    "n": 25,
+    "valor": 60612.8,
     "casou_padrao": true
    },
    {
@@ -492,6 +492,13 @@
     "n": 19,
     "valor": 41109.49,
     "casou_padrao": true
+   },
+   {
+    "produto": "None",
+    "gateway": "asaas",
+    "n": 1,
+    "valor": 219.0,
+    "casou_padrao": false
    },
    {
     "produto": "Parcelamento Asaas 12x boleto - total R$ 2.639 (sem descricao na API; entra por decisao Ramon 31/08)",
@@ -530,15 +537,15 @@
    "n": 11,
    "gasto": 32948.573899999996,
    "leads": 3107,
-   "vendas": 18,
-   "faturamento": 28205.27,
-   "roas_ponderado": 0.8560391744299441,
-   "lucro": -4743.303899999994,
+   "vendas": 19,
+   "faturamento": 29427.27,
+   "roas_ponderado": 0.893127274318844,
+   "lucro": -3521.3038999999944,
    "bateu_meta": 0,
    "lucro_acima_1000": 3,
    "roas_positivo": 4
   },
-  "fisher_p": 0.499871497580892,
+  "fisher_p": 0.5060678062106321,
   "mannwhitney_p": 0.835526127055433
  },
  "separacao_temperatura": [
@@ -548,21 +555,43 @@
    "leads_topo": 744,
    "pct_topo": 17.198335644937586,
    "vendas_topo": 7,
-   "vendas_base": 16,
+   "vendas_base": 18,
    "taxa_topo": 0.009408602150537635,
-   "taxa_base": 0.00446677833612507,
-   "lift": 2.106350806451613
+   "taxa_base": 0.005025125628140704,
+   "lift": 1.8723118279569892
   },
   {
-   "temperatura": "sem público no nome",
-   "leads": 1261,
-   "leads_topo": 390,
-   "pct_topo": 30.927835051546392,
+   "temperatura": "Google",
+   "leads": 1078,
+   "leads_topo": 327,
+   "pct_topo": 30.333951762523192,
    "vendas_topo": 7,
    "vendas_base": 4,
-   "taxa_topo": 0.017948717948717947,
-   "taxa_base": 0.004592422502870264,
-   "lift": 3.9083333333333328
+   "taxa_topo": 0.021406727828746176,
+   "taxa_base": 0.005326231691078562,
+   "lift": 4.019113149847095
+  },
+  {
+   "temperatura": "orgânico / sem rastro",
+   "leads": 94,
+   "leads_topo": 43,
+   "pct_topo": 45.744680851063826,
+   "vendas_topo": 1,
+   "vendas_base": 0,
+   "taxa_topo": 0.023255813953488372,
+   "taxa_base": 0.0,
+   "lift": null
+  },
+  {
+   "temperatura": "Meta, sem público no nome",
+   "leads": 89,
+   "leads_topo": 20,
+   "pct_topo": 22.471910112359552,
+   "vendas_topo": 0,
+   "vendas_base": 0,
+   "taxa_topo": 0.0,
+   "taxa_base": 0.0,
+   "lift": null
   }
  ],
  "tabelas": {
@@ -757,13 +786,13 @@
    {
     "leads": 952,
     "cpl": 9.0985890756,
-    "conversao": 0.0084033613,
-    "vendas": 8,
+    "conversao": 0.0094537815,
+    "vendas": 9,
     "vendas_cartao": 5,
-    "vendas_boleto": 3,
-    "faturamento": 13622.25,
-    "roas": 1.5726708851,
-    "lucro": 4960.3932,
+    "vendas_boleto": 4,
+    "faturamento": 14844.25,
+    "roas": 1.7137491814,
+    "lucro": 6182.3932,
     "gasto": 8661.8568,
     "cid": "120248822827090390",
     "campanha": "[17][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABERTO][CBO][AUT][13.08][TESTE_CONVERSAO][PG1][PIXELNOVO][JUL_24_TOP50][3]",
@@ -859,13 +888,13 @@
    {
     "leads": 643,
     "cpl": 7.4564359253,
-    "conversao": 0.0,
-    "vendas": 0,
+    "conversao": 0.00155521,
+    "vendas": 1,
     "vendas_cartao": 0,
-    "vendas_boleto": 0,
-    "faturamento": 0.0,
-    "roas": 0.0,
-    "lucro": -4794.4883,
+    "vendas_boleto": 1,
+    "faturamento": 1100.2,
+    "roas": 0.2294718291,
+    "lucro": -3694.2883,
     "gasto": 4794.4883,
     "cid": "120248823436580390",
     "campanha": "[28][DEVLF][CAP][LEADS][SITE][FRIO][ADVTG_ABERTO][ABO][AUT][13.08][TESTE_CRITIVOS][8CONJ][PG1][PIXELNOVO]",
@@ -975,11 +1004,11 @@
     "peso_historico": 0.0,
     "compradores_hist": 0,
     "esperados_hist": 0.0,
-    "vendas": 0.0,
-    "faturamento": 0.0,
-    "roas": 0.0,
-    "lucro": -131.7693,
-    "conversao": 0.0,
+    "vendas": 1.0,
+    "faturamento": 1100.2,
+    "roas": 8.3494410306,
+    "lucro": 968.4307,
+    "conversao": 0.1,
     "no_corte": false
    },
    {
@@ -2039,11 +2068,11 @@
     "peso_historico": 0.936210251,
     "compradores_hist": 277,
     "esperados_hist": 210.5873,
-    "vendas": 8.0,
-    "faturamento": 13622.25,
-    "roas": 1.6065225932,
-    "lucro": 5142.9108,
-    "conversao": 0.0084835631,
+    "vendas": 9.0,
+    "faturamento": 14844.25,
+    "roas": 1.7506375969,
+    "lucro": 6364.9108,
+    "conversao": 0.0095440085,
     "no_corte": true
    },
    {
@@ -3402,11 +3431,11 @@
     "pct_d9_d10": 45.0230234559,
     "lift_criativo": 1.3153689705,
     "n_hist": 29353,
-    "vendas": 13.0,
-    "faturamento": 20724.0,
-    "lucro": 5675.6996,
+    "vendas": 14.0,
+    "faturamento": 21946.0,
+    "lucro": 6897.6996,
     "cpl": 11.3060108189,
-    "conversao": 0.0087306917
+    "conversao": 0.0094022834
    },
    {
     "modelo": "Challenger (jul_24)",
@@ -4010,11 +4039,11 @@
     "pct_d9_d10": 0.0,
     "lift_criativo": null,
     "n_hist": 0,
-    "vendas": 0.0,
-    "faturamento": 0.0,
-    "lucro": -131.7693,
+    "vendas": 1.0,
+    "faturamento": 1100.2,
+    "lucro": 968.4307,
     "cpl": 18.8241857143,
-    "conversao": 0.0
+    "conversao": 0.1
    },
    {
     "modelo": "Lead Padrão (Meta)",
