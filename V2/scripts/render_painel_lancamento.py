@@ -527,6 +527,38 @@ def main() -> int:
         rot_perde = ("nas que não venderam"
                      if perde and not any((x.get("faturamento") or 0) > 0 for x in perde)
                      else "nas que perderam")
+        # O que a régua nova muda na prática (conclusão pedida pelo Ramon, 01/09):
+        # ela mostra o dinheiro cedo, e o número do relatório para de esconder o
+        # pior pedaço. Os dois "dentro do teto" saem do MESMO contrato.
+        def _dentro(sel):
+            gj_ = sum(x["gasto"] for x in sel)
+            gd_ = sum(x["gasto"] for x in sel
+                      if x["cpl"] <= x["teto"] * (2.0 / 1.5))
+            return ((100 * gd_ / gj_) if gj_ else None), len(sel)
+        jl_v = [x for x in um_meta if int(x.get("leads_ledger") or 0) >= 100
+                and x["gasto"] >= 300 and x.get("cpl") is not None
+                and x.get("teto") is not None]
+        jl_n = [x for x in um_meta if x["gasto"] >= 300 and x.get("cpl") is not None
+                and x.get("teto") is not None]
+        pv, nv = _dentro(jl_v)
+        pn, nn = _dentro(jl_n)
+        g_perde = sum(x["gasto"] for x in perde)
+        est_perde = sum(1 for x in perde if x["cpl"] > x["teto"] * (2.0 / 1.5))
+        est_ganha = sum(1 for x in ganha if x["cpl"] > x["teto"] * (2.0 / 1.5))
+        conclusao_regua = ""
+        if perde and pv is not None and pn is not None:
+            conclusao_regua = (
+                "<p class='h2sub' style='margin-top:10px'><b>O que a régua nova muda "
+                "na prática:</b> ela não salva um desastre, ela mostra o dinheiro "
+                f"cedo. Aqui, {br(100 * g_perde / g_meta_u, 1)}% de toda a verba Meta "
+                f"({br(g_perde, 0, 'R$ ')}) saiu em {len(perde)} duplas que não fizeram "
+                "uma venda e não apareciam em tabela nenhuma. E o teto antecipado é "
+                f"sinal, não sentença: das {n_est} marcadas como estouro, {est_perde} "
+                f"perderam tudo e {est_ganha} ainda deram lucro. O número do relatório "
+                f"também ficou honesto: o \"dentro do teto 1,5\" saiu de "
+                f"{br(pv, 1)}% (régua velha, {nv} duplas julgadas) para {br(pn, 1)}% "
+                f"(régua nova, {nn} duplas), porque parou de deixar o pior dinheiro "
+                "fora da conta.</p>")
         frase_prejuizo = ""
         if perde or ganha:
             frase_prejuizo = (
@@ -551,7 +583,8 @@ def main() -> int:
               "(backtest de 01/09, 10 lançamentos fechados):</b> nessa fatia, o "
               "dinheiro que o teto do par marcou FORA rendeu 0,75 por real investido; "
               "o que marcou DENTRO rendeu 2,66. Foi essa medição que virou a régua "
-              "oficial do julgamento acima.</p>")
+              "oficial do julgamento acima.</p>"
+            + conclusao_regua)
     # (análise autoral do porquê — ex.: o CPL 39% mais caro do LF64 — vive em
     #  conclusao.html/notas.html na pasta do LF, nunca aqui: o script é genérico
     #  e o texto do LF64 vazou pro painel do LF65 na primeira prova de reuso.)
