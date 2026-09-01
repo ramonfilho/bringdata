@@ -741,9 +741,18 @@ def constroi_lancamento(lf: str, *, as_of: Optional[date] = None,
         if (cap_start and cap_start >= date(2026, 7, 25)
                 and "decil_champion" in mm.columns
                 and mm["decil_champion"].notna().any()):
-            sep_col = "decil_champion"
-        sep_temp = separacao_por_temperatura(mm, tem_venda=tem_venda,
-                                             col_decil=sep_col)
+            # DUAS réguas únicas lado a lado (pedido do Ramon, 01/09: na série
+            # o challenger tem sinal e praticamente empata — a linha dele entra
+            # também). Nunca a nota mista aqui.
+            sep_col = "decil_champion+decil_challenger"
+            sep_temp = (
+                separacao_por_temperatura(mm, tem_venda=tem_venda,
+                                          col_decil="decil_champion")
+                + separacao_por_temperatura(mm, tem_venda=tem_venda,
+                                            col_decil="decil_challenger"))
+        else:
+            sep_temp = separacao_por_temperatura(mm, tem_venda=tem_venda,
+                                                 col_decil=sep_col)
 
         # De onde veio o comprador (nota 8 do Ramon, 31/08): a tabela de
         # campanhas casa venda SÓ com cadastro da captação DESTE LF; as vendas

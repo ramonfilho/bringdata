@@ -438,12 +438,12 @@ def _load_matched(
     naobase_sales = None
     if cadastro_reader is not None:
         cadastros = cadastro_reader(cap_start, cap_end)
-        launch_patterns = _load_launch_products()
-        if launch_patterns:
+        launch_rules = _load_launch_rules()
+        if any(launch_rules.values()):
             # conta como venda do LF só os PRODUTOS do lançamento na janela de CARRINHO
             # (exclui evergreen/combos, como o cliente). Casa por identidade → janela larga
             # (o carrinho é ~2-3 semanas após a captação). Não-casadas = 'Não-base'.
-            launch_sales = _filter_launch_sales(sales_df, launch_patterns, vendas_start, vendas_end)
+            launch_sales = _filter_launch_sales(sales_df, launch_rules, vendas_start, vendas_end)
             neg_window = window_days
             if vendas_end and cap_start:
                 neg_window = max(window_days, (vendas_end - cap_start).days + 3)
@@ -524,16 +524,78 @@ def _load_launch_products(path: Optional[Path] = None) -> list:
         return []
 
 
-def _filter_launch_sales(sales_df, patterns, vendas_start, vendas_end):
-    """Vendas do LANÇAMENTO: produto casa algum `patterns` E sale_date na janela de carrinho
-    [vendas_start, vendas_end]. Sem patterns → devolve as vendas como estão (fallback)."""
-    if sales_df is None or sales_df.empty or not patterns:
+def _load_launch_rules(path: Optional[Path] = None) -> dict:
+    """As TRÊS regras da régua de produto do lançamento (fonte única = yaml):
+      patterns  substrings no produto (launch_products) — como sempre
+      exact     produto EXATO, strip+lower (launch_products_exact): pega o
+                "Parcela 1 de 12." truncado SEM arrastar a variante RENEGOCIAÇÃO
+                (que contém o mesmo texto e não é venda nova)
+      gateways  gateway INTEIRO (launch_sale_gateways): o Asaas grava produto
+                NULL em 100% das linhas, então só o gateway identifica a venda
+    Decisão do Ramon (01/09/2026, itens B1/B5): Parcela 1 de 12 e Asaas ENTRAM
+    na régua; os dois são boleto → haircut de 50% aplica sozinho."""
+    out = {"patterns": _load_launch_products(path), "exact": [], "gateways": []}
+    import yaml
+    try:
+        cfg = yaml.safe_load(open(path or _DEFAULT_CLIENT_CFG)) or {}
+        for chave, alvo in (("launch_products_exact", "exact"),
+                            ("launch_sale_gateways", "gateways")):
+            v = _find_key(cfg, chave)
+            out[alvo] = ([str(p).strip().lower() for p in v if str(p).strip()]
+                         if v else [])
+    except Exception:  # noqa: BLE001 — config ausente não derruba o relatório
+        pass
+    return out
+
+
+def _filter_launch_sales(sales_df, rules, vendas_start, vendas_end):
+    """Vendas do LANÇAMENTO na janela de carrinho, pelas três regras de
+    `_load_launch_rules` (substring, produto exato, gateway inteiro). `rules`
+    aceita a lista antiga de patterns (compat). Depois do corte: a ENTRADA de
+    gateway (ex.: Asaas R$ 219) de um comprador que JÁ tem venda da lista
+    EXATA na janela é descartada — entrada e 1ª parcela são o MESMO contrato
+    (dupla contagem tratada; decisão do Ramon, 01/09/2026)."""
+    if isinstance(rules, (list, tuple)):
+        rules = {"patterns": list(rules), "exact": [], "gateways": []}
+    patterns = rules.get("patterns") or []
+    exact = set(rules.get("exact") or [])
+    gws = set(rules.get("gateways") or [])
+    if sales_df is None or sales_df.empty or not (patterns or exact or gws):
         return sales_df
-    prod = sales_df.get("produto", pd.Series([""] * len(sales_df), index=sales_df.index)).astype(str).str.lower()
-    df = sales_df[prod.apply(lambda s: any(p in s for p in patterns))]
+    idx = sales_df.index
+    pl = (sales_df.get("produto", pd.Series([""] * len(sales_df), index=idx))
+          .astype(str).str.strip().str.lower())
+    org = (sales_df.get("origem", pd.Series([""] * len(sales_df), index=idx))
+           .astype(str).str.strip().str.lower())
+    hit_pat = (pl.apply(lambda s: any(p in s for p in patterns))
+               if patterns else pd.Series(False, index=idx))
+    hit_exact = pl.isin(exact) if exact else pd.Series(False, index=idx)
+    hit_gw = org.isin(gws) if gws else pd.Series(False, index=idx)
+    df = sales_df[hit_pat | hit_exact | hit_gw]
     if vendas_start and vendas_end and not df.empty:
         sd = pd.to_datetime(df["sale_date"]).dt.date
         df = df[(sd >= vendas_start) & (sd <= vendas_end)]
+    if exact and gws and not df.empty:
+        pl2 = df["produto"].astype(str).str.strip().str.lower()
+        org2 = (df["origem"].astype(str).str.strip().str.lower()
+                if "origem" in df.columns else pd.Series("", index=df.index))
+        eh_exata = pl2.isin(exact)
+        chaves: set = set()
+        for c in ("email", "telefone"):
+            if c in df.columns:
+                chaves |= (set(df.loc[eh_exata, c].dropna().astype(str)
+                               .str.strip().str.lower()) - {""})
+
+        def _mesmo_comprador(r):
+            for c in ("email", "telefone"):
+                v = str(r.get(c) or "").strip().lower()
+                if v and v in chaves:
+                    return True
+            return False
+
+        entrada_gw = org2.isin(gws) & ~eh_exata
+        drop = entrada_gw & df.apply(_mesmo_comprador, axis=1)
+        df = df[~drop]
     return df
 
 
@@ -682,10 +744,10 @@ def compute_range_performance(
     matched_modelo = build_matched_df(ledger_reader(start, end), sales_df, window_days=window_days)
     naobase_sales = None
     if cadastro_reader is not None:
-        launch_patterns = _load_launch_products()
-        if launch_patterns:
+        launch_rules = _load_launch_rules()
+        if any(launch_rules.values()):
             # intervalo livre: filtra produto do lançamento (sem janela de carrinho fixa)
-            launch_sales = _filter_launch_sales(sales_df, launch_patterns, None, None)
+            launch_sales = _filter_launch_sales(sales_df, launch_rules, None, None)
             matched_negocio = build_matched_df(cadastro_reader(start, end), launch_sales, window_days=window_days)
             naobase_sales = _unmatched_launch(launch_sales, matched_negocio)
         else:
