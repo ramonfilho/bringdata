@@ -1,0 +1,30 @@
+
+LF60  cap 2026-06-22→2026-06-29  vendas 2026-07-06→2026-07-12  estado=maduro
+referência 2026-08-31T06:34  fator 1.2000 (tracking)  crédito 0.4329  régua 5d158f0a
+cadastros 12,187  unidades 36  campanhas 10
+gasto Meta R$ 63,803.02  casado por unidade R$ 63,767.92  (99.9%)
+sem criativo 137  macro quebrada 155  ids não resolvidos 0
+
+⚠ PRODUTOS FORA DA RÉGUA (vendidos na janela, sem padrão no yaml):
+   Club Hub  [guru]  n=1  R$ 497.00
+   Cobrança gerada e recebida automaticamente devido ao pagamento em duplicidade da cobrança Nr. 807508389  [boletex]  n=1  R$ 281.57
+   DevClub Vitalício  [tmb]  n=1  R$ 1,497.00
+   DevClub Vitalício + Plano Dev + 3 meses de Club Hub  [guru]  n=2  R$ 2,494.00
+   None  [asaas]  n=2  R$ 320.14
+   Operação 50k + Acesso Vitalício a Formação FullStack DevClub  [guru]  n=237  R$ 218,793.00
+   Operação 50k + Acesso Vitalício ao DevClub  [tmb]  n=66  R$ 127,380.00
+   [COMBO] DevClub + Plano Dev + ClubHub (1 ano de acesso)  [guru]  n=1  R$ 497.00
+   → decidir com o dono se entram, antes de publicar faturamento.
+
+teto (MEDIDO): 5 unidades julgáveis (cortes ≥100 leads e ≥R$ 300) — dentro 2 (R$ 43,261.33) · acima 3 (R$ 18,590.83)
+  dentro: vendas 35  ROAS 1.25  lucro R$ 10,964.45  | bateu meta 1  lucro>1000 2  positivo 2
+   acima: vendas 11  ROAS 0.74  lucro R$ -4,795.19  | bateu meta 0  lucro>1000 0  positivo 0
+  Fisher p=0.5891  Mann-Whitney p=0.2
+
+separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
+  frio                   leads   8,407  topo 1.14%  base 0.60%  lift 1.91x
+  Google                 leads   1,459  topo 1.89%  base 1.31%  lift 1.45x
+  Meta, sem público no nome leads     166  topo 2.53%  base 0.00%  lift —
+  orgânico / sem rastro  leads     125  topo 1.23%  base 2.27%  lift 0.54x
+
+contrato congelado em docs/relatorios/_corrida/LF60/contrato.json  (60,478 bytes)

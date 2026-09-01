@@ -1,0 +1,32 @@
+
+LF63  cap 2026-07-13→2026-07-20  vendas 2026-07-27→2026-07-30  estado=venda_fechada_imatura
+referência 2026-08-31T06:34  fator 1.2000 (tracking)  crédito 0.4329  régua 5d158f0a
+cadastros 9,634  unidades 38  campanhas 14
+gasto Meta R$ 51,718.85  casado por unidade R$ 50,084.48  (96.8%)
+sem criativo 143  macro quebrada 111  ids não resolvidos 0
+
+⚠ PRODUTOS FORA DA RÉGUA (vendidos na janela, sem padrão no yaml):
+   (Desativado) DevClub - 2024  [tmb]  n=1  R$ 1,190.00
+   FrontEnd Club  [hotmart]  n=1  R$ 552.21
+   MBA IA e Automações para Negócios  [tmb]  n=1  R$ 4,830.00
+   Parcela 1 de 9  [boletex]  n=1  R$ 191.54
+   Parcela 2 de 11  [boletex]  n=1  R$ 163.54
+   Parcela 2 de 11. Parcelamento 11x - Plano DevClub Padrão (inclui order bump)  [boletex]  n=1  R$ 269.75
+   Parcela 2 de 8  [boletex]  n=1  R$ 211.89
+   Parcela 2 de 9  [boletex]  n=1  R$ 192.54
+   Parcela 3 de 11  [boletex]  n=1  R$ 6.55
+   Quitação contrato.  [boletex]  n=1  R$ 1,386.00
+   → decidir com o dono se entram, antes de publicar faturamento.
+
+teto (MEDIDO): 7 unidades julgáveis (cortes ≥100 leads e ≥R$ 300) — dentro 2 (R$ 2,650.79) · acima 5 (R$ 46,675.87)
+  dentro: vendas 1  ROAS 0.36  lucro R$ -1,684.29  | bateu meta 0  lucro>1000 0  positivo 0
+   acima: vendas 3  ROAS 0.09  lucro R$ -42,528.47  | bateu meta 0  lucro>1000 0  positivo 0
+  Fisher p=0.3071  Mann-Whitney p=0.6691408878405654
+
+separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
+  frio                   leads   6,392  topo 1.07%  base 0.71%  lift 1.52x
+  Google                 leads   1,559  topo 1.90%  base 1.20%  lift 1.58x
+  orgânico / sem rastro  leads     146  topo 4.17%  base 8.00%  lift 0.52x
+  Meta, sem público no nome leads     119  topo 1.45%  base 2.00%  lift 0.72x
+
+contrato congelado em docs/relatorios/_corrida/LF63/contrato.json  (64,300 bytes)

@@ -1,0 +1,26 @@
+
+LF58  cap 2026-06-08→2026-06-14  vendas 2026-06-22→2026-06-28  estado=maduro
+referência 2026-08-31T06:34  fator 1.2000 (tracking)  crédito 0.4329  régua 5d158f0a
+cadastros 9,920  unidades 31  campanhas 11
+gasto Meta R$ 71,884.98  casado por unidade R$ 69,631.13  (96.9%)
+sem criativo 104  macro quebrada 95  ids não resolvidos 0
+
+⚠ PRODUTOS FORA DA RÉGUA (vendidos na janela, sem padrão no yaml):
+   Acesso Fullstack Vitalício + ClubHub + Plano Dev  [boletex]  n=3  R$ 542.51
+   Cobrança gerada automaticamente a partir de Pix recebido.  [boletex]  n=1  R$ 0.50
+   Cobrança gerada e recebida automaticamente devido ao pagamento em duplicidade da cobrança Nr. 766476002  [boletex]  n=1  R$ 209.00
+   None  [asaas]  n=50  R$ 11,178.08
+   → decidir com o dono se entram, antes de publicar faturamento.
+
+teto (MEDIDO): 8 unidades julgáveis (cortes ≥100 leads e ≥R$ 300) — dentro 1 (R$ 689.91) · acima 7 (R$ 64,603.73)
+  dentro: vendas 0  ROAS 0.00  lucro R$ -689.91  | bateu meta 0  lucro>1000 0  positivo 0
+   acima: vendas 30  ROAS 0.73  lucro R$ -17,254.99  | bateu meta 1  lucro>1000 2  positivo 2
+  Fisher p=1.0000  Mann-Whitney p=0.48549880264428236
+
+separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
+  frio                   leads   7,017  topo 1.00%  base 0.51%  lift 1.96x
+  Google                 leads     970  topo 2.12%  base 1.49%  lift 1.42x
+  Meta, sem público no nome leads     112  topo 0.00%  base 1.96%  lift 0.00x
+  orgânico / sem rastro  leads     109  topo 9.68%  base 2.13%  lift 4.55x
+
+contrato congelado em docs/relatorios/_corrida/LF58/contrato.json  (54,293 bytes)

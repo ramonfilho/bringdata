@@ -100,6 +100,121 @@ def _atualiza_vendas(lf: str, as_of) -> None:
     print(f"[vendas] ingerido por gateway: {res.get('loaded', res)}")
 
 
+def _lucro_por_decil(contrato: dict) -> dict | None:
+    """Lucro por decil (decisão do Ramon, 01/09): o custo de um lead é o CPL
+    POR LEAD DO LEDGER da dupla criativo×campanha que o trouxe — a verba sai
+    antes de o modelo dar a nota, então custo do decil = soma desses CPLs, e
+    lucro = faturamento casado menos isso. Réguas SEPARADAS por modelo (nota
+    mista dilui). Só Meta não-quente, casamento de 21 dias.
+
+    Pré-condições (fora delas devolve None, e a seção não sai no painel):
+    captação >= 25/07/2026 (antes disso as colunas por-modelo do ledger vieram
+    trocadas em parte dos registros) e venda ingerida.
+    """
+    from datetime import timedelta
+
+    import pandas as pd
+
+    from src.core.ab_arm import temperatura_da_campanha
+    from src.data.analytics_connection import open_analytics_connection
+    from src.data.criativo_historico import criativo_do_lead, mapa_de_nomes
+    from src.data.ledger_connection import open_ledger_read_connection
+    from src.monitoring.campaign_classifier import channel_from_source
+    from src.monitoring.utm_quality import _campaign_id_from_utm
+    from src.validation.model_performance import (build_matched_df,
+                                                  read_analytics_sales)
+
+    meta = contrato["meta"]
+    if not meta.get("tem_venda") or str(meta["cap_start"]) < "2026-07-25":
+        return None
+    cs = date.fromisoformat(str(meta["cap_start"])[:10])
+    ce = date.fromisoformat(str(meta["cap_end"])[:10])
+
+    # CPL por LEAD DO LEDGER re-derivado das unidades (gasto ÷ leads_ledger):
+    # independe da base do CPL publicado (que desde 01/09 é por cadastro).
+    un = contrato["tabelas"]["unidades"]
+    if hasattr(un, "to_dict"):          # na emissão ainda é DataFrame
+        un = un.to_dict("records")
+    cpl_un = {}
+    for u in un:
+        if (u.get("canal") == "meta" and u.get("gasto")
+                and int(u.get("leads_ledger") or 0) > 0):
+            cpl_un[(u.get("cid") or "", str(u.get("criativo")))] = (
+                float(u["gasto"]) / int(u["leads_ledger"]))
+    if not cpl_un:
+        return None
+
+    an = open_analytics_connection(timeout=300)
+    lg = open_ledger_read_connection()
+    try:
+        # projeção própria: a padrão do ledger não traz utm_content, e sem ele
+        # não dá pra achar a dupla (criativo) de cada lead.
+        cols = ["email", "telefone", "data_captura", "decil_champion",
+                "decil_challenger", "utm_campaign", "utm_content", "utm_source"]
+        rows = lg.run(
+            "SELECT email, phone, created_at, decil_champion, decil_challenger, "
+            "utm_campaign, utm_content, utm_source FROM registros_ml "
+            "WHERE created_at >= :s AND created_at < (CAST(:e AS date) + INTERVAL '1 day') "
+            "AND lead_score IS NOT NULL", s=cs.isoformat(), e=ce.isoformat())
+        leads = pd.DataFrame(rows, columns=cols)
+        leads["data_captura"] = pd.to_datetime(leads["data_captura"], utc=True,
+                                               errors="coerce").dt.tz_localize(None)
+        sales = read_analytics_sales(an, cs, ce + timedelta(days=22))
+        mapa = mapa_de_nomes(an, client_id=meta.get("client_id", "devclub"))
+    finally:
+        for c in (lg, an):
+            try:
+                c.close()
+            except Exception:
+                pass
+    if leads.empty:
+        return None
+    m = build_matched_df(leads, sales, window_days=21)
+    camp = m.get("utm_campaign")
+    m["_cid"] = [(_campaign_id_from_utm(c) or "") for c in camp]
+    cont = m.get("utm_content", pd.Series([None] * len(m), index=m.index))
+    m["_cria"] = [criativo_do_lead(x, mapa) for x in cont]
+    m["_cpl"] = [cpl_un.get((c, k)) for c, k in zip(m["_cid"], m["_cria"])]
+    canal = m.get("utm_source").map(lambda s_: channel_from_source(s_))
+    temp = camp.map(lambda c: temperatura_da_campanha(c))
+    base = (canal == "meta") & (temp != "quente") & m["_cpl"].notna()
+    conv = m.get("converted").fillna(False).astype(bool)
+    val = pd.to_numeric(m.get("sale_value_realizado", m.get("sale_value")),
+                        errors="coerce").fillna(0.0)
+
+    def _resumo(g) -> dict:
+        n = int(g.sum())
+        custo = float(m.loc[g, "_cpl"].sum())
+        v = int(conv[g].sum())
+        fat = float(val[g & conv].sum())
+        return dict(leads=n, custo=custo, vendas=v, faturamento=fat,
+                    lucro=fat - custo, roas=(fat / custo if custo else None))
+
+    out = {"janela": f"{cs} a {ce} (+21d de casamento)",
+           "filtro": "meta_nao_quente", "custo_base": "cpl_por_lead_do_ledger"}
+    for chave, col in (("champion", "decil_champion"),
+                       ("challenger", "decil_challenger")):
+        dec = pd.to_numeric(m[col], errors="coerce") if col in m.columns else None
+        if dec is None or not dec.notna().any():
+            out[chave] = None
+            continue
+        b = base & dec.notna()
+        decis = []
+        for d in range(1, 11):
+            r = _resumo(b & (dec == d))
+            r["decil"] = d
+            decis.append(r)
+        out[chave] = dict(
+            decis=decis,
+            total=_resumo(b),
+            top30=_resumo(b & (dec >= 8)),
+            resto=_resumo(b & (dec < 8)),
+            top20=_resumo(b & (dec >= 9)),
+            fundo=_resumo(b & (dec <= 5)),
+        )
+    return out
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Relatório por lançamento (um comando)")
     ap.add_argument("--lf", required=True, help="Nome do lançamento (ex.: LF64)")
@@ -183,6 +298,19 @@ def main() -> int:
             criativos_por_tipo=r["criativos_por_tipo"],
         ),
     )
+    # lucro por decil (01/09): melhor esforço — falha vira None e aviso, o
+    # contrato sai do mesmo jeito (a seção do painel simplesmente não aparece).
+    try:
+        contrato["tabelas"]["lucro_decil"] = _lucro_por_decil(contrato)
+        ld = contrato["tabelas"]["lucro_decil"]
+        if ld and ld.get("champion"):
+            t30 = ld["champion"]["top30"]
+            print(f"lucro por decil: top30 Champion R$ {t30['lucro']:,.0f} "
+                  f"({t30['leads']} leads)")
+    except Exception as e:
+        contrato["tabelas"]["lucro_decil"] = None
+        print(f"⚠ lucro por decil indisponível: {e}", file=sys.stderr)
+
     dst = out / "contrato.json"
     dst.write_text(json.dumps(contrato, ensure_ascii=False, indent=1,
                               default=_jsonable))
@@ -194,6 +322,14 @@ def main() -> int:
         print(f"\n✗ cobertura de gasto casado {100*pct:.1f}% abaixo do piso "
               f"{100*args.piso_gasto:.0f}% — investigar antes de publicar", file=sys.stderr)
         return 3
+    # teto do casado: mais de 102% = a MESMA verba contada duas vezes no join
+    # (foi assim que R$ 381 mil de gasto fantasma entraram nos contratos da
+    # corrida em ago/26 com a cobertura imprimindo 149-197% sem travar nada)
+    if pct is not None and pct > 1.02:
+        print(f"\n✗ GASTO CASADO {100*pct:.1f}% > 102% do gasto real: verba "
+              f"DUPLICADA no casamento unidade x insights. NÃO PUBLICAR — "
+              f"contrato gravado só para diagnóstico.", file=sys.stderr)
+        return 4
     return 0
 
 

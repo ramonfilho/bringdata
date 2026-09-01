@@ -1,0 +1,85 @@
+[launch_calendar_reader] 31 LFs lidos da tabela (client_id=devclub)
+ Buscando vendas Guru via API (2026-08-31 a 2026-09-01)
+ Total de transações buscadas: 3
+    Cache SAVED Guru: guru_2026-08-31_2026-09-01_pos-dev.parquet
+  guru:    3 vendas
+ Carregando vendas Hotmart via API (2026-08-31 → 2026-09-01)
+   22 transações brutas obtidas da API Hotmart
+    22 vendas Hotmart carregadas e normalizadas
+    Cache SAVED Hotmart: hotmart_2026-08-31_2026-09-01.parquet
+  hotmart: 22 vendas
+ Buscando pagamentos Asaas de 2026-08-31 a 2026-09-01 (por clientPaymentDate)...
+ Total de pagamentos pagos encontrados: 4
+ Buscando dados de 4 clientes únicos...
+ Asaas: 1 pagamentos removidos por customer.dateCreated antes de 2026-08-31 (clientes de outros lançamentos).
+ Asaas: 3 vendas carregadas (2026-08-31 a 2026-09-01)
+    Cache SAVED Asaas: asaas_2026-08-31_2026-09-01.parquet
+  asaas:   3 vendas
+ Buscando vendas Boletex via API (2026-08-31 → 2026-09-01)
+ Boletex: 4 vendas brutas (2026-08-31 → 2026-09-01)
+   Boletex: 4 vendas válidas normalizadas
+    Cache SAVED Boletex: boletex_2026-08-31_2026-09-01.parquet
+  boletex: 4 vendas
+ Buscando vendas TMB via API (2026-08-31 → 2026-09-01)
+[tmb_api] 34 pedidos Efetivados (2026-08-31→2026-09-01)
+    Cache SAVED TMB API: tmb_api_2026-08-31_2026-09-01.parquet
+  tmb:     34 vendas
+Total carregado: 66 vendas → upsert em analytics.sales
+[sales_store] {'attempted': 66, 'inserted': 2, 'skipped': 64, 'filtered': 0, 'intra_dup': 0, 'by_gateway': {'guru': 3, 'hotmart': 22, 'asaas': 3, 'boletex': 4, 'tmb': 34}}
+ETL concluído: 2 inseridas, 64 já existiam (de 66). Por gateway: {'guru': 3, 'hotmart': 22, 'asaas': 3, 'boletex': 4, 'tmb': 34}
+[launch_calendar_reader] 31 LFs lidos da tabela (client_id=devclub)
+[ledger_connection] leitura do ledger via fonte=cloudsql
+[criativo_historico] 863 criativos · 27 lançamentos fechados · 339592 leads · 2573 compradores
+[teto_por_chave] 92 unidades campanha×conjunto×criativo
+[teto_por_chave] tetos: 50 criativos · 21 campanhas · 88 unidades · 92 unidades-conjunto
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 5,587
+   Vendas: 194
+   Índices criados: emails=179 tel_full=131 last6=131
+    Matching concluído: 42 matches (0.75%)
+      Email: 36 | Tel: 5 | Last6: 1
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 6,656
+   Vendas: 59
+   Índices criados: emails=56 tel_full=37 last6=37
+    Matching concluído: 43 matches (0.65%)
+      Email: 39 | Tel: 4 | Last6: 0
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 107,277
+   Vendas: 14
+   Índices criados: emails=14 tel_full=5 last6=5
+    Matching concluído: 0 matches (0.00%)
+      Email: 0 | Tel: 0 | Last6: 0
+⚠ lucro por decil indisponível: 'str' object has no attribute 'get'
+[vendas] venda aberta — puxando gateways 2026-08-31 → 2026-09-01 antes de montar (desligue com --sem-etl)
+[vendas] ingerido por gateway: {'guru': 3, 'hotmart': 22, 'asaas': 3, 'boletex': 4, 'tmb': 34}
+
+LF65  cap 2026-08-18→2026-08-24  vendas 2026-08-31→2026-09-06  estado=venda_aberta
+referência 2026-08-31T06:34  fator 1.2000 (tracking)  crédito 0.4329  régua 5d158f0a
+cadastros 6,656  unidades 88  campanhas 21
+gasto Meta R$ 48,582.30  casado por unidade R$ 47,739.08  (98.3%)
+sem criativo 109  macro quebrada 61  ids não resolvidos 0
+
+⚠ PRODUTOS FORA DA RÉGUA (vendidos na janela, sem padrão no yaml):
+   DevClub Vitalício  [tmb]  n=1  R$ 1,100.00
+   Multa 10% quebra contrato.  [boletex]  n=1  R$ 197.49
+   None  [asaas]  n=2  R$ 416.49
+   Parcela 1 de 12.  [boletex]  n=3  R$ 8,576.00
+   → decidir com o dono se entram, antes de publicar faturamento.
+
+teto (MEDIDO): 13 unidades julgáveis (cortes ≥100 leads e ≥R$ 300) — dentro 2 (R$ 2,945.57) · acima 11 (R$ 32,948.57)
+  dentro: vendas 1  ROAS 0.41  lucro R$ -1,723.57  | bateu meta 0  lucro>1000 0  positivo 0
+   acima: vendas 23  ROAS 1.04  lucro R$ 1,244.90  | bateu meta 1  lucro>1000 3  positivo 4
+  Fisher p=0.2392  Mann-Whitney p=0.835526127055433
+
+separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
+  frio                   leads   4,326  topo 1.19%  base 0.54%  lift 2.19x
+  Google                 leads   1,078  topo 2.14%  base 0.53%  lift 4.02x
+  orgânico / sem rastro  leads      94  topo 2.33%  base 0.00%  lift —
+  Meta, sem público no nome leads      89  topo 0.00%  base 0.00%  lift —
+
+contrato congelado em docs/relatorios/lf65_resultado/contrato.json  (121,578 bytes)
+comparativo: /Users/ramonmoreira/Desktop/bring_data/V2/docs/relatorios/lf65_resultado/comparativo.html  (3,296 bytes)
+xlsx:   docs/relatorios/lf65_resultado/criativos_por_tipo_lf65.xlsx  (42 linhas, completo, formatado)
+painel: docs/relatorios/lf65_resultado/painel_lf65.html  (42,949 bytes)
+✓ painel do LF65 em docs/relatorios/lf65_resultado

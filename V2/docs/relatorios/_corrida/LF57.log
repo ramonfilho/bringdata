@@ -1,0 +1,27 @@
+
+LF57  cap 2026-06-01→2026-06-07  vendas 2026-06-15→2026-06-21  estado=maduro
+referência 2026-08-31T06:34  fator 1.2000 (tracking)  crédito 0.4329  régua 5d158f0a
+cadastros 7,156  unidades 55  campanhas 27
+gasto Meta R$ 56,533.98  casado por unidade R$ 55,835.93  (98.8%)
+sem criativo 83  macro quebrada 53  ids não resolvidos 1
+
+⚠ PRODUTOS FORA DA RÉGUA (vendidos na janela, sem padrão no yaml):
+   Acesso Fullstack Vitalício + ClubHub + Plano Dev  [boletex]  n=2  R$ 3,850.08
+   Club Hub  [guru]  n=2  R$ 994.00
+   DevClub Vitalício + Plano Dev + 3 meses de Club Hub  [guru]  n=2  R$ 2,994.00
+   None  [asaas]  n=56  R$ 12,562.26
+   Plano Dev - DevClub Vitalício  [tmb]  n=2  R$ 7,001.40
+   [COMBO] DevClub + Plano Dev + ClubHub (1 ano de acesso)  [guru]  n=1  R$ 497.00
+   → decidir com o dono se entram, antes de publicar faturamento.
+
+teto (MEDIDO): 10 unidades julgáveis (cortes ≥100 leads e ≥R$ 300) — dentro 0 (R$ 0.00) · acima 10 (R$ 45,554.59)
+  dentro: vendas None  ROAS —  lucro R$ —  | bateu meta None  lucro>1000 None  positivo None
+   acima: vendas 37  ROAS 1.29  lucro R$ 13,360.78  | bateu meta 2  lucro>1000 3  positivo 4
+
+separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
+  frio                   leads   4,670  topo 1.26%  base 0.65%  lift 1.94x
+  Google                 leads     914  topo 1.83%  base 0.27%  lift 6.71x
+  Meta, sem público no nome leads      99  topo 0.00%  base 0.00%  lift —
+  orgânico / sem rastro  leads      84  topo 6.12%  base 2.86%  lift 2.14x
+
+contrato congelado em docs/relatorios/_corrida/LF57/contrato.json  (89,484 bytes)

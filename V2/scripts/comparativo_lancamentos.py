@@ -43,9 +43,28 @@ def carrega(lf):
     return json.loads(p.read_text())
 
 
+def _sem_fantasma(unidades):
+    """Blindagem contra VERBA DUPLICADA nos contratos antigos (achado 01/09):
+    leads com utm_campaign = só o ID criavam um 2º grupo da mesma campanha e o
+    join dava o gasto INTEIRO pros dois (cobertura chegou a 197% e ninguém
+    travou). Nos contratos novos não ocorre; nos da corrida (LF56-LF63) está
+    gravado. Regra: entre unidades de MESMO (cid, gasto ao centavo), fica só a
+    com mais leads."""
+    from collections import defaultdict
+    g = defaultdict(list)
+    for u in unidades:
+        g[(u.get("cid"), round(float(u.get("gasto") or 0), 2), str(u.get("criativo")))].append(u)
+    out = []
+    for us in g.values():
+        us = sorted(us, key=lambda x: -(int(x.get("leads_ledger") or 0)))
+        out.append(us[0])
+    return out
+
+
 def metricas(lf):
     """As métricas de UM contrato, no grão que a comparação usa."""
     c = carrega(lf)
+    c["tabelas"]["unidades"] = _sem_fantasma(c["tabelas"]["unidades"])
     m, ca = c["meta"], c["tabelas"]["campanhas"]
     gasto = sum(x.get("gasto") or 0 for x in ca)
     fat = sum(x.get("faturamento") or 0 for x in ca)
@@ -93,6 +112,7 @@ def metricas(lf):
                      for x in uj) / lj) if lj else None),
         maduro=(carrinho_fechado and vendas_cobertas),
         vendas_start=m["vendas_start"][:10], vendas_end=m["vendas_end"][:10],
+        sales_max=str(m.get("sales_max"))[:10],
     )
 
 
@@ -131,7 +151,15 @@ def _ritmo_carrinho(alvo_m, prev_m):
     hoje = date.today()
     a_ini, a_fim = _d(alvo_m["vendas_start"]), _d(alvo_m["vendas_end"])
     p_ini, p_fim = _d(prev_m["vendas_start"]), _d(prev_m["vendas_end"])
-    k = max(1, (min(hoje, a_fim) - a_ini).days + 1)  # dias de carrinho corridos
+    try:
+        smax = _d(alvo_m["sales_max"])
+    except Exception:
+        smax = hoje
+    # dias de carrinho REALMENTE medíveis: calendário limitado pela ingestão
+    a_fim_med = min(hoje, a_fim, smax)
+    k = max(1, (a_fim_med - a_ini).days + 1)
+    # o último dia medido só está "em curso" quando a ingestão chegou em HOJE
+    em_curso = (smax >= hoje and hoje <= a_fim)
     cond = " OR ".join("lower(produto) LIKE '%" + p.lower() + "%'" for p in pats)
 
     try:
@@ -143,14 +171,15 @@ def _ritmo_carrinho(alvo_m, prev_m):
                 n, fat = conn.run(q)[0]
                 return int(n), float(fat)
 
-            a_n, a_fat = soma(a_ini, min(hoje, a_fim))
+            a_n, a_fat = soma(a_ini, a_fim_med)
             p_n, p_fat = soma(p_ini, min(p_ini + timedelta(days=k - 1), p_fim))
             _, p_full = soma(p_ini, p_fim)
         finally:
             conn.close()
     except Exception:
         return None
-    return dict(k=k, dia_corrente=(hoje <= a_fim), a_fat=a_fat, p_fat=p_fat,
+    return dict(k=k, dia_corrente=em_curso, faltam=max(0, (a_fim - a_fim_med).days),
+                a_fat=a_fat, p_fat=p_fat,
                 p_full=p_full, share1=(100 * p_fat / p_full if p_full else None))
 
 
@@ -190,12 +219,17 @@ def _veredito(alvo, at, prev):
         obs = (" Obs: o dia ainda aberto pode fechar parte disso."
                if r["dia_corrente"] else "")
         if (pct or 0) >= 95:
-            p += (f"<br><br>3- Conversão no nível do anterior: faturamento "
-                  f"{janela} em {br(pct, 0)}% do ritmo por real {par}.<br><br>"
-                  "A diferença de lucro da tabela é só o calendário do carrinho.")
+            fecho = ("com o dia da abertura já FECHADO dos dois lados"
+                     if (r["k"] == 1 and not r["dia_corrente"])
+                     else f"nos primeiros {r['k']} dias")
+            p += (f"<br><br>3- A conversão NÃO caiu: {fecho}, o faturamento "
+                  f"BRUTO de gateway (régua de produto; por isso maior que o "
+                  f"atribuído do painel) está em {br(pct, 0)}% do ritmo por real {par}. "
+                  f"Faltam {r['faltam']} dias de carrinho aqui.")
         else:
-            p += (f"<br><br>3- A conversão do lançamento está pior: faturamento "
-                  f"{janela} está {br(100 - (pct or 0), 0)}% pior {par}.{obs}<br><br>"
+            p += (f"<br><br>3- A conversão do lançamento está pior: o faturamento "
+                  f"BRUTO de gateway (régua de produto; por isso maior que o "
+                  f"atribuído do painel) {janela} está {br(100 - (pct or 0), 0)}% pior {par}.{obs}<br><br>"
                   "Das variáveis que a gente mede, a única que mudou pra pior e "
                   "pode explicar essa queda é a verba menos concentrada no "
                   f"criativo campeão ({_pp(at['conc1'], prev['conc1'])}pp). Lead "
@@ -284,7 +318,7 @@ def main() -> int:
 
     chaves_m = ("conc1", "conc3", "d910", "cpl", "teto15")
     tab_mud = ("<p class='h2sub' style='margin-top:14px'><b>O que mudou neste "
-               "lançamento</b> — as duas alavancas que abrem ou fecham a folga do "
+               "lançamento:</b> as duas alavancas que abrem ou fecham a folga do "
                "teto: quanta verba concentrou no criativo certo, e a qualidade do "
                "público comprado (% de leads nota 9-10, pesado por leads):</p>"
                "<div class='tw'><table class='tb'><thead><tr><th></th>"
@@ -316,13 +350,13 @@ def main() -> int:
     def _lfs(s):
         return " e ".join(f"{r['lf']} ({br(r['roas'])})" for r in por_sem[s])
 
-    epoca = ("<p class='h2sub' style='margin-top:14px'><b>Época do mês — só a "
+    epoca = ("<p class='h2sub' style='margin-top:14px'><b>Época do mês, só a "
              "conclusão.</b> 1- Base: os 8 fechados, sem o DEV21 (quente, fora da "
              "régua). No máximo 2 lançamentos por semana do mês; amostra de cara "
              f"ou coroa. 2- O que aparece: a {pior_s}ª semana tem a pior média de "
              f"ROAS ({br(med_sem[pior_s])}: {_lfs(pior_s)}); a {melhor_s}ª tem a "
              f"melhor ({br(med_sem[melhor_s])}: {_lfs(melhor_s)}). 3- Veredito: "
-             "sugestivo, não conclusivo — uns 5/10 de confiança; só fecha com mais "
+             "sugestivo, não conclusivo: uns 5/10 de confiança; só fecha com mais "
              f"lançamentos. 4- Este LF começou na {at['semana']}ª semana"
              + (", que não é a ruim: época não explica o resultado dele."
                 if at["semana"] != pior_s

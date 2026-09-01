@@ -1,0 +1,34 @@
+
+LF56  cap 2026-05-25→2026-05-30  vendas 2026-06-08→2026-06-14  estado=maduro
+referência 2026-08-31T06:34  fator 1.2000 (tracking)  crédito 0.4329  régua 5d158f0a
+cadastros 6,862  unidades 86  campanhas 25
+gasto Meta R$ 40,838.84  casado por unidade R$ 40,475.61  (99.1%)
+sem criativo 52  macro quebrada 39  ids não resolvidos 0
+
+⚠ PRODUTOS FORA DA RÉGUA (vendidos na janela, sem padrão no yaml):
+   Acesso Fullstack Vitalício + ClubHub + Plano Dev  [boletex]  n=6  R$ 6,280.06
+   Club Hub - Com 1 ano de acesso (75% OFF) Comercial  [boletex]  n=2  R$ 1,318.00
+   Club Hub - Oficial  [guru]  n=1  R$ 497.00
+   DevClub Vitalício  [tmb]  n=3  R$ 3,300.69
+   DevClub Vitalício + Plano Dev + 3 meses de Club Hub  [guru]  n=3  R$ 4,491.00
+   None  [asaas]  n=103  R$ 22,022.23
+   None  [boletex]  n=1  R$ 120.75
+   None  [tmb]  n=2  R$ 4,133.40
+   Parcela 11 de 11. Parcelamento 11x - Plano DevClub Padrão (inclui order bump)  [boletex]  n=1  R$ 269.75
+   Plano Dev - DevClub Vitalício  [tmb]  n=1  R$ 1,497.00
+   [COMBO] DevClub + Plano Dev (1 ano de acesso)  [guru]  n=1  R$ 997.00
+   [COMBO] DevClub + Plano Dev + ClubHub (1 ano de acesso)  [guru]  n=3  R$ 2,491.00
+   → decidir com o dono se entram, antes de publicar faturamento.
+
+teto (MEDIDO): 14 unidades julgáveis (cortes ≥100 leads e ≥R$ 300) — dentro 3 (R$ 4,907.49) · acima 11 (R$ 22,231.45)
+  dentro: vendas 9  ROAS 2.73  lucro R$ 8,509.24  | bateu meta 3  lucro>1000 3  positivo 3
+   acima: vendas 19  ROAS 1.36  lucro R$ 8,019.51  | bateu meta 3  lucro>1000 2  positivo 3
+  Fisher p=0.3806  Mann-Whitney p=0.05181233122832814
+
+separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
+  frio                   leads   4,876  topo 1.37%  base 0.88%  lift 1.55x
+  Google                 leads     461  topo 1.02%  base 1.20%  lift 0.85x
+  Meta, sem público no nome leads      54  topo 0.00%  base 0.00%  lift —
+  orgânico / sem rastro  leads      22  topo 7.14%  base 12.50%  lift 0.57x
+
+contrato congelado em docs/relatorios/_corrida/LF56/contrato.json  (128,163 bytes)

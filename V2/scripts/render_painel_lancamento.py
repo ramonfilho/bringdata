@@ -244,9 +244,14 @@ def main() -> int:
                            pct(100 * s["taxa_topo"], 2) if s.get("taxa_topo") is not None else "—",
                            pct(100 * s["taxa_base"], 2) if s.get("taxa_base") is not None else "—",
                            (br(lift, 2) + "x") if lift is not None else "—"])
+        regua_sep = next((x.get("regua") for x in sep if x.get("regua")), None)
+        rot_regua = (" Régua ÚNICA do <b>Champion</b>: a nota do abr_28 para todo "
+                     "lead, inclusive os atendidos pelo Challenger (a nota mista "
+                     "dilui a medição — decisão de 01/09)."
+                     if regua_sep == "decil_champion" else "")
         tab_sep = ("<p class='h2sub' style='margin-top:14px'><b>Separação dentro de cada "
                    "público</b> (respondentes com nota; topo = notas 9-10, base = 1-8; "
-                   "lift = quantas vezes o topo converte acima da base):</p>"
+                   "lift = quantas vezes o topo converte acima da base)." + rot_regua + "</p>"
                    + _tab(["Público", "Leads c/ nota", "% no topo", "Conv. topo",
                            "Conv. base", "Lift topo/base"], rows_s))
 
@@ -424,6 +429,45 @@ def main() -> int:
                  "tolerância de 2%):</p>" + tab_teto15
                  + f"<p class='h2sub' style='margin-top:10px'>Com a régua mais folgada, "
                  f"<b>{len(d15)}</b> de {len(uj)} unidades couberam no teto.</p>")
+
+    # ── o dinheiro que o corte NÃO julga (decisão do Ramon, 01/09) ───────────
+    # O corte exige 100 leads e R$ 300 na dupla; CPL alto atrasa os 100 leads,
+    # então o pior dinheiro fica invisível. Backtest de 01/09 (10 LFs fechados):
+    # liberar o teto do PAR já com R$ 300 separa lucro de prejuízo.
+    um_meta = [x for x in u if x.get("canal") == "meta" and x.get("gasto")]
+    g_meta_u = sum(x["gasto"] for x in um_meta)
+    sem_ver = [x for x in um_meta if not x.get("no_corte")]
+    g_sem = sum(x["gasto"] for x in sem_ver)
+    delta_sv = sorted([x for x in sem_ver if x["gasto"] >= 300
+                       and int(x.get("leads_ledger") or 0) < 100
+                       and x.get("cpl") is not None and x.get("teto") is not None],
+                      key=lambda x: -x["gasto"])
+    if tem_venda and delta_sv and g_meta_u:
+        rows_sv = []
+        for x in delta_sv[:10]:
+            t15 = x["teto"] * (2.0 / 1.5)
+            raz = x["cpl"] / t15
+            rows_sv.append([x["criativo"][:24], str(x.get("campanha"))[:30],
+                            br(x["gasto"], 0, "R$ "), int(x.get("leads_ledger") or 0),
+                            br(x["cpl"]), br(t15),
+                            ((br(raz, 1) + "x", "neg") if raz > 1 else ("dentro", "pos"))])
+        g_delta_sv = sum(x["gasto"] for x in delta_sv)
+        n_est = sum(1 for x in delta_sv if x["cpl"] > x["teto"] * (2.0 / 1.5))
+        tab_teto += (
+            f"<p class='h2sub' style='margin-top:14px'><b>O dinheiro que o corte não julga.</b> "
+            f"O julgamento acima exige 100 leads e R$ 300 de gasto na dupla criativo×campanha. "
+            f"Ficou sem veredito neste lançamento: {br(g_sem, 0, 'R$ ')} "
+            f"({br(100 * g_sem / g_meta_u, 1)}% do gasto Meta). A fatia julgável ANTECIPADO "
+            f"(R$ 300+ de gasto, ainda sem 100 leads) tem {len(delta_sv)} duplas e "
+            f"{br(g_delta_sv, 0, 'R$ ')}, {n_est} delas estourando o teto 1,5. É o pior "
+            f"dinheiro do lançamento: CPL alto é justamente o que impede de juntar 100 leads.</p>"
+            + _tab(["Criativo", "Campanha", "Gasto", "Leads", "CPL", "Teto 1,5", "Estouro"],
+                   rows_sv)
+            + "<p class='h2sub' style='margin-top:10px'><b>Orientação nova (backtest de 01/09, "
+              "10 lançamentos fechados):</b> julgar a dupla pelo teto do PRÓPRIO PAR assim que "
+              "ela passa de R$ 300 de gasto separa: o dinheiro que essa regra marcou FORA rendeu "
+              "0,75 por real investido; o que ela marcou DENTRO rendeu 2,66. O papel da regra é "
+              "dar visibilidade a esse dinheiro no relatório, não cortar sozinha.</p>")
     # (análise autoral do porquê — ex.: o CPL 39% mais caro do LF64 — vive em
     #  conclusao.html/notas.html na pasta do LF, nunca aqui: o script é genérico
     #  e o texto do LF64 vazou pro painel do LF65 na primeira prova de reuso.)
@@ -491,6 +535,46 @@ def main() -> int:
             tab_cria_tipo += ("<p class='h2sub' style='margin-top:10px'><b>Estourou o "
                               "teto e mesmo assim lucrou — por quê?</b> "
                               + "; ".join(exp) + ".</p>")
+
+    # ── lucro por decil (decisão do Ramon, 01/09): o custo de um lead é o CPL
+    # da dupla criativo×campanha que o trouxe (a verba sai antes da nota), então
+    # dá pra somar custo por decil e fechar lucro. Contrato antigo não tem o
+    # bloco e a seção simplesmente não sai.
+    tab_ld = ""
+    ld = c["tabelas"].get("lucro_decil")
+    if ld and ld.get("champion"):
+        rows_ld = []
+        for r in ld["champion"]["decis"]:
+            rows_ld.append([f"<b>D{r['decil']}</b>", f"{r['leads']:,}".replace(",", "."),
+                            br(r["custo"], 0, "R$ "), br(r["vendas"], 0),
+                            br(r["faturamento"], 0, "R$ "), _cor(r["lucro"], 0),
+                            _cor((r["lucro"] / r["leads"]) if r["leads"] else None)])
+        resumo = []
+        for nome, chave in (("Champion (abr_28)", "champion"),
+                            ("Challenger (jul_24)", "challenger")):
+            bloco = ld.get(chave)
+            if not bloco:
+                continue
+            for rot, k in (("top 30 (D8-D10)", "top30"), ("resto (D1-D7)", "resto"),
+                           ("fundo (D1-D5)", "fundo")):
+                sm = bloco.get(k)
+                if sm:
+                    resumo.append([f"<b>{nome} · {rot}</b>",
+                                   f"{sm['leads']:,}".replace(",", "."),
+                                   br(sm["custo"], 0, "R$ "), br(sm["vendas"], 0),
+                                   br(sm["faturamento"], 0, "R$ "), _cor(sm["lucro"], 0),
+                                   br(sm["roas"], 2)])
+        tab_ld = (
+            "<p class='h2sub' style='margin-top:14px'><b>Lucro por decil</b> (só Meta frio; "
+            "o custo de cada lead é o CPL da dupla criativo×campanha que o trouxe, porque a "
+            "verba sai antes de o modelo dar a nota; réguas separadas por modelo, nunca "
+            "misturadas). Primeiro o Champion, decil a decil:</p>"
+            + _tab(["Decil", "Leads", "Custo", "Vendas", "Faturamento", "Lucro",
+                    "Lucro/lead"], rows_ld)
+            + "<p class='h2sub' style='margin-top:10px'>O resumo que decide, nos dois "
+              "modelos (ROAS = faturamento / custo alocado):</p>"
+            + _tab(["", "Leads", "Custo", "Vendas", "Faturamento", "Lucro", "ROAS"],
+                   resumo))
 
     import pandas as pd
     from openpyxl.styles import Font
@@ -560,7 +644,7 @@ def main() -> int:
              "html": tab_modelo + aguardando},
             {"title": "2 · Lucro do modelo contra o Lead — e a separação por público",
              "sub": "",
-             "html": tab_pub + tab_ml + tab_sep},
+             "html": tab_pub + tab_ml + tab_sep + tab_ld},
             {"title": "2 · Campanha a campanha (top 15 por gasto)",
              "sub": "As mesmas colunas do debriefing: gasto, cadastros, CPL, vendas, ROAS e lucro.",
              "html": tab_camp},
