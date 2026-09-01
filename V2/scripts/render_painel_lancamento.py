@@ -649,7 +649,7 @@ def main() -> int:
              "sub": "As mesmas colunas do debriefing: gasto, cadastros, CPL, vendas, ROAS e lucro.",
              "html": tab_camp},
             {"title": f"4 · Teto de CPL — {modo}",
-             "sub": "Unidade = criativo×campanha com ≥100 leads e ≥R$ 300 de gasto. "
+             "sub": "Unidade = criativo×campanha com ≥R$ 300 de gasto. "
                     "*Meta = ROAS 2,0 com tolerância de 2% (um 1,97 conta).",
              "html": tab_teto},
             {"title": "7 · Criativo agregado por tipo de campanha",
