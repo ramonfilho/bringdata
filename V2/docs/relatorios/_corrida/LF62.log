@@ -1,3 +1,59 @@
+[launch_calendar_reader] 31 LFs lidos da tabela (client_id=devclub)
+ Buscando vendas Guru via API (2026-09-01 a 2026-09-01)
+ Total de transações buscadas: 0
+ Nenhuma venda retornada da API Guru
+  guru:    0 vendas
+ Carregando vendas Hotmart via API (2026-09-01 → 2026-09-01)
+   0 transações brutas obtidas da API Hotmart
+  hotmart: 0 vendas
+ Buscando pagamentos Asaas de 2026-09-01 a 2026-09-01 (por clientPaymentDate)...
+ Total de pagamentos pagos encontrados: 0
+ Nenhum pagamento Asaas encontrado no período.
+    Cache SAVED Asaas: asaas_2026-09-01_2026-09-01.parquet
+  asaas:   0 vendas
+ Buscando vendas Boletex via API (2026-09-01 → 2026-09-01)
+ Boletex: 0 vendas brutas (2026-09-01 → 2026-09-01)
+  boletex: 0 vendas
+ Buscando vendas TMB via API (2026-09-01 → 2026-09-01)
+[tmb_api] 2 pedidos Efetivados (2026-09-01→2026-09-01)
+    Cache SAVED TMB API: tmb_api_2026-09-01_2026-09-01.parquet
+  tmb:     2 vendas
+Total carregado: 2 vendas → upsert em analytics.sales
+[sales_store] {'attempted': 2, 'inserted': 0, 'skipped': 2, 'filtered': 0, 'intra_dup': 0, 'by_gateway': {'tmb': 2}}
+ETL concluído: 0 inseridas, 2 já existiam (de 2). Por gateway: {'tmb': 2}
+[launch_calendar_reader] 31 LFs lidos da tabela (client_id=devclub)
+[ledger_connection] leitura do ledger via fonte=cloudsql
+[criativo_historico] 759 criativos · 22 lançamentos fechados · 275290 leads · 2110 compradores
+[teto_por_chave] 29 unidades campanha×conjunto×criativo
+[teto_por_chave] tetos: 22 criativos · 10 campanhas · 29 unidades · 29 unidades-conjunto
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 8,172
+   Vendas: 1,286
+   Índices criados: emails=1,188 tel_full=1,073 last6=1,085
+    Matching concluído: 91 matches (1.11%)
+      Email: 72 | Tel: 12 | Last6: 7
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 9,737
+   Vendas: 147
+   Índices criados: emails=140 tel_full=127 last6=128
+    Matching concluído: 68 matches (0.70%)
+      Email: 58 | Tel: 10 | Last6: 0
+[lancamento_unidades] 29 entradas do teto fundidas em 23 unidades reais (utm com id puro)
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 61,242
+   Vendas: 78
+   Índices criados: emails=74 tel_full=67 last6=67
+    Matching concluído: 7 matches (0.01%)
+      Email: 3 | Tel: 0 | Last6: 4
+[ledger_connection] leitura do ledger via fonte=cloudsql
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 8,172
+   Vendas: 741
+   Índices criados: emails=681 tel_full=640 last6=648
+    Matching concluído: 81 matches (0.99%)
+      Email: 67 | Tel: 11 | Last6: 3
+[vendas] venda fechada imatura — puxando gateways 2026-09-01 → 2026-09-01 antes de montar (desligue com --sem-etl)
+[vendas] ingerido por gateway: {'guru': 0, 'hotmart': 0, 'asaas': 0, 'boletex': 0, 'tmb': 2}
 
 LF62  cap 2026-07-06→2026-07-12  vendas 2026-07-20→2026-07-26  estado=venda_fechada_imatura
 referência 2026-08-31T06:34  fator 1.2000 (tracking)  crédito 0.4329  régua 5d158f0a
@@ -25,4 +81,4 @@ separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
   Meta, sem público no nome leads     121  topo 3.17%  base 3.45%  lift 0.92x
   orgânico / sem rastro  leads      91  topo 12.00%  base 2.44%  lift 4.92x
 
-contrato congelado em docs/relatorios/_corrida/LF62/contrato.json  (43,955 bytes)
+contrato congelado em docs/relatorios/_corrida/LF62/contrato.json  (47,257 bytes)

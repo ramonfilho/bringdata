@@ -125,8 +125,14 @@ def _lucro_por_decil(contrato: dict) -> dict | None:
                                                   read_analytics_sales)
 
     meta = contrato["meta"]
-    if not meta.get("tem_venda") or str(meta["cap_start"]) < "2026-07-25":
+    if not meta.get("tem_venda"):
         return None
+    # A partir de 01/09 a medição sai SEMPRE que houver venda. O corte de 25/07
+    # vale só para as colunas POR MODELO (antes disso champion/challenger vinham
+    # trocadas em parte dos registros); a régua MISTA (`decil` = a nota que o
+    # lead recebeu de quem o atendeu, a mesma que virou valor enviado pro Meta)
+    # é confiável em toda a série e é o que sustenta o lucro do topo LF56+.
+    por_modelo_ok = str(meta["cap_start"]) >= "2026-07-25"
     cs = date.fromisoformat(str(meta["cap_start"])[:10])
     ce = date.fromisoformat(str(meta["cap_end"])[:10])
 
@@ -149,10 +155,10 @@ def _lucro_por_decil(contrato: dict) -> dict | None:
     try:
         # projeção própria: a padrão do ledger não traz utm_content, e sem ele
         # não dá pra achar a dupla (criativo) de cada lead.
-        cols = ["email", "telefone", "data_captura", "decil_champion",
+        cols = ["email", "telefone", "data_captura", "decil", "decil_champion",
                 "decil_challenger", "utm_campaign", "utm_content", "utm_source"]
         rows = lg.run(
-            "SELECT email, phone, created_at, decil_champion, decil_challenger, "
+            "SELECT email, phone, created_at, decil, decil_champion, decil_challenger, "
             "utm_campaign, utm_content, utm_source FROM registros_ml "
             "WHERE created_at >= :s AND created_at < (CAST(:e AS date) + INTERVAL '1 day') "
             "AND lead_score IS NOT NULL", s=cs.isoformat(), e=ce.isoformat())
@@ -191,9 +197,14 @@ def _lucro_por_decil(contrato: dict) -> dict | None:
                     lucro=fat - custo, roas=(fat / custo if custo else None))
 
     out = {"janela": f"{cs} a {ce} (+21d de casamento)",
-           "filtro": "meta_nao_quente", "custo_base": "cpl_por_lead_do_ledger"}
-    for chave, col in (("champion", "decil_champion"),
+           "filtro": "meta_nao_quente", "custo_base": "cpl_por_lead_do_ledger",
+           "por_modelo": por_modelo_ok}
+    for chave, col in (("misto", "decil"),
+                       ("champion", "decil_champion"),
                        ("challenger", "decil_challenger")):
+        if chave != "misto" and not por_modelo_ok:
+            out[chave] = None
+            continue
         dec = pd.to_numeric(m[col], errors="coerce") if col in m.columns else None
         if dec is None or not dec.notna().any():
             out[chave] = None

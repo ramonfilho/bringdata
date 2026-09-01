@@ -125,7 +125,7 @@ def _contratos_lucro_decil():
             ld2 = json.loads(q.read_text())["tabelas"].get("lucro_decil")
         except Exception:
             continue
-        if ld2 and ld2.get("champion"):
+        if ld2 and (ld2.get("champion") or ld2.get("misto")):
             saida.append((lf, ld2))
     return saida
 
@@ -136,6 +136,8 @@ def _serie_lucro_decil():
     tot: dict = {}
     lfs = []
     for lf, ld2 in _contratos_lucro_decil():
+        if not ld2.get("champion"):
+            continue                      # LF antes de 25/07: só a régua mista
         lfs.append(lf)
         for chave in ("champion", "challenger"):
             bl = ld2.get(chave) or {}
@@ -144,6 +146,26 @@ def _serie_lucro_decil():
                 d = tot.setdefault((chave, k), {"custo": 0.0, "faturamento": 0.0})
                 d["custo"] += float(sm.get("custo") or 0)
                 d["faturamento"] += float(sm.get("faturamento") or 0)
+    return tot, lfs
+
+
+def _serie_lucro_decil_misto():
+    """Série COMPLETA do lucro por decil, na nota que o lead recebeu NA ÉPOCA
+    (coluna `decil`: a do modelo que o atendeu, a mesma que virou valor enviado
+    pro Meta). Confiável em toda a série, ao contrário das colunas por modelo,
+    que só valem de 25/07 em diante. Devolve (tot, lfs)."""
+    tot: dict = {}
+    lfs = []
+    for lf, ld2 in _contratos_lucro_decil():
+        bl = ld2.get("misto")
+        if not bl:
+            continue
+        lfs.append(lf)
+        for k in ("top30", "fundo"):
+            sm = bl.get(k) or {}
+            d = tot.setdefault(k, {"custo": 0.0, "faturamento": 0.0})
+            d["custo"] += float(sm.get("custo") or 0)
+            d["faturamento"] += float(sm.get("faturamento") or 0)
     return tot, lfs
 
 
@@ -156,6 +178,8 @@ def _serie_separacao_top30():
     tot: dict = {}
     lfs = []
     for lf, ld2 in _contratos_lucro_decil():
+        if not ld2.get("champion"):
+            continue
         lfs.append(lf)
         for chave in ("champion", "challenger"):
             for d in ((ld2.get(chave) or {}).get("decis") or []):
@@ -692,6 +716,28 @@ def main() -> int:
                 nota_serie = (" A série soma os lançamentos com essa medição (nota por "
                               "modelo só vale de 25/07 em diante); carrinho aberto entra "
                               "parcial.")
+        except Exception:
+            pass
+        # Série COMPLETA (pedido do Ramon, 01/09): a régua por modelo só existe
+        # de 25/07; a nota USADA na época existe desde sempre, e é ela que virou
+        # o valor enviado pro Meta. Uma linha, fechando a tabela.
+        try:
+            tot_mi, lfs_mi = _serie_lucro_decil_misto()
+            t = tot_mi.get("top30")
+            f = tot_mi.get("fundo")
+            if len(lfs_mi) > 2 and t and t["custo"]:
+                faixa = f"{sorted(lfs_mi)[0]}→{sorted(lfs_mi)[-1]}"
+                rows_ld.append([
+                    f"<b>Nota usada na época · série completa ({faixa})</b>",
+                    _cor(t["faturamento"] - t["custo"], 0),
+                    br(t["faturamento"] / t["custo"], 2),
+                    _cor((f["faturamento"] - f["custo"]) if f else None, 0),
+                    br((f["faturamento"] / f["custo"]) if (f and f["custo"]) else None, 2)])
+                nota_serie += (f" A última linha vai mais longe: usa a nota que o lead "
+                               f"recebeu NA ÉPOCA (a do modelo que o atendeu, a mesma que "
+                               f"virou valor enviado pro Meta), então cobre os "
+                               f"{len(lfs_mi)} lançamentos. Ela responde \"o topo dá "
+                               f"lucro?\", não \"qual modelo é melhor?\".")
         except Exception:
             pass
         if rows_ld:

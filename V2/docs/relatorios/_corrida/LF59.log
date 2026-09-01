@@ -1,3 +1,35 @@
+[launch_calendar_reader] 31 LFs lidos da tabela (client_id=devclub)
+[launch_calendar_reader] 31 LFs lidos da tabela (client_id=devclub)
+[ledger_connection] leitura do ledger via fonte=cloudsql
+[criativo_historico] 674 criativos · 19 lançamentos fechados · 250139 leads · 1967 compradores
+[teto_por_chave] 55 unidades campanha×conjunto×criativo
+[teto_por_chave] tetos: 45 criativos · 17 campanhas · 55 unidades · 55 unidades-conjunto
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 6,164
+   Vendas: 1,441
+   Índices criados: emails=1,296 tel_full=1,210 last6=1,226
+    Matching concluído: 48 matches (0.78%)
+      Email: 36 | Tel: 6 | Last6: 6
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 8,381
+   Vendas: 61
+   Índices criados: emails=55 tel_full=51 last6=53
+    Matching concluído: 39 matches (0.47%)
+      Email: 34 | Tel: 5 | Last6: 0
+[lancamento_unidades] 55 entradas do teto fundidas em 49 unidades reais (utm com id puro)
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 62,412
+   Vendas: 22
+   Índices criados: emails=21 tel_full=19 last6=21
+    Matching concluído: 5 matches (0.01%)
+      Email: 2 | Tel: 2 | Last6: 1
+[ledger_connection] leitura do ledger via fonte=cloudsql
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 6,164
+   Vendas: 740
+   Índices criados: emails=662 tel_full=627 last6=637
+    Matching concluído: 42 matches (0.68%)
+      Email: 35 | Tel: 4 | Last6: 3
 
 LF59  cap 2026-06-15→2026-06-21  vendas 2026-06-29→2026-07-05  estado=maduro
 referência 2026-08-31T06:34  fator 1.2000 (tracking)  crédito 0.4329  régua 5d158f0a
@@ -29,4 +61,4 @@ separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
   orgânico / sem rastro  leads     106  topo 8.20%  base 4.44%  lift 1.84x
   Meta, sem público no nome leads      72  topo 0.00%  base 0.00%  lift —
 
-contrato congelado em docs/relatorios/_corrida/LF59/contrato.json  (77,856 bytes)
+contrato congelado em docs/relatorios/_corrida/LF59/contrato.json  (81,039 bytes)

@@ -4,7 +4,7 @@
   "lf": "LF58",
   "client_id": "devclub",
   "as_of": "2026-09-01",
-  "gerado_em": "2026-09-01 11:55:48.751697-03:00",
+  "gerado_em": "2026-09-01 13:28:43.990437-03:00",
   "cap_start": "2026-06-08",
   "cap_end": "2026-06-14",
   "vendas_start": "2026-06-22",
@@ -2197,6 +2197,147 @@
     "conversao": 0.0
    }
   ],
-  "lucro_decil": null
+  "lucro_decil": {
+   "janela": "2026-06-08 a 2026-06-14 (+21d de casamento)",
+   "filtro": "meta_nao_quente",
+   "custo_base": "cpl_por_lead_do_ledger",
+   "por_modelo": false,
+   "misto": {
+    "decis": [
+     {
+      "leads": 326,
+      "custo": 2794.185054033615,
+      "vendas": 0,
+      "faturamento": 0.0,
+      "lucro": -2794.185054033615,
+      "roas": 0.0,
+      "decil": 1
+     },
+     {
+      "leads": 394,
+      "custo": 3517.5628858909677,
+      "vendas": 1,
+      "faturamento": 1997.0,
+      "lucro": -1520.5628858909677,
+      "roas": 0.567722614998588,
+      "decil": 2
+     },
+     {
+      "leads": 323,
+      "custo": 2952.0416834011976,
+      "vendas": 0,
+      "faturamento": 0.0,
+      "lucro": -2952.0416834011976,
+      "roas": 0.0,
+      "decil": 3
+     },
+     {
+      "leads": 390,
+      "custo": 3769.083771864395,
+      "vendas": 0,
+      "faturamento": 0.0,
+      "lucro": -3769.083771864395,
+      "roas": 0.0,
+      "decil": 4
+     },
+     {
+      "leads": 539,
+      "custo": 5462.010104495162,
+      "vendas": 1,
+      "faturamento": 2132.4,
+      "lucro": -3329.6101044951615,
+      "roas": 0.3904057222898697,
+      "decil": 5
+     },
+     {
+      "leads": 768,
+      "custo": 7910.774798849849,
+      "vendas": 3,
+      "faturamento": 6261.799999999999,
+      "lucro": -1648.9747988498493,
+      "roas": 0.7915533129460853,
+      "decil": 6
+     },
+     {
+      "leads": 827,
+      "custo": 8615.89791427034,
+      "vendas": 3,
+      "faturamento": 6261.799999999999,
+      "lucro": -2354.09791427034,
+      "roas": 0.7267727707902278,
+      "decil": 7
+     },
+     {
+      "leads": 759,
+      "custo": 7871.030356617011,
+      "vendas": 5,
+      "faturamento": 10391.199999999999,
+      "lucro": 2520.1696433829875,
+      "roas": 1.3201829403776004,
+      "decil": 8
+     },
+     {
+      "leads": 806,
+      "custo": 8646.960466535407,
+      "vendas": 9,
+      "faturamento": 19479.760000000002,
+      "lucro": 10832.799533464595,
+      "roas": 2.2527869851364075,
+      "decil": 9
+     },
+     {
+      "leads": 1903,
+      "custo": 19904.838867356495,
+      "vendas": 15,
+      "faturamento": 31016.56,
+      "lucro": 11111.721132643506,
+      "roas": 1.5582422046564008,
+      "decil": 10
+     }
+    ],
+    "total": {
+     "leads": 7035,
+     "custo": 71444.38590331444,
+     "vendas": 37,
+     "faturamento": 77540.51999999999,
+     "lucro": 6096.13409668555,
+     "roas": 1.085326985733147
+    },
+    "top30": {
+     "leads": 3468,
+     "custo": 36422.82969050891,
+     "vendas": 29,
+     "faturamento": 60887.52,
+     "lucro": 24464.69030949109,
+     "roas": 1.671685602611653
+    },
+    "resto": {
+     "leads": 3567,
+     "custo": 35021.55621280552,
+     "vendas": 8,
+     "faturamento": 16653.0,
+     "lucro": -18368.556212805517,
+     "roas": 0.47550713905485686
+    },
+    "top20": {
+     "leads": 2709,
+     "custo": 28551.799333891897,
+     "vendas": 24,
+     "faturamento": 50496.31999999999,
+     "lucro": 21944.520666108096,
+     "roas": 1.7685862599930524
+    },
+    "fundo": {
+     "leads": 1972,
+     "custo": 18494.883499685337,
+     "vendas": 2,
+     "faturamento": 4129.4,
+     "lucro": -14365.483499685337,
+     "roas": 0.22327256076364338
+    }
+   },
+   "champion": null,
+   "challenger": null
+  }
  }
 }
