@@ -4,7 +4,7 @@
   "lf": "LF65",
   "client_id": "devclub",
   "as_of": "2026-09-01",
-  "gerado_em": "2026-09-01 13:35:26.540813-03:00",
+  "gerado_em": "2026-09-01 15:49:18.382137-03:00",
   "cap_start": "2026-08-18",
   "cap_end": "2026-08-24",
   "vendas_start": "2026-08-31",
@@ -5067,6 +5067,79 @@
      "roas": 0.8360560486050106
     }
    }
+  },
+  "paginas": {
+   "cobertura_url": 98.01353737492643,
+   "cadastros_total": 6796,
+   "cadastros_com_url": 6661,
+   "rodizio_share": 0.8645584725536993,
+   "tem_venda": true,
+   "linhas": [
+    {
+     "pagina": "cap-meta-a-v2",
+     "cadastros": 2198,
+     "pct_trafego": 32.99804834108993,
+     "pct_d9_d10": 18.089103596349972,
+     "vendas": 17,
+     "conversao": 0.7734303912647862
+    },
+    {
+     "pagina": "cap-meta-f-v1",
+     "cadastros": 1106,
+     "pct_trafego": 16.604113496472003,
+     "pct_d9_d10": 16.00877192982456,
+     "vendas": 2,
+     "conversao": 0.18083182640144665
+    },
+    {
+     "pagina": "cap-meta-f-v2",
+     "cadastros": 1052,
+     "pct_trafego": 15.793424410749136,
+     "pct_d9_d10": 17.6158940397351,
+     "vendas": 6,
+     "conversao": 0.5703422053231939
+    },
+    {
+     "pagina": "cap-meta-f-v3",
+     "cadastros": 995,
+     "pct_trafego": 14.937697042486112,
+     "pct_d9_d10": 16.171224732461354,
+     "vendas": 7,
+     "conversao": 0.7035175879396985
+    },
+    {
+     "pagina": "cap-go-a-v1",
+     "cadastros": 609,
+     "pct_trafego": 9.142771355652304,
+     "pct_d9_d10": 26.470588235294116,
+     "vendas": 7,
+     "conversao": 1.1494252873563218
+    },
+    {
+     "pagina": "cap-go-a-v2",
+     "cadastros": 575,
+     "pct_trafego": 8.632337486863834,
+     "pct_d9_d10": 34.02646502835539,
+     "vendas": 5,
+     "conversao": 0.8695652173913043
+    },
+    {
+     "pagina": "cap-org-a-v1",
+     "cadastros": 92,
+     "pct_trafego": 1.3811739978982134,
+     "pct_d9_d10": 50.72463768115942,
+     "vendas": 1,
+     "conversao": 1.0869565217391304
+    },
+    {
+     "pagina": "outras (3 páginas)",
+     "cadastros": 34,
+     "pct_trafego": 0.5104338687884702,
+     "pct_d9_d10": 31.57894736842105,
+     "vendas": 0,
+     "conversao": 0.0
+    }
+   ]
   }
  }
 }

@@ -762,6 +762,49 @@ def main() -> int:
                 + _tab(["Modelo", "Lucro top 30", "ROAS top 30",
                         "Lucro Bottom 50", "ROAS Bottom 50"], rows_ld))
 
+    # ── página de captação (01/09): seção FIXA, mesmo molde do quente/frio ───
+    # Contrato antigo não tem o bloco → a seção simplesmente não aparece.
+    tab_pag = ""
+    pg = c["tabelas"].get("paginas")
+    if pg and pg.get("linhas"):
+        rz = pg.get("rodizio_share")
+        rodizio_on = rz is not None and rz >= 0.5
+        rows_pg = []
+        for x in pg["linhas"]:
+            rows_pg.append([
+                f"<b>{x['pagina']}</b>",
+                f"{x['cadastros']:,}".replace(",", "."),
+                pct(x["pct_trafego"], 1),
+                pct(x["pct_d9_d10"], 1) if x.get("pct_d9_d10") is not None else "—",
+                br(x.get("vendas"), 0),
+                pct(x["conversao"], 2) if x.get("conversao") is not None else "—",
+            ])
+        if rodizio_on:
+            aviso_pag = (f"Neste lançamento o rodízio estava LIGADO ({pct(100*rz, 0)} "
+                         "dos cadastros da Meta, nos pares campanha×anúncio com 30+ "
+                         "cadastros, vieram de anúncio que alimentou 2+ páginas). Comparação limpa (mesmo público, mesmo criativo), "
+                         "mas o gasto é do anúncio, não da página: esta tabela "
+                         "mede, não julga teto.")
+        elif rz is not None:
+            aviso_pag = (f"Rodízio desligado neste lançamento ({pct(100*rz, 0)} dos "
+                         "cadastros da Meta, nos pares com 30+ cadastros, em anúncio "
+                         "multi-página): cada campanha "
+                         "aponta pra sua página, o gasto passa a ser atribuível e a "
+                         "página pode entrar no julgamento do teto.")
+        else:
+            aviso_pag = ""
+        tab_pag = (
+            "<p class='h2sub' style='margin-top:14px'>Página = a URL que o lead abriu "
+            "pra se cadastrar (gravada no cadastro; cobertura de "
+            + pct(pg["cobertura_url"], 1) + " neste lançamento). "
+            "<b>Conversão</b> = vendas do lançamento casadas por email/telefone ÷ "
+            "cadastros da página; <b>% notas 9-10</b> = fatia dos leads da página "
+            "que o modelo pôs no topo (mostra se a página atrai lead melhor ou "
+            "pior). " + aviso_pag +
+            " Páginas com menos de 50 cadastros somadas em 'outras'.</p>"
+            + _tab(["Página", "Cadastros", "% do tráfego", "% notas 9-10",
+                    "Vendas", "Conversão"], rows_pg))
+
     import pandas as pd
     from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
@@ -852,6 +895,16 @@ def main() -> int:
     if nota_cria.exists():
         sec = next(x for x in spec["sections"] if "Criativo agregado" in x["title"])
         sec["html"] += nota_cria.read_text()
+
+    # Página de captação: entra depois do criativo (mesma família: atributo
+    # da captação), antes do comparativo. Contrato sem o bloco = sem seção.
+    if tab_pag:
+        spec["sections"].append({
+            "title": "Página de captação",
+            "sub": "Onde o lead se cadastrou. O texto abaixo diz se, neste "
+                   "lançamento, a página era sorteada pelo rodízio (medição limpa, "
+                   "sem verba atribuível) ou escolhida por campanha (entra no teto).",
+            "html": tab_pag})
 
     # Comparação com os lançamentos anteriores: gerada por
     # scripts/comparativo_lancamentos.py na pasta do LF; entra antes do carimbo.

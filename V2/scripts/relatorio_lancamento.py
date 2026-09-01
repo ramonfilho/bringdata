@@ -226,6 +226,155 @@ def _lucro_por_decil(contrato: dict) -> dict | None:
     return out
 
 
+
+def _paginas_do_lancamento(contrato: dict) -> dict | None:
+    """Conversão por PÁGINA de captação (decisão do Ramon, 01/09): a página é a
+    URL que o lead abriu pra se cadastrar (`analytics.captacoes.utm_url`, ~98%
+    preenchida de LF56 em diante; conferida contra o ledger: 100% igual onde as
+    duas fontes se cruzam).
+
+    Enquanto o RODÍZIO estiver ligado (o mesmo anúncio espalha os leads em
+    várias páginas, em proporção fixa), a comparação entre páginas é limpa
+    (mesmo público, mesmo criativo), mas o gasto NÃO é atribuível a página:
+    isto é medição, não julgamento de teto. `rodizio_share` mede isso no
+    próprio lançamento (fração dos cadastros Meta, em pares campanha×anúncio
+    com ≥30 cadastros, cujo par alimentou 2+ páginas), e o render troca o texto quando o rodízio desligar.
+
+    Vendas na MESMA régua do bloco NEGÓCIO: produtos do lançamento na janela
+    de carrinho, casamento email+telefone. Sem venda ingerida → vendas e
+    conversão None (regra de ouro: nunca 0 fabricado).
+    """
+    from datetime import timedelta
+
+    import pandas as pd
+
+    from src.data.analytics_connection import open_analytics_connection
+    from src.data.ledger_connection import open_ledger_read_connection
+    from src.monitoring.campaign_classifier import channel_from_source
+    from src.validation.model_performance import (_filter_launch_sales,
+                                                  _load_launch_rules,
+                                                  build_matched_df,
+                                                  read_analytics_sales)
+
+    meta = contrato["meta"]
+    cs = date.fromisoformat(str(meta["cap_start"])[:10])
+    ce = date.fromisoformat(str(meta["cap_end"])[:10])
+    vs = date.fromisoformat(str(meta["vendas_start"])[:10]) if meta.get("vendas_start") else None
+    ve = date.fromisoformat(str(meta["vendas_end"])[:10]) if meta.get("vendas_end") else None
+    tem_venda = bool(meta.get("tem_venda"))
+
+    an = open_analytics_connection(timeout=300)
+    lg = open_ledger_read_connection()
+    try:
+        # UMA linha por PESSOA: desde 11/08/2026 a `captacoes` tem grão por
+        # INSCRIÇÃO (chave lf+email+origem_id) — sem o DISTINCT ON, quem se
+        # cadastra em 2 páginas viraria 2 leads e a venda dele contaria 2x
+        # (achado da revisão de 01/09). Fica a PRIMEIRA inscrição com URL.
+        rows = an.run(
+            "SELECT DISTINCT ON (lower(email)) lower(email), phone, captured_at, "
+            "  regexp_replace(regexp_replace(regexp_replace(lower(utm_url),"
+            "    '^https?://',''),'[?#].*$',''),'/+$','') AS url_norm, "
+            "  utm_source, utm_campaign, coalesce(ad_name, utm_content) "
+            "FROM captacoes WHERE lf = :lf "
+            "ORDER BY lower(email), (coalesce(utm_url,'') = ''), captured_at",
+            lf=contrato["lf"])
+        total = len(rows)
+        # decil MISTO (a nota de quem atendeu o lead; confiável na série toda),
+        # pra mostrar se alguma página atrai lead pior aos olhos do modelo.
+        dec_rows = lg.run(
+            # ORDER BY: email repetido fica com o decil MAIS RECENTE, sempre o
+            # mesmo em toda reemissão (contrato congelado tem que reproduzir).
+            "SELECT lower(email), decil FROM registros_ml "
+            "WHERE created_at >= :s AND created_at < (CAST(:e AS date) + INTERVAL '1 day') "
+            "AND decil IS NOT NULL ORDER BY created_at", s=cs.isoformat(), e=ce.isoformat())
+        sales = read_analytics_sales(an, cs, min(date.today(), ce + timedelta(days=60))
+                                     + timedelta(days=1))
+    finally:
+        for c in (lg, an):
+            try:
+                c.close()
+            except Exception:
+                pass
+    if not total:
+        return None
+    cols = ["email", "telefone", "data_captura", "url", "utm_source",
+            "utm_campaign", "ad"]
+    df = pd.DataFrame(rows, columns=cols)
+    df = df[df["url"].fillna("") != ""].copy()
+    com_url = len(df)
+    if not com_url:
+        return None
+    # slug = 1º trecho do path; URL sem barra (rótulo solto de planilha) fica inteira
+    df["pagina"] = [u.split("/", 1)[1].split("/")[0] if "/" in u else u
+                    for u in df["url"]]
+    df["data_captura"] = pd.to_datetime(df["data_captura"], utc=True,
+                                        errors="coerce").dt.tz_localize(None)
+
+    # vendas: régua de produto do lançamento na janela de carrinho (igual NEGÓCIO)
+    rules = _load_launch_rules()
+    ls = (_filter_launch_sales(sales, rules, vs, ve)
+          if any(rules.values()) else sales)
+    janela = max(60, (ve - cs).days + 3) if (ve and cs) else 60
+    # `pagina` viaja DENTRO do df casado: agrupar no próprio `m` dispensa
+    # alinhamento de índice com o df original (robusto a matcher que reindexe).
+    m = build_matched_df(df[["email", "telefone", "data_captura", "pagina"]].copy(),
+                         ls, window_days=janela)
+    m["_conv"] = m["converted"].fillna(False).astype(bool)
+    dmap = {r[0]: int(r[1]) for r in dec_rows}
+    m["_dec"] = m["email"].map(dmap)
+
+    # rodízio: fração dos cadastros META cujo par campanha×anúncio alimentou
+    # 2+ páginas (cada uma com ≥20% do par). ≥50% = rodízio ligado.
+    canal = df["utm_source"].map(lambda s_: channel_from_source(s_))
+    mm = df[(canal == "meta") & df["ad"].notna()]
+    rodizio_share = None
+    if len(mm):
+        tam = mm.groupby(["utm_campaign", "ad"])["pagina"].agg(["size"])
+        pares_ok = tam[tam["size"] >= 30].index
+        n_dup = n_rod = 0
+        for chave in pares_ok:
+            g = mm[(mm["utm_campaign"] == chave[0]) & (mm["ad"] == chave[1])]
+            partes = g["pagina"].value_counts(normalize=True)
+            n_dup += len(g)
+            if (partes >= 0.20).sum() >= 2:
+                n_rod += len(g)
+        rodizio_share = (n_rod / n_dup) if n_dup else None
+
+    linhas, sobra = [], dict(pagina=None, cadastros=0, vendas=0, dec_n=0, dec_topo=0)
+    for pg, g in m.groupby("pagina"):
+        n = len(g)
+        v = int(g["_conv"].sum())
+        d_ = g["_dec"].dropna()
+        item = dict(cadastros=n, vendas=v, dec_n=int(len(d_)),
+                    dec_topo=int((d_ >= 9).sum()))
+        if n >= 50:
+            linhas.append(dict(pagina=pg, **item))
+        else:
+            sobra["cadastros"] += n
+            sobra["vendas"] += v
+            sobra["dec_n"] += item["dec_n"]
+            sobra["dec_topo"] += item["dec_topo"]
+            sobra["n_paginas"] = sobra.get("n_paginas", 0) + 1
+    linhas.sort(key=lambda x: -x["cadastros"])
+    if sobra["cadastros"]:
+        sobra["pagina"] = f"outras ({sobra.pop('n_paginas')} páginas)"
+        linhas.append(sobra)
+
+    out_l = []
+    for x in linhas:
+        n = x["cadastros"]
+        out_l.append(dict(
+            pagina=x["pagina"], cadastros=n,
+            pct_trafego=100.0 * n / com_url,
+            pct_d9_d10=(100.0 * x["dec_topo"] / x["dec_n"] if x["dec_n"] else None),
+            vendas=(x["vendas"] if tem_venda else None),
+            conversao=(100.0 * x["vendas"] / n if (tem_venda and n) else None),
+        ))
+    return dict(cobertura_url=100.0 * com_url / total, cadastros_total=total,
+                cadastros_com_url=com_url, rodizio_share=rodizio_share,
+                tem_venda=tem_venda, linhas=out_l)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Relatório por lançamento (um comando)")
     ap.add_argument("--lf", required=True, help="Nome do lançamento (ex.: LF64)")
@@ -325,6 +474,20 @@ def main() -> int:
     except Exception as e:
         contrato["tabelas"]["lucro_decil"] = None
         print(f"⚠ lucro por decil indisponível: {e}", file=sys.stderr)
+
+    # páginas de captação (01/09): mesmo contrato de falha do lucro por decil:
+    # melhor esforço, None nunca derruba a emissão.
+    try:
+        contrato["tabelas"]["paginas"] = _paginas_do_lancamento(contrato)
+        pg = contrato["tabelas"]["paginas"]
+        if pg:
+            rz = pg.get("rodizio_share")
+            print(f"páginas: {len(pg['linhas'])} linhas, cobertura de URL "
+                  f"{pg['cobertura_url']:.1f}%"
+                  + (f", rodízio {100*rz:.0f}%" if rz is not None else ""))
+    except Exception as e:
+        contrato["tabelas"]["paginas"] = None
+        print(f"⚠ páginas indisponíveis: {e}", file=sys.stderr)
 
     dst = out / "contrato.json"
     dst.write_text(json.dumps(contrato, ensure_ascii=False, indent=1,
