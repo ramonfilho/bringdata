@@ -215,6 +215,78 @@ def tabela_campanhas(neg: pd.DataFrame, spend_df: Optional[pd.DataFrame], *,
     return df
 
 
+# ───────────────────── fusão por cid (identidade real da unidade) ───────────
+class _TetoFundido:
+    """Shim do teto para unidades FUNDIDAS: mesma interface (.ok/.valor/.motivo)
+    do objeto da calculadora; valor = média ponderada pelos leads (o teto é
+    linear na conversão esperada)."""
+    __slots__ = ("ok", "valor", "motivo")
+
+    def __init__(self, valor):
+        self.ok = valor is not None
+        self.valor = valor
+        self.motivo = None if self.ok else "sem_base"
+
+
+def _chave_da_unidade(u: dict) -> tuple:
+    """A identidade REAL da unidade: (canal, id da campanha, criativo)."""
+    cid = _campaign_id_from_utm(u["campanha"]) or ""
+    google = bool(u["campanha"] == "devlf" or cid == "")
+    return ("google" if google else "meta", (cid or str(u["campanha"])),
+            str(u["criativo"]))
+
+
+def funde_unidades_por_cid(por_unidade: list) -> list:
+    """Funde entradas de `tetos_completos` que são a MESMA unidade real.
+
+    O `por_unidade` agrupa pela STRING de utm_campaign; leads com a UTM gravada
+    só com o ID numérico formavam um SEGUNDO grupo da mesma campanha, e o join
+    de gasto (e o de vendas, ambos por cid) dava a verba INTEIRA pros dois —
+    R$ 381.604 de gasto fantasma nos contratos LF56-LF63, com a cobertura
+    imprimindo 149-197% sem travar nada (achado de 01/09/2026). Fundir por cid
+    mata a duplicação na raiz.
+
+    Regras (tudo linear na conversão → média pesada por n): n soma; pct e teto
+    pesados por n; a decomposição do histórico fica da entrada com MAIS leads
+    (mesmo criativo = mesmo histórico); `campanha` fica com o NOME, nunca o id.
+    """
+    grupos: dict = {}
+    ordem: list = []
+    for u in por_unidade:
+        k = _chave_da_unidade(u)
+        if k not in grupos:
+            grupos[k] = []
+            ordem.append(k)
+        grupos[k].append(u)
+    out: list = []
+    for k in ordem:
+        us = grupos[k]
+        if len(us) == 1:
+            out.append(us[0])
+            continue
+        us = sorted(us, key=lambda x: -int(x["n"]))
+        base = dict(us[0])
+        n_tot = sum(int(x["n"]) for x in us)
+        if n_tot:
+            base["pct"] = sum(float(x["pct"]) * int(x["n"]) for x in us) / n_tot
+        com_teto = [x for x in us if x["teto"].ok]
+        if com_teto:
+            n_t = sum(int(x["n"]) for x in com_teto)
+            base["teto"] = _TetoFundido(
+                sum(float(x["teto"].valor) * int(x["n"]) for x in com_teto) / n_t)
+        if str(base["campanha"]).strip().isdigit():
+            nomes = [str(x["campanha"]) for x in us
+                     if not str(x["campanha"]).strip().isdigit()]
+            if nomes:
+                base["campanha"] = nomes[0]
+        base["n"] = n_tot
+        out.append(base)
+    if len(out) != len(por_unidade):
+        logger.info("[lancamento_unidades] %d entradas do teto fundidas em %d "
+                    "unidades reais (utm com id puro)", len(por_unidade), len(out))
+    return out
+
+
 # ───────────────────────── a tabela-fato da unidade ──────────────────────────
 def tabela_unidades(neg: pd.DataFrame, por_unidade: list, gasto_unid: dict, *,
                     haircut: float, tem_venda: bool = True) -> pd.DataFrame:
@@ -231,6 +303,7 @@ def tabela_unidades(neg: pd.DataFrame, por_unidade: list, gasto_unid: dict, *,
     preenchido — nunca herda gasto da Meta (guarda de canal; medido: a fusão
     derrubava o CPL do DEV-AD0138 em 52%).
     """
+    por_unidade = funde_unidades_por_cid(por_unidade)
     # lado do lead: cadastros por unidade
     cad = (neg.groupby(["canal", "cid", "criativo"], dropna=False)
            .size().to_dict()) if len(neg) else {}
@@ -249,15 +322,25 @@ def tabela_unidades(neg: pd.DataFrame, por_unidade: list, gasto_unid: dict, *,
         leads_ger = int(g["leads_gerenciador"]) if g else None
         n_cad = cad.get((canal, cid, criativo))
         t = u["teto"]
-        teto = float(t.valor) if t.ok else None
-        cpl = (gasto / u["n"]) if (gasto is not None and u["n"]) else None
+        teto_lead = float(t.valor) if t.ok else None
+        # CPL ÚNICO = custo por CADASTRO (regra do Ramon, 01/09): o painel fala
+        # a língua do gerenciador. O teto nasce por lead do LEDGER (respondente),
+        # então re-baseia na MESMA régua — teto_cad = teto × (leads_ledger /
+        # cadastros); o gasto máximo permitido da unidade não muda. Unidade sem
+        # cadastro casado cai no par antigo (lead a lead), sempre consistente.
+        base = int(n_cad) if n_cad else (int(u["n"]) or None)
+        cpl_base = "cadastro" if n_cad else "lead_ledger"
+        teto = (teto_lead * (int(u["n"]) / base)
+                if (teto_lead is not None and base and n_cad) else teto_lead)
+        cpl = (gasto / base) if (gasto is not None and base) else None
         linha = dict(
             cid=cid, campanha=u["campanha"], canal=canal, criativo=criativo,
             temperatura=(temperatura_da_campanha(u["campanha"])
                          if canal == "meta" else None),
             leads_ledger=int(u["n"]), cadastros=(int(n_cad) if n_cad else None),
             leads_gerenciador=leads_ger, pct_d9_d10=float(u["pct"]),
-            gasto=gasto, cpl=cpl, teto=teto,
+            gasto=gasto, cpl=cpl, cpl_base=cpl_base, teto=teto,
+            teto_por_lead=teto_lead,
             folga=((teto - cpl) if (teto is not None and cpl is not None) else None),
             dentro_do_teto=((cpl <= teto) if (teto is not None and cpl is not None)
                             else None),
@@ -361,7 +444,8 @@ def julga_dentro_vs_acima(unidades: pd.DataFrame, *,
 # ───────────────────────── separação por temperatura ─────────────────────────
 def separacao_por_temperatura(ledger_matched: Optional[pd.DataFrame], *,
                               tem_venda: bool = True,
-                              decil_topo: int = 9) -> list:
+                              decil_topo: int = 9,
+                              col_decil: str = "decil") -> list:
     """Quanto o modelo SEPARA dentro de cada público (quente/frio/sem rótulo):
     taxa de conversão do topo (D9-D10) contra a base (D1-D8) e o lift entre elas.
 
@@ -405,7 +489,10 @@ def separacao_por_temperatura(ledger_matched: Optional[pd.DataFrame], *,
 
         temp = pd.Series([_balde(c_, t_) for c_, t_ in zip(canal, temp)],
                          index=df.index)
-    dec = pd.to_numeric(df.get("decil"), errors="coerce")
+    # `col_decil` escolhe a RÉGUA: 'decil' = nota mista (variante que atendeu);
+    # 'decil_champion' = régua única do Champion (decisão de 01/09 — a mista
+    # dilui: top30 1,53x contra 2,47x no LF65). Quem decide é o compositor.
+    dec = pd.to_numeric(df.get(col_decil), errors="coerce")
     conv = (df.get("converted", pd.Series(False, index=df.index))
             .fillna(False).astype(bool))
     ok = dec.notna()
@@ -414,7 +501,8 @@ def separacao_por_temperatura(ledger_matched: Optional[pd.DataFrame], *,
         topo, base = g & (dec >= decil_topo), g & (dec < decil_topo)
         n, n_topo, n_base = int(g.sum()), int(topo.sum()), int(base.sum())
         linha = dict(temperatura=str(t), leads=n, leads_topo=n_topo,
-                     pct_topo=(100.0 * n_topo / n if n else None))
+                     pct_topo=(100.0 * n_topo / n if n else None),
+                     regua=col_decil)
         if tem_venda and n:
             vt, vb = int(conv[topo].sum()), int(conv[base].sum())
             tx_t = (vt / n_topo) if n_topo else None
@@ -460,7 +548,8 @@ def criativos_por_tipo(unidades: pd.DataFrame, campanhas: pd.DataFrame) -> pd.Da
                 faturamento=("faturamento", lambda s: s.sum(min_count=1)),
                 lucro=("lucro", lambda s: s.sum(min_count=1)))
            .reset_index())
-    agg["cpl"] = agg["gasto"] / agg["leads_ledger"].where(agg["leads_ledger"] > 0)
+    base = agg["cadastros"].fillna(agg["leads_ledger"])
+    agg["cpl"] = agg["gasto"] / base.where(base > 0)   # CPL por CADASTRO (01/09)
     agg["conversao"] = agg["vendas"] / agg["cadastros"].where(agg["cadastros"] > 0)
     return agg.sort_values(["modelo", "gasto"], ascending=[True, False],
                            na_position="last").reset_index(drop=True)
@@ -644,8 +733,17 @@ def constroi_lancamento(lf: str, *, as_of: Optional[date] = None,
             if len(unidades) else unidades,
             tolerancia_meta=tolerancia_meta)
         por_tipo = criativos_por_tipo(unidades, campanhas)
-        sep_temp = separacao_por_temperatura(m["matched_modelo"],
-                                             tem_venda=tem_venda)
+        # régua ÚNICA na separação (01/09): nota mista dilui; as colunas por
+        # modelo do ledger só valem para captação >= 25/07/2026 (antes, parte
+        # veio trocada — armadilha do champion_run_id). Antes disso: mista.
+        sep_col = "decil"
+        mm = m["matched_modelo"]
+        if (cap_start and cap_start >= date(2026, 7, 25)
+                and "decil_champion" in mm.columns
+                and mm["decil_champion"].notna().any()):
+            sep_col = "decil_champion"
+        sep_temp = separacao_por_temperatura(mm, tem_venda=tem_venda,
+                                             col_decil=sep_col)
 
         # De onde veio o comprador (nota 8 do Ramon, 31/08): a tabela de
         # campanhas casa venda SÓ com cadastro da captação DESTE LF; as vendas
@@ -706,6 +804,7 @@ def constroi_lancamento(lf: str, *, as_of: Optional[date] = None,
             corte_leads=corte_leads, corte_gasto=corte_gasto,
             tolerancia_meta=tolerancia_meta,
             historico_criativos=len(hist), historico_corte=str(cap_start),
+            separacao_regua=sep_col,
             devolvidos_n=0,                   # LF64: debriefing ainda não existe
             cobertura=dict(
                 gasto_meta_total=gasto_meta_total, gasto_meta_casado=gasto_casado,

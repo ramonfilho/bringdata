@@ -194,7 +194,10 @@ class ModelRegistry:
 # ───────────────────────── leitores (data access) ───────────────────────────
 # Projeções enxutas; ficam aqui na Etapa 1. Fase 2 do estrangulamento move pra
 # repositórios em src/data/. O chamador injeta a conexão (dono de fechá-la).
-_LEDGER_COLS = ("email", "phone", "created_at", "decil", "lead_score", "variant", "utm_campaign", "utm_source")
+_LEDGER_COLS = ("email", "phone", "created_at", "decil", "lead_score", "variant", "utm_campaign", "utm_source",
+                # réguas por MODELO (dual-decil do ledger): confiáveis para
+                # captação >= 25/07/2026 — antes, parte veio trocada
+                "decil_champion", "decil_challenger")
 _SALES_COLS = ("email", "phone", "sale_value", "sale_value_realizado", "sale_date", "gateway", "produto")
 
 

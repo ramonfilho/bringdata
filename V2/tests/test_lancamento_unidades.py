@@ -188,8 +188,14 @@ def test_unidades_join_e_guarda_de_canal():
     assert len(u) == 3
     a = u[u["criativo"] == "dev-ad0100"].iloc[0]
     assert a["gasto"] == pytest.approx(100.0)
-    assert a["cpl"] == pytest.approx(10.0)
-    assert a["folga"] == pytest.approx(-2.0) and a["dentro_do_teto"] == False  # noqa: E712
+    # CPL por CADASTRO (regra de 01/09): 100 / 2 cadastros; o teto re-baseia
+    # na mesma régua (8,0 por lead × 10 leads ÷ 2 cadastros = 40,0), então o
+    # veredito (estourou) não muda com a troca de base.
+    assert a["cpl"] == pytest.approx(50.0)
+    assert a["cpl_base"] == "cadastro"
+    assert a["teto"] == pytest.approx(40.0)
+    assert a["teto_por_lead"] == pytest.approx(8.0)
+    assert a["folga"] == pytest.approx(-10.0) and a["dentro_do_teto"] == False  # noqa: E712
     assert a["leads_gerenciador"] == 12 and a["cadastros"] == 2
     # GUARDA DE CANAL: a unidade do Google NÃO herda o gasto Meta homônimo
     g = u[u["criativo"] == "dev-ad0300"].iloc[0]
@@ -384,3 +390,43 @@ def test_separacao_divide_por_canal_quando_ha_utm_source():
     # sem utm_source (contrato antigo/teste), cai no comportamento antigo
     velho = {r["temperatura"] for r in L.separacao_por_temperatura(_ledger_temperatura())}
     assert velho == {"frio", "quente"}
+
+
+# ───────────────────── fusão por cid (verba fantasma, 01/09) ─────────────────
+def test_unidades_fusao_por_cid_mata_verba_duplicada():
+    """Lead com utm_campaign = só o ID formava uma SEGUNDA unidade da mesma
+    campanha e o join dava gasto e vendas inteiros pros dois (R$ 381.604 de
+    fantasma nos contratos LF56-LF63). A fusão por cid conta UMA vez."""
+    pu = _por_unidade() + [
+        dict(campanha="12024500000000001", criativo="dev-ad0100", n=3,
+             pct=40.0, teto=_Teto(9.0), n_hist=500, lift_criativo=1.2,
+             peso=0.2, compradores_hist=5, esperados=4.2)]
+    u = L.tabela_unidades(_neg(tem_venda=True), pu, _gasto_unid(),
+                          haircut=0.5, tem_venda=True)
+    a = u[u["criativo"] == "dev-ad0100"]
+    assert len(a) == 1                                     # UMA unidade real
+    a = a.iloc[0]
+    assert a["campanha"] == "CAP | X|12024500000000001"    # nome vence o id puro
+    assert a["leads_ledger"] == 13                         # 10 + 3
+    assert a["gasto"] == pytest.approx(100.0)              # verba contada UMA vez
+    assert a["vendas"] == 1                                # venda idem
+    assert a["pct_d9_d10"] == pytest.approx((20.0 * 10 + 40.0 * 3) / 13)
+    assert a["teto_por_lead"] == pytest.approx((8.0 * 10 + 9.0 * 3) / 13)
+
+
+def test_funde_preserva_unidades_distintas():
+    """Unidades de cids diferentes (e as do Google) não se fundem."""
+    assert len(L.funde_unidades_por_cid(_por_unidade())) == 3
+
+
+# ───────────────────── separação com régua única (01/09) ─────────────────────
+def test_separacao_regua_unica_por_coluna():
+    df = _ledger_temperatura().rename(columns={"decil": "decil_champion"})
+    df["decil"] = [1] * 8          # a nota mista não separa nada de propósito
+    s = {r["temperatura"]: r for r in L.separacao_por_temperatura(
+        df, tem_venda=True, col_decil="decil_champion")}
+    assert s["frio"]["taxa_topo"] == pytest.approx(0.5)
+    assert s["frio"]["regua"] == "decil_champion"
+    # default continua a mista, com o rótulo dizendo qual régua foi usada
+    s2 = L.separacao_por_temperatura(_ledger_temperatura(), tem_venda=True)
+    assert all(r["regua"] == "decil" for r in s2)
