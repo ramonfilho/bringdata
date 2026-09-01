@@ -35,7 +35,28 @@ def test_a_porta_do_gasto_publica_a_dupla_que_o_piso_de_leads_escondia():
     """O caso que motivou a mudança: CPL alto, poucos leads, dinheiro de verdade
     gasto. Media 2,43 de ROAS dentro do teto contra 0,77 fora, em 11 lançamentos."""
     assert p._publica_unidade(40, 100, _ger(gasto=300.0), CRIATIVO, CAMPANHA)
-    assert p._publica_unidade(11, 100, _ger(gasto=1500.0), CRIATIVO, CAMPANHA)
+    assert p._publica_unidade(20, 100, _ger(gasto=1500.0), CRIATIVO, CAMPANHA)
+
+
+def test_a_porta_do_gasto_NAO_publica_agregado_de_meia_duzia_de_pessoas():
+    """REGRA INEGOCIÁVEL do topo do arquivo: decil POR LEAD não sai desta entrega.
+
+    Com 3 leads a %D9-D10 só assume 0%, 33%, 67% ou 100%, e cada valor diz o decil
+    de um lead com outro nome. Medido em 01/09/2026: uma dupla com 3 leads e R$ 600
+    gastos existia de verdade na janela de 90 dias. E o buraco anda junto com o que
+    a porta pega: CPL alto é pouco lead pelo mesmo dinheiro."""
+    assert not p._publica_unidade(3, 100, _ger(gasto=600.0), CRIATIVO, CAMPANHA)
+    assert not p._publica_unidade(1, 100, _ger(gasto=5000.0), CRIATIVO, CAMPANHA)
+    assert not p._publica_unidade(19, 100, _ger(gasto=5000.0), CRIATIVO, CAMPANHA)
+    # a fronteira exata, para ninguém baixar o piso sem passar por aqui
+    assert p.PISO_PRIVACIDADE_UNIDADE == 20
+    assert p._publica_unidade(20, 100, _ger(gasto=300.0), CRIATIVO, CAMPANHA)
+
+
+def test_o_piso_de_privacidade_nao_cobra_pedagio_de_quem_ja_passava():
+    """Ele guarda só a porta NOVA. Quem cruza o piso de leads de sempre entra
+    igual, porque essa linha já era publicada antes desta mudança existir."""
+    assert p._publica_unidade(150, 100, _ger(), CRIATIVO, CAMPANHA)
 
 
 def test_abaixo_dos_dois_pisos_nao_publica():
