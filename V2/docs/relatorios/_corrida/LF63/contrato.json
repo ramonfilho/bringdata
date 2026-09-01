@@ -4,7 +4,7 @@
   "lf": "LF63",
   "client_id": "devclub",
   "as_of": "2026-09-01",
-  "gerado_em": "2026-09-01 10:13:58.360625-03:00",
+  "gerado_em": "2026-09-01 11:42:01.991586-03:00",
   "cap_start": "2026-07-13",
   "cap_end": "2026-07-20",
   "vendas_start": "2026-07-27",
@@ -12,7 +12,7 @@
   "estado": "venda_fechada_imatura",
   "tem_venda": true,
   "window_days": 60,
-  "sales_max": "2026-08-31",
+  "sales_max": "2026-09-01",
   "referencia_id": "2026-08-31T06:34",
   "ruler_run_id": "5d158f0aa6e54b489498470446194a6c",
   "referencia_snapshot": {

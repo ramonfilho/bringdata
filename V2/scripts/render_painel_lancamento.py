@@ -109,6 +109,38 @@ def _serie_ml_vs_lead(pasta_alvo):
     return ganha, total, alvo_parcial
 
 
+def _serie_lucro_decil():
+    """Agrega os blocos `lucro_decil` de TODOS os contratos disponíveis.
+    Só existem para captação >= 25/07 (LF64+): antes disso as colunas por
+    modelo do ledger não valem. Soma custo e faturamento de top30/fundo por
+    modelo e refaz lucro e ROAS. Devolve (tot, lfs)."""
+    base = Path("docs/relatorios")
+    fontes = {}
+    for q in sorted(base.glob("_corrida/*/contrato.json")):
+        fontes[q.parent.name.upper()] = q
+    for q in sorted(base.glob("lf*_resultado/contrato.json")):
+        fontes[q.parent.name[:-10].upper()] = q      # pasta vence a corrida
+    tot: dict = {}
+    lfs = []
+    for lf, q in sorted(fontes.items()):
+        try:
+            c2 = json.loads(q.read_text())
+            ld2 = c2["tabelas"].get("lucro_decil")
+        except Exception:
+            continue
+        if not ld2 or not ld2.get("champion"):
+            continue
+        lfs.append(lf)
+        for chave in ("champion", "challenger"):
+            bl = ld2.get(chave) or {}
+            for k in ("top30", "fundo"):
+                sm = bl.get(k) or {}
+                d = tot.setdefault((chave, k), {"custo": 0.0, "faturamento": 0.0})
+                d["custo"] += float(sm.get("custo") or 0)
+                d["faturamento"] += float(sm.get("faturamento") or 0)
+    return tot, lfs
+
+
 def main() -> int:
     pasta = Path(sys.argv[1] if len(sys.argv) > 1 else "docs/relatorios/lf64_resultado")
     c = json.loads((pasta / "contrato.json").read_text())
@@ -235,20 +267,27 @@ def main() -> int:
     sep = c.get("separacao_temperatura") or []
     tab_sep = ""
     if sep:
+        _REGUA_ROT = {"decil_champion": " · régua abr_28",
+                      "decil_challenger": " · régua jul_24"}
         rows_s = []
         for s in sep:
             lift = s.get("lift")
-            rows_s.append([f"<b>{s['temperatura']}</b>",
+            rows_s.append([f"<b>{s['temperatura']}{_REGUA_ROT.get(s.get('regua') or '', '')}</b>",
                            f"{s['leads']:,}".replace(",", "."),
                            pct(s.get("pct_topo"), 1),
                            pct(100 * s["taxa_topo"], 2) if s.get("taxa_topo") is not None else "—",
                            pct(100 * s["taxa_base"], 2) if s.get("taxa_base") is not None else "—",
                            (br(lift, 2) + "x") if lift is not None else "—"])
-        regua_sep = next((x.get("regua") for x in sep if x.get("regua")), None)
-        rot_regua = (" Régua ÚNICA do <b>Champion</b>: a nota do abr_28 para todo "
-                     "lead, inclusive os atendidos pelo Challenger (a nota mista "
-                     "dilui a medição — decisão de 01/09)."
-                     if regua_sep == "decil_champion" else "")
+        reguas_sep = {x.get("regua") for x in sep if x.get("regua")}
+        if {"decil_champion", "decil_challenger"} <= reguas_sep:
+            rot_regua = (" DUAS réguas únicas lado a lado: cada linha usa a nota "
+                         "daquele modelo para TODOS os leads (a mista dilui; o "
+                         "Challenger entrou por decisão de 01/09, série empatada).")
+        elif reguas_sep == {"decil_champion"}:
+            rot_regua = (" Régua ÚNICA do <b>Champion</b>: a nota do abr_28 para "
+                         "todo lead (a mista dilui a medição).")
+        else:
+            rot_regua = ""
         tab_sep = ("<p class='h2sub' style='margin-top:14px'><b>Separação dentro de cada "
                    "público</b> (respondentes com nota; topo = notas 9-10, base = 1-8; "
                    "lift = quantas vezes o topo converte acima da base)." + rot_regua + "</p>"
@@ -430,7 +469,7 @@ def main() -> int:
                  + f"<p class='h2sub' style='margin-top:10px'>Com a régua mais folgada, "
                  f"<b>{len(d15)}</b> de {len(uj)} unidades couberam no teto.</p>")
 
-    # ── o dinheiro que o corte NÃO julga (decisão do Ramon, 01/09) ───────────
+    # ── o dinheiro que o corte NÃO JULGAVA (decisão do Ramon, 01/09) ────────
     # O corte exige 100 leads e R$ 300 na dupla; CPL alto atrasa os 100 leads,
     # então o pior dinheiro fica invisível. Backtest de 01/09 (10 LFs fechados):
     # liberar o teto do PAR já com R$ 300 separa lucro de prejuízo.
@@ -450,19 +489,22 @@ def main() -> int:
             rows_sv.append([x["criativo"][:24], str(x.get("campanha"))[:30],
                             br(x["gasto"], 0, "R$ "), int(x.get("leads_ledger") or 0),
                             br(x["cpl"]), br(t15),
-                            ((br(raz, 1) + "x", "neg") if raz > 1 else ("dentro", "pos"))])
+                            ((br(raz, 1) + "x", "neg") if raz > 1 else ("dentro", "pos")),
+                            _cor(x.get("lucro"), 0)])
         g_delta_sv = sum(x["gasto"] for x in delta_sv)
         n_est = sum(1 for x in delta_sv if x["cpl"] > x["teto"] * (2.0 / 1.5))
         tab_teto += (
-            f"<p class='h2sub' style='margin-top:14px'><b>O dinheiro que o corte não julga.</b> "
+            f"<p class='h2sub' style='margin-top:14px'><b>O dinheiro que o corte não julgava.</b> "
             f"O julgamento acima exige 100 leads e R$ 300 de gasto na dupla criativo×campanha. "
-            f"Ficou sem veredito neste lançamento: {br(g_sem, 0, 'R$ ')} "
-            f"({br(100 * g_sem / g_meta_u, 1)}% do gasto Meta). A fatia julgável ANTECIPADO "
-            f"(R$ 300+ de gasto, ainda sem 100 leads) tem {len(delta_sv)} duplas e "
-            f"{br(g_delta_sv, 0, 'R$ ')}, {n_est} delas estourando o teto 1,5. É o pior "
-            f"dinheiro do lançamento: CPL alto é justamente o que impede de juntar 100 leads.</p>"
-            + _tab(["Criativo", "Campanha", "Gasto", "Leads", "CPL", "Teto 1,5", "Estouro"],
-                   rows_sv)
+            f"Ficava sem veredito neste lançamento: {br(g_sem, 0, 'R$ ')} "
+            f"({br(100 * g_sem / g_meta_u, 1)}% do gasto Meta). Com a régua nova (teto do "
+            f"PRÓPRIO PAR, liberado já com R$ 300 de gasto), "
+            f"<b>{br(100 * g_delta_sv / g_sem, 0)}%</b> desse dinheiro passa a ter veredito: "
+            f"{len(delta_sv)} duplas e {br(g_delta_sv, 0, 'R$ ')}, {n_est} delas estourando o "
+            f"teto 1,5. É o pior dinheiro do lançamento: CPL alto é justamente o que impede "
+            f"de juntar 100 leads.</p>"
+            + _tab(["Criativo", "Campanha", "Gasto", "Leads", "CPL", "Teto 1,5", "Estouro",
+                    "Prejuízo"], rows_sv)
             + "<p class='h2sub' style='margin-top:10px'><b>Orientação nova (backtest de 01/09, "
               "10 lançamentos fechados):</b> julgar a dupla pelo teto do PRÓPRIO PAR assim que "
               "ela passa de R$ 300 de gasto separa: o dinheiro que essa regra marcou FORA rendeu "
@@ -543,38 +585,48 @@ def main() -> int:
     tab_ld = ""
     ld = c["tabelas"].get("lucro_decil")
     if ld and ld.get("champion"):
+        # Formato enxuto (pedido do Ramon, 01/09): UMA linha por modelo, só o
+        # que decide — lucro e ROAS do top 30 contra lucro e ROAS do fundo.
         rows_ld = []
-        for r in ld["champion"]["decis"]:
-            rows_ld.append([f"<b>D{r['decil']}</b>", f"{r['leads']:,}".replace(",", "."),
-                            br(r["custo"], 0, "R$ "), br(r["vendas"], 0),
-                            br(r["faturamento"], 0, "R$ "), _cor(r["lucro"], 0),
-                            _cor((r["lucro"] / r["leads"]) if r["leads"] else None)])
-        resumo = []
         for nome, chave in (("Champion (abr_28)", "champion"),
                             ("Challenger (jul_24)", "challenger")):
             bloco = ld.get(chave)
             if not bloco:
                 continue
-            for rot, k in (("top 30 (D8-D10)", "top30"), ("resto (D1-D7)", "resto"),
-                           ("fundo (D1-D5)", "fundo")):
-                sm = bloco.get(k)
-                if sm:
-                    resumo.append([f"<b>{nome} · {rot}</b>",
-                                   f"{sm['leads']:,}".replace(",", "."),
-                                   br(sm["custo"], 0, "R$ "), br(sm["vendas"], 0),
-                                   br(sm["faturamento"], 0, "R$ "), _cor(sm["lucro"], 0),
-                                   br(sm["roas"], 2)])
-        tab_ld = (
-            "<p class='h2sub' style='margin-top:14px'><b>Lucro por decil</b> (só Meta frio; "
-            "o custo de cada lead é o CPL da dupla criativo×campanha que o trouxe, porque a "
-            "verba sai antes de o modelo dar a nota; réguas separadas por modelo, nunca "
-            "misturadas). Primeiro o Champion, decil a decil:</p>"
-            + _tab(["Decil", "Leads", "Custo", "Vendas", "Faturamento", "Lucro",
-                    "Lucro/lead"], rows_ld)
-            + "<p class='h2sub' style='margin-top:10px'>O resumo que decide, nos dois "
-              "modelos (ROAS = faturamento / custo alocado):</p>"
-            + _tab(["", "Leads", "Custo", "Vendas", "Faturamento", "Lucro", "ROAS"],
-                   resumo))
+            t = bloco.get("top30") or {}
+            f = bloco.get("fundo") or {}
+            rows_ld.append([f"<b>{nome} · este lançamento</b>",
+                            _cor(t.get("lucro"), 0), br(t.get("roas"), 2),
+                            _cor(f.get("lucro"), 0), br(f.get("roas"), 2)])
+        nota_serie = ""
+        try:
+            tot_s, lfs_s = _serie_lucro_decil()
+            if len(lfs_s) > 1:
+                for nome, chave in (("Champion (abr_28)", "champion"),
+                                    ("Challenger (jul_24)", "challenger")):
+                    t = tot_s.get((chave, "top30"))
+                    f = tot_s.get((chave, "fundo"))
+                    if not (t and t["custo"]):
+                        continue
+                    rows_ld.append([
+                        f"<b>{nome} · série ({'+'.join(lfs_s)})</b>",
+                        _cor(t["faturamento"] - t["custo"], 0),
+                        br(t["faturamento"] / t["custo"], 2),
+                        _cor((f["faturamento"] - f["custo"]) if f else None, 0),
+                        br((f["faturamento"] / f["custo"]) if (f and f["custo"]) else None, 2)])
+                nota_serie = (" A série soma todos os lançamentos que têm essa medição "
+                              "(as notas por modelo do ledger só valem de 25/07 em "
+                              "diante); lançamento com carrinho aberto entra parcial.")
+        except Exception:
+            pass
+        if rows_ld:
+            tab_ld = (
+                "<p class='h2sub' style='margin-top:14px'><b>Lucro por decil</b> (só Meta "
+                "frio; o custo de cada lead é o CPL da dupla criativo×campanha que o "
+                "trouxe, porque a verba sai antes da nota; top 30 = notas 8-10, fundo = "
+                "notas 1-5; régua única de cada modelo, nunca mista)." + nota_serie + "</p>"
+                + _tab(["Modelo", "Lucro top 30", "ROAS top 30",
+                        "Lucro fundo", "ROAS fundo"], rows_ld))
 
     import pandas as pd
     from openpyxl.styles import Font

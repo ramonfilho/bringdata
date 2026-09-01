@@ -27,32 +27,40 @@ Fila viva, irmã do NOTAS_RAMON_3108.md. Não apagar item; marcar resolvido.
 
 ## B. Decisões do Ramon em aberto
 
-- [>] B1. DECIDIDO (01/09): **"Parcela 1 de 12." ENTRA na régua, contando 50%**
-  (é boleto). Tratar a dupla contagem dos 2 compradores com entrada Asaas de
-  R$ 219 na mesma janela. Vai pra fila de execução. Vendas **"Parcela 1 de 12."** (boletex com descrição truncada, 3
-  vendas, R$ 8.576 no carrinho do LF65) entram na régua? Com elas o painel dá
-  exatamente os 60 do relatório do cliente. Risco: 2 desses compradores também
-  têm entrada Asaas de R$ 219 na janela (dupla contagem se entrar sem tratar).
+- [x] B1. EXECUTADO (01/09, PR #255): **"Parcela 1 de 12." na régua** por
+  casamento EXATO de produto (`launch_products_exact` no yaml) — exato porque a
+  variante "RENEGOCIAÇÃO" contém o mesmo texto e NÃO é venda nova. Boletex =
+  boleto = 50% automático. Dupla contagem TRATADA no filtro: entrada Asaas de
+  comprador que já tem a Parcela exata na janela é descartada (mesmo contrato).
+  OBSERVAÇÃO pra decisão futura: existem "Parcela 1 de 9/11" avulsas pequenas
+  (ex.: R$ 191) que NÃO entraram — só o "Parcela 1 de 12." decidido.
 - [ ] B2. **Corte do julgável:** aguarda o backtest (C7). Material guardado na
   seção D pra virar orientação no relatório junto com a conclusão.
 - [ ] B3. Folga da tabela "o que mudou": decidir a base depois do B2.
 - [~] B4. SEPARADO (01/09): farol é interpretação/frente própria, fora desta fila. Farol verde/amarelo/vermelho automático na planilha da agência (o
   teto por criativo já vai; falta a cor calculada). Ofertado em 01/09.
-- [>] B5. DECIDIDO (01/09): **Asaas gateway ENTRA na régua, junto com a Parcela 1 de 12** (boleto, 50%). Asaas gateway inteiro: 1.213 vendas com produto NULL fora da régua
-  em TODOS os LFs (pendência de 31/08).
+- [x] B5. EXECUTADO (01/09, PR #255): **gateway Asaas inteiro na régua**
+  (`launch_sale_gateways` no yaml): toda venda asaas na janela de carrinho
+  conta (produto NULL em 100% das linhas), como boleto (50%). Vale pra TODOS os
+  LFs → os contratos da corrida foram re-gerados com a régua nova. Ressalva
+  declarada: entrada Asaas de produto não-lançamento na janela também entra
+  (não há como distinguir sem descrição — decisão consciente do Ramon).
 - [ ] B6. Linha do LF66 na planilha PC FORMULÁRIOS (captação 25 a 30/08,
   carrinho abre 07/09).
 
 ## C. Execução aprovada, em fila
 
-- [ ] C1. **AUTOMAÇÃO DAS AÇÕES** (aprovada 01/09, "vamos fazer"): número e
-  contagem das recomendações calculados do contrato a cada emissão (molde com
-  buracos; o julgamento continua autoral). Engole os menores: m1 (7 contra 9
-  campanhas), m2 (média de médias vira média agregada), m3 (declarar a base
-  com/sem DEV21 em cada número).
-- [ ] C1b. Regra nova registrada: **DEV21 fora de toda MÉDIA, dentro de toda
-  CONTAGEM** (média contamina por público quente; contagem vale porque ele
-  também teve frio).
+- [x] C1. FEITO (01/09): `scripts/gera_acoes.py` + `acoes_template.html` na
+  pasta do LF = **molde com buracos**. O julgamento continua autoral no molde;
+  os números saem do CONTRATO a cada emissão via tokens ({{cpl:ad0160:jul_24}},
+  {{teto15:...}}, {{folga...}}, {{prejuizo...}}, {{camps1k_n/gasto}}). Token sem
+  resolução ABORTA a emissão listando o que faltou. Plugado no
+  painel_lancamento.sh (contrato → ações → comparativo → render). Engole m1
+  (contagens do contrato) e m2 (teto agregado pesado, nunca média de médias);
+  m3 (base com/sem DEV21) já está declarado no comparativo.
+- [x] C1b. Regra aplicada onde há média: comparativo (média e top 5 sem DEV21,
+  rotulados) e contagens que o incluem dizem isso no texto. Segue valendo como
+  regra de conduta pra análises novas.
 - [x] C2. FEITO (01/09, PR #254): CPL da unidade e do criativo agregado agora
   dividem por CADASTRO (a tabela de campanhas já era assim). O teto re-baseia
   na MESMA régua (teto × leads_ledger ÷ cadastros), então o gasto máximo da

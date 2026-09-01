@@ -140,8 +140,11 @@ def _ritmo_carrinho(alvo_m, prev_m):
     try:
         sys.path.insert(0, str(_V2))
         from src.data.analytics_connection import open_analytics_connection
-        pats = yaml.safe_load((_V2 / "configs/clients/devclub.yaml").read_text())[
-            "business"]["launch_products"]
+        biz = yaml.safe_load((_V2 / "configs/clients/devclub.yaml").read_text())[
+            "business"]
+        pats = biz["launch_products"]
+        exatos = [str(x).strip().lower() for x in (biz.get("launch_products_exact") or [])]
+        gws = [str(x).strip().lower() for x in (biz.get("launch_sale_gateways") or [])]
     except Exception:
         return None
 
@@ -160,7 +163,10 @@ def _ritmo_carrinho(alvo_m, prev_m):
     k = max(1, (a_fim_med - a_ini).days + 1)
     # o último dia medido só está "em curso" quando a ingestão chegou em HOJE
     em_curso = (smax >= hoje and hoje <= a_fim)
-    cond = " OR ".join("lower(produto) LIKE '%" + p.lower() + "%'" for p in pats)
+    partes = ["lower(produto) LIKE '%" + p.lower() + "%'" for p in pats]
+    partes += ["lower(trim(produto)) = '" + e + "'" for e in exatos]
+    partes += ["lower(gateway) = '" + g + "'" for g in gws]
+    cond = " OR ".join(partes)
 
     try:
         conn = open_analytics_connection(timeout=120)
@@ -203,7 +209,9 @@ def _veredito(alvo, at, prev):
          f"{br(prev['pct_gasto_dentro'], 1)}%.<br><br>"
          f"2- A verba no criativo nº 1 {'caiu' if d_conc < 0 else 'subiu'} "
          f"({_pp(at['conc1'], prev['conc1'])}pp): foi {br(at['conc1'], 1)}% no "
-         f"{alvo} contra {br(prev['conc1'], 1)}% no {prev['lf']}, e volume "
+         f"{alvo} contra {br(prev['conc1'], 1)}% no {prev['lf']}; nos 3 maiores "
+         f"criativos, {br(at['conc3'], 1)}% contra {br(prev['conc3'], 1)}% "
+         f"({_pp(at['conc3'], prev['conc3'])}pp). E volume "
          f"{'menor' if (d_cad or 0) < 0 else 'maior'}: {cad} cadastros "
          f"({br(d_cad, 0)}%) com {br(d_gasto, 0)}% de verba.")
     r = _ritmo_carrinho(at, prev) if not at["maduro"] else None
@@ -267,41 +275,22 @@ def main() -> int:
         vals = [r[k] for r in rows if r[k] is not None]
         return sum(vals) / len(vals) if vals else None
 
-    prov = not at["maduro"]
-
-    def linha(rot, r, provisorio=False):
-        tag = " <i>(provisório)</i>" if provisorio else ""
-        # o replace do milhar fica NUM fragmento só: f-strings adjacentes
-        # concatenam antes do .replace e ele comia a vírgula do rótulo
-        cad = f"{r['cadastros']:,}".replace(",", ".")
-        return (f"<tr><td><b>{rot}</b>{tag}</td>"
-                f"<td>{br(r['gasto'], 0, 'R$ ')}</td>"
-                f"<td>{cad}</td>"
-                f"<td>{br(r['cpl'])}</td>"
-                f"<td>{br(r.get('teto15'))}</td>"
-                f"<td>{br(r['pct_gasto_dentro'], 1)}%</td>"
-                f"<td>{br(r['roas'])}</td>"
-                f"<td class='{'pos' if (r['lucro'] or 0) > 0 else 'neg'}'>{br(r['lucro'], 0, 'R$ ')}</td></tr>")
-
-    media = {k: med(serie_sem, k) for k in
-             ("gasto", "cadastros", "cpl", "teto15", "pct_gasto_dentro", "roas",
-           "lucro", "conc1", "conc3", "d910")}
-    media["cadastros"] = int(media["cadastros"] or 0)
-    t3 = {k: med(top3, k) for k in
-          ("gasto", "cadastros", "cpl", "teto15", "pct_gasto_dentro", "roas",
-           "lucro", "conc1", "conc3", "d910")}
-    t3["cadastros"] = int(t3["cadastros"] or 0)
-
-    head = ("<tr><th></th><th>Gasto</th><th>Cadastros</th><th>CPL</th>"
-            "<th>Teto 1,5 médio</th>"
-            "<th>% gasto dentro do teto 1,5</th><th>ROAS</th><th>Lucro</th></tr>")
-    rows = [linha(f"{alvo} (este)", at, prov)]
-    if prev:
-        rows.append(linha(f"{prev['lf']} (anterior)", prev, not prev["maduro"]))
-    rows.append(linha("Média LF56→LF63 (sem o DEV21, quente)", media))
-    rows.append(linha("Top 3 ROAS (" + ", ".join(r["lf"] for r in top3) + ")", t3))
-    tab1 = (f"<div class='tw'><table class='tb'><thead>{head}</thead>"
-            f"<tbody>{''.join(rows)}</tbody></table></div>")
+    # 1ª tabela REMOVIDA (pedido do Ramon, 01/09): o que ela tinha de útil é a
+    # comparação de % do gasto dentro do teto 1,5 e de CPL — e isso cabe em
+    # texto simples, contra o anterior e contra os 5 melhores ROAS da série.
+    top5 = sorted([r for r in serie if r["lf"] != "DEV21"],
+                  key=lambda r: -(r["roas"] or 0))[:5]
+    t5 = {k: med(top5, k) for k in ("pct_gasto_dentro", "cpl")}
+    nomes5 = ", ".join(r["lf"] for r in top5)
+    tab1 = ("<p class='h2sub'><b>No que já fecha na captação:</b> "
+            f"{br(at['pct_gasto_dentro'], 1)}% do gasto julgável ficou dentro do "
+            "teto 1,5 neste lançamento"
+            + (f", contra {br(prev['pct_gasto_dentro'], 1)}% no {prev['lf']}"
+               if prev else "")
+            + f" e {br(t5['pct_gasto_dentro'], 1)}% na média dos 5 melhores ROAS "
+            f"da série ({nomes5}). CPL por cadastro: {br(at['cpl'])}"
+            + (f" contra {br(prev['cpl'])}" if prev else "")
+            + f" e {br(t5['cpl'])} nos 5 melhores.</p>")
 
     # ── o que mudou: concentração de verba por criativo + qualidade do público ─
     def linha_mud(rot, r):

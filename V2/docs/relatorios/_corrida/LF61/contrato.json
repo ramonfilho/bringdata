@@ -4,7 +4,7 @@
   "lf": "LF61",
   "client_id": "devclub",
   "as_of": "2026-09-01",
-  "gerado_em": "2026-09-01 10:13:32.187527-03:00",
+  "gerado_em": "2026-09-01 11:39:33.956119-03:00",
   "cap_start": "2026-06-29",
   "cap_end": "2026-07-05",
   "vendas_start": "2026-07-13",
@@ -12,7 +12,7 @@
   "estado": "venda_fechada_imatura",
   "tem_venda": true,
   "window_days": 60,
-  "sales_max": "2026-08-31",
+  "sales_max": "2026-09-01",
   "referencia_id": "2026-08-31T06:34",
   "ruler_run_id": "5d158f0aa6e54b489498470446194a6c",
   "referencia_snapshot": {
@@ -609,11 +609,11 @@
    "gasto": 2658.5509999999995,
    "leads": 481,
    "vendas": 2,
-   "faturamento": 3160.925,
-   "roas_ponderado": 1.1889653423989237,
-   "lucro": 502.3740000000005,
+   "faturamento": 1947.74,
+   "roas_ponderado": 0.7326321744438984,
+   "lucro": -710.8109999999997,
    "bateu_meta": 0,
-   "lucro_acima_1000": 1,
+   "lucro_acima_1000": 0,
    "roas_positivo": 1
   },
   "acima": {
@@ -629,7 +629,7 @@
    "roas_positivo": 2
   },
   "fisher_p": 0.7672392631080938,
-  "mannwhitney_p": 1.0
+  "mannwhitney_p": 0.6385920776850198
  },
  "separacao_temperatura": [
   {
@@ -707,9 +707,9 @@
     "vendas": 3,
     "vendas_cartao": 1,
     "vendas_boleto": 2,
-    "faturamento": 4227.125,
-    "roas": 1.6192758071,
-    "lucro": 1616.6216,
+    "faturamento": 3013.94,
+    "roas": 1.1545436026,
+    "lucro": 403.4366,
     "gasto": 2610.5034,
     "cid": "120244621534140390",
     "campanha": "DEVLF | CAP | FRIO | FASE 04 | ADV | LEAD | PG1 | 2026-05-25",
@@ -789,10 +789,10 @@
     "leads": 0,
     "cpl": null,
     "conversao": null,
-    "vendas": 16,
+    "vendas": 18,
     "vendas_cartao": 8,
-    "vendas_boleto": 8,
-    "faturamento": 21553.64,
+    "vendas_boleto": 10,
+    "faturamento": 22876.575,
     "roas": null,
     "lucro": null,
     "gasto": null,
@@ -1158,9 +1158,9 @@
     "compradores_hist": 241,
     "esperados_hist": 181.975,
     "vendas": 2.0,
-    "faturamento": 3160.925,
-    "roas": 1.732769281,
-    "lucro": 1336.7208,
+    "faturamento": 1947.74,
+    "roas": 1.0677203791,
+    "lucro": 123.5358,
     "conversao": 0.0055710306,
     "no_corte": true
    },
@@ -1611,8 +1611,8 @@
     "lift_criativo": 1.3243577414,
     "n_hist": 24585,
     "vendas": 2.0,
-    "faturamento": 3160.925,
-    "lucro": 502.374,
+    "faturamento": 1947.74,
+    "lucro": -710.811,
     "cpl": 4.7559051878,
     "conversao": 0.0035778175
    },

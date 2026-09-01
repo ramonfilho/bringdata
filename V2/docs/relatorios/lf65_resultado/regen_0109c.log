@@ -1,0 +1,36 @@
+
+LF65  cap 2026-08-18→2026-08-24  vendas 2026-08-31→2026-09-06  estado=venda_aberta
+referência 2026-08-31T06:34  fator 1.2000 (tracking)  crédito 0.4329  régua 5d158f0a
+cadastros 6,656  unidades 88  campanhas 21
+gasto Meta R$ 48,582.30  casado por unidade R$ 47,739.08  (98.3%)
+sem criativo 109  macro quebrada 61  ids não resolvidos 0
+
+⚠ PRODUTOS FORA DA RÉGUA (vendidos na janela, sem padrão no yaml):
+   DevClub Vitalício  [tmb]  n=1  R$ 1,100.00
+   Multa 10% quebra contrato.  [boletex]  n=1  R$ 197.49
+   None  [asaas]  n=2  R$ 416.49
+   Parcela 1 de 12.  [boletex]  n=3  R$ 8,576.00
+   → decidir com o dono se entram, antes de publicar faturamento.
+
+teto (MEDIDO): 13 unidades julgáveis (cortes ≥100 leads e ≥R$ 300) — dentro 2 (R$ 2,945.57) · acima 11 (R$ 32,948.57)
+  dentro: vendas 1  ROAS 0.41  lucro R$ -1,723.57  | bateu meta 0  lucro>1000 0  positivo 0
+   acima: vendas 23  ROAS 1.08  lucro R$ 2,564.40  | bateu meta 1  lucro>1000 3  positivo 4
+  Fisher p=0.2392  Mann-Whitney p=0.835526127055433
+
+separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
+  frio                   leads   4,326  topo 1.19%  base 0.54%  lift 2.19x
+  Google                 leads   1,078  topo 2.14%  base 0.53%  lift 4.02x
+  orgânico / sem rastro  leads      94  topo 2.33%  base 0.00%  lift —
+  Meta, sem público no nome leads      89  topo 0.00%  base 0.00%  lift —
+  frio                   leads   4,326  topo 0.98%  base 0.64%  lift 1.53x
+  Google                 leads   1,078  topo 1.02%  base 1.02%  lift 1.00x
+  orgânico / sem rastro  leads      94  topo 3.23%  base 0.00%  lift —
+  Meta, sem público no nome leads      89  topo 0.00%  base 0.00%  lift —
+lucro por decil: top30 Champion R$ 18,867 (1438 leads)
+
+contrato congelado em docs/relatorios/lf65_resultado/contrato.json  (128,850 bytes)
+ações geradas: docs/relatorios/lf65_resultado/conclusao.html (molde acoes_template.html)
+comparativo: /Users/ramonmoreira/Desktop/bring_data/V2/docs/relatorios/lf65_resultado/comparativo.html  (2,735 bytes)
+xlsx:   docs/relatorios/lf65_resultado/criativos_por_tipo_lf65.xlsx  (42 linhas, completo, formatado)
+painel: docs/relatorios/lf65_resultado/painel_lf65.html  (44,683 bytes)
+✓ painel do LF65 em docs/relatorios/lf65_resultado

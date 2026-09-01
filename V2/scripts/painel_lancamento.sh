@@ -33,6 +33,11 @@ export LAUNCHES_SOURCE=table
 
 OUT="docs/relatorios/$(echo "$LF" | tr '[:upper:]' '[:lower:]')_resultado"
 python3 scripts/relatorio_lancamento.py --lf "$LF" --out "$OUT" "$@"
+# Ações = molde com buracos (C1, 01/09): se a pasta tem acoes_template.html,
+# os números do texto autoral saem do CONTRATO desta emissão (fail-loud).
+if [ -f "$OUT/acoes_template.html" ]; then
+  python3 scripts/gera_acoes.py "$OUT"
+fi
 python3 scripts/comparativo_lancamentos.py "$LF" || echo "⚠ comparativo falhou — painel sai sem a seção"
 python3 scripts/render_painel_lancamento.py "$OUT"
 echo "✓ painel do $LF em $OUT"
