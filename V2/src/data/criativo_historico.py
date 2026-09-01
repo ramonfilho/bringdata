@@ -38,6 +38,9 @@ _PREFIXO_GOOGLE = re.compile(r"^\[G\]\s*", re.IGNORECASE)
 _ESPACOS = re.compile(r"\s+")
 
 
+_SUFIXO_COPIA = re.compile(r"(\s*[—–-]\s*c[oó]pia(\s*\d+)?\s*)+$")
+
+
 def chave_canonica(criativo) -> str:
     """A grafia única de um criativo, pra somar a evidência dele numa gaveta só.
 
@@ -55,13 +58,22 @@ def chave_canonica(criativo) -> str:
        porque a busca ACHA uma das gavetas e devolve metade da evidência sem erro
        nenhum — o peso `n/(n+2000)` cai e o teto afrouxa em silêncio.
     3. **Caixa e espaço**. Mesma família dos dois acima, custo zero.
+    4. **Sufixo "— cópia"** (medido em 01/09/2026). O gerenciador batiza a
+       duplicata de um anúncio com "— cópia" (às vezes "— cópia 2"), e cópia É
+       o mesmo anúncio por convenção do projeto (Ramon, 18/08). Sem esta regra
+       a cópia abria gaveta própria com histórico ZERO: o ad0128 rodou no LF65
+       como "— cópia" com 111 leads lendo 0 de um histórico de 1.267; o ad0156
+       vivia partido em 5.929 + 3.348 leads; ad0140, ad0141 e ad0043 idem. O
+       peso do histórico caía a 0 e o teto saía desinformado — na tabela do
+       lançamento E na planilha da agência (mesma função nas duas pontas).
 
     Aplicada só na LEITURA (`le_historico`), igual ao estrangulamento de id→nome
     que já existia: o refresh semanal segue gravando por chave crua e a tabela não
     muda de forma.
     """
     s = _PREFIXO_GOOGLE.sub("", str(criativo or "").strip())
-    return _ESPACOS.sub(" ", unicodedata.normalize("NFC", s)).casefold()
+    s = _ESPACOS.sub(" ", unicodedata.normalize("NFC", s)).casefold()
+    return _SUFIXO_COPIA.sub("", s).strip()
 
 
 def tem_carimbo_google(chave) -> bool:

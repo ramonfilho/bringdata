@@ -100,3 +100,16 @@ def test_chave_canonica_tira_carimbo_acento_caixa_e_espaco():
     assert chave_canonica(NFC) == chave_canonica(NFD)
     assert chave_canonica("  DEV  AD0140 ") == chave_canonica("dev ad0140")
     assert chave_canonica(None) == ""
+
+
+# ───────────────────── regra 4: sufixo "— cópia" (01/09/2026) ────────────────
+def test_chave_canonica_remove_sufixo_copia():
+    from src.data.criativo_historico import chave_canonica as k
+    base = k("DEV-AD0156 - vid - captação")
+    assert k("DEV-AD0156 - vid - captação — cópia") == base
+    assert k("DEV-AD0156 - vid - captação — cópia 2") == base
+    assert k("DEV-AD0156 - vid - captação - cópia") == base
+    # NFD no próprio sufixo (o "ó" como o + acento combinante) também cai
+    assert k("DEV-AD0156 - vid - captação — cópia") == base
+    # "cópia" no MEIO do nome não é sufixo — fica
+    assert "cópia" in k("dev-ad0001-vid-cópia-de-seguranca-v0")
