@@ -261,8 +261,12 @@ def main() -> int:
 
     j = r["julgamento"]
     modo = "PREVISÃO (sem venda ingerida)" if not meta["tem_venda"] else "MEDIDO"
+    # A régua é só o gasto desde 31/08/2026; o piso de leads virou 0. Imprimir
+    # "≥0 leads" seria ruído, então só sai quando alguém reativar o piso.
+    _corte = (f"≥{meta['corte_leads']} leads e ≥R$ {meta['corte_gasto']:.0f}"
+              if meta.get("corte_leads") else f"≥R$ {meta['corte_gasto']:.0f} de gasto")
     print(f"\nteto ({modo}): {j['julgaveis']} unidades julgáveis "
-          f"(cortes ≥{meta['corte_leads']} leads e ≥R$ {meta['corte_gasto']:.0f}) — "
+          f"(corte {_corte}) — "
           f"dentro {j['dentro']['n']} (R$ {j['dentro']['gasto']:,.2f}) · "
           f"acima {j['acima']['n']} (R$ {j['acima']['gasto']:,.2f})")
     if meta["tem_venda"]:
