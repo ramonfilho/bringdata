@@ -9,8 +9,10 @@ ESTADO: NO AR desde 12/08/2026. Job `push-scores-zanelato`, cron de hora em hora
     N=50 e 10,0pp em N=100. Abaixo de 100 o ruído é maior que a diferença entre criativos e a
     coluna de delta vira decorativa. Vale para as linhas por criativo e por campanha.
   - EXCEÇÃO, desde 01/09/2026: a linha do PRODUTO (criativo × campanha) sai também com
-    GASTO >= R$ 300 mesmo abaixo dos 100 leads: a régua do julgamento interno desde o
-    PR #256. É união com o piso de N, então nenhuma linha que o gestor já via sumiu.
+    GASTO >= R$ 300 e pelo menos 20 leads, mesmo abaixo dos 100: a régua do julgamento
+    interno desde o PR #256, com piso de privacidade próprio (ver MÍNIMO DE LEADS, no
+    fim deste texto). É união com o piso de N, então nenhuma linha que o gestor já via
+    sumiu.
     O porquê medido está em `_publica_unidade`. Essas linhas saem com `·piso_gasto` no
     selo, porque a %D9-D10 delas é de amostra pequena. O teto aguenta, a % crua não.
   - `LEDGER_DECIL_READ_SOURCE=ledger` é OBRIGATÓRIO no ambiente onde ele roda. Sem isso a
@@ -97,6 +99,13 @@ O piso vem do `min_n` da função e não é enfeite estatístico: abaixo dele o 
 score individual disfarçado. A função já separa em `rows` (mostrados) e `hidden_below_min_n`,
 e este script manda só os primeiros — e REPORTA quantos ficaram de fora, porque corte
 silencioso lido como "só existem estes criativos" é pior que corte nenhum.
+
+A linha do produto que entra pela porta do GASTO tem piso próprio para a mesma regra:
+`PISO_PRIVACIDADE_UNIDADE` = 20 leads. Sem ele a porta publicaria agregado de 3 pessoas
+(medido em 01/09/2026: uma dupla com 3 leads e R$ 600 gastos passava), e com N=3 a
+%D9-D10 só assume 0%, 33%, 67% ou 100%, cada valor dizendo o decil de um lead com outro
+nome. Não é acaso: a porta seleciona CPL alto, e CPL alto é pouco lead pelo mesmo
+dinheiro, então o buraco anda junto com o que a porta existe para pegar.
 
 Uso:
   python scripts/push_scores_zanelato.py --check   # calcula e mostra, não escreve
@@ -575,13 +584,30 @@ def _mapa_campanha_google(conn) -> dict:
 # julgamento interno (`constroi_lancamento`, PR #256), pelo mesmo motivo medido.
 PISO_GASTO_UNIDADE = 300.0
 
+# PISO DE PRIVACIDADE da porta do gasto. Não é estatístico: é a regra inegociável
+# do topo deste arquivo (decil POR LEAD não sai daqui) aplicada à porta nova.
+#
+# Sem ele a porta do gasto publica agregado de 3 pessoas: medido em 01/09/2026 na
+# janela de 90 dias, uma dupla com 3 leads e R$ 600 gastos (CPL R$ 200) passava.
+# Com N=3 a %D9-D10 só assume 0%, 33%, 67% ou 100%, e cada valor diz o decil de
+# um lead específico com outro nome. E não é acaso: a porta do gasto seleciona
+# CPL alto, e CPL alto é justamente pouco lead para o mesmo dinheiro. O buraco é
+# correlacionado com o que a porta existe para pegar.
+#
+# POR QUE 20: preserva a medição e fecha o buraco. Das 78 duplas que sustentaram
+# a decisão (>= R$ 300 e < 100 leads em LF56..LF65 + DEV21), 71 têm N >= 20, o
+# que mantém R$ 51.477 dos R$ 54.062 medidos (95,2%). E com 20 leads nenhum lead
+# sozinho move a porcentagem publicada mais que 5 pontos.
+PISO_PRIVACIDADE_UNIDADE = 20
+
 
 def _publica_unidade(n, min_n, ger, criativo, campanha, teto_ok=True) -> bool:
     """A dupla criativo×campanha merece linha no painel do gestor?
 
-    Sai True por UMA de duas portas: gasto >= R$ 300 no gerenciador (a régua
-    nova) OU o piso de N de sempre. É união, não troca: a régua nova só
-    ACRESCENTA linha, nunca tira do gestor uma que ele já consultava.
+    Sai True por UMA de duas portas: gasto >= R$ 300 no gerenciador E pelo menos
+    `PISO_PRIVACIDADE_UNIDADE` leads (a régua nova) OU o piso de N de sempre. É
+    união, não troca: a régua nova só ACRESCENTA linha, nunca tira do gestor uma
+    que ele já consultava.
 
     POR QUE O GASTO (medido em 11 lançamentos fechados, LF56..LF65 + DEV21):
     entre as duplas com >= R$ 300 gastos e MENOS de 100 leads (as que o piso
@@ -616,6 +642,9 @@ def _publica_unidade(n, min_n, ger, criativo, campanha, teto_ok=True) -> bool:
     # linha sem teto calculável seria só uma %D9-D10 de amostra pequena, que é
     # exatamente o que o piso de N protege. Sem teto, não entra.
     if not teto_ok:
+        return False
+    # E agregado de meia dúzia de pessoas é decil individual com outro nome.
+    if n < PISO_PRIVACIDADE_UNIDADE:
         return False
     if "|" not in str(campanha):
         return False                      # Google/campanha sem id: sem gasto Meta
