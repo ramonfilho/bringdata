@@ -12,10 +12,10 @@ sem criativo 104  macro quebrada 95  ids não resolvidos 0
    None  [asaas]  n=50  R$ 11,178.08
    → decidir com o dono se entram, antes de publicar faturamento.
 
-teto (MEDIDO): 8 unidades julgáveis (cortes ≥100 leads e ≥R$ 300) — dentro 1 (R$ 689.91) · acima 7 (R$ 64,603.73)
+teto (MEDIDO): 12 unidades julgáveis (corte ≥R$ 300 de gasto) — dentro 1 (R$ 689.91) · acima 11 (R$ 67,777.15)
   dentro: vendas 0  ROAS 0.00  lucro R$ -689.91  | bateu meta 0  lucro>1000 0  positivo 0
-   acima: vendas 30  ROAS 0.71  lucro R$ -18,468.18  | bateu meta 1  lucro>1000 2  positivo 2
-  Fisher p=1.0000  Mann-Whitney p=0.48549880264428236
+   acima: vendas 31  ROAS 0.70  lucro R$ -20,575.40  | bateu meta 1  lucro>1000 2  positivo 3
+  Fisher p=1.0000  Mann-Whitney p=0.5182416111597716
 
 separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
   frio                   leads   7,017  topo 1.00%  base 0.51%  lift 1.96x
@@ -23,4 +23,4 @@ separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
   Meta, sem público no nome leads     112  topo 0.00%  base 1.96%  lift 0.00x
   orgânico / sem rastro  leads     109  topo 9.68%  base 2.13%  lift 4.55x
 
-contrato congelado em docs/relatorios/_corrida/LF58/contrato.json  (54,284 bytes)
+contrato congelado em docs/relatorios/_corrida/LF58/contrato.json  (54,289 bytes)

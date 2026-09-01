@@ -1,0 +1,44 @@
+Traceback (most recent call last):
+  File "/Users/ramonmoreira/.pyenv/versions/3.11.6/lib/python3.11/site-packages/pg8000/core.py", line 154, in _read
+    block = sock.read(size - got)
+            ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ramonmoreira/.pyenv/versions/3.11.6/lib/python3.11/socket.py", line 706, in readinto
+    return self._sock.recv_into(b)
+           ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ramonmoreira/.pyenv/versions/3.11.6/lib/python3.11/ssl.py", line 1311, in recv_into
+    return self.read(nbytes, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ramonmoreira/.pyenv/versions/3.11.6/lib/python3.11/ssl.py", line 1167, in read
+    return self._sslobj.read(len, buffer)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TimeoutError: The read operation timed out
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/Users/ramonmoreira/Desktop/bring_data/V2/scripts/relatorio_lancamento.py", line 341, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/Users/ramonmoreira/Desktop/bring_data/V2/scripts/relatorio_lancamento.py", line 236, in main
+    r = constroi_lancamento(args.lf, as_of=as_of)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ramonmoreira/Desktop/bring_data/V2/src/validation/lancamento_unidades.py", line 704, in constroi_lancamento
+    _, por_unidade, _ = tetos_completos(
+                        ^^^^^^^^^^^^^^^^
+  File "/Users/ramonmoreira/Desktop/bring_data/V2/src/monitoring/teto_por_chave.py", line 205, in tetos_completos
+    finas = unidades_finas(ledger_conn, run_id=run_id,
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ramonmoreira/Desktop/bring_data/V2/src/monitoring/teto_por_chave.py", line 69, in unidades_finas
+    for camp, cria, conj, decil, n in ledger_conn.run(
+                                      ^^^^^^^^^^^^^^^^
+  File "/Users/ramonmoreira/.pyenv/versions/3.11.6/lib/python3.11/site-packages/pg8000/native.py", line 218, in run
+    self._context = self.execute_unnamed(
+                    ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ramonmoreira/.pyenv/versions/3.11.6/lib/python3.11/site-packages/pg8000/core.py", line 707, in execute_unnamed
+    self.handle_messages(context)
+  File "/Users/ramonmoreira/.pyenv/versions/3.11.6/lib/python3.11/site-packages/pg8000/core.py", line 822, in handle_messages
+    code, data_len = ci_unpack(_read(self._sock, 5))
+                               ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/ramonmoreira/.pyenv/versions/3.11.6/lib/python3.11/site-packages/pg8000/core.py", line 160, in _read
+    raise InterfaceError("network error") from e
+pg8000.exceptions.InterfaceError: network error

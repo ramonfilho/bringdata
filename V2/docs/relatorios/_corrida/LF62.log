@@ -14,7 +14,7 @@ sem criativo 81  macro quebrada 113  ids não resolvidos 0
    ★ Club Hub - Oficial  [guru]  n=1  R$ 497.00
    → decidir com o dono se entram, antes de publicar faturamento.
 
-teto (MEDIDO): 6 unidades julgáveis (cortes ≥100 leads e ≥R$ 300) — dentro 2 (R$ 2,242.11) · acima 4 (R$ 52,572.43)
+teto (MEDIDO): 6 unidades julgáveis (corte ≥R$ 300 de gasto) — dentro 2 (R$ 2,242.11) · acima 4 (R$ 52,572.43)
   dentro: vendas 6  ROAS 4.11  lucro R$ 6,981.49  | bateu meta 2  lucro>1000 2  positivo 2
    acima: vendas 41  ROAS 1.15  lucro R$ 8,059.76  | bateu meta 1  lucro>1000 3  positivo 3
   Fisher p=0.0613  Mann-Whitney p=0.13333333333333333
@@ -25,4 +25,4 @@ separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
   Meta, sem público no nome leads     121  topo 3.17%  base 3.45%  lift 0.92x
   orgânico / sem rastro  leads      91  topo 12.00%  base 2.44%  lift 4.92x
 
-contrato congelado em docs/relatorios/_corrida/LF62/contrato.json  (43,953 bytes)
+contrato congelado em docs/relatorios/_corrida/LF62/contrato.json  (43,955 bytes)

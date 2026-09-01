@@ -34,9 +34,20 @@ Fila viva, irmã do NOTAS_RAMON_3108.md. Não apagar item; marcar resolvido.
   comprador que já tem a Parcela exata na janela é descartada (mesmo contrato).
   OBSERVAÇÃO pra decisão futura: existem "Parcela 1 de 9/11" avulsas pequenas
   (ex.: R$ 191) que NÃO entraram — só o "Parcela 1 de 12." decidido.
-- [ ] B2. **Corte do julgável:** aguarda o backtest (C7). Material guardado na
-  seção D pra virar orientação no relatório junto com a conclusão.
-- [ ] B3. Folga da tabela "o que mudou": decidir a base depois do B2.
+- [x] B2. DECIDIDO E EXECUTADO (01/09, PR #256, feito pelo Ramon com a OUTRA
+  sessão): a régua do julgamento virou **só gasto ≥ R$ 300** (corte_leads 100→0).
+  Medição do PR: dentro 1,47→1,49 e fora 0,83→0,82 de ROAS com R$ 54k a mais
+  julgados (48,7k caem do lado FORA, como esperado). Confere com o backtest da
+  seção F. O piso de 100 leads segue onde existe por OUTRO motivo (comparação
+  %D9-D10 na planilha da agência). A seção do painel virou narrativa da
+  transição: o que a régua nova recuperou, dupla a dupla, com prejuízo.
+- [x] B3. DECIDIDO (01/09, Ramon): **folga do PAR**, sem mix com teto de campanha
+  (o backtest reprovou o teto de campanha: 70,1% contra 73,9% do par). Na tabela
+  "o que mudou" a folga sai em DUAS colunas na transição: régua nova (R$ 300) e
+  régua antiga (100 leads + R$ 300). **A coluna antiga sai depois do LF67**, que
+  já está rodando com a régua nova desde 01/09. Implementado em
+  `scripts/comparativo_lancamentos.py` (`teto15_velho`).
+
 - [~] B4. SEPARADO (01/09): farol é interpretação/frente própria, fora desta fila. Farol verde/amarelo/vermelho automático na planilha da agência (o
   teto por criativo já vai; falta a cor calculada). Ofertado em 01/09.
 - [x] B5. EXECUTADO (01/09, PR #255): **gateway Asaas inteiro na régua**
@@ -73,10 +84,16 @@ Fila viva, irmã do NOTAS_RAMON_3108.md. Não apagar item; marcar resolvido.
 - [x] C4. FEITO (01/09): o item 3 do comparativo agora diz "faturamento BRUTO
   de gateway (régua de produto; por isso maior que o atribuído do painel)" nos
   dois ramos do veredito.
-- [ ] C5. **ad0128 com histórico partido em dois nomes** (um com 1.267 leads,
-  outro com 0): medir se o teto em produção sai errado por isso, listar TODOS
-  os criativos partidos, e corrigir apontando os nomes pro mesmo criativo no
-  mapa de nomes (precedente: NFC/NFD inflou 5 tetos, PR #237).
+- [x] C5. RESOLVIDO (01/09, PR #257). O "gêmeo com 0" do ad0128 é o sufixo
+  **"— cópia"** do gerenciador: a duplicata abria gaveta própria com histórico
+  ZERO (no LF65, 111 leads lendo 0 de um histórico de 1.267 → teto desinformado
+  6,43). Conserto = 4ª regra da `chave_canonica` (remove o sufixo "— cópia"),
+  valendo pro painel E pra planilha da agência (mesma função). Também fundiu
+  ad0156 (5.929+3.348 leads), ad0140 (+1.042), ad0141 (+260) e ad0043 (+640).
+  SOBRA pra decisão do Ramon: nomes TRUNCADOS tipo "dev-ad0106-vid-captação-v-"
+  (7 casos, 75-179 leads cada) e famílias com grafia dupla tipo
+  "estãopagando"/"estão pagando" no ad0150 — fundir exige mapa de apelidos
+  nome→nome (mecanismo novo), não dá pra deduzir com segurança só da grafia.
 - [x] C6. DECIDIDO E FEITO (01/09): `lucro por decil` virou bloco do contrato
   (gerador) + seção do painel (render): Champion decil a decil + resumo
   top30/resto/fundo dos DOIS modelos. Custo = CPL por lead do ledger da dupla
@@ -167,3 +184,18 @@ não julga", já no painel), não gatilho automático. Ressalva de sempre: o bal
 - LF65: 13 julgáveis antes e depois, dentro 2 / acima 11 idênticos, **0 flips**
   no teto 1,5. Ações re-citadas na base nova (AD0160 10,11 vs 11,70 segue
   VERDE; ad0154 13,77 vs 12,60 e 8,08 vs 4,80 seguem corte; ad0170 idem).
+
+## G. Rodada de ajustes do painel (01/09, tarde)
+
+- [x] G1. Separação: linhas sem lift (orgânico, Meta sem nome) saíram da tabela.
+- [x] G2. Separação da SÉRIE no corte top 30 (8-10), o que vai pra Meta:
+  abr_28 2,58x contra jul_24 2,78x em 11.167 leads de Meta frio (LF64+LF65).
+  É a medição que sustenta manter os dois modelos no ar; um LF sozinho não decide.
+- [x] G3. Lucro por decil: "fundo" virou **Bottom 50** e a descrição passou a
+  trazer a fórmula por extenso (lucro = faturamento − custo; ROAS = faturamento
+  ÷ custo) com exemplo real preenchido do próprio contrato.
+- [x] G4. "O dinheiro que o corte não julgava": a tabela dupla a dupla SAIU
+  (o prejuízo somado da fatia é R$ 411 líquido, R$ 5.702 nas que perderam,
+  não justifica tabela). Fica a frase + a linha do backtest.
+- [x] G5. Confirmado: o "44,3% do gasto julgável dentro do teto 1,5" já sai da
+  régua nova (o contrato traz `corte_leads=0`), não do corte antigo.

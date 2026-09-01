@@ -18,7 +18,7 @@ sem criativo 143  macro quebrada 111  ids não resolvidos 0
    Quitação contrato.  [boletex]  n=1  R$ 1,386.00
    → decidir com o dono se entram, antes de publicar faturamento.
 
-teto (MEDIDO): 7 unidades julgáveis (cortes ≥100 leads e ≥R$ 300) — dentro 2 (R$ 2,650.79) · acima 5 (R$ 46,675.87)
+teto (MEDIDO): 7 unidades julgáveis (corte ≥R$ 300 de gasto) — dentro 2 (R$ 2,650.79) · acima 5 (R$ 46,675.87)
   dentro: vendas 1  ROAS 0.36  lucro R$ -1,684.29  | bateu meta 0  lucro>1000 0  positivo 0
    acima: vendas 3  ROAS 0.09  lucro R$ -42,528.47  | bateu meta 0  lucro>1000 0  positivo 0
   Fisher p=0.3071  Mann-Whitney p=0.6691408878405654
@@ -29,4 +29,4 @@ separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
   orgânico / sem rastro  leads     146  topo 4.17%  base 8.00%  lift 0.52x
   Meta, sem público no nome leads     119  topo 1.45%  base 2.00%  lift 0.72x
 
-contrato congelado em docs/relatorios/_corrida/LF63/contrato.json  (64,300 bytes)
+contrato congelado em docs/relatorios/_corrida/LF63/contrato.json  (64,299 bytes)

@@ -14,9 +14,9 @@ sem criativo 83  macro quebrada 53  ids não resolvidos 1
    [COMBO] DevClub + Plano Dev + ClubHub (1 ano de acesso)  [guru]  n=1  R$ 497.00
    → decidir com o dono se entram, antes de publicar faturamento.
 
-teto (MEDIDO): 10 unidades julgáveis (cortes ≥100 leads e ≥R$ 300) — dentro 0 (R$ 0.00) · acima 10 (R$ 45,554.59)
+teto (MEDIDO): 19 unidades julgáveis (corte ≥R$ 300 de gasto) — dentro 0 (R$ 0.00) · acima 19 (R$ 53,563.83)
   dentro: vendas None  ROAS —  lucro R$ —  | bateu meta None  lucro>1000 None  positivo None
-   acima: vendas 37  ROAS 1.29  lucro R$ 13,360.78  | bateu meta 2  lucro>1000 3  positivo 4
+   acima: vendas 43  ROAS 1.27  lucro R$ 14,541.14  | bateu meta 4  lucro>1000 5  positivo 6
 
 separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
   frio                   leads   4,670  topo 1.26%  base 0.65%  lift 1.94x
@@ -24,4 +24,4 @@ separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
   Meta, sem público no nome leads      99  topo 0.00%  base 0.00%  lift —
   orgânico / sem rastro  leads      84  topo 6.12%  base 2.86%  lift 2.14x
 
-contrato congelado em docs/relatorios/_corrida/LF57/contrato.json  (89,498 bytes)
+contrato congelado em docs/relatorios/_corrida/LF57/contrato.json  (89,495 bytes)

@@ -88,6 +88,12 @@ def metricas(lf):
     top_cria = sorted(por_cria.values(), reverse=True)
     lw = sum(int(x.get("leads_ledger") or 0) for x in um)
     lj = sum(int(x.get("leads_ledger") or 0) for x in uj)
+    # régua ANTIGA (100 leads + R$ 300), para a coluna de transição da folga:
+    # decisão do Ramon (01/09) — as duas lado a lado até o LF67, depois só a nova.
+    uj_v = [x for x in c["tabelas"]["unidades"]
+            if int(x.get("leads_ledger") or 0) >= 100 and (x.get("gasto") or 0) >= 300
+            and x.get("teto") is not None and x.get("cpl") is not None]
+    lj_v = sum(int(x.get("leads_ledger") or 0) for x in uj_v)
     # provisório = ainda vai crescer: carrinho aberto, ou a ingestão de vendas
     # (sales_max) ainda não passou do fim do carrinho. 'venda_fechada_imatura'
     # com vendas ingeridas até o fim do carrinho JÁ é final para o NEGÓCIO
@@ -110,6 +116,8 @@ def metricas(lf):
                    for x in um) / lw) if lw else None),
         teto15=((sum(x["teto"] * (2.0 / 1.5) * int(x.get("leads_ledger") or 0)
                      for x in uj) / lj) if lj else None),
+        teto15_velho=((sum(x["teto"] * (2.0 / 1.5) * int(x.get("leads_ledger") or 0)
+                           for x in uj_v) / lj_v) if lj_v else None),
         maduro=(carrinho_fechado and vendas_cobertas),
         vendas_start=m["vendas_start"][:10], vendas_end=m["vendas_end"][:10],
         sales_max=str(m.get("sales_max"))[:10],
@@ -294,26 +302,35 @@ def main() -> int:
 
     # ── o que mudou: concentração de verba por criativo + qualidade do público ─
     def linha_mud(rot, r):
-        folga = ((r.get("teto15") - r.get("cpl"))
-                 if (r.get("teto15") is not None and r.get("cpl") is not None)
-                 else None)
+        def _folga(chave):
+            t = r.get(chave)
+            return ((t - r["cpl"]) if (t is not None and r.get("cpl") is not None)
+                    else None)
+        folga, folga_v = _folga("teto15"), _folga("teto15_velho")
         nome1 = f" ({r['cria1'][:22]})" if r.get("cria1") else ""
         return (f"<tr><td><b>{rot}</b></td>"
                 f"<td>{br(r.get('conc1'), 1)}%{nome1}</td>"
                 f"<td>{br(r.get('conc3'), 1)}%</td>"
                 f"<td>{br(r.get('d910'), 1)}%</td>"
                 f"<td>{br(r.get('cpl'))}</td><td>{br(r.get('teto15'))}</td>"
-                f"<td class='{'pos' if (folga or 0) > 0 else 'neg'}'>{br(folga)}</td></tr>")
+                f"<td class='{'pos' if (folga or 0) > 0 else 'neg'}'>{br(folga)}</td>"
+                f"<td class='{'pos' if (folga_v or 0) > 0 else 'neg'}'>{br(folga_v)}</td></tr>")
 
-    chaves_m = ("conc1", "conc3", "d910", "cpl", "teto15")
+    chaves_m = ("conc1", "conc3", "d910", "cpl", "teto15", "teto15_velho")
     tab_mud = ("<p class='h2sub' style='margin-top:14px'><b>O que mudou neste "
                "lançamento:</b> as duas alavancas que abrem ou fecham a folga do "
                "teto: quanta verba concentrou no criativo certo, e a qualidade do "
-               "público comprado (% de leads nota 9-10, pesado por leads):</p>"
+               "público comprado (% de leads nota 9-10, pesado por leads). "
+               "<b>Folga = teto 1,5 médio − CPL</b>, sempre no teto do PAR "
+               "anúncio×campanha: quantos reais por cadastro ainda cabem antes de "
+               "o lançamento passar do teto. Duas colunas na transição: a régua "
+               "nova (julga toda dupla com R$ 300 de gasto) e a antiga (exigia "
+               "também 100 leads). A antiga sai depois do LF67.</p>"
                "<div class='tw'><table class='tb'><thead><tr><th></th>"
                "<th>% verba no criativo nº 1</th><th>% top 3 criativos</th>"
                "<th>% leads D9-D10</th><th>CPL</th><th>Teto 1,5 médio</th>"
-               "<th>Folga (teto − CPL)</th></tr></thead><tbody>"
+               "<th>Folga · régua R$ 300</th>"
+               "<th>Folga · régua 100 leads</th></tr></thead><tbody>"
                + linha_mud(f"{alvo} (este)", at)
                + (linha_mud(f"{prev['lf']} (anterior)", prev) if prev else "")
                + linha_mud("Média LF56→LF63 (sem o DEV21)", {k: med(serie_sem, k) for k in chaves_m})

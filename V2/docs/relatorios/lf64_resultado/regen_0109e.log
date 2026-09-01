@@ -1,0 +1,95 @@
+[launch_calendar_reader] 31 LFs lidos da tabela (client_id=devclub)
+ Buscando vendas Guru via API (2026-09-01 a 2026-09-01)
+ Total de transações buscadas: 0
+ Nenhuma venda retornada da API Guru
+  guru:    0 vendas
+ Carregando vendas Hotmart via API (2026-09-01 → 2026-09-01)
+   0 transações brutas obtidas da API Hotmart
+  hotmart: 0 vendas
+ Buscando pagamentos Asaas de 2026-09-01 a 2026-09-01 (por clientPaymentDate)...
+ Total de pagamentos pagos encontrados: 0
+ Nenhum pagamento Asaas encontrado no período.
+    Cache SAVED Asaas: asaas_2026-09-01_2026-09-01.parquet
+  asaas:   0 vendas
+ Buscando vendas Boletex via API (2026-09-01 → 2026-09-01)
+ Boletex: 0 vendas brutas (2026-09-01 → 2026-09-01)
+  boletex: 0 vendas
+ Buscando vendas TMB via API (2026-09-01 → 2026-09-01)
+[tmb_api] 2 pedidos Efetivados (2026-09-01→2026-09-01)
+    Cache SAVED TMB API: tmb_api_2026-09-01_2026-09-01.parquet
+  tmb:     2 vendas
+Total carregado: 2 vendas → upsert em analytics.sales
+[sales_store] {'attempted': 2, 'inserted': 0, 'skipped': 2, 'filtered': 0, 'intra_dup': 0, 'by_gateway': {'tmb': 2}}
+ETL concluído: 0 inseridas, 2 já existiam (de 2). Por gateway: {'tmb': 2}
+[launch_calendar_reader] 31 LFs lidos da tabela (client_id=devclub)
+[ledger_connection] leitura do ledger via fonte=cloudsql
+[criativo_historico] 806 criativos · 26 lançamentos fechados · 314752 leads · 2366 compradores
+[teto_por_chave] 143 unidades campanha×conjunto×criativo
+[teto_por_chave] tetos: 44 criativos · 35 campanhas · 143 unidades · 143 unidades-conjunto
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 8,606
+   Vendas: 526
+   Índices criados: emails=498 tel_full=424 last6=428
+    Matching concluído: 79 matches (0.92%)
+      Email: 69 | Tel: 9 | Last6: 1
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 10,193
+   Vendas: 103
+   Índices criados: emails=95 tel_full=67 last6=68
+    Matching concluído: 79 matches (0.78%)
+      Email: 70 | Tel: 9 | Last6: 0
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 103,698
+   Vendas: 21
+   Índices criados: emails=19 tel_full=14 last6=14
+    Matching concluído: 4 matches (0.00%)
+      Email: 1 | Tel: 0 | Last6: 3
+[ledger_connection] leitura do ledger via fonte=cloudsql
+ Matching unificado (VALIDAÇÃO) - EMAIL + TELEFONE + ÚLTIMOS 6 DÍGITOS
+   Leads: 8,606
+   Vendas: 526
+   Índices criados: emails=498 tel_full=424 last6=428
+    Matching concluído: 79 matches (0.92%)
+      Email: 69 | Tel: 9 | Last6: 1
+[vendas] venda fechada imatura — puxando gateways 2026-09-01 → 2026-09-01 antes de montar (desligue com --sem-etl)
+[vendas] ingerido por gateway: {'guru': 0, 'hotmart': 0, 'asaas': 0, 'boletex': 0, 'tmb': 2}
+
+LF64  cap 2026-08-07→2026-08-17  vendas 2026-08-24→2026-08-30  estado=venda_fechada_imatura
+referência 2026-08-31T06:34  fator 1.2000 (tracking)  crédito 0.4329  régua 5d158f0a
+cadastros 10,193  unidades 143  campanhas 42
+gasto Meta R$ 78,182.01  casado por unidade R$ 75,733.47  (96.9%)
+sem criativo 175  macro quebrada 107  ids não resolvidos 0
+
+⚠ PRODUTOS FORA DA RÉGUA (vendidos na janela, sem padrão no yaml):
+   DevClub Vitalício  [tmb]  n=2  R$ 3,280.00
+   MBA IA & Negócios  [guru]  n=1  R$ 4,000.00
+   MBA IA e Automações para Negócios  [tmb]  n=1  R$ 5,570.00
+   None  [asaas]  n=1  R$ 116.66
+   Parcela 2 de 9  [boletex]  n=1  R$ 191.54
+   Parcela 3 de 10. Parcelamento 11x - Plano DevClub Padrão (inclui order bump) (RENEGOCIAÇÃO)  [boletex]  n=1  R$ 269.75
+   ★ FrontEnd Club  [guru]  n=1  R$ 597.00
+   → decidir com o dono se entram, antes de publicar faturamento.
+
+teto (MEDIDO): 48 unidades julgáveis (corte ≥R$ 300 de gasto) — dentro 2 (R$ 1,196.46) · acima 46 (R$ 69,540.57)
+  dentro: vendas 3  ROAS 3.86  lucro R$ 3,421.79  | bateu meta 2  lucro>1000 1  positivo 2
+   acima: vendas 60  ROAS 1.28  lucro R$ 19,154.82  | bateu meta 11  lucro>1000 10  positivo 15
+  Fisher p=0.2514  Mann-Whitney p=0.014325226153556248
+
+separação do modelo por público (conversão D9-D10 vs D1-D8, respondentes):
+  frio                   leads   7,008  topo 1.93%  base 0.62%  lift 3.13x
+  Google                 leads   1,303  topo 1.39%  base 0.53%  lift 2.62x
+  Meta, sem público no nome leads     151  topo 3.51%  base 1.06%  lift 3.30x
+  orgânico / sem rastro  leads     139  topo 6.94%  base 0.00%  lift —
+  quente                 leads       5  topo 0.00%  base 0.00%  lift —
+  frio                   leads   7,008  topo 1.94%  base 0.70%  lift 2.79x
+  Google                 leads   1,303  topo 1.39%  base 0.53%  lift 2.63x
+  Meta, sem público no nome leads     151  topo 1.85%  base 2.06%  lift 0.90x
+  orgânico / sem rastro  leads     139  topo 8.33%  base 0.00%  lift —
+  quente                 leads       5  topo 0.00%  base —  lift —
+lucro por decil: top30 Champion R$ 50,651 (1931 leads)
+
+contrato congelado em docs/relatorios/lf64_resultado/contrato.json  (191,956 bytes)
+comparativo: /Users/ramonmoreira/Desktop/bring_data/V2/docs/relatorios/lf64_resultado/comparativo.html  (2,444 bytes)
+xlsx:   docs/relatorios/lf64_resultado/criativos_por_tipo_lf64.xlsx  (45 linhas, completo, formatado)
+painel: docs/relatorios/lf64_resultado/painel_lf64.html  (49,406 bytes)
+✓ painel do LF64 em docs/relatorios/lf64_resultado
