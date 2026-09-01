@@ -7,7 +7,12 @@ ESTADO: NO AR desde 12/08/2026. Job `push-scores-zanelato`, cron de hora em hora
     criativos é ~11pp (desvio-padrão de 13,3pp medido em 21 criativos com N>=200, descontado
     o ruído de amostra desses mesmos 200). Dois erros-padrão dão 18,2pp em N=30, 14,1pp em
     N=50 e 10,0pp em N=100. Abaixo de 100 o ruído é maior que a diferença entre criativos e a
-    coluna de delta vira decorativa. O relatório interno usa o mesmo 100 desde 12/08/2026.
+    coluna de delta vira decorativa. Vale para as linhas por criativo e por campanha.
+  - EXCEÇÃO, desde 01/09/2026: a linha do PRODUTO (criativo × campanha) sai também com
+    GASTO >= R$ 300 mesmo abaixo dos 100 leads: a régua do julgamento interno desde o
+    PR #256. É união com o piso de N, então nenhuma linha que o gestor já via sumiu.
+    O porquê medido está em `_publica_unidade`. Essas linhas saem com `·piso_gasto` no
+    selo, porque a %D9-D10 delas é de amostra pequena. O teto aguenta, a % crua não.
   - `LEDGER_DECIL_READ_SOURCE=ledger` é OBRIGATÓRIO no ambiente onde ele roda. Sem isso a
     função cai no ramo legado que lê a `scores_historicos`, aposentada em 08/07/2026 — e
     devolve VAZIO para qualquer lançamento depois do LF61. O job já tem a variável; um
@@ -247,20 +252,30 @@ def _leads_do_gerenciador(conn, ini, fim) -> dict:
     anúncio (Ramon, 18/08). Chaves normalizadas em minúsculas/espaço único.
 
     Devolve {"fino": {(cid, nome, conjunto): n}, "cn": {(cid, nome): n},
-             "campanha": {cid: n}, "nome": {nome: n}}."""
+             "campanha": {cid: n}, "nome": {nome: n},
+             "gasto_cn": {(cid, nome): R$}}.
+
+    `gasto_cn` (01/09/2026) é o GASTO na mesma cesta `cn`, o grão criativo ×
+    campanha. Ele não entra na moeda do gerenciador; serve só pra régua de
+    publicação da linha do produto, que passou a ser gasto e não mais contagem
+    de leads (ver `_um_corte`). Sai da MESMA query e das MESMAS chaves dos
+    leads: uma cesta paralela, não uma segunda leitura do banco."""
     def _n(x):
         return " ".join(str(x or "").split()).lower()
-    out = {"fino": {}, "cn": {}, "campanha": {}, "nome": {}, "cobertura": 1.0}
+    out = {"fino": {}, "cn": {}, "campanha": {}, "nome": {}, "gasto_cn": {},
+           "cobertura": 1.0}
 
-    def _soma(cid, nome, conj, ld):
+    def _soma(cid, nome, conj, ld, sp=0.0):
         out["fino"][(cid, nome, conj)] = out["fino"].get((cid, nome, conj), 0) + ld
         out["cn"][(cid, nome)] = out["cn"].get((cid, nome), 0) + ld
         out["campanha"][cid] = out["campanha"].get(cid, 0) + ld
         out["nome"][nome] = out["nome"].get(nome, 0) + ld
+        out["gasto_cn"][(cid, nome)] = out["gasto_cn"].get((cid, nome), 0.0) + sp
 
     try:
         rows = conn.run(
-            "SELECT campaign_id, ad_name, coalesce(adset_name, ''), sum(leads) "
+            "SELECT campaign_id, ad_name, coalesce(adset_name, ''), sum(leads), "
+            "coalesce(sum(spend), 0) "
             "FROM ad_insights WHERE insight_date >= :i AND insight_date <= :f "
             "AND leads > 0 AND campaign_id IS NOT NULL GROUP BY 1, 2, 3",
             i=ini.isoformat(), f=fim.isoformat())
@@ -271,8 +286,8 @@ def _leads_do_gerenciador(conn, ini, fim) -> dict:
               f"linhas saem na moeda real, com selo dizendo isso")
         out["cobertura"] = 0.0
         return out
-    for cid, nome, conj, ld in rows:
-        _soma(str(cid), _n(nome), _n(conj), int(ld))
+    for cid, nome, conj, ld, sp in rows:
+        _soma(str(cid), _n(nome), _n(conj), int(ld), float(sp or 0))
 
     # A ingestão do gerenciador fecha D-1; a janela dos cortes inclui HOJE.
     # Sem esta puxada AO VIVO, a razão dos cortes hoje/3 dias sairia enviesada
@@ -306,7 +321,8 @@ def _leads_do_gerenciador(conn, ini, fim) -> dict:
                     for x in _CACHE_DIA_VIVO[d]:
                         if x["ld"] and x["camp"]:
                             _soma(str(x["camp"]), _n(x["nome"]),
-                                  _n(x.get("cjn")), int(x["ld"]))
+                                  _n(x.get("cjn")), int(x["ld"]),
+                                  float(x.get("sp") or 0))
                     vivos += 1
             except Exception as e:
                 print(f"  puxada ao vivo do gerenciador falhou ({e})")
@@ -555,6 +571,60 @@ def _mapa_campanha_google(conn) -> dict:
         return {}
 
 
+# A régua da LINHA DO PRODUTO (criativo × campanha), 01/09/2026. Mesmo número do
+# julgamento interno (`constroi_lancamento`, PR #256), pelo mesmo motivo medido.
+PISO_GASTO_UNIDADE = 300.0
+
+
+def _publica_unidade(n, min_n, ger, criativo, campanha, teto_ok=True) -> bool:
+    """A dupla criativo×campanha merece linha no painel do gestor?
+
+    Sai True por UMA de duas portas: gasto >= R$ 300 no gerenciador (a régua
+    nova) OU o piso de N de sempre. É união, não troca: a régua nova só
+    ACRESCENTA linha, nunca tira do gestor uma que ele já consultava.
+
+    POR QUE O GASTO (medido em 11 lançamentos fechados, LF56..LF65 + DEV21):
+    entre as duplas com >= R$ 300 gastos e MENOS de 100 leads (as que o piso
+    de N escondia), o teto separa lucro de prejuízo: quem respeitou o teto deu
+    ROAS 2,43 e +R$ 8,1k, quem estourou deu 0,77 e -R$ 11,0k, em R$ 48,4k de
+    gasto. E separa TAMBÉM onde o criativo não tem histórico nenhum (25 das 78
+    duplas, teto apoiado só nos ~51 leads da própria unidade): 1,89 contra
+    0,84. Ou seja, o medo estatístico do piso ("abaixo de 100 o teto é ruído")
+    não se sustenta na medição: o teto continua ordenando certo. O que o piso
+    escondia era justamente o pior dinheiro, porque CPL alto é o que impede uma
+    dupla de juntar 100 leads.
+
+    O QUE NÃO MUDA: as linhas por criativo e por campanha seguem no piso de
+    N=100 do `build_top5_comparison`. A medição acima é sobre o TETO no grão
+    criativo×campanha, e é só isso que ela licencia; a coluna de comparação tem
+    justificativa própria (o erro-padrão da %D9-D10) e continua com ela.
+
+    O PREÇO, dito em voz alta: a linha que entra pela porta do gasto publica
+    uma %D9-D10 de amostra pequena, e o Δpp dela é mais ruidoso que o das
+    outras. O teto aguenta o N baixo porque é encolhido contra o histórico do
+    criativo (é ele que a medição validou); a porcentagem crua não é. Por isso
+    a linha sai com `·piso_gasto` no selo e com a contagem de leads na própria
+    linha. O ruído fica declarado, não escondido.
+
+    DEGRADAÇÃO SEGURA: sem casamento no gerenciador (anúncio do Google, campanha
+    sem o sufixo `nome|id`, janela com a moeda indisponível, ou anúncio que
+    gastou sem o gerenciador contar lead nenhum) o gasto sai None e a linha cai
+    no piso de N, o comportamento de antes desta mudança."""
+    if n >= min_n:
+        return True
+    # Daqui pra baixo é só a porta do gasto. Ela existe pra ENTREGAR UM TETO;
+    # linha sem teto calculável seria só uma %D9-D10 de amostra pequena, que é
+    # exatamente o que o piso de N protege. Sem teto, não entra.
+    if not teto_ok:
+        return False
+    if "|" not in str(campanha):
+        return False                      # Google/campanha sem id: sem gasto Meta
+    chave = (str(campanha).split("|")[-1].strip(),
+             " ".join(str(criativo or "").split()).lower())
+    gasto = (ger or {}).get("gasto_cn", {}).get(chave)
+    return gasto is not None and gasto >= PISO_GASTO_UNIDADE
+
+
 def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict,
               credito=None) -> tuple:
     """Roda a comparação numa janela e devolve (linhas, resumo). NÃO recalcula nada.
@@ -588,6 +658,11 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict,
         conn, conn, run_id=run_id,
         win_start=_fronteira_utc(ini), win_end=_fronteira_utc(fim, fim_do_dia=True))
 
+    # Lido AQUI (e não mais só no fim) porque agora ele serve a DUAS coisas: a
+    # régua de gasto que decide quais linhas do produto saem, logo abaixo, e a
+    # moeda do gerenciador aplicada no fim. É a MESMA leitura de antes, uma só.
+    ger = _leads_do_gerenciador(conn, ini, fim)
+
     barra = comp["bar_pct"]
     linhas, escondidas = [], 0
     for nivel, dados in comp["levels"].items():
@@ -611,12 +686,11 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict,
             ])
     # O GRÃO DO PRODUTO: criativo DENTRO de cada campanha (o mesmo anúncio pode
     # ter um teto numa campanha e outro na outra). tipo criativo_campanha[sufixo],
-    # chave "criativo @ campanha", mesmo piso de N das demais linhas.
+    # chave "criativo @ campanha". A régua desta linha é o GASTO (ver
+    # `_publica_unidade`); as demais linhas seguem no piso de N.
     min_n_u = comp.get("min_n") or 100
     mapa_camp_g = _mapa_campanha_google(conn)
     for u in unidades_t:
-        if u["n"] < min_n_u:
-            continue
         t = u["teto"]
         cr = u["criativo"]
         camp_rotulo = u["campanha"]
@@ -631,6 +705,15 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict,
                 camp_rotulo = mapa_camp_g[cr]
             if cr in mapa_nome:
                 cr = mapa_nome[cr]
+        if not _publica_unidade(u["n"], min_n_u, ger, cr, camp_rotulo,
+                                teto_ok=bool(t.ok)):
+            continue
+        # Linha que entrou pela porta do gasto vai MARCADA no selo (coluna de
+        # texto que já carrega os selos de moeda). Sem isto ela ficaria
+        # indistinguível de uma linha com 400 leads, e a %D9-D10 dela é de
+        # amostra pequena. O teto aguenta o N baixo (é encolhido contra o
+        # histórico do criativo), a porcentagem crua não.
+        selo_regua = "" if u["n"] >= min_n_u else "·piso_gasto"
         linhas.append([
             "criativo_campanha" + sufixo,
             f"{cr} @ {camp_rotulo}",
@@ -640,7 +723,7 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict,
             round(u["pct"] - (barra or 0), 1),
             (f"{t.valor:.2f}" if t.ok else None),
             (t.roas_alvo if t.ok else None),
-            carimbo(t),
+            carimbo(t) + selo_regua,
         ])
 
     # O grão do PÚBLICO (18/08): o mesmo anúncio na mesma campanha rodando em
@@ -678,7 +761,7 @@ def _um_corte(conn, lf, run_id, ini, fim, sufixo: str, mapa_nome: dict,
     # o teto continua CALCULADO por lead real (a régua honesta); aqui ele só é
     # traduzido pra unidade que o gestor compara na tela dele — com o cadastro
     # sem pesquisa valendo o crédito medido, não zero (Decisão 12).
-    linhas = _moeda_do_gerenciador(linhas, _leads_do_gerenciador(conn, ini, fim),
+    linhas = _moeda_do_gerenciador(linhas, ger,
                                    cad=_cadastros_da_janela(conn, ini, fim, mapa_nome),
                                    credito=credito)
 
