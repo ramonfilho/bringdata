@@ -430,3 +430,57 @@ def test_separacao_regua_unica_por_coluna():
     # default continua a mista, com o rótulo dizendo qual régua foi usada
     s2 = L.separacao_por_temperatura(_ledger_temperatura(), tem_venda=True)
     assert all(r["regua"] == "decil" for r in s2)
+
+
+# ───────────────── régua de produto: exato + gateway + dedup (01/09) ─────────
+def _vendas_regua():
+    rows = [
+        # produto, origem, email, telefone, sale_value, sale_date
+        ("DevClub - Full Stack 2026", "tmb", "p1@x.com", "11999990001", 2079.0, "2026-09-01"),
+        ("Parcela 1 de 12.", "boletex", "p2@x.com", "11999990002", 2858.0, "2026-09-01"),
+        ("Parcela 1 de 12. RENEGOCIAÇÃO / Parcelamento 11x", "boletex", "p3@x.com",
+         "11999990003", 2383.0, "2026-09-01"),
+        (None, "asaas", "p4@x.com", "11999990004", 219.0, "2026-09-01"),
+        # entrada Asaas do MESMO comprador da Parcela exata → dupla contagem, sai
+        (None, "asaas", "p2@x.com", "11999990002", 219.0, "2026-09-01"),
+        ("Parcela 1 de 9", "boletex", "p5@x.com", "11999990005", 191.0, "2026-09-01"),
+        ("DevClub - Full Stack 2026", "tmb", "p6@x.com", "11999990006", 2079.0, "2026-10-15"),
+    ]
+    return pd.DataFrame(rows, columns=["produto", "origem", "email", "telefone",
+                                       "sale_value", "sale_date"])
+
+
+def test_filter_launch_rules_exato_gateway_dedup():
+    from src.validation.model_performance import _filter_launch_sales
+    rules = {"patterns": ["full stack 2026"], "exact": ["parcela 1 de 12."],
+             "gateways": ["asaas"]}
+    df = _filter_launch_sales(_vendas_regua(), rules,
+                              date(2026, 8, 31), date(2026, 9, 6))
+    produtos = sorted(str(x) for x in df["produto"])
+    # entra: full stack (padrão), Parcela exata, Asaas NULL de comprador novo
+    assert len(df) == 3
+    assert "Parcela 1 de 12." in produtos
+    # NÃO entra: renegociação (mesmo texto, casamento é exato)…
+    assert not any("RENEGOCIA" in p_ for p_ in produtos)
+    # …nem "Parcela 1 de 9" (fora da lista), nem a venda fora da janela
+    assert not any(p_ == "Parcela 1 de 9" for p_ in produtos)
+    # dedup: a entrada Asaas do comprador p2 (que tem a Parcela exata) saiu;
+    # a do p4 (comprador só-Asaas) ficou
+    asaas = df[df["origem"] == "asaas"]
+    assert list(asaas["email"]) == ["p4@x.com"]
+
+
+def test_filter_launch_rules_compat_lista_antiga():
+    """Chamada legada com LISTA de patterns continua funcionando igual."""
+    from src.validation.model_performance import _filter_launch_sales
+    df = _filter_launch_sales(_vendas_regua(), ["full stack 2026"],
+                              date(2026, 8, 31), date(2026, 9, 6))
+    assert len(df) == 1 and df.iloc[0]["email"] == "p1@x.com"
+
+
+def test_load_launch_rules_do_yaml():
+    from src.validation.model_performance import _load_launch_rules
+    r = _load_launch_rules()
+    assert "parcela 1 de 12." in r["exact"]
+    assert "asaas" in r["gateways"]
+    assert "full stack 2026" in r["patterns"]
