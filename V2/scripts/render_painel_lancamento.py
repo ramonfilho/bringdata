@@ -289,69 +289,41 @@ def main() -> int:
             except Exception:
                 pass
 
-    sep = c.get("separacao_temperatura") or []
+    # Separação: a tabela por público (topo 9-10, UM lançamento) saiu a pedido
+    # do Ramon (01/09). O que decide é a série, no corte top 30 — o mesmo que
+    # vai pro público da Meta. Contrato sem `lucro_decil` (LF antes de 25/07)
+    # simplesmente não tem esta seção.
     tab_sep = ""
-    if sep:
-        _REGUA_ROT = {"decil_champion": " · régua abr_28",
-                      "decil_challenger": " · régua jul_24"}
-        rows_s = []
-        for s in sep:
-            lift = s.get("lift")
-            if lift is None:
-                continue          # público minúsculo (orgânico, sem nome): sem lift medível
-            rows_s.append([f"<b>{s['temperatura']}{_REGUA_ROT.get(s.get('regua') or '', '')}</b>",
-                           f"{s['leads']:,}".replace(",", "."),
-                           pct(s.get("pct_topo"), 1),
-                           pct(100 * s["taxa_topo"], 2) if s.get("taxa_topo") is not None else "—",
-                           pct(100 * s["taxa_base"], 2) if s.get("taxa_base") is not None else "—",
-                           (br(lift, 2) + "x") if lift is not None else "—"])
-        reguas_sep = {x.get("regua") for x in sep if x.get("regua")}
-        if {"decil_champion", "decil_challenger"} <= reguas_sep:
-            rot_regua = (" DUAS réguas únicas lado a lado: cada linha usa a nota "
-                         "daquele modelo para TODOS os leads (a mista dilui; o "
-                         "Challenger entrou por decisão de 01/09, série empatada).")
-        elif reguas_sep == {"decil_champion"}:
-            rot_regua = (" Régua ÚNICA do <b>Champion</b>: a nota do abr_28 para "
-                         "todo lead (a mista dilui a medição).")
-        else:
-            rot_regua = ""
-        tab_sep = ("<p class='h2sub' style='margin-top:14px'><b>Separação dentro de cada "
-                   "público</b> (respondentes com nota; topo = notas 9-10, base = 1-8; "
-                   "lift = quantas vezes o topo converte acima da base)." + rot_regua + "</p>"
-                   + _tab(["Público", "Leads c/ nota", "% no topo", "Conv. topo",
-                           "Conv. base", "Lift topo/base"], rows_s))
-        # Série: o veredito de modelo NUNCA sai de um lançamento só (pedido do
-        # Ramon, 01/09). Aqui o corte é o top 30 (8-10), o que vai pra Meta.
-        try:
-            tot_sp, lfs_sp = _serie_separacao_top30()
-            rows_sp = []
-            if len(lfs_sp) > 1:
-                for nome, chave in (("abr_28 (Champion)", "champion"),
-                                    ("jul_24 (Challenger)", "challenger")):
-                    t_ = tot_sp.get((chave, "topo")) or {}
-                    b_ = tot_sp.get((chave, "base")) or {}
-                    if not (t_.get("leads") and b_.get("leads")):
-                        continue
-                    ct_ = t_["vendas"] / t_["leads"]
-                    cb_ = b_["vendas"] / b_["leads"]
-                    n_ = t_["leads"] + b_["leads"]
-                    rows_sp.append([f"<b>régua {nome}</b>",
-                                    f"{n_:,}".replace(",", "."),
-                                    pct(100 * t_["leads"] / n_, 1),
-                                    pct(100 * ct_, 2), pct(100 * cb_, 2),
-                                    (br(ct_ / cb_, 2) + "x") if cb_ else "—"])
-            if rows_sp:
-                tab_sep += ("<p class='h2sub' style='margin-top:14px'><b>A mesma "
-                            "separação na série (" + "+".join(lfs_sp) + "), no corte que "
-                            "vai pra Meta</b> (top 30 = notas 8-10 contra o resto; só Meta "
-                            "frio, a mesma base do lucro por decil). Um lançamento sozinho "
-                            "tem vendas de menos pra decidir qual modelo separa melhor; "
-                            "somados, os dois separam praticamente igual, e é por isso que "
-                            "os dois seguem no ar.</p>"
-                            + _tab(["Régua", "Leads c/ nota", "% no topo", "Conv. topo",
-                                    "Conv. base", "Lift topo/base"], rows_sp))
-        except Exception:
-            pass
+    try:
+        tot_sp, lfs_sp = _serie_separacao_top30()
+        rows_sp = []
+        if len(lfs_sp) > 1:
+            for nome, chave in (("abr_28 (Champion)", "champion"),
+                                ("jul_24 (Challenger)", "challenger")):
+                t_ = tot_sp.get((chave, "topo")) or {}
+                b_ = tot_sp.get((chave, "base")) or {}
+                if not (t_.get("leads") and b_.get("leads")):
+                    continue
+                ct_ = t_["vendas"] / t_["leads"]
+                cb_ = b_["vendas"] / b_["leads"]
+                n_ = t_["leads"] + b_["leads"]
+                rows_sp.append([f"<b>régua {nome}</b>",
+                                f"{n_:,}".replace(",", "."),
+                                pct(100 * t_["leads"] / n_, 1),
+                                pct(100 * ct_, 2), pct(100 * cb_, 2),
+                                (br(ct_ / cb_, 2) + "x") if cb_ else "—"])
+        if rows_sp:
+            tab_sep = ("<p class='h2sub' style='margin-top:14px'><b>Separação dos "
+                       "modelos na série (" + "+".join(lfs_sp) + ")</b>, no corte que "
+                       "vai pra Meta: top 30 (notas 8-10) contra o resto, só Meta frio. "
+                       "Lift = quantas vezes o topo converte acima do resto. Um "
+                       "lançamento sozinho tem vendas de menos pra dizer qual modelo "
+                       "separa melhor; somados, os dois separam igual, e é por isso "
+                       "que os dois seguem no ar.</p>"
+                       + _tab(["Régua", "Leads c/ nota", "% no topo", "Conv. topo",
+                               "Conv. base", "Lift topo/base"], rows_sp))
+    except Exception:
+        pass
 
     # ── tela 2: campanha a campanha (top por gasto) ──────────────────────────
     top_camp = sorted([x for x in ca if x.get("gasto")], key=lambda x: -x["gasto"])[:15]
@@ -547,6 +519,22 @@ def main() -> int:
         # Fica a frase, que é o que muda a decisão.
         g_rec = sum(x["gasto"] for x in rec)
         n_est = sum(1 for x in rec if x["cpl"] > x["teto"] * (2.0 / 1.5))
+        # O tamanho REAL do estrago dessa fatia (pedido do Ramon, 01/09): é o
+        # número que dá a dimensão, não a lista dupla a dupla.
+        perde = [x for x in rec if (x.get("lucro") or 0) < 0]
+        ganha = [x for x in rec if (x.get("lucro") or 0) > 0]
+        liq = sum(x.get("lucro") or 0 for x in rec)
+        rot_perde = ("nas que não venderam"
+                     if perde and not any((x.get("faturamento") or 0) > 0 for x in perde)
+                     else "nas que perderam")
+        frase_prejuizo = ""
+        if perde or ganha:
+            frase_prejuizo = (
+                f"O prejuízo real dessas {len(rec)} duplas é pequeno: "
+                f"{br(liq, 0, 'R$ ')} de lucro líquido, com "
+                f"{br(abs(sum(x['lucro'] for x in perde)), 0, 'R$ ')} de prejuízo "
+                f"{rot_perde} e {br(sum(x['lucro'] for x in ganha), 0, 'R$ ')} de "
+                f"lucro nas que venderam.")
         g_cauda = g_sem_velho - g_rec
         tab_teto += (
             f"<p class='h2sub' style='margin-top:14px'><b>O dinheiro que o corte não "
@@ -558,7 +546,7 @@ def main() -> int:
             f"acima) recupera <b>{br(100 * g_rec / g_sem_velho, 0)}%</b> disso: "
             f"{len(rec)} duplas e {br(g_rec, 0, 'R$ ')}, {n_est} delas estourando o "
             f"teto 1,5. Fica de fora só a cauda com menos de R$ 300 por dupla "
-            f"({br(g_cauda, 0, 'R$ ')}).</p>"
+            f"({br(g_cauda, 0, 'R$ ')}). {frase_prejuizo}</p>"
             + "<p class='h2sub' style='margin-top:10px'><b>Por que dá pra confiar "
               "(backtest de 01/09, 10 lançamentos fechados):</b> nessa fatia, o "
               "dinheiro que o teto do par marcou FORA rendeu 0,75 por real investido; "
@@ -668,9 +656,9 @@ def main() -> int:
                         br(t["faturamento"] / t["custo"], 2),
                         _cor((f["faturamento"] - f["custo"]) if f else None, 0),
                         br((f["faturamento"] / f["custo"]) if (f and f["custo"]) else None, 2)])
-                nota_serie = (" A série soma todos os lançamentos que têm essa medição "
-                              "(as notas por modelo do ledger só valem de 25/07 em "
-                              "diante); lançamento com carrinho aberto entra parcial.")
+                nota_serie = (" A série soma os lançamentos com essa medição (nota por "
+                              "modelo só vale de 25/07 em diante); carrinho aberto entra "
+                              "parcial.")
         except Exception:
             pass
         if rows_ld:
@@ -679,27 +667,19 @@ def main() -> int:
             ex = (ld.get("champion") or {}).get("top30") or {}
             exemplo = ""
             if ex.get("custo") and ex.get("faturamento") is not None:
-                exemplo = (" <b>Exemplo real deste lançamento</b>, top 30 do Champion: "
-                           + br(ex["faturamento"], 0, "R$ ") + " de faturamento − "
-                           + br(ex["custo"], 0, "R$ ") + " de custo = "
-                           + br(ex["faturamento"] - ex["custo"], 0, "R$ ") + " de lucro; "
-                           "ROAS = " + br(ex["faturamento"], 0, "R$ ") + " ÷ "
+                exemplo = (" Aqui, top 30 do Champion: "
+                           + br(ex["faturamento"], 0, "R$ ") + " − "
                            + br(ex["custo"], 0, "R$ ") + " = "
-                           + br(ex["faturamento"] / ex["custo"], 2) + ", ou seja cada R$ 1 "
-                           "gasto para trazer esses leads voltou como "
-                           + br(ex["faturamento"] / ex["custo"], 2) + ".")
+                           + br(ex["faturamento"] - ex["custo"], 0, "R$ ")
+                           + ", ROAS " + br(ex["faturamento"] / ex["custo"], 2) + ".")
             tab_ld = (
                 "<p class='h2sub' style='margin-top:14px'><b>Lucro por decil</b> (só Meta "
-                "frio). <b>Como a conta é feita:</b> cada lead entra com um custo, que é o "
-                "CPL da dupla anúncio×campanha que o trouxe (a verba é gasta para comprar "
-                "o lead, antes de ele receber nota). Somando os leads de um grupo de notas "
-                "sai o custo do grupo; somando o que os compradores desse grupo pagaram "
-                "sai o faturamento. Daí: <b>lucro = faturamento − custo</b> e <b>ROAS = "
-                "faturamento ÷ custo</b> (quantos reais voltaram por real gasto; abaixo de "
-                "1,00 o grupo deu prejuízo)." + exemplo +
-                " <b>Top 30</b> = notas 8, 9 e 10, a faixa que vai pro público da Meta. "
-                "<b>Bottom 50</b> = notas 1 a 5, a metade de baixo. Cada linha usa a nota "
-                "de um modelo só para todos os leads, nunca misturada." + nota_serie + "</p>"
+                "frio). Cada lead custa o CPL da dupla anúncio×campanha que o trouxe; o "
+                "custo do grupo é a soma desses CPLs. <b>Lucro = faturamento − custo</b>; "
+                "<b>ROAS = faturamento ÷ custo</b> (abaixo de 1,00 o grupo deu prejuízo)."
+                + exemplo +
+                " <b>Top 30</b> = notas 8-10, a faixa que vai pra Meta; <b>Bottom 50</b> = "
+                "notas 1-5. Uma régua por linha, nunca mista." + nota_serie + "</p>"
                 + _tab(["Modelo", "Lucro top 30", "ROAS top 30",
                         "Lucro Bottom 50", "ROAS Bottom 50"], rows_ld))
 
