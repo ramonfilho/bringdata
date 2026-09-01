@@ -607,7 +607,7 @@ def _historico_para_consulta(hist_df: pd.DataFrame, mapa_nomes: dict) -> dict:
 def constroi_lancamento(lf: str, *, as_of: Optional[date] = None,
                         window_days: int = 60, client_id: str = "devclub",
                         referencia: Optional[dict] = None,
-                        corte_leads: int = 100, corte_gasto: float = 300.0,
+                        corte_leads: int = 0, corte_gasto: float = 300.0,
                         tolerancia_meta: float = 0.02) -> dict:
     """Monta o relatório inteiro de UM lançamento, numa passada, ponto único de
     composição (quem decide as fontes é aqui; as funções acima são puras).
@@ -627,9 +627,21 @@ def constroi_lancamento(lf: str, *, as_of: Optional[date] = None,
     'meta' (janelas, estado, referência congelada, coberturas, produtos da
     janela de vendas com a flag de régua). NÃO escreve em banco nem em arquivo.
 
-    `corte_leads`/`corte_gasto`: os literais do DEV21 (>=100 leads, >=R$ 300).
-    Aplicados SÓ ao julgamento do teto — a tabela-fato guarda todas as linhas
-    com a coluna `no_corte` dizendo quem entrou.
+    `corte_leads`/`corte_gasto`: a régua do julgamento. Desde 31/08/2026 é só o
+    GASTO (>= R$ 300); o piso de 100 leads saiu (`corte_leads=0`). Aplicados SÓ
+    ao julgamento do teto — a tabela-fato guarda todas as linhas com a coluna
+    `no_corte` dizendo quem entrou.
+
+    Por que o piso de leads caiu (decisão do Ramon, 31/08/2026): CPL alto é
+    justamente o que impede uma dupla de juntar 100 leads, então o piso escondia
+    o pior dinheiro do lançamento. Medido sobre os 11 lançamentos com contrato
+    congelado: entram 78 duplas e R$ 54.062 que antes ficavam sem veredito, e a
+    separação MELHORA em vez de piorar — dentro passa de ROAS 1,47 para 1,49,
+    fora de 0,83 para 0,82. Quase todo o dinheiro novo (R$ 48,7k de R$ 54,1k)
+    cai do lado FORA, que é a leitura esperada. O piso de 100 continua valendo
+    onde ele existe por outro motivo: a comparação de %D9-D10 entre criativos no
+    painel da agência (`push_scores_zanelato`), onde abaixo de 100 o ruído come
+    a diferença entre anúncios.
     """
     from src.core.launches import load_launches
     from src.data.ad_insights_reader import gasto_por_unidade, read_ad_insights
