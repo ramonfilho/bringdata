@@ -46,7 +46,7 @@ jobs:
       - run: ruff check --select E9,F63,F7,F82 V2/src V2/api V2/scripts V2/tests
 
   test:
-    name: pytest (Python 3.10, sem credencial)
+    name: pytest (Python 3.10, artefatos do bucket quando ha identidade)
     runs-on: ubuntu-latest
     defaults:
       run:
