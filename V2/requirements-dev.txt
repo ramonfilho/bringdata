@@ -4,5 +4,5 @@
 # Os pinos são os do ambiente onde a suíte foi validada (pip freeze, 14/09/2026).
 -r api/requirements.txt
 pytest==9.1.1
-mlflow==2.13.2
+mlflow==3.16.0
 ruff==0.12.10
