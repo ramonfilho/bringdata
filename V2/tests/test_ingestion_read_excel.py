@@ -9,6 +9,7 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import logging
+import pytest
 import yaml
 from src.data_processing.ingestion import read_excel_files
 
@@ -32,14 +33,11 @@ def test_read_excel_files():
     data_dir = config['ingestion']['training_data_dir']
     test_files = sorted(glob.glob(os.path.join(data_dir, "*.xlsx")))
 
-    # Verificar se arquivos existem
-    missing_files = [f for f in test_files if not os.path.exists(f)]
-    if missing_files:
-        print("\n⚠️  Arquivos não encontrados:")
-        for f in missing_files:
-            print(f"   - {f}")
-        print("\nAjuste os caminhos no teste conforme sua estrutura de dados.")
-        return
+    # Os .xlsx são dado de lead, locais e gitignored. No runner do CI (e em qualquer
+    # máquina sem eles) o glob vem vazio: pular, dizendo por quê, em vez de chamar
+    # read_excel_files([]) e cair no ValueError que a função levanta de propósito.
+    if not test_files:
+        pytest.skip(f"sem .xlsx local em {data_dir} (dado de lead, fora do repositório)")
 
     print(f"\n📂 Testando leitura de {len(test_files)} arquivo(s)...\n")
 
