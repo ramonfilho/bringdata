@@ -248,6 +248,74 @@ def atualizar_business_config_com_recall(model_metadata: dict, client_config: "C
             logger.info(f"  YAML do cliente não encontrado: {yaml_path}")
 
 
+def reescrever_active_model_yaml(config_path, run_id: str, model_info: dict) -> None:
+    """Troca SÓ os escalares do bloco `active_model` e preserva byte a byte o resto.
+
+    Até 14/09/2026 esta etapa abria o arquivo em modo escrita e gravava um dicionário
+    novo com um único bloco: o `ab_test` inteiro (variantes, role_history, pixels,
+    eventos secundários e todos os comentários) sumia a cada ativação. O YAML de
+    produção é a fonte do roteamento do A/B, então ativar um run não pode apagá-lo.
+
+    O bloco `performance:` deixa de ser gravado (e é removido se existir): as métricas
+    do modelo vivem no run do MLflow, que é de onde o model card e o gate do CI leem. A
+    cópia à mão no YAML estava errada (AUC 0,6999 no arquivo, 0,7531 no run do mesmo
+    champion).
+
+    Regras de texto, de propósito simples: o bloco começa na linha `active_model:` e
+    termina na primeira linha seguinte que começa na coluna 0 e não é vazia. Dentro
+    dele, cada `  chave: valor` conhecida é reescrita mantendo o comentário de fim de
+    linha; comentários e linhas vazias do bloco ficam; `  performance:` e seus
+    sub-itens (4 espaços) saem. Chave conhecida ausente é inserida logo após
+    `active_model:`.
+    """
+    import re as _re
+    from pathlib import Path as _Path
+
+    config_path = _Path(config_path)
+    linhas = config_path.read_text().split("\n")
+    try:
+        ini = next(i for i, l in enumerate(linhas) if l.rstrip() == "active_model:")
+    except StopIteration:
+        raise RuntimeError(
+            f"{config_path}: sem bloco 'active_model:' na coluna 0; não ativo nada por segurança"
+        )
+    fim = next(
+        (i for i in range(ini + 1, len(linhas)) if linhas[i] and not linhas[i].startswith((" ", "\t"))),
+        len(linhas),
+    )
+    novos = {
+        'model_name': model_info.get('model_name', 'v1_devclub_rf_temporal_leads_single'),
+        'mlflow_run_id': run_id,
+        'trained_at': model_info.get('trained_at', ''),
+        'split_method': model_info.get('split_type', 'temporal_leads'),
+    }
+
+    def _fmt(chave, valor):
+        return f"'{valor}'" if chave == 'trained_at' else str(valor)
+
+    saida, dentro_performance, vistos = [], False, set()
+    for l in linhas[ini + 1:fim]:
+        if _re.match(r"^  performance:\s*(#.*)?$", l):
+            dentro_performance = True
+            continue
+        if dentro_performance:
+            if l.startswith("    "):
+                continue
+            dentro_performance = False
+        m = _re.match(r"^  ([a-z_]+):(.*)$", l)
+        if m and m.group(1) in novos:
+            chave, resto = m.group(1), m.group(2)
+            mc = _re.search(r"\s+#.*$", resto)
+            comentario = mc.group(0) if mc else ""
+            saida.append(f"  {chave}: {_fmt(chave, novos[chave])}{comentario}")
+            vistos.add(chave)
+            continue
+        saida.append(l)
+    inserir = [f"  {k}: {_fmt(k, v)}" for k, v in novos.items() if k not in vistos]
+    linhas = linhas[:ini + 1] + inserir + saida + linhas[fim:]
+    config_path.write_text("\n".join(linhas))
+
+
 def ativar_run_existente(run_id: str, client_config: "ClientConfig" = None):
     """
     Ativa um run MLflow existente como modelo de produção sem retreinar.
@@ -289,32 +357,10 @@ def ativar_run_existente(run_id: str, client_config: "ClientConfig" = None):
     print(f"  AUC: {perf.get('auc', 0):.4f} | Monotonia: {perf.get('monotonia_percentage', 0):.1f}% | Lift: {perf.get('lift_maximum', 0):.2f}x")
     print(f"  Split: {model_info.get('split_type', 'N/A')} | Records: {split.get('total_records', 'N/A'):,}")
 
-    # 2. Atualizar configs/active_models/devclub.yaml
+    # 2. Atualizar configs/active_models/devclub.yaml SEM apagar o resto do arquivo
     config_path = Path(__file__).parent.parent.parent / "configs" / "active_models" / "devclub.yaml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-
-    active_config = {
-        'active_model': {
-            'model_name': model_info.get('model_name', 'v1_devclub_rf_temporal_leads_single'),
-            'mlflow_run_id': run_id,
-            'model_path': f"files/{model_info.get('trained_at', '')[:10].replace('-', '')}",
-            'trained_at': model_info.get('trained_at', ''),
-            'split_method': model_info.get('split_type', 'temporal_leads'),
-            'performance': {
-                'auc': round(perf.get('auc', 0), 12),
-                'monotonia_percentage': perf.get('monotonia_percentage', 0),
-                'lift_maximum': perf.get('lift_maximum', 0),
-            }
-        }
-    }
-
-    with open(config_path, 'w') as f:
-        yaml.dump(active_config, f, default_flow_style=False, sort_keys=False)
-        f.write("\n# Para mudar o modelo ativo:\n")
-        f.write("# 1. Treine um novo modelo: python -m src.train_pipeline --set-active\n")
-        f.write("# 2. Ative um run existente: python -m src.train_pipeline --activate-run <run_id>\n")
-
-    print(f"  configs/active_models/devclub.yaml atualizado")
+    reescrever_active_model_yaml(config_path, run_id, model_info)
+    print("  configs/active_models/devclub.yaml atualizado (bloco active_model; ab_test intacto)")
 
     # 3. Atualizar conversion_rates (com PAV)
     atualizar_business_config_com_recall(model_metadata, client_config=client_config)
