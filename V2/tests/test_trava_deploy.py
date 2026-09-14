@@ -18,6 +18,7 @@ E a escotilha de emergência é explícita: sem saída, trava vira gambiarra pio
 """
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -163,3 +164,32 @@ def test_sync_nao_engole_mais_o_erro_do_gcloud():
         f"o erro do gcloud voltou para /dev/null: {criacao[0][:140]}")
     assert '2>"$err_tmp"' in criacao[0], "o erro deixou de ser capturado"
     assert 'motivo=$(tail' in t, "sumiu a captura do motivo da falha"
+
+
+# ---------------------------------------------------------------------------
+# 14/09/2026: o deploy passa a rodar também no runner do GitHub Actions. Três amarras
+# que só existiam porque o script nasceu num laptop, e que num runner viravam ou erro
+# ("/Users/ramonmoreira" não existe lá) ou, pior, gate pulado em silêncio.
+# ---------------------------------------------------------------------------
+_GATE = _V2 / "api" / "deploy-gate.sh"
+_DEPLOY = next((_V2 / "api").glob("deploy_ca*.sh"))
+
+
+def test_gate_nao_depende_de_caminho_de_uma_maquina():
+    t = _GATE.read_text()
+    assert "/Users/" not in t, "caminho absoluto de laptop no gatekeeper: não roda no runner"
+    assert 'REPO="${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")' in t, "a raiz do repo tem que ser derivada do próprio arquivo, não de uma constante"
+
+
+def test_gate_c_nao_e_mais_pulado_sem_env():
+    """Um replay de 50 leads que não roda não prova nada. Sem credencial é falha, não aviso."""
+    t = _DEPLOY.read_text()
+    assert re.search(r"Gate C[^\n]*pulado", t) is None, "Gate C voltou a ser pulável"
+    assert "baixar_artefatos_modelo.sh" in t, "o build tem que buscar os artefatos no bucket"
+
+
+def test_rollback_e_a_revisao_viva_e_sem_default_velho():
+    t = _DEPLOY.read_text()
+    g = (_V2 / "scripts" / "progression_gate.py").read_text()
+    assert "00269-jjn" not in t and "00269-jjn" not in g, "voltou o default de revisão morta"
+    assert "percent')==100" in t, "o alvo de rollback tem que ser a revisão que serve 100%"

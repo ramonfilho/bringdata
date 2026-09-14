@@ -341,6 +341,13 @@ validate_prerequisites() {
         MODEL_PATH="mlruns/1/${MLFLOW_RUN_ID}/artifacts"
         FULL_MODEL_DIR="$PROJECT_ROOT/$MODEL_PATH"
 
+        # Artefatos de TODOS os runs do YAML (champion + variantes): do bucket do MLflow
+        # quando não estão no disco. Antes o build só lia o V2/mlruns local, que existe
+        # num Mac e em nenhum runner.
+        bash "$SCRIPT_DIR/../scripts/baixar_artefatos_modelo.sh" || {
+            print_error "Não consegui garantir os artefatos dos runs do YAML (ver acima)."
+            exit 1
+        }
         if [ ! -d "$FULL_MODEL_DIR" ]; then
             print_error "MLflow artifacts não encontrados: $FULL_MODEL_DIR"
             exit 1
@@ -416,12 +423,20 @@ print(v)
     print_success "PRODUCT_VALUE (${CLIENT_ID}): R$ $PRODUCT_VALUE"
 
     # 1.9 Obter revisão atual (para rollback)
-    print_info "Obtendo revisão atual do Cloud Run..."
-    PREVIOUS_REVISION=$(gcloud run revisions list \
-        --service=$SERVICE_NAME \
-        --region=$REGION \
-        --format="value(metadata.name)" \
-        --limit=1 2>/dev/null || echo "")
+    print_info "Obtendo a revisão VIVA do Cloud Run (alvo de rollback)..."
+    # A revisão de rollback é a que SERVE 100% do tráfego, não a mais recente: a mais
+    # recente pode ser um canary anterior parado a 0% (pendência anotada em 24/08/2026).
+    PREVIOUS_REVISION=$(gcloud run services describe "$SERVICE_NAME" --region="$REGION" --format=json 2>/dev/null \
+        | python3 -c "import json,sys
+try:
+    d=json.load(sys.stdin)
+    print(next((t.get('revisionName') or '') for t in d.get('status',{}).get('traffic',[]) if t.get('percent')==100))
+except Exception:
+    print('')")
+    if [ -z "$PREVIOUS_REVISION" ]; then
+        print_error "Nenhuma revisão serve 100% do tráfego (progressão no meio?). Sem alvo de rollback o deploy não segue."
+        exit 1
+    fi
 
     if [ -n "$PREVIOUS_REVISION" ]; then
         print_success "Revisão atual: $PREVIOUS_REVISION"
@@ -742,37 +757,51 @@ print(','.join(stale))
         GATE_C_SCRIPT="$SCRIPT_DIR/../scripts/test_revision_equivalence.py"
         ENV_FILE="$SCRIPT_DIR/../.env"
         GATE_C_N=50
-        if [ -f "$GATE_C_SCRIPT" ] && [ -f "$ENV_FILE" ]; then
-            # Carrega RAILWAY_DB_* + LEDGER_DB_* (Gate C lê registros_ml do Cloud SQL
-            # desde a Etapa 5 — DROP da cópia Railway). Escopo seletivo evita '|' em GURU_API_TOKEN.
+        # Credenciais do Gate C (RAILWAY_DB_* + LEDGER_DB_*; o gate lê registros_ml no Cloud
+        # SQL): do V2/.env quando existe (máquina de desenvolvimento), senão do que o
+        # lib/config.sh já resolveu (defaults + Secret Manager), que é o caminho do runner.
+        # Até 14/09/2026, sem .env o gate era PULADO com um aviso; um replay que não roda
+        # não prova nada, então virou falha alta. Escopo seletivo evita '|' em GURU_API_TOKEN.
+        if [ -f "$ENV_FILE" ]; then
             eval "$(grep -E '^(RAILWAY_DB_|LEDGER_DB_)' "$ENV_FILE" | sed 's/^/export /')"
+        fi
+        export RAILWAY_DB_HOST RAILWAY_DB_PORT RAILWAY_DB_NAME RAILWAY_DB_USER RAILWAY_DB_PASSWORD
+        export LEDGER_DB_HOST="${LEDGER_DB_HOST:-104.197.138.129}" LEDGER_DB_PORT="${LEDGER_DB_PORT:-5432}"
+        export LEDGER_DB_NAME="${LEDGER_DB_NAME:-ledger}" LEDGER_DB_USER="${LEDGER_DB_USER:-ledger_app}"
+        LEDGER_DB_PASSWORD="${LEDGER_DB_PASSWORD:-$(gcloud secrets versions access latest --secret=ledger-db-password --project="$PROJECT_ID" 2>/dev/null)}"
+        export LEDGER_DB_PASSWORD
+        if [ ! -f "$GATE_C_SCRIPT" ]; then
+            print_error "[Gate C] script obrigatório não encontrado em $GATE_C_SCRIPT"
+            print_warning "Revisão permanece em 0% de tráfego. Restaurar o script antes de prosseguir."
+            exit 1
+        fi
+        if [ -z "${RAILWAY_DB_PASSWORD:-}" ] || [ -z "${LEDGER_DB_PASSWORD:-}" ]; then
+            print_error "[Gate C] sem credencial de banco (RAILWAY_DB_*/LEDGER_DB_*): nem V2/.env nem o Secret Manager responderam."
+            print_warning "Revisão permanece em 0% de tráfego. NÃO progredir tráfego até resolver."
+            exit 1
+        fi
 
-            print_info "[Gate C.1] modo predict — score raw + decil ($GATE_C_N leads)..."
-            if python3 "$GATE_C_SCRIPT" "$NEW_REVISION" \
-                --region "$REGION" --project "$PROJECT_ID" \
-                --mode predict --n $GATE_C_N; then
-                print_success "[Gate C.1] score raw idêntico entre $NEW_REVISION e prod"
-            else
-                print_error "[Gate C.1] FALHOU — divergência de score raw ou decil"
-                print_warning "Revisão permanece em 0% de tráfego. NÃO progredir tráfego até resolver."
-                print_info "Se a mudança de scoring é INTENCIONAL (novo modelo), re-rode com --expect-score-change."
-                exit 1
-            fi
-
-            print_info "[Gate C.2] modo capi-dry-run — decil + value + event_name + path A/B ($GATE_C_N leads)..."
-            if python3 "$GATE_C_SCRIPT" "$NEW_REVISION" \
-                --region "$REGION" --project "$PROJECT_ID" \
-                --mode capi-dry-run --n $GATE_C_N; then
-                print_success "[Gate C.2] decil idêntico em path A/B (Champion + Challenger)"
-            else
-                print_error "[Gate C.2] FALHOU — divergência de decil no path A/B"
-                print_warning "Revisão permanece em 0% de tráfego. NÃO progredir tráfego até resolver."
-                exit 1
-            fi
-        elif [ ! -f "$GATE_C_SCRIPT" ]; then
-            print_warning "Gate C script não encontrado em $GATE_C_SCRIPT — pulado"
+        print_info "[Gate C.1] modo predict — score raw + decil ($GATE_C_N leads)..."
+        if python3 "$GATE_C_SCRIPT" "$NEW_REVISION" \
+            --region "$REGION" --project "$PROJECT_ID" \
+            --mode predict --n $GATE_C_N; then
+            print_success "[Gate C.1] score raw idêntico entre $NEW_REVISION e prod"
         else
-            print_warning "Arquivo $ENV_FILE ausente — Gate C precisa de RAILWAY_DB_* — pulado"
+            print_error "[Gate C.1] FALHOU — divergência de score raw ou decil"
+            print_warning "Revisão permanece em 0% de tráfego. NÃO progredir tráfego até resolver."
+            print_info "Se a mudança de scoring é INTENCIONAL (novo modelo), re-rode com --expect-score-change."
+            exit 1
+        fi
+
+        print_info "[Gate C.2] modo capi-dry-run — decil + value + event_name + path A/B ($GATE_C_N leads)..."
+        if python3 "$GATE_C_SCRIPT" "$NEW_REVISION" \
+            --region "$REGION" --project "$PROJECT_ID" \
+            --mode capi-dry-run --n $GATE_C_N; then
+            print_success "[Gate C.2] decil idêntico em path A/B (Champion + Challenger)"
+        else
+            print_error "[Gate C.2] FALHOU — divergência de decil no path A/B"
+            print_warning "Revisão permanece em 0% de tráfego. NÃO progredir tráfego até resolver."
+            exit 1
         fi
 
         # [T3-1 + T2-7] Progressão de canary recomendada — não pular etapas.
@@ -790,7 +819,7 @@ print(','.join(stale))
             # check-only: não executa update-traffic; apenas valida que a revisão está saudável
             # contra critérios do estágio antes do operador promover.
             python3 "$PROGRESSION_SCRIPT" --revision "$NEW_REVISION" --from 0 --to 10 \
-                --rollback "${PREVIOUS_REVISION:-smart-ads-api-00269-jjn}" \
+                --rollback "$PREVIOUS_REVISION" \
                 --service "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" || \
                 print_warning "[T2-7] gate retornou non-zero — leia razões acima antes de prosseguir"
             echo

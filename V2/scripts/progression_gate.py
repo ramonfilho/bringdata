@@ -325,8 +325,10 @@ def main():
                         help='Tráfego atual da revisão (0, 10, ou 50)')
     parser.add_argument('--to', dest='to_pct', type=int, required=True, choices=[10, 50, 100],
                         help='Tráfego alvo (10, 50, ou 100)')
-    parser.add_argument('--rollback', default='smart-ads-api-00269-jjn',
-                        help='Revisão de rollback/Champion (default: 00269-jjn)')
+    # Sem default: o antigo apontava para uma revisão de meses atrás (00269), e
+    # um gate que aponta rollback para revisão morta não é gate. Quem chama passa a viva.
+    parser.add_argument('--rollback', required=True,
+                        help='Revisão que serve 100% hoje (alvo de rollback)')
     parser.add_argument('--observation-hours', type=int, default=None,
                         help='Horas de observação (default: baseado no estágio)')
     parser.add_argument('--execute', action='store_true', help='Executar promoção se PROMOTE')
