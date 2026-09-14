@@ -24,10 +24,10 @@ from src.core.client_config import ClientConfig
 
 logger = logging.getLogger(__name__)
 
-# Configurar MLflow tracking URI (fonte única em core/mlflow_setup; experimento é
-# setado dentro da função). Respeita override por MLFLOW_TRACKING_URI.
+# A URI do MLflow (fonte única em core/mlflow_setup) é resolvida DENTRO das funções que
+# falam com o servidor, nunca no import. Importar este módulo não pode exigir credencial:
+# o CI roda a suíte sem .env, e funções puras como reescrever_active_model_yaml vivem aqui.
 from src.core.mlflow_setup import ensure_tracking_uri
-_tracking_uri = ensure_tracking_uri()
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +336,7 @@ def ativar_run_existente(run_id: str, client_config: "ClientConfig" = None):
     print(f"\nATIVANDO RUN EXISTENTE: {run_id}")
 
     # 1. Baixar metadata do MLflow
+    ensure_tracking_uri()
     client = mlflow.tracking.MlflowClient()
     try:
         run = client.get_run(run_id)
@@ -413,6 +414,7 @@ def registrar_features_e_modelo_devclub(
         if client_config and client_config.model and client_config.model.mlflow_experiment_name
         else "devclub_lead_scoring"
     )
+    ensure_tracking_uri()
     _mlflow_client = mlflow.tracking.MlflowClient()
     _exp = _mlflow_client.get_experiment_by_name(experiment_name)
     if _exp is None or _exp.lifecycle_stage == "deleted":
