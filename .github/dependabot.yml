@@ -1,0 +1,73 @@
+# Varredura de dependências: escopo decidido em 14/09/2026.
+#
+# O que entra:
+#   1. V2/api/requirements.txt  -> o que vai para a imagem de produção (scorer, jobs, monitoring).
+#   2. V2/requirements-dev.txt  -> o que o CI usa (pytest, ruff, mlflow de leitura).
+#   3. .github/workflows        -> as actions (checkout, auth, setup-gcloud...), por SHA de tag.
+# O que fica de fora:
+#   - V2/scripts/requirements_google_ads_setup.txt: setup pontual, roda na mão, não vai para imagem.
+#   - Atualização de versão MAIOR ou MENOR das libs que o modelo salvo assume (scikit-learn,
+#     numpy, pandas, scipy, joblib): o pickle do RandomForest foi gravado com a versão pinada
+#     e uma troca dessas é PR de retreino, não de dependência. Correção de segurança (patch)
+#     continua entrando.
+# Ritmo: semanal, segunda de manhã, PRs agrupadas para não virar ruído. Cada PR passa pelo
+# CI (lint, 953 testes, gate do modelo) como qualquer outra, e o merge só sai com os checks
+# verdes (proteção da main).
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /V2/api
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 3
+    groups:
+      producao:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: scikit-learn
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: numpy
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: pandas
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: scipy
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: joblib
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    labels: ["dependencias"]
+    commit-message:
+      prefix: "deps(api)"
+
+  - package-ecosystem: pip
+    directory: /V2
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 2
+    groups:
+      dev:
+        patterns: ["*"]
+    labels: ["dependencias"]
+    commit-message:
+      prefix: "deps(dev)"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 2
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: ["dependencias"]
+    commit-message:
+      prefix: "deps(actions)"
