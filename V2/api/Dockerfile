@@ -1,5 +1,8 @@
 # Dockerfile para API V2 Lead Scoring
-FROM python:3.10-slim-bullseye
+# Base: Debian 12 (bookworm). O bullseye saiu de suporte em 31/08/2026 e o apt-get do
+# build passou a dar 404 em maquina limpa (primeiro deploy pelo Actions, 14/09/2026).
+# tests/test_dockerfile_base.py trava a volta para distro fora de suporte.
+FROM python:3.10-slim-bookworm
 
 # Metadados
 LABEL maintainer="Smart Ads Team"
