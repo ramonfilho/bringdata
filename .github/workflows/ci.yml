@@ -1,0 +1,122 @@
+# CI: roda em todo pull request e, chamado pelo deploy.yml, em todo push na main.
+#
+# Três trabalhos:
+#   lint       - ruff com o conjunto MÍNIMO de regras (E9, F63, F7, F82): só o que quebra
+#                em execução (arquivo que não compila, comparação sempre falsa, return/break
+#                fora de lugar, nome nunca definido). O conjunto completo dá 1.472
+#                apontamentos em ~180 mil linhas e não serve de porta; este dava 13,
+#                corrigidos na PR #260.
+#   test       - a suíte inteira em Python 3.10 (a versão da imagem, V2/api/Dockerfile),
+#                sem credencial nenhuma. Os artefatos do modelo ativo vêm do bucket quando
+#                o job tem identidade no GCP (push na main ou PR de branch do próprio
+#                repositório); PR vindo de fork não recebe identidade, e nesse caso só o
+#                teste que precisa do artefato pula.
+#   model-gate - só em PR: se configs/active_models/ mudou, julga o run que ENTRA
+#                (scripts/ci_check_active_model.py): FINISHED no MLflow, artefatos no
+#                bucket, pisos de AUC/monotonia, lineage, delta contra o champion anterior.
+#
+# As variáveis GCP_* vêm de Settings > Variables (scripts/bootstrap_identidade_ci.sh
+# grava as duas). Na main este arquivo não dispara sozinho: o deploy.yml o chama
+# (workflow_call) como primeiro job, e o canary só nasce se ele passar.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write   # identidade federada no GCP (google-github-actions/auth)
+
+jobs:
+  lint:
+    name: lint mínimo (ruff E9,F63,F7,F82)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install ruff==0.12.10
+      - run: ruff check --select E9,F63,F7,F82 V2/src V2/api V2/scripts V2/tests
+
+  test:
+    name: pytest (Python 3.10, artefatos do bucket quando ha identidade)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: V2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: |
+            V2/api/requirements.txt
+            V2/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+
+      - name: Autenticar no GCP (identidade federada)
+        id: auth
+        if: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) }}
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - name: gcloud
+        if: steps.auth.outcome == 'success'
+        uses: google-github-actions/setup-gcloud@v2
+      - name: Artefatos dos runs ativos (bucket do MLflow)
+        if: steps.auth.outcome == 'success'
+        run: bash scripts/baixar_artefatos_modelo.sh
+
+      - name: pytest
+        env:
+          # Com identidade, artefato ausente é FALHA (o gate do modelo não pode virar skip).
+          CI_REQUIRE_MODEL_ARTIFACTS: ${{ steps.auth.outcome == 'success' && '1' || '' }}
+        run: python -m pytest
+
+  model-gate:
+    name: gate do modelo (run que a PR troca no YAML)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: V2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # precisa de origin/main para comparar o YAML
+      - name: o YAML de produção mudou nesta PR?
+        id: mudou
+        run: |
+          if git diff --quiet origin/main...HEAD -- configs/active_models/; then
+            echo "mudou=false" >> "$GITHUB_OUTPUT"; echo "YAML de produção intacto: nada a julgar."
+          else
+            echo "mudou=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.mudou.outputs.mudou == 'true'
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: V2/requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+        if: steps.mudou.outputs.mudou == 'true'
+      - name: Autenticar no GCP (identidade federada)
+        if: steps.mudou.outputs.mudou == 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+        if: steps.mudou.outputs.mudou == 'true'
+      - name: julgar o run que entra
+        if: steps.mudou.outputs.mudou == 'true'
+        run: python3 scripts/ci_check_active_model.py --base-ref origin/main
