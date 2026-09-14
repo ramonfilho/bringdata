@@ -24,6 +24,14 @@
 #
 # workflow_dispatch com modo=wif-check: só prova a identidade (token, bucket, segredo),
 # não toca produção. Use uma vez depois do bootstrap.
+#
+# Rollback (desde 14/09/2026):
+#   automático - cada degrau roda scripts/promover_com_rollback.sh: gate, promote, smoke
+#                depois do tráfego. Gate=ROLLBACK, promote quebrado ou smoke ruim devolvem
+#                100% à revisão que estava viva antes do canário, sozinhos.
+#   manual     - workflow_dispatch com modo=rollback e revisao_alvo: devolve 100% àquela
+#                revisão pelo deploy-gate (com --rollback, que libera a monotonicidade) e
+#                alinha os espelhos. É o botão de emergência, sem esperar environment.
 name: Deploy
 
 on:
@@ -32,10 +40,14 @@ on:
   workflow_dispatch:
     inputs:
       modo:
-        description: "canary (fluxo normal) ou wif-check (só testa a identidade)"
+        description: "canary (fluxo normal), wif-check (só testa a identidade) ou rollback (devolve 100% a uma revisão)"
         type: choice
         default: canary
-        options: [canary, wif-check]
+        options: [canary, wif-check, rollback]
+      revisao_alvo:
+        description: "modo=rollback: revisão que volta a 100% (ex.: smart-ads-api-01141-hex)"
+        type: string
+        required: false
 
 concurrency:
   group: deploy-prod          # um deploy por vez; o seguinte espera (não cancela)
@@ -53,6 +65,27 @@ env:
   GCP_IMPERSONATE_SA: ${{ vars.GCP_DEPLOYER_SA }}
 
 jobs:
+  rollback:
+    name: rollback manual (revisao_alvo volta a 100%)
+    if: github.event_name == 'workflow_dispatch' && inputs.modo == 'rollback'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: revisao_alvo obrigatória
+        run: test -n "${{ inputs.revisao_alvo }}" || { echo "informe revisao_alvo"; exit 1; }
+      - name: deploy-gate promote --rollback (100% + lockstep dos espelhos)
+        run: bash V2/api/deploy-gate.sh promote --revision "${{ inputs.revisao_alvo }}" --to 100 --rollback --yes
+      - name: smoke na revisão restaurada
+        run: python3 V2/scripts/smoke_test_revision.py "${{ inputs.revisao_alvo }}"
+
   wif-check:
     name: identidade federada (só leitura)
     if: github.event_name == 'workflow_dispatch' && inputs.modo == 'wif-check'
@@ -138,9 +171,8 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v2
-      - name: progression_gate 0 -> 10 (PROMOTE=0, HOLD=1, ROLLBACK=2)
-        run: python3 V2/scripts/progression_gate.py --revision "${{ needs.canary.outputs.revision }}" --from 0 --to 10 --rollback "${{ needs.canary.outputs.previous }}"
-      - run: bash V2/api/deploy-gate.sh promote --revision "${{ needs.canary.outputs.revision }}" --to 10 --yes
+      - name: gate 0 -> 10, promote a 10%, smoke; rollback automático se der ruim
+        run: bash V2/scripts/promover_com_rollback.sh "${{ needs.canary.outputs.revision }}" "${{ needs.canary.outputs.previous }}" 0 10
 
   canary-50:
     name: promover a 50%
@@ -158,9 +190,8 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v2
-      - name: progression_gate 10 -> 50
-        run: python3 V2/scripts/progression_gate.py --revision "${{ needs.canary.outputs.revision }}" --from 10 --to 50 --rollback "${{ needs.canary.outputs.previous }}"
-      - run: bash V2/api/deploy-gate.sh promote --revision "${{ needs.canary.outputs.revision }}" --to 50 --yes
+      - name: gate 10 -> 50, promote a 50%, smoke; rollback automático se der ruim
+        run: bash V2/scripts/promover_com_rollback.sh "${{ needs.canary.outputs.revision }}" "${{ needs.canary.outputs.previous }}" 10 50
 
   production:
     name: promover a 100% (+ lockstep dos espelhos)
@@ -178,6 +209,5 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v2
-      - name: progression_gate 50 -> 100
-        run: python3 V2/scripts/progression_gate.py --revision "${{ needs.canary.outputs.revision }}" --from 50 --to 100 --rollback "${{ needs.canary.outputs.previous }}"
-      - run: bash V2/api/deploy-gate.sh promote --revision "${{ needs.canary.outputs.revision }}" --to 100 --yes
+      - name: gate 50 -> 100, promote a 100%, smoke; rollback automático se der ruim
+        run: bash V2/scripts/promover_com_rollback.sh "${{ needs.canary.outputs.revision }}" "${{ needs.canary.outputs.previous }}" 50 100
