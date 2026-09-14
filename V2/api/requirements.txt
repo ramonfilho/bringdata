@@ -47,7 +47,7 @@ google-ads==31.0.0
 google-cloud-bigquery==3.14.1
 
 # Cloud Storage (para upload de relatórios de validação)
-google-cloud-storage==2.14.0
+google-cloud-storage==3.14.1
 
 # Cloud Logging (consumido por /monitoring/feature-report — substitui subprocess gcloud)
 google-cloud-logging==3.9.0
