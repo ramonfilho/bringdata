@@ -193,3 +193,11 @@ def test_rollback_e_a_revisao_viva_e_sem_default_velho():
     g = (_V2 / "scripts" / "progression_gate.py").read_text()
     assert "00269-jjn" not in t and "00269-jjn" not in g, "voltou o default de revisão morta"
     assert "percent')==100" in t, "o alvo de rollback tem que ser a revisão que serve 100%"
+
+
+def test_webhook_do_slack_nao_e_literal_no_config():
+    """Quem tem a URL do webhook posta no canal. Ela é segredo, e segredo vem do Secret Manager."""
+    t = (_V2 / "api" / "lib" / "config.sh").read_text()
+    assert "hooks.slack.com/services/" not in t, "URL de webhook literal em arquivo versionado"
+    assert "slack-webhook-url" in t, "o webhook tem que vir do Secret Manager"
+    assert "ERROR_SLACK_SECRET_UNAVAILABLE" in _DEPLOY.read_text(), "o deploy não confere a sentinela"

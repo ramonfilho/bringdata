@@ -22,10 +22,15 @@ class ValidationSlackNotifier:
             webhook_url: URL do webhook Slack (usa env var se não fornecido)
         """
         import os
-        self.webhook_url = webhook_url or os.getenv(
-            'SLACK_WEBHOOK_URL',
-            'https://hooks.slack.com/services/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'
-        )
+        # Sem fallback literal: até 14/09/2026 a URL do webhook (que é segredo: quem a
+        # tem posta no canal) ficava aqui em texto claro. Agora vem do ambiente, que o
+        # deploy preenche a partir do Secret Manager (slack-webhook-url).
+        self.webhook_url = webhook_url or os.getenv('SLACK_WEBHOOK_URL')
+        if not self.webhook_url:
+            raise ValueError(
+                'SLACK_WEBHOOK_URL ausente: o deploy a injeta a partir do Secret Manager '
+                '(slack-webhook-url); localmente, exporte a variável.'
+            )
 
     def send_validation_summary(
         self,

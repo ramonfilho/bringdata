@@ -122,6 +122,10 @@ PADROES_PROIBIDOS = [
     (re.compile(r"\bghp_[A-Za-z0-9]{30,}\b"), "token pessoal do GitHub"),
     (re.compile(r"\bAIza[A-Za-z0-9_\-]{30,}\b"), "chave de API do Google"),
     (re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"), "chave privada"),
+    # URL de webhook do Slack: quem tem a URL posta no canal. Ficou literal em
+    # api/lib/config.sh até 14/09/2026 porque nenhum padrão acima casa URL.
+    (re.compile(r"hooks\.slack\.com/services/T[A-Z0-9]{5,}/B[A-Z0-9]{5,}/[A-Za-z0-9]{16,}"),
+     "URL de webhook do Slack em texto claro (use Secret Manager: slack-webhook-url)"),
 ]
 
 # Binários e artefatos onde varrer texto não faz sentido.

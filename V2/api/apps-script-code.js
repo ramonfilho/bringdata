@@ -15,7 +15,7 @@
 const API_URL = 'https://bring-data-api-12955519745.us-central1.run.app';
 const SERVICE_ACCOUNT_EMAIL = 'smart-ads-451319@appspot.gserviceaccount.com';
 const META_ACCOUNT_ID = 'act_188005769808959';  // Los Angeles Producciones LTDA (PRODUÇÃO)
-const SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/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';
+const SLACK_WEBHOOK_URL = '<SLACK_WEBHOOK_URL: definir nas Script Properties, nunca no código>';
 
 // =============================================================================
 // MENU

@@ -138,7 +138,13 @@ INGESTION_CADASTROS_SCHEDULE="${INGESTION_CADASTROS_SCHEDULE:-0 10 * * *}"
 # SLACK (NOTIFICATIONS)
 # =============================================================================
 
-SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-https://hooks.slack.com/services/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}"
+# O webhook do Slack é um segredo (quem tem a URL posta no canal). Até 14/09/2026 ele era
+# um literal versionado aqui, e o teste anti-credencial não pegava URL de webhook. Agora
+# vem do Secret Manager (slack-webhook-url) e o build_env_vars aborta se não vier.
+# `|| true`: o script que faz source roda com `set -e`, e uma substituição que falha
+# (segredo ainda não criado, máquina sem gcloud) mataria o script em silêncio. Vazio
+# aqui vira a sentinela ERROR_SLACK_SECRET_UNAVAILABLE no build_env_vars, que grita.
+SLACK_WEBHOOK_URL="${SLACK_WEBHOOK_URL:-$(gcloud secrets versions access latest --secret=slack-webhook-url --project="$PROJECT_ID" 2>/dev/null || true)}"
 
 # =============================================================================
 # META API (DATA SOURCE)
@@ -178,6 +184,10 @@ build_env_vars() {
     ENV_VARS="$ENV_VARS,META_DATA_SOURCE=$META_DATA_SOURCE"
     ENV_VARS="$ENV_VARS,GURU_DATA_SOURCE=$GURU_DATA_SOURCE"
     ENV_VARS="$ENV_VARS,VALIDATION_REPORTS_BUCKET=$BUCKET_NAME"
+    if [ -z "$SLACK_WEBHOOK_URL" ]; then
+        echo "ERROR_SLACK_SECRET_UNAVAILABLE"
+        return 1
+    fi
     ENV_VARS="$ENV_VARS,SLACK_WEBHOOK_URL=$SLACK_WEBHOOK_URL"
     ENV_VARS="$ENV_VARS,TZ=America/Sao_Paulo"
     ENV_VARS="$ENV_VARS,RAILWAY_DB_HOST=$RAILWAY_DB_HOST"

@@ -230,7 +230,7 @@ DB_USER=postgres,\
 DB_PASSWORD=<senha: gcloud secrets versions access latest --secret=mlflow-db-password>,\
 META_DATA_SOURCE=api,\
 VALIDATION_REPORTS_BUCKET=bring-data-validation-reports,\
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/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"
+SLACK_WEBHOOK_URL=<valor: gcloud secrets versions access latest --secret=slack-webhook-url>"
 ```
 
 ### 4️⃣ Deploy
