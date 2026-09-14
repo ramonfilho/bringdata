@@ -21,7 +21,9 @@
 # Overrides (uso consciente): --allow-behind (canary fora do topo)  --rollback (promover atrás do vivo)  --no-sync (não alinhar monitoring)
 set -uo pipefail
 
-REPO="/Users/ramonmoreira/Desktop/bring_data"
+# Raiz do repositório derivada do próprio arquivo (V2/api/deploy-gate.sh -> ../..). Era um
+# caminho absoluto de UM Mac, e o gate passou a rodar também no runner do GitHub Actions.
+REPO="${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 PROJECT="smart-ads-451319"; REGION="us-central1"
 API_SVC="smart-ads-api"; MON_SVC="smart-ads-monitoring"
 # Serviços que rodam a MESMA imagem do scorer e precisam andar junto com ele.
@@ -48,6 +50,9 @@ ok(){   echo "${c_grn}ok${c_off} $*"; }
 warn(){ echo "${c_yel}!!${c_off} $*"; }
 err(){  echo "${c_red}xx${c_off} $*" >&2; }
 now_utc(){ date -u +%Y-%m-%dT%H:%M:%SZ; }
+# Quem está operando, para o lock e o ledger: no GitHub Actions, ator e número do run
+# (rastreável até o log do job); fora dele, o hostname, como sempre foi.
+quem(){ if [ -n "${GITHUB_ACTIONS:-}" ]; then echo "github:${GITHUB_ACTOR:-?}:run${GITHUB_RUN_ID:-?}"; else hostname -s 2>/dev/null; fi; }
 
 # ───────── helpers read-only ─────────
 live_revision(){ gcloud run services describe "$1" --region="$REGION" --project="$PROJECT" --format=json 2>/dev/null \
@@ -75,7 +80,7 @@ rel_to_main(){ local sha="$1"
 # ───────── ledger (1 objeto por evento no GCS = sem corrida) ─────────
 ledger_write(){ local ts; ts=$(now_utc); local obj="$GS_BASE/events/${ts//:/-}_$2_$1.json"
   printf '{"ts":"%s","host":"%s","action":"%s","service":"%s","from_sha":"%s","to_sha":"%s","result":"%s","reason":"%s"}\n' \
-    "$ts" "$(hostname -s 2>/dev/null)" "$1" "$2" "$3" "$4" "$5" "${6:-}" \
+    "$ts" "$(quem)" "$1" "$2" "$3" "$4" "$5" "${6:-}" \
     | gcloud storage cp - "$obj" --project="$PROJECT" >/dev/null 2>&1 && info "ledger: $1/$2 -> $5" || warn "ledger: falha (segue)"; }
 ledger_tail(){ gcloud storage ls "$GS_BASE/events/" --project="$PROJECT" 2>/dev/null | sort | tail -"${1:-6}" \
   | while read -r o; do gcloud storage cat "$o" --project="$PROJECT" 2>/dev/null; done \
@@ -87,7 +92,7 @@ for l in sys.stdin:
 
 # ───────── lock distribuído (GCS, atômico via if-generation-match=0) ─────────
 lock_holder(){ gcloud storage cat "$LOCK_OBJ" --project="$PROJECT" 2>/dev/null; }
-lock_acquire(){ local j; j=$(printf '{"host":"%s","ts":"%s","pid":%s}' "$(hostname -s)" "$(now_utc)" "$$")
+lock_acquire(){ local j; j=$(printf '{"host":"%s","ts":"%s","pid":%s}' "$(quem)" "$(now_utc)" "$$")
   for a in 1 2 3; do
     if printf '%s\n' "$j" | gcloud storage cp - "$LOCK_OBJ" --if-generation-match=0 --project="$PROJECT" >/dev/null 2>&1; then ok "lock adquirido."; return 0; fi
     local held ts; held=$(lock_holder); ts=$(printf '%s' "$held" | python3 -c "import json,sys;print(json.load(sys.stdin).get('ts',''))" 2>/dev/null)
