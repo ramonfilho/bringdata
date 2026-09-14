@@ -1,0 +1,183 @@
+# Deploy: push na main -> suíte -> canary a 0% -> progressão 10 / 50 / 100 com aprovação.
+#
+# O motor é o mesmo de antes, V2/api/deploy-gate.sh (lock no GCS, frescor, monotonicidade,
+# ledger, lockstep dos espelhos) envelopando o deploy_capi.sh (build, revisão sem tráfego,
+# Gates B, C e D). O que muda é QUEM chama: o runner, com a identidade federada da conta
+# github-deployer (scripts/bootstrap_identidade_ci.sh), em vez de um laptop com .env.
+#
+# Jobs:
+#   test        - reaproveita o ci.yml (lint + pytest). Canary só nasce se passar.
+#   canary      - build da imagem a partir do SHA do push, revisão a 0% com tag canary-*,
+#                 Gates B (smoke), D (YAML dentro da imagem), C (replay de 50 leads contra a
+#                 revisão viva) e o progression_gate em modo check 0 -> 10.
+#   canary-10, canary-50, production
+#               - cada um espera aprovação no environment de mesmo nome (required reviewers),
+#                 consulta o progression_gate (exit 0 = PROMOTE; 1 = HOLD, o job falha e
+#                 pode ser reexecutado mais tarde sem novo deploy; 2 = ROLLBACK) e promove
+#                 pelo deploy-gate, que em 100% alinha os espelhos monitoring e webhook.
+#
+# Trava de segurança da promoção: os três jobs só rodam com a variável PROMOTION_ENABLED
+# igual a "true". Ela deve ser ligada SÓ depois que os três environments existirem com
+# required reviewers (repositório público ou plano Pro). Sem essa trava, num repositório
+# privado no plano Free o GitHub cria o environment sem proteção e a promoção sairia
+# sem ninguém aprovar.
+#
+# workflow_dispatch com modo=wif-check: só prova a identidade (token, bucket, segredo),
+# não toca produção. Use uma vez depois do bootstrap.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: "canary (fluxo normal) ou wif-check (só testa a identidade)"
+        type: choice
+        default: canary
+        options: [canary, wif-check]
+
+concurrency:
+  group: deploy-prod          # um deploy por vez; o seguinte espera (não cancela)
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: smart-ads-451319
+  REGION: us-central1
+  SERVICE: smart-ads-api
+  # scripts/gcp_auth.py: token de identidade personificando a própria conta do runner
+  GCP_IMPERSONATE_SA: ${{ vars.GCP_DEPLOYER_SA }}
+
+jobs:
+  wif-check:
+    name: identidade federada (só leitura)
+    if: github.event_name == 'workflow_dispatch' && inputs.modo == 'wif-check'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: o que o pipeline precisa conseguir fazer
+        run: |
+          set -e
+          echo "conta ativa: $(gcloud config get-value account)"
+          URL=$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT_ID" --format='value(status.url)')
+          echo "serviço: $URL"
+          gcloud auth print-identity-token --audiences="$URL" >/dev/null && echo "token de identidade: ok"
+          gcloud storage ls "gs://smart-ads-mlflow/deploy-gate/" >/dev/null && echo "bucket do gate: ok"
+          gcloud secrets versions access latest --secret=railway-db-password --project="$PROJECT_ID" >/dev/null && echo "segredo railway-db-password: ok"
+          gcloud artifacts docker images list gcr.io/$PROJECT_ID/$SERVICE --limit=1 >/dev/null && echo "registro de imagens: ok"
+
+  test:
+    if: github.event_name == 'push' || inputs.modo == 'canary'
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  canary:
+    name: canary a 0% (build + gates)
+    needs: test
+    runs-on: ubuntu-latest
+    outputs:
+      revision: ${{ steps.rev.outputs.revision }}
+      previous: ${{ steps.rev.outputs.previous }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # o gate compara HEAD com origin/main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: V2/requirements-dev.txt
+      - run: pip install -r V2/requirements-dev.txt
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - uses: docker/setup-buildx-action@v3
+      - run: gcloud auth configure-docker gcr.io --quiet
+
+      - name: revisão viva antes do deploy (alvo de rollback)
+        id: before
+        run: |
+          gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT_ID" --format=json \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print(next(t['revisionName'] for t in d['status']['traffic'] if t.get('percent')==100))" \
+            | tee -a "$GITHUB_STEP_SUMMARY" | sed 's/^/previous=/' >> "$GITHUB_OUTPUT"
+
+      - name: deploy-gate deploy (canary 0% + Gates B, D, C + check 0 -> 10)
+        run: bash V2/api/deploy-gate.sh deploy --yes
+
+      - name: revisão canary criada
+        id: rev
+        run: |
+          REV=$(gcloud run revisions list --service="$SERVICE" --region="$REGION" --project="$PROJECT_ID" --format='value(metadata.name)' --limit=1)
+          echo "revision=$REV" >> "$GITHUB_OUTPUT"
+          echo "previous=${{ steps.before.outputs.previous }}" >> "$GITHUB_OUTPUT"
+          echo "canary: $REV (viva: ${{ steps.before.outputs.previous }})" >> "$GITHUB_STEP_SUMMARY"
+
+  canary-10:
+    name: promover a 10%
+    needs: canary
+    if: vars.PROMOTION_ENABLED == 'true'
+    environment: canary-10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: progression_gate 0 -> 10 (PROMOTE=0, HOLD=1, ROLLBACK=2)
+        run: python3 V2/scripts/progression_gate.py --revision "${{ needs.canary.outputs.revision }}" --from 0 --to 10 --rollback "${{ needs.canary.outputs.previous }}"
+      - run: bash V2/api/deploy-gate.sh promote --revision "${{ needs.canary.outputs.revision }}" --to 10 --yes
+
+  canary-50:
+    name: promover a 50%
+    needs: [canary, canary-10]
+    if: vars.PROMOTION_ENABLED == 'true'
+    environment: canary-50
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: progression_gate 10 -> 50
+        run: python3 V2/scripts/progression_gate.py --revision "${{ needs.canary.outputs.revision }}" --from 10 --to 50 --rollback "${{ needs.canary.outputs.previous }}"
+      - run: bash V2/api/deploy-gate.sh promote --revision "${{ needs.canary.outputs.revision }}" --to 50 --yes
+
+  production:
+    name: promover a 100% (+ lockstep dos espelhos)
+    needs: [canary, canary-50]
+    if: vars.PROMOTION_ENABLED == 'true'
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: progression_gate 50 -> 100
+        run: python3 V2/scripts/progression_gate.py --revision "${{ needs.canary.outputs.revision }}" --from 50 --to 100 --rollback "${{ needs.canary.outputs.previous }}"
+      - run: bash V2/api/deploy-gate.sh promote --revision "${{ needs.canary.outputs.revision }}" --to 100 --yes
