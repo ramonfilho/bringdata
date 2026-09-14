@@ -193,40 +193,6 @@ def calculate_roas_multiplier(roas_proj: float) -> float:
     return multiplier
 
 
-def calculate_confidence_level(leads: int, period_days: int = 1) -> str:
-    """
-    Calcula nível de confiança estatística baseado no volume de leads e período
-
-    Baseado em requisitos da Learning Phase do Meta Ads (2024):
-    - Meta: 10 conversões em 3 dias (~3.3/dia)
-    - Google Ads: 30 conversões em 30 dias (1/dia)
-
-    Thresholds escalados por período:
-    - Base: 3 leads/dia (insuficiente), 10/dia (baixa), 20/dia (média)
-
-    Args:
-        leads: Número de leads no período
-        period_days: Número de dias do período (1, 3, 7, 30, etc.)
-
-    Returns:
-        Nível de confiança: 'insuficiente', 'baixa', 'media', 'alta'
-    """
-    # Thresholds ajustados por período (leads/dia × período)
-    # Importados de business_config.py
-    threshold_insuficiente = CONFIDENCE_THRESHOLDS_PER_DAY["insufficient"] * period_days
-    threshold_baixa = CONFIDENCE_THRESHOLDS_PER_DAY["low"] * period_days
-    threshold_media = CONFIDENCE_THRESHOLDS_PER_DAY["medium"] * period_days
-
-    if leads < threshold_insuficiente:
-        return 'insuficiente'
-    elif leads < threshold_baixa:
-        return 'baixa'
-    elif leads < threshold_media:
-        return 'media'
-    else:
-        return 'alta'
-
-
 def calculate_budget_variation(
     margem_contrib: float,
     spend: float,
