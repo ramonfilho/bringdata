@@ -138,7 +138,7 @@ def test_breakeven_e_o_definidor_no_render():
 
 
 if __name__ == "__main__":
-    for fn in (test_sinal_por_breakeven, test_casa_por_campaign_id_quando_nome_diverge,
+    for fn in (test_casa_por_campaign_id_quando_nome_diverge,
                test_folga_negativa_e_render, test_frozen_noop,
                test_breakeven_e_o_definidor_no_render):
         fn()

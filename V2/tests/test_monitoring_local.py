@@ -73,9 +73,6 @@ if __name__ == '__main__':
     # Teste 1: Função isolada
     test_calculate_missing_rate()
 
-    # Teste 2: Monitoramento completo
-    test_monitoring_with_sheets_api()
-
     print("="*80)
     print("✅ TODOS OS TESTES PASSARAM!")
     print("="*80)

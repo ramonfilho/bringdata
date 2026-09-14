@@ -2989,7 +2989,7 @@ def main():
             slack_metrics = {
                 'status': 'success',
                 'total_leads': len(leads_df) if 'leads_df' in locals() else 0,
-                'total_conversions': conversions_count if 'conversions_count' in locals() else 0,
+                'total_conversions': locals().get('conversions_count', 0),
                 'total_campaigns': len(costs_hierarchy_temp) if 'costs_hierarchy_temp' in locals() else 0
             }
 

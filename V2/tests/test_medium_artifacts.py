@@ -44,6 +44,10 @@ def _active_run_id() -> str:
         pytest.skip(f"{cfg_path.name} sem mlflow_run_id")
     artifact_dir = ROOT / 'mlruns' / '1' / run_id / 'artifacts' / 'model'
     if not artifact_dir.exists():
+        # No CI os artefatos vêm do bucket antes do pytest; ausência ali é falha, porque um
+        # skip verde esconderia justamente o gate do modelo. Fora do CI continua skip.
+        if os.environ.get('CI_REQUIRE_MODEL_ARTIFACTS'):
+            pytest.fail(f"CI_REQUIRE_MODEL_ARTIFACTS ligado e artefato ausente: {artifact_dir}")
         pytest.skip(f"Artifact local do modelo ativo não disponível: {artifact_dir}")
     return run_id
 

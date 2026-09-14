@@ -1071,7 +1071,8 @@ def send_purchase_event(
     user_agent: Optional[str],
     client_ip: Optional[str],
     event_source_url: Optional[str],
-    capi_config: Optional[CAPIConfig] = None
+    capi_config: Optional[CAPIConfig] = None,
+    test_event_code: Optional[str] = None,
 ) -> Dict:
     """
     Envia evento Purchase quando lead vira venda

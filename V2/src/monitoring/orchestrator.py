@@ -1178,6 +1178,10 @@ class MonitoringOrchestrator:
         """
         from datetime import datetime, timedelta, timezone
         from api.database import LeadCAPI
+        # Cliente para o filtro multi-cliente (era usado sem definição: NameError latente
+        # sempre que `_filter_by_client` fosse True). Mesmo critério de
+        # `_generate_operational_routines_summary`.
+        _client_id = getattr(self._client_config, 'client_id', 'devclub') if self._client_config else 'devclub'
 
         if self.db is None:
             return {}
