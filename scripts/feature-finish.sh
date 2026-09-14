@@ -21,6 +21,8 @@ gh pr create --repo ramonfilho/bringdata --base main --head "$branch" --fill
 
 echo ""
 echo "✅ PR aberto para $branch."
+echo "ℹ️  O CI roda na PR (lint mínimo, suíte em Python 3.10, gate do modelo se o YAML mudou):"
+echo "      gh pr checks --watch     # acompanha até ficar verde"
 echo ""
 echo "ℹ️  Ao mergear o PR, feche esta sala pra não acumular:"
 echo "      bash scripts/worktree-janitor.sh            # dry-run (mostra o que faria)"
