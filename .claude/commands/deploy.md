@@ -2,6 +2,8 @@
 
 Todo deploy de produção passa pelo `V2/api/deploy-gate.sh` — nunca `deploy_capi.sh` direto, nunca overlay (`gcloud run services update --image`) na mão. Doc completa: `V2/docs/DEPLOY_GATEKEEPER.md`.
 
+Desde 14/09/2026 o mesmo gate roda no GitHub Actions (`.github/workflows/deploy.yml`): merge na `main` cria o canary a 0% com os gates; promover a 10/50/100 passa por aprovação nos environments e pelo `progression_gate`. O fluxo manual abaixo continua válido e é o único enquanto os workflows não estiverem na `main` e os environments não existirem com reviewer (seção "Pelo GitHub Actions" do doc).
+
 ## Como agir quando esta skill for invocada
 1. **SEMPRE** comece pelo estado: `bash V2/api/deploy-gate.sh status`
 2. **Prévia** antes de agir: `... deploy --dry-run` / `... promote --revision R --dry-run`
