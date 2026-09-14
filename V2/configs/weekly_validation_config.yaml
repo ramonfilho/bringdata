@@ -79,7 +79,7 @@ cloud_run:
     META_DATA_SOURCE: "local"  # Usar CSV local (trocar para 'api' em produção)
     GURU_DATA_SOURCE: "api"    # Sempre usar API da Guru
     VALIDATION_REPORTS_BUCKET: "bring-data-validation-reports"
-    SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/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"
+    SLACK_WEBHOOK_URL: "<Secret Manager: slack-webhook-url>"
 
   # Comando para atualizar env vars:
   update_env_command: |
@@ -93,7 +93,7 @@ cloud_run:
 # -----------------------------------------------------------------------------
 slack:
   # Webhook URL (pode ser o mesmo do monitoramento ou criar canal separado)
-  webhook_url: "https://hooks.slack.com/services/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"
+  webhook_url: "<Secret Manager: slack-webhook-url>"
 
   # Formato da mensagem
   message_format:

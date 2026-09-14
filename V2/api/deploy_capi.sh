@@ -622,6 +622,10 @@ deploy_to_cloud_run() {
         print_error "Token das rotas internas não veio (Secret Manager api-internal-token). Sem ele as rotas fechadas devolvem 401 pra todo mundo. Abortando deploy."
         exit 1
     fi
+    if [[ "$ENV_VARS" == *"ERROR_SLACK_SECRET_UNAVAILABLE"* ]]; then
+        print_error "O webhook do Slack não veio (Secret Manager slack-webhook-url). Sem ele os alertas e relatórios saem mudos. Abortando deploy."
+        exit 1
+    fi
     print_success "Variáveis de ambiente configuradas (via lib/config.sh)"
 
     TRAFFIC_FLAG=""
