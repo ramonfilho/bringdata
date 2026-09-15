@@ -67,29 +67,55 @@ SERVICE_NAME = 'smart-ads-api'
 REGION = 'us-central1'
 PROJECT = 'smart-ads-451319'
 
-# Critérios por estágio (T1-9 em PLANO_SAFEGUARD.md)
+# Critérios por estágio (T1-9 em PLANO_SAFEGUARD.md).
+#
+# `janela_horas` é a JANELA DE EVIDÊNCIA: quantas horas para trás o gate olha ao pedir o
+# feature-report, o daily-check e a taxa de 5xx da revisão. Não é tempo mínimo de espera.
+# Até 15/09/2026 a chave se chamava `min_hours_observed` e o estágio 100 tinha
+# `min_days_observed: 7`, que nenhuma linha lia: o gate nunca esperou 24h nem 7 dias, só
+# olhava 24h para trás. O nome novo diz o que o código faz. A espera entre degraus é a
+# aprovação humana no environment do GitHub (canary-10, canary-50, production).
+#
+# Taxas (`min_capi_sent_rate`, `min_meta_acceptance_rate`) são FRAÇÕES (0.90 = 90%). O
+# daily-check devolve porcentagem (66.6 = 66,6%); check_daily_report normaliza. Até 15/09
+# a comparação era feita sem normalizar (66.6 < 0.90 é falso), então esses dois critérios
+# nunca seguraram nada.
 STAGE_CRITERIA = {
     10: {
-        'min_hours_observed': 1.0,
+        # Desde #274 o degrau 0 -> 10 no deploy.yml passa pelo smoke, não por este gate.
+        # Fica para uso manual (--from 0 --to 10) e para o check logo depois do Gate C.
+        'janela_horas': 1,
         'max_5xx_rate': 0.01,              # 1%
         'required_feature_report_status': ['OK', 'INFO'],  # WARNING bloqueia progressão
     },
     50: {
-        'min_hours_observed': 24.0,
+        'janela_horas': 24,
         'max_5xx_rate': 0.01,
         'required_feature_report_status': ['OK', 'INFO'],  # alinhado com PLANO_SAFEGUARD § "Como tráfego cresce após o deploy" (10→50: feature_report ∈ {OK, INFO})
-        'min_capi_sent_rate': 0.90,
+        # DESLIGADO em 15/09/2026 (None): com a normalização de unidade este critério passaria
+        # a segurar toda promoção, porque o send_rate medido em 24h no serviço inteiro é 66,6%
+        # e ninguém definiu se isso é normal (leads sem fbp/fbc, fontes fora da Meta) ou defeito.
+        # Ligar de volta com um número medido, não com o 90% do plano de abril.
+        'min_capi_sent_rate': None,
         'min_meta_acceptance_rate': 0.85,
         'max_d10_divergence_pp': 10.0,
     },
     100: {
-        'min_days_observed': 7,            # deploys normais
+        'janela_horas': 24,
         'required_feature_report_status': ['OK'],
-        'min_capi_sent_rate': 0.90,
+        'min_capi_sent_rate': None,        # idem estágio 50
         'max_5xx_rate': 0.01,
         'note': 'Main unificada aguarda DEV20 fechar (17/05+) para ROAS consolidado',
     },
 }
+
+
+def _fracao(v):
+    """Taxa em fração (0-1). O daily-check manda porcentagem (66.6); 1.0 e abaixo já é fração."""
+    if v is None:
+        return None
+    v = float(v)
+    return v / 100.0 if v > 1.0 else v
 
 
 @dataclass
@@ -211,8 +237,8 @@ def check_daily_report(base_url: str, hours: int) -> Dict[str, Any]:
 
     return {
         'ok': True,
-        'capi_sent_rate': capi_sent.get('send_rate'),
-        'meta_acceptance_rate': meta_resp.get('acceptance_rate'),
+        'capi_sent_rate': _fracao(capi_sent.get('send_rate')),
+        'meta_acceptance_rate': _fracao(meta_resp.get('acceptance_rate')),
         'decil_zero_events': decil_zero,
         'd10_pct_24h': d10_24h,
         'd10_pct_month': d10_month,
@@ -342,7 +368,7 @@ def main():
         return 3
 
     stage = STAGE_CRITERIA[args.to_pct]
-    hours = args.observation_hours or int(stage.get('min_hours_observed', 24))
+    hours = args.observation_hours or int(stage.get('janela_horas', 24))
 
     print(f"[gate] Progressão {args.from_pct}% → {args.to_pct}%")
     print(f"[gate] Revisão canary: {args.revision}")

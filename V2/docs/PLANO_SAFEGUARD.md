@@ -381,11 +381,13 @@ Etapas obrigatórias entre revisão criada e revisão em 100%. Cada etapa exige 
 
 ### Etapas padrão
 
-| De | Para | Tempo mínimo | Critérios objetivos |
+| De | Para | Janela de evidência | Critérios objetivos |
 |---|---|---|---|
 | Build | 0% (`--no-traffic`) | — | Smoke test 5 leads: score retorna, decil atribuído, log CAPI sem 5xx |
-| 0% | 10% | 1 hora | Taxa de 5xx na nova rev < 1%; top-5 features do modelo não zeradas no smoke |
-| 10% | 50% | 24 horas | `funnel_metrics.capi_sent.send_rate` ≥ 90%; `meta_response.acceptance_rate` ≥ 85%; nenhum decil com 0 eventos CAPI; D10% últimas 24h não diverge de últimos 30 dias em mais de 10pp; `/monitoring/feature-report?hours=24` retorna `batches_with_issues=0` e `overall_status ∈ {OK, INFO}` |
+| 0% | 10% | — | Smoke de novo na revisão (desde #274, 14/09/2026). O check 0 → 10 do gate roda no deploy, logo depois do replay do Gate C; depois de aprovado, a revisão a 0% não tem lote na janela e o gate devolveria HOLD para sempre |
+| 10% | 50% | 24 horas para trás | `meta_response.acceptance_rate` ≥ 85%; nenhum decil com 0 eventos CAPI; D10% últimas 24h não diverge de últimos 30 dias em mais de 10pp; `/monitoring/feature-report?hours=24` retorna `batches_with_issues=0` e `overall_status ∈ {OK, INFO}`. `capi_sent.send_rate` ≥ 90% está DESLIGADO desde 15/09/2026: a comparação nunca funcionou (porcentagem contra fração) e o valor medido no serviço é 66,6%; ligar de volta com número medido |
+
+**Tempo mínimo de espera (corrigido em 15/09/2026):** o código nunca teve um. A coluna antiga dizia "1 hora", "24 horas" e o estágio 100 carregava `min_days_observed: 7` sem nenhuma linha que lesse a chave. A "janela" é quantas horas para trás o gate olha; a espera entre degraus é a aprovação humana no environment do GitHub Actions (canary-10, canary-50, production), e quem aprova decide quanto tempo o canário fica em cada degrau.
 | 50% | 100% | Caso a caso — ver abaixo | Caso a caso |
 
 ### 50% → 100% — dois cenários
