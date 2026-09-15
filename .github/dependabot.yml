@@ -53,6 +53,13 @@ updates:
     groups:
       dev:
         patterns: ["*"]
+    ignore:
+      # O cliente do MLflow fala DIRETO com o Postgres de tracking (URI postgresql+psycopg2).
+      # Um cliente 3.x contra o banco 2.13 tenta migrar o schema na primeira conexao. Subir
+      # de major e tarefa planejada (servidor e cliente juntos), nao PR de dependencia.
+      # A PR #273 do Dependabot (2.13.2 -> 3.16.0) foi fechada por isso em 14/09/2026.
+      - dependency-name: mlflow
+        update-types: ["version-update:semver-major"]
     labels: ["dependencias"]
     commit-message:
       prefix: "deps(dev)"
