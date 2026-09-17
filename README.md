@@ -95,6 +95,16 @@ The suite runs without a `.env`. Tests that need the model artifacts skip when t
 artifacts are absent; to run them, authenticate to GCP and fetch the artifacts of
 the active runs with `bash scripts/baixar_artefatos_modelo.sh`.
 
+## Automatic review
+
+Every pull request from this repository gets a second reader: `.github/workflows/revisao.yml`
+runs Claude Code over the diff and comments what it would change before merging (logic
+defects, unhandled error paths, secrets in clear text, missing tests). It does not block
+the merge; the branch protection only requires the CI checks. It needs one of two
+repository secrets: `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`, uses the
+Claude plan quota) or `ANTHROPIC_API_KEY` (billed per token). Without either, the job
+skips in seconds.
+
 ## Data and secrets
 
 No lead data and no credential is tracked. Secrets live in Google Secret Manager
