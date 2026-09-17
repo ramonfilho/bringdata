@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 os.environ.setdefault("RAILWAY_DB_HOST", "localhost")
 os.environ.setdefault("RAILWAY_DB_PASSWORD", "dummy-para-teste")
 
-import api.app as app_mod
+import api.routers.webhooks as app_mod  # o handler e o helper _hotleads_webhook_url vivem no router
 import api.hotleads_integration as hl
 import src.data.ledger_connection as ledger_conn
 
