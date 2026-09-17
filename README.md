@@ -45,8 +45,10 @@ flowchart LR
   M --> B[build image from the SHA]
   B --> C0[revision at 0% traffic]
   C0 --> G[Gate B smoke, Gate D config audit, Gate C 50-lead replay]
-  G --> A10[approval: 10%] --> A50[approval: 50%] --> A100[approval: 100%]
-  A100 --> V[watch 60 min, automatic rollback]
+  G --> W{deploy window open?}
+  W -->|yes| T10[10%] --> T50[50%] --> T100[100%]
+  W -->|no| Z[canary waits at 0%; resumed at 09:05 next business day]
+  T100 --> V[watch 60 min, automatic rollback]
 ```
 
 - **CI on every PR** (`.github/workflows/ci.yml`): ruff with the error-only rule set,
@@ -59,10 +61,13 @@ flowchart LR
   then run against that revision: a smoke test, an audit of the YAML inside the
   image, and a replay of 50 real leads that must return the same score and decile
   as the live revision.
-- **Progressive delivery**: traffic moves in steps of 10, 50 and 100 percent. Each
-  step waits for a human approval in a GitHub environment, runs the progression gate
-  (feature report, CAPI deciles, 5xx rate), moves the traffic, and runs the smoke
-  again. A bad verdict or a failed smoke restores the previous revision by itself.
+- **Progressive delivery**: traffic moves in steps of 10, 50 and 100 percent with no
+  human click. The first step only runs inside the deploy window (business days,
+  09:00 to 18:00 in São Paulo, no launch with an open cart in the launch calendar);
+  outside it the canary waits at 0% and a scheduled run resumes it on the next
+  business morning. Each step runs the progression gate (feature report, CAPI
+  deciles, 5xx rate), moves the traffic, and runs the smoke again. A bad verdict or a
+  failed smoke restores the previous revision by itself.
 - **After 100%**: a watcher polls the new revision for an hour and rolls back on a
   feature-validation error or a 5xx rate above 1%.
 - **Guardrails around all of it**: one deploy at a time (lock in GCS), the deploy

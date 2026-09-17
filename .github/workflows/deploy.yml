@@ -1,4 +1,4 @@
-# Deploy: push na main -> suíte -> canary a 0% -> progressão 10 / 50 / 100 com aprovação.
+# Deploy: push na main -> suíte -> canary a 0% -> progressão 10 / 50 / 100 dentro da janela.
 #
 # O motor é o mesmo de antes, V2/api/deploy-gate.sh (lock no GCS, frescor, monotonicidade,
 # ledger, lockstep dos espelhos) envelopando o deploy_capi.sh (build, revisão sem tráfego,
@@ -14,16 +14,22 @@
 #                 taxa de 5xx dos logs dela; ERROR ou 5xx > 1% (com amostra) devolvem 100% à
 #                 revisão anterior sozinho (scripts/vigia_pos_deploy.py).
 #   canary-10, canary-50, production
-#               - cada um espera aprovação no environment de mesmo nome (required reviewers),
-#                 consulta o progression_gate (exit 0 = PROMOTE; 1 = HOLD, o job falha e
-#                 pode ser reexecutado mais tarde sem novo deploy; 2 = ROLLBACK) e promove
-#                 pelo deploy-gate, que em 100% alinha os espelhos monitoring e webhook.
+#               - sem clique humano desde 17/09/2026: cada degrau consulta o progression_gate
+#                 (exit 0 = PROMOTE; 1 = HOLD, o job falha e pode ser reexecutado mais tarde
+#                 sem novo deploy; 2 = ROLLBACK) e promove pelo deploy-gate, que em 100%
+#                 alinha os espelhos monitoring e webhook. Os environments continuam
+#                 existindo pelo registro de deployments, sem required reviewers.
+#   janela      - antes do primeiro tráfego (canary-10), scripts/janela_de_deploy.py responde
+#                 "é hora?": dia útil, 09h às 18h em São Paulo, nenhum LF com carrinho
+#                 aberto no calendário. Fechada: o canário fica a 0%, o run termina verde e
+#                 um marcador (gs://smart-ads-mlflow/deploy-gate/aguardando_janela.json)
+#                 guarda a revisão e o alvo de rollback.
+#   retomar     - no cron de 09:05 (dias úteis) ou por workflow_dispatch modo=retomar: lê o
+#                 marcador (ou revisao_alvo), confere que a revisão existe e é mais nova que
+#                 a viva, e a escada 10 / 50 / 100 + vigia segue a partir dela.
 #
-# Trava de segurança da promoção: os três jobs só rodam com a variável PROMOTION_ENABLED
-# igual a "true". Ela deve ser ligada SÓ depois que os três environments existirem com
-# required reviewers (repositório público ou plano Pro). Sem essa trava, num repositório
-# privado no plano Free o GitHub cria o environment sem proteção e a promoção sairia
-# sem ninguém aprovar.
+# Trava de segurança da promoção: os jobs de tráfego só rodam com a variável
+# PROMOTION_ENABLED igual a "true". Desligá-la faz todo canário parar a 0%.
 #
 # workflow_dispatch com modo=wif-check: só prova a identidade (token, bucket, segredo),
 # não toca produção. Use uma vez depois do bootstrap.
@@ -51,15 +57,19 @@ on:
       - '.claude/**'
       - 'scripts/**'
       - 'infra/**'
+  schedule:
+    # 09:05 em São Paulo (UTC-3, sem horário de verão), de segunda a sexta: retoma um
+    # canário que ficou esperando a janela. Sem marcador, o run termina em segundos.
+    - cron: '5 12 * * 1-5'
   workflow_dispatch:
     inputs:
       modo:
-        description: "canary (fluxo normal), wif-check (só testa a identidade) ou rollback (devolve 100% a uma revisão)"
+        description: "canary (fluxo normal), retomar (escada a partir de revisao_alvo ou do marcador), wif-check (só testa a identidade) ou rollback (devolve 100% a uma revisão)"
         type: choice
         default: canary
-        options: [canary, wif-check, rollback]
+        options: [canary, retomar, wif-check, rollback]
       revisao_alvo:
-        description: "modo=rollback: revisão que volta a 100% (ex.: smart-ads-api-01141-hex)"
+        description: "modo=rollback: revisão que volta a 100%; modo=retomar: canário a 0% que sobe a escada (vazio = ler o marcador)"
         type: string
         required: false
 
@@ -169,12 +179,63 @@ jobs:
           echo "previous=${{ steps.before.outputs.previous }}" >> "$GITHUB_OUTPUT"
           echo "canary: $REV (viva: ${{ steps.before.outputs.previous }})" >> "$GITHUB_STEP_SUMMARY"
 
+  retomar:
+    name: retomar canário que esperava a janela
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.modo == 'retomar')
+    runs-on: ubuntu-latest
+    outputs:
+      revision: ${{ steps.alvo.outputs.revision }}
+      previous: ${{ steps.alvo.outputs.previous }}
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: marcador (ou revisao_alvo) -> revisão que sobe e alvo de rollback
+        id: alvo
+        env:
+          MARCADOR: gs://smart-ads-mlflow/deploy-gate/aguardando_janela.json
+          ALVO_INPUT: ${{ inputs.revisao_alvo }}
+        run: |
+          set -e
+          REV="$ALVO_INPUT"
+          if [ -z "$REV" ]; then
+            REV=$(gcloud storage cat "$MARCADOR" --project="$PROJECT_ID" 2>/dev/null \
+              | python3 -c "import sys,json; print(json.load(sys.stdin).get('revision',''))" 2>/dev/null || true)
+          fi
+          if [ -z "$REV" ]; then echo "nada aguardando a janela." | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
+          VIVA=$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT_ID" --format=json \
+            | python3 -c "import json,sys; d=json.load(sys.stdin); print(next(t['revisionName'] for t in d['status']['traffic'] if t.get('percent')==100))")
+          num(){ echo "$1" | sed -E 's/.*-0*([0-9]+)-[a-z0-9]+$/\1/'; }
+          if ! gcloud run revisions describe "$REV" --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            echo "revisão $REV não existe mais; marcador descartado." | tee -a "$GITHUB_STEP_SUMMARY"
+            gcloud storage rm "$MARCADOR" --project="$PROJECT_ID" >/dev/null 2>&1 || true
+            exit 0
+          fi
+          if [ "$(num "$REV")" -le "$(num "$VIVA")" ]; then
+            echo "$REV não é mais nova que a viva ($VIVA); marcador descartado." | tee -a "$GITHUB_STEP_SUMMARY"
+            gcloud storage rm "$MARCADOR" --project="$PROJECT_ID" >/dev/null 2>&1 || true
+            exit 0
+          fi
+          echo "revision=$REV" >> "$GITHUB_OUTPUT"
+          echo "previous=$VIVA" >> "$GITHUB_OUTPUT"
+          echo "retomando $REV (viva: $VIVA)" >> "$GITHUB_STEP_SUMMARY"
+
   canary-10:
     name: promover a 10%
-    needs: canary
-    if: vars.PROMOTION_ENABLED == 'true'
+    needs: [canary, retomar]
+    if: ${{ !cancelled() && vars.PROMOTION_ENABLED == 'true' && (needs.canary.result == 'success' || needs.retomar.outputs.revision != '') }}
     environment: canary-10
     runs-on: ubuntu-latest
+    env:
+      REVISAO: ${{ needs.canary.outputs.revision || needs.retomar.outputs.revision }}
+      ANTERIOR: ${{ needs.canary.outputs.previous || needs.retomar.outputs.previous }}
+      MARCADOR: gs://smart-ads-mlflow/deploy-gate/aguardando_janela.json
+      LAUNCHES_SOURCE: table
+      LEDGER_DB_HOST: 104.197.138.129   # IP público do Cloud SQL smart-ads-db (SSL obrigatório); senha vem do Secret Manager
+    outputs:
+      adiado: ${{ steps.janela.outputs.aberta == 'false' }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -185,15 +246,39 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v2
+      - run: pip install -q pg8000 pyyaml
+      - name: é hora? (dia útil, 09h às 18h em São Paulo, carrinho fechado)
+        id: janela
+        run: |
+          PW=$(gcloud secrets versions access latest --secret=ledger-db-password --project="$PROJECT_ID")
+          echo "::add-mask::$PW"
+          LEDGER_DB_PASSWORD="$PW" python3 V2/scripts/janela_de_deploy.py
+      - name: janela fechada; o canário fica a 0% e o marcador guarda o que retomar
+        if: steps.janela.outputs.aberta == 'false'
+        env:
+          MOTIVO: ${{ steps.janela.outputs.motivo }}
+          PROXIMA: ${{ steps.janela.outputs.proxima }}
+          SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 -c "import json,os,datetime; print(json.dumps({'revision': os.environ['REVISAO'], 'previous': os.environ['ANTERIOR'], 'sha': os.environ['SHA'], 'run': os.environ['RUN_ID'], 'motivo': os.environ['MOTIVO'], 'ts': datetime.datetime.now(datetime.timezone.utc).isoformat()}))" \
+            | gcloud storage cp - "$MARCADOR" --project="$PROJECT_ID"
+          echo "janela fechada ($MOTIVO). $REVISAO fica a 0%; retoma em $PROXIMA pelo cron, ou antes com workflow_dispatch modo=retomar." | tee -a "$GITHUB_STEP_SUMMARY"
       - name: gate 0 -> 10, promote a 10%, smoke; rollback automático se der ruim
-        run: bash V2/scripts/promover_com_rollback.sh "${{ needs.canary.outputs.revision }}" "${{ needs.canary.outputs.previous }}" 0 10
+        if: steps.janela.outputs.aberta == 'true'
+        run: |
+          gcloud storage rm "$MARCADOR" --project="$PROJECT_ID" >/dev/null 2>&1 || true
+          bash V2/scripts/promover_com_rollback.sh "$REVISAO" "$ANTERIOR" 0 10
 
   canary-50:
     name: promover a 50%
-    needs: [canary, canary-10]
-    if: vars.PROMOTION_ENABLED == 'true'
+    needs: [canary, retomar, canary-10]
+    if: ${{ !cancelled() && vars.PROMOTION_ENABLED == 'true' && needs.canary-10.result == 'success' && needs.canary-10.outputs.adiado != 'true' }}
     environment: canary-50
     runs-on: ubuntu-latest
+    env:
+      REVISAO: ${{ needs.canary.outputs.revision || needs.retomar.outputs.revision }}
+      ANTERIOR: ${{ needs.canary.outputs.previous || needs.retomar.outputs.previous }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -205,14 +290,17 @@ jobs:
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v2
       - name: gate 10 -> 50, promote a 50%, smoke; rollback automático se der ruim
-        run: bash V2/scripts/promover_com_rollback.sh "${{ needs.canary.outputs.revision }}" "${{ needs.canary.outputs.previous }}" 10 50
+        run: bash V2/scripts/promover_com_rollback.sh "$REVISAO" "$ANTERIOR" 10 50
 
   production:
     name: promover a 100% (+ lockstep dos espelhos)
-    needs: [canary, canary-50]
-    if: vars.PROMOTION_ENABLED == 'true'
+    needs: [canary, retomar, canary-50]
+    if: ${{ !cancelled() && vars.PROMOTION_ENABLED == 'true' && needs.canary-50.result == 'success' }}
     environment: production
     runs-on: ubuntu-latest
+    env:
+      REVISAO: ${{ needs.canary.outputs.revision || needs.retomar.outputs.revision }}
+      ANTERIOR: ${{ needs.canary.outputs.previous || needs.retomar.outputs.previous }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -224,14 +312,17 @@ jobs:
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v2
       - name: gate 50 -> 100, promote a 100%, smoke; rollback automático se der ruim
-        run: bash V2/scripts/promover_com_rollback.sh "${{ needs.canary.outputs.revision }}" "${{ needs.canary.outputs.previous }}" 50 100
+        run: bash V2/scripts/promover_com_rollback.sh "$REVISAO" "$ANTERIOR" 50 100
 
   vigia:
     name: vigia 60 min depois dos 100% (rollback automático)
-    needs: [canary, production]
-    if: vars.PROMOTION_ENABLED == 'true'
+    needs: [canary, retomar, production]
+    if: ${{ !cancelled() && vars.PROMOTION_ENABLED == 'true' && needs.production.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 75
+    env:
+      REVISAO: ${{ needs.canary.outputs.revision || needs.retomar.outputs.revision }}
+      ANTERIOR: ${{ needs.canary.outputs.previous || needs.retomar.outputs.previous }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
@@ -243,4 +334,4 @@ jobs:
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v2
       - name: feature-report da revisão + 5xx dos logs, a cada 5 min por 60 min
-        run: python3 V2/scripts/vigia_pos_deploy.py --revision "${{ needs.canary.outputs.revision }}" --rollback "${{ needs.canary.outputs.previous }}" --minutos 60 --intervalo 5
+        run: python3 V2/scripts/vigia_pos_deploy.py --revision "$REVISAO" --rollback "$ANTERIOR" --minutos 60 --intervalo 5
