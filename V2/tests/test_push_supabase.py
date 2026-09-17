@@ -384,6 +384,10 @@ class _ConnAuditoria:
             return [["2026-05-12"]]
         if "data <" in sql:
             return [[self._a_podar]]
+        # Quarta pergunta (17/09/2026): quantas linhas são de OUTRA integração na mesma
+        # tabela (`WHERE NOT (<forma da data>)`). Aqui, nenhuma.
+        if "NOT (" in sql:
+            return [[0]]
         return self._por_mes
 
     def close(self):
