@@ -1,6 +1,6 @@
 # MLflow — Acesso e Uso
 
-> ⚠️ **A instância Cloud SQL está parada desde 2026-04-26** (`activation-policy=NEVER`) por motivo de custo. Antes de usar MLflow (retreino, exploração ad-hoc), subir a instância — ver `operacoes_gcp_custos.md` para o protocolo de start/stop.
+> **A instância Cloud SQL `smart-ads-db` está LIGADA** (`activation-policy=ALWAYS`, conferido em 17/09/2026): o gate de modelo do CI lê o run nela em toda PR que troca o YAML, e o retreino grava nela. Desligar quebra os dois. (O aviso antigo, de 26/04/2026, dizia que ela ficava parada por custo: Antes de usar MLflow (retreino, exploração ad-hoc), subir a instância — ver `operacoes_gcp_custos.md` para o protocolo de start/stop.
 
 ## Infraestrutura
 
