@@ -28,13 +28,19 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
+import time
 import urllib.parse
 import urllib.request
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-_CACHE: Dict[str, Optional[str]] = {}
+# Por audiência: (token, instante em que foi cunhado). O token de identidade do Google
+# vale 60 minutos; renovar aos 50 evita o que aconteceu em 17/09/2026, quando o vigia
+# de 60 minutos guardou o token da primeira rodada e a rodada dos 61 minutos levou 401.
+_CACHE: Dict[str, tuple] = {}
+VALIDADE_S = 50 * 60
+_agora = time.monotonic
 
 
 # Conta de serviço a personificar. O `gcloud auth print-identity-token
@@ -53,11 +59,12 @@ def token_de_identidade(audiencia: str) -> Optional[str]:
     numa esteira automática) e, se o gcloud recusar por tipo de conta, personifica
     a conta de serviço dos crons.
 
-    Cacheado por audiência: o gate faz dezenas de chamadas e cada chamada ao gcloud
-    custa perto de um segundo.
+    Cacheado por audiência e por VALIDADE_S (50 min): o gate faz dezenas de chamadas
+    e cada chamada ao gcloud custa perto de um segundo, mas o token morre aos 60 min.
     """
-    if audiencia in _CACHE:
-        return _CACHE[audiencia]
+    guardado = _CACHE.get(audiencia)
+    if guardado is not None and (_agora() - guardado[1]) < VALIDADE_S:
+        return guardado[0]
 
     sa = os.environ.get("GCP_IMPERSONATE_SA", SA_PADRAO)
     tentativas = [
@@ -88,7 +95,7 @@ def token_de_identidade(audiencia: str) -> Optional[str]:
         logger.warning(
             "[auth] SEM token para %s (%s). As chamadas vão sem cabeçalho e o "
             "serviço, que está fechado, vai responder 403.", audiencia, ultimo_erro)
-    _CACHE[audiencia] = tok
+    _CACHE[audiencia] = (tok, _agora())
     return tok
 
 
