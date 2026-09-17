@@ -16,6 +16,12 @@ from fastapi import APIRouter
 import logging
 from api.state import PipelineDep, PipelineOptDep
 
+# Raiz do V2 (onde vivem configs/, src/, vendas/, files/). Este arquivo está em
+# api/routers/, dois níveis abaixo; `Path(__file__).parent.parent` apontaria para api/.
+# Foi o que quebrou o daily-check na revisão 01179-jux (17/09/2026): 500 por
+# 'api/configs/active_models/devclub.yaml' não existir.
+_RAIZ = Path(__file__).resolve().parents[2]
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -309,7 +315,7 @@ async def audience_drift_endpoint(
                                 detail=f"date inválido: '{date}'. Use YYYY-MM-DD.")
 
     cfg_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        str(_RAIZ),
         'configs', 'clients', f'{client_id}.yaml',
     )
     client_config = ClientConfig.from_yaml(cfg_path)
@@ -384,7 +390,7 @@ async def audience_quality_endpoint(
                                 detail=f"date inválido: '{date}'. Use YYYY-MM-DD.")
 
     cfg_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        str(_RAIZ),
         'configs', 'clients', f'{client_id}.yaml',
     )
     client_config = ClientConfig.from_yaml(cfg_path)
@@ -1059,11 +1065,11 @@ async def test_validation_dependencies():
 
         # 2. Testar paths críticos
         from pathlib import Path
-        script_path = Path(__file__).parent.parent / 'src' / 'validation' / 'validate_ml_performance.py'
+        script_path = _RAIZ / 'src' / 'validation' / 'validate_ml_performance.py'
         if not script_path.exists():
             errors.append(f"Script not found: {script_path}")
 
-        vendas_dir = Path(__file__).parent.parent / 'vendas'
+        vendas_dir = _RAIZ / 'vendas'
         if not vendas_dir.exists():
             warnings.append(f"Vendas dir not found: {vendas_dir}")
 
@@ -1142,7 +1148,7 @@ async def execute_weekly_validation(db: Session = Depends(get_db)):
         logger.info(f"📅 TESTE Campanha Atípica 1: captação={start_date} a {end_date}, vendas={sales_start} a {sales_end}")
 
         # 2. Executar script de validação
-        script_path = Path(__file__).parent.parent / 'src' / 'validation' / 'validate_ml_performance.py'
+        script_path = _RAIZ / 'src' / 'validation' / 'validate_ml_performance.py'
 
         cmd = [
             'python',
@@ -1168,7 +1174,7 @@ async def execute_weekly_validation(db: Session = Depends(get_db)):
             cmd,
             capture_output=False,  # Permite streaming de logs!
             text=True,
-            cwd=Path(__file__).parent.parent,
+            cwd=_RAIZ,
             env=env,
             timeout=600  # 10 minutos timeout
         )
@@ -1192,7 +1198,7 @@ async def execute_weekly_validation(db: Session = Depends(get_db)):
         logger.info("✅ Script de validação executado com sucesso")
 
         # 3. Encontrar Excel gerado
-        results_dir = Path(__file__).parent.parent / 'files' / 'validation' / 'resultados'
+        results_dir = _RAIZ / 'files' / 'validation' / 'resultados'
         excel_files = sorted(results_dir.glob('validation_report_*.xlsx'), key=lambda p: p.stat().st_mtime)
 
         if not excel_files:

@@ -2,6 +2,7 @@
 
 Gerado a partir do app.py monolítico (corte por domínio, corpo dos handlers intacto)."""
 import os
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
 from typing import Annotated, List, Dict, Any, Optional
@@ -13,6 +14,12 @@ from sqlalchemy.orm import Session
 from fastapi import APIRouter
 import logging
 from api.state import PipelineOptDep, pipelines
+
+# Raiz do V2 (onde vivem configs/, src/, vendas/, files/). Este arquivo está em
+# api/routers/, dois níveis abaixo; `Path(__file__).parent.parent` apontaria para api/.
+# Foi o que quebrou o daily-check na revisão 01179-jux (17/09/2026): 500 por
+# 'api/configs/active_models/devclub.yaml' não existir.
+_RAIZ = Path(__file__).resolve().parents[2]
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -860,7 +867,7 @@ async def daily_monitoring_check_railway(
         # 5. Executar orquestrador (apenas para alertas de drift/qualidade ML)
         # ------------------------------------------------------------------
         config_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            str(_RAIZ),
             'configs/active_models/devclub.yaml'
         )
         with open(config_path, 'r') as f:
@@ -872,7 +879,7 @@ async def daily_monitoring_check_railway(
                 model_path = active_model['model_path']
 
         if not os.path.isabs(model_path):
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            base_dir = str(_RAIZ)
             model_path = os.path.join(base_dir, model_path)
 
         # E6: rolling 30d via Railway (Lead.decil) — usado como baseline em
@@ -1858,7 +1865,7 @@ async def daily_monitoring_check(
     try:
         # Obter model_path do modelo ativo
         config_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            str(_RAIZ),
             'configs/active_models/devclub.yaml'
         )
 
@@ -1872,7 +1879,7 @@ async def daily_monitoring_check(
 
         # Garantir path absoluto
         if not os.path.isabs(model_path):
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            base_dir = str(_RAIZ)
             model_path = os.path.join(base_dir, model_path)
 
         logger.info(f"📂 Usando modelo: {model_path}")

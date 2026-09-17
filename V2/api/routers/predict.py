@@ -17,6 +17,12 @@ from fastapi import APIRouter
 import logging
 from api.state import PipelineDep, pipelines
 
+# Raiz do V2 (onde vivem configs/, src/, vendas/, files/). Este arquivo está em
+# api/routers/, dois níveis abaixo; `Path(__file__).parent.parent` apontaria para api/.
+# Foi o que quebrou o daily-check na revisão 01179-jux (17/09/2026): 500 por
+# 'api/configs/active_models/devclub.yaml' não existir.
+_RAIZ = Path(__file__).resolve().parents[2]
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -106,7 +112,7 @@ async def get_model_info(pipeline: PipelineDep):
             import json
             from pathlib import Path
             model_name = metadata.get("model_info", {}).get("model_name", "")
-            mapping_file = Path(__file__).parent.parent / "arquivos_modelo" / f"feature_name_mapping_{model_name}.json"
+            mapping_file = _RAIZ / "arquivos_modelo" / f"feature_name_mapping_{model_name}.json"
             if mapping_file.exists():
                 with open(mapping_file) as f:
                     mapping_data = json.load(f)
