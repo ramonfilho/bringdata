@@ -77,14 +77,25 @@ def params_mlflow(result: Optional['SelectionResult'] = None) -> Dict[str, objec
 
 def _temporal_holdout_mask(dates, train_ratio: float) -> np.ndarray:
     """Máscara booleana posicional (True=treino): ordena por data e pega os primeiros
-    train_ratio. Espelha o split temporal_leads do treino — mesmo critério, então o
-    holdout aqui bate com o test set do modelo por construção."""
+    train_ratio. Espelha o split temporal_leads do treino (mesmo critério).
+
+    Chamada com o universo inteiro, o holdout bate com o test set do modelo. Por isso
+    o train_pipeline NÃO chama com o universo inteiro: passa só a parte de treino
+    (ver `mascara_treino_temporal`), e a seleção abre o próprio holdout dentro dela.
+    O test set do modelo nunca participa da escolha de features."""
     d = pd.to_datetime(pd.Series(dates).reset_index(drop=True), errors='coerce')
     order = np.argsort(d.values, kind='mergesort')
     n_train = int(len(order) * train_ratio)
     mask = np.zeros(len(order), dtype=bool)
     mask[order[:n_train]] = True
     return mask
+
+
+def mascara_treino_temporal(dates, train_ratio: float) -> np.ndarray:
+    """Quais linhas são a parte de TREINO do modelo (os primeiros train_ratio por data).
+    O train_pipeline usa isto para entregar à seleção só o que o modelo treina; assim
+    o holdout da seleção fica dentro do treino e o test set não vaza na escolha."""
+    return _temporal_holdout_mask(dates, train_ratio)
 
 
 def select_features(

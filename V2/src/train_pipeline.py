@@ -1414,13 +1414,22 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
     from src.model.feature_selection import params_mlflow as _fs_params_mlflow
     _fs_params: dict = _fs_params_mlflow(None)
     if use_feature_selection:
-        from src.model.feature_selection import select_features
+        from src.model.feature_selection import select_features, mascara_treino_temporal
         _fs = (client_config.model.feature_selection or {}) if (client_config and client_config.model) else {}
         _fs_feats = [c for c in dataset_v1_devclub_encoded.columns if c != 'target']
+        # A seleção roda SÓ na parte de treino do modelo (os primeiros train_ratio dos
+        # leads por data, o mesmo critério do split temporal_leads) e abre o próprio
+        # holdout dentro dela. Antes, o holdout da seleção ERA o test set do modelo:
+        # a lista de features era escolhida olhando o mesmo conjunto onde o AUC final
+        # é reportado, e o ganho (+0,011 no changelog) carregava viés de seleção.
+        _fs_datas = dataset_v1_devclub['Data'].values
+        _fs_treino = mascara_treino_temporal(_fs_datas, train_ratio)
+        logger.info("  [feature-selection] seleção restrita à parte de treino: %d de %d leads (test set do modelo fora)",
+                    int(_fs_treino.sum()), len(_fs_treino))
         _fs_result = select_features(
-            X=dataset_v1_devclub_encoded[_fs_feats],
-            y=dataset_v1_devclub_encoded['target'].astype(int).values,
-            dates=dataset_v1_devclub['Data'].values,
+            X=dataset_v1_devclub_encoded[_fs_feats].iloc[_fs_treino],
+            y=dataset_v1_devclub_encoded['target'].astype(int).values[_fs_treino],
+            dates=_fs_datas[_fs_treino],
             train_ratio=train_ratio,
             estimator_params=client_config.model.hyperparameters,
             method=_fs.get('method', 'permutation'),
