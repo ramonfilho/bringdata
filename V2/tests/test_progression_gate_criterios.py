@@ -92,3 +92,63 @@ def test_5xx_sem_requisicao_nao_conta():
     daily = dict(_DAILY_OK, cinco_xx={'rate': None, 'n_5xx': 0, 'total': 0})
     r = pg.decide(50, 100, _FEAT_OK, daily, pg.STAGE_CRITERIA[100])
     assert r.verdict == 'PROMOTE', r.reasons
+
+
+# ---------------------------------------------------------------------------
+# Diferencial (17/09/2026): canário 5xx onde a viva responde 200 = ROLLBACK
+# ---------------------------------------------------------------------------
+_CAMINHO = "/monitoring/daily-check/railway?hours=24"
+
+
+def _viva_responde(url):
+    return {"ok": True}
+
+
+def _viva_nao_responde(url):
+    return None
+
+
+def test_canario_500_com_viva_200_e_defeito_da_revisao():
+    sinal = {'ok': False, 'reason': 'daily-check inacessível', 'http': 500, 'path': _CAMINHO}
+    motivo = pg.diferencial(sinal, "https://viva", fetch=_viva_responde)
+    assert motivo and "HTTP 500" in motivo and "defeito da revisão" in motivo
+    r = pg.decide(10, 50, _FEAT_OK, sinal, pg.STAGE_CRITERIA[50], diferenciais=[motivo])
+    assert r.verdict == 'ROLLBACK' and r.reasons[0] == motivo
+
+
+def test_canario_500_com_viva_tambem_500_e_o_servico_nao_a_revisao():
+    sinal = {'ok': False, 'http': 500, 'path': _CAMINHO}
+    assert pg.diferencial(sinal, "https://viva", fetch=_viva_nao_responde) is None
+    r = pg.decide(10, 50, _FEAT_OK, sinal, pg.STAGE_CRITERIA[50], diferenciais=[])
+    assert r.verdict == 'HOLD'
+
+
+def test_timeout_no_canario_nao_e_diferencial():
+    sinal = {'ok': False, 'http': None, 'path': _CAMINHO}
+    assert pg.diferencial(sinal, "https://viva", fetch=_viva_responde) is None
+    sinal_4xx = {'ok': False, 'http': 404, 'path': _CAMINHO}
+    assert pg.diferencial(sinal_4xx, "https://viva", fetch=_viva_responde) is None
+
+
+def test_sem_url_da_viva_nao_ha_diferencial():
+    sinal = {'ok': False, 'http': 500, 'path': _CAMINHO}
+    assert pg.diferencial(sinal, None, fetch=_viva_responde) is None
+
+
+def test_fetch_json_registra_o_status_http(monkeypatch):
+    import io
+    import urllib.error
+    import urllib.request
+
+    def urlopen_500(req, timeout=0):
+        raise urllib.error.HTTPError(req.full_url, 500, "erro", {}, io.BytesIO(b'{"detail":"x"}'))
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen_500)
+    assert pg.fetch_json("https://canario/x") is None
+    assert pg.ULTIMO_HTTP["https://canario/x"] == 500
+
+
+def test_check_daily_report_devolve_http_e_caminho_quando_cai(monkeypatch):
+    monkeypatch.setattr(pg, "fetch_json", lambda url, timeout=0: pg.ULTIMO_HTTP.__setitem__(url, 500))
+    d = pg.check_daily_report("https://canario", 24)
+    assert d == {'ok': False, 'reason': 'daily-check inacessível', 'http': 500, 'path': _CAMINHO}
