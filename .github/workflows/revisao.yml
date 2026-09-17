@@ -1,0 +1,56 @@
+# Revisão automática de PR: o "segundo par de olhos" possível num repositório de um dev só.
+#
+# Roda em toda PR do próprio repositório e comenta o que achou (correção, segurança, teste
+# que falta, segredo em texto claro). Não bloqueia merge: a proteção da main exige os
+# checks do ci.yml, não este. O que ele escreve é opinião para o autor ler antes de mergear.
+#
+# Só executa se o segredo ANTHROPIC_API_KEY existir no repositório (Settings > Secrets >
+# Actions). Sem o segredo, o job termina em segundos dizendo que pulou, sem falhar.
+# Custo: uma chamada por PR; a ordem de grandeza é centavos de dólar por revisão.
+name: Revisão automática
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
+concurrency:
+  group: revisao-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  revisar:
+    name: revisão automática (só com ANTHROPIC_API_KEY)
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: o segredo existe?
+        id: chave
+        env:
+          TEM: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+        run: |
+          echo "tem=$TEM" >> "$GITHUB_OUTPUT"
+          [ "$TEM" = "true" ] || echo "ANTHROPIC_API_KEY ausente: revisão automática pulada." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@v4
+        if: steps.chave.outputs.tem == 'true'
+        with: { fetch-depth: 0 }
+      - uses: anthropics/claude-code-action@v1
+        if: steps.chave.outputs.tem == 'true'
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: "--max-turns 12"
+          prompt: |
+            Revise esta pull request como um segundo desenvolvedor do projeto. Leia o diff
+            (git diff origin/${{ github.base_ref }}...HEAD) e o que ele toca. Comente na PR,
+            em português, só o que mudaria antes de mergear: defeito de lógica, caminho de
+            erro sem tratamento, segredo ou dado pessoal em texto claro, teste que a mudança
+            pedia e não tem, comportamento que contradiz um comentário ou doc do repositório.
+            Para cada ponto: arquivo e linha, o que está errado, como corrigir. Sem elogio,
+            sem resumo do diff, sem sugestão de estilo. Se não houver nada, escreva uma
+            linha dizendo que não encontrou motivo para segurar o merge.
