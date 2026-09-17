@@ -51,7 +51,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           claude_args: >-
-            --max-turns 14
+            --max-turns 40
             --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Read,Grep,Glob"
           prompt: |
             Revise esta pull request como um segundo desenvolvedor do projeto. Leia o diff
@@ -65,14 +65,17 @@ jobs:
             Publique o resultado como UM comentário na PR ${{ github.event.pull_request.number }}
             do repositório ${{ github.repository }}, com `gh pr comment <número> --body "<texto>"`
             pela ferramenta Bash. Texto que fica só na sua resposta final não chega a ninguém.
-            Não crie commits nem altere arquivos.
+            Não crie commits nem altere arquivos. Economize turnos: leia o diff inteiro numa
+            chamada (`gh pr diff <número>`), abra no máximo cinco arquivos além dele, e
+            publique o comentário antes do vigésimo turno mesmo que ainda tenha dúvidas;
+            nesse caso diga o que não deu tempo de conferir.
       - name: revisar (chave da API)
         uses: anthropics/claude-code-action@v1
         if: steps.chave.outputs.modo == 'api'
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_args: >-
-            --max-turns 14
+            --max-turns 40
             --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Read,Grep,Glob"
           prompt: |
             Revise esta pull request como um segundo desenvolvedor do projeto. Leia o diff
@@ -86,4 +89,7 @@ jobs:
             Publique o resultado como UM comentário na PR ${{ github.event.pull_request.number }}
             do repositório ${{ github.repository }}, com `gh pr comment <número> --body "<texto>"`
             pela ferramenta Bash. Texto que fica só na sua resposta final não chega a ninguém.
-            Não crie commits nem altere arquivos.
+            Não crie commits nem altere arquivos. Economize turnos: leia o diff inteiro numa
+            chamada (`gh pr diff <número>`), abra no máximo cinco arquivos além dele, e
+            publique o comentário antes do vigésimo turno mesmo que ainda tenha dúvidas;
+            nesse caso diga o que não deu tempo de conferir.
