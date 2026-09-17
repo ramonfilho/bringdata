@@ -29,7 +29,7 @@ fingerprint) e **modelo** (run MLflow + métricas). Uma entrada por modelo, mais
 - **Dados:** matched **100014** leads, **283** compradores (0.28% positivos), fingerprint `a7ed2821922a4f9a`. Split `temporal_leads`, corte 2026-03-31, período 2026-02-04..2026-04-12 (treino 80011 / teste 20003).
 - **Config:** n_estimators=300, max_depth=8, min_samples_split=2, min_samples_leaf=1, max_features=sqrt, class_weight=balanced, random_state=42. buyer_weights=True, tmb_risk_filter=all, matching=email_telefone, features=41.
 - **Métricas (test):** AUC **0.7168** · lift **2.44** · top-3 **64.44%** · top-5 82.22% · monotonia 66.67% · baseline 0.22%.
-- **Δ vs anterior:** _(preencher: comparação exige rodar o modelo anterior no mesmo test set)_
+- **Δ vs anterior:** não comparado (o modelo anterior não foi rodado neste test set; sem essa rodada a diferença não existe como número)
 - **Mudanças de código desde o anterior (rascunho automático, curar):**
   - aa47ce8 feat(relatório criativo): mostra o ID da campanha na Meta no rótulo
   - f1c5454 feat(relatório criativo): agrupa por AÇÃO (aumentar/reduzir orçamento) em vez de lista única
@@ -46,7 +46,7 @@ fingerprint) e **modelo** (run MLflow + métricas). Uma entrada por modelo, mais
 - **Dados:** matched **316280** leads, **4043** compradores (1.28% positivos), fingerprint `2c3e423ca07bf12f`. Split `temporal_leads`, corte 2026-04-29, período 2025-01-03..2026-07-01 (treino 253024 / teste 63256).
 - **Config:** n_estimators=300, max_depth=8, min_samples_split=2, min_samples_leaf=1, max_features=sqrt, class_weight=balanced, random_state=42. buyer_weights=True, tmb_risk_filter=all, matching=email_telefone, features=53.
 - **Métricas (test):** AUC **0.7297** · lift **3.32** · top-3 **63.82%** · top-5 79.92% · monotonia 88.89% · baseline 0.83%.
-- **Δ vs anterior:** _(preencher: comparação exige rodar o modelo anterior no mesmo test set)_
+- **Δ vs anterior:** não comparado (o modelo anterior não foi rodado neste test set; sem essa rodada a diferença não existe como número)
 - **Mudanças de código desde o anterior (rascunho automático, curar):**
   - 0eaee9f docs(indice): lista RUNBOOK_scoring_pipeline, ROLLBACK_DECISION e MODEL_CHANGELOG
   - 96fa6d6 fix(deploy): isola gate de progressão na revisão canary + fonte única de URL Cloud Run
