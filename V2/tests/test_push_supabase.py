@@ -381,13 +381,17 @@ class _ConnAuditoria:
         # por sorte, porque o valor errado só era repassado como parâmetro. Dublê que
         # deixa de casar em silêncio é pior que dublê que quebra.
         if "::text" in sql and "count(" not in sql:
-            return [["2026-05-12"]]
+            # corte da janela (tem "- 90") ou o dia de hoje (17/09/2026): duas datas
+            return [["2026-05-12"]] if f"- {p.DIAS}" in sql else [["2026-09-17"]]
+        if "GROUP BY" in sql:
+            return self._por_mes
+        # Quarta pergunta (17/09/2026): quantas linhas são de OUTRA integração na mesma
+        # tabela (`WHERE NOT (<forma da data>)`). Aqui, nenhuma. Quinta: quantas de
+        # hoje (`data = :h`), fora da comparação. Aqui, nenhuma.
+        if "NOT (" in sql or "data = :h" in sql:
+            return [[0]]
         if "data <" in sql:
             return [[self._a_podar]]
-        # Quarta pergunta (17/09/2026): quantas linhas são de OUTRA integração na mesma
-        # tabela (`WHERE NOT (<forma da data>)`). Aqui, nenhuma.
-        if "NOT (" in sql:
-            return [[0]]
         return self._por_mes
 
     def close(self):

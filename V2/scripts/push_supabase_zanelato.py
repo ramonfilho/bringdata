@@ -217,6 +217,8 @@ DIA_SQL = f"""
 # 00h e 03h UTC do dia da fronteira seria gravado com data de um dia ANTES do corte — a
 # carga o inseria, a poda o apagava, e isso se repetiria a cada rodada, para sempre.
 CORTE_SQL = f"((now() AT TIME ZONE '{FUSO}')::date - {DIAS})"
+# O dia de hoje na mesma regra de fuso: a auditoria compara só o que já fechou.
+HOJE_SQL = f"((now() AT TIME ZONE '{FUSO}')::date)"
 
 # As 11 colunas da tabela deles, na ordem em que o SELECT abaixo as produz. `id` e
 # `recebido_em` ficam de fora: o primeiro é identidade automática, o segundo tem
@@ -511,15 +513,25 @@ def auditar() -> dict:
         # e aplicada nos dois. Calcular duas vezes, uma em cada ponta, foi o que gerou o
         # falso positivo de +14 em 10/08/2026.
         corte = str(origem.run(f"SELECT ({CORTE_SQL})::text")[0][0])
+        # O dia de hoje fica FORA da comparação: ele está em movimento nas duas pontas
+        # (lead chega na origem; o incremental leva até 10 min para copiar). Medido em
+        # 17/09/2026: duas rodadas com minutos de diferença deram -3 e +1 só em setembro,
+        # com junho, julho e agosto batendo exatos. Hoje é reportado à parte, como aviso.
+        hoje = str(origem.run(f"SELECT ({HOJE_SQL})::text")[0][0])
         esperado = {str(r[0]): int(r[1]) for r in origem.run(
-            f"SELECT substr(data,1,7), count(*) FROM ({_select(False)}) s GROUP BY 1")}
+            f"SELECT substr(data,1,7), count(*) FROM ({_select(False)}) s "
+            f"WHERE data < :h GROUP BY 1", h=hoje)}
+        origem_hoje = int(origem.run(
+            f"SELECT count(*) FROM ({_select(False)}) s WHERE data = :h", h=hoje)[0][0])
     finally:
         origem.close()
     dst = destino(porta=5432)
     try:
         obtido = {str(r[0]): int(r[1]) for r in dst.run(
             f"SELECT substr(data,1,7), count(*) FROM {TABELA_DESTINO} "
-            f"WHERE {SO_NOSSAS} AND data >= :c GROUP BY 1", c=corte)}
+            f"WHERE {SO_NOSSAS} AND data >= :c AND data < :h GROUP BY 1", c=corte, h=hoje)}
+        destino_hoje = int(dst.run(f"SELECT count(*) FROM {TABELA_DESTINO} "
+                                   f"WHERE {SO_NOSSAS} AND data = :h", h=hoje)[0][0])
         # Linhas de outra integração (funil MBA) na mesma tabela: contadas à parte, só
         # para quem lê saber que existem. Não entram na comparação.
         de_outros = dst.run(f"SELECT count(*) FROM {TABELA_DESTINO} "
@@ -533,7 +545,7 @@ def auditar() -> dict:
     finally:
         dst.close()
 
-    print(f"corte da janela: data >= {corte} ({DIAS} dias)")
+    print(f"corte da janela: data >= {corte} ({DIAS} dias); hoje ({hoje}) fica fora da comparação")
     print(f"{'mês':<9} {'origem':>9} {'destino':>9} {'dif':>8}")
     tabela, ruins = [f"{'mês':<9} {'origem':>9} {'destino':>9} {'dif':>8}"], []
     for m in sorted(set(esperado) | set(obtido)):
@@ -549,6 +561,8 @@ def auditar() -> dict:
     if de_outros:
         print(f"(de outra integração, fora da auditoria: {de_outros:,} linhas)")
         tabela.append(f"de outra integração (funil MBA), fora da auditoria: {de_outros:,}")
+    print(f"(hoje, em movimento, fora da comparação: origem {origem_hoje:,}, destino {destino_hoje:,})")
+    tabela.append(f"hoje ({hoje}), em movimento: origem {origem_hoje:,}, destino {destino_hoje:,}")
 
     if ruins:
         det = "; ".join(f"{m}: origem {e:,} destino {o:,} ({o - e:+,})" for m, e, o in ruins)
@@ -569,7 +583,8 @@ def auditar() -> dict:
         f":white_check_mark: Entrega Zanelato conferida: *{total:,} leads*, "
         f"todos os {len(esperado)} meses batem."
         + (f" ({a_podar:,} linhas aguardando a poda.)" if a_podar else ""))
-    return {"modo": "auditar", "linhas": total, "a_podar": a_podar, "de_outros": de_outros}
+    return {"modo": "auditar", "linhas": total, "a_podar": a_podar, "de_outros": de_outros,
+            "hoje": {"data": hoje, "origem": origem_hoje, "destino": destino_hoje}}
 
 
 def main() -> int:
