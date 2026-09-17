@@ -69,3 +69,22 @@ def test_tudo_bem_promove():
     for de, para in ((10, 50), (50, 100)):
         r = pg.decide(de, para, _FEAT_OK, _DAILY_OK, pg.STAGE_CRITERIA[para])
         assert r.verdict == 'PROMOTE' and r.exit_code == 0, (de, para, r.reasons)
+
+
+def test_5xx_acima_do_teto_com_amostra_e_rollback():
+    daily = dict(_DAILY_OK, cinco_xx={'rate': 0.05, 'n_5xx': 5, 'total': 100})
+    r = pg.decide(10, 50, _FEAT_OK, daily, pg.STAGE_CRITERIA[50])
+    assert r.verdict == 'ROLLBACK'
+    assert any('[5xx] 5 de 100' in m for m in r.reasons), r.reasons
+
+
+def test_5xx_sem_amostra_nao_conta():
+    daily = dict(_DAILY_OK, cinco_xx={'rate': 0.10, 'n_5xx': 1, 'total': 10})
+    r = pg.decide(10, 50, _FEAT_OK, daily, pg.STAGE_CRITERIA[50])
+    assert r.verdict == 'PROMOTE', r.reasons
+
+
+def test_5xx_sem_requisicao_nao_conta():
+    daily = dict(_DAILY_OK, cinco_xx={'rate': None, 'n_5xx': 0, 'total': 0})
+    r = pg.decide(50, 100, _FEAT_OK, daily, pg.STAGE_CRITERIA[100])
+    assert r.verdict == 'PROMOTE', r.reasons

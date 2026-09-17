@@ -152,8 +152,16 @@ def fetch_json(url: str, timeout: int = 180) -> Optional[Dict[str, Any]]:
         return None
 
 
-def get_5xx_rate(revision: str, project: str, hours: int) -> Optional[float]:
-    """Calcula taxa de 5xx via Cloud Monitoring."""
+# Abaixo disto a taxa de 5xx não é julgada: 1 erro em 10 requisições é 10% e não é sinal.
+MIN_REQUISICOES_5XX = 30
+
+
+def get_5xx_rate(revision: str, project: str, hours: int) -> Dict[str, Any]:
+    """Taxa de 5xx da revisão nos logs de requisição: {'rate', 'n_5xx', 'total'}.
+
+    rate é None quando não houve requisição (ou o gcloud falhou). Até 15/09/2026 esta função
+    devolvia só a taxa e NINGUÉM a chamava: max_5xx_rate estava nos critérios sem efeito.
+    """
     filter_str = (
         f'resource.type=cloud_run_revision AND '
         f'resource.labels.revision_name={revision} AND '
@@ -184,11 +192,11 @@ def get_5xx_rate(revision: str, project: str, hours: int) -> Optional[float]:
         total = len([l for l in result_total.stdout.splitlines() if l.strip()])
 
         if total == 0:
-            return None
-        return n_5xx / total
+            return {'rate': None, 'n_5xx': 0, 'total': 0}
+        return {'rate': n_5xx / total, 'n_5xx': n_5xx, 'total': total}
     except Exception as e:
         print(f"  [gate] erro calculando 5xx: {e}", file=sys.stderr)
-        return None
+        return {'rate': None, 'n_5xx': 0, 'total': 0}
 
 
 # =============================================================================
@@ -309,6 +317,14 @@ def decide(
             verdict = 'HOLD' if verdict == 'PROMOTE' else verdict
             reasons.append(f"[qualidade] D10% divergência {d10_div:.1f}pp > {max_div}pp")
 
+    # 5xx da revisão (logs de requisição). Só com amostra: MIN_REQUISICOES_5XX.
+    cinco = daily_signals.get('cinco_xx') or {}
+    max_5xx = stage_criteria.get('max_5xx_rate')
+    taxa_5xx = cinco.get('rate')
+    if max_5xx and taxa_5xx is not None and int(cinco.get('total') or 0) >= MIN_REQUISICOES_5XX and taxa_5xx > max_5xx:
+        verdict = 'ROLLBACK'
+        reasons.append(f"[5xx] {cinco.get('n_5xx', 0)} de {cinco.get('total')} requisições ({taxa_5xx:.2%}) > {max_5xx:.2%}")
+
     if verdict == 'PROMOTE':
         reasons.append(f"✅ Todos os critérios do estágio {from_pct}% → {to_pct}% satisfeitos")
 
@@ -407,6 +423,8 @@ def main():
     daily = check_daily_report(base_url, hours)
     if daily.get('ok'):
         print(f"  → daily: capi_sent_rate={daily.get('capi_sent_rate')}, d10_div={daily.get('d10_divergence_pp', 0):.1f}pp, zero_decis={daily.get('decil_zero_events')}")
+    daily['cinco_xx'] = get_5xx_rate(args.revision, args.project, hours)
+    print(f"  → 5xx da revisão: {daily['cinco_xx']}")
     print()
 
     result = decide(args.from_pct, args.to_pct, feat, daily, stage)
