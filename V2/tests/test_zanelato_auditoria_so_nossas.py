@@ -126,3 +126,24 @@ def test_hoje_fica_fora_da_comparacao_e_e_reportado_a_parte(pontas):
     assert "conferida" in avisos[-1]
     por_mes = [q for q in dst.consultas if "GROUP BY" in q]
     assert "data < :h" in por_mes[0]
+
+
+def test_a_carga_cheia_apaga_so_as_nossas_linhas(monkeypatch):
+    """`--full` regrava a janela; um DELETE sem filtro levaria as 652 linhas do funil MBA."""
+    comandos = []
+
+    class _Dst:
+        def run(self, sql, **params):
+            comandos.append(sql)
+            return [[0]]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(z, "_le", lambda janela: [])
+    monkeypatch.setattr(z, "destino", lambda porta=None: _Dst())
+    monkeypatch.setattr(z, "_grava", lambda dst, linhas, apagar_chaves: 0)
+    z.full()
+    deletes = [c for c in comandos if c.startswith("DELETE")]
+    assert deletes == [f"DELETE FROM {z.TABELA_DESTINO} WHERE {z.SO_NOSSAS}"]
+    assert comandos[0] == "BEGIN" and comandos[-1] == "COMMIT"
