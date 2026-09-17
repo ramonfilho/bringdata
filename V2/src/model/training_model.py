@@ -56,6 +56,10 @@ def assert_mlflow_backend_running(project_id: str = _MLFLOW_SQL_PROJECT,
 
     Raises:
         RuntimeError com comando de fix se instância parada/inacessível.
+
+    Sem `gcloud` no PATH (Cloud Run Job de retreino, que roda na imagem da API),
+    NÃO levanta: registra um aviso e devolve None, e a conexão do MLflow falha
+    alto sozinha logo adiante se a instância estiver parada.
     """
     import subprocess
     try:

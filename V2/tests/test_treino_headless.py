@@ -9,6 +9,7 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 V2 = Path(__file__).resolve().parents[1]
@@ -82,3 +83,17 @@ def test_setup_do_job_usa_segredos_e_fontes_do_banco():
     assert "LEDGER_DB_PASSWORD=ledger-db-password:latest" in s
     assert "--leads-source,db,--sales-source,db,--no-api-data" in s
     assert "MLFLOW_TRACKING_URI" not in s, "a URI com senha nunca passa pelo script"
+
+
+
+def test_sem_nenhum_caminho_completo_a_mensagem_serve_para_o_job(monkeypatch, tmp_path):
+    """Cenário do Job com o bind do segredo falhando: só o host chegou, sem `.env`."""
+    from src.core import mlflow_setup as m
+    _limpa_env(monkeypatch)
+    monkeypatch.setenv("MLFLOW_DB_HOST", "10.0.0.5")
+    monkeypatch.setattr(m, "_V2_ROOT", tmp_path)          # sem .env para carregar
+    with pytest.raises(RuntimeError) as e:
+        m.resolve_tracking_uri()
+    msg = str(e.value)
+    assert "MLFLOW_DB_HOST e MLFLOW_DB_PASSWORD" in msg and "mlflow-db-password" in msg
+    assert "setup_retreino_job.sh" in msg
