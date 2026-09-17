@@ -76,7 +76,7 @@ PROJECT = 'smart-ads-451319'
 # olhava 24h para trás. O nome novo diz o que o código faz. A espera entre degraus é a
 # aprovação humana no environment do GitHub (canary-10, canary-50, production).
 #
-# Taxas (`min_capi_sent_rate`, `min_meta_acceptance_rate`) são FRAÇÕES (0.90 = 90%). O
+# Taxas (`min_capi_sent_rate`, `min_meta_acceptance_rate`) são FRAÇÕES (0.50 = 50%). O
 # daily-check devolve porcentagem (66.6 = 66,6%); check_daily_report normaliza. Até 15/09
 # a comparação era feita sem normalizar (66.6 < 0.90 é falso), então esses dois critérios
 # nunca seguraram nada.
@@ -92,18 +92,20 @@ STAGE_CRITERIA = {
         'janela_horas': 24,
         'max_5xx_rate': 0.01,
         'required_feature_report_status': ['OK', 'INFO'],  # alinhado com PLANO_SAFEGUARD § "Como tráfego cresce após o deploy" (10→50: feature_report ∈ {OK, INFO})
-        # DESLIGADO em 15/09/2026 (None): com a normalização de unidade este critério passaria
-        # a segurar toda promoção, porque o send_rate medido em 24h no serviço inteiro é 66,6%
-        # e ninguém definiu se isso é normal (leads sem fbp/fbc, fontes fora da Meta) ou defeito.
-        # Ligar de volta com um número medido, não com o 90% do plano de abril.
-        'min_capi_sent_rate': None,
+        # Piso MEDIDO em 17/09/2026 (registros_ml, 90 dias, 90.361 leads, taxa por dia):
+        # mínimo 4,0%, p10 53,5%, p25 69,2%, mediana 79,0%, p75 85,2%, máximo 92,7%. Os 90%
+        # do plano de abril nunca aconteceram num dia sequer. O piso em 50% (p10) segura a
+        # promoção só quando o serviço inteiro está mandando menos da metade dos leads para
+        # a Meta, que é o retrato de um incidente (4 a 12/08: 4% a 35%; 8 a 11/09: 12% a
+        # 37%). HOLD, não rollback: o critério é do serviço, não da revisão.
+        'min_capi_sent_rate': 0.50,
         'min_meta_acceptance_rate': 0.85,
         'max_d10_divergence_pp': 10.0,
     },
     100: {
         'janela_horas': 24,
         'required_feature_report_status': ['OK'],
-        'min_capi_sent_rate': None,        # idem estágio 50
+        'min_capi_sent_rate': 0.50,        # mesmo piso medido do estágio 50
         'max_5xx_rate': 0.01,
         'note': 'Main unificada aguarda DEV20 fechar (17/05+) para ROAS consolidado',
     },

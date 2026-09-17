@@ -43,11 +43,15 @@ def test_taxa_da_meta_em_porcentagem_baixa_segura_a_promocao():
     assert any('acceptance_rate 60.00% < 85.00%' in m for m in r.reasons), r.reasons
 
 
-def test_capi_send_rate_desligado_nao_segura():
-    daily = dict(_DAILY_OK, capi_sent_rate=pg._fracao(66.6))
+def test_capi_send_rate_no_piso_medido():
+    # piso 50% = p10 dos 90 dias medidos em 17/09/2026; 66,6% (dia normal) passa, 37% (incidente) segura
     for estagio in (50, 100):
-        r = pg.decide(estagio // 5, estagio, _FEAT_OK, daily, pg.STAGE_CRITERIA[estagio])
+        crit = pg.STAGE_CRITERIA[estagio]
+        assert crit['min_capi_sent_rate'] == 0.50, estagio
+        r = pg.decide(estagio // 5, estagio, _FEAT_OK, dict(_DAILY_OK, capi_sent_rate=pg._fracao(66.6)), crit)
         assert r.verdict == 'PROMOTE', (estagio, r.reasons)
+        r = pg.decide(estagio // 5, estagio, _FEAT_OK, dict(_DAILY_OK, capi_sent_rate=pg._fracao(37.1)), crit)
+        assert r.verdict == 'HOLD' and any('send_rate 37.10% < 50.00%' in m for m in r.reasons), (estagio, r.reasons)
 
 
 def test_sem_lote_na_janela_e_hold_nao_rollback():
