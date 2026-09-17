@@ -2,7 +2,7 @@
 # Base: Debian 12 (bookworm). O bullseye saiu de suporte em 31/08/2026 e o apt-get do
 # build passou a dar 404 em maquina limpa (primeiro deploy pelo Actions, 14/09/2026).
 # tests/test_dockerfile_base.py trava a volta para distro fora de suporte.
-FROM python:3.10-slim-bookworm
+FROM python:3.10-slim-bookworm AS base
 
 # Metadados
 LABEL maintainer="Smart Ads Team"
@@ -94,6 +94,24 @@ RUN mkdir -p /app/vendas
 
 # Dar permissões para o usuário appuser
 RUN chown -R appuser:appuser /app
+
+# ---------------------------------------------------------------------------
+# Etapa `treino`: a mesma base (mesmo Python, mesmos pins de pandas/numpy/sklearn,
+# mesmo carimbo APP_COMMIT) mais o que só o retreino usa (mlflow, pyarrow). Fica ANTES
+# da etapa `api` de propósito: `docker build` sem --target constrói a última etapa, e a
+# última tem que continuar sendo a API. O deploy.yml constrói esta com
+# `--target treino` e publica como gcr.io/<projeto>/smart-ads-treino:<tag da API>.
+# ---------------------------------------------------------------------------
+FROM base AS treino
+COPY ./api/requirements-treino.txt .
+RUN pip install --no-cache-dir -r requirements-treino.txt
+USER appuser
+ENTRYPOINT ["python", "-m", "src.train_pipeline"]
+
+# ---------------------------------------------------------------------------
+# Etapa `api` (a última: é o que um build sem --target produz)
+# ---------------------------------------------------------------------------
+FROM base AS api
 
 # Trocar para usuário não-root
 USER appuser

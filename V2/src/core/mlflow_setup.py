@@ -37,13 +37,31 @@ _COMO_CONFIGURAR = (
 )
 
 
+def _uri_das_partes() -> str:
+    """Monta a URI do backend a partir de MLFLOW_DB_HOST e MLFLOW_DB_PASSWORD.
+
+    É como o Cloud Run Job de retreino recebe a credencial: a senha vem do Secret
+    Manager (`mlflow-db-password`) como variável própria, sem ninguém montar uma URI
+    com senha dentro num arquivo. Usuário, porta e banco têm o default do projeto.
+    Vazio quando o host ou a senha faltam.
+    """
+    host, senha = os.environ.get("MLFLOW_DB_HOST"), os.environ.get("MLFLOW_DB_PASSWORD")
+    if not host or not senha:
+        return ""
+    from urllib.parse import quote
+    user = os.environ.get("MLFLOW_DB_USER", "postgres")
+    port = os.environ.get("MLFLOW_DB_PORT", "5432")
+    db = os.environ.get("MLFLOW_DB_NAME", "mlflow")
+    return f"postgresql+psycopg2://{quote(user)}:{quote(senha, safe='')}@{host}:{port}/{db}"
+
+
 def resolve_tracking_uri() -> str:
     """URI efetiva, lida do ambiente (carrega o `V2/.env` se ainda não estiver lá).
 
     Raises:
         RuntimeError: se `MLFLOW_TRACKING_URI` não estiver configurada.
     """
-    uri = os.environ.get("MLFLOW_TRACKING_URI")
+    uri = os.environ.get("MLFLOW_TRACKING_URI") or _uri_das_partes()
     if not uri:
         # O gerador de model card roda standalone, fora do train_pipeline (que já
         # carrega o .env). Carregar aqui mantém ele funcionando sem criar mais um

@@ -169,6 +169,23 @@ jobs:
           echo "previous=${{ steps.before.outputs.previous }}" >> "$GITHUB_OUTPUT"
           echo "canary: $REV (viva: ${{ steps.before.outputs.previous }})" >> "$GITHUB_STEP_SUMMARY"
 
+      - name: imagem de treino (etapa treino do Dockerfile, mesma tag da API)
+        # Reaproveita as camadas que o build da API acabou de deixar no runner; só
+        # acrescenta mlflow e pyarrow. Não segura o deploy da API se falhar: o job de
+        # retreino continua na imagem anterior e o resumo do run mostra o problema.
+        continue-on-error: true
+        run: |
+          API_IMG=$(gcloud run revisions describe "${{ steps.rev.outputs.revision }}" --region="$REGION" --project="$PROJECT_ID" --format='value(spec.containers[0].image)')
+          TAG="${API_IMG##*:}"
+          IMG="gcr.io/$PROJECT_ID/smart-ads-treino:$TAG"
+          mkdir -p V2/mlruns_build
+          docker buildx build --load --target treino -f V2/api/Dockerfile \
+            --build-arg MODEL_PATH=mlruns_build \
+            --build-arg APP_COMMIT="$(git rev-parse --short HEAD)" --build-arg APP_COMMIT_DIRTY=false \
+            -t "$IMG" V2/
+          docker push "$IMG"
+          echo "imagem de treino: $IMG" >> "$GITHUB_STEP_SUMMARY"
+
   canary-10:
     name: promover a 10%
     needs: canary
