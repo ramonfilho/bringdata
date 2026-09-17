@@ -396,14 +396,19 @@ def _grava(dst, linhas: list, *, apagar_chaves: bool) -> int:
 
 
 def full() -> dict:
-    """Carga cheia dos 90 dias. Primeira vez e recuperação."""
+    """Carga cheia dos 90 dias. Primeira vez e recuperação.
+
+    Apaga e regrava SÓ as nossas linhas (`SO_NOSSAS`). Desde 10/09/2026 outra integração
+    grava o funil MBA na mesma tabela; um `DELETE` sem filtro levaria os dados deles junto.
+    Tudo numa transação: quem lê a tabela deles vê o antes ou o depois, nunca o meio.
+    """
     linhas = _le(janela=False)
     print(f"  {len(linhas):,} linhas nos últimos {DIAS} dias")
     dst = destino(porta=5432)          # direta: eles indicaram esta para carga grande
     try:
         dst.run("BEGIN")
-        antes = dst.run(f"SELECT count(*) FROM {TABELA_DESTINO}")[0][0]
-        dst.run(f"DELETE FROM {TABELA_DESTINO}")
+        antes = dst.run(f"SELECT count(*) FROM {TABELA_DESTINO} WHERE {SO_NOSSAS}")[0][0]
+        dst.run(f"DELETE FROM {TABELA_DESTINO} WHERE {SO_NOSSAS}")
         n = _grava(dst, linhas, apagar_chaves=False)
         dst.run("COMMIT")
         print(f"  destino: {antes:,} -> {n:,} linhas")
