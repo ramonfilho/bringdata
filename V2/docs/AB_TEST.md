@@ -3,6 +3,8 @@
 **Atualizado:** 2026-04-28
 **Status atual:** 🔓 **REABERTO em 28/04/2026** após validação out-of-sample do Champion v4 (`60637bb98b94421b9c7579bb4ac1b1ad`) atravessada favoravelmente.
 
+> **Como ler este documento (nota de 17/09/2026).** O "A/B" descrito aqui compara CAMPANHAS, e não é um experimento randomizado. O braço de cada lead vem da substring da UTM da campanha que o trouxe (Champion ou Challenger), sem sorteio, e a métrica final é o ROAS que a própria Meta atribui a cada campanha. Isso mistura o efeito do modelo com o público, a verba e a fase de aprendizado de cada campanha. O que a comparação mede bem: se o evento de um modelo, entregue à Meta, comprou vendas com lucro naquela campanha. O que ela não mede: a diferença entre os dois modelos sob as mesmas condições. O veredito sobre modelo sai da série de lançamentos com régua única (coluna `decil_champion`, captação a partir de 25/07/2026), nunca de um lançamento só: em LF64 + LF65 os dois modelos separam cerca de 2,7x (p < 0,00001) e a diferença entre eles dá p = 0,665, empate. Um desenho randomizado (sorteio por hash do lead dentro da mesma campanha, com tabela de tamanho de amostra) está no roadmap, ainda não desenhado.
+
 > Deploy do Champion v4 em produção via canary está em execução em sessão paralela. Roteamento exato do A/B (por UTM, por split de tráfego Cloud Run, ou híbrido) é definido na sessão de deploy. As seções abaixo descrevem o design canônico — adaptar à estratégia em execução.
 
 > **Nota sobre identificadores codificados (`DT-12`, `T1-X`, etc.):** este doc usa IDs curtos pra cruzar com commits. Nome verbal de cada um nos catálogos:

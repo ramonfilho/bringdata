@@ -98,3 +98,24 @@ if __name__ == "__main__":
     test_metodo_invalido_falha_alto()
     test_agnostico_ao_modelo()
     print("OK — testes de feature selection passaram")
+
+
+def test_mascara_treino_temporal_pega_os_primeiros_por_data():
+    from src.model.feature_selection import mascara_treino_temporal
+    datas = np.array(['2026-03-01', '2026-01-01', '2026-02-01', '2026-04-01', '2026-05-01'], dtype='datetime64[D]')
+    m = mascara_treino_temporal(datas, 0.6)
+    # 3 de 5 (60%): as 3 datas mais antigas, independente da ordem das linhas
+    assert m.tolist() == [True, True, True, False, False]
+
+
+def test_train_pipeline_seleciona_features_so_na_parte_de_treino():
+    """Trava anti-deriva: a chamada de select_features no train_pipeline tem que
+    receber só a parte de treino (mascara_treino_temporal), nunca o universo inteiro.
+    Se voltar ao universo inteiro, o holdout da seleção vira o test set do modelo."""
+    from pathlib import Path
+    src = (Path(__file__).resolve().parent.parent / 'src' / 'train_pipeline.py').read_text()
+    i = src.index('_fs_result = select_features(')
+    chamada = src[i:i + 500]
+    assert '_fs_treino = mascara_treino_temporal(_fs_datas, train_ratio)' in src
+    assert '.iloc[_fs_treino]' in chamada
+    assert 'dates=_fs_datas[_fs_treino]' in chamada

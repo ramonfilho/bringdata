@@ -147,7 +147,7 @@ def test_contador_ab_do_dm_filtra_allowlist():
 
 
 def test_split_da_previsao_separa_fora_meta():
-    src = (Path(__file__).resolve().parent.parent / 'api' / 'app.py').read_text()
+    src = ''.join(p.read_text() for p in [Path(__file__).resolve().parent.parent / 'api' / 'app.py'] + sorted((Path(__file__).resolve().parent.parent / 'api' / 'routers').glob('*.py')))  # app.py + routers
     assert "_vk = 'fora_meta'" in src, \
         "o split por variante da previsão voltou a rotular google como Champion"
 

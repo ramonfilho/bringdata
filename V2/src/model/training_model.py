@@ -1209,6 +1209,21 @@ def registrar_features_e_modelo_devclub(
         top5_conversoes = analise_decis.tail(5)['pct_total_conversoes'].sum()
         lift_maximo = analise_decis['lift'].max()
 
+        # Incerteza e calibração no test set (src/model/metricas_incerteza.py): intervalo
+        # bootstrap de AUC e do lift do top-10%, Brier e ECE. Nunca derruba o treino.
+        try:
+            from src.model.metricas_incerteza import medir_incerteza
+            incerteza = medir_incerteza(y_test.values, y_prob)
+            logger.info(
+                "  AUC IC95%% [%.4f, %.4f] | lift top-10%% %.2f IC95%% [%.2f, %.2f] | Brier %.4f | ECE %.4f (positivos no test: %d)",
+                incerteza['auc_ci95_low'], incerteza['auc_ci95_high'], incerteza['lift_top10'],
+                incerteza['lift_top10_ci95_low'], incerteza['lift_top10_ci95_high'],
+                incerteza['brier_test'], incerteza['ece_test'], int(incerteza['n_pos_test']),
+            )
+        except Exception as _e:
+            logger.warning(f"  [incerteza] não medida: {_e}")
+            incerteza = {}
+
         # Monotonia
         taxas = analise_decis['taxa_conversao'].values
         crescimentos = sum(1 for i in range(1, len(taxas)) if taxas[i] >= taxas[i-1])
@@ -1278,6 +1293,8 @@ def registrar_features_e_modelo_devclub(
         mlflow.log_metric("baseline_conversion_rate", taxa_base)
         mlflow.log_metric("train_positive_rate", y_train.mean())
         mlflow.log_metric("test_positive_rate", y_test.mean())
+        for _k, _v in incerteza.items():
+            mlflow.log_metric(_k, float(_v))
 
         # Metadados do modelo
         model_metadata = {
@@ -1326,7 +1343,8 @@ def registrar_features_e_modelo_devclub(
                 "top5_decil_concentration": float(top5_conversoes),
                 "lift_maximum": float(lift_maximo),
                 "monotonia_percentage": float(monotonia),
-                "baseline_conversion_rate": float(taxa_base)
+                "baseline_conversion_rate": float(taxa_base),
+                **{k: float(v) for k, v in incerteza.items()},
             },
             "decil_analysis": {
                 f"decil_{i+1}": {

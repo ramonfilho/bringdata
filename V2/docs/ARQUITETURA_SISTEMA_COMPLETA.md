@@ -1,6 +1,7 @@
 # SMART ADS V2 — ARQUITETURA DO SISTEMA
 
 > **DOCUMENTO CRÍTICO**: Leia no início de TODA sessão de desenvolvimento.
+> **Estado vivo (17/09/2026):** o que roda hoje está no `README.md` da raiz e na pipeline (`.github/workflows/deploy.yml`, canário com rollback); o modelo servido é o de `V2/configs/active_models/devclub.yaml`. Os blocos "Estado atual da produção (28/04/2026)" abaixo são histórico e ficam para contexto das decisões. `src/features/` ainda existe no repositório (a consolidação em `src/core` descrita abaixo deixou o pacote antigo no lugar).
 > Última atualização: 2026-06-08 (seção BANCO DE DADOS — migração de schema 11–17/05). Estado de A/B/modelo abaixo é de 2026-04-28.
 >
 > **⚠️ Schema do banco mudou (11–17/05/2026):** a captação migrou do par `Lead`/`leads_capi` para o schema novo (`Client`/`UTMTracking`/`Activity`) + o ledger `registros_ml`. As tabelas antigas estão **mortas** (somente histórico). Ver seção [BANCO DE DADOS](#banco-de-dados) e `PROCESSO_CAPI_LEAD_SURVEYS.md`.
