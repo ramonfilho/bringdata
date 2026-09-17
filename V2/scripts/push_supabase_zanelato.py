@@ -120,6 +120,15 @@ from urllib.parse import unquote, urlparse
 from scripts.provisiona_dash_zanelato import origem_leitura
 
 TABELA_DESTINO = "public.leads_inbound"
+
+# Só as linhas que ESTE script escreve entram na auditoria. Desde 10/09/2026 outra
+# integração grava na mesma tabela o funil MBA (campanhas `[W-MBA]`, `utm_url` nulo) com
+# a data em barra (`2026/09/10`); a nossa `data` sai de `::date` e é sempre `AAAA-MM-DD`.
+# Medido em 17/09/2026: 108.333 linhas nossas contra 652 deles. Sem este filtro, as
+# linhas deles caíam num "mês" `2026/09` que a origem não tem, e a auditoria falhava
+# todo dia desde 11/09 por dado que não é nosso. Se um dia eles passarem a gravar com
+# hífen, a auditoria volta a divergir, e é o comportamento certo: aí é preciso olhar.
+SO_NOSSAS = "data ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'"
 SEGREDO_URL = "dash-zanelato-supabase-url"
 PROJETO_GCP = "smart-ads-451319"
 
@@ -510,13 +519,17 @@ def auditar() -> dict:
     try:
         obtido = {str(r[0]): int(r[1]) for r in dst.run(
             f"SELECT substr(data,1,7), count(*) FROM {TABELA_DESTINO} "
-            f"WHERE data >= :c GROUP BY 1", c=corte)}
+            f"WHERE {SO_NOSSAS} AND data >= :c GROUP BY 1", c=corte)}
+        # Linhas de outra integração (funil MBA) na mesma tabela: contadas à parte, só
+        # para quem lê saber que existem. Não entram na comparação.
+        de_outros = dst.run(f"SELECT count(*) FROM {TABELA_DESTINO} "
+                            f"WHERE NOT ({SO_NOSSAS})")[0][0]
         # Linhas que já saíram da janela e ainda não foram podadas. NÃO é divergência:
         # é trabalho pendente da poda diária, e some sozinho. Reportado à parte de
         # propósito, porque misturar as duas coisas é o que faz uma auditoria virar
         # ruído e ser ignorada.
-        a_podar = dst.run(f"SELECT count(*) FROM {TABELA_DESTINO} WHERE data < :c",
-                          c=corte)[0][0]
+        a_podar = dst.run(f"SELECT count(*) FROM {TABELA_DESTINO} "
+                          f"WHERE {SO_NOSSAS} AND data < :c", c=corte)[0][0]
     finally:
         dst.close()
 
@@ -533,6 +546,9 @@ def auditar() -> dict:
     if a_podar:
         print(f"\n(fora da janela, aguardando poda: {a_podar:,} linhas — não é divergência)")
         tabela.append(f"fora da janela, aguardando poda: {a_podar:,} (não é divergência)")
+    if de_outros:
+        print(f"(de outra integração, fora da auditoria: {de_outros:,} linhas)")
+        tabela.append(f"de outra integração (funil MBA), fora da auditoria: {de_outros:,}")
 
     if ruins:
         det = "; ".join(f"{m}: origem {e:,} destino {o:,} ({o - e:+,})" for m, e, o in ruins)
@@ -553,7 +569,7 @@ def auditar() -> dict:
         f":white_check_mark: Entrega Zanelato conferida: *{total:,} leads*, "
         f"todos os {len(esperado)} meses batem."
         + (f" ({a_podar:,} linhas aguardando a poda.)" if a_podar else ""))
-    return {"modo": "auditar", "linhas": total, "a_podar": a_podar}
+    return {"modo": "auditar", "linhas": total, "a_podar": a_podar, "de_outros": de_outros}
 
 
 def main() -> int:
