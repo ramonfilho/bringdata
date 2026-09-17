@@ -10,6 +10,9 @@
 #   canary      - build da imagem a partir do SHA do push, revisão a 0% com tag canary-*,
 #                 Gates B (smoke), D (YAML dentro da imagem), C (replay de 50 leads contra a
 #                 revisão viva) e o progression_gate em modo check 0 -> 10.
+#   vigia       - 60 minutos depois dos 100%: a cada 5 min colhe feature-report da revisão e
+#                 taxa de 5xx dos logs dela; ERROR ou 5xx > 1% (com amostra) devolvem 100% à
+#                 revisão anterior sozinho (scripts/vigia_pos_deploy.py).
 #   canary-10, canary-50, production
 #               - cada um espera aprovação no environment de mesmo nome (required reviewers),
 #                 consulta o progression_gate (exit 0 = PROMOTE; 1 = HOLD, o job falha e
@@ -37,6 +40,16 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # Só o que entra na imagem deploya. Documento, teste, workflow e infra não criam canário.
+    paths-ignore:
+      - '**.md'
+      - 'V2/docs/**'
+      - 'V2/tests/**'
+      - 'V2/requirements-dev.txt'
+      - '.github/**'
+      - '.claude/**'
+      - 'scripts/**'
+      - 'infra/**'
   workflow_dispatch:
     inputs:
       modo:
@@ -211,3 +224,22 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
       - name: gate 50 -> 100, promote a 100%, smoke; rollback automático se der ruim
         run: bash V2/scripts/promover_com_rollback.sh "${{ needs.canary.outputs.revision }}" "${{ needs.canary.outputs.previous }}" 50 100
+
+  vigia:
+    name: vigia 60 min depois dos 100% (rollback automático)
+    needs: [canary, production]
+    if: vars.PROMOTION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: feature-report da revisão + 5xx dos logs, a cada 5 min por 60 min
+        run: python3 V2/scripts/vigia_pos_deploy.py --revision "${{ needs.canary.outputs.revision }}" --rollback "${{ needs.canary.outputs.previous }}" --minutos 60 --intervalo 5
