@@ -83,15 +83,15 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.modo == 'rollback'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: { python-version: "3.10" }
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v3
       - name: revisao_alvo obrigatória
         run: test -n "${{ inputs.revisao_alvo }}" || { echo "informe revisao_alvo"; exit 1; }
       - name: deploy-gate promote --rollback (100% + lockstep dos espelhos)
@@ -104,11 +104,11 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.modo == 'wif-check'
     runs-on: ubuntu-latest
     steps:
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v3
       - name: o que o pipeline precisa conseguir fazer
         run: |
           set -e
@@ -133,20 +133,20 @@ jobs:
       revision: ${{ steps.rev.outputs.revision }}
       previous: ${{ steps.rev.outputs.previous }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0            # o gate compara HEAD com origin/main
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.10"
           cache: pip
           cache-dependency-path: V2/requirements-dev.txt
       - run: pip install -r V2/requirements-dev.txt
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v3
       - uses: docker/setup-buildx-action@v3
       - run: gcloud auth configure-docker gcr.io --quiet
 
@@ -175,15 +175,15 @@ jobs:
     environment: canary-10
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: { python-version: "3.10" }
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v3
       - name: gate 0 -> 10, promote a 10%, smoke; rollback automático se der ruim
         run: bash V2/scripts/promover_com_rollback.sh "${{ needs.canary.outputs.revision }}" "${{ needs.canary.outputs.previous }}" 0 10
 
@@ -194,15 +194,15 @@ jobs:
     environment: canary-50
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: { python-version: "3.10" }
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v3
       - name: gate 10 -> 50, promote a 50%, smoke; rollback automático se der ruim
         run: bash V2/scripts/promover_com_rollback.sh "${{ needs.canary.outputs.revision }}" "${{ needs.canary.outputs.previous }}" 10 50
 
@@ -213,15 +213,15 @@ jobs:
     environment: production
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: { python-version: "3.10" }
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v3
       - name: gate 50 -> 100, promote a 100%, smoke; rollback automático se der ruim
         run: bash V2/scripts/promover_com_rollback.sh "${{ needs.canary.outputs.revision }}" "${{ needs.canary.outputs.previous }}" 50 100
 
@@ -232,14 +232,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { fetch-depth: 0 }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with: { python-version: "3.10" }
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
-      - uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v3
       - name: feature-report da revisão + 5xx dos logs, a cada 5 min por 60 min
         run: python3 V2/scripts/vigia_pos_deploy.py --revision "${{ needs.canary.outputs.revision }}" --rollback "${{ needs.canary.outputs.previous }}" --minutos 60 --intervalo 5
