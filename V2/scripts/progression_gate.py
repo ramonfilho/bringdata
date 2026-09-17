@@ -140,18 +140,47 @@ class GateResult:
 from cloud_run_urls import get_revision_url, get_service_url  # noqa: E402
 
 
+# Último status HTTP visto por URL (200, 500, ...; None = não respondeu). Quem julga
+# precisa distinguir "o canário respondeu 500" de "o canário não respondeu".
+ULTIMO_HTTP: Dict[str, Optional[int]] = {}
+
+
 def fetch_json(url: str, timeout: int = 180) -> Optional[Dict[str, Any]]:
     try:
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=timeout) as resp:
+            ULTIMO_HTTP[url] = resp.status
             return json.loads(resp.read().decode('utf-8'))
     except urllib.error.HTTPError as e:
+        ULTIMO_HTTP[url] = e.code
         body = e.read().decode('utf-8', errors='replace')[:200] if hasattr(e, 'read') else ''
         print(f"  [gate] HTTP {e.code} em {url}: {body}", file=sys.stderr)
         return None
     except Exception as e:
+        ULTIMO_HTTP[url] = None
         print(f"  [gate] Erro em {url}: {e}", file=sys.stderr)
         return None
+
+
+def diferencial(sinal: Dict[str, Any], base_viva: Optional[str], fetch=None) -> Optional[str]:
+    """Defeito da revisão, não do serviço: o canário respondeu 5xx num endpoint que a
+    revisão viva responde 200.
+
+    Medido em 17/09/2026 (canário 01179-jux): o daily-check devolveu 500 por um caminho
+    de arquivo errado na refatoração das rotas; a viva respondia 200. O gate tratou como
+    "inacessível" (HOLD) e deixou 10% do tráfego na revisão quebrada. Timeout ou
+    conexão recusada (http None) NÃO entram aqui: isso é o serviço, não a revisão.
+    Devolve o motivo do ROLLBACK, ou None.
+    """
+    http = (sinal or {}).get('http')
+    caminho = (sinal or {}).get('path')
+    if not base_viva or not caminho or not isinstance(http, int) or http < 500:
+        return None
+    fetch = fetch or fetch_json
+    if fetch(f"{base_viva}{caminho}") is None:
+        return None
+    return (f"[diferencial] canário HTTP {http} em {caminho}; a revisão viva responde 200: "
+            f"defeito da revisão, não do serviço")
 
 
 # Abaixo disto a taxa de 5xx não é julgada: 1 erro em 10 requisições é 10% e não é sinal.
@@ -210,7 +239,8 @@ def check_feature_report(base_url: str, revision: str, hours: int) -> Dict[str, 
     print(f"  [gate] consultando {url}")
     report = fetch_json(url, timeout=120)
     if report is None:
-        return {'ok': False, 'reason': 'feature-report inacessível', 'status': None}
+        return {'ok': False, 'reason': 'feature-report inacessível', 'status': None,
+                'http': ULTIMO_HTTP.get(url), 'path': url[len(base_url):]}
 
     status = report.get('overall_status', 'NO_DATA')
     total = report.get('total_batches', 0)
@@ -229,7 +259,8 @@ def check_daily_report(base_url: str, hours: int) -> Dict[str, Any]:
     print(f"  [gate] consultando {url}")
     report = fetch_json(url, timeout=300)
     if report is None:
-        return {'ok': False, 'reason': 'daily-check inacessível'}
+        return {'ok': False, 'reason': 'daily-check inacessível',
+                'http': ULTIMO_HTTP.get(url), 'path': url[len(base_url):]}
 
     fm = report.get('funnel_metrics', {}) or {}
     lqm = report.get('lead_quality_metrics', {}) or {}
@@ -267,10 +298,16 @@ def decide(
     feat_signals: Dict[str, Any],
     daily_signals: Dict[str, Any],
     stage_criteria: Dict[str, Any],
+    diferenciais: Optional[List[str]] = None,
 ) -> GateResult:
     reasons = []
     verdict = 'PROMOTE'
     signals = {'feature_report': feat_signals, 'daily': daily_signals}
+
+    # Canário 5xx onde a viva responde 200: é a revisão, e ela sai (ver `diferencial`).
+    if diferenciais:
+        verdict = 'ROLLBACK'
+        reasons.extend(diferenciais)
 
     # Feature report é o gate mais crítico (T1-11)
     if not feat_signals.get('ok'):
@@ -361,6 +398,14 @@ def execute_promotion(revision: str, from_pct: int, to_pct: int,
 # Main
 # =============================================================================
 
+def base_viva_ou_none(args) -> Optional[str]:
+    """URL do serviço (revisão viva), ou None se não der para obter."""
+    try:
+        return get_service_url(args.service, args.region, args.project)
+    except Exception:
+        return None
+
+
 def main():
     instalar_auth_gcp()
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -429,7 +474,17 @@ def main():
     print(f"  → 5xx da revisão: {daily['cinco_xx']}")
     print()
 
-    result = decide(args.from_pct, args.to_pct, feat, daily, stage)
+    # Só faz sentido comparar quando o gate falou com a URL própria do canário.
+    diferenciais = []
+    if base_url != base_viva_ou_none(args):
+        try:
+            viva = get_service_url(args.service, args.region, args.project)
+        except Exception as e:
+            print(f"[gate] sem URL da viva para o diferencial ({e})", file=sys.stderr)
+            viva = None
+        diferenciais = [d for d in (diferencial(feat, viva), diferencial(daily, viva)) if d]
+
+    result = decide(args.from_pct, args.to_pct, feat, daily, stage, diferenciais)
 
     print('=' * 80)
     print(f'VEREDITO: {result.verdict}')
