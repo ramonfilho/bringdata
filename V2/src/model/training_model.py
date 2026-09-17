@@ -56,6 +56,10 @@ def assert_mlflow_backend_running(project_id: str = _MLFLOW_SQL_PROJECT,
 
     Raises:
         RuntimeError com comando de fix se instância parada/inacessível.
+
+    Sem `gcloud` no PATH (Cloud Run Job de retreino, que roda na imagem da API),
+    NÃO levanta: registra um aviso e devolve None, e a conexão do MLflow falha
+    alto sozinha logo adiante se a instância estiver parada.
     """
     import subprocess
     try:
@@ -65,9 +69,12 @@ def assert_mlflow_backend_running(project_id: str = _MLFLOW_SQL_PROJECT,
             capture_output=True, text=True, timeout=10
         )
     except FileNotFoundError:
-        raise RuntimeError(
-            "gcloud CLI não encontrado — instale Google Cloud SDK pra usar MLflow remoto."
-        )
+        # Sem gcloud não há como conferir (é o caso do Cloud Run Job de retreino, que
+        # roda na imagem da API). A instância fica sempre ligada; se não estiver, a
+        # conexão do MLflow falha alto logo adiante, com erro de rede em vez de críptico.
+        logger.warning("[mlflow] gcloud não encontrado; pulo a checagem do Cloud SQL "
+                       "(ambiente sem SDK, ex.: Cloud Run Job).")
+        return
     except subprocess.TimeoutExpired:
         raise RuntimeError(
             f"Timeout ao consultar Cloud SQL '{instance_id}' — rede indisponível?"

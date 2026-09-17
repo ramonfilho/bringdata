@@ -29,7 +29,7 @@ ela com a comparação feita.
 
 | Peça | Estado | Trabalho |
 |---|---|---|
-| pipeline de treino (`src/train_pipeline.py`) | existe, roda no Mac com `.env` | rodar headless na imagem: ler credenciais das variáveis de ambiente do job, sem `.env` |
+| pipeline de treino (`src/train_pipeline.py`) | headless desde 17/09/2026: a etapa `treino` do `api/Dockerfile` (base da API + mlflow e pyarrow) vira `gcr.io/<projeto>/smart-ads-treino:<tag>` em todo deploy; o job `retreino-mensal` (`scripts/setup_retreino_job.sh`) recebe `LEDGER_DB_*` e `MLFLOW_DB_*` do Secret Manager e roda `--leads-source db --sales-source db --no-api-data` | nada |
 | model card e `git_commit` no run | existe (PR #92) | nada |
 | régua de comparação | existe (`ci_check_active_model.py`, PR #262) | expor `julgar()` para o job chamar |
 | abrir a PR do modelo | existe (`abrir_pr_modelo.sh`, usa worktree e `gh`) | versão para runner: sem worktree, `gh` autenticado por token do repositório, push por HTTPS |
