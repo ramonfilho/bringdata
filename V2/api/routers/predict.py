@@ -2,6 +2,7 @@
 
 Gerado a partir do app.py monolítico (corte por domínio, corpo dos handlers intacto)."""
 import os
+from pathlib import Path
 import pandas as pd
 import numpy as np
 from fastapi import FastAPI, HTTPException, UploadFile, File
