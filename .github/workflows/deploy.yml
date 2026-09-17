@@ -46,6 +46,7 @@ on:
       - 'V2/docs/**'
       - 'V2/tests/**'
       - 'V2/requirements-dev.txt'
+      - 'V2/.coveragerc'
       - '.github/**'
       - '.claude/**'
       - 'scripts/**'

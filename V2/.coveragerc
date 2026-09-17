@@ -1,0 +1,14 @@
+# Cobertura medida no CI (job pytest). O piso em ci.yml e o valor do dia em que entrou
+# (14% em 17/09/2026): nao pode cair; subir e trabalho de cada PR que toca codigo sem teste.
+[run]
+source = src, api, scripts
+omit =
+    */tests/*
+    */mlruns/*
+    */__pycache__/*
+branch = False
+
+[report]
+skip_covered = True
+skip_empty = True
+precision = 0

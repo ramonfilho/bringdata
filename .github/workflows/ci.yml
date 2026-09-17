@@ -76,11 +76,21 @@ jobs:
         if: steps.auth.outcome == 'success'
         run: bash scripts/baixar_artefatos_modelo.sh
 
-      - name: pytest
+      - name: pytest (com cobertura; piso 14%, o valor de 17/09/2026)
         env:
           # Com identidade, artefato ausente é FALHA (o gate do modelo não pode virar skip).
           CI_REQUIRE_MODEL_ARTIFACTS: ${{ steps.auth.outcome == 'success' && '1' || '' }}
-        run: python -m pytest
+        run: python -m pytest --cov --cov-report=term --cov-report=xml --cov-fail-under=14 | tee pytest.out
+      - name: cobertura no resumo do job
+        if: always()
+        run: |
+          { echo '## Cobertura'; echo; echo '```'; grep -E '^(TOTAL|Name)' pytest.out || true; grep -E '^(src|api|scripts)/' pytest.out | sort -k4 -n | head -15; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-xml
+          path: V2/coverage.xml
+          retention-days: 14
 
   model-gate:
     name: gate do modelo (run que a PR troca no YAML)
