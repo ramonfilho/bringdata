@@ -12,6 +12,25 @@ dados novos, compara com o champion pela mesma régua do CI, e abre a PR do mode
 o resultado justifica. Ninguém decide sem ver; o que muda é que a candidatura chega
 pronta, com número, em vez de depender de alguém lembrar.
 
+## Etapa 1 entregue (18/09/2026)
+
+Primeira rodada real do job `retreino-mensal` (imagem `smart-ads-treino:v20260918_011535`,
+4 vCPU, 8 GiB, sem `.env`, sem gcloud, só do Cloud SQL): 396.366 linhas de pesquisa e
+20.155 vendas lidas do `analytics`, 70 features, **9,5 minutos** de ponta a ponta. Run
+`47b0cae614e24833b517e2508e392064` no MLflow: `FINISHED`, `git_commit=bb23587`,
+`git_dirty=false` (o primeiro run do projeto com linhagem limpa; os anteriores eram
+`dirty=true`), AUC 0,722 (IC95% 0,708 a 0,734), KS 0,316, monotonia 100%, artefatos em
+`gs://smart-ads-mlflow/artifacts/`. O run não foi ativado: ativar continua sendo a PR do
+modelo (etapas 3 e 4). Como rodar de novo: `bash scripts/setup_retreino_job.sh` e
+`gcloud run jobs execute retreino-mensal --region us-central1 --wait`.
+
+O que a primeira rodada ensinou, já corrigido: a imagem da API não tinha `mlflow` nem
+`pyarrow` (etapa `treino` do Dockerfile, #297); a checagem do Cloud SQL chamava `gcloud`
+(#297); a Célula 1 exigia planilha local (modo banco, #310); a tag da imagem de treino
+saía como digest (#308); o `gcloud run jobs create` recusa valor repetido em `--args`
+(#309); o Dependabot passou a propor mlflow 3 e pyarrow 23 por causa do
+`requirements-treino.txt` (ignores em #312).
+
 ## Entrada, processamento, saída
 
 | Etapa | O que entra | O que acontece | O que sai |
