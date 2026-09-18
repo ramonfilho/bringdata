@@ -26,7 +26,8 @@ ENVS="LEDGER_DB_HOST=$CLOUDSQL_IP,LEDGER_DB_PORT=5432,LEDGER_DB_NAME=ledger,LEDG
 ENVS="$ENVS,MLFLOW_DB_HOST=$CLOUDSQL_IP,MLFLOW_DB_PORT=5432,MLFLOW_DB_USER=postgres,MLFLOW_DB_NAME=mlflow"
 ENVS="$ENVS,LAUNCHES_SOURCE=table,PYTHONUNBUFFERED=1,TZ=America/Sao_Paulo"
 SECRETS="LEDGER_DB_PASSWORD=ledger-db-password:latest,MLFLOW_DB_PASSWORD=mlflow-db-password:latest"
-ARGS="--leads-source,db,--sales-source,db,--no-api-data"
+# Forma --flag=valor: o gcloud recusa valor repetido ("db" duas vezes) na lista de --args.
+ARGS="--leads-source=db,--sales-source=db,--no-api-data"
 
 COMUM=(--region="$REGION" --project="$PROJECT" --image="$IMG" --service-account="$SA"
        --cpu=4 --memory=8Gi --task-timeout=3600 --max-retries=0 --tasks=1
