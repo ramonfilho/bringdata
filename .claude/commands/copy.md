@@ -245,13 +245,13 @@ ramon@bring-data.com
 
 ### Caminho principal — **coluna Copy do CSV** (contatos rastreados)
 
-Se o destinatário **já tem uma linha** em `bring_data_contatos` (CSV `V2/comercial/contatos.csv`), a copy final **vai direto na coluna `Copy`** dessa linha, via edição do CSV + `--push`. A célula do Sheets preserva newlines nativamente — copiar de célula (duplo clique, Cmd+A, Cmd+C) entrega o texto íntegro para Gmail/WhatsApp.
+Se o destinatário **já tem uma linha** em `bring_data_contatos` (CSV `V2/comercial/contatos.csv` (pasta LOCAL, fora do git desde 18/09/2026; cópia em `~/Desktop/bring_data_fora_do_repo/V2/comercial/`)), a copy final **vai direto na coluna `Copy`** dessa linha, via edição do CSV + `--push`. A célula do Sheets preserva newlines nativamente — copiar de célula (duplo clique, Cmd+A, Cmd+C) entrega o texto íntegro para Gmail/WhatsApp.
 
 **Fluxo:**
 1. Montar a mensagem.
 2. **Mostrar inline em bloco** para o usuário aprovar o conteúdo.
 3. Após aprovação, editar o CSV: `df.loc[mask, "Copy"] = texto`.
-4. `python V2/comercial/contatos_sync.py --push`.
+4. `python V2/comercial/contatos_sync.py --push` (script na pasta local `V2/comercial/`, fora do git; ver `/sheets`).
 5. Para enviar: usuário clica na célula Copy no Sheet → Cmd+A → Cmd+C → cola no cliente.
 
 Se a linha tiver Copy anterior (histórico de contatos), **acrescentar** ao final com separador `\n\n---\n\n` em vez de sobrescrever.
