@@ -6,12 +6,13 @@ números dos limiares são os de configs/retreino_mensal.yaml; os do champion at
 os do run real (AUC 0,7531, monotonia 77,8%), que justamente NÃO passaria no piso de
 80% e por isso não pode ser rejulgado a cada PR.
 """
+import scripts.ci_check_active_model as gate
 from scripts.ci_check_active_model import julgar, limiares_de, runs_do_yaml, runs_que_entram
 
 LIM = limiares_de({"comparison": {"min_auc": 0.65, "min_monotonia": 0.80,
                                   "manual_approval_threshold": 0.005, "auto_approve_threshold": 0.02}})
 BOM = {"auc": 0.7297, "monotonia_percentage": 88.89, "lift_maximum": 3.32}
-LIMPO = {"git_commit": "135b219", "git_dirty": "false"}
+LIMPO = {"git_commit": "135b219", "git_dirty": "false", "dataset_hash": "77bc2ac9a17270ec", "dataset_linhas": "382128"}
 
 
 def _yaml(champion, variantes=None, enabled=True):
@@ -73,3 +74,28 @@ def test_champion_novo_precisa_bater_o_anterior_pela_politica_do_retreino():
 def test_variante_nova_nao_e_comparada_com_champion():
     ok, motivos, nota = julgar("variante:x", {**BOM, "auc": 0.66}, LIMPO, "FINISHED", True, LIM, {"auc": 0.75})
     assert ok and nota == "ok"
+
+
+def test_reprova_run_sem_o_conjunto_de_treino_congelado():
+    # Etapa 2 do treino contínuo (18/09/2026): sem o retrato no run, não se sabe com o que
+    # o modelo foi treinado. O run headless real tem dataset_hash 77bc2ac9 e 382.128 linhas.
+    sem_retrato = {"git_commit": "135b219", "git_dirty": "false"}
+    ok, motivos, _ = julgar("variante:x", BOM, sem_retrato, "FINISHED", True, LIM)
+    assert not ok and any("conjunto de treino congelado" in m for m in motivos)
+    ok, motivos, _ = julgar("variante:x", BOM, {**sem_retrato, "dataset_hash": "abc"}, "FINISHED", True, LIM)
+    assert not ok
+
+
+def test_bucket_precisa_do_parquet_e_do_manifesto_alem_dos_arquivos_do_deploy(monkeypatch):
+    class _R:
+        def __init__(self, out):
+            self.returncode, self.stdout = 0, out
+
+    base = gate.BUCKET + "/r1/artifacts/"
+    so_deploy = "\n".join(base + a for a in gate.ARQUIVOS_DO_DEPLOY)
+    monkeypatch.setattr(gate.subprocess, "run", lambda *a, **k: _R(so_deploy))
+    assert gate.artefatos_no_bucket("r1") is False
+    completo = so_deploy + "\n" + "\n".join(base + a for a in gate.ARQUIVOS_DO_RETRATO)
+    monkeypatch.setattr(gate.subprocess, "run", lambda *a, **k: _R(completo))
+    assert gate.artefatos_no_bucket("r1") is True
+

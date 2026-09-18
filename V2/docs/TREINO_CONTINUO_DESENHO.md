@@ -31,12 +31,33 @@ saía como digest (#308); o `gcloud run jobs create` recusa valor repetido em `-
 (#309); o Dependabot passou a propor mlflow 3 e pyarrow 23 por causa do
 `requirements-treino.txt` (ignores em #312).
 
+## Etapa 2 entregue (18/09/2026): o congelamento já existia, o gate passou a exigir
+
+O desenho pedia uma tabela datada no Cloud SQL. Não precisou: desde a PR #175 (10/08/2026)
+todo treino grava, no run do MLflow que ele gera, o retrato do conjunto de treino
+(`src/core/train_snapshot.py`): um manifesto (linhas, colunas, intervalo de datas,
+positivos, hash do conteúdo) e o parquet do conjunto inteiro antes da engenharia de
+features, mais os params `dataset_hash` e `dataset_linhas`. O job headless roda o mesmo
+código, então a primeira execução na nuvem já saiu congelada: o run 47b0cae6 tem
+`dataset_hash` 77bc2ac9, 382.128 linhas, e `conjunto_de_treino.parquet` + `.json` em
+`gs://smart-ads-mlflow/artifacts/47b0cae614e24833b517e2508e392064/artifacts/`.
+
+O que esta etapa acrescentou: o gate do modelo no CI (`scripts/ci_check_active_model.py`)
+reprova run que entra no YAML sem os dois params ou sem os dois arquivos no bucket. Um
+modelo só chega em produção com o dado que o gerou preso ao run. Efeito colateral aceito:
+uma PR que volte o YAML para um run anterior a 10/08 (sem retrato) é reprovada; volta de
+modelo se faz pelo rollback do deploy, não pelo YAML.
+
+A comparação champion contra desafiante "nas mesmas linhas" (o motivo da tabela datada)
+fica para a etapa 3: o julgamento lê o `dataset_hash` dos dois runs e diz se o conjunto
+mudou entre eles.
+
 ## Entrada, processamento, saída
 
 | Etapa | O que entra | O que acontece | O que sai |
 |---|---|---|---|
 | 1. Gatilho | dia 1 de cada mês às 06:00 (Cloud Scheduler), ou um alerta de drift do monitoring | dispara o Cloud Run Job `retreino-mensal` | uma execução do job |
-| 2. Universo | `leads_treino_prod` no Cloud SQL, com corte temporal do dia | o job congela o universo numa tabela datada (`leads_treino_prod_YYYYMMDD`) antes de treinar | universo reproduzível |
+| 2. Universo | `leads_treino_prod` no Cloud SQL, com corte temporal do dia | o treino grava o retrato do conjunto (manifesto + parquet, `src/core/train_snapshot.py`) no run, e o gate do CI exige isso | run com `dataset_hash` e o parquet do que foi usado |
 | 3. Treino | o universo congelado e os hiperparâmetros de `configs/clients/devclub.yaml` | `src.train_pipeline` na imagem da API (mesmo Python, mesmos pins do scikit-learn) | run no MLflow com `git_commit` = SHA da imagem e `git_dirty=false` por construção; artefatos no bucket; model card |
 | 4. Julgamento | run novo e run do champion | a função `julgar()` de `ci_check_active_model.py`, com os limiares de `retreino_mensal.yaml` (`min_auc` 0,65, `min_monotonia` 0,80, `auto_approve_threshold` +0,02 de AUC, `manual_approval_threshold` +0,005) | um de três: descarta, pede olhar humano, ou candidata |
 | 5. Saída | o veredito | descarta: DM no Slack com o card e o motivo; candidata ou "olhar humano": `abrir_pr_modelo.sh <run>` abre a PR com o card no corpo | PR do modelo, que segue o caminho de hoje (CI, aprovação, deploy em degraus) |
@@ -53,14 +74,14 @@ ela com a comparação feita.
 | régua de comparação | existe (`ci_check_active_model.py`, PR #262) | expor `julgar()` para o job chamar |
 | abrir a PR do modelo | existe (`abrir_pr_modelo.sh`, usa worktree e `gh`) | versão para runner: sem worktree, `gh` autenticado por token do repositório, push por HTTPS |
 | Cloud Run Job `retreino-mensal` | não existe | criar com a imagem da API, 8 GiB, 4 vCPU, timeout 60 min, conta de serviço com leitura do Cloud SQL e escrita no bucket e no MLflow |
-| congelar o universo | não existe | uma tabela por corte; o treino lê só dela |
+| congelar o universo | existe desde a PR #175 (retrato no run); o gate exige desde 18/09/2026 | nada |
 | gatilho por drift | não existe | o alerta de drift do monitoring chama o job (uma linha no orquestrador de alertas) |
 
 ## Riscos conhecidos, e o que o desenho faz com eles
 
 - **Modelo passado não é reproduzível** (memória do projeto: o universo era destruído no
-  rebuild). O congelamento por corte na etapa 2 é a resposta: o run aponta para a tabela
-  que o gerou.
+  rebuild). O retrato no run (etapa 2) é a resposta: o run carrega o parquet e o hash do
+  conjunto que o gerou, e o gate não deixa entrar run sem isso.
 - **Treinar no runner do GitHub.** Não: o dado de lead não sai do projeto GCP. O job roda
   no Cloud Run, na mesma rede das outras rotinas.
 - **Custo.** Um job mensal de até 60 minutos com 4 vCPU e 8 GiB fica na casa de centavos
@@ -73,8 +94,8 @@ ela com a comparação feita.
 
 1. **Treino headless** (2 dias): `train_pipeline` lê credenciais do ambiente; job
    `retreino-mensal` criado e rodado uma vez na mão; run no MLflow com `git_dirty=false`.
-2. **Universo congelado** (1 dia): tabela por corte e o treino lendo dela; teste que
-   compara o run com a tabela.
+2. **Universo congelado**: entregue em 18/09/2026 sem tabela nova (seção acima); o gate
+   do CI exige `dataset_hash`, `dataset_linhas` e o parquet no run.
 3. **Julgamento e Slack** (1 dia): o job chama `julgar()` e manda o card no DM em
    qualquer veredito.
 4. **PR automática** (1 dia): versão do `abrir_pr_modelo.sh` para runner; o job abre a PR
