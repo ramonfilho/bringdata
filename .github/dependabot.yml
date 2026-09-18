@@ -47,6 +47,10 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: pyarrow
         update-types: ["version-update:semver-major"]
+      # O cliente do MLflow (requirements-treino.txt, 2.13.2) exige gunicorn<23; a PR #325
+      # (22 -> 26) nem instalava. Sobe junto com o mlflow, como tarefa planejada.
+      - dependency-name: gunicorn
+        update-types: ["version-update:semver-major"]
       # google-cloud-storage 3 conflita com google-auth 2.25.2 pinado (PR #278); sobe
       # junto com google-auth, numa PR nossa.
       - dependency-name: google-cloud-storage
@@ -102,6 +106,12 @@ updates:
       # Minor também fica: requirements-dev.txt pina 2.13.2 (o mesmo do /V2/api), e o
       # mlflow 2.22 puxa gunicorn<24, que conflita com o gunicorn da API.
       - dependency-name: mlflow
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # google-cloud-logging >= 3.10 e google-cloud-pubsub >= 2.22 exigem protobuf 6; o
+      # mlflow 2.13 exige protobuf<5. Mesma regra do /V2/api (PR #327 nem instalava).
+      - dependency-name: google-cloud-logging
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: google-cloud-pubsub
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
     labels: ["dependencias"]
     commit-message:
