@@ -81,7 +81,7 @@ def test_setup_do_job_usa_segredos_e_fontes_do_banco():
     s = (RAIZ / "scripts/setup_retreino_job.sh").read_text()
     assert "MLFLOW_DB_PASSWORD=mlflow-db-password:latest" in s
     assert "LEDGER_DB_PASSWORD=ledger-db-password:latest" in s
-    assert "--leads-source,db,--sales-source,db,--no-api-data" in s
+    assert "--leads-source=db,--sales-source=db,--no-api-data" in s
     assert "MLFLOW_TRACKING_URI" not in s, "a URI com senha nunca passa pelo script"
 
 
