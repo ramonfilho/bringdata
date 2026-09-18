@@ -42,7 +42,7 @@ jobs:
           if [ "$OAUTH" = "true" ]; then modo=oauth; elif [ "$API" = "true" ]; then modo=api; else modo=nenhum; fi
           echo "modo=$modo" >> "$GITHUB_OUTPUT"
           [ "$modo" != "nenhum" ] || echo "Nem CLAUDE_CODE_OAUTH_TOKEN nem ANTHROPIC_API_KEY: revisão automática pulada." >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: steps.chave.outputs.modo != 'nenhum'
         with: { fetch-depth: 0 }
       - name: revisar (cota do plano)
