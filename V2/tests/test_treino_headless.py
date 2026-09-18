@@ -97,3 +97,22 @@ def test_sem_nenhum_caminho_completo_a_mensagem_serve_para_o_job(monkeypatch, tm
     msg = str(e.value)
     assert "MLFLOW_DB_HOST e MLFLOW_DB_PASSWORD" in msg and "mlflow-db-password" in msg
     assert "setup_retreino_job.sh" in msg
+
+
+def test_modo_banco_e_so_quando_tudo_vem_do_cloud_sql():
+    from src import train_pipeline as t
+    assert t.modo_banco("db", "db", False)
+    assert not t.modo_banco("db", "files", False)
+    assert not t.modo_banco("files", "db", False)
+    assert not t.modo_banco("db", "db", True)
+
+
+def test_no_modo_banco_sem_planilha_a_celula_1_nao_le_arquivos():
+    """Primeira execução do job (17/09/2026, retreino-mensal-mwmb2): a imagem não tem
+    planilha e `read_excel_files([])` levantou ValueError antes de tocar no banco."""
+    src = (V2 / "src" / "train_pipeline.py").read_text(encoding="utf-8")
+    trecho = src.split("CÉLULA 1: LEITURA DE ARQUIVOS")[1].split("CÉLULA 2")[0]
+    assert "elif modo_banco(leads_source, sales_source, include_api_data) and not filepaths:" in trecho
+    assert "all_data = {}" in trecho
+    ordem = trecho.index("modo_banco(") < trecho.index("all_data = read_all_training_sources(")
+    assert ordem, "o modo banco tem que ser decidido antes da leitura de arquivos"
