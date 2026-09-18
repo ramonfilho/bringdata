@@ -298,7 +298,7 @@ Recebe `ClientConfig` e passa para os 3 sub-monitores.
 
 **Output:** Slack + log em `outputs/monitoring/`
 
-**Golden snapshot:** `docs/monitoring_golden_snapshot.json` — pendente de captura limpa. O snapshot anterior (3.929 leads, 3 alertas) era referência pré-refactor. Sistema atual está com `distribution_drift HIGH` em Medium e `score_distribution_change HIGH` em D10 desde 22/04, então capturar agora cristalizaria um baseline degradado. Captura reposicionada para "pós-canary v4 a 10% estável" — ver `PLANO_EXECUCAO.md` H1.2.
+**Golden snapshot:** o arquivo `docs/monitoring_golden_snapshot.json` foi REMOVIDO do repositório em 18/09/2026: carregava o bloco `leads_data` com e-mail e telefone de 3.929 leads, num repositório público. Um snapshot de referência, se voltar a existir, fica fora do git (bucket) e sem dado pessoal.
 
 > **Nota DT-7:** alertas `missing_features` para campanhas Lookalike são esperados e documentados. Threshold de Medium calculado sobre dataset histórico completo (pré-cutoff) — campanhas antigas com alta freq histórica mas inativas no lançamento atual aparecem como ausentes. Ver `PLANO_REFACTOR_MLOPS.md` DT-7.
 

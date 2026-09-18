@@ -119,3 +119,6 @@ V2/docs/bring_data_02_execução.md
 V2/docs/swot_bringdata.md
 V2/docs/relatorios/**/*.log
 *.bak
+
+# Snapshot do monitoring com dados de leads: nunca mais no git (removido em 18/09/2026).
+V2/docs/monitoring_golden_snapshot.json
