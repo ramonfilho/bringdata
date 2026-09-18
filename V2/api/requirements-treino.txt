@@ -1,4 +1,4 @@
 # Só o que o treino precisa além da imagem da API (etapa treino do api/Dockerfile).
 # Pins iguais aos do requirements-dev.txt e do Mac que treina hoje (17/09/2026).
-mlflow==2.13.2
+mlflow==2.22.5
 pyarrow==15.0.2
