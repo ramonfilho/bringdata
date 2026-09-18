@@ -30,11 +30,34 @@ def _carregar_app():
     return app_mod
 
 
+def _achatar(rotas, prefixo=""):
+    """Rotas folha (as que têm `methods`), atravessando routers incluídos.
+
+    Até o Starlette 0.27 `app.routes` já vinha achatado (uma APIRoute por rota, com o
+    prefixo aplicado). No Starlette 1.x (FastAPI 0.141, produção desde 18/09/2026)
+    `app.routes` devolve um wrapper por `include_router` (`original_router` + contexto
+    com o prefixo) e as rotas ficam dentro dele; sem atravessar, a tabela saía vazia e o
+    teste passava só em máquina com a versão velha.
+    """
+    for r in rotas:
+        if hasattr(r, "methods"):
+            yield r, prefixo
+            continue
+        interno = getattr(r, "original_router", None) or getattr(r, "router", None)
+        filhas = getattr(interno, "routes", None) if interno is not None else getattr(r, "routes", None)
+        if not filhas:
+            continue
+        ctx = getattr(r, "include_context", None)
+        sub = (getattr(ctx, "prefix", None) or getattr(r, "prefix", None)
+               or getattr(interno, "prefix", None) or "")
+        yield from _achatar(filhas, prefixo + sub)
+
+
 def tabela_de_rotas(app) -> list:
     linhas = []
-    for r in app.routes:
-        if not hasattr(r, "methods"):
-            continue
+    for r, prefixo in _achatar(app.routes):
+        caminho = r.path if (not prefixo or r.path.startswith(prefixo)) else prefixo + r.path
+        r = type("R", (), {"path": caminho, "methods": r.methods, "name": r.name, "endpoint": r.endpoint})()
         linhas.append({
             "path": r.path,
             "methods": sorted(r.methods),

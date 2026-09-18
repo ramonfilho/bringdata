@@ -60,8 +60,14 @@ _REPO = Path(__file__).resolve().parents[2]
 PADROES_PROIBIDOS = [
     (re.compile(r"postgres(?:ql)?(?:\+\w+)?://[^\s:/{]+:(?![<${])[^\s@/{}]{6,}@"),
      "URI de banco com senha embutida (use env var / Secret Manager)"),
+    # O terceiro lookahead (18/09/2026) deixa passar a REFERÊNCIA a um segredo do Secret
+    # Manager na forma `nome-kebab:latest` (ou `:3`), que é a sintaxe de `--set-secrets` do
+    # Cloud Run: `LEDGER_DB_PASSWORD=ledger-db-password:latest` guarda o nome de um secret,
+    # não o valor. É a mesma exclusão de kebab-case dos dois padrões seguintes, pelo mesmo
+    # motivo (guard que grita em código correto é desligado). O preço é o mesmo de lá: uma
+    # senha toda minúscula com hífens e `:latest` no fim passaria.
     (re.compile(r"""[A-Z_]*PASSWORD[A-Z_]*\s*=\s*["']?(?![<${\s"'])"""
-                r"""(?![^\s"',)]*\()[^\s"',)]{6,}"""),
+                r"""(?![^\s"',)]*\()(?![a-z0-9]+(?:-[a-z0-9]+)+:(?:latest|\d+)(?=[\s"',)]|$))[^\s"',)]{6,}"""),
      "senha atribuída em texto claro"),
     # Segredo escondido no fallback de uma env var do shell: `${VAR:-segredo}`.
     #
@@ -187,3 +193,14 @@ def test_uri_do_mlflow_nao_tem_default_com_senha():
         mod._V2_ROOT = original
         if salvo is not None:
             os.environ["MLFLOW_TRACKING_URI"] = salvo
+
+
+def test_referencia_ao_secret_manager_passa_e_senha_de_verdade_nao():
+    """`VAR=nome-kebab:latest` é a sintaxe de --set-secrets do Cloud Run (nome, não valor)."""
+    padrao = next(p for p, oque in PADROES_PROIBIDOS if oque == "senha atribuída em texto claro")
+    assert not padrao.search("LEDGER_DB_PASSWORD=ledger-db-password:latest")
+    assert not padrao.search('SECRETS="MLFLOW_DB_PASSWORD=mlflow-db-password:3,X=y"')
+    assert padrao.search("LEDGER_DB_PASSWORD=Xk9pq2mZ")
+    assert padrao.search("LEDGER_DB_PASSWORD=ledger-db-password")      # sem :latest é literal
+    assert padrao.search("DB_PASSWORD=ledger-db-password:latest-mesmo")
+

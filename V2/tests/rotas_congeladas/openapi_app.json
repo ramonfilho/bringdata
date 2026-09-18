@@ -71,7 +71,7 @@
    "Body_predict_batch_csv_predict_csv_post": {
     "properties": {
      "file": {
-      "format": "binary",
+      "contentMediaType": "application/octet-stream",
       "title": "File",
       "type": "string"
      }
@@ -94,6 +94,7 @@
      "leads": {
       "description": "TODOS os leads do dia anterior (D1-D10)",
       "items": {
+       "additionalProperties": true,
        "type": "object"
       },
       "title": "Leads",
@@ -130,6 +131,7 @@
      "leads": {
       "description": "Dados do Sheets das últimas 24h",
       "items": {
+       "additionalProperties": true,
        "type": "object"
       },
       "title": "Leads",
@@ -148,6 +150,7 @@
      "actionable_alerts": {
       "default": [],
       "items": {
+       "additionalProperties": true,
        "type": "object"
       },
       "title": "Actionable Alerts",
@@ -155,6 +158,7 @@
      },
      "alerts": {
       "items": {
+       "additionalProperties": true,
        "type": "object"
       },
       "title": "Alerts",
@@ -181,6 +185,7 @@
      "funnel_metrics": {
       "anyOf": [
        {
+        "additionalProperties": true,
         "type": "object"
        },
        {
@@ -192,6 +197,7 @@
      "hotleads_24h_summary": {
       "anyOf": [
        {
+        "additionalProperties": true,
         "type": "object"
        },
        {
@@ -203,6 +209,7 @@
      "launch_resolution": {
       "anyOf": [
        {
+        "additionalProperties": true,
         "type": "object"
        },
        {
@@ -214,6 +221,7 @@
      "lead_quality_metrics": {
       "anyOf": [
        {
+        "additionalProperties": true,
         "type": "object"
        },
        {
@@ -225,6 +233,7 @@
      "operational_routines": {
       "anyOf": [
        {
+        "additionalProperties": true,
         "type": "object"
        },
        {
@@ -236,6 +245,7 @@
      "pubsub_24h_summary": {
       "anyOf": [
        {
+        "additionalProperties": true,
         "type": "object"
        },
        {
@@ -247,6 +257,7 @@
      "revenue_forecast": {
       "anyOf": [
        {
+        "additionalProperties": true,
         "type": "object"
        },
        {
@@ -258,6 +269,7 @@
      "survey_funnel_metrics": {
       "anyOf": [
        {
+        "additionalProperties": true,
         "type": "object"
        },
        {
@@ -277,6 +289,7 @@
      "traffic_metrics": {
       "anyOf": [
        {
+        "additionalProperties": true,
         "type": "object"
        },
        {
@@ -288,6 +301,7 @@
      "training_drift_24h_summary": {
       "anyOf": [
        {
+        "additionalProperties": true,
         "type": "object"
        },
        {
@@ -696,6 +710,7 @@
     "description": "Modelo para um lead individual",
     "properties": {
      "data": {
+      "additionalProperties": true,
       "title": "Data",
       "type": "object"
      },
@@ -1111,6 +1126,13 @@
    },
    "ValidationError": {
     "properties": {
+     "ctx": {
+      "title": "Context",
+      "type": "object"
+     },
+     "input": {
+      "title": "Input"
+     },
      "loc": {
       "items": {
        "anyOf": [
@@ -3006,6 +3028,7 @@
      "content": {
       "application/json": {
        "schema": {
+        "additionalProperties": true,
         "title": "Request",
         "type": "object"
        }
