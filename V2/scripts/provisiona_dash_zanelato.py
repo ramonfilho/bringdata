@@ -5,7 +5,7 @@ DevClub): banco separado, tabela única, usuário somente-leitura.
 ESTADO EM 12/08/2026: TEMPLATE DE ONBOARDING — NÃO APAGAR.
 ==========================================================
 A entrega para a Zanelato migrou para o Supabase deles (ver `push_supabase_zanelato.py` e
-`docs/ENTREGA_DADOS_AGENCIA.md`) e o cron daqui está pausado. Este arquivo FICA por decisão
+`docs/interno/ENTREGA_DADOS_AGENCIA.md`) e o cron daqui está pausado. Este arquivo FICA por decisão
 explícita: é o único lugar do projeto que sabe provisionar uma entrega para um cliente do
 zero, com o teste de aceitação que prova o isolamento antes de a credencial sair.
 

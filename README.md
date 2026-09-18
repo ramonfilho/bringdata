@@ -1,5 +1,7 @@
 # bringdata
 
+[![Deploy](https://github.com/ramonfilho/bringdata/actions/workflows/deploy.yml/badge.svg)](https://github.com/ramonfilho/bringdata/actions/workflows/deploy.yml) ![Python 3.10](https://img.shields.io/badge/python-3.10-blue) [![License: source-available](https://img.shields.io/badge/license-source--available-lightgrey)](LICENSE)
+
 [![Deploy](https://github.com/ramonfilho/bringdata/actions/workflows/deploy.yml/badge.svg?branch=main)](https://github.com/ramonfilho/bringdata/actions/workflows/deploy.yml)
 
 Lead scoring in production for a Brazilian online school (DevClub). Each lead that
@@ -68,7 +70,7 @@ toward the ads still under their ceiling.
 Sales are matched to leads by email and phone inside each launch window, ad spend
 comes from the ad account per ad and day, and every number below is revenue over
 spend on that matched base. The two sheets with the full method are the canonical
-business case ([Lead score e teto de CPL](https://claude.ai/code/artifact/716d63bc-4eab-49b0-90e2-884ed5a22869), 15/09/2026);
+business case ([Lead score e teto de CPL](V2/docs/relatorios/case_lead_score_teto/RESULTADO.md), 15/09/2026);
 the same numbers, their sources and their caveats are in
 [V2/docs/relatorios/case_lead_score_teto/RESULTADO.md](V2/docs/relatorios/case_lead_score_teto/RESULTADO.md).
 
@@ -198,3 +200,7 @@ No lead data and no credential is tracked. Secrets live in Google Secret Manager
 and reach the services as environment variables at deploy time. The CI identity is
 a dedicated service account that GitHub assumes through OIDC, limited to this
 repository.
+
+## License
+
+Source-available: the code is published to be read and evaluated. Any other use needs written permission from Bring Data; see [LICENSE](LICENSE).

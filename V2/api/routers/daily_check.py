@@ -36,7 +36,7 @@ class DailyCheckResponse(BaseModel):
     alerts_by_severity: Dict[str, int]
     alerts_by_category: Dict[str, int]
     # Subset HIGH+MEDIUM em formato compacto (type, severity, column, percentage, message).
-    # Lista de leitura humana direta — ver V.2 de docs/registro_erros_ml.md.
+    # Lista de leitura humana direta — ver V.2 de docs/interno/registro_erros_ml.md.
     actionable_alerts: List[Dict[str, Any]] = []
     alerts: List[Dict[str, Any]]
     critical_summary: str

@@ -34,7 +34,7 @@ from ml_evolution_report import load_sheets_data
 
 
 # Histórico de pools candidatos. CANONICAL é o atual em produção
-# (ver docs/METODOLOGIA_TOP5_ROAS.md; regerar com
+# (ver docs/interno/METODOLOGIA_TOP5_ROAS.md; regerar com
 # `python -m scripts.compute_top5_roas_attributable`).
 OLD_POOL = ['LF40', 'LF41', 'LF45', 'LF50', 'LF53']
 NEW4_POOL = ['LF44', 'LF45', 'LF41', 'LF46']

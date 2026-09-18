@@ -2,7 +2,7 @@
 
 Use esta skill para **compor ou revisar** posts no LinkedIn que usem o projeto Bring Data como portfólio técnico e pessoal de Ramon Filho.
 
-**Pré-requisito inegociável:** toda fonte de números, claims e histórias está em `V2/docs/portfolio_linkedin.md`. Esta skill **não inventa**. Se faltar informação, parar e perguntar.
+**Pré-requisito inegociável:** toda fonte de números, claims e histórias está em `V2/docs/interno/portfolio_linkedin.md`. Esta skill **não inventa**. Se faltar informação, parar e perguntar.
 
 > Contexto operacional do projeto está em `/ctx`. Contexto comercial (decks, precificação) está em `/comercial`. Esta skill é sobre **conteúdo de portfólio**, não venda direta.
 
@@ -29,7 +29,7 @@ O fluxo esperado é **3 posts por semana**, entregues sob demanda: o usuário di
 
 ### Fluxo de `/linkedin` (default)
 
-1. **Ler** `queue.yaml` e `V2/docs/portfolio_linkedin.md`.
+1. **Ler** `queue.yaml` e `V2/docs/interno/portfolio_linkedin.md`.
 2. **Scan de git:** `git log <meta.last_scanned_commit>..HEAD --oneline --no-merges`.
    - Classificar cada commit novo pelo prefixo (ver tabela abaixo) e propor entrada.
    - Mostrar em 1 bloco compacto: "N commits novos. Propostas de adição: [lista]. [a]ceitar todos / [e]ditar / [s]kip".
@@ -208,7 +208,7 @@ Quando o usuário pedir variante em PT explicitamente (`/linkedin <args> --pt` o
 
 ### Números só saem do portfolio doc ou /comercial
 
-Se o post precisa de um número, ele **precisa estar em** `V2/docs/portfolio_linkedin.md` §10 ou em `/comercial`. Se não estiver, parar e perguntar a Ramon — nunca inventar. Se não for possível obter, **reformular o post para não precisar do número**.
+Se o post precisa de um número, ele **precisa estar em** `V2/docs/interno/portfolio_linkedin.md` §10 ou em `/comercial`. Se não estiver, parar e perguntar a Ramon — nunca inventar. Se não for possível obter, **reformular o post para não precisar do número**.
 
 ### Tom permanente
 

@@ -4,7 +4,7 @@ Lineage humano de cada modelo treinado e considerado (candidato, deployado ou re
 Amarra as 3 camadas de versionamento: **código** (Git/PR), **dados** (fonte + contagens +
 fingerprint) e **modelo** (run MLflow + métricas). Uma entrada por modelo, mais recente no topo.
 
-- Deploy seguro (trocar o `mlflow_run_id` de produção) segue o [`PROMOCAO_MODELO_CHECKLIST.md`](PROMOCAO_MODELO_CHECKLIST.md).
+- Deploy seguro (trocar o `mlflow_run_id` de produção) segue o [`PROMOCAO_MODELO_CHECKLIST.md`](interno/PROMOCAO_MODELO_CHECKLIST.md).
 - O `run_id` é a chave no MLflow (backend Postgres `<IP da instância smart-ads-db>:5432/mlflow`).
 
 ## Template de entrada
@@ -36,7 +36,7 @@ fingerprint) e **modelo** (run MLflow + métricas). Uma entrada por modelo, mais
   - ee2010d feat(capi): jul_24 dispara 5 eventos de qualidade (top10/top30/top50 + 70-90/50-70)
   - bcd3111 feat(ab): promove abr28 a champion + jul_24 challenger (eventos top30/top10)
   - 3873026 feat(capi): segundo evento de qualidade por variante (capi_secondary_hq_events)
-- **Decisão:** CANDIDATO — registrado no MLflow, não ativado, produção intacta. Promover exige o [`PROMOCAO_MODELO_CHECKLIST.md`](PROMOCAO_MODELO_CHECKLIST.md) + deploy com canário.
+- **Decisão:** CANDIDATO — registrado no MLflow, não ativado, produção intacta. Promover exige o [`PROMOCAO_MODELO_CHECKLIST.md`](interno/PROMOCAO_MODELO_CHECKLIST.md) + deploy com canário.
 
 ---
 
@@ -58,7 +58,7 @@ fingerprint) e **modelo** (run MLflow + métricas). Uma entrada por modelo, mais
   - d3c2bc4 feat(relatório criativo): daily-trafego aceita start_date/end_date (janela fundida) (#93)
   - c4c5a46 feat(lineage): model card automatico + carimbo de commit no treino
   - 784dea4 feat(lineage): dataset_fingerprint no MLflow + MODEL_CHANGELOG.md
-- **Decisão:** CANDIDATO — registrado no MLflow, não ativado, produção intacta. Promover exige o [`PROMOCAO_MODELO_CHECKLIST.md`](PROMOCAO_MODELO_CHECKLIST.md) + deploy com canário.
+- **Decisão:** CANDIDATO — registrado no MLflow, não ativado, produção intacta. Promover exige o [`PROMOCAO_MODELO_CHECKLIST.md`](interno/PROMOCAO_MODELO_CHECKLIST.md) + deploy com canário.
 
 ---
 
@@ -77,7 +77,7 @@ fingerprint) e **modelo** (run MLflow + métricas). Uma entrada por modelo, mais
   - **Serving dos dados de treino:** TMB entra no `analytics.sales` via API REST (PR #79/#80, live #82); consolidação Cloud SQL + **universo único `leads_treino_prod`** (substitui Sheets/Railway); ingestão automática de vendas+leads; **fix do nome da fonte** `train_unified` → `leads_treino_prod` (PR #90) que tira a dependência de monkeypatch; treino passa a ler leads e vendas do banco (`leads_source=db`, `sales_source=db`, todos os gateways disponíveis).
   - **Sinal / rótulos:** grupo de controle curado em `analytics.campaign_labels` ligado ao peso de controle (PR #85); peso direcional de controle `control_boost` (PR #86, off por default).
   - **Features:** seleção por importância de permutação como etapa final opt-in (PR #89).
-- **Decisão:** **CANDIDATO** (registrado no MLflow, **não ativado**, produção intacta). Não é comparável 1:1 com o abr28 (test set, features e janela de dados diferentes). Promover exige o [`PROMOCAO_MODELO_CHECKLIST.md`](PROMOCAO_MODELO_CHECKLIST.md) + deploy com canário (sem tráfego → 5% → 10% → 1 lançamento → 100%, monitorando D10% e CAPI).
+- **Decisão:** **CANDIDATO** (registrado no MLflow, **não ativado**, produção intacta). Não é comparável 1:1 com o abr28 (test set, features e janela de dados diferentes). Promover exige o [`PROMOCAO_MODELO_CHECKLIST.md`](interno/PROMOCAO_MODELO_CHECKLIST.md) + deploy com canário (sem tráfego → 5% → 10% → 1 lançamento → 100%, monitorando D10% e CAPI).
 
 ---
 

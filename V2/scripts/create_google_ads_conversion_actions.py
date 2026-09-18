@@ -9,7 +9,7 @@ ConversionActionService (parte de MUTAÇÃO da Google Ads API — NÃO a
 
 Token descartável: o developer token / OAuth aqui serve SÓ pra esta
 criação. Em runtime, o envio de evento usa a Data Manager API com
-service account (ver V2/docs/google_ads_pendencias.md). Depois que as
+service account (ver V2/docs/interno/google_ads_pendencias.md). Depois que as
 duas conversion actions existirem, nada disto é mais necessário.
 
 O que cria (idempotente — pula se já existir com o mesmo nome):

@@ -4,7 +4,7 @@
 #
 # `gcloud monitoring time-series` NÃO existe nesta versão do gcloud → usamos a API
 # REST via curl. `gcloud monitoring policies`/`channels` variam por componente, então
-# criamos tudo por REST tb. Ver docs/RUNBOOK_scoring_pipeline.md.
+# criamos tudo por REST tb. Ver docs/interno/RUNBOOK_scoring_pipeline.md.
 set -euo pipefail
 
 PROJECT="smart-ads-451319"

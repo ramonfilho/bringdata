@@ -30,7 +30,7 @@ tem que continuar chamando aquelas campanhas de Challenger. Resolver sempre pelo
 HOJE reescreveria o passado a cada promoção — silenciosamente. Por isso o papel é datado:
 `resolve_arm(..., captured_at=<data do lead>)`. Sem data, vale o papel de hoje.
 
-Convenções e histórico de marcadores: V2/docs/DEFINICAO_ESCOPO_LFS.md
+Convenções e histórico de marcadores: V2/docs/interno/DEFINICAO_ESCOPO_LFS.md
 """
 from __future__ import annotations
 

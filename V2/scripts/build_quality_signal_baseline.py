@@ -38,7 +38,7 @@ def parse_args():
     p.add_argument('--client', default='devclub')
     p.add_argument('--launches', required=True,
                    help='LFs do pool, vírgula-separado (ex Top 5 canonical: LF45,LF44,LF46,LF41,LF43 — '
-                        'ver docs/METODOLOGIA_TOP5_ROAS.md)')
+                        'ver docs/interno/METODOLOGIA_TOP5_ROAS.md)')
     p.add_argument('--label', default='Top 5 ROAS atribuível 60d')
     p.add_argument('--run-id', required=True, help='MLflow run_id do modelo Challenger usado pra scorear')
     p.add_argument('--model-label', default='challenger_abr28')

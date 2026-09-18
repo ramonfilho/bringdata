@@ -50,7 +50,7 @@ Inside wins in 20 of 21 launches, median 2.5x, p < 0.001, on R$ 1.33M of audited
   lift within the cold audience was 1.06x, against 1.55x in LF56. Most of the profit comes
   from choosing which audiences and ads to buy, and the ceiling is the tool for that.
 - The "A/B" between champion and challenger compares campaigns routed by UTM, not a
-  randomized split; see `docs/AB_TEST.md`. Model verdicts come from the launch series with
+  randomized split; see `docs/interno/AB_TEST.md`. Model verdicts come from the launch series with
   a single ruler (`decil_champion`, signups from 25/07/2026), never from one launch.
 - Offline, the model's temporal test set gives AUC 0.73 and lift 3.3 (`docs/MODEL_CHANGELOG.md`);
   the online effect on Meta's delivery has no randomized control yet.

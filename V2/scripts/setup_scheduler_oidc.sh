@@ -3,7 +3,7 @@
 # endurecimento pós-apagão 22-23/07/2026). Idempotente: pode rodar de novo.
 #
 # NÃO deixa o serviço privado (o /webhook/lead_capture precisa de anônimo — ver
-# docs/RUNBOOK_scoring_pipeline.md). É defense-in-depth: se o allUsers sumir por
+# docs/interno/RUNBOOK_scoring_pipeline.md). É defense-in-depth: se o allUsers sumir por
 # engano, os crons sobrevivem via token; só o webhook quebraria.
 set -euo pipefail
 

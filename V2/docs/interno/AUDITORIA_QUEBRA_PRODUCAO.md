@@ -4,7 +4,7 @@ Documento operacional, escrito em linguagem natural. Lista os cenários que **po
 
 **Critério de entrada:** o cenário só está aqui se já tem **precedente histórico de quebrar produção** OU se tem **pré-condição clara hoje pra afetar ≥2% dos leads**. O resto vai pro fundo (seção "Documentado mas não atacar agora") com motivação curta.
 
-**Política de referência:** este doc é a camada operacional. Quando um cenário precisar de detalhe técnico de implementação, link direto pro arquivo correspondente em vez de duplicar conteúdo. Especificações técnicas continuam vivendo em [PLANO_SAFEGUARD.md](PLANO_SAFEGUARD.md), [PLANO_REFACTOR_MLOPS.md](PLANO_REFACTOR_MLOPS.md) e [registro_erros_ml.md](registro_erros_ml.md).
+**Política de referência:** este doc é a camada operacional. Quando um cenário precisar de detalhe técnico de implementação, link direto pro arquivo correspondente em vez de duplicar conteúdo. Especificações técnicas continuam vivendo em [PLANO_SAFEGUARD.md](../PLANO_SAFEGUARD.md), [PLANO_REFACTOR_MLOPS.md](PLANO_REFACTOR_MLOPS.md) e [registro_erros_ml.md](registro_erros_ml.md).
 
 ---
 
@@ -34,7 +34,7 @@ Documento operacional, escrito em linguagem natural. Lista os cenários que **po
 | `source` | `facebook-ads` 77.75%, `google-ads` 9.67%, `tiktok` 3.69%, `ig` 2.55% | `tiktok` confirma o bug ativo do path Champion descrito em DT-19 (refactor unify_utm variant-aware). `ig` é mapeado para `instagram` via `source_to_channel_mapping`. |
 | `term` | `ig` 62.24%, `fb` 14.60%, vazio 5.86%, IDs longos `23504811738--...` 2.49% + `23731741326--...` 2.23% | IDs numéricos longos (>10 dígitos) não casam com `term_outros_patterns` atuais (que pegam dígitos curtos, ver DT-13). Volume agregado 4.72% — entra na decisão de DT-19 (extensão da whitelist do Term via variante). |
 
-**Critério de fechamento:** auditoria realizada, todas as categorias ≥2% têm decisão registrada (M1 para mix quente; DT-19 para tiktok e IDs longos Term; absorção por threshold para granulação `aberto \| ad0XXX`). Sensor adicional (validador cross-coluna `Source_*` todas zeradas) plantado em [`src/core/feature_validator.py`](../src/core/feature_validator.py) `validate_post_encoding_all_zero_groups` em 14/mai — detecta automaticamente novas categorias que escapem da whitelist da variante.
+**Critério de fechamento:** auditoria realizada, todas as categorias ≥2% têm decisão registrada (M1 para mix quente; DT-19 para tiktok e IDs longos Term; absorção por threshold para granulação `aberto \| ad0XXX`). Sensor adicional (validador cross-coluna `Source_*` todas zeradas) plantado em [`src/core/feature_validator.py`](../../src/core/feature_validator.py) `validate_post_encoding_all_zero_groups` em 14/mai — detecta automaticamente novas categorias que escapem da whitelist da variante.
 
 ### Cenário 1.2 — Categoria nova de feature de alta importância escapa da whitelist canônica (descrição original)
 
@@ -95,7 +95,7 @@ Documento operacional, escrito em linguagem natural. Lista os cenários que **po
 
 **Resultado da auditoria:** o cenário original foi descrito sob a premissa de que o Cloud Run baixaria artefatos do GCS no boot. **Não é a arquitetura real.** O sistema atual baka os artefatos do MLflow direto na imagem Docker (`mlruns_build/` é copiado pra dentro do container), então o Cloud Run nunca depende do GCS em runtime — ele depende da imagem.
 
-Pre-flight equivalente JÁ EXISTE em [`V2/api/deploy_capi.sh`](../api/deploy_capi.sh):
+Pre-flight equivalente JÁ EXISTE em [`V2/api/deploy_capi.sh`](../../api/deploy_capi.sh):
 - Linhas 272-290: confirma que `mlruns/1/{run_id}/artifacts/model/model.pkl`, `model_metadata.json` e `feature_registry.json` existem **localmente** antes de prosseguir com o build. Falha alto se faltar.
 - Linhas 390-393: bloqueia o stage do Champion se a pasta de artefatos não existir.
 - Linhas 419-423: bloqueia o stage de variantes A/B com mensagem pronta de `mlflow.artifacts.download_artifacts(run_id, dst_path)` pra puxar do GCS.
@@ -120,9 +120,9 @@ O cenário marginal restante seria "artefato existe localmente mas GCS foi limpo
 
 - **19/23 ✅ FUNCIONA** — código existe na localização declarada E é invocado de caminho de produção real.
 - **4/23 ⚠️ DRIFT** de documentação (não bug de produção):
-  - **T1-3 (CAPI dedup)** — doc apontava `capi_integration.py`; na realidade dedup cliente-side vive em [`api/app.py:865-875`](../api/app.py#L865-L875) + endpoint `/capi/check_sent`. PLANO_SAFEGUARD.md atualizado.
+  - **T1-3 (CAPI dedup)** — doc apontava `capi_integration.py`; na realidade dedup cliente-side vive em [`api/app.py:865-875`](../../api/app.py#L865-L875) + endpoint `/capi/check_sent`. PLANO_SAFEGUARD.md atualizado.
   - **T2-2 (log_step_count)** — doc dizia "6+2 pontos"; real é "8+3". PLANO_SAFEGUARD.md atualizado.
-  - **T2-5 (filtro vendas)** — loaders estão em [`src/validation/data_loader.py`](../src/validation/data_loader.py), não em `core/ingestion.py`. PLANO_SAFEGUARD.md atualizado.
+  - **T2-5 (filtro vendas)** — loaders estão em [`src/validation/data_loader.py`](../../src/validation/data_loader.py), não em `core/ingestion.py`. PLANO_SAFEGUARD.md atualizado.
   - **T2-6 (exceções silenciosas)** — `app.py:1637` tinha `logger.error` mas faltava `exc_info=True`. Adicionado em 11/mai.
 - **0/23 ❌ FANTASMA** novo (T1-16 segue como o único fantasma conhecido, já catalogado como backlog).
 
@@ -177,10 +177,10 @@ Eixos:
 **O que aconteceria:** o tráfego do lançamento traz perfil de audiência que diverge do perfil do treino (ex.: idade média 10 anos abaixo, mix de gênero invertido). O modelo continua scorreando dentro do range conhecido (sem `null_rate_high` nem `wrong_dtype`), então os sensores existentes não disparam. Performance do lançamento cai sem causa visível.
 
 **Resultado da validação (11/mai):**
-- Sensor `_check_audience_profile_drift` em [`V2/src/monitoring/data_quality.py:1968`](../src/monitoring/data_quality.py#L1968) está ativo via `THRESHOLDS['audience_profile_drift']['enabled']=True`.
-- Snapshot de referência [`V2/configs/reference_audience_profiles/devclub.json`](../configs/reference_audience_profiles/devclub.json) foi regerado em 2026-05-14 — pós-LF54, captura corretamente o pool Top 5 ROAS atribuível 60d.
+- Sensor `_check_audience_profile_drift` em [`V2/src/monitoring/data_quality.py:1968`](../../src/monitoring/data_quality.py#L1968) está ativo via `THRESHOLDS['audience_profile_drift']['enabled']=True`.
+- Snapshot de referência [`V2/configs/reference_audience_profiles/devclub.json`](../../configs/reference_audience_profiles/devclub.json) foi regerado em 2026-05-14 — pós-LF54, captura corretamente o pool Top 5 ROAS atribuível 60d.
 - Rodando o sensor com leads de ontem (n=707 do LF55), dispara 1 alerta HIGH com 11 categorias ≥2.0pp de drift (idade, ocupação, faixa salarial). Mensagem detalhada e acionável (ex.: "Idade: 35-44 — 23.4%→19.4% (-4.1pp)").
-- O alerta entra automaticamente em `actionable_alerts` (HIGH+MEDIUM) do response `/monitoring/daily-check/railway` ([orchestrator.py:230-241](../src/monitoring/orchestrator.py#L230)), ordenado por severity no topo.
+- O alerta entra automaticamente em `actionable_alerts` (HIGH+MEDIUM) do response `/monitoring/daily-check/railway` ([orchestrator.py:230-241](../../src/monitoring/orchestrator.py#L230)), ordenado por severity no topo.
 
 **Único item pendente:** **rotina humana** de leitura do alerta. Tecnicamente o sinal chega ao endpoint; cabe ao operador estabelecer cadência fixa de leitura (ex.: chave-de-dia antes do almoço). Sem isso, o alerta vai pro JSON sem ninguém olhar — risco real, mas não é mais "bug de salvaguarda" e sim "disciplina operacional".
 
@@ -191,9 +191,9 @@ Eixos:
 **Resultado:** validador pós-encoding bloqueador implementado (item T1-16 do `PLANO_SAFEGUARD.md`). Quando o pipeline gera uma coluna OHE mas ela chega zerada em massa (sinal de feature pré-OHE quebrada — categoria sumiu, casing mudou, parsing JSONB falhou), o `apply_encoding` levanta `ValueError` antes do scoring. Bloqueia o caminho que causou os Clusters 3, 4 e 5 do Erro 2.
 
 Componentes:
-- Gerador offline dos baselines: [`V2/scripts/generate_feature_zero_baselines.py`](../scripts/generate_feature_zero_baselines.py) lê `distribuicoes_esperadas.json` do MLflow e calcula a fração esperada de cada coluna OHE. Saída em `V2/configs/feature_zero_baselines/{run_id}.json`.
-- Validador em runtime: `validate_post_encoding_zero_rates()` em [`V2/src/core/feature_validator.py`](../src/core/feature_validator.py). Thresholds default — batch ≥50, expected ≥15%, drop ≥70% — distinguem bug claro de sample noise mesmo em batches do polling Railway.
-- Integração no encoding: [`V2/src/core/encoding.py`](../src/core/encoding.py) passo 9, chama o validador quando `artifacts['mlflow_run_id']` está setado (caminho de produção; treino e parity audit passam `artifacts={}` e pulam).
+- Gerador offline dos baselines: [`V2/scripts/generate_feature_zero_baselines.py`](../../scripts/generate_feature_zero_baselines.py) lê `distribuicoes_esperadas.json` do MLflow e calcula a fração esperada de cada coluna OHE. Saída em `V2/configs/feature_zero_baselines/{run_id}.json`.
+- Validador em runtime: `validate_post_encoding_zero_rates()` em [`V2/src/core/feature_validator.py`](../../src/core/feature_validator.py). Thresholds default — batch ≥50, expected ≥15%, drop ≥70% — distinguem bug claro de sample noise mesmo em batches do polling Railway.
+- Integração no encoding: [`V2/src/core/encoding.py`](../../src/core/encoding.py) passo 9, chama o validador quando `artifacts['mlflow_run_id']` está setado (caminho de produção; treino e parity audit passam `artifacts={}` e pulam).
 
 Validado com input real de produção (200 leads do Railway via `railway_lead_to_sheets_row`): caso saudável passa sem disparar; caso patológico (`Source = None`) dispara corretamente com `Source_facebook_ads` esperado 89.9% / observado 0%.
 
@@ -217,7 +217,7 @@ Validado com input real de produção (200 leads do Railway via `railway_lead_to
 
 ### Cenário 5.1 — Cloud SQL `smart-ads-db` em `activation-policy=NEVER` quando retreino disparar — [✅ FECHADO 2026-05-11]
 
-**Resultado da auditoria:** o pre-flight check JÁ EXISTE como `assert_mlflow_backend_running()` em [`V2/src/model/training_model.py:46-96`](../src/model/training_model.py#L46-L96), invocado em `train_pipeline.main():246` e `retraining_orchestrator.main():631`. Verifica `state` da instância via `gcloud sql instances describe`, falha alto com `RuntimeError` se diferente de `RUNNABLE` e a mensagem inclui o comando exato pra subir a instância. Complementar: `register_mlflow_cleanup_reminder()` emite lembrete no fim do processo pra desligar a instância (economia ~R$40/mês). Verificado em 11/mai com instância em `STOPPED` — guard disparou corretamente com mensagem clara.
+**Resultado da auditoria:** o pre-flight check JÁ EXISTE como `assert_mlflow_backend_running()` em [`V2/src/model/training_model.py:46-96`](../../src/model/training_model.py#L46-L96), invocado em `train_pipeline.main():246` e `retraining_orchestrator.main():631`. Verifica `state` da instância via `gcloud sql instances describe`, falha alto com `RuntimeError` se diferente de `RUNNABLE` e a mensagem inclui o comando exato pra subir a instância. Complementar: `register_mlflow_cleanup_reminder()` emite lembrete no fim do processo pra desligar a instância (economia ~R$40/mês). Verificado em 11/mai com instância em `STOPPED` — guard disparou corretamente com mensagem clara.
 
 **O que aconteceria:** retreino é disparado (manual ou agendado), tenta conectar no MLflow tracking pra registrar o run, falha porque a instância está parada. Treino aborta no início, ninguém é notificado. Demora 2-3 minutos pra subir a instância depois que alguém percebe.
 

@@ -5,7 +5,7 @@ Hookado dentro do polling /railway/process-pending que já roda a cada 5min via
 Cloud Scheduler existente. Custo zero adicional (sem novo scheduler, sem novo
 endpoint, sem novo banco). Estado persistido em JSON no GCS.
 
-Spec: docs/CRITICAL_ALERTS_SPEC.md
+Spec: docs/interno/CRITICAL_ALERTS_SPEC.md
 
 Princípios:
   - DM pessoal (SLACK_USER_DM), nunca canal do cliente.

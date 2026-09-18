@@ -1,6 +1,6 @@
 # Perfil de audiência — LF48
 
-> **Nota:** análise feita com pool de referência anterior (Top 5/6 antigo). Definição canônica atual em [docs/METODOLOGIA_TOP5_ROAS.md](METODOLOGIA_TOP5_ROAS.md) (recalibrada 2026-05-14: LF45, LF44, LF46, LF41, LF43).
+> **Nota:** análise feita com pool de referência anterior (Top 5/6 antigo). Definição canônica atual em [docs/interno/METODOLOGIA_TOP5_ROAS.md](METODOLOGIA_TOP5_ROAS.md) (recalibrada 2026-05-14: LF45, LF44, LF46, LF41, LF43).
 
 **Atualizado:** 2026-05-12  
 **Janela LF48:** captação 2026-03-10 → 2026-03-16 (14,828 leads).  

@@ -3,7 +3,7 @@
 O NOME da fonte vem do config do cliente (`ingestion.leads_unified_source`), não é cravado
 aqui — ver `unified_source()` abaixo pra por que isso deixou de ser constante.
 
-Metodologia e legenda: V2/docs/RECONSTRUCAO_LEADS_UNIFICADA.md (skill /data-architect).
+Metodologia e legenda: V2/docs/interno/RECONSTRUCAO_LEADS_UNIFICADA.md (skill /data-architect).
 
 Regra de governança: TODA modificação de dado roda por este script (CLI), nunca inline.
   python -m src.data.leads_unify --dry-run   # conta por fonte, não grava

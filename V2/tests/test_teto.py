@@ -125,7 +125,7 @@ def test_cinco_baldes_distinguem_o_que_dois_baldes_achatavam():
 
 
 def test_valores_dos_cinco_baldes_batem_com_a_documentacao():
-    """Os R$ publicados em docs/TETO_DE_CPL_DECISOES.md, decisão 1. Se este teste cair,
+    """Os R$ publicados em docs/interno/TETO_DE_CPL_DECISOES.md, decisão 1. Se este teste cair,
     ou a conta mudou ou a documentação está mentindo — e as duas exigem ação."""
     calc = CalculadoraDeTeto.de_referencia_carregada(_REF)
     esperado = {'D1-D2': 1.64, 'D3-D4': 2.72, 'D5-D6': 4.09,

@@ -1,7 +1,7 @@
 """
 Gera PDF do contrato do endpoint /monitoring/audience-drift pra dashboard.
 
-Lê docs/CONTRATO_AUDIENCE_DRIFT.md (fonte única — editável) e renderiza
+Lê docs/interno/CONTRATO_AUDIENCE_DRIFT.md (fonte única — editável) e renderiza
 com `scripts/pdf_base` (paleta/estilos/espaçamento padrão Bring Data).
 
 Saída: V2/propostas_e_apresentacoes/contrato_audience_drift.pdf

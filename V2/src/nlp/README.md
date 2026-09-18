@@ -26,4 +26,4 @@ do formulário de cada cliente.
 ## Dependências
 
 Não implementar antes da Fase 5. Ver plano de refatoração:
-`V2/docs/PLANO_REFACTOR_MLOPS.md`, Seção 4.4.
+`V2/docs/interno/PLANO_REFACTOR_MLOPS.md`, Seção 4.4.

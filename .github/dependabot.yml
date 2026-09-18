@@ -145,6 +145,11 @@ updates:
       day: monday
       time: "07:00"
       timezone: America/Sao_Paulo
+    ignore:
+      # A imagem segue o Python da suíte (3.10, o do CI e dos pins científicos); trocar de
+      # versão é tarefa planejada, não PR de dependência (PR #333, 3.14, fechada em 18/09/2026).
+      - dependency-name: python
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     open-pull-requests-limit: 1
     labels: ["dependencias"]
     commit-message:

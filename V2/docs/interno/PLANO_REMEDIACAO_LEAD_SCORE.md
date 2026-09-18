@@ -7,7 +7,7 @@
 **Status canônico e prioridade vivem em `PLANO_EXECUCAO.md`.** Este documento é o "como"; o "quando" é definido lá.
 
 Referências:
-- Auditoria que originou o plano: `docs/relatorio_qualidade_audiencia_2026-05-11.md` (seção 8, limitação 3).
+- Auditoria que originou o plano: `docs/interno/relatorio_qualidade_audiencia_2026-05-11.md` (seção 8, limitação 3).
 - Memória persistente: `~/.claude/.../memory/projeto_lead_score_versao_codigo.md`.
 
 ---
@@ -139,7 +139,7 @@ Aplicando aos consumidores listados a seguir: itens que alimentam **decisões co
 
 #### L7. Análise retrospectiva do bug de codificação no Champion — CONCLUÍDO
 
-**Status:** concluído. A quantificação do dano do bug em que o Champion `jan30` recebia codificação OHE em vez de ordinal em idade e faixa salarial (identificado no projeto como DT-12) já foi feita em sessão anterior e está registrada em `docs/registro_erros_ml.md`. Não há ação remanescente neste plano.
+**Status:** concluído. A quantificação do dano do bug em que o Champion `jan30` recebia codificação OHE em vez de ordinal em idade e faixa salarial (identificado no projeto como DT-12) já foi feita em sessão anterior e está registrada em `docs/interno/registro_erros_ml.md`. Não há ação remanescente neste plano.
 
 ---
 

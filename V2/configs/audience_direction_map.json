@@ -24,7 +24,7 @@
       "very_negative": "lift < 0.5"
     },
     "rule_summary": "Δpp+ & positive → bom; Δpp+ & negative → ruim; Δpp− & negative → bom; Δpp− & positive → ruim",
-    "doc": "docs/METODOLOGIA_TOP5_ROAS.md"
+    "doc": "docs/interno/METODOLOGIA_TOP5_ROAS.md"
   },
   "direction_map": {
     "O seu gênero:": {

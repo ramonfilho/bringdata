@@ -260,7 +260,7 @@ Para ter as 5 UTMs no grão lead × LF é preciso enriquecer a partir de `regist
 Duas fontes documentadas, e **nenhuma das duas é automática hoje**.
 
 **a) Exports manuais em CSV (foi a origem do backfill).**
-`V2/docs/analise_lift_entrada_grupo_whatsapp.md` registra: *"os 9 exports 'Histórico de
+`V2/docs/interno/analise_lift_entrada_grupo_whatsapp.md` registra: *"os 9 exports 'Histórico de
 atividades' do SendFlow (`data/devclub/SendFlow*.csv`), evento 'Entrou no grupo', LF48 a
 LF56 (~10/03 a 30/05). 97.760 telefones únicos."*
 
@@ -280,7 +280,7 @@ manual"* está correta na origem. A ação manual **foi feita** (os 9 CSVs), o w
 **chegou a funcionar** por 4 dias no ritmo certo, e o que falta hoje é diagnosticar por que
 ele parou em 14/06. Nada na documentação explica a parada.
 
-**Nota de inventário:** `V2/docs/RECONSTRUCAO_LEADS_UNIFICADA.md` já lista a
+**Nota de inventário:** `V2/docs/interno/RECONSTRUCAO_LEADS_UNIFICADA.md` já lista a
 `whatsapp_group_joins` com 112.825 linhas, marcada como fora do `train_unified` porque não
 carrega pesquisa. O número não mudou desde então, o que é outra confirmação de que a tabela
 está parada.

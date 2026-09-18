@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 # de ~22h) levava HORAS pra drenar. A 250/rodada o teto vira ~3.000/h → o mesmo
 # backlog drena em ~20min. 250 é conservador (o pull do Pub/Sub aceita até 1.000) e
 # em dia normal puxa só o que houver (fluxo baixo), sem custo. Ver
-# docs/RUNBOOK_scoring_pipeline.md e memória incidente_allusers_derruba_crons.
+# docs/interno/RUNBOOK_scoring_pipeline.md e memória incidente_allusers_derruba_crons.
 DEFAULT_BATCH = 250
 PUBSUB_PROJECT_ID = "smart-ads-451319"
 PUBSUB_SUBSCRIPTION_ID = "lead-capture-ingest-sub"

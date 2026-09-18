@@ -1,5 +1,5 @@
 """Persiste resultados de validação no schema analytics (Cloud SQL). Fase 1 da
-consolidação (docs/CONSOLIDACAO_CLOUDSQL.md).
+consolidação (docs/interno/CONSOLIDACAO_CLOUDSQL.md).
 
 Sink PARALELO ao .xlsx — o relatório Excel continua sendo a fonte de export.
 Aqui gravamos os mesmos números em tabela consultável (`validation_runs` +

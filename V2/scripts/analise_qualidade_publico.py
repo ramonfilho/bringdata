@@ -1,7 +1,7 @@
 """Qualidade dos leads e capacidade de separação dos modelos, por público.
 
 Reproduz de ponta a ponta a análise documentada em
-`docs/METODOLOGIA_QUALIDADE_POR_PUBLICO.md`: pega os leads de uma janela de
+`docs/interno/METODOLOGIA_QUALIDADE_POR_PUBLICO.md`: pega os leads de uma janela de
 captação, resolve o decil de CADA modelo do A/B, cruza com as vendas reais e
 devolve três tabelas — nota por público, conversão por público e capacidade de
 separação (topo vs base).

@@ -7,7 +7,7 @@ xlsx Performance Geral.
 
 A definição **canonical** do projeto é "ROAS atribuível 60d" — atribuição por
 captação_date + 60d, no script `compute_top5_roas_attributable.py`. Ver
-`docs/METODOLOGIA_TOP5_ROAS.md`. Os dois CSVs convivem por motivos diferentes.
+`docs/interno/METODOLOGIA_TOP5_ROAS.md`. Os dois CSVs convivem por motivos diferentes.
 
 ────────────────────────────────────────────────────────────────────────────────
 

@@ -327,7 +327,7 @@ Próximo deploy normal já resolve. Se quiser forçar agora, basta deployar a me
 
 O cleanup automático do `deploy_capi.sh` só roda **no início de um deploy**. Se o operador fica dias sem deployar, tags canary órfãs (revisão 0% tráfego + `minScale`) sangram ~R$ 4-5/dia cada sem ninguém perceber.
 
-**Solução:** endpoint `POST /admin/cleanup-canary-tags` em [`api/app.py`](../api/app.py) + Cloud Scheduler diário.
+**Solução:** endpoint `POST /admin/cleanup-canary-tags` em [`api/app.py`](../../api/app.py) + Cloud Scheduler diário.
 
 - Endpoint usa a Cloud Run Admin API v1 (`run.namespaces.services`) pra ler o próprio serviço, identificar tags `canary-*` em revisões com `percent==0`, e removê-las via `replaceService`.
 - Proteções: nunca toca tag `prod`, tag não-canary, nem revisão com `percent > 0`. Suporta `?dry_run=true`.

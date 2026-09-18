@@ -5,7 +5,7 @@ O `predict_proba` do Random Forest treinado com `class_weight='balanced'` produz
 scores brutos que não são probabilidades reais de conversão — o reweighting da
 classe minoritária empurra todos os scores pra perto do meio, gerando viés
 sistemático de superestimação (ECE de 26-40 pp medido nos modelos atuais em
-2026-05-08, ver `docs/analise_calibracao_jan30_abr28.md`).
+2026-05-08, ver `docs/interno/analise_calibracao_jan30_abr28.md`).
 
 Este módulo implementa o padrão Estratégia (Strategy): cada método de calibração
 (none, isotonic, sigmoid) é uma classe que segue a mesma interface. O Predictor
@@ -15,7 +15,7 @@ recebe uma instância via injeção e aplica internamente sem perguntar qual é.
 calibrado"). Modelos antigos sem `calibrator.pkl` carregam `NoneCalibrator` no
 load e seguem matematicamente idênticos ao comportamento pré-DT-20.
 
-Detalhes arquiteturais completos: `docs/PLANO_REFACTOR_MLOPS.md` § DT-20.
+Detalhes arquiteturais completos: `docs/interno/PLANO_REFACTOR_MLOPS.md` § DT-20.
 """
 
 from __future__ import annotations

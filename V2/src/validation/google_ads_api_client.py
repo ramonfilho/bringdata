@@ -55,7 +55,7 @@ def _build_ga_service_from_env():
     if missing:
         raise RuntimeError(
             "[google_ads_api_client] credenciais ausentes no ambiente: "
-            f"{', '.join(missing)}. Ver V2/docs/google_ads_pendencias.md "
+            f"{', '.join(missing)}. Ver V2/docs/interno/google_ads_pendencias.md "
             "seção 'Leitura de campanhas e dados'. Se for refresh token "
             "expirado (invalid_grant), rodar scripts/google_ads_oauth_refresh_token.py."
         )

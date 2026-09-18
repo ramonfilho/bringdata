@@ -1,7 +1,7 @@
 """
 Gera PDF de "Requisitos e contrato de dados do sistema novo".
 
-Lê docs/REQUISITOS_SISTEMA_NOVO.md (fonte única — editável) e renderiza
+Lê docs/interno/REQUISITOS_SISTEMA_NOVO.md (fonte única — editável) e renderiza
 com a base compartilhada `scripts/pdf_base` (paleta/estilos/espaçamento
 padrão Bring Data).
 

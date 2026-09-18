@@ -7,7 +7,7 @@
 > **Status canônico e prioridade vivem em `PLANO_EXECUCAO.md`.** Este documento descreve o "como" técnico de cada DT-X / R-X e preserva o histórico do refactor; o "quando" é definido lá. Quando houver conflito sobre prioridade ou status, o PLANO_EXECUCAO vence. Ao concluir um item, atualizar a marcação RESOLVIDO/✅ neste arquivo E mover/remover o item da seção correspondente do PLANO_EXECUCAO.
 
 Referências:
-- Roadmap (sequência de execução): `docs/PLANO_EXECUCAO.md`
+- Roadmap (sequência de execução): `docs/interno/PLANO_EXECUCAO.md`
 - Histórico do deploy do refactor: `docs/arquivo/CHECKLIST_DEPLOY_REFACTOR.md`
 
 ---
@@ -1014,7 +1014,7 @@ O parâmetro `config.term_long_id_threshold` pode ser marcado DEPRECATED no YAML
 
 ### Variante A/B exige campos obrigatórios que o caminho do Champion nunca usa
 
-**Sintoma:** [`ABTestVariantConfig`](../src/core/client_config.py#L342-L352) declara `capi_event_name`, `capi_event_name_high_quality` e `conversion_rates` como obrigatórios no dataclass + parser ([client_config.py:382-388](../src/core/client_config.py#L382-L388)). Mas em produção esses campos só são consumidos quando `ab_v` (variante matcheada por `match_variant`) é truthy ([app.py:3458-3464](../api/app.py#L3458-L3464)). Pro path Champion (variante não matcheia, `ab_v=None`), event_name e conversion_rates vêm de `client_config.capi.*` em `clients/devclub.yaml`, e o pixel vem de `client_config.capi.pixel_id`.
+**Sintoma:** [`ABTestVariantConfig`](../../src/core/client_config.py#L342-L352) declara `capi_event_name`, `capi_event_name_high_quality` e `conversion_rates` como obrigatórios no dataclass + parser ([client_config.py:382-388](../../src/core/client_config.py#L382-L388)). Mas em produção esses campos só são consumidos quando `ab_v` (variante matcheada por `match_variant`) é truthy ([app.py:3458-3464](../../api/app.py#L3458-L3464)). Pro path Champion (variante não matcheia, `ab_v=None`), event_name e conversion_rates vêm de `client_config.capi.*` em `clients/devclub.yaml`, e o pixel vem de `client_config.capi.pixel_id`.
 
 **Cheiro de design:** uma entrada tipo "shim" — variante existindo só pra hospedar `encoding_overrides` do Champion (caso DT-12 + workaround do bug do jan30 descoberto em 02/05/2026) — é forçada a preencher event_name, event_name_hq, conversion_rates como **lixo de parser**. O leitor do YAML acha que esses valores vão ser usados; eles não vão. Documentação fica enganosa, manutenção fica frágil (alguém pode "corrigir" um valor desses achando que é bug e na verdade nunca foi lido).
 
@@ -1087,7 +1087,7 @@ O parâmetro `config.term_long_id_threshold` pode ser marcado DEPRECATED no YAML
 | `BusinessConfig` em `src/core/client_config.py` | dataclass com defaults — `product_value: float = 1563.75` ⚠️ | Forma tipada do YAML acima |
 | `api/business_config.py` | `PRODUCT_VALUE`, `CONVERSION_RATES`, `LEAD_VALUE_BY_DECILE_CHAMPION/CHALLENGER` hardcoded | (1) `src/model/training_model.py:atualizar_business_config_com_recall` escreve aqui após cada treino; (2) revisão `edf23e9` (rollback) lia daqui via import direto até 29/04 |
 
-**O bug que esse débito causou (já mitigado com Fix A em 06/05):** entre 30/04 e 06/05, produção (revisão `main`) usava o YAML como fonte de verdade mas `conversion_rates` tinha sido removido em 06/04 (commit `d40970a`) sem ninguém atualizar o código de runtime. Resultado: 7 dias com 100% dos `LeadQualified` enviados com `value=0`. Detalhes em `docs/operacoes_gcp_custos.md` seção "Investigação de spike de custo — 2026-05-06" e em `PLANO_EXECUCAO.md` "Sequelas 02/05" item VAL=0.
+**O bug que esse débito causou (já mitigado com Fix A em 06/05):** entre 30/04 e 06/05, produção (revisão `main`) usava o YAML como fonte de verdade mas `conversion_rates` tinha sido removido em 06/04 (commit `d40970a`) sem ninguém atualizar o código de runtime. Resultado: 7 dias com 100% dos `LeadQualified` enviados com `value=0`. Detalhes em `docs/interno/operacoes_gcp_custos.md` seção "Investigação de spike de custo — 2026-05-06" e em `PLANO_EXECUCAO.md` "Sequelas 02/05" item VAL=0.
 
 **Fix A aplicado em 06/05/2026:** `conversion_rates` recolocado no YAML, com rates back-calculadas a partir de `LEAD_VALUE_BY_DECILE_CHAMPION` (rate = lead_value / product_value). Próximo deploy aplica em produção. **Esse fix tampa o buraco mas não unifica nada** — `business_config.py` continua como fonte secundária, não-lida em produção.
 
@@ -1193,7 +1193,7 @@ Fechamento desta etapa: **uma única fonte de verdade** (YAML) para `conversion_
 | `fez_faculdade` | `'Sim'`, `'Não'` |
 | `investiu_curso_online` | `'Sim'`, `'Não'` |
 
-A exclusão é **deliberada** e está documentada com comentário longo em [src/data_processing/category_unification.py:91-115](../src/data_processing/category_unification.py#L91-L115). Razão: o Champion atual (`jan30`, run `d51757f5041c44b7ab1a056fce8c3c35`) foi treinado com os valores ORIGINAIS — `pd.get_dummies()` gera nomes de coluna sufixados pelo valor cru (`'Não' → '_N_o'`). Se a normalização passar a rodar em produção, `'Não' → '_N_o'` vira `'nao' → '_nao'` (sufixo inexistente no `feature_registry`) e o modelo recebe **as 4 features zeradas pra 100% dos leads** — silencioso, sem erro.
+A exclusão é **deliberada** e está documentada com comentário longo em [src/data_processing/category_unification.py:91-115](../../src/data_processing/category_unification.py#L91-L115). Razão: o Champion atual (`jan30`, run `d51757f5041c44b7ab1a056fce8c3c35`) foi treinado com os valores ORIGINAIS — `pd.get_dummies()` gera nomes de coluna sufixados pelo valor cru (`'Não' → '_N_o'`). Se a normalização passar a rodar em produção, `'Não' → '_N_o'` vira `'nao' → '_nao'` (sufixo inexistente no `feature_registry`) e o modelo recebe **as 4 features zeradas pra 100% dos leads** — silencioso, sem erro.
 
 **Por que vira bug se o front mudar:** hoje protegidos porque o payload é estável (`'Sim'`/`'Não'` exatos). Se o front mandar `'sim'` minúsculo, `'SIM'` caps ou whitespace extra, o OHE gera coluna inédita e o sinal cai a zero do mesmo jeito. Mesma classe dos Clusters 1, 3, 4, 5 do Erro 2 do `registro_erros_ml.md`. Dependência implícita inadmissível em sistema multi-modelo/multi-cliente.
 
@@ -1232,10 +1232,10 @@ A exclusão é **deliberada** e está documentada com comentário longo em [src/
 **Mitigação de risco enquanto o fix não entra:** vetor 3 da V.2 implementado em 08/05/2026 — `actionable_alerts` no `/monitoring/daily-check` destaca HIGH+MEDIUM. Se o front mandar valor inesperado, `check_category_drift` dispara `new_categories` e aparece no topo do response. Isso não é fail-safe (continua silencioso pra produção até o próximo daily-check), mas dá detecção em até 24h.
 
 **Cross-refs:**
-- `V2/docs/registro_erros_ml.md` § V.2
+- `V2/docs/interno/registro_erros_ml.md` § V.2
 - `V2/src/data_processing/category_unification.py:91-115` (comentário longo no código)
-- `V2/docs/CHECKLIST_ONBOARDING_NEW_CLIENT.md` § 3 (treinar modelo)
-- `V2/docs/PLANO_EXECUCAO.md` (item de pré-requisito do próximo retreino)
+- `V2/docs/interno/CHECKLIST_ONBOARDING_NEW_CLIENT.md` § 3 (treinar modelo)
+- `V2/docs/interno/PLANO_EXECUCAO.md` (item de pré-requisito do próximo retreino)
 
 **Prioridade:** **alta** — bloqueia A/B com Challenger novo. Risco operacional atual baixo (front estável), mas a primeira variação de casing quebra silenciosamente.
 
@@ -1243,7 +1243,7 @@ A exclusão é **deliberada** e está documentada com comentário longo em [src/
 
 ### Unificação de Source/Term ignora a whitelist da variante A/B em execução
 
-**Contexto (descoberto em 2026-05-11, Cenário 1.2 do `AUDITORIA_QUEBRA_PRODUCAO.md`):** a unificação de Medium em [src/core/medium.py:99-169](../src/core/medium.py#L99-L169) **já é variant-aware** — carrega a whitelist canônica de `distribuicoes_esperadas.json` do `mlflow_run_id` da variante em execução (resolvido em `production_pipeline.py:279` como `predictor_override or self.predictor`). A unificação de Source/Term em [src/core/utm.py](../src/core/utm.py), em contraste, **só usa o YAML global do cliente** (`config.source_canonical_values` e `term_mappings`). Sem variant info, sem artifacts.
+**Contexto (descoberto em 2026-05-11, Cenário 1.2 do `AUDITORIA_QUEBRA_PRODUCAO.md`):** a unificação de Medium em [src/core/medium.py:99-169](../../src/core/medium.py#L99-L169) **já é variant-aware** — carrega a whitelist canônica de `distribuicoes_esperadas.json` do `mlflow_run_id` da variante em execução (resolvido em `production_pipeline.py:279` como `predictor_override or self.predictor`). A unificação de Source/Term em [src/core/utm.py](../../src/core/utm.py), em contraste, **só usa o YAML global do cliente** (`config.source_canonical_values` e `term_mappings`). Sem variant info, sem artifacts.
 
 **Por que vira bug:** o YAML hoje aceita `tiktok` e `youtube` como Source canônico, porque a Challenger `abr28` (`5d158f0aa6e54b489498470446194a6c`) tem `Source_tiktok` e `Source_youtube` no `feature_registry`. Mas o Champion `jan30` (`d51757f5041c44b7ab1a056fce8c3c35`) só tem `Source_facebook_ads`, `Source_google_ads`, `Source_outros`. Resultado:
 
@@ -1282,7 +1282,7 @@ D. **Teste unitário em `tests/test_unify_utm.py`** — input com `Source=tiktok
 **Impacto prático imediato:** ~1.93% dos leads do path Champion (≈70 leads/dia, ≈2100 leads/30d em volume atual) deixam de ter encoding Source zerado. Crescente se o gestor escalar TikTok.
 
 **Cross-refs:**
-- `V2/docs/AUDITORIA_QUEBRA_PRODUCAO.md` Cenário 1.2 (achado original).
+- `V2/docs/interno/AUDITORIA_QUEBRA_PRODUCAO.md` Cenário 1.2 (achado original).
 - `V2/src/core/medium.py:99-169` (referência arquitetural — já é variant-aware).
 - `V2/src/core/utm.py:52-103` (`_unify_source` — alvo do refactor).
 - `V2/src/production_pipeline.py:268, 296` (assimetria atual: medium recebe artifacts, utm não).
@@ -1311,7 +1311,7 @@ Faixa de referência da literatura: ECE < 5 pp é "bem calibrado"; > 10 pp é "s
 
 **Estado de partida (em 2026-05-08):**
 - Nenhum dos dois modelos em produção tem calibrator. Verificado por inspeção de `V2/mlruns/1/{d51757f5...,5d158f0a...}/artifacts/` — só `model.pkl`, `feature_registry.json`, `model_metadata.json` (e mais 2 artifacts no Challenger, mas nenhum de calibração).
-- `LeadScoringPredictor` em [src/model/prediction.py](../src/model/prediction.py) não tem código de calibração — carrega o RF e devolve `predict_proba` bruto direto.
+- `LeadScoringPredictor` em [src/model/prediction.py](../../src/model/prediction.py) não tem código de calibração — carrega o RF e devolve `predict_proba` bruto direto.
 
 #### Decisões de design tomadas
 
@@ -1331,7 +1331,7 @@ Padrão de projeto: **Estratégia** (Strategy pattern). Calibração tem N varia
 #### Sequência de execução em 5 fases (3 PRs)
 
 **Fase 1 — Abstração** (PR 1, zero efeito em produção)
-1. Criar [`src/model/calibration.py`](../src/model/calibration.py) com:
+1. Criar [`src/model/calibration.py`](../../src/model/calibration.py) com:
    - Interface `Calibrator` (abstrata): `fit(y_true, y_prob)`, `transform(y_prob) → y_prob_calibrated`, `save(path)`, `load(path)`
    - 3 implementações: `NoneCalibrator`, `SigmoidCalibrator`, `IsotonicCalibrator`
    - Factory `make_calibrator(method: str) → Calibrator`
@@ -1368,8 +1368,8 @@ Padrão de projeto: **Estratégia** (Strategy pattern). Calibração tem N varia
 - Gate C rodado com `--expect-score-change` (thresholds recomputados em escala calibrada vão mudar decis em produção; isso é o objetivo, não regressão)
 
 **Fase 5 — Próximos treinos já calibrando automaticamente** (PR 3, vai junto com próximo retreino do Champion)
-1. Adicionar `CalibrationConfig` em [`src/core/client_config.py`](../src/core/client_config.py) dentro de `ScoringConfig` (ou estrutura nova)
-2. Modificar [`src/model/training_model.py`](../src/model/training_model.py) na sequência canônica de salvar artifacts:
+1. Adicionar `CalibrationConfig` em [`src/core/client_config.py`](../../src/core/client_config.py) dentro de `ScoringConfig` (ou estrutura nova)
+2. Modificar [`src/model/training_model.py`](../../src/model/training_model.py) na sequência canônica de salvar artifacts:
    - **Antes** de `calcular_thresholds_decis`: fittar calibrador no holdout temporal interno (14% mais recentes do train set)
    - Recomputar `y_prob_val` → `calibrator.transform(y_prob_val)`
    - Calcular thresholds sobre os scores calibrados (não sobre os brutos)
@@ -1396,8 +1396,8 @@ Fase 1 (abstração no Predictor) só vira necessária quando o calibrator entra
 | Tentação | Bloqueio |
 |---|---|
 | Consumidor pergunta "tem calibrator?" antes de chamar predict | `NoneCalibrator` garante que método existe sempre — pergunta é ilegal pela interface |
-| Train_pipeline crescer em 200 linhas de calibração inline | Lógica vive em [`src/model/calibration.py`](../src/model/calibration.py) (interface + 3 implementações + factory + load/save); train_pipeline tem uma chamada |
-| Doc esquecer de mencionar que score agora é calibrado | Docstring de `predict_proba` deixa explícito + atualizar [`ARQUITETURA_SISTEMA_COMPLETA.md`](ARQUITETURA_SISTEMA_COMPLETA.md) na seção "PIPELINE DE PRODUÇÃO" |
+| Train_pipeline crescer em 200 linhas de calibração inline | Lógica vive em [`src/model/calibration.py`](../../src/model/calibration.py) (interface + 3 implementações + factory + load/save); train_pipeline tem uma chamada |
+| Doc esquecer de mencionar que score agora é calibrado | Docstring de `predict_proba` deixa explícito + atualizar [`ARQUITETURA_SISTEMA_COMPLETA.md`](../ARQUITETURA_SISTEMA_COMPLETA.md) na seção "PIPELINE DE PRODUÇÃO" |
 | Cliente B futuro nascer sem calibração | Template default no `configs/clients/template.yaml` com `method: isotonic` |
 | Aplicar calibrator de um run em modelo de outro | Calibrator vive como artifact dentro do mesmo run do modelo. Run filho mantém pai linkado para auditoria. |
 
@@ -1431,7 +1431,7 @@ Hoje a equivalência entre revisões é checada de forma **estática**, numa **a
 
 É uma camada **a mais, antes** do canário, **não** um substituto dos gates de promoção. A sombra responde "o pipeline novo se comporta de forma sã no tráfego real?"; os gates (paridade treino × produção, higiene de dataset, D10% abaixo de 25%, validação out-of-sample) continuam respondendo "o sinal está correto?" no momento de promover. Sequência: sombra → diff limpo → canário (`--no-traffic` → smoke → 5% → 10% → 100%), gates de todo jeito.
 
-A especificação completa (o que faz / por que / como / onde no código) vive no catálogo de salvaguardas — ver a salvaguarda "Revisão candidata em sombra" (T2-11) em [`PLANO_SAFEGUARD.md`](PLANO_SAFEGUARD.md). Registrado em 2026-06-09 ao desenhar a feature "entrou no grupo de WhatsApp"; **não implementado**; fora do escopo atual.
+A especificação completa (o que faz / por que / como / onde no código) vive no catálogo de salvaguardas — ver a salvaguarda "Revisão candidata em sombra" (T2-11) em [`PLANO_SAFEGUARD.md`](../PLANO_SAFEGUARD.md). Registrado em 2026-06-09 ao desenhar a feature "entrou no grupo de WhatsApp"; **não implementado**; fora do escopo atual.
 
 *Identificador histórico: DT-21.*
 
@@ -1441,7 +1441,7 @@ A especificação completa (o que faz / por que / como / onde no código) vive n
 
 **O que é:** o pipeline de treino passou a contar só ~metade das conversões reais (boleto perdido, dataset cartão-dominado). Investigado e confirmado em 2026-06-10.
 
-**Root cause (em código):** o rename das colunas do arquivo de pedidos TMB é **hardcoded** em [`src/data_processing/ingestion.py:169-175`](../src/data_processing/ingestion.py#L169-L175) e **não mapeia nenhuma coluna de data** para a coluna canônica `data`. Resultado: os pedidos de boleto ficam com `data=NaT` e são cortados pelo filtro `--max-date` ([`train_pipeline.py`](../src/train_pipeline.py) ~621), sobrando ~185 de ~7.000. O campo `tmb_pedidos_column_mapping` em `configs/clients/devclub.yaml` existe mas é **config morta** — nenhum código a lê (por isso editar o yaml não corrige).
+**Root cause (em código):** o rename das colunas do arquivo de pedidos TMB é **hardcoded** em [`src/data_processing/ingestion.py:169-175`](../../src/data_processing/ingestion.py#L169-L175) e **não mapeia nenhuma coluna de data** para a coluna canônica `data`. Resultado: os pedidos de boleto ficam com `data=NaT` e são cortados pelo filtro `--max-date` ([`train_pipeline.py`](../../src/train_pipeline.py) ~621), sobrando ~185 de ~7.000. O campo `tmb_pedidos_column_mapping` em `configs/clients/devclub.yaml` existe mas é **config morta** — nenhum código a lê (por isso editar o yaml não corrige).
 
 **Impacto medido:** conversões do treino caíram de ~2.743 (1,36%, Challenger 28/04) e 2.813 (1,32%, 08/05) para ~625 (0,62%) em **todo treino de 28/05 em diante**. **Produção NÃO foi afetada** — Champion (jan30) e Challenger (abr28) são pré-quebra; nenhum modelo de 28/05+ foi promovido (conferido em `active_models/devclub.yaml`). Descartar análises feitas sobre os runs de 28/05.
 
@@ -1453,7 +1453,7 @@ A especificação completa (o que faz / por que / como / onde no código) vive n
 
 **Nota operacional (migração de máquina):** a leitura do Google Sheets quebrou no Mac novo (ADC sem escopo de Sheets → "app blocked"); **corrigida** criando chave de service account (`~/.config/gcloud/smart-ads-sheets-sa.json`, SA `smart-ads-451319@appspot`) + `GOOGLE_APPLICATION_CREDENTIALS` no `.env`. Registrar: `.env` + essa chave SA são arquivos que faltam na migração (Fase 4 do LEIA-ME). E `backup_sheets_url` no yaml é campo de **monitoramento** — não é a fonte do treino (treino lê Sheets via `read_all_training_sources`).
 
-**Cross-ref:** salvaguarda fail-loud **T2-10** em [`PLANO_SAFEGUARD.md`](PLANO_SAFEGUARD.md).
+**Cross-ref:** salvaguarda fail-loud **T2-10** em [`PLANO_SAFEGUARD.md`](../PLANO_SAFEGUARD.md).
 
 *Identificador histórico: DT-22.*
 

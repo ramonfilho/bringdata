@@ -12,7 +12,7 @@ A coluna mais importante do relatório é **"última atualização"**: é ela qu
 "esta tabela ainda é alimentada ou parou?" sem ninguém precisar investigar.
 
 Uso:
-    python -m scripts.catalogo_dados                    # escreve V2/docs/CATALOGO_DADOS.md
+    python -m scripts.catalogo_dados                    # escreve V2/docs/interno/CATALOGO_DADOS.md
     python -m scripts.catalogo_dados --stdout           # imprime, não escreve
     python -m scripts.catalogo_dados --sem-colunas      # só o resumo, sem listar colunas
 """

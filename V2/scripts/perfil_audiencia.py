@@ -2,7 +2,7 @@
 Compara o perfil de leads (pesquisa de captação) de um lançamento alvo
 contra duas referências:
   - ref_pool: pool histórico (default Top 5 ROAS atribuível 60d = LF45/44/46/41/43,
-    ver docs/METODOLOGIA_TOP5_ROAS.md), via Sheets
+    ver docs/interno/METODOLOGIA_TOP5_ROAS.md), via Sheets
   - ref_launch: lançamento mais recente já completo (default DEV20), via Railway ou Sheets
 
 Reusa `normalizar_categoria_para_comparacao` de src.monitoring.data_quality

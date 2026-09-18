@@ -2,7 +2,7 @@
 
 Você é um engenheiro de MLOps verificando se um **canary deploy** está entregando um sinal de scoring equivalente (ou melhor) que a revisão anterior. Hoje não temos Champion/Challenger por UTM — temos **duas revisões Cloud Run convivendo** (rollback vs main unificada) e queremos saber se a nova não está degradando o sinal.
 
-Referência: `V2/docs/AB_TEST.md` seção "Estratégia de deploy — 50/50 em vez de 100%" e `V2/docs/PLANO_EXECUCAO.md` Fase 3.
+Referência: `V2/docs/interno/AB_TEST.md` seção "Estratégia de deploy — 50/50 em vez de 100%" e `V2/docs/interno/PLANO_EXECUCAO.md` Fase 3.
 
 **Premissa:** `ab_test.enabled` está `false`. Cada revisão scora 100% dos seus leads com um modelo único. O split é gerenciado pelo Cloud Run, não por UTM.
 

@@ -71,7 +71,7 @@ bring_data/
 
 **Bloqueador crítico (T1-1):** encoding ordinal usa nome literal de coluna no treino (`'Qual a sua idade?'`) mas nome curto (`'idade'`) em produção → features zeradas silenciosamente.
 
-Leia `docs/PLANO_EXECUCAO.md` para estado detalhado do roadmap.
+Leia `docs/interno/PLANO_EXECUCAO.md` para estado detalhado do roadmap.
 
 ---
 
@@ -96,7 +96,7 @@ GOOGLE_APPLICATION_CREDENTIALS=... # para Sheets e BigQuery
 ### Cloud SQL Proxy (para queries locais ao PostgreSQL)
 ```bash
 cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db --port=5432 &
-# Credenciais: ver docs/acesso_sql.md
+# Credenciais: ver docs/interno/acesso_sql.md
 ```
 
 ### MLflow
@@ -105,7 +105,7 @@ cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db --port=5432 &
 export MLFLOW_TRACKING_URI="postgresql+psycopg2://postgres:<senha: gcloud secrets versions access latest --secret=mlflow-db-password>@<IP da instância smart-ads-db>:5432/mlflow"
 # Artifacts: gs://smart-ads-mlflow/artifacts/
 # Não há UI web ativa — use SDK Python (mlflow.tracking.MlflowClient) ou CLI.
-# Detalhes em docs/MLFLOW.md.
+# Detalhes em docs/interno/MLFLOW.md.
 
 # Local (apenas sandbox — mlflow.db SQLite + mlruns/ locais)
 mlflow ui --backend-store-uri sqlite:///mlflow.db   # http://localhost:5000
@@ -312,18 +312,18 @@ gcloud run revisions list \
 
 | Pergunta | Documento |
 |---|---|
-| O que implementar agora? | `docs/PLANO_EXECUCAO.md` ← **leitura diária** |
+| O que implementar agora? | `docs/interno/PLANO_EXECUCAO.md` ← **leitura diária** |
 | Mapa de todos os docs | `docs/INDICE_DOCUMENTACAO.md` |
 | Arquitetura completa | `docs/ARQUITETURA_SISTEMA_COMPLETA.md` |
-| Refactor `src/core/` (motivação, fases) | `docs/PLANO_REFACTOR_MLOPS.md` |
+| Refactor `src/core/` (motivação, fases) | `docs/interno/PLANO_REFACTOR_MLOPS.md` |
 | Safeguards pendentes (T1–T3) | `docs/PLANO_SAFEGUARD.md` |
-| A/B test (config, janela, critério) | `docs/AB_TEST.md` |
+| A/B test (config, janela, critério) | `docs/interno/AB_TEST.md` |
 | Investigação de erros passados | `docs/Erros_cometidos.md` ← antes de infra |
 | Roadmap de maturidade MLOps | `docs/ROADMAP_MLOPS_MATURIDADE.md` |
-| Como conectar ao banco local | `docs/acesso_sql.md` |
-| Como acessar Google Sheets | `docs/acesso_sheets.md` |
-| ROAS DevClub (histórico) | `docs/analise_valor_ml_devclub.md` |
-| Decisão do rollback (13/04) | `docs/ROLLBACK_DECISION.md` |
+| Como conectar ao banco local | `docs/interno/acesso_sql.md` |
+| Como acessar Google Sheets | `docs/interno/acesso_sheets.md` |
+| ROAS DevClub (histórico) | `docs/interno/analise_valor_ml_devclub.md` |
+| Decisão do rollback (13/04) | `docs/interno/ROLLBACK_DECISION.md` |
 
 ---
 
