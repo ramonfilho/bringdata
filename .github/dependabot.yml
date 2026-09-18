@@ -73,7 +73,14 @@ updates:
     groups:
       dev:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
     ignore:
+      # O grupo dev segue o include (-r api/requirements.txt) e chegou a propor major de
+      # PRODUÇÃO por fora da lista do /V2/api (PR #319, 18/09/2026: gunicorn 26 contra o
+      # mlflow<24, gspread 6, google-cloud-storage 3, facebook-business 26). Major nenhum
+      # entra por aqui; minor e patch passam pelo CI como qualquer PR.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
       # Os pins científicos do dev seguem os da API: a suíte roda contra os mesmos
       # artefatos do modelo, e pandas 3 exige Python 3.11 (PR #314 quebrava o pip).
       - dependency-name: pandas
@@ -92,8 +99,10 @@ updates:
       # Um cliente 3.x contra o banco 2.13 tenta migrar o schema na primeira conexao. Subir
       # de major e tarefa planejada (servidor e cliente juntos), nao PR de dependencia.
       # A PR #273 do Dependabot (2.13.2 -> 3.16.0) foi fechada por isso em 14/09/2026.
+      # Minor também fica: requirements-dev.txt pina 2.13.2 (o mesmo do /V2/api), e o
+      # mlflow 2.22 puxa gunicorn<24, que conflita com o gunicorn da API.
       - dependency-name: mlflow
-        update-types: ["version-update:semver-major"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     labels: ["dependencias"]
     commit-message:
       prefix: "deps(dev)"
