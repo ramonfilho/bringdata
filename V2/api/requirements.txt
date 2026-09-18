@@ -29,7 +29,7 @@ pg8000==1.31.5
 sqlalchemy==2.0.53
 
 # Meta Conversions API
-facebook-business==19.0.3
+facebook-business==26.0.1
 
 # Google Sheets API
 google-auth==2.58.0
