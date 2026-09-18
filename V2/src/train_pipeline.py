@@ -423,6 +423,15 @@ def _assert_retraining_decisions_resolved(config_path: str, set_active: bool) ->
     logger.info(f"  [set-active gate] retraining_decisions OK: {decisions}")
 
 
+def modo_banco(leads_source: str, sales_source: str, include_api_data: bool) -> bool:
+    """True quando o treino lê TUDO do Cloud SQL: leads e vendas por `db`, sem API.
+
+    É o modo do Cloud Run Job de retreino. Nele a planilha local é dispensável, e a
+    imagem não tem nenhuma.
+    """
+    return leads_source == 'db' and sales_source == 'db' and not include_api_data
+
+
 def main(initial_matching='email_telefone', save_files=False, save_test_predictions=False, tune_hyperparams=False, grid_size='small', split_method='temporal_leads', tmb_risk_filter='all', set_active=False, medium_strategy='binary_top3', validation_hook=None, quality_gate_hook=None, include_api_data=True, include_sheets_api=True, api_start_date=None, api_end_date=None, output_subdir='training', verbosity='normal', capture_parity_snapshots=False, use_buyer_weights=True, save_encoded=False, cli_args=None, use_cached_data=False, fixed_hyperparams=None, max_date=None, min_date=None, use_control_weights=False, train_ratio=0.7, control_alpha=None, control_boost=None, exclude_features=None, export_matched_dataset=None, sales_source='files', sales_gateways=None, dump_pesquisa_db=False, leads_source='files', use_feature_selection=False, model_card=False, nota_criativo=False, use_hotleads_feature=False, as_of=None, export_pesquisa=None):
     # Guard: Cloud SQL MLflow precisa estar RUNNABLE. Falha alto se NEVER.
     assert_mlflow_backend_running()
@@ -566,6 +575,14 @@ def main(initial_matching='email_telefone', save_files=False, save_test_predicti
         logger.info(f"  Carregando dados do cache: {os.path.basename(_cache_path)}")
         with open(_cache_path, 'rb') as f:
             all_data = pickle.load(f)
+    elif modo_banco(leads_source, sales_source, include_api_data) and not filepaths:
+        # Cloud Run Job de retreino (17/09/2026): a imagem não tem planilha nenhuma e
+        # pesquisa e vendas vêm inteiras do Cloud SQL nas células 5 e 6. Sem isto,
+        # `read_excel_files([])` levanta ValueError antes de qualquer leitura do banco.
+        # As células 2 a 4 aceitam dicionário vazio e produzem DataFrames vazios, que as
+        # leituras do banco substituem por inteiro.
+        logger.info("  Modo banco: nenhuma planilha local; pesquisa e vendas vêm do Cloud SQL.")
+        all_data = {}
     else:
         all_data = read_all_training_sources(
             filepaths,
