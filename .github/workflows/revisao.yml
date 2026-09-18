@@ -4,9 +4,12 @@
 # que falta, segredo em texto claro). Não bloqueia merge: a proteção da main exige os
 # checks do ci.yml, não este. O que ele escreve é opinião para o autor ler antes de mergear.
 #
-# Só executa se o segredo ANTHROPIC_API_KEY existir no repositório (Settings > Secrets >
-# Actions). Sem o segredo, o job termina em segundos dizendo que pulou, sem falhar.
-# Custo: uma chamada por PR; a ordem de grandeza é centavos de dólar por revisão.
+# Só executa se existir um dos dois segredos no repositório (Settings > Secrets > Actions):
+#   CLAUDE_CODE_OAUTH_TOKEN  gerado por `claude setup-token` na máquina de quem tem plano
+#                            Pro/Max; a revisão consome a cota do plano, sem fatura extra.
+#   ANTHROPIC_API_KEY        chave da API, cobrada por token (estimativa: US$ 0,15 a 0,35
+#                            por PR, conforme o modelo).
+# O token do plano tem precedência. Sem nenhum dos dois, o job pula em segundos, sem falhar.
 name: Revisão automática
 
 on:
@@ -25,26 +28,31 @@ concurrency:
 
 jobs:
   revisar:
-    name: revisão automática (só com ANTHROPIC_API_KEY)
+    name: revisão automática (só com CLAUDE_CODE_OAUTH_TOKEN ou ANTHROPIC_API_KEY)
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: o segredo existe?
+      - name: algum segredo existe?
         id: chave
         env:
-          TEM: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          OAUTH: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN != '' }}
+          API: ${{ secrets.ANTHROPIC_API_KEY != '' }}
         run: |
-          echo "tem=$TEM" >> "$GITHUB_OUTPUT"
-          [ "$TEM" = "true" ] || echo "ANTHROPIC_API_KEY ausente: revisão automática pulada." >> "$GITHUB_STEP_SUMMARY"
+          if [ "$OAUTH" = "true" ]; then modo=oauth; elif [ "$API" = "true" ]; then modo=api; else modo=nenhum; fi
+          echo "modo=$modo" >> "$GITHUB_OUTPUT"
+          [ "$modo" != "nenhum" ] || echo "Nem CLAUDE_CODE_OAUTH_TOKEN nem ANTHROPIC_API_KEY: revisão automática pulada." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v4
-        if: steps.chave.outputs.tem == 'true'
+        if: steps.chave.outputs.modo != 'nenhum'
         with: { fetch-depth: 0 }
-      - uses: anthropics/claude-code-action@v1
-        if: steps.chave.outputs.tem == 'true'
+      - name: revisar (cota do plano)
+        uses: anthropics/claude-code-action@v1
+        if: steps.chave.outputs.modo == 'oauth'
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          claude_args: "--max-turns 12"
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: >-
+            --max-turns 40
+            --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Read,Grep,Glob"
           prompt: |
             Revise esta pull request como um segundo desenvolvedor do projeto. Leia o diff
             (git diff origin/${{ github.base_ref }}...HEAD) e o que ele toca. Comente na PR,
@@ -54,3 +62,34 @@ jobs:
             Para cada ponto: arquivo e linha, o que está errado, como corrigir. Sem elogio,
             sem resumo do diff, sem sugestão de estilo. Se não houver nada, escreva uma
             linha dizendo que não encontrou motivo para segurar o merge.
+            Publique o resultado como UM comentário na PR ${{ github.event.pull_request.number }}
+            do repositório ${{ github.repository }}, com `gh pr comment <número> --body "<texto>"`
+            pela ferramenta Bash. Texto que fica só na sua resposta final não chega a ninguém.
+            Não crie commits nem altere arquivos. Economize turnos: leia o diff inteiro numa
+            chamada (`gh pr diff <número>`), abra no máximo cinco arquivos além dele, e
+            publique o comentário antes do vigésimo turno mesmo que ainda tenha dúvidas;
+            nesse caso diga o que não deu tempo de conferir.
+      - name: revisar (chave da API)
+        uses: anthropics/claude-code-action@v1
+        if: steps.chave.outputs.modo == 'api'
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --max-turns 40
+            --allowedTools "Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(git diff:*),Bash(git log:*),Read,Grep,Glob"
+          prompt: |
+            Revise esta pull request como um segundo desenvolvedor do projeto. Leia o diff
+            (git diff origin/${{ github.base_ref }}...HEAD) e o que ele toca. Comente na PR,
+            em português, só o que mudaria antes de mergear: defeito de lógica, caminho de
+            erro sem tratamento, segredo ou dado pessoal em texto claro, teste que a mudança
+            pedia e não tem, comportamento que contradiz um comentário ou doc do repositório.
+            Para cada ponto: arquivo e linha, o que está errado, como corrigir. Sem elogio,
+            sem resumo do diff, sem sugestão de estilo. Se não houver nada, escreva uma
+            linha dizendo que não encontrou motivo para segurar o merge.
+            Publique o resultado como UM comentário na PR ${{ github.event.pull_request.number }}
+            do repositório ${{ github.repository }}, com `gh pr comment <número> --body "<texto>"`
+            pela ferramenta Bash. Texto que fica só na sua resposta final não chega a ninguém.
+            Não crie commits nem altere arquivos. Economize turnos: leia o diff inteiro numa
+            chamada (`gh pr diff <número>`), abra no máximo cinco arquivos além dele, e
+            publique o comentário antes do vigésimo turno mesmo que ainda tenha dúvidas;
+            nesse caso diga o que não deu tempo de conferir.

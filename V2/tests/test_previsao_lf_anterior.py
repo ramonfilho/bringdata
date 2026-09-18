@@ -78,7 +78,7 @@ def test_regra_do_app_e_a_mesma_deste_teste():
     """Trava anti-deriva: o trecho de seleção em api/app.py precisa conter a
     regra 'cap_end < cap_start do ativo' e a guarda contra duplicar o ativo.
     Se alguém reescrever a seleção, este teste aponta o contrato."""
-    src = (Path(__file__).resolve().parent.parent / 'api' / 'app.py').read_text()
+    src = ''.join(p.read_text() for p in [Path(__file__).resolve().parent.parent / 'api' / 'app.py'] + sorted((Path(__file__).resolve().parent.parent / 'api' / 'routers').glob('*.py')))  # app.py + routers
     assert "c['cap_end'] < _cs_ativo" in src
     assert 'nunca duplicar o LF corrente' in src
 

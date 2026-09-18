@@ -104,11 +104,16 @@ def _construcoes_daily_check_response_via_ast() -> list[set[str]]:
     model não basta — precisa passar na construção também.
     """
     import ast
-    app_path = os.path.join(os.path.dirname(__file__), '..', 'api', 'app.py')
-    with open(app_path) as f:
-        tree = ast.parse(f.read())
+    # Os handlers vivem em api/routers/*.py (app.py é só wiring); varre todos.
+    import glob
+    api_dir = os.path.join(os.path.dirname(__file__), '..', 'api')
+    fontes = [os.path.join(api_dir, 'app.py')] + sorted(glob.glob(os.path.join(api_dir, 'routers', '*.py')))
+    nodes = []
+    for caminho in fontes:
+        with open(caminho) as f:
+            nodes.extend(ast.walk(ast.parse(f.read())))
     construcoes: list[set[str]] = []
-    for node in ast.walk(tree):
+    for node in nodes:
         if not isinstance(node, ast.Call):
             continue
         func = node.func

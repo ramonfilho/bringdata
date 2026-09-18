@@ -1,7 +1,7 @@
 # Alertas críticos — especificação
 
 **Versão:** 2026-05-13
-**Status:** spec fechada, pré-implementação
+**Status:** implementado e no ar desde 15/08/2026 (`src/monitoring/critical_alerts.py`, ligado em `/railway/process-pending`); `CRITICAL_ALERTS_DRY_RUN=false` passou a ser versionado no deploy em 28/08/2026 (PR #248). O texto abaixo é a especificação que o código seguiu.
 
 ## Propósito
 

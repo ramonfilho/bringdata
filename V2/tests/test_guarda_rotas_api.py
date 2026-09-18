@@ -160,7 +160,9 @@ import ast
 import functools
 from pathlib import Path
 
-_APP_PY = Path(auth.__file__).parent / 'app.py'
+_API = Path(auth.__file__).parent
+# app.py é só o wiring; as rotas vivem em api/routers/<domínio>.py. Varre todos.
+_FONTES_DA_API = [_API / 'app.py'] + sorted((_API / 'routers').glob('*.py'))
 
 
 @functools.lru_cache(maxsize=1)
@@ -171,9 +173,9 @@ def _rotas_do_app():
     pipeline inteiro. A pergunta aqui é sobre o que está DECLARADO no decorador, e
     isso o arquivo responde, em qualquer máquina, sem segredo nenhum.
     """
-    arvore = ast.parse(_APP_PY.read_text())
     fora = []
-    for no in ast.walk(arvore):
+    nos = [no for f in _FONTES_DA_API for no in ast.walk(ast.parse(f.read_text()))]
+    for no in nos:
         if not isinstance(no, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for dec in no.decorator_list:
@@ -181,7 +183,7 @@ def _rotas_do_app():
                 continue
             f = dec.func
             if not (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name)
-                    and f.value.id == 'app'
+                    and f.value.id in ('app', 'router')
                     and f.attr in ('get', 'post', 'put', 'delete')):
                 continue
             if not (dec.args and isinstance(dec.args[0], ast.Constant)):
@@ -219,7 +221,7 @@ def test_nenhuma_guarda_le_o_cabecalho_Authorization():
     manda. Se alguma guarda nossa passar a ler esse cabeçalho, ela rejeita os nossos
     próprios crons, que é o jeito mais provável de esta mudança derrubar produção."""
     # Nenhuma guarda declarada no app pode se apoiar no cabeçalho Authorization.
-    for linha in _APP_PY.read_text().splitlines():
+    for linha in (l for f in _FONTES_DA_API for l in f.read_text().splitlines()):
         if 'exigir_token(' in linha:
             assert 'authorization' not in linha.lower(), linha
     # E o módulo da guarda não pode usar esse nome de cabeçalho em CÓDIGO. Docstring
@@ -276,7 +278,7 @@ def test_documentacao_automatica_desligada_por_default():
     completo da API: toda rota, todo parâmetro, todo nome de campo, inclusive
     `lead_score` e `decil`. Era o índice que tornava as outras rotas descobríveis.
     Fechar rota e continuar publicando o mapa é meio serviço."""
-    fonte = _APP_PY.read_text()
+    fonte = (_API / 'app.py').read_text()  # o app FastAPI continua criado no app.py
     assert 'docs_url="/docs" if _DOCS else None' in fonte, (
         'docs_url voltou a ser incondicional')
     assert 'redoc_url="/redoc" if _DOCS else None' in fonte

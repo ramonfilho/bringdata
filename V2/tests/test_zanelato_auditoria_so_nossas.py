@@ -15,14 +15,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from scripts import push_supabase_zanelato as z  # noqa: E402
 
 CORTE = "2026-06-19"
+HOJE = "2026-09-25"
 NOSSAS = {"2026-06": 10, "2026-07": 20, "2026-08": 30, "2026-09": 40}
 DE_OUTROS = 652
+ORIGEM_HOJE = 7          # leads de hoje na origem; o destino ainda não copiou todos
 
 
 class _Origem:
     def run(self, sql, **params):
         if "::text" in sql:
-            return [[CORTE]]
+            return [[CORTE]] if f"- {z.DIAS}" in sql else [[HOJE]]
+        if "data = :h" in sql:
+            return [[ORIGEM_HOJE]]
         return [[m, n] for m, n in NOSSAS.items()]
 
     def close(self):
@@ -33,7 +37,8 @@ class _Destino:
     """Aplica de verdade o filtro de forma da data às linhas que finge ter."""
 
     def __init__(self):
-        self.linhas = [(f"{m}-20", n) for m, n in NOSSAS.items()] + [("2026/09/12", DE_OUTROS)]
+        self.linhas = ([(f"{m}-20", n) for m, n in NOSSAS.items()]
+                       + [("2026/09/12", DE_OUTROS), (HOJE, ORIGEM_HOJE - 3)])
         self.consultas = []
 
     def _filtra(self, sql):
@@ -52,17 +57,27 @@ class _Destino:
             out.append((data, n))
         return out
 
+    @staticmethod
+    def _k(d):
+        # Comparação como o Postgres deles fez de verdade: a collation ignora a pontuação
+        # no primeiro nível, então '2026/09/12' cai entre '2026-09-11' e '2026-09-13'.
+        # Foi assim que as linhas com barra entraram na janela e derrubaram a auditoria.
+        return d.replace("/", "-")
+
     def run(self, sql, **params):
         self.consultas.append(sql)
         linhas = self._filtra(sql)
+        k = self._k
         if "GROUP BY" in sql:
             por_mes = {}
             for data, n in linhas:
-                if data >= params["c"]:
+                if k(data) >= k(params["c"]) and ("h" not in params or k(data) < k(params["h"])):
                     por_mes[data[:7]] = por_mes.get(data[:7], 0) + n
             return [[m, n] for m, n in por_mes.items()]
+        if "data = :h" in sql:
+            return [[sum(n for d, n in linhas if k(d) == k(params["h"]))]]
         if "data <" in sql:
-            return [[sum(n for d, n in linhas if d < params["c"])]]
+            return [[sum(n for d, n in linhas if k(d) < k(params["c"]))]]
         return [[sum(n for _, n in linhas)]]
 
     def close(self):
@@ -99,3 +114,36 @@ def test_sem_o_filtro_o_mes_com_barra_faria_falhar(pontas, monkeypatch):
     monkeypatch.setattr(z, "SO_NOSSAS", "TRUE")
     with pytest.raises(SystemExit, match="2026/09"):
         z.auditar()
+
+
+def test_hoje_fica_fora_da_comparacao_e_e_reportado_a_parte(pontas):
+    """Hoje está em movimento nas duas pontas (17/09/2026: -3 e +1 em rodadas com minutos
+    de diferença, com os meses fechados batendo). Diferença de hoje não é divergência."""
+    dst, avisos = pontas
+    r = z.auditar()
+    assert r["hoje"] == {"data": HOJE, "origem": ORIGEM_HOJE, "destino": ORIGEM_HOJE - 3}
+    assert r["linhas"] == sum(NOSSAS.values())
+    assert "conferida" in avisos[-1]
+    por_mes = [q for q in dst.consultas if "GROUP BY" in q]
+    assert "data < :h" in por_mes[0]
+
+
+def test_a_carga_cheia_apaga_so_as_nossas_linhas(monkeypatch):
+    """`--full` regrava a janela; um DELETE sem filtro levaria as 652 linhas do funil MBA."""
+    comandos = []
+
+    class _Dst:
+        def run(self, sql, **params):
+            comandos.append(sql)
+            return [[0]]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(z, "_le", lambda janela: [])
+    monkeypatch.setattr(z, "destino", lambda porta=None: _Dst())
+    monkeypatch.setattr(z, "_grava", lambda dst, linhas, apagar_chaves: 0)
+    z.full()
+    deletes = [c for c in comandos if c.startswith("DELETE")]
+    assert deletes == [f"DELETE FROM {z.TABELA_DESTINO} WHERE {z.SO_NOSSAS}"]
+    assert comandos[0] == "BEGIN" and comandos[-1] == "COMMIT"
