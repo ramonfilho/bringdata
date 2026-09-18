@@ -51,6 +51,11 @@ updates:
       # (22 -> 26) nem instalava. Sobe junto com o mlflow, como tarefa planejada.
       - dependency-name: gunicorn
         update-types: ["version-update:semver-major"]
+      # SDK da Meta: versão maior mexe em CAPI, insights e públicos (7 arquivos), e os dois
+      # jobs não passam pelo canário. Sobe como tarefa planejada, com teste manual dos três
+      # pontos (decisão do Ramon em 18/09/2026; PR #326 fechada).
+      - dependency-name: facebook-business
+        update-types: ["version-update:semver-major"]
       # google-cloud-storage 3 conflita com google-auth 2.25.2 pinado (PR #278); sobe
       # junto com google-auth, numa PR nossa.
       - dependency-name: google-cloud-storage
