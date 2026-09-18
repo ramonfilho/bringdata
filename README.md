@@ -34,7 +34,9 @@ toward the ads still under their ceiling.
 Sales are matched to leads by email and phone inside each launch window, ad spend
 comes from the ad account per ad and day, and every number below is revenue over
 spend on that matched base. The two sheets with the full method are the canonical
-business case ([Lead score e teto de CPL](https://claude.ai/code/artifact/716d63bc-4eab-49b0-90e2-884ed5a22869), 15/09/2026).
+business case ([Lead score e teto de CPL](https://claude.ai/code/artifact/716d63bc-4eab-49b0-90e2-884ed5a22869), 15/09/2026);
+the same numbers, their sources and their caveats are in
+[V2/docs/relatorios/case_lead_score_teto/RESULTADO.md](V2/docs/relatorios/case_lead_score_teto/RESULTADO.md).
 
 **Lead score.** Leads in tiers 8 to 10 return R$ 2.14 per real spent (44.1% of the
 leads); tiers 1 to 5 return R$ 0.89 (32.2% of the leads). Tiers 8 to 10 convert at

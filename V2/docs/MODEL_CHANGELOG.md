@@ -5,7 +5,7 @@ Amarra as 3 camadas de versionamento: **código** (Git/PR), **dados** (fonte + c
 fingerprint) e **modelo** (run MLflow + métricas). Uma entrada por modelo, mais recente no topo.
 
 - Deploy seguro (trocar o `mlflow_run_id` de produção) segue o [`PROMOCAO_MODELO_CHECKLIST.md`](PROMOCAO_MODELO_CHECKLIST.md).
-- O `run_id` é a chave no MLflow (backend Postgres `104.197.138.129:5432/mlflow`).
+- O `run_id` é a chave no MLflow (backend Postgres `<IP da instância smart-ads-db>:5432/mlflow`).
 
 ## Template de entrada
 

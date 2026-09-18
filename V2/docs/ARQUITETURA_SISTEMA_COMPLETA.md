@@ -370,8 +370,8 @@ DB: railway | User: postgres
 
 ```
 Instância: smart-ads-451319:us-central1:smart-ads-db
-DB: mlflow | Acesso direto: 104.197.138.129:5432
-MLFLOW_TRACKING_URI=postgresql+psycopg2://postgres:<senha: gcloud secrets versions access latest --secret=mlflow-db-password>@104.197.138.129:5432/mlflow
+DB: mlflow | Acesso direto: <IP da instância smart-ads-db>:5432
+MLFLOW_TRACKING_URI=postgresql+psycopg2://postgres:<senha: gcloud secrets versions access latest --secret=mlflow-db-password>@<IP da instância smart-ads-db>:5432/mlflow
 ```
 
 **Artifacts MLflow:** `gs://smart-ads-mlflow/artifacts/`
@@ -404,7 +404,7 @@ Configurável via `IngestionConfig.matching_method` no `devclub.yaml`.
 
 ```bash
 # Tracking
-export MLFLOW_TRACKING_URI=postgresql+psycopg2://postgres:<senha: gcloud secrets versions access latest --secret=mlflow-db-password>@104.197.138.129:5432/mlflow
+export MLFLOW_TRACKING_URI=postgresql+psycopg2://postgres:<senha: gcloud secrets versions access latest --secret=mlflow-db-password>@<IP da instância smart-ads-db>:5432/mlflow
 
 # Ver runs
 mlflow ui  # abre em localhost:5000

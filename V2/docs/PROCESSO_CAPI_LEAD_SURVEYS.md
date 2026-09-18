@@ -302,7 +302,7 @@ São parte do item 14 (seção do digest) + adicionadas ao `critical_alerts.py` 
 
 *Infra GCP:* projeto `smart-ads-451319`; tópico `lead-capture-ingest`; sub `lead-capture-ingest-sub`; SA publisher `lead-capture-publisher@…`; SA consumer (Cloud Run default) `smart-ads-451319@appspot…`.
 
-*Contrato cliente:* [REQUISITOS_SISTEMA_NOVO.md](REQUISITOS_SISTEMA_NOVO.md) + [propostas_e_apresentacoes/requisitos_sistema_novo.pdf](../propostas_e_apresentacoes/requisitos_sistema_novo.pdf) + [propostas_e_apresentacoes/requisitos_sistema_novo_payload.json](../propostas_e_apresentacoes/requisitos_sistema_novo_payload.json).
+*Contrato cliente:* [REQUISITOS_SISTEMA_NOVO.md](REQUISITOS_SISTEMA_NOVO.md) + PDF e JSON schema (fora do repositório público desde 18/09/2026; cópia local em `~/Desktop/bring_data_fora_do_repo/`).
 
 *Classe de quebra histórica relevante:* "Cluster 5" / "cenário 1.2" em [AUDITORIA_QUEBRA_PRODUCAO.md](AUDITORIA_QUEBRA_PRODUCAO.md) e [registro_erros_ml.md](registro_erros_ml.md).
 

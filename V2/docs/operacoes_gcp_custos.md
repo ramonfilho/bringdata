@@ -61,7 +61,7 @@ gcloud sql instances patch smart-ads-db \
   --project=smart-ads-451319
 ```
 
-**Tracking URI:** hardcoded em `src/model/training_model.py:28` apontando para `104.197.138.129:5432/mlflow`. Funciona quando a instância está `ALWAYS`.
+**Tracking URI:** hardcoded em `src/model/training_model.py:28` apontando para `<IP da instância smart-ads-db>:5432/mlflow`. Funciona quando a instância está `ALWAYS`.
 
 ---
 

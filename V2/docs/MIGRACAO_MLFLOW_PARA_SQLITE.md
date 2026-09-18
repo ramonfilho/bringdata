@@ -23,7 +23,7 @@ Levantado em 2026-05-14 lendo o código.
 
 | Arquivo | Categoria | O que faz |
 |---|---|---|
-| `src/model/training_model.py:27-31` | **Treino — crítico** | `mlflow.set_tracking_uri('postgresql+psycopg2://...104.197.138.129:5432/mlflow')` no nível do módulo |
+| `src/model/training_model.py:27-31` | **Treino — crítico** | `mlflow.set_tracking_uri('postgresql+psycopg2://...<IP da instância smart-ads-db>:5432/mlflow')` no nível do módulo |
 | `src/model/training_model.py:185-193` | **Ativação — crítico** | `MlflowClient().get_run()` + `download_artifacts()` para ativar um run antigo como modelo de produção |
 | `src/model/training_model.py:283-288` | **Treino — crítico** | `mlflow.start_run()` + `mlflow.sklearn.log_model()` registram modelo no servidor |
 | `src/experiments/rules_vs_rf.py:420-438` | **Experimentação** | `mlflow.set_experiment()` + `mlflow.start_run()` para logar baseline vs RF |

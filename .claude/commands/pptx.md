@@ -1,6 +1,6 @@
 # /pptx — Leitura e edição de arquivos PPTX
 
-Use esta skill quando precisar **ler conteúdo** ou **editar texto** de arquivos `.pptx` no repositório — tipicamente os decks comerciais em `V2/propostas_e_apresentacoes/`.
+Use esta skill quando precisar **ler conteúdo** ou **editar texto** de arquivos `.pptx` no repositório — tipicamente os decks comerciais em `V2/propostas_e_apresentacoes/` (pasta LOCAL, fora do git desde 18/09/2026).
 
 ---
 

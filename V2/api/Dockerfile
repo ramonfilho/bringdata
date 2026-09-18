@@ -2,7 +2,9 @@
 # Base: Debian 12 (bookworm). O bullseye saiu de suporte em 31/08/2026 e o apt-get do
 # build passou a dar 404 em maquina limpa (primeiro deploy pelo Actions, 14/09/2026).
 # tests/test_dockerfile_base.py trava a volta para distro fora de suporte.
-FROM python:3.10-slim-bookworm AS base
+# Tag + digest: a tag diz o que é, o digest garante que o build de hoje e o de amanhã
+# partem do mesmo conteúdo. O Dependabot (ecosistema docker) sobe o digest por PR.
+FROM python:3.10-slim-bookworm@sha256:68d914ec641a0b69267ce65184d000a2bc3a9ee2590ab702b82250ab2385735a AS base
 
 # Metadados
 LABEL maintainer="Smart Ads Team"

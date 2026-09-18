@@ -28,4 +28,4 @@ def test_base_nao_e_distro_fora_de_suporte():
 
 def test_base_continua_no_python_3_10_slim():
     # o Python da imagem é o que os pins do requirements.txt e os pickles do modelo assumem
-    assert re.search(r"^FROM python:3\.10-slim-\w+( AS \w+)?$", _from()), _from()
+    assert re.search(r"^FROM python:3\.10-slim-\w+(@sha256:[0-9a-f]{64})?( AS \w+)?$", _from()), _from()

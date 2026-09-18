@@ -17,7 +17,7 @@ O ledger `registros_ml` — nossa tabela com `lead_score`, `decil`, `variant` **
 
 | Decisão | Detalhe |
 |---|---|
-| Destino = **GCP Cloud SQL** `smart-ads-db` | smart-ads-451319, us-central1 (mesma região do Cloud Run), db-f1-micro, Postgres 15, IP público 104.197.138.129. Instância **fica ALWAYS permanentemente** (custo ~US$10-15/mês assumido; era a instância do MLflow que estava parada por economia). |
+| Destino = **GCP Cloud SQL** `smart-ads-db` | smart-ads-451319, us-central1 (mesma região do Cloud Run), db-f1-micro, Postgres 15, IP público <IP da instância smart-ads-db>. Instância **fica ALWAYS permanentemente** (custo ~US$10-15/mês assumido; era a instância do MLflow que estava parada por economia). |
 | Database novo `ledger`, separado do `mlflow` | Mesma instância, databases distintos, user dedicado de privilégio mínimo. |
 | Migração por **estrangulamento com dual-write** | Cloud SQL primário, Railway espelho, paridade por ~7 dias, depois corta. Rollback = trocar env var. |
 | Limpeza do estoque histórico **ao final**, com dump prévio | Inclui planilha (colunas + trigger Apps Script). |

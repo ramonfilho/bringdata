@@ -18,7 +18,8 @@ from pathlib import Path
 # um URL sintático basta, create_engine não conecta.
 os.environ.setdefault("DATABASE_URL", "postgresql://teste:teste@localhost:5432/teste")
 
-FIXTURES = Path(__file__).resolve().parent / "fixtures"
+# Pasta própria (tests/fixtures/ está no .gitignore e engoliu a primeira versão destas fixtures).
+FIXTURES = Path(__file__).resolve().parent / "rotas_congeladas"
 ROTAS = FIXTURES / "rotas_app.json"
 OPENAPI = FIXTURES / "openapi_app.json"
 

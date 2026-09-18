@@ -55,7 +55,7 @@ Cada fase roda dual-read (tabela vs API ao vivo) e só vira a chave quando a par
 ### Fase 0 — Fundação ✅ CONCLUÍDA (24/06)
 - [x] Worktree + branch.
 - [x] DDL das tabelas: `api/db/analytics_schema.sql` (leads, sales, validation_runs/metrics, meta_insights).
-- [x] **DDL aplicado no Cloud SQL**: schema `analytics` no database `ledger` (instância `smart-ads-db`, RUNNABLE/ALWAYS, IP 104.197.138.129). 5 tabelas, 87 colunas. Owner `postgres` (ledger_app não tem DDL na database); `ledger_app` recebeu USAGE/CREATE no schema + ALL em tables/sequences.
+- [x] **DDL aplicado no Cloud SQL**: schema `analytics` no database `ledger` (instância `smart-ads-db`, RUNNABLE/ALWAYS, IP <IP da instância smart-ads-db>). 5 tabelas, 87 colunas. Owner `postgres` (ledger_app não tem DDL na database); `ledger_app` recebeu USAGE/CREATE no schema + ALL em tables/sequences.
 - [x] **Smoke `ledger_app`** (usuário do pipeline): SELECT nas 5 tabelas + INSERT em validation_runs/metrics + JOIN por FK + DELETE CASCADE. Tudo OK.
 - [x] Conexão: helper próprio `src/data/analytics_connection.py` (Cloud SQL `ledger` + `SET search_path TO analytics`). `ledger_connection.py` é leitura do `registros_ml` e o docstring dele proíbe escrita — por isso helper à parte.
 
