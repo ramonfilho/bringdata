@@ -36,7 +36,7 @@ google-auth==2.58.0
 google-auth-oauthlib==1.4.1
 google-auth-httplib2==0.4.2
 google-api-python-client==2.200.0
-gspread==5.12.3
+gspread==6.2.1
 
 # Google Ads API — LEITURA (funil Google no digest). Sem isto a imagem não tem
 # `google.ads` e o funil degrada em runtime ("No module named 'google.ads'").
