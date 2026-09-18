@@ -120,6 +120,9 @@ that changes the run id in the active-model YAML, opened by
 exist, if it was trained from a dirty working tree, if its artifacts are missing
 from the bucket, or if its metrics fall below the thresholds in
 `V2/configs/retreino_mensal.yaml`. The history is in `V2/docs/MODEL_CHANGELOG.md`.
+Once a month (day 1, 06:00 São Paulo) a Cloud Run job retrains on the database, judges
+the new run with the same gate, posts the verdict to Slack and opens that pull request by
+itself when the run passes; a score-drift alert triggers the same job, with a 14-day cooldown.
 
 ## Running the tests
 

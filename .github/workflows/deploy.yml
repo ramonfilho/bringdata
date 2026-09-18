@@ -198,6 +198,13 @@ jobs:
             -t "$IMG" V2/
           docker push "$IMG"
           echo "imagem de treino: $IMG" >> "$GITHUB_STEP_SUMMARY"
+          # O job de retreino segue a imagem da API (lockstep): o cron do dia 1 e o gatilho
+          # de drift precisam do código de pós-treino do deploy vigente.
+          if gcloud run jobs update retreino-mensal --image="$IMG" --region="$REGION" --project="$PROJECT_ID" >/dev/null 2>&1; then
+            echo "job retreino-mensal na imagem $IMG" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "job retreino-mensal NÃO atualizado (ainda não existe? scripts/setup_retreino_job.sh)" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   retomar:
     name: retomar canário que esperava a janela

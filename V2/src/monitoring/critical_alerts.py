@@ -819,6 +819,14 @@ def run_critical_checks(
                     'message': result.message, 'details': result.details,
                     'dispatch_status': status,
                 })
+                if result.rule_name == 'score_drift':
+                    # Etapa 5 do treino contínuo (18/09/2026): drift de score chama o job
+                    # de retreino, com cooldown de 14 dias. Nunca derruba o ciclo.
+                    try:
+                        from src.retreino.gatilho import disparar_retreino
+                        summary['retreino'] = disparar_retreino(f"score_drift: {result.message[:120]}")
+                    except Exception as e:
+                        logger.warning(f"[critical_alerts] gatilho de retreino falhou: {e}")
     finally:
         # ledger_conn é sempre uma conexão própria (mesmo quando aponta pro
         # Railway) — fechar pra não vazar conexão a cada ciclo de 5min.
