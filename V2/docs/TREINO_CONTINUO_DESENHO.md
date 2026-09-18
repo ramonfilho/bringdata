@@ -52,6 +52,29 @@ A comparação champion contra desafiante "nas mesmas linhas" (o motivo da tabel
 fica para a etapa 3: o julgamento lê o `dataset_hash` dos dois runs e diz se o conjunto
 mudou entre eles.
 
+## Etapas 3, 4 e 5 entregues (18/09/2026)
+
+**O que entra:** o run que o job acabou de gravar no MLflow (`--pos-treino` no fim de
+`src.train_pipeline`), o champion do YAML de produção e os limiares de
+`configs/retreino_mensal.yaml`.
+
+**O que acontece:** `src/retreino/pos_treino.py` julga o run com a mesma função do gate
+do CI (`julgar()`), monta o card (AUC, monotonia, lift, KS, delta contra o champion, hash e
+linhas do conjunto congelado, motivos) e manda por DM no Slack em qualquer veredito. Se o
+run passou, abre a PR do modelo pela API do GitHub: ramo `modelo/<run8>`, bloco
+`active_model` reescrito pela mesma função de `--activate-run` (o `ab_test` fica intacto),
+card no corpo. O CI julga a PR de novo; o merge continua sendo a aprovação humana.
+
+**O que sai:** um DM por treino e, quando cabe, uma PR. Sem o segredo `github-pr-token`
+(PAT fine-grained do repositório, Contents e Pull requests em escrita, guardado no Secret
+Manager e ligado ao job por `scripts/setup_retreino_job.sh`), o DM traz o comando manual.
+
+**Gatilhos:** o Cloud Scheduler `retreino-mensal-cron` roda o job no dia 1 às 06:00 de
+São Paulo; a regra `score_drift` dos alertas críticos (score médio de 60 minutos fora do
+baseline de 30 dias) chama `src/retreino/gatilho.py`, que executa o job pela API com
+cooldown de 14 dias guardado em `gs://smart-ads-mlflow/retreino/ultimo_gatilho.json`. O
+deploy troca a imagem do job junto com a da API, para o pós-treino ser o do código vigente.
+
 ## Entrada, processamento, saída
 
 | Etapa | O que entra | O que acontece | O que sai |
@@ -71,11 +94,11 @@ ela com a comparação feita.
 |---|---|---|
 | pipeline de treino (`src/train_pipeline.py`) | headless desde 17/09/2026: a etapa `treino` do `api/Dockerfile` (base da API + mlflow e pyarrow) vira `gcr.io/<projeto>/smart-ads-treino:<tag>` em todo deploy; o job `retreino-mensal` (`scripts/setup_retreino_job.sh`) recebe `LEDGER_DB_*` e `MLFLOW_DB_*` do Secret Manager e roda `--leads-source db --sales-source db --no-api-data` | nada |
 | model card e `git_commit` no run | existe (PR #92) | nada |
-| régua de comparação | existe (`ci_check_active_model.py`, PR #262) | expor `julgar()` para o job chamar |
-| abrir a PR do modelo | existe (`abrir_pr_modelo.sh`, usa worktree e `gh`) | versão para runner: sem worktree, `gh` autenticado por token do repositório, push por HTTPS |
-| Cloud Run Job `retreino-mensal` | não existe | criar com a imagem da API, 8 GiB, 4 vCPU, timeout 60 min, conta de serviço com leitura do Cloud SQL e escrita no bucket e no MLflow |
+| régua de comparação | existe (`ci_check_active_model.py`, PR #262); o job chama `julgar()` em `src/retreino/pos_treino.py` desde 18/09/2026 | nada |
+| abrir a PR do modelo | existe: na mão (`abrir_pr_modelo.sh`) e pelo job, via API do GitHub (`src/retreino/pos_treino.py`, desde 18/09/2026) | criar o segredo `github-pr-token` (PAT fine-grained do repositório: Contents e Pull requests em escrita); sem ele o DM traz o comando manual |
+| Cloud Run Job `retreino-mensal` | existe desde 17/09/2026 (`scripts/setup_retreino_job.sh`); o deploy troca a imagem em lockstep desde 18/09 | nada |
 | congelar o universo | existe desde a PR #175 (retrato no run); o gate exige desde 18/09/2026 | nada |
-| gatilho por drift | não existe | o alerta de drift do monitoring chama o job (uma linha no orquestrador de alertas) |
+| gatilho por drift | existe desde 18/09/2026: `src/retreino/gatilho.py`, chamado pelo orquestrador de alertas quando `score_drift` dispara, cooldown de 14 dias; cron `retreino-mensal-cron` no dia 1 às 06:00 | nada |
 
 ## Riscos conhecidos, e o que o desenho faz com eles
 
@@ -96,11 +119,12 @@ ela com a comparação feita.
    `retreino-mensal` criado e rodado uma vez na mão; run no MLflow com `git_dirty=false`.
 2. **Universo congelado**: entregue em 18/09/2026 sem tabela nova (seção acima); o gate
    do CI exige `dataset_hash`, `dataset_linhas` e o parquet no run.
-3. **Julgamento e Slack** (1 dia): o job chama `julgar()` e manda o card no DM em
-   qualquer veredito.
-4. **PR automática** (1 dia): versão do `abrir_pr_modelo.sh` para runner; o job abre a PR
-   quando o veredito permite.
-5. **Gatilhos** (1 dia): Cloud Scheduler mensal e a chamada a partir do alerta de drift.
+3. **Julgamento e Slack**: entregue em 18/09/2026 (`src/retreino/pos_treino.py`, flag
+   `--pos-treino` do treino; DM em qualquer veredito).
+4. **PR automática**: entregue em 18/09/2026 pela API do GitHub; depende do segredo
+   `github-pr-token` (sem ele, o DM traz o comando manual).
+5. **Gatilhos**: entregues em 18/09/2026 (cron do dia 1 às 06:00 e `score_drift` com
+   cooldown de 14 dias).
 
 Fora deste projeto: mudar a régua (os limiares de `retreino_mensal.yaml` são decisão de
 negócio), e retreinar com dado de outro cliente (o universo é o da DevClub).
