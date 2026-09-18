@@ -38,6 +38,19 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: joblib
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # matplotlib 3.11+ exige Python 3.11; a imagem é 3.10 (PR #277 quebrava o pip).
+      - dependency-name: matplotlib
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # requirements-treino.txt mora aqui: mlflow 3 migraria o schema do Postgres de
+      # tracking, e pyarrow major muda o parquet que o pandas 2.0.3 lê.
+      - dependency-name: mlflow
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: pyarrow
+        update-types: ["version-update:semver-major"]
+      # google-cloud-storage 3 conflita com google-auth 2.25.2 pinado (PR #278); sobe
+      # junto com google-auth, numa PR nossa.
+      - dependency-name: google-cloud-storage
+        update-types: ["version-update:semver-major"]
     labels: ["dependencias"]
     commit-message:
       prefix: "deps(api)"
