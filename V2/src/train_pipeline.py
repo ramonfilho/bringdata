@@ -1988,6 +1988,10 @@ if __name__ == "__main__":
              "exato que o pipeline monta a partir das fontes."
     )
 
+    parser.add_argument(
+        '--pos-treino', action='store_true',
+        help='depois do treino: julga o run pela régua do CI, avisa no Slack (DM) e abre a PR '
+             'do modelo se passar (etapas 3 e 4 do treino contínuo, src/retreino/pos_treino.py)')
     args = parser.parse_args()
 
     if args.activate_run:
@@ -1997,7 +2001,7 @@ if __name__ == "__main__":
         ativar_run_existente(args.activate_run, client_config=client_config)
         sys.exit(0)
 
-    main(
+    resultado_treino = main(
         initial_matching=args.initial_matching,
         save_files=args.save_files,  # DEPRECATED
         save_test_predictions=args.save_test_predictions,
@@ -2036,3 +2040,15 @@ if __name__ == "__main__":
         leads_source=args.leads_source,
         model_card=args.model_card,
     )
+
+    if args.pos_treino:
+        # Etapas 3 e 4 do treino contínuo. Fail-soft: o treino já terminou e o run existe.
+        try:
+            from src.retreino.pos_treino import executar
+            _rid = (resultado_treino or {}).get('mlflow_run_id')
+            if _rid:
+                executar(_rid)
+            else:
+                logger.warning("  [pos-treino] run_id ausente no resultado; nada julgado")
+        except Exception as _e:
+            logger.warning(f"  [pos-treino] falhou (treino OK): {type(_e).__name__}: {_e}")
