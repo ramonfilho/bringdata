@@ -1,7 +1,8 @@
 # Business case: lead score and cost ceiling (as of 15/09/2026)
 
 The canonical numbers of the system, the ones the README quotes. Source: the two-sheet
-artifact "Lead score e teto de CPL" (15/09/2026,
+artifact "Lead score and CPL ceiling" (15/09/2026,
+https://claude.ai/code/artifact/af1aa0de-eeea-4e52-989d-8bdbac606eb6; Portuguese original at
 https://claude.ai/code/artifact/716d63bc-4eab-49b0-90e2-884ed5a22869), built from the
 tables below. The per-launch panels in this folder's siblings (`lf64_resultado/`,
 `lf65_resultado/`, `lucro_ml_vs_lead/`) are the launch-by-launch view of the same data.

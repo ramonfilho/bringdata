@@ -2,8 +2,6 @@
 
 [![Deploy](https://github.com/ramonfilho/bringdata/actions/workflows/deploy.yml/badge.svg)](https://github.com/ramonfilho/bringdata/actions/workflows/deploy.yml) ![Python 3.10](https://img.shields.io/badge/python-3.10-blue) [![License: source-available](https://img.shields.io/badge/license-source--available-lightgrey)](LICENSE)
 
-[![Deploy](https://github.com/ramonfilho/bringdata/actions/workflows/deploy.yml/badge.svg?branch=main)](https://github.com/ramonfilho/bringdata/actions/workflows/deploy.yml)
-
 Lead scoring in production for a Brazilian online school (DevClub). Each lead that
 signs up for a launch gets a purchase-propensity score and a decile from a Random
 Forest, and the decile drives what happens next: the conversion events sent to
@@ -70,7 +68,7 @@ toward the ads still under their ceiling.
 Sales are matched to leads by email and phone inside each launch window, ad spend
 comes from the ad account per ad and day, and every number below is revenue over
 spend on that matched base. The two sheets with the full method are the canonical
-business case ([Lead score e teto de CPL](V2/docs/relatorios/case_lead_score_teto/RESULTADO.md), 15/09/2026);
+business case ([Lead score and CPL ceiling](https://claude.ai/code/artifact/af1aa0de-eeea-4e52-989d-8bdbac606eb6), 15/09/2026);
 the same numbers, their sources and their caveats are in
 [V2/docs/relatorios/case_lead_score_teto/RESULTADO.md](V2/docs/relatorios/case_lead_score_teto/RESULTADO.md).
 
