@@ -380,7 +380,7 @@ ARQUIVADOS (concluído, referência)
 |---|---|---|
 | `ARQUITETURA_SISTEMA_COMPLETA.md` | Atualizar: rollback edf23e9 em prod, retreinos v4, A/B em standby, canary direto | H1.4 do PLANO_EXECUCAO |
 | `pagina2_codigo_modificado.js` | Mover para `docs/frontend/` ou deletar | Qualquer momento |
-| `monitoring_golden_snapshot.json` | Capturar — pré-requisito do deploy canary (H1.2 do PLANO_EXECUCAO) | 🔴 antes do próximo deploy |
+| `monitoring_golden_snapshot.json` | REMOVIDO em 18/09/2026 (tinha dado pessoal de leads; repositório público). Referência futura fica no bucket, sem PII | removido |
 
 ---
 
