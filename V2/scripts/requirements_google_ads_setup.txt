@@ -4,4 +4,4 @@
 #
 #   pip install -r V2/scripts/requirements_google_ads_setup.txt
 google-ads>=27.0.0
-google-auth-oauthlib>=1.2.0
+google-auth-oauthlib>=1.4.1
