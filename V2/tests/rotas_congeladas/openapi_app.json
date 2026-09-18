@@ -1,0 +1,3248 @@
+{
+ "components": {
+  "schemas": {
+   "BatchPredictionRequest": {
+    "description": "Request para predições em batch",
+    "properties": {
+     "leads": {
+      "items": {
+       "$ref": "#/components/schemas/LeadData"
+      },
+      "maxItems": 600,
+      "minItems": 1,
+      "title": "Leads",
+      "type": "array"
+     },
+     "request_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Request Id"
+     }
+    },
+    "required": [
+     "leads"
+    ],
+    "title": "BatchPredictionRequest",
+    "type": "object"
+   },
+   "BatchPredictionResponse": {
+    "description": "Response para predições em batch",
+    "properties": {
+     "predictions": {
+      "items": {
+       "$ref": "#/components/schemas/PredictionResult"
+      },
+      "title": "Predictions",
+      "type": "array"
+     },
+     "processing_time_seconds": {
+      "title": "Processing Time Seconds",
+      "type": "number"
+     },
+     "request_id": {
+      "title": "Request Id",
+      "type": "string"
+     },
+     "timestamp": {
+      "title": "Timestamp",
+      "type": "string"
+     },
+     "total_leads": {
+      "title": "Total Leads",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "request_id",
+     "total_leads",
+     "predictions",
+     "processing_time_seconds",
+     "timestamp"
+    ],
+    "title": "BatchPredictionResponse",
+    "type": "object"
+   },
+   "Body_predict_batch_csv_predict_csv_post": {
+    "properties": {
+     "file": {
+      "format": "binary",
+      "title": "File",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file"
+    ],
+    "title": "Body_predict_batch_csv_predict_csv_post",
+    "type": "object"
+   },
+   "CapiBatchRequest": {
+    "description": "Request para processamento batch CAPI",
+    "properties": {
+     "dry_run": {
+      "default": false,
+      "description": "Se True: roda routing A/B + cálculo de value sem chamar Meta nem escrever em DB. Usado por Gate C de equivalência de revisões.",
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "leads": {
+      "description": "TODOS os leads do dia anterior (D1-D10)",
+      "items": {
+       "type": "object"
+      },
+      "title": "Leads",
+      "type": "array"
+     }
+    },
+    "required": [
+     "leads"
+    ],
+    "title": "CapiBatchRequest",
+    "type": "object"
+   },
+   "CapiCheckSentRequest": {
+    "description": "Request para verificar quais leads já foram enviados",
+    "properties": {
+     "emails": {
+      "description": "Lista de emails para verificar",
+      "items": {
+       "type": "string"
+      },
+      "title": "Emails",
+      "type": "array"
+     }
+    },
+    "required": [
+     "emails"
+    ],
+    "title": "CapiCheckSentRequest",
+    "type": "object"
+   },
+   "DailyCheckRequest": {
+    "description": "Request para check diário de monitoramento",
+    "properties": {
+     "leads": {
+      "description": "Dados do Sheets das últimas 24h",
+      "items": {
+       "type": "object"
+      },
+      "title": "Leads",
+      "type": "array"
+     }
+    },
+    "required": [
+     "leads"
+    ],
+    "title": "DailyCheckRequest",
+    "type": "object"
+   },
+   "DailyCheckResponse": {
+    "description": "Response do check diário",
+    "properties": {
+     "actionable_alerts": {
+      "default": [],
+      "items": {
+       "type": "object"
+      },
+      "title": "Actionable Alerts",
+      "type": "array"
+     },
+     "alerts": {
+      "items": {
+       "type": "object"
+      },
+      "title": "Alerts",
+      "type": "array"
+     },
+     "alerts_by_category": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "title": "Alerts By Category",
+      "type": "object"
+     },
+     "alerts_by_severity": {
+      "additionalProperties": {
+       "type": "integer"
+      },
+      "title": "Alerts By Severity",
+      "type": "object"
+     },
+     "critical_summary": {
+      "title": "Critical Summary",
+      "type": "string"
+     },
+     "funnel_metrics": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Funnel Metrics"
+     },
+     "hotleads_24h_summary": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Hotleads 24H Summary"
+     },
+     "launch_resolution": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Launch Resolution"
+     },
+     "lead_quality_metrics": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Lead Quality Metrics"
+     },
+     "operational_routines": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Operational Routines"
+     },
+     "pubsub_24h_summary": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pubsub 24H Summary"
+     },
+     "revenue_forecast": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Revenue Forecast"
+     },
+     "survey_funnel_metrics": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Survey Funnel Metrics"
+     },
+     "timestamp": {
+      "title": "Timestamp",
+      "type": "string"
+     },
+     "total_alerts": {
+      "title": "Total Alerts",
+      "type": "integer"
+     },
+     "traffic_metrics": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Traffic Metrics"
+     },
+     "training_drift_24h_summary": {
+      "anyOf": [
+       {
+        "type": "object"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Training Drift 24H Summary"
+     }
+    },
+    "required": [
+     "total_alerts",
+     "alerts_by_severity",
+     "alerts_by_category",
+     "alerts",
+     "critical_summary",
+     "timestamp"
+    ],
+    "title": "DailyCheckResponse",
+    "type": "object"
+   },
+   "DecilCalculationRequest": {
+    "description": "Request para calcular decis de scores existentes",
+    "properties": {
+     "scores": {
+      "items": {
+       "type": "number"
+      },
+      "title": "Scores",
+      "type": "array"
+     }
+    },
+    "required": [
+     "scores"
+    ],
+    "title": "DecilCalculationRequest",
+    "type": "object"
+   },
+   "DecilCalculationResponse": {
+    "description": "Response para cálculo de decis",
+    "properties": {
+     "results": {
+      "items": {
+       "$ref": "#/components/schemas/DecilCalculationResult"
+      },
+      "title": "Results",
+      "type": "array"
+     },
+     "timestamp": {
+      "title": "Timestamp",
+      "type": "string"
+     },
+     "total_scores": {
+      "title": "Total Scores",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "total_scores",
+     "results",
+     "timestamp"
+    ],
+    "title": "DecilCalculationResponse",
+    "type": "object"
+   },
+   "DecilCalculationResult": {
+    "description": "Resultado de um cálculo de decil",
+    "properties": {
+     "decil": {
+      "title": "Decil",
+      "type": "string"
+     },
+     "score": {
+      "title": "Score",
+      "type": "number"
+     }
+    },
+    "required": [
+     "score",
+     "decil"
+    ],
+    "title": "DecilCalculationResult",
+    "type": "object"
+   },
+   "ExplainRequest": {
+    "properties": {
+     "event_id": {
+      "description": "event_id do lead em registros_ml (UUID v7) ou 'legacy-{id}' pra Lead antiga",
+      "title": "Event Id",
+      "type": "string"
+     },
+     "source": {
+      "default": "registros_ml",
+      "description": "Fonte do lead: 'registros_ml' (default) ou 'legacy'",
+      "title": "Source",
+      "type": "string"
+     }
+    },
+    "required": [
+     "event_id"
+    ],
+    "title": "ExplainRequest",
+    "type": "object"
+   },
+   "HTTPValidationError": {
+    "properties": {
+     "detail": {
+      "items": {
+       "$ref": "#/components/schemas/ValidationError"
+      },
+      "title": "Detail",
+      "type": "array"
+     }
+    },
+    "title": "HTTPValidationError",
+    "type": "object"
+   },
+   "LeadCaptureRequest": {
+    "description": "Dados capturados do lead no frontend",
+    "properties": {
+     "cartao_credito": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cartao Credito"
+     },
+     "cidade": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cidade"
+     },
+     "email": {
+      "title": "Email",
+      "type": "string"
+     },
+     "estudou_programacao": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Estudou Programacao"
+     },
+     "event_id": {
+      "title": "Event Id",
+      "type": "string"
+     },
+     "event_source_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Event Source Url"
+     },
+     "faixa_salarial": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Faixa Salarial"
+     },
+     "fbc": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fbc"
+     },
+     "fbp": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fbp"
+     },
+     "first_name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "First Name"
+     },
+     "genero": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Genero"
+     },
+     "idade": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Idade"
+     },
+     "interesse_evento": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Interesse Evento"
+     },
+     "interesse_programacao": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Interesse Programacao"
+     },
+     "investiu_curso_online": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Investiu Curso Online"
+     },
+     "last_name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Last Name"
+     },
+     "name": {
+      "title": "Name",
+      "type": "string"
+     },
+     "ocupacao": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ocupacao"
+     },
+     "phone": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Phone"
+     },
+     "pretende_faculdade": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pretende Faculdade"
+     },
+     "tem_comp": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Tem Comp"
+     },
+     "user_agent": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "User Agent"
+     },
+     "utm_campaign": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Utm Campaign"
+     },
+     "utm_content": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Utm Content"
+     },
+     "utm_medium": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Utm Medium"
+     },
+     "utm_source": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Utm Source"
+     },
+     "utm_term": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Utm Term"
+     }
+    },
+    "required": [
+     "name",
+     "email",
+     "event_id"
+    ],
+    "title": "LeadCaptureRequest",
+    "type": "object"
+   },
+   "LeadData": {
+    "description": "Modelo para um lead individual",
+    "properties": {
+     "data": {
+      "title": "Data",
+      "type": "object"
+     },
+     "email": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Email"
+     },
+     "row_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Row Id"
+     }
+    },
+    "required": [
+     "data"
+    ],
+    "title": "LeadData",
+    "type": "object"
+   },
+   "PredictionResult": {
+    "description": "Resultado de uma predição",
+    "properties": {
+     "decil": {
+      "title": "Decil",
+      "type": "string"
+     },
+     "email": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Email"
+     },
+     "lead_score": {
+      "title": "Lead Score",
+      "type": "number"
+     },
+     "row_id": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Row Id"
+     }
+    },
+    "required": [
+     "lead_score",
+     "decil"
+    ],
+    "title": "PredictionResult",
+    "type": "object"
+   },
+   "PurchaseSaleItem": {
+    "description": "Uma venda confirmada a ser enviada como evento Purchase",
+    "properties": {
+     "email": {
+      "title": "Email",
+      "type": "string"
+     },
+     "nome": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Nome"
+     },
+     "sale_date": {
+      "title": "Sale Date",
+      "type": "string"
+     },
+     "telefone": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Telefone"
+     },
+     "valor_venda": {
+      "title": "Valor Venda",
+      "type": "number"
+     }
+    },
+    "required": [
+     "email",
+     "valor_venda",
+     "sale_date"
+    ],
+    "title": "PurchaseSaleItem",
+    "type": "object"
+   },
+   "SendPurchaseEventsRequest": {
+    "description": "Request para envio de eventos Purchase.\n\nA lista de sales deve ser extraída dos arquivos TMB/Guru via SalesDataLoader\nantes de chamar este endpoint.",
+    "properties": {
+     "dry_run": {
+      "default": false,
+      "title": "Dry Run",
+      "type": "boolean"
+     },
+     "sales": {
+      "items": {
+       "$ref": "#/components/schemas/PurchaseSaleItem"
+      },
+      "title": "Sales",
+      "type": "array"
+     },
+     "test_event_code": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Test Event Code"
+     }
+    },
+    "required": [
+     "sales"
+    ],
+    "title": "SendPurchaseEventsRequest",
+    "type": "object"
+   },
+   "UpdateSurveyRequest": {
+    "description": "Dados da Página 2 - Pesquisa (atualiza lead existente)",
+    "properties": {
+     "cartao_credito": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cartao Credito"
+     },
+     "cidade": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Cidade"
+     },
+     "email": {
+      "title": "Email",
+      "type": "string"
+     },
+     "estudou_programacao": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Estudou Programacao"
+     },
+     "event_id": {
+      "title": "Event Id",
+      "type": "string"
+     },
+     "event_source_url": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Event Source Url"
+     },
+     "faixa_salarial": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Faixa Salarial"
+     },
+     "fbc": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fbc"
+     },
+     "fbp": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Fbp"
+     },
+     "genero": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Genero"
+     },
+     "idade": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Idade"
+     },
+     "interesse_evento": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Interesse Evento"
+     },
+     "interesse_programacao": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Interesse Programacao"
+     },
+     "investiu_curso_online": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Investiu Curso Online"
+     },
+     "name": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Name"
+     },
+     "ocupacao": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Ocupacao"
+     },
+     "phone": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Phone"
+     },
+     "pretende_faculdade": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Pretende Faculdade"
+     },
+     "user_agent": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "User Agent"
+     },
+     "utm_campaign": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Utm Campaign"
+     },
+     "utm_content": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Utm Content"
+     },
+     "utm_medium": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Utm Medium"
+     },
+     "utm_source": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Utm Source"
+     },
+     "utm_term": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "type": "null"
+       }
+      ],
+      "title": "Utm Term"
+     }
+    },
+    "required": [
+     "email",
+     "event_id"
+    ],
+    "title": "UpdateSurveyRequest",
+    "type": "object"
+   },
+   "ValidationError": {
+    "properties": {
+     "loc": {
+      "items": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "integer"
+        }
+       ]
+      },
+      "title": "Location",
+      "type": "array"
+     },
+     "msg": {
+      "title": "Message",
+      "type": "string"
+     },
+     "type": {
+      "title": "Error Type",
+      "type": "string"
+     }
+    },
+    "required": [
+     "loc",
+     "msg",
+     "type"
+    ],
+    "title": "ValidationError",
+    "type": "object"
+   }
+  }
+ },
+ "info": {
+  "description": "API otimizada para predições em batch via Google Sheets",
+  "title": "Bring Data Lead Scoring API V2",
+  "version": "2.0.0"
+ },
+ "openapi": "3.1.0",
+ "paths": {
+  "/": {
+   "get": {
+    "description": "Endpoint raiz",
+    "operationId": "root__get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Root"
+   }
+  },
+  "/admin/cleanup-canary-tags": {
+   "post": {
+    "description": "Remove tags canary-* de revisões sem tráfego (percent==0).\n\nCada tag canary mantém a revisão \"ready to serve\", o que respeita\nmin-instances e gera custo always-on mesmo com 0% de tráfego. O\ndeploy_capi.sh já limpa no início de cada deploy, mas se ficam dias\nsem deploy as tags órfãs sangram ~R$ 4-5/dia cada. Este endpoint é\ndisparado por Cloud Scheduler diário (canary-tag-cleanup-daily) pra\ncobrir esse gap — independente de deploy.\n\nProteções: só remove entry que tem tag começando com 'canary-' E\npercent ausente/0. Nunca toca tag 'prod', tag não-canary, nem\nrevisão com tráfego > 0.\n\nArgs:\n    dry_run: se True, retorna o que removeria sem aplicar.",
+    "operationId": "cleanup_canary_tags_admin_cleanup_canary_tags_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "dry_run",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Dry Run",
+       "type": "boolean"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Cleanup Canary Tags"
+   }
+  },
+  "/admin/cleanup_duplicates": {
+   "post": {
+    "description": "Deleta registros duplicados da página Parabéns\n\nSEGURANÇA:\n- Requer lista explícita de IDs\n- Executa em transação (rollback automático em caso de erro)\n- Retorna estatísticas da deleção",
+    "operationId": "cleanup_duplicates_admin_cleanup_duplicates_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "items": {
+         "type": "integer"
+        },
+        "title": "Ids To Delete",
+        "type": "array"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Cleanup Duplicates"
+   }
+  },
+  "/admin/migrate_capi_sent_at": {
+   "post": {
+    "description": "Endpoint temporário para executar migração da coluna capi_sent_at",
+    "operationId": "migrate_capi_sent_at_admin_migrate_capi_sent_at_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Migrate Capi Sent At"
+   }
+  },
+  "/admin/refresh-cpl": {
+   "post": {
+    "description": "Refresh do lookup de custo por adset (Bloco B/4 do EVENTOS_E_DECIS_PLANO).\n\nPuxa Meta Insights API da janela móvel dos últimos `window_days` dias\n(default 30, excluindo dia corrente) e UPSERTa nas tabelas Railway\n`cpl_adset` e `ad_to_adset_map`. Idempotente — rodar 2× no mesmo dia\nproduz o mesmo estado final.\n\nDisparado por Cloud Scheduler 1×/dia às 04:00 BRT (job\n`cpl-refresh-daily` configurado em GCP). Custo praticamente zero —\nreusa o container já rodando, sem Cloud Run Job dedicado.\n\nArgs:\n    client_id: identificador do cliente. Default 'devclub'.\n    window_days: tamanho da janela móvel (default 30).\n    dry_run: se True, calcula sem escrever no Railway. Útil pra debug.",
+    "operationId": "refresh_cpl_admin_refresh_cpl_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "client_id",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "Client Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "window_days",
+      "required": false,
+      "schema": {
+       "default": 30,
+       "title": "Window Days",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "dry_run",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Dry Run",
+       "type": "boolean"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Refresh Cpl"
+   }
+  },
+  "/calculate_decils": {
+   "post": {
+    "description": "Calcula decis para scores já existentes (útil para backfill).\n\nArgs:\n    request: Lista de lead_scores\n\nReturns:\n    Lista de scores + decis calculados",
+    "operationId": "calculate_decils_calculate_decils_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DecilCalculationRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DecilCalculationResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Calculate Decils"
+   }
+  },
+  "/capi/check_sent": {
+   "post": {
+    "description": "Verifica quais leads da lista já foram enviados para CAPI\n\nArgs:\n    request: Lista de emails para verificar\n\nReturns:\n    {\n        \"total_checked\": int,\n        \"sent_count\": int,\n        \"not_sent_count\": int,\n        \"sent_emails\": List[str]\n    }",
+    "operationId": "check_capi_sent_capi_check_sent_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CapiCheckSentRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Check Capi Sent"
+   }
+  },
+  "/capi/process_daily_batch": {
+   "post": {
+    "description": "Processa batch de CAPI com thresholds fixos\nEnvia 2 eventos para cada lead:\n- LeadQualified (com valor): TODOS os leads (D1-D10)\n- LeadQualifiedHighQuality (sem valor): Apenas D9-D10\n\nChamado pelo Apps Script a cada 3 horas após classificação ML",
+    "operationId": "process_daily_batch_capi_capi_process_daily_batch_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/CapiBatchRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Process Daily Batch Capi"
+   }
+  },
+  "/capi/send_purchase_events": {
+   "post": {
+    "description": "Envia eventos Purchase para a Meta CAPI para compradores confirmados de um lançamento.\n\nFluxo:\n1. Recebe lista de vendas (extraída do TMB/Guru via SalesDataLoader)\n2. Busca FBP/FBC no Railway por email (batch)\n3. Envia evento Purchase com timestamp real da compra e valor real da venda\n4. Retorna resumo: enviados / anomalias (sem FBP/FBC no Railway) / erros\n\nUso: chamado manualmente após fechamento do carrinho + período de devoluções.\nAnomalias = compradores não encontrados no Railway — enviados sem FBP/FBC,\ncom matching menos preciso na Meta. Quantidade registrada para auditoria.",
+    "operationId": "send_purchase_events_capi_send_purchase_events_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/SendPurchaseEventsRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Send Purchase Events"
+   }
+  },
+  "/health": {
+   "get": {
+    "description": "Health check detalhado",
+    "operationId": "health_check_health_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Health Check"
+   }
+  },
+  "/hotleads/submit-batch": {
+   "post": {
+    "description": "Submete leads recentes sem selo ao batch_enrich da Hotmart (sem pixel).\nIdempotente por construção: só pega quem está com `hotleads_status` NULL ou\n'submitted' vencido, então rodar duas vezes seguidas não duplica.",
+    "operationId": "hotleads_submit_batch_hotleads_submit_batch_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "integer"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Limit"
+      }
+     },
+     {
+      "in": "query",
+      "name": "dry_run",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Dry Run",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Hotleads Submit Batch"
+   }
+  },
+  "/hotleads/webhook": {
+   "post": {
+    "description": "Recebe o selo (quente/frio) por lead e dispara o evento dos quentes.\n\nResponde 200 mesmo com falhas parciais: a Hotmart não reentrega, então\ndevolver erro só jogaria fora os selos que deram certo. O que falhou fica\nregistrado em `hotleads_error` no ledger.",
+    "operationId": "hotleads_webhook_hotleads_webhook_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "token",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Token"
+      }
+     },
+     {
+      "in": "query",
+      "name": "dry_run",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Dry Run",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Hotleads Webhook"
+   }
+  },
+  "/model/info": {
+   "get": {
+    "description": "Retorna informações sobre o modelo: metadados, performance e feature importances",
+    "operationId": "get_model_info_model_info_get",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Model Info"
+   }
+  },
+  "/monitoring/audience-drift": {
+   "get": {
+    "description": "Drift de público por característica vs Top 5 ROAS — versão completa.\n\nDevolve TODAS as categorias (sem cut de 2pp, sem dedup binárias). Mesmo\ncômputo do digest do Slack — só sem os filtros aplicados. Pra consumo\nvia dashboard cliente.\n\nArgs:\n    client_id: cliente (default `devclub`).\n    date: opcional, formato `YYYY-MM-DD`. Quando informado, é o \"hoje\" da\n          simulação — `day_*` vira o dia anterior a ele, `prev_day_*` vira\n          D-2, e `launch_*` resolve o LF ativo naquela data. Sem o param,\n          tudo é relativo ao dia atual (comportamento default do digest).\n\nSem auth — mesmo padrão dos demais `/monitoring/*` endpoints. URL é\npública na internet; dado é demográfico agregado (sem PII).",
+    "operationId": "audience_drift_endpoint_monitoring_audience_drift_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "client_id",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "Client Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Date"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Audience Drift Endpoint"
+   }
+  },
+  "/monitoring/audience-quality": {
+   "get": {
+    "description": "Qualidade de público num só lugar, pro dashboard do cliente - SÓ LEITURA.\n\nJunta, sem vazar receita/tráfego, as duas dimensões que importam:\n\n  • `audience`  → CARACTERÍSTICAS do público vs Top ROAS (perfil do comprador):\n      - `general`    : todas as categorias, todas as fontes (ontem / D-2 / lançamento)\n      - `by_source`  : Meta vs Google, por categoria (ontem + lançamento)\n      - `by_variant` : Lead/Champion/Challenger (A/B), por categoria (ontem + lançamento)\n  • `model_score` → NOTA do modelo (decis na régua ÚNICA do Challenger abr_28):\n      - `previous_day` / `current_launch`, cada um com `distribution` (Total) +\n        `by_source` (Meta/Google) + `by_optgoal` (Lead/Champion/Challenger) +\n        `baseline_challenger` (ref Top ROAS) + `score_geral` no lançamento.\n\nReusa EXATAMENTE os mesmos cálculos do relatório das 06:00 (métodos do\n`DataQualityMonitor` + módulo `decis_by_channel`), então os números batem com\no Slack por construção. Sem auth (padrão `/monitoring/*`), sem PII - dado\ndemográfico agregado. Leitura do ledger pela fonte de `LEDGER_READ_SOURCE`.\nLatência ~10-20s (várias queries); cachear no front.\n\nArgs:\n    client_id: cliente (default `devclub`).\n    date: opcional `YYYY-MM-DD` - \"hoje\" simulado (ontem/D-2/LF ficam relativos).",
+    "operationId": "audience_quality_endpoint_monitoring_audience_quality_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "client_id",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "Client Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Date"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Audience Quality Endpoint"
+   }
+  },
+  "/monitoring/cost-alert": {
+   "get": {
+    "description": "Alerta de custo de infraestrutura - manda DM se o gasto de um dia estourar o teto.\n\nÉ o ponto único de composição do alerta: aqui se decide o dia, o teto e o\ndestino; a leitura do faturamento e a regra ficam em\n`src/monitoring/gcp_cost.py` e `src/monitoring/cost_alert.py`.\n\nChamado 1x/dia pelo Cloud Scheduler de manhã, logo depois do relatório\ndiário. Só produz mensagem quando há o que avisar:\n  - uso do dia acima do teto → DM com o ranking de quem gastou\n  - faturamento sem nenhuma linha do dia → DM de \"não consegui medir\"\n    (export quebrado devolveria zero, e zero passaria por dia calmo)\n  - dentro do teto → responde 200 sem postar nada\n\nParâmetros:\n  - `limite`: teto do dia em reais. Sem ele, vale o valor da variável de\n    ambiente `CLOUD_RUN_COST_ALERT_BRL` (hoje R$ 10) - mudar o teto não\n    exige deploy.\n  - `servico`: nome do serviço no faturamento do Google ('Cloud Run',\n    'Cloud SQL', 'BigQuery'…). Default 'Cloud Run'.\n  - `date`: dia YYYY-MM-DD no calendário de Brasília, ou os tokens\n    `ontem`/`hoje`. Sem ele, ontem - o último dia completo.\n  - `force=1`: posta mesmo estando dentro do teto, pra validar a formatação\n    da mensagem sem esperar um estouro real.\n\nO destino é SEMPRE o DM do operador (`SLACK_USER_DM`), nunca canal de\ncliente: é informação de infraestrutura nossa.",
+    "operationId": "cost_alert_monitoring_cost_alert_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "limite",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Limite"
+      }
+     },
+     {
+      "in": "query",
+      "name": "servico",
+      "required": false,
+      "schema": {
+       "default": "Cloud Run",
+       "title": "Servico",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Date"
+      }
+     },
+     {
+      "in": "query",
+      "name": "force",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Force",
+       "type": "boolean"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Cost Alert"
+   }
+  },
+  "/monitoring/daily-check": {
+   "get": {
+    "description": "Executa check diário de monitoramento com dados do Railway PostgreSQL.\n\nDelega para /monitoring/daily-check/railway, que é a fonte primária de dados.\nRailway cobre 99.9% dos leads (verificado em 23/02/2026).\n\nArgs:\n    hours: Número de horas para buscar (padrão: 24). Ignorado se start_date/end_date forem passados.\n    start_date: Data de início no formato YYYY-MM-DD (BRT). Ex: 2026-02-01\n    end_date: Data de fim no formato YYYY-MM-DD (BRT). Ex: 2026-02-20\n\nReturns:\n    Alertas consolidados por severidade e categoria",
+    "operationId": "daily_monitoring_check_auto_monitoring_daily_check_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "hours",
+      "required": false,
+      "schema": {
+       "default": 24,
+       "title": "Hours",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "start_date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Start Date"
+      }
+     },
+     {
+      "in": "query",
+      "name": "end_date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "End Date"
+      }
+     },
+     {
+      "in": "query",
+      "name": "include_today_partial",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Include Today Partial",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DailyCheckResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Daily Monitoring Check Auto"
+   },
+   "post": {
+    "description": "Executa check diário de monitoramento consolidado.\n\nVerifica:\n- Data Quality: category drift, distribution drift, missing rate, score distribution\n- Operational: 6h sem leads, 6h sem CAPI\n- CAPI Quality: missing rate fbp/fbc\n\nArgs:\n    request: Dados do Sheets (últimas 24h)\n    db: Sessão PostgreSQL (injetada automaticamente)\n\nReturns:\n    Alertas consolidados por severidade e categoria",
+    "operationId": "daily_monitoring_check_monitoring_daily_check_post",
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/DailyCheckRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DailyCheckResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Daily Monitoring Check"
+   }
+  },
+  "/monitoring/daily-check/railway": {
+   "get": {
+    "description": "Executa check diário de monitoramento 100% com dados do Railway PostgreSQL.\n\nFluxo:\n1. Busca leads scored das últimas N horas (para alertas/drift ML)\n2. Busca stats agregados da janela (total, CAPI, qualidade de dados)\n3. Busca todos os leads scored (para métricas de qualidade por período)\n4. Constrói funnel_metrics e lead_quality_metrics do Railway — sem Sheets/Cloud SQL\n5. Executa orchestrator.run_daily_check() para gerar alertas de drift/qualidade\n6. Substitui funnel_metrics e lead_quality_metrics pelo resultado Railway\n\nArgs:\n    hours: Número de horas para buscar (padrão: 24). Ignorado se start_date/end_date forem passados.\n    start_date: Data de início no formato YYYY-MM-DD (BRT). Ex: 2026-02-01\n    end_date: Data de fim no formato YYYY-MM-DD (BRT). Ex: 2026-02-20\n    db: Sessão PostgreSQL Cloud SQL (mantida para assinatura, não usada nas métricas)",
+    "operationId": "daily_monitoring_check_railway_monitoring_daily_check_railway_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "hours",
+      "required": false,
+      "schema": {
+       "default": 24,
+       "title": "Hours",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "start_date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Start Date"
+      }
+     },
+     {
+      "in": "query",
+      "name": "end_date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "End Date"
+      }
+     },
+     {
+      "in": "query",
+      "name": "include_today_partial",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Include Today Partial",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "query",
+      "name": "anchor_date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Anchor Date"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/DailyCheckResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Daily Monitoring Check Railway"
+   }
+  },
+  "/monitoring/feature-report": {
+   "get": {
+    "description": "[T1-11 Peça B] Agrega os logs do feature_validator das últimas N horas\ne retorna relatório consolidado do monitoramento pré-encoding.\n\nConsome os logs estruturados [FV_JSON] emitidos por\n`src/core/feature_validator.py` em produção (um log por batch scoreado).\n\nArgs:\n    hours:    janela em horas a consultar (default: 24)\n    revision: se informado, filtra só essa revisão Cloud Run\n\nReturns:\n    {\n      'window': {'hours': N, 'since': iso_ts},\n      'total_batches': int,\n      'batches_by_severity': {'OK': N, 'INFO': N, 'WARNING': N, 'ERROR': N},\n      'issues_by_feature': {feature_name: {'count': N, 'problems': {problem_type: N}, 'latest_details': {...}}},\n      'overall_status': 'OK' | 'INFO' | 'WARNING' | 'ERROR',\n      'recommended_action': str,\n      'sample_error_log': {... snippet do log mais recente com severity=ERROR ...}  # se houver\n    }\n\nFiltros Cloud Logging:\n  resource.type=cloud_run_revision AND\n  resource.labels.service_name=smart-ads-api AND\n  textPayload:\"[FV_JSON]\"",
+    "operationId": "feature_report_monitoring_feature_report_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "hours",
+      "required": false,
+      "schema": {
+       "default": 24,
+       "title": "Hours",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "revision",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Revision"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Feature Report"
+   }
+  },
+  "/monitoring/painel-vigia": {
+   "get": {
+    "description": "Vigia do painel da agência - DM se o painel travar, esvaziar ou ficar cego.\n\nPonto único de composição: aqui se escolhem as DUAS conexões (o banco da\nagência onde o painel mora, e o analytics onde vive a janela do\ngerenciador) e o destino do aviso. A regra inteira fica em\n`src/monitoring/painel_vigia.py`.\n\nChamado de hora em hora pelo Cloud Scheduler, depois da rodada do robô de\npublicação (cron :22). Só produz mensagem quando há o que avisar:\n  - painel sem escrita há mais de `horas` (default 2 = duas rodadas\n    perdidas) → 🔴 travado, com onde olhar\n  - painel sem nenhuma linha → 🔴 vazio\n  - conjuntos de anúncios homônimos na mesma campanha (janela de 3 dias)\n    → ⚠️ split por público cego; pedir nome distinto ao tráfego\n  - tudo em dia → responde 200 sem postar nada (`force=1` posta o 🟢)\n\nNasceu do incidente de 18/08/2026: o robô morreu na estreia do LF65 e o\npainel exibiu o \"hoje\" de ontem por 11 horas - quem percebeu foi o gestor.",
+    "operationId": "painel_vigia_monitoring_painel_vigia_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "horas",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Horas"
+      }
+     },
+     {
+      "in": "query",
+      "name": "force",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Force",
+       "type": "boolean"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Painel Vigia"
+   }
+  },
+  "/monitoring/slack-digest": {
+   "get": {
+    "description": "Renderiza o daily-check em 2 views distintas e posta em canais separados.\n\n- `channel_client`: view enxuta pro cliente — A/B test + 2 tabelas de drift\n  por variante (ontem + lançamento atual) com ✅ por linha + drift geral\n  com 🟢🟡🔴 + 2 distribuições de decis.\n- `channel_full`: view completa pro privado — severity, alertas, funil,\n  lead quality detalhado, survey funnel, revenue forecast, tráfego Meta.\n- `channel` (legacy): se passado sozinho, usa view full no canal indicado\n  (backward compat com o uso antigo).\n\nReusa o handler /monitoring/daily-check/railway in-process e aplica os\nrenderers do `src/monitoring/digest`. Token vem do env `SLACK_BOT_TOKEN`\n(Secret Manager).\n\nTrava de tráfego (`src/monitoring/traffic_gate`): sem gasto nem lead pago na\njanela, o daily-check roda mas NÃO posta — devolve 200 com `skipped`. Entre\nlançamentos a captação fica pausada e o relatório seria só tabela de zeros.\n`force=1` posta de qualquer jeito (validação de formatação no DM), e a env\n`REPORTS_REQUIRE_TRAFFIC=0` desliga a trava sem deploy.",
+    "operationId": "post_slack_digest_monitoring_slack_digest_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "channel",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Channel"
+      }
+     },
+     {
+      "in": "query",
+      "name": "channel_client",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Channel Client"
+      }
+     },
+     {
+      "in": "query",
+      "name": "channel_full",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Channel Full"
+      }
+     },
+     {
+      "in": "query",
+      "name": "hours",
+      "required": false,
+      "schema": {
+       "default": 24,
+       "title": "Hours",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "include_today_partial",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Include Today Partial",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "query",
+      "name": "date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Date"
+      }
+     },
+     {
+      "in": "query",
+      "name": "force",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Force",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Post Slack Digest"
+   }
+  },
+  "/monitoring/utm-quality": {
+   "get": {
+    "description": "Qualidade de Content (criativo) por modelo — SÓ LEITURA, dia(s) fixo(s).\n\nRanqueia criativos (`utm_content`) por decil médio dos leads scoreados numa\njanela de dia(s)-calendário BRT `[start 00:00, end 23:59]` (até 90 dias).\n`start_date` e `end_date` são obrigatórios — `start==end` = um dia. A coluna\nLF é contexto/tendência point-in-time (não afeta o ranking). Os decis já estão\npré-computados no ledger; o endpoint só lê e agrega (nenhum scoring).\n\nDevolve JSON. **Não posta no Slack** — o relatório diário pro grupo de tráfego\né o endpoint dedicado `/monitoring/utm-quality/daily-trafego` (canal fixo no\nservidor). Atribuição por modelo reusa `ABTestConfig.match_variant`.\n\nArgs:\n    start_date/end_date: YYYY-MM-DD BRT, obrigatórios. start==end = 1 dia. ≤90d.\n    min_volume: N mínimo de leads pra um criativo entrar no ranking (default 20).\n    top_n: tamanho do Top piores e Top melhores (default 5).\n    client_id: cliente (carrega `configs/active_models/{id}.yaml`).",
+    "operationId": "utm_quality_endpoint_monitoring_utm_quality_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "start_date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Start Date"
+      }
+     },
+     {
+      "in": "query",
+      "name": "end_date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "End Date"
+      }
+     },
+     {
+      "in": "query",
+      "name": "min_volume",
+      "required": false,
+      "schema": {
+       "default": 20,
+       "title": "Min Volume",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "top_n",
+      "required": false,
+      "schema": {
+       "default": 5,
+       "title": "Top N",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "client_id",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "Client Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Utm Quality Endpoint"
+   }
+  },
+  "/monitoring/utm-quality/daily-trafego": {
+   "get": {
+    "description": "Relatório diário de criativo, postado no Slack. Default: dia ANTERIOR (BRT) →\ngrupo de tráfego (cliente), chamado pelo Cloud Scheduler às 06:00.\n\nDestino parametrizado via `_resolve_report_channel` (ponto único):\n  - dest='trafego' (default): canal do cliente. É o que o cron usa.\n  - dest='dm' (ou 'validacao'): DM do operador — pra VALIDAR formatação antes\n    de liberar pro cliente (política: validação→DM, OK explícito→trafego).\n\nJanela (BRT), em ordem de precedência:\n  - `start_date`+`end_date`: intervalo FUNDIDO (ex.: ontem+hoje num só\n    relatório). ≤90d, valida em `_utm_quality_day_range_brt`.\n  - `date`: um dia específico.\n  - nada: dia ANTERIOR (comportamento do cron da manhã 06:40).\nAceitam YYYY-MM-DD OU os tokens relativos `hoje`/`ontem` (resolvidos no\nrequest). É assim que o cron da TARDE (14h) manda ontem+hoje sem a URL saber a\ndata: `?start_date=ontem&end_date=hoje`. A linha \"Lançamento\" é sempre o\nacumulado; só a janela muda.\n\nSubstitui o antigo hack de subir canary com env de canal redirecionado pra\npostar no DM: agora é `?dest=dm[&date=…]` ou `?dest=dm&start_date=…&end_date=…`.\n\nTrava de tráfego (`src/monitoring/traffic_gate`): sem lead de origem PAGA na\njanela não há criativo pra ranquear, então não posta — devolve 200 com\n`skipped`. `force=1` posta de qualquer jeito; `REPORTS_REQUIRE_TRAFFIC=0`\ndesliga a trava sem deploy.",
+    "operationId": "utm_quality_daily_trafego_monitoring_utm_quality_daily_trafego_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "min_volume",
+      "required": false,
+      "schema": {
+       "default": 20,
+       "title": "Min Volume",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "top_n",
+      "required": false,
+      "schema": {
+       "default": 5,
+       "title": "Top N",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "client_id",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "Client Id",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "dest",
+      "required": false,
+      "schema": {
+       "default": "trafego",
+       "title": "Dest",
+       "type": "string"
+      }
+     },
+     {
+      "in": "query",
+      "name": "date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Date"
+      }
+     },
+     {
+      "in": "query",
+      "name": "start_date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Start Date"
+      }
+     },
+     {
+      "in": "query",
+      "name": "end_date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "End Date"
+      }
+     },
+     {
+      "in": "query",
+      "name": "force",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Force",
+       "type": "boolean"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Utm Quality Daily Trafego"
+   }
+  },
+  "/predict/batch": {
+   "post": {
+    "description": "Predição em batch via JSON\nOtimizado para Google Apps Script",
+    "operationId": "predict_batch_json_predict_batch_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/BatchPredictionRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/BatchPredictionResponse"
+        }
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Predict Batch Json"
+   }
+  },
+  "/predict/csv": {
+   "post": {
+    "description": "Predição em batch via upload CSV\nPara testes ou uploads manuais",
+    "operationId": "predict_batch_csv_predict_csv_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "multipart/form-data": {
+       "schema": {
+        "$ref": "#/components/schemas/Body_predict_batch_csv_predict_csv_post"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Predict Batch Csv"
+   }
+  },
+  "/predict/explain": {
+   "post": {
+    "description": "Re-scoreia 1 lead já persistido e devolve todo o caminho de scoring.\n\nÚtil pra auditoria de integridade do pipeline lead→score:\n  - paridade: o `lead_score` recalculado deve bater com o `lead_score`\n    persistido (mesma versão de código + mesmo payload → mesmo resultado).\n  - inspeção: o vetor encodado (52 colunas) revela features canônicas\n    zeradas quando o payload tinha o dado correspondente (cenário\n    clássico de divergência de nomenclatura).\n\nNão envia CAPI, não persiste nada, não muta estado.",
+    "operationId": "predict_explain_predict_explain_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/ExplainRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Predict Explain"
+   }
+  },
+  "/pubsub/process-pending": {
+   "post": {
+    "description": "Consumer Pub/Sub do sistema novo (lead-capture-ingest-sub) → CAPI scoreado.\n\nChamado pelo Cloud Scheduler em cadência fixa.\n\nFluxo (delega tudo a api.pubsub_branch.drain_pending_pubsub):\n  0. Repete os passos abaixo até a fila esvaziar (tetos de tempo e de rodadas\n     no pubsub_branch). Antes era UM pull por invocação e o resto esperava o\n     tick seguinte de 5 min, o que fazia mensagem envelhecer em degrau e\n     disparar o alerta de backlog com a fila drenando normalmente.\n  1. Pull batch da sub Pub/Sub.\n  2. Por mensagem: parse → traduz slugs → classifica → scoreia (pipeline.run)\n                   → CAPI (send_batch_events) → ledger registros_ml → ack.\n\nOff por padrão via env `PUBSUB_CAPI_ENABLED`. Deploy ≠ ligar: enquanto o\nenv não estiver `true`, o endpoint volta no-op (sem pull, sem ack).\nArquitetura nova — substitui o ramo I3/I4 (api/survey_branch.py e\napi/survey_enrichment.py, marcados DEPRECATED 2026-05-23).\n\nArgs:\n    dry_run: Se True, processa e loga (pull → score → monta CAPI) mas NÃO\n             envia Meta, NÃO grava ledger e NÃO acka mensagens. Permite\n             smoke contra o backlog real do canary sem efeito colateral.",
+    "operationId": "pubsub_process_pending_pubsub_process_pending_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "dry_run",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Dry Run",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Pubsub Process Pending"
+   }
+  },
+  "/railway/process-pending": {
+   "post": {
+    "description": "Processa leads pendentes do Railway PostgreSQL (leadScore IS NULL).\n\nChamado pelo Cloud Scheduler a cada 5 minutos.\n\nFluxo:\n1. Conecta ao Railway PostgreSQL via pg8000\n2. Busca até 50 leads sem score (ORDER BY createdAt ASC)\n3. Converte pesquisa JSONB → formato Google Sheets via railway_mapping\n4. Roda pipeline ML em batch → lead_score + decil\n5. Atualiza Railway: leadScore, decil, updatedAt\n6. Envia eventos CAPI para Meta\n\nArgs:\n    dry_run: Quando True, executa passos 1-4 (leitura + scoring) mas PULA\n             passos 5-6 (escrita no banco + envio CAPI). Usado pelo smoke\n             test pós-canary pra exercitar o caminho de polling sem efeito\n             colateral em produção. Resposta inclui `dry_run: true`.",
+    "operationId": "railway_process_pending_railway_process_pending_post",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "dry_run",
+      "required": false,
+      "schema": {
+       "default": false,
+       "title": "Dry Run",
+       "type": "boolean"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Railway Process Pending"
+   }
+  },
+  "/smoke/run-variants": {
+   "get": {
+    "description": "[T1-14] Roda o pipeline para cada variante A/B explicitamente.\n\nPega N leads recentes do Railway e força cada variante (incluindo o\nChampion default) a scorear com seu predictor + encoding_overrides\ncorrespondente. Retorna pass/fail por variante.\n\nCobre o gap descoberto via investigação V.1 (registro_erros_ml.md):\no smoke test antigo chamava `/monitoring/daily-check/railway` sem\ncontexto A/B e nunca exercitava Champion com encoding_overrides\nnem variantes shim — bug do Cluster 5 (29/abr–05/mai/2026) passou\npor isso.\n\nArgs:\n    limit: Quantos leads usar para o teste (default 5).\n    hours: Janela de leads recentes do Railway (default 24h).",
+    "operationId": "smoke_run_variants_smoke_run_variants_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 5,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "hours",
+      "required": false,
+      "schema": {
+       "default": 24,
+       "title": "Hours",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Smoke Run Variants"
+   }
+  },
+  "/validation/test": {
+   "get": {
+    "description": "Testa rapidamente se todas as dependências para validação estão OK.\nRetorna em segundos, não minutos.",
+    "operationId": "test_validation_dependencies_validation_test_get",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Test Validation Dependencies"
+   }
+  },
+  "/validation/weekly": {
+   "post": {
+    "description": "Executa validação semanal do modelo ML.\n\n- Calcula período automaticamente (semana anterior)\n- Executa validate_ml_performance.py com flags apropriadas\n- Faz upload do Excel para Cloud Storage\n- Envia sumário para Slack\n\nChamado automaticamente por Cloud Scheduler toda segunda-feira às 10h.",
+    "operationId": "execute_weekly_validation_validation_weekly_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Execute Weekly Validation"
+   }
+  },
+  "/webhook/lead_capture": {
+   "post": {
+    "description": "Webhook para capturar dados de leads com FBP/FBC\nChamado pelo formulário frontend após envio do lead",
+    "operationId": "webhook_lead_capture_webhook_lead_capture_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/LeadCaptureRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Webhook Lead Capture"
+   }
+  },
+  "/webhook/lead_capture/by_emails": {
+   "post": {
+    "description": "Busca leads por lista de emails com filtro de data opcional\n\nBody:\n    {\n        \"emails\": [\"email1@example.com\", \"email2@example.com\"],\n        \"start_date\": \"2025-11-18\",  // opcional\n        \"end_date\": \"2025-11-24\"     // opcional\n    }",
+    "operationId": "get_leads_by_emails_endpoint_webhook_lead_capture_by_emails_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "title": "Request",
+        "type": "object"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Leads By Emails Endpoint"
+   }
+  },
+  "/webhook/lead_capture/recent": {
+   "get": {
+    "description": "Retorna leads recentes com filtros opcionais de data\n\nArgs:\n    limit: Número máximo de leads (padrão: 10, máx: 10000)\n    start_date: Data início (YYYY-MM-DD) - opcional\n    end_date: Data fim (YYYY-MM-DD) - opcional",
+    "operationId": "get_recent_leads_endpoint_webhook_lead_capture_recent_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "limit",
+      "required": false,
+      "schema": {
+       "default": 10,
+       "title": "Limit",
+       "type": "integer"
+      }
+     },
+     {
+      "in": "query",
+      "name": "start_date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Start Date"
+      }
+     },
+     {
+      "in": "query",
+      "name": "end_date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "End Date"
+      }
+     },
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Get Recent Leads Endpoint"
+   }
+  },
+  "/webhook/lead_capture/stats": {
+   "get": {
+    "description": "Estatísticas de captura de leads CAPI\nÚtil para monitoramento e debug\n\nArgs:\n    start_date: Data início (YYYY-MM-DD) - opcional\n    end_date: Data fim (YYYY-MM-DD) - opcional",
+    "operationId": "lead_capture_stats_webhook_lead_capture_stats_get",
+    "parameters": [
+     {
+      "in": "query",
+      "name": "start_date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "Start Date"
+      }
+     },
+     {
+      "in": "query",
+      "name": "end_date",
+      "required": false,
+      "schema": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ],
+       "title": "End Date"
+      }
+     }
+    ],
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Lead Capture Stats"
+   }
+  },
+  "/webhook/sendflow_group_join": {
+   "post": {
+    "description": "Recebe o Sendhook do SendFlow (membro adicionado ao grupo de WhatsApp) e grava a\nentrada em whatsapp_group_joins (feature \"entrou no grupo\"). Valida o header `sendtok`.\nLógica de tradução/persistência em api/sendflow_receiver (anti-corrupção + idempotente).",
+    "operationId": "webhook_sendflow_group_join_webhook_sendflow_group_join_post",
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     }
+    },
+    "summary": "Webhook Sendflow Group Join"
+   }
+  },
+  "/webhook/update_survey": {
+   "post": {
+    "description": "Webhook para atualizar lead com dados da Página 2 - Pesquisa\n\nFluxo:\n1. Busca lead existente por email (criado na Página 1)\n2. Atualiza com dados da pesquisa\n3. Gera score ML + decil\n4. Envia para CAPI\n\nChamado pelo formulário da Página 2 após preenchimento da pesquisa",
+    "operationId": "webhook_update_survey_webhook_update_survey_post",
+    "parameters": [
+     {
+      "in": "header",
+      "name": "X-Client-ID",
+      "required": false,
+      "schema": {
+       "default": "devclub",
+       "title": "X-Client-Id",
+       "type": "string"
+      }
+     }
+    ],
+    "requestBody": {
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/UpdateSurveyRequest"
+       }
+      }
+     },
+     "required": true
+    },
+    "responses": {
+     "200": {
+      "content": {
+       "application/json": {
+        "schema": {}
+       }
+      },
+      "description": "Successful Response"
+     },
+     "422": {
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/HTTPValidationError"
+        }
+       }
+      },
+      "description": "Validation Error"
+     }
+    },
+    "summary": "Webhook Update Survey"
+   }
+  }
+ }
+}

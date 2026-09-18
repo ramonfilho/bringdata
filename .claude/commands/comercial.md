@@ -8,7 +8,7 @@ Use esta skill como ponto de partida para qualquer trabalho relacionado ao **fun
 
 ## MATERIAL ATIVO (abril/2026)
 
-Pasta: `V2/propostas_e_apresentacoes/`
+Pasta: `V2/propostas_e_apresentacoes/` (LOCAL, ignorada pelo git desde 18/09/2026; o repo é público. Se a pasta não existir neste Mac, copie de `~/Desktop/bring_data_fora_do_repo/V2/`)
 
 | Arquivo | Público-alvo | Diferenciador |
 |---|---|---|

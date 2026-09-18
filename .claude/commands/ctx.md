@@ -102,7 +102,7 @@ cloud-sql-proxy smart-ads-451319:us-central1:bring-data-db --port=5432 &
 ### MLflow
 ```bash
 # Remoto (canônico — tracking prod, backend Cloud SQL Postgres)
-export MLFLOW_TRACKING_URI="postgresql+psycopg2://postgres:<senha: gcloud secrets versions access latest --secret=mlflow-db-password>@104.197.138.129:5432/mlflow"
+export MLFLOW_TRACKING_URI="postgresql+psycopg2://postgres:<senha: gcloud secrets versions access latest --secret=mlflow-db-password>@<IP da instância smart-ads-db>:5432/mlflow"
 # Artifacts: gs://smart-ads-mlflow/artifacts/
 # Não há UI web ativa — use SDK Python (mlflow.tracking.MlflowClient) ou CLI.
 # Detalhes em docs/MLFLOW.md.

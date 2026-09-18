@@ -23,7 +23,7 @@ Landing page → formulário → API FastAPI (Cloud Run)
 
 **Stack:**
 - Cloud Run: `smart-ads-api` (região `us-central1`, projeto `smart-ads-451319`)
-- MLflow tracking: PostgreSQL `104.197.138.129:5432/mlflow` + artifacts `gs://smart-ads-mlflow/artifacts/`
+- MLflow tracking: PostgreSQL `<IP da instância smart-ads-db>:5432/mlflow` + artifacts `gs://smart-ads-mlflow/artifacts/`
 - Banco de dados produção: Railway PostgreSQL (tabela `Lead` com colunas camelCase)
 - Deploy: `V2/api/deploy_capi.sh` com flag `--no-traffic` para canary
 

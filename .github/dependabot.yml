@@ -136,3 +136,16 @@ updates:
     labels: ["dependencias"]
     commit-message:
       prefix: "deps(actions)"
+
+  # Imagem base do Dockerfile (V2/api): o FROM leva tag + digest; o digest só sobe por PR.
+  - package-ecosystem: docker
+    directory: /V2/api
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 1
+    labels: ["dependencias"]
+    commit-message:
+      prefix: "deps(docker)"

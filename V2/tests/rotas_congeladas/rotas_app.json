@@ -1,0 +1,306 @@
+[
+ {
+  "path": "/",
+  "methods": [
+   "GET"
+  ],
+  "name": "root",
+  "endpoint": "root"
+ },
+ {
+  "path": "/admin/cleanup-canary-tags",
+  "methods": [
+   "POST"
+  ],
+  "name": "cleanup_canary_tags",
+  "endpoint": "cleanup_canary_tags"
+ },
+ {
+  "path": "/admin/cleanup_duplicates",
+  "methods": [
+   "POST"
+  ],
+  "name": "cleanup_duplicates",
+  "endpoint": "cleanup_duplicates"
+ },
+ {
+  "path": "/admin/migrate_capi_sent_at",
+  "methods": [
+   "POST"
+  ],
+  "name": "migrate_capi_sent_at",
+  "endpoint": "migrate_capi_sent_at"
+ },
+ {
+  "path": "/admin/refresh-cpl",
+  "methods": [
+   "POST"
+  ],
+  "name": "refresh_cpl",
+  "endpoint": "refresh_cpl"
+ },
+ {
+  "path": "/calculate_decils",
+  "methods": [
+   "POST"
+  ],
+  "name": "calculate_decils",
+  "endpoint": "calculate_decils"
+ },
+ {
+  "path": "/capi/check_sent",
+  "methods": [
+   "POST"
+  ],
+  "name": "check_capi_sent",
+  "endpoint": "check_capi_sent"
+ },
+ {
+  "path": "/capi/process_daily_batch",
+  "methods": [
+   "POST"
+  ],
+  "name": "process_daily_batch_capi",
+  "endpoint": "process_daily_batch_capi"
+ },
+ {
+  "path": "/capi/send_purchase_events",
+  "methods": [
+   "POST"
+  ],
+  "name": "send_purchase_events",
+  "endpoint": "send_purchase_events"
+ },
+ {
+  "path": "/health",
+  "methods": [
+   "GET"
+  ],
+  "name": "health_check",
+  "endpoint": "health_check"
+ },
+ {
+  "path": "/hotleads/submit-batch",
+  "methods": [
+   "POST"
+  ],
+  "name": "hotleads_submit_batch",
+  "endpoint": "hotleads_submit_batch"
+ },
+ {
+  "path": "/hotleads/webhook",
+  "methods": [
+   "POST"
+  ],
+  "name": "hotleads_webhook",
+  "endpoint": "hotleads_webhook"
+ },
+ {
+  "path": "/model/info",
+  "methods": [
+   "GET"
+  ],
+  "name": "get_model_info",
+  "endpoint": "get_model_info"
+ },
+ {
+  "path": "/monitoring/audience-drift",
+  "methods": [
+   "GET"
+  ],
+  "name": "audience_drift_endpoint",
+  "endpoint": "audience_drift_endpoint"
+ },
+ {
+  "path": "/monitoring/audience-quality",
+  "methods": [
+   "GET"
+  ],
+  "name": "audience_quality_endpoint",
+  "endpoint": "audience_quality_endpoint"
+ },
+ {
+  "path": "/monitoring/cost-alert",
+  "methods": [
+   "GET"
+  ],
+  "name": "cost_alert",
+  "endpoint": "cost_alert"
+ },
+ {
+  "path": "/monitoring/daily-check",
+  "methods": [
+   "GET"
+  ],
+  "name": "daily_monitoring_check_auto",
+  "endpoint": "daily_monitoring_check_auto"
+ },
+ {
+  "path": "/monitoring/daily-check",
+  "methods": [
+   "POST"
+  ],
+  "name": "daily_monitoring_check",
+  "endpoint": "daily_monitoring_check"
+ },
+ {
+  "path": "/monitoring/daily-check/railway",
+  "methods": [
+   "GET"
+  ],
+  "name": "daily_monitoring_check_railway",
+  "endpoint": "daily_monitoring_check_railway"
+ },
+ {
+  "path": "/monitoring/feature-report",
+  "methods": [
+   "GET"
+  ],
+  "name": "feature_report",
+  "endpoint": "feature_report"
+ },
+ {
+  "path": "/monitoring/painel-vigia",
+  "methods": [
+   "GET"
+  ],
+  "name": "painel_vigia",
+  "endpoint": "painel_vigia"
+ },
+ {
+  "path": "/monitoring/slack-digest",
+  "methods": [
+   "GET"
+  ],
+  "name": "post_slack_digest",
+  "endpoint": "post_slack_digest"
+ },
+ {
+  "path": "/monitoring/utm-quality",
+  "methods": [
+   "GET"
+  ],
+  "name": "utm_quality_endpoint",
+  "endpoint": "utm_quality_endpoint"
+ },
+ {
+  "path": "/monitoring/utm-quality/daily-trafego",
+  "methods": [
+   "GET"
+  ],
+  "name": "utm_quality_daily_trafego",
+  "endpoint": "utm_quality_daily_trafego"
+ },
+ {
+  "path": "/predict/batch",
+  "methods": [
+   "POST"
+  ],
+  "name": "predict_batch_json",
+  "endpoint": "predict_batch_json"
+ },
+ {
+  "path": "/predict/csv",
+  "methods": [
+   "POST"
+  ],
+  "name": "predict_batch_csv",
+  "endpoint": "predict_batch_csv"
+ },
+ {
+  "path": "/predict/explain",
+  "methods": [
+   "POST"
+  ],
+  "name": "predict_explain",
+  "endpoint": "predict_explain"
+ },
+ {
+  "path": "/pubsub/process-pending",
+  "methods": [
+   "POST"
+  ],
+  "name": "pubsub_process_pending",
+  "endpoint": "pubsub_process_pending"
+ },
+ {
+  "path": "/railway/process-pending",
+  "methods": [
+   "POST"
+  ],
+  "name": "railway_process_pending",
+  "endpoint": "railway_process_pending"
+ },
+ {
+  "path": "/smoke/run-variants",
+  "methods": [
+   "GET"
+  ],
+  "name": "smoke_run_variants",
+  "endpoint": "smoke_run_variants"
+ },
+ {
+  "path": "/validation/test",
+  "methods": [
+   "GET"
+  ],
+  "name": "test_validation_dependencies",
+  "endpoint": "test_validation_dependencies"
+ },
+ {
+  "path": "/validation/weekly",
+  "methods": [
+   "POST"
+  ],
+  "name": "execute_weekly_validation",
+  "endpoint": "execute_weekly_validation"
+ },
+ {
+  "path": "/webhook/lead_capture",
+  "methods": [
+   "POST"
+  ],
+  "name": "webhook_lead_capture",
+  "endpoint": "webhook_lead_capture"
+ },
+ {
+  "path": "/webhook/lead_capture/by_emails",
+  "methods": [
+   "POST"
+  ],
+  "name": "get_leads_by_emails_endpoint",
+  "endpoint": "get_leads_by_emails_endpoint"
+ },
+ {
+  "path": "/webhook/lead_capture/recent",
+  "methods": [
+   "GET"
+  ],
+  "name": "get_recent_leads_endpoint",
+  "endpoint": "get_recent_leads_endpoint"
+ },
+ {
+  "path": "/webhook/lead_capture/stats",
+  "methods": [
+   "GET"
+  ],
+  "name": "lead_capture_stats",
+  "endpoint": "lead_capture_stats"
+ },
+ {
+  "path": "/webhook/sendflow_group_join",
+  "methods": [
+   "POST"
+  ],
+  "name": "webhook_sendflow_group_join",
+  "endpoint": "webhook_sendflow_group_join"
+ },
+ {
+  "path": "/webhook/update_survey",
+  "methods": [
+   "POST"
+  ],
+  "name": "webhook_update_survey",
+  "endpoint": "webhook_update_survey"
+ }
+]

@@ -111,3 +111,11 @@ env_bringdata.txt
 # só por caminho explícito, nunca por padrão amplo.
 !V2/configs/**/*.csv
 !V2/tests/fixtures/*.csv
+
+# Material comercial e artefatos locais: ficam fora do repo público (backup em ~/Desktop/bring_data_fora_do_repo)
+V2/comercial/
+V2/propostas_e_apresentacoes/
+V2/docs/bring_data_02_execução.md
+V2/docs/swot_bringdata.md
+V2/docs/relatorios/**/*.log
+*.bak

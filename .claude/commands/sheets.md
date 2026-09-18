@@ -8,7 +8,7 @@ Use esta skill para qualquer operação em Google Sheets do projeto.
 
 ## FLUXO OFICIAL — `bring_data_contatos`
 
-### Módulo: `V2/comercial/contatos_sync.py`
+### Módulo: `V2/comercial/contatos_sync.py` (pasta LOCAL, fora do git desde 18/09/2026; cópia em `~/Desktop/bring_data_fora_do_repo/V2/comercial/`)
 
 Encapsula schema, validação, sync bidirecional e UI kit. **Sempre usar isso** em vez de manipulação direta via `gspread` para mudanças de dados.
 

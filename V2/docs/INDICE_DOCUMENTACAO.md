@@ -31,23 +31,8 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 
 ## Camada 1 — Estratégia
 
-### `bring_data_02_execução.md`
-**Papel:** visão de negócio, roadmap de escala (Fases 1/2/3 do produto), moat competitivo, backlog de features. Também contém o script de venda e o checklist de onboarding comercial.
-**Status:** ativo. Renomeado de `adsmarter_02_execução.md` para `bring_data_02_execução.md` conforme rebrand.
-**Relação:** é o "porquê" de tudo. O plano de refactor e o roadmap MLOps são consequências das decisões aqui.
-**Ação sugerida:** revisar após Cliente B onboarding.
-
-### `swot_bringdata.md`
-**Papel:** análise SWOT completa com dados de mercado, forças, fraquezas, oportunidades e ameaças. Inclui síntese estratégica e prioridades.
-**Status:** ativo. Criado em março/2026.
-**Relação:** complementa `bring_data_02_execução.md` com profundidade competitiva. Referencia W1 (feedback loop) e W2 (token Meta) como riscos críticos.
-
-### `bring_data_produto.md`
-**Papel:** script de reunião comercial — estrutura da conversa de vendas, quebra de objeções, fechamento.
-**Status:** ativo.
-**Relação:** instrumento de execução comercial. Derivado das forças documentadas no SWOT.
-
----
+### Estratégia comercial (execução, SWOT, script de reunião)
+**Status:** material comercial (fora do repositório público desde 18/09/2026; cópia local em `~/Desktop/bring_data_fora_do_repo/`). O repositório guarda só o sistema.
 
 ## Camada 2 — Planejamento
 
@@ -117,11 +102,11 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 ### `PROCESSO_CAPI_LEAD_SURVEYS.md`
 **Papel:** especificação **e diário** da frente que faz o evento CAPI scoreado por ML (`LeadQualified`/`LeadQualifiedHighQuality`) ser disparado também a partir da esteira nova do dono. A captação migrou de `Lead`→`lead_surveys` em ~12/05/2026 e o sinal scoreado ficou OFF para a inflow viva; em 2026-05-23 a esteira nova de scoring foi reaberta via consumer Pub/Sub que substituiu o desenho anterior (leitura Railway + parse de log). Cobre porquê (migração da captação + virada de arquitetura), histórico da investigação SQL (esteiras disjuntas, recuperação de campos via JOIN com `UTMTracking`+`integration_logs` etc — agora superado), decisões cronológicas, protocolo de implementação (I0–I7 do design SQL pausado + P1–P18 do design Pub/Sub atual), desenho técnico Pub/Sub e plano de monitoramento pós-Pub/Sub com tabela completa de 26 itens (8 mantém, 13 adapta, 1 remove, 4 cria do zero).
 **Status:** ✅ **LIVE em produção desde 2026-05-23 19:45 BRT.** Consumer Pub/Sub (`api/pubsub_branch.py`) processando mensagens da sub `lead-capture-ingest-sub`; revisão `smart-ads-api-00341-ml6` a 100% tráfego com `PUBSUB_CAPI_ENABLED=true`; Cloud Scheduler `pubsub-process-pending` ENABLED (`*/5 * * * *`); IAM `roles/pubsub.subscriber` concedido ao Cloud Run SA; ledger `registros_ml` operacional (PK migrada `lead_id`→`event_id` UUID v7). Smoke real: 25 mensagens processadas, 0 enviadas ao Meta (todas do load test antigo, source não-Meta). Backlog do load test purgado em 24/05. Testes 26/26 verdes. Gates B/D/C.1/C.2 passaram (bonus: fix do Gate C.1 que tornou o gate intrínseco, commit `c09e0d2`). Consolidado 2026-05-24 via `/docs`. **Pendências:** P17 colunas UTM no `registros_ml` + P18 refator do monitoramento (13 itens adaptar, 4 criar) + verificação UTM cliente pré-go-live (depende do gestor de tráfego subir tags do sistema novo, previsto 2026-05-26+). **Deprecado:** módulos `api/survey_branch.py` e `api/survey_enrichment.py` do design SQL pausado (header `[DEPRECATED 2026-05-23]`); hook `_run_survey_branch_safely` em `app.py` continua mas off por `SURVEY_CAPI_ENABLED` default false.
-**Relação:** roadmap em `PLANO_EXECUCAO.md`. Contrato cliente do payload Pub/Sub em `REQUISITOS_SISTEMA_NOVO.md` + PDF + JSON schema em `propostas_e_apresentacoes/`. Classe de quebra histórica "Cluster 5" em `AUDITORIA_QUEBRA_PRODUCAO.md` e `registro_erros_ml.md`. Toca endpoint novo `/pubsub/process-pending` (`api/app.py`), reusa `pipeline.run`+`send_batch_events`+`api/railway_mapping.py` (com função nova `traduzir_survey_slugs`). Tabelas Railway: `registros_ml` (nossa, viva); `lead_surveys`/`UTMTracking`/`Client` (vivas, sistema novo); `Lead`/`leads_capi` (mortas desde 17/05). Infra GCP: tópico `lead-capture-ingest`, sub `lead-capture-ingest-sub` (retenção 31d); SA publisher `lead-capture-publisher@…` (entregue ao dono); SA consumer = Cloud Run default. `instrucoes_dev_frontend_capi.md` continua **deprecado**.
+**Relação:** roadmap em `PLANO_EXECUCAO.md`. Contrato cliente do payload Pub/Sub em `REQUISITOS_SISTEMA_NOVO.md` + PDF e JSON schema entregues ao dono (fora do repositório público desde 18/09/2026; cópia local em `~/Desktop/bring_data_fora_do_repo/`). Classe de quebra histórica "Cluster 5" em `AUDITORIA_QUEBRA_PRODUCAO.md` e `registro_erros_ml.md`. Toca endpoint novo `/pubsub/process-pending` (`api/app.py`), reusa `pipeline.run`+`send_batch_events`+`api/railway_mapping.py` (com função nova `traduzir_survey_slugs`). Tabelas Railway: `registros_ml` (nossa, viva); `lead_surveys`/`UTMTracking`/`Client` (vivas, sistema novo); `Lead`/`leads_capi` (mortas desde 17/05). Infra GCP: tópico `lead-capture-ingest`, sub `lead-capture-ingest-sub` (retenção 31d); SA publisher `lead-capture-publisher@…` (entregue ao dono); SA consumer = Cloud Run default. `instrucoes_dev_frontend_capi.md` continua **deprecado**.
 
 ### `REQUISITOS_SISTEMA_NOVO.md`
 **Papel:** contrato de dados cliente-facing entregue ao dono do sistema novo (DevClub) em 2026-05-22. Define o payload JSON que o backend dele tem que publicar no nosso tópico Pub/Sub `lead-capture-ingest` por lead: 1 evento, identificador estável (`eventId` UUID v7), identidade (email/firstName/lastName/phone), captura Meta (`fbp`/`fbc` ou null nunca string vazia), `hasComputer` top-level (`SIM`/`NAO`), userAgent cru, `ip4`, objeto `survey` com as 10 respostas em vocabulário fechado (slugs lowercase + lowercase de cortesia, listados no Anexo A.2), objeto `utm` cru do anúncio. Inclui correções obrigatórias antes de ir ao ar (1: `eventId` único por lead, hoje produção gera dois ids diferentes pro mesmo lead; 2: `fbc` vazio vira `null` não `""`; 3: macros do Facebook tipo `{{adset.name}}` precisam ser renderizadas, não literais). Anexo C ensina como publicar (browser → backend dele → publish server-side via SA + chave JSON que entregamos). Anexo D lista as correções.
-**Status:** ativo. Criado em 2026-05-22; entregue ao dono em PDF (`propostas_e_apresentacoes/requisitos_sistema_novo.pdf`) + JSON schema (`propostas_e_apresentacoes/requisitos_sistema_novo_payload.json`). Substitui o `instrucoes_dev_frontend_capi.md` (deprecado).
+**Status:** ativo. Criado em 2026-05-22; entregue ao dono em PDF + JSON schema (fora do repositório público desde 18/09/2026; cópia local em `~/Desktop/bring_data_fora_do_repo/`). Substitui o `instrucoes_dev_frontend_capi.md` (deprecado).
 **Relação:** é o contrato consumido por `PROCESSO_CAPI_LEAD_SURVEYS.md` (esteira nova de scoring CAPI). Quando o dono publica seguindo este contrato, o nosso consumer Pub/Sub (`api/pubsub_branch.py`) parseia, traduz slugs via `traduzir_survey_slugs`, scoreia e envia ao Meta. Geradores de PDF: `scripts/gerar_pdf_requisitos_sistema_novo.py` + `scripts/pdf_base.py` (base compartilhada de paleta/estilos).
 
 ### `arquivo/ROADMAP_MLOPS_MATURIDADE.md` 📦 ARQUIVADO
@@ -159,7 +144,7 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 
 ### `instrucoes_dev_frontend_capi.md` e `instrucao_frontend_fbp_fbc.txt`
 **Papel:** instruções para o dev front-end sobre CAPI e captura de FBP/FBC.
-**Status:** ⚠️ **DEPRECADO (2026-05-19, reforçado 2026-05-24).** O contrato de dados de fato vive em **`REQUISITOS_SISTEMA_NOVO.md`** (payload Pub/Sub formal entregue ao dono em 22/05) + PDF + JSON schema em `propostas_e_apresentacoes/`. Mantido só para referência histórica. Ver `PROCESSO_CAPI_LEAD_SURVEYS.md` (estado LIVE 2026-05-24).
+**Status:** ⚠️ **DEPRECADO (2026-05-19, reforçado 2026-05-24).** O contrato de dados de fato vive em **`REQUISITOS_SISTEMA_NOVO.md`** (payload Pub/Sub formal entregue ao dono em 22/05) + PDF e JSON schema entregues ao dono (fora do repositório público desde 18/09/2026; cópia local em `~/Desktop/bring_data_fora_do_repo/`). Mantido só para referência histórica. Ver `PROCESSO_CAPI_LEAD_SURVEYS.md` (estado LIVE 2026-05-24).
 
 ### `operacoes_gcp_custos.md`
 **Papel:** registro das otimizações de custo aplicadas no GCP em 2026-04-26 (~R$ 167/mês), procedimento de stop/start do Cloud SQL `smart-ads-db` para retreino, cleanup policy do Artifact Registry e bugs latentes descobertos durante a auditoria. Inclui investigações de spike: 06/mai/2026 (worker timeout do gunicorn) e 14/mai/2026 (acúmulo de tags `canary-*` no Cloud Run mantendo instâncias always-on — remediado com cleanup automático no `deploy_capi.sh`). Em 14/mai também documentou a eliminação de min-instances no Cloud Run (de ~R$ 14/dia pra ~R$ 4-5/dia), guardrails nos scripts de treino contra esquecer de ligar/desligar Cloud SQL, e checklist de monitoramento pós-mudança.
@@ -283,7 +268,7 @@ HISTÓRICO           → decisões passadas, migrações concluídas
 **Status:** ✅ **ARQUIVADO em 2026-05-08.** Conteúdo migrado para `registro_erros_ml.md`. Permanece para referência histórica.
 
 ### `arquivo/auditoria_dano_bugs_ml.md` 📦 ARQUIVADO
-**Status:** ✅ **ARQUIVADO em 2026-05-08.** Conteúdo (audiência cliente externo) migrado e re-tecnicado para `registro_erros_ml.md`. PDF entregue ao cliente em `V2/propostas_e_apresentacoes/auditoria_dano_bugs_ml.pdf`.
+**Status:** ✅ **ARQUIVADO em 2026-05-08.** Conteúdo (audiência cliente externo) migrado e re-tecnicado para `registro_erros_ml.md`. PDF entregue ao cliente (fora do repositório público desde 18/09/2026; cópia local em `~/Desktop/bring_data_fora_do_repo/`).
 
 ### `modelo_producao_devclub_15mar2026_interno.txt`
 **Papel:** documentação interna do modelo em produção (run `2a98e51c`, 59 features, AUC 0.745).

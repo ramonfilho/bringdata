@@ -37,7 +37,7 @@ Análise offline em worktree separado (`bring_data-roas`):
 - Aplicando a fórmula `retorno_esperado = (probabilidade × ticket à vista) ÷ custo_por_lead` para reordenar os top-N, o ganho líquido anual projetado fica entre R$ 86 mil (top 10%) e R$ 298 mil (top 50%), usando faturamento recebido à vista (cartão líquido + primeira parcela do boleto, mesma fórmula do `_generate_revenue_forecast` em [src/monitoring/orchestrator.py](../src/monitoring/orchestrator.py)) e corrigindo por uma taxa de rastreamento de 52,8% das vendas reais que de fato casam com um lead nosso.
 - Validação por bootstrap em mil iterações: correlação de Spearman entre decil predito e ROAS realizado fica em \[0,92, 1,00] na fórmula nova vs \[0,45, 0,90] na propensão pura.
 
-PDF para stakeholders em [propostas_e_apresentacoes/descoberta_roas_devclub.pdf](../propostas_e_apresentacoes/descoberta_roas_devclub.pdf).
+PDF para stakeholders (fora do repositório público desde 18/09/2026; cópia local em `~/Desktop/bring_data_fora_do_repo/`).
 
 **Estado em 2026-06-07:** especificação arquitetural pronta, zero código em produção.
 

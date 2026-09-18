@@ -6,7 +6,7 @@
 
 | Componente | Onde |
 |---|---|
-| Tracking (runs, params, metrics) | Cloud SQL PostgreSQL `104.197.138.129:5432/mlflow` (instância `smart-ads-db`) |
+| Tracking (runs, params, metrics) | Cloud SQL PostgreSQL `<IP da instância smart-ads-db>:5432/mlflow` (instância `smart-ads-db`; o IP sai de `gcloud sql instances describe smart-ads-db --format='value(ipAddresses[0].ipAddress)'`) |
 | Artifacts (model.pkl, feature_registry.json, etc.) | `gs://smart-ads-mlflow/artifacts/` |
 
 ---
@@ -26,7 +26,7 @@ em vez de cair calado num MLflow local vazio. Para configurar (uma vez por máqu
 
 ```bash
 SENHA=$(gcloud secrets versions access latest --secret=mlflow-db-password --project=smart-ads-451319)
-echo "MLFLOW_TRACKING_URI=postgresql+psycopg2://postgres:$SENHA@104.197.138.129:5432/mlflow?sslmode=require" >> V2/.env
+echo "MLFLOW_TRACKING_URI=postgresql+psycopg2://postgres:$SENHA@<IP da instância smart-ads-db>:5432/mlflow?sslmode=require" >> V2/.env
 ```
 
 > **Por que não pode voltar pro código:** até 05/08/2026 a senha do usuário `postgres`

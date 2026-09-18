@@ -134,7 +134,7 @@ Toda frente de trabalho (feature nova, refator, migração, mudança de código 
 **Fluxo:**
 
 1. **Abrir worktree por frente:** `bash scripts/feature-start.sh <nome>` — faz `git fetch origin` e cria a worktree **a partir do `origin/main` atual**, nunca do HEAD local (que fica velho quando outro terminal avança a `main` — causa recorrente de base desatualizada e diff sujo). Cada frente tem working tree próprio — o trabalho não-commitado de uma não vaza pra outra.
-2. **Avançar isolado:** commits na branch da frente, no seu ritmo.
+2. **Avançar isolado:** commits na branch da frente, no seu ritmo. A mensagem de commit descreve o sistema e o porquê da mudança; nunca cita pessoa nem "pedido do Ramon" (o repo é público e quem lê o log é recrutador ou engenheiro, que leu isso como pergunta de autoria).
 3. **Fechar com PR → `main`:** `bash scripts/feature-finish.sh` (push + abre o PR). **O PR é o passo de fechamento OBRIGATÓRIO de toda feature**: a frente não se considera concluída sem PR. O CI (`.github/workflows/ci.yml`) roda na PR o lint mínimo, a suíte inteira em Python 3.10 sem credencial e, se o YAML de produção mudou, o gate do modelo. Resolver conflitos no merge, com as frentes lado a lado.
 4. **Merge na `main` = canary automático:** o `deploy.yml` roda a suíte de novo, constrói a imagem do SHA mergeado e cria a revisão a 0% pelo `deploy-gate.sh` (Gates B, C e D). Nenhum deploy sai de laptop. Enquanto os workflows não estiverem na `main` (o push deles exige o escopo `workflow` no token do `gh`), o canary continua sendo `bash V2/api/deploy-gate.sh deploy` na mão.
 5. **Promover é aprovação registrada:** os jobs `canary-10`, `canary-50` e `production` esperam aprovação no environment de mesmo nome, consultam o `progression_gate` e promovem pelo `deploy-gate.sh promote` (em 100% com lockstep dos espelhos). Enquanto os environments não existirem com reviewer (repositório público ou plano Pro) e a variável `PROMOTION_ENABLED` não estiver ligada, promover continua sendo `bash V2/api/deploy-gate.sh promote --revision <canary>` na mão.
@@ -260,7 +260,7 @@ Nunca adicionar hardcodes dentro de funções `core/`. Todo valor específico de
 gcloud sql instances patch smart-ads-db --activation-policy=ALWAYS --project=smart-ads-451319
 # Aguardar state=RUNNABLE (~2-3 min)
 
-# Treinar modelo (MLflow tracking via 104.197.138.129:5432/mlflow)
+# Treinar modelo (MLflow tracking via <IP da instância smart-ads-db>:5432/mlflow)
 python -m src.train_pipeline --initial-matching email_telefone --set-active
 
 # Monitoramento local (lê do Railway via env vars RAILWAY_DB_*)
