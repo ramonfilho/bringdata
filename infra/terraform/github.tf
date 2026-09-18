@@ -5,8 +5,7 @@ data "github_repository" "repo" {
 }
 
 # Um environment por degrau de tráfego, sem reviewer desde 17/09/2026: quem segura o
-# tráfego é o gate (números) e a janela de deploy (dia útil, 09h às 18h, carrinho
-# fechado), em V2/scripts/janela_de_deploy.py. O environment fica pelo registro de
+# tráfego é o gate (números) e a janela de deploy (dia útil, 09h às 18h), em V2/scripts/janela_de_deploy.py. O environment fica pelo registro de
 # deployments no GitHub.
 resource "github_repository_environment" "stage" {
   for_each            = toset(["canary-10", "canary-50", "production"])
