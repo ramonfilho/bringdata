@@ -175,8 +175,11 @@ jobs:
         # retreino continua na imagem anterior e o resumo do run mostra o problema.
         continue-on-error: true
         run: |
-          API_IMG=$(gcloud run revisions describe "${{ steps.rev.outputs.revision }}" --region="$REGION" --project="$PROJECT_ID" --format='value(spec.containers[0].image)')
+          # A revisão devolve a imagem por digest (@sha256:...); o template do serviço
+          # guarda a forma com tag (:vAAAAMMDD_HHMMSS), que é a que o job de retreino usa.
+          API_IMG=$(gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT_ID" --format='value(spec.template.spec.containers[0].image)')
           TAG="${API_IMG##*:}"
+          case "$TAG" in v[0-9]*) ;; *) echo "tag inesperada: $API_IMG"; exit 1;; esac
           IMG="gcr.io/$PROJECT_ID/smart-ads-treino:$TAG"
           mkdir -p V2/mlruns_build
           docker buildx build --load --target treino -f V2/api/Dockerfile \
