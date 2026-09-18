@@ -4,22 +4,16 @@ data "github_repository" "repo" {
   name = var.github_repo
 }
 
-data "github_user" "reviewer" {
-  username = var.github_owner
-}
-
-# Um environment por degrau de tráfego, com o dono como reviewer obrigatório. A promoção
-# no deploy.yml só roda quando alguém aprova aqui.
+# Um environment por degrau de tráfego, sem reviewer desde 17/09/2026: quem segura o
+# tráfego é o gate (números) e a janela de deploy (dia útil, 09h às 18h, carrinho
+# fechado), em V2/scripts/janela_de_deploy.py. O environment fica pelo registro de
+# deployments no GitHub.
 resource "github_repository_environment" "stage" {
   for_each            = toset(["canary-10", "canary-50", "production"])
   repository          = data.github_repository.repo.name
   environment         = each.value
   prevent_self_review = false
   can_admins_bypass   = true
-
-  reviewers {
-    users = [data.github_user.reviewer.id]
-  }
 }
 
 # Variáveis lidas pelos workflows (não são segredos).

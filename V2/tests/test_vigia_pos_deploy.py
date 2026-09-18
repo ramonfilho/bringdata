@@ -102,7 +102,7 @@ def test_deploy_yml_tem_o_job_vigia_depois_do_production_e_ignora_o_que_nao_vai_
     m = re.search(r"\n  vigia:\n(.*?)(?=\n  [a-z0-9-]+:\n|\Z)", wf, re.S)
     assert m, "job vigia ausente"
     bloco = m.group(1)
-    assert "needs: [canary, production]" in bloco
+    assert "needs: [canary, retomar, production]" in bloco   # retomar desde 17/09/2026 (janela de deploy)
     assert "scripts/vigia_pos_deploy.py" in bloco and "--rollback" in bloco
     assert "timeout-minutes: 75" in bloco
     ignore = wf.split("paths-ignore:", 1)[1].split("workflow_dispatch:", 1)[0]
