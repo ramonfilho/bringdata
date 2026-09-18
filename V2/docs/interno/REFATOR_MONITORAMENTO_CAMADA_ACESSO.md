@@ -146,7 +146,7 @@ Maior em volume de código, mesma mecânica de troca de fonte. Detecta drift de 
 
 - `V2/CLAUDE.md` — regra obrigatória de invocar `/sw-architect` antes de mudança arquitetural.
 - `.claude/commands/sw-architect.md` — a skill em si.
-- `docs/PROCESSO_CAPI_LEAD_SURVEYS.md` — contexto da virada de arquitetura SQL→Pub/Sub e do que vive em `registros_ml`. P18 desse doc é exatamente este refator.
+- `docs/interno/PROCESSO_CAPI_LEAD_SURVEYS.md` — contexto da virada de arquitetura SQL→Pub/Sub e do que vive em `registros_ml`. P18 desse doc é exatamente este refator.
 - Memória: `projeto_baseline_drift_split_railway_ledger.md` — decisão sobre baseline 30d ficar no Railway antigo durante transição.
 - Memória: `projeto_migracao_lead_surveys.md` — contexto do porquê `Lead` parou em 17/05.
 

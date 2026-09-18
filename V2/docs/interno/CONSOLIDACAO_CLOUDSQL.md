@@ -117,6 +117,6 @@ verbatim → mesmas colunas. **É a parte mais sensível (pesquisa = feature do 
 
 ## Documentos relacionados
 
-- `docs/REFATOR_MONITORAMENTO_CAMADA_ACESSO.md` — a camada `src/data/` que esta frente estende.
-- `docs/PLANO_LEDGER_CLOUDSQL.md` — precedente de criar database no Cloud SQL (Etapa 0 do ledger).
+- `docs/interno/REFATOR_MONITORAMENTO_CAMADA_ACESSO.md` — a camada `src/data/` que esta frente estende.
+- `docs/interno/PLANO_LEDGER_CLOUDSQL.md` — precedente de criar database no Cloud SQL (Etapa 0 do ledger).
 - `api/db/analytics_schema.sql` — o DDL desta frente.

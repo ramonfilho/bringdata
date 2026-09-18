@@ -9,9 +9,9 @@
 **Identificadores históricos** (`T1-X`, `T2-X`, `T3-X`) ficam no rodapé de cada item — preservam rastreabilidade com commits e issues antigas, mas não ocupam o título.
 
 Referências:
-- Roadmap (sequência de execução): [`PLANO_EXECUCAO.md`](PLANO_EXECUCAO.md)
-- Cenários a estressar (ataques deliberados): [`AUDITORIA_QUEBRA_PRODUCAO.md`](AUDITORIA_QUEBRA_PRODUCAO.md)
-- Erros históricos (motivação): [`registro_erros_ml.md`](registro_erros_ml.md)
+- Roadmap (sequência de execução): [`PLANO_EXECUCAO.md`](interno/PLANO_EXECUCAO.md)
+- Cenários a estressar (ataques deliberados): [`AUDITORIA_QUEBRA_PRODUCAO.md`](interno/AUDITORIA_QUEBRA_PRODUCAO.md)
+- Erros históricos (motivação): [`registro_erros_ml.md`](interno/registro_erros_ml.md)
 - Skills de investigação: `/investigate`, `/investigate-ab`, `/safeguard`
 
 ---
@@ -153,7 +153,7 @@ Etapas que rodam **antes** de uma revisão receber tráfego, dentro do `deploy_c
 
 **Status:** ✅ ativo desde 21/abr. Cobertura por variante A/B implementada em 08/mai.
 
-**Cleanup automático de tags antigas (14/mai/2026):** o `deploy_capi.sh` remove automaticamente, antes de cada deploy `--no-traffic`, todas as tags `canary-*` em revisões com 0% de tráfego. Implementado após incidente de custo (33 tags acumuladas geraram +R$ 70/dia em min-instances always-on no Cloud Run — cada tag mantém URL dedicada e respeita `min-instances=1` perpetuamente). Tags em revisões com tráfego > 0 são preservadas. Detalhes do incidente em [`operacoes_gcp_custos.md`](operacoes_gcp_custos.md) seção "Investigação de spike de custo — 2026-05-14".
+**Cleanup automático de tags antigas (14/mai/2026):** o `deploy_capi.sh` remove automaticamente, antes de cada deploy `--no-traffic`, todas as tags `canary-*` em revisões com 0% de tráfego. Implementado após incidente de custo (33 tags acumuladas geraram +R$ 70/dia em min-instances always-on no Cloud Run — cada tag mantém URL dedicada e respeita `min-instances=1` perpetuamente). Tags em revisões com tráfego > 0 são preservadas. Detalhes do incidente em [`operacoes_gcp_custos.md`](interno/operacoes_gcp_custos.md) seção "Investigação de spike de custo — 2026-05-14".
 
 *Identificadores históricos: T1-10 (verificação de cobertura), T1-11 (validação pré-encoding e endpoint `/feature-report`), T1-14 (smoke por variante A/B).*
 
@@ -354,7 +354,7 @@ Sequência de implementação proposta: **D3 primeiro** (estanca o dano operacio
 
 ### Drift de perfil de audiência
 
-**O que faz:** todo dia compara o perfil agregado dos leads que entraram no dia anterior contra um snapshot de "audiência winner" — proporções do pool dos Top 5 lançamentos por ROAS atribuível 60d, definido em `docs/METODOLOGIA_TOP5_ROAS.md` (atualizado 2026-05-14: LF45, LF44, LF46, LF41, LF43, n=42.038 leads). Emite alerta agregado com até dois subgrupos de features:
+**O que faz:** todo dia compara o perfil agregado dos leads que entraram no dia anterior contra um snapshot de "audiência winner" — proporções do pool dos Top 5 lançamentos por ROAS atribuível 60d, definido em `docs/interno/METODOLOGIA_TOP5_ROAS.md` (atualizado 2026-05-14: LF45, LF44, LF46, LF41, LF43, n=42.038 leads). Emite alerta agregado com até dois subgrupos de features:
 - **`top_list`** — features com `|Δpp| ≥ 3` → severity HIGH
 - **`down_list`** — features com `2 ≤ |Δpp| < 3` → severity MEDIUM
 

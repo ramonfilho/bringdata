@@ -146,7 +146,7 @@ ORDER BY dia
   (commit `4c1d727`) populou `conversion_rates` dos variants. História
   canônica em [registro_erros_ml.md § I.8b](registro_erros_ml.md);
   salvaguardas T1-17 (Gate D) e T1-18 (Gate C) em
-  [PLANO_SAFEGUARD.md](PLANO_SAFEGUARD.md).
+  [PLANO_SAFEGUARD.md](../PLANO_SAFEGUARD.md).
 
 ## Limitações
 

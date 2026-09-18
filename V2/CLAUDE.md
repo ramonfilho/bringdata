@@ -12,12 +12,12 @@ Leia este arquivo no início de toda sessão antes de qualquer tarefa.
 
 | Documento | Papel |
 |---|---|
-| `docs/PLANO_EXECUCAO.md` | ⭐ **Roadmap único** — única fonte de "o que fazer e quando" (horizontes H1–H7, gate único, A/B em Standby, backlog) |
+| `docs/interno/PLANO_EXECUCAO.md` | ⭐ **Roadmap único** — única fonte de "o que fazer e quando" (horizontes H1–H7, gate único, A/B em Standby, backlog) |
 | `docs/ARQUITETURA_SISTEMA_COMPLETA.md` | Arquitetura, fluxos, endpoints, comandos |
 | `docs/PLANO_SAFEGUARD.md` | 📚 Catálogo técnico dos itens T1-X / T2-X / T3-X (especificação, não prioridade) |
-| `docs/PLANO_REFACTOR_MLOPS.md` | 📚 Catálogo técnico dos DT-X / R-X + histórico do refactor (especificação, não prioridade) |
-| `docs/PLANO_REMEDIACAO_LEAD_SCORE.md` | 📚 Catálogo técnico dos consumidores L1–L9 que leem `Lead.leadScore` / `Lead.decil` como verdade atemporal — fotografia do código que rodou na hora, não medição estável (especificação, não prioridade) |
-| `docs/AB_TEST.md` | 📚 Design do teste A/B (executar quando o gate for retomado) |
+| `docs/interno/PLANO_REFACTOR_MLOPS.md` | 📚 Catálogo técnico dos DT-X / R-X + histórico do refactor (especificação, não prioridade) |
+| `docs/interno/PLANO_REMEDIACAO_LEAD_SCORE.md` | 📚 Catálogo técnico dos consumidores L1–L9 que leem `Lead.leadScore` / `Lead.decil` como verdade atemporal — fotografia do código que rodou na hora, não medição estável (especificação, não prioridade) |
+| `docs/interno/AB_TEST.md` | 📚 Design do teste A/B (executar quando o gate for retomado) |
 | `docs/INDICE_DOCUMENTACAO.md` | Mapa de papéis e relações entre todos os docs |
 
 **Hierarquia:** `PLANO_EXECUCAO.md` é o roadmap único. Os catálogos (📚) descrevem o **como** técnico de cada item; o **quando** vive no PLANO_EXECUCAO. Quando houver conflito de status ou prioridade, o PLANO_EXECUCAO vence.
@@ -87,11 +87,11 @@ Toda menção a um item técnico identificado por código — cenários da audit
 4. Quando recuperar contexto de outras sessões via memória ou docs: aplicar a mesma tradução antes de devolver pro usuário.
 
 **Catálogos onde os IDs vivem (para o leitor consultar quando quiser detalhe técnico):**
-- Cenários de auditoria → `docs/AUDITORIA_QUEBRA_PRODUCAO.md`
+- Cenários de auditoria → `docs/interno/AUDITORIA_QUEBRA_PRODUCAO.md`
 - Salvaguardas (T-X) → `docs/PLANO_SAFEGUARD.md`
-- Dívidas técnicas (DT-X) e pré-requisitos do segundo cliente (R-X) → `docs/PLANO_REFACTOR_MLOPS.md`
-- Itens M-X de prioridade operacional → `docs/PLANO_EXECUCAO.md`
-- Erros históricos e Clusters → `docs/registro_erros_ml.md`
+- Dívidas técnicas (DT-X) e pré-requisitos do segundo cliente (R-X) → `docs/interno/PLANO_REFACTOR_MLOPS.md`
+- Itens M-X de prioridade operacional → `docs/interno/PLANO_EXECUCAO.md`
+- Erros históricos e Clusters → `docs/interno/registro_erros_ml.md`
 
 ### Resumo de uma frase no topo de toda mensagem longa
 
@@ -203,7 +203,7 @@ Já houve quebra em produção por divergência de normalização (UTM com `.low
 | Matching | `core/matching.py` — consolida os 6 arquivos de `src/matching/` |
 | Janela de conversão | Simétrica — remove TODOS os leads após `date_limite`, não só `target=1` |
 
-> **⚠️ Schema do banco mudou (11–17/05/2026).** As tabelas `Lead`/`leads_capi` **morreram em ~17/05** (somente histórico). Para dados a partir de 17/05/2026 a fonte é o ledger **`registros_ml`** + as tabelas novas `Client`/`UTMTracking`/`Activity`. As linhas abaixo mostram a fonte **atual** e, entre parênteses, a fonte **histórica** (<17/05). Detalhe completo em `docs/ARQUITETURA_SISTEMA_COMPLETA.md` § BANCO DE DADOS e `docs/PROCESSO_CAPI_LEAD_SURVEYS.md`.
+> **⚠️ Schema do banco mudou (11–17/05/2026).** As tabelas `Lead`/`leads_capi` **morreram em ~17/05** (somente histórico). Para dados a partir de 17/05/2026 a fonte é o ledger **`registros_ml`** + as tabelas novas `Client`/`UTMTracking`/`Activity`. As linhas abaixo mostram a fonte **atual** e, entre parênteses, a fonte **histórica** (<17/05). Detalhe completo em `docs/ARQUITETURA_SISTEMA_COMPLETA.md` § BANCO DE DADOS e `docs/interno/PROCESSO_CAPI_LEAD_SURVEYS.md`.
 
 | `fbp`/`fbc` | **Atual: `registros_ml.fbp`/`fbc`** (ou `Client.fbp`/`fbc`). Histórico (<17/05): `leads_capi`. NUNCA `Lead.fbp`/`Lead.fbc` (sempre vazios). |
 | `pesquisa` (respostas) | **Atual: `registros_ml.survey_responses` (jsonb)**. Histórico: `Lead.pesquisa` (jsonb). As colunas tabulares de `leads_capi` são 100% NULL — vestígio. |
@@ -251,9 +251,9 @@ Nunca adicionar hardcodes dentro de funções `core/`. Todo valor específico de
 
 ## Como rodar localmente
 
-> Banco operacional (`leads_capi`, `Lead`) está no **Railway** desde 25/02/2026 — não usa Cloud SQL Proxy. Ver `docs/acesso_sql.md` "Banco 2 — Railway" para credenciais.
+> Banco operacional (`leads_capi`, `Lead`) está no **Railway** desde 25/02/2026 — não usa Cloud SQL Proxy. Ver `docs/interno/acesso_sql.md` "Banco 2 — Railway" para credenciais.
 >
-> **MLflow tracking** (necessário para treinar/retreinar) usa Cloud SQL `smart-ads-db`, **parado desde 26/04/2026**. Subir antes — ver `docs/operacoes_gcp_custos.md`.
+> **MLflow tracking** (necessário para treinar/retreinar) usa Cloud SQL `smart-ads-db`, **parado desde 26/04/2026**. Subir antes — ver `docs/interno/operacoes_gcp_custos.md`.
 
 ```bash
 # Subir Cloud SQL para MLflow (só antes de treinar/retreinar)
@@ -309,14 +309,14 @@ gcloud sql instances patch smart-ads-db --activation-policy=NEVER --project=smar
 - **API:** FastAPI + Uvicorn em Cloud Run (`https://smart-ads-api-12955519745.us-central1.run.app`)
   - Serviço ativo: `smart-ads-api` (`bring-data-api` foi deletado em 26/04/2026 — sem tráfego)
 - **Banco operacional:** Railway PostgreSQL (env vars `RAILWAY_DB_*`) — Cloud SQL `bring-data-db` foi descomissionado em 25/02/2026
-- **Cloud SQL (MLflow tracking):** `smart-ads-451319:us-central1:smart-ads-db` — **parado desde 26/04/2026** (`activation-policy=NEVER`); subir manualmente antes de retreinar (ver `docs/operacoes_gcp_custos.md`)
+- **Cloud SQL (MLflow tracking):** `smart-ads-451319:us-central1:smart-ads-db` — **parado desde 26/04/2026** (`activation-policy=NEVER`); subir manualmente antes de retreinar (ver `docs/interno/operacoes_gcp_custos.md`)
 - **Banco operacional Railway — schema mudou em 11–17/05/2026.** As tabelas vivas hoje são do sistema novo do dono + nosso ledger:
   - **`registros_ml`** ⭐ — nosso ledger ML (consumer Pub/Sub, live desde 23/05). Fonte de `decil`, `lead_score`, `variant` (A/B), `utm_campaign`, `survey_responses`, `fbp`/`fbc`. **Fonte de leitura do monitoramento novo.**
   - **`Client`** — cadastro do lead (front novo). Tem `campaignKey`, `isBuyer`, `firstSeenAt`, `fbp`/`fbc`, `hasComputer`.
   - **`UTMTracking`** — UTM por lead (`campaign`/`source`/`medium`/`url`), 1:N por `clientEmail`.
   - **`Activity`** — log de eventos do lead (entrou no grupo, lista VIP).
   - **Mortas (somente histórico, pararam ~17/05):** `Lead`, `leads_capi`, `LeadsClient` e a transitória `lead_surveys` (morreu 21/05). NÃO consultar para dados recentes — retornam vazio e induzem falso "ingestão parada".
-  - Detalhes e regras de consulta em `docs/ARQUITETURA_SISTEMA_COMPLETA.md` § "BANCO DE DADOS — armadilhas de schema" e `docs/PROCESSO_CAPI_LEAD_SURVEYS.md`.
+  - Detalhes e regras de consulta em `docs/ARQUITETURA_SISTEMA_COMPLETA.md` § "BANCO DE DADOS — armadilhas de schema" e `docs/interno/PROCESSO_CAPI_LEAD_SURVEYS.md`.
 - **Scheduler:** Cloud Scheduler → Cloud Run (monitoramento diário e polling Railway a cada 5min). Retreino é manual.
 - **Notificações:** Slack
 

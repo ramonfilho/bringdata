@@ -149,7 +149,7 @@ gh pr create \
   --title "refactor: MLOps core layer — multi-cliente sem hardcodes" \
   --base main \
   --head refactor/mlops-core \
-  --body "Ver V2/docs/PLANO_REFACTOR_MLOPS.md para descrição completa. Parity checks 6/6 PASS. AUC 0.747 (baseline ±0.5%)."
+  --body "Ver V2/docs/interno/PLANO_REFACTOR_MLOPS.md para descrição completa. Parity checks 6/6 PASS. AUC 0.747 (baseline ±0.5%)."
 
 # Após aprovação — merge
 gh pr merge --squash  # ou --merge, conforme preferência do repo

@@ -71,7 +71,7 @@ feature ficar pronta.
   "valida só no Lead" revogada (leitura no Lead + confirmação no ML); sem ondas;
   AD0160 núcleo; AD0424 candidato prioritário nas duas frentes.
 
-## Pendências ligadas (ver docs/PENDENCIAS.md)
+## Pendências ligadas (ver docs/interno/PENDENCIAS.md)
 
 Teto de largada; pontuação pelo TEXTO (cold start); histórico de criativo em 2
 tempos/semana; semáforo CPL÷teto no painel da agência (prometido à gestora).

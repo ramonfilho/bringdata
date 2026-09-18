@@ -114,7 +114,7 @@ medido; extrapolado ao portfólio inteiro, **+148% / R$621k**.
 
 - Relatórios: `outputs/validation/<mês>/<LF> - ...xlsx` (janela 60d via
   `--sales-end-date = vendas_start+60d`; aba Detalhes inclui "Valor Recebido").
-- Scripts: `analise_valor_ml/extract_sales.py` (tidy venda-a-venda),
+- Scripts: `docs/relatorios/analise_valor_ml/extract_sales.py` (tidy venda-a-venda),
   `rebuild_comparacao.py` (agregado contratado validado),
   `final_recebido.py` (contratado + recebido, medido + portfólio).
 - Resolver: `src/core/ab_arm.py` (+ `tests/test_ab_arm.py`).

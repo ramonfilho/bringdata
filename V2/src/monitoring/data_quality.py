@@ -1858,7 +1858,7 @@ class DataQualityMonitor:
     def _load_direction_map(self):
         """Carrega configs/audience_direction_map.json. Retorna {} se ausente
         (degradação graceful: sem direction map, drift fica sem classificação
-        bom/ruim — só marca 'unknown'). Ver docs/METODOLOGIA_TOP5_ROAS.md."""
+        bom/ruim — só marca 'unknown'). Ver docs/interno/METODOLOGIA_TOP5_ROAS.md."""
         candidates = [
             Path('configs/audience_direction_map.json'),
             Path(__file__).resolve().parents[2] / 'configs' / 'audience_direction_map.json',

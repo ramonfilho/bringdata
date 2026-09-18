@@ -10,7 +10,7 @@ Pra cada (feature, valor_canônico):
   lift = P(compra | valor)  /  P(compra | baseline)
 
   Onde:
-    - baseline = pool Top 5 ROAS atribuível 60d (ver docs/METODOLOGIA_TOP5_ROAS.md)
+    - baseline = pool Top 5 ROAS atribuível 60d (ver docs/interno/METODOLOGIA_TOP5_ROAS.md)
     - P(compra | valor) = compradores_v / leads_v  no pool baseline
     - P(compra | baseline) = compradores_total / leads_total  no pool
 
@@ -76,7 +76,7 @@ MATCHED_PARQUET = REPO_ROOT / 'outputs' / 'analysis' / 'matched_dataset_2026-05-
 LAUNCHES_YAML = REPO_ROOT / 'configs' / 'launches.yaml'
 OUTPUT_JSON = REPO_ROOT / 'configs' / 'audience_direction_map.json'
 
-# Top 5 canonical — ver docs/METODOLOGIA_TOP5_ROAS.md
+# Top 5 canonical — ver docs/interno/METODOLOGIA_TOP5_ROAS.md
 TOP5 = ['LF45', 'LF44', 'LF46', 'LF41', 'LF43']
 
 CATEGORICAL_FEATURES = [
@@ -240,7 +240,7 @@ def main():
                 'Δpp+ & positive → bom; Δpp+ & negative → ruim; '
                 'Δpp− & negative → bom; Δpp− & positive → ruim'
             ),
-            'doc': 'docs/METODOLOGIA_TOP5_ROAS.md',
+            'doc': 'docs/interno/METODOLOGIA_TOP5_ROAS.md',
         },
         'direction_map': direction_map,
     }

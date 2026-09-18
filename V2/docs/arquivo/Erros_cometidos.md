@@ -1,4 +1,4 @@
-> **DEPRECADO em 2026-05-08.** Conteúdo migrado para [registro_erros_ml.md](../registro_erros_ml.md).
+> **DEPRECADO em 2026-05-08.** Conteúdo migrado para [registro_erros_ml.md](../interno/registro_erros_ml.md).
 > Este arquivo permanece para referência histórica.
 
 ---

@@ -71,7 +71,7 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
 
         def _run_critical_alerts_safely(_conn):
             """Hook crítico: registra status do polling + roda as 6 regras.
-            Falha NÃO pode quebrar o polling. Vide docs/CRITICAL_ALERTS_SPEC.md."""
+            Falha NÃO pode quebrar o polling. Vide docs/interno/CRITICAL_ALERTS_SPEC.md."""
             try:
                 from src.monitoring.critical_alerts import (
                     run_critical_checks, record_polling_status, GcsStateStore,
@@ -87,7 +87,7 @@ async def railway_process_pending(pipeline: PipelineDep, dry_run: bool = False):
         def _run_survey_branch_safely(_conn):
             """I4: ramo isolado lead_surveys → CAPI scoreado. NUNCA propaga
             (não pode derrubar o polling do Lead). Off por SURVEY_CAPI_ENABLED
-            (deploy ≠ ligar). Vide docs/PROCESSO_CAPI_LEAD_SURVEYS.md §9."""
+            (deploy ≠ ligar). Vide docs/interno/PROCESSO_CAPI_LEAD_SURVEYS.md §9."""
             try:
                 from api.survey_branch import is_enabled, process_pending_surveys
                 if not is_enabled():

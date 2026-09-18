@@ -550,7 +550,7 @@ def enrich_campaign_budget(rows, *, win_start, win_end, client_id: str = 'devclu
     if _sem_teto:
         from collections import Counter as _C
         logger.error("[top5] %d de %d campanhas com gasto ficaram SEM TETO — motivos: %s. "
-                     "Teto ausente é falha, não estado normal (ver docs/TETO_DE_CPL_DECISOES.md).",
+                     "Teto ausente é falha, não estado normal (ver docs/interno/TETO_DE_CPL_DECISOES.md).",
                      len(_sem_teto), _matched, dict(_C(_sem_teto)))
     return rows
 

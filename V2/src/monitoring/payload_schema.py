@@ -122,7 +122,7 @@ PAYLOAD_SCHEMA: dict[str, tuple[FieldDecision, str | None]] = {
     'alerts[].details.top_list[].today_pct':                                            (R, None),  # ex: None
     'alerts[].details.top_list[].prev_day_pct':                                         (R, None),  # ex: None — D-2 full BRT day (anteontem)
     'alerts[].details.top_list[].prev_day_delta_pp':                                    (R, None),  # ex: None
-    'alerts[].details.top_list[].direction':                                            (R, None),  # ex: 'positive' | 'negative' | 'neutral' | 'uncertain' | 'insufficient_data' | None — vem do audience_direction_map.json (ver docs/METODOLOGIA_TOP5_ROAS.md)
+    'alerts[].details.top_list[].direction':                                            (R, None),  # ex: 'positive' | 'negative' | 'neutral' | 'uncertain' | 'insufficient_data' | None — vem do audience_direction_map.json (ver docs/interno/METODOLOGIA_TOP5_ROAS.md)
     'alerts[].details.top_list[].day_quality':                                          (R, None),  # ex: 'bom' | 'ruim' | 'neutro' — direction × sign(delta_pp)
     'alerts[].details.top_list[].prev_day_quality':                                     (R, None),  # ex: 'bom' | 'ruim' | 'neutro' | None — direction × sign(prev_day_delta_pp)
     'alerts[].details.top_list[].today_quality':                                        (R, None),  # ex: 'bom' | 'ruim' | 'neutro' | None — direction × sign(today_delta_pp)

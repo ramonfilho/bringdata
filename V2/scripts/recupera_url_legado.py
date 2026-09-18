@@ -72,7 +72,7 @@ BUCKET = "smart-ads-validation-reports"
 OBJ_DUMP = "backups/cloud-sql-final-export-20260225.sql.gz"
 # Cópia da planilha de produção congelada em 08/02/2026. O nome real do arquivo é
 # `copia_de_analise_ [LF] Pesquisa - Mai25 - February 8, 12:13 PM`; ela aparece no
-# `docs/acesso_sheets.md` como "planilha de backup".
+# `docs/interno/acesso_sheets.md` como "planilha de backup".
 SHEET_COPIA = "1OqNYA5zU9ix1uf52ovRYIdLhcugzwgfKOheKxE_zgvE"
 # Só a aba v2 tem a coluna preenchida: na aba `[LF] Pesquisa` a `Page URL` existe mas
 # está inteiramente vazia (medido: 68.348 linhas, zero URLs).

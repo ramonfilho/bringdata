@@ -158,10 +158,10 @@ Consulte conforme o tipo de decisão:
 
 | Decisão | Documento |
 |---|---|
-| O que implementar agora | `docs/PLANO_EXECUCAO.md` |
-| Detalhes do refactor multi-cliente | `docs/PLANO_REFACTOR_MLOPS.md` |
+| O que implementar agora | `docs/interno/PLANO_EXECUCAO.md` |
+| Detalhes do refactor multi-cliente | `docs/interno/PLANO_REFACTOR_MLOPS.md` |
 | Gaps de infraestrutura a implementar | `docs/PLANO_SAFEGUARD.md` |
-| A/B test: configuração e janela válida | `docs/AB_TEST.md` |
+| A/B test: configuração e janela válida | `docs/interno/AB_TEST.md` |
 | Arquitetura completa do sistema | `docs/ARQUITETURA_SISTEMA_COMPLETA.md` |
 | Erros a não repetir | `docs/Erros_cometidos.md` |
 | Roadmap de maturidade MLOps | `docs/ROADMAP_MLOPS_MATURIDADE.md` |

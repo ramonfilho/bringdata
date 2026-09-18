@@ -13,7 +13,7 @@ lógica do caminho atual (`atribuir_decil_por_threshold` em
 `DecileAssignment` único agregando decil + nome do evento HQ + pixel +
 faixa de decis HQ. Paridade 100% com o caminho atual é critério de aceite.
 
-Catálogo do "como" deste subsistema: V2/docs/EVENTOS_E_DECIS_PLANO.md
+Catálogo do "como" deste subsistema: V2/docs/interno/EVENTOS_E_DECIS_PLANO.md
 (Bloco C).
 """
 from __future__ import annotations

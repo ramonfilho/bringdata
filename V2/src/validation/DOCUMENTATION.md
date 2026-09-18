@@ -435,7 +435,7 @@ export SHEETS_SHARE_EMAILS="usuario1@email.com,usuario2@email.com"
 **Autenticação:**
 - Utiliza Google Cloud Application Default Credentials (ADC)
 - Requer escopos: `spreadsheets`, `drive`
-- Configuração documentada em `docs/acesso_sheets.md`
+- Configuração documentada em `docs/interno/acesso_sheets.md`
 
 ### Exemplo de Uso
 

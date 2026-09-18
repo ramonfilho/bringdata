@@ -2,8 +2,8 @@
 
 > Registro da decisão tomada com `/sw-architect` + `/data-architect` (01/07/2026),
 > na frente do **relatório de performance de modelo** (`V2/src/validation/model_performance.py`).
-> Contexto do por quê ROAS ficou fora da v1: `V2/docs/AB_TEST.md` (ROAS é o veredito
-> final, medido no Ads Manager por variante) e a consolidação: `V2/docs/CONSOLIDACAO_CLOUDSQL.md`
+> Contexto do por quê ROAS ficou fora da v1: `V2/docs/interno/AB_TEST.md` (ROAS é o veredito
+> final, medido no Ads Manager por variante) e a consolidação: `V2/docs/interno/CONSOLIDACAO_CLOUDSQL.md`
 > (a tabela `analytics.meta_insights` já existe **vazia**; decisão 25/06 = popular
 > retroativamente com script separado).
 

@@ -32,7 +32,7 @@ O resultado é um `Teto` com MOTIVO explícito, e não um `None` solto. Foram
 encontrados 7 pontos onde o teto sumia em silêncio, e no resumo diário ele virava
 string vazia: "não há teto" e "não deu para calcular" ficavam idênticos na tela do
 gestor. O motivo é o que torna os dois distinguíveis. Ver
-`docs/TETO_DE_CPL_DECISOES.md`.
+`docs/interno/TETO_DE_CPL_DECISOES.md`.
 """
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ ROAS_ALVO_PADRAO = 2.0
 # vizinho ainda dá p = 4,6 × 10⁻³.
 #
 # Evidência completa e critério para revisitar (todo par vizinho com p < 0,05) em
-# `docs/TETO_DE_CPL_DECISOES.md`, decisão 1.
+# `docs/interno/TETO_DE_CPL_DECISOES.md`, decisão 1.
 BALDES_DE_DECIL = (
     ('D1-D2',  ('D01', 'D02')),
     ('D3-D4',  ('D03', 'D04')),

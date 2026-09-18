@@ -1452,7 +1452,7 @@ def _slack_alert_audience(a: dict, B: list):
     """Drift geral com 🟢 bom · 🔴 ruim · ⚪ neutro/uncertain.
 
     Quality = direction (audience_direction_map) × sign(Δpp).
-    Ver docs/METODOLOGIA_TOP5_ROAS.md.
+    Ver docs/interno/METODOLOGIA_TOP5_ROAS.md.
     """
     d = a.get('details', {}) or {}
     ref_label = d.get('reference_pool_label') or 'lançamentos referência'
@@ -1497,7 +1497,7 @@ def _slack_alert_audience_by_variant(a: dict, B: list):
     """Drift por A/B (Champion vs Challenger) com 🟢 bom · 🔴 ruim · ⚪ neutro por variante.
 
     Quality = direction da categoria × sign(Δpp) (ver _classify_drift_quality
-    em data_quality.py). Ver docs/METODOLOGIA_TOP5_ROAS.md.
+    em data_quality.py). Ver docs/interno/METODOLOGIA_TOP5_ROAS.md.
     """
     d = a.get('details', {}) or {}
     window = d.get('window') or ''

@@ -37,26 +37,26 @@ Leia nesta ordem (pular o que não existir):
 3. `docs/bring_data_produto.md` — definição do produto
 
 **Camada de planejamento (o que está sendo feito)**
-4. `docs/PLANO_EXECUCAO.md`
-5. `docs/PLANO_REFACTOR_MLOPS.md`
+4. `docs/interno/PLANO_EXECUCAO.md`
+5. `docs/interno/PLANO_REFACTOR_MLOPS.md`
 6. `docs/PLANO_SAFEGUARD.md`
 7. `docs/CHECKLIST_DEPLOY_REFACTOR.md`
-8. `docs/CHECKLIST_ONBOARDING_NEW_CLIENT.md`
+8. `docs/interno/CHECKLIST_ONBOARDING_NEW_CLIENT.md`
 
 **Camada operacional (A/B test ativo)**
-9. `docs/AB_TEST.md`
-10. `docs/INVESTIGACAO_BAIXO_DESEMPENHO.md`
+9. `docs/interno/AB_TEST.md`
+10. `docs/interno/INVESTIGACAO_BAIXO_DESEMPENHO.md`
 
 **Camada de referência técnica**
 11. `docs/ARQUITETURA_SISTEMA_COMPLETA.md`
-12. `docs/SISTEMA_VALIDACAO_ML.md`
+12. `docs/interno/SISTEMA_VALIDACAO_ML.md`
 13. `docs/Erros_cometidos.md`
 14. `docs/auditoria_dano_bugs_ml.md`
 
 **Camada de análise**
-15. `docs/analise_perfil_leads_devclub.md`
-16. `docs/analise_valor_ml_devclub.md`
-17. `docs/revenue_forecast.md`
+15. `docs/interno/analise_perfil_leads_devclub.md`
+16. `docs/interno/analise_valor_ml_devclub.md`
+17. `docs/interno/revenue_forecast.md`
 
 **Histórico (leitura rápida)**
 18. `docs/arquivo/` — só para identificar o que já foi feito

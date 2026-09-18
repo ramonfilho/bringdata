@@ -37,7 +37,7 @@ Arquivos afetados:
 - `src/validation/data_loader.py`
 - `configs/campanhas_atipicas.yaml`
 - `configs/weekly_validation_config.yaml`
-- `docs/instrucoes_dev_frontend_capi.md`
+- `docs/interno/instrucoes_dev_frontend_capi.md`
 - `docs/CHECKLIST_DEPLOY_REFACTOR.md`
 - `CLAUDE.md`
 - (+ arquivos em `docs/arquivo/`)
@@ -67,7 +67,7 @@ correção, em vez de cair calada num MLflow local vazio. Um teste de regressão
 qualquer credencial literal voltar.
 
 ### Paths absolutos locais
-`configs/devclub.yaml` e `mlflow_tracking/0/meta.yaml` foram atualizados para `/Users/ramonmoreira/Desktop/bring_data/`.
+`configs/devclub.yaml` e `docs/arquivo/mlflow_tracking/0/meta.yaml` foram atualizados para `/Users/ramonmoreira/Desktop/bring_data/`.
 Para que funcionem, renomear o diretório localmente:
 
 ```bash

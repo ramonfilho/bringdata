@@ -17,10 +17,10 @@
 
 ### O que está rodando
 
-- **Consumer Pub/Sub** ([api/pubsub_branch.py](../api/pubsub_branch.py), módulo novo): puxa mensagens da assinatura `lead-capture-ingest-sub`, traduz os slugs do payload em strings PT-Long que o modelo conhece, classifica (Meta-elegível / pular-allowlist / pular-faltando-dado / enviar), scoreia via o mesmo `pipeline.run` do fluxo `Lead` antigo, envia CAPI via o mesmo `send_batch_events`, grava 1 linha por lead em `registros_ml`, dá ack na mensagem.
-- **Endpoint HTTP**: `POST /pubsub/process-pending` em [api/app.py](../api/app.py). Off por padrão via env `PUBSUB_CAPI_ENABLED`. Atualmente **ligado** em produção.
-- **Mapa de tradução**: função `traduzir_survey_slugs` em [api/railway_mapping.py](../api/railway_mapping.py) cobre os 10 campos da pesquisa do sistema novo. Cinco têm slug nada-trivial (`idade=<18`, `ocupacao=clt`, `faixaSalarial=0`/`1000-2000`, `atracaoProfissao=trabalhar_exterior`, `interesseEvento=transicao_carreira`), cinco têm lowercase de cortesia (`genero=feminino`/`masculino`, `cartaoCredito`/`estudouProgramacao`/`faculdade`/`investiuCurso = sim`/`nao`). É idempotente em PT-Long, fail-loud em slug fora do vocabulário declarado.
-- **Ledger** [`registros_ml`](../scripts/create_registros_ml.py): tabela nossa no Railway PostgreSQL, 1 linha por lead processado. PK `event_id` (UUID v7 do payload, antes era `lead_id` integer; DDL migrado idempotente em 2026-05-23). Colunas: `email`, `variant` (champion/challenger), `lead_score`, `decil`, `base_meta_event_id`, `base_status` (`sent`/`error`/`skipped_allowlist`/`skipped_missing_data`), `hq_meta_event_id`, `hq_status`, `capi_sent_at`, `error_message`, `created_at`.
+- **Consumer Pub/Sub** ([api/pubsub_branch.py](../../api/pubsub_branch.py), módulo novo): puxa mensagens da assinatura `lead-capture-ingest-sub`, traduz os slugs do payload em strings PT-Long que o modelo conhece, classifica (Meta-elegível / pular-allowlist / pular-faltando-dado / enviar), scoreia via o mesmo `pipeline.run` do fluxo `Lead` antigo, envia CAPI via o mesmo `send_batch_events`, grava 1 linha por lead em `registros_ml`, dá ack na mensagem.
+- **Endpoint HTTP**: `POST /pubsub/process-pending` em [api/app.py](../../api/app.py). Off por padrão via env `PUBSUB_CAPI_ENABLED`. Atualmente **ligado** em produção.
+- **Mapa de tradução**: função `traduzir_survey_slugs` em [api/railway_mapping.py](../../api/railway_mapping.py) cobre os 10 campos da pesquisa do sistema novo. Cinco têm slug nada-trivial (`idade=<18`, `ocupacao=clt`, `faixaSalarial=0`/`1000-2000`, `atracaoProfissao=trabalhar_exterior`, `interesseEvento=transicao_carreira`), cinco têm lowercase de cortesia (`genero=feminino`/`masculino`, `cartaoCredito`/`estudouProgramacao`/`faculdade`/`investiuCurso = sim`/`nao`). É idempotente em PT-Long, fail-loud em slug fora do vocabulário declarado.
+- **Ledger** [`registros_ml`](../../scripts/create_registros_ml.py): tabela nossa no Railway PostgreSQL, 1 linha por lead processado. PK `event_id` (UUID v7 do payload, antes era `lead_id` integer; DDL migrado idempotente em 2026-05-23). Colunas: `email`, `variant` (champion/challenger), `lead_score`, `decil`, `base_meta_event_id`, `base_status` (`sent`/`error`/`skipped_allowlist`/`skipped_missing_data`), `hq_meta_event_id`, `hq_status`, `capi_sent_at`, `error_message`, `created_at`.
 
   **Decisão 2026-05-24** (será implementada em seguida): adicionar também colunas `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`, `utm_url`. Motivo: simplificar queries de monitoramento (ranking de UTM por decil, source missing, etc.) que precisariam fazer JOIN com `lead_surveys × UTMTracking`. Single-table fica mais rápido e mais fácil de ler. Consumer Pub/Sub vai passar a gravar essas colunas no INSERT.
 
@@ -37,7 +37,7 @@
 - **Gate D** (auditoria do YAML dentro da imagem): passou — variants `champion_jan30` e `challenger_abr28` consistentes.
 - **Gate C.1** (equivalência de score raw + decil contra revisão de referência em produção): passou, 7 leads do Railway comparados, 0 divergências.
 - **Gate C.2** (equivalência de decil + value + event_name no caminho A/B): passou, 9 leads, 0 divergências.
-- **Bonus**: o script do Gate C.1 ([scripts/test_revision_equivalence.py](../scripts/test_revision_equivalence.py)) foi corrigido no commit `c09e0d2`. Antes ele exigia que a revisão de referência tivesse tag de URL, e falhava com "revisão sem URL tagged" se quem fez o deploy anterior não tivesse movido a tag `prod` ao promover. O fix devolve a URL principal do serviço como fallback quando a revisão alvo serve 100% e está sem tag — a URL principal sempre roteia pra quem está a 100%. O gate ficou intrínseco, não depende mais de convenção operacional frágil.
+- **Bonus**: o script do Gate C.1 ([scripts/test_revision_equivalence.py](../../scripts/test_revision_equivalence.py)) foi corrigido no commit `c09e0d2`. Antes ele exigia que a revisão de referência tivesse tag de URL, e falhava com "revisão sem URL tagged" se quem fez o deploy anterior não tivesse movido a tag `prod` ao promover. O fix devolve a URL principal do serviço como fallback quando a revisão alvo serve 100% e está sem tag — a URL principal sempre roteia pra quem está a 100%. O gate ficou intrínseco, não depende mais de convenção operacional frágil.
 
 ### Smoke real do primeiro ciclo
 
@@ -54,9 +54,9 @@ Backlog do load test antigo (744 mensagens restantes) **purgado** em 2026-05-24 
 
 | Arquivo | Cobertura | Status |
 |---|---|---|
-| [tests/test_traduzir_survey_slugs.py](../tests/test_traduzir_survey_slugs.py) | Tradução slug→PT, paridade encoding(slug)==encoding(PT-Long), idempotência, fail-loud, não-mutação | 7/7 |
-| [tests/test_pubsub_branch.py](../tests/test_pubsub_branch.py) | Funções puras do consumer (parse, payload→survey_dict, payload→enrich, payload→utm, is_meta_eligible, classify, ledger_row) — contra payload real | 14/14 |
-| [tests/test_survey_mapping.py](../tests/test_survey_mapping.py) | Regressão do adaptador I2 (continua válida) | 5/5 |
+| [tests/test_traduzir_survey_slugs.py](../../tests/test_traduzir_survey_slugs.py) | Tradução slug→PT, paridade encoding(slug)==encoding(PT-Long), idempotência, fail-loud, não-mutação | 7/7 |
+| [tests/test_pubsub_branch.py](../../tests/test_pubsub_branch.py) | Funções puras do consumer (parse, payload→survey_dict, payload→enrich, payload→utm, is_meta_eligible, classify, ledger_row) — contra payload real | 14/14 |
+| [tests/test_survey_mapping.py](../../tests/test_survey_mapping.py) | Regressão do adaptador I2 (continua válida) | 5/5 |
 
 ### Pendências antes da próxima fase
 
@@ -68,10 +68,10 @@ Backlog do load test antigo (744 mensagens restantes) **purgado** em 2026-05-24 
 
 O design original (chamado nos protocolos antigos de **I3** = enriquecimento por JOIN com `integration_logs` e **I4** = ramo isolado lendo `lead_surveys`) ficou pausado em 2026-05-19 antes do deploy canary. **Em 2026-05-23 a pausa foi superada por uma virada de arquitetura** — em vez de retomar I3/I4, foi construído o consumer Pub/Sub do zero, com payload completo do dono. Os módulos do design antigo continuam no repositório mas com header `[DEPRECATED 2026-05-23]`:
 
-- [api/survey_enrichment.py](../api/survey_enrichment.py) — enriquecimento por log; substituído porque o payload Pub/Sub já traz `hasComputer`/`fbp`/`fbc`/`firstName`/`lastName`/`phone`/`userAgent`/`ip` direto.
-- [api/survey_branch.py](../api/survey_branch.py) — ramo isolado lendo Railway; substituído pelo consumer Pub/Sub.
+- [api/survey_enrichment.py](../../api/survey_enrichment.py) — enriquecimento por log; substituído porque o payload Pub/Sub já traz `hasComputer`/`fbp`/`fbc`/`firstName`/`lastName`/`phone`/`userAgent`/`ip` direto.
+- [api/survey_branch.py](../../api/survey_branch.py) — ramo isolado lendo Railway; substituído pelo consumer Pub/Sub.
 
-O hook `_run_survey_branch_safely` em [api/app.py](../api/app.py) continua presente mas off por env (`SURVEY_CAPI_ENABLED` default false), pronto para remoção na próxima limpeza.
+O hook `_run_survey_branch_safely` em [api/app.py](../../api/app.py) continua presente mas off por env (`SURVEY_CAPI_ENABLED` default false), pronto para remoção na próxima limpeza.
 
 ---
 
@@ -151,9 +151,9 @@ Cada item foi um ciclo fechado: implementa → testa → commita → (deploy can
 | **P2** | Pub/Sub provisionado — tópico + sub 31d + SA publisher + chave entregue ao dono | ✅ 2026-05-22 |
 | **P3** | Verificação dos primeiros 9 leads que o dono publicou — formato slug confirmado | ✅ 2026-05-23 |
 | **P4** | DDL do ledger migrado — PK `lead_id` integer → `event_id` string (UUID v7) | ✅ aplicado idempotente |
-| **P5** | Mapa slug→PT em [api/railway_mapping.py](../api/railway_mapping.py) — `traduzir_survey_slugs` para os 10 campos da pesquisa | ✅ commit `3457916` |
-| **P6** | Consumer [api/pubsub_branch.py](../api/pubsub_branch.py) — pull/parse/translate/classify/score/send/ledger/ack | ✅ commit `3457916` |
-| **P7** | Endpoint `POST /pubsub/process-pending` em [api/app.py](../api/app.py) | ✅ commit `3457916` |
+| **P5** | Mapa slug→PT em [api/railway_mapping.py](../../api/railway_mapping.py) — `traduzir_survey_slugs` para os 10 campos da pesquisa | ✅ commit `3457916` |
+| **P6** | Consumer [api/pubsub_branch.py](../../api/pubsub_branch.py) — pull/parse/translate/classify/score/send/ledger/ack | ✅ commit `3457916` |
+| **P7** | Endpoint `POST /pubsub/process-pending` em [api/app.py](../../api/app.py) | ✅ commit `3457916` |
 | **P8** | Deprecar `survey_branch.py` + `survey_enrichment.py` via header `[DEPRECATED 2026-05-23]` | ✅ commit `3457916` |
 | **P9** | Merge `feat/capi-lead-surveys-scoring` → `main` (sem conflitos, auto-merge no `app.py`) | ✅ commit `43a0d98` |
 | **P10** | Fix Gate C.1 — `scripts/test_revision_equivalence.py` aceita revisão de 100% sem tag | ✅ commit `c09e0d2` |
@@ -175,12 +175,12 @@ Cada item foi um ciclo fechado: implementa → testa → commita → (deploy can
 
 2. **Ledger `registros_ml`** (nosso): `event_id` TEXT PRIMARY KEY (UUID v7 do payload, estável entre reenvios). Demais colunas em §"O que está rodando" acima. Dedup é trivial: `ON CONFLICT (event_id) DO NOTHING`. Fonte de leitura do monitoramento (§7).
 
-3. **Consumer** ([api/pubsub_branch.py](../api/pubsub_branch.py)): chamado a cada 5 min pelo Cloud Scheduler via `POST /pubsub/process-pending`. Off por padrão via env `PUBSUB_CAPI_ENABLED` (deploy ≠ ligar). Quando ligado:
+3. **Consumer** ([api/pubsub_branch.py](../../api/pubsub_branch.py)): chamado a cada 5 min pelo Cloud Scheduler via `POST /pubsub/process-pending`. Off por padrão via env `PUBSUB_CAPI_ENABLED` (deploy ≠ ligar). Quando ligado:
    - **Pull** batch de até 25 mensagens da assinatura.
    - **Parse** JSON. Payload inválido vira erro de log + ack (não recicla).
    - **Traduz slugs** via `traduzir_survey_slugs`. Slug fora do vocabulário declarado → `ValueError`, registra lead com `base_status='error'`, ack.
    - **Classifica**:
-     - Source não está na allowlist Meta (`facebook-ads`/`instagram`/`ig`/`fb`/`facebook` per [configs/clients/devclub.yaml](../configs/clients/devclub.yaml)) → `skipped_allowlist`.
+     - Source não está na allowlist Meta (`facebook-ads`/`instagram`/`ig`/`fb`/`facebook` per [configs/clients/devclub.yaml](../../configs/clients/devclub.yaml)) → `skipped_allowlist`.
      - Meta-elegível mas faltando `hasComputer` ou `fbp` ou `fbc` → `skipped_missing_data`.
      - Caso contrário → `send`.
    - **Scoreia** os de `send` usando o **mesmo** `pipeline.run` do fluxo `Lead`, mesmo roteamento A/B Champion/Challenger, mesmo `atribuir_decil_por_threshold`. Nenhuma transformação reimplementada → equivalência por construção (Gate C.1/C.2 trivial).
@@ -190,7 +190,7 @@ Cada item foi um ciclo fechado: implementa → testa → commita → (deploy can
 
 4. **Idempotência ponta-a-ponta**: o `eventId` do payload é o mesmo entre reenvios do dono (contrato), é nosso PK no ledger (`ON CONFLICT DO NOTHING`), e é o que vira o `event_id` no Meta CAPI (Meta deduplica por isso também). Reentregar a mesma mensagem 10 vezes resulta em 1 linha no ledger e 1 evento no Meta.
 
-5. **Allowlist do envio ao Meta** ([configs/clients/devclub.yaml](../configs/clients/devclub.yaml) → `utm_source_allowlist`): hoje contém `facebook-ads`, `instagram`, `ig`, `fb`, `facebook`. Source fora dela não dispara evento Meta. Verificada contra o **valor bruto** de `utm.source` no payload — não depende do mapeamento de sinônimos.
+5. **Allowlist do envio ao Meta** ([configs/clients/devclub.yaml](../../configs/clients/devclub.yaml) → `utm_source_allowlist`): hoje contém `facebook-ads`, `instagram`, `ig`, `fb`, `facebook`. Source fora dela não dispara evento Meta. Verificada contra o **valor bruto** de `utm.source` no payload — não depende do mapeamento de sinônimos.
 
 ## 6. Pendências obrigatórias antes da próxima fase
 
@@ -292,9 +292,9 @@ São parte do item 14 (seção do digest) + adicionadas ao `critical_alerts.py` 
 
 ---
 
-*Artefatos vivos (caminho Pub/Sub):* [api/pubsub_branch.py](../api/pubsub_branch.py), [api/railway_mapping.py](../api/railway_mapping.py) (mapa slug→PT), [api/survey_mapping.py](../api/survey_mapping.py) (reaproveitado do I2), [scripts/create_registros_ml.py](../scripts/create_registros_ml.py), [api/app.py](../api/app.py) (endpoint `/pubsub/process-pending`), testes em `tests/test_traduzir_survey_slugs.py` e `tests/test_pubsub_branch.py`.
+*Artefatos vivos (caminho Pub/Sub):* [api/pubsub_branch.py](../../api/pubsub_branch.py), [api/railway_mapping.py](../../api/railway_mapping.py) (mapa slug→PT), [api/survey_mapping.py](../../api/survey_mapping.py) (reaproveitado do I2), [scripts/create_registros_ml.py](../../scripts/create_registros_ml.py), [api/app.py](../../api/app.py) (endpoint `/pubsub/process-pending`), testes em `tests/test_traduzir_survey_slugs.py` e `tests/test_pubsub_branch.py`.
 
-*Artefatos deprecados (caminho SQL/Railway, mantidos por histórico):* [api/survey_branch.py](../api/survey_branch.py), [api/survey_enrichment.py](../api/survey_enrichment.py) (ambos com header `[DEPRECATED 2026-05-23]`).
+*Artefatos deprecados (caminho SQL/Railway, mantidos por histórico):* [api/survey_branch.py](../../api/survey_branch.py), [api/survey_enrichment.py](../../api/survey_enrichment.py) (ambos com header `[DEPRECATED 2026-05-23]`).
 
 *Reuso canônico (compartilhado com o fluxo `Lead` antigo):* `pipeline.run`, `pipeline.get_ab_variant`, `pipeline.get_variant_predictor`, `atribuir_decil_por_threshold`, `send_batch_events`.
 

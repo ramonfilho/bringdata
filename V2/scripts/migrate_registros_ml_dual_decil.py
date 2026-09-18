@@ -1,4 +1,4 @@
-"""Fase 1 do refator 'decil dos 2 modelos no ledger' (V2/docs/plano_decis_dois_modelos_ledger.md).
+"""Fase 1 do refator 'decil dos 2 modelos no ledger' (V2/docs/interno/plano_decis_dois_modelos_ledger.md).
 
 Adiciona ao `registros_ml` as colunas para gravar o score/decil dos DOIS modelos
 (champion + challenger) + run_ids + auditoria, no momento do scoreamento online.

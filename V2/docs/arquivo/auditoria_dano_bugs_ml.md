@@ -1,4 +1,4 @@
-> **DEPRECADO em 2026-05-08.** Conteúdo migrado para [registro_erros_ml.md](../registro_erros_ml.md), re-tecnicado para audiência interna (Champion/Challenger, ordinal vs OHE, encoding_overrides, LQHQ vs LQ).
+> **DEPRECADO em 2026-05-08.** Conteúdo migrado para [registro_erros_ml.md](../interno/registro_erros_ml.md), re-tecnicado para audiência interna (Champion/Challenger, ordinal vs OHE, encoding_overrides, LQHQ vs LQ).
 > Versão original (linguagem leve para cliente externo) preservada aqui para referência. PDF entregue ao cliente (fora do repositório público desde 18/09/2026; cópia local em `~/Desktop/bring_data_fora_do_repo/`).
 
 ---

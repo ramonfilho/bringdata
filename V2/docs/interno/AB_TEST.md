@@ -8,7 +8,7 @@
 > Deploy do Champion v4 em produção via canary está em execução em sessão paralela. Roteamento exato do A/B (por UTM, por split de tráfego Cloud Run, ou híbrido) é definido na sessão de deploy. As seções abaixo descrevem o design canônico — adaptar à estratégia em execução.
 
 > **Nota sobre identificadores codificados (`DT-12`, `T1-X`, etc.):** este doc usa IDs curtos pra cruzar com commits. Nome verbal de cada um nos catálogos:
-> - Salvaguardas (`T1-X`) — [`PLANO_SAFEGUARD.md`](PLANO_SAFEGUARD.md)
+> - Salvaguardas (`T1-X`) — [`PLANO_SAFEGUARD.md`](../PLANO_SAFEGUARD.md)
 > - Dívida técnica (`DT-X`) — [`PLANO_REFACTOR_MLOPS.md`](PLANO_REFACTOR_MLOPS.md)
 > - **`DT-12`** especificamente: "encoding diferente por variante A/B" — mecanismo de override que permite Champion e Challenger usarem transformações diferentes pra idade/salário (resolvido em 01/abr; cenário de aposentadoria desse mecanismo está como **`DT-16`** no catálogo).
 
@@ -423,7 +423,7 @@ Ver: `PLANO_REFACTOR_MLOPS.md` seção DT-12 para detalhes completos.
 >
 > **Motivo da rejeição:** o patch carregaria adiante a pipeline não refatorada do rollback (sem `src/core/`), criando um caminho paralelo que depois precisaria ser abandonado para destravar multi-cliente (Fase 3b em diante). Unificar `edf23e9` → `main` mantém uma pipeline só, evolutiva.
 >
-> **Onde ler o que substituiu:** `docs/PLANO_EXECUCAO.md` → Fase 3 "Unificação de branches" (revista em 2026-04-21).
+> **Onde ler o que substituiu:** `docs/interno/PLANO_EXECUCAO.md` → Fase 3 "Unificação de branches" (revista em 2026-04-21).
 >
 > **O que a ab-patch oferecia (para referência):** A/B routing sobre a pipeline do rollback — preservava as features `_valido_*` que Champion precisa. A unificação na main precisa **portar** essas features em vez de reaproveitar a pipeline antiga.
 

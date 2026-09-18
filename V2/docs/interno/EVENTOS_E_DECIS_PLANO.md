@@ -20,7 +20,7 @@ Cada lead deixa o scoring carregando uma lista de **atribuições** (decil + nom
 
 O dono pediu que os eventos de alta qualidade (`LeadQualifiedHighQuality` do Champion e `HQLB` do Challenger) voltassem a chegar no pixel `241752320666130` (BM do Rodolfo Mori), por onde o gestor de tráfego precisa cadastrar campanhas que otimizem nesses sinais.
 
-Mecanismo implementado: lista declarativa `capi.extra_hq_destinations` em [configs/clients/devclub.yaml](../configs/clients/devclub.yaml), parseada para uma dataclass `ExtraHQDestination` em [src/core/client_config.py](../src/core/client_config.py), e consumida por um laço dentro de `send_both_lead_events` em [api/capi_integration.py](../api/capi_integration.py). Para cada destinação cujo `event_name` case com o evento HQ que efetivamente saiu, dispara cópia reusando `send_lead_qualified_high_quality` com overrides de pixel, nome de evento e faixa de decis.
+Mecanismo implementado: lista declarativa `capi.extra_hq_destinations` em [configs/clients/devclub.yaml](../../configs/clients/devclub.yaml), parseada para uma dataclass `ExtraHQDestination` em [src/core/client_config.py](../../src/core/client_config.py), e consumida por um laço dentro de `send_both_lead_events` em [api/capi_integration.py](../../api/capi_integration.py). Para cada destinação cujo `event_name` case com o evento HQ que efetivamente saiu, dispara cópia reusando `send_lead_qualified_high_quality` com overrides de pixel, nome de evento e faixa de decis.
 
 **Estado em 2026-06-07:** canary `smart-ads-api-00680-jez` a 0% de tráfego, gates B/D/C.1/C.2 passados (50 leads cada, zero divergências contra produção). Aguardando autorização para promoção.
 
@@ -34,7 +34,7 @@ Análise offline em worktree separado (`bring_data-roas`):
 
 - Descobriu-se que o `utm_campaign` que a Meta grava em todo lead carrega o identificador da campanha no sufixo (depois da barra vertical) — chave que permite casar custo ao lead com unicidade contra campanhas reaproveitadas com mesmo nome.
 - Atribuição de custo por lead via composite key `(campaign_id, ad_name)` casado contra o spend da Meta API por adset por dia atingiu 82,8% de cobertura, mediana R$ 5,35 — alinhada ao histórico do gestor de R$ 4-6.
-- Aplicando a fórmula `retorno_esperado = (probabilidade × ticket à vista) ÷ custo_por_lead` para reordenar os top-N, o ganho líquido anual projetado fica entre R$ 86 mil (top 10%) e R$ 298 mil (top 50%), usando faturamento recebido à vista (cartão líquido + primeira parcela do boleto, mesma fórmula do `_generate_revenue_forecast` em [src/monitoring/orchestrator.py](../src/monitoring/orchestrator.py)) e corrigindo por uma taxa de rastreamento de 52,8% das vendas reais que de fato casam com um lead nosso.
+- Aplicando a fórmula `retorno_esperado = (probabilidade × ticket à vista) ÷ custo_por_lead` para reordenar os top-N, o ganho líquido anual projetado fica entre R$ 86 mil (top 10%) e R$ 298 mil (top 50%), usando faturamento recebido à vista (cartão líquido + primeira parcela do boleto, mesma fórmula do `_generate_revenue_forecast` em [src/monitoring/orchestrator.py](../../src/monitoring/orchestrator.py)) e corrigindo por uma taxa de rastreamento de 52,8% das vendas reais que de fato casam com um lead nosso.
 - Validação por bootstrap em mil iterações: correlação de Spearman entre decil predito e ROAS realizado fica em \[0,92, 1,00] na fórmula nova vs \[0,45, 0,90] na propensão pura.
 
 PDF para stakeholders (fora do repositório público desde 18/09/2026; cópia local em `~/Desktop/bring_data_fora_do_repo/`).
@@ -45,7 +45,7 @@ PDF para stakeholders (fora do repositório público desde 18/09/2026; cópia lo
 
 Três pontos de colisão identificados durante o desenho com `/sw-architect`:
 
-1. **Mesmo arquivo, mesma função.** As duas frentes mexem em [api/capi_integration.py](../api/capi_integration.py), especificamente em `send_both_lead_events`. O fan-out introduziu um laço logo após o disparo do evento HQ primário; o desenho original da recalibração propunha refatorar a função inteira para usar um conceito novo (chamado então de `EventEmitter`).
+1. **Mesmo arquivo, mesma função.** As duas frentes mexem em [api/capi_integration.py](../../api/capi_integration.py), especificamente em `send_both_lead_events`. O fan-out introduziu um laço logo após o disparo do evento HQ primário; o desenho original da recalibração propunha refatorar a função inteira para usar um conceito novo (chamado então de `EventEmitter`).
 
 2. **Dois mecanismos para o mesmo problema.** "Quais pixels recebem qual evento" estava modelado de duas formas: lista declarativa `extra_hq_destinations` no YAML do cliente (fan-out) versus mapping bipartido `(estratégia, variante) → {decil: nome_do_evento}` em uma classe nova (recalibração). Duas fontes de verdade para a mesma decisão tendem a divergir.
 
@@ -59,7 +59,7 @@ Resolvida a partir dos princípios da skill `/sw-architect` (uma fonte de verdad
 
 **O conceito `EventEmitter` proposto no desenho original da recalibração morre.** O comportamento que ele cobriria já sai naturalmente da combinação de dois componentes que vão existir de qualquer jeito:
 
-- A interface de estratégia de decil (PropensityDecileStrategy hoje, RoasV1DecileStrategy depois) já retorna, no método `assign`, o trio `(decil, nome do evento primário, pixel principal)` — quem decide qual evento primário sai é a própria estratégia, lendo a configuração de variante que já existe em [configs/active_models/devclub.yaml](../configs/active_models/devclub.yaml).
+- A interface de estratégia de decil (PropensityDecileStrategy hoje, RoasV1DecileStrategy depois) já retorna, no método `assign`, o trio `(decil, nome do evento primário, pixel principal)` — quem decide qual evento primário sai é a própria estratégia, lendo a configuração de variante que já existe em [configs/active_models/devclub.yaml](../../configs/active_models/devclub.yaml).
 - O laço de fan-out já existente é a única autoridade sobre "cópias em pixels extras", lendo `extra_hq_destinations` do cliente. Funciona idêntico para qualquer evento primário que passe por ele — Propensão hoje, ROAS V1 amanhã, qualquer outro depois.
 
 Consequências práticas dessa decisão:
@@ -73,7 +73,7 @@ Consequências práticas dessa decisão:
 
 ## 3. Fluxo do lead — desenho fundido
 
-Cada lead, na cadeia de scoring de [api/capi_integration.py](../api/capi_integration.py):
+Cada lead, na cadeia de scoring de [api/capi_integration.py](../../api/capi_integration.py):
 
 1. Recebe a variante (Champion ou Challenger) pelo `pipeline.get_ab_variant(utm)`.
 2. `pipeline.run` pontua o lead — retorna score bruto.
@@ -117,7 +117,7 @@ Camada de dados nova que vai alimentar a fórmula da recalibração. Isolada do 
   - `ad_to_adset_map` — chave `(client_id, campaign_id, ad_name)`, coluna `adset_id`, `updated_at`. Resolve a ambiguidade de nome de anúncio reaproveitado em campanhas distintas.
 
   **Nota — por que `utm_medium` não substitui a `ad_to_adset_map`:** verificação contra o snapshot 120d em 2026-06-07 mostrou que `utm_medium` tem cobertura ótima (98,6%) mas é **categoria de público** no DevClub (`ABERTO`, `MIX QUENTE`, `dgen`, `Linguagem de programação`), não identificador de adset — 61% do volume vive num bucket `ABERTO` espalhado por **74 adsets reais distintos**, indistinguíveis por medium. A `ad_to_adset_map` é justamente o que abre esses 74 em CPLs próprios, via casamento `(campaign_id, ad_name) → adset_id`.
-- Repositório `CplRepository` em [src/data/cost_attribution/](../src/data/cost_attribution/) — interface mais adapter Railway mais adapter em memória (carregado no startup do container, lookup de microssegundos no hot path).
+- Repositório `CplRepository` em [src/data/cost_attribution/](../../src/data/cost_attribution/) — interface mais adapter Railway mais adapter em memória (carregado no startup do container, lookup de microssegundos no hot path).
 - Resolver `AdResolver` — adaptador `(campaign_id, ad_name) → adset_id` consumindo `ad_to_adset_map`.
 - Job de refresh — entry point standalone que puxa Meta Insights API agregando spend e leads dos últimos 30 dias por adset, calcula `cpl_30d`, faz upsert nas duas tabelas. Idempotente.
 - Infra do refresh — **Cloud Scheduler → endpoint HTTP no `smart-ads-api`** (mesmo padrão do polling Railway e do monitoramento diário), 1×/dia às 04:00 BRT. Custo praticamente zero, reusa container já rodando, sem Cloud Run Job dedicado.
@@ -131,7 +131,7 @@ Camada de dados nova que vai alimentar a fórmula da recalibração. Isolada do 
 Refator preparatório do scoring para aceitar múltiplas estratégias de decil sem mudar comportamento. Sai um arquivo de produção com paridade 100% contra o comportamento atual.
 
 **Trabalhos:**
-- Definir interface `DecileStrategy` em [src/core/](../src/core/) (ou diretório a ser combinado com o já existente do scoring). Método único `assign(score, features, variant_config, lead_id)` retornando uma dataclass `DecileAssignment` com decil, identificador da estratégia, nome do evento primário, pixel principal e metadados de observabilidade.
+- Definir interface `DecileStrategy` em [src/core/](../../src/core/) (ou diretório a ser combinado com o já existente do scoring). Método único `assign(score, features, variant_config, lead_id)` retornando uma dataclass `DecileAssignment` com decil, identificador da estratégia, nome do evento primário, pixel principal e metadados de observabilidade.
 - Implementar `PropensityDecileStrategy` extraindo a lógica de "qual decil vira qual evento" que hoje vive inline em `send_both_lead_events`. Lê `variant_config.event_name_high_quality` e `variant_config.pixel_id`.
 - Testar paridade: rodar pelo menos 10 mil leads pelo fluxo antigo e pelo fluxo novo (com `PropensityDecileStrategy` como única estratégia habilitada), asseverar 100% mesmo decil e mesmo evento primário.
 
@@ -142,7 +142,7 @@ Refator preparatório do scoring para aceitar múltiplas estratégias de decil s
 Introduz o caminho que itera sobre múltiplas atribuições, mantendo o ponto de entrada antigo intacto para os consumidores externos da função.
 
 **Trabalhos:**
-- Criar `send_all_lead_events` em [api/capi_integration.py](../api/capi_integration.py). Assinatura recebe uma lista de `DecileAssignment` + os mesmos parâmetros de identidade do lead que `send_both_lead_events` já recebe.
+- Criar `send_all_lead_events` em [api/capi_integration.py](../../api/capi_integration.py). Assinatura recebe uma lista de `DecileAssignment` + os mesmos parâmetros de identidade do lead que `send_both_lead_events` já recebe.
 - Para cada atribuição: dispara primário com overrides apontando para o pixel principal da atribuição; executa o **laço de fan-out atual idêntico**, lendo `extra_hq_destinations` e copiando onde o `event_name` casar.
 - `send_both_lead_events` vira adapter: monta uma lista com uma única atribuição da `PropensityDecileStrategy` e chama `send_all_lead_events`. Comportamento externo idêntico a hoje.
 - Atualizar os callers de `send_both_lead_events` somente se houver ganho claro (por exemplo, evitar dupla pontuação do mesmo lead). Não obrigatório para entrar em produção — a função antiga continua funcional.
@@ -255,7 +255,7 @@ A implementação técnica do calibrador no pipeline (interface `Calibrator`, in
 
 ## 6. Vínculo com o roadmap único
 
-Conforme [CLAUDE.md](../CLAUDE.md) e a hierarquia descrita em [PLANO_EXECUCAO.md](PLANO_EXECUCAO.md): este documento é um **catálogo técnico** ("como"). O **quando** vive no `PLANO_EXECUCAO.md`. Quando houver divergência de prioridade ou status, vence o `PLANO_EXECUCAO`.
+Conforme [CLAUDE.md](../../CLAUDE.md) e a hierarquia descrita em [PLANO_EXECUCAO.md](PLANO_EXECUCAO.md): este documento é um **catálogo técnico** ("como"). O **quando** vive no `PLANO_EXECUCAO.md`. Quando houver divergência de prioridade ou status, vence o `PLANO_EXECUCAO`.
 
 - **Bloco A** entra no horizonte imediato — já em canary, atende ao pedido do dono de 2026-06-07.
 - **Blocos B–E** são candidatos a horizonte futuro; depende da priorização de `PLANO_EXECUCAO` contra o gate único (validação OOS) e os pré-requisitos do segundo cliente.

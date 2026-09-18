@@ -8,7 +8,7 @@ Estrutura:
   - `adapters/`      — implementações: Railway (fonte de verdade) e
                        InMemory (cache no startup do scoring).
 
-Catálogo do "como" deste subsistema: V2/docs/EVENTOS_E_DECIS_PLANO.md (Bloco B).
+Catálogo do "como" deste subsistema: V2/docs/interno/EVENTOS_E_DECIS_PLANO.md (Bloco B).
 """
 from .cpl_record import CplRecord, AdMapping  # noqa: F401
 from .cpl_repository import CplRepository  # noqa: F401

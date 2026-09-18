@@ -3,7 +3,7 @@
 `registros_ml` é populado pelo consumer Pub/Sub desde 2026-05-23. Cada linha é
 1 lead processado, identificado pelo `event_id` (UUID v7 do payload). Schema
 completo em `scripts/create_registros_ml.py`; documentação operacional em
-`docs/PROCESSO_CAPI_LEAD_SURVEYS.md`.
+`docs/interno/PROCESSO_CAPI_LEAD_SURVEYS.md`.
 
 Este adaptador é a tradução entre o schema físico (colunas snake_case) e o
 formato interno `LeadRecord` (campos em português, contrato estável).

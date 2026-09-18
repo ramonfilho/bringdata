@@ -1,6 +1,6 @@
 # Roadmap MLOps — Bring Data V2 (ARQUIVADO)
 
-> **📦 ARQUIVADO em 2026-04-27.** Conteúdo absorvido pelo `docs/PLANO_EXECUCAO.md` (horizontes H1–H7) que agora é o roadmap único do projeto. Este arquivo permanece como referência histórica das fases imediata/pós-deploy/Cliente B/escala originalmente desenhadas. Não consultar para saber o que fazer agora — ir ao `PLANO_EXECUCAO.md`.
+> **📦 ARQUIVADO em 2026-04-27.** Conteúdo absorvido pelo `docs/interno/PLANO_EXECUCAO.md` (horizontes H1–H7) que agora é o roadmap único do projeto. Este arquivo permanece como referência histórica das fases imediata/pós-deploy/Cliente B/escala originalmente desenhadas. Não consultar para saber o que fazer agora — ir ao `PLANO_EXECUCAO.md`.
 
 ---
 

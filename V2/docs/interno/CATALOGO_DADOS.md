@@ -1,6 +1,6 @@
 # Catálogo de dados
 
-**Gerado automaticamente em 2026-08-11** por [scripts/catalogo_dados.py](../scripts/catalogo_dados.py). Não editar à mão: rode o script de novo.
+**Gerado automaticamente em 2026-08-11** por [scripts/catalogo_dados.py](../../scripts/catalogo_dados.py). Não editar à mão: rode o script de novo.
 
 As partes escritas por gente são duas, as duas dentro do script: a coluna *Para que serve* (dicionário `PARA_QUE_SERVE`) e a seção *Relações entre tabelas* (constante `RELACOES`). Tabela nova aparece aqui sozinha, marcada como SEM DESCRIÇÃO até alguém escrever a linha dela.
 

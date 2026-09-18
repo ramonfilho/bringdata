@@ -4,7 +4,7 @@
 **Propósito:** evitar a "pegadinha de promoção" — substituir o `mlflow_run_id` do Champion sem migrar `encoding_overrides`, `conversion_rates` e códigos correlatos quebra produção em segundos. Este doc é o protocolo obrigatório.
 
 > **Nota sobre identificadores codificados (`T1-10`, `DT-12`, `DT-17`, `DT-18`):** este doc cita IDs curtos pra rastreabilidade. O nome verbal e contexto completo de cada um vivem nos catálogos:
-> - `T1-10` ("detecção de feature crítica zerada após encoding") — ver [`PLANO_SAFEGUARD.md`](PLANO_SAFEGUARD.md).
+> - `T1-10` ("detecção de feature crítica zerada após encoding") — ver [`PLANO_SAFEGUARD.md`](../PLANO_SAFEGUARD.md).
 > - `DT-12` ("encoding diferente por variante A/B"), `DT-17` ("eliminar duplicação business_config × YAML"), `DT-18` ("normalizar 4 features binárias raw") — ver [`PLANO_REFACTOR_MLOPS.md`](PLANO_REFACTOR_MLOPS.md).
 
 ---
@@ -220,8 +220,8 @@ Verificar nas primeiras 24h:
 - `capi_integration.py:347` — onde conversion_rates_override é aplicado
 - `core/encoding.py:175-203` — merge de EncodingConfig + override
 - `core/encoding.py:321-355` — alinhamento ao feature_registry
-- `docs/PLANO_REFACTOR_MLOPS.md` DT-12 — histórico do encoding_overrides
-- `docs/PLANO_REFACTOR_MLOPS.md` DT-17 — solução arquitetural definitiva (em aberto)
+- `docs/interno/PLANO_REFACTOR_MLOPS.md` DT-12 — histórico do encoding_overrides
+- `docs/interno/PLANO_REFACTOR_MLOPS.md` DT-17 — solução arquitetural definitiva (em aberto)
 
 ---
 

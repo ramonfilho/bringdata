@@ -26,7 +26,7 @@ Mesmo conceito ("lead com pesquisa"), **4 esquemas de chave diferentes**, **0 fo
 - Instância `smart-ads-db` (sempre ligada), database `ledger`, schema **`analytics`**.
 - Conexão: `src/data/analytics_connection.py` (`SET search_path TO analytics, public`). Para varreduras pesadas de jsonb, **abrir com `timeout` ≥ 180s** — o default 30s estoura em scans de 200k+ linhas.
 - Tabelas: `analytics.leads` (pesquisa + decil/score por source), `analytics.sales` (vendas dos 5 gateways), `validation_runs`/`validation_metrics`, `meta_insights`.
-- Doc autoritativo da consolidação: `V2/docs/CONSOLIDACAO_CLOUDSQL.md`.
+- Doc autoritativo da consolidação: `V2/docs/interno/CONSOLIDACAO_CLOUDSQL.md`.
 
 ### As fontes brutas (lineage real) — todas no Cloud SQL `public`
 | fonte conceitual | tabela | janela | esquema survey |

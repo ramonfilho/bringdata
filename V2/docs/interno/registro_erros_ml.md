@@ -13,7 +13,7 @@ politica_merge: versão mais nova vence; auditoria foi re-tecnicada (Champion/Ch
 > Registro técnico consolidado: bugs com impacto real, decisões erradas, padrões que se repetiram, backtests contrafactuais (mar–mai/2026), medidas corretivas implementadas e frentes preventivas em aberto.
 
 > **Nota sobre identificadores codificados (Cluster N, V.1, V.2, T1-X, DT-X, R-X):** este doc usa identificadores curtos pra cruzar com commits, issues e os catálogos técnicos. O significado verbal de cada um vive nos catálogos correspondentes:
-> - `T1-X` / `T2-X` / `T3-X` (salvaguardas) — descrição verbal completa em [`PLANO_SAFEGUARD.md`](PLANO_SAFEGUARD.md)
+> - `T1-X` / `T2-X` / `T3-X` (salvaguardas) — descrição verbal completa em [`PLANO_SAFEGUARD.md`](../PLANO_SAFEGUARD.md)
 > - `DT-X` / `R-X` (dívida técnica do refactor) — descrição verbal completa em [`PLANO_REFACTOR_MLOPS.md`](PLANO_REFACTOR_MLOPS.md)
 > - `Cluster N` do Erro 2 — descrição completa logo abaixo na seção 2 deste doc
 > - `V.1` / `V.2` / `V.3` / `V.4` — frentes preventivas em aberto, descritas na seção V deste doc
@@ -228,8 +228,8 @@ Como descoberto: observação direta do canary em 10% via Q1 BQ — **não foi a
 Corrigido: Patch B (commit `4c1d727`) — populou `conversion_rates` dos dois variants com valores back-calculados de `LEAD_VALUE_BY_DECILE_CHAMPION/CHALLENGER ÷ product_value`.
 
 Salvaguardas adicionadas no mesmo dia para fechar a classe inteira:
-- **T1-17 (Gate D)** — auditoria de YAML dentro da imagem deployada (D1: business.conversion_rates não vazio; D2: variants ativos com conversion_rates não-zero). Bloqueia deploy. Detalhes em [PLANO_SAFEGUARD.md](PLANO_SAFEGUARD.md).
-- **T1-18 (Gate C revisado)** — equivalência de score+decil entre revisões via `/capi/process_daily_batch?dry_run=true`, com cobertura forçada de Champion + Challenger paths. Detalhes em [PLANO_SAFEGUARD.md](PLANO_SAFEGUARD.md).
+- **T1-17 (Gate D)** — auditoria de YAML dentro da imagem deployada (D1: business.conversion_rates não vazio; D2: variants ativos com conversion_rates não-zero). Bloqueia deploy. Detalhes em [PLANO_SAFEGUARD.md](../PLANO_SAFEGUARD.md).
+- **T1-18 (Gate C revisado)** — equivalência de score+decil entre revisões via `/capi/process_daily_batch?dry_run=true`, com cobertura forçada de Champion + Challenger paths. Detalhes em [PLANO_SAFEGUARD.md](../PLANO_SAFEGUARD.md).
 - **A/B routing em `/capi/process_daily_batch`** (commit `266d79d`) — antes só `/webhook/lead_capture` e `/railway/process-pending` faziam routing; agora os três endpoints batem. Consistência arquitetural + viabilidade do Gate C.
 
 Drain: revisão `smart-ads-api-00412-rag` em 100% desde 08/05 ~14:25 BRT. Q1 pós-promoção: zero events value=0; D04=R$1.97, D05=R$5.62, D06=R$5.62, D08=R$6.75, D10=R$14.97 — todos batendo `LEAD_VALUE_BY_DECILE_CHAMPION`.
@@ -451,7 +451,7 @@ Tudo em `PR #141`.
 
 - **16/08 (`PR #219`):** o alarme de idade passa a olhar **só lead que o re-envio automático ainda pode pegar**; quem envelheceu para fora da janela vira uma linha própria de pendência manual, sem vermelho.
 - **16/08 14:27:** os 4 foram re-submetidos **na mão** (execução `ad362391`). A Hotmart aceitou o lote.
-- **17/08:** 24h depois, **nenhum dos 4 recebeu resposta**, enquanto 1.525 selos voltaram normalmente no mesmo período (105 quentes) — ou seja, o fluxo está saudável e a recusa é específica desses e-mails. Encerrados por [`V2/scripts/fechar_hotleads_presos_pane_agosto.py`](../scripts/fechar_hotleads_presos_pane_agosto.py): **1** deles já tinha resposta guardada de uma captação anterior (não comprador, selado em 31/07) e essa resposta foi copiada para o ledger, exatamente o que a volta teria escrito; os outros **3** receberam o estado final `sem_retorno` com o motivo escrito no próprio registro. A linha de pendência foi a zero.
+- **17/08:** 24h depois, **nenhum dos 4 recebeu resposta**, enquanto 1.525 selos voltaram normalmente no mesmo período (105 quentes) — ou seja, o fluxo está saudável e a recusa é específica desses e-mails. Encerrados por [`V2/scripts/fechar_hotleads_presos_pane_agosto.py`](../../scripts/fechar_hotleads_presos_pane_agosto.py): **1** deles já tinha resposta guardada de uma captação anterior (não comprador, selado em 31/07) e essa resposta foi copiada para o ledger, exatamente o que a volta teria escrito; os outros **3** receberam o estado final `sem_retorno` com o motivo escrito no próprio registro. A linha de pendência foi a zero.
 
 **Causa-raiz.** Uma mudança de **infraestrutura** (fechar o serviço) quebrou um contrato de **integração** (o endereço que um terceiro usa para responder) porque nada relacionava as duas coisas: o inventário de "quem bate na nossa porta de fora" não existia. É o mesmo esqueleto do Erro 12 (migração de banco sem inventário dos pontos de integração), com terceiro no lugar de código nosso.
 
@@ -492,7 +492,7 @@ Todas em produção, com data de deploy verificável. Atacam o bug-raiz "deploy 
 
 ### Detecção de features faltando (fail-loud)
 - **Validação pré-encoding:** features críticas com nome/tipo errado bloqueiam pipeline. *(23/abr)*
-- ~~**Validação pós-encoding:** feature zerada em >5% dos leads gera alerta + bloqueia.~~ **STATUS REAL (verificado 08/05/2026): NÃO IMPLEMENTADA.** Existe apenas log de feature **ausente do DataFrame** em [encoding.py:337-344](../src/core/encoding.py#L337-L344) (importância ≥5% → ERROR; <5% → WARNING), mas log nunca bloqueia o pipeline e não detecta encoding **zerado** após `pd.get_dummies()`. Falsa segurança que contribuiu para Clusters 4 e 5 do Erro 2 passarem. Pendente — ver V.1.3 abaixo.
+- ~~**Validação pós-encoding:** feature zerada em >5% dos leads gera alerta + bloqueia.~~ **STATUS REAL (verificado 08/05/2026): NÃO IMPLEMENTADA.** Existe apenas log de feature **ausente do DataFrame** em [encoding.py:337-344](../../src/core/encoding.py#L337-L344) (importância ≥5% → ERROR; <5% → WARNING), mas log nunca bloqueia o pipeline e não detecta encoding **zerado** após `pd.get_dummies()`. Falsa segurança que contribuiu para Clusters 4 e 5 do Erro 2 passarem. Pendente — ver V.1.3 abaixo.
 - **Painel de cobertura de features:** dashboard últimas 24h. *(23/abr)*
 
 ### Paridade treino ↔ produção
@@ -526,15 +526,15 @@ Seção viva — listar pontos de fragilidade conhecidos que **não são bug ati
 
 #### V.1.1 — Smoke test pré-deploy: roda no caminho default, não no A/B
 
-**Localização:** [scripts/smoke_test_revision.py:91-107](../scripts/smoke_test_revision.py#L91-L107).
+**Localização:** [scripts/smoke_test_revision.py:91-107](../../scripts/smoke_test_revision.py#L91-L107).
 **O que faz hoje:** chama `/monitoring/daily-check/railway?hours=1` na URL da revisão alvo, processa logs `[T1-10]` e `[STARTUP CHECK]`. O endpoint inicializa `LeadScoringPipeline(client_id=client_id)` **sem contexto A/B** — não passa `encoding_overrides` nem flags de variante.
-**Gap:** o Champion dentro de `/predict/batch` com A/B ativo chama `pipeline.run(..., predictor_override=predictor, encoding_overrides=champion_cfg.encoding_overrides)` ([api/app.py:1734-1738](../api/app.py#L1734-L1738)). O smoke test nunca exercita esse caminho. Hipótese **(d) confirmada**.
+**Gap:** o Champion dentro de `/predict/batch` com A/B ativo chama `pipeline.run(..., predictor_override=predictor, encoding_overrides=champion_cfg.encoding_overrides)` ([api/app.py:1734-1738](../../api/app.py#L1734-L1738)). O smoke test nunca exercita esse caminho. Hipótese **(d) confirmada**.
 
 **Fix proposto:** smoke test deve detectar `ab_test.enabled: true` em `configs/active_models/{client}.yaml` e, quando ativo, exercitar **cada variante explicitamente** (Champion + Challenger) — chamar endpoint que respeite o roteamento A/B com payloads que caem em ambos. Comparar o output (decil + score + value) com baseline esperado por variante.
 
 #### V.1.2 — Auditoria paridade treino↔produção: ignora `encoding_overrides`
 
-**Localização:** [tests/parity_audit.py:182-228](../tests/parity_audit.py#L182-L228).
+**Localização:** [tests/parity_audit.py:182-228](../../tests/parity_audit.py#L182-L228).
 **O que faz hoje:** carrega `ClientConfig.from_yaml('devclub.yaml')`, chama `apply_encoding(df_input, config.encoding, artifacts={})` com `config.encoding` **padrão** e `artifacts={}` (sem feature_registry de variante).
 **Gap:** o teste roda como se A/B não existisse. Quando o Champion no A/B precisa de `encoding_overrides` (caso jan30 com ordinal_variables), a auditoria passa porque está testando a configuração base, não a configuração efetiva da variante. Hipótese **(a) confirmada**.
 
@@ -544,15 +544,15 @@ Seção viva — listar pontos de fragilidade conhecidos que **não são bug ati
 
 #### V.1.3 — Validação ">5% zerados → bloqueia" não existe
 
-**Achado mais grave:** essa salvaguarda foi **declarada como entregue em 21/abr** (Seção IV deste documento, agora corrigida) mas nunca foi implementada. O que existe em [encoding.py:337-344](../src/core/encoding.py#L337-L344) é apenas log de feature **ausente do DataFrame** (não de feature zerada após encoding) — e o log nunca bloqueia o pipeline.
+**Achado mais grave:** essa salvaguarda foi **declarada como entregue em 21/abr** (Seção IV deste documento, agora corrigida) mas nunca foi implementada. O que existe em [encoding.py:337-344](../../src/core/encoding.py#L337-L344) é apenas log de feature **ausente do DataFrame** (não de feature zerada após encoding) — e o log nunca bloqueia o pipeline.
 
 **Por que importa:** o bug típico dos Clusters 3, 4, 5 do Erro 2 produz colunas que **existem no DataFrame** (`pd.get_dummies()` cria a coluna) mas chegam zeradas (sem casar com o valor esperado). O log atual não pega esse caso. Encoding zerado em 25% dos leads (Cluster 5) não dispararia nada.
 
 **Fix proposto:** implementar de fato. Pós-encoding, para cada feature com `importance ≥ 0.03` no `feature_registry` ativo, calcular `(df[feature] == 0).mean()`. Se >X% dos leads tiverem zero E a distribuição esperada do treino tiver <X% (capturada em `distribuicoes_esperadas.json`), `raise ValueError` com nome da feature e variante. Threshold X precisa ser feature-aware: features ordinais (idade, salário) podem ter "0" como categoria válida; features OHE (Medium_*) não.
 
-**Encaixe (formalizado em 08/05/2026):** os 3 fixes foram registrados como itens no [PLANO_SAFEGUARD.md](PLANO_SAFEGUARD.md):
-- **T1-14** ✅ **Concluído (08/05/2026)** — novo endpoint `GET /smoke/run-variants` em [api/app.py](../api/app.py) busca leads do Railway e força cada variante (Champion default + variantes do `ab_test.variants`, incluindo shims) a scorear com seu `predictor_override` + `encoding_overrides`. Valida score ∈ [0,1], decis ∈ {D01..D10}, e `mlflow_run_id` casando esperado. [scripts/smoke_test_revision.py](../scripts/smoke_test_revision.py) ganhou novo gate T1-14 que bloqueia o deploy quando qualquer variante quebra.
-- **T1-15** ✅ **Concluído (08/05/2026)** — nova função `audit_encoding_ab_variants` em [tests/parity_audit.py](../tests/parity_audit.py) itera por cada variante de `configs/active_models/{client}.yaml` aplicando `merge_encoding(base, variant.encoding_overrides)` antes de chamar `apply_encoding`. Por variante: (1) comparação coluna-a-coluna contra `snapshot_encoding_output_{variant}.pkl` capturado via [tests/capture_encoding_snapshots_ab.py](../tests/capture_encoding_snapshots_ab.py) — pega divergência de schema E de valor; (2) smoke checks (ordinais numéricas, sem NaN, nomes válidos) como segunda linha de defesa. `deploy_capi.sh` Gate A agora chama `--function encoding_ab`. Validação 09/05/2026: 192.386 linhas, Champion 52 colunas, Challenger 61 colunas — outputs idênticos.
+**Encaixe (formalizado em 08/05/2026):** os 3 fixes foram registrados como itens no [PLANO_SAFEGUARD.md](../PLANO_SAFEGUARD.md):
+- **T1-14** ✅ **Concluído (08/05/2026)** — novo endpoint `GET /smoke/run-variants` em [api/app.py](../../api/app.py) busca leads do Railway e força cada variante (Champion default + variantes do `ab_test.variants`, incluindo shims) a scorear com seu `predictor_override` + `encoding_overrides`. Valida score ∈ [0,1], decis ∈ {D01..D10}, e `mlflow_run_id` casando esperado. [scripts/smoke_test_revision.py](../../scripts/smoke_test_revision.py) ganhou novo gate T1-14 que bloqueia o deploy quando qualquer variante quebra.
+- **T1-15** ✅ **Concluído (08/05/2026)** — nova função `audit_encoding_ab_variants` em [tests/parity_audit.py](../../tests/parity_audit.py) itera por cada variante de `configs/active_models/{client}.yaml` aplicando `merge_encoding(base, variant.encoding_overrides)` antes de chamar `apply_encoding`. Por variante: (1) comparação coluna-a-coluna contra `snapshot_encoding_output_{variant}.pkl` capturado via [tests/capture_encoding_snapshots_ab.py](../../tests/capture_encoding_snapshots_ab.py) — pega divergência de schema E de valor; (2) smoke checks (ordinais numéricas, sem NaN, nomes válidos) como segunda linha de defesa. `deploy_capi.sh` Gate A agora chama `--function encoding_ab`. Validação 09/05/2026: 192.386 linhas, Champion 52 colunas, Challenger 61 colunas — outputs idênticos.
 - **T1-19** (follow-up de T1-15) — **alinhamento contra `feature_registry` real de cada variante (via MLflow).** Hoje `audit_encoding_ab_variants` chama `apply_encoding(df, eff_encoding, artifacts={})` com `artifacts={}`. Isso significa que a auditoria valida que o output não tem NaN, dtype certo e nomes válidos, mas **não valida que o conjunto de colunas produzidas casa exatamente com o que o modelo da variante espera consumir** (`feature_names_in_`). Se a variante registra no MLflow um `feature_registry` com 87 colunas e o `apply_encoding` mesclado produz 86 ou 88, T1-15 passa silenciosa. **Fix proposto**: para cada variante, baixar o `feature_registry.json` do `mlflow_run_id` correspondente, passar como `artifacts={'feature_registry': variant_registry}` para `apply_encoding`, e comparar `set(df_actual.columns) == set(variant_registry['feature_names'])`. Falha por divergência de schema bloqueia. Pré-condição: rotina de download de artifact do MLflow no parity_audit (não existe hoje) — T1-19 depende de Cloud SQL `smart-ads-db` estar rodando ou de cachear o `feature_registry.json` localmente sob `configs/active_models/registry_cache/{run_id}.json` no momento do `--set-active`.
 - **T1-16** — validação pós-encoding ">X% zerados → raise" feature-aware (resolve V.1.3, item que estava declarado como entregue mas nunca foi implementado)
 
@@ -562,35 +562,35 @@ Ordem de execução recomendada: T1-14 → T1-15 → T1-19 → T1-16. T1-14 e T1
 
 **Estado atual (mapeado em 08/05/2026):**
 
-| Feature (front camelCase) | Pós-`data_loader` ([validation/data_loader.py:448-458](../src/validation/data_loader.py#L448-L458)) | Em `categorias_esperadas.json` (treino jan30) | Valores canônicos |
+| Feature (front camelCase) | Pós-`data_loader` ([validation/data_loader.py:448-458](../../src/validation/data_loader.py#L448-L458)) | Em `categorias_esperadas.json` (treino jan30) | Valores canônicos |
 |---|---|---|---|
 | `genero` | `genero` | `'O seu gênero:'` | `['Feminino', 'Masculino']` |
 | `estudouProgramacao` | `estudou_programacao` | `'Já estudou programação?'` | `['Não', 'Sim']` |
 | `faculdade` | `pretende_faculdade` (sic — `df.get('fez_faculdade')`) | `'Você já fez/faz/pretende fazer faculdade?'` | `['Não', 'Sim']` |
 | `investiuCurso` | `investiu_curso_online` | `investiu_curso_online` | `['Não', 'Sim']` |
 
-**Por que ficaram fora da normalização (deliberado):** [category_unification.py:91-115](../src/data_processing/category_unification.py#L91-L115) tem comentário explícito documentando a exclusão. Modelo jan30 foi treinado com valores ORIGINAIS (com acento e capital). Passar pelo `limpar_texto` (lowercase + unidecode) quebraria o OHE — `'Não' → '_N_o'` viraria `'nao' → '_nao'`, feature inexistente no treino. Logo, **não é descuido — é a única forma de o modelo atual reconhecer essas features**.
+**Por que ficaram fora da normalização (deliberado):** [category_unification.py:91-115](../../src/data_processing/category_unification.py#L91-L115) tem comentário explícito documentando a exclusão. Modelo jan30 foi treinado com valores ORIGINAIS (com acento e capital). Passar pelo `limpar_texto` (lowercase + unidecode) quebraria o OHE — `'Não' → '_N_o'` viraria `'nao' → '_nao'`, feature inexistente no treino. Logo, **não é descuido — é a única forma de o modelo atual reconhecer essas features**.
 
 **Por que não é bug hoje:** o front sempre manda formato exato (`'Masculino'`/`'Feminino'`, `'Sim'`/`'Não'`). Modelo protegido nas duplicações que existem hoje. Não há perda de sinal.
 
-**Por que é armadilha latente:** se o front mandar `'sim'` minúsculo, `'SIM'` caps, ou whitespace extra, [encoding.py:265-274](../src/core/encoding.py#L265-L274) (`pd.get_dummies()` puro) gera coluna OHE inédita — **silencioso**. Mesma classe de bug do Cluster 1 (07/01: `'NÃO'` em "Tem computador?") e do Erro 15 (UTM Source/Term).
+**Por que é armadilha latente:** se o front mandar `'sim'` minúsculo, `'SIM'` caps, ou whitespace extra, [encoding.py:265-274](../../src/core/encoding.py#L265-L274) (`pd.get_dummies()` puro) gera coluna OHE inédita — **silencioso**. Mesma classe de bug do Cluster 1 (07/01: `'NÃO'` em "Tem computador?") e do Erro 15 (UTM Source/Term).
 
-**Caminho de produção confirmado (08/05/2026):** [production_pipeline.py:212-346](../src/production_pipeline.py#L212-L346). Sequência:
+**Caminho de produção confirmado (08/05/2026):** [production_pipeline.py:212-346](../../src/production_pipeline.py#L212-L346). Sequência:
 1. `[1/8] _preprocess` (core/preprocessing.py) faz rename — snake → questão longa.
 2. `[4/11] unify_utm` → `[5/11] _unify_medium` → `[6/11] _unify_categories` (category_unification.py — onde as 4 features são deliberadamente excluídas, ver acima).
-3. `[8/12] check_category_drift` ([production_pipeline.py:333-346](../src/production_pipeline.py#L333-L346)) — quando este roda, os nomes já casam com `categorias_esperadas.json`. **Hipótese (a) confirmada: não há `missing_column` HIGH disparando hoje.**
+3. `[8/12] check_category_drift` ([production_pipeline.py:333-346](../../src/production_pipeline.py#L333-L346)) — quando este roda, os nomes já casam com `categorias_esperadas.json`. **Hipótese (a) confirmada: não há `missing_column` HIGH disparando hoje.**
 
-**Status real do monitoramento das 4 features:** `check_category_drift` já cobre tecnicamente — se `'sim'` minúsculo aparecesse, dispararia `new_categories` alert. **Porém** o alerta hoje só faz `logger.warning` e armazena em `self.alerts` ([production_pipeline.py:341-344](../src/production_pipeline.py#L341-L344) — comentário literal: *"Armazenar alertas para enviar depois (implementação futura)"*). Não chega ao Slack. Em outras palavras: o sensor existe; o cabo do alarme até a sirene não foi puxado.
+**Status real do monitoramento das 4 features:** `check_category_drift` já cobre tecnicamente — se `'sim'` minúsculo aparecesse, dispararia `new_categories` alert. **Porém** o alerta hoje só faz `logger.warning` e armazena em `self.alerts` ([production_pipeline.py:341-344](../../src/production_pipeline.py#L341-L344) — comentário literal: *"Armazenar alertas para enviar depois (implementação futura)"*). Não chega ao Slack. Em outras palavras: o sensor existe; o cabo do alarme até a sirene não foi puxado.
 
 **Mitigação proposta — 3 vetores:**
-1. **Fail-loud no encoding (seguro, sem retreino):** validação em [encoding.py:265-274](../src/core/encoding.py#L265-L274) antes do `get_dummies`. Se valor fora de `{Sim, Não, Masculino, Feminino}` aparece em >0 leads, bloqueia e loga.
+1. **Fail-loud no encoding (seguro, sem retreino):** validação em [encoding.py:265-274](../../src/core/encoding.py#L265-L274) antes do `get_dummies`. Se valor fora de `{Sim, Não, Masculino, Feminino}` aparece em >0 leads, bloqueia e loga.
 2. **Normalização em `data_loader` (precisa retreino):** novo `_normalizar_categorico_binario` (strip + lower) em `core/`, aplicado em treino E produção. Exige retreinar para que o modelo aprenda com valores normalizados — não pode ser inserido sozinho em produção (quebraria jan30).
 3. **Alerta de monitoramento (defesa em profundidade):** `check_binary_feature_canonical_values` em `monitoring/data_quality.py` com dict explícito `{coluna: [valores_canônicos]}`. Alerta no Slack se valor fora aparece. Não bloqueia — apenas avisa.
 
 **Decisão na sessão de 08/05/2026:** atacar o vetor 3 primeiro (defesa em profundidade). Bloqueador antes de implementar: confirmar onde inserir o check no caminho de produção — se nomes são snake (pós-`data_loader`) ou longos (pós-renomeação a localizar) na hora em que o check rodar.
 
 **Implementado (08/05/2026) — vetor 3 fechado:** sem criar check novo. `check_category_drift` já cobre tecnicamente as 4 features (nomes alinhados pós-`_preprocess`). Lacuna real era leitura humana — alerts ficavam diluídos na lista completa do response. Mudanças aplicadas:
-- [orchestrator.py:215-237](../src/monitoring/orchestrator.py#L215-L237) — `alerts` ordenados por severity desc (HIGH → MEDIUM → LOW) + novo subset `actionable_alerts` (HIGH+MEDIUM, formato compacto `{type, severity, category, column, percentage, message}`).
+- [orchestrator.py:215-237](../../src/monitoring/orchestrator.py#L215-L237) — `alerts` ordenados por severity desc (HIGH → MEDIUM → LOW) + novo subset `actionable_alerts` (HIGH+MEDIUM, formato compacto `{type, severity, category, column, percentage, message}`).
 - `DailyCheckResponse` em `api/app.py:79-93` ganhou o campo `actionable_alerts` (default `[]`).
 - Endpoints `/monitoring/daily-check/railway` e `/monitoring/daily-check` passam o campo.
 
@@ -619,7 +619,7 @@ Lista aberta de cenários a estressar. Cada item: descrição + verificação pr
 
 ### V.4 — Ausência de check de drift de perfil de audiência vs Top 5 ROAS no monitoring (descoberto 08/05/2026)
 
-**Estado atual:** o `DataQualityMonitor` em [src/monitoring/data_quality.py:397](../src/monitoring/data_quality.py#L397) só compara distribuições contra `distribuicoes_esperadas.json` capturado **no treino**. Não há nenhum check contra um perfil de audiência **winner histórico** (ex.: Top 5 ROAS). Resultado: drift de público que afeta diretamente performance de lançamento passa silencioso até alguém abrir uma análise ad-hoc.
+**Estado atual:** o `DataQualityMonitor` em [src/monitoring/data_quality.py:397](../../src/monitoring/data_quality.py#L397) só compara distribuições contra `distribuicoes_esperadas.json` capturado **no treino**. Não há nenhum check contra um perfil de audiência **winner histórico** (ex.: Top 5 ROAS). Resultado: drift de público que afeta diretamente performance de lançamento passa silencioso até alguém abrir uma análise ad-hoc.
 
 **Como foi descoberto:** comparação manual em 08/05/2026 do LF54 em captação contra Top 5 ROAS histórico (LF40, LF41, LF44, LF45, LF47, n=39.771) revelou shift forte e estatisticamente robusto:
 - "Sem computador": 12,5% → 22,9% (+10,4pp, ⚠⚠)
@@ -630,7 +630,7 @@ Lista aberta de cenários a estressar. Cada item: descrição + verificação pr
 
 **Por que conta como erro:** o monitoring deveria ter levantado essa bandeira automaticamente. Não levantou. Cada lançamento entre o último Top 5 ROAS e hoje rodou às cegas para esse drift. Drift de público é causa direta de queda de ROAS — e o sistema atual não tem antena para isso.
 
-**Mitigação proposta (T1-13):** novo check method `audience_profile_drift` em `DataQualityMonitor`, comparando o último dia completo de captação contra snapshot estático do Top 5 ROAS (`configs/clients/devclub/reference_audience_profile.json`). Threshold ⚠ ≥ 5pp por categoria canônica; severity HIGH se ≥ 5pp nas 5 features socioeconômicas críticas (computador, gênero, ocupação CLT, programação, cartão). Especificação completa em [PLANO_SAFEGUARD.md § T1-13](PLANO_SAFEGUARD.md). Prioridade máxima registrada em [PLANO_EXECUCAO.md § H4 — Sequelas 08/05/2026](PLANO_EXECUCAO.md).
+**Mitigação proposta (T1-13):** novo check method `audience_profile_drift` em `DataQualityMonitor`, comparando o último dia completo de captação contra snapshot estático do Top 5 ROAS (`configs/clients/devclub/reference_audience_profile.json`). Threshold ⚠ ≥ 5pp por categoria canônica; severity HIGH se ≥ 5pp nas 5 features socioeconômicas críticas (computador, gênero, ocupação CLT, programação, cartão). Especificação completa em [PLANO_SAFEGUARD.md § T1-13](../PLANO_SAFEGUARD.md). Prioridade máxima registrada em [PLANO_EXECUCAO.md § H4 — Sequelas 08/05/2026](PLANO_EXECUCAO.md).
 
 **Lição estrutural:** monitoring de drift contra "snapshot do treino" é necessário mas não suficiente. Treino antigo + drift de público = baseline cego. Faltava monitoring contra um pool histórico de **performance** (não apenas estatístico).
 
@@ -661,7 +661,7 @@ Mesma população, mesmo filtro (`pesquisa IS NOT NULL AND "leadScore" IS NOT NU
 
 **Por que conta como erro:** uma salvaguarda crítica (bloqueia deploy) usa uma amostra **não-representativa** por construção. "50 mais recentes" reflete só as últimas horas — sensível a qualquer rajada de campanha (no caso, um pico recente de `google-ads`). Resultado: falso positivo que **trava o pipeline de deploy inteiro** sem nenhum problema real no modelo ou no pipeline. O risco aqui não é sinal degradado — é o oposto: a salvaguarda parando deploys legítimos por ruído de amostragem.
 
-**Mitigação proposta:** corrigir o método de amostragem do validador T1-16 / Gate C — trocar "50 mais recentes" por amostra **aleatória ou estratificada** sobre janela representativa (ex: 7 dias). Manter o validador (ele pega degradação real de feature); o defeito é só a amostragem. Sem identificador novo — é correção do T1-16 existente. Localização: a query de amostragem do Gate C em [`scripts/test_revision_equivalence.py`](../scripts/test_revision_equivalence.py) (`fetch_leads_predict_mode`, `ORDER BY "createdAt" DESC`) e o caminho equivalente do polling/`/predict/batch`.
+**Mitigação proposta:** corrigir o método de amostragem do validador T1-16 / Gate C — trocar "50 mais recentes" por amostra **aleatória ou estratificada** sobre janela representativa (ex: 7 dias). Manter o validador (ele pega degradação real de feature); o defeito é só a amostragem. Sem identificador novo — é correção do T1-16 existente. Localização: a query de amostragem do Gate C em [`scripts/test_revision_equivalence.py`](../../scripts/test_revision_equivalence.py) (`fetch_leads_predict_mode`, `ORDER BY "createdAt" DESC`) e o caminho equivalente do polling/`/predict/batch`.
 
 **Consequência colateral:** o endpoint `/admin/cleanup-canary-tags` (limpeza de tag canary independente de deploy) ficou bloqueado em 0% de tráfego porque toda revisão precisa passar no Gate C, e o Gate C travava nesse falso positivo. Prioridade baixa — o custo de tag órfã já está coberto pelo cleanup embutido no `deploy_capi.sh`. Corrigir a amostragem destrava ambos.
 

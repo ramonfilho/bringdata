@@ -34,7 +34,7 @@ from src.core.mlflow_setup import ensure_tracking_uri
 # Guardrails: Cloud SQL `smart-ads-db` precisa estar RUNNABLE pra MLflow
 # ---------------------------------------------------------------------------
 # A instância fica em `activation-policy=NEVER` por padrão (economia ~R$ 40/mês —
-# ver V2/docs/operacoes_gcp_custos.md). Tem que ligar antes de treinar/ativar
+# ver V2/docs/interno/operacoes_gcp_custos.md). Tem que ligar antes de treinar/ativar
 # e desligar depois. Este guard evita erro críptico do SQLAlchemy quando
 # alguém esquece de ligar.
 
@@ -97,7 +97,7 @@ def assert_mlflow_backend_running(project_id: str = _MLFLOW_SQL_PROJECT,
             f"  # aguardar state=RUNNABLE:\n"
             f"  gcloud sql instances describe {instance_id} \\\n"
             f"    --project={project_id} --format='value(state)'\n\n"
-            f"Protocolo completo em V2/docs/operacoes_gcp_custos.md."
+            f"Protocolo completo em V2/docs/interno/operacoes_gcp_custos.md."
         )
     logger.info(f"✓ MLflow backend (Cloud SQL '{instance_id}') está RUNNABLE")
 

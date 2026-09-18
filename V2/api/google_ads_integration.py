@@ -21,7 +21,7 @@ feita), quando `GoogleAdsConfig.enabled` e o lead passar na `source_allowlist`.
 ⚠️ Antes do canary: rodar `send_batch_events(..., dry_run=True)` (vira
 `validateOnly=true` na API) pra confirmar os NOMES DE CAMPO do payload contra a
 referência da Data Manager API — a forma do request abaixo é a melhor conhecida
-da doc, mas só o validate_only confirma. Ver docs/google_ads_pendencias.md.
+da doc, mas só o validate_only confirma. Ver docs/interno/google_ads_pendencias.md.
 ────────────────────────────────────────────────────────────────────────────
 """
 

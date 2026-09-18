@@ -14,7 +14,7 @@ Cada vez que sai um evento CAPI de alta qualidade (o `LeadQualifiedHighQuality` 
 
 ## 1. O quê e por quê
 
-**O quê:** depois que o evento de alta qualidade primário sai pelo pixel da variante (jan30 ou abr28), um laço dentro de `send_both_lead_events` (em [api/capi_integration.py](../api/capi_integration.py)) consulta a lista `capi.extra_hq_destinations` do `ClientConfig` e, para cada destinação cujo nome de evento case com o evento primário que acabou de sair, dispara uma cópia adicional reusando a mesma função `send_lead_qualified_high_quality` — só que com `pixel_id_override`, `event_name_override` e `high_quality_decils_override` apontando para o destino adicional.
+**O quê:** depois que o evento de alta qualidade primário sai pelo pixel da variante (jan30 ou abr28), um laço dentro de `send_both_lead_events` (em [api/capi_integration.py](../../api/capi_integration.py)) consulta a lista `capi.extra_hq_destinations` do `ClientConfig` e, para cada destinação cujo nome de evento case com o evento primário que acabou de sair, dispara uma cópia adicional reusando a mesma função `send_lead_qualified_high_quality` — só que com `pixel_id_override`, `event_name_override` e `high_quality_decils_override` apontando para o destino adicional.
 
 **Por quê (o que forçou esta frente):** o dono pediu, em 2026-06-07, que os eventos de alta qualidade voltassem a chegar no pixel antigo do BM dele (final `…6130`) — eles já existiam lá no passado mas desapareceram. O gestor de tráfego precisa do `LeadQualifiedHighQuality` e do `HQLB` cadastrados nesse pixel para conseguir criar campanhas que otimizam nesses eventos por ali. Como cada variante A/B já manda o seu evento HQ no seu próprio pixel principal, a única coisa que faltava era duplicar a saída.
 
@@ -24,7 +24,7 @@ Cada vez que sai um evento CAPI de alta qualidade (o `LeadQualifiedHighQuality` 
 
 ## 2. Decisão arquitetural — nível CLIENTE, não nível VARIANTE
 
-A configuração do fan-out vive na seção `capi` do arquivo do cliente ([configs/clients/devclub.yaml](../configs/clients/devclub.yaml)), que é carregada em runtime no `CAPIConfig`. **Não vive** no `ABTestVariantConfig` do `active_models/devclub.yaml` (onde moram pixel principal, faixa de decis e nome de evento da variante).
+A configuração do fan-out vive na seção `capi` do arquivo do cliente ([configs/clients/devclub.yaml](../../configs/clients/devclub.yaml)), que é carregada em runtime no `CAPIConfig`. **Não vive** no `ABTestVariantConfig` do `active_models/devclub.yaml` (onde moram pixel principal, faixa de decis e nome de evento da variante).
 
 **Por quê:**
 
@@ -67,7 +67,7 @@ A configuração do fan-out vive na seção `capi` do arquivo do cliente ([confi
 
 ## 4. Configuração — bloco YAML no cliente
 
-Em [configs/clients/devclub.yaml](../configs/clients/devclub.yaml), dentro de `capi:`:
+Em [configs/clients/devclub.yaml](../../configs/clients/devclub.yaml), dentro de `capi:`:
 
 ```yaml
 capi:
@@ -94,11 +94,11 @@ capi:
 
 | Arquivo | Mudança |
 |---|---|
-| [src/core/client_config.py](../src/core/client_config.py) | Adiciona dataclass `ExtraHQDestination` (campos `event_name`, `pixel_id`, `decils`). Adiciona campo `extra_hq_destinations: Optional[List[ExtraHQDestination]]` em `CAPIConfig`. Adiciona helper `_parse_extra_hq_destinations` (fail-loud) e `_load_capi_config`. O `from_yaml` chama `_load_capi_config` no lugar do `_make(CAPIConfig, ...)` padrão. |
-| [configs/clients/devclub.yaml](../configs/clients/devclub.yaml) | Adiciona o bloco `extra_hq_destinations` em `capi:` (ver §4). |
-| [api/capi_integration.py](../api/capi_integration.py) | Adiciona laço logo após o disparo HQ primário em `send_both_lead_events`. Resolve o nome do evento HQ que efetivamente saiu (`event_name_hq_override` ou `capi_config.event_name_high_quality`). Para cada destinação cujo `event_name` case, chama `send_lead_qualified_high_quality` reusando os 3 overrides já existentes da função. Try/except por destinação — falha isolada não derruba o primário nem as outras cópias. Retorno passa a incluir `extra_hq_results: List[Dict]`. |
+| [src/core/client_config.py](../../src/core/client_config.py) | Adiciona dataclass `ExtraHQDestination` (campos `event_name`, `pixel_id`, `decils`). Adiciona campo `extra_hq_destinations: Optional[List[ExtraHQDestination]]` em `CAPIConfig`. Adiciona helper `_parse_extra_hq_destinations` (fail-loud) e `_load_capi_config`. O `from_yaml` chama `_load_capi_config` no lugar do `_make(CAPIConfig, ...)` padrão. |
+| [configs/clients/devclub.yaml](../../configs/clients/devclub.yaml) | Adiciona o bloco `extra_hq_destinations` em `capi:` (ver §4). |
+| [api/capi_integration.py](../../api/capi_integration.py) | Adiciona laço logo após o disparo HQ primário em `send_both_lead_events`. Resolve o nome do evento HQ que efetivamente saiu (`event_name_hq_override` ou `capi_config.event_name_high_quality`). Para cada destinação cujo `event_name` case, chama `send_lead_qualified_high_quality` reusando os 3 overrides já existentes da função. Try/except por destinação — falha isolada não derruba o primário nem as outras cópias. Retorno passa a incluir `extra_hq_results: List[Dict]`. |
 
-Re-export do dataclass em [src/core/\_\_init\_\_.py](../src/core/__init__.py) é apenas higiene (sem efeito comportamental).
+Re-export do dataclass em [src/core/\_\_init\_\_.py](../../src/core/__init__.py) é apenas higiene (sem efeito comportamental).
 
 **Não tocaram:** `app.py`, `survey_branch.py`, `pubsub_branch.py`, `active_models/devclub.yaml`. O caminho do lead — da leitura da UTM até o disparo primário — permaneceu **idêntico**.
 
@@ -147,7 +147,7 @@ Antes do canary ir pra qualquer tráfego acima de 0%, **os eventos precisam esta
 ## 9. Rollback
 
 **Cenário A — desligar fan-out por completo:**
-Deletar o bloco `extra_hq_destinations` no [configs/clients/devclub.yaml](../configs/clients/devclub.yaml) e redeployar. Sem o bloco, o parse devolve `None`, o laço fica inerte, comportamento volta a ser exatamente o da revisão anterior (00675-jix). Sem mudança de código.
+Deletar o bloco `extra_hq_destinations` no [configs/clients/devclub.yaml](../../configs/clients/devclub.yaml) e redeployar. Sem o bloco, o parse devolve `None`, o laço fica inerte, comportamento volta a ser exatamente o da revisão anterior (00675-jix). Sem mudança de código.
 
 **Cenário B — desligar fan-out para um evento específico:**
 Deletar só a entrada correspondente da lista. Os demais continuam.
@@ -197,7 +197,7 @@ Há uma frente em andamento em outro worktree implementando um **EventEmitter co
 
 ---
 
-*Artefatos vivos:* [src/core/client_config.py](../src/core/client_config.py) (dataclass + parser), [configs/clients/devclub.yaml](../configs/clients/devclub.yaml) (bloco `extra_hq_destinations`), [api/capi_integration.py](../api/capi_integration.py) (laço dentro de `send_both_lead_events`).
+*Artefatos vivos:* [src/core/client_config.py](../../src/core/client_config.py) (dataclass + parser), [configs/clients/devclub.yaml](../../configs/clients/devclub.yaml) (bloco `extra_hq_destinations`), [api/capi_integration.py](../../api/capi_integration.py) (laço dentro de `send_both_lead_events`).
 
 *Documentos relacionados:* [AB_TEST.md](AB_TEST.md) (princípio "uma variante = um evento"), [PROCESSO_CAPI_LEAD_SURVEYS.md](PROCESSO_CAPI_LEAD_SURVEYS.md) (caminhos de entrada do lead — webhook `Lead` e consumer Pub/Sub — que convergem em `send_batch_events` → `send_both_lead_events`).
 

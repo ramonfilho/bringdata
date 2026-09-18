@@ -2,7 +2,7 @@
 
 **Sistema Bring Data · Cliente DevClub · 11/05/2026**
 
-> **Nota:** este relatório usou o pool anterior `LF40, LF41, LF45, LF50, LF53` como Top 5 ROAS realized. Definição canônica do Top 5 atualizada em 2026-05-14 (LF45, LF44, LF46, LF41, LF43) — ver [docs/METODOLOGIA_TOP5_ROAS.md](METODOLOGIA_TOP5_ROAS.md).
+> **Nota:** este relatório usou o pool anterior `LF40, LF41, LF45, LF50, LF53` como Top 5 ROAS realized. Definição canônica do Top 5 atualizada em 2026-05-14 (LF45, LF44, LF46, LF41, LF43) — ver [docs/interno/METODOLOGIA_TOP5_ROAS.md](METODOLOGIA_TOP5_ROAS.md).
 
 ---
 
