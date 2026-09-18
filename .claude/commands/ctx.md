@@ -346,7 +346,7 @@ gcloud run revisions list \
 | `/prospect` | Pesquisar contatos de uma empresa-alvo com protocolo de confiança (tier ranking, multi-source) |
 | `/copy` | Redigir ou revisar mensagens iniciais de outreach (email, LinkedIn, WhatsApp) |
 | `/pptx` | Ler ou editar texto dos decks em `V2/propostas_e_apresentacoes/` |
-| `/sheets` | Leitura/edição do CSV-fonte (`V2/comercial/contatos.csv`) e sync com Google Sheets |
+| `/sheets` | Leitura/edição do CSV-fonte (`V2/comercial/contatos.csv`, pasta LOCAL fora do git desde 18/09/2026) e sync com Google Sheets |
 
 ---
 
