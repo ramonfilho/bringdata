@@ -51,6 +51,13 @@ updates:
       # junto com google-auth, numa PR nossa.
       - dependency-name: google-cloud-storage
         update-types: ["version-update:semver-major"]
+      # google-cloud-logging 3.16 e google-cloud-pubsub 2.40 exigem protobuf >= 6.33;
+      # mlflow 2.13 (requirements-treino.txt, instalado junto no CI) exige protobuf < 5.
+      # Sobem quando o mlflow subir (PR #315 caiu em ResolutionImpossible).
+      - dependency-name: google-cloud-logging
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: google-cloud-pubsub
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     labels: ["dependencias"]
     commit-message:
       prefix: "deps(api)"
@@ -67,6 +74,20 @@ updates:
       dev:
         patterns: ["*"]
     ignore:
+      # Os pins científicos do dev seguem os da API: a suíte roda contra os mesmos
+      # artefatos do modelo, e pandas 3 exige Python 3.11 (PR #314 quebrava o pip).
+      - dependency-name: pandas
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: numpy
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: scikit-learn
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: scipy
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: matplotlib
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: pyarrow
+        update-types: ["version-update:semver-major"]
       # O cliente do MLflow fala DIRETO com o Postgres de tracking (URI postgresql+psycopg2).
       # Um cliente 3.x contra o banco 2.13 tenta migrar o schema na primeira conexao. Subir
       # de major e tarefa planejada (servidor e cliente juntos), nao PR de dependencia.
