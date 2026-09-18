@@ -15,7 +15,11 @@ para cada run_id que ENTRA (champion trocado, variante do A/B nova ou trocada), 
   5. se o CHAMPION foi trocado: delta de AUC contra o champion anterior >=
      comparison.manual_approval_threshold (abaixo disso a política do retreino diz
      "manter champion"). >= auto_approve_threshold vira nota "auto"; entre os dois,
-     "manual", e a revisão da PR é a aprovação manual.
+     "manual", e a revisão da PR é a aprovação manual;
+  6. retrato do conjunto de treino (desde 18/09/2026): `dataset_hash` e `dataset_linhas`
+     nos params e conjunto_de_treino.parquet + .json no bucket, gravados por
+     src/core/train_snapshot em todo treino. Sem isso não se sabe com o que o modelo
+     foi treinado, e a etapa 2 do treino contínuo é exatamente essa garantia.
 
 Runs que já estavam no YAML não são rejulgados: a régua vale para quem entra. (O
 champion de hoje, abr28, tem monotonia 77,8% no run e não passaria no piso de 80%;
@@ -49,6 +53,8 @@ _V2 = Path(__file__).resolve().parents[1]
 BUCKET = os.environ.get("MLFLOW_ARTIFACTS_BUCKET", "gs://smart-ads-mlflow/artifacts")
 PROJETO = os.environ.get("PROJECT_ID", "smart-ads-451319")
 ARQUIVOS_DO_DEPLOY = ("model/MLmodel", "model_metadata.json", "feature_registry.json")
+# O retrato do conjunto de treino (src/core/train_snapshot.py): manifesto e parquet.
+ARQUIVOS_DO_RETRATO = ("conjunto_de_treino.parquet", "conjunto_de_treino.json")
 
 
 # ----------------------------------------------------------------- parte pura
@@ -81,7 +87,7 @@ def julgar(papel: str, metricas: Dict[str, float], params: Dict[str, Any], statu
     if status != "FINISHED":
         motivos.append(f"run não está FINISHED (status={status})")
     if not artefatos_ok:
-        motivos.append("faltam artefatos no bucket: " + ", ".join(ARQUIVOS_DO_DEPLOY))
+        motivos.append("faltam artefatos no bucket: " + ", ".join(ARQUIVOS_DO_DEPLOY + ARQUIVOS_DO_RETRATO))
     auc = metricas.get("auc")
     mono = metricas.get("monotonia_percentage")
     if auc is None or mono is None:
@@ -95,6 +101,9 @@ def julgar(papel: str, metricas: Dict[str, float], params: Dict[str, Any], statu
         motivos.append("run sem git_commit (treinado sem o carimbo de lineage)")
     if str(params.get("git_dirty", "")).lower() == "true":
         motivos.append("run treinado de árvore suja (git_dirty=true): não é reproduzível a partir do git")
+    if not params.get("dataset_hash") or not params.get("dataset_linhas"):
+        motivos.append("run sem o conjunto de treino congelado (params dataset_hash/dataset_linhas): "
+                       "não se sabe com o que o modelo foi treinado")
     if papel == "champion" and auc is not None:
         if metricas_anterior and metricas_anterior.get("auc") is not None:
             delta = auc - float(metricas_anterior["auc"])
@@ -167,7 +176,7 @@ def artefatos_no_bucket(run_id: str) -> bool:
     if r.returncode != 0:
         return False
     listados = r.stdout
-    return all(f"{BUCKET}/{run_id}/artifacts/{a}" in listados for a in ARQUIVOS_DO_DEPLOY)
+    return all(f"{BUCKET}/{run_id}/artifacts/{a}" in listados for a in ARQUIVOS_DO_DEPLOY + ARQUIVOS_DO_RETRATO)
 
 
 def main() -> int:
