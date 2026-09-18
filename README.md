@@ -1,5 +1,7 @@
 # bringdata
 
+[![Deploy](https://github.com/ramonfilho/bringdata/actions/workflows/deploy.yml/badge.svg?branch=main)](https://github.com/ramonfilho/bringdata/actions/workflows/deploy.yml)
+
 Lead scoring in production for a Brazilian online school (DevClub). Each lead that
 signs up for a launch gets a purchase-propensity score and a decile from a Random
 Forest, and the decile drives what happens next: the conversion events sent to
@@ -9,13 +11,45 @@ the traffic team reads.
 The repository holds the whole loop: ingestion, training, the scoring API, the
 event senders, monitoring, and the CI/CD that ships it.
 
+## How the pieces connect
+
+```mermaid
+flowchart LR
+  lead["Lead signs up on a launch page<br/>reaches the API by Pub/Sub or polling, every 5 min"]
+  api["Scoring API<br/>Cloud Run, FastAPI<br/>RandomForest champion and challenger"]
+  db[("Cloud SQL Postgres<br/>ledger registros_ml and the analytics schema")]
+  events["Conversion events<br/>Meta CAPI, Google Ads"]
+  sources["Sales, ad spend, ad insights, launch calendar<br/>payment gateways, Meta and Google ad accounts"]
+  jobs["Ingestion jobs<br/>Cloud Run jobs on Cloud Scheduler"]
+  ceiling["Cost ceiling per ad<br/>recomputed hourly, read by the traffic team"]
+  monitor["Monitoring and reports<br/>daily checks, drift, alerts and digests on Slack"]
+  retrain["Monthly retraining job<br/>MLflow run, model card, quality gate"]
+  registry[("Model registry<br/>MLflow on Cloud SQL, artifacts in GCS")]
+  cicd["Pull request changes the run id<br/>CI model gate, canary 0, 10, 50, 100, rollback"]
+
+  lead --> api
+  api -->|"score, decile and run id per lead"| db
+  api -->|"events by decile"| events
+  sources --> jobs --> db
+  db --> ceiling
+  db --> monitor
+  db --> retrain
+  retrain --> registry
+  registry --> cicd --> api
+```
+
+Read it left to right: a lead comes in and leaves with a score; the outcomes (sales,
+spend) come back through the ingestion jobs; the same database feeds the ceiling, the
+monitoring and the retraining; and a new model only reaches the API through a pull
+request, the gates and the canary.
+
 ## What runs
 
 | Piece | Where | What it does |
 |---|---|---|
 | Scoring API | Cloud Run service `smart-ads-api` (FastAPI, Python 3.10) | scores leads as they arrive, writes the ledger, sends CAPI and Google Ads events |
 | Monitoring and webhook | Cloud Run services on the same image | daily checks, feature validation, alerts, Hotmart and SendFlow webhooks |
-| Ingestion and reports | 17 Cloud Run jobs on Cloud Scheduler | leads, sales, ad spend, ad insights, launch calendar, Meta audiences, model performance report |
+| Ingestion, reports and retraining | 18 Cloud Run jobs, fired by Cloud Scheduler | leads, sales, ad spend, ad insights, launch calendar, Meta audiences, model performance report, monthly retraining |
 | Model registry | MLflow on Cloud SQL, artifacts in a GCS bucket | every training run, its metrics, its model card |
 | Data | Cloud SQL (Postgres) | the ledger (`registros_ml`) and the `analytics` schema |
 
@@ -54,9 +88,11 @@ R$ 2.52 per real (258 ads, R$ 747k of spend, 60% of them doubled their money); a
 paid above it returned R$ 1.18 (225 ads, R$ 586k, 23% doubled). The inside wins in 20 of
 21 launches, median 2.5x, p < 0.001, on R$ 1.33M of audited media.
 
-Offline, the model's temporal test set (the most recent 30% of leads) gives AUC 0.73,
-KS and lift per decile in `V2/docs/MODEL_CHANGELOG.md`; the reports per launch that
-produce the money numbers live in `V2/docs/relatorios/`.
+Offline, the model in production scores AUC 0.70 on its temporal holdout (the most
+recent leads, never seen in training) with a top-decile lift of 3.9x; those numbers sit
+next to the run id in `V2/configs/active_models/devclub.yaml`, and every candidate
+trained since, with its own metrics, is in `V2/docs/MODEL_CHANGELOG.md`. The reports per
+launch that produce the money numbers live in `V2/docs/relatorios/`.
 
 ## Repository layout
 
