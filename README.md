@@ -96,7 +96,7 @@ flowchart LR
   as the live revision.
 - **Progressive delivery**: traffic moves in steps of 10, 50 and 100 percent with no
   human click. The first step only runs inside the deploy window (business days,
-  09:00 to 18:00 in São Paulo, no launch with an open cart in the launch calendar);
+  09:00 to 18:00 in São Paulo);
   outside it the canary waits at 0% and a scheduled run resumes it on the next
   business morning. Each step runs the progression gate (feature report, CAPI
   deciles, 5xx rate), moves the traffic, and runs the smoke again. A bad verdict or a

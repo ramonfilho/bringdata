@@ -60,3 +60,11 @@ def test_terraform_nao_tem_mais_reviewer_nos_environments():
     tf = (RAIZ / "infra/terraform/github.tf").read_text(encoding="utf-8")
     assert "reviewers {" not in tf
     assert 'github_repository_environment" "stage"' in tf
+
+
+def test_a_janela_nao_le_o_banco_nem_o_calendario():
+    job = _wf()["jobs"]["canary-10"]
+    janela = next(p for p in job["steps"] if p.get("id") == "janela")
+    assert "ledger-db-password" not in janela["run"]
+    assert "LAUNCHES_SOURCE" not in job.get("env", {}) and "LEDGER_DB_HOST" not in job.get("env", {})
+    assert not any("pg8000" in p.get("run", "") for p in job["steps"])

@@ -20,8 +20,8 @@
 #                 alinha os espelhos monitoring e webhook. Os environments continuam
 #                 existindo pelo registro de deployments, sem required reviewers.
 #   janela      - antes do primeiro tráfego (canary-10), scripts/janela_de_deploy.py responde
-#                 "é hora?": dia útil, 09h às 18h em São Paulo, nenhum LF com carrinho
-#                 aberto no calendário. Fechada: o canário fica a 0%, o run termina verde e
+#                 "é hora?": dia útil, 09h às 18h em São Paulo (o carrinho aberto deixou de
+#                 fechar a janela em 18/09/2026). Fechada: o canário fica a 0%, o run termina verde e
 #                 um marcador (gs://smart-ads-mlflow/deploy-gate/aguardando_janela.json)
 #                 guarda a revisão e o alvo de rollback.
 #   retomar     - no cron de 09:05 (dias úteis) ou por workflow_dispatch modo=retomar: lê o
@@ -252,8 +252,6 @@ jobs:
       REVISAO: ${{ needs.canary.outputs.revision || needs.retomar.outputs.revision }}
       ANTERIOR: ${{ needs.canary.outputs.previous || needs.retomar.outputs.previous }}
       MARCADOR: gs://smart-ads-mlflow/deploy-gate/aguardando_janela.json
-      LAUNCHES_SOURCE: table
-      LEDGER_DB_HOST: 104.197.138.129   # IP público do Cloud SQL smart-ads-db (SSL obrigatório); senha vem do Secret Manager
     outputs:
       adiado: ${{ steps.janela.outputs.aberta == 'false' }}
     steps:
@@ -266,13 +264,9 @@ jobs:
           workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v3
-      - run: pip install -q pg8000 pyyaml
-      - name: é hora? (dia útil, 09h às 18h em São Paulo, carrinho fechado)
+      - name: é hora? (dia útil, 09h às 18h em São Paulo)
         id: janela
-        run: |
-          PW=$(gcloud secrets versions access latest --secret=ledger-db-password --project="$PROJECT_ID")
-          echo "::add-mask::$PW"
-          LEDGER_DB_PASSWORD="$PW" python3 V2/scripts/janela_de_deploy.py
+        run: python3 V2/scripts/janela_de_deploy.py
       - name: janela fechada; o canário fica a 0% e o marcador guarda o que retomar
         if: steps.janela.outputs.aberta == 'false'
         env:
