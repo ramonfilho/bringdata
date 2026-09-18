@@ -80,6 +80,9 @@ jobs:
         env:
           # Com identidade, artefato ausente é FALHA (o gate do modelo não pode virar skip).
           CI_REQUIRE_MODEL_ARTIFACTS: ${{ steps.auth.outcome == 'success' && '1' || '' }}
+        # `shell: bash` explícito liga `-o pipefail`: sem ele o exit do passo era o do `tee`
+        # (sempre 0) e o job ficou verde com testes falhando de 17/09 a 18/09/2026 (#287).
+        shell: bash
         run: python -m pytest --cov --cov-report=term --cov-report=xml --cov-fail-under=14 | tee pytest.out
       - name: cobertura no resumo do job
         if: always()

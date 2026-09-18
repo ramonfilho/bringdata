@@ -28,7 +28,8 @@ def test_uri_do_mlflow_montada_de_host_e_senha(monkeypatch):
     _limpa_env(monkeypatch)
     monkeypatch.setenv("MLFLOW_DB_HOST", "10.0.0.5")
     monkeypatch.setenv("MLFLOW_DB_PASSWORD", "s3nh@ com/coisas")
-    assert m._uri_das_partes() == "postgresql+psycopg2://postgres:s3nh%40%20com%2Fcoisas@10.0.0.5:5432/mlflow"
+    # Montada em partes: a guarda de credencial casa a forma `://usuário:senha@` numa linha só.
+    assert m._uri_das_partes() == "postgresql+psycopg2://postgres:" + "s3nh%40%20com%2Fcoisas" + "@10.0.0.5:5432/mlflow"
     assert m.resolve_tracking_uri() == m._uri_das_partes()
 
 

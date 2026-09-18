@@ -163,6 +163,7 @@ jobs:
 
       - name: revisão viva antes do deploy (alvo de rollback)
         id: before
+        shell: bash   # pipefail: gcloud falhando não pode virar alvo de rollback vazio
         run: |
           gcloud run services describe "$SERVICE" --region="$REGION" --project="$PROJECT_ID" --format=json \
             | python3 -c "import json,sys; d=json.load(sys.stdin); print(next(t['revisionName'] for t in d['status']['traffic'] if t.get('percent')==100))" \
