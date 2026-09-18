@@ -238,7 +238,7 @@ class ValidationSheetsUploader:
 
                 # Upload dos dados (batch update é mais eficiente)
                 logger.info(f"      Fazendo upload de {len(data)} linhas...")
-                worksheet.update('A1', data, value_input_option='USER_ENTERED')
+                worksheet.update(range_name='A1', values=data, value_input_option='USER_ENTERED')
 
                 # Aplicar formatação (com delay maior para evitar rate limits)
                 logger.info(f"      Aplicando formatação...")
@@ -325,7 +325,7 @@ class ValidationSheetsUploader:
                 for _, row in df_filled.iterrows():
                     data.append([str(val) for val in row.tolist()])
 
-                worksheet.update('A1', data, value_input_option='USER_ENTERED')
+                worksheet.update(range_name='A1', values=data, value_input_option='USER_ENTERED')
                 time.sleep(0.5)
 
             logger.info(f"    Atualização concluída: {spreadsheet.url}")
