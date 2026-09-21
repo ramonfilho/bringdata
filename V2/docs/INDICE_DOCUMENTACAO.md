@@ -395,4 +395,4 @@ Skills invocáveis via `/skill` para tarefas recorrentes:
 | `/investigate` | Investigar por que um lançamento foi ruim — números históricos, causas do baixo ROAS, D10% anormal | `INVESTIGACAO_BAIXO_DESEMPENHO.md` |
 | `/investigate-ab` | Verificar se o teste A/B está tecnicamente válido — roteamento correto, eventos chegando, janela limpa | `AB_TEST.md` |
 | `/safeguard` | Auditoria completa de integridade — encoding, CAPI, deploy, timezone, monitoramento | `PLANO_SAFEGUARD.md` |
-| `/docs` | Skill master de documentação — modos `mapear`, `unificar`, `arquivar`, `indexar`, `auditar`. Substitui `/plan-integrator`. | Este índice + `V2/.claude/skills/docs/SKILL.md` |
+| `/docs` | Skill master de documentação — modos `mapear`, `unificar`, `arquivar`, `indexar`, `auditar`. Substitui `/plan-integrator`. | Este índice + `.claude/skills/docs/SKILL.md` |

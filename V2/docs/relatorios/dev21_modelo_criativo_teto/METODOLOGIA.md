@@ -34,7 +34,7 @@ corte7.py, corte8.py ........ cortes D7+/D8+ na série fria (precisam abr28_lead
 ```
 
 - **Montagem do HTML**: o painel NÃO é gerado do zero. A cadeia é
-  `painel_dev21.bak.html` (base: cabeçalho, tiles, seções de negócio) → `add_secoes.py` (blocos modelo+criativo) → `add_teto.py` (bloco do teto) = `painel_dev21.pre_lacunas.html` → **`add_lacunas.py`** (as 6 seções de 20/08 + limitações + renomeia "Como ler"). Cada `add_*.py` insere por âncora de texto e **só grava se o JavaScript da página passar em `node --check`** (gate instalado depois de uma chave sobrando deixar o painel em branco). O template visual é o da skill `/painel-dados` (`V2/.claude/skills/painel-dados/template.html`); gráfico de barras usa `data:[{label, mean}]`, **não** `points:`.
+  `painel_dev21.bak.html` (base: cabeçalho, tiles, seções de negócio) → `add_secoes.py` (blocos modelo+criativo) → `add_teto.py` (bloco do teto) = `painel_dev21.pre_lacunas.html` → **`add_lacunas.py`** (as 6 seções de 20/08 + limitações + renomeia "Como ler"). Cada `add_*.py` insere por âncora de texto e **só grava se o JavaScript da página passar em `node --check`** (gate instalado depois de uma chave sobrando deixar o painel em branco). O template visual é o da skill `/painel-dados` (`.claude/skills/painel-dados/template.html`); gráfico de barras usa `data:[{label, mean}]`, **não** `points:`.
 - Republicação: ferramenta Artifact com o MESMO url para manter o link.
 
 ## 2. Fontes de dados
