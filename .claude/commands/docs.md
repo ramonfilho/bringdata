@@ -1,6 +1,6 @@
 # /docs — Skill master de documentação
 
-Invoca a skill `docs` definida em [V2/.claude/skills/docs/SKILL.md](../../V2/.claude/skills/docs/SKILL.md). Substitui o antigo `/plan-integrator` (modo `mapear` cobre o mesmo escopo).
+Invoca a skill `docs` definida em [.claude/skills/docs/SKILL.md](../skills/docs/SKILL.md). Substitui o antigo `/plan-integrator` (modo `mapear` cobre o mesmo escopo).
 
 ## Modos
 
@@ -26,4 +26,4 @@ Argumentos: $ARGUMENTS
 
 ---
 
-**Ação:** leia [V2/.claude/skills/docs/SKILL.md](../../V2/.claude/skills/docs/SKILL.md) integralmente e execute o modo solicitado em `$ARGUMENTS`. Se nenhum modo for informado, infira do contexto e confirme antes de agir.
+**Ação:** leia [.claude/skills/docs/SKILL.md](../skills/docs/SKILL.md) integralmente e execute o modo solicitado em `$ARGUMENTS`. Se nenhum modo for informado, infira do contexto e confirme antes de agir.
